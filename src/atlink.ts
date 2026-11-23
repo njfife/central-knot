@@ -294,7 +294,7 @@ export async function serverAt(where: { folder: string; folderName: string; file
 // `root`, and that folder's own name, never Central Knot's copy's; the folder at `root` itself is named `rootName`: the
 // repository's name at a link, and for a marketplace's plugin, read from its own folder whatever that folder is called, the
 // plugin's name. Two routes read with it, a
-// marketplace's plugin in Pi and OpenCode (`marketplace`: pluginlibrary.ts readPlugin) and a plugin's own folder at a source's
+// marketplace's plugin in Pi, OpenCode and Antigravity (`marketplace`: pluginlibrary.ts readPlugin) and a plugin's own folder at a source's
 // link (`link`: holdsAt), and they differ only in a skill's key (library.ts A SOURCE says the two rules). What its files leave
 // unread (PluginFiles `unread`) is an unreadable line of that kind: one by name, or one line (`unread`) for a folder of them that
 // can't be listed, a servers file that isn't JSON, or a plugin.json that can't be read (then every kind's).

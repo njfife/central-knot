@@ -23,8 +23,8 @@
 // or managed again): `background`; but not while some tool has the plugin off by its own switch (`offElsewhere`: one turned
 // off somewhere is not wanted everywhere, read from the tools at each look). Nothing else is: an uninstall runs only at the
 // plugin's own click (its switch, a tool's box unticked), and an install in a tool already on `tools` (one that failed, one
-// removed there by hand) waits for its box to be ticked on the plugin's page. "Has it" is installed whole, or (in Pi and
-// OpenCode, which have no plugin installer) some item linked to the plugin wanted in that tool (`items`). In Pi and OpenCode a
+// removed there by hand) waits for its box to be ticked on the plugin's page. "Has it" is installed whole, or (in Pi, OpenCode
+// and Antigravity, which have no plugin installer) some item linked to the plugin wanted in that tool (`items`). In Pi, OpenCode and Antigravity a
 // plugin whose parts from before the library wait to be moved has none and can't go in (rows 7 and 6: pluginstatus.ts toolNow,
 // waitsToMove), so nothing is owed there until partsmigrate.ts has moved them. An item's own `except` decides where it is; the
 // entry's only seeds a new item's (pluginlibrary.ts), and a click on one tool changes that tool in each item's `except` alone. A
@@ -41,7 +41,7 @@
 //   Off or no entry, ticked   → On, `except` by the first read's rule (firstEntry), the ticked tool counted as having it.
 //   No entry, unticked        → the first read's rule, then as On, unticked.
 //   Off, unticked             → the entry as it is (`except` changes only while On): that tool's copy is taken out (row 9 or 10).
-// In Pi and OpenCode a tick turns On only what it brings into that tool: an item that comes On is kept out of every other tool
+// In Pi, OpenCode and Antigravity a tick turns On only what it brings into that tool: an item that comes On is kept out of every other tool
 // it wasn't in (pluginlibrary.ts clickOn). A copy that can't be taken out here has its box off (pluginstatus.ts boxOf).
 // Who reads what: marketplaces.ts gathers what the tools have (pluginstatus.ts toolNow) and carries out a click (turn, undoTurn); the
 // automatic updates carry out the background's installs (pluginupdates.ts); the pages and pluginstatus.ts say the answer.
@@ -77,7 +77,7 @@ export interface PluginRecord {
 
 /** What one managed tool has of a plugin now, and how it could take it in or out (marketplaces.ts toolsNow reads it). */
 export interface ToolNow {
-  /** Installed whole, some item linked to it wanted there (Pi, OpenCode), none, or its record can't be read now. */
+  /** Installed whole, some item linked to it wanted there (Pi, OpenCode, Antigravity), none, or its record can't be read now. */
   has: 'whole' | 'items' | 'none' | 'unknown';
   /** How it would go in: the tool's own installer, as library items, or why it can't (pluginstatus.ts says it). */
   route: 'whole' | 'items' | { cannot: string };

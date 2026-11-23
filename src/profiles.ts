@@ -2,7 +2,7 @@
 // switch changes, which profile is in use, what its Undo turns back) are profileplan.ts's. A switch is the library's own clicks,
 // Turn on and Turn off, made together in one pass per kind (skills.ts applySkills, servers.ts applyServers, agents.ts
 // applyAgents), and for a plugin's items each copy's own switch: an installed copy's in its tool (pluginswitch.ts click, run
-// through the main process: PluginSide), a copy placed in Pi or OpenCode by its library item's On or Off in a pass of its own,
+// through the main process: PluginSide), a copy placed in Pi, OpenCode or Antigravity by its library item's On or Off in a pass of its own,
 // and any uncovered Copilot CLI `disabledMcpServers` rule cleared on switch or Undo and restored on Undo (`runCopilotRules`);
 // all of it told to History in one entry of its own, written first (librarypass.ts PassOptions told) and then left holding only
 // the plugin copies and Copilot CLI rules each tool confirmed. Its Undo is each library item's own Turn on or Turn off, each with its own entry, and

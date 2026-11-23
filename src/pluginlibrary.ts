@@ -1,4 +1,4 @@
-// A plugin's skills, agents and MCP servers as library items in Pi and OpenCode, which have no plugin installer (library.ts A
+// A plugin's skills, agents and MCP servers as library items in Pi, OpenCode and Antigravity, which have no plugin installer (library.ts A
 // PLUGIN: the table's rows that differ for a plugin, decided by SourceSeen `plugin`). This module owns:
 // - the plugin's read (readPlugin): its files as catalogdetail.ts pluginFiles reads them from the marketplace's copy
 //   (marketplaces.ts locate, never a tool's installed copy), made into one SourceRead per kind by the one reader of a plugin's
@@ -9,14 +9,14 @@
 // - what the Plugins page shows of them (itemsView: "Its items", and "has it" in each tool), from one look at the home that every
 //   plugin of a view shares (lookAtKinds), with why none of them is on in such a tool, which the run's report says too
 //   (pluginstatus.ts notInWhy), and each name he has under each tool's box (`clashes`).
-// When a plugin is read: at a click that brings it into Pi or OpenCode (On, Add, a tool's box ticked), at its Update and
+// When a plugin is read: at a click that brings it into Pi, OpenCode or Antigravity (On, Add, a tool's box ticked), at its Update and
 // Update all, and at the automatic updates' check, for a plugin with items (withItemsOf) or a tool new here (marketplaces.ts);
 // Off and a box unticked only click. A plugin whose parts from before the library wait to be moved takes this route
 // only once they are (pluginstatus.ts waitsToMove). Kept elsewhere: the table (library.ts), the held answer in the tools with an
 // installer (plugins.ts pluginHolds), the switch's table (pluginrecord.ts owedTo), and the let-go of an item changed here, in
 // every pass (librarypass.ts letGo).
 // Known miss: a skill keyed by its folder, or by its plugin's name at the plugin's root (library.ts A SOURCE, the two key rules),
-// whose SKILL.md names it otherwise is loaded by Pi and OpenCode under that name, so it can meet a skill of that name there
+// whose SKILL.md names it otherwise is loaded by Pi, OpenCode and Antigravity under that name, so it can meet a skill of that name there
 // unmarked, and through a Git link is a second item.
 import { basename } from 'node:path';
 import { pluginItems, wasRead } from './atlink.ts';
@@ -38,7 +38,7 @@ import { harnessIds } from './harnesses.ts';
 import { notInWhy, type ItemOut } from './pluginstatus.ts';
 import { andList, toolNames } from './words.ts';
 
-/** The managed tools a plugin's items go to as library items: those with no plugin installer (Pi, OpenCode). */
+/** The managed tools a plugin's items go to as library items: those with no plugin installer (Pi, OpenCode, Antigravity). */
 export const itemTools = (tools: readonly HarnessId[]) => tools.filter(tool => !takesPlugins(tool));
 
 /** One item a plugin's switch put back by its Undo: as before the click (one it made: Off); one it took (library.ts TAKE) by its History `entry`'s own Undo. */

@@ -294,7 +294,7 @@ export interface DesktopApi {
   setPluginPart(source: string, marketName: string, plugin: string, part: PartRef, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
   /** Turns a whole installed plugin off (`on` false) or back on in one tool, with that tool's own switch. */
   setPluginOn(source: string, marketName: string, plugin: string, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
-  /** A plugin's items in Pi and OpenCode brought up to date from its marketplace's copy (marketplaces.ts items). */
+  /** A plugin's items in Pi, OpenCode and Antigravity brought up to date from its marketplace's copy (marketplaces.ts items). */
   pluginItems(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   /** One skill's or agent's file as each tool's installed copy of a plugin has it, read when its row is opened. */
   pluginItemTexts(plugin: string, marketName: string, kind: PartKind, name: string): Promise<{ tool: HarnessId; text: string }[]>;
@@ -744,7 +744,7 @@ export interface PartRef { kind: PartKind; name: string }
 export interface PluginItem { kind: PartKind; name: string; description: string; /** MCP servers: what it runs or connects to. */ runs?: string;
   /**
    * Skills and agents: the name its plan key is made of (profileplan.ts pluginItemKey): a skill's folder's and an agent's file's
-   * without .md (values.ts nameOfFile), as Pi and OpenCode name its placed copy; for the skill of a plugin that is one skill,
+   * without .md (values.ts nameOfFile), as Pi, OpenCode and Antigravity name its placed copy; for the skill of a plugin that is one skill,
    * SKILL.md at its root (catalogdetail.ts skillsIn: its path is "."), the plugin's. An MCP server has none: its name is both.
    */
   keyName?: string }
@@ -813,7 +813,7 @@ export interface MarketplaceView {
   waiting?: string[];
   /** Each listed plugin's one switch, by plugin (pluginrecord.ts PluginSwitch). */
   switches?: Record<string, PluginSwitch>;
-  /** The plugins with items in the library (pluginlibrary.ts itemsView), by plugin: "Its items" and "has it" in Pi and OpenCode. */
+  /** The plugins with items in the library (pluginlibrary.ts itemsView), by plugin: "Its items" and "has it" in Pi, OpenCode and Antigravity. */
   items?: Record<string, PluginItemsView>;
 }
 /**
@@ -1441,7 +1441,7 @@ export interface SwitchedItem { id: string; name: string }
 
 /**
  * One copy of a plugin's item a profile switch turned, as History keeps it: the item's id (profileplan.ts pluginItemId) and its
- * name then, the tool, and what the switch turned it to (`on`); it was the other before. A copy placed in Pi and OpenCode is its
+ * name then, the tool, and what the switch turned it to (`on`); it was the other before. A copy placed in Pi, OpenCode and Antigravity is its
  * library item turned once, kept as one of these for each tool it is in.
  */
 export interface PluginSwitched { id: string; name: string; tool: HarnessId; on: boolean }

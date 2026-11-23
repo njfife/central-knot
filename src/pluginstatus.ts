@@ -185,7 +185,7 @@ export const DIRECTORY = 'anthropic-plugin-directory';
 /** Why Central Knot leaves Claude Code's copy from the Anthropic Directory to Claude Code. */
 export const FROM_DIRECTORY = 'Claude Code has its copy from the Anthropic Directory: update or uninstall it in Claude Code (/plugin).';
 
-/** Whether the tool has the plugin's items: "has it" for Pi and OpenCode, as pluginlibrary.ts onIn counted it for the view. */
+/** Whether the tool has the plugin's items: "has it" for Pi, OpenCode and Antigravity, as pluginlibrary.ts onIn counted it for the view. */
 export const itemsIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) => !!entry.items?.[plugin]?.on[tool];
 /** Whether every one of a plugin's items is on in a tool, as it loads them, or the same as his: the tool's box is ticked in full. */
 export const itemsAllIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) => { const items = entry.items?.[plugin];
@@ -414,8 +414,8 @@ export function outdated(entry: MarketplaceView, plugin: string, tool: HarnessId
 
 /**
  * The tools Update brings up to date for one plugin by their own update: those whose installed copy is out of date
- * (`outdated`) and can be changed here (as for an uninstall: not held, a CLI, a home that can be written). Its items in Pi and
- * OpenCode come up to date apart (pluginlibrary.ts itemsView `ready`).
+ * (`outdated`) and can be changed here (as for an uninstall: not held, a CLI, a home that can be written). Its items in Pi,
+ * OpenCode and Antigravity come up to date apart (pluginlibrary.ts itemsView `ready`).
  */
 export function updateTools(view: PluginsView, entry: MarketplaceView, plugin: string, offered: string | undefined, detail?: PluginDetail | null): HarnessId[] {
   return view.tools.filter(tool => outdated(entry, plugin, tool, offered, detail) && !cantUninstall(view, entry, plugin, tool));
@@ -425,7 +425,7 @@ export function updateTools(view: PluginsView, entry: MarketplaceView, plugin: s
 
 /**
  * One managed tool's mark for a plugin, from the table's answer (`owed`) and the tool's copy: installed (`outdated` when an
- * Update is offered), its items on there (`items`: Pi, OpenCode), installed though not wanted (`stays`: Off, or kept out of
+ * Update is offered), its items on there (`items`: Pi, OpenCode, Antigravity), installed though not wanted (`stays`: Off, or kept out of
  * it), not in it though wanted (`waits` for the automatic updates' check; `not-brought`, new here while some tool has it off
  * in its own settings; `missing`), its parts from before the library waiting to be moved (`parts-waiting`: Pi, OpenCode), a
  * tool that can't take it (`cannot`), not in it (`absent`, kept out of it or not), its record unreadable (`unknown`), or
