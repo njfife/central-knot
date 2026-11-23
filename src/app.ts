@@ -34,7 +34,7 @@ import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, t
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
-import { stillLoadAfter, turnsWords, undoOffered, wholeSaid } from './profileplan.ts';
+import { changeWords, stillLoadAfter, undoOffered, wholeCounts, wholeSaid } from './profileplan.ts';
 import { hasReloadAdvice, pluginReloads, reloadAdvice, reloadsFor, settleReloads, waysFrom, type ReloadChange } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
 import { followView, type SigninChecks } from './mcpsignin.ts';
@@ -1855,7 +1855,7 @@ function turnedOutcome(page: Page, lead: string, turned: NonNullable<ApplyResult
   const sinceSaid = turned.since?.length ? ` Left as ${turned.since.length === 1 ? 'it is' : 'they are'}: ${turned.since.join('; ')}.` : '';
   const notDone = results.length ? ` ${results.slice(0, 2).map(entry => entry.message).join(' ')}${results.length > 2 ? ' …' : ''}` : '';
   const warn = results.length > 0 || turned.left.length > 0 || !!turned.since?.length;
-  tellWritten({ page, band: true, fade: !!fade && !warn && !act, text: `${lead}: ${turnsWords(turned, 'did') || 'nothing changed'}${still}.${whole}${leftSaid}${sinceSaid}${notDone}`, warn, act }, reloads);
+  tellWritten({ page, band: true, fade: !!fade && !warn && !act, text: `${lead}: ${changeWords(turned, turned.plugins ?? { on: 0, off: 0 }, 'did', still) || 'nothing changed'}.${whole}${leftSaid}${sinceSaid}${notDone}`, warn, act }, reloads);
 }
 
 /**
@@ -1863,7 +1863,7 @@ function turnedOutcome(page: Page, lead: string, turned: NonNullable<ApplyResult
  * (profileplan.ts stillLoadAfter), each plugin it turned on or off whole in Claude Code (profileplan.ts wholeSaid), and Undo switch
  * only where History would offer it (profileplan.ts undoOffered).
  */
-const switchOutcome = (result: ProfileSwitchResult, page: Page) => turnedOutcome(page, `Switched to ${result.name}`, result, result.results, result.reloads, {
+const switchOutcome = (result: ProfileSwitchResult, page: Page) => turnedOutcome(page, `Switched to ${result.name}`, { ...result, plugins: wholeCounts({ steps: result.profile?.wholeSteps }) }, result.results, result.reloads, {
   still: result.profile && state.home ? stillLoadAfter(result.profile, state.home) : '', whole: result.profile && state.home ? wholeSaid(result.profile, state.home) : '',
   act: result.event && state.home && undoOffered(result, state.home)
     ? { label: 'Undo switch', id: 'outcome-undo', title: 'Turn back each item this switch changed, where it is still as the switch left it', run: () => void restoreEvent(result.event!) } : undefined });

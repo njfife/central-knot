@@ -13,7 +13,7 @@
 import { acting, deleteProfileDef, machine, profileState, rerender, saveProfileDef, showPage, state, switchToProfile, whyReadOnly } from './app.ts';
 import { openPlugin, outcomeBand, pluginTag, problemsBand } from './matrix.ts';
 import { button, checkbox, emptyState, findInput, h, icon } from './dom.ts';
-import { allTurns, changes, claudeInstall, comesWith, copilotKeptOnBy, heldWords, homeItems, inUse, inUseName, itemRowState, keptOn, leftOut, loadWords, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginPlan, pluginRowState, pluginStayNote, switchable, switchPlan, switchPreview, takenWhole, turnsWords, wholeTurns, type LiveItem, type PluginCopy, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
+import { allTurns, changeWords, claudeInstall, comesWith, copilotKeptOnBy, heldWords, homeItems, inUse, inUseName, itemRowState, keptOn, leftOut, loadWords, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginPlan, pluginRowState, pluginStayNote, switchable, switchPlan, switchPreview, takenWhole, wholeCounts, wholeTurns, type LiveItem, type PluginCopy, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
 import { noSingleSwitch } from './pluginstatus.ts';
 import { counted } from './pluginswitch.ts';
 import { andList, toolList, toolNames } from './words.ts';
@@ -201,11 +201,15 @@ function pluginRow(profile: Profile, item: PluginLive, turn: PluginTurn | undefi
     h(`span.pf-state${moves ? '.pf-state-moves' : ''}`, { role: 'cell', 'data-state': said }, said));
 }
 
-/** What a switch to the open profile would do, as the page shows it: to the library items (switchPlan), to the plugins' items (pluginPlan), each item counted once (allTurns), and whether it is in use (inUse). */
-interface Plan { turns: Turns; plugs: PluginTurn[]; counted: ReturnType<typeof allTurns>; isInUse: boolean }
+/**
+ * What a switch to the open profile would do, as the page shows it: to the library items (switchPlan), to the plugins' items
+ * (pluginPlan), each item counted once (allTurns), the plugins it turns whole in Claude Code (`whole`: wholeTurns), all of it in
+ * words (`said`: changeWords, '' when it changes nothing), and whether it is in use (inUse).
+ */
+interface Plan { turns: Turns; plugs: PluginTurn[]; counted: ReturnType<typeof allTurns>; whole: InstalledPlugin[]; said: string; isInUse: boolean }
 const planOf = (profile: Profile, all: LiveItem[], plugged: PluginLive[]): Plan => {
-  const turns = switchPlan(profile, all), plugs = pluginPlan(profile, plugged);
-  return { turns, plugs, counted: allTurns(turns, plugs), isInUse: inUse([profile], all, plugged).length > 0 };
+  const turns = switchPlan(profile, all), plugs = pluginPlan(profile, plugged), counted = allTurns(turns, plugs), whole = wholeTurns(profile, plugged);
+  return { turns, plugs, counted, whole, said: changeWords(counted, wholeCounts({ installs: whole }), 'will'), isInUse: inUse([profile], all, plugged).length > 0 };
 };
 
 /** A kind's rows under a heading with a tick box for all of them: the library's items, then the plugins' (with Find in use, `list` and `plugged` are the rows shown). */
@@ -238,15 +242,14 @@ function findBar(shown: number, total: number, onSwitch: boolean) {
 
 /**
  * On a profile that switches plugin items, while Claude Code has a plugin it lists: how Claude Code differs, said once
- * (profileplan.ts takenWhole), and under one heading each plugin a switch turns on or off there whole (wholeTurns), by name, with
- * what goes with it.
+ * (profileplan.ts takenWhole), and under one heading each plugin a switch turns on or off there whole (`turns`: the Plan's
+ * `whole`, while the profile can be switched to), by name, with what goes with it.
  */
-function claudeBand(profile: Profile, plugged: PluginLive[]) {
+function claudeBand(profile: Profile, plugged: PluginLive[], turns: InstalledPlugin[]) {
   if (!profile.switchesPluginItems || !plugged.some(claudeInstall)) return null;
   const line = (install: InstalledPlugin, brought = takenWhole(profile, install).brought) => (install.off
     ? `${install.plugin} on${brought.length ? `, with ${andList(brought.map(part => part.name))} too` : ''}`
     : `${install.plugin} off, with its ${counted(install.items)} and everything else it brings there`);
-  const turns = wholeTurns(profile, plugged);
   return h('div.band.band-help', { role: 'note', id: 'profile-claude' }, icon('info', 14, 'tone-muted'), h('span.band-text', {},
     'Claude Code takes a plugin whole: it is on there while any of its items is ticked, and off while none is.',
     turns.length ? h('span.pf-claude-turns', {}, h('strong', {}, 'Switching turns, in Claude Code:'), h('ul', {}, turns.map(install => h('li', {}, line(install))))) : null));
@@ -323,12 +326,12 @@ function deleteActions(profile: Profile) {
  */
 function switchButton(profile: Profile, plan: Plan, all: LiveItem[], plugged: PluginLive[]): HTMLElement | null {
   if (profileState.renaming === profile.id) return null;
-  const off = changes(plan.counted) ? undefined : heldWords(plan.plugs, plugged).off;
+  const off = plan.said ? undefined : heldWords(plan.plugs, plugged).off;
   if (off) return button({ variant: 'outline', size: 'small', label: 'Open its plugin', id: 'profile-open-plugin', attrs: { title: `Open ${off.item.plugin} on Plugins, where it is turned on or off in each tool` },
     onclick: () => openPlugin({ source: 'install' in off.copy.target ? off.copy.target.install.source : undefined, plugin: off.item.plugin, marketplace: off.item.marketName }) });
-  if (!changes(plan.counted) || !switchable(profile, all, plugged)) return null;
+  if (!plan.said || !switchable(profile, all, plugged)) return null;
   const label = profile.name.length > 18 ? 'Switch to this profile' : `Switch to ${profile.name}`;
-  const title = whyReadOnly(state.home!) ?? `Use ${profile.name}: ${turnsWords(plan.counted, 'will')}.${profile.switchesPluginItems ? '' : ` ${pluginStayNote(plan.plugs, plugged)}`} One step in History, with Undo.`;
+  const title = whyReadOnly(state.home!) ?? `Use ${profile.name}: ${plan.said}.${profile.switchesPluginItems ? '' : ` ${pluginStayNote(plan.plugs, plugged)}`} One step in History, with Undo.`;
   return button({ variant: 'primary', size: 'small', label, id: 'profile-switch', disabled: !canEditProfiles(), attrs: { title }, onclick: () => void switchToProfile(profile.id) });
 }
 
@@ -355,7 +358,7 @@ function profileDetail(profile: Profile) {
       button({ variant: 'primary', size: 'small', label: 'Start from what’s on now', id: 'profile-from-now', disabled: !canEditProfiles(),
         attrs: { title: profile.switchesPluginItems ? 'Tick every skill, MCP server and agent that is on now' : 'Tick every skill, MCP server and agent of yours that is on now' },
         onclick: () => void saveProfileDef({ id: profile.id, items: [...all.filter(item => item.on), ...visiblePlugins.filter(pluginItemOn)].map(item => item.id) }, `${profile.name} now has what is on.`) })) : null,
-    findBar(shown.length + pluggedShown.length, all.length + visiblePlugins.length, !!primary), leftOutBand(), claudeBand(profile, visiblePlugins),
+    findBar(shown.length + pluggedShown.length, all.length + visiblePlugins.length, !!primary), leftOutBand(), claudeBand(profile, visiblePlugins, switchable(profile, all, plugged) ? plan.whole : []),
     !profile.switchesPluginItems ? choosePluginsBand(profile) : null,
     h('div.scroll.pf-scroll', { id: 'profile-scroll' }, shown.length || pluggedShown.length ? table(profile, shown, pluggedShown, plan)
       : h('p.pf-none', {}, find ? `Nothing matches “${find}”.` : !profile.switchesPluginItems && plugged.length ? 'Central Knot has no skills, MCP servers or agents of your own yet.' : 'Central Knot has no skills, MCP servers or agents yet, and no tool has one through a plugin.')));

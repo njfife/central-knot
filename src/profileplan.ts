@@ -577,8 +577,12 @@ export function undoInHome(event: Pick<HistoryEvent, 'profile'>, home: PluginHom
   return undoTurns(event, homeItems(home, plugins), plugins, home.mcp);
 }
 
-/** Whether Undo is offered for a profile entry in `home`: true only while at least one item, plugin copy, Copilot CLI rule or plugin in Claude Code can be turned back (shared by the header and History). */
-export const undoOffered = (event: Pick<HistoryEvent, 'profile'>, home: PluginHome): boolean => changes(undoInHome(event, home)) > 0 || pluginUndo(event, pluginLive(home)).whole.length > 0;
+/** What undoing a profile entry would turn back in `home`, in words (changeWords): its items, and the plugins it turns back whole in Claude Code; '' for nothing. */
+export const undoWords = (event: Pick<HistoryEvent, 'profile'>, home: PluginHome) =>
+  changeWords(undoInHome(event, home), wholeCounts({ steps: pluginUndo(event, pluginLive(home)).whole.flatMap(run => run.ops) }), 'will');
+
+/** Whether Undo is offered for a profile entry in `home`: only while it would turn something back (undoWords; shared by the header and History). */
+export const undoOffered = (event: Pick<HistoryEvent, 'profile'>, home: PluginHome): boolean => !!undoWords(event, home);
 
 /**
  * A plan's counts in words: what it will do ("turns 2 items on and 5 off") or did ("2 items turned on and 5 turned off"); ''
@@ -619,11 +623,26 @@ export function switchPreview(profile: Profile, live: LiveItem[], plugins: Plugi
   }
   if (!count) return `0 items${keep}`;
   const kept = stillLoadWords(turns.off.map(item => keptOn(item, plugs)), plugs.filter(turn => turn.off.length).map(turn => keptOn(plugins.find(item => item.id === turn.id)!, plugs)));
-  // The plugins it turns whole in Claude Code (wholeTurns), counted, a sentence for each direction; the Profiles page names them.
-  const inClaude = (on: boolean, count = whole.filter(install => !!install.off === on).length) => (count ? `turns ${plural(count, 'plugin')} ${on ? 'on' : 'off'} in Claude Code` : '');
-  const said = [changes(counted) ? `${turnsWords(counted, 'will')}${kept}` : '', inClaude(true), inClaude(false)].filter(Boolean);
-  if (!said.length) return `Not in use · ${heldWords(plugs, plugins).text}`;
-  return `Switching ${said.map((sentence, at) => (at ? sentence.charAt(0).toUpperCase() + sentence.slice(1) : sentence)).join('. ')}${keep}`;
+  const said = changeWords(counted, wholeCounts({ installs: whole }), 'will', kept);
+  return said ? `Switching ${said}${keep}` : `Not in use · ${heldWords(plugs, plugins).text}`;
+}
+
+/** How many plugins a switch turns on and off whole in Claude Code: before it, those wholeTurns finds (`installs`); after it, its entry's `wholeSteps` (`steps`). */
+export const wholeCounts = ({ installs = [], steps = [] }: { installs?: InstalledPlugin[]; steps?: Pick<PluginOp, 'action'>[] }) => ({
+  on: installs.filter(install => install.off).length + steps.filter(op => op.action === 'plugin-on').length,
+  off: installs.filter(install => !install.off).length + steps.filter(op => op.action === 'plugin-off').length });
+
+/**
+ * What a switch or its Undo does or did, in words: its items' counts (turnsWords, then `kept`: how many of them still load), then a
+ * sentence for each direction it turns plugins whole in Claude Code ("Turns 1 plugin off in Claude Code", "1 plugin turned off in
+ * Claude Code"); '' for nothing. The one answer to "does it change anything?" that the preview, the Switch button and its title,
+ * the result, History's line and its Undo's all ask.
+ */
+export function changeWords(items: { on: unknown[]; off: unknown[] }, plugins: { on: number; off: number }, tense: 'will' | 'did', kept = ''): string {
+  const whole = (['on', 'off'] as const).filter(way => plugins[way])
+    .map(way => `${tense === 'will' ? `turns ${plural(plugins[way], 'plugin')} ${way}` : `${plural(plugins[way], 'plugin')} turned ${way}`} in Claude Code`);
+  const said = [changes(items) ? `${turnsWords(items, tense)}${kept}` : '', ...whole].filter(Boolean);
+  return said.map((sentence, at) => (at ? sentence.charAt(0).toUpperCase() + sentence.slice(1) : sentence)).join('. ');
 }
 
 /**

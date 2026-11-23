@@ -26,7 +26,7 @@ import type { KindLibrary } from './librarypass.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from './mcpswitch.ts';
 import { reverse, succeeded, type PluginDone, type PluginDraft, type PluginOp } from './pluginplan.ts';
 import { click } from './pluginswitch.ts';
-import { changes, copilotKeptOnBy, copilotUndo, heldWords, liveItems, onAfterUndo, pluginPlan, pluginUndo, switchPlan, undoPlan, wholeRuns, withCopilotOff, type CopilotRule, type CopyTurn, type Libraries, type LiveItem, type PluginLive, type PluginTurn, type Turns, type WholeRun } from './profileplan.ts';
+import { changes, copilotKeptOnBy, copilotUndo, heldWords, wholeCounts, liveItems, onAfterUndo, pluginPlan, pluginUndo, switchPlan, undoPlan, wholeRuns, withCopilotOff, type CopilotRule, type CopyTurn, type Libraries, type LiveItem, type PluginLive, type PluginTurn, type Turns, type WholeRun } from './profileplan.ts';
 import type { ReloadChange } from './reload.ts';
 import { applyServers, serverKind, serversView } from './servers.ts';
 import { errorCode, libraryGate, storeDirectory, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
@@ -405,19 +405,21 @@ export async function undoSwitch(context: ShareContext, tools: HarnessId[], even
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return stop(`${gate.refused} Nothing was undone.`);
   const undo = back.length || whole.length || copilotBack.length || copilotClear.length ? profileEvent(context, past.item, { toName: past.profile.toName, undoOf: past.id, on: named(turns.on), off: named(turns.off),
-    ...(back.length ? { plugins: back.map(switched) } : {}), ...(copilotBack.length ? { copilotCleared: copilotBack } : {}) }) : undefined;
+    ...(back.length ? { plugins: back.map(switched) } : {}), ...(whole.length ? { wholeSteps: whole.flatMap(run => run.ops) } : {}), ...(copilotBack.length ? { copilotCleared: copilotBack } : {}) }) : undefined;
   if (undo) await appendHistory(context, [undo]);
   const { results, made, reloads, done, copies, letGo, asAsked, steps } = await turnTogether(context, tools, turns, false, back, read.libraries, plugins, whole);
   const rules = await runCopilotRules(context, copilotBack, true), cleared = await runCopilotRules(context, copilotClear, false);
   const undoNotes = [...keptNotes, ...cleared.confirmed.map(orphanClearedNote)];
-  if (undo && (copies.length < back.length || rules.confirmed.length < copilotBack.length || undoNotes.length)) await settleEntry(context, undo.id, copies, [], undoNotes, copilotBack.length ? rules.confirmed : undefined);
-  const by = (undo && (copies.length || steps.length || rules.confirmed.length || cleared.confirmed.length) ? undo.id : undefined) ?? made[0];
-  if (by) { const now = await readHistory(context), entry = now.find(each => each.id === eventId); if (entry) { entry.undoneBy = by; await replaceHistory(context, now); } }
+  const planned = whole.flatMap(run => run.ops).length;
+  if (undo && (copies.length < back.length || steps.length < planned || rules.confirmed.length < copilotBack.length || undoNotes.length)) await settleEntry(context, undo.id, copies, steps, undoNotes, copilotBack.length ? rules.confirmed : undefined);
   const { results: notDone, ...switchedBack } = outcome(turns, done, [...results, ...rules.results, ...cleared.results], back.filter(turn => !asAsked.includes(turn) && !letGo.includes(turn)), copies);
+  // What a tool refused to turn back leaves the switch undoable, for that part, once the refusal clears.
+  const by = notDone.length ? undefined : (undo && (copies.length || steps.length || rules.confirmed.length || cleared.confirmed.length) ? undo.id : undefined) ?? made[0];
+  if (by) { const now = await readHistory(context), entry = now.find(each => each.id === eventId); if (entry) { entry.undoneBy = by; await replaceHistory(context, now); } }
   const since = [...left.map(({ copy, why }) => `${copy.name} in ${toolNames[copy.tool]}, ${why}`),
     ...[...groupBy(letGo, turn => turn.item.id).values()].map(list => `${list[0]!.item.name} in ${andList(list.map(turn => toolNames[turn.copy.tool]))}, edited by hand since, so it is your own now`)];
   return { results: notDone, harnessWrites: changes(done) + copies.length + rules.confirmed.length + cleared.confirmed.length, made,
     switched: { on: switchedBack.on, off: [...switchedBack.off, ...rules.confirmed.filter(rule => !done.off.some(item => item.id === rule.id)).map(rule => rule.name)],
-      left: [...new Set([...switchedBack.left, ...rules.left, ...cleared.left])], ...(since.length ? { since } : {}), ...(undoNotes.length ? { settingsChanged: undoNotes } : {}) },
+      left: [...new Set([...switchedBack.left, ...rules.left, ...cleared.left])], ...(since.length ? { since } : {}), ...(undoNotes.length ? { settingsChanged: undoNotes } : {}), ...(steps.length ? { plugins: wholeCounts({ steps }) } : {}) },
     reloads };
 }

@@ -13585,7 +13585,7 @@ async function claudeWholeFlow() {
   // What Claude Code needs to pick the plugin up (reload.ts) may follow the result's sentences.
   const result = await a.text('.band-done .band-text');
   check('the switch turns writing-kit on in Claude Code alone, and its result says so in the Library’s words, with Undo', JSON.stringify(enabled()) === '[true,false,false]' && await a.exists('#outcome-undo')
-    && (result ?? '').startsWith('Switched to Writing: 1 item turned on. write is on in Claude Code. Its whole plugin writing-kit was turned on there, with its 2 other skills.'), [enabled(), result]);
+    && (result ?? '').startsWith('Switched to Writing: 1 item turned on. 1 plugin turned on in Claude Code. write is on in Claude Code. Its whole plugin writing-kit was turned on there, with its 2 other skills.'), [enabled(), result]);
   same('in use, the header counts the two skills on with their plugin apart', await a.text('.profile-header p'), 'In use · 2 items on, 2 more on in Claude Code with their plugin, the other 2 off wherever they can be switched');
   await pictures('claude-whole-writing-result');
   await a.click('#outcome-undo'); await done();
