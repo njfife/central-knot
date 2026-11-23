@@ -47,6 +47,7 @@ import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
 import { forgetMissing, SETTLE_MS } from './librarypass.ts';
 import { homePass, passTells, syncOnceReport, takenInReloads, type HomePass } from './homepass.ts';
+import { waysFrom } from './reload.ts';
 import { deleteProfile, readProfiles, saveProfile, switchProfile, undoSwitch, type PluginSide } from './profiles.ts';
 import { homeItems, inUse, inUseName, pluginLive, switchable, switchPreview, type LiveItem, type PluginHome, type PluginLive } from './profileplan.ts';
 import { atMostEvery, defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil, oneTurn } from './model.ts';
@@ -186,6 +187,7 @@ function context(): ShareContext {
     resumeFirst: resumeFirst?.home === current!.home ? resumeFirst.wait : undefined,
     allowActualWrites: writesRealHome(process.platform) && !smoke,
     overrides: Object.fromEntries(harnessIds.map(id => [id, overrideFor(id)])),
+    ...(handoff.home === current!.home ? { ways: waysFrom(handoff.snapshots) } : {}),
     historyDays: historyDays(), held: heldReason(),
   };
 }
@@ -643,7 +645,7 @@ let partsWaiting: string | undefined;
  * anything else, either way (it does nothing once moved), so no click comes before it.
  */
 async function pass(snapshots: Snapshot[], explicit = false, forView = false): Promise<BackgroundPass> {
-  const shared: ShareContext = { ...context(), read: async () => snapshots, reads: new Map(), ...(forView ? { kept: new Map() } : {}) };
+  const shared: ShareContext = { ...context(), read: async () => snapshots, ways: waysFrom(snapshots), reads: new Map(), ...(forView ? { kept: new Map() } : {}) };
   // While plugin parts from before the library wait to be moved there, the plugins record's first read comes first (its install
   // alpha 1 waited for read from pluginUpdates, made before any pass), and the move may read a plugin (homepass.ts step 2).
   const pluginNow = await carriedMarket?.beforeParts().catch((error: unknown) => { logFailure('plugins record', error); return undefined; });

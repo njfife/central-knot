@@ -30,7 +30,7 @@ import { andList, fewNames, kindNouns, pageNames, rowNames, rowNouns, saidByKind
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
 import { copilotSharesYours, homeItems, inUse, itemId, pluginLive } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
-import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
+import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, saidInStatusBar, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -53,7 +53,7 @@ import { cellWords, handledWhere, inTool, insideTitle, itemThrough, offIn, pageR
 import { fromChoices, fromShows, originOf, type From, type FromEntry } from './origins.ts';
 import { sources } from './sourcespage.ts';
 import { folded, lineDiff } from './diff.ts';
-import { reloadAdvice, rowReload, toItemKind, type ReloadAdvice, type ReloadItem } from './reload.ts';
+import { reloadAdvice, rowReload, toItemKind, type ReloadAdvice } from './reload.ts';
 import { pageData, readPageData, resetPageData } from './pagedata.ts';
 
 const names = toolNames as Record<Tool, string>;
@@ -174,7 +174,7 @@ function pluginDetails(t: Table, row: PluginRow, placement: 'row' | 'dock' = 'ro
       const install = row.copies[tool as HarnessId] ? row.installs[tool as HarnessId] : undefined;
       const item: PluginItemAt | undefined = install && { kind: row.kind, name: row.name, tool: tool as HarnessId, install };
       const reload = state.outcome && outcomeShown(state.outcome, t)
-        ? rowReload(state.outcome.reloads, row.kind, itemKey(row.name), tool as HarnessId, `${row.plugin}@${row.marketName}`) : '';
+        ? rowReload(state.outcome.reloads, row.kind, itemKey(row.name), tool as HarnessId, `${row.plugin}@${row.marketName}`, toolWays()) : '';
       return h('div.details-tool', {}, h('div.details-tool-head', {},
         h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
         h('span.details-tool-line', {}, [toolWords(row, tool as HarnessId), item ? cantSwitch(item) ?? switchWords(item) : '', reload].filter(Boolean).join(' ')),
@@ -917,11 +917,11 @@ export const resultInHeader = () => state.page === 'library' || state.page === '
   || (state.page === 'harnesses' && !(state.harness && state.harnessTab === 'instructions'));
 
 /** One tool's Copy button (icon and title carry "Copy"); flashes check and announces on click. */
-function reloadButton(item: ReloadItem): HTMLElement {
-  const control = button({ variant: 'outline', size: 'micro', icon: 'copy', label: item.chip!, name: `${item.chip}. ${item.title}`, id: `outcome-copy-${item.tool}`,
-    attrs: { title: item.title!, 'data-copy': item.command! }, onclick: (event: Event) => {
+function reloadButton(item: { chip: string; command: string; title: string }, id: string): HTMLElement {
+  const control = button({ variant: 'outline', size: 'micro', icon: 'copy', label: item.chip, name: `${item.chip}. ${item.title}`, id,
+    attrs: { title: item.title, 'data-copy': item.command }, onclick: (event: Event) => {
       event.stopPropagation();
-      void navigator.clipboard.writeText(item.command!).then(() => {
+      void navigator.clipboard.writeText(item.command).then(() => {
         control.classList.add('is-copied'); control.firstElementChild?.replaceWith(icon('copy-check', 14)); announce(`Copied ${item.command}.`);
         setTimeout(() => { control.classList.remove('is-copied'); control.firstElementChild?.replaceWith(icon('copy', 14)); }, 1500);
       }, () => announce('Could not copy. Select the text instead.'));
@@ -931,15 +931,22 @@ function reloadButton(item: ReloadItem): HTMLElement {
 
 /** One non-wrapping line of per-tool reload chips for the folded header, with +N more opening Show all on overflow. */
 export function reloadChips(advice: ReloadAdvice, of: typeof state.shownWhole): HTMLElement | null {
-  const chips = advice.items.filter(item => item.chip);
+  const chips = advice.items.flatMap(item => [
+    ...(item.chip ? [{ chip: item.chip, command: item.command, title: item.title!, id: `outcome-copy-${item.tool}` }] : []),
+    ...(item.more ?? []).map((extra, at) => ({ ...extra, id: `outcome-copy-${item.tool}-${at + 1}` })),
+  ]);
+  const view = (chip: { chip: string; command?: string; title: string; id: string }) =>
+    (chip.command ? reloadButton({ chip: chip.chip, command: chip.command, title: chip.title }, chip.id) : h('span.reload-chip', { title: chip.title }, chip.chip));
   return chips.length ? h('div.result-reloads', {},
-    h('span.result-copies', {}, chips.map(item => (item.command ? reloadButton(item) : h('span.reload-chip', { title: item.title! }, item.chip!)))),
+    h('span.result-copies', {}, chips.map(view)),
     h('button.inline-link.reload-more', { type: 'button', id: 'outcome-reload-more', hidden: true, onclick: (event: Event) => { event.stopPropagation(); state.shownWhole = of; rerender(); } }, '')) : null;
 }
 
-/** Per-tool reload lines for Show all and off-header bands: the table's sentence, then its Copy button if it has one. */
+/** Per-tool reload lines for Show all and off-header bands: the table's sentence, then its Copy buttons if it has any. */
 export const reloadLines = (advice: ReloadAdvice): HTMLElement | null => (advice.items.length
-  ? h('div.reload-list.result-copies', {}, advice.items.map(item => h('div.reload-row', {}, h('span.reload-row-text', {}, item.text), item.command ? reloadButton(item) : null))) : null);
+  ? h('div.reload-list.result-copies', {}, advice.items.map(item => h('div.reload-row', {}, h('span.reload-row-text', {}, item.text),
+    item.command ? reloadButton({ chip: item.chip!, command: item.command, title: item.title! }, `outcome-copy-${item.tool}`) : null,
+    ...(item.more ?? []).flatMap((extra, at) => (extra.command ? [reloadButton({ ...extra, command: extra.command }, `outcome-copy-${item.tool}-${at + 1}`)] : []))))) : null);
 
 /**
  * The last action's result as a band, when it offers something to do; a result that only tells is in the status bar. While a
@@ -976,7 +983,7 @@ export function outcomeBand(cardResult?: Outcome): HTMLElement | null {
         : outcome.history ? smallAction(outcome.refused ? 'History' : 'Undo in History', 'outcome-history', () => showPage('history')) : null,
       outcome.next ? button({ variant: 'outline', size: 'small', label: outcome.next.label, id: outcome.next.id, attrs: outcome.next.title ? { title: outcome.next.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.next!.run(); } }) : null),
     cardResult ? null : closeButton(closeResult, { id: 'outcome-dismiss' }),
-    outcome === state.outcome && !resultInHeader() && outcome.reloads ? reloadLines(reloadAdvice(outcome.reloads)) : null);
+    outcome === state.outcome && !resultInHeader() && outcome.reloads ? reloadLines(reloadAdvice(outcome.reloads, toolWays())) : null);
 }
 
 /**
@@ -1064,7 +1071,7 @@ export function listResult(): HTMLElement[] {
   const close = () => { for (const { problem } of background) state.dismissed.add(problemKey(problem)); closeResult(); };
   const of = done ? state.outcome : kept.length ? lastResult(kept[0]!.kind) : background[0]?.problem;
   const whole = of !== undefined && state.shownWhole === of;
-  const advice = done && state.outcome?.reloads ? reloadAdvice(state.outcome.reloads) : undefined;
+  const advice = done && state.outcome?.reloads ? reloadAdvice(state.outcome.reloads, toolWays()) : undefined;
   const hasAdvice = !!advice?.items.length;
   // With no problem line, Show all follows the sentence, for one the header cuts or whose reload sentences live under Show all.
   if (done && !lines.length) done.querySelector('.band-text')!.after(wholeToggle(state.outcome, 0, hasAdvice));
@@ -2397,7 +2404,7 @@ const switchStatus = (t: Table, skill: ItemRow) => statusLine(skill, itemOf(skil
 function harnessLine(skill: ItemRow, tool: Tool): string {
   const through = itemThrough(state.home, skill.kind, skill, tool);
   const reload = state.outcome && outcomeShown(state.outcome, useTableShown())
-    ? rowReload(state.outcome.reloads, toItemKind(skill.kind), through ? itemKey(through.name) : skill.key, tool as HarnessId, through ? `${through.install.plugin}@${through.install.marketName}` : undefined) : '';
+    ? rowReload(state.outcome.reloads, toItemKind(skill.kind), through ? itemKey(through.name) : skill.key, tool as HarnessId, through ? `${through.install.plugin}@${through.install.marketName}` : undefined, toolWays()) : '';
   // Through a plugin: where it comes from, then why its switch can't be used here, or that it is the whole plugin's.
   if (through) return [skill.cannot?.[tool], cantSwitch(through) ?? switchWords(through), reload].filter(Boolean).join(' ');
   const lib = libraryPages[skill.kind], own = skill.ownPart?.[tool];

@@ -807,7 +807,7 @@ async function writeCopy(pass: Pass, item: LibraryItem, tool: HarnessId, here: S
   const done = here ? {} : await follow(pass, item, tool, true);
   const switchedOff = !!done.off || !!pass.disk.switchedOff?.get(item.key)?.includes(tool);
   const off = done.off ? ` ${toolName(tool)}’s own settings keep it out, so it doesn’t load it.` : '';
-  const next = switchedOff ? '' : reloadLine(tool, pass.kind.kind);
+  const next = switchedOff ? '' : reloadLine(tool, pass.kind.kind, pass.context.ways?.[tool]);
   const message = `${here ? 'Now has the current version' : 'Added'}${wrote ? `, ${wrote.said}` : ''}.${done.changed ? ` ${done.changed}` : ''}${off}${next ? ` ${next}` : ''}`;
   pass.results.push({ item: item.name, harness: tool, outcome: 'written', replaced: here ? true : undefined, message, ...(switchedOff ? { switchedOff: true as const } : {}), ...(done.changed ? { settingsChanged: done.changed } : {}) });
   return true;
