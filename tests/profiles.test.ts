@@ -633,9 +633,10 @@ async function sideNow(box: Box) {
     binaries = { 'copilot-cli': bin };
   }
   if (box.tools.includes('claude-cli')) {
-    // Claude Code's `plugin enable|disable <id>`, as the real one writes it: enabledPlugins in its settings.json, every other key kept.
+    // Claude Code's `plugin enable|disable <id>`, as the real one writes it: enabledPlugins in its settings.json, every other key
+    // kept; each call also listed in the box's claude-calls.
     const bin = join(box.base, 'bin/claude');
-    await putFile(bin, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} -e 'const fs=require("fs"),p=require("path"),[a,b,c]=process.argv.slice(1);if(a==="plugin"&&(b==="enable"||b==="disable")&&c){const f=p.join(process.env.HOME,".claude/settings.json"),j=JSON.parse(fs.readFileSync(f,"utf8"));j.enabledPlugins={...j.enabledPlugins,[c]:b==="enable"};fs.writeFileSync(f,JSON.stringify(j,null,2)+"\\n");process.exit(0);}process.exit(9);' "$@"\n`);
+    await putFile(bin, `#!/bin/sh\necho "$2 $3" >> ${JSON.stringify(join(box.base, 'claude-calls'))}\nexec ${JSON.stringify(process.execPath)} -e 'const fs=require("fs"),p=require("path"),[a,b,c]=process.argv.slice(1);if(a==="plugin"&&(b==="enable"||b==="disable")&&c){const f=p.join(process.env.HOME,".claude/settings.json"),j=JSON.parse(fs.readFileSync(f,"utf8"));j.enabledPlugins={...j.enabledPlugins,[c]:b==="enable"};fs.writeFileSync(f,JSON.stringify(j,null,2)+"\\n");process.exit(0);}process.exit(9);' "$@"\n`);
     await chmod(bin, 0o755);
     binaries = { ...binaries, 'claude-cli': bin };
   }
@@ -912,7 +913,7 @@ test('Where a part’s own switch can’t be written, docs is not turned on in C
     // A `permissions` that is not an object: the agent's rule can't be written into it.
     await writeFile(join(box.home, '.claude/settings.json'), `${JSON.stringify({ ...(await settings()), permissions: 'odd' }, null, 2)}\n`);
     const done = await switchProfile(box.context, box.tools, await made('Work', [aId]), (await sideNow(box)).side);
-    assert.deepEqual([done.results.map(result => result.outcome), (await settings()).enabledPlugins], [['failed'], { 'docs@team': false }]);
+    assert.deepEqual([done.results.map(result => result.outcome), (await settings()).enabledPlugins, await text(box, '../claude-calls')], [['failed'], { 'docs@team': false }, undefined], 'Claude Code never asked to enable it');
   } finally { await box.cleanup(); }
 });
 
@@ -924,6 +925,7 @@ test('A plugin a profile leaves out goes off in Claude Code even when none of it
     assert.deepEqual([await preview(quiet), await (await sideNow(box)).inUse()], ['Switching turns 1 plugin off in Claude Code', []]);
     const done = await switched(quiet);
     assert.deepEqual([(await settings()).enabledPlugins, done.said, await (await sideNow(box)).inUse()], [{ 'docs@team': false }, ' The whole plugin docs was turned off in Claude Code.', ['Quiet']]);
+    assert.equal(undoOffered({ profile: done.profile }, (await sideNow(box)).view), true, 'its Undo is offered though no item of it changed');
     await undoSwitch(box.context, box.tools, done.event!, (await sideNow(box)).side);
     assert.equal(JSON.parse((await text(box, '.claude/settings.json'))!).enabledPlugins['docs@team'], JSON.parse(before!).enabledPlugins['docs@team']);
   } finally { await box.cleanup(); }
