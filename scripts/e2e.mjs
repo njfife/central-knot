@@ -164,10 +164,10 @@ if (named) for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sign
 
 /** Clean environment for every app launch (main and second-instance): never inherits ELECTRON_RUN_AS_NODE or real tool configs. */
 function appEnv(home = HOME, more = {}) {
-  // OpenCode's CLI is looked for only inside the throwaway home, and on a Mac every app in the stand-in for /Applications
+  // OpenCode's and Antigravity's CLIs are looked for only inside the throwaway home, and on a Mac every app in the stand-in for /Applications
   // (CK_TEST_APPS, empty here): a machine that has them installed (the Mac these run on does) would otherwise bring them into
   // every flow that opens "This Mac's home".
-  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, CK_TEST_HOME_ONLY: 'opencode', CK_PLUGIN_UPDATES_EVERY_MS: 'never', CK_PLUGIN_TEXT: 'never', ...(process.platform === 'darwin' ? { CK_TEST_APPS: MAC.root } : {}), ...more };
+  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, CK_TEST_HOME_ONLY: 'opencode,agy', CK_PLUGIN_UPDATES_EVERY_MS: 'never', CK_PLUGIN_TEXT: 'never', ...(process.platform === 'darwin' ? { CK_TEST_APPS: MAC.root } : {}), ...more };
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   return env;
 }
@@ -386,7 +386,7 @@ async function backFlow() {
   const onlySkill = skill(join(ownHome, '.claude/skills'), 'only-skill');
   const onlyCli = join(ownHome, '.local/bin/claude');
   cpSync(join(HOME, '.local/bin/claude'), onlyCli);
-  const a = await launch(join(scratch, 'back-data'), ['--practice-copy'], ownHome, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  const a = await launch(join(scratch, 'back-data'), ['--practice-copy'], ownHome, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' });
   const thumb = async (button = 'back') => {
     for (const [type, buttons] of [['mousePressed', button === 'back' ? 8 : 16], ['mouseReleased', 0]]) {
       await a.send('Input.dispatchMouseEvent', { type, x: 400, y: 28, button, buttons, clickCount: 1 });
@@ -4357,7 +4357,7 @@ async function releasedStartupFlow() {
     writeFileSync(join(fresh, path), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`, { mode: 0o755 });
   }
   skill(join(fresh, '.codex/skills'), 'handoff', handoff);
-  const b = await launch(join(scratch, 'first-open-data'), asReleased, fresh, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  const b = await launch(join(scratch, 'first-open-data'), asReleased, fresh, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' });
   await b.click('#nav-overview');
   check('at its first open of a fresh home, the Overview asks first setup’s question', await b.exists('#setup-yes'), await b.text('.overview-lead'));
   await b.click('#setup-yes');
@@ -4374,7 +4374,7 @@ async function releasedStartupFlow() {
   // Saved hours ago, so it is past the settle window (librarypass.ts SETTLE_MS) and the first pass would take it in.
   const found = skill(join(fresh, '.codex/skills'), 'later'), hoursAgo = new Date(Date.now() - 5 * 3_600_000);
   for (const path of [join(found, 'SKILL.md'), found]) utimesSync(path, hoursAgo, hoursAgo);
-  const c = await launch(data, asReleased, fresh, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  const c = await launch(data, asReleased, fresh, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' });
   const kept = readdirSync(data).filter(name => /^app-settings\.unreadable-\d+\.json$/.test(name));
   same('a settings file that can’t be read is kept beside the new one, byte for byte, never written over',
     [kept.map(name => readFileSync(join(data, name), 'utf8')), !!jsonOrNothing(join(data, 'app-settings.json'))], [[damaged], true]);
@@ -4545,6 +4545,66 @@ async function fewToolsFlow() {
 }
 
 /**
+ * Antigravity as a tool, beside the five others, in a home of its own: its CLI stands in there as `agy` (answering nothing but
+ * its version); its skills and MCP servers are read from ~/.gemini/config, never from ~/.gemini/skills (the Gemini CLI's too),
+ * and a skill taken in is written there. Pictures of the pages that list six tools.
+ */
+async function antigravityFlow() {
+  const home = join(scratch, 'home-antigravity'), ag = join(home, '.gemini/config');
+  const cli = (path, version) => { mkdirSync(join(home, path, '..'), { recursive: true }); writeFileSync(join(home, path), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(join(home, path), 0o755); };
+  for (const [name, version] of [['claude', '2.1.309 (Claude Code)'], ['copilot', '1.0.107'], ['codex', 'codex-cli 0.142.3'], ['pi', '1.5.0'], ['opencode', '1.19.5'], ['agy', '1.5.14']]) cli(`.local/bin/${name}`, version);
+  skill(join(home, '.claude/skills'), 'notes');
+  skill(join(ag, 'skills'), 'alpha');
+  skill(join(home, '.gemini/skills'), 'gemini-only');
+  writeFileSync(join(ag, 'mcp_config.json'), `${JSON.stringify({ mcpServers: { 'ag-docs': { command: 'npx', args: ['-y', 'docs'], disabled: true } }, mine: { keep: true } }, null, 2)}\n`);
+  const a = await launch(join(scratch, 'antigravity-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' });
+  const pictures = async (name, sizes = [SMALLEST, [1316, 819], [1728, 1117]]) => { if (!shots) return; for (const [width, height] of sizes) { await sizeTo(a, width, height); await a.shot(`${name}-${width}`); } await fullSize(a); };
+  await a.click('#nav-overview');
+  same('the Overview lists Antigravity, last of the six, with its one skill', [await a.all('.tools-table tr[data-tool]', 'e.dataset.tool'), (await a.all('.tools-table tr[data-tool="antigravity-cli"] td', 'e.textContent.trim()'))[1]],
+    [['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'], '1']);
+  check('the Overview’s key says what its dash means', (await a.text('#overview-tools-key') ?? '').startsWith('—: that kind isn’t handled for that tool'), await a.text('#overview-tools-key'));
+  await pictures('antigravity-overview');
+  await a.click('#nav-harnesses');
+  const card = await a.text('#harness-antigravity-cli');
+  check('Antigravity’s card names its CLI with its version, and says its agents aren’t handled', card.includes('Installed · 1.5.14') && card.includes('Agents aren’t handled for Antigravity'), card);
+  await pictures('antigravity-harnesses');
+  await openKind(a, 'skills');
+  same('alpha is Antigravity’s own copy, notes Claude Code’s alone, and the Gemini CLI’s folder is not read',
+    [await cellState(a, 'skills', 'alpha', 'antigravity-cli'), await cellState(a, 'skills', 'notes', 'antigravity-cli'), await a.exists(`.ov-row[data-key="${rowPart('', 'skills', 'gemini-only')}"]`)], ['own-copy', 'none', false]);
+  await a.click(`#${rowPart('open', 'skills', 'alpha')}`);
+  await fitsAtMinimum(a, 'Skills with six tools, a skill open');
+  if (shots) { await sizeTo(a, ...SMALLEST); await a.click('#sidebar-toggle'); await a.shot('antigravity-library-sidebar-860'); await a.click('#sidebar-toggle'); await fullSize(a); }
+  await pictures('antigravity-library');
+  const view = await a.run('window.centralKnot.refresh()');
+  same('its MCP server is read from mcp_config.json, off as its own switch says', view.mcp.items.map(item => [item.key, item.switchedOff]), [['ag-docs', ['antigravity-cli']]]);
+  if (canWriteRealHome) {
+    await a.click(`#${rowPart('add', 'skills', 'notes')}`);
+    same('a found skill taken in is written to ~/.gemini/config/skills, byte for byte; ~/.gemini/skills is never written',
+      [readNow(join(ag, 'skills/notes/SKILL.md')), existsSync(join(home, '.gemini/skills/notes'))], [readNow(join(home, '.claude/skills/notes/SKILL.md')), false]);
+  }
+  // Six tools is the widest table now: nothing is cut off on any page at the smallest window, nor on a plugin's page, where
+  // Antigravity is a column that takes the plugin's items.
+  const market = join(scratch, 'antigravity-market');
+  writeMarket(market);
+  await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)})`);
+  for (const page of ['overview', 'harnesses', 'library', 'instructions', 'plugins', 'profiles']) {
+    await a.click(`#nav-${page}`);
+    await fitsAtMinimum(a, `${page} with six tools`);
+    if (page === 'plugins') await pictures('antigravity-plugins');
+  }
+  await a.click('#nav-plugins');
+  const cell = '[id^="pcell-"][id$="-issue-tracker-antigravity-cli"]';
+  for (let tries = 0; tries < 50 && !(await a.exists(cell)); tries++) await wait(100);
+  same('Antigravity is a column on Plugin marketplaces; a plugin off is in none of the tools', await a.run(`document.querySelector('${cell}')?.dataset.state`), 'absent');
+  await a.click('[id^="popen-"][id$="-issue-tracker"]');
+  for (let tries = 0; tries < 40 && !(await a.exists('.plugin-items-section')); tries++) await wait(100);
+  await fitsAtMinimum(a, 'a plugin’s page with six tools');
+  await pictures('antigravity-plugin-page');
+  same('no page errors, Antigravity', a.pageErrors, []);
+  await a.quit();
+}
+
+/**
  * OpenCode as a tool, beside Claude Code, in a home of its own: its CLI and its desktop app stand in there (the CLI answers
  * nothing but its version), and its skills, MCP servers, agents and instruction file are read from its own folder.
  */
@@ -4567,7 +4627,7 @@ async function openCodeFlow() {
   mkdirSync(join(oc, 'agents'));
   writeFileSync(join(oc, 'agents/helper.md'), '---\ndescription: Helps.\nmode: subagent\n---\n\nYou help.\n');
   // Every tool is looked for only inside this home, so the flow reads the same on a machine that has some installed.
-  const onlyHere = { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' };
+  const onlyHere = { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' };
   const a = await launch(join(scratch, 'opencode-data'), flag('--electron') ? ['--as-released'] : [], home, onlyHere);
   // With --shots, a page's picture at each window size the app must fit.
   const pictures = async (page, name) => { if (!shots) return; for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(page, width, height); await page.shot(`${name}-${width}`); } await fullSize(page); };
@@ -4729,7 +4789,7 @@ async function pluginRowsFitFlow() {
   for (const plugin of [long, nightly]) file(market, `plugins/${plugin}/skills/dashboards/SKILL.md`, '---\nname: dashboards\ndescription: Builds a dashboard.\n---\n\nBuild it.\n');
   file(home, '.claude/plugins/known_marketplaces.json', JSON.stringify({ 'rows-fit': { source: { source: 'directory', path: market }, installLocation: market } }));
   writeClaudeInstall(home, 'rows-fit', gone, '1.0.0', { 'skills/ship/SKILL.md': '---\nname: ship\ndescription: Ships logs.\n---\n\nShip them.\n' });
-  const a = await launch(join(scratch, 'rows-fit-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  const a = await launch(join(scratch, 'rows-fit-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' });
   const pieces = name => a.all(`.plugin-row[data-plugin="${name}"] .plugin-row-open > *`);
   const sidebarOpen = async open => { if (await a.run(`document.body.classList.contains('rail')`) === open) await a.click('#sidebar-toggle'); };
   const titleLines = () => a.run(`(() => { const range = document.createRange(); range.selectNodeContents(document.querySelector('.plugin-row[data-plugin="${long}"] .plugin-row-title'));
@@ -4784,7 +4844,7 @@ async function dockedListFlow() {
   writeClaudeInstall(home, 'local-market', 'kit', '1.0.0', { 'skills/zulu/SKILL.md': text('zulu') });
   mkdirSync(join(home, '.claude/projects/-work'), { recursive: true });
   writeFileSync(join(home, '.claude/projects/-work/s1.jsonl'), `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'research' } }] }, timestamp: new Date().toISOString() })}\n`);
-  const a = await launch(join(scratch, 'docked-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  const a = await launch(join(scratch, 'docked-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' });
   await a.click('#nav-overview');
   await a.click('#setup-yes');
   for (let tries = 0; tries < 100 && !(await a.exists('#walk-skip')); tries++) await wait(100);
@@ -4839,7 +4899,7 @@ async function suggestedFlow() {
   const cli = (path, version) => { mkdirSync(join(home, path, '..'), { recursive: true }); writeFileSync(join(home, path), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(join(home, path), 0o755); };
   cli('.local/bin/claude', '2.1.309 (Claude Code)');
   mkdirSync(join(home, '.claude'), { recursive: true });
-  const onlyHere = { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' };
+  const onlyHere = { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' };
   const data = join(scratch, 'suggested-data');
   const a = await launch(data, flag('--electron') ? ['--as-released'] : [], home, onlyHere);
   const pictures = async name => { if (!shots) return; for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); await a.shot(`${name}-${width}`); } await fullSize(a); };
@@ -4900,7 +4960,7 @@ async function otherAppsFlow() {
   const app = (name, version) => { mkdirSync(join(home, 'Applications', name, 'Contents'), { recursive: true }); writeFileSync(join(home, 'Applications', name, 'Contents/Info.plist'), `<?xml version="1.0"?>\n<plist><dict><key>CFBundleShortVersionString</key><string>${version}</string></dict></plist>\n`); };
   cli('.local/bin/claude', '2.1.309 (Claude Code)');
   mkdirSync(join(home, '.claude'), { recursive: true });
-  const a = await launch(join(scratch, 'other-apps-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  const a = await launch(join(scratch, 'other-apps-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' });
   await a.click('#nav-harnesses');
   check('with none of them installed, nothing is said about other apps', !(await a.exists('#other-apps')));
   app('T3 Code (Nightly).app', '0.1.9-nightly.20261110.4478');
@@ -8436,7 +8496,7 @@ async function ownPartsFlow() {
   const before = hashes();
   for (const folder of [data, real]) mkdirSync(folder, { recursive: true });
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
-  const a = await launch(data, [], real, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  const a = await launch(data, [], real, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' });
   if (await a.exists('#setup-no')) await a.click('#setup-no');
   await a.click('#nav-instructions');
   for (let tries = 0; tries < 50 && !(await a.exists('#ins-edit-claude-cli')); tries++) await wait(100);
@@ -11168,7 +11228,7 @@ async function libraryFlow() {
     writeFileSync(join(RA.home, '.claude.json'), `${JSON.stringify({ mcpServers: { docs: { command: 'npx', args: ['docs'] } } }, null, 2)}\n`);
     mkdirSync(RA.data, { recursive: true });
     writeFileSync(join(RA.data, 'app-settings.json'), JSON.stringify({ closeExplained: true }));
-    const onlyHere = { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' };
+    const onlyHere = { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' };
     const a = await launch(RA.data, flag('--electron') ? ['--as-released'] : [], RA.home, onlyHere);
     const aShots = async (name, size, railMode) => {
       if (!shots) return;
@@ -11630,7 +11690,7 @@ echo "$*" >> "$HOME/claude-calls.txt"
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
   writeFileSync(join(data, 'marketplaces.json'), JSON.stringify([market]));
-  const a = await launch(data, [], tools, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' });
+  const a = await launch(data, [], tools, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' });
   // The base, as the Instructions page saves it, for Claude Code: its strip, and the text it replaced as an earlier version.
   same('the base is saved into Claude Code’s file', await a.run(`(async () => { const api = window.centralKnot; const home = (await api.refresh()).home; const base = await api.instructionBase();
     const seen = Object.fromEntries((await api.instructions()).map(file => [file.tool, { path: file.path, hash: file.hash }]));
@@ -14065,7 +14125,7 @@ async function clickReadsFlow() {
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, sessionStripFlow, fromFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow],
-  [fewToolsFlow, openCodeFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow, clickReadsFlow],
+  [fewToolsFlow, openCodeFlow, antigravityFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow, clickReadsFlow],
   [backFlow, backPlaceFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, mcpSigninFlow, firstSetupFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.

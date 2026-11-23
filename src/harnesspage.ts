@@ -10,7 +10,7 @@ import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { pluginTitle } from './pluginparts.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural } from './model.ts';
-import { andList, coworkWords, fileName, kindNouns, pageNames, toolNames as names } from './words.ts';
+import { andList, coworkWords, fileName, kindNouns, pageNames, sentence, toolNames as names } from './words.ts';
 import { agentsKeptIn, hasCowork, takesPlugins, type AgentTool } from './presence.ts';
 import { brandMark } from './brand.ts';
 import { shortBuild } from './values.ts';
@@ -36,8 +36,8 @@ const readProblems = (snapshot: Snapshot) => (snapshot.discovery === 'missing' ?
 const listed = (home: HomeView) => home.snapshots.filter(snapshot => home.mode === 'actual' || home.sync.present.includes(snapshot.harness));
 
 const supports = (home: HomeView, kind: PageKind, tool: HarnessId) => kindSource(home, kind).tools.includes(tool);
-/** Said on the card, the tab's tooltip and the empty tab when a tool can't hold a kind. */
-const kindNotUsed = (tool: HarnessId, kind: PageKind) => `${names[tool]} doesn’t use ${kindNouns[kind].many}`;
+/** Said on the card, the tab's tooltip and the empty tab when Central Knot holds no kind of this in a tool (Antigravity's agents). */
+const kindNotUsed = (tool: HarnessId, kind: PageKind) => `${sentence(kindNouns[kind].many)} aren’t handled for ${names[tool]}`;
 
 /**
  * What one tool has of one kind: its total, the synced subtotal (for skills, only copies managed there), and copies that

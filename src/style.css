@@ -551,17 +551,20 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
  */
 .matrix { container: table / inline-size; position: relative; }
 .ov { --ov-columns: minmax(200px, 1fr) 84px repeat(var(--tool-count, 3), 120px); }
-/* A narrow table: tighter columns, so names keep their room. Four tools need it sooner, five sooner still (dom.ts
-   data-tools). Five tools in the smallest window with the sidebar open are tighter again. */
+/* A narrow table: tighter columns, so names keep their room. Four tools need it sooner, five and six sooner still (dom.ts
+   data-tools). Five or six tools in the smallest window with the sidebar open are tighter again; six tighter than five there. */
 @container table (width < 780px) { .ov { --narrow: 1; } }
 @container table (width < 900px) { .ov[data-tools="4"] { --narrow: 1; } }
 @container table (width < 1020px) { .ov[data-tools="5"] { --narrow: 1; } }
+@container table (width < 1140px) { .ov[data-tools="6"] { --narrow: 1; } }
 @container table (width < 700px) { .ov[data-tools="5"] { --tight: 1; } }
+@container table (width < 800px) { .ov[data-tools="6"] { --tight: 1; } }
 @container style(--narrow: 1) {
   .ov-row { --ov-columns: minmax(160px, 1fr) 72px repeat(var(--tool-count, 3), 92px); }
 }
 @container style(--tight: 1) {
   .ov-row { --ov-columns: minmax(160px, 1fr) 60px repeat(var(--tool-count, 3), 80px); }
+  .ov[data-tools="6"] .ov-row { --ov-columns: minmax(120px, 1fr) 52px repeat(6, 72px); }
 }
 
 .ov-row { position: relative; display: grid; grid-template-columns: var(--ov-columns); align-items: center; height: 40px; box-shadow: inset 0 -1px 0 var(--line); scroll-margin-top: 128px; }
