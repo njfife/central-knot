@@ -4,8 +4,9 @@
 //                                `except` (the tools it is kept out of); per home: `tools`, the managed tools that
 //                                are not new here (the first read puts every managed tool there but one an install waited
 //                                for; the automatic updates add a new tool after their first check for it; a tool managed
-//                                again leaves it), and `knows`, the tools it was written knowing (bringForward). Nothing else: what each tool has (installed or not, its version, its own
-//                                switches, what its copy holds) is read at each look.
+//                                again leaves it), and `knows`, the tools it was written knowing (bringForward). Nothing
+//                                else: what each tool has (installed or not, its version, its own switches, what its copy
+//                                holds) is read at each look.
 //
 // THE TABLE (owedTo), per managed tool, from the plugin's entry and what that tool has now (ToolNow). "Wanted" is On and not
 // kept out of the tool. Rows, first match:
@@ -225,7 +226,10 @@ const isEntry = (value: unknown): value is PluginEntry => {
     && typeof entry.on === 'boolean' && Array.isArray(entry.except) && onlyAllowed(entry.except, harnessIds).length === entry.except.length;
 };
 
-/** The home's record: none (`record` undefined) when there is no file yet. One that can't be read, is damaged or newer is a `problem` that stops every write. */
+/**
+ * The home's record: none (`record` undefined) when there is no file yet. One that can't be read, is damaged or newer is a `problem`
+ * that stops every write. One that knew fewer tools than this build has its entries brought forward as read (keptOutOfNew).
+ */
 export async function readPluginRecord(home: string): Promise<{ record?: PluginRecord; problem?: string }> {
   let text: string;
   try { text = await readFile(recordPath(home), 'utf8'); }
