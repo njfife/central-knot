@@ -40,6 +40,8 @@ export interface McpEntry {
   extras: Record<string, unknown>;
   /** Where OpenCode holds it (`mcp.<name>`, or `mcp.servers.<name>`): its own switch differs between the two. */
   place?: string[];
+  /** Antigravity: its remote server's address is written under `url`, not `serverUrl` (the key Central Knot writes otherwise). */
+  urlKey?: 'url';
   hash: string;
   /** Why this entry is never shared: it belongs to the app that wrote it, such as ChatGPT desktop. */
   hostBound?: string;
@@ -47,13 +49,13 @@ export interface McpEntry {
 
 /**
  * A tool's own part of one server's entry: its name there as written (it may differ by case from another tool's), where
- * OpenCode had it, and its own fields and lines (`extras`), so Off then On gives the tool back its entry. Kept as text
- * (ownText) by serverstore.ts.
+ * OpenCode had it, the key Antigravity's had its address under, and its own fields and lines (`extras`), so Off then On gives
+ * the tool back its entry. Kept as text (ownText) by serverstore.ts.
  */
-export interface OwnPart { name: string; place?: string[]; extras: Record<string, unknown> }
+export interface OwnPart { name: string; place?: string[]; urlKey?: 'url'; extras: Record<string, unknown> }
 export const ownText = (own: OwnPart) => JSON.stringify(own);
 /** One entry's own part as text (servers.ts serverKind ownOf, and a source's .mcp.json entry: atlink.ts serversAt). */
-export const ownPartOf = (entry: McpEntry) => ownText({ name: entry.name, place: entry.place, extras: entry.extras });
+export const ownPartOf = (entry: McpEntry) => ownText({ name: entry.name, place: entry.place, urlKey: entry.urlKey, extras: entry.extras });
 
 /**
  * A server's parts in the order a sentence lists them, with each one's words, and for a map, the words for one entry of it:
@@ -160,14 +162,15 @@ function fromAntigravity(name: string, file: string, raw: Record<string, unknown
   const server: NeutralServer = url !== undefined ? { transport: 'http', url, headers: nonEmpty(strings(raw.headers)) }
     : { transport: 'stdio', command: typeof raw.command === 'string' ? raw.command : undefined, args: nonEmpty(list(raw.args)), env: nonEmpty(strings(raw.env)), cwd: typeof raw.cwd === 'string' ? raw.cwd : undefined };
   const extras = Object.fromEntries(Object.entries(raw).filter(([key]) => !['command', 'args', 'env', 'cwd', 'serverUrl', 'url', 'headers'].includes(key)));
-  return { name, tool: 'antigravity-cli', file, server, extras, hash: serverHash(server), hostBound: hostBound(name, server) };
+  const urlKey = typeof raw.serverUrl !== 'string' && typeof raw.url === 'string' ? { urlKey: 'url' as const } : {};
+  return { name, tool: 'antigravity-cli', file, server, extras, ...urlKey, hash: serverHash(server), hostBound: hostBound(name, server) };
 }
 
 /** A server as Antigravity's file holds it, with its own fields there kept. */
-function antigravityEntry(server: NeutralServer, extras: Record<string, unknown>): Record<string, unknown> {
+function antigravityEntry(server: NeutralServer, extras: Record<string, unknown>, urlKey = 'serverUrl'): Record<string, unknown> {
   const entry: Record<string, unknown> = server.transport === 'stdio'
     ? { command: server.command, args: server.args, env: server.env, cwd: server.cwd, ...extras }
-    : { serverUrl: server.url, headers: server.headers, ...extras };
+    : { [urlKey]: server.url, headers: server.headers, ...extras };
   return Object.fromEntries(Object.entries(entry).filter(([, value]) => value !== undefined));
 }
 
@@ -284,7 +287,7 @@ export function cannotHold(tool: HarnessId, server: NeutralServer): string | und
  * The entry text for a destination: the neutral fields, plus that tool's own fields for this server as they were. `place`:
  * where OpenCode had it, for an entry it has no longer.
  */
-export function writeEntry(text: string, tool: HarnessId, name: string, server: NeutralServer | undefined, extras: Record<string, unknown> = {}, place?: string[]): string {
+export function writeEntry(text: string, tool: HarnessId, name: string, server: NeutralServer | undefined, extras: Record<string, unknown> = {}, place?: string[], urlKey?: 'url'): string {
   if (tool === 'codex-cli') {
     // A table taken from the file's end takes the blank line put before it, so Off then On leaves the file as it was.
     if (!server) return setTomlTable(text, ['mcp_servers'], name, undefined, { endGap: true });
@@ -303,7 +306,7 @@ export function writeEntry(text: string, tool: HarnessId, name: string, server: 
     return setJsonMember(text, openCodeServer(text, name)?.place ?? place ?? ['mcp', name], server && openCodeEntry(server, extras));
   }
   if (!server) return setJsonMember(text, ['mcpServers', name], undefined);
-  return setJsonMember(text, ['mcpServers', name], tool === 'antigravity-cli' ? antigravityEntry(server, extras) : jsonEntry(tool, server, extras));
+  return setJsonMember(text, ['mcpServers', name], tool === 'antigravity-cli' ? antigravityEntry(server, extras, urlKey) : jsonEntry(tool, server, extras));
 }
 
 /** A server as a JSON tool writes it (Claude Code, Copilot CLI, Pi), with that tool's own fields kept. */
@@ -324,7 +327,7 @@ export function jsonEntry(tool: HarnessId, server: NeutralServer, extras: Record
  * never find the file gone; its writes made without the lock are the one gap, both ways (the header). Answers why nothing was written, if it wasn't: `changed`, the entry or the file changed since it was read;
  * `locked`, Claude Code's lock stayed held (Claude Code saving, or a lock one that stopped left). The next pass tries again.
  */
-export async function editEntry(context: ShareContext, tool: HarnessId, name: string, expected: string | undefined, server: NeutralServer | undefined, extras?: Record<string, unknown>, place?: string[]): Promise<{ stopped: string; changed?: true; locked?: true } | undefined> {
+export async function editEntry(context: ShareContext, tool: HarnessId, name: string, expected: string | undefined, server: NeutralServer | undefined, extras?: Record<string, unknown>, place?: string[], urlKey?: 'url'): Promise<{ stopped: string; changed?: true; locked?: true } | undefined> {
   const file = mcpFile(context, tool), lock = tool === 'claude-cli' ? `${file}.lock` : undefined;
   // Any failure but a change (permissions, a full disk) stops this one write, never the rest of the pass.
   const failed = (error: unknown) => ({ stopped: `Could not write ${harnesses[tool].name}'s settings file: ${error instanceof Error ? error.message : String(error)}` });
@@ -335,7 +338,7 @@ export async function editEntry(context: ShareContext, tool: HarnessId, name: st
     if (now.problem) return { stopped: now.problem };
     const current = now.entries.find(entry => entry.name === name);
     if ((current?.hash ?? undefined) !== expected) return { stopped: `${harnesses[tool].name}'s entry for ${name} changed just now. Nothing was written; it is read again next time.`, changed: true };
-    await writeFileChecked(file, writeEntry(now.text ?? '', tool, name, server, extras ?? current?.extras ?? {}, place), now.exists ? now.text : undefined, !!lock);
+    await writeFileChecked(file, writeEntry(now.text ?? '', tool, name, server, extras ?? current?.extras ?? {}, place, urlKey ?? current?.urlKey), now.exists ? now.text : undefined, !!lock);
     return undefined;
   } catch (error) {
     if (errorCode(error) === 'CK_CHANGED' || errorCode(error) === 'CK_OCCUPIED') return { stopped: `${harnesses[tool].name}'s settings file changed just now. Nothing was written; it is read again next time.`, changed: true };

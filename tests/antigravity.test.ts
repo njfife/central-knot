@@ -163,6 +163,21 @@ test('Servers go to mcp_config.json in Antigravity’s form beside his own; Off 
   } finally { await box.cleanup(); }
 });
 
+test('His remote server written with url comes back with url after Off and On, its own fields kept; one written with serverUrl, with serverUrl', async () => {
+  const box = await sandbox();
+  try {
+    const servers = { 'with-url': { url: 'https://a.example/mcp', oauth: { clientId: 'id' }, timeoutSeconds: 27 }, 'with-server-url': { serverUrl: 'https://b.example/mcp', enabledTools: ['x'] } };
+    await writeFile(config(box.home, 'mcp_config.json'), JSON.stringify({ mcpServers: servers }));
+    const mcp = async () => JSON.parse(await readFile(config(box.home, 'mcp_config.json'), 'utf8')).mcpServers;
+    const both = (on: boolean) => ['with-url', 'with-server-url'].map(key => ({ key, on, except: [] }));
+    await applyServers(box.context, tools, both(true));
+    await applyServers(box.context, tools, both(false));
+    assert.deepEqual(await mcp(), {});
+    await applyServers(box.context, tools, both(true));
+    assert.deepEqual(await mcp(), servers);
+  } finally { await box.cleanup(); }
+});
+
 test('An empty mcp_config.json is Antigravity’s no servers (its CLI lists none): a server turned on is written into it', async () => {
   const box = await sandbox();
   try {

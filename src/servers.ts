@@ -176,7 +176,7 @@ export const serverKind: Kind<NeutralServer, McpEntry, ServerDisk> = {
 async function writeServer(context: ShareContext, item: LibraryItem, tool: HarnessId, here: McpEntry | undefined, server: NeutralServer) {
   context.fault?.('before-rename');
   const kept = here ? undefined : await keptOwn(context, item, tool);
-  const stopped = await editEntry(context, tool, here?.name ?? kept?.name ?? item.name, here?.hash, server, kept?.extras, kept?.place);
+  const stopped = await editEntry(context, tool, here?.name ?? kept?.name ?? item.name, here?.hash, server, kept?.extras, kept?.place, kept?.urlKey);
   return stopped && { stopped: stopped.stopped };
 }
 
