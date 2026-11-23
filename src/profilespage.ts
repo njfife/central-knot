@@ -3,7 +3,8 @@
 // agents): the library's items, and when `switchesPluginItems` is true each plugin's item some tool has, from its plugin, with
 // under its name each tool that doesn't switch it (copyNote; why, for a tool with no switch for one item, the head of its kind
 // says once: kindNote), and in Claude Code, which takes a plugin whole, what comes on there with a ticked item (wholeNote, such a
-// skill's row set in beneath it: withBrought); an older profile with `switchesPluginItems` false hides
+// skill's row set in beneath it: withBrought), with that rule and each plugin a switch turns there said under Find (claudeBand);
+// an older profile with `switchesPluginItems` false hides
 // plugin rows behind "Choose plugin items for this profile" until chosen. Each row has its box (in the profile or not) and what
 // a switch would do to it (one the profile leaves out names under its name the tools that keep it on: profileplan.ts keptOn),
 // and under Find a line on what the Library lists beside them (items only found: profileplan.ts leftOut). Ticking only edits the
@@ -12,12 +13,13 @@
 import { acting, deleteProfileDef, machine, profileState, rerender, saveProfileDef, showPage, state, switchToProfile, whyReadOnly } from './app.ts';
 import { openPlugin, outcomeBand, pluginTag, problemsBand } from './matrix.ts';
 import { button, checkbox, emptyState, findInput, h, icon } from './dom.ts';
-import { allTurns, changes, claudeInstall, copilotKeptOnBy, heldWords, homeItems, inUse, inUseName, itemRowState, keptOn, leftOut, loadWords, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginPlan, pluginRowState, pluginStayNote, switchable, switchPlan, switchPreview, takenWhole, turnsWords, type LiveItem, type PluginCopy, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
+import { allTurns, changes, claudeInstall, comesWith, copilotKeptOnBy, heldWords, homeItems, inUse, inUseName, itemRowState, keptOn, leftOut, loadWords, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginPlan, pluginRowState, pluginStayNote, switchable, switchPlan, switchPreview, takenWhole, turnsWords, wholeTurns, type LiveItem, type PluginCopy, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
 import { noSingleSwitch } from './pluginstatus.ts';
+import { counted } from './pluginswitch.ts';
 import { andList, toolList, toolNames } from './words.ts';
 import type { ItemKind } from './library.ts';
 import { plural } from './model.ts';
-import type { HarnessId, PluginItem, Profile } from './types.ts';
+import type { HarnessId, InstalledPlugin, PluginItem, Profile } from './types.ts';
 
 let find = '';
 /** Whether the status bar's profile menu is open. */
@@ -165,9 +167,8 @@ function copyNote(profile: Profile, item: PluginLive, copy: PluginCopy): HTMLEle
 function wholeNote(profile: Profile, item: PluginLive): HTMLElement | null {
   const install = claudeInstall(item), { ticked, brought } = install ? takenWhole(profile, install) : { ticked: [], brought: [] };
   const names = (parts: PluginItem[]) => andList(parts.map(part => part.name)), note = (text: string) => h('span.pf-note', { 'data-tool': 'claude-cli' }, text);
-  if (!brought.length) return null;
-  if (profile.items.includes(item.id)) return note(`Brings ${names(brought)} on in Claude Code.`);
-  return brought.some(part => part.kind === item.kind && part.name === item.name) ? note(`Comes on in Claude Code with ${names(ticked)} (${item.plugin} is whole there).`) : null;
+  if (profile.items.includes(item.id)) return brought.length ? note(`Brings ${names(brought)} on in Claude Code.`) : null;
+  return comesWith(profile, item) ? note(`Comes on in Claude Code too, with ${names(ticked)}.`) : null;
 }
 
 /**
@@ -177,10 +178,7 @@ function wholeNote(profile: Profile, item: PluginLive): HTMLElement | null {
  */
 function withBrought(profile: Profile, rows: PluginLive[]): { item: PluginLive; beneath: boolean }[] {
   const ticked = (item: PluginLive) => profile.items.includes(item.id);
-  const bringer = (item: PluginLive) => {
-    const install = claudeInstall(item);
-    return install && !ticked(item) && takenWhole(profile, install).brought.some(part => part.kind === item.kind && part.name === item.name) ? rows.find(other => ticked(other) && claudeInstall(other) === install) : undefined;
-  };
+  const bringer = (item: PluginLive) => (comesWith(profile, item) ? rows.find(other => ticked(other) && claudeInstall(other) === claudeInstall(item)) : undefined);
   const under = new Map(rows.map(item => [item, bringer(item)]));
   return rows.flatMap(item => (under.get(item) ? [] : [{ item, beneath: false }, ...rows.filter(other => under.get(other) === item).map(other => ({ item: other, beneath: true }))]));
 }
@@ -190,7 +188,8 @@ function pluginRow(profile: Profile, item: PluginLive, turn: PluginTurn | undefi
   const included = profile.items.includes(item.id), { said, changes: moves } = pluginState(profile, item, turn, isInUse);
   const notes = [wholeNote(profile, item), ...item.copies.map(copy => copyNote(profile, item, copy))].flatMap(note => note ?? []);
   const kept = !included ? item.copies.map(copy => (copy.way === 'switch' ? copilotKeptOnBy(profile, item, copy) : undefined)).find(Boolean) : undefined;
-  const except = kept ? `, except Copilot CLI (same name as ${kept.by === 'plugin' ? `${kept.plugin}’s` : 'yours'})` : '';
+  const except = kept ? `, except Copilot CLI (same name as ${kept.by === 'plugin' ? `${kept.plugin}’s` : 'yours'})`
+    : comesWith(profile, item) ? ', except Claude Code, where it comes on with its plugin' : '';
   const help = `${included ? `In ${profile.name}: switching to it turns ${item.name} on` : `Not in ${profile.name}: switching to it turns ${item.name} off`} in each tool that can switch it${except}. Click to ${included ? 'leave it out' : 'put it in'}.`;
   return h(`div.pf-row${included ? '.pf-included' : ''}${beneath ? '.pf-beneath' : ''}`, { role: 'row', 'data-item': item.id },
     h('span.pf-name', { role: 'cell' },
@@ -235,6 +234,22 @@ function findBar(shown: number, total: number, onSwitch: boolean) {
   return h('div.toolbar', {}, h('label.find', {}, icon('search', 16, 'find-glyph'), input,
     find ? button({ variant: 'ghost', size: 'micro', icon: 'x', name: 'Clear', id: 'profile-find-clear', onclick: () => { find = ''; rerender(); document.getElementById('profile-find')?.focus(); } }) : null),
     h('div.toolbar-end', {}, h('span.pf-save-note', {}, onSwitch ? 'Ticks save at once · items change on Switch' : 'Ticks save at once'), find ? h('span.result-count', {}, `${shown} of ${total}`) : null));
+}
+
+/**
+ * On a profile that switches plugin items, while Claude Code has a plugin it lists: how Claude Code differs, said once
+ * (profileplan.ts takenWhole), and under one heading each plugin a switch turns on or off there whole (wholeTurns), by name, with
+ * what goes with it.
+ */
+function claudeBand(profile: Profile, plugged: PluginLive[]) {
+  if (!profile.switchesPluginItems || !plugged.some(claudeInstall)) return null;
+  const line = (install: InstalledPlugin, brought = takenWhole(profile, install).brought) => (install.off
+    ? `${install.plugin} on${brought.length ? `, with ${andList(brought.map(part => part.name))} too` : ''}`
+    : `${install.plugin} off, with its ${counted(install.items)} and everything else it brings there`);
+  const turns = wholeTurns(profile, plugged);
+  return h('div.band.band-help', { role: 'note', id: 'profile-claude' }, icon('info', 14, 'tone-muted'), h('span.band-text', {},
+    'Claude Code takes a plugin whole: it is on there while any of its items is ticked, and off while none is.',
+    turns.length ? h('span.pf-claude-turns', {}, h('strong', {}, 'Switching turns, in Claude Code:'), h('ul', {}, turns.map(install => h('li', {}, line(install))))) : null));
 }
 
 /** Under Find, only while the Library lists items no profile can tick, items only found in a tool: how many (profileplan.ts leftOut). */
@@ -340,7 +355,7 @@ function profileDetail(profile: Profile) {
       button({ variant: 'primary', size: 'small', label: 'Start from what’s on now', id: 'profile-from-now', disabled: !canEditProfiles(),
         attrs: { title: profile.switchesPluginItems ? 'Tick every skill, MCP server and agent that is on now' : 'Tick every skill, MCP server and agent of yours that is on now' },
         onclick: () => void saveProfileDef({ id: profile.id, items: [...all.filter(item => item.on), ...visiblePlugins.filter(pluginItemOn)].map(item => item.id) }, `${profile.name} now has what is on.`) })) : null,
-    findBar(shown.length + pluggedShown.length, all.length + visiblePlugins.length, !!primary), leftOutBand(),
+    findBar(shown.length + pluggedShown.length, all.length + visiblePlugins.length, !!primary), leftOutBand(), claudeBand(profile, visiblePlugins),
     !profile.switchesPluginItems ? choosePluginsBand(profile) : null,
     h('div.scroll.pf-scroll', { id: 'profile-scroll' }, shown.length || pluggedShown.length ? table(profile, shown, pluggedShown, plan)
       : h('p.pf-none', {}, find ? `Nothing matches “${find}”.` : !profile.switchesPluginItems && plugged.length ? 'Central Knot has no skills, MCP servers or agents of your own yet.' : 'Central Knot has no skills, MCP servers or agents yet, and no tool has one through a plugin.')));

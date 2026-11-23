@@ -12,7 +12,7 @@ import { readTool, writeEntry } from '../src/mcp.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { hashesOf, libraryWords, sentences } from '../src/libraryrow.ts';
 import { migrateProfiles } from '../src/profilemigrate.ts';
-import { allTurns, copilotKeptOnBy, copilotServerName, copilotSharesYours, entryTurns, homeItems, itemRowState, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, stillLoadAfter, switchable, switchPlan, switchPreview, takenWhole, turnsWords, undoInHome, undoOffered, undoPlan, undoTurns, wholeSaid, wholeWords, withCopilotOff, type Libraries, type PluginHome } from '../src/profileplan.ts';
+import { allTurns, copilotKeptOnBy, copilotServerName, copilotSharesYours, entryTurns, homeItems, itemRowState, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, stillLoadAfter, switchable, switchPlan, switchPreview, takenWhole, turnsWords, undoInHome, undoOffered, undoPlan, undoTurns, wholeSaid, wholeTurns, withCopilotOff, type Libraries, type PluginHome } from '../src/profileplan.ts';
 import { NO_PLUGINS, deleteProfile, readLibraries, readProfiles, saveProfile, saveProfiles, switchProfile, undoSwitch, type PluginSide } from '../src/profiles.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { pluginOnIn } from '../src/pluginrows.ts';
@@ -816,11 +816,11 @@ async function wholeHome({ enabled = true, parts = false, skills = ['a', 'b', 'c
 }
 const [aId, sId, gId] = [docsId('skill', 'a'), docsId('mcp', 's'), docsId('agent', 'g')];
 
-test('Claude Code takes a plugin whole: with docs off there, a profile that ticks a alone says first that b and c come on too, and the switch turns docs on there', async () => {
+test('Claude Code takes a plugin whole: with docs off there, a profile that ticks a alone counts first that docs comes on there, and the switch turns docs on there', async () => {
   const { box, made, preview, switched, settings } = await wholeHome({ enabled: false });
   try {
     const work = await made('Work', [aId]), before = await text(box, '.claude/settings.json');
-    assert.equal(await preview(work), 'Switching turns 1 item on. Also turns on 2 other skills of docs in Claude Code');
+    assert.equal(await preview(work), 'Switching turns 1 item on. Turns 1 plugin on in Claude Code');
     const done = await switched(work);
     assert.deepEqual([done.stopped, done.on, done.results, (await settings()).enabledPlugins], [undefined, ['a'], [], { 'docs@team': true }]);
     assert.equal(done.said, ' a is on in Claude Code. Its whole plugin docs was turned on there, with its 2 other skills.', 'the result, in the Library’s words');
@@ -832,11 +832,11 @@ test('Claude Code takes a plugin whole: with docs off there, a profile that tick
   } finally { await box.cleanup(); }
 });
 
-test('With docs on in Claude Code, a profile that ticks none of it says first that docs goes off there with everything it brings, a plugin installed since the profile was saved too; the switch turns it off', async () => {
+test('With docs on in Claude Code, a profile that ticks none of it counts first that docs goes off there, a plugin installed since the profile was saved too; the switch turns it off', async () => {
   const { box, made, preview, switched, settings } = await wholeHome({ notes: true });
   try {
     const quiet = await made('Quiet', ['skill:notes']);
-    assert.equal(await preview(quiet), 'Switching turns 3 items off. Turns docs off in Claude Code, with its 3 skills and everything else it brings there');
+    assert.equal(await preview(quiet), 'Switching turns 3 items off. Turns 1 plugin off in Claude Code');
     const done = await switched(quiet);
     assert.deepEqual([done.off, (await settings()).enabledPlugins, done.said], [['a', 'b', 'c'], { 'docs@team': false }, ' a is off in Claude Code. Its whole plugin docs was turned off there, with its 2 other skills.']);
   } finally { await box.cleanup(); }
@@ -850,14 +850,14 @@ test('A profile that ticks every skill of docs says nothing of other skills, and
   } finally { await box.cleanup(); }
 });
 
-test('A plugin of one skill goes on and off with it in Claude Code, and nothing is said of other skills', async () => {
+test('A plugin of one skill goes on and off with it in Claude Code, said before and after as any plugin is, with no other skill to name', async () => {
   const { box, made, preview, switched, settings } = await wholeHome({ enabled: false, skills: ['a'], notes: true });
   try {
     const work = await made('Work', ['skill:notes', aId]), quiet = await made('Quiet', ['skill:notes']);
-    assert.equal(await preview(work), 'Switching turns 1 item on');
-    assert.deepEqual([(await switched(work)).said, (await settings()).enabledPlugins], ['', { 'docs@team': true }]);
-    assert.equal(await preview(quiet), 'Switching turns 1 item off');
-    assert.deepEqual([(await switched(quiet)).said, (await settings()).enabledPlugins], ['', { 'docs@team': false }]);
+    assert.equal(await preview(work), 'Switching turns 1 item on. Turns 1 plugin on in Claude Code');
+    assert.deepEqual([(await switched(work)).said, (await settings()).enabledPlugins], [' a is on in Claude Code. Its whole plugin docs was turned on there.', { 'docs@team': true }]);
+    assert.equal(await preview(quiet), 'Switching turns 1 item off. Turns 1 plugin off in Claude Code');
+    assert.deepEqual([(await switched(quiet)).said, (await settings()).enabledPlugins], [' a is off in Claude Code. Its whole plugin docs was turned off there.', { 'docs@team': false }]);
   } finally { await box.cleanup(); }
 });
 
@@ -873,11 +873,11 @@ test('docs off, its server s off by its own switch: a profile that ticks a and s
   } finally { await box.cleanup(); }
 });
 
-test('docs off, a profile that ticks only its server s: docs comes on for it, with its three skills, as the preview says first', async () => {
+test('docs off, a profile that ticks only its server s: docs comes on for it, with its three skills, as the preview counts first', async () => {
   const { box, made, preview, switched, settings } = await wholeHome({ enabled: false, parts: true });
   try {
     const servers = await made('Servers', [sId]), profileNow = (await readProfiles(box.home)).profiles.find(each => each.id === servers)!;
-    assert.equal(await preview(servers), 'Switching turns 1 item on. Also turns on 3 skills of docs in Claude Code');
+    assert.equal(await preview(servers), 'Switching turns 1 item on. Turns 1 plugin on in Claude Code');
     assert.deepEqual(takenWhole(profileNow, (await sideNow(box)).view.pluginItems![0]!).brought.map(part => part.name), ['a', 'b', 'c']);
     const done = await switched(servers);
     assert.deepEqual([(await settings()).enabledPlugins, (await settings()).permissions?.deny, done.said], [{ 'docs@team': true }, ['Agent(docs:g)'], ' s is on in Claude Code. Its whole plugin docs was turned on there, with its 3 skills.']);
@@ -923,7 +923,7 @@ test('A plugin a profile leaves out goes off in Claude Code even when none of it
     const quiet = await made('Quiet', ['skill:notes']), before = await text(box, '.claude/settings.json');
     assert.deepEqual([await preview(quiet), await (await sideNow(box)).inUse()], ['Switching turns 1 plugin off in Claude Code', []]);
     const done = await switched(quiet);
-    assert.deepEqual([(await settings()).enabledPlugins, done.said, await (await sideNow(box)).inUse()], [{ 'docs@team': false }, ' docs was turned off in Claude Code, with everything it brings there.', ['Quiet']]);
+    assert.deepEqual([(await settings()).enabledPlugins, done.said, await (await sideNow(box)).inUse()], [{ 'docs@team': false }, ' The whole plugin docs was turned off in Claude Code.', ['Quiet']]);
     await undoSwitch(box.context, box.tools, done.event!, (await sideNow(box)).side);
     assert.equal(JSON.parse((await text(box, '.claude/settings.json'))!).enabledPlugins['docs@team'], JSON.parse(before!).enabledPlugins['docs@team']);
   } finally { await box.cleanup(); }
@@ -966,7 +966,7 @@ test('In use, the skills on in Claude Code with a ticked one are counted apart, 
 
 test('Nothing is done in Claude Code for a plugin only in Codex; an unreadable Claude Code copy is held, and nothing is written there', () => {
   const codexOnly = docsHome([docsIn('codex-cli')]), work = profile('Work', [pdfId]);
-  assert.deepEqual([pluginPlan(work, pluginLive(codexOnly)), wholeWords(work, pluginLive(codexOnly))], [[{ id: sheetId, on: [], off: ['codex-cli'], held: [] }], '']);
+  assert.deepEqual([pluginPlan(work, pluginLive(codexOnly)), wholeTurns(work, pluginLive(codexOnly))], [[{ id: sheetId, on: [], off: ['codex-cli'], held: [] }], []]);
   const unread = docsHome([docsIn('claude-cli', { items: [], problem: 'Unreadable.' }), docsIn('codex-cli')]);
   assert.deepEqual(pluginPlan(work, pluginLive(unread)).map(turn => [turn.id, turn.on, turn.off, turn.held.map(held => held.tool)]), [[pdfId, [], [], ['claude-cli']], [sheetId, [], ['codex-cli'], ['claude-cli']]]);
 });
@@ -1135,10 +1135,12 @@ test('An Undo’s History row counts all it put back, his own items and the plug
 const kitId = (kind: ItemKind, key: string) => `plugin:${kind}:kit@team/${key}`;
 const KIT_TRACKER = { command: 'npx', args: ['-y', 'tracker'] }, KIT_REVIEWER = { name: 'reviewer', description: 'Reviews a change.', prompt: 'You review changes.' };
 
-async function kitHome({ claude = true, codex = false, enabled = true, triage = 'The triage skill.', mine = 'codex-cli' as Three, shared = [] as string[], parts = false } = {}) {
+async function kitHome({ claude = true, codex = false, enabled = true, triage = 'The triage skill.', mine = 'codex-cli' as Three, shared = [] as string[], parts = false, sibling = false } = {}) {
   const box = await sandbox(['claude-cli', 'codex-cli']);
   const copyIn = async (folder: string) => {
     await putFile(join(folder, 'skills/triage/SKILL.md'), skillText(triage, 'triage'));
+    // With `sibling`, a second skill, sort, which a profile can tick to keep kit on in Claude Code while its triage goes off in Codex.
+    if (sibling) await putFile(join(folder, 'skills/sort/SKILL.md'), skillText('The sort skill.', 'sort'));
     await putFile(join(folder, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'kit', version: '1.0.0' }));
     await putFile(join(folder, '.codex-plugin/plugin.json'), JSON.stringify({ name: 'kit', version: '1.0.0', skills: './skills' }));
     if (!parts) return;
@@ -1244,7 +1246,7 @@ test('The plugin in Claude Code and Codex, his triage in Codex, a profile that l
   try {
     const quiet = await made('Quiet', ['skill:keep']);
     const both = '2 items off; 1 still loads from a copy of yours there, in Codex';
-    assert.equal(await preview('Quiet'), `Switching turns ${both}`);
+    assert.equal(await preview('Quiet'), `Switching turns ${both}. Turns 1 plugin off in Claude Code`);
     assert.equal(await result(quiet), `2 items turned off; ${both.split('; ').slice(1).join('; ')}`);
   } finally { await box.cleanup(); }
 });
@@ -1260,18 +1262,20 @@ async function triageRow(box: Box) {
 }
 
 test('The plugin in Claude Code and Codex, his triage in Codex, both turned off by a switch: his row says it is in Central Knot, Claude Code and Codex, and its tooltip says why of each', async () => {
-  const { box, made, result } = await kitHome({ codex: true });
+  const { box, made, result } = await kitHome({ codex: true, sibling: true });
   try {
-    await result(await made('Quiet', ['skill:keep', kitId('skill', 'triage')]));
+    // Quiet ticks kit's sort, so kit stays on in Claude Code with its triage; Codex turns its triage off by its own switch.
+    await result(await made('Quiet', ['skill:keep', kitId('skill', 'sort')]));
+    assert.match((await text(box, '.codex/config.toml'))!, /name = "kit:triage"\nenabled = false/);
     assert.deepEqual((await triageRow(box)).tag, { text: 'in Central Knot, Claude Code and Codex', title: 'Central Knot keeps this skill and its versions. '
       + 'Claude Code has it on through its plugin: its switch there, in the opened row, turns that off. Codex has a copy Central Knot didn’t put there, left alone while the skill is off.' });
   } finally { await box.cleanup(); }
 });
 
 test('The same, then his copy in Codex switched off by path in Codex’s own settings: Codex loads nothing, so his row says it is on in Claude Code only, through its plugin, as its tooltip does', async () => {
-  const { box, made, result } = await kitHome({ codex: true });
+  const { box, made, result } = await kitHome({ codex: true, sibling: true });
   try {
-    await result(await made('Quiet', ['skill:keep', kitId('skill', 'triage')]));
+    await result(await made('Quiet', ['skill:keep', kitId('skill', 'sort')]));
     await setDisabled(box.context, 'codex-cli', { folder: 'triage', name: 'triage', skillFile: join(folderOf(box, 'codex-cli', 'triage'), 'SKILL.md') }, true);
     assert.deepEqual((await triageRow(box)).tag, { text: 'on in Claude Code only, through its plugin',
       title: 'Central Knot keeps this skill and its versions. Claude Code has it on through its plugin: its switch there, in the opened row, turns that off.' });
@@ -1343,7 +1347,7 @@ test('An MCP server and an agent of his that the plugin brings alike in Claude C
     await made('Bare', ['skill:keep', 'skill:triage']);
     // Bare ticks nothing of kit, so kit goes off in Claude Code: his server and agent, and kit's skill, server and agent.
     assert.deepEqual([await preview('No tracker'), await preview('No reviewer'), await preview('Bare')], ['Switching turns 1 item off; 1 still loads through a plugin, in Claude Code',
-      'Switching turns 1 item off; 1 still loads through a plugin, in Claude Code', 'Switching turns 5 items off']);
+      'Switching turns 1 item off; 1 still loads through a plugin, in Claude Code', 'Switching turns 5 items off. Turns 1 plugin off in Claude Code']);
     assert.equal(await result(servers), '1 item turned off; 1 still loads through a plugin, in Claude Code');
   } finally { await box.cleanup(); }
 });
@@ -1859,7 +1863,7 @@ test('switchPreview gives the same line for the page header and both menus: mana
   assert.equal(switchPreview(profile('EmptyOld', [], false), liveList, plugs), '0 items. Plugin items stay as they are.');
   assert.equal(switchPreview(profile('EmptyNew', [], true), liveList, plugs), '0 items');
   // pdf and sheet turn off in Codex, and in Claude Code, which has no switch for one skill of a plugin, with the whole plugin.
-  assert.equal(switchPreview(profile('Modern', ['skill:notes'], true), liveList, plugs), 'Switching turns 1 item on and 3 off. Turns document-tools off in Claude Code, with its 2 skills and everything else it brings there');
+  assert.equal(switchPreview(profile('Modern', ['skill:notes'], true), liveList, plugs), 'Switching turns 1 item on and 3 off. Turns 1 plugin off in Claude Code');
   // notes on, pager off: Legacy is in use (other personal item off, plugin items left alone); Modern is not (plugin items still on).
   const notesOn = docsHome([docsIn('claude-cli'), docsIn('codex-cli')], [], [['skill', 'notes', true], ['skill', 'pager', false]]);
   assert.equal(switchPreview(legacy, homeItems(notesOn), pluginLive(notesOn)), 'In use · 1 item on, the other 1 of yours off. Plugin items stay as they are.');

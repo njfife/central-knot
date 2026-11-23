@@ -5,9 +5,9 @@
 //   `switchesPluginItems` is true each plugin copy wherever its tool has a switch for one item (pluginPlan).
 // - Claude Code has no switch for one skill of a plugin, so there a profile that chooses plugin items has a plugin on while it
 //   ticks any item the plugin brings there and off while it ticks none (takenWhole, the one rule; a skill it leaves out comes on
-//   with a ticked one: PluginTurn `along`). One run per plugin carries it out (wholeRuns: its MCP servers' and agents' own
-//   switches first, then the plugin's), whose steps History keeps for the Undo (`wholeSteps`, pluginUndo); said before by
-//   wholeWords and the Profiles page's rows, after by wholeSaid.
+//   with a ticked one: comesWith, PluginTurn `along`; the plugins a switch turns on or off there: wholeTurns). One run per plugin
+//   carries it out (wholeRuns: its MCP servers' and agents' own switches first, then the plugin's), whose steps History keeps for
+//   the Undo (`wholeSteps`, pluginUndo); said before by switchPreview and the Profiles page, after by wholeSaid.
 // - In Copilot CLI a plugin's MCP server and any other server of the exact same bare name are one switch (`disabledMcpServers`;
 //   while both his own and a plugin's are configured, Copilot CLI runs the plugin's). The same rule applies for each copy of a
 //   name from what the switch will leave configured: kept on when the profile names it or another live member (`copilotKeptOnBy`),
@@ -304,8 +304,14 @@ export function takenWhole(profile: Pick<Profile, 'items'>, install: InstalledPl
 /** The plugin a plugin's item comes from as Claude Code has it installed and could read, if it does: what takenWhole is asked of. */
 export const claudeInstall = (item: PluginLive): InstalledPlugin | undefined =>
   item.copies.flatMap(copy => (copy.tool === 'claude-cli' && copy.way !== 'unread' && 'install' in copy.target ? [copy.target.install] : []))[0];
-/** How many skills a plugin brings in a tool: with more than one in Claude Code, a switch says what goes on or off with one (wholeWords, wholeSaid). */
-const skillCount = (install: InstalledPlugin) => install.items.filter(part => part.kind === 'skill').length;
+/** Whether a plugin's skill comes on in Claude Code only with a ticked item of its plugin there, the profile leaving it out (takenWhole `brought`). */
+export const comesWith = (profile: Pick<Profile, 'items'>, item: PluginLive) => {
+  const install = claudeInstall(item);
+  return !!install && !profile.items.includes(item.id) && takenWhole(profile, install).brought.some(part => samePart(part, item));
+};
+/** Each plugin in Claude Code a switch to `profile` turns on or off there whole (takenWhole against its own switch now), whether or not an item of it changes. */
+export const wholeTurns = (profile: Pick<Profile, 'items' | 'switchesPluginItems'>, plugins: PluginLive[]) => (!profile.switchesPluginItems ? []
+  : [...new Set(plugins.map(claudeInstall))].filter((install): install is InstalledPlugin => !!install && (takenWhole(profile, install).ticked.length > 0) === !!install.off));
 
 /**
  * What a switch to a profile would do to one plugin's item: the tools it turns on (`on`), those it turns off (`off`), and
@@ -332,8 +338,8 @@ export function pluginPlan(profile: Pick<Profile, 'items' | 'switchesPluginItems
     });
   }
   return items.flatMap(item => {
-    const ticked = profile.items.includes(item.id);
-    const along = (copy: PluginCopy) => !ticked && copy.way === 'whole' && 'install' in copy.target && takenWhole(profile, copy.target.install).brought.some(part => samePart(part, item));
+    const ticked = profile.items.includes(item.id), brought = comesWith(profile, item);
+    const along = (copy: PluginCopy) => brought && copy.way === 'whole';
     const want = (copy: PluginCopy) => ticked || along(copy) || !!copilotKeptOnBy(profile, item, copy);
     const differ = item.copies.filter(copy => copy.way === 'unread' || (copy.way !== 'stays' && copy.on !== want(copy)));
     const turned = differ.filter(copy => copy.way === 'switch' || copy.way === 'whole'), tools = (copies: PluginCopy[]) => copies.map(copy => copy.tool);
@@ -347,27 +353,32 @@ export function pluginPlan(profile: Pick<Profile, 'items' | 'switchesPluginItems
 export interface WholeRun { copies: CopyTurn[]; ops: PluginOp[] }
 
 /**
- * How a switch carries out its turns in Claude Code (CopyTurn, from pluginPlan), one run per plugin there: while the profile ticks
- * any item of it (takenWhole), each MCP server's and agent's own switch toward its tick, then the plugin's own on (pluginplan.ts
- * batches runs them in that order, so nothing the profile leaves out loads meanwhile); while it ticks none, the plugin's own off,
- * the parts' switches left as they are. Each step only where Claude Code has it otherwise now.
+ * How a switch to a profile that switches plugin items carries out its turns in Claude Code (CopyTurn, from pluginPlan; `live`:
+ * pluginLive), one run per plugin there with a step to take: while the profile ticks any item of it (takenWhole), each MCP
+ * server's and agent's own switch toward its tick, then the plugin's own on (profiles.ts turnTogether runs the parts' first, and
+ * the plugin's only once they all went through, so nothing the profile leaves out loads meanwhile); while it ticks none, the
+ * plugin's own off, the parts' switches left as they are. Each step only where Claude Code has it otherwise now.
  */
-export function wholeRuns(profile: Pick<Profile, 'items'>, copies: CopyTurn[]): WholeRun[] {
-  const claude = copies.filter(turn => turn.copy.tool === 'claude-cli' && 'install' in turn.copy.target);
-  return [...groupBy(claude, turn => (turn.copy.target as PluginItemAt).install).entries()].map(([install, turns]) => {
-    const { ticked } = takenWhole(profile, install), on = ticked.length > 0;
+export function wholeRuns(profile: Pick<Profile, 'items' | 'switchesPluginItems'>, copies: CopyTurn[], live: PluginLive[]): WholeRun[] {
+  return !profile.switchesPluginItems ? [] : [...new Set(live.map(claudeInstall))].flatMap(install => {
+    if (!install) return [];
+    const { ticked } = takenWhole(profile, install), on = ticked.length > 0, turns = copies.filter(turn => 'install' in turn.copy.target && turn.copy.target.install === install);
     const at = { source: install.source ?? '', marketName: install.marketName, plugin: install.plugin, tool: install.tool };
     const parts = on ? install.items.filter(part => hasOwnSwitch(install.tool, part.kind) && itemOffNow(install, part) === ticked.includes(part)) : [];
-    return { copies: turns, ops: [...parts.map((part): PluginOp => ({ ...at, part: { kind: part.kind, name: part.name }, action: ticked.includes(part) ? 'part-on' : 'part-off' })),
-      ...(on === !!install.off ? [{ ...at, action: on ? 'plugin-on' as const : 'plugin-off' as const }] : [])] };
+    const ops = [...parts.map((part): PluginOp => ({ ...at, part: { kind: part.kind, name: part.name }, action: ticked.includes(part) ? 'part-on' : 'part-off' })),
+      ...(on === !!install.off ? [{ ...at, action: on ? 'plugin-on' as const : 'plugin-off' as const }] : [])];
+    return ops.length || turns.length ? [{ copies: turns, ops }] : [];
   });
 }
 
-/** Whether the plugins' items agree with a profile (their part of "in use"): a switch to it would turn none, and hold none. */
-export const pluginItemsAgree = (profile: Pick<Profile, 'items' | 'switchesPluginItems'>, items: PluginLive[]) => !pluginPlan(profile, items).length;
+/** Whether the plugins' items agree with a profile (their part of "in use"): a switch to it would turn none, hold none, and turn no plugin whole in Claude Code. */
+export const pluginItemsAgree = (profile: Pick<Profile, 'items' | 'switchesPluginItems'>, items: PluginLive[]) => !pluginPlan(profile, items).length && !wholeTurns(profile, items).length;
 
-/** One copy of a plugin's item to turn in one tool, toward `on`: a switch's (pluginPlan) or its Undo's (pluginUndo), as profiles.ts carries it out. */
-export interface CopyTurn { item: PluginLive; copy: PluginCopy; on: boolean }
+/**
+ * One copy of a plugin's item to turn in one tool, toward `on`: a switch's (pluginPlan) or its Undo's (pluginUndo), as profiles.ts
+ * carries it out; `along`, one that comes on in Claude Code only with its whole plugin (PluginTurn `along`), which no count takes in.
+ */
+export interface CopyTurn { item: PluginLive; copy: PluginCopy; on: boolean; along?: true }
 
 /** The live library item ids that will be On once an Undo's `turns` run. */
 export const onAfterUndo = (live: LiveItem[], turns: Turns) => new Set(live.filter(item => (item.on && !turns.off.includes(item)) || turns.on.includes(item)).map(item => item.id));
@@ -380,29 +391,29 @@ const asLeft = (install: InstalledPlugin, steps: PluginOp[]) => !install.off ===
  * What the Undo of a switch's History entry turns back of the plugins' items (HistoryEvent profile `plugins`), decided from each
  * copy now: each still as the switch left it, still the plugin's and still turned by its own switch there goes back (`back`),
  * unless putting a Copilot CLI rule back would turn off a server of his there now (`afterOn` or found: `keptOff`); each other
- * is left (`left`), with why (`gone`, or changed since). A copy in Claude Code turned with its whole plugin (the entry's
- * `wholeSteps`) goes back with that plugin's steps reversed, one run (`whole`), while the plugin is as they left it (asLeft).
+ * is left (`left`), with why (`gone`, or changed since). Each plugin in Claude Code the switch's steps turned (the entry's
+ * `wholeSteps`) goes back with those steps reversed, one run with its copies (`whole`), while it is as they left it (asLeft).
  */
 export function pluginUndo(event: Pick<HistoryEvent, 'profile'>, items: PluginLive[], afterOn?: ReadonlySet<string>): { back: CopyTurn[]; whole: WholeRun[]; left: { copy: PluginSwitched; why: string }[]; keptOff: string[] } {
-  const back: CopyTurn[] = [], left: { copy: PluginSwitched; why: string }[] = [], keptOff: string[] = [], whole = new Map<InstalledPlugin, WholeRun>();
+  const back: CopyTurn[] = [], left: { copy: PluginSwitched; why: string }[] = [], keptOff: string[] = [];
   const afterProfile = { items: [...(afterOn ?? [])], switchesPluginItems: true };
+  const installs = items.flatMap(item => item.copies.flatMap(copy => (copy.tool === 'claude-cli' && 'install' in copy.target ? [copy.target.install] : [])));
+  const runs = [...groupBy(event.profile?.wholeSteps ?? [], op => `${op.tool}\u0000${op.marketName}\u0000${op.plugin}`).values()].map(steps => {
+    const install = installs.find(each => each.tool === steps[0]!.tool && each.plugin === steps[0]!.plugin && each.marketName === steps[0]!.marketName);
+    return { steps, install, asLeft: !!install && !install.problem && asLeft(install, steps), run: { copies: [] as CopyTurn[], ops: opposites(steps) } };
+  });
   for (const done of event.profile?.plugins ?? []) {
     const item = items.find(each => each.id === done.id), copy = item?.copies.find(each => each.tool === done.tool);
-    const steps = (event.profile?.wholeSteps ?? []).filter(op => op.tool === done.tool && op.plugin === item?.plugin && op.marketName === item.marketName);
-    if (steps.length) {
-      const install = copy && copy.way !== 'unread' && 'install' in copy.target ? copy.target.install : undefined;
-      if (!install || !asLeft(install, steps)) { left.push({ copy: done, why: copy?.way === 'unread' ? 'its copy couldn’t be read' : 'changed since the switch' }); continue; }
-      back.push({ item: item!, copy: copy!, on: !done.on });
-      (whole.get(install) ?? whole.set(install, { copies: [], ops: opposites(steps) }).get(install)!).copies.push(back.at(-1)!);
-      continue;
-    }
-    const kept =done.on && copy?.way === 'switch' && copy.on && copy.tool === 'copilot-cli' && item?.kind === 'mcp' ? copilotKeptOnBy(afterProfile, item, copy) : undefined;
+    const mine = runs.find(({ steps: [op] }) => op!.tool === done.tool && op!.plugin === item?.plugin && op!.marketName === item.marketName);
+    if (mine?.asLeft && item && copy) { back.push({ item, copy, on: !done.on, ...(done.along ? { along: true as const } : {}) }); mine.run.copies.push(back.at(-1)!); continue; }
+    if (mine) { left.push({ copy: done, why: mine.install?.problem ? 'its copy couldn’t be read' : 'changed since the switch' }); continue; }
+    const kept = done.on && copy?.way === 'switch' && copy.on && copy.tool === 'copilot-cli' && item?.kind === 'mcp' ? copilotKeptOnBy(afterProfile, item, copy) : undefined;
     if (done.on && copy?.gone) left.push({ copy: done, why: 'deleted by hand since' });
     else if (kept?.by === 'own' || kept?.by === 'found') { if (!keptOff.includes(item!.name)) keptOff.push(item!.name); }
     else if (item && copy?.way === 'switch' && copy.on === done.on) back.push({ item, copy, on: !done.on });
     else left.push({ copy: done, why: 'changed since the switch' });
   }
-  return { back, whole: [...whole.values()], left, keptOff };
+  return { back, whole: runs.filter(each => each.asLeft).map(each => each.run), left, keptOff };
 }
 
 /** Whether a plugin's item is on for "Start from what’s on now": on in some tool that switches it; where no tool does, in any tool. */
@@ -411,12 +422,17 @@ export function pluginItemOn(item: PluginLive): boolean {
   return (switched.length ? switched : item.copies).some(copy => copy.on);
 }
 
-/** What an in-use profile's Now column says for a plugin's item (profilespage.ts). */
-export function pluginRowState(profile: Pick<Profile, 'items' | 'switchesPluginItems'>, item: PluginLive): 'On' | 'Off' | 'Off · on in Copilot CLI' {
+/**
+ * What an in-use profile's Now column says for a plugin's item (profilespage.ts): On or Off where the tools that switch it for this
+ * item alone have it; "Off · on in Copilot CLI" or "… in Claude Code" where it is on there only by another server of its name or
+ * with its whole plugin.
+ */
+export function pluginRowState(profile: Pick<Profile, 'items' | 'switchesPluginItems'>, item: PluginLive): 'On' | 'Off' | `Off · on in ${string}` {
   const switched = item.copies.filter(copy => copy.way === 'switch');
   const own = switched.filter(copy => !copilotKeptOnBy(profile, item, copy));
   if (!switched.length || !own.length || own.some(copy => copy.on)) return pluginItemOn(item) ? 'On' : 'Off';
-  return switched.some(copy => copy.on) ? 'Off · on in Copilot CLI' : 'Off';
+  const elsewhere = item.copies.find(copy => copy.on && (copy.way === 'whole' || switched.includes(copy)));
+  return elsewhere ? `Off · on in ${toolNames[elsewhere.tool]}` : 'Off';
 }
 
 /** What a library item's row tooltip says for its state now (`profilespage.ts`; `switchPlan` puts any `copilotOff` item under Turns on or Turns off, so the Now column never sees it). */
@@ -440,8 +456,8 @@ export function heldWords(plan: PluginTurn[], items: PluginLive[]): { text: stri
   return { text: parts.join('; '), off: [...off.values()][0] };
 }
 
-/** Plugin items' copies counted as items, one per item, toward `on`: a copy turned in two tools is one item. */
-const itemsToward = <Copy extends { id: string; on: boolean }>(copies: Copy[], on: boolean) => [...new Map(copies.filter(copy => copy.on === on).map(copy => [copy.id, copy])).values()];
+/** Plugin items' copies counted as items, one per item, toward `on`: a copy turned in two tools is one item; one that came on only with its whole plugin (`along`) is none. */
+const itemsToward = <Copy extends { id: string; on: boolean; along?: true }>(copies: Copy[], on: boolean) => [...new Map(copies.filter(copy => copy.on === on && !copy.along).map(copy => [copy.id, copy])).values()];
 
 /** What a switch, or its Undo, changes: the items it turns On, and those it turns Off. */
 export interface Turns { on: LiveItem[]; off: LiveItem[] }
@@ -467,7 +483,8 @@ export const switchable = (profile: Pick<Profile, 'items' | 'switchesPluginItems
  * of the plugins' items (`plugins`: pluginLive; pluginItemsAgree). A copy that `stays` (a plugin's agent in Copilot CLI) is left
  * out of that, so two profiles that differ only by such an item are both in use. In Claude Code a plugin is on or off whole
  * (takenWhole): a profile that ticks one of its skills stops being in use when the plugin is turned off there by hand, and is in
- * use again once it is back on; two that tick different items of it are both in use while it is on.
+ * use again once it is back on; two that tick different skills of it are both in use while it is on, as long as neither leaves out
+ * an MCP server or agent of it that is on there by its own switch.
  */
 export const inUse = (profiles: Profile[], live: LiveItem[], plugins: PluginLive[]) => profiles.filter(profile => !changes(switchPlan(profile, live)) && pluginItemsAgree(profile, plugins));
 
@@ -549,7 +566,7 @@ export function entryTurns(was: NonNullable<HistoryEvent['profile']>) {
 
 /** What the Undo of a switch's entry will turn back, each item once: its library items (undoPlan), uncovered Copilot CLI rules (`copilotUndo`) and plugins' items (pluginUndo). */
 export function undoTurns(event: Pick<HistoryEvent, 'profile'>, live: LiveItem[], plugins: PluginLive[], mcp: Pick<HomeView['mcp'], 'items' | 'library'> = { items: [], library: {} }) {
-  const library = undoPlan(event, live), afterOn = onAfterUndo(live, library), back = pluginUndo(event, plugins, afterOn).back.map(turn => ({ id: turn.item.id, on: turn.on }));
+  const library = undoPlan(event, live), afterOn = onAfterUndo(live, library), back = pluginUndo(event, plugins, afterOn).back.map(turn => ({ id: turn.item.id, on: turn.on, ...(turn.along ? { along: turn.along } : {}) }));
   const rules = copilotUndo(event, mcp.items, mcp.library, afterOn).back.filter(rule => !library.off.some(item => item.id === rule.id));
   return { on: [...library.on, ...itemsToward(back, true)], off: [...library.off, ...rules, ...itemsToward(back, false)] };
 }
@@ -560,8 +577,8 @@ export function undoInHome(event: Pick<HistoryEvent, 'profile'>, home: PluginHom
   return undoTurns(event, homeItems(home, plugins), plugins, home.mcp);
 }
 
-/** Whether Undo is offered for a profile entry in `home`: true only while at least one item, plugin copy or Copilot CLI rule can be turned back (shared by the header and History). */
-export const undoOffered = (event: Pick<HistoryEvent, 'profile'>, home: PluginHome): boolean => changes(undoInHome(event, home)) > 0;
+/** Whether Undo is offered for a profile entry in `home`: true only while at least one item, plugin copy, Copilot CLI rule or plugin in Claude Code can be turned back (shared by the header and History). */
+export const undoOffered = (event: Pick<HistoryEvent, 'profile'>, home: PluginHome): boolean => changes(undoInHome(event, home)) > 0 || pluginUndo(event, pluginLive(home)).whole.length > 0;
 
 /**
  * A plan's counts in words: what it will do ("turns 2 items on and 5 off") or did ("2 items turned on and 5 turned off"); ''
@@ -589,45 +606,38 @@ export function pluginStayNote(plugs: PluginTurn[], plugins: PluginLive[]): stri
  * items, `pluginStayNote` sits beside it.
  */
 export function switchPreview(profile: Profile, live: LiveItem[], plugins: PluginLive[]): string {
-  const turns = switchPlan(profile, live), plugs = pluginPlan(profile, plugins), counted = allTurns(turns, plugs);
+  const turns = switchPlan(profile, live), plugs = pluginPlan(profile, plugins), counted = allTurns(turns, plugs), whole = wholeTurns(profile, plugins);
   const keep = profile.switchesPluginItems ? '' : `. ${pluginStayNote(plugs, plugins)}`;
   const count = namedCount(profile, live, plugins);
-  if (!changes(turns) && !plugs.length) {
-    const others = live.length + (profile.switchesPluginItems ? plugins.length : 0) - count;
+  if (!changes(turns) && !plugs.length && !whole.length) {
+    // In Claude Code a skill left out is on while its plugin is (comesWith): counted apart, not among those off.
+    const brought = plugins.filter(item => comesWith(profile, item)), others = live.length + (profile.switchesPluginItems ? plugins.length : 0) - count - brought.length;
+    const one = new Set(brought.map(item => `${item.plugin}@${item.marketName}`)).size === 1;
+    const more = brought.length ? `, ${brought.length} more on in Claude Code with ${brought.length === 1 ? 'its' : 'their'} plugin${one ? '' : 's'}` : '';
     const rest = !others ? '' : profile.switchesPluginItems ? `, the other ${others} off wherever they can be switched` : `, the other ${others} of yours off`;
-    return `In use · ${plural(count, 'item')} on${rest}${keep}`;
+    return `In use · ${plural(count, 'item')} on${more}${rest}${keep}`;
   }
   if (!count) return `0 items${keep}`;
   const kept = stillLoadWords(turns.off.map(item => keptOn(item, plugs)), plugs.filter(turn => turn.off.length).map(turn => keptOn(plugins.find(item => item.id === turn.id)!, plugs)));
-  return changes(counted) ? `Switching ${turnsWords(counted, 'will')}${kept}${wholeWords(profile, plugins)}${keep}` : `Not in use · ${heldWords(plugs, plugins).text}`;
-}
-
-/**
- * After switchPreview's count, what a switch to `profile` does to each plugin it turns on or off whole in Claude Code
- * (takenWhole) with more than one skill there (one skill's switch is the plugin's), a sentence each: ". Also turns on 2 other
- * skills of docs in Claude Code" (its skills the profile leaves out), ". Turns docs off in Claude Code, with its 3 skills and
- * everything else it brings there" (its hooks and commands stop too); '' for none.
- */
-export function wholeWords(profile: Pick<Profile, 'items' | 'switchesPluginItems'>, plugins: PluginLive[]): string {
-  if (!profile.switchesPluginItems) return '';
-  return [...new Set(plugins.map(claudeInstall))].flatMap(install => {
-    if (!install || skillCount(install) < 2) return [];
-    const { ticked, brought } = takenWhole(profile, install), other = ticked.some(part => part.kind === 'skill') ? 'other skill' : 'skill';
-    if (!ticked.length) return install.off ? [] : [`. Turns ${install.plugin} off in Claude Code, with its ${skillCount(install)} skills and everything else it brings there`];
-    return install.off && brought.length ? [`. Also turns on ${plural(brought.length, other)} of ${install.plugin} in Claude Code`] : [];
-  }).join('');
+  // The plugins it turns whole in Claude Code (wholeTurns), counted, a sentence for each direction; the Profiles page names them.
+  const inClaude = (on: boolean, count = whole.filter(install => !!install.off === on).length) => (count ? `turns ${plural(count, 'plugin')} ${on ? 'on' : 'off'} in Claude Code` : '');
+  const said = [changes(counted) ? `${turnsWords(counted, 'will')}${kept}` : '', inClaude(true), inClaude(false)].filter(Boolean);
+  if (!said.length) return `Not in use · ${heldWords(plugs, plugins).text}`;
+  return `Switching ${said.map((sentence, at) => (at ? sentence.charAt(0).toUpperCase() + sentence.slice(1) : sentence)).join('. ')}${keep}`;
 }
 
 /**
  * What a switch's result adds for each plugin whose whole switch in Claude Code its steps turned (HistoryEvent profile
- * `wholeSteps`), with more than one skill there, in the Library's words (pluginswitch.ts itemSaid), read from the view after it
- * (`home`): " a is on in Claude Code. Its whole plugin docs was turned on there, with its 2 other skills."; '' for none.
+ * `wholeSteps`), in the Library's words (pluginswitch.ts itemSaid) where an item it asked for came or went with it, read from the
+ * view after it (`home`): " a is on in Claude Code. Its whole plugin docs was turned on there, with its 2 other skills."; else
+ * " The whole plugin docs was turned off in Claude Code."; '' for none.
  */
 export function wholeSaid(entry: NonNullable<HistoryEvent['profile']>, home: PluginHome): string {
   const steps = entry.wholeSteps ?? [];
   return steps.filter(op => isWhole(op.action)).flatMap(op => {
     const on = op.action === 'plugin-on', install = home.pluginItems?.find(each => each.tool === op.tool && each.plugin === op.plugin && each.marketName === op.marketName);
-    const part = install?.items.find(each => entry.plugins?.some(copy => copy.tool === op.tool && copy.on === on && copy.id === pluginItemId(each.kind, pluginItemKey(install, each))));
-    return install && part && skillCount(install) > 1 ? [` ${itemSaid({ kind: part.kind, name: part.name, tool: op.tool, install }, on, steps)}`] : [];
+    const part = install?.items.find(each => entry.plugins?.some(copy => !copy.along && copy.tool === op.tool && copy.on === on && copy.id === pluginItemId(each.kind, pluginItemKey(install, each))));
+    if (!install) return [];
+    return [` ${part ? itemSaid({ kind: part.kind, name: part.name, tool: op.tool, install }, on, steps) : `The whole plugin ${op.plugin} was turned ${on ? 'on' : 'off'} in Claude Code.`}`];
   }).join('');
 }

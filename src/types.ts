@@ -1446,7 +1446,7 @@ export interface SwitchedItem { id: string; name: string }
  * name then, the tool, and what the switch turned it to (`on`); it was the other before. A copy placed in Pi and OpenCode is its
  * library item turned once, kept as one of these for each tool it is in.
  */
-export interface PluginSwitched { id: string; name: string; tool: HarnessId; on: boolean }
+export interface PluginSwitched { id: string; name: string; tool: HarnessId; on: boolean; /** Came on in Claude Code only with its whole plugin, the profile leaving it out (profileplan.ts comesWith): no count takes it in. */ along?: true }
 
 /**
  * What a switch did: the profile's name, the items it turned On and Off and those not as it asked once its passes ran (`left`:

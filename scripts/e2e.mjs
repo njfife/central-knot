@@ -12676,7 +12676,7 @@ async function profilePluginsFlow() {
   same('with everything on, Work is in use', [(await a.text('#status-profile'))?.trim(), await a.text('.profile-header p')], ['Work', 'In use · 2 items on']);
   await newProfile(a, 'Quiet');
   await a.click(byId(`pf-${issuesId}`)); await done();
-  const keptOnNote = 'Comes on in Claude Code with issues (issue-tracker is whole there).';
+  const keptOnNote = 'Comes on in Claude Code too, with issues.';
   same('before the click: Quiet turns triage off where it can, and its row says, under its name and not in a tooltip, that it is on in Claude Code with issues, and why; issues has no change; the header counts triage as still loading there',
     [await a.text(`${row(triageId)} .pf-state`), await a.run(`document.querySelector('${row(triageId)} .pf-state').title`), await a.all(`${row(triageId)} .pf-note`, 'e.textContent'), await a.text(`${row(issuesId)} .pf-state`), await a.text('.profile-header p')],
     ['Turns off in Codex and Pi', '', [keptOnNote], 'No change', 'Switching turns 1 item off; 1 stays on in Claude Code, through its plugin']);
@@ -12689,12 +12689,12 @@ async function profilePluginsFlow() {
   same('Codex’s rule turns triage alone off, the plugin left on; Pi’s copy is out; Claude Code’s settings are as they were', files(),
     { codex: `${codexBefore}\n[[skills.config]]\nname = "issue-tracker:triage"\nenabled = false\n`, claude: before.claude, pi: undefined });
   same('Quiet is in use, said with what it can switch; triage’s row still says it is on in Claude Code with issues', [(await a.text('#status-profile'))?.trim(), await a.text('.profile-header p'), await a.text(`${row(triageId)} .pf-state`), await a.all(`${row(triageId)} .pf-note`, 'e.textContent')],
-    ['Quiet', 'In use · 1 item on, the other 1 off wherever they can be switched', 'Off', [keptOnNote]]);
+    ['Quiet', 'In use · 1 item on, 1 more on in Claude Code with its plugin', 'Off · on in Claude Code', [keptOnNote]]);
   check('the result says what it turned off and, read again, that Claude Code still loads it, with Undo switch', /^Switched to Quiet: 1 item turned off; 1 stays on in Claude Code, through its plugin\./.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-undo'), await a.text('.bands'));
   if (a.inspect) {
     const menu = await mainHelpers(a.inspect);
     // A click on the profile in use changes nothing (main.ts switchFromMenu), so finding the ticked Quiet is a look, not a switch.
-    try { check('the menu bar’s Profile menu ticks Quiet, from the same read as the page', await menu.clickMenu('Quiet · In use · 1 item on, the other 1 off wherever they can be switched', true) >= 1); } finally { menu.close(); }
+    try { check('the menu bar’s Profile menu ticks Quiet, from the same read as the page', await menu.clickMenu('Quiet · In use · 1 item on, 1 more on in Claude Code with its plugin', true) >= 1); } finally { menu.close(); }
   } else console.log('No main-process inspector: skipping the menu bar’s Profile menu.');
   // Codex turned back by hand first: the Undo puts Pi's copy back, leaves Codex, and says so once.
   writeFileSync(config, codexBefore);
@@ -12954,7 +12954,7 @@ async function profilePluginsFlow() {
     [!(readNow(oldCodexCfg) ?? '').includes('name = "issue-tracker:triage"'), !(JSON.parse(readNow(oldCopilotSettings)).disabledSkills ?? []).includes('issue-tracker:triage'),
       (readNow(oldCodexCfg) ?? '').includes('[plugins."issue-tracker@ck-test-market".mcp_servers.issues]\nenabled = false')], [true, true, true]);
   await b.click(byId(`pf-${triageId}`)); await bDone();
-  same('unticking triage (keeping notes ticked) counts 1 item turning off before Switch: issue-tracker, nothing of it ticked now, goes off whole in Claude Code', await b.text('.profile-header p'), 'Switching turns 1 item off');
+  same('unticking triage (keeping notes ticked) counts 1 item turning off before Switch: issue-tracker, nothing of it ticked now, goes off whole in Claude Code', await b.text('.profile-header p'), 'Switching turns 1 item off. Turns 1 plugin off in Claude Code');
   await b.click('#profile-switch'); await bDone();
   same('switching with triage unticked turns triage off in both Codex and Copilot CLI, and issue-tracker off in Claude Code, and format 3 keeps the flag',
     [(readNow(oldCodexCfg) ?? '').includes('name = "issue-tracker:triage"\nenabled = false'), (JSON.parse(readNow(oldCopilotSettings)).disabledSkills ?? []).includes('issue-tracker:triage'),
@@ -13000,7 +13000,7 @@ async function profilePluginsFlow() {
     };
   })()`);
   same('mixed status menu shows one profile of each kind, keeps the in-use row full contrast and matching summary colour', mixedMenu,
-    { inUseChecked: 'true', inUseOpacity: '1', inUsePreview: 'In use · 1 item on. Plugin items stay as they are.', otherPreview: 'Switching turns 1 item on', samePreviewColor: true });
+    { inUseChecked: 'true', inUseOpacity: '1', inUsePreview: 'In use · 1 item on. Plugin items stay as they are.', otherPreview: 'Switching turns 1 item on. Turns 1 plugin on in Claude Code', samePreviewColor: true });
   if (shots) await b.shot('old-profile-menu-mixed-1316');
   await b.click('#status-profile');
   await fullSize(b);
@@ -13331,19 +13331,24 @@ async function heldWholeInstallsPage() {
  * clicks, one on each, turn each its own; and a profile that ticks one and not the other leaves each tool's file as it says.
  */
 /**
- * In Claude Code a profile turns a plugin on or off whole (profileplan.ts takenWhole), there being no switch for one of its skills:
- * writing-kit, installed there with the skills brainstorm, outline and write, off. Writing ticks his notes and write: before the
- * switch its header and the status bar's menu say brainstorm and outline come on too, write's row names them, and each is set in
- * beneath it saying what it comes on with, its own box adding it (examples 1 and 6 of the brief); the switch turns writing-kit on
- * there, said in the Library's words. Quiet ticks his notes alone: before, the header says writing-kit goes off there with
- * everything it brings; the switch turns it off, and its Undo on again. Pictures of each preview and result at 860 and 1316 wide.
+ * In Claude Code a profile turns a plugin on or off whole (profileplan.ts takenWhole), there being no switch for one of its skills,
+ * and the Profiles page says so plainly (profilespage.ts claudeBand). Three plugins installed there and on: writing-kit (brainstorm,
+ * outline and write), solo (one skill) and tracker-kit (an MCP server and a hook). Mine ticks his notes alone: before the switch the
+ * page says the rule once and names all three as turning off there, with what goes with each, the header and the status bar's menu
+ * count them; the switch turns them off, each said in the result. Writing ticks his notes and write: the page names writing-kit as
+ * coming on with brainstorm and outline, set in beneath write saying what they come on with; the switch turns it on; its Undo
+ * puts it back off. Pictures of each preview and result at 860 and 1316 wide, light and dark.
  */
 async function claudeWholeFlow() {
   const home = join(scratch, 'home-claude-whole'), data = join(scratch, 'claude-whole-data'), tools = join(scratch, 'tools-claude-whole');
   const md = (name, what) => `---\nname: ${name}\ndescription: ${what}\n---\n\n${what}\n`;
   writeClaudeInstall(home, 'ck-test-market', 'writing-kit', '1.0.0', Object.fromEntries([['brainstorm', 'Lists ideas.'], ['outline', 'Orders them.'], ['write', 'Writes a first draft.']].map(([name, what]) => [`skills/${name}/SKILL.md`, md(name, what)])));
-  const settings = join(home, '.claude/settings.json'), enabled = () => JSON.parse(readNow(settings)).enabledPlugins['writing-kit@ck-test-market'];
-  writeFileSync(settings, `${JSON.stringify({ enabledPlugins: { 'writing-kit@ck-test-market': false } }, null, 2)}\n`);
+  writeClaudeInstall(home, 'ck-test-market', 'solo', '1.0.0', { 'skills/single/SKILL.md': md('single', 'Does one thing.') });
+  writeClaudeInstall(home, 'ck-test-market', 'tracker-kit', '1.0.0', { '.mcp.json': JSON.stringify({ mcpServers: { tracker: { command: 'npx', args: ['tracker'] } } }),
+    'hooks/hooks.json': JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'true' }] }] } }) });
+  const ids = ['writing-kit', 'solo', 'tracker-kit'].map(plugin => `${plugin}@ck-test-market`), settings = join(home, '.claude/settings.json');
+  const enabled = () => ids.map(id => JSON.parse(readNow(settings)).enabledPlugins[id]);
+  writeFileSync(settings, `${JSON.stringify({ enabledPlugins: Object.fromEntries(ids.map(id => [id, true])) }, null, 2)}\n`);
   mkdirSync(join(home, '.claude/skills/notes'), { recursive: true });
   writeFileSync(join(home, '.claude/skills/notes/SKILL.md'), md('notes', 'Takes notes.'));
   claudeCli(tools);
@@ -13352,47 +13357,63 @@ async function claudeWholeFlow() {
   const a = await launch(data, [], tools);
   const done = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
   const id = name => `plugin:skill:writing-kit@ck-test-market/${name}`, row = name => `.pf-row[data-item="${id(name)}"]`, notes = async name => a.all(`${row(name)} .pf-note`, 'e.textContent');
-  const pictures = async name => { if (!shots) return; for (const [width, height] of [SMALLEST, [1316, 819]]) { await sizeTo(a, width, height); await a.shot(`${name}-${width}`); } await fullSize(a); };
+  const band = async () => [await a.text('#profile-claude .band-text'), await a.all('#profile-claude li', 'e.textContent')];
+  const rule = 'Claude Code takes a plugin whole: it is on there while any of its items is ticked, and off while none is.';
+  const pictures = async name => {
+    if (!shots) return;
+    for (const theme of ['light', 'dark']) {
+      await a.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+      for (const [width, height] of [SMALLEST, [1316, 819]]) { await sizeTo(a, width, height); await a.shot(`${name}-${theme}-${width}`); }
+    }
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    await fullSize(a);
+  };
   same('his notes taken in', await a.run(`window.centralKnot.applySkills([{ key: 'notes', on: true, except: [] }], false, ${JSON.stringify(home)}).then(result => result.stopped ?? 'ok')`), 'ok');
   await a.click('#nav-profiles');
   await a.click('#header-refresh');
+
+  await newProfile(a, 'Mine');
+  await a.click(byId('pf-skill:notes')); await done();
+  const [ruleShown, offLines] = await band();
+  same('before Mine (his own items alone), the page says the rule once and names each plugin turning off in Claude Code, the one-skill and the skill-less ones too, with what goes with each; the header counts them',
+    [ruleShown.startsWith(rule), [...offLines].sort(), await a.text('.profile-header p')],
+    [true, ['solo off, with its 1 skill and everything else it brings there', 'tracker-kit off, with its 1 MCP server and everything else it brings there', 'writing-kit off, with its 3 skills and everything else it brings there'],
+      'Switching turns 5 items off. Turns 3 plugins off in Claude Code']);
+  await a.click('#status-profile');
+  same('the status bar’s menu counts them in one sentence', (await a.all('.pf-menu-preview', 'e.textContent')).includes('Switching turns 5 items off. Turns 3 plugins off in Claude Code'), true);
+  await a.click('#status-profile');
+  await pictures('claude-whole-mine-preview');
+  await fitsAtMinimum(a, 'a profile that turns three plugins off in Claude Code, each named');
+  await a.click('#profile-switch'); await done();
+  const mineSaid = await a.text('.band-done .band-text') ?? '';
+  check('the switch turns all three off there, and its result names each', enabled().every(on => on === false) && mineSaid.startsWith('Switched to Mine: 5 items turned off.')
+    && ['writing-kit', 'solo', 'tracker-kit'].every(plugin => mineSaid.includes(`Its whole plugin ${plugin} was turned off there`)), [enabled(), mineSaid]);
+  await pictures('claude-whole-mine-result');
+
   await newProfile(a, 'Writing');
   for (const box of ['pf-skill:notes', `pf-${id('write')}`]) { await a.click(byId(box)); await done(); }
-  const comes = 'Comes on in Claude Code with write (writing-kit is whole there).';
-  same('example 1, before the switch: the header says brainstorm and outline come on too; write names them, and each is set in beneath it, saying what it comes on with',
-    [await a.text('.profile-header p'), await a.all('.pf-row[data-item^="plugin:"]', 'e.dataset.item'), await a.all('.pf-row.pf-beneath', 'e.dataset.item'),
+  const comes = 'Comes on in Claude Code too, with write.';
+  same('before Writing: the page names writing-kit coming on with brainstorm and outline; write names them, each set in beneath it saying what it comes on with, its box its own; the header counts one plugin',
+    [await band(), await a.text('.profile-header p'), await a.all('.pf-row[data-item^="plugin:skill:writing-kit"]', 'e.dataset.item'), await a.all('.pf-row.pf-beneath', 'e.dataset.item'),
       await notes('write'), await notes('brainstorm'), await notes('outline'), await a.text(`${row('outline')} .pf-state`), await a.run(`document.querySelector('${row('outline')} input').checked`)],
-    ['Switching turns 1 item on. Also turns on 2 other skills of writing-kit in Claude Code', [id('write'), id('brainstorm'), id('outline')], [id('brainstorm'), id('outline')],
-      ['Brings brainstorm and outline on in Claude Code.'], [comes], [comes], 'Turns on', false]);
-  await a.click('#status-profile');
-  same('the status bar’s menu says the same', (await a.all('.pf-menu-preview', 'e.textContent')).includes('Switching turns 1 item on. Also turns on 2 other skills of writing-kit in Claude Code'), true);
-  await a.click('#status-profile');
+    [[rule + 'Switching turns, in Claude Code:writing-kit on, with brainstorm and outline too', ['writing-kit on, with brainstorm and outline too']], 'Switching turns 1 item on. Turns 1 plugin on in Claude Code',
+      [id('write'), id('brainstorm'), id('outline')], [id('brainstorm'), id('outline')], ['Brings brainstorm and outline on in Claude Code.'], [comes], [comes], 'Turns on', false]);
+  same('a brought row’s box says what a switch does to it in Claude Code, and off elsewhere', await a.run(`document.querySelector('${row('brainstorm')} label').title`),
+    'Not in Writing: switching to it turns brainstorm off in each tool that can switch it, except Claude Code, where it comes on with its plugin. Click to put it in.');
   // Find showing write alone: its own row still names what it brings.
   await a.run(`(() => { const input = document.querySelector('#profile-find'); input.value = 'write'; input.dispatchEvent(new Event('input', { bubbles: true })); })()`); await a.settle();
   same('with Find on write alone, its row still names brainstorm and outline', [await a.all('.pf-row[data-item^="plugin:"]', 'e.dataset.item'), await notes('write')], [[id('write')], ['Brings brainstorm and outline on in Claude Code.']]);
   await a.click('#profile-find-clear'); await a.settle();
-  await pictures('claude-whole-1-preview');
-  await fitsAtMinimum(a, 'a profile whose ticked skill brings its plugin’s others on in Claude Code');
+  await pictures('claude-whole-writing-preview');
   await a.click('#profile-switch'); await done();
   // What Claude Code needs to pick the plugin up (reload.ts) may follow the result's sentences.
   const result = await a.text('.band-done .band-text');
-  check('the switch turns writing-kit on in Claude Code, and its result says so in the Library’s words, with Undo', enabled() === true && await a.exists('#outcome-undo')
+  check('the switch turns writing-kit on in Claude Code alone, and its result says so in the Library’s words, with Undo', JSON.stringify(enabled()) === '[true,false,false]' && await a.exists('#outcome-undo')
     && (result ?? '').startsWith('Switched to Writing: 1 item turned on. write is on in Claude Code. Its whole plugin writing-kit was turned on there, with its 2 other skills.'), [enabled(), result]);
-  await pictures('claude-whole-1-result');
-
-  await newProfile(a, 'Quiet');
-  await a.click(byId('pf-skill:notes')); await done();
-  same('example 2, before the switch: the header says writing-kit goes off in Claude Code with everything it brings, and no row says anything comes on',
-    [await a.text('.profile-header p'), await a.all('.pf-row[data-item^="plugin:"] .pf-note', 'e.textContent'), await a.all('.pf-row[data-item^="plugin:"] .pf-state', 'e.textContent')],
-    ['Switching turns 3 items off. Turns writing-kit off in Claude Code, with its 3 skills and everything else it brings there', [], ['Turns off', 'Turns off', 'Turns off']]);
-  await pictures('claude-whole-2-preview');
-  await a.click('#profile-switch'); await done();
-  const said = await a.text('.band-done .band-text');
-  check('the switch turns writing-kit off in Claude Code, and its result says so', enabled() === false
-    && /^Switched to Quiet: 3 items turned off\. (brainstorm|outline|write) is off in Claude Code\. Its whole plugin writing-kit was turned off there, with its 2 other skills\./.test(said ?? ''), [enabled(), said]);
-  await pictures('claude-whole-2-result');
+  same('in use, the header counts the two skills on with their plugin apart', await a.text('.profile-header p'), 'In use · 2 items on, 2 more on in Claude Code with their plugin, the other 2 off wherever they can be switched');
+  await pictures('claude-whole-writing-result');
   await a.click('#outcome-undo'); await done();
-  same('its Undo turns writing-kit on again there, and Writing is in use', [enabled(), (await a.text('#status-profile'))?.trim()], [true, 'Writing']);
+  same('its Undo turns writing-kit off again there, and Mine is in use', [enabled(), (await a.text('#status-profile'))?.trim()], [[false, false, false], 'Mine']);
   same('no page errors', a.pageErrors, []);
   await a.quit();
 }
