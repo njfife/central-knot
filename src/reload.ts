@@ -130,7 +130,8 @@ export const reloadTable: Record<HarnessId, ToolSteps> = {
     skill: { cli: AGY_SKILL, app: NONE, both: AGY_SKILL },
     mcp: {
       cli: AGY_MCP_CLI, app: AGY_MCP_APP,
-      both: { ...AGY_MCP_CLI, text: 'In Antigravity, type /mcp and reload, or choose Restart on the server’s menu in the Antigravity app.', more: [{ chip: AGY_MCP_APP.chip!, title: AGY_MCP_APP.text }] },
+      both: { ...AGY_MCP_CLI, text: 'In Antigravity, type /mcp and reload, or choose Restart on the server’s menu in the Antigravity app.',
+        more: [{ chip: AGY_MCP_APP.chip!, title: AGY_MCP_APP.text }] },
     },
     // No agent is written to Antigravity yet (presence.ts agentsKeptIn), so this line is never asked.
     agent: same(NONE),

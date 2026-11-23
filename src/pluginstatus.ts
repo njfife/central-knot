@@ -23,8 +23,10 @@ export function pluginsInstalled(home: Pick<HomeView, 'pluginItems' | 'pluginRec
 }
 /** Why a tool's plugins are "—" (`unsupported` above), on the Overview and Harnesses (`who`: its name, or "that tool"): a plugin's page puts the plugin's items there (pluginlibrary.ts). */
 export const takesItemsOnly = (who: string) => `${who} takes a plugin’s items, not the plugin`;
-/** What such a tool takes of a plugin, as a sentence names it: its skills, agents and MCP servers, of the kinds it holds. */
-export const takenItems = (tool: HarnessId) => `its ${andList((['skill', 'agent', 'mcp'] as const).filter(kind => holds(tool, kind)).map(kind => (kind === 'mcp' ? 'MCP servers' : `${kind}s`)))}`;
+/** What such tools take of a plugin, as a sentence names it: its skills, agents and MCP servers, agents said apart where some hold none (presence.ts holds). */
+export function takenItems(tools: HarnessId[], none = tools.filter(tool => !holds(tool, 'agent'))) {
+  return `its ${andList(['skills', ...(none.length === tools.length ? [] : [`agents${none.length ? ` (not in ${andList(none.map(tool => names[tool]))})` : ''}`]), 'MCP servers'])}`;
+}
 
 /**
  * Whether a marketplace's plugin is installed in no tool managed now, so Find may offer its items as ones the person doesn't

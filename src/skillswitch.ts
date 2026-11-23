@@ -83,10 +83,10 @@ export async function setDisabled(context: ShareContext, tool: HarnessId, target
     return { changed: true, edit: next.edit };
   }
   if (tool === 'claude-cli' && !disabled) restore ??= (await readKeptOverrides(context))[target.folder];
-  const back = typeof restore === 'object' ? restore.removed : undefined;
-  await writeConfirmed(context, file, target, withSwitch(context, file, target, disabled, restore as string | undefined, back), disabled);
+  await writeConfirmed(context, file, target, withSwitch(context, file, target, disabled, restore), disabled);
   if (tool === 'claude-cli') await keepOverrides(context, { [target.folder]: disabled ? now.previous : undefined });
-  const removed = tool === 'antigravity-cli' && !disabled ? list((file.parsed as { json: Record<string, unknown> }).json.exclude).filter(entry => antigravityExcludes(entry, target.skillFile)) as string[] : [];
+  const exclude = tool === 'antigravity-cli' && !disabled ? list((file.parsed as { json: Record<string, unknown> }).json.exclude) : [];
+  const removed = exclude.filter(entry => antigravityExcludes(entry, target.skillFile)) as string[];
   return { changed: true, previous: now.previous, ...(removed.length ? { edit: { added: [], removed } } : {}) };
 }
 
@@ -302,9 +302,9 @@ function stateIn(context: ShareContext, tool: HarnessId, parsed: ParsedSwitches,
 
 /**
  * The file's text with this copy turned off or on, for every tool but Pi (whose list is piSwitched's). Only the switch changes.
- * `back`: the entries an Antigravity Enable took out, which its Undo puts back (else the folder's name).
+ * `restore`: setDisabled's: Claude Code's override, or what an Antigravity Enable took out, which its Undo puts back (else the folder's name).
  */
-function withSwitch(context: ShareContext, file: SwitchFile, target: SwitchTarget, disabled: boolean, restore?: string, back: unknown[] = [target.folder]): string {
+function withSwitch(context: ShareContext, file: SwitchFile, target: SwitchTarget, disabled: boolean, restore?: string | ListEdit): string {
   if (file.tool === 'codex-cli') return codexWithSwitch(context, file.text, target, disabled);
   // A leading byte-order mark (some Windows editors add one) is kept, and set aside while editing.
   const bom = file.text.startsWith('\uFEFF') ? '\uFEFF' : '';
@@ -323,7 +323,7 @@ function withSwitch(context: ShareContext, file: SwitchFile, target: SwitchTarge
   }
   if (file.tool === 'antigravity-cli') {
     const others = list(json.exclude).filter(entry => !antigravityExcludes(entry, target.skillFile));
-    return bom + putList('exclude', disabled ? [...others, ...back] : others);
+    return bom + putList('exclude', disabled ? [...others, ...(typeof restore === 'object' ? restore.removed : [target.folder])] : others);
   }
   // OpenCode. Already as asked: not a byte changes.
   if ((openCodeAction(openCodeRules(json), target.name) === 'deny') === disabled) return file.text;

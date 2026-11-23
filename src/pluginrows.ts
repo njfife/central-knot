@@ -141,7 +141,7 @@ function missingWhy(row: PluginRow, tool: HarnessId): string {
   if (install?.problem) return `${name} has ${row.plugin} installed, but its files couldn’t be read.`;
   if (install && tool === 'codex-cli' && row.kind === 'agent') return `${name} has ${row.plugin} installed, but Codex doesn’t load a plugin’s agents.`;
   if (install) return `${name} has ${row.plugin} installed, but its copy doesn’t have this ${row.kind === 'mcp' ? 'MCP server' : row.kind}.`;
-  if (!takesPlugins(tool)) return `${name} takes no plugins.${handledWhere(row).listed ? ` Tick ${name} on ${row.plugin}’s page to put ${takenItems(tool)} there, as items that follow it.` : ''}`;
+  if (!takesPlugins(tool)) return `${name} takes no plugins.${handledWhere(row).listed ? ` Tick ${name} on ${row.plugin}’s page to put ${takenItems([tool])} there, as items that follow it.` : ''}`;
   return `Not installed in ${name}.${handledWhere(row).listed ? ` The plugin’s page on ${pageNames.plugins} installs it there.` : ''}`;
 }
 

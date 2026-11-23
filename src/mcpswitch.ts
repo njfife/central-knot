@@ -63,11 +63,9 @@ const deniesByName = (entry: unknown, name: string) => record(entry)?.serverName
 /** Pi and Antigravity: the server's own entry in their file's `mcpServers`, if it is there as an object. */
 const serversEntry = (text: string, name: string) => record(record(jsonOf(text).mcpServers)?.[name]);
 
-/** The key that turns an OpenCode entry off, with its value: `enabled: false` under `mcp`, `disabled: true` under `mcp.servers`. */
-const openCodeOff = (place: string[]): [string, boolean] => (place.length === 3 ? ['disabled', true] : ['enabled', false]);
-/** The key inside a server's entry that turns it off, with its value: Antigravity's `disabled: true`, OpenCode's by place, else `enabled: false`. */
+/** The key inside a server's entry that turns it off, with its value: `disabled: true` in Antigravity and under OpenCode's `mcp.servers`, else `enabled: false`. */
 const entryOff = (tool: HarnessId, place: string[] = []): [string, boolean] =>
-  (tool === 'antigravity-cli' ? ['disabled', true] : tool === 'opencode-cli' ? openCodeOff(place) : ['enabled', false]);
+  (tool === 'antigravity-cli' || (tool === 'opencode-cli' && place.length === 3) ? ['disabled', true] : ['enabled', false]);
 
 /** Codex: the server's own `[mcp_servers.<name>]` table, if it has one. */
 const codexTable = (text: string, name: string) => readTomlTables(text).find(table => !table.array && table.path.length === 2 && table.path[0] === 'mcp_servers' && table.path[1] === name);
@@ -84,7 +82,7 @@ export function mcpDisabled(tool: HarnessId, text: string, name: string): boolea
     }
     case 'opencode-cli': {
       const found = openCodeServer(text, name);
-      const [key, off] = openCodeOff(found?.place ?? []);
+      const [key, off] = entryOff(tool, found?.place);
       return record(found?.raw)?.[key] === off;
     }
   }
@@ -124,7 +122,7 @@ export function withMcpSwitch(tool: HarnessId, text: string, name: string, disab
     case 'opencode-cli': {
       const found = openCodeServer(text, name);
       if (!found || !record(found.raw)) throw new Error(`OpenCode has no "${name}" server to switch.`);
-      const [key, off] = openCodeOff(found.place);
+      const [key, off] = entryOff(tool, found.place);
       return setJsonMember(text, [...found.place, key], disabled ? off : undefined);
     }
   }

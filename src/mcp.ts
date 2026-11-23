@@ -160,7 +160,8 @@ function openCodeEntry(server: NeutralServer, extras: Record<string, unknown>): 
 function fromAntigravity(name: string, file: string, raw: Record<string, unknown>): McpEntry {
   const url = [raw.serverUrl, raw.url].find(value => typeof value === 'string') as string | undefined;
   const server: NeutralServer = url !== undefined ? { transport: 'http', url, headers: nonEmpty(strings(raw.headers)) }
-    : { transport: 'stdio', command: typeof raw.command === 'string' ? raw.command : undefined, args: nonEmpty(list(raw.args)), env: nonEmpty(strings(raw.env)), cwd: typeof raw.cwd === 'string' ? raw.cwd : undefined };
+    : { transport: 'stdio', command: typeof raw.command === 'string' ? raw.command : undefined, args: nonEmpty(list(raw.args)),
+      env: nonEmpty(strings(raw.env)), cwd: typeof raw.cwd === 'string' ? raw.cwd : undefined };
   const extras = Object.fromEntries(Object.entries(raw).filter(([key]) => !['command', 'args', 'env', 'cwd', 'serverUrl', 'url', 'headers'].includes(key)));
   const urlKey = typeof raw.serverUrl !== 'string' && typeof raw.url === 'string' ? { urlKey: 'url' as const } : {};
   return { name, tool: 'antigravity-cli', file, server, extras, ...urlKey, hash: serverHash(server), hostBound: hostBound(name, server) };
