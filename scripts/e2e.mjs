@@ -6300,9 +6300,9 @@ async function draftFlow() {
   await a.click('#header-refresh'); await openKind(a, 'skills'); await a.click('#nav-instructions');
   await until(async () => (await says(codexText)) === codex0.trimEnd());
 
-  // While a tool's editor has the focus, a redraw that would change nothing is not made (app.ts fadeNow, renderer.ts's focus
-  // listener, repopage.ts loadRepo): the editor stays the same box, so its Undo goes on, and so does a word an input method is
-  // composing. A redraw that does change something still replaces it, its caret and scroll kept (the checks above).
+  // While a tool's editor has the focus, the fade with nothing to clear, a Git repo read that changes nothing and the window's focus
+  // draw nothing (app.ts fadeNow, repopage.ts loadRepo, renderer.ts's focus listener): the editor stays the same box, so its Undo
+  // goes on, and so does a word an input method is composing. Any other redraw still replaces it, its caret and scroll kept (above).
   await a.click('#ins-edit-codex-cli');
   const editorNow = `document.querySelector('#ins-text-codex-cli')`;
   /** Waits until the editor has stayed the same box for 300 ms: the read a click starts draws the page again when it lands. */
@@ -6328,7 +6328,7 @@ async function draftFlow() {
   const focusBack = async () => { await a.run(`(dispatchEvent(new Event('focus')), true)`); await a.settle(); };
   await editorSteady();
   same('in a tool’s editor with no redraw, Undo takes away the word typed', await typedThenUndone(), [true, true]);
-  same('the window getting the focus back, with no notice drawn while it was away, draws nothing: the editor is the same box, and Undo takes away the word typed',
+  same('the window getting the focus back while the editor has it draws nothing: the editor is the same box, and Undo takes away the word typed',
     await typedThenUndone(focusBack), [true, true]);
   const [composedIn, caret] = await a.run(`[${editorNow}.value, ${editorNow}.selectionStart]`);
   await a.send('Input.imeSetComposition', { text: 'ni', selectionStart: 2, selectionEnd: 2 });
@@ -6338,12 +6338,14 @@ async function draftFlow() {
     await a.run(`${editorNow}.value`), composedIn.slice(0, caret) + '你' + composedIn.slice(caret));
   await undo();
   // Refresh ends by starting the result's 8 s to go (app.ts FADE_MS) and a read of the Git repo 1.5 s later (app.ts afterActing).
-  // With no result to clear and the repo as it was, neither draws: a word typed just after Refresh is still undone after both.
-  const idleAt = await a.run(`new Promise(done => {
+  // With no result to clear and the repo as it was, neither draws: a word typed just after Refresh is still undone after both. The
+  // word must come before the read: Refresh again, three times at most, until the editor is steady soon enough after it ends.
+  const refreshed = () => a.run(`new Promise(done => {
     const watch = new MutationObserver(() => { if (document.body.dataset.busy === 'false') { watch.disconnect(); done(Date.now()); } });
     watch.observe(document.body, { attributeFilter: ['data-busy'] }); document.querySelector('#header-refresh').click(); })`);
-  await editorSteady();
-  const typedAt = Date.now() - idleAt, through = {};
+  let idleAt, typedAt;
+  for (let tries = 0; tries < 3 && !(typedAt < 1400); tries++) { idleAt = await refreshed(); await editorSteady(); typedAt = Date.now() - idleAt; }
+  const through = {};
   const afterRefresh = await typedThenUndone(async () => {
     await wait(Math.max(0, idleAt + 2500 - Date.now()));
     through.repoRead = await sameEditor();
@@ -6351,8 +6353,8 @@ async function draftFlow() {
     await wait(Math.max(0, idleAt + 9000 - Date.now()));
     through.fade = await sameEditor();
   });
-  if (typedAt < 1400) same('the Git repo read 1.5 s after Refresh, the repo as it was, draws nothing: the editor is the same box', through.repoRead, true);
-  else console.log(`draft: the Git repo read after Refresh not checked: the word was typed ${typedAt} ms after Refresh ended, too near the read`);
+  same('the Git repo read 1.5 s after Refresh, the repo as it was, draws nothing: the word was typed before it, and the editor is the same box',
+    [typedAt < 1400, through.repoRead], [true, true]);
   same('the result’s time to go 8 s after Refresh, with nothing to clear, draws nothing: the editor is the same box', through.fade, true);
   same('and Undo, after both, takes away the word typed just after Refresh', afterRefresh[1], true);
   // Closed; where a check above failed and left words in it, through its discard question, so the checks below start as they would.
@@ -6361,7 +6363,8 @@ async function draftFlow() {
   for (let tries = 0; tries < 30 && await a.exists('#ins-text-codex-cli'); tries++) await wait(100);
   // With no editor's text area focused, coming back to the window draws it again, and the words of time come up to date: History's
   // row drawn "just now", the clock the page reads moved on 61 minutes, then the window's focus.
-  await a.run(`(window.ckRealNow = Date.now, window.ckShift = Date.parse(${JSON.stringify(historyAt)}) - Date.now(), Date.now = () => window.ckRealNow() + window.ckShift, true)`);
+  await a.run(`(window.ckRealNow = Date.now, window.ckShift = Date.parse(${JSON.stringify(historyAt)}) - Date.now(),
+    Date.now = () => window.ckRealNow() + window.ckShift, true)`);
   await a.click('#nav-history');
   await untilThere('.history-when');
   const drawnAt = await says('.history-when');
