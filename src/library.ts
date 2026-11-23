@@ -159,8 +159,8 @@
 // A skill at a link is keyed by its SKILL.md's name wherever it is read from: a link to its folder, to a folder of skills, or to a
 // plugin's own folder (atlink.ts pluginItems, `link` route). A plugin's skill a marketplace lists is keyed by its folder's name, as
 // every tool's copy of it is named, one at the plugin's root by the plugin's (A PLUGIN, below; pluginItems, `marketplace` route).
-// Two routes, two key rules: where a skill's folder and SKILL.md name differ, the same skill through both is two items in Pi and
-// OpenCode (pluginlibrary.ts's known miss).
+// Two routes, two key rules: where a skill's folder and SKILL.md name differ, the same skill through both is two items in Pi,
+// OpenCode and Antigravity (pluginlibrary.ts's known miss).
 //
 // "Read whole", for one kind (each kind a source brings has a read of its own, by its own keys): the source was fetched, the
 // link's folder is there and is no marketplace, and no plugin its repository's marketplace lists (atlink.ts holdsAt; a plugin's
@@ -248,7 +248,7 @@
 // source that is no longer recorded reads as not linked, so Remove lets go of every link at once.
 //
 // A PLUGIN (pluginlibrary.ts) is the other kind of source: a plugin whose skills, agents and MCP servers are written as items in
-// Pi and OpenCode, which have no plugin installer. Its id is its plugins.json entry's (pluginrecord.ts PluginEntry `id`), its link
+// Pi, OpenCode and Antigravity, which have no plugin installer. Its id is its plugins.json entry's (pluginrecord.ts PluginEntry `id`), its link
 // sourcelink.ts pluginLink's ("the plugin pdf", never a Git link), and it is read from its marketplace's copy at a click that
 // brings it into a tool, at its Update and at the automatic updates' check (pluginlibrary.ts says when); a skill of it is keyed by
 // its folder's name (A SOURCE says both key rules), and a plugin that is one skill at its root by the plugin's name, never by the

@@ -31,6 +31,8 @@ export function executableCandidates(home: string, searchPath: string, binary = 
   // OpenCode's own installer puts it here and adds this folder to the front of the terminal's PATH (seen on a Mac with a
   // Homebrew copy too: the terminal ran this one), so it is looked at first.
   if (binary === 'opencode') candidates.unshift(join(home, '.opencode/bin/opencode'));
+  // Antigravity's CLI is `agy` by its docs; an install seen on Linux (1.5.14) names it `antigravity`. Both are looked for, `agy` first.
+  if (binary === 'agy') candidates.push(...candidates.map(candidate => join(dirname(candidate), 'antigravity')));
   return homeOnly(binary) ? candidates.filter(candidate => candidate.startsWith(`${home}${sep}`)) : candidates;
 }
 
@@ -128,6 +130,9 @@ export function appCandidates(home: string, binary: string, platform: string = p
     // pi-gui is a third-party desktop app for Pi (no official one is established): it uses Pi's own files through Pi's SDK.
     pi: where.map(apps => ({ name: 'pi-gui (third-party)', app: join(apps, 'pi-gui.app'), carries: 'Pi' })),
     opencode: where.map(apps => ({ name: 'OpenCode desktop', app: join(apps, 'OpenCode.app'), carries: 'OpenCode', carried: { file: 'Contents/Resources/opencode-cli.version' } })),
+    // Antigravity's desktop app, then its editor: either is Antigravity here, read for its own version only (where each keeps
+    // the CLI it may carry is not known). Where they install on Linux is not known either.
+    agy: [['Antigravity desktop', 'Antigravity.app'], ['Antigravity IDE', 'Antigravity IDE.app']].flatMap(([name, app]) => where.map(apps => ({ name, app: join(apps, app), carries: 'Antigravity' }))),
   };
   const own: Record<string, Record<string, AppCandidate[]>> = {
     win32: {

@@ -225,7 +225,7 @@ async function claudeReach(at: UsageWhere, now: number, oldest: number | undefin
  * Each tool's reader. `tells`: `sure`, every use leaves its record (none seen means none); `seen`, a record found is a use,
  * but a use may leave none that is known (its form was never seen in a real file); a kind left out has no record at all.
  */
-export const readers: Record<HarnessId, Reader> = {
+export const readers: Record<HarnessId, Reader | undefined> = {
   'claude-cli': { tells: { skill: 'sure', agent: 'sure', mcp: 'sure' }, reach: claudeReach,
     read: (at, now) => jsonlSessions([join(toolConfigRoot(at, 'claude-cli'), 'projects')], firstPart, ['"tool_use"', '<command-name>/'], claudeUses, now) },
   // Codex's skills: seen only. Even with every command form read, a bare SKILL.md read from the skill's own folder names no
@@ -239,11 +239,13 @@ export const readers: Record<HarnessId, Reader> = {
   'pi-cli': { tells: { skill: 'sure', agent: 'sure', mcp: 'sure' },
     read: (at, now) => jsonlSessions([join(toolConfigRoot(at, 'pi-cli'), 'sessions')], path => path, ['"toolCall"', '<skill name='], piUses, now) },
   'opencode-cli': { tells: { skill: 'sure', agent: 'sure' }, read: openCodeSessions },
+  // Antigravity's history is not read yet: it is left out of a reading, so no use and no "none seen" is said of it.
+  'antigravity-cli': undefined,
 };
 
 /** One tool's sessions, read and counted: how many it keeps and how many started since `since`; per name, the sessions since `since` that used it (by number) and its newest use. */
-async function readTool(tool: HarnessId, at: UsageWhere, now: number): Promise<ToolUsage> {
-  const reader = readers[tool], since = now - USAGE_DAYS * DAY_MS;
+async function readTool(tool: HarnessId, reader: Reader, at: UsageWhere, now: number): Promise<ToolUsage> {
+  const since = now - USAGE_DAYS * DAY_MS;
   let read: Read | undefined;
   try { read = await reader.read(at, now); }
   catch { return { tool, tells: reader.tells, sessions: 0, recent: 0, used: [], unread: true }; }
@@ -269,6 +271,6 @@ async function readTool(tool: HarnessId, at: UsageWhere, now: number): Promise<T
 
 /** Reads every tool's session history in a home: the page's one reading (types.ts UsageReading). */
 export async function readUsage(at: UsageWhere, now = Date.now()): Promise<UsageReading> {
-  const tools = await Promise.all(harnessIds.map(tool => readTool(tool, at, now)));
+  const tools = await Promise.all(harnessIds.flatMap(tool => { const reader = readers[tool]; return reader ? [readTool(tool, reader, at, now)] : []; }));
   return { at: new Date(now).toISOString(), tools };
 }

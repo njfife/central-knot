@@ -31,6 +31,7 @@ const settled = { managed: ['claude-cli', 'copilot-cli', 'codex-cli'] as Harness
 const all: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
 const FILES: Record<HarnessId, string> = {
   'claude-cli': '.claude.json', 'copilot-cli': '.copilot/mcp-config.json', 'codex-cli': '.codex/config.toml', 'pi-cli': '.pi/agent/mcp.json', 'opencode-cli': '.config/opencode/opencode.json',
+  'antigravity-cli': '.gemini/config/mcp_config.json',
 };
 const say = sentences(libraryWords.mcp);
 

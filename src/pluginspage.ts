@@ -346,7 +346,7 @@ function undoButton(): HTMLElement | null {
 }
 
 /**
- * What each kind of step an Undo runs does, in Undo's tooltip, before the tools it runs in. A plugin's items in Pi and OpenCode
+ * What each kind of step an Undo runs does, in Undo's tooltip, before the tools it runs in. A plugin's items in Pi, OpenCode and Antigravity
  * (items-back) have no words: Central Knot puts them back itself, through no tool's command.
  */
 const UNDO_WORDS: [PluginOp['action'][], string][] = [[['remove'], 'uninstalls it from'], [['install'], 'reinstalls it in'],

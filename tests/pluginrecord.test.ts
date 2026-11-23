@@ -69,14 +69,14 @@ test('The first read: a plugin every managed tool has is On everywhere; one some
   ], []);
   assert.deepEqual(record.plugins.map(entry => [entry.plugin, entry.on, entry.except]), [
     ['pdf', true, []],
-    ['notes', true, ['copilot-cli', 'codex-cli', 'opencode-cli']]]);
+    ['notes', true, ['copilot-cli', 'codex-cli', 'opencode-cli', 'antigravity-cli']]]);
   assert.deepEqual(record.tools, ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli']);
   assert.deepEqual(record.plugins.map(entry => [entry.source, entry.marketName, typeof entry.id]), [[team, 'team', 'string'], [team, 'team', 'string']]);
 });
 
 test('The first read keeps a tool out of nothing an install waited for in the version before: that tool stays off `tools`, so the install still happens', () => {
   const record = firstRecord(['claude-cli', 'codex-cli'], [has('claude-cli', 'pdf')], [{ tool: 'codex-cli', source: `${team}/`, plugin: 'pdf' }]);
-  assert.deepEqual(record.plugins.map(entry => [entry.plugin, entry.except]), [['pdf', ['copilot-cli', 'pi-cli', 'opencode-cli']]]);
+  assert.deepEqual(record.plugins.map(entry => [entry.plugin, entry.except]), [['pdf', ['copilot-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli']]]);
   assert.deepEqual(record.tools, ['claude-cli']);
   assert.equal(owedTo(record.plugins[0], 'codex-cli', now('none'), record.tools).background, true);
 });
@@ -84,6 +84,18 @@ test('The first read keeps a tool out of nothing an install waited for in the ve
 test('The first read records only what a managed tool has, one entry per plugin however its marketplace is spelt', () => {
   const record = firstRecord(['claude-cli'], [has('claude-cli', 'pdf'), has('codex-cli', 'xlsx'), has('claude-cli', 'pdf', `${team}/`)], []);
   assert.deepEqual(record.plugins.map(entry => entry.plugin), ['pdf'], 'Codex is left out here: its plugin is not read');
+});
+
+test('plugins.json written knowing five tools: a plugin kept out of some of them is kept out of a tool it never knew; one in all five is not', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'ck-pluginrecord-'));
+  try {
+    const entry = (plugin: string, except: HarnessId[]) => ({ id: plugin, source: '/m', marketName: 'm', plugin, on: true, except });
+    await mkdir(join(home, '.central-knot'));
+    await writeFile(join(home, '.central-knot/plugins.json'), JSON.stringify({ formatVersion: 1, tools: ['pi-cli'], plugins: [entry('kept', ['claude-cli', 'copilot-cli', 'codex-cli']), entry('everywhere', [])] }));
+    const { record } = await readPluginRecord(home);
+    assert.deepEqual(record?.plugins.map(each => [each.plugin, each.except]), [['kept', ['claude-cli', 'copilot-cli', 'codex-cli', 'antigravity-cli']], ['everywhere', []]]);
+    assert.deepEqual(record?.knows, ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'], 'what it knew, until bringForward records more');
+  } finally { await rm(home, { recursive: true, force: true }); }
 });
 
 test('plugins.json: none is no record; one damaged or newer stops writes; one saved reads back', async () => {

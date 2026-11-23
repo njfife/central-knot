@@ -1,4 +1,4 @@
-// A plugin's skills, agents and MCP servers as library items in Pi and OpenCode, which have no plugin installer (library.ts A
+// A plugin's skills, agents and MCP servers as library items in Pi, OpenCode and Antigravity, which have no plugin installer (library.ts A
 // PLUGIN: the table's rows that differ for a plugin, decided by SourceSeen `plugin`). This module owns:
 // - the plugin's read (readPlugin): its files as catalogdetail.ts pluginFiles reads them from the marketplace's copy
 //   (marketplaces.ts locate, never a tool's installed copy), made into one SourceRead per kind by the one reader of a plugin's
@@ -9,14 +9,14 @@
 // - what the Plugins page shows of them (itemsView: "Its items", and "has it" in each tool), from one look at the home that every
 //   plugin of a view shares (lookAtKinds), with why none of them is on in such a tool, which the run's report says too
 //   (pluginstatus.ts notInWhy), and each name he has under each tool's box (`clashes`).
-// When a plugin is read: at a click that brings it into Pi or OpenCode (On, Add, a tool's box ticked), at its Update and
+// When a plugin is read: at a click that brings it into Pi, OpenCode or Antigravity (On, Add, a tool's box ticked), at its Update and
 // Update all, and at the automatic updates' check, for a plugin with items (withItemsOf) or a tool new here (marketplaces.ts);
 // Off and a box unticked only click. A plugin whose parts from before the library wait to be moved takes this route
 // only once they are (pluginstatus.ts waitsToMove). Kept elsewhere: the table (library.ts), the held answer in the tools with an
 // installer (plugins.ts pluginHolds), the switch's table (pluginrecord.ts owedTo), and the let-go of an item changed here, in
 // every pass (librarypass.ts letGo).
 // Known miss: a skill keyed by its folder, or by its plugin's name at the plugin's root (library.ts A SOURCE, the two key rules),
-// whose SKILL.md names it otherwise is loaded by Pi and OpenCode under that name, so it can meet a skill of that name there
+// whose SKILL.md names it otherwise is loaded by Pi, OpenCode and Antigravity under that name, so it can meet a skill of that name there
 // unmarked, and through a Git link is a second item.
 import { basename } from 'node:path';
 import { pluginItems, wasRead } from './atlink.ts';
@@ -28,7 +28,7 @@ import type { PluginDone, PluginOp } from './pluginplan.ts';
 import type { PluginEntry } from './pluginrecord.ts';
 import { pluginItemId, pluginItemKey } from './profileplan.ts';
 import { profilesNaming } from './profiles.ts';
-import { takesPlugins } from './presence.ts';
+import { holds, takesPlugins } from './presence.ts';
 import type { ShareContext } from './share.ts';
 import { pluginLink } from './sourcelink.ts';
 import { sourceKinds, type SourceKind } from './sources.ts';
@@ -38,7 +38,7 @@ import { harnessIds } from './harnesses.ts';
 import { notInWhy, type ItemOut } from './pluginstatus.ts';
 import { andList, toolNames } from './words.ts';
 
-/** The managed tools a plugin's items go to as library items: those with no plugin installer (Pi, OpenCode). */
+/** The managed tools a plugin's items go to as library items: those with no plugin installer (Pi, OpenCode, Antigravity). */
 export const itemTools = (tools: readonly HarnessId[]) => tools.filter(tool => !takesPlugins(tool));
 
 /** One item a plugin's switch put back by its Undo: as before the click (one it made: Off); one it took (library.ts TAKE) by its History `entry`'s own Undo. */
@@ -181,12 +181,14 @@ export async function runItems(context: ShareContext, tools: HarnessId[], entry:
   const looks = await lookAtKinds(context, tools);
   const madeOut = (tool: HarnessId) => (item: LibraryItem, kind: ItemKind) => item.except.includes(tool) && made.has(`${kind}:${item.name}`);
   const why = (tool: HarnessId) => files.problem ?? `Nothing of ${entry.plugin} is on in ${toolNames[tool]}. ${notInWhy(tool, entry.plugin, outsIn(tool, lines, after, madeOut(tool), heldByShared(looks, tool))).join(' ')}`;
-  // A take that can't land says why, and nothing changed. What is on in each tool is counted as the box counts it (onThere).
-  const refused = sourced.find(({ said }) => said.held)?.said, his = sourced.filter(({ said }) => said.answer === 'differs').length;
+  // A take that can't land says why, and nothing changed. What is on in each tool, and of how many, is counted as the box counts it
+  // (onThere, and the view's `of`: the kinds the tool holds).
+  const refused = sourced.find(({ said }) => said.held)?.said, his = sourced.filter(({ said }) => said.answer === 'differs');
+  const of = (tool: HarnessId) => [...after, ...alike, ...his].filter(({ kind }) => holds(tool, kind)).length;
   const on = (tool: HarnessId) => onThere(looks, [...after, ...(!('outOf' in ask) && entry.on && !entry.except.includes(tool) ? alike : [])], tool);
   const ticks = await movedTicks(context, entry, before, after, moved, folder);
   const done = named.map((tool): PluginDone => ({ ...op, tool, report: refused ? { tool, outcome: 'held', message: `${refused.name}: ${refused.held}`, runs: [], changed: false }
-    : reportIn(tool, ask, before, after, results, why(tool), !!files.problem, on(tool), after.length + alike.length + his, ticks) }));
+    : reportIn(tool, ask, before, after, results, why(tool), !!files.problem, on(tool), of(tool), ticks) }));
   return { ...ran(done, results), ...(undo.length ? { back: undo } : {}) };
 }
 /**
@@ -356,14 +358,18 @@ export async function itemsView(tools: readonly HarnessId[], looks: KindLooks, e
     const held = outsIn(tool, [], linked, ownIn(tool), heldByShared(looks, tool)).filter(({ out }) => out === 'own' || out === 'shared');
     return held.length ? [[tool, notInWhy(tool, entry.plugin, held)] as const] : [];
   }));
-  // Each name of his under each tool's box the plugin is wanted in, whatever else is so: the same as his, or Use the plugin's but
-  // where its take can't land there (librarypass.ts takeHeld: his through the shared folder, say).
+  // Each name of his of a kind the tool holds (presence.ts holds) under each tool's box the plugin is wanted in, whatever else is
+  // so: the same as his, or Use the plugin's but where its take can't land there (librarypass.ts takeHeld: his through the shared folder, say).
   const yours: Partial<Record<HarnessId, YourName[]>> = {};
-  for (const tool of his.length ? wanted : []) yours[tool] = await Promise.all(his.map(async ({ line: { kind, key, name, state }, item }): Promise<YourName> => {
-    const plugins = reads?.find(each => each.kind === kind)?.names.get(key), held = plugins && 'content' in plugins ? await takeHeld(look(kind), item, tool, plugins.content) : undefined;
-    return { kind, key, name, ...(state === 'alike' ? { same: true as const } : held ? { held: { why: held.why, ...(held.throughShared ? { shared: true as const } : {}) } } : {}) };
-  }));
-  return { lines, on, of: linked.length + his.length, ...(Object.keys(keptOut).length ? { keptOut } : {}), ...(ready ? { ready: true as const } : {}), ...(due ? { due: true as const } : {}), ...(problem ? { problem } : {}),
+  for (const tool of wanted) {
+    const there = his.filter(({ line }) => holds(tool, line.kind));
+    if (there.length) yours[tool] = await Promise.all(there.map(async ({ line: { kind, key, name, state }, item }): Promise<YourName> => {
+      const plugins = reads?.find(each => each.kind === kind)?.names.get(key), held = plugins && 'content' in plugins ? await takeHeld(look(kind), item, tool, plugins.content) : undefined;
+      return { kind, key, name, ...(state === 'alike' ? { same: true as const } : held ? { held: { why: held.why, ...(held.throughShared ? { shared: true as const } : {}) } } : {}) };
+    }));
+  }
+  const of = Object.fromEntries(itemTools(tools).map(tool => [tool, [...linked, ...his.map(({ line }) => line)].filter(({ kind }) => holds(tool, kind)).length]));
+  return { lines, on, of, ...(Object.keys(keptOut).length ? { keptOut } : {}), ...(ready ? { ready: true as const } : {}), ...(due ? { due: true as const } : {}), ...(problem ? { problem } : {}),
     ...(away.length ? { notIn: Object.fromEntries(away) } : {}), ...(Object.keys(heldOut).length ? { heldOut } : {}), ...(Object.keys(yours).length ? { yours } : {}) };
 }
 

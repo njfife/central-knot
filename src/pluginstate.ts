@@ -385,7 +385,7 @@ export const usePlugins = (entry: MarketplaceView, plugin: string, tool: Harness
 /** What each tool now has changed: the page and the item lists read again, once for the action (app.ts readHomeOnce). */
 async function readAgain(): Promise<void> {
   showView(await api().plugins().catch(() => null));
-  // The item lists show what plugins bring, each with its switch in each tool, and a plugin's items in Pi and OpenCode: every
+  // The item lists show what plugins bring, each with its switch in each tool, and a plugin's items in Pi, OpenCode and Antigravity: every
   // plugin change is seen there (and where it came from) at once.
   await readHomeOnce();
   readShown();

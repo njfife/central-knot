@@ -74,7 +74,7 @@ export async function libraryDocs(context: ShareContext, view: HomeView): Promis
  * in it or a server's name], which no Library row's id (skills-, agents-, mcp-) can be; its name, and its plugin's apart; its
  * description (a server's launch); its text, the first 1,000 characters of its file as kept (a skill's or agent's after its
  * frontmatter, as a Library row's: the name and description are the document's already); and what its row draws (types.ts
- * CatalogItem). One already a Library row (linked to that plugin in Pi or OpenCode: pluginrows.ts onOwnRow) is left to that row.
+ * CatalogItem). One already a Library row (linked to that plugin in Pi, OpenCode or Antigravity: pluginrows.ts onOwnRow) is left to that row.
  * `texts`: as the job keeps them (plugintext.ts texts()), whatever pin each was read at; only those of a marketplace the open home
  * lists (`listed`, marketplaces.ts listings) are used: another home's stay kept until the job matches them to this home's listing.
  */

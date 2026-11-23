@@ -5,13 +5,13 @@
 // engine: every change goes through the pages it mirrors, or the switch's toolchoice.ts.
 import { noteMove, KINDS, acting, harnessManaged as managed, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type PageKind } from './app.ts';
 import { manageLocked, manageRow } from './managecard.ts';
-import { installsIn, pluginsInstalled, takesItemsOnly, type MarketPlugin } from './pluginstatus.ts';
+import { installsIn, pluginsInstalled, takenItems, takesItemsOnly, type MarketPlugin } from './pluginstatus.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { pluginTitle } from './pluginparts.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural } from './model.ts';
-import { andList, coworkWords, fileName, kindNouns, pageNames, toolNames as names } from './words.ts';
-import { agentsKeptIn, hasCowork, takesPlugins } from './presence.ts';
+import { andList, coworkWords, fileName, kindNouns, pageNames, sentence, toolNames as names } from './words.ts';
+import { agentsKeptIn, hasCowork, takesPlugins, type AgentTool } from './presence.ts';
 import { brandMark } from './brand.ts';
 import { shortBuild } from './values.ts';
 import type { DesktopApp, HarnessId, HomeView, InstructionFile, Snapshot } from './types.ts';
@@ -36,8 +36,8 @@ const readProblems = (snapshot: Snapshot) => (snapshot.discovery === 'missing' ?
 const listed = (home: HomeView) => home.snapshots.filter(snapshot => home.mode === 'actual' || home.sync.present.includes(snapshot.harness));
 
 const supports = (home: HomeView, kind: PageKind, tool: HarnessId) => kindSource(home, kind).tools.includes(tool);
-/** Said on the card, the tab's tooltip and the empty tab when a tool can't hold a kind. */
-const kindNotUsed = (tool: HarnessId, kind: PageKind) => `${names[tool]} doesn’t use ${kindNouns[kind].many}`;
+/** Said on the card, the tab's tooltip and the empty tab when Central Knot holds no kind of this in a tool (Antigravity's agents). */
+const kindNotUsed = (tool: HarnessId, kind: PageKind) => `${sentence(kindNouns[kind].many)} aren’t handled for ${names[tool]}`;
 
 /**
  * What one tool has of one kind: its total, the synced subtotal (for skills, only copies managed there), and copies that
@@ -303,7 +303,7 @@ function pluginsTab(tool: HarnessId) {
   if (plugins.state === 'unsupported') {
     // Only the tools that take a plugin whole are named as where plugins install; this one takes a plugin's items.
     const takers = (market.view?.tools ?? []).filter(takesPlugins);
-    return page(emptyState('puzzle', takesItemsOnly(names[tool]), `${takers.length ? `Central Knot installs marketplace plugins into ${andList(takers.map(each => names[each]))}. A plugin’s page on ${pageNames.plugins} puts its skills, agents and MCP servers in ${names[tool]} as items of Central Knot’s that follow the plugin. ` : ''}${names[tool]}’s own packages stay as they are.`));
+    return page(emptyState('puzzle', takesItemsOnly(names[tool]), `${takers.length ? `Central Knot installs marketplace plugins into ${andList(takers.map(each => names[each]))}. A plugin’s page on ${pageNames.plugins} puts ${takenItems([tool])} in ${names[tool]} as items of Central Knot’s that follow the plugin. ` : ''}${names[tool]}’s own ${tool === 'antigravity-cli' ? 'plugins' : 'packages'} stay as they are.`));
   }
   // What could not be checked is said, so the list is never taken for everything installed.
   const unsure = [...plugins.unknown.map(({ plugin, reason }) => `${pluginTitle(plugin)}: ${reason}`), ...plugins.unreadable.map(name => `${name} could not be read.`)];
@@ -349,7 +349,7 @@ function aboutTab(snapshot: Snapshot, home: HomeView) {
         ...(disclosed && roots.size && !(disclosed.to && roots.has(disclosed.to)) ? fact('New skills go to', disclosed.blocked ? h('span', {}, h('span.tone-warning', {}, 'Nowhere. '), disclosed.blocked) : path(disclosed.to)) : []),
         ...(supports(home, 'mcp', tool) ? fact('MCP servers file', mcpFile ? path(mcpFile) : h('span.tone-faint', {}, '— (no MCP servers found)')) : []),
         // Where it keeps agents (presence.ts agentsKeptIn): its agents folder, or (Pi) its skills folder, shown above.
-        ...(!supports(home, 'agents', tool) ? [] : agentsKeptIn[tool] === 'skills folder' ? fact('Agents', h('span.tone-faint', {}, 'In its skills folder, each as a skill'))
+        ...(!supports(home, 'agents', tool) ? [] : agentsKeptIn[tool as AgentTool] === 'skills folder' ? fact('Agents', h('span.tone-faint', {}, 'In its skills folder, each as a skill'))
           : fact('Agents folder', agentFile ? path(dirname(agentFile)) : h('span.tone-faint', {}, '— (no agents found)'))),
         ...(ins ? fact('Instructions', h('span.harness-path', {}, path(ins.path), ins.exists ? null : h('span.tone-faint', {}, '(no file yet)'))) : [])))))));
 }

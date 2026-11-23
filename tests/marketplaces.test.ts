@@ -769,7 +769,7 @@ test('One tick on a plugin that is Off turns it On in that tool alone: Pi ticked
     const at = fivePlaces(box);
     const tick = await box.markets.turn(box.root, 'pdf', 'let-in', 'pi-cli', box.home);
     // Every tool but Pi in `except`, managed or not, so a tool managed later gets none of it by itself.
-    assert.deepEqual([(await at.entry()).on, (await at.entry()).except], [true, ['claude-cli', 'copilot-cli', 'codex-cli', 'opencode-cli']]);
+    assert.deepEqual([(await at.entry()).on, (await at.entry()).except], [true, ['claude-cli', 'copilot-cli', 'codex-cli', 'opencode-cli', 'antigravity-cli']]);
     assert.deepEqual([await at.pi(), await at.opencode(), at.claude()], [true, false, []]);
     await box.markets.undoTurn(box.root, 'pdf', tick.before!, tick.back!, box.home);
     assert.deepEqual([(await at.entry()).on, (await at.entry()).except, await at.pi()], [false, [], false]);
@@ -860,7 +860,7 @@ test('One tick on a plugin never turned on records it On in that tool alone, by 
   try {
     await box.markets.turn(box.root, 'notes', 'let-in', 'claude-cli', box.home);
     assert.deepEqual([box.calls.filter(call => /^install/.test(call)), (await box.record()).plugins.map(entry => [entry.plugin, entry.on, entry.except])],
-      [['install notes claude-cli'], [['notes', true, ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli']]]]);
+      [['install notes claude-cli'], [['notes', true, ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli']]]]);
   } finally { await box.cleanup(); }
 });
 
@@ -998,7 +998,7 @@ test('A first read made while the marketplace couldn’t be read gives the answe
     await rm(box.root, { recursive: true });
     const offline = await box.markets.view();
     assert.match(offline.marketplaces.find(entry => entry.source === box.root)!.problem ?? '', /./);
-    assert.deepEqual((await box.record()).plugins.map(entry => [entry.plugin, entry.on, entry.except]), [['pdf', true, ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli']]]);
+    assert.deepEqual((await box.record()).plugins.map(entry => [entry.plugin, entry.on, entry.except]), [['pdf', true, ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli']]]);
     const sw = offline.marketplaces.find(entry => entry.source === box.root)!.switches!.pdf!;
     assert.deepEqual([sw.tools['claude-cli']!.has, sw.tools['claude-cli']!.act], ['whole', undefined], 'still installed in Claude Code, read by its record');
     await marketplace(box.root, 'team', ['pdf', 'notes']);
@@ -1018,7 +1018,7 @@ test('A tool record that can’t be read is unknown, not empty: the first read w
     assert.match((await box.markets.turn(box.root, 'pdf', 'off', undefined, box.home)).stopped ?? '', /can’t be read now/);
     await put(join(box.home, '.codex/config.toml'), 'model = "o4"\n');
     assert.equal((await box.markets.view()).switchProblem, undefined);
-    assert.deepEqual((await box.record()).plugins.map(entry => [entry.plugin, entry.except]), [['pdf', ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli']]]);
+    assert.deepEqual((await box.record()).plugins.map(entry => [entry.plugin, entry.except]), [['pdf', ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli']]]);
   } finally { await box.cleanup(); }
 });
 

@@ -13,7 +13,8 @@ export interface HarnessDefinition {
   name: string;
   surface: string;
   binary: string;
-  configEnv: string;
+  /** The variable that moves its config folder, where it has one (Antigravity has none: harnesses below). */
+  configEnv?: string;
   /** The tool's folder inside the one `configEnv` names (OpenCode's `opencode` inside XDG_CONFIG_HOME); without it, `configEnv` names the folder itself. */
   configUnder?: string;
   defaultConfig: string;
@@ -83,6 +84,16 @@ export const harnesses: Record<HarnessId, HarnessDefinition> = {
       { path: join(home, '.agents/skills'), label: 'Shared .agents skills' },
     ],
   },
+  // Antigravity, measured on its CLI 1.5.14 in a throwaway home: its CLI (`agy`, also installed as `antigravity`), desktop app and
+  // editor share ~/.gemini/config, and no variable moves it. It reads skills from more folders than this one (~/.gemini/skills, which
+  // the Gemini CLI reads too, and one folder of the CLI's and one of the editor's alone), but never ~/.agents/skills; Central Knot
+  // reads and writes only its own. No agents or plugins here yet (presence.ts).
+  'antigravity-cli': {
+    id: 'antigravity-cli', name: 'Antigravity', surface: 'CLI', binary: 'agy',
+    defaultConfig: '.gemini/config', reservedSkills: [], loadsDotFolders: false,
+    otherReaders: ['Antigravity desktop', 'Antigravity IDE'],
+    skillRoots: config => [{ path: join(config, 'skills'), label: 'Antigravity skills' }],
+  },
 };
 
 export const harnessIds = Object.keys(harnesses) as HarnessId[];
@@ -91,9 +102,9 @@ export function configRoot(definition: HarnessDefinition, home: string, override
   return override === undefined ? join(home, definition.defaultConfig) : override;
 }
 
-/** A tool's config folder in a home, following its override (CLAUDE_CONFIG_DIR, COPILOT_HOME, CODEX_HOME, PI_CODING_AGENT_DIR, XDG_CONFIG_HOME for OpenCode). */
+/** A tool's config folder in a home, following its override (CLAUDE_CONFIG_DIR, COPILOT_HOME, CODEX_HOME, PI_CODING_AGENT_DIR, XDG_CONFIG_HOME for OpenCode; none for Antigravity). */
 export const envOverride = (definition: HarnessDefinition, env: Record<string, string | undefined>) => {
-  const named = env[definition.configEnv];
+  const named = definition.configEnv && env[definition.configEnv];
   return named === undefined || !definition.configUnder ? named : join(named, definition.configUnder);
 };
 

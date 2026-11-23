@@ -15,7 +15,7 @@ import { readProfiles, saveProfile, switchProfile } from '../src/profiles.ts';
 import { homeItems, inUse, pluginLive } from '../src/profileplan.ts';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
 import { readPlugin } from '../src/pluginlibrary.ts';
-import { notInWhy } from '../src/pluginstatus.ts';
+import { itemsAllIn, itemsOnWords, notInWhy } from '../src/pluginstatus.ts';
 import { readHistory } from '../src/history.ts';
 import { homePass } from '../src/homepass.ts';
 import * as engine from '../src/plugins.ts';
@@ -197,6 +197,62 @@ test('On makes its items and turns them On in Pi; Pi’s box unticked takes them
     await box.undo(on);
     assert.deepEqual(Object.keys(await files(box.pi(''))).filter(path => path.startsWith('skills/')), Object.keys(before).filter(path => path.startsWith('skills/')));
     assert.deepEqual(Object.values((await box.library()).skill).map(item => [item.on, !!item.source]), [[false, true], [false, true], [false, true]]);
+  } finally { await box.cleanup(); }
+});
+
+test('Antigravity takes a plugin’s items as Pi does: its skills and the server that runs on its own, and not its agent, which Antigravity isn’t given yet', async () => {
+  const box = await kitHome({ tools: ['claude-cli', 'antigravity-cli'] });
+  try {
+    const on = await box.turn('on');
+    assert.deepEqual(on.done.map(step => [step.tool, step.action, step.report.outcome]), [['claude-cli', 'install', 'installed'], ['antigravity-cli', 'install-items', 'installed']]);
+    const config = (path: string) => join(box.home, '.gemini/config', path);
+    assert.equal(await readFile(config('skills/notes/SKILL.md'), 'utf8'), skill('notes'), 'byte for byte from the plugin');
+    assert.deepEqual(JSON.parse(await readFile(config('mcp_config.json'), 'utf8')).mcpServers, { relay: { command: 'npx', args: ['relay'] } });
+    assert.deepEqual([await exists(config('agents')), await exists(config('skills/helper.md'))], [false, false]);
+    // Counted over what it takes: its three skills and its server are all of kit's items there, and its box is ticked in full.
+    const view = await box.view();
+    assert.deepEqual([itemsOnWords(view, 'kit', 'antigravity-cli'), itemsAllIn(view, 'kit', 'antigravity-cli')], ['4 of its 4 items are on', true]);
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin whose one item is an agent offers Antigravity, which takes no agents, nothing, and says why', async () => {
+  const box = await kitHome({ tools: ['claude-cli', 'antigravity-cli'] });
+  try {
+    for (const path of ['skills', 'extra', '.mcp.json']) await rm(join(box.kit, path), { recursive: true, force: true });
+    const nothing = 'kit has no skill or MCP server, which is all Antigravity takes of a plugin: what it brings (1 agent) stays with the tools that take plugins.';
+    const done = await box.turn('on'), owed = (await box.view()).switches!.kit!.tools['antigravity-cli']!;
+    assert.deepEqual([done.done.filter(step => step.tool === 'antigravity-cli').map(step => `${step.report.outcome}: ${step.report.message}`), owed.act ?? `off: ${owed.held}`],
+      [[`held: ${nothing}`], `off: ${nothing}`]);
+  } finally { await box.cleanup(); }
+});
+
+/** kit holding one skill, notes, and one agent, helper, in a home with Claude Code and Antigravity, which holds no agents. */
+async function skillAndAgent() {
+  const box = await kitHome({ tools: ['claude-cli', 'antigravity-cli'] });
+  for (const path of ['skills/review', 'extra', '.mcp.json']) await rm(join(box.kit, path), { recursive: true, force: true });
+  await put(join(box.kit, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'kit' }));
+  return box;
+}
+
+test('kit of one skill and one agent ticked for Antigravity: the result counts what Antigravity holds, as its box does', async () => {
+  const box = await skillAndAgent();
+  try {
+    const ticked = await box.turn('let-in', 'antigravity-cli');
+    assert.deepEqual([ticked.done.filter(step => step.tool === 'antigravity-cli').map(step => step.report.message), itemsOnWords(await box.view(), 'kit', 'antigravity-cli')],
+      [['1 of its 1 items is on in Antigravity.'], '1 of its 1 items is on']);
+  } finally { await box.cleanup(); }
+});
+
+test('His agent helper beside the plugin’s of other content: under Antigravity, which holds no agents, Use the plugin’s is neither offered nor taken', async () => {
+  const box = await skillAndAgent();
+  try {
+    await put(join(box.home, '.claude/agents/helper.md'), '---\nname: helper\ndescription: His.\n---\nHis own.\n');
+    await applyAgents(box.share, box.tools, [{ key: 'helper', on: true, except: [] }]);
+    await box.turn('let-in', 'antigravity-cli');
+    const his = (await box.library()).agent.helper!;
+    assert.equal((await box.view()).items!.kit!.yours, undefined);
+    const took = await box.markets.take(box.root, 'kit', { kind: 'agent', key: 'helper' }, 'antigravity-cli', box.home);
+    assert.deepEqual([took.stopped, took.done, (await box.library()).agent.helper], ['Antigravity holds no agents, so the plugin’s helper can’t go there. Nothing was changed.', [], his]);
   } finally { await box.cleanup(); }
 });
 
@@ -734,7 +790,7 @@ test('His case: his server maps meets the plugin’s maps of other content in Pi
     const ticked = await box.turn('let-in', 'pi-cli');
     // Doing nothing: the plugin on, his maps untouched in every tool, the reason a state beside its action.
     assert.deepEqual([await box.toolFiles(), (await box.maps()).source, (await box.view()).items!.kit!.yours], [before, undefined, { 'pi-cli': [{ kind: 'mcp', key: 'maps', name: 'maps' }] }]);
-    assert.deepEqual([(await box.view()).items!.kit!.on, (await box.view()).items!.kit!.of], [{ 'pi-cli': 0, 'opencode-cli': 0 }, 1], 'its items for Pi: maps, not on there');
+    assert.deepEqual([(await box.view()).items!.kit!.on, (await box.view()).items!.kit!.of], [{ 'pi-cli': 0, 'opencode-cli': 0 }, { 'pi-cli': 1, 'opencode-cli': 1 }], 'its items for Pi: maps, not on there');
     assert.deepEqual([ticked.done.map(step => step.report.message), (await box.view()).switches!.kit!.tools['pi-cli']!.held],
       [['Nothing of kit is on in Pi. maps: you keep your own MCP server by that name, not the plugin’s.'], 'maps: you keep your own MCP server by that name, not the plugin’s.']);
     const took = await box.take('mcp', 'maps');
@@ -743,7 +799,7 @@ test('His case: his server maps meets the plugin’s maps of other content in Pi
     assert.deepEqual([piMaps(after).args, after.claude, after['opencode/opencode.json']], [['maps-of-kit'], before.claude, before['opencode/opencode.json']],
       'Pi has the plugin’s entry; Claude Code and OpenCode keep his, untouched');
     const maps = await box.maps();
-    assert.deepEqual([!!maps.source, maps.on, maps.except, Object.keys(maps.applied), maps.versions.some(version => version.hash === his)], [true, true, ['claude-cli', 'copilot-cli', 'codex-cli', 'opencode-cli'], ['pi-cli'], true],
+    assert.deepEqual([!!maps.source, maps.on, maps.except, Object.keys(maps.applied), maps.versions.some(version => version.hash === his)], [true, true, ['claude-cli', 'copilot-cli', 'codex-cli', 'opencode-cli', 'antigravity-cli'], ['pi-cli'], true],
       'the plugin’s, linked; his version kept; kept out of every tool but Pi, his copies there theirs now');
     assert.deepEqual((await box.taken()).map(event => [event.previous, event.version, event.took, event.losers.map(loser => loser.tool)]),
       [[his, maps.hash, { on: true, except: [], copies: { 'claude-cli': his, 'opencode-cli': his } }, ['pi-cli']]], 'one History entry, with the copy each let-go tool held');
@@ -778,7 +834,7 @@ test('The plugin’s maps the same as his: nothing changes, no link, no write, n
     await box.update();
     const items = (await box.view()).items!.kit!;
     assert.deepEqual([await box.toolFiles(), await mine(), await box.taken()], [before, his, []], 'his, as he had it, in every tool');
-    assert.deepEqual([items.yours, items.on['pi-cli'], items.of, (await box.view()).switches!.kit!.tools['pi-cli']!.has], [{ 'pi-cli': [{ kind: 'mcp', key: 'maps', name: 'maps', same: true }] }, 1, 1, 'items']);
+    assert.deepEqual([items.yours, items.on['pi-cli'], items.of['pi-cli'], (await box.view()).switches!.kit!.tools['pi-cli']!.has], [{ 'pi-cli': [{ kind: 'mcp', key: 'maps', name: 'maps', same: true }] }, 1, 1, 'items']);
     const { yourSaid } = await import('../src/pluginstatus.ts');
     assert.equal(yourSaid(items.yours!['pi-cli']![0]!, 'pi-cli'), 'maps is the same as yours, so yours stays.');
     await box.turn('off');
@@ -1624,7 +1680,7 @@ test('Upgrading with the plugin installed whole in Claude Code: a switch to a pr
     assert.deepEqual([await box.folders(), await box.inUseNow()], [{ pi: [old], opencode: [old] }, ['Saved']]);
     await rootAtPinB(box);
     await switchProfile(box.share, box.tools, saved, { live: box.live, run: async () => [] });
-    assert.deepEqual([await box.folders(), (await box.skills())['root-fixture']!.except, await box.inUseNow()], [{ pi: ['root-fixture'], opencode: ['root-fixture'] }, [], ['Saved']]);
+    assert.deepEqual([await box.folders(), (await box.skills())['root-fixture']!.except, await box.inUseNow()], [{ pi: ['root-fixture'], opencode: ['root-fixture'] }, ['antigravity-cli'], ['Saved']]);
   } finally { await box.cleanup(); }
 });
 

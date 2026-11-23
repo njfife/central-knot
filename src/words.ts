@@ -7,7 +7,7 @@ import type { HomeKind } from './presence.ts';
 import type { NamedRow } from './itemrow.ts';
 import type { HarnessId, SwitchProblem } from './types.ts';
 
-export const toolNames: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi', 'opencode-cli': 'OpenCode' };
+export const toolNames: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi', 'opencode-cli': 'OpenCode', 'antigravity-cli': 'Antigravity' };
 
 /** What is said about Cowork where Claude desktop is here (presence.ts, hasCowork): on Claude Code's card, and on a plugin's page. */
 export const coworkWords = {

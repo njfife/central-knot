@@ -127,7 +127,7 @@ test('Worked example 1: spoiling plugins.json (invalid JSON or unknown tool id i
     ['invalid JSON', () => '{ broken'],
     ['unknown tool id in except', (good: string) => {
       const parsed = JSON.parse(good) as { plugins: { except: string[] }[] };
-      parsed.plugins[0]!.except.push('antigravity-cli');
+      parsed.plugins[0]!.except.push('future-tool-cli');
       return `${JSON.stringify(parsed, null, 2)}\n`;
     }],
   ] as const) {
