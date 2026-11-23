@@ -18,7 +18,7 @@ import { readPluginItems } from '../src/pluginitems.ts';
 import { pluginOnIn } from '../src/pluginrows.ts';
 import { runPlan, type PlanApi } from '../src/pluginplan.ts';
 import { savePluginRecord } from '../src/pluginrecord.ts';
-import { setPart, setSkill } from '../src/plugins.ts';
+import { setPart, setSkill, setWhole } from '../src/plugins.ts';
 import type { PluginTool } from '../src/presence.ts';
 import { applyServers, serversView } from '../src/servers.ts';
 import { keepDenies } from '../src/serverstore.ts';
@@ -629,13 +629,21 @@ async function sideNow(box: Box) {
     await chmod(bin, 0o755);
     binaries = { 'copilot-cli': bin };
   }
+  if (box.tools.includes('claude-cli')) {
+    // Claude Code's `plugin enable|disable <id>`, as the real one writes it: enabledPlugins in its settings.json, every other key kept.
+    const bin = join(box.base, 'bin/claude');
+    await putFile(bin, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} -e 'const fs=require("fs"),p=require("path"),[a,b,c]=process.argv.slice(1);if(a==="plugin"&&(b==="enable"||b==="disable")&&c){const f=p.join(process.env.HOME,".claude/settings.json"),j=JSON.parse(fs.readFileSync(f,"utf8"));j.enabledPlugins={...j.enabledPlugins,[c]:b==="enable"};fs.writeFileSync(f,JSON.stringify(j,null,2)+"\\n");process.exit(0);}process.exit(9);' "$@"\n`);
+    await chmod(bin, 0o755);
+    binaries = { ...binaries, 'claude-cli': bin };
+  }
   const context = { ...box.context, dataDir: join(box.base, 'data'), binaries };
   const view = { pluginItems: await readPluginItems(context, box.tools), profiles: await readProfiles(box.home), skills: await skillsView(box.context, box.tools),
     mcp: await serversView(box.context, box.tools), agents: await agentsView(box.context, box.tools) } as unknown as HomeView;
   const plugins = pluginLive(view), never = async () => { throw new Error('A profile never installs or uninstalls.'); };
   const api: PlanApi = { install: never, uninstall: never,
     setSkill: async (source, marketName, plugin, skill, tool, on) => ({ reports: [await setSkill(context, marketName, plugin, skill, tool as PluginTool, on, source)] }),
-    setPart: async (source, marketName, plugin, part, tool, on) => ({ reports: [await setPart(context, marketName, plugin, part, tool as PluginTool, on, source)] }) };
+    setPart: async (source, marketName, plugin, part, tool, on) => ({ reports: [await setPart(context, marketName, plugin, part, tool as PluginTool, on, source)] }),
+    setWhole: async (source, marketName, plugin, tool, on) => ({ reports: [await setWhole(context, marketName, plugin, tool as PluginTool, on, source)] }) };
   const side: PluginSide = { live: async () => plugins, run: async ops => (await runPlan(ops, api, box.home)).done };
   return { view, live: homeItems(view), plugins, side, inUse: async () => inUse((await readProfiles(box.home)).profiles, homeItems(view), plugins).map(each => each.name) };
 }
@@ -773,6 +781,39 @@ test('With the whole plugin off in Codex a switch writes nothing there: it is of
     const work = await switchProfile(box.context, box.tools, await made('Work', [docsId('skill', 'pdf-reader'), docsId('skill', 'spreadsheet'), docsId('mcp', 'issues')]), (await sideNow(box)).side);
     assert.deepEqual([work.on, work.results.map(result => result.message)], [['pdf-reader'], ['pdf-reader: The whole plugin docs is off in Codex.', 'spreadsheet: The whole plugin docs is off in Codex.', 'issues: The whole plugin docs is off in Codex.']]);
     assert.deepEqual([await text(box, '.codex/config.toml'), await (await sideNow(box)).inUse()], [off, []]);
+  } finally { await box.cleanup(); }
+});
+
+// ---------- Claude Code takes a plugin whole ----------
+// Claude Code has no switch for one skill of a plugin, so a profile that chooses plugin items has a plugin on there while it ticks
+// any item the plugin brings there, and off while it ticks none. docs@team, in Claude Code alone, brings the skills a, b and c, and
+// with `parts` the MCP server s and the agent g; `enabled` false: off there. Its switch there is `claude plugin enable` (sideNow's
+// stand-in writes enabledPlugins as the real one does).
+
+async function wholeHome({ enabled = true, parts = false } = {}) {
+  const box = await sandbox(['claude-cli']), cache = join(box.home, '.claude/plugins/cache/team/docs/1.0.0');
+  for (const name of ['a', 'b', 'c']) await putFile(join(cache, 'skills', name, 'SKILL.md'), skillText(`The ${name} skill.`, name));
+  await putFile(join(cache, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'docs', version: '1.0.0' }));
+  if (parts) {
+    await putFile(join(cache, '.mcp.json'), JSON.stringify({ mcpServers: { s: { command: 'npx', args: ['s'] } } }));
+    await putFile(join(cache, 'agents/g.md'), '---\nname: g\ndescription: Reviews a change.\n---\n\nYou review changes.\n');
+  }
+  await putFile(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'docs@team': [{ scope: 'user', installPath: cache, version: '1.0.0' }] } }));
+  await putFile(join(box.home, '.claude/settings.json'), `${JSON.stringify({ extraKnownMarketplaces: { team: { source: { source: 'directory', path: '/m' } } }, enabledPlugins: { 'docs@team': enabled } }, null, 2)}\n`);
+  const made = async (name: string, items: string[]) => (await saveProfile(box.context, { name, items })).id!;
+  /** What the page's header and both menus say of a switch to `id`, from the home as it is now. */
+  const preview = async (id: string) => { const now = await sideNow(box); return switchPreview((await readProfiles(box.home)).profiles.find(each => each.id === id)!, now.live, now.plugins); };
+  const settings = async () => JSON.parse((await text(box, '.claude/settings.json'))!);
+  return { box, made, preview, settings };
+}
+
+test('Claude Code takes a plugin whole: with docs off there, a profile that ticks a alone says first that b and c come on too, and the switch turns docs on there', async () => {
+  const { box, made, preview, settings } = await wholeHome({ enabled: false });
+  try {
+    const work = await made('Work', [docsId('skill', 'a')]);
+    assert.equal(await preview(work), 'Switching turns 1 item on. Also turns on 2 other skills of docs in Claude Code');
+    const switched = await switchProfile(box.context, box.tools, work, (await sideNow(box)).side);
+    assert.deepEqual([switched.stopped, switched.on, switched.results, (await settings()).enabledPlugins], [undefined, ['a'], [], { 'docs@team': true }]);
   } finally { await box.cleanup(); }
 });
 
