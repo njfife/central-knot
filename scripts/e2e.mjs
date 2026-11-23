@@ -13556,8 +13556,9 @@ async function stillLoadsFlow() {
 
   // His triage, which a plugin still loads (profileplan.ts keptOn, a plugin's copy), in a small home of its own with Claude Code
   // and Codex alone: triage and keep in Codex's folder, taken in and On; issue-tracker, installed and enabled in Claude Code,
-  // brings the same triage, so Central Knot writes none there. Quiet, with keep alone: the header, triage's row, the result read
-  // again, Codex's folder gone and the plugin as it was; the result's Undo puts Codex's folder back; switched again, his Library row.
+  // brings the same triage, so Central Knot writes none there. Quiet, with keep and the plugin's own triage (so the plugin, whole
+  // in Claude Code, stays on there), not his: the header, triage's row, the result read again, Codex's folder gone and the plugin as
+  // it was; the result's Undo puts Codex's folder back; switched again, his Library row.
   const kit = join(scratch, 'home-plugin-still-loads'), kitData = join(scratch, 'plugin-still-loads-data'), kitTools = join(scratch, 'tools-plugin-still-loads');
   const triage = readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8');
   writeClaudeInstall(kit, 'ck-test-market', 'issue-tracker', '2.0.0', { 'skills/triage/SKILL.md': triage });
@@ -13580,8 +13581,7 @@ async function stillLoadsFlow() {
   await b.click('#nav-profiles');
   await newProfile(b, 'Quiet');
   check('triage reaches Profiles', await until(() => b.exists(byId('pf-skill:triage'))));
-  await b.click(byId('pf-skill:keep'));
-  await bDone();
+  for (const box of ['pf-skill:keep', 'pf-plugin:skill:issue-tracker@ck-test-market/triage']) { await b.click(byId(box)); await bDone(); }
   const kitHeader = 'Switching turns 1 item off; 1 still loads through a plugin, in Claude Code';
   same('the header counts triage as still loading through a plugin, in Claude Code, and its row says so under its name',
     [await b.text('.profile-header p'), await b.text('.pf-row[data-item="skill:triage"] .pf-note')], [kitHeader, 'Claude Code still loads it through a plugin.']);
