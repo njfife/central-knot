@@ -427,7 +427,7 @@ test('What a pass puts in a tool with no click of his behind it has its own entr
   } finally { await b.cleanup(); }
 });
 
-test('A copy a pass could not put in a tool has no entry: a skills folder that can’t be written', async () => {
+test('A copy a pass could not put in a tool has no entry until a later pass puts it there: a skills folder that can’t be written', async () => {
   const b = await box();
   try {
     await b.turnOn();
@@ -439,6 +439,9 @@ test('A copy a pass could not put in a tool has no entry: a skills folder that c
     await turnCodexOn(b);
     assert.deepEqual([await b.read('.codex/skills/todo/SKILL.md'), (await b.history()).filter(event => event.cause === 'in-line' && event.only)], [undefined, []]);
     await chmod(join(b.home, '.codex/skills'), 0o755);
+    await b.pass();
+    assert.deepEqual([!!(await b.read('.codex/skills/todo/SKILL.md')), (await b.history()).filter(event => event.cause === 'in-line' && event.only).map(event => [event.key, event.only])],
+      [true, [['todo', 'codex-cli']]], 'the pass that puts it there once it can is the one whose entry says so');
   } finally { await b.cleanup(); }
 });
 

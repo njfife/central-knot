@@ -5209,9 +5209,11 @@ async function freedOtherWaysFlow() {
   const c = await other.open();
   await openKind(c, 'skills');
   same('opened with the alpha gone: nothing holds this build, and the record names it, by its name', [await c.exists('#held'), other.record().owner, other.record().ownerName], [false, 'com.centralknot.firstlook', 'Central Knot']);
-  // (The AppImage's first open also turns start at sign-in on: this build's own default, not the alpha's.)
+  // (The AppImage's first open also turns start at sign-in on: this build's own default, not the alpha's; and toolsSeen is the
+  // tools this build saw managed in the home, its own record: arrivals.ts.)
+  const { toolsSeen: _seen, ...appNow } = JSON.parse(readFileSync(join(other.data, 'app-settings.json'), 'utf8'));
   same('of the alpha’s choices only History’s days are this build’s now (the longer): Automatic sync, plugin updates and the home it opens are as they were',
-    [readFileSync(join(other.data, 'sync-settings.json'), 'utf8'), JSON.parse(readFileSync(join(other.data, 'app-settings.json'), 'utf8'))], [ownSync, { ...ownApp, historyDays: 90, ...(appImageRun ? { startAtSignIn: true } : {}) }]);
+    [readFileSync(join(other.data, 'sync-settings.json'), 'utf8'), appNow], [ownSync, { ...ownApp, historyDays: 90, ...(appImageRun ? { startAtSignIn: true } : {}) }]);
   check('Skills asks Resume, and nothing on the page names the alpha', await c.exists('#resume') && !(await c.run('document.body.innerText')).includes('Central Knot Alpha'), await c.text('.bands'));
   same('nothing in its tools changed before Resume', toolFiles(other.home), files);
   await c.click('#resume');
