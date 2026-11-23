@@ -31,8 +31,8 @@ const switchHeld = (install: InstalledPlugin, part: Part): string | undefined =>
   : part.kind === 'skill' ? install.switchesHeld ?? install.skillsHeld?.[part.name] ?? noSwitchReason(install.tool, undefined, part.name) : undefined);
 /** The plugin's items in that tool whose own switch can be written: those are held off when the plugin comes on for one item. */
 const switchable = (install: InstalledPlugin): Part[] => install.items.filter(entry => hasOwnSwitch(install.tool, entry.kind) && !switchHeld(install, entry));
-/** Whether the tool has this one item's own switch off now. */
-const itemOffNow = (install: InstalledPlugin, part: Part) => !!{ skill: install.skillsOff, mcp: install.serversOff, agent: install.agentsOff }[part.kind]?.some(name => samePart(part, { kind: part.kind, name }));
+/** Whether the tool has this one item's own switch off now, whether or not the whole plugin is on there. */
+export const itemOffNow =(install: InstalledPlugin, part: Part) => !!{ skill: install.skillsOff, mcp: install.serversOff, agent: install.agentsOff }[part.kind]?.some(name => samePart(part, { kind: part.kind, name }));
 
 /** Whether the whole plugin is off in the item's tool once the draft runs. */
 const wholeOffAfter = (draft: PluginDraft, item: PluginItemAt) => {

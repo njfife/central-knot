@@ -2,7 +2,8 @@
 // switch changes, which profile is in use, what its Undo turns back) are profileplan.ts's. A switch is the library's own clicks,
 // Turn on and Turn off, made together in one pass per kind (skills.ts applySkills, servers.ts applyServers, agents.ts
 // applyAgents), and for a plugin's items each copy's own switch: an installed copy's in its tool (pluginswitch.ts click, run
-// through the main process: PluginSide), a copy placed in Pi or OpenCode by its library item's On or Off in a pass of its own,
+// through the main process: PluginSide), in Claude Code its whole plugin's with its parts' switches, one run per plugin
+// (profileplan.ts wholeRuns), a copy placed in Pi or OpenCode by its library item's On or Off in a pass of its own,
 // and any uncovered Copilot CLI `disabledMcpServers` rule cleared on switch or Undo and restored on Undo (`runCopilotRules`);
 // all of it told to History in one entry of its own, written first (librarypass.ts PassOptions told) and then left holding only
 // the plugin copies and Copilot CLI rules each tool confirmed. Its Undo is each library item's own Turn on or Turn off, each with its own entry, and
@@ -23,9 +24,9 @@ import { appendHistory, clock, readHistory, replaceHistory } from './history.ts'
 import { itemKey, type ItemKind } from './library.ts';
 import type { KindLibrary } from './librarypass.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from './mcpswitch.ts';
-import { succeeded, type PluginDone, type PluginDraft, type PluginOp } from './pluginplan.ts';
+import { reverse, strayHolds, succeeded, type PluginDone, type PluginDraft, type PluginOp } from './pluginplan.ts';
 import { click } from './pluginswitch.ts';
-import { changes, copilotKeptOnBy, copilotUndo, heldWords, liveItems, onAfterUndo, pluginPlan, pluginUndo, switchPlan, undoPlan, withCopilotOff, type CopilotRule, type CopyTurn, type Libraries, type LiveItem, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
+import { changes, copilotKeptOnBy, copilotUndo, heldWords, liveItems, onAfterUndo, pluginPlan, pluginUndo, switchPlan, undoPlan, wholeRuns, withCopilotOff, type CopilotRule, type CopyTurn, type Libraries, type LiveItem, type PluginLive, type PluginTurn, type Turns, type WholeRun } from './profileplan.ts';
 import type { ReloadChange } from './reload.ts';
 import { applyServers, serverKind, serversView } from './servers.ts';
 import { errorCode, libraryGate, storeDirectory, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
@@ -208,13 +209,15 @@ function placedClicks(kind: ItemKind, copies: CopyTurn[], libraries: Libraries):
 /**
  * Turns `turns.on` On and `turns.off` Off, the library's own clicks, one pass per kind (`told`: History has them in the caller's
  * entry); then the placed copies in `copies`, one pass per kind of their own whose entry is always the caller's (placedClicks);
- * then each installed copy by its own switch in its tool (installedCopy). Answers what each pass and tool said, the entries the
+ * then each installed copy by its own switch in its tool (installedCopy), but those in `runs`: each run's copies together, its
+ * steps in one run (in Claude Code: profileplan.ts wholeRuns), its part switches put back if its plugin then didn't come on
+ * (pluginplan.ts strayHolds). Answers what each pass and tool said, the entries the
  * library items' clicks made, what is as asked after, read back: each library item (`done`), each copy whose change its tool
  * confirmed (`copies`: a placed copy by its library item read again and that tool's own result in its pass), and the placed
  * copies whose library item is no longer the plugin's (`letGo`: edited by hand since), and each installed copy its tool found as
- * asked already (`asAsked`), which are neither turned nor failed.
+ * asked already (`asAsked`), which are neither turned nor failed; and the runs' steps that changed (`steps`).
  */
-async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Turns, told: boolean, copies: CopyTurn[], libraries: Libraries, plugins: PluginSide) {
+async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Turns, told: boolean, copies: CopyTurn[], libraries: Libraries, plugins: PluginSide, runs: WholeRun[]) {
   const results: DestinationResult[] = [], made: string[] = [], placedResults: { kind: ItemKind; result: DestinationResult }[] = [], reloads: ReloadChange[] = [];
   for (const { kind, pass } of KINDS) {
     const asked = [...turns.on.filter(item => item.kind === kind).map(item => [item, true] as const), ...turns.off.filter(item => item.kind === kind).map(item => [item, false] as const)];
@@ -228,8 +231,20 @@ async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Tu
       if (mine) placedResults.push(...done.results.map(result => ({ kind, result }))); else made.push(...(done.made ?? []));
     }
   }
-  const confirmed: CopyTurn[] = [], asAsked: CopyTurn[] = [], copilotDone = new Set<string>();
-  for (const turn of copies.filter(each => !placedKey(each))) {
+  const confirmed: CopyTurn[] = [], asAsked: CopyTurn[] = [], copilotDone = new Set<string>(), steps: PluginOp[] = [], inRuns = new Set(runs.flatMap(run => run.copies));
+  for (const run of runs) {
+    const done = await plugins.run(run.ops), failed = done.filter(each => !succeeded(each.report)), { item: { plugin }, copy: { tool } } = run.copies[0]!;
+    if (failed.length || done.length < run.ops.length) {
+      const stray = strayHolds(done);
+      if (stray.length) await plugins.run(reverse(stray));
+      const said = failed.length ? failed.map(({ report }) => report) : [{ outcome: 'failed', message: 'It stopped before it was through.' }];
+      results.push(...said.map(report => ({ item: plugin, harness: tool, outcome: report.outcome === 'held' ? 'held' as const : 'failed' as const, message: `${plugin}: ${report.message}` })));
+    } else if (done.some(each => each.report.changed)) {
+      confirmed.push(...run.copies);
+      for (const { report, ...op } of done.filter(each => each.report.changed)) { steps.push(op); reloads.push(...report.reloads ?? []); }
+    } else asAsked.push(...run.copies);
+  }
+  for (const turn of copies.filter(each => !placedKey(each) && !inRuns.has(each))) {
     // Two plugins sharing an exact MCP server name in Copilot CLI share one switch: once the first confirmed it, the second did too.
     const shared = turn.item.kind === 'mcp' && turn.copy.tool === 'copilot-cli' ? `${turn.item.name}\u0000${turn.on}` : undefined;
     if (shared && copilotDone.has(shared)) { confirmed.push(turn); continue; }
@@ -248,14 +263,14 @@ async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Tu
       && result.harness === turn.copy.tool && (result.outcome === 'failed' || result.outcome === 'held'));
   };
   return { results, made, reloads, done: { on: turns.on.filter(item => now(item) === true), off: turns.off.filter(item => now(item) === false) },
-    copies: copies.filter(turn => (placedKey(turn) ? placedDone(turn) : confirmed.includes(turn))), letGo, asAsked };
+    copies: copies.filter(turn => (placedKey(turn) ? placedDone(turn) : confirmed.includes(turn))), letGo, asAsked, steps };
 }
 
 /**
  * One installed copy turned by its own switch in its tool, run by the main process: the one step pluginswitch.ts click makes for
- * it, never a whole plugin's, since a copy a plan turns has its plugin on there and a switch of its own that can be written
- * (profileplan.ts installedWay). Answers whether the tool confirmed a change (`changed`; not when it was as asked already), or
- * what went wrong (`failed`).
+ * it, never a whole plugin's, since a copy a plan turns outside Claude Code (whose go in runs: profileplan.ts wholeRuns) has its
+ * plugin on there and a switch of its own that can be written (profileplan.ts installedWay). Answers whether the tool confirmed a
+ * change (`changed`; not when it was as asked already), or what went wrong (`failed`).
  */
 async function installedCopy({ item, copy, on }: CopyTurn, plugins: PluginSide): Promise<{ changed: boolean; failed?: DestinationResult; reloads: ReloadChange[] }> {
   const draft: PluginDraft = new Map();
@@ -316,11 +331,12 @@ async function runCopilotRules(context: ShareContext, rules: CopilotRule[], disa
   return { confirmed, results, left };
 }
 
-/** A switch's or Undo's entry once its passes ran: keeping only confirmed plugin copies and orphan Copilot CLI clears, plus settings notes. Returns the settled profile payload written to History. */
-async function settleEntry(context: ShareContext, eventId: string, confirmed: CopyTurn[], settingsChanged: string[], copilotCleared?: CopilotRule[]): Promise<HistoryEvent['profile']> {
+/** A switch's or Undo's entry once its passes ran: keeping only confirmed plugin copies, the whole plugins' steps that changed and orphan Copilot CLI clears, plus settings notes. Returns the settled profile payload written to History. */
+async function settleEntry(context: ShareContext, eventId: string, confirmed: CopyTurn[], steps: PluginOp[], settingsChanged: string[], copilotCleared?: CopilotRule[]): Promise<HistoryEvent['profile']> {
   const history = await readHistory(context), entry = history.find(each => each.id === eventId);
   if (!entry?.profile) return undefined;
   if (entry.profile.plugins) entry.profile.plugins = confirmed.map(switched);
+  if (entry.profile.wholeSteps) { if (steps.length) entry.profile.wholeSteps = steps; else delete entry.profile.wholeSteps; }
   if (copilotCleared) { if (copilotCleared.length) entry.profile.copilotCleared = copilotCleared; else delete entry.profile.copilotCleared; }
   if (settingsChanged.length) entry.settingsChanged = settingsChanged;
   await replaceHistory(context, history);
@@ -347,18 +363,18 @@ export async function switchProfile(context: ShareContext, tools: HarnessId[], i
   const live = await plugins.live(), { items } = await withCopilot(context, tools, liveItems(read.libraries, read.plugins), live);
   const planned = switchPlan(profile, items), turns: Turns = { on: planned.on.filter(item => !item.on), off: planned.off };
   const clears: CopilotRule[] = planned.on.filter(item => item.copilotOff).map(item => ({ id: item.id, name: item.name, server: item.copilotOff! }));
-  const plan = pluginPlan(profile, live), copies = copiesTurned(plan, live), held = heldResults(plan, live);
+  const plan = pluginPlan(profile, live), copies = copiesTurned(plan, live), runs = wholeRuns(profile, copies), held = heldResults(plan, live);
   if (!changes(planned) && !copies.length) return held.length ? stopped(`${heldWords(plan, live).text}. Nothing was switched.`) : { name: profile.name, on: [], off: [], left: [], results: [], reloads: [] };
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return stopped(`${gate.refused} Nothing was switched.`);
-  const event = profileEvent(context, profile.name, { toName: profile.name, on: named(turns.on), off: named(turns.off),
-    ...(copies.length ? { plugins: copies.map(switched) } : {}), ...(clears.length ? { copilotCleared: clears } : {}) });
+  const steps = runs.flatMap(run => run.ops), event = profileEvent(context, profile.name, { toName: profile.name, on: named(turns.on), off: named(turns.off),
+    ...(copies.length ? { plugins: copies.map(switched) } : {}), ...(steps.length ? { wholeSteps: steps } : {}), ...(clears.length ? { copilotCleared: clears } : {}) });
   await appendHistory(context, [event]);
-  const done = await turnTogether(context, tools, turns, true, copies, read.libraries, plugins), rules = await runCopilotRules(context, clears, false);
+  const done = await turnTogether(context, tools, turns, true, copies, read.libraries, plugins, runs), rules = await runCopilotRules(context, clears, false);
   const settingsChanged = [...done.results.flatMap(result => (result.settingsChanged ? [result.settingsChanged] : [])), ...clearedForHis(profile, done.copies),
     ...rules.confirmed.map(orphanClearedNote)];
-  const settled = done.copies.length < copies.length || rules.confirmed.length < clears.length || settingsChanged.length
-    ? await settleEntry(context, event.id, done.copies, settingsChanged, clears.length ? rules.confirmed : undefined)
+  const settled = done.copies.length < copies.length || done.steps.length < steps.length || rules.confirmed.length < clears.length || settingsChanged.length
+    ? await settleEntry(context, event.id, done.copies, done.steps, settingsChanged, clears.length ? rules.confirmed : undefined)
     : event.profile;
   const out = outcome(turns, done.done, [...held, ...done.results, ...rules.results], copies.filter(turn => !done.asAsked.includes(turn)), done.copies);
   return { name: profile.name, on: [...out.on, ...rules.confirmed.filter(rule => !done.done.on.some(item => item.id === rule.id)).map(rule => rule.name)],
@@ -374,7 +390,7 @@ export async function undoSwitch(context: ShareContext, tools: HarnessId[], even
   const read = await readLibraries(context);
   if ('stop' in read) return stop(read.stop);
   const livePlugins = await plugins.live(), { items, rows } = await withCopilot(context, tools, liveItems(read.libraries, read.plugins), livePlugins);
-  const turns = undoPlan(past, items), afterOn = onAfterUndo(items, turns), { back, left, keptOff: pluginKept } = pluginUndo(past, livePlugins, afterOn);
+  const turns = undoPlan(past, items), afterOn = onAfterUndo(items, turns), { back, whole, left, keptOff: pluginKept } = pluginUndo(past, livePlugins, afterOn);
   const { back: copilotBack, keptOff: ruleKept } = copilotUndo(past, rows, read.libraries.mcp, afterOn);
   const copilotClear: CopilotRule[] = turns.on.filter(item => item.copilotOff).map(item => ({ id: item.id, name: item.name, server: item.copilotOff! }));
   const keptNotes = [...new Set([...pluginKept, ...ruleKept])].map(name => `Copilot CLI’s off-switch for “${name}” was left off: a server of yours has that name there now.`);
@@ -384,10 +400,10 @@ export async function undoSwitch(context: ShareContext, tools: HarnessId[], even
   const undo = back.length || copilotBack.length || copilotClear.length ? profileEvent(context, past.item, { toName: past.profile.toName, undoOf: past.id, on: named(turns.on), off: named(turns.off),
     ...(back.length ? { plugins: back.map(switched) } : {}), ...(copilotBack.length ? { copilotCleared: copilotBack } : {}) }) : undefined;
   if (undo) await appendHistory(context, [undo]);
-  const { results, made, reloads, done, copies, letGo, asAsked } = await turnTogether(context, tools, turns, false, back, read.libraries, plugins);
+  const { results, made, reloads, done, copies, letGo, asAsked } = await turnTogether(context, tools, turns, false, back, read.libraries, plugins, whole);
   const rules = await runCopilotRules(context, copilotBack, true), cleared = await runCopilotRules(context, copilotClear, false);
   const undoNotes = [...keptNotes, ...cleared.confirmed.map(orphanClearedNote)];
-  if (undo && (copies.length < back.length || rules.confirmed.length < copilotBack.length || undoNotes.length)) await settleEntry(context, undo.id, copies, undoNotes, copilotBack.length ? rules.confirmed : undefined);
+  if (undo && (copies.length < back.length || rules.confirmed.length < copilotBack.length || undoNotes.length)) await settleEntry(context, undo.id, copies, [], undoNotes, copilotBack.length ? rules.confirmed : undefined);
   const by = (undo && (copies.length || rules.confirmed.length || cleared.confirmed.length) ? undo.id : undefined) ?? made[0];
   if (by) { const now = await readHistory(context), entry = now.find(each => each.id === eventId); if (entry) { entry.undoneBy = by; await replaceHistory(context, now); } }
   const { results: notDone, ...switchedBack } = outcome(turns, done, [...results, ...rules.results, ...cleared.results], back.filter(turn => !asAsked.includes(turn) && !letGo.includes(turn)), copies);

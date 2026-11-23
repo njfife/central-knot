@@ -586,10 +586,12 @@ export interface HistoryEvent {
    * Off, and a switch's plugins' items' copies it turned (`plugins`: written as planned before the switch, then as each tool
    * confirmed). Its Undo turns back each item and copy still as it left it (profileplan.ts undoPlan, pluginUndo), the copies told
    * in an entry of the Undo's own (`undoOf`: the switch's entry; `plugins`: what it turned them back to; `on` and `off`: his items
-   * it turned back too, which have entries of their own as well), which has no Undo. An
+   * it turned back too, which have entries of their own as well), which has no Undo. A switch's `wholeSteps`: the steps it ran on
+   * the plugins Claude Code takes whole (profileplan.ts wholeRuns: written as planned, then those that changed), each plugin's
+   * reversed by its Undo while the plugin is as they left it (profileplan.ts pluginUndo). An
    * entry from before profiles were sets of items has neither `on` nor `off`: it is past.
    */
-  profile?: { toName?: string; on?: SwitchedItem[]; off?: SwitchedItem[]; plugins?: PluginSwitched[]; copilotCleared?: { id: string; name: string; server: string }[]; migrated?: true; undoOf?: string };
+  profile?: { toName?: string; on?: SwitchedItem[]; off?: SwitchedItem[]; plugins?: PluginSwitched[]; wholeSteps?: PluginOp[]; copilotCleared?: { id: string; name: string; server: string }[]; migrated?: true; undoOf?: string };
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false); `before`, a Claude Code override it replaced ("name-only"), for Undo. */
   switched?: SwitchRecord[];
   /** What the pass changed in a tool's own settings with the copies, in words (librarypass.ts Kind.follow): Pi's skills list. */

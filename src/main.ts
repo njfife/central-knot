@@ -996,15 +996,15 @@ async function profileHome(tools: HarnessId[]): Promise<PluginHome> {
 
 /**
  * What a profile switch and its Undo are given of the plugins' items (profiles.ts PluginSide): each as it is now in `tools`
- * (profileHome, so a switch queued behind another plans from what that one left), and a run of one item's own switch in its
- * tool, through the Plugins page's own steps (marketplaces.ts setSkill, setPart); a profile installs and uninstalls nothing.
+ * (profileHome, so a switch queued behind another plans from what that one left), and a run of an item's own switch in its tool,
+ * or of a whole plugin's in Claude Code (profileplan.ts wholeRuns), through the Plugins page's own steps (marketplaces.ts setSkill,
+ * setPart, setWhole); a profile installs and uninstalls nothing.
  */
 const pluginSide = (tools: HarnessId[]): PluginSide => ({ live: async () => pluginLive(await profileHome(tools)), run: async ops => {
   const markets = carriedMarket, home = current?.home;
   if (!markets || !home) return [];
-  // No setWhole is given, so a whole plugin's step fails for its tool (pluginplan.ts runPlan); no install or uninstall runs either.
   const never = async (tools: HarnessId[]) => ({ reports: failedFor(tools, 'A profile never installs or uninstalls a plugin.') });
-  return (await runPlan(ops, { install: (...args) => never(args[3]), uninstall: (...args) => never([args[3]]), setSkill: markets.setSkill, setPart: markets.setPart }, home)).done;
+  return (await runPlan(ops, { install: (...args) => never(args[3]), uninstall: (...args) => never([args[3]]), setSkill: markets.setSkill, setPart: markets.setPart, setWhole: markets.setWhole }, home)).done;
 } });
 
 /** Refreshes the menus' live library items and plugin copies for `tools`, from the same read the page and switch use (profileHome). */

@@ -2,7 +2,8 @@
 // shows each profile and which are in use; the open profile shows every item it can tick, under its kind (skills, MCP servers,
 // agents): the library's items, and when `switchesPluginItems` is true each plugin's item some tool has, from its plugin, with
 // under its name each tool that doesn't switch it (copyNote; why, for a tool with no switch for one item, the head of its kind
-// says once: kindNote); an older profile with `switchesPluginItems` false hides
+// says once: kindNote), and in Claude Code, which takes a plugin whole, what comes on there with a ticked item (wholeNote, such a
+// skill's row set in beneath it: withBrought); an older profile with `switchesPluginItems` false hides
 // plugin rows behind "Choose plugin items for this profile" until chosen. Each row has its box (in the profile or not) and what
 // a switch would do to it (one the profile leaves out names under its name the tools that keep it on: profileplan.ts keptOn),
 // and under Find a line on what the Library lists beside them (items only found: profileplan.ts leftOut). Ticking only edits the
@@ -11,12 +12,12 @@
 import { acting, deleteProfileDef, machine, profileState, rerender, saveProfileDef, showPage, state, switchToProfile, whyReadOnly } from './app.ts';
 import { openPlugin, outcomeBand, pluginTag, problemsBand } from './matrix.ts';
 import { button, checkbox, emptyState, findInput, h, icon } from './dom.ts';
-import { allTurns, changes, copilotKeptOnBy, heldWords, homeItems, inUse, inUseName, itemRowState, keptOn, leftOut, loadWords, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginPlan, pluginRowState, pluginStayNote, switchable, switchPlan, switchPreview, turnsWords, type LiveItem, type PluginCopy, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
+import { allTurns, changes, claudeInstall, copilotKeptOnBy, heldWords, homeItems, inUse, inUseName, itemRowState, keptOn, leftOut, loadWords, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginPlan, pluginRowState, pluginStayNote, switchable, switchPlan, switchPreview, takenWhole, turnsWords, type LiveItem, type PluginCopy, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
 import { noSingleSwitch } from './pluginstatus.ts';
 import { andList, toolList, toolNames } from './words.ts';
 import type { ItemKind } from './library.ts';
 import { plural } from './model.ts';
-import type { HarnessId, Profile } from './types.ts';
+import type { HarnessId, PluginItem, Profile } from './types.ts';
 
 let find = '';
 /** Whether the status bar's profile menu is open. */
@@ -111,18 +112,20 @@ function itemRow(profile: Profile, item: LiveItem, plan: Plan) {
 }
 
 /**
- * What a switch does to a plugin's item, in its column: Turns on or off where some tool turns it (pluginPlan), naming those tools
- * when others don't turn ("Turns off in Codex and Pi"); else what the row shows while in use (profileplan.ts pluginRowState), or
- * No change. A tool that keeps it on because it can't switch one item says so under the row's name (copyNote).
+ * What a switch does to a plugin's item, in its column: Turns on or off where some tool turns it (pluginPlan; on, too, where it
+ * comes on with its whole plugin: `along`), naming those tools when others don't turn ("Turns off in Codex and Pi"); else what the
+ * row shows while in use (profileplan.ts pluginRowState), or No change. A tool that keeps it on because it can't switch one item
+ * says so under the row's name (copyNote).
  */
 function pluginState(profile: Profile, item: PluginLive, turn: PluginTurn | undefined, isInUse: boolean): { said: string; changes: boolean } {
-  if (!turn?.on.length && !turn?.off.length) return { said: isInUse ? pluginRowState(profile, item) : 'No change', changes: false };
+  const on = [...turn?.on ?? [], ...turn?.along ?? []];
+  if (!on.length && !turn?.off.length) return { said: isInUse ? pluginRowState(profile, item) : 'No change', changes: false };
   const part = (dir: 'on' | 'off', list: HarnessId[]) => `turns ${dir}${list.length < item.copies.length ? ` in ${andList(list.map(tool => toolNames[tool]))}` : ''}`;
-  const both = [turn.on.length && part('on', turn.on), turn.off.length && part('off', turn.off)].filter(Boolean).join('; ');
+  const both = [on.length && part('on', on), turn!.off.length && part('off', turn!.off)].filter(Boolean).join('; ');
   return { said: `${both.charAt(0).toUpperCase()}${both.slice(1)}`, changes: true };
 }
 
-/** At the head of a kind, once: each tool with no switch for one item of a plugin of that kind that has such an item here, which keeps those items on. */
+/** At the head of a kind, once: each tool with no switch for one item of a plugin of that kind that has such an item here, which keeps those items on (Copilot CLI's agents; Claude Code takes a plugin whole instead: wholeNote). */
 function kindNote(kind: ItemKind, plugged: PluginLive[]) {
   const tools = [...new Set(plugged.flatMap(item => item.copies.filter(copy => copy.way === 'stays').map(copy => copy.tool)))];
   return tools.length ? h('div.pf-kind-note', { role: 'note', id: `pf-note-${kind}` }, tools.map(tool => `${noSingleSwitch(tool, kind)}, so a plugin’s ${kindWords[kind].many} stay on there.`).join(' ')) : null;
@@ -133,7 +136,7 @@ function kindNote(kind: ItemKind, plugged: PluginLive[]) {
  * sharing its exact name (profileplan.ts copilotKeptOnBy): on a row the profile leaves out, a copy that stays on in a tool with no
  * switch for one item (the head of the kind says it once for every row: kindNote); its whole plugin off there, with the way to
  * the plugin's page; its own switch held (pluginswitch.ts cantSwitch); its copy unreadable. Nothing for a copy that switches for
- * this item alone.
+ * this item alone, or with its whole plugin in Claude Code (wholeNote says that once for the item).
  */
 function copyNote(profile: Profile, item: PluginLive, copy: PluginCopy): HTMLElement | null {
   const tool = toolNames[copy.tool], note = (text: string, ...more: (Node | null)[]) => h('span.pf-note', { 'data-tool': copy.tool }, text, ...more);
@@ -145,6 +148,7 @@ function copyNote(profile: Profile, item: PluginLive, copy: PluginCopy): HTMLEle
       : h('span.pf-note', { 'data-tool': copy.tool, title: 'To use yours there, rename one of the two or turn the plugin off in Copilot CLI.' },
         `${verb} in ${tool}, which runs the plugin’s “${item.name}” instead of yours (same name).`);
   }
+  if (copy.way === 'whole') return null;
   // Why, the head of its kind says once (kindNote).
   if (copy.way === 'stays') return profile.items.includes(item.id) ? null : note(`Stays on in ${tool}.`);
   if (copy.way === 'unread') return h('span.pf-note', { 'data-tool': copy.tool, title: copy.why }, `Not known in ${tool}: its copy couldn’t be read.`);
@@ -154,13 +158,41 @@ function copyNote(profile: Profile, item: PluginLive, copy: PluginCopy): HTMLEle
     attrs: { title: `Open ${item.plugin} on Plugins, where it is turned on or off in each tool` }, onclick: () => openPlugin({ source, plugin: item.plugin, marketplace: item.marketName }) }));
 }
 
-/** A plugin's item's row: its box, its name and plugin (the Library's mark, matrix.ts pluginTag), what a switch does to it, and under its name each tool whose copy it can't turn or keeps on by shared name (copyNote). */
-function pluginRow(profile: Profile, item: PluginLive, turn: PluginTurn | undefined, isInUse: boolean) {
-  const included = profile.items.includes(item.id), { said, changes: moves } = pluginState(profile, item, turn, isInUse), notes = item.copies.flatMap(copy => copyNote(profile, item, copy) ?? []);
+/**
+ * Under a plugin item's name, where Claude Code takes its plugin whole (profileplan.ts takenWhole): on a ticked row, the skills the
+ * profile leaves out that come on there with it; on such a skill's row, what it comes on with. Nothing where no skill comes on so.
+ */
+function wholeNote(profile: Profile, item: PluginLive): HTMLElement | null {
+  const install = claudeInstall(item), { ticked, brought } = install ? takenWhole(profile, install) : { ticked: [], brought: [] };
+  const names = (parts: PluginItem[]) => andList(parts.map(part => part.name)), note = (text: string) => h('span.pf-note', { 'data-tool': 'claude-cli' }, text);
+  if (!brought.length) return null;
+  if (profile.items.includes(item.id)) return note(`Brings ${names(brought)} on in Claude Code.`);
+  return brought.some(part => part.kind === item.kind && part.name === item.name) ? note(`Comes on in Claude Code with ${names(ticked)} (${item.plugin} is whole there).`) : null;
+}
+
+/**
+ * A kind's plugin rows in their order, but each skill that comes on in Claude Code only with a ticked row of its plugin (wholeNote)
+ * set in beneath the first such row of this list (`beneath`), as the owner pictured it; one whose ticked row isn't in the list
+ * (another kind's, or hidden by Find) stays where it is.
+ */
+function withBrought(profile: Profile, rows: PluginLive[]): { item: PluginLive; beneath: boolean }[] {
+  const ticked = (item: PluginLive) => profile.items.includes(item.id);
+  const bringer = (item: PluginLive) => {
+    const install = claudeInstall(item);
+    return install && !ticked(item) && takenWhole(profile, install).brought.some(part => part.kind === item.kind && part.name === item.name) ? rows.find(other => ticked(other) && claudeInstall(other) === install) : undefined;
+  };
+  const under = new Map(rows.map(item => [item, bringer(item)]));
+  return rows.flatMap(item => (under.get(item) ? [] : [{ item, beneath: false }, ...rows.filter(other => under.get(other) === item).map(other => ({ item: other, beneath: true }))]));
+}
+
+/** A plugin's item's row: its box, its name and plugin (the Library's mark, matrix.ts pluginTag), what a switch does to it, and under its name what comes on with it in Claude Code (wholeNote) and each tool whose copy it can't turn or keeps on by shared name (copyNote); set in beneath the row it comes on with (`beneath`: withBrought). */
+function pluginRow(profile: Profile, item: PluginLive, turn: PluginTurn | undefined, isInUse: boolean, beneath = false) {
+  const included = profile.items.includes(item.id), { said, changes: moves } = pluginState(profile, item, turn, isInUse);
+  const notes = [wholeNote(profile, item), ...item.copies.map(copy => copyNote(profile, item, copy))].flatMap(note => note ?? []);
   const kept = !included ? item.copies.map(copy => (copy.way === 'switch' ? copilotKeptOnBy(profile, item, copy) : undefined)).find(Boolean) : undefined;
   const except = kept ? `, except Copilot CLI (same name as ${kept.by === 'plugin' ? `${kept.plugin}’s` : 'yours'})` : '';
   const help = `${included ? `In ${profile.name}: switching to it turns ${item.name} on` : `Not in ${profile.name}: switching to it turns ${item.name} off`} in each tool that can switch it${except}. Click to ${included ? 'leave it out' : 'put it in'}.`;
-  return h(`div.pf-row${included ? '.pf-included' : ''}`, { role: 'row', 'data-item': item.id },
+  return h(`div.pf-row${included ? '.pf-included' : ''}${beneath ? '.pf-beneath' : ''}`, { role: 'row', 'data-item': item.id },
     h('span.pf-name', { role: 'cell' },
       tick(profile, { id: `pf-${item.id}`, checked: included, label: `${item.name} (${kindWords[item.kind].one} from ${item.plugin}) in ${profile.name}`, help,
         itemsAfterClick: included ? profile.items.filter(entry => entry !== item.id) : [...profile.items, item.id] }),
@@ -185,7 +217,8 @@ function tableSection(profile: Profile, kind: ItemKind, list: LiveItem[], plugge
   const tickAll = tick(profile, { id: `pf-all-${kind}`, checked: all, mixed: inside > 0, label: `${title}: all in ${profile.name}`, help: `${all ? 'Leave every one' : 'Put every one'}${find ? ' shown' : ''} ${all ? 'out of' : 'in'} ${profile.name}`,
     itemsAfterClick: all ? profile.items.filter(entry => !ids.has(entry)) : [...new Set([...profile.items, ...ids])] });
   return [h('div.pf-section', { role: 'row' }, h('span.pf-section-label', { role: 'cell' }, tickAll, h('strong', {}, title), h('span.pf-section-count', {}, `${inside} of ${ids.size} ticked`))),
-    kindNote(kind, plugged), ...list.map(item => itemRow(profile, item, plan)), ...plugged.map(item => pluginRow(profile, item, plan.plugs.find(turn => turn.id === item.id), plan.isInUse))];
+    kindNote(kind, plugged), ...list.map(item => itemRow(profile, item, plan)),
+    ...withBrought(profile, plugged).map(({ item, beneath }) => pluginRow(profile, item, plan.plugs.find(turn => turn.id === item.id), plan.isInUse, beneath))];
 }
 
 /** The items under their kinds, each with what a switch does to it. */
