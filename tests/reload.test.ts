@@ -871,3 +871,70 @@ echo '${JSON.stringify({ plugins: { 'kit@team': [{ scope: 'user', installPath: n
     assert.deepEqual(reloadAdvice(settleReloads(pluginReloads([{ source: market, marketName: 'team', plugin: 'kit', tool: 'claude-cli', action: 'update', report }]))), { text: '', items: [] });
   } finally { await box.cleanup(); }
 });
+
+test('A whole plugin turned off advises its tool’s plugin row while single-item Off stays silent', async () => {
+  const box = await tempHome(['claude-cli', 'copilot-cli', 'codex-cli']);
+  try {
+    const market = join(box.base, 'market');
+    const claudeCopy = join(box.home, '.claude/plugins/cache/team/kit/1.0.0');
+    const copilotCopy = join(box.home, '.copilot/cache/team/kit');
+    await put(join(claudeCopy, '.claude-plugin/plugin.json'), '{"name":"kit","version":"1.0.0"}');
+    await put(join(claudeCopy, 'skills/triage/SKILL.md'), skillText('triage'));
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ plugins: { 'kit@team': [{ scope: 'user', installPath: claudeCopy, version: '1.0.0' }] } }));
+    await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'directory', path: market } } }));
+    await put(join(copilotCopy, 'skills/triage/SKILL.md'), skillText('triage'));
+    await put(join(box.home, '.codex/plugins/cache/team/kit/1.0.0/skills/triage/SKILL.md'), skillText('triage'));
+    const fakeClaude = join(box.base, 'claude'), fakeCopilot = join(box.base, 'copilot');
+    await put(fakeClaude, `#!/bin/sh
+node -e 'const fs = require("fs"), p = process.env.HOME + "/.claude/settings.json"; const d = JSON.parse(fs.readFileSync(p, "utf8")); d.enabledPlugins[process.argv[3]] = process.argv[2] === "enable"; fs.writeFileSync(p, JSON.stringify(d));' "$@"
+`);
+    await put(fakeCopilot, `#!/bin/sh
+node -e 'const fs = require("fs"), p = process.env.HOME + "/.copilot/config.json"; const d = JSON.parse(fs.readFileSync(p, "utf8")); d.installedPlugins[0].enabled = process.argv[2] === "enable"; fs.writeFileSync(p, JSON.stringify(d));' "$@"
+`);
+    await chmod(fakeClaude, 0o755);
+    await chmod(fakeCopilot, 0o755);
+    const cases: ['claude-cli' | 'copilot-cli' | 'codex-cli', 'cli' | 'app' | 'both', string][] = [
+      ['claude-cli', 'cli', 'Turned off in Claude Code. In Claude Code, type /reload-plugins.'],
+      ['claude-cli', 'app', 'Turned off in Claude Code. In Claude desktop’s Code tab, type /reload-plugins or start a new session.'],
+      ['claude-cli', 'both', 'Turned off in Claude Code. In Claude Code or Claude desktop’s Code tab, type /reload-plugins.'],
+      ['copilot-cli', 'cli', 'Turned off in Copilot CLI. In Copilot CLI, start a new session.'],
+      ['copilot-cli', 'app', 'Turned off in Copilot CLI. Restart the GitHub Copilot app.'],
+      ['copilot-cli', 'both', 'Turned off in Copilot CLI. In Copilot CLI, start a new session, or restart the GitHub Copilot app.'],
+      ['codex-cli', 'cli', 'Turned off in Codex. In Codex, start a new session.'],
+      ['codex-cli', 'app', 'Turned off in Codex. Restart the ChatGPT desktop app.'],
+      ['codex-cli', 'both', 'Turned off in Codex. In Codex, start a new session; restart the ChatGPT desktop app if it is open.'],
+    ];
+    for (const [tool, way, expected] of cases) {
+      await put(join(box.home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'kit@team': true } }));
+      await put(join(box.home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'kit', marketplace: 'team', cache_path: copilotCopy, version: '1.0.0', enabled: true }] }));
+      await put(join(box.home, '.codex/config.toml'), '[plugins."kit@team"]\nenabled = true\n');
+      const pctx: PluginContext = { home: box.home, dataDir: join(box.base, 'data'), binaries: { 'claude-cli': fakeClaude, 'copilot-cli': fakeCopilot }, ways: { [tool]: way } };
+      const rep = await setWhole(pctx, 'team', 'kit', tool, false, market);
+      assert.equal(rep.message, expected, `${tool} ${way}`);
+      assert.deepEqual(settleReloads(rep.reloads ?? []), [], `${tool} ${way}: Off still settles to no header reload chip`);
+    }
+  } finally { await box.cleanup(); }
+});
+
+test('Opened plugin skill row agrees with the header after a whole plugin turns on in Copilot CLI and Codex', () => {
+  const copilotWhole = [
+    { tool: 'copilot-cli' as const, kind: 'skill' as const, key: 'triage', on: true, plugin: 'kit@team' },
+    { tool: 'copilot-cli' as const, kind: 'plugin' as const, on: true, plugin: 'kit@team' },
+  ];
+  for (const way of ['cli', 'app', 'both'] as const) {
+    const ways = { 'copilot-cli': way };
+    assert.equal(rowReload(copilotWhole, 'skill', 'triage', 'copilot-cli', 'kit@team', ways), reloadAdvice(copilotWhole, ways).text, `copilot ${way}`);
+  }
+  const codexWhole = [
+    { tool: 'codex-cli' as const, kind: 'skill' as const, key: 'triage', on: true, plugin: 'kit@team' },
+    { tool: 'codex-cli' as const, kind: 'plugin' as const, on: true, plugin: 'kit@team' },
+  ];
+  for (const way of ['cli', 'app', 'both'] as const) {
+    const ways = { 'codex-cli': way };
+    assert.equal(rowReload(codexWhole, 'skill', 'triage', 'codex-cli', 'kit@team', ways), reloadAdvice(codexWhole, ways).text, `codex ${way}`);
+  }
+  // Untouched/disabled skill in the same plugin and standalone skill of the same key stay silent; single-skill switch keeps /skills reload.
+  assert.equal(rowReload(copilotWhole, 'skill', 'other', 'copilot-cli', 'kit@team'), '');
+  assert.equal(rowReload(copilotWhole, 'skill', 'triage', 'copilot-cli'), '');
+  assert.equal(rowReload([copilotWhole[0]!], 'skill', 'triage', 'copilot-cli', 'kit@team'), 'In Copilot CLI, type /skills reload.');
+});

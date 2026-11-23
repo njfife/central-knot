@@ -15,7 +15,7 @@ import { codexSkillSwitches, type CodexSkillSwitch } from './skillswitch.ts';
 import { partOff, serverHeld, withPartSwitch } from './partswitch.ts';
 import { DIRECTORY, INLINE_SKILLS_CONFIG, hasPartSwitch, heldReason, loadsKind, noCli, offByBareName, noSwitchReason } from './pluginstatus.ts';
 import { takesPlugins, type PluginTool } from './presence.ts';
-import { reloadAdvice, settleReloads, type ReloadChange, type ToolWays } from './reload.ts';
+import { reloadAdvice, reloadStep, settleReloads, type ReloadChange, type ToolWays } from './reload.ts';
 import type { LibraryItem } from './library.ts';
 import { readPluginRecord } from './pluginrecord.ts';
 import { errorCode, itemKey, writeFileChecked } from './share.ts';
@@ -1105,7 +1105,11 @@ export async function setWhole(context: PluginContext, marketplace: string, plug
   if (!(await wholeOff(context, tool, id)) === on) return { tool, outcome, message: `Already ${on ? 'on' : 'off'} in ${name}.`, runs: [] };
   const run = await switchWhole(context, tool, id, on);
   if (!run) return { tool, outcome: 'failed', message: `Codex’s config.toml has no entry for ${id} to switch.`, runs: [] };
-  if (!(await wholeOff(context, tool, id)) === on) return { tool, outcome, changed: true, ...withNext(context, tool, await installedReloads(context, tool, marketplace, plugin, on), `Turned ${on ? 'on' : 'off'} in ${name}.`), runs: [run] };
+  if (!(await wholeOff(context, tool, id)) === on) {
+    const reloads = await installedReloads(context, tool, marketplace, plugin, on);
+    if (on) return { tool, outcome, changed: true, ...withNext(context, tool, reloads, `Turned on in ${name}.`), runs: [run] };
+    return { tool, outcome, changed: true, message: `Turned off in ${name}. ${reloadStep(tool, 'plugin', context.ways?.[tool]).text}`.trim(), runs: [run], reloads };
+  }
   return { tool, outcome: 'failed', message: `Still ${on ? 'off' : 'on'} in ${name}. ${lastLines(run.output)}`.trim(), runs: [run] };
 }
 
