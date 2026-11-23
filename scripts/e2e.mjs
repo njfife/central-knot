@@ -4603,9 +4603,10 @@ async function antigravityFlow() {
   same('Antigravity is a column on Plugin marketplaces; a plugin off is in none of the tools', await a.run(`document.querySelector('${cell}')?.dataset.state`), 'absent');
   await a.click('[id^="popen-"][id$="-issue-tracker"]');
   for (let tries = 0; tries < 40 && !(await a.exists('.plugin-items-section')); tries++) await wait(100);
-  check('its page says Antigravity takes none of a plugin’s agents', (await a.text('.plugin-parts-about') ?? '').includes('its skills, agents (not in Antigravity) and MCP servers are items'), await a.text('.plugin-parts-about'));
   await fitsAtMinimum(a, 'a plugin’s page with six tools');
   await pictures('antigravity-plugin-page');
+  await a.click('#nav-harnesses'); await a.click('#harness-antigravity-cli'); await a.click('#harness-tab-plugins');
+  check('its Plugins tab says a plugin’s page puts its skills and MCP servers there, no agents', (await a.text('#harness-body') ?? '').includes('puts its skills and MCP servers in Antigravity as items'), await a.text('#harness-body'));
   same('no page errors, Antigravity', a.pageErrors, []);
   await a.quit();
 }
