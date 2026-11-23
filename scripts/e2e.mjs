@@ -1098,7 +1098,11 @@ async function arrivalFlow() {
   // Antigravity (`agy`) installed while the app is open: notes and docs go in; it takes no agents yet, so they are not counted.
   writeFileSync(join(home, '.local/bin/agy'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "1.5.14" && exit 0\nexit 9\n', { mode: 0o755 });
   await a.click('#header-refresh');
-  same('Antigravity installed: its line counts the skill and the server copied there', await lines(a), ['overview-arrived-antigravity-cli: Central Knot now manages Antigravity. Copied 2 items. Its switch on Harnesses']);
+  same('Antigravity installed: its own line, under OpenCode’s still open, counts the skill and the server copied there', await lines(a), [
+    'overview-arrived-opencode-cli: Central Knot now manages OpenCode. Automatic sync was off, so no items were copied. Its switch on Harnesses',
+    'overview-arrived-antigravity-cli: Central Knot now manages Antigravity. Copied 2 items. Its switch on Harnesses']);
+  await fitsAtMinimum(a, 'the Overview with two tools that came under management');
+  await pictures(a, 'two-lines');
   same('and each has its entry', await copied(a, 'Antigravity'), ['docs: Turn it off in Antigravity', 'notes: Turn it off in Antigravity']);
   same('no page errors, arrival', a.pageErrors, []);
   await a.quit();
