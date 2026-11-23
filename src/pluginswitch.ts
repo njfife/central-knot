@@ -31,8 +31,8 @@ const switchHeld = (install: InstalledPlugin, part: Part): string | undefined =>
   : part.kind === 'skill' ? install.switchesHeld ?? install.skillsHeld?.[part.name] ?? noSwitchReason(install.tool, undefined, part.name) : undefined);
 /** The plugin's items in that tool whose own switch can be written: those are held off when the plugin comes on for one item. */
 const switchable = (install: InstalledPlugin): Part[] => install.items.filter(entry => hasOwnSwitch(install.tool, entry.kind) && !switchHeld(install, entry));
-/** Whether the tool has this one item's own switch off now. */
-const itemOffNow = (install: InstalledPlugin, part: Part) => !!{ skill: install.skillsOff, mcp: install.serversOff, agent: install.agentsOff }[part.kind]?.some(name => samePart(part, { kind: part.kind, name }));
+/** Whether the tool has this one item's own switch off now, whether or not the whole plugin is on there. */
+export const itemOffNow =(install: InstalledPlugin, part: Part) => !!{ skill: install.skillsOff, mcp: install.serversOff, agent: install.agentsOff }[part.kind]?.some(name => samePart(part, { kind: part.kind, name }));
 
 /** Whether the whole plugin is off in the item's tool once the draft runs. */
 const wholeOffAfter = (draft: PluginDraft, item: PluginItemAt) => {
@@ -142,7 +142,7 @@ const named = (op: PluginOp) => (op.part ? `${partWords[op.part.kind][0]} ${op.p
  * other skills."; '' where only the item's own switch turned. `there`: said in place of the tool's name.
  */
 export function alongWords(item: PluginItemAt, ops: PluginOp[], there = false): string {
-  const whole = ops.find(op => op.tool === item.tool && op.plugin === item.install.plugin && (op.action === 'plugin-on' || op.action === 'plugin-off'));
+  const whole = ops.find(op => op.tool === item.tool && op.plugin === item.install.plugin && op.marketName === item.install.marketName && (op.action === 'plugin-on' || op.action === 'plugin-off'));
   if (!whole) return '';
   const where = there ? 'there' : `in ${names[item.tool]}`;
   if (whole.forItems) {
@@ -159,7 +159,7 @@ export function alongWords(item: PluginItemAt, ops: PluginOp[], there = false): 
 export const itemSaid = (item: PluginItemAt, on: boolean, ops: PluginOp[]) => [`${item.name} is ${on ? 'on' : 'off'} in ${names[item.tool]}.`, alongWords(item, ops, true)].filter(Boolean).join(' ');
 
 /** A list of the plugin's items by kind, in words: "2 skills and 1 MCP server", or ''. `beside`: the kind of the item they are counted beside, said as "1 other MCP server". */
-const counted = (items: Part[], beside?: PartKind) => andList((['skill', 'mcp', 'agent'] as PartKind[]).flatMap(kind => {
+export const counted = (items: Part[], beside?: PartKind) => andList((['skill', 'mcp', 'agent'] as PartKind[]).flatMap(kind => {
   const n = items.filter(entry => entry.kind === kind).length;
   return n ? [`${n} ${kind === beside ? 'other ' : ''}${partWords[kind][n === 1 ? 0 : 1]}`] : [];
 }));

@@ -125,10 +125,10 @@ const OPPOSITE: Partial<Record<PluginAction, PluginAction>> = { install: 'remove
  * file it wrote, and its earlier bytes come back). "Already installed", failures and unknowns are left alone. An update has
  * no way back (the tools keep no earlier copy to return to), so it is left out; a plugin's items have theirs (items-back).
  */
-export const reverse = (done: PluginDone[]): PluginOp[] => done
-  .filter(entry => entry.report.changed && entry.action !== 'update' && !isItems(entry.action))
-  .map(({ report: _report, ...op }): PluginOp => ({ ...op, action: OPPOSITE[op.action]! }))
-  .reverse();
+export const reverse = (done: PluginDone[]): PluginOp[] => opposites(done
+  .filter(entry => entry.report.changed && entry.action !== 'update' && !isItems(entry.action)).map(({ report: _report, ...op }) => op));
+/** Steps that changed, each turned the other way, last first: a profile's Undo of the steps History kept (profileplan.ts pluginUndo). */
+export const opposites = (ops: PluginOp[]): PluginOp[] => ops.map(op => ({ ...op, action: OPPOSITE[op.action]! })).reverse();
 
 /**
  * What a run left behind that nobody asked for: a plugin was to come on with other items held off, the items' switches
