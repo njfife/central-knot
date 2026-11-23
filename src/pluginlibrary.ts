@@ -28,7 +28,7 @@ import type { PluginDone, PluginOp } from './pluginplan.ts';
 import type { PluginEntry } from './pluginrecord.ts';
 import { pluginItemId, pluginItemKey } from './profileplan.ts';
 import { profilesNaming } from './profiles.ts';
-import { takesPlugins } from './presence.ts';
+import { holds, takesPlugins } from './presence.ts';
 import type { ShareContext } from './share.ts';
 import { pluginLink } from './sourcelink.ts';
 import { sourceKinds, type SourceKind } from './sources.ts';
@@ -363,7 +363,8 @@ export async function itemsView(tools: readonly HarnessId[], looks: KindLooks, e
     const plugins = reads?.find(each => each.kind === kind)?.names.get(key), held = plugins && 'content' in plugins ? await takeHeld(look(kind), item, tool, plugins.content) : undefined;
     return { kind, key, name, ...(state === 'alike' ? { same: true as const } : held ? { held: { why: held.why, ...(held.throughShared ? { shared: true as const } : {}) } } : {}) };
   }));
-  return { lines, on, of: linked.length + his.length, ...(Object.keys(keptOut).length ? { keptOut } : {}), ...(ready ? { ready: true as const } : {}), ...(due ? { due: true as const } : {}), ...(problem ? { problem } : {}),
+  const of = Object.fromEntries(itemTools(tools).map(tool => [tool, [...linked, ...his.map(({ line }) => line)].filter(({ kind }) => holds(tool, kind)).length]));
+  return { lines, on, of, ...(Object.keys(keptOut).length ? { keptOut } : {}), ...(ready ? { ready: true as const } : {}), ...(due ? { due: true as const } : {}), ...(problem ? { problem } : {}),
     ...(away.length ? { notIn: Object.fromEntries(away) } : {}), ...(Object.keys(heldOut).length ? { heldOut } : {}), ...(Object.keys(yours).length ? { yours } : {}) };
 }
 

@@ -5,8 +5,8 @@
 import type { Components, HarnessId, HomeView, InstallState, InstalledCopy, MarketplaceView, Outcome, PartKind, PartRef, PluginContents, PluginDetail, PluginView, PluginsView, YourName } from './types.ts';
 import { groupBy, plural } from './model.ts';
 import { SAFE_NAME, compareVersions, isCommitHash } from './values.ts';
-import { andList, toolNames as names } from './words.ts';
-import { takesPlugins } from './presence.ts';
+import { andList, orList, toolNames as names } from './words.ts';
+import { holds, takesPlugins } from './presence.ts';
 import type { Owed, PluginSwitch, ToolNow } from './pluginrecord.ts';
 
 /**
@@ -23,6 +23,8 @@ export function pluginsInstalled(home: Pick<HomeView, 'pluginItems' | 'pluginRec
 }
 /** Why a tool's plugins are "—" (`unsupported` above), on the Overview and Harnesses (`who`: its name, or "that tool"): a plugin's page puts the plugin's items there (pluginlibrary.ts). */
 export const takesItemsOnly = (who: string) => `${who} takes a plugin’s items, not the plugin`;
+/** What such a tool takes of a plugin, as a sentence names it: its skills, agents and MCP servers, of the kinds it holds. */
+export const takenItems = (tool: HarnessId) => `its ${andList((['skill', 'agent', 'mcp'] as const).filter(kind => holds(tool, kind)).map(kind => (kind === 'mcp' ? 'MCP servers' : `${kind}s`)))}`;
 
 /**
  * Whether a marketplace's plugin is installed in no tool managed now, so Find may offer its items as ones the person doesn't
@@ -136,7 +138,7 @@ export function toolNow(view: PluginsView, entry: MarketplaceView, plugin: strin
   const why = unavailable(view, entry, plugin, tool);
   // A tool with no installer (Pi) is held back only by what it can't hold of the plugin, unless the plugin can go nowhere new at all.
   const elsewhere = takesPlugins(tool) || why !== blocked(view, entry, tool) ? why : undefined;
-  const items = !takesPlugins(tool) && (!components || !!(components.skills || components.agents || components.mcp));
+  const items = !takesPlugins(tool) && (!components || !!(components.skills || (components.agents && holds(tool, 'agent')) || (components.mcp && holds(tool, 'mcp'))));
   // Read, and every name it has is his own, another source's, removed or unreadable, or (On) none a tick can bring in: why.
   const notIn = entry.items?.[plugin]?.notIn?.[tool];
   const brings = (entry.items?.[plugin]?.lines.some(line => line.state !== 'not-brought' && line.state !== 'removed') ?? true) && (notIn?.tickHelps ?? true);
@@ -189,11 +191,11 @@ export const FROM_DIRECTORY = 'Claude Code has its copy from the Anthropic Direc
 export const itemsIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) => !!entry.items?.[plugin]?.on[tool];
 /** Whether every one of a plugin's items is on in a tool, as it loads them, or the same as his: the tool's box is ticked in full. */
 export const itemsAllIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) => { const items = entry.items?.[plugin];
-  return !!items && (items.on[tool] ?? 0) - (items.keptOut?.[tool] ?? 0) >= items.of; };
+  return !!items && (items.on[tool] ?? 0) - (items.keptOut?.[tool] ?? 0) >= (items.of[tool] ?? 0); };
 /** "2 of its 3 items are on", in one tool (`where`: " there"), as the tool loads them: those its own settings keep out said apart. */
 export const itemsOnWords = (entry: MarketplaceView, plugin: string, tool: HarnessId, where = '') => {
   const items = entry.items?.[plugin], out = items?.keptOut?.[tool] ?? 0, on = (items?.on[tool] ?? 0) - out;
-  return `${on} of its ${items?.of ?? 0} items ${on === 1 ? 'is' : 'are'} on${where}${out ? ` (${names[tool]}’s own settings keep ${out} out)` : ''}`;
+  return `${on} of its ${items?.of[tool] ?? 0} items ${on === 1 ? 'is' : 'are'} on${where}${out ? ` (${names[tool]}’s own settings keep ${out} out)` : ''}`;
 };
 
 /**
@@ -542,7 +544,8 @@ const OUT = {
  */
 export function notInWhy(tool: HarnessId, plugin: string, outs: { name: string; kind: PartKind; out: ItemOut }[], brings?: string): string[] {
   const where = names[tool];
-  if (!outs.length) return [`${plugin} has no skill, agent or MCP server, which is all ${where} takes of a plugin: what it brings${brings ? ` (${brings})` : ''} stays with the tools that take plugins.`];
+  const kinds = orList((['skill', 'agent', 'mcp'] as const).filter(kind => holds(tool, kind)).map(kind => (kind === 'mcp' ? 'MCP server' : kind)));
+  if (!outs.length) return [`${plugin} has no ${kinds}, which is all ${where} takes of a plugin: what it brings${brings ? ` (${brings})` : ''} stays with the tools that take plugins.`];
   return [...groupBy(outs, ({ out, kind }) => (typeof out === 'string' ? `${out} ${kind}` : out.cannot)).values()].map(group => {
     const list = group.map(each => each.name), { out, kind } = group[0]!, named = andList(list.length > 4 ? [...list.slice(0, 3), `${list.length - 3} more`] : list);
     return typeof out === 'string' ? OUT[out](named, list.length > 1, kind, where) : `${named}: ${out.cannot}`;

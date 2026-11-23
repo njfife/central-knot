@@ -15,7 +15,7 @@ import { readProfiles, saveProfile, switchProfile } from '../src/profiles.ts';
 import { homeItems, inUse, pluginLive } from '../src/profileplan.ts';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
 import { readPlugin } from '../src/pluginlibrary.ts';
-import { notInWhy } from '../src/pluginstatus.ts';
+import { itemsAllIn, itemsOnWords, notInWhy } from '../src/pluginstatus.ts';
 import { readHistory } from '../src/history.ts';
 import { homePass } from '../src/homepass.ts';
 import * as engine from '../src/plugins.ts';
@@ -209,6 +209,20 @@ test('Antigravity takes a plugin’s items as Pi does: its skills and the server
     assert.equal(await readFile(config('skills/notes/SKILL.md'), 'utf8'), skill('notes'), 'byte for byte from the plugin');
     assert.deepEqual(JSON.parse(await readFile(config('mcp_config.json'), 'utf8')).mcpServers, { relay: { command: 'npx', args: ['relay'] } });
     assert.deepEqual([await exists(config('agents')), await exists(config('skills/helper.md'))], [false, false]);
+    // Counted over what it takes: its three skills and its server are all of kit's items there, and its box is ticked in full.
+    const view = await box.view();
+    assert.deepEqual([itemsOnWords(view, 'kit', 'antigravity-cli'), itemsAllIn(view, 'kit', 'antigravity-cli')], ['4 of its 4 items are on', true]);
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin whose one item is an agent offers Antigravity, which takes no agents, nothing, and says why', async () => {
+  const box = await kitHome({ tools: ['claude-cli', 'antigravity-cli'] });
+  try {
+    for (const path of ['skills', 'extra', '.mcp.json']) await rm(join(box.kit, path), { recursive: true, force: true });
+    const nothing = 'kit has no skill or MCP server, which is all Antigravity takes of a plugin: what it brings (1 agent) stays with the tools that take plugins.';
+    const done = await box.turn('on'), owed = (await box.view()).switches!.kit!.tools['antigravity-cli']!;
+    assert.deepEqual([done.done.filter(step => step.tool === 'antigravity-cli').map(step => `${step.report.outcome}: ${step.report.message}`), owed.act ?? `off: ${owed.held}`],
+      [[`held: ${nothing}`], `off: ${nothing}`]);
   } finally { await box.cleanup(); }
 });
 

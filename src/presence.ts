@@ -67,6 +67,9 @@ export type AgentTool = keyof typeof agentsKeptIn;
 export const agentTools = Object.keys(agentsKeptIn) as AgentTool[];
 export const mcpTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
 
+/** Whether a tool holds a kind of item: every tool a skill, MCP servers and agents those mcpTools and agentTools name. */
+export const holds = (tool: HarnessId, kind: 'skill' | 'mcp' | 'agent') => kind === 'skill' || (kind === 'mcp' ? mcpTools : agentTools as HarnessId[]).includes(tool);
+
 /** Whether a tool (or a value from the page) is one that installs plugins. */
 export const takesPlugins = (tool: unknown): tool is PluginTool => pluginTools.some(entry => entry === tool);
 

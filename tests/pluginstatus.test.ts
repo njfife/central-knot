@@ -25,7 +25,7 @@ test('A tool takes a plugin by its own installer only when its CLI is there and 
     [{ has: 'none', route: { cannot: WAITS_TO_MOVE } }, { has: 'none', route: { cannot: WAITS_TO_MOVE } }]);
   assert.deepEqual([route('claude-cli', waiting), route('copilot-cli', waiting)], ['whole', 'whole']);
   // Its items On in Pi: Pi has it; Copilot CLI, with no copy of the plugin, has nothing of it (its items come only with the plugin).
-  const withItems: MarketplaceView = { ...entry, items: { p: { lines: [{ kind: 'skill', key: 's', name: 's', state: 'linked', on: true, except: [] }], on: { 'pi-cli': 1 }, of: 1 } } };
+  const withItems: MarketplaceView = { ...entry, items: { p: { lines: [{ kind: 'skill', key: 's', name: 's', state: 'linked', on: true, except: [] }], on: { 'pi-cli': 1 }, of: { 'pi-cli': 1 } } } };
   assert.deepEqual(['pi-cli', 'copilot-cli'].map(tool => toolNow({ ...view, tools: [...view.tools, 'pi-cli'] }, withItems, 'p', tool as 'pi-cli', undefined, false).has), ['items', 'none']);
   // One answer for every box, panel and key: held says why, installed is never unavailable, a missing CLI is.
   assert.equal(unavailable(view, entry, 'p', 'codex-cli'), 'other');
@@ -195,7 +195,7 @@ test('A tool’s plugins are counted from its own record, each install once, the
 });
 
 test('A plugin’s items in Pi are counted as Pi loads them: one its own settings keep out is said apart', () => {
-  const entry = { items: { maps: { lines: [], on: { 'pi-cli': 2 }, keptOut: { 'pi-cli': 1 }, of: 2 } } } as unknown as MarketplaceView;
+  const entry = { items: { maps: { lines: [], on: { 'pi-cli': 2 }, keptOut: { 'pi-cli': 1 }, of: { 'pi-cli': 2 } } } } as unknown as MarketplaceView;
   assert.equal(itemsOnWords(entry, 'maps', 'pi-cli', ' there'), '1 of its 2 items is on there (Pi’s own settings keep 1 out)');
-  assert.equal(itemsOnWords({ items: { maps: { lines: [], on: { 'pi-cli': 2 }, of: 2 } } } as unknown as MarketplaceView, 'maps', 'pi-cli'), '2 of its 2 items are on');
+  assert.equal(itemsOnWords({ items: { maps: { lines: [], on: { 'pi-cli': 2 }, of: { 'pi-cli': 2 } } } } as unknown as MarketplaceView, 'maps', 'pi-cli'), '2 of its 2 items are on');
 });

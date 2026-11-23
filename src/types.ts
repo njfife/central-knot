@@ -833,7 +833,7 @@ export interface PluginItemLine { kind: ItemKind; key: string; name: string; sta
  * `yours`: for a plugin On, each tool with no installer it is wanted in, each name it has that he has his own of,
  * whatever else is so, said under that tool's box (pluginstatus.ts yourSaid).
  */
-export interface PluginItemsView { lines: PluginItemLine[]; on: Partial<Record<HarnessId, number>>; /** Of those on, how many the tool's own settings keep out (it doesn't load them). */ keptOut?: Partial<Record<HarnessId, number>>; of: number; ready?: true; due?: true; problem?: string; notIn?: Partial<Record<HarnessId, { reasons: string[]; tickHelps: boolean }>>; heldOut?: Partial<Record<HarnessId, string[]>>; yours?: Partial<Record<HarnessId, YourName[]>> }
+export interface PluginItemsView { lines: PluginItemLine[]; on: Partial<Record<HarnessId, number>>; /** Of those on, how many the tool's own settings keep out (it doesn't load them). */ keptOut?: Partial<Record<HarnessId, number>>; /** Its items each tool holds the kind of (presence.ts holds). */ of: Partial<Record<HarnessId, number>>; ready?: true; due?: true; problem?: string; notIn?: Partial<Record<HarnessId, { reasons: string[]; tickHelps: boolean }>>; heldOut?: Partial<Record<HarnessId, string[]>>; yours?: Partial<Record<HarnessId, YourName[]>> }
 /**
  * A name of a plugin's he has his own of, in one tool (PluginItemsView yours): Use the plugin's is offered there, but where it is
  * the same content (`same`) or the take can't land there (`held`: why, librarypass.ts takeHeld; `shared`: his through the shared skills folder).

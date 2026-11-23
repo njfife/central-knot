@@ -13,7 +13,7 @@ import { clickNote, componentsOf, dotted, libraryLink, markOf, pluginSwitch, plu
 import { inlineMarkdown } from './markdown.ts';
 import { pluginKey } from './pluginplan.ts';
 import { boxOf, cantSwitchSkill, comparableText, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, waitingWords, waitsToMove, whyNotCarried, yourSaid, type ToolMark } from './pluginstatus.ts';
-import { hasCowork, pluginTools, takesPlugins } from './presence.ts';
+import { hasCowork, holds, pluginTools, takesPlugins } from './presence.ts';
 import { applyPluginOps, market, openLink, shownDetail, toggleOpened, usePlugins } from './pluginstate.ts';
 import type { Components, DeclaredHook, HarnessId, MarketplaceView, Outcome, PluginDetail, PluginItemLine, PluginView, PluginsView, YourName } from './types.ts';
 import { hookLine } from './sessionhooks.ts';
@@ -126,6 +126,10 @@ function yourLines(view: PluginsView, entry: MarketplaceView, plugin: PluginView
     yours.some(offered) ? h('span.plugin-tool-state.plugin-tool-why', {}, 'Using the plugin’s keeps yours as a version, and your other tools keep their copies.') : null];
 }
 
+/** "agents", and where some of `tools` hold none (presence.ts holds), which: "agents (not in Antigravity)"; none where no tool holds them. */
+const agentsIn = (tools: HarnessId[], none = tools.filter(tool => !holds(tool, 'agent'))) =>
+  (none.length === tools.length ? [] : [`agents${none.length ? ` (not in ${andList(none.map(tool => names[tool]))})` : ''}`]);
+
 /**
  * Its items: in Pi, OpenCode and Antigravity, which take no plugins, the plugin's skills, agents and MCP servers are items of Central Knot's
  * linked to it (pluginlibrary.ts itemsView, from the table the pass carries out). One line each, by kind, its name opening its
@@ -146,7 +150,7 @@ function itemsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const lines = (['skill', 'agent', 'mcp'] as const).flatMap(kind => items.lines.filter(line => line.kind === kind));
   return h('section.plugin-section.plugin-items-section', { 'aria-label': 'Its items' },
     h('div.plugin-section-head', {}, h('h3', {}, 'Its items')),
-    h('p.plugin-parts-about', {}, `In ${andList(tools.map(tool => names[tool]))}, its skills, agents and MCP servers are items of Central Knot’s that follow the plugin: its switch turns them on or off there, and one you change here becomes your own.`),
+    h('p.plugin-parts-about', {}, `In ${andList(tools.map(tool => names[tool]))}, its ${andList(['skills', ...agentsIn(tools), 'MCP servers'])} are items of Central Knot’s that follow the plugin: its switch turns them on or off there, and one you change here becomes your own.`),
     items.problem ? h('p.plugin-muted', {}, `${items.problem} Its items stay as they are.`) : null,
     h('ul.plugin-outcome-list.plugin-items-list', {}, lines.map(line => h('li.plugin-outcome-row', { 'data-key': `${line.kind}:${line.key}` },
       h('span.plugin-items-name', {}, `${partWords[line.kind][0]} `, linked(line)
