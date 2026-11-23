@@ -303,7 +303,7 @@ function pluginsTab(tool: HarnessId) {
   if (plugins.state === 'unsupported') {
     // Only the tools that take a plugin whole are named as where plugins install; this one takes a plugin's items.
     const takers = (market.view?.tools ?? []).filter(takesPlugins);
-    return page(emptyState('puzzle', takesItemsOnly(names[tool]), `${takers.length ? `Central Knot installs marketplace plugins into ${andList(takers.map(each => names[each]))}. A plugin’s page on ${pageNames.plugins} puts ${takenItems([tool])} in ${names[tool]} as items of Central Knot’s that follow the plugin. ` : ''}${names[tool]}’s own ${tool === 'pi-cli' ? 'packages' : 'plugins'} stay as they are.`));
+    return page(emptyState('puzzle', takesItemsOnly(names[tool]), `${takers.length ? `Central Knot installs marketplace plugins into ${andList(takers.map(each => names[each]))}. A plugin’s page on ${pageNames.plugins} puts ${takenItems([tool])} in ${names[tool]} as items of Central Knot’s that follow the plugin. ` : ''}${names[tool]}’s own ${tool === 'antigravity-cli' ? 'plugins' : 'packages'} stay as they are.`));
   }
   // What could not be checked is said, so the list is never taken for everything installed.
   const unsure = [...plugins.unknown.map(({ plugin, reason }) => `${pluginTitle(plugin)}: ${reason}`), ...plugins.unreadable.map(name => `${name} could not be read.`)];
