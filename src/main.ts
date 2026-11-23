@@ -46,6 +46,7 @@ import { linkLabel } from './sourcelink.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
 import { forgetMissing, SETTLE_MS } from './librarypass.ts';
+import { byHand, observe, seenBefore, seenIn, type ToolsSeen } from './arrivals.ts';
 import { homePass, passTells, syncOnceReport, takenInReloads, type HomePass } from './homepass.ts';
 import { waysFrom } from './reload.ts';
 import { deleteProfile, readProfiles, saveProfile, switchProfile, undoSwitch, type PluginSide } from './profiles.ts';
@@ -54,7 +55,7 @@ import { atMostEvery, defaultHistoryDays, historyDayChoices, holdingBuild, holds
 import { keepEntries, linuxPlaces, placeAutostart, readAutostart, signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, BuildOutcome, OtherBuild, PartRef, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, LogFolderOpened, LogTail, Snapshot, SyncNotice } from './types.ts';
 import { machineNames, writesRealHome } from './machine.ts';
-import { joinedWords, pageNames, toolList } from './words.ts';
+import { pageNames, toolList } from './words.ts';
 import { buildTag, startUpdater, type PendingUpdate } from './updater.ts';
 import { lineApp, releaseLine } from './updates.ts';
 import { autoUpdates, CHECK_EVERY_MS, PLUGIN_UPDATES_DEFAULT, type UpdatesRecord } from './pluginupdates.ts';
@@ -223,7 +224,8 @@ function send(channel: 'sync:changed' | 'sync:request' | 'settings:changed' | 'n
 // ---------- Running in the background (PLT-03, PLT-04, D-36) ----------
 
 /** The home last opened, so a start at sign-in syncs it again; and whether to start at sign-in (on by default). */
-interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean; /** The first close said once that Central Knot keeps running. */ closeExplained?: boolean; /** Light, dark, or as the system is set (the default). */ appearance?: Appearance; /** How long History keeps things. */ historyDays?: HistoryDays; /** Plugins are updated automatically (pluginupdates.ts). */ pluginUpdates?: boolean; /** What marketplace plugins hold is read (plugintext.ts); on unless turned off. */ pluginText?: boolean; /** An update prepared for the next launch to report on (updater.ts). */ update?: PendingUpdate }
+interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean; /** The first close said once that Central Knot keeps running. */ closeExplained?: boolean; /** Light, dark, or as the system is set (the default). */ appearance?: Appearance; /** How long History keeps things. */ historyDays?: HistoryDays; /** Plugins are updated automatically (pluginupdates.ts). */ pluginUpdates?: boolean; /** What marketplace plugins hold is read (plugintext.ts); on unless turned off. */ pluginText?: boolean; /** An update prepared for the next launch to report on (updater.ts). */ update?: PendingUpdate;
+  /** Each home's managed tools as its last pass saw them, and the arrivals its Overview says, by home (arrivals.ts ToolsSeen; read through seenIn). */ toolsSeen?: Record<string, unknown> }
 const appSettingsPath = () => join(app.getPath('userData'), 'app-settings.json');
 let appSettings: AppSettings = {};
 /** app-settings.json as read: {} where there is none (a first launch), its object, or undefined where it is there and can't be read as one (values.ts jsonObject). */
@@ -649,7 +651,11 @@ async function pass(snapshots: Snapshot[], explicit = false, forView = false): P
   // While plugin parts from before the library wait to be moved there, the plugins record's first read comes first (its install
   // alpha 1 waited for read from pluginUpdates, made before any pass), and the move may read a plugin (homepass.ts step 2).
   const pluginNow = await carriedMarket?.beforeParts().catch((error: unknown) => { logFailure('plugins record', error); return undefined; });
-  const { synced, seen, seenFailed, profilesFailed, partsFailed, partsWait, untouched } = await homePass(shared, await managedNow(shared, snapshots), syncOn || explicit, pluginNow);
+  const managed = await managedNow(shared, snapshots), writes = syncOn || explicit;
+  // The tools seen before, seeded from the records before this pass adds a tool to them; then what this pass saw (arrivals.ts).
+  const before = await toolsSeenBefore(shared, managed);
+  const { synced, seen, seenFailed, profilesFailed, partsFailed, partsWait, untouched } = await homePass(shared, managed, writes, pluginNow);
+  if (before) await keepToolsSeen(observe(before, managed, writes, synced));
   partsWaiting = partsWait;
   if (profilesFailed !== undefined) logFailure('moving profiles', profilesFailed);
   if (partsFailed !== undefined) logFailure('moving plugin parts', partsFailed);
@@ -662,6 +668,18 @@ async function pass(snapshots: Snapshot[], explicit = false, forView = false): P
   return { synced, seen, skills: skills ?? { results: [], writes: 0, reloads: [] }, done: [skills, servers, agents].flatMap(kind => kind?.results ?? []), told: passTells(synced), serversAndAgents: {
     serverNotices: servers?.notices ?? [], agentNotices: agents?.notices ?? [], settling: !!(servers?.settling || agents?.settling),
     changed: !!(servers?.writes || servers?.notices?.length || agents?.writes || agents?.notices?.length) }, ...(untouched && forView ? { kept: { kept: shared.kept, reads: shared.reads } } : {}) };
+}
+
+/** Every home's entry the settings keep (AppSettings toolsSeen), an object whatever a hand edit left there. */
+const toolsSeen = () => record(appSettings.toolsSeen) ?? {};
+/** The open home's managed tools as last seen (arrivals.ts seenBefore); none for the Practice copy, which is made afresh at each launch. */
+const toolsSeenBefore = (shared: ShareContext, managed: HarnessId[]) =>
+  (current!.mode === 'fixture' ? Promise.resolve(undefined) : seenBefore(toolsSeen()[current!.home], shared, managed));
+/** Keeps the open home's tools seen where they changed; a save that fails is logged, and the next pass tries again. */
+async function keepToolsSeen(seen: ToolsSeen) {
+  const home = current!.home;
+  if (JSON.stringify(seen) === JSON.stringify(toolsSeen()[home])) return;
+  await saveAppSettings({ toolsSeen: { ...toolsSeen(), [home]: seen } }).catch(error => logFailure('settings', error));
 }
 
 /**
@@ -710,7 +728,7 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passes: 
     // Apps that run the tools or read their files are looked for only on this computer, like the tools' own apps.
     ...(current!.mode === 'actual' ? { otherApps: await findOtherApps(current!.home) } : {}),
     sync: { managed, present, joining: await joiningCounts(shared, managed, present, syncEverything === true), writes: await skillFolders(shared, managed), access: await writeAccess(shared), gate: await syncGate(shared),
-      caughtUp, syncEverything },
+      caughtUp, syncEverything, arrived: seenIn(toolsSeen()[current!.home])?.arrived ?? [] },
     skills: await skillsView(shared, managed, notices),
     mcp: await serversView(shared, managed, pendingServerNotices.splice(0)),
     agents: await agentsView(shared, managed, pendingAgentNotices.splice(0)),
@@ -1051,7 +1069,8 @@ let lastPresent = { home: '', tools: '' };
 
 /**
  * Notes the open home's tools (noteTools); when they changed, the folders are watched again, so a new tool is watched like the
- * rest, and a tool installed since the last note that Central Knot manages (it isn't left out) is said once in the status bar.
+ * rest, and a tool installed since the last note that Central Knot manages (it isn't left out) gets each On plugin not kept out
+ * of it at a check made now (pluginupdates.ts toolJoined). The Overview says such a tool (arrivals.ts).
  */
 function toolsChangedHere(snapshots: Snapshot[]): boolean {
   const { noted, changed, joined } = noteTools(lastPresent, current?.home ?? '', snapshots);
@@ -1059,10 +1078,7 @@ function toolsChangedHere(snapshots: Snapshot[]): boolean {
   if (changed) void startWatching();
   const shared = context();
   void leftOutNow(shared).then(leftOut => {
-    const managing = joined.filter(tool => !leftOut.includes(tool));
-    if (managing.length) send('said', joinedWords(managing));
-    // A managed tool new here gets each On plugin not kept out of it at a check made now (pluginupdates.ts toolJoined).
-    if (managing.length && pluginChecksRun) return pluginUpdates?.toolJoined();
+    if (joined.some(tool => !leftOut.includes(tool)) && pluginChecksRun) return pluginUpdates?.toolJoined();
   }).catch(error => logFailure('plugin updates', error));
   return changed;
 }
@@ -1698,18 +1714,27 @@ app.whenReady().then(async () => {
   });
   handleNow('app:quit', async () => { quitting = true; app.quit(); });
   // A tool's Manage switch (toolchoice.ts chooseTools), then the home read again: with Automatic sync on, that pass brings a tool
-  // turned on into line, and what it did there (`did`) is what the page's band says. A tool turned on is new to the plugins
-  // record (marketplaces.ts toolManaged), and gets each On plugin not kept out of it at a check made now.
+  // turned on into line, and what it did there (`did`) is what the page's band says, so it is no arrival (arrivals.ts byHand). A
+  // tool turned on is new to the plugins record (marketplaces.ts toolManaged), and gets each On plugin not kept out of it at a
+  // check made now.
   handle('tools:manage', async (tool, on, resume, home) => {
     if (home !== current?.home || !isTool(tool) || typeof on !== 'boolean') return { stopped: elsewhere, view: null, did: [] };
     const chosen = await chooseTools(context(), tool, on, resume === true);
     if (!chosen.stopped) {
       log(`sync: ${tool} ${on ? 'managed' : 'left out'} in ${home}`);
+      const seen = on ? await toolsSeenBefore(context(), await toolsNow()) : undefined;
+      if (seen) await keepToolsSeen(byHand(seen, tool));
       if (on) await markets.toolManaged(tool, home).catch(error => logFailure('plugins record', error));
       if (on && pluginChecksRun) void pluginUpdates?.toolJoined().catch(error => logFailure('plugin updates', error));
     }
     const { view, passes } = await syncAndView();
     return { ...chosen, view, did: passes.flatMap(pass => pass.done ?? []).filter(result => result.harness === tool) };
+  });
+  // The Overview's line that a tool came under management, closed for good in that home (arrivals.ts), in the queue, so no pass
+  // between its read and its save of the tools seen puts it back.
+  handle('tools:dismiss-arrival', async (tool, home) => {
+    const seen = current && home === current.home ? seenIn(toolsSeen()[current.home]) : undefined;
+    if (seen) await keepToolsSeen({ ...seen, arrived: seen.arrived.filter(arrival => arrival.tool !== tool) });
   });
   // With Sync off, a click writes exactly the items it is about; spreading anything else waits for Sync.
   handle('servers:apply', async (list, resume, home) => (home === current?.home

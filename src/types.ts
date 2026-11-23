@@ -142,6 +142,8 @@ export interface DesktopApi {
    * the tool (its results there), which the band after the click says.
    */
   manageTool(tool: HarnessId, on: boolean, resume: boolean, home: string): Promise<{ stopped?: string; view: HomeView | null; did: DestinationResult[] }>;
+  /** The Overview's line that `tool` came under management in `home` (arrivals.ts), closed for good. */
+  dismissArrival(tool: HarnessId, home: string): Promise<void>;
   /** Replace: the build the held screen names, its bundle at `path`, quit and moved to the Trash (main.ts builds:replace, otherbuilds.ts removeBuild). */
   replaceOtherBuild(path: string, build: string): Promise<BuildOutcome & { view: HomeView | null }>;
   /** Asks every running copy of the build the held screen names to quit (otherbuilds.ts quitBuild). */
@@ -378,7 +380,12 @@ export interface SyncView {
    * themselves; off, each waits for Add; absent, never answered, so first setup asks it (firstsetup.ts).
    */
   syncEverything?: boolean;
+  /** The tools that came under management by themselves here, as the Overview says them until each is dismissed (arrivals.ts). */
+  arrived: Arrival[];
 }
+
+/** A tool that came under management by itself (arrivals.ts), and how many items were copied there; `copied` absent: Automatic sync was off, so none. */
+export interface Arrival { tool: HarnessId; copied?: number }
 
 /**
  * What managing one more tool would do there now, each kind's added up (librarypass.ts joinCounts, from the same look and plans
@@ -539,7 +546,7 @@ export interface HistoryEvent {
   foundIn?: HarnessId[];
   /** 'managing': the tool, and whether Central Knot manages it from then on (toolchoice.ts chooseTools). */
   managing?: { tool: HarnessId; on: boolean };
-  /** 'on' / 'off': the one harness it was turned on or off in. */
+  /** 'on' / 'off': the one harness it was turned on or off in, or (`cause` 'in-line') put in. */
   only?: HarnessId;
   /**
    * A library item's: what made it happen, read by historyactions.ts alone. `switch`: the person's switch ('on' / 'off'). `found`:
@@ -556,7 +563,8 @@ export interface HistoryEvent {
    * copy the item didn't have ('kept-edit'; `losers`: that copy), which gave way to the current version (library.ts managedAgain).
    * `own-copy`: a harness's own copy, which Central Knot had never put there and no click took over, gave way to the current
    * version ('kept-edit'; `losers`). `in-line`: a pass no click asked brought harnesses into line with the item: copies written
-   * over ('on'; `losers`, each with what it held), or removed ('off', or 'deleted' for a deleted item) (librarypass.ts logItem).
+   * over ('on'; `losers`, each with what it held), a copy put in one harness that had none ('on', `only`), or copies removed
+   * ('off', or 'deleted' for a deleted item) (librarypass.ts logItem).
    */
   cause?: 'switch' | 'found' | 'sync-everything' | 'pulled' | 'source' | 'source-merged' | 'source-kept' | 'source-dropped' | 'own-now' | 'plugin-taken' | 'deleted-by-hand' | 'tool-back' | 'own-copy' | 'in-line';
   /**

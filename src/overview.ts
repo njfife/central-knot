@@ -1,6 +1,7 @@
 // The Overview, the page the app opens on (app.ts state.page starts on it; nothing remembers another page across a launch).
 // Top to bottom: what the last action did (matrix.ts outcomeBand) and the Practice copy's note; the lead, only while nothing is
-// on; what needs you (needsYou: one function, one order, nothing when nothing does); a card per kind (kindCard: its counts and
+// on; what needs you (needsYou: one function, one order, nothing when nothing does; a tool that came under management by itself
+// last, until closed: arrivalLines, the one thing here kept for a home, by main.ts); a card per kind (kindCard: its counts and
 // whether it is in sync, then what the usage reading says of it); the usage strip (usageStrip); a row per managed tool
 // (toolsTable: its version, what it has of each kind and of plugins, its sessions in the last 30 days); and where every change
 // is kept. Nothing is stored, and opening it reads nothing more than the home's view. The figures come from that view, the usage
@@ -24,7 +25,7 @@ import { rowCount } from './pluginrows.ts';
 import { fromAnyPlugin } from './origins.ts';
 import { pluginsInstalled, takesItemsOnly, type PluginsInstalled } from './pluginstatus.ts';
 import { heldKinds } from './presence.ts';
-import type { HarnessId, HomeView } from './types.ts';
+import type { Arrival, HarnessId, HomeView } from './types.ts';
 import { updateLine } from './updateview.ts';
 import { asksNow } from './setupcounts.ts';
 import { settingsReset } from './settingspage.ts';
@@ -98,12 +99,29 @@ function readOnlyLine(home: HomeView): HTMLElement | null {
   return line('overview-preview', 'lock', 'tone-warning', `Automatic sync is paused. Preview only: ${previewReason(why)}.`);
 }
 
+/** What a tool's arrival line says (types.ts Arrival): "Central Knot now manages OpenCode. Copied 2 items." */
+const arrivedWords = ({ tool, copied }: Arrival) => `Central Knot now manages ${toolNames[tool]}. ${copied === undefined
+  ? 'Automatic sync was off, so no items were copied.' : copied ? `Copied ${plural(copied, 'item')}.` : 'No items were copied.'}`;
+
+/**
+ * A line for each tool that came under management by itself here (types.ts SyncView arrived, from arrivals.ts): what it says,
+ * a link to its Manage switch on Harnesses, and its ×, which closes it for good in this home, at once on the page.
+ */
+const arrivalLines = (home: HomeView) => home.sync.arrived.map(({ tool, copied }) => {
+  const id = `overview-arrived-${tool}`;
+  const toSwitch = () => { showPage('harnesses'); document.getElementById(`manage-${tool}`)?.focus(); };
+  const close = () => { home.sync.arrived = home.sync.arrived.filter(other => other.tool !== tool); rerender(); void window.centralKnot.dismissArrival(tool, home.home); };
+  return line(id, 'boxes', 'tone-muted', `${arrivedWords({ tool, copied })} `, link('Its switch on Harnesses', `${id}-open`, toSwitch),
+    button({ variant: 'ghost', size: 'micro', icon: 'x', name: `Close: Central Knot now manages ${toolNames[tool]}`, id: `${id}-dismiss`, onclick: close }));
+});
+
 /**
  * What needs the person, before any figure, in this order: that Central Knot's settings file couldn't be read at launch, with the
  * way to Settings, which says where the old file is (settingspage.ts settingsReset); first setup (after the problems when a kind is stopped; its question, Resume, or the way into choosing copies:
  * firstsetup.ts setupLead); an update to install (updateview.ts updateLine); why the home can't be written (readOnlyLine); each
  * kind's problems, each said once (but the stop said above: matrix.ts problemsBesideStop); found items whose copies differ, a line
- * per kind with the page's "Copies differ" count, where first setup doesn't speak of them; Automatic sync off.
+ * per kind with the page's "Copies differ" count, where first setup doesn't speak of them; Automatic sync off; then each tool
+ * that came under management by itself, until it is closed (arrivalLines).
  */
 function needsYou(home: HomeView): HTMLElement | null {
   const empty = noToolManaged(), kinds = heldKinds(home), said = new Set<string>();
@@ -121,7 +139,8 @@ function needsYou(home: HomeView): HTMLElement | null {
   const setup = empty ? null : setupLead(home);
   const setupAfterStop = asksNow(home) === 'question' && kinds.some(kind => home[kind].gate.state === 'stopped');
   const reset = home.settingsUnread ? line('overview-settings-kept', 'circle-alert', 'tone-warning', `${settingsReset} `, link('Open Settings', 'overview-settings-kept-open', () => showPage('settings'))) : null;
-  const lines = [reset, setupAfterStop ? null : setup, updateLine(), readOnlyLine(home), ...problems, setupAfterStop ? setup : null, ...differ, syncOff].filter((each): each is HTMLElement => !!each);
+  const lines = [reset, setupAfterStop ? null : setup, updateLine(), readOnlyLine(home), ...problems, setupAfterStop ? setup : null, ...differ, syncOff, ...arrivalLines(home)]
+    .filter((each): each is HTMLElement => !!each);
   return lines.length ? h('div.overview-needs', { id: 'overview-needs' }, lines) : null;
 }
 

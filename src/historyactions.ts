@@ -18,13 +18,15 @@
 //     (`source`: brought in, Off;
 //     `source-dropped`: no longer there)
 //   on, off or deleted by a pass no click    none: nothing was asked (a deleted item's Restore is its Delete's
-//     asked (`in-line`)                      entry's; what an `on` wrote over is kept among the item's versions)
+//     asked (`in-line`), copies written      entry's; what an `on` wrote over is kept among the item's versions)
+//     over or removed
 //   off in one harness (`only`)              Turn it on in          the item is On and kept out of that harness
 //                                            <harness>
 //   on: the switch, or an item Pull          Turn it off            the item is On
 //     brought
-//   on in one harness (`only`)               Turn it off in         the item is On and in that harness
-//                                            <harness>
+//   on in one harness (`only`): the switch,  Turn it off in         the item is On and in that harness
+//     or a copy a pass no click asked put    <harness>
+//     there (`in-line`)
 //   on or off whose click took tools' own    Undo: that action,     the item is as the click left it (asTheClickLeftIt);
 //     copies over (`tookFrom`)               each such copy given   after that, the plain action above, which gives
 //                                            back                   nothing back
@@ -130,7 +132,9 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
   const overSaid = over.length ? ` ${andList(over)}’s own ${words.copy}${over.length === 1 ? ' was' : 's were'} written over and kept as a version.` : '';
   switch (event.kind) {
     case 'on': {
-      // A pass no click asked wrote the current version over copies there (a tool managed again, a folder writable again).
+      // A pass no click asked put a copy in one tool that had none (`only`: a tool that came under management, say), or wrote
+      // the current version over copies there (a tool managed again, a folder writable again).
+      if (event.cause === 'in-line' && event.only) return { glyph: 'circle-check', text: `Copied to ${where}.` };
       if (event.cause === 'in-line') return { glyph: 'circle-check', text: `Written over in ${tools} with the current version when sync reached ${event.losers.length === 1 ? 'it' : 'them'}; what was there is one of its versions.` };
       if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}${named(event.only) ? `: its ${words.copy} there is back` : ''}.${overSaid}${gaveSaid}` };
       // A plugin's read brought it in with the plugin's On (library.ts A PLUGIN).
@@ -272,8 +276,8 @@ const isVersion = (item: LibraryItem, hash: string | undefined): hash is string 
 export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined, itemNow: ItemNow, version?: string, loads?: LibraryFacts['loads']): EntryAction | undefined {
   if (!item || event.undoneBy) return undefined;
   // A pass no click asked brought tools into line: nothing was asked, so nothing is undone here (a deleted item's Restore is
-  // its Delete's entry's).
-  if (event.cause === 'in-line') return undefined;
+  // its Delete's entry's); but a copy it put in one tool (`only`) can be taken out of that tool, as its switch there would.
+  if (event.cause === 'in-line' && !event.only) return undefined;
   const name = item.name, now = asItIs(item.key, item), everywhere = item.on ? ', in every tool it is on in' : '';
   if (event.kind === 'deleted') {
     const help = `Put ${name} back in Central Knot as it was${item.on ? ', and in every tool it was on in' : ''}`;

@@ -1020,7 +1020,7 @@ async function arrivalFlow() {
   writeFileSync(join(home, '.claude.json'), `${JSON.stringify({ mcpServers: { docs: { type: 'stdio', command: 'docs-server', args: [] } } }, null, 2)}\n`);
   const openCode = join(home, '.local/bin/opencode'), openCodeSettings = join(home, '.config/opencode/opencode.json');
   const install = on => (on ? writeFileSync(openCode, '#!/bin/sh\n[ "$1" = "--version" ] && echo "1.19.5" && exit 0\nexit 9\n', { mode: 0o755 }) : rmSync(openCode));
-  const lines = async a => { await a.click('#nav-overview'); return a.all('.overview-arrived', 'e.id + ": " + e.textContent'); };
+  const lines = async a => { await a.click('#nav-overview'); return a.all('p[id^="overview-arrived-"]', 'e.id + ": " + e.textContent'); };
   const addAgent = async (a, name) => { writeFileSync(join(home, `.claude/agents/${name}.md`), agent(name)); await a.click('#header-refresh'); await openKind(a, 'agents'); await a.click(`#${rowPart('add', 'agents', name)}`); };
   const COPIED = `[...document.querySelectorAll('.history-row')].filter(row => row.querySelector('.history-about').textContent === 'Copied to OpenCode.')`;
   /** History's entries for the copies a pass put in OpenCode with no click: each item's name and the action its row offers. */

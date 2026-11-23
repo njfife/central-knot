@@ -40,7 +40,8 @@ export interface NotedTools { home: string; tools: string }
 /**
  * Notes which tools are in `home`. `changed` only when they differ from those noted while that same home stayed open: a home
  * just opened is only noted, since opening it starts watching and the page reads it anyway. `joined`: the tools installed since
- * the last note in that same home (main.ts says which of them Central Knot manages now); kept in memory only, never stored.
+ * the last note in that same home (main.ts asks a plugin check for those Central Knot manages); kept in memory only, never
+ * stored. What the Overview says of a tool that came under management is arrivals.ts's, from every pass, not from this note.
  */
 export function noteTools(last: NotedTools, home: string, snapshots: Snapshot[]): { noted: NotedTools; changed: boolean; joined: HarnessId[] } {
   const now = presentTools(snapshots), noted = { home, tools: now.join() };
