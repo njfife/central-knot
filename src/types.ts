@@ -433,7 +433,7 @@ export interface Change {
   untake?: Partial<Record<HarnessId, string>>;
 }
 
-export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, what is not as it asked, any settings notes, and each plugin item's copy it left (`since`). */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left' | 'settingsChanged'> & { since?: string[] }; /** Confirmed changes for reload advice (reload.ts). */ reloads: ReloadChange[]; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
+export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, what is not as it asked, any settings notes, and each plugin item's copy it left (`since`). */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left' | 'settingsChanged'> & { since?: string[]; /** The plugins it turned back whole in Claude Code, by direction (profileplan.ts wholeCounts). */ plugins?: { on: number; off: number } }; /** Confirmed changes for reload advice (reload.ts). */ reloads: ReloadChange[]; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
 
 /**
  * What sync did on its own, told once in the Library: to one item (ItemNotice), the found items Synchronize everything
@@ -586,10 +586,12 @@ export interface HistoryEvent {
    * Off, and a switch's plugins' items' copies it turned (`plugins`: written as planned before the switch, then as each tool
    * confirmed). Its Undo turns back each item and copy still as it left it (profileplan.ts undoPlan, pluginUndo), the copies told
    * in an entry of the Undo's own (`undoOf`: the switch's entry; `plugins`: what it turned them back to; `on` and `off`: his items
-   * it turned back too, which have entries of their own as well), which has no Undo. An
+   * it turned back too, which have entries of their own as well), which has no Undo. A switch's `wholeSteps`: the steps it ran on
+   * the plugins Claude Code takes whole (profileplan.ts wholeRuns: written as planned, then those that changed), each plugin's
+   * reversed by its Undo while the plugin is as they left it (profileplan.ts pluginUndo). An
    * entry from before profiles were sets of items has neither `on` nor `off`: it is past.
    */
-  profile?: { toName?: string; on?: SwitchedItem[]; off?: SwitchedItem[]; plugins?: PluginSwitched[]; copilotCleared?: { id: string; name: string; server: string }[]; migrated?: true; undoOf?: string };
+  profile?: { toName?: string; on?: SwitchedItem[]; off?: SwitchedItem[]; plugins?: PluginSwitched[]; wholeSteps?: PluginOp[]; copilotCleared?: { id: string; name: string; server: string }[]; migrated?: true; undoOf?: string };
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false); `before`, a Claude Code override it replaced ("name-only"), for Undo. */
   switched?: SwitchRecord[];
   /** What the pass changed in a tool's own settings with the copies, in words (librarypass.ts Kind.follow): Pi's skills list. */
@@ -1444,7 +1446,7 @@ export interface SwitchedItem { id: string; name: string }
  * name then, the tool, and what the switch turned it to (`on`); it was the other before. A copy placed in Pi, OpenCode and Antigravity is its
  * library item turned once, kept as one of these for each tool it is in.
  */
-export interface PluginSwitched { id: string; name: string; tool: HarnessId; on: boolean }
+export interface PluginSwitched { id: string; name: string; tool: HarnessId; on: boolean; /** Came on in Claude Code only with its whole plugin, the profile leaving it out (profileplan.ts comesWith): no count takes it in. */ along?: true }
 
 /**
  * What a switch did: the profile's name, the items it turned On and Off and those not as it asked once its passes ran (`left`:

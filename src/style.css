@@ -1857,6 +1857,12 @@ span.ins-confirm { margin-top: 0; }
 .pf-name-text { flex: 0 1 auto; min-width: 48px; font-weight: 500; overflow-wrap: anywhere; }
 /* A long name wraps instead of being cut: rows grow, keeping their minimum height */
 .pf-row:not(.pf-head) .pf-name { padding-block: 6px; }
+/* A skill that comes on in Claude Code with the ticked row above it, its plugin being whole there (profilespage.ts withBrought). */
+.pf-row.pf-beneath .pf-name { padding-left: 40px; }
+/* How Claude Code takes a plugin whole, and what a switch turns there, under Find (profilespage.ts claudeBand) */
+#profile-claude { align-items: flex-start; }
+.pf-claude-turns { display: block; margin-top: 4px; }
+.pf-claude-turns ul { margin: 2px 0 0; padding-left: 18px; }
 /* What the profile leaves out reads quieter, so its set reads as a set at any width */
 .pf-row:not(.pf-included):not(.pf-head) .pf-name-text { color: var(--ink-soft); font-weight: 400; }
 .pf-desc { flex: 1 1 0; min-width: 0; max-width: 80ch; font-size: 12px; line-height: 16px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
