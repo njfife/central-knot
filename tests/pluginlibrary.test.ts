@@ -200,6 +200,18 @@ test('On makes its items and turns them On in Pi; Pi’s box unticked takes them
   } finally { await box.cleanup(); }
 });
 
+test('Antigravity takes a plugin’s items as Pi does: its skills and the server that runs on its own, and not its agent, which Antigravity isn’t given yet', async () => {
+  const box = await kitHome({ tools: ['claude-cli', 'antigravity-cli'] });
+  try {
+    const on = await box.turn('on');
+    assert.deepEqual(on.done.map(step => [step.tool, step.action, step.report.outcome]), [['claude-cli', 'install', 'installed'], ['antigravity-cli', 'install-items', 'installed']]);
+    const config = (path: string) => join(box.home, '.gemini/config', path);
+    assert.equal(await readFile(config('skills/notes/SKILL.md'), 'utf8'), skill('notes'), 'byte for byte from the plugin');
+    assert.deepEqual(JSON.parse(await readFile(config('mcp_config.json'), 'utf8')).mcpServers, { relay: { command: 'npx', args: ['relay'] } });
+    assert.deepEqual([await exists(config('agents')), await exists(config('skills/helper.md'))], [false, false]);
+  } finally { await box.cleanup(); }
+});
+
 test('Arriving On writes over nothing: Pi’s own skill review keeps Pi out of the plugin’s item; the person’s library item notes of the same content is never linked, and the plugin’s Off leaves it On', async () => {
   const box = await kitHome();
   try {
