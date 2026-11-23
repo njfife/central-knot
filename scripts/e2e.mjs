@@ -13548,6 +13548,7 @@ async function claudeWholeFlow() {
   await a.click('#header-refresh');
 
   await newProfile(a, 'Mine');
+  same('a new profile with nothing in it, which can’t be switched to, says the rule and lists nothing a switch would turn in Claude Code', [(await band())[0], await a.exists('#profile-switch')], [rule, false]);
   await a.click(byId('pf-skill:notes')); await done();
   const [ruleShown, offLines] = await band();
   same('before Mine (his own items alone), the page says the rule once and names each plugin turning off in Claude Code, the one-skill and the skill-less ones too, with what goes with each; the header counts them',
@@ -13589,6 +13590,24 @@ async function claudeWholeFlow() {
   await pictures('claude-whole-writing-result');
   await a.click('#outcome-undo'); await done();
   same('its Undo turns writing-kit off again there, and Mine is in use', [enabled(), (await a.text('#status-profile'))?.trim()], [[false, false, false], 'Mine']);
+
+  // A switch that changes only a plugin: tracker-kit on again by hand, its one server off by its own switch, so Mine turns no item
+  // and one plugin off. The header, Switch and its title, the result, History's line and its Undo's all say that one change.
+  const now = JSON.parse(readNow(settings));
+  writeFileSync(settings, `${JSON.stringify({ ...now, enabledPlugins: { ...now.enabledPlugins, [ids[2]]: true }, deniedMcpServers: [{ serverName: 'plugin:tracker-kit:tracker' }] }, null, 2)}\n`);
+  await a.click('#header-refresh');
+  await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Mine')).click()`); await a.settle();
+  same('a switch that turns only a plugin off: the header counts it, and Switch is offered, its title saying the same', [await a.text('.profile-header p'), await a.run(`document.querySelector('#profile-switch')?.title`)],
+    ['Switching turns 1 plugin off in Claude Code', 'Use Mine: turns 1 plugin off in Claude Code. One step in History, with Undo.']);
+  await a.click('#profile-switch'); await done();
+  check('its result says the plugin it turned off, not "nothing changed"', enabled()[2] === false && (await a.text('.band-done .band-text') ?? '').startsWith('Switched to Mine: 1 plugin turned off in Claude Code.'), [enabled(), await a.text('.band-done .band-text')]);
+  await openHistory(a, '#nav-history', () => a.exists('li.history-row[data-kind="profile"]'));
+  same('History’s line says the same', (await a.all('li.history-row[data-kind="profile"] .history-about', 'e.textContent'))[0], 'Switched to Mine: 1 plugin turned off in Claude Code.');
+  await a.click('li.history-row[data-kind="profile"] .history-actions button'); await done();
+  // What Claude Code needs to pick the plugin up (reload.ts) may follow the result's sentence.
+  const undoSaid = await a.run(`document.querySelector('#announcement').dataset.text`), undoLine = (await a.all('li.history-row[data-kind="profile"] .history-about', 'e.textContent'))[0];
+  check('its Undo turns tracker-kit back on, and its result and its History line say so', enabled()[2] === true && (undoSaid ?? '').startsWith('Undone: 1 plugin turned on in Claude Code.')
+    && undoLine === 'Undid the switch to Mine: 1 plugin turned on in Claude Code.', [enabled(), undoSaid, undoLine]);
   same('no page errors', a.pageErrors, []);
   await a.quit();
 }

@@ -634,9 +634,9 @@ async function sideNow(box: Box) {
   }
   if (box.tools.includes('claude-cli')) {
     // Claude Code's `plugin enable|disable <id>`, as the real one writes it: enabledPlugins in its settings.json, every other key
-    // kept; each call also listed in the box's claude-calls.
+    // kept; each call also listed in the box's claude-calls; refused while the box has refuse-<enable|disable>-<id>.
     const bin = join(box.base, 'bin/claude');
-    await putFile(bin, `#!/bin/sh\necho "$2 $3" >> ${JSON.stringify(join(box.base, 'claude-calls'))}\nexec ${JSON.stringify(process.execPath)} -e 'const fs=require("fs"),p=require("path"),[a,b,c]=process.argv.slice(1);if(a==="plugin"&&(b==="enable"||b==="disable")&&c){const f=p.join(process.env.HOME,".claude/settings.json"),j=JSON.parse(fs.readFileSync(f,"utf8"));j.enabledPlugins={...j.enabledPlugins,[c]:b==="enable"};fs.writeFileSync(f,JSON.stringify(j,null,2)+"\\n");process.exit(0);}process.exit(9);' "$@"\n`);
+    await putFile(bin, `#!/bin/sh\necho "$2 $3" >> ${JSON.stringify(join(box.base, 'claude-calls'))}\n[ -f ${JSON.stringify(box.base)}/refuse-$2-$3 ] && exit 9\nexec ${JSON.stringify(process.execPath)} -e 'const fs=require("fs"),p=require("path"),[a,b,c]=process.argv.slice(1);if(a==="plugin"&&(b==="enable"||b==="disable")&&c){const f=p.join(process.env.HOME,".claude/settings.json"),j=JSON.parse(fs.readFileSync(f,"utf8"));j.enabledPlugins={...j.enabledPlugins,[c]:b==="enable"};fs.writeFileSync(f,JSON.stringify(j,null,2)+"\\n");process.exit(0);}process.exit(9);' "$@"\n`);
     await chmod(bin, 0o755);
     binaries = { ...binaries, 'claude-cli': bin };
   }
@@ -882,6 +882,29 @@ test('docs off, a profile that ticks only its server s: docs comes on for it, wi
     assert.deepEqual(takenWhole(profileNow, (await sideNow(box)).view.pluginItems![0]!).brought.map(part => part.name), ['a', 'b', 'c']);
     const done = await switched(servers);
     assert.deepEqual([(await settings()).enabledPlugins, (await settings()).permissions?.deny, done.said], [{ 'docs@team': true }, ['Agent(docs:g)'], ' s is on in Claude Code. Its whole plugin docs was turned on there, with its 3 skills.']);
+  } finally { await box.cleanup(); }
+});
+
+test('An Undo Claude Code refuses for one of two plugins leaves the switch undoable for it: once the refusal clears, a second Undo turns it back', async () => {
+  const { box, made, switched, settings } = await wholeHome({ enabled: false });
+  try {
+    // A second plugin, solo@team, one skill, off in Claude Code beside docs.
+    const solo = join(box.home, '.claude/plugins/cache/team/solo/1.0.0'), record = join(box.home, '.claude/plugins/installed_plugins.json');
+    await putFile(join(solo, 'skills/single/SKILL.md'), skillText('The single skill.', 'single'));
+    await putFile(join(solo, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'solo', version: '1.0.0' }));
+    const installed = JSON.parse((await text(box, '.claude/plugins/installed_plugins.json'))!);
+    await writeFile(record, JSON.stringify({ ...installed, plugins: { ...installed.plugins, 'solo@team': [{ scope: 'user', installPath: solo, version: '1.0.0' }] } }));
+    await writeFile(join(box.home, '.claude/settings.json'), `${JSON.stringify({ ...(await settings()), enabledPlugins: { 'docs@team': false, 'solo@team': false } }, null, 2)}\n`);
+    const done = await switched(await made('Both', [aId, 'plugin:skill:solo@team/single']));
+    assert.deepEqual((await settings()).enabledPlugins, { 'docs@team': true, 'solo@team': true });
+    await writeFile(join(box.base, 'refuse-disable-docs@team'), '');
+    const refused = await undoSwitch(box.context, box.tools, done.event!, (await sideNow(box)).side);
+    const entry = async () => (await history(box)).find(each => each.id === done.event)!;
+    assert.deepEqual([refused.results.map(result => result.outcome), (await settings()).enabledPlugins, (await entry()).undoneBy, undoOffered({ profile: done.profile }, (await sideNow(box)).view)],
+      [['failed'], { 'docs@team': true, 'solo@team': false }, undefined, true], 'solo went back; docs, refused, is still undoable');
+    await rm(join(box.base, 'refuse-disable-docs@team'));
+    const again = await undoSwitch(box.context, box.tools, done.event!, (await sideNow(box)).side);
+    assert.deepEqual([again.results, (await settings()).enabledPlugins, !!(await entry()).undoneBy], [[], { 'docs@team': false, 'solo@team': false }, true]);
   } finally { await box.cleanup(); }
 });
 
