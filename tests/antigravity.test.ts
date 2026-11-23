@@ -163,6 +163,17 @@ test('Servers go to mcp_config.json in Antigravity’s form beside his own; Off 
   } finally { await box.cleanup(); }
 });
 
+test('An empty mcp_config.json is Antigravity’s no servers (its CLI lists none): a server turned on is written into it', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(config(box.home, 'mcp_config.json'), '');
+    await writeFile(join(box.home, '.claude.json'), JSON.stringify({ mcpServers: { docs: { command: 'docs' } } }));
+    assert.deepEqual(await readTool(box.context, 'antigravity-cli'), { entries: [], invalid: [], exists: true, text: '' });
+    assert.equal((await applyServers(box.context, tools, [{ key: 'docs', on: true, except: [] }])).writes, 1);
+    assert.deepEqual(JSON.parse(await readFile(config(box.home, 'mcp_config.json'), 'utf8')), { mcpServers: { docs: { command: 'docs' } } });
+  } finally { await box.cleanup(); }
+});
+
 test('A server Antigravity holds at url, or with a type, is the same Streamable HTTP server; its switch is disabled: true, which On takes out', async () => {
   const box = await sandbox();
   try {

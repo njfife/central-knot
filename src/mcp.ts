@@ -239,7 +239,8 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
       return { entries: servers.filter(server => !held(server)).map(server => fromOpenCode(server.name, file, server.raw as Record<string, unknown>, server.place)),
         invalid: [...new Set(servers.filter(held).map(server => server.name))], exists: true, text };
     }
-    const parsed = JSON.parse(withoutBom(text)) as { mcpServers?: unknown };
+    // An empty file is Antigravity's no servers (its CLI lists none, measured on 1.5.14); another tool's is unreadable.
+    const parsed = JSON.parse(tool === 'antigravity-cli' && !text.trim() ? '{}' : withoutBom(text)) as { mcpServers?: unknown };
     // A servers member that is there but is not an object (null, a list) makes the file unreadable: never read as no servers.
     const servers = parsed && typeof parsed === 'object' && 'mcpServers' in parsed ? parsed.mcpServers : {};
     if (!servers || typeof servers !== 'object' || Array.isArray(servers)) throw new Error('mcpServers is not an object');
