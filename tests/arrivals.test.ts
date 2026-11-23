@@ -29,7 +29,7 @@ async function box() {
   const turnOn = async () => assert.equal((await applySkills(context, await managedNow(context, await context.read()), [{ key: 'notes', on: true, except: [] }])).stopped, undefined);
   const codex = (installed: boolean) => (installed ? mkdir(join(home, '.codex/skills'), { recursive: true }) : rm(join(home, '.codex'), { recursive: true }));
   const inCodex = () => readFile(join(home, '.codex/skills/notes/SKILL.md'), 'utf8').then(() => true, () => false);
-  return { context, pass, turnOn, codex, inCodex, cleanup: () => rm(base, { recursive: true, force: true }) };
+  return { home, context, pass, turnOn, codex, inCodex, cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 
 test('A first setup says nothing; a tool installed later has arrived, with the items copied there, and stays said until closed', async () => {
@@ -38,10 +38,26 @@ test('A first setup says nothing; a tool installed later has arrived, with the i
     const first = await b.pass(undefined);
     assert.deepEqual(first, { managed: ['claude-cli', 'copilot-cli'], arrived: [] }, 'seeded from what is managed: the records name no tool yet');
     await b.turnOn();
+    const settled = await b.pass(first);
+    // Codex installed, and Copilot CLI's skills folder made again meanwhile: notes goes into both; Codex's copy alone is its arrival's.
     await b.codex(true);
-    const seen = await b.pass(await b.pass(first));
-    assert.deepEqual([seen, await b.inCodex()], [{ managed: ['claude-cli', 'copilot-cli', 'codex-cli'], arrived: [{ tool: 'codex-cli', copied: 1 }] }, true]);
+    await rm(join(b.home, '.copilot/skills'), { recursive: true });
+    await mkdir(join(b.home, '.copilot/skills'));
+    const seen = await b.pass(settled), inCopilot = await readFile(join(b.home, '.copilot/skills/notes/SKILL.md'), 'utf8').then(() => true, () => false);
+    assert.deepEqual([seen, await b.inCodex(), inCopilot], [{ managed: ['claude-cli', 'copilot-cli', 'codex-cli'], arrived: [{ tool: 'codex-cli', copied: 1 }] }, true, true]);
     assert.deepEqual(await b.pass(seen), seen, 'the next pass says nothing more and keeps the line');
+  } finally { await b.cleanup(); }
+});
+
+test('A tool that arrives with a copy of its own that differs counts it as written over, not copied', async () => {
+  const b = await box();
+  try {
+    await b.turnOn();
+    const before = await b.pass(undefined);
+    await b.codex(true);
+    await mkdir(join(b.home, '.codex/skills/notes'));
+    await writeFile(join(b.home, '.codex/skills/notes/SKILL.md'), '---\nname: notes\ndescription: Notes.\n---\n\nCodex’s own notes.\n');
+    assert.deepEqual((await b.pass(before)).arrived, [{ tool: 'codex-cli', copied: 0 }]);
   } finally { await b.cleanup(); }
 });
 
