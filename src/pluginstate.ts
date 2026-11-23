@@ -540,8 +540,12 @@ export function closeRun(): void { endRun(); clearRun(); }
  */
 export const overRun = (outcome: Outcome | undefined): boolean => outcome?.page === 'plugins' && !outcome.act && !saidInStatusBar(outcome);
 const clearRun = () => { market.lastRun = undefined; market.problem = undefined; };
-/** The run's result with no problem line goes by itself, as a list page's result does (app.ts FADE_MS); its Undo with it. */
-export function fadeRun(): void { if (market.lastRun && !market.problem && lastLines().every(line => line.ok)) clearRun(); }
+/** The run's result with no problem line goes by itself, as a list page's result does (app.ts FADE_MS); its Undo with it. Answers whether it went. */
+export function fadeRun(): boolean {
+  const goes = !!market.lastRun && !market.problem && lastLines().every(line => line.ok);
+  if (goes) clearRun();
+  return goes;
+}
 
 /** The way back from the last run, while it is for the home on screen: its reversal (a switch's, as main gave it), or what an Undo didn't get to. */
 export function undoOps(): PluginOp[] {

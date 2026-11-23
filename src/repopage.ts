@@ -56,6 +56,8 @@ const errorText = (error: unknown) => String(error instanceof Error ? error.mess
 
 /** What the last failed read said, so a good read clears only that. */
 let lastReadFailure: string | undefined;
+/** What a read can change of what this page and the sidebar's count show, as one value to compare (loadRepo). */
+const shownNow = () => JSON.stringify([repo.view, repo.problem, repo.checking]);
 
 /**
  * Reads the repo's view; `check` then asks the repo for its latest commit (a fetch), showing the view meanwhile. Loads may overlap
@@ -73,6 +75,7 @@ export async function loadRepo(check = false): Promise<void> {
   let failed: string | undefined;
   try { view = (await api().repo(false)) ?? undefined; } catch (error) { failed = `Couldn’t read the repo’s state: ${errorText(error)}`; }
   if (turn !== loads) return;
+  const shown = shownNow();
   // A read that fails keeps the last view on screen and says why, rather than leave a blank page; the next good read takes the
   // reason away (a refused action's reason stays until it is dismissed or the page is left).
   if (failed) { view = repo.view; repo.problem = failed; } else if (repo.problem === lastReadFailure) repo.problem = undefined;
@@ -81,7 +84,8 @@ export async function loadRepo(check = false): Promise<void> {
   wantCheck = false;
   repo.view = view;
   if (!inFlight) repo.checking = false;
-  rerender();
+  // Drawn only when the read changed what is shown: a redraw that changes nothing would replace a text field he is typing in, and its Undo.
+  if (shownNow() !== shown) rerender();
   if (!check || !view?.connected || !view.access.allowed) return;
   repo.checking = true;
   rerender();

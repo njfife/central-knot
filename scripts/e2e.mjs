@@ -6130,6 +6130,11 @@ async function draftFlow() {
   const claude0 = '# Style\nBe brief.\n\n# Claude\nUse the Task tool.\nDropped by the draft.\n', codex0 = 'Be brief.\nRun codex review before pushing.\n';
   writeFileSync(claudeMd, claude0);
   writeFileSync(agentsMd, codex0);
+  // One History entry (a tool's Manage switch, which has no Undo): its age is what the window's focus brings up to date.
+  const historyAt = new Date().toISOString();
+  mkdirSync(join(home, '.central-knot'), { recursive: true });
+  writeFileSync(join(home, '.central-knot/history.json'), JSON.stringify({ events: [{ id: 'managed-codex', at: historyAt, key: 'tool:codex-cli', item: 'Codex',
+    kind: 'managing', managing: { tool: 'codex-cli', on: true }, losers: [], orderProved: true }] }));
   mkdirSync(join(realHome, '.local/bin'), { recursive: true });
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
@@ -6293,6 +6298,82 @@ async function draftFlow() {
   await a.press('Escape');
   writeFileSync(agentsMd, codex0);
   await a.click('#header-refresh'); await openKind(a, 'skills'); await a.click('#nav-instructions');
+  await until(async () => (await says(codexText)) === codex0.trimEnd());
+
+  // While a tool's editor has the focus, the fade with nothing to clear, a Git repo read that changes nothing and the window's focus
+  // draw nothing (app.ts fadeNow, repopage.ts loadRepo, renderer.ts's focus listener): the editor stays the same box, so its Undo
+  // goes on, and so does a word an input method is composing. Any other redraw still replaces it, its caret and scroll kept (above).
+  await a.click('#ins-edit-codex-cli');
+  const editorNow = `document.querySelector('#ins-text-codex-cli')`;
+  /** Waits until the editor has stayed the same box for 300 ms: the read a click starts draws the page again when it lands. */
+  const editorSteady = async () => {
+    for (let tries = 0; tries < 30; tries++) { await a.run(`(${editorNow}.ckSteady = true)`); await wait(300); if (await a.run(`${editorNow}?.ckSteady === true`)) return; }
+  };
+  // Undo as the Edit menu sends it: the editing command, with no key that types.
+  const undo = async () => {
+    for (const type of ['rawKeyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, commands: type === 'keyUp' ? [] : ['undo'] });
+    await a.settle();
+  };
+  const sameEditor = () => a.run(`${editorNow}?.ckSame === true && document.activeElement === ${editorNow}`);
+  /** A word typed in the focused editor, `meanwhile` run, then Undo: whether the editor stayed the same box, and whether the Undo took the word away. */
+  const typedThenUndone = async (meanwhile = async () => {}) => {
+    const before = await a.run(`(area => { area.ckSame = true; area.focus(); return area.value; })(${editorNow})`);
+    await a.send('Input.insertText', { text: 'typed ' });
+    await meanwhile();
+    const kept = await sameEditor();
+    await undo();
+    return [kept, await a.run(`${editorNow}?.value`) === before];
+  };
+  // What the window hears when he comes back to it from another app.
+  const focusBack = async () => { await a.run(`(dispatchEvent(new Event('focus')), true)`); await a.settle(); };
+  await editorSteady();
+  same('in a tool’s editor with no redraw, Undo takes away the word typed', await typedThenUndone(), [true, true]);
+  same('the window getting the focus back while the editor has it draws nothing: the editor is the same box, and Undo takes away the word typed',
+    await typedThenUndone(focusBack), [true, true]);
+  const [composedIn, caret] = await a.run(`[${editorNow}.value, ${editorNow}.selectionStart]`);
+  await a.send('Input.imeSetComposition', { text: 'ni', selectionStart: 2, selectionEnd: 2 });
+  await focusBack();
+  await a.send('Input.insertText', { text: '你' });
+  same('a word an input method is composing, the window getting the focus back meanwhile: once committed, the editor holds the word, not its letters before it',
+    await a.run(`${editorNow}.value`), composedIn.slice(0, caret) + '你' + composedIn.slice(caret));
+  await undo();
+  // Refresh ends by starting the result's 8 s to go (app.ts FADE_MS) and a read of the Git repo 1.5 s later (app.ts afterActing).
+  // With no result to clear and the repo as it was, neither draws: a word typed just after Refresh is still undone after both. The
+  // word must come before the read: Refresh again, three times at most, until the editor is steady soon enough after it ends.
+  const refreshed = () => a.run(`new Promise(done => {
+    const watch = new MutationObserver(() => { if (document.body.dataset.busy === 'false') { watch.disconnect(); done(Date.now()); } });
+    watch.observe(document.body, { attributeFilter: ['data-busy'] }); document.querySelector('#header-refresh').click(); })`);
+  let idleAt, typedAt;
+  for (let tries = 0; tries < 3 && !(typedAt < 1400); tries++) { idleAt = await refreshed(); await editorSteady(); typedAt = Date.now() - idleAt; }
+  const through = {};
+  const afterRefresh = await typedThenUndone(async () => {
+    await wait(Math.max(0, idleAt + 2500 - Date.now()));
+    through.repoRead = await sameEditor();
+    await a.run(`(${editorNow}.ckSame = true)`);
+    await wait(Math.max(0, idleAt + 9000 - Date.now()));
+    through.fade = await sameEditor();
+  });
+  same('the Git repo read 1.5 s after Refresh, the repo as it was, draws nothing: the word was typed before it, and the editor is the same box',
+    [typedAt < 1400, through.repoRead], [true, true]);
+  same('the result’s time to go 8 s after Refresh, with nothing to clear, draws nothing: the editor is the same box', through.fade, true);
+  same('and Undo, after both, takes away the word typed just after Refresh', afterRefresh[1], true);
+  // Closed; where a check above failed and left words in it, through its discard question, so the checks below start as they would.
+  await a.press('Escape');
+  if (await a.exists('#ins-discard-codex-cli')) await a.click('#ins-discard-codex-cli');
+  for (let tries = 0; tries < 30 && await a.exists('#ins-text-codex-cli'); tries++) await wait(100);
+  // With no editor's text area focused, coming back to the window draws it again, and the words of time come up to date: History's
+  // row drawn "just now", the clock the page reads moved on 61 minutes, then the window's focus.
+  await a.run(`(window.ckRealNow = Date.now, window.ckShift = Date.parse(${JSON.stringify(historyAt)}) - Date.now(),
+    Date.now = () => window.ckRealNow() + window.ckShift, true)`);
+  await a.click('#nav-history');
+  await untilThere('.history-when');
+  const drawnAt = await says('.history-when');
+  await a.run(`(window.ckShift += 61 * 60000, true)`);
+  await focusBack();
+  same('on History, the clock moved on 61 minutes and the window given the focus: its row no longer says “just now”',
+    [drawnAt, (await says('.history-when')) !== 'just now'], ['just now', true]);
+  await a.run(`(Date.now = window.ckRealNow, true)`);
+  await a.click('#nav-instructions');
   await until(async () => (await says(codexText)) === codex0.trimEnd());
 
   await a.shot('draft-entry');

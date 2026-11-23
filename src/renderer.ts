@@ -3,8 +3,10 @@
 // sidebar's update control kept), and drawing again on a change. On a list page the last result and the sync notices are in the
 // header's own 48px, each whole only in the card that hangs from it (resultHere says the rule). A redraw keeps what is selected, the scroll places and the
 // focus (render), Back and Forward put back a visit's scroll places (places.ts), and a press on a control it replaces still counts
-// (dom.ts keepClicksAcrossRedraws). The page's state and actions are app.ts's; each page is drawn by its own module (pages.ts and
-// the *page.ts modules, matrix.ts for the item tables).
+// (dom.ts keepClicksAcrossRedraws). A redraw replaces a text field, its Undo and an input method's word in progress with it, so the
+// result's time to go with nothing to clear (app.ts fadeNow) and a Git repo read that brings what is shown (repopage.ts loadRepo)
+// draw nothing, and the window's focus draws again except while an editor's text area has it (its listener, below). The page's
+// state and actions are app.ts's; each page is drawn by its own module (pages.ts and the *page.ts modules, matrix.ts for the item tables).
 import { settingsPage } from './settingspage.ts';
 import packageInfo from '../package.json' with { type: 'json' };
 import { absentKinds, acting, drawPage, keepingFocus, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, state, type Page } from './app.ts';
@@ -272,8 +274,9 @@ document.addEventListener('click', event => {
 // Escape with a card open folds it and does nothing else, before any other Escape is heard: a find box, or a search field's own
 // clearing, keeps its words.
 window.addEventListener('keydown', event => { if (event.key === 'Escape' && foldResult(true)) { event.stopPropagation(); event.preventDefault(); } }, true);
-// Coming back to the window draws it again: a notice drawn while it had no focus is seen now, and its arrival plays (matrix.ts markSeen).
-window.addEventListener('focus', () => rerender());
+// Coming back to the window draws it again (a notice drawn while it had no focus is seen now: matrix.ts markSeen; the words of time
+// come up to date), except while an editor's text area has the focus: drawn again, it would lose its Undo, and its page draws no notices.
+window.addEventListener('focus', () => { if (!document.activeElement?.matches('textarea.ins-text')) rerender(); });
 
 // Laid out, and at each resize: fit reload chips on Row 2 (+N more on overflow) and show Show all on cut or hidden advice.
 const cut = (text: Element) => text.scrollWidth > text.clientWidth || text.scrollHeight > text.clientHeight;
