@@ -5,9 +5,6 @@ name: Windows checks
 # every Windows step lands. Never a required check for Mac or Linux changes, and never releases anything.
 on:
   workflow_dispatch:
-  # Temporary on this branch until windows.yml is on next (GitHub rejects workflow_dispatch until then); removed in final commit.
-  push:
-    branches: [ci/a-windows-run]
 permissions:
   contents: read
 # A group of its own: groups are shared by every workflow in the repository, so another workflow's name would cancel its runs.
