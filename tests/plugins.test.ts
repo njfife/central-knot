@@ -4,10 +4,11 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { tomlValue } from '../src/textedit.ts';
 import { compareVersions } from '../src/values.ts';
 import { INLINE_SKILLS_CONFIG } from '../src/pluginstatus.ts';
-import { cachedCatalog, checkAccess, forgetRefusals, fromDirectory, gitFailure, refusedBy, repositoryKey, whyGitFailed, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, setSkill, uninstall, update, type PluginContext } from '../src/plugins.ts';
+import { cachedCatalog, checkAccess, copySource, forgetRefusals, fromDirectory, gitFailure, gitPrefix, readRemotePlugin, refusedBy, repositoryKey, whyGitFailed, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, setSkill, uninstall, update, type PluginContext } from '../src/plugins.ts';
 
 const noPosix = process.platform === 'win32';
 
@@ -185,6 +186,59 @@ test('Git access failures are told apart, an ambiguous one says so, and an unkno
     assert.deepEqual([failure.state, words.test(failure.message)], [state, true], `${output}: ${failure.message}`);
     assert.equal(whyGitFailed(code, output), failure.message, 'a clone and an access check word one failure the same way');
   }
+});
+
+test('Git command prefix keeps macOS and Linux unchanged and adds byte-exact and long-path settings on Windows', () => {
+  // Literal list read from `git show origin/next:src/plugins.ts` (`plugins.ts` `git`).
+  const nextPrefix = ['-c', 'core.hooksPath=/dev/null'];
+  assert.deepEqual(gitPrefix('darwin'), nextPrefix);
+  assert.deepEqual(gitPrefix('linux'), nextPrefix);
+  assert.deepEqual(gitPrefix('win32'), [
+    ...nextPrefix,
+    '-c', 'core.autocrlf=false',
+    '-c', 'core.eol=lf',
+    '-c', 'core.longpaths=true',
+  ]);
+  assert.deepEqual(gitPrefix(), gitPrefix(process.platform));
+});
+
+test('Clones and pinned checkouts keep exact LF bytes (even under text=auto) and paths past 260 characters', async () => {
+  const box = await sandbox();
+  try {
+    const repo = join(box.base, 'repo');
+    const deep = join('a'.repeat(50), 'b'.repeat(50), 'c'.repeat(50), 'd'.repeat(50), 'e'.repeat(50), 'SKILL.md');
+    const v1 = { plain: 'line one\nline two\n', auto: 'alpha\nbeta\n', deep: '---\nname: deep\n---\nBody.\n' };
+    const v2 = { plain: 'line one\nline two\nline three\n', auto: 'alpha\nbeta\ngamma\n', deep: v1.deep };
+    const git = (args: string[]) => execFileSync('git', ['-C', repo, '-c', 'core.autocrlf=false', '-c', 'core.longpaths=true', '-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], { encoding: 'utf8' }).trim();
+    await mkdir(repo, { recursive: true });
+    execFileSync('git', ['init', '-q', '-b', 'main', repo]);
+    git(['config', 'uploadpack.allowReachableSHA1InWant', 'true']);
+    await put(join(repo, '.gitattributes'), 'auto.md text=auto\n');
+    await put(join(repo, 'plain.md'), v1.plain);
+    await put(join(repo, 'auto.md'), v1.auto);
+    await put(join(repo, deep), v1.deep);
+    git(['add', '--all']);
+    git(['commit', '-qm', 'v1']);
+    const firstSha = git(['rev-parse', 'HEAD']);
+    await put(join(repo, 'plain.md'), v2.plain);
+    await put(join(repo, 'auto.md'), v2.auto);
+    git(['add', '--all']);
+    git(['commit', '-qm', 'v2']);
+
+    const url = pathToFileURL(repo).href;
+    const target = join(box.base, 'copied');
+    assert.equal(await copySource(url, target), undefined);
+    assert.ok(join(target, deep).length > 260, `expected >260 char path, got ${join(target, deep).length}`);
+    assert.equal(await readFile(join(target, 'plain.md'), 'utf8'), v2.plain);
+    assert.equal(await readFile(join(target, 'auto.md'), 'utf8'), v2.auto);
+    assert.equal(await readFile(join(target, deep), 'utf8'), v2.deep);
+
+    const pinned = await readRemotePlugin(box.context, { url, path: '.', sha: firstSha });
+    assert.ok('folder' in pinned, JSON.stringify(pinned));
+    assert.equal(await readFile(join(pinned.folder, 'plain.md'), 'utf8'), v1.plain);
+    assert.equal(await readFile(join(pinned.folder, 'auto.md'), 'utf8'), v1.auto);
+    assert.equal(await readFile(join(pinned.folder, deep), 'utf8'), v1.deep);
+  } finally { await box.cleanup(); }
 });
 
 test('The access check finds Git missing, and asks only once per source within one request', { skip: noPosix }, async () => {
