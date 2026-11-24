@@ -1,39 +1,42 @@
 // Offline model pricing from the checked-in rates table (assets/model-rates.json, built and validated by
-// scripts/build-rates.ts from Pydantic's genai-prices MIT list). Owns: the bundled table (bundledRates), first-party
-// tool providers (TOOL_PROVIDERS), the one rule for a tool-reported cost (reportedCost), pricing one request
-// (priceRequest), AI credits (priceCredits, USD_PER_AI_CREDIT), and coverage totals (sumPrices, coverageText).
+// scripts/build-rates.ts from Pydantic's genai-prices MIT list, prices/new_data/v2/data_slim.json). Owns: the bundled
+// table (bundledRates), first-party tool providers (TOOL_PROVIDERS), the one rule for a tool-reported cost
+// (reportedCost), pricing one request as the list's own Python code does (priceRequest), AI credits (priceCredits,
+// USD_PER_AI_CREDIT), and coverage totals (sumPrices, coverageText).
 // Not here: reading session files (sessionrequests.ts), table validation (scripts/build-rates.ts), network fetches,
-// UI pages, or user price overrides.
+// non-text units, UI pages, or user price overrides.
 import rawRates from '../assets/model-rates.json' with { type: 'json' };
 import type { Request } from './sessionrequests.ts';
 import type { HarnessId } from './types.ts';
 
-/** Match clauses used by genai-prices at revision 55b1818ba5ed431d09d93c0622c76beec09292cc (`and` is unused there). */
+/** Match clauses from genai-prices types.py:60-69 (all seven are used by prices/new_data/v2/data_slim.json). */
 export type MatchClause =
   | { equals: string } | { starts_with: string } | { ends_with: string } | { contains: string } | { regex: string }
   | { or: MatchClause[] } | { and: MatchClause[] };
 
-export interface RateValues { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }
-export interface RateTier extends RateValues { above: number }
-export interface ModelRate extends RateValues { id: string; match: MatchClause; tiers?: RateTier[]; timeOfDay?: true }
+export interface UnitTier { start: number; price: number }
+/** A flat USD-per-MTok rate, or a threshold-tiered rate sorted ascending by `start` (types.py:1016-1036). */
+export type UnitPrice = number | { base: number; tiers: UnitTier[] };
+export interface PriceSet { input?: UnitPrice; output?: UnitPrice; cacheRead?: UnitPrice; cacheWrite?: UnitPrice; cacheWrite1h?: UnitPrice }
+export interface PriceConstraint { startDate?: string; startTime?: string; endTime?: string }
+export interface ConditionalPrice { constraint?: PriceConstraint; prices: PriceSet }
+export interface PriceVariant { when: Partial<Record<'speed' | 'service_tier', string>>; constraint?: PriceConstraint; prices: PriceSet }
+export interface ModelRate { id: string; match: MatchClause; prices: PriceSet | ConditionalPrice[]; variants?: PriceVariant[] }
 export interface ProviderRates { id: string; match?: MatchClause; fallbacks?: string[]; models: ModelRate[] }
 export interface RatesSource { name: string; url: string; revision: string; license: string; notice: string }
-export interface RatesTable { format: 1; date: string; source: RatesSource; providers: ProviderRates[] }
+/** Checked-in rates table: `date` is when the upstream data file was last changed; `built` is when this file was made. */
+export interface RatesTable { format: 1; date: string; built: string; source: RatesSource; providers: ProviderRates[] }
 
 /** One request's pricing inputs: a subset of sessionrequests.ts Request so any Request passes straight in. */
-export type PriceInput = Pick<Request, 'tool' | 'model' | 'provider' | 'tokens' | 'speed' | 'serviceTier' | 'reported'>;
+export type PriceInput = Pick<Request, 'tool' | 'at' | 'model' | 'provider' | 'tokens' | 'speed' | 'serviceTier' | 'reported'>;
 
-/** How a request matched a row: its provider and model id, exact id vs wider list rule, and provider origin. */
-export interface PriceMatch {
-  provider: string;
-  model: string;
-  by: 'exact' | 'rule';
-  providerFrom: 'request' | 'tool';
-}
+/** How a request matched a row: provider and model id, exact row id vs wider rule, and provider origin. */
+export interface PriceMatch { provider: string; model: string; by: 'exact' | 'rule'; providerFrom: 'request' | 'tool' }
 
 export type UnpricedReason =
-  | 'no-provider' | 'not-in-table' | 'missing-rate' | 'missing-tier'
-  | 'unsupported-speed' | 'unsupported-service-tier' | 'invalid-tokens' | 'invalid-credits';
+  | 'no-provider' | 'not-in-table' | 'missing-rate'
+  | 'unsupported-speed' | 'unsupported-service-tier'
+  | 'invalid-tokens' | 'invalid-time' | 'invalid-credits';
 
 export type PriceResult =
   | { priced: true; dollars: number; basis: 'list'; ratesDate: string; matched: PriceMatch; atLeast?: true }
@@ -53,6 +56,9 @@ export const TOOL_PROVIDERS: Readonly<Partial<Record<HarnessId, string>>> = { 'c
 /** The checked-in rates table, loaded offline as written by scripts/build-rates.ts. */
 export const bundledRates = rawRates as unknown as RatesTable;
 
+const DAY_MS = 86_400_000;
+const ORDINARY_TIERS = new Set(['standard', 'default']);
+const PRICE_KEYS: readonly (keyof PriceSet)[] = ['input', 'output', 'cacheRead', 'cacheWrite', 'cacheWrite1h'];
 const whole = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
 const noPrice = (reason: UnpricedReason, detail: string): PriceResult => ({ priced: false, reason, detail });
 
@@ -77,7 +83,7 @@ function normalizeCompactDate(ref: string): string {
 
 /**
  * Matches a provider id following genai-prices data_snapshot.py:168-188 (rev 55b1818ba5ed431d09d93c0622c76beec09292cc):
- * exact provider id first (case-insensitive, trimmed), then the first provider match in list order.
+ * exact provider id first (case-insensitive, trimmed), then the first provider_match in list order.
  */
 function findProvider(providerId: string, table: RatesTable): ProviderRates | undefined {
   const ref = providerId.trim().toLowerCase();
@@ -87,24 +93,26 @@ function findProvider(providerId: string, table: RatesTable): ProviderRates | un
 }
 
 /**
- * Matches a model id inside a resolved provider following genai-prices types.py:416-438 (rev 55b1818ba5ed431d09d93c0622c76beec09292cc),
- * with exact row id first: (1) exact model id (case-insensitive), then first `model.match` in list order; (2) one hop into
- * `provider.fallbacks` in list order; (3) if unmatched, retry (1)-(2) after compact-date normalization (`-YYYYMMDD` to `-YYYY-MM-DD`).
+ * Matches a model id inside a resolved provider following genai-prices types.py:416-438 (rev 55b1818ba5ed431d09d93c0622c76beec09292cc):
+ * (1) first `model.match` in the provider's list order (no exact-id shortcut); (2) one hop into `provider.fallbacks`
+ * in list order; (3) if unmatched, retry (1)-(2) after compact-date normalization (`-YYYYMMDD` to `-YYYY-MM-DD`).
+ * `by` is `'exact'` only when the matched row's own id equals the saved id (case-insensitively), else `'rule'`.
  */
-function findModel(provider: ProviderRates, modelId: string, table: RatesTable): { provider: string; rate: ModelRate; by: 'exact' | 'rule' } | undefined {
+function findModel(provider: ProviderRates, modelId: string, table: RatesTable) {
   const ref = modelId.toLowerCase();
   if (!ref) return undefined;
-  const candidates = [provider];
-  for (const id of provider.fallbacks ?? []) {
-    const fallback = table.providers.find(p => p.id === id);
-    if (fallback) candidates.push(fallback);
-  }
+  const matchIn = (p: ProviderRates, text: string, fallback: boolean) => {
+    const rate = p.models.find(m => matchesClause(m.match, text));
+    if (!rate) return undefined;
+    return { provider: p.id, rate, by: (rate.id.toLowerCase() === ref ? 'exact' : 'rule') as 'exact' | 'rule', fallback };
+  };
   const search = (text: string) => {
-    for (const p of candidates) {
-      const exact = p.models.find(m => m.id.toLowerCase() === text);
-      if (exact) return { provider: p.id, rate: exact, by: (exact.id.toLowerCase() === ref ? 'exact' : 'rule') as 'exact' | 'rule' };
-      const rule = p.models.find(m => matchesClause(m.match, text));
-      if (rule) return { provider: p.id, rate: rule, by: 'rule' as const };
+    const direct = matchIn(provider, text, false);
+    if (direct) return direct;
+    for (const id of provider.fallbacks ?? []) {
+      const fallback = table.providers.find(p => p.id === id);
+      const hit = fallback && matchIn(fallback, text, true);
+      if (hit) return hit;
     }
     return undefined;
   };
@@ -114,14 +122,49 @@ function findModel(provider: ProviderRates, modelId: string, table: RatesTable):
   return normalized !== ref ? search(normalized) : undefined;
 }
 
+const timeMs = (value: string) => {
+  const ms = Date.parse(`1970-01-01T${/[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}Z`}`);
+  return ((ms % DAY_MS) + DAY_MS) % DAY_MS;
+};
+
+/** Evaluates StartDateConstraint and TimeOfDateConstraint at a UTC instant (types.py:1095-1136). */
+function constraintActive(constraint: PriceConstraint | undefined, utcDate: string, utcTimeMs: number): boolean {
+  if (!constraint) return true;
+  if (constraint.startDate !== undefined) return utcDate >= constraint.startDate;
+  if (constraint.startTime !== undefined && constraint.endTime !== undefined) {
+    const start = timeMs(constraint.startTime);
+    const end = timeMs(constraint.endTime);
+    return end < start ? utcTimeMs >= start || utcTimeMs < end : start <= utcTimeMs && utcTimeMs < end;
+  }
+  return false;
+}
+
+/** Picks the base PriceSet in force at `at`, last active entry winning or first as fallback (types.py:730-738). */
+function basePricesAt(prices: PriceSet | ConditionalPrice[], utcDate: string, utcTimeMs: number): PriceSet {
+  if (!Array.isArray(prices)) return prices;
+  for (let i = prices.length - 1; i >= 0; i--) {
+    const entry = prices[i]!;
+    if (constraintActive(entry.constraint, utcDate, utcTimeMs)) return entry.prices;
+  }
+  return prices[0]!.prices;
+}
+
+/** Resolves a per-unit flat or threshold-tiered price using total input tokens (types.py:899-919). */
+function unitRate(price: UnitPrice | undefined, totalInputTokens: number): number | undefined {
+  if (price === undefined || typeof price === 'number') return price;
+  let rate = price.base;
+  for (const tier of price.tiers) {
+    if (totalInputTokens > tier.start) rate = tier.price;
+  }
+  return rate;
+}
+
 /**
  * The one rule for a tool-reported cost in USD (used for Request.reported and SessionRead.treeReported):
  * a finite figure above zero wins; zero, negative, non-finite or absent falls back to list pricing.
  */
-export function reportedCost(reported: number | undefined): number | undefined {
-  if (typeof reported === 'number' && Number.isFinite(reported) && reported > 0) return reported;
-  return undefined;
-}
+export const reportedCost = (reported: number | undefined): number | undefined =>
+  typeof reported === 'number' && Number.isFinite(reported) && reported > 0 ? reported : undefined;
 
 /** Prices one request from a tool's history. Reported cost > 0 wins; otherwise uses the list's own rules. */
 export function priceRequest(input: PriceInput, table: RatesTable = bundledRates): PriceResult {
@@ -134,9 +177,10 @@ export function priceRequest(input: PriceInput, table: RatesTable = bundledRates
     && (tokens.cacheWrite1h === undefined || (whole(tokens.cacheWrite1h) && tokens.cacheWrite1h <= tokens.cacheWrite));
   if (!validTokens) return noPrice('invalid-tokens', 'Token counts must be non-negative whole numbers');
 
-  // genai-prices at revision 55b1818ba5ed431d09d93c0622c76beec09292cc has no rates for non-standard speed or serviceTier.
-  if (input.speed !== undefined && input.speed !== 'standard') return noPrice('unsupported-speed', `No rate for speed ${input.speed}`);
-  if (input.serviceTier !== undefined && input.serviceTier !== 'standard') return noPrice('unsupported-service-tier', `No rate for service tier ${input.serviceTier}`);
+  const when = new Date(input.at);
+  if (Number.isNaN(when.getTime())) return noPrice('invalid-time', 'Request time must be a valid timestamp');
+  const utcDate = when.toISOString().slice(0, 10);
+  const utcTimeMs = ((when.getTime() % DAY_MS) + DAY_MS) % DAY_MS;
 
   const savedProvider = input.provider?.trim();
   const providerFrom: 'request' | 'tool' = savedProvider ? 'request' : 'tool';
@@ -148,23 +192,46 @@ export function priceRequest(input: PriceInput, table: RatesTable = bundledRates
 
   const hit = findModel(provider, input.model, table);
   if (!hit) return noPrice('not-in-table', `${provider.id}/${input.model} is not in the table`);
-  if (hit.rate.timeOfDay) return noPrice('missing-tier', `${hit.provider}/${hit.rate.id} uses time-of-day pricing`);
 
-  const promptTokens = tokens.input + tokens.cacheRead + tokens.cacheWrite;
-  let values: RateValues = hit.rate;
-  if (hit.rate.tiers?.length) {
-    for (const tier of [...hit.rate.tiers].sort((a, b) => a.above - b.above)) {
-      if (promptTokens > tier.above) values = tier;
+  const base = basePricesAt(hit.rate.prices, utcDate, utcTimeMs);
+  // Apply price_variants first-to-last per key (types.py:739-752), skipped on fallback rows (types.py:766-769).
+  // genai-prices silently keeps the base price for any unmatched context value; we allow that only for the ordinary
+  // labels ('standard', 'default') and refuse any other unmatched speed or serviceTier.
+  const contextOf = (key: 'speed' | 'service_tier') => (key === 'speed' ? input.speed : input.serviceTier);
+  const overrides: PriceSet = {};
+  const matchedKeys = new Set<string>();
+  if (!hit.fallback && (input.speed !== undefined || input.serviceTier !== undefined)) {
+    for (const variant of hit.rate.variants ?? []) {
+      if (!constraintActive(variant.constraint, utcDate, utcTimeMs)) continue;
+      const entries = Object.entries(variant.when) as ['speed' | 'service_tier', string][];
+      if (!entries.every(([key, value]) => contextOf(key) === value)) continue;
+      for (const [key] of entries) matchedKeys.add(key);
+      for (const key of PRICE_KEYS) {
+        if (overrides[key] === undefined && variant.prices[key] !== undefined) overrides[key] = variant.prices[key];
+      }
     }
   }
+  if (input.speed !== undefined && !matchedKeys.has('speed') && !ORDINARY_TIERS.has(input.speed)) {
+    return noPrice('unsupported-speed', `No rate for speed ${input.speed} on ${hit.provider}/${hit.rate.id}`);
+  }
+  if (input.serviceTier !== undefined && !matchedKeys.has('service_tier') && !ORDINARY_TIERS.has(input.serviceTier)) {
+    return noPrice('unsupported-service-tier', `No rate for service tier ${input.serviceTier} on ${hit.provider}/${hit.rate.id}`);
+  }
+  const active: PriceSet = { ...base, ...overrides };
 
-  // Per genai-prices types.py:822-858, 977-989, decompose.py:14-36 and data_units.py:7-28 (rev 55b1818ba5ed431d09d93c0622c76beec09292cc),
-  // cache_read_tokens and cache_write_tokens are descendants of input_tokens and are charged at input_mtok when a row lacks its own rate.
+  // Per genai-prices types.py:822-858, 977-989, decompose.py:14-36 and data_units.py:7-36 (rev 55b1818ba5ed431d09d93c0622c76beec09292cc),
+  // cache_read_tokens and cache_write_tokens descend from input_tokens, and cache_write_1h_tokens descends from
+  // cache_write_tokens: when a descendant lacks its own price, its count stays in its priced ancestor.
+  const totalInput = tokens.input + tokens.cacheRead + tokens.cacheWrite;
+  const oneHour = tokens.cacheWrite1h ?? 0;
+  const inputRate = unitRate(active.input, totalInput);
+  const cacheWriteRate = unitRate(active.cacheWrite, totalInput) ?? inputRate;
   const parts: [number, number | undefined, string][] = [
-    [tokens.input, values.input, 'input'],
-    [tokens.cacheRead, values.cacheRead ?? values.input, 'cache-read'],
-    [tokens.cacheWrite, values.cacheWrite ?? values.input, 'cache-write'],
-    [tokens.output, values.output, 'output'],
+    [tokens.input, inputRate, 'input'],
+    [tokens.cacheRead, unitRate(active.cacheRead, totalInput) ?? inputRate, 'cache-read'],
+    [tokens.cacheWrite - oneHour, cacheWriteRate, 'cache-write'],
+    [oneHour, unitRate(active.cacheWrite1h, totalInput) ?? cacheWriteRate, 'one-hour cache-write'],
+    [tokens.output, unitRate(active.output, totalInput), 'output'],
   ];
   let dollars = 0;
   for (const [count, rate, label] of parts) {
@@ -174,8 +241,8 @@ export function priceRequest(input: PriceInput, table: RatesTable = bundledRates
   dollars /= 1_000_000;
 
   const matched: PriceMatch = { provider: hit.provider, model: hit.rate.id, by: hit.by, providerFrom };
-  // cacheWrite1h sits inside cacheWrite; the list holds one cache-write rate and 1h writes cost more, so mark "at least".
-  const atLeast = tokens.cacheWrite1h !== undefined && tokens.cacheWrite1h > 0;
+  // Where a row lacks cacheWrite1h, one-hour tokens fall back to the shorter-TTL cache-write/input rate (undercharging).
+  const atLeast = oneHour > 0 && active.cacheWrite1h === undefined;
   return { priced: true, dollars, basis: 'list', ratesDate: table.date, matched, ...(atLeast ? { atLeast: true } : {}) };
 }
 

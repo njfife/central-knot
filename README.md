@@ -214,13 +214,13 @@ npm test             # TypeScript check and unit tests (tests/*.test.ts)
 
 The disk image is made by `scripts/mac-dmg.mjs`. Each app's window is its own folder, `assets/dmg/Central-Knot/` and `assets/dmg/Central-Knot-Alpha/`: the picture, `background.svg` (it names the app), kept as PNGs at both sizes, and the window's size and icon places in `DS_Store`, which `scripts/mac-dmg-layout.sh "<app name>"` makes again on a Mac after a layout change. Releases are published on GitHub with their checks in the release notes.
 
-**Model rates table.** `assets/model-rates.json` holds the dated per-million-token API rates for session cost estimates, built from Pydantic's `genai-prices` public list (`prices/data_slim.json`, MIT licence) with its licence notice and source revision. Refresh it by hand before cutting a release and commit the updated file:
+**Model rates table.** `assets/model-rates.json` holds the dated per-million-token API rates for session cost estimates, built from Pydantic's `genai-prices` public list (`prices/new_data/v2/data_slim.json`, MIT licence) with its licence notice and source revision; the table's `date` is the date that revision's data file was last changed in Git (with `built` recording when the file was generated). Refresh it by hand before cutting a release and commit the updated file:
 
 ```sh
 node scripts/build-rates.ts
 ```
 
-That script is the only place that touches the network for rates (fetching the public list's `main` commit hash, `prices/data_slim.json` and `LICENSE`, sending nothing about this project or computer). Packaging and the app read the checked-in `assets/model-rates.json` offline.
+That script is the only place that touches the network for rates (fetching the public list's `main` commit hash, the data file's last-changed commit date, `prices/new_data/v2/data_slim.json` and `LICENSE`, sending nothing about this project or computer). Packaging and the app read the checked-in `assets/model-rates.json` offline.
 
 ### Building a custom build
 

@@ -1,15 +1,19 @@
 // Makes and validates the checked-in model rates table (assets/model-rates.json) from Pydantic's genai-prices public list
-// (prices/data_slim.json, MIT licence). Run by hand before a release: `node scripts/build-rates.ts`.
-// This script is the only place that touches the network for rates, and it sends nothing but the public requests for
-// the list's commit hash, data_slim.json and LICENSE. Packaging and the app read assets/model-rates.json offline.
+// (prices/new_data/v2/data_slim.json, MIT licence). Run by hand before a release: `node scripts/build-rates.ts`.
+// This script is the only place that touches the network for rates, and it sends nothing but public requests for the
+// list's commit hash, data commit date, data_slim.json and LICENSE. Packaging and the app read assets/model-rates.json offline.
 import { execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import type { MatchClause, ModelRate, ProviderRates, RatesTable, RateTier, RateValues } from '../src/rates.ts';
+import type {
+  ConditionalPrice, MatchClause, ModelRate, PriceConstraint, PriceSet, PriceVariant, ProviderRates, RatesTable, UnitPrice,
+} from '../src/rates.ts';
 import { record } from '../src/values.ts';
 
 const REPO = 'https://github.com/pydantic/genai-prices.git';
 const RAW_BASE = 'https://raw.githubusercontent.com/pydantic/genai-prices';
+const API_BASE = 'https://api.github.com/repos/pydantic/genai-prices';
+export const UPSTREAM_DATA_PATH = 'prices/new_data/v2/data_slim.json';
 const DEFAULT_OUT = join(import.meta.dirname, '..', 'assets', 'model-rates.json');
 
 /**
@@ -22,6 +26,7 @@ export const KEPT_PROVIDERS = [
 ] as const;
 
 const KEPT_SET = new Set<string>(KEPT_PROVIDERS);
+const KEPT_WHEN_KEYS = new Set(['speed', 'service_tier']);
 
 type UpstreamNumber = number | { base: number; tiers: { start: number; price: number }[] };
 interface UpstreamPrices {
@@ -29,26 +34,50 @@ interface UpstreamPrices {
   output_mtok?: UpstreamNumber;
   cache_read_mtok?: UpstreamNumber;
   cache_write_mtok?: UpstreamNumber;
+  cache_write_1h_mtok?: UpstreamNumber;
+  [key: string]: unknown;
 }
-interface UpstreamConditional {
-  constraint?: { start_date?: string; start_time?: string; end_time?: string; [key: string]: unknown };
-  prices: UpstreamPrices;
+interface UpstreamConstraint {
+  start_date?: string;
+  start_time?: string;
+  end_time?: string;
+  [key: string]: unknown;
 }
+interface UpstreamConditional { constraint?: UpstreamConstraint; prices: UpstreamPrices }
+interface UpstreamVariant { when: Record<string, string>; constraint?: UpstreamConstraint; prices: UpstreamPrices }
 export interface UpstreamProvider {
   id: string;
   provider_match?: MatchClause;
   fallback_model_providers?: string[];
-  models: { id: string; match: MatchClause; prices: UpstreamPrices | UpstreamConditional[] }[];
+  models: {
+    id: string;
+    match: MatchClause;
+    prices: UpstreamPrices | UpstreamConditional[];
+    price_variants?: UpstreamVariant[];
+  }[];
 }
 
-const FIELDS: readonly [keyof UpstreamPrices, keyof RateValues][] = [
+const FIELDS: readonly [keyof UpstreamPrices, keyof PriceSet][] = [
   ['input_mtok', 'input'],
   ['output_mtok', 'output'],
   ['cache_read_mtok', 'cacheRead'],
   ['cache_write_mtok', 'cacheWrite'],
+  ['cache_write_1h_mtok', 'cacheWrite1h'],
 ];
 const STRING_CLAUSES = new Set(['equals', 'starts_with', 'ends_with', 'contains', 'regex']);
 const nonNeg = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+
+function validIsoDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const day = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(day) && new Date(day).toISOString().slice(0, 10) === value;
+}
+
+function validUtcTime(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[zZ]|[+-]\d{2}:\d{2})?$/.test(value)) return false;
+  const iso = `1970-01-01T${/[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}Z`}`;
+  return Number.isFinite(Date.parse(iso));
+}
 
 function assertMatchClause(raw: unknown, where: string): void {
   const obj = record(raw);
@@ -70,37 +99,74 @@ function assertMatchClause(raw: unknown, where: string): void {
   throw new Error(`Unknown match operator ${key} at ${where}`);
 }
 
-function assertRateValues(raw: Record<string, unknown>, where: string): void {
-  for (const [, key] of FIELDS) {
-    if (raw[key] !== undefined && !nonNeg(raw[key])) throw new Error(`Invalid ${key} rate at ${where}`);
+function assertUnitPrice(raw: unknown, where: string): void {
+  if (nonNeg(raw)) return;
+  const obj = record(raw);
+  if (!obj || !nonNeg(obj.base) || !Array.isArray(obj.tiers)) throw new Error(`Invalid unit price at ${where}`);
+  let prev = -1;
+  for (const [i, item] of obj.tiers.entries()) {
+    const tier = record(item);
+    if (!tier || typeof tier.start !== 'number' || !Number.isSafeInteger(tier.start) || tier.start < 0 || tier.start < prev || !nonNeg(tier.price)) {
+      throw new Error(`Invalid tier ${i} at ${where}`);
+    }
+    prev = tier.start;
   }
+}
+
+function assertPriceSet(raw: unknown, where: string): void {
+  const obj = record(raw);
+  if (!obj) throw new Error(`Invalid price set at ${where}`);
+  const allowed = new Set<string>(FIELDS.map(([, dst]) => dst));
+  for (const [key, value] of Object.entries(obj)) {
+    if (!allowed.has(key)) throw new Error(`Unknown price key ${key} at ${where}`);
+    if (value !== undefined) assertUnitPrice(value, `${where}.${key}`);
+  }
+}
+
+function assertConstraint(raw: unknown, where: string): void {
+  const obj = record(raw);
+  if (!obj) throw new Error(`Invalid constraint at ${where}`);
+  const keys = Object.keys(obj);
+  if (keys.length === 1 && validIsoDate(obj.startDate)) return;
+  if (keys.length === 2 && validUtcTime(obj.startTime) && validUtcTime(obj.endTime)) return;
+  throw new Error(`Invalid constraint at ${where}: ${JSON.stringify(raw)}`);
 }
 
 function assertModelRate(raw: Record<string, unknown>, where: string): void {
   if (typeof raw.id !== 'string' || !raw.id.trim()) throw new Error(`Invalid model id at ${where}`);
   assertMatchClause(raw.match, `${where}.match`);
-  assertRateValues(raw, where);
-  if (raw.timeOfDay !== undefined && raw.timeOfDay !== true) throw new Error(`Invalid timeOfDay at ${where}`);
-  if (raw.tiers !== undefined) {
-    if (!Array.isArray(raw.tiers)) throw new Error(`Invalid tiers at ${where}`);
-    for (const [i, entry] of raw.tiers.entries()) {
-      const tier = record(entry);
-      if (!tier || !nonNeg(tier.above) || tier.tiers !== undefined || tier.timeOfDay !== undefined) {
-        throw new Error(`Invalid tier ${i} at ${where}`);
+  if (Array.isArray(raw.prices)) {
+    if (!raw.prices.length) throw new Error(`Empty conditional prices at ${where}`);
+    for (const [i, item] of raw.prices.entries()) {
+      const cond = record(item);
+      if (!cond) throw new Error(`Invalid conditional price ${i} at ${where}`);
+      if (cond.constraint !== undefined) assertConstraint(cond.constraint, `${where}.prices[${i}].constraint`);
+      assertPriceSet(cond.prices, `${where}.prices[${i}].prices`);
+    }
+  } else {
+    assertPriceSet(raw.prices, `${where}.prices`);
+  }
+  if (raw.variants !== undefined) {
+    if (!Array.isArray(raw.variants)) throw new Error(`Invalid variants at ${where}`);
+    for (const [i, item] of raw.variants.entries()) {
+      const variant = record(item);
+      const when = variant && record(variant.when);
+      const whenEntries = when ? Object.entries(when) : [];
+      if (!variant || !whenEntries.length || !whenEntries.every(([k, v]) => KEPT_WHEN_KEYS.has(k) && typeof v === 'string' && v.length > 0)) {
+        throw new Error(`Invalid variant ${i} at ${where}`);
       }
-      assertRateValues(tier, `${where}.tiers[${i}]`);
+      if (variant.constraint !== undefined) assertConstraint(variant.constraint, `${where}.variants[${i}].constraint`);
+      assertPriceSet(variant.prices, `${where}.variants[${i}].prices`);
     }
   }
 }
 
-/** Validates a JSON value as a RatesTable, throwing on missing date, notice, match clauses or invalid rates. */
+/** Validates a JSON value as a RatesTable, throwing on invalid dates, notice, match clauses, constraints or rates. */
 export function parseRatesTable(raw: unknown): RatesTable {
   const obj = record(raw);
   if (!obj || obj.format !== 1) throw new Error('Rates table must be format 1');
-  const day = typeof obj.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(obj.date) ? Date.parse(`${obj.date}T00:00:00Z`) : NaN;
-  if (!Number.isFinite(day) || new Date(day).toISOString().slice(0, 10) !== obj.date) {
-    throw new Error('Rates table has no valid YYYY-MM-DD date');
-  }
+  if (!validIsoDate(obj.date)) throw new Error('Rates table has no valid YYYY-MM-DD data date');
+  if (!validIsoDate(obj.built)) throw new Error('Rates table has no valid YYYY-MM-DD built date');
   const src = record(obj.source);
   if (!src || !['name', 'url', 'revision', 'license', 'notice'].every(k => typeof src[k] === 'string' && src[k].trim().length > 0)) {
     throw new Error('Rates table source must name url, revision, license and notice');
@@ -133,79 +199,64 @@ export function parseRatesTable(raw: unknown): RatesTable {
   return obj as unknown as RatesTable;
 }
 
-function priceAt(field: UpstreamNumber, above?: number): number {
-  if (typeof field === 'number') return field;
-  if (above === undefined) return field.base;
-  let picked = field.base;
-  for (const tier of [...field.tiers].sort((a, b) => a.start - b.start)) {
-    if (tier.start <= above) picked = tier.price;
-  }
-  return picked;
+function extractUnitPrice(value: UpstreamNumber): UnitPrice {
+  if (typeof value === 'number') return value;
+  const tiers = [...value.tiers].sort((a, b) => a.start - b.start).map(tier => ({ start: tier.start, price: tier.price }));
+  return { base: value.base, tiers };
 }
 
-function extractRate(prices: UpstreamPrices): RateValues & { tiers?: RateTier[] } {
-  const rate: RateValues & { tiers?: RateTier[] } = {};
-  const starts = new Set<number>();
+function extractPriceSet(prices: UpstreamPrices): PriceSet {
+  const out: PriceSet = {};
   for (const [src, dst] of FIELDS) {
-    const value = prices[src];
-    if (value === undefined) continue;
-    rate[dst] = priceAt(value);
-    if (typeof value !== 'number') for (const tier of value.tiers) starts.add(tier.start);
+    const value = prices[src] as UpstreamNumber | undefined;
+    if (value !== undefined) out[dst] = extractUnitPrice(value);
   }
-  if (starts.size) {
-    rate.tiers = [...starts].sort((a, b) => a - b).map(above => {
-      const tier: RateTier = { above };
-      for (const [src, dst] of FIELDS) {
-        const value = prices[src];
-        if (value !== undefined) tier[dst] = priceAt(value, above);
-      }
-      return tier;
+  return out;
+}
+
+function extractConstraint(constraint: UpstreamConstraint, label: string): PriceConstraint {
+  const keys = Object.keys(constraint);
+  if (keys.length === 1 && typeof constraint.start_date === 'string') return { startDate: constraint.start_date };
+  if (keys.length === 2 && typeof constraint.start_time === 'string' && typeof constraint.end_time === 'string') {
+    return { startTime: constraint.start_time, endTime: constraint.end_time };
+  }
+  throw new Error(`Unsupported price constraint on ${label}: ${JSON.stringify(constraint)}`);
+}
+
+function extractModelPrices(prices: UpstreamPrices | UpstreamConditional[], label: string): PriceSet | ConditionalPrice[] | undefined {
+  if (!Array.isArray(prices)) {
+    const set = extractPriceSet(prices);
+    return Object.keys(set).length ? set : undefined;
+  }
+  const list: ConditionalPrice[] = prices.map((entry, i) => ({
+    ...(entry.constraint ? { constraint: extractConstraint(entry.constraint, `${label}[${i}]`) } : {}),
+    prices: extractPriceSet(entry.prices),
+  }));
+  return list.some(entry => Object.keys(entry.prices).length > 0) ? list : undefined;
+}
+
+function extractVariants(variants: readonly UpstreamVariant[] | undefined, label: string): PriceVariant[] | undefined {
+  if (!variants?.length) return undefined;
+  const kept: PriceVariant[] = [];
+  for (const [i, variant] of variants.entries()) {
+    const entries = Object.entries(variant.when);
+    if (!entries.length || !entries.every(([k]) => KEPT_WHEN_KEYS.has(k))) continue;
+    kept.push({
+      when: variant.when as PriceVariant['when'],
+      ...(variant.constraint ? { constraint: extractConstraint(variant.constraint, `${label}.variants[${i}]`) } : {}),
+      prices: extractPriceSet(variant.prices),
     });
   }
-  return rate;
-}
-
-function resolveModelPrices(
-  prices: UpstreamPrices | UpstreamConditional[],
-  date: string,
-  label: string,
-): RateValues & { tiers?: RateTier[]; timeOfDay?: true } {
-  if (!Array.isArray(prices)) return extractRate(prices);
-  let active: UpstreamPrices | undefined;
-  let activeDate = '';
-  let hasTimeOfDay = false;
-  for (const entry of prices) {
-    const constraint = entry.constraint;
-    if (!constraint) {
-      if (!activeDate) active = entry.prices;
-      continue;
-    }
-    const keys = Object.keys(constraint);
-    if (keys.length === 1 && typeof constraint.start_date === 'string') {
-      if (constraint.start_date <= date && constraint.start_date >= activeDate) {
-        active = entry.prices;
-        activeDate = constraint.start_date;
-      }
-    } else if (keys.length === 2 && typeof constraint.start_time === 'string' && typeof constraint.end_time === 'string') {
-      hasTimeOfDay = true;
-    } else {
-      throw new Error(`Unsupported price constraint on ${label}: ${JSON.stringify(constraint)}`);
-    }
-  }
-  // Models whose upstream price varies by UTC clock time (currently only two DeepSeek entries) are marked rather than
-  // guessing peak vs off-peak; priceRequest returns unpriced ('missing-tier') in plain words.
-  if (hasTimeOfDay) return { timeOfDay: true };
-  if (!active) throw new Error(`No active base price for ${label} as of ${date}`);
-  return extractRate(active);
+  return kept.length ? kept : undefined;
 }
 
 /**
- * Builds a dated, trimmed RatesTable from an upstream genai-prices data_slim.json array, keeping providers, models,
- * match clauses and fallbacks in the upstream list's own order. Pure, no network.
+ * Builds a dated, trimmed RatesTable from an upstream genai-prices v2/data_slim.json array, keeping providers, models,
+ * match clauses, fallbacks, conditional prices, speed/service_tier variants and text-token rates in upstream order.
  */
 export function buildRatesTable(
   upstream: readonly UpstreamProvider[],
-  meta: { date: string; revision: string; url: string; notice: string },
+  meta: { date: string; built: string; revision: string; url: string; notice: string },
 ): RatesTable {
   const providers: ProviderRates[] = [];
   const found = new Set<string>();
@@ -214,10 +265,11 @@ export function buildRatesTable(
     found.add(provider.id);
     const models: ModelRate[] = [];
     for (const model of provider.models) {
-      const rate = resolveModelPrices(model.prices, meta.date, `${provider.id}/${model.id}`);
-      if (rate.timeOfDay || rate.input !== undefined || rate.output !== undefined || rate.cacheRead !== undefined || rate.cacheWrite !== undefined) {
-        models.push({ id: model.id, match: model.match, ...rate });
-      }
+      const label = `${provider.id}/${model.id}`;
+      const prices = extractModelPrices(model.prices, label);
+      if (!prices) continue;
+      const variants = extractVariants(model.price_variants, label);
+      models.push({ id: model.id, match: model.match, prices, ...(variants ? { variants } : {}) });
     }
     const fallbacks = provider.fallback_model_providers?.filter(id => KEPT_SET.has(id));
     providers.push({
@@ -233,6 +285,7 @@ export function buildRatesTable(
   return parseRatesTable({
     format: 1,
     date: meta.date,
+    built: meta.built,
     source: { name: 'pydantic/genai-prices', url: meta.url, revision: meta.revision, license: 'MIT', notice: meta.notice.trim() },
     providers,
   });
@@ -261,6 +314,7 @@ export function formatRatesJson(table: RatesTable): string {
     '{',
     `  "format": ${table.format},`,
     `  "date": ${JSON.stringify(table.date)},`,
+    `  "built": ${JSON.stringify(table.built)},`,
     `  "source": ${sourceJson},`,
     '  "providers": [',
     providerBlocks.join(',\n'),
@@ -283,31 +337,48 @@ async function fetchText(url: string): Promise<string> {
   return response.text();
 }
 
+async function dataChangedDate(revision: string): Promise<string> {
+  const url = `${API_BASE}/commits?sha=${revision}&path=${UPSTREAM_DATA_PATH}&per_page=1`;
+  const commits = JSON.parse(await fetchText(url)) as { commit?: { committer?: { date?: string }; author?: { date?: string } } }[];
+  const iso = commits[0]?.commit?.committer?.date ?? commits[0]?.commit?.author?.date ?? '';
+  const day = iso.slice(0, 10);
+  if (!validIsoDate(day)) throw new Error(`Could not determine last-changed date for ${UPSTREAM_DATA_PATH} at ${revision}`);
+  return day;
+}
+
 function parseArgs(argv: string[]) {
   let rev: string | undefined;
-  let date = new Date().toISOString().slice(0, 10);
+  let date: string | undefined;
+  let built = new Date().toISOString().slice(0, 10);
   let out = DEFAULT_OUT;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--rev') rev = argv[++i];
     else if (arg === '--date') date = argv[++i] ?? '';
+    else if (arg === '--built') built = argv[++i] ?? '';
     else if (arg === '--out') out = resolve(argv[++i] ?? '');
     else throw new Error(`Unknown option: ${arg}`);
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(`Invalid --date: ${date}`);
+  if (date !== undefined && !validIsoDate(date)) throw new Error(`Invalid --date: ${date}`);
+  if (!validIsoDate(built)) throw new Error(`Invalid --built: ${built}`);
   if (rev !== undefined && !/^[0-9a-f]{40}$/.test(rev)) throw new Error(`Invalid --rev: ${rev}`);
-  return { rev, date, out };
+  return { rev, date, built, out };
 }
 
 if (process.argv[1] === import.meta.filename) {
-  const { rev: givenRev, date, out } = parseArgs(process.argv.slice(2));
+  const { rev: givenRev, date: givenDate, built, out } = parseArgs(process.argv.slice(2));
   const revision = givenRev ?? latestMainRevision();
-  const url = `${RAW_BASE}/${revision}/prices/data_slim.json`;
-  const [rawList, notice] = await Promise.all([fetchText(url), fetchText(`${RAW_BASE}/${revision}/LICENSE`)]);
-  const table = buildRatesTable(JSON.parse(rawList) as UpstreamProvider[], { date, revision, url, notice });
+  const url = `${RAW_BASE}/${revision}/${UPSTREAM_DATA_PATH}`;
+  const [rawList, notice, dataDate] = await Promise.all([
+    fetchText(url),
+    fetchText(`${RAW_BASE}/${revision}/LICENSE`),
+    givenDate ? Promise.resolve(givenDate) : dataChangedDate(revision),
+  ]);
+  const table = buildRatesTable(JSON.parse(rawList) as UpstreamProvider[], { date: dataDate, built, revision, url, notice });
   const json = formatRatesJson(table);
   await mkdir(dirname(out), { recursive: true });
   await writeFile(out, json, 'utf8');
   const models = table.providers.reduce((sum, provider) => sum + provider.models.length, 0);
-  console.log(`Wrote ${out}: ${table.providers.length} providers, ${models} models, ${Buffer.byteLength(json)} bytes (rev ${revision.slice(0, 12)}, date ${date}).`);
+  const summary = `${table.providers.length} providers, ${models} models, ${Buffer.byteLength(json)} bytes`;
+  console.log(`Wrote ${out}: ${summary} (rev ${revision.slice(0, 12)}, data ${dataDate}, built ${built}).`);
 }
