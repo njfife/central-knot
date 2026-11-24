@@ -5,8 +5,9 @@
 // is pluginswitch.ts's answer (wholeTurn); where the tool lacks the plugin, whether it may go in is the plugin's box on its own
 // page (pluginstatus.ts boxOf), asked of the Plugins page's view (pluginstate.ts lineBox): no second set of rules here.
 // Elsewhere: the buttons' clicks (Install, Put its items here and Remove: pluginstate.ts turnFromLine, a plugin's turn in main;
-// Turn the plugin on or off: matrix.ts switchPluginItem, the item's own switch's click), the line drawn (matrix.ts lineActions),
-// and the line of a library item from a plugin in Pi, OpenCode and Antigravity, which is the library's own (libraryrow.ts hasLine).
+// Turn the plugin on or off: matrix.ts switchPluginItem, the item's own switch's click), the line drawn (matrix.ts pluginLine),
+// which of a library row's lines are a plugin's (matrix.ts rowPluginFacts), and the others, the library's own (libraryrow.ts hasLine):
+// a library item from a plugin in Pi, OpenCode and Antigravity, and one kept out of a tool that lacks the plugin.
 import { DIRECTORY, loadsKind, partWords, samePart } from './pluginstatus.ts';
 import { cantSwitch, copilotByName, onNow, ownSwitch, wholeTurn, type PluginItemAt } from './pluginswitch.ts';
 import { holds, takesPlugins } from './presence.ts';

@@ -2439,14 +2439,16 @@ const switchStatus = (t: Table, skill: ItemRow) => statusLine(skill, itemOf(skil
 
 /**
  * A library row's line in one tool that is a plugin's (pluginline.ts): the tool has the item through a plugin, or the item is from a
- * plugin (library.ts A PLUGIN) that this tool, which takes plugins, doesn't have installed.
+ * plugin (library.ts A PLUGIN) that this tool, which takes plugins, doesn't have installed (it gets it only with the plugin:
+ * plugins.ts pluginHolds). An item On and kept out of that tool keeps the library's own switch there, which lets it in.
  */
 function rowPluginFacts(skill: ItemRow, tool: Tool) {
   const through = itemThrough(state.home, skill.kind, skill, tool), kind = partOfPage[skill.kind];
   if (through) return lineFacts(kind, through.install.plugin, through.install.marketName, tool as HarnessId, through);
-  const link = skill.fromSource?.link ?? '', plugin = pluginOf(link), marketName = pluginMarketOf(link);
+  const link = skill.fromSource?.link ?? '', plugin = pluginOf(link), marketName = pluginMarketOf(link), item = inLibrary(itemOf(skill));
   const has = state.home?.pluginItems?.some(install => install.tool === tool && install.plugin === plugin && install.marketName === marketName);
-  return plugin && marketName && takesPlugins(tool) && !has ? lineFacts(kind, plugin, marketName, tool as HarnessId) : undefined;
+  const keptOut = !!item?.on && item.except.includes(tool as HarnessId);
+  return plugin && marketName && takesPlugins(tool) && !has && !keptOut ? lineFacts(kind, plugin, marketName, tool as HarnessId) : undefined;
 }
 
 /**
