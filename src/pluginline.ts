@@ -82,8 +82,9 @@ function install({ tool, plugin, marketName, box, parts }: LineFacts): LineContr
   if (box === 'unlisted') return none(`Not installed in ${where}. ${marketName === DIRECTORY ? 'It comes from the Anthropic Directory, which only Claude Code installs from.' : `${capital(unlisted(marketName))}, so it can’t be installed from here.`}`);
   if (box?.off) return none(box.off);
   if (!box || box.ticked) return none(`Not installed in ${where}.`);
-  // Codex loads what its own manifest names, which isn't read here: nothing is counted for it.
-  const counts = parts && tool !== 'codex-cli' ? countOf(parts, kind => loadsKind(tool, kind)) : undefined;
+  // Claude Code and Copilot CLI load each part its marketplace lists; Codex loads what its own manifest names (no agents), which
+  // isn't read here: nothing is counted for it.
+  const counts = parts && tool !== 'codex-cli' ? countOf(parts, () => true) : undefined;
   return button('install', `Installs ${plugin} in ${where}${counts?.words ? `, with its ${counts.words} on` : ''}.`);
 }
 
