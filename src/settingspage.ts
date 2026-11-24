@@ -4,10 +4,10 @@
 // and switched through app.ts switchSyncEverything. Help's Log row also shows Central Knot's own log under it (Show log: its
 // last lines, read by main.ts readLog, never stored); the log is written by main.ts log. A settings file that couldn't be read at
 // launch is said in a note at the top (keptNote) until it is closed, and first on the Overview (overview.ts needsYou).
-import { acting, announce, machine, rerender, switchSyncEverything, showPage, state, whyReadOnly } from './app.ts';
+import { acting, announce, rerender, switchSyncEverything, showPage, state, whyReadOnly } from './app.ts';
 import { outcomeBand } from './matrix.ts';
 import { oneUndoCovers } from './historyactions.ts';
-import { button, h, icon, toggle } from './dom.ts';
+import { button, h, icon, infoMark, toggle } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { DAY_MS, defaultHistoryDays, historyDayChoices } from './model.ts';
 import { openWalkthrough } from './firstsetup.ts';
@@ -156,8 +156,6 @@ const save = <Answer extends AppPreferences | HistoryWindowSaved>(row: string, c
     return afterwards(answer);
   }, error => saveFailure(error, kept));
 
-/** What starting at sign-in does. A reason it can't be changed here takes this line's place. */
-const signInHint = `Opens hidden in ${machine.tray} when you sign in, so sync keeps running without the window.`;
 /** Opens the system's own place for it (main says which, in the system's words); where that fails, says the way there. */
 const openSignInPlace = ({ open, unopened }: SignInPlace) => ({ label: open, run: () => void window.centralKnot.openSignInSettings().catch(() => announce(unopened)) });
 
@@ -326,8 +324,8 @@ function logButtons(at: 'row' | 'foot'): HTMLElement {
   return h('div.setting-actions', {},
     at === 'foot' && shown ? button({ variant: 'outline', icon: 'refresh-cw', label: 'Refresh log', id: 'log-refresh', onclick: () => void showLog(shown.count, true) }) : null,
     button({ variant: 'outline', label: shown ? 'Hide log' : 'Show log', id: id('show-log'), onclick: () => (shown ? hideLog() : void showLog(LOG_LINES, true)),
-      attrs: { 'aria-expanded': String(!!shown), 'aria-controls': shown ? 'setting-log-lines' : undefined, 'aria-describedby': 'setting-log-hint' } }),
-    button({ variant: 'outline', label: 'Open log folder', id: id('open-log-folder'), onclick: () => void openLogFolder(), attrs: { 'aria-describedby': 'setting-log-hint' } }));
+      attrs: { 'aria-expanded': String(!!shown), 'aria-controls': shown ? 'setting-log-lines' : undefined, 'aria-describedby': 'setting-log-info-card' } }),
+    button({ variant: 'outline', label: 'Open log folder', id: id('open-log-folder'), onclick: () => void openLogFolder(), attrs: { 'aria-describedby': 'setting-log-info-card' } }));
 }
 
 /**
@@ -361,17 +359,17 @@ function messageLine({ text, detail, tone, action }: RowMessage, { id, announce 
 }
 
 /**
- * One setting: its name and hint at the left, its control at the right (under them on a narrow page), and beneath both, on
- * lines of their own so the control never moves when they come or go: what its last action said, `notice`, what needs the
- * person about its current state, and `below`, what else the row shows under them: a question it asks before it acts, or
- * what its setting just did.
+ * One setting: its name (with an optional info mark after it) and optional hint at the left, its control at the right (under
+ * them on a narrow page), and beneath both, on lines of their own so the control never moves when they come or go: what its
+ * last action said, `notice`, what needs the person about its current state, and `below`, what else the row shows under them:
+ * a question it asks before it acts, or what its setting just did.
  */
-function settingRow(id: string, title: string, hint: string, control: HTMLElement, notice?: RowMessage, below?: HTMLElement): HTMLElement {
+function settingRow(id: string, title: string, hint: string | undefined, control: HTMLElement, notice?: RowMessage, below?: HTMLElement, info?: string): HTMLElement {
   const message = messages.get(id);
   return h('div.setting-row', { id: `setting-${id}` },
     h('div.setting-text', {},
-      h('div.setting-title', { id: `setting-${id}-title` }, title),
-      h('p.setting-hint', { id: `setting-${id}-hint` }, hint)),
+      h('div.setting-title', {}, h('span', { id: `setting-${id}-title` }, title), info ? infoMark(`setting-${id}-info`, title, info) : null),
+      hint ? h('p.setting-hint', { id: `setting-${id}-hint` }, hint) : null),
     h('div.setting-control', {}, control),
     message && messageLine(message, { id: `setting-${id}-message` }),
     notice && messageLine(notice, { id: `setting-${id}-notice`, announce: false }),
@@ -521,18 +519,20 @@ const settingsSection = (id: string, title: string, ...rows: (HTMLElement | null
 export function settingsPage(): HTMLElement {
   const chosen = current?.appearance;
   const signIn = current?.signIn;
-  // Why it can't be changed here replaces the hint; why the system has it off (it can be changed) shows beneath, with the way to fix it.
+  // A reason it can't be changed here stays on the page as the row's hint; what starting at sign-in does lives in its info card.
+  // Why the system has it off (it can be changed) shows beneath, with the way to fix it.
   const cannot = signIn?.available ? undefined : signIn?.reason?.text;
+  const signInDescribed = cannot ? 'setting-sign-in-hint' : 'setting-sign-in-info-card';
   const systemSays: RowMessage | undefined = signIn?.reason && signIn.place ? { text: signIn.reason.text, tone: 'system', action: openSignInPlace(signIn.place) } : undefined;
   const done = state.outcome?.page === 'settings' && !!state.outcome.reloads?.length ? outcomeBand() : null;
   return h('div.page', {}, done ? h('div.bands', {}, done) : null, h('div.scroll.settings-scroll', { id: 'settings-scroll' },
     state.home?.settingsUnread ? keptNote(state.home.settingsUnread) : null,
     settingsSection('general', 'General',
-      settingRow('sign-in', 'Start at sign-in', cannot ?? signInHint,
+      settingRow('sign-in', 'Start at sign-in', cannot,
         // Off and unchangeable until main has said, so a click never acts on a guess. No tooltip: the row's title already says it.
         toggle({ on: !!signIn?.on, label: 'Start at sign-in', onchange: on => void chooseSignIn(on), disabled: !signIn?.available, id: 'start-at-sign-in',
-          attrs: { 'aria-describedby': systemSays ? 'setting-sign-in-hint setting-sign-in-notice' : 'setting-sign-in-hint', title: null } }),
-        systemSays),
+          attrs: { 'aria-describedby': systemSays ? `${signInDescribed} setting-sign-in-notice` : signInDescribed, title: null } }),
+        systemSays, undefined, 'Starts Central Knot hidden at sign-in so background sync runs.'),
       settingRow('appearance', 'Appearance', 'System follows your computer’s light or dark setting.',
         // Until the settings arrive, no card is chosen; the cards look as usual (not dimmed) and System holds the Tab stop.
         h('div.appearance-choices', { role: 'radiogroup', 'aria-labelledby': 'setting-appearance-title', 'aria-describedby': 'setting-appearance-hint', 'aria-busy': String(!current), onkeydown: moveAppearance },
@@ -555,6 +555,6 @@ export function settingsPage(): HTMLElement {
         shortening ? shortenConfirmation(shortening) : undefined)),
     // Help stays the last section, so the log's lines lengthen the page's own scroll.
     settingsSection('help', 'Help',
-      settingRow('log', 'Log', 'Central Knot’s own log, for reporting a problem. Your tools’ files aren’t here.', logButtons('row')),
+      settingRow('log', 'Log', undefined, logButtons('row'), undefined, undefined, 'Central Knot’s diagnostic log for bug reports. Tool config files aren’t included.'),
       shownLog ? logBlock(shownLog) : null)));
 }

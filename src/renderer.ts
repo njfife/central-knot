@@ -10,7 +10,7 @@
 import { settingsPage } from './settingspage.ts';
 import packageInfo from '../package.json' with { type: 'json' };
 import { absentKinds, acting, drawPage, keepingFocus, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, state, type Page } from './app.ts';
-import { afterLayout, button, fitBars, h, icon, keepClicksAcrossRedraws, keepSelection, runAfterLayout, whyOff } from './dom.ts';
+import { afterLayout, button, closeInfoCard, fitBars, h, icon, keepClicksAcrossRedraws, keepSelection, runAfterLayout, syncInfoCard, whyOff } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { heldKinds, type HomeKind } from './presence.ts';
 import { kindNouns, pageNames } from './words.ts';
@@ -271,9 +271,9 @@ document.addEventListener('click', event => {
   clickedInNotices = !!(event.target as Element).closest('#notices-card, #header .header-notice');
   if (leavesCard(event)) foldResult(true); else if (!(event.detail && pressedInCard) && !inCard(event)) foldResult();
 }, true);
-// Escape with a card open folds it and does nothing else, before any other Escape is heard: a find box, or a search field's own
-// clearing, keeps its words.
-window.addEventListener('keydown', event => { if (event.key === 'Escape' && foldResult(true)) { event.stopPropagation(); event.preventDefault(); } }, true);
+// Escape closes any open info card first, else folds a header card, and does nothing else before any other Escape is heard:
+// a find box, or a search field's own clearing, keeps its words.
+window.addEventListener('keydown', event => { if (event.key === 'Escape' && (closeInfoCard() || foldResult(true))) { event.stopPropagation(); event.preventDefault(); } }, true);
 // Coming back to the window draws it again (a notice drawn while it had no focus is seen now: matrix.ts markSeen; the words of time
 // come up to date), except while an editor's text area has the focus: drawn again, it would lose its Undo, and its page draws no notices.
 window.addEventListener('focus', () => { if (!document.activeElement?.matches('textarea.ins-text')) rerender(); });
@@ -339,6 +339,7 @@ function renderWindow() {
     if (node && fieldText(node) === text) Object.assign(node, { scrollTop: top, scrollLeft: left });
   }
   putBack();
+  syncInfoCard();
   if (state.home) document.body.dataset.ready = 'true';
 }
 
