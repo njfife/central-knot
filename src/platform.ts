@@ -21,6 +21,8 @@ const homeOnly = (binary: string, env: NodeJS.ProcessEnv = process.env) => (env.
 
 /** How many folders are searched for a CLI: a terminal's PATH is a few dozen at most. */
 const SEARCHED = 40;
+/** Windows puts the machine's PATH before the user's, so developer machines carry more entries before user-installed CLIs. */
+const WINDOWS_SEARCHED = 120;
 
 /** Command endings Windows can run for a CLI (script-host and UI endings like .js or .vbs are left out). */
 const WINDOWS_EXTS = ['.exe', '.cmd', '.bat', '.com'];
@@ -75,7 +77,7 @@ export function executableCandidates(home: string, searchPath: string, binary = 
     }
     const exts = windowsExts(env);
     const names = binary === 'agy' ? ['agy', 'antigravity'] : [binary];
-    const candidates = names.flatMap(name => dirs.slice(0, SEARCHED).flatMap(dir => exts.map(ext => joinPath(dir, `${name}${ext}`))));
+    const candidates = names.flatMap(name => dirs.slice(0, WINDOWS_SEARCHED).flatMap(dir => exts.map(ext => joinPath(dir, `${name}${ext}`))));
     return homeOnly(binary, env) ? candidates.filter(candidate => underHome(candidate, home, platform)) : candidates;
   }
   const fixed = [join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin'];
@@ -173,7 +175,8 @@ export function macPlaces(home: string, env: NodeJS.ProcessEnv = process.env): M
 }
 
 export function appCandidates(home: string, binary: string, platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): AppCandidate[] {
-  const where = macPlaces(home, env).applications;
+  // On Windows, keep only home/Applications (never /Applications, which would leak a Mac's real apps when win32 is tested there).
+  const where = platform === 'win32' ? [join(home, 'Applications')] : macPlaces(home, env).applications;
   const local = winFolder(env, 'LOCALAPPDATA', joinPath(home, 'AppData', 'Local'));
   const aliases = (family: string) => joinPath(local, 'Microsoft', 'WindowsApps', family);
   const programFiles = winFolder(env, 'ProgramFiles', 'C:\\Program Files');
@@ -205,7 +208,7 @@ export function appCandidates(home: string, binary: string, platform: string = p
       codex: ['/usr/lib/chatgpt', join(home, '.local/opt/chatgpt')].map(app => ({ name: 'ChatGPT desktop', app, versionFile: 'resources/app.asar', carries: 'Codex', carried: { binary: 'resources/codex' } })),
     },
   };
-  // The macOS places stay last everywhere: harmless where they can't exist, and the Linux e2e stands in an app there.
+  // The macOS places stay last on Linux (and home/Applications on Windows): cross-platform tests and e2e flows stand in .app bundles under home.
   return [...(own[platform]?.[binary] ?? []), ...(mac[binary] ?? [])].filter(candidate => !homeOnly(binary, env) || underHome(candidate.app, home, platform));
 }
 
@@ -214,7 +217,8 @@ export function appCandidates(home: string, binary: string, platform: string = p
  * computer, never run, and named on Harnesses only when found. `says`: what that means for what Central Knot sets up.
  */
 export function otherAppCandidates(home: string, platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): { name: string; says: string; apps: AppCandidate[] }[] {
-  const places = (name: string, bundles: string[]) => macPlaces(home, env).applications.flatMap(apps => bundles.map(bundle => ({ name, app: join(apps, bundle), carries: '' })));
+  const appDirs = platform === 'win32' ? [join(home, 'Applications')] : macPlaces(home, env).applications;
+  const places = (name: string, bundles: string[]) => appDirs.flatMap(apps => bundles.map(bundle => ({ name, app: join(apps, bundle), carries: '' })));
   // Measured on Windows 11 (electron-builder NSIS per-user install); VS Code's Windows places are not yet measured.
   const t3Win = platform === 'win32' ? [{ name: 'T3 Code', app: joinPath(winFolder(env, 'LOCALAPPDATA', joinPath(home, 'AppData', 'Local')), 'Programs', 't3code'), versionFile: 'resources/app.asar', carries: '' }] : [];
   return [

@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover, findBinary, findCli, findOtherApps } from '../src/discovery.ts';
 import { appCandidates, executableCandidates, otherAppCandidates } from '../src/platform.ts';
@@ -11,14 +11,14 @@ import { isPresent, presentTools } from '../src/presence.ts';
 
 const WIN_PATHEXT = '.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.CPL';
 
-/** A disposable home and Windows-style APPDATA / LOCALAPPDATA pointing inside it. */
+/** A disposable home and Windows-style APPDATA / LOCALAPPDATA pointing inside it, isolated from real /Applications. */
 async function winBox() {
   const dir = await mkdtemp(join(tmpdir(), 'ck-win-find-'));
   const home = join(dir, 'home');
   const appData = join(home, 'AppData', 'Roaming');
   const local = join(home, 'AppData', 'Local');
   await mkdir(home, { recursive: true });
-  const env: NodeJS.ProcessEnv = { APPDATA: appData, LOCALAPPDATA: local, PATHEXT: WIN_PATHEXT };
+  const env: NodeJS.ProcessEnv = { APPDATA: appData, LOCALAPPDATA: local, PATHEXT: WIN_PATHEXT, CK_TEST_APPS: join(dir, 'no-mac-apps') };
   return { dir, home, appData, local, env, cleanup: () => rm(dir, { recursive: true, force: true }) };
 }
 
@@ -119,20 +119,24 @@ test('Windows install places are searched even when absent from PATH: npm global
     assert.equal((await findBinary('antigravity-cli', box.home, agyBin, 'win32', box.env))?.binary, join(agyBin, 'antigravity.exe'));
     await put(join(agyBin, 'agy.exe'), 'exe');
     assert.equal((await findBinary('antigravity-cli', box.home, agyBin, 'win32', box.env))?.binary, join(agyBin, 'agy.exe'));
-    // A 50-folder PATH still keeps the fixed install folders inside the 40-folder search cap.
-    const longPath = Array.from({ length: 50 }, (_, i) => `C:\\Tools\\dir-${i}`).join(';');
-    const capped = executableCandidates('C:\\Users\\x', longPath, 'codex', 'win32', { APPDATA: 'C:\\Users\\x\\AppData\\Roaming', PATHEXT: '.EXE;.CMD' });
-    assert.equal(capped.length, 40 * 2);
+    // A 50-folder machine PATH before a user install folder still reaches the user's folder on Windows, while a 150-folder PATH stays bounded at 120.
+    const fiftyMachine = [...Array.from({ length: 50 }, (_, i) => `C:\\Machine\\dir-${i}`), 'C:\\Users\\x\\custom-tools'].join(';');
+    const reached = executableCandidates('C:\\Users\\x', fiftyMachine, 'codex', 'win32', { APPDATA: 'C:\\Users\\x\\AppData\\Roaming', PATHEXT: '.EXE;.CMD' });
+    assert.ok(reached.includes('C:\\Users\\x\\custom-tools\\codex.exe'), 'user folder after 50 machine PATH entries must not fall off the Windows bound');
+    const hugePath = Array.from({ length: 150 }, (_, i) => `C:\\Tools\\dir-${i}`).join(';');
+    const capped = executableCandidates('C:\\Users\\x', hugePath, 'codex', 'win32', { APPDATA: 'C:\\Users\\x\\AppData\\Roaming', PATHEXT: '.EXE;.CMD' });
+    assert.equal(capped.length, 120 * 2);
     assert.ok(capped.includes('C:\\Users\\x\\AppData\\Roaming\\npm\\codex.cmd'));
   } finally { await box.cleanup(); }
 });
 
-test('Windows PATH tolerates uppercase CLAUDE.EXE, trailing backslashes, quotes, empty entries and skips relative paths', async () => {
+test('Windows PATH tolerates uppercase PATHEXT, trailing backslashes, quotes, empty entries and skips relative paths', async () => {
   const box = await winBox();
   try {
     const bin = join(box.dir, 'Program Tools');
     await mkdir(bin, { recursive: true });
-    await writeFile(join(bin, 'CLAUDE.EXE'), '#!/bin/sh\necho "2.1.329 (Claude Code)"\n', { mode: 0o755 });
+    // Lower-case file here (Windows' own filesystem matches CLAUDE.EXE to claude.exe); checked uppercase on Windows below.
+    await writeFile(join(bin, 'claude.exe'), '#!/bin/sh\necho "2.1.329 (Claude Code)"\n', { mode: 0o755 });
     const messy = `;"" ; ;relative-project-bin;.\\local;C:drive-relative;"${bin}\\" ;C:\\Users\\x\\extra\\;C:\\;`;
     const candidates = executableCandidates(box.home, messy, 'claude', 'win32', box.env);
     assert.ok(!candidates.some(path => path.includes('"') || path.includes('relative-project-bin') || path.includes('drive-relative')));
@@ -143,9 +147,13 @@ test('Windows PATH tolerates uppercase CLAUDE.EXE, trailing backslashes, quotes,
     assert.equal(dedup.filter(path => path.toLowerCase() === 'c:\\tools\\bin\\claude.exe').length, 1);
 
     const found = await findBinary('claude-cli', box.home, messy, 'win32', box.env);
-    assert.equal(found?.binary.toLowerCase(), join(bin, 'claude.exe').toLowerCase());
-    if (process.platform !== 'win32') {
-      assert.equal(basename(found!.binary), 'CLAUDE.EXE');
+    assert.equal(found?.binary, join(bin, 'claude.exe'));
+    if (process.platform === 'win32') {
+      const upper = join(box.dir, 'Upper');
+      await mkdir(upper, { recursive: true });
+      await writeFile(join(upper, 'CLAUDE.EXE'), 'exe');
+      assert.equal((await findBinary('claude-cli', box.home, upper, 'win32', box.env))?.binary, join(upper, 'claude.exe'));
+    } else {
       const snap = await discover({
         home: box.home, mode: 'actual', harness: 'claude-cli', runProbes: true, platform: 'win32',
         binaries: candidates, apps: appCandidates(box.home, 'claude', 'win32', box.env),
@@ -208,10 +216,10 @@ test('Windows desktop apps with no CLI make their tool App only (pi-gui) and app
     assert.deepEqual(piNoAsar.app, { name: 'pi-gui (third-party)', carries: 'Pi' });
 
     // T3 Code under %LOCALAPPDATA%\Programs\t3code shows under Also on this computer with its version; absent when uninstalled.
-    const noOthers = (await findOtherApps(box.home, 'win32', { ...box.env, CK_TEST_APPS: join(box.dir, 'no-mac-apps') }));
+    const noOthers = await findOtherApps(box.home, 'win32', box.env);
     assert.deepEqual(noOthers, []);
     await asar(join(box.local, 'Programs', 't3code', 'resources', 'app.asar'), '0.1.9-nightly.20261110.4478');
-    const others = await findOtherApps(box.home, 'win32', { ...box.env, CK_TEST_APPS: join(box.dir, 'no-mac-apps') });
+    const others = await findOtherApps(box.home, 'win32', box.env);
     assert.equal(others.length, 1);
     assert.equal(others[0].name, 'T3 Code');
     assert.equal(others[0].version, '0.1.9-nightly.20261110.4478');
@@ -223,6 +231,9 @@ test('Windows desktop apps with no CLI make their tool App only (pi-gui) and app
     assert.equal(appCandidates('C:\\Users\\x', 'pi', 'win32', relocated)[0].app, 'D:\\LocalData\\Programs\\@pi-guidesktop');
     assert.equal(appCandidates('C:\\Users\\x', 'copilot', 'win32', relocated)[1].app, 'D:\\Programs\\GitHub Copilot');
     assert.equal(otherAppCandidates('C:\\Users\\x', 'win32', relocated)[0].apps[0].app, 'D:\\LocalData\\Programs\\t3code');
+    // Windows candidates never include macOS's system /Applications folder, so running on a Mac with ChatGPT.app never leaks it.
+    assert.ok(appCandidates(box.home, 'codex', 'win32', {}).every(c => !c.app.startsWith('/Applications')), 'win32 appCandidates must not include /Applications');
+    assert.ok(otherAppCandidates(box.home, 'win32', {}).every(o => o.apps.every(a => !a.app.startsWith('/Applications'))), 'win32 otherAppCandidates must not include /Applications');
   } finally { await box.cleanup(); }
 });
 
@@ -270,6 +281,8 @@ test('macOS and Linux candidate lists, order and desktop app places are unchange
       ['/Users/fixture/.local/bin/claude', '/Users/fixture/.nvm/bin/claude'],
       `${platform} CK_TEST_HOME_ONLY`,
     );
+    const fiftyPosix = Array.from({ length: 50 }, (_, i) => `/opt/dir-${i}`).join(':');
+    assert.equal(executableCandidates(home, fiftyPosix, 'claude', platform, env).length, 40, `${platform} bound unchanged at 40`);
   }
   assert.deepEqual(appCandidates(home, 'pi', 'darwin', env).map(c => c.app), [
     '/Users/fixture/Applications/pi-gui.app',

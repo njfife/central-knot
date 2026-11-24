@@ -6,7 +6,7 @@
 import { constants } from 'node:fs';
 import { access, lstat, open, readFile, readdir, readlink, realpath, stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parseDocument } from 'yaml';
 import { configRoot, harnesses, type HarnessDefinition } from './harnesses.ts';
@@ -32,18 +32,17 @@ const versions = new Map<string, { file: string; answer: ProbeResult }>();
 export const forgetVersions = () => versions.clear();
 
 export async function probeVersion(binary: string, timeoutMs = 1500, platform: string = process.platform): Promise<ProbeResult> {
-  const target = platform === 'win32' ? await runnable(binary, platform) : binary;
-  if (!target) return { state: 'missing', detail: 'Executable unavailable.' };
+  if (platform === 'win32' && !(await runnable(binary, platform))) return { state: 'missing', detail: 'Executable unavailable.' };
   try {
-    await access(target, constants.X_OK);
+    await access(binary, constants.X_OK);
   } catch (error) {
     return { state: errorCode(error) === 'EACCES' ? 'restricted' : 'missing', detail: 'Executable unavailable.' };
   }
-  const file = await stat(target).then(({ ino, size, mtimeMs }) => `${ino} ${size} ${mtimeMs}`, () => undefined);
-  const known = versions.get(target);
+  const file = await stat(binary).then(({ ino, size, mtimeMs }) => `${ino} ${size} ${mtimeMs}`, () => undefined);
+  const known = versions.get(binary);
   if (file && known?.file === file) return known.answer;
-  const answer = await askVersion(target, timeoutMs);
-  if (file && answer.state === 'ok') versions.set(target, { file, answer });
+  const answer = await askVersion(binary, timeoutMs);
+  if (file && answer.state === 'ok') versions.set(binary, { file, answer });
   return answer;
 }
 
@@ -69,18 +68,12 @@ function askVersion(binary: string, timeoutMs: number): Promise<ProbeResult> {
 }
 
 /**
- * The candidate path if it exists as a runnable file. On Windows, names match case-insensitively without POSIX execute
- * bits (so a `win32` check on a case-sensitive filesystem matches `CLAUDE.EXE` to `claude.exe`).
+ * The candidate path if it exists as a runnable file. On Windows, files have no POSIX execute bit and the Windows
+ * filesystem matches case itself, so a regular-file check is all that is needed.
  */
-async function runnable(path: string, platform: string = process.platform): Promise<string | undefined> {
+function runnable(path: string, platform: string = process.platform): Promise<string | undefined> {
   if (platform !== 'win32') return access(path, constants.X_OK).then(() => path, () => undefined);
-  if (await stat(path).then(info => info.isFile(), () => false)) return path;
-  if (process.platform === 'win32') return undefined;
-  const dir = dirname(path), wanted = basename(path).toLowerCase();
-  const match = (await readdir(dir).catch(() => [] as string[])).find(entry => entry.toLowerCase() === wanted);
-  if (!match) return undefined;
-  const actual = join(dir, match);
-  return stat(actual).then(info => (info.isFile() ? actual : undefined), () => undefined);
+  return stat(path).then(info => (info.isFile() ? path : undefined), () => undefined);
 }
 
 /** The version in an Electron app's app.asar, from the package.json at its root; read from the archive's header, not unpacked. */
