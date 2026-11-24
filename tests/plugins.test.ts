@@ -242,7 +242,7 @@ test('Clones and pinned checkouts keep exact LF bytes (even under text=auto) and
   } finally { await box.cleanup(); }
 });
 
-test('The access check finds Git missing, and asks only once per source within one request', { skip: noPosix }, async () => {
+test('The access check finds Git missing, and asks only once per source within one request', async () => {
   const box = await sandbox();
   const savedPath = process.env.PATH;
   try {
@@ -403,7 +403,7 @@ test('Codex loads the copy it chooses from its cache: the highest version, or "l
   } finally { await box.cleanup(); }
 });
 
-test('A Git marketplace is checked, then read from a fresh shallow copy; the last copy stays browsable', { skip: noPosix }, async () => {
+test('A Git marketplace is checked, then read from a fresh shallow copy; the last copy stays browsable', async () => {
   const box = await sandbox();
   const server = spawn(process.execPath, [join(import.meta.dirname, '../scripts/git-http-fixture.mjs'), join(box.base, 'served'), '0']);
   try {
@@ -529,7 +529,7 @@ test('A plugin command for a home that is not this computer’s own is given, on
   } finally { await box.cleanup(); }
 });
 
-test('A folder marketplace named through a link is the same marketplace, so it is listed once', { skip: noPosix }, async () => {
+test('A folder marketplace named through a link is the same marketplace, so it is listed once', async () => {
   const box = await sandbox();
   try {
     await symlink(box.home, join(box.base, 'linked'));
@@ -537,7 +537,7 @@ test('A folder marketplace named through a link is the same marketplace, so it i
   } finally { await box.cleanup(); }
 });
 
-test('A plugin from another repository is copied once; a pinned commit that can’t be read leaves no copy behind', { skip: noPosix }, async () => {
+test('A plugin from another repository is copied once; a pinned commit that can’t be read leaves no copy behind', async () => {
   const box = await sandbox();
   try {
     const repo = join(box.base, 'repo');
@@ -612,7 +612,7 @@ test('A repository key is spelled as Claude Code keys the Anthropic Directory, h
   assert.equal(repositoryKey('https://github.com/HubSpot/hubspot-mcp-plugins', 'HubSpot-Sales'), 'github.com/hubspot/hubspot-mcp-plugins#HubSpot-Sales');
 });
 
-test('A plugin Claude Code has from the Anthropic Directory is the marketplace’s same plugin, installed: Install runs nothing', { skip: noPosix }, async () => {
+test('A plugin Claude Code has from the Anthropic Directory is the marketplace’s same plugin, installed: Install runs nothing', async () => {
   const box = await sandbox();
   try {
     const root = join(box.base, 'market');
@@ -656,7 +656,7 @@ test('A directory install’s key is also read from plugin-directory-bindings.js
   } finally { await box.cleanup(); }
 });
 
-test('A directory install whose files are gone is held, not offered for Install: Claude Code would refuse the marketplace’s copy', { skip: noPosix }, async () => {
+test('A directory install whose files are gone is held, not offered for Install: Claude Code would refuse the marketplace’s copy', async () => {
   const box = await sandbox();
   try {
     const root = join(box.base, 'market');

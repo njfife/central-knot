@@ -132,7 +132,7 @@ test('AT-01: permission restriction is not an empty skill list', { skip: lockSki
   } finally { await setup.cleanup(); }
 });
 
-test('OWN-02: reading a linked skill leaves the link and target unchanged', { skip: process.platform === 'win32' }, async () => {
+test('OWN-02: reading a linked skill leaves the link and target unchanged', async () => {
   const setup = await fixture();
   try {
     await skill(setup.home, 'original', 'User bytes');
@@ -303,7 +303,7 @@ test('A desktop app with no CLI makes its tool present, with the app’s version
   } finally { await setup.cleanup(); }
 });
 
-test('The copy of the tool a desktop app carries is found where the app keeps it: the plugin route when there is no CLI', { skip: process.platform === 'win32' }, async () => {
+test('The copy of the tool a desktop app carries is found where the app keeps it: the plugin route when there is no CLI', async () => {
   const setup = await fixture();
   try {
     const mine = (binary: string) => appCandidates(setup.home, binary).filter(candidate => candidate.app.startsWith(setup.home));

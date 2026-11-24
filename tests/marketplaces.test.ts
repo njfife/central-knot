@@ -187,7 +187,7 @@ test('A carried marketplace addition queued before a tool is left out asks again
   } finally { await box.cleanup(); }
 });
 
-test('With no CLI, a tool’s plugins go through the copy its desktop app carries, named on the page with the version it answers', { skip: process.platform === 'win32' }, async () => {
+test('With no CLI, a tool’s plugins go through the copy its desktop app carries, named on the page with the version it answers', async () => {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-app-route-')));
   const runtime = join(base, 'copilot-sdk-runtime-1.0.102-0.unstable.r41779900948.gf482387/copilot');
   await put(runtime, '#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.102-0.unstable.r41779900948.gf482387."\n');
