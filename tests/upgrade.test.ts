@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { agentsFolder } from '../src/agentfiles.ts';
 import { observe, seenBefore } from '../src/arrivals.ts';
 import { readHistory } from '../src/history.ts';
+import { slashPath } from './wincompat.ts';
 import { agentKind, applyAgents } from '../src/agents.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import { libraryEntry } from '../src/historyactions.ts';
@@ -570,7 +571,7 @@ test('Plugin parts and no plugins record, sync record at format 2: the start’s
  */
 async function endState(box: Box) {
   const ids: [string, string][] = (await readJson(join(box.store, 'plugins.json'))).plugins.map((entry: PluginEntry) => [entry.id, `${entry.plugin}@${entry.marketName}`]);
-  const jsonHome = JSON.stringify(box.home).slice(1, -1), slashHome = box.home.replaceAll('\\', '/');
+  const jsonHome = JSON.stringify(box.home).slice(1, -1), slashHome = slashPath(box.home);
   const plain = (text: string) => ids.reduce((done, [id, name]) => done.replaceAll(id, name),
     text.replaceAll(jsonHome, '~').replaceAll(box.home, '~').replaceAll(slashHome, '~'));
   const tools = Object.keys((await filesIn(box.home)).sha256).filter(inTools).sort();

@@ -117,7 +117,7 @@ test('A cell says what its tool’s answer says of it, and only that: not checke
   assert.equal(connectedLine(['claude-cli', 'pi-cli', 'opencode-cli']), 'Connected means the server answered: Claude Code, Pi and OpenCode do not say whether it needed a sign-in. For Needs sign-in: copy the command, run it in a terminal, then Check again.');
 });
 
-const posixShellSkip = process.platform === 'win32' && 'POSIX /bin/sh quoting check; covered on macOS and Linux (Windows PowerShell quoting is a later step).';
+const posixShellSkip = process.platform === 'win32' && 'POSIX /bin/sh quoting check; covered on macOS and Linux (Windows PowerShell quoting is step 18 under Later).';
 
 test('The tool’s own sign-in command, with the server as one literal argument a shell accepts', async t => {
   assert.equal(signInCommand('claude-cli', 'plugin:tracker:issues'), 'claude mcp login plugin:tracker:issues');

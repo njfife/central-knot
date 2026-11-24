@@ -1,10 +1,12 @@
 name: Windows checks
 # Manual Windows checks (started by hand: gh workflow run windows.yml -R njfife/central-knot --ref <branch>).
 # Strict steps (type check, build, packaged preview smoke test, and tests/windows-strict.txt) have no continue-on-error
-# and must pass. The full unit suite runs advisory (continue-on-error: true) and uploads its summary and raw log until
-# every Windows step lands. Never a required check for Mac or Linux changes, and never releases anything.
+# and must pass. Remaining unit tests run advisory (continue-on-error: true) and combine with strict.log in the uploaded report.
 on:
   workflow_dispatch:
+  # Temporary on this branch until windows.yml is on next (GitHub rejects workflow_dispatch until then); removed in final commit.
+  push:
+    branches: [ci/a-windows-run]
 permissions:
   contents: read
 # A group of its own: groups are shared by every workflow in the repository, so another workflow's name would cancel its runs.
@@ -35,8 +37,16 @@ jobs:
       - name: Package Windows preview and smoke test
         run: node scripts/windows-check.mjs --smoke
       - name: Strict Windows unit tests
-        run: node scripts/windows-check.mjs --strict
-      - name: Advisory full unit suite
+        run: |
+          $ErrorActionPreference = 'Continue'
+          [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
+          $files = @(Get-Content tests/windows-strict.txt | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith('#') })
+          if ($files.Count -eq 0) { throw 'tests/windows-strict.txt lists no test files.' }
+          foreach ($f in $files) { if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { throw "Missing strict file: $f" } }
+          New-Item -ItemType Directory -Force windows-unit-report | Out-Null
+          & node --test @files 2>&1 | Tee-Object -FilePath windows-unit-report/strict.log
+          exit $LASTEXITCODE
+      - name: Advisory remaining unit tests
         continue-on-error: true
         timeout-minutes: 25
         run: node scripts/windows-check.mjs --advisory windows-unit-report

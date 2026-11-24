@@ -28,6 +28,7 @@ import { chooseTools } from '../src/toolchoice.ts';
 import { newItem } from '../src/library.ts';
 import type { HarnessId, PluginTurn } from '../src/types.ts';
 import { repository, standInHosts } from './sourcerepo.ts';
+import { slashPath } from './wincompat.ts';
 
 const hosts = await standInHosts();
 test.after(() => hosts.cleanup());
@@ -47,7 +48,7 @@ async function snapshotFiles(folder: string, exclude: string[] = []): Promise<Re
   const found: Record<string, string> = {};
   const walk = async (dir: string) => {
     for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
-      const full = join(dir, entry.name), rel = relative(folder, full).replaceAll('\\', '/');
+      const full = join(dir, entry.name), rel = slashPath(relative(folder, full));
       if (exclude.some(prefix => rel === prefix || rel.startsWith(`${prefix}/`))) continue;
       if (entry.isSymbolicLink()) found[rel] = `symlink:${await readlink(full)}`;
       else if (entry.isDirectory()) await walk(full);

@@ -8,6 +8,7 @@ import { discover, findApp, forgetVersions, probeVersion } from '../src/discover
 import { appCandidates, executableCandidates, hasStatusNotifierWatcher, shellPath, TRAY_ASKS, TRAY_PAUSE_MS, trayWithin } from '../src/platform.ts';
 import { isPresent } from '../src/presence.ts';
 import { lockSkip, withLock } from './fslock.ts';
+import { slashPath } from './wincompat.ts';
 
 async function fixture() {
   const home = await mkdtemp(join(tmpdir(), 'ck-first-look-'));
@@ -145,7 +146,7 @@ test('OWN-02: reading a linked skill leaves the link and target unchanged', { sk
 });
 
 test('Finder-like PATH still yields bounded explicit candidates, never project paths', () => {
-  const candidates = executableCandidates('/Users/fixture', '/usr/bin:/bin:relative-project-bin');
+  const candidates = executableCandidates('/Users/fixture', '/usr/bin:/bin:relative-project-bin', 'claude', 'darwin').map(slashPath);
   assert.ok(candidates.includes('/Users/fixture/.local/bin/claude'));
   assert.ok(candidates.includes('/opt/homebrew/bin/claude'));
   assert.ok(candidates.length <= 40);

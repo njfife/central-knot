@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, truncate, writeFile } from 'node:fs/promises';
 import { lockSkip, withLock } from './fslock.ts';
+import { posixModeSkip } from './wincompat.ts';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { aboutBuild, activeBundle, bundledMarketplace, customBuild, openBundle, readRelease, releaseDate, releaseLabel } from '../src/bundle.ts';
@@ -87,8 +88,6 @@ test('a custom build file that isn’t one reads as the standard build', () => {
   assert.deepEqual(customBuild({ id: 'acme', name: 'Acme', bundleId: 'com.centralknot.custom.acme', marketplace: { logo: '../../etc/passwd', displayName: 'Acme plugins' }, more: 1 }),
     { id: 'acme', name: 'Acme', bundleId: 'com.centralknot.custom.acme', marketplace: { displayName: 'Acme plugins' } });
 });
-
-const posixModeSkip = process.platform === 'win32' && 'Windows NTFS has no POSIX execute/group permission bits (chmod 0755 stays 0666); covered on macOS and Linux.';
 
 test('packing: every plugin’s files go in as they are, a plugin kept elsewhere is fetched, and one that can’t be is named', async t => {
   const { base, source, pack, cleanup } = await setup();

@@ -17,6 +17,7 @@ import { bytes, everywhere, folderOf, historyActions, itemOf, put, sandbox, seen
 import { applySkills, restoreSkill } from '../src/skills.ts';
 import { deslopFiles, repository, skillMd, standInHosts } from './sourcerepo.ts';
 import { within } from './within.ts';
+import { posixModeSkip } from './wincompat.ts';
 
 const hosts = await standInHosts();
 test.after(() => hosts.cleanup());
@@ -349,8 +350,6 @@ test('Merge with a conflict changes nothing: no version, no tool written, no His
     assert.deepEqual(await notices(box, 'notes'), ['wait', true]);
   } finally { await box.cleanup(); }
 });
-
-const posixModeSkip = process.platform === 'win32' && 'Windows NTFS has no POSIX execute bit (chmod 0755 stays 0666); covered on macOS and Linux.';
 
 test('Merge on real folders never loses a side: a script made runnable here and a file added here survive the source’s change; a file deleted here that the source changed is a conflict, not a deletion', async t => {
   const box = await sandbox();

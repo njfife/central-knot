@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { lockSkip, withLock } from './fslock.ts';
+import { winLockSkip, withLock } from './fslock.ts';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ORIGIN_COLOURS, originMark, sessionStrip } from '../src/sessionhooks.ts';
@@ -150,10 +150,10 @@ test('the person’s own settings that can’t be read, or don’t parse, are sa
     assert.deepEqual(garbled, { ownHooks: [], ownHooksUnread: [join(claude, 'settings.json')] });
     assert.deepEqual(sessionStrip('claude-cli', [], garbled)!.groups.map(group => [group.name, group.settings, group.unread]),
       [['yours', join(claude, 'settings.json'), [join(claude, 'settings.json')]]]);
-    await t.test('an unreadable Copilot hooks file is reported in ownHooksUnread', { skip: lockSkip }, async () => {
+    await t.test('an unreadable Copilot hooks file is reported in ownHooksUnread', { skip: winLockSkip }, async () => {
       await put(join(copilot, 'hooks/locked.json'), JSON.stringify({ hooks: { sessionStart: [{ type: 'command', bash: './x.sh' }] } }));
       await withLock(join(copilot, 'hooks/locked.json'), 'file-unreadable', async () => {
-        assert.deepEqual((await sessionSettings('copilot-cli', copilot)).ownHooksUnread, [join(copilot, 'hooks/locked.json')]);
+        assert.deepEqual((await sessionSettings('copilot-cli', copilot)).ownHooksUnread, process.getuid?.() === 0 ? [] : [join(copilot, 'hooks/locked.json')]);
       });
     });
     // Codex's config.toml that doesn't parse (a string left open): its inline hooks aren't known, so it is named.

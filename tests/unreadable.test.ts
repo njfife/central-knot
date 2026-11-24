@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { jsonObject } from '../src/values.ts';
 import { keepUnreadable } from '../src/share.ts';
 import { lockSkip, withLock } from './fslock.ts';
@@ -23,7 +23,8 @@ test('An unreadable file is kept beside it as name.unreadable-time.json, byte fo
     const path = join(folder, 'app-settings.json');
     await writeFile(path, '{"home": {"mode": "act');
     const kept = await keepUnreadable(path);
-    assert.match(kept, /[\\/]app-settings\.unreadable-\d+\.json$/);
+    assert.equal(dirname(kept), folder);
+    assert.match(basename(kept), /^app-settings\.unreadable-\d+\.json$/);
     assert.equal(await readFile(kept, 'utf8'), '{"home": {"mode": "act');
     assert.deepEqual(await readdir(folder), [kept.slice(folder.length + 1)]);
   } finally { await rm(folder, { recursive: true, force: true }); }

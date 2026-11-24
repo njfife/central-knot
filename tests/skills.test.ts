@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import fs, { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { lockPath, lockSkip, withLock } from './fslock.ts';
+import { colonNameSkip, posixModeSkip } from './wincompat.ts';
 import { join } from 'node:path';
 import { readHistory } from '../src/history.ts';
 import { libraryEntry, librarySentence } from '../src/historyactions.ts';
@@ -38,9 +39,6 @@ async function touch(path: string, when: Date) {
 const say = sentences(libraryWords.skills);
 /** A skill with several files: a script that can run, a file of mode 0600, an empty folder, and a file a tool added beside SKILL.md. */
 const rich = { 'SKILL.md': skillText(), 'scripts/run.sh': { text: '#!/bin/sh\necho hi\n', mode: 0o755 }, 'secret.txt': { text: 'mine\n', mode: 0o600 }, 'notes.log': 'added by Claude Code\n' };
-
-const posixModeSkip = process.platform === 'win32' && 'Windows NTFS has no POSIX execute bit (chmod 0755 stays 0666); covered on macOS and Linux.';
-const colonNameSkip = process.platform === 'win32' && 'Windows NTFS forbids colons in folder names (tests macOS/Linux colon folder names); covered on macOS and Linux.';
 
 test('A skill found in one tool is taken in by its switch and goes into every tool, its whole folder byte for byte', async t => {
   const box = await sandbox();

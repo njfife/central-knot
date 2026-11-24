@@ -1,4 +1,5 @@
-# Unit test files that must pass on Windows (.github/workflows/windows.yml strict step); this list only grows.
+# Unit test files that must pass on Windows (.github/workflows/windows.yml strict step).
+# A file joins once a Windows run's advisory report proves it passes cleanly (added by the step's builder); this list only grows.
 tests/agentmigrate.test.ts
 tests/agents.test.ts
 tests/agentswalk.test.ts

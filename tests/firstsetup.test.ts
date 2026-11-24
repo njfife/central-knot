@@ -23,6 +23,7 @@ import { chooseTools } from '../src/toolchoice.ts';
 import { inUse, liveItems } from '../src/profileplan.ts';
 import { readLibraries, readProfiles, saveProfile, switchProfile } from '../src/profiles.ts';
 import type { Change, HarnessId, HistoryEvent, HomeView, LibraryFacts, LibraryView } from '../src/types.ts';
+import { slashPath } from './wincompat.ts';
 
 const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
 const skillRoot = { 'claude-cli': '.claude/skills', 'copilot-cli': '.copilot/skills', 'codex-cli': '.codex/skills' } as Record<HarnessId, string>;
@@ -68,7 +69,7 @@ async function filesIn(box: Box): Promise<Record<string, string>> {
   const found: Record<string, string> = {};
   const walk = async (folder: string) => {
     for (const entry of await readdir(folder, { withFileTypes: true })) {
-      const path = join(folder, entry.name), rel = relative(box.home, path).replaceAll('\\', '/');
+      const path = join(folder, entry.name), rel = slashPath(relative(box.home, path));
       if (entry.isDirectory()) { if (rel !== '.central-knot') await walk(path); }
       else found[rel] = (await readFile(path)).toString('base64');
     }

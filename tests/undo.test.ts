@@ -10,6 +10,7 @@ import { libraryEntry, librarySentence } from '../src/historyactions.ts';
 import { libraryWords, rowClicks } from '../src/libraryrow.ts';
 import * as agent from './agentclicks.ts';
 import { bytes, choose, everywhere, folderOf, historyActions, historyOf, inTool, pass, put, sandbox, seen, send, skillText, turnOff, turnOn, undo } from './skillclicks.ts';
+import { colonNameSkip } from './wincompat.ts';
 
 test('Undo right after taking in a found skill: the copies it made go, the tool it was found in keeps its folder, and the skill is found again', async () => {
   const box = await sandbox();
@@ -57,8 +58,6 @@ test('Undo of a skill’s Off (Turn these off’s, row by row) where it was kept
     assert.deepEqual([await everywhere(box), (await seen(box)).item!.except], [before, ['codex-cli']]);
   } finally { await box.cleanup(); }
 });
-
-const colonNameSkip = process.platform === 'win32' && 'Windows NTFS forbids colons in folder names (tests macOS/Linux colon folder names); covered on macOS and Linux.';
 
 test('A skill whose folder is named agent:review: the History entry its Off makes says it is a skill’s', { skip: colonNameSkip }, async () => {
   const box = await sandbox();
