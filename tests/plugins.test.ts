@@ -11,7 +11,7 @@ import { compareVersions } from '../src/values.ts';
 import { INLINE_SKILLS_CONFIG } from '../src/pluginstatus.ts';
 import { cachedCatalog, checkAccess, copySource, forgetRefusals, fromDirectory, gitFailure, gitPrefix, readRemotePlugin, refusedBy, repositoryKey, whyGitFailed, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, setSkill, uninstall, update, type PluginContext } from '../src/plugins.ts';
 
-const noPosix = false; // one Windows run only
+const noPosix = process.platform === 'win32';
 
 async function sandbox() {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-plugins-')));
