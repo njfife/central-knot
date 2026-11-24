@@ -232,10 +232,8 @@ test('each tool’s cell says whether it is on: the skill’s own switch, the wh
 
 test('a plugin whose marketplace is on no tool any more says where it is handled instead of linking to a page', () => {
   const [row] = pageRows(homeOf([], [install('claude-cli', { listed: false })]), 'skills').rows;
-  const where = handledWhere(row!);
-  assert.equal(where.listed, false);
-  assert.match(where.text, /^Installed in Claude Code from the marketplace “m”, which isn’t added in Central Knot or in that tool now/);
+  assert.match(handledWhere(row!), /^Installed in Claude Code from the marketplace “m”, which isn’t added in Central Knot or in that tool now/);
   // A plugin from the Anthropic Directory is said to be from there, not from a marketplace that went missing.
   const [directory] = pageRows(homeOf([], [{ ...install('claude-cli', { listed: false }), marketName: 'anthropic-plugin-directory' }]), 'skills').rows;
-  assert.equal(handledWhere(directory!).text, 'Installed in Claude Code from the Anthropic Directory. Claude Code’s own /plugin updates, turns off or removes it.');
+  assert.equal(handledWhere(directory!), 'Installed in Claude Code from the Anthropic Directory. Claude Code’s own /plugin updates, turns off or removes it.');
 });

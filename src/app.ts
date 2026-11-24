@@ -29,7 +29,7 @@ import { asksWhichCopy, copiesDiffer, libraryWords, placeOf, stillReadWords } fr
 import { andList, countedAs, fewNames, fileName, kindNames, kindNouns, noToolsSentence, notAllThrough, orList, rowNames, rowNouns, saidByKind, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
-import { closeRun, endListNews, fadeRun, loadPlugins, overRun, resetMarket } from './pluginstate.ts';
+import { closeRun, endListNews, fadeRun, loadPlugins, overRun, resetMarket, unsaidFor } from './pluginstate.ts';
 import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, type LastRun, type PluginDone, type PluginOp } from './pluginplan.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
@@ -255,7 +255,7 @@ function fadeNow(): void {
   if (acting() || !windowVisible()) return;
   if (heldInHeader()) { fading = setTimeout(() => (heldInHeader() ? fadeNow() : fadeLater()), 250); return; }
   const outcome = state.outcome;
-  if (outcome?.fade || (outcome && resultInHeader() && !outcome.warn && !outcome.reasons?.length)) state.outcome = undefined;
+  if (!outcome?.keep && (outcome?.fade || (outcome && resultInHeader() && !outcome.warn && !outcome.reasons?.length))) state.outcome = undefined;
   // Drawn only when a result went: a redraw that changes nothing would replace a text field he is typing in, and its Undo.
   if (fadeRun() || state.outcome !== outcome) rerender();
 }
@@ -1048,7 +1048,8 @@ export function leaveResults(page = state.page) {
   if (!clickList.running) endRun();
   const carried = state.outcome?.carry ? { ...state.outcome, page, carry: false } : undefined;
   state.skillsResult = undefined; state.mcpResult = undefined; state.agentsResult = undefined;
-  tell(carried);
+  // A line's plugin turn that ended while another page was open is said as its page opens (pluginstate.ts unsaidFor).
+  tell(carried ?? unsaidFor(page));
 }
 
 let moveRequested: 'visit' | 'back' | undefined;
@@ -1261,6 +1262,8 @@ export interface Outcome {
   band?: boolean;
   /** The band goes after a few seconds: an Undo's confirmation. */
   fade?: boolean;
+  /** It stays until closed or another result takes its place, however long it is up: a line's plugin turn, which can take minutes (pluginstate.ts runLine). */
+  keep?: boolean;
   undo?: { id: string; label: string };
   act?: {
     label: string; id: string; run: () => void; title?: string;

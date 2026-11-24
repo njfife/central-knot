@@ -1315,6 +1315,8 @@ const caretLineShows = a => a.run(`(() => {
  * in a real window on macOS 26, comes off its height. Every check at the smallest size sizes the page to this.
  */
 const SMALLEST = [860, 560 - 32];
+/** Longer than a result without Undo stays in the header (app.ts FADE_MS). */
+const FADE_WAIT = 9000;
 
 /**
  * Each row of the sidebar (a page, a home, the update control) that shows less than its full height: under the edge of a list
@@ -14627,6 +14629,8 @@ if (tool === 'claude') {
   const row = (kind, key) => rowPart('', kind, key), lead = `${plugin}@ck-test-market/incident-lead`, triage = `${plugin}@ck-test-market/incident-triage`;
   const open = async (kind, key) => { await openKind(a, kind); await until(() => a.exists(byId(rowPart('open', kind, key)))); if (!(await a.exists(`.ov-row.open[data-key="${row(kind, key)}"]`))) await a.click(byId(rowPart('open', kind, key))); };
   const lineOf = tool => a.run(`(() => { const head = [...document.querySelectorAll('.details .details-tool-head')].find(each => each.querySelector('.details-tool-label strong')?.textContent === ${JSON.stringify(tool)}); return head ? head.querySelector('.details-tool-line').textContent : null; })()`);
+  // A line's result, on its own line under the tool's line (the usage line's place): its words, and whether its Undo is there.
+  const resultOf = tool => a.run(`(() => { const head = [...document.querySelectorAll('.details .details-tool-head')].find(each => each.querySelector('.details-tool-label strong')?.textContent === ${JSON.stringify(tool)}); const said = head?.parentElement.querySelector('.details-tool-result'); return said ? [said.querySelector('.details-tool-result-text').textContent, !!said.querySelector('button')] : null; })()`);
   const act = (kind, key, tool) => byId(rowPart('line', kind, key, tool));
   const label = selector => a.run(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? null`);
   // A line's click joins the page's list; the page acts until it is done, so this click doesn't wait for the page to settle.
@@ -14635,13 +14639,13 @@ if (tool === 'claude') {
   await open('agents', lead);
   await until(() => a.exists(act('agents', lead, 'copilot-cli')));
   // Example 1: an agent only through a plugin that is in Claude Code and not in Copilot CLI.
-  same('an agent only through a plugin: Copilot CLI’s line offers Install the plugin, counting what Copilot CLI loads of it',
-    [await label(act('agents', lead, 'copilot-cli')), await lineOf('Copilot CLI')], ['Install the plugin', 'Installs varo-incident-response in Copilot CLI, with its 1 skill, 1 agent and 1 MCP server on.']);
+  same('an agent only through a plugin: Copilot CLI’s line offers Install the plugin (not counted: Copilot CLI may read another skills folder than the count)',
+    [await label(act('agents', lead, 'copilot-cli')), await lineOf('Copilot CLI')], ['Install the plugin', 'Installs varo-incident-response in Copilot CLI.']);
   same('no line of the opened row sends him to the plugin’s page; its strip names the plugin, its version, where it is, and Its page to look',
     [await a.run(`[...document.querySelectorAll('.details .details-tool')].some(line => /plugin’s page|Plugin marketplaces/.test(line.textContent))`), await a.text('.details .plugin-strip')],
     [false, `varo-incident-response 1.10.0·in Claude Code·Its page`]);
   // Example 10: Codex reads its own manifest, which isn't read here, and loads no plugin's agents: nothing counted for it.
-  same('Codex’s line installs it there, counting nothing', [await label(act('agents', lead, 'codex-cli')), await lineOf('Codex')], ['Install the plugin', 'Installs varo-incident-response in Codex.']);
+  same('Codex loads no plugin’s agents: its line on an agent says so, with no button', [await a.exists(act('agents', lead, 'codex-cli')), await lineOf('Codex')], [false, 'Codex doesn’t load a plugin’s agents.']);
   // Example 11: a home 0.7.0 alpha 6 left, opened and its plugin's row open: nothing written.
   same('opening the home and the row writes nothing: the plugins record and each tool’s files as they were', [readNow(join(home, '.central-knot/plugins.json')), toolFiles()], [recordBefore, filesBefore]);
   if (shots) for (const [width, height, rail] of [[...SMALLEST, true], [1316, 819, false], [2560, 1440, false]]) {
@@ -14654,10 +14658,10 @@ if (tool === 'claude') {
   // Example 7: the install fails in the tool's own words; the button is still there; the record is as the box's route left it.
   writeFileSync(join(home, 'fail-copilot'), '');
   await a.click(act('agents', lead, 'copilot-cli'));
-  await until(async () => /^Not installed in Copilot CLI/.test(await lineOf('Copilot CLI') ?? ''));
-  const failedLine = await lineOf('Copilot CLI');
-  check('a failed install says so on its line in Copilot CLI’s words, and what its page says of Copilot CLI now; the button is still there',
-    /^Installs varo-incident-response in Copilot CLI.*Not installed in Copilot CLI: Failed to install varo-incident-response@ck-test-market: the network is unreachable\.? Not in Copilot CLI, though the plugin is on\./.test(failedLine ?? '')
+  await until(async () => /^Not installed in Copilot CLI/.test((await resultOf('Copilot CLI'))?.[0] ?? ''));
+  const failedLine = (await resultOf('Copilot CLI'))?.[0];
+  check('a failed install says so on its own line in Copilot CLI’s words, and what its page says of Copilot CLI now; the button is still there',
+    /^Not installed in Copilot CLI: Failed to install varo-incident-response@ck-test-market: the network is unreachable\.? Not in Copilot CLI, though the plugin is on\./.test(failedLine ?? '') && await lineOf('Copilot CLI') === 'Installs varo-incident-response in Copilot CLI.'
     && await a.run(`!!document.querySelector('${act('agents', lead, 'copilot-cli')}') && !document.querySelector('${act('agents', lead, 'copilot-cli')}').disabled`), failedLine);
   same('after the failed install, the plugins record and Copilot CLI’s files are byte for byte what the box’s failed tick left', left(home), failedByBox);
   rmSync(join(home, 'fail-copilot'));
@@ -14670,13 +14674,27 @@ if (tool === 'claude') {
     [await lineOf('Copilot CLI'), await a.run(`document.querySelector('${act('agents', lead, 'copilot-cli')}').disabled`), await a.run(`!document.querySelector('${act('agents', lead, 'opencode-cli')}').disabled`)],
     ['Installing varo-incident-response in Copilot CLI… This can take a few minutes.', true, true]);
   rmSync(join(home, 'slow'));
-  await until(async () => /Installed varo-incident-response in Copilot CLI/.test(await lineOf('Copilot CLI') ?? ''), 300);
-  const installedLine = await lineOf('Copilot CLI');
-  check('done: its line says what was installed, counted from Copilot CLI’s copy as read again, what Copilot CLI needs, and Undo',
-    /Installed varo-incident-response in Copilot CLI, with its 1 skill, 1 MCP server and 1 agent\. In Copilot CLI, start a new session\./.test(installedLine ?? '') && await a.exists(byId(rowPart('line-undo', 'agents', lead, 'copilot-cli'))) && await a.exists('#outcome-undo'), installedLine);
+  await until(async () => /Installed varo-incident-response in Copilot CLI/.test((await resultOf('Copilot CLI'))?.[0] ?? ''), 300);
+  const installedLine = await lineOf('Copilot CLI'), installedSaid = await resultOf('Copilot CLI');
+  check('done: its result has a line of its own under Copilot CLI’s, counted from its copy as read again, with what Copilot CLI needs and Undo; the line’s sentence is the next act’s alone',
+    /^Installed varo-incident-response in Copilot CLI, with its 1 skill, 1 MCP server and 1 agent\. In Copilot CLI, start a new session\.$/.test(installedSaid?.[0] ?? '') && installedSaid?.[1]
+    && installedLine === 'Inside varo-incident-response 1.10.0, on here. Turns the whole plugin varo-incident-response off in Copilot CLI, with its 1 skill and 1 MCP server.' && await a.exists('#outcome-undo'), [installedLine, installedSaid]);
   if (shots) { await sizeTo(a, 1316, 819); await a.shot('lines-installed-1316'); await fullSize(a); }
   const byLine = left(home);
   for (const [at, what] of ['the plugins record', 'Copilot CLI’s config.json', 'Copilot CLI’s settings.json'].entries()) same(`the install from the line leaves ${what} byte for byte as the box’s tick did`, byLine[at], installedByBox[at]);
+  // A new act on the plugin retires the last one's result and its Undo, in the header and on its line: Codex's install of the
+  // skill (which fails, its stand-in installing nothing) started while Copilot CLI's result is up.
+  writeFileSync(join(home, 'slow'), '');
+  await open('skills', triage);
+  await until(() => a.exists(act('skills', triage, 'codex-cli')));
+  await press(act('skills', triage, 'codex-cli'));
+  await until(async () => /^Installing/.test((await lineOf('Codex')) ?? ''), 50);
+  const retired = [await a.exists('#outcome-undo'), /in Copilot CLI/.test(await a.text('#header') ?? '')];
+  await a.run(openKindNow('agents'));
+  same('a new act retires the last result and its Undo: none in the header, none on Copilot CLI’s line', [...retired, await resultOf('Copilot CLI')], [false, false, null]);
+  rmSync(join(home, 'slow'));
+  await until(async () => /Not installed in Codex/.test(await a.text('#header') ?? ''), 300);
+  await idle();
   // The Plugins page shows the same: Copilot CLI's box ticked.
   await a.click('#nav-plugins');
   await until(() => a.exists(`#popen-0-${plugin}`) || a.exists(`#pbox-0-${plugin}-copilot-cli`));
@@ -14718,6 +14736,22 @@ if (tool === 'claude') {
   await a.click('#outcome-undo');
   await idle();
   same('its Undo takes the items out of Pi and puts the record back', [existsSync(join(home, '.pi/agent/skills/incident-triage/SKILL.md')), entryNow(plugin)], [false, placedBefore]);
+  await open('skills', 'incident-triage');
+  await until(() => a.exists(act('skills', 'incident-triage', 'pi-cli')));
+  same('after the Undo its items are in the Library, off, and Pi’s line can put them there again', [await switchOn(a, 'skills', 'incident-triage'), await label(act('skills', 'incident-triage', 'pi-cli'))], [false, 'Put its items here']);
+  // A name OpenCode has of his own stays his: the line says so before the click, and the result after, from what was placed.
+  skill(join(home, '.config/opencode/skills'), 'incident-triage', text('incident-triage', 'Mine, not the plugin’s.'));
+  await a.click('#header-refresh');
+  await open('agents', 'incident-lead');
+  await until(() => a.exists(act('agents', 'incident-lead', 'opencode-cli')));
+  same('OpenCode’s line counts what will go in, and names his own that stays', [await label(act('agents', 'incident-lead', 'opencode-cli')), await lineOf('OpenCode')],
+    ['Put its items here', 'varo-incident-response’s 1 agent and 1 MCP server go into OpenCode, following the plugin. Your own incident-triage stays as it is.']);
+  await a.click(act('agents', 'incident-lead', 'opencode-cli'));
+  await until(async () => / in OpenCode\./.test(await a.text('#header') ?? ''), 300);
+  check('the result counts what was put there, and names his own that stayed', /Put 1 MCP server and 1 agent of varo-incident-response in OpenCode\. Your own incident-triage stays as it is\./.test(await a.text('#header') ?? '')
+    && readNow(join(home, '.config/opencode/skills/incident-triage/SKILL.md')).includes('Mine, not the plugin’s.'), await a.text('#header'));
+  await a.click('#outcome-undo');
+  await idle();
 
   // An item's switch and a plugin's turn, in each order: each Undo puts back only its own.
   await open('mcp', 'incident-io');
@@ -14766,6 +14800,9 @@ if (tool === 'claude') {
   await a.click(`.ov-row[data-key="${row('skills', 'incident-triage')}"] .switch`);
   await idle();
   same('On, the same', [await label(act('skills', 'incident-triage', 'claude-cli')), await switchOn(a, 'skills', 'incident-triage')], ['Install the plugin', true]);
+  check('its switch’s result, its status line and its marks say those tools get it with the plugin, not that they can’t take it, nor that it is on there',
+    /incident-triage is on in Pi\./.test(await a.text('#header') ?? '') && /not in Claude Code, Copilot CLI or Codex: they get it with the plugin \(see below\)/.test(await a.text('.details-status') ?? '')
+    && await a.run(`['claude-cli', 'copilot-cli', 'codex-cli'].every(tool => document.getElementById(${JSON.stringify(rowPart('cell', 'skills', 'incident-triage'))} + '-' + tool)?.dataset.state === 'with-plugin')`), [await a.text('#header'), await a.text('.details-status')]);
   if (shots) for (const [width, height, rail] of [[...SMALLEST, true], [1316, 819, false], [2560, 1440, false]]) {
     await sizeTo(a, width, height);
     if (await a.run(`document.body.classList.contains('rail')`) !== rail) await a.click('#sidebar-toggle');
@@ -14795,10 +14832,17 @@ if (tool === 'claude') {
   same('Copilot CLI loads it live: Remove the plugin, saying turning it off there is removing it', [await label(act('agents', 'incident-lead', 'copilot-cli')), (await lineOf('Copilot CLI'))?.replace(/^Inside varo-incident-response 1\.10\.0, on here\. /, '')],
     ['Remove the plugin', 'Copilot CLI loads varo-incident-response live from a folder, so turning it off there is removing it. Uninstalls varo-incident-response from Copilot CLI. Its marketplace folder stays.']);
   const liveOn = () => JSON.parse(readNow(join(home, '.copilot/settings.json'))).enabledPlugins?.[id];
-  await a.click(act('agents', 'incident-lead', 'copilot-cli'));
+  // Started, then another page opened while it runs: back on the Library once it is done, its result and Undo are there, and
+  // stay past the time a result without Undo fades.
+  writeFileSync(join(home, 'slow'), '');
+  await press(act('agents', 'incident-lead', 'copilot-cli'));
+  await a.run(`document.getElementById('nav-overview').click()`);
   await until(() => liveOn() === false, 300);
-  await idle();
-  check('removed: its result says so, and what its Undo can’t put back', /Removed varo-incident-response from Copilot CLI\./.test(await a.text('#header') ?? '') && /Undo installs the marketplace’s copy as it is now/.test(await a.text('#header') ?? ''), await a.text('#header'));
+  rmSync(join(home, 'slow'));
+  await wait(3000);
+  await openKind(a, 'agents');
+  await wait(FADE_WAIT);
+  check('removed while another page was open: back on the Library its result says so, and what its Undo can’t put back, with Undo, past the time a result fades', /Removed varo-incident-response from Copilot CLI\./.test(await a.text('#header') ?? '') && /Undo installs the marketplace’s copy as it is now/.test(await a.text('#header') ?? '') && await a.exists('#outcome-undo'), await a.text('#header'));
   await a.click('#outcome-undo');
   await until(() => liveOn() === true, 300);
   await idle();
@@ -14807,6 +14851,9 @@ if (tool === 'claude') {
   // Example 8: the state changed under the page, its listing still there: nothing runs, and the line says how it stands.
   const settingsNow = JSON.parse(readNow(join(home, '.copilot/settings.json')));
   writeFileSync(join(home, '.copilot/settings.json'), JSON.stringify({ ...settingsNow, enabledPlugins: { [id]: false } }));
+  // Kept out of Copilot CLI in the record, as a home where it was never let in there has it.
+  const recordNow = JSON.parse(readNow(join(home, '.central-knot/plugins.json')));
+  writeFileSync(join(home, '.central-knot/plugins.json'), `${JSON.stringify({ ...recordNow, plugins: recordNow.plugins.map(each => (each.plugin === plugin ? { ...each, except: [...new Set([...each.except, 'copilot-cli'])] } : each)) }, null, 2)}\n`);
   await a.click('#header-refresh');
   await open('agents', 'incident-lead');
   await until(() => a.run(`document.querySelector('${act('agents', 'incident-lead', 'copilot-cli')}')?.textContent === 'Install the plugin'`));
@@ -14814,7 +14861,12 @@ if (tool === 'claude') {
   const callsBefore = readNow(join(home, 'copilot-calls.txt'));
   await a.click(act('agents', 'incident-lead', 'copilot-cli'));
   await until(async () => /Nothing was run in Copilot CLI/.test(await a.text('#header') ?? ''), 300);
-  check('a stale click runs nothing, and says how Copilot CLI stands now', readNow(join(home, 'copilot-calls.txt')) === callsBefore && /Nothing was run in Copilot CLI\. Copilot CLI: installed/.test(await a.text('#header') ?? ''), [await a.text('#header'), readNow(join(home, 'copilot-calls.txt')).slice(callsBefore.length)]);
+  check('a stale click runs nothing, says Copilot CLI had it already and that Central Knot now keeps it there, with Undo for that', readNow(join(home, 'copilot-calls.txt')) === callsBefore
+    && /Nothing was run in Copilot CLI: it has varo-incident-response already\. Central Knot now keeps it in Copilot CLI\./.test(await a.text('#header') ?? '') && await a.exists('#outcome-undo'), [await a.text('#header'), readNow(join(home, 'copilot-calls.txt')).slice(callsBefore.length)]);
+  const keptIn = entryNow(plugin).except;
+  await a.click('#outcome-undo');
+  await idle();
+  same('its Undo puts the record back: Copilot CLI kept out again, nothing run', [entryNow(plugin).except.includes('copilot-cli'), keptIn.includes('copilot-cli'), readNow(join(home, 'copilot-calls.txt')) === callsBefore], [true, false, true]);
 
   // Example 9: a plugin whose marketplace is added nowhere here: no button, and why.
   await open('skills', 'lone-tool@other-market/lone');

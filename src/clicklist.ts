@@ -1,5 +1,7 @@
 // The page's one list of clicks, carried out one at a time in the order clicked: a row's switch or Add on the item lists
-// (app.ts queueClick) and a plugin's switch or tool's box on Plugins (pluginstate.ts turnPlugin) join it, each a Turn. While
+// (app.ts queueClick), a plugin's switch or tool's box on Plugins (pluginstate.ts turnPlugin) and a tool's line's Install, Put its
+// items here or Remove in the Library (pluginstate.ts turnFromLine, a run of its own: its result is the Library header's) join it,
+// each a Turn. While
 // clicks wait or run, the page acts (app.ts acting): the writes it names are off and say why, the page stays live (it scrolls,
 // rows open, switches take clicks), and the background refresh waits: the home is read once when the list is empty and anything
 // owes it a read (app.ts readHomeOnce). A run of clicks, said once with one Undo, is decided here for both routes (runAt): a click

@@ -9,10 +9,10 @@
 // which of a library row's lines are a plugin's (matrix.ts rowPluginFacts), and the others, the library's own (libraryrow.ts hasLine):
 // a library item from a plugin in Pi, OpenCode and Antigravity, and one kept out of a tool that lacks the plugin.
 import { DIRECTORY, loadsKind, partWords, samePart } from './pluginstatus.ts';
-import { cantSwitch, copilotByName, onNow, ownSwitch, wholeTurn, type PluginItemAt } from './pluginswitch.ts';
+import { cantSwitch, copilotByName, offRemoves, onNow, wholeTurn, type PluginItemAt } from './pluginswitch.ts';
 import { holds, takesPlugins } from './presence.ts';
 import { andList, toolNames as names } from './words.ts';
-import type { Components, HarnessId, InstalledPlugin, PartKind } from './types.ts';
+import type { Components, HarnessId, InstalledPlugin, PartKind, PartRef } from './types.ts';
 
 /** What a line's button does: install the plugin, put its items in a tool that takes no plugins, uninstall a plugin Copilot CLI loads live, or turn the whole plugin there. */
 export type LineAct = 'install' | 'place' | 'remove' | 'plugin-on' | 'plugin-off';
@@ -30,8 +30,13 @@ export interface LineFacts {
   through?: PluginItemAt;
   /** The tool has the plugin installed, but its copy lacks the item. */
   installed?: InstalledPlugin;
-  /** The plugin's box for this tool on its page; undefined while the Plugins page's view is read, `unlisted` where no marketplace here lists the plugin. */
-  box?: LineBox | 'unlisted';
+  /**
+   * The plugin's box for this tool on its page; undefined while the Plugins page's view is read, `unlisted` where no marketplace
+   * here lists the plugin, `ambiguous` where more than one of that name does and the row can't tell which it comes from.
+   */
+  box?: LineBox | 'unlisted' | 'ambiguous';
+  /** Names of the plugin's items this tool has of his own, which a placement leaves his (library.ts TAKE; pluginrows.ts placedIn). */
+  yours?: PartRef[];
   /** What its marketplace lists in it, for the counts; undefined where that isn't known. */
   parts?: Components;
 }
@@ -63,10 +68,10 @@ const bringsMore = (item: PluginItemAt) => item.install.items.some(entry => !sam
 function hasIt(item: PluginItemAt, { box, marketName }: LineFacts): LineControl {
   const tool = names[item.tool], plugin = item.install.plugin;
   // Copilot CLI's whole-plugin switch for a plugin it loads live from a folder is its uninstall.
-  if (item.tool === 'copilot-cli' && item.install.live && !ownSwitch(item)) {
+  if (offRemoves(item)) {
     const lead = `${tool} loads ${plugin} live from a folder, so turning it off there is removing it.`;
     if (box === 'unlisted') return none(`${lead} ${capital(unlisted(marketName))}, so ${tool}’s own plugin commands remove it.`);
-    if (!box?.ticked || box.off) return none([lead, box?.off].filter(Boolean).join(' '));
+    if (typeof box !== 'object' || !box.ticked || box.off) return none([lead, typeof box === 'object' ? box.off : undefined].filter(Boolean).join(' '));
     return button('remove', `${lead} Uninstalls ${plugin} from ${tool}. Its marketplace folder stays.`);
   }
   // The switch: a click that turns this item alone, one that can't be written (said beside it), a plugin that is this item
@@ -77,33 +82,43 @@ function hasIt(item: PluginItemAt, { box, marketName }: LineFacts): LineControl 
   return button(onNow(item) ? 'plugin-off' : 'plugin-on', `Turns ${whole}.${byName}`);
 }
 
-function install({ tool, plugin, marketName, box, parts }: LineFacts): LineControl {
+function install({ tool, kind, plugin, marketName, box, parts }: LineFacts): LineControl {
   const where = names[tool];
+  // Installing the plugin there wouldn't give this item: Codex loads no plugin's agents.
+  if (!loadsKind(tool, kind)) return none(`${where} doesn’t load a plugin’s ${partWords[kind][1]}.`);
   if (box === 'unlisted') return none(`Not installed in ${where}. ${marketName === DIRECTORY ? 'It comes from the Anthropic Directory, which only Claude Code installs from.' : `${capital(unlisted(marketName))}, so it can’t be installed from here.`}`);
+  if (box === 'ambiguous') return none(`Not installed in ${where}. ${twoNamed(marketName, plugin)}, so which one to install it from can’t be told here.`);
   if (box?.off) return none(box.off);
   if (!box || box.ticked) return none(`Not installed in ${where}.`);
-  // Claude Code and Copilot CLI load each part its marketplace lists; Codex loads what its own manifest names (no agents), which
-  // isn't read here: nothing is counted for it.
-  const counts = parts && tool !== 'codex-cli' ? countOf(parts, () => true) : undefined;
+  // Claude Code loads each part its marketplace entry lists, as the catalog counts them. Copilot CLI reads a skills folder the
+  // entry names in place of the plugin's own, and Codex its own manifest, neither of which the count follows: not counted.
+  const counts = parts && tool === 'claude-cli' ? countOf(parts, () => true) : undefined;
   return button('install', `Installs ${plugin} in ${where}${counts?.words ? `, with its ${counts.words} on` : ''}.`);
 }
 
-function place({ tool, plugin, marketName, box, parts }: LineFacts): LineControl {
+function place({ tool, plugin, marketName, box, parts, yours = [] }: LineFacts): LineControl {
   const where = names[tool];
   if (box === 'unlisted') return none(`${where} takes no plugins, and ${unlisted(marketName)}, so its items can’t be put there.`);
+  if (box === 'ambiguous') return none(`${where} takes no plugins, and ${twoNamed(marketName, plugin).replace(/^M/, 'm')}, so which one to put its items from can’t be told here.`);
   if (box?.off) return none(box.off);
   if (!box) return none(`${where} takes no plugins.`);
   // Ticked: the plugin's other items are there, and a tick can't bring this one (its line on the plugin's page has why).
   if (box.ticked) return none(`${plugin}’s other items are in ${where}, following the plugin; this one isn’t.`);
-  const counts = parts && countOf(parts, kind => holds(tool, kind));
-  if (!counts?.words) return button('place', `Puts the items of ${plugin} that ${where} can hold into ${where}, following the plugin.`);
+  const counts = parts && countOf(parts, kind => holds(tool, kind), yours);
+  const mine = yours.length ? ` ${yoursStay(yours)}` : '';
+  if (!counts?.words) return button('place', `Puts the items of ${plugin} that ${where} can hold into ${where}, following the plugin.${mine}`);
   const cannot = [parts!.hooks ? 'hooks' : '', parts!.commands ? 'commands' : ''].filter(Boolean);
-  return button('place', `${plugin}’s ${counts.words} ${counts.total === 1 ? 'goes' : 'go'} into ${where}, following the plugin.${cannot.length ? ` ${capital(andList(cannot))} can’t.` : ''}`);
+  return button('place', `${plugin}’s ${counts.words} ${counts.total === 1 ? 'goes' : 'go'} into ${where}, following the plugin.${mine}${cannot.length ? ` ${capital(andList(cannot))} can’t.` : ''}`);
 }
 
-/** The plugin's skills, agents and MCP servers its marketplace lists, of the kinds `keep` keeps, in words ("3 skills and 1 MCP server"), and how many. */
-function countOf(parts: Components, keep: (kind: PartKind) => boolean): { words: string; total: number } {
-  const counts = (['skill', 'agent', 'mcp'] as const).filter(keep).map(kind => [kind, { skill: parts.skills, agent: parts.agents, mcp: parts.mcp }[kind]] as const).filter(([, count]) => count > 0);
+/** That his own of the plugin's names stay his: "Your own triage stays as it is." The line before a placement and its result say it. */
+export const yoursStay = (yours: PartRef[]) => `Your own ${andList(yours.map(part => part.name))} ${yours.length === 1 ? 'stays as it is' : 'stay as they are'}.`;
+const twoNamed = (marketName: string, plugin: string) => `More than one marketplace here named “${marketName}” lists ${plugin}`;
+
+/** The plugin's skills, agents and MCP servers its marketplace lists, of the kinds `keep` keeps, but `less`, in words ("3 skills and 1 MCP server"), and how many. */
+function countOf(parts: Components, keep: (kind: PartKind) => boolean, less: PartRef[] = []): { words: string; total: number } {
+  const listed = (kind: PartKind) => ({ skill: parts.skills, agent: parts.agents, mcp: parts.mcp })[kind] - less.filter(part => part.kind === kind).length;
+  const counts = (['skill', 'agent', 'mcp'] as const).filter(keep).map(kind => [kind, listed(kind)] as const).filter(([, count]) => count > 0);
   return { words: andList(counts.map(([kind, count]) => `${count} ${partWords[kind][count === 1 ? 0 : 1]}`)), total: counts.reduce((sum, [, count]) => sum + count, 0) };
 }
 

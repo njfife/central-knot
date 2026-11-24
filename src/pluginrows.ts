@@ -10,9 +10,9 @@ import { lacksIt } from './pluginline.ts';
 import { onNow, type PluginItemAt } from './pluginswitch.ts';
 import { takesPlugins } from './presence.ts';
 import { andList, byToolOrder, toolNames as names } from './words.ts';
-import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, PartKind, PluginItem, ThroughPlugin } from './types.ts';
+import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, PartKind, PartRef, PluginItem, ThroughPlugin } from './types.ts';
 import { kindSource } from './itemrow.ts';
-import { pluginLink } from './sourcelink.ts';
+import { pluginLink, pluginMarketOf, pluginOf } from './sourcelink.ts';
 
 type Page = keyof typeof partOfPage;
 
@@ -133,7 +133,7 @@ export function inWhere(row: PluginRow): string {
 }
 
 /** A row's tag's hover text: it is inside the installed plugin. */
-export const insideTitle = (row: PluginRow) => `Inside the plugin ${inWhere(row)}. It comes and goes with the plugin${handledWhere(row).listed ? ', on the plugin’s page' : ''}`;
+export const insideTitle = (row: PluginRow) => `Inside the plugin ${inWhere(row)}. It comes and goes with the plugin${listedHere(row) ? ', on the plugin’s page' : ''}`;
 
 /** Why a tool has no copy of this item, as a sentence naming that tool (a mark's tooltip; the opened row's line says what can be done: pluginline.ts). */
 function missingWhy(row: PluginRow, tool: HarnessId): string {
@@ -159,11 +159,52 @@ export function toolWords(row: PluginRow, tool: HarnessId): string {
   return off === 'plugin' ? `${inside}. The whole plugin is turned off here.` : off === 'item' ? `${inside}. Turned off here with its own switch.` : `${inside}, on here.`;
 }
 
-/** Where a plugin's item is handled, in one sentence: on its page, or, with its marketplace nowhere here, in the tool itself (the opened row's strip says it: matrix.ts pluginStrip). */
-export function handledWhere(row: PluginRow): { listed: boolean; text: string } {
-  const listed = Object.values(row.installs).some(install => install?.listed);
-  if (listed) return { listed, text: 'Installed, updated and removed with the plugin, on ' };
+/** Whether the plugin's marketplace is on the Plugins page (it is added in some tool that has it), so it has a page there. */
+const listedHere = (row: PluginRow) => Object.values(row.installs).some(install => install?.listed);
+/**
+ * How a plugin whose marketplace is on no page here is handled, in one sentence (the opened row's strip says it: matrix.ts
+ * pluginStrip): from the Anthropic Directory by Claude Code itself, else by each tool's own plugin commands; '' where it is listed.
+ */
+export function handledWhere(row: PluginRow): string {
+  if (listedHere(row)) return '';
   const tools = pluginTools(row).map(tool => names[tool]);
-  if (row.marketName === DIRECTORY) return { listed, text: `Installed in ${andList(tools)} from the Anthropic Directory. Claude Code’s own /plugin updates, turns off or removes it.` };
-  return { listed, text: `Installed in ${andList(tools)} from the marketplace “${row.marketName}”, which isn’t added in Central Knot or in ${tools.length === 1 ? 'that tool' : 'those tools'} now, so the plugin has no page here. ${tools.length === 1 ? `${tools[0]}’s` : 'Each tool’s'} own plugin commands update, turn off or remove it.` };
+  if (row.marketName === DIRECTORY) return `Installed in ${andList(tools)} from the Anthropic Directory. Claude Code’s own /plugin updates, turns off or removes it.`;
+  return `Installed in ${andList(tools)} from the marketplace “${row.marketName}”, which isn’t added in Central Knot or in ${tools.length === 1 ? 'that tool' : 'those tools'} now, so the plugin has no page here. ${tools.length === 1 ? `${tools[0]}’s` : 'Each tool’s'} own plugin commands update, turn off or remove it.`;
+}
+
+/**
+ * The tools a library item from a plugin (library.ts A PLUGIN) gets only by installing that plugin: those that take plugins and
+ * don't have it installed, but one the item is On and kept out of, where its own switch lets it in. There its row's line offers
+ * Install the plugin (pluginline.ts), and its mark and its status line say it gets it with the plugin (matrix.ts markOf,
+ * libraryrow.ts statusLine); its switch's result doesn't count it among the tools it is on in (matrix.ts canHave).
+ */
+export function withPluginOnly(home: Pick<HomeView, 'pluginItems' | Page> | undefined, page: Page, row: { fromSource?: { link: string }; on?: boolean; except?: readonly string[] }): HarnessId[] {
+  const link = row.fromSource?.link ?? '', plugin = pluginOf(link), marketName = pluginMarketOf(link);
+  if (!home || !plugin) return [];
+  return kindSource(home, page).tools.filter(tool => takesPlugins(tool) && !keptOutOf(row, tool)
+    && !home.pluginItems?.some(install => install.tool === tool && install.plugin === plugin && install.marketName === marketName));
+}
+
+/** Whether a library item is On and kept out of the tool: there its own switch lets it in, whatever its plugin. */
+export const keptOutOf = (row: { on?: boolean; except?: readonly string[] }, tool: string) => !!row.on && !!row.except?.includes(tool);
+
+/**
+ * What a tool that takes no plugins has of a plugin now: Central Knot's copies that follow it (`placed`: a library item from the
+ * plugin whose copy there is its current version), and the names of its items there that are his own (`yours`: any other copy of
+ * one of its names, which a placement leaves his: library.ts TAKE). Its names: its items as any tool has it installed, and its
+ * items in the library. A line's sentence names `yours` before a placement (pluginline.ts), its result both after (pluginstate.ts runLine).
+ */
+export function placedIn(home: HomeView, plugin: string, marketName: string, tool: HarnessId): { placed: PartRef[]; yours: PartRef[] } {
+  const link = pluginLink(plugin, marketName), placed: PartRef[] = [], yours: PartRef[] = [];
+  const installed = (home.pluginItems ?? []).filter(install => install.plugin === plugin && install.marketName === marketName).flatMap(install => install.items);
+  for (const page of ['skills', 'mcp', 'agents'] as const) {
+    const kind = partOfPage[page], view = home[page];
+    if (!view.tools.includes(tool)) continue;
+    for (const fact of view.items) {
+      const copy = fact.copies[tool], linked = fact.fromSource?.link === link, part = { kind, name: fact.name };
+      if (linked && copy && copy.hash === view.library[fact.key]?.hash) placed.push(part);
+      else if (copy && (linked || installed.some(item => samePart(item, part)))) yours.push(part);
+    }
+  }
+  return { placed, yours };
 }

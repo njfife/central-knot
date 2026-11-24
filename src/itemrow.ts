@@ -65,6 +65,8 @@ export interface ItemRow {
   switchedOff?: Tool[];
   /** `pluginOn`: the tools with no copy of their own that have it on through an installed plugin (pluginrows.ts pluginOnIn; libraryrow.ts LibraryRow says it). */
   pluginOn?: Tool[];
+  /** The tools an item from a plugin gets only by installing that plugin (pluginrows.ts withPluginOnly; libraryrow.ts LibraryRow says it). */
+  getsWithPlugin?: Tool[];
 }
 
 /**

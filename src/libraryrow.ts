@@ -105,6 +105,8 @@ export interface LibraryRow {
   switchedOff?: readonly string[];
   /** `pluginOn`: the tools with no copy of their own that have it on through an installed plugin (pluginrows.ts pluginOnIn): an Off item is still on there. */
   pluginOn?: readonly string[];
+  /** The tools an item from a plugin gets only by installing that plugin (pluginrows.ts withPluginOnly): said apart from those that can't take it. */
+  getsWithPlugin?: readonly string[];
 }
 
 /**
@@ -414,8 +416,10 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
   // A tool whose own switch has it off doesn't load it: it is no tool it is on in (the parts below say it).
   const onIn = tools.filter(tool => !row.switchedOff?.includes(tool) && (['current', 'edited'].includes(harnessIs(row, item, tool)) || (harnessIs(row, item, tool) === 'gets-it' && waitsForEdit(tool))));
   const edit = row.plan?.takeIn;
-  const absent = onIn.length ? [] : cannotHave(row, item, tools), cantTake = cannot.filter(tool => !absent.includes(tool));
-  const cant = [absent.length ? `not in ${orList(absent.map(toolName))}` : '', cantTake.length ? `${andList(cantTake.map(toolName))} can’t take it` : ''].filter(Boolean).join(' · ');
+  const plugged = cannot.filter(tool => row.getsWithPlugin?.includes(tool));
+  const absent = (onIn.length ? [] : cannotHave(row, item, tools)).filter(tool => !plugged.includes(tool)), cantTake = cannot.filter(tool => !absent.includes(tool) && !plugged.includes(tool));
+  const cant = [absent.length ? `not in ${orList(absent.map(toolName))}` : '', cantTake.length ? `${andList(cantTake.map(toolName))} can’t take it` : '',
+    plugged.length ? `not in ${orList(plugged.map(toolName))}: ${plugged.length === 1 ? 'it gets' : 'they get'} it with the plugin` : ''].filter(Boolean).join(' · ');
   const parts = [onIn.length ? `On in ${named(onIn, tools)}${cannot.length ? ' only' : ''}` : 'On',
     edit ? `${toolName(edit)}’s edit becomes the current version when sync runs` : '',
     gets.length ? `${named(gets, tools)} ${gets.length === 1 ? 'gets' : 'get'} it when sync runs` : '',

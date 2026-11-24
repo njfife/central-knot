@@ -50,7 +50,7 @@ import { lineControl, type LineFacts } from './pluginline.ts';
 import { succeeded, type PluginDone, type PluginDraft } from './pluginplan.ts';
 import { alongWords, cantSwitch, click as clickPluginItem, clickWords, copilotByName, itemSaid, onNow as itemOn, switchWords, turnEvery, wholeWords, type PluginItemAt } from './pluginswitch.ts';
 import { pageOfPart, partOfPage } from './pluginstatus.ts';
-import { cellWords, handledWhere, inTool, insideTitle, itemThrough, offIn, pageRows, pluginOnIn, rowCount, pluginTools, throughPluginHere, toolWords, type PluginRow } from './pluginrows.ts';
+import { cellWords, handledWhere, inTool, insideTitle, itemThrough, keptOutOf, offIn, pageRows, placedIn, pluginOnIn, rowCount, pluginTools, throughPluginHere, toolWords, withPluginOnly, type PluginRow } from './pluginrows.ts';
 import { fromChoices, fromShows, originOf, type From, type FromEntry } from './origins.ts';
 import { sources } from './sourcespage.ts';
 import { folded, lineDiff } from './diff.ts';
@@ -127,10 +127,12 @@ function pluginStrip(plugin: string, marketName: string, installs: InstalledPlug
  * The facts a tool's line on a plugin's item is drawn from (pluginline.ts LineFacts): the home's view, and the Plugins page's,
  * read for it while such a row is open (pluginstate.ts wantView, lineBox), with the listing's source a turn names.
  */
-function lineFacts(kind: PartKind, plugin: string, marketName: string, tool: HarnessId, through?: PluginItemAt, installed?: InstalledPlugin, source?: string): LineFacts & { source?: string } {
+function lineFacts(kind: PartKind, plugin: string, marketName: string, tool: HarnessId, through?: PluginItemAt, installed?: InstalledPlugin): LineFacts & { source?: string } {
   wantView(state.home?.readId);
-  const box = lineBox(plugin, marketName, through?.install.source ?? installed?.source ?? source, tool);
-  return { tool, kind, plugin, marketName, through, installed, box: box.box, parts: box.parts, source: box.source };
+  // Its source as a tool that has it registered spells it, so the listing is this one's where two of one name list the plugin.
+  const known = through?.install.source ?? installed?.source ?? state.home?.pluginItems?.find(install => install.plugin === plugin && install.marketName === marketName && install.source)?.source;
+  const box = lineBox(plugin, marketName, known, tool), yours = takesPlugins(tool) || !state.home ? undefined : placedIn(state.home, plugin, marketName, tool).yours;
+  return { tool, kind, plugin, marketName, through, installed, box: box.box, parts: box.parts, source: box.source, ...(yours?.length ? { yours } : {}) };
 }
 
 /**
@@ -142,14 +144,16 @@ function lineFacts(kind: PartKind, plugin: string, marketName: string, tool: Har
 function pluginLine(row: ItemRow | PluginRow, facts: LineFacts & { source?: string }, lead: string, reload: string) {
   const control = lineControl(facts), item = facts.through, said = lineSaid(facts.plugin, facts.marketName, facts.tool, idOf(row));
   const words = control.control === 'switch' ? (item ? cantSwitch(item) ?? switchWords(item) : '') : control.sentence;
-  const text = [lead, said?.busy ? said.text : words, said && !said.busy ? said.text : '', reload].filter(Boolean).join(' ');
-  const undo = said?.act ? smallAction('Undo', elId('line-undo', row, facts.tool), said.act) : null;
-  if (control.control !== 'button') return { text, failed: said?.failed, control: control.control === 'switch' && item ? pluginItemControls(item, row) : undo && h('span.details-tool-actions', {}, undo) };
+  // Its result is a line of its own, under this one, with what the tool needs to load it and its Undo.
+  const result = said && !said.busy ? h(`p.details-tool-result${said.failed ? '.tone-warning' : ''}`, {}, icon(said.failed ? 'triangle-alert' : 'check', 12),
+    h('span.details-tool-result-text', {}, [said.text, reload].filter(Boolean).join(' ')), said.act ? smallAction('Undo', elId('line-undo', row, facts.tool), said.act, '', !!acting()) : null) : null;
+  const text = [lead, said?.busy ? said.text : words, result ? '' : reload].filter(Boolean).join(' ');
+  if (control.control !== 'button') return { text, result, control: control.control === 'switch' && item ? pluginItemControls(item, row) : null };
   const { act } = control, whole = act === 'plugin-on' || act === 'plugin-off';
   const run = () => (whole ? switchPluginItem(item!, row) : turnFromLine({ source: facts.source!, marketName: facts.marketName, plugin: facts.plugin, tool: facts.tool, act }, idOf(row)));
   // Turn the plugin on or off applies at once, as the switch it stands for; the others wait their turn in the page's list.
   const off = whole ? cantSwitchHere(item!) ?? writeOff(homeStops()) : said?.busy || queueOff(homeStops()) || (!facts.source && 'Not read yet.');
-  return { text, failed: said?.failed, control: h('span.details-tool-actions', {}, undo,
+  return { text, result, control: h('span.details-tool-actions', {},
     button({ variant: 'outline', size: 'micro', label: control.label, id: elId('line', row, facts.tool), disabled: off, attrs: { title: control.sentence }, onclick: (event: MouseEvent) => { event.stopPropagation(); run(); } })) };
 }
 
@@ -198,16 +202,16 @@ function pluginDetails(t: Table, row: PluginRow, placement: 'row' | 'dock' = 'ro
       row.kind === 'mcp' && row.description ? h('dl.details-definition', {}, h('dt', {}, 'Type'), h('dd', {}, type === 'Command' ? 'Command (stdio)' : type), h('dt', {}, type === 'Command' ? 'Command' : 'URL'), h('dd.mono', {}, rest.join(' · ')))
         : row.description ? h('p.details-description', {}, row.description) : null,
       excerptLine(t, row),
-      pluginStrip(row.plugin, row.marketName, Object.values(row.installs).filter(install => !!install), elId('open-whole', row), handledWhere(row).text)),
+      pluginStrip(row.plugin, row.marketName, Object.values(row.installs).filter(install => !!install), elId('open-whole', row), handledWhere(row))),
     h('div.details-tools', {}, toolsFor(t, kindOf(row)).map(tool => {
       const at = tool as HarnessId, install = row.installs[at], copy = row.copies[at] ? install : undefined;
       const item: PluginItemAt | undefined = copy && { kind: row.kind, name: row.name, tool: at, install: copy };
       const reload = state.outcome && outcomeShown(state.outcome, t)
         ? rowReload(state.outcome.reloads, row.kind, itemKey(row.name), at, `${row.plugin}@${row.marketName}`, toolWays()) : '';
-      const line = pluginLine(row, lineFacts(row.kind, row.plugin, row.marketName, at, item, copy ? undefined : install, install?.source), item ? toolWords(row, at) : '', reload);
+      const line = pluginLine(row, lineFacts(row.kind, row.plugin, row.marketName, at, item, copy ? undefined : install), item ? toolWords(row, at) : '', reload);
       return h('div.details-tool', {}, h('div.details-tool-head', {},
         h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
-        h(`span.details-tool-line${line.failed ? '.tone-warning' : ''}`, {}, line.text), line.control), usageLine(t, row, tool));
+        h('span.details-tool-line', {}, line.text), line.control), line.result ?? usageLine(t, row, tool));
     })),
     row.kind === 'mcp' ? null : h('div.details-file', {}, h('div.details-actions', {}, smallAction(shown ? `Hide its ${file}` : `Show its ${file}`, elId('pfile', row), () => toggleFile(row))), fileShown));
 }
@@ -298,7 +302,7 @@ function rowsOf(kind: PageKind): ItemRow[] {
   if (!state.home) return [];
   const { facts } = kindSource(state.home, kind);
   // Where a plugin has it on is read from the plugins the tools have, beside the facts (an Off item's words say it).
-  if (factsCache[kind]?.from !== facts) factsCache[kind] = { from: facts, list: facts.map(fact => fromFacts(kind, fact)).map(row => ({ ...row, pluginOn: pluginOnIn(state.home, kind, row) })) };
+  if (factsCache[kind]?.from !== facts) factsCache[kind] = { from: facts, list: facts.map(fact => fromFacts(kind, fact)).map(row => ({ ...row, pluginOn: pluginOnIn(state.home, kind, row), getsWithPlugin: withPluginOnly(state.home, kind, row) })) };
   return factsCache[kind]!.list;
 }
 /** A kind's row by its key, as the home on screen has it now: what a result reads of each row it changed (app.ts runOutcome, stillRead). */
@@ -1882,7 +1886,7 @@ function turnOff(t: Table, skill: ItemRow, seen: boolean): Click {
 }
 
 /** Every tool that can have it: where it is on once it is on everywhere. */
-const canHave = (t: Table, skill: ItemRow) => toolsFor(t, skill.kind).filter(tool => !skill.cannot?.[tool] || throughPluginHere(skill, tool));
+const canHave = (t: Table, skill: ItemRow) => toolsFor(t, skill.kind).filter(tool => (!skill.cannot?.[tool] && !skill.getsWithPlugin?.includes(tool)) || throughPluginHere(skill, tool));
 /** Where it is on once it is on everywhere, but `left`: tools it stays off in (a plugin's with no switch for one item, a write that failed). */
 const onPhrase = (t: Table, skill: ItemRow, left: readonly string[] = []) => toolsPhrase(canHave(t, skill).filter(tool => !left.includes(tool)), toolsFor(t, skill.kind));
 
@@ -2044,6 +2048,7 @@ const keyWords = {
   'will-sync': 'Gets a copy when sync runs next',
   taken: 'Edited, becomes the current version', 'deleted-by-hand': 'Deleted there; turns off when sync runs', leaving: 'Removed when sync runs', own: 'Its own copy, not from Central Knot',
   current: 'Has the current version', has: 'Has it', 'kept-out': 'Kept out', 'off-in-ck': 'Off: Central Knot keeps it', unseen: 'Left as it is (its line says why)', 'cannot-take': 'Can’t take it',
+  'with-plugin': 'Gets it with its plugin (its line installs it)',
   'another-way': 'Has it another way, not from Central Knot', switched: 'Switched off in its own settings',
 } as const;
 
@@ -2058,6 +2063,8 @@ function markOf(skill: ItemRow, tool: Tool): { look: MarkLook; words: string; gl
   if (given && (on || !skill.loads?.[tool as HarnessId])) {
     return { look: on ? 'on' : 'off', state: on ? 'plugin' : 'plugin-off', key: on ? 'on' : 'plugin-off', words: `${skill.anotherWay?.[tool] ?? skill.cannot?.[tool] ?? `${names[tool]} has it through the plugin ${given.plugin}.`}${on ? '' : ' It is turned off there.'}` };
   }
+  // A tool that gets it only with its plugin, which it lacks (pluginrows.ts withPluginOnly): not "can't take it".
+  if (skill.getsWithPlugin?.includes(tool)) return { look: 'none', state: 'with-plugin', key: 'with-plugin', words: `${names[tool]}: not there; it gets it with the plugin ${pluginOf(skill.fromSource!.link)}, which its line installs.` };
   return libraryMark(libraryPages[skill.kind], skill, tool);
 }
 
@@ -2439,16 +2446,20 @@ const switchStatus = (t: Table, skill: ItemRow) => statusLine(skill, itemOf(skil
 
 /**
  * A library row's line in one tool that is a plugin's (pluginline.ts): the tool has the item through a plugin, or the item is from a
- * plugin (library.ts A PLUGIN) that this tool, which takes plugins, doesn't have installed (it gets it only with the plugin:
- * plugins.ts pluginHolds). An item On and kept out of that tool keeps the library's own switch there, which lets it in.
+ * plugin (library.ts A PLUGIN) that this tool gets only with the plugin (pluginrows.ts withPluginOnly), or that this tool, which takes
+ * no plugins, has none of placed. An item On and kept out of a tool keeps the library's own switch there, which lets it in.
  */
 function rowPluginFacts(skill: ItemRow, tool: Tool) {
   const through = itemThrough(state.home, skill.kind, skill, tool), kind = partOfPage[skill.kind];
   if (through) return lineFacts(kind, through.install.plugin, through.install.marketName, tool as HarnessId, through);
-  const link = skill.fromSource?.link ?? '', plugin = pluginOf(link), marketName = pluginMarketOf(link), item = inLibrary(itemOf(skill));
-  const has = state.home?.pluginItems?.some(install => install.tool === tool && install.plugin === plugin && install.marketName === marketName);
-  const keptOut = !!item?.on && item.except.includes(tool as HarnessId);
-  return plugin && marketName && takesPlugins(tool) && !has && !keptOut ? lineFacts(kind, plugin, marketName, tool as HarnessId) : undefined;
+  const link = skill.fromSource?.link ?? '', plugin = pluginOf(link), marketName = pluginMarketOf(link);
+  if (!plugin || !marketName) return undefined;
+  if (skill.getsWithPlugin?.includes(tool)) return lineFacts(kind, plugin, marketName, tool as HarnessId);
+  if (takesPlugins(tool) || keptOutOf(skill, tool)) return undefined;
+  // A tool that takes no plugins where none of its items is placed (its box on the plugin's page unticked: after a placement's
+  // Undo, they are in the Library, Off): its line puts them there again.
+  const facts = lineFacts(kind, plugin, marketName, tool as HarnessId);
+  return typeof facts.box === 'object' && !facts.box.ticked && !facts.box.off ? facts : undefined;
 }
 
 /**
@@ -2456,7 +2467,7 @@ function rowPluginFacts(skill: ItemRow, tool: Tool) {
  * controls, each applied at once: a plugin's line where it is one (rowPluginFacts); else the item's switch for that harness and what
  * its kind adds there (libraryHarnessSwitch), or nothing where the tool has it through a plugin whose copy isn't read.
  */
-function harnessLine(skill: ItemRow, tool: Tool): { text: string; control: HTMLElement | null; failed?: boolean } {
+function harnessLine(skill: ItemRow, tool: Tool): { text: string; control: HTMLElement | null; result: HTMLElement | null } {
   const plugged = rowPluginFacts(skill, tool), through = plugged?.through;
   const reload = state.outcome && outcomeShown(state.outcome, useTableShown())
     ? rowReload(state.outcome.reloads, toItemKind(skill.kind), through ? itemKey(through.name) : skill.key, tool as HarnessId, through ? `${through.install.plugin}@${through.install.marketName}` : undefined, toolWays()) : '';
@@ -2464,7 +2475,7 @@ function harnessLine(skill: ItemRow, tool: Tool): { text: string; control: HTMLE
   if (plugged) return pluginLine(skill, plugged, through ? skill.cannot?.[tool] ?? '' : '', reload);
   const lib = libraryPages[skill.kind], own = skill.ownPart?.[tool];
   return { text: [lib.say.harnessLine(skill, itemOf(skill), tool, names[tool]), own?.length ? lib.words.own(own) : '', reload].filter(Boolean).join(' '),
-    control: throughPluginHere(skill, tool) ? null : libraryHarnessSwitch(lib, skill, tool) };
+    control: throughPluginHere(skill, tool) ? null : libraryHarnessSwitch(lib, skill, tool), result: null };
 }
 
 /**
@@ -2561,10 +2572,10 @@ function details(t: Table, skill: ItemRow, placement: Placement = 'row'): HTMLEl
       h('div.details-tool-head', {},
         h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
         ...settingsFile(tool),
-        h(`span.details-tool-line${line.failed ? '.tone-warning' : ''}`, {}, line.text),
+        h('span.details-tool-line', {}, line.text),
         line.control),
       lib.toolNote?.(skill, tool as HarnessId),
-      usageLine(t, skill, tool));
+      line.result ?? usageLine(t, skill, tool));
   };
   const close = placement === 'row' ? h('button.details-close', { type: 'button', id: elId('close', skill), 'aria-label': `Close details for ${skill.key}`, title: 'Close', onclick: () => { t.view.comparing = undefined; rerender(); } }, icon('x', 14)) : null;
   const box = (...children: (Child | Child[])[]) => h(`div.compare.details${placement === 'row' ? '' : '.details-bare'}${differs ? '.details-differs' : ''}${skill.kind === 'mcp' ? '.details-mcp' : '.details-grid'}`, { role: 'region', 'aria-label': `Details for ${skill.key}` }, ...children);
