@@ -9827,6 +9827,12 @@ async function sessionsFlow() {
   same('a day with nothing: the date, one sentence naming the tools read and no total; the tool present and not read yet named once; the foot line',
     [await a.text('#sessions-heading'), await a.exists('#sessions-total'), await a.text('#sessions-none'), await a.text('#sessions-not-read'), await a.text('#sessions-foot'), await a.exists('.session')],
     [`Today, ${await dateOf(today)}`, false, 'No sessions today in Claude Code or Codex.', 'Not read yet: Copilot CLI.', foot, false]);
+  // A Codex file of today whose one line can't be read: the day is not known to be empty.
+  const day = new Date(today), dated = [day.getFullYear(), day.getMonth() + 1, day.getDate()].map(part => String(part).padStart(2, '0')).join('/');
+  put(`.codex/sessions/${dated}/rollout-torn.jsonl`, ['a line that is not JSON'], todayAt(0.1));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 100 && (await a.text('#sessions-none')) === 'No sessions today in Claude Code or Codex.'; tries++) await wait(100);
+  same('"No sessions" only for a reading that is whole: with a file that could not be read, no sessions found', await a.text('#sessions-none'), 'No sessions found.');
 
   // Today: two Claude Code sessions and a Codex session with its child.
   const longFolder = 'a-project-folder-whose-name-runs-on-and-on-past-any-column-it-could-be-given';
@@ -9837,7 +9843,6 @@ async function sessionsFlow() {
     { type: 'cost-state', sessionId: 'alpha', totalCostUSD: 4.31, modelUsage: {}, hasUnknownModelCost: false }], todayAt(0.3));
   put('.claude/projects/-work-notes/beta.jsonl', [reply('beta', 'b1', todayAt(0.5), 'claude-opus-5-5', usage(8_000, 800), '/work/notes'),
     reply('beta', 'b2', todayAt(0.55), 'claude-2', usage(2_000, 200, { write: 6_000, hour: 6_000 }), '/work/notes')], todayAt(0.55));
-  const day = new Date(today), dated = [day.getFullYear(), day.getMonth() + 1, day.getDate()].map(part => String(part).padStart(2, '0')).join('/');
   put(`.codex/sessions/${dated}/rollout-x1.jsonl`, rollout('x1', undefined, todayAt(0.7), 'gpt-6-astra', 'r1', [40_000, 30_000, 2_000]), todayAt(0.7));
   put(`.codex/sessions/${dated}/rollout-x2.jsonl`, [...rollout('x2', 'x1', todayAt(0.8), 'codex-auto-review', 'r2', [9_000, 0, 300]), 'a line that is not JSON'], todayAt(0.8));
   await a.click('#header-refresh');
@@ -9859,7 +9864,9 @@ async function sessionsFlow() {
   same('the caption and the price list’s date, once, under the heading', await a.all('.sessions-caption'),
     ['What these tokens cost at each model’s API price. On a subscription you pay your plan’s price, not this.', `Prices as of ${pricesDate}.`]);
   same('what could not be read, for Codex, and the tool not read yet', [await a.all('.sessions-unread'), await a.text('#sessions-not-read')],
-    [['Some of Codex’s session files could not be read; what they hold is not here.'], 'Not read yet: Copilot CLI.']);
+    [['Some of Codex’s session history could not be read.'], 'Not read yet: Copilot CLI.']);
+  same('two kinds of no price in one sum read once, on the hover of the day’s unpriced count', await a.run(`document.querySelector('#sessions-unpriced')?.title ?? null`),
+    'No price known for 1 request on a model the price list does not have and a fast reply.');
   const open = session => a.click(`.session[data-session="${session}"] > details > summary`);
   /** An opened row's models, or the totals' (`#sessions-by-model`): the model and what is said under it, the four token counts as digits, the price. */
   const models = where => a.run(`[...document.querySelectorAll('${where} .session-models tbody tr')].map(tr => [...tr.cells].map((td, index) => (index && index < 5 ? td.textContent.replace(/\\D/g, '') : td.innerText.trim())))`);

@@ -371,7 +371,7 @@ test('A session begun yesterday with a response today counts only today\'s respo
   assert.deepEqual(view.total.tokens, row.tokens);
 });
 
-test('Parent with child (Claude subagents and Codex parent_thread_id on codex-auto-review) and orphan child: child nests under parent, parent excludes child, each request counts once', async () => {
+test('Parent with child (Claude subagents and Codex parent_thread_id on codex-auto-review) and orphan child: child nests under parent, its own sum excludes the child, its sum with its children includes it, a tool counts top-level sessions, each request counts once in the totals', async () => {
   const home = await newHome();
   const t = TODAY.start + 11 * HOUR;
 
@@ -400,9 +400,10 @@ test('Parent with child (Claude subagents and Codex parent_thread_id on codex-au
 
   const view = sessionRows(await readSessionPeriod({ home }, TODAY, ['claude-cli', 'codex-cli']));
 
-  // Top-level rows: orphan claude child, codex parent p1, claude parent p1 (3 top-level; 5 sessions total).
+  // Top-level rows: orphan claude child, codex parent p1, claude parent p1: 3 sessions, the two children set under their parents.
   assert.equal(view.rows.length, 3);
-  assert.equal(view.total.sessions, 5);
+  assert.equal(view.total.sessions, 3, 'the day counts top-level sessions');
+  assert.deepEqual(view.byTool.map(each => [each.tool, each.sessions]), [['claude-cli', 2], ['codex-cli', 1]], 'a tool counts its top-level sessions');
 
   const claudeParent = view.rows.find(r => r.tool === 'claude-cli' && r.session === 'p1')!;
   const claudeOrphan = view.rows.find(r => r.tool === 'claude-cli' && r.session === 'agent-orphan')!;
@@ -418,6 +419,9 @@ test('Parent with child (Claude subagents and Codex parent_thread_id on codex-au
   approx(claudeParent.cost.dollars, dParent, 'Claude parent excludes child dollars');
   assert.deepEqual(claudeParent.tokens, { input: 10_000, cacheRead: 0, cacheWrite: 0, output: 1_000 }, 'Claude parent excludes child tokens');
   approx(claudeParent.children[0]!.cost.dollars, dChild);
+  approx(claudeParent.withChildren.cost.dollars, dParent + dChild, 'Claude parent with its child');
+  assert.deepEqual(claudeParent.withChildren.tokens, { input: 14_000, cacheRead: 0, cacheWrite: 0, output: 1_500 }, 'Claude parent with its child: tokens');
+  assert.deepEqual(claudeParent.children[0]!.withChildren, { tokens: claudeParent.children[0]!.tokens, cost: claudeParent.children[0]!.cost }, 'a row with no children: its own sum');
 
   assert.equal(claudeOrphan.parent, 'gone');
   approx(claudeOrphan.cost.dollars, dOrphan);
@@ -428,6 +432,8 @@ test('Parent with child (Claude subagents and Codex parent_thread_id on codex-au
   assert.equal(codexParent.children[0]!.cost.unpriced, 1);
   assert.equal(codexParent.cost.unpriced, 0, 'Codex parent excludes unpriced child');
   approx(codexParent.cost.dollars, dCodexParent);
+  approx(codexParent.withChildren.cost.dollars, dCodexParent, 'Codex parent with its child: the child adds no dollars');
+  assert.deepEqual([codexParent.withChildren.cost.unpriced, codexParent.withChildren.cost.unpricedBy.noRow], [1, 1], 'and carries its unpriced request, by reason');
 
   approx(view.total.cost.dollars, dParent + dChild + dOrphan + dCodexParent, 'day total sums each row once');
   assert.equal(view.total.cost.unpriced, 1);
@@ -757,7 +763,7 @@ test('Pure sessionRows guards against synthetic parent cycles without dropping r
   };
   const view = sessionRows(reading);
   assert.equal(view.rows.length, 2, 'cyclic parents stay at top level rather than disappearing');
-  assert.equal(view.total.sessions, 2);
+  assert.equal(view.total.sessions, 2, 'each counted once, as a top-level session');
   assert.deepEqual(view.total.cost.unpricedBy, { noRow: 1, speedOrTier: [], other: 1 });
 });
 
