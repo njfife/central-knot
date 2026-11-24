@@ -6,7 +6,7 @@
 import { constants } from 'node:fs';
 import { access, lstat, open, readFile, readdir, readlink, realpath, stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
-import { isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parseDocument } from 'yaml';
 import { configRoot, harnesses, type HarnessDefinition } from './harnesses.ts';
@@ -31,38 +31,57 @@ const VERSION = /\b\d+\.\d+\.\d+(?:[-+][\w.-]+)?\b/;
 const versions = new Map<string, { file: string; answer: ProbeResult }>();
 export const forgetVersions = () => versions.clear();
 
-export async function probeVersion(binary: string, timeoutMs = 1500): Promise<ProbeResult> {
+export async function probeVersion(binary: string, timeoutMs = 1500, platform: string = process.platform): Promise<ProbeResult> {
+  const target = platform === 'win32' ? await runnable(binary, platform) : binary;
+  if (!target) return { state: 'missing', detail: 'Executable unavailable.' };
   try {
-    await access(binary, constants.X_OK);
+    await access(target, constants.X_OK);
   } catch (error) {
     return { state: errorCode(error) === 'EACCES' ? 'restricted' : 'missing', detail: 'Executable unavailable.' };
   }
-  const file = await stat(binary).then(({ ino, size, mtimeMs }) => `${ino} ${size} ${mtimeMs}`, () => undefined);
-  const known = versions.get(binary);
+  const file = await stat(target).then(({ ino, size, mtimeMs }) => `${ino} ${size} ${mtimeMs}`, () => undefined);
+  const known = versions.get(target);
   if (file && known?.file === file) return known.answer;
-  const answer = await askVersion(binary, timeoutMs);
-  if (file && answer.state === 'ok') versions.set(binary, { file, answer });
+  const answer = await askVersion(target, timeoutMs);
+  if (file && answer.state === 'ok') versions.set(target, { file, answer });
   return answer;
 }
 
 /** The binary's own --version, run outside the home with its own folder first on PATH, within `timeoutMs`. */
 function askVersion(binary: string, timeoutMs: number): Promise<ProbeResult> {
   return new Promise(resolveResult => {
-    execFile(binary, ['--version'], {
-      cwd: tmpdir(), env: { ...process.env, PATH: pathBeside(binary) }, timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 16 * 1024,
-      windowsHide: true, encoding: 'utf8',
-    }, (error, stdout) => {
-      if (error) {
-        resolveResult({ state: error.killed ? 'timeout' : 'failed', detail: error.killed ? 'Version probe timed out.' : 'Version probe failed.' });
-        return;
-      }
-      const version = stdout.trim().match(VERSION)?.[0];
-      resolveResult(version ? { state: 'ok', version, detail: 'Version only; no session started.' } : { state: 'malformed', detail: 'Version probe returned no recognizable version.' });
-    });
+    try {
+      execFile(binary, ['--version'], {
+        cwd: tmpdir(), env: { ...process.env, PATH: pathBeside(binary) }, timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 16 * 1024,
+        windowsHide: true, encoding: 'utf8',
+      }, (error, stdout) => {
+        if (error) {
+          resolveResult({ state: error.killed ? 'timeout' : 'failed', detail: error.killed ? 'Version probe timed out.' : 'Version probe failed.' });
+          return;
+        }
+        const version = stdout.trim().match(VERSION)?.[0];
+        resolveResult(version ? { state: 'ok', version, detail: 'Version only; no session started.' } : { state: 'malformed', detail: 'Version probe returned no recognizable version.' });
+      });
+    } catch {
+      resolveResult({ state: 'failed', detail: 'Version probe failed.' });
+    }
   });
 }
 
-const runnable = (path: string) => access(path, constants.X_OK).then(() => path, () => undefined);
+/**
+ * The candidate path if it exists as a runnable file. On Windows, names match case-insensitively without POSIX execute
+ * bits (so a `win32` check on a case-sensitive filesystem matches `CLAUDE.EXE` to `claude.exe`).
+ */
+async function runnable(path: string, platform: string = process.platform): Promise<string | undefined> {
+  if (platform !== 'win32') return access(path, constants.X_OK).then(() => path, () => undefined);
+  if (await stat(path).then(info => info.isFile(), () => false)) return path;
+  if (process.platform === 'win32') return undefined;
+  const dir = dirname(path), wanted = basename(path).toLowerCase();
+  const match = (await readdir(dir).catch(() => [] as string[])).find(entry => entry.toLowerCase() === wanted);
+  if (!match) return undefined;
+  const actual = join(dir, match);
+  return stat(actual).then(info => (info.isFile() ? actual : undefined), () => undefined);
+}
 
 /** The version in an Electron app's app.asar, from the package.json at its root; read from the archive's header, not unpacked. */
 async function asarVersion(path: string): Promise<string | undefined> {
@@ -95,7 +114,7 @@ async function packageFolder(aliases: string): Promise<string | undefined> {
  * in one of its build folders (without a binary to look for, the newest version folder); the Copilot app's is the
  * runtime unpacked for the version it names.
  */
-export async function findApp(candidates: AppCandidate[], timeoutMs?: number): Promise<DesktopApp | undefined> {
+export async function findApp(candidates: AppCandidate[], timeoutMs?: number, platform: string = process.platform): Promise<DesktopApp | undefined> {
   for (const candidate of candidates) {
     const app = candidate.alias ? await packageFolder(candidate.app) : candidate.app;
     if (!app) continue;
@@ -111,16 +130,16 @@ export async function findApp(candidates: AppCandidate[], timeoutMs?: number): P
       carriedVersion = versions[0];
       for (const each of carried.binary ? versions : []) {
         const builds = await readdir(join(carried.folders, each)).catch(() => [] as string[]);
-        for (const build of builds.sort()) binary ??= await runnable(join(carried.folders, each, build, carried.binary!));
+        for (const build of builds.sort()) binary ??= await runnable(join(carried.folders, each, build, carried.binary!), platform);
         if (binary) { carriedVersion = each; break; }
       }
     } else if ('file' in carried) {
       carriedVersion = (await readFile(join(app, carried.file), 'utf8').catch(() => '')).match(VERSION)?.[0];
       // The runtime's folder is named by its version alone (app 1.2.0), or after `copilot-sdk-runtime-` (app 1.1).
-      for (const folder of carriedVersion && carried.runtimes && carried.binary ? [carriedVersion, `copilot-sdk-runtime-${carriedVersion}`] : []) binary ??= await runnable(join(carried.runtimes!, folder, carried.binary!));
+      for (const folder of carriedVersion && carried.runtimes && carried.binary ? [carriedVersion, `copilot-sdk-runtime-${carriedVersion}`] : []) binary ??= await runnable(join(carried.runtimes!, folder, carried.binary!), platform);
     } else {
       const copy = join(app, carried.binary);
-      carriedVersion = (await probeVersion(copy, timeoutMs)).version;
+      carriedVersion = (await probeVersion(copy, timeoutMs, platform)).version;
       if (carriedVersion) binary = copy;
     }
     return { name: candidate.name, ...(version ? { version } : {}), carries: candidate.carries, ...(carriedVersion ? { carriedVersion } : {}), ...(binary ? { binary } : {}) };
@@ -129,10 +148,10 @@ export async function findApp(candidates: AppCandidate[], timeoutMs?: number): P
 }
 
 /** The apps found here that run the tools or read their files without being one (platform.ts otherAppCandidates), each with its version. */
-export async function findOtherApps(home: string): Promise<OtherApp[]> {
+export async function findOtherApps(home: string, platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): Promise<OtherApp[]> {
   const found: OtherApp[] = [];
-  for (const { name, says, apps } of otherAppCandidates(home)) {
-    const app = await findApp(apps.map(path => ({ name, app: path, carries: '' })));
+  for (const { name, says, apps } of otherAppCandidates(home, platform, env)) {
+    const app = await findApp(apps, undefined, platform);
     if (app) found.push({ name, says, ...(app.version ? { version: app.version } : {}) });
   }
   return found;
@@ -144,11 +163,12 @@ export async function findOtherApps(home: string): Promise<OtherApp[]> {
  * the copy of the tool its desktop app carries (Claude desktop's Code tab, the GitHub Copilot app's runtime, ChatGPT
  * desktop's Codex), with that app. That copy never counts as a CLI install (CD §3).
  */
-export async function findBinary(tool: HarnessId, home: string, searchPath: string): Promise<{ binary: string; app?: DesktopApp } | undefined> {
-  for (const candidate of executableCandidates(home, searchPath, harnesses[tool].binary)) {
-    if (await runnable(candidate)) return { binary: candidate };
+export async function findBinary(tool: HarnessId, home: string, searchPath: string, platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): Promise<{ binary: string; app?: DesktopApp } | undefined> {
+  for (const candidate of executableCandidates(home, searchPath, harnesses[tool].binary, platform, env)) {
+    const found = await runnable(candidate, platform);
+    if (found) return { binary: found };
   }
-  const app = await findApp(appCandidates(home, harnesses[tool].binary));
+  const app = await findApp(appCandidates(home, harnesses[tool].binary, platform, env), undefined, platform);
   return app?.binary ? { binary: app.binary, app } : undefined;
 }
 
@@ -157,9 +177,10 @@ export async function findBinary(tool: HarnessId, home: string, searchPath: stri
  * followed, is not inside an `.app` bundle (a PATH folder in one, or a link into one, is passed over for the next). For the MCP
  * sign-in check (mcpsigninrun.ts), which reports what the command line says; the plugin runs keep findBinary's own rule.
  */
-export async function findCli(tool: HarnessId, home: string, searchPath: string): Promise<string | undefined> {
-  for (const candidate of executableCandidates(home, searchPath, harnesses[tool].binary)) {
-    if (await runnable(candidate) && !/\.app\//.test(await realpath(candidate))) return candidate;
+export async function findCli(tool: HarnessId, home: string, searchPath: string, platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): Promise<string | undefined> {
+  for (const candidate of executableCandidates(home, searchPath, harnesses[tool].binary, platform, env)) {
+    const found = await runnable(candidate, platform);
+    if (found && !/\.app[\\/]/.test(await realpath(found))) return found;
   }
   return undefined;
 }
@@ -268,6 +289,7 @@ export async function discover(options: {
   apps?: AppCandidate[];
   runProbes?: boolean;
   timeoutMs?: number;
+  platform?: string;
 }): Promise<Snapshot> {
   const definition: HarnessDefinition = harnesses[options.harness ?? 'claude-cli'];
   const home = resolve(options.home);
@@ -297,14 +319,14 @@ export async function discover(options: {
   if (options.runProbes) {
     snapshot.probe = { state: 'missing', detail: `No ${definition.binary} executable in the bounded candidate list.` };
     for (const binary of options.binaries ?? []) {
-      const probe = await probeVersion(binary, options.timeoutMs);
+      const probe = await probeVersion(binary, options.timeoutMs, options.platform);
       if (probe.state === 'missing') continue;
       snapshot.probe = probe;
       snapshot.detection = probe.state === 'restricted' ? snapshot.detection : probe.state === 'ok' ? 'Installed' : 'Version unknown';
       break;
     }
     // The desktop app alone makes the tool present (its files are the same ones the CLI reads), but never counts as the CLI.
-    const app = await findApp(options.apps ?? [], options.timeoutMs);
+    const app = await findApp(options.apps ?? [], options.timeoutMs, options.platform);
     if (app) {
       snapshot.app = app;
       if (snapshot.detection === 'Not found' || snapshot.detection === 'Config found but app not detected') snapshot.detection = 'App only';
