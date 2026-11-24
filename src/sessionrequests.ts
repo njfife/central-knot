@@ -10,10 +10,12 @@
 // shrank, or is another file now, is read from its start, and the read says it started over before its first line. What every
 // tool's reader does with those lines is `readSession`'s: each made a record, the last request of each id kept, and counted as
 // unread a line that is not a JSON record or a record its tool's reader says should have been a request and is not one; every
-// other record is passed over uncounted. Claude Code's files are found by `claudeFiles`, each a session, and their records made
-// into requests by `readClaudeSession`; Codex's rollouts by `codexRollouts`, and theirs by `readCodexRollout`, which also gives
-// back what the next read of the same file needs from this one (`CodexState`, kept by the caller beside the `Position`). Both
-// read the same files as usage.ts, the Library's usage reading, which keeps its own refresh and its own rules, and take from it
+// other record is passed over uncounted. Claude Code's files are found by `claudeFiles` (every folder at every depth listed on
+// its own, returning a `FileListing` with `unread` and `unreadSessions` when any folder could not be listed), each a session
+// via `claudeFile`, and their records made into requests by `readClaudeSession`; Codex's rollouts by `codexRollouts` (every
+// folder at every depth listed on its own, returning a `FileListing`), and theirs by `readCodexRollout`, which also gives back
+// what the next read of the same file needs from this one (`CodexState`, kept by the caller beside the `Position`). Both read
+// the same files as usage.ts, the Library's usage reading, which keeps its own refresh and its own rules, and take from it
 // what both need (usage.ts's header names them).
 //
 // Not here: the other tools (each another reader beside these two), prices, a record kept, a page.
@@ -147,20 +149,45 @@ async function readSession(file: string, from: Position | undefined, reader: Rea
   return { requests: [...requests.values()], startedOver, ...stated, unread, position };
 }
 
+/**
+ * What listing a tool's session files found: files from readable folders, whether any folder could not be listed (`unread`),
+ * and any session ids whose own subfolder (such as Claude Code's `<project>/<id>/subagents`) could not be listed.
+ */
+export interface FileListing<T> { files: T[]; unread: boolean; unreadSessions?: string[] }
+
 /** A Claude Code session file: where it is, the session it is (its file's name), and the session it is a child of. */
 export interface ClaudeFile { file: string; session: string; parent?: string }
 
+/** Maps one relative `.jsonl` path under Claude Code's projects folder to its `ClaudeFile`; undefined for other files. */
+function claudeFile(root: string, name: string): ClaudeFile | undefined {
+  if (!name.endsWith('.jsonl')) return undefined;
+  const parts = name.slice(0, -'.jsonl'.length).split(sep);
+  const file = join(root, name);
+  if (parts.length === 2) return { file, session: parts[1] };
+  return parts.length === 4 && parts[2] === 'subagents' ? { file, session: parts[3], parent: parts[1] } : undefined;
+}
+
 /**
  * Claude Code's session files in a home: `<project>/<id>.jsonl`, session `<id>`, and a child's `<project>/<id>/subagents/
- * agent-<x>.jsonl`, its own session `agent-<x>` with parent `<id>`. Other files are no session's; no projects folder: undefined.
+ * agent-<x>.jsonl`, its own session `agent-<x>` with parent `<id>`. Other files are no session's. Every folder at every depth
+ * under `claudeProjects` is listed on its own so an unreadable folder never hides readable siblings; `unread` flags any folder
+ * that could not be listed, and `unreadSessions` names sessions whose own folder or `subagents` folder could not be listed.
  */
-export async function claudeFiles(at: UsageWhere): Promise<ClaudeFile[] | undefined> {
+export async function claudeFiles(at: UsageWhere): Promise<FileListing<ClaudeFile>> {
   const root = claudeProjects(at);
-  return (await sessionFiles([root]))?.flatMap(({ name }) => {
-    const parts = name.slice(0, -'.jsonl'.length).split(sep), file = join(root, name);
-    if (parts.length === 2) return [{ file, session: parts[1] }];
-    return parts.length === 4 && parts[2] === 'subagents' ? [{ file, session: parts[3], parent: parts[1] }] : [];
+  let unread = false;
+  const unreadSessions = new Set<string>();
+  const found = await sessionFiles([root], (_root, rel) => {
+    unread = true;
+    const parts = rel.split(sep);
+    if (parts.length === 2 || (parts.length >= 3 && parts[2] === 'subagents')) unreadSessions.add(parts[1]);
   });
+  const files: ClaudeFile[] = [];
+  for (const { name } of found ?? []) {
+    const file = claudeFile(root, name);
+    if (file) files.push(file);
+  }
+  return { files, unread, ...(unreadSessions.size > 0 ? { unreadSessions: [...unreadSessions] } : {}) };
 }
 
 /** A count of tokens as saved: a whole number, not below zero. */
@@ -214,12 +241,15 @@ export function readClaudeSession(of: ClaudeFile, from?: Position): Promise<Sess
 }
 
 /**
- * Codex's rollouts in a home, under `sessions` and `archived_sessions` (usage.ts codexFolders), each a session; no folder
- * there: undefined. Which session a rollout is, and whose child, its own `session_meta` record says (readCodexRollout), not its
- * place: a rollout moved to the archive is the same session.
+ * Codex's rollouts in a home, under `sessions` and `archived_sessions` (usage.ts codexFolders), every folder at every depth
+ * listed on its own so an unreadable folder never hides readable siblings; missing roots are ignored and `unread` flags any
+ * folder that could not be listed. Which session a rollout is, and whose child, its own `session_meta` record says
+ * (readCodexRollout), not its place: a rollout moved to the archive is the same session.
  */
-export async function codexRollouts(at: UsageWhere): Promise<string[] | undefined> {
-  return (await sessionFiles(codexFolders(at)))?.map(({ root, name }) => join(root, name));
+export async function codexRollouts(at: UsageWhere): Promise<FileListing<string>> {
+  let unread = false;
+  const found = await sessionFiles(codexFolders(at), () => { unread = true; });
+  return { files: (found ?? []).map(({ root, name }) => join(root, name)), unread };
 }
 
 /**

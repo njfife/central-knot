@@ -1,10 +1,10 @@
 // Offline model pricing from the checked-in rates table (assets/model-rates.json, built and validated by
 // scripts/build-rates.ts from Pydantic's genai-prices MIT list, prices/new_data/v2/data_slim.json). Owns: the bundled
 // table (bundledRates), first-party tool providers (TOOL_PROVIDERS), the one rule for a tool-reported cost
-// (reportedCost), pricing one request as the list's own Python code does (priceRequest), AI credits (priceCredits,
-// USD_PER_AI_CREDIT), and coverage totals (sumPrices, coverageText).
-// Not here: reading session files (sessionrequests.ts), table validation (scripts/build-rates.ts), network fetches,
-// non-text units, UI pages, or user price overrides.
+// (reportedCost), pricing one request as the list's own Python code does (priceRequest), and AI credits (priceCredits,
+// USD_PER_AI_CREDIT). Summing priced requests lives in sessionrow.ts.
+// Not here: reading session files (sessionrequests.ts), summing rows/totals (sessionrow.ts), table validation
+// (scripts/build-rates.ts), network fetches, non-text units, UI pages, or user price overrides.
 import rawRates from '../assets/model-rates.json' with { type: 'json' };
 import type { Request } from './sessionrequests.ts';
 import type { HarnessId } from './types.ts';
@@ -43,9 +43,6 @@ export type PriceResult =
   | { priced: true; dollars: number; basis: 'reported' }
   | { priced: true; dollars: number; credits: number; basis: 'credits' }
   | { priced: false; reason: UnpricedReason; detail: string };
-
-/** Sum of priced requests; `dollars` is undefined when `priced` is 0 so unpriced requests never count as $0. */
-export interface PriceSum { dollars: number | undefined; priced: number; total: number; atLeast: number; credits?: number }
 
 /** GitHub documents 1 AI credit = $0.01 USD (docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing). */
 export const USD_PER_AI_CREDIT = 0.01;
@@ -253,22 +250,3 @@ export function priceCredits(credits: number): PriceResult {
   }
   return { priced: true, dollars: credits / Math.round(1 / USD_PER_AI_CREDIT), credits, basis: 'credits' };
 }
-
-/** Sums priced requests and counts coverage; an unpriced request never counts as $0. */
-export function sumPrices(results: readonly PriceResult[]): PriceSum {
-  let dollars = 0;
-  let priced = 0;
-  let atLeast = 0;
-  let credits: number | undefined;
-  for (const result of results) {
-    if (!result.priced) continue;
-    dollars += result.dollars;
-    priced++;
-    if (result.basis === 'list' && result.atLeast) atLeast++;
-    if (result.basis === 'credits') credits = (credits ?? 0) + result.credits;
-  }
-  return { dollars: priced > 0 ? dollars : undefined, priced, total: results.length, atLeast, ...(credits !== undefined ? { credits } : {}) };
-}
-
-/** Formats coverage as "N of M priced". */
-export const coverageText = (sum: Pick<PriceSum, 'priced' | 'total'>) => `${sum.priced} of ${sum.total} priced`;

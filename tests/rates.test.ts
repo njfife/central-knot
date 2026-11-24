@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  bundledRates, coverageText, priceCredits, priceRequest, reportedCost, sumPrices, TOOL_PROVIDERS, USD_PER_AI_CREDIT,
-  type ModelRate, type PriceResult, type PriceSet, type ProviderRates, type RatesTable, type UnitPrice,
+  bundledRates, priceCredits, priceRequest, reportedCost, TOOL_PROVIDERS, USD_PER_AI_CREDIT,
+  type ModelRate, type PriceSet, type ProviderRates, type RatesTable, type UnitPrice,
 } from '../src/rates.ts';
 import type { Request } from '../src/sessionrequests.ts';
 import {
@@ -294,7 +294,7 @@ test('per-unit tiers switch strictly above start, one-hour writes use cacheWrite
   assert.ok(Math.abs(embedIn.dollars - (100_000 * flat(baseSetOf(rowOf('openai', 'text-embedding-3-large')).input)) / 1_000_000) < 1e-12);
 });
 
-test('reportedCost, AI credits, coverage totals, invalid tokens and Request pass-through', () => {
+test('reportedCost, AI credits, invalid tokens and Request pass-through', () => {
   assert.equal(reportedCost(0.42), 0.42);
   for (const none of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, undefined]) {
     assert.equal(reportedCost(none), undefined);
@@ -311,21 +311,6 @@ test('reportedCost, AI credits, coverage totals, invalid tokens and Request pass
   assert.deepEqual(priceCredits(34), { priced: true, dollars: 0.34, credits: 34, basis: 'credits' });
   assert.deepEqual(priceCredits(1.25), { priced: true, dollars: 0.0125, credits: 1.25, basis: 'credits' });
   assert.equal(priceCredits(-1).priced, false);
-
-  const oneHour = { input: 10_000, cacheRead: 0, cacheWrite: 1_000, cacheWrite1h: 400, output: 1_000 };
-  const results: PriceResult[] = [
-    ...Array.from({ length: 6 }, () => priceRequest({ tool: 'claude-cli', at: AT, model: 'claude-opus-5-5', tokens }, checkedIn)),
-    ...Array.from({ length: 2 }, () => priceRequest({ tool: 'codex-cli', at: AT, model: 'gpt-6.2-astra', tokens: oneHour }, checkedIn)),
-    priceRequest({ tool: 'codex-cli', at: AT, model: 'codex-auto-review', tokens }, checkedIn),
-    priceRequest({ tool: 'pi-cli', at: AT, model: 'claude-opus-5-5', tokens }, checkedIn),
-  ];
-  const sum = sumPrices(results);
-  assert.equal(sum.priced, 8);
-  assert.equal(sum.total, 10);
-  assert.equal(sum.atLeast, 2);
-  assert.equal(coverageText(sum), '8 of 10 priced');
-  assert.deepEqual(sumPrices([results[8]!, results[9]!]), { dollars: undefined, priced: 0, total: 2, atLeast: 0 });
-  assert.deepEqual(sumPrices([priceCredits(34), priceCredits(16), results[8]!]), { dollars: 0.5, priced: 2, total: 3, atLeast: 0, credits: 50 });
 
   for (const bad of [
     { input: -1, cacheRead: 0, cacheWrite: 0, output: 0 },
