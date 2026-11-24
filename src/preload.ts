@@ -40,6 +40,7 @@ const api: DesktopApi = {
   syncNow: home => ipcRenderer.invoke('sync:now', home),
   setSyncEverything: (on, home, answering) => ipcRenderer.invoke('sync:everything', on, home, answering),
   manageTool: (tool, on, resume, home) => ipcRenderer.invoke('tools:manage', tool, on, resume, home),
+  dismissArrival: (tool, home) => ipcRenderer.invoke('tools:dismiss-arrival', tool, home),
   replaceOtherBuild: (path, build) => ipcRenderer.invoke('builds:replace', path, build),
   quitOtherBuild: build => ipcRenderer.invoke('builds:quit', build),
   quit: () => ipcRenderer.invoke('app:quit'),
