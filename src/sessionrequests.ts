@@ -3,7 +3,7 @@
 // however often the history repeats the record, its time, the model's id exactly as saved, and its tokens by kind. It never
 // holds message text, and never money: a price is worked out from it elsewhere. Nothing is stored here: a caller keeps each
 // file's `Position` for its next read, and the requests it is given by tool, session and request id. A later read can bring
-// an id again (Claude Code records a response in part before recording it whole), and then the later replaces the earlier.
+// an id the caller already holds (Claude Code records a response in part before recording it whole): the later one replaces it.
 //
 // A file is read by `scanLines`, from where its last read ended: complete lines only, each parsed as it is read; a file that
 // shrank, or is another file now, is read from its start. Claude Code's files are found by `claudeFiles`, each a session,
@@ -23,7 +23,7 @@ export interface Tokens { input: number; cacheRead: number; cacheWrite: number; 
 /** One response of a model, as a tool's session history recorded it. */
 export interface Request {
   tool: HarnessId;
-  /** The tool's own id for the session (Claude Code's: its file's name). */
+  /** The tool's own id for the session (Claude Code's: its file's name without `.jsonl`). */
   session: string;
   /** The session this one is a child of, where it is one. */
   parent?: string;
@@ -49,7 +49,7 @@ const CHUNK = 64 * 1024;
 /**
  * Hands each complete line appended to `file` since `from` to `line`, as it is read, and says where this read ended. A last line
  * with no newline yet is left for the next read. A file shorter than `from`, or another file now (its identity changed: replaced),
- * is read from its start. Only the line being handed over and the bytes after it are held.
+ * is read from its start. Held meanwhile: one chunk of the file (`CHUNK`) and the line it ends in.
  */
 export async function scanLines(file: string, from: Position | undefined, line: (text: string) => void): Promise<Position> {
   const handle = await open(file, 'r');
@@ -77,7 +77,7 @@ export interface SessionRead {
   project?: string;
   /** The tool's own cost in dollars for the session with its children: the last record of it in these lines, where above zero. */
   treeReported?: number;
-  /** Lines passed over that could have held a request: not a JSON record, or a record with usage that can't be read as a request. */
+  /** Lines passed over that could have held a request: which, each tool's reader says (Claude Code's: readClaudeSession). */
   unread: number;
   /** Where the next read starts. */
   position: Position;
@@ -123,8 +123,9 @@ function claudeRequest(record: JsonRecord, of: ClaudeFile): Request | undefined 
 /**
  * One read of a Claude Code session file from `from` (its start when undefined). A response is an `assistant` record, recorded
  * once per content part and sometimes in part first: the last record of each message id stands. The closing `cost-state`
- * record's `totalCostUSD` covers the session with its children; an older version writes none. Every other record holds no
- * request, and is passed over.
+ * record's `totalCostUSD` covers the session with its children; an older version writes none. Counted as unread: a line that
+ * is not a JSON record, and an `assistant` record, or any other with `message.usage`, that is not a request (claudeRequest).
+ * Every other record holds no request, and is passed over uncounted.
  */
 export async function readClaudeSession(of: ClaudeFile, from?: Position): Promise<SessionRead> {
   const requests = new Map<string, Request>();
@@ -140,5 +141,5 @@ export async function readClaudeSession(of: ClaudeFile, from?: Position): Promis
     else unread++;
   });
   const treeReported = typeof closingCost === 'number' && closingCost > 0 ? closingCost : undefined;
-  return { requests: [...requests.values()], ...(project ? { project } : {}), ...(treeReported ? { treeReported } : {}), unread, position };
+  return { requests: [...requests.values()], ...(project ? { project } : {}), ...(treeReported !== undefined ? { treeReported } : {}), unread, position };
 }

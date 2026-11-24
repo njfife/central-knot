@@ -47,9 +47,12 @@ test('A Claude Code session of three responses is three requests, each with its 
   ]);
   const read = await readClaudeSession({ file, session: 'one' });
   assert.deepEqual(read.requests, [
-    { tool: 'claude-cli', session: 'one', request: 'msg_1', at: Date.parse('2026-11-24T15:29:59.466Z'), model: 'claude-opus-5-5', tokens: { input: 301, cacheRead: 81, cacheWrite: 13, output: 41 } },
-    { tool: 'claude-cli', session: 'one', request: 'msg_2', at: Date.parse('2026-11-24T15:30:05.000Z'), model: 'claude-opus-5-5', tokens: { input: 3, cacheRead: 40_000, cacheWrite: 2_000, output: 900 } },
-    { tool: 'claude-cli', session: 'one', request: 'msg_3', at: Date.parse('2026-11-24T15:30:09.000Z'), model: 'claude-haiku-4-5-20251001', tokens: { input: 0, cacheRead: 42_000, cacheWrite: 0, output: 12 } },
+    { tool: 'claude-cli', session: 'one', request: 'msg_1', at: Date.parse('2026-11-24T15:29:59.466Z'), model: 'claude-opus-5-5',
+      tokens: { input: 301, cacheRead: 81, cacheWrite: 13, output: 41 } },
+    { tool: 'claude-cli', session: 'one', request: 'msg_2', at: Date.parse('2026-11-24T15:30:05.000Z'), model: 'claude-opus-5-5',
+      tokens: { input: 3, cacheRead: 40_000, cacheWrite: 2_000, output: 900 } },
+    { tool: 'claude-cli', session: 'one', request: 'msg_3', at: Date.parse('2026-11-24T15:30:09.000Z'), model: 'claude-haiku-4-5-20251001',
+      tokens: { input: 0, cacheRead: 42_000, cacheWrite: 0, output: 12 } },
   ], 'thinking is inside output once, and cache writes are their total, not their parts again');
   assert.equal(read.project, 'app', 'the project is the recorded working folder\'s name');
   assert.equal(read.unread, 0);
@@ -57,6 +60,17 @@ test('A Claude Code session of three responses is three requests, each with its 
 
 /** Each request's id and output tokens, in the order read. */
 const outputs = (requests: { request: string; tokens: { output: number } }[]) => requests.map(each => [each.request, each.tokens.output]);
+
+test('A record longer than one chunk of the file is read whole, and an empty file is nothing', async () => {
+  const home = await newHome(), file = join(home, '.claude/projects/-work-app/one.jsonl');
+  await write(file, '');
+  assert.deepEqual((await readClaudeSession({ file, session: 'one' })).requests, []);
+  const long = response('msg_1', '2026-11-24T15:30:00.000Z', usage(5, 10, 1_000, 10));
+  long.message.content = [{ type: 'text', text: 'Résumé ✓ '.repeat(20_000) }];
+  await put(file, [{ ...long, cwd: '/work/café' }, response('msg_2', '2026-11-24T15:30:05.000Z', usage(1, 0, 2_000, 20))]);
+  const read = await readClaudeSession({ file, session: 'one' });
+  assert.deepEqual([outputs(read.requests), read.project, read.unread], [[['msg_1', 10], ['msg_2', 20]], 'café', 0]);
+});
 
 test('A response recorded twice, first in part and then whole, is one request with the whole one\'s tokens', async () => {
   const home = await newHome(), file = join(home, '.claude/projects/-work-app/one.jsonl');
@@ -73,7 +87,8 @@ test('A response recorded twice, first in part and then whole, is one request wi
 test('A file read in two goes, cut in the middle of a line: the cut line is read whole in the second go, and once', async () => {
   const home = await newHome(), file = join(home, '.claude/projects/-work-app/one.jsonl');
   const cut = lines([response('msg_3', '2026-11-24T15:30:09.000Z', usage(2, 0, 3_000, 30))]);
-  await write(file, lines([response('msg_1', '2026-11-24T15:30:00.000Z', usage(5, 10, 1_000, 10)), response('msg_2', '2026-11-24T15:30:05.000Z', usage(1, 0, 2_000, 20))]) + cut.slice(0, 40));
+  const whole = lines([response('msg_1', '2026-11-24T15:30:00.000Z', usage(5, 10, 1_000, 10)), response('msg_2', '2026-11-24T15:30:05.000Z', usage(1, 0, 2_000, 20))]);
+  await write(file, whole + cut.slice(0, 40));
   const first = await readClaudeSession({ file, session: 'one' });
   assert.deepEqual(outputs(first.requests), [['msg_1', 10], ['msg_2', 20]]);
   assert.equal(first.unread, 0, 'the cut line is left for the next read, not passed over');
@@ -128,7 +143,10 @@ test('A parent and its child\'s file are two sessions, the child naming its pare
 test('The closing cost record is the tree\'s reported cost; with none, or none above zero, there is none', async () => {
   const home = await newHome(), project = join(home, '.claude/projects/-work-app');
   const cost = (usd: number) => ({ type: 'cost-state', sessionId: 'one', totalCostUSD: usd, modelUsage: {}, hasUnknownModelCost: false });
-  const reported = async (name: string, records: object[]) => { await put(join(project, name), records); return (await readClaudeSession({ file: join(project, name), session: name })).treeReported; };
+  const reported = async (name: string, records: object[]) => {
+    await put(join(project, name), records);
+    return (await readClaudeSession({ file: join(project, name), session: name })).treeReported;
+  };
   const said = response('msg_1', '2026-11-24T15:30:00.000Z', usage(5, 10, 1_000, 10));
   assert.equal(await reported('closed.jsonl', [said, cost(0.0098), said, cost(0.0133)]), 0.0133, 'the last one: each is the total so far');
   assert.equal(await reported('older.jsonl', [said]), undefined, 'an older version writes none');
@@ -152,5 +170,5 @@ test('A line that is not JSON, and a record with usage of a kind not known, are 
   ].join(''));
   const read = await readClaudeSession({ file, session: 'one' });
   assert.deepEqual(outputs(read.requests), [['msg_1', 10], ['msg_5', 50]]);
-  assert.equal(read.unread, 4, 'the cut record, null, the unknown kind with usage and the response with no output count; a record that holds no usage does not');
+  assert.equal(read.unread, 4, 'the cut record, null, the unknown kind with usage and the response with no output count; a record with no usage does not');
 });
