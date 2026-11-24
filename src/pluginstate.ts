@@ -641,14 +641,17 @@ async function runLine(click: LineClick, home: string): Promise<void> {
   setHome(await api().refresh());
   showView(await api().plugins().catch(() => null));
   const mine = result.done.filter(step => step.tool === aim.tool), problem = result.stopped ?? mine.find(step => !succeeded(step.report))?.report.message;
-  const failed = !!problem || !mine.some(step => succeeded(step.report)), where = toolNames[aim.tool], words = LINE_WORDS[aim.act];
+  const failed = !!problem || !mine.length, where = toolNames[aim.tool], words = LINE_WORDS[aim.act];
   const removed = result.done.filter(step => step.action === 'remove' && step.report.changed).map(step => step.tool);
   const limits = view && entry ? undoLimits(view, entry, aim.plugin, removed, before) : [];
-  // After a failure, what the plugin's page says of that tool now (its entry is saved before anything runs).
+  // Where it didn't go, what the plugin's page says of that tool now: its entry is saved before anything runs, and with nothing
+  // run there and nothing stopped, the tool was already as the click asked (it changed since the line was drawn).
   const now = failed ? lineBox(aim.plugin, aim.marketName, aim.source, aim.tool).words : undefined;
   const reload = reloadAdvice(settleReloads(pluginReloads(mine)), toolWays()).text;
-  const text = failed ? [`${words.not} ${where}: ${(problem ?? 'nothing ran').replace(/\.$/, '')}.`, now].filter(Boolean).join(' ')
-    : [`${words.done} ${aim.act === 'place' ? `${placedNow(aim) || 'the items'} of ${aim.plugin} in` : `${aim.plugin} ${aim.act === 'remove' ? 'from' : 'in'}`} ${where}${aim.act === 'install' ? installedNow(aim) : ''}.`, reload].filter(Boolean).join(' ');
+  // The tool's own words, without the "Not installed." its report leads with (plugins.ts install).
+  const said = problem?.replace(/^Not (installed|put in|removed)\.\s*/, '').replace(/\.$/, '');
+  const text = !failed ? [`${words.done} ${aim.act === 'place' ? `${placedNow(aim) || 'the items'} of ${aim.plugin} in` : `${aim.plugin} ${aim.act === 'remove' ? 'from' : 'in'}`} ${where}${aim.act === 'install' ? installedNow(aim) : ''}.`, reload].filter(Boolean).join(' ')
+    : [said ? `${words.not} ${where}: ${said}.` : `Nothing was run in ${where}.`, now].filter(Boolean).join(' ');
   const back = result.back ?? [];
   const outcome = withReloads({ page: app.page, text, band: true, warn: failed, reasons: limits,
     ...(back.length ? { act: { label: 'Undo', id: 'outcome-undo', title: 'Put back what this did', run: () => void undoLine(aim, result.before ?? null, back) } } : {}) }, pluginReloads(mine));
