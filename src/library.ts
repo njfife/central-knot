@@ -503,8 +503,9 @@ export const theVersion = (from: Origin) => `the version ${from.how === 'was-in'
 /**
  * H: what a harness holds of an item now. `at`: when its copy was last changed (ms); absent for a copy with no time of its
  * own (an MCP entry, whose time is its whole file's), which "latest" can't order (latestEdit). Nothing of Central Knot's
- * happens in a harness whose copy is `unseen` (it can't be seen for sure) or `held` (it can't be given the item; with
- * `anotherWay`, it has the item another way: the header says which is which), and `why` says it on the page. THE SHARED FOLDER:
+ * happens in a harness whose copy is `unseen` (it can't be seen for sure, or a hold such as sourcestore.ts pluginsRecordHold keeps
+ * it as it is) or `held` (it can't be given the item; with `anotherWay`, it has the item another way: the header says which is
+ * which), and `why` says it on the page. THE SHARED FOLDER:
  * `throughShared`, the other way is that folder, at its folder there; `sharedWay`, it had it so and that folder (`copy`) or its
  * link to it (`link`) was deleted by hand.
  */

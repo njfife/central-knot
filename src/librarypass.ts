@@ -368,7 +368,7 @@ export async function guardFolders(look: AnyLook, items: LibraryItem[], shelf?: 
     const path = look.kind.folder(look.context, tool), was = look.library.folders[tool];
     const here = look.kind.folderSeen ? await look.kind.folderSeen(look.context, tool) : await folderAt(path);
     // What was applied there, and what it had through the shared folder (library.ts THE SHARED FOLDER), is no longer known.
-    const forget = (which: LibraryItem[]) => { for (const item of which) { if (pluginsRecordHold(item, look.recorded)) continue; delete item.applied[tool]; delete item.throughShared?.[tool]; } };
+    const forget = (which: LibraryItem[]) => { for (const item of which) { delete item.applied[tool]; delete item.throughShared?.[tool]; } };
     const where = `${toolName(tool)}’s ${look.kind.words.folder(tool)}`;
     const backWithoutFolder = !was && Object.values(look.library.items).some(item => item.applied[tool] !== undefined);
     if (!here) {
@@ -429,7 +429,6 @@ export const sharedFileAt = (path: string) => stat(path).then(() => sharedFileSe
 async function cameBack(look: AnyLook, tool: HarnessId, shelf?: Shelf<unknown>) {
   const givingWay: { item: LibraryItem; version: Version; content: unknown }[] = [];
   for (const item of Object.values(look.library.items)) {
-    if (pluginsRecordHold(item, look.recorded)) continue;
     delete item.throughShared?.[tool];
     const here = look.disk.byKey.get(item.key)?.[tool], unseen = unseenIn(look.disk, tool, item.key);
     const copy: HarnessCopy = unseen ? { is: 'unseen', why: unseen } : here ? { is: 'present', hash: here.hash, at: here.at } : { is: 'absent' };

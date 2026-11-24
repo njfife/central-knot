@@ -5,12 +5,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { agentKind, agentsView, applyAgents } from '../src/agents.ts';
 import { discover } from '../src/discovery.ts';
 import { connectRepo, pullRepo, pushRepo } from '../src/gitrepo.ts';
+import { readHistory } from '../src/history.ts';
 import { homePass } from '../src/homepass.ts';
 import { joinCounts } from '../src/librarypass.ts';
 import { hashesOf, libraryWords, sentences, statusLine } from '../src/libraryrow.ts';
@@ -20,9 +21,10 @@ import * as engine from '../src/plugins.ts';
 import { NO_PLUGINS, saveProfile, switchProfile } from '../src/profiles.ts';
 import { applyServers, serverKind, serversView } from '../src/servers.ts';
 import type { ShareContext } from '../src/share.ts';
-import { applySkills, skillKind, skillsView } from '../src/skills.ts';
-import { addSource, checkSource, previewSource, sourcesView } from '../src/sources.ts';
+import { applySkills, skillKind, skillsView, takeOver } from '../src/skills.ts';
+import { addSource, checkSource, previewSource, removeSource, sourcesView } from '../src/sources.ts';
 import { pluginsRecordHold, type Recorded } from '../src/sourcestore.ts';
+import { chooseTools } from '../src/toolchoice.ts';
 import { newItem } from '../src/library.ts';
 import type { HarnessId, PluginTurn } from '../src/types.ts';
 import { repository, standInHosts } from './sourcerepo.ts';
@@ -36,7 +38,7 @@ const exists = (path: string) => stat(path).then(() => true, () => false);
 const skill = (name: string, body = name) => `---\nname: ${name}\ndescription: ${name}\n---\n${body}\n`;
 const agentMd = (name: string, body = 'Help.') => `---\nname: ${name}\ndescription: ${name}\n---\n${body}\n`;
 
-const DAMAGED_REASON = 'The plugins record is damaged. Nothing was written or deleted. Put the record back, then try again. Its plugins’ items are held as they are until then. Sync takes them up again by itself once the record is back.';
+const DAMAGED_REASON = 'The plugins record is damaged. Nothing was written or deleted. Put the record back, then try again. Its plugins’ items are held as they are until then. The next sync takes them up again once the record is back.';
 
 /** Every file under `folder`, by relative path, with its bytes: for byte-for-byte "nothing changed" and twin-home checks. */
 async function snapshotFiles(folder: string, exclude: string[] = []): Promise<Record<string, string>> {
@@ -45,7 +47,8 @@ async function snapshotFiles(folder: string, exclude: string[] = []): Promise<Re
     for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
       const full = join(dir, entry.name), rel = relative(folder, full);
       if (exclude.some(prefix => rel === prefix || rel.startsWith(`${prefix}/`))) continue;
-      if (entry.isDirectory()) await walk(full);
+      if (entry.isSymbolicLink()) found[rel] = `symlink:${await readlink(full)}`;
+      else if (entry.isDirectory()) await walk(full);
       else found[rel] = await readFile(full, 'utf8');
     }
   };
@@ -349,6 +352,19 @@ test('Worked example 6a: a profile switch while plugins.json is damaged switches
     assert.equal(await readFile(join(box.home, '.pi/agent/skills/triage/SKILL.md'), 'utf8'), piTriageBefore);
     assert.equal(await exists(join(box.home, '.claude/skills/triage/SKILL.md')), false);
     assert.equal((await box.library()).skill.triage?.on, true);
+    // Fix item 4: History records only what actually switched, not the held plugin items, and switchProfile returns that settled payload.
+    const entry = (await readHistory(box.share)).find(event => event.id === switched.event);
+    assert.deepEqual(entry?.profile?.on, [{ id: 'skill:draft', name: 'draft' }]);
+    assert.deepEqual(entry?.profile?.off, [{ id: 'skill:own-note', name: 'own-note' }]);
+    assert.deepEqual(switched.profile, entry?.profile);
+    // And when a profile switch leaves every planned item held, History records empty on/off lists.
+    const onlyHeld = await saveProfile(box.share, { name: 'OnlyHeld', items: ['skill:draft'] });
+    assert.equal(onlyHeld.problem, undefined);
+    const heldSwitch = await switchProfile(box.share, ALL_FIVE, onlyHeld.id!, NO_PLUGINS);
+    const heldEntry = (await readHistory(box.share)).find(event => event.id === heldSwitch.event);
+    assert.deepEqual(heldEntry?.profile?.on, []);
+    assert.deepEqual(heldEntry?.profile?.off, []);
+    assert.deepEqual(heldSwitch.profile, heldEntry?.profile);
   } finally { await box.cleanup(); }
 });
 
@@ -409,42 +425,177 @@ test('Worked example 6b: Pull while plugins.json is damaged pulls personal chang
   } finally { await box.cleanup(); }
 });
 
-test('Rule edges: pluginsRecordHold checks active source id, verified Git sources and stored plugin provenance; guardFolders and cameBack keep applied baselines while plugins.json is damaged', async () => {
+test('Rule edges: pluginsRecordHold distinguishes removed Git sources from plugins and unreadable sources.json; restoring a deleted plugin item is held', async () => {
   const damaged: Recorded = { ids: new Set(['git-1']), links: new Map([['git-1', 'https://example.test/org/repo']]), plugins: [], sources: new Set(['git-1']), pluginsProblem: DAMAGED_REASON };
+  const bothDamaged: Recorded = { ...damaged, ids: new Set(), links: new Map(), sources: new Set(), sourcesProblem: 'The sources record is damaged.' };
   const withOrigin = (source: string | undefined, link?: string) => ({
     ...newItem('x', 'x'), ...(source ? { source } : {}),
     versions: link ? [{ hash: 'h1', at: '2026-11-23T00:00:00.000Z', from: { how: 'source' as const, link } }] : [],
   });
   assert.equal(pluginsRecordHold(withOrigin(undefined, 'plugin:kit@team'), damaged), undefined, 'no active source id: personal item (even with old plugin provenance) is not held');
   assert.equal(pluginsRecordHold(withOrigin('git-1', 'https://example.test/org/repo'), damaged), undefined, 'verified Git source with Git provenance is not held');
+  assert.equal(pluginsRecordHold(withOrigin('removed-git', 'https://example.test/org/removed'), damaged), undefined, 'removed Git source with readable sources.json and non-plugin provenance is his own, not held');
+  assert.equal(pluginsRecordHold(withOrigin('removed-git', 'https://example.test/org/removed'), bothDamaged), DAMAGED_REASON, 'unreadable sources.json holds unresolved source id');
   assert.equal(pluginsRecordHold(withOrigin('plug-1', 'plugin:kit@team'), damaged), DAMAGED_REASON, 'plugin item is held');
-  assert.equal(pluginsRecordHold(withOrigin('unknown-1'), damaged), DAMAGED_REASON, 'unresolved active source id is held');
+  assert.equal(pluginsRecordHold(withOrigin('unknown-1'), damaged), DAMAGED_REASON, 'unresolved active source id with no provenance is held');
   assert.equal(pluginsRecordHold(withOrigin('git-1', 'plugin:kit@team'), damaged), DAMAGED_REASON, 'stored plugin provenance holds even if source id collided with sources.json');
 
-  // Folder reset (guardFolders forget) and tool managed again (cameBack) preserve applied baselines of held plugin items.
+  // Restore of a deleted plugin item is also refused while plugins.json is damaged.
   const box = await partialHome();
   try {
-    const before = (await box.library()).skill.triage!;
-    assert.ok(before.applied['pi-cli'], 'baseline applied in Pi');
-    await writeFile(box.pluginsPath, '{ broken');
-    // Remove Pi's skills folder (guardFolders away -> forget), run pass: applied['pi-cli'] stays intact.
-    await rm(join(box.home, '.pi/agent/skills'), { recursive: true, force: true });
-    await homePass(box.share, ALL_FIVE, true);
-    assert.equal((await box.library()).skill.triage?.applied['pi-cli'], before.applied['pi-cli'], 'guardFolders forget skips held plugin item');
-    // Simulate tool managed again (folder back, no folder identity on record -> cameBack): applied['pi-cli'] still intact.
-    await mkdir(join(box.home, '.pi/agent/skills'), { recursive: true });
-    const skillsPath = join(box.home, '.central-knot/skills.json');
-    const raw = JSON.parse(await readFile(skillsPath, 'utf8')) as { folders: Record<string, unknown> };
-    delete raw.folders['pi-cli'];
-    await writeFile(skillsPath, `${JSON.stringify(raw, null, 2)}\n`);
-    await homePass(box.share, ALL_FIVE, true);
-    assert.equal((await box.library()).skill.triage?.applied['pi-cli'], before.applied['pi-cli'], 'cameBack skips held plugin item');
-    // Restore of a deleted plugin item is also refused while plugins.json is damaged.
-    await writeFile(box.pluginsPath, box.goodPlugins);
     assert.equal((await applySkills(box.share, ALL_FIVE, [{ key: 'triage', on: false, except: [], deleted: true }])).stopped, undefined);
     await writeFile(box.pluginsPath, '{ broken');
     const restored = await applySkills(box.share, ALL_FIVE, [{ key: 'triage', on: true, except: [], deleted: false }]);
     assert.deepEqual(restored.results.map(r => [r.item, r.outcome, r.unchanged, r.message]), [['triage', 'held', true, DAMAGED_REASON]]);
     assert.ok((await box.library()).skill.triage?.deleted, 'deleted plugin item stays deleted while plugins.json is damaged');
+  } finally { await box.cleanup(); }
+});
+
+test('Fix item 1: Push while plugins.json is damaged leaves pre-existing repo paths of held plugin skill, agent and server untouched while pushing personal edits', async () => {
+  const box = await partialHome();
+  try {
+    const remote = join(box.base, 'config.git'), author = join(box.base, 'author');
+    execFileSync('git', ['init', '--quiet', '--bare', '--initial-branch=main', remote]);
+    execFileSync('git', ['clone', '--quiet', remote, author]);
+    await put(join(author, 'skills/triage/SKILL.md'), skill('triage', 'Existing repo triage.'));
+    await put(join(author, 'agents/reviewer.md'), agentMd('reviewer', 'Existing repo reviewer.'));
+    await put(join(author, 'mcp/relay.json'), `${JSON.stringify({ command: 'npx', args: ['relay'] }, null, 2)}\n`);
+    await put(join(author, 'skills/own-note/SKILL.md'), skill('own-note', 'Personal v1.'));
+    execFileSync('git', ['-C', author, 'add', '-A']);
+    execFileSync('git', ['-C', author, '-c', 'user.name=a', '-c', 'user.email=a@b', 'commit', '--quiet', '-m', 'existing']);
+    execFileSync('git', ['-C', author, 'push', '--quiet', 'origin', 'HEAD:main']);
+    // Healthy Pull sets state.base with all four paths while plugin items remain linked.
+    assert.equal((await connectRepo(box.share, remote, '')).stopped, undefined);
+    assert.equal((await pullRepo(box.share)).stopped, undefined);
+    assert.ok((await box.library()).skill.triage?.source);
+
+    await writeFile(box.pluginsPath, '{ broken');
+    const remotePaths = () => execFileSync('git', ['--git-dir', remote, 'ls-tree', '-r', '--name-only', 'main'], { encoding: 'utf8' }).trim().split('\n').sort();
+    const expected = ['agents/reviewer.md', 'mcp/relay.json', 'skills/own-note/SKILL.md', 'skills/triage/SKILL.md'];
+    // With no personal change, Push has nothing to send and deletes nothing.
+    const idlePush = await pushRepo(box.share);
+    assert.match(idlePush.stopped ?? '', /Nothing to push/);
+    assert.deepEqual(remotePaths(), expected);
+    // With a personal edit, Push sends own-note and leaves every held plugin path in the repo byte-for-byte intact.
+    const editedOwn = skill('own-note', 'Personal edited while damaged.');
+    await put(join(box.home, '.claude/skills/own-note/SKILL.md'), editedOwn);
+    await homePass(box.share, ALL_FIVE, true);
+    const pushed = await pushRepo(box.share);
+    assert.equal(pushed.stopped, undefined);
+    assert.deepEqual(remotePaths(), expected);
+    assert.equal(execFileSync('git', ['--git-dir', remote, 'show', 'main:skills/own-note/SKILL.md'], { encoding: 'utf8' }), editedOwn);
+  } finally { await box.cleanup(); }
+});
+
+test('Fix item 2: after repair, returning Pi to Manage after its copy went away — or replacing Pi’s skills folder — restores Pi and keeps OpenCode, matching a sound twin', async () => {
+  // Case A: Pi unmanaged -> copy removed -> Pi managed again while damaged -> repair.
+  const results = [];
+  for (const damaged of [true, false]) {
+    const box = await partialHome();
+    try {
+      if (damaged) await writeFile(box.pluginsPath, '{ broken');
+      assert.equal((await chooseTools(box.share, 'pi-cli', false)).stopped, undefined);
+      await homePass(box.share, ALL_FIVE.filter(tool => tool !== 'pi-cli'), true);
+      await rm(join(box.home, '.pi/agent/skills/triage'), { recursive: true, force: true });
+      assert.equal((await chooseTools(box.share, 'pi-cli', true)).stopped, undefined);
+      await homePass(box.share, ALL_FIVE, true);
+      if (damaged) {
+        assert.equal(await exists(join(box.home, '.pi/agent/skills/triage/SKILL.md')), false, 'nothing written to Pi while damaged');
+        await writeFile(box.pluginsPath, box.goodPlugins);
+        await homePass(box.share, ALL_FIVE, true);
+      }
+      const item = (await box.library()).skill.triage!;
+      const history = (await readHistory(box.share)).filter(event => event.key === 'triage').map(event => [event.kind, event.cause]);
+      results.push({ on: item.on, pi: await exists(join(box.home, '.pi/agent/skills/triage/SKILL.md')), open: await exists(join(box.home, '.config/opencode/skills/triage/SKILL.md')), history });
+    } finally { await box.cleanup(); }
+  }
+  assert.deepEqual(results[0], results[1], 'damaged-then-repaired matches never-damaged twin');
+  assert.equal(results[0]!.on, true);
+  assert.equal(results[0]!.pi, true);
+  assert.equal(results[0]!.open, true);
+
+  // Case B: Pi's entire skills folder replaced by an empty one while damaged -> repair restores Pi and keeps OpenCode.
+  const box = await partialHome();
+  try {
+    await writeFile(box.pluginsPath, '{ broken');
+    await rm(join(box.home, '.pi/agent/skills'), { recursive: true, force: true });
+    await mkdir(join(box.home, '.pi/agent/skills'), { recursive: true });
+    await homePass(box.share, ALL_FIVE, true);
+    assert.equal(await exists(join(box.home, '.pi/agent/skills/triage/SKILL.md')), false, 'nothing written to Pi while damaged');
+    await writeFile(box.pluginsPath, box.goodPlugins);
+    await homePass(box.share, ALL_FIVE, true);
+    assert.equal((await box.library()).skill.triage?.on, true);
+    assert.equal(await exists(join(box.home, '.pi/agent/skills/triage/SKILL.md')), true);
+    assert.equal(await exists(join(box.home, '.config/opencode/skills/triage/SKILL.md')), true);
+  } finally { await box.cleanup(); }
+});
+
+test('Fix item 3: takeOver of a held plugin skill’s shared copy or outside link refuses before removing anything and appends no History entry', async () => {
+  const box = await partialHome();
+  try {
+    const shared = join(box.home, '.agents/skills/triage/SKILL.md');
+    const piCopy = await readFile(join(box.home, '.pi/agent/skills/triage/SKILL.md'), 'utf8');
+    await put(shared, piCopy);
+    const outsideTarget = join(box.base, 'outside-triage');
+    await put(join(outsideTarget, 'SKILL.md'), piCopy);
+    await symlink(outsideTarget, join(box.home, '.codex/skills/triage'));
+    await homePass(box.share, ALL_FIVE, true);
+    await writeFile(box.pluginsPath, '{ broken');
+    const beforeFiles = await box.toolFiles();
+
+    const sharedTake = await takeOver(box.share, ALL_FIVE, 'triage', 'copilot-cli');
+    assert.equal(sharedTake.stopped, DAMAGED_REASON);
+    assert.equal(await readFile(shared, 'utf8'), piCopy, 'shared copy stayed intact');
+
+    const linkTake = await takeOver(box.share, ALL_FIVE, 'triage', 'codex-cli');
+    assert.equal(linkTake.stopped, DAMAGED_REASON);
+    assert.equal(await exists(join(box.home, '.codex/skills/triage/SKILL.md')), true, 'outside symlink stayed intact');
+
+    assert.deepEqual(await box.toolFiles(), beforeFiles);
+    assert.equal((await readHistory(box.share)).some(event => event.kind === 'took-over' && event.key === 'triage'), false);
+  } finally { await box.cleanup(); }
+});
+
+test('Fix item 5: an item from a Git source removed by the user is his own and keeps syncing and pushing while plugins.json is damaged', async () => {
+  const box = await partialHome({ gitSource: true });
+  try {
+    assert.equal((await removeSource(box.share, ALL_FIVE, box.sourceId!)).stopped, undefined);
+    // Source id remains on the item after removeSource, while sources.json no longer lists it.
+    assert.ok((await box.library()).skill['git-skill']?.source);
+
+    await writeFile(box.pluginsPath, '{ broken');
+    const edited = skill('git-skill', 'Removed Git source skill edited while plugins.json damaged.');
+    await put(join(box.home, '.claude/skills/git-skill/SKILL.md'), edited);
+    await homePass(box.share, ALL_FIVE, true);
+    for (const root of ['.claude/skills', '.copilot/skills', '.codex/skills', '.pi/agent/skills']) {
+      assert.equal(await readFile(join(box.home, root, 'git-skill/SKILL.md'), 'utf8'), edited, `removed Git source skill synced to ${root}`);
+    }
+    // Plugin skill still held.
+    assert.equal(await exists(join(box.home, '.claude/skills/triage/SKILL.md')), false);
+    // Push also includes the removed Git source skill as his own (never held or deleted).
+    const remote = join(box.base, 'config.git');
+    execFileSync('git', ['init', '--quiet', '--bare', '--initial-branch=main', remote]);
+    assert.equal((await connectRepo(box.share, remote, '')).stopped, undefined);
+    assert.equal((await pushRepo(box.share)).stopped, undefined);
+    assert.equal(execFileSync('git', ['--git-dir', remote, 'show', 'main:skills/git-skill/SKILL.md'], { encoding: 'utf8' }), edited);
+  } finally { await box.cleanup(); }
+});
+
+test('Fix item 6: in a sound home with Pi and OpenCode left out in Manage, triage’s status agrees with the plugin-only lines below it', async () => {
+  const box = await partialHome();
+  try {
+    const managed = ALL_FIVE.filter(tool => tool !== 'pi-cli' && tool !== 'opencode-cli');
+    assert.equal((await chooseTools(box.share, 'pi-cli', false)).stopped, undefined);
+    assert.equal((await chooseTools(box.share, 'opencode-cli', false)).stopped, undefined);
+    await homePass(box.share, managed, true);
+    const view = await skillsView(box.share, managed), fact = view.items.find(item => item.key === 'triage')!;
+    const row = { ...fact, hashes: hashesOf(fact.copies) };
+    const say = sentences(libraryWords.skills);
+    assert.deepEqual(managed.map(tool => say.harnessLine(row, view.library.triage, tool, tool === 'claude-cli' ? 'Claude Code' : tool === 'copilot-cli' ? 'Copilot CLI' : 'Codex')), [
+      'Claude Code gets it only with the plugin partial, and the plugin is kept out of Claude Code.',
+      'Copilot CLI gets it only with the plugin partial, and the plugin is kept out of Copilot CLI.',
+      'Codex gets it only with the plugin partial, and the plugin is kept out of Codex.',
+    ]);
+    assert.equal(statusLine(row, view.library.triage, view.tools), 'On · not in Claude Code, Copilot CLI or Codex (see below)');
   } finally { await box.cleanup(); }
 });

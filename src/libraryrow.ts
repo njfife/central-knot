@@ -23,7 +23,7 @@ import { originWords, theVersion, wantedIn, type LibraryItem, type Plan, type Ta
 import { clockTimesApart, dayAndTime } from './model.ts';
 import { linkLabel, pluginOf } from './sourcelink.ts';
 import type { Change, HarnessId, ItemNotice, LibraryFacts, PluginItemNotice, TakenInNotice } from './types.ts';
-import { andList, deletedIn, kindNouns, pageNames, sentence, toolName, toolsPhrase } from './words.ts';
+import { andList, deletedIn, kindNouns, orList, pageNames, sentence, toolName, toolsPhrase } from './words.ts';
 
 // ---------- What a kind supplies ----------
 
@@ -158,7 +158,7 @@ export const isPartial = (item: LibraryItem | undefined, tools: readonly string[
  * - `own-copy`: a copy Central Knot didn't put there (a found item's, or one that turned up while the item is Off or kept
  *   out of that harness); `kept-out`: the person keeps the item out of this harness; `none`: no copy;
  * - `another-way`: no copy of its own, and it has the item another way (`anotherWay`), so nothing of Central Knot's goes there;
- * - `cannot`: it can't be given a copy (the row says why); `unseen`: its copy can't be read for sure, so nothing happens there.
+ * - `cannot`: it can't be given a copy (the row says why); `unseen`: its copy can't be read for sure (or a hold keeps it as it is), so nothing happens there.
  */
 export type HarnessIs = 'current' | 'gets-it' | 'edited' | 'deleted-by-hand' | 'leaving' | 'own-copy' | 'kept-out' | 'none' | 'another-way' | 'cannot' | 'unseen';
 
@@ -417,7 +417,7 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
   const parts = [onIn.length ? `On in ${named(onIn, tools)}${cannot.length ? ' only' : ''}` : 'On',
     edit ? `${toolName(edit)}’s edit becomes the current version when sync runs` : '',
     gets.length ? `${named(gets, tools)} ${gets.length === 1 ? 'gets' : 'get'} it when sync runs` : '',
-    cannot.length ? `${andList(cannot.map(toolName))} can’t take it (see below)` : '',
+    cannot.length ? (onIn.length ? `${andList(cannot.map(toolName))} can’t take it (see below)` : `not in ${orList(cannot.map(toolName))} (see below)`) : '',
     another.length ? `${andList(another.map(toolName))} ${another.length === 1 ? 'has' : 'have'} it another way` : '',
     out.length ? `kept out of ${named(out, tools)}` : '',
     unseen.length && !onIn.length && !gets.length && !cannot.length && !another.length && !out.length ? 'left as it is (see below)' : '',

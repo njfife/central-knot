@@ -14261,7 +14261,7 @@ async function pluginRecordHoldsFlow() {
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
 
   const pluginsPath = join(home, '.central-knot/plugins.json');
-  const reason = 'The plugins record is damaged. Nothing was written or deleted. Put the record back, then try again. Its plugins’ items are held as they are until then. Sync takes them up again by itself once the record is back.';
+  const reason = 'The plugins record is damaged. Nothing was written or deleted. Put the record back, then try again. Its plugins’ items are held as they are until then. The next sync takes them up again once the record is back.';
   const leaked = () => [
     existsSync(join(home, '.claude/skills/triage/SKILL.md')),
     existsSync(join(home, '.copilot/skills/triage/SKILL.md')),

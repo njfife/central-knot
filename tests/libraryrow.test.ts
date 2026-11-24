@@ -425,9 +425,12 @@ test('What waits for the next pass (waitsForSync: the Overview card’s changes 
   assert.deepEqual([row({}, {}, onlyInCodex).plan?.turnedOffBy, row({}, {}, onlyInCodex).plan?.remove], ['codex-cli', []]);
 });
 
-test('An On item unseen in every tool says so instead of an empty "On in "', () => {
-  const why = 'The plugins record is damaged. Nothing was written or deleted. Put the record back, then try again. Its plugins’ items are held as they are until then. Sync takes them up again by itself once the record is back.';
+test('An On item unseen in every tool says so instead of an empty "On in "; one held out of every managed tool agrees with the lines below', () => {
+  const why = 'The plugins record is damaged. Nothing was written or deleted. Put the record back, then try again. Its plugins’ items are held as they are until then. The next sync takes them up again once the record is back.';
   const unseen = Object.fromEntries(tools.map(tool => [tool, why]));
   assert.equal(statusLine(row({}, { unseen }, item()), item(), tools), 'On · left as it is (see below)');
   assert.equal(lineIn({}, item(), 'claude-cli', 'Claude Code', { unseen }), why);
+  const pluginOnly = Object.fromEntries(tools.map(tool => [tool, `${tool} gets it only with the plugin partial, and the plugin is kept out.`]));
+  assert.equal(statusLine(row({}, { cannot: pluginOnly }, item({ applied: {} })), item({ applied: {} }), tools), 'On · not in Claude Code, Copilot CLI or Codex (see below)');
+  assert.equal(statusLine(row({}, { cannot: { 'claude-cli': pluginOnly['claude-cli'] } }, item({ applied: {} })), item({ applied: {} }), ['claude-cli']), 'On · not in Claude Code (see below)');
 });

@@ -231,7 +231,7 @@ const isEntry = (value: unknown): value is PluginEntry => {
  * that stops writes and holds its plugins' items. One that knew fewer tools than this build has its entries brought forward as read (keptOutOfNew).
  */
 export async function readPluginRecord(home: string): Promise<{ record?: PluginRecord; problem?: string }> {
-  const held = `${NOTHING_CHANGED} Its plugins’ items are held as they are until then. Sync takes them up again by itself once the record is back.`;
+  const held = `${NOTHING_CHANGED} Its plugins’ items are held as they are until then. The next sync takes them up again once the record is back.`;
   let text: string;
   try { text = await readFile(recordPath(home), 'utf8'); }
   catch (error) { return errorCode(error) === 'ENOENT' ? {} : { problem: `The plugins record could not be read. ${held}` }; }
