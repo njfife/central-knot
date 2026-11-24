@@ -45,7 +45,8 @@ type Counts = ReturnType<typeof counts>;
 const runningTotal = (): Counts => counts(0, 0, 0);
 /** The older counter's record: the last response's counts and the thread's running total. */
 const counter = (at: string, last: object, total: object) => ({
-  timestamp: at, type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { ...total }, last_token_usage: last, model_context_window: 258400 }, rate_limits: { limit_id: 'codex', plan_type: null } },
+  timestamp: at, type: 'event_msg',
+  payload: { type: 'token_count', info: { total_token_usage: { ...total }, last_token_usage: last, model_context_window: 258400 }, rate_limits: { limit_id: 'codex', plan_type: null } },
 });
 
 /** Counts as a version from before cache writes were saved writes them: with none (Codex reads that as 0). */
@@ -59,7 +60,10 @@ function respond(total: Counts, response: string, at: string, used: Counts, form
   const said = { timestamp: at, type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Done.' }] } };
   const record = {
     timestamp: at, type: 'token_usage_record',
-    payload: { thread_id: THREAD, turn_id: 'turn-1', session_id: THREAD, root_turn_id: 'turn-1', response_id: response, usage: used, turn_token_usage: { ...total }, thread_token_usage: { ...total } },
+    payload: {
+      thread_id: THREAD, turn_id: 'turn-1', session_id: THREAD, root_turn_id: 'turn-1', response_id: response,
+      usage: used, turn_token_usage: { ...total }, thread_token_usage: { ...total },
+    },
   };
   return form === 'modern' ? [said, record, counter(at, used, total)] : [said, counter(at, noCacheWrites(used), noCacheWrites(total))];
 }
@@ -73,11 +77,11 @@ test('A Codex rollout of three responses is three requests: cached input taken o
     ...respond(total, 'resp_2', '2026-11-24T15:29:06.137Z', counts(5_302, 5_000, 420, 300)),
     ...respond(total, 'resp_3', '2026-11-24T15:29:07.338Z', counts(303, 0, 43, 0, 7)),
   ]);
-  const read = await readCodexRollout(file);
+  const read = await readCodexRollout(file), request = { tool: 'codex-cli', session: THREAD, model: 'gpt-6-astra' };
   assert.deepEqual(read.requests, [
-    { tool: 'codex-cli', session: THREAD, request: 'resp_1', at: Date.parse('2026-11-24T15:29:04.762Z'), model: 'gpt-6-astra', tokens: { input: 220, cacheRead: 81, cacheWrite: 0, output: 41 } },
-    { tool: 'codex-cli', session: THREAD, request: 'resp_2', at: Date.parse('2026-11-24T15:29:06.137Z'), model: 'gpt-6-astra', tokens: { input: 302, cacheRead: 5_000, cacheWrite: 0, output: 420 } },
-    { tool: 'codex-cli', session: THREAD, request: 'resp_3', at: Date.parse('2026-11-24T15:29:07.338Z'), model: 'gpt-6-astra', tokens: { input: 303, cacheRead: 0, cacheWrite: 7, output: 43 } },
+    { ...request, request: 'resp_1', at: Date.parse('2026-11-24T15:29:04.762Z'), tokens: { input: 220, cacheRead: 81, cacheWrite: 0, output: 41 } },
+    { ...request, request: 'resp_2', at: Date.parse('2026-11-24T15:29:06.137Z'), tokens: { input: 302, cacheRead: 5_000, cacheWrite: 0, output: 420 } },
+    { ...request, request: 'resp_3', at: Date.parse('2026-11-24T15:29:07.338Z'), tokens: { input: 303, cacheRead: 0, cacheWrite: 7, output: 43 } },
   ], 'each response once, though its count follows it');
   assert.deepEqual([read.project, read.unread, read.startedOver], ['app', 0, false]);
 });

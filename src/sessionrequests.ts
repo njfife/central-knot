@@ -121,7 +121,8 @@ interface Besides { project?: string; treeReported?: number }
  * the read started over (scanLines) and given `besides` to fill, and gives back what each record is then handed to; a line
  * that is not a JSON record is counted unread. Of the requests found, the last of each id in these lines stands.
  */
-async function readSession(file: string, from: Position | undefined, reader: (startedOver: boolean, besides: Besides) => (record: JsonRecord) => Found): Promise<SessionRead> {
+type Reader = (startedOver: boolean, besides: Besides) => (record: JsonRecord) => Found;
+async function readSession(file: string, from: Position | undefined, reader: Reader): Promise<SessionRead> {
   const requests = new Map<string, Request>(), besides: Besides = {};
   let startedOver = false, unread = 0;
   const position = await scanLines(file, from, over => {
@@ -133,8 +134,8 @@ async function readSession(file: string, from: Position | undefined, reader: (st
       else if (found) requests.set(found.request, found);
     };
   });
-  const { project, treeReported } = besides;
-  return { requests: [...requests.values()], startedOver, ...(project ? { project } : {}), ...(treeReported !== undefined ? { treeReported } : {}), unread, position };
+  const { project, treeReported } = besides, found = { ...(project ? { project } : {}), ...(treeReported !== undefined ? { treeReported } : {}) };
+  return { requests: [...requests.values()], startedOver, ...found, unread, position };
 }
 
 /** A Claude Code session file: where it is, the session it is (its file's name), and the session it is a child of. */
@@ -241,7 +242,8 @@ function codexTokens(usage: JsonRecord | undefined): Tokens | undefined {
 const KINDS = ['input', 'cacheRead', 'cacheWrite', 'output'] as const;
 /** What a running total `now` adds to the one before it, kind by kind; undefined when a kind went down. */
 function added(now: Tokens, before: Tokens): Tokens | undefined {
-  const tokens = { input: now.input - before.input, cacheRead: now.cacheRead - before.cacheRead, cacheWrite: now.cacheWrite - before.cacheWrite, output: now.output - before.output };
+  const tokens = { input: now.input - before.input, cacheRead: now.cacheRead - before.cacheRead,
+    cacheWrite: now.cacheWrite - before.cacheWrite, output: now.output - before.output };
   return KINDS.some(kind => tokens[kind] < 0) ? undefined : tokens;
 }
 
