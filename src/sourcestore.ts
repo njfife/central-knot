@@ -13,13 +13,16 @@
 // and Keep mine on a waiting one's (each takes that name from it, with no fetch).
 // A missing copy means only "look again": the row reads it as nothing at the link's folder (atlink.ts unreadWhy), and the
 // next Check now fetches it. Which items came from a source is the items' own (library.ts LibraryItem `source`,
-// `seen`), never this record's, and whom an item is linked to is library.ts linkedTo's alone. This module only reads and
-// writes what it is given.
+// `seen`), never this record's, and whom an item is linked to is library.ts linkedTo's alone. While plugins.json has a problem
+// (pluginrecord.ts readPluginRecord), `pluginsRecordHold` is the one rule deciding which items are held by their active
+// `source` id and stored provenance (asked by librarypass.ts copyRead/click/fromSourceStep and skills.ts takeOver, and shown
+// by libraryrow.ts statusLine; gitrepo.ts refuses Pull and Push whole). This module reads and writes what it is given.
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { readPluginRecord, type PluginEntry } from './pluginrecord.ts';
+import type { LibraryItem } from './library.ts';
+import { readPluginRecord } from './pluginrecord.ts';
 import { sameSource } from './plugins.ts';
-import { pluginLink } from './sourcelink.ts';
+import { pluginLink, pluginOf } from './sourcelink.ts';
 import { NOTHING_CHANGED, errorCode, storeDirectory, writeDurably } from './share.ts';
 
 /** One source, as the home records it (sources.json). */
@@ -74,14 +77,29 @@ export const saveSources = (home: string, sources: SourceRecord[]) => writeDurab
 export const sourceAt = async (home: string, address: string) => (await readSources(home)).sources.find(source => sameSource(source.repository, address));
 
 /**
- * Every id an item can be linked to (library.ts linkedSource), the one place they are gathered: each source's in sources.json and
- * each plugin's in plugins.json (library.ts A PLUGIN), with the link each is named by (`links`: a source's as given, a plugin's
- * sourcelink.ts pluginLink) and the plugins' entries. A record that can't be read gives none of its ids.
+ * Every id an item can be linked to (library.ts linkedSource), the one place they are gathered: each source's in sources.json
+ * (`sources`) and each plugin's in plugins.json (library.ts A PLUGIN), with the link each is named by (`links`: a source's as
+ * given, a plugin's sourcelink.ts pluginLink), the plugins' entries, and why sources.json or plugins.json could not be read
+ * (`sourcesProblem`, `pluginsProblem`, never set for a missing file). A record that can't be read gives none of its ids.
  */
-export async function recordedIds(home: string): Promise<{ ids: Set<string>; links: Map<string, string>; plugins: PluginEntry[] }> {
-  const [{ sources }, { record }] = await Promise.all([readSources(home), readPluginRecord(home)]);
+export async function recordedIds(home: string) {
+  const [{ sources, problem: sourcesProblem }, { record, problem: pluginsProblem }] = await Promise.all([readSources(home), readPluginRecord(home)]);
   const plugins = record?.plugins ?? [];
   const links = new Map([...sources.map(source => [source.id, source.link] as const), ...plugins.map(entry => [entry.id, pluginLink(entry.plugin, entry.marketName)] as const)]);
-  return { ids: new Set(links.keys()), links, plugins };
+  return { ids: new Set(links.keys()), links, plugins, sources: new Set(sources.map(source => source.id)), sourcesProblem, pluginsProblem };
 }
-export type Recorded = Awaited<ReturnType<typeof recordedIds>>;
+export type Recorded = Omit<Awaited<ReturnType<typeof recordedIds>>, 'sourcesProblem' | 'pluginsProblem'> & { sourcesProblem?: string; pluginsProblem?: string };
+
+/**
+ * Why an item is held while the plugins record has a problem, if it is: an active `source` id whose latest link provenance
+ * since take-in is a plugin, or that isn't in a readable sources.json when sources.json has a problem or the item has no link
+ * provenance (a removed Git source's item with readable sources.json and non-plugin provenance is his own). Asked by
+ * librarypass.ts copyRead/click/fromSourceStep and skills.ts takeOver.
+ */
+export function pluginsRecordHold(item: Pick<LibraryItem, 'source' | 'versions'>, recorded: Recorded): string | undefined {
+  if (!recorded.pluginsProblem || !item.source) return undefined;
+  const takenIn = item.versions.findIndex(version => version.from.how === 'found' || version.from.how === 'chosen');
+  const link = (takenIn < 0 ? item.versions : item.versions.slice(0, takenIn)).find(version => version.from.link)?.from.link;
+  if (link && pluginOf(link)) return recorded.pluginsProblem;
+  return recorded.sources.has(item.source) || (link && !recorded.sourcesProblem) ? undefined : recorded.pluginsProblem;
+}

@@ -106,11 +106,11 @@ test('plugins.json: none is no record; one damaged or newer stops writes; one sa
     await savePluginRecord(home, record);
     assert.deepEqual(await readPluginRecord(home), { record });
     await writeFile(join(home, '.central-knot/plugins.json'), '{ "formatVersion": 1, "tools": [], "plugins": [{ "id": 1 }] }');
-    assert.match((await readPluginRecord(home)).problem ?? '', /damaged/);
+    assert.equal((await readPluginRecord(home)).problem, 'The plugins record is damaged. Nothing was written or deleted. Put the record back, then try again. Its plugins’ items are held as they are until then. The next sync takes them up again once the record is back.');
     await writeFile(join(home, '.central-knot/plugins.json'), '{ "formatVersion": 2 }');
-    assert.match((await readPluginRecord(home)).problem ?? '', /newer Central Knot/);
+    assert.equal((await readPluginRecord(home)).problem, 'The plugins record was written by a newer Central Knot. Nothing was written or deleted. Put the record back, then try again. Its plugins’ items are held as they are until then. The next sync takes them up again once the record is back.');
     await rm(join(home, '.central-knot/plugins.json'));
     await mkdir(join(home, '.central-knot/plugins.json'));
-    assert.match((await readPluginRecord(home)).problem ?? '', /could not be read/);
+    assert.equal((await readPluginRecord(home)).problem, 'The plugins record could not be read. Nothing was written or deleted. Put the record back, then try again. Its plugins’ items are held as they are until then. The next sync takes them up again once the record is back.');
   } finally { await rm(home, { recursive: true, force: true }); }
 });

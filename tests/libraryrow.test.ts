@@ -424,3 +424,19 @@ test('What waits for the next pass (waitsForSync: the Overview card’s changes 
   // The last waits as a hand deletion alone: it turns Off at the next pass, with no copy left to remove.
   assert.deepEqual([row({}, {}, onlyInCodex).plan?.turnedOffBy, row({}, {}, onlyInCodex).plan?.remove], ['codex-cli', []]);
 });
+
+test('An On item unseen in every tool says so instead of an empty "On in "; one held out of every managed tool agrees with the lines below', () => {
+  const why = 'The plugins record is damaged. Nothing was written or deleted. Put the record back, then try again. Its plugins’ items are held as they are until then. The next sync takes them up again once the record is back.';
+  const unseen = Object.fromEntries(tools.map(tool => [tool, why]));
+  assert.equal(statusLine(row({}, { unseen }, item()), item(), tools), 'On · left as it is (see below)');
+  assert.equal(lineIn({}, item(), 'claude-cli', 'Claude Code', { unseen }), why);
+  const pluginOnly = Object.fromEntries(tools.map(tool => [tool, `${tool} gets it only with the plugin partial, and the plugin is kept out.`]));
+  assert.equal(statusLine(row({}, { cannot: pluginOnly }, item({ applied: {} })), item({ applied: {} }), tools), 'On · not in Claude Code, Copilot CLI or Codex (see below)');
+  assert.equal(statusLine(row({}, { cannot: { 'claude-cli': pluginOnly['claude-cli'] } }, item({ applied: {} })), item({ applied: {} }), ['claude-cli']), 'On · not in Claude Code (see below)');
+  // A tool that still holds an older copy it refused to replace has the item: it is never counted as "not in".
+  const keptOld = 'Codex will not load a skill with no YAML frontmatter.';
+  assert.equal(statusLine(row({ 'codex-cli': 'a' }, { cannot: { 'codex-cli': keptOld } }, item({ applied: { 'codex-cli': 'a' } })), item({ applied: { 'codex-cli': 'a' } }), ['codex-cli']),
+    'On · Codex can’t take it (see below)');
+  assert.equal(statusLine(row({ 'codex-cli': 'a' }, { cannot: { 'claude-cli': pluginOnly['claude-cli'], 'codex-cli': keptOld } }, item({ applied: { 'codex-cli': 'a' } })),
+    item({ applied: { 'codex-cli': 'a' } }), ['claude-cli', 'codex-cli']), 'On · not in Claude Code · Codex can’t take it (see below)');
+});

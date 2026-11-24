@@ -338,10 +338,13 @@ async function runCopilotRules(context: ShareContext, rules: CopilotRule[], disa
   return { confirmed, results, left };
 }
 
-/** A switch's or Undo's entry once its passes ran: keeping only confirmed plugin copies, the whole plugins' steps that changed and orphan Copilot CLI clears, plus settings notes. Returns the settled profile payload written to History. */
-async function settleEntry(context: ShareContext, eventId: string, confirmed: CopyTurn[], steps: PluginOp[], settingsChanged: string[], copilotCleared?: CopilotRule[]): Promise<HistoryEvent['profile']> {
+/** Keeps only what actually switched (library items, confirmed plugin copies, whole steps and orphan clears) plus settings notes; returns the settled payload. */
+async function settleEntry(context: ShareContext, eventId: string, turned: Turns, confirmed: CopyTurn[],
+  steps: PluginOp[], settingsChanged: string[], copilotCleared?: CopilotRule[]): Promise<HistoryEvent['profile']> {
   const history = await readHistory(context), entry = history.find(each => each.id === eventId);
   if (!entry?.profile) return undefined;
+  entry.profile.on = named(turned.on);
+  entry.profile.off = named(turned.off);
   if (entry.profile.plugins) entry.profile.plugins = confirmed.map(switched);
   if (entry.profile.wholeSteps) { if (steps.length) entry.profile.wholeSteps = steps; else delete entry.profile.wholeSteps; }
   if (copilotCleared) { if (copilotCleared.length) entry.profile.copilotCleared = copilotCleared; else delete entry.profile.copilotCleared; }
@@ -349,6 +352,8 @@ async function settleEntry(context: ShareContext, eventId: string, confirmed: Co
   await replaceHistory(context, history);
   return entry.profile;
 }
+
+const short = (done: Turns, planned: Turns) => done.on.length < planned.on.length || done.off.length < planned.off.length;
 
 /** Confirmed Copilot CLI off-switches cleared solely because the profile names his own server of that exact name (said in result and History). */
 function clearedForHis(profile: Profile, confirmed: CopyTurn[]): string[] {
@@ -380,8 +385,8 @@ export async function switchProfile(context: ShareContext, tools: HarnessId[], i
   const done = await turnTogether(context, tools, turns, true, copies, read.libraries, plugins, runs), rules = await runCopilotRules(context, clears, false);
   const settingsChanged = [...done.results.flatMap(result => (result.settingsChanged ? [result.settingsChanged] : [])), ...clearedForHis(profile, done.copies),
     ...rules.confirmed.map(orphanClearedNote)];
-  const settled = done.copies.length < copies.length || done.steps.length < steps.length || rules.confirmed.length < clears.length || settingsChanged.length
-    ? await settleEntry(context, event.id, done.copies, done.steps, settingsChanged, clears.length ? rules.confirmed : undefined)
+  const settled = short(done.done, turns) || done.copies.length < copies.length || done.steps.length < steps.length || rules.confirmed.length < clears.length || settingsChanged.length
+    ? await settleEntry(context, event.id, done.done, done.copies, done.steps, settingsChanged, clears.length ? rules.confirmed : undefined)
     : event.profile;
   const out = outcome(turns, done.done, [...held, ...done.results, ...rules.results], copies.filter(turn => !done.asAsked.includes(turn)), done.copies);
   return { name: profile.name, on: [...out.on, ...rules.confirmed.filter(rule => !done.done.on.some(item => item.id === rule.id)).map(rule => rule.name)],
@@ -411,7 +416,8 @@ export async function undoSwitch(context: ShareContext, tools: HarnessId[], even
   const rules = await runCopilotRules(context, copilotBack, true), cleared = await runCopilotRules(context, copilotClear, false);
   const undoNotes = [...keptNotes, ...cleared.confirmed.map(orphanClearedNote)];
   const planned = whole.flatMap(run => run.ops).length;
-  if (undo && (copies.length < back.length || steps.length < planned || rules.confirmed.length < copilotBack.length || undoNotes.length)) await settleEntry(context, undo.id, copies, steps, undoNotes, copilotBack.length ? rules.confirmed : undefined);
+  if (undo && (short(done, turns) || copies.length < back.length || steps.length < planned || rules.confirmed.length < copilotBack.length || undoNotes.length))
+    await settleEntry(context, undo.id, done, copies, steps, undoNotes, copilotBack.length ? rules.confirmed : undefined);
   const { results: notDone, ...switchedBack } = outcome(turns, done, [...results, ...rules.results, ...cleared.results], back.filter(turn => !asAsked.includes(turn) && !letGo.includes(turn)), copies);
   // What a tool refused to turn back leaves the switch undoable, for that part, once the refusal clears.
   const by = notDone.length ? undefined : (undo && (copies.length || steps.length || rules.confirmed.length || cleared.confirmed.length) ? undo.id : undefined) ?? made[0];
