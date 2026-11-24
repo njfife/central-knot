@@ -236,7 +236,7 @@ async function standIns() {
    */
   const put = (binary: string, body: string, js: string, folder = join(tools, '.local/bin')) => standIn(join(folder, binary),
     `#!/bin/sh\necho "$(pwd)|$(ls -A | wc -l | tr -d ' ')|$HOME|\${CLAUDE_CONFIG_DIR-none}|$*" >> ${calls}\n${body}\n`,
-    `const fs = require("fs"); fs.appendFileSync(${JSON.stringify(calls)}, [process.cwd(), fs.readdirSync(".").length, process.env.HOME, process.env.CLAUDE_CONFIG_DIR ?? "none", process.argv.slice(1).join(" ")].join("|") + "\\n");\n${js}`);
+    `const fs = require("fs"); fs.appendFileSync(${JSON.stringify(calls)}, [fs.realpathSync.native(process.cwd()), fs.readdirSync(".").length, process.env.HOME, process.env.CLAUDE_CONFIG_DIR ?? "none", process.argv.slice(1).join(" ")].join("|") + "\\n");\n${js}`);
   const calledWith = async () => (await readFile(calls, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => line.split('|'));
   const where = (actual = true, searchPath = '') => ({ home, actual, toolsHome: tools, searchPath });
   const before = process.env.CK_TEST_HOME_ONLY;
@@ -318,8 +318,8 @@ test('A home other than this computer’s is checked with an environment made fo
     await sandbox.put('opencode', `env > ${seen}\ncat ${join(import.meta.dirname, 'mcpsignin/opencode-list.stdout')}`,
       `fs.writeFileSync(${JSON.stringify(seen)}, Object.entries(process.env).map(([name, value]) => name + "=" + value + "\\n").join("")); ${printOut('opencode-list.stdout')}`);
     // What the shell adds by itself (PWD, OLDPWD, SHLVL, _) aside; on Windows, what Windows gives every program it starts
-    // whatever it was given (the list libuv keeps), and npm's .cmd its PATHEXT.
-    const added = windows ? ['LOGONSERVER', 'PATHEXT', 'PROMPT', 'SYSTEMDRIVE', 'SYSTEMROOT', 'TEMP', 'USERDOMAIN', 'USERNAME', 'WINDIR'] : ['PWD', 'OLDPWD', 'SHLVL', '_'];
+    // whatever it was given (the list libuv keeps), and what cmd.exe and npm's .cmd add (measured on Windows Server 2025).
+    const added = windows ? ['COMSPEC', 'LOGONSERVER', 'PATHEXT', 'PROMPT', 'SYSTEMDRIVE', 'SYSTEMROOT', 'TEMP', 'USERDOMAIN', 'USERNAME', 'WINDIR'] : ['PWD', 'OLDPWD', 'SHLVL', '_'];
     const readEnv = async () => Object.fromEntries((await readFile(seen, 'utf8')).split('\n').filter(Boolean)
       .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)])
       .filter(([name]) => !added.includes(windows ? name.toUpperCase() : name)));

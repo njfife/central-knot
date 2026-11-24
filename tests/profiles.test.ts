@@ -653,7 +653,7 @@ async function sideNow(box: Box) {
     setPart: async (source, marketName, plugin, part, tool, on) => ({ reports: [await setPart(context, marketName, plugin, part, tool as PluginTool, on, source)] }),
     setWhole: async (source, marketName, plugin, tool, on) => ({ reports: [await setWhole(context, marketName, plugin, tool as PluginTool, on, source)] }) };
   const side: PluginSide = { live: async () => plugins, run: async ops => (await runPlan(ops, api, box.home)).done };
-  return { view, live: homeItems(view), plugins, side, inUse: async () => inUse((await readProfiles(box.home)).profiles, homeItems(view), plugins).map(each => each.name) };
+  return { view, live: homeItems(view), plugins, side, binaries, inUse: async () => inUse((await readProfiles(box.home)).profiles, homeItems(view), plugins).map(each => each.name) };
 }
 /** The files a plugin's items live in: Codex's and Claude Code's settings, and each skill's folder in Pi. */
 const pluginFiles = async (box: Box) => ({ codex: await text(box, '.codex/config.toml'), claude: await text(box, '.claude/settings.json'),
@@ -925,7 +925,7 @@ test('Where Claude Code doesn’t turn docs on (its command fails), every part s
   const { box, made } = await wholeHome({ enabled: false, parts: true, denied: ['s'] });
   try {
     const work = await made('Work', [aId, sId]), before = await text(box, '.claude/settings.json'), now = await sideNow(box);
-    await rm(join(box.base, 'bin/claude'));
+    await rm(now.binaries['claude-cli']!);
     const done = await switchProfile(box.context, box.tools, work, now.side);
     assert.deepEqual([done.results.map(result => [result.harness, result.outcome]), done.left, await text(box, '.claude/settings.json')], [[['claude-cli', 'failed']], ['a', 's'], before]);
     assert.deepEqual([done.profile?.plugins, done.profile?.wholeSteps], [[], undefined]);

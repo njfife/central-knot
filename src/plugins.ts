@@ -1,11 +1,11 @@
 // Marketplaces and plugins for the CLIs: read a catalog without running anything from it, show what each tool would get,
 // and install or uninstall through each tool's own commands, confirmed by reading the record that tool keeps (PLG-03).
-import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { pathBeside } from './platform.ts';
+import { homeVariables, start } from './launch.ts';
 import { probeVersion } from './discovery.ts';
 import { configRoot, harnesses } from './harnesses.ts';
 import { CODEX_MANIFEST, MANIFEST, codexManifest, inside, installedContents, parseObject, pluginContents, pluginManifest, readManifest, remoteOf, skillName, skillNamesIn, sourceOf, type ReadAs } from './catalogdetail.ts';
@@ -40,6 +40,8 @@ export interface PluginContext {
   ways?: ToolWays;
   overrides?: Partial<Record<HarnessId, string>>;
   timeoutMs?: number;
+  /** Whether `home` is this computer's own; a home that is not is named to the tools' commands, on Windows, by its own variables too (launch.ts homeVariables). */
+  actual?: boolean;
   /** Reads shared within one read-only view (each tool's records and a live folder's catalog read once). Never set for an install or uninstall, which read again after their command. */
   reads?: Map<string, Promise<unknown>>;
   /** Access checks made in one request, by URL, so tools installing from one Git marketplace check it once (MKT-05). */
@@ -96,15 +98,16 @@ export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; max
 export type RunResult = { code: number | 'timeout' | 'missing'; output: string; stdout: Buffer };
 
 /**
- * Runs a command, stopped at its timeout or its `signal`. `group` (git's runs and mcpsigninrun.ts's, off Windows): it runs in a
- * process group of its own, and stopping it stops the whole group, the helpers it started (git's remote-http) with it.
+ * Runs a command (started as launch.ts start says: on Windows a .cmd through cmd.exe), stopped at its timeout or its `signal`.
+ * `group` (git's runs and mcpsigninrun.ts's, off Windows): it runs in a process group of its own, and stopping it stops the
+ * whole group, the helpers it started (git's remote-http) with it.
  */
 export function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number; group?: boolean } & RunOptions): Promise<RunResult> {
   const maxBytes = options.maxBytes ?? 4 * 1024 * 1024, group = !!options.group && process.platform !== 'win32';
   return new Promise(done => {
     const out: Buffer[] = [], err: Buffer[] = [];
     let stopped = false, cut = false, ended = false;
-    const child = spawn(file, args, { env: options.env, cwd: options.cwd, windowsHide: true, detached: group });
+    const child = start(file, args, { env: options.env, cwd: options.cwd, windowsHide: true, detached: group });
     const kill = () => { try { if (group && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); } catch { /* already ended */ } };
     const stop = () => { stopped = true; kill(); };
     // Past maxBytes on either stream it ran, it just said too much: it is stopped, and what it said up to maxBytes is kept.
@@ -1149,7 +1152,8 @@ async function native(context: PluginContext, tool: PluginTool, args: string[]):
   if (!binary) return { tool, command, ok: false, output: noCli(tool), changed: [] };
   const files = pluginRecordFiles(context, tool);
   const before = await Promise.all(files.map(readOrNull));
-  const env: NodeJS.ProcessEnv = { ...gitEnv(), HOME: context.home, USERPROFILE: context.home, PATH: pathBeside(binary) };
+  const env: NodeJS.ProcessEnv = { ...gitEnv(), HOME: context.home, USERPROFILE: context.home, PATH: pathBeside(binary),
+    ...(context.actual ? {} : homeVariables(context.home)) };
   const override = context.overrides?.[tool];
   // Codex on Windows finds its home from the system, not HOME or USERPROFILE (seen with ChatGPT desktop's Codex 0.165), so
   // it is named outright. CODEX_HOME at the default root is what Codex reads anyway. CLAUDE_CONFIG_DIR is never set

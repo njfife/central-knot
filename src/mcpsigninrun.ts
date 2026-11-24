@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { findCli } from './discovery.ts';
 import { CHECK_LIMIT_MS, listCommand, readAnswer } from './mcpsignin.ts';
 import { pathBeside } from './platform.ts';
+import { homeVariables } from './launch.ts';
 import { run } from './plugins.ts';
 import type { HarnessId, SigninAnswer } from './types.ts';
 
@@ -19,12 +20,14 @@ export interface CheckWhere { home: string; actual: boolean; toolsHome: string; 
 
 /**
  * What a check of a home other than this computer's runs with: what a command line needs to start (its PATH, the home, the
- * temporary folder, the locale, the terminal type) and nothing else. The plugin runs (plugins.ts native) keep the app's whole
- * environment for any home, as git and the network need the person's own settings to fetch.
+ * temporary folder, the locale, the terminal type; on Windows the home's other variables too: launch.ts homeVariables) and
+ * nothing else. The plugin runs (plugins.ts native) keep the app's whole environment for any home, as git and the network
+ * need the person's own settings to fetch.
  */
 const KEPT = ['TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM'];
 const ownEnv = (home: string, binary: string): NodeJS.ProcessEnv =>
-  ({ ...Object.fromEntries(KEPT.flatMap(name => (process.env[name] === undefined ? [] : [[name, process.env[name]]]))), HOME: home, PATH: pathBeside(binary) });
+  ({ ...Object.fromEntries(KEPT.flatMap(name => (process.env[name] === undefined ? [] : [[name, process.env[name]]]))), HOME: home, PATH: pathBeside(binary),
+    ...homeVariables(home) });
 
 /** The checks under way, each with its stop and its end (the folder removed); and whether Quit has begun, after which none starts. */
 const underWay = new Map<AbortController, Promise<unknown>>();

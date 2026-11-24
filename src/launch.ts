@@ -11,8 +11,9 @@ import { win32 } from 'node:path';
 /** What is really started for a program and its arguments, and the option that says its arguments are already encoded. */
 export interface Launch { file: string; args: string[]; options: { windowsVerbatimArguments?: true } }
 
-/** cmd.exe's own characters (cross-spawn's list): each written with a caret before it, so cmd reads it as itself. */
+/** cmd.exe's own characters (cross-spawn's list), each given a caret before it, so that cmd reads it as itself. */
 const CMD_SPECIAL = /([()\][%!^"`<>&|;, *?])/g;
+const caret = (text: string) => text.replace(CMD_SPECIAL, '^$1');
 /** One argument as a Windows program reads it from its command line: quoted, a quote as \", the backslashes before one or at the end doubled. */
 const quoted = (arg: string) => `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`;
 
@@ -32,19 +33,19 @@ function forwardsLikeNpm(file: string): boolean {
 
 /**
  * What starts `file` with `args`. On Windows a .cmd or .bat is run by cmd.exe (ComSpec) with /d (no AutoRun), /s and /c, and
- * delayed expansion off (/v:off, so `!` is itself): its path quoted (a path can't hold a quote; a pair of % around a
- * variable's name in it would still be read as that variable), each argument quoted as a program reads it, then a caret put
- * before each of cmd's characters, once for each time cmd will read it. An argument holding a line break can't be passed
- * (cmd ends the command there): nothing is run and the refusal names it. Anything else, and every program on macOS and
- * Linux, is started as asked.
+ * delayed expansion off (/v:off, so `!` is itself). Its path is given a caret before each of cmd's characters (read once: a
+ * space, &, ^ or %NAME% in it stays itself); each argument is quoted as a program reads it, then given a caret before each
+ * of cmd's characters, once for each time cmd reads it. An argument holding a line break can't be passed (cmd ends the
+ * command there): nothing is run and the refusal names it. Anything else, and every program on macOS and Linux, is started
+ * as asked.
  */
 export function launchCommand(file: string, args: string[], platform: string = process.platform): Launch {
   if (platform !== 'win32' || !/\.(cmd|bat)$/i.test(file)) return { file, args, options: {} };
   const broken = args.find(arg => /[\r\n]/.test(arg));
   if (broken !== undefined) throw new Error(`${win32.basename(file)} was not run: on Windows an argument to it can’t hold a line break (${JSON.stringify(broken)}).`);
   const reads = forwardsLikeNpm(file) ? 2 : 1;
-  const encoded = args.map(arg => { let text = quoted(arg); for (let read = 0; read < reads; read++) text = text.replace(CMD_SPECIAL, '^$1'); return text; });
-  return { file: process.env.ComSpec ?? 'cmd.exe', args: ['/d', '/s', '/v:off', '/c', `""${file}"${encoded.map(arg => ` ${arg}`).join('')}"`], options: { windowsVerbatimArguments: true } };
+  const encoded = args.map(arg => { let text = quoted(arg); for (let read = 0; read < reads; read++) text = caret(text); return text; });
+  return { file: process.env.ComSpec ?? 'cmd.exe', args: ['/d', '/s', '/v:off', '/c', `"${caret(file)}${encoded.map(arg => ` ${arg}`).join('')}"`], options: { windowsVerbatimArguments: true } };
 }
 
 /** Starts `file` with `args` (launchCommand), with the caller's own options. Throws, as spawn does, when it can't be started so. */
