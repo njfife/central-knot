@@ -26,6 +26,7 @@ tests/instructionparts.test.ts
 tests/instructions.test.ts
 tests/itemrow.test.ts
 tests/kindstore.test.ts
+tests/launch.test.ts
 tests/library.test.ts
 tests/librarygate.test.ts
 tests/librarypass.test.ts
@@ -57,6 +58,7 @@ tests/pluginswitch.test.ts
 tests/plugintext.test.ts
 tests/pluginupdates.test.ts
 tests/releasetag.test.ts
+tests/reload.test.ts
 tests/scratch.test.ts
 tests/search.test.ts
 tests/servermigrate.test.ts
