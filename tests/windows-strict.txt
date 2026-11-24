@@ -1,0 +1,7 @@
+# Unit test files that must pass on Windows (.github/workflows/windows.yml strict step); this list only grows.
+tests/library.test.ts
+tests/model.test.ts
+tests/textedit.test.ts
+tests/updates.test.ts
+tests/visits.test.ts
+tests/words.test.ts

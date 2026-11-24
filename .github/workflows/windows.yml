@@ -1,0 +1,48 @@
+name: Windows checks
+# Manual Windows checks (started by hand: gh workflow run windows.yml -R njfife/central-knot --ref <branch>).
+# Strict steps (type check, build, packaged preview smoke test, and tests/windows-strict.txt) have no continue-on-error
+# and must pass. The full unit suite runs advisory (continue-on-error: true) and uploads its summary and raw log until
+# every Windows step lands. Never a required check for Mac or Linux changes, and never releases anything.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+# A group of its own: groups are shared by every workflow in the repository, so another workflow's name would cancel its runs.
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      # Git for Windows defaults to core.autocrlf=true; turn it off before checkout so the repo keeps its exact LF bytes.
+      - name: Keep repository bytes at checkout
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      # Scope autocrlf=false to this checkout only so temp Git repos in tests still see Git for Windows' real system default.
+      - name: Scope autocrlf to this checkout
+        run: git config --local core.autocrlf false && git config --global --unset core.autocrlf
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Build
+        run: npm run build
+      - name: Package Windows preview and smoke test
+        run: node scripts/windows-check.mjs --smoke
+      - name: Strict Windows unit tests
+        run: node scripts/windows-check.mjs --strict
+      - name: Advisory full unit suite
+        continue-on-error: true
+        run: node scripts/windows-check.mjs --advisory windows-unit-report
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: windows-unit-report
+          path: windows-unit-report
+          if-no-files-found: ignore
+          retention-days: 7
