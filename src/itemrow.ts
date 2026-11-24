@@ -136,7 +136,8 @@ export function lastUpdated(row: Pick<ItemRow, 'versions'>, item: LibraryItem | 
 export type RowUsage = number | { at?: number; sessions?: number };
 /** What an order compares a row by, highest first: a time (ms), or a count with a time to break ties; none goes last, by name. */
 export type OrderRank = number | { count: number; time?: number };
-/** A row's rank in an order: when it was last updated or last used, or its sessions in 30 days with its newest use to break ties; none by name, or with no figure. */
+/** A row's rank in an order: when it was last updated or last used, or its sessions in the last 30 days with its newest use to
+ * break ties; none by name, or with no time, no sessions in the last 30 days, or nothing known. */
 export function rankIn<Row extends Pick<ItemRow, 'key' | 'versions'>>(
   row: Row, order: RowOrder, itemOf: (row: Row) => LibraryItem | undefined, usage: (row: Row) => RowUsage | undefined = () => undefined,
 ): OrderRank | undefined {

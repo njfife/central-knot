@@ -2294,7 +2294,8 @@ const usageElsewhere = (t: Table, skill: ItemRow) => usageOf(t, skill).filter(ea
 
 // ---------- The order of the rows under each heading ----------
 
-/** The flags (flags.ts) that remember a non-default Sort on the Library: one choice, kept. */
+/** The flags (flags.ts) that remember a non-default Sort on the Library: one choice, kept.
+ * Where more than one of the three flags is set, the first in `orderFlags` wins. */
 const orderFlags: Record<Exclude<RowOrder, 'name'>, string> = { 'most-used': 'ck-items-by-most-used', used: 'ck-items-by-last-used', updated: 'ck-items-by-last-updated' };
 /** The order of the rows under each heading (itemrow.ts inOrder): the one chosen, on the Library; by name on a harness's tab. */
 const chosenOrder = (t: Table): RowOrder => (t.tool ? 'name' : (Object.entries(orderFlags) as [RowOrder, string][]).find(([, flag]) => readFlag(flag))?.[0] ?? 'name');
