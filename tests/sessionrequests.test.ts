@@ -3,7 +3,7 @@
 // a response is an `assistant` record with the message's id, model and usage, among records that hold none.
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFile, mkdir, mkdtemp, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdir, mkdtemp, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { claudeFiles, readClaudeSession, scanLines } from '../src/sessionrequests.ts';
@@ -152,7 +152,7 @@ test('A file replaced by another, longer than where the last read ended, is read
 
 test('A parent and its child\'s file are two sessions, the child naming its parent, and each request is read once', async () => {
   const home = await newHome(), project = join(home, '.claude/projects/-work-app');
-  assert.equal(await claudeFiles({ home }), undefined, 'no projects folder: no files');
+  assert.deepEqual(await claudeFiles({ home }), { files: [], unread: false }, 'no projects folder: no files');
   await put(join(project, 'one.jsonl'), [
     response('msg_1', '2026-11-24T15:30:00.000Z', usage(5, 1_000, 10, 10)), response('msg_3', '2026-11-24T15:31:00.000Z', usage(1, 1_200, 0, 30)),
   ]);
@@ -160,13 +160,31 @@ test('A parent and its child\'s file are two sessions, the child naming its pare
     { ...response('msg_2', '2026-11-24T15:30:30.000Z', usage(7, 0, 400, 20), 'claude-haiku-4-5-20251001'), isSidechain: true, agentId: 'a1' },
   ]);
   await writeFile(join(project, 'one/subagents/agent-a1.meta.json'), '{"agentType":"reviewer"}');
-  const files = (await claudeFiles({ home }))!.sort((a, b) => a.session.localeCompare(b.session));
+  const listed = await claudeFiles({ home });
+  assert.equal(listed.unread, false);
+  const files = listed.files.sort((a, b) => a.session.localeCompare(b.session));
   assert.deepEqual(files, [
     { file: join(project, 'one/subagents/agent-a1.jsonl'), session: 'agent-a1', parent: 'one' },
     { file: join(project, 'one.jsonl'), session: 'one' },
   ]);
   const requests = (await Promise.all(files.map(each => readClaudeSession(each)))).flatMap(read => read.requests);
   assert.deepEqual(requests.map(each => [each.request, each.session, each.parent]), [['msg_2', 'agent-a1', 'one'], ['msg_1', 'one', undefined], ['msg_3', 'one', undefined]]);
+
+  // An unreadable sibling project folder or nested subagents folder flags unread without hiding readable files.
+  const blocked = join(home, '.claude/projects/-work-blocked');
+  await mkdir(blocked, { recursive: true });
+  await chmod(blocked, 0o000);
+  const subagents = join(project, 'one/subagents');
+  await chmod(subagents, 0o111);
+  try {
+    const partial = await claudeFiles({ home });
+    assert.equal(partial.unread, true);
+    assert.deepEqual(partial.unreadSessions, ['one']);
+    assert.deepEqual(partial.files, [{ file: join(project, 'one.jsonl'), session: 'one' }]);
+  } finally {
+    await chmod(subagents, 0o700);
+    await chmod(blocked, 0o700);
+  }
 });
 
 test('The cost record is the tool\'s own running total for the file as last recorded, zero included; with none, or one that leaves a model out, there is none', async () => {
