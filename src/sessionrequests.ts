@@ -62,7 +62,7 @@ export async function scanLines(file: string, from: Position | undefined, line: 
       read += bytesRead;
       const text = Buffer.concat([rest, chunk.subarray(0, bytesRead)]);
       let start = 0, end: number;
-      while ((end = text.indexOf(10, start)) !== -1) { line(text.toString('utf8', start, end)); start = end + 1; }
+      while ((end = text.indexOf('\n', start)) !== -1) { line(text.toString('utf8', start, end)); start = end + 1; }
       rest = text.subarray(start);
     }
     return { dev, ino, offset: read - rest.length };
@@ -75,7 +75,7 @@ export interface SessionRead {
   requests: Request[];
   /** The working folder's name, from the first record in these lines that states one. */
   project?: string;
-  /** The tool's own cost in dollars for the session with its children: the last record of it in these lines, where above zero. */
+  /** The tool's own cost in dollars for the session with its children: the last record of it in these lines, if above zero. */
   treeReported?: number;
   /** Lines passed over that could have held a request: which, each tool's reader says (Claude Code's: readClaudeSession). */
   unread: number;
