@@ -472,6 +472,7 @@ test('One-hour cache writes: exact on claude-opus-5-5 (has cacheWrite1h), and "a
   assert.equal(lowerRow.models[0]!.cost.atLeast, true);
   assert.equal(exactRow.cost.atLeast, false, 'unrelated session stays exact');
   assert.equal(mixed.byTool[0]!.cost.atLeast, true);
+  assert.equal(mixed.byTool[0]!.cost.oneHourLow, true, 'and says it is for the one-hour writes');
   assert.equal(mixed.byModel.find(m => m.model === 'claude-2')!.cost.atLeast, true);
   assert.equal(mixed.byModel.find(m => m.model === 'claude-opus-5-5')!.cost.atLeast, false);
   assert.equal(mixed.total.cost.atLeast, true);
