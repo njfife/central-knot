@@ -1,8 +1,9 @@
 // Pure rows and totals for a period's session reading (sessionday.ts DayReading), for the Sessions page: turns read sessions
-// into ordered session rows (newest first), nests child sessions under their parent (chronological; orphan children stay at
-// top level, once), computes per-model tokens and list-price sums (the one sum in the codebase), keeps a root session's
-// tool-reported figure beside its sum without adding it to any total, and computes period, per-tool and per-model totals with
-// each present tool's unread flag beside the rows and the price list's date once.
+// into ordered session rows (newest first), nests child sessions (an agent's) under their parent (chronological; orphan children
+// stay at top level, once), computes per-model tokens and list-price sums (the one sum in the codebase), each row's own and with
+// its children's, keeps a root session's tool-reported figure beside its sum without adding it to any total, and computes
+// period, per-tool and per-model totals (each request once; sessions counted at top level) with each present tool's unread
+// flag beside the rows and the price list's date once.
 // Not here: reading session files (sessionday.ts, sessionrequests.ts), pricing requests (rates.ts), IPC, or page wording/DOM.
 import type { UnpricedReason } from './rates.ts';
 import type { Tokens } from './sessionrequests.ts';
@@ -34,19 +35,23 @@ export interface CostSum {
 /** One saved model id's tokens and list-price sum, inside a row or across the period. */
 export interface ModelCost { model: string; tokens: Tokens; cost: CostSum }
 /**
- * One session's row for the period: its own requests alone (never its children's), its first and last request time (ms),
- * optional `reported` tool figure (USD, only on a root session wholly inside the period; never in sums), and nested `children`.
+ * One session's row for the period: `tokens`, `models` and `cost` of its own requests alone, `withChildren` the same sum over
+ * its own and every descendant's (an agent's session and theirs; its own where it has none), its first and last request time
+ * (ms, its own), optional `reported` tool figure (USD, only on a root session wholly inside the period; never in sums), and
+ * nested `children`.
  */
 export interface SessionRow {
   tool: SessionTool; session: string; parent?: string; project?: string;
   first: number; last: number; tokens: Tokens; models: ModelCost[]; cost: CostSum;
+  withChildren: { tokens: Tokens; cost: CostSum };
   reported?: number; children: SessionRow[];
 }
-/** One present tool's totals for the period, with its `unread` flag beside the rows. */
+/** One present tool's totals for the period (`sessions`: its top-level rows), with its `unread` flag beside the rows. */
 export interface ToolTotal { tool: SessionTool; sessions: number; tokens: Tokens; cost: CostSum; unread: boolean }
 /** All rows, totals, per-tool status and the price list's date once (never per row or sum) for a period reading. */
 export interface DayRows {
   period: Period; ratesDate: string; rows: SessionRow[];
+  /** `sessions`: the top-level rows, a child counted in its parent's. */
   total: { sessions: number; tokens: Tokens; cost: CostSum };
   byTool: ToolTotal[]; byModel: ModelCost[];
 }
@@ -137,20 +142,19 @@ function hasAncestor(start: SessionRow, target: SessionRow, byKey: Map<string, S
 /** Turns a period reading into ordered session rows (children nested under parents) and period, tool and model totals. */
 export function sessionRows(reading: DayReading): DayRows {
   const allRows: SessionRow[] = [];
-  const byTool: ToolTotal[] = [];
-  for (const toolReading of reading.tools) {
-    const { sessions } = toolReading;
-    for (const s of sessions) {
-      const first = s.requests.reduce((min, { request }) => Math.min(min, request.at), Infinity);
-      const last = s.requests.reduce((max, { request }) => Math.max(max, request.at), -Infinity);
-      allRows.push({
-        tool: s.tool, session: s.session,
-        ...(s.parent ? { parent: s.parent } : {}), ...(s.project ? { project: s.project } : {}),
-        first, last, ...tally(s.requests), models: modelsOf(s.requests),
-        ...(s.reported !== undefined ? { reported: s.reported } : {}), children: [],
-      });
-    }
-    byTool.push({ tool: toolReading.tool, sessions: sessions.length, ...tally(sessions.flatMap(s => s.requests)), unread: toolReading.unread });
+  const own = new Map<SessionRow, readonly PricedRequest[]>();
+  for (const s of reading.tools.flatMap(toolReading => toolReading.sessions)) {
+    const first = s.requests.reduce((min, { request }) => Math.min(min, request.at), Infinity);
+    const last = s.requests.reduce((max, { request }) => Math.max(max, request.at), -Infinity);
+    const sum = tally(s.requests);
+    const row: SessionRow = {
+      tool: s.tool, session: s.session,
+      ...(s.parent ? { parent: s.parent } : {}), ...(s.project ? { project: s.project } : {}),
+      first, last, ...sum, models: modelsOf(s.requests), withChildren: sum,
+      ...(s.reported !== undefined ? { reported: s.reported } : {}), children: [],
+    };
+    own.set(row, s.requests);
+    allRows.push(row);
   }
   const byKey = new Map(allRows.map(row => [`${row.tool}\0${row.session}`, row]));
   const rows: SessionRow[] = [];
@@ -161,9 +165,15 @@ export function sessionRows(reading: DayReading): DayRows {
   }
   for (const row of allRows) row.children.sort((a, b) => a.first - b.first || a.last - b.last || a.session.localeCompare(b.session));
   rows.sort((a, b) => b.last - a.last || b.first - a.first || a.tool.localeCompare(b.tool) || a.session.localeCompare(b.session));
+  // A row's requests with its descendants' (the nesting above has no cycle), summed once per row that has children.
+  const family = (row: SessionRow): PricedRequest[] => [...own.get(row)!, ...row.children.flatMap(family)];
+  for (const row of allRows) if (row.children.length) row.withChildren = tally(family(row));
+  const byTool = reading.tools.map(({ tool, sessions, unread }): ToolTotal => ({
+    tool, sessions: rows.filter(row => row.tool === tool).length, ...tally(sessions.flatMap(s => s.requests)), unread,
+  }));
   const allRequests = reading.tools.flatMap(t => t.sessions.flatMap(s => s.requests));
   return {
     period: reading.period, ratesDate: reading.ratesDate, rows,
-    total: { sessions: allRows.length, ...tally(allRequests) }, byTool, byModel: modelsOf(allRequests),
+    total: { sessions: rows.length, ...tally(allRequests) }, byTool, byModel: modelsOf(allRequests),
   };
 }
