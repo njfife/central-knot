@@ -18,7 +18,7 @@ import { dirname, join } from 'node:path';
 import { emptyLibrary, readLibraryFile, saveLibraryFile, type RecordFile, type StoredLibrary } from './kindstore.ts';
 import type { LibraryItem } from './library.ts';
 import type { KindLibrary } from './librarypass.ts';
-import { NOTHING_CHANGED, copyTree, exists, finishCopy, readRecord, readTree, removeTree, saveRecord, storeDirectory, storeFolder, writeDurably, type ShareContext } from './share.ts';
+import { FORMAT_VERSION, NOTHING_CHANGED, copyTree, exists, finishCopy, readRecord, readTree, removeTree, saveRecord, storeDirectory, storeFolder, writeDurably, type ShareContext } from './share.ts';
 import { migrateSkills, type Migrated, type ToolsRead } from './skillmigrate.ts';
 import type { HarnessId } from './types.ts';
 
@@ -68,14 +68,14 @@ export async function recordedSkills(home: string): Promise<Record<string, Libra
   return 'library' in read ? read.library.items : {};
 }
 
-/** sync.json without the skills it held before the library (format 2): who owns this home, its generation and its tools stay. */
+/** sync.json without the skills it held before the library, in this build's format (share.ts FORMAT_VERSION): who owns this home, its generation and its tools stay. */
 async function finishMigration(context: ShareContext) {
   const { record } = await readRecord(context.home);
   if (record?.formatVersion !== 1) return;
   const backup = join(storeDirectory(context.home), 'sync.v1.json');
   if (!(await exists(backup))) await writeDurably(backup, `${JSON.stringify(record, null, 2)}\n`);
   const { items: _items, roots: _roots, lastStartId: _last, activeStartId: _active, ...kept } = record as typeof record & Record<string, unknown>;
-  await saveRecord(context.home, { ...kept, formatVersion: 2 });
+  await saveRecord(context.home, { ...kept, formatVersion: FORMAT_VERSION });
 }
 
 export const saveLibrary = (home: string, library: KindLibrary) => saveLibraryFile(home, RECORD, library);

@@ -158,9 +158,10 @@ test('Migration: every state lands where its table says, every folder byte for b
       for (const tool of all) { const there = await readTree(folderOf(box, tool, key)).catch(() => undefined); if (there && !item.deleted) assert.ok(versions.has(there.hash), `${key}: ${tool}’s copy`); }
       for (const version of item.versions) assert.ok(await stat(join(box.home, '.central-knot/items/skills', storeFolder(key), 'versions', version.hash)).then(() => true, () => false), `${key}: ${version.hash} is stored`);
     }
-    // The records: skills.json is the library's, sync.json keeps the build it names and its tools, sync.v1.json the earlier file.
+    // The records: skills.json is the library's, sync.json keeps the build it names and its tools, in this build's format (3: a
+    // build that knows five tools stops there), sync.v1.json the earlier file.
     const sync = JSON.parse(await readFile(join(box.home, '.central-knot/sync.json'), 'utf8'));
-    assert.deepEqual(sync, { formatVersion: 2, generation: 'g1', owner: 'test', tools: all });
+    assert.deepEqual(sync, { formatVersion: 3, generation: 'g1', owner: 'test', tools: all });
     assert.deepEqual(JSON.parse(await readFile(join(box.home, '.central-knot/sync.v1.json'), 'utf8')), record);
   } finally { await box.cleanup(); }
 });
@@ -198,7 +199,7 @@ test('Migration: a crash at each of its steps leaves the earlier record and kept
       const before = await folders(box);
       await pass(box);
       assert.deepEqual(await folders(box), before, step);
-      assert.equal(JSON.parse(await readFile(join(box.home, '.central-knot/sync.json'), 'utf8')).formatVersion, 2, step);
+      assert.equal(JSON.parse(await readFile(join(box.home, '.central-knot/sync.json'), 'utf8')).formatVersion, 3, step);
       assert.equal((await library(box)).steady.on, true, step);
     } finally { await box.cleanup(); }
   }

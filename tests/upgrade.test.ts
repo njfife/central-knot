@@ -37,10 +37,10 @@ import { homePass } from '../src/homepass.ts';
 import { toolMark } from '../src/pluginstatus.ts';
 import { readProfiles } from '../src/profiles.ts';
 import { readTool, serverHash } from '../src/mcp.ts';
-import type { PluginEntry } from '../src/pluginrecord.ts';
+import { bringForward, type PluginEntry } from '../src/pluginrecord.ts';
 import { applyServers, serverKind, serversView } from '../src/servers.ts';
 import { setSyncEverything } from '../src/everything.ts';
-import { managedNow, readRecord, syncGate, writeAccess } from '../src/share.ts';
+import { libraryGate, managedNow, readRecord, syncGate, writeAccess } from '../src/share.ts';
 import { asksNow } from '../src/setupcounts.ts';
 import { applySkills, skillKind } from '../src/skills.ts';
 import type { HarnessId, HistoryEvent, HomeView } from '../src/types.ts';
@@ -447,8 +447,8 @@ for (const rule of [true, false]) for (const sync of ['on', 'off'] as const) {
 
 /**
  * alpha-1-parts brought to this version (start), then its records rewritten as `next` wrote them, which v0.7.0-alpha.5 was cut
- * from: knowing five tools, no sixth in any list and no `knows`; then Antigravity there (a chosen folder's tool is there by its
- * folder). `excepts`: each plugin's `except`, and each item's linked to one (pdf and lookup, let go as his own, follow the
+ * from: knowing five tools, no sixth in any list and no `knows`, and the sync record at format 2; then Antigravity there (a chosen
+ * folder's tool is there by its folder). `excepts`: each plugin's `except`, and each item's linked to one (pdf and lookup, let go as his own, follow the
  * library's rule for a tool joining), as the records hold them now; `saved`, as they held them before; `linked`, those items.
  */
 async function fiveToolsThenAntigravity(box: Box) {
@@ -462,6 +462,7 @@ async function fiveToolsThenAntigravity(box: Box) {
   const five = (value: unknown): unknown => (Array.isArray(value) ? value.filter(each => each !== 'antigravity-cli').map(five)
     : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'knows').map(([key, each]) => [key, five(each)])) : value);
   for (const name of records) await writeFile(join(box.store, name), `${JSON.stringify(five(await readJson(join(box.store, name))), null, 2)}\n`);
+  await writeFile(join(box.store, 'sync.json'), `${JSON.stringify({ ...await readJson(join(box.store, 'sync.json')), formatVersion: 2 }, null, 2)}\n`);
   await mkdir(join(box.home, '.gemini/config'), { recursive: true });
   return { excepts, saved, linked };
 }
@@ -494,6 +495,101 @@ test('Records that knew five tools, opened with Antigravity there: it has arrive
     assert.ok(there.length > 0, 'the pass put items there');
     assert.deepEqual([seen.arrived.map(({ tool, copied }) => ({ tool, copied })), copied, copied.filter(key => linked.includes(key))], [[{ tool: 'antigravity-cli', copied: there.length }], there, []]);
   } finally { await rm(box.base, { recursive: true, force: true }); }
+});
+
+// The last release reads a sync record above format 2 as written by a newer Central Knot and stops syncing the home (its
+// share.ts readRecord; this one's FORMAT_VERSION). Such a home's records are first brought forward, naming Antigravity, by a step
+// that runs with Automatic sync on or off (pluginrecord.ts bringForward): each record it saves is saved after the sync record is
+// lifted, so a start stopped at any moment leaves a home the last release stops syncing, never one it syncs with a sixth tool named.
+test('Records that knew five tools: each one brought forward is saved after the sync record is lifted to format 3, at which the last release stops syncing', async () => {
+  const box = await placeParts(true);
+  try {
+    await fiveToolsThenAntigravity(box);
+    const context = appContext(box.home, box.appData), formats: string[] = [];
+    const noting = (kind: typeof skillKind | typeof agentKind | typeof serverKind) => ({ open: kind.open, save: async (home: string, library: Parameters<typeof kind.save>[1]) => {
+      formats.push(`${kind.kind} saved at format ${(await readRecord(home)).record?.formatVersion}`);
+      await kind.save(home, library);
+    } });
+    assert.equal((await readRecord(box.home)).record?.formatVersion, 2, 'as the last release left it');
+    await bringForward(context, [noting(skillKind), noting(agentKind), noting(serverKind)]);
+    assert.deepEqual(formats, ['skill saved at format 3', 'agent saved at format 3', 'mcp saved at format 3']);
+    assert.deepEqual((await readJson(join(box.store, 'plugins.json'))).knows.includes('antigravity-cli'), true);
+  } finally { await rm(box.base, { recursive: true, force: true }); }
+});
+test('Records that knew five tools, opened with Automatic sync off: nothing is synced, and the sync record is lifted to format 3 all the same', async () => {
+  const box = await placeParts(true);
+  try {
+    await fiveToolsThenAntigravity(box);
+    const was = await filesIn(box.home), after = start(box, 'off', 1)[0];
+    assert.deepEqual([changedInTools(was, after.files), (await readRecord(box.home)).record?.formatVersion], [[], 3]);
+  } finally { await rm(box.base, { recursive: true, force: true }); }
+});
+
+// The Plugins page writes the plugins record outside the library's gate, naming every tool this build knows (share.ts liftFirst).
+// A home the last release left that this version doesn't remember waits for Resume: a plugin's click there is refused with the
+// gate's words and saves nothing, since a record naming Antigravity beside a sync record at format 2 is one the last release reads
+// as damaged, then syncs the plugin's items into tools it is kept out of. Remembered, the same click lifts the sync record first.
+test('Records that knew five tools, waiting for Resume: a plugin’s click is refused with the gate’s words and saves nothing; remembered, it lifts the sync record first', async () => {
+  const box = await placeParts(true);
+  try {
+    await fiveToolsThenAntigravity(box);
+    const settings = appContext(box.home, box.appData).settingsPath, memory = await readFile(settings, 'utf8');
+    const entry: PluginEntry = (await readJson(join(box.store, 'plugins.json'))).plugins[0];
+    const records = () => Promise.all(['sync.json', 'plugins.json'].map(name => readFile(join(box.store, name), 'utf8')));
+    const click = () => plugins(box).markets.turn(entry.source, entry.plugin, entry.on ? 'off' : 'on', undefined, box.home);
+    await rm(settings);
+    const before = await records(), refused = await click();
+    assert.deepEqual([await records(), refused.stopped], [before, 'This app has an intact sync record but no memory of it. Resuming keeps every recorded choice.']);
+    await writeFile(settings, memory);
+    await click();
+    const now: PluginEntry[] = (await readJson(join(box.store, 'plugins.json'))).plugins;
+    assert.deepEqual([(await readRecord(box.home)).record?.formatVersion, now.find(each => each.plugin === entry.plugin)?.on], [3, !entry.on]);
+  } finally { await rm(box.base, { recursive: true, force: true }); }
+});
+
+// alpha-1-parts as alpha 1 left it: the old plugin parts, no plugins record, the sync record at format 2. A start of this version
+// first makes the plugins record (marketplaces.ts beforeParts, before any step asks the library's gate), naming Antigravity among
+// the tools it was written knowing: the sync record is lifted before it is saved.
+test('Plugin parts and no plugins record, sync record at format 2: the start’s first plugins record is saved after the sync record is lifted', async () => {
+  const box = await place('alpha-1-parts');
+  try {
+    const knows = async () => (await readJson(join(box.store, 'plugins.json')))?.knows?.includes('antigravity-cli');
+    assert.deepEqual([await knows(), (await readRecord(box.home)).record?.formatVersion], [undefined, 2]);
+    await plugins(box).markets.beforeParts();
+    assert.deepEqual([await knows(), (await readRecord(box.home)).record?.formatVersion], [true, 3]);
+  } finally { await rm(box.base, { recursive: true, force: true }); }
+});
+
+/**
+ * What a start left of a home, without what two copies of one home differ by (their folder, each plugin's id, and the times and
+ * ids History and the versions keep): each tool file's text, each kind's items as their switches stand, the plugins record, and
+ * the sync record's format.
+ */
+async function endState(box: Box) {
+  const ids: [string, string][] = (await readJson(join(box.store, 'plugins.json'))).plugins.map((entry: PluginEntry) => [entry.id, `${entry.plugin}@${entry.marketName}`]);
+  const plain = (text: string) => ids.reduce((done, [id, name]) => done.replaceAll(id, name), text.replaceAll(box.home, '~'));
+  const tools = Object.keys((await filesIn(box.home)).sha256).filter(inTools).sort();
+  const items = async (name: string) => Object.entries<LibraryItem>((await readJson(join(box.store, name))).items)
+    .map(([key, { on, except, source }]) => plain(JSON.stringify({ key, on, except, source })));
+  return {
+    tools: await Promise.all(tools.map(async path => [path, plain(await readFile(join(box.home, path), 'utf8'))])),
+    items: [...await items('skills.json'), ...await items('mcp.json'), ...await items('agents.json')],
+    plugins: plain(await readFile(join(box.store, 'plugins.json'), 'utf8')), format: (await readRecord(box.home)).record?.formatVersion,
+  };
+}
+
+// A start stopped right after the lift, before anything else was written: only the sync record has changed, so the last release
+// refuses the home and nothing in it names Antigravity yet; and this version, opened again, ends as a start never stopped does.
+test('Records that knew five tools: a start stopped right after the lift has changed only the sync record, and the next start ends as one never stopped', async () => {
+  const [stopped, whole] = [await placeParts(true), await placeParts(true)];
+  try {
+    for (const box of [stopped, whole]) await fiveToolsThenAntigravity(box);
+    const was = await filesIn(stopped.home);
+    assert.ok(!('refused' in await libraryGate(appContext(stopped.home, stopped.appData))), 'the lift, as the start’s first step that writes');
+    assert.deepEqual([writtenBetween(was, await filesIn(stopped.home)), (await readRecord(stopped.home)).record?.formatVersion], [['.central-knot/sync.json'], 3]);
+    for (const box of [stopped, whole]) start(box, 'on', 1);
+    assert.deepEqual(await endState(stopped), await endState(whole));
+  } finally { for (const box of [stopped, whole]) await rm(box.base, { recursive: true, force: true }); }
 });
 
 // Pi left out at the upgrade and managed again later: the move decides it as the record knew it, so nothing he removed there
