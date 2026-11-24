@@ -141,8 +141,19 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
   });
 }
 
+/**
+ * Leading arguments for Git commands run through `git` / `runGit`: hooks stay off everywhere, and on Windows line endings
+ * stay byte-exact (even under `text=auto`) and paths past 260 characters are allowed. Passed as `-c` flags rather than
+ * `GIT_CONFIG_COUNT`, which tests use for stand-in hosts.
+ */
+export const gitPrefix = (platform: NodeJS.Platform = process.platform): string[] =>
+  platform === 'win32'
+    ? ['-c', 'core.hooksPath=/dev/null', '-c', 'core.autocrlf=false', '-c', 'core.eol=lf', '-c', 'core.longpaths=true']
+    : ['-c', 'core.hooksPath=/dev/null'];
+
 /** Git run with hooks and prompts off: an SSH host, key or credential that would ask fails at once instead (MKT-05). */
-const git = (args: string[], timeoutMs: number, options: RunOptions = {}) => run('git', ['-c', 'core.hooksPath=/dev/null', ...args], { timeoutMs, ...options, group: true, env: { ...gitEnv(), ...options.env } });
+const git = (args: string[], timeoutMs: number, options: RunOptions = {}) =>
+  run('git', [...gitPrefix(), ...args], { timeoutMs, ...options, group: true, env: { ...gitEnv(), ...options.env } });
 /** The same Git, for other features (the git repo of the Managed set, the plugin text: plugintext.ts): hooks and prompts off, this computer's own sign-in. */
 export const runGit = (args: string[], timeoutMs = 60_000, options: RunOptions = {}) => git(args, timeoutMs, options);
 
