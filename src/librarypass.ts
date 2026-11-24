@@ -1399,8 +1399,6 @@ async function keepMine(pass: Pass, item: LibraryItem, there: { hash: string; co
  */
 async function pull(pass: Pass, key: string, brought: Pulled<unknown>) {
   const known = pass.library.items[key], live = known && !known.deleted ? known : undefined;
-  const recordHold = live && pluginsRecordHold(live, pass.recorded);
-  if (recordHold) { pass.results.push({ item: live.name, outcome: 'held', unchanged: true, message: recordHold }); return; }
   if ('removed' in brought) {
     if (live) { live.deleted = { at: now() }; pass.asked.set(key, { kind: 'deleted', cause: 'pulled', fill: 'removed' }); }
     return;

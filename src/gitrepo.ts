@@ -22,17 +22,18 @@ import { agentHash, agentText, fromMarkdown, readAgents, safeName, type AgentEnt
 import { agentsForRepo, agentsView, applyAgents } from './agents.ts';
 import { parseSkill } from './discovery.ts';
 import { harnesses } from './harnesses.ts';
-import { wantedIn, type LibraryItem } from './library.ts';
+import { wantedIn } from './library.ts';
 import { appendHistory, readHistory, replaceHistory } from './history.ts';
 import { applySkills, skillsForRepo, skillsView } from './skills.ts';
 import { fromJson, jsonEntry, serverHash, type NeutralServer } from './mcp.ts';
 import { applyServers, serversForRepo, serversView } from './servers.ts';
+import { readPluginRecord } from './pluginrecord.ts';
 import { gitEnv, gitFailure, runGit, whyGitFailed, whyPushFailed } from './plugins.ts';
 import { PRODUCT } from './values.ts';
 import { leftOutSentence, pageNames } from './words.ts';
 import { copyTree, errorCode, exists, itemKey, libraryGate, managedNow, notCopied, sha256 as sha, plainError, readTree, removeTree, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext, type Tree } from './share.ts';
 import { undoBase } from './instructions.ts';
-import { pluginsRecordHold, recordedIds, sourceAt } from './sourcestore.ts';
+import { recordedIds, sourceAt } from './sourcestore.ts';
 import type { ApplyResult, BaseUndo, DestinationResult, HarnessId, HistoryEvent, RepoChange, RepoCommit, RepoKind, RepoResult, RepoView, Snapshot } from './types.ts';
 
 /** The base instructions (instructions.ts repoBase): read for Push, applied on Pull. Without it, instructions/ is left alone. */
@@ -296,12 +297,12 @@ const forgetWritten = (dir: string) => rm(writtenPath(dir), { force: true });
  * that isn't in Central Knot is not sent, and not removed from the repo either.
  */
 async function writeSkills(context: ShareContext, dir: string, tools: HarnessId[]): Promise<Written> {
-  const written: Written = { unsent: new Map(), unmanaged: new Set(), held: new Set() };
+  const written: Written = { unsent: new Map(), unmanaged: new Set() };
   // Missing or damaged, it only means every skill is written again.
   const before: Record<string, string> = await readFile(writtenPath(dir), 'utf8').then(JSON.parse).catch(() => ({}));
-  const sources = new Map<string, string>(), plugin = await pluginItems(context.home, written.held);
+  const sources = new Map<string, string>(), plugin = await pluginItems(context.home);
   for (const { item, folder } of await skillsForRepo(context, tools)) {
-    if (plugin(item, item.key)) continue;
+    if (plugin(item)) continue;
     if (folder) sources.set(item.name, folder);
     else markUnsendable(written.unsent, item.key, 'skill', item.name, 'Its current version is no longer in Central Knot’s store.');
   }
@@ -328,17 +329,12 @@ async function writeSkills(context: ShareContext, dir: string, tools: HarnessId[
 /**
  * Whether Push leaves an item out: one linked to a plugin (library.ts A PLUGIN), which each machine gets from the plugin there;
  * pushed, it would arrive elsewhere unlinked and On, and Claude Code there would load it twice beside the installed plugin.
- * While plugins.json has a problem, `pluginsRecordHold` leaves plugin items out here too (and librarypass.ts `pull` holds them).
- * The one place Push decides it, for each kind's writer.
+ * Pull is unchanged. The one place Push decides it, for each kind's writer.
  */
-const pluginItems = async (home: string, held?: Set<string>) => {
-  const recorded = await recordedIds(home), ids = new Set(recorded.plugins.map(entry => entry.id));
-  return (item: Pick<LibraryItem, 'source' | 'versions'>, key: string) =>
-    (!!item.source && ids.has(item.source)) || (!!pluginsRecordHold(item, recorded) && (held?.add(key), true));
-};
+const pluginItems = async (home: string) => { const ids = new Set((await recordedIds(home)).plugins.map(entry => entry.id)); return (item: { source?: string }) => !!item.source && ids.has(item.source); };
 
-/** What a writer reports: Managed items that can't go, unmanaged keys here, and keys held by a damaged plugins record. */
-interface Written { unsent: Unsent; unmanaged: Set<string>; held: Set<string> }
+/** What a writer reports: the Managed items here that can't go in the repo, and the keys of items here that aren't Managed. */
+interface Written { unsent: Unsent; unmanaged: Set<string> }
 
 /**
  * Writes every MCP server in Central Knot's library, On or Off here, but one linked to a plugin (pluginItems), under mcp/ in Claude Code's shape: its current version (or
@@ -349,9 +345,9 @@ interface Written { unsent: Unsent; unmanaged: Set<string>; held: Set<string> }
  */
 async function writeServers(context: ShareContext, dir: string, tools: HarnessId[], baseId: string | undefined): Promise<Written> {
   await clearLayout(dir, 'mcp', entry => entry.isFile() && entry.name.endsWith('.json'));
-  const written: Written = { unsent: new Map(), unmanaged: new Set(), held: new Set() };
-  const plugin = await pluginItems(context.home, written.held), all = await serversForRepo(context, tools), view = await serversView(context, tools);
-  const library = all.filter(entry => !plugin(entry.item, serverKey(entry.item.name))), pathOf = (name: string) => `mcp/${toFile(name)}.json`;
+  const written: Written = { unsent: new Map(), unmanaged: new Set() };
+  const plugin = await pluginItems(context.home), all = await serversForRepo(context, tools), view = await serversView(context, tools);
+  const library = all.filter(entry => !plugin(entry.item)), pathOf = (name: string) => `mcp/${toFile(name)}.json`;
   const inRepo = baseId ? await readBlobs(dir, library.map(entry => `${baseId}:${pathOf(entry.item.name)}`)) : new Map<string, Buffer>();
   for (const { item, server, claudeOwn } of library) {
     if (!server) { markUnsendable(written.unsent, serverKey(item.name), 'mcp', item.name, 'Its current version is no longer in Central Knot’s store.'); continue; }
@@ -374,9 +370,9 @@ async function writeServers(context: ShareContext, dir: string, tools: HarnessId
  */
 async function writeAgents(context: ShareContext, dir: string, tools: HarnessId[], baseId: string | undefined): Promise<Written> {
   await clearLayout(dir, 'agents', entry => entry.isFile() && entry.name.endsWith('.md'));
-  const written: Written = { unsent: new Map(), unmanaged: new Set(), held: new Set() };
-  const plugin = await pluginItems(context.home, written.held), all = await agentsForRepo(context, tools), view = await agentsView(context, tools);
-  const library = all.filter(entry => !plugin(entry.item, agentKey(entry.item.name))), pathOf = (name: string) => `agents/${toFile(name)}.md`;
+  const written: Written = { unsent: new Map(), unmanaged: new Set() };
+  const plugin = await pluginItems(context.home), all = await agentsForRepo(context, tools), view = await agentsView(context, tools);
+  const library = all.filter(entry => !plugin(entry.item)), pathOf = (name: string) => `agents/${toFile(name)}.md`;
   const plain = library.filter(entry => entry.agent && entry.claudeFile === undefined);
   const inRepo = baseId ? await readBlobs(dir, plain.map(entry => `${baseId}:${pathOf(entry.item.name)}`)) : new Map<string, Buffer>();
   for (const { item, agent, claudeFile } of library) {
@@ -400,13 +396,12 @@ async function writeManaged(context: ShareContext, dir: string, baseId: string |
   const agents = await writeAgents(context, dir, tools, baseId);
   const unsent: Unsent = new Map([...skills.unsent, ...servers.unsent, ...agents.unsent]);
   const unmanaged = new Set([...skills.unmanaged, ...servers.unmanaged, ...agents.unmanaged]);
-  const held = new Set([...skills.held, ...servers.held, ...agents.held]);
   if (base) {
     await rm(join(dir, 'instructions', 'base.md'), { force: true });
     const text = await base.read();
     if (text?.trim()) await writeScratch(join(dir, 'instructions', 'base.md'), text);
   }
-  return { unsent, unmanaged, held, tools };
+  return { unsent, unmanaged, tools };
 }
 
 /** Stages the working tree as it is and returns its tree. Everything is taken, even what the repo's .gitignore names: content moves as-is. */
@@ -423,21 +418,19 @@ interface Sides {
   branchGone?: boolean;
   /** Keys of items in a tool here that aren't Managed (so not in `here`): one the repo adds by the same name replaces it. */
   unmanaged?: Set<string>;
-  /** Keys held by a damaged plugins record (pluginsRecordHold): Push leaves any existing repo paths as they are. */
-  held?: Set<string>;
 }
 
 /** Writes the Managed set here into the clone, then reads all three sides: the base commit, the repo's latest, and here. */
 async function stageSides(context: ShareContext, dir: string, state: RepoState, base?: BaseInstructions): Promise<Sides> {
   await keepBytes(dir).catch(() => undefined);
-  const { unsent, unmanaged, held } = await writeManaged(context, dir, state.base, base);
+  const { unsent, unmanaged } = await writeManaged(context, dir, state.base, base);
   const tree = await stageTree(dir);
   const latestId = await commitOf(dir, `refs/remotes/origin/${state.branch}`);
   // The branch gone from the repo (deleted there) is not every item deleted: the repo is read as it was at the base, and Push puts
   // the branch back.
   const branchGone = !!state.base && !latestId;
   const [atBase, latest, here] = await Promise.all([readSide(dir, state.base, !!base), readSide(dir, branchGone ? state.base : latestId, !!base), readSide(dir, tree, !!base)]);
-  return { base: atBase, latest, here, latestId: branchGone ? state.base : latestId, branchGone, unsent, unmanaged, held };
+  return { base: atBase, latest, here, latestId: branchGone ? state.base : latestId, branchGone, unsent, unmanaged };
 }
 
 const same = (first?: SideItem, second?: SideItem) => first?.id === second?.id;
@@ -463,15 +456,13 @@ function pullOf(row: RepoChange): NonNullable<RepoChange['pull']> {
  * Pull again while the repo still has what it had then. `syncOn`: whether Automatic sync is on; while it is off, an agent's
  * deletion coming in waits for it (`sync: 'waits'`), since Pull can't spread one without it.
  */
-export function classify(sides: Pick<Sides, 'base' | 'latest' | 'here' | 'unsent' | 'unmanaged' | 'held'>,
-  unfinished: Unfinished = {}, syncOn = true): { incoming: RepoChange[]; outgoing: RepoChange[] } {
+export function classify(sides: Pick<Sides, 'base' | 'latest' | 'here' | 'unsent' | 'unmanaged'>, unfinished: Unfinished = {}, syncOn = true): { incoming: RepoChange[]; outgoing: RepoChange[] } {
   const incoming: RepoChange[] = [];
   const outgoing: RepoChange[] = [];
   const { base, latest, here, unsent } = sides;
   // Unsent keys too: one whose deletion in the repo waits is in no side once the base has moved past it.
   for (const key of new Set([...base.keys(), ...latest.keys(), ...here.keys(), ...unsent.keys()])) {
-    const held = !!sides.held?.has(key);
-    const [atBase, inRepo, atHere] = [base.get(key), latest.get(key), held && !unfinished[key] ? base.get(key) : here.get(key)];
+    const [atBase, inRepo, atHere] = [base.get(key), latest.get(key), here.get(key)];
     // An item that can't be sent from here goes on exactly one list, held, with why: coming in when the repo has a change to it
     // waiting (Pull won't take it while this computer's copy can't be read, and keeps it for later), else going out (below).
     if (unsent.has(key)) {
@@ -487,7 +478,7 @@ export function classify(sides: Pick<Sides, 'base' | 'latest' | 'here' | 'unsent
     // The last Pull couldn't finish it. Unless it was edited here since, the repo's version (as it is now) is still what comes in; an
     // edit since keeps the usual rules: it beats the repo's deletion, and gives way to the repo's edit with History keeping it.
     else if (unfinished[key]) {
-      const editedHere = !held && editedSince(unfinished[key], atHere);
+      const editedHere = editedSince(unfinished[key], atHere);
       if (editedHere && atHere && !inRepo) outgoing.push({ ...row, change: 'added', keptHere: true });
       else incoming.push({ ...row, change: changeFrom(atHere, inRepo), held: unfinished[key].heldFor ? NOW_FREE : unfinished[key].reason, retry: true, alsoHere: editedHere ? (atHere ? 'changed' : 'removed') : undefined });
     }
@@ -528,24 +519,28 @@ async function openClone(context: ShareContext): Promise<{ state: RepoState; dir
 }
 
 const PULL_FIRST = 'The repo has changes this computer doesn’t have yet. Pull them first, then push.';
+/** While plugins.json has a problem, Pull and Push wait (for personal items too) rather than misread plugin links. */
+const pluginsHold = (home: string) => readPluginRecord(home).then(({ problem }) => (problem ? `${problem} Pull and Push wait until then, for your own items too.` : undefined));
 
 async function buildView(context: ShareContext, { base, syncOn }: RepoOptions): Promise<RepoView> {
   const access = await writeAccess(context);
   const found = await openClone(context);
   if (!found) return { connected: false, access };
   const { state, dir } = found;
-  const sides = await stageSides(context, dir, state, base);
+  const held = await pluginsHold(context.home);
+  const sides = held ? undefined : await stageSides(context, dir, state, base);
   // An unfinished item that is now the same here and in the repo (put right by hand, say) is finished.
-  const settled = Object.keys(state.unfinished ?? {}).filter(key => !sides.unsent.has(key) && !sides.held?.has(key) && same(sides.latest.get(key), sides.here.get(key)));
+  const settled = sides ? Object.keys(state.unfinished ?? {}).filter(key => !sides.unsent.has(key) && same(sides.latest.get(key), sides.here.get(key))) : [];
   if (settled.length && access.allowed) {
     for (const key of settled) delete state.unfinished![key];
     await saveState(context.home, { ...state, unfinished: Object.keys(state.unfinished!).length ? state.unfinished : undefined });
   }
-  const { incoming, outgoing } = classify(sides, state.unfinished, syncOn);
+  const { incoming, outgoing } = sides ? classify(sides, state.unfinished, syncOn) : { incoming: [], outgoing: [] };
   return {
-    connected: true, access, url: state.url, branch: state.branch, base: await describeCommit(dir, state.base), latest: await describeCommit(dir, sides.latestId),
-    pulledAt: state.pulledAt, pushedAt: state.pushedAt, checkedAt: state.checkedAt, problem: state.problem, incoming, outgoing,
-    pushBlocked: sides.latestId !== state.base ? PULL_FIRST : undefined, branchGone: sides.branchGone,
+    connected: true, access, url: state.url, branch: state.branch, base: await describeCommit(dir, state.base),
+    latest: await describeCommit(dir, sides ? sides.latestId : (await commitOf(dir, `refs/remotes/origin/${state.branch}`)) ?? state.base),
+    pulledAt: state.pulledAt, pushedAt: state.pushedAt, checkedAt: state.checkedAt, problem: state.problem, held, incoming, outgoing,
+    pushBlocked: sides && sides.latestId !== state.base ? PULL_FIRST : undefined, branchGone: sides?.branchGone,
   };
 }
 
@@ -556,7 +551,7 @@ async function buildView(context: ShareContext, { base, syncOn }: RepoOptions): 
 export function repoView(context: ShareContext, options: RepoOptions & { check?: boolean } = {}): Promise<RepoView> {
   return exclusive(async () => {
     // A page's check gives up sooner than Pull's: a Pull or Push waiting behind it holds every other change in the app.
-    if (options.check) await check(context, 20_000);
+    if (options.check && !(await pluginsHold(context.home))) await check(context, 20_000);
     return buildView(context, options);
   });
 }
@@ -719,7 +714,7 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
   const done = await applyAgents(context, tools, [], { only, pulled: new Map([[key, { name: change.name, agent, claudeFile: text }]]) });
   const here = (await agentsView(context, tools)).library[key];
   // Only where Claude Code has the agent (it is On and not kept out there): a copy it holds otherwise is not Central Knot's.
-  if (done.stopped || done.results.some(result => result.outcome === 'held' && !result.harness) || !tools.includes('claude-cli') || !here || !wantedIn(here, 'claude-cli')) return outcome(done);
+  if (done.stopped || !tools.includes('claude-cli') || !here || !wantedIn(here, 'claude-cli')) return outcome(done);
   return [...outcome(done), ...await pullClaudeSettings(context, change, agentHash(agent), text, wrote)];
 }
 
@@ -868,7 +863,8 @@ async function sayingWhy(context: ShareContext, options: RepoOptions, action: 'P
 async function readyToMove(context: ShareContext, options: RepoOptions): Promise<{ dir: string; state: RepoState; sides: Sides } | { refused: RepoResult }> {
   // Pull writes a tool's copy before sync runs, so the gate for library writes is asked first; only asked: Pull's pass enters it.
   const gate = await libraryGate(context);
-  if ('refused' in gate) return { refused: await refusal(context, gate.refused, options) };
+  const stopped = 'refused' in gate ? gate.refused : await pluginsHold(context.home);
+  if (stopped) return { refused: await refusal(context, stopped, options) };
   const found = await openClone(context);
   if (!found) return { refused: await refusal(context, 'No repo is connected.', options) };
   const problem = await check(context);

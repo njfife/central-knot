@@ -86,7 +86,7 @@ export async function loadRepo(check = false): Promise<void> {
   if (!inFlight) repo.checking = false;
   // Drawn only when the read changed what is shown: a redraw that changes nothing would replace a text field he is typing in, and its Undo.
   if (shownNow() !== shown) rerender();
-  if (!check || !view?.connected || !view.access.allowed) return;
+  if (!check || !view?.connected || !view.access.allowed || view.held) return;
   repo.checking = true;
   rerender();
   inFlight = api().repo(true).finally(() => { inFlight = undefined; });
@@ -323,6 +323,7 @@ function stateLine(view: ConnectedRepoView, counts: Waiting): HTMLElement {
     : part('circle-check', 'tone-success', 'Up to date with the repo');
   const nothingMoves = !counts.pull && !counts.push && !counts.retry;
   const parts = repo.checking ? [part('refresh-cw', 'tone-muted spin', 'Checking the repo…')]
+    : view.held ? [part('circle-alert', 'tone-danger', 'Pull and Push are held')]
     // Unreachable: what can't move is said beside each list; the line keeps to the problem and the counts.
     : view.problem ? [part('circle-alert', 'tone-danger', 'Couldn’t reach the repo'), ...moving]
     // Nothing moves: what can't leads, in full ink, then the rest. Otherwise it follows the counts, quietly.
@@ -334,7 +335,7 @@ function stateLine(view: ConnectedRepoView, counts: Waiting): HTMLElement {
 
 /** What a check found, for the status bar: the state line's words, so the two never disagree. */
 function checkedText(view: ConnectedRepoView): string {
-  if (view.problem) return 'Couldn’t reach the repo.';
+  if (view.held || view.problem) return view.held ? 'Pull and Push are held.' : 'Couldn’t reach the repo.';
   const words = waitingWords(waitingCounts(view));
   const moving = [words.pull, words.push, words.retry].filter(Boolean).join(', ');
   const stuck = [words.stuckIn, words.stuckOut].filter(Boolean).join(', ');
@@ -387,8 +388,8 @@ function connectedPage(view: ConnectedRepoView) {
   const counts = waitingCounts(view);
   const words = waitingWords(counts);
   const locked = !!acting() || !view.access.allowed;
-  // While the repo can't be reached, Pull and Push wait for Try again (in the band) rather than fail the same way.
-  const moving = locked || repo.checking || !!view.problem;
+  // While the repo can't be reached or Pull and Push are held, neither button can act.
+  const moving = locked || repo.checking || !!view.problem || !!view.held;
   const pullControl = pullButton(view, counts, moving);
   const pushControl = pushButton(view, counts.push, moving);
   // Rows to pull but none Pull will move (each waits or can't come in): Pull only moves this computer to the newer commit.
@@ -414,7 +415,7 @@ function connectedPage(view: ConnectedRepoView) {
     h('div.bands', {},
       view.access.allowed ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.access.reason)),
       disconnectQuestion(),
-      problemBand(view.problem && !repo.problem && !repo.checking ? view.problem : undefined),
+      problemBand(!repo.problem && !repo.checking ? (view.held ?? view.problem) : undefined),
       outcomeBand()),
     h('div.scroll.repo-scroll', { id: 'repo-scroll' },
       h('section.repo-where', { 'aria-label': 'Repo' },
@@ -423,8 +424,8 @@ function connectedPage(view: ConnectedRepoView) {
           h('dt', {}, 'This computer is at'), h('dd', {}, view.base ? commitText(view.base) : h('span.tone-muted', {}, 'Nothing pulled or pushed yet')),
           h('dt', {}, view.problem ? 'Repo, last seen' : 'Repo’s latest'), h('dd', {}, view.branchGone ? h('span.tone-warning', {}, `The repo no longer has the branch ${view.branch}. Push puts it back.`) : !view.latest ? h('span.tone-muted', {}, 'The repo is empty') : latestDiffers ? h('span.repo-latest', {}, commitText(view.latest), h('span.repo-new', {}, 'not pulled yet')) : h('span.tone-muted', {}, sameCommitText(counts))),
           h('dt', {}, 'Activity'), h('dd', {}, h('span.repo-activity', {}, activity)))),
-      view.problem ? h('p.repo-stale', { id: WAITING_ID }, icon('info', 12), `${view.latest ? 'These lists are from the last time the repo was reached' : 'The repo hasn’t been reached yet'}; Pull and Push wait until it can be.`) : null,
-      inSync && view.branchGone ? h('div.repo-in-sync', {}, h('span', {}, `Nothing else differs. Push puts the branch ${view.branch} back in the repo.`), pushControl)
+      !view.held && view.problem ? h('p.repo-stale', { id: WAITING_ID }, icon('info', 12), `${view.latest ? 'These lists are from the last time the repo was reached' : 'The repo hasn’t been reached yet'}; Pull and Push wait until it can be.`) : null,
+      view.held ? null : inSync && view.branchGone ? h('div.repo-in-sync', {}, h('span', {}, `Nothing else differs. Push puts the branch ${view.branch} back in the repo.`), pushControl)
         : inSync && view.pushBlocked ? h('div.repo-in-sync', {}, h('span', {}, 'The repo has a newer commit that changes nothing in your Managed set. Pull to move to it.'), pullControl)
         : inSync ? h('p.repo-in-sync', {}, 'Refresh checks the repo for new commits.')
         : h('div.repo-sides', {},

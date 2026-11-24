@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { agentKind, agentsView, applyAgents } from '../src/agents.ts';
 import { discover } from '../src/discovery.ts';
-import { connectRepo, pullRepo, pushRepo } from '../src/gitrepo.ts';
+import { connectRepo, pullRepo, pushRepo, repoView } from '../src/gitrepo.ts';
 import { readHistory } from '../src/history.ts';
 import { homePass } from '../src/homepass.ts';
 import { joinCounts } from '../src/librarypass.ts';
@@ -20,7 +20,7 @@ import { readPluginRecord } from '../src/pluginrecord.ts';
 import * as engine from '../src/plugins.ts';
 import { NO_PLUGINS, saveProfile, switchProfile } from '../src/profiles.ts';
 import { applyServers, serverKind, serversView } from '../src/servers.ts';
-import type { ShareContext } from '../src/share.ts';
+import { readTree, type ShareContext } from '../src/share.ts';
 import { applySkills, skillKind, skillsView, takeOver } from '../src/skills.ts';
 import { addSource, checkSource, previewSource, removeSource, sourcesView } from '../src/sources.ts';
 import { pluginsRecordHold, type Recorded } from '../src/sourcestore.ts';
@@ -39,6 +39,8 @@ const skill = (name: string, body = name) => `---\nname: ${name}\ndescription: $
 const agentMd = (name: string, body = 'Help.') => `---\nname: ${name}\ndescription: ${name}\n---\n${body}\n`;
 
 const DAMAGED_REASON = 'The plugins record is damaged. Nothing was written or deleted. Put the record back, then try again. Its plugins’ items are held as they are until then. The next sync takes them up again once the record is back.';
+const REPO_HOLD_CLAUSE = 'Pull and Push wait until then, for your own items too.';
+const DAMAGED_REPO_REASON = `${DAMAGED_REASON} ${REPO_HOLD_CLAUSE}`;
 
 /** Every file under `folder`, by relative path, with its bytes: for byte-for-byte "nothing changed" and twin-home checks. */
 async function snapshotFiles(folder: string, exclude: string[] = []): Promise<Record<string, string>> {
@@ -368,61 +370,144 @@ test('Worked example 6a: a profile switch while plugins.json is damaged switches
   } finally { await box.cleanup(); }
 });
 
-test('Worked example 6b: Pull while plugins.json is damaged pulls personal changes, holds plugin items (never pushing them either), and reports why', async () => {
-  const box = await partialHome();
-  try {
-    const remote = join(box.base, 'config.git');
-    execFileSync('git', ['init', '--quiet', '--bare', '--initial-branch=main', remote]);
-    assert.equal((await connectRepo(box.share, remote, '')).stopped, undefined);
-    assert.equal((await pushRepo(box.share)).stopped, undefined);
+test('Worked example 6b: while plugins.json has a problem, Pull and Push refuse before reading or writing anything (including personal items and retry records)', async () => {
+  for (const [label, spoil, expected] of [
+    ['damaged JSON', '{ broken', DAMAGED_REPO_REASON],
+    ['newer formatVersion', `${JSON.stringify({ formatVersion: 99, tools: [], knows: [], plugins: [] })}\n`,
+      `The plugins record was written by a newer Central Knot. Nothing was written or deleted. Put the record back, then try again. Its plugins’ items are held as they are until then. The next sync takes them up again once the record is back. ${REPO_HOLD_CLAUSE}`],
+  ] as const) {
+    const box = await partialHome();
+    try {
+      const remote = join(box.base, 'config.git'), author = join(box.base, 'author');
+      execFileSync('git', ['init', '--quiet', '--bare', '--initial-branch=main', remote]);
+      assert.equal((await connectRepo(box.share, remote, '')).stopped, undefined);
+      assert.equal((await pushRepo(box.share)).stopped, undefined);
+      // Upstream commit adding a personal change and a colliding plugin item.
+      execFileSync('git', ['clone', '--quiet', remote, author]);
+      await put(join(author, 'skills/own-note/SKILL.md'), skill('own-note', 'Personal upstream edit.'));
+      await put(join(author, 'skills/triage/SKILL.md'), skill('triage', 'From repo, collides with plugin.'));
+      execFileSync('git', ['-C', author, 'add', '-A']);
+      execFileSync('git', ['-C', author, '-c', 'user.name=a', '-c', 'user.email=a@b', 'commit', '--quiet', '-m', 'upstream']);
+      execFileSync('git', ['-C', author, 'push', '--quiet', 'origin', 'HEAD:main']);
+      // Local personal edit and a pre-existing retry record in repo.json that must stay untouched during the hold.
+      await put(join(box.home, '.claude/skills/own-note/SKILL.md'), skill('own-note', 'Personal local edit.'));
+      await homePass(box.share, ALL_FIVE, true);
+      const repoStatePath = join(box.home, '.central-knot/repo.json');
+      const seededState = { ...JSON.parse(await readFile(repoStatePath, 'utf8')), unfinished: { 'mcp:relay': { reason: 'Earlier hold.', here: 'h0' } } };
+      await writeFile(repoStatePath, `${JSON.stringify(seededState, null, 2)}\n`);
 
-    // Clone the remote as another machine: edit personal `own-note`, and add `triage` (colliding with the plugin's skill) and `reviewer` (colliding with the plugin's agent, with Claude-only model setting).
-    const author = join(box.base, 'author');
-    execFileSync('git', ['clone', '--quiet', remote, author]);
-    const pulledOwn = skill('own-note', 'Personal updated from Git repo.');
-    await put(join(author, 'skills/own-note/SKILL.md'), pulledOwn);
-    await put(join(author, 'skills/triage/SKILL.md'), skill('triage', 'From repo, must be held.'));
-    await put(join(author, 'agents/reviewer.md'), '---\nname: reviewer\ndescription: reviewer\nmodel: opus\n---\nReview from plugin.\n');
-    execFileSync('git', ['-C', author, 'add', '-A']);
-    execFileSync('git', ['-C', author, '-c', 'user.name=a', '-c', 'user.email=a@b', 'commit', '--quiet', '-m', 'update']);
-    execFileSync('git', ['-C', author, 'push', '--quiet', 'origin', 'HEAD:main']);
+      await writeFile(box.pluginsPath, spoil);
+      const beforeTools = await box.toolFiles();
+      const beforeStore = await snapshotFiles(join(box.home, '.central-knot'));
+      const beforeRemoteHead = execFileSync('git', ['--git-dir', remote, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim();
 
-    // Place a hand-made copy of reviewer.md in Claude Code with matching prompt and another model: pullClaudeSettings must not touch it either.
-    const claudeReviewerBefore = '---\nname: reviewer\ndescription: reviewer\nmodel: sonnet\n---\nReview from plugin.\n';
-    await put(join(box.home, '.claude/agents/reviewer.md'), claudeReviewerBefore);
-    // Spoil plugins.json, then Pull.
-    const piTriageBefore = await readFile(join(box.home, '.pi/agent/skills/triage/SKILL.md'), 'utf8');
-    const piReviewerBefore = await readFile(join(box.home, '.pi/agent/skills/reviewer.md'), 'utf8');
-    const libBefore = await box.library();
-    await writeFile(box.pluginsPath, '{ broken');
+      const view = await repoView(box.share, { check: true });
+      assert.ok(view.connected, `${label}: repo stays connected`);
+      assert.equal(view.held, expected, `${label}: Git page view carries the hold sentence`);
+      assert.deepEqual([view.incoming, view.outgoing], [[], []], `${label}: no pull/push lists staged while held`);
 
-    const pulled = await pullRepo(box.share);
-    assert.equal(pulled.stopped, undefined);
-    assert.equal(pulled.pulled, 1, 'only the personal item pulled');
-    // Personal skill pulled to every tool (OpenCode reads Claude Code's shared folder).
-    for (const root of ['.claude/skills', '.copilot/skills', '.codex/skills', '.pi/agent/skills']) {
-      assert.equal(await readFile(join(box.home, root, 'own-note/SKILL.md'), 'utf8'), pulledOwn, `pulled personal skill in ${root}`);
+      const pulled = await pullRepo(box.share);
+      assert.equal(pulled.stopped, expected, `${label}: Pull refuses with the record’s sentence + personal-items clause`);
+      assert.deepEqual(pulled.results, []);
+      assert.ok(pulled.view.connected && pulled.view.held === expected);
+
+      const pushed = await pushRepo(box.share);
+      assert.equal(pushed.stopped, expected, `${label}: Push refuses with the record’s sentence + personal-items clause`);
+      assert.deepEqual(pushed.results, []);
+      assert.ok(pushed.view.connected && pushed.view.held === expected);
+
+      assert.deepEqual(await box.toolFiles(), beforeTools, `${label}: no tool file changed`);
+      assert.deepEqual(await snapshotFiles(join(box.home, '.central-knot')), beforeStore, `${label}: no store file, clone file or retry record changed`);
+      assert.equal(execFileSync('git', ['--git-dir', remote, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim(), beforeRemoteHead, `${label}: remote repo untouched`);
+    } finally { await box.cleanup(); }
+  }
+});
+
+test('Git recovery matches a sound twin for both an upstream edit of a linked plugin agent and an upstream deletion of a linked plugin server', async () => {
+  const gitTree = (bare: string) => Object.fromEntries(
+    execFileSync('git', ['--git-dir', bare, 'ls-tree', '-r', '--name-only', 'main'], { encoding: 'utf8' })
+      .trim().split('\n').filter(Boolean).sort()
+      .map(path => [path, execFileSync('git', ['--git-dir', bare, 'show', `main:${path}`], { encoding: 'utf8' })]),
+  );
+  const runCase = async (scenario: 'upstream-edit' | 'upstream-delete', spoil: boolean) => {
+    const box = await partialHome();
+    try {
+      const remote = join(box.base, 'config.git'), author = join(box.base, 'author');
+      execFileSync('git', ['init', '--quiet', '--bare', '--initial-branch=main', remote]);
+      execFileSync('git', ['clone', '--quiet', remote, author]);
+      await put(join(author, 'skills/own-note/SKILL.md'), skill('own-note', 'Personal v1.'));
+      await put(join(author, 'agents/reviewer.md'), agentMd('reviewer', 'Review from plugin.'));
+      await put(join(author, 'mcp/relay.json'), `${JSON.stringify({ command: 'npx', args: ['relay'] }, null, 2)}\n`);
+      await put(join(author, 'mcp/own-srv.json'), `${JSON.stringify({ command: 'npx', args: ['own-srv'] }, null, 2)}\n`);
+      execFileSync('git', ['-C', author, 'add', '-A']);
+      execFileSync('git', ['-C', author, '-c', 'user.name=a', '-c', 'user.email=a@b', 'commit', '--quiet', '-m', 'seed']);
+      execFileSync('git', ['-C', author, 'push', '--quiet', 'origin', 'HEAD:main']);
+      assert.equal((await connectRepo(box.share, remote, '')).stopped, undefined);
+      assert.equal((await pullRepo(box.share)).stopped, undefined);
+      // Upstream change while the record will be damaged on the spoiled twin.
+      if (scenario === 'upstream-edit') {
+        await put(join(author, 'agents/reviewer.md'), agentMd('reviewer', 'Review edited upstream.'));
+        await put(join(author, 'skills/from-team/SKILL.md'), skill('from-team', 'Team skill from upstream.'));
+      } else {
+        await rm(join(author, 'mcp/relay.json'));
+        await rm(join(author, 'mcp/own-srv.json'));
+      }
+      execFileSync('git', ['-C', author, 'add', '-A']);
+      execFileSync('git', ['-C', author, '-c', 'user.name=a', '-c', 'user.email=a@b', 'commit', '--quiet', '-m', scenario]);
+      execFileSync('git', ['-C', author, 'push', '--quiet', 'origin', 'HEAD:main']);
+
+      // Personal edit made locally.
+      await put(join(box.home, '.claude/skills/own-note/SKILL.md'), skill('own-note', `Personal after ${scenario}.`));
+      if (spoil) {
+        await writeFile(box.pluginsPath, '{ broken');
+        await homePass(box.share, ALL_FIVE, true);
+        assert.equal((await pullRepo(box.share)).stopped, DAMAGED_REPO_REASON);
+        assert.equal((await pushRepo(box.share)).stopped, DAMAGED_REPO_REASON);
+        const heldView = await repoView(box.share, { check: true });
+        assert.ok(heldView.connected && heldView.held === DAMAGED_REPO_REASON);
+        // Put the record back; check incoming list before Pull, then sync + Pull + Push.
+        await writeFile(box.pluginsPath, box.goodPlugins);
+        await homePass(box.share, ALL_FIVE, true);
+      } else {
+        await homePass(box.share, ALL_FIVE, true);
+      }
+      const beforePull = await repoView(box.share, { check: true });
+      assert.ok(beforePull.connected && !beforePull.held);
+      const pulled = await pullRepo(box.share);
+      assert.equal(pulled.stopped, undefined);
+      const pushed = await pushRepo(box.share);
+      assert.equal(pushed.stopped, undefined);
+      const treeAfterPush = gitTree(remote);
+      await homePass(box.share, ALL_FIVE, true);
+      await pushRepo(box.share);
+      const lib = await box.library();
+      return {
+        beforePullIncoming: beforePull.incoming,
+        treeAfterPush,
+        treeFinal: gitTree(remote),
+        tools: await box.toolFiles(),
+        relayDeleted: !!lib.mcp.relay?.deleted,
+        ownSrvDeleted: !!lib.mcp['own-srv']?.deleted,
+        reviewerHash: lib.agent.reviewer?.hash,
+        reviewerLinked: !!lib.agent.reviewer?.source,
+        ownHash: lib.skill['own-note']?.hash,
+        history: (await readHistory(box.share)).map(event => [event.kind, event.key, event.cause, event.via]),
+      };
+    } finally { await box.cleanup(); }
+  };
+
+  for (const scenario of ['upstream-edit', 'upstream-delete'] as const) {
+    const [repaired, twin] = [await runCase(scenario, true), await runCase(scenario, false)];
+    assert.deepEqual(repaired, twin, `${scenario}: repaired home matches sound twin after Pull then Push`);
+    if (scenario === 'upstream-edit') {
+      assert.match(repaired.tools['.pi/agent/skills/reviewer.md'] ?? '', /Review edited upstream\./);
+      assert.ok(repaired.treeFinal['agents/reviewer.md'], 'upstream edit of linked agent kept in repo after settle');
     }
-    // Plugin skill and agent stayed untouched on disk and in the library records.
-    assert.equal(await readFile(join(box.home, '.pi/agent/skills/triage/SKILL.md'), 'utf8'), piTriageBefore);
-    assert.equal(await exists(join(box.home, '.claude/skills/triage/SKILL.md')), false);
-    assert.equal(await readFile(join(box.home, '.pi/agent/skills/reviewer.md'), 'utf8'), piReviewerBefore);
-    assert.equal(await readFile(join(box.home, '.claude/agents/reviewer.md'), 'utf8'), claudeReviewerBefore, 'pullClaudeSettings did not write a held plugin agent');
-    const libAfter = await box.library();
-    assert.equal(libAfter.skill.triage?.hash, libBefore.skill.triage?.hash);
-    assert.equal(libAfter.skill.triage?.source, libBefore.skill.triage?.source);
-    assert.equal(libAfter.agent.reviewer?.hash, libBefore.agent.reviewer?.hash);
-    // Pull's result and view say why each plugin item was held.
-    assert.ok(pulled.results.some(r => r.item === 'triage' && r.outcome === 'held' && r.message === DAMAGED_REASON),
-      `Pull result names triage hold: ${JSON.stringify(pulled.results)}`);
-    assert.ok(pulled.results.some(r => r.item === 'reviewer' && r.outcome === 'held' && r.message === DAMAGED_REASON),
-      `Pull result names reviewer hold: ${JSON.stringify(pulled.results)}`);
-    assert.ok(pulled.view.connected);
-    assert.equal(pulled.view.incoming.find(row => row.name === 'triage')?.held, DAMAGED_REASON);
-    assert.equal(pulled.view.incoming.find(row => row.name === 'reviewer')?.held, DAMAGED_REASON);
-    // And Push does not offer plugin items as outgoing additions while plugins.json is damaged.
-    assert.deepEqual(pulled.view.outgoing.filter(row => ['triage', 'reviewer', 'relay'].includes(row.name)), []);
-  } finally { await box.cleanup(); }
+    if (scenario === 'upstream-delete') {
+      assert.equal(repaired.beforePullIncoming.find(row => row.key === 'mcp:own-srv')?.change, 'removed');
+      assert.equal(repaired.ownSrvDeleted, true);
+    }
+  }
 });
 
 test('Rule edges: pluginsRecordHold distinguishes removed Git sources from plugins and unreadable sources.json; restoring a deleted plugin item is held', async () => {
@@ -448,42 +533,6 @@ test('Rule edges: pluginsRecordHold distinguishes removed Git sources from plugi
     const restored = await applySkills(box.share, ALL_FIVE, [{ key: 'triage', on: true, except: [], deleted: false }]);
     assert.deepEqual(restored.results.map(r => [r.item, r.outcome, r.unchanged, r.message]), [['triage', 'held', true, DAMAGED_REASON]]);
     assert.ok((await box.library()).skill.triage?.deleted, 'deleted plugin item stays deleted while plugins.json is damaged');
-  } finally { await box.cleanup(); }
-});
-
-test('Fix item 1: Push while plugins.json is damaged leaves pre-existing repo paths of held plugin skill, agent and server untouched while pushing personal edits', async () => {
-  const box = await partialHome();
-  try {
-    const remote = join(box.base, 'config.git'), author = join(box.base, 'author');
-    execFileSync('git', ['init', '--quiet', '--bare', '--initial-branch=main', remote]);
-    execFileSync('git', ['clone', '--quiet', remote, author]);
-    await put(join(author, 'skills/triage/SKILL.md'), skill('triage', 'Existing repo triage.'));
-    await put(join(author, 'agents/reviewer.md'), agentMd('reviewer', 'Existing repo reviewer.'));
-    await put(join(author, 'mcp/relay.json'), `${JSON.stringify({ command: 'npx', args: ['relay'] }, null, 2)}\n`);
-    await put(join(author, 'skills/own-note/SKILL.md'), skill('own-note', 'Personal v1.'));
-    execFileSync('git', ['-C', author, 'add', '-A']);
-    execFileSync('git', ['-C', author, '-c', 'user.name=a', '-c', 'user.email=a@b', 'commit', '--quiet', '-m', 'existing']);
-    execFileSync('git', ['-C', author, 'push', '--quiet', 'origin', 'HEAD:main']);
-    // Healthy Pull sets state.base with all four paths while plugin items remain linked.
-    assert.equal((await connectRepo(box.share, remote, '')).stopped, undefined);
-    assert.equal((await pullRepo(box.share)).stopped, undefined);
-    assert.ok((await box.library()).skill.triage?.source);
-
-    await writeFile(box.pluginsPath, '{ broken');
-    const remotePaths = () => execFileSync('git', ['--git-dir', remote, 'ls-tree', '-r', '--name-only', 'main'], { encoding: 'utf8' }).trim().split('\n').sort();
-    const expected = ['agents/reviewer.md', 'mcp/relay.json', 'skills/own-note/SKILL.md', 'skills/triage/SKILL.md'];
-    // With no personal change, Push has nothing to send and deletes nothing.
-    const idlePush = await pushRepo(box.share);
-    assert.match(idlePush.stopped ?? '', /Nothing to push/);
-    assert.deepEqual(remotePaths(), expected);
-    // With a personal edit, Push sends own-note and leaves every held plugin path in the repo byte-for-byte intact.
-    const editedOwn = skill('own-note', 'Personal edited while damaged.');
-    await put(join(box.home, '.claude/skills/own-note/SKILL.md'), editedOwn);
-    await homePass(box.share, ALL_FIVE, true);
-    const pushed = await pushRepo(box.share);
-    assert.equal(pushed.stopped, undefined);
-    assert.deepEqual(remotePaths(), expected);
-    assert.equal(execFileSync('git', ['--git-dir', remote, 'show', 'main:skills/own-note/SKILL.md'], { encoding: 'utf8' }), editedOwn);
   } finally { await box.cleanup(); }
 });
 
@@ -556,7 +605,7 @@ test('Fix item 3: takeOver of a held plugin skill’s shared copy or outside lin
   } finally { await box.cleanup(); }
 });
 
-test('Fix item 5: an item from a Git source removed by the user is his own and keeps syncing and pushing while plugins.json is damaged', async () => {
+test('Fix item 5: an item from a Git source removed by the user is his own and keeps syncing while plugins.json is damaged, then pushes once the record is back', async () => {
   const box = await partialHome({ gitSource: true });
   try {
     assert.equal((await removeSource(box.share, ALL_FIVE, box.sourceId!)).stopped, undefined);
@@ -570,15 +619,45 @@ test('Fix item 5: an item from a Git source removed by the user is his own and k
     for (const root of ['.claude/skills', '.copilot/skills', '.codex/skills', '.pi/agent/skills']) {
       assert.equal(await readFile(join(box.home, root, 'git-skill/SKILL.md'), 'utf8'), edited, `removed Git source skill synced to ${root}`);
     }
-    // Plugin skill still held.
+    // Plugin skill still held, and Push refuses until plugins.json is back.
     assert.equal(await exists(join(box.home, '.claude/skills/triage/SKILL.md')), false);
-    // Push also includes the removed Git source skill as his own (never held or deleted).
     const remote = join(box.base, 'config.git');
     execFileSync('git', ['init', '--quiet', '--bare', '--initial-branch=main', remote]);
     assert.equal((await connectRepo(box.share, remote, '')).stopped, undefined);
+    assert.equal((await pushRepo(box.share)).stopped, DAMAGED_REPO_REASON);
+    // Once plugins.json is back, Push sends the removed Git source skill as his own.
+    await writeFile(box.pluginsPath, box.goodPlugins);
     assert.equal((await pushRepo(box.share)).stopped, undefined);
     assert.equal(execFileSync('git', ['--git-dir', remote, 'show', 'main:skills/git-skill/SKILL.md'], { encoding: 'utf8' }), edited);
   } finally { await box.cleanup(); }
+});
+
+test('A tool holding an older copy it refused to replace is not called "not in" on the row (only Codex managed)', async () => {
+  const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-codex-old-copy-')));
+  try {
+    const home = join(base, 'home');
+    await mkdir(join(home, '.codex/skills'), { recursive: true });
+    const oldCopy = skill('demo', 'Old valid copy Codex runs.');
+    await put(join(home, '.codex/skills/demo/SKILL.md'), oldCopy);
+    const share: ShareContext = {
+      home, mode: 'custom', build: 'test', settingsPath: join(base, 'settings.json'), realHome: join(base, 'real'), settleMs: 0,
+      read: () => Promise.all(['codex-cli' as HarnessId].map(harness => discover({ home, mode: 'custom', harness }))),
+    };
+    assert.equal((await applySkills(share, ['codex-cli'], [{ key: 'demo', on: true, except: [] }])).stopped, undefined);
+    // Pull a version with no YAML frontmatter: Codex refuses to replace its older copy and keeps running oldCopy.
+    const badFolder = join(base, 'pulled-demo');
+    await put(join(badFolder, 'SKILL.md'), '# No frontmatter\nCodex will not load this.\n');
+    const pulled = await applySkills(share, ['codex-cli'], [], {
+      only: new Set(['demo']), pulled: new Map([['demo', { name: 'demo', folder: badFolder, hash: (await readTree(badFolder)).hash }]]),
+    });
+    assert.equal(pulled.stopped, undefined);
+    assert.equal(await readFile(join(home, '.codex/skills/demo/SKILL.md'), 'utf8'), oldCopy, 'Codex kept its older copy on disk');
+    const view = await skillsView(share, ['codex-cli']), fact = view.items.find(item => item.key === 'demo')!;
+    const row = { ...fact, hashes: hashesOf(fact.copies) };
+    assert.ok(row.hashes['codex-cli'], 'row records Codex’s older copy');
+    assert.match(row.cannot['codex-cli'] ?? '', /YAML frontmatter/);
+    assert.equal(statusLine(row, view.library.demo, ['codex-cli']), 'On · Codex can’t take it (see below)');
+  } finally { await rm(base, { recursive: true, force: true }); }
 });
 
 test('Fix item 6: in a sound home with Pi and OpenCode left out in Manage, triage’s status agrees with the plugin-only lines below it', async () => {

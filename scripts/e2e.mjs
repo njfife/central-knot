@@ -14261,7 +14261,10 @@ async function pluginRecordHoldsFlow() {
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
 
   const pluginsPath = join(home, '.central-knot/plugins.json');
+  const remote = join(scratch, 'repo-record-holds.git');
+  execFileSync('git', ['init', '--quiet', '--bare', '--initial-branch=main', remote]);
   const reason = 'The plugins record is damaged. Nothing was written or deleted. Put the record back, then try again. Its plugins’ items are held as they are until then. The next sync takes them up again once the record is back.';
+  const repoReason = `${reason} Pull and Push wait until then, for your own items too.`;
   const leaked = () => [
     existsSync(join(home, '.claude/skills/triage/SKILL.md')),
     existsSync(join(home, '.copilot/skills/triage/SKILL.md')),
@@ -14285,6 +14288,8 @@ async function pluginRecordHoldsFlow() {
   await a.click('#pbox-0-partial-opencode-cli'); await waitBusy(a);
   for (let tries = 0; tries < 50 && !existsSync(join(home, '.config/opencode/skills/triage/SKILL.md')); tries++) await wait(100);
   same('own-note taken in', await a.run(`window.centralKnot.applySkills([{ key: 'own-note', on: true, except: [] }], false, ${JSON.stringify(home)}).then(r => r.stopped ?? 'ok')`), 'ok');
+  same('repo connected', await a.run(`window.centralKnot.connectRepo(${JSON.stringify(remote)}, '', ${JSON.stringify(home)}).then(r => r.stopped ?? 'ok')`), 'ok');
+  same('baseline pushed', await a.run(`window.centralKnot.pushRepo(${JSON.stringify(home)}).then(r => r.stopped ?? 'ok')`), 'ok');
   same('baseline: plugin items in Pi and OpenCode only, none in Claude/Copilot/Codex',
     [existsSync(join(home, '.pi/agent/skills/triage/SKILL.md')), existsSync(join(home, '.config/opencode/skills/triage/SKILL.md')), leaked()],
     [true, true, [false, false, false, false, false, false]]);
@@ -14336,6 +14341,18 @@ async function pluginRecordHoldsFlow() {
         await a.shot('record-holds-library-1316-rail');
       }
     }
+    const remoteHeadBefore = execFileSync('git', ['--git-dir', remote, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim();
+    await a.click('#nav-repo');
+    for (let tries = 0; tries < 50 && !(await a.exists('#repo-state')); tries++) await wait(100);
+    const repoText = await a.text('.repo-page') ?? '';
+    check(`${label}: Git repo page shows the hold band and disables Pull/Push`,
+      repoText.includes('Pull and Push are held') && repoText.includes(repoReason) && !(await a.exists('#repo-pull')) && !(await a.exists('#repo-push')), repoText);
+    same(`${label}: Pull and Push refuse via IPC and leave the repo unchanged`, [
+      await a.run(`window.centralKnot.pullRepo(${JSON.stringify(home)}).then(r => r.stopped)`),
+      await a.run(`window.centralKnot.pushRepo(${JSON.stringify(home)}).then(r => r.stopped)`),
+      execFileSync('git', ['--git-dir', remote, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim(),
+    ], [repoReason, repoReason, remoteHeadBefore]);
+    if (label === 'invalid JSON') await fitsAtMinimum(a, 'held Git repo page');
     same(`${label}: no page errors`, a.pageErrors, []);
     await a.quit();
   }
@@ -14346,6 +14363,10 @@ async function pluginRecordHoldsFlow() {
   await a.click('#nav-plugins');
   for (let tries = 0; tries < 50 && !(await a.exists('#pswitch-0-partial:not([disabled])')); tries++) await wait(100);
   check('restored: Plugins switch is enabled again and hold hint is gone', !(await a.text('.market-main') ?? '').includes('Its plugins’ items are held'), await a.text('.market-main'));
+  await a.click('#nav-repo');
+  for (let tries = 0; tries < 50 && !(await a.exists('#repo-push')); tries++) await wait(100);
+  check('restored: Git repo page clears the hold band and offers Push again', !(await a.text('.repo-page') ?? '').includes('Pull and Push wait until then'), await a.text('.repo-page'));
+  same('restored: Push succeeds after plugins.json is back', await a.run(`window.centralKnot.pushRepo(${JSON.stringify(home)}).then(r => r.stopped ?? 'ok')`), 'ok');
   await openKind(a, 'skills');
   const triageRow = `.ov-row[data-key="${rowPart('', 'skills', 'triage')}"]`;
   for (let tries = 0; tries < 50 && !(await a.exists(triageRow)); tries++) await wait(100);

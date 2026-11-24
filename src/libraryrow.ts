@@ -414,10 +414,12 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
   // A tool whose own switch has it off doesn't load it: it is no tool it is on in (the parts below say it).
   const onIn = tools.filter(tool => !row.switchedOff?.includes(tool) && (['current', 'edited'].includes(harnessIs(row, item, tool)) || (harnessIs(row, item, tool) === 'gets-it' && waitsForEdit(tool))));
   const edit = row.plan?.takeIn;
+  const absent = onIn.length ? [] : cannotHave(row, item, tools), cantTake = cannot.filter(tool => !absent.includes(tool));
+  const cant = [absent.length ? `not in ${orList(absent.map(toolName))}` : '', cantTake.length ? `${andList(cantTake.map(toolName))} can’t take it` : ''].filter(Boolean).join(' · ');
   const parts = [onIn.length ? `On in ${named(onIn, tools)}${cannot.length ? ' only' : ''}` : 'On',
     edit ? `${toolName(edit)}’s edit becomes the current version when sync runs` : '',
     gets.length ? `${named(gets, tools)} ${gets.length === 1 ? 'gets' : 'get'} it when sync runs` : '',
-    cannot.length ? (onIn.length ? `${andList(cannot.map(toolName))} can’t take it (see below)` : `not in ${orList(cannot.map(toolName))} (see below)`) : '',
+    cant ? `${cant} (see below)` : '',
     another.length ? `${andList(another.map(toolName))} ${another.length === 1 ? 'has' : 'have'} it another way` : '',
     out.length ? `kept out of ${named(out, tools)}` : '',
     unseen.length && !onIn.length && !gets.length && !cannot.length && !another.length && !out.length ? 'left as it is (see below)' : '',

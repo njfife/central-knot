@@ -1396,8 +1396,9 @@ export type RepoView =
     pulledAt?: string;
     pushedAt?: string;
     checkedAt?: string;
-    /** Why the last check could not reach the repo. */
+    /** Why the last check could not reach the repo (`problem`), or why Pull and Push are held (`held`). */
     problem?: string;
+    held?: string;
     incoming: RepoChange[];
     outgoing: RepoChange[];
     /** Why Push can't run now. */
