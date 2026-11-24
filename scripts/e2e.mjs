@@ -9778,6 +9778,165 @@ const homeWith = name => {
 };
 
 /**
+ * The Sessions page (sessionspage.ts) on a made-up home with Claude Code, Codex and Copilot CLI: the sidebar entry after
+ * History; the reading shown arriving; a day with nothing; then a day of Claude Code and Codex sessions (the real model ids,
+ * a reply priced as another row, a fast reply with no rate, a lower bound, a Codex child with no price under its parent, a
+ * line Codex wrote that is not JSON, Claude Code's own figure); Yesterday and back; Refresh after a file gains a response;
+ * nothing written under the home; nothing cut off at each window size; in a development run, a reading that fails. The app
+ * has no clock to set: the records are dated by this machine's calendar, and within two minutes of midnight the flow waits past it.
+ */
+async function sessionsFlow() {
+  const midnight = (back = 0, at = new Date()) => new Date(at.getFullYear(), at.getMonth(), at.getDate() - back).getTime();
+  if (midnight(-1) - Date.now() < 120_000) await wait(midnight(-1) - Date.now() + 1000);
+  const today = midnight(0), yesterday = midnight(1), started = Date.now();
+  /** A time today before the flow started: `part` of the way from midnight. */
+  const todayAt = part => today + Math.floor((started - today) * part);
+  const home = join(scratch, 'sessions-home'), data = join(scratch, 'sessions-data'), real = join(scratch, 'sessions-real');
+  mkdirSync(join(home, '.local/bin'), { recursive: true });
+  for (const [name, output] of [['claude', '2.1.309 (Claude Code)'], ['codex', 'codex-cli 0.142.3'], ['copilot', 'GitHub Copilot CLI 1.0.107.']]) {
+    writeFileSync(join(home, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`);
+    chmodSync(join(home, '.local/bin', name), 0o755);
+  }
+  const ours = new Set();
+  const put = (path, records, mtime) => {
+    ours.add(path);
+    mkdirSync(dirname(join(home, path)), { recursive: true });
+    writeFileSync(join(home, path), records.map(record => (typeof record === 'string' ? record : JSON.stringify(record))).join('\n') + '\n');
+    utimesSync(join(home, path), new Date(mtime), new Date(mtime));
+  };
+  const usage = (input, output, more = {}) => ({ input_tokens: input, cache_read_input_tokens: more.read ?? 0, cache_creation_input_tokens: more.write ?? 0,
+    cache_creation: { ephemeral_5m_input_tokens: (more.write ?? 0) - (more.hour ?? 0), ephemeral_1h_input_tokens: more.hour ?? 0 }, output_tokens: output, speed: more.speed ?? 'standard', service_tier: 'standard' });
+  const reply = (session, id, at, model, used, cwd) => ({ type: 'assistant', sessionId: session, cwd, timestamp: new Date(at).toISOString(),
+    message: { id, type: 'message', role: 'assistant', model, content: [{ type: 'text', text: 'Made up.' }], usage: used } });
+  const rollout = (id, parent, at, model, response, [input, cached, output]) => [
+    { timestamp: new Date(at).toISOString(), type: 'session_meta', payload: { id, session_id: parent ?? id, ...(parent ? { parent_thread_id: parent } : {}), cwd: '/work/codex-app', model_provider: 'openai' } },
+    { timestamp: new Date(at).toISOString(), type: 'turn_context', payload: { turn_id: `turn-${id}`, cwd: '/work/codex-app', model } },
+    { timestamp: new Date(at + 1).toISOString(), type: 'token_usage_record', payload: { response_id: response,
+      usage: { input_tokens: input, cached_input_tokens: cached, cache_write_input_tokens: 0, output_tokens: output, reasoning_output_tokens: 0, total_tokens: input + output } } }];
+  // Yesterday, one Claude Code session; today, nothing yet.
+  put('.claude/projects/-work-notes/gamma.jsonl', [reply('gamma', 'g1', yesterday + 36_000_000, 'claude-fable-5', usage(20_000, 2_000), '/work/notes')], yesterday + 36_000_000);
+  for (const folder of [data, real]) mkdirSync(folder, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  const a = await launch(data, [], real);
+  const before = treeOf(home);
+  same('Sessions is in the sidebar, after History', await a.all('#nav [id^="nav-"]', 'e.id.slice(4)'),
+    ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'sessions', 'repo', 'settings']);
+  const arriving = await a.run(`(() => { document.querySelector('#nav-sessions').click(); return document.querySelector('#sessions-reading')?.textContent ?? null; })()`);
+  const landed = async () => { for (let tries = 0; tries < 100 && !(await a.exists('#sessions-heading')); tries++) await wait(100); await a.settle(); };
+  await landed();
+  const dateOf = (ms, month = 'long') => a.run(`new Date(${ms}).toLocaleDateString(undefined, { day: 'numeric', month: '${month}' })`);
+  const foot = 'Read from the tools’ own session history each time this page opens. Nothing is kept.';
+  same('opening the page asks for today’s reading and says so until it lands', arriving, 'Reading today’s sessions…');
+  same('a day with nothing: the date, one sentence naming the tools read and no total; the tool present and not read yet named once; the foot line',
+    [await a.text('#sessions-heading'), await a.exists('#sessions-total'), await a.text('#sessions-none'), await a.text('#sessions-not-read'), await a.text('#sessions-foot'), await a.exists('.session')],
+    [`Today, ${await dateOf(today)}`, false, 'No sessions today in Claude Code or Codex.', 'Not read yet: Copilot CLI.', foot, false]);
+
+  // Today: two Claude Code sessions and a Codex session with its child.
+  const longFolder = 'a-project-folder-whose-name-runs-on-and-on-past-any-column-it-could-be-given';
+  const alpha = '.claude/projects/-work-central-knot/alpha.jsonl';
+  put(alpha, [reply('alpha', 'a1', todayAt(0.2), 'claude-fable-5', usage(30_000, 3_000, { read: 120_000 }), `/work/${longFolder}`),
+    reply('alpha', 'a2', todayAt(0.25), 'claude-haiku-4-5-20251001', usage(10_000, 1_000), `/work/${longFolder}`),
+    reply('alpha', 'a3', todayAt(0.3), 'claude-haiku-4-5', usage(5_000, 500, { speed: 'fast' }), `/work/${longFolder}`),
+    { type: 'cost-state', sessionId: 'alpha', totalCostUSD: 4.31, modelUsage: {}, hasUnknownModelCost: false }], todayAt(0.3));
+  put('.claude/projects/-work-notes/beta.jsonl', [reply('beta', 'b1', todayAt(0.5), 'claude-opus-5-5', usage(8_000, 800), '/work/notes'),
+    reply('beta', 'b2', todayAt(0.55), 'claude-2', usage(2_000, 200, { write: 6_000, hour: 6_000 }), '/work/notes')], todayAt(0.55));
+  const day = new Date(today), dated = [day.getFullYear(), day.getMonth() + 1, day.getDate()].map(part => String(part).padStart(2, '0')).join('/');
+  put(`.codex/sessions/${dated}/rollout-x1.jsonl`, rollout('x1', undefined, todayAt(0.7), 'gpt-6-astra', 'r1', [40_000, 30_000, 2_000]), todayAt(0.7));
+  put(`.codex/sessions/${dated}/rollout-x2.jsonl`, [...rollout('x2', 'x1', todayAt(0.8), 'codex-auto-review', 'r2', [9_000, 0, 300]), 'a line that is not JSON'], todayAt(0.8));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 100 && !(await a.exists('.session')); tries++) await wait(100);
+  await a.settle();
+  const nesting = () => a.all('.session', '[e.dataset.session, e.parentElement.closest(".session")?.dataset.session ?? null]');
+  same('Refresh reads the day again: a row a session, newest first, the Codex child set in under its parent', await nesting(), [['x1', null], ['x2', 'x1'], ['beta', null], ['alpha', null]]);
+  const summary = session => a.run(`[...document.querySelectorAll('.session[data-session="${session}"] > details > summary > .session-cell')].map(cell => cell.textContent)`);
+  const money = /^≈ \$\d+\.\d\d/;
+  const [alphaRow, betaRow, x1Row, x2Row] = [await summary('alpha'), await summary('beta'), await summary('x1'), await summary('x2')];
+  same('a row says when, the tool, the project folder’s name, its models and its dollars, said as its sum is',
+    [/^\S.*\S$/.test(alphaRow[0]), alphaRow.slice(1, 4), money.test(alphaRow[4]) && alphaRow[4].endsWith(', without 1 request that has no known price.'),
+      money.test(betaRow[4]) && betaRow[4].endsWith(' or more'), x1Row.slice(1, 4), money.test(x1Row[4]) && !/without|more/.test(x1Row[4]), x2Row[4]],
+    [true, ['Claude Code', longFolder, 'claude-fable-5, claude-haiku-4-5-20251001, claude-haiku-4-5'], true, true, ['Codex', 'codex-app', 'gpt-6-astra'], true, 'no price known']);
+  const total = await a.text('#sessions-total');
+  same('the day’s total: a lower bound, and what it leaves out', [money.test(total), total.replace(/^≈ \$[\d,.]+/, '≈ $…')], [true, '≈ $… or more, without 2 requests that have no known price.']);
+  const ratesDate = JSON.parse(readFileSync(join(root, 'assets/model-rates.json'), 'utf8')).date.split('-').map(Number);
+  const pricesDate = await a.run(`new Date(${ratesDate[0]}, ${ratesDate[1] - 1}, ${ratesDate[2]}).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })`);
+  same('the caption and the price list’s date, once, under the heading', await a.all('.sessions-caption'),
+    ['What these tokens cost at each model’s API price. On a subscription you pay your plan’s price, not this.', `Prices as of ${pricesDate}.`]);
+  same('what could not be read, for Codex, and the tool not read yet', [await a.all('.sessions-unread'), await a.text('#sessions-not-read')],
+    [['Some of Codex’s session files could not be read; what they hold is not here.'], 'Not read yet: Copilot CLI.']);
+  const open = session => a.click(`.session[data-session="${session}"] > details > summary`);
+  /** An opened row's models, or the totals' (`#sessions-by-model`): the model and what is said under it, the four token counts as digits, the price. */
+  const models = where => a.run(`[...document.querySelectorAll('${where} .session-models tbody tr')].map(tr => [...tr.cells].map((td, index) => (index && index < 5 ? td.textContent.replace(/\\D/g, '') : td.innerText.trim())))`);
+  const notes = session => a.all(`.session[data-session="${session}"] > details .session-note`);
+  await open('alpha');
+  const alphaModels = await models('.session[data-session="alpha"] > details');
+  same('an opened row: each model’s input, cached, cache-written and output tokens and its dollars; priced as the row the list matched; no price known for a fast reply',
+    alphaModels.map(([model, ...counts]) => [model, ...counts.slice(0, 4), money.test(counts[4]) ? '≈ $…' : counts[4]]),
+    [['claude-fable-5', '30000', '120000', '0', '3000', '≈ $…'], ['claude-haiku-4-5-20251001\npriced as claude-haiku-4-5', '10000', '0', '0', '1000', '≈ $…'], ['claude-haiku-4-5', '5000', '0', '0', '500', 'no price known for a fast reply']]);
+  same('Claude Code’s own figure beside the row’s sum, and out of every total', await notes('alpha'), ['Claude Code’s own figure for this session: $4.31. Not in the totals.']);
+  await open('beta');
+  same('a lower bound says why, opened', [await notes('beta'), (await models('.session[data-session="beta"] > details')).map(row => row[0])],
+    [['One-hour cache writes are priced at the shorter cache’s rate; they cost more.'], ['claude-opus-5-5', 'claude-2']]);
+  await open('x2');
+  same('a child on a model the list does not have: its tokens, and no price known', await models('.session[data-session="x2"] > details'), [['codex-auto-review', '9000', '0', '0', '300', 'no price known']]);
+  const byTool = await a.all('#sessions-by-tool li', '[e.dataset.tool, [...e.children].map(part => part.textContent)]');
+  same('totals by tool: its sessions, its sum, and the API prices it is priced at',
+    byTool.map(([tool, [name, count, sum, prices]]) => [tool, name, count, sum.replace(/^≈ \$[\d,.]+/, '≈ $…'), prices]),
+    [['claude-cli', 'Claude Code', '2 sessions', '≈ $… or more, without 1 request that has no known price.', 'At Anthropic’s API prices.'],
+      ['codex-cli', 'Codex', '2 sessions', '≈ $…, without 1 request that has no known price.', 'At OpenAI’s API prices.']]);
+  same('totals by model, under the rows: every model of the day once, said as in an opened row', (await models('#sessions-by-model')).map(row => [row[0], row[5].replace(/^≈ \$[\d,.]+/, '≈ $…')]).sort(),
+    [['claude-2', '≈ $… or more'], ['claude-fable-5', '≈ $…'], ['claude-haiku-4-5', 'no price known for a fast reply'], ['claude-haiku-4-5-20251001\npriced as claude-haiku-4-5', '≈ $…'],
+      ['claude-opus-5-5', '≈ $…'], ['codex-auto-review', 'no price known'], ['gpt-6-astra', '≈ $…']]);
+  same('the foot line, once', await a.all('#sessions-foot'), [foot]);
+
+  // Yesterday, and back.
+  await a.click('#sessions-day-yesterday');
+  for (let tries = 0; tries < 100 && !(await a.exists('.session[data-session="gamma"]')); tries++) await wait(100);
+  same('Yesterday asks for its own day: its date, its one session', [await a.text('#sessions-heading'), await nesting(), await a.run(`document.querySelector('#sessions-day-yesterday').getAttribute('aria-pressed')`)],
+    [`Yesterday, ${await dateOf(yesterday)}`, [['gamma', null]], 'true']);
+  await a.click('#sessions-day-today');
+  for (let tries = 0; tries < 100 && !(await a.exists('.session[data-session="alpha"]')); tries++) await wait(100);
+  same('Today again, and the rows opened before are open still', await a.all('.session > details[open]', 'e.parentElement.dataset.session'), ['x2', 'beta', 'alpha']);
+
+  // A response added to a session: Refresh reads it.
+  const alphaCost = async () => (await summary('alpha'))[4];
+  const was = await alphaCost();
+  writeFileSync(join(home, alpha), `${JSON.stringify(reply('alpha', 'a4', Math.max(today, Date.now() - 1000), 'claude-fable-5', usage(50_000, 5_000), `/work/${longFolder}`))}\n`, { flag: 'a' });
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 100 && (await alphaCost()) === was; tries++) await wait(100);
+  same('Refresh after a file gains a response: its session’s sum and model tokens grow, and it is the newest row',
+    [(await alphaCost()) !== was, (await models('.session[data-session="alpha"] > details'))[0].slice(0, 2), (await nesting())[0]], [true, ['claude-fable-5', '80000'], ['alpha', null]]);
+  const changed = Object.entries(treeOf(home)).filter(([path, hash]) => !ours.has(path) && before[path] !== hash).map(([path]) => path);
+  same('nothing written under the home: every file there is as it was, but the session files the flow wrote', [changed, Object.keys(before).filter(path => !ours.has(path) && !existsSync(join(home, path)))], [[], []]);
+
+  // Nothing cut off, with rows opened, at each window size, the sidebar open and as a rail; the rows scroll with the page.
+  const SPILLS = `(() => { const page = document.querySelector('#sessions-scroll'), edge = page.getBoundingClientRect().right - parseFloat(getComputedStyle(page).paddingRight);
+    return [...page.querySelectorAll('*')].flatMap(e => [...(e.getBoundingClientRect().right > edge + 1 ? ['past the page’s edge: ' + (e.id || e.className || e.tagName)] : []),
+      ...(['auto', 'scroll'].includes(getComputedStyle(e).overflowY) ? ['a box that scrolls inside the page: ' + (e.id || e.className)] : [])]); })()`;
+  for (const [width, height] of [SMALLEST, [1280, 800], [1316, 819], [1728, 1117], [2560, 1440]]) {
+    await sizeTo(a, width, height);
+    for (const rail of [false, true]) {
+      if ((await a.run(`document.body.classList.contains('rail')`)) !== rail) await a.click('#sidebar-toggle');
+      same(`nothing cut off at ${width}×${height}, the sidebar ${rail ? 'a rail' : 'open'}: Sessions with rows opened`, [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT), ...await a.run(SPILLS)], []);
+      if (!rail && (width === SMALLEST[0] || width === 2560)) await a.shot(`sessions-${width}`);
+    }
+  }
+  await fullSize(a);
+  same('no page error on the Sessions page', a.pageErrors, []);
+  // A reading that fails says so (a development run only: it reaches main to make the request fail).
+  const main = a.inspect ? await mainHelpers(a.inspect) : undefined;
+  if (main) {
+    await main.failRequest('sessions:read');
+    await a.click('#header-refresh');
+    for (let tries = 0; tries < 50 && !(await a.exists('#sessions-failed')); tries++) await wait(100);
+    same('a reading that fails says so in one sentence, and shows nothing from the reading before', [await a.text('#sessions-failed'), await a.exists('.session')],
+      ['Sessions could not be read. Refresh to try again.', false]);
+    await main.restore('sessions:read');
+    main.close();
+  } else console.log('sessionsFlow: a reading that fails is checked in a development run only (it reaches the main process).');
+  await a.quit();
+}
+
+/**
  * Word search in the app as built (search.ts, searchdocs.ts): main indexes the Library with SQLite's own full-text search from
  * each view it hands over, and answers the page beside its queue. On a made-up home, through the page's own call: the name
  * weighted above the text (bm25()), an excerpt of the text (snippet()), another form of a word (porter), a word only the
@@ -14497,7 +14656,7 @@ async function pluginRecordHoldsFlow() {
 
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, sessionStripFlow, fromFlow, claudeWholeFlow],
-  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow],
+  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow, sessionsFlow],
   [fewToolsFlow, openCodeFlow, antigravityFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, pluginRecordHoldsFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow, clickReadsFlow],
   [backFlow, backPlaceFlow, harnessFlow, manageFlow, arrivalFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, mcpSigninFlow, firstSetupFlow, crashFlow],
 ];
