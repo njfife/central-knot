@@ -99,19 +99,20 @@ function readOnlyLine(home: HomeView): HTMLElement | null {
   return line('overview-preview', 'lock', 'tone-warning', `Automatic sync is paused. Preview only: ${previewReason(why)}.`);
 }
 
-/** What a tool's arrival line says (types.ts Arrival): "Central Knot now manages OpenCode. Copied 2 items." */
+/** What a tool's arrival line says (types.ts Arrival): "Central Knot now manages OpenCode. Copied 2 items.", and before a sync has brought it into line, what that sync does. */
 const arrivedWords = ({ tool, copied }: Arrival) => `Central Knot now manages ${toolNames[tool]}. ${copied === undefined
-  ? 'Automatic sync was off, so no items were copied.' : copied ? `Copied ${plural(copied, 'item')}.` : 'No items were copied.'}`;
+  ? 'Its items are copied there at the next sync.' : copied ? `Copied ${plural(copied, 'item')}.` : 'No items needed copying.'}`;
 
 /**
  * A line for each tool that came under management by itself here (types.ts SyncView arrived, from arrivals.ts): what it says,
  * a link to its Manage switch on Harnesses, and its ×, which closes it for good in this home, at once on the page.
  */
-const arrivalLines = (home: HomeView) => home.sync.arrived.map(({ tool, copied }) => {
+const arrivalLines = (home: HomeView) => home.sync.arrived.map(arrival => {
+  const { tool } = arrival;
   const id = `overview-arrived-${tool}`;
   const toSwitch = () => { showPage('harnesses'); document.getElementById(`manage-${tool}`)?.focus(); };
   const close = () => { home.sync.arrived = home.sync.arrived.filter(other => other.tool !== tool); rerender(); void window.centralKnot.dismissArrival(tool, home.home); };
-  return line(id, 'boxes', 'tone-muted', `${arrivedWords({ tool, copied })} `, link('Its switch on Harnesses', `${id}-open`, toSwitch),
+  return line(id, 'boxes', 'tone-muted', `${arrivedWords(arrival)} `, link('Its switch on Harnesses', `${id}-open`, toSwitch),
     button({ variant: 'ghost', size: 'micro', icon: 'x', name: `Close: Central Knot now manages ${toolNames[tool]}`, id: `${id}-dismiss`, onclick: close }));
 });
 

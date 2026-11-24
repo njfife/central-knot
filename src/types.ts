@@ -384,8 +384,11 @@ export interface SyncView {
   arrived: Arrival[];
 }
 
-/** A tool that came under management by itself (arrivals.ts), and how many items have been copied there since; `copied` absent: no pass that may write has run since (Automatic sync off), so none. */
-export interface Arrival { tool: HarnessId; copied?: number }
+/**
+ * A tool that came under management by itself (arrivals.ts observe): `since` when, its "Copied to <tool>" entries in History
+ * counting from then; `copied` how many there were at the end of the first pass that brought the home into line, absent until it.
+ */
+export interface Arrival { tool: HarnessId; since: string; copied?: number }
 
 /**
  * What managing one more tool would do there now, each kind's added up (librarypass.ts joinCounts, from the same look and plans

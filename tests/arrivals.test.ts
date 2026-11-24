@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { byHand, observe, seenBefore, seenIn, type ToolsSeen } from '../src/arrivals.ts';
+import { byHand, observe, passStarts, seenBefore, seenIn, type ToolsSeen } from '../src/arrivals.ts';
 import { homePass } from '../src/homepass.ts';
 import { readHistory } from '../src/history.ts';
 import { managedNow, type ShareContext } from '../src/share.ts';
@@ -14,6 +14,7 @@ import { applySkills } from '../src/skills.ts';
 import { applyAgents } from '../src/agents.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import { appContext } from './upgrade/start.ts';
+import type { DestinationResult, HarnessId, PassResult } from '../src/types.ts';
 
 async function box() {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-arrivals-')));
@@ -22,10 +23,10 @@ async function box() {
   await mkdir(join(home, '.copilot/skills'), { recursive: true });
   await writeFile(join(home, '.claude/skills/notes/SKILL.md'), '---\nname: notes\ndescription: Notes.\n---\n\nTake notes.\n');
   const context: ShareContext = { ...appContext(home, join(base, 'data')), settleMs: 0 };
-  /** One pass of the whole home, as main.ts runs it; `kept` what the settings held for the home. */
+  /** One pass of the whole home, as main.ts runs it with the app open since the first; `kept` what the settings held for the home. */
   const pass = async (kept: ToolsSeen | undefined, writes = true) => {
-    const managed = await managedNow(context, await context.read()), before = await seenBefore(kept, context, managed);
-    return observe(before, managed, writes, (await homePass({ ...context, reads: new Map() }, managed, writes)).synced);
+    const managed = await managedNow(context, await context.read()), since = passStarts(home), before = await seenBefore(kept, context, managed);
+    return observe(context, before, managed, since, (await homePass({ ...context, reads: new Map() }, managed, writes)).synced);
   };
   /** notes turned On by its Add, which makes the home's record. */
   const turnOn = async () => assert.equal((await applySkills(context, await managedNow(context, await context.read()), [{ key: 'notes', on: true, except: [] }])).stopped, undefined);
@@ -51,7 +52,7 @@ test('A first setup says nothing; a tool installed later has arrived, with the i
     await rm(join(b.home, '.copilot/skills'), { recursive: true });
     await mkdir(join(b.home, '.copilot/skills'));
     const seen = await b.pass(settled), inCopilot = await readFile(join(b.home, '.copilot/skills/notes/SKILL.md'), 'utf8').then(() => true, () => false);
-    assert.deepEqual([seen, await b.inCodex(), inCopilot], [{ managed: ['claude-cli', 'copilot-cli', 'codex-cli'], arrived: [{ tool: 'codex-cli', copied: 1 }] }, true, true]);
+    assert.deepEqual([seen.managed, said(seen), await b.inCodex(), inCopilot], [['claude-cli', 'copilot-cli', 'codex-cli'], [{ tool: 'codex-cli', copied: 1 }], true, true]);
     assert.deepEqual(await b.pass(seen), seen, 'the next pass says nothing more and keeps the line');
   } finally { await b.cleanup(); }
 });
@@ -64,7 +65,7 @@ test('A tool that arrives with a copy of its own that differs counts it as writt
     await b.codex(true);
     await mkdir(join(b.home, '.codex/skills/notes'));
     await writeFile(join(b.home, '.codex/skills/notes/SKILL.md'), '---\nname: notes\ndescription: Notes.\n---\n\nCodex’s own notes.\n');
-    assert.deepEqual((await b.pass(before)).arrived, [{ tool: 'codex-cli', copied: 0 }]);
+    assert.deepEqual(said(await b.pass(before)), [{ tool: 'codex-cli', copied: 0 }]);
   } finally { await b.cleanup(); }
 });
 
@@ -75,8 +76,8 @@ test('With Automatic sync off the arrival is kept with nothing copied; sync on a
     const before = await b.pass(undefined);
     await b.codex(true);
     const off = await b.pass(before, false);
-    assert.deepEqual([off.arrived, await b.inCodex()], [[{ tool: 'codex-cli' }], false]);
-    assert.deepEqual([(await b.pass(off)).arrived, await b.inCodex()], [[{ tool: 'codex-cli', copied: 1 }], true]);
+    assert.deepEqual([said(off), await b.inCodex()], [[{ tool: 'codex-cli' }], false]);
+    assert.deepEqual([said(await b.pass(off)), await b.inCodex()], [[{ tool: 'codex-cli', copied: 1 }], true]);
   } finally { await b.cleanup(); }
 });
 
@@ -108,6 +109,18 @@ test('What a click’s own pass put there before the pass that saw the tool arri
   } finally { await b.cleanup(); }
 });
 
+test('A pass that didn’t bring the home into line fixes no count: one that may not write, a kind stopped or still settling, a crash', async () => {
+  const b = await box();
+  try {
+    const before: ToolsSeen = { managed: ['claude-cli', 'copilot-cli'], arrived: [] }, managed: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
+    const ran: PassResult = { results: [], writes: 0, reloads: [] };
+    const synced = (more: Partial<PassResult> = {}, crashes: DestinationResult[] = []) => ({ skills: { ...ran, ...more }, servers: ran, agents: ran, crashes });
+    const passes = [undefined, synced({ stopped: 'Stopped.' }), synced({ settling: true }), synced({}, [{ item: 'Skills sync', outcome: 'failed', message: 'Crashed.' }]), synced()];
+    assert.deepEqual(await Promise.all(passes.map(async each => said(await observe(b.context, before, managed, '', each)))),
+      [[{ tool: 'codex-cli' }], [{ tool: 'codex-cli' }], [{ tool: 'codex-cli' }], [{ tool: 'codex-cli' }], [{ tool: 'codex-cli', copied: 0 }]]);
+  } finally { await b.cleanup(); }
+});
+
 test('A copy held at the pass that brought the home into line (an agents folder that can’t be written) lands later with its own entry; the line keeps that pass’s count', async () => {
   const b = await box();
   try {
@@ -131,7 +144,7 @@ test('A home the settings keep nothing for is seeded from its records: a tool th
     await b.pass(undefined);
     assert.deepEqual(await b.pass(undefined), { managed: ['claude-cli', 'copilot-cli'], arrived: [] }, 'as after the last release, which kept nothing');
     await b.codex(true);
-    assert.deepEqual((await b.pass(undefined)).arrived, [{ tool: 'codex-cli', copied: 1 }]);
+    assert.deepEqual(said(await b.pass(undefined)), [{ tool: 'codex-cli', copied: 1 }]);
   } finally { await b.cleanup(); }
 });
 
@@ -146,7 +159,7 @@ test('A tool seen gone and back has arrived again, its line gone meanwhile; one 
     assert.deepEqual(gone, { managed: ['claude-cli', 'copilot-cli'], arrived: [] }, 'no line names a tool Central Knot doesn’t manage');
     await b.codex(true);
     const back = await b.pass(gone);
-    assert.deepEqual(back.arrived, [{ tool: 'codex-cli', copied: 1 }]);
+    assert.deepEqual(said(back), [{ tool: 'codex-cli', copied: 1 }]);
     await chooseTools(b.context, 'codex-cli', false);
     const left = await b.pass({ ...back, arrived: [] });
     await chooseTools(b.context, 'codex-cli', true);
@@ -157,6 +170,6 @@ test('A tool seen gone and back has arrived again, its line gone meanwhile; one 
 test('What the settings hold for a home is read in this shape only; anything else is seeded again', () => {
   assert.equal(seenIn(undefined), undefined);
   assert.equal(seenIn({ arrived: [] }), undefined);
-  assert.deepEqual(seenIn({ managed: ['codex-cli', 'nonesuch', 3], arrived: [{ tool: 'codex-cli', copied: 2 }, { tool: 'nonesuch' }, { tool: 'pi-cli', copied: 'two' }, 'x'] }),
-    { managed: ['codex-cli'], arrived: [{ tool: 'codex-cli', copied: 2 }, { tool: 'pi-cli' }] });
+  assert.deepEqual(seenIn({ managed: ['codex-cli', 'nonesuch', 3], arrived: [{ tool: 'codex-cli', since: 'T', copied: 2 }, { tool: 'nonesuch' }, { tool: 'pi-cli', copied: 'two' }, 'x'] }),
+    { managed: ['codex-cli'], arrived: [{ tool: 'codex-cli', since: 'T', copied: 2 }, { tool: 'pi-cli', since: '' }] });
 });

@@ -46,7 +46,7 @@ import { linkLabel } from './sourcelink.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
 import { forgetMissing, SETTLE_MS } from './librarypass.ts';
-import { byHand, observe, seenBefore, seenIn, type ToolsSeen } from './arrivals.ts';
+import { byHand, observe, passStarts, seenBefore, seenIn, type ToolsSeen } from './arrivals.ts';
 import { homePass, passTells, syncOnceReport, takenInReloads, type HomePass } from './homepass.ts';
 import { waysFrom } from './reload.ts';
 import { deleteProfile, readProfiles, saveProfile, switchProfile, undoSwitch, type PluginSide } from './profiles.ts';
@@ -651,11 +651,11 @@ async function pass(snapshots: Snapshot[], explicit = false, forView = false): P
   // While plugin parts from before the library wait to be moved there, the plugins record's first read comes first (its install
   // alpha 1 waited for read from pluginUpdates, made before any pass), and the move may read a plugin (homepass.ts step 2).
   const pluginNow = await carriedMarket?.beforeParts().catch((error: unknown) => { logFailure('plugins record', error); return undefined; });
-  const managed = await managedNow(shared, snapshots), writes = syncOn || explicit;
+  const managed = await managedNow(shared, snapshots), since = passStarts(current!.home);
   // The tools seen before, seeded from the records before this pass adds a tool to them; then what this pass saw (arrivals.ts).
   const before = await toolsSeenBefore(shared, managed);
-  const { synced, seen, seenFailed, profilesFailed, partsFailed, partsWait, untouched } = await homePass(shared, managed, writes, pluginNow);
-  if (before) await keepToolsSeen(observe(before, managed, writes, synced));
+  const { synced, seen, seenFailed, profilesFailed, partsFailed, partsWait, untouched } = await homePass(shared, managed, syncOn || explicit, pluginNow);
+  if (before) await keepToolsSeen(await observe(shared, before, managed, since, synced));
   partsWaiting = partsWait;
   if (profilesFailed !== undefined) logFailure('moving profiles', profilesFailed);
   if (partsFailed !== undefined) logFailure('moving plugin parts', partsFailed);

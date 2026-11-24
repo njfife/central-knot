@@ -1,9 +1,9 @@
-// Which tools came under Central Knot's management by themselves (installed while the app was closed or while it is open, or
-// found again after being away), and how many items have been copied to each since. The rule, in two sentences: the
-// managed tools each pass of the whole home sees are kept per home, whatever Automatic sync is, and a tool managed now that was
-// not among them has arrived, so one seen gone and back, its Manage switch still on, arrives again. A home with nothing kept yet
-// is seeded silently, from the tools its records name, else (a first setup) from what is managed now; and a tool turned on by
-// its Manage switch is kept before its pass (byHand), so it is no arrival: its switch says what it did.
+// Which tools came under Central Knot's management by themselves (installed while the app was closed or open, or found again
+// after being away), and how many items were copied to each until a sync first brought it into line (observe). The rule, in two
+// sentences: the managed tools each pass of the whole home sees are kept per home, whatever Automatic sync is, and a tool managed
+// now that was not among them has arrived, so one seen gone and back, its Manage switch still on, arrives again. A home with
+// nothing kept yet is seeded silently, from the tools its records name, else (a first setup) from what is managed now; and a tool
+// turned on by its Manage switch is kept before its pass (byHand), so it is no arrival: its switch says what it did.
 // Kept in main.ts's settings (AppSettings toolsSeen), by main.ts pass (the one caller of observe), `tools:manage` and
 // `tools:dismiss-arrival`; the Overview says each arrival until it is dismissed (overview.ts arrivalLines). In History a copy put
 // there by a pass no click asked has an entry of its own; one that a click, a take-in, an edit, Pull, a source, a profile switch
@@ -11,6 +11,7 @@
 // are managed (presence.ts managedTools).
 import { agentKind } from './agents.ts';
 import { harnessIds } from './harnesses.ts';
+import { readHistory } from './history.ts';
 import type { HomePass } from './homepass.ts';
 import { serverKind } from './servers.ts';
 import type { ShareContext } from './share.ts';
@@ -26,7 +27,8 @@ export function seenIn(stored: unknown): ToolsSeen | undefined {
   const entry = record(stored);
   if (!entry || !Array.isArray(entry.managed)) return undefined;
   const arrived = (Array.isArray(entry.arrived) ? entry.arrived : []).map(record).flatMap(each => (each && harnessIds.includes(each.tool as HarnessId)
-    ? [{ tool: each.tool as HarnessId, ...(typeof each.copied === 'number' ? { copied: each.copied } : {}) }] : []));
+    ? [{ tool: each.tool as HarnessId, since: typeof each.since === 'string' ? each.since : '', ...(typeof each.copied === 'number' ? { copied: each.copied } : {}) }]
+    : []));
   return { managed: onlyAllowed(entry.managed, harnessIds), arrived };
 }
 
@@ -48,20 +50,25 @@ export async function seenBefore(stored: unknown, context: ShareContext, managed
 }
 
 /**
- * What a pass that saw `managed` leaves kept: each tool not seen before has arrived, and an arrival whose tool is no longer
- * managed goes, so no line names a tool Central Knot doesn't manage. `copied` is what has been copied there since it arrived:
- * each pass that may write (`writes`: Automatic sync on, or Sync once) adds what it put there where the tool had none, so a
- * count left short (sync off at first, a pass that copied only part) grows as the rest lands; absent until such a pass runs.
+ * What a pass that saw `managed` leaves kept. Each tool not seen before has arrived, `since` the pass before this one started
+ * (passStarts), so a click's pass between the two is in it; an arrival whose tool is no longer managed goes, so no line names
+ * a tool Central Knot doesn't manage. An arrival's `copied` is fixed at the end of the first pass that brings the home into
+ * line (`synced`: it may write, and every kind ran, none stopped or still settling): the "Copied to <tool>" entries History has
+ * had for the tool since it arrived (librarypass.ts logItem), so the line's number is what History shows. A pass a quit cuts
+ * short never gets here, so the one that finishes counts its copies too. Absent until then.
  */
-export function observe(before: ToolsSeen, managed: HarnessId[], writes: boolean, synced: HomePass['synced']): ToolsSeen {
-  const count = (arrival: Arrival): Arrival => (writes ? { tool: arrival.tool, copied: (arrival.copied ?? 0) + copiedTo(arrival.tool, synced) } : arrival);
-  const arrived = managed.filter(tool => !before.managed.includes(tool)).map(tool => ({ tool }));
-  return { managed, arrived: [...before.arrived.filter(arrival => managed.includes(arrival.tool)), ...arrived].map(count) };
+export async function observe(context: ShareContext, before: ToolsSeen, managed: HarnessId[], since: string, synced: HomePass['synced']): Promise<ToolsSeen> {
+  const arrived: Arrival[] = [...before.arrived.filter(arrival => managed.includes(arrival.tool)), ...managed.filter(tool => !before.managed.includes(tool)).map(tool => ({ tool, since }))];
+  const inLine = !!synced && !synced.crashes.length && [synced.skills, synced.servers, synced.agents].every(done => done && !done.stopped && !done.settling);
+  if (!inLine || arrived.every(arrival => arrival.copied !== undefined)) return { managed, arrived };
+  const history = await readHistory(context);
+  const copied = ({ tool, since: from }: Arrival) => history.filter(event => event.cause === 'in-line' && event.only === tool && event.at >= from).length;
+  return { managed, arrived: arrived.map(arrival => (arrival.copied === undefined ? { ...arrival, copied: copied(arrival) } : arrival)) };
 }
 
-/** The items a pass put in `tool` where it had none, every kind's (one result per item and tool): not a copy written over, the same already, or held. */
-const copiedTo = (tool: HarnessId, synced: HomePass['synced']) => [synced?.skills, synced?.servers, synced?.agents]
-  .flatMap(done => done?.results ?? []).filter(result => result.harness === tool && result.outcome === 'written' && !result.replaced).length;
+/** When each home's last pass of the whole home started this launch, which main.ts pass asks at its start: the `since` of a tool it sees arrive. */
+const lastStarts = new Map<string, string>();
+export const passStarts = (home: string, started = new Date().toISOString()) => { const since = lastStarts.get(home) ?? started; lastStarts.set(home, started); return since; };
 
 /** A tool turned on by its Manage switch, kept as seen before the pass that brings it into line. */
 export const byHand = (seen: ToolsSeen, tool: HarnessId): ToolsSeen => (seen.managed.includes(tool) ? seen : { ...seen, managed: [...seen.managed, tool] });

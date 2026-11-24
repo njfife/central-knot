@@ -281,8 +281,6 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
   // A pass no click asked brought tools into line: nothing was asked, so nothing is undone here (a deleted item's Restore is
   // its Delete's entry's); but a copy it put in one tool (`only`) can be taken out of that tool, as its switch there would.
   if (event.cause === 'in-line' && !event.only) return undefined;
-  // An entry about one harness (`only`) offers nothing while it isn't managed: its switch there would change nothing in it now.
-  if (event.only && !itemNow.managed.includes(event.only)) return undefined;
   const name = item.name, now = asItIs(item.key, item), everywhere = item.on ? ', in every tool it is on in' : '';
   if (event.kind === 'deleted') {
     const help = `Put ${name} back in Central Knot as it was${item.on ? ', and in every tool it was on in' : ''}`;
@@ -293,6 +291,9 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
     const offered = versionChoices(event, item).some(choice => choice.hash === version);
     return offered ? { label: 'Use it', help: `Make that copy’s version of ${name} the current one${everywhere}`, change: { ...now, version } } : undefined;
   }
+  // An entry about one harness (`only`) offers no action of its own while it isn't managed: its switch there would change
+  // nothing in it now. A version choice above writes only to the tools that are, as any does.
+  if (event.only && !itemNow.managed.includes(event.only)) return undefined;
   // Clear the switch (a skill's): its Undo turns that tool's own switch off again (skills.ts restoreSkill does it, not a Change).
   // Offered while one of those tools still loads it (`loads`, the row's: each tool's own switch now; unknown, it is offered).
   const stillCleared = !loads || event.switched?.some(entry => !loads[entry.tool]?.switchedOff);

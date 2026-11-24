@@ -486,13 +486,13 @@ test('Records that knew five tools, opened with Antigravity there: it has arrive
   const box = await placeParts(true);
   try {
     const { linked } = await fiveToolsThenAntigravity(box);
-    const context = { ...appContext(box.home, box.appData), reads: new Map() }, managed = await managedNow(context, await context.read());
+    const context = { ...appContext(box.home, box.appData), reads: new Map(), settleMs: 0 }, managed = await managedNow(context, await context.read());
     const before = await seenBefore(undefined, context, managed), told = (await readHistory(context)).length;
-    const seen = observe(before, managed, true, (await homePass(context, managed, true)).synced);
+    const seen = await observe(context, before, managed, new Date().toISOString(), (await homePass(context, managed, true)).synced);
     const copied = (await readHistory(context)).slice(told).filter(event => event.cause === 'in-line' && event.only === 'antigravity-cli').map(event => libraryEntry(event)!.key).sort();
     const there = [...await readdir(join(box.home, '.gemini/config/skills')), ...Object.keys((await readJson(join(box.home, '.gemini/config/mcp_config.json')))?.mcpServers ?? {})].sort();
     assert.ok(there.length > 0, 'the pass put items there');
-    assert.deepEqual([seen.arrived, copied, copied.filter(key => linked.includes(key))], [[{ tool: 'antigravity-cli', copied: there.length }], there, []]);
+    assert.deepEqual([seen.arrived.map(({ tool, copied }) => ({ tool, copied })), copied, copied.filter(key => linked.includes(key))], [[{ tool: 'antigravity-cli', copied: there.length }], there, []]);
   } finally { await rm(box.base, { recursive: true, force: true }); }
 });
 
