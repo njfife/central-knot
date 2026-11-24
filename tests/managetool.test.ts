@@ -12,7 +12,7 @@ import { readHistory } from '../src/history.ts';
 import { homePass } from '../src/homepass.ts';
 import { applyBase, baseView, instructionsView, saveInstruction, undoBase } from '../src/instructions.ts';
 import type { LibraryItem } from '../src/library.ts';
-import { libraryAction, librarySentence } from '../src/historyactions.ts';
+import { libraryAction, librarySentence, versionChoices } from '../src/historyactions.ts';
 import { libraryWords, sentences, statusLine } from '../src/libraryrow.ts';
 import { NO_PLUGINS, saveProfile, switchProfile } from '../src/profiles.ts';
 import { setDisabled } from '../src/skillswitch.ts';
@@ -442,6 +442,24 @@ test('An entry about one tool offers nothing while that tool is not managed, and
     await restoreSkill(b.context, managed, entry.id);
     assert.deepEqual([offered, said, (await b.history()).find(event => event.id === entry.id)?.undoneBy, !!(await b.read(CODEX.skill)), (await b.items()).skills.notes.except],
       [undefined, 'Turned on in Codex: its folder there is back. Codex isn’t managed now.', undefined, true, []]);
+  } finally { await b.cleanup(); }
+});
+
+test('Use Codex’s copy on an entry about Codex still works once Codex is not managed: the version is made current in the tools that are', async () => {
+  const b = await box();
+  try {
+    await b.turnOn();
+    await b.pass();
+    // notes kept out of Codex, Codex's own copy written there, then notes let in again: the click takes that copy over (a version).
+    await applySkills(b.context, await b.managed(), [{ key: 'notes', on: true, except: ['codex-cli'] }]);
+    await writeFile(join(b.home, CODEX.skill), skillText('Codex’s own notes.'));
+    await applySkills(b.context, await b.managed(), [{ key: 'notes', on: true, except: [] }]);
+    const entry = (await b.history()).filter(event => event.key === 'notes' && event.only === 'codex-cli').at(-1)!;
+    await chooseTools(b.context, 'codex-cli', false);
+    const managed = await b.managed(), [choice] = versionChoices(entry, (await b.items()).skills.notes);
+    const offered = libraryAction(entry, (await b.items()).skills.notes, { managed, pending: [] }, choice?.hash)?.label;
+    await restoreSkill(b.context, managed, entry.id, choice?.hash);
+    assert.deepEqual([choice?.tool, offered, await b.read('.claude/skills/notes/SKILL.md')], ['codex-cli', 'Use it', skillText('Codex’s own notes.')]);
   } finally { await b.cleanup(); }
 });
 

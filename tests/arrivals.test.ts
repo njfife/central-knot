@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { byHand, observe, seenBefore, seenIn, type ToolsSeen } from '../src/arrivals.ts';
 import { homePass } from '../src/homepass.ts';
+import { readHistory } from '../src/history.ts';
 import { managedNow, type ShareContext } from '../src/share.ts';
 import { applySkills } from '../src/skills.ts';
 import { applyAgents } from '../src/agents.ts';
@@ -32,6 +33,11 @@ async function box() {
   const inCodex = () => readFile(join(home, '.codex/skills/notes/SKILL.md'), 'utf8').then(() => true, () => false);
   return { home, context, pass, turnOn, codex, inCodex, cleanup: () => rm(base, { recursive: true, force: true }) };
 }
+
+/** An arrival as the line reads it: the tool and its count. */
+const said = (seen: ToolsSeen) => seen.arrived.map(({ tool, copied }) => (copied === undefined ? { tool } : { tool, copied }));
+/** History's "Copied to Codex" entries: each copy a pass with no click behind it put in Codex. */
+const copiedTo = async (b: { context: ShareContext }) => (await readHistory(b.context)).filter(event => event.cause === 'in-line' && event.only === 'codex-cli');
 
 test('A first setup says nothing; a tool installed later has arrived, with the items copied there, and stays said until closed', async () => {
   const b = await box();
@@ -74,7 +80,35 @@ test('With Automatic sync off the arrival is kept with nothing copied; sync on a
   } finally { await b.cleanup(); }
 });
 
-test('A first pass that copied only part (an agents folder that can’t be written): the next pass’s copies there are added to the count', async () => {
+test('The count is fixed at the end of the first pass that brought the home into line: a copy put there later is in History, not in the line', async () => {
+  const b = await box();
+  try {
+    await b.turnOn();
+    const before = await b.pass(undefined);
+    await b.codex(true);
+    const arrived = await b.pass(before);
+    await rm(join(b.home, '.codex/skills'), { recursive: true });
+    await mkdir(join(b.home, '.codex/skills'));
+    assert.deepEqual([said(arrived), said(await b.pass(arrived)), (await copiedTo(b)).length], [[{ tool: 'codex-cli', copied: 1 }], [{ tool: 'codex-cli', copied: 1 }], 2],
+      'Codex’s skills folder made again: notes is copied there again, with an entry of its own');
+  } finally { await b.cleanup(); }
+});
+
+test('What a click’s own pass put there before the pass that saw the tool arrive is counted as History shows it: an entry of its own counts, the click’s entry doesn’t', async () => {
+  const b = await box();
+  try {
+    await b.turnOn();
+    await mkdir(join(b.home, '.claude/skills/todo'), { recursive: true });
+    await writeFile(join(b.home, '.claude/skills/todo/SKILL.md'), '---\nname: todo\ndescription: Todo.\n---\n\nDo things.\n');
+    const before = await b.pass(undefined);
+    await b.codex(true);
+    // Turning todo on, Codex there now: its pass puts todo in Codex (the click's entry) and notes (an entry of its own).
+    await applySkills(b.context, await managedNow(b.context, await b.context.read()), [{ key: 'todo', on: true, except: [] }]);
+    assert.deepEqual([said(await b.pass(before)), (await copiedTo(b)).map(event => event.key)], [[{ tool: 'codex-cli', copied: 1 }], ['notes']]);
+  } finally { await b.cleanup(); }
+});
+
+test('A copy held at the pass that brought the home into line (an agents folder that can’t be written) lands later with its own entry; the line keeps that pass’s count', async () => {
   const b = await box();
   try {
     await mkdir(join(b.home, '.claude/agents'), { recursive: true });
@@ -86,7 +120,7 @@ test('A first pass that copied only part (an agents folder that can’t be writt
     await mkdir(join(b.home, '.codex/agents'), { mode: 0o555 });
     const part = await b.pass(before);
     await chmod(join(b.home, '.codex/agents'), 0o755);
-    assert.deepEqual([part.arrived, (await b.pass(part)).arrived], [[{ tool: 'codex-cli', copied: 1 }], [{ tool: 'codex-cli', copied: 2 }]]);
+    assert.deepEqual([said(part), said(await b.pass(part)), (await copiedTo(b)).length], [[{ tool: 'codex-cli', copied: 1 }], [{ tool: 'codex-cli', copied: 1 }], 2]);
   } finally { await b.cleanup(); }
 });
 

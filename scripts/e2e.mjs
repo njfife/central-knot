@@ -1052,7 +1052,7 @@ async function arrivalFlow() {
     await lines(a), ['overview-arrived-opencode-cli: Central Knot now manages OpenCode. Copied 2 items. Its switch on Harnesses']);
   await fitsAtMinimum(a, 'the Overview with a tool that came under management');
   await pictures(a, 'overview');
-  same('History has an entry for each copy put there, each offering Turn it off in OpenCode', await copied(a), ['docs: Turn it off in OpenCode', 'reviewer: Turn it off in OpenCode']);
+  same('History has an entry for each copy put there, each offering Turn it off in OpenCode, as many as the line counts', await copied(a), ['docs: Turn it off in OpenCode', 'reviewer: Turn it off in OpenCode']);
   await pictures(a, 'history');
   check('OpenCode has docs before its entry’s action', readNow(openCodeSettings).includes('"docs"'), readNow(openCodeSettings));
   await a.run(`${COPIED()}.find(row => row.querySelector('.history-what strong').textContent === 'docs').querySelector('.history-actions button').click()`);
@@ -1091,7 +1091,7 @@ async function arrivalFlow() {
   await addAgent(a, 'tester');
   install(true);
   await a.click('#header-refresh');
-  same('with Automatic sync off, the line says nothing was copied', await lines(a), ['overview-arrived-opencode-cli: Central Knot now manages OpenCode. Automatic sync was off, so no items were copied. Its switch on Harnesses']);
+  same('with Automatic sync off, the line says its items are copied at the next sync', await lines(a), ['overview-arrived-opencode-cli: Central Knot now manages OpenCode. Its items are copied there at the next sync. Its switch on Harnesses']);
   same('nothing was written in OpenCode, and no entry made', [existsSync(join(home, '.config/opencode/agents/tester.md')), (await copied(a)).filter(entry => entry.startsWith('tester'))], [false, []]);
   await a.click('#sync-switch');
   same('Automatic sync on again: the catch-up’s copy, with its entry', [existsSync(join(home, '.config/opencode/agents/tester.md')), (await copied(a)).filter(entry => entry.startsWith('tester'))], [true, ['tester: Turn it off in OpenCode']]);
@@ -1104,6 +1104,14 @@ async function arrivalFlow() {
     'overview-arrived-antigravity-cli: Central Knot now manages Antigravity. Copied 2 items. Its switch on Harnesses']);
   await fitsAtMinimum(a, 'the Overview with two tools that came under management');
   await pictures(a, 'two-lines');
+  // OpenCode taken away and back with everything still there: nothing needed copying. Its line goes while it is away.
+  install(false);
+  await a.click('#header-refresh');
+  install(true);
+  await a.click('#header-refresh');
+  same('back with nothing to copy, its line says no items needed copying', await lines(a), [
+    'overview-arrived-antigravity-cli: Central Knot now manages Antigravity. Copied 2 items. Its switch on Harnesses',
+    'overview-arrived-opencode-cli: Central Knot now manages OpenCode. No items needed copying. Its switch on Harnesses']);
   same('and each has its entry', await copied(a, 'Antigravity'), ['docs: Turn it off in Antigravity', 'notes: Turn it off in Antigravity']);
   same('no page errors, arrival', a.pageErrors, []);
   await a.quit();
