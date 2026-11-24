@@ -631,8 +631,9 @@ export interface PassOptions<Content> {
    */
   source?: SourceRead<Content>;
   /**
-   * The clicks are told to History in one entry the caller wrote first (a profile switch: profiles.ts), so their own On and
-   * Off entries are not written (logItem). What else the pass finds (an edit taken in, a copy deleted by hand) is told as ever.
+   * The clicks are told to History in one entry the caller wrote first (a profile switch: profiles.ts; Take over, whose pass has
+   * no click: skills.ts takeOver), so their own On and Off entries are not written, nor one for a copy the pass puts where there
+   * was none (logItem). What else the pass finds (an edit taken in, a copy deleted by hand) is told as ever.
    */
   told?: boolean;
   /**
@@ -875,12 +876,12 @@ async function deletionsTold(pass: Pass) {
  * its plan writes or removes; not for a profile switch's clicks, which its own entry tells: PassOptions told), an edit taken
  * in, and a copy deleted by hand that turned it Off (these two are also notices, since no one asked for them); edits not
  * taken in that gave way, and a harness's own copies that gave way (`own-copy`). Then one rule for the rest, by what the pass
- * does and never why: a write over a copy, or a removal, that nothing above told gets its entry (cause `in-line`), whichever
- * pass makes it (a tool managed again, a write held in an earlier pass): an `on` for the copies written
- * over, and an `off` (a `deleted` for a deleted item) for the copies removed. Each names the harnesses the plan writes or
- * removes; one whose write or removal is then held is taken out after (untell), said in the pass's results, and finished by a
- * later pass (named then by the rule above where it writes over a copy or removes one; where it only adds, the entry of the
- * click that asked for it covers it, Undo included). A copy a harness managed again gives way with has its entry from
+ * does and never why: a write or a removal that nothing above told gets its entry (cause `in-line`), whichever pass makes it
+ * (a tool that came under management or was managed again, Automatic sync turned back on, a write held in an earlier pass):
+ * an `on` for the copies written over, an `on` in one harness (`only`) for each copy put where there was none (unless the
+ * caller told History first: PassOptions told), and an `off` (a `deleted` for a deleted item) for the copies removed. Each names the harnesses the plan writes or removes; one whose
+ * write or removal is then held is taken out after (untell), so an entry left naming none goes, said in the pass's results,
+ * and finished by a later pass, which names it then. A copy a harness managed again gives way with has its entry from
  * cameBack, which may concern an item outside this pass.
  */
 function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record<HarnessId, Seen>>, copies: Copies): Told {
@@ -959,6 +960,10 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
   const told = new Set([...gaveWay, ...theirs, ...(pass.givingWay.get(item.key) ?? []).map(kept => kept.harness)]);
   const over = made.takeIn ? [] : did.written.filter(tool => slot[tool] && !told.has(tool));
   if (over.length) log({ kind: 'on', cause: 'in-line', losers: before(over) }, over);
+  // Each copy put where there was none, one entry each, so its action takes that one copy out again (historyactions.ts); in a
+  // pass whose caller told History first (PassOptions told), that entry says it.
+  const added = made.takeIn || pass.told ? [] : did.written.filter(tool => !slot[tool]);
+  for (const tool of added) log({ kind: 'on', cause: 'in-line', only: tool, losers: before([tool]) }, [tool]);
   const gone = made.turnedOffBy ? [] : did.removed;
   if (gone.length) log({ kind: item.deleted ? 'deleted' : 'off', cause: 'in-line', losers: before(gone) }, gone);
   return { events, named };

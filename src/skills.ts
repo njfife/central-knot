@@ -528,7 +528,8 @@ export async function takeOver(context: ShareContext, tools: HarnessId[], key: s
   // Told once it happened: a take-over has no Undo, so an entry must never claim one that didn't.
   const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key, of: 'skill', item: item.name, kind: 'took-over', losers: [loser], orderProved: true };
   await appendHistory(context, [event]);
-  const done = await applySkills(context, tools, [], { only: new Set([key]) });
+  // The copies it puts in the tools that read the copy taken over are the take-over's: its entry tells them (PassOptions told).
+  const done = await applySkills(context, tools, [], { only: new Set([key]), told: true });
   // Central Knot's copy is off where the copy it replaced was: a switch that goes by the file's path names the new one. The
   // old copy's own entry stays as he wrote it (its folder is gone, so it names nothing); what Pi's list gains is said.
   const listSaid: string[] = [];

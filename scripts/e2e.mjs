@@ -1002,6 +1002,121 @@ async function manageFlow() {
   await a.quit();
 }
 
+/**
+ * A tool that comes under management by itself (arrivals.ts): OpenCode installed while the app was closed, then taken away and
+ * installed again while it is open, then again with Automatic sync off; last, Antigravity installed while it is open. The Overview says each arrival, with how many items were
+ * copied there, until it is dismissed for that home; each copy has its own History entry, whose action takes it out of that
+ * tool; the status bar says nothing of it. A first setup, a home whose settings keep no tools yet, and Manage turned off and on
+ * by hand say nothing. With --shots, the line and the entries at 860 and 1316.
+ */
+async function arrivalFlow() {
+  const home = join(scratch, 'home-arrival'), data = join(scratch, 'arrival-data'), onlyHere = { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' };
+  const released = flag('--electron') ? ['--as-released'] : [];
+  toolClis(home);
+  skill(join(home, '.claude/skills'), 'notes');
+  const agent = name => `---\nname: ${name}\ndescription: The ${name} agent.\n---\n\nDo the ${name} work.\n`;
+  mkdirSync(join(home, '.claude/agents'), { recursive: true });
+  writeFileSync(join(home, '.claude/agents/reviewer.md'), agent('reviewer'));
+  writeFileSync(join(home, '.claude.json'), `${JSON.stringify({ mcpServers: { docs: { type: 'stdio', command: 'docs-server', args: [] } } }, null, 2)}\n`);
+  const openCode = join(home, '.local/bin/opencode'), openCodeSettings = join(home, '.config/opencode/opencode.json');
+  const install = on => (on ? writeFileSync(openCode, '#!/bin/sh\n[ "$1" = "--version" ] && echo "1.19.5" && exit 0\nexit 9\n', { mode: 0o755 }) : rmSync(openCode));
+  const lines = async a => { await a.click('#nav-overview'); return a.all('p[id^="overview-arrived-"]', 'e.id + ": " + e.textContent'); };
+  const addAgent = async (a, name) => { writeFileSync(join(home, `.claude/agents/${name}.md`), agent(name)); await a.click('#header-refresh'); await openKind(a, 'agents'); await a.click(`#${rowPart('add', 'agents', name)}`); };
+  const COPIED = (tool = 'OpenCode') => `[...document.querySelectorAll('.history-row')].filter(row => row.querySelector('.history-about').textContent === 'Copied to ${tool}.')`;
+  /** History's entries for the copies a pass put in a tool with no click: each item's name and the action its row offers. */
+  const copied = async (a, tool) => {
+    await a.click('#nav-history');
+    for (let tries = 0; tries < 30 && !(await a.exists('.history-row')); tries++) await wait(100);
+    return (await a.run(`${COPIED(tool)}.map(row => row.querySelector('.history-what strong').textContent + ': ' + [...row.querySelectorAll('.history-actions button')].map(b => b.textContent).join())`)).sort();
+  };
+  const pictures = async (a, name) => { if (!shots) return; for (const [width, height] of [SMALLEST, [1316, 819]]) { await sizeTo(a, width, height); await a.shot(`arrival-${name}-${width}`); } await fullSize(a); };
+
+  // A first setup: three tools, nothing said; Add takes the three items in and puts them in all three.
+  let a = await launch(data, released, home, onlyHere);
+  same('a first setup says no tool came under management', await lines(a), []);
+  for (const [kind, key] of [['skills', 'notes'], ['mcp', 'docs'], ['agents', 'reviewer']]) { await openKind(a, kind); await a.click(`#${rowPart('add', kind, key)}`); }
+  await a.quit();
+  // A home the settings keep no tools for (the last release kept none) is seeded from its records, silently.
+  const settingsFile = join(data, 'app-settings.json'), settings = jsonOrNothing(settingsFile);
+  same('the settings keep the tools seen in this one home', Object.keys(settings?.toolsSeen ?? {}).length, 1);
+  delete settings?.toolsSeen;
+  writeFileSync(settingsFile, JSON.stringify(settings));
+  a = await launch(data, released, home, onlyHere);
+  same('a home with no tools kept yet is seeded from its records, and nothing is said', await lines(a), []);
+  await a.quit();
+
+  // OpenCode installed while the app was closed: said at the first pass, each copy in History, one entry's action taking its copy out.
+  install(true);
+  a = await launch(data, released, home, onlyHere);
+  same('OpenCode installed while the app was closed: the Overview says Central Knot manages it now, and how many items were copied there (notes is in Claude Code’s folder, which OpenCode reads)',
+    await lines(a), ['overview-arrived-opencode-cli: Central Knot now manages OpenCode. Copied 2 items. Its switch on Harnesses']);
+  await fitsAtMinimum(a, 'the Overview with a tool that came under management');
+  await pictures(a, 'overview');
+  same('History has an entry for each copy put there, each offering Turn it off in OpenCode, as many as the line counts', await copied(a), ['docs: Turn it off in OpenCode', 'reviewer: Turn it off in OpenCode']);
+  await pictures(a, 'history');
+  check('OpenCode has docs before its entry’s action', readNow(openCodeSettings).includes('"docs"'), readNow(openCodeSettings));
+  await a.run(`${COPIED()}.find(row => row.querySelector('.history-what strong').textContent === 'docs').querySelector('.history-actions button').click()`);
+  await a.settle();
+  check('its action takes docs out of OpenCode and leaves it in the others', !readNow(openCodeSettings).includes('"docs"') && readNow(join(home, '.copilot/mcp-config.json')).includes('"docs"'), readNow(openCodeSettings));
+  await a.click('#nav-overview');
+  await a.click('#overview-arrived-opencode-cli-open');
+  same('its link opens Harnesses with OpenCode’s Manage switch in focus', [await a.text('.page-title'), await a.run('document.activeElement?.id')], ['Harnesses', 'manage-opencode-cli']);
+  await a.click('#nav-overview');
+  await a.click('#overview-arrived-opencode-cli-dismiss');
+  await a.click('#header-refresh');
+  same('dismissed, the line is gone, after a refresh too', await lines(a), []);
+  await a.quit();
+  a = await launch(data, released, home, onlyHere);
+  same('and after a launch', await lines(a), []);
+
+  // Taken away while the app is open, an agent added meanwhile, installed again: said again, and the status bar says nothing of it.
+  install(false);
+  await addAgent(a, 'helper');
+  install(true);
+  await a.click('#header-refresh');
+  same('installed again while the app is open, it is said again, with what was copied', await lines(a), ['overview-arrived-opencode-cli: Central Knot now manages OpenCode. Copied 1 item. Its switch on Harnesses']);
+  check('the status bar says nothing of it', !/installed now/.test(await a.run(`document.querySelector('#announcement').dataset.text`) ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`));
+  same('History has the new copy’s entry', (await copied(a)).filter(entry => entry.startsWith('helper')), ['helper: Turn it off in OpenCode']);
+  await a.click('#nav-overview');
+  await a.click('#overview-arrived-opencode-cli-dismiss');
+  // Manage turned off and on by hand: its own result, no arrival line.
+  await a.click('#nav-harnesses');
+  await a.click('#manage-opencode-cli');
+  await a.click('#manage-opencode-cli');
+  same('Manage turned off and on by hand says no arrival', await lines(a), []);
+
+  // With Automatic sync off: said, nothing copied, no entry; Automatic sync on again: the catch-up's entry.
+  await a.click('#sync-switch');
+  install(false);
+  await addAgent(a, 'tester');
+  install(true);
+  await a.click('#header-refresh');
+  same('with Automatic sync off, the line says its items are copied at the next sync', await lines(a), ['overview-arrived-opencode-cli: Central Knot now manages OpenCode. Its items are copied there at the next sync. Its switch on Harnesses']);
+  same('nothing was written in OpenCode, and no entry made', [existsSync(join(home, '.config/opencode/agents/tester.md')), (await copied(a)).filter(entry => entry.startsWith('tester'))], [false, []]);
+  await a.click('#sync-switch');
+  same('Automatic sync on again: the catch-up’s copy, with its entry', [existsSync(join(home, '.config/opencode/agents/tester.md')), (await copied(a)).filter(entry => entry.startsWith('tester'))], [true, ['tester: Turn it off in OpenCode']]);
+  same('and the line counts what has been copied there since OpenCode arrived', await lines(a), ['overview-arrived-opencode-cli: Central Knot now manages OpenCode. Copied 1 item. Its switch on Harnesses']);
+  // Antigravity (`agy`) installed while the app is open: notes and docs go in; it takes no agents yet, so they are not counted.
+  writeFileSync(join(home, '.local/bin/agy'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "1.5.14" && exit 0\nexit 9\n', { mode: 0o755 });
+  await a.click('#header-refresh');
+  same('Antigravity installed: its own line, under OpenCode’s still open, counts the skill and the server copied there', await lines(a), [
+    'overview-arrived-opencode-cli: Central Knot now manages OpenCode. Copied 1 item. Its switch on Harnesses',
+    'overview-arrived-antigravity-cli: Central Knot now manages Antigravity. Copied 2 items. Its switch on Harnesses']);
+  await fitsAtMinimum(a, 'the Overview with two tools that came under management');
+  await pictures(a, 'two-lines');
+  // OpenCode taken away and back with everything still there: nothing needed copying. Its line goes while it is away.
+  install(false);
+  await a.click('#header-refresh');
+  install(true);
+  await a.click('#header-refresh');
+  same('back with nothing to copy, its line says no items needed copying', await lines(a), [
+    'overview-arrived-antigravity-cli: Central Knot now manages Antigravity. Copied 2 items. Its switch on Harnesses',
+    'overview-arrived-opencode-cli: Central Knot now manages OpenCode. No items needed copying. Its switch on Harnesses']);
+  same('and each has its entry', await copied(a, 'Antigravity'), ['docs: Turn it off in Antigravity', 'notes: Turn it off in Antigravity']);
+  same('no page errors, arrival', a.pageErrors, []);
+  await a.quit();
+}
+
 // ---------- Fit: nothing is cut off ----------
 // In the page, on both axes: each control (button, switch, input, filter chip, tool label) that the window or a clipping
 // ancestor cuts. A control a scroll area can bring into view is reachable there, but that scroll area's own viewport must
@@ -5103,9 +5218,11 @@ async function freedOtherWaysFlow() {
   const c = await other.open();
   await openKind(c, 'skills');
   same('opened with the alpha gone: nothing holds this build, and the record names it, by its name', [await c.exists('#held'), other.record().owner, other.record().ownerName], [false, 'com.centralknot.firstlook', 'Central Knot']);
-  // (The AppImage's first open also turns start at sign-in on: this build's own default, not the alpha's.)
+  // (The AppImage's first open also turns start at sign-in on: this build's own default, not the alpha's; and toolsSeen is the
+  // tools this build saw managed in the home, its own record: arrivals.ts.)
+  const { toolsSeen: _seen, ...appNow } = JSON.parse(readFileSync(join(other.data, 'app-settings.json'), 'utf8'));
   same('of the alpha’s choices only History’s days are this build’s now (the longer): Automatic sync, plugin updates and the home it opens are as they were',
-    [readFileSync(join(other.data, 'sync-settings.json'), 'utf8'), JSON.parse(readFileSync(join(other.data, 'app-settings.json'), 'utf8'))], [ownSync, { ...ownApp, historyDays: 90, ...(appImageRun ? { startAtSignIn: true } : {}) }]);
+    [readFileSync(join(other.data, 'sync-settings.json'), 'utf8'), appNow], [ownSync, { ...ownApp, historyDays: 90, ...(appImageRun ? { startAtSignIn: true } : {}) }]);
   check('Skills asks Resume, and nothing on the page names the alpha', await c.exists('#resume') && !(await c.run('document.body.innerText')).includes('Central Knot Alpha'), await c.text('.bands'));
   same('nothing in its tools changed before Resume', toolFiles(other.home), files);
   await c.click('#resume');
@@ -14381,7 +14498,7 @@ const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, sessionStripFlow, fromFlow, claudeWholeFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow],
   [fewToolsFlow, openCodeFlow, antigravityFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, pluginRecordHoldsFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow, clickReadsFlow],
-  [backFlow, backPlaceFlow, harnessFlow, manageFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, mcpSigninFlow, firstSetupFlow, crashFlow],
+  [backFlow, backPlaceFlow, harnessFlow, manageFlow, arrivalFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, mcpSigninFlow, firstSetupFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.
 const runs = flow => flow !== crashFlow || (canWriteRealHome && crashRounds > 0);
