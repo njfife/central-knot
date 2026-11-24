@@ -228,21 +228,22 @@ const isEntry = (value: unknown): value is PluginEntry => {
 
 /**
  * The home's record: none (`record` undefined) when there is no file yet. One that can't be read, is damaged or newer is a `problem`
- * that stops every write. One that knew fewer tools than this build has its entries brought forward as read (keptOutOfNew).
+ * that stops writes and holds its plugins' items. One that knew fewer tools than this build has its entries brought forward as read (keptOutOfNew).
  */
 export async function readPluginRecord(home: string): Promise<{ record?: PluginRecord; problem?: string }> {
+  const held = `${NOTHING_CHANGED} Its plugins’ items are held as they are until then. The next sync takes them up again once the record is back.`;
   let text: string;
   try { text = await readFile(recordPath(home), 'utf8'); }
-  catch (error) { return errorCode(error) === 'ENOENT' ? {} : { problem: `The plugins record could not be read. ${NOTHING_CHANGED}` }; }
+  catch (error) { return errorCode(error) === 'ENOENT' ? {} : { problem: `The plugins record could not be read. ${held}` }; }
   try {
     const read = JSON.parse(text) as { formatVersion?: number; tools?: unknown; knows?: unknown; plugins?: unknown[] } | null;
-    if ((read?.formatVersion ?? 0) > FORMAT_VERSION) return { problem: `The plugins record was written by a newer Central Knot. ${NOTHING_CHANGED}` };
+    if ((read?.formatVersion ?? 0) > FORMAT_VERSION) return { problem: `The plugins record was written by a newer Central Knot. ${held}` };
     const tools = onlyAllowed(read?.tools, harnessIds), knows = read?.knows === undefined ? KNEW_FIVE : onlyAllowed(read.knows, harnessIds);
     if (read?.formatVersion === FORMAT_VERSION && Array.isArray(read.tools) && tools.length === read.tools.length && Array.isArray(read.plugins) && read.plugins.every(isEntry)) {
       return { record: { tools, knows, plugins: read.plugins.map(entry => ({ ...entry, except: keptOutOfNew(entry.except, knows) })) } };
     }
   } catch { /* said below */ }
-  return { problem: `The plugins record is damaged. ${NOTHING_CHANGED}` };
+  return { problem: `The plugins record is damaged. ${held}` };
 }
 
 export const savePluginRecord = (home: string, record: PluginRecord) =>

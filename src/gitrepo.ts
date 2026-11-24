@@ -27,6 +27,7 @@ import { appendHistory, readHistory, replaceHistory } from './history.ts';
 import { applySkills, skillsForRepo, skillsView } from './skills.ts';
 import { fromJson, jsonEntry, serverHash, type NeutralServer } from './mcp.ts';
 import { applyServers, serversForRepo, serversView } from './servers.ts';
+import { readPluginRecord } from './pluginrecord.ts';
 import { gitEnv, gitFailure, runGit, whyGitFailed, whyPushFailed } from './plugins.ts';
 import { PRODUCT } from './values.ts';
 import { leftOutSentence, pageNames } from './words.ts';
@@ -518,24 +519,28 @@ async function openClone(context: ShareContext): Promise<{ state: RepoState; dir
 }
 
 const PULL_FIRST = 'The repo has changes this computer doesn’t have yet. Pull them first, then push.';
+/** While plugins.json has a problem, Pull and Push wait (for personal items too) rather than misread plugin links. */
+const pluginsHold = (home: string) => readPluginRecord(home).then(({ problem }) => (problem ? `${problem} Pull and Push wait until then, for your own items too.` : undefined));
 
 async function buildView(context: ShareContext, { base, syncOn }: RepoOptions): Promise<RepoView> {
   const access = await writeAccess(context);
   const found = await openClone(context);
   if (!found) return { connected: false, access };
   const { state, dir } = found;
-  const sides = await stageSides(context, dir, state, base);
+  const held = await pluginsHold(context.home);
+  const sides = held ? undefined : await stageSides(context, dir, state, base);
   // An unfinished item that is now the same here and in the repo (put right by hand, say) is finished.
-  const settled = Object.keys(state.unfinished ?? {}).filter(key => !sides.unsent.has(key) && same(sides.latest.get(key), sides.here.get(key)));
+  const settled = sides ? Object.keys(state.unfinished ?? {}).filter(key => !sides.unsent.has(key) && same(sides.latest.get(key), sides.here.get(key))) : [];
   if (settled.length && access.allowed) {
     for (const key of settled) delete state.unfinished![key];
     await saveState(context.home, { ...state, unfinished: Object.keys(state.unfinished!).length ? state.unfinished : undefined });
   }
-  const { incoming, outgoing } = classify(sides, state.unfinished, syncOn);
+  const { incoming, outgoing } = sides ? classify(sides, state.unfinished, syncOn) : { incoming: [], outgoing: [] };
   return {
-    connected: true, access, url: state.url, branch: state.branch, base: await describeCommit(dir, state.base), latest: await describeCommit(dir, sides.latestId),
-    pulledAt: state.pulledAt, pushedAt: state.pushedAt, checkedAt: state.checkedAt, problem: state.problem, incoming, outgoing,
-    pushBlocked: sides.latestId !== state.base ? PULL_FIRST : undefined, branchGone: sides.branchGone,
+    connected: true, access, url: state.url, branch: state.branch, base: await describeCommit(dir, state.base),
+    latest: await describeCommit(dir, sides ? sides.latestId : (await commitOf(dir, `refs/remotes/origin/${state.branch}`)) ?? state.base),
+    pulledAt: state.pulledAt, pushedAt: state.pushedAt, checkedAt: state.checkedAt, problem: state.problem, held, incoming, outgoing,
+    pushBlocked: sides && sides.latestId !== state.base ? PULL_FIRST : undefined, branchGone: sides?.branchGone,
   };
 }
 
@@ -546,7 +551,7 @@ async function buildView(context: ShareContext, { base, syncOn }: RepoOptions): 
 export function repoView(context: ShareContext, options: RepoOptions & { check?: boolean } = {}): Promise<RepoView> {
   return exclusive(async () => {
     // A page's check gives up sooner than Pull's: a Pull or Push waiting behind it holds every other change in the app.
-    if (options.check) await check(context, 20_000);
+    if (options.check && !(await pluginsHold(context.home))) await check(context, 20_000);
     return buildView(context, options);
   });
 }
@@ -858,7 +863,8 @@ async function sayingWhy(context: ShareContext, options: RepoOptions, action: 'P
 async function readyToMove(context: ShareContext, options: RepoOptions): Promise<{ dir: string; state: RepoState; sides: Sides } | { refused: RepoResult }> {
   // Pull writes a tool's copy before sync runs, so the gate for library writes is asked first; only asked: Pull's pass enters it.
   const gate = await libraryGate(context);
-  if ('refused' in gate) return { refused: await refusal(context, gate.refused, options) };
+  const stopped = 'refused' in gate ? gate.refused : await pluginsHold(context.home);
+  if (stopped) return { refused: await refusal(context, stopped, options) };
   const found = await openClone(context);
   if (!found) return { refused: await refusal(context, 'No repo is connected.', options) };
   const problem = await check(context);

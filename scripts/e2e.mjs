@@ -14355,10 +14355,150 @@ async function clickReadsFlow() {
   await a.quit();
 }
 
+/**
+ * Damaged plugins.json (invalid JSON, and separately an unknown tool id in `except`) with Automatic sync on: a plugin kept to
+ * Pi and OpenCode only has its skill, agent and MCP server held in every managed tool while a personal skill keeps syncing;
+ * Plugins and the held item's row in the Library both say why; putting plugins.json back clears the holds.
+ */
+async function pluginRecordHoldsFlow() {
+  const home = join(scratch, 'home-record-holds'), data = join(scratch, 'data-record-holds'), market = join(scratch, 'market-record-holds'), tools = join(scratch, 'tools-record-holds');
+  for (const dir of ['.claude/skills', '.copilot/skills', '.codex/skills', '.pi/agent/skills', '.config/opencode/skills']) {
+    mkdirSync(join(home, dir), { recursive: true });
+  }
+  const put = (path, text) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text); };
+  put(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'team', plugins: [{ name: 'partial', source: './plugins/partial', version: '1.0.0' }] }));
+  put(join(market, 'plugins/partial/.claude-plugin/plugin.json'), JSON.stringify({ name: 'partial' }));
+  put(join(market, 'plugins/partial/skills/triage/SKILL.md'), '---\nname: triage\ndescription: Triage issues.\n---\nFrom plugin.\n');
+  put(join(market, 'plugins/partial/agents/reviewer.md'), '---\nname: reviewer\ndescription: Review changes.\n---\nReview.\n');
+  put(join(market, 'plugins/partial/.mcp.json'), JSON.stringify({ mcpServers: { relay: { command: 'npx', args: ['relay'] } } }));
+  put(join(home, '.claude/skills/own-note/SKILL.md'), '---\nname: own-note\ndescription: Personal.\n---\nPersonal v1.\n');
+  mkdirSync(join(tools, '.local/bin'), { recursive: true });
+  writeFileSync(join(tools, '.local/bin/claude'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.322 (Claude Code)" && exit 0\nexit 1\n', { mode: 0o755 });
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
+
+  const pluginsPath = join(home, '.central-knot/plugins.json');
+  const remote = join(scratch, 'repo-record-holds.git');
+  const git = (...args) => spawnSync('git', args, { encoding: 'utf8' }).stdout.trim();
+  git('init', '--quiet', '--bare', '--initial-branch=main', remote);
+  const reason = 'The plugins record is damaged. Nothing was written or deleted. Put the record back, then try again. Its plugins’ items are held as they are until then. The next sync takes them up again once the record is back.';
+  const repoReason = `${reason} Pull and Push wait until then, for your own items too.`;
+  const leaked = () => [
+    existsSync(join(home, '.claude/skills/triage/SKILL.md')),
+    existsSync(join(home, '.copilot/skills/triage/SKILL.md')),
+    existsSync(join(home, '.codex/skills/triage/SKILL.md')),
+    existsSync(join(home, '.claude/agents/reviewer.md')),
+    existsSync(join(home, '.copilot/agents/reviewer.agent.md')),
+    (readNow(join(home, '.claude.json')) ?? '').includes('relay'),
+  ];
+  const waitBusy = async a => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+
+  // Baseline: add marketplace, tick partial in Pi and OpenCode only, take own-note in.
+  let a = await launch(data, [], tools);
+  if (await a.exists('#setup-no')) await a.click('#setup-no');
+  same('marketplace added', await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)}).then(result => result.problem ?? 'added')`), 'added');
+  await a.click('#nav-plugins');
+  for (let tries = 0; tries < 50 && !(await a.exists('#popen-0-partial')); tries++) await wait(100);
+  await a.click('#popen-0-partial');
+  for (let tries = 0; tries < 50 && !(await a.exists('#pbox-0-partial-pi-cli')); tries++) await wait(100);
+  await a.click('#pbox-0-partial-pi-cli'); await waitBusy(a);
+  for (let tries = 0; tries < 50 && !existsSync(join(home, '.pi/agent/skills/triage/SKILL.md')); tries++) await wait(100);
+  await a.click('#pbox-0-partial-opencode-cli'); await waitBusy(a);
+  for (let tries = 0; tries < 50 && !existsSync(join(home, '.config/opencode/skills/triage/SKILL.md')); tries++) await wait(100);
+  same('own-note taken in', await a.run(`window.centralKnot.applySkills([{ key: 'own-note', on: true, except: [] }], false, ${JSON.stringify(home)}).then(r => r.stopped ?? 'ok')`), 'ok');
+  same('repo connected', await a.run(`window.centralKnot.connectRepo(${JSON.stringify(remote)}, '', ${JSON.stringify(home)}).then(r => r.stopped ?? 'ok')`), 'ok');
+  same('baseline pushed', await a.run(`window.centralKnot.pushRepo(${JSON.stringify(home)}).then(r => r.stopped ?? 'ok')`), 'ok');
+  same('baseline: plugin items in Pi and OpenCode only, none in Claude/Copilot/Codex',
+    [existsSync(join(home, '.pi/agent/skills/triage/SKILL.md')), existsSync(join(home, '.config/opencode/skills/triage/SKILL.md')), leaked()],
+    [true, true, [false, false, false, false, false, false]]);
+  await a.quit();
+
+  const goodPlugins = readFileSync(pluginsPath, 'utf8');
+  const piTriageBefore = readFileSync(join(home, '.pi/agent/skills/triage/SKILL.md'), 'utf8');
+  const openTriageBefore = readFileSync(join(home, '.config/opencode/skills/triage/SKILL.md'), 'utf8');
+
+  // Spoil plugins.json both ways: (1) invalid JSON, (2) unknown tool id in `except`; launch with Automatic sync on.
+  for (const [label, spoiled, ownBody] of [
+    ['invalid JSON', '{ broken', 'Personal v2 while invalid JSON.'],
+    ['unknown tool id in except', (() => { const p = JSON.parse(goodPlugins); p.plugins[0].except.push('future-tool-cli'); return `${JSON.stringify(p, null, 2)}\n`; })(), 'Personal v3 while unknown tool id.'],
+  ]) {
+    writeFileSync(pluginsPath, spoiled);
+    const ownText = `---\nname: own-note\ndescription: Personal.\n---\n${ownBody}\n`;
+    writeFileSync(join(home, '.claude/skills/own-note/SKILL.md'), ownText);
+    a = await launch(data, [], tools);
+    for (let tries = 0; tries < 80 && readNow(join(home, '.pi/agent/skills/own-note/SKILL.md')) !== ownText; tries++) await wait(100);
+    same(`${label}: personal skill synced to Copilot, Codex and Pi while plugins.json damaged`,
+      [readNow(join(home, '.copilot/skills/own-note/SKILL.md')), readNow(join(home, '.codex/skills/own-note/SKILL.md')), readNow(join(home, '.pi/agent/skills/own-note/SKILL.md'))], [ownText, ownText, ownText]);
+    same(`${label}: no plugin item leaked to Claude/Copilot/Codex, and Pi/OpenCode copies stayed untouched`,
+      [leaked(), readNow(join(home, '.pi/agent/skills/triage/SKILL.md')), readNow(join(home, '.config/opencode/skills/triage/SKILL.md'))],
+      [[false, false, false, false, false, false], piTriageBefore, openTriageBefore]);
+    await a.click('#nav-plugins');
+    for (let tries = 0; tries < 50 && !(await a.exists('#pswitch-0-partial')); tries++) await wait(100);
+    const pluginsText = await a.text('.market-main') ?? '';
+    check(`${label}: Plugins page says what is held and disables the switch`,
+      pluginsText.includes(reason) && await a.run(`!!document.querySelector('#pswitch-0-partial')?.disabled`), pluginsText);
+    if (label === 'invalid JSON') {
+      await fitsAtMinimum(a, 'damaged plugins record on Plugins page');
+      if (shots) { await sizeTo(a, 1316, 819); await a.shot('record-holds-plugins-1316'); }
+    }
+    await openKind(a, 'skills');
+    const triageOpen = `#${rowPart('open', 'skills', 'triage')}`;
+    for (let tries = 0; tries < 50 && !(await a.exists(triageOpen)); tries++) await wait(100);
+    await a.click(triageOpen);
+    for (let tries = 0; tries < 50 && !(await a.exists('.details-status')); tries++) await wait(100);
+    const detailsText = await a.text('.details') ?? '';
+    check(`${label}: held skill row in the Library says the same reason`,
+      detailsText.includes('On · left as it is (see below)') && detailsText.includes(reason), detailsText);
+    if (label === 'invalid JSON') {
+      await fitsAtMinimum(a, 'held plugin skill opened in Library');
+      await sizeTo(a, 1316, 819);
+      same('at 1316×819 with held row opened, nothing overflows', await a.run(`document.documentElement.scrollWidth <= window.innerWidth + 1`), true);
+      if (shots) {
+        await a.shot('record-holds-library-1316-open');
+        await a.click('#sidebar-toggle');
+        await a.shot('record-holds-library-1316-rail');
+      }
+    }
+    const remoteHeadBefore = git('--git-dir', remote, 'rev-parse', 'refs/heads/main');
+    await a.click('#nav-repo');
+    for (let tries = 0; tries < 50 && !(await a.exists('#repo-state')); tries++) await wait(100);
+    const repoText = await a.text('.repo-page') ?? '';
+    check(`${label}: Git repo page shows the hold band and disables Pull/Push`,
+      repoText.includes('Pull and Push are held') && repoText.includes(repoReason) && !(await a.exists('#repo-pull')) && !(await a.exists('#repo-push')), repoText);
+    same(`${label}: Pull and Push refuse via IPC and leave the repo unchanged`, [
+      await a.run(`window.centralKnot.pullRepo(${JSON.stringify(home)}).then(r => r.stopped)`),
+      await a.run(`window.centralKnot.pushRepo(${JSON.stringify(home)}).then(r => r.stopped)`),
+      git('--git-dir', remote, 'rev-parse', 'refs/heads/main'),
+    ], [repoReason, repoReason, remoteHeadBefore]);
+    if (label === 'invalid JSON') await fitsAtMinimum(a, 'held Git repo page');
+    same(`${label}: no page errors`, a.pageErrors, []);
+    await a.quit();
+  }
+
+  // Restore plugins.json: next launch clears the hold and keeps plugin items where they belong.
+  writeFileSync(pluginsPath, goodPlugins);
+  a = await launch(data, [], tools);
+  await a.click('#nav-plugins');
+  for (let tries = 0; tries < 50 && !(await a.exists('#pswitch-0-partial:not([disabled])')); tries++) await wait(100);
+  check('restored: Plugins switch is enabled again and hold hint is gone', !(await a.text('.market-main') ?? '').includes('Its plugins’ items are held'), await a.text('.market-main'));
+  await a.click('#nav-repo');
+  for (let tries = 0; tries < 50 && !(await a.exists('#repo-push')); tries++) await wait(100);
+  check('restored: Git repo page clears the hold band and offers Push again', !(await a.text('.repo-page') ?? '').includes('Pull and Push wait until then'), await a.text('.repo-page'));
+  same('restored: Push succeeds after plugins.json is back', await a.run(`window.centralKnot.pushRepo(${JSON.stringify(home)}).then(r => r.stopped ?? 'ok')`), 'ok');
+  await openKind(a, 'skills');
+  const triageRow = `.ov-row[data-key="${rowPart('', 'skills', 'triage')}"]`;
+  for (let tries = 0; tries < 50 && !(await a.exists(triageRow)); tries++) await wait(100);
+  check('restored: triage row in the Library shows its plugin link again and no unseen mark',
+    /from the plugin partial/.test(await a.text(triageRow) ?? '') && !(await a.exists(`${triageRow} [data-state="unseen"]`)), await a.text(triageRow));
+  same('restored: still no plugin item leaked to Claude/Copilot/Codex', leaked(), [false, false, false, false, false, false]);
+  same('restored: no page errors', a.pageErrors, []);
+  await a.quit();
+}
+
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, sessionStripFlow, fromFlow, claudeWholeFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow],
-  [fewToolsFlow, openCodeFlow, antigravityFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow, clickReadsFlow],
+  [fewToolsFlow, openCodeFlow, antigravityFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, pluginRecordHoldsFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow, clickReadsFlow],
   [backFlow, backPlaceFlow, harnessFlow, manageFlow, arrivalFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, mcpSigninFlow, firstSetupFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.

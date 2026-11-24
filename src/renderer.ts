@@ -104,11 +104,11 @@ function repoRow() {
   const newer = !pull && !retry && !!view.pushBlocked;
   // Directions, not an item count: ↓ to pull (or pull again), ↑ to push.
   const shown = [pull + retry ? `↓${pull + retry}` : newer ? '↓' : '', push ? `↑${push}` : ''].filter(Boolean).join(' ');
-  const unreachable = !!view.problem;
+  const blocked = view.held ? 'Pull and Push are held' : view.problem ? 'Couldn’t reach the repo' : '';
   const words = waitingWords(counts);
-  const said = [unreachable ? 'Couldn’t reach the repo' : '', words.pull, words.retry, newer ? 'A newer commit to pull' : '', words.push].filter(Boolean).join(' · ');
-  // While the repo can't be reached, the counts are last seen: quiet, as on the page.
-  return navRow('repo', 'Git repo', 'git-branch', shown || undefined, said || undefined, unreachable);
+  const said = [blocked, words.pull, words.retry, newer ? 'A newer commit to pull' : '', words.push].filter(Boolean).join(' · ');
+  // While the repo can't be reached or is held, the counts are last seen: quiet, as on the page.
+  return navRow('repo', 'Git repo', 'git-branch', shown || undefined, said || undefined, !!blocked);
 }
 
 function renderSidebar() {

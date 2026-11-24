@@ -37,6 +37,7 @@ import { openLibrary, readVersion, recordedSkills, saveLibrary, storeVersion, ty
 import { mergeSkill } from './merge.ts';
 import { pluginLink } from './sourcelink.ts';
 import { sourceFacts } from './sources.ts';
+import { pluginsRecordHold } from './sourcestore.ts';
 import { followCopy, isDisabled, piListWords, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, type ListEdit, type SwitchFile } from './skillswitch.ts';
 import { agentInPi, agentKind, applyAgents } from './agents.ts';
 import { harnesses } from './harnesses.ts';
@@ -510,6 +511,8 @@ export async function takeOver(context: ShareContext, tools: HarnessId[], key: s
   const { look, live } = await lookFor(skillKind, context, tools);
   const item = live.find(entry => entry.key === key);
   if (!item) return stop('Turn it on first: Central Knot takes over a copy only of a skill it has.');
+  const held = pluginsRecordHold(item, look.recorded);
+  if (held) return stop(held);
   const way = look.disk.ways.get(key)?.[tool], copy = look.disk.outside.get(key)?.[tool];
   if (!way?.take || !copy) return stop(`${toolName(tool)} has no copy of ${item.name} for Central Knot to take over now. Nothing was changed.`);
   const gate = await libraryGate(context, { start: true, resume });
