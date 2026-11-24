@@ -570,7 +570,9 @@ test('Plugin parts and no plugins record, sync record at format 2: the start’s
  */
 async function endState(box: Box) {
   const ids: [string, string][] = (await readJson(join(box.store, 'plugins.json'))).plugins.map((entry: PluginEntry) => [entry.id, `${entry.plugin}@${entry.marketName}`]);
-  const plain = (text: string) => ids.reduce((done, [id, name]) => done.replaceAll(id, name), text.replaceAll(box.home, '~'));
+  const jsonHome = JSON.stringify(box.home).slice(1, -1), slashHome = box.home.replaceAll('\\', '/');
+  const plain = (text: string) => ids.reduce((done, [id, name]) => done.replaceAll(id, name),
+    text.replaceAll(jsonHome, '~').replaceAll(box.home, '~').replaceAll(slashHome, '~'));
   const tools = Object.keys((await filesIn(box.home)).sha256).filter(inTools).sort();
   const items = async (name: string) => Object.entries<LibraryItem>((await readJson(join(box.store, name))).items)
     .map(([key, { on, except, source }]) => plain(JSON.stringify({ key, on, except, source })));
