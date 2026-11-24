@@ -1,5 +1,5 @@
 // On/off flags kept per viewer in this window's local storage: the practice copy's note dismissed (app.ts), and the item lists'
-// rows sorted by last updated or last used (matrix.ts BY_UPDATED, BY_USED). Storage that can't be used reads as unset and drops writes, so at worst a
+// rows sorted by last updated, last used or most used (matrix.ts orderFlags). Storage that can't be used reads as unset and drops writes, so at worst a
 // note shows again or the rows go by name again. Nothing a home or
 // the app's settings keep goes here (those are main.ts's and share.ts's).
 

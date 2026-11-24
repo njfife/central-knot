@@ -7,6 +7,7 @@ import { appendFile, chmod, mkdir, mkdtemp, realpath, rename, rm, writeFile } fr
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { claudeFiles, readClaudeSession, scanLines } from '../src/sessionrequests.ts';
+import { winLockSkip } from './fslock.ts';
 
 /** A made-up home, removed when the tests end. */
 const homes: string[] = [];
@@ -150,7 +151,7 @@ test('A file replaced by another, longer than where the last read ended, is read
   assert.deepEqual([outputs(again.requests), again.startedOver], [[['msg_2', 20], ['msg_3', 30], ['msg_4', 40]], true]);
 });
 
-test('A parent and its child\'s file are two sessions, the child naming its parent, and each request is read once', async () => {
+test('A parent and its child\'s file are two sessions, the child naming its parent, and each request is read once', async t => {
   const home = await newHome(), project = join(home, '.claude/projects/-work-app');
   assert.deepEqual(await claudeFiles({ home }), { files: [], unread: false }, 'no projects folder: no files');
   await put(join(project, 'one.jsonl'), [
@@ -171,19 +172,23 @@ test('A parent and its child\'s file are two sessions, the child naming its pare
   assert.deepEqual(requests.map(each => [each.request, each.session, each.parent]), [['msg_2', 'agent-a1', 'one'], ['msg_1', 'one', undefined], ['msg_3', 'one', undefined]]);
 
   // An unreadable sibling project folder or nested subagents folder flags unread without hiding readable files.
-  const blocked = join(home, '.claude/projects/-work-blocked');
-  await mkdir(blocked, { recursive: true });
-  await chmod(blocked, 0o000);
-  const subagents = join(project, 'one/subagents');
-  await chmod(subagents, 0o111);
-  try {
-    const partial = await claudeFiles({ home });
-    assert.equal(partial.unread, true);
-    assert.deepEqual(partial.unreadSessions, ['one']);
-    assert.deepEqual(partial.files, [{ file: join(project, 'one.jsonl'), session: 'one' }]);
-  } finally {
-    await chmod(subagents, 0o700);
-    await chmod(blocked, 0o700);
+  if (winLockSkip) {
+    await t.test('an unreadable sibling project folder or nested subagents folder flags unread without hiding readable files', { skip: winLockSkip }, () => {});
+  } else {
+    const blocked = join(home, '.claude/projects/-work-blocked');
+    await mkdir(blocked, { recursive: true });
+    await chmod(blocked, 0o000);
+    const subagents = join(project, 'one/subagents');
+    await chmod(subagents, 0o111);
+    try {
+      const partial = await claudeFiles({ home });
+      assert.equal(partial.unread, true);
+      assert.deepEqual(partial.unreadSessions, ['one']);
+      assert.deepEqual(partial.files, [{ file: join(project, 'one.jsonl'), session: 'one' }]);
+    } finally {
+      await chmod(subagents, 0o700);
+      await chmod(blocked, 0o700);
+    }
   }
 });
 

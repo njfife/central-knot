@@ -1,7 +1,7 @@
 // An item (a skill, an MCP server or an agent) as the item lists draw it (ItemRow), with its kind, a row's identity on a page
 // (rowId), a row named by its kind and key as a click and its result name it (RowKey, NamedRow, sameRow) and the ids of its
-// elements (partId), each kind's items in a home as every page reads them (kindSource), the order of the rows under a heading (inOrder; the choice itself is matrix.ts
-// orderChoice; a row's last use, usagerow.ts lastUse), and the rows a click pins where they were, on every list that orders
+// elements (partId), each kind's items in a home as every page reads them (kindSource), the order of the rows under a heading (inOrder, rankIn, byUsage; the choice itself is matrix.ts
+// orderChoice; a row's usage, usagerow.ts figureFor and lastUse), and the rows a click pins where they were, on every list that orders
 // rows by their state, the Plugins list too (Pinned). Pure: no DOM. Every kind is on Central Knot's library: what a row and each tool's mark say is libraryrow.ts's,
 // from the kind's view (types.ts LibraryView).
 import { currentIndex, type LibraryItem, type Plan, type VersionChange } from './library.ts';
@@ -71,7 +71,7 @@ export interface ItemRow {
 
 /**
  * A row's identity on a page, from its kind and key ("skills-review"): what the page keeps of one row goes by it (the opened row,
- * the flash, the armed Delete, a plugin item's file shown, a pin and a row's time in the order), since a skill and an agent may
+ * the flash, the armed Delete, a plugin item's file shown, a pin and a row's rank in the order), since a skill and an agent may
  * share a key.
  */
 export const rowId = (kind: PageKind, key: string) => `${kind}-${key}`;
@@ -111,8 +111,10 @@ export const anyOn = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents'>) =>
 
 // ---------- The order of the rows under a heading ----------
 
-/** The orders the item lists offer: by name (as always, and the default), by last updated, or by last used (usage collected: usagerow.ts lastUse), newest first. */
-export type RowOrder = 'name' | 'updated' | 'used';
+/** The orders the item lists offer: by name (as always, and the default), by last updated, by last used (usagerow.ts lastUse), or by most used (sessions in 30 days, usagerow.ts rowFigure, then newest use), highest first. */
+export type RowOrder = 'name' | 'updated' | 'used' | 'most-used';
+/** Whether an order depends on the usage reading, so a reading that lands holds rows where they were (matrix.ts holdOrder). */
+export const byUsage = (order: RowOrder) => order === 'used' || order === 'most-used';
 
 /** The order by name (a leading dot aside), and one name by kind: skill, server, agent (the Library's mixed list; its plugin rows too). */
 export const byName = (first: { key: string; kind: PageKind }, second: { key: string; kind: PageKind }) =>
@@ -132,34 +134,55 @@ export function lastUpdated(row: Pick<ItemRow, 'versions'>, item: LibraryItem | 
   return times.length ? Math.max(...times) : undefined;
 }
 
-/** A row's time in an order, in ms: when it was last updated or last used; none by name, or where it has no time. */
-export const timeIn = <Row extends Pick<ItemRow, 'key' | 'versions'>>(row: Row, order: RowOrder, itemOf: (row: Row) => LibraryItem | undefined, usedAt: (row: Row) => number | undefined = () => undefined) =>
-  (order === 'updated' ? lastUpdated(row, itemOf(row)) : order === 'used' ? usedAt(row) : undefined);
+/** A row's usage for ordering: its newest use (ms) alone, or with its sessions in the last 30 days (usagerow.ts rowFigure). */
+export type RowUsage = number | { at?: number; sessions?: number };
+/** What an order compares a row by, highest first: a time (ms), or a count with a time to break ties; none goes last, by name. */
+export type OrderRank = number | { count: number; time?: number };
+/** A row's rank in an order: when it was last updated or last used, or its sessions in the last 30 days with its newest use to
+ * break ties; none by name, or with no time, no sessions in the last 30 days, or nothing known. */
+export function rankIn<Row extends Pick<ItemRow, 'key' | 'versions'>>(
+  row: Row, order: RowOrder, itemOf: (row: Row) => LibraryItem | undefined, usage: (row: Row) => RowUsage | undefined = () => undefined,
+): OrderRank | undefined {
+  if (order === 'updated') return lastUpdated(row, itemOf(row));
+  if (!byUsage(order)) return undefined;
+  const seen = usage(row);
+  if (order === 'used') return typeof seen === 'number' ? seen : seen?.at;
+  return seen && typeof seen === 'object' && seen.sessions && seen.sessions > 0 ? { count: seen.sessions, time: seen.at } : undefined;
+}
+const finite = (value: number | undefined) => (typeof value === 'number' && Number.isFinite(value) ? value : -Infinity);
+const pair = (rank: OrderRank | undefined): readonly [number, number] =>
+  (rank && typeof rank === 'object' ? [finite(rank.count), finite(rank.time)] : [finite(rank), -Infinity]);
 
 /**
- * The rows under one heading in the chosen order. Last updated or last used: newest first, an item with no time after every
- * one with a time; equal times, or none, go by name, and one name by kind (skills, servers, agents: the Library's mixed list), so
- * every look gives the same order. `itemOf`: a row's item as the library
- * holds it; `usedAt`: a row's last use (ms); `pins`: a row pinned on this list goes by the time it had when pinned (Pin). Each
- * row's time is kept by its row id, so a skill and an agent of one name keep their own.
+ * The rows under one heading in the chosen order. Last updated, last used or most used: highest rank first (sessions in 30 days,
+ * then newest use for Most used), an item with no rank after every one with one; equal ranks, or none, go by name, and one name
+ * by kind (skills, servers, agents: the Library's mixed list), so every look gives the same order. `itemOf`: a row's item as the
+ * library holds it; `usage`: a row's usage (RowUsage); `pins`: a row pinned on this list goes by the rank it had when pinned
+ * (Pin). Each row's rank is kept by its row id, so a skill and an agent of one name keep their own.
  */
-export function inOrder<Row extends Pick<ItemRow, 'kind' | 'key' | 'versions'>>(rows: readonly Row[], order: RowOrder, itemOf: (row: Row) => LibraryItem | undefined, usedAt: (row: Row) => number | undefined = () => undefined, pins?: Pinned<unknown>): Row[] {
+export function inOrder<Row extends Pick<ItemRow, 'kind' | 'key' | 'versions'>>(
+  rows: readonly Row[], order: RowOrder, itemOf: (row: Row) => LibraryItem | undefined,
+  usage: (row: Row) => RowUsage | undefined = () => undefined, pins?: Pinned<unknown>,
+): Row[] {
   const id = (row: Row) => rowId(row.kind, row.key);
-  const time = new Map(rows.map(row => { const pinned = pins?.rows.get(id(row)); return [id(row), (pinned ? pinned.time : timeIn(row, order, itemOf, usedAt)) ?? -Infinity]; }));
-  return [...rows].sort((first, second) => (time.get(id(second))! - time.get(id(first))!) || byName(first, second));
+  const rank = new Map(rows.map(row => { const pinned = pins?.rows.get(id(row)); return [id(row), pair(pinned ? pinned.rank : rankIn(row, order, itemOf, usage))]; }));
+  return [...rows].sort((first, second) => {
+    const a = rank.get(id(first))!, b = rank.get(id(second))!;
+    return (b[0] - a[0]) || (b[1] - a[1]) || byName(first, second);
+  });
 }
 
 // ---------- Rows pinned where they were ----------
 
 /**
  * One row pinned on a list, whose own switch (or Add) was clicked there: the group it was drawn in before its first click
- * there, and its time in the list's order then (timeIn), so it keeps its place among its neighbours too (Add gives a found
+ * there, and its rank in the list's order then (rankIn), so it keeps its place among its neighbours too (Add gives a found
  * item a time). A click never moves a row: it stays where it was, drawn in its new state, while the person works down the list.
- * Nor does a usage reading that lands: on a list that goes by last used, every row is pinned where it is first (matrix.ts holdOrder).
- * On the Library while its Find has text, every row drawn is pinned, with no time, in the order drawn: the order the rows were
+ * Nor does a usage reading that lands: on a list ordered by usage (byUsage), every row is pinned where it is first (matrix.ts holdOrder).
+ * On the Library while its Find has text, every row drawn is pinned, with no rank, in the order drawn: the order the rows were
  * pinned in is their order there (matrix.ts holdFound, foundOrder).
  */
-export interface Pin<Group> { group: Group; time?: number }
+export interface Pin<Group> { group: Group; rank?: OrderRank }
 /**
  * The rows pinned on one list, by the id its rows have there: an item list's row id (rowId), a plugin's name on Plugins. `list`:
  * which list, as its page names it: where it is, its Sort and its chip (never Find). Every page that orders rows by their state
@@ -170,7 +193,7 @@ export interface Pinned<Group = string | number> { list: string; rows: Map<strin
 export const noPins = <Group = string | number>(): Pinned<Group> => ({ list: '', rows: new Map() });
 /** The rows pinned on `list`: these, or none when they were pinned on another list, which lets those go. */
 export const pinsOn = <Group>(pins: Pinned<Group>, list: string): Pinned<Group> => (pins.list === list ? pins : { list, rows: new Map() });
-/** A click on a row's own switch: it keeps the group it is drawn in now and its time, unless an earlier click on this list pinned it. */
-export function pin<Group>(pins: Pinned<Group>, id: string, group: Group, time?: number): void { if (!pins.rows.has(id)) pins.rows.set(id, { group, time }); }
+/** A click on a row's own switch: it keeps the group it is drawn in now and its rank, unless an earlier click on this list pinned it. */
+export function pin<Group>(pins: Pinned<Group>, id: string, group: Group, rank?: OrderRank): void { if (!pins.rows.has(id)) pins.rows.set(id, { group, rank }); }
 /** The group a row is drawn in: the one it is pinned in, else its own. A row new to the list is pinned nowhere, so it goes where its own group puts it. */
 export const placeIn = <Group>(pins: Pinned<Group>, id: string, own: Group): Group => (pins.rows.get(id)?.group ?? own);
