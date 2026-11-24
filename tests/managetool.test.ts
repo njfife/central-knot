@@ -427,6 +427,24 @@ test('What a pass puts in a tool with no click of his behind it has its own entr
   } finally { await b.cleanup(); }
 });
 
+test('An entry about one tool offers nothing while that tool is not managed, and says so; its action asked anyway changes nothing and marks nothing done', async () => {
+  const b = await box();
+  try {
+    await b.turnOn();
+    await b.pass();
+    // notes kept out of Codex, then let in again: its "Turned on in Codex" offers Turn it off in Codex while Codex is managed.
+    await applySkills(b.context, await b.managed(), [{ key: 'notes', on: true, except: ['codex-cli'] }]);
+    await applySkills(b.context, await b.managed(), [{ key: 'notes', on: true, except: [] }]);
+    const entry = (await b.history()).filter(event => event.key === 'notes' && event.only === 'codex-cli').at(-1)!;
+    await chooseTools(b.context, 'codex-cli', false);
+    const managed = await b.managed(), item = (await b.items()).skills.notes;
+    const offered = libraryAction(entry, item, { managed, pending: [] })?.label, said = librarySentence(entry, libraryWords.skills, managed, item)?.text;
+    await restoreSkill(b.context, managed, entry.id);
+    assert.deepEqual([offered, said, (await b.history()).find(event => event.id === entry.id)?.undoneBy, !!(await b.read(CODEX.skill)), (await b.items()).skills.notes.except],
+      [undefined, 'Turned on in Codex: its folder there is back. Codex isn’t managed now.', undefined, true, []]);
+  } finally { await b.cleanup(); }
+});
+
 test('A copy a pass could not put in a tool has no entry until a later pass puts it there: a skills folder that can’t be written', async () => {
   const b = await box();
   try {
