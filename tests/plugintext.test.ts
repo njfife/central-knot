@@ -16,7 +16,7 @@ import { readCatalog, runGit } from '../src/plugins.ts';
 import { pluginTextJob, type PluginText } from '../src/plugintext.ts';
 import type { PluginTextView } from '../src/types.ts';
 
-const noPosix = false; // one Windows run only
+const noPosix = process.platform === 'win32';
 const put = async (path: string, text: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, text); };
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' }).trim();
 

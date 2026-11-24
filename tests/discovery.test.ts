@@ -102,7 +102,7 @@ test('DET-02: a relative config root fails visibly and no default is substituted
   } finally { await setup.cleanup(); }
 });
 
-test('AT-01/DET-02: version probe is bounded and uses only --version', { skip: false }, async () => {
+test('AT-01/DET-02: version probe is bounded and uses only --version', { skip: process.platform === 'win32' }, async () => {
   const setup = await fixture();
   try {
     const binary = await executable(setup.home, "printf '2.1.318 (Claude Code)\\n'");
@@ -132,7 +132,7 @@ test('AT-01: permission restriction is not an empty skill list', { skip: lockSki
   } finally { await setup.cleanup(); }
 });
 
-test('OWN-02: reading a linked skill leaves the link and target unchanged', { skip: false }, async () => {
+test('OWN-02: reading a linked skill leaves the link and target unchanged', { skip: process.platform === 'win32' }, async () => {
   const setup = await fixture();
   try {
     await skill(setup.home, 'original', 'User bytes');
@@ -172,7 +172,7 @@ test('On this computer a tool is here only when its CLI or app is found: a folde
   } finally { await setup.cleanup(); }
 });
 
-test('The terminal’s PATH is read from the login shell, whatever its startup files print around it', { skip: false }, async () => {
+test('The terminal’s PATH is read from the login shell, whatever its startup files print around it', { skip: process.platform === 'win32' }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ck-shell-'));
   try {
     // A stand-in shell: a banner as a startup file might print, then the command it was given (-ilc), with nvm's folder on its PATH.
@@ -187,7 +187,7 @@ test('The terminal’s PATH is read from the login shell, whatever its startup f
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test('A Linux desktop has a system tray when its session bus has a StatusNotifierWatcher; no answer counts as none', { skip: false }, async () => {
+test('A Linux desktop has a system tray when its session bus has a StatusNotifierWatcher; no answer counts as none', { skip: process.platform === 'win32' }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ck-bus-'));
   try {
     // Stand-ins for dbus-send that answer only the question asked, with the reply a KDE session's bus gave (KDE's panel holds the
@@ -206,7 +206,7 @@ test('A Linux desktop has a system tray when its session bus has a StatusNotifie
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test('A start at sign-in asks for the tray again, about once a second for about ten seconds, until the panel’s watcher is there', { skip: false }, async () => {
+test('A start at sign-in asks for the tray again, about once a second for about ten seconds, until the panel’s watcher is there', { skip: process.platform === 'win32' }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ck-bus-'));
   try {
     // Stand-ins for dbus-send that note each ask: a panel whose watcher is on the bus from the second ask, and a desktop with none.
@@ -226,7 +226,7 @@ test('A start at sign-in asks for the tray again, about once a second for about 
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test('A tool is asked its version once while its binary is the same file, and again when it is replaced or the person refreshes', { skip: false }, async () => {
+test('A tool is asked its version once while its binary is the same file, and again when it is replaced or the person refreshes', { skip: process.platform === 'win32' }, async () => {
   const setup = await fixture();
   try {
     const asked = join(setup.home, 'asked.log'), started = join(setup.home, 'started'), binary = join(setup.home, 'fixture-claude'), npmTime = new Date('1985-10-26T08:15:00Z');
@@ -255,7 +255,7 @@ test('A tool is asked its version once while its binary is the same file, and ag
   } finally { await setup.cleanup(); }
 });
 
-test('A version probe finds a script CLI’s interpreter beside it, even when the app was opened with a short PATH', { skip: false }, async () => {
+test('A version probe finds a script CLI’s interpreter beside it, even when the app was opened with a short PATH', { skip: process.platform === 'win32' }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ck-probe-'));
   const path = process.env.PATH;
   try {
@@ -274,7 +274,7 @@ async function app(path: string, version: string) {
   await writeFile(join(path, 'Contents/Info.plist'), `<?xml version="1.0"?>\n<plist><dict>\n\t<key>CFBundleShortVersionString</key>\n\t<string>${version}</string>\n</dict></plist>\n`);
 }
 
-test('A desktop app with no CLI makes its tool present, with the app’s version and the version it carries, never as the CLI', { skip: false }, async () => {
+test('A desktop app with no CLI makes its tool present, with the app’s version and the version it carries, never as the CLI', { skip: process.platform === 'win32' }, async () => {
   const setup = await fixture();
   try {
     const apps = appCandidates(setup.home, 'claude');
@@ -303,7 +303,7 @@ test('A desktop app with no CLI makes its tool present, with the app’s version
   } finally { await setup.cleanup(); }
 });
 
-test('The copy of the tool a desktop app carries is found where the app keeps it: the plugin route when there is no CLI', { skip: false }, async () => {
+test('The copy of the tool a desktop app carries is found where the app keeps it: the plugin route when there is no CLI', { skip: process.platform === 'win32' }, async () => {
   const setup = await fixture();
   try {
     const mine = (binary: string) => appCandidates(setup.home, binary).filter(candidate => candidate.app.startsWith(setup.home));
@@ -338,7 +338,7 @@ async function asar(path: string, version: string) {
   await writeFile(path, Buffer.concat([head, body]));
 }
 
-test('Desktop apps are found where Windows and Linux install them, with the copy of the tool only where its route was proved', { skip: false }, async () => {
+test('Desktop apps are found where Windows and Linux install them, with the copy of the tool only where its route was proved', { skip: process.platform === 'win32' }, async () => {
   const setup = await fixture();
   try {
     const system = join(setup.home, '.system');
