@@ -4993,7 +4993,7 @@ async function dockedListFlow() {
   };
   for (const selector of ['#nav-library', '#library-kind-all', `#${rowPart('open', 'skills', 'research')}`]) await a.click(selector);
   // Each Sort the menu offers, from the dock's narrowest (1200 px of content): Last updated adds a column (style.css .ov-dated).
-  for (const [order, label, widths] of [['name', 'Name', [1200, 1260, 1520, 1672, 2560]], ['updated', 'Last updated', [1200, 1260, 1520]], ['used', 'Last used', [1200, 1260]]]) {
+  for (const [order, label, widths] of [['name', 'Name', [1200, 1260, 1520, 1672, 2560]], ['updated', 'Last updated', [1200, 1260, 1520]], ['used', 'Last used', [1200, 1260]], ['most-used', 'Most used', [1200, 1260]]]) {
     await a.run(`(() => { const sort = document.querySelector('#item-order'); sort.value = '${order}'; sort.dispatchEvent(new Event('change')); })()`);
     await a.settle();
     for (const content of widths) await fits(`the Library by ${label}`, content, 4);
@@ -9474,6 +9474,58 @@ async function usageFlow() {
   await a.click('#header-refresh');
   for (let tries = 0; tries < 50 && (await sectionsNow(a, 'skills'))[0]?.[1]?.[0] !== 'notes'; tries++) { await wait(100); await a.settle(); }
   same('Refresh lets the held order go', (await sectionsNow(a, 'skills'))[0][1], ['notes', 'idle', 'standup', 'fresh', 'spare']);
+  // Sort by Most used: sessions in the last 30 days, most first; equal counts by more recent use, then by name; no figure last, by name.
+  same('Sort offers Most used after Last used', await a.run(`[...document.querySelector('#item-order').options].map(option => [option.value, option.textContent])`),
+    [['name', 'Name'], ['updated', 'Last updated'], ['used', 'Last used'], ['most-used', 'Most used']]);
+  await chooseOrder('most-used');
+  same('Sort by Most used: 14 sessions, then 1 session, then those with no use seen in 30 days by name (standup, used 40 days ago, with them)',
+    (await sectionsNow(a, 'skills'))[0][1], ['notes', 'idle', 'fresh', 'spare', 'standup']);
+  await openKind(a, 'agents');
+  const mostOnAgents = await a.run(`document.querySelector('#item-order')?.value`);
+  await openKind(a, 'skills');
+  same('Most used is remembered across a redraw of the Library', [mostOnAgents, await a.run(`document.querySelector('#item-order')?.value`)], ['most-used', 'most-used']);
+  // spare gets 2 sessions (5 and 6 days ago: more sessions than idle, yet older); fresh gets 1 session (yesterday: tied with idle, newer).
+  const mostTemp = ['s-spare-1.jsonl', 's-spare-2.jsonl', 's-fresh-1.jsonl'].map(file => join(home, '.claude/projects/-work', file));
+  lines(mostTemp[0], [skillCall('spare', 5)]);
+  lines(mostTemp[1], [skillCall('spare', 6)]);
+  lines(mostTemp[2], [skillCall('fresh', 1.1)]);
+  await a.click('#collect-usage');
+  for (let tries = 0; tries < 100 && ((await figures()).spare !== 'used 5 days ago · 2 sessions' || (await figures()).fresh !== 'used yesterday · 1 session'); tries++) await wait(100);
+  same('under Most used, a reading that lands moves no row, updates each figure in place, and offers Put in order',
+    [(await sectionsNow(a, 'skills'))[0][1], (await figures()).spare, (await figures()).fresh, await a.exists('#put-in-order')],
+    [['notes', 'idle', 'fresh', 'spare', 'standup'], 'used 5 days ago · 2 sessions', 'used yesterday · 1 session', true]);
+  await a.click('#put-in-order');
+  same('Put in order puts rows in Most used order (14, 2, 1 yesterday, 1 three days ago, none) and the link goes',
+    [(await sectionsNow(a, 'skills'))[0][1], await a.exists('#put-in-order')], [['notes', 'spare', 'fresh', 'idle', 'standup'], false]);
+  await a.click('#usage-line-close');
+  await a.shot('usage-most-used');
+  if (shots) { for (const [width, height] of [[1316, 819], SMALLEST]) { await sizeTo(a, width, height); await a.shot(`usage-most-used-${width}`); } await fullSize(a); }
+  await fitsAtMinimum(a, 'Skills sorted by Most used');
+  // While Find has text, Sort shows Best match (disabled) and returns to Most used when Find is cleared.
+  await a.run(`(() => { const input = document.querySelector('#find'); input.value = 'notes'; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  for (let tries = 0; tries < 50 && (await a.run(`document.querySelector('#item-order')?.value`)) !== 'best'; tries++) await wait(100);
+  const whileFind = await a.run(`(select => [select.value, select.options[select.selectedIndex].textContent, select.disabled])(document.querySelector('#item-order'))`);
+  await a.run(`(() => { const input = document.querySelector('#find'); input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  for (let tries = 0; tries < 50 && (await a.run(`document.querySelector('#item-order')?.value`)) !== 'most-used'; tries++) await wait(100);
+  same('while Find has text, Sort shows Best match and returns to Most used when Find is cleared',
+    [whileFind, await a.run(`(select => [select.value, select.disabled])(document.querySelector('#item-order'))`)],
+    [['best', 'Best match', true], ['most-used', false]]);
+  // On a harness's tab: by name, and no Sort ("Most used" not offered); returning to the Library keeps Most used.
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-skills');
+  same('on a harness’s tab, rows stay by name and no Sort is offered',
+    [(await sectionsNow(a, 'skills'))[0][1], await a.exists('#item-order')], [['fresh', 'idle', 'notes', 'spare', 'standup'], false]);
+  await openKind(a, 'skills');
+  same('returning to the Library keeps Most used', await a.run(`document.querySelector('#item-order')?.value`), 'most-used');
+  // Restore the five skills' original usage and Last used order for the existing checks that follow.
+  for (const file of mostTemp) rmSync(file);
+  await a.click('#collect-usage');
+  for (let tries = 0; tries < 100 && ((await figures()).spare !== 'no use seen in 30 days' || (await figures()).fresh !== 'no use seen in 30 days'); tries++) await wait(100);
+  await a.click('#usage-line-close');
+  await chooseOrder('used');
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && (await sectionsNow(a, 'skills'))[0]?.[1]?.[0] !== 'notes'; tries++) { await wait(100); await a.settle(); }
   await sizeTo(a, 860, 600);
   same('at 860×600 the button keeps its word, and its icon is not the chip’s', [(await a.run(`document.querySelector('#collect-usage').innerText.trim()`)).split(' ')[0], await a.exists('#collect-usage svg')], ['Update', false]);
   same('the longest figure, "used 13 days ago · 999 sessions", is whole in a figure’s cell', await a.run(`(() => { const cell = document.querySelector('.ov-used'), was = [...cell.childNodes];
@@ -9575,6 +9627,18 @@ async function usageFlow() {
   const firstDrawn = await sectionsNow(a, 'skills');
   for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
   same('the next launch keeps Sort by Last used, and the reading that comes by itself moves no row', [await a.run(`document.querySelector('#item-order').value`), await sectionsNow(a, 'skills')], ['used', firstDrawn]);
+  // Sort by Most used, kept from this launch to the next: the reading that comes by itself moves no row; choosing another order clears it.
+  await chooseOrder('most-used');
+  same('choosing Most used sets its flag and clears Last used’s',
+    await a.run(`[localStorage.getItem('ck-items-by-most-used'), localStorage.getItem('ck-items-by-last-used')]`), ['1', null]);
+  await a.quit();
+  a = await launch(data, [], real);
+  await openKind(a, 'skills');
+  for (let tries = 0; tries < 50 && (await sectionsNow(a, 'skills'))[0]?.[1]?.length !== 5; tries++) { await wait(100); await a.settle(); }
+  const firstDrawnMost = await sectionsNow(a, 'skills');
+  for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
+  same('the next launch keeps Sort by Most used, and the reading that comes by itself moves no row',
+    [await a.run(`document.querySelector('#item-order').value`), await sectionsNow(a, 'skills')], ['most-used', firstDrawnMost]);
 
   // ---------- A reading that lands moves nothing ----------
   // This computer's home (`real`), opened now, has history in five tools and its reading starts afresh. Each reading is held
@@ -9610,6 +9674,8 @@ async function usageFlow() {
   {
     const lead = () => a.text('#usage-when');
     await chooseOrder('name');
+    same('choosing Name clears Most used’s flag and keeps Name',
+      await a.run(`[localStorage.getItem('ck-items-by-most-used'), document.querySelector('#item-order').value]`), [null, 'name']);
     await sizeTo(a, 1000, 760);
     await a.click('#home-actual');
     for (let tries = 0; tries < 100 && !(await a.exists(`#${rowPart('open', 'skills', 'alpha')}`)); tries++) await wait(50);
