@@ -213,7 +213,7 @@ export async function codexRollouts(at: UsageWhere): Promise<string[] | undefine
 export interface CodexState {
   /** The thread's own id, from the rollout's `session_meta` (its first record). */
   session?: string;
-  /** The thread it is a child of, where it is one, from the same record. */
+  /** The thread it is a child of, where it is one: the same record's `parent_thread_id`. */
   parent?: string;
   /** The model selected for the turn in force: the last `turn_context`'s, which governs each response after it. */
   model?: string;
@@ -276,8 +276,7 @@ function codexRecord(record: JsonRecord, state: CodexState, besides: Besides): F
   if ((record.type === 'session_meta' || record.type === 'turn_context') && typeof payload.cwd === 'string') besides.project ??= basename(payload.cwd);
   if (record.type === 'session_meta' && typeof payload.id === 'string') {
     state.session = payload.id;
-    const parent = payload.parent_thread_id ?? payload.source?.subagent?.thread_spawn?.parent_thread_id;
-    if (typeof parent === 'string') state.parent = parent;
+    if (typeof payload.parent_thread_id === 'string') state.parent = payload.parent_thread_id;
   }
   if (record.type === 'turn_context' && typeof payload.model === 'string') state.model = payload.model;
   if (record.type === 'token_usage_record') {
