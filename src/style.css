@@ -1205,6 +1205,38 @@ span.ins-confirm { margin-top: 0; }
 .signin-words .btn { flex: none; }
 .signin-command { display: block; margin-top: 2px; font-family: var(--mono); font-size: 11px; line-height: 16px; color: var(--ink); }
 
+/* ---------- The Sessions page (sessionspage.ts) ----------
+   The day's choice, its heading and caption, a row a session (a child set in under its parent, as a plugin's parts are), each
+   opened to its models, then the totals. Long names wrap; the rows scroll with the page, never in a box of their own. */
+.sessions-scroll { display: flex; flex-direction: column; gap: 10px; padding: 16px var(--pad-end) 32px 16px; }
+.sessions-scroll > * { flex: none; }
+.sessions-scroll > .kind-switch { align-self: flex-start; }
+.sessions-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
+.sessions-heading { margin: 0; font-size: 16px; font-weight: 600; }
+.sessions-total { font-size: 14px; font-variant-numeric: tabular-nums; }
+.sessions-caption, .sessions-line, .sessions-foot, .session-note { margin: 0; max-width: var(--measure); font-size: 12.5px; line-height: 1.55; color: var(--ink-soft); }
+.sessions-line { color: var(--ink); }
+.sessions-foot { margin-top: 8px; color: var(--ink-faint); }
+.sessions-rows, .session-children, .sessions-by-tool { list-style: none; margin: 0; padding: 0; }
+.session-children { margin-left: 17px; }
+.session > details > summary { list-style: none; display: grid; grid-template-columns: 12px 17ch 11ch minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1.2fr); gap: 2px 12px;
+  align-items: baseline; padding: 6px 8px; border-radius: 6px; font-size: 12.5px; cursor: pointer; }
+.session > details > summary::-webkit-details-marker { display: none; }
+.session > details > summary:hover { background: var(--row-hover); }
+.session > details[open] > summary .session-chevron { transform: rotate(90deg); }
+.session-cell { min-width: 0; overflow-wrap: anywhere; }
+.session-when, .session-cost { font-variant-numeric: tabular-nums; }
+.session-project, .session-named { color: var(--ink-soft); }
+.session-body { display: flex; flex-direction: column; gap: 6px; padding: 4px 8px 12px 32px; }
+.session-models { width: 100%; border-collapse: collapse; font-size: 12px; }
+.session-models th, .session-models td { padding: 3px 12px 3px 0; text-align: left; vertical-align: top; }
+.session-models th { font-weight: 500; color: var(--ink-soft); }
+.session-models .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.session-model { font-family: var(--mono); overflow-wrap: anywhere; }
+.session-as { display: block; color: var(--ink-faint); }
+.sessions-by-tool li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 3px 0; font-size: 12.5px; }
+.sessions-tool { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
+
 /* ---------- Plugins: marketplaces at the left, the chosen marketplace or plugin at the right ---------- */
 .plugins-page { --market-list-width: 236px; --market-gutter: 24px; }
 .market-layout { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: var(--market-list-width) minmax(0, 1fr); }

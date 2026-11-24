@@ -67,6 +67,12 @@ export const agentsKeptIn = {
 export type AgentTool = keyof typeof agentsKeptIn;
 export const agentTools = Object.keys(agentsKeptIn) as AgentTool[];
 export const mcpTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
+/**
+ * The tools whose session history Central Knot reads for the Sessions page (sessionday.ts, each by its reader in
+ * sessionrequests.ts); a present tool not here is "not read yet" on that page. Here so the page and main read one list.
+ */
+export type SessionTool = 'claude-cli' | 'codex-cli';
+export const SESSION_TOOLS: readonly SessionTool[] = ['claude-cli', 'codex-cli'];
 
 /** Whether a tool holds a kind of item: every tool a skill, MCP servers and agents those mcpTools and agentTools name. */
 export const holds = (tool: HarnessId, kind: 'skill' | 'mcp' | 'agent') => kind === 'skill' || (kind === 'mcp' ? mcpTools : agentTools as HarnessId[]).includes(tool);

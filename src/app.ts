@@ -38,13 +38,15 @@ import { changeWords, stillLoadAfter, undoOffered, wholeCounts, wholeSaid } from
 import { hasReloadAdvice, pluginReloads, reloadAdvice, reloadsFor, settleReloads, waysFrom, type ReloadChange } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
 import { followView, type SigninChecks } from './mcpsignin.ts';
+import { loadSessions, type SessionsDay } from './sessionspage.ts';
+import type { DayRows } from './sessionrow.ts';
 import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
 /** Every page, in the sidebar's order. The Library lists every kind of item (matrix.ts libraryTable), its segment `state.libraryKind`. */
-export const pages = ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'profiles', 'history', 'sources', 'repo', 'settings'] as const;
+export const pages = ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'profiles', 'history', 'sessions', 'sources', 'repo', 'settings'] as const;
 export type Page = typeof pages[number];
 
 /** This computer's names, and what its platform offers (machine.ts). */
@@ -168,6 +170,10 @@ export const state = {
   pinned: noPins(),
   /** MCP sign-in: what each column's last Check said in the open home (mcpsigninpage.ts), made again when a home opens; never stored. */
   mcpSignin: { home: '', columns: {} } as SigninChecks,
+  /** The Sessions page's day (sessionspage.ts): read when the page opens, on Refresh and on a choice of day (loadSessions); never stored. */
+  sessions: pageData<DayRows>(),
+  /** Which day the Sessions page reads: Today at launch, kept while the window is open, across pages and homes. */
+  sessionsDay: 'today' as SessionsDay,
 };
 
 /**
@@ -402,6 +408,7 @@ function accept(view: HomeView): HomeView {
   resetPageData(state.instructions);
   resetPageData(state.history);
   resetPageData(state.usage);
+  resetPageData(state.sessions);
   state.usageBand = false;
   // What the MCP sign-in checks said is the last home's; one still running there is dropped when it answers.
   state.mcpSignin = { home: view.home, columns: {} };
@@ -982,7 +989,7 @@ export const whyReadOnly = (home: HomeView) => (!home.sync.access.allowed ? home
 export const whyKindReadOnly = (home: HomeView, kind: PageKind) => whyReadOnly(home) ?? (home[kind].gate.state === 'stopped' ? home[kind].gate.reason : undefined);
 
 /**
- * Reads what a page shows beyond the home itself: History, Settings, Instructions or Plugins, into its slot
+ * Reads what a page shows beyond the home itself: History, Settings, Instructions, Sessions or Plugins, into its slot
  * (pagedata.ts), never as an action: the page says it is reading, and anything else can go on meanwhile. `fresh` reads
  * each marketplace anew.
  */
@@ -990,6 +997,7 @@ function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; 
   if (page === 'history') return loadHistory();
   if (page === 'settings') return loadSettings().then(() => undefined);
   if (page === 'instructions') return loadInstructions(readId);
+  if (page === 'sessions') return loadSessions(readId);
   // Harnesses sums up each tool's instruction file and installs, as Instructions and Plugins read them. It only counts installs,
   // so its Refresh reads the tools again without fetching every marketplace anew (Plugins' Refresh does that).
   if (page === 'harnesses') return Promise.all([loadInstructions(readId), absentKinds().includes('plugins') ? undefined : loadPlugins(false, readId)]).then(() => undefined);

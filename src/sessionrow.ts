@@ -6,7 +6,8 @@
 // Not here: reading session files (sessionday.ts, sessionrequests.ts), pricing requests (rates.ts), IPC, or page wording/DOM.
 import type { UnpricedReason } from './rates.ts';
 import type { Tokens } from './sessionrequests.ts';
-import type { DayReading, Period, PricedRequest, SessionTool } from './sessionday.ts';
+import type { SessionTool } from './presence.ts';
+import type { DayReading, Period, PricedRequest } from './sessionday.ts';
 
 /** A saved model id matched by a wider rule (`by: 'rule'`), and a provider with whether it came from the request or tool. */
 export interface PricedAs { model: string; as: string }

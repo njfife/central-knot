@@ -989,7 +989,7 @@ async function manageFlow() {
   await a.click('#sync-switch');
   // Every tool left out: the pages say so and point to Harnesses, not that no tool was found.
   for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#manage-${tool}`);
-  same('with every tool left out, the sidebar holds only the pages that need no tool', await a.all('#nav [id^="nav-"]', 'e.id.slice(4)'), ['overview', 'harnesses', 'sources', 'history', 'repo', 'settings']);
+  same('with every tool left out, the sidebar holds only the pages that need no tool', await a.all('#nav [id^="nav-"]', 'e.id.slice(4)'), ['overview', 'harnesses', 'sources', 'history', 'sessions', 'repo', 'settings']);
   await a.click('#nav-overview');
   same('its Overview names the tools left out and opens Harnesses', [await a.text('.overview-lead'), await a.exists('#overview-open-harnesses'), await a.exists('#overview-choose-home')],
     ['Central Knot manages none of the tools here: Claude Code, Copilot CLI and Codex are left out.', true, false]);
@@ -4558,7 +4558,7 @@ async function fewToolsFlow() {
     await a.quit();
     return;
   }
-  same('a home with no tools shows only the pages that hold no kind', await pages(), ['overview', 'harnesses', 'sources', 'history', 'repo', 'settings']);
+  same('a home with no tools shows only the pages that hold no kind', await pages(), ['overview', 'harnesses', 'sources', 'history', 'sessions', 'repo', 'settings']);
   same('its Overview says no tools were found, once, with another home to choose', [await a.text('.overview-lead'), await a.exists('#overview-choose-home')], ['No tools were found in this home.', true]);
   check('its status bar says only that the home opened', /^Opened [^.]+\.$/.test(await a.run(`document.querySelector('#announcement').dataset.text`) ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`));
   same('with nothing to sync, the switch is shown, not offered', await a.run(`[document.querySelector('#sync-switch').getAttribute('aria-disabled'), document.querySelector('#sync-switch .sync-state').textContent]`), ['true', 'Nothing to sync']);
@@ -4576,13 +4576,13 @@ async function fewToolsFlow() {
   mkdirSync(join(home, '.codex/skills/notes'), { recursive: true });
   writeFileSync(join(home, '.codex/skills/notes/SKILL.md'), text('notes'));
   await a.click('#header-refresh');
-  same('a tool’s folder alone, with no CLI or app, makes no tool', await pages(), ['overview', 'harnesses', 'sources', 'history', 'repo', 'settings']);
+  same('a tool’s folder alone, with no CLI or app, makes no tool', await pages(), ['overview', 'harnesses', 'sources', 'history', 'sessions', 'repo', 'settings']);
   mkdirSync(join(home, '.pi/agent/skills/notes'), { recursive: true });
   writeFileSync(join(home, '.pi/agent/skills/notes/SKILL.md'), text('notes'));
   cli('.pi/agent/bin/pi', 'pi 1.5.0');
   await a.click('#header-refresh');
   // Codex, whose folder is still here, holds plugins: were it counted, that page would be back.
-  same('with Pi alone, Plugins is left out, and the Library stays: Pi takes agents as skills', await pages(), ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'sources', 'profiles', 'history', 'repo', 'settings']);
+  same('with Pi alone, Plugins is left out, and the Library stays: Pi takes agents as skills', await pages(), ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'sources', 'profiles', 'history', 'sessions', 'repo', 'settings']);
   check('and the Overview names it once', (await a.text('#overview-absent') ?? '').includes('No tool here holds plugins') && await a.exists('#overview-agents'), await a.text('#overview-absent'));
   await openKind(a, 'skills');
   check('the tool with only a folder has no mark', await a.exists('.tool-mark[data-tool="pi-cli"]') && !(await a.exists('[data-tool="codex-cli"], #tool-codex-cli')));
@@ -4596,7 +4596,7 @@ async function fewToolsFlow() {
   mkdirSync(join(home, '.claude'), { recursive: true });
   cli('.local/bin/claude', '2.1.309 (Claude Code)');
   await a.click('#header-refresh');
-  same('a tool that holds plugins brings them back', await pages(), ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'repo', 'settings']);
+  same('a tool that holds plugins brings them back', await pages(), ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'sessions', 'repo', 'settings']);
   await a.click('#nav-harnesses');
   check('Claude Code’s CLI alone says nothing of Cowork', !(await a.text('#harness-claude-cli')).includes('Cowork'), await a.text('#harness-claude-cli'));
   // On Plugins, its only tool goes away (Pi, still here, holds no plugins): the page it was on no longer exists here, so the
@@ -4605,7 +4605,7 @@ async function fewToolsFlow() {
   rmSync(join(home, '.claude'), { recursive: true, force: true });
   rmSync(join(home, '.local/bin/claude'));
   await a.click('#header-refresh');
-  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'sources', 'profiles', 'history', 'repo', 'settings']]);
+  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'sources', 'profiles', 'history', 'sessions', 'repo', 'settings']]);
   const moved = await a.run(`document.querySelector('#announcement').dataset.text`);
   check('and the status bar says what was read and why the page moved', /^Read .*No tool here holds plugins now\.$/.test(moved ?? ''), moved);
   // Claude desktop alone, with no CLI and no .claude folder yet: Claude Code is here, said so with both versions.
@@ -9167,7 +9167,7 @@ async function mcpSigninFlow() {
   const before = started().length;
   await a.click('#nav-mcpsignin');
   same('the page is in the sidebar beside the Library, under its name', [await a.text('.page-title'), await a.all('#nav [id^="nav-"]', 'e.id.slice(4)')],
-    ['MCP sign-in', ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'repo', 'settings']]);
+    ['MCP sign-in', ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'sessions', 'repo', 'settings']]);
   await wait(500);
   same('opening the page runs no tool', started().length, before);
   const opened = await page();
@@ -10400,7 +10400,7 @@ async function libraryFlow() {
   }
   rmSync(join(A.copilot, 'idle'), { recursive: true, force: true });
   a = await launch(A.data, [], A.real);
-  same('one Library row in the sidebar, where the three kinds had theirs', await a.all('#nav .nav-row', 'e.id.replace("nav-", "")'), ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'repo', 'settings']);
+  same('one Library row in the sidebar, where the three kinds had theirs', await a.all('#nav .nav-row', 'e.id.replace("nav-", "")'), ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'sessions', 'repo', 'settings']);
   await openKind(a, 'all');
   const total = (await counts(a)).all;
   same('the sidebar’s total is the kind switch’s All, and each segment counts the rows of its kind listed',
