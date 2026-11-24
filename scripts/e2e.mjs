@@ -1095,11 +1095,12 @@ async function arrivalFlow() {
   same('nothing was written in OpenCode, and no entry made', [existsSync(join(home, '.config/opencode/agents/tester.md')), (await copied(a)).filter(entry => entry.startsWith('tester'))], [false, []]);
   await a.click('#sync-switch');
   same('Automatic sync on again: the catch-up’s copy, with its entry', [existsSync(join(home, '.config/opencode/agents/tester.md')), (await copied(a)).filter(entry => entry.startsWith('tester'))], [true, ['tester: Turn it off in OpenCode']]);
+  same('and the line counts what has been copied there since OpenCode arrived', await lines(a), ['overview-arrived-opencode-cli: Central Knot now manages OpenCode. Copied 1 item. Its switch on Harnesses']);
   // Antigravity (`agy`) installed while the app is open: notes and docs go in; it takes no agents yet, so they are not counted.
   writeFileSync(join(home, '.local/bin/agy'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "1.5.14" && exit 0\nexit 9\n', { mode: 0o755 });
   await a.click('#header-refresh');
   same('Antigravity installed: its own line, under OpenCode’s still open, counts the skill and the server copied there', await lines(a), [
-    'overview-arrived-opencode-cli: Central Knot now manages OpenCode. Automatic sync was off, so no items were copied. Its switch on Harnesses',
+    'overview-arrived-opencode-cli: Central Knot now manages OpenCode. Copied 1 item. Its switch on Harnesses',
     'overview-arrived-antigravity-cli: Central Knot now manages Antigravity. Copied 2 items. Its switch on Harnesses']);
   await fitsAtMinimum(a, 'the Overview with two tools that came under management');
   await pictures(a, 'two-lines');

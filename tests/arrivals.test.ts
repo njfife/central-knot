@@ -3,13 +3,14 @@
 // runs as main.ts pass runs it: the tools seen before (seeded where none are kept), the pass, then what it saw.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { byHand, observe, seenBefore, seenIn, type ToolsSeen } from '../src/arrivals.ts';
 import { homePass } from '../src/homepass.ts';
 import { managedNow, type ShareContext } from '../src/share.ts';
 import { applySkills } from '../src/skills.ts';
+import { applyAgents } from '../src/agents.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import { appContext } from './upgrade/start.ts';
 
@@ -61,7 +62,7 @@ test('A tool that arrives with a copy of its own that differs counts it as writt
   } finally { await b.cleanup(); }
 });
 
-test('With Automatic sync off the arrival is kept with nothing copied; sync on again copies, and says nothing more', async () => {
+test('With Automatic sync off the arrival is kept with nothing copied; sync on again copies, and the count is what has been copied since', async () => {
   const b = await box();
   try {
     await b.turnOn();
@@ -69,7 +70,23 @@ test('With Automatic sync off the arrival is kept with nothing copied; sync on a
     await b.codex(true);
     const off = await b.pass(before, false);
     assert.deepEqual([off.arrived, await b.inCodex()], [[{ tool: 'codex-cli' }], false]);
-    assert.deepEqual([(await b.pass(off)).arrived, await b.inCodex()], [[{ tool: 'codex-cli' }], true]);
+    assert.deepEqual([(await b.pass(off)).arrived, await b.inCodex()], [[{ tool: 'codex-cli', copied: 1 }], true]);
+  } finally { await b.cleanup(); }
+});
+
+test('A first pass that copied only part (an agents folder that can’t be written): the next pass’s copies there are added to the count', async () => {
+  const b = await box();
+  try {
+    await mkdir(join(b.home, '.claude/agents'), { recursive: true });
+    await writeFile(join(b.home, '.claude/agents/reviewer.md'), '---\nname: reviewer\ndescription: Reviews code\n---\n\nReview code.\n');
+    await b.turnOn();
+    assert.equal((await applyAgents(b.context, await managedNow(b.context, await b.context.read()), [{ key: 'reviewer', on: true, except: [] }])).stopped, undefined);
+    const before = await b.pass(undefined);
+    await b.codex(true);
+    await mkdir(join(b.home, '.codex/agents'), { mode: 0o555 });
+    const part = await b.pass(before);
+    await chmod(join(b.home, '.codex/agents'), 0o755);
+    assert.deepEqual([part.arrived, (await b.pass(part)).arrived], [[{ tool: 'codex-cli', copied: 1 }], [{ tool: 'codex-cli', copied: 2 }]]);
   } finally { await b.cleanup(); }
 });
 
