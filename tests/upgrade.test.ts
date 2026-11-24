@@ -497,11 +497,11 @@ test('Records that knew five tools, opened with Antigravity there: it has arrive
   } finally { await rm(box.base, { recursive: true, force: true }); }
 });
 
-// The last release reads a sync record above format 2 as written by a newer Central Knot and syncs nothing there (its share.ts
-// readRecord; this one's FORMAT_VERSION). Such a home's records are first brought forward, naming Antigravity, by a step that
-// runs with Automatic sync on or off (pluginrecord.ts bringForward): each record it saves is saved after the sync record is
-// lifted, so a start stopped at any moment leaves a home the last release refuses, never one it syncs with a sixth tool named.
-test('Records that knew five tools: each one brought forward is saved after the sync record is lifted to format 3, which the last release refuses', async () => {
+// The last release reads a sync record above format 2 as written by a newer Central Knot and stops syncing the home (its
+// share.ts readRecord; this one's FORMAT_VERSION). Such a home's records are first brought forward, naming Antigravity, by a step
+// that runs with Automatic sync on or off (pluginrecord.ts bringForward): each record it saves is saved after the sync record is
+// lifted, so a start stopped at any moment leaves a home the last release stops syncing, never one it syncs with a sixth tool named.
+test('Records that knew five tools: each one brought forward is saved after the sync record is lifted to format 3, at which the last release stops syncing', async () => {
   const box = await placeParts(true);
   try {
     await fiveToolsThenAntigravity(box);
@@ -522,6 +522,41 @@ test('Records that knew five tools, opened with Automatic sync off: nothing is s
     await fiveToolsThenAntigravity(box);
     const was = await filesIn(box.home), after = start(box, 'off', 1)[0];
     assert.deepEqual([changedInTools(was, after.files), (await readRecord(box.home)).record?.formatVersion], [[], 3]);
+  } finally { await rm(box.base, { recursive: true, force: true }); }
+});
+
+// The Plugins page writes the plugins record outside the library's gate, naming every tool this build knows (share.ts liftFirst).
+// A home the last release left that this version doesn't remember waits for Resume: a plugin's click there is refused with the
+// gate's words and saves nothing, since a record naming Antigravity beside a sync record at format 2 is one the last release reads
+// as damaged, then syncs the plugin's items into tools it is kept out of. Remembered, the same click lifts the sync record first.
+test('Records that knew five tools, waiting for Resume: a plugin’s click is refused with the gate’s words and saves nothing; remembered, it lifts the sync record first', async () => {
+  const box = await placeParts(true);
+  try {
+    await fiveToolsThenAntigravity(box);
+    const settings = appContext(box.home, box.appData).settingsPath, memory = await readFile(settings, 'utf8');
+    const entry: PluginEntry = (await readJson(join(box.store, 'plugins.json'))).plugins[0];
+    const records = () => Promise.all(['sync.json', 'plugins.json'].map(name => readFile(join(box.store, name), 'utf8')));
+    const click = () => plugins(box).markets.turn(entry.source, entry.plugin, entry.on ? 'off' : 'on', undefined, box.home);
+    await rm(settings);
+    const before = await records(), refused = await click();
+    assert.deepEqual([await records(), refused.stopped], [before, 'This app has an intact sync record but no memory of it. Resuming keeps every recorded choice.']);
+    await writeFile(settings, memory);
+    await click();
+    const now: PluginEntry[] = (await readJson(join(box.store, 'plugins.json'))).plugins;
+    assert.deepEqual([(await readRecord(box.home)).record?.formatVersion, now.find(each => each.plugin === entry.plugin)?.on], [3, !entry.on]);
+  } finally { await rm(box.base, { recursive: true, force: true }); }
+});
+
+// alpha-1-parts as alpha 1 left it: the old plugin parts, no plugins record, the sync record at format 2. A start of this version
+// first makes the plugins record (marketplaces.ts beforeParts, before any step asks the library's gate), naming Antigravity among
+// the tools it was written knowing: the sync record is lifted before it is saved.
+test('Plugin parts and no plugins record, sync record at format 2: the start’s first plugins record is saved after the sync record is lifted', async () => {
+  const box = await place('alpha-1-parts');
+  try {
+    const knows = async () => (await readJson(join(box.store, 'plugins.json')))?.knows?.includes('antigravity-cli');
+    assert.deepEqual([await knows(), (await readRecord(box.home)).record?.formatVersion], [undefined, 2]);
+    await plugins(box).markets.beforeParts();
+    assert.deepEqual([await knows(), (await readRecord(box.home)).record?.formatVersion], [true, 3]);
   } finally { await rm(box.base, { recursive: true, force: true }); }
 });
 

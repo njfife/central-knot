@@ -21,10 +21,11 @@
 // pass enters it before it reads its clicks (librarypass.ts runPass), so an item list's click that the pass then refuses has
 // still made the record of a home with none, or resumed one that waited. What checks before such a write starts (Pull, Push,
 // Synchronize everything's Undo and Restore, the Undo of a Pull's change to Claude Code's settings, the profiles migration)
-// only asks it; what writes a file of Central Knot's own alone asks it for that (`ownFile`: profiles.json, a source's Look and
-// Remove). Writes that are not the library's ask writeAccess alone: the record taken over (takeOverSync, which changes the
-// build it names), another build of the app, the Git repo's connection, instructions and plugins; syncsHere is whether this
-// build syncs the home at all (the background pass, History kept tidy).
+// asks it without entering, which makes and remembers nothing but still lifts a format 2 record; what writes a file of Central
+// Knot's own alone asks it for that (`ownFile`: profiles.json, a source's Look and Remove). Writes that are not the library's
+// ask writeAccess alone: the record taken over (takeOverSync, which changes the build it names), another build of the app, the
+// Git repo's connection, instructions, and plugins, whose page also asks liftFirst before it writes (marketplaces.ts guard,
+// recordFor); syncsHere is whether this build syncs the home at all (the background pass, History kept tidy).
 import { createHash, randomUUID } from 'node:crypto';
 import { STANDARD_BUILD, PRODUCT } from './values.ts';
 import { createReadStream } from 'node:fs';
@@ -451,7 +452,7 @@ export async function forgetStale(context: ShareContext, generation: string) {
 
 export const NOTHING_CHANGED = 'Nothing was written or deleted. Put the record back, then try again.';
 
-/** What a write of the library asks of libraryGate. With none set, it only asks: nothing is made or remembered (a format 2 record is still lifted). */
+/** What a write of the library asks of libraryGate. With none set, nothing is made or remembered; a format 2 record is lifted all the same. */
 export interface Entering {
   /** It enters a write: a home with no sync record gets one, this build's, remembered as its own. */
   start?: boolean;
@@ -466,7 +467,8 @@ export interface Entering {
  * a record that can't be read or isn't the one this build remembers (syncGate `stopped`), or one waiting for Resume (unless
  * `resume` or `ownFile`). Let in, it has already done what entering needs before anything is written: the record made (`start`), the
  * home remembered (`start`, `resume`), so a click that writes before its own pass never finds that pass refused; and, asked any
- * way, a format 2 record lifted to FORMAT_VERSION, so a build that knows five tools stops before this one names a sixth. Answers the
+ * way, a format 2 record lifted to FORMAT_VERSION (knewFive), so a build that knows five tools stops syncing the home before a
+ * library write of this one names a sixth (the Plugins page's writes: liftFirst). Answers the
  * home's record, where it has one (with `start`, always). A click that writes by its own hand runs its own refusals before it,
  * and enters it only to write; a pass enters it first (this file's header).
  */
@@ -480,9 +482,22 @@ export async function libraryGate(context: ShareContext, asked: Entering = {}): 
   let { record } = await readRecord(context.home);
   if (!record && asked.start) { record = newRecord(context); await saveRecord(context.home, record); await remember(context, record.generation); }
   else if (record && gate.state === 'needs-resume' && asked.resume) await remember(context, record.generation);
-  if (record?.formatVersion === 2) { record = { ...record, formatVersion: FORMAT_VERSION }; await saveRecord(context.home, record); }
+  if (knewFive(record)) { record = { ...record, formatVersion: FORMAT_VERSION }; await saveRecord(context.home, record); }
   if (asked.resume && context.resumeFirst) context.resumeFirst.reason = undefined;
   return { record };
+}
+
+/** A record a build that knows five tools wrote (format 2), which libraryGate lifts to FORMAT_VERSION. */
+const knewFive = (record: SyncRecord | undefined): record is SyncRecord => record?.formatVersion === 2;
+/**
+ * For a write the library's gate doesn't cover that can name a sixth tool (the Plugins page's: marketplaces.ts guard, recordFor):
+ * on a home whose record knewFive, the gate is asked, which lifts it first, or why not (nothing is to be written then); on any
+ * other home nothing is asked (one with no record: nothing to lift).
+ */
+export async function liftFirst(context: ShareContext): Promise<string | undefined> {
+  if (!knewFive((await readRecord(context.home)).record)) return undefined;
+  const gate = await libraryGate(context);
+  return 'refused' in gate ? gate.refused : undefined;
 }
 
 /**

@@ -18,7 +18,7 @@ import { waysFrom } from './reload.ts';
 import type { ItemKind } from './library.ts';
 import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartRef, PluginActionResult, PluginDetail, PluginTurn, PluginTurnResult, PluginView, PluginsView, Snapshot, SyncNotice, YourName } from './types.ts';
 import { harnessIds } from './harnesses.ts';
-import { errorCode, syncGate, writeDurably, type ShareContext } from './share.ts';
+import { errorCode, liftFirst, syncGate, writeDurably, type ShareContext } from './share.ts';
 import type { Listed } from './plugintext.ts';
 import { readRecord as readPartsRecord, type PartsRecord, type PluginNow } from './partsmigrate.ts';
 import { MARKET_UNREAD, SKILL_SWITCH_TESTED_FROM, copyDiffers, partWords, firstReadWaits, heldReason, keptReason, marketTitle, notCarried, recordUnread, toolNow, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
@@ -328,7 +328,9 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     if (read.problem || read.record) return { ...read, unknown, partsKnown };
     if (unknown.length || !partsKnown) return { problem: firstReadWaits(unknown, partsKnown), unknown, partsKnown };
     const record = firstRecord(tools, await holdingsIn(ctx, tools, parts), await host.waitedBefore?.() ?? []);
-    if (writable) await savePluginRecord(ctx.home, record);
+    // It names every tool this build knows: on a home an earlier build wrote, saved only once its sync record is lifted.
+    const share = host.share?.();
+    if (writable && !(share && await liftFirst(share))) await savePluginRecord(ctx.home, record);
     return { record, unknown, partsKnown };
   }
 
@@ -570,12 +572,13 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /** Why plugin work of its own accord (the automatic updates, the record's first read before a pass, a carried marketplace) waits: the home waits for Resume, as its sync passes do. */
   const waitsForResume = async () => { const share = host.share?.(), gate = share && await syncGate(share); return gate?.state === 'needs-resume' ? gate.reason : undefined; };
-  // Writes act only on the home on screen, only where writing is allowed there, and in no tool whose Manage switch is off.
+  // Writes act only on the home on screen, only where writing is allowed there, on a home an earlier build wrote only once its
+  // sync record is lifted (share.ts liftFirst: they can name a sixth tool), and in no tool whose Manage switch is off.
   const guard = async (home: unknown, tools: readonly HarnessId[] = []) => {
     if (home !== host.home()?.home) return 'The home on screen is not the one open. Nothing was changed. Read it again.';
-    const writing = await host.writeAccess();
+    const writing = await host.writeAccess(), share = host.share?.();
     if (!writing.allowed) return writing.reason ?? 'Writing isn’t allowed in this home, so nothing was changed.';
-    return leftOutOf(tools);
+    return (share && await liftFirst(share)) || leftOutOf(tools);
   };
   /** Why nothing is written in these tools, if one of them is left out here: asked at the moment of writing (host.leftOut). */
   const leftOutOf = async (tools: readonly HarnessId[]) => {

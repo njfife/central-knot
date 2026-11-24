@@ -861,7 +861,7 @@ async function sayingWhy(context: ShareContext, options: RepoOptions, action: 'P
 
 /** What Pull and Push both start from: a writable home, a connected repo checked just now, and the three sides compared. */
 async function readyToMove(context: ShareContext, options: RepoOptions): Promise<{ dir: string; state: RepoState; sides: Sides } | { refused: RepoResult }> {
-  // Pull writes a tool's copy before sync runs, so the gate for library writes is asked first; only asked: Pull's pass enters it.
+  // Pull writes a tool's copy before sync runs, so the gate is asked first, without entering (a format 2 record is still lifted): its pass enters it.
   const gate = await libraryGate(context);
   const stopped = 'refused' in gate ? gate.refused : await pluginsHold(context.home);
   if (stopped) return { refused: await refusal(context, stopped, options) };

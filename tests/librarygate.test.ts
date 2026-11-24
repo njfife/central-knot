@@ -84,9 +84,9 @@ test('The gate in a home waiting for Resume: refuses, unless the click is a Resu
   assert.deepEqual([said.resume, said.ownFile], ['let in, with its record, remembered', 'let in, with its record']);
 });
 // A build that knows five tools (0.7.0 alpha 5 and earlier) reads any format above 2 as written by a newer Central Knot and stops
-// syncing the home (share.ts FORMAT_VERSION). So whatever write this build lets in, it lifts such a record first: nothing it then
-// writes, naming a sixth tool, is ever left in a home that build would sync.
-test('The gate in a home a build that knows five tools wrote (format 2): every write it lets in lifts the record to format 3 first; a refusal leaves it as it was', async () => {
+// syncing the home (share.ts FORMAT_VERSION). So whenever the gate lets a write in, asked any way, it lifts such a record first:
+// no library write of this build that names a sixth tool is left in a home that build would sync.
+test('The gate in a home a build that knows five tools wrote (format 2): letting a write in, asked any way, it lifts the record to format 3 first; a refusal leaves it as it was', async () => {
   const lifted = 'let in, with its record, lifted to format 3';
   assert.deepEqual(await row('ready', 2), { 'only asked': lifted, start: lifted, resume: lifted, ownFile: lifted });
   const said = await row('waiting for Resume', 2);
