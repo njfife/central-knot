@@ -13,6 +13,7 @@ tests/clickplan.test.ts
 tests/copywords.test.ts
 tests/cowork.test.ts
 tests/discovery-copilot.test.ts
+tests/discovery.test.ts
 tests/drafts.test.ts
 tests/firstsetup.test.ts
 tests/gitrepo-edits.test.ts
@@ -43,6 +44,7 @@ tests/otherbuilds.test.ts
 tests/pagedata.test.ts
 tests/partsmigrate.test.ts
 tests/partswitch.test.ts
+tests/platform.test.ts
 tests/pluginitems.test.ts
 tests/pluginlibrary.test.ts
 tests/pluginplan.test.ts
@@ -61,6 +63,7 @@ tests/servermigrate.test.ts
 tests/servers.test.ts
 tests/serverswalk.test.ts
 tests/sessionhooks.test.ts
+tests/sessionrequests.test.ts
 tests/share-recovery.test.ts
 tests/signin.test.ts
 tests/skillmigrate.test.ts
