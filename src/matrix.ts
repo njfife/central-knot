@@ -26,7 +26,7 @@
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, noticeNames, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
-import { andList, fewNames, kindNouns, pageNames, rowNames, rowNouns, saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind } from './words.ts';
+import { andList, byToolOrder, fewNames, kindNouns, pageNames, rowNames, rowNouns, saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind } from './words.ts';
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
 import { copilotSharesYours, homeItems, inUse, itemId, pluginLive } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
@@ -42,10 +42,11 @@ import { versionList, type VersionText } from './versionlist.ts';
 import { itemKey, listed, type Version } from './library.ts';
 import { keptBack } from './clickplan.ts';
 import type { Change, DestinationResult, HomeView, ItemNotice, LibraryFacts, PluginItemNotice, PluginTextView, SearchHit, SyncGate, SyncNotice } from './types.ts';
-import type { HarnessId, TakenInNotice, UsageReading } from './types.ts';
-import { pluginOf } from './sourcelink.ts';
-import { heldKinds } from './presence.ts';
-import { market } from './pluginstate.ts';
+import type { HarnessId, InstalledPlugin, PartKind, TakenInNotice, UsageReading } from './types.ts';
+import { pluginMarketOf, pluginOf } from './sourcelink.ts';
+import { heldKinds, takesPlugins } from './presence.ts';
+import { lineBox, lineSaid, listingOf, market, turnFromLine, wantView } from './pluginstate.ts';
+import { lineControl, type LineFacts } from './pluginline.ts';
 import { succeeded, type PluginDone, type PluginDraft } from './pluginplan.ts';
 import { alongWords, cantSwitch, click as clickPluginItem, clickWords, copilotByName, itemSaid, onNow as itemOn, switchWords, turnEvery, wholeWords, type PluginItemAt } from './pluginswitch.ts';
 import { pageOfPart, partOfPage } from './pluginstatus.ts';
@@ -63,8 +64,7 @@ const names = toolNames as Record<Tool, string>;
  * marketplace's name, to find it by when the page lists that marketplace under another spelling of its address.
  */
 export function openPlugin({ source, plugin, marketplace }: { source?: string; plugin: string; marketplace?: string }) {
-  const lists = (entry: { plugins: { name: string }[] }) => entry.plugins.some(item => item.name === plugin);
-  const listed = market.view?.marketplaces.find(entry => entry.source === source && lists(entry)) ?? market.view?.marketplaces.find(entry => !!marketplace && entry.name === marketplace && lists(entry));
+  const listed = listingOf(plugin, marketplace, source);
   market.nav = { source: listed?.source ?? source, marketName: listed ? undefined : marketplace, plugin, tab: 'plugins', find: '', category: undefined };
   showPage('plugins');
 }
@@ -93,11 +93,11 @@ function switchPluginItem(item: PluginItemAt, row: ItemRow | PluginRow) {
 const cantSwitchHere = (item: PluginItemAt) => cantSwitch(item) ?? (state.home ? whyReadOnly(state.home) : undefined);
 
 /**
- * The item's switch in one tool, in an opened row, where a person's own item has its switch there: on or off, applied at once,
- * with the tool's own switch for one item or (where it has none) the whole plugin's, which its line says first. `page`: a link
- * to the plugin's page beside it, on a row that has no other. `row`: the row it is drawn in, whose kind, key and ids it takes.
+ * The item's switch in one tool, in an opened row, where a click changes only this item there (pluginline.ts): on or off, applied
+ * at once, with the tool's own switch for one item or (a skill in Claude Code) the whole plugin's, which its line says first.
+ * `row`: the row it is drawn in, whose kind, key and ids it takes.
  */
-function pluginItemControls(item: PluginItemAt, row: ItemRow | PluginRow, page?: () => void) {
+function pluginItemControls(item: PluginItemAt, row: ItemRow | PluginRow) {
   const id = elId('enable', row, item.tool);
   const on = itemOn(item);
   const why = cantSwitchHere(item);
@@ -105,23 +105,52 @@ function pluginItemControls(item: PluginItemAt, row: ItemRow | PluginRow, page?:
   return h('span.details-tool-actions', {},
     h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, on ? 'On' : 'Off'),
       // A plugin item's own switch writes no kind's record: the home's gate (cantSwitchHere asks it too).
-      toggle({ on, label, disabled: why ?? writeOff(homeStops()), onchange: () => switchPluginItem(item, row), id })),
-    page ? smallAction('Plugin’s page', elId('enable', row, item.tool, 'page'), page, '.tool-link') : null);
+      toggle({ on, label, disabled: why ?? writeOff(homeStops()), onchange: () => switchPluginItem(item, row), id })));
 }
 
-/** Opens the plugin's page on Plugins, found by its marketplace's name where the source each tool recorded is spelled otherwise. */
-function openWhole(row: PluginRow) {
-  const source = Object.values(row.installs).find(install => install?.listed)?.source;
-  market.nav = { source, plugin: row.plugin, tab: 'plugins', find: '', category: undefined, marketName: row.marketName };
-  showPage('plugins');
+/**
+ * The plugin an opened row's item comes with, in one line: "varo-risk 1.10.0 · in Claude Code and Copilot CLI · Its page" (a link,
+ * to look: each act is on its tool's line), each tool's version where they differ; where no marketplace here lists it, `handled`
+ * says how the tools handle it instead (pluginrows.ts handledWhere).
+ */
+function pluginStrip(plugin: string, marketName: string, installs: InstalledPlugin[], id: string, handled?: string) {
+  const versions = new Set(installs.map(install => install.version)), one = versions.size === 1 ? [...versions][0] : undefined;
+  const tools = installs.sort((first, second) => byToolOrder(first.tool, second.tool)).map(install => `${names[install.tool]}${!one && install.version ? ` ${install.version}` : ''}`);
+  const source = installs.find(install => install.listed)?.source, listed = installs.some(install => install.listed) || !!listingOf(plugin, marketName, source);
+  const page = listed ? [h('button.inline-link', { type: 'button', id, onclick: (event: Event) => { event.stopPropagation(); openPlugin({ source, plugin, marketplace: marketName }); } }, 'Its page')] : [];
+  const parts: Child[] = [`${plugin}${one ? ` ${one}` : ''}`, tools.length ? `in ${andList(tools)}` : 'installed in no tool here', ...page];
+  return h('p.details-limits.details-note.details-part.plugin-strip', {}, icon('puzzle', 12, 'tone-muted'),
+    h('span', {}, ...parts.flatMap((part, at) => (at ? [h('span.meta-dot', { 'aria-hidden': 'true' }, '·'), part] : [part])), listed || !handled ? '' : ` ${handled}`));
 }
 
-/** Where a plugin's item is handled, as a sentence: a link to the plugin's page, or how the tool itself does it. */
-function handledNote(row: PluginRow, lead: string, id: string) {
-  const where = handledWhere(row);
-  return h('p.details-limits.details-note.details-part', {}, icon('puzzle', 12, 'tone-muted'), h('span', {}, lead, where.text,
-    ...(where.listed ? [h('button.inline-link', { type: 'button', id, onclick: (event: Event) => { event.stopPropagation(); openWhole(row); } }, `${row.plugin}’s page on ${pageNames.plugins}`), '. '] : [' ']),
-    'Central Knot doesn’t copy it between tools; the switches below turn it on or off in each tool.'));
+/**
+ * The facts a tool's line on a plugin's item is drawn from (pluginline.ts LineFacts): the home's view, and the Plugins page's,
+ * read for it while such a row is open (pluginstate.ts wantView, lineBox), with the listing's source a turn names.
+ */
+function lineFacts(kind: PartKind, plugin: string, marketName: string, tool: HarnessId, through?: PluginItemAt, installed?: InstalledPlugin, source?: string): LineFacts & { source?: string } {
+  wantView(state.home?.readId);
+  const box = lineBox(plugin, marketName, through?.install.source ?? installed?.source ?? source, tool);
+  return { tool, kind, plugin, marketName, through, installed, box: box.box, parts: box.parts, source: box.source };
+}
+
+/**
+ * A tool's line on a plugin's item (pluginline.ts lineControl), after `lead` (what the tool has): its sentence and its control, the
+ * item's switch or a button that names its act; while its click waits or runs, what it is doing, then its result with its Undo
+ * (pluginstate.ts lineSaid). Install, Put its items here and Remove wait their turn (turnFromLine); Turn the plugin on or off is the
+ * item's own switch's click (switchPluginItem).
+ */
+function pluginLine(row: ItemRow | PluginRow, facts: LineFacts & { source?: string }, lead: string, reload: string) {
+  const control = lineControl(facts), item = facts.through, said = lineSaid(facts.plugin, facts.marketName, facts.tool);
+  const words = control.control === 'switch' ? (item ? cantSwitch(item) ?? switchWords(item) : '') : control.sentence;
+  const text = [lead, said?.busy ? said.text : words, said && !said.busy ? said.text : '', reload].filter(Boolean).join(' ');
+  const undo = said?.act ? smallAction('Undo', elId('line-undo', row, facts.tool), said.act) : null;
+  if (control.control !== 'button') return { text, failed: said?.failed, control: control.control === 'switch' && item ? pluginItemControls(item, row) : undo && h('span.details-tool-actions', {}, undo) };
+  const { act } = control, whole = act === 'plugin-on' || act === 'plugin-off';
+  const run = () => (whole ? switchPluginItem(item!, row) : turnFromLine({ source: facts.source!, marketName: facts.marketName, plugin: facts.plugin, tool: facts.tool, act }));
+  // Turn the plugin on or off applies at once, as the switch it stands for; the others wait their turn in the page's list.
+  const off = whole ? cantSwitchHere(item!) ?? writeOff(homeStops()) : said?.busy || queueOff(homeStops()) || (!facts.source && 'Not read yet.');
+  return { text, failed: said?.failed, control: h('span.details-tool-actions', {}, undo,
+    button({ variant: 'outline', size: 'micro', label: control.label, id: elId('line', row, facts.tool), disabled: off, attrs: { title: control.sentence }, onclick: (event: MouseEvent) => { event.stopPropagation(); run(); } })) };
 }
 
 
@@ -169,16 +198,16 @@ function pluginDetails(t: Table, row: PluginRow, placement: 'row' | 'dock' = 'ro
       row.kind === 'mcp' && row.description ? h('dl.details-definition', {}, h('dt', {}, 'Type'), h('dd', {}, type === 'Command' ? 'Command (stdio)' : type), h('dt', {}, type === 'Command' ? 'Command' : 'URL'), h('dd.mono', {}, rest.join(' · ')))
         : row.description ? h('p.details-description', {}, row.description) : null,
       excerptLine(t, row),
-      handledNote(row, '', elId('open-whole', row))),
+      pluginStrip(row.plugin, row.marketName, Object.values(row.installs).filter(install => !!install), elId('open-whole', row), handledWhere(row).text)),
     h('div.details-tools', {}, toolsFor(t, kindOf(row)).map(tool => {
-      const install = row.copies[tool as HarnessId] ? row.installs[tool as HarnessId] : undefined;
-      const item: PluginItemAt | undefined = install && { kind: row.kind, name: row.name, tool: tool as HarnessId, install };
+      const at = tool as HarnessId, install = row.installs[at], copy = row.copies[at] ? install : undefined;
+      const item: PluginItemAt | undefined = copy && { kind: row.kind, name: row.name, tool: at, install: copy };
       const reload = state.outcome && outcomeShown(state.outcome, t)
-        ? rowReload(state.outcome.reloads, row.kind, itemKey(row.name), tool as HarnessId, `${row.plugin}@${row.marketName}`, toolWays()) : '';
+        ? rowReload(state.outcome.reloads, row.kind, itemKey(row.name), at, `${row.plugin}@${row.marketName}`, toolWays()) : '';
+      const line = pluginLine(row, lineFacts(row.kind, row.plugin, row.marketName, at, item, copy ? undefined : install, install?.source), item ? toolWords(row, at) : '', reload);
       return h('div.details-tool', {}, h('div.details-tool-head', {},
         h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
-        h('span.details-tool-line', {}, [toolWords(row, tool as HarnessId), item ? cantSwitch(item) ?? switchWords(item) : '', reload].filter(Boolean).join(' ')),
-        item ? pluginItemControls(item, row) : null), usageLine(t, row, tool));
+        h(`span.details-tool-line${line.failed ? '.tone-warning' : ''}`, {}, line.text), line.control), usageLine(t, row, tool));
     })),
     row.kind === 'mcp' ? null : h('div.details-file', {}, h('div.details-actions', {}, smallAction(shown ? `Hide its ${file}` : `Show its ${file}`, elId('pfile', row), () => toggleFile(row))), fileShown));
 }
@@ -842,11 +871,19 @@ function sourceTag(skill: ItemRow) {
   const tag = skill.fromSource && fromSourceWords(skill.fromSource).tag, plugin = skill.fromSource && pluginOf(skill.fromSource.link);
   return tag ? h(`span.row-tag.row-tag-source${plugin ? '.row-tag-plugin' : ''}`, { title: tag.title }, icon('link-2', 12, plugin ? 'tone-muted' : 'tone-warning'), tag.text) : null;
 }
-/** The opened row's line saying which source an item is from, and whether a version waits there or it removed the item, with its link to that source's page. */
+/** The opened row's line saying which source an item is from, and whether a version waits there or it removed the item, with its link to that source's page (a plugin's: its strip, pluginStrip). */
 function fromSourceLine(skill: ItemRow, from: NonNullable<ItemRow['fromSource']>) {
-  const said = fromSourceWords(from);
+  const said = fromSourceWords(from), page = said.page;
   return h('p.details-limits.details-note', {}, icon('link-2', 12, from.waits || from.removed ? 'tone-warning' : 'tone-muted'), h('span', {}, said.before,
-    h('button.inline-link', { type: 'button', id: elId('from-source', skill), title: from.link, onclick: () => showPage(said.page) }, pageNames[said.page]), said.after));
+    page ? h('button.inline-link', { type: 'button', id: elId('from-source', skill), title: from.link, onclick: () => showPage(page) }, pageNames[page]) : null, said.after));
+}
+
+/** The plugins a library row's item comes with: the one it is from (library.ts A PLUGIN), and those a tool has it through, each once, with each tool's install of it. */
+function rowPlugins(skill: ItemRow) {
+  const link = skill.fromSource?.link ?? '', from = pluginOf(link) ? [{ plugin: pluginOf(link)!, marketName: pluginMarketOf(link)! }] : [];
+  const named = [...from, ...Object.values(skill.plugin ?? {}).flatMap(given => (given ? [{ plugin: given.plugin, marketName: given.marketplace }] : []))];
+  return named.filter((each, at) => named.findIndex(other => other.plugin === each.plugin && other.marketName === each.marketName) === at)
+    .map(each => ({ ...each, installs: (state.home?.pluginItems ?? []).filter(install => install.plugin === each.plugin && install.marketName === each.marketName) }));
 }
 
 /**
@@ -2400,15 +2437,32 @@ function offNote(t: Table, list: ItemRow[]) {
 /** What the item is now, in one line (libraryrow.ts statusLine), and for a found one, what Synchronize everything does with it while it is on. */
 const switchStatus = (t: Table, skill: ItemRow) => statusLine(skill, itemOf(skill), toolsFor(t, skill.kind), !!state.home?.sync.syncEverything, leftOutTools());
 
-/** What one tool has, for its row in the item's details: what its copy is, then whether its own switch has it off, and any reload step from the active click result. */
-function harnessLine(skill: ItemRow, tool: Tool): string {
-  const through = itemThrough(state.home, skill.kind, skill, tool);
+/**
+ * A library row's line in one tool that is a plugin's (pluginline.ts): the tool has the item through a plugin, or the item is from a
+ * plugin (library.ts A PLUGIN) that this tool, which takes plugins, doesn't have installed.
+ */
+function rowPluginFacts(skill: ItemRow, tool: Tool) {
+  const through = itemThrough(state.home, skill.kind, skill, tool), kind = partOfPage[skill.kind];
+  if (through) return lineFacts(kind, through.install.plugin, through.install.marketName, tool as HarnessId, through);
+  const link = skill.fromSource?.link ?? '', plugin = pluginOf(link), marketName = pluginMarketOf(link);
+  const has = state.home?.pluginItems?.some(install => install.tool === tool && install.plugin === plugin && install.marketName === marketName);
+  return plugin && marketName && takesPlugins(tool) && !has ? lineFacts(kind, plugin, marketName, tool as HarnessId) : undefined;
+}
+
+/**
+ * One tool's line in an item's details: what it has, in a sentence (with any reload step from the active click result), and its own
+ * controls, each applied at once: a plugin's line where it is one (rowPluginFacts); else the item's switch for that harness and what
+ * its kind adds there (libraryHarnessSwitch), or nothing where the tool has it through a plugin whose copy isn't read.
+ */
+function harnessLine(skill: ItemRow, tool: Tool): { text: string; control: HTMLElement | null; failed?: boolean } {
+  const plugged = rowPluginFacts(skill, tool), through = plugged?.through;
   const reload = state.outcome && outcomeShown(state.outcome, useTableShown())
     ? rowReload(state.outcome.reloads, toItemKind(skill.kind), through ? itemKey(through.name) : skill.key, tool as HarnessId, through ? `${through.install.plugin}@${through.install.marketName}` : undefined, toolWays()) : '';
-  // Through a plugin: where it comes from, then why its switch can't be used here, or that it is the whole plugin's.
-  if (through) return [skill.cannot?.[tool], cantSwitch(through) ?? switchWords(through), reload].filter(Boolean).join(' ');
+  // Through a plugin: where it comes from first.
+  if (plugged) return pluginLine(skill, plugged, through ? skill.cannot?.[tool] ?? '' : '', reload);
   const lib = libraryPages[skill.kind], own = skill.ownPart?.[tool];
-  return [lib.say.harnessLine(skill, itemOf(skill), tool, names[tool]), own?.length ? lib.words.own(own) : '', reload].filter(Boolean).join(' ');
+  return { text: [lib.say.harnessLine(skill, itemOf(skill), tool, names[tool]), own?.length ? lib.words.own(own) : '', reload].filter(Boolean).join(' '),
+    control: throughPluginHere(skill, tool) ? null : libraryHarnessSwitch(lib, skill, tool) };
 }
 
 /**
@@ -2490,19 +2544,6 @@ function libraryVersions(t: Table, lib: LibraryPage, skill: ItemRow) {
 }
 
 /**
- * One tool's own controls in an item's details, each applied at once: the item's switch for that harness and what its kind
- * adds there (libraryHarnessSwitch); the plugin's page, for a tool that has it through one. Each says what it does on hover.
- */
-function harnessControls(skill: ItemRow, tool: Tool) {
-  const given = throughPluginHere(skill, tool);
-  // Through a plugin: the item's switch in that tool (its own, or the whole plugin's), with the way to the plugin's page.
-  const through = itemThrough(state.home, skill.kind, skill, tool);
-  if (through) return pluginItemControls(through, skill, () => openPlugin(given!));
-  if (given) return h('span.details-tool-actions', {}, smallAction('Plugin’s page', elId('plugin', skill, tool), () => openPlugin(given)));
-  return libraryHarnessSwitch(libraryPages[skill.kind], skill, tool);
-}
-
-/**
  * An item's details: its status, each tool with its own controls, its versions, where each copy is, what its kind shows of its
  * own (librarypages.ts), and its Delete from Central Knot last. While a found item's copies differ, only the question of which
  * copy every tool uses, and the copies.
@@ -2512,14 +2553,17 @@ function details(t: Table, skill: ItemRow, placement: Placement = 'row'): HTMLEl
   const differs = isDiffering(skill);
   // MCP: each tool's row has its settings file and Show in folder, where a server is changed.
   const settingsFile = (tool: Tool) => (skill.kind === 'mcp' && skill.paths?.[tool] ? [wrappingPath(skill.paths[tool]!), showInFolder(skill.paths[tool]!)] : []);
-  const toolRow = (tool: Tool) => h('div.details-tool', {},
-    h('div.details-tool-head', {},
-      h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
-      ...settingsFile(tool),
-      h('span.details-tool-line', {}, harnessLine(skill, tool)),
-      harnessControls(skill, tool)),
-    lib.toolNote?.(skill, tool as HarnessId),
-    usageLine(t, skill, tool));
+  const toolRow = (tool: Tool) => {
+    const line = harnessLine(skill, tool);
+    return h('div.details-tool', {},
+      h('div.details-tool-head', {},
+        h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
+        ...settingsFile(tool),
+        h(`span.details-tool-line${line.failed ? '.tone-warning' : ''}`, {}, line.text),
+        line.control),
+      lib.toolNote?.(skill, tool as HarnessId),
+      usageLine(t, skill, tool));
+  };
   const close = placement === 'row' ? h('button.details-close', { type: 'button', id: elId('close', skill), 'aria-label': `Close details for ${skill.key}`, title: 'Close', onclick: () => { t.view.comparing = undefined; rerender(); } }, icon('x', 14)) : null;
   const box = (...children: (Child | Child[])[]) => h(`div.compare.details${placement === 'row' ? '' : '.details-bare'}${differs ? '.details-differs' : ''}${skill.kind === 'mcp' ? '.details-mcp' : '.details-grid'}`, { role: 'region', 'aria-label': `Details for ${skill.key}` }, ...children);
   // The copy question is asked in one place: by first setup's walkthrough where it is at this row, else here.
@@ -2535,11 +2579,12 @@ function details(t: Table, skill: ItemRow, placement: Placement = 'row'): HTMLEl
       // Its description whole: the closed row cuts it.
       skill.description ? h('p.details-description.details-description-whole', {}, skill.description) : null,
       excerptLine(t, skill),
+      rowPlugins(skill).map(({ plugin, marketName, installs }) => pluginStrip(plugin, marketName, installs, elId('strip', skill, plugin))),
       files ? h('div.details-actions', {}, files) : null),
     // What every tool shares of it, and what stays each harness's own, said where it is true: an item in Central Knot, or a
     // found one that can be taken in.
     tools.length > 1 && (inLibrary(itemOf(skill)) || canAdd(skill)) ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), lib.words.shared) : null,
-    h('div.details-tools', {}, tools.map(toolRow), usageElsewhere(t, skill)),
+    h('div.details-tools', {}, tools.map(tool => toolRow(tool)), usageElsewhere(t, skill)),
     libraryVersions(t, lib, skill),
     inFiles || skill.kind === 'mcp' ? null : wherePaths(t, skill),
     lib.own?.(skill) ?? null,

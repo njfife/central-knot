@@ -102,4 +102,6 @@ export function shortLabels(links: readonly string[]): Map<string, string> {
 export const pluginLink = (plugin: string, marketName: string) => `${PLUGIN}${plugin}@${marketName}`;
 /** The plugin a link names (pluginLink), if it is a plugin's. */
 export const pluginOf = (link: string) => (link.startsWith(PLUGIN) ? link.slice(PLUGIN.length, link.lastIndexOf('@')) : undefined);
+/** The marketplace's name a plugin's link names (pluginLink), if it is a plugin's. */
+export const pluginMarketOf = (link: string) => (link.startsWith(PLUGIN) ? link.slice(link.lastIndexOf('@') + 1) : undefined);
 const PLUGIN = 'plugin:';

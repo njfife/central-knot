@@ -168,25 +168,32 @@ export const counted = (items: Part[], beside?: PartKind) => andList((['skill', 
 export const copilotByName = (name: string, on: boolean, yours = false) =>
   `Copilot CLI goes by the name, so ${yours ? `your own “${name}”` : `any other server named “${name}”`} there goes ${on ? 'on' : 'off'} too${on && yours ? ' (while both are on, Copilot CLI runs the plugin’s)' : ''}.`;
 
-/** What a click on the item's switch does, as the sentence after its state ("Click to turn it off in Codex."). */
-export function clickWords(item: PluginItemAt): string {
-  const tool = names[item.tool];
-  const plugin = item.install.plugin;
-  const on = onNow(item);
+/**
+ * What a click on the item's switch turns of its whole plugin in its tool, as the words after "turn": "the whole plugin
+ * document-tools off in Claude Code, with its 1 skill", "the plugin full on in Codex with only this skill on"; undefined where
+ * it turns the item's own switch alone. The switch's words (clickWords) and its line's button (pluginline.ts) both say it.
+ */
+export function wholeTurn(item: PluginItemAt): string | undefined {
+  const tool = names[item.tool], plugin = item.install.plugin;
   // What else of the plugin is on there now: what its own switch already keeps off neither goes with it nor comes back with it.
   const rest = item.install.items.filter(entry => !samePart(entry, item) && !(hasOwnSwitch(item.tool, entry.kind) && itemOffNow(item.install, entry)));
+  const withRest = rest.length ? `, with its ${counted(rest)}` : '';
+  if (onNow(item)) return ownSwitch(item) ? undefined : `the whole plugin ${plugin} off in ${tool}${withRest}`;
+  if (!item.install.off) return undefined;
+  if (!ownSwitch(item)) return `the whole plugin ${plugin} on in ${tool}${withRest}`;
+  // What comes on beside this item: whatever the plugin brings that can't be held off there (no switch of its own, or one that
+  // can't be written), and isn't off by its own switch already.
+  const held = switchable(item.install);
+  const brought = rest.filter(entry => !held.some(part => samePart(part, entry)));
+  return `the plugin ${plugin} on in ${tool} with only this ${partWords[item.kind][0]} on${brought.length ? `; its ${counted(brought, item.kind)} ${brought.length === 1 ? 'comes' : 'come'} on too` : ''}`;
+}
+
+/** What a click on the item's switch does, as the sentence after its state ("Click to turn it off in Codex."). */
+export function clickWords(item: PluginItemAt): string {
+  const tool = names[item.tool], whole = wholeTurn(item);
   const byName = (turnsOn: boolean) => (item.kind === 'mcp' && item.tool === 'copilot-cli' ? ` ${copilotByName(item.name, turnsOn)}` : '');
-  if (on && ownSwitch(item)) return `Click to turn it off in ${tool}.${byName(false)}`;
-  if (on) return `${tool} has no switch for one ${partWords[item.kind][0]} of a plugin. Click to turn the whole plugin ${plugin} off in ${tool}${rest.length ? `, with its ${counted(rest)}` : ''}.`;
-  if (!item.install.off) return `Click to turn it on in ${tool}.${byName(true)}`;
-  if (ownSwitch(item)) {
-    // What comes on beside this item: whatever the plugin brings that can't be held off there (no switch of its own, or
-    // one that can't be written), and isn't off by its own switch already.
-    const held = switchable(item.install);
-    const brought = rest.filter(entry => !held.some(part => samePart(part, entry)));
-    return `Click to turn the plugin ${plugin} on in ${tool} with only this ${partWords[item.kind][0]} on${brought.length ? `; its ${counted(brought, item.kind)} ${brought.length === 1 ? 'comes' : 'come'} on too` : ''}.`;
-  }
-  return `Click to turn the whole plugin ${plugin} on in ${tool}${rest.length ? `, with its ${counted(rest)}` : ''}.`;
+  if (onNow(item)) return whole ? `${tool} has no switch for one ${partWords[item.kind][0]} of a plugin. Click to turn ${whole}.` : `Click to turn it off in ${tool}.${byName(false)}`;
+  return whole ? `Click to turn ${whole}.` : `Click to turn it on in ${tool}.${byName(true)}`;
 }
 
 /** The line beside the item's switch where the tool has none for one item: that its switch is the whole plugin's there; else ''. */

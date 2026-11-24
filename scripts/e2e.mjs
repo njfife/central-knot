@@ -459,10 +459,10 @@ async function backFlow() {
   await openKind(a, 'skills');
   const skillPart = (part, key, ...within) => byId(rowPart(part, 'skills', key, ...within));
   await a.click(skillPart('open', 'pdf-reader'));
-  await a.click(skillPart('enable', 'pdf-reader', 'claude-cli', 'page'));
+  await a.click(skillPart('strip', 'pdf-reader', 'document-tools'));
   // Navigation draws the page before its first catalog read has finished.
   for (let tries = 0; tries < 100 && !(await a.exists('.market-item.selected')); tries++) await wait(100);
-  same('the skill’s per-tool link resolves an alternate spelling on the first marketplace read', await exactPlugin(), ['back-market', 'document-tools']);
+  same('the skill’s plugin strip links its page, an alternate spelling resolved on the first marketplace read', await exactPlugin(), ['back-market', 'document-tools']);
   await a.click(byId('nav-history'));
   await a.click(byId('nav-harnesses'));
   await a.click(byId('harness-claude-cli'));
@@ -3016,8 +3016,8 @@ async function practiceFlow() {
   if (pluginSettingsBefore === undefined) rmSync(pluginSettings, { force: true }); else writeFileSync(pluginSettings, pluginSettingsBefore);
   await a.click('#header-refresh');
   for (let tries = 0; tries < 40 && (await a.run(`document.querySelector('#${rowPart('cell', 'mcp', 'issues', 'claude-cli')}')?.dataset.state`)) !== 'plugin'; tries++) await wait(100);
-  if (!(await a.exists(`#${rowPart('enable', 'mcp', 'issues', 'claude-cli', 'page')}`))) await a.click(`#${rowPart('open', 'mcp', 'issues')}`);
-  await a.click(`#${rowPart('enable', 'mcp', 'issues', 'claude-cli', 'page')}`);
+  if (!(await a.exists(`#${rowPart('strip', 'mcp', 'issues', 'issue-tracker')}`))) await a.click(`#${rowPart('open', 'mcp', 'issues')}`);
+  await a.click(`#${rowPart('strip', 'mcp', 'issues', 'issue-tracker')}`);
   for (let tries = 0; tries < 30 && !(await a.exists('#plugin-back')); tries++) await wait(100);
   check('and its opened row leads to the plugin’s page', await a.exists('#plugin-back') && /issue[- ]tracker/i.test(await a.text('.plugin-page h2') ?? ''), await a.text('.plugin-page h2'));
   // triage, moved to the library from its part above: Delete from Central Knot takes Pi's copy out, and leaves the plugin's own

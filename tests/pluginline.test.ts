@@ -16,14 +16,14 @@ const installed = (tool: HarnessId, more: Partial<InstalledPlugin> = {}): Instal
     { kind: 'mcp', name: 'jira', description: '' }, ...(tool === 'codex-cli' ? [] : [{ kind: 'agent' as const, name: 'lead', description: '' }])],
   ...more });
 /** What the marketplace lists in it: 3 skills, 1 agent, 1 MCP server, hooks and a command. */
-const parts: Components = { skills: 3, commands: 1, agents: 1, mcp: 1, mcpRootVariable: false, bin: false, hooks: true, hooksIn: [] };
+const parts: Components = { skills: 3, commands: 1, agents: 1, mcp: 1, mcpRootVariable: false, bin: false, hooks: true, hooksIn: [], startHooksIn: [], promptHooksIn: [], sessionTextHooks: [] };
 /** The tool has the item through the plugin. */
 const through = (tool: HarnessId, kind: PartKind, name: string, more: Partial<InstalledPlugin> = {}): LineFacts =>
   ({ tool, kind, plugin: 'varo-risk', marketName: 'varo', through: { kind, name, tool, install: installed(tool, more) }, box: { ticked: true }, parts });
 /** The tool lacks the plugin: its box on the plugin's page (pluginstatus.ts boxOf) decides. */
 const lacks = (tool: HarnessId, kind: PartKind, box: LineFacts['box'], more: Partial<LineFacts> = {}): LineFacts => ({ tool, kind, plugin: 'varo-risk', marketName: 'varo', box, parts, ...more });
 
-const SWITCH = { control: 'switch' };
+const SWITCH = { control: 'switch' } as const;
 const cases: [string, LineFacts, ReturnType<typeof lineControl>][] = [
   // The tool has the item through the plugin.
   ['its own switch, the plugin on there: the switch, as before', through('copilot-cli', 'skill', 'handoff'), SWITCH],

@@ -112,14 +112,14 @@ export interface LibraryRow {
  * changed here, or a tool's copy unreadable: library.ts changedHere), or once the source removed it (`removed`: library.ts
  * REMOVED AT ITS SOURCE), the tag after its name; and the opened row's line, written around its link to Sources (`before`, the
  * link, `after`), which also says when nothing waits yet but the next change would (`nextWaits`: edited here, an older version
- * made current, or a Merge's result).
+ * made current, or a Merge's result). A plugin's item has no link there: its plugin's strip on the opened row has its page (matrix.ts pluginStrip).
  */
-export function fromSourceWords(from: NonNullable<LibraryFacts['fromSource']>): { tag?: { text: string; title: string }; before: string; after: string; page: 'sources' | 'plugins' } {
+export function fromSourceWords(from: NonNullable<LibraryFacts['fromSource']>): { tag?: { text: string; title: string }; before: string; after: string; page?: 'sources' } {
   const label = linkLabel(from.link);
   // An item a plugin brought (library.ts A PLUGIN): it never waits, and a change made here lets it go.
   if (pluginOf(from.link)) {
     const follows = `It follows the plugin in the tools that take no plugins; a change you make to it here makes it your own, no longer the plugin’s`;
-    return { tag: { text: `from ${label}`, title: `${follows}.` }, before: `From ${label}. ${follows}. The plugin’s page is on `, after: '.', page: 'plugins' };
+    return { tag: { text: `from ${label}`, title: `${follows}.` }, before: `From ${label}. ${follows}.`, after: '' };
   }
   if (from.removed) {
     const off = `${label} no longer has it: it is Off, and no longer from that source. Turn it on to use it again`;
