@@ -12,10 +12,15 @@ import type { DayReading, Period, PricedRequest, SessionTool } from './sessionda
 export interface PricedAs { model: string; as: string }
 export interface PricedProvider { provider: string; from: 'request' | 'tool' }
 /**
- * Counts of unpriced requests in a CostSum, grouped from rates.ts UnpricedReason as the page will say them:
- * `noRow` (`not-in-table`), `speedOrTier` (`unsupported-speed`, `unsupported-service-tier`), and `other` (all other reasons).
+ * A speed or service tier the list has no rate for on the request's model: `which` of the two rates.ts priceRequest refused
+ * (`unsupported-speed`, `unsupported-service-tier`), its value as the tool `saved` it (`fast`, `priority`), and how many `requests`.
  */
-export interface UnpricedBy { noRow: number; speedOrTier: number; other: number }
+export interface SpeedOrTier { which: 'speed' | 'serviceTier'; saved: string; requests: number }
+/**
+ * Unpriced requests in a CostSum, grouped from rates.ts UnpricedReason as the page will say them: `noRow` (`not-in-table`)
+ * and `other` (every other reason but a refused speed or tier) as counts, and `speedOrTier`, one entry per refused value.
+ */
+export interface UnpricedBy { noRow: number; speedOrTier: SpeedOrTier[]; other: number }
 /**
  * Sum of list prices for a row, model or total: `dollars` (undefined when no request had a known price, never $0),
  * `unpriced` and `unpricedBy` (unpriced requests total and by reason; never "N of M", since unread lines make M unknown),
@@ -47,9 +52,9 @@ export interface DayRows {
 
 const totalTokens = (t: Tokens) => t.input + t.cacheRead + t.cacheWrite + t.output;
 
-const UNPRICED_BUCKET: Record<UnpricedReason, keyof UnpricedBy> = {
+const UNPRICED_BUCKET: Record<UnpricedReason, 'noRow' | SpeedOrTier['which'] | 'other'> = {
   'not-in-table': 'noRow',
-  'unsupported-speed': 'speedOrTier', 'unsupported-service-tier': 'speedOrTier',
+  'unsupported-speed': 'speed', 'unsupported-service-tier': 'serviceTier',
   'no-provider': 'other', 'missing-rate': 'other', 'invalid-tokens': 'other', 'invalid-time': 'other', 'invalid-credits': 'other',
 };
 
@@ -64,10 +69,12 @@ function tally(requests: readonly PricedRequest[]): { tokens: Tokens; cost: Cost
   let priced = 0;
   let unpriced = 0;
   let atLeast = false;
-  const unpricedBy: UnpricedBy = { noRow: 0, speedOrTier: 0, other: 0 };
+  const counted = { noRow: 0, other: 0 };
+  const refused = new Map<string, SpeedOrTier>();
   const asMap = new Map<string, PricedAs>();
   const provMap = new Map<string, PricedProvider>();
-  for (const { request: { model, tokens: t }, price } of requests) {
+  for (const { request, price } of requests) {
+    const { model, tokens: t } = request;
     input += t.input;
     cacheRead += t.cacheRead;
     cacheWrite += t.cacheWrite;
@@ -75,7 +82,16 @@ function tally(requests: readonly PricedRequest[]): { tokens: Tokens; cost: Cost
     output += t.output;
     if (!price.priced) {
       unpriced++;
-      unpricedBy[UNPRICED_BUCKET[price.reason]]++;
+      const bucket = UNPRICED_BUCKET[price.reason];
+      if (bucket === 'noRow' || bucket === 'other') {
+        counted[bucket]++;
+        continue;
+      }
+      const saved = (bucket === 'speed' ? request.speed : request.serviceTier) ?? '';
+      const key = `${bucket}\0${saved}`;
+      const entry = refused.get(key) ?? { which: bucket, saved, requests: 0 };
+      entry.requests++;
+      refused.set(key, entry);
       continue;
     }
     dollars += price.dollars;
@@ -87,6 +103,8 @@ function tally(requests: readonly PricedRequest[]): { tokens: Tokens; cost: Cost
   }
   const pricedAs = [...asMap.values()].sort((a, b) => a.model.localeCompare(b.model) || a.as.localeCompare(b.as));
   const providers = [...provMap.values()].sort((a, b) => a.provider.localeCompare(b.provider) || a.from.localeCompare(b.from));
+  const speedOrTier = [...refused.values()].sort((a, b) => a.which.localeCompare(b.which) || a.saved.localeCompare(b.saved));
+  const unpricedBy: UnpricedBy = { noRow: counted.noRow, speedOrTier, other: counted.other };
   return {
     tokens: { input, cacheRead, cacheWrite, ...(cacheWrite1h > 0 ? { cacheWrite1h } : {}), output },
     cost: { dollars: priced > 0 ? dollars : undefined, unpriced, unpricedBy, atLeast, pricedAs, providers },

@@ -296,7 +296,7 @@ test('Exact models, priced-as rule (haiku dated), fast speed priced vs unsupport
   const c1 = view.rows.find(r => r.session === 'c1')!;
   approx(c1.cost.dollars, dOpusBase + dOpusFast + dHaiku, 'c1 dollars');
   assert.equal(c1.cost.unpriced, 1, 'haiku fast has no known price');
-  assert.deepEqual(c1.cost.unpricedBy, { noRow: 0, speedOrTier: 1, other: 0 }, 'fast reply grouped as speedOrTier');
+  assert.deepEqual(c1.cost.unpricedBy, { noRow: 0, speedOrTier: [{ which: 'speed', saved: 'fast', requests: 1 }], other: 0 }, 'fast reply grouped as speedOrTier');
   assert.deepEqual(c1.cost.pricedAs, [{ model: 'claude-haiku-4-5-20251001', as: 'claude-haiku-4-5' }]);
   assert.deepEqual(c1.cost.providers, [{ provider: 'anthropic', from: 'tool' }]);
   assert.deepEqual(c1.tokens, { input: 45_000, cacheRead: 0, cacheWrite: 0, output: 4_500 }, 'unpriced fast reply tokens still kept');
@@ -304,7 +304,7 @@ test('Exact models, priced-as rule (haiku dated), fast speed priced vs unsupport
   const x1 = view.rows.find(r => r.session === 'x1')!;
   approx(x1.cost.dollars, dAstra + dSol1, 'x1 dollars');
   assert.equal(x1.cost.unpriced, 1, 'codex-auto-review has no known price');
-  assert.deepEqual(x1.cost.unpricedBy, { noRow: 1, speedOrTier: 0, other: 0 }, 'unlisted model grouped as noRow');
+  assert.deepEqual(x1.cost.unpricedBy, { noRow: 1, speedOrTier: [], other: 0 }, 'unlisted model grouped as noRow');
   assert.deepEqual(x1.cost.pricedAs, []);
   assert.deepEqual(x1.cost.providers, [{ provider: 'openai', from: 'request' }]);
   assert.deepEqual(x1.tokens, { input: 23_000, cacheRead: 10_000, cacheWrite: 0, output: 2_400 });
@@ -315,7 +315,7 @@ test('Exact models, priced-as rule (haiku dated), fast speed priced vs unsupport
   // Day totals & byModel totals.
   approx(view.total.cost.dollars, dOpusBase + dOpusFast + dHaiku + dAstra + dSol1 + dSol2, 'day total dollars');
   assert.equal(view.total.cost.unpriced, 2, 'day total leaves out haiku fast and codex-auto-review');
-  assert.deepEqual(view.total.cost.unpricedBy, { noRow: 1, speedOrTier: 1, other: 0 });
+  assert.deepEqual(view.total.cost.unpricedBy, { noRow: 1, speedOrTier: [{ which: 'speed', saved: 'fast', requests: 1 }], other: 0 });
 
   const byModel = new Map(view.byModel.map(m => [m.model, m]));
   approx(byModel.get('claude-opus-5-5')!.cost.dollars, dOpusBase + dOpusFast);
@@ -327,6 +327,28 @@ test('Exact models, priced-as rule (haiku dated), fast speed priced vs unsupport
   assert.equal(byModel.get('codex-auto-review')!.cost.dollars, undefined, 'codex-auto-review has tokens and no dollars');
   assert.equal(byModel.get('codex-auto-review')!.cost.unpriced, 1);
   assert.deepEqual(byModel.get('codex-auto-review')!.tokens, { input: 5_000, cacheRead: 3_000, cacheWrite: 0, output: 400 });
+});
+
+test('A reply refused for its speed or service tier keeps which it was and its saved value, counted, in every sum', async () => {
+  const home = await newHome();
+  const t = TODAY.start + 9 * HOUR;
+  // One Claude Code session on claude-haiku-4-5, whose row has no fast rate and no service-tier rates: two fast replies and
+  // one priority reply, each refused for what it saved; a standard reply priced.
+  await put(join(home, '.claude/projects/-work-app/s1.jsonl'), [
+    claudeReply('f1', t, claudeUsage(1_000, 0, 0, 100, { speed: 'fast' }), 'claude-haiku-4-5', '/work/app', 's1'),
+    claudeReply('f2', t + 1_000, claudeUsage(1_000, 0, 0, 100, { speed: 'fast' }), 'claude-haiku-4-5', '/work/app', 's1'),
+    claudeReply('p1', t + 2_000, claudeUsage(1_000, 0, 0, 100, { tier: 'priority' }), 'claude-haiku-4-5', '/work/app', 's1'),
+    claudeReply('ok', t + 3_000, claudeUsage(1_000, 0, 0, 100), 'claude-haiku-4-5', '/work/app', 's1'),
+  ], t + 3_000);
+  const view = sessionRows(await readSessionPeriod({ home }, TODAY, ['claude-cli']));
+  const refused = [{ which: 'serviceTier', saved: 'priority', requests: 1 }, { which: 'speed', saved: 'fast', requests: 2 }];
+  const row = view.rows[0]!;
+  assert.equal(row.cost.unpriced, 3);
+  assert.deepEqual(row.cost.unpricedBy, { noRow: 0, speedOrTier: refused, other: 0 }, 'the row names each refused speed and tier once, counted');
+  assert.deepEqual(row.models[0]!.cost.unpricedBy.speedOrTier, refused, 'the model in the opened row says the same');
+  assert.deepEqual(view.byTool[0]!.cost.unpricedBy.speedOrTier, refused, 'the tool total says the same');
+  assert.deepEqual(view.total.cost.unpricedBy.speedOrTier, refused, 'the period total says the same');
+  assert.ok(row.cost.dollars! > 0, 'the standard reply is priced');
 });
 
 test('A session begun yesterday with a response today counts only today\'s responses; exact period edges [start, end) keep 00:00 and 23:59:59.999 and drop 00:00 next day', async () => {
@@ -736,7 +758,7 @@ test('Pure sessionRows guards against synthetic parent cycles without dropping r
   const view = sessionRows(reading);
   assert.equal(view.rows.length, 2, 'cyclic parents stay at top level rather than disappearing');
   assert.equal(view.total.sessions, 2);
-  assert.deepEqual(view.total.cost.unpricedBy, { noRow: 1, speedOrTier: 0, other: 1 });
+  assert.deepEqual(view.total.cost.unpricedBy, { noRow: 1, speedOrTier: [], other: 1 });
 });
 
 test('An unreadable Codex archive or sibling Claude project folder flags the tool without hiding readable sessions', async () => {
