@@ -1,9 +1,10 @@
 // Pure rows and totals for a period's session reading (sessionday.ts DayReading), for the Sessions page: turns read sessions
 // into ordered session rows (newest first), nests child sessions under their parent (chronological; orphan children stay at
-// top level, once), computes per-model tokens and list-price sums, keeps a root session's tool-reported figure beside its sum
-// without adding it to any total, and computes period, per-tool and per-model totals with each present tool's unread flag
-// beside the rows and the price list's date once.
+// top level, once), computes per-model tokens and list-price sums (the one sum in the codebase), keeps a root session's
+// tool-reported figure beside its sum without adding it to any total, and computes period, per-tool and per-model totals with
+// each present tool's unread flag beside the rows and the price list's date once.
 // Not here: reading session files (sessionday.ts, sessionrequests.ts), pricing requests (rates.ts), IPC, or page wording/DOM.
+import type { UnpricedReason } from './rates.ts';
 import type { Tokens } from './sessionrequests.ts';
 import type { DayReading, Period, PricedRequest, SessionTool } from './sessionday.ts';
 
@@ -11,12 +12,17 @@ import type { DayReading, Period, PricedRequest, SessionTool } from './sessionda
 export interface PricedAs { model: string; as: string }
 export interface PricedProvider { provider: string; from: 'request' | 'tool' }
 /**
+ * Counts of unpriced requests in a CostSum, grouped from rates.ts UnpricedReason as the page will say them:
+ * `noRow` (`not-in-table`), `speedOrTier` (`unsupported-speed`, `unsupported-service-tier`), and `other` (all other reasons).
+ */
+export interface UnpricedBy { noRow: number; speedOrTier: number; other: number }
+/**
  * Sum of list prices for a row, model or total: `dollars` (undefined when no request had a known price, never $0),
- * `unpriced` (requests with no known price; never "N of M", since unread lines make M unknown), `atLeast` (true if any
- * priced request used a lower bound), `pricedAs` (unique wider-rule matches), and `providers` (unique providers used).
+ * `unpriced` and `unpricedBy` (unpriced requests total and by reason; never "N of M", since unread lines make M unknown),
+ * `atLeast` (true if any priced request used a lower bound), `pricedAs` (unique wider-rule matches), and `providers`.
  */
 export interface CostSum {
-  dollars: number | undefined; unpriced: number; atLeast: boolean;
+  dollars: number | undefined; unpriced: number; unpricedBy: UnpricedBy; atLeast: boolean;
   pricedAs: PricedAs[]; providers: PricedProvider[];
 }
 /** One saved model id's tokens and list-price sum, inside a row or across the period. */
@@ -41,10 +47,17 @@ export interface DayRows {
 
 const totalTokens = (t: Tokens) => t.input + t.cacheRead + t.cacheWrite + t.output;
 
+const UNPRICED_BUCKET: Record<UnpricedReason, keyof UnpricedBy> = {
+  'not-in-table': 'noRow',
+  'unsupported-speed': 'speedOrTier', 'unsupported-service-tier': 'speedOrTier',
+  'no-provider': 'other', 'missing-rate': 'other', 'invalid-tokens': 'other', 'invalid-time': 'other', 'invalid-credits': 'other',
+};
+
 /** Sums token counts (`cacheWrite1h` stays inside `cacheWrite`, kept when > 0) and list-price metadata in one pass. */
 function tally(requests: readonly PricedRequest[]): { tokens: Tokens; cost: CostSum } {
   let input = 0, cacheRead = 0, cacheWrite = 0, cacheWrite1h = 0, output = 0;
   let dollars = 0, priced = 0, unpriced = 0, atLeast = false;
+  const unpricedBy: UnpricedBy = { noRow: 0, speedOrTier: 0, other: 0 };
   const asMap = new Map<string, PricedAs>(), provMap = new Map<string, PricedProvider>();
   for (const { request: { model, tokens: t }, price } of requests) {
     input += t.input;
@@ -52,7 +65,11 @@ function tally(requests: readonly PricedRequest[]): { tokens: Tokens; cost: Cost
     cacheWrite += t.cacheWrite;
     cacheWrite1h += t.cacheWrite1h ?? 0;
     output += t.output;
-    if (!price.priced) { unpriced++; continue; }
+    if (!price.priced) {
+      unpriced++;
+      unpricedBy[UNPRICED_BUCKET[price.reason]]++;
+      continue;
+    }
     dollars += price.dollars;
     priced++;
     if (price.basis !== 'list') continue;
@@ -64,7 +81,7 @@ function tally(requests: readonly PricedRequest[]): { tokens: Tokens; cost: Cost
   const providers = [...provMap.values()].sort((a, b) => a.provider.localeCompare(b.provider) || a.from.localeCompare(b.from));
   return {
     tokens: { input, cacheRead, cacheWrite, ...(cacheWrite1h > 0 ? { cacheWrite1h } : {}), output },
-    cost: { dollars: priced > 0 ? dollars : undefined, unpriced, atLeast, pricedAs, providers },
+    cost: { dollars: priced > 0 ? dollars : undefined, unpriced, unpricedBy, atLeast, pricedAs, providers },
   };
 }
 
@@ -94,7 +111,7 @@ function hasAncestor(start: SessionRow, target: SessionRow, byKey: Map<string, S
 export function sessionRows(reading: DayReading): DayRows {
   const allRows: SessionRow[] = [], byTool: ToolTotal[] = [];
   for (const toolReading of reading.tools) {
-    const sessions = toolReading.sessions.filter(s => s.requests.length > 0);
+    const { sessions } = toolReading;
     for (const s of sessions) {
       const first = s.requests.reduce((min, { request }) => Math.min(min, request.at), Infinity);
       const last = s.requests.reduce((max, { request }) => Math.max(max, request.at), -Infinity);

@@ -4,7 +4,7 @@ process.env.TZ = 'America/New_York';
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFile, chmod, mkdir, mkdtemp, readdir, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdir, mkdtemp, readdir, realpath, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { managedTools, presentTools } from '../src/presence.ts';
@@ -296,6 +296,7 @@ test('Exact models, priced-as rule (haiku dated), fast speed priced vs unsupport
   const c1 = view.rows.find(r => r.session === 'c1')!;
   approx(c1.cost.dollars, dOpusBase + dOpusFast + dHaiku, 'c1 dollars');
   assert.equal(c1.cost.unpriced, 1, 'haiku fast has no known price');
+  assert.deepEqual(c1.cost.unpricedBy, { noRow: 0, speedOrTier: 1, other: 0 }, 'fast reply grouped as speedOrTier');
   assert.deepEqual(c1.cost.pricedAs, [{ model: 'claude-haiku-4-5-20251001', as: 'claude-haiku-4-5' }]);
   assert.deepEqual(c1.cost.providers, [{ provider: 'anthropic', from: 'tool' }]);
   assert.deepEqual(c1.tokens, { input: 45_000, cacheRead: 0, cacheWrite: 0, output: 4_500 }, 'unpriced fast reply tokens still kept');
@@ -303,6 +304,7 @@ test('Exact models, priced-as rule (haiku dated), fast speed priced vs unsupport
   const x1 = view.rows.find(r => r.session === 'x1')!;
   approx(x1.cost.dollars, dAstra + dSol1, 'x1 dollars');
   assert.equal(x1.cost.unpriced, 1, 'codex-auto-review has no known price');
+  assert.deepEqual(x1.cost.unpricedBy, { noRow: 1, speedOrTier: 0, other: 0 }, 'unlisted model grouped as noRow');
   assert.deepEqual(x1.cost.pricedAs, []);
   assert.deepEqual(x1.cost.providers, [{ provider: 'openai', from: 'request' }]);
   assert.deepEqual(x1.tokens, { input: 23_000, cacheRead: 10_000, cacheWrite: 0, output: 2_400 });
@@ -313,6 +315,7 @@ test('Exact models, priced-as rule (haiku dated), fast speed priced vs unsupport
   // Day totals & byModel totals.
   approx(view.total.cost.dollars, dOpusBase + dOpusFast + dHaiku + dAstra + dSol1 + dSol2, 'day total dollars');
   assert.equal(view.total.cost.unpriced, 2, 'day total leaves out haiku fast and codex-auto-review');
+  assert.deepEqual(view.total.cost.unpricedBy, { noRow: 1, speedOrTier: 1, other: 0 });
 
   const byModel = new Map(view.byModel.map(m => [m.model, m]));
   approx(byModel.get('claude-opus-5-5')!.cost.dollars, dOpusBase + dOpusFast);
@@ -710,13 +713,13 @@ test('Concurrent reads for the same home and period join one in-flight read; ano
   assert.equal(sessionRows(second).total.tokens.input, 3_000);
 });
 
-test('Pure sessionRows guards against synthetic parent cycles without dropping rows', () => {
-  const req = (session: string, parent: string, at: number) => ({
+test('Pure sessionRows guards against synthetic parent cycles without dropping rows and groups remaining unpriced reasons under other', () => {
+  const req = (session: string, parent: string, at: number, reason: 'not-in-table' | 'missing-rate') => ({
     request: {
       tool: 'claude-cli' as const, session, parent, request: `m-${session}`, at,
       model: 'claude-fable-5', tokens: { input: 100, cacheRead: 0, cacheWrite: 0, output: 10 },
     },
-    price: { priced: false as const, reason: 'not-in-table' as const, detail: 'test' },
+    price: { priced: false as const, reason, detail: 'test' },
   });
   const reading: DayReading = {
     period: TODAY,
@@ -725,12 +728,123 @@ test('Pure sessionRows guards against synthetic parent cycles without dropping r
       tool: 'claude-cli',
       unread: false,
       sessions: [
-        { tool: 'claude-cli', session: 'a', parent: 'b', requests: [req('a', 'b', TODAY.start + 1_000)] },
-        { tool: 'claude-cli', session: 'b', parent: 'a', requests: [req('b', 'a', TODAY.start + 2_000)] },
+        { tool: 'claude-cli', session: 'a', parent: 'b', requests: [req('a', 'b', TODAY.start + 1_000, 'not-in-table')] },
+        { tool: 'claude-cli', session: 'b', parent: 'a', requests: [req('b', 'a', TODAY.start + 2_000, 'missing-rate')] },
       ],
     }],
   };
   const view = sessionRows(reading);
   assert.equal(view.rows.length, 2, 'cyclic parents stay at top level rather than disappearing');
   assert.equal(view.total.sessions, 2);
+  assert.deepEqual(view.total.cost.unpricedBy, { noRow: 1, speedOrTier: 0, other: 1 });
+});
+
+test('An unreadable Codex archive or sibling Claude project folder flags the tool without hiding readable sessions', async () => {
+  const home = await newHome();
+  const t = TODAY.start + 10 * HOUR;
+  await put(join(home, '.claude/projects/readable/good.jsonl'), [
+    claudeReply('m1', t, claudeUsage(5_000, 0, 0, 500), 'claude-fable-5', '/work/readable', 'good'),
+  ], t);
+  const blockedProject = join(home, '.claude/projects/blocked');
+  await mkdir(blockedProject, { recursive: true });
+  await chmod(blockedProject, 0o000);
+  lockedPaths.push(blockedProject);
+
+  await put(join(home, '.codex/sessions/2026/11/24/rollout-good.jsonl'), [
+    codexMeta('good', t), codexTurn('gpt-6.2-sol', t), codexUsage('r1', t, 4_000, 0, 500),
+  ], t);
+  const blockedArchive = join(home, '.codex/archived_sessions');
+  await mkdir(blockedArchive, { recursive: true });
+  await chmod(blockedArchive, 0o000);
+  lockedPaths.push(blockedArchive);
+
+  const view = sessionRows(await readSessionPeriod({ home }, TODAY, ['claude-cli', 'codex-cli']));
+  assert.deepEqual(view.rows.map(r => `${r.tool}/${r.session}`).sort(), ['claude-cli/good', 'codex-cli/good']);
+  assert.deepEqual(view.byTool.map(each => [each.tool, each.sessions, each.unread]), [
+    ['claude-cli', 1, true],
+    ['codex-cli', 1, true],
+  ]);
+});
+
+test('Restoring a stale partial copy with a newer mtime keeps the fuller reply and the largest tool figure across files', async () => {
+  const home = await newHome();
+  const t = TODAY.start + 10 * HOUR;
+  // Earlier mtime holds the completed reply (800 output) and the larger tool figure (0.42).
+  await put(join(home, '.claude/projects/orig/resume.jsonl'), [
+    claudeReply('msg', t, claudeUsage(5_000, 0, 0, 800), 'claude-fable-5', '/work/orig', 'resume'),
+    claudeCost(0.42, 'resume'),
+  ], t + 1_000);
+  // Later mtime holds an early partial copy (2 output) with no cost-state.
+  await put(join(home, '.claude/projects/backup/resume.jsonl'), [
+    claudeReply('msg', t, claudeUsage(5_000, 0, 0, 2), 'claude-fable-5', '/work/orig', 'resume'),
+  ], t + 2_000);
+  // Another session whose later-mtime copy holds a smaller earlier running total (0.15 < 0.55).
+  await put(join(home, '.claude/projects/orig/smaller.jsonl'), [
+    claudeReply('msg2', t, claudeUsage(5_000, 0, 0, 400), 'claude-fable-5', '/work/orig', 'smaller'),
+    claudeCost(0.55, 'smaller'),
+  ], t + 1_000);
+  await put(join(home, '.claude/projects/backup/smaller.jsonl'), [
+    claudeReply('msg2', t, claudeUsage(5_000, 0, 0, 10), 'claude-fable-5', '/work/orig', 'smaller'),
+    claudeCost(0.15, 'smaller'),
+  ], t + 2_000);
+
+  const view = sessionRows(await readSessionPeriod({ home }, TODAY, ['claude-cli']));
+  const resume = view.rows.find(r => r.session === 'resume')!;
+  const smaller = view.rows.find(r => r.session === 'smaller')!;
+  assert.equal(resume.tokens.output, 800, 'fuller reply beats stale partial copy on timestamp tie');
+  assert.equal(resume.reported, 0.42, 'tool figure survives stale copy lacking cost-state');
+  assert.equal(smaller.tokens.output, 400);
+  assert.equal(smaller.reported, 0.55, 'largest running total wins across files');
+});
+
+test('An older copy of the same root session, an unread line in the tree, or a listed file missing on open blocks the tool figure and flags the tool where unread', async () => {
+  const home = await newHome();
+  const t = TODAY.start + 14 * HOUR;
+
+  // (a) Root session also has an unopened older copy in another project folder: blocks reported, not unread.
+  await put(join(home, '.claude/projects/new-proj/split-root.jsonl'), [
+    claudeReply('sr1', t, claudeUsage(5_000, 0, 0, 500), 'claude-fable-5', '/work/app', 'split-root'),
+    claudeCost(0.42, 'split-root'),
+  ], t);
+  const oldCopy = join(home, '.claude/projects/old-proj/split-root.jsonl');
+  await put(oldCopy, [claudeReply('sr0', TODAY.start - HOUR, claudeUsage(5_000, 0, 0, 500), 'claude-fable-5', '/work/app', 'split-root')], TODAY.start - 1);
+  await chmod(oldCopy, 0o000);
+  lockedPaths.push(oldCopy);
+
+  const oldRootView = sessionRows(await readSessionPeriod({ home }, TODAY, ['claude-cli']));
+  assert.equal(oldRootView.rows[0]!.reported, undefined, 'unopened older copy of same root session blocks tool figure');
+  assert.equal(oldRootView.byTool[0]!.unread, false, 'older copy was never opened');
+
+  // (b) Parent with unread JSON line in its own file: blocks reported and flags unread.
+  const home2 = await newHome();
+  await putText(join(home2, '.claude/projects/p/dirty.jsonl'), [
+    lines([claudeReply('d1', t, claudeUsage(5_000, 0, 0, 500), 'claude-fable-5', '/work/app', 'dirty'), claudeCost(0.61, 'dirty')]),
+    '{broken\n',
+  ].join(''), t);
+  const dirtyView = sessionRows(await readSessionPeriod({ home: home2 }, TODAY, ['claude-cli']));
+  assert.equal(dirtyView.rows[0]!.reported, undefined, 'tree with unread line carries no tool figure');
+  assert.equal(dirtyView.byTool[0]!.unread, true);
+
+  // (c) Listed file missing when opened (ENOENT via broken symlink) or unreadable on read (EACCES): flags unread and blocks parent figure.
+  const home3 = await newHome();
+  await put(join(home3, '.claude/projects/p/vanish-parent.jsonl'), [
+    claudeReply('vp1', t, claudeUsage(5_000, 0, 0, 500), 'claude-fable-5', '/work/app', 'vanish-parent'),
+    claudeCost(0.73, 'vanish-parent'),
+  ], t);
+  await mkdir(join(home3, '.claude/projects/p/vanish-parent/subagents'), { recursive: true });
+  await symlink(join(home3, 'gone-target.jsonl'), join(home3, '.claude/projects/p/vanish-parent/subagents/agent-gone.jsonl'));
+  await put(join(home3, '.claude/projects/p/locked-parent.jsonl'), [
+    claudeReply('lp1', t, claudeUsage(5_000, 0, 0, 500), 'claude-fable-5', '/work/app', 'locked-parent'),
+    claudeCost(0.84, 'locked-parent'),
+  ], t);
+  const lockedChild = join(home3, '.claude/projects/p/locked-parent/subagents/agent-locked.jsonl');
+  await put(lockedChild, [claudeReply('lc1', t, claudeUsage(1_000, 0, 0, 100), 'claude-opus-5-5', '/work/app', 'agent-locked')], t);
+  await chmod(lockedChild, 0o000);
+  lockedPaths.push(lockedChild);
+  await mkdir(join(home3, '.codex/sessions/2026/11/24'), { recursive: true });
+  await symlink(join(home3, 'moved-rollout.jsonl'), join(home3, '.codex/sessions/2026/11/24/rollout-moved.jsonl'));
+  const goneView = sessionRows(await readSessionPeriod({ home: home3 }, TODAY, ['claude-cli', 'codex-cli']));
+  assert.equal(goneView.rows.find(r => r.session === 'vanish-parent')!.reported, undefined, 'missing child file blocks parent figure');
+  assert.equal(goneView.rows.find(r => r.session === 'locked-parent')!.reported, undefined, 'unreadable child file blocks parent figure');
+  assert.deepEqual(goneView.byTool.map(each => [each.tool, each.unread]), [['claude-cli', true], ['codex-cli', true]]);
 });

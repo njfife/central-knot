@@ -4,7 +4,7 @@
 // (the modern form) and then an `event_msg` `token_count` (the older counter, a running total), or in older files the count alone.
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFile, mkdir, mkdtemp, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdir, mkdtemp, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { codexRollouts, readCodexRollout } from '../src/sessionrequests.ts';
@@ -266,7 +266,7 @@ test('A running total that goes down inside the file (the counter began again) g
 
 test('A parent and a child rollout are two sessions, the child naming its parent; the same rollout archived is the same session', async () => {
   const home = await newHome(), day = join(home, '.codex/sessions/2026/11/24');
-  assert.equal(await codexRollouts({ home }), undefined, 'no rollout folder: no files');
+  assert.deepEqual(await codexRollouts({ home }), { files: [], unread: false }, 'no rollout folder: no files');
   const child = '01a20e2c-cf1b-7f43-9270-20da1042ac75';
   await put(join(day, `rollout-2026-11-24T15-29-03-${THREAD}.jsonl`), [
     meta(), turn('gpt-6-astra', '2026-11-24T15:29:03.502Z'), ...respond(runningTotal(), 'resp_1', '2026-11-24T15:29:04.762Z', counts(301, 81, 41)),
@@ -274,7 +274,9 @@ test('A parent and a child rollout are two sessions, the child naming its parent
   await put(join(day, `rollout-2026-11-24T15-29-07-${child}.jsonl`), [
     childMeta(child, THREAD), turn('gpt-6-astra-mini', '2026-11-24T15:29:07.380Z'), ...respond(runningTotal(), 'resp_5', '2026-11-24T15:29:08.568Z', counts(305, 85, 45)),
   ]);
-  const files = (await codexRollouts({ home }))!.sort();
+  const listed = await codexRollouts({ home });
+  assert.equal(listed.unread, false);
+  const files = listed.files.sort();
   const reads = await Promise.all(files.map(file => readCodexRollout(file)));
   assert.deepEqual(reads.flatMap(read => read.requests).map(each => [each.request, each.session, each.parent, each.model]), [
     ['resp_1', THREAD, undefined, 'gpt-6-astra'], ['resp_5', child, THREAD, 'gpt-6-astra-mini'],
@@ -282,9 +284,18 @@ test('A parent and a child rollout are two sessions, the child naming its parent
   const archived = join(home, '.codex/archived_sessions', `rollout-2026-11-24T15-29-07-${child}.jsonl`);
   await mkdir(dirname(archived), { recursive: true });
   await rename(files[1], archived);
-  assert.deepEqual(await codexRollouts({ home }), [files[0], archived], 'an archived rollout is listed from its new folder');
+  assert.deepEqual(await codexRollouts({ home }), { files: [files[0], archived], unread: false }, 'an archived rollout is listed from its new folder');
   const moved = await readCodexRollout(archived);
   assert.deepEqual(moved.requests.map(each => [each.request, each.session, each.parent]), [['resp_5', child, THREAD]], 'the same session and request ids where it is now');
+
+  // An unreadable archive root flags unread without hiding live rollouts.
+  const archiveDir = dirname(archived);
+  await chmod(archiveDir, 0o000);
+  try {
+    assert.deepEqual(await codexRollouts({ home }), { files: [files[0]], unread: true });
+  } finally {
+    await chmod(archiveDir, 0o700);
+  }
 });
 
 test('A line that is not JSON, a response missing a count, and a response before any model are passed over and counted as unread; a count of limits alone is nothing', async () => {
