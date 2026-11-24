@@ -1,7 +1,7 @@
 // How the app names this computer, its home, where its icon sits and the shortcut key, decided here once for the main process
 // (from process.platform) and the page (from its user agent) alike; whether this platform writes a real home (writesRealHome);
-// and the one rule for turning a native path into the `/` form shown to a person or compared as text (displayPath, shownFromHome).
-// What Start at sign-in can do here is signin.ts's.
+// and the one rule for what is shown or compared from a native path (displayPath, shownFromHome; skillswitch.ts forwardSlashes
+// is the separate separator-blind rule for what tools' own settings hold). What Start at sign-in can do here is signin.ts's.
 import type { HomeMode } from './types.ts';
 
 /** This computer's names, as sentences use them. */
@@ -56,8 +56,8 @@ export const displayPath = (path: string, platform: string = hostPlatform()): st
   (platform === 'win32' ? path.replaceAll('\\', '/') : path);
 
 /**
- * A path shortened against `home` as the page (app.ts shownPath) and sentences (skills.ts pathWords) show it: inside the
- * real home from `~`, inside another home from `…`, with `/` separators. Outside `home` it still turns `\` to `/` on Windows.
+ * A path shortened against `home` as the page (app.ts shownPath) shows it: the real home or a path inside it from `~`,
+ * another home or a path inside it from `…`, with `/` separators. Outside `home` it still turns `\` to `/` on Windows.
  */
 export function shownFromHome(path: string, home: { home: string; mode: HomeMode } | undefined, platform: string = hostPlatform()): string {
   const slash = platform === 'win32' ? '\\' : '/';

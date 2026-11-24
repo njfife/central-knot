@@ -14,7 +14,7 @@ import { readPluginItems } from '../src/pluginitems.ts';
 import { libraryDocs } from '../src/searchdocs.ts';
 import { serversView } from '../src/servers.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
-import { skillsView } from '../src/skills.ts';
+import { pathWords, skillsView } from '../src/skills.ts';
 import { isDisabled, readSwitchFile } from '../src/skillswitch.ts';
 import type { HomeView } from '../src/types.ts';
 
@@ -36,7 +36,7 @@ test('displayPath turns native backslashes into / on Windows and keeps its argum
   }
 });
 
-test('shownFromHome shortens paths under home with the platform separator and uses / on Windows (app.ts shownPath, skills.ts pathWords)', () => {
+test('shownFromHome shortens the home itself and paths under it with the platform separator and uses / on Windows (app.ts shownPath)', () => {
   assert.equal(shownFromHome('C:\\Users\\x\\.agents\\skills', { home: 'C:\\Users\\x', mode: 'actual' }, 'win32'), '~/.agents/skills');
   assert.equal(shownFromHome('C:\\Users\\x\\.central-knot\\history.json', { home: 'C:\\Users\\x', mode: 'actual' }, 'win32'), '~/.central-knot/history.json');
   assert.equal(shownFromHome('C:\\Users\\x', { home: 'C:\\Users\\x', mode: 'actual' }, 'win32'), '~');
@@ -47,7 +47,7 @@ test('shownFromHome shortens paths under home with the platform separator and us
   assert.equal(shownFromHome('D:\\team\\skills\\notes', { home: 'C:\\Users\\x', mode: 'actual' }, 'win32'), 'D:/team/skills/notes');
   assert.equal(shownFromHome('C:\\Users\\x\\notes', undefined, 'win32'), 'C:/Users/x/notes');
 
-  // Recorded from running next (7915120) on Linux: POSIX paths keep any \ in a file name unchanged.
+  // Recorded from running next (7915120) app.ts shownPath on Linux: POSIX paths keep any \ in a file name unchanged.
   for (const platform of ['linux', 'darwin'] as const) {
     assert.equal(shownFromHome('/home/u/dir/a\\b.md', { home: '/home/u', mode: 'actual' }, platform), '~/dir/a\\b.md', platform);
     assert.equal(shownFromHome('/home/u/dir/a\\b.md', { home: '/home/u', mode: 'custom' }, platform), '…/dir/a\\b.md', platform);
@@ -55,6 +55,23 @@ test('shownFromHome shortens paths under home with the platform separator and us
     assert.equal(shownFromHome('/other/a\\b.md', { home: '/home/u', mode: 'actual' }, platform), '/other/a\\b.md', platform);
     assert.equal(shownFromHome('/home/u2/a\\b.md', { home: '/home/u', mode: 'actual' }, platform), '/home/u2/a\\b.md', platform);
     assert.equal(shownFromHome('/other/a\\b.md', undefined, platform), '/other/a\\b.md', platform);
+  }
+});
+
+test('skills.ts pathWords shortens only paths under home with the platform separator and keeps the home itself as its full path', () => {
+  assert.equal(pathWords({ home: 'C:\\Users\\x', mode: 'actual' }, 'C:\\Users\\x\\.agents\\skills', 'win32'), '~/.agents/skills');
+  assert.equal(pathWords({ home: 'C:\\Temp\\home', mode: 'custom' }, 'C:\\Temp\\home\\.claude\\skills\\notes', 'win32'), '…/.claude/skills/notes');
+  assert.equal(pathWords({ home: 'C:\\Users\\x', mode: 'actual' }, 'C:\\Users\\x', 'win32'), 'C:/Users/x');
+  assert.equal(pathWords({ home: 'C:\\Users\\x', mode: 'actual' }, 'C:\\Users\\x2\\notes', 'win32'), 'C:/Users/x2/notes');
+  assert.equal(pathWords({ home: 'C:\\Users\\x', mode: 'actual' }, 'D:\\team\\skills\\notes', 'win32'), 'D:/team/skills/notes');
+
+  // Recorded from running next (d4ac5835) skills.ts pathWords on Linux: the home itself is not shortened to ~ or ….
+  for (const platform of ['linux', 'darwin'] as const) {
+    assert.equal(pathWords({ home: '/home/u', mode: 'actual' }, '/home/u', platform), '/home/u', platform);
+    assert.equal(pathWords({ home: '/home/u', mode: 'custom' }, '/home/u', platform), '/home/u', platform);
+    assert.equal(pathWords({ home: '/home/u', mode: 'actual' }, '/home/u/dir/a\\b.md', platform), '~/dir/a\\b.md', platform);
+    assert.equal(pathWords({ home: '/home/u', mode: 'custom' }, '/home/u/dir/a\\b.md', platform), '…/dir/a\\b.md', platform);
+    assert.equal(pathWords({ home: '/home/u', mode: 'actual' }, '/other/a\\b.md', platform), '/other/a\\b.md', platform);
   }
 });
 
@@ -80,6 +97,24 @@ test(
         };
         const view = await skillsView(context, ['claude-cli']);
         assert.equal(view.items.find(item => item.key === 'notes')?.anotherWay?.['claude-cli'], expected, `skills pathWords (${mode})`);
+      }
+      // 1b. skills.ts pathWords on the home itself (link resolving to home): next leaves the full home path (unlike app.ts shownPath).
+      for (const mode of ['actual', 'custom'] as const) {
+        const home = join(base, `skills-root-${mode}`);
+        await mkdir(join(home, '.claude/skills'), { recursive: true });
+        await put(join(home, '.copilot/skills/notes/SKILL.md'), '---\nname: notes\ndescription: D.\n---\nBody.\n');
+        await symlink('../..', join(home, '.claude/skills/notes'));
+        const context: ShareContext = {
+          home, mode,
+          read: () => Promise.all((['claude-cli', 'copilot-cli'] as const).map(harness => discover({ home, mode, harness }))),
+          build: 'test', settingsPath: join(base, `settings-root-${mode}.json`), realHome: home, settleMs: 0,
+        };
+        const view = await skillsView(context, ['claude-cli', 'copilot-cli']);
+        assert.equal(
+          view.items.find(item => item.key === 'notes')?.anotherWay?.['claude-cli'],
+          `Claude Code has it through a link in its skills folder (to ${home}), which is not Central Knot’s copy.`,
+          `skills pathWords on home itself (${mode})`,
+        );
       }
 
       // 2. atlink.ts: skillsAt, agentsAt and pluginItems.
