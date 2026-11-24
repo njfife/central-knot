@@ -1,9 +1,11 @@
 // The page's element builder (h) and the small controls every page draws with: buttons, switches (toggle), checkboxes, icons,
-// info marks and their top-layer detail cards (infoMark, cardPlace, closeInfoCard, syncInfoCard), empty states, section headings,
-// shortened paths and file blocks, the layout steps run after a render (afterLayout); a press and its release (the pointer's, or
-// Space's on a button) counting as one click when a redraw replaced the control between them (keepClicksAcrossRedraws), and whether
-// a press on a text was a click or a drag, which every click on a text asks (pressWasDrag); and what a redraw keeps of what is
-// selected (keepSelection). No words of the app's own: what a control says is its caller's, and the styles are style.css's.
+// info marks and their top-layer detail cards (infoMark, infoCardId, cardPlace, closeInfoCard, syncInfoCard), empty states,
+// section headings, shortened paths and file blocks, the layout steps run after a render (afterLayout); a press and its release
+// (the pointer's, or Space's on a button) counting as one click when a redraw replaced the control between them
+// (keepClicksAcrossRedraws), and whether a press on a text was a click or a drag, which every click on a text asks
+// (pressWasDrag); and what a redraw keeps of what is selected (keepSelection). Almost no words of the app's own (only small
+// control labels like "Dismiss", "About <label>", and rereadBand's status lines): what a control says is its caller's, and the
+// styles are style.css's.
 import { icons, type IconName } from './icons.ts';
 import { groupBy } from './model.ts';
 
@@ -363,34 +365,52 @@ export function fileBlocks<Copy extends { text: string }>(id: string, label: str
   });
 }
 
-const CARD_GAP = 4, CARD_EDGE = 8, INFO_OPEN_MS = 300, INFO_CLOSE_MS = 200;
+const CARD_GAP = 4;
+const CARD_EDGE = 8;
+const INFO_OPEN_MS = 300;
+const INFO_CLOSE_MS = 200;
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(value, max));
+/** The id of the detail card paired with an info mark of `id` (use for `aria-describedby` on related controls). */
+export const infoCardId = (id: string) => `${id}-card`;
 /**
- * Places an info card 4 px below its mark, or 4 px above when it would reach within 8 px of the window's foot,
- * sliding sideways to stay 8 px inside the window's sides.
+ * Places an info card 4 px below `block` (defaults to `mark`), or 4 px above when there is no room below within 8 px of
+ * the window's foot; when neither side fits cleanly, clamps on whichever side of `block` has more room. Slides sideways
+ * from `mark.left` to stay 8 px inside the window's sides.
  */
-export function cardPlace(mark: { left: number; top: number; right: number; bottom: number },
-  card: { width: number; height: number }, view: { width: number; height: number }): { left: number; top: number } {
+export function cardPlace(mark: { left: number; top: number; bottom: number }, card: { width: number; height: number },
+  view: { width: number; height: number }, block: { top: number; bottom: number } = mark): { left: number; top: number } {
   const maxLeft = Math.max(CARD_EDGE, Math.floor(view.width - CARD_EDGE - card.width));
   const maxTop = Math.max(CARD_EDGE, Math.floor(view.height - CARD_EDGE - card.height));
-  const below = mark.bottom + CARD_GAP, above = mark.top - CARD_GAP - card.height;
-  const preferred = below <= maxTop ? below : above >= CARD_EDGE ? above : view.height - mark.bottom >= mark.top ? below : above;
+  const below = block.bottom + CARD_GAP;
+  const above = block.top - CARD_GAP - card.height;
+  let preferred: number;
+  if (below <= maxTop) preferred = below;
+  else if (above >= CARD_EDGE) preferred = above;
+  else preferred = view.height - block.bottom >= block.top ? below : above;
   return { left: Math.round(clamp(mark.left, CARD_EDGE, maxLeft)), top: Math.round(clamp(preferred, CARD_EDGE, maxTop)) };
 }
 /** The one open info card, by its mark's id, and whether a click pinned it. */
 let openCard: { id: string; pinned: boolean } | undefined;
 /** Hover open/close timers, kept by mark id so a redraw never strands one. */
 const infoTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const clearInfoTimer = (id: string) => { clearTimeout(infoTimers.get(id)); infoTimers.delete(id); };
+function clearInfoTimer(id?: string): void {
+  if (id === undefined) {
+    for (const handle of infoTimers.values()) clearTimeout(handle);
+    infoTimers.clear();
+    return;
+  }
+  clearTimeout(infoTimers.get(id));
+  infoTimers.delete(id);
+}
 /** Whether `mark` still lies inside every clipping ancestor's box and the window. */
 function markInView(mark: HTMLElement): boolean {
   const rect = mark.getBoundingClientRect();
-  const outside = (box: { left: number; top: number; right: number; bottom: number }, x = true, y = true) =>
-    (y && (rect.bottom <= box.top || rect.top >= box.bottom)) || (x && (rect.right <= box.left || rect.left >= box.right));
+  const outside = (box: { left: number; top: number; right: number; bottom: number }, clipX = true, clipY = true) =>
+    (clipY && (rect.bottom <= box.top || rect.top >= box.bottom)) || (clipX && (rect.right <= box.left || rect.left >= box.right));
   if ((!rect.width && !rect.height) || outside({ left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight })) return false;
   for (let up = mark.parentElement; up && up !== document.body; up = up.parentElement) {
-    const { overflowX: x, overflowY: y } = getComputedStyle(up);
-    if ((x !== 'visible' || y !== 'visible') && outside(up.getBoundingClientRect(), x !== 'visible', y !== 'visible')) return false;
+    const { overflowX, overflowY } = getComputedStyle(up);
+    if (outside(up.getBoundingClientRect(), overflowX !== 'visible', overflowY !== 'visible')) return false;
   }
   return true;
 }
@@ -400,37 +420,51 @@ export function closeInfoCard(): boolean {
   const { id } = openCard;
   openCard = undefined;
   clearInfoTimer(id);
-  const card = document.getElementById(`${id}-card`);
+  const card = document.getElementById(infoCardId(id));
   if (card?.matches(':popover-open')) card.hidePopover();
   return true;
 }
-/** Reopens and places the active info card; clears it when its mark is gone or (on scroll/resize) out of its box's view. */
+/** Reopens and places the active info card (renderer.ts renderWindow, scroll, resize); clears it when gone or out of view. */
 export function syncInfoCard(checkView = false): void {
   if (!openCard) return;
-  const mark = document.getElementById(openCard.id), card = document.getElementById(`${openCard.id}-card`);
+  const mark = document.getElementById(openCard.id);
+  const card = document.getElementById(infoCardId(openCard.id));
   if (!mark || !card || (checkView && !markInView(mark))) { closeInfoCard(); return; }
   if (!card.matches(':popover-open')) card.showPopover();
+  // Reset to 0 before measuring so a card placed near the right edge measures its natural width after a narrower resize.
   card.style.left = card.style.top = '0px';
-  const { left, top } = cardPlace(mark.getBoundingClientRect(), card.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight });
+  const block = (mark.closest('[data-info-block]') ?? mark).getBoundingClientRect();
+  const { left, top } = cardPlace(
+    mark.getBoundingClientRect(), card.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight }, block,
+  );
   Object.assign(card.style, { left: `${left}px`, top: `${top}px` });
 }
-afterLayout(() => syncInfoCard());
 function openInfoCard(id: string, pinned: boolean): void {
   clearInfoTimer(id);
+  if (!document.getElementById(id) || !document.getElementById(infoCardId(id))) return;
+  clearInfoTimer();
   if (openCard && openCard.id !== id) closeInfoCard();
-  openCard = { id, pinned: pinned || (openCard?.id === id && openCard.pinned) };
+  openCard = { id, pinned: pinned || !!openCard?.pinned };
   syncInfoCard();
 }
 const hoverInfo = (id: string, enter: boolean) => (event: PointerEvent) => {
   if (event.pointerType !== 'mouse') return;
   clearInfoTimer(id);
-  if (enter && openCard?.id !== id) infoTimers.set(id, setTimeout(() => openInfoCard(id, false), INFO_OPEN_MS));
-  else if (!enter && openCard?.id === id && !openCard.pinned) infoTimers.set(id, setTimeout(() => { if (openCard?.id === id && !openCard.pinned) closeInfoCard(); }, INFO_CLOSE_MS));
+  if (enter) {
+    if (openCard?.id !== id) infoTimers.set(id, setTimeout(() => openInfoCard(id, false), INFO_OPEN_MS));
+  } else if (openCard?.id === id && !openCard.pinned) {
+    infoTimers.set(id, setTimeout(() => {
+      if (openCard?.id === id && !openCard.pinned) closeInfoCard();
+    }, INFO_CLOSE_MS));
+  }
 };
+// Guarded so Node unit tests can import pure cardPlace from this module without a DOM.
 if (typeof document !== 'undefined') {
+  // Capture phase so clicks on controls that stop propagation (such as toggle) still close an open card.
   document.addEventListener('click', event => {
     if (!openCard) return;
-    const mark = document.getElementById(openCard.id), card = document.getElementById(`${openCard.id}-card`);
+    const mark = document.getElementById(openCard.id);
+    const card = document.getElementById(infoCardId(openCard.id));
     const target = event.target as Node | null;
     if (!target || (!mark?.contains(target) && !card?.contains(target))) closeInfoCard();
   }, true);
@@ -438,19 +472,37 @@ if (typeof document !== 'undefined') {
   window.addEventListener('resize', () => syncInfoCard(true));
 }
 /**
- * A small `ⓘ` button with a top-layer detail card beside it (≤2 sentences, text only). Never put anything a person
- * must know before a click that removes, overwrites or runs something, or a fault, only in a card. Native `title` from
- * now only names an icon, a mark, a "—", a label cut short, or a command's hint.
+ * A small circled-`?` button (`icon('circle-help', 14)`) with a top-layer detail card beside it (text only, ≤2 sentences).
+ * - `id` must be unique on the page and stable across redraws (redraws reopen the card and keep focus by it).
+ * - The card's id is `infoCardId(id)` (`<id>-card`); use it for `aria-describedby` on related controls too.
+ * - Do not place the mark inside a `<button>` or `<label>`.
+ * - Opens clear of the nearest ancestor marked `data-info-block` (below its last line, or above its first when short of room),
+ *   falling back to the mark itself; aligns sideways from the mark. Escape is handled first in renderer.ts.
+ * - Never put anything a person must know before a click that removes, overwrites or runs something, or a fault, only in a card.
+ *   New native `title` attributes only name an icon, a mark, a "—", a label cut short, or a command's hint (older disabled
+ *   reasons in whyOff/lockAttrs and checkbox's help still use `title`).
  */
 export function infoMark(id: string, label: string, text: string): HTMLElement {
   const enter = hoverInfo(id, true), leave = hoverInfo(id, false);
   const mark = h('button.info-mark', {
-    type: 'button', id, 'aria-label': `About ${label}`, 'aria-describedby': `${id}-card`,
+    type: 'button', id, 'aria-label': `About ${label}`, 'aria-describedby': infoCardId(id),
     onpointerenter: enter, onpointerleave: leave,
-    onfocus: (event: FocusEvent) => { if (event.relatedTarget) openInfoCard(id, false); },
-    onblur: () => { if (mark.isConnected && openCard?.id === id && !openCard.pinned) closeInfoCard(); },
-    onclick: (event: MouseEvent) => { event.stopPropagation(); if (openCard?.id === id && openCard.pinned) closeInfoCard(); else openInfoCard(id, true); },
-  }, icon('info', 14));
-  const card = h('span.info-card', { id: `${id}-card`, role: 'tooltip', popover: 'manual', onpointerenter: enter, onpointerleave: leave }, text);
+    onfocus: (event: FocusEvent) => {
+      // Focus restored by app.ts keepingFocus after a redraw has no relatedTarget, so Escape's close stays closed.
+      if (event.relatedTarget) openInfoCard(id, false);
+    },
+    onblur: () => {
+      // A redraw removes the mark before renderer.ts reopens its card; ignore blur from a detached mark.
+      if (mark.isConnected && openCard?.id === id && !openCard.pinned) closeInfoCard();
+    },
+    onclick: (event: MouseEvent) => {
+      // Stop clicks on the mark from triggering an ancestor row's own click handler.
+      event.stopPropagation();
+      clearInfoTimer();
+      if (openCard?.id === id && openCard.pinned) closeInfoCard();
+      else openInfoCard(id, true);
+    },
+  }, icon('circle-help', 14));
+  const card = h('span.info-card', { id: infoCardId(id), role: 'tooltip', popover: 'manual', onpointerenter: enter, onpointerleave: leave }, text);
   return h('span.info-wrap', {}, mark, card);
 }

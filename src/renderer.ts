@@ -339,7 +339,7 @@ function renderWindow() {
     if (node && fieldText(node) === text) Object.assign(node, { scrollTop: top, scrollLeft: left });
   }
   putBack();
-  syncInfoCard();
+  syncInfoCard(true);
   if (state.home) document.body.dataset.ready = 'true';
 }
 

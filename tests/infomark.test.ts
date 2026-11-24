@@ -43,7 +43,16 @@ test('a mark at the bottom-right corner flips above and slides inside the right 
   assert.ok(place.top >= 8 && place.top + CARD.height <= SMALLEST.height - 8);
 });
 
-test('when neither below nor above fits cleanly in a very short window, the card clamps inside it', () => {
-  const place = cardPlace(markAt(100, 40), { width: 200, height: 60 }, { width: 400, height: 90 });
-  assert.ok(place.top >= 8 && place.top + 60 <= 90 - 8);
+test('when neither below nor above fits cleanly in a very short window, the card clamps on the roomier side', () => {
+  // Room below (90 - 30 = 60) > room above (10): clamps below to maxTop = 90 - 8 - 60 = 22.
+  assert.deepEqual(cardPlace(markAt(100, 10), { width: 200, height: 60 }, { width: 400, height: 90 }), { left: 100, top: 22 });
+  // Room above (60) > room below (90 - 80 = 10): clamps above to CARD_EDGE = 8.
+  assert.deepEqual(cardPlace(markAt(100, 60), { width: 200, height: 60 }, { width: 400, height: 90 }), { left: 100, top: 8 });
+});
+
+test('clears a taller block of text its mark heads: 4 px below the block, or 4 px above when short of room', () => {
+  // Fault line beneath a label: card clears the block's last line and stays aligned to the mark's left.
+  assert.deepEqual(cardPlace(markAt(180, 120), CARD, SMALLEST, { top: 120, bottom: 156 }), { left: 180, top: 160 });
+  // Near the foot, no room below the block: flips 4 px above the block's first line.
+  assert.deepEqual(cardPlace(markAt(180, 452), CARD, SMALLEST, { top: 452, bottom: 488 }), { left: 180, top: 384 });
 });

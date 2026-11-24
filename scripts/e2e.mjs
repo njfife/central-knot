@@ -1610,9 +1610,10 @@ async function appImageSignIn(a, savedSettings) {
   const exec = path => readNow(path).split('\n').find(line => line.startsWith('Exec='));
   const state = () => a.run(`(({ disabled, ariaChecked }) => [ariaChecked, disabled])(document.querySelector('#start-at-sign-in'))`);
   const firstOpen = [await state(), exec(autostart), exec(launcher), existsSync(icon) && readFileSync(icon).equals(readFileSync(join(root, 'assets/icon.png')))];
+  const signInCardWords = `Opens hidden in ${process.platform === 'darwin' ? 'the menu bar' : 'the system tray'} at sign-in, so sync keeps running.`;
   same('when Start at sign-in can change, its standing sentence is gone and its info card describes the switch',
     [await a.exists('#setting-sign-in-hint'), await a.run(`document.querySelector('#start-at-sign-in').getAttribute('aria-describedby')`), await a.text('#setting-sign-in-info-card')],
-    [false, 'setting-sign-in-info-card', 'Starts Central Knot hidden at sign-in so background sync runs.']);
+    [false, 'setting-sign-in-info-card', signInCardWords]);
   await a.click('#start-at-sign-in');
   for (let tries = 0; tries < 30 && existsSync(autostart); tries++) await wait(100);
   const off = [await state(), existsSync(autostart), existsSync(launcher), (await savedSettings()).startAtSignIn];
@@ -3542,9 +3543,10 @@ async function practiceFlow() {
     // Coming back to the window: the row can be changed now.
     await refocus(main);
     await until(false, () => a.run(`document.querySelector('#start-at-sign-in').disabled`));
+    const signInCardWords = `Opens hidden in ${process.platform === 'darwin' ? 'the menu bar' : 'the system tray'} at sign-in, so sync keeps running.`;
     same('when Start at sign-in can change, its standing sentence is gone and its info card describes the switch',
       [await a.exists('#setting-sign-in-hint'), await a.run(`document.querySelector('#start-at-sign-in').getAttribute('aria-describedby')`), await a.text('#setting-sign-in-info-card')],
-      [false, 'setting-sign-in-info-card', 'Starts Central Knot hidden at sign-in so background sync runs.']);
+      [false, 'setting-sign-in-info-card', signInCardWords]);
     await a.click('#start-at-sign-in');
     const fromSettings = await until(['true', null, null], row);
     // The menu's item turns it off while Settings is open: the row follows.
@@ -3597,6 +3599,8 @@ async function practiceFlow() {
     main.close();
   }
   // Info marks and their top-layer detail cards (dom.ts infoMark) on Settings: Start at sign-in and Log.
+  const signInCardText = `Opens hidden in ${process.platform === 'darwin' ? 'the menu bar' : 'the system tray'} at sign-in, so sync keeps running.`;
+  const logCardText = 'Central Knot’s own log, for reporting a problem. Your tools’ files aren’t in it.';
   const cardOpen = id => a.run(`!!document.querySelector('#${id}-card')?.matches(':popover-open')`);
   const centerOf = selector => a.run(`(() => { const b = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) }; })()`);
   const pressTab = async (shift = false) => { for (const type of ['rawKeyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers: shift ? 8 : 0 }); await wait(60); };
@@ -3606,10 +3610,46 @@ async function practiceFlow() {
     const read = id => { const m = document.querySelector('#' + id), c = document.querySelector('#' + id + '-card'); return [m?.tagName, m?.getAttribute('aria-label'), m?.hasAttribute('title'), m?.getAttribute('aria-describedby'), c?.getAttribute('role'), c?.getAttribute('popover'), c?.textContent]; };
     return [read('setting-sign-in-info'), read('setting-log-info'), !!document.querySelector('#setting-log-hint'), document.querySelector('#show-log')?.getAttribute('aria-describedby'), document.querySelector('#open-log-folder')?.getAttribute('aria-describedby')];
   })()`), [
-    ['BUTTON', 'About Start at sign-in', false, 'setting-sign-in-info-card', 'tooltip', 'manual', 'Starts Central Knot hidden at sign-in so background sync runs.'],
-    ['BUTTON', 'About Log', false, 'setting-log-info-card', 'tooltip', 'manual', 'Central Knot’s diagnostic log for bug reports. Tool config files aren’t included.'],
+    ['BUTTON', 'About Start at sign-in', false, 'setting-sign-in-info-card', 'tooltip', 'manual', signInCardText],
+    ['BUTTON', 'About Log', false, 'setting-log-info-card', 'tooltip', 'manual', logCardText],
     false, 'setting-log-info-card', 'setting-log-info-card',
   ]);
+  // In the fault state (Start at sign-in unavailable), the open card sits clear of the fault line beneath the label.
+  if (await a.exists('#setting-sign-in-hint')) {
+    await a.click('#setting-sign-in-info');
+    const clearOfFault = await a.run(`(() => { const h = document.querySelector('#setting-sign-in-hint').getBoundingClientRect(), c = document.querySelector('#setting-sign-in-info-card').getBoundingClientRect(); return c.top >= h.bottom + 3 || c.bottom <= h.top - 3; })()`);
+    same('when Start at sign-in shows its fault line, its open info card does not meet that line', clearOfFault, true);
+    await a.click('#setting-sign-in-info');
+  }
+  // A focus or click cancels a pending hover on another mark, and a hover timer whose mark vanished leaves an open card alone.
+  await sizeTo(a, 1728, 1117);
+  await moveTo({ x: 0, y: 0 });
+  const bothStartAt = await centerOf('#setting-sign-in-info');
+  await moveTo(bothStartAt);
+  await wait(60);
+  await a.run(`document.querySelector('#show-log').focus({ preventScroll: true })`);
+  await pressTab(true);
+  await wait(360);
+  const focusBeatHover = [await cardOpen('setting-log-info'), await cardOpen('setting-sign-in-info'), await a.run(`document.activeElement?.id`)];
+  await pressEsc();
+  await moveTo({ x: 0, y: 0 });
+  await wait(40);
+  await moveTo(bothStartAt);
+  await wait(60);
+  await a.click('#setting-log-info');
+  await wait(360);
+  const clickBeatHover = [await cardOpen('setting-log-info'), await cardOpen('setting-sign-in-info')];
+  await moveTo({ x: 0, y: 0 });
+  await wait(40);
+  await moveTo(bothStartAt);
+  await wait(60);
+  await a.run(`document.querySelector('#setting-sign-in-info').closest('.info-wrap').remove()`);
+  await wait(360);
+  const vanishedLeftOpen = await cardOpen('setting-log-info');
+  await a.click('#header-refresh');
+  await fullSize(a);
+  same('focus or click on another mark cancels a pending hover, and a timer whose mark vanished leaves the open card alone',
+    [focusBeatHover, clickBeatHover, vanishedLeftOpen], [[true, false, 'setting-log-info'], [true, false], true]);
   // Hover: opens after 300 ms (mouse only), stays when moving onto the card or returning before 200 ms, closes 200 ms after leaving; touch never hover-opens.
   await moveTo({ x: 0, y: 0 });
   await a.run(`document.querySelector('#setting-sign-in-info').scrollIntoView({ block: 'center' })`);
@@ -3719,10 +3759,10 @@ async function practiceFlow() {
   if (shots) {
     await sizeTo(a, 1316, 819);
     await a.click('#appearance-dark');
-    await a.run(`document.querySelector('#settings-scroll').scrollTop = 0`);
+    await a.run(`document.querySelector('#settings-scroll').scrollTop = 0; document.activeElement?.blur()`);
     await moveTo(await centerOf('#setting-sign-in-info'));
     await wait(380);
-    await a.shot('info-card-1316-mouse-dark');
+    await a.shot(await a.exists('#setting-sign-in-hint') ? 'info-card-1316-fault-mouse-dark' : 'info-card-1316-mouse-dark');
     await moveTo({ x: 0, y: 0 });
     await wait(280);
     await a.click('#sidebar-toggle');
