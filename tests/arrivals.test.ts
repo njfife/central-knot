@@ -88,10 +88,12 @@ test('The count is fixed at the end of the first pass that brought the home into
     const before = await b.pass(undefined);
     await b.codex(true);
     const arrived = await b.pass(before);
+    // Codex's skills folder made again (notes copied there again, an entry of its own), and OpenCode arriving in the same pass.
     await rm(join(b.home, '.codex/skills'), { recursive: true });
     await mkdir(join(b.home, '.codex/skills'));
-    assert.deepEqual([said(arrived), said(await b.pass(arrived)), (await copiedTo(b)).length], [[{ tool: 'codex-cli', copied: 1 }], [{ tool: 'codex-cli', copied: 1 }], 2],
-      'Codex’s skills folder made again: notes is copied there again, with an entry of its own');
+    await mkdir(join(b.home, '.config/opencode'), { recursive: true });
+    assert.deepEqual([said(arrived), said(await b.pass(arrived)), (await copiedTo(b)).length],
+      [[{ tool: 'codex-cli', copied: 1 }], [{ tool: 'codex-cli', copied: 1 }, { tool: 'opencode-cli', copied: 0 }], 2]);
   } finally { await b.cleanup(); }
 });
 
