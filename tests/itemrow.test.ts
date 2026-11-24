@@ -4,7 +4,8 @@
 // page draws them; and a skill and an agent of one name, two rows apart (rowId), on two lists and on one.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { inOrder, noPins, pin, pinsOn, placeIn, rowId, type ItemRow, type Pinned } from '../src/itemrow.ts';
+import { byUsage, inOrder, noPins, pin, pinsOn, placeIn, rankIn, rowId, type ItemRow, type Pinned, type RowUsage } from '../src/itemrow.ts';
+import { lastUse, rowFigure, type ToolSays } from '../src/usagerow.ts';
 import { keepVersion, newItem, setCurrent, type LibraryItem, type Shelf } from '../src/library.ts';
 
 /** A shelf that keeps nothing: these examples read only the item's record. */
@@ -154,4 +155,82 @@ test('On the Library, the kinds are mixed under one heading in the chosen Sort, 
   assert.deepEqual(ids(inOrder(rows, 'name', from({}))), ['mcp-github', 'skills-notes', 'skills-review', 'mcp-review', 'agents-review']);
   // By last updated, none has a time: they go by name and kind the same way, whatever order they came in.
   assert.deepEqual(ids(inOrder([...rows].reverse(), 'updated', from({}))), ['mcp-github', 'skills-notes', 'skills-review', 'mcp-review', 'agents-review']);
+});
+
+// ---------- By most used ----------
+
+test('By most used: rows with 12, 3 and 7 sessions in the last 30 days go 12, 7, 3', () => {
+  const usage: Record<string, { sessions: number; at: number }> = {
+    alpha: { sessions: 12, at: Date.parse(daysAgo(6)) },
+    beta: { sessions: 3, at: Date.parse(daysAgo(1)) },
+    gamma: { sessions: 7, at: Date.parse(daysAgo(4)) },
+  };
+  const rows = [row('beta'), row('gamma'), row('alpha')];
+  assert.deepEqual(keys(inOrder(rows, 'most-used', from({}), each => usage[each.key])), ['alpha', 'gamma', 'beta']);
+});
+
+test('By most used: equal counts go by the more recent use first, then by name and kind', () => {
+  const tiedTime = Date.parse(daysAgo(1));
+  const usage: Record<string, RowUsage> = {
+    'skills-alpha': { sessions: 5, at: Date.parse(daysAgo(7)) },
+    'skills-beta': { sessions: 5, at: tiedTime },
+  };
+  assert.deepEqual(keys(inOrder([row('alpha'), row('beta')], 'most-used', from({}), each => usage[rowId(each.kind, each.key)])), ['beta', 'alpha']);
+  // Same count and same last use: by name, and one name by kind (skill, server, agent), whatever order they came in.
+  const mixed = [row('review', {}, 'agents'), row('review', {}, 'mcp'), row('notes'), row('review')];
+  const ids = (list: ItemRow[]) => list.map(each => rowId(each.kind, each.key));
+  const sameUsage = () => ({ sessions: 5, at: tiedTime });
+  assert.deepEqual(ids(inOrder(mixed, 'most-used', from({}), sameUsage)), ['skills-notes', 'skills-review', 'mcp-review', 'agents-review']);
+  assert.deepEqual(ids(inOrder([...mixed].reverse(), 'most-used', from({}), sameUsage)), ['skills-notes', 'skills-review', 'mcp-review', 'agents-review']);
+});
+
+test('By most used: rows with no figure (no use seen, can’t say, or usage not collected) go last by name', () => {
+  const saysByKey: Record<string, ToolSays[]> = {
+    used: [{ tool: 'claude-cli', sessions: 4, last: daysAgo(2) }],
+    // Used 40 days ago: 0 sessions in 30 days, so rowFigure is noneSeen (no figure for Most used, still has lastUse for Last used).
+    old: [{ tool: 'claude-cli', sessions: 0, last: daysAgo(40) }],
+    unknown: [{ tool: 'codex-cli', sessions: 0, cantSay: 'no-record' }],
+    never: [{ tool: 'claude-cli', sessions: 0 }],
+  };
+  const usage = (each: ItemRow): RowUsage => {
+    const says = saysByKey[each.key] ?? [], figure = rowFigure(says, ['claude-cli', 'codex-cli']);
+    return figure && 'used' in figure ? { sessions: figure.sessions, at: Date.parse(figure.used) } : { at: lastUse(says) };
+  };
+  const rows = [row('unknown'), row('old'), row('never'), row('used')];
+  assert.deepEqual(keys(inOrder(rows, 'most-used', from({}), usage)), ['used', 'never', 'old', 'unknown']);
+  assert.deepEqual(keys(inOrder(rows, 'used', from({}), usage)), ['used', 'old', 'never', 'unknown']);
+  // With usage not collected at all, every row has no figure and the whole list is by name.
+  assert.deepEqual(keys(inOrder(rows, 'most-used', from({}), () => undefined)), ['never', 'old', 'unknown', 'used']);
+  // A direct RowUsage with sessions: 0 still counts as no figure under Most used (goes by name, not ahead by its older time).
+  assert.deepEqual(keys(inOrder([row('zebra'), row('alpha')], 'most-used', from({}), each => (each.key === 'zebra' ? { sessions: 0, at: Date.parse(daysAgo(40)) } : undefined))), ['alpha', 'zebra']);
+});
+
+test('By most used: pinned rows keep their count and tie-breaking time until unpinned, and byUsage marks usage orders', () => {
+  assert.deepEqual((['name', 'updated', 'used', 'most-used'] as const).map(byUsage), [false, false, true, true]);
+  const rows = [row('alpha'), row('beta'), row('gamma')];
+  // Before any reading lands, every row is pinned with no rank: once a reading lands, they stay by name until unpinned.
+  const beforeFirst = pinsOn(noPins<string>(), 'Library by most-used');
+  for (const each of rows) pin(beforeFirst, rowId(each.kind, each.key), 'on', rankIn(each, 'most-used', from({}), () => undefined));
+  const firstReading: Record<string, RowUsage> = {
+    alpha: { sessions: 3, at: Date.parse(daysAgo(2)) },
+    beta: { sessions: 7, at: Date.parse(daysAgo(1)) },
+    gamma: { sessions: 12, at: Date.parse(daysAgo(3)) },
+  };
+  assert.deepEqual(keys(inOrder(rows, 'most-used', from({}), each => firstReading[each.key], beforeFirst)), ['alpha', 'beta', 'gamma']);
+  assert.deepEqual(keys(inOrder(rows, 'most-used', from({}), each => firstReading[each.key])), ['gamma', 'beta', 'alpha']);
+  // Already ordered by Most used (alpha and beta tied at 5, alpha newer; gamma uncounted): an update raises gamma and makes beta newer.
+  const earlier: Record<string, RowUsage | undefined> = {
+    alpha: { sessions: 5, at: Date.parse(daysAgo(1)) },
+    beta: { sessions: 5, at: Date.parse(daysAgo(7)) },
+    gamma: undefined,
+  };
+  const held = pinsOn(noPins<string>(), 'Library by most-used');
+  for (const each of rows) pin(held, rowId(each.kind, each.key), 'on', rankIn(each, 'most-used', from({}), row => earlier[row.key]));
+  const updated: Record<string, RowUsage> = {
+    alpha: { sessions: 5, at: Date.parse(daysAgo(1)) },
+    beta: { sessions: 5, at: Date.parse(daysAgo(0)) },
+    gamma: { sessions: 10, at: Date.parse(daysAgo(0)) },
+  };
+  assert.deepEqual(keys(inOrder(rows, 'most-used', from({}), each => updated[each.key], held)), ['alpha', 'beta', 'gamma']);
+  assert.deepEqual(keys(inOrder(rows, 'most-used', from({}), each => updated[each.key])), ['gamma', 'beta', 'alpha']);
 });

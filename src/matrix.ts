@@ -8,7 +8,7 @@
 // to hold the question of the item it is at.
 // Usage, collected when a home opens and on Update usage statistics (app.ts collectUsage): when it was collected and the button
 // at the toolbar's end, a band an Update opens (closed by its button), a figure on each row and a line per tool in
-// an opened row, the Last used order (which a reading that lands never redraws: holdOrder), and the "No use seen in 30 days"
+// an opened row, the Last used and Most used orders (which a reading that lands never redraws: holdOrder), and the "No use seen in 30 days"
 // chip with its band and one Turn these off (built from each row's own Off: rowClicks.off); what the reading says of a row, and
 // the chip's rule, are usagerow.ts's.
 // A table is told the kinds it lists and its tool by its caller (useLibrary, useTab give a Table): the Library's, its segment's
@@ -34,7 +34,7 @@ import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFir
 import { takeBack, wantedOn } from './clicklist.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
-import { byName, inOrder, kindSource, lastUpdated, noPins, partId, pin, placeIn, rowId, timeIn, type ItemRow, type KindSource, type Pinned, type RowKey, type RowOrder, type Tool } from './itemrow.ts';
+import { byName, byUsage, inOrder, kindSource, lastUpdated, noPins, partId, pin, placeIn, rankIn, rowId, type ItemRow, type KindSource, type Pinned, type RowKey, type RowOrder, type RowUsage, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, rowClicks, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
@@ -1944,7 +1944,7 @@ const turningLabel = (name: string, on: boolean) => `${name}: being turned ${on 
  */
 function flip(t: Table, skill: ItemRow, on: boolean) {
   const { kind, key } = skill;
-  if (searching(t)) holdFound(t); else pin(pinnedHere(t), idOf(skill), sectionOf(t, skill), timeIn(skill, chosenOrder(t), itemOf, usedAt(t)));
+  if (searching(t)) holdFound(t); else pin(pinnedHere(t), idOf(skill), sectionOf(t, skill), rankIn(skill, chosenOrder(t), itemOf, usageIn(t)));
   if (takeBack(kind, key)) { rerender(); return; }
   if (on && isDiffering(skill)) {
     // The question opens under its row; a second click on the switch closes it.
@@ -2294,37 +2294,43 @@ const usageElsewhere = (t: Table, skill: ItemRow) => usageOf(t, skill).filter(ea
 
 // ---------- The order of the rows under each heading ----------
 
-/** The flags (flags.ts) that put the Library's rows by last updated, or by last used: one choice, kept. */
-const BY_UPDATED = 'ck-items-by-last-updated', BY_USED = 'ck-items-by-last-used';
-/** The order of the rows under each heading (itemrow.ts inOrder): the one chosen, on the Library (by Last used, a row with no use seen goes by name); by name on a harness's tab. */
-const chosenOrder = (t: Table): RowOrder => (t.tool ? 'name' : readFlag(BY_USED) ? 'used' : readFlag(BY_UPDATED) ? 'updated' : 'name');
-/** A row's last use on a table, for the Last used order (itemrow.ts inOrder). */
-const usedAt = (t: Table) => (skill: ItemRow) => lastUse(usageOf(t, skill));
+/** The flags (flags.ts) that remember a non-default Sort on the Library: one choice, kept.
+ * Where more than one of the three flags is set, the first in `orderFlags` wins. */
+const orderFlags: Record<Exclude<RowOrder, 'name'>, string> = { 'most-used': 'ck-items-by-most-used', used: 'ck-items-by-last-used', updated: 'ck-items-by-last-updated' };
+/** The order of the rows under each heading (itemrow.ts inOrder): the one chosen, on the Library; by name on a harness's tab. */
+const chosenOrder = (t: Table): RowOrder => (t.tool ? 'name' : (Object.entries(orderFlags) as [RowOrder, string][]).find(([, flag]) => readFlag(flag))?.[0] ?? 'name');
+/** A row's usage on a table, for Last used and Most used (itemrow.ts inOrder): newest use at any time, and the sessions its Used cell shows. */
+const usageIn = (t: Table) => (skill: ItemRow): RowUsage => {
+  const figure = figureOf(t, skill);
+  return figure && 'used' in figure ? { sessions: figure.sessions, at: Date.parse(figure.used) } : { at: lastUse(usageOf(t, skill)) };
+};
 /**
  * A reading about to land moves no row (app.ts collectUsage calls this once its answer is known to be kept, before the slot takes
- * it). A reading moves rows only through the Last used order or the "No use seen" chip, so while the list on screen goes by last
- * used or that chip is on, each of its rows is pinned where it is now (itemrow.ts Pinned), as its own switch would pin it
- * (flip): its cell fills in place, and the new order is drawn when the pins are let go (app.ts pinnedRows: another list or none
- * drawn, Refresh, or Put in order: rowsHeld).
+ * it). A reading moves rows only through a usage order (Last used, Most used: itemrow.ts byUsage) or the "No use seen" chip, so
+ * while the list on screen goes by one or that chip is on, each of its rows is pinned where it is now (itemrow.ts Pinned), as its
+ * own switch would pin it (flip): its cell fills in place, and the new order is drawn when the pins are let go (app.ts pinnedRows:
+ * another list or none drawn, Refresh, or Put in order: rowsHeld).
  */
 export function holdOrder() {
   const t = useTableShown();
   if (!t) return;
   // While the Library's Find has text, its rows go by best match, which a reading doesn't change: only the chip can move them.
   if (searching(t)) { if (t.view.filter === 'unused') holdFound(t); return; }
-  if (chosenOrder(t) !== 'used' && t.view.filter !== 'unused') return;
+  const order = chosenOrder(t);
+  if (!byUsage(order) && t.view.filter !== 'unused') return;
   const pins = pinnedHere(t);
-  for (const skill of filesView(t) ? rowsIn(t) : rowsIn(t).filter(each => picked(t, each))) pin(pins, idOf(skill), sectionOf(t, skill), timeIn(skill, chosenOrder(t), itemOf, usedAt(t)));
+  for (const skill of filesView(t) ? rowsIn(t) : rowsIn(t).filter(each => picked(t, each))) pin(pins, idOf(skill), sectionOf(t, skill), rankIn(skill, order, itemOf, usageIn(t)));
 }
 /** Whether each row says when it was last updated: while the rows go by it (not while the Library's Find has text: they go by best match). */
 const dated = (t: Table) => chosenOrder(t) === 'updated' && !searching(t);
 /** The choice of order, after the filters on the Library. */
 function orderChoice(t: Table) {
   if (t.tool) return null;
-  const choose = (event: Event) => { const value = (event.target as HTMLSelectElement).value; writeFlag(BY_UPDATED, value === 'updated'); writeFlag(BY_USED, value === 'used'); rerender(); };
+  const choose = (event: Event) => { const value = (event.target as HTMLSelectElement).value; for (const [key, flag] of Object.entries(orderFlags)) writeFlag(flag, value === key); rerender(); };
   const order = chosenOrder(t), option = (value: RowOrder, label: string) => h('option', { value, selected: order === value }, label);
   // While the Library's Find has text: Best match, greyed, its tooltip saying why.
-  const best = searching(t), options = best ? [h('option', { value: 'best', selected: true }, 'Best match')] : [option('name', 'Name'), option('updated', 'Last updated'), option('used', 'Last used')];
+  const best = searching(t), options = best ? [h('option', { value: 'best', selected: true }, 'Best match')]
+    : [option('name', 'Name'), option('updated', 'Last updated'), option('used', 'Last used'), option('most-used', 'Most used')];
   return [h('span.order', { title: best ? 'Best match while Find has text; the Sort you chose comes back when Find is cleared' : 'The order of the rows under each heading' }, h('label.order-word', { for: 'item-order' }, 'Sort'),
     h('span.select.select-bar', {}, h('select', { id: 'item-order', 'aria-label': 'Sort by', title: best ? undefined : 'Sort by', disabled: best, onchange: choose }, options), best ? null : icon('chevrons-up-down', 14))),
     roomHeld(rowsHeld(t), held => button({ variant: 'ghost', size: 'small', icon: 'list', label: 'Put in order', id: held ? 'put-in-order' : undefined, collapse: true, onclick: () => { unpin(); rerender(); } }))];
@@ -2335,7 +2341,7 @@ function orderChoice(t: Table) {
  * its one list (foundRows; none pinned: best first).
  */
 const listedIds = (t: Table, pins: Pinned<Role>) => (searching(t) ? foundRows(t, pins).map(idOf) : (['on', 'found', 'away', 'off'] as Role[]).flatMap(role =>
-  inOrder(rowsIn(t).filter(skill => (picked(t, skill) || pins.rows.has(idOf(skill))) && placeIn(pins, idOf(skill), sectionOf(t, skill)) === role), chosenOrder(t), itemOf, usedAt(t), pins).map(idOf)));
+  inOrder(rowsIn(t).filter(skill => (picked(t, skill) || pins.rows.has(idOf(skill))) && placeIn(pins, idOf(skill), sectionOf(t, skill)) === role), chosenOrder(t), itemOf, usageIn(t), pins).map(idOf)));
 /**
  * Whether rows on this list are held where they were (a row's own click pinned it, or a reading as it landed: holdOrder), so that
  * putting them in order would move one: the one place that says so. Put in order, beside Sort, lets them go (orderChoice).
@@ -2365,7 +2371,7 @@ function section(t: Table, role: Role, rows: ItemRow[], truly: ItemRow[]) {
     h(`div.ov-section${role === 'off' || role === 'away' ? '.ov-section-away' : ''}`, { role: 'row', 'data-section': role },
       // Counts are of the rows that match (Find, From and the chip), as the kind switch's are: a pin keeps a row's place, not a count.
       h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(truly.filter(row => picked(t, row)).length)), note ? sectionNote(own, note) : null)),
-    inOrder(rows, chosenOrder(t), itemOf, usedAt(t), pinnedHere(t)).flatMap(skill => row(t, skill)));
+    inOrder(rows, chosenOrder(t), itemOf, usageIn(t), pinnedHere(t)).flatMap(skill => row(t, skill)));
 }
 
 /**
@@ -2657,7 +2663,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
   // The table's headings, on, then found, then off (a row whose switch was clicked here under the one it was under), and its
   // order under each (inOrder's, which the stable sort keeps).
   const pins = pinnedHere(t), place = new Map(all.map(skill => [idOf(skill), (['on', 'found', 'off'] as Role[]).indexOf(placeIn(pins, idOf(skill), sectionOf(t, skill)))]));
-  const shown = inOrder(matches, chosenOrder(t), itemOf, usedAt(t), pins).sort((first, second) => place.get(idOf(first))! - place.get(idOf(second))!);
+  const shown = inOrder(matches, chosenOrder(t), itemOf, usageIn(t), pins).sort((first, second) => place.get(idOf(first))! - place.get(idOf(second))!);
   const chosen = all.find(skill => skill.key === state.item);
   // The detail always shows a skill: the chosen one, else the first listed. In narrow content it sits below the list.
   const shownDetail = chosen ?? shown[0] ?? all[0];

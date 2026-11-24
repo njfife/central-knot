@@ -23,6 +23,7 @@ import { readVersion as agentVersion } from './agentstore.ts';
 import { bodyOf } from './discovery.ts';
 import { kindSource, rowId } from './itemrow.ts';
 import type { LibraryItem } from './library.ts';
+import { displayPath } from './machine.ts';
 import { installedCopies, sameSource, sourceKey } from './plugins.ts';
 import { onOwnRow, pageRows, type PluginRow } from './pluginrows.ts';
 import { installedNowhere, partOfPage, samePart } from './pluginstatus.ts';
@@ -114,7 +115,7 @@ async function skillText(folder: string): Promise<string[]> {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       if (entry.name === '.git' || notCopied(entry.name, entry.isFile())) continue;
       if (entry.isDirectory()) await visit(join(directory, entry.name));
-      else names.push(relative(folder, join(directory, entry.name)));
+      else names.push(displayPath(relative(folder, join(directory, entry.name))));
     }
   };
   try {

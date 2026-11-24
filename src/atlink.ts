@@ -32,6 +32,7 @@ import { CODEX_MANIFEST, MANIFEST, inside, pluginContents, pluginFiles, type Plu
 import { parseSkill } from './discovery.ts';
 import { itemKey, type ItemKind } from './library.ts';
 import type { SourceRead } from './librarypass.ts';
+import { displayPath } from './machine.ts';
 import { cannotHold, fromJson, ownPartOf, runsFrom, type NeutralServer } from './mcp.ts';
 import type { AgentTool } from './presence.ts';
 import { readTree } from './share.ts';
@@ -93,7 +94,7 @@ export async function holdsAt(root: string, folder: string, repository: string, 
   return { holds: 'plugin', kinds: read.map(withTheirs), notComing };
 }
 /** Whether an item an earlier kind found holds this path (from the repository's root): its folder joined with one of its files. */
-const heldEarlier = (earlier: readonly ItemThere<unknown>[], path: string) => earlier.some(item => item.files.some(file => join(item.folder, file) === path));
+const heldEarlier = (earlier: readonly ItemThere<unknown>[], path: string) => earlier.some(item => item.files.some(file => displayPath(join(item.folder, file)) === path));
 /** A repository's own name ("skill-deslop"), which names an item at its root that its own file doesn't. */
 const repoName = (repository: string) => basename(repository.replace(/\/+$/, '')).replace(/\.git$/, '') || 'skill';
 /** One kind's items in what is at a link (none where that kind wasn't read). */
@@ -105,7 +106,7 @@ export const itemsOf = (found: Holds, entry: SourceKind) => found.kinds.find(eac
 async function withSkill(root: string, folder: string): Promise<string[]> {
   const names = (await readdir(join(root, folder), { withFileTypes: true }).catch(() => [])).filter(entry => entry.isDirectory() && !entry.name.startsWith('.'));
   const found: string[] = [];
-  for (const entry of names.sort((first, second) => first.name.localeCompare(second.name))) if (await present(join(root, folder, entry.name, 'SKILL.md'))) found.push(join(folder, entry.name));
+  for (const entry of names.sort((first, second) => first.name.localeCompare(second.name))) if (await present(join(root, folder, entry.name, 'SKILL.md'))) found.push(displayPath(join(folder, entry.name)));
   return found;
 }
 
@@ -208,10 +209,10 @@ export function agentInText(file: Pick<AgentFile, 'path' | 'tool' | 'name'>, tex
 /** Every agent at the link's `folder` (the header above), each with its files by path from the folder that holds them. */
 export async function agentsAt(root: string, folder: string, rootName: string, earlier: readonly ItemThere<unknown>[]): Promise<ItemThere<SharedAgent>[]> {
   const listed = async (at: string) => (await readdir(join(root, at), { withFileTypes: true }).catch(() => []))
-    .filter(entry => !entry.isDirectory() && !entry.name.startsWith('.') && !NOT_AN_AGENT.test(entry.name)).map(entry => join(at, entry.name)).filter(path => !heldEarlier(earlier, path)).sort();
+    .filter(entry => !entry.isDirectory() && !entry.name.startsWith('.') && !NOT_AN_AGENT.test(entry.name)).map(entry => displayPath(join(at, entry.name))).filter(path => !heldEarlier(earlier, path)).sort();
   const itself = ['agents', 'agent'].includes(basename(folder));
   const files: AgentFile[] = [];
-  for (const at of [...(itself ? [folder] : []), ...AGENT_FOLDERS.map(inner => join(folder, inner))]) {
+  for (const at of [...(itself ? [folder] : []), ...AGENT_FOLDERS.map(inner => displayPath(join(folder, inner)))]) {
     for (const path of (await listed(at)).filter(each => each.endsWith(suffixIn(at)))) { const read = await agentFileAt(root, path, false); if (read) files.push(read); }
   }
   if (!itself) for (const path of (await listed(folder)).filter(each => each.endsWith('.md'))) { const read = await agentFileAt(root, path, true); if (read) files.push(read); }
@@ -251,7 +252,7 @@ function agentOf(files: AgentFile[], folder: string, rootName: string): ItemTher
 
 /** Every MCP server in the `.mcp.json` at the link's `folder` (the header above). */
 export async function serversAt(root: string, folder: string, rootName: string, earlier: readonly ItemThere<unknown>[]): Promise<ItemThere<NeutralServer>[]> {
-  const path = join(folder, '.mcp.json'), where = { folder, folderName: folder ? basename(folder) : rootName, files: ['.mcp.json'] };
+  const path = displayPath(join(folder, '.mcp.json')), where = { folder, folderName: folder ? basename(folder) : rootName, files: ['.mcp.json'] };
   const info = heldEarlier(earlier, path) ? undefined : await lstat(join(root, path)).catch(() => undefined);
   const file = (why: string): ItemThere<NeutralServer>[] => [{ ...where, key: itemKey('.mcp.json'), unreadable: `its .mcp.json ${why}` }];
   if (!info) return [];
@@ -313,14 +314,14 @@ const onceEach = (items: ItemThere<unknown>[], what: string) => items.map((item)
 
 /** Each kind's items in a plugin's files, read for `route` (the header above). */
 export async function pluginItems(files: PluginFiles, root: string, rootName: string, route: PluginRoute): Promise<Record<ItemKind, PluginKindRead>> {
-  const where = (path: string) => { const folder = relative(root, path); return { folder, folderName: folder ? basename(folder) : rootName }; };
+  const where = (path: string) => { const folder = displayPath(relative(root, path)); return { folder, folderName: folder ? basename(folder) : rootName }; };
   const plugin = { ...where(files.folder), files: [] };
   const named = (names: string[]): ItemThere<unknown>[] => names.filter(name => name !== '*').map(name => ({ ...plugin, key: itemKey(name), name, unreadable: 'it can’t be read' }));
   const whole = (unread: boolean, what: string, key: string, why: string): Pick<PluginKindRead, 'unread'> => (!unread ? {}
     : { unread: { ...plugin, key: itemKey(files.unread.manifest ? 'plugin.json' : key), unreadable: files.unread.manifest ? `its .claude-plugin/plugin.json can’t be read, so where its ${what} are isn’t known` : why } });
   const skills = await Promise.all(files.skills.map(dir => { const at = where(dir); return skillAt(root, at.folder, at.folderName, route === 'marketplace'); }));
   const agents = files.agents.flatMap(({ name, path, text, whole: all }): ItemThere<unknown>[] => {
-    const file = join(files.folder, path), there = { ...where(dirname(file)), key: itemKey(name), name, files: [basename(file)] }, shown = relative(root, file);
+    const file = join(files.folder, path), there = { ...where(dirname(file)), key: itemKey(name), name, files: [basename(file)] }, shown = displayPath(relative(root, file));
     const read = all ? agentInText({ path: shown, tool: 'claude-cli', name }, text, false) : undefined;
     // A page (a README, or a .md with no front matter) is no agent, as at any link (agentsAt's header).
     if (NOT_AN_AGENT.test(basename(file)) || (all && !read)) return [];
