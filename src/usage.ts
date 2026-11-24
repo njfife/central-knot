@@ -13,7 +13,7 @@
 // Not here: which item a name is, by each tool's spelling rules (usagerow.ts, the page's, with the 30 days: USAGE_DAYS),
 // and what the page shows (matrix.ts). Another tool is another row of `readers`, and of usagerow.ts spelledIn. Shared with
 // sessionrequests.ts, which reads each response's tokens from the same files: where they are (`sessionFiles`,
-// `claudeProjects`) and a line read as a record (`recordOf`, `timeOf`).
+// `claudeProjects`, `codexFolders`) and a line read as a record (`recordOf`, `timeOf`).
 import { constants as fsConstants, createReadStream, existsSync } from 'node:fs';
 import { copyFile, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -131,6 +131,8 @@ export async function sessionFiles(roots: string[]): Promise<{ root: string; nam
 
 /** Claude Code's projects folder in a home, where its session files are. */
 export const claudeProjects = (at: UsageWhere) => join(toolConfigRoot(at, 'claude-cli'), 'projects');
+/** Codex's two folders of rollouts in a home: its sessions, and those it archived (moved there whole). */
+export const codexFolders = (at: UsageWhere) => ['sessions', 'archived_sessions'].map(folder => join(toolConfigRoot(at, 'codex-cli'), folder));
 
 /**
  * The sessions in a tool's `.jsonl` files under `roots` (none there: undefined), each file streamed line by line. `sessionOf`
@@ -247,8 +249,7 @@ export const readers: Record<HarnessId, Reader | undefined> = {
   // Codex's skills: seen only. Even with every command form read, a bare SKILL.md read from the skill's own folder names no
   // skill (3 of 39 sessions with a read, measured on 507 real sessions, 2026-11-16).
   'codex-cli': { tells: { skill: 'seen', agent: 'seen', mcp: 'sure' },
-    read: (at, now) => jsonlSessions(['sessions', 'archived_sessions'].map(folder => join(toolConfigRoot(at, 'codex-cli'), folder)), path => path,
-      ['McpToolCall', 'SKILL.md', 'spawn_agent', '<skill>'], codexUses, now) },
+    read: (at, now) => jsonlSessions(codexFolders(at), path => path, ['McpToolCall', 'SKILL.md', 'spawn_agent', '<skill>'], codexUses, now) },
   'copilot-cli': { tells: { skill: 'sure', mcp: 'seen' },
     read: (at, now) => jsonlSessions([join(toolConfigRoot(at, 'copilot-cli'), 'session-state')], path => path.split(sep)[0], ['skill.invoked', 'mcpServerName'], copilotUses, now) },
   // An agent in Pi is a loose skill file (presence.ts agentsKeptIn): its uses are a skill's records, as sure as a skill's.
