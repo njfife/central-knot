@@ -1232,10 +1232,17 @@ span.ins-confirm { margin-top: 0; }
 .session-models th, .session-models td { padding: 3px 12px 3px 0; text-align: left; vertical-align: top; }
 .session-models th { font-weight: 500; color: var(--ink-soft); }
 .session-models .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.session-models th:first-child, .session-models td:first-child { width: 100%; }
+.session-models td:last-child { min-width: 24ch; }
 .session-model { font-family: var(--mono); overflow-wrap: anywhere; }
 .session-as { display: block; color: var(--ink-faint); }
 .sessions-by-tool li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 3px 0; font-size: 12.5px; }
 .sessions-tool { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
+/* A narrow content area: a row's models go to a second line, so its project's name keeps room. */
+@container content (width < 1000px) {
+  .session > details > summary { grid-template-columns: 12px 17ch 11ch minmax(0, 1fr) minmax(0, 0.9fr); }
+  .session-named { grid-row: 2; grid-column: 2 / 5; }
+}
 
 /* ---------- Plugins: marketplaces at the left, the chosen marketplace or plugin at the right ---------- */
 .plugins-page { --market-list-width: 236px; --market-gutter: 24px; }

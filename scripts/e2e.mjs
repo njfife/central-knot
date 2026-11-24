@@ -9792,11 +9792,8 @@ async function sessionsFlow() {
   /** A time today before the flow started: `part` of the way from midnight. */
   const todayAt = part => today + Math.floor((started - today) * part);
   const home = join(scratch, 'sessions-home'), data = join(scratch, 'sessions-data'), real = join(scratch, 'sessions-real');
-  mkdirSync(join(home, '.local/bin'), { recursive: true });
-  for (const [name, output] of [['claude', '2.1.309 (Claude Code)'], ['codex', 'codex-cli 0.142.3'], ['copilot', 'GitHub Copilot CLI 1.0.107.']]) {
-    writeFileSync(join(home, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`);
-    chmodSync(join(home, '.local/bin', name), 0o755);
-  }
+  // A chosen folder's tools are the ones whose folders are there (discovery.ts runs no probes there): Claude Code, Codex and Copilot CLI.
+  for (const folder of ['.claude', '.codex', '.copilot']) mkdirSync(join(home, folder), { recursive: true });
   const ours = new Set();
   const put = (path, records, mtime) => {
     ours.add(path);
@@ -9856,7 +9853,7 @@ async function sessionsFlow() {
       money.test(betaRow[4]) && betaRow[4].endsWith(' or more'), x1Row.slice(1, 4), money.test(x1Row[4]) && !/without|more/.test(x1Row[4]), x2Row[4]],
     [true, ['Claude Code', longFolder, 'claude-fable-5, claude-haiku-4-5-20251001, claude-haiku-4-5'], true, true, ['Codex', 'codex-app', 'gpt-6-astra'], true, 'no price known']);
   const total = await a.text('#sessions-total');
-  same('the day’s total: a lower bound, and what it leaves out', [money.test(total), total.replace(/^≈ \$[\d,.]+/, '≈ $…')], [true, '≈ $… or more, without 2 requests that have no known price.']);
+  same('the day’s total: a lower bound, and what it leaves out', [money.test(total), total.replace(/^≈ \$[\d,]*\.\d+/, '≈ $…')], [true, '≈ $… or more, without 2 requests that have no known price.']);
   const ratesDate = JSON.parse(readFileSync(join(root, 'assets/model-rates.json'), 'utf8')).date.split('-').map(Number);
   const pricesDate = await a.run(`new Date(${ratesDate[0]}, ${ratesDate[1] - 1}, ${ratesDate[2]}).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })`);
   same('the caption and the price list’s date, once, under the heading', await a.all('.sessions-caption'),
@@ -9875,15 +9872,15 @@ async function sessionsFlow() {
   same('Claude Code’s own figure beside the row’s sum, and out of every total', await notes('alpha'), ['Claude Code’s own figure for this session: $4.31. Not in the totals.']);
   await open('beta');
   same('a lower bound says why, opened', [await notes('beta'), (await models('.session[data-session="beta"] > details')).map(row => row[0])],
-    [['One-hour cache writes are priced at the shorter cache’s rate; they cost more.'], ['claude-opus-5-5', 'claude-2']]);
+    [['One-hour cache writes are priced at the shorter cache’s rate; they cost more.'], ['claude-2', 'claude-opus-5-5']]);
   await open('x2');
   same('a child on a model the list does not have: its tokens, and no price known', await models('.session[data-session="x2"] > details'), [['codex-auto-review', '9000', '0', '0', '300', 'no price known']]);
   const byTool = await a.all('#sessions-by-tool li', '[e.dataset.tool, [...e.children].map(part => part.textContent)]');
   same('totals by tool: its sessions, its sum, and the API prices it is priced at',
-    byTool.map(([tool, [name, count, sum, prices]]) => [tool, name, count, sum.replace(/^≈ \$[\d,.]+/, '≈ $…'), prices]),
+    byTool.map(([tool, [name, count, sum, prices]]) => [tool, name, count, sum.replace(/^≈ \$[\d,]*\.\d+/, '≈ $…'), prices]),
     [['claude-cli', 'Claude Code', '2 sessions', '≈ $… or more, without 1 request that has no known price.', 'At Anthropic’s API prices.'],
       ['codex-cli', 'Codex', '2 sessions', '≈ $…, without 1 request that has no known price.', 'At OpenAI’s API prices.']]);
-  same('totals by model, under the rows: every model of the day once, said as in an opened row', (await models('#sessions-by-model')).map(row => [row[0], row[5].replace(/^≈ \$[\d,.]+/, '≈ $…')]).sort(),
+  same('totals by model, under the rows: every model of the day once, said as in an opened row', (await models('#sessions-by-model')).map(row => [row[0], row[5].replace(/^≈ \$[\d,]*\.\d+/, '≈ $…')]).sort(),
     [['claude-2', '≈ $… or more'], ['claude-fable-5', '≈ $…'], ['claude-haiku-4-5', 'no price known for a fast reply'], ['claude-haiku-4-5-20251001\npriced as claude-haiku-4-5', '≈ $…'],
       ['claude-opus-5-5', '≈ $…'], ['codex-auto-review', 'no price known'], ['gpt-6-astra', '≈ $…']]);
   same('the foot line, once', await a.all('#sessions-foot'), [foot]);
