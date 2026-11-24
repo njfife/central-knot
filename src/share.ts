@@ -33,6 +33,7 @@ import { access, chmod, constants, copyFile, link, lstat, mkdir, open, readFile,
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
 import { configRoot, harnessIds, harnesses, writeRoot } from './harnesses.ts';
 import { instructionFiles } from './instructions.ts';
+import { displayPath } from './machine.ts';
 import { mcpFile } from './mcp.ts';
 import { managedTools } from './presence.ts';
 import type { HarnessId, HistoryDays, HomeMode, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
@@ -157,7 +158,7 @@ export async function readTree(directory: string, options: { includeGit?: boolea
     for (const entry of await readdir(current, { withFileTypes: true })) {
       if ((entry.name === '.git' && !options.includeGit) || notCopied(entry.name, entry.isFile())) continue;
       const path = join(current, entry.name);
-      const relativePath = relative(directory, path).split(sep).join('/');
+      const relativePath = displayPath(relative(directory, path));
       if (entry.isSymbolicLink()) { held ??= `It contains a link (${relativePath}), and Central Knot creates and follows no links here. Replace the link with the file it leads to, then Refresh.`; files.set(relativePath, { sha256: 'link', mode: 0 }); }
       else if (entry.isDirectory()) { directories.push(relativePath); await visit(path); }
       else if (entry.isFile()) files.set(relativePath, { sha256: await hashFile(path), mode: (await stat(path)).mode & 0o777 });
