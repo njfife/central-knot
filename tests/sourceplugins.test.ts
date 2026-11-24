@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
-import { lockSkip, withLock } from './fslock.ts';
+import { lockPath, winLockSkip } from './fslock.ts';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { agentKind, agentsView, applyAgents } from '../src/agents.ts';
@@ -161,14 +161,16 @@ test('A plugin.json that can’t be read holds back every kind: each item gone s
   } finally { await box.cleanup(); }
 });
 
-test('An agents folder in a plugin that can’t be listed holds back only the agents’ drops: skills and servers are read whole', { skip: lockSkip }, async () => {
+test('An agents folder in a plugin that can’t be listed holds back only the agents’ drops: skills and servers are read whole', { skip: winLockSkip }, async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'ck-plugin-copy-')));
+  let unlock: (() => Promise<void>) | undefined;
   try {
     for (const [path, text] of Object.entries({ '.claude-plugin/plugin.json': '{"name":"kit"}', 'skills/notes/SKILL.md': skillMd('notes'), 'agents/helper.md': helperMd(), '.mcp.json': mcpJson({ relay: { command: 'npx' } }) })) await put(join(root, path), text);
-    const found = await withLock(join(root, 'agents'), 'dir-unreadable', () => holdsAt(root, '', 'https://github.com/team/kit.git', sourceKinds()));
+    unlock = await lockPath(join(root, 'agents'), 'dir-unreadable');
+    const found = await holdsAt(root, '', 'https://github.com/team/kit.git', sourceKinds());
     const source = { id: 's', link: 'https://github.com/team/kit', repository: 'https://github.com/team/kit.git', ref: 'main', folder: '', commit: 'c', commitAt: '', readAt: '', addedAt: '' };
     assert.deepEqual(sourceKinds().map(entry => [entry.kind.kind, readOf(source, found, entry, new Set()).whole]), [['skill', true], ['agent', false], ['mcp', true]]);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally { await unlock?.().catch(() => {}); await rm(root, { recursive: true, force: true }); }
 });
 
 test('Known miss: a plugin with only .codex-plugin/plugin.json is read at the default places, not at the paths that manifest names', async () => {

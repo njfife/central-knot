@@ -5,7 +5,7 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readdir, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises';
-import { lockSkip, withLock } from './fslock.ts';
+import { lockPath, lockSkip } from './fslock.ts';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -225,9 +225,10 @@ test('A session file that can\'t be read is skipped and counted as such; the res
   const call = (name: string) => [{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: name } }] }, timestamp: daysAgo(2) }];
   await put(join(project, 'ok.jsonl'), call('alpha'));
   await put(join(project, 'locked.jsonl'), call('beta'));
+  const unlock = await lockPath(join(project, 'locked.jsonl'), 'file-unreadable');
   await symlink(join(project, 'nowhere.jsonl'), join(project, 'gone.jsonl'));
-  const reading = await withLock(join(project, 'locked.jsonl'), 'file-unreadable', () => readUsage({ home }, NOW));
-  const history = historyOf(reading, 'claude-cli');
+  const reading = await readUsage({ home }, NOW), history = historyOf(reading, 'claude-cli');
+  await unlock();
   const says = toolSays(reading, 'skill', facts('gamma', {}), 'claude-cli')!;
   assert.deepEqual([history.sessions, history.skipped, history.unread, Object.keys(usedIn(reading, 'claude-cli')), says.cantSay, says.skipped],
     [1, 1, undefined, ['skill:alpha'], 'unread', 1]);

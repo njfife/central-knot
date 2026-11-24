@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
-import { lockSkip, withLock } from './fslock.ts';
+import { winLockSkip, withLock } from './fslock.ts';
 import { join } from 'node:path';
 import { agentsView, applyAgents } from '../src/agents.ts';
 import { readHistory } from '../src/history.ts';
@@ -476,7 +476,7 @@ test('A link of his in Claude Code’s folder still loads after a switch in Clau
   } finally { await box.cleanup(); }
 });
 
-test('A server whose entry Claude Code lost while its removal was owed (as alpha 2 left it) turns Off again in the switch that turns it On: the result says so, and History says why', { skip: lockSkip }, async () => {
+test('A server whose entry Claude Code lost while its removal was owed (as alpha 2 left it) turns Off again in the switch that turns it On: the result says so, and History says why', { skip: winLockSkip }, async () => {
   const { box, made, profiles } = await home();
   try {
     // The switch's removal from Claude Code is left owed (its file can't be read meanwhile), as alpha 2 left it.
@@ -724,7 +724,7 @@ test('A copy already as asked when its switch runs (turned by hand after the pla
   } finally { await box.cleanup(); }
 });
 
-test('A tool whose write fails is said, and is in neither the History entry nor its Undo; the other tools are switched', { skip: lockSkip }, async () => {
+test('A tool whose write fails is said, and is in neither the History entry nor its Undo; the other tools are switched', { skip: winLockSkip }, async () => {
   const { box, made } = await pluginHome();
   try {
     // Codex's folder can't be written: its config.toml is replaced through a file beside it (share.ts writeFileChecked).
@@ -1022,7 +1022,7 @@ test('A switch that turns his own Copilot CLI server on leaves the plugin’s se
   } finally { await box.cleanup(); }
 });
 
-test('A placed copy counts as turned only in the tools whose own removal went through: Pi’s folder not writable, OpenCode’s copy goes, Pi’s stays, and History has OpenCode', { skip: lockSkip }, async () => {
+test('A placed copy counts as turned only in the tools whose own removal went through: Pi’s folder not writable, OpenCode’s copy goes, Pi’s stays, and History has OpenCode', { skip: winLockSkip }, async () => {
   const { box, made } = await pluginHome({ opencode: true });
   try {
     const other = await made('Other', [sheetId2, issuesId2]), side = (await sideNow(box)).side, pi = join(box.home, '.pi/agent/skills');
@@ -1032,7 +1032,7 @@ test('A placed copy counts as turned only in the tools whose own removal went th
   } finally { await box.cleanup(); }
 });
 
-test('A plugin’s skill and server of one name placed in Pi, one held there: the other’s change is the switch’s, by its kind, and its Undo puts it back', { skip: lockSkip }, async () => {
+test('A plugin’s skill and server of one name placed in Pi, one held there: the other’s change is the switch’s, by its kind, and its Undo puts it back', { skip: winLockSkip }, async () => {
   for (const held of ['skill', 'mcp'] as const) {
     // docs's skill issues and server issues in Pi, each taken in from Pi and linked to the plugin, as its own run leaves them; his anchor beside them.
     const box = await sandbox(['pi-cli']), mcp = join(box.home, '.pi/agent/mcp.json');
@@ -2061,7 +2061,7 @@ test('Copilot shared name example 6: names differing only in case (Issues vs iss
   } finally { await box.cleanup(); }
 });
 
-test('Copilot shared name example 7: when .copilot/settings.json cannot be written, the result says so, History holds only what was confirmed, and the profile is not in use', { skip: lockSkip }, async () => {
+test('Copilot shared name example 7: when .copilot/settings.json cannot be written, the result says so, History holds only what was confirmed, and the profile is not in use', { skip: winLockSkip }, async () => {
   const { box, made } = await pluginHome({ copilot: true });
   try {
     await takeInCopilotServer(box);
@@ -2240,7 +2240,7 @@ test('Copilot shared name fix 1: a disabledMcpServers rule outliving the plugin 
       assert.deepEqual(await before.inUse(), [], 'orphan rule blocks In use');
       assert.equal(switchPreview(mineProfile, before.live, before.plugins), 'Switching turns 1 item on');
       // Unwritable .copilot: fails cleanly, not in use, no false settingsChanged.
-      await t.test('unwritable .copilot fails cleanly without false settingsChanged', { skip: lockSkip }, async () => {
+      await t.test('unwritable .copilot fails cleanly without false settingsChanged', { skip: winLockSkip }, async () => {
         const failed = await withLock(join(box.home, '.copilot'), 'dir-readonly', () => switchProfile(box.context, box.tools, mine, before.side));
         assert.deepEqual([failed.left, failed.results.map(r => [r.harness, r.outcome]), failed.settingsChanged], [['issues'], [['copilot-cli', 'failed']], undefined]);
         assert.deepEqual(await (await sideNow(box)).inUse(), [], 'failed clear leaves not in use');
@@ -2456,7 +2456,7 @@ test('A profile switch returns the settled History profile payload, and undoOffe
     assert.equal(undoOffered(entry, afterCleared), false);
     assert.deepEqual(undoInHome(cleared, afterCleared), { on: [], off: [] });
     // Failed orphan Copilot CLI clear: settleEntry drops copilotCleared from History and returns that exact payload (no drift).
-    await t.test('failed orphan Copilot CLI clear drops copilotCleared from History and result', { skip: lockSkip }, async () => {
+    await t.test('failed orphan Copilot CLI clear drops copilotCleared from History and result', { skip: winLockSkip }, async () => {
       await writeFile(settingsPath, `${JSON.stringify({ ...JSON.parse((await text(box, '.copilot/settings.json'))!), disabledMcpServers: ['issues'] }, null, 2)}\n`);
       await withLock(join(box.home, '.copilot'), 'dir-readonly', async () => {
         const failedClear = await switchProfile(box.context, box.tools, mineId, (await sideNow(box)).side);

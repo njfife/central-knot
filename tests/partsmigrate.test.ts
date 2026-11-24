@@ -3,7 +3,7 @@
 // each part's content kept in the store, the copies in the tools, and the plugins record its first read made. The same over a
 // whole home alpha 1 made is tests/upgrade.test.ts.
 import { test } from 'node:test';
-import { lockSkip, withLock } from './fslock.ts';
+import { winLockSkip, withLock } from './fslock.ts';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -313,7 +313,7 @@ test('It waits whole while a copy on record can’t be read, the record can’t,
     await box.record([{ tool: 'pi-cli', item: part('pdf', hash) }]);
     await mkdir(box.at('pi-cli', 'skills/pdf'), { recursive: true });
     await put(box.at('pi-cli', 'skills/pdf/SKILL.md'), '');
-    await t.test('waits while a copy on record can’t be read', { skip: lockSkip }, async () => {
+    await t.test('waits while a copy on record can’t be read', { skip: winLockSkip }, async () => {
       await withLock(box.at('pi-cli', 'skills/pdf/SKILL.md'), 'file-unreadable', async () => {
         assert.ok((await box.migrate()).waits, 'a copy that can’t be read');
       });

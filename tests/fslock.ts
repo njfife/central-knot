@@ -1,5 +1,5 @@
 // Shared file and folder permission locks for unit tests moved to this helper (chmod on POSIX; Windows ACL locking is
-// step 6), plus cross-platform recursive writable cleanup so test teardown never shells out to `chmod`.
+// step 6), plus a recursive writable clean-up for Windows, where a suite's `chmod -R u+rwx` teardown has no `chmod` to call.
 // Not every lock in the suite uses this helper yet: step 6 also owns the raw `chmod` locks in `tests/librarywalk.test.ts`
 // (:162, :499), `tests/agentswalk.test.ts` (:73, :168), and `tests/plugintext.test.ts` (:496). On Windows today the strict
 // walk suites pass while their `chmod` calls lock nothing on Windows folders even though their traces say "[tool read-only]".
@@ -9,10 +9,13 @@ import { join } from 'node:path';
 /** Skip reason on Windows until step 6 builds Windows ACL locking here. */
 export const LOCK_SKIP_WIN = 'Locked folders on Windows are step 6 (ACL lock helper not built yet); covered on macOS and Linux.';
 
-/** Skip value on Windows only (leaves POSIX root behavior unchanged for tests that keep their own root branch). */
+/** Skip value on Windows only: for lock tests that run as root on macOS and Linux too (or keep their own root branch). */
 export const winLockSkip: string | false = process.platform === 'win32' && LOCK_SKIP_WIN;
 
-/** Skip value for tests that lock a file or folder: false on non-root POSIX, a named reason on Windows or as root. */
+/**
+ * Skip value on Windows and, on macOS and Linux, as root (root ignores the lock): used by the lock tests that skipped as
+ * root before the Windows work, and by this helper's own checks (tests/windowscheck.test.ts); every other one uses winLockSkip.
+ */
 export const lockSkip: string | false = winLockSkip
   || (process.getuid?.() === 0 && 'root bypasses file and folder permission locks');
 
@@ -42,8 +45,9 @@ export async function withLock<T>(path: string, kind: LockKind, work: () => Prom
 }
 
 /**
- * Restores owner write/read/traverse permissions across a temp tree without spawning `chmod`, so `rm` succeeds
- * after a test leaves read-only files or locked folders behind on any platform. Never follows symlinks.
+ * Restores owner write/read/traverse permissions across a temp tree without spawning `chmod`, so `rm` succeeds after a
+ * test leaves read-only files or locked folders behind. Never follows symlinks. The discovery-copilot, presence and
+ * skillsafety suites clean up with it on Windows only; on macOS and Linux they keep `chmod -R u+rwx`, whose failure fails them.
  */
 export async function makeWritableTree(root: string): Promise<void> {
   const info = await lstat(root).catch(() => undefined);

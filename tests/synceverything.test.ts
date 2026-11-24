@@ -221,9 +221,12 @@ test('A copy that can’t be read, and an MCP entry in a form Central Knot doesn
   try {
     // A folder that can't be copied as it is (a link inside) is a row with no Add; one with a file it can't read is no row.
     await putSkill(box, 'claude-cli', 'linked');
-    const outside = join(box.base, 'outside.txt');
-    await writeFile(outside, 'outside\n');
-    await symlink(outside, join(box.home, skillRoot['claude-cli'], 'linked', 'outside'));
+    if (process.platform === 'win32') {
+      // Windows has no /etc/hosts to link to: a file of the test's own outside the home stands in for it.
+      const outside = join(box.base, 'outside.txt');
+      await writeFile(outside, 'outside\n');
+      await symlink(outside, join(box.home, skillRoot['claude-cli'], 'linked', 'outside'));
+    } else await symlink('/etc/hosts', join(box.home, skillRoot['claude-cli'], 'linked', 'hosts'));
     if (!winLockSkip) {
       await putSkill(box, 'claude-cli', 'locked');
       const lockedFile = join(box.home, skillRoot['claude-cli'], 'locked', 'private.txt');

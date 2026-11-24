@@ -10,7 +10,7 @@ import { applyBase, baseView, instructionsView, saveInstruction, undoBase } from
 import { PART_TEXT_LIMIT } from '../src/instructionparts.ts';
 import { sha256, type ShareContext } from '../src/share.ts';
 import type { HarnessId, InstructionPart } from '../src/types.ts';
-import { lockPath, lockSkip } from './fslock.ts';
+import { lockPath, winLockSkip } from './fslock.ts';
 import { slashPath } from './wincompat.ts';
 
 const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
@@ -157,7 +157,7 @@ test('Claude Code’s rules: a linked folder is followed and each real folder re
     await symlink('..', join(box.home, '.claude/rules/sub/back'));
     await box.write('shared-rules/linked.md', 'Linked.\n');
     await symlink(join(box.home, 'shared-rules'), join(box.home, '.claude/rules/team'));
-    if (!lockSkip) {
+    if (!winLockSkip) {
       await box.write('.claude/rules/locked/hidden.md', 'Not readable here.\n');
       unlock = await lockPath(locked, 'dir-unreadable');
     }
@@ -166,7 +166,7 @@ test('Claude Code’s rules: a linked folder is followed and each real folder re
       '.claude/rules/team/linked.md · a rule · Linked.\n',
       '.claude/rules/top.md · a rule · Top.\n',
     ]);
-    if (lockSkip) await t.test('an unreadable rules folder leaves the rest listed', { skip: lockSkip }, () => {});
+    if (winLockSkip) await t.test('an unreadable rules folder leaves the rest listed', { skip: winLockSkip }, () => {});
   } finally { await unlock?.(); await box.cleanup(); }
 });
 

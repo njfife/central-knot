@@ -366,11 +366,10 @@ test('Merge on real folders never loses a side: a script made runnable here and 
     assert.deepEqual(merged(await mergeIt(box, id)), [{ name: 'notes', answer: 'merge', merge: 'merged' }]);
     for (const tool of box.tools) {
       const folder = folderOf(box, tool as never, 'notes');
-      assert.deepEqual([await readFile(join(folder, 'mine.md'), 'utf8'), await toolBody(box, tool, 'notes')], ['Mine.\n', 'Last, theirs.']);
+      if (posixModeSkip) assert.deepEqual([await readFile(join(folder, 'mine.md'), 'utf8'), await toolBody(box, tool, 'notes')], ['Mine.\n', 'Last, theirs.']);
+      else assert.deepEqual([(await stat(join(folder, 'run.sh'))).mode & 0o111, await readFile(join(folder, 'mine.md'), 'utf8'), await toolBody(box, tool, 'notes')], [0o111, 'Mine.\n', 'Last, theirs.']);
     }
-    await t.test('POSIX execute bit survives merge on real folders', { skip: posixModeSkip }, async () => {
-      for (const tool of box.tools) assert.equal((await stat(join(folderOf(box, tool as never, 'notes'), 'run.sh'))).mode & 0o111, 0o111, tool);
-    });
+    if (posixModeSkip) await t.test('POSIX execute bit survives merge on real folders', { skip: posixModeSkip }, () => {});
     await rm(join(claude, 'notes.md'));
     await applySkills(box.context, box.tools, []);
     await repo.commit({ 'notes.md': 'Notes, changed at the source.\n' }, '2026-11-04T10:00:00Z');
