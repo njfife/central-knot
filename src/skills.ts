@@ -41,14 +41,14 @@ import { pluginsRecordHold } from './sourcestore.ts';
 import { followCopy, isDisabled, piListWords, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, type ListEdit, type SwitchFile } from './skillswitch.ts';
 import { agentInPi, agentKind, applyAgents } from './agents.ts';
 import { harnesses } from './harnesses.ts';
+import { shownFromHome } from './machine.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, Skill, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy } from './types.ts';
 import { andList, notManagedHere, throughPlugin, toolName } from './words.ts';
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const nameOf = (tool: HarnessId) => toolName(tool);
 /** A path as a sentence says it, as the page shows paths (app.ts shownPath): inside the real home from ~, inside another home from "…". */
-const pathWords = (context: ShareContext, path: string) =>
-  (path.startsWith(`${context.home}/`) ? `${context.mode === 'actual' ? '~' : '…'}${path.slice(context.home.length)}` : path);
+const pathWords = (context: ShareContext, path: string) => shownFromHome(path, context);
 /** A skill's first line of body text, which the copy question quotes to tell copies apart. */
 const bodyLine = (content: string) => content.replace(/^﻿?---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/, '').split(/\r?\n/)
   .map(line => line.trim()).find(line => line && !line.startsWith('#')) ?? '';
