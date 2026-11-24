@@ -19,6 +19,7 @@ import type { ShareContext } from '../src/share.ts';
 import { isDisabled, readSwitchFile, setDisabled } from '../src/skillswitch.ts';
 import { readJsonc } from '../src/textedit.ts';
 import type { HarnessId } from '../src/types.ts';
+import { slashPath } from './wincompat.ts';
 
 const tools: HarnessId[] = ['claude-cli', 'opencode-cli'];
 const OPENCODE = '.config/opencode';
@@ -39,8 +40,13 @@ const exists = (path: string) => lstat(path).then(() => true, () => false);
 const settings = (home: string) => join(home, OPENCODE, 'opencode.json');
 
 test('OpenCode is looked for where its installer puts it first, and its folder follows XDG_CONFIG_HOME', () => {
-  assert.equal(executableCandidates('/h', '/usr/bin', 'opencode')[0], '/h/.opencode/bin/opencode');
-  assert.equal(envOverride(harnesses['opencode-cli'], { XDG_CONFIG_HOME: '/x' }), '/x/opencode');
+  if (process.platform === 'win32') {
+    assert.equal(slashPath(executableCandidates('/h', '/usr/bin', 'opencode', 'linux')[0]), '/h/.opencode/bin/opencode');
+    assert.equal(envOverride(harnesses['opencode-cli'], { XDG_CONFIG_HOME: '/x' }), join('/x', 'opencode'));
+  } else {
+    assert.equal(executableCandidates('/h', '/usr/bin', 'opencode')[0], '/h/.opencode/bin/opencode');
+    assert.equal(envOverride(harnesses['opencode-cli'], { XDG_CONFIG_HOME: '/x' }), '/x/opencode');
+  }
   assert.equal(envOverride(harnesses['opencode-cli'], {}), undefined);
   assert.equal(envOverride(harnesses['claude-cli'], { CLAUDE_CONFIG_DIR: '/c' }), '/c');
 });

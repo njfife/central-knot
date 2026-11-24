@@ -50,7 +50,9 @@ test('Start at sign-in shows the system’s answer, and why it is off or can’t
   assert.equal(named('Linux AppImage, a file it didn’t write in its place').reason?.text, 'Another file is in its place, which Central Knot didn’t write and leaves as it is: /home/a/.config/autostart/com.centralknot.firstlook.desktop.');
 });
 
-test('XDG places: the config and data folders the environment names, else ~/.config and ~/.local/share; a relative one is ignored', () => {
+const linuxSkip = process.platform === 'win32' && 'Linux-only XDG desktop/autostart paths and POSIX modes (src/signin.ts); covered on Linux and macOS.';
+
+test('XDG places: the config and data folders the environment names, else ~/.config and ~/.local/share; a relative one is ignored', { skip: linuxSkip }, () => {
   assert.deepEqual(linuxPlaces('/home/a', {}, 'com.centralknot.alpha'), {
     autostart: '/home/a/.config/autostart/com.centralknot.alpha.desktop',
     launcher: '/home/a/.local/share/applications/com.centralknot.alpha.desktop',
@@ -88,7 +90,7 @@ async function inHome(example: (places: ReturnType<typeof linuxPlaces>, icon: Bu
 const wrote = (...paths: string[]) => paths.map(path => `wrote ${path}`);
 const moved = { ...app, appImage: '/home/a/Applications/Central-Knot-Alpha.AppImage' };
 
-test('Linux start at sign-in is Central Knot’s own autostart file: written whole when on, removed when off, read back as on or off', () => inHome(async places => {
+test('Linux start at sign-in is Central Knot’s own autostart file: written whole when on, removed when off, read back as on or off', { skip: linuxSkip }, () => inHome(async places => {
   assert.deepEqual(readAutostart(places), { openAtLogin: false }, 'none yet: off');
   assert.equal(await placeAutostart(places, app, true), true);
   assert.equal(readFileSync(places.autostart, 'utf8'), desktopEntry(app, 'autostart'), 'on: the folder is made and the file written');
@@ -200,7 +202,7 @@ test('only an entry whose program is another AppImage has moved: anything else i
   await keptThrough(launcher(desktopEntry(app, 'launcher').replaceAll('\n', '\r\n')));
 }));
 
-test('an icon already at its path is left as it is, and one that can’t be written stops neither entry', () => inHome(async (places, icon) => {
+test('an icon already at its path is left as it is, and one that can’t be written stops neither entry', { skip: linuxSkip }, () => inHome(async (places, icon) => {
   mkdirSync(join(places.icon, '..'), { recursive: true });
   writeFileSync(places.icon, 'his own picture');
   assert.deepEqual(await keepEntries(places, app, icon), wrote(places.launcher));

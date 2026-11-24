@@ -3,6 +3,7 @@
 // each part's content kept in the store, the copies in the tools, and the plugins record its first read made. The same over a
 // whole home alpha 1 made is tests/upgrade.test.ts.
 import { test } from 'node:test';
+import { winLockSkip, withLock } from './fslock.ts';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -305,17 +306,18 @@ test('Nothing kept: an unedited skill tells by its recorded hash; a server can�
   } finally { await box.cleanup(); }
 });
 
-test('It waits whole while a copy on record can’t be read, the record can’t, plugins.json isn’t made, or there is no sync record; then a run finishes it', async () => {
+test('It waits whole while a copy on record can’t be read, the record can’t, plugins.json isn’t made, or there is no sync record; then a run finishes it', async t => {
   const box = await partsHome();
   try {
     const hash = await box.keep('pdf');
     await box.record([{ tool: 'pi-cli', item: part('pdf', hash) }]);
     await mkdir(box.at('pi-cli', 'skills/pdf'), { recursive: true });
     await put(box.at('pi-cli', 'skills/pdf/SKILL.md'), '');
-    const { chmod } = await import('node:fs/promises');
-    await chmod(box.at('pi-cli', 'skills/pdf/SKILL.md'), 0);
-    assert.ok((await box.migrate()).waits, 'a copy that can’t be read');
-    await chmod(box.at('pi-cli', 'skills/pdf/SKILL.md'), 0o644);
+    await t.test('waits while a copy on record can’t be read', { skip: winLockSkip }, async () => {
+      await withLock(box.at('pi-cli', 'skills/pdf/SKILL.md'), 'file-unreadable', async () => {
+        assert.ok((await box.migrate()).waits, 'a copy that can’t be read');
+      });
+    });
     await box.copy('pi-cli', 'pdf');
     const text = await readFile(join(box.home, '.central-knot/plugin-parts.json'), 'utf8');
     await writeFile(join(box.home, '.central-knot/plugin-parts.json'), '{"installs":');

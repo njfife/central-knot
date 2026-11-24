@@ -34,13 +34,15 @@ esac`);
   catch (error) { throw Object.assign(error as Error, { calls: calls(), image, mount }); }
 }
 
-test('A disk refused its eject (“Resource busy”) is detached by its device, tried again forced: no longer there is detached', t => {
+const macSkip = process.platform === 'win32' && 'Mac-only hdiutil disk-image helper (scripts/mac-dmg.mjs); covered on macOS and Linux.';
+
+test('A disk refused its eject (“Resource busy”) is detached by its device, tried again forced: no longer there is detached', { skip: macSkip }, t => {
   assert.deepEqual(detachWith(t, [busy, gone]), [
     'attach <box>/writable.dmg -nobrowse -noautoopen -mountpoint <box>/volume -readonly', 'detach /dev/disk5', 'detach /dev/disk5 -force']);
   assert.deepEqual(detachWith(t, Array(5).fill(busy)).slice(1), ['detach /dev/disk5', ...Array(5).fill('detach /dev/disk5 -force')]);
 });
 
-test('A disk still busy after twelve tries fails naming image, mount and device, any other refusal fails at once, and work errors or bad attach output are not lost', t => {
+test('A disk still busy after twelve tries fails naming image, mount and device, any other refusal fails at once, and work errors or bad attach output are not lost', { skip: macSkip }, t => {
   const namesAll = (e: Fail) => e.message.includes(e.image) && e.message.includes(e.mount) && e.message.includes('/dev/disk5') && e.leftMounted === true;
   assert.throws(() => detachWith(t, Array(15).fill(busy)), (e: Fail) => /Resource busy/.test(e.message) && namesAll(e) && e.calls.slice(1).length === 12);
   assert.throws(() => detachWith(t, ['hdiutil: detach failed - Operation not permitted']), (e: Fail) => /Operation not permitted/.test(e.message) && namesAll(e) && e.calls.slice(1).length === 1);

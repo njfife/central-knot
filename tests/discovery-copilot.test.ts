@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { codexProblem, copilotProblem, discover, parseSkill } from '../src/discovery.ts';
 import { execFileSync } from 'node:child_process';
+import { makeWritableTree } from './fslock.ts';
 
 const CLAUDE = '.claude/skills', COPILOT = '.copilot/skills', AGENTS = '.agents/skills';
 const noPosix = process.platform === 'win32';
@@ -13,7 +14,11 @@ async function sandbox() {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-share-')));
   const home = join(base, 'home');
   await mkdir(home);
-  return { base, home, settingsPath: join(base, 'settings', 'settings.json'), realHome: join(base, 'real-home'), cleanup: () => { execFileSync('chmod', ['-R', 'u+rwx', base]); return rm(base, { recursive: true, force: true }); } };
+  return { base, home, settingsPath: join(base, 'settings', 'settings.json'), realHome: join(base, 'real-home'), cleanup: () => {
+    // Windows has no chmod to call: makeWritableTree (tests/fslock.ts) gives the tree back to its owner there.
+    if (process.platform === 'win32') return makeWritableTree(base).then(() => rm(base, { recursive: true, force: true }));
+    execFileSync('chmod', ['-R', 'u+rwx', base]); return rm(base, { recursive: true, force: true });
+  } };
 }
 
 const text = (name: string, body = 'Body.') => `---\nname: ${name}\ndescription: A ${name} skill.\n---\n\n${body}\n`;
