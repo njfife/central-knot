@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { winLockSkip, withLock } from './fslock.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { byHand, observe, passStarts, seenBefore, seenIn, type ToolsSeen } from '../src/arrivals.ts';
@@ -123,7 +124,7 @@ test('A pass that didn’t bring the home into line fixes no count: one that may
   } finally { await b.cleanup(); }
 });
 
-test('A copy held at the pass that brought the home into line (an agents folder that can’t be written) lands later with its own entry; the line keeps that pass’s count', async () => {
+test('A copy held at the pass that brought the home into line (an agents folder that can’t be written) lands later with its own entry; the line keeps that pass’s count', { skip: winLockSkip }, async () => {
   const b = await box();
   try {
     await mkdir(join(b.home, '.claude/agents'), { recursive: true });
@@ -132,9 +133,16 @@ test('A copy held at the pass that brought the home into line (an agents folder 
     assert.equal((await applyAgents(b.context, await managedNow(b.context, await b.context.read()), [{ key: 'reviewer', on: true, except: [] }])).stopped, undefined);
     const before = await b.pass(undefined);
     await b.codex(true);
-    await mkdir(join(b.home, '.codex/agents'), { mode: 0o555 });
-    const part = await b.pass(before);
-    await chmod(join(b.home, '.codex/agents'), 0o755);
+    // On macOS and Linux the folder is made read-only by mkdir's own mode (under the umask); Windows needs the lock helper.
+    let part;
+    if (process.platform === 'win32') {
+      await mkdir(join(b.home, '.codex/agents'));
+      part = await withLock(join(b.home, '.codex/agents'), 'dir-readonly', () => b.pass(before));
+    } else {
+      await mkdir(join(b.home, '.codex/agents'), { mode: 0o555 });
+      part = await b.pass(before);
+      await chmod(join(b.home, '.codex/agents'), 0o755);
+    }
     assert.deepEqual([said(part), said(await b.pass(part)), (await copiedTo(b)).length], [[{ tool: 'codex-cli', copied: 1 }], [{ tool: 'codex-cli', copied: 1 }], 2]);
   } finally { await b.cleanup(); }
 });

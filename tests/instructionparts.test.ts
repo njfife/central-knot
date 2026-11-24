@@ -2,7 +2,7 @@
 // (instructionparts.ts), and that none of them is ever written: a save, the base and its Undo change only the tool's own file.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
@@ -10,6 +10,8 @@ import { applyBase, baseView, instructionsView, saveInstruction, undoBase } from
 import { PART_TEXT_LIMIT } from '../src/instructionparts.ts';
 import { sha256, type ShareContext } from '../src/share.ts';
 import type { HarnessId, InstructionPart } from '../src/types.ts';
+import { lockPath, winLockSkip } from './fslock.ts';
+import { slashPath } from './wincompat.ts';
 
 const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
 async function sandbox() {
@@ -26,7 +28,7 @@ async function sandbox() {
    * when only some, then its text, why it is not shown, or (⚠) what to mend; last, whose own file it is when another tool's.
    */
   const said = async (tool: HarnessId) => (await partsOf(tool)).map((part: InstructionPart) => [
-    part.path.startsWith(home) ? relative(home, part.path) : part.path, part.from, part.only && `for ${part.only}`,
+    part.path.startsWith(home) ? slashPath(relative(home, part.path)) : part.path, part.from, part.only && `for ${part.only}`,
     'text' in part ? part.text : 'notShown' in part ? part.notShown : `⚠ ${part.problem}`, part.ownedBy && `${part.ownedBy}’s own`,
   ].filter(Boolean).join(' · '));
   return { home, context, snapshots, write, partsOf, said, cleanup: () => rm(base, { recursive: true, force: true }) };
@@ -145,23 +147,27 @@ test('Claude Code’s rules: every .md under rules/, sub-folders too, each follo
   } finally { await box.cleanup(); }
 });
 
-test('Claude Code’s rules: a linked folder is followed and each real folder read once, so a loop of links ends; one that can’t be read leaves the rest listed', async () => {
+test('Claude Code’s rules: a linked folder is followed and each real folder read once, so a loop of links ends; one that can’t be read leaves the rest listed', async t => {
   const box = await sandbox();
   const locked = join(box.home, '.claude/rules/locked');
+  let unlock: (() => Promise<void>) | undefined;
   try {
     await box.write('.claude/rules/top.md', 'Top.\n');
     await box.write('.claude/rules/sub/inner.md', 'Inner.\n');
     await symlink('..', join(box.home, '.claude/rules/sub/back'));
     await box.write('shared-rules/linked.md', 'Linked.\n');
     await symlink(join(box.home, 'shared-rules'), join(box.home, '.claude/rules/team'));
-    await box.write('.claude/rules/locked/hidden.md', 'Not readable here.\n');
-    await chmod(locked, 0o000);
+    if (!winLockSkip) {
+      await box.write('.claude/rules/locked/hidden.md', 'Not readable here.\n');
+      unlock = await lockPath(locked, 'dir-unreadable');
+    }
     assert.deepEqual(await box.said('claude-cli'), [
       '.claude/rules/sub/inner.md · a rule · Inner.\n',
       '.claude/rules/team/linked.md · a rule · Linked.\n',
       '.claude/rules/top.md · a rule · Top.\n',
     ]);
-  } finally { await chmod(locked, 0o755); await box.cleanup(); }
+    if (winLockSkip) await t.test('an unreadable rules folder leaves the rest listed', { skip: winLockSkip }, () => {});
+  } finally { await unlock?.(); await box.cleanup(); }
 });
 
 test('Copilot CLI: its instructions files for every file are shown whole, front matter and all; a scoped one comes last, with its scope', async () => {
@@ -262,12 +268,12 @@ test('A file another file brings in is shown, never written: a save, the base an
     const hashes = () => Promise.all(brought.map(async path => sha256(await readFile(join(box.home, path), 'utf8'))));
     const before = await hashes();
     const files = await instructionsView(box.context, await box.snapshots(), true);
-    assert.deepEqual(files.flatMap(file => file.parts!).map(part => relative(box.home, part.path)), brought, 'each is listed');
+    assert.deepEqual(files.flatMap(file => file.parts!).map(part => slashPath(relative(box.home, part.path))), brought, 'each is listed');
     const claude = files.find(file => file.tool === 'claude-cli')!;
     assert.equal((await saveInstruction(box.context, await box.snapshots(), 'claude-cli', 'Mine, edited.\n@a.md\n', claude.hash)).saved, true);
     const seen = Object.fromEntries((await instructionsView(box.context, await box.snapshots())).map(file => [file.tool, { path: file.path, hash: file.hash }]));
     const applied = await applyBase(box.context, await box.snapshots(), { text: 'Shared.\n', expected: (await baseView(box.context)).hash, seen, tools });
-    assert.deepEqual(applied.written.map(file => relative(box.home, file.path)).sort(),
+    assert.deepEqual(applied.written.map(file => slashPath(relative(box.home, file.path))).sort(),
       ['.claude/CLAUDE.md', '.codex/AGENTS.md', '.config/opencode/AGENTS.md', '.copilot/copilot-instructions.md', '.pi/agent/AGENTS.md'], 'the base goes to each tool’s own file');
     assert.deepEqual(await hashes(), before, 'after a save and the base');
     assert.equal((await undoBase(box.context, await box.snapshots(), applied.undo!)).written.length, 5);

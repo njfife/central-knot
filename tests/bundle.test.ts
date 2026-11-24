@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, truncate, writeFile } from 'node:fs/promises';
+import { winLockSkip, withLock } from './fslock.ts';
+import { posixModeSkip } from './wincompat.ts';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { aboutBuild, activeBundle, bundledMarketplace, customBuild, openBundle, readRelease, releaseDate, releaseLabel } from '../src/bundle.ts';
@@ -87,7 +89,7 @@ test('a custom build file that isn’t one reads as the standard build', () => {
     { id: 'acme', name: 'Acme', bundleId: 'com.centralknot.custom.acme', marketplace: { displayName: 'Acme plugins' } });
 });
 
-test('packing: every plugin’s files go in as they are, a plugin kept elsewhere is fetched, and one that can’t be is named', async () => {
+test('packing: every plugin’s files go in as they are, a plugin kept elsewhere is fetched, and one that can’t be is named', async t => {
   const { base, source, pack, cleanup } = await setup();
   try {
     const packed = await pack(join(base, 'out'));
@@ -117,8 +119,10 @@ test('packing: every plugin’s files go in as they are, a plugin kept elsewhere
     const folder = bundledMarketplace(data);
     assert.equal(opened.active?.folder, folder);
     assert.equal(await readFile(join(folder, 'plugins/docs/skills/pdf/SKILL.md'), 'utf8'), await readFile(join(source, 'plugins/docs/skills/pdf/SKILL.md'), 'utf8'));
-    assert.equal((await stat(join(folder, 'plugins/docs/bin/run.sh'))).mode & 0o777, 0o755);
-    assert.equal((await stat(join(folder, 'plugins/docs/bin/shared.sh'))).mode & 0o777, 0o775, 'a mode this account wouldn’t give a new file is kept too');
+    await t.test('POSIX file modes (0755, 0775) are kept through packing and opening', { skip: posixModeSkip }, async () => {
+      assert.equal((await stat(join(folder, 'plugins/docs/bin/run.sh'))).mode & 0o777, 0o755);
+      assert.equal((await stat(join(folder, 'plugins/docs/bin/shared.sh'))).mode & 0o777, 0o775, 'a mode this account wouldn’t give a new file is kept too');
+    });
     assert.equal(await readFile(join(folder, 'plugins/docs/skills/pdf/alias.md'), 'utf8'), await readFile(join(folder, 'plugins/docs/skills/pdf/SKILL.md'), 'utf8'));
     assert.equal(await exists(join(folder, '.git')), false);
     assert.equal(await exists(join(folder, '_bundled/elsewhere/.git')), false);
@@ -253,7 +257,7 @@ test('opening: a swap that stopped halfway is mended, so the last working conten
   } finally { await cleanup(); }
 });
 
-test('staging a custom build: its identity file, the carried release, its pictures and a report that says what is not met', async () => {
+test('staging a custom build: its identity file, the carried release, its pictures and a report that says what is not met', async t => {
   const { base, source, cleanup } = await setup();
   try {
     await writeFile(join(base, 'icon.png'), 'png');
@@ -283,11 +287,14 @@ test('staging a custom build: its identity file, the carried release, its pictur
     assert.deepEqual((await readdir(out)).sort(), ['build-report.txt', 'custom-build.json']);
     assert.match(plain.report, /Marketplace: none/);
     // A staging that stopped halfway (its icon is there but can't be read) leaves a folder the next staging may clear.
-    await writeFile(join(base, 'locked.png'), 'png');
-    await chmod(join(base, 'locked.png'), 0o000);
-    await assert.rejects(stageCustomBuild({ marketplace: source, appName: 'Acme Knot', appIcon: join(base, 'locked.png') }, { out: join(base, 'half'), work: join(base, 'work') }));
-    assert.equal((await readdir(join(base, 'half'))).includes('bundle'), true, 'it stopped after the marketplace was packed');
-    assert.equal((await stageCustomBuild({ appName: 'Staging Knot' }, { out: join(base, 'half'), work: join(base, 'work') })).build.id, 'staging-knot');
+    await t.test('a staging stopped halfway by an unreadable icon leaves a folder the next staging may clear', { skip: winLockSkip }, async () => {
+      await writeFile(join(base, 'locked.png'), 'png');
+      await withLock(join(base, 'locked.png'), 'file-unreadable', async () => {
+        await assert.rejects(stageCustomBuild({ marketplace: source, appName: 'Acme Knot', appIcon: join(base, 'locked.png') }, { out: join(base, 'half'), work: join(base, 'work') }));
+        assert.equal((await readdir(join(base, 'half'))).includes('bundle'), true, 'it stopped after the marketplace was packed');
+        assert.equal((await stageCustomBuild({ appName: 'Staging Knot' }, { out: join(base, 'half'), work: join(base, 'work') })).build.id, 'staging-knot');
+      });
+    });
     // Staging clears a folder staged before, never a folder holding someone's other files.
     await mkdir(join(base, 'mine'));
     await writeFile(join(base, 'mine/notes.txt'), 'keep');

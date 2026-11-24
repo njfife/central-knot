@@ -5,7 +5,8 @@
 // profile in use; and the agent row that offered an Add that did nothing.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { lockPath, winLockSkip } from './fslock.ts';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { agentsView, applyAgents } from '../src/agents.ts';
@@ -214,24 +215,41 @@ test('A skill saved in two goes: the first, inside the settle window, is left fo
   } finally { await box.cleanup(); }
 });
 
-test('A copy that can’t be read, and an MCP entry in a form Central Knot doesn’t edit, are left quietly; so is a tool Central Knot doesn’t manage', async () => {
+test('A copy that can’t be read, and an MCP entry in a form Central Knot doesn’t edit, are left quietly; so is a tool Central Knot doesn’t manage', async t => {
   const box = await sandbox();
+  let unlock: (() => Promise<void>) | undefined;
   try {
     // A folder that can't be copied as it is (a link inside) is a row with no Add; one with a file it can't read is no row.
     await putSkill(box, 'claude-cli', 'linked');
-    await symlink('/etc/hosts', join(box.home, skillRoot['claude-cli'], 'linked', 'hosts'));
-    await putSkill(box, 'claude-cli', 'locked');
-    await writeFile(join(box.home, skillRoot['claude-cli'], 'locked', 'private.txt'), 'x');
-    await chmod(join(box.home, skillRoot['claude-cli'], 'locked', 'private.txt'), 0o000);
+    if (process.platform === 'win32') {
+      // Windows has no /etc/hosts to link to: a file of the test's own outside the home stands in for it.
+      const outside = join(box.base, 'outside.txt');
+      await writeFile(outside, 'outside\n');
+      await symlink(outside, join(box.home, skillRoot['claude-cli'], 'linked', 'outside'));
+    } else await symlink('/etc/hosts', join(box.home, skillRoot['claude-cli'], 'linked', 'hosts'));
+    if (!winLockSkip) {
+      await putSkill(box, 'claude-cli', 'locked');
+      const lockedFile = join(box.home, skillRoot['claude-cli'], 'locked', 'private.txt');
+      await writeFile(lockedFile, 'x');
+      unlock = await lockPath(lockedFile, 'file-unreadable');
+    }
     await writeFile(join(box.home, mcpFile['claude-cli']), `${JSON.stringify({ mcpServers: { odd: 42 } }, null, 2)}\n`);
     await mkdir(join(box.home, '.pi/agent/skills/elsewhere'), { recursive: true });
     await writeFile(join(box.home, '.pi/agent/skills/elsewhere/SKILL.md'), skill('elsewhere'));
     await turnOn(box);
     const done = await background(box);
     const view = await views(box);
-    assert.deepEqual([wrote(done), noticesOf(done), Object.keys(view.skills.library), Object.keys(view.mcp.library), rowOf(view.skills, 'locked'), rowOf(view.skills, 'elsewhere')], [0, [], [], [], undefined, undefined]);
+    if (winLockSkip) {
+      assert.deepEqual([wrote(done), noticesOf(done), Object.keys(view.skills.library), Object.keys(view.mcp.library), rowOf(view.skills, 'elsewhere')], [0, [], [], [], undefined]);
+      await t.test('a skill with an unreadable file inside is no row and stays untouched', { skip: winLockSkip }, () => {});
+    } else {
+      assert.deepEqual([wrote(done), noticesOf(done), Object.keys(view.skills.library), Object.keys(view.mcp.library), rowOf(view.skills, 'locked'), rowOf(view.skills, 'elsewhere')], [0, [], [], [], undefined, undefined]);
+    }
     assert.deepEqual([rowOf(view.skills, 'linked')?.takeInAnswers, rowOf(view.mcp, 'odd')?.takeInAnswers], [{ click: { leave: 'no-copy' }, rule: { leave: 'no-copy' } }, { click: { leave: 'no-copy' }, rule: { leave: 'no-copy' } }]);
-  } finally { await box.cleanup(); }
+  } finally {
+    await unlock?.();
+    await box.cleanup();
+  }
 });
 
 test('While a plugin’s parts wait to be moved to the library, no copy of their names is taken in, his own in another tool neither; Add has nothing to take', async () => {

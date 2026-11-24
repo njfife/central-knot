@@ -19,6 +19,7 @@ import { createMarketplaces } from '../../src/marketplaces.ts';
 import { managedNow, readRecord, writeAccess, type ShareContext } from '../../src/share.ts';
 import { skillVersion, skillsView } from '../../src/skills.ts';
 import type { LibraryView } from '../../src/types.ts';
+import { slashPath } from '../wincompat.ts';
 
 /** The app's context for a chosen folder, as main.ts context() makes it, with no tool's folder moved by a variable. */
 export function appContext(home: string, appData: string): ShareContext {
@@ -46,7 +47,7 @@ export async function filesIn(folder: string): Promise<Files> {
   const found: Files = { sha256: {}, stamp: {} };
   const entries = (await readdir(folder, { recursive: true, withFileTypes: true })).filter(entry => entry.isFile());
   for (const path of entries.map(entry => join(entry.parentPath, entry.name)).sort()) {
-    const name = relative(folder, path), info = await stat(path);
+    const name = slashPath(relative(folder, path)), info = await stat(path);
     found.sha256[name] = createHash('sha256').update(await readFile(path)).digest('hex');
     found.stamp[name] = `${info.ino}:${info.mtimeMs}`;
   }

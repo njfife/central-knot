@@ -99,9 +99,9 @@ test('A plugin’s instruction files are listed by their path in it, from the fi
     await put(join(plugin, 'skills/s/SKILL.md'), '---\nname: s\n---\n');
     await put(join(plugin, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'notes', instructions: './rules/style.md' }));
     const contents = await pluginContents(plugin, {}, root);
-    assert.deepEqual(contents.instructions.map(file => file.path), ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md', join('.claude', 'CLAUDE.md'), join('.github', 'copilot-instructions.md'), join('com.github.copilot', 'rules', 'plain.md'), join('com.github.copilot', 'rules', 'scoped.instructions.md')]);
+    assert.deepEqual(contents.instructions.map(file => file.path), ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md', '.claude/CLAUDE.md', '.github/copilot-instructions.md', 'com.github.copilot/rules/plain.md', 'com.github.copilot/rules/scoped.instructions.md']);
     // Each is named by its path and holds its whole text, as a skill's file does.
-    assert.deepEqual(contents.instructions[3], { name: join('.claude', 'CLAUDE.md'), description: '', text: 'Read me: .claude/CLAUDE.md\n', path: join('.claude', 'CLAUDE.md') });
+    assert.deepEqual(contents.instructions[3], { name: '.claude/CLAUDE.md', description: '', text: 'Read me: .claude/CLAUDE.md\n', path: '.claude/CLAUDE.md' });
   } finally { await cleanup(); }
 });
 

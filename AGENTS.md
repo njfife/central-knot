@@ -29,7 +29,8 @@ Keep the loop short. These are the checks; nothing else is required.
 - The Mac is its owner's own computer. The Mac run waits while it is short of memory, swap or disk (`scripts/mac-guard.ts`), keeps its temporary files under `/private/tmp/ck-ci-<run>-<attempt>/` and, however it ends, removes them, empties `release/` and stops what it left running. A task that touches the Mac removes what it made there before it ends.
 - The full tour (`--full`, hundreds of pictures, about ten minutes) runs for a new release only. Do not run it, repair it or extend it for an ordinary change; a section outside your feature is not yours to fix.
 - The end-to-end checks already open every page, fail on a page error and check that nothing is cut off at each window size. Add a check there, not a tour section, when behaviour needs covering.
-- A Linux run (`.github/workflows/linux.yml`: every push to `next`, or `gh workflow run linux.yml -R njfife/central-knot --ref <branch>`) is for the Linux plan's steps, never a required check for a Mac change; no Windows run is required.
+- A Linux run (`.github/workflows/linux.yml`: every push to `next`, or `gh workflow run linux.yml -R njfife/central-knot --ref <branch>`) is for the Linux plan's steps, never a required check for a Mac change.
+- A Windows run (`.github/workflows/windows.yml`, started by hand with `gh workflow run windows.yml -R njfife/central-knot --ref <branch>`) exists for Windows work and is never required for a Mac or Linux change. A Windows step's brief says when to run it.
 - A change that adds, renames or removes a file under `src/` or `scripts/` changes its entry in `MAP.md`; `tests/map.test.ts` (in `npm test`) fails until it does and says what to change.
 - `docs/SPEC.md` is history, as `LEDGER.md` is: written before the library and not kept true, so read `MAP.md` and the module headers for how the code works now. Its ids cited in comments (`SYN-03`, `MCP-02`, `D-36`) are historical.
 

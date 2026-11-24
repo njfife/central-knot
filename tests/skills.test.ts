@@ -6,7 +6,9 @@ import { test } from 'node:test';
 import { itemNotice } from './notices.ts';
 import assert from 'node:assert/strict';
 import fs, { realpathSync } from 'node:fs';
-import { chmod, mkdir, readFile, readdir, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { lockPath, lockSkip, withLock } from './fslock.ts';
+import { colonNameSkip, posixModeSkip } from './wincompat.ts';
 import { join } from 'node:path';
 import { readHistory } from '../src/history.ts';
 import { libraryEntry, librarySentence } from '../src/historyactions.ts';
@@ -38,7 +40,7 @@ const say = sentences(libraryWords.skills);
 /** A skill with several files: a script that can run, a file of mode 0600, an empty folder, and a file a tool added beside SKILL.md. */
 const rich = { 'SKILL.md': skillText(), 'scripts/run.sh': { text: '#!/bin/sh\necho hi\n', mode: 0o755 }, 'secret.txt': { text: 'mine\n', mode: 0o600 }, 'notes.log': 'added by Claude Code\n' };
 
-test('A skill found in one tool is taken in by its switch and goes into every tool, its whole folder byte for byte', async () => {
+test('A skill found in one tool is taken in by its switch and goes into every tool, its whole folder byte for byte', async t => {
   const box = await sandbox();
   try {
     await put(box, 'claude-cli', rich, ['empty/inside']);
@@ -49,7 +51,10 @@ test('A skill found in one tool is taken in by its switch and goes into every to
     assert.notEqual(await turnOn(box), 'choose');
     const all = await everywhere(box);
     for (const tool of tools) assert.deepEqual(all[tool], all['claude-cli'], tool);
-    assert.equal(all['codex-cli']!['scripts/run.sh'], '755 #!/bin/sh\necho hi\n');
+    assert.ok(all['codex-cli']!['scripts/run.sh']?.endsWith(' #!/bin/sh\necho hi\n'));
+    await t.test('POSIX execute bit (0755) is kept on scripts', { skip: posixModeSkip }, () => {
+      assert.equal(all['codex-cli']!['scripts/run.sh'], '755 #!/bin/sh\necho hi\n');
+    });
     assert.equal(all['codex-cli']!['empty/inside/'] !== undefined, true, 'an empty folder is part of a skill');
     assert.deepEqual((await itemOf(box))!.versions.map(version => version.from), [{ how: 'found', harness: 'claude-cli' }]);
     assert.equal((await pass(box)).writes, 0, 'a second pass finds nothing to do');
@@ -197,7 +202,7 @@ test('A folder seen again in part ends its absence: moved away by a save, back w
   } finally { await box.cleanup(); }
 });
 
-test('A copy held while it is missing (its skills folder can’t be written) ends its absence too: once the folder can be, the window starts again', { skip: process.getuid?.() === 0 }, async () => {
+test('A copy held while it is missing (its skills folder can’t be written) ends its absence too: once the folder can be, the window starts again', { skip: lockSkip }, async () => {
   const box = await sandbox();
   const folder = join(box.home, roots['codex-cli']);
   try {
@@ -206,8 +211,7 @@ test('A copy held while it is missing (its skills folder can’t be written) end
     const waiting = { ...box.context, settleMs: 2000 };
     await rm(folderOf(box, 'codex-cli'), { recursive: true });
     assert.equal((await applySkills(waiting, box.tools, [], { now: 1000 })).settling, true);
-    await chmod(folder, 0o555);
-    try { await applySkills(waiting, box.tools, [], { now: 1500 }); } finally { await chmod(folder, 0o755); }
+    await withLock(folder, 'dir-readonly', () => applySkills(waiting, box.tools, [], { now: 1500 }));
     const writable = await applySkills(waiting, box.tools, [], { now: 300_000 });
     assert.deepEqual([writable.settling, (await itemOf(box))!.on], [true, true]);
     await applySkills(waiting, box.tools, [], { now: 302_500 });
@@ -451,7 +455,7 @@ test('A copy in ~/.agents/skills is not Central Knot’s: the tools that read it
   } finally { await box.cleanup(); }
 });
 
-test('A skill whose folder is named with a colon (Finder shows “review/fix”): its entry is a skill’s, and the click’s Undo takes it out again', async () => {
+test('A skill whose folder is named with a colon (Finder shows “review/fix”): its entry is a skill’s, and the click’s Undo takes it out again', { skip: colonNameSkip }, async () => {
   const box = await sandbox();
   try {
     const name = 'review:fix';
@@ -520,19 +524,20 @@ test('Take over carries a tool’s own switch: a skill Codex had off where it re
   } finally { await box.cleanup(); }
 });
 
-test('A take-over that couldn’t happen leaves no History entry saying it did', { skip: process.getuid?.() === 0 }, async () => {
+test('A take-over that couldn’t happen leaves no History entry saying it did', { skip: lockSkip }, async () => {
   const box = await sandbox();
   const sharedRoot = join(box.home, '.agents/skills');
   try {
     await mkdir(join(sharedRoot, 'notes'), { recursive: true });
     await writeFile(join(sharedRoot, 'notes/SKILL.md'), skillText('In the shared folder.'));
     await turnOn(box);
-    await chmod(sharedRoot, 0o555);
-    const done = await takeOver(box.context, box.tools, 'notes', 'codex-cli');
-    assert.ok(done.stopped, 'the shared copy could not be removed');
-    assert.ok(await bytes(join(sharedRoot, 'notes')), 'and it is still there');
-    assert.equal((await historyOf(box)).filter(event => event.kind === 'took-over').length, 0);
-  } finally { await chmod(sharedRoot, 0o755).catch(() => undefined); await box.cleanup(); }
+    await withLock(sharedRoot, 'dir-readonly', async () => {
+      const done = await takeOver(box.context, box.tools, 'notes', 'codex-cli');
+      assert.ok(done.stopped, 'the shared copy could not be removed');
+      assert.ok(await bytes(join(sharedRoot, 'notes')), 'and it is still there');
+      assert.equal((await historyOf(box)).filter(event => event.kind === 'took-over').length, 0);
+    });
+  } finally { await box.cleanup(); }
 });
 
 test('A link to a copy the tool also reads in ~/.agents/skills (as the skills installer leaves them) is said and taken over as that copy: the link goes with it', async () => {
@@ -651,7 +656,7 @@ test('Only Claude Code’s link to the shared copy deleted by hand: a deletion i
   } finally { await box.cleanup(); }
 });
 
-test('A shared folder that can’t be vouched for: renamed away, unreadable, holding none of its skills (a volume not mounted, a folder of other things put in its place, a link to another skills folder): nothing written, nothing turned off, said once naming the skills; back, all as before', async () => {
+test('A shared folder that can’t be vouched for: renamed away, unreadable, holding none of its skills (a volume not mounted, a folder of other things put in its place, a link to another skills folder): nothing written, nothing turned off, said once naming the skills; back, all as before', async t => {
   const { box, root, toolFolders } = await sharedHome();
   const aside = join(box.base, 'aside'), elsewhere = join(box.base, 'other-skills');
   try {
@@ -663,7 +668,6 @@ test('A shared folder that can’t be vouched for: renamed away, unreadable, hol
       ['empty', async () => { await rename(root, aside); await mkdir(root); }, putBack],
       ['a README in its place', async () => { await rename(root, aside); await mkdir(root); await writeFile(join(root, 'README.md'), 'Not mounted.\n'); }, putBack],
       ['a link to another skills folder', async () => { await rename(root, aside); await symlink(elsewhere, root); }, putBack]];
-    if (process.getuid?.() !== 0) ways.push(['unreadable', () => chmod(root, 0), () => chmod(root, 0o755)]);
     for (const [how, hide, show] of ways) {
       await hide();
       try {
@@ -673,8 +677,15 @@ test('A shared folder that can’t be vouched for: renamed away, unreadable, hol
         if (how === 'renamed away') assert.match(view.problems[0], /until it is back; a skill turned on meanwhile waits for it too \(if you removed it, turn them off and remove any link into it\)\.$/);
       } finally { await show(); }
     }
+    await t.test('an unreadable shared skills folder holds everything unchanged', { skip: lockSkip }, async () => {
+      await withLock(root, 'dir-unreadable', async () => {
+        const done = await pass(box), view = await skillsView(box.context, box.tools);
+        assert.deepEqual([done.writes, done.notices ?? [], (await itemOf(box))!.on, await toolFolders(), view.problems.length], [0, [], true, before, 1], 'unreadable');
+        assert.match(view.problems[0], /^The shared skills folder \(.*\) .*, so Central Knot changes nothing for the skills tools read there \(notes and other\) until/, 'unreadable');
+      });
+    });
     assert.deepEqual([await toolFolders(), (await itemOf(box))!.throughShared, (await pass(box)).writes, await deletedHere(box)], [before, item!.throughShared, 0, []]);
-  } finally { await chmod(root, 0o755).catch(() => undefined); await box.cleanup(); }
+  } finally { await box.cleanup(); }
 });
 
 test('A click while the shared folder can’t be vouched for writes no copy for the tools that wait, and its result says each waits; a profile switch’s too', async () => {
@@ -1137,52 +1148,54 @@ test('The tool choice lets go of a tool’s folder: a tool left out and back get
   } finally { await box.cleanup(); }
 });
 
-test('A folder that can’t be written holds the write there, and the tool catches up once it can', { skip: process.getuid?.() === 0 }, async () => {
+test('A folder that can’t be written holds the write there, and the tool catches up once it can', { skip: lockSkip }, async () => {
   const box = await sandbox();
   try {
     await put(box, 'claude-cli');
-    await chmod(join(box.home, roots['codex-cli']), 0o555);
-    await turnOn(box);
-    const { fact, item, row } = await seen(box);
-    assert.equal(harnessIs(row, item, 'codex-cli'), 'cannot');
-    assert.match(fact!.cannot['codex-cli'] ?? '', /can’t be written/);
-    await chmod(join(box.home, roots['codex-cli']), 0o755);
+    await withLock(join(box.home, roots['codex-cli']), 'dir-readonly', async () => {
+      await turnOn(box);
+      const { fact, item, row } = await seen(box);
+      assert.equal(harnessIs(row, item, 'codex-cli'), 'cannot');
+      assert.match(fact!.cannot['codex-cli'] ?? '', /can’t be written/);
+    });
     await pass(box);
     assert.ok(await bytes(folderOf(box, 'codex-cli')));
-  } finally { await chmod(join(box.home, roots['codex-cli']), 0o755).catch(() => undefined); await box.cleanup(); }
+  } finally { await box.cleanup(); }
 });
 
-test('Clicking Add, On, or a tool’s switch with a locked skills folder names that tool and says why, while background passes and History stay unchanged', { skip: process.getuid?.() === 0 }, async t => {
+test('Clicking Add, On, or a tool’s switch with a locked skills folder names that tool and says why, while background passes and History stay unchanged', { skip: lockSkip }, async t => {
   const lockedWhy = 'Codex’s skills folder can’t be written, so Central Knot can’t change the skill there. Once the folder’s permissions let it, Codex catches up when sync runs.';
   const withLockedCodex = async (run: (box: Box, codexRoot: string) => Promise<void>) => {
     const box = await sandbox(), codexRoot = join(box.home, roots['codex-cli']);
-    try { await run(box, codexRoot); } finally { await chmod(codexRoot, 0o755).catch(() => undefined); await box.cleanup(); }
+    try { await run(box, codexRoot); } finally { await box.cleanup(); }
   };
   await t.test('Add of a found skill read before Codex is locked names Claude Code and Copilot CLI, not Codex', () => withLockedCodex(async (box, codexRoot) => {
     await put(box, 'claude-cli', { 'SKILL.md': skillText('Fifth skill.', 'fifth') }, [], 'fifth');
     const before = await seen(box, box.context, 'fifth');
-    await chmod(codexRoot, 0o555);
-    const added = await send(box, rowClicks.on(before.row, before.item));
-    const addRes = clickResults(added.results, ['fifth']);
-    assert.deepEqual([addRes.notIn, addRes.failed], [['codex-cli'], true]);
-    assert.deepEqual(addRes.ours.filter(entry => entry.harness === 'codex-cli'), [{ item: 'fifth', harness: 'codex-cli', outcome: 'held', message: lockedWhy }]);
-    assert.equal(say.said.takenIn('fifth', tools.filter(tool => !addRes.notIn.includes(tool)), tools), 'fifth is in Central Knot now, and on in Claude Code and Copilot CLI.');
-    assert.deepEqual([(await historyOf(box, box.context, 'fifth')).at(-1)!.losers.map(loser => loser.tool), await bytes(folderOf(box, 'codex-cli', 'fifth'))], [['copilot-cli'], undefined]);
-    assert.deepEqual((await pass(box)).results, [], 'a background pass says nothing new');
+    await withLock(codexRoot, 'dir-readonly', async () => {
+      const added = await send(box, rowClicks.on(before.row, before.item));
+      const addRes = clickResults(added.results, ['fifth']);
+      assert.deepEqual([addRes.notIn, addRes.failed], [['codex-cli'], true]);
+      assert.deepEqual(addRes.ours.filter(entry => entry.harness === 'codex-cli'), [{ item: 'fifth', harness: 'codex-cli', outcome: 'held', message: lockedWhy }]);
+      assert.equal(say.said.takenIn('fifth', tools.filter(tool => !addRes.notIn.includes(tool)), tools), 'fifth is in Central Knot now, and on in Claude Code and Copilot CLI.');
+      assert.deepEqual([(await historyOf(box, box.context, 'fifth')).at(-1)!.losers.map(loser => loser.tool), await bytes(folderOf(box, 'codex-cli', 'fifth'))], [['copilot-cli'], undefined]);
+      assert.deepEqual((await pass(box)).results, [], 'a background pass says nothing new');
+    });
   }));
   await t.test('On for an Off skill names Claude Code and Copilot CLI and says not in Codex', () => withLockedCodex(async (box, codexRoot) => {
     await put(box, 'claude-cli', { 'SKILL.md': skillText('Fifth skill.', 'fifth') }, [], 'fifth');
     await turnOn(box, box.context, 'fifth');
     await turnOff(box, box.context, 'fifth');
-    await chmod(codexRoot, 0o555);
-    assert.equal((await seen(box, box.context, 'fifth')).fact!.cannot['codex-cli'], undefined);
-    const turnedOn = await turnOn(box, box.context, 'fifth');
-    assert.ok(turnedOn !== 'choose');
-    const onRes = clickResults(turnedOn.results, ['fifth']);
-    assert.deepEqual([onRes.notIn, onRes.failed], [['codex-cli'], true]);
-    assert.equal(`fifth is on in ${toolsPhrase(tools.filter(tool => !onRes.notIn.includes(tool)), tools)}; not in ${toolsPhrase(onRes.notIn, tools)}.`, 'fifth is on in Claude Code and Copilot CLI; not in Codex.');
-    assert.deepEqual((await historyOf(box, box.context, 'fifth')).at(-1)!.losers.map(loser => loser.tool), ['claude-cli', 'copilot-cli']);
-    assert.deepEqual((await pass(box)).results, []);
+    await withLock(codexRoot, 'dir-readonly', async () => {
+      assert.equal((await seen(box, box.context, 'fifth')).fact!.cannot['codex-cli'], undefined);
+      const turnedOn = await turnOn(box, box.context, 'fifth');
+      assert.ok(turnedOn !== 'choose');
+      const onRes = clickResults(turnedOn.results, ['fifth']);
+      assert.deepEqual([onRes.notIn, onRes.failed], [['codex-cli'], true]);
+      assert.equal(`fifth is on in ${toolsPhrase(tools.filter(tool => !onRes.notIn.includes(tool)), tools)}; not in ${toolsPhrase(onRes.notIn, tools)}.`, 'fifth is on in Claude Code and Copilot CLI; not in Codex.');
+      assert.deepEqual((await historyOf(box, box.context, 'fifth')).at(-1)!.losers.map(loser => loser.tool), ['claude-cli', 'copilot-cli']);
+      assert.deepEqual((await pass(box)).results, []);
+    });
   }));
   await t.test('Codex’s switch from kept out to on says couldn’t be put in Codex, and catches up once writable', () => withLockedCodex(async (box, codexRoot) => {
     await put(box, 'claude-cli', { 'SKILL.md': skillText('Fifth skill.', 'fifth') }, [], 'fifth');
@@ -1190,14 +1203,14 @@ test('Clicking Add, On, or a tool’s switch with a locked skills folder names t
     const { row: onRow, item: onItem } = await seen(box, box.context, 'fifth');
     const out = await send(box, rowClicks.inHarness(onRow, onItem, 'codex-cli', true));
     assert.deepEqual(clickResults(out.results, ['fifth']).notIn, []);
-    await chmod(codexRoot, 0o555);
-    const { row: outRow, item: outItem } = await seen(box, box.context, 'fifth');
-    const back = await send(box, rowClicks.inHarness(outRow, outItem, 'codex-cli', false));
-    const backRes = clickResults(back.results, ['fifth']);
-    assert.deepEqual([backRes.notIn, backRes.failed], [['codex-cli'], true]);
-    assert.equal(say.said.inHarness('fifth', 'codex-cli', false, backRes.notIn.includes('codex-cli')), 'fifth couldn’t be put in Codex.');
-    assert.deepEqual((await pass(box)).results, []);
-    await chmod(codexRoot, 0o755);
+    await withLock(codexRoot, 'dir-readonly', async () => {
+      const { row: outRow, item: outItem } = await seen(box, box.context, 'fifth');
+      const back = await send(box, rowClicks.inHarness(outRow, outItem, 'codex-cli', false));
+      const backRes = clickResults(back.results, ['fifth']);
+      assert.deepEqual([backRes.notIn, backRes.failed], [['codex-cli'], true]);
+      assert.equal(say.said.inHarness('fifth', 'codex-cli', false, backRes.notIn.includes('codex-cli')), 'fifth couldn’t be put in Codex.');
+      assert.deepEqual((await pass(box)).results, []);
+    });
     const caught = await pass(box);
     assert.deepEqual([caught.writes, caught.results.filter(entry => entry.outcome === 'held'), !!(await bytes(folderOf(box, 'codex-cli', 'fifth')))], [1, [], true]);
     assert.deepEqual([(await pass(box)).writes, (await pass(box)).results], [0, []]);
@@ -1205,10 +1218,11 @@ test('Clicking Add, On, or a tool’s switch with a locked skills folder names t
   await t.test('Synchronize everything reports a locked folder once on take-in, not on later passes', () => withLockedCodex(async (box, codexRoot) => {
     await setSyncEverything(box.context, true);
     await put(box, 'claude-cli', { 'SKILL.md': skillText('Sixth skill.', 'sixth') }, [], 'sixth');
-    await chmod(codexRoot, 0o555);
-    const firstRule = await pass(box);
-    assert.deepEqual(firstRule.results.filter(entry => entry.outcome === 'held'), [{ item: 'sixth', harness: 'codex-cli', outcome: 'held', message: lockedWhy }]);
-    assert.deepEqual((await pass(box)).results, [], 'not repeated on the next pass');
+    await withLock(codexRoot, 'dir-readonly', async () => {
+      const firstRule = await pass(box);
+      assert.deepEqual(firstRule.results.filter(entry => entry.outcome === 'held'), [{ item: 'sixth', harness: 'codex-cli', outcome: 'held', message: lockedWhy }]);
+      assert.deepEqual((await pass(box)).results, [], 'not repeated on the next pass');
+    });
   }));
 });
 
@@ -1256,7 +1270,7 @@ test('A tool whose skills folder is linked to another tool’s locks both folder
   } finally { await box.cleanup(); }
 });
 
-test('Only a tool held by its locked skills folder is named on a click, not one kept out, with a plugin, or reading another copy', { skip: process.getuid?.() === 0 }, async () => {
+test('Only a tool held by its locked skills folder is named on a click, not one kept out, with a plugin, or reading another copy', { skip: lockSkip }, async () => {
   const box = await sandbox(['claude-cli', 'copilot-cli', 'codex-cli', 'opencode-cli']);
   const claudeRoot = join(box.home, roots['claude-cli']), codexRoot = join(box.home, roots['codex-cli']), opencodeRoot = join(box.home, roots['opencode-cli']);
   try {
@@ -1274,27 +1288,28 @@ test('Only a tool held by its locked skills folder is named on a click, not one 
     const { row: keptRow, item: keptItem } = await seen(box, box.context, 'fifth');
     await send(box, rowClicks.inHarness(keptRow, keptItem, 'copilot-cli', true));
     await turnOff(box, box.context, 'fifth');
-    await chmod(codexRoot, 0o555);
-    const turnedOn = await turnOn(box, box.context, 'fifth');
-    assert.ok(turnedOn !== 'choose');
-    assert.deepEqual(clickResults(turnedOn.results, ['fifth']).notIn, ['codex-cli'], 'kept out and plugin tools are not named');
-    // Even if Claude Code's own folder is also locked, Claude Code is held by the plugin (Disk.held), not by the lock.
-    await turnOff(box, box.context, 'fifth');
-    await chmod(claudeRoot, 0o555);
-    const bothLocked = await turnOn(box, box.context, 'fifth');
-    assert.ok(bothLocked !== 'choose');
-    assert.deepEqual(clickResults(bothLocked.results, ['fifth']).notIn, ['codex-cli']);
-    await chmod(claudeRoot, 0o755);
-    await chmod(codexRoot, 0o755);
+    const unlockCodex = await lockPath(codexRoot, 'dir-readonly');
+    try {
+      const turnedOn = await turnOn(box, box.context, 'fifth');
+      assert.ok(turnedOn !== 'choose');
+      assert.deepEqual(clickResults(turnedOn.results, ['fifth']).notIn, ['codex-cli'], 'kept out and plugin tools are not named');
+      // Even if Claude Code's own folder is also locked, Claude Code is held by the plugin (Disk.held), not by the lock.
+      await turnOff(box, box.context, 'fifth');
+      await withLock(claudeRoot, 'dir-readonly', async () => {
+        const bothLocked = await turnOn(box, box.context, 'fifth');
+        assert.ok(bothLocked !== 'choose');
+        assert.deepEqual(clickResults(bothLocked.results, ['fifth']).notIn, ['codex-cli']);
+      });
+    } finally { await unlockCodex(); }
     // OpenCode reads Claude Code's folder: keeping another skill out of Claude Code while OpenCode's folder is locked names OpenCode.
     await put(box, 'claude-cli', { 'SKILL.md': skillText('Shared reader.', 'reader') }, [], 'reader');
     await turnOn(box, box.context, 'reader');
-    await chmod(opencodeRoot, 0o555);
-    const { row: readerRow, item: readerItem } = await seen(box, box.context, 'reader');
-    const outOfClaude = await send(box, rowClicks.inHarness(readerRow, readerItem, 'claude-cli', true));
-    assert.deepEqual(clickResults(outOfClaude.results, ['reader']).notIn, ['opencode-cli']);
+    await withLock(opencodeRoot, 'dir-readonly', async () => {
+      const { row: readerRow, item: readerItem } = await seen(box, box.context, 'reader');
+      const outOfClaude = await send(box, rowClicks.inHarness(readerRow, readerItem, 'claude-cli', true));
+      assert.deepEqual(clickResults(outOfClaude.results, ['reader']).notIn, ['opencode-cli']);
+    });
   } finally {
-    for (const dir of [claudeRoot, codexRoot, opencodeRoot]) await chmod(dir, 0o755).catch(() => undefined);
     await box.cleanup();
   }
 });
