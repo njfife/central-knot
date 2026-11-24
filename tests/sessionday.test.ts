@@ -848,3 +848,47 @@ test('An older copy of the same root session, an unread line in the tree, or a l
   assert.equal(goneView.rows.find(r => r.session === 'locked-parent')!.reported, undefined, 'unreadable child file blocks parent figure');
   assert.deepEqual(goneView.byTool.map(each => [each.tool, each.unread]), [['claude-cli', true], ['codex-cli', true]]);
 });
+
+test('An unreadable nested folder (Claude subagents or Codex dated day) flags unread without hiding siblings and blocks the parent figure', async () => {
+  const home = await newHome();
+  const t = TODAY.start + 10 * HOUR;
+
+  // Claude Code: readable parent root.jsonl beside unlistable root/subagents (and even with a second copy in another project).
+  await put(join(home, '.claude/projects/p/root.jsonl'), [
+    claudeReply('p1', t, claudeUsage(5_000, 0, 0, 800), 'claude-fable-5', '/work/p', 'root'),
+    claudeCost(0.42, 'root'),
+  ], t);
+  const blockedSubagents = join(home, '.claude/projects/p/root/subagents');
+  await put(join(blockedSubagents, 'agent-child.jsonl'), [
+    claudeReply('c1', t, claudeUsage(1_000, 0, 0, 10), 'claude-fable-5', '/work/p', 'agent-child'),
+  ], t);
+  await chmod(blockedSubagents, 0o111);
+  lockedPaths.push(blockedSubagents);
+
+  // Codex: unlistable dated folder sessions/2026/11/23 beside readable sessions/2026/11/24.
+  const blockedDay = join(home, '.codex/sessions/2026/11/23');
+  await put(join(blockedDay, 'rollout-old.jsonl'), [
+    codexMeta('old', TODAY.start - 1_000), codexTurn('gpt-6.2-sol', TODAY.start - 1_000), codexUsage('r0', TODAY.start - 1_000, 5_000, 0, 10),
+  ], TODAY.start - 1_000);
+  await chmod(blockedDay, 0o111);
+  lockedPaths.push(blockedDay);
+  await put(join(home, '.codex/sessions/2026/11/24/rollout-visible.jsonl'), [
+    codexMeta('visible', t), codexTurn('gpt-6.2-sol', t), codexUsage('r1', t, 5_000, 0, 30),
+  ], t);
+
+  const view = sessionRows(await readSessionPeriod({ home }, TODAY, ['claude-cli', 'codex-cli']));
+  assert.deepEqual(view.rows.map(r => `${r.tool}/${r.session}`).sort(), ['claude-cli/root', 'codex-cli/visible']);
+  assert.equal(view.rows.find(r => r.session === 'root')!.reported, undefined, 'unlistable subagents blocks parent tool figure');
+  assert.deepEqual(view.byTool.map(each => [each.tool, each.sessions, each.unread]), [
+    ['claude-cli', 1, true],
+    ['codex-cli', 1, true],
+  ]);
+
+  // Adding a readable copy of the same root session in another project still keeps reported blocked.
+  await put(join(home, '.claude/projects/copy/root.jsonl'), [
+    claudeReply('p1', t, claudeUsage(5_000, 0, 0, 800), 'claude-fable-5', '/work/copy', 'root'),
+    claudeCost(0.42, 'root'),
+  ], t);
+  const withCopy = sessionRows(await readSessionPeriod({ home }, TODAY, ['claude-cli']));
+  assert.equal(withCopy.rows.find(r => r.session === 'root')!.reported, undefined, 'copy cannot restore figure while subagents are unlistable');
+});

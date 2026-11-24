@@ -42,7 +42,7 @@ async function readTool(tool: SessionTool, at: UsageWhere, period: Period): Prom
   let unread = false;
   // Sessions whose tool-reported figure cannot stand for this period, because their tree is not known to lie wholly inside it:
   // 1. Any file of this session (another root copy or a child) was skipped as older than period.start.
-  // 2. Any listed file of this session or a child vanished (ENOENT), failed stat/read, or held unread lines.
+  // 2. Any subfolder (e.g. subagents) or listed file of this session or a child could not be listed, vanished (ENOENT), failed stat/read, or held unread lines.
   // 3. Any deduplicated request of this session or a child fell outside [period.start, period.end).
   // Blocked children propagate to their ancestors before ReadSession.reported is attached.
   const figureBlocked = new Set<string>();
@@ -58,6 +58,7 @@ async function readTool(tool: SessionTool, at: UsageWhere, period: Period): Prom
   if (tool === 'claude-cli') {
     const listed = await claudeFiles(at);
     if (listed.unread) unread = true;
+    for (const id of listed.unreadSessions ?? []) figureBlocked.add(id);
     for (const of of listed.files) candidates.push({ ...of, read: () => readClaudeSession(of) });
   } else {
     const listed = await codexRollouts(at);
@@ -98,7 +99,8 @@ async function readTool(tool: SessionTool, at: UsageWhere, period: Period): Prom
     }
     if (read.unread > 0) markUnread(item);
     if (item.session && !item.parent) {
-      // Running total across files of one session never goes down: keep the largest reported figure.
+      // Keep the largest reported figure across copies of one session (rests on the figure never going down within a file as
+      // seen; a file cut back after a copy was made would show the copy's larger figure).
       const figure = reportedCost(read.treeReported);
       if (figure !== undefined) {
         const entry = getMeta(item.session);
@@ -110,7 +112,9 @@ async function readTool(tool: SessionTool, at: UsageWhere, period: Period): Prom
       entry.parent ??= req.parent;
       entry.project ??= read.project;
       const prev = entry.requests.get(req.request);
-      // Duplicate reply across files: later time wins; on a tie, more tokens in all (a partial reply is never larger than the whole one); on a tie, either.
+      // Duplicate reply across files: later time wins; on a tie, more tokens in all (rests on what the tools were seen to
+      // write — a reply recorded in part, then whole, its counts only growing; a later record with fewer tokens at the same
+      // time would lose); on a tie, either.
       if (!prev || req.at > prev.at || (req.at === prev.at && reqTokens(req) > reqTokens(prev))) {
         entry.requests.set(req.request, req);
       }

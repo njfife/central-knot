@@ -170,15 +170,19 @@ test('A parent and its child\'s file are two sessions, the child naming its pare
   const requests = (await Promise.all(files.map(each => readClaudeSession(each)))).flatMap(read => read.requests);
   assert.deepEqual(requests.map(each => [each.request, each.session, each.parent]), [['msg_2', 'agent-a1', 'one'], ['msg_1', 'one', undefined], ['msg_3', 'one', undefined]]);
 
-  // An unreadable sibling project folder flags unread without hiding readable siblings.
+  // An unreadable sibling project folder or nested subagents folder flags unread without hiding readable files.
   const blocked = join(home, '.claude/projects/-work-blocked');
   await mkdir(blocked, { recursive: true });
   await chmod(blocked, 0o000);
+  const subagents = join(project, 'one/subagents');
+  await chmod(subagents, 0o111);
   try {
     const partial = await claudeFiles({ home });
     assert.equal(partial.unread, true);
-    assert.deepEqual(partial.files.sort((a, b) => a.session.localeCompare(b.session)), files);
+    assert.deepEqual(partial.unreadSessions, ['one']);
+    assert.deepEqual(partial.files, [{ file: join(project, 'one.jsonl'), session: 'one' }]);
   } finally {
+    await chmod(subagents, 0o700);
     await chmod(blocked, 0o700);
   }
 });

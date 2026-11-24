@@ -10,16 +10,16 @@
 // shrank, or is another file now, is read from its start, and the read says it started over before its first line. What every
 // tool's reader does with those lines is `readSession`'s: each made a record, the last request of each id kept, and counted as
 // unread a line that is not a JSON record or a record its tool's reader says should have been a request and is not one; every
-// other record is passed over uncounted. Claude Code's files are found by `claudeFiles` (each project folder listed on its
-// own, returning a `FileListing` with `unread` if `.claude/projects` or any project folder could not be listed), each a
-// session via `claudeFile`, and their records made into requests by `readClaudeSession`; Codex's rollouts by `codexRollouts`
-// (each root listed on its own, returning a `FileListing`), and theirs by `readCodexRollout`, which also gives back what the
-// next read of the same file needs from this one (`CodexState`, kept by the caller beside the `Position`). Both read the same
-// files as usage.ts, the Library's usage reading, which keeps its own refresh and its own rules, and take from it what both
-// need (usage.ts's header names them).
+// other record is passed over uncounted. Claude Code's files are found by `claudeFiles` (every folder at every depth listed on
+// its own, returning a `FileListing` with `unread` and `unreadSessions` when any folder could not be listed), each a session
+// via `claudeFile`, and their records made into requests by `readClaudeSession`; Codex's rollouts by `codexRollouts` (every
+// folder at every depth listed on its own, returning a `FileListing`), and theirs by `readCodexRollout`, which also gives back
+// what the next read of the same file needs from this one (`CodexState`, kept by the caller beside the `Position`). Both read
+// the same files as usage.ts, the Library's usage reading, which keeps its own refresh and its own rules, and take from it
+// what both need (usage.ts's header names them).
 //
 // Not here: the other tools (each another reader beside these two), prices, a record kept, a page.
-import { open, readdir } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
 import { basename, join, sep } from 'node:path';
 import type { HarnessId } from './types.ts';
 import { claudeProjects, codexFolders, recordOf, sessionFiles, timeOf, type JsonRecord, type UsageWhere } from './usage.ts';
@@ -149,18 +149,11 @@ async function readSession(file: string, from: Position | undefined, reader: Rea
   return { requests: [...requests.values()], startedOver, ...stated, unread, position };
 }
 
-/** What listing a tool's session files found: files from readable folders, and whether any folder could not be listed. */
-export interface FileListing<T> { files: T[]; unread: boolean }
-
-/** Lists `.jsonl` files under one folder through usage.ts `sessionFiles`, reporting errors beside the list. */
-async function listFolder(folder: string, ignoreMissing: boolean): Promise<FileListing<{ root: string; name: string }>> {
-  try {
-    const files = await sessionFiles([folder]);
-    return { files: files ?? [], unread: !ignoreMissing && files === undefined };
-  } catch (error) {
-    return { files: [], unread: (error as NodeJS.ErrnoException)?.code !== 'ENOTDIR' };
-  }
-}
+/**
+ * What listing a tool's session files found: files from readable folders, whether any folder could not be listed (`unread`),
+ * and any session ids whose own subfolder (such as Claude Code's `<project>/<id>/subagents`) could not be listed.
+ */
+export interface FileListing<T> { files: T[]; unread: boolean; unreadSessions?: string[] }
 
 /** A Claude Code session file: where it is, the session it is (its file's name), and the session it is a child of. */
 export interface ClaudeFile { file: string; session: string; parent?: string }
@@ -176,28 +169,25 @@ function claudeFile(root: string, name: string): ClaudeFile | undefined {
 
 /**
  * Claude Code's session files in a home: `<project>/<id>.jsonl`, session `<id>`, and a child's `<project>/<id>/subagents/
- * agent-<x>.jsonl`, its own session `agent-<x>` with parent `<id>`. Other files are no session's. Each project folder under
- * `claudeProjects` is listed on its own so one unreadable project folder never hides its siblings; `unread` flags a missing
- * entry or any folder that could not be listed (no projects folder: empty, `unread: false`).
+ * agent-<x>.jsonl`, its own session `agent-<x>` with parent `<id>`. Other files are no session's. Every folder at every depth
+ * under `claudeProjects` is listed on its own so an unreadable folder never hides readable siblings; `unread` flags any folder
+ * that could not be listed, and `unreadSessions` names sessions whose own folder or `subagents` folder could not be listed.
  */
 export async function claudeFiles(at: UsageWhere): Promise<FileListing<ClaudeFile>> {
   const root = claudeProjects(at);
   let unread = false;
-  const entries = await readdir(root, { withFileTypes: true }).catch(error => {
-    if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') unread = true;
-    return [];
+  const unreadSessions = new Set<string>();
+  const found = await sessionFiles([root], (_root, rel) => {
+    unread = true;
+    const parts = rel.split(sep);
+    if (parts.length === 2 || (parts.length >= 3 && parts[2] === 'subagents')) unreadSessions.add(parts[1]);
   });
   const files: ClaudeFile[] = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
-    const listed = await listFolder(join(root, entry.name), false);
-    if (listed.unread) unread = true;
-    for (const { name } of listed.files) {
-      const found = claudeFile(root, join(entry.name, name));
-      if (found) files.push(found);
-    }
+  for (const { name } of found ?? []) {
+    const file = claudeFile(root, name);
+    if (file) files.push(file);
   }
-  return { files, unread };
+  return { files, unread, ...(unreadSessions.size > 0 ? { unreadSessions: [...unreadSessions] } : {}) };
 }
 
 /** A count of tokens as saved: a whole number, not below zero. */
@@ -251,20 +241,15 @@ export function readClaudeSession(of: ClaudeFile, from?: Position): Promise<Sess
 }
 
 /**
- * Codex's rollouts in a home, under `sessions` and `archived_sessions` (usage.ts codexFolders), each root listed on its own
- * so one unreadable root never hides the other; missing roots are ignored and `unread` flags any root that could not be
- * listed. Which session a rollout is, and whose child, its own `session_meta` record says (readCodexRollout), not its place:
- * a rollout moved to the archive is the same session.
+ * Codex's rollouts in a home, under `sessions` and `archived_sessions` (usage.ts codexFolders), every folder at every depth
+ * listed on its own so an unreadable folder never hides readable siblings; missing roots are ignored and `unread` flags any
+ * folder that could not be listed. Which session a rollout is, and whose child, its own `session_meta` record says
+ * (readCodexRollout), not its place: a rollout moved to the archive is the same session.
  */
 export async function codexRollouts(at: UsageWhere): Promise<FileListing<string>> {
-  const files: string[] = [];
   let unread = false;
-  for (const root of codexFolders(at)) {
-    const listed = await listFolder(root, true);
-    if (listed.unread) unread = true;
-    for (const { name } of listed.files) files.push(join(root, name));
-  }
-  return { files, unread };
+  const found = await sessionFiles(codexFolders(at), () => { unread = true; });
+  return { files: (found ?? []).map(({ root, name }) => join(root, name)), unread };
 }
 
 /**

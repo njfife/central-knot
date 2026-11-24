@@ -55,10 +55,18 @@ const UNPRICED_BUCKET: Record<UnpricedReason, keyof UnpricedBy> = {
 
 /** Sums token counts (`cacheWrite1h` stays inside `cacheWrite`, kept when > 0) and list-price metadata in one pass. */
 function tally(requests: readonly PricedRequest[]): { tokens: Tokens; cost: CostSum } {
-  let input = 0, cacheRead = 0, cacheWrite = 0, cacheWrite1h = 0, output = 0;
-  let dollars = 0, priced = 0, unpriced = 0, atLeast = false;
+  let input = 0;
+  let cacheRead = 0;
+  let cacheWrite = 0;
+  let cacheWrite1h = 0;
+  let output = 0;
+  let dollars = 0;
+  let priced = 0;
+  let unpriced = 0;
+  let atLeast = false;
   const unpricedBy: UnpricedBy = { noRow: 0, speedOrTier: 0, other: 0 };
-  const asMap = new Map<string, PricedAs>(), provMap = new Map<string, PricedProvider>();
+  const asMap = new Map<string, PricedAs>();
+  const provMap = new Map<string, PricedProvider>();
   for (const { request: { model, tokens: t }, price } of requests) {
     input += t.input;
     cacheRead += t.cacheRead;
@@ -109,7 +117,8 @@ function hasAncestor(start: SessionRow, target: SessionRow, byKey: Map<string, S
 
 /** Turns a period reading into ordered session rows (children nested under parents) and period, tool and model totals. */
 export function sessionRows(reading: DayReading): DayRows {
-  const allRows: SessionRow[] = [], byTool: ToolTotal[] = [];
+  const allRows: SessionRow[] = [];
+  const byTool: ToolTotal[] = [];
   for (const toolReading of reading.tools) {
     const { sessions } = toolReading;
     for (const s of sessions) {

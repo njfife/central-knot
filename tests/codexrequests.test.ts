@@ -288,12 +288,16 @@ test('A parent and a child rollout are two sessions, the child naming its parent
   const moved = await readCodexRollout(archived);
   assert.deepEqual(moved.requests.map(each => [each.request, each.session, each.parent]), [['resp_5', child, THREAD]], 'the same session and request ids where it is now');
 
-  // An unreadable archive root flags unread without hiding live rollouts.
+  // An unreadable archive root or dated subfolder flags unread without hiding readable rollouts beside it.
   const archiveDir = dirname(archived);
+  const blockedDay = join(home, '.codex/sessions/2026/11/23');
+  await mkdir(blockedDay, { recursive: true });
   await chmod(archiveDir, 0o000);
+  await chmod(blockedDay, 0o111);
   try {
     assert.deepEqual(await codexRollouts({ home }), { files: [files[0]], unread: true });
   } finally {
+    await chmod(blockedDay, 0o700);
     await chmod(archiveDir, 0o700);
   }
 });
