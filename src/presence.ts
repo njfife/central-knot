@@ -1,8 +1,9 @@
 // Which tools are in a home (presentTools) and which of them Central Knot manages (managedTools): every installed tool but
 // the ones whose Manage switch is off (share.ts SyncRecord leftOut, changed only by toolchoice.ts chooseTools). Central Knot
-// writes only in managed tools, and every page but Harnesses (a left-out tool's card and switch) shows only those as tools,
-// so the rule lives here, once, for the main process and the page alike. Not here: turning the switch (toolchoice.ts), each
-// tool's definition (harnesses.ts) and what is read of it in a home (discovery.ts).
+// writes only in managed tools, and every page but Harnesses (a left-out tool's card and switch) and Sessions (whose costs are
+// read from every installed tool's history, managed or not: SESSION_TOOLS) shows only those as tools, so the rule lives here,
+// once, for the main process and the page alike. Not here: turning the switch (toolchoice.ts), each tool's definition
+// (harnesses.ts) and what is read of it in a home (discovery.ts).
 import type { HarnessId, Snapshot } from './types.ts';
 
 /**
@@ -67,6 +68,12 @@ export const agentsKeptIn = {
 export type AgentTool = keyof typeof agentsKeptIn;
 export const agentTools = Object.keys(agentsKeptIn) as AgentTool[];
 export const mcpTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
+/**
+ * The tools whose session history Central Knot reads for the Sessions page (sessionday.ts, each by its reader in
+ * sessionrequests.ts); a present tool not here is "not counted" on that page. Here so the page and main read one list.
+ */
+export type SessionTool = 'claude-cli' | 'codex-cli';
+export const SESSION_TOOLS: readonly SessionTool[] = ['claude-cli', 'codex-cli'];
 
 /** Whether a tool holds a kind of item: every tool a skill, MCP servers and agents those mcpTools and agentTools name. */
 export const holds = (tool: HarnessId, kind: 'skill' | 'mcp' | 'agent') => kind === 'skill' || (kind === 'mcp' ? mcpTools : agentTools as HarnessId[]).includes(tool);

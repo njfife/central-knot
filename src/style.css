@@ -1205,6 +1205,53 @@ span.ins-confirm { margin-top: 0; }
 .signin-words .btn { flex: none; }
 .signin-command { display: block; margin-top: 2px; font-family: var(--mono); font-size: 11px; line-height: 16px; color: var(--ink); }
 
+/* ---------- The Sessions page (sessionspage.ts) ----------
+   The day's choice; its dollars, date and unpriced count; a line of the tools' sums; a row a session and, opened, its models
+   and its agents' rows; By model, folded. Every row and model line shares one set of columns (--sessions-columns): the project's
+   takes the room there is, so a row's dollars begin where its name's column ends and are one column with an opened row's Cost,
+   and the rows span the page. The rows scroll with the page. A narrow content area gives the project the room the token columns
+   had: a model's tokens go to a second line. */
+.sessions-scroll { padding: 16px var(--pad-end) 32px 16px; }
+.sessions-content { --sessions-columns: 12px 128px 100px minmax(0, 1fr) 190px repeat(4, 86px);
+  display: flex; flex-direction: column; gap: 10px; }
+.sessions-content > * { flex: none; }
+.sessions-content > .kind-switch { align-self: flex-start; }
+.sessions-sep { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0; }
+.sessions-sep > * + *::before, .sessions-estimate + .sessions-unpriced::before { content: "·"; margin-right: 8px; font-weight: 400; color: var(--ink-faint); }
+.sessions-head { font-size: 16px; }
+.sessions-head > .sessions-estimate { font-size: 18px; }
+.sessions-heading { margin: 0; font-size: inherit; font-weight: 400; }
+.sessions-caption, .sessions-aside { margin: 0; max-width: var(--measure); font-size: 12.5px; line-height: 1.55; color: var(--ink-soft); }
+.sessions-tools { font-size: 13px; }
+.sessions-tool, .sessions-tool-total { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 6px; }
+.sessions-cost { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
+.sessions-unpriced { color: var(--ink-soft); }
+.sessions-rows, .sessions-children { list-style: none; margin: 0; padding: 0; }
+.sessions-row summary, .sessions-line { display: grid; grid-template-columns: var(--sessions-columns); column-gap: 10px; align-items: baseline; padding: 6px 8px; font-size: 12.5px; }
+.sessions-row summary, .sessions-by-model summary { list-style: none; border-radius: 6px; cursor: pointer; }
+.sessions-row summary::-webkit-details-marker, .sessions-by-model summary::-webkit-details-marker { display: none; }
+.sessions-row summary:hover { background: var(--row-hover); }
+details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
+.sessions-row summary > *, .sessions-line > * { min-width: 0; }
+.sessions-when, .sessions-cost, .sessions-counts > * { font-variant-numeric: tabular-nums; }
+.sessions-project { color: var(--ink-soft); overflow-wrap: anywhere; }
+.sessions-body { padding-bottom: 8px; }
+.sessions-line { padding-top: 2px; padding-bottom: 2px; font-size: 12px; }
+.sessions-line-head { color: var(--ink-soft); font-weight: 500; }
+.sessions-span { grid-column: 2 / 5; }
+.sessions-model { font-family: var(--mono); overflow-wrap: break-word; }
+.sessions-as { display: block; color: var(--ink-faint); }
+.sessions-counts { display: contents; }
+.sessions-counts > * { text-align: right; }
+.sessions-aside { margin-left: 30px; }
+.sessions-by-model summary { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
+@container content (width < 1000px) {
+  .sessions-content { --sessions-columns: 12px 128px 100px minmax(0, 1fr) 150px; }
+  .sessions-counts { display: flex; flex-wrap: wrap; gap: 0 12px; grid-column: 2 / -1; color: var(--ink-soft); }
+  .sessions-counts > span::after { content: " " attr(data-label); }
+  .sessions-line-head > .sessions-counts { display: none; }
+}
+
 /* ---------- Plugins: marketplaces at the left, the chosen marketplace or plugin at the right ---------- */
 .plugins-page { --market-list-width: 236px; --market-gutter: 24px; }
 .market-layout { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: var(--market-list-width) minmax(0, 1fr); }
