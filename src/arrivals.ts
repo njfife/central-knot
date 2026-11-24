@@ -1,12 +1,14 @@
 // Which tools came under Central Knot's management by themselves (installed while the app was closed or while it is open, or
-// found again after being away), and how many items the pass that first saw each copied there. The rule, in two sentences: the
+// found again after being away), and how many items have been copied to each since. The rule, in two sentences: the
 // managed tools each pass of the whole home sees are kept per home, whatever Automatic sync is, and a tool managed now that was
 // not among them has arrived, so one seen gone and back, its Manage switch still on, arrives again. A home with nothing kept yet
 // is seeded silently, from the tools its records name, else (a first setup) from what is managed now; and a tool turned on by
 // its Manage switch is kept before its pass (byHand), so it is no arrival: its switch says what it did.
 // Kept in main.ts's settings (AppSettings toolsSeen), by main.ts pass (the one caller of observe), `tools:manage` and
-// `tools:dismiss-arrival`; the Overview says each arrival until it is dismissed (overview.ts arrivalLines). Each copy that pass put
-// there has its own History entry (librarypass.ts logItem). Not here: which tools are managed (presence.ts managedTools).
+// `tools:dismiss-arrival`; the Overview says each arrival until it is dismissed (overview.ts arrivalLines). In History a copy put
+// there by a pass no click asked has an entry of its own; one that a click, a take-in, an edit, Pull, a source, a profile switch
+// or Take over asked for is told in that one's entry, with the others it made (librarypass.ts logItem). Not here: which tools
+// are managed (presence.ts managedTools).
 import { agentKind } from './agents.ts';
 import { harnessIds } from './harnesses.ts';
 import type { HomePass } from './homepass.ts';
@@ -46,14 +48,15 @@ export async function seenBefore(stored: unknown, context: ShareContext, managed
 }
 
 /**
- * What a pass that saw `managed` leaves kept: each tool not seen before has arrived, with how many items the pass put there
- * where it had none (`copied`; absent where it wrote nothing: `writes` false, Automatic sync off); an arrival whose tool is no
- * longer managed goes, so no line names a tool Central Knot doesn't manage.
+ * What a pass that saw `managed` leaves kept: each tool not seen before has arrived, and an arrival whose tool is no longer
+ * managed goes, so no line names a tool Central Knot doesn't manage. `copied` is what has been copied there since it arrived:
+ * each pass that may write (`writes`: Automatic sync on, or Sync once) adds what it put there where the tool had none, so a
+ * count left short (sync off at first, a pass that copied only part) grows as the rest lands; absent until such a pass runs.
  */
 export function observe(before: ToolsSeen, managed: HarnessId[], writes: boolean, synced: HomePass['synced']): ToolsSeen {
-  const still = before.arrived.filter(arrival => managed.includes(arrival.tool));
-  const arrived = managed.filter(tool => !before.managed.includes(tool)).map(tool => (writes ? { tool, copied: copiedTo(tool, synced) } : { tool }));
-  return { managed, arrived: [...still, ...arrived] };
+  const count = (arrival: Arrival): Arrival => (writes ? { tool: arrival.tool, copied: (arrival.copied ?? 0) + copiedTo(arrival.tool, synced) } : arrival);
+  const arrived = managed.filter(tool => !before.managed.includes(tool)).map(tool => ({ tool }));
+  return { managed, arrived: [...before.arrived.filter(arrival => managed.includes(arrival.tool)), ...arrived].map(count) };
 }
 
 /** The items a pass put in `tool` where it had none, every kind's (one result per item and tool): not a copy written over, the same already, or held. */

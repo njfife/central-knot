@@ -384,7 +384,7 @@ export interface SyncView {
   arrived: Arrival[];
 }
 
-/** A tool that came under management by itself (arrivals.ts), and how many items were copied there; `copied` absent: Automatic sync was off, so none. */
+/** A tool that came under management by itself (arrivals.ts), and how many items have been copied there since; `copied` absent: no pass that may write has run since (Automatic sync off), so none. */
 export interface Arrival { tool: HarnessId; copied?: number }
 
 /**

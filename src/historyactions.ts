@@ -27,6 +27,8 @@
 //   on in one harness (`only`): the switch,  Turn it off in         the item is On and in that harness
 //     or a copy a pass no click asked put    <harness>
 //     there (`in-line`)
+//   on or off in one harness (`only`) while  none: its switch there would change nothing now (the entry says that
+//     that harness is not managed            harness isn't managed now)
 //   on or off whose click took tools' own    Undo: that action,     the item is as the click left it (asTheClickLeftIt);
 //     copies over (`tookFrom`)               each such copy given   after that, the plain action above, which gives
 //                                            back                   nothing back
@@ -112,7 +114,7 @@ export function keptOver(name: string, tools: readonly string[]): string {
 /**
  * What a library item's entry says happened, in its kind's words (libraryrow.ts RowWords), or undefined for a kind from before
  * the library whose general sentence still holds (historypage.ts describe). `homeTools`: the home's harnesses, so "all 3
- * tools" can be said. `item`: the item now, to name a version. `undid`: the entry is another's Undo (that one's `undoneBy`
+ * tools" can be said, and an entry about one harness no longer among them says it isn't managed now. `item`: the item now, to name a version. `undid`: the entry is another's Undo (that one's `undoneBy`
  * names it), so it reads as one.
  */
 export function librarySentence(event: HistoryEvent, words: RowWords, homeTools: string[], item?: LibraryItem, undid = false): { glyph: IconName; text: string } | undefined {
@@ -120,6 +122,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
   /** " and removed from Codex", or nothing when no harness was touched. */
   const also = (words: string) => (tools ? `${words} ${tools}` : '');
   const where = event.only ? toolName(event.only) : '', from = event.winner ? toolName(event.winner.tool) : '';
+  const away = event.only && !homeTools.includes(event.only) ? ` ${where} isn’t managed now.` : '';
   // What made it happen is the entry's `cause` alone (types.ts HistoryEvent); none is the person's own switch or click.
   const pulled = event.cause === 'pulled', keeps = 'Central Knot keeps it.', source = event.link ? linkLabel(event.link) : 'Its source', plugin = event.link && pluginOf(event.link);
   // An Undo that gave tools their own copies back instead of removing what was there (types.ts HistoryEvent gaveBack).
@@ -134,9 +137,9 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
     case 'on': {
       // A pass no click asked put a copy in one tool that had none (`only`: a tool that came under management, say), or wrote
       // the current version over copies there (a tool managed again, a folder writable again).
-      if (event.cause === 'in-line' && event.only) return { glyph: 'circle-check', text: `Copied to ${where}.` };
+      if (event.cause === 'in-line' && event.only) return { glyph: 'circle-check', text: `Copied to ${where}.${away}` };
       if (event.cause === 'in-line') return { glyph: 'circle-check', text: `Written over in ${tools} with the current version when sync reached ${event.losers.length === 1 ? 'it' : 'them'}; what was there is one of its versions.` };
-      if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}${named(event.only) ? `: its ${words.copy} there is back` : ''}.${overSaid}${gaveSaid}` };
+      if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}${named(event.only) ? `: its ${words.copy} there is back` : ''}.${overSaid}${gaveSaid}${away}` };
       // A plugin's read brought it in with the plugin's On (library.ts A PLUGIN).
       if (event.cause === 'source') return { glyph: 'link-2', text: `Brought in from ${source}${also(': put in')}.` };
       const said = {
@@ -149,8 +152,8 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       return { glyph, text: `${text}${overSaid}${gaveSaid}` };
     }
     case 'off':
-      if (event.only && event.gaveBack?.includes(event.only)) return { glyph: 'circle-off', text: `Kept out of ${where}: ${where} has its own copy back, as before. ${keeps}` };
-      if (event.only) return { glyph: 'circle-off', text: `Kept out of ${where}${named(event.only) ? ': its copy there was removed' : ''}. ${keeps}${gaveSaid}` };
+      if (event.only && event.gaveBack?.includes(event.only)) return { glyph: 'circle-off', text: `Kept out of ${where}: ${where} has its own copy back, as before. ${keeps}${away}` };
+      if (event.only) return { glyph: 'circle-off', text: `Kept out of ${where}${named(event.only) ? ': its copy there was removed' : ''}. ${keeps}${gaveSaid}${away}` };
       if (event.cause === 'deleted-by-hand') {
         const place = deletedIn(event.winner?.tool ?? '', event.sharedWay);
         return { glyph: 'trash-2', text: `Its copy was deleted in ${place}, so it was turned off${also(' and removed from')}. ${keeps}` };
@@ -278,6 +281,8 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
   // A pass no click asked brought tools into line: nothing was asked, so nothing is undone here (a deleted item's Restore is
   // its Delete's entry's); but a copy it put in one tool (`only`) can be taken out of that tool, as its switch there would.
   if (event.cause === 'in-line' && !event.only) return undefined;
+  // An entry about one harness (`only`) offers nothing while it isn't managed: its switch there would change nothing in it now.
+  if (event.only && !itemNow.managed.includes(event.only)) return undefined;
   const name = item.name, now = asItIs(item.key, item), everywhere = item.on ? ', in every tool it is on in' : '';
   if (event.kind === 'deleted') {
     const help = `Put ${name} back in Central Knot as it was${item.on ? ', and in every tool it was on in' : ''}`;
