@@ -27,6 +27,7 @@ import { readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { minimatch } from 'minimatch';
 import { openCodeSettings, toolConfigRoot } from './harnesses.ts';
+import { displayPath } from './machine.ts';
 import { errorCode, plainError, storeDirectory, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { editTomlArray, readJsonc, readTomlTables, setJsonMember, tomlValue, type TomlTable, type TomlValue } from './textedit.ts';
 import type { HarnessId, SwitchProblem, SwitchTarget } from './types.ts';
@@ -283,8 +284,9 @@ const openCodeAction = (rules: [string, unknown][], name: string) => rules.filte
 
 /** Whether an Antigravity `exclude` entry keeps this copy out: the name of its folder, or a path ending at that folder. */
 const antigravityExcludes = (entry: unknown, skillFile: string) => {
-  const folder = forwardSlashes(dirname(skillFile));
-  return typeof entry === 'string' && (folder === entry || folder.endsWith(`/${entry}`));
+  if (typeof entry !== 'string') return false;
+  const folder = forwardSlashes(dirname(skillFile)), shown = displayPath(entry);
+  return folder === shown || folder.endsWith(`/${shown}`);
 };
 
 /** Whether the parsed settings turn this copy off, and (Claude Code) what its override held otherwise. */

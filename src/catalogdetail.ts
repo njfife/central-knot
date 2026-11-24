@@ -4,6 +4,7 @@
 import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { nameAndDescription } from './discovery.ts';
+import { displayPath } from './machine.ts';
 import { pluginTools } from './presence.ts';
 import type { DeclaredHook, HarnessId, NamedPart, PluginContents, PluginDetail } from './types.ts';
 import { githubRepo, isFolder, isHttps, nameOfFile, record, strings, text } from './values.ts';
@@ -106,7 +107,7 @@ const NESTED_LEVELS = 6;
 async function skillsIn(root: string, folder: string, paths: string[], subfolders = true, unread?: string[], asCodex = false): Promise<NamedPart[]> {
   const found: NamedPart[] = [];
   const add = async (dir: string) => {
-    const path = relative(folder, dir) || '.';
+    const path = displayPath(relative(folder, dir)) || '.';
     // A folder listed twice (skills/ and skills/pdf) is one skill.
     if (found.some(part => part.path === path)) return true;
     const body = await partFile(root, join(dir, 'SKILL.md'));
@@ -143,11 +144,12 @@ async function markdownIn(root: string, folder: string, paths: string[], unread?
   for (const path of paths) {
     const files = path.endsWith('.md') ? [path] : await filesIn(path, 0);
     for (const file of files) {
-      if (found.some(part => part.path === relative(folder, file))) continue;
+      const rel = displayPath(relative(folder, file));
+      if (found.some(part => part.path === rel)) continue;
       const body = await partFile(root, file);
       if (body === undefined) { if (unread && await present(file)) unread.push(agentName(file)); continue; }
       const meta = nameAndDescription(body);
-      found.push({ name: meta.name || agentName(file), description: meta.description ?? '', text: body, path: relative(folder, file) });
+      found.push({ name: meta.name || agentName(file), description: meta.description ?? '', text: body, path: rel });
     }
   }
   return found.sort((first, second) => first.name.localeCompare(second.name));
@@ -162,7 +164,7 @@ const INSTRUCTION_FILES = ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md', '.claude/CLAUD
 
 /** A plugin's instruction files (INSTRUCTION_FILES) in `folder`, each named by its path there, read as its skills' files are. */
 async function instructionsIn(root: string, folder: string): Promise<NamedPart[]> {
-  const inFolder = async (path: string) => (await listInside(root, join(folder, path))).filter(name => name.endsWith('.md')).sort().map(name => join(path, name));
+  const inFolder = async (path: string) => (await listInside(root, join(folder, path))).filter(name => name.endsWith('.md')).sort().map(name => displayPath(join(path, name)));
   const found: NamedPart[] = [];
   for (const path of (await Promise.all(INSTRUCTION_FILES.map(path => (path.endsWith('/') ? inFolder(path) : [path])))).flat()) {
     const body = await partFile(root, join(folder, path));

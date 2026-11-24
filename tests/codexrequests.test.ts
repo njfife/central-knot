@@ -8,6 +8,7 @@ import { appendFile, chmod, mkdir, mkdtemp, realpath, rename, rm, writeFile } fr
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { codexRollouts, readCodexRollout } from '../src/sessionrequests.ts';
+import { winLockSkip } from './fslock.ts';
 
 /** A made-up home, removed when the tests end. */
 const homes: string[] = [];
@@ -264,7 +265,7 @@ test('A running total that goes down inside the file (the counter began again) g
   assert.deepEqual(read.state.lastTotal, asTokens(resumed), 'the new count is the baseline from there on');
 });
 
-test('A parent and a child rollout are two sessions, the child naming its parent; the same rollout archived is the same session', async () => {
+test('A parent and a child rollout are two sessions, the child naming its parent; the same rollout archived is the same session', async t => {
   const home = await newHome(), day = join(home, '.codex/sessions/2026/11/24');
   assert.deepEqual(await codexRollouts({ home }), { files: [], unread: false }, 'no rollout folder: no files');
   const child = '01a20e2c-cf1b-7f43-9270-20da1042ac75';
@@ -289,16 +290,20 @@ test('A parent and a child rollout are two sessions, the child naming its parent
   assert.deepEqual(moved.requests.map(each => [each.request, each.session, each.parent]), [['resp_5', child, THREAD]], 'the same session and request ids where it is now');
 
   // An unreadable archive root or dated subfolder flags unread without hiding readable rollouts beside it.
-  const archiveDir = dirname(archived);
-  const blockedDay = join(home, '.codex/sessions/2026/11/23');
-  await mkdir(blockedDay, { recursive: true });
-  await chmod(archiveDir, 0o000);
-  await chmod(blockedDay, 0o111);
-  try {
-    assert.deepEqual(await codexRollouts({ home }), { files: [files[0]], unread: true });
-  } finally {
-    await chmod(blockedDay, 0o700);
-    await chmod(archiveDir, 0o700);
+  if (winLockSkip) {
+    await t.test('an unreadable archive root or dated subfolder flags unread without hiding readable rollouts beside it', { skip: winLockSkip }, () => {});
+  } else {
+    const archiveDir = dirname(archived);
+    const blockedDay = join(home, '.codex/sessions/2026/11/23');
+    await mkdir(blockedDay, { recursive: true });
+    await chmod(archiveDir, 0o000);
+    await chmod(blockedDay, 0o111);
+    try {
+      assert.deepEqual(await codexRollouts({ home }), { files: [files[0]], unread: true });
+    } finally {
+      await chmod(blockedDay, 0o700);
+      await chmod(archiveDir, 0o700);
+    }
   }
 });
 
