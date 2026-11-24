@@ -68,9 +68,9 @@ async function filesIn(box: Box): Promise<Record<string, string>> {
   const found: Record<string, string> = {};
   const walk = async (folder: string) => {
     for (const entry of await readdir(folder, { withFileTypes: true })) {
-      const path = join(folder, entry.name);
-      if (entry.isDirectory()) { if (relative(box.home, path) !== '.central-knot') await walk(path); }
-      else found[relative(box.home, path)] = (await readFile(path)).toString('base64');
+      const path = join(folder, entry.name), rel = relative(box.home, path).replaceAll('\\', '/');
+      if (entry.isDirectory()) { if (rel !== '.central-knot') await walk(path); }
+      else found[rel] = (await readFile(path)).toString('base64');
     }
   };
   await walk(box.home);

@@ -25,6 +25,7 @@ import { addSource, checkSource, previewSource, removeSource, rowClick } from '.
 import type { HarnessId } from '../src/types.ts';
 import type { PluginDone } from '../src/pluginplan.ts';
 import { repository, standInHosts } from './sourcerepo.ts';
+import { lockSkip, withLock } from './fslock.ts';
 
 const ALL_FIVE: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
 const put = async (path: string, text: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, text); };
@@ -194,7 +195,7 @@ test('Item 3: First setup Use the latest advises only for chosen keys, never unr
   } finally { await box.cleanup(); }
 });
 
-test('Item 4: Take over advises only for tools whose destination write was confirmed, never read-only Pi or re-disabled tools', async () => {
+test('Item 4: Take over advises only for tools whose destination write was confirmed, never read-only Pi or re-disabled tools', { skip: lockSkip }, async () => {
   const box = await tempHome(ALL_FIVE);
   try {
     await put(join(box.home, '.agents/skills/shared-notes/SKILL.md'), skillText('shared-notes'));
@@ -203,15 +204,12 @@ test('Item 4: Take over advises only for tools whose destination write was confi
     const sharedFile = join(box.home, '.agents/skills/shared-notes/SKILL.md');
     await put(join(box.home, '.codex/config.toml'), `[[skills.config]]\npath = ${JSON.stringify(sharedFile)}\nenabled = false\n`);
     // Make Pi's skills folder read-only so takeOver cannot write Pi.
-    await chmod(join(box.home, '.pi/agent/skills'), 0o555);
-    const done = await takeOver(box.context, box.tools, 'shared-notes', 'pi-cli');
-    await chmod(join(box.home, '.pi/agent/skills'), 0o755);
+    const done = await withLock(join(box.home, '.pi/agent/skills'), 'dir-readonly', () => takeOver(box.context, box.tools, 'shared-notes', 'pi-cli'));
     const toolsAdvised = reloadAdvice(settleReloads(done.reloads)).items.map(item => item.tool);
     assert.ok(!toolsAdvised.includes('pi-cli'), 'read-only Pi must not be advised');
     assert.ok(!toolsAdvised.includes('codex-cli'), 're-disabled Codex must not be advised');
     assert.deepEqual(toolsAdvised, ['copilot-cli']);
   } finally {
-    await chmod(join(box.home, '.pi/agent/skills'), 0o755).catch(() => {});
     await box.cleanup();
   }
 });
@@ -263,14 +261,12 @@ test('Worked example 3: a plugin ticked for Pi that places two skills and an MCP
   } finally { await box.cleanup(); }
 });
 
-test('Worked example 4 and Item 8: nothing written, held, failed, removed, turned off, switched-off, or kept give-back produces no reload advice (and kept give-back never sets unchanged)', async () => {
+test('Worked example 4 and Item 8: nothing written, held, failed, removed, turned off, switched-off, or kept give-back produces no reload advice (and kept give-back never sets unchanged)', { skip: lockSkip }, async () => {
   const box = await tempHome(['claude-cli', 'pi-cli', 'opencode-cli']);
   try {
     await put(join(box.home, '.claude/skills/notes/SKILL.md'), skillText('notes'));
     await put(join(box.home, '.pi/agent/settings.json'), JSON.stringify({ skills: ['-skills/notes'] }));
-    await chmod(join(box.home, '.config/opencode/skills'), 0o555);
-    const pass = await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [] }]);
-    await chmod(join(box.home, '.config/opencode/skills'), 0o755);
+    const pass = await withLock(join(box.home, '.config/opencode/skills'), 'dir-readonly', () => applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [] }]));
     assert.deepEqual(reloadAdvice(settleReloads(pass.reloads)), { text: '', items: [] });
     assert.equal(pass.results.find(entry => entry.harness === 'pi-cli')?.switchedOff, true);
     assert.doesNotMatch(pass.results.find(entry => entry.harness === 'pi-cli')?.message ?? '', /\/reload/);
@@ -288,7 +284,6 @@ test('Worked example 4 and Item 8: nothing written, held, failed, removed, turne
     assert.ok(kept.every(entry => entry.unchanged === undefined), 'kept give-back never sets refusal flag unchanged');
     assert.deepEqual(reloadAdvice(settleReloads(undone.reloads)), { text: '', items: [] });
   } finally {
-    await chmod(join(box.home, '.config/opencode/skills'), 0o755).catch(() => {});
     await box.cleanup();
   }
 });
@@ -316,7 +311,7 @@ test('Worked example 6 and Pi agent rule: an agent written to both Claude Code a
   } finally { await box.cleanup(); }
 });
 
-test('Profile switch: skill and MCP server into Codex while Copilot CLI is held names Codex once with /new and omits Copilot CLI', async () => {
+test('Profile switch: skill and MCP server into Codex while Copilot CLI is held names Codex once with /new and omits Copilot CLI', { skip: lockSkip }, async () => {
   const box = await tempHome(['claude-cli', 'copilot-cli', 'codex-cli']);
   try {
     await put(join(box.home, '.claude/skills/notes/SKILL.md'), skillText('notes'));
@@ -326,9 +321,7 @@ test('Profile switch: skill and MCP server into Codex while Copilot CLI is held 
     await applyServers(box.context, box.tools, [{ key: 'docs', on: true, except: [] }]);
     await applyServers(box.context, box.tools, [{ key: 'docs', on: false, except: [] }]);
     const saved = await saveProfile(box.context, { name: 'Dev', items: ['skill:notes', 'mcp:docs'] });
-    await chmod(join(box.home, '.copilot/skills'), 0o555);
-    const switched = await switchProfile(box.context, box.tools, saved.id!, NO_PLUGINS);
-    await chmod(join(box.home, '.copilot/skills'), 0o755);
+    const switched = await withLock(join(box.home, '.copilot/skills'), 'dir-readonly', () => switchProfile(box.context, box.tools, saved.id!, NO_PLUGINS));
     const advice = reloadAdvice(settleReloads(switched.reloads));
     assert.equal(advice.text, 'Restart Claude Code (claude --continue keeps the chat). In Codex, type /new, or restart it (codex resume --last keeps the chat).');
     assert.deepEqual(advice.items.map(item => [item.tool, item.chip, item.command]), [
@@ -337,7 +330,6 @@ test('Profile switch: skill and MCP server into Codex while Copilot CLI is held 
     ]);
     assert.doesNotMatch(advice.text, /Copilot/);
   } finally {
-    await chmod(join(box.home, '.copilot/skills'), 0o755).catch(() => {});
     await box.cleanup();
   }
 });

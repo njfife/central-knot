@@ -19,6 +19,8 @@ import { askedToQuit, standInApp, standInMac } from './macstandins.ts';
 import { within } from './within.ts';
 
 const ALPHA = 'Central Knot Alpha', STANDARD = 'Central Knot', ACME = 'Acme Knot', ACME_BUILD = 'com.centralknot.custom.acme';
+const macSkip = process.platform === 'win32' && 'Mac-only .app bundle, Info.plist and lsappinfo stand-ins (src/otherbuilds.ts); covered on macOS and Linux.';
+const macTest = (name: string, fn: () => Promise<void>, skip?: boolean | string) => test(name, { skip: macSkip || skip }, fn);
 const trashWords = (name: string) => `${name} is in the Trash, where it stays until you empty the Trash. Your skills, MCP servers and agents, which of them are kept in step, and History stay: they’re saved in this home, not in an app. ${name}’s own settings folder stays too. If ${name} still starts at sign-in, turn it off in System Settings › General › Login Items.`;
 
 /**
@@ -54,7 +56,7 @@ const alive = (app: ChildProcess) => app.exitCode === null && app.signalCode ===
 
 // ---------- The look ----------
 
-test('Another build is a bundle at the top of an Applications folder whose Info.plist names a Central Knot id other than this one, by the name it gives', () => aMac(async ({ stand, mine, downloads, context }) => {
+macTest('Another build is a bundle at the top of an Applications folder whose Info.plist names a Central Knot id other than this one, by the name it gives', () => aMac(async ({ stand, mine, downloads, context }) => {
   const alpha = stand.bundle(stand.applications, ALPHA, ALPHA_BUILD);
   const alsoMine = stand.bundle(mine, ALPHA, ALPHA_BUILD);
   const acme = stand.bundle(stand.applications, ACME, ACME_BUILD);
@@ -73,14 +75,14 @@ test('Another build is a bundle at the top of an Applications folder whose Info.
   ]);
 }));
 
-test('It is the same from every side: the alpha finds the standard app, and a custom build finds both', () => aMac(async ({ stand, context }) => {
+macTest('It is the same from every side: the alpha finds the standard app, and a custom build finds both', () => aMac(async ({ stand, context }) => {
   const standard = stand.bundle(stand.applications, STANDARD, STANDARD_BUILD);
   const alpha = stand.bundle(stand.applications, ALPHA, ALPHA_BUILD);
   assert.deepEqual(await lookForBuilds(context), [{ build: STANDARD_BUILD, name: STANDARD, installed: standard, running: [] }]);
   assert.deepEqual((await lookForBuilds({ ...context, own: ACME_BUILD }))?.map(found => found.installed), [alpha, standard]);
 }, ALPHA_BUILD));
 
-test('A running build is found by its bundle id wherever it runs from; one with no bundle in an Applications folder is found running, for Quit', () => aMac(async ({ stand, downloads, context, runs }) => {
+macTest('A running build is found by its bundle id wherever it runs from; one with no bundle in an Applications folder is found running, for Quit', () => aMac(async ({ stand, downloads, context, runs }) => {
   const alpha = stand.bundle(stand.applications, ALPHA, ALPHA_BUILD);
   const translocated = join(downloads, 'AppTranslocation/d/Central Knot Alpha.app');
   await runs([{ bundleId: ALPHA_BUILD, path: alpha, quits: true }, { bundleId: ALPHA_BUILD, path: translocated, quits: true }]);
@@ -92,7 +94,7 @@ test('A running build is found by its bundle id wherever it runs from; one with 
   assert.deepEqual(await lookForBuilds(context), [{ build: ALPHA_BUILD, name: ALPHA, running: [fromTrash] }]);
 }));
 
-test('A name with “&” reads as written, and the look says whether each build’s settings folder is there (what can be kept when the home’s record passes from it)', () => aMac(async ({ stand, support, context }) => {
+macTest('A name with “&” reads as written, and the look says whether each build’s settings folder is there (what can be kept when the home’s record passes from it)', () => aMac(async ({ stand, support, context }) => {
   const smith = stand.bundle(stand.applications, 'Smith & Co Knot', 'com.centralknot.custom.smith');
   const alpha = stand.bundle(stand.applications, ALPHA, ALPHA_BUILD);
   mkdirSync(join(support, ALPHA_BUILD), { recursive: true });
@@ -102,7 +104,7 @@ test('A name with “&” reads as written, and the look says whether each build
   ]);
 }));
 
-test('A custom build running from elsewhere is found only where the open home’s record names it, the one other id looked for running, and says the record names it', () => aMac(async ({ stand, downloads, context, runs }) => {
+macTest('A custom build running from elsewhere is found only where the open home’s record names it, the one other id looked for running, and says the record names it', () => aMac(async ({ stand, downloads, context, runs }) => {
   const acme = stand.bundle(downloads, ACME, ACME_BUILD);
   await runs([{ bundleId: ACME_BUILD, path: acme, quits: true }]);
   assert.deepEqual(await lookForBuilds(context), []);
@@ -110,18 +112,18 @@ test('A custom build running from elsewhere is found only where the open home’
   assert.deepEqual(await lookForBuilds(context, STANDARD_BUILD), [], 'this build’s own id, named by the record, is not another build');
 }));
 
-test('Where whether a build runs can’t be told, the look leaves `running` unset; where an Applications folder can’t be read there is no answer', { skip: process.getuid?.() === 0 }, () => aMac(async ({ stand, mine, context }) => {
+macTest('Where whether a build runs can’t be told, the look leaves `running` unset; where an Applications folder can’t be read there is no answer', () => aMac(async ({ stand, mine, context }) => {
   const alpha = stand.bundle(stand.applications, ALPHA, ALPHA_BUILD);
   rmSync(mine, { recursive: true });
   const blind = { ...context, places: { ...context.places, lsappinfo: join(stand.root, 'no-such-program') } };
   assert.deepEqual(await lookForBuilds(blind), [{ build: ALPHA_BUILD, name: ALPHA, installed: alpha }], 'a missing ~/Applications is no matter');
   chmodSync(stand.applications, 0o000);
   try { assert.equal(await lookForBuilds(context), undefined); } finally { chmodSync(stand.applications, 0o755); }
-}));
+}), process.getuid?.() === 0);
 
 // ---------- Replace ----------
 
-test('Replace refuses, in plain words and changing nothing, anything but another build’s bundle at the top of an Applications folder', () => aMac(async ({ stand, mine, downloads, context, trashed }) => {
+macTest('Replace refuses, in plain words and changing nothing, anything but another build’s bundle at the top of an Applications folder', () => aMac(async ({ stand, mine, downloads, context, trashed }) => {
   const own = stand.bundle(stand.applications, STANDARD, STANDARD_BUILD);
   const self = { ...context, ownBundle: own };
   const inDownloads = stand.bundle(downloads, ALPHA, ALPHA_BUILD);
@@ -147,7 +149,7 @@ test('Replace refuses, in plain words and changing nothing, anything but another
   assert.deepEqual(trashed(), []);
 }));
 
-test('Replace only from a copy at the top of an Applications folder: from a disk image or the Trash nothing is quit or removed', () => aMac(async ({ stand, home, context, runs, trashed, alpha }) => {
+macTest('Replace only from a copy at the top of an Applications folder: from a disk image or the Trash nothing is quit or removed', () => aMac(async ({ stand, home, context, runs, trashed, alpha }) => {
   const found = alpha();
   const [app] = await runs([{ bundleId: ALPHA_BUILD, path: found.installed, quits: true }]);
   const installedHere = { ...context, ownBundle: join(stand.applications, `${STANDARD}.app`) };
@@ -163,7 +165,7 @@ test('Replace only from a copy at the top of an Applications folder: from a disk
   assert.deepEqual(trashed(), []);
 }));
 
-test('Replace asks a running build to quit, waits for it, then moves its bundle to the Trash; the next look finds nothing', () => aMac(async ({ stand, context, runs, trashed, alpha }) => {
+macTest('Replace asks a running build to quit, waits for it, then moves its bundle to the Trash; the next look finds nothing', () => aMac(async ({ stand, context, runs, trashed, alpha }) => {
   const found = alpha();
   const [app] = await runs([{ bundleId: ALPHA_BUILD, path: found.installed, quits: true }]);
   assert.deepEqual(await removeBuild(context, found), { said: trashWords(ALPHA), done: true });
@@ -176,14 +178,14 @@ test('Replace asks a running build to quit, waits for it, then moves its bundle 
   assert.equal((await lookForBuilds(context))?.length, 1, 'the app put back from the Trash is found again');
 }));
 
-test('A custom build is replaced like any other, under its own name', () => aMac(async ({ stand, context, trashed }) => {
+macTest('A custom build is replaced like any other, under its own name', () => aMac(async ({ stand, context, trashed }) => {
   stand.bundle(stand.applications, ACME, ACME_BUILD);
   const [acme] = (await lookForBuilds(context)) ?? [];
   assert.deepEqual(await removeBuild(context, acme), { said: trashWords(ACME), done: true });
   assert.deepEqual(trashed(), ['Acme Knot.app']);
 }));
 
-test('A build that finishes something before it quits (a plugin step) is waited for, then replaced; Replace waits longer than a build holds its quit (main.ts before-quit, 15 s)', () => aMac(async ({ context, runs, trashed, alpha }) => {
+macTest('A build that finishes something before it quits (a plugin step) is waited for, then replaced; Replace waits longer than a build holds its quit (main.ts before-quit, 15 s)', () => aMac(async ({ context, runs, trashed, alpha }) => {
   assert.ok(QUIT_WAIT_MS > 15_000, String(QUIT_WAIT_MS));
   const found = alpha();
   await runs([{ bundleId: ALPHA_BUILD, path: found.installed, quits: true, afterMs: 800 }]);
@@ -191,7 +193,7 @@ test('A build that finishes something before it quits (a plugin step) is waited 
   assert.deepEqual(trashed(), ['Central Knot Alpha.app']);
 }));
 
-test('A build still running after the wait is not removed, and the words say how long it was given', () => aMac(async ({ context, runs, trashed, alpha }) => {
+macTest('A build still running after the wait is not removed, and the words say how long it was given', () => aMac(async ({ context, runs, trashed, alpha }) => {
   const found = alpha();
   const [app] = await runs([{ bundleId: ALPHA_BUILD, path: found.installed, quits: false }]);
   assert.deepEqual(await removeBuild(context, found), { said: `${ALPHA} didn’t quit within 2 seconds, so nothing was removed. Quit it yourself, then try again.`, done: false });
@@ -199,7 +201,7 @@ test('A build still running after the wait is not removed, and the words say how
   assert.deepEqual(trashed(), []);
 }));
 
-test('Every running copy is asked to quit, wherever it runs from, and nothing is removed while any runs', () => aMac(async ({ downloads, context, runs, alpha }) => {
+macTest('Every running copy is asked to quit, wherever it runs from, and nothing is removed while any runs', () => aMac(async ({ downloads, context, runs, alpha }) => {
   const found = alpha();
   const [installed, copy] = await runs([{ bundleId: ALPHA_BUILD, path: found.installed, quits: false }, { bundleId: ALPHA_BUILD, path: join(downloads, 'Central Knot Alpha.app'), quits: true }]);
   assert.equal((await removeBuild(context, found)).done, false);
@@ -207,7 +209,7 @@ test('Every running copy is asked to quit, wherever it runs from, and nothing is
   assert.ok(alive(installed) && existsSync(found.installed), 'the installed copy still runs, so the bundle stays');
 }));
 
-test('Where the Trash refuses, nothing else is tried: the bundle stays, and the words say so with the bundle to show in Finder', () => aMac(async ({ stand, context, runs, alpha }) => {
+macTest('Where the Trash refuses, nothing else is tried: the bundle stays, and the words say so with the bundle to show in Finder', () => aMac(async ({ stand, context, runs, alpha }) => {
   const found = alpha();
   const refusing = { ...context, trash: async () => { throw new Error('The operation couldn’t be completed.'); } };
   const rest = `so it is still in ${stand.applications}. Nothing else was tried: move it to the Trash in Finder (or ask whoever manages this Mac), then click Refresh.`;
@@ -217,14 +219,14 @@ test('Where the Trash refuses, nothing else is tried: the bundle stays, and the 
   assert.ok(existsSync(found.installed));
 }));
 
-test('Where whether it runs can’t be told, nothing is removed', () => aMac(async ({ stand, context, alpha }) => {
+macTest('Where whether it runs can’t be told, nothing is removed', () => aMac(async ({ stand, context, alpha }) => {
   const found = alpha();
   const blind = { ...context, places: { ...context.places, lsappinfo: join(stand.root, 'no-such-program') } };
   assert.deepEqual(await removeBuild(blind, found), { said: `Central Knot couldn’t tell whether ${ALPHA} is running, so nothing was removed. Quit ${ALPHA}, then try again.`, done: false });
   assert.ok(existsSync(found.installed));
 }));
 
-test('The bundle is checked again as the last thing before the Trash: one swapped in while the other app was quitting is not removed', () => aMac(async ({ stand, context, runs, trashed, alpha }) => {
+macTest('The bundle is checked again as the last thing before the Trash: one swapped in while the other app was quitting is not removed', () => aMac(async ({ stand, context, runs, trashed, alpha }) => {
   const found = alpha();
   const [app] = await runs([{ bundleId: ALPHA_BUILD, path: found.installed, quits: false }]);
   const removing = removeBuild(context, found);
@@ -239,7 +241,7 @@ test('The bundle is checked again as the last thing before the Trash: one swappe
   assert.deepEqual(trashed(), []);
 }));
 
-test('A copy listed as running that can’t be asked about means whether it runs isn’t known: nothing is quit or removed', () => aMac(async ({ stand, context, runs, alpha }) => {
+macTest('A copy listed as running that can’t be asked about means whether it runs isn’t known: nothing is quit or removed', () => aMac(async ({ stand, context, runs, alpha }) => {
   const found = alpha();
   const [app] = await runs([{ bundleId: ALPHA_BUILD, path: found.installed, quits: true }]);
   // macOS lists the copy, then can't say anything about it.
@@ -251,7 +253,7 @@ test('A copy listed as running that can’t be asked about means whether it runs
   assert.ok(alive(app) && existsSync(found.installed));
 }));
 
-test('A list of running apps that says something Central Knot can’t read means whether it runs isn’t known: nothing is quit or removed', () => aMac(async ({ stand, context, runs, alpha }) => {
+macTest('A list of running apps that says something Central Knot can’t read means whether it runs isn’t known: nothing is quit or removed', () => aMac(async ({ stand, context, runs, alpha }) => {
   const found = alpha();
   const [app] = await runs([{ bundleId: ALPHA_BUILD, path: found.installed, quits: true }]);
   // macOS answers with a line in a form this code doesn't know: not "nothing is running".
@@ -272,7 +274,7 @@ test('Every script that starts the app names its stand-in for this Mac, so none 
   assert.deepEqual(starting.filter(([, text]) => !sets(text)).map(([name]) => name), []);
 });
 
-test('A stand-in app ends with the process that started it: one that won’t quit, started by a test that throws before it kills it, is gone', async () => {
+macTest('A stand-in app ends with the process that started it: one that won’t quit, started by a test that throws before it kills it, is gone', async () => {
   const standIns = pathToFileURL(join(import.meta.dirname, 'macstandins.ts')).href;
   const failing = spawnSync(process.execPath, ['--input-type=module', '-e',
     `import { standInApp } from ${JSON.stringify(standIns)}; console.log((await standInApp(false)).pid); throw new Error('the test failed');`], { encoding: 'utf8' });
@@ -285,7 +287,7 @@ test('A stand-in app ends with the process that started it: one that won’t qui
 
 // ---------- Quit ----------
 
-test('Quit asks every copy of a build running from somewhere else, and says what came of it; nothing is removed', () => aMac(async ({ stand, home, context, runs }) => {
+macTest('Quit asks every copy of a build running from somewhere else, and says what came of it; nothing is removed', () => aMac(async ({ stand, home, context, runs }) => {
   const asFound: OtherBuild = { build: ALPHA_BUILD, name: ALPHA, running: [] };
   assert.deepEqual(await quitBuild(context, asFound), { said: `${ALPHA} isn’t running.`, done: true });
   const fromTrash = stand.bundle(join(home, '.Trash'), ALPHA, ALPHA_BUILD);

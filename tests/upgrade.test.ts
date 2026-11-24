@@ -96,9 +96,12 @@ async function place(folder: OldHome['folder'] | 'alpha-1-parts'): Promise<Box> 
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-upgrade-')));
   const home = join(base, 'home'), appData = join(base, 'app'), store = join(home, '.central-knot');
   await cp(join(fixtures, folder), home, { recursive: true });
+  const madeAtPattern = new RegExp(`${MADE_AT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(/[^"]*)?`, 'g');
   for (const path of Object.keys((await filesIn(home)).sha256)) {
     const text = await readFile(join(home, path), 'utf8');
-    if (text.includes(MADE_AT)) await writeFile(join(home, path), text.replaceAll(MADE_AT, home));
+    if (text.includes(MADE_AT)) {
+      await writeFile(join(home, path), text.replace(madeAtPattern, (_, sub = '') => JSON.stringify(join(home, sub)).slice(1, -1)));
+    }
   }
   const context = appContext(home, appData);
   const seen = async (path: string) => { const info = await stat(path); return { ino: info.ino, birth: Math.round(info.birthtimeMs) }; };

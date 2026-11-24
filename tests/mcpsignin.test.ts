@@ -117,15 +117,19 @@ test('A cell says what its tool’s answer says of it, and only that: not checke
   assert.equal(connectedLine(['claude-cli', 'pi-cli', 'opencode-cli']), 'Connected means the server answered: Claude Code, Pi and OpenCode do not say whether it needed a sign-in. For Needs sign-in: copy the command, run it in a terminal, then Check again.');
 });
 
-test('The tool’s own sign-in command, with the server as one literal argument a shell accepts', () => {
+const posixShellSkip = process.platform === 'win32' && 'POSIX /bin/sh quoting check; covered on macOS and Linux (Windows PowerShell quoting is a later step).';
+
+test('The tool’s own sign-in command, with the server as one literal argument a shell accepts', async t => {
   assert.equal(signInCommand('claude-cli', 'plugin:tracker:issues'), 'claude mcp login plugin:tracker:issues');
   assert.equal(signInCommand('codex-cli', 'oauth'), 'codex mcp login oauth');
   assert.equal(signInCommand('pi-cli', 'team.docs_v2@corp/one-two'), 'pi mcp login team.docs_v2@corp/one-two');
   assert.equal(signInCommand('opencode-cli', 'my server'), 'opencode mcp auth \'my server\'');
-  for (const name of ['O\'Reilly', 'my server', '$(touch x)', 'a"b\'c', '']) {
-    const said = spawnSync('/bin/sh', ['-c', `set -- ${signInCommand('claude-cli', name)}; printf '%s|%s' "$#" "$4"`], { encoding: 'utf8' });
-    assert.equal(said.stdout, `4|${name}`, name);
-  }
+  await t.test('POSIX /bin/sh round-trips every quoted server name', { skip: posixShellSkip }, () => {
+    for (const name of ['O\'Reilly', 'my server', '$(touch x)', 'a"b\'c', '']) {
+      const said = spawnSync('/bin/sh', ['-c', `set -- ${signInCommand('claude-cli', name)}; printf '%s|%s' "$#" "$4"`], { encoding: 'utf8' });
+      assert.equal(said.stdout, `4|${name}`, name);
+    }
+  });
 });
 
 // ---------- The rows, from the view the Library has ----------

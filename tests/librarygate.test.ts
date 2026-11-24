@@ -7,8 +7,9 @@
 // Synchronize everything: tests/firstsetup.test.ts; a profile switch: tests/profiles.test.ts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { lockSkip, withLock } from './fslock.ts';
 
 import { NO_PLUGINS, saveProfile, switchProfile } from '../src/profiles.ts';
 import { libraryGate, newRecord, remember, saveRecord, syncGate, type Entering, type ShareContext } from '../src/share.ts';
@@ -24,7 +25,7 @@ async function forget(box: Box) {
   await rm(box.context.settingsPath);
   assert.equal((await syncGate(box.context)).state, 'needs-resume');
 }
-const inBox = (name: string, body: (box: Box) => Promise<void>) => test(name, async () => { const box = await sandbox(); try { await body(box); } finally { await box.cleanup(); } });
+const inBox = (name: string, body: (box: Box) => Promise<void>, options?: { skip?: boolean | string }) => test(name, options ?? {}, async () => { const box = await sandbox(); try { await body(box); } finally { await box.cleanup(); } });
 
 // ---------- The gate's own table ----------
 
@@ -64,12 +65,12 @@ inBox('First setup requires write access to the existing store, or to the home t
   const store = join(box.home, '.central-knot');
   for (const folder of [box.home, store]) {
     if (folder === store) await mkdir(store);
-    await chmod(folder, 0o555);
-    try { assert.equal((await syncGate(box.context)).state, 'stopped'); }
-    finally { await chmod(folder, 0o755); }
+    await withLock(folder, 'dir-readonly', async () => {
+      assert.equal((await syncGate(box.context)).state, 'stopped');
+    });
     assert.deepEqual(await syncGate(box.context), { state: 'first-setup' });
   }
-});
+}, { skip: lockSkip });
 
 test('The gate in a home with no sync record: lets every write in; only `start` makes the record and remembers it', async () => {
   assert.deepEqual(await row('no record'), { 'only asked': 'let in', start: 'let in, with its record, record made, remembered', resume: 'let in', ownFile: 'let in' });

@@ -4,7 +4,8 @@
 // as main.ts runs them (homepass.ts homePass with the managed tools of the moment). Codex is the tool switched.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { lockSkip, withLock } from './fslock.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
@@ -464,7 +465,7 @@ test('Use Codex’s copy on an entry about Codex still works once Codex is not m
   } finally { await b.cleanup(); }
 });
 
-test('A copy a pass could not put in a tool has no entry until a later pass puts it there: a skills folder that can’t be written', async () => {
+test('A copy a pass could not put in a tool has no entry until a later pass puts it there: a skills folder that can’t be written', { skip: lockSkip }, async () => {
   const b = await box();
   try {
     await b.turnOn();
@@ -472,10 +473,10 @@ test('A copy a pass could not put in a tool has no entry until a later pass puts
     await mkdir(join(b.home, '.claude/skills/todo'), { recursive: true });
     await writeFile(join(b.home, '.claude/skills/todo/SKILL.md'), '---\nname: todo\ndescription: Todo.\n---\n\nDo things.\n');
     await applySkills(b.context, await b.managed(), [{ key: 'todo', on: true, except: [] }]);
-    await chmod(join(b.home, '.codex/skills'), 0o555);
-    await turnCodexOn(b);
-    assert.deepEqual([await b.read('.codex/skills/todo/SKILL.md'), (await b.history()).filter(event => event.cause === 'in-line' && event.only)], [undefined, []]);
-    await chmod(join(b.home, '.codex/skills'), 0o755);
+    await withLock(join(b.home, '.codex/skills'), 'dir-readonly', async () => {
+      await turnCodexOn(b);
+      assert.deepEqual([await b.read('.codex/skills/todo/SKILL.md'), (await b.history()).filter(event => event.cause === 'in-line' && event.only)], [undefined, []]);
+    });
     await b.pass();
     assert.deepEqual([!!(await b.read('.codex/skills/todo/SKILL.md')), (await b.history()).filter(event => event.cause === 'in-line' && event.only).map(event => [event.key, event.only])],
       [true, [['todo', 'codex-cli']]], 'the pass that puts it there once it can is the one whose entry says so');

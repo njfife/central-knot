@@ -24,7 +24,7 @@ const SPLIT = ' · ';
 /** Every file under a folder, as a path from the root. */
 function filesUnder(folder: string): string[] {
   return readdirSync(join(root, folder)).flatMap(entry => {
-    const path = join(folder, entry);
+    const path = `${folder}/${entry}`;
     return statSync(join(root, path)).isDirectory() ? filesUnder(path) : [path];
   });
 }

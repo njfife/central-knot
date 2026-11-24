@@ -5,10 +5,10 @@
 // shown here on skills.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { makeWritableTree } from './fslock.ts';
 import { discover } from '../src/discovery.ts';
 import { managedNow, readRecord, storeDirectory, syncGate, takeOverSync, writeAccess, type ShareContext } from '../src/share.ts';
 import { applySkills, skillsView } from '../src/skills.ts';
@@ -24,7 +24,7 @@ async function sandbox() {
   const home = join(base, 'home');
   await mkdir(join(home, '.claude'), { recursive: true });
   await mkdir(join(home, '.copilot'), { recursive: true });
-  return { base, home, cleanup: () => { execFileSync('chmod', ['-R', 'u+rwx', base]); return rm(base, { recursive: true, force: true }); } };
+  return { base, home, cleanup: async () => { await makeWritableTree(base); return rm(base, { recursive: true, force: true }); } };
 }
 type Box = Awaited<ReturnType<typeof sandbox>>;
 const read = (home: string, mode: Snapshot['mode'] = 'custom') => () => Promise.all(both.map(harness => discover({ home, mode, harness })));

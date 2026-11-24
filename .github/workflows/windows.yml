@@ -17,7 +17,7 @@ concurrency:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       # Git for Windows defaults to core.autocrlf=true; turn it off before checkout so the repo keeps its exact LF bytes.
       - name: Keep repository bytes at checkout
@@ -41,6 +41,7 @@ jobs:
         run: node scripts/windows-check.mjs --strict
       - name: Advisory full unit suite
         continue-on-error: true
+        timeout-minutes: 25
         run: node scripts/windows-check.mjs --advisory windows-unit-report
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { execFileSync } from 'node:child_process';
 import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { makeWritableTree } from './fslock.ts';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
 import { managedNow } from '../src/share.ts';
@@ -31,7 +31,7 @@ async function home(skills: Record<string, string[]>, folders: string[] = []) {
   /** A pass of the skills kind on the tools present (and managed) here now, as the app runs one. */
   const apply = async (changes: Change[] = []) => applySkills(settled, await managedNow(settled, await read()), changes);
   const view = async () => skillsView(context, await managedNow(context, await read()));
-  return { path, read, context, apply, view, cleanup: () => { execFileSync('chmod', ['-R', 'u+rwx', base]); return rm(base, { recursive: true, force: true }); } };
+  return { path, read, context, apply, view, cleanup: async () => { await makeWritableTree(base); return rm(base, { recursive: true, force: true }); } };
 }
 
 test('a tool is present when its own folder exists; the others are missing', async () => {

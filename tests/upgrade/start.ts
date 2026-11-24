@@ -46,7 +46,7 @@ export async function filesIn(folder: string): Promise<Files> {
   const found: Files = { sha256: {}, stamp: {} };
   const entries = (await readdir(folder, { recursive: true, withFileTypes: true })).filter(entry => entry.isFile());
   for (const path of entries.map(entry => join(entry.parentPath, entry.name)).sort()) {
-    const name = relative(folder, path), info = await stat(path);
+    const name = relative(folder, path).replaceAll('\\', '/'), info = await stat(path);
     found.sha256[name] = createHash('sha256').update(await readFile(path)).digest('hex');
     found.stamp[name] = `${info.ino}:${info.mtimeMs}`;
   }

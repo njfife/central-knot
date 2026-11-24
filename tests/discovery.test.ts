@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover, findApp, forgetVersions, probeVersion } from '../src/discovery.ts';
 import { appCandidates, executableCandidates, hasStatusNotifierWatcher, shellPath, TRAY_ASKS, TRAY_PAUSE_MS, trayWithin } from '../src/platform.ts';
 import { isPresent } from '../src/presence.ts';
+import { lockSkip, withLock } from './fslock.ts';
 
 async function fixture() {
   const home = await mkdtemp(join(tmpdir(), 'ck-first-look-'));
@@ -117,16 +118,17 @@ test('AT-01/DET-02: version probe is bounded and uses only --version', { skip: p
   } finally { await setup.cleanup(); }
 });
 
-test('AT-01: permission restriction is not an empty skill list', { skip: process.getuid?.() === 0 || process.platform === 'win32' }, async () => {
+test('AT-01: permission restriction is not an empty skill list', { skip: lockSkip }, async () => {
   const setup = await fixture();
   const skillsRoot = join(setup.home, '.claude/skills');
   try {
     await mkdir(skillsRoot, { recursive: true });
-    await chmod(skillsRoot, 0o000);
-    const snapshot = await discover({ home: setup.home, mode: 'custom' });
-    assert.equal(snapshot.discovery, 'restricted');
-    assert.equal(snapshot.skills.length, 0);
-  } finally { await chmod(skillsRoot, 0o755); await setup.cleanup(); }
+    await withLock(skillsRoot, 'dir-unreadable', async () => {
+      const snapshot = await discover({ home: setup.home, mode: 'custom' });
+      assert.equal(snapshot.discovery, 'restricted');
+      assert.equal(snapshot.skills.length, 0);
+    });
+  } finally { await setup.cleanup(); }
 });
 
 test('OWN-02: reading a linked skill leaves the link and target unchanged', { skip: process.platform === 'win32' }, async () => {
@@ -158,8 +160,8 @@ test('On this computer a tool is here only when its CLI or app is found: a folde
     const leftBehind = await discover({ home: setup.home, mode: 'actual', runProbes: true, binaries: [join(setup.home, 'absent')] });
     assert.equal(leftBehind.detection, 'Config found but app not detected');
     assert.equal(isPresent(leftBehind), false);
-    // With its CLI found, it is here.
-    const installed = await discover({ home: setup.home, mode: 'actual', runProbes: true, binaries: [await executable(setup.home, "printf '2.1.318 (Claude Code)\\n'")] });
+    // With its CLI found, it is here (Node itself answers --version on every platform).
+    const installed = await discover({ home: setup.home, mode: 'actual', runProbes: true, binaries: [process.execPath] });
     assert.ok(isPresent(installed));
     // A chosen folder is never searched for tools: there the folder is all there is to go by.
     assert.ok(isPresent(await discover({ home: setup.home, mode: 'custom' })));

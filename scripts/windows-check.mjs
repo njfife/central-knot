@@ -51,9 +51,11 @@ async function runSmoke() {
 /** Runs the named strict Windows unit test files; fails on any failure. */
 function runStrict() {
   const files = strictFiles();
+  const t0 = Date.now();
   console.log(`Running ${files.length} strict unit test files from ${STRICT_LIST}`);
   const result = spawnSync(process.execPath, ['--test', ...files], { cwd: root, stdio: 'inherit' });
   if (result.error) plainly(`Could not run strict unit tests: ${result.error.message}`);
+  console.log(`Strict unit tests exited ${result.status ?? 1} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   process.exit(result.status ?? 1);
 }
 
@@ -128,22 +130,30 @@ function runAdvisory(outDir) {
   if (!outDir) plainly('Usage: node scripts/windows-check.mjs --advisory <outDir>');
   const dir = resolve(outDir);
   mkdirSync(dir, { recursive: true });
+  const t0 = Date.now();
   const command = process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : 'npm';
   const args = process.platform === 'win32' ? ['/d', '/s', '/c', 'npm test'] : ['test'];
   const child = spawn(command, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   const chunks = [];
   child.stdout.on('data', chunk => chunks.push(chunk));
   child.stderr.on('data', chunk => chunks.push(chunk));
-  child.on('close', code => {
+  let finished = false;
+  const finish = code => {
+    if (finished) return;
+    finished = true;
     const raw = Buffer.concat(chunks).toString('utf8');
     const exitCode = code ?? 1;
     const summary = parseUnitLog(raw, exitCode);
     writeFileSync(join(dir, 'full.log'), raw);
     writeFileSync(join(dir, 'summary.txt'), summary);
+    console.log(`Advisory full unit suite finished in ${((Date.now() - t0) / 1000).toFixed(1)}s (exit ${exitCode})`);
     process.stdout.write(summary);
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n\`\`\`text\n${summary}\`\`\`\n`);
     process.exit(exitCode);
-  });
+  };
+  // Guard against an orphaned grandchild keeping stdout/stderr pipes open after npm exits on Windows.
+  child.on('exit', code => setTimeout(() => finish(code), 3000).unref());
+  child.on('close', code => finish(code));
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {

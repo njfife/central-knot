@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { readTool } from '../src/mcp.ts';
@@ -91,7 +91,7 @@ test('An exclude entry in skills.json is read as Antigravity reads it: the folde
       await writeFile(config(box.home, 'skills.json'), JSON.stringify({ exclude }));
       return isDisabled(box.context, await readSwitchFile(box.context, 'antigravity-cli'), target);
     };
-    for (const entry of ['alpha', 'skills/alpha', 'config/skills/alpha', target.skillFile.replace('/SKILL.md', '')]) assert.equal(await off([entry]), true, entry);
+    for (const entry of ['alpha', 'skills/alpha', 'config/skills/alpha', dirname(target.skillFile)]) assert.equal(await off([entry]), true, entry);
     // Measured on 1.5.14: none of these keeps alpha out (by its name in the frontmatter, a pattern, another case, another folder).
     for (const entry of ['Alpha', 'alph*', 'alph.*', '^alpha$', 'ALPHA', 'other/alpha', 'alpha-two']) assert.equal(await off([entry]), false, entry);
   } finally { await box.cleanup(); }

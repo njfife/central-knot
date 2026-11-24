@@ -8,7 +8,8 @@
 import { test } from 'node:test';
 import { bandAfter, itemNotice } from './notices.ts';
 import assert from 'node:assert/strict';
-import fs, { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import fs, { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { lockSkip, withLock } from './fslock.ts';
 import { spawnSync } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
@@ -249,11 +250,10 @@ test('A tool installed later gets an On server from the pass of the whole home, 
  * undone, marking nothing): this build's first pass is what such a home meets.
  */
 async function claudeLeftOwed<T>(box: Box, pass: () => Promise<T>) {
-  await fs.chmod(box.path('claude-cli'), 0o000);
-  try { return await pass(); } finally { await fs.chmod(box.path('claude-cli'), 0o644); }
+  return withLock(box.path('claude-cli'), 'file-unreadable', pass);
 }
 
-test('Sync once reports an unreadable owed removal and counts it as done only when the tool can be read again', async () => {
+test('Sync once reports an unreadable owed removal and counts it as done only when the tool can be read again', { skip: lockSkip }, async () => {
   const box = await sandbox(), tools = settled.managed;
   try {
     await writeFile(box.path('claude-cli'), JSON.stringify({ mcpServers: { docs: { command: 'docs' } } }));
@@ -283,7 +283,7 @@ test('Sync once: one item refused in two tools is two reasons, each its item, th
   });
 });
 
-test('A home alpha 2 left with Claude Code’s steps owed: the first pass takes a server turned Off out of Claude Code, and one deleted, by its tombstone', async () => {
+test('A home alpha 2 left with Claude Code’s steps owed: the first pass takes a server turned Off out of Claude Code, and one deleted, by its tombstone', { skip: lockSkip }, async () => {
   const box = await sandbox();
   try {
     await writeFile(box.path('claude-cli'), `${JSON.stringify({ numStartups: 2, mcpServers: { docs: { type: 'stdio', command: 'npx' }, web: { type: 'stdio', command: 'web' } } }, null, 2)}\n`);
@@ -411,7 +411,7 @@ test('A click on another server reads this one too: that read starts no window f
   } finally { await box.cleanup(); }
 });
 
-test('A settings file whose look fails for another reason than “not there” starts no window: deleted after, it gets the whole window', { skip: process.getuid?.() === 0 }, async () => {
+test('A settings file whose look fails for another reason than “not there” starts no window: deleted after, it gets the whole window', { skip: lockSkip }, async () => {
   const box = await sandbox();
   try {
     await writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { docs: { type: 'local', command: 'npx' } } }));
@@ -419,8 +419,9 @@ test('A settings file whose look fails for another reason than “not there” s
     // As in this computer's own home: a folder opened as home that can't be looked into is preview only (share.ts writeAccess).
     const waiting: ShareContext = { ...box.context, mode: 'actual', realHome: box.home, allowActualWrites: true, settleMs: 2000 };
     const codex = join(box.home, '.codex');
-    await chmod(codex, 0o000);
-    try { assert.equal((await applyServers(waiting, all, [], { now: 1000 })).settling, false); } finally { await chmod(codex, 0o755); }
+    await withLock(codex, 'dir-unreadable', async () => {
+      assert.equal((await applyServers(waiting, all, [], { now: 1000 })).settling, false);
+    });
     await rm(box.path('codex-cli'));
     const away = await applyServers(waiting, all, [], { now: 3500 });
     assert.deepEqual([away.settling, await commandIn(box, 'codex-cli')], [true, undefined], 'really missing now: its window starts now');
@@ -563,7 +564,7 @@ test('Taking in a server Claude Code had has its Undo, as any tool’s: Claude C
   } finally { await box.cleanup(); }
 });
 
-test('With Automatic sync off, what Claude Code is owed waits for Sync once or a click on its row, as any tool’s: a home alpha 2 left so is not written by its first pass', async () => {
+test('With Automatic sync off, what Claude Code is owed waits for Sync once or a click on its row, as any tool’s: a home alpha 2 left so is not written by its first pass', { skip: lockSkip }, async () => {
   const box = await sandbox();
   try {
     await writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { a: { type: 'local', command: 'a' }, b: { type: 'local', command: 'b' } } }));
@@ -698,14 +699,15 @@ test('A crash inside the checked write of a linked config.toml: the next pass pu
   assert.ok((await fs.lstat(codex)).isSymbolicLink(), 'config.toml is still a link, not a file in its place');
 }));
 
-test('A pass that can’t write one tool’s file says so and goes on: it never throws', () => inBox(async box => {
+test('A pass that can’t write one tool’s file says so and goes on: it never throws', { skip: lockSkip }, () => inBox(async box => {
   await fs.writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { a: { type: 'local', command: 'A' }, b: { type: 'local', command: 'B' } } }));
   await fs.writeFile(box.path('codex-cli'), '');
   await applyServers(box.context, copilotAndCodex, [on('a'), on('b')]);
   await fs.writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { a: { type: 'local', command: 'A2' }, b: { type: 'local', command: 'B2' } } }));
-  await fs.chmod(join(box.home, '.codex'), 0o555);
   let threw: unknown;
-  try { await applyServers(box.context, copilotAndCodex, []); } catch (error) { threw = error; } finally { await fs.chmod(join(box.home, '.codex'), 0o755); }
+  await withLock(join(box.home, '.codex'), 'dir-readonly', async () => {
+    try { await applyServers(box.context, copilotAndCodex, []); } catch (error) { threw = error; }
+  });
   assert.equal(threw, undefined, `the pass threw instead of reporting a held write: ${threw}`);
 }));
 
@@ -762,7 +764,7 @@ test('Two tools’ entries edited between passes have no time to order them: His
   assert.equal(librarySentence(entry, libraryWords.mcp, copilotAndCodex)?.text, 'Copilot CLI’s edit became the current version, though the times can’t tell which edit came last. Codex’s is kept as a version.');
 }));
 
-test('Claude Code’s write owed (as alpha 2 left it) while its entry is edited by hand and Copilot CLI and Codex edit theirs: no time decided, as History says, and each is written', () => inBox(async box => {
+test('Claude Code’s write owed (as alpha 2 left it) while its entry is edited by hand and Copilot CLI and Codex edit theirs: no time decided, as History says, and each is written', { skip: lockSkip }, () => inBox(async box => {
   const docs = (command: string) => JSON.stringify({ mcpServers: { docs: { type: 'stdio', command } } });
   await fs.writeFile(box.path('claude-cli'), docs('BASE'));
   await applyServers(box.context, three, [on('docs')]);
@@ -780,7 +782,7 @@ test('Claude Code’s write owed (as alpha 2 left it) while its entry is edited 
   assert.deepEqual([await commandIn(box, 'codex-cli'), await commandIn(box, 'claude-cli')], ['COPILOT-2', 'COPILOT-2']);
 }));
 
-test('Claude Code’s entry edited by hand while its write was owed (as alpha 2 left it) gives way to the current version: kept as a version, then written over, as History says', () => inBox(async box => {
+test('Claude Code’s entry edited by hand while its write was owed (as alpha 2 left it) gives way to the current version: kept as a version, then written over, as History says', { skip: lockSkip }, () => inBox(async box => {
   const docs = (command: string) => JSON.stringify({ mcpServers: { docs: { type: 'stdio', command } } });
   await fs.writeFile(box.path('claude-cli'), docs('BASE'));
   await applyServers(box.context, three, [on('docs')]);
@@ -796,7 +798,7 @@ test('Claude Code’s entry edited by hand while its write was owed (as alpha 2 
   assert.ok(view.library.docs.versions.some(version => version.from.how === 'edited' && version.from.harness === 'claude-cli'), 'Claude Code’s edit is a version');
 }));
 
-test('A removal Claude Code owes (as alpha 2 left it) goes to the file it was owed in, never to Claude Code’s settings moved somewhere else since', () => inBox(async box => {
+test('A removal Claude Code owes (as alpha 2 left it) goes to the file it was owed in, never to Claude Code’s settings moved somewhere else since', { skip: lockSkip }, () => inBox(async box => {
   await fs.writeFile(box.path('claude-cli'), docsRuns('BASE'));
   await applyServers(box.context, three, [on('docs')]);
   await fs.writeFile(box.path('copilot-cli'), '{"mcpServers":{}}');

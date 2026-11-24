@@ -177,10 +177,10 @@ test('A draft changes only the tools ticked for the base, leaves a copy edited i
 
 test('A tool that fails, answers out of form, takes too long or is stopped gives no draft, says why in its own words, and leaves nothing behind', async () => {
   const box = await sandbox();
-  // writeDraft makes its scratch folder in os.tmpdir(), which on macOS and Linux follows TMPDIR: here, this test's own folder,
-  // so the last check sees only what these drafts left, not a folder another run left or is using in the shared one.
-  const shared = process.env.TMPDIR;
-  process.env.TMPDIR = box.base;
+  // writeDraft makes its scratch folder in os.tmpdir(), which reads TMPDIR on macOS/Linux and TEMP/TMP on Windows: point all
+  // three at this test's folder so the last check sees only what these drafts left.
+  const shared = { TMPDIR: process.env.TMPDIR, TEMP: process.env.TEMP, TMP: process.env.TMP };
+  process.env.TMPDIR = process.env.TEMP = process.env.TMP = box.base;
   try {
     await writeFile(box.file('.claude/CLAUDE.md'), 'Be brief.\n');
     const sources = await draftSources(box.context, await box.snapshots());
@@ -205,7 +205,7 @@ test('A tool that fails, answers out of form, takes too long or is stopped gives
     assert.equal(await readFile(box.file('.claude/CLAUDE.md'), 'utf8'), 'Be brief.\n');
     assert.deepEqual((await readdir(box.base)).filter(name => name.startsWith('central-knot-draft-')), []);
   } finally {
-    if (shared === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = shared;
+    for (const [key, value] of Object.entries(shared)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
     await box.cleanup();
   }
 });

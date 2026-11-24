@@ -47,7 +47,7 @@ async function snapshotFiles(folder: string, exclude: string[] = []): Promise<Re
   const found: Record<string, string> = {};
   const walk = async (dir: string) => {
     for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
-      const full = join(dir, entry.name), rel = relative(folder, full);
+      const full = join(dir, entry.name), rel = relative(folder, full).replaceAll('\\', '/');
       if (exclude.some(prefix => rel === prefix || rel.startsWith(`${prefix}/`))) continue;
       if (entry.isSymbolicLink()) found[rel] = `symlink:${await readlink(full)}`;
       else if (entry.isDirectory()) await walk(full);
@@ -285,7 +285,7 @@ test('Worked example 4: putting plugins.json back matches a twin home that never
         read: () => Promise.all(ALL_FIVE.map(harness => discover({ home: twinHome, mode: 'custom', harness }))),
       };
       // Register the same generation under twinHome's path so libraryGate accepts twinHome without waiting for Resume.
-      await put(twinShare.settingsPath, (await readFile(damaged.share.settingsPath, 'utf8')).replaceAll(damaged.home, twinHome));
+      await put(twinShare.settingsPath, (await readFile(damaged.share.settingsPath, 'utf8')).replaceAll(JSON.stringify(damaged.home), JSON.stringify(twinHome)));
 
       // Spoil damaged's plugins.json and run a pass while damaged, then put plugins.json back and run a pass.
       await writeFile(damaged.pluginsPath, '{ broken');

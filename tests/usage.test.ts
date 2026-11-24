@@ -4,7 +4,8 @@
 // The reading is made at noon on 16 November 2026; "N days ago" counts back from it.
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readdir, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { lockSkip, withLock } from './fslock.ts';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -219,15 +220,14 @@ test('An agent in Pi, kept there as a loose skill file: /skill:<name> typed and 
   assert.deepEqual([says.sessions, says.last, says.cantSay], [1, daysAgo(1), undefined]);
 });
 
-test('A session file that can\'t be read is skipped and counted as such; the rest are read, and one gone since the listing is simply skipped', { skip: process.getuid?.() === 0 }, async () => {
+test('A session file that can\'t be read is skipped and counted as such; the rest are read, and one gone since the listing is simply skipped', { skip: lockSkip }, async () => {
   const home = await newHome(), project = join(home, '.claude/projects/-work');
   const call = (name: string) => [{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: name } }] }, timestamp: daysAgo(2) }];
   await put(join(project, 'ok.jsonl'), call('alpha'));
   await put(join(project, 'locked.jsonl'), call('beta'));
-  await chmod(join(project, 'locked.jsonl'), 0o000);
   await symlink(join(project, 'nowhere.jsonl'), join(project, 'gone.jsonl'));
-  const reading = await readUsage({ home }, NOW), history = historyOf(reading, 'claude-cli');
-  await chmod(join(project, 'locked.jsonl'), 0o644);
+  const reading = await withLock(join(project, 'locked.jsonl'), 'file-unreadable', () => readUsage({ home }, NOW));
+  const history = historyOf(reading, 'claude-cli');
   const says = toolSays(reading, 'skill', facts('gamma', {}), 'claude-cli')!;
   assert.deepEqual([history.sessions, history.skipped, history.unread, Object.keys(usedIn(reading, 'claude-cli')), says.cantSay, says.skipped],
     [1, 1, undefined, ['skill:alpha'], 'unread', 1]);

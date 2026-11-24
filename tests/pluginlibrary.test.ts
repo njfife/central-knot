@@ -107,7 +107,7 @@ async function kitHome(options: { tools?: HarnessId[]; remote?: true } = {}) {
 async function files(folder: string): Promise<Record<string, string>> {
   const found: Record<string, string> = {};
   const walk = async (dir: string) => { for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
-    if (entry.isDirectory()) await walk(join(dir, entry.name)); else found[relative(folder, join(dir, entry.name))] = await readFile(join(dir, entry.name), 'utf8');
+    if (entry.isDirectory()) await walk(join(dir, entry.name)); else found[relative(folder, join(dir, entry.name)).replaceAll('\\', '/')] = await readFile(join(dir, entry.name), 'utf8');
   } };
   await walk(folder);
   return found;

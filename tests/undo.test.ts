@@ -58,7 +58,9 @@ test('Undo of a skill’s Off (Turn these off’s, row by row) where it was kept
   } finally { await box.cleanup(); }
 });
 
-test('A skill whose folder is named agent:review: the History entry its Off makes says it is a skill’s', async () => {
+const colonNameSkip = process.platform === 'win32' && 'Windows NTFS forbids colons in folder names (tests macOS/Linux colon folder names); covered on macOS and Linux.';
+
+test('A skill whose folder is named agent:review: the History entry its Off makes says it is a skill’s', { skip: colonNameSkip }, async () => {
   const box = await sandbox();
   try {
     await put(box, 'claude-cli', { 'SKILL.md': skillText('Review it.', 'agent:review') }, [], 'agent:review');
