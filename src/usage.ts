@@ -14,7 +14,7 @@
 // and what the page shows (matrix.ts). Another tool is another row of `readers`, and of usagerow.ts spelledIn. Shared with
 // sessionrequests.ts, which reads each response's tokens from the same files: where they are (`sessionFiles`,
 // `claudeProjects`, `codexFolders`) and a line read as a record (`recordOf`, `timeOf`).
-import { constants as fsConstants, createReadStream, existsSync } from 'node:fs';
+import { constants as fsConstants, createReadStream, existsSync, type Dirent } from 'node:fs';
 import { copyFile, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
@@ -121,11 +121,60 @@ export function recordOf(line: string): JsonRecord | undefined {
   catch { return undefined; }
 }
 
-/** The `.jsonl` files under each of `roots`, each named by its root and its path under it; undefined when no root is there. */
-export async function sessionFiles(roots: string[]): Promise<{ root: string; name: string }[] | undefined> {
-  const listed = (root: string) => readdir(root, { recursive: true }).then(names => names.filter(name => name.endsWith('.jsonl')).map(name => ({ root, name })),
-    (error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? undefined : Promise.reject(error)));
-  const found = await Promise.all(roots.map(listed));
+/**
+ * The `.jsonl` files under each of `roots`, each named by its root and its path under it; undefined when no root is there.
+ * Without `onUnread`, any unreadable folder rejects (Library usage view); with `onUnread`, an unreadable folder at any depth
+ * is reported there and passed over while readable siblings are still listed.
+ */
+export async function sessionFiles(
+  roots: string[],
+  onUnread?: (root: string, rel: string) => void,
+): Promise<{ root: string; name: string }[] | undefined> {
+  const walk = async (root: string, rel: string, out: { root: string; name: string }[], seen: Set<string>): Promise<boolean> => {
+    const dir = rel ? join(root, rel) : root;
+    let entries: Dirent[];
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch (error) {
+      if (!rel && (error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      if (!onUnread) throw error;
+      onUnread(root, rel);
+      return true;
+    }
+    for (const entry of entries) {
+      const next = rel ? join(rel, entry.name) : entry.name;
+      if (entry.isDirectory()) {
+        await walk(root, next, out, seen);
+      } else if (entry.isSymbolicLink()) {
+        try {
+          const info = await stat(join(root, next));
+          if (info.isDirectory()) {
+            const key = `${info.dev}:${info.ino}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              await walk(root, next, out, seen);
+              seen.delete(key);
+            }
+          } else if (entry.name.endsWith('.jsonl')) {
+            out.push({ root, name: next });
+          }
+        } catch (error) {
+          if (entry.name.endsWith('.jsonl')) out.push({ root, name: next });
+          else if (onUnread && (error as NodeJS.ErrnoException).code !== 'ENOENT') onUnread(root, next);
+        }
+      } else if (entry.name.endsWith('.jsonl')) {
+        out.push({ root, name: next });
+      }
+    }
+    return true;
+  };
+  const found = await Promise.all(roots.map(async root => {
+    const out: { root: string; name: string }[] = [];
+    const seen = new Set<string>();
+    const rootInfo = await stat(root).catch(() => undefined);
+    if (rootInfo) seen.add(`${rootInfo.dev}:${rootInfo.ino}`);
+    return (await walk(root, '', out, seen)) ? out : undefined;
+  }));
   return found.every(list => list === undefined) ? undefined : found.flatMap(list => list ?? []);
 }
 
