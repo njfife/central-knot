@@ -3,7 +3,8 @@
 // stay at top level, once), computes per-model tokens and list-price sums (the one sum in the codebase), each row's own and with
 // its children's, keeps a root session's tool-reported figure beside its sum without adding it to any total, and computes
 // period, per-tool and per-model totals (each request once; sessions counted at top level) with each present tool's unread
-// flag beside the rows and the price list's date once.
+// flag beside the rows, a tool's and the day's sum a lower bound where some of that history could not be read (the one place
+// that is decided), and the price list's date once.
 // Not here: reading session files (sessionday.ts, sessionrequests.ts), pricing requests (rates.ts), IPC, or page wording/DOM.
 import type { UnpricedReason } from './rates.ts';
 import type { Tokens } from './sessionrequests.ts';
@@ -26,10 +27,12 @@ export interface UnpricedBy { noRow: number; speedOrTier: SpeedOrTier[]; other: 
 /**
  * Sum of list prices for a row, model or total: `dollars` (undefined when no request had a known price, never $0),
  * `unpriced` and `unpricedBy` (unpriced requests total and by reason; never "N of M", since unread lines make M unknown),
- * `atLeast` (true if any priced request used a lower bound), `pricedAs` (unique wider-rule matches), and `providers`.
+ * `oneHourLow` (true if any priced request's one-hour cache writes were priced at the shorter cache's rate), `atLeast` (the
+ * sum is a lower bound: `oneHourLow`, or, for a tool's sum and the day's, some of that history could not be read),
+ * `pricedAs` (unique wider-rule matches), and `providers`.
  */
 export interface CostSum {
-  dollars: number | undefined; unpriced: number; unpricedBy: UnpricedBy; atLeast: boolean;
+  dollars: number | undefined; unpriced: number; unpricedBy: UnpricedBy; oneHourLow: boolean; atLeast: boolean;
   pricedAs: PricedAs[]; providers: PricedProvider[];
 }
 /** One saved model id's tokens and list-price sum, inside a row or across the period. */
@@ -74,7 +77,7 @@ function tally(requests: readonly PricedRequest[]): { tokens: Tokens; cost: Cost
   let dollars = 0;
   let priced = 0;
   let unpriced = 0;
-  let atLeast = false;
+  let oneHourLow = false;
   const counted = { noRow: 0, other: 0 };
   const refused = new Map<string, SpeedOrTier>();
   const asMap = new Map<string, PricedAs>();
@@ -103,7 +106,7 @@ function tally(requests: readonly PricedRequest[]): { tokens: Tokens; cost: Cost
     dollars += price.dollars;
     priced++;
     if (price.basis !== 'list') continue;
-    if (price.atLeast) atLeast = true;
+    if (price.atLeast) oneHourLow = true;
     if (price.matched.by === 'rule') asMap.set(`${model}\0${price.matched.model}`, { model, as: price.matched.model });
     provMap.set(`${price.matched.provider}\0${price.matched.providerFrom}`, { provider: price.matched.provider, from: price.matched.providerFrom });
   }
@@ -113,7 +116,7 @@ function tally(requests: readonly PricedRequest[]): { tokens: Tokens; cost: Cost
   const unpricedBy: UnpricedBy = { noRow: counted.noRow, speedOrTier, other: counted.other };
   return {
     tokens: { input, cacheRead, cacheWrite, ...(cacheWrite1h > 0 ? { cacheWrite1h } : {}), output },
-    cost: { dollars: priced > 0 ? dollars : undefined, unpriced, unpricedBy, atLeast, pricedAs, providers },
+    cost: { dollars: priced > 0 ? dollars : undefined, unpriced, unpricedBy, oneHourLow, atLeast: oneHourLow, pricedAs, providers },
   };
 }
 
@@ -168,12 +171,14 @@ export function sessionRows(reading: DayReading): DayRows {
   // A row's requests with its descendants' (the nesting above has no cycle), summed once per row that has children.
   const family = (row: SessionRow): PricedRequest[] => [...own.get(row)!, ...row.children.flatMap(family)];
   for (const row of allRows) if (row.children.length) row.withChildren = tally(family(row));
+  // A sum over history some of which could not be read is a lower bound: a tool's, and the day's. (A row is its files' own.)
+  const lowerBound = ({ tokens, cost }: ReturnType<typeof tally>, unread: boolean) => ({ tokens, cost: unread ? { ...cost, atLeast: true } : cost });
   const byTool = reading.tools.map(({ tool, sessions, unread }): ToolTotal => ({
-    tool, sessions: rows.filter(row => row.tool === tool).length, ...tally(sessions.flatMap(s => s.requests)), unread,
+    tool, sessions: rows.filter(row => row.tool === tool).length, ...lowerBound(tally(sessions.flatMap(s => s.requests)), unread), unread,
   }));
   const allRequests = reading.tools.flatMap(t => t.sessions.flatMap(s => s.requests));
   return {
     period: reading.period, ratesDate: reading.ratesDate, rows,
-    total: { sessions: rows.length, ...tally(allRequests) }, byTool, byModel: modelsOf(allRequests),
+    total: { sessions: rows.length, ...lowerBound(tally(allRequests), reading.tools.some(t => t.unread)) }, byTool, byModel: modelsOf(allRequests),
   };
 }

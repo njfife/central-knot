@@ -70,7 +70,7 @@ export const agentTools = Object.keys(agentsKeptIn) as AgentTool[];
 export const mcpTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
 /**
  * The tools whose session history Central Knot reads for the Sessions page (sessionday.ts, each by its reader in
- * sessionrequests.ts); a present tool not here is "not read yet" on that page. Here so the page and main read one list.
+ * sessionrequests.ts); a present tool not here is "not counted" on that page. Here so the page and main read one list.
  */
 export type SessionTool = 'claude-cli' | 'codex-cli';
 export const SESSION_TOOLS: readonly SessionTool[] = ['claude-cli', 'codex-cli'];

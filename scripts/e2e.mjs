@@ -9871,8 +9871,8 @@ async function sessionsFlow() {
     cache_creation: { ephemeral_5m_input_tokens: (more.write ?? 0) - (more.hour ?? 0), ephemeral_1h_input_tokens: more.hour ?? 0 }, output_tokens: output, speed: more.speed ?? 'standard', service_tier: 'standard' });
   const reply = (session, id, at, model, used, cwd) => ({ type: 'assistant', sessionId: session, cwd, timestamp: new Date(at).toISOString(),
     message: { id, type: 'message', role: 'assistant', model, content: [{ type: 'text', text: 'Made up.' }], usage: used } });
-  const rollout = (id, parent, at, model, response, [input, cached, output]) => [
-    { timestamp: new Date(at).toISOString(), type: 'session_meta', payload: { id, session_id: parent ?? id, ...(parent ? { parent_thread_id: parent } : {}), cwd: '/work/codex-app', model_provider: 'openai' } },
+  const rollout = (id, parent, at, model, response, [input, cached, output], provider = 'openai') => [
+    { timestamp: new Date(at).toISOString(), type: 'session_meta', payload: { id, session_id: parent ?? id, ...(parent ? { parent_thread_id: parent } : {}), cwd: '/work/codex-app', model_provider: provider } },
     { timestamp: new Date(at).toISOString(), type: 'turn_context', payload: { turn_id: `turn-${id}`, cwd: '/work/codex-app', model } },
     { timestamp: new Date(at + 1).toISOString(), type: 'token_usage_record', payload: { response_id: response,
       usage: { input_tokens: input, cached_input_tokens: cached, cache_write_input_tokens: 0, output_tokens: output, reasoning_output_tokens: 0, total_tokens: input + output } } }];
@@ -9891,7 +9891,8 @@ async function sessionsFlow() {
   same('opening the page asks for today’s reading and says so until it lands', arriving, 'Reading today’s sessions…');
   same('a day with nothing: the date, one sentence naming the tools read and no dollars; the tool present and not read yet named once',
     [await a.text('#sessions-heading'), await a.exists('.sessions-head > .sessions-estimate'), await a.text('#sessions-none'), await a.text('#sessions-not-read'), await a.exists('.sessions-row')],
-    [`Today, ${await dateOf(today)}`, false, 'No sessions today in Claude Code or Codex.', 'Not read yet: Copilot CLI', false]);
+    [`Today, ${await dateOf(today)}`, false, 'No sessions today in Claude Code or Codex.', 'Not counted: Copilot CLI', false]);
+  same('the tool not counted says why on hover', await a.run(`document.querySelector('#sessions-not-read').title`), 'So far Central Knot reads Claude Code’s and Codex’s sessions.');
   // A Codex file of today whose one line can't be read: the day is not known to be empty.
   const day = new Date(today), dated = [day.getFullYear(), day.getMonth() + 1, day.getDate()].map(part => String(part).padStart(2, '0')).join('/');
   put(`.codex/sessions/${dated}/rollout-torn.jsonl`, ['a line that is not JSON'], todayAt(0.1));
@@ -9906,15 +9907,19 @@ async function sessionsFlow() {
     reply('alpha', 'a2', todayAt(0.25), 'claude-haiku-4-5-20251001', usage(10_000, 1_000), `/work/${longFolder}`),
     reply('alpha', 'a3', todayAt(0.3), 'claude-haiku-4-5', usage(5_000, 500, { speed: 'fast' }), `/work/${longFolder}`),
     { type: 'cost-state', sessionId: 'alpha', totalCostUSD: 4.31, modelUsage: {}, hasUnknownModelCost: false }], todayAt(0.3));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 100 && !(await a.exists('.sessions-row')); tries++) await wait(100);
+  same('a tool whose history could not all be read and gave no session: no sessions found, on its hover', await a.run(`document.querySelector('.sessions-tool-total[data-tool="codex-cli"]').title`), 'No sessions found.');
   put('.claude/projects/-work-notes/beta.jsonl', [reply('beta', 'b1', todayAt(0.5), 'claude-opus-5-5', usage(8_000, 800), '/work/notes'),
     reply('beta', 'b2', todayAt(0.55), 'claude-2', usage(2_000, 200, { write: 6_000, hour: 6_000 }), '/work/notes')], todayAt(0.55));
   put(`.codex/sessions/${dated}/rollout-x1.jsonl`, rollout('x1', undefined, todayAt(0.7), 'gpt-6-astra', 'r1', [40_000, 30_000, 2_000]), todayAt(0.7));
   put(`.codex/sessions/${dated}/rollout-x2.jsonl`, [...rollout('x2', 'x1', todayAt(0.8), 'codex-auto-review', 'r2', [9_000, 0, 300]), 'a line that is not JSON'], todayAt(0.8));
+  put(`.codex/sessions/${dated}/rollout-x3.jsonl`, rollout('x3', 'x1', todayAt(0.85), 'gpt-6-astra', 'r3', [1_000, 0, 100], 'acme-gateway'), todayAt(0.85));
   await a.click('#header-refresh');
-  for (let tries = 0; tries < 100 && !(await a.exists('.sessions-row')); tries++) await wait(100);
+  for (let tries = 0; tries < 100 && !(await a.exists('.sessions-row[data-session="x1"]')); tries++) await wait(100);
   await a.settle();
   const nesting = () => a.all('.sessions-row', '[e.dataset.session, e.parentElement.closest(".sessions-row")?.dataset.session ?? null]');
-  same('Refresh reads the day again: a row a session, newest first, the Codex agent’s session inside its parent’s', await nesting(), [['x1', null], ['x2', 'x1'], ['beta', null], ['alpha', null]]);
+  same('Refresh reads the day again: a row a session, newest first, the Codex agents’ sessions inside their parent’s', await nesting(), [['x1', null], ['x2', 'x1'], ['x3', 'x1'], ['beta', null], ['alpha', null]]);
   const masked = text => text.replace(/≈ \$[\d,]*\.\d+/, '≈ $…');
   const ONE_HOUR = 'One-hour cache writes are priced at the shorter cache’s rate; they cost more.';
   /** A closed row as it reads: when, the tool, the project, its dollars and unpriced count, and their hovers. */
@@ -9925,19 +9930,21 @@ async function sessionsFlow() {
   same('a closed row: when, the tool, the project folder’s name, its dollars bold with its agents’, unpriced counted, why on hover; an agent’s session marked Agent',
     [/^\S.*\S$/.test(alphaRow[0]), ...[alphaRow, betaRow, x1Row, x2Row].map(says => [says[1], says[2], masked(says[3]), ...says.slice(4)])],
     [true, ['Claude Code', longFolder, '≈ $…', '1 unpriced', '', 'No price known for a fast reply.'], ['Claude Code', 'notes', '≈ $… or more', '', ONE_HOUR, ''],
-      ['Codex', 'codex-app', '≈ $…', '1 unpriced', '', 'No price known.'], ['Agent', 'codex-app', '', '1 unpriced', '', 'No price known.']]);
+      ['Codex', 'codex-app', '≈ $…', '2 unpriced', '', 'No price known.'], ['Agent', 'codex-app', '', '1 unpriced', '', 'No price known.']]);
   const ratesDate = JSON.parse(readFileSync(join(root, 'assets/model-rates.json'), 'utf8')).date.split('-').map(Number);
   const pricesDate = await a.run(`new Date(${ratesDate[0]}, ${ratesDate[1] - 1}, ${ratesDate[2]}).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })`);
   const head = await a.run(`[...document.querySelector('.sessions-head').children].map(part => [part.textContent, part.title])`);
-  same('the heading: the day’s dollars first, the price list’s date and why it is a lower bound on hover; the date; the unpriced count, its reasons said once on hover',
-    head.map(([text, title]) => [masked(text), title]), [['≈ $… or more', `Prices as of ${pricesDate}. ${ONE_HOUR}`], [`Today, ${await dateOf(today)}`, ''],
-      ['2 unpriced', 'No price known for 1 request on a model the price list does not have and a fast reply.']]);
+  const unreadCodex = 'Some of Codex’s session history could not be read.';
+  same('the heading: the day’s dollars, the price list’s date and each reason it is a lower bound on hover; the requests unpriced, each reason said once and true on hover; the day',
+    head.map(([text, title]) => [masked(text), title]), [['≈ $… or more', `Prices as of ${pricesDate}. ${unreadCodex} ${ONE_HOUR}`],
+      ['3 requests unpriced', 'No price known for 2 requests with no matching rate and a fast reply.'], [`Today, ${await dateOf(today)}`, '']]);
   same('the caption once; what could not be read, for Codex', [await a.all('.sessions-caption:not(.sessions-unread)'), await a.all('.sessions-unread')],
-    [['At API prices, not your plan’s.'], ['Some of Codex’s session history could not be read.']]);
+    [['At API prices, not your plan’s.'], [unreadCodex]]);
   const tools = await a.all('#sessions-by-tool > .sessions-tool-total', '[e.dataset.tool, e.textContent.replace(/≈.*/, ""), e.querySelector(".sessions-estimate")?.textContent, e.querySelector(".sessions-unpriced")?.textContent, e.querySelector(".sessions-estimate")?.title]');
-  same('the tools’ line: each tool’s dollars and unpriced count, its top-level sessions and whose prices on hover; the tool not read yet',
+  same('the tools’ line: each tool’s dollars and unpriced count, a lower bound where some of its history could not be read; its top-level sessions, whose prices and why low on hover; the tool not counted',
     [tools.map(([tool, name, sum, unpriced, title]) => [tool, name, masked(sum), unpriced, title]), await a.text('#sessions-not-read')],
-    [[['claude-cli', 'Claude Code', '≈ $… or more', '1 unpriced', `2 sessions. At Anthropic’s API prices. ${ONE_HOUR}`], ['codex-cli', 'Codex', '≈ $…', '1 unpriced', '1 session. At OpenAI’s API prices.']], 'Not read yet: Copilot CLI']);
+    [[['claude-cli', 'Claude Code', '≈ $… or more', '1 unpriced', `2 sessions. At Anthropic’s API prices. ${ONE_HOUR}`],
+      ['codex-cli', 'Codex', '≈ $… or more', '2 unpriced', `1 session. At OpenAI’s API prices. ${unreadCodex}`]], 'Not counted: Copilot CLI']);
   const open = session => a.click(`.sessions-row[data-session="${session}"] > details > summary`);
   /** Model lines in `where`: the model and what is said under it, its price, the four token counts as digits. */
   const models = async where => (await a.run(`[...document.querySelectorAll('${where} > .sessions-line:not(.sessions-line-head)')].map(line => [line.querySelector('.sessions-span').innerText.trim(),
@@ -9959,7 +9966,7 @@ async function sessionsFlow() {
   await a.click('#sessions-by-model summary');
   same('By model, opened: every model of the day once, said as in an opened row', (await models('#sessions-by-model > details')).map(row => row.slice(0, 2)).sort(),
     [['claude-2', '≈ $… or more'], ['claude-fable-5', '≈ $…'], ['claude-haiku-4-5', 'no price known for a fast reply'], ['claude-haiku-4-5-20251001\npriced as claude-haiku-4-5', '≈ $…'],
-      ['claude-opus-5-5', '≈ $…'], ['codex-auto-review', 'no price known'], ['gpt-6-astra', '≈ $…']]);
+      ['claude-opus-5-5', '≈ $…'], ['codex-auto-review', 'no price known'], ['gpt-6-astra', '≈ $…; no price known']]);
   await a.click('#sessions-by-model summary');
 
   // Yesterday, and back.
@@ -9987,17 +9994,23 @@ async function sessionsFlow() {
   const SPILLS = `(() => { const page = document.querySelector('#sessions-scroll'), edge = page.getBoundingClientRect().right - parseFloat(getComputedStyle(page).paddingRight);
     return [...page.querySelectorAll('*')].flatMap(e => [...(e.getBoundingClientRect().right > edge + 1 ? ['past the page’s edge: ' + (e.id || e.className || e.tagName)] : []),
       ...(['auto', 'scroll'].includes(getComputedStyle(e).overflowY) ? ['a box that scrolls inside the page: ' + (e.id || e.className)] : [])]); })()`;
-  /** How far apart a row's project and its dollars are, and whether the opened row's Cost column starts where the dollars do. */
-  const lineUp = () => a.run(`(() => { const row = document.querySelector('.sessions-row[data-session="beta"] > details > summary'), at = name => row.querySelector('.sessions-' + name).getBoundingClientRect().left;
-    const costHead = document.querySelector('.sessions-row[data-session="alpha"] .sessions-line-head').children[1].getBoundingClientRect().left;
-    return [Math.round(at('cost') - at('project')), Math.abs(costHead - at('cost')) < 1]; })()`);
+  /**
+   * Whether a row's project column ends where its dollars begin (one gap between), the opened row's Cost starts where the dollars
+   * do, and the rows span the page: a row reaches the page's edge (its scrollbar and padding off) and its columns fill it.
+   */
+  const lineUp = () => a.run(`(() => { const row = document.querySelector('.sessions-row[data-session="beta"] > details > summary'), box = name => row.querySelector('.sessions-' + name).getBoundingClientRect();
+    const head = document.querySelector('.sessions-row[data-session="alpha"] .sessions-line-head'), page = document.querySelector('#sessions-scroll'), style = getComputedStyle(row);
+    const edge = page.getBoundingClientRect().left + page.clientLeft + page.clientWidth - parseFloat(getComputedStyle(page).paddingRight);
+    const tracks = style.gridTemplateColumns.split(' ').map(parseFloat), used = tracks.reduce((sum, track) => sum + track, 0) + parseFloat(style.columnGap) * (tracks.length - 1);
+    return [Math.abs(box('cost').left - box('project').right - parseFloat(style.columnGap)) < 1, Math.abs(head.children[1].getBoundingClientRect().left - box('cost').left) < 1,
+      Math.abs(edge - row.getBoundingClientRect().right) < 1 && Math.abs(used - (row.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight))) < 1]; })()`);
   for (const [width, height] of [SMALLEST, [1280, 800], [1316, 819], [1728, 1117], [2560, 1440]]) {
     await sizeTo(a, width, height);
     for (const rail of [false, true]) {
       if ((await a.run(`document.body.classList.contains('rail')`)) !== rail) await a.click('#sidebar-toggle');
       same(`nothing cut off at ${width}×${height}, the sidebar ${rail ? 'a rail' : 'open'}: Sessions with one row opened`, [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT), ...await a.run(SPILLS)], []);
-      const [apart, lined] = await lineUp();
-      same(`at ${width}×${height}, the sidebar ${rail ? 'a rail' : 'open'}: a row’s dollars in one column with the opened row’s Cost, within 400 px of its project`, [lined, apart <= 400], [true, true]);
+      same(`at ${width}×${height}, the sidebar ${rail ? 'a rail' : 'open'}: the project’s column ends where the dollars begin, one column with the opened row’s Cost, and the rows span the page`,
+        await lineUp(), [true, true, true]);
       if (!rail && [SMALLEST[0], 1316, 2560].includes(width)) await a.shot(`sessions-${width}-after`);
     }
   }

@@ -767,7 +767,7 @@ test('Pure sessionRows guards against synthetic parent cycles without dropping r
   assert.deepEqual(view.total.cost.unpricedBy, { noRow: 1, speedOrTier: [], other: 1 });
 });
 
-test('An unreadable Codex archive or sibling Claude project folder flags the tool without hiding readable sessions', async () => {
+test('An unreadable Codex archive or sibling Claude project folder flags the tool without hiding readable sessions, and makes its sum and the day\'s a lower bound', async () => {
   const home = await newHome();
   const t = TODAY.start + 10 * HOUR;
   await put(join(home, '.claude/projects/readable/good.jsonl'), [
@@ -792,6 +792,9 @@ test('An unreadable Codex archive or sibling Claude project folder flags the too
     ['claude-cli', 1, true],
     ['codex-cli', 1, true],
   ]);
+  assert.deepEqual(view.byTool.map(each => [each.cost.atLeast, each.cost.oneHourLow]), [[true, false], [true, false]], 'a tool with history not read: its sum is a lower bound, for that reason alone');
+  assert.deepEqual([view.total.cost.atLeast, view.total.cost.oneHourLow], [true, false], 'and so is the day\'s');
+  assert.deepEqual(view.rows.map(row => row.cost.atLeast), [false, false], 'a row read whole stays as it is');
 });
 
 test('Restoring a stale partial copy with a newer mtime keeps the fuller reply and the largest tool figure across files', async () => {

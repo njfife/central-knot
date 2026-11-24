@@ -1207,12 +1207,13 @@ span.ins-confirm { margin-top: 0; }
 
 /* ---------- The Sessions page (sessionspage.ts) ----------
    The day's choice; its dollars, date and unpriced count; a line of the tools' sums; a row a session and, opened, its models
-   and its agents' rows; By model, folded. Every row and model line shares one set of columns (--sessions-columns), so a figure
-   sits in one column close to its name, and the content is no wider than the Overview's figures (1500px). The rows scroll with
-   the page. A narrow content area gives the project the room the token columns had: a model's tokens go to a second line. */
+   and its agents' rows; By model, folded. Every row and model line shares one set of columns (--sessions-columns): the project's
+   takes the room there is, so a row's dollars begin where its name's column ends and are one column with an opened row's Cost,
+   and the rows span the page. The rows scroll with the page. A narrow content area gives the project the room the token columns
+   had: a model's tokens go to a second line. */
 .sessions-scroll { padding: 16px var(--pad-end) 32px 16px; }
-.sessions-content { --sessions-columns: 12px 128px 100px minmax(0, 220px) 190px repeat(4, 86px);
-  display: flex; flex-direction: column; gap: 10px; max-width: 1500px; }
+.sessions-content { --sessions-columns: 12px 128px 100px minmax(0, 1fr) 190px repeat(4, 86px);
+  display: flex; flex-direction: column; gap: 10px; }
 .sessions-content > * { flex: none; }
 .sessions-content > .kind-switch { align-self: flex-start; }
 .sessions-sep { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0; }

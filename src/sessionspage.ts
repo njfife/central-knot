@@ -24,12 +24,18 @@ const opened = new Set<string>();
 const ONE_HOUR = 'One-hour cache writes are priced at the shorter cache’s rate; they cost more.';
 const TOKEN_HEADS = ['Input', 'Cached', 'Cache-written', 'Output'];
 
-/** Local midnight `back` days before today's, from the calendar: a day is 23 or 25 hours when the clocks change, never 24 added. */
-const midnight = (back: number) => { const now = new Date(); return new Date(now.getFullYear(), now.getMonth(), now.getDate() - back).getTime(); };
-/** The chosen day as the half-open period its reading asks for: its own midnight to the next. */
-const periodOf = (day: SessionsDay): Period => (day === 'today' ? { start: midnight(0), end: midnight(-1) } : { start: midnight(1), end: midnight(0) });
+/** Local midnight `back` days before `now`'s day, from the calendar: a day is 23 or 25 hours when the clocks change, never 24 added. */
+const midnight = (now: Date, back: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - back).getTime();
+/** The chosen day as the half-open period its reading asks for: its own midnight to the next, both from one reading of the clock. */
+function periodOf(day: SessionsDay, now = new Date()): Period {
+  const back = day === 'today' ? 0 : 1;
+  return { start: midnight(now, back), end: midnight(now, back - 1) };
+}
 /** "Today" or "Yesterday" for a reading's day as the clock stands now, so a page left open past midnight stays true; else none. */
-const dayName = (start: number) => (start === midnight(0) ? 'Today' : start === midnight(1) ? 'Yesterday' : undefined);
+const dayName = (start: number, now = new Date()) => (start === midnight(now, 0) ? 'Today' : start === midnight(now, 1) ? 'Yesterday' : undefined);
+/** Which tools Central Knot reads, said where none is here and on the hover of the tools it does not count. */
+const readsSoFar = `So far Central Knot reads ${andList(SESSION_TOOLS.map(tool => `${toolNames[tool]}’s`))} sessions.`;
+const unreadWords = (tool: HarnessId) => `Some of ${toolNames[tool]}’s session history could not be read.`;
 
 /**
  * Reads the chosen day's rows into their slot: on opening the page and on Refresh (app.ts loadPageData), and on a press of a
@@ -59,19 +65,23 @@ const dollars = (amount: number) => amount.toLocaleString('en-US', { style: 'cur
 const estimate = (cost: CostSum) => (cost.dollars === undefined ? '' : `≈ ${dollars(cost.dollars)}${cost.atLeast ? ' or more' : ''}`);
 const sentence = (words: string) => `${words[0]!.toUpperCase()}${words.slice(1)}.`;
 
-/** Why requests have no price, each reason once: "no price known" where a model the list lacks is the only one, else what each was. */
+/** Why requests have no price, each reason once: "no price known" where no matching rate (no row for the provider or model) is the only one, else what each was. */
 function noPriceWords({ noRow, speedOrTier, other }: UnpricedBy): string {
-  const why = [...(noRow ? [`${plural(noRow, 'request')} on a model the price list does not have`] : []),
+  const why = [...(noRow ? [`${plural(noRow, 'request')} with no matching rate`] : []),
     ...speedOrTier.map(each => (each.requests === 1 ? `a ${each.saved} reply` : `${each.requests} ${each.saved} replies`)),
     ...(other ? [`${plural(other, 'request')} for another reason`] : [])];
   return noRow && why.length === 1 ? 'no price known' : `no price known for ${andList(why)}`;
 }
 
-/** A sum as a row, a tool and the day say it: its estimate in bold, `about` and a lower bound's reason on its hover; how many have no price, why on theirs. */
-function sumView(cost: CostSum, about: string[] = []): [HTMLElement | null, HTMLElement | null] {
-  const title = [...about, ...(cost.atLeast ? [ONE_HOUR] : [])].join(' ');
+/**
+ * A sum as a row, a tool and the day say it: its estimate in bold, `about` (the other reasons it may be low, first) and the
+ * one-hour reason on its hover; how many have no price, why on theirs: "2 unpriced", or with `requests` (the day's heading,
+ * where a bare count would read as sessions) "2 requests unpriced".
+ */
+function sumView(cost: CostSum, about: string[] = [], requests = false): [HTMLElement | null, HTMLElement | null] {
+  const title = [...about, ...(cost.oneHourLow ? [ONE_HOUR] : [])].join(' ');
   return [cost.dollars === undefined ? null : h('strong.sessions-estimate', title ? { title } : {}, estimate(cost)),
-    cost.unpriced ? h('span.sessions-unpriced', { title: sentence(noPriceWords(cost.unpricedBy)) }, `${cost.unpriced} unpriced`) : null];
+    cost.unpriced ? h('span.sessions-unpriced', { title: sentence(noPriceWords(cost.unpricedBy)) }, `${requests ? plural(cost.unpriced, 'request') : cost.unpriced} unpriced`) : null];
 }
 
 /** Each model's price and tokens by kind, on the page's columns: in an opened row and in By model; its saved id as saved. */
@@ -96,7 +106,7 @@ const kept = (key: string, ...children: (Node | null)[]) => h('details', { open:
 function sessionRow(row: SessionRow, agent = false): HTMLElement {
   const [first, last] = [row.first, row.last].map(at => clockTime(new Date(at).toISOString()));
   const notes = [row.reported === undefined ? null : `${toolNames[row.tool]}’s own figure for this session: ${dollars(row.reported)}. Not in the totals.`,
-    row.cost.atLeast ? ONE_HOUR : null];
+    row.cost.oneHourLow ? ONE_HOUR : null];
   return h('li.sessions-row', { 'data-session': row.session, 'data-tool': row.tool }, kept(`${row.tool}\0${row.session}`,
     h('summary', {}, icon('chevron-right', 12, 'tone-faint sessions-chevron'),
       h('span.sessions-when', {}, first === last ? first : `${first}–${last}`),
@@ -110,16 +120,17 @@ function sessionRow(row: SessionRow, agent = false): HTMLElement {
 /** The line under the heading: each tool's sum (its sessions and whose prices on hover), the tools not read yet; or that there was none. */
 function toolsLine(rows: DayRows, day: string, present: HarnessId[]) {
   const notYet = present.filter(tool => !(SESSION_TOOLS as readonly HarnessId[]).includes(tool));
-  const none = !rows.byTool.length ? `So far Central Knot reads ${andList(SESSION_TOOLS.map(tool => `${toolNames[tool]}’s`))} sessions.`
+  const none = !rows.byTool.length ? readsSoFar
     : rows.byTool.some(total => total.unread) ? 'No sessions found.' : `No sessions ${day} in ${orList(rows.byTool.map(total => toolNames[total.tool]))}.`;
   const tools = rows.byTool.map(total => {
     const names = [...new Set(total.cost.providers.map(each => providerNames[each.provider] ?? each.provider))];
-    const about = [`${plural(total.sessions, 'session')}.`, ...(names.length ? [`At ${andList(names.map(name => `${name}’s`))} API prices.`] : [])];
-    return h('span.sessions-tool-total', { 'data-tool': total.tool, ...(total.sessions ? {} : { title: `No sessions ${day}.` }) },
+    const about = [`${plural(total.sessions, 'session')}.`, ...(names.length ? [`At ${andList(names.map(name => `${name}’s`))} API prices.`] : []),
+      ...(total.unread ? [unreadWords(total.tool)] : [])];
+    return h('span.sessions-tool-total', { 'data-tool': total.tool, ...(total.sessions ? {} : { title: total.unread ? 'No sessions found.' : `No sessions ${day}.` }) },
       brandMark(total.tool, 14), toolNames[total.tool], ...(total.sessions ? sumView(total.cost, about) : []));
   });
   return h('p.sessions-tools.sessions-sep', { id: 'sessions-by-tool' }, ...(rows.rows.length ? tools : [h('span', { id: 'sessions-none' }, none)]),
-    notYet.length ? h('span', { id: 'sessions-not-read' }, `Not read yet: ${andList(notYet.map(tool => toolNames[tool]))}`) : null);
+    notYet.length ? h('span', { id: 'sessions-not-read', title: readsSoFar }, `Not counted: ${andList(notYet.map(tool => toolNames[tool]))}`) : null);
 }
 
 /** A day's reading: its dollars, date and unpriced count; the tools' line; what could not be read; the rows; By model, folded. */
@@ -127,13 +138,13 @@ function dayView(rows: DayRows, present: HarnessId[]) {
   const date = new Date(rows.period.start).toLocaleDateString(undefined, { day: 'numeric', month: 'long' }), name = dayName(rows.period.start);
   const [year, month, dayOfMonth] = rows.ratesDate.split('-').map(Number);
   const prices = `Prices as of ${new Date(year!, month! - 1, dayOfMonth).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}.`;
-  const [total, unpriced] = rows.rows.length ? sumView(rows.total.cost, [prices]) : [null, null];
+  const unread = rows.byTool.filter(each => each.unread).map(each => unreadWords(each.tool));
+  const [total, unpriced] = rows.rows.length ? sumView(rows.total.cost, [prices, ...unread], true) : [null, null];
   return [
-    h('div.sessions-head.sessions-sep', {}, total, h('h2.sessions-heading', { id: 'sessions-heading' }, name ? `${name}, ${date}` : date), unpriced),
+    h('div.sessions-head.sessions-sep', {}, total, unpriced, h('h2.sessions-heading', { id: 'sessions-heading' }, name ? `${name}, ${date}` : date)),
     rows.rows.length ? h('p.sessions-caption', {}, 'At API prices, not your plan’s.') : null,
     toolsLine(rows, name ? name.toLowerCase() : `on ${date}`, present),
-    ...rows.byTool.filter(each => each.unread).map(each => h('p.sessions-caption.sessions-unread', { id: `sessions-unread-${each.tool}` },
-      `Some of ${toolNames[each.tool]}’s session history could not be read.`)),
+    ...unread.map(words => h('p.sessions-caption.sessions-unread', {}, words)),
     rows.rows.length ? h('ul.sessions-rows', {}, ...rows.rows.map(row => sessionRow(row))) : null,
     rows.rows.length ? h('div.sessions-by-model', { id: 'sessions-by-model' }, kept('by-model', h('summary', {}, icon('chevron-right', 12, 'tone-faint sessions-chevron'), 'By model'),
       ...modelLines(rows.byModel))) : null,
