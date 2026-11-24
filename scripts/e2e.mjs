@@ -14379,7 +14379,8 @@ async function pluginRecordHoldsFlow() {
 
   const pluginsPath = join(home, '.central-knot/plugins.json');
   const remote = join(scratch, 'repo-record-holds.git');
-  execFileSync('git', ['init', '--quiet', '--bare', '--initial-branch=main', remote]);
+  const git = (...args) => spawnSync('git', args, { encoding: 'utf8' }).stdout.trim();
+  git('init', '--quiet', '--bare', '--initial-branch=main', remote);
   const reason = 'The plugins record is damaged. Nothing was written or deleted. Put the record back, then try again. Its plugins’ items are held as they are until then. The next sync takes them up again once the record is back.';
   const repoReason = `${reason} Pull and Push wait until then, for your own items too.`;
   const leaked = () => [
@@ -14458,7 +14459,7 @@ async function pluginRecordHoldsFlow() {
         await a.shot('record-holds-library-1316-rail');
       }
     }
-    const remoteHeadBefore = execFileSync('git', ['--git-dir', remote, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim();
+    const remoteHeadBefore = git('--git-dir', remote, 'rev-parse', 'refs/heads/main');
     await a.click('#nav-repo');
     for (let tries = 0; tries < 50 && !(await a.exists('#repo-state')); tries++) await wait(100);
     const repoText = await a.text('.repo-page') ?? '';
@@ -14467,7 +14468,7 @@ async function pluginRecordHoldsFlow() {
     same(`${label}: Pull and Push refuse via IPC and leave the repo unchanged`, [
       await a.run(`window.centralKnot.pullRepo(${JSON.stringify(home)}).then(r => r.stopped)`),
       await a.run(`window.centralKnot.pushRepo(${JSON.stringify(home)}).then(r => r.stopped)`),
-      execFileSync('git', ['--git-dir', remote, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim(),
+      git('--git-dir', remote, 'rev-parse', 'refs/heads/main'),
     ], [repoReason, repoReason, remoteHeadBefore]);
     if (label === 'invalid JSON') await fitsAtMinimum(a, 'held Git repo page');
     same(`${label}: no page errors`, a.pageErrors, []);
