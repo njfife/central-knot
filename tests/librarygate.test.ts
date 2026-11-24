@@ -1,6 +1,6 @@
 // The gate for library writes (src/share.ts libraryGate), on real folders in a temp home. First its own table: each state a
-// home can be in, against each way of asking (only asking, `start`, `resume`, `ownFile`): what it answers, and what it made or
-// remembered; and on which platforms a real home lets writes in at all. Then the clicks that write before their own pass runs
+// home can be in, against each way of asking (only asking, `start`, `resume`, `ownFile`): what it answers, and what it made,
+// remembered or lifted (a record an earlier build wrote, to this build's format); and on which platforms a real home lets writes in at all. Then the clicks that write before their own pass runs
 // (a skill's Take over, a tool's own switch cleared and its Undo), in a home waiting for Resume (refused, unless the click is
 // a Resume, which the gate remembers before anything is written); and clicks refused for a reason of their own, which make
 // no record and resume no home. The pass's own gate: tests/agents.test.ts; a tool's Manage switch: tests/managetool.test.ts;
@@ -29,28 +29,35 @@ const inBox = (name: string, body: (box: Box) => Promise<void>) => test(name, as
 // ---------- The gate's own table ----------
 
 type HomeState = 'no record' | 'ready' | 'waiting for Resume' | 'a record that can’t be read' | 'a home that can’t be written';
-/** A home in `state`, made with share.ts's own steps (the record saved, this app remembering it or not). */
-async function homeIn(box: Box, state: HomeState): Promise<ShareContext> {
+/**
+ * A home in `state`, made with share.ts's own steps (the record saved, this app remembering it or not); `format`: the record as
+ * a build that wrote that format left it (2: one that knows five tools; 1: from before the library), else this build's own.
+ */
+async function homeIn(box: Box, state: HomeState, format?: 1 | 2): Promise<ShareContext> {
   const record = join(box.home, '.central-knot/sync.json');
-  if (state === 'ready' || state === 'waiting for Resume') await saveRecord(box.home, newRecord(box.context));
+  if (state === 'ready' || state === 'waiting for Resume') await saveRecord(box.home, { ...newRecord(box.context), ...(format ? { formatVersion: format } : {}) });
   if (state === 'ready') await remember(box.context, JSON.parse(await readFile(record, 'utf8')).generation);
   if (state === 'a record that can’t be read') { await mkdir(join(box.home, '.central-knot'), { recursive: true }); await writeFile(record, '{ damaged'); }
   return state === 'a home that can’t be written' ? { ...box.context, mode: 'actual', realHome: box.home, allowActualWrites: false } : box.context;
 }
-/** What the gate answers a home in `state` asked this way, in a fresh home: refused (and why), or let in, and what it made or remembered. */
-async function answer(state: HomeState, asked: Entering): Promise<string> {
+/**
+ * What the gate answers a home in `state` asked this way, in a fresh home: refused (and why, the record left byte for byte), or
+ * let in, and what it made, remembered or lifted.
+ */
+async function answer(state: HomeState, asked: Entering, format?: 1 | 2): Promise<string> {
   const box = await sandbox();
   try {
-    const context = await homeIn(box, state), recorded = () => readFile(join(box.home, '.central-knot/sync.json'), 'utf8').then(() => true, () => false);
+    const context = await homeIn(box, state, format), text = () => readFile(join(box.home, '.central-knot/sync.json'), 'utf8').catch(() => undefined);
     const known = () => readFile(box.context.settingsPath, 'utf8').then(text => !!JSON.parse(text).homes?.[box.home], () => false);
-    const [hadRecord, knewIt] = [await recorded(), await known()];
-    const gate = await libraryGate(context, asked);
-    if ('refused' in gate) return `refused: ${gate.refused}`;
-    return ['let in', gate.record && 'with its record', !hadRecord && await recorded() && 'record made', !knewIt && await known() && 'remembered'].filter(Boolean).join(', ');
+    const [before, knewIt] = [await text(), await known()];
+    const gate = await libraryGate(context, asked), after = await text();
+    if ('refused' in gate) { assert.equal(after, before, 'a refusal leaves the record as it was'); return `refused: ${gate.refused}`; }
+    const lifted = before && after && JSON.parse(before).formatVersion !== JSON.parse(after).formatVersion && `lifted to format ${JSON.parse(after).formatVersion}`;
+    return ['let in', gate.record && 'with its record', !before && after && 'record made', !knewIt && await known() && 'remembered', lifted].filter(Boolean).join(', ');
   } finally { await box.cleanup(); }
 }
 const ways: [string, Entering][] = [['only asked', {}], ['start', { start: true }], ['resume', { resume: true }], ['ownFile', { ownFile: true }]];
-const row = async (state: HomeState) => Object.fromEntries(await Promise.all(ways.map(async ([way, asked]) => [way, await answer(state, asked)] as const)));
+const row = async (state: HomeState, format?: 1 | 2) => Object.fromEntries(await Promise.all(ways.map(async ([way, asked]) => [way, await answer(state, asked, format)] as const)));
 const refusedEveryWay = (said: Record<string, string>, why: RegExp) => { for (const [way, text] of Object.entries(said)) assert.match(text, why, way); };
 
 inBox('First setup requires write access to the existing store, or to the home that will contain it', async box => {
@@ -75,6 +82,20 @@ test('The gate in a home waiting for Resume: refuses, unless the click is a Resu
   const said = await row('waiting for Resume');
   for (const way of ['only asked', 'start']) assert.match(said[way], /^refused: This app has an intact sync record but no memory of it\./, way);
   assert.deepEqual([said.resume, said.ownFile], ['let in, with its record, remembered', 'let in, with its record']);
+});
+// A build that knows five tools (0.7.0 alpha 5 and earlier) reads any format above 2 as written by a newer Central Knot and stops
+// syncing the home (share.ts FORMAT_VERSION). So whatever write this build lets in, it lifts such a record first: nothing it then
+// writes, naming a sixth tool, is ever left in a home that build would sync.
+test('The gate in a home a build that knows five tools wrote (format 2): every write it lets in lifts the record to format 3 first; a refusal leaves it as it was', async () => {
+  const lifted = 'let in, with its record, lifted to format 3';
+  assert.deepEqual(await row('ready', 2), { 'only asked': lifted, start: lifted, resume: lifted, ownFile: lifted });
+  const said = await row('waiting for Resume', 2);
+  for (const way of ['only asked', 'start']) assert.match(said[way], /^refused: This app has an intact sync record but no memory of it\./, way);
+  assert.deepEqual([said.resume, said.ownFile], ['let in, with its record, remembered, lifted to format 3', lifted]);
+});
+test('The gate in a home whose record holds the skills from before the library (format 1): lets writes in and lifts nothing (the skills migration writes format 3)', async () => {
+  const ready = 'let in, with its record';
+  assert.deepEqual(await row('ready', 1), { 'only asked': ready, start: ready, resume: ready, ownFile: ready });
 });
 test('The gate in a home whose record can’t be read, and a home that can’t be written: refuses every way, in plain words', async () => {
   refusedEveryWay(await row('a record that can’t be read'), /^refused: The sync record is damaged\. Nothing was written or deleted\./);

@@ -38,8 +38,12 @@ import type { HarnessId, HistoryDays, HomeMode, PlanTarget, Skill, Snapshot, Syn
 import type { KeptReads } from './librarypass.ts';
 import type { ToolWays } from './reload.ts';
 
-/** sync.json's format (SyncRecord); format 1 is read until the skills migration (skillstore.ts) writes format 2. */
-export const FORMAT_VERSION = 2;
+/**
+ * sync.json's format (SyncRecord). Format 3 is format 2 written by a build that knows a sixth tool (Antigravity): a build that
+ * knows five (0.7.0 alpha 5 and earlier) reads any later format as written by a newer Central Knot and stops syncing the home.
+ * libraryGate lifts a format 2 record before a write; format 1 is read until the skills migration (skillstore.ts) writes this one.
+ */
+export const FORMAT_VERSION = 3;
 /** A text's SHA-256, hex: what Central Knot names content by. */
 export const sha256 = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
 const STAGE_PREFIX = '.ck-stage-';
@@ -93,9 +97,10 @@ export interface ShareContext {
 /**
  * The home's sync record (sync.json): the build it names (`owner`: the one that made it or last took it over; older builds
  * stop where it names another, this one only rewrites it, main.ts takeOverHome), the generation it remembers, the tools
- * left out of Central Knot's care here (`leftOut`), and whether its standing rule is on (`syncEverything`). Format 2. Format 1
- * also held the skills, with `items`, `roots` and more: skillstore.ts moves them into the library and writes format 2
- * (sync.v1.json keeps the earlier file); until it has, those fields are carried through every save as they are.
+ * left out of Central Knot's care here (`leftOut`), and whether its standing rule is on (`syncEverything`). Format 3
+ * (FORMAT_VERSION), whose fields are format 2's. Format 1 also held the skills, with `items`, `roots` and more: skillstore.ts
+ * moves them into the library and writes format 3 (sync.v1.json keeps the earlier file); until it has, those fields are carried
+ * through every save as they are.
  */
 export interface SyncRecord { formatVersion: number; generation: string; owner: string; /** The owner's own name, as people know it (a record made before there were custom builds has none). */ ownerName?: string;
   /**
@@ -446,7 +451,7 @@ export async function forgetStale(context: ShareContext, generation: string) {
 
 export const NOTHING_CHANGED = 'Nothing was written or deleted. Put the record back, then try again.';
 
-/** What a write of the library asks of libraryGate. With none set, it only asks: nothing is made or remembered. */
+/** What a write of the library asks of libraryGate. With none set, it only asks: nothing is made or remembered (a format 2 record is still lifted). */
 export interface Entering {
   /** It enters a write: a home with no sync record gets one, this build's, remembered as its own. */
   start?: boolean;
@@ -460,7 +465,8 @@ export interface Entering {
  * The gate for library writes: whether one may happen now, else why not in plain words: a preview-only home (writeAccess),
  * a record that can't be read or isn't the one this build remembers (syncGate `stopped`), or one waiting for Resume (unless
  * `resume` or `ownFile`). Let in, it has already done what entering needs before anything is written: the record made (`start`), the
- * home remembered (`start`, `resume`), so a click that writes before its own pass never finds that pass refused. Answers the
+ * home remembered (`start`, `resume`), so a click that writes before its own pass never finds that pass refused; and, asked any
+ * way, a format 2 record lifted to FORMAT_VERSION, so a build that knows five tools stops before this one names a sixth. Answers the
  * home's record, where it has one (with `start`, always). A click that writes by its own hand runs its own refusals before it,
  * and enters it only to write; a pass enters it first (this file's header).
  */
@@ -474,6 +480,7 @@ export async function libraryGate(context: ShareContext, asked: Entering = {}): 
   let { record } = await readRecord(context.home);
   if (!record && asked.start) { record = newRecord(context); await saveRecord(context.home, record); await remember(context, record.generation); }
   else if (record && gate.state === 'needs-resume' && asked.resume) await remember(context, record.generation);
+  if (record?.formatVersion === 2) { record = { ...record, formatVersion: FORMAT_VERSION }; await saveRecord(context.home, record); }
   if (asked.resume && context.resumeFirst) context.resumeFirst.reason = undefined;
   return { record };
 }
