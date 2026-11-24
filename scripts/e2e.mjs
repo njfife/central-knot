@@ -14679,7 +14679,10 @@ if (tool === 'claude') {
   check('done: its result has a line of its own under Copilot CLI’s, counted from its copy as read again, with what Copilot CLI needs and Undo; the line’s sentence is the next act’s alone',
     /^Installed varo-incident-response in Copilot CLI, with its 1 skill, 1 MCP server and 1 agent\. In Copilot CLI, start a new session\.$/.test(installedSaid?.[0] ?? '') && installedSaid?.[1]
     && installedLine === 'Inside varo-incident-response 1.10.0, on here. Turns the whole plugin varo-incident-response off in Copilot CLI, with its 1 skill and 1 MCP server.' && await a.exists('#outcome-undo'), [installedLine, installedSaid]);
-  if (shots) { await sizeTo(a, 1316, 819); await a.shot('lines-installed-1316'); await fullSize(a); }
+  // Pictured at the smallest window (the rail, then the sidebar open) and the largest.
+  const pictures = async name => { if (!shots) return; for (const [width, height, rail] of [[...SMALLEST, true], [...SMALLEST, false], [2560, 1440, false]]) {
+    await sizeTo(a, width, height); if (await a.run(`document.body.classList.contains('rail')`) !== rail) await a.click('#sidebar-toggle'); await a.shot(`${name}-${width}${rail ? '-rail' : ''}`); } await fullSize(a); };
+  await pictures('lines-agent-installed');
   const byLine = left(home);
   for (const [at, what] of ['the plugins record', 'Copilot CLI’s config.json', 'Copilot CLI’s settings.json'].entries()) same(`the install from the line leaves ${what} byte for byte as the box’s tick did`, byLine[at], installedByBox[at]);
   // A new act on the plugin retires the last one's result and its Undo, in the header and on its line: Codex's install of the
@@ -14815,13 +14818,14 @@ if (tool === 'claude') {
   await press(act('skills', 'incident-triage', 'claude-cli'));
   same('a second line’s click waits its turn, said on its own line', [await lineOf('Codex'), await lineOf('Claude Code')], ['Installing varo-incident-response in Codex… This can take a few minutes.', 'Waiting to install varo-incident-response in Claude Code…']);
   // Pictured while the clicks run: a resize here waits for nothing, as sizeTo waits for the page to settle.
-  if (shots) { await a.send('Emulation.setDeviceMetricsOverride', { width: 1316, height: 819, deviceScaleFactor: 1, mobile: false }); await wait(300); await a.shot('lines-installing-and-waiting-1316'); }
+  if (shots) for (const [width, height] of [SMALLEST, [2560, 1440]]) { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false }); await wait(300); await a.shot(`lines-skill-installing-and-waiting-${width}`); }
   rmSync(join(home, 'slow'));
   await until(() => JSON.parse(readNow(claudeRecord) || '{"plugins":{}}').plugins[id] !== undefined, 300);
   await until(async () => /in Claude Code/.test(await a.text('#header') ?? ''), 100);
   check('it ran after it: the plugin installed in Claude Code from the entry’s marketplace', /Installed varo-incident-response in Claude Code/.test(await a.text('#header') ?? ''), await a.text('#header'));
   await idle();
   if (shots) await fullSize(a);
+  await pictures('lines-skill-installed');
 
   // Example 6: a plugin Copilot CLI loads live from a folder: its agent's line removes it; Undo puts it back.
     writeFileSync(join(home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'directory', path: market } } }, enabledPlugins: { [id]: true } }));

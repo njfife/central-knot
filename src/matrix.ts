@@ -145,7 +145,7 @@ function pluginLine(row: ItemRow | PluginRow, facts: LineFacts & { source?: stri
   const control = lineControl(facts), item = facts.through, said = lineSaid(facts.plugin, facts.marketName, facts.tool, idOf(row));
   const words = control.control === 'switch' ? (item ? cantSwitch(item) ?? switchWords(item) : '') : control.sentence;
   // Its result is a line of its own, under this one, with what the tool needs to load it and its Undo.
-  const result = said && !said.busy ? h(`p.details-tool-result${said.failed ? '.tone-warning' : ''}`, {}, icon(said.failed ? 'triangle-alert' : 'check', 12),
+  const result = said && !said.busy ? h('p.details-tool-result', { 'data-failed': String(!!said.failed) }, icon(said.failed ? 'triangle-alert' : 'check', 12, said.failed ? 'tone-warning' : 'tone-success'),
     h('span.details-tool-result-text', {}, [said.text, reload].filter(Boolean).join(' ')), said.act ? smallAction('Undo', elId('line-undo', row, facts.tool), said.act, '', !!acting()) : null) : null;
   const text = [lead, said?.busy ? said.text : words, result ? '' : reload].filter(Boolean).join(' ');
   if (control.control !== 'button') return { text, result, control: control.control === 'switch' && item ? pluginItemControls(item, row) : null };
