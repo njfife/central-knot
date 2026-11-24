@@ -37,6 +37,19 @@ const childMeta = (id: string, parent: string) => ({
     source: { subagent: { thread_spawn: { parent_thread_id: parent, depth: 1, agent_nickname: 'Tesla' } } }, thread_source: 'subagent', model_provider: 'openai',
   },
 });
+/**
+ * The thread's settings as Codex applies them, with the service tier asked for: as the signed-in rollouts save it (0.167.2:
+ * `default`), or with none named (null), as the made-up rollouts of 0.169.1 have it.
+ */
+const settings = (at: string, tier: string | null) => ({
+  timestamp: at, type: 'event_msg',
+  payload: {
+    type: 'thread_settings_applied', thread_id: THREAD,
+    thread_settings: {
+      model: 'gpt-6-astra', model_provider_id: 'openai', approval_policy: 'never', cwd: '/work/app', ...(tier ? { service_tier: tier } : {}),
+    },
+  },
+});
 /** A turn's settings, with the model selected for it. */
 const turn = (model: string, at: string) => ({ timestamp: at, type: 'turn_context', payload: { turn_id: `turn-${at}`, cwd: '/work/app', model, summary: 'none' } });
 /** Codex's counts of one response (its TokenUsage): `input` with its cached part inside it, `output` with its reasoning inside it. */
@@ -146,6 +159,23 @@ test('The provider saved with the thread goes on each of its requests, a later r
   assert.deepEqual((await readCodexRollout(unsaid)).requests.map(each => [each.request, 'provider' in each]), [['resp_2', false]]);
 });
 
+test('The service tier asked for in the thread\'s settings goes on each request after it, a later read\'s too, until settings that name none', async () => {
+  const home = await newHome(), file = join(home, '.codex/sessions/2026/11/24/rollout-one.jsonl'), total = runningTotal();
+  // Codex saves the tier asked for, not the one a reply was served at: a session asked for at priority is not priced at the base.
+  await put(file, [meta(), settings('2026-11-24T15:29:03.501Z', 'priority'), turn('gpt-6-astra', '2026-11-24T15:29:03.502Z')]);
+  const first = await readCodexRollout(file);
+  await appendFile(file, lines([
+    ...respond(total, 'resp_1', '2026-11-24T15:29:04.762Z', counts(301, 81, 41)),
+    settings('2026-11-24T15:29:05.000Z', null),
+    ...respond(total, 'resp_2', '2026-11-24T15:29:06.137Z', counts(302, 82, 42)),
+    settings('2026-11-24T15:29:07.000Z', 'default'),
+    ...respond(total, 'resp_3', '2026-11-24T15:29:08.558Z', counts(303, 83, 43)),
+  ]));
+  const second = await readCodexRollout(file, first);
+  assert.deepEqual(second.requests.map(each => [each.request, 'serviceTier' in each, each.serviceTier]),
+    [['resp_1', true, 'priority'], ['resp_2', false, undefined], ['resp_3', true, 'default']], 'each as saved; none named, none given');
+});
+
 test('Two responses recorded the modern way and then one count covering both: both stand, and the count adds nothing', async () => {
   const home = await newHome(), file = join(home, '.codex/sessions/2026/11/24/rollout-one.jsonl'), total = runningTotal();
   const [firstSaid, firstRecord] = respond(total, 'resp_1', '2026-11-24T15:29:04.762Z', counts(301, 81, 41));
@@ -203,11 +233,14 @@ test('The older counter read in two goes: no response lost or doubled at the cut
     'its count is measured from nothing, not from the old file\'s last total');
 });
 
-test('A file replaced by another is read from its start with no state carried: the thread and model are the new file\'s own', async () => {
+test('A file replaced by another is read from its start with no state carried: the thread, model and tier are the new file\'s own', async () => {
   const home = await newHome(), file = join(home, '.codex/sessions/2026/11/24/rollout-one.jsonl');
-  await put(file, [meta(), turn('gpt-6-astra', '2026-11-24T15:29:03.502Z'), ...respond(runningTotal(), 'resp_1', '2026-11-24T15:29:04.762Z', counts(301, 81, 41))]);
+  await put(file, [
+    meta(), settings('2026-11-24T15:29:03.501Z', 'priority'), turn('gpt-6-astra', '2026-11-24T15:29:03.502Z'),
+    ...respond(runningTotal(), 'resp_1', '2026-11-24T15:29:04.762Z', counts(301, 81, 41)),
+  ]);
   const before = await readCodexRollout(file);
-  // Another file, holding no thread or model: a carried state would name the old one's.
+  // Another file, holding no thread, model or tier: a carried state would name the old one's.
   const other = runningTotal();
   await put(`${file}.new`, [...respond(other, 'resp_2', '2026-11-24T16:00:00.000Z', counts(1, 0, 1)), ...respond(other, 'resp_3', '2026-11-24T16:00:01.000Z', counts(1, 0, 1))]);
   await rename(`${file}.new`, file);
