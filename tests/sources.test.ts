@@ -17,6 +17,7 @@ import { bytes, everywhere, folderOf, historyActions, itemOf, put, sandbox, seen
 import { applySkills, restoreSkill } from '../src/skills.ts';
 import { deslopFiles, repository, skillMd, standInHosts } from './sourcerepo.ts';
 import { within } from './within.ts';
+import { posixModeSkip } from './wincompat.ts';
 
 const hosts = await standInHosts();
 test.after(() => hosts.cleanup());
@@ -350,7 +351,7 @@ test('Merge with a conflict changes nothing: no version, no tool written, no His
   } finally { await box.cleanup(); }
 });
 
-test('Merge on real folders never loses a side: a script made runnable here and a file added here survive the source’s change; a file deleted here that the source changed is a conflict, not a deletion', async () => {
+test('Merge on real folders never loses a side: a script made runnable here and a file added here survive the source’s change; a file deleted here that the source changed is a conflict, not a deletion', async t => {
   const box = await sandbox();
   try {
     const { repo, id } = await oneSkill(box, 'notes', { on: true, body: lines() });
@@ -365,8 +366,10 @@ test('Merge on real folders never loses a side: a script made runnable here and 
     assert.deepEqual(merged(await mergeIt(box, id)), [{ name: 'notes', answer: 'merge', merge: 'merged' }]);
     for (const tool of box.tools) {
       const folder = folderOf(box, tool as never, 'notes');
-      assert.deepEqual([(await stat(join(folder, 'run.sh'))).mode & 0o111, await readFile(join(folder, 'mine.md'), 'utf8'), await toolBody(box, tool, 'notes')], [0o111, 'Mine.\n', 'Last, theirs.']);
+      if (posixModeSkip) assert.deepEqual([await readFile(join(folder, 'mine.md'), 'utf8'), await toolBody(box, tool, 'notes')], ['Mine.\n', 'Last, theirs.']);
+      else assert.deepEqual([(await stat(join(folder, 'run.sh'))).mode & 0o111, await readFile(join(folder, 'mine.md'), 'utf8'), await toolBody(box, tool, 'notes')], [0o111, 'Mine.\n', 'Last, theirs.']);
     }
+    if (posixModeSkip) await t.test('POSIX execute bit survives merge on real folders', { skip: posixModeSkip }, () => {});
     await rm(join(claude, 'notes.md'));
     await applySkills(box.context, box.tools, []);
     await repo.commit({ 'notes.md': 'Notes, changed at the source.\n' }, '2026-11-04T10:00:00Z');

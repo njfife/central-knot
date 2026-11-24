@@ -27,6 +27,7 @@ import { execFileSync } from 'node:child_process';
 import { connectRepo, pushRepo } from '../src/gitrepo.ts';
 import { addSource, previewSource } from '../src/sources.ts';
 import { repository, standInHosts } from './sourcerepo.ts';
+import { slashPath } from './wincompat.ts';
 
 const put = async (path: string, text: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, text); };
 const exists = (path: string) => stat(path).then(() => true, () => false);
@@ -107,7 +108,7 @@ async function kitHome(options: { tools?: HarnessId[]; remote?: true } = {}) {
 async function files(folder: string): Promise<Record<string, string>> {
   const found: Record<string, string> = {};
   const walk = async (dir: string) => { for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
-    if (entry.isDirectory()) await walk(join(dir, entry.name)); else found[relative(folder, join(dir, entry.name))] = await readFile(join(dir, entry.name), 'utf8');
+    if (entry.isDirectory()) await walk(join(dir, entry.name)); else found[slashPath(relative(folder, join(dir, entry.name)))] = await readFile(join(dir, entry.name), 'utf8');
   } };
   await walk(folder);
   return found;

@@ -6,7 +6,8 @@
 import { test } from 'node:test';
 import { bandAfter, itemNotice } from './notices.ts';
 import assert from 'node:assert/strict';
-import fs, { chmod, mkdir, readFile, readdir, rename, rm, utimes, writeFile } from 'node:fs/promises';
+import fs, { mkdir, readFile, readdir, rename, rm, utimes, writeFile } from 'node:fs/promises';
+import { lockSkip, winLockSkip, withLock } from './fslock.ts';
 import { spawnSync } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { writeFileSync } from 'node:fs';
@@ -28,7 +29,7 @@ import type { HarnessId, PassResult } from '../src/types.ts';
 import { choose, claudeAgent, claudeOwn, codexAgent, deleteIt, fileOf, filesOf, historyActions, historyOf, itemOf, keepOut, makeCurrent, pass, readOf, sandbox, seen, tools, trial, turnOff, turnOn, undo, write, type Box, type Tool } from './agentclicks.ts';
 
 const { harnessLine, noticeWords, said } = sentences(libraryWords.agents);
-const inBox = (name: string, body: (box: Box) => Promise<void>, options: { skip?: boolean } = {}) => test(name, options, async () => { const box = await sandbox(); try { await body(box); } finally { await box.cleanup(); } });
+const inBox = (name: string, body: (box: Box) => Promise<void>, options: { skip?: boolean | string } = {}) => test(name, options, async () => { const box = await sandbox(); try { await body(box); } finally { await box.cleanup(); } });
 /** An agent written in Claude Code, taken into Central Knot and applied to every harness. */
 async function on(box: Box, text = claudeAgent()) { await write(box, 'claude-cli', text); assert.notEqual(await turnOn(box), 'choose'); }
 /** Each version of the agent as the opened row lists it (library.ts listed): its prompt's last line and where it came from, the current one first. */
@@ -610,30 +611,29 @@ inBox('A look at a folder that fails for another reason than “not there” est
   const waiting: ShareContext = { ...box.context, mode: 'actual', realHome: box.home, allowActualWrites: true, settleMs: 2000 };
   const codex = join(box.home, '.codex'), agents = join(codex, 'agents');
   // Codex's agents folder can't be looked at (no permission on the folder above it): it is not away, so no window starts.
-  await chmod(codex, 0o000);
-  try { assert.equal((await applyAgents(waiting, tools, [], { now: 1000 })).settling, false); } finally { await chmod(codex, 0o755); }
+  await withLock(codex, 'dir-unreadable', async () => {
+    assert.equal((await applyAgents(waiting, tools, [], { now: 1000 })).settling, false);
+  });
   await rm(agents, { recursive: true });
   const away = await applyAgents(waiting, tools, [], { now: 3500 });
   assert.deepEqual([away.settling, away.writes], [true, 0], 'really away now: its window starts now');
-  await chmod(codex, 0o000);
-  try { await applyAgents(waiting, tools, [], { now: 4000 }); } finally { await chmod(codex, 0o755); }
+  await withLock(codex, 'dir-unreadable', () => applyAgents(waiting, tools, [], { now: 4000 }));
   const again = await applyAgents(waiting, tools, [], { now: 6000 });
   assert.deepEqual([again.settling, again.writes], [true, 0], 'a failed look in between ages nothing: the window starts again');
   assert.equal((await applyAgents(waiting, tools, [], { now: 8500 })).writes, 1, 'past it, the folder is written afresh');
-}, { skip: process.getuid?.() === 0 });
+}, { skip: lockSkip });
 
 inBox('A folder that can’t be listed for a while ages no copy’s absence: once it can be, a copy deleted by hand gets the whole window', async box => {
   await on(box);
   const waiting = { ...box.context, settleMs: 2000 }, agents = join(box.home, '.codex/agents');
   await rm(fileOf(box, 'codex-cli'));
   assert.equal((await applyAgents(waiting, tools, [], { now: 1000 })).settling, true);
-  await chmod(agents, 0o000);
-  try { await applyAgents(waiting, tools, [], { now: 2000 }); } finally { await chmod(agents, 0o755); }
+  await withLock(agents, 'dir-unreadable', () => applyAgents(waiting, tools, [], { now: 2000 }));
   const listed = await applyAgents(waiting, tools, [], { now: 3500 });
   assert.deepEqual([listed.settling, (await itemOf(box))!.on], [true, true]);
   await applyAgents(waiting, tools, [], { now: 6000 });
   assert.equal((await itemOf(box))!.on, false, 'a deletion that stays still turns the agent Off');
-}, { skip: process.getuid?.() === 0 });
+}, { skip: lockSkip });
 
 /** Runs `pass` with the guard's look at Codex's agents folder failing as a denied permission would, after the agents were read; `meanwhile` lands at that moment. */
 async function guardLookFails<T>(box: Box, meanwhile: () => Promise<unknown>, pass: () => Promise<T>): Promise<T> {
@@ -687,24 +687,24 @@ inBox('An edit in one harness and a deletion in another: the edit is the current
 
 // ---------- A copy that can't be seen is never a copy that is gone ----------
 
-const unseeable: [string, (box: Box) => Promise<unknown>, (box: Box) => Promise<unknown>][] = [
-  ['an unreadable file', box => chmod(fileOf(box, 'codex-cli'), 0o000), box => chmod(fileOf(box, 'codex-cli'), 0o644)],
-  ['a half-written save', box => write(box, 'codex-cli', 'name = "reviewer"\n'), async () => undefined],
-  ['a file that is no agent', box => write(box, 'claude-cli', 'no frontmatter yet'), async () => undefined],
-  ['its agents folder away', box => rename(join(box.home, '.codex/agents'), join(box.home, '.codex/agents-away')), async box => { await rm(join(box.home, '.codex/agents'), { recursive: true, force: true }); await rename(join(box.home, '.codex/agents-away'), join(box.home, '.codex/agents')); }],
-  ['its agents folder made again, empty', async box => { await rm(join(box.home, '.codex/agents'), { recursive: true }); await mkdir(join(box.home, '.codex/agents')); }, async () => undefined],
+const unseeable: [string, (box: Box) => Promise<() => Promise<unknown>>][] = [
+  ['an unreadable file', async box => { const { lockPath } = await import('./fslock.ts'); return lockPath(fileOf(box, 'codex-cli'), 'file-unreadable'); }],
+  ['a half-written save', async box => { await write(box, 'codex-cli', 'name = "reviewer"\n'); return async () => undefined; }],
+  ['a file that is no agent', async box => { await write(box, 'claude-cli', 'no frontmatter yet'); return async () => undefined; }],
+  ['its agents folder away', async box => { await rename(join(box.home, '.codex/agents'), join(box.home, '.codex/agents-away')); return async () => { await rm(join(box.home, '.codex/agents'), { recursive: true, force: true }); await rename(join(box.home, '.codex/agents-away'), join(box.home, '.codex/agents')); }; }],
+  ['its agents folder made again, empty', async box => { await rm(join(box.home, '.codex/agents'), { recursive: true }); await mkdir(join(box.home, '.codex/agents')); return async () => undefined; }],
 ];
-for (const [what, hide, show] of unseeable) {
+for (const [what, hide] of unseeable) {
   inBox(`A copy that can’t be seen (${what}) turns nothing Off and removes nothing`, async box => {
     await on(box);
     await pass(box);
     const others = async () => { const now = await filesOf(box); return [now['copilot-cli'] !== undefined, (await itemOf(box))!.on]; };
-    await hide(box);
+    const show = await hide(box);
     try {
       for (const now of [1000, 9000]) { const done = await applyAgents(box.context, tools, [], { now }); assert.equal(done.results.filter(entry => entry.outcome === 'removed').length, 0, JSON.stringify(done.results)); }
       assert.deepEqual(await others(), [true, true]);
-    } finally { await show(box); }
-  }, { skip: what === 'an unreadable file' && process.getuid?.() === 0 });
+    } finally { await show(); }
+  }, { skip: what === 'an unreadable file' && lockSkip });
 }
 
 inBox('A folder made again gets its agents back; a harness no longer managed is left as it is', async box => {
@@ -794,7 +794,7 @@ inBox('An Off agent is in no tool, so no tool is named as one that can’t take 
 // Pi holds no agents of its own: an agent is a loose `<name>.md` in its skills folder, the Markdown Claude Code's file has (presence.ts
 // agentsKeptIn, agentfiles.ts). Pi is then one more harness of the agents kind: every rule above holds there as anywhere.
 
-const inPiBox = (name: string, body: (box: Box) => Promise<void>) => test(name, async () => { const box = await sandbox(true); try { await body(box); } finally { await box.cleanup(); } });
+const inPiBox = (name: string, body: (box: Box) => Promise<void>, options: { skip?: boolean | string } = {}) => test(name, options, async () => { const box = await sandbox(true); try { await body(box); } finally { await box.cleanup(); } });
 const piSkills = (box: Box) => join(box.home, '.pi/agent/skills');
 /** A skill folder of the person's own, in a skills folder (Pi's own, or ~/.agents/skills). */
 async function skillFolder(root: string, name: string) {
@@ -918,17 +918,16 @@ inPiBox('Pi’s file deleted by hand while the agent is On turns it Off in every
 
 inPiBox('Every sentence that names Pi’s folder for an agent calls it its skills folder: one that can’t be written, and one that is away', async box => {
   await on(box);
-  await chmod(piSkills(box), 0o555);
-  try {
+  await withLock(piSkills(box), 'dir-readonly', async () => {
     await edit(box, 'claude-cli', 'Be exact.');
     await pass(box);
     assert.deepEqual(await piLine(box), ['cannot', 'Pi’s skills folder can’t be written, so Central Knot can’t change the agent there. Once the folder’s permissions let it, Pi catches up when sync runs.']);
-  } finally { await chmod(piSkills(box), 0o755); }
+  });
   await pass(box);
   await rename(piSkills(box), `${piSkills(box)}-away`);
   await turnOff(box);
   assert.deepEqual(await piLine(box), ['unseen', 'Pi’s skills folder isn’t there. Its copy is removed once it is back.']);
-});
+}, { skip: winLockSkip });
 
 inPiBox('A loose file in Pi named like an agent that Central Knot never applied there is the person’s own skill: whether the agent is turned On, taken in by Add, or met on the first pass after the update, Pi is held and the file stays as it was', async box => {
   const mine = '---\nname: reviewer\ndescription: My own Pi skill\n---\n\nMine.\n';
@@ -979,8 +978,7 @@ inPiBox('A skill an earlier version made for Pi from the agent (Convert to skill
 inBox('A tool whose agents folder can’t be written says why on its line, pass after pass, instead of promising the agent; once it can be, it gets it', async box => {
   await on(box);
   const folder = join(box.home, '.copilot/agents');
-  await chmod(folder, 0o555);
-  try {
+  await withLock(folder, 'dir-readonly', async () => {
     await edit(box, 'claude-cli', 'Be exact.');
     // The edit's notice and History name only the tool it reached.
     const told = itemNotice((await pass(box)).notices![0]);
@@ -991,36 +989,33 @@ inBox('A tool whose agents folder can’t be written says why on its line, pass 
     assert.equal(harnessIs(row, item, 'copilot-cli'), 'cannot');
     assert.equal(harnessLine(row, item, 'copilot-cli', 'Copilot CLI'),
       'Copilot CLI’s agents folder can’t be written, so Central Knot can’t change the agent there. Once the folder’s permissions let it, Copilot CLI catches up when sync runs.');
-  } finally { await chmod(folder, 0o755); }
+  });
   assert.equal((await pass(box)).writes, 1);
   assert.match((await readOf(box, 'copilot-cli'))!, /Be exact\./);
   // Deleted from Central Knot while the folder can't be written: the row says its copy there goes once it can be.
-  await chmod(folder, 0o555);
-  try {
+  await withLock(folder, 'dir-readonly', async () => {
     await deleteIt(box);
     const { row } = await seen(box);
     assert.match(harnessLine(row, undefined, 'copilot-cli', 'Copilot CLI'), /^Central Knot removes this copy once it can write in Copilot CLI’s agents folder\.$/);
-  } finally { await chmod(folder, 0o755); }
+  });
   await pass(box);
   assert.equal(await readOf(box, 'copilot-cli'), undefined);
   await (await historyActions(box)).find(action => action.label === 'Restore')!.run();
   // With no copy there either, nothing is tried pass after pass: its line says why, and no pass reports a failed write.
   await rm(fileOf(box, 'copilot-cli'));
-  await chmod(folder, 0o555);
-  try {
+  await withLock(folder, 'dir-readonly', async () => {
     await keepOut(box, 'copilot-cli');
     await keepOut(box, 'copilot-cli', false);
     const tried = await pass(box);
     assert.deepEqual([tried.results.filter(entry => entry.harness === 'copilot-cli'), (await marks(box))['copilot-cli']], [[], 'cannot']);
-  } finally { await chmod(folder, 0o755); }
-}, { skip: process.getuid?.() === 0 });
+  });
+}, { skip: lockSkip });
 
 inBox('Clicking Add, On, or a harness’s switch with a locked agents folder names that harness and says why, and says nothing on later passes', async box => {
   const codexAgents = join(box.home, '.codex/agents');
   const lockedWhy = 'Codex’s agents folder can’t be written, so Central Knot can’t change the agent there. Once the folder’s permissions let it, Codex catches up when sync runs.';
   await write(box, 'claude-cli', claudeAgent());
-  await chmod(codexAgents, 0o555);
-  try {
+  await withLock(codexAgents, 'dir-readonly', async () => {
     const added = await turnOn(box);
     assert.ok(added !== 'choose');
     const addRes = clickResults(added.results, ['reviewer']);
@@ -1038,11 +1033,11 @@ inBox('Clicking Add, On, or a harness’s switch with a locked agents folder nam
     assert.deepEqual([backRes.notIn, backRes.failed], [['codex-cli'], true]);
     assert.equal(said.inHarness('reviewer', 'codex-cli', false, backRes.notIn.includes('codex-cli')), 'reviewer couldn’t be put in Codex.');
     assert.deepEqual((await pass(box)).results, []);
-  } finally { await chmod(codexAgents, 0o755); }
+  });
   assert.equal((await pass(box)).writes, 1);
   assert.ok(await readOf(box, 'codex-cli'));
   assert.deepEqual((await pass(box)).results, []);
-}, { skip: process.getuid?.() === 0 });
+}, { skip: lockSkip });
 
 // ---------- Found agents ----------
 

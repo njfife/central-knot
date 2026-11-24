@@ -4,7 +4,8 @@
 // the commands are plain strings.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { winLockSkip, withLock } from './fslock.ts';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ORIGIN_COLOURS, originMark, sessionStrip } from '../src/sessionhooks.ts';
@@ -140,7 +141,7 @@ test('the person’s own hooks are marked yours, a group for each file that hold
   } finally { await rm(base, { recursive: true, force: true }); }
 });
 
-test('the person’s own settings that can’t be read, or don’t parse, are said in their own group, never read as no hooks', async () => {
+test('the person’s own settings that can’t be read, or don’t parse, are said in their own group, never read as no hooks', async t => {
   const base = await mkdtemp(join(tmpdir(), 'ck-session-'));
   try {
     const claude = join(base, '.claude'), copilot = join(base, '.copilot');
@@ -149,10 +150,12 @@ test('the person’s own settings that can’t be read, or don’t parse, are sa
     assert.deepEqual(garbled, { ownHooks: [], ownHooksUnread: [join(claude, 'settings.json')] });
     assert.deepEqual(sessionStrip('claude-cli', [], garbled)!.groups.map(group => [group.name, group.settings, group.unread]),
       [['yours', join(claude, 'settings.json'), [join(claude, 'settings.json')]]]);
-    await put(join(copilot, 'hooks/locked.json'), JSON.stringify({ hooks: { sessionStart: [{ type: 'command', bash: './x.sh' }] } }));
-    await chmod(join(copilot, 'hooks/locked.json'), 0o000);
-    assert.deepEqual((await sessionSettings('copilot-cli', copilot)).ownHooksUnread, process.getuid?.() === 0 ? [] : [join(copilot, 'hooks/locked.json')]);
-    await chmod(join(copilot, 'hooks/locked.json'), 0o644);
+    await t.test('an unreadable Copilot hooks file is reported in ownHooksUnread', { skip: winLockSkip }, async () => {
+      await put(join(copilot, 'hooks/locked.json'), JSON.stringify({ hooks: { sessionStart: [{ type: 'command', bash: './x.sh' }] } }));
+      await withLock(join(copilot, 'hooks/locked.json'), 'file-unreadable', async () => {
+        assert.deepEqual((await sessionSettings('copilot-cli', copilot)).ownHooksUnread, process.getuid?.() === 0 ? [] : [join(copilot, 'hooks/locked.json')]);
+      });
+    });
     // Codex's config.toml that doesn't parse (a string left open): its inline hooks aren't known, so it is named.
     await put(join(base, '.codex/config.toml'), 'model = "unterminated\n');
     assert.deepEqual((await sessionSettings('codex-cli', join(base, '.codex'))).ownHooksUnread, [join(base, '.codex/config.toml')]);

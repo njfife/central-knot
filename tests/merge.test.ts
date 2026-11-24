@@ -11,6 +11,7 @@ import { readTree } from '../src/share.ts';
 import { mergeSkill } from '../src/merge.ts';
 import { readVersion } from '../src/skillstore.ts';
 import { sandbox, type Box } from './skillclicks.ts';
+import { posixModeSkip } from './wincompat.ts';
 
 /** A skill's folder for one side: each file's text (or bytes) and mode where it isn't the default. */
 type Side = Record<string, string | Buffer | { text: string; mode: number }>;
@@ -82,9 +83,12 @@ test('Bytes as they are: Windows line endings stay through the line merge, a fil
   assert.equal(files['end.md'].text, 'last', 'the newline removed here stays removed');
 });
 
-test('A script made runnable here while the source rewrote it: the merged script has the source’s bytes and stays runnable; a file added here only survives', async () => {
+test('A script made runnable here while the source rewrote it: the merged script has the source’s bytes and stays runnable; a file added here only survives', async t => {
   const base = { 'SKILL.md': skill('Takes notes.', 'Write.'), 'run.sh': { text: '#!/bin/sh\necho one\n', mode: 0o644 } };
   const { done, files } = await merge(base, { ...base, 'run.sh': { text: '#!/bin/sh\necho one\n', mode: 0o755 }, 'mine.md': 'Mine.\n' }, { ...base, 'run.sh': { text: '#!/bin/sh\necho two\n', mode: 0o644 } });
   assert.ok('merged' in done);
-  assert.deepEqual([files['run.sh'], files['mine.md']?.text], [{ text: '#!/bin/sh\necho two\n', mode: '755' }, 'Mine.\n']);
+  assert.deepEqual([files['run.sh']?.text, files['mine.md']?.text], ['#!/bin/sh\necho two\n', 'Mine.\n']);
+  await t.test('POSIX execute bit (0755) survives merge', { skip: posixModeSkip }, () => {
+    assert.deepEqual(files['run.sh'], { mode: '755', text: '#!/bin/sh\necho two\n' });
+  });
 });

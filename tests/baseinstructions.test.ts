@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { lockSkip, withLock } from './fslock.ts';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
@@ -111,7 +112,7 @@ test('A copy edited in a tool’s file stays until the person chooses, also afte
   } finally { await box.cleanup(); }
 });
 
-test('Taking a tool off takes the block out, keeps own text and edited copies, and adding it again never repeats the base', async () => {
+test('Taking a tool off takes the block out, keeps own text and edited copies, and adding it again never repeats the base', async t => {
   const box = await sandbox();
   const claude = box.file('.claude/CLAUDE.md'), codex = box.file('.codex/AGENTS.md'), copilot = box.file('.copilot/copilot-instructions.md');
   try {
@@ -133,16 +134,13 @@ test('Taking a tool off takes the block out, keeps own text and edited copies, a
     await box.set('Shared.\n', ['claude-cli', 'copilot-cli']);
     await box.set('Shared.\n', ['claude-cli']);
     assert.equal(await readFile(copilot, 'utf8'), 'Shared.\n');
-    // (A read-only folder doesn't stop root, so this step only runs as an ordinary user.)
-    if (process.getuid?.() !== 0) {
-      await chmod(box.file('.copilot'), 0o555);
-      const blocked = await box.set('Shared.\n', ['claude-cli', 'copilot-cli']);
-      await chmod(box.file('.copilot'), 0o755);
+    await t.test('a failed write into a read-only folder keeps the plain-text record for the retry', { skip: lockSkip }, async () => {
+      const blocked = await withLock(box.file('.copilot'), 'dir-readonly', () => box.set('Shared.\n', ['claude-cli', 'copilot-cli']));
       assert.ok(blocked.left.some(entry => entry.tool === 'copilot-cli' && entry.why === 'failed'));
       // Taken off again before the retry (nothing to change in the file): the record of the plain text stays.
       await box.set('Shared.\n', ['claude-cli']);
       assert.equal(await readFile(copilot, 'utf8'), 'Shared.\n');
-    }
+    });
     await box.set('Shared.\n', ['claude-cli', 'copilot-cli']);
     await box.set('Shared, now.\n', ['claude-cli', 'copilot-cli']);
     assert.deepEqual(splitBase(await readFile(copilot, 'utf8')), { own: '', copy: 'Shared, now.\n' });
