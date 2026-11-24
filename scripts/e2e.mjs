@@ -989,7 +989,7 @@ async function manageFlow() {
   await a.click('#sync-switch');
   // Every tool left out: the pages say so and point to Harnesses, not that no tool was found.
   for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#manage-${tool}`);
-  same('with every tool left out, the sidebar holds only the pages that need no tool', await a.all('#nav [id^="nav-"]', 'e.id.slice(4)'), ['overview', 'harnesses', 'sources', 'history', 'repo', 'settings']);
+  same('with every tool left out, the sidebar holds only the pages that need no tool', await a.all('#nav [id^="nav-"]', 'e.id.slice(4)'), ['overview', 'harnesses', 'sources', 'history', 'sessions', 'repo', 'settings']);
   await a.click('#nav-overview');
   same('its Overview names the tools left out and opens Harnesses', [await a.text('.overview-lead'), await a.exists('#overview-open-harnesses'), await a.exists('#overview-choose-home')],
     ['Central Knot manages none of the tools here: Claude Code, Copilot CLI and Codex are left out.', true, false]);
@@ -4558,7 +4558,7 @@ async function fewToolsFlow() {
     await a.quit();
     return;
   }
-  same('a home with no tools shows only the pages that hold no kind', await pages(), ['overview', 'harnesses', 'sources', 'history', 'repo', 'settings']);
+  same('a home with no tools shows only the pages that hold no kind', await pages(), ['overview', 'harnesses', 'sources', 'history', 'sessions', 'repo', 'settings']);
   same('its Overview says no tools were found, once, with another home to choose', [await a.text('.overview-lead'), await a.exists('#overview-choose-home')], ['No tools were found in this home.', true]);
   check('its status bar says only that the home opened', /^Opened [^.]+\.$/.test(await a.run(`document.querySelector('#announcement').dataset.text`) ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`));
   same('with nothing to sync, the switch is shown, not offered', await a.run(`[document.querySelector('#sync-switch').getAttribute('aria-disabled'), document.querySelector('#sync-switch .sync-state').textContent]`), ['true', 'Nothing to sync']);
@@ -4576,13 +4576,13 @@ async function fewToolsFlow() {
   mkdirSync(join(home, '.codex/skills/notes'), { recursive: true });
   writeFileSync(join(home, '.codex/skills/notes/SKILL.md'), text('notes'));
   await a.click('#header-refresh');
-  same('a tool’s folder alone, with no CLI or app, makes no tool', await pages(), ['overview', 'harnesses', 'sources', 'history', 'repo', 'settings']);
+  same('a tool’s folder alone, with no CLI or app, makes no tool', await pages(), ['overview', 'harnesses', 'sources', 'history', 'sessions', 'repo', 'settings']);
   mkdirSync(join(home, '.pi/agent/skills/notes'), { recursive: true });
   writeFileSync(join(home, '.pi/agent/skills/notes/SKILL.md'), text('notes'));
   cli('.pi/agent/bin/pi', 'pi 1.5.0');
   await a.click('#header-refresh');
   // Codex, whose folder is still here, holds plugins: were it counted, that page would be back.
-  same('with Pi alone, Plugins is left out, and the Library stays: Pi takes agents as skills', await pages(), ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'sources', 'profiles', 'history', 'repo', 'settings']);
+  same('with Pi alone, Plugins is left out, and the Library stays: Pi takes agents as skills', await pages(), ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'sources', 'profiles', 'history', 'sessions', 'repo', 'settings']);
   check('and the Overview names it once', (await a.text('#overview-absent') ?? '').includes('No tool here holds plugins') && await a.exists('#overview-agents'), await a.text('#overview-absent'));
   await openKind(a, 'skills');
   check('the tool with only a folder has no mark', await a.exists('.tool-mark[data-tool="pi-cli"]') && !(await a.exists('[data-tool="codex-cli"], #tool-codex-cli')));
@@ -4596,7 +4596,7 @@ async function fewToolsFlow() {
   mkdirSync(join(home, '.claude'), { recursive: true });
   cli('.local/bin/claude', '2.1.309 (Claude Code)');
   await a.click('#header-refresh');
-  same('a tool that holds plugins brings them back', await pages(), ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'repo', 'settings']);
+  same('a tool that holds plugins brings them back', await pages(), ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'sessions', 'repo', 'settings']);
   await a.click('#nav-harnesses');
   check('Claude Code’s CLI alone says nothing of Cowork', !(await a.text('#harness-claude-cli')).includes('Cowork'), await a.text('#harness-claude-cli'));
   // On Plugins, its only tool goes away (Pi, still here, holds no plugins): the page it was on no longer exists here, so the
@@ -4605,7 +4605,7 @@ async function fewToolsFlow() {
   rmSync(join(home, '.claude'), { recursive: true, force: true });
   rmSync(join(home, '.local/bin/claude'));
   await a.click('#header-refresh');
-  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'sources', 'profiles', 'history', 'repo', 'settings']]);
+  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'sources', 'profiles', 'history', 'sessions', 'repo', 'settings']]);
   const moved = await a.run(`document.querySelector('#announcement').dataset.text`);
   check('and the status bar says what was read and why the page moved', /^Read .*No tool here holds plugins now\.$/.test(moved ?? ''), moved);
   // Claude desktop alone, with no CLI and no .claude folder yet: Claude Code is here, said so with both versions.
@@ -9167,7 +9167,7 @@ async function mcpSigninFlow() {
   const before = started().length;
   await a.click('#nav-mcpsignin');
   same('the page is in the sidebar beside the Library, under its name', [await a.text('.page-title'), await a.all('#nav [id^="nav-"]', 'e.id.slice(4)')],
-    ['MCP sign-in', ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'repo', 'settings']]);
+    ['MCP sign-in', ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'sessions', 'repo', 'settings']]);
   await wait(500);
   same('opening the page runs no tool', started().length, before);
   const opened = await page();
@@ -9844,6 +9844,193 @@ const homeWith = name => {
 };
 
 /**
+ * The Sessions page (sessionspage.ts) on a made-up home with Claude Code, Codex and Copilot CLI: the sidebar entry after
+ * History; the reading shown arriving; a day with nothing; then a day of Claude Code and Codex sessions (the real model ids,
+ * a reply priced as another row, a fast reply with no rate, a lower bound, a Codex child with no price under its parent, a
+ * line Codex wrote that is not JSON, Claude Code's own figure); Yesterday and back; Refresh after a file gains a response;
+ * nothing written under the home; nothing cut off at each window size; in a development run, a reading that fails. The app
+ * has no clock to set: the records are dated by this machine's calendar, and within two minutes of midnight the flow waits past it.
+ */
+async function sessionsFlow() {
+  const midnight = (back = 0, at = new Date()) => new Date(at.getFullYear(), at.getMonth(), at.getDate() - back).getTime();
+  if (midnight(-1) - Date.now() < 120_000) await wait(midnight(-1) - Date.now() + 1000);
+  const today = midnight(0), yesterday = midnight(1), started = Date.now();
+  /** A time today before the flow started: `part` of the way from midnight. */
+  const todayAt = part => today + Math.floor((started - today) * part);
+  const home = join(scratch, 'sessions-home'), data = join(scratch, 'sessions-data'), real = join(scratch, 'sessions-real');
+  // A chosen folder's tools are the ones whose folders are there (discovery.ts runs no probes there): Claude Code, Codex and Copilot CLI.
+  for (const folder of ['.claude', '.codex', '.copilot']) mkdirSync(join(home, folder), { recursive: true });
+  const ours = new Set();
+  const put = (path, records, mtime) => {
+    ours.add(path);
+    mkdirSync(dirname(join(home, path)), { recursive: true });
+    writeFileSync(join(home, path), records.map(record => (typeof record === 'string' ? record : JSON.stringify(record))).join('\n') + '\n');
+    utimesSync(join(home, path), new Date(mtime), new Date(mtime));
+  };
+  const usage = (input, output, more = {}) => ({ input_tokens: input, cache_read_input_tokens: more.read ?? 0, cache_creation_input_tokens: more.write ?? 0,
+    cache_creation: { ephemeral_5m_input_tokens: (more.write ?? 0) - (more.hour ?? 0), ephemeral_1h_input_tokens: more.hour ?? 0 }, output_tokens: output, speed: more.speed ?? 'standard', service_tier: 'standard' });
+  const reply = (session, id, at, model, used, cwd) => ({ type: 'assistant', sessionId: session, cwd, timestamp: new Date(at).toISOString(),
+    message: { id, type: 'message', role: 'assistant', model, content: [{ type: 'text', text: 'Made up.' }], usage: used } });
+  const rollout = (id, parent, at, model, response, [input, cached, output], provider = 'openai') => [
+    { timestamp: new Date(at).toISOString(), type: 'session_meta', payload: { id, session_id: parent ?? id, ...(parent ? { parent_thread_id: parent } : {}), cwd: '/work/codex-app', model_provider: provider } },
+    { timestamp: new Date(at).toISOString(), type: 'turn_context', payload: { turn_id: `turn-${id}`, cwd: '/work/codex-app', model } },
+    { timestamp: new Date(at + 1).toISOString(), type: 'token_usage_record', payload: { response_id: response,
+      usage: { input_tokens: input, cached_input_tokens: cached, cache_write_input_tokens: 0, output_tokens: output, reasoning_output_tokens: 0, total_tokens: input + output } } }];
+  // Yesterday, one Claude Code session; today, nothing yet.
+  put('.claude/projects/-work-notes/gamma.jsonl', [reply('gamma', 'g1', yesterday + 36_000_000, 'claude-fable-5', usage(20_000, 2_000), '/work/notes')], yesterday + 36_000_000);
+  for (const folder of [data, real]) mkdirSync(folder, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  const a = await launch(data, [], real);
+  const before = treeOf(home);
+  same('Sessions is in the sidebar, after History', await a.all('#nav [id^="nav-"]', 'e.id.slice(4)'),
+    ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'sessions', 'repo', 'settings']);
+  const arriving = await a.run(`(() => { document.querySelector('#nav-sessions').click(); return document.querySelector('#sessions-reading')?.textContent ?? null; })()`);
+  const landed = async () => { for (let tries = 0; tries < 100 && !(await a.exists('#sessions-heading')); tries++) await wait(100); await a.settle(); };
+  await landed();
+  const dateOf = (ms, month = 'long') => a.run(`new Date(${ms}).toLocaleDateString(undefined, { day: 'numeric', month: '${month}' })`);
+  same('opening the page asks for today’s reading and says so until it lands', arriving, 'Reading today’s sessions…');
+  same('a day with nothing: the date, one sentence naming the tools read and no dollars; the tool present and not read yet named once',
+    [await a.text('#sessions-heading'), await a.exists('.sessions-head > .sessions-estimate'), await a.text('#sessions-none'), await a.text('#sessions-not-read'), await a.exists('.sessions-row')],
+    [`Today, ${await dateOf(today)}`, false, 'No sessions today in Claude Code or Codex.', 'Not counted: Copilot CLI', false]);
+  same('the tool not counted says why on hover', await a.run(`document.querySelector('#sessions-not-read').title`), 'So far Central Knot reads Claude Code’s and Codex’s sessions.');
+  // A Codex file of today whose one line can't be read: the day is not known to be empty.
+  const day = new Date(today), dated = [day.getFullYear(), day.getMonth() + 1, day.getDate()].map(part => String(part).padStart(2, '0')).join('/');
+  put(`.codex/sessions/${dated}/rollout-torn.jsonl`, ['a line that is not JSON'], todayAt(0.1));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 100 && (await a.text('#sessions-none')) === 'No sessions today in Claude Code or Codex.'; tries++) await wait(100);
+  same('"No sessions" only for a reading that is whole: with a file that could not be read, no sessions found', await a.text('#sessions-none'), 'No sessions found.');
+
+  // Today: two Claude Code sessions and a Codex session with its agent's.
+  const longFolder = 'a-project-folder-whose-name-runs-on-and-on-past-any-column-it-could-be-given';
+  const alpha = '.claude/projects/-work-central-knot/alpha.jsonl';
+  put(alpha, [reply('alpha', 'a1', todayAt(0.2), 'claude-fable-5', usage(30_000, 3_000, { read: 120_000 }), `/work/${longFolder}`),
+    reply('alpha', 'a2', todayAt(0.25), 'claude-haiku-4-5-20251001', usage(10_000, 1_000), `/work/${longFolder}`),
+    reply('alpha', 'a3', todayAt(0.3), 'claude-haiku-4-5', usage(5_000, 500, { speed: 'fast' }), `/work/${longFolder}`),
+    { type: 'cost-state', sessionId: 'alpha', totalCostUSD: 4.31, modelUsage: {}, hasUnknownModelCost: false }], todayAt(0.3));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 100 && !(await a.exists('.sessions-row')); tries++) await wait(100);
+  same('a tool whose history could not all be read and gave no session: no sessions found, on its hover', await a.run(`document.querySelector('.sessions-tool-total[data-tool="codex-cli"]').title`), 'No sessions found.');
+  put('.claude/projects/-work-notes/beta.jsonl', [reply('beta', 'b1', todayAt(0.5), 'claude-opus-5-5', usage(8_000, 800), '/work/notes'),
+    reply('beta', 'b2', todayAt(0.55), 'claude-2', usage(2_000, 200, { write: 6_000, hour: 6_000 }), '/work/notes')], todayAt(0.55));
+  put(`.codex/sessions/${dated}/rollout-x1.jsonl`, rollout('x1', undefined, todayAt(0.7), 'gpt-6-astra', 'r1', [40_000, 30_000, 2_000]), todayAt(0.7));
+  put(`.codex/sessions/${dated}/rollout-x2.jsonl`, [...rollout('x2', 'x1', todayAt(0.8), 'codex-auto-review', 'r2', [9_000, 0, 300]), 'a line that is not JSON'], todayAt(0.8));
+  put(`.codex/sessions/${dated}/rollout-x3.jsonl`, rollout('x3', 'x1', todayAt(0.85), 'gpt-6-astra', 'r3', [1_000, 0, 100], 'acme-gateway'), todayAt(0.85));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 100 && !(await a.exists('.sessions-row[data-session="x1"]')); tries++) await wait(100);
+  await a.settle();
+  const nesting = () => a.all('.sessions-row', '[e.dataset.session, e.parentElement.closest(".sessions-row")?.dataset.session ?? null]');
+  same('Refresh reads the day again: a row a session, newest first, the Codex agents’ sessions inside their parent’s', await nesting(), [['x1', null], ['x2', 'x1'], ['x3', 'x1'], ['beta', null], ['alpha', null]]);
+  const masked = text => text.replace(/≈ \$[\d,]*\.\d+/, '≈ $…');
+  const ONE_HOUR = 'One-hour cache writes are priced at the shorter cache’s rate; they cost more.';
+  /** A closed row as it reads: when, the tool, the project, its dollars and unpriced count, and their hovers. */
+  const rowSays = session => a.run(`(row => { const cell = name => row.querySelector(':scope > details > summary > .sessions-' + name), cost = cell('cost');
+    const part = name => cost.querySelector('.sessions-' + name);
+    return [cell('when').textContent, cell('tool').textContent, cell('project').textContent, part('estimate')?.textContent ?? '', part('unpriced')?.textContent ?? '', part('estimate')?.title ?? '', part('unpriced')?.title ?? '']; })(document.querySelector('.sessions-row[data-session="${session}"]'))`);
+  const [alphaRow, betaRow, x1Row, x2Row] = [await rowSays('alpha'), await rowSays('beta'), await rowSays('x1'), await rowSays('x2')];
+  same('a closed row: when, the tool, the project folder’s name, its dollars bold with its agents’, unpriced counted, why on hover; an agent’s session marked Agent',
+    [/^\S.*\S$/.test(alphaRow[0]), ...[alphaRow, betaRow, x1Row, x2Row].map(says => [says[1], says[2], masked(says[3]), ...says.slice(4)])],
+    [true, ['Claude Code', longFolder, '≈ $…', '1 unpriced', '', 'No price known for a fast reply.'], ['Claude Code', 'notes', '≈ $… or more', '', ONE_HOUR, ''],
+      ['Codex', 'codex-app', '≈ $…', '2 unpriced', '', 'No price known.'], ['Agent', 'codex-app', '', '1 unpriced', '', 'No price known.']]);
+  const ratesDate = JSON.parse(readFileSync(join(root, 'assets/model-rates.json'), 'utf8')).date.split('-').map(Number);
+  const pricesDate = await a.run(`new Date(${ratesDate[0]}, ${ratesDate[1] - 1}, ${ratesDate[2]}).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })`);
+  const head = await a.run(`[...document.querySelector('.sessions-head').children].map(part => [part.textContent, part.title])`);
+  const unreadCodex = 'Some of Codex’s session history could not be read.';
+  same('the heading: the day’s dollars, the price list’s date and each reason it is a lower bound on hover; the requests unpriced, each reason said once and true on hover; the day',
+    head.map(([text, title]) => [masked(text), title]), [['≈ $… or more', `Prices as of ${pricesDate}. ${unreadCodex} ${ONE_HOUR}`],
+      ['3 requests unpriced', 'No price known for 2 requests with no matching rate and a fast reply.'], [`Today, ${await dateOf(today)}`, '']]);
+  same('the caption once; what could not be read, for Codex', [await a.all('.sessions-caption:not(.sessions-unread)'), await a.all('.sessions-unread')],
+    [['At API prices, not your plan’s.'], [unreadCodex]]);
+  const tools = await a.all('#sessions-by-tool > .sessions-tool-total', '[e.dataset.tool, e.textContent.replace(/≈.*/, ""), e.querySelector(".sessions-estimate")?.textContent, e.querySelector(".sessions-unpriced")?.textContent, e.querySelector(".sessions-estimate")?.title]');
+  same('the tools’ line: each tool’s dollars and unpriced count, a lower bound where some of its history could not be read; its top-level sessions, whose prices and why low on hover; the tool not counted',
+    [tools.map(([tool, name, sum, unpriced, title]) => [tool, name, masked(sum), unpriced, title]), await a.text('#sessions-not-read')],
+    [[['claude-cli', 'Claude Code', '≈ $… or more', '1 unpriced', `2 sessions. At Anthropic’s API prices. ${ONE_HOUR}`],
+      ['codex-cli', 'Codex', '≈ $… or more', '2 unpriced', `1 session. At OpenAI’s API prices. ${unreadCodex}`]], 'Not counted: Copilot CLI']);
+  const open = session => a.click(`.sessions-row[data-session="${session}"] > details > summary`);
+  /** Model lines in `where`: the model and what is said under it, its price, the four token counts as digits. */
+  const models = async where => (await a.run(`[...document.querySelectorAll('${where} > .sessions-line:not(.sessions-line-head)')].map(line => [line.querySelector('.sessions-span').innerText.trim(),
+    line.children[1].textContent, ...[...line.querySelectorAll('.sessions-counts > span')].map(count => count.textContent.replace(/\\D/g, ''))])`)).map(([model, price, ...counts]) => [model, masked(price), ...counts]);
+  const body = session => `.sessions-row[data-session="${session}"] > details > .sessions-body`;
+  const notes = session => a.all(`${body(session)} > .sessions-aside`);
+  await open('alpha');
+  same('an opened row: each model’s price and its input, cached, cache-written and output tokens; priced as the row the list matched; no price known for a fast reply',
+    await models(body('alpha')), [['claude-fable-5', '≈ $…', '30000', '120000', '0', '3000'], ['claude-haiku-4-5-20251001\npriced as claude-haiku-4-5', '≈ $…', '10000', '0', '0', '1000'],
+      ['claude-haiku-4-5', 'no price known for a fast reply', '5000', '0', '0', '500']]);
+  same('Claude Code’s own figure in the opened row, out of every total', await notes('alpha'), ['Claude Code’s own figure for this session: $4.31. Not in the totals.']);
+  await open('beta');
+  same('a lower bound says why, opened', [await notes('beta'), (await models(body('beta'))).map(row => row[0])], [[ONE_HOUR], ['claude-2', 'claude-opus-5-5']]);
+  await open('x1');
+  await open('x2');
+  same('an opened row: its own models, then its agent’s session, whose model the list does not have: its tokens, and no price known',
+    [(await models(body('x1'))).map(row => row[0]), await models(body('x2'))], [['gpt-6-astra'], [['codex-auto-review', 'no price known', '9000', '0', '0', '300']]]);
+  same('By model is folded at first', await a.run(`document.querySelector('#sessions-by-model > details').open`), false);
+  await a.click('#sessions-by-model summary');
+  same('By model, opened: every model of the day once, said as in an opened row', (await models('#sessions-by-model > details')).map(row => row.slice(0, 2)).sort(),
+    [['claude-2', '≈ $… or more'], ['claude-fable-5', '≈ $…'], ['claude-haiku-4-5', 'no price known for a fast reply'], ['claude-haiku-4-5-20251001\npriced as claude-haiku-4-5', '≈ $…'],
+      ['claude-opus-5-5', '≈ $…'], ['codex-auto-review', 'no price known'], ['gpt-6-astra', '≈ $…; no price known']]);
+  await a.click('#sessions-by-model summary');
+
+  // Yesterday, and back.
+  await a.click('#sessions-day-yesterday');
+  for (let tries = 0; tries < 100 && !(await a.exists('.sessions-row[data-session="gamma"]')); tries++) await wait(100);
+  same('Yesterday asks for its own day: its date, its one session', [await a.text('#sessions-heading'), await nesting(), await a.run(`document.querySelector('#sessions-day-yesterday').getAttribute('aria-pressed')`)],
+    [`Yesterday, ${await dateOf(yesterday)}`, [['gamma', null]], 'true']);
+  await a.click('#sessions-day-today');
+  for (let tries = 0; tries < 100 && !(await a.exists('.sessions-row[data-session="alpha"]')); tries++) await wait(100);
+  same('Today again, and the rows opened before are open still', await a.all('.sessions-row > details[open]', 'e.parentElement.dataset.session'), ['x1', 'x2', 'beta', 'alpha']);
+
+  // A response added to a session: Refresh reads it.
+  const alphaCost = async () => (await rowSays('alpha'))[3];
+  const was = await alphaCost();
+  writeFileSync(join(home, alpha), `${JSON.stringify(reply('alpha', 'a4', Math.max(today, Date.now() - 1000), 'claude-fable-5', usage(50_000, 5_000), `/work/${longFolder}`))}\n`, { flag: 'a' });
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 100 && (await alphaCost()) === was; tries++) await wait(100);
+  same('Refresh after a file gains a response: its session’s sum and model tokens grow, and it is the newest row',
+    [(await alphaCost()) !== was, (await models(body('alpha')))[0].filter((_, index) => index !== 1).slice(0, 2), (await nesting())[0]], [true, ['claude-fable-5', '80000'], ['alpha', null]]);
+  const changed = Object.entries(treeOf(home)).filter(([path, hash]) => !ours.has(path) && before[path] !== hash).map(([path]) => path);
+  same('nothing written under the home: every file there is as it was, but the session files the flow wrote', [changed, Object.keys(before).filter(path => !ours.has(path) && !existsSync(join(home, path)))], [[], []]);
+
+  // One row opened and the others closed; nothing cut off at each window size, the sidebar open and as a rail; the rows scroll with the page.
+  for (const session of ['x1', 'beta']) await open(session);
+  const SPILLS = `(() => { const page = document.querySelector('#sessions-scroll'), edge = page.getBoundingClientRect().right - parseFloat(getComputedStyle(page).paddingRight);
+    return [...page.querySelectorAll('*')].flatMap(e => [...(e.getBoundingClientRect().right > edge + 1 ? ['past the page’s edge: ' + (e.id || e.className || e.tagName)] : []),
+      ...(['auto', 'scroll'].includes(getComputedStyle(e).overflowY) ? ['a box that scrolls inside the page: ' + (e.id || e.className)] : [])]); })()`;
+  /**
+   * Whether a row's project column ends where its dollars begin (one gap between), the opened row's Cost starts where the dollars
+   * do, and the rows span the page: a row reaches the page's edge (its scrollbar and padding off) and its columns fill it.
+   */
+  const lineUp = () => a.run(`(() => { const row = document.querySelector('.sessions-row[data-session="beta"] > details > summary'), box = name => row.querySelector('.sessions-' + name).getBoundingClientRect();
+    const head = document.querySelector('.sessions-row[data-session="alpha"] .sessions-line-head'), page = document.querySelector('#sessions-scroll'), style = getComputedStyle(row);
+    const edge = page.getBoundingClientRect().left + page.clientLeft + page.clientWidth - parseFloat(getComputedStyle(page).paddingRight);
+    const tracks = style.gridTemplateColumns.split(' ').map(parseFloat), used = tracks.reduce((sum, track) => sum + track, 0) + parseFloat(style.columnGap) * (tracks.length - 1);
+    return [Math.abs(box('cost').left - box('project').right - parseFloat(style.columnGap)) < 1, Math.abs(head.children[1].getBoundingClientRect().left - box('cost').left) < 1,
+      Math.abs(edge - row.getBoundingClientRect().right) < 1 && Math.abs(used - (row.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight))) < 1]; })()`);
+  for (const [width, height] of [SMALLEST, [1280, 800], [1316, 819], [1728, 1117], [2560, 1440]]) {
+    await sizeTo(a, width, height);
+    for (const rail of [false, true]) {
+      if ((await a.run(`document.body.classList.contains('rail')`)) !== rail) await a.click('#sidebar-toggle');
+      same(`nothing cut off at ${width}×${height}, the sidebar ${rail ? 'a rail' : 'open'}: Sessions with one row opened`, [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT), ...await a.run(SPILLS)], []);
+      same(`at ${width}×${height}, the sidebar ${rail ? 'a rail' : 'open'}: the project’s column ends where the dollars begin, one column with the opened row’s Cost, and the rows span the page`,
+        await lineUp(), [true, true, true]);
+      if (!rail && [SMALLEST[0], 1316, 2560].includes(width)) await a.shot(`sessions-${width}-after`);
+    }
+  }
+  await fullSize(a);
+  same('no page error on the Sessions page', a.pageErrors, []);
+  // A reading that fails says so (a development run only: it reaches main to make the request fail).
+  const main = a.inspect ? await mainHelpers(a.inspect) : undefined;
+  if (main) {
+    await main.failRequest('sessions:read');
+    await a.click('#header-refresh');
+    for (let tries = 0; tries < 50 && !(await a.exists('#sessions-failed')); tries++) await wait(100);
+    same('a reading that fails says so in one sentence, and shows nothing from the reading before', [await a.text('#sessions-failed'), await a.exists('.sessions-row')],
+      ['Sessions could not be read. Refresh to try again.', false]);
+    await main.restore('sessions:read');
+    main.close();
+  } else console.log('sessionsFlow: a reading that fails is checked in a development run only (it reaches the main process).');
+  await a.quit();
+}
+
+/**
  * Word search in the app as built (search.ts, searchdocs.ts): main indexes the Library with SQLite's own full-text search from
  * each view it hands over, and answers the page beside its queue. On a made-up home, through the page's own call: the name
  * weighted above the text (bm25()), an excerpt of the text (snippet()), another form of a word (porter), a word only the
@@ -10307,7 +10494,7 @@ async function libraryFlow() {
   }
   rmSync(join(A.copilot, 'idle'), { recursive: true, force: true });
   a = await launch(A.data, [], A.real);
-  same('one Library row in the sidebar, where the three kinds had theirs', await a.all('#nav .nav-row', 'e.id.replace("nav-", "")'), ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'repo', 'settings']);
+  same('one Library row in the sidebar, where the three kinds had theirs', await a.all('#nav .nav-row', 'e.id.replace("nav-", "")'), ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'sessions', 'repo', 'settings']);
   await openKind(a, 'all');
   const total = (await counts(a)).all;
   same('the sidebar’s total is the kind switch’s All, and each segment counts the rows of its kind listed',
@@ -14563,7 +14750,7 @@ async function pluginRecordHoldsFlow() {
 
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, sessionStripFlow, fromFlow, claudeWholeFlow],
-  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow],
+  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow, sessionsFlow],
   [fewToolsFlow, openCodeFlow, antigravityFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, pluginRecordHoldsFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow, clickReadsFlow],
   [backFlow, backPlaceFlow, harnessFlow, manageFlow, arrivalFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, mcpSigninFlow, firstSetupFlow, crashFlow],
 ];

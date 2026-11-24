@@ -9,6 +9,7 @@ import type { NeutralServer } from './mcp.ts';
 import type { PluginDone, PluginOp } from './pluginplan.ts';
 import type { PluginEntry, PluginSwitch } from './pluginrecord.ts';
 import type { ReloadChange } from './reload.ts';
+import type { DayRows } from './sessionrow.ts';
 
 export type HomeMode = 'fixture' | 'custom' | 'actual';
 export type HarnessId = 'claude-cli' | 'copilot-cli' | 'codex-cli' | 'pi-cli' | 'opencode-cli' | 'antigravity-cli';
@@ -209,6 +210,11 @@ export interface DesktopApi {
   agentVersion(key: string, hash: string): Promise<{ name: string; description: string; prompt: string } | null>;
   /** Reads which skills, agents and MCP servers the tools' session history shows were used (usage.ts readUsage), when the page collects usage (app.ts collectUsage); null for another home than the open one. */
   readUsage(home: string): Promise<UsageReading | null>;
+  /**
+   * Reads the present tools' sessions in [start, end) (two local midnights) and makes them rows (sessionday.ts readSessionPeriod,
+   * sessionrow.ts sessionRows), for the Sessions page (sessionspage.ts loadSessions); null for another home than the open one.
+   */
+  readSessions(home: string, start: number, end: number, readId?: number): Promise<DayRows | null>;
   /** Runs one tool's own MCP list command for the open home and reads its answer of the servers `names` (mcpsigninrun.ts checkSignin); null for another home, or a tool with no such command. */
   checkSignin(tool: HarnessId, home: string, names: string[]): Promise<SigninAnswer | null>;
   /**

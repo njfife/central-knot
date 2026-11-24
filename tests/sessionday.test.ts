@@ -297,7 +297,7 @@ test('Exact models, priced-as rule (haiku dated), fast speed priced vs unsupport
   const c1 = view.rows.find(r => r.session === 'c1')!;
   approx(c1.cost.dollars, dOpusBase + dOpusFast + dHaiku, 'c1 dollars');
   assert.equal(c1.cost.unpriced, 1, 'haiku fast has no known price');
-  assert.deepEqual(c1.cost.unpricedBy, { noRow: 0, speedOrTier: 1, other: 0 }, 'fast reply grouped as speedOrTier');
+  assert.deepEqual(c1.cost.unpricedBy, { noRow: 0, speedOrTier: [{ which: 'speed', saved: 'fast', requests: 1 }], other: 0 }, 'fast reply grouped as speedOrTier');
   assert.deepEqual(c1.cost.pricedAs, [{ model: 'claude-haiku-4-5-20251001', as: 'claude-haiku-4-5' }]);
   assert.deepEqual(c1.cost.providers, [{ provider: 'anthropic', from: 'tool' }]);
   assert.deepEqual(c1.tokens, { input: 45_000, cacheRead: 0, cacheWrite: 0, output: 4_500 }, 'unpriced fast reply tokens still kept');
@@ -305,7 +305,7 @@ test('Exact models, priced-as rule (haiku dated), fast speed priced vs unsupport
   const x1 = view.rows.find(r => r.session === 'x1')!;
   approx(x1.cost.dollars, dAstra + dSol1, 'x1 dollars');
   assert.equal(x1.cost.unpriced, 1, 'codex-auto-review has no known price');
-  assert.deepEqual(x1.cost.unpricedBy, { noRow: 1, speedOrTier: 0, other: 0 }, 'unlisted model grouped as noRow');
+  assert.deepEqual(x1.cost.unpricedBy, { noRow: 1, speedOrTier: [], other: 0 }, 'unlisted model grouped as noRow');
   assert.deepEqual(x1.cost.pricedAs, []);
   assert.deepEqual(x1.cost.providers, [{ provider: 'openai', from: 'request' }]);
   assert.deepEqual(x1.tokens, { input: 23_000, cacheRead: 10_000, cacheWrite: 0, output: 2_400 });
@@ -316,7 +316,7 @@ test('Exact models, priced-as rule (haiku dated), fast speed priced vs unsupport
   // Day totals & byModel totals.
   approx(view.total.cost.dollars, dOpusBase + dOpusFast + dHaiku + dAstra + dSol1 + dSol2, 'day total dollars');
   assert.equal(view.total.cost.unpriced, 2, 'day total leaves out haiku fast and codex-auto-review');
-  assert.deepEqual(view.total.cost.unpricedBy, { noRow: 1, speedOrTier: 1, other: 0 });
+  assert.deepEqual(view.total.cost.unpricedBy, { noRow: 1, speedOrTier: [{ which: 'speed', saved: 'fast', requests: 1 }], other: 0 });
 
   const byModel = new Map(view.byModel.map(m => [m.model, m]));
   approx(byModel.get('claude-opus-5-5')!.cost.dollars, dOpusBase + dOpusFast);
@@ -328,6 +328,28 @@ test('Exact models, priced-as rule (haiku dated), fast speed priced vs unsupport
   assert.equal(byModel.get('codex-auto-review')!.cost.dollars, undefined, 'codex-auto-review has tokens and no dollars');
   assert.equal(byModel.get('codex-auto-review')!.cost.unpriced, 1);
   assert.deepEqual(byModel.get('codex-auto-review')!.tokens, { input: 5_000, cacheRead: 3_000, cacheWrite: 0, output: 400 });
+});
+
+test('A reply refused for its speed or service tier keeps which it was and its saved value, counted, in every sum', async () => {
+  const home = await newHome();
+  const t = TODAY.start + 9 * HOUR;
+  // One Claude Code session on claude-haiku-4-5, whose row has no fast rate and no service-tier rates: two fast replies and
+  // one priority reply, each refused for what it saved; a standard reply priced.
+  await put(join(home, '.claude/projects/-work-app/s1.jsonl'), [
+    claudeReply('f1', t, claudeUsage(1_000, 0, 0, 100, { speed: 'fast' }), 'claude-haiku-4-5', '/work/app', 's1'),
+    claudeReply('f2', t + 1_000, claudeUsage(1_000, 0, 0, 100, { speed: 'fast' }), 'claude-haiku-4-5', '/work/app', 's1'),
+    claudeReply('p1', t + 2_000, claudeUsage(1_000, 0, 0, 100, { tier: 'priority' }), 'claude-haiku-4-5', '/work/app', 's1'),
+    claudeReply('ok', t + 3_000, claudeUsage(1_000, 0, 0, 100), 'claude-haiku-4-5', '/work/app', 's1'),
+  ], t + 3_000);
+  const view = sessionRows(await readSessionPeriod({ home }, TODAY, ['claude-cli']));
+  const refused = [{ which: 'serviceTier', saved: 'priority', requests: 1 }, { which: 'speed', saved: 'fast', requests: 2 }];
+  const row = view.rows[0]!;
+  assert.equal(row.cost.unpriced, 3);
+  assert.deepEqual(row.cost.unpricedBy, { noRow: 0, speedOrTier: refused, other: 0 }, 'the row names each refused speed and tier once, counted');
+  assert.deepEqual(row.models[0]!.cost.unpricedBy.speedOrTier, refused, 'the model in the opened row says the same');
+  assert.deepEqual(view.byTool[0]!.cost.unpricedBy.speedOrTier, refused, 'the tool total says the same');
+  assert.deepEqual(view.total.cost.unpricedBy.speedOrTier, refused, 'the period total says the same');
+  assert.ok(row.cost.dollars! > 0, 'the standard reply is priced');
 });
 
 test('A session begun yesterday with a response today counts only today\'s responses; exact period edges [start, end) keep 00:00 and 23:59:59.999 and drop 00:00 next day', async () => {
@@ -350,7 +372,7 @@ test('A session begun yesterday with a response today counts only today\'s respo
   assert.deepEqual(view.total.tokens, row.tokens);
 });
 
-test('Parent with child (Claude subagents and Codex parent_thread_id on codex-auto-review) and orphan child: child nests under parent, parent excludes child, each request counts once', async () => {
+test('Parent with child (Claude subagents and Codex parent_thread_id on codex-auto-review) and orphan child: child nests under parent, its own sum excludes the child, its sum with its children includes it, a tool counts top-level sessions, each request counts once in the totals', async () => {
   const home = await newHome();
   const t = TODAY.start + 11 * HOUR;
 
@@ -379,9 +401,10 @@ test('Parent with child (Claude subagents and Codex parent_thread_id on codex-au
 
   const view = sessionRows(await readSessionPeriod({ home }, TODAY, ['claude-cli', 'codex-cli']));
 
-  // Top-level rows: orphan claude child, codex parent p1, claude parent p1 (3 top-level; 5 sessions total).
+  // Top-level rows: orphan claude child, codex parent p1, claude parent p1: 3 sessions, the two children set under their parents.
   assert.equal(view.rows.length, 3);
-  assert.equal(view.total.sessions, 5);
+  assert.equal(view.total.sessions, 3, 'the day counts top-level sessions');
+  assert.deepEqual(view.byTool.map(each => [each.tool, each.sessions]), [['claude-cli', 2], ['codex-cli', 1]], 'a tool counts its top-level sessions');
 
   const claudeParent = view.rows.find(r => r.tool === 'claude-cli' && r.session === 'p1')!;
   const claudeOrphan = view.rows.find(r => r.tool === 'claude-cli' && r.session === 'agent-orphan')!;
@@ -397,6 +420,9 @@ test('Parent with child (Claude subagents and Codex parent_thread_id on codex-au
   approx(claudeParent.cost.dollars, dParent, 'Claude parent excludes child dollars');
   assert.deepEqual(claudeParent.tokens, { input: 10_000, cacheRead: 0, cacheWrite: 0, output: 1_000 }, 'Claude parent excludes child tokens');
   approx(claudeParent.children[0]!.cost.dollars, dChild);
+  approx(claudeParent.withChildren.cost.dollars, dParent + dChild, 'Claude parent with its child');
+  assert.deepEqual(claudeParent.withChildren.tokens, { input: 14_000, cacheRead: 0, cacheWrite: 0, output: 1_500 }, 'Claude parent with its child: tokens');
+  assert.deepEqual(claudeParent.children[0]!.withChildren, { tokens: claudeParent.children[0]!.tokens, cost: claudeParent.children[0]!.cost }, 'a row with no children: its own sum');
 
   assert.equal(claudeOrphan.parent, 'gone');
   approx(claudeOrphan.cost.dollars, dOrphan);
@@ -407,6 +433,8 @@ test('Parent with child (Claude subagents and Codex parent_thread_id on codex-au
   assert.equal(codexParent.children[0]!.cost.unpriced, 1);
   assert.equal(codexParent.cost.unpriced, 0, 'Codex parent excludes unpriced child');
   approx(codexParent.cost.dollars, dCodexParent);
+  approx(codexParent.withChildren.cost.dollars, dCodexParent, 'Codex parent with its child: the child adds no dollars');
+  assert.deepEqual([codexParent.withChildren.cost.unpriced, codexParent.withChildren.cost.unpricedBy.noRow], [1, 1], 'and carries its unpriced request, by reason');
 
   approx(view.total.cost.dollars, dParent + dChild + dOrphan + dCodexParent, 'day total sums each row once');
   assert.equal(view.total.cost.unpriced, 1);
@@ -444,6 +472,7 @@ test('One-hour cache writes: exact on claude-opus-5-5 (has cacheWrite1h), and "a
   assert.equal(lowerRow.models[0]!.cost.atLeast, true);
   assert.equal(exactRow.cost.atLeast, false, 'unrelated session stays exact');
   assert.equal(mixed.byTool[0]!.cost.atLeast, true);
+  assert.equal(mixed.byTool[0]!.cost.oneHourLow, true, 'and says it is for the one-hour writes');
   assert.equal(mixed.byModel.find(m => m.model === 'claude-2')!.cost.atLeast, true);
   assert.equal(mixed.byModel.find(m => m.model === 'claude-opus-5-5')!.cost.atLeast, false);
   assert.equal(mixed.total.cost.atLeast, true);
@@ -748,11 +777,11 @@ test('Pure sessionRows guards against synthetic parent cycles without dropping r
   };
   const view = sessionRows(reading);
   assert.equal(view.rows.length, 2, 'cyclic parents stay at top level rather than disappearing');
-  assert.equal(view.total.sessions, 2);
-  assert.deepEqual(view.total.cost.unpricedBy, { noRow: 1, speedOrTier: 0, other: 1 });
+  assert.equal(view.total.sessions, 2, 'each counted once, as a top-level session');
+  assert.deepEqual(view.total.cost.unpricedBy, { noRow: 1, speedOrTier: [], other: 1 });
 });
 
-test('An unreadable Codex archive or sibling Claude project folder flags the tool without hiding readable sessions', { skip: winLockSkip }, async () => {
+test('An unreadable Codex archive or sibling Claude project folder flags the tool without hiding readable sessions, and makes its sum and the day\'s a lower bound', { skip: winLockSkip }, async () => {
   const home = await newHome();
   const t = TODAY.start + 10 * HOUR;
   await put(join(home, '.claude/projects/readable/good.jsonl'), [
@@ -777,6 +806,9 @@ test('An unreadable Codex archive or sibling Claude project folder flags the too
     ['claude-cli', 1, true],
     ['codex-cli', 1, true],
   ]);
+  assert.deepEqual(view.byTool.map(each => [each.cost.atLeast, each.cost.oneHourLow]), [[true, false], [true, false]], 'a tool with history not read: its sum is a lower bound, for that reason alone');
+  assert.deepEqual([view.total.cost.atLeast, view.total.cost.oneHourLow], [true, false], 'and so is the day\'s');
+  assert.deepEqual(view.rows.map(row => row.cost.atLeast), [false, false], 'a row read whole stays as it is');
 });
 
 test('Restoring a stale partial copy with a newer mtime keeps the fuller reply and the largest tool figure across files', async () => {
