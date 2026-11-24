@@ -1,7 +1,8 @@
 // How Central Knot starts another program (start, launchCommand), and what a tool is given on Windows for a home that is not
 // this computer's own (homeVariables). On macOS and Linux a program is started exactly as asked. On Windows Node refuses to
 // start a .cmd or .bat without a shell (since April 2024), and most of the tools' commands there are one (npm installs a
-// command as a .cmd): such a file is run through cmd.exe with each argument encoded so that it arrives as it was given.
+// command as a .cmd): such a file is run through cmd.exe with each argument encoded so that it arrives as it was given
+// (through npm's own .cmd every argument does; see launchCommand for what another .cmd gets).
 // Its callers (plugins.ts run, draftbase.ts run, discovery.ts askVersion) keep their own output, limits, timer and stop: how a
 // program and what it started are stopped is theirs. Where a tool's command is found is platform.ts's.
 import { readFileSync } from 'node:fs';
@@ -22,7 +23,9 @@ const NPM_SHIM_HEAD = '@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\n
 /**
  * Whether `file` is a .cmd npm wrote: its head, and `%*` (every argument it was given, as given) once, at the end of its last
  * line, which starts the program. cmd reads such a line again, so the arguments are read twice. Known by what the file holds,
- * not its name: any other .cmd (one that can't be read, too) is taken to read them once.
+ * not its name: any other .cmd (one that can't be read, too) is taken to read them once, which is right for one that reads
+ * its own arguments; one that passes them on in a form of its own (pnpm's, a hand-written one) is read twice, and there an
+ * argument holding a quote does not arrive whole (measured on Windows Server 2025).
  */
 function forwardsLikeNpm(file: string): boolean {
   try {
@@ -45,7 +48,8 @@ export function launchCommand(file: string, args: string[], platform: string = p
   if (broken !== undefined) throw new Error(`${win32.basename(file)} was not run: on Windows an argument to it can’t hold a line break (${JSON.stringify(broken)}).`);
   const reads = forwardsLikeNpm(file) ? 2 : 1;
   const encoded = args.map(arg => { let text = quoted(arg); for (let read = 0; read < reads; read++) text = caret(text); return text; });
-  return { file: process.env.ComSpec ?? 'cmd.exe', args: ['/d', '/s', '/v:off', '/c', `"${caret(file)}${encoded.map(arg => ` ${arg}`).join('')}"`], options: { windowsVerbatimArguments: true } };
+  const line = `"${caret(file)}${encoded.map(arg => ` ${arg}`).join('')}"`;
+  return { file: process.env.ComSpec ?? 'cmd.exe', args: ['/d', '/s', '/v:off', '/c', line], options: { windowsVerbatimArguments: true } };
 }
 
 /** Starts `file` with `args` (launchCommand), with the caller's own options. Throws, as spawn does, when it can't be started so. */
@@ -59,7 +63,7 @@ export function start(file: string, args: string[], options: SpawnOptionsWithout
  * computer's own (a Practice copy, another folder, a test's made-up home), so that a tool run there reads that home and not
  * the person's: USERPROFILE, HOMEDRIVE and HOMEPATH, APPDATA and LOCALAPPDATA, and Codex's CODEX_HOME. Nothing is made in
  * `home` for them. Their names are in upper case, which Node passes over the same name in another case (of names differing
- * only in case it passes the first in sorted order). None elsewhere, where HOME is the home.
+ * only in case it passes the first in sorted order, child_process.js). None elsewhere, where HOME is the home.
  */
 export function homeVariables(home: string, platform: string = process.platform): Record<string, string> {
   if (platform !== 'win32') return {};
