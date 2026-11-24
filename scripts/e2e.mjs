@@ -14529,7 +14529,7 @@ async function libraryLinesFlow() {
 const read = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } }, write = (f, v) => { fs.mkdirSync(p.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(v, null, 2)); };
 const versions = { claude: '2.1.322 (Claude Code)', copilot: 'GitHub Copilot CLI 1.0.107.', codex: 'codex-cli 0.142.3', pi: '1.5.0', opencode: '1.19.5', agy: '1.5.14' };
 if (args[0] === '--version') { console.log(versions[tool]); process.exit(0); }
-if (fs.existsSync(p.join(H, 'slow'))) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);
+if (fs.existsSync(p.join(H, 'slow'))) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, fs.existsSync(p.join(H, 'slower')) ? 6000 : 2000);
 if (tool !== 'claude' && tool !== 'copilot') process.exit(9);
 fs.appendFileSync(p.join(H, tool + '-calls.txt'), args.join(' ') + '\\n');
 const [, verb, what] = args;
@@ -14591,6 +14591,32 @@ if (tool === 'claude') {
   const installedByBox = left(viaBox);
   same('the Plugins page’s route: no page errors', b.pageErrors, []);
   await b.quit();
+
+  // Quit while an install runs, started from Copilot CLI's box on the Plugins page and from its line in the Library, each on a
+  // copy of the home: the home is left byte for byte the same either way.
+  const quitDuring = async (name, click) => {
+    const copy = join(scratch, `home-lines-${name}`);
+    cpSync(seeded, copy, { recursive: true });
+    for (const slow of ['slow', 'slower']) writeFileSync(join(copy, slow), '');
+    const q = await start(`lines-${name}`, copy);
+    await click(q);
+    await until(() => readNow(join(copy, '.central-knot/plugins.json')) !== readNow(join(seeded, '.central-knot/plugins.json')));
+    await wait(500);
+    await q.quit();
+    // The stand-in's own command, which the app started, ends by itself.
+    await wait(9000);
+    return left(copy);
+  };
+  const quitFromBox = await quitDuring('quit-box', async q => {
+    await q.click('#nav-plugins'); await until(() => q.exists(`#popen-0-${plugin}`)); await q.click(`#popen-0-${plugin}`);
+    await until(() => q.exists(`#pbox-0-${plugin}-copilot-cli:not([disabled])`)); await q.run(`document.querySelector('#pbox-0-${plugin}-copilot-cli').click()`);
+  });
+  const quitFromLine = await quitDuring('quit-line', async q => {
+    await openKind(q, 'agents'); const opener = byId(rowPart('open', 'agents', `${plugin}@ck-test-market/incident-lead`)), button = byId(rowPart('line', 'agents', `${plugin}@ck-test-market/incident-lead`, 'copilot-cli'));
+    await until(() => q.exists(opener)); await q.click(opener); await until(() => q.exists(`${button}:not([disabled])`)); await q.run(`document.querySelector(${JSON.stringify(button)}).click()`);
+  });
+  same('quit while an install started from the line runs: the home is left as quitting during the box’s install leaves it', quitFromLine, quitFromBox);
+  console.log(`Quit during an install: Copilot CLI ${quitFromLine[1].includes(plugin) ? 'has' : 'lacks'} the plugin afterwards, from either route; its entry was saved first.`);
 
   // The Library's route, on the seeded home.
   const home = join(scratch, 'home-lines');
@@ -14751,12 +14777,14 @@ if (tool === 'claude') {
   await until(async () => /^Installing/.test((await lineOf('Codex')) ?? ''), 50);
   await press(act('skills', 'incident-triage', 'claude-cli'));
   same('a second line’s click waits its turn, said on its own line', [await lineOf('Codex'), await lineOf('Claude Code')], ['Installing varo-incident-response in Codex… This can take a few minutes.', 'Waiting to install varo-incident-response in Claude Code…']);
-  if (shots) { await sizeTo(a, 1316, 819); await a.shot('lines-installing-and-waiting-1316'); await fullSize(a); }
+  // Pictured while the clicks run: a resize here waits for nothing, as sizeTo waits for the page to settle.
+  if (shots) { await a.send('Emulation.setDeviceMetricsOverride', { width: 1316, height: 819, deviceScaleFactor: 1, mobile: false }); await wait(300); await a.shot('lines-installing-and-waiting-1316'); }
   rmSync(join(home, 'slow'));
   await until(() => JSON.parse(readNow(claudeRecord) || '{"plugins":{}}').plugins[id] !== undefined, 300);
   await until(async () => /in Claude Code/.test(await a.text('#header') ?? ''), 100);
   check('it ran after it: the plugin installed in Claude Code from the entry’s marketplace', /Installed varo-incident-response in Claude Code/.test(await a.text('#header') ?? ''), await a.text('#header'));
   await idle();
+  if (shots) await fullSize(a);
 
   // Example 6: a plugin Copilot CLI loads live from a folder: its agent's line removes it; Undo puts it back.
     writeFileSync(join(home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'directory', path: market } } }, enabledPlugins: { [id]: true } }));
