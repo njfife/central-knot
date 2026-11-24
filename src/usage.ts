@@ -11,7 +11,9 @@
 // world_state, Pi's system message) are never read. A use is a kind, a name and a time; no message text is kept.
 //
 // Not here: which item a name is, by each tool's spelling rules (usagerow.ts, the page's, with the 30 days: USAGE_DAYS),
-// and what the page shows (matrix.ts). Another tool is another row of `readers`, and of usagerow.ts spelledIn.
+// and what the page shows (matrix.ts). Another tool is another row of `readers`, and of usagerow.ts spelledIn. Shared with
+// sessionrequests.ts, which reads each response's tokens from the same files: where they are (`sessionFiles`,
+// `claudeProjects`) and a line read as a record (`recordOf`, `timeOf`).
 import { constants as fsConstants, createReadStream, existsSync } from 'node:fs';
 import { copyFile, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -32,7 +34,7 @@ interface Use { kind: ItemKind; name: string; at: number }
 /** One session as read: when it started (its first timestamp), and its uses. */
 interface Session { start?: number; uses: Use[] }
 /** One parsed line of a session file, as JSON: every reader looks only at the fields it names. */
-type JsonRecord = Record<string, any>;
+export type JsonRecord = Record<string, any>;
 
 /** A tool's sessions as read, and how many of its session files are there and couldn't be read (skipped, the rest counted). */
 interface Read { sessions: Session[]; skipped: number }
@@ -111,7 +113,24 @@ function piUses(record: JsonRecord): Omit<Use, 'at'>[] {
 }
 
 /** A record's own time (ms): its `timestamp`, as text or a number; undefined when it has none. */
-const timeOf = (record: JsonRecord) => { const at = typeof record.timestamp === 'number' ? record.timestamp : Date.parse(record.timestamp); return Number.isFinite(at) ? at : undefined; };
+export const timeOf = (record: JsonRecord) => { const at = typeof record.timestamp === 'number' ? record.timestamp : Date.parse(record.timestamp); return Number.isFinite(at) ? at : undefined; };
+
+/** A line of a session file as a record: a JSON object; undefined for any other line. */
+export function recordOf(line: string): JsonRecord | undefined {
+  try { const record = JSON.parse(line); return record !== null && typeof record === 'object' && !Array.isArray(record) ? record : undefined; }
+  catch { return undefined; }
+}
+
+/** The `.jsonl` files under each of `roots`, each named by its root and its path under it; undefined when no root is there. */
+export async function sessionFiles(roots: string[]): Promise<{ root: string; name: string }[] | undefined> {
+  const listed = (root: string) => readdir(root, { recursive: true }).then(names => names.filter(name => name.endsWith('.jsonl')).map(name => ({ root, name })),
+    (error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? undefined : Promise.reject(error)));
+  const found = await Promise.all(roots.map(listed));
+  return found.every(list => list === undefined) ? undefined : found.flatMap(list => list ?? []);
+}
+
+/** Claude Code's projects folder in a home, where its session files are. */
+export const claudeProjects = (at: UsageWhere) => join(toolConfigRoot(at, 'claude-cli'), 'projects');
 
 /**
  * The sessions in a tool's `.jsonl` files under `roots` (none there: undefined), each file streamed line by line. `sessionOf`
@@ -120,21 +139,19 @@ const timeOf = (record: JsonRecord) => { const at = typeof record.timestamp === 
  * holds; a use whose record has no time is not counted.
  */
 async function jsonlSessions(roots: string[], sessionOf: (path: string) => string, marks: string[], usesIn: (record: JsonRecord) => Omit<Use, 'at'>[], now: number): Promise<Read | undefined> {
-  const listed = (root: string) => readdir(root, { recursive: true }).then(names => names.filter(name => name.endsWith('.jsonl')).map(name => ({ root, name })),
-    (error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? undefined : Promise.reject(error)));
-  const found = await Promise.all(roots.map(listed));
-  if (found.every(list => list === undefined)) return undefined;
+  const files = await sessionFiles(roots);
+  if (!files) return undefined;
   const sessions = new Map<string, Session>();
   let skipped = 0;
-  for (const { root, name } of found.flat().filter(file => file !== undefined)) {
+  for (const { root, name } of files) {
     const file = join(root, name), uses: Use[] = [];
     let started: number | undefined, fileTime: number | undefined;
     try {
       for await (const line of createInterface({ input: createReadStream(file), crlfDelay: Infinity })) {
         const marked = marks.some(mark => line.includes(mark));
         if (!marked && started !== undefined) continue;
-        let record: JsonRecord;
-        try { record = JSON.parse(line); } catch { continue; }
+        const record = recordOf(line);
+        if (!record) continue;
         let at = timeOf(record);
         if (at !== undefined && at > now) at = fileTime ??= (await stat(file)).mtimeMs;
         started ??= at;
@@ -214,9 +231,8 @@ async function openCodeRead(file: string, now: number, copied: boolean): Promise
  * session if that is older (a folder copied from another computer is newer than what it holds).
  */
 async function claudeReach(at: UsageWhere, now: number, oldest: number | undefined): Promise<number | undefined> {
-  const root = toolConfigRoot(at, 'claude-cli');
-  const born = await stat(join(root, 'projects')).then(made => made.birthtimeMs || undefined, () => undefined);
-  const set = await readFile(join(root, 'settings.json'), 'utf8').then(text => JSON.parse(text).cleanupPeriodDays, () => undefined);
+  const born = await stat(claudeProjects(at)).then(made => made.birthtimeMs || undefined, () => undefined);
+  const set = await readFile(join(toolConfigRoot(at, 'claude-cli'), 'settings.json'), 'utf8').then(text => JSON.parse(text).cleanupPeriodDays, () => undefined);
   const began = Math.min(born ?? Infinity, oldest ?? Infinity);
   return Math.max(Number.isFinite(began) ? began : 0, now - (typeof set === 'number' && set > 0 ? set : 30) * DAY_MS);
 }
@@ -227,7 +243,7 @@ async function claudeReach(at: UsageWhere, now: number, oldest: number | undefin
  */
 export const readers: Record<HarnessId, Reader | undefined> = {
   'claude-cli': { tells: { skill: 'sure', agent: 'sure', mcp: 'sure' }, reach: claudeReach,
-    read: (at, now) => jsonlSessions([join(toolConfigRoot(at, 'claude-cli'), 'projects')], firstPart, ['"tool_use"', '<command-name>/'], claudeUses, now) },
+    read: (at, now) => jsonlSessions([claudeProjects(at)], firstPart, ['"tool_use"', '<command-name>/'], claudeUses, now) },
   // Codex's skills: seen only. Even with every command form read, a bare SKILL.md read from the skill's own folder names no
   // skill (3 of 39 sessions with a read, measured on 507 real sessions, 2026-11-16).
   'codex-cli': { tells: { skill: 'seen', agent: 'seen', mcp: 'sure' },
