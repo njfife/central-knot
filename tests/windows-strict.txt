@@ -3,6 +3,7 @@
 tests/agentmigrate.test.ts
 tests/agents.test.ts
 tests/agentswalk.test.ts
+tests/antigravity.test.ts
 tests/arrivals.test.ts
 tests/baseinstructions.test.ts
 tests/bundle.test.ts
