@@ -5,7 +5,7 @@
 import { execFile } from 'node:child_process';
 import { setTimeout as wait } from 'node:timers/promises';
 import { userInfo } from 'node:os';
-import { delimiter, dirname, isAbsolute, join, sep } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, posix, sep, win32 } from 'node:path';
 
 /**
  * PATH for running a CLI: its own folder first. An app opened from Finder or a launcher gets a short PATH, and a CLI that
@@ -17,12 +17,69 @@ export const pathBeside = (binary: string) => [dirname(binary), process.env.PATH
  * Tools an end-to-end run looks for only inside its throwaway home (CK_TEST_HOME_ONLY: their binaries' names, with commas):
  * what the machine running the checks has installed must not change what they see.
  */
-const homeOnly = (binary: string) => (process.env.CK_TEST_HOME_ONLY ?? '').split(',').includes(binary);
+const homeOnly = (binary: string, env: NodeJS.ProcessEnv = process.env) => (env.CK_TEST_HOME_ONLY ?? '').split(',').includes(binary);
 
 /** How many folders are searched for a CLI: a terminal's PATH is a few dozen at most. */
 const SEARCHED = 40;
+/** Windows puts the machine's PATH before the user's, so developer machines carry more entries before user-installed CLIs. */
+const WINDOWS_SEARCHED = 120;
 
-export function executableCandidates(home: string, searchPath: string, binary = 'claude'): string[] {
+/** Command endings Windows can run for a CLI (script-host and UI endings like .js or .vbs are left out). */
+const WINDOWS_EXTS = ['.exe', '.cmd', '.bat', '.com'];
+
+const envValue = (env: NodeJS.ProcessEnv, name: string) =>
+  env[name] ?? Object.entries(env).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
+
+const isWinPath = (path: string) => /^[A-Za-z]:/.test(path) || path.includes('\\');
+const joinPath = (dir: string, ...parts: string[]) => (isWinPath(dir) ? win32 : posix).join(dir, ...parts);
+
+/** Strip quotes and trailing separators (keeping a root like `C:\` or `/`) from a Windows PATH entry. */
+function cleanWinDir(raw: string): string {
+  const dir = raw.trim().replace(/"/g, '');
+  if (!dir) return '';
+  if (/^[A-Za-z]:[\\/]+$/.test(dir)) return `${dir.slice(0, 2)}\\`;
+  return dir === '/' ? '/' : dir.replace(/[\\/]+$/, '');
+}
+
+/** Endings from PATHEXT that can run a CLI, lowercased, always carrying .exe before .cmd. */
+function windowsExts(env: NodeJS.ProcessEnv): string[] {
+  const fromEnv = (envValue(env, 'PATHEXT') ?? '').split(';')
+    .map(ext => ext.trim().toLowerCase()).filter(ext => WINDOWS_EXTS.includes(ext));
+  const exts = [...new Set(fromEnv)];
+  if (!exts.length) return [...WINDOWS_EXTS];
+  for (const needed of ['.exe', '.cmd']) if (!exts.includes(needed)) exts.push(needed);
+  const exe = exts.indexOf('.exe'), cmd = exts.indexOf('.cmd');
+  if (exe > cmd) [exts[cmd], exts[exe]] = [exts[exe], exts[cmd]];
+  return exts;
+}
+
+const winFolder = (env: NodeJS.ProcessEnv, name: string, fallback: string) => {
+  const fromEnv = cleanWinDir(envValue(env, name) ?? '');
+  return fromEnv && win32.isAbsolute(fromEnv) ? fromEnv : fallback;
+};
+
+const underHome = (candidate: string, home: string, platform: string) => {
+  if (platform !== 'win32') return candidate.startsWith(`${home}${sep}`);
+  const root = cleanWinDir(home);
+  const slash = root.endsWith('\\') || root.endsWith('/') ? '' : isWinPath(root) ? '\\' : '/';
+  return candidate.toLowerCase().startsWith(`${root}${slash}`.toLowerCase());
+};
+
+export function executableCandidates(home: string, searchPath: string, binary = 'claude', platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): string[] {
+  if (platform === 'win32') {
+    const appData = winFolder(env, 'APPDATA', joinPath(home, 'AppData', 'Roaming'));
+    const local = winFolder(env, 'LOCALAPPDATA', joinPath(home, 'AppData', 'Local'));
+    const fixed = [joinPath(home, '.local', 'bin'), joinPath(appData, 'npm'), joinPath(local, 'Microsoft', 'WinGet', 'Links'), joinPath(home, 'scoop', 'shims')];
+    const seen = new Set<string>(), dirs: string[] = [];
+    for (const dir of [...fixed, ...searchPath.split(';').map(cleanWinDir).filter(win32.isAbsolute)]) {
+      const key = dir.replace(/\\/g, '/').toLowerCase();
+      if (!seen.has(key)) { seen.add(key); dirs.push(dir); }
+    }
+    const exts = windowsExts(env);
+    const names = binary === 'agy' ? ['agy', 'antigravity'] : [binary];
+    const candidates = names.flatMap(name => dirs.slice(0, WINDOWS_SEARCHED).flatMap(dir => exts.map(ext => joinPath(dir, `${name}${ext}`))));
+    return homeOnly(binary, env) ? candidates.filter(candidate => underHome(candidate, home, platform)) : candidates;
+  }
   const fixed = [join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin'];
   const directories = [...fixed, ...searchPath.split(':').filter(isAbsolute)];
   const candidates = [...new Set(directories)].slice(0, SEARCHED).map(directory => join(directory, binary));
@@ -33,7 +90,7 @@ export function executableCandidates(home: string, searchPath: string, binary = 
   if (binary === 'opencode') candidates.unshift(join(home, '.opencode/bin/opencode'));
   // Antigravity's CLI is `agy` by its docs; an install seen on Linux (1.5.14) names it `antigravity`. Both are looked for, `agy` first.
   if (binary === 'agy') candidates.push(...candidates.map(candidate => join(dirname(candidate), 'antigravity')));
-  return homeOnly(binary) ? candidates.filter(candidate => candidate.startsWith(`${home}${sep}`)) : candidates;
+  return homeOnly(binary, env) ? candidates.filter(candidate => candidate.startsWith(`${home}${sep}`)) : candidates;
 }
 
 const PATH_MARK = '__central_knot_path__';
@@ -61,7 +118,7 @@ let searched: Promise<string> | undefined;
  * (a shell's startup can take a second); every search for a CLI uses this one answer.
  */
 export const searchPath = (): Promise<string> =>
-  (searched ??= shellPath().then(fromShell => [process.env.PATH, fromShell].filter(Boolean).join(':')));
+  (searched ??= shellPath().then(fromShell => [process.env.PATH, fromShell].filter(Boolean).join(delimiter)));
 
 /**
  * Whether this Linux desktop has a system tray: Electron's tray icon there is a StatusNotifierItem, which shows only where
@@ -117,10 +174,12 @@ export function macPlaces(home: string, env: NodeJS.ProcessEnv = process.env): M
   return { applications: [join(home, 'Applications'), '/Applications'], lsappinfo: '/usr/bin/lsappinfo' };
 }
 
-export function appCandidates(home: string, binary: string, platform: string = process.platform): AppCandidate[] {
-  const where = macPlaces(home).applications;
-  const local = join(home, 'AppData', 'Local');
-  const aliases = (family: string) => join(local, 'Microsoft', 'WindowsApps', family);
+export function appCandidates(home: string, binary: string, platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): AppCandidate[] {
+  // On Windows, keep only home/Applications (never /Applications, which would leak a Mac's real apps when win32 is tested there).
+  const where = platform === 'win32' ? [join(home, 'Applications')] : macPlaces(home, env).applications;
+  const local = winFolder(env, 'LOCALAPPDATA', joinPath(home, 'AppData', 'Local'));
+  const aliases = (family: string) => joinPath(local, 'Microsoft', 'WindowsApps', family);
+  const programFiles = winFolder(env, 'ProgramFiles', 'C:\\Program Files');
   const mac: Record<string, AppCandidate[]> = {
     claude: where.map(apps => ({ name: 'Claude desktop', app: join(apps, 'Claude.app'), carries: 'Code tab', carried: { folders: join(home, 'Library/Application Support/Claude/claude-code'), binary: 'claude.app/Contents/MacOS/claude' } })),
     copilot: where.map(apps => ({ name: 'GitHub Copilot app', app: join(apps, 'GitHub Copilot.app'), carries: 'Copilot runtime', carried: { file: 'Contents/Resources/copilot-sdk/cliVersion.d.ts', runtimes: join(home, 'Library/Caches/github-copilot-sdk/cli'), binary: 'copilot' } })),
@@ -136,10 +195,12 @@ export function appCandidates(home: string, binary: string, platform: string = p
   };
   const own: Record<string, Record<string, AppCandidate[]>> = {
     win32: {
-      claude: [{ name: 'Claude desktop', app: aliases('Claude_pzs8sxrjxfjjc'), alias: true, versionFile: 'app/resources/app.asar', carries: 'Code tab', carried: { folders: join(local, 'Claude-Data', 'claude_pzs8sxrjxfjjc', 'claude-code'), binary: 'claude.exe' } }],
+      claude: [{ name: 'Claude desktop', app: aliases('Claude_pzs8sxrjxfjjc'), alias: true, versionFile: 'app/resources/app.asar', carries: 'Code tab', carried: { folders: joinPath(local, 'Claude-Data', 'claude_pzs8sxrjxfjjc', 'claude-code'), binary: 'claude.exe' } }],
       // The setup program installs for one person under Programs; the .msi for everyone under Program Files.
-      copilot: [join(local, 'Programs', 'GitHub Copilot'), join(process.env.ProgramFiles ?? 'C:\\Program Files', 'GitHub Copilot')].map(app => ({ name: 'GitHub Copilot app', app, carries: 'Copilot runtime', carried: { file: 'copilot-sdk/cliVersion.d.ts', runtimes: join(local, 'github-copilot-sdk', 'cli'), binary: 'copilot.exe' } })),
+      copilot: [joinPath(local, 'Programs', 'GitHub Copilot'), joinPath(programFiles, 'GitHub Copilot')].map(app => ({ name: 'GitHub Copilot app', app, carries: 'Copilot runtime', carried: { file: 'copilot-sdk/cliVersion.d.ts', runtimes: joinPath(local, 'github-copilot-sdk', 'cli'), binary: 'copilot.exe' } })),
       codex: [{ name: 'ChatGPT desktop', app: aliases('OpenAI.Codex_2p2nqsd0c76g0'), alias: true, versionFile: 'app/resources/app.asar', carries: 'Codex', carried: { binary: 'app/resources/codex.exe' } }],
+      // Per-user electron-builder NSIS install measured on Windows 11.
+      pi: [{ name: 'pi-gui (third-party)', app: joinPath(local, 'Programs', '@pi-guidesktop'), versionFile: 'resources/app.asar', carries: 'Pi' }],
     },
     linux: {
       claude: [{ name: 'Claude desktop', app: '/usr/lib/claude-desktop', versionFile: 'resources/app.asar', carries: 'Code tab', carried: { folders: join(home, '.config/Claude/claude-code') } }],
@@ -147,18 +208,21 @@ export function appCandidates(home: string, binary: string, platform: string = p
       codex: ['/usr/lib/chatgpt', join(home, '.local/opt/chatgpt')].map(app => ({ name: 'ChatGPT desktop', app, versionFile: 'resources/app.asar', carries: 'Codex', carried: { binary: 'resources/codex' } })),
     },
   };
-  // The macOS places stay last everywhere: harmless where they can't exist, and the Linux e2e stands in an app there.
-  return [...(own[platform]?.[binary] ?? []), ...(mac[binary] ?? [])].filter(candidate => !homeOnly(binary) || candidate.app.startsWith(`${home}${sep}`));
+  // The macOS places stay last on Linux (and home/Applications on Windows): cross-platform tests and e2e flows stand in .app bundles under home.
+  return [...(own[platform]?.[binary] ?? []), ...(mac[binary] ?? [])].filter(candidate => !homeOnly(binary, env) || underHome(candidate.app, home, platform));
 }
 
 /**
  * Apps that are no tool of their own here, but run the tools or read their files (SPEC 5.1, D-24): looked for on this
  * computer, never run, and named on Harnesses only when found. `says`: what that means for what Central Knot sets up.
  */
-export const otherAppCandidates = (home: string): { name: string; says: string; apps: string[] }[] => {
-  const places = (names: string[]) => macPlaces(home).applications.flatMap(apps => names.map(name => join(apps, name)));
+export function otherAppCandidates(home: string, platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): { name: string; says: string; apps: AppCandidate[] }[] {
+  const appDirs = platform === 'win32' ? [join(home, 'Applications')] : macPlaces(home, env).applications;
+  const places = (name: string, bundles: string[]) => appDirs.flatMap(apps => bundles.map(bundle => ({ name, app: join(apps, bundle), carries: '' })));
+  // Measured on Windows 11 (electron-builder NSIS per-user install); VS Code's Windows places are not yet measured.
+  const t3Win = platform === 'win32' ? [{ name: 'T3 Code', app: joinPath(winFolder(env, 'LOCALAPPDATA', joinPath(home, 'AppData', 'Local')), 'Programs', 't3code'), versionFile: 'resources/app.asar', carries: '' }] : [];
   return [
-    { name: 'T3 Code', says: 'Runs your tools for you. One it starts with this computer’s home uses what is set up here.', apps: places(['T3 Code.app', 'T3 Code (Nightly).app', 'T3 Code (Alpha).app']) },
-    { name: 'VS Code', says: 'Its built-in Copilot lists skills from some of your tools’ folders. Central Knot doesn’t change VS Code’s own settings.', apps: places(['Visual Studio Code.app', 'Visual Studio Code - Insiders.app']) },
+    { name: 'T3 Code', says: 'Runs your tools for you. One it starts with this computer’s home uses what is set up here.', apps: [...t3Win, ...places('T3 Code', ['T3 Code.app', 'T3 Code (Nightly).app', 'T3 Code (Alpha).app'])] },
+    { name: 'VS Code', says: 'Its built-in Copilot lists skills from some of your tools’ folders. Central Knot doesn’t change VS Code’s own settings.', apps: places('VS Code', ['Visual Studio Code.app', 'Visual Studio Code - Insiders.app']) },
   ];
-};
+}
