@@ -1,6 +1,8 @@
 // How the app names this computer, its home, where its icon sits and the shortcut key, decided here once for the main process
-// (from process.platform) and the page (from its user agent) alike; and whether this platform writes a real home
-// (writesRealHome). What Start at sign-in can do here is signin.ts's.
+// (from process.platform) and the page (from its user agent) alike; whether this platform writes a real home (writesRealHome);
+// and the one rule for what is shown or compared from a native path (displayPath, shownFromHome; skillswitch.ts forwardSlashes
+// is the separate separator-blind rule for what tools' own settings hold). What Start at sign-in can do here is signin.ts's.
+import type { HomeMode } from './types.ts';
 
 /** This computer's names, as sentences use them. */
 export interface MachineNames {
@@ -42,3 +44,23 @@ export const pagePlatform = (userAgent: string): string => (userAgent.includes('
  * development run shares the standard app's settings folder and its single-instance lock, so it never runs beside it).
  */
 export const writesRealHome = (platform: string): boolean => platform === 'darwin' || platform === 'linux';
+
+/** This process's platform in Node, or the page's from its user agent in the renderer. */
+const hostPlatform = (): string => (typeof process === 'object' && process.platform ? process.platform : pagePlatform(navigator.userAgent));
+
+/**
+ * A native path in the `/` form shown to a person or compared as text; paths read from or written to disk stay native.
+ * On macOS and Linux the argument comes back unchanged (keeping a `\` inside a file's name); on Windows `\` becomes `/`.
+ */
+export const displayPath = (path: string, platform: string = hostPlatform()): string =>
+  (platform === 'win32' ? path.replaceAll('\\', '/') : path);
+
+/**
+ * A path shortened against `home` as the page (app.ts shownPath) shows it: the real home or a path inside it from `~`,
+ * another home or a path inside it from `…`, with `/` separators. Outside `home` it still turns `\` to `/` on Windows.
+ */
+export function shownFromHome(path: string, home: { home: string; mode: HomeMode } | undefined, platform: string = hostPlatform()): string {
+  const slash = platform === 'win32' ? '\\' : '/';
+  if (!home || (path !== home.home && !path.startsWith(`${home.home}${slash}`))) return displayPath(path, platform);
+  return `${home.mode === 'actual' ? '~' : '…'}${displayPath(path.slice(home.home.length), platform)}`;
+}

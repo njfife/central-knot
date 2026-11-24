@@ -32,8 +32,8 @@ test('Parts are found as Claude Code and Codex find them: what plugin.json and t
     // Skills: the default folder, plugin.json's list and the entry's, each skill once. Commands: the lists replace commands/.
     assert.deepEqual(contents.skills.map(skill => skill.name), ['hello', 'more', 'unlisted']);
     // Each part carries its whole file as written and its place in the plugin, the same in every copy of it.
-    assert.deepEqual(contents.skills[0], { name: 'hello', description: 'Says hello', text: '---\nname: hello\ndescription: Says hello\n---\n', path: join('skills', 'hello') });
-    assert.deepEqual(contents.commands[0], { name: 'notes', description: 'Takes notes', text: '---\ndescription: Takes notes\n---\n', path: join('tools', 'notes.md') });
+    assert.deepEqual(contents.skills[0], { name: 'hello', description: 'Says hello', text: '---\nname: hello\ndescription: Says hello\n---\n', path: 'skills/hello' });
+    assert.deepEqual(contents.commands[0], { name: 'notes', description: 'Takes notes', text: '---\ndescription: Takes notes\n---\n', path: 'tools/notes.md' });
     assert.deepEqual(contents.commands.map(command => command.name), ['notes', 'status']);
     // plugin.json's version wins over the entry's.
     assert.equal(contents.version, '0.9.0');
@@ -84,7 +84,7 @@ test('Server and hook files are read in every shape plugins use: flat or wrapped
     assert.deepEqual(contents.lspServers, ['gopls', 'rust']);
     assert.deepEqual(contents.hooks.map(hook => hook.event), ['PreToolUse']);
     // Two commands may share a name in different folders; their places in the plugin tell them apart.
-    assert.deepEqual(contents.commands.map(command => [command.name, command.path]), [['commit', join('commands', 'docs', 'commit.md')], ['commit', join('commands', 'git', 'commit.md')]]);
+    assert.deepEqual(contents.commands.map(command => [command.name, command.path]), [['commit', 'commands/docs/commit.md'], ['commit', 'commands/git/commit.md']]);
   } finally { await cleanup(); }
 });
 

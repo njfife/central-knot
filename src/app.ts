@@ -28,7 +28,7 @@ import { entriesNow, everythingDone, libraryAction, libraryEntry, librarySentenc
 import { asksWhichCopy, copiesDiffer, libraryWords, placeOf, stillReadWords } from './libraryrow.ts';
 import { andList, countedAs, fewNames, fileName, kindNames, kindNouns, noToolsSentence, notAllThrough, orList, rowNames, rowNouns, saidByKind, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
-import { machineNames, pagePlatform } from './machine.ts';
+import { machineNames, pagePlatform, shownFromHome } from './machine.ts';
 import { closeRun, endListNews, fadeRun, loadPlugins, overRun, resetMarket } from './pluginstate.ts';
 import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, type LastRun, type PluginDone, type PluginOp } from './pluginplan.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
@@ -49,8 +49,9 @@ const api = () => window.centralKnot;
 export const pages = ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'profiles', 'history', 'sessions', 'sources', 'repo', 'settings'] as const;
 export type Page = typeof pages[number];
 
+const platform = pagePlatform(navigator.userAgent);
 /** This computer's names, and what its platform offers (machine.ts). */
-export const machine = machineNames(pagePlatform(navigator.userAgent));
+export const machine = machineNames(platform);
 export const { home: realHomeName, machine: thisMachine, tray: trayPlace } = machine;
 
 /** The kinds of item the tables manage: the Library's segments, and a tool's tabs of them under Harnesses. */
@@ -1110,13 +1111,9 @@ export const showFile = (path: string) => void api().showFile?.(path);
 
 /**
  * A path as the page shows it, shorter on screen only: inside the real home it starts at ~, inside the practice copy or a
- * chosen folder at "…". Copying and tooltips give the full path.
+ * chosen folder at "…", with `/` separators on every platform. Copying and tooltips give the full path.
  */
-export const shownPath = (path: string) => {
-  const home = state.home;
-  if (!home || (path !== home.home && !path.startsWith(`${home.home}/`))) return path;
-  return `${home.mode === 'actual' ? '~' : '…'}${path.slice(home.home.length)}`;
-};
+export const shownPath = (path: string) => shownFromHome(path, state.home, platform);
 
 // ---------- History ----------
 

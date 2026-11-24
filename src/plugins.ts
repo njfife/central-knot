@@ -142,9 +142,10 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
 }
 
 /**
- * Leading arguments for Git commands run through `git` / `runGit`: hooks stay off everywhere, and on Windows line endings
- * stay byte-exact (even under `text=auto`) and paths past 260 characters are allowed. Passed as `-c` flags rather than
- * `GIT_CONFIG_COUNT`, which tests use for stand-in hosts.
+ * Leading arguments for Git commands run through `git` / `runGit`: macOS and Linux pass only `core.hooksPath=/dev/null`;
+ * Windows also passes `core.autocrlf=false`, `core.eol=lf` and `core.longpaths=true`, so a checkout keeps LF where a
+ * repository does not say otherwise (a repository’s explicit `eol` attribute is still honoured) and paths past 260 characters
+ * are allowed. Passed as `-c` flags rather than `GIT_CONFIG_COUNT`, which tests use for stand-in hosts.
  */
 export const gitPrefix = (platform: NodeJS.Platform = process.platform): string[] =>
   platform === 'win32'
