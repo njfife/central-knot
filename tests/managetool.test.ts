@@ -452,6 +452,7 @@ test('Use Codex’s copy on an entry about Codex still works once Codex is not m
     await b.pass();
     // notes kept out of Codex, Codex's own copy written there, then notes let in again: the click takes that copy over (a version).
     await applySkills(b.context, await b.managed(), [{ key: 'notes', on: true, except: ['codex-cli'] }]);
+    await mkdir(join(b.home, '.codex/skills/notes'));
     await writeFile(join(b.home, CODEX.skill), skillText('Codex’s own notes.'));
     await applySkills(b.context, await b.managed(), [{ key: 'notes', on: true, except: [] }]);
     const entry = (await b.history()).filter(event => event.key === 'notes' && event.only === 'codex-cli').at(-1)!;
