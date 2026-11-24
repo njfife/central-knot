@@ -8,12 +8,13 @@
 //
 // A file is read by `scanLines`, from where its last read ended: complete lines only, each parsed as it is read; a file that
 // shrank, or is another file now, is read from its start, and the read says it started over before its first line. What every
-// tool's reader does with those lines is `readSession`'s: each made a record, the last request of each id kept, the lines
-// passed over counted. Claude Code's files are found by `claudeFiles`, each a session, and their records made into requests
-// by `readClaudeSession`; Codex's rollouts by `codexRollouts`, and theirs by `readCodexRollout`, which also gives back what
-// the next read of the same file needs from this one (`CodexState`, kept by the caller beside the `Position`). Both read the
-// same files as usage.ts, the Library's usage reading, which keeps its own refresh and its own rules, and take from it what
-// both need (usage.ts's header names them).
+// tool's reader does with those lines is `readSession`'s: each made a record, the last request of each id kept, and counted as
+// unread a line that is not a JSON record or a record its tool's reader says should have been a request and is not one; every
+// other record is passed over uncounted. Claude Code's files are found by `claudeFiles`, each a session, and their records made
+// into requests by `readClaudeSession`; Codex's rollouts by `codexRollouts`, and theirs by `readCodexRollout`, which also gives
+// back what the next read of the same file needs from this one (`CodexState`, kept by the caller beside the `Position`). Both
+// read the same files as usage.ts, the Library's usage reading, which keeps its own refresh and its own rules, and take from it
+// what both need (usage.ts's header names them).
 //
 // Not here: the other tools (each another reader beside these two), prices, a record kept, a page.
 import { open } from 'node:fs/promises';
@@ -43,7 +44,7 @@ export interface Request {
   at: number;
   /** The model's id exactly as saved. */
   model: string;
-  /** The model's provider, where the tool saves one (Claude Code saves none). */
+  /** The model's provider, where the tool saves one (Codex's: its `model_provider`, as saved; Claude Code saves none). */
   provider?: string;
   tokens: Tokens;
   /** The speed it was served at, as the tool saved it (Claude Code's `usage.speed`), where saved. */
@@ -116,12 +117,14 @@ type Found = Request | 'unread' | undefined;
 /** What a tool's reader finds of a session besides its requests, as `SessionRead`'s fields of the same names say. */
 interface Besides { project?: string; treeReported?: number }
 
+/** A tool's reader, as readSession calls it once per read. */
+type Reader = (startedOver: boolean, besides: Besides) => (record: JsonRecord) => Found;
+
 /**
  * One read of a session file from `from` (its start when undefined), as every tool's reader does it: `reader` is told whether
  * the read started over (scanLines) and given `besides` to fill, and gives back what each record is then handed to; a line
  * that is not a JSON record is counted unread. Of the requests found, the last of each id in these lines stands.
  */
-type Reader = (startedOver: boolean, besides: Besides) => (record: JsonRecord) => Found;
 async function readSession(file: string, from: Position | undefined, reader: Reader): Promise<SessionRead> {
   const requests = new Map<string, Request>(), besides: Besides = {};
   let startedOver = false, unread = 0;
@@ -134,8 +137,8 @@ async function readSession(file: string, from: Position | undefined, reader: Rea
       else if (found) requests.set(found.request, found);
     };
   });
-  const { project, treeReported } = besides, found = { ...(project ? { project } : {}), ...(treeReported !== undefined ? { treeReported } : {}) };
-  return { requests: [...requests.values()], startedOver, ...found, unread, position };
+  const { project, treeReported } = besides, stated = { ...(project ? { project } : {}), ...(treeReported !== undefined ? { treeReported } : {}) };
+  return { requests: [...requests.values()], startedOver, ...stated, unread, position };
 }
 
 /** A Claude Code session file: where it is, the session it is (its file's name), and the session it is a child of. */
@@ -200,8 +203,8 @@ export function readClaudeSession(of: ClaudeFile, from?: Position): Promise<Sess
 
 /**
  * Codex's rollouts in a home, under `sessions` and `archived_sessions` (usage.ts codexFolders), each a session; no folder
- * there: undefined. Which session a rollout is, and whose child, its own first record says (readCodexRollout), not its place:
- * a rollout moved to the archive is the same session.
+ * there: undefined. Which session a rollout is, and whose child, its own `session_meta` record says (readCodexRollout), not its
+ * place: a rollout moved to the archive is the same session.
  */
 export async function codexRollouts(at: UsageWhere): Promise<string[] | undefined> {
   return (await sessionFiles(codexFolders(at)))?.map(({ root, name }) => join(root, name));
@@ -212,10 +215,12 @@ export async function codexRollouts(at: UsageWhere): Promise<string[] | undefine
  * no file, so it holds for the rollout wherever it is moved. A first read, or one that starts over, begins from none of it.
  */
 export interface CodexState {
-  /** The thread's own id, from the rollout's `session_meta` (its first record). */
+  /** The thread's own id: the last `session_meta` read's `id` (Codex writes one, as the rollout's first record). */
   session?: string;
-  /** The thread it is a child of, where it is one: the same record's `parent_thread_id`. */
+  /** The thread it is a child of: the last `parent_thread_id` a `session_meta` named, where one did. */
   parent?: string;
+  /** The provider of its models: the last `model_provider` a `session_meta` named, as saved, where one did. */
+  provider?: string;
   /** The model selected for the turn in force: the last `turn_context`'s, which governs each response after it. */
   model?: string;
   /** The older counter's running total at its last count, as tokens: what the next count is measured from. */
@@ -247,11 +252,14 @@ function added(now: Tokens, before: Tokens): Tokens | undefined {
   return KINDS.some(kind => tokens[kind] < 0) ? undefined : tokens;
 }
 
-/** A Codex request: `id` and `tokens`, its record's time, and the thread and model `state` holds; undefined when one is missing. */
+/**
+ * A Codex request: `id` and `tokens`, its record's time, and the thread, model and provider `state` holds; undefined when the
+ * id, tokens, time, thread or model is missing.
+ */
 function codexRequest(record: JsonRecord, id: unknown, tokens: Tokens | undefined, state: CodexState): Request | undefined {
-  const at = timeOf(record), { session, parent, model } = state;
+  const at = timeOf(record), { session, parent, model, provider } = state;
   if (typeof id !== 'string' || !id || !tokens || at === undefined || !session || !model) return undefined;
-  return { tool: 'codex-cli', session, ...(parent ? { parent } : {}), request: id, at, model, tokens };
+  return { tool: 'codex-cli', session, ...(parent ? { parent } : {}), request: id, at, model, ...(provider ? { provider } : {}), tokens };
 }
 
 /**
@@ -279,6 +287,7 @@ function codexRecord(record: JsonRecord, state: CodexState, besides: Besides): F
   if (record.type === 'session_meta' && typeof payload.id === 'string') {
     state.session = payload.id;
     if (typeof payload.parent_thread_id === 'string') state.parent = payload.parent_thread_id;
+    if (typeof payload.model_provider === 'string') state.provider = payload.model_provider;
   }
   if (record.type === 'turn_context' && typeof payload.model === 'string') state.model = payload.model;
   if (record.type === 'token_usage_record') {

@@ -21,10 +21,13 @@ async function put(path: string, records: object[]) {
 }
 
 const THREAD = '01a20e2c-be50-7391-8319-0e3b60899d84';
-/** A rollout's first record: the thread it is, in the folder it ran in. */
-const meta = (id = THREAD) => ({
+/** A rollout's first record: the thread it is, in the folder it ran in, and the provider of its models (null: none saved). */
+const meta = (id = THREAD, provider: string | null = 'openai') => ({
   timestamp: '2026-11-24T15:29:03.343Z', type: 'session_meta',
-  payload: { session_id: id, id, cwd: '/work/app', originator: 'codex_exec', cli_version: '0.169.1', source: 'exec', thread_source: 'user', model_provider: 'openai' },
+  payload: {
+    session_id: id, id, cwd: '/work/app', originator: 'codex_exec', cli_version: '0.169.1', source: 'exec', thread_source: 'user',
+    ...(provider ? { model_provider: provider } : {}),
+  },
 });
 /** A child's first record: its own thread, spawned by `parent`, which it names twice, as 0.169.1 writes it. */
 const childMeta = (id: string, parent: string) => ({
@@ -77,7 +80,7 @@ test('A Codex rollout of three responses is three requests: cached input taken o
     ...respond(total, 'resp_2', '2026-11-24T15:29:06.137Z', counts(5_302, 5_000, 420, 300)),
     ...respond(total, 'resp_3', '2026-11-24T15:29:07.338Z', counts(303, 0, 43, 0, 7)),
   ]);
-  const read = await readCodexRollout(file), request = { tool: 'codex-cli', session: THREAD, model: 'gpt-6-astra' };
+  const read = await readCodexRollout(file), request = { tool: 'codex-cli', session: THREAD, model: 'gpt-6-astra', provider: 'openai' };
   assert.deepEqual(read.requests, [
     { ...request, request: 'resp_1', at: Date.parse('2026-11-24T15:29:04.762Z'), tokens: { input: 220, cacheRead: 81, cacheWrite: 0, output: 41 } },
     { ...request, request: 'resp_2', at: Date.parse('2026-11-24T15:29:06.137Z'), tokens: { input: 302, cacheRead: 5_000, cacheWrite: 0, output: 420 } },
@@ -115,18 +118,42 @@ test('A rollout read in three goes: the thread and the model from the first read
   const home = await newHome(), file = join(home, '.codex/sessions/2026/11/24/rollout-one.jsonl'), total = runningTotal();
   await put(file, [meta(), turn('gpt-6-astra', '2026-11-24T15:29:03.502Z')]);
   const first = await readCodexRollout(file);
-  assert.deepEqual([first.requests, first.state], [[], { session: THREAD, model: 'gpt-6-astra' }]);
+  assert.deepEqual([first.requests, first.state], [[], { session: THREAD, provider: 'openai', model: 'gpt-6-astra' }]);
   const [message, record, count] = respond(total, 'resp_1', '2026-11-24T15:29:04.762Z', counts(301, 81, 41));
   await appendFile(file, lines([message, record]));
   const second = await readCodexRollout(file, first);
   assert.deepEqual(second.requests, [
-    { tool: 'codex-cli', session: THREAD, request: 'resp_1', at: Date.parse('2026-11-24T15:29:04.762Z'), model: 'gpt-6-astra', tokens: tokens(220, 81, 41) },
+    { tool: 'codex-cli', session: THREAD, request: 'resp_1', at: Date.parse('2026-11-24T15:29:04.762Z'), model: 'gpt-6-astra', provider: 'openai', tokens: tokens(220, 81, 41) },
   ]);
   assert.equal(second.project, undefined, 'no record in these lines states the working folder');
   await appendFile(file, lines([count, ...respond(total, 'resp_2', '2026-11-24T15:29:06.137Z', counts(302, 82, 42))]));
   const third = await readCodexRollout(file, second);
   assert.deepEqual(said(third.requests), [['resp_2', 'gpt-6-astra', tokens(220, 82, 42)]], 'resp_1\'s count, in this read, follows its usage record in the last');
-  assert.deepEqual([first.state, second.startedOver, third.startedOver], [{ session: THREAD, model: 'gpt-6-astra' }, false, false], 'a state handed in is left as it was');
+  const firstState = { session: THREAD, provider: 'openai', model: 'gpt-6-astra' };
+  assert.deepEqual([first.state, second.startedOver, third.startedOver], [firstState, false, false], 'a state handed in is left as it was');
+});
+
+test('The provider saved with the thread goes on each of its requests, a later read\'s too; a rollout that saved none gives none', async () => {
+  const home = await newHome(), file = join(home, '.codex/sessions/2026/11/24/rollout-one.jsonl'), total = runningTotal();
+  // A provider of the person's own, serving a model whose id OpenAI's could have: a price for it must not be OpenAI's.
+  await put(file, [meta(THREAD, 'azure'), turn('gpt-6-astra', '2026-11-24T15:29:03.502Z')]);
+  const first = await readCodexRollout(file);
+  await appendFile(file, lines(respond(total, 'resp_1', '2026-11-24T15:29:04.762Z', counts(301, 81, 41))));
+  const second = await readCodexRollout(file, first);
+  assert.deepEqual(second.requests.map(each => [each.request, each.model, each.provider]), [['resp_1', 'gpt-6-astra', 'azure']]);
+  const unsaid = join(home, '.codex/sessions/2026/11/24/rollout-two.jsonl');
+  await put(unsaid, [meta(THREAD, null), turn('gpt-6-astra', '2026-11-24T15:29:03.502Z'), ...respond(runningTotal(), 'resp_2', '2026-11-24T15:29:04.762Z', counts(1, 0, 1))]);
+  assert.deepEqual((await readCodexRollout(unsaid)).requests.map(each => [each.request, 'provider' in each]), [['resp_2', false]]);
+});
+
+test('Two responses recorded the modern way and then one count covering both: both stand, and the count adds nothing', async () => {
+  const home = await newHome(), file = join(home, '.codex/sessions/2026/11/24/rollout-one.jsonl'), total = runningTotal();
+  const [firstSaid, firstRecord] = respond(total, 'resp_1', '2026-11-24T15:29:04.762Z', counts(301, 81, 41));
+  const [secondSaid, secondRecord, bothCounted] = respond(total, 'resp_2', '2026-11-24T15:29:06.137Z', counts(302, 82, 42));
+  await put(file, [meta(), turn('gpt-6-astra', '2026-11-24T15:29:03.502Z'), firstSaid, firstRecord, secondSaid, secondRecord, bothCounted]);
+  const read = await readCodexRollout(file);
+  assert.deepEqual(said(read.requests), [['resp_1', 'gpt-6-astra', tokens(220, 81, 41)], ['resp_2', 'gpt-6-astra', tokens(220, 82, 42)]]);
+  assert.deepEqual([sum(read.requests), read.state.lastTotal], [asTokens(total), asTokens(total)], 'the count moved the baseline past both');
 });
 
 test('A rollout begun by an older Codex and resumed by a newer: each response once, and the sums are the file\'s final running total', async () => {
