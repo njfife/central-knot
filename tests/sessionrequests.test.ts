@@ -169,7 +169,7 @@ test('A parent and its child\'s file are two sessions, the child naming its pare
   assert.deepEqual(requests.map(each => [each.request, each.session, each.parent]), [['msg_2', 'agent-a1', 'one'], ['msg_1', 'one', undefined], ['msg_3', 'one', undefined]]);
 });
 
-test('The closing cost record is the tree\'s reported cost as recorded, zero included; with none, there is none', async () => {
+test('The cost record is the tool\'s own running total for the file as last recorded, zero included; with none, or one that leaves a model out, there is none', async () => {
   const home = await newHome(), project = join(home, '.claude/projects/-work-app');
   const cost = (usd: number) => ({ type: 'cost-state', sessionId: 'one', totalCostUSD: usd, modelUsage: {}, hasUnknownModelCost: false });
   const reported = async (name: string, records: object[]) => {
@@ -179,6 +179,9 @@ test('The closing cost record is the tree\'s reported cost as recorded, zero inc
   const said = response('msg_1', '2026-11-24T15:30:00.000Z', usage(5, 1_000, 10, 10));
   assert.equal(await reported('closed.jsonl', [said, cost(0.0098), said, cost(0.0133)]), 0.0133, 'the last one: each is the total so far');
   assert.equal(await reported('older.jsonl', [said]), undefined, 'an older version writes none');
+  const leavesOut = { ...cost(0.0133), hasUnknownModelCost: true };
+  assert.equal(await reported('unknown.jsonl', [said, cost(0.0098), said, leavesOut]), undefined,
+    'the last total leaves a model out: no figure, not the earlier one');
   const file = join(project, 'two-goes.jsonl');
   await put(file, [said, cost(0.01)]);
   const positive = await readClaudeSession({ file, session: 'two-goes' });
@@ -187,6 +190,17 @@ test('The closing cost record is the tree\'s reported cost as recorded, zero inc
   await appendFile(file, lines([said]));
   const none = await readClaudeSession({ file, session: 'two-goes' }, zero.position);
   assert.deepEqual([positive.treeReported, zero.treeReported, none.treeReported], [0.01, 0, undefined], 'a later read says zero; one with no cost record, none');
+});
+
+test('A response Claude Code made up itself (model `<synthetic>`: an error or an interrupt, no tokens) is no request, and not unread', async () => {
+  const home = await newHome(), file = join(home, '.claude/projects/-work-app/one.jsonl');
+  const madeUp = response('msg_2', '2026-11-24T15:30:05.000Z', { ...usage(0, 0, 0, 0), service_tier: null, speed: null }, '<synthetic>');
+  await put(file, [
+    response('msg_1', '2026-11-24T15:30:00.000Z', usage(5, 1_000, 10, 10)), asked('2026-11-24T15:30:04.000Z'), madeUp,
+    asked('2026-11-24T15:30:06.000Z'), response('msg_3', '2026-11-24T15:30:09.000Z', usage(2, 1_100, 0, 30)),
+  ]);
+  const read = await readClaudeSession({ file, session: 'one' });
+  assert.deepEqual([outputs(read.requests), read.unread], [[['msg_1', 10], ['msg_3', 30]], 0], 'nothing is missing: no model answered');
 });
 
 test('A line that is not JSON, a record with usage of a kind not known, and a response missing a count are passed over and counted as unread', async () => {

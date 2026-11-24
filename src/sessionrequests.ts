@@ -49,9 +49,12 @@ export interface Request {
   tokens: Tokens;
   /** The speed it was served at, as the tool saved it (Claude Code's `usage.speed`), where saved. */
   speed?: string;
-  /** The service tier it was served at, as the tool saved it (Claude Code's `usage.service_tier`), where saved. */
+  /**
+   * Its service tier, as the tool saved it, where saved: Claude Code's `usage.service_tier`, the tier it was served at; Codex's,
+   * the tier asked for in the thread's settings (CodexState.serviceTier), the only one Codex saves.
+   */
   serviceTier?: string;
-  /** A cost in dollars the tool saved for this request alone (Claude Code saves one only for the tree: `SessionRead.treeReported`). */
+  /** A cost in dollars the tool saved for this request alone (Claude Code saves one only for the session: `SessionRead.treeReported`). */
   reported?: number;
 }
 
@@ -104,7 +107,10 @@ export interface SessionRead {
   startedOver: boolean;
   /** The working folder's name, from the first record in these lines that states one. */
   project?: string;
-  /** The tool's own cost in dollars for the session with its children, as recorded (zero too): the last record of it in these lines. */
+  /**
+   * The tool's own running total in dollars for the session file, as it last recorded it in these lines (zero too); whether it
+   * includes its agents' is not known. Absent where none is recorded, or where the tool says the last one leaves a model out.
+   */
   treeReported?: number;
   /** Lines passed over that could have held a request: which, each tool's reader says (readClaudeSession, readCodexRollout). */
   unread: number;
@@ -187,16 +193,22 @@ function claudeRequest(record: JsonRecord, of: ClaudeFile): Request | undefined 
 
 /**
  * One read of a Claude Code session file from `from` (its start when undefined). A response is an `assistant` record, recorded
- * once per content part and sometimes in part first: the last record of each message id stands. The closing `cost-state`
- * record's `totalCostUSD` covers the session with its children; an older version writes none. Counted as unread: a line that
- * is not a JSON record, and an `assistant` record, or any other with `message.usage`, that is not a request (claudeRequest).
- * Every other record holds no request, and is passed over uncounted.
+ * once per content part and sometimes in part first: the last record of each message id stands. A `cost-state` record's
+ * `totalCostUSD` is the tool's own running total for this file, small side calls that no record in it holds included; whether
+ * it includes its agents' is not known (no agent's own file seen holds a `cost-state`). Where its `hasUnknownModelCost` is
+ * true the total leaves a model out, and is not given. An older version writes none. Counted as unread: a line that is not a
+ * JSON record, and an `assistant` record, or any other with `message.usage`, that is not a request (claudeRequest). Every
+ * other record holds no request, and is passed over uncounted, an `assistant` record of model `<synthetic>` too: one Claude
+ * Code wrote itself (an error or an interrupt), no model's.
  */
 export function readClaudeSession(of: ClaudeFile, from?: Position): Promise<SessionRead> {
   return readSession(of.file, from, (_startedOver, besides) => record => {
     if (typeof record.cwd === 'string') besides.project ??= basename(record.cwd);
-    if (record.type === 'cost-state' && Number.isFinite(record.totalCostUSD)) besides.treeReported = record.totalCostUSD;
+    if (record.type === 'cost-state' && Number.isFinite(record.totalCostUSD)) {
+      besides.treeReported = record.hasUnknownModelCost === true ? undefined : record.totalCostUSD;
+    }
     if (record.type !== 'assistant' && record.message?.usage === undefined) return undefined;
+    if (record.type === 'assistant' && record.message?.model === '<synthetic>') return undefined;
     return claudeRequest(record, of) ?? 'unread';
   });
 }
@@ -223,6 +235,8 @@ export interface CodexState {
   provider?: string;
   /** The model selected for the turn in force: the last `turn_context`'s, which governs each response after it. */
   model?: string;
+  /** The service tier asked for: the last `thread_settings_applied`'s `thread_settings.service_tier`, as saved; none where it names none. */
+  serviceTier?: string;
   /** The older counter's running total at its last count, as tokens: what the next count is measured from. */
   lastTotal?: Tokens;
   /** Whether a modern usage record came after that count: the next count's response was recorded so, and is not one again. */
@@ -253,13 +267,14 @@ function added(now: Tokens, before: Tokens): Tokens | undefined {
 }
 
 /**
- * A Codex request: `id` and `tokens`, its record's time, and the thread, model and provider `state` holds; undefined when the
- * id, tokens, time, thread or model is missing.
+ * A Codex request: `id` and `tokens`, its record's time, and the thread, model, provider and service tier `state` holds;
+ * undefined when the id, tokens, time, thread or model is missing.
  */
 function codexRequest(record: JsonRecord, id: unknown, tokens: Tokens | undefined, state: CodexState): Request | undefined {
-  const at = timeOf(record), { session, parent, model, provider } = state;
+  const at = timeOf(record), { session, parent, model, provider, serviceTier } = state;
   if (typeof id !== 'string' || !id || !tokens || at === undefined || !session || !model) return undefined;
-  return { tool: 'codex-cli', session, ...(parent ? { parent } : {}), request: id, at, model, ...(provider ? { provider } : {}), tokens };
+  return { tool: 'codex-cli', session, ...(parent ? { parent } : {}), request: id, at, model, ...(provider ? { provider } : {}), tokens,
+    ...(serviceTier ? { serviceTier } : {}) };
 }
 
 /**
@@ -290,6 +305,10 @@ function codexRecord(record: JsonRecord, state: CodexState, besides: Besides): F
     if (typeof payload.model_provider === 'string') state.provider = payload.model_provider;
   }
   if (record.type === 'turn_context' && typeof payload.model === 'string') state.model = payload.model;
+  if (record.type === 'event_msg' && payload.type === 'thread_settings_applied') {
+    const tier = payload.thread_settings?.service_tier;
+    state.serviceTier = typeof tier === 'string' ? tier : undefined;
+  }
   if (record.type === 'token_usage_record') {
     state.recordedSince = true;
     return codexRequest(record, payload.response_id, codexTokens(payload.usage), state) ?? 'unread';
@@ -299,11 +318,12 @@ function codexRecord(record: JsonRecord, state: CodexState, besides: Besides): F
 
 /**
  * One read of a Codex rollout from where `from` ended (its start when undefined), and the state it leaves. A response is its
- * `token_usage_record` (the modern form), by its `response_id`, with the model in force. The older counter (counterRequest)
- * is read only for a stretch with no modern record: each count ends a stretch, as Codex writes a response's usage record
- * before its count, so in a stretch with both the response is the modern record's alone. Counted as unread: a line that is
- * not a JSON record; a usage record, or a count, whose tokens are not counts or that has no time, or no thread or model known
- * before it. Every other record holds no request, a count with no `info` (only its limits) too.
+ * `token_usage_record` (the modern form), by its `response_id`, with the model and the service tier asked for in force
+ * (CodexState). The older counter (counterRequest) is read only for a stretch with no modern record: each count ends a
+ * stretch, as Codex writes a response's usage record before its count, so in a stretch with both the response is the modern
+ * record's alone. Counted as unread: a line that is not a JSON record; a usage record, or a count, whose tokens are not counts
+ * or that has no time, or no thread or model known before it. Every other record holds no request, a count with no `info`
+ * (only its limits) too.
  */
 export async function readCodexRollout(file: string, from?: { position: Position; state: CodexState }): Promise<CodexRead> {
   let state: CodexState = {};
