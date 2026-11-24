@@ -29,6 +29,12 @@ export const tagHere = release => { try { return releaseTagHere(release); } catc
 /** dist/ as the plain standard app: no custom build's files, the standard name. */
 const plainBuild = () => execFileSync(process.execPath, ['scripts/build.mjs'], { stdio: 'inherit', env: { ...process.env, CK_CUSTOM_BUILD: '', CK_APP_NAME: '' } });
 
+/** Paths excluded from the packaged app's asar archive; anything else at the repository root (dist/, assets/) is kept. */
+export const PACKAGE_IGNORE = [
+  /^\/src(?:\/|$)/, /^\/tests(?:\/|$)/, /^\/scripts(?:\/|$)/, /^\/.github(?:\/|$)/,
+  /^\/release(?:\/|$)/, /^\/build(?:\/|$)/, /^\/docs(?:\/|$)/, /^\/LEDGER\.md$/, /^\/README\.md$/,
+];
+
 /**
  * The packager's folder of `own` (the app a line's tag makes, or with `custom` a custom build's, whose dist/ the caller built)
  * for `platform` and `arch`, under release/, with `tag` recorded in it (dist/build-info.json, for this package only). An alpha
@@ -51,7 +57,7 @@ export async function packageFolder({ own, tag, custom, platform, arch, options 
     asar: true, overwrite: true, prune: true,
     // Optional: a folder already holding the Electron zip, for when GitHub's downloads are failing (CK_ELECTRON_ZIP_DIR).
     ...(process.env.CK_ELECTRON_ZIP_DIR ? { electronZipDir: process.env.CK_ELECTRON_ZIP_DIR } : {}),
-    ignore: [/^\/src(?:\/|$)/, /^\/tests(?:\/|$)/, /^\/scripts(?:\/|$)/, /^\/.github(?:\/|$)/, /^\/release(?:\/|$)/, /^\/build(?:\/|$)/, /^\/docs(?:\/|$)/, /^\/LEDGER\.md$/, /^\/README\.md$/],
+    ignore: PACKAGE_IGNORE,
     ...options,
   }).finally(async () => {
     await rm('dist/build-info.json', { force: true });
