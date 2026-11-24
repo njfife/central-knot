@@ -187,7 +187,7 @@ test('A carried marketplace addition queued before a tool is left out asks again
   } finally { await box.cleanup(); }
 });
 
-test('With no CLI, a tool’s plugins go through the copy its desktop app carries, named on the page with the version it answers', { skip: process.platform === 'win32' }, async () => {
+test('With no CLI, a tool’s plugins go through the copy its desktop app carries, named on the page with the version it answers', { skip: false }, async () => {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-app-route-')));
   const runtime = join(base, 'copilot-sdk-runtime-1.0.102-0.unstable.r41779900948.gf482387/copilot');
   await put(runtime, '#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.102-0.unstable.r41779900948.gf482387."\n');
@@ -416,7 +416,7 @@ test('The list’s background read (local) reads only what is on disk: a plugin 
   } finally { await box.cleanup(); }
 });
 
-test('Turning a plugin skill off is offered on a build older than the one tested; Refresh reads the build again for the note', { skip: process.platform === 'win32' }, async () => {
+test('Turning a plugin skill off is offered on a build older than the one tested; Refresh reads the build again for the note', { skip: false }, async () => {
   const box = await setup({ codex: true });
   try {
     await mkdir(join(box.base, 'bin'), { recursive: true });
@@ -890,7 +890,7 @@ test('A tool still holding a plugin that is Off keeps a ticked box: unticked, it
   } finally { await box.cleanup(); }
 });
 
-test('A tool whose own add refused the marketplace: its line says so in its words, and later clicks neither run it there again nor list it as failed', { skip: process.platform === 'win32' }, async () => {
+test('A tool whose own add refused the marketplace: its line says so in its words, and later clicks neither run it there again nor list it as failed', { skip: false }, async () => {
   let box!: Awaited<ReturnType<typeof setup>>;
   box = await setup({ tools: ['claude-cli', 'copilot-cli'], engine: {
     findClis: async () => ({ binaries: { 'claude-cli': '/bin/true', 'copilot-cli': join(box.base, 'bin/copilot') }, apps: {} }),

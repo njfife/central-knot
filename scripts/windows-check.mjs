@@ -211,7 +211,7 @@ function runAdvisory(outDir) {
   const fd = openSync(join(dir, 'full.log'), 'w');
   const chunks = [];
   console.log(`Running ${rest.length} advisory unit test files (excluding ${strict.size} strict files)`);
-  const child = spawn(process.execPath, ['--test', ...rest], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['--test', '--test-timeout=60000', ...rest], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   const take = chunk => {
     chunks.push(chunk);
     writeSync(fd, chunk);

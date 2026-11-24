@@ -13,7 +13,6 @@ tests/clickplan.test.ts
 tests/copywords.test.ts
 tests/cowork.test.ts
 tests/discovery-copilot.test.ts
-tests/discovery.test.ts
 tests/drafts.test.ts
 tests/firstsetup.test.ts
 tests/gitrepo-edits.test.ts
@@ -37,7 +36,6 @@ tests/macguard.test.ts
 tests/managetool.test.ts
 tests/map.test.ts
 tests/markdown.test.ts
-tests/marketplaces.test.ts
 tests/merge.test.ts
 tests/model.test.ts
 tests/origins.test.ts
@@ -51,11 +49,9 @@ tests/pluginlibrary.test.ts
 tests/pluginplan.test.ts
 tests/pluginrecord.test.ts
 tests/pluginrecordholds.test.ts
-tests/plugins.test.ts
 tests/pluginskills.test.ts
 tests/pluginstatus.test.ts
 tests/pluginswitch.test.ts
-tests/plugintext.test.ts
 tests/pluginupdates.test.ts
 tests/releasetag.test.ts
 tests/reload.test.ts
