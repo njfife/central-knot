@@ -65,6 +65,49 @@ test('parseUnitLog pulls totals, failing tests with their first error line, canc
   const cleanSection = summary.split('## Clean files')[1]!.split('## Failing tests')[0]!;
   assert.ok(!cleanSection.includes('tests/map.test.ts'));
   assert.ok(cleanSection.includes('tests/words.test.ts'));
+  assert.ok(!summary.includes('## Not run'));
+});
+
+test('parseUnitLog reports advisory files under Not run (never Clean files) when strict emitted totals but advisory exited without totals', () => {
+  const strict = [
+    '✔ strict pass (1.0ms)',
+    'ℹ tests 1',
+    'ℹ suites 0',
+    'ℹ pass 1',
+    'ℹ fail 0',
+    'ℹ cancelled 0',
+    'ℹ skipped 0',
+    'ℹ todo 0',
+    'ℹ duration_ms 5.0',
+  ].join('\n');
+  const crashedAdvisory = 'Error: worker crashed before node --test printed totals\n';
+  const summary = parseUnitLog(crashedAdvisory, 1, strict, ['tests/words.test.ts']);
+  const cleanSection = summary.split('## Clean files (1 of ')[1]!.split('## Not run')[0]!;
+  const notRunSection = summary.split('## Not run')[1]!;
+  assert.ok(cleanSection.includes('tests/words.test.ts'));
+  assert.ok(!cleanSection.includes('tests/skills.test.ts'));
+  assert.ok(notRunSection.includes('tests/skills.test.ts'));
+  assert.ok(!notRunSection.includes('tests/words.test.ts'));
+  assert.match(summary, /## Output \(advisory, before node --test summary\)\nError: worker crashed/);
+});
+
+test('lockPath unlock is idempotent on an existing path and throws if the locked path disappeared', { skip: lockSkip }, async () => {
+  const base = await mkdtemp(join(tmpdir(), 'ck-fslock-unlock-'));
+  try {
+    const okFile = join(base, 'ok.txt');
+    await writeFile(okFile, 'ok\n');
+    const unlockOk = await lockPath(okFile, 'file-unreadable');
+    await unlockOk();
+    await unlockOk();
+    const goneFile = join(base, 'gone.txt');
+    await writeFile(goneFile, 'gone\n');
+    const unlockGone = await lockPath(goneFile, 'file-unreadable');
+    await rm(goneFile);
+    await assert.rejects(unlockGone(), { code: 'ENOENT' });
+  } finally {
+    await makeWritableTree(base);
+    await rm(base, { recursive: true, force: true });
+  }
 });
 
 test('slashPath replaces only the host native separator, keeping backslashes intact on POSIX', () => {

@@ -101,7 +101,10 @@ async function place(folder: OldHome['folder'] | 'alpha-1-parts'): Promise<Box> 
   for (const path of Object.keys((await filesIn(home)).sha256)) {
     const text = await readFile(join(home, path), 'utf8');
     if (text.includes(MADE_AT)) {
-      await writeFile(join(home, path), text.replace(madeAtPattern, (_, sub = '') => JSON.stringify(join(home, sub)).slice(1, -1)));
+      const rewritten = process.platform === 'win32'
+        ? text.replace(madeAtPattern, (_, sub = '') => JSON.stringify(join(home, sub)).slice(1, -1))
+        : text.replaceAll(MADE_AT, home);
+      await writeFile(join(home, path), rewritten);
     }
   }
   const context = appContext(home, appData);
@@ -571,9 +574,10 @@ test('Plugin parts and no plugins record, sync record at format 2: the start’s
  */
 async function endState(box: Box) {
   const ids: [string, string][] = (await readJson(join(box.store, 'plugins.json'))).plugins.map((entry: PluginEntry) => [entry.id, `${entry.plugin}@${entry.marketName}`]);
-  const jsonHome = JSON.stringify(box.home).slice(1, -1), slashHome = slashPath(box.home);
-  const plain = (text: string) => ids.reduce((done, [id, name]) => done.replaceAll(id, name),
-    text.replaceAll(jsonHome, '~').replaceAll(box.home, '~').replaceAll(slashHome, '~'));
+  const stripHome = (text: string) => (process.platform === 'win32'
+    ? text.replaceAll(JSON.stringify(box.home).slice(1, -1), '~').replaceAll(box.home, '~').replaceAll(slashPath(box.home), '~')
+    : text.replaceAll(box.home, '~'));
+  const plain = (text: string) => ids.reduce((done, [id, name]) => done.replaceAll(id, name), stripHome(text));
   const tools = Object.keys((await filesIn(box.home)).sha256).filter(inTools).sort();
   const items = async (name: string) => Object.entries<LibraryItem>((await readJson(join(box.store, name))).items)
     .map(([key, { on, except, source }]) => plain(JSON.stringify({ key, on, except, source })));

@@ -27,7 +27,12 @@ export async function lockPath(path: string, kind: LockKind): Promise<() => Prom
   const locked = kind === 'dir-readonly' ? 0o555 : 0o000;
   const restored = kind === 'file-unreadable' ? 0o644 : 0o755;
   await chmod(path, locked);
-  return () => chmod(path, restored).catch(() => undefined);
+  let unlocked = false;
+  return async () => {
+    if (unlocked) return;
+    await chmod(path, restored);
+    unlocked = true;
+  };
 }
 
 /** Runs `work` with `path` locked and restores its permissions in `finally`. */

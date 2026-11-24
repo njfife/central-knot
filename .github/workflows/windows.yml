@@ -4,6 +4,9 @@ name: Windows checks
 # and must pass. Remaining unit tests run advisory (continue-on-error: true) and combine with strict.log in the uploaded report.
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - ci/a-windows-run
 permissions:
   contents: read
 # A group of its own: groups are shared by every workflow in the repository, so another workflow's name would cancel its runs.

@@ -146,7 +146,9 @@ test('OWN-02: reading a linked skill leaves the link and target unchanged', { sk
 });
 
 test('Finder-like PATH still yields bounded explicit candidates, never project paths', () => {
-  const candidates = executableCandidates('/Users/fixture', '/usr/bin:/bin:relative-project-bin', 'claude', 'darwin').map(slashPath);
+  const candidates = process.platform === 'win32'
+    ? executableCandidates('/Users/fixture', '/usr/bin:/bin:relative-project-bin', 'claude', 'darwin').map(slashPath)
+    : executableCandidates('/Users/fixture', '/usr/bin:/bin:relative-project-bin');
   assert.ok(candidates.includes('/Users/fixture/.local/bin/claude'));
   assert.ok(candidates.includes('/opt/homebrew/bin/claude'));
   assert.ok(candidates.length <= 40);
@@ -161,8 +163,9 @@ test('On this computer a tool is here only when its CLI or app is found: a folde
     const leftBehind = await discover({ home: setup.home, mode: 'actual', runProbes: true, binaries: [join(setup.home, 'absent')] });
     assert.equal(leftBehind.detection, 'Config found but app not detected');
     assert.equal(isPresent(leftBehind), false);
-    // With its CLI found, it is here (Node itself answers --version on every platform).
-    const installed = await discover({ home: setup.home, mode: 'actual', runProbes: true, binaries: [process.execPath] });
+    // With its CLI found, it is here (on Windows, Node itself answers --version until step 3 adds .cmd probing).
+    const binary = process.platform === 'win32' ? process.execPath : await executable(setup.home, "printf '2.1.318 (Claude Code)\\n'");
+    const installed = await discover({ home: setup.home, mode: 'actual', runProbes: true, binaries: [binary] });
     assert.ok(isPresent(installed));
     // A chosen folder is never searched for tools: there the folder is all there is to go by.
     assert.ok(isPresent(await discover({ home: setup.home, mode: 'custom' })));

@@ -291,9 +291,9 @@ test('staging a custom build: its identity file, the carried release, its pictur
       await writeFile(join(base, 'locked.png'), 'png');
       await withLock(join(base, 'locked.png'), 'file-unreadable', async () => {
         await assert.rejects(stageCustomBuild({ marketplace: source, appName: 'Acme Knot', appIcon: join(base, 'locked.png') }, { out: join(base, 'half'), work: join(base, 'work') }));
+        assert.equal((await readdir(join(base, 'half'))).includes('bundle'), true, 'it stopped after the marketplace was packed');
+        assert.equal((await stageCustomBuild({ appName: 'Staging Knot' }, { out: join(base, 'half'), work: join(base, 'work') })).build.id, 'staging-knot');
       });
-      assert.equal((await readdir(join(base, 'half'))).includes('bundle'), true, 'it stopped after the marketplace was packed');
-      assert.equal((await stageCustomBuild({ appName: 'Staging Knot' }, { out: join(base, 'half'), work: join(base, 'work') })).build.id, 'staging-knot');
     });
     // Staging clears a folder staged before, never a folder holding someone's other files.
     await mkdir(join(base, 'mine'));

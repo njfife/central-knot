@@ -39,6 +39,10 @@ async function skill(home: string, root: string, folder: string, content = text(
 /** A stand-in CLI in the home's ~/.local/bin that answers --version. */
 async function cli(home: string, name: string) {
   await mkdir(join(home, '.local/bin'), { recursive: true });
+  if (process.platform === 'win32') {
+    await writeFile(join(home, '.local/bin', `${name}.cmd`), '@echo 1.5.14\r\n');
+    return;
+  }
   await writeFile(join(home, '.local/bin', name), '#!/bin/sh\necho 1.5.14\n');
   await chmod(join(home, '.local/bin', name), 0o755);
 }

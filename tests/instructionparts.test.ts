@@ -10,7 +10,7 @@ import { applyBase, baseView, instructionsView, saveInstruction, undoBase } from
 import { PART_TEXT_LIMIT } from '../src/instructionparts.ts';
 import { sha256, type ShareContext } from '../src/share.ts';
 import type { HarnessId, InstructionPart } from '../src/types.ts';
-import { lockSkip, withLock } from './fslock.ts';
+import { lockPath, lockSkip } from './fslock.ts';
 import { slashPath } from './wincompat.ts';
 
 const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
@@ -149,26 +149,25 @@ test('Claude Code’s rules: every .md under rules/, sub-folders too, each follo
 
 test('Claude Code’s rules: a linked folder is followed and each real folder read once, so a loop of links ends; one that can’t be read leaves the rest listed', async t => {
   const box = await sandbox();
+  const locked = join(box.home, '.claude/rules/locked');
+  let unlock: (() => Promise<void>) | undefined;
   try {
     await box.write('.claude/rules/top.md', 'Top.\n');
     await box.write('.claude/rules/sub/inner.md', 'Inner.\n');
     await symlink('..', join(box.home, '.claude/rules/sub/back'));
     await box.write('shared-rules/linked.md', 'Linked.\n');
     await symlink(join(box.home, 'shared-rules'), join(box.home, '.claude/rules/team'));
-    const expected = [
+    if (!lockSkip) {
+      await box.write('.claude/rules/locked/hidden.md', 'Not readable here.\n');
+      unlock = await lockPath(locked, 'dir-unreadable');
+    }
+    assert.deepEqual(await box.said('claude-cli'), [
       '.claude/rules/sub/inner.md · a rule · Inner.\n',
       '.claude/rules/team/linked.md · a rule · Linked.\n',
       '.claude/rules/top.md · a rule · Top.\n',
-    ];
-    assert.deepEqual(await box.said('claude-cli'), expected);
-    await t.test('an unreadable rules folder leaves the rest listed', { skip: lockSkip }, async () => {
-      const locked = join(box.home, '.claude/rules/locked');
-      await box.write('.claude/rules/locked/hidden.md', 'Not readable here.\n');
-      await withLock(locked, 'dir-unreadable', async () => {
-        assert.deepEqual(await box.said('claude-cli'), expected);
-      });
-    });
-  } finally { await box.cleanup(); }
+    ]);
+    if (lockSkip) await t.test('an unreadable rules folder leaves the rest listed', { skip: lockSkip }, () => {});
+  } finally { await unlock?.(); await box.cleanup(); }
 });
 
 test('Copilot CLI: its instructions files for every file are shown whole, front matter and all; a scoped one comes last, with its scope', async () => {
