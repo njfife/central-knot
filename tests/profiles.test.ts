@@ -3,7 +3,7 @@
 // before (profilemigrate.ts). The temp home has Claude Code, Copilot CLI and Codex.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { winLockSkip, withLock } from './fslock.ts';
 import { join } from 'node:path';
 import { agentsView, applyAgents } from '../src/agents.ts';
@@ -28,6 +28,7 @@ import { applySkills, skillsView } from '../src/skills.ts';
 import { setDisabled } from '../src/skillswitch.ts';
 import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, Profile, ThroughPlugin } from '../src/types.ts';
 import { bytes, folderOf, put, sandbox, skillText, type Box, type Tool } from './skillclicks.ts';
+import { standIn } from './standin.ts';
 
 // ---------- The rules ----------
 
@@ -630,18 +631,18 @@ async function pluginHome({ copilot = false, opencode = false } = {}) {
 async function sideNow(box: Box) {
   let binaries: Partial<Record<PluginTool, string>> = {};
   if (box.tools.includes('copilot-cli')) {
-    const bin = join(box.base, 'bin/copilot');
-    await putFile(bin, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} -e 'const fs=require("fs"),p=require("path"),[a,b,c]=process.argv.slice(1);if(a==="skill"&&(b==="enable"||b==="disable")&&c){const f=p.join(process.env.HOME,".copilot/settings.json"),j=fs.existsSync(f)?JSON.parse(fs.readFileSync(f,"utf8")):{};const l=(Array.isArray(j.disabledSkills)?j.disabledSkills:[]).filter(x=>x!==c);if(b==="disable")l.push(c);if(l.length)j.disabledSkills=l;else delete j.disabledSkills;fs.writeFileSync(f,JSON.stringify(j,null,2)+"\\n");process.exit(0);}process.exit(9);' "$@"\n`);
-    await chmod(bin, 0o755);
-    binaries = { 'copilot-cli': bin };
+    // Copilot CLI's `skill enable|disable <name>`, as the real one writes it: disabledSkills in its settings.json (tests/standin.ts).
+    const js = `const fs=require("fs"),p=require("path"),[a,b,c]=process.argv.slice(1);if(a==="skill"&&(b==="enable"||b==="disable")&&c){const f=p.join(process.env.HOME,".copilot/settings.json"),j=fs.existsSync(f)?JSON.parse(fs.readFileSync(f,"utf8")):{};const l=(Array.isArray(j.disabledSkills)?j.disabledSkills:[]).filter(x=>x!==c);if(b==="disable")l.push(c);if(l.length)j.disabledSkills=l;else delete j.disabledSkills;fs.writeFileSync(f,JSON.stringify(j,null,2)+"\\n");process.exit(0);}process.exit(9);`;
+    binaries = { 'copilot-cli': await standIn(join(box.base, 'bin/copilot'), `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} -e '${js}' "$@"\n`, js) };
   }
   if (box.tools.includes('claude-cli')) {
     // Claude Code's `plugin enable|disable <id>`, as the real one writes it: enabledPlugins in its settings.json, every other key
     // kept; each call also listed in the box's claude-calls; refused while the box has refuse-<enable|disable>-<id>.
-    const bin = join(box.base, 'bin/claude');
-    await putFile(bin, `#!/bin/sh\necho "$2 $3" >> ${JSON.stringify(join(box.base, 'claude-calls'))}\n[ -f ${JSON.stringify(box.base)}/refuse-$2-$3 ] && exit 9\nexec ${JSON.stringify(process.execPath)} -e 'const fs=require("fs"),p=require("path"),[a,b,c]=process.argv.slice(1);if(a==="plugin"&&(b==="enable"||b==="disable")&&c){const f=p.join(process.env.HOME,".claude/settings.json"),j=JSON.parse(fs.readFileSync(f,"utf8"));j.enabledPlugins={...j.enabledPlugins,[c]:b==="enable"};fs.writeFileSync(f,JSON.stringify(j,null,2)+"\\n");process.exit(0);}process.exit(9);' "$@"\n`);
-    await chmod(bin, 0o755);
-    binaries = { ...binaries, 'claude-cli': bin };
+    const calls = JSON.stringify(join(box.base, 'claude-calls')), refused = JSON.stringify(box.base);
+    const js = `const fs=require("fs"),p=require("path"),[a,b,c]=process.argv.slice(1);if(a==="plugin"&&(b==="enable"||b==="disable")&&c){const f=p.join(process.env.HOME,".claude/settings.json"),j=JSON.parse(fs.readFileSync(f,"utf8"));j.enabledPlugins={...j.enabledPlugins,[c]:b==="enable"};fs.writeFileSync(f,JSON.stringify(j,null,2)+"\\n");process.exit(0);}process.exit(9);`;
+    const listedAndRefused = `const [, , did, id] = process.argv; require("fs").appendFileSync(${calls}, did + " " + id + "\\n"); if (require("fs").existsSync(${refused} + "/refuse-" + did + "-" + id)) process.exit(9);\n`;
+    binaries = { ...binaries, 'claude-cli': await standIn(join(box.base, 'bin/claude'),
+      `#!/bin/sh\necho "$2 $3" >> ${calls}\n[ -f ${refused}/refuse-$2-$3 ] && exit 9\nexec ${JSON.stringify(process.execPath)} -e '${js}' "$@"\n`, `${listedAndRefused}${js}`) };
   }
   const context = { ...box.context, dataDir: join(box.base, 'data'), binaries };
   const view = { pluginItems: await readPluginItems(context, box.tools), profiles: await readProfiles(box.home), skills: await skillsView(box.context, box.tools),

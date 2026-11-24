@@ -7,13 +7,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { answerFor, askedNow, cellSays, connectedLine, followView, readAnswer, signInCommand, signinRows, type SigninCell, type SigninChecks } from '../src/mcpsignin.ts';
 import { checkLimit, checkSignin, stopChecks } from '../src/mcpsigninrun.ts';
 import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, SigninAnswer } from '../src/types.ts';
+import { standIn } from './standin.ts';
 
 const captured = (file: string) => readFileSync(join(import.meta.dirname, 'mcpsignin', file), 'utf8');
 const cell = (name: string, off = false): SigninCell => ({ name, off });
@@ -117,7 +118,8 @@ test('A cell says what its tool’s answer says of it, and only that: not checke
   assert.equal(connectedLine(['claude-cli', 'pi-cli', 'opencode-cli']), 'Connected means the server answered: Claude Code, Pi and OpenCode do not say whether it needed a sign-in. For Needs sign-in: copy the command, run it in a terminal, then Check again.');
 });
 
-const posixShellSkip = process.platform === 'win32' && 'POSIX /bin/sh quoting check; covered on macOS and Linux (Windows PowerShell quoting is step 18 under Later).';
+const windows = process.platform === 'win32';
+const posixShellSkip = windows && 'POSIX /bin/sh quoting check; covered on macOS and Linux (Windows PowerShell quoting is step 18 under Later).';
 
 test('The tool’s own sign-in command, with the server as one literal argument a shell accepts', async t => {
   assert.equal(signInCommand('claude-cli', 'plugin:tracker:issues'), 'claude mcp login plugin:tracker:issues');
@@ -228,27 +230,29 @@ async function standIns() {
   await mkdir(join(home, '.central-knot'), { recursive: true });
   await writeFile(join(home, '.central-knot/sync.json'), '{}\n');
   await mkdir(join(tools, '.local/bin'), { recursive: true });
-  /** A stand-in for `binary` in this computer's own tools: it records where it ran, how full that folder was, HOME and one tool variable, then runs `body`. */
-  const put = async (binary: string, body: string, folder = join(tools, '.local/bin')) => {
-    await mkdir(folder, { recursive: true });
-    const path = join(folder, binary);
-    await writeFile(path, `#!/bin/sh\necho "$(pwd)|$(ls -A | wc -l | tr -d ' ')|$HOME|\${CLAUDE_CONFIG_DIR-none}|$*" >> ${calls}\n${body}\n`);
-    await chmod(path, 0o755);
-    return path;
-  };
+  /**
+   * A stand-in for `binary` in this computer's own tools: it records where it ran, how full that folder was, HOME and one tool
+   * variable, then runs `body` (shell), or on Windows `js` (Node: tests/standin.ts).
+   */
+  const put = (binary: string, body: string, js: string, folder = join(tools, '.local/bin')) => standIn(join(folder, binary),
+    `#!/bin/sh\necho "$(pwd)|$(ls -A | wc -l | tr -d ' ')|$HOME|\${CLAUDE_CONFIG_DIR-none}|$*" >> ${calls}\n${body}\n`,
+    `const fs = require("fs"); fs.appendFileSync(${JSON.stringify(calls)}, [process.cwd(), fs.readdirSync(".").length, process.env.HOME, process.env.CLAUDE_CONFIG_DIR ?? "none", process.argv.slice(1).join(" ")].join("|") + "\\n");\n${js}`);
   const calledWith = async () => (await readFile(calls, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => line.split('|'));
   const where = (actual = true, searchPath = '') => ({ home, actual, toolsHome: tools, searchPath });
   const before = process.env.CK_TEST_HOME_ONLY;
   process.env.CK_TEST_HOME_ONLY = BINARIES;
   return { base, home, tools, put, calledWith, where, done: async () => { process.env.CK_TEST_HOME_ONLY = before; await rm(base, { recursive: true, force: true }); } };
 }
+/** The Windows stand-ins' words for `cat <file>`, and for `sleep 300 & echo $! > <pidFile>; wait`: a child left waiting, its number written down. */
+const printOut = (file: string) => `process.stdout.write(fs.readFileSync(${JSON.stringify(join(import.meta.dirname, 'mcpsignin', file))}));`;
+const leaveChild = (pidFile: string) => `fs.writeFileSync(${JSON.stringify(pidFile)}, String(require("child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 300_000)"], { stdio: "ignore" }).pid));`;
 const isRunning = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const until = async (ready: () => Promise<boolean>) => { for (let tries = 0; tries < 250 && !(await ready()); tries++) await new Promise(done => setTimeout(done, 20)); };
 
 test('Check runs the tool’s command once, from an empty folder that is gone after, for the home on screen, writing nothing of Central Knot’s', { timeout: 15_000 }, async () => {
   const sandbox = await standIns();
   try {
-    await sandbox.put('codex', `cat ${join(import.meta.dirname, 'mcpsignin/codex-list.stdout')}`);
+    await sandbox.put('codex', `cat ${join(import.meta.dirname, 'mcpsignin/codex-list.stdout')}`, printOut('codex-list.stdout'));
     const kept = await readdir(join(sandbox.home, '.central-knot'));
     const answer: SigninAnswer | undefined = await checkSignin(sandbox.where(), 'codex-cli', []);
     assert.equal(cellSays('codex-cli', cell('oauth'), answer).words, 'Needs sign-in');
@@ -260,7 +264,7 @@ test('Check runs the tool’s command once, from an empty folder that is gone af
     await assert.rejects(readdir(folder), { code: 'ENOENT' });
     assert.deepEqual(await readdir(join(sandbox.home, '.central-knot')), kept);
     // Pi ends with exit code 1 when a server failed: its answer is read all the same.
-    await sandbox.put('pi', `cat ${join(import.meta.dirname, 'mcpsignin/pi-list.stdout')}\nexit 1`);
+    await sandbox.put('pi', `cat ${join(import.meta.dirname, 'mcpsignin/pi-list.stdout')}\nexit 1`, `${printOut('pi-list.stdout')} process.exitCode = 1;`);
     assert.equal(cellSays('pi-cli', cell('plain'), await checkSignin(sandbox.where(), 'pi-cli', [])).words, 'Connected');
   } finally { await sandbox.done(); }
 });
@@ -269,7 +273,7 @@ test('A command that never answers is stopped at the limit with the processes it
   const sandbox = await standIns();
   try {
     const pidFile = join(sandbox.base, 'child.pid');
-    await sandbox.put('pi', `sleep 300 &\necho $! > ${pidFile}\nwait`);
+    await sandbox.put('pi', `sleep 300 &\necho $! > ${pidFile}\nwait`, leaveChild(pidFile));
     const from = Date.now();
     const answer = await checkSignin(sandbox.where(), 'pi-cli', [], 400);
     assert.deepEqual(answer, { failed: 'timeout' });
@@ -289,11 +293,11 @@ test('A tool with no command line here says so, Copilot CLI is never run, and on
   const before = process.env.CLAUDE_CONFIG_DIR;
   try {
     assert.deepEqual(await checkSignin(sandbox.where(), 'opencode-cli', []), { failed: 'missing' });
-    await sandbox.put('copilot', 'echo "{}"');
+    await sandbox.put('copilot', 'echo "{}"', 'process.stdout.write("{}\\n");');
     assert.equal(await checkSignin(sandbox.where(), 'copilot-cli', []), undefined);
     assert.deepEqual(await sandbox.calledWith(), []);
     process.env.CLAUDE_CONFIG_DIR = join(sandbox.base, 'moved-claude');
-    await sandbox.put('claude', `cat ${join(import.meta.dirname, 'mcpsignin/claude-list.stdout')}`);
+    await sandbox.put('claude', `cat ${join(import.meta.dirname, 'mcpsignin/claude-list.stdout')}`, printOut('claude-list.stdout'));
     await checkSignin(sandbox.where(true), 'claude-cli', []);
     await checkSignin(sandbox.where(false), 'claude-cli', []);
     // This computer's home: its override, as every run there has it. A Practice copy or another folder: none, so the tool reads that home's files.
@@ -311,21 +315,28 @@ test('A home other than this computer’s is checked with an environment made fo
   const before = Object.fromEntries([...Object.keys(kept), ...Object.keys(extra)].map(name => [name, process.env[name]]));
   try {
     const seen = join(sandbox.base, 'env.txt');
-    await sandbox.put('opencode', `env > ${seen}\ncat ${join(import.meta.dirname, 'mcpsignin/opencode-list.stdout')}`);
-    // What the shell adds by itself (PWD, OLDPWD, SHLVL, _) aside.
+    await sandbox.put('opencode', `env > ${seen}\ncat ${join(import.meta.dirname, 'mcpsignin/opencode-list.stdout')}`,
+      `fs.writeFileSync(${JSON.stringify(seen)}, Object.entries(process.env).map(([name, value]) => name + "=" + value + "\\n").join("")); ${printOut('opencode-list.stdout')}`);
+    // What the shell adds by itself (PWD, OLDPWD, SHLVL, _) aside; on Windows, what Windows gives every program it starts
+    // whatever it was given (the list libuv keeps), and npm's .cmd its PATHEXT.
+    const added = windows ? ['LOGONSERVER', 'PATHEXT', 'PROMPT', 'SYSTEMDRIVE', 'SYSTEMROOT', 'TEMP', 'USERDOMAIN', 'USERNAME', 'WINDIR'] : ['PWD', 'OLDPWD', 'SHLVL', '_'];
     const readEnv = async () => Object.fromEntries((await readFile(seen, 'utf8')).split('\n').filter(Boolean)
       .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)])
-      .filter(([name]) => !['PWD', 'OLDPWD', 'SHLVL', '_'].includes(name)));
+      .filter(([name]) => !added.includes(windows ? name.toUpperCase() : name)));
+    // On Windows, the variables a tool there finds its home by, each pointing into this home.
+    const homeIn = windows ? { APPDATA: join(sandbox.home, 'AppData', 'Roaming'), CODEX_HOME: join(sandbox.home, '.codex'), HOMEDRIVE: sandbox.home.slice(0, 2),
+      HOMEPATH: sandbox.home.slice(2), LOCALAPPDATA: join(sandbox.home, 'AppData', 'Local'), USERPROFILE: sandbox.home } : {};
     // Set: the kept variables are passed on with their values, and nothing else from the app's environment reaches another home.
     Object.assign(process.env, extra, kept);
     await checkSignin(sandbox.where(false), 'opencode-cli', []);
     const withKept = await readEnv();
-    assert.deepEqual(Object.keys(withKept).sort(), ['HOME', 'LANG', 'LC_ALL', 'LC_CTYPE', 'PATH', 'TERM', 'TMPDIR']);
+    assert.deepEqual(Object.keys(withKept).sort(), ['HOME', 'LANG', 'LC_ALL', 'LC_CTYPE', 'PATH', 'TERM', 'TMPDIR', ...Object.keys(homeIn)].sort());
     assert.deepEqual(Object.fromEntries(Object.keys(kept).map(name => [name, withKept[name]])), kept);
+    assert.deepEqual(Object.fromEntries(Object.keys(homeIn).map(name => [name, withKept[name]])), homeIn);
     // Unset: absent from the environment, not passed on empty.
     for (const name of Object.keys(kept)) delete process.env[name];
     await checkSignin(sandbox.where(false), 'opencode-cli', []);
-    assert.deepEqual(Object.keys(await readEnv()).sort(), ['HOME', 'PATH']);
+    assert.deepEqual(Object.keys(await readEnv()).sort(), ['HOME', 'PATH', ...Object.keys(homeIn)].sort());
     // This computer's own home: the app's environment, an override of the tool's own included.
     await checkSignin(sandbox.where(true), 'opencode-cli', []);
     assert.ok((await readFile(seen, 'utf8')).split('\n').includes(`OPENCODE_CONFIG=${extra.OPENCODE_CONFIG}`));
@@ -338,9 +349,9 @@ test('A home other than this computer’s is checked with an environment made fo
 test('Only a command line outside an app bundle is run: a link into one is passed over for the next', { timeout: 15_000 }, async () => {
   const sandbox = await standIns();
   try {
-    const bundled = await sandbox.put('codex', 'echo bundle', join(sandbox.base, 'ChatGPT.app/Contents/Resources/codex-cli/bin'));
-    await symlink(bundled, join(sandbox.tools, '.local/bin/codex'));
-    await sandbox.put('codex', `cat ${join(import.meta.dirname, 'mcpsignin/codex-list.stdout')}`, join(sandbox.tools, 'later-bin'));
+    const bundled = await sandbox.put('codex', 'echo bundle', 'process.stdout.write("bundle\\n");', join(sandbox.base, 'ChatGPT.app/Contents/Resources/codex-cli/bin'));
+    await symlink(bundled, join(sandbox.tools, '.local/bin', basename(bundled)));
+    await sandbox.put('codex', `cat ${join(import.meta.dirname, 'mcpsignin/codex-list.stdout')}`, printOut('codex-list.stdout'), join(sandbox.tools, 'later-bin'));
     const answer = await checkSignin(sandbox.where(true, join(sandbox.tools, 'later-bin')), 'codex-cli', []);
     assert.equal(cellSays('codex-cli', cell('plain'), answer).words, 'No sign-in needed');
     assert.equal((await sandbox.calledWith()).length, 1);
@@ -352,8 +363,8 @@ test('Quit stops every check, the one just clicked too, each second Quit waits f
   const sandbox = await standIns();
   try {
     const pidFile = join(sandbox.base, 'child.pid');
-    await sandbox.put('claude', `sleep 300 &\necho $! > ${pidFile}\nwait`);
-    await sandbox.put('codex', `cat ${join(import.meta.dirname, 'mcpsignin/codex-list.stdout')}`);
+    await sandbox.put('claude', `sleep 300 &\necho $! > ${pidFile}\nwait`, leaveChild(pidFile));
+    await sandbox.put('codex', `cat ${join(import.meta.dirname, 'mcpsignin/codex-list.stdout')}`, printOut('codex-list.stdout'));
     const running = checkSignin(sandbox.where(), 'claude-cli', []);
     await until(async () => !!(await readFile(pidFile, 'utf8').catch(() => '')));
     const [[folder]] = await sandbox.calledWith();
