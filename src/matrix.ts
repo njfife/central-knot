@@ -140,13 +140,13 @@ function lineFacts(kind: PartKind, plugin: string, marketName: string, tool: Har
  * item's own switch's click (switchPluginItem).
  */
 function pluginLine(row: ItemRow | PluginRow, facts: LineFacts & { source?: string }, lead: string, reload: string) {
-  const control = lineControl(facts), item = facts.through, said = lineSaid(facts.plugin, facts.marketName, facts.tool);
+  const control = lineControl(facts), item = facts.through, said = lineSaid(facts.plugin, facts.marketName, facts.tool, idOf(row));
   const words = control.control === 'switch' ? (item ? cantSwitch(item) ?? switchWords(item) : '') : control.sentence;
   const text = [lead, said?.busy ? said.text : words, said && !said.busy ? said.text : '', reload].filter(Boolean).join(' ');
   const undo = said?.act ? smallAction('Undo', elId('line-undo', row, facts.tool), said.act) : null;
   if (control.control !== 'button') return { text, failed: said?.failed, control: control.control === 'switch' && item ? pluginItemControls(item, row) : undo && h('span.details-tool-actions', {}, undo) };
   const { act } = control, whole = act === 'plugin-on' || act === 'plugin-off';
-  const run = () => (whole ? switchPluginItem(item!, row) : turnFromLine({ source: facts.source!, marketName: facts.marketName, plugin: facts.plugin, tool: facts.tool, act }));
+  const run = () => (whole ? switchPluginItem(item!, row) : turnFromLine({ source: facts.source!, marketName: facts.marketName, plugin: facts.plugin, tool: facts.tool, act }, idOf(row)));
   // Turn the plugin on or off applies at once, as the switch it stands for; the others wait their turn in the page's list.
   const off = whole ? cantSwitchHere(item!) ?? writeOff(homeStops()) : said?.busy || queueOff(homeStops()) || (!facts.source && 'Not read yet.');
   return { text, failed: said?.failed, control: h('span.details-tool-actions', {}, undo,

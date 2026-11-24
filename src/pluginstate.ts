@@ -599,7 +599,7 @@ export interface LineAim { source: string; marketName: string; plugin: string; t
  * A line's click in the page's list (clicklist.ts), a run of its own: what its line says while it waits and runs, then its result,
  * which its line says while the header says it (`outcome`, with its Undo: the row it came from may go, the header's stays).
  */
-interface LineClick extends Turn { aim: LineAim; page: string; result?: { text: string; failed: boolean; outcome: Outcome } }
+interface LineClick extends Turn { aim: LineAim; page: string; from: string; result?: { text: string; failed: boolean; outcome: Outcome } }
 const isLineClick = (turn: Turn): turn is LineClick => 'aim' in turn;
 const LINE_WORDS: Record<LineAim['act'], { waiting: string; running: string; done: string; not: string }> = {
   install: { waiting: 'Waiting to install', running: 'Installing', done: 'Installed', not: 'Not installed in' },
@@ -607,23 +607,26 @@ const LINE_WORDS: Record<LineAim['act'], { waiting: string; running: string; don
   remove: { waiting: 'Waiting to remove', running: 'Removing', done: 'Removed', not: 'Not removed from' },
 };
 
-/** What a tool's line says of its latest click (waiting, running, or its result while the header says it), if it has one. */
-export function lineSaid(plugin: string, marketName: string, tool: HarnessId): { text: string; failed?: boolean; busy: boolean; act?: () => void } | undefined {
+/**
+ * What a tool's line says of the latest click on its plugin in its tool: waiting or running, on every row of the plugin's items; its
+ * result, while the header says it, on the line it was made on (`from`: its row's id) alone.
+ */
+export function lineSaid(plugin: string, marketName: string, tool: HarnessId, from: string): { text: string; failed?: boolean; busy: boolean; act?: () => void } | undefined {
   const click = clickList.turns.filter(isLineClick).findLast(turn => turn.aim.plugin === plugin && turn.aim.marketName === marketName && turn.aim.tool === tool);
   if (!click) return undefined;
   const { aim } = click, words = LINE_WORDS[aim.act], into = aim.act === 'remove' ? 'from' : 'in';
   if (click.state === 'waiting') return { text: `${words.waiting} ${aim.act === 'place' ? 'in' : `${aim.plugin} ${into}`} ${toolNames[aim.tool]}…`, busy: true };
   if (!click.result) return { text: `${words.running} ${aim.act === 'place' ? `of ${aim.plugin} in` : `${aim.plugin} ${into}`} ${toolNames[aim.tool]}…${aim.act === 'install' ? ' This can take a few minutes.' : ''}`, busy: true };
-  return app.outcome === click.result.outcome ? { text: click.result.text, failed: click.result.failed, busy: false, act: click.result.outcome.act?.run } : undefined;
+  return app.outcome === click.result.outcome && click.from === from ? { text: click.result.text, failed: click.result.failed, busy: false, act: click.result.outcome.act?.run } : undefined;
 }
 
 /**
  * A line's click (pluginline.ts: Install the plugin, Put its items here, Remove the plugin): it ends the run before it and joins the
  * page's list as a run of its own, run in its turn by main as the plugin's box on its page is (marketplaces.ts turn).
  */
-export function turnFromLine(aim: LineAim): void {
+export function turnFromLine(aim: LineAim, from: string): void {
   endRun();
-  const click: LineClick = { state: 'waiting', run: { place: 'line', lastAt: 0 }, aim, page: app.page, work: () => runLine(click, app.home!.home) };
+  const click: LineClick = { state: 'waiting', run: { place: 'line', lastAt: 0 }, aim, page: app.page, from, work: () => runLine(click, app.home!.home) };
   join(click);
   rerender();
 }
@@ -647,10 +650,10 @@ async function runLine(click: LineClick, home: string): Promise<void> {
   // Where it didn't go, what the plugin's page says of that tool now: its entry is saved before anything runs, and with nothing
   // run there and nothing stopped, the tool was already as the click asked (it changed since the line was drawn).
   const now = failed ? lineBox(aim.plugin, aim.marketName, aim.source, aim.tool).words : undefined;
-  const reload = reloadAdvice(settleReloads(pluginReloads(mine)), toolWays()).text;
   // The tool's own words, without the "Not installed." its report leads with (plugins.ts install).
   const said = problem?.replace(/^Not (installed|put in|removed)\.\s*/, '').replace(/\.$/, '');
-  const text = !failed ? [`${words.done} ${aim.act === 'place' ? `${placedNow(aim) || 'the items'} of ${aim.plugin} in` : `${aim.plugin} ${aim.act === 'remove' ? 'from' : 'in'}`} ${where}${aim.act === 'install' ? installedNow(aim) : ''}.`, reload].filter(Boolean).join(' ')
+  // What the tool needs to load it is the row's own line's (matrix.ts rowReload), from this result's reloads.
+  const text = !failed ? `${words.done} ${aim.act === 'place' ? `${placedNow(aim) || 'the items'} of ${aim.plugin} in` : `${aim.plugin} ${aim.act === 'remove' ? 'from' : 'in'}`} ${where}${aim.act === 'install' ? installedNow(aim) : ''}.`
     : [said ? `${words.not} ${where}: ${said}.` : `Nothing was run in ${where}.`, now].filter(Boolean).join(' ');
   const back = result.back ?? [];
   const outcome = withReloads({ page: app.page, text, band: true, warn: failed, reasons: limits,
