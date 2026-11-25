@@ -11,13 +11,13 @@ import { acting, announce, baseDraftTyped, draftFile, draftUnsaved, harnessTabSh
 import { baseCard, baseStrip } from './basecard.ts';
 import { changeCounts, diffView, discardConfirm, escapeTo, infoBox, keys, legend, previewBlock, versionsList, type Stage } from './editparts.ts';
 import { fileName, lineCount, sentence, toolNames } from './words.ts';
-import { button, h, icon, lockAttrs, pathText, rereadBand } from './dom.ts';
+import { button, h, icon, infoMark, lockAttrs, pathText, rereadBand } from './dom.ts';
 import { noToolsState } from './pages.ts';
 import { brandMark, openPlugin, outcomeBand } from './matrix.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { plural } from './model.ts';
-import { hookSourceControls } from './hooksourceview.ts';
-import { sessionStrip, type SessionGroup } from './sessionhooks.ts';
+import { canRun, hookSourceControls } from './hooksourceview.ts';
+import { HOOK_RUN_WARN, hookStripHelp, hookStripNote, sessionStrip, type SessionGroup } from './sessionhooks.ts';
 import type { HarnessId, InstructionFile, InstructionPart } from './types.ts';
 import { lineDiff } from './diff.ts';
 import { keepLineBreaks } from './drafts.ts';
@@ -194,7 +194,12 @@ function partView(tool: HarnessId, part: InstructionPart): HTMLElement {
  * page, where the header already names the tool, so the card leads with the file's path. `goToOther`: where the open
  * draft's own card is on another page (another harness's), a link goes there.
  */
-export function instructionCard(file: InstructionFile, { titled = true, goToOther }: { titled?: boolean; goToOther?: (tool: HarnessId) => void } = {}) {
+interface HookStripPage {
+  markFirst: { seen: boolean };
+  anyRunnable: boolean;
+}
+
+export function instructionCard(file: InstructionFile, { titled = true, goToOther, hookInfo }: { titled?: boolean; goToOther?: (tool: HarnessId) => void; hookInfo?: HookStripPage } = {}) {
   const editing = draftFile() === file;
   // An open editor with no changes locks nothing: Edit elsewhere just moves to that file. A changed one asks first.
   const toolDirty = !editing && draftUnsaved();
@@ -218,34 +223,41 @@ export function instructionCard(file: InstructionFile, { titled = true, goToOthe
       stage.actions),
     stage.body,
     otherFiles(file),
-    sessionStripView(file),
+    sessionStripView(file, hookInfo),
     versionsList(file.versions, { id: version => `ins-load-${file.tool}-${version}`, disabled: !!acting() || readOnly || otherDirty || (editing && draftUnsaved()),
       why: editing ? 'Finish or cancel this edit first.' : lockedWhy, run: version => void loadInstructionVersion(file, version) }));
 }
 
 /**
- * The strip on a tool's card after the files read with it (sessionhooks.ts sessionStrip): its heading, the sentence on what it
- * lists and what it doesn't, the tool's note, then each origin by its mark and name with where it is turned off (its plugin's
- * page, or the settings file that holds the person's own), what couldn't be read in the warning tone, and each hook beneath it:
- * when it runs, then its command. None with nothing to show.
+ * The strip on a tool's card after the files read with it (sessionhooks.ts sessionStrip): its heading (with T1.23's mark on
+ * the first hooks strip of a page), the standing run warning when any row can run, the sentence on what it lists, the tool's
+ * note (T2.28 where it applies), then each origin by its mark and name with where it is turned off, what couldn't be read, and
+ * each hook beneath it: when it runs, its command, and its Run it / View source controls (hooksourceview.ts).
  */
-function sessionStripView(file: InstructionFile) {
+function sessionStripView(file: InstructionFile, hookInfo?: HookStripPage) {
   const strip = sessionStrip(file.tool, state.home?.pluginItems ?? [], file);
   if (!strip) return null;
+  const isHooks = strip.heading === 'Hooks that can add text';
+  const hasRunnable = strip.groups.some(group => group.hooks.some(hook => canRun(hook.source)));
+  const showMark = isHooks && (!hookInfo || (!hookInfo.markFirst.seen && (hookInfo.markFirst.seen = true)));
+  const mark = showMark ? infoMark('session-hooks-info', strip.heading, hookStripHelp(file.tool, hookInfo ? hookInfo.anyRunnable : hasRunnable)) : null;
+  const note = hookStripNote(file.tool, strip, hasRunnable);
   const where = ({ plugin, settings, says }: SessionGroup, at: number) => (plugin?.listed
     ? button({ variant: 'link', size: 'micro', label: 'Plugin’s page: turn it off there', id: `session-page-${file.tool}-${at}`, onclick: () => openPlugin({ source: plugin.source, plugin: plugin.plugin, marketplace: plugin.marketName }) })
     : settings ? h('span.session-in', {}, 'in ', pathText(shownPath(settings), settings)) : says ? h('span', {}, says) : null);
   const warning = (words: string, path?: string) => h('p.session-warning.tone-warning', {}, icon('triangle-alert', 12), h('span', {}, words, path ? pathText(shownPath(path), path) : null));
   return h('section.session-strip', { id: `session-${file.tool}`, 'aria-label': `${strip.heading}: ${toolNames[file.tool]}` },
-    h('h4.session-title', {}, strip.heading), h('p.session-about', {}, strip.about),
-    strip.note ? h('p.session-note', {}, ...inlineMarkdown(`${strip.note}.`, () => undefined)) : null,
+    h('div.session-title-row', {}, h('h4.session-title', {}, strip.heading), mark),
+    hasRunnable ? h('p.session-run-warn', {}, HOOK_RUN_WARN) : null,
+    h('p.session-about', {}, strip.about),
+    note ? h('p.session-note', {}, ...inlineMarkdown(note, () => undefined)) : null,
     strip.groups.length ? h('ul.session-groups', {}, strip.groups.map((group, at) => h('li.session-group', {},
       h('p.session-head', {}, h(`span.origin-mark.${group.mark}`, { 'aria-hidden': 'true' }), h('strong.session-name', {}, group.settings ? `${group.name},` : group.name), where(group, at)),
       group.problem ? warning(group.problem) : null,
       ...group.unread.map(path => (path === group.settings ? warning('Its hooks couldn’t be read.') : warning('Its hooks couldn’t be read: ', path))),
       group.hooks.length ? h('ul.session-hooks', {}, group.hooks.map((hook, row) => h('li.session-hook', {},
         h('span.session-lead', {}, h('span.session-when', {}, sentence(hook.when)), h('code.session-command', {}, hook.command)),
-        hookSourceControls(hook.source, `hook-source-${file.tool}-${at}-${row}`)))) : null))) : null);
+        hookSourceControls(hook.source, `hook-source-${state.page}-${file.tool}-${at}-${row}`)))) : null))) : null);
 }
 
 /**
@@ -283,12 +295,16 @@ export function instructionsPage() {
   const files = state.instructions.data;
   if (!files) return h('div.page', {}, h('div.scroll', {}, instructionsNotRead()));
   if (!files.length) return h('div.page', {}, noToolsState('instructions'));
+  const items = state.home?.pluginItems ?? [];
+  const anyRunnable = files.some(file =>
+    sessionStrip(file.tool, items, file)?.groups.some(group => group.hooks.some(hook => canRun(hook.source))));
+  const hookInfo: HookStripPage = { markFirst: { seen: false }, anyRunnable };
   return h('div.page', {}, instructionBands(),
     h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
       aboutInstructions(files, !!state.base),
       baseCard(files),
       h('div.ins-section-head', {}, h('h2.ins-section-title', {}, 'Each tool’s own instructions'), h('p.ins-section-note', {}, 'Only that tool reads these.')),
-      h('div.ins-tool-cards', {}, files.map(file => instructionCard(file)))));
+      h('div.ins-tool-cards', {}, files.map(file => instructionCard(file, { hookInfo })))));
 }
 
 /** Shown while the files are not here yet: their read is under way, or it failed (Refresh reads again). */

@@ -541,12 +541,13 @@ test('Items 5 and 6: distinct row ids for duplicate inline hooks, and reset on h
   const viewMod: any = await import('../src/hooksourceview.ts');
   state.home = { home: '/tmp/home-a', mode: 'custom', label: 'A' } as any;
   const dupRef: any = { from: 'marketplace', marketName: 'team', plugin: 'p', declaredIn: '/m/p/hooks/hooks.json', event: 'SessionStart', at: 0, command: 'echo x' };
+  const srcBtn = (row: any[]) => row[0].children.find((child: any) => 'data-hook-source' in (child?.attrs ?? {}));
   const row0 = viewMod.hookSourceControls(dupRef, 'hook-source-session-0');
   const row1 = viewMod.hookSourceControls(dupRef, 'hook-source-session-1');
   // Item 6: two identical inline hooks at separate row slots must never share a button id.
-  assert.notEqual(row0[0].id, row1[0].id, 'duplicate inline hooks must get distinct ids');
+  assert.notEqual(srcBtn(row0).id, srcBtn(row1).id, 'duplicate inline hooks must get distinct ids');
   // Item 5 & short list item 2: opening row0 renders Declared in <path> · the marketplace’s copy with no script-missing line.
-  row0[0].onclick();
+  srcBtn(row0).onclick();
   await new Promise(resolve => setTimeout(resolve, 10));
   const openedRow = viewMod.hookSourceControls(dupRef, 'hook-source-session-0');
   assert.equal(openedRow.length, 2);
@@ -560,7 +561,7 @@ test('Items 5 and 6: distinct row ids for duplicate inline hooks, and reset on h
   // Own hook with no script omits marketplace copy note too.
   const ownRef: any = { from: 'own', tool: 'claude-cli', declaredIn: '/tmp/home-a/.claude/settings.json', event: 'SessionStart', at: 0, command: 'echo x' };
   answer = { file: '/tmp/home-a/.claude/settings.json', entry: '{"command":"echo x"}' };
-  viewMod.hookSourceControls(ownRef, 'hook-source-own-0')[0].onclick();
+  srcBtn(viewMod.hookSourceControls(ownRef, 'hook-source-own-0')).onclick();
   await new Promise(resolve => setTimeout(resolve, 10));
   const ownRendered = textOf(viewMod.hookSourceControls(ownRef, 'hook-source-own-0')[1]);
   assert.match(ownRendered, /Declared in .*settings\.json/);
