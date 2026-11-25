@@ -193,7 +193,7 @@ function context(snapshots = handoff.home === current!.home ? handoff.snapshots 
     allowActualWrites: writesRealHome(process.platform) && !smoke,
     overrides: Object.fromEntries(harnessIds.map(id => [id, overrideFor(id)])),
     ...(snapshots ? { ways: waysFrom(snapshots) } : {}),
-    historyDays: historyDays(), held: heldReason(),
+    historyDays: historyDays(), held: heldReason(), log,
   };
 }
 
