@@ -204,7 +204,7 @@ const install = (tool: HarnessId, more: Partial<InstalledPlugin> = {}): Installe
 });
 const view = (tools: HarnessId[], items: LibraryFacts[], pluginItems: InstalledPlugin[] = []) => {
   const empty = { tools, items: [], library: {} };
-  return { mcp: { tools, items, library: {} }, skills: empty, agents: empty, pluginItems } as unknown as HomeView;
+  return { mcp: { tools, items, library: {} }, skills: empty, agents: empty, pluginItems, snapshots: [] } as unknown as HomeView;
 };
 /** A row's cells by what they name and whether they are off (`copy`, what each copy is, aside). */
 const named = (cells: Partial<Record<HarnessId, SigninCell>>) => Object.fromEntries(Object.entries(cells).map(([tool, { name, off }]) => [tool, name === undefined ? { off } : { name, off }]));
@@ -237,7 +237,14 @@ test('A tool whose check can’t run on this computer: its last check found no c
   // A check's answer is the later word: Claude Code's command found since, Pi's gone.
   checks.columns['claude-cli'] = { at: '2026-11-21T10:00:00Z', answer: { servers: {} }, asked: [] };
   checks.columns['pi-cli'] = { at: '2026-11-21T10:00:00Z', answer: { failed: 'missing' }, asked: [] };
-  assert.deepEqual([cannotRun(checks, home, 'claude-cli'), cannotRun(checks, home, 'pi-cli')], [false, true]);
+  assert.deepEqual([cannotRun(checks, home, 'claude-cli'), cannotRun(checks, home, 'pi-cli')], [false, true]);  // Pi installed since, and a Refresh: the view's probe finds it, which is newer than the check; its old answer goes.
+  const after = { snapshots: [{ harness: 'pi-cli', probe: { state: 'ok', version: '1.6.0' } }], mcp: { tools: [], items: [] } } as unknown as HomeView;
+  followView(checks, after);
+  assert.deepEqual([cannotRun(checks, after, 'pi-cli'), checks.columns['pi-cli']], [false, undefined]);
+  // A view whose probe still finds no Pi, or that ran no probe (another folder's home), keeps the check's word.
+  checks.columns['pi-cli'] = { at: '2026-11-21T10:00:00Z', answer: { failed: 'missing' }, asked: [] };
+  followView(checks, { ...after, snapshots: [{ harness: 'pi-cli', probe: { state: 'not-run' } }] } as unknown as HomeView);
+  assert.equal(cannotRun(checks, after, 'pi-cli'), true);
 });
 
 test('Rows are the servers some managed tool has; a tool’s own switch and a plugin turned off are its Off marks', () => {

@@ -4,9 +4,9 @@
 // (signinRows), those that need him first (grouped), which cells a check holds for as views come (askedNow, followView,
 // answerFor), a cell's words (cellSays), the time a column shows of its own (ownTime), the line saying what a check does on this
 // computer (checkLine, for the tools whose check can run here: cannotRun), a session-only tool's head (IN_SESSION), the marks'
-// cards (connectedCard, SESSION_CARD, LOCAL_CARD), and each tool's own sign-in command (signInCommand). Pure, for the page and main alike. Elsewhere: the run, in main (mcpsigninrun.ts
-// checkSignin); the page, its clicks and the order it holds its rows in (mcpsigninpage.ts); its state (app.ts state.mcpSignin);
-// the shapes (types.ts SigninAnswer, SigninSaid).
+// cards (connectedCard, SESSION_CARD, LOCAL_CARD), and each tool's own sign-in command (signInCommand). Pure, for the page and
+// main alike. Elsewhere: the run, in main (mcpsigninrun.ts checkSignin); the page, its clicks and the order it holds its rows in
+// (mcpsigninpage.ts); its state (app.ts state.mcpSignin); the shapes (types.ts SigninAnswer, SigninSaid).
 // Only what a tool's command prints is read, and what can't be read is said so, never made a status: Central Knot reads, keeps and
 // shows no token, credential file, cache or keychain entry, and starts no sign-in. The words each tool prints were measured on
 // 2026-11-21 against stand-in servers in throwaway homes (tests/mcpsignin/: Claude Code 2.1.330, Codex 0.169.1 and 0.171.0, Pi
@@ -168,6 +168,9 @@ export function followView(checks: SigninChecks, home: HomeView) {
   const still = (tool: HarnessId, asked: string[]) => { const now = new Set(askedNow(home, tool)); return asked.filter(key => now.has(key)); };
   for (const [tool, column] of Object.entries(checks.columns) as [HarnessId, ColumnCheck][]) column.asked = still(tool, column.asked);
   if (checks.checking) checks.checking.asked = still(checks.checking.tool, checks.checking.asked);
+  // A check that found no command line is older than this view's probe that finds one: the newer word decides, so that answer goes.
+  const found = (tool: HarnessId) => home.snapshots.some(each => each.harness === tool && each.probe.state === 'ok');
+  for (const tool of Object.keys(checks.columns) as HarnessId[]) if (cannotRun(checks, home, tool) && found(tool)) delete checks.columns[tool];
 }
 /** The answer a row's cell in `tool` is shown from: its column's last check, if that check holds for it. */
 export function answerFor(checks: SigninChecks, tool: HarnessId, row: SigninRow): SigninAnswer | undefined {
@@ -176,7 +179,8 @@ export function answerFor(checks: SigninChecks, tool: HarnessId, row: SigninRow)
 }
 /** The time a column's head shows of its own last check: before a whole Check all, or where its minute (or day) isn't that one's. */
 export function ownTime(checks: SigninChecks, tool: HarnessId): string | undefined {
-  const at = checks.columns[tool]?.at, minute = (iso: string) => Math.floor(Date.parse(iso) / 60_000);
+  const at = checks.columns[tool]?.at;
+  const minute = (iso: string) => Math.floor(Date.parse(iso) / 60_000);
   return at && (!checks.all || minute(at) !== minute(checks.all)) ? at : undefined;
 }
 
@@ -257,7 +261,7 @@ export function checkLine(rows: SigninRow[], checked: HarnessId[], openCode: str
   const parts = [first, checked.includes('opencode-cli') ? openCodeLeaves(openCode) : undefined].filter(Boolean);
   return parts.length ? `${parts.join('; ')}.` : undefined;
 }
-/** Whether `tool`'s check can't run on this computer: its column's last check found no command line, or, before one, the tool's own probe found none. */
+/** Whether `tool`'s check can't run on this computer: its column's last check found no command line (until a probe finds one: followView), or, before one, the tool's own probe found none. */
 export function cannotRun(checks: SigninChecks, home: HomeView, tool: HarnessId): boolean {
   const answer = checks.columns[tool]?.answer;
   if (answer) return 'failed' in answer && answer.failed === 'missing';

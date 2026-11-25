@@ -9780,6 +9780,10 @@ async function mcpSigninFlow() {
   same('a tool whose check can’t run here is left out of the line', await a.text('#signin-line'), 'Check starts local servers in Claude Code and Pi.');
   await owners('no-command-line');
   renameSync(join(scratch, 'opencode-aside'), join(home, '.local/bin/opencode'));
+  // OpenCode there again, and a Refresh: its probe finds it, which is newer than the check that found none: it is in the line again.
+  await a.click('#header-refresh');
+  same('a tool a Refresh finds after a check found none is in the line again, with its clause', await a.text('#signin-line'),
+    'Check starts local servers in Claude Code, Pi and OpenCode; OpenCode adds $schema to its config files.');
   // A check stopped at its limit (here 4 s): Didn’t answer in 70 s, the limit the app keeps.
   writeFileSync(join(said, 'codex.wait'), '30');
   await a.click('#signin-check-codex-cli');

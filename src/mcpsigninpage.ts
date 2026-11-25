@@ -4,8 +4,8 @@
 // time, beside it the line saying what a check does on this computer; a cell that needs a sign-in offers that tool's own command
 // to copy, and nothing else is started. What each check said lives in app.ts state.mcpSignin for the home it was made in, until
 // Central Knot quits; nothing is stored. The rows keep the places they had when he came to the page (inPlace). The rows, which
-// cells a check holds for, the cells' and heads' words, the line, the cards and the commands are mcpsignin.ts's; the page's own
-// words are its controls' (Check, Check all and its time, Copy and what it says), Local, a check's refusal and the empty state.
+// cells a check holds for, the cells' words, a session-only head, the line, the cards and the commands are mcpsignin.ts's; the
+// controls', `MCP server`, Local, `In the plugin …`, the marks' labels, a check's refusal and the empty state are this file's.
 import { pinnedRows, rerender, state } from './app.ts';
 import { brandMark } from './brand.ts';
 import { button, emptyState, h, infoMark } from './dom.ts';
@@ -39,11 +39,9 @@ async function checkColumns(tools: HarnessId[], whole = false) {
     const answer = await window.centralKnot.checkSignin(tool, checks.home, names).catch((error: unknown) => { (checks.failed ??= {})[tool] = String(error instanceof Error ? error.message : error); return null; });
     if (answer) { checks.columns[tool] = { at: new Date().toISOString(), answer, asked: checking.asked }; delete checks.failed?.[tool]; }
     checks.checking = undefined;
+    if (whole && tool === tools.at(-1)) checks.all = new Date().toISOString();
     rerender();
   }
-  if (!whole) return;
-  checks.all = new Date().toISOString();
-  rerender();
 }
 
 /**
@@ -54,7 +52,7 @@ async function checkColumns(tools: HarnessId[], whole = false) {
 function inPlace(rows: SigninRow[]): SigninRow[] {
   const pins = pinnedRows<number>('mcpsignin');
   const now = grouped(rows, state.mcpSignin);
-  // A pin's `group` holds the row's place here (this list has no groups): the next free one, so a row new since goes last.
+  // A pin's `group` holds the row's place here (this list has no headings): the next free one, so a row new since goes last.
   for (const row of now) pin(pins, row.id, pins.rows.size);
   return now.sort((first, second) => pins.rows.get(first.id)!.group - pins.rows.get(second.id)!.group);
 }
@@ -64,21 +62,21 @@ const keep = (words = '', mark: HTMLElement | null) => (mark ? [words.replace(/\
 
 /** The page's three marks, each with its card on the first place it fits and nowhere after: Connected's, Local's and the session-only heads'. */
 function marksOnce(tools: HarnessId[]) {
-  const cards = { connected: ['Connected', connectedCard(tools)], local: ['Local', LOCAL_CARD], session: ['session-only columns', SESSION_CARD] } as const;
+  const cards = { connected: { label: 'Connected', text: connectedCard(tools) }, local: { label: 'Local', text: LOCAL_CARD }, session: { label: 'session-only columns', text: SESSION_CARD } };
   const placed = new Set<keyof typeof cards>();
   return (which: keyof typeof cards) => {
     if (placed.has(which)) return null;
     placed.add(which);
-    const [label, text] = cards[which];
-    return infoMark(`signin-${which}-mark`, label, text);
+    return infoMark(`signin-${which}-mark`, cards[which].label, cards[which].text);
   };
 }
 type Mark = ReturnType<typeof marksOnce>;
 
 /** A column's head: the tool's name, then its Check and its own time where it shows one (mcpsignin.ts ownTime), or where a session-only tool's sign-in shows. */
 function columnHead(tool: HarnessId, mark: Mark) {
-  const checks = state.mcpSignin, own = ownTime(checks, tool), failed = checks.failed?.[tool];
-  const when = checks.checking?.tool === tool ? 'Checking…' : failed ? `Couldn’t run the check: ${failed}` : own ? `Checked ${clockTime(own)}` : '';
+  const own = ownTime(state.mcpSignin, tool);
+  const failed = state.mcpSignin.failed?.[tool];
+  const when = state.mcpSignin.checking?.tool === tool ? 'Checking…' : failed ? `Couldn’t run the check: ${failed}` : own ? `Checked ${clockTime(own)}` : '';
   return h('th.signin-head', { scope: 'col', 'data-tool': tool },
     h('span.signin-tool', {}, brandMark(tool, 14), toolNames[tool]),
     listCommand[tool] ? h('span.signin-check', {},
