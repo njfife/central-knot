@@ -1415,7 +1415,8 @@ app.on('before-quit', event => {
   const draft = process.platform === 'win32' ? draftRun?.catch(() => undefined) : undefined;
   const saving = pluginText?.stop();
   // An MCP sign-in check or hook run under way is stopped, its processes with it, and its temp folder removed before the app goes; none starts after.
-  const signins = stopChecks(), hooks = stopHookRuns();
+  const signins = stopChecks();
+  const hooks = stopHookRuns();
   if (!pluginStep && !saving && !signins && !draft && !hooks) return;
   heldForWork = 'waiting';
   event.preventDefault();

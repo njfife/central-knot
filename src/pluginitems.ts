@@ -75,9 +75,18 @@ export async function sessionSettings(tool: HarnessId, root: string): Promise<Pi
       return { ownHooks: hooks, ownHooksUnread: unread, ...(disabled ? { ownHooksDisabled: true as const } : {}) };
     }
     case 'codex-cli': {
-      const toml = join(root, 'config.toml'), inToml = tomlHooks((await textOf(toml)) ?? '');
-      if (!inToml) unread.push(toml);
-      return { ownHooks: [...(await hooksIn(join(root, 'hooks.json'))).hooks, ...readHooks(tool, toml, inToml ?? {})], ownHooksUnread: unread };
+      const toml = join(root, 'config.toml');
+      let tables: ReturnType<typeof readTomlTables> | undefined;
+      try { tables = readTomlTables((await textOf(toml)) ?? ''); } catch { unread.push(toml); }
+      const features = tables?.filter(table => !table.array && table.path.length === 1 && table.path[0] === 'features').flatMap(table => table.entries);
+      const flag = (name: string) => features?.findLast(entry => entry.key === name)?.value;
+      const hooksFlag = flag('hooks');
+      const disabled = typeof hooksFlag === 'boolean' ? !hooksFlag : flag('codex_hooks') === false;
+      return {
+        ownHooks: [...(await hooksIn(join(root, 'hooks.json'))).hooks, ...readHooks(tool, toml, tables ? tomlHooks(tables) : {})],
+        ownHooksUnread: unread,
+        ...(disabled ? { ownHooksDisabled: true as const } : {}),
+      };
     }
     case 'copilot-cli': {
       const files = (await readdir(join(root, 'hooks')).catch(() => [])).filter(name => name.endsWith('.json')).sort().map(name => join(root, 'hooks', name));
@@ -106,12 +115,10 @@ export async function sessionSettings(tool: HarnessId, root: string): Promise<Pi
 
 /**
  * Codex's hooks written inline in config.toml (`[[hooks.Event]]` groups, each with `[[hooks.Event.hooks]]` or an inline
- * `hooks = [{ … }]` list), as the JSON form reads them; undefined where the file isn't TOML this reader follows.
+ * `hooks = [{ … }]` list), as the JSON form reads them, from tables already parsed by `readTomlTables`.
  */
-function tomlHooks(toml: string): Record<string, unknown> | undefined {
+function tomlHooks(tables: ReturnType<typeof readTomlTables>): Record<string, unknown> {
   const hooks: Record<string, { hooks: unknown[] }[]> = {};
-  let tables: ReturnType<typeof readTomlTables>;
-  try { tables = readTomlTables(toml); } catch { return undefined; }
   for (const { path: [top, event, inner, ...more], array, entries } of tables) {
     const fields = Object.fromEntries(entries.map(entry => [entry.keys.join('.'), entry.value]));
     if (top !== 'hooks' || !event || !array || more.length) continue;

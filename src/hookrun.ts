@@ -1,10 +1,10 @@
 // Running one hook's command once on click (IPC hook:run / hook:stop), in main, and classifying what the tool would add
 // (whatHookWouldAdd, pure): re-finds the hook on disk through hooksource.ts findHook, enforces the main-side gate (actual
-// home, non-Windows in this step, own hooks only in this step, tool installed, hooks not disabled, event adds text by
-// pluginoutcomes.ts addsText, matching start source, one run at a time per hook), builds each tool's environment, launch form
-// and stdin JSON, runs through plugins.ts run (process group + bounded drain), cleans up disposable Claude files and stops
-// active runs on Stop or Quit (stopHookRun, stopHookRuns). Nothing here stores results or draws a page; hook source extraction
-// stays in hooksource.ts.
+// home, non-Windows in this step, own hooks only in this step, tool installed, hooks not disabled, command type, event adds
+// text by pluginoutcomes.ts addsText, matching start source by pluginoutcomes.ts pickStartSource, one run at a time per hook),
+// builds each tool's environment, launch form and stdin JSON, runs through plugins.ts run (process group + launch.ts
+// CLOSE_GRACE_MS drain), cleans up disposable Claude files and stops active runs on Stop or Quit (stopHookRun, stopHookRuns).
+// Nothing here stores results or draws a page; hook source extraction stays in hooksource.ts.
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { access, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
@@ -13,7 +13,8 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { findBinary } from './discovery.ts';
 import { harnesses } from './harnesses.ts';
 import { findHook, type HookSourceContext } from './hooksource.ts';
-import { addsText } from './pluginoutcomes.ts';
+import { CLOSE_GRACE_MS } from './launch.ts';
+import { addsText, pickStartSource } from './pluginoutcomes.ts';
 import { run, type RunResult } from './plugins.ts';
 import type { DeclaredHook, HarnessId, HookRunResult, HookSourceRef } from './types.ts';
 import { record } from './values.ts';
@@ -27,11 +28,12 @@ export interface HookRunContext extends HookSourceContext {
 /** Raw process outcome fed to `whatHookWouldAdd`. */
 export interface HookRunRaw {
   tool: HarnessId; event: string; code: RunResult['code']; reason?: RunResult['reason'];
-  stdout: string; stderr: string; program?: string; spawnError?: string;
+  signal?: NodeJS.Signals; stdout: string; program?: string; spawnError?: string;
 }
 
-const MAX_TIMEOUT_SEC = 60, CLAUDE_CHAR_LIMIT = 10_000, CODEX_TOKEN_LIMIT = 2_500, DRAIN_MS = 1_500;
-const START_SOURCES = ['startup', 'resume', 'clear', 'compact', 'fork'] as const;
+const MAX_TIMEOUT_SEC = 60;
+const CLAUDE_CHAR_LIMIT = 10_000;
+const CODEX_TOKEN_LIMIT = 2_500;
 const SCRUB_PREFIXES = ['CK_', 'ELECTRON_', 'CLAUDE_PLUGIN_OPTION_'];
 const SCRUB_EXACT = new Set([
   'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_SESSION_ID', 'CLAUDE_PROJECT_DIR', 'CLAUDE_ENV_FILE',
@@ -45,15 +47,6 @@ export const hookRunKey = (home: string, ref: HookSourceRef): string => JSON.str
   home, ref.from, 'tool' in ref ? ref.tool : '', 'marketName' in ref ? ref.marketName : '', 'plugin' in ref ? ref.plugin : '',
   ref.declaredIn, ref.event, ref.at, ref.command,
 ]);
-
-/** Picks the first supported start-of-session source matching `matcher` (startup first), or undefined when none matches. */
-export function pickStartSource(tool: HarnessId, matcher?: string): string | undefined {
-  if (tool === 'copilot-cli' || !matcher || matcher === '*') return 'startup';
-  try {
-    const pattern = new RegExp(matcher);
-    return START_SOURCES.find(source => pattern.test(source));
-  } catch { return START_SOURCES.find(source => source === matcher); }
-}
 
 /** Time limit enforced for one hook run, in seconds: positive configured timeout capped at 60 s, else tool default capped at 60 s. */
 export function hookTimeoutSec(tool: HarnessId, isPrompt: boolean, configured?: number): number {
@@ -115,49 +108,92 @@ function buildHookLaunch(tool: HarnessId, hook: DeclaredHook, home: string, code
     if (hook.shell && hook.shell !== 'bash' && hook.shell !== 'sh') return { problem: `Uses shell “${hook.shell}”, which isn’t run here.` };
     return { file: hook.shell === 'bash' ? 'bash' : '/bin/sh', args: ['-c', launch.shell] };
   }
-  if (tool === 'codex-cli') return { file: codexShell, args: ['-lc', 'shell' in launch ? launch.shell : launch.program] };
+  if (tool === 'codex-cli') return 'shell' in launch ? { file: codexShell, args: ['-lc', launch.shell] } : { problem: 'Codex hooks must declare a shell command.' };
   return 'program' in launch ? { file: launch.program, args: launch.args } : { file: 'bash', args: ['-c', launch.shell] };
 }
 
 const nonEmpty = (value: unknown) => (typeof value === 'string' && value.trim() ? value : undefined);
-function tryJsonObject(trimmed: string): Record<string, unknown> | 'invalid' | undefined {
+
+/** Copilot CLI strips single-line JSON objects with `"type": "progress"` before parsing the remaining stdout as one JSON object. */
+function stripCopilotProgress(stdout: string): string {
+  return stdout.split(/\r?\n/).filter(line => {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return true;
+    try { return record(JSON.parse(trimmed))?.type !== 'progress'; } catch { return true; }
+  }).join('\n').trim();
+}
+
+/** Claude Code stdout JSON rule (hooks#exit-code-0): one JSON object; non-{…} or multi-line JSON with no fields set is plain text. */
+function parseClaudeJson(trimmed: string): Record<string, unknown> | 'invalid' | undefined {
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return undefined;
+  try { return record(JSON.parse(trimmed)) ?? 'invalid'; } catch { /* check multi-line rule */ }
+  const lines = trimmed.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (lines.length < 2) return 'invalid';
+  const items: unknown[] = [];
+  for (const line of lines) {
+    try { items.push(JSON.parse(line)); } catch { return 'invalid'; }
+  }
+  const setsField = items.some(item => {
+    const obj = record(item);
+    return obj !== undefined && Object.keys(obj).length > 0;
+  });
+  return setsField ? 'invalid' : undefined;
+}
+
+/** Codex stdout JSON rule (user_prompt_submit.rs): anything starting with `{` is parsed as JSON, else plain text. */
+function parseCodexJson(trimmed: string): Record<string, unknown> | 'invalid' | undefined {
   if (!trimmed.startsWith('{')) return undefined;
   try { return record(JSON.parse(trimmed)) ?? 'invalid'; } catch { return 'invalid'; }
 }
+
 function toolLimit(tool: HarnessId, added: string): Pick<HookRunResult, 'overLimit'> {
   if (tool === 'claude-cli' && added.length > CLAUDE_CHAR_LIMIT) return { overLimit: { limit: CLAUDE_CHAR_LIMIT, unit: 'chars' } };
   if (tool === 'codex-cli' && Math.ceil(Buffer.byteLength(added, 'utf8') / 4) > CODEX_TOKEN_LIMIT) return { overLimit: { limit: CODEX_TOKEN_LIMIT, unit: 'tokens' } };
   return {};
 }
 
-/** Pure output classifier: works out what `raw.tool` would add (or why it wouldn't) from the hook's exit state and streams. */
-export function whatHookWouldAdd(raw: HookRunRaw): Pick<HookRunResult, 'outcome' | 'detail' | 'added' | 'overLimit' | 'program' | 'problem'> {
+function classifyJsonContext(tool: HarnessId, event: string, parsed: Record<string, unknown>): Pick<HookRunResult, 'outcome' | 'detail' | 'added' | 'overLimit'> {
+  if (parsed.decision === 'block' || parsed.continue === false) return { outcome: 'not-added', detail: 'json-block' };
+  const specific = record(parsed.hookSpecificOutput);
+  const eventOk = specific?.hookEventName === undefined || specific.hookEventName === event;
+  const context = specific && eventOk ? nonEmpty(specific.additionalContext) : undefined;
+  return context ? { outcome: 'adds', added: context, ...toolLimit(tool, context) } : { outcome: 'not-added', detail: 'json-no-context' };
+}
+
+/** Pure output classifier: works out what `raw.tool` would add (or why it wouldn't) from the hook's exit state and stdout. */
+export function whatHookWouldAdd(raw: HookRunRaw): Pick<HookRunResult, 'outcome' | 'detail' | 'added' | 'overLimit' | 'program' | 'problem' | 'signal'> {
   if (raw.reason === 'aborted') return { outcome: 'stopped' };
-  if (raw.reason === 'timeout' || raw.code === 'timeout') return { outcome: 'timeout' };
-  if (raw.reason === 'missing' || raw.code === 'missing') return { outcome: 'missing', ...(raw.program ? { program: raw.program } : {}) };
+  if (raw.reason === 'timeout') return { outcome: 'timeout' };
+  if (raw.reason === 'missing') return { outcome: 'missing', ...(raw.program ? { program: raw.program } : {}) };
   if (raw.reason === 'overflow') return { outcome: 'not-added', detail: 'overflow' };
   if (raw.reason === 'error') return { outcome: 'not-added', detail: 'spawn-error', ...(raw.spawnError ? { problem: raw.spawnError } : {}) };
-  const trimmed = raw.stdout.trim(), parsed = tryJsonObject(trimmed);
+  if (raw.signal) return { outcome: 'failed', signal: raw.signal };
+  const trimmed = raw.stdout.trim();
+  if (raw.tool === 'claude-cli') {
+    if (raw.code === 2) return { outcome: 'claude-exit-2' };
+    const parsed = parseClaudeJson(trimmed);
+    if (raw.code !== 0) return parsed && parsed !== 'invalid' ? classifyJsonContext(raw.tool, raw.event, parsed) : { outcome: 'failed' };
+    if (!trimmed) return { outcome: 'empty' };
+    if (parsed === 'invalid') return { outcome: 'not-added', detail: 'invalid-json' };
+    if (parsed) return classifyJsonContext(raw.tool, raw.event, parsed);
+    return { outcome: 'adds', added: raw.stdout, ...toolLimit(raw.tool, raw.stdout) };
+  }
   if (raw.code !== 0) {
-    if (parsed && parsed !== 'invalid') return { outcome: 'not-added', detail: 'nonzero-json' };
-    if (raw.tool === 'claude-cli' && raw.code === 2) return { outcome: 'claude-exit-2' };
     if (raw.tool === 'codex-cli' && raw.event === 'UserPromptSubmit' && raw.code === 2) return { outcome: 'not-added', detail: 'codex-prompt-exit-2' };
     return { outcome: 'failed' };
   }
   if (!trimmed) return { outcome: 'empty' };
   if (raw.tool === 'copilot-cli') {
-    const context = parsed && parsed !== 'invalid' ? nonEmpty(parsed.additionalContext) : undefined;
+    const body = stripCopilotProgress(raw.stdout);
+    let parsed: Record<string, unknown> | undefined;
+    try { parsed = body ? record(JSON.parse(body)) : undefined; } catch { /* non-JSON ignored by Copilot */ }
+    const context = parsed ? nonEmpty(parsed.additionalContext) : undefined;
     return context ? { outcome: 'adds', added: context } : { outcome: 'copilot-ignored' };
   }
+  const parsed = parseCodexJson(trimmed);
   if (parsed === 'invalid') return { outcome: 'not-added', detail: 'invalid-json' };
-  if (parsed) {
-    if (parsed.decision === 'block' || parsed.continue === false) return { outcome: 'not-added', detail: 'json-block' };
-    const specific = record(parsed.hookSpecificOutput);
-    const eventOk = specific?.hookEventName === undefined || specific.hookEventName === raw.event;
-    const context = specific && eventOk ? nonEmpty(specific.additionalContext) : undefined;
-    return context ? { outcome: 'adds', added: context, ...toolLimit(raw.tool, context) } : { outcome: 'not-added', detail: 'json-no-context' };
-  }
-  return { outcome: 'adds', added: raw.stdout, ...toolLimit(raw.tool, raw.stdout) };
+  if (parsed) return classifyJsonContext(raw.tool, raw.event, parsed);
+  return { outcome: 'adds', added: trimmed, ...toolLimit(raw.tool, trimmed) };
 }
 
 /** Active hook runs keyed by hookRunKey, each with its AbortController and cleanup promise; quitting blocks new starts. */
@@ -175,7 +211,11 @@ export function stopHookRun(home: string, ref: HookSourceRef): boolean {
 /** Quit: refuses all new hook runs, aborts every active one and returns a promise settling once cleanup finishes (undefined when idle). */
 export function stopHookRuns(): Promise<unknown> | undefined {
   quitting = true;
-  return active.size ? Promise.all([...active.values()].map(entry => (entry.stop.abort(), entry.ended))) : undefined;
+  if (!active.size) return undefined;
+  return Promise.all([...active.values()].map(entry => {
+    entry.stop.abort();
+    return entry.ended;
+  }));
 }
 
 const makeResult = (fields: Pick<HookRunResult, 'outcome'> & Partial<HookRunResult>): HookRunResult =>
@@ -199,21 +239,35 @@ export async function runHook(ctx: HookRunContext, ref: HookSourceRef): Promise<
 }
 
 async function executeHook(ctx: HookRunContext, ref: Extract<HookSourceRef, { from: 'own' }>, signal: AbortSignal): Promise<HookRunResult> {
-  const started = Date.now(), baseEnv = ctx.env ?? process.env, platform = ctx.platform ?? process.platform;
-  const halt = (cwd = '', isPrompt = false, limitSec?: number) => (signal.aborted
-    ? makeResult({ outcome: 'stopped', durationMs: Date.now() - started, cwd, emptyPrompt: isPrompt, ...(limitSec !== undefined ? { limitSec } : {}) })
-    : ctx.stillOpen && !ctx.stillOpen() ? hookRunRefused(HOOK_SOURCE_UNREADABLE, isPrompt) : undefined);
+  const started = Date.now();
+  const baseEnv = ctx.env ?? process.env;
+  const platform = ctx.platform ?? process.platform;
+  const halt = (cwd = '', isPrompt = false, limitSec?: number, source?: string) => {
+    if (signal.aborted) {
+      return makeResult({
+        outcome: 'stopped', durationMs: Date.now() - started, cwd, emptyPrompt: isPrompt,
+        ...(limitSec !== undefined ? { limitSec } : {}), ...(source ? { source } : {}),
+      });
+    }
+    if (ctx.stillOpen && !ctx.stillOpen()) return hookRunRefused(HOOK_SOURCE_UNREADABLE, isPrompt);
+    return undefined;
+  };
   const path = typeof ctx.searchPath === 'function' ? await ctx.searchPath() : ctx.searchPath;
   const afterPath = halt();
   if (afterPath) return afterPath;
   if (!(await findBinary(ref.tool, ctx.toolsHome, path, platform, baseEnv))) return hookRunRefused('Not installed here: source only.');
-  const found = halt() ?? await findHook(ctx, ref);
-  if ('outcome' in found) return found;
+  const afterBin = halt();
+  if (afterBin) return afterBin;
+  const found = await findHook(ctx, ref);
   const afterFind = halt();
   if (afterFind) return afterFind;
   if ('problem' in found) return hookRunRefused(found.problem);
-  if (found.hooksDisabled) return hookRunRefused('Hooks are turned off in Claude Code’s settings (disableAllHooks).');
+  if (found.hooksDisabled) {
+    const why = ref.tool === 'codex-cli' ? 'Codex’s settings ([features] hooks = false)' : 'Claude Code’s settings (disableAllHooks)';
+    return hookRunRefused(`Hooks are turned off in ${why}.`);
+  }
   const { hook } = found;
+  if (hook.type && hook.type !== 'command') return hookRunRefused(`Not a command hook (type “${hook.type}”).`);
   if (!addsText(ref.tool, hook)) return hookRunRefused('This hook does not add text to sessions.');
   const isPrompt = hook.event === 'UserPromptSubmit';
   const source = isPrompt ? undefined : pickStartSource(ref.tool, hook.matcher);
@@ -226,31 +280,37 @@ async function executeHook(ctx: HookRunContext, ref: Extract<HookSourceRef, { fr
   const cwd = ref.tool === 'copilot-cli' && hook.cwd ? resolve(ctx.home, hook.cwd) : ctx.home;
   const limitSec = hookTimeoutSec(ref.tool, isPrompt, hook.timeout);
   if (ref.tool === 'copilot-cli' && hook.cwd && !(await stat(cwd).then(info => info.isDirectory(), () => false))) {
-    return makeResult({ outcome: 'not-added', detail: 'spawn-error', problem: `Working folder not found: ${cwd}`, durationMs: Date.now() - started, cwd, emptyPrompt: isPrompt, limitSec });
+    return makeResult({ outcome: 'not-added', detail: 'spawn-error', problem: `Working folder not found: ${cwd}`, durationMs: Date.now() - started, cwd, emptyPrompt: isPrompt, limitSec, ...(source ? { source } : {}) });
   }
   let tempDir: string | undefined;
   try {
-    let transcriptPath: string | undefined, envFile: string | undefined;
+    let transcriptPath: string | undefined;
+    let envFile: string | undefined;
     if (ref.tool === 'claude-cli') {
       tempDir = await mkdtemp(join(tmpdir(), 'ck-hook-run-'));
       transcriptPath = join(tempDir, 'transcript.jsonl');
       await writeFile(transcriptPath, '');
-      if (!isPrompt) { envFile = join(tempDir, 'claude-env'); await writeFile(envFile, ''); }
+      if (!isPrompt) {
+        envFile = join(tempDir, 'claude-env');
+        await writeFile(envFile, '');
+      }
     }
-    const beforeRun = halt(cwd, isPrompt, limitSec);
+    const beforeRun = halt(cwd, isPrompt, limitSec, source);
     if (beforeRun) return beforeRun;
     const env = buildHookEnv(ref.tool, ctx.home, path, baseEnv, { overrides: ctx.overrides, envFile, copilotEnv: hook.env });
     const input = JSON.stringify(buildHookInput(ref.tool, hook.event, ctx.home, { source, transcriptPath }));
     const runStart = Date.now();
     const ran = await run(launch.file, launch.args, {
-      cwd, env, input, timeoutMs: Math.round(limitSec * 1000), group: true, signal,
-      drainMs: ctx.drainMs ?? DRAIN_MS, ...(ctx.maxBytes ? { maxBytes: ctx.maxBytes } : {}),
+      cwd, env, input, timeoutMs: Math.round(limitSec * 1000), group: true, signal, catchStart: true,
+      drainMs: ctx.drainMs ?? CLOSE_GRACE_MS, ...(ctx.maxBytes ? { maxBytes: ctx.maxBytes } : {}),
     });
-    const stdout = ran.stdout.toString('utf8'), stderr = ran.stderr.toString('utf8');
-    const classified = whatHookWouldAdd({ tool: ref.tool, event: hook.event, code: ran.code, reason: ran.reason, stdout, stderr, program: launch.file, spawnError: ran.spawnError });
+    const stdout = ran.stdout.toString('utf8');
+    const stderr = ran.stderr.toString('utf8');
+    const classified = whatHookWouldAdd({ tool: ref.tool, event: hook.event, code: ran.code, reason: ran.reason, signal: ran.signal, stdout, program: launch.file, spawnError: ran.spawnError });
     return makeResult({
       ...classified, allPrinted: stdout, stderr, durationMs: Date.now() - runStart, cwd, emptyPrompt: isPrompt, limitSec,
-      ...(typeof ran.code === 'number' && !ran.reason ? { exitCode: ran.code } : {}),
+      ...(source ? { source } : {}),
+      ...(typeof ran.code === 'number' && !ran.reason && !ran.signal ? { exitCode: ran.code } : {}),
     });
   } finally {
     if (tempDir) await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);

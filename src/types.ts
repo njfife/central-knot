@@ -883,6 +883,8 @@ export interface NamedPart { name: string; description: string; text: string; pa
 export interface DeclaredHook {
   declaredIn: string; event: string; matcher?: string; at: number;
   launch?: { shell: string } | { program: string; args: string[] };
+  /** Non-command hook type when `launch` was still extracted for display (refused at run time by hookrun.ts). */
+  type?: string;
   /** Claude Code's explicit `shell` field when set (e.g. 'bash', 'powershell'). */
   shell?: string;
   timeout?: number; cwd?: string; env?: Record<string, string>;
@@ -902,11 +904,11 @@ export interface HookSource {
 /** What a hook run came to (hookrun.ts whatHookWouldAdd / runHook): each row of the tool output rules plus gate refusals. */
 export type HookRunOutcome = 'adds' | 'empty' | 'copilot-ignored' | 'claude-exit-2' | 'failed' | 'timeout' | 'stopped' | 'missing' | 'not-added' | 'refused';
 /** Why `HookRunOutcome` is `'not-added'` (cases outside the short outcome sentences, kept for A2's wording). */
-export type HookNotAddedDetail = 'json-no-context' | 'json-block' | 'invalid-json' | 'nonzero-json' | 'codex-prompt-exit-2' | 'overflow' | 'spawn-error';
+export type HookNotAddedDetail = 'json-no-context' | 'json-block' | 'invalid-json' | 'codex-prompt-exit-2' | 'overflow' | 'spawn-error';
 /** One hook run's complete result from main (hook:run), never stored. */
 export interface HookRunResult {
   outcome: HookRunOutcome; detail?: HookNotAddedDetail; added?: string; allPrinted: string; stderr: string;
-  exitCode?: number; durationMs: number; at: string; cwd: string; emptyPrompt: boolean;
+  exitCode?: number; signal?: NodeJS.Signals; source?: string; durationMs: number; at: string; cwd: string; emptyPrompt: boolean;
   overLimit?: { limit: number; unit: 'chars' | 'tokens' }; limitSec?: number; program?: string; problem?: string;
 }
 /** What a plugin holds, read from its files (catalogdetail.ts); the row counts come from the same read. */
@@ -1167,7 +1169,7 @@ export interface InstructionFile {
   ownHooks?: DeclaredHook[];
   /** Each of those settings files that is there but couldn't be read or doesn't parse: its hooks aren't known. */
   ownHooksUnread?: string[];
-  /** Claude Code's `disableAllHooks: true` in settings.json: own hooks are declared, not run. */
+  /** Hooks turned off in the tool's settings (Claude Code `disableAllHooks: true`, Codex `[features] hooks = false`): declared, not run. */
   ownHooksDisabled?: true;
   /** Pi's packages and OpenCode's plugins, each as its settings list it (pluginitems.ts sessionSettings): code that can add to its sessions. */
   extensions?: string[];

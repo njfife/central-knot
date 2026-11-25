@@ -201,14 +201,14 @@ export function readHooks(tool: HarnessId | undefined, declaredIn: string, hooks
     .map(({ hook, matcher }, at): DeclaredHook => {
       const target = tool ?? (hook?.bash !== undefined || hook?.exec !== undefined ? 'copilot-cli' : 'claude-cli');
       const launch = launchOf(target, hook ?? {});
+      const type = launch && hook?.type !== undefined && hook.type !== 'command' ? String(hook.type) : '';
       const shell = target === 'claude-cli' ? text(hook?.shell) : '';
       const timeout = hook?.timeoutSec ?? hook?.timeout, env = record(hook?.env);
-      return { declaredIn, event, at, ...(text(matcher) ? { matcher: text(matcher) } : {}), ...(launch ? { launch } : {}), ...(shell ? { shell } : {}), ...(typeof timeout === 'number' ? { timeout } : {}),
+      return { declaredIn, event, at, ...(text(matcher) ? { matcher: text(matcher) } : {}), ...(launch ? { launch } : {}), ...(type ? { type } : {}), ...(shell ? { shell } : {}), ...(typeof timeout === 'number' ? { timeout } : {}),
         ...(text(hook?.cwd) ? { cwd: text(hook?.cwd) } : {}), ...(env ? { env: Object.fromEntries(Object.entries(env).map(([name, value]) => [name, text(value)])) } : {}) };
     }));
 }
 function launchOf(tool: HarnessId, hook: Record<string, unknown>): DeclaredHook['launch'] {
-  if (hook.type !== undefined && hook.type !== 'command') return undefined;
   if (tool === 'copilot-cli' && text(hook.exec)) return { program: text(hook.exec), args: strings(hook.args) ?? [] };
   if (tool === 'claude-cli' && text(hook.command) && Array.isArray(hook.args)) return { program: text(hook.command), args: strings(hook.args)! };
   const shell = (tool === 'copilot-cli' && text(hook.bash)) || text(hook.command);

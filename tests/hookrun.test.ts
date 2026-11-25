@@ -12,8 +12,10 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from '
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { findHook, readHookSource } from '../src/hooksource.ts';
-import { hookTimeoutSec, pickStartSource, runHook, stopHookRun, stopHookRuns, whatHookWouldAdd, type HookRunContext } from '../src/hookrun.ts';
+import { hookTimeoutSec, runHook, stopHookRun, stopHookRuns, whatHookWouldAdd, type HookRunContext } from '../src/hookrun.ts';
+import { pickStartSource } from '../src/pluginoutcomes.ts';
 import { sessionSettings } from '../src/pluginitems.ts';
+import { run } from '../src/plugins.ts';
 import { sessionStrip } from '../src/sessionhooks.ts';
 import type { HarnessId, HookSourceRef } from '../src/types.ts';
 import { standIn } from './standin.ts';
@@ -126,6 +128,7 @@ process.stdout.write('Prompt context\\n');
     assert.equal(result.stderr, 'note on stderr\n');
     assert.equal(result.exitCode, 0);
     assert.equal(result.cwd, box.home);
+    assert.equal(result.source, 'startup');
     assert.equal(result.emptyPrompt, false);
     assert.equal(result.overLimit, undefined);
     assert.equal(result.limitSec, 60);
@@ -162,6 +165,7 @@ process.stdout.write('Prompt context\\n');
     const promptRes = await runHook(box.ctx(), promptRef);
     assert.equal(promptRes.outcome, 'adds');
     assert.equal(promptRes.added, 'Prompt context\n');
+    assert.equal(promptRes.source, undefined);
     assert.equal(promptRes.emptyPrompt, true);
     assert.equal(promptRes.limitSec, 30);
     const pIn = JSON.parse(await readFile(promptStdin, 'utf8'));
@@ -189,6 +193,7 @@ test('Worked example 2: Claude Code JSON hookSpecificOutput.additionalContext ex
     const ref = await box.ownRef('claude-cli', 0);
     const res = await runHook(box.ctx(), ref);
     assert.equal(res.outcome, 'adds');
+    assert.equal(res.source, 'resume');
     assert.equal(res.added, 'Follow the team style guide.');
     assert.equal(res.allPrinted, `${payload}\n`);
     assert.notEqual(res.added, res.allPrinted);
@@ -310,7 +315,8 @@ process.stdout.write('Codex context\\n');
     const startRef = await box.ownRef('codex-cli', 0);
     const startRes = await runHook(box.ctx({ env: { ...box.baseEnv, SHELL: customShell } }), startRef);
     assert.equal(startRes.outcome, 'adds');
-    assert.equal(startRes.added, 'Codex context\n');
+    assert.equal(startRes.added, 'Codex context');
+    assert.equal(startRes.source, 'compact');
     assert.equal(startRes.limitSec, 60);
     assert.equal(startRes.emptyPrompt, false);
     assert.equal((await readFile(shellLog, 'utf8')).trim(), '-lc');
@@ -347,7 +353,8 @@ process.stdout.write('Codex context\\n');
     const tomlRef = await box.ownRef('codex-cli', 2);
     const tomlRes = await runHook(box.ctx(), tomlRef);
     assert.equal(tomlRes.outcome, 'adds');
-    assert.equal(tomlRes.added, 'from-toml\n');
+    assert.equal(tomlRes.added, 'from-toml');
+    assert.equal(tomlRes.source, 'startup');
   } finally { await box.done(); }
 });
 
@@ -398,15 +405,29 @@ test('Worked example 4b (through runHook): Claude Code exit 2 on start and promp
 
 test('Pure classification table (whatHookWouldAdd): every row, edge case and tool limit boundary', () => {
   const classify = (tool: HarnessId, event: string, code: number | 'timeout' | 'missing', stdout: string, extra: Partial<Parameters<typeof whatHookWouldAdd>[0]> = {}) =>
-    whatHookWouldAdd({ tool, event, code, stdout, stderr: '', ...extra });
+    whatHookWouldAdd({ tool, event, code, stdout, ...extra });
 
   // T4.22: exit 0, plain or valid nested context (Claude/Codex), top-level context (Copilot).
   assert.deepEqual(classify('claude-cli', 'SessionStart', 0, 'hello\n'), { outcome: 'adds', added: 'hello\n' });
-  assert.deepEqual(classify('codex-cli', 'SessionStart', 0, 'hello\n'), { outcome: 'adds', added: 'hello\n' });
+  // Codex trims plain stdout (codex-rs/hooks/src/events/user_prompt_submit.rs:159,219: `let trimmed_stdout = run_result.stdout.trim()`).
+  assert.deepEqual(classify('codex-cli', 'SessionStart', 0, 'hello\n'), { outcome: 'adds', added: 'hello' });
   assert.deepEqual(classify('claude-cli', 'SessionStart', 0, JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'ctx' } })), { outcome: 'adds', added: 'ctx' });
   assert.deepEqual(classify('claude-cli', 'SessionStart', 0, JSON.stringify({ hookSpecificOutput: { additionalContext: 'ctx' } })), { outcome: 'adds', added: 'ctx' });
   assert.deepEqual(classify('codex-cli', 'UserPromptSubmit', 0, JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'codex ctx' } })), { outcome: 'adds', added: 'codex ctx' });
   assert.deepEqual(classify('copilot-cli', 'sessionStart', 0, JSON.stringify({ additionalContext: 'copilot ctx' })), { outcome: 'adds', added: 'copilot ctx' });
+  // Copilot CLI strips single-line JSON progress events before JSON.parse (hooks-reference#progress-messages:
+  // "Any line that, after trimming, is a single complete JSON object with \"type\": \"progress\" is consumed as a progress event and removed from the hook's output stream.").
+  assert.deepEqual(
+    classify('copilot-cli', 'sessionStart', 0, '{"type":"progress","message":"Preparing"}\n{"additionalContext":"top text"}\n'),
+    { outcome: 'adds', added: 'top text' },
+  );
+  // Multi-line progress object is not recognized as progress and falls through to ignored (hooks-reference#progress-messages:
+  // "Multi-line / pretty-printed progress objects are not recognized as progress and will be left in the output stream").
+  assert.deepEqual(
+    classify('copilot-cli', 'sessionStart', 0, '{\n"type":"progress"\n}\n{"additionalContext":"top text"}'),
+    { outcome: 'copilot-ignored' },
+  );
+  assert.deepEqual(classify('copilot-cli', 'sessionStart', 0, '{"type":"progress","message":"Only progress"}\n'), { outcome: 'copilot-ignored' });
 
   // T4.23: exit 0, empty stdout (never for non-empty JSON like {}).
   assert.deepEqual(classify('claude-cli', 'SessionStart', 0, ''), { outcome: 'empty' });
@@ -419,21 +440,51 @@ test('Pure classification table (whatHookWouldAdd): every row, edge case and too
   assert.deepEqual(classify('copilot-cli', 'sessionStart', 0, '{}'), { outcome: 'copilot-ignored' });
   assert.deepEqual(classify('copilot-cli', 'sessionStart', 0, JSON.stringify({ additionalContext: '' })), { outcome: 'copilot-ignored' });
 
-  // T4.25: exit 2 from Claude Code start and prompt hooks.
-  assert.deepEqual(classify('claude-cli', 'SessionStart', 2, '', { stderr: 'stderr line' }), { outcome: 'claude-exit-2' });
-  assert.deepEqual(classify('claude-cli', 'UserPromptSubmit', 2, 'plain', { stderr: 'blocked!' }), { outcome: 'claude-exit-2' });
+  // T4.25: exit 2 from Claude Code start and prompt hooks, decided before JSON is looked at
+  // (code.claude.com/docs/en/hooks#exit-code-output: "Exit code 2 still blocks with most JSON your hook prints." / Table: "Blocking error.").
+  assert.deepEqual(classify('claude-cli', 'SessionStart', 2, ''), { outcome: 'claude-exit-2' });
+  assert.deepEqual(classify('claude-cli', 'UserPromptSubmit', 2, 'plain'), { outcome: 'claude-exit-2' });
+  assert.deepEqual(
+    classify('claude-cli', 'UserPromptSubmit', 2, JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'nested' } })),
+    { outcome: 'claude-exit-2' },
+  );
 
-  // T4.26: other non-zero failure.
-  assert.deepEqual(classify('claude-cli', 'SessionStart', 1, '', { stderr: 'boom' }), { outcome: 'failed' });
-  assert.deepEqual(classify('codex-cli', 'SessionStart', 2, '', { stderr: 'boom' }), { outcome: 'failed' });
-  assert.deepEqual(classify('copilot-cli', 'sessionStart', 2, '', { stderr: 'boom' }), { outcome: 'failed' });
+  // Claude Code other non-zero exit with valid JSON: Claude ignores the exit code and the JSON fields decide
+  // (code.claude.com/docs/en/hooks#exit-code-output table: "Success. Claude Code ignores the exit code, and the fields alone decide.").
+  assert.deepEqual(
+    classify('claude-cli', 'UserPromptSubmit', 1, JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'still added' } })),
+    { outcome: 'adds', added: 'still added' },
+  );
+  assert.deepEqual(classify('claude-cli', 'SessionStart', 1, JSON.stringify({ continue: false })), { outcome: 'not-added', detail: 'json-block' });
+  // Claude Code other non-zero exit with unparseable JSON: non-blocking error -> failed
+  // (code.claude.com/docs/en/hooks#exit-code-output table: "JSON that can't be parsed ... | Any other exit code: Non-blocking error.").
+  assert.deepEqual(classify('claude-cli', 'UserPromptSubmit', 1, '{ broken }'), { outcome: 'failed' });
+
+  // T4.26: other non-zero failure. Codex parses JSON only on Some(0) (user_prompt_submit.rs:158-252);
+  // Copilot parses stdout JSON only on exit 0 (hooks-reference#exit-codes-for-command-hooks).
+  assert.deepEqual(classify('claude-cli', 'SessionStart', 1, ''), { outcome: 'failed' });
+  assert.deepEqual(classify('codex-cli', 'SessionStart', 2, ''), { outcome: 'failed' });
+  assert.deepEqual(classify('codex-cli', 'UserPromptSubmit', 1, JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'x' } })), { outcome: 'failed' });
+  assert.deepEqual(classify('copilot-cli', 'sessionStart', 1, JSON.stringify({ additionalContext: 'x' })), { outcome: 'failed' });
+  assert.deepEqual(classify('copilot-cli', 'sessionStart', 2, JSON.stringify({ additionalContext: 'x' })), { outcome: 'failed' });
 
   // T4.27: timeout, stopped, missing executable.
   assert.deepEqual(classify('claude-cli', 'SessionStart', 'timeout', '', { reason: 'timeout' }), { outcome: 'timeout' });
   assert.deepEqual(classify('claude-cli', 'SessionStart', 'timeout', '', { reason: 'aborted' }), { outcome: 'stopped' });
   assert.deepEqual(classify('claude-cli', 'SessionStart', 'missing', '', { reason: 'missing', program: 'no-such' }), { outcome: 'missing', program: 'no-such' });
 
-  // Catch-all 'not-added': JSON without context, JSON blocks, mismatched hookEventName, invalid JSON-looking, non-zero JSON, Codex prompt exit 2, overflow, spawn error.
+  // Claude Code stdout that is not one JSON object (code.claude.com/docs/en/hooks#exit-code-0):
+  // - "Output that doesn't start with `{`, or that starts with `{` and doesn't end with `}`: plain text. A JSON array and a quoted JSON string are plain text by this rule."
+  assert.deepEqual(classify('claude-cli', 'SessionStart', 0, '{a normal note'), { outcome: 'adds', added: '{a normal note' });
+  assert.deepEqual(classify('claude-cli', 'SessionStart', 0, '[]'), { outcome: 'adds', added: '[]' });
+  // - "Two or more lines that each parse as JSON on their own, the first starting with `{` and the last ending with `}`:
+  //    plain text when no line is a JSON output object that sets a field. When one line is, the output is a parse failure"
+  assert.deepEqual(classify('claude-cli', 'SessionStart', 0, '{}\n{}'), { outcome: 'adds', added: '{}\n{}' });
+  assert.deepEqual(classify('claude-cli', 'SessionStart', 0, '{}\n{"systemMessage":"hi"}'), { outcome: 'not-added', detail: 'invalid-json' });
+  // - "Anything else that starts with `{` and ends with `}` but isn't valid JSON: a parse failure."
+  assert.deepEqual(classify('claude-cli', 'SessionStart', 0, '{ broken }'), { outcome: 'not-added', detail: 'invalid-json' });
+
+  // Catch-all 'not-added': JSON without context, JSON blocks, mismatched hookEventName, Codex invalid JSON-looking, Codex prompt exit 2 (including with JSON), overflow, spawn error.
   assert.deepEqual(classify('claude-cli', 'SessionStart', 0, '{}'), { outcome: 'not-added', detail: 'json-no-context' });
   assert.deepEqual(classify('claude-cli', 'SessionStart', 0, JSON.stringify({ systemMessage: 'hi' })), { outcome: 'not-added', detail: 'json-no-context' });
   assert.deepEqual(classify('claude-cli', 'SessionStart', 0, JSON.stringify({ additionalContext: 'top level only' })), { outcome: 'not-added', detail: 'json-no-context' });
@@ -441,13 +492,18 @@ test('Pure classification table (whatHookWouldAdd): every row, edge case and too
   assert.deepEqual(classify('claude-cli', 'UserPromptSubmit', 0, JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'wrong event' } })), { outcome: 'not-added', detail: 'json-no-context' });
   assert.deepEqual(classify('claude-cli', 'UserPromptSubmit', 0, JSON.stringify({ decision: 'block', reason: 'stop', hookSpecificOutput: { additionalContext: 'also' } })), { outcome: 'not-added', detail: 'json-block' });
   assert.deepEqual(classify('codex-cli', 'SessionStart', 0, JSON.stringify({ continue: false, stopReason: 'halt' })), { outcome: 'not-added', detail: 'json-block' });
-  assert.deepEqual(classify('claude-cli', 'SessionStart', 0, '{ broken json'), { outcome: 'not-added', detail: 'invalid-json' });
+  // Codex looks_like_json treats brace-prefixed invalid JSON as a hook failure (user_prompt_submit.rs:212).
+  assert.deepEqual(classify('codex-cli', 'SessionStart', 0, '{ broken json'), { outcome: 'not-added', detail: 'invalid-json' });
   assert.deepEqual(classify('codex-cli', 'SessionStart', 0, '{}\n{}'), { outcome: 'not-added', detail: 'invalid-json' });
-  assert.deepEqual(classify('claude-cli', 'SessionStart', 1, JSON.stringify({ continue: false })), { outcome: 'not-added', detail: 'nonzero-json' });
-  assert.deepEqual(classify('claude-cli', 'UserPromptSubmit', 2, JSON.stringify({ decision: 'block' })), { outcome: 'not-added', detail: 'nonzero-json' });
-  assert.deepEqual(classify('codex-cli', 'UserPromptSubmit', 2, '', { stderr: 'blocked in codex' }), { outcome: 'not-added', detail: 'codex-prompt-exit-2' });
+  assert.deepEqual(classify('codex-cli', 'UserPromptSubmit', 2, ''), { outcome: 'not-added', detail: 'codex-prompt-exit-2' });
+  assert.deepEqual(
+    classify('codex-cli', 'UserPromptSubmit', 2, JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'ignored' } })),
+    { outcome: 'not-added', detail: 'codex-prompt-exit-2' },
+  );
   assert.deepEqual(classify('claude-cli', 'SessionStart', 1, 'huge', { reason: 'overflow' }), { outcome: 'not-added', detail: 'overflow' });
   assert.deepEqual(classify('claude-cli', 'SessionStart', 1, '', { reason: 'error', spawnError: 'EACCES' }), { outcome: 'not-added', detail: 'spawn-error', problem: 'EACCES' });
+  // Signal termination has no exit code and reports the signal (Codex user_prompt_submit.rs:253: "hook exited without a status code"; Claude/Copilot pages are silent beyond non-zero failure).
+  assert.deepEqual(classify('claude-cli', 'SessionStart', 1, 'partial', { signal: 'SIGTERM' }), { outcome: 'failed', signal: 'SIGTERM' });
 
   // Tool context limits: exact boundary passes without overLimit; 1 past carries overLimit AND whole text.
   const claudeAt = 'a'.repeat(10_000), claudeOver = 'a'.repeat(10_001);
@@ -549,10 +605,40 @@ test('Gates and refusals: wrong home mode, Windows, uninstalled tool, plugin hoo
     assert.equal(goneRun.outcome, 'refused');
     assert.equal(goneRun.problem, goneSrc.problem);
 
-    // Non-command hook with stray command field is not classified as a command launch.
+    // Non-command hook with stray command field stays listed on pages (launch preserved), but runHook refuses it.
     await put(settings, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'prompt', command: `echo stray >> ${JSON.stringify(marker)}` }] }] } }));
-    const foundPrompt = await findHook({ home: box.home, mode: 'actual', dataDir: box.data }, { from: 'own', tool: 'claude-cli', declaredIn: settings, event: 'SessionStart', at: 0, command: '' });
-    assert.equal('hook' in foundPrompt && foundPrompt.hook.launch, undefined);
+    const promptStrip = sessionStrip('claude-cli', [], await sessionSettings('claude-cli', join(box.home, '.claude')));
+    assert.equal(promptStrip?.groups[0]?.hooks.length, 1, 'non-command entry with command stays listed on Instructions');
+    assert.equal(promptStrip?.groups[0]?.hooks[0]?.command, `echo stray >> ${JSON.stringify(marker)}`);
+    const strayRef = promptStrip!.groups[0]!.hooks[0]!.source;
+    const strayRun = await runHook(box.ctx(), strayRef);
+    assert.equal(strayRun.outcome, 'refused');
+    assert.match(strayRun.problem ?? '', /not a command hook/i);
+
+    // Codex [features] hooks = false (and deprecated alias codex_hooks = false): View source reads it, runHook refuses it.
+    const codexBox = await sandbox(['codex']);
+    try {
+      const codexMarker = join(codexBox.base, 'codex-off.marker');
+      await put(join(codexBox.home, '.codex/hooks.json'), JSON.stringify({
+        hooks: { SessionStart: [{ hooks: [{ type: 'command', command: `echo ran > ${JSON.stringify(codexMarker)}` }] }] },
+      }));
+      await put(join(codexBox.home, '.codex/config.toml'), '[features]\nhooks = false\n');
+      const cRef = await codexBox.ownRef('codex-cli', 0);
+      assert.equal((await readHookSource({ home: codexBox.home, mode: 'actual', dataDir: codexBox.data }, cRef)).problem, undefined);
+      const offRes = await runHook(codexBox.ctx(), cRef);
+      assert.equal(offRes.outcome, 'refused');
+      assert.match(offRes.problem ?? '', /\[features\] hooks = false/);
+      // Deprecated alias codex_hooks = false also disables hooks.
+      await put(join(codexBox.home, '.codex/config.toml'), '[features]\ncodex_hooks = false\n');
+      const aliasRes = await runHook(codexBox.ctx(), cRef);
+      assert.equal(aliasRes.outcome, 'refused');
+      assert.match(aliasRes.problem ?? '', /\[features\] hooks = false/);
+      await assert.rejects(stat(codexMarker), { code: 'ENOENT' }, 'disabled Codex hook did not execute');
+      // Explicit hooks = true wins over deprecated codex_hooks = false.
+      await put(join(codexBox.home, '.codex/config.toml'), '[features]\nhooks = true\ncodex_hooks = false\n');
+      assert.equal((await runHook(codexBox.ctx(), cRef)).outcome, 'empty');
+      assert.equal(await readFile(codexMarker, 'utf8'), 'ran\n');
+    } finally { await codexBox.done(); }
 
     // Marker file was never written by any of the refused calls above.
     await assert.rejects(stat(marker), { code: 'ENOENT' });
@@ -657,6 +743,68 @@ test('Nothing in main.ts starts a hook run except the one hook:run channel', asy
   assert.equal(calls.length, 1, 'runHook is called in exactly one place in main.ts');
   const start = main.lastIndexOf("handleNow('hook:run'", calls[0]!.index);
   assert.ok(start >= 0 && calls[0]!.index - start < 600, 'the sole runHook call lives inside handleNow(\'hook:run\', …)');
+});
+
+test('Fix list checks: signal exit, plugins.ts sync throw rejection, Codex disabled, non-command display, and shared start sources', { skip: unixSkip, timeout: 15_000 }, async t => {
+  await t.test('Item 1 (signal): a hook killed by SIGTERM reports signal with no exitCode', async () => {
+    const box = await sandbox(['claude']);
+    try {
+      await put(join(box.home, '.claude/settings.json'), JSON.stringify({
+        hooks: { SessionStart: [{ hooks: [{ type: 'command', command: process.execPath, args: ['-e', "process.stdout.write('partial'); process.kill(process.pid, 'SIGTERM')"] }] }] },
+      }));
+      const sigRes = await runHook(box.ctx(), await box.ownRef('claude-cli', 0));
+      assert.equal(sigRes.outcome, 'failed');
+      assert.equal(sigRes.exitCode, undefined);
+      assert.equal(sigRes.signal, 'SIGTERM');
+    } finally { await box.done(); }
+  });
+
+  await t.test('Item 2 (Codex [features] hooks = false): refused while View source still reads it', async () => {
+    const box = await sandbox(['codex']);
+    try {
+      const marker = join(box.base, 'codex-off-2.marker');
+      await put(join(box.home, '.codex/hooks.json'), JSON.stringify({
+        hooks: { SessionStart: [{ hooks: [{ type: 'command', command: `echo ran > ${JSON.stringify(marker)}` }] }] },
+      }));
+      await put(join(box.home, '.codex/config.toml'), '[features]\nhooks = false\n');
+      const ref = await box.ownRef('codex-cli', 0);
+      assert.equal((await readHookSource({ home: box.home, mode: 'actual', dataDir: box.data }, ref)).problem, undefined);
+      const res = await runHook(box.ctx(), ref);
+      assert.equal(res.outcome, 'refused');
+      assert.match(res.problem ?? '', /\[features\] hooks = false/);
+      await assert.rejects(stat(marker), { code: 'ENOENT' });
+    } finally { await box.done(); }
+  });
+
+  await t.test('Item 3 (plugins.ts run): non-hook callers reject on sync start throw; catchStart resolves reason error', async () => {
+    await assert.rejects(() => run('echo', ['bad\0arg'], { timeoutMs: 5_000 }));
+    const caught = await run('echo', ['bad\0arg'], { timeoutMs: 5_000, catchStart: true });
+    assert.equal(caught.reason, 'error');
+    assert.ok(caught.spawnError);
+  });
+
+  await t.test('Item 4 (catalogdetail.ts): non-command hook with command stays listed on pages, refused at run', async () => {
+    const box = await sandbox(['claude']);
+    try {
+      const marker = join(box.base, 'stray-4.marker');
+      await put(join(box.home, '.claude/settings.json'), JSON.stringify({
+        hooks: { SessionStart: [{ hooks: [{ type: 'prompt', command: `echo stray > ${JSON.stringify(marker)}` }] }] },
+      }));
+      const strip = sessionStrip('claude-cli', [], await sessionSettings('claude-cli', join(box.home, '.claude')));
+      assert.equal(strip?.groups[0]?.hooks.length, 1);
+      const res = await runHook(box.ctx(), strip!.groups[0]!.hooks[0]!.source);
+      assert.equal(res.outcome, 'refused');
+      assert.match(res.problem ?? '', /not a command hook/i);
+      await assert.rejects(stat(marker), { code: 'ENOENT' });
+    } finally { await box.done(); }
+  });
+
+  await t.test('Item 5 (pluginoutcomes.ts): start-of-session sources live in one home alongside whenItRuns', async () => {
+    const outcomesMod = await import('../src/pluginoutcomes.ts') as Record<string, unknown>;
+    assert.equal(typeof outcomesMod.pickStartSource, 'function', 'pluginoutcomes.ts exports pickStartSource');
+    const hookrunSrc = await readFile(join(import.meta.dirname, '../src/hookrun.ts'), 'utf8');
+    assert.equal(hookrunSrc.includes('START_SOURCES'), false, 'hookrun.ts does not duplicate START_SOURCES');
+  });
 });
 
 // Last in this file: Quit closes the door to new hook runs for the rest of the process, as it does for the app.
