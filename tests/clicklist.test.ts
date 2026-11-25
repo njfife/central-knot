@@ -43,6 +43,10 @@ const api = {
   onProfileSwitched: (listener: (result: ProfileSwitchResult) => void) => { main.profileSwitched = listener; },
   onWindowShown: (listener: () => void) => { main.windowShown = listener; },
   syncNow: async (_home: string): Promise<unknown> => null,
+  pullRepo: async (_home: string): Promise<unknown> => null,
+  switchProfile: async (_id: string, _home: string): Promise<unknown> => null,
+  saveProfile: async (_profile: unknown, _home: string): Promise<unknown> => null,
+  deleteProfile: async (_id: string, _home: string): Promise<unknown> => null,
   // A home's usage, read as it opens (app.ts collectUsage): none here; one that failed would be said in the status bar.
   readUsage: async () => ({ at: '2026-11-20T00:00:00.000Z', tools: [] }),
 };
@@ -67,8 +71,9 @@ Object.assign(globalThis, {
 Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh' } });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
-const { acting, applyByKind, applyClick, askFlash, closeResult, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, selectOff, whyKindReadOnly, whyReadOnly,
+const { acting, applyByKind, applyClick, askFlash, closeResult, deleteProfileDef, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, saveProfileDef, selectOff, switchToProfile, whyKindReadOnly, whyReadOnly,
   loadHome, problemKey, queueClick, readAgain, restoreEvent, setRenderer, showPage, syncNow, state: app } = await import('../src/app.ts');
+const { repo, repoPage } = await import('../src/repopage.ts');
 const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, runReloads, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
@@ -2256,4 +2261,218 @@ test('Bulk Turn failure, differing Add, and already-on plugin row say exact fact
       findById(selActions, 'take-over-cancel-skills-charlie-claude-cli').onclick({ stopPropagation() {} });
     });
   } finally { stopSelecting(); }
+});
+
+// ---------- Every result that ends the profile in use says so (app.ts tell, clicklist.ts Run, repopage.ts Pull) ----------
+
+/** Builds a Library world with `notes` and `standup` and named profiles, returning a helper that clones the home with updated on-states. */
+function profileActWorld(t: TestContext, { beforeOn, profiles }: {
+  beforeOn: Record<string, boolean>; profiles: { id: string; name: string; items: string[] }[];
+}) {
+  onLibrary();
+  const events = homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'skills', key: 'standup' }], { on: false });
+  const base = app.home!;
+  const viewWith = (on: Record<string, boolean>, homePath = base.home): HomeView => {
+    const view = structuredClone(base);
+    view.home = homePath;
+    for (const [key, isOn] of Object.entries(on)) view.skills.library[key]!.on = isOn;
+    view.profiles = { profiles: profiles.map(profile => ({ ...profile, switchesPluginItems: true })), plugins: [] };
+    return view;
+  };
+  app.home = viewWith(beforeOn);
+  return { events, viewWith };
+}
+
+test('Row switch ending Everyday appends profileLeftUse; on then off in one run adds none; whole-refused adds none', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
+  const { viewWith } = profileActWorld(t, { beforeOn: { notes: true, standup: false }, profiles: [everyday] });
+  let nextView = viewWith({ notes: true, standup: true });
+  t.mock.method(api, 'refresh', async () => nextView);
+
+  // Single row switch turning standup on ends Everyday.
+  flip('standup', true);
+  await settled();
+  await main.pass(did('standup', true));
+  assert.equal(app.outcome?.text, 'standup is on. Everyday stopped being the profile in use.');
+  assert.equal(app.outcome?.profileEnded, true);
+
+  // Turning standup back off in the same run brings Everyday back: no profile sentence.
+  nextView = viewWith({ notes: true, standup: false });
+  flip('standup', false);
+  await settled();
+  await main.pass(did('standup', false));
+  assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
+  assert.equal(app.outcome?.profileEnded, undefined);
+
+  // New run: refused whole click adds no sentence even when the refreshed view matches no profile.
+  closeResult();
+  nextView = viewWith({ notes: false, standup: false });
+  flip('standup', true);
+  await settled();
+  await main.pass(refusedAsStale('standup'));
+  assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
+  assert.equal(app.outcome?.profileEnded, undefined);
+});
+
+test('Leaving the Library mid-run still announces the ended profile in the status bar', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
+  const { viewWith } = profileActWorld(t, { beforeOn: { notes: true, standup: false }, profiles: [everyday] });
+  t.mock.method(api, 'refresh', async () => viewWith({ notes: true, standup: true }));
+  flip('standup', true);
+  await settled();
+  showPage('history');
+  await main.pass(did('standup', true));
+  assert.equal(app.outcome, undefined);
+  assert.equal(app.said.text, 'standup is on. Everyday stopped being the profile in use.');
+});
+
+test('applyClick (tool switch / plugin switch) appends profileLeftUse when it ends the profile and skips when refused', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
+  const { viewWith } = profileActWorld(t, { beforeOn: { notes: true, standup: false }, profiles: [everyday] });
+  let nextView = viewWith({ notes: false, standup: false });
+  t.mock.method(api, 'refresh', async () => nextView);
+
+  // Effective applyClick ends Everyday.
+  applyClick({ kind: 'skills', items: ['notes'], rows: [{ kind: 'skills', key: 'notes' }], changes: [{ key: 'notes', on: false, except: [], seenOn: true }], said: 'notes is off.' });
+  await settled();
+  await main.pass(did('notes', false));
+  assert.equal(app.outcome?.text, 'notes is off. Everyday stopped being the profile in use.');
+  assert.equal(app.outcome?.profileEnded, true);
+
+  // Stopped applyClick adds no profile sentence even if refreshed home matches no profile.
+  app.home = viewWith({ notes: true, standup: false });
+  nextView = viewWith({ notes: false, standup: false });
+  applyClick({ kind: 'skills', items: ['notes'], rows: [{ kind: 'skills', key: 'notes' }], changes: [{ key: 'notes', on: false, except: [], seenOn: true }], said: 'notes is off.' });
+  await settled();
+  await main.pass({ stopped: 'The skills record is damaged.', results: [], writes: 0, reloads: [] });
+  assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
+  assert.equal(app.outcome?.profileEnded, undefined);
+});
+
+test('applyByKind (Turn these off) and Library Undo append profileLeftUse only when they end the profile in use', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
+  const { viewWith } = profileActWorld(t, { beforeOn: { notes: true, standup: false }, profiles: [everyday] });
+  let nextView = viewWith({ notes: false, standup: false });
+  t.mock.method(api, 'refresh', async () => nextView);
+
+  // Turn these off ends Everyday.
+  turnTheseOff([itemRow('skills', 'notes')]);
+  await settled();
+  await main.pass(offMade('skills', 'notes'));
+  assert.match(app.outcome?.text ?? '', /Everyday stopped being the profile in use\.$/);
+  assert.equal(app.outcome?.profileEnded, true);
+
+  // Its Undo restores Everyday (no profile before): no sentence.
+  nextView = viewWith({ notes: true, standup: false });
+  app.outcome!.act!.run();
+  await settled();
+  assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
+
+  // Clicking standup off brings Everyday into use; its Undo turns standup back on and ends Everyday.
+  app.home = viewWith({ notes: true, standup: true });
+  nextView = viewWith({ notes: true, standup: false });
+  flip('standup', false);
+  await settled();
+  await main.pass(offMade('skills', 'standup'));
+  assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
+  nextView = viewWith({ notes: true, standup: true });
+  app.outcome!.act!.run();
+  await settled();
+  assert.equal(app.outcome?.text, 'Undone: standup is as before. Everyday stopped being the profile in use.');
+  assert.equal(app.outcome?.profileEnded, true);
+
+  // applyByKind refused whole adds no sentence.
+  app.home = viewWith({ notes: true, standup: false });
+  nextView = viewWith({ notes: false, standup: false });
+  turnTheseOff([itemRow('skills', 'notes')]);
+  await settled();
+  await main.pass({ stopped: 'The skills record is damaged.', results: [], writes: 0, reloads: [] });
+  assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
+});
+
+test('Sync once appends profileLeftUse when it ends the profile and skips when nothing was synced', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
+  const { viewWith } = profileActWorld(t, { beforeOn: { notes: true, standup: false }, profiles: [everyday] });
+  const afterView = viewWith({ notes: true, standup: true });
+
+  t.mock.method(api, 'syncNow', async () => ({ view: afterView, text: 'Took in standup.', reasons: [], warn: false, history: false, reloads: [], did: true }));
+  await syncNow();
+  assert.equal(app.outcome?.text, 'Took in standup. Everyday stopped being the profile in use.');
+  assert.equal(app.outcome?.profileEnded, true);
+
+  // Sync once with nothing synced (did: false) adds no sentence even if the returned view matches no profile.
+  app.home = viewWith({ notes: true, standup: false });
+  t.mock.method(api, 'syncNow', async () => ({ view: afterView, text: 'Not everything was synced.', reasons: ['The skills record is damaged.'], warn: true, history: false, reloads: [], did: false }));
+  await syncNow();
+  assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
+  assert.equal(app.outcome?.profileEnded, undefined);
+});
+
+test('Git repo Pull appends profileLeftUse when it ends the profile, keeping History note, and skips when nothing moved', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
+  const { viewWith } = profileActWorld(t, { beforeOn: { notes: true, standup: false }, profiles: [everyday] });
+  app.page = 'repo';
+  const connected = {
+    connected: true, url: 'https://example.com/cfg.git', branch: 'main', access: { allowed: true },
+    latest: { id: 'abcdef1234567', subject: 'Add standup' }, incoming: [{ kind: 'skill', key: 'standup', name: 'standup', change: 'added' }], outgoing: [],
+  } as any;
+  repo.view = connected;
+  let afterView = viewWith({ notes: true, standup: true });
+  t.mock.method(api, 'refresh', async () => afterView);
+  let reply: Record<string, unknown> = { view: { ...connected, base: connected.latest, incoming: [] }, results: [{ item: 'standup', harness: 'claude-cli', outcome: 'written', message: 'Written.' }], pulled: 1 };
+  t.mock.method(api as any, 'pullRepo', async () => reply);
+
+  findById(repoPage(), 'repo-pull').onclick({ detail: 1 });
+  await settled();
+  assert.equal(app.outcome?.text, 'Pulled 1 change into your tools. Everyday stopped being the profile in use.');
+  assert.equal(app.outcome?.note, 'Undo it in History.');
+  assert.equal(app.outcome?.profileEnded, true);
+
+  // Pull that moved nothing adds no profile sentence.
+  app.home = viewWith({ notes: true, standup: false });
+  repo.view = connected;
+  reply = { view: { ...connected, base: connected.latest, incoming: [] }, results: [], pulled: 0 };
+  findById(repoPage(), 'repo-pull').onclick({ detail: 1 });
+  await settled();
+  assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
+  assert.equal(app.outcome?.profileEnded, undefined);
+});
+
+test('Profile switches, profile definition edits/deletes, and home changes add no profile sentence', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
+  const focus = { id: 'p-2', name: 'Focus', items: ['skill:notes', 'skill:standup'] };
+  const { viewWith } = profileActWorld(t, { beforeOn: { notes: true, standup: false }, profiles: [everyday, focus] });
+  const focusView = viewWith({ notes: true, standup: true });
+
+  // Switching from Everyday to Focus via Profiles / status bar: no sentence.
+  t.mock.method(api as any, 'switchProfile', async () => ({ name: 'Focus', on: ['standup'], off: [], left: [], results: [], reloads: [], view: focusView }));
+  await switchToProfile('p-2');
+  assert.match(app.outcome?.text ?? '', /^Switched to Focus:/);
+  assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
+
+  // Saving a profile edit with band=true that changes matching: no sentence.
+  app.home = viewWith({ notes: true, standup: false });
+  t.mock.method(api as any, 'saveProfile', async () => ({ id: 'p-1', profiles: { profiles: [{ ...everyday, items: ['skill:notes', 'skill:standup'], switchesPluginItems: true }], plugins: [] } }));
+  await saveProfileDef({ id: 'p-1', switchesPluginItems: true }, 'Everyday now switches plugin items for good.', true);
+  assert.equal(app.outcome?.text, 'Everyday now switches plugin items for good.');
+
+  // Deleting the profile in use: no sentence.
+  app.home = viewWith({ notes: true, standup: false });
+  t.mock.method(api as any, 'deleteProfile', async () => ({ profiles: { profiles: [focus], plugins: [] } }));
+  await deleteProfileDef('p-1');
+  assert.equal(app.outcome?.text, 'Deleted the profile Everyday. No item changed.');
+
+  // Home changed mid-act: no sentence.
+  app.home = viewWith({ notes: true, standup: false }, '/home-a');
+  t.mock.method(api, 'refresh', async () => viewWith({ notes: true, standup: true }, '/home-b'));
+  applyClick({ kind: 'skills', items: ['standup'], rows: [{ kind: 'skills', key: 'standup' }], changes: [{ key: 'standup', on: true, except: [], seenOn: false }], said: 'standup is on.' });
+  await settled();
+  await main.pass(did('standup', true));
+  assert.equal(app.outcome?.text, 'standup is on.');
+
+  // Opening a home via loadHome (even the same path): no sentence.
+  app.home = viewWith({ notes: true, standup: false }, '/home-a');
+  t.mock.method(api, 'selectHome', async () => viewWith({ notes: true, standup: true }, '/home-a'));
+  await loadHome('fixture');
+  assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
 });

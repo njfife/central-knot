@@ -565,7 +565,9 @@ async function syncOnce(home: unknown) {
       const { view, passes } = await syncAndView(true);
       const { access, gate } = view.sync;
       const stopped = !access.allowed ? access.reason : 'reason' in gate ? gate.reason : undefined;
-      return { view, ...syncOnceReport(passes.flatMap(pass => pass.synced ?? []), stopped) };
+      const synced = passes.flatMap(pass => pass.synced ?? []);
+      const did = synced.some(pass => [pass.skills, pass.servers, pass.agents].some(run => !!run && (run.writes > 0 || !!run.notices?.length)));
+      return { view, did, ...syncOnceReport(synced, stopped) };
     });
   } finally { syncOnceRunning = false; refreshTray(); }
 }

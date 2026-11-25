@@ -2012,6 +2012,62 @@ async function practiceFlow() {
     [profileUndoText, await a.text('#status-profile')]);
   await openKind(a, 'skills');
   await switchFromBar('Incident');
+  // Every ordinary act that ends Incident says so; its Undo, on-then-off in one run, a keep-out, and a switch from the bar say none.
+  await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
+  const rowEndsText = await a.text('#header [data-outcome] .band-text') ?? '';
+  check('turning standup on from its row ends Incident and says so in the result while the bar reads No profile',
+    rowEndsText.endsWith('Incident stopped being the profile in use.') && (await a.text('#status-profile'))?.trim() === 'No profile',
+    [rowEndsText, await a.text('#status-profile')]);
+  if (shots) {
+    for (const [width, height] of [SMALLEST, [1316, 819]]) {
+      await sizeTo(a, width, height);
+      if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+      for (const theme of ['light', 'dark']) {
+        await a.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+        await wait(80);
+        await a.shot(`row-switch-ends-profile-${width}-${theme}`);
+      }
+    }
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    await wait(80);
+    await fullSize(a);
+  }
+  await a.click('#outcome-undo');
+  same('its Undo restores Incident with no profile sentence',
+    [(await a.text('#status-profile'))?.trim(), /stopped being the profile/.test((await a.text('#header [data-outcome] .band-text')) ?? '')],
+    ['Incident', false]);
+  await a.clickInRun(`#${rowPart('switch', 'skills', 'standup')}`);
+  await a.clickInRun(`#${rowPart('switch', 'skills', 'standup')}`);
+  same('turning standup on then off in one run leaves Incident in use with no profile sentence',
+    [(await a.text('#status-profile'))?.trim(), /stopped being the profile/.test((await a.text('#header [data-outcome] .band-text')) ?? '')],
+    ['Incident', false]);
+  await openRow('notes', `#${rowPart('enable', 'skills', 'notes', 'codex-cli')}`);
+  await a.click(`#${rowPart('enable', 'skills', 'notes', 'codex-cli')}`);
+  same('a keep-out in one tool leaves Incident in use with no profile sentence',
+    [(await a.text('#status-profile'))?.trim(), /stopped being the profile/.test((await a.text('#header [data-outcome] .band-text')) ?? '')],
+    ['Incident', false]);
+  await a.click('#outcome-undo');
+  await a.click(`#${rowPart('open', 'skills', 'notes')}`);
+  await a.click('#nav-profiles');
+  await newProfile(a, 'WithStandup');
+  await a.click('#pf-skill\\:notes');
+  await a.click('#pf-skill\\:standup');
+  await openKind(a, 'skills');
+  await switchFromBar('WithStandup');
+  const barSwitchText = await a.text('#header [data-outcome] .band-text') ?? '';
+  check('switching from Incident to another profile from the bar adds no profile sentence',
+    barSwitchText.startsWith('Switched to WithStandup:') && !/stopped being the profile/.test(barSwitchText) && (await a.text('#status-profile'))?.trim() === 'WithStandup',
+    [barSwitchText, await a.text('#status-profile')]);
+  await a.click('#outcome-undo');
+  same('undoing that bar switch restores Incident with no profile sentence',
+    [(await a.text('#status-profile'))?.trim(), /stopped being the profile/.test((await a.text('#header [data-outcome] .band-text')) ?? '')],
+    ['Incident', false]);
+  await a.click('#nav-profiles');
+  await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('WithStandup')).click()`);
+  await a.settle();
+  await a.click('#profile-delete');
+  await a.click('#profile-delete-confirm');
+  await openKind(a, 'skills');
   }
   // Turned back on by hand: the profile in use is worked out, so the status bar follows at once.
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
@@ -9919,10 +9975,23 @@ async function usageFlow() {
   const before = filesOf(['standup', 'spare']);
   await a.click('#turn-unused-off');
   for (let tries = 0; tries < 50 && !(await a.exists('#outcome-undo')); tries++) await wait(100);
-  if (shots) { for (const [width, height] of [[1316, 819], SMALLEST]) { await sizeTo(a, width, height); await a.shot(`usage-result-${width}`); } await fullSize(a); }
-  same('Turn these off: one click removes Central Knot’s copies, leaves spare’s shared copy and says Codex still reads spare another way, with one Undo; the chip, now at 0, is gone',
-    [await a.text('.outcome-text, [data-outcome] .band-text'), Object.entries(filesOf(['standup', 'spare'])).filter(([, body]) => body), (await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'spare')}"] .row-tag`))?.trim(), await a.exists('.chip[data-tip="No use seen in 30 days"]')],
-    ['Turned off 2 skills with no use seen in the last 30 days: spare and standup. Codex still reads spare another way. Central Knot keeps them, and turning one on puts it back as it was.', [[join(shared, 'spare'), before[join(shared, 'spare')]]], 'in Central Knot and Codex', false]);
+  if (shots) {
+    for (const [width, height] of [SMALLEST, [1316, 819]]) {
+      await sizeTo(a, width, height);
+      if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+      for (const theme of ['light', 'dark']) {
+        await a.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+        await wait(80);
+        await a.shot(`turn-unused-off-ends-profile-${width}-${theme}`);
+      }
+    }
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    await wait(80);
+    await fullSize(a);
+  }
+  same('Turn these off: one click removes Central Knot’s copies, leaves spare’s shared copy, says Codex still reads spare another way and Everyday stopped being in use, with one Undo; the chip, now at 0, is gone',
+    [await a.text('.outcome-text, [data-outcome] .band-text'), (await a.text('#status-profile'))?.trim(), Object.entries(filesOf(['standup', 'spare'])).filter(([, body]) => body), (await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'spare')}"] .row-tag`))?.trim(), await a.exists('.chip[data-tip="No use seen in 30 days"]')],
+    ['Turned off 2 skills with no use seen in the last 30 days: spare and standup. Codex still reads spare another way. Central Knot keeps them, and turning one on puts it back as it was. Everyday stopped being the profile in use.', 'No profile', [[join(shared, 'spare'), before[join(shared, 'spare')]]], 'in Central Knot and Codex', false]);
   await a.click('#outcome-undo');
   for (let tries = 0; tries < 50 && JSON.stringify(filesOf(['standup', 'spare'])) !== JSON.stringify(before); tries++) await wait(100);
   same('its one Undo puts both back On, every file byte for byte, and the chip offers them again',
@@ -9936,7 +10005,7 @@ async function usageFlow() {
   const chipOn = () => a.run(`document.querySelector('.chip-on')?.dataset.tip`);
   const afterOne = [await sectionsNow(a, 'skills'), await chipOn()];
   await a.clickInRun(`#${rowPart('switch', 'skills', 'spare')}`);
-  same('spare, clicked soon after standup, joins its run: said once', await a.text('#header [data-outcome] .band-text'), '2 skills are off: standup and spare. Codex still reads spare another way.');
+  same('spare, clicked soon after standup, joins its run: said once, with Everyday leaving use', await a.text('#header [data-outcome] .band-text'), '2 skills are off: standup and spare. Codex still reads spare another way. Everyday stopped being the profile in use.');
   await a.shot('usage-chip-pinned');
   same('with the chip on, rows turned Off by their own switch stay listed where they were, and the chip stays on', [afterOne, [await sectionsNow(a, 'skills'), await chipOn()], [await switchOn(a, 'skills', 'standup'), await switchOn(a, 'skills', 'spare')]],
     [[[['on', ['standup', 'spare']]], 'No use seen in 30 days'], [[['on', ['standup', 'spare']]], 'No use seen in 30 days'], [false, false]]);
@@ -12946,6 +13015,9 @@ async function selectFlow() {
   mkdirSync(join(home, '.claude/agents'), { recursive: true });
   writeFileSync(join(home, '.claude/agents/scout.md'), '---\nname: scout\ndescription: The scout agent.\n---\n\nYou scout.\n');
   toolClis(home);
+  // A profile matching the eight skills left On right before section 14's Turn off of many (delta and echo turned Off, kilo deleted).
+  mkdirSync(join(home, '.central-knot'), { recursive: true });
+  writeFileSync(join(home, '.central-knot/profiles.json'), JSON.stringify({ formatVersion: 2, profiles: [{ id: 'everyday', name: 'Everyday', items: ['skill:alpha', 'skill:bravo', 'skill:charlie', 'skill:foxtrot', 'skill:golf', 'skill:hotel', 'skill:india', 'skill:juliet'] }] }));
   // History kept for 7 days: what the question says, from the start, with History never opened.
   mkdirSync(join(scratch, 'select-data'), { recursive: true });
   writeFileSync(join(scratch, 'select-data/app-settings.json'), JSON.stringify({ historyDays: 7 }));
@@ -13166,9 +13238,9 @@ async function selectFlow() {
   await bulkShots('turn-bar');
   await a.click('#select-turn-off');
   await done();
-  same('Turn off takes the three on rows, leaves delta and echo untouched, says 2 were already off, ends the mode',
-    [['alpha', 'bravo', 'charlie', 'delta', 'echo'].map(inAllTools), await a.text('#header [data-outcome] .band-text'), await a.exists('#outcome-undo'), await word(), await a.exists('#select-bar'), historyBefore() - histCount0],
-    [[[], [], [], [], []], 'Turned off 3 skills: alpha, bravo and charlie. 2 were already off.', true, 'Select', false, 3]);
+  same('Turn off takes the three on rows, leaves delta and echo untouched, says 2 were already off and Everyday stopped being in use, ends the mode',
+    [['alpha', 'bravo', 'charlie', 'delta', 'echo'].map(inAllTools), await a.text('#header [data-outcome] .band-text'), (await a.text('#status-profile'))?.trim(), await a.exists('#outcome-undo'), await word(), await a.exists('#select-bar'), historyBefore() - histCount0],
+    [[[], [], [], [], []], 'Turned off 3 skills: alpha, bravo and charlie. 2 were already off. Everyday stopped being the profile in use.', 'No profile', true, 'Select', false, 3]);
   await bulkShots('turn-off-result');
   await wait(FADE_WAIT);
   same('Turn off result stays until closed', await a.exists('#outcome-undo'), true);
@@ -15521,6 +15593,35 @@ async function profilePluginsFlow() {
   same('History has one entry per switch and one for the Undo, newest first, each saying what it did, the switch it undid marked Undone',
     [await a.all('.history-row[data-kind="profile"] .history-about', 'e.textContent'), await a.all('.history-row[data-kind="profile"] .history-done', 'e.textContent')],
     [['Switched to Work: 1 item turned on.', 'Switched to Quiet: 1 item turned off.', 'Undid the switch to Quiet: 1 item turned on.', 'Switched to Quiet: 1 item turned off.'], ['Undone']]);
+
+  // Turning a plugin item off from the Library while Work is in use says Work stopped being the profile in use; its Undo restores Work with no profile sentence.
+  const triageKey = 'triage';
+  await openKind(a, 'skills');
+  for (let tries = 0; tries < 60 && !(await a.exists(byId(rowPart('switch', 'skills', triageKey)))); tries++) await wait(100);
+  await a.click(byId(rowPart('switch', 'skills', triageKey)));
+  await done();
+  const pluginRowText = await a.text('#header [data-outcome] .band-text') ?? '';
+  check('a plugin item’s row switch on the Library ending Work says so and the bar reads No profile',
+    pluginRowText.endsWith('Work stopped being the profile in use.') && (await a.text('#status-profile'))?.trim() === 'No profile',
+    [pluginRowText, await a.text('#status-profile')]);
+  await a.click('#outcome-undo');
+  await done();
+  same('its Undo restores Work with no profile sentence',
+    [(await a.text('#status-profile'))?.trim(), /stopped being the profile/.test((await a.text('#header [data-outcome] .band-text')) ?? '')],
+    ['Work', false]);
+  await a.click(byId(rowPart('open', 'skills', triageKey)));
+  await a.click(byId(rowPart('enable', 'skills', triageKey, 'codex-cli')));
+  await done();
+  const pluginToolText = await a.text('#header [data-outcome] .band-text') ?? '';
+  check('a plugin item’s tool switch in an opened row ending Work says so and the bar reads No profile',
+    pluginToolText.endsWith('Work stopped being the profile in use.') && (await a.text('#status-profile'))?.trim() === 'No profile',
+    [pluginToolText, await a.text('#status-profile')]);
+  await a.click('#outcome-undo-plugin');
+  await done();
+  await a.click(byId(rowPart('open', 'skills', triageKey)));
+  same('undoing the plugin item’s tool switch restores Work and Codex’s config byte for byte with no profile sentence',
+    [readNow(config), (await a.text('#status-profile'))?.trim(), /stopped being the profile/.test((await a.text('#header [data-outcome] .band-text')) ?? '')],
+    [codexBefore, 'Work', false]);
 
   // The whole plugin off in Codex: a switch can't turn its items on there, so the rows say so, with the way to its page.
   writeFileSync(config, readNow(config).replace('enabled = true', 'enabled = false'));
