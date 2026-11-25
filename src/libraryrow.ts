@@ -410,16 +410,16 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
   if (deletedBy) return `On · its copy was deleted in ${deletedIn(deletedBy, row.plan?.sharedWay)}, so it turns off when sync runs. Central Knot keeps it.`;
   // A harness holding the current version that only waits for an edit made elsewhere has it on.
   const waitsForEdit = (tool: string) => row.hashes?.[tool] === item!.hash;
-  const gets = where('gets-it').filter(tool => !waitsForEdit(tool)), out = where('kept-out', 'leaving'), cannot = where('cannot'), unseen = where('unseen');
+  // A tool that gets it only with its plugin is its line's to say (pluginline.ts): not said here as one that can't take it.
+  const gets = where('gets-it').filter(tool => !waitsForEdit(tool)), out = where('kept-out', 'leaving'), cannot = where('cannot').filter(tool => !row.getsWithPlugin?.includes(tool)), unseen = where('unseen');
   const switched = tools.filter(tool => row.switchedOff?.includes(tool) && !out.includes(tool));
-  const another = where('another-way').filter(tool => wantedIn(item!, tool as HarnessId));
-  // A tool whose own switch has it off doesn't load it: it is no tool it is on in (the parts below say it).
-  const onIn = tools.filter(tool => !row.switchedOff?.includes(tool) && (['current', 'edited'].includes(harnessIs(row, item, tool)) || (harnessIs(row, item, tool) === 'gets-it' && waitsForEdit(tool))));
+  const another = where('another-way').filter(tool => wantedIn(item!, tool as HarnessId) && !row.pluginOn?.includes(tool));
+  // A tool whose own switch has it off doesn't load it: it is no tool it is on in (the parts below say it). One that has it on
+  // through its plugin is (pluginrows.ts pluginOnIn), as its line's switch says.
+  const onIn = tools.filter(tool => row.pluginOn?.includes(tool) || (!row.switchedOff?.includes(tool) && (['current', 'edited'].includes(harnessIs(row, item, tool)) || (harnessIs(row, item, tool) === 'gets-it' && waitsForEdit(tool)))));
   const edit = row.plan?.takeIn;
-  const plugged = cannot.filter(tool => row.getsWithPlugin?.includes(tool));
-  const absent = (onIn.length ? [] : cannotHave(row, item, tools)).filter(tool => !plugged.includes(tool)), cantTake = cannot.filter(tool => !absent.includes(tool) && !plugged.includes(tool));
-  const cant = [absent.length ? `not in ${orList(absent.map(toolName))}` : '', cantTake.length ? `${andList(cantTake.map(toolName))} can’t take it` : '',
-    plugged.length ? `not in ${orList(plugged.map(toolName))}: ${plugged.length === 1 ? 'it gets' : 'they get'} it with the plugin` : ''].filter(Boolean).join(' · ');
+  const absent = (onIn.length ? [] : cannotHave(row, item, tools)).filter(tool => cannot.includes(tool)), cantTake = cannot.filter(tool => !absent.includes(tool));
+  const cant = [absent.length ? `not in ${orList(absent.map(toolName))}` : '', cantTake.length ? `${andList(cantTake.map(toolName))} can’t take it` : ''].filter(Boolean).join(' · ');
   const parts = [onIn.length ? `On in ${named(onIn, tools)}${cannot.length ? ' only' : ''}` : 'On',
     edit ? `${toolName(edit)}’s edit becomes the current version when sync runs` : '',
     gets.length ? `${named(gets, tools)} ${gets.length === 1 ? 'gets' : 'get'} it when sync runs` : '',

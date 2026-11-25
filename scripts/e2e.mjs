@@ -2924,25 +2924,25 @@ async function practiceFlow() {
   check('its mark says which plugin, and is drawn on', /^Claude Code has it with the plugin issue-tracker, so no separate copy is placed there\.$/.test(throughTitle ?? '') && await a.exists(`#${rowPart('cell', 'skills', 'triage', 'claude-cli')}[data-look="on"]`), [throughTitle, await a.text('.legend')]);
   await fitsAtMinimum(a, 'a skill a tool has through a plugin');
   await a.shot('skill-through-plugin');
-  // Its opened row has the item's switch in Claude Code. Claude Code has none for one skill of a plugin, so it is the whole
-  // plugin's there, and both its line and its label say so first (the click runs Claude Code's own command, not run here).
+  // Its opened row's Claude Code line: Claude Code has no switch for one skill of a plugin, so its line has Turn the plugin off,
+  // saying what goes with it (the click runs Claude Code's own switch for the whole plugin, a stand-in here).
   const pluginSettings = join(practice, '.claude/settings.json');
   const pluginSettingsBefore = existsSync(pluginSettings) ? readFileSync(pluginSettings, 'utf8') : undefined;
   const pluginSettingsNow = () => (existsSync(pluginSettings) ? readFileSync(pluginSettings, 'utf8') : undefined);
-  if (!(await a.exists(`#${rowPart('enable', 'skills', 'triage', 'claude-cli')}`))) await a.click(`#${rowPart('open', 'skills', 'triage')}`);
-  const triageLine = await a.text(`.details-tool:has(#${rowPart('enable', 'skills', 'triage', 'claude-cli')}) .details-tool-line`) ?? '';
-  const triageSwitch = await a.run(`document.querySelector('#${rowPart('enable', 'skills', 'triage', 'claude-cli')}')?.getAttribute('aria-label')`) ?? '';
-  check('the opened row’s Claude Code switch says it is the whole plugin’s', /Claude Code has no switch for one skill of a plugin, so this switch turns the whole plugin off there\./.test(triageLine)
-    && /Click to turn the whole plugin issue-tracker off in Claude Code, with its 1 MCP server\.$/.test(triageSwitch), [triageLine, triageSwitch]);
+  const wholeButton = byId(rowPart('line', 'skills', 'triage', 'claude-cli'));
+  if (!(await a.exists(wholeButton))) await a.click(`#${rowPart('open', 'skills', 'triage')}`);
+  const triageLine = await a.run(`document.querySelector(${JSON.stringify(wholeButton)})?.closest('.details-tool').querySelector('.details-tool-line').textContent ?? ''`);
+  check('the opened row’s Claude Code line turns the whole plugin off, saying what goes with it', /Turns the whole plugin issue-tracker off in Claude Code, with its 1 MCP server\.$/.test(triageLine)
+    && await a.text(wholeButton) === 'Turn the plugin off', [triageLine, await a.text(wholeButton)]);
   // A click on it applies at once, with Claude Code's own command (a stand-in here): the result leads with the skill clicked,
   // and its Undo turns the plugin back on there.
   const settingsAt = pluginSettingsNow() ?? '{}';
   const issueTrackerStub = `#!/bin/sh\ncase "$*" in\n  "plugin disable issue-tracker@ck-test-market --scope user") printf '{"enabledPlugins":{"issue-tracker@ck-test-market":false}}' > "$HOME/.claude/settings.json" ;;\n  "plugin enable issue-tracker@ck-test-market --scope user") printf '%s' '${settingsAt}' > "$HOME/.claude/settings.json" ;;\n  *) exit 9 ;;\nesac\n`;
   writeFileSync(claudeStub, issueTrackerStub);
   const wholeOff = () => JSON.parse(pluginSettingsNow() ?? '{}').enabledPlugins?.['issue-tracker@ck-test-market'] === false;
-  await a.click(`#${rowPart('enable', 'skills', 'triage', 'claude-cli')}`);
+  await a.click(wholeButton);
   for (let tries = 0; tries < 60 && !(await a.exists('#outcome-undo-plugin')); tries++) await wait(100);
-  check('the opened row’s switch applies at once, and its result leads with the skill', wholeOff() && await cellState(a, 'skills', 'triage', 'claude-cli') === 'plugin-off'
+  check('the opened row’s button applies at once, and its result leads with the skill', wholeOff() && await cellState(a, 'skills', 'triage', 'claude-cli') === 'plugin-off'
     && /triage is off in Claude Code\. Its whole plugin issue-tracker was turned off there, with its MCP server issues\./.test(await a.text('#header') ?? ''), [pluginSettingsNow(), await a.text('#header')]);
   await a.click('#outcome-undo-plugin');
   for (let tries = 0; tries < 60 && (wholeOff() || !/Undone: triage/.test(await a.text('#header') ?? '')); tries++) await wait(100);
@@ -13923,9 +13923,9 @@ async function heldWholeInstallsPage() {
   await sizeTo(a, 1316, 819);
   await a.settle();
   if (shots) await a.shot('held-whole-installs-row-1316');
-  same('Pi holds the first text again; Claude Code and Codex keep the second through the plugin, with their marks and switches on the opened row',
+  same('Pi holds the first text again; Claude Code and Codex keep the second through the plugin, with their marks, and Claude Code’s whole-plugin button and Codex’s switch on the opened row',
     [piText(), await cellState(a, 'skills', 'triage', 'claude-cli'), await cellState(a, 'skills', 'triage', 'codex-cli'),
-      await a.exists(byId(rowPart('enable', 'skills', 'triage', 'claude-cli'))), await a.exists(byId(rowPart('enable', 'skills', 'triage', 'codex-cli')))],
+      await a.exists(byId(rowPart('line', 'skills', 'triage', 'claude-cli'))), await a.exists(byId(rowPart('enable', 'skills', 'triage', 'codex-cli')))],
     [first.trim().split('\n').at(-1), 'plugin', 'plugin', true, true]);
   await fullSize(a);
   same('no page errors, the whole installs beside a version taken back', a.pageErrors, []);
@@ -14883,6 +14883,9 @@ if (tool === 'claude') {
   const open = async (kind, key) => { await openKind(a, kind); await until(() => a.exists(byId(rowPart('open', kind, key)))); if (!(await a.exists(`.ov-row.open[data-key="${row(kind, key)}"]`))) await a.click(byId(rowPart('open', kind, key))); };
   const lineOf = tool => a.run(`(() => { const head = [...document.querySelectorAll('.details .details-tool-head')].find(each => each.querySelector('.details-tool-label strong')?.textContent === ${JSON.stringify(tool)}); return head ? head.querySelector('.details-tool-line').textContent : null; })()`);
   // A line's result, on its own line under the tool's line (the usage line's place): its words, and whether its Undo is there.
+  // The one place a result is: on its line, or in the header when its line wasn't on screen as its act ended; its Undo there.
+  const saidAnywhere = async tool => `${await a.text('#header') ?? ''} ${(await resultOf(tool))?.[0] ?? ''}`;
+  const undoLast = () => a.click(`${'.details-tool-result button.text-action'}`).catch(() => a.click('#outcome-undo'));
   const resultOf = tool => a.run(`(() => { const head = [...document.querySelectorAll('.details .details-tool-head')].find(each => each.querySelector('.details-tool-label strong')?.textContent === ${JSON.stringify(tool)}); const said = head?.parentElement.querySelector('.details-tool-result'); return said ? [said.querySelector('.details-tool-result-text').textContent, !!said.querySelector('button')] : null; })()`);
   const act = (kind, key, tool) => byId(rowPart('line', kind, key, tool));
   const label = selector => a.run(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? null`);
@@ -14931,11 +14934,15 @@ if (tool === 'claude') {
   const installedLine = await lineOf('Copilot CLI'), installedSaid = await resultOf('Copilot CLI');
   check('done: its result has a line of its own under Copilot CLI’s, counted from its copy as read again, with what Copilot CLI needs and Undo; the line’s sentence is the next act’s alone',
     /^Installed varo-incident-response in Copilot CLI, with its 1 skill, 1 MCP server and 1 agent\. In Copilot CLI, start a new session\.$/.test(installedSaid?.[0] ?? '') && installedSaid?.[1]
-    && installedLine === 'Inside varo-incident-response 1.10.0, on here. Turns the whole plugin varo-incident-response off in Copilot CLI, with its 1 skill and 1 MCP server.' && await a.exists('#outcome-undo'), [installedLine, installedSaid]);
+    && installedLine === 'Inside varo-incident-response 1.10.0, on here. Turns the whole plugin varo-incident-response off in Copilot CLI, with its 1 skill and 1 MCP server.', [installedLine, installedSaid]);
   // Pictured at the smallest window (the rail, then the sidebar open) and the largest.
   const pictures = async name => { if (!shots) return; for (const [width, height, rail] of [[...SMALLEST, true], [...SMALLEST, false], [2560, 1440, false]]) {
     await sizeTo(a, width, height); if (await a.run(`document.body.classList.contains('rail')`) !== rail) await a.click('#sidebar-toggle'); await a.shot(`${name}-${width}${rail ? '-rail' : ''}`); } await fullSize(a); };
   await pictures('lines-agent-installed');
+  same('one result for one act: on its line, while the line is on screen, and not in the header too', [await a.exists('#outcome-undo'), /Installed varo-incident-response/.test(await a.text('#header') ?? '')], [false, false]);
+  await a.click('#nav-overview');
+  await open('agents', lead);
+  same('its result stays on its line when he comes back to the Library', (await resultOf('Copilot CLI'))?.[0]?.startsWith('Installed varo-incident-response in Copilot CLI'), true);
   const byLine = left(home);
   for (const [at, what] of ['the plugins record', 'Copilot CLI’s config.json', 'Copilot CLI’s settings.json'].entries()) same(`the install from the line leaves ${what} byte for byte as the box’s tick did`, byLine[at], installedByBox[at]);
   // A new act on the plugin retires the last one's result and its Undo, in the header and on its line: Codex's install of the
@@ -14976,12 +14983,12 @@ if (tool === 'claude') {
   const entryNow = name => JSON.parse(readNow(join(home, '.central-knot/plugins.json'))).plugins.find(each => each.plugin === name);
   await open('skills', triage);
   await until(() => a.exists(act('skills', triage, 'pi-cli')));
-  same('Pi’s line puts its items there, counting what Pi holds', [await label(act('skills', triage, 'pi-cli')), await lineOf('Pi')], ['Put its items here', 'varo-incident-response’s 1 skill, 1 agent and 1 MCP server go into Pi, following the plugin.']);
+  same('Pi’s line puts its items there, saying what kinds and promising no number', [await label(act('skills', triage, 'pi-cli')), await lineOf('Pi')], ['Put its items here', 'Puts varo-incident-response’s skills, agents and MCP servers into Pi, following the plugin.']);
   const placedBefore = entryNow(plugin);
   await a.click(act('skills', triage, 'pi-cli'));
   await until(() => existsSync(join(home, '.pi/agent/skills/incident-triage/SKILL.md')));
   check('placed: the row only through the plugin has gone, its result and Undo stay in the header', !(await a.exists(`.ov-row[data-key="${row('skills', triage)}"]`)) && await a.exists('#outcome-undo')
-    && /Put 1 skill, 1 MCP server and 1 agent of varo-incident-response in Pi\./.test(await a.text('#header') ?? ''), await a.text('#header'));
+    && /Put varo-incident-response’s items in Pi: 3 of its 3 items are on in Pi\./.test(await a.text('#header') ?? ''), await a.text('#header'));
   if (shots) { await sizeTo(a, 1316, 819); await a.shot('lines-placed-row-gone-1316'); await fullSize(a); }
   const placedResult = await a.run(`document.querySelector('#outcome-undo') && true`);
   await open('skills', 'incident-triage');
@@ -14989,24 +14996,34 @@ if (tool === 'claude') {
   await open('skills', `${plugin}@ck-test-market/incident-extra`);
   same('the item Claude Code’s copy has and the marketplace’s doesn’t: its Pi line says so, with no button', [await lineOf('Pi'), await a.exists(act('skills', `${plugin}@ck-test-market/incident-extra`, 'pi-cli'))],
     ['varo-incident-response’s other items are in Pi, following the plugin; this one isn’t.', false]);
-  await a.click('#outcome-undo');
+  await undoLast();
   await idle();
   same('its Undo takes the items out of Pi and puts the record back', [existsSync(join(home, '.pi/agent/skills/incident-triage/SKILL.md')), entryNow(plugin)], [false, placedBefore]);
   await open('skills', 'incident-triage');
   await until(() => a.exists(act('skills', 'incident-triage', 'pi-cli')));
   same('after the Undo its items are in the Library, off, and Pi’s line can put them there again', [await switchOn(a, 'skills', 'incident-triage'), await label(act('skills', 'incident-triage', 'pi-cli'))], [false, 'Put its items here']);
+  // Put there again from the Off row, which turns On and moves: Pi's line has the item's switch and the result, with its Undo.
+  await a.click(act('skills', 'incident-triage', 'pi-cli'));
+  await until(() => existsSync(join(home, '.pi/agent/skills/incident-triage/SKILL.md')));
+  await idle();
+  await open('skills', 'incident-triage');
+  const piSaid = await resultOf('Pi');
+  same('placed from the Off row: Pi’s line keeps its switch, and the result is on it, with Undo', [await a.exists(byId(rowPart('enable', 'skills', 'incident-triage', 'pi-cli'))), /^Put varo-incident-response’s items in Pi/.test(piSaid?.[0] ?? ''), piSaid?.[1]], [true, true, true]);
+  await a.run(`(document.querySelector(${JSON.stringify(byId(rowPart('line-undo', 'skills', 'incident-triage', 'pi-cli')))}) ?? document.querySelector('#outcome-undo')).click()`);
+  await idle();
+  same('and its Undo takes them out again', existsSync(join(home, '.pi/agent/skills/incident-triage/SKILL.md')), false);
   // A name OpenCode has of his own stays his: the line says so before the click, and the result after, from what was placed.
   skill(join(home, '.config/opencode/skills'), 'incident-triage', text('incident-triage', 'Mine, not the plugin’s.'));
   await a.click('#header-refresh');
   await open('agents', 'incident-lead');
   await until(() => a.exists(act('agents', 'incident-lead', 'opencode-cli')));
-  same('OpenCode’s line counts what will go in, and names his own that stays', [await label(act('agents', 'incident-lead', 'opencode-cli')), await lineOf('OpenCode')],
-    ['Put its items here', 'varo-incident-response’s 1 agent and 1 MCP server go into OpenCode, following the plugin. Your own incident-triage stays as it is.']);
+  same('OpenCode’s line names his own that stays, and promises no number', [await label(act('agents', 'incident-lead', 'opencode-cli')), await lineOf('OpenCode')],
+    ['Put its items here', 'Puts varo-incident-response’s skills, agents and MCP servers into OpenCode, following the plugin. Your own incident-triage stays as it is.']);
   await a.click(act('agents', 'incident-lead', 'opencode-cli'));
-  await until(async () => / in OpenCode\./.test(await a.text('#header') ?? ''), 300);
-  check('the result counts what was put there, and names his own that stayed', /Put 1 MCP server and 1 agent of varo-incident-response in OpenCode\. Your own incident-triage stays as it is\./.test(await a.text('#header') ?? '')
-    && readNow(join(home, '.config/opencode/skills/incident-triage/SKILL.md')).includes('Mine, not the plugin’s.'), await a.text('#header'));
-  await a.click('#outcome-undo');
+  await until(async () => /in OpenCode:/.test(await saidAnywhere('OpenCode')), 300);
+  check('the result counts what the placement put there, and names his own it left, from its own report', /Put varo-incident-response’s items in OpenCode: 2 of its 3 items are on in OpenCode\. incident-triage: /.test(await saidAnywhere('OpenCode'))
+    && readNow(join(home, '.config/opencode/skills/incident-triage/SKILL.md')).includes('Mine, not the plugin’s.'), await saidAnywhere('OpenCode'));
+  await undoLast();
   await idle();
 
   // An item's switch and a plugin's turn, in each order: each Undo puts back only its own.
@@ -15024,7 +15041,7 @@ if (tool === 'claude') {
   await until(() => inCopilot(), 300);
   await idle();
   same('installed by hand with no entry: its line installs it in Copilot CLI, and the turn makes its entry', [!!entryNow('document-tools'), entryNow('document-tools')?.except.includes('copilot-cli')], [true, false]);
-  await a.click('#outcome-undo');
+  await undoLast();
   await idle();
   same('the switch, then a turn: the turn’s Undo leaves the switch as it was, and takes the plugin and its entry back out', [claudeDenied(), deniedAfterSwitch > 0, inCopilot(), entryNow('document-tools')], [deniedAfterSwitch, true, false, undefined]);
   await open('mcp', 'incident-io');
@@ -15056,8 +15073,8 @@ if (tool === 'claude') {
   await a.click(`.ov-row[data-key="${row('skills', 'incident-triage')}"] .switch`);
   await idle();
   same('On, the same', [await label(act('skills', 'incident-triage', 'claude-cli')), await switchOn(a, 'skills', 'incident-triage')], ['Install the plugin', true]);
-  check('its switch’s result, its status line and its marks say those tools get it with the plugin, not that they can’t take it, nor that it is on there',
-    /incident-triage is on in Pi\./.test(await a.text('#header') ?? '') && /not in Claude Code, Copilot CLI or Codex: they get it with the plugin \(see below\)/.test(await a.text('.details-status') ?? '')
+  check('its switch’s result names only where it is on; its status line says where it is on and nothing its lines contradict; its marks say those tools get it with the plugin',
+    /incident-triage is on in Pi\./.test(await a.text('#header') ?? '') && /^On in Pi( · kept out of [^·]*)?$/.test(await a.text('.details-status') ?? '')
     && await a.run(`['claude-cli', 'copilot-cli', 'codex-cli'].every(tool => document.getElementById(${JSON.stringify(rowPart('cell', 'skills', 'incident-triage'))} + '-' + tool)?.dataset.state === 'with-plugin')`), [await a.text('#header'), await a.text('.details-status')]);
   if (shots) for (const [width, height, rail] of [[...SMALLEST, true], [1316, 819, false], [2560, 1440, false]]) {
     await sizeTo(a, width, height);
@@ -15074,8 +15091,8 @@ if (tool === 'claude') {
   if (shots) for (const [width, height] of [SMALLEST, [2560, 1440]]) { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false }); await wait(300); await a.shot(`lines-skill-installing-and-waiting-${width}`); }
   rmSync(join(home, 'slow'));
   await until(() => JSON.parse(readNow(claudeRecord) || '{"plugins":{}}').plugins[id] !== undefined, 300);
-  await until(async () => /in Claude Code/.test(await a.text('#header') ?? ''), 100);
-  check('it ran after it: the plugin installed in Claude Code from the entry’s marketplace', /Installed varo-incident-response in Claude Code/.test(await a.text('#header') ?? ''), await a.text('#header'));
+  await until(async () => /Installed varo-incident-response in Claude Code/.test(await saidAnywhere('Claude Code')), 100);
+  check('it ran after it: the plugin installed in Claude Code from the entry’s marketplace, said once, on its line', /^Installed varo-incident-response in Claude Code/.test((await resultOf('Claude Code'))?.[0] ?? '') && !/Installed varo/.test(await a.text('#header') ?? ''), await saidAnywhere('Claude Code'));
   await idle();
   if (shots) await fullSize(a);
   await pictures('lines-skill-installed');
@@ -15099,8 +15116,8 @@ if (tool === 'claude') {
   await wait(3000);
   await openKind(a, 'agents');
   await wait(FADE_WAIT);
-  check('removed while another page was open: back on the Library its result says so, and what its Undo can’t put back, with Undo, past the time a result fades', /Removed varo-incident-response from Copilot CLI\./.test(await a.text('#header') ?? '') && /Undo installs the marketplace’s copy as it is now/.test(await a.text('#header') ?? '') && await a.exists('#outcome-undo'), await a.text('#header'));
-  await a.click('#outcome-undo');
+  check('removed while another page was open: back on the Library its result is on its line, with what its Undo can’t put back and Undo, past the time a result fades', /^Removed varo-incident-response from Copilot CLI\. Undo installs the marketplace’s copy as it is now/.test((await resultOf('Copilot CLI'))?.[0] ?? '') && (await resultOf('Copilot CLI'))?.[1], await saidAnywhere('Copilot CLI'));
+  await undoLast();
   await until(() => liveOn() === true, 300);
   await idle();
   same('its Undo puts it back', liveOn(), true);
@@ -15117,13 +15134,14 @@ if (tool === 'claude') {
   writeFileSync(join(home, '.copilot/settings.json'), JSON.stringify({ ...settingsNow, enabledPlugins: { [id]: true } }));
   const callsBefore = readNow(join(home, 'copilot-calls.txt'));
   await a.click(act('agents', 'incident-lead', 'copilot-cli'));
-  await until(async () => /Nothing was run in Copilot CLI/.test(await a.text('#header') ?? ''), 300);
+  await until(async () => /Nothing was run in Copilot CLI/.test(await saidAnywhere('Copilot CLI')), 300);
   check('a stale click runs nothing, says Copilot CLI had it already and that Central Knot now keeps it there, with Undo for that', readNow(join(home, 'copilot-calls.txt')) === callsBefore
-    && /Nothing was run in Copilot CLI: it has varo-incident-response already\. Central Knot now keeps it in Copilot CLI\./.test(await a.text('#header') ?? '') && await a.exists('#outcome-undo'), [await a.text('#header'), readNow(join(home, 'copilot-calls.txt')).slice(callsBefore.length)]);
+    && /Nothing was run in Copilot CLI: it has varo-incident-response already\. Central Knot now keeps it in Copilot CLI\./.test(await saidAnywhere('Copilot CLI')) && (await resultOf('Copilot CLI'))?.[1], [await saidAnywhere('Copilot CLI'), readNow(join(home, 'copilot-calls.txt')).slice(callsBefore.length)]);
   const keptIn = entryNow(plugin).except;
-  await a.click('#outcome-undo');
+  await undoLast();
   await idle();
   same('its Undo puts the record back: Copilot CLI kept out again, nothing run', [entryNow(plugin).except.includes('copilot-cli'), keptIn.includes('copilot-cli'), readNow(join(home, 'copilot-calls.txt')) === callsBefore], [true, false, true]);
+  check('and says what it did', /Undone: Central Knot keeps varo-incident-response out of Copilot CLI again\./.test(`${await a.text('#header')} ${(await resultOf('Copilot CLI'))?.[0]}`), [await a.text('#header'), await resultOf('Copilot CLI')]);
 
   // Example 9: a plugin whose marketplace is added nowhere here: no button, and why.
   await open('skills', 'lone-tool@other-market/lone');
@@ -15137,6 +15155,49 @@ if (tool === 'claude') {
   await fullSize(a);
   same('no page errors', a.pageErrors, []);
   await a.quit();
+
+  // A result and its Undo belong to the home its act ran in: an install that ends while Overview is open, then another home
+  // opened (the dialog answered in the main process, which only a development run opens to the checks).
+  const homeA = join(scratch, 'home-lines-a'), homeB = join(scratch, 'home-lines-b');
+  for (const each of [homeA, homeB]) cpSync(seeded, each, { recursive: true });
+  const c = await start('lines-homes', homeA);
+  if (c.inspect) {
+    const main = await c.main();
+    try { await main.run(`(electron.dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [${JSON.stringify(homeB)}] }), true)`); } finally { main.close(); }
+    writeFileSync(join(homeA, 'slow'), '');
+    const opened = async () => { await openKind(c, 'agents'); await until(() => c.exists(byId(rowPart('open', 'agents', lead)))); if (!(await c.exists(`.ov-row.open[data-key="${row('agents', lead)}"]`))) await c.click(byId(rowPart('open', 'agents', lead))); };
+    await opened();
+    await until(() => c.exists(`${act('agents', lead, 'copilot-cli')}:not([disabled])`));
+    await c.run(`document.querySelector(${JSON.stringify(act('agents', lead, 'copilot-cli'))}).click()`);
+    await c.run(`document.getElementById('nav-overview').click()`);
+    await until(() => readNow(join(homeA, '.copilot/config.json')).includes(plugin), 300);
+    await wait(3000);
+    const homeBBefore = left(homeB);
+    await c.click('#home-custom');
+    await until(async () => (await c.text('#home-label') ?? '').includes('home-lines-b'));
+    await opened();
+    await c.click('#nav-overview');
+    await opened();
+    same('in another home, the first home’s result and its Undo are gone, and nothing of it acts there', [await c.exists('#outcome-undo'), await c.exists('.details-tool-result'), left(homeB)], [false, false, homeBBefore]);
+    // Starting an act on a plugin from the Library retires its Undo on the Plugins page: the box's install, then the line's.
+    await c.click('#nav-plugins');
+    await until(() => c.exists(`#popen-0-${plugin}`) || c.exists(`#pbox-0-${plugin}-copilot-cli`));
+    if (!(await c.exists(`#pbox-0-${plugin}-copilot-cli`))) await c.click(`#popen-0-${plugin}`);
+    await until(() => c.exists(`#pbox-0-${plugin}-copilot-cli:not([disabled])`));
+    await c.click(`#pbox-0-${plugin}-copilot-cli`);
+    await until(() => c.exists('#plugins-undo'), 300);
+    await openKind(c, 'skills');
+    await until(() => c.exists(byId(rowPart('open', 'skills', triage))));
+    await c.click(byId(rowPart('open', 'skills', triage)));
+    await until(() => c.exists(`${act('skills', triage, 'codex-cli')}:not([disabled])`));
+    await c.click(act('skills', triage, 'codex-cli'));
+    await until(async () => /Not installed in Codex/.test(`${await c.text('#header')} ${await c.text('.details')}`), 300);
+    await c.click('#nav-plugins');
+    await until(() => c.exists(`#pbox-0-${plugin}-copilot-cli`));
+    same('an act on the plugin from the Library retired its Undo on the Plugins page', await c.exists('#plugins-undo'), false);
+  } else console.log('No main-process inspector: skipping a result’s home and the Plugins page’s Undo retired by a line.');
+  same('two homes: no page errors', c.pageErrors, []);
+  await c.quit();
 }
 
 const groups = [

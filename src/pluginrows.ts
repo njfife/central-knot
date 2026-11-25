@@ -181,30 +181,20 @@ export function handledWhere(row: PluginRow): string {
 export function withPluginOnly(home: Pick<HomeView, 'pluginItems' | Page> | undefined, page: Page, row: { fromSource?: { link: string }; on?: boolean; except?: readonly string[] }): HarnessId[] {
   const link = row.fromSource?.link ?? '', plugin = pluginOf(link), marketName = pluginMarketOf(link);
   if (!home || !plugin) return [];
-  return kindSource(home, page).tools.filter(tool => takesPlugins(tool) && !keptOutOf(row, tool)
+  return kindSource(home, page).tools.filter(tool => takesPlugins(tool) && !(row.on && row.except?.includes(tool))
     && !home.pluginItems?.some(install => install.tool === tool && install.plugin === plugin && install.marketName === marketName));
 }
 
-/** Whether a library item is On and kept out of the tool: there its own switch lets it in, whatever its plugin. */
-export const keptOutOf = (row: { on?: boolean; except?: readonly string[] }, tool: string) => !!row.on && !!row.except?.includes(tool);
-
 /**
- * What a tool that takes no plugins has of a plugin now: Central Knot's copies that follow it (`placed`: a library item from the
- * plugin whose copy there is its current version), and the names of its items there that are his own (`yours`: any other copy of
- * one of its names, which a placement leaves his: library.ts TAKE). Its names: its items as any tool has it installed, and its
- * items in the library. A line's sentence names `yours` before a placement (pluginline.ts), its result both after (pluginstate.ts runLine).
+ * The names of a plugin's items a tool has of his own (any copy there but Central Knot's current copy of an item from the plugin),
+ * which an install or a placement leaves his (library.ts TAKE). Its names: its items as any tool has it installed, and its items in
+ * the library. A line's sentence names them before its act (pluginline.ts yoursStay).
  */
-export function placedIn(home: HomeView, plugin: string, marketName: string, tool: HarnessId): { placed: PartRef[]; yours: PartRef[] } {
-  const link = pluginLink(plugin, marketName), placed: PartRef[] = [], yours: PartRef[] = [];
+export function yoursIn(home: HomeView, plugin: string, marketName: string, tool: HarnessId): PartRef[] {
+  const link = pluginLink(plugin, marketName);
   const installed = (home.pluginItems ?? []).filter(install => install.plugin === plugin && install.marketName === marketName).flatMap(install => install.items);
-  for (const page of ['skills', 'mcp', 'agents'] as const) {
-    const kind = partOfPage[page], view = home[page];
-    if (!view.tools.includes(tool)) continue;
-    for (const fact of view.items) {
-      const copy = fact.copies[tool], linked = fact.fromSource?.link === link, part = { kind, name: fact.name };
-      if (linked && copy && copy.hash === view.library[fact.key]?.hash) placed.push(part);
-      else if (copy && (linked || installed.some(item => samePart(item, part)))) yours.push(part);
-    }
-  }
-  return { placed, yours };
+  return (['skills', 'mcp', 'agents'] as const).flatMap(page => (home[page].tools.includes(tool) ? home[page].items : []).flatMap(fact => {
+    const copy = fact.copies[tool], linked = fact.fromSource?.link === link, part = { kind: partOfPage[page], name: fact.name };
+    return copy && (linked ? copy.hash !== home[page].library[fact.key]?.hash : installed.some(item => samePart(item, part))) ? [part] : [];
+  }));
 }

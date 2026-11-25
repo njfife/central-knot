@@ -29,7 +29,7 @@ import { asksWhichCopy, copiesDiffer, libraryWords, placeOf, stillReadWords } fr
 import { andList, countedAs, fewNames, fileName, kindNames, kindNouns, noToolsSentence, notAllThrough, orList, rowNames, rowNouns, saidByKind, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform, shownFromHome } from './machine.ts';
-import { closeRun, endListNews, fadeRun, loadPlugins, overRun, resetMarket, unsaidFor } from './pluginstate.ts';
+import { closeRun, endListNews, fadeRun, forgetResults, loadPlugins, overRun, resetMarket, retire } from './pluginstate.ts';
 import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, type LastRun, type PluginDone, type PluginOp } from './pluginplan.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
@@ -262,7 +262,7 @@ function fadeNow(): void {
   if (acting() || !windowVisible()) return;
   if (heldInHeader()) { fading = setTimeout(() => (heldInHeader() ? fadeNow() : fadeLater()), 250); return; }
   const outcome = state.outcome;
-  if (!outcome?.keep && (outcome?.fade || (outcome && resultInHeader() && !outcome.warn && !outcome.reasons?.length))) state.outcome = undefined;
+  if (outcome?.fade || (outcome && resultInHeader() && !outcome.warn && !outcome.reasons?.length)) state.outcome = undefined;
   // Drawn only when a result went: a redraw that changes nothing would replace a text field he is typing in, and its Undo.
   if (fadeRun() || state.outcome !== outcome) rerender();
 }
@@ -603,7 +603,7 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   const reloads = [...own, ...(plugged ? pluginReloads(plugged.done) : [])];
   return { kept, did: done, reloads, refused: done || !refusal ? undefined : refusal.message, changed, undo, along, focus: click.focus?.(),
     outcome: withReloads({ page, items: click.items, rows: click.rows, warn: warned || !!click.also?.length || !!refusal, band: true, fade: click.undoing && !warned,
-      text, reasons: [...(done && refusal ? [refusal.message] : []), ...switchReasons(plugged, click.also)], act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: () => void undoClick({ rows: changed, focus: click.focus, regroups: click.regroups }, [undo]) } }, reloads) };
+      text, reasons: [...(done && refusal ? [refusal.message] : []), ...switchReasons(plugged, click.also)], plugins: [...new Set(back.map(op => op.plugin))], act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: () => void undoClick({ rows: changed, focus: click.focus, regroups: click.regroups }, [undo]) } }, reloads) };
 }
 
 /**
@@ -622,7 +622,7 @@ async function switchesOnly(click: Click, ops: PluginOp[], page: Page): Promise<
   const reloads = pluginReloads(ran.done);
   return { did: ran.done.some(entry => succeeded(entry.report)), reloads, along: worked ? click.plugins?.said : undefined, undo,
     outcome: withReloads({ page, items: click.items, rows: click.rows, text, reasons: switchReasons(ran, click.also), warn: !worked || !!click.also?.length, band: true, fade: click.undoing && worked,
-      act: undo && { label: 'Undo', id: 'outcome-undo-plugin', title: 'Turn them back as they were', run: () => void applyClick(back) } }, reloads) };
+      plugins: [...new Set(ran.back.map(op => op.plugin))], act: undo && { label: 'Undo', id: 'outcome-undo-plugin', title: 'Turn them back as they were', run: () => void applyClick(back) } }, reloads) };
 }
 
 /** A click applied at once, under busy: one tool's control in an opened row, Delete, Make current, Resume, a copy chosen (Turn these off: applyByKind). */
@@ -876,8 +876,10 @@ export const problemKey = (entry: DestinationResult) => `problem:${entry.of ?? '
  * and the choices that turn it all back.
  */
 export async function runSwitches(ops: PluginOp[], undo = false) {
-  // A plugin changes here as it does on its own page: the Plugins list's rows from before are no longer true (pluginstate.ts).
+  // A plugin changes here as it does on its own page: the Plugins list's rows from before are no longer true (pluginstate.ts), and
+  // each plugin's earlier results and their Undo go (pluginstate.ts retire).
   endListNews();
+  for (const plugin of new Set(ops.map(op => op.plugin))) retire(plugin);
   const home = state.home!.home;
   const plan = { install: api().installPlugin, uninstall: api().uninstallPlugin, setSkill: api().setPluginSkill, setPart: api().setPluginPart, setWhole: api().setPluginOn };
   const result = await runPlan(ops, plan, home);
@@ -967,8 +969,9 @@ export const startHome = () => busy('Reading skills, MCP servers and agents…',
 export async function readAgain() {
   let read = false;
   unpin();
-  // What a list of plugin clicks said is not restated over a home read again.
+  // What a list of plugin clicks said is not restated over a home read again, nor a line's result (pluginstate.ts LineResult).
   endListNews();
+  forgetResults();
   await busy(noToolManaged() ? 'Reading…' : `Reading ${heldKindNames()}…`, async () => {
     const view = await api().refresh(true);
     if (!view) return;
@@ -1057,8 +1060,7 @@ export function leaveResults(page = state.page) {
   if (!clickList.running) endRun();
   const carried = state.outcome?.carry ? { ...state.outcome, page, carry: false } : undefined;
   state.skillsResult = undefined; state.mcpResult = undefined; state.agentsResult = undefined;
-  // A line's plugin turn that ended while another page was open is said as its page opens (pluginstate.ts unsaidFor).
-  tell(carried ?? unsaidFor(page));
+  tell(carried);
 }
 
 let moveRequested: 'visit' | 'back' | undefined;
@@ -1267,8 +1269,8 @@ export interface Outcome {
   band?: boolean;
   /** The band goes after a few seconds: an Undo's confirmation. */
   fade?: boolean;
-  /** It stays until closed or another result takes its place, however long it is up: a line's plugin turn, which can take minutes (pluginstate.ts runLine). */
-  keep?: boolean;
+  /** The plugins whose acts its Undo turns back: an act on one of them, from either page, retires it (pluginstate.ts retire). */
+  plugins?: string[];
   undo?: { id: string; label: string };
   act?: {
     label: string; id: string; run: () => void; title?: string;
