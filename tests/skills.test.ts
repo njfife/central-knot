@@ -119,6 +119,18 @@ test('Two edits: the latest wins by the folder’s time, where a file removed in
   } finally { await box.cleanup(); }
 });
 
+test('A copy whose files are older than its folder keeps the folder’s time outside the copy question: in its details, and as the version taken in', async () => {
+  const box = await sandbox();
+  try {
+    await put(box, 'claude-cli');
+    await utimes(join(folderOf(box, 'claude-cli'), 'SKILL.md'), at(0), at(0));
+    await utimes(folderOf(box, 'claude-cli'), at(30), at(30));
+    assert.equal((await seen(box)).fact!.copies['claude-cli']!.modified, at(30).toISOString(), 'its details');
+    await turnOn(box);
+    assert.deepEqual((await itemOf(box))!.versions.map(version => version.at), [at(30).toISOString()], 'its version’s time, as History says it');
+  } finally { await box.cleanup(); }
+});
+
 test('Two edits a minute apart: History and the notice call the later one the latest; two saved in the same millisecond: the times can’t tell, and neither do they', async () => {
   const box = await sandbox();
   try {

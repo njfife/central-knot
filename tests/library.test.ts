@@ -385,7 +385,7 @@ test('A record’s value is an item only with each field of the type it holds (w
 
 // ---------- takeInAnswer: the FOUND table, row by row, a click's column and Synchronize everything's ----------
 
-const copy = (harness: 'claude-cli' | 'codex-cli' | 'copilot-cli', hash: string, more: { at?: number; switchedOff?: true } = {}) => ({ harness, hash, ...more });
+const copy = (harness: 'claude-cli' | 'codex-cli' | 'copilot-cli', hash: string, more: { at?: number; filesAt?: number; switchedOff?: true } = {}) => ({ harness, hash, ...more });
 const found = (copies: ReturnType<typeof copy>[], more: { deleted?: boolean } = {}) => ({ copies, deleted: false, ...more });
 /** Both columns' answers for one found key. */
 const both = (key: ReturnType<typeof found>, settle?: { clock: number; ms: number }) => [takeInAnswer('click', key), takeInAnswer('rule', key, undefined, settle)];
@@ -423,26 +423,41 @@ test('Found, copies that differ and none chosen: a click waits for the row’s q
 // ---------- latestCopy: which of the copies that differ is the latest ----------
 
 test('The latest copy is the content changed last, a second or more after every other', () => {
-  assert.equal(latestCopy([{ hash: 'a', at: 1_000 }, { hash: 'x', at: 2_000 }]), 'x');
-  assert.equal(latestCopy([{ hash: 'x', at: 9_000 }, { hash: 'a', at: 2_000 }, { hash: 'b', at: 4_000 }]), 'x', 'of three');
+  assert.equal(latestCopy([{ hash: 'a', at: 1_000 }, { hash: 'x', at: 2_000 }]).latest, 'x');
+  assert.equal(latestCopy([{ hash: 'x', at: 9_000 }, { hash: 'a', at: 2_000 }, { hash: 'b', at: 4_000 }]).latest, 'x', 'of three');
 });
 test('A content was made when its earliest copy was changed: a copy written later that only carries it doesn’t make it the latest', () =>
   // 'a' was edited at 1 s and copied to Codex at 9 s; 'x' was edited at 5 s, after 'a' was.
-  assert.equal(latestCopy([{ hash: 'a', at: 1_000 }, { hash: 'a', at: 9_000 }, { hash: 'x', at: 5_000 }]), 'x'));
+  assert.equal(latestCopy([{ hash: 'a', at: 1_000 }, { hash: 'a', at: 9_000 }, { hash: 'x', at: 5_000 }]).latest, 'x'));
 test('No latest where a copy has no time of its own (an MCP entry): no dates to go by', () => {
-  assert.equal(latestCopy([{ hash: 'a' }, { hash: 'x' }]), undefined);
-  assert.equal(latestCopy([{ hash: 'a', at: 1_000 }, { hash: 'x' }]), undefined, 'one timed copy is not enough');
-  assert.equal(latestCopy([{ hash: 'a', at: 1_000 }, { hash: 'b', at: 5_000 }, { hash: 'x' }]), undefined, 'one copy with no time, and the others can’t be ordered against it');
+  assert.equal(latestCopy([{ hash: 'a' }, { hash: 'x' }]).latest, undefined);
+  assert.equal(latestCopy([{ hash: 'a', at: 1_000 }, { hash: 'x' }]).latest, undefined, 'one timed copy is not enough');
+  assert.equal(latestCopy([{ hash: 'a', at: 1_000 }, { hash: 'b', at: 5_000 }, { hash: 'x' }]).latest, undefined, 'one copy with no time, and the others can’t be ordered against it');
 });
-test('No latest where the last two contents were changed less than a second apart (saved in the same second); one second apart is enough', () => {
-  assert.equal(latestCopy([{ hash: 'a', at: 10_000 }, { hash: 'x', at: 10_999 }]), undefined);
-  assert.equal(latestCopy([{ hash: 'a', at: 10_000 }, { hash: 'x', at: 10_000 }]), undefined, 'the very same time');
-  assert.equal(latestCopy([{ hash: 'a', at: 10_000 }, { hash: 'x', at: 11_000 }]), 'x');
+test('No latest where the last two contents were changed less than a second apart (saved in the same second) and have no files’ times of their own; one second apart is enough', () => {
+  assert.equal(latestCopy([{ hash: 'a', at: 10_000 }, { hash: 'x', at: 10_999 }]).latest, undefined);
+  assert.equal(latestCopy([{ hash: 'a', at: 10_000 }, { hash: 'x', at: 10_000 }]).latest, undefined, 'the very same time');
+  assert.equal(latestCopy([{ hash: 'a', at: 10_000 }, { hash: 'x', at: 11_000 }]).latest, 'x');
 });
-test('No latest among copies that are all the same: there is nothing to choose', () => assert.equal(latestCopy([{ hash: 'a', at: 1_000 }, { hash: 'a', at: 5_000 }]), undefined));
+test('No latest among copies that are all the same: there is nothing to choose', () => assert.equal(latestCopy([{ hash: 'a', at: 1_000 }, { hash: 'a', at: 5_000 }]).latest, undefined));
 test('Known weakness, as written in latestCopy: a copy Central Knot wrote later carries that write’s time, so its older content reads as the latest', () =>
   // The person edited Claude Code's copy to 'b' at 5 s; Central Knot had written 'a' into Codex at 8 s (a tool that was behind).
-  assert.equal(latestCopy([{ hash: 'b', at: 5_000 }, { hash: 'a', at: 8_000 }]), 'a'));
+  assert.equal(latestCopy([{ hash: 'b', at: 5_000 }, { hash: 'a', at: 8_000 }]).latest, 'a'));
+const HOUR = 3_600_000, unpacked = 100 * HOUR;
+test('Two skill folders unpacked at one moment tie by their copies’ times: their files’ own times tell the latest, and the answer says them', () => {
+  // Claude Code's SKILL.md was saved 48 hours before the unpacking, Codex's 2 hours before; both folders have the unpacking's time.
+  const copies = [copy('claude-cli', 'a', { at: unpacked, filesAt: unpacked - 48 * HOUR }), copy('codex-cli', 'x', { at: unpacked, filesAt: unpacked - 2 * HOUR })];
+  const said = { wait: 'choice', latest: 'x', filesAt: { a: unpacked - 48 * HOUR, x: unpacked - 2 * HOUR } };
+  assert.deepEqual(both(found(copies)), [said, said], 'the question and Synchronize everything’s Use the latest for the rest');
+});
+test('Of three contents, only those tied with the last by their copies’ times are compared by their files: an older one never wins, though its files are the newest', () =>
+  // 'c' was changed two seconds before the tied two, and its files are newer than theirs: it is out before the files are compared.
+  assert.deepEqual(latestCopy([{ hash: 'a', at: unpacked, filesAt: unpacked - 25 * HOUR }, { hash: 'b', at: unpacked, filesAt: unpacked - HOUR }, { hash: 'c', at: unpacked - 2_000, filesAt: unpacked - 2_000 }]),
+    { latest: 'b', filesAt: { a: unpacked - 25 * HOUR, b: unpacked - HOUR } }));
+test('No latest where the copies’ times tie and their files’ times tie too, or a tied content has no files’ time (an agent’s file): no dates to go by', () => {
+  assert.deepEqual(latestCopy([{ hash: 'a', at: unpacked, filesAt: unpacked - HOUR }, { hash: 'x', at: unpacked, filesAt: unpacked - HOUR + 999 }]), {});
+  assert.deepEqual(latestCopy([{ hash: 'a', at: unpacked, filesAt: unpacked - HOUR }, { hash: 'x', at: unpacked + 500 }]), {});
+});
 test('Found otherwise: taken in from the one content (first harness), or from the copy a click chose', () => {
   assert.deepEqual(both(found([copy('claude-cli', 'a'), copy('codex-cli', 'a')])), [{ take: copy('claude-cli', 'a'), chosen: false }, { take: copy('claude-cli', 'a'), chosen: false }]);
   assert.deepEqual(takeInAnswer('click', found([copy('claude-cli', 'a'), copy('codex-cli', 'x')]), { harness: 'codex-cli', hash: 'x' }), { take: copy('codex-cli', 'x'), chosen: true });

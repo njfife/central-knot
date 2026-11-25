@@ -802,10 +802,12 @@ function compareChoices(t: Table, skill: ItemRow, inFiles = false, then?: () => 
   // A choice turns it on everywhere: every tool that can hold it and has no copy gets the chosen one.
   const receiving = tools.filter(tool => !skill.cannot?.[tool] && skill.copies[tool] === undefined);
   // The copy changed last is the engine's answer (library.ts latestCopy, in the take-in answer); none where no date tells.
-  const asked = skill.takeInAnswers?.click, latestHash = asked && 'wait' in asked ? asked.latest : undefined;
-  const latest = groups.find(([tool]) => skill.hashes?.[tool] === latestHash);
-  // When a group's content was made, for its line: when its earliest copy was changed (as latestCopy reads it).
-  const editedAt = groups.map(group => Math.min(...group.map(tool => Date.parse(versions[tool]?.at ?? ''))));
+  const asked = skill.takeInAnswers?.click, waiting = asked && 'wait' in asked ? asked : undefined;
+  const latest = groups.find(([tool]) => skill.hashes?.[tool] === waiting?.latest);
+  // When a group's content was made, for its line, as latestCopy compared it: its files' time where those told the latest (the
+  // copies' times tied), else when its earliest copy was changed.
+  const filesAt = ([tool]: Tool[]) => waiting?.filesAt?.[skill.hashes?.[tool] ?? ''];
+  const editedAt = groups.map(group => filesAt(group) ?? Math.min(...group.map(tool => Date.parse(versions[tool]?.at ?? ''))));
   // The line under each name, in one form: the copy's size (where the sizes differ) and when it was edited ("7 lines · edited
   // 2 days ago"); none for an MCP entry, which has neither. The copy edited most recently has the line's one emphasis.
   const sizesDiffer = new Set(groups.map(([tool]) => versions[tool]?.lines)).size > 1;

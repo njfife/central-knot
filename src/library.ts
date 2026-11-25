@@ -860,6 +860,8 @@ export interface FoundCopy {
   harness: HarnessId; hash: string;
   /** When it was last changed (ms); absent where a copy has no time of its own (an MCP entry). */
   at?: number;
+  /** When its files alone were last changed (ms), where that can differ from `at` (a skill's folder); latestCopy reads it. */
+  filesAt?: number;
   /** That harness's own switch turns it off there (skillswitch.ts, mcpswitch.ts). */
   switchedOff?: true;
 }
@@ -878,9 +880,10 @@ export type TakenBy = 'click' | 'rule';
 export type LeftFound = 'held-back' | 'no-copy' | 'deleted' | 'switched-off' | 'settling' | 'choice-changed';
 /**
  * The table's answer: take it in from this copy (`chosen`: the person chose it among copies that differ), wait for a choice of
- * copy (`latest`: the content changed last, which the question preselects: latestCopy), or leave it found.
+ * copy (latestCopy's answer: the content changed last, which the question preselects, and the files' times that told it), or
+ * leave it found.
  */
-export type TakeInAnswer = { take: FoundCopy; chosen: boolean } | { wait: 'choice'; latest?: string } | { leave: LeftFound };
+export type TakeInAnswer = { take: FoundCopy; chosen: boolean } | ({ wait: 'choice' } & LatestCopy) | { leave: LeftFound };
 
 /**
  * The header's FOUND table, for one found key. `chosen`: the copy a click chose where copies differ, as the page saw it.
@@ -896,33 +899,42 @@ export function takeInAnswer(by: TakenBy, found: FoundKey, chosen?: { harness: H
   const pick = chosen && copies.find(copy => copy.harness === chosen.harness);
   if (!rule && chosen && (!pick || (chosen.hash !== undefined && pick.hash !== chosen.hash))) return { leave: 'choice-changed' };
   const differ = new Set(copies.map(copy => copy.hash)).size > 1;
-  if (differ && !pick) { const latest = latestCopy(copies); return { wait: 'choice', ...(latest ? { latest } : {}) }; }
+  if (differ && !pick) return { wait: 'choice', ...latestCopy(copies) };
   return { take: pick ?? copies[0], chosen: differ };
 }
 
 /**
- * Of a found key's copies that differ, the content changed last (its hash), which the copy question preselects (its main
- * button) and first setup's "Use the latest for the rest" takes; none where it can't be told. A content was made when its
+ * Of a found key's copies that differ, the content changed last (`latest`, its hash), which the copy question preselects (its
+ * main button) and first setup's "Use the latest for the rest" takes; none where it can't be told. A content was made when its
  * earliest copy was changed, so a copy that only carries it (written later) doesn't make it newer. None when a copy has no
- * time of its own (an MCP entry, whose time is its whole file's: "no dates to go by"), or the last two contents were changed
- * less than a second apart (a tie: some file systems, and copies made by unpacking or copying, keep a file's time only to
- * the second).
+ * time of its own (an MCP entry, whose time is its whole file's: "no dates to go by").
+ * Contents changed less than a second before the last one tie with it (some file systems, and copies made by unpacking or
+ * copying, keep a file's time only to the second). Of tied contents, the files' own times (`filesAt`) are compared the same way,
+ * by content, and where they tell the latest, said for the question's lines: a skill's folder takes the time it was made or
+ * unpacked, whatever its files'. Only the tied are compared, so an older content never wins by its files. None where a tied
+ * content has no such time (an agent's file), or the files' times tie too.
  * Known weakness: a copy Central Knot wrote carries the time of that write, not of the edit it holds; one written into a tool
  * that was behind, alone with its content, reads as changed then.
  * Not `plan`'s "latest wins", which is for an item already in the library: there two edits made in harnesses are ordered by
  * their times, a copy with no time counts as earlier than any, and a tie goes to the first harness (latestEdit); here a tie,
  * or a copy with no time, is no latest, and the person chooses.
  */
-export function latestCopy(copies: readonly Pick<FoundCopy, 'hash' | 'at'>[]): string | undefined {
-  const made = new Map<string, number>();
-  for (const { hash, at } of copies) {
-    if (at === undefined) return undefined;
-    made.set(hash, Math.min(made.get(hash) ?? Infinity, at));
-  }
-  const [last, before] = [...made].sort(([, first], [, second]) => second - first);
-  return last && before && last[1] - before[1] >= TIE_MS ? last[0] : undefined;
+export function latestCopy(copies: readonly Pick<FoundCopy, 'hash' | 'at' | 'filesAt'>[]): LatestCopy {
+  // When a content was made, by one of its times: its earliest copy's; NaN where a copy of it has no such time.
+  const made = (hash: string, time: 'at' | 'filesAt') => Math.min(...copies.filter(copy => copy.hash === hash).map(copy => copy[time] ?? NaN));
+  const contents = [...new Set(copies.map(copy => copy.hash))];
+  if (contents.length < 2 || contents.some(hash => Number.isNaN(made(hash, 'at')))) return {};
+  const last = Math.max(...contents.map(hash => made(hash, 'at')));
+  const tied = contents.filter(hash => last - made(hash, 'at') < TIE_MS);
+  if (tied.length === 1) return { latest: tied[0] };
+  if (tied.some(hash => Number.isNaN(made(hash, 'filesAt')))) return {};
+  const filesAt = Object.fromEntries(tied.map(hash => [hash, made(hash, 'filesAt')]));
+  const [first, second] = tied.sort((one, other) => filesAt[other] - filesAt[one]);
+  return filesAt[first] - filesAt[second] >= TIE_MS ? { latest: first, filesAt } : {};
 }
-/** Two contents changed less than this apart are a tie for latestCopy: no latest. */
+/** latestCopy's answer: the content changed last, and where the files' times told it (their copies' times tied), each tied content's. */
+export type LatestCopy = { latest?: string; filesAt?: Record<string, number> };
+/** Two contents changed less than this apart are a tie for latestCopy, by their copies' times as by their files'. */
 const TIE_MS = 1000;
 
 // ---------- Versions ----------

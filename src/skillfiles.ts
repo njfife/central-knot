@@ -8,7 +8,8 @@
 //   parseSkill) and no link or special file inside (share.ts readTree). Its content, and a version's, is the folder as
 //   readTree hashes it: every file's bytes, the executable bit, empty folders; Finder's and editors' leftovers and a nested
 //   .git are no part of it. Its time (folderTime) is the latest change among the folder and what is in it, so a file removed
-//   inside counts. One readDisk shares a local FolderReads map so each real folder is hashed once; nothing is kept past it.
+//   inside counts; the same walk gives the latest among its files alone, which only the copy question reads (SkillCopy
+//   filesAt). One readDisk shares a local FolderReads map so each real folder is hashed once; nothing is kept past it.
 // - What a copy is not: a folder whose SKILL.md is missing or can't be read, or with a link inside, is `unseen` (its why);
 //   a link in a skills folder is no copy of Central Knot's, read as the copy it leads to (`links`).
 // - Writing and removing, each checked: a copy is written over (swapFolder) or removed (removeFolder) only while it still
@@ -72,6 +73,11 @@ export interface SkillCopy {
   hash: string;
   /** The latest change among the folder and what is in it (ms): folderTime. */
   at: number;
+  /**
+   * The latest change among its files alone (ms): folderTime. Only the copy question reads it (library.ts latestCopy), where
+   * two folders made at one moment tie by `at`; never stored.
+   */
+  filesAt: number;
   directory: string;
   /** Its SKILL.md as each tool reads it (discovery.ts), for whether a tool would load it (share.ts targetFor) and for the page. */
   skill: Skill;
@@ -89,13 +95,18 @@ export interface FolderRead {
   uncopied: Set<string>;
 }
 
-/** The latest change time (ms) among a folder and everything in it, Finder's and editors' leftovers and a nested .git left out. */
-export async function folderTime(directory: string): Promise<number> {
-  let latest = (await stat(directory)).mtimeMs;
+/**
+ * The latest change time (ms) among a folder and everything in it (`at`), and among its files alone (`filesAt`; -Infinity where
+ * it has none), Finder's and editors' leftovers and a nested .git left out.
+ */
+export async function folderTime(directory: string): Promise<{ at: number; filesAt: number }> {
+  const latest = { at: (await stat(directory)).mtimeMs, filesAt: -Infinity };
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     if (entry.name === '.git' || notCopied(entry.name, entry.isFile())) continue;
     const path = join(directory, entry.name);
-    latest = Math.max(latest, entry.isDirectory() ? await folderTime(path) : (await lstat(path)).mtimeMs);
+    const inside = entry.isDirectory() ? await folderTime(path) : await lstat(path).then(info => ({ at: info.mtimeMs, filesAt: info.mtimeMs }));
+    latest.at = Math.max(latest.at, inside.at);
+    latest.filesAt = Math.max(latest.filesAt, inside.filesAt);
   }
   return latest;
 }
@@ -104,7 +115,7 @@ export async function folderTime(directory: string): Promise<number> {
  * One real folder's content, shared within one readDisk (skills.ts) and never kept across reads: an edit made by hand,
  * even one that keeps its time stamp, must be seen at the next read (share.ts ShareContext.read).
  */
-type FolderContent = { real: string; content: string; hash: string; at: number } | { unseen: (where: string) => string; isSkill?: true };
+type FolderContent = { real: string; content: string; hash: string; at: number; filesAt: number } | { unseen: (where: string) => string; isSkill?: true };
 export type FolderReads = Map<string, FolderContent>;
 
 /** Builds a Skill from a folder's SKILL.md text as a tool loads it under `directory`'s own folder name. */
@@ -134,7 +145,7 @@ async function readFolder(directory: string): Promise<FolderContent> {
     }
     const tree = await readTree(directory);
     if (tree.held) return { unseen: where => `${where} can’t be copied as it is: ${tree.held!.replace(/^It\b/, 'it')}`, isSkill: true };
-    return { real: await realpath(directory), content, hash: tree.hash, at: await folderTime(directory) };
+    return { real: await realpath(directory), content, hash: tree.hash, ...await folderTime(directory) };
   } catch (error) {
     return { unseen: where => `${where} is there but could not be read${errorCode(error) === 'EACCES' ? ' (permission denied)' : ''}. Nothing changes there until it reads again.` };
   }
@@ -147,7 +158,7 @@ export async function readCopy(tool: HarnessId, directory: string, rootLabel: st
   const entry = (real ? reads.get(real) : undefined) ?? await readFolder(real ?? directory);
   if (real && !reads.has(real)) reads.set(real, entry);
   if ('unseen' in entry) return { unseen: entry.unseen(where), ...(entry.isSkill ? { isSkill: true } : {}) };
-  return { tool, name, key: itemKey(name), hash: entry.hash, at: entry.at, directory, skill: asSkill(directory, entry.content, entry.real, rootLabel) };
+  return { tool, name, key: itemKey(name), hash: entry.hash, at: entry.at, filesAt: entry.filesAt, directory, skill: asSkill(directory, entry.content, entry.real, rootLabel) };
 }
 
 /**
