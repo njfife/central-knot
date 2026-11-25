@@ -623,6 +623,8 @@ async function backPlaceFlow() {
   writeFileSync(join(P.home, '.claude/CLAUDE.md'), lines(60, 'Follow project convention'));
   mkdirSync(join(P.home, '.copilot'), { recursive: true });
   writeFileSync(join(P.home, '.copilot/copilot-instructions.md'), lines(60, 'Follow project convention'));
+  // Enough tools for the Overview to scroll at 1316×819 too.
+  for (const folder of ['.codex', '.pi/agent', '.config/opencode', '.gemini/config']) mkdirSync(join(P.home, folder), { recursive: true });
   // A folder marketplace of 30 plugins in two categories; pack-16, installed in Claude Code, brings 20 skills to the Library. pack-16's
   // and pack-17's pages hold those skills and a long README.
   const plugins = numbered('pack', 30), pluginSkills = Object.fromEntries(numbered('plugin-skill', 20).map(name => [`skills/${name}/SKILL.md`, text(name)]));
@@ -10130,10 +10132,24 @@ async function usageFlow() {
   await a.quit();
 
   // ---------- The Overview, the page a launch opens on: its figures land with no click, and nothing on it moves ----------
+  // Seed five more On skills and two On agents older than 30 days with no use recorded (plus delta = 8 total unused).
+  const extraUnusedSkills = ['foxtrot', 'golf', 'hotel', 'india', 'juliet'];
+  for (const name of extraUnusedSkills) {
+    const folder = skill(realSkills, name);
+    for (const path of [folder, join(folder, 'SKILL.md')]) utimesSync(path, ago(40), ago(40));
+  }
+  const extraUnusedAgents = ['audit', 'triage'];
+  mkdirSync(join(real, '.claude/agents'), { recursive: true });
+  for (const name of extraUnusedAgents) {
+    const file = join(real, `.claude/agents/${name}.md`);
+    writeFileSync(file, `---\nname: ${name}\ndescription: The ${name} agent.\n---\n\nDo the ${name} work.\n`);
+    utimesSync(file, ago(40), ago(40));
+  }
   // Launched on this computer's home and nothing clicked: its first reading waits on the pipe. The cards, the tools table's rows
   // and its header cells, and the usage line are measured at 1280 and 860 while it runs, then again once it has landed.
   a = await launch(data, [], real);
   for (let tries = 0; tries < 100 && !(await a.exists('.kind-card')); tries++) await wait(50);
+  for (let tries = 0; tries < 100 && !(await a.run(`/10 skills · 9 on/.test(document.querySelector('.kind-card:has(#overview-skills) .kind-card-summary')?.textContent ?? '') && /2 agents · 2 on/.test(document.querySelector('.kind-card:has(#overview-agents) .kind-card-summary')?.textContent ?? '')`)); tries++) await wait(50);
   for (let tries = 0; tries < 200 && !reading(); tries++) await wait(25);
   const places = () => a.run(`[...document.querySelectorAll('.kind-card, .tools-table tr, .tools-table thead th, #overview-usage')].map(e => { const box = e.getBoundingClientRect(); return [box.left, box.top, box.width, box.height].map(Math.round).join(' '); })`);
   const usageSaid = async () => (await a.text('#overview-usage .overview-usage-text:not(.band-unshown)'))?.trim();
@@ -10146,20 +10162,46 @@ async function usageFlow() {
   for (let tries = 0; tries < 100 && !/^Usage collected/.test(await usageSaid() ?? ''); tries++) await wait(100);
   await a.settle();
   for (const [width, height] of [[860, 600], [1280, 800]]) { await sizeTo(a, width, height); placesAfter[width] = await places(); }
-  same('launched with nothing clicked, the Overview holds each figure’s room while the first reading runs: the line says it is collecting, the Skills card … where its count will be (its five lines’ room held by style.css), every sessions cell …',
+  same('launched with nothing clicked, the Overview holds each figure’s room while the first reading runs: the line says it is collecting, the Skills card … where its count will be (its four lines’ room held by style.css), every sessions cell …',
     whileRunning, ['Collecting usage statistics: reading your tools’ session history on this computer. Nothing leaves it.', ['Used in the last 30 days: …'], ['…']]);
   same('the figures land by themselves, and no card, table row, header cell or the usage line moved, at 1280 and at 860', [placesAfter[1280], placesAfter[860]], [placesWhile[1280], placesWhile[860]]);
-  same('the Skills card says the reading as its page does: 3 used, the No use seen chip’s 1 (delta; bravo is Off) as a link, and the three most used by sessions, equal ones by name; the line, when',
-    [await cardLines(), await a.text('#overview-skills-unused'), /^Usage collected today at [^.]+\. Update usage statistics$/.test(await usageSaid() ?? '')], [['Used in the last 30 days: 3', 'No use seen in 30 days: 1', 'Most usedalpha2 sessions', 'echo2 sessions', 'charlie1 session'], 'No use seen in 30 days: 1', true]);
+  const cardUnusedLinks = await a.all('.kind-card button[id$="-unused"]', 'e.id');
+  const unusedLinks = await a.all('#overview-usage #overview-unused', 'e.textContent.trim()');
+  const unusedHasArrow = await a.run(`(() => { const b = document.querySelector('#overview-usage #overview-unused'); const svg = b?.lastElementChild; return svg?.tagName.toLowerCase() === 'svg' && /m12 5 7 7-7 7/.test(svg.innerHTML); })()`);
+  same('the Skills card says 3 used and the three most used with no per-kind unused link, and the usage strip holds one combined link for all 8 unused items with an arrow',
+    [await cardLines(), cardUnusedLinks, unusedLinks, unusedHasArrow, /^Usage collected today at [^.]+\. Update usage statistics · No use seen in 30 days: 8$/.test(await usageSaid() ?? '')],
+    [['Used in the last 30 days: 3', 'Most usedalpha2 sessions', 'echo2 sessions', 'charlie1 session'], [], ['No use seen in 30 days: 8'], true, true]);
   check('every tool’s sessions cell has its figure, or why there is none', (await sessionsSaid()).every(said => said && said !== '…'), await sessionsSaid());
-  await a.click('#overview-skills-unused');
-  same('No use seen opens Skills on that chip, the rows the card counted', [await a.run(`document.querySelector('.chip-on')?.dataset.tip`), (await sectionsNow(a, 'skills'))[0]?.[1]], ['No use seen in 30 days', ['delta']]);
+  await a.click('#overview-unused');
+  const allRows = await a.all('.ov-row[data-key]', 'e.dataset.key');
+  const expectedUnused = [...['delta', ...extraUnusedSkills].map(key => rowPart('', 'skills', key)), ...extraUnusedAgents.map(key => rowPart('', 'agents', key))].sort();
+  same('the combined unused link opens Library on All with the No use seen chip active and all 8 matching rows',
+    [await a.run(`document.querySelector('#library-kind-all')?.getAttribute('aria-pressed')`), await a.run(`document.querySelector('.chip-on')?.dataset.tip`), [...allRows].sort()],
+    ['true', 'No use seen in 30 days', expectedUnused]);
   await a.click('#nav-overview');
   await a.click('#overview-skills-top-1');
   same('a most used name opens its row on Skills, under All', [await a.run(`document.querySelector('.chip-on')?.dataset.tip ?? 'All'`), await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'echo')}"]')?.getAttribute('aria-expanded')`)], ['All', 'true']);
   await a.click('#nav-overview');
   await fullSize(a);
   await fitsAtMinimum(a, 'the Overview with usage collected');
+  if (shots) {
+    const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+    for (const [label, width, height, openSidebar] of [['1316', 1316, 819, true], ['1316-rail', 1316, 819, false], ['860-open', 860, 560, true]]) {
+      await sizeTo(a, width, height);
+      const railNow = await a.run(`document.body.classList.contains('rail')`);
+      if (openSidebar ? railNow : !railNow) await a.click('#sidebar-toggle');
+      for (const mode of ['light', 'dark']) { await theme(mode); await wait(50); await a.shot(`overview-unused-${label}-${mode}`); }
+      const railAfter = await a.run(`document.body.classList.contains('rail')`);
+      if (railAfter !== railNow) await a.click('#sidebar-toggle');
+    }
+    await theme('');
+    await fullSize(a);
+  }
+  await a.click('#overview-unused');
+  await a.click('#turn-unused-off');
+  for (let tries = 0; tries < 50 && !(await a.exists('#outcome-undo')); tries++) await wait(100);
+  await a.click('#nav-overview');
+  same('with no unused items left, the usage strip shows no unused link', [await a.exists('#overview-unused'), await a.all('.kind-card button[id$="-unused"]', 'e.id'), /^Usage collected today at [^.]+\. Update usage statistics$/.test(await usageSaid() ?? '')], [false, [], true]);
   same('no page errors, the Overview', a.pageErrors, []);
   await a.quit();
   // Started at sign-in, with no window (--hidden): nothing is collected until the window first shows (a second launch shows it).
