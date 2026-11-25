@@ -12228,8 +12228,14 @@ echo "$*" >> "$HOME/claude-calls.txt"
   const long = `"\${CLAUDE_PLUGIN_ROOT}/hooks/start.sh" --with-a-very-long-option-name=${'x'.repeat(120)} --from /${'deep-folder/'.repeat(14)}notes.md`;
   const hooks = (event, matcher, ...commands) => JSON.stringify({ hooks: { [event]: [{ matcher, hooks: commands }], PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo checked' }] }] } });
   const command = text => ({ type: 'command', command: text });
-  writeClaudeInstall(home, name, 'release-helper', '0.4.1', { 'hooks/hooks.json': hooks('SessionStart', 'startup', { ...command('node'), args: ['${CLAUDE_PLUGIN_ROOT}/hooks/remind.mjs', '--days', '2'] }, command(long)) });
-  writeClaudeInstall(home, name, 'document-tools', '1.2.0', { 'hooks/hooks.json': hooks('SessionStart', 'startup', command('cat "${CLAUDE_PLUGIN_ROOT}/STYLE.md"')) });
+  writeClaudeInstall(home, name, 'release-helper', '0.4.1', {
+    'hooks/hooks.json': hooks('SessionStart', 'startup', { ...command('node'), args: ['${CLAUDE_PLUGIN_ROOT}/hooks/remind.mjs', '--days', '2'] }, command(long)),
+    'hooks/remind.mjs': '// installed in Claude Code\nconsole.log("claude remind");\n',
+  });
+  writeClaudeInstall(home, name, 'document-tools', '1.2.0', {
+    'hooks/hooks.json': hooks('SessionStart', 'startup', command('cat "${CLAUDE_PLUGIN_ROOT}/STYLE.md"')),
+    'STYLE.md': '# Style guide\n- Prefer short functions.\n',
+  });
   writeClaudeInstall(home, name, 'issue-tracker', '2.0.0', { 'hooks/hooks.json': hooks('UserPromptSubmit', '', command('node ${CLAUDE_PLUGIN_ROOT}/hooks/prompt.mjs')) });
   const more = ['changelog', 'deps-watch', 'lint-guard', 'onboarding', 'pr-reviewer', 'security-scan', 'standup-notes', 'style-guide', 'test-runner'];
   for (const plugin of more) writeClaudeInstall(home, name, plugin, '1.0.0', { 'hooks/hooks.json': hooks('SessionStart', plugin === 'standup-notes' ? 'compact' : 'startup', command(`cat "\${CLAUDE_PLUGIN_ROOT}/${plugin}.md"`)) });
@@ -12238,13 +12244,24 @@ echo "$*" >> "$HOME/claude-calls.txt"
   writeFileSync(record, JSON.stringify({ version: 2, plugins: { ...JSON.parse(readFileSync(record, 'utf8')).plugins, [`vanished@${name}`]: [{ scope: 'user', installPath: join(home, '.claude/plugins/cache', name, 'vanished/1.0.0'), version: '1.0.0' }] } }));
   // Added from Git, so Claude Code reads each plugin from its copy in the cache (one from a folder marketplace it reads in place).
   writeFileSync(join(home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ [name]: { source: { source: 'git', url: market } } }));
-  writeFileSync(join(home, '.claude/settings.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: '~/bin/greet.sh', args: ['--short'] }] }] } }));
+  writeFileSync(join(home, '.claude/settings.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: '~/bin/greet.sh --short' }] }] } }, null, 2));
+  mkdirSync(join(home, 'bin'), { recursive: true });
+  writeFileSync(join(home, 'bin/greet.sh'), [
+    '#!/bin/sh',
+    'echo "Welcome to this workspace"',
+    `# ${'long-note-'.repeat(16)}end`,
+    ...Array.from({ length: 24 }, (_, i) => `echo "line ${i + 1}"`),
+    '',
+  ].join('\n'));
   writeFileSync(join(home, '.claude/CLAUDE.md'), '# How I work\n- Keep changes small.\n\nSee @notes/style.md for the house style.\n');
   mkdirSync(join(home, '.claude/notes'), { recursive: true });
   writeFileSync(join(home, '.claude/notes/style.md'), '# Style\n- Short sentences.\n');
   const codexCopy = join(home, '.codex/plugins/cache', name, 'release-helper/0.4.1');
   mkdirSync(join(codexCopy, 'hooks'), { recursive: true });
   writeFileSync(join(codexCopy, 'hooks/hooks.json'), JSON.stringify({ hooks: { SessionStart: [{ matcher: 'startup|resume', hooks: [command('node "${PLUGIN_ROOT}/hooks/remind.mjs" --days 2'), command(long)] }] } }));
+  writeFileSync(join(codexCopy, 'hooks/remind.mjs'), '// installed in Codex\nconsole.log("codex remind");\n');
+  mkdirSync(join(market, 'plugins/release-helper/hooks'), { recursive: true });
+  writeFileSync(join(market, 'plugins/release-helper/hooks/remind.mjs'), '// marketplace copy\nconsole.log("marketplace remind");\n');
   // superpowers' shape, shortened: Claude Code's start-of-session hook in hooks/hooks.json, and a Codex manifest whose `"hooks": {}`
   // names none in its place, so Codex runs none. In the marketplace and installed in Codex, whose strip has no group for it.
   const powers = join(market, 'plugins/superpowers'), catalog = join(market, '.claude-plugin/marketplace.json'), listed = JSON.parse(readFileSync(catalog, 'utf8'));
@@ -12300,7 +12317,7 @@ echo "$*" >> "$HOME/claude-calls.txt"
     await a.run(`[...document.querySelectorAll('.session-hook')].some(hook => /known only/.test(hook.textContent))`)], ['Hooks that can add text',
     ['These hooks run a program when a session starts or when you send a prompt, and what it prints can be added to the session; that is known only when it runs. Other kinds of hook (one that calls a URL or an MCP tool), and a project’s or an organisation’s hooks, aren’t listed.'], false]);
   same('your own hooks say the file that holds them; a plugin’s link says what it is for', [await a.text('#session-claude-cli .session-in'), await a.run(`document.querySelector('#session-claude-cli .session-in .path-text')?.title`),
-    [...new Set(await a.all('#session-claude-cli .session-group button', 'e.textContent'))]], [`in …${join(home, '.claude/settings.json').slice(home.length)}`, join(home, '.claude/settings.json'), ['Plugin’s page: turn it off there']]);
+    [...new Set(await a.all('#session-claude-cli .session-head button', 'e.textContent'))]], [`in …${join(home, '.claude/settings.json').slice(home.length)}`, join(home, '.claude/settings.json'), ['Plugin’s page: turn it off there']]);
   same('on the card: the file, the base strip, the files read with it, this strip, then Earlier versions', await a.run(`(() => { const card = document.querySelector('article[aria-label="Claude Code instructions"]');
     const parts = ['.ins-body > :first-child', '.base-strip', '#ins-parts-claude-cli', '#session-claude-cli', 'details.ins-versions'].map(selector => card.querySelector(selector));
     return [parts.map(part => !!part), parts.every((part, at) => at === 0 || (parts[at - 1].compareDocumentPosition(part) & Node.DOCUMENT_POSITION_FOLLOWING))]; })()`), [[true, true, true, true, true], true]);
@@ -12314,6 +12331,100 @@ echo "$*" >> "$HOME/claude-calls.txt"
     'Pi loads these packages into every session, and they can add text to it; what they add is known only when they run.']);
   same('one plugin has one mark in every tool, a dot hidden from a screen reader', await a.run(`(() => { const marks = [...document.querySelectorAll('.session-group')].filter(group => group.querySelector('.session-name').textContent === 'release-helper')
     .map(group => group.querySelector('.origin-mark')); return [marks.length, new Set(marks.map(mark => mark.className)).size, marks.every(mark => mark.getAttribute('aria-hidden') === 'true' && getComputedStyle(mark).borderRadius === '50%')]; })()`), [2, 1, true]);
+  // Examples 1, 4, 6 and 11: View source on Instructions (own hook with keyboard/Escape/wrapping/scroll, installed plugin copies, cat script, missing script).
+  const openSource = async (btnId, panelSelector) => {
+    await a.click(byId(btnId));
+    for (let tries = 0; tries < 50 && await a.run(`(() => { const p = document.querySelector(${JSON.stringify(panelSelector)}); return !p || p.textContent === 'Reading…'; })()`); tries++) await wait(100);
+    return a.text(panelSelector);
+  };
+  const hookBtnIn = (stripId, groupName, matchCmd) => a.run(`(() => {
+    const group = [...document.querySelectorAll('#${stripId} .session-group')].find(g => g.querySelector('.session-name')?.textContent === ${JSON.stringify(groupName)});
+    const row = [...(group?.querySelectorAll('.session-hook') ?? [])].find(r => !${JSON.stringify(matchCmd ?? '')} || r.querySelector('.session-command')?.textContent.includes(${JSON.stringify(matchCmd ?? '')}));
+    return row?.querySelector('button[data-hook-source]')?.id ?? null;
+  })()`);
+  const ownBtnId = await hookBtnIn('session-claude-cli', 'yours,');
+  check('your own Claude Code hook row has a View source button', !!ownBtnId && (await a.text(byId(ownBtnId))) === 'View source', ownBtnId);
+  if (ownBtnId) {
+    // Open with keyboard Enter, check content, scrolling, wrapping at 860×528 and 2560×1440, and Escape from the script block.
+    await a.run(`document.getElementById(${JSON.stringify(ownBtnId)})?.focus()`);
+    for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r' } : {}) });
+    for (let tries = 0; tries < 50 && !(await a.exists('#session-claude-cli .session-group .session-hook .hook-source pre')); tries++) await wait(100);
+    const ownSource = await a.text('#session-claude-cli .session-group .session-hook .hook-source');
+    const ownOrder = await a.run(`(() => { const p = document.querySelector('#session-claude-cli .session-group .session-hook .hook-source');
+      const owners = [...(p?.querySelectorAll('.content-owner') ?? [])].map(e => e.textContent);
+      const pres = [...(p?.querySelectorAll('pre') ?? [])].map(e => e.textContent);
+      return { owners, pres }; })()`);
+    check('clicking View source shows the script first, then Declared in and the entry, with no marketplace-copy note',
+      /bin\/greet\.sh/.test(ownOrder?.owners?.[0] ?? '') && /Welcome to this workspace/.test(ownOrder?.pres?.[0] ?? '')
+      && /Declared in .*\.claude\/settings\.json/.test(ownOrder?.owners?.[1] ?? '') && /"command": "~\/bin\/greet\.sh --short"/.test(ownOrder?.pres?.[1] ?? '')
+      && !/marketplace’s copy/.test(ownSource ?? '')
+      && (await a.text(byId(ownBtnId))) === 'Hide source', { ownSource, ownOrder });
+    const checkBlockFit = async (width, height) => {
+      await sizeTo(a, width, height);
+      await a.settle();
+      return a.run(`(() => {
+        const panel = document.querySelector('#session-claude-cli .session-group .session-hook .hook-source');
+        const script = panel?.querySelectorAll('pre')[0];
+        const row = panel?.closest('.session-hook'), btn = row?.querySelector('button[data-hook-source]');
+        if (!script || !row || !btn) return null;
+        script.scrollIntoView();
+        script.focus();
+        const scroll = document.querySelector('#instructions-scroll');
+        return [
+          document.activeElement === script,
+          script.scrollHeight > script.clientHeight,
+          script.scrollWidth <= script.clientWidth + 1,
+          getComputedStyle(script).userSelect === 'text',
+          scroll.scrollWidth <= scroll.clientWidth + 1,
+          Math.abs(script.getBoundingClientRect().right - panel.getBoundingClientRect().right) <= 2,
+          Math.abs(btn.getBoundingClientRect().right - row.getBoundingClientRect().right) <= 2,
+        ];
+      })()`);
+    };
+    same('at 860×528 the opened script block fills its card width, scrolls, wraps, and the button sits at the right edge', await checkBlockFit(860, 528), [true, true, true, true, true, true, true]);
+    same('a wrapped script line has a hanging indent and the following line returns to the left edge', await a.run(`(() => {
+      const pre = document.querySelector('#session-claude-cli .session-group .session-hook .hook-source pre');
+      const text = pre?.firstChild?.textContent ?? '', start = text.indexOf('# long-note-'), end = text.indexOf('\\n', start), nextEnd = text.indexOf('\\n', end + 1);
+      const rects = (from, to) => { const r = document.createRange(); r.setStart(pre.firstChild, from); r.setEnd(pre.firstChild, to); return [...r.getClientRects()]; };
+      const wrapped = rects(start, end), next = rects(end + 1, nextEnd);
+      return [wrapped.length >= 2, wrapped[1]?.left > wrapped[0]?.left + 10, Math.abs(next[0]?.left - wrapped[0]?.left) <= 1];
+    })()`), [true, true, true]);
+    same('at 2560×1440 the opened script block fills its card width without sideways scroll', await checkBlockFit(2560, 1440), [true, true, true, true, true, true, true]);
+    await fullSize(a);
+    // Escape inside the focused script block hides it and returns focus to View source.
+    await a.run(`document.querySelectorAll('#session-claude-cli .session-group .session-hook .hook-source pre')[0]?.focus()`);
+    for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await a.settle();
+    same('Escape hides the opened hook source and returns focus to View source',
+      [await a.exists('#session-claude-cli .session-group .session-hook .hook-source'), await a.text(byId(ownBtnId)), await a.run(`document.activeElement?.id`)],
+      [false, 'View source', ownBtnId]);
+    // Open again by click, edit script on disk, Refresh closes open panels so reopening reads the fresh file.
+    await openSource(ownBtnId, '#session-claude-cli .session-group .session-hook .hook-source');
+    const greetPath = join(home, 'bin/greet.sh'), greetBefore = readNow(greetPath);
+    writeFileSync(greetPath, '#!/bin/sh\necho "Fresh after Refresh"\n');
+    await a.click('#header-refresh');
+    for (let tries = 0; tries < 200 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100);
+    await showStrips();
+    same('Refresh closes open hook source panels so stale text is never kept',
+      [await a.exists('#session-claude-cli .session-group .session-hook .hook-source'), await a.text(byId(ownBtnId))], [false, 'View source']);
+    const afterRefresh = await openSource(ownBtnId, '#session-claude-cli .session-group .session-hook .hook-source');
+    check('reopening after Refresh reads the updated script from disk', /Fresh after Refresh/.test(afterRefresh ?? ''), afterRefresh);
+    await a.click(byId(ownBtnId));
+    writeFileSync(greetPath, greetBefore);
+    same('a second click hides the source and restores View source', [await a.exists('#session-claude-cli .session-group .session-hook .hook-source'), await a.text(byId(ownBtnId))], [false, 'View source']);
+  }
+  const helperHookBtn = await hookBtnIn('session-claude-cli', 'release-helper', 'remind.mjs');
+  const helperHookSource = helperHookBtn && await openSource(helperHookBtn, '#session-claude-cli .hook-source');
+  check('an installed plugin hook on Instructions reads from the tool’s installed copy', /hooks\/hooks\.json/.test(helperHookSource ?? '') && /installed in Claude Code/.test(helperHookSource ?? ''), helperHookSource);
+  if (helperHookBtn) await a.click(byId(helperHookBtn));
+  const styleHookBtn = await hookBtnIn('session-claude-cli', 'document-tools', 'STYLE.md');
+  const styleHookSource = styleHookBtn && await openSource(styleHookBtn, '#session-claude-cli .hook-source');
+  check('cat on a plugin file shows that file’s text', /STYLE\.md/.test(styleHookSource ?? '') && /Prefer short functions/.test(styleHookSource ?? ''), styleHookSource);
+  if (styleHookBtn) await a.click(byId(styleHookBtn));
+  const missingHookBtn = await hookBtnIn('session-claude-cli', 'issue-tracker', 'prompt.mjs');
+  const missingHookSource = missingHookBtn && await openSource(missingHookBtn, '#session-claude-cli .hook-source');
+  check('a missing script shows its path and that it couldn’t be read', /hooks\/prompt\.mjs/.test(missingHookSource ?? '') && /This file couldn’t be read\./.test(missingHookSource ?? ''), missingHookSource);
+  if (missingHookBtn) await a.click(byId(missingHookBtn));
   // The very long command wraps whole at the smallest window, the sidebar open or as a rail; and so at every size pictured.
   const wraps = () => a.run(`(() => { const command = [...document.querySelectorAll('#session-claude-cli .session-command')].find(each => each.textContent.includes('deep-folder')); command.scrollIntoView(); const box = command.getBoundingClientRect(), card = command.closest('.ins-card').getBoundingClientRect();
     return [command.scrollWidth <= command.clientWidth + 1, box.height > 40, box.right <= card.right + 1]; })()`);
@@ -12345,11 +12456,52 @@ echo "$*" >> "$HOME/claude-calls.txt"
   await pictures('session-strip', '#session-claude-cli', [...atTwo, [1316, 819, true], [1728, 1080, false], [2560, 1440, false]]);
   await pictures('session-codex', '#ins-head-codex-cli', [[1316, 819, false]]);
   await pictures('session-copilot-note', '#ins-head-copilot-cli', [[1316, 819, false]]);
+  // Pictures of a hook's source open on Instructions: own hook (860 and 1316, sidebar open and rail) and a plugin's hook (860 and 1316).
+  if (shots && ownBtnId) {
+    await openSource(ownBtnId, '#session-claude-cli .hook-source');
+    await pictures('hook-source-instructions', '#session-claude-cli', [...atTwo, [1316, 819, true]]);
+    await a.click(byId(ownBtnId));
+  }
+  if (shots && styleHookBtn) {
+    await openSource(styleHookBtn, '#session-claude-cli .hook-source');
+    await pictures('hook-source-instructions-plugin', '#session-claude-cli .session-group:has(.hook-source)', atTwo);
+    await a.click(byId(styleHookBtn));
+  }
   // Its link opens release-helper's page; Back returns to the Instructions page with its strips.
   const helperLink = await a.run(`[...document.querySelectorAll('#session-claude-cli .session-group')].find(group => group.querySelector('.session-name').textContent === 'release-helper').querySelector('button').id`);
   await a.click(byId(helperLink));
   for (let tries = 0; tries < 100 && (await a.text('.crumb-here')) !== 'release-helper'; tries++) await wait(100);
   same('the link opens the plugin’s page', await a.text('.crumb-here'), 'release-helper');
+  for (let tries = 0; tries < 50 && !(await a.exists('.plugin-parts li.with-source button[data-hook-source]')); tries++) await wait(100);
+  const pluginHookBtns = await a.run(`[...document.querySelectorAll('.plugin-parts li.with-source button[data-hook-source]')].map(b => b.id)`);
+  check('on the plugin’s page every hook row has View source (both session-text hooks and other hooks)', pluginHookBtns.length === 3, pluginHookBtns);
+  if (pluginHookBtns.length >= 3) {
+    const inlineSrc = await openSource(pluginHookBtns[0], '.plugin-page .hook-source');
+    const inlineBlocks = await a.run(`document.querySelectorAll('.plugin-page .hook-source .content-block').length`);
+    check('an inline echo hook on the plugin’s page shows only Declared in <path> · the marketplace’s copy and the entry',
+      inlineBlocks === 1 && !/No script file found/.test(inlineSrc ?? '') && !/The marketplace’s copy\./.test(inlineSrc ?? '')
+      && /Declared in .*hooks\/hooks\.json · the marketplace’s copy/.test(inlineSrc ?? '') && /hookSpecificOutput/.test(inlineSrc ?? ''), { inlineBlocks, inlineSrc });
+    same('a wrapped entry line also has a hanging indent', await a.run(`(() => {
+      const pre = document.querySelector('.plugin-page .hook-source pre');
+      const r = document.createRange(); r.selectNodeContents(pre.firstChild);
+      const rects = [...r.getClientRects()];
+      return [rects.length >= 2, rects[1]?.left > rects[0]?.left + 10];
+    })()`), [true, true]);
+    await pictures('hook-source-no-script', '.plugin-parts li.with-source', atTwo);
+    await a.click(byId(pluginHookBtns[0]));
+    const marketSrc = await openSource(pluginHookBtns[1], '.plugin-page .hook-source');
+    const marketOwners = await a.run(`[...document.querySelectorAll('.plugin-page .hook-source .content-owner')].map(e => e.textContent)`);
+    check('the plugin’s page shows the marketplace copy’s script first, then Declared in <path> · the marketplace’s copy',
+      !/The marketplace’s copy\./.test(marketSrc ?? '') && /hooks\/remind\.mjs/.test(marketOwners?.[0] ?? '') && !/marketplace’s copy/.test(marketOwners?.[0] ?? '')
+      && /marketplace copy/.test(marketSrc ?? '') && /Declared in .*hooks\/hooks\.json · the marketplace’s copy/.test(marketOwners?.[1] ?? '')
+      && (marketSrc ?? '').indexOf('marketplace copy') < (marketSrc ?? '').indexOf('Declared in'), { marketOwners, marketSrc });
+    await pictures('hook-source-plugin', '.plugin-parts li.with-source', [...atTwo, [1316, 819, true]]);
+    await a.click(byId(pluginHookBtns[1]));
+    const otherSrc = await openSource(pluginHookBtns[2], '.plugin-page .hook-source');
+    check('Other hooks rows also open View source cleanly',
+      !/No script file found/.test(otherSrc ?? '') && /Declared in .*hooks\/hooks\.json · the marketplace’s copy/.test(otherSrc ?? '') && /echo checked/.test(otherSrc ?? ''), otherSrc);
+    await a.click(byId(pluginHookBtns[2]));
+  }
   const back = async () => { await a.send('Input.dispatchKeyEvent', { type: 'keyDown', key: process.platform === 'darwin' ? '[' : 'ArrowLeft', modifiers: process.platform === 'darwin' ? 4 : 1 }); await a.send('Input.dispatchKeyEvent', { type: 'keyUp', key: process.platform === 'darwin' ? '[' : 'ArrowLeft', modifiers: process.platform === 'darwin' ? 4 : 1 }); await a.settle(); await showStrips(); };
   await back();
   same('Back returns to the Instructions page with the same strips', [await a.run(`document.querySelector('.nav-row[aria-current=page]')?.id`), (await names('claude-cli')).length, (await names('codex-cli')).length], ['nav-instructions', 15, 1]);
@@ -12374,6 +12526,10 @@ echo "$*" >> "$HOME/claude-calls.txt"
   await a.click(byId('harness-tab-instructions'));
   for (let tries = 0; tries < 100 && !(await a.exists('#session-codex-cli')); tries++) await wait(100);
   same('Codex’s Instructions tab has its strip', (await groups('codex-cli'))[0]?.[1].length, 2);
+  const codexTabBtn = await hookBtnIn('session-codex-cli', 'release-helper', 'remind.mjs');
+  const codexTabSource = codexTabBtn && await openSource(codexTabBtn, '#session-codex-cli .hook-source');
+  check('a tool’s own Instructions tab opens View source from that tool’s installed copy', /Declared in .*hooks\/hooks\.json/.test(codexTabSource ?? '') && /installed in Codex/.test(codexTabSource ?? '') && !/marketplace’s copy/.test(codexTabSource ?? ''), codexTabSource);
+  if (codexTabBtn) await a.click(byId(codexTabBtn));
   await pictures('session-strip-harness-tab', '#session-codex-cli', [[1316, 819, false]]);
   // superpowers' page says what its strips say: Claude Code and Copilot CLI would run its hook, Codex none of it.
   await a.click(byId('nav-plugins'));
