@@ -334,8 +334,8 @@ interface Table { kinds: PageKind[]; tool?: Tool; view: View; used?: boolean; sh
 const rowsIn = (t: Table) => t.kinds.flatMap(rowsOf);
 /**
  * Each kind a table lists, with what it brings beside its rows: its own record's stop (the home's is said once, by listBands),
- * its problems beside that stop and its part of the usage reading (kindUsage). The bands (listBands), whether the No use seen
- * chip is offered and its band (usedColumn, unusedCount, unusedBand) go over the kinds here. Kept for the last home, reading,
+ * its problems beside that stop and its part of the usage reading (kindUsage). The bands (listBands), the Used column and
+ * the chip's band (usedColumn, unusedBand) go over the kinds here. Kept for the last home, reading,
  * kinds and tool asked for, one entry: the asks for one table share it,
  * and on a segment of one kind the segment's asks and the chips' (overEveryKind) take turns, each working it out again. Not here:
  * a kind's notices, kept as they are first shown (toldNotices).
@@ -511,7 +511,7 @@ function filterBar(t: Table) {
   // A chip is offered while something matches it, over every kind the Library holds (overEveryKind), or while it is the one on.
   const offered = (id: Filter, matching: boolean) => matching || view.filter === id;
   const chips = [offered('attention', copiesDifferChipShown(over)) ? chip('attention', chipNames.attention, 'diff', shows('attention'), true) : null,
-    offered('unused', !!unusedCount(over)) ? chip('unused', chipNames.unused, 'history', shows('unused')) : null].filter(Boolean);
+    offered('unused', !!reading(over) && !!unusedCount(over.kinds)) ? chip('unused', chipNames.unused, 'history', shows('unused')) : null].filter(Boolean);
   return chips.length ? h('div.chips', { role: 'group', 'aria-label': 'Show only' }, chips) : null;
 }
 
@@ -1563,7 +1563,7 @@ function tableOf(name: keyof typeof views, kinds: PageKind[], harness?: Tool, fi
   if (pinnedHere(t).rows.size > 0) return t;
   const over = overEveryKind(t);
   if (t.view.filter === 'attention' && !copiesDifferChipShown(over)) t.view.filter = 'all';
-  if (t.view.filter === 'unused' && !unusedCount(over)) t.view.filter = 'all';
+  if (t.view.filter === 'unused' && (!reading(over) || !unusedCount(over.kinds))) t.view.filter = 'all';
   return t;
 }
 /** The segment the Library was last drawn for (useLibrary), so another one starts its list afresh. */
@@ -2415,9 +2415,13 @@ export function usageSums(): UsageSummary | undefined {
 }
 /** A kind's items in the reading's sum, in a table: whether it has a Used column, the "No use seen in 30 days" chip's lists and what its band leaves out. */
 const kindUsage = (t: Table, kind: PageKind): KindUsage | undefined => (reading(t) ? usageSums()?.kinds[kind] : undefined);
-/** Whether a row is in the "No use seen in 30 days" chip, and how many it holds (no chip at 0). */
+/** Whether a row is in the "No use seen in 30 days" chip. */
 const inUnusedChip = (t: Table, skill: ItemRow) => !!kindUsage(t, skill.kind)?.noUseSeen.includes(skill.key);
-const unusedCount = (t: Table) => kindParts(t).reduce((sum, part) => sum + (part.usage?.noUseSeen.length ?? 0), 0);
+/** How many items the "No use seen in 30 days" chip holds across `kinds`, for the Library and the Overview alike. */
+export function unusedCount(kinds: readonly PageKind[]): number {
+  const sum = usageSums();
+  return sum ? kinds.reduce((total, kind) => total + sum.kinds[kind].noUseSeen.length, 0) : 0;
+}
 
 /**
  * The chip's band. Its lead: how many it holds, Turn these off and what it does (it skips a plugin's items and items linked to
