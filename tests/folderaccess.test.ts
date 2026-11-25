@@ -1,6 +1,7 @@
 // The one answer to "can this folder be written?" (share.ts folderAccess) and a refusal read as a denial (share.ts denied),
 // as worked examples: off Windows the answer is access itself; on Windows the folder itself opened for writing and closed,
-// once a folder a pass, leaving nothing behind and waking none of the app's own watches.
+// once a folder a pass (and asked again by the view made right after it), leaving nothing behind and, in the app's own layout,
+// waking none of its watches.
 import assert from 'node:assert/strict';
 import { constants, watch } from 'node:fs';
 import fsp, { access, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
@@ -8,7 +9,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { mock, test } from 'node:test';
-import { denied, folderAccess } from '../src/share.ts';
+import { denied, folderAccess, withoutFolderAnswers } from '../src/share.ts';
 import { lockPath, lockSkip, makeWritableTree, withLock } from './fslock.ts';
 import { pass, put, roots, sandbox, turnOn } from './skillclicks.ts';
 
@@ -41,7 +42,7 @@ test('On Windows a folder that takes a new file but refuses a removal can be wri
   });
 }));
 
-test('Off Windows the answer is access itself: the caller’s mode, its error, asked every time', { skip: process.platform === 'win32' ? 'Off Windows only.' : lockSkip }, () => inBase(async folder => {
+test('Off Windows the answer is access itself: its very promise, with the caller’s mode, its error, asked every time', { skip: process.platform === 'win32' ? 'Off Windows only.' : lockSkip }, () => inBase(async folder => {
   const reads = new Map<string, Promise<unknown>>();
   const both = (mode: number) => Promise.all([outcome(folderAccess({ reads }, folder, mode)), outcome(access(folder, mode))]);
   assert.deepEqual(await both(constants.W_OK | constants.X_OK), ['ok', 'ok']);
@@ -55,6 +56,31 @@ test('Off Windows the answer is access itself: the caller’s mode, its error, a
   });
   assert.deepEqual(await Promise.all([outcome(folderAccess({}, join(folder, 'gone'), constants.W_OK)), outcome(access(join(folder, 'gone'), constants.W_OK))]), ['ENOENT', 'ENOENT']);
   assert.equal(reads.size, 0);
+  // What access gives is what the caller gets, the same promise: its settling and its error object are access's own.
+  const given = Promise.reject(Object.assign(new Error('refused'), { code: 'EACCES' }));
+  given.catch(() => undefined);
+  const asked = mock.method(fsp, 'access', () => given);
+  syncBuiltinESMExports();
+  try {
+    const answer = folderAccess({ reads }, folder, constants.W_OK | constants.X_OK);
+    answer.catch(() => undefined);
+    assert.equal(answer, given);
+    assert.deepEqual(asked.mock.calls.map(call => call.arguments), [[folder, constants.W_OK | constants.X_OK]]);
+  } finally {
+    mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+}));
+
+test('On Windows a folder’s answer does not outlive its pass: the view made right after asks again, and keeps the pass’s other reads', { skip: windowsOnly }, () => inBase(async folder => {
+  const pass = { reads: new Map<string, Promise<unknown>>([['a plugin read', Promise.resolve('read once')]]) };
+  const unlock = await lockPath(folder, 'dir-readonly');
+  assert.equal(await outcome(folderAccess(pass, folder, constants.W_OK)), 'EPERM');
+  await unlock();
+  assert.equal(await outcome(folderAccess(pass, folder, constants.W_OK)), 'EPERM', 'within its pass the answer stands, as it would in a view given the pass’s reads whole');
+  const view = { reads: withoutFolderAnswers(pass.reads) };
+  assert.equal(await outcome(folderAccess(view, folder, constants.W_OK)), 'ok');
+  assert.equal(view.reads?.get('a plugin read'), pass.reads.get('a plugin read'));
 }));
 
 test('A refusal is a denial of permission by its code: EACCES everywhere, EPERM on Windows only', () => {
@@ -90,8 +116,11 @@ test('On Windows a hundred passes over four tools open each folder once a pass a
   try { assert.deepEqual(await entries(), before); } finally { await box.cleanup(); }
 });
 
-test('On Windows the opens a pass makes wake none of the app’s own watches: within a tool’s skills folder, or for a file named in the folder above it; a real entry does', { skip: windowsOnly }, () => inBase(async skills => {
-  // As main.ts startWatching watches: the skills folder within, the folder above it for the files it names (here config.toml).
+test('On Windows, in the app’s own layout, the opens a pass makes wake none of its watches: within a tool’s skills folder, or for a file named in the folder above it; a real entry does', { skip: windowsOnly }, () => inBase(async skills => {
+  // As main.ts startWatching watches: the skills folder within, the folder above it for the file names it holds (here config.toml).
+  // Opening a folder that holds files makes one change event, named for it, in the watch on the folder above (once in a hundred
+  // opens, measured on Windows): that watch acts on none but its file names. A tool's skills folder placed inside another tool's
+  // watched skills folder is not this layout: the outer folder's watch, which acts on every event, would see the inner one opened.
   const above = dirname(skills), store = join(above, '.central-knot'), events: string[] = [];
   await mkdir(join(skills, 'notes', 'scripts'), { recursive: true });
   await mkdir(store);

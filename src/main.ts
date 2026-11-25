@@ -19,7 +19,10 @@ import { discover, findOtherApps, forgetVersions } from './discovery.ts';
 import { envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { appCandidates, executableCandidates, macPlaces, searchPath, TRAY_ASKS, trayWithin } from './platform.ts';
 import { intoFolder, lookForBuilds, quitBuild, removeBuild, runsOutside, type BuildsContext } from './otherbuilds.ts';
-import { errorCode, forgetStale, keepUnreadable, leftOutNow, managedNow, readRecord, remember, syncGate, takeOverSync, writeAccess, writeDurably, type ShareContext } from './share.ts';
+import {
+  errorCode, forgetStale, keepUnreadable, leftOutNow, managedNow, readRecord, remember, syncGate, takeOverSync, withoutFolderAnswers,
+  writeAccess, writeDurably, type ShareContext,
+} from './share.ts';
 import { everythingEntryAction, setSyncEverything } from './everything.ts';
 import { chooseTools, whatJoiningDoes } from './toolchoice.ts';
 import { pruneHistory, readHistory } from './history.ts';
@@ -676,7 +679,7 @@ async function pass(snapshots: Snapshot[], explicit = false, forView = false): P
   const { skills, servers, agents } = synced;
   return { synced, seen, skills: skills ?? { results: [], writes: 0, reloads: [] }, done: [skills, servers, agents].flatMap(kind => kind?.results ?? []), told: passTells(synced), serversAndAgents: {
     serverNotices: servers?.notices ?? [], agentNotices: agents?.notices ?? [], settling: !!(servers?.settling || agents?.settling),
-    changed: !!(servers?.writes || servers?.notices?.length || agents?.writes || agents?.notices?.length) }, ...(untouched && forView ? { kept: { kept: shared.kept, reads: shared.reads } } : {}) };
+    changed: !!(servers?.writes || servers?.notices?.length || agents?.writes || agents?.notices?.length) }, ...(untouched && forView ? { kept: { kept: shared.kept, reads: withoutFolderAnswers(shared.reads) } } : {}) };
 }
 
 /** Every home's entry the settings keep (AppSettings toolsSeen), an object whatever a hand edit left there. */

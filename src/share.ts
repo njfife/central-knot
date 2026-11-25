@@ -84,7 +84,11 @@ export interface ShareContext {
   overrides?: Partial<Record<HarnessId, string>>;
   /** How each tool was found here (CLI, desktop app, or both), for reload advice (reload.ts). */
   ways?: ToolWays;
-  /** Reads shared within one pass or one view (what each tool has through its plugins): set only on a context made for that one use. */
+  /**
+   * Reads shared within one pass or one view (what each tool has through its plugins; on Windows each folder's answer to
+   * folderAccess): set only on a context made for that one use. On Windows a pass given none, a click's, has its own
+   * (librarypass.ts runPass); the view made right after a pass takes the pass's reads but its folder answers (withoutFolderAnswers).
+   */
   reads?: Map<string, Promise<unknown>>;
   /** Each kind's read its pass of the whole home left standing, for the view made right after, whose look takes it (librarypass.ts KeptReads, lookFor): main.ts pass and syncAndView only. */
   kept?: KeptReads;
@@ -625,24 +629,39 @@ export async function syncsHere(context: ShareContext): Promise<boolean> {
   return (await writeAccess(context)).allowed && (await syncGate(context)).state === 'ready';
 }
 
+/** What a folder's answer is kept under in ShareContext reads (folderAccess on Windows); withoutFolderAnswers leaves those out. */
+const FOLDER_ANSWER = 'folderAccess ';
+
 /**
  * The one answer to "can this folder be written?", for a folder that is there: it resolves where it can and rejects with the
- * refusal where it can't, as access does. Off Windows it is access(folder, mode), asked each time. On Windows, where access looks
- * at no folder's permissions, the folder itself is opened for writing and closed, and `mode` is not asked: nothing is made in
- * it, so nothing is left there. A watch on the folder above may then see a change to the folder itself (seen on Windows, not
- * once an open), which the app's watches there pass over: they look for the files they name alone (main.ts startWatching).
- * A folder that lets a file be made but not its own attributes be written is refused, so the answer errs on holding back; one
- * that lets a file be made but none removed passes (the removal then says it failed). Within a pass or a view (ShareContext
- * reads, by the folder's real path) a folder is opened once; the next pass opens it again, which is when an unlock is seen.
+ * refusal where it can't, as access does. Off Windows it is access(folder, mode) itself, its own promise, asked each time. On
+ * Windows, where access looks at no folder's permissions, the folder itself is opened for writing and closed (openedOnWindows),
+ * and `mode` is not asked. Within a pass or a view (ShareContext reads, by the folder's real path) a folder is opened once; the
+ * next pass, and the view made right after a pass (withoutFolderAnswers), open it again, which is when an unlock is seen.
  */
-export async function folderAccess(context: Pick<ShareContext, 'reads'>, folder: string, mode: number): Promise<void> {
-  if (process.platform !== 'win32') return access(folder, mode);
+export function folderAccess(context: Pick<ShareContext, 'reads'>, folder: string, mode: number): Promise<void> {
+  return process.platform === 'win32' ? openedOnWindows(context, folder) : access(folder, mode);
+}
+
+/**
+ * folderAccess on Windows. Nothing is made in the folder, so nothing is left there. Its limits, measured on Windows: a folder
+ * that lets a file be made but not its own attributes be written is refused (the answer errs on holding back); one that lets a
+ * file be made but none removed passes (the removal then says it failed); one with the read-only attribute passes, as a file
+ * can be made in it. Opening a folder that holds files makes one change event, named for it, in the watch on the folder above
+ * (once in a hundred opens): in the app's own layout no watch that sees it acts on it (main.ts startWatching acts there on the
+ * file names it holds alone); a tool's skills folder placed inside another tool's watched skills folder is not covered by that.
+ */
+async function openedOnWindows(context: Pick<ShareContext, 'reads'>, folder: string): Promise<void> {
   const opened = () => open(folder, constants.O_WRONLY).then(handle => handle.close());
   if (!context.reads) return opened();
-  const key = `folderAccess ${await realpath(folder).catch(() => folder)}`;
+  const key = `${FOLDER_ANSWER}${await realpath(folder).catch(() => folder)}`;
   if (!context.reads.has(key)) context.reads.set(key, opened());
   return context.reads.get(key) as Promise<void>;
 }
+
+/** A pass's reads as the view made right after it takes them (main.ts pass): every read but its folder answers, asked again. */
+export const withoutFolderAnswers = (reads: ShareContext['reads']) =>
+  reads && new Map([...reads].filter(([key]) => !key.startsWith(FOLDER_ANSWER)));
 
 /** Nothing is written while this build is held; the real home only by explicitly choosing it. A simulated home that reaches it stays read-only. */
 export async function writeAccess(context: ShareContext): Promise<WriteAccess> {
