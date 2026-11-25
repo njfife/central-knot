@@ -1,6 +1,7 @@
-// Helper for .github/workflows/windows.yml: packages the Windows preview and runs its --smoke-test (--smoke), and runs
-// the advisory unit test files not yet on tests/windows-strict.txt (--advisory <outDir>), streaming full.log to disk as
-// it goes and combining strict.log's counts with the advisory run into summary.txt. Strict unit tests run directly via
+// Helper for .github/workflows/windows.yml: packages the Windows preview and runs its --smoke-test, then tests/launch.test.ts
+// under the packaged app's own Node (--smoke), and runs the advisory unit test files not yet on tests/windows-strict.txt
+// (--advisory <outDir>), streaming full.log to disk as it goes and combining strict.log's counts with the advisory run into
+// summary.txt. Strict unit tests run directly via
 // `node --test` in windows.yml (no wrapper here); windows.yml omits continue-on-error on strict steps and sets it here.
 import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync, writeSync } from 'node:fs';
@@ -21,7 +22,7 @@ const strictSet = () => new Set(
     .filter(line => line && !line.startsWith('#')),
 );
 
-/** Packages the standard Windows x64 preview (no release tag) and proves its --smoke-test passes. */
+/** Packages the standard Windows x64 preview (no release tag), proves its --smoke-test passes, and that it starts a .cmd as src/launch.ts says. */
 async function runSmoke() {
   if (process.platform !== 'win32') plainly('The Windows smoke test runs only on Windows.');
   process.chdir(root);
@@ -44,6 +45,17 @@ async function runSmoke() {
     process.exit(result.status || 1);
   }
   console.log(`Smoke test passed in ${((Date.now() - t1) / 1000).toFixed(1)}s: ${passLine}`);
+  // How the app starts a tool's command (src/launch.ts), under the packaged app's own Node rather than the tests' Node.
+  const t2 = Date.now();
+  const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1' };
+  delete env.NODE_TEST_CONTEXT;
+  const launch = spawnSync(exe, ['--test', 'tests/launch.test.ts'], { cwd: root, env, encoding: 'utf8', timeout: 120_000 });
+  const said = (launch.stdout ?? '').replace(/\r/g, '');
+  if (launch.error || launch.status !== 0 || !/^ℹ fail 0$/m.test(said) || !/^ℹ skipped 0$/m.test(said)) {
+    console.error(`tests/launch.test.ts under the packaged app failed (status=${launch.status}, error=${launch.error?.message ?? 'none'}).\n${said.trim()}\n${(launch.stderr ?? '').trim()}`);
+    process.exit(launch.status || 1);
+  }
+  console.log(`tests/launch.test.ts passed under the packaged app's own Node in ${((Date.now() - t2) / 1000).toFixed(1)}s, none skipped.`);
 }
 
 /** Extracts totals, skips, failures, and cancellations from a single `node --test` output log. */
