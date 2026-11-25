@@ -4,7 +4,6 @@
 // prompt (writeDraft refuses when the files changed since). Its answer sorts those instructions into what every tool should get
 // (the base) and what stays only in each tool's file. Nothing is written here: the answer is a draft, which the Instructions page
 // reviews and saves like any other base change.
-import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +11,7 @@ import { findBinary } from './discovery.ts';
 import { harnessIds } from './harnesses.ts';
 import { baseView, instructionsView } from './instructions.ts';
 import { pathBeside } from './platform.ts';
+import { start } from './launch.ts';
 import { fileName, toolNames } from './words.ts';
 import type { ShareContext } from './share.ts';
 import type { BaseDraft, HarnessId, Snapshot } from './types.ts';
@@ -155,7 +155,7 @@ function run(binary: string, args: string[], prompt: string, { cwd, signal, time
   return new Promise(done => {
     // Its own process group (not on Windows), so stopping it reaches helpers it started, such as MCP servers.
     const grouped = process.platform !== 'win32';
-    const child = spawn(binary, args, { cwd, env: { ...process.env, PATH: pathBeside(binary) }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: grouped });
+    const child = start(binary, args, { cwd, env: { ...process.env, PATH: pathBeside(binary) }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: grouped });
     let output = '', said = '', stoppedAs: 'timeout' | 'cancelled' | undefined, finished = false;
     const stop = (as: 'timeout' | 'cancelled') => {
       if (finished) return;

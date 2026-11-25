@@ -142,7 +142,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const open = host.home();
     if (!open) throw new Error('No home is open.');
     const routes = clis ? await use.findClis() : { binaries: {}, apps: {} };
-    return { home: open.home, dataDir: join(host.dataDir, 'plugins'), binaries: routes.binaries, apps: routes.apps, ...(ways ? { ways: waysFrom((await host.read()).snapshots) } : {}), overrides: open.overrides };
+    return { home: open.home, actual: open.actual, dataDir: join(host.dataDir, 'plugins'), binaries: routes.binaries, apps: routes.apps,
+      ...(ways ? { ways: waysFrom((await host.read()).snapshots) } : {}), overrides: open.overrides };
   };
 
   /**

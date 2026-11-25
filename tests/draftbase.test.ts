@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
@@ -9,6 +9,7 @@ import { draftCommand, draftPrompt, draftSources, draftTools, parseDraft, prompt
 import { linesNotCarried, splitBase, withBase } from '../src/basetext.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
+import { standIn } from './standin.ts';
 
 const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
 async function sandbox() {
@@ -18,15 +19,14 @@ async function sandbox() {
   const context: ShareContext = { home, mode: 'custom', read: async () => [], build: 'test', settingsPath: join(base, 'settings.json'), realHome: join(base, 'real') };
   const snapshots = () => Promise.all(tools.map(harness => discover({ home, mode: 'custom', harness })));
   const seen = async () => Object.fromEntries((await instructionsView(context, await snapshots())).map(file => [file.tool, { path: file.path, hash: file.hash }]));
-  /** A stand-in for a tool's CLI: a script that reads the prompt and answers as `body` (shell) says. */
-  const cli = async (name: string, body: string) => {
-    const path = join(base, name);
-    await writeFile(path, `#!/bin/sh\n${body}\n`);
-    await chmod(path, 0o755);
-    return path;
-  };
+  /** A stand-in for a tool's CLI: a script that reads the prompt and answers as `body` (shell) says, or on Windows `js` (Node: tests/standin.ts). */
+  const cli = (name: string, body: string, js: string) => standIn(join(base, name), `#!/bin/sh\n${body}\n`, js);
   return { base, home, context, snapshots, seen, cli, file: (path: string) => join(home, path), cleanup: () => rm(base, { recursive: true, force: true }) };
 }
+
+/** The Windows stand-ins' words for what the shell ones do: read all the prompt, then print `text` and a line break, as `cat <<'EOF'` does. */
+const readPrompt = 'const fs = require("fs"); const prompt = fs.readFileSync(0);';
+const say = (text: string) => `process.stdout.write(${JSON.stringify(`${text}\n`)});`;
 
 /** What the page sends when the person saw the prompt as it is: writeDraft runs only for the prompt shown. */
 const seenAsIs = (sources: DraftSources) => ({ shown: draftPrompt(sources) });
@@ -91,7 +91,8 @@ test('The prompt is shown before anything runs, and what runs is sent that promp
     await writeFile(box.file('.claude/CLAUDE.md'), 'Be brief.\nAnd kind.\n');
     const now = await draftSources(box.context, await box.snapshots());
     const marker = join(box.base, 'ran');
-    const binary = await box.cli('claude', `touch '${marker}'\ncat > /dev/null\ncat <<'EOF'\n${answer('Be brief.', { 'claude-cli': '' })}\nEOF`);
+    const binary = await box.cli('claude', `touch '${marker}'\ncat > /dev/null\ncat <<'EOF'\n${answer('Be brief.', { 'claude-cli': '' })}\nEOF`,
+      `${readPrompt} fs.writeFileSync(${JSON.stringify(marker)}, ''); ${say(answer('Be brief.', { 'claude-cli': '' }))}`);
     assert.deepEqual(await writeDraft(now, 'claude-cli', binary, { shown: (shown as { prompt: string }).prompt }), { promptNow: draftPrompt(now) });
     await assert.rejects(readFile(marker));
     // Sent the prompt now shown, it runs.
@@ -114,7 +115,10 @@ test('A draft sorts the files with instructions of their own, and saving it sets
 
     // The stand-in keeps what it was sent, and answers through standard output, in an empty folder of its own.
     const got = join(box.base, 'got');
-    const binary = await box.cli('claude', `cat > '${got}'\necho "$*" > '${got}.args'\npwd > '${got}.cwd'\nls -A > '${got}.ls'\ncat <<'EOF'\n${answer('# Style\nBe brief.', { 'claude-cli': '# Claude\nUse the Task tool.', 'codex-cli': 'Run codex review before pushing.' })}\nEOF`);
+    const reply = answer('# Style\nBe brief.', { 'claude-cli': '# Claude\nUse the Task tool.', 'codex-cli': 'Run codex review before pushing.' });
+    const binary = await box.cli('claude', `cat > '${got}'\necho "$*" > '${got}.args'\npwd > '${got}.cwd'\nls -A > '${got}.ls'\ncat <<'EOF'\n${reply}\nEOF`,
+      `${readPrompt} const got = ${JSON.stringify(got)}; fs.writeFileSync(got, prompt); fs.writeFileSync(got + ".args", process.argv.slice(1).join(" ") + "\\n");
+      fs.writeFileSync(got + ".cwd", process.cwd() + "\\n"); fs.writeFileSync(got + ".ls", fs.readdirSync(".").join("\\n") + "\\n"); ${say(reply)}`);
     const { draft } = await writeDraft(sources, 'claude-cli', binary, seenAsIs(sources));
     assert.equal(await readFile(got, 'utf8'), draftPrompt(sources));
     assert.equal((await readFile(`${got}.args`, 'utf8')).trim(), '-p --tools  --strict-mcp-config --no-session-persistence');
@@ -186,14 +190,16 @@ test('A tool that fails, answers out of form, takes too long or is stopped gives
     await writeFile(box.file('.claude/CLAUDE.md'), 'Be brief.\n');
     const sources = await draftSources(box.context, await box.snapshots());
     // Not signed in: it exits before reading the prompt, and what it said is passed on.
-    const signedOut = await writeDraft(sources, 'claude-cli', await box.cli('signed-out', 'echo "Not logged in · Please run /login" >&2\nexit 1'), seenAsIs(sources));
+    const signedOut = await writeDraft(sources, 'claude-cli', await box.cli('signed-out', 'echo "Not logged in · Please run /login" >&2\nexit 1',
+      'process.stderr.write("Not logged in · Please run /login\\n"); process.exitCode = 1;'), seenAsIs(sources));
     assert.equal(signedOut.stopped, 'Claude Code could not write a draft: “Not logged in · Please run /login”. Nothing was changed.');
-    const chatty = await writeDraft(sources, 'codex-cli', await box.cli('chatty', 'cat > /dev/null\necho "Sure! Here are some thoughts."'), seenAsIs(sources));
+    const chatty = await writeDraft(sources, 'codex-cli', await box.cli('chatty', 'cat > /dev/null\necho "Sure! Here are some thoughts."', `${readPrompt} ${say('Sure! Here are some thoughts.')}`), seenAsIs(sources));
     assert.equal(chatty.stopped, 'Codex answered, but its answer stopped before the end, so there is no draft. Nothing was changed. Try again, or have another tool write it.');
     // Codex's answer is the file it is told to write, not what it prints while working.
-    const codex = await box.cli('codex', `cat > /dev/null\necho "working…"\nfor last; do :; done\nprev=""\nfor arg; do [ "$prev" = "-o" ] && out="$arg"; prev="$arg"; done\ncat > "$out" <<'EOF'\n${answer('Be brief.', { 'claude-cli': '' })}\nEOF`);
+    const codex = await box.cli('codex', `cat > /dev/null\necho "working…"\nfor last; do :; done\nprev=""\nfor arg; do [ "$prev" = "-o" ] && out="$arg"; prev="$arg"; done\ncat > "$out" <<'EOF'\n${answer('Be brief.', { 'claude-cli': '' })}\nEOF`,
+      `${readPrompt} ${say('working…')} const args = process.argv.slice(1); fs.writeFileSync(args[args.indexOf("-o") + 1], ${JSON.stringify(`${answer('Be brief.', { 'claude-cli': '' })}\n`)});`);
     assert.deepEqual((await writeDraft(sources, 'codex-cli', codex, seenAsIs(sources))).draft?.own, { 'claude-cli': '' });
-    const slow = await box.cli('slow', 'cat > /dev/null\nsleep 30');
+    const slow = await box.cli('slow', 'cat > /dev/null\nsleep 30', `${readPrompt} setTimeout(() => {}, 30_000);`);
     const started = Date.now();
     assert.equal((await writeDraft(sources, 'pi-cli', slow, { ...seenAsIs(sources), timeoutMs: 300 })).stopped, 'Pi did not finish a draft in time, so it was stopped. Nothing was changed.');
     const stopping = new AbortController();
@@ -215,7 +221,7 @@ test('The tools that can write a draft are those with a CLI on this computer', a
   const box = await sandbox();
   try {
     await mkdir(box.file('.local/bin'), { recursive: true });
-    for (const name of ['claude', 'pi']) { await writeFile(box.file(`.local/bin/${name}`), '#!/bin/sh\n'); await chmod(box.file(`.local/bin/${name}`), 0o755); }
+    for (const name of ['claude', 'pi']) await standIn(box.file(`.local/bin/${name}`), '#!/bin/sh\n', '');
     // A file that can't be run is no CLI.
     await writeFile(box.file('.local/bin/codex'), '#!/bin/sh\n');
     const found = await draftTools(box.home, '');
@@ -254,7 +260,9 @@ test('A tool that ends leaving a helper running still gives its draft at once, a
     const sources = await draftSources(box.context, await box.snapshots());
     const pidFile = join(box.base, 'helper.pid');
     // The helper keeps the tool's output open, as an MCP server started from the person's config would.
-    const binary = await box.cli('leaves-helper', `cat > /dev/null\n(sleep 60 & echo $! > '${pidFile}'; wait) &\ncat <<'EOF'\n${answer('Be brief.', { 'claude-cli': '' })}\nEOF\nexit 0`);
+    const binary = await box.cli('leaves-helper', `cat > /dev/null\n(sleep 60 & echo $! > '${pidFile}'; wait) &\ncat <<'EOF'\n${answer('Be brief.', { 'claude-cli': '' })}\nEOF\nexit 0`,
+      `${readPrompt} const helper = require("child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 60_000)"], { stdio: ["ignore", "inherit", "inherit"] });
+      fs.writeFileSync(${JSON.stringify(pidFile)}, String(helper.pid)); helper.unref(); ${say(answer('Be brief.', { 'claude-cli': '' }))}`);
     const started = Date.now();
     assert.deepEqual((await writeDraft(sources, 'claude-cli', binary, seenAsIs(sources))).draft?.base, 'Be brief.\n');
     assert.ok(Date.now() - started < 10_000);
