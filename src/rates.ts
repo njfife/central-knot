@@ -157,7 +157,7 @@ function unitRate(price: UnitPrice | undefined, totalInputTokens: number): numbe
 }
 
 /**
- * The one rule for a tool-reported cost in USD (used for Request.reported and SessionRead.treeReported):
+ * The one rule for a tool-reported cost in USD (used for Request.reported and SessionRead.reported's dollars):
  * a finite figure above zero wins; zero, negative, non-finite or absent falls back to list pricing.
  */
 export const reportedCost = (reported: number | undefined): number | undefined =>

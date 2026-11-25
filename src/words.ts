@@ -142,3 +142,6 @@ export const rowNames = (rows: readonly Named[], among: readonly Named[] = rows)
 export const throughPlugin = (tool: HarnessId, given: { plugin: string; version?: string; off?: true }, item = 'skill') =>
   `${toolNames[tool]} has this ${item} through the plugin ${given.plugin}${given.version ? ` (version ${given.version})` : ''}${given.off ? ', turned off there' : ''}, so no separate copy is placed there.`;
 
+/** Shown in View source when a hook's declaring file or script cannot be read (hooksource.ts, hooksourceview.ts, main.ts). */
+export const HOOK_SOURCE_UNREADABLE = 'This file couldn’t be read.';
+
