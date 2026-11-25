@@ -10567,7 +10567,7 @@ async function sessionsWeekFlow() {
   same('the sweep after the home opened kept every request of the five days', keptIds(), ['f1', 'f2', 'g1', 'n1', 'r2', 'y1']);
   rmSync(goneFile);
 
-  // A home that keeps: 7 days offered; chosen, what was kept, a line a day.
+  // A home that keeps: 7 days offered; chosen, what was kept, a line for each day with sessions.
   await a.click('#nav-sessions');
   for (let tries = 0; tries < 100 && !(await a.exists('#sessions-heading')); tries++) await wait(100);
   await a.settle();
