@@ -8,7 +8,7 @@
 //   and shows again when the row comes back; only the rows listed are counted and acted on (ofListed).
 // - A Delete of many: what it takes and leaves of the ticked rows listed (each row says why it can't be deleted, if it can't),
 //   its question, kept with the rows it counted and closed once they change under it (ask, askedNow, cancelAsk, toggleWhy), and
-//   its words (selectedWords, deleteLabel, questionWords, cantWords, whyLines, deletedWords).
+//   its words (selectedWords, deleteLabel, questionWords, cantWords, whyLines, deletedWords, restoreWords).
 // Pure: no DOM, nothing of matrix.ts, which draws it (selectControl, selectBar, tickOf, headingTick), gives it the rows it lists
 // in their order on screen with why each can't be deleted (matrix.ts cantDelete, which the single Delete in an opened row asks
 // too), and sends a Delete of many (matrix.ts deleteTicked → app.ts applyByKind).

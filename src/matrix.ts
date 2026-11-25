@@ -23,6 +23,8 @@
 // no rows of the Library's (catalogGroup). A tool's tabs match their Find here (holdsFindText); the Files view, itself.
 // From (fromChoice: where a row came from, origins.ts) and the chip narrow what Find leaves (picked), and every count and
 // Turn these off goes by that one list (listedRows). A choice of From, a chip or Find's text shows its list from the top (listFromTop).
+// Select on the Library's list (selection.ts keeps its mode and ticks): a tick in each switch's place and on each heading, its bar
+// under the toolbar, and a Delete of many (selectControl, selectBar, deleteTicked), what can be deleted being cantDelete's.
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, noticeNames, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
