@@ -26,7 +26,7 @@
 // shows its list from the top (listFromTop).
 // Select on the Library's list (selection.ts keeps its mode and ticks): a tick in each switch's place and on each heading, its bar
 // under the toolbar, and Turn on, Turn off and Delete of many (selectControl, selectBar, turnTicked, deleteTicked), decided by
-// cantTurn, alreadyAs and cantDelete; writing controls on an opened row (and Resume, Turn these off) dim via writeOff. It goes
+// cantTurn, alreadyAs and cantDelete; writing controls on an opened row (and Resume, Turn these off) dim via app.ts writeOff. It goes
 // by the rows drawn, in their order on screen (drawTable: Table selectable), which holds a pinned row the chip dropped too.
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, noticeNames, plural } from './model.ts';
@@ -35,7 +35,7 @@ import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, pageNames, 
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
 import { copilotSharesYours, homeItems, inUse, itemId, pluginLive } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
-import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
+import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, writeOff, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, whyOff, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -61,7 +61,7 @@ import { sources } from './sourcespage.ts';
 import { folded, lineDiff } from './diff.ts';
 import { reloadAdvice, rowReload, toItemKind, type ReloadAdvice } from './reload.ts';
 import { pageData, readPageData, resetPageData } from './pagedata.ts';
-import { ask, askedNow, cancelAsk, cantWords, deletedWords, headingState, isTicked, ofListed, questionWords, selectedWords, selecting, listDrawn, startSelecting, stopSelecting, restoreWords, tickHeading, tickRow, toggleWhy, turnedWords, turnLabel, whyLines, whyShown, type Listed } from './selection.ts';
+import { ask, askedNow, cancelAsk, cantWords, deletedWords, DIFFERS_REASON, headingState, isTicked, ofListed, questionWords, selectedWords, selecting, listDrawn, startSelecting, stopSelecting, restoreWords, tickHeading, tickRow, toggleWhy, turnedWords, turnLabel, turnTail, whyLines, whyShown, type Listed } from './selection.ts';
 
 const names = toolNames as Record<Tool, string>;
 
@@ -168,7 +168,7 @@ function pluginLine(row: ItemRow | PluginRow, facts: LineFacts & { source?: stri
 function resultLine(row: ItemRow | PluginRow, tool: Tool) {
   const said = resultOn(tool as HarnessId, { kind: partOfPage[kindOf(row)], name: nameOf(row) });
   return said ? h('p.details-tool-result', { 'data-result': resultKey(said.aim), 'data-failed': String(said.failed) }, icon(said.failed ? 'triangle-alert' : 'check', 12, said.failed ? 'tone-warning' : 'tone-success'),
-    h('span.details-tool-result-text', {}, [said.words, said.next].filter(Boolean).join(' ')), said.undo ? smallAction('Undo', elId('line-undo', row, tool), said.undo, '', writeOff(false)) : null,
+    h('span.details-tool-result-text', {}, [said.words, said.next].filter(Boolean).join(' ')), said.undo ? smallAction('Undo', elId('line-undo', row, tool), said.undo, '', selectOff() ?? !!acting()) : null,
     closeButton(() => closeLineResult(said), { id: elId('line-close', row, tool), label: 'Close this result' })) : null;
 }
 
@@ -614,8 +614,6 @@ export const notAllRead = (home: HomeView, kind: PageKind) => !!home[kind].unrea
  */
 const homeStops = () => !state.home || !!whyReadOnly(state.home);
 const kindStops = (kind: PageKind) => !state.home || !!whyKindReadOnly(state.home, kind);
-/** Why a write other than a row's own switch or Add is off now, if it is: the page acts (app.ts acting), Select's mode is on (app.ts selectOff), or `stops`. */
-const writeOff = (stops: boolean): string | boolean => acting() ?? selectOff() ?? stops;
 /** A row's own switch or Add takes a click while a run of clicks goes on (app.ts queueClick): off only under other work, or by `stops`. */
 const queueOff = (stops: boolean) => stops || !!state.busy;
 /**
@@ -631,18 +629,19 @@ const cantDelete = (row: ItemRow | PluginRow): string | undefined => (isPluginRo
  * found row whose copies differ or that can't be added yet. The one function selectBar and headingTick ask.
  */
 function cantTurn(t: Table, row: ItemRow | PluginRow, on: boolean): string | undefined {
-  if (isPluginRow(row)) return `part of the plugin ${row.plugin}`;
+  const pluginWhy = (plugin: string) => `its switch also turns the plugin “${plugin}”: use the row’s own switch`;
+  if (isPluginRow(row)) return pluginWhy(row.plugin);
   const through = throughItems(t, row);
-  if (through.length) return `part of the plugin ${through[0]!.install.plugin}`;
+  if (through.length) return pluginWhy(through[0]!.install.plugin);
   const stop = stopFor(row.kind);
   if (stop) return stop;
   if (libraryPlace(itemOf(row)) !== 'found') return undefined;
   if (!on) return 'not in Central Knot';
-  if (isDiffering(row)) return 'its copies differ: its own row asks which to use';
+  if (isDiffering(row)) return DIFFERS_REASON;
   return canAdd(row) ? undefined : 'nothing can be added yet';
 }
-/** Whether a library row's place is already what a bulk Turn asks for (a partly-on row is already on). */
-const alreadyAs = (row: ItemRow | PluginRow, on: boolean) => !isPluginRow(row) && libraryPlace(itemOf(row)) === (on ? 'on' : 'off');
+/** Whether a row is already in the state a bulk Turn asks for (a partly-on library row is already on; a plugin row follows its switch). */
+const alreadyAs = (row: ItemRow | PluginRow, on: boolean) => (isPluginRow(row) ? rowItems(row).some(itemOn) === on : libraryPlace(itemOf(row)) === (on ? 'on' : 'off'));
 /**
  * What stops a kind's writes (app.ts whyKindReadOnly) as a row's reason before anything is tried: the stop alone ("the agents
  * record is damaged"), without what its band adds of what was not done (words.ts NOTHING_CHANGED).
@@ -834,8 +833,7 @@ function compareChoices(t: Table, skill: ItemRow, inFiles = false, then?: () => 
     // A tool whose copy is one it has another way keeps it: Central Knot writes nothing there (library.ts, "held").
     const replaced = others.filter(entry => !skill.anotherWay?.[entry]), keeping = others.filter(entry => skill.anotherWay?.[entry]);
     const said = copyQuote(skill, tool, others);
-    const off = writeOff(kindStops(skill.kind));
-    return h('button.version', { type: 'button', id: elId(`${prefix}use`, skill, tool), 'aria-label': `Use ${tools}’s copy`, disabled: !!off, ...whyOff(off), onclick: () => void applyClick(turnOn(t, skill, tool)).then(then) },
+    return h('button.version', { type: 'button', id: elId(`${prefix}use`, skill, tool), 'aria-label': `Use ${tools}’s copy`, disabled: !!writeOff(kindStops(skill.kind)), ...whyOff(selectOff()), onclick: () => void applyClick(turnOn(t, skill, tool)).then(then) },
       who,
       h('span.version-says', {},
         said ? h('span.version-text', {}, ...said) : null,
@@ -1929,15 +1927,15 @@ const tickedLook = (t: Table, row: ItemRow | PluginRow) => (t.selectable && isTi
  * tickHeading); none out of the mode, nor over rows none of which passes cantDelete or cantTurn either way.
  */
 function headingTick(t: Table, role: string, name: string, rows: (ItemRow | PluginRow)[]) {
+  if (!t.selectable || !rows.some(row => !cantDelete(row) || !cantTurn(t, row, true) || !cantTurn(t, row, false))) return null;
   const ids = rows.map(selectId);
-  const acts = rows.some(row => !cantDelete(row) || !cantTurn(t, row, true) || !cantTurn(t, row, false));
-  return t.selectable && acts ? tickButton(`tick-heading-${role}`, headingState(ids), `Every row under ${name}`, () => { tickHeading(ids); rerender(); }) : null;
+  return tickButton(`tick-heading-${role}`, headingState(ids), `Every row under ${name}`, () => { tickHeading(ids); rerender(); });
 }
 
 /**
  * Select's bar, after the toolbar and outside the list's scrolling box, while the mode is on: how many rows listed are ticked,
- * how many of them can't be deleted, Turn on, Turn off and Delete…; once Delete… is clicked, its question in the same place,
- * the focus on its Cancel. "N can't be deleted ›", on the bar and after the question, opens their names and reasons over the
+ * Turn on, Turn off, Delete… and how many of them can't be deleted; once Delete… is clicked, its question in the same place,
+ * the focus on its Cancel. "N can't be deleted ›", beside Delete… and after the question, opens their names and reasons over the
  * rows (style.css .select-why). Turn on and Turn off act at once, showing their own count when they take fewer than are ticked.
  * From Select's click on, the bar holds the room of the question about every row listed, the longest it can ask here, drawn
  * unseen in the same place (style.css .band-stack): no tick and no question moves a row. `rows`: the rows listed, in their order on screen.
@@ -1947,8 +1945,8 @@ function selectBar(t: Table, rows: (ItemRow | PluginRow)[]) {
   const listed: Listed[] = base.map(({ row, id, name }) => ({ id, name, cant: cantDelete(row) }));
   const turnOf = (on: boolean) => ofListed(base.map(({ row, id, name }) => ({ id, name, cant: cantTurn(t, row, on), already: alreadyAs(row, on) })));
   const { ticked, takes, leaves } = ofListed(listed);
-  const on = turnOf(true);
-  const off = turnOf(false);
+  const toOn = turnOf(true);
+  const toOff = turnOf(false);
   const days = state.historyDays ?? defaultHistoryDays;
   const takenOf = (list: Listed[]) => rows.filter((row): row is ItemRow => !isPluginRow(row) && list.some(each => each.id === selectId(row)));
   const offDelete = acting() ?? !takes.length;
@@ -1961,12 +1959,12 @@ function selectBar(t: Table, rows: (ItemRow | PluginRow)[]) {
     rerender();
     document.getElementById('select-cancel')?.focus();
   };
-  const turnBtn = (toOn: boolean, group: ReturnType<typeof turnOf>) => button({
-    variant: 'outline', size: 'small', label: turnLabel(toOn, group.takes.length, ticked.length), id: toOn ? 'select-turn-on' : 'select-turn-off',
-    disabled: acting() ?? !group.takes.length, onclick: () => turnTicked(toOn, takenOf(group.takes), group.already.length, group.leaves),
+  const turnBtn = (on: boolean, group: ReturnType<typeof turnOf>) => button({
+    variant: 'outline', size: 'small', label: turnLabel(on, group.takes.length, ticked.length), id: on ? 'select-turn-on' : 'select-turn-off',
+    disabled: acting() ?? !group.takes.length, onclick: () => turnTicked(on, takenOf(group.takes), group.already.length, group.leaves),
   });
-  const counting = () => h('span.select-line', {}, h('span.select-text.select-count', {}, selectedWords(ticked.length)), why(true, leaves.length),
-    turnBtn(true, on), turnBtn(false, off), button({ variant: 'outline', size: 'small', label: 'Delete…', id: 'select-delete', disabled: offDelete, onclick: askNow }));
+  const counting = () => h('span.select-line', {}, h('span.select-text.select-count', {}, selectedWords(ticked.length)),
+    turnBtn(true, toOn), turnBtn(false, toOff), button({ variant: 'outline', size: 'small', label: 'Delete…', id: 'select-delete', disabled: offDelete, onclick: askNow }), why(true, leaves.length));
   const question = (shown: boolean, deletes: number, cant: number) => {
     const now = button({ variant: 'outline', size: 'small', label: `Delete ${deletes}`, id: idIf(shown, 'select-delete-now'), disabled: offDelete, onclick: () => deleteTicked(takenOf(takes), leaves.length) });
     now.classList.add('delete-now');
@@ -1994,10 +1992,11 @@ function deleteTicked(rows: ItemRow[], left: number) {
  */
 function turnTicked(on: boolean, rows: ItemRow[], already: number, leaves: Listed[]) {
   stopSelecting();
-  const change = on ? rowClicks.on : rowClicks.off;
+  const change = on ? rowClicks.on : rowClicks.off, tools = state.home?.sync.managed ?? [];
   void applyByKind(clicksByKind(rows, row => change(row, itemOf(row))),
-    (changed, stayed) => turnedWords(on, rowNames(changed), rowNouns(changed.map(row => row.kind)), already, leaves.length, on ? [] : stayed),
-    { now: on ? 'on' : 'off', stays: true, reasons: whyLines(leaves) });
+    (changed, stayed) => turnedWords(on, rowNames(changed), rowNouns(changed.map(row => row.kind)), 0, 0, on ? [] : stayed),
+    { now: on ? 'on' : 'off', stays: true, reasons: whyLines(leaves), tail: turnTail(on, already, leaves.length),
+      partial: notIn => (notIn.length ? `${on ? 'Not' : 'Still'} in ${toolsPhrase(notIn, tools)}.` : '') });
 }
 
 // ---------- One switch per item ----------
@@ -2456,7 +2455,7 @@ export const toTurnOff = (shown: ItemRow[]) => shown.filter(row => !leftToItsRow
 
 /**
  * One click per kind over `rows`, each row's change made by `change`, for app.ts applyByKind, whose `said` words the whole (each
- * click's own is empty): Turn these off's, and Select's Delete of many (deleteTicked).
+ * click's own is empty): Turn these off (turnTheseOff), and Select's Delete, Turn on and Turn off of many (deleteTicked, turnTicked).
  */
 const clicksByKind = (rows: ItemRow[], change: (row: ItemRow) => Change): Click[] => KINDS.map(kind => rows.filter(row => row.kind === kind)).filter(list => list.length)
   .map(list => ({ kind: list[0]!.kind, items: list.map(nameOf), rows: list.map(rowKey), regroups: true, changes: list.map(change), said: '' }));
@@ -2691,9 +2690,9 @@ function libraryDelete(t: Table, lib: LibraryPage, skill: ItemRow) {
   const said = (notIn: HarnessId[]) => lib.say.said.deleted(name, item.on, stillIn(skill, item, notIn, tools), tools);
   const run = () => { view.confirmDelete = undefined; click({ kind: skill.kind, items: [name], rows: [rowKey(skill)], changes: [rowClicks.remove(skill, item)], said }); };
   // Armed, it is still a button (outlined in red); Cancel beside it is a link.
-  const now = button({ variant: 'outline', size: 'micro', label: 'Delete it now', id: elId('delete-confirm', skill), disabled: writeOff(cant),
-    attrs: { title: `Delete ${name} from Central Knot now. History can restore it.` }, onclick: run });
+  const now = button({ variant: 'outline', size: 'micro', label: 'Delete it now', id: elId('delete-confirm', skill), disabled: writeOff(cant), onclick: run });
   now.classList.add('delete-now');
+  now.title = selectOff() ?? `Delete ${name} from Central Knot now. History can restore it.`;
   return h('span.delete-armed', {}, smallAction('Cancel', elId('delete-cancel', skill), disarm), now,
     h('span.delete-armed-note', { id: elId('delete-note', skill) }, lib.say.said.deleteArmed(state.historyDays ?? defaultHistoryDays)));
 }
@@ -2725,7 +2724,7 @@ function libraryVersions(t: Table, lib: LibraryPage, skill: ItemRow) {
     said: notIn => { const source = (version.from.how === 'made-current' && madeFrom(item, version)) || version;
       return lib.say.said.madeCurrent(name, source, versionClock(item, source), on(notIn), toolsFor(t, skill.kind)); } });
   const reading = at === undefined || !listed(item)[at] ? undefined : { index: at, text: textOf(listed(item)[at].hash), current: textOf(item.hash) };
-  return versionList({ item, rowId: id, writeOff: writeOff(kindStops(skill.kind)), unfolded: view.versionsUnfolded === id, onUnfold: () => { view.versionsUnfolded = id; rerender(); },
+  return versionList({ item, rowId: id, canWrite: !writeOff(kindStops(skill.kind)), why: selectOff(), unfolded: view.versionsUnfolded === id, onUnfold: () => { view.versionsUnfolded = id; rerender(); },
     changes: skill.versionChanges, reading, now: Date.now(), onRead: read, onMakeCurrent: makeCurrent });
 }
 

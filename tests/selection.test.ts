@@ -238,14 +238,14 @@ test('Turn on and Turn off of many: ofListed splits takes, already and leaves; t
     { id: 'skills-bravo', name: 'bravo', already: true },
     { id: 'skills-charlie', name: 'charlie', already: true },
     { id: 'skills-clash', name: 'clash', cant: 'not in Central Knot' },
-    { id: 'skills-zulu', name: 'zulu', cant: 'part of the plugin kit', already: true },
+    { id: 'skills-zulu', name: 'zulu', cant: 'its switch also turns the plugin “kit”: use the row’s own switch', already: true },
   ];
   startSelecting();
   tickHeading(ids(rows));
   const split = ofListed(rows);
   assert.deepEqual(split.takes.map(row => row.name), ['alpha']);
-  assert.deepEqual(split.already.map(row => row.name), ['bravo', 'charlie']);
-  assert.deepEqual(split.leaves.map(row => row.name), ['clash', 'zulu'], 'cant takes precedence over already');
+  assert.deepEqual(split.already.map(row => row.name), ['bravo', 'charlie', 'zulu'], 'already takes precedence over cant');
+  assert.deepEqual(split.leaves.map(row => row.name), ['clash']);
   assert.deepEqual(
     [turnLabel(true, 0, 0), turnLabel(true, 0, 5), turnLabel(true, 5, 5), turnLabel(true, 2, 5), turnLabel(false, 3, 5), turnLabel(false, 3, 3)],
     ['Turn on', 'Turn on', 'Turn on', 'Turn on 2', 'Turn off 3', 'Turn off'],
@@ -257,7 +257,7 @@ test('Turn on and Turn off of many: ofListed splits takes, already and leaves; t
   stopSelecting();
 });
 
-test('Turn off of many on real folders: 3 on (one kept out of Codex) and 2 off; only the 3 are sent, 2 untouched, Undo puts each back in the same tools', async () => {
+test('Turn off of many on real folders: 3 on (one kept out of Codex) and 2 off; ofListed sorts all 5 so only the 3 are sent, 2 untouched, Undo puts each back in the same tools', async () => {
   const box = await tenSkills();
   try {
     // Keep alpha out of codex-cli (on in claude-cli and copilot-cli only); turn echo off too (golf is already off).
@@ -266,19 +266,24 @@ test('Turn off of many on real folders: 3 on (one kept out of Codex) and 2 off; 
     await turnOff(box, box.context, 'echo');
     const before = await toolFolders(box);
     const historyBefore = (await readHistory(box.context)).length;
-    const onThree = ['alpha', 'bravo', 'charlie'];
-    const offChanges = await Promise.all(onThree.map(async name => { const { row, item } = await seen(box, box.context, name); return rowClicks.off(row, item); }));
+    const five = ['alpha', 'bravo', 'charlie', 'echo', 'golf'];
+    const listed: Listed[] = await Promise.all(five.map(async name => ({ id: `skills-${name}`, name, already: placeOf(await itemOf(box, name)) === 'off' })));
+    startSelecting();
+    tickHeading(ids(listed));
+    const sorted = ofListed(listed);
+    assert.deepEqual([sorted.takes.map(row => row.name), sorted.already.map(row => row.name), sorted.leaves], [['alpha', 'bravo', 'charlie'], ['echo', 'golf'], []]);
+    const offChanges = await Promise.all(sorted.takes.map(async ({ name }) => { const { row, item } = await seen(box, box.context, name); return rowClicks.off(row, item); }));
     const sent = await applySkills(box.context, box.tools, offChanges);
     assert.equal(sent.made?.length, 3, 'one History entry per changed row, none for echo or golf');
     assert.equal((await readHistory(box.context)).length - historyBefore, 3);
-    for (const name of [...onThree, 'echo', 'golf']) for (const tool of tools) assert.equal(await bytes(folderOf(box, tool, name)), undefined, `${name} off in ${tool}`);
+    for (const name of five) for (const tool of tools) assert.equal(await bytes(folderOf(box, tool, name)), undefined, `${name} off in ${tool}`);
     assert.deepEqual((await itemOf(box, 'alpha'))?.except, ['codex-cli'], 'alpha keeps its except');
     await undoAll(box, sent.made ?? []);
     assert.deepEqual(await toolFolders(box), before, 'every tool folder back as before, alpha still out of Codex');
     assert.equal(await bytes(folderOf(box, 'codex-cli', 'alpha')), undefined);
     assert.ok(await bytes(folderOf(box, 'claude-cli', 'alpha')));
     assert.ok(await bytes(folderOf(box, 'copilot-cli', 'alpha')));
-  } finally { await box.cleanup(); }
+  } finally { stopSelecting(); await box.cleanup(); }
 });
 
 test('Turn on of many on real folders: 2 off (one kept out of Codex) and 1 addable found row; Undo puts all 3 back with found files byte for byte', async () => {

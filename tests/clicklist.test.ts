@@ -72,7 +72,7 @@ const { acting, applyByKind, applyClick, askFlash, closeResult, drawPage, flashR
 const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, runReloads, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
-const { backgroundProblems, copyQuestion, headerNotices, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
+const { backgroundProblems, copyQuestion, headerNotices, libraryTable, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
 const { openWalkthrough, walkthroughBand } = await import('../src/firstsetup.ts');
 const { pluginsResult } = await import('../src/pluginspage.ts');
 const { versionsList } = await import('../src/editparts.ts');
@@ -1882,31 +1882,205 @@ test('On another plugin’s page (or after Refresh), the header omits "Last chan
   assert.equal(resultText(), '1 of 1 didn’t go through in every tool: alpha. ');
 });
 
-test('applyByKind supports now: "on" when every asked row has a tool failure, and appends extra reasons', async t => {
-  onLibrary();
-  homeWith(t, [{ kind: 'skills', key: 'alpha' }], { on: false });
-  const done = applyByKind(
-    [{ kind: 'skills', items: ['alpha'], rows: [{ kind: 'skills', key: 'alpha' }], changes: [{ key: 'alpha', on: true, except: [], seenOn: false }], said: '' }],
-    () => 'unused',
-    { now: 'on', stays: true, reasons: ['zulu: part of the plugin kit'] },
-  );
-  await settled();
-  await main.pass({ results: [{ item: 'alpha', harness: 'copilot-cli', outcome: 'failed', message: 'locked' }], writes: 0, made: ['on-alpha'], reloads: [] });
-  await done;
-  assert.equal(app.outcome?.text, '1 of 1 didn’t go through in every tool: alpha. 1 is on.');
-  assert.deepEqual(app.outcome?.reasons, ['zulu: part of the plugin kit']);
-  assert.equal(app.outcome?.stays, true);
-  // selectOff is active only on the Library's list while Select's mode is on, never on the Files view or another page.
-  const { startSelecting, stopSelecting } = await import('../src/selection.ts');
-  app.page = 'library';
-  app.libraryView = 'list';
-  assert.equal(selectOff(), undefined);
-  startSelecting();
-  assert.equal(selectOff(), 'Done ends selecting');
-  app.libraryView = 'files';
-  assert.equal(selectOff(), undefined);
-  app.libraryView = 'list';
-  app.page = 'harnesses';
-  assert.equal(selectOff(), undefined);
-  stopSelecting();
+test('Bulk Turn failure, differing Add, and already-on plugin row say exact facts on every path', async t => {
+  const { startSelecting, stopSelecting, tickRow } = await import('../src/selection.ts');
+  const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
+  const empty = { tools, items: [], notices: [], problems: [], unread: [], access: { allowed: true }, gate: { state: 'ready' }, library: {} };
+  const skillFact = (key: string, extra: Record<string, unknown> = {}) => ({ key, name: key, description: '', copies: {}, except: [], cannot: {}, edited: [], ...extra });
+  const setupSelectHome = () => {
+    onLibrary();
+    app.libraryView = 'list';
+    app.libraryKind = 'all';
+    app.home = {
+      home: '/home', label: 'Practice', sync: { managed: tools, present: tools, caughtUp: [], access: { allowed: true }, gate: { state: 'ready' } },
+      skills: {
+        ...empty,
+        items: [
+          skillFact('charlie', { on: true, copies: { 'claude-cli': {}, 'copilot-cli': {}, 'codex-cli': {} } }),
+          skillFact('delta', { on: false }),
+          skillFact('clash', { on: false, copies: { 'claude-cli': { hash: 'a' }, 'copilot-cli': { hash: 'b' } }, takeInAnswers: { click: { wait: 'copies-differ' }, rule: { wait: 'copies-differ' } } }),
+          skillFact('lima', { on: false, copies: { 'claude-cli': { hash: 'l' } }, takeInAnswers: { click: { take: 'claude-cli' }, rule: { take: 'claude-cli' } } }),
+        ],
+        library: {
+          charlie: { ...newItem('charlie', 'charlie'), on: true },
+          delta: { ...newItem('delta', 'delta'), on: false },
+        },
+      },
+      mcp: empty,
+      agents: empty,
+      pluginItems: [{ tool: 'claude-cli', plugin: 'kit', source: '/market', marketName: 'team', off: false, items: [{ kind: 'skill', name: 'zulu' }] }],
+    } as unknown as HomeView;
+    t.mock.method(api, 'refresh', async () => app.home);
+  };
+  try {
+    await t.test('1. Only taken row fails in a tool: names Copilot CLI, never claims "1 is off", keeps already/not-turned-off counts', async () => {
+      setupSelectHome();
+      startSelecting();
+      const order1 = ['skills-charlie', 'skills-clash', 'skills-delta'];
+      for (const row of order1) tickRow(row, order1, false);
+      const bar1 = libraryTable();
+      findById(bar1, 'select-turn-off').onclick();
+      await settled();
+      await main.pass({ results: [
+        { item: 'charlie', harness: 'claude-cli', outcome: 'removed', message: '' },
+        { item: 'charlie', harness: 'codex-cli', outcome: 'removed', message: '' },
+        { item: 'charlie', harness: 'copilot-cli', outcome: 'failed', message: 'couldn’t remove' },
+      ], writes: 2, made: ['off-charlie'], reloads: [] });
+      await settled();
+      assert.equal(app.outcome?.text, '1 of 1 didn’t go through in every tool: charlie. Still in Copilot CLI. 1 was already off. 1 not turned off.');
+      assert.deepEqual(app.outcome?.reasons, ['clash: not in Central Knot']);
+    });
+
+    await t.test('2. Found row whose copies came to differ before Refresh: not counted as turned on, named with its reason', async () => {
+      setupSelectHome();
+      startSelecting();
+      const order2 = ['skills-delta', 'skills-lima'];
+      for (const row of order2) tickRow(row, order2, false);
+      const bar2 = libraryTable();
+      findById(bar2, 'select-turn-on').onclick();
+      await settled();
+      await main.pass({ results: [
+        { item: 'delta', harness: 'claude-cli', outcome: 'written', message: '' },
+        { item: 'lima', outcome: 'held', differs: true, message: 'Copies differ. Choose which copy to use.' },
+      ], writes: 1, made: ['on-delta'], reloads: [] });
+      await settled();
+      assert.equal(app.outcome?.text, '1 of 2 didn’t go through in every tool: lima. Turned on 1 skill: delta.');
+      assert.deepEqual(app.outcome?.items, ['delta']);
+      assert.deepEqual(app.outcome?.reasons, ['lima: its copies differ (its row asks which to use)']);
+      assert.equal(app.outcome?.warn, true);
+    });
+
+    await t.test('3. Plugin row already on is counted as "already on" for Turn on, not listed under "not turned on"', async () => {
+      setupSelectHome();
+      startSelecting();
+      const zuluId = 'plugin-skills-kit@team/zulu';
+      const order3 = ['skills-delta', zuluId];
+      for (const row of order3) tickRow(row, order3, false);
+      const bar3 = libraryTable();
+      findById(bar3, 'select-turn-on').onclick();
+      await settled();
+      await main.pass({ results: [{ item: 'delta', harness: 'claude-cli', outcome: 'written', message: '' }], writes: 1, made: ['on-delta'], reloads: [] });
+      await settled();
+      assert.equal(app.outcome?.text, 'Turned on 1 skill: delta. 1 was already on.');
+      assert.deepEqual(app.outcome?.reasons, []);
+      // selectOff is active only on the Library's list while Select's mode is on, never on the Files view or another page.
+      app.page = 'library';
+      app.libraryView = 'list';
+      assert.equal(selectOff(), undefined);
+      startSelecting();
+      assert.equal(selectOff(), 'Done ends selecting');
+      app.libraryView = 'files';
+      assert.equal(selectOff(), undefined);
+      app.libraryView = 'list';
+      app.page = 'harnesses';
+      assert.equal(selectOff(), undefined);
+    });
+    await t.test('1b. Turn on failure path names missing tool, never claims "1 is on", and differing-only Add keeps already count', async () => {
+      setupSelectHome();
+      startSelecting();
+      const order = ['skills-charlie', 'skills-delta', 'skills-clash'];
+      for (const row of order) tickRow(row, order, false);
+      const bar = libraryTable();
+      findById(bar, 'select-turn-on').onclick();
+      await settled();
+      await main.pass({ results: [
+        { item: 'delta', harness: 'claude-cli', outcome: 'written', message: '' },
+        { item: 'delta', harness: 'codex-cli', outcome: 'written', message: '' },
+        { item: 'delta', harness: 'copilot-cli', outcome: 'failed', message: 'locked' },
+      ], writes: 2, made: ['on-delta'], reloads: [] });
+      await settled();
+      assert.equal(app.outcome?.text, '1 of 1 didn’t go through in every tool: delta. Not in Copilot CLI. 1 was already on. 1 not turned on.');
+      assert.deepEqual(app.outcome?.reasons, ['clash: its copies differ (its row asks which to use)']);
+
+      // Only taken row is a found skill whose copies came to differ before Refresh, alongside an already-on row.
+      setupSelectHome();
+      startSelecting();
+      const orderDiff = ['skills-charlie', 'skills-lima'];
+      for (const row of orderDiff) tickRow(row, orderDiff, false);
+      findById(libraryTable(), 'select-turn-on').onclick();
+      await settled();
+      await main.pass({ results: [{ item: 'lima', outcome: 'held', differs: true, message: 'Copies differ.' }], writes: 0, reloads: [] });
+      await settled();
+      assert.equal(app.outcome?.text, '1 of 1 didn’t go through in every tool: lima. Nothing changed. 1 was already on.');
+      assert.deepEqual(app.outcome?.reasons, ['lima: its copies differ (its row asks which to use)']);
+      assert.equal(app.outcome?.warn, true);
+    });
+
+    await t.test('4. Loose plugin-origin item (no throughItems) is taken; throughItems row and unaddable found row are left with their reasons; bar puts reasons beside Delete', async () => {
+      setupSelectHome();
+      app.home!.skills.items.push(
+        skillFact('loose', { on: true, fromSource: { link: 'plugin:team/kit' }, copies: { 'claude-cli': {} } }) as any,
+        skillFact('bound', { on: true, plugin: { 'claude-cli': { plugin: 'kit', marketplace: 'team' } }, anotherWay: { 'claude-cli': 'Through kit.' }, copies: { 'codex-cli': {} } }) as any,
+        skillFact('unreadable', { on: false, copies: {}, takeInAnswers: { click: { leave: 'no-readable' }, rule: { leave: 'no-readable' } } }) as any,
+      );
+      app.home!.skills.library.loose = { ...newItem('loose', 'loose'), on: true };
+      app.home!.skills.library.bound = { ...newItem('bound', 'bound'), on: true };
+      app.home!.pluginItems!.push({ tool: 'claude-cli', plugin: 'kit', source: '/market', marketName: 'team', off: false, listed: true, items: [{ kind: 'skill', name: 'bound', description: '' }] });
+      startSelecting();
+      const order = ['skills-loose', 'skills-bound', 'skills-unreadable'];
+      for (const row of order) tickRow(row, order, false);
+      const tree = libraryTable();
+      // Bar places "1 can't be deleted ›" right after Delete… (not before Turn on).
+      const line = findById(tree, 'select-bar').children[0];
+      assert.deepEqual(line.children.map((child: unknown) => textOf(child)).filter(Boolean), ['3 selected', 'Turn on', 'Turn off 1', 'Delete…', '1 can’t be deleted ›']);
+      // Turn off takes loose (no tool has it through a plugin), leaves bound (plugin switch) and unreadable (found).
+      findById(tree, 'select-turn-off').onclick();
+      await settled();
+      await main.pass({ results: [{ item: 'loose', harness: 'claude-cli', outcome: 'removed', message: '' }], writes: 1, made: ['off-loose'], reloads: [] });
+      await settled();
+      assert.equal(app.outcome?.text, 'Turned off 1 skill: loose. 2 not turned off.');
+      assert.deepEqual(app.outcome?.reasons, [
+        'bound: its switch also turns the plugin “kit”: use the row’s own switch',
+        'unreadable: not in Central Knot',
+      ]);
+      // Turn on with delta (off) + unreadable (!canAdd) leaves unreadable with "nothing can be added yet".
+      startSelecting();
+      const orderOn = ['skills-delta', 'skills-unreadable'];
+      for (const row of orderOn) tickRow(row, orderOn, false);
+      findById(libraryTable(), 'select-turn-on').onclick();
+      await settled();
+      await main.pass({ results: [{ item: 'delta', harness: 'claude-cli', outcome: 'written', message: '' }], writes: 1, made: ['on-delta'], reloads: [] });
+      await settled();
+      assert.equal(app.outcome?.text, 'Turned on 1 skill: delta. 1 not turned on.');
+      assert.deepEqual(app.outcome?.reasons, ['unreadable: nothing can be added yet']);
+    });
+
+    await t.test('5. Outside Select mode, busy controls keep their own tooltips and armed Take over Cancel disables while busy (and stays live in Select)', async () => {
+      const { libraryPages } = await import('../src/librarypages.ts');
+      const { versionList } = await import('../src/versionlist.ts');
+      setupSelectHome();
+      app.home!.skills.items[0]!.switchedOff = ['claude-cli'];
+      app.home!.skills.items[0]!.takeOver = { 'claude-cli': { kind: 'shared', path: '/home/.agents/skills/charlie' } } as any;
+      const charlieRow = { kind: 'skills' as const, ...app.home!.skills.items[0]! };
+      // Arm Take over… while idle.
+      const idleBox = libraryPages.skills.tool!(charlieRow as any, 'claude-cli')!;
+      findById(idleBox, 'take-over-skills-charlie-claude-cli').onclick({ stopPropagation() {} });
+      // Busy outside Select mode: tooltips stay their own words, Cancel is disabled.
+      app.busy = 'Applying…';
+      try {
+        const busyActions = libraryPages.skills.tool!(charlieRow as any, 'claude-cli')!;
+        const clearBtn = findById(busyActions, 'clear-switch-skills-charlie-claude-cli');
+        const cancelBtn = findById(busyActions, 'take-over-cancel-skills-charlie-claude-cli');
+        const confirmBtn = findById(busyActions, 'take-over-confirm-skills-charlie-claude-cli');
+        assert.equal(clearBtn.attrs.title.startsWith('Clear Claude Code’s own switch'), true);
+        assert.equal(confirmBtn.attrs.title.startsWith('Remove the copy'), true);
+        assert.equal(cancelBtn.attrs.disabled, '');
+        const item = { ...newItem('charlie', 'charlie'), on: true, versions: [
+          { hash: 'h2', at: '2026-11-25T10:00:00Z', from: { how: 'found', in: 'claude-cli' } },
+          { hash: 'h1', at: '2026-11-24T10:00:00Z', from: { how: 'found', in: 'claude-cli' } },
+        ] };
+        const busyVersions = versionList({ item: item as any, rowId: 'skills-charlie', canWrite: false, unfolded: true, onUnfold: () => {}, now: Date.now(), onRead: () => {}, onMakeCurrent: () => {} });
+        const makeCur = findById(busyVersions, 'version-current-skills-charlie-1');
+        assert.equal(makeCur.title, 'Make this the current version of charlie, in every tool it is on in. Undo makes today’s current again.');
+      } finally { app.busy = undefined; }
+      // Inside Select mode (idle): writing buttons show "Done ends selecting", Cancel stays live.
+      startSelecting();
+      const selActions = libraryPages.skills.tool!(charlieRow as any, 'claude-cli')!;
+      assert.equal(findById(selActions, 'clear-switch-skills-charlie-claude-cli').attrs.title, 'Done ends selecting');
+      assert.equal(findById(selActions, 'take-over-confirm-skills-charlie-claude-cli').attrs.title, 'Done ends selecting');
+      assert.equal(findById(selActions, 'take-over-cancel-skills-charlie-claude-cli').attrs.disabled, undefined);
+      // Disarm armed state for clean teardown.
+      findById(selActions, 'take-over-cancel-skills-charlie-claude-cli').onclick({ stopPropagation() {} });
+    });
+  } finally { stopSelecting(); }
 });

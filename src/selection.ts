@@ -35,7 +35,7 @@ let mode: Mode | undefined;
 
 /** Select clicked: the mode, nothing ticked. */
 export const startSelecting = () => { mode = { ticked: new Set(), whyOpen: false }; };
-/** Done, Escape, a Delete of many sent, another home: no mode, and its ticks go. */
+/** Done, Escape, a bulk action sent, another home: no mode, and its ticks go. */
 export const stopSelecting = () => { mode = undefined; };
 export const selecting = () => !!mode;
 /** Whether this draw of the page drew the Library's list (listDrawn, from matrix.ts drawTable), read and let go by afterPageDrawn. */
@@ -74,9 +74,9 @@ export function tickHeading(ids: string[]) {
 /** Of the rows listed, in their order: those ticked (counted by the bar), and of them what the action takes, skips as already so, and leaves with a reason. */
 export function ofListed(listed: Listed[]) {
   const ticked = listed.filter(row => isTicked(row.id));
-  const leaves = ticked.filter(row => row.cant);
-  const already = ticked.filter(row => !row.cant && row.already);
-  return { ticked, takes: ticked.filter(row => !row.cant && !row.already), already, leaves };
+  const already = ticked.filter(row => row.already);
+  const leaves = ticked.filter(row => !row.already && row.cant);
+  return { ticked, takes: ticked.filter(row => !row.already && !row.cant), already, leaves };
 }
 function counted(listed: Listed[]): Counted {
   const { takes, leaves } = ofListed(listed);
@@ -113,19 +113,19 @@ export const questionWords = (takes: number, days: number) => `Delete ${takes} f
 export const cantWords = (leaves: number) => `${leaves} can’t be deleted`;
 /** Each reason an action can't take a row, after the names of its rows: "clash: not in Central Knot". */
 export const whyLines = (leaves: Listed[]) => [...groupBy(leaves, row => row.cant!)].map(([why, rows]) => `${andList(rows.map(row => row.name))}: ${why}`);
+/** Reason a found row whose copies differ can't be turned on in bulk (shared by matrix.ts cantTurn and app.ts applyByKind). */
+export const DIFFERS_REASON = 'its copies differ (its row asks which to use)';
 /** A Turn button's label: its own count when it takes fewer than are ticked (`Turn off 3`), plain (`Turn off`) when it takes all or none. */
 export const turnLabel = (on: boolean, takes: number, ticked: number) =>
   `Turn ${on ? 'on' : 'off'}${takes && takes < ticked ? ` ${takes}` : ''}`;
+/** Counts of ticked rows already in the asked state or left with a reason, said on every Turn result path. */
+export function turnTail(on: boolean, already: number, left: number): string {
+  const state = on ? 'on' : 'off';
+  return [already ? `${already} ${already === 1 ? 'was' : 'were'} already ${state}.` : '', left ? `${left} not turned ${state}.` : ''].filter(Boolean).join(' ');
+}
 /** The result of Turn on or Turn off of many: the rows changed, how many ticked rows were already so, how many it left, and any tools still reading them another way (`stayed`). */
 export function turnedWords(on: boolean, names: string[], nouns: { one: string; many: string }, already: number, left: number, stayed: string[] = []): string {
-  const state = on ? 'on' : 'off';
-  const parts = [
-    `Turned ${state} ${plural(names.length, nouns.one, nouns.many)}: ${fewNames(names)}.`,
-    already ? `${already} ${already === 1 ? 'was' : 'were'} already ${state}.` : '',
-    left ? `${left} not turned ${state}.` : '',
-    ...stayed,
-  ];
-  return parts.filter(Boolean).join(' ');
+  return [`Turned ${on ? 'on' : 'off'} ${plural(names.length, nouns.one, nouns.many)}: ${fewNames(names)}.`, turnTail(on, already, left), ...stayed].filter(Boolean).join(' ');
 }
 /** The result: the rows deleted (`names`, in the kinds' words: words.ts rowNouns), and how many ticked rows it left (`left`). */
 export const deletedWords = (names: string[], nouns: { one: string; many: string }, left: number) =>

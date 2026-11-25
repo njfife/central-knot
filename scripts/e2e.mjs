@@ -12529,7 +12529,7 @@ async function selectFlow() {
     const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
     for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100);
     for (const [width, height, open, dark] of [[...SMALLEST, false], [...SMALLEST, true], [1316, 819, false], [1316, 819, true], [1316, 819, true, true], [...SMALLEST, true, true], [2560, 1440, true]]) {
-      await sizeTo(a, width, height); await sidebarOpen(open); await theme(dark ? 'dark' : 'light');
+      await sizeTo(a, width, height); await sidebarOpen(open); await theme(dark ? 'dark' : 'light'); await wait(160);
       await a.shot(`select-${name}-${width}${open ? '' : '-rail'}${dark ? '-dark' : ''}`);
     }
     await theme('light'); await sidebarOpen(true); await fullSize(a);
@@ -12575,7 +12575,7 @@ async function selectFlow() {
   // 3. Shift-click: the run as listed, from clash under Found to zulu under Only through a plugin.
   await a.click(tick('india'));
   await a.click(tick('clash'));
-  same('three ticked, one of which can’t be deleted: the bar says so beside the count, and Delete… has no number', await bar(), ['3 selected', '1 can’t be deleted ›', 'Turn on', 'Turn off 2', 'Delete…']);
+  same('three ticked, one of which can’t be deleted: the bar says so beside Delete…, and Delete… has no number', await bar(), ['3 selected', 'Turn on', 'Turn off 2', 'Delete…', '1 can’t be deleted ›']);
   await pictures('three');
   await shiftClick(`.ov-row[data-key="${zulu}"] .ov-name`);
   await a.settle();
@@ -12607,7 +12607,7 @@ async function selectFlow() {
   same('no tick on a heading none of whose rows can be deleted: Found, Only through a plugin', [await a.exists('#tick-heading-on'), await a.exists('#tick-heading-found'), await a.exists('#tick-heading-plugins')], [true, false, false]);
   await a.click('#tick-heading-on');
   for (const [key, kind] of [['clash'], ['scout', 'agents'], ['zulu']]) await a.click(tick(key, kind));
-  same('thirteen ticked: the bar says how many can’t be deleted', await bar(), ['13 selected', '3 can’t be deleted ›', 'Turn on', 'Turn off 10', 'Delete…']);
+  same('thirteen ticked: the bar says how many can’t be deleted', await bar(), ['13 selected', 'Turn on', 'Turn off 10', 'Delete…', '3 can’t be deleted ›']);
   const before = folders();
   const rowTop = () => top('alpha');
   const bare = await rowTop();
@@ -12621,7 +12621,7 @@ async function selectFlow() {
   await pictures('question');
   await a.click('#select-why');
   await a.click('#select-cancel');
-  same('Cancel: the bar again, the ticks kept, nothing changed', [await bar(), (await ticked()).length, folders()], [['13 selected', '3 can’t be deleted ›', 'Turn on', 'Turn off 10', 'Delete…'], 13, before]);
+  same('Cancel: the bar again, the ticks kept, nothing changed', [await bar(), (await ticked()).length, folders()], [['13 selected', 'Turn on', 'Turn off 10', 'Delete…', '3 can’t be deleted ›'], 13, before]);
   // 7. Delete 10: ten leave every tool and the page; one result, which stays; the mode ends.
   await a.click('#select-delete');
   await a.click('#select-delete-now');
@@ -12748,8 +12748,8 @@ async function selectFlow() {
   await a.click('#library-select');
   same('Found heading tick shows once a row under Found can be taken by Turn on', await a.exists('#tick-heading-found'), true);
   for (const name of ['alpha', 'echo', 'lima', 'bravo']) await a.click(tick(name));
-  same('bar with two off, one addable found, one partly on: Turn on 3, Turn off 1, Delete reasons link',
-    await bar(), ['4 selected', '1 can’t be deleted ›', 'Turn on 3', 'Turn off 1', 'Delete…']);
+  same('bar with two off, one addable found, one partly on: Turn on 3, Turn off 1, Delete reasons link beside Delete…',
+    await bar(), ['4 selected', 'Turn on 3', 'Turn off 1', 'Delete…', '1 can’t be deleted ›']);
   await bulkShots('bar-with-reasons');
   await fitsAtMinimum(a, 'Select bar with all three buttons and reasons link');
   await a.click('#select-turn-on');
@@ -12771,33 +12771,33 @@ async function selectFlow() {
   for (const [key, kind] of [['clash'], ['scout', 'agents'], ['zulu']]) await a.click(tick(key, kind));
   same('only untakeable rows ticked: both Turn buttons disabled with plain labels',
     [await bar(), await a.run(`['select-turn-on', 'select-turn-off', 'select-delete'].map(id => document.getElementById(id).disabled)`)],
-    [['3 selected', '3 can’t be deleted ›', 'Turn on', 'Turn off', 'Delete…'], [true, true, true]]);
+    [['3 selected', 'Turn on', 'Turn off', 'Delete…', '3 can’t be deleted ›'], [true, true, true]]);
   await a.run(`document.getElementById('select-turn-on').click(); document.getElementById('select-turn-off').click();`);
   await a.settle();
   same('clicking disabled Turn buttons does nothing and stays in Select mode', await word(), 'Done');
   // Add bravo (on) and lima (found addable), click Turn off: bravo goes off; clash, lima, scout, zulu listed in reasons.
   await a.click(tick('bravo'));
   await a.click(tick('lima'));
-  same('mixed Turn off selection shows exact button numbers', await bar(), ['5 selected', '4 can’t be deleted ›', 'Turn on 1', 'Turn off 1', 'Delete…']);
+  same('mixed Turn off selection shows exact button numbers', await bar(), ['5 selected', 'Turn on 1', 'Turn off 1', 'Delete…', '4 can’t be deleted ›']);
   await a.click('#select-turn-off');
   await done();
   await a.click('#problems-show-all');
   same('Turn off skips plugin, damaged, and found rows with their reasons; plugin state byte for byte untouched',
     [inAllTools('bravo'), await a.text('#header [data-outcome] .band-text'), await a.all('#header .problem-line .problem-text', 'e.textContent'), tree(join(home, '.claude/plugins')), readNow(join(home, '.claude/settings.json'))],
-    [[], 'Turned off 1 skill: bravo. 4 not turned off.', ['clash and lima: not in Central Knot', 'scout: the agents record is damaged', 'zulu: part of the plugin kit'], pluginsBefore, claudeSettingsBefore]);
+    [[], 'Turned off 1 skill: bravo. 4 not turned off.', ['clash and lima: not in Central Knot', 'scout: the agents record is damaged', 'zulu: its switch also turns the plugin “kit”: use the row’s own switch'], pluginsBefore, claudeSettingsBefore]);
   await bulkShots('turn-off-reasons', async () => { if (await a.run(`document.getElementById('problems-show-all')?.getAttribute('aria-expanded') === 'false'`)) await a.click('#problems-show-all'); });
   await a.click('#outcome-undo');
   await done();
   same('Undo puts bravo back on in Claude Code and Copilot CLI', inAllTools('bravo'), ['.claude/skills', '.copilot/skills']);
-  // Turn on with echo (off), clash (differs), scout (damaged), zulu (plugin): echo goes on; other three in reasons.
+  // Turn on with echo (off), clash (differs), scout (damaged), zulu (plugin, already on): echo goes on; zulu is already on; clash and scout in reasons.
   await a.click('#library-select');
   for (const [key, kind] of [['echo'], ['clash'], ['scout', 'agents'], ['zulu']]) await a.click(tick(key, kind));
   await a.click('#select-turn-on');
   await done();
   await a.click('#problems-show-all');
-  same('Turn on skips differing found, damaged, and plugin rows with their reasons; plugin state untouched',
+  same('Turn on counts already-on plugin row as already on and skips differing found and damaged rows with their reasons; plugin state untouched',
     [inAllTools('echo').length, await a.text('#header [data-outcome] .band-text'), await a.all('#header .problem-line .problem-text', 'e.textContent'), tree(join(home, '.claude/plugins')), readNow(join(home, '.claude/settings.json'))],
-    [3, 'Turned on 1 skill: echo. 3 not turned on.', ['clash: its copies differ: its own row asks which to use', 'scout: the agents record is damaged', 'zulu: part of the plugin kit'], pluginsBefore, claudeSettingsBefore]);
+    [3, 'Turned on 1 skill: echo. 1 was already on. 2 not turned on.', ['clash: its copies differ (its row asks which to use)', 'scout: the agents record is damaged'], pluginsBefore, claudeSettingsBefore]);
   await bulkShots('turn-on-reasons', async () => { if (await a.run(`document.getElementById('problems-show-all')?.getAttribute('aria-expanded') === 'false'`)) await a.click('#problems-show-all'); });
   await a.click('#outcome-undo');
   await done();
@@ -12841,9 +12841,10 @@ async function selectFlow() {
   const charlieCurrent = `#${rowPart('version-current', 'skills', 'charlie', '1')}`;
   const charlieRead = `#${rowPart('version-read', 'skills', 'charlie', '0')}`;
   const charlieFiles = `#${rowPart('files', 'skills', 'charlie')}`;
-  same('opened row in Select mode: tool switch, Delete… and Make current are dimmed with Done ends selecting; Read and Files stay live',
-    [await controlInfo(charlieSwitch), await controlInfo(charlieDelete), await controlInfo(charlieCurrent), (await controlInfo(charlieRead))?.disabled, (await controlInfo(charlieFiles))?.disabled],
-    [{ disabled: true, title: 'Done ends selecting' }, { disabled: true, title: 'Done ends selecting' }, { disabled: true, title: 'Done ends selecting' }, false, false]);
+  const switchWordOpacity = () => a.run(`getComputedStyle(document.querySelector(${JSON.stringify(charlieSwitch)}).closest('.tool-switch').querySelector('.tool-switch-word')).opacity`);
+  same('opened row in Select mode: tool switch (and its On label), Delete… and Make current are dimmed with Done ends selecting; Read and Files stay live',
+    [await controlInfo(charlieSwitch), await switchWordOpacity(), await controlInfo(charlieDelete), await controlInfo(charlieCurrent), (await controlInfo(charlieRead))?.disabled, (await controlInfo(charlieFiles))?.disabled],
+    [{ disabled: true, title: 'Done ends selecting' }, '0.4', { disabled: true, title: 'Done ends selecting' }, { disabled: true, title: 'Done ends selecting' }, false, false]);
   await a.run(`for (const s of ${JSON.stringify([charlieSwitch, charlieDelete, charlieCurrent])}) document.querySelector(s)?.click()`);
   await a.settle();
   same('clicking dimmed controls in an opened row changes nothing on disk or in History', [allFolders(), historyBefore()], [beforeOpen, histOpen0]);
@@ -12892,8 +12893,8 @@ async function selectFlow() {
   await a.run(`document.querySelector(${JSON.stringify(charlieFiles)}).focus()`);
   await a.press('Escape');
   same('Escape inside an opened row ends Select mode, keeps row open, and re-enables its controls',
-    [await word(), await a.exists('#select-bar'), (await controlInfo(charlieSwitch))?.disabled, (await controlInfo(charlieDelete))?.disabled, (await controlInfo(charlieSwitch))?.title !== 'Done ends selecting'],
-    ['Select', false, false, false, true]);
+    [await word(), await a.exists('#select-bar'), (await controlInfo(charlieSwitch))?.disabled, await switchWordOpacity(), (await controlInfo(charlieDelete))?.disabled, (await controlInfo(charlieSwitch))?.title !== 'Done ends selecting'],
+    ['Select', false, false, '1', false, true]);
   await a.click(charlieSwitch);
   same('after Escape/Done, the opened row’s tool switch works again', inAllTools('charlie').includes('.claude/skills'), false);
   await a.click('#outcome-undo');
@@ -12974,8 +12975,8 @@ async function selectFlow() {
   same('no page errors, Select folded', l.pageErrors, []);
   await l.quit();
 
-  // Whenever the Library's rows are not what is drawn, the mode ends: an empty Library (the one item deleted by its own row's
-  // Delete, then its Undo), and the held screen (another build installed, then gone).
+  // Whenever the Library's rows are not what is drawn, the mode ends: an empty Library (an opened row's Delete is dimmed while
+  // selecting, so the sole item is removed externally and refreshed, then restored), and the held screen (another build installed, then gone).
   const solo = join(scratch, 'home-select-solo'), soloMac = standInMac(join(scratch, 'mac-select-solo'));
   skill(join(solo, '.claude/skills'), 'solo');
   toolClis(solo);
@@ -12984,7 +12985,6 @@ async function selectFlow() {
   await o.click('#nav-overview');
   await o.click('#setup-yes');
   for (let tries = 0; tries < 100 && !(await o.exists(`#${rowPart('switch', 'skills', 'solo')}`)); tries++) { await openKind(o, 'all'); await wait(100); }
-  const soloDone = async () => { for (let tries = 0; tries < 300 && await o.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await o.settle(); };
   const soloMode = async () => [await o.text('#library-select .band-stack > :not(.band-unshown)'), await o.exists('#select-bar'), await o.exists('.ov-row.row-ticked')];
   // solo ticked and the question open, from wherever the page is.
   const asking = async () => {

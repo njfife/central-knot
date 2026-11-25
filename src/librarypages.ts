@@ -5,7 +5,7 @@
 // for a kind (app.ts PageKind: 'agents'), not the library's (library.ts ItemKind: 'agent'). matrix.ts draws every row of a
 // kind here as a library row (librarySwitch, libraryMark, libraryVersions, libraryDelete, …). Every place a kind is wired in
 // is in librarypass.ts's recipe; this is one.
-import { acting, rerender, selectOff, shownPath, skillAction, state, whyKindReadOnly, type PageKind } from './app.ts';
+import { acting, rerender, selectOff, shownPath, skillAction, state, whyKindReadOnly, writeOff, type PageKind } from './app.ts';
 import { h, icon, whyOff } from './dom.ts';
 import { partId, rowId, type ItemRow } from './itemrow.ts';
 import type { NeutralServer } from './mcp.ts';
@@ -84,10 +84,11 @@ let armed: string | undefined;
 function skillToolActions(row: ItemRow, tool: HarnessId): HTMLElement | null {
   const home = state.home, item = home?.skills.library[row.key], name = row.name ?? row.key, where = toolName(tool);
   if (!home) return null;
-  const action = (label: string, id: string, title: string, run: () => void, danger = false, live = false) => {
-    // A skill's write, as its row's other controls: off while the page acts, Select's mode is on, or the kind's gate stops it.
-    const off = live ? false : acting() ?? selectOff() ?? !!whyKindReadOnly(home, row.kind);
-    return h(`button.text-action${danger ? '.text-danger' : ''}`, { type: 'button', id, title, disabled: !!off, ...whyOff(off), onclick: (event: Event) => { event.stopPropagation(); run(); } }, label);
+  const action = (label: string, id: string, title: string, run: () => void, { danger = false, keepInSelect = false } = {}) => {
+    // A skill's write, as its row's other controls (app.ts writeOff); Cancel stays live in Select's mode.
+    const stops = !!whyKindReadOnly(home, row.kind);
+    const disabled = keepInSelect ? !!acting() || stops : !!writeOff(stops);
+    return h(`button.text-action${danger ? '.text-danger' : ''}`, { type: 'button', id, title, disabled, ...whyOff(keepInSelect ? undefined : selectOff()), onclick: (event: Event) => { event.stopPropagation(); run(); } }, label);
   };
   const clear = row.switchedOff?.includes(tool) ? action(`Let ${where} load it`, partId('clear-switch', rowId(row.kind, row.key), tool),
     `Clear ${where}’s own switch for ${name}, so ${where} loads it again. History can undo it.`,
@@ -99,9 +100,9 @@ function skillToolActions(row: ItemRow, tool: HarnessId): HTMLElement | null {
       () => void skillAction('take-over', row.key, tool, name))
     : armed !== key ? action('Take over…', partId('take-over', rowId(row.kind, row.key), tool), `Remove the copy at ${shownPath(outside.path)} and give each tool that read it Central Knot’s copy. Other apps that read that folder won’t find it there.`,
       () => { armed = key; rerender(); })
-      : h('span.delete-armed', {}, action('Cancel', partId('take-over-cancel', rowId(row.kind, row.key), tool), 'Leave the copy where it is', () => { armed = undefined; rerender(); }, false, true),
+      : h('span.delete-armed', {}, action('Cancel', partId('take-over-cancel', rowId(row.kind, row.key), tool), 'Leave the copy where it is', () => { armed = undefined; rerender(); }, { keepInSelect: true }),
         action('Take over now', partId('take-over-confirm', rowId(row.kind, row.key), tool), `Remove the copy at ${shownPath(outside.path)}; it is kept as a version first if Central Knot doesn’t have that content. This has no Undo.`,
-          () => { armed = undefined; void skillAction('take-over', row.key, tool, name); }, true));
+          () => { armed = undefined; void skillAction('take-over', row.key, tool, name); }, { danger: true }));
   return clear || take ? h('span.details-tool-extra', {}, clear, take) : null;
 }
 
