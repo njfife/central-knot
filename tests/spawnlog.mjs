@@ -36,14 +36,18 @@ export function normal(text) {
 }
 /**
  * A recorded value with what else no two runs share written the same way: ids, hashes (Git's, and folders named by one),
- * times, ports, and a process number in a stand-in's arguments. A stand-in's digest (`bytes`) is kept as it is.
+ * times, ports, a process number in a stand-in's arguments, and the test runner's slot for a file (NODE_TEST_WORKER_ID,
+ * which depends on scheduling). A stand-in's digest (`bytes`) is kept as it is. For a helper process (`helper`: a fixture
+ * server, a stand-in running Node), which can't know the folders its test made, a name ending as mkdtemp ends one is written
+ * as `<prefix>*` too.
  */
-const stable = (value, key) => {
+const stable = (value, key, helper = false) => {
   if (key === 'bytes') return value;
-  if (Array.isArray(value)) return value.map(each => stable(each));
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([name, each]) => [name, stable(each, name)]));
+  if (key === 'NODE_TEST_WORKER_ID') return '<worker>';
+  if (Array.isArray(value)) return value.map(each => stable(each, undefined, helper));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([name, each]) => [name, stable(each, name, helper)]));
   if (typeof value !== 'string') return value;
-  return value
+  return (helper ? madeLike(value) : value)
     .replace(/0x[0-9a-f]+/g, '0x<n>')
     .replace(/\b1[6-9]\d{8}(\d{3})?\b/g, '<time>')
     .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g, '<uuid>')
@@ -51,6 +55,8 @@ const stable = (value, key) => {
     .replace(/\d{4}-\d\d-\d\dT\d\d[-:]\d\d[-:]\d\d[-.:]\d{3}Z/g, '<time>')
     .replace(/(127\.0\.0\.1|localhost):\d+/g, '$1:<port>');
 };
+/** A folder's name ending as mkdtemp ends one (a prefix ending in -, then six letters or digits), written `<prefix>*`. */
+const madeLike = text => text.replace(/(\/[\w.]+(?:-[\w.]+)*-)[A-Za-z0-9]{6}(?=\/|$)/g, '$1*');
 
 const folder = process.env.CK_SPAWN_LOG;
 if (folder && process.argv[2] !== 'compare') record(folder);
@@ -144,9 +150,10 @@ function read(from) {
     const script = stable(JSON.parse(head).process);
     // Any other process (a test's stand-in or fixture server running Node) by its script alone: its arguments, and the folder
     // its parent made for it, differ from run to run.
-    const owner = /\btests\/[\w.-]+\.test\.ts\b/.exec(script)?.[0] ?? script.split(' ')[0].replace(/(\/[\w.]+(?:-[\w.]+)*-)[A-Za-z0-9]{6}(?=\/|$)/g, '$1*');
+    const testFile = /\btests\/[\w.-]+\.test\.ts\b/.exec(script)?.[0];
+    const owner = testFile ?? madeLike(script.split(' ')[0]);
     const kept = files.get(owner) ?? { records: [], probes: new Set() };
-    for (const recorded of lines.map(line => stable(JSON.parse(line)))) {
+    for (const recorded of lines.map(line => stable(JSON.parse(line), undefined, !testFile))) {
       const line = JSON.stringify(recorded);
       if (recorded.probe) kept.probes.add(line); else kept.records.push(line);
     }
