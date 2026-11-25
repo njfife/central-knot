@@ -76,6 +76,8 @@ export function start(file: string, args: string[], options: SpawnOptionsWithout
 
 /** How long taskkill is given to end a tree: it is ended itself then, and the tree is not known to be gone. */
 const TREE_STOP_MS = 2000;
+/** How long a run stopped on Windows waits for its output to close once stopTree has answered: a helper outside the tree can hold it open. */
+export const CLOSE_GRACE_MS = 1500;
 /** Each child's one stop (stopTree), kept by the child itself: a later child may have the same process id, never the same object. */
 const treeStops = new WeakMap<ChildProcess, Promise<boolean>>();
 

@@ -43,6 +43,14 @@ test('A child already seen to end gets no taskkill: its stop answers that the tr
   assert.deepEqual(started.slice(before), []);
 });
 
+test('A child that never started has nothing to stop: no taskkill, and its stop answers that nothing is left', async () => {
+  const child = childProcess.spawn(join(tmpdir(), 'ck-nolaunch-not-there'), [], { stdio: 'ignore' });
+  child.on('error', () => undefined);
+  const before = started.length;
+  assert.equal(await stopTree(child), true);
+  assert.deepEqual(started.slice(before), []);
+});
+
 test('A draft stopped before its tool starts starts none, and leaves no folder', async () => {
   const box = await sandbox();
   try {

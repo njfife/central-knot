@@ -5,7 +5,7 @@ import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { pathBeside } from './platform.ts';
-import { dropVariable, homeVariables, start, stopTree } from './launch.ts';
+import { CLOSE_GRACE_MS, dropVariable, homeVariables, start, stopTree } from './launch.ts';
 import { probeVersion } from './discovery.ts';
 import { configRoot, harnesses } from './harnesses.ts';
 import { CODEX_MANIFEST, MANIFEST, codexManifest, inside, installedContents, parseObject, pluginContents, pluginManifest, readManifest, remoteOf, skillName, skillNamesIn, sourceOf, type ReadAs } from './catalogdetail.ts';
@@ -113,8 +113,8 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
     let stopping: Promise<void> | undefined;
     const child = start(file, args, { env: options.env, cwd: options.cwd, windowsHide: true, detached: group });
     const kill = process.platform === 'win32'
-      // Once the tree is stopped the run ends at `close`, or 1.5 s later at most: a helper outside the tree can hold the output open.
-      ? () => { stopping ??= stopTree(child).then(whole => { leftRunning = !whole; setTimeout(() => end(child.exitCode ?? 1), 1500); }); }
+      // Once the tree is stopped the run ends at `close`, or CLOSE_GRACE_MS later at most.
+      ? () => { stopping ??= stopTree(child).then(whole => { leftRunning = !whole; setTimeout(() => end(child.exitCode ?? 1), CLOSE_GRACE_MS); }); }
       : () => { try { if (group && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); } catch { /* already ended */ } };
     const stop = () => { stopped = true; kill(); };
     // Past maxBytes on either stream it ran, it just said too much: it is stopped, and what it said up to maxBytes is kept.

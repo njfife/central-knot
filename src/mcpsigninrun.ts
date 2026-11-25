@@ -3,9 +3,10 @@
 // computer's own command line, never a desktop app's copy (discovery.ts findCli). It runs from an empty folder made for the run and
 // removed after it (one that can't be removed is left and said in the app's log: launch.ts clearRunFolder), in a process group of
 // its own (on Windows, its tree: launch.ts stopTree), stopped whole at the limit or when Central Knot quits (stopChecks, from
-// main.ts's before-quit), and none starts once Quit has begun. This computer's own home is checked with the app's environment, its tools' overrides included (as main.ts
-// overrideFor reads them); any other home with an environment made for it (ownEnv), so none of the tools' own variables reaches
-// it. Central Knot writes nothing and keeps nothing; the tools' own commands write their own logs and caches in their own folders.
+// main.ts's before-quit), and none starts once Quit has begun. This computer's own home is checked with the app's environment,
+// its tools' overrides included (as main.ts overrideFor reads them); any other home with an environment made for it (ownEnv), so
+// none of the tools' own variables reaches it. Central Knot writes nothing and keeps nothing; the tools' own commands write their
+// own logs and caches in their own folders.
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

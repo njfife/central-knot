@@ -59,7 +59,12 @@ async function sandbox() {
     /** The stand-in: it starts a child that starts a grandchild, each writing its process id; once all three are up it runs `then`. */
     tool: (name: string, then = '') => standIn(join(base, name), '#!/bin/sh\n', `require(${JSON.stringify(tree)})(${JSON.stringify(pids)}, 2, () => { ${then} });`),
     /** Waits for the tool, its child and its grandchild to be up, and gives their process ids. */
-    up: async () => { await until(async () => (await written()).length === 3); const up = await written(); assert.equal(up.length, 3, 'the tool, its child and its grandchild are up'); return up; },
+    up: async () => {
+      await until(async () => (await written()).length === 3);
+      const up = await written();
+      assert.equal(up.length, 3, 'the tool, its child and its grandchild are up');
+      return up;
+    },
     /** None of the three is running now (the moment a stopped process takes to end allowed). */
     gone: async () => { const up = await written(); await until(() => !up.some(isRunning), 50); assert.deepEqual(up.filter(isRunning), [], 'none of the tree is left running'); },
     end: async () => {
@@ -148,7 +153,9 @@ if (role === 'helper') { require('fs').writeFileSync(pidFile, String(process.pid
 else require('child_process').spawn(process.execPath, [__filename, pidFile, 'helper'], { detached: true, stdio: 'inherit' }).unref();
 `;
 
-test('A sign-in check whose tool left a helper outside its tree, holding its output and its folder, answers 1.5 s after the tree is stopped; the folder left is said in the log', { skip, timeout: 20_000 }, async () => {
+test('A sign-in check whose tool left a helper outside its tree, holding its output and its folder, answers 1.5 s after the tree is stopped; the folder left is said in the log', {
+  skip, timeout: 20_000,
+}, async () => {
   const box = await sandbox();
   const before = process.env.CK_TEST_HOME_ONLY, helperPid = join(box.base, 'helper.pid'), orphan = join(box.base, 'orphan.cjs');
   process.env.CK_TEST_HOME_ONLY = 'claude';
@@ -175,7 +182,9 @@ test('A sign-in check whose tool left a helper outside its tree, holding its out
   }
 });
 
-test('A taskkill that fails leaves the tree as it was: the draft still ends as timed out soon after, no second taskkill is tried, and the log says what was left', { skip, timeout: 30_000 }, async () => {
+test('A taskkill that fails leaves the tree as it was: the draft still ends as timed out soon after, no second taskkill is tried, and the log says what was left', {
+  skip, timeout: 30_000,
+}, async () => {
   const box = await sandbox();
   const temp = join(box.base, 'temp'), cmdPid = join(box.base, 'cmd.pid'), shared = { TEMP: process.env.TEMP, TMP: process.env.TMP, SystemRoot: process.env.SystemRoot };
   await mkdir(temp);

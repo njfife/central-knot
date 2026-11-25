@@ -11,7 +11,7 @@ import { findBinary } from './discovery.ts';
 import { harnessIds } from './harnesses.ts';
 import { baseView, instructionsView } from './instructions.ts';
 import { pathBeside } from './platform.ts';
-import { clearRunFolder, start, stopTree } from './launch.ts';
+import { CLOSE_GRACE_MS, clearRunFolder, start, stopTree } from './launch.ts';
 import { fileName, toolNames } from './words.ts';
 import type { ShareContext } from './share.ts';
 import type { BaseDraft, HarnessId, Snapshot } from './types.ts';
@@ -166,8 +166,11 @@ function run(binary: string, args: string[], prompt: string, { cwd, signal, time
     const stop = (as: 'timeout' | 'cancelled') => {
       if (finished) return;
       stoppedAs ??= as;
-      // Windows: once the tree is stopped the run ends at `close`, or 1.5 s later at most, as a helper outside the tree can hold the output open.
-      if (process.platform === 'win32') { stopping ??= stopTree(child).then(whole => { leftRunning = !whole; setTimeout(() => finish(child.exitCode ?? 1), 1500); }); return; }
+      // Windows: once the tree is stopped the run ends at `close`, or CLOSE_GRACE_MS later at most.
+      if (process.platform === 'win32') {
+        stopping ??= stopTree(child).then(whole => { leftRunning = !whole; setTimeout(() => finish(child.exitCode ?? 1), CLOSE_GRACE_MS); });
+        return;
+      }
       try { if (grouped && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); } catch { child.kill('SIGKILL'); }
     };
     const timer = setTimeout(() => stop('timeout'), timeoutMs);
