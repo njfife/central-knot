@@ -531,14 +531,14 @@ async function walk(seed: number): Promise<Finding[]> {
       const act = pick(acts);
       const blocked = act.app && !act.byHand && process.getuid?.() !== 0 && next() < 0.12 ? pick(tools as Tool[]) : undefined;
       const crash = act.app && !act.byHand && !blocked && next() < 0.1 ? pick(['before-remove', 'before-rename', 'mid-replace'] as const) : undefined;
-      trace.push(`${act.name}${blocked ? ` [${blocked} read-only]` : ''}${crash ? ` [crash ${crash}]` : ''}`);
       const before = await folders(), contentsBefore = await contents(), managedBefore = [...tools], entriesBefore = await historyCount(), settledBefore = settled;
       const switchesBefore = await switchesNow(), criticBefore = await criticNow(), relayBefore = await relayNow(), tomeBefore = await contentAt(tomeInPi);
       let done: unknown, crashed = false;
-      const unlockBlocked = blocked ? await lockPath(join(box.home, roots[blocked]), 'dir-readonly').catch(() => undefined) : undefined;
+      const unlockBlocked = blocked ? await lockPath(join(box.home, roots[blocked]), 'dir-readonly') : undefined;
+      trace.push(`${act.name}${unlockBlocked ? ` [${blocked} read-only]` : ''}${crash ? ` [crash ${crash}]` : ''}`);
       try { done = await act.run(crash ? { fault: at => { if (at === crash) throw new Error('crash'); } } : {}); }
       catch (error) { if ((error as Error).message === 'crash') crashed = true; else { fail(`threw: ${(error as Error).message.slice(0, 140)}`); break; } }
-      finally { await unlockBlocked?.().catch(() => undefined); }
+      finally { if (unlockBlocked) await unlockBlocked(); }
       if (!act.app && syncOn && next() < 0.7) { trace.push('background pass'); await pass(); }
       last = act.click && !crashed ? done as PassResult : act.app ? undefined : last;
       const after = await folders(), versions = await versionsNow();

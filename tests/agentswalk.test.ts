@@ -199,15 +199,15 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
       const act = pick(acts);
       const blocked = act.app && !act.byHand && process.getuid?.() !== 0 && next() < 0.12 ? pick(tools as Tool[]) : undefined;
       const crash = act.app && !act.byHand && !blocked && next() < 0.1 ? pick(['before-remove', 'before-rename'] as const) : undefined;
-      trace.push(`${act.name}${blocked ? ` [${blocked} read-only]` : ''}${crash ? ` [crash ${crash}]` : ''}`);
       const before = await filesOf(box), managedBefore = [...tools], entriesBefore = await historyCount(), settledBefore = settled;
       // What the pass of an acting step reads first: each managed harness's own part as it is now.
       if (act.app) for (const tool of managedBefore as Tool[]) { const own = ownOf(tool, before[tool]); if (own !== undefined && !blocked) lastOwn[tool] = own; }
       let done: unknown, crashed = false;
-      const unlockBlocked = blocked ? await lockPath(join(box.home, files[blocked], '..'), 'dir-readonly').catch(() => undefined) : undefined;
+      const unlockBlocked = blocked ? await lockPath(join(box.home, files[blocked], '..'), 'dir-readonly') : undefined;
+      trace.push(`${act.name}${unlockBlocked ? ` [${blocked} read-only]` : ''}${crash ? ` [crash ${crash}]` : ''}`);
       try { done = await act.run(crash ? { fault: at => { if (at === crash) throw new Error('crash'); } } : {}); }
       catch (error) { if ((error as Error).message === 'crash') crashed = true; else { fail(`threw: ${(error as Error).message.slice(0, 140)}`); break; } }
-      finally { await unlockBlocked?.().catch(() => undefined); }
+      finally { if (unlockBlocked) await unlockBlocked(); }
       if (act.name.startsWith('hand') && syncOn && next() < 0.7) {
         trace.push('background pass');
         // That pass reads each managed harness's file first, then may write or remove it: both are what Central Knot keeps now.

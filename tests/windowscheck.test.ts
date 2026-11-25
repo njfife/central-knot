@@ -119,6 +119,7 @@ test('lockPath enforces all four lock kinds, unlocks idempotently, rejects ENOEN
     await assert.rejects(stat(join(noReadDir, 'secret.txt')));
     await unlockNoRead();
     assert.deepEqual(await readdir(noReadDir), ['secret.txt']);
+    assert.equal(await readFile(join(noReadDir, 'secret.txt'), 'utf8'), 'hidden\n');
     const noListDir = join(base, 'nolist');
     await mkdir(noListDir);
     await writeFile(join(noListDir, 'known.txt'), 'known\n');
