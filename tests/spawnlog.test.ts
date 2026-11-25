@@ -24,12 +24,14 @@ async function run(made: string[], { script = '#!/bin/sh\nexit 0\n', env = { PRO
   await mkdir(join(folder, 'records'));
   await writeFile(join(folder, 'run.mjs'), `
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { standIn } from ${JSON.stringify(standin)};
-const tool = await standIn(join(mkdtempSync(join(tmpdir(), 'ck-spawnlog-tool-')), 'tool'), ${JSON.stringify(script)}, '');
+const folder = mkdtempSync(join(tmpdir(), 'ck-spawnlog-tool-'));
+const tool = await standIn(join(folder, 'tool'), ${JSON.stringify(script)}, '');
 spawnSync(tool, ['--version'], { env: { PATH: process.env.PATH, ...${JSON.stringify(env)} }, ...${JSON.stringify(options)} });
+rmSync(folder, { recursive: true, force: true });
 `);
   const ran = spawnSync(process.execPath, ['--import', recorder, join(folder, 'run.mjs')], { env: { ...process.env, CK_SPAWN_LOG: join(folder, 'records') }, encoding: 'utf8' });
   assert.equal(ran.status, 0, ran.stderr);
