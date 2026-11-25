@@ -5,11 +5,15 @@
 // process ids.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import childProcess from 'node:child_process';
+import { copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { start, stopTree } from '../src/launch.ts';
 import { run } from '../src/plugins.ts';
 import { draftPrompt, writeDraft, type DraftSources } from '../src/draftbase.ts';
+import { checkSignin } from '../src/mcpsigninrun.ts';
 import { standIn } from './standin.ts';
 
 const skip = process.platform === 'win32' ? false
@@ -31,6 +35,15 @@ function level(pids, below, ready) {
 if (require.main === module) level(process.argv[2], Number(process.argv[3]));
 module.exports = level;
 `;
+
+/** Every taskkill started in this file, by the path it was started from (launch.ts imports spawn, which this wraps). */
+const taskkills: string[] = [];
+const spawnAsIs = childProcess.spawn;
+childProcess.spawn = ((...args: Parameters<typeof spawnAsIs>) => {
+  if (/taskkill\.exe$/i.test(args[0])) taskkills.push(args[0]);
+  return spawnAsIs(...args);
+}) as typeof spawnAsIs;
+syncBuiltinESMExports();
 
 const isRunning = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const until = async (ready: () => Promise<boolean> | boolean, tries = 250) => { for (let count = 0; count < tries && !(await ready()); count++) await new Promise(done => setTimeout(done, 20)); };
@@ -90,16 +103,106 @@ for (const how of Object.keys(STOPS) as Stop[]) {
     Object.assign(process.env, { TEMP: temp, TMP: temp });
     try {
       const tool = await box.tool('pi', how === 'output' ? `process.stdout.write("x".repeat(${4 * 1024 * 1024 + 1}));` : '');
-      const stop = new AbortController();
-      const draft = writeDraft(SOURCES, 'pi-cli', tool, { shown: draftPrompt(SOURCES), timeoutMs: how === 'timeout' ? 3000 : 60_000, signal: stop.signal });
+      const stop = new AbortController(), logged: string[] = [];
+      const draft = writeDraft(SOURCES, 'pi-cli', tool, { shown: draftPrompt(SOURCES), timeoutMs: how === 'timeout' ? 3000 : 60_000, signal: stop.signal, log: line => logged.push(line) });
       await box.up();
       if (how === 'signal') stop.abort();
       assert.deepEqual(await draft, how === 'signal' ? { cancelled: true } : { stopped: 'Pi did not finish a draft in time, so it was stopped. Nothing was changed.' });
       await box.gone();
       assert.deepEqual(await readdir(temp), [], 'the draft’s folder is gone');
+      assert.deepEqual(logged, [], 'nothing to say in the log');
     } finally {
       for (const [key, value] of Object.entries(shared)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
       await box.end();
     }
   });
 }
+
+test('A tree is stopped once however often its stop is asked, and its stop asked again after the end starts no second taskkill', { skip, timeout: 20_000 }, async () => {
+  const box = await sandbox();
+  try {
+    const folder = join(box.base, 'work');
+    await mkdir(folder);
+    const child = start(await box.tool('tool'), [], { cwd: folder, windowsHide: true });
+    child.stdin.end();
+    const closed = new Promise(done => child.once('close', done));
+    await box.up();
+    const before = taskkills.length;
+    const first = stopTree(child), second = stopTree(child);
+    assert.equal(second, first, 'the second stop is the first');
+    assert.equal(await first, true, 'taskkill ended 0: the tree is gone');
+    await closed;
+    await box.gone();
+    assert.equal(await stopTree(child), true, 'asked again after the end, the first stop answers');
+    assert.equal(taskkills.length - before, 1, 'one taskkill for the child');
+  } finally { await box.end(); }
+});
+
+/**
+ * Started without "helper", it starts itself again as the helper (detached, with this one's output and folder) and ends at
+ * once, so that the helper's parent is gone before anything is stopped and no tree leads to it; the helper writes its process
+ * id and ends by itself after 60 s.
+ */
+const ORPHAN = `const [pidFile, role] = process.argv.slice(2);
+if (role === 'helper') { require('fs').writeFileSync(pidFile, String(process.pid)); setTimeout(() => {}, 60_000); }
+else require('child_process').spawn(process.execPath, [__filename, pidFile, 'helper'], { detached: true, stdio: 'inherit' }).unref();
+`;
+
+test('A sign-in check whose tool left a helper outside its tree, holding its output and its folder, answers 1.5 s after the tree is stopped; the folder left is said in the log', { skip, timeout: 20_000 }, async () => {
+  const box = await sandbox();
+  const before = process.env.CK_TEST_HOME_ONLY, helperPid = join(box.base, 'helper.pid'), orphan = join(box.base, 'orphan.cjs');
+  process.env.CK_TEST_HOME_ONLY = 'claude';
+  let left = '';
+  try {
+    await writeFile(orphan, ORPHAN);
+    // The tool starts the helper's parent, which ends at once, and never answers.
+    await standIn(join(box.base, 'tools/.local/bin/claude'), '#!/bin/sh\n',
+      `require("child_process").spawn(process.execPath, [${JSON.stringify(orphan)}, ${JSON.stringify(helperPid)}], { stdio: "inherit" }); setTimeout(() => {}, 60_000);`);
+    const logged: string[] = [], from = Date.now();
+    const answer = await checkSignin({ home: join(box.base, 'home'), actual: false, toolsHome: join(box.base, 'tools'), searchPath: '' }, 'claude-cli', [], 1000, line => logged.push(line));
+    const took = Date.now() - from;
+    assert.deepEqual(answer, { failed: 'timeout' }, 'an answer, not an error');
+    assert.ok(took > 1000 + 1500 && took < 1000 + 2000 + 1500 + 1500, `answered ${took} ms after it started: its limit, taskkill, then 1.5 s for the output`);
+    assert.equal(logged.length, 1, logged.join('\n'));
+    left = logged[0].match(/^sign-in check in Claude Code: its folder (.+) was left behind \(E[A-Z]+\)$/)?.[1] ?? '';
+    assert.match(left, /ck-mcp-signin-/, logged[0]);
+  } finally {
+    if (before === undefined) delete process.env.CK_TEST_HOME_ONLY; else process.env.CK_TEST_HOME_ONLY = before;
+    const helper = Number(await readFile(helperPid, 'utf8').catch(() => ''));
+    if (helper) { try { process.kill(helper); } catch { /* already ended */ } }
+    if (left) await rm(left, { recursive: true, force: true, maxRetries: 10 });
+    await box.end();
+  }
+});
+
+test('A taskkill that fails leaves the tree as it was: the draft still ends as timed out soon after, no second taskkill is tried, and the log says what was left', { skip, timeout: 30_000 }, async () => {
+  const box = await sandbox();
+  const temp = join(box.base, 'temp'), cmdPid = join(box.base, 'cmd.pid'), shared = { TEMP: process.env.TEMP, TMP: process.env.TMP, SystemRoot: process.env.SystemRoot };
+  await mkdir(temp);
+  Object.assign(process.env, { TEMP: temp, TMP: temp });
+  try {
+    // The system's folder as this test gives it: its taskkill is a copy of node, which finds no script named /PID and ends 1.
+    const fake = join(box.base, 'Windows');
+    await mkdir(join(fake, 'System32'), { recursive: true });
+    await copyFile(process.execPath, join(fake, 'System32', 'taskkill.exe'));
+    const tool = await box.tool('pi', `require("fs").writeFileSync(${JSON.stringify(cmdPid)}, String(process.ppid));`);
+    const logged: string[] = [], before = taskkills.length, from = Date.now();
+    const draft = writeDraft(SOURCES, 'pi-cli', tool, { shown: draftPrompt(SOURCES), timeoutMs: 4000, log: line => logged.push(line) });
+    const up = await box.up();
+    assert.ok(Date.now() - from < 4000, 'the tree was up before the draft’s limit');
+    process.env.SystemRoot = fake;
+    assert.deepEqual(await draft, { stopped: 'Pi did not finish a draft in time, so it was stopped. Nothing was changed.' });
+    const took = Date.now() - from;
+    process.env.SystemRoot = shared.SystemRoot;
+    assert.ok(took < 4000 + 2000 + 1500 + 1500, `ended ${took} ms after it started`);
+    assert.deepEqual(taskkills.slice(before), [join(fake, 'System32', 'taskkill.exe')], 'one taskkill, the one this test gave');
+    assert.deepEqual(up.filter(isRunning), up, 'the tree is as it was');
+    assert.equal(logged.length, 1, logged.join('\n'));
+    assert.match(logged[0], /^draft by Pi: not everything it started could be stopped; its folder .+central-knot-draft-.+ was left behind \(E[A-Z]+\)$/);
+  } finally {
+    for (const [key, value] of Object.entries(shared)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    const cmd = Number(await readFile(cmdPid, 'utf8').catch(() => ''));
+    if (cmd) { try { process.kill(cmd); } catch { /* already ended */ } }
+    await box.end();
+  }
+});

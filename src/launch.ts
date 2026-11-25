@@ -3,12 +3,16 @@
 // start a .cmd or .bat without a shell (since April 2024), and most of the tools' commands there are one (npm installs a
 // command as a .cmd): such a file is run through cmd.exe with each argument encoded so that it arrives as it was given
 // (through npm's own .cmd every argument does; see launchCommand for what another .cmd takes).
-// Its callers (plugins.ts run, draftbase.ts run, discovery.ts askVersion) keep their own output, limits, timer and stop: how a
-// program and what it started are stopped is theirs. Where a tool's command is found is platform.ts's. The app's other
-// programs are started where they are used, as asked: git and tar are .exe files on Windows, and the login shell, D-Bus,
-// lsappinfo and codesign run only on macOS or Linux.
+// Its callers (plugins.ts run, draftbase.ts run, discovery.ts askVersion) keep their own output, limits and timer. On macOS
+// and Linux how a program and what it started are stopped is theirs (a process group of its own). On Windows the two runs
+// stop a program with everything it started through stopTree, and end only once it has answered: plugins.ts run (git's runs
+// and the MCP sign-in check go through it) and draftbase.ts run; askVersion's probe is still ended by execFile's timeout
+// alone. After a run, the folder it worked in is removed by clearRunFolder, which never throws. Where a tool's command is
+// found is platform.ts's. The app's other programs are started where they are used, as asked: git and tar are .exe files on
+// Windows, and the login shell, D-Bus, lsappinfo and codesign run only on macOS or Linux.
 import { readFileSync } from 'node:fs';
-import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from 'node:child_process';
+import { rm } from 'node:fs/promises';
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from 'node:child_process';
 import { win32 } from 'node:path';
 
 /** What is really started for a command and its arguments, and the options cmd.exe's route adds (arguments already encoded, no window). */
@@ -68,6 +72,50 @@ export function launchCommand(file: string, args: string[], platform: string = p
 export function start(file: string, args: string[], options: SpawnOptionsWithoutStdio): ChildProcessWithoutNullStreams {
   const launch = launchCommand(file, args);
   return spawn(launch.file, launch.args, { ...options, ...launch.options });
+}
+
+/** How long taskkill is given to end a tree: it is ended itself then, and the tree is not known to be gone. */
+const TREE_STOP_MS = 2000;
+/** Each child's one stop (stopTree), kept by the child itself: a later child may have the same process id, never the same object. */
+const treeStops = new WeakMap<ChildProcess, Promise<boolean>>();
+
+/**
+ * Windows: stops `child` and everything started from it, and what those started, with the system's own taskkill (/PID <pid>
+ * /T /F, by its full path under SystemRoot, read at each stop), with no window and its output not read, given two seconds.
+ * True only where taskkill ended 0, so the tree is gone; false for anything else: another code, its two seconds passed (it
+ * is ended then), it could not be started. Its words and its other codes are not read: they are in the system's language,
+ * and one code is given for more than one cause. A child already seen to end gets no taskkill (its process id may be
+ * another program's by then): false. One that never started has nothing to stop: true. Once at most for a child: a second
+ * stop answers as the first. Not reached: a helper whose parent had ended before the stop, as no tree leads to it.
+ */
+export function stopTree(child: ChildProcess): Promise<boolean> {
+  const asked = treeStops.get(child);
+  if (asked) return asked;
+  const stopping = new Promise<boolean>(done => {
+    if (child.pid === undefined) return done(true);
+    if (child.exitCode !== null || child.signalCode !== null) return done(false);
+    const bound = setTimeout(() => done(false), TREE_STOP_MS);
+    const answer = (whole: boolean) => { clearTimeout(bound); done(whole); };
+    try {
+      const taskkill = spawn(win32.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe'), ['/PID', String(child.pid), '/T', '/F'],
+        { stdio: 'ignore', windowsHide: true, timeout: TREE_STOP_MS });
+      taskkill.on('error', () => answer(false));
+      taskkill.on('exit', code => answer(code === 0));
+    } catch { answer(false); }
+  });
+  treeStops.set(child, stopping);
+  return stopping;
+}
+
+/**
+ * Removes the folder a tool's run worked in, once the run has ended, and never throws. Where the folder can't be removed (on
+ * Windows something the run started still holds it), or the run's stop was not known to end everything it started
+ * (`leftRunning`), `log` gets one line naming the run (`who`) and the folder.
+ */
+export async function clearRunFolder(folder: string, who: string, leftRunning: boolean | undefined, log?: (line: string) => void): Promise<void> {
+  const failed = await rm(folder, { recursive: true, force: true }).then(() => '', (error: NodeJS.ErrnoException) => error.code ?? String(error));
+  const said = [leftRunning ? 'not everything it started could be stopped' : '', failed ? `its folder ${folder} was left behind (${failed})` : ''].filter(Boolean);
+  if (said.length) log?.(`${who}: ${said.join('; ')}`);
 }
 
 /**

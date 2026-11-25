@@ -5,7 +5,7 @@ import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { pathBeside } from './platform.ts';
-import { dropVariable, homeVariables, start } from './launch.ts';
+import { dropVariable, homeVariables, start, stopTree } from './launch.ts';
 import { probeVersion } from './discovery.ts';
 import { configRoot, harnesses } from './harnesses.ts';
 import { CODEX_MANIFEST, MANIFEST, codexManifest, inside, installedContents, parseObject, pluginContents, pluginManifest, readManifest, remoteOf, skillName, skillNamesIn, sourceOf, type ReadAs } from './catalogdetail.ts';
@@ -93,22 +93,29 @@ export const gitEnv = () => ({ ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INT
 export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; maxBytes?: number; env?: NodeJS.ProcessEnv }
 /**
  * A command's outcome: `output` is both streams as trimmed text (what failures are worded from); `stdout` its output byte for
- * byte. A run stopped by its `signal` reads as one that timed out (`'timeout'`).
+ * byte. A run stopped by its `signal` reads as one that timed out (`'timeout'`). `leftRunning`: set where a stop on Windows
+ * was not known to end everything the command started (launch.ts stopTree).
  */
-export type RunResult = { code: number | 'timeout' | 'missing'; output: string; stdout: Buffer };
+export type RunResult = { code: number | 'timeout' | 'missing'; output: string; stdout: Buffer; leftRunning?: boolean };
 
 /**
  * Runs a command (started as launch.ts start says: on Windows a .cmd through cmd.exe), stopped at its timeout or its `signal`.
  * `group` (git's runs and mcpsigninrun.ts's, off Windows): it runs in a process group of its own, and stopping it stops the
- * whole group, the helpers it started (git's remote-http) with it.
+ * whole group, the helpers it started (git's remote-http) with it. On Windows any stop is launch.ts stopTree's, the command
+ * with everything it started, and the run ends once that has answered.
  */
 export function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number; group?: boolean } & RunOptions): Promise<RunResult> {
   const maxBytes = options.maxBytes ?? 4 * 1024 * 1024, group = !!options.group && process.platform !== 'win32';
   return new Promise(done => {
     const out: Buffer[] = [], err: Buffer[] = [];
-    let stopped = false, cut = false, ended = false;
+    let stopped = false, cut = false, ended = false, leftRunning = false;
+    /** Windows: the stop under way (launch.ts stopTree), which the run's end waits for. Never set elsewhere. */
+    let stopping: Promise<void> | undefined;
     const child = start(file, args, { env: options.env, cwd: options.cwd, windowsHide: true, detached: group });
-    const kill = () => { try { if (group && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); } catch { /* already ended */ } };
+    const kill = process.platform === 'win32'
+      // Once the tree is stopped the run ends at `close`, or 1.5 s later at most: a helper outside the tree can hold the output open.
+      ? () => { stopping ??= stopTree(child).then(whole => { leftRunning = !whole; setTimeout(() => end(child.exitCode ?? 1), 1500); }); }
+      : () => { try { if (group && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); } catch { /* already ended */ } };
     const stop = () => { stopped = true; kill(); };
     // Past maxBytes on either stream it ran, it just said too much: it is stopped, and what it said up to maxBytes is kept.
     const take = (chunks: Buffer[]) => {
@@ -128,13 +135,16 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
       clearTimeout(timer);
       options.signal?.removeEventListener('abort', stop);
       const stdout = Buffer.concat(out), output = `${stdout.toString('utf8')}${Buffer.concat(err).toString('utf8')}`.replace(/\r/g, '').trim();
-      if (cut) done({ code: 1, output: `${output.slice(-2000)}\n(output cut: more than ${maxBytes / 1024 / 1024} MB)`, stdout });
-      else done({ code: stopped && code !== 0 ? 'timeout' : code, output, stdout });
+      const left = leftRunning ? { leftRunning } : {};
+      if (cut) done({ code: 1, output: `${output.slice(-2000)}\n(output cut: more than ${maxBytes / 1024 / 1024} MB)`, stdout, ...left });
+      else done({ code: stopped && code !== 0 ? 'timeout' : code, output, stdout, ...left });
     };
+    // While a stop is under way (Windows), the run's end waits for it.
+    const settle = (code: RunResult['code']) => { if (stopping) void stopping.then(() => end(code)); else end(code); };
     child.stdout.on('data', take(out));
     child.stderr.on('data', take(err));
-    child.on('error', error => end(errorCode(error) === 'ENOENT' ? 'missing' : 1));
-    child.on('close', code => end(code ?? 1));
+    child.on('error', error => settle(errorCode(error) === 'ENOENT' ? 'missing' : 1));
+    child.on('close', code => settle(code ?? 1));
     // A timeout of zero (or less) is none, as it was for execFile.
     const timer = options.timeoutMs > 0 ? setTimeout(stop, options.timeoutMs) : undefined;
     if (options.signal?.aborted) stop(); else options.signal?.addEventListener('abort', stop, { once: true });

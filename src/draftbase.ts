@@ -11,7 +11,7 @@ import { findBinary } from './discovery.ts';
 import { harnessIds } from './harnesses.ts';
 import { baseView, instructionsView } from './instructions.ts';
 import { pathBeside } from './platform.ts';
-import { start } from './launch.ts';
+import { clearRunFolder, start, stopTree } from './launch.ts';
 import { fileName, toolNames } from './words.ts';
 import type { ShareContext } from './share.ts';
 import type { BaseDraft, HarnessId, Snapshot } from './types.ts';
@@ -148,18 +148,26 @@ export function parseDraft(answer: string, tools: HarnessId[]): { base: string; 
   return { base, own: Object.fromEntries(tools.map(tool => [tool, part(parts.get(tool)!)])) };
 }
 
-type Ran = { code: number | 'timeout' | 'missing' | 'cancelled'; output: string; said: string };
+/** How a run ended; `leftRunning`: its stop on Windows was not known to end everything the tool started (launch.ts stopTree). */
+type Ran = { code: number | 'timeout' | 'missing' | 'cancelled'; output: string; said: string; leftRunning: boolean };
 
-/** Runs the tool once with the prompt on its standard input. Stopping it (time up, or cancelled) stops what it started too. */
+/**
+ * Runs the tool once with the prompt on its standard input. Stopping it (time up, or cancelled) stops what it started too; on
+ * Windows through launch.ts stopTree, and the run ends once that has answered.
+ */
 function run(binary: string, args: string[], prompt: string, { cwd, signal, timeoutMs }: { cwd: string; signal?: AbortSignal; timeoutMs: number }): Promise<Ran> {
   return new Promise(done => {
     // Its own process group (not on Windows), so stopping it reaches helpers it started, such as MCP servers.
     const grouped = process.platform !== 'win32';
     const child = start(binary, args, { cwd, env: { ...process.env, PATH: pathBeside(binary) }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: grouped });
-    let output = '', said = '', stoppedAs: 'timeout' | 'cancelled' | undefined, finished = false;
+    let output = '', said = '', stoppedAs: 'timeout' | 'cancelled' | undefined, finished = false, leftRunning = false;
+    /** Windows: the stop under way (launch.ts stopTree), which every end below waits for. Never set elsewhere. */
+    let stopping: Promise<void> | undefined;
     const stop = (as: 'timeout' | 'cancelled') => {
       if (finished) return;
       stoppedAs ??= as;
+      // Windows: once the tree is stopped the run ends at `close`, or 1.5 s later at most, as a helper outside the tree can hold the output open.
+      if (process.platform === 'win32') { stopping ??= stopTree(child).then(whole => { leftRunning = !whole; setTimeout(() => finish(child.exitCode ?? 1), 1500); }); return; }
       try { if (grouped && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); } catch { child.kill('SIGKILL'); }
     };
     const timer = setTimeout(() => stop('timeout'), timeoutMs);
@@ -172,15 +180,17 @@ function run(binary: string, args: string[], prompt: string, { cwd, signal, time
       signal?.removeEventListener('abort', cancel);
       // The tool has ended: a helper it left running (an MCP server from the person's config) ends with it.
       try { if (grouped && child.pid) process.kill(-child.pid, 'SIGKILL'); } catch { /* none left */ }
-      done({ code: stoppedAs ?? code, output, said });
+      done({ code: stoppedAs ?? code, output, said, leftRunning });
     };
+    // While a stop is under way (Windows), the run's end waits for it.
+    const settle = (code: Ran['code']) => { if (stopping) void stopping.then(() => finish(code)); else finish(code); };
     child.stdout.setEncoding('utf8').on('data', (text: string) => { output += text; if (output.length > MOST_OUTPUT) stop('timeout'); });
     child.stderr.setEncoding('utf8').on('data', (text: string) => { said = (said + text).slice(-8000); });
-    child.on('error', error => finish((error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 1));
-    child.on('close', code => finish(code ?? 1));
+    child.on('error', error => settle((error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 1));
+    child.on('close', code => settle(code ?? 1));
     // A helper the tool left running can hold its output open, so its end is not waited for past the tool's own exit:
     // what the tool said has arrived by then, give or take a moment.
-    child.on('exit', code => { setTimeout(() => finish(code ?? 1), 1500); });
+    child.on('exit', code => { setTimeout(() => settle(code ?? 1), 1500); });
     // A tool that exits before reading its input (not signed in) closes the pipe: that is its failure to report, not ours.
     child.stdin.on('error', () => {});
     child.stdin.end(prompt);
@@ -209,20 +219,24 @@ function lastWords(text: string) {
  * Has `by` write a draft from `sources`, on `model` when one is given. It is sent `shown`, the prompt the person saw: when the
  * files changed since, so that the prompt now differs, nothing runs and the prompt as it is now comes back to be shown instead.
  * The answer comes back sorted, with the hash of everything it was written from, so a review can tell when a file changed
- * since. A failure says what the tool said; every failure leaves everything as it was.
+ * since. A failure says what the tool said; every failure leaves everything as it was. Stopped by `signal` before its tool
+ * starts, it starts none. Its folder is removed after (launch.ts clearRunFolder: what can't be removed is said to `log`).
  */
-export async function writeDraft(sources: DraftSources, by: HarnessId, binary: string, options: { shown: string; model?: string; signal?: AbortSignal; timeoutMs?: number }): Promise<BaseDraft> {
+export async function writeDraft(sources: DraftSources, by: HarnessId, binary: string, options: { shown: string; model?: string; signal?: AbortSignal; timeoutMs?: number; log?: (line: string) => void }): Promise<BaseDraft> {
   const name = toolNames[by];
   if (!sources.files.length) return { stopped: NOTHING_TO_SORT };
   const prompt = draftPrompt(sources);
   if (prompt !== options.shown) return { promptNow: prompt };
   // An empty folder of its own: no project there for the tool to read, and nothing of the person's to change.
   const folder = await mkdtemp(join(tmpdir(), 'central-knot-draft-'));
+  let leftRunning = false;
   try {
     const answerFile = join(folder, 'answer.md');
     const command = draftCommand(by, answerFile, options.model);
     if (!command) return { stopped: `${name} can’t write a draft here. Nothing was changed.` };
+    if (options.signal?.aborted) return { cancelled: true };
     const ran = await run(binary, command.args, prompt, { cwd: folder, signal: options.signal, timeoutMs: options.timeoutMs ?? DRAFT_TIMEOUT_MS });
+    leftRunning = ran.leftRunning;
     if (ran.code === 'cancelled') return { cancelled: true };
     if (ran.code === 'missing') return { stopped: `${name} could not be started, so there is no draft. Nothing was changed.` };
     if (ran.code === 'timeout') return { stopped: `${name} did not finish a draft in time, so it was stopped. Nothing was changed.` };
@@ -240,6 +254,6 @@ export async function writeDraft(sources: DraftSources, by: HarnessId, binary: s
     }
     return { draft: { by, base: sorted.base, own: sorted.own, read: Object.fromEntries(sources.files.map(file => [file.tool, file.hash])), baseHash: sources.baseHash } };
   } finally {
-    await rm(folder, { recursive: true, force: true }).catch(() => {});
+    await clearRunFolder(folder, `draft by ${name}`, leftRunning, options.log);
   }
 }
