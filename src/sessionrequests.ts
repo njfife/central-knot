@@ -365,6 +365,9 @@ function counterRequest(record: JsonRecord, state: CodexState): Found {
   return codexRequest(record, `${state.session} ${record.timestamp} ${saved.total_tokens}`, tokens, state) ?? 'unread';
 }
 
+/** Whether `key` has the `<thread> <timestamp> <total_tokens>` form `counterRequest` creates for older Codex counts. */
+export const isCodexCounterKey = (key: string): boolean => /^.+ \S+ (?:\d+|undefined)$/.test(key);
+
 /** What one record of a rollout is, as readCodexRollout says, `state` and `besides` brought up to date with it. */
 function codexRecord(record: JsonRecord, state: CodexState, besides: Besides): Found {
   const payload = record.payload ?? {};

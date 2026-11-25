@@ -29,8 +29,20 @@ export const addsText = (tool: HarnessId, hook: DeclaredHook) => !!hook.launch &
 export const ignoresText = (tool: HarnessId, hook: DeclaredHook) => tool === 'copilot-cli' && !!hook.launch && COPILOT_PROMPTS.includes(hook.event);
 /** When a tool's hooks that can add text run, in words: "when a session starts or when you send a prompt". */
 export const textEventsWords = (tool: HarnessId) => [...new Set(Object.values(TEXT_EVENTS[tool] ?? {}))].join(' or ');
-/** A start-of-session matcher's values, as Claude Code and Codex match it against how the session started. */
+/** A start-of-session matcher's values, as Claude Code and Codex match it against how the session started (startup first). */
 const STARTS: Record<string, string> = { startup: START, resume: 'when a session resumes', clear: 'when a session is cleared', compact: 'after the conversation is compacted', fork: 'when a session is forked' };
+
+/** First start-of-session source matching `matcher` (startup first), or undefined when none matches; shared by hookrun.ts. */
+export function pickStartSource(tool: HarnessId, matcher?: string): string | undefined {
+  if (tool === 'copilot-cli' || !matcher || matcher === '*') return 'startup';
+  const names = Object.keys(STARTS);
+  try {
+    const pattern = new RegExp(matcher);
+    return names.find(source => pattern.test(source));
+  } catch {
+    return names.find(source => source === matcher);
+  }
+}
 /**
  * When a hook that can add text runs, as declared: its event's words, narrowed by a start-of-session hook's matcher in Claude
  * Code and Codex (in their words where each value is one of theirs, as written otherwise). A prompt hook's matcher is
