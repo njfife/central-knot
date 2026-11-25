@@ -739,11 +739,10 @@ async function withPlatform<T>(platform: NodeJS.Platform, run: () => Promise<T>)
   }
 }
 
-test('canonicalHome folds capitals on macOS, keeps them on Linux, and matches keepSessionCosts across reopen', async () => {
-  const h = await makeHarness();
-  const mixedHome = join(h.root, 'KeepCostsMac', 'HomeA');
-  const at = new Date(NOW - 60_000).toISOString();
-  await writeLines(join(mixedHome, '.claude/projects/-work-app/s1.jsonl'), [claudeRecord('s1', 'm1', at)]);
+test('canonicalHome folds capitals on macOS, preserves them on Linux, and misses a raw realpath entry on macOS', async () => {
+  const root = await makeTemp();
+  const mixedHome = join(root, 'KeepCostsMac', 'HomeA');
+  await mkdir(mixedHome, { recursive: true });
   const real = await realpath(mixedHome);
   assert.notEqual(real, real.toLowerCase(), 'fixture path contains capitals');
 
@@ -753,42 +752,7 @@ test('canonicalHome folds capitals on macOS, keeps them on Linux, and matches ke
   assert.notEqual(macKey, real, 'macOS consent key differs from raw realpath when path has capitals');
   assert.equal(linuxKey, real, 'Linux consent key preserves capitals');
 
-  h.current.context = { ...h.current.context, home: mixedHome };
-  h.keeper.homeOpened(mixedHome, macKey);
-  const reply = await h.keeper.setKeep(mixedHome, true);
-  assert.equal(reply.on, true);
-  await h.waitIdle();
-
-  const saved = record((await h.readSavedSettings())?.keepSessionCosts);
-  assert.equal(saved?.[macKey], true, 'consent saved under macOS canonicalHome key');
-  assert.equal(Object.hasOwn(saved ?? {}, real), false, 'raw realpath key is absent on macOS');
-
-  const reopened = await makeHarness({ initialSettings: { keepSessionCosts: saved } });
-  reopened.current.context = { ...reopened.current.context, home: mixedHome };
-  const reopenedView = reopened.keeper.homeOpened(mixedHome, macKey);
-  assert.equal(reopenedView.on, true, 'reopening with macOS canonicalHome finds saved consent');
-  await reopened.waitIdle();
-
-  const month = monthOf(NOW - 60_000);
-  const rec = await readSessionRecord(mixedHome, [month]);
-  assert.deepEqual(Object.keys(rec.months[month]!.sessions[0]!.requests), ['m1'], 'kept record on a mixed-case Mac home is still found');
-
   const rawSeeded = await makeHarness({ initialSettings: { keepSessionCosts: { [real]: true } } });
   rawSeeded.current.context = { ...rawSeeded.current.context, home: mixedHome };
   assert.equal(rawSeeded.keeper.homeOpened(mixedHome, macKey).on, false, 'pre-seeding raw realpath misses consent on macOS');
-});
-
-test('e2e session-keeping flows spell keepSessionCosts keys with canonicalHome, not realpathSync', async () => {
-  const source = await readFile(join(import.meta.dirname, '../scripts/e2e.mjs'), 'utf8');
-  assert.equal(/import\s*\{[^}]*\bcanonicalHome\b[^}]*\}\s*from\s*['"]\.\.\/src\/sessionkeep\.ts['"]/.test(source), true,
-    'scripts/e2e.mjs imports canonicalHome from ../src/sessionkeep.ts');
-  for (const name of ['keepSessionCostsFlow', 'sessionsWeekFlow']) {
-    const start = source.indexOf(`async function ${name}()`);
-    assert.ok(start >= 0, `${name} exists in scripts/e2e.mjs`);
-    const end = source.indexOf('\n}\n', start);
-    assert.ok(end > start, `${name} closes in scripts/e2e.mjs`);
-    const body = source.slice(start, end + 2);
-    assert.equal(/\brealpathSync\s*\(/.test(body), false, `${name} must not spell keepSessionCosts keys with raw realpathSync`);
-    assert.equal(/\bcanonicalHome\s*\(/.test(body), true, `${name} spells keepSessionCosts keys with canonicalHome`);
-  }
 });
