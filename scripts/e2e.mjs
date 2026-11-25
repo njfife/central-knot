@@ -10229,6 +10229,289 @@ async function sessionsFlow() {
 }
 
 /**
+ * Per-home session-cost keeping (sessionkeep.ts, sessionspage.ts, settingspage.ts): nothing written before the click; the
+ * Sessions page button, info card, Collecting… state, and clean removal once swept; the Settings switch turning sweeps off
+ * without touching the record; a failed settings save leaving consent off; Automatic sync off leaving sweeps running; Quit
+ * returning without waiting on a blocked sweep; an unwritable store refusing verbatim on both pages with consent left off;
+ * nothing cut off and pictures at 860×560 and 1316×820 with the sidebar open, light and dark.
+ */
+async function keepSessionCostsFlow() {
+  const midnight = (back = 0, at = new Date()) => new Date(at.getFullYear(), at.getMonth(), at.getDate() - back).getTime();
+  if (midnight(-1) - Date.now() < 120_000) await wait(midnight(-1) - Date.now() + 1000);
+  const today = midnight(0), started = Date.now();
+  const todayAt = part => today + Math.floor((started - today) * part);
+  const monthKey = ms => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+  const homeA = join(scratch, 'keep-costs-a'), homeB = join(scratch, 'keep-costs-b'), outside = join(scratch, 'keep-costs-outside');
+  const data = join(scratch, 'keep-costs-data'), real = join(scratch, 'keep-costs-real');
+  for (const dir of [join(homeA, '.claude'), join(homeA, '.codex'), join(homeB, '.claude'), join(homeB, '.central-knot'), outside, data, real]) mkdirSync(dir, { recursive: true });
+  // One skill so Automatic sync is offered and can be toggled off for Check 9.
+  skill(join(homeA, '.claude/skills'), 'demo');
+  // Home B has a symlinked sessions folder so checkSessionStore refuses verbatim without touching disk.
+  symlinkSync(outside, join(homeB, '.central-knot/sessions'));
+  const put = (home, rel, records, mtime) => {
+    const file = join(home, rel);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, records.map(r => JSON.stringify(r)).join('\n') + '\n');
+    utimesSync(file, new Date(mtime), new Date(mtime));
+    return file;
+  };
+  const reply = (session, id, at, model, input, output, cwd) => ({
+    type: 'assistant', sessionId: session, cwd, timestamp: new Date(at).toISOString(),
+    message: { id, type: 'message', role: 'assistant', model, content: [{ type: 'text', text: 'Stand-in.' }],
+      usage: { input_tokens: input, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: output, speed: 'standard', service_tier: 'standard' } },
+  });
+  const rollout = (id, at, model, response, input, output) => [
+    { timestamp: new Date(at).toISOString(), type: 'session_meta', payload: { id, session_id: id, cwd: '/work/codex-app', model_provider: 'openai' } },
+    { timestamp: new Date(at).toISOString(), type: 'turn_context', payload: { turn_id: `turn-${id}`, cwd: '/work/codex-app', model } },
+    { timestamp: new Date(at + 1).toISOString(), type: 'token_usage_record', payload: { response_id: response,
+      usage: { input_tokens: input, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: output, reasoning_output_tokens: 0, total_tokens: input + output } } },
+  ];
+  const day = new Date(today), dated = [day.getFullYear(), day.getMonth() + 1, day.getDate()].map(p => String(p).padStart(2, '0')).join('/');
+  const claudeFile = put(homeA, '.claude/projects/-work-central-knot/alpha.jsonl', [
+    reply('alpha', 'm1', todayAt(0.25), 'claude-haiku-4-5-20251001', 20_000, 2_000, '/work/central-knot'),
+    reply('alpha', 'm2', todayAt(0.45), 'claude-fable-5', 15_000, 1_500, '/work/central-knot'),
+  ], todayAt(0.45));
+  put(homeA, `.codex/sessions/${dated}/rollout-c1.jsonl`, rollout('c1', todayAt(0.6), 'gpt-6-astra', 'r1', 30_000, 3_000), todayAt(0.6));
+
+  /** Makes a 60-day-old FIFO so Today/Yesterday and 30-day Usage skip it while sweepSessions blocks in open(pipe, 'r') until release(). */
+  const makeHoldPipe = rel => {
+    const pipe = join(homeA, rel);
+    mkdirSync(dirname(pipe), { recursive: true });
+    spawnSync('mkfifo', [pipe]);
+    const old = new Date(Date.now() - 60 * 86_400_000);
+    utimesSync(pipe, old, old);
+    const release = async () => {
+      for (let tries = 0; tries < 200; tries++) {
+        try { const fd = openSync(pipe, fsConstants.O_WRONLY | fsConstants.O_NONBLOCK); closeSync(fd); return true; } catch { await wait(25); }
+      }
+      return false;
+    };
+    const clean = () => { if (existsSync(pipe)) rmSync(pipe); };
+    return { pipe, release, clean };
+  };
+
+  const SPILLS = `(() => { const page = document.querySelector('#sessions-scroll'); if (!page) return [];
+    const edge = page.getBoundingClientRect().right - parseFloat(getComputedStyle(page).paddingRight);
+    return [...page.querySelectorAll('*')].flatMap(e => e.getBoundingClientRect().right > edge + 1 ? ['past the page’s edge: ' + (e.id || e.className || e.tagName)] : []); })()`;
+  const captureAndCheck = async (a, prefix, checkSessionsSpills, scrollTarget) => {
+    const headingTops = {};
+    for (const [width, height] of [[860, 560], [1316, 820]]) {
+      await sizeTo(a, width, height);
+      if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+      if (scrollTarget) await a.run(`document.querySelector(${JSON.stringify(scrollTarget)})?.scrollIntoView({ block: 'center' })`);
+      await wait(100);
+      if (checkSessionsSpills) headingTops[width] = Math.round(await a.run(`document.querySelector('#sessions-heading')?.getBoundingClientRect().top ?? 0`));
+      const cut = [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT), ...(checkSessionsSpills ? await a.run(SPILLS) : [])];
+      same(`nothing cut off at ${width}×${height} with sidebar open (${prefix})`, cut, []);
+      if (shots) {
+        for (const look of ['light', 'dark']) {
+          await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+          await wait(150);
+          await a.shot(`${prefix}-${look}-${width}`);
+        }
+        await a.send('Emulation.setEmulatedMedia', { features: [] });
+      }
+    }
+    await fullSize(a);
+    return headingTops;
+  };
+  const captureCard860 = async (a, buttonSelector, cardSelector, prefix, scrollTarget) => {
+    await sizeTo(a, 860, 560);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    if (scrollTarget) await a.run(`document.querySelector(${JSON.stringify(scrollTarget)})?.scrollIntoView({ block: 'center' })`);
+    await a.click(buttonSelector);
+    await wait(100);
+    same(`info card open at 860×560 (${prefix})`, await a.run(`document.querySelector(${JSON.stringify(cardSelector)})?.matches(':popover-open') ?? false`), true);
+    if (shots) {
+      for (const look of ['light', 'dark']) {
+        await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+        await wait(150);
+        await a.shot(`${prefix}-${look}-860`);
+      }
+      await a.send('Emulation.setEmulatedMedia', { features: [] });
+    }
+    await a.click(buttonSelector);
+    await fullSize(a);
+  };
+
+  const settingsPath = join(data, 'app-settings.json');
+  writeFileSync(settingsPath, JSON.stringify({ home: { mode: 'custom', path: homeA } }));
+  const pipe1 = makeHoldPipe('.claude/projects/-work-hold/held-1.jsonl');
+  const a = await launch(data, [], real, { CK_SESSION_SWEEP_EVERY_MS: '1500' });
+  const canonA = realpathSync(homeA), canonB = realpathSync(homeB);
+  const sessionsDirA = join(homeA, '.central-knot/sessions');
+  const monthFileA = join(sessionsDirA, `${monthKey(todayAt(0.45))}.json`);
+  try {
+    // Check 1: nothing created or written before the click.
+    await a.click('#nav-sessions');
+    for (let tries = 0; tries < 100 && !(await a.exists('#sessions-heading')); tries++) await wait(100);
+    await wait(2000);
+    same('before the click: Start button and its info card match verbatim',
+      [await a.text('#sessions-keep-start'), await a.text('#sessions-keep-info-card'), await a.exists('#sessions-collecting')],
+      ['Start keeping session costs', 'This home’s Central Knot folder keeps each session’s project, request times, models, token counts and estimated prices. No message text. You can turn this off in Settings; what was kept stays.', false]);
+    same('before the click: no sessions folder, no lock, no keepSessionCosts entry',
+      [existsSync(sessionsDirA), existsSync(join(sessionsDirA, 'lock.sqlite')), jsonOrNothing(settingsPath)?.keepSessionCosts ?? null],
+      [false, false, null]);
+    const topsBefore = await captureAndCheck(a, 'sessions-before', true);
+    await captureCard860(a, '#sessions-keep-info', '#sessions-keep-info-card', 'sessions-card');
+
+    // Click Start: enters Collecting… while FIFO blocks open(pipe1, 'r') until release().
+    await a.click('#sessions-keep-start');
+    for (let tries = 0; tries < 150 && !(await a.exists('#sessions-collecting')); tries++) await wait(50);
+    await wait(300);
+    same('during the first sweep: Collecting… replaces the Start button and status bar announces keeping',
+      [await a.text('#sessions-collecting'), await a.exists('#sessions-keep-start'), await a.text('#announcement')],
+      ['Collecting…', false, 'Keeping session costs for this home.']);
+    const topsCollecting = await captureAndCheck(a, 'sessions-collecting', true);
+    same('still Collecting… until FIFO is released', await a.exists('#sessions-collecting'), true);
+
+    // Release FIFO so sweep finishes; button's place holds nothing, status bar still says keeping, and receipts landed.
+    same('FIFO had an active sweep reader waiting', await pipe1.release(), true);
+    pipe1.clean();
+    for (let tries = 0; tries < 150 && await a.exists('#sessions-collecting'); tries++) await wait(50);
+    await a.settle();
+    same('after the first sweep: button place holds nothing and status bar says keeping',
+      [await a.exists('#sessions-keep-start'), await a.exists('#sessions-collecting'), await a.exists('#sessions-keep-result'), await a.text('#announcement')],
+      [false, false, false, 'Keeping session costs for this home.']);
+    const saved1 = jsonOrNothing(settingsPath)?.keepSessionCosts ?? {};
+    same('consent saved on for Home A alone', [saved1[canonA], Object.hasOwn(saved1, canonB)], [true, false]);
+    const kept1 = jsonOrNothing(monthFileA);
+    const ids1 = (kept1?.sessions ?? []).flatMap(s => Object.keys(s.requests).map(id => `${s.tool}:${id}`)).sort();
+    same('kept record holds stand-in Claude Code and Codex requests', ids1, ['claude-cli:m1', 'claude-cli:m2', 'codex-cli:r1']);
+    const topsAfter = await captureAndCheck(a, 'sessions-after', true);
+    same('Fix 5: sessions bar keeps one height across before, collecting, and after (0 px jump at 860 and 1316)',
+      [topsCollecting, topsAfter], [topsBefore, topsBefore]);
+
+    // Fix 2: Refresh started during Collecting… whose reply lands after the sweep ends must not restore Collecting….
+    const main = a.inspect ? await mainHelpers(a.inspect) : undefined;
+    if (main) {
+      const pipeRefresh = makeHoldPipe('.claude/projects/-work-hold/held-refresh.jsonl');
+      try {
+        for (let tries = 0; tries < 160 && !(await a.exists('#sessions-collecting')); tries++) await wait(50);
+        await main.holdRefresh('view.sessionCosts?.collecting === true');
+        await a.run(`document.querySelector('#header-refresh').click()`);
+        for (let tries = 0; tries < 100 && !(await main.refreshHeld()); tries++) await wait(50);
+        same('Refresh snapshot held while Collecting…', await main.refreshHeld(), true);
+        same('Refresh FIFO released', await pipeRefresh.release(), true);
+        pipeRefresh.clean();
+        for (let tries = 0; tries < 150 && await a.exists('#sessions-collecting'); tries++) await wait(50);
+        await main.releaseRefresh();
+        await a.settle();
+        same('older Refresh reply arriving after sweep ends does not restore Collecting…', await a.exists('#sessions-collecting'), false);
+      } finally { pipeRefresh.clean(); main.close(); }
+    } else console.log('keepSessionCostsFlow: stale Refresh during Collecting… is checked in a development run only (it holds discovery:refresh in main).');
+
+    // Check 2: Settings switch under "This home" is On; turning Off stops sweeps, leaves record untouched, brings Start back.
+    await a.click('#nav-settings');
+    for (let tries = 0; tries < 100 && !(await a.exists('#keep-session-costs')); tries++) await wait(50);
+    same('Settings shows Keep session costs On under This home with shared card text',
+      [await a.run(`!!document.querySelector('#keep-session-costs')?.closest('section')?.querySelector('#settings-home')`),
+        await a.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`),
+        await a.text('#setting-session-costs-info-card')],
+      [true, 'true', 'This home’s Central Knot folder keeps each session’s project, request times, models, token counts and estimated prices. No message text. If you turn this off, what was kept stays.']);
+    await captureAndCheck(a, 'settings-row', false, '#setting-session-costs');
+    await captureCard860(a, '#setting-session-costs-info', '#setting-session-costs-info-card', 'settings-card', '#setting-session-costs');
+    const beforeOffBytes = readFileSync(monthFileA, 'utf8');
+    await a.click('#keep-session-costs');
+    for (let tries = 0; tries < 100 && (await a.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`)) !== 'false'; tries++) await wait(50);
+    same('Keep session costs turns Off in Settings', await a.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`), 'false');
+    await captureAndCheck(a, 'settings-row-off', false, '#setting-session-costs');
+    writeFileSync(claudeFile, `${JSON.stringify(reply('alpha', 'm3-while-off', Math.max(today, Date.now() - 1000), 'claude-haiku-4-5-20251001', 5_000, 500, '/work/central-knot'))}\n`, { flag: 'a' });
+    await wait(2200);
+    same('while Off: next ticks do not sweep and record is untouched', readFileSync(monthFileA, 'utf8'), beforeOffBytes);
+    await a.click('#nav-sessions');
+    for (let tries = 0; tries < 100 && !(await a.exists('#sessions-keep-start')); tries++) await wait(50);
+    same('turning Off puts Start keeping session costs back on Sessions', await a.exists('#sessions-keep-start'), true);
+
+    // Check 6: a settings save that fails leaves consent off, sweeps nothing, and reports why inline.
+    if (process.platform !== 'win32' && process.getuid?.() !== 0) {
+      chmodSync(settingsPath, 0o444);
+      try {
+        await a.click('#sessions-keep-start');
+        for (let tries = 0; tries < 100 && !(await a.exists('#sessions-keep-result')); tries++) await wait(50);
+        check('failed settings save says why inline and keeps button and consent off',
+          /Couldn’t save/.test(await a.text('#sessions-keep-result') ?? '') && await a.exists('#sessions-keep-start') && jsonOrNothing(settingsPath)?.keepSessionCosts?.[canonA] === false,
+          { text: await a.text('#sessions-keep-result'), keep: jsonOrNothing(settingsPath)?.keepSessionCosts });
+      } finally { chmodSync(settingsPath, 0o644); }
+    }
+
+    // Check 9: Automatic sync off does not stop sweeps (initial or scheduled tick).
+    if ((await a.run(`document.querySelector('#sync-switch')?.getAttribute('aria-checked')`)) === 'true') await a.click('#sync-switch');
+    same('Automatic sync is off', await a.run(`document.querySelector('#sync-switch')?.getAttribute('aria-checked')`), 'false');
+    await a.click('#sessions-keep-start');
+    for (let tries = 0; tries < 150 && (await a.exists('#sessions-keep-start') || await a.exists('#sessions-collecting')); tries++) await wait(50);
+    writeFileSync(claudeFile, `${JSON.stringify(reply('alpha', 'm4-sync-off', Math.max(today, Date.now() - 500), 'claude-haiku-4-5-20251001', 6_000, 600, '/work/central-knot'))}\n`, { flag: 'a' });
+    let hasSyncOff = false;
+    for (let tries = 0; tries < 80 && !hasSyncOff; tries++) {
+      hasSyncOff = (jsonOrNothing(monthFileA)?.sessions ?? []).some(s => Object.hasOwn(s.requests, 'm4-sync-off'));
+      if (!hasSyncOff) await wait(100);
+    }
+    same('with Automatic sync off, scheduled sweep still collects new request', [hasSyncOff, await a.run(`document.querySelector('#sync-switch')?.getAttribute('aria-checked')`)], [true, 'false']);
+    same('no page errors on Home A', a.pageErrors, []);
+
+    // Check 8: Quit during a live multi-batch sweep raises abort and exits promptly without waiting for remaining batches.
+    const bulkDir = join(homeA, '.claude/projects/-work-bulk');
+    mkdirSync(bulkDir, { recursive: true });
+    const bulkAt = Math.max(today, Date.now() - 2000);
+    for (let i = 0; i < 260; i++) {
+      const batchLines = [];
+      for (let j = 0; j < 25; j++) batchLines.push(JSON.stringify(reply(`bulk-${i}`, `b-${i}-${j}`, bulkAt, 'claude-haiku-4-5-20251001', 1000, 100, '/work/bulk')));
+      writeFileSync(join(bulkDir, `s-${i}.jsonl`), `${batchLines.join('\n')}\n`);
+    }
+    for (let tries = 0; tries < 160 && !(await a.exists('#sessions-collecting')); tries++) await wait(25);
+    const quitStart = Date.now();
+    await a.quit();
+    const quitMs = Date.now() - quitStart;
+    check(`Quit during a sweep returns promptly without waiting (${quitMs} ms)`, quitMs < 5000, { quitMs });
+  } finally { pipe1.clean(); }
+
+  // Check 7: unwritable / symlinked store home refuses verbatim on both pages and leaves consent off.
+  const currentSettings = jsonOrNothing(settingsPath) ?? {};
+  writeFileSync(settingsPath, JSON.stringify({ ...currentSettings, home: { mode: 'custom', path: homeB } }));
+  const b = await launch(data, [], real);
+  await b.click('#nav-sessions');
+  for (let tries = 0; tries < 100 && !(await b.exists('#sessions-keep-start')); tries++) await wait(50);
+  await b.click('#sessions-keep-start');
+  for (let tries = 0; tries < 100 && !(await b.exists('#sessions-keep-result')); tries++) await wait(50);
+  same('refused home on Sessions shows record refusal verbatim, leaves consent off and outside folder empty',
+    [await b.text('#sessions-keep-result'), await b.exists('#sessions-keep-start'), Object.hasOwn(jsonOrNothing(settingsPath)?.keepSessionCosts ?? {}, canonB), readdirSync(outside)],
+    ['The sessions folder is a link.', true, false, []]);
+  await b.click('#nav-settings');
+  for (let tries = 0; tries < 100 && !(await b.exists('#keep-session-costs')); tries++) await wait(50);
+  await b.click('#keep-session-costs');
+  for (let tries = 0; tries < 100 && !(await b.exists('#setting-session-costs-message')); tries++) await wait(50);
+  same('refused home in Settings shows record refusal verbatim and leaves switch Off',
+    [await b.text('#setting-session-costs-message'), await b.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`)],
+    ['The sessions folder is a link.', 'false']);
+
+  // Fix 3 & Item 4: mend the refused store, turn On in Settings (announces keeping), then Off; old refusal must not come back on Sessions.
+  rmSync(join(homeB, '.central-knot/sessions'));
+  await b.click('#keep-session-costs');
+  for (let tries = 0; tries < 100 && (await b.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`)) !== 'true'; tries++) await wait(50);
+  same('turning On in Settings announces keeping in status bar', await b.text('#announcement'), 'Keeping session costs for this home.');
+  if (shots) {
+    await sizeTo(b, 1316, 820);
+    if (await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
+    await b.run(`document.querySelector('#setting-session-costs')?.scrollIntoView({ block: 'center' })`);
+    for (const look of ['light', 'dark']) {
+      await b.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+      await wait(150);
+      await b.shot(`settings-row-on-result-${look}-1316`);
+    }
+    await b.send('Emulation.setEmulatedMedia', { features: [] });
+    await fullSize(b);
+  }
+  await b.click('#keep-session-costs');
+  for (let tries = 0; tries < 100 && (await b.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`)) !== 'false'; tries++) await wait(50);
+  await b.click('#nav-sessions');
+  for (let tries = 0; tries < 100 && !(await b.exists('#sessions-keep-start')); tries++) await wait(50);
+  same('after mending store and turning On then Off in Settings, old refusal does not return on Sessions',
+    await b.exists('#sessions-keep-result'), false);
+  same('no page errors on Home B', b.pageErrors, []);
+  await b.quit();
+}
+
+/**
  * Word search in the app as built (search.ts, searchdocs.ts): main indexes the Library with SQLite's own full-text search from
  * each view it hands over, and answers the page beside its queue. On a made-up home, through the page's own call: the name
  * weighted above the text (bm25()), an excerpt of the text (snippet()), another form of a word (porter), a word only the
@@ -12197,6 +12480,348 @@ async function libraryFlow() {
 }
 
 /**
+ * Select on the Library (selection.ts, drawn by matrix.ts selectControl, selectBar, tickOf and headingTick) on a home of eleven
+ * skills in Central Knot, a found skill whose copies differ (clash), one a plugin alone brings (zulu) and an agent whose kind's
+ * record stops writes (scout): the word Select and nothing else until it is clicked; ticks in the switches' place, a row's click,
+ * a Shift-click's run across headings, a heading's tick; Find hiding ticks and a Delete of the one listed; the question over
+ * thirteen, its rows left and why, Cancel; the Delete of ten, its one result that stays, and its one Undo, byte for byte; what
+ * ends the mode (Done, Escape, another page, the Files view), a redraw between a press and its release, the keyboard; the
+ * toolbar's lines with and without Select, and nothing cut off. With --shots, the four states at 860, 1316 and 2560 wide.
+ */
+async function selectFlow() {
+  const home = join(scratch, 'home-select'), claude = join(home, '.claude/skills'), copilot = join(home, '.copilot/skills');
+  const names = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet'];
+  for (const name of [...names, 'kilo']) skill(claude, name);
+  skill(claude, 'clash', text('clash', 'One way.'));
+  skill(copilot, 'clash', text('clash', 'Another way.'));
+  writeClaudeInstall(home, 'local-market', 'kit', '1.0.0', { 'skills/zulu/SKILL.md': text('zulu', 'Plugin skill.') });
+  mkdirSync(join(home, '.claude/agents'), { recursive: true });
+  writeFileSync(join(home, '.claude/agents/scout.md'), '---\nname: scout\ndescription: The scout agent.\n---\n\nYou scout.\n');
+  toolClis(home);
+  // History kept for 7 days: what the question says, from the start, with History never opened.
+  mkdirSync(join(scratch, 'select-data'), { recursive: true });
+  writeFileSync(join(scratch, 'select-data/app-settings.json'), JSON.stringify({ historyDays: 7 }));
+  const a = await launch(join(scratch, 'select-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex' });
+  await a.click('#nav-overview');
+  await a.click('#setup-yes');
+  for (let tries = 0; tries < 100 && !(await a.exists('#walk-skip')); tries++) await wait(100);
+  await a.click('#walk-skip');
+  // The agents' record damaged: its kind stops writes, and scout can't be deleted.
+  writeFileSync(join(home, '.central-knot/agents.json'), '{');
+  await a.click('#header-refresh');
+  await openKind(a, 'all');
+  // zulu's row is its plugin's own, keyed by the plugin: its key as drawn.
+  const zulu = await a.run(`[...document.querySelectorAll('.ov-plugin-row')].find(row => row.textContent.includes('zulu')).dataset.key`);
+  // A plugin's own row's tick is led by plugin- (matrix.ts selectId).
+  const id = (key, kind = 'skills') => (key === 'zulu' ? zulu : rowPart('', kind, key)), tick = (key, kind = 'skills') => `[id="tick-${key === 'zulu' ? 'plugin-' : ''}${id(key, kind)}"]`;
+  const word = () => a.text('#library-select .band-stack > :not(.band-unshown)');
+  const bar = () => a.run(`[...document.querySelectorAll('#select-bar > :not(.band-unshown) > *')].map(part => part.textContent.trim()).filter(Boolean)`);
+  const ticked = () => a.all('.ov-row.row-ticked', 'e.dataset.key');
+  const top = key => a.run(`Math.round(document.querySelector('.ov-row[data-key="${id(key)}"]').getBoundingClientRect().top)`);
+  const shiftClick = selector => a.run(`document.querySelector(${JSON.stringify(selector)}).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true }))`);
+  const done = async () => { for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  const roots = ['.claude/skills', '.copilot/skills', '.codex/skills', '.agents/skills'].filter(root => existsSync(join(home, root)));
+  const folders = () => Object.fromEntries(roots.map(root => [root, tree(join(home, root))]));
+  const inTools = name => roots.filter(root => existsSync(join(home, root, name)));
+  const sidebarOpen = async open => { if (await a.run(`document.body.classList.contains('rail')`) === open) await a.click('#sidebar-toggle'); };
+  const pictures = async name => {
+    if (!shots) return;
+    const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+    for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100);
+    for (const [width, height, open, dark] of [[...SMALLEST, false], [...SMALLEST, true], [1316, 819, false], [1316, 819, true], [1316, 819, true, true], [...SMALLEST, true, true], [2560, 1440, true]]) {
+      await sizeTo(a, width, height); await sidebarOpen(open); await theme(dark ? 'dark' : 'light');
+      await a.shot(`select-${name}-${width}${open ? '' : '-rail'}${dark ? '-dark' : ''}`);
+    }
+    await theme('light'); await sidebarOpen(true); await fullSize(a);
+  };
+  // 1. One word on the toolbar, and nothing else of it until it is clicked.
+  same('the Library has Select on its toolbar, and no bar and no tick until it is clicked',
+    [await word(), await a.exists('#select-bar'), await a.exists('.ov [role="checkbox"]')], ['Select', false, false]);
+  same('From’s and Sort’s menus have nothing of Select’s bar: no padding, no line under them, as on next',
+    await a.run(`[...document.querySelectorAll('.ov-page .toolbar .select')].map(each => { const look = getComputedStyle(each); return [look.paddingLeft, look.paddingRight, look.borderBottomWidth]; })`), [['0px', '0px', '0px'], ['0px', '0px', '0px']]);
+  await pictures('off');
+  // 13. The toolbar's lines with Select and without it (hidden by a rule a redraw keeps), where it fits on a line it already has.
+  const toolbarLines = () => a.run(`(() => { const middles = [...document.querySelector('.ov-page .toolbar').children].filter(part => part.offsetWidth).map(part => { const box = part.getBoundingClientRect(); return (box.top + box.bottom) / 2; }).sort((x, y) => x - y);
+    return middles.filter((middle, index) => !index || middle - middles[index - 1] > 8).length; })()`);
+  const linesWithout = async () => {
+    await a.run(`(sheet => { window.ckHide = sheet.insertRule('#library-select { display: none !important; }', sheet.cssRules.length); window.dispatchEvent(new Event('focus')); })(document.styleSheets[0])`);
+    await a.settle();
+    const lines = await toolbarLines();
+    await a.run(`document.styleSheets[0].deleteRule(window.ckHide); window.dispatchEvent(new Event('focus'))`);
+    await a.settle();
+    return lines;
+  };
+  const measured = {};
+  for (const [width, height, open] of [[860, 560, true], [860, 560, false], [1280, 800, true], [1316, 819, true], [1316, 819, false]]) {
+    await sizeTo(a, width, height); await sidebarOpen(open);
+    measured[`${width}×${height}${open ? '' : ' rail'}`] = [await linesWithout(), await toolbarLines()];
+  }
+  await sidebarOpen(true); await fullSize(a);
+  console.log(`selectFlow: the toolbar's lines without Select, then with it: ${JSON.stringify(measured)}`);
+  same('at the owner’s window (1316×819, the sidebar folded and open), Select adds no line to the toolbar', [measured['1316×819 rail'][1] - measured['1316×819 rail'][0], measured['1316×819'][1] - measured['1316×819'][0]], [0, 0]);
+  // 2. In the mode: Done in Select's width, the bar, a tick in each switch's place.
+  const width = () => a.run(`document.getElementById('library-select').offsetWidth`), selectWidth = await width();
+  await a.click('#library-select');
+  same('Select reads Done, as wide; the bar shows, Delete… off with nothing ticked; each row has a tick and no switch',
+    [await word(), await width(), await bar(), await a.run(`document.getElementById('select-delete').disabled`), await a.exists(tick('alpha')), await a.exists(tick('zulu')), await a.exists('.ov .switch, .ov .add-item')],
+    ['Done', selectWidth, ['Delete…'], true, true, true, false]);
+  const record = () => readNow(join(home, '.central-knot/skills.json')), was = { record: record(), bravo: await top('bravo') };
+  await a.click(`.ov-row[data-key="${id('alpha')}"] .ov-name`);
+  same('a click on a row ticks it, and flips nothing: the bar counts it, no row moved, nothing written',
+    [await ticked(), await bar(), await top('bravo'), record() === was.record], [[id('alpha')], ['1 selected', 'Delete…'], was.bravo, true]);
+  await a.click(`#${rowPart('open', 'skills', 'bravo')}`);
+  same('the chevron opens a row and ticks nothing', [await a.all('.ov-row[aria-expanded="true"]', 'e.dataset.key'), await ticked()], [[id('bravo')], [id('alpha')]]);
+  await a.click(`#${rowPart('open', 'skills', 'bravo')}`);
+  // 3. Shift-click: the run as listed, from clash under Found to zulu under Only through a plugin.
+  await a.click(tick('india'));
+  await a.click(tick('clash'));
+  same('three ticked, one of which can’t be deleted: the bar says so beside the count, and Delete… has no number', await bar(), ['3 selected', '1 can’t be deleted ›', 'Delete…']);
+  await pictures('three');
+  await shiftClick(`.ov-row[data-key="${zulu}"] .ov-name`);
+  await a.settle();
+  same('a Shift-click ticks the run between two rows as listed, across a heading', await ticked(), [id('alpha'), id('india'), id('clash'), id('scout', 'agents'), id('zulu')]);
+  // 4. A heading's tick.
+  same('with some of its rows ticked, On’s tick is mixed', await a.run(`document.getElementById('tick-heading-on').getAttribute('aria-checked')`), 'mixed');
+  await a.click('#tick-heading-on');
+  same('On’s tick ticks every row under it', [await a.run(`document.getElementById('tick-heading-on').getAttribute('aria-checked')`), (await ticked()).length], ['true', 14]);
+  // 5. Find narrows: the bar counts the rows listed; cleared, the ticks are back; a Delete takes the listed row alone.
+  const find = async text => { await a.run(`(i => { i.value = ${JSON.stringify(text)}; i.dispatchEvent(new Event('input', { bubbles: true })); })(document.querySelector('#find'))`); await a.settle(); };
+  await find('kilo');
+  for (let tries = 0; tries < 50 && (await a.all('.ov-row[data-key]', 'e.dataset.key')).length !== 1; tries++) await wait(100);
+  same('Find leaves kilo: the bar counts one', await bar(), ['1 selected', 'Delete…']);
+  await find('');
+  same('Find cleared: every tick is back', (await ticked()).length, 14);
+  await find('kilo');
+  for (let tries = 0; tries < 50 && (await a.all('.ov-row[data-key]', 'e.dataset.key')).length !== 1; tries++) await wait(100);
+  await a.click('#select-delete');
+  same('its question is about the one row listed', (await bar())[0], 'Delete 1 from every tool and Central Knot? History can restore it for 7 days.');
+  const placed = names.map(inTools);
+  await a.click('#select-delete-now');
+  await done();
+  same('Delete takes kilo alone, the rows Find hid stay in the tools, and the mode ends',
+    [inTools('kilo'), names.map(inTools), await word(), await a.exists('#select-bar')], [[], placed, 'Select', false]);
+  check('kilo was in the tools, as the others are', placed.every(where => where.length >= 2), placed);
+  await find('');
+  // 6. Thirteen ticked: ten can be deleted, and a found skill, a plugin's and a stopped kind's can't.
+  await a.click('#library-select');
+  same('no tick on a heading none of whose rows can be deleted: Found, Only through a plugin', [await a.exists('#tick-heading-on'), await a.exists('#tick-heading-found'), await a.exists('#tick-heading-plugins')], [true, false, false]);
+  await a.click('#tick-heading-on');
+  for (const [key, kind] of [['clash'], ['scout', 'agents'], ['zulu']]) await a.click(tick(key, kind));
+  same('thirteen ticked: the bar says how many can’t be deleted', await bar(), ['13 selected', '3 can’t be deleted ›', 'Delete…']);
+  const before = folders();
+  const rowTop = () => top('alpha');
+  const bare = await rowTop();
+  await a.click('#select-delete');
+  same('the question, in the bar’s place, the focus on Cancel; no row moved', [await bar(), await a.run('document.activeElement?.id'), await rowTop()],
+    [['Delete 10 from every tool and Central Knot? History can restore them for 7 days. 3 can’t be deleted ›', 'Cancel', 'Delete 10'], 'select-cancel', bare]);
+  await a.click('#select-why');
+  same('the list opens over the rows: no row moved', await rowTop(), bare);
+  same('“3 can’t be deleted” names each with its reason', await a.all('#select-why-list p', 'e.textContent'),
+    ['clash: not in Central Knot', 'scout: the agents record is damaged', 'zulu: Only through a plugin']);
+  await pictures('question');
+  await a.click('#select-why');
+  await a.click('#select-cancel');
+  same('Cancel: the bar again, the ticks kept, nothing changed', [await bar(), (await ticked()).length, folders()], [['13 selected', '3 can’t be deleted ›', 'Delete…'], 13, before]);
+  // 7. Delete 10: ten leave every tool and the page; one result, which stays; the mode ends.
+  await a.click('#select-delete');
+  await a.click('#select-delete-now');
+  await done();
+  same('ten leave every tool and the page, one result, the mode ended',
+    [names.filter(name => inTools(name).length), await a.text('#header [data-outcome] .band-text'), await a.exists('#outcome-undo'), await word(), await a.exists('.ov [role="checkbox"]')],
+    [[], 'Deleted 10 skills: alpha, bravo, charlie and 7 more. 3 not deleted.', true, 'Select', false]);
+  same('none of the ten is listed', (await a.all('.ov-row[data-key]', 'e.dataset.key')).filter(key => names.some(name => key === id(name))), []);
+  await pictures('result');
+  await wait(FADE_WAIT);
+  same('the result stays past the time a result goes by itself', await a.exists('#outcome-undo'), true);
+  // 8. Undo: all ten back, each tool's copy as before.
+  await a.click('#outcome-undo');
+  await done();
+  same('one Undo puts the ten back in every tool, byte for byte, On as they were', [folders(), names.map(name => JSON.parse(record()).items[name]?.on)], [before, names.map(() => true)]);
+  // 10. What ends the mode: Done, Escape, another page, the Files view; each clears the ticks.
+  const ends = async (how, act) => { await a.click('#library-select'); await a.click(tick('alpha')); await act(); same(`${how} ends the mode`, [await word(), await a.exists('#select-bar')], ['Select', false]); };
+  await ends('Done', () => a.click('#library-select'));
+  await ends('Escape', () => a.press('Escape'));
+  await ends('another page', async () => { await a.click('#nav-overview'); await openKind(a, 'all'); });
+  await ends('the Files view', async () => { await a.click(`#${rowPart('open', 'skills', 'alpha')}`); await a.click(`#${rowPart('files', 'skills', 'alpha')}`); await a.click('#files-back'); });
+  await a.click('#library-select');
+  same('Select again starts with nothing ticked', await ticked(), []);
+  // Escape in Find with text clears it and keeps the mode; with Delete's question open it closes the question first.
+  await a.click(tick('alpha'));
+  await find('bravo');
+  await a.run(`document.getElementById('find').focus()`);
+  await a.press('Escape');
+  same('Escape in Find clears it, the mode and its tick kept', [await a.run(`document.getElementById('find').value`), await word(), await ticked()], ['', 'Done', [id('alpha')]]);
+  await a.click('#select-delete');
+  await a.press('Escape');
+  same('Escape with the question open closes it, the mode kept', [(await bar())[0], await word()], ['1 selected', 'Done']);
+  // 11. A redraw keeps the ticks, and a press on a tick that a redraw replaces before its release, with Shift, ticks the run.
+  await a.click('#collect-usage');
+  for (let tries = 0; tries < 100 && await a.exists('#collect-usage:disabled'); tries++) await wait(100);
+  same('usage collected: the ticks are kept', await ticked(), [id('alpha')]);
+  const at = await a.run(`(box => [box.x + box.width / 2, box.y + box.height / 2])(document.querySelector('${tick('delta')}').getBoundingClientRect())`);
+  await a.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: at[0], y: at[1], button: 'left', buttons: 1, clickCount: 1, modifiers: 8 });
+  await a.run(`window.dispatchEvent(new Event('focus'))`);
+  await a.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: at[0], y: at[1], button: 'left', buttons: 0, clickCount: 1, modifiers: 8 });
+  await a.settle();
+  same('a Shift-click a redraw split ticks the run', await ticked(), [id('alpha'), id('bravo'), id('charlie'), id('delta')]);
+  // 12. The keyboard: a tick takes the focus, Space ticks, Escape leaves.
+  await a.run(`document.querySelector('${tick('echo')}').focus()`);
+  await a.press(' ', 'Space');
+  same('Space on a tick ticks its row', (await ticked()).includes(id('echo')), true);
+  await a.press('Escape');
+  same('Escape leaves the mode', await word(), 'Select');
+  // 13. Nothing cut off at 860 with the sidebar folded and open, in the mode and with the question open.
+  await sizeTo(a, ...SMALLEST); await sidebarOpen(true);
+  await a.click('#library-select');
+  const firstRow = () => a.run(`Math.round(document.querySelector('.ov-row[data-key]').getBoundingClientRect().top)`), selecting = await firstRow();
+  await a.click('#tick-heading-on');
+  await a.click(tick('clash'));
+  const ticking = await firstRow();
+  await a.click('#select-delete');
+  same('at 860 wide, from Select’s click on, no row moves: a tick of one that can’t be deleted, the question on two lines', [await a.run(`document.querySelector('#select-bar > :not(.band-unshown) .select-text').offsetHeight > 20`), ticking, await firstRow()], [true, selecting, selecting]);
+  await a.click('#select-cancel');
+  await fullSize(a);
+  await fitsAtMinimum(a, 'the Library selecting');
+  await a.click('#select-delete');
+  await fitsAtMinimum(a, 'the Library asking a Delete of many');
+  await a.click('#select-cancel');
+  await a.click('#library-select');
+  // No Select on a tool's tab.
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-skills');
+  same('no Select on a tool’s tab', await a.exists('#library-select'), false);
+  same('no page errors, Select', a.pageErrors, []);
+  await a.quit();
+
+  // A server of his named as a plugin's server's row is keyed (kit@local-market/search) beside that plugin's server search: a
+  // tick on the plugin's row ticks it alone, and Delete has nothing to take.
+  const keyed = join(scratch, 'home-select-key');
+  mkdirSync(keyed, { recursive: true });
+  writeFileSync(join(keyed, '.claude.json'), `${JSON.stringify({ mcpServers: { 'kit@local-market/search': { type: 'http', url: 'https://own.example.test/mcp' } } }, null, 2)}\n`);
+  writeClaudeInstall(keyed, 'local-market', 'kit', '1.0.0', { '.mcp.json': JSON.stringify({ mcpServers: { search: { type: 'http', url: 'https://plugin.example.test/mcp' } } }) });
+  toolClis(keyed);
+  const k = await launch(join(scratch, 'select-key-data'), flag('--electron') ? ['--as-released'] : [], keyed, { CK_TEST_HOME_ONLY: 'claude,copilot,codex' });
+  await k.click('#nav-overview');
+  await k.click('#setup-yes');
+  await openKind(k, 'all');
+  for (let tries = 0; tries < 100 && (await k.all('.ov-row[data-key]', 'e.dataset.key')).length < 2; tries++) await wait(100);
+  await k.click('#library-select');
+  await k.click('.ov-plugin-row .ov-name');
+  same('a tick on the plugin’s row ticks it alone, not his server whose name is that row’s key; Delete has nothing to take',
+    [await k.all('.ov-row.row-ticked', 'e.classList.contains("ov-plugin-row") ? "plugin" : "his"'), await k.run(`document.getElementById('select-delete').disabled`)], [['plugin'], true]);
+  same('no page errors, one key for two rows', k.pageErrors, []);
+  await k.quit();
+
+  // Select folds with the toolbar's controls (bar-icons): in a home as libraryFlow's toolbar home is, at 1316 with the sidebar open
+  // (its bar one line at the icons step and past it), it is its icon, named Select, and enters the mode; Done is a word at every
+  // width. Select is the word wherever the bar is looser than the icons step.
+  const L = homeWith('select-light');
+  for (const name of ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta', 'iota', 'kappa', 'lambda', 'mu']) skill(L.claude, name);
+  mkdirSync(L.copilot, { recursive: true });
+  mkdirSync(join(L.home, '.claude/agents'), { recursive: true });
+  writeFileSync(join(L.home, '.claude/agents/checker.md'), '---\nname: checker\ndescription: The checker agent.\n---\n\nYou check.\n');
+  const l = await launch(L.data, [], L.real);
+  await l.click('#nav-overview');
+  await l.click('#setup-yes');
+  for (let tries = 0; tries < 100 && !(await l.exists(`#${rowPart('switch', 'skills', 'beta')}`)); tries++) { await openKind(l, 'all'); await wait(100); }
+  const lightOpen = async open => { if (await l.run(`document.body.classList.contains('rail')`) === open) await l.click('#sidebar-toggle'); };
+  // Select (or Done) as drawn: its icon shown, its word shown, its tooltip; the toolbar's fold steps and its lines.
+  const selectNow = () => l.run(`(b => { const shown = e => !!e && getComputedStyle(e).display !== 'none', bar = document.querySelector('#main .toolbar');
+    const middles = [...bar.children].filter(part => part.offsetWidth).map(part => { const box = part.getBoundingClientRect(); return (box.top + box.bottom) / 2; }).sort((x, y) => x - y);
+    return { icon: shown(b.querySelector('svg')), word: shown(b.querySelector('.btn-label')), title: b.title, steps: [...bar.classList].filter(c => c.startsWith('bar-')), lines: middles.filter((m, i) => !i || m - middles[i - 1] > 8).length,
+      content: document.getElementById('main').clientWidth }; })(document.getElementById('library-select'))`);
+  const lightTheme = value => l.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+  const lightShots = async name => {
+    if (!shots) return;
+    for (let tries = 0; tries < 300 && await l.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100);
+    for (const look of ['light', 'dark']) { await lightTheme(look); await l.settle(); await l.shot(`select-${name}-1316${look === 'dark' ? '-dark' : ''}`); }
+    await lightTheme('light');
+  };
+  await sizeTo(l, 1316, 819); await lightOpen(true);
+  const folded = await selectNow();
+  console.log(`selectFlow: libraryFlow's toolbar home at 1316×819, the sidebar open, not selecting: ${JSON.stringify(folded)}`);
+  same('at 1316 with the sidebar open, past the icons step, Select is its icon, named Select, and the toolbar one line', [folded.icon, folded.word, folded.title, folded.steps.includes('bar-icons'), folded.lines], [true, false, 'Select', true, 1]);
+  await lightShots('light-off');
+  await l.click('#library-select');
+  for (const name of ['alpha', 'gamma', 'zeta']) await l.click(`#${rowPart('tick', 'skills', name)}`);
+  const selectingThere = await selectNow();
+  console.log(`selectFlow: the same, selecting: ${JSON.stringify(selectingThere)}`);
+  same('its click enters the mode, and Done is a word', [await l.exists('#select-bar'), selectingThere.word, selectingThere.icon, await l.text('#library-select .band-stack > :not(.band-unshown)')], [true, true, false, 'Done']);
+  await lightShots('light-three');
+  await l.click('#library-select');
+  for (const [width, height, open] of [[1316, 819, false], [2560, 1440, true]]) {
+    await sizeTo(l, width, height); await lightOpen(open);
+    const there = await selectNow();
+    console.log(`selectFlow: libraryFlow's toolbar home at ${width}×${height}${open ? '' : ' on its rail'}: ${JSON.stringify(there)}`);
+    same(`at ${width}×${height}${open ? '' : ' on its rail'}, Select is its word unless the bar is at the icons step, then its icon`, [there.word, there.icon], [!there.steps.includes('bar-icons'), there.steps.includes('bar-icons')]);
+  }
+  same('at 2560 Select is its word', (await selectNow()).word, true);
+  await fullSize(l);
+  same('no page errors, Select folded', l.pageErrors, []);
+  await l.quit();
+
+  // Whenever the Library's rows are not what is drawn, the mode ends: an empty Library (the one item deleted by its own row's
+  // Delete, then its Undo), and the held screen (another build installed, then gone).
+  const solo = join(scratch, 'home-select-solo'), soloMac = standInMac(join(scratch, 'mac-select-solo'));
+  skill(join(solo, '.claude/skills'), 'solo');
+  toolClis(solo);
+  const o = await launch(join(scratch, 'select-solo-data'), flag('--electron') ? ['--as-released'] : [], solo,
+    { CK_TEST_HOME_ONLY: 'claude,copilot,codex', CK_TEST_APPS: soloMac.root, CK_TEST_OWN_BUNDLE: join(soloMac.applications, 'Central Knot.app') });
+  await o.click('#nav-overview');
+  await o.click('#setup-yes');
+  for (let tries = 0; tries < 100 && !(await o.exists(`#${rowPart('switch', 'skills', 'solo')}`)); tries++) { await openKind(o, 'all'); await wait(100); }
+  const soloDone = async () => { for (let tries = 0; tries < 300 && await o.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await o.settle(); };
+  const soloMode = async () => [await o.text('#library-select .band-stack > :not(.band-unshown)'), await o.exists('#select-bar'), await o.exists('.ov-row.row-ticked')];
+  // solo ticked and the question open, from wherever the page is.
+  const asking = async () => {
+    if ((await soloMode())[0] === 'Select') await o.click('#library-select');
+    if (!(await o.exists('.ov-row.row-ticked'))) await o.click(`#${rowPart('tick', 'skills', 'solo')}`);
+    if (await o.exists('#select-delete')) await o.click('#select-delete');
+  };
+  await asking();
+  await o.click(`#${rowPart('open', 'skills', 'solo')}`);
+  await o.click(`#${rowPart('delete', 'skills', 'solo')}`);
+  await o.click(`#${rowPart('delete-confirm', 'skills', 'solo')}`);
+  await soloDone();
+  check('its own Delete leaves the Library empty: no list drawn', !(await o.exists('.ov-row[data-key]')));
+  await o.click('#outcome-undo');
+  await soloDone();
+  same('its Undo brings the row back, and no mode, tick or question with it', [await o.exists(`#${rowPart('switch', 'skills', 'solo')}`), ...await soloMode()], [true, 'Select', false, false]);
+  await asking();
+  const acme = soloMac.bundle(soloMac.applications, 'Acme Knot', 'com.centralknot.custom.acme');
+  await o.click('#header-refresh');
+  for (let tries = 0; tries < 100 && !(await o.exists('#held')); tries++) await wait(100);
+  check('another build installed: the held screen takes the Library’s place', await o.exists('#held'));
+  rmSync(acme, { recursive: true, force: true });
+  await o.click('#header-refresh');
+  for (let tries = 0; tries < 100 && (await o.exists('#held') || !(await o.exists('.ov-row[data-key]'))); tries++) await wait(100);
+  same('that build gone: the Library is back, and no mode, tick or question with it', [await o.exists('#held'), ...await soloMode()], [false, 'Select', false, false]);
+  same('no page errors, the Library away while asking', o.pageErrors, []);
+  await o.quit();
+
+  // Another home taken while asking ends the mode where the home changes: a home with a tool and nothing in it (its Library drawn
+  // without a list), then back. Two homes to switch between: a development run's Practice copy and this computer's home.
+  if (!flag('--electron')) { console.log('selectFlow: another home while asking: skipped (the packaged app has no Practice copy to switch to)'); return; }
+  const empty = join(scratch, 'home-select-empty');
+  mkdirSync(join(empty, '.claude/skills'), { recursive: true });
+  toolClis(empty);
+  const p = await launch(join(scratch, 'select-practice-data'), [], empty, { CK_TEST_HOME_ONLY: 'claude,copilot,codex' });
+  await openKind(p, 'all');
+  await p.click('#library-select');
+  await p.click('.ov-row:not(.ov-plugin-row)[data-key] .ov-name');
+  await p.click('#select-delete');
+  await p.click('#home-actual');
+  for (let tries = 0; tries < 100 && (await p.text('#home-label')) === 'Practice copy'; tries++) await wait(100);
+  check('this computer’s home, with nothing in it, shows no list', !(await p.exists('.ov-row[data-key]')));
+  await p.click('#home-fixture');
+  for (let tries = 0; tries < 100 && (await p.text('#home-label')) !== 'Practice copy'; tries++) await wait(100);
+  same('back on the Practice copy: no mode, no tick, no question', [await p.text('#library-select .band-stack > :not(.band-unshown)'), await p.exists('#select-bar'), await p.exists('.ov-row.row-ticked')], ['Select', false, false]);
+  same('no page errors, another home while asking', p.pageErrors, []);
+  await p.quit();
+}
+
+/**
  * The strip on each tool's card that names the hooks and extensions that can add text to its sessions (sessionhooks.ts), on a
  * made-up home. Claude Code: a file with an import (so the files read with it show), the base applied (so the base strip and
  * Earlier versions show), your own hook, and a dozen plugins with hooks: release-helper's with arguments and one very long
@@ -12623,6 +13248,7 @@ async function hookRunFlow() {
   putScript('bin/copilot-plain.sh', '#!/bin/sh\necho "plain text ignored by copilot"\n');
   const claudeSettings = join(home, '.claude/settings.json');
   const initialClaudeJson = JSON.stringify({
+    pluginConfigs: { [`release-helper@${marketName}`]: { options: { team_note: 'Tuesday-releases' } } },
     hooks: {
       SessionStart: [{
         matcher: 'startup',
@@ -12652,13 +13278,27 @@ async function hookRunFlow() {
   mkdirSync(dirname(claudeSettings), { recursive: true });
   writeFileSync(claudeSettings, initialClaudeJson);
   writeFileSync(join(home, '.claude/CLAUDE.md'), '# Workspace rules\n- Keep things simple.\n');
+  const pluginMarker = join(home, 'plugin-marker.txt');
+  const claudePluginRoot = join(home, '.claude/plugins/cache', marketName, 'release-helper/0.4.1');
+  const claudePluginData = join(home, '.claude/plugins/data', `release-helper-${marketName}`);
   writeClaudeInstall(home, marketName, 'release-helper', '0.4.1', {
-    'hooks/hooks.json': JSON.stringify({ hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: 'echo plugin-hook' }] }] } }),
+    '.claude-plugin/plugin.json': JSON.stringify({ name: 'release-helper', version: '0.4.1', userConfig: { team_note: { description: 'Release note' } } }),
+    'hooks/hooks.json': JSON.stringify({ hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: '${CLAUDE_PLUGIN_ROOT}/hooks/hello.sh' }] }] } }),
+    'hooks/hello.sh': `#!/bin/sh\necho ran >> ${JSON.stringify(pluginMarker)}\nprintf 'root=%s\\ndata=%s\\nnote=%s\\n' "$CLAUDE_PLUGIN_ROOT" "$CLAUDE_PLUGIN_DATA" "$CLAUDE_PLUGIN_OPTION_TEAM_NOTE"\n`,
   });
+  chmodSync(join(claudePluginRoot, 'hooks/hello.sh'), 0o755);
   writeFileSync(join(home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ [marketName]: { source: { source: 'git', url: market } } }));
   mkdirSync(join(home, '.codex'), { recursive: true });
   writeFileSync(join(home, '.codex/AGENTS.md'), '# Codex rules\n');
-  writeFileSync(join(home, '.codex/config.toml'), '[features]\ncodex_hooks = false\n\n[[hooks.SessionStart]]\nmatcher = "startup"\n\n[[hooks.SessionStart.hooks]]\ntype = "command"\ncommand = "~/bin/codex-hook.sh"\n');
+  const codexPluginRoot = join(home, '.codex/plugins/cache', marketName, 'release-helper/0.4.1');
+  const codexPluginData = join(home, '.codex/plugins/data', `release-helper-${marketName}`);
+  mkdirSync(join(codexPluginRoot, 'hooks'), { recursive: true });
+  writeFileSync(join(codexPluginRoot, 'hooks/hooks.json'), JSON.stringify({
+    hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: '${PLUGIN_ROOT}/hooks/codex-hello.sh' }] }] },
+  }));
+  writeFileSync(join(codexPluginRoot, 'hooks/codex-hello.sh'), '#!/bin/sh\nprintf "codex-root=%s\\ncodex-data=%s\\n" "$PLUGIN_ROOT" "$PLUGIN_DATA"\n', { mode: 0o755 });
+  const codexConfig = join(home, '.codex/config.toml');
+  writeFileSync(codexConfig, `[features]\ncodex_hooks = false\n\n[plugins."release-helper@${marketName}"]\nenabled = true\n\n[[hooks.SessionStart]]\nmatcher = "startup"\n\n[[hooks.SessionStart.hooks]]\ntype = "command"\ncommand = "~/bin/codex-hook.sh"\n`);
   mkdirSync(join(home, '.copilot/hooks'), { recursive: true });
   writeFileSync(join(home, '.copilot/hooks/prompt-only.json'), JSON.stringify({ version: 1, hooks: { userPromptSubmitted: [{ type: 'command', bash: './prompt-only.sh' }] } }));
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'actual' }, closeExplained: true }));
@@ -12706,7 +13346,7 @@ async function hookRunFlow() {
   await steady();
   await waitFor(`!!document.querySelector('#session-claude-cli')`);
   await redrawUnder(a, '#session-claude-cli .session-title');
-  same('nothing ran on opening Instructions, Refresh, or a redraw landing', markerCount(), 0);
+  same('nothing ran on opening Instructions, Refresh, or a redraw landing', [markerCount(), existsSync(pluginMarker)], [0, false]);
 
   // Check 3: standing line on runnable strips, none on non-runnable; Copilot prompt-only note; Codex T2.28 note; T1.23 once & <= 30 words.
   same('standing warning is on Claude Code and Codex strips and absent on Copilot CLI prompt-only strip',
@@ -12722,17 +13362,68 @@ async function hookRunFlow() {
   })()`);
   check('T1.23 info mark appears once on the page with exact wording and <= 30 words',
     helpInfo.count === 1 && helpInfo.id === 'session-hooks-info' && helpInfo.words <= 30
-    && helpInfo.card === 'Session-start and prompt command hooks; URL, MCP, project and organisation hooks aren’t listed. Run it runs in your home folder, or in the folder the hook names.', helpInfo);
-  const pluginRow = await rowOf('session-claude-cli', 'echo plugin-hook');
-  same('installed plugin hook row on Instructions has View source alone and no Run it', [!!pluginRow?.srcId, pluginRow?.runId], [true, null]);
+    && helpInfo.card === 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.', helpInfo);
+  const pluginRow = await rowOf('session-claude-cli', 'hello.sh');
+  const codexPluginRow = await rowOf('session-codex-cli', 'codex-hello.sh');
+  same('installed plugin hook rows on Instructions have Run it and View source for Claude Code and Codex',
+    [!!pluginRow?.srcId, !!pluginRow?.runId, !!codexPluginRow?.srcId, !!codexPluginRow?.runId],
+    [true, true, true, true]);
 
-  // Picture: before clicking Run it (860 sidebar open + 1316×820 sidebar open, light & dark) and T1.23 card open.
+  // Picture: before clicking Run it (860 sidebar open + 1316×820 sidebar open, light & dark), plugin row before, and T1.23 card open.
   await pictures('before', '#session-claude-cli', bothSizes);
+  await pictures('plugin-before', `#session-claude-cli .session-group:has(#${pluginRow.runId})`, bothSizes);
   if (shots) {
+    await sizeTo(a, 1316, 820);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    await a.run(`document.querySelector('#session-claude-cli')?.scrollIntoView({ block: 'start' })`);
+    await steady();
     await a.click('#session-hooks-info');
-    await pictures('t1-23-card', '#session-claude-cli');
+    await steady();
+    for (const scheme of ['light', 'dark']) {
+      await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] });
+      await steady();
+      await a.shot(`t1-23-card-1316x820-${scheme}`);
+    }
     await a.press('Escape');
+    await a.send('Emulation.setEmulatedMedia', { features: [] });
+    await fullSize(a);
   }
+
+  // Worked example 1 & 3 (plugin hook): Claude Code installed plugin hook runs with root, data (created on first use) and option, fits at 860 & 1316, then refuses once turned off.
+  same('Claude Code plugin data folder absent before first run', existsSync(claudePluginData), false);
+  const pluginRes = await runAndWait('session-claude-cli', 'hello.sh');
+  check('Claude Code plugin hook shows Would add with installed root, data path and option',
+    /^Would add run in ~, /.test(pluginRes) && pluginRes.includes(`root=${claudePluginRoot}`)
+    && pluginRes.includes(`data=${claudePluginData}`) && pluginRes.includes('note=Tuesday-releases'), pluginRes);
+  same('Claude Code plugin data folder created on first run', existsSync(claudePluginData), true);
+  for (const [w, h] of [[860, 560], [1316, 820]]) {
+    await sizeTo(a, w, h);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    await a.run(`document.getElementById(${JSON.stringify(pluginRow.runId)})?.closest('.session-hook')?.scrollIntoView({ block: 'start' })`);
+    await a.settle();
+    same(`plugin hook result fits without horizontal overflow at ${w}×${h} with sidebar open`,
+      await a.run(`(() => { const sc = document.getElementById('instructions-scroll'); return sc.scrollWidth <= sc.clientWidth + 1; })()`), true);
+  }
+  await fullSize(a);
+  await pictures('plugin-result', `#session-claude-cli .session-group:has(#${pluginRow.runId})`, bothSizes);
+  // Missing declared plugin option shows "Ran without some of the plugin’s options." note under the result.
+  const claudeManifest = join(claudePluginRoot, '.claude-plugin/plugin.json');
+  const initialManifest = readNow(claudeManifest);
+  writeFileSync(claudeManifest, JSON.stringify({ name: 'release-helper', version: '0.4.1', userConfig: { team_note: { description: 'Release note' }, extra_opt: { description: 'Extra option' } } }));
+  const pluginNoteRes = await runAndWait('session-claude-cli', 'hello.sh');
+  check('plugin hook with an unavailable declared option shows Ran without some of the plugin’s options. note',
+    /^Would add run in ~, /.test(pluginNoteRes) && pluginNoteRes.includes('Ran without some of the plugin’s options.'), pluginNoteRes);
+  await pictures('plugin-note', `#session-claude-cli .session-group:has(#${pluginRow.runId})`);
+  writeFileSync(claudeManifest, initialManifest);
+  const pluginCountAfterRun = readNow(pluginMarker).trim().split('\n').filter(Boolean).length;
+  writeFileSync(claudeSettings, JSON.stringify({ ...JSON.parse(initialClaudeJson), enabledPlugins: { [`release-helper@${marketName}`]: false } }, null, 2));
+  const pluginOffRes = await runAndWait('session-claude-cli', 'hello.sh');
+  check('turning the plugin off after page read refuses Run it and leaves no marker',
+    pluginOffRes.includes('Not run: release-helper is turned off in Claude Code.')
+    && readNow(pluginMarker).trim().split('\n').filter(Boolean).length === pluginCountAfterRun, pluginOffRes);
+  await pictures('plugin-refused', `#session-claude-cli .session-group:has(#${pluginRow.runId})`);
+  await a.run(`document.getElementById(${JSON.stringify(pluginRow.runId)})?.closest('.session-hook')?.querySelector('.hook-run button[aria-label="Close result"]')?.click()`);
+  writeFileSync(claudeSettings, initialClaudeJson);
 
   // Check 1 & 8 & page-stays-still: keyboard Enter runs two-lines.sh, keeps scrollTop when in view, Escape closes & refocuses Run it, Space runs again.
   const twoIds = await rowOf('session-claude-cli', 'two-lines.sh');
@@ -12908,11 +13599,21 @@ async function hookRunFlow() {
     /^Couldn’t start: \/nonexistent-ck-hook-bin-xyz not found\. tried at /.test(missingRes) && !missingRes.includes('Run again'), missingRes);
   await pictures('result-timeout-stopped-missing', `#session-claude-cli .session-hook:has(#${(await rowOf('session-claude-cli', 'slow-limit.sh')).runId})`);
 
-  // Check 2: Codex refusal (hooks turned off in config.toml).
+  // Check 2: Codex refusal (hooks turned off in config.toml), then Codex plugin hook runs with trust note and no data folder created.
   const codexRefused = await runAndWait('session-codex-cli', 'codex-hook.sh');
   check('Codex hooks-off refusal says Not run: + main’s words',
     codexRefused.includes('Not run: hooks are turned off in Codex’s settings ([features] codex_hooks = false).') && !codexRefused.includes('Run again'), codexRefused);
+  const codexPluginRefused = await runAndWait('session-codex-cli', 'codex-hello.sh');
+  check('Codex plugin hook also refuses when tool hooks are disabled',
+    codexPluginRefused.includes('Not run: hooks are turned off in Codex’s settings ([features] codex_hooks = false).'), codexPluginRefused);
   await pictures('result-codex-refused', '#session-codex-cli');
+  writeFileSync(codexConfig, `[features]\nhooks = true\n\n[plugins."release-helper@${marketName}"]\nenabled = true\n\n[[hooks.SessionStart]]\nmatcher = "startup"\n\n[[hooks.SessionStart.hooks]]\ntype = "command"\ncommand = "~/bin/codex-hook.sh"\n`);
+  const codexPluginRes = await runAndWait('session-codex-cli', 'codex-hello.sh');
+  check('Codex installed plugin hook runs with PLUGIN_ROOT, PLUGIN_DATA, trust note and no data folder created',
+    /^Would add run in ~, /.test(codexPluginRes) && codexPluginRes.includes('Codex adds it only once trusted in /hooks.')
+    && codexPluginRes.includes(`codex-root=${codexPluginRoot}`) && codexPluginRes.includes(`codex-data=${codexPluginData}`)
+    && !existsSync(codexPluginData), codexPluginRes);
+  await pictures('plugin-codex-result', '#session-codex-cli');
 
   // Check 7: duplicate command in two places gets two distinct ids; clicking low row brings result into view!
   const dupIds = await a.run(`[...document.querySelectorAll('#session-claude-cli .session-hook')]
@@ -12930,11 +13631,17 @@ async function hookRunFlow() {
       return head.top >= sc.top - 1 && head.bottom <= sc.bottom + 1; })()`), true);
   await fullSize(a);
 
-  // Check 2: Copilot CLI ignored output (add start hook, Refresh, run).
+  // Check 2 & Worked example 6: Copilot CLI own start hook runs (ignored plain stdout) while Copilot CLI installed plugin hook keeps View source alone.
+  const copilotPluginRoot = join(home, '.copilot/plugins/cache', marketName, 'release-helper/0.4.1');
+  mkdirSync(join(copilotPluginRoot, 'hooks'), { recursive: true });
+  writeFileSync(join(copilotPluginRoot, 'hooks/hooks.json'), JSON.stringify({ version: 1, hooks: { sessionStart: [{ type: 'command', bash: 'echo copilot-plugin-hook' }] } }));
+  writeFileSync(join(home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'release-helper', marketplace: marketName, version: '0.4.1', cache_path: copilotPluginRoot, enabled: true }] }));
   writeFileSync(join(home, '.copilot/hooks/start.json'), JSON.stringify({ version: 1, hooks: { sessionStart: [{ type: 'command', bash: '~/bin/copilot-plain.sh' }] } }));
   await a.click('#header-refresh');
   await steady();
   await waitFor(`!!document.querySelector('#session-copilot-cli button[data-hook-run]')`);
+  const copilotPluginRow = await rowOf('session-copilot-cli', 'copilot-plugin-hook');
+  same('Copilot CLI installed plugin hook keeps View source alone and no Run it', [!!copilotPluginRow?.srcId, copilotPluginRow?.runId], [true, null]);
   const copRes = await runAndWait('session-copilot-cli', 'copilot-plain.sh');
   check('Copilot CLI plain stdout shows ignored sentence with quiet meta and Show all it printed fold',
     /^Copilot CLI would ignore this: no top-level additionalContext\. run in ~, /.test(copRes) && copRes.includes('Show all it printed'), copRes);
@@ -13021,6 +13728,9 @@ async function hookRunFlow() {
   await waitFor(`!!document.querySelector('#session-claude-cli button[data-hook-run]')`);
   const tabRes = await runAndWait('session-claude-cli', 'two-lines.sh');
   check('tool’s Instructions tab runs hook and shows Would add', /^Would add run in ~, /.test(tabRes) && tabRes.includes('First line from hook'), tabRes);
+  const tabPluginRes = await runAndWait('session-claude-cli', 'hello.sh');
+  check('tool’s Instructions tab runs installed plugin hook and shows Would add',
+    /^Would add run in ~, /.test(tabPluginRes) && tabPluginRes.includes(`root=${claudePluginRoot}`) && tabPluginRes.includes('note=Tuesday-releases'), tabPluginRes);
   await pictures('tab-claude', '#session-claude-cli', bothSizes);
   await fitsAtMinimum(a, 'Claude Code Instructions tab with Run it result');
   await sizeTo(a, 1316, 820);
@@ -16008,8 +16718,8 @@ if (tool === 'claude') {
 }
 
 const groups = [
-  [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, sessionStripFlow, hookRunFlow, fromFlow, claudeWholeFlow],
-  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow, sessionsFlow],
+  [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, selectFlow, sessionStripFlow, hookRunFlow, fromFlow, claudeWholeFlow],
+  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow, sessionsFlow, keepSessionCostsFlow],
   [fewToolsFlow, openCodeFlow, antigravityFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, pluginRecordHoldsFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow, clickReadsFlow],
   [backFlow, backPlaceFlow, libraryLinesFlow, harnessFlow, manageFlow, arrivalFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, mcpSigninFlow, firstSetupFlow, crashFlow],
 ];

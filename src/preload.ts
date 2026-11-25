@@ -16,6 +16,8 @@ const api: DesktopApi = {
   agentVersion: (key, hash) => ipcRenderer.invoke('agents:version', key, hash),
   readUsage: home => ipcRenderer.invoke('usage:read', home),
   readSessions: (home, start, end, readId) => ipcRenderer.invoke('sessions:read', home, start, end, readId),
+  setKeepSessionCosts: (home, on) => ipcRenderer.invoke('sessions:keep', home, on),
+  onSessionCostsChanged: callback => { ipcRenderer.on('session-costs:changed', (_event, view) => callback(view)); },
   checkSignin: (tool, home, names) => ipcRenderer.invoke('mcp-signin:check', tool, home, names),
   search: (typed, shown) => ipcRenderer.invoke('search:ask', typed, shown),
   onSearchPublished: callback => { ipcRenderer.on('search:published', (_event, home, readId) => callback(String(home), Number(readId))); },

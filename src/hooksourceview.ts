@@ -25,9 +25,10 @@ const opened = new Map<string, { seq: number; panelId: string; source?: HookSour
 const runs = new Map<string, RunEntry>();
 let seq = 0;
 
-/** Whether the page offers Run it (mirrors main's own deciding gate in hookrun.ts runHook): this computer's own home, his own hooks, and not Windows. */
+/** Whether the page offers Run it (mirrors main's own deciding gate in hookrun.ts runHook): this computer's own home, not Windows, and his own hooks or Claude Code / Codex installed plugin hooks. */
 export function canRun(ref: HookSourceRef, mode: HomeMode | undefined = state.home?.mode, platform = pagePlatform(navigator.userAgent)): boolean {
-  return mode === 'actual' && ref.from === 'own' && platform !== 'win32';
+  if (mode !== 'actual' || platform === 'win32') return false;
+  return ref.from === 'own' || (ref.from === 'installed' && (ref.tool === 'claude-cli' || ref.tool === 'codex-cli'));
 }
 
 /** Short deterministic hash of a row key so re-read position shifts give another hook a different button id. */

@@ -140,7 +140,8 @@ const isDrag = (press: Press, releasedAt: number | undefined) => press.dragged |
  * contents). The press notes the control's id, what it says (`says`), `where` it is (renderer.ts gives the page's place and the
  * home) and on a text the character it landed on. At the release, by the pointer and the main button that pressed, the record
  * ends, and if the pressed control is gone, the one now there with the same id, saying the same in the same place and not
- * disabled, takes its place: a button is clicked, at the release's point, when the release lands on it; a text is clicked when
+ * disabled, takes its place: a button is clicked, at the release's point and with Shift as the release held it (a Shift-click
+ * on a Library row's tick ticks a run: matrix.ts tickOf), when the release lands on it; a text is clicked when
  * the press was a click (isDrag), or else gets the drag's selection, from the press to the release, or none when the release is
  * off it. When no such control is there, a text's selection is cleared. A text still there keeps whether its press was a drag
  * for its own click, which comes next (pressWasDrag). A window that loses the focus keeps the record: on the Mac's four-window
@@ -179,7 +180,7 @@ export function keepClicksAcrossRedraws(where: () => string): void {
     const now = nowThere(was), text = was.at !== undefined, at = text && now ? offsetIn(now, event.clientX, event.clientY) : undefined;
     if (now === was.control) { if (text) released = { id: was.id, drag: isDrag(was, at) }; return; }
     if (!now) { if (text) getSelection()?.removeAllRanges(); return; }
-    const click = () => now.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: event.clientX, clientY: event.clientY, detail: was.detail }));
+    const click = () => now.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: event.clientX, clientY: event.clientY, detail: was.detail, shiftKey: event.shiftKey }));
     if (!text) { if (now.contains(event.target as Node)) click(); }
     else if (!isDrag(was, at)) click();
     else if (at === undefined) getSelection()?.removeAllRanges();

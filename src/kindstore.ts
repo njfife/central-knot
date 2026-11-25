@@ -6,7 +6,8 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { isLibraryItem, type LibraryItem } from './library.ts';
 import type { KindLibrary } from './librarypass.ts';
-import { NOTHING_CHANGED, errorCode, exists, sha256, storeDirectory, writeDurably } from './share.ts';
+import { errorCode, exists, sha256, storeDirectory, writeDurably } from './share.ts';
+import { NOTHING_CHANGED } from './words.ts';
 import type { HarnessId } from './types.ts';
 
 /** A kind's record: its library (librarypass.ts KindLibrary) and the format it was written in. */

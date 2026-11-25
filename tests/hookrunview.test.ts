@@ -213,30 +213,48 @@ test('Check 2: hookRunWords matches every outcome, quiet trailing run place/time
     outcome: 'refused', problem: 'Central Knot is quitting.',
   }), '~', time);
   assert.equal(refusedProper.sentence, 'Not run: Central Knot is quitting.');
+  const refusedPluginOff = hookRunWords('claude-cli', baseResult({
+    outcome: 'refused', problem: 'ReleaseHelper is turned off in Claude Code.',
+  }), '~', time);
+  assert.equal(refusedPluginOff.sentence, 'Not run: ReleaseHelper is turned off in Claude Code.');
+  const refusedCopilotPlugin = hookRunWords('copilot-cli', baseResult({
+    outcome: 'refused', problem: 'Copilot CLI plugin hooks aren’t supported here.',
+  }), '~', time);
+  assert.equal(refusedCopilotPlugin.sentence, 'Not run: Copilot CLI plugin hooks aren’t supported here.');
   const ipcFailed = hookRunWords('claude-cli', baseResult({ outcome: 'refused' }), '~', time);
   assert.equal(ipcFailed.sentence, 'Couldn’t run it.');
   assert.equal(ipcFailed.meta, undefined);
+
+  // missingOptions note shows under started outcomes and not on refused / couldn't start.
+  const missingOptsAdds = hookRunWords('claude-cli', baseResult({
+    outcome: 'adds', added: 'ok', allPrinted: 'ok', missingOptions: true,
+  }), '~', time);
+  assert.deepEqual(missingOptsAdds.notes, ['Ran without some of the plugin’s options.']);
+  const missingOptsEmpty = hookRunWords('claude-cli', baseResult({ outcome: 'empty', missingOptions: true }), '~', time);
+  assert.deepEqual(missingOptsEmpty.notes, ['Ran without some of the plugin’s options.']);
+  const missingOptsNotStarted = hookRunWords('claude-cli', baseResult({ outcome: 'missing', program: '/nope', missingOptions: true }), '~', time);
+  assert.deepEqual(missingOptsNotStarted.notes, []);
 });
 
 // ---------- Pure unit tests: T1.23 & T2.28 strip lines (Check 3) ----------
 
-test('Check 3: standing line names Run it, T1.23 help card stays within 30 words and covers hook cwd, and T2.28 strip notes replace strip.note', () => {
+test('Check 3: standing line names Run it, T1.23 help card stays within 30 words and covers hook cwd and plugin files/data, and T2.28 strip notes replace strip.note', () => {
   assert.equal(HOOK_RUN_WARN, 'Run it runs the command for real. It may change your files.');
 
   const claudeRun = hookStripHelp('claude-cli', true);
-  assert.equal(claudeRun, 'Session-start and prompt command hooks; URL, MCP, project and organisation hooks aren’t listed. Run it runs in your home folder, or in the folder the hook names.');
+  assert.equal(claudeRun, 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.');
   assert.ok(wordCount(claudeRun) <= 30, `expected <=30 words, got ${wordCount(claudeRun)}`);
 
   const claudeNoRun = hookStripHelp('claude-cli', false);
-  assert.equal(claudeNoRun, 'Session-start and prompt command hooks; URL, MCP, project and organisation hooks aren’t listed.');
+  assert.equal(claudeNoRun, 'Session-start and prompt hooks; not URL, MCP, project or organisation.');
   assert.ok(wordCount(claudeNoRun) <= 30);
 
   const copilotRun = hookStripHelp('copilot-cli', true);
-  assert.equal(copilotRun, 'Session-start command hooks; URL, MCP, project and organisation hooks aren’t listed. Run it runs in your home folder, or in the folder the hook names.');
+  assert.equal(copilotRun, 'Session-start hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.');
   assert.ok(wordCount(copilotRun) <= 30);
 
   const copilotNoRun = hookStripHelp('copilot-cli', false);
-  assert.equal(copilotNoRun, 'Session-start command hooks; URL, MCP, project and organisation hooks aren’t listed.');
+  assert.equal(copilotNoRun, 'Session-start hooks; not URL, MCP, project or organisation.');
   assert.ok(wordCount(copilotNoRun) <= 30);
 
   // T2.28 Codex note replaces strip.note only when runnable.
@@ -515,9 +533,11 @@ test('Checks 4, 5, 6, 7, 8: eligibility, hashed ids, double click & held Enter g
   const ownRef: HookSourceRef = { from: 'own', tool: 'claude-cli', declaredIn: '/tmp/h/.claude/settings.json', event: 'SessionStart', at: 0, command: 'echo a', fingerprint: 'fp-a' };
   const ownRef2: HookSourceRef = { from: 'own', tool: 'claude-cli', declaredIn: '/tmp/h/.claude/settings.json', event: 'SessionStart', at: 1, command: 'echo a', fingerprint: 'fp-a' };
   const pluginRef: HookSourceRef = { from: 'installed', tool: 'claude-cli', plugin: 'p', marketName: 'm', declaredIn: '/p/hooks.json', event: 'SessionStart', at: 0, command: 'echo p', fingerprint: 'fp-p' };
+  const codexPluginRef: HookSourceRef = { from: 'installed', tool: 'codex-cli', plugin: 'p', marketName: 'm', declaredIn: '/p/hooks.json', event: 'SessionStart', at: 0, command: 'echo p', fingerprint: 'fp-p' };
+  const copilotPluginRef: HookSourceRef = { from: 'installed', tool: 'copilot-cli', plugin: 'p', marketName: 'm', declaredIn: '/p/hooks.json', event: 'SessionStart', at: 0, command: 'echo p', fingerprint: 'fp-p' };
   const marketRef: HookSourceRef = { from: 'marketplace', marketName: 'm', plugin: 'p', declaredIn: '/m/hooks.json', event: 'SessionStart', at: 0, command: 'echo m', fingerprint: 'fp-m' };
 
-  // Check 4: eligibility gate (actual + own + non-Windows only).
+  // Check 4: eligibility gate (actual + non-Windows + own or Claude Code / Codex installed plugin).
   state.home = undefined;
   assert.equal(viewMod.canRun(ownRef, undefined, 'linux'), false);
   assert.equal(viewMod.canRun(ownRef, 'actual', 'linux'), true);
@@ -525,7 +545,12 @@ test('Checks 4, 5, 6, 7, 8: eligibility, hashed ids, double click & held Enter g
   assert.equal(viewMod.canRun(ownRef, 'actual', 'win32'), false);
   assert.equal(viewMod.canRun(ownRef, 'custom', 'linux'), false);
   assert.equal(viewMod.canRun(ownRef, 'fixture', 'linux'), false);
-  assert.equal(viewMod.canRun(pluginRef, 'actual', 'linux'), false);
+  assert.equal(viewMod.canRun(pluginRef, 'actual', 'linux'), true);
+  assert.equal(viewMod.canRun(pluginRef, 'actual', 'darwin'), true);
+  assert.equal(viewMod.canRun(pluginRef, 'actual', 'win32'), false);
+  assert.equal(viewMod.canRun(pluginRef, 'custom', 'linux'), false);
+  assert.equal(viewMod.canRun(codexPluginRef, 'actual', 'linux'), true);
+  assert.equal(viewMod.canRun(copilotPluginRef, 'actual', 'linux'), false);
   assert.equal(viewMod.canRun(marketRef, 'actual', 'linux'), false);
 
   // Non-runnable row renders only View source and never Run it.
@@ -936,4 +961,48 @@ test('Short list 3: hookFingerprint sorts env keys by plain code-unit order (<),
   const fpBA = hookFingerprint({ ...base, env: { B: '2', a: '1' } });
   assert.equal(fpAB, fpBA);
   assert.ok(fpAB.indexOf('"B"') >= 0 && fpAB.indexOf('"B"') < fpAB.indexOf('"a"'), `expected B before a in ${fpAB}`);
+});
+
+test('Installed plugin hook row renders Run it for Claude Code (with missingOptions note) and Codex (with trust note), and omits Run it for Copilot CLI', async () => {
+  const dom = makeDom();
+  let nextResult = baseResult({ outcome: 'adds', added: 'plugin text', allPrinted: 'plugin text', missingOptions: true });
+  dom.handlers.hookRun = async () => nextResult;
+  await import('../src/settingspage.ts');
+  const { state } = await import('../src/app.ts');
+  const viewMod = await import('../src/hooksourceview.ts');
+  viewMod.resetHookSources();
+  state.home = { home: '/tmp/h', mode: 'actual', label: 'Home' } as any;
+
+  const claudeRef: HookSourceRef = { from: 'installed', tool: 'claude-cli', plugin: 'helper', marketName: 'team', declaredIn: '/tmp/h/.claude/plugins/cache/team/helper/1.0.0/hooks/hooks.json', event: 'SessionStart', at: 0, command: '${CLAUDE_PLUGIN_ROOT}/hooks/hello.sh', fingerprint: 'fp-1' };
+  const codexRef: HookSourceRef = { from: 'installed', tool: 'codex-cli', plugin: 'helper', marketName: 'team', declaredIn: '/tmp/h/.codex/plugins/cache/team/helper/1.0.0/hooks/hooks.json', event: 'SessionStart', at: 0, command: '${PLUGIN_ROOT}/hooks/hello.sh', fingerprint: 'fp-2' };
+  const copilotRef: HookSourceRef = { from: 'installed', tool: 'copilot-cli', plugin: 'helper', marketName: 'team', declaredIn: '/tmp/h/.copilot/plugins/cache/team/helper/1.0.0/hooks/hooks.json', event: 'sessionStart', at: 0, command: 'echo hi', fingerprint: 'fp-3' };
+
+  const claudeRow = dom.makeNode('li');
+  claudeRow.connected = true;
+  claudeRow.append(...viewMod.hookSourceControls(claudeRef, 'hook-source-instructions-claude-cli-1-0'));
+  const claudeBtn = dom.findAll(claudeRow, n => 'data-hook-run' in (n.attrs ?? {}))[0];
+  assert.ok(claudeBtn);
+  claudeBtn.onclick({ detail: 1 });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const claudePanelText = dom.textOf(dom.findAll(claudeRow, n => n.className === 'hook-run')[0]);
+  assert.match(claudePanelText, /Would add/);
+  assert.match(claudePanelText, /Ran without some of the plugin’s options\./);
+
+  nextResult = baseResult({ outcome: 'adds', added: 'codex plugin text', allPrinted: 'codex plugin text' });
+  const codexRow = dom.makeNode('li');
+  codexRow.connected = true;
+  codexRow.append(...viewMod.hookSourceControls(codexRef, 'hook-source-instructions-codex-cli-1-0'));
+  const codexBtn = dom.findAll(codexRow, n => 'data-hook-run' in (n.attrs ?? {}))[0];
+  assert.ok(codexBtn);
+  assert.notEqual(claudeBtn.id, codexBtn.id, 'same plugin in two tools gets distinct button ids');
+  codexBtn.onclick({ detail: 1 });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const codexPanelText = dom.textOf(dom.findAll(codexRow, n => n.className === 'hook-run')[0]);
+  assert.match(codexPanelText, /Codex adds it only once trusted in \/hooks\./);
+
+  const copilotRow = dom.makeNode('li');
+  copilotRow.connected = true;
+  copilotRow.append(...viewMod.hookSourceControls(copilotRef, 'hook-source-instructions-copilot-cli-1-0'));
+  assert.equal(dom.findAll(copilotRow, n => 'data-hook-run' in (n.attrs ?? {})).length, 0);
+  assert.equal(dom.findAll(copilotRow, n => 'data-hook-source' in (n.attrs ?? {})).length, 1);
 });

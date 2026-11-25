@@ -1,24 +1,32 @@
-// Running one hook's command once on click (IPC hook:run / hook:stop), in main, and classifying what the tool would add
-// (whatHookWouldAdd, pure): re-finds the hook on disk through hooksource.ts findHook, enforces the main-side gate (actual
-// home, non-Windows in this step, own hooks only in this step, tool installed, hooks not disabled, command type, event adds
-// text by pluginoutcomes.ts addsText, matching start source by pluginoutcomes.ts pickStartSource, one run at a time per hook),
-// builds each tool's environment, launch form and stdin JSON, runs through plugins.ts run (process group + launch.ts
-// CLOSE_GRACE_MS drain), cleans up disposable Claude files and stops active runs on Stop or Quit (stopHookRun, stopHookRuns).
-// Nothing here stores results or draws a page; hook source extraction stays in hooksource.ts.
+// Runs one hook's command once on click (IPC hook:run / hook:stop) in main and classifies what the tool would add
+// (whatHookWouldAdd, pure).
+// Gate: re-finds the hook via hooksource.ts findHook; requires actual home, non-Windows, own hooks or installed Claude Code /
+// Codex plugin hooks, installed tool binary, plugin on, tool hooks not disabled, command type, event adding text
+// (pluginoutcomes.ts addsText), matching start source (pluginoutcomes.ts pickStartSource), and one run at a time per hook.
+// Environment and launch: scrubs inherited control, session and plugin variables first, then sets tool and plugin variables
+// (including plain declared Claude Code userConfig options from settings.json or manifest defaults) and creates Claude Code's
+// plugin data folder on first use. Claude Code puts ${CLAUDE_PROJECT_DIR} (and for plugins, ${CLAUDE_PLUGIN_ROOT} and
+// ${CLAUDE_PLUGIN_DATA}) into shell lines as text (for own hooks too) and into exec-form program and each argument separately;
+// Codex puts its four plugin variables into the command before the shell. A Claude Code plugin command or argument holding
+// ${user_config. is refused; Codex has no ${user_config.…} and leaves that as written. Runs through plugins.ts run (process
+// group + launch.ts CLOSE_GRACE_MS drain), cleans up disposable Claude files, and stops active runs on Stop or Quit.
+// Nothing here stores results or draws a page; source reading stays in hooksource.ts.
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { access, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
+import { pluginManifest } from './catalogdetail.ts';
 import { findBinary } from './discovery.ts';
-import { harnesses } from './harnesses.ts';
+import { harnesses, toolConfigRoot } from './harnesses.ts';
 import { findHook, type HookSourceContext } from './hooksource.ts';
 import { CLOSE_GRACE_MS } from './launch.ts';
 import { addsText, pickStartSource } from './pluginoutcomes.ts';
 import { run, type RunResult } from './plugins.ts';
+import { readJsonc } from './textedit.ts';
 import type { DeclaredHook, HarnessId, HookRunResult, HookSourceRef } from './types.ts';
 import { record } from './values.ts';
-import { HOOK_SOURCE_UNREADABLE } from './words.ts';
+import { HOOK_SOURCE_UNREADABLE, toolNames } from './words.ts';
 
 /** Inputs needed to run one hook in main (plus optional test seams for platform, env, capture cap and drain wait). */
 export interface HookRunContext extends HookSourceContext {
@@ -54,10 +62,54 @@ export function hookTimeoutSec(tool: HarnessId, isPrompt: boolean, configured?: 
   return Math.min(tool === 'codex-cli' || (tool === 'claude-cli' && !isPrompt) ? 600 : 30, MAX_TIMEOUT_SEC);
 }
 
-/** Builds the environment for one own-hook run: user env + tool overrides, scrubbed of app/session/plugin controls, then tool vars. */
+interface PluginLaunch {
+  id: string;
+  root: string;
+  data: string;
+  vars: Record<string, string>;
+}
+
+const isPlainOption = (value: unknown): value is string | number | boolean =>
+  typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value)) || typeof value === 'boolean';
+
+/** Computes a plugin's id, root, data folder and tool-supplied path variables for Claude Code or Codex. */
+function pluginPaths(tool: 'claude-cli' | 'codex-cli', toolRoot: string, plugin: string, marketName: string, pluginRoot: string): PluginLaunch {
+  const id = `${plugin}@${marketName}`;
+  const root = resolve(pluginRoot);
+  if (tool === 'claude-cli') {
+    const safeId = id.replace(/[^A-Za-z0-9_-]/g, '-');
+    const data = join(toolRoot, 'plugins', 'data', safeId);
+    return { id, root, data, vars: { CLAUDE_PLUGIN_ROOT: root, CLAUDE_PLUGIN_DATA: data } };
+  }
+  const data = join(toolRoot, 'plugins', 'data', `${plugin}-${marketName}`);
+  return { id, root, data, vars: { PLUGIN_ROOT: root, CLAUDE_PLUGIN_ROOT: root, PLUGIN_DATA: data, CLAUDE_PLUGIN_DATA: data } };
+}
+
+/** Reads a Claude Code plugin's declared userConfig options from settings.json (or manifest defaults); flags any declared option without a plain value. */
+async function claudePluginOptions(pluginRoot: string, toolRoot: string, id: string): Promise<{ env: Record<string, string>; missing: boolean }> {
+  const declared = record((await pluginManifest(pluginRoot))?.userConfig);
+  const keys = declared ? Object.keys(declared) : [];
+  if (!keys.length) return { env: {}, missing: false };
+  let settings: Record<string, unknown> | undefined;
+  try {
+    settings = record(readJsonc(await readFile(join(toolRoot, 'settings.json'), 'utf8')));
+  } catch { /* absent or unreadable settings.json: only manifest defaults apply */ }
+  const configured = record(record(record(settings?.pluginConfigs)?.[id])?.options);
+  const env: Record<string, string> = {};
+  let missing = false;
+  for (const key of keys) {
+    const hasConfig = configured !== undefined && Object.hasOwn(configured, key) && configured[key] !== undefined;
+    const value = hasConfig ? configured[key] : record(declared![key])?.default;
+    if (isPlainOption(value)) env[`CLAUDE_PLUGIN_OPTION_${key.toUpperCase()}`] = String(value);
+    else missing = true;
+  }
+  return { env, missing };
+}
+
+/** Builds the environment for one hook run: user env + tool overrides, scrubbed of app/session/plugin controls first, then tool and plugin vars. */
 function buildHookEnv(
   tool: HarnessId, home: string, path: string, base: NodeJS.ProcessEnv,
-  extra: { overrides?: Partial<Record<HarnessId, string>>; envFile?: string; copilotEnv?: Record<string, string> },
+  extra: { overrides?: Partial<Record<HarnessId, string>>; envFile?: string; copilotEnv?: Record<string, string>; pluginEnv?: Record<string, string> },
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(base)) {
@@ -72,6 +124,7 @@ function buildHookEnv(
     env.CLAUDE_PROJECT_DIR = home;
     if (extra.envFile) env.CLAUDE_ENV_FILE = extra.envFile;
   }
+  if (extra.pluginEnv) Object.assign(env, extra.pluginEnv);
   if (tool === 'copilot-cli' && extra.copilotEnv) {
     const snap = { ...env };
     for (const [name, raw] of Object.entries(extra.copilotEnv)) {
@@ -97,18 +150,29 @@ function buildHookInput(tool: HarnessId, event: string, home: string, extra: { s
     : { sessionId, timestamp: Date.now(), cwd: home, source: 'startup' };
 }
 
+const replaceBraced = (value: string, vars: Record<string, string>) =>
+  value.replace(/\$\{([A-Z0-9_]+)\}/g, (whole, name: string) => (Object.hasOwn(vars, name) ? vars[name]! : whole));
+
 /** Resolves the executable and arguments for a hook by its tool's launch rules on macOS and Linux. */
-function buildHookLaunch(tool: HarnessId, hook: DeclaredHook, home: string, codexShell: string): { file: string; args: string[] } | { problem: string } {
+function buildHookLaunch(tool: HarnessId, hook: DeclaredHook, home: string, codexShell: string, plugin?: PluginLaunch): { file: string; args: string[] } | { problem: string } {
   const launch = hook.launch!;
   if (tool === 'claude-cli') {
+    if (plugin) {
+      const parts = 'program' in launch ? [launch.program, ...launch.args] : [launch.shell];
+      if (parts.some(part => part.includes('${user_config.'))) return { problem: 'This hook’s command uses a plugin option, which isn’t supported here.' };
+    }
+    const vars = { CLAUDE_PROJECT_DIR: home, ...plugin?.vars };
     if ('program' in launch) {
-      const sub = (value: string) => value.replace(/\$\{CLAUDE_PROJECT_DIR\}|\$CLAUDE_PROJECT_DIR(?![A-Za-z0-9_])/g, home);
+      const sub = (value: string) => replaceBraced(value, vars).replace(/\$CLAUDE_PROJECT_DIR(?![A-Za-z0-9_])/g, () => home);
       return { file: sub(launch.program), args: launch.args.map(sub) };
     }
     if (hook.shell && hook.shell !== 'bash' && hook.shell !== 'sh') return { problem: `Uses shell “${hook.shell}”, which isn’t run here.` };
-    return { file: hook.shell === 'bash' ? 'bash' : '/bin/sh', args: ['-c', launch.shell] };
+    return { file: hook.shell === 'bash' ? 'bash' : '/bin/sh', args: ['-c', replaceBraced(launch.shell, vars)] };
   }
-  if (tool === 'codex-cli') return { file: codexShell, args: ['-lc', (launch as { shell: string }).shell] };
+  if (tool === 'codex-cli') {
+    const cmd = plugin ? replaceBraced((launch as { shell: string }).shell, plugin.vars) : (launch as { shell: string }).shell;
+    return { file: codexShell, args: ['-lc', cmd] };
+  }
   return 'program' in launch ? { file: launch.program, args: launch.args } : { file: 'bash', args: ['-c', launch.shell] };
 }
 
@@ -231,12 +295,13 @@ const makeResult = (fields: Pick<HookRunResult, 'outcome'> & Partial<HookRunResu
 /** Refusal answer for main.ts and runHook when a request fails its gate before starting. */
 export const hookRunRefused = (problem: string, emptyPrompt = false): HookRunResult => makeResult({ outcome: 'refused', problem, emptyPrompt });
 
-/** Runs one own hook once after enforcing the main-side gate; registered synchronously so Stop and Quit reach it before any await. */
+/** Runs one own or installed plugin hook once after enforcing the main-side gate; registered synchronously so Stop and Quit reach it before any await. */
 export async function runHook(ctx: HookRunContext, ref: HookSourceRef): Promise<HookRunResult> {
   if (quitting) return hookRunRefused('Central Knot is quitting.');
   if ((ctx.platform ?? process.platform) === 'win32') return hookRunRefused('Not run on Windows yet.');
   if (ctx.mode !== 'actual') return hookRunRefused('Runs only on this computer’s home.');
-  if (ref.from !== 'own') return hookRunRefused(ref.from === 'installed' ? 'Plugin hooks aren’t run yet.' : 'Marketplace hooks aren’t run.');
+  if (ref.from === 'marketplace') return hookRunRefused('Marketplace hooks aren’t run.');
+  if (ref.from === 'installed' && ref.tool === 'copilot-cli') return hookRunRefused('Copilot CLI plugin hooks aren’t supported here.');
   const key = hookRunKey(ctx.home, ref);
   if (active.has(key)) return hookRunRefused('This hook is already running.');
   const stop = new AbortController();
@@ -249,7 +314,7 @@ export async function runHook(ctx: HookRunContext, ref: HookSourceRef): Promise<
   }
 }
 
-async function executeHook(ctx: HookRunContext, ref: Extract<HookSourceRef, { from: 'own' }>, signal: AbortSignal): Promise<HookRunResult> {
+async function executeHook(ctx: HookRunContext, ref: Extract<HookSourceRef, { from: 'own' | 'installed' }>, signal: AbortSignal): Promise<HookRunResult> {
   const started = Date.now();
   const baseEnv = ctx.env ?? process.env;
   const platform = ctx.platform ?? process.platform;
@@ -273,25 +338,43 @@ async function executeHook(ctx: HookRunContext, ref: Extract<HookSourceRef, { fr
   const afterFind = halt();
   if (afterFind) return afterFind;
   if ('problem' in found) return hookRunRefused(found.problem);
-  if (found.hooksDisabled) {
-    const where = ref.tool === 'codex-cli' ? 'Codex’s settings' : 'Claude Code’s settings';
-    return hookRunRefused(`Hooks are turned off in ${where} (${found.hooksDisabled}).`);
-  }
+  if (ref.from === 'installed' && found.pluginOff) return hookRunRefused(`${ref.plugin} is turned off in ${toolNames[ref.tool]}.`);
+  if (found.hooksDisabled) return hookRunRefused(`Hooks are turned off in ${toolNames[ref.tool]}’s settings (${found.hooksDisabled}).`);
+  const toolRoot = toolConfigRoot(ctx, ref.tool);
   const { hook } = found;
   if (hook.type && hook.type !== 'command') return hookRunRefused(`Not a command hook (type “${hook.type}”).`);
   if (!addsText(ref.tool, hook)) return hookRunRefused('This hook does not add text to sessions.');
   const isPrompt = hook.event === 'UserPromptSubmit';
   const source = isPrompt ? undefined : pickStartSource(ref.tool, hook.matcher);
   if (!isPrompt && !source) return hookRunRefused('No session start matches this hook’s matcher.');
+  let plugin: PluginLaunch | undefined;
+  if (ref.from === 'installed') {
+    if (!found.pluginRoot || (ref.tool !== 'claude-cli' && ref.tool !== 'codex-cli')) return hookRunRefused(HOOK_SOURCE_UNREADABLE);
+    plugin = pluginPaths(ref.tool, toolRoot, ref.plugin, ref.marketName, found.pluginRoot);
+  }
   const shellCandidate = baseEnv.SHELL?.trim();
   const codexShell = ref.tool === 'codex-cli' && shellCandidate && isAbsolute(shellCandidate)
     ? await access(shellCandidate, constants.X_OK).then(() => shellCandidate, () => '/bin/sh') : '/bin/sh';
-  const launch = buildHookLaunch(ref.tool, hook, ctx.home, codexShell);
+  const launch = buildHookLaunch(ref.tool, hook, ctx.home, codexShell, plugin);
   if ('problem' in launch) return hookRunRefused(launch.problem, isPrompt);
   const cwd = ref.tool === 'copilot-cli' && hook.cwd ? resolve(ctx.home, hook.cwd) : ctx.home;
   const limitSec = hookTimeoutSec(ref.tool, isPrompt, hook.timeout);
   if (ref.tool === 'copilot-cli' && hook.cwd && !(await stat(cwd).then(info => info.isDirectory(), () => false))) {
     return makeResult({ outcome: 'not-added', detail: 'spawn-error', problem: `Working folder not found: ${cwd}`, durationMs: Date.now() - started, cwd, emptyPrompt: isPrompt, limitSec, ...(source ? { source } : {}) });
+  }
+  let pluginEnv: Record<string, string> | undefined = plugin?.vars;
+  let missingOptions = false;
+  if (plugin && ref.tool === 'claude-cli') {
+    const opts = await claudePluginOptions(plugin.root, toolRoot, plugin.id);
+    const afterOpts = halt(cwd, isPrompt, limitSec, source);
+    if (afterOpts) return afterOpts;
+    pluginEnv = { ...plugin.vars, ...opts.env };
+    missingOptions = opts.missing;
+    try {
+      await mkdir(plugin.data, { recursive: true });
+    } catch {
+      return hookRunRefused('Couldn’t create the plugin’s data folder.', isPrompt);
+    }
   }
   let tempDir: string | undefined;
   try {
@@ -308,7 +391,7 @@ async function executeHook(ctx: HookRunContext, ref: Extract<HookSourceRef, { fr
     }
     const beforeRun = halt(cwd, isPrompt, limitSec, source);
     if (beforeRun) return beforeRun;
-    const env = buildHookEnv(ref.tool, ctx.home, path, baseEnv, { overrides: ctx.overrides, envFile, copilotEnv: hook.env });
+    const env = buildHookEnv(ref.tool, ctx.home, path, baseEnv, { overrides: ctx.overrides, envFile, copilotEnv: hook.env, pluginEnv });
     const input = JSON.stringify(buildHookInput(ref.tool, hook.event, ctx.home, { source, transcriptPath }));
     const runStart = Date.now();
     const ran = await run(launch.file, launch.args, {
@@ -321,6 +404,7 @@ async function executeHook(ctx: HookRunContext, ref: Extract<HookSourceRef, { fr
     return makeResult({
       ...classified, allPrinted: stdout, stderr, durationMs: Date.now() - runStart, cwd, emptyPrompt: isPrompt, limitSec,
       ...(source ? { source } : {}),
+      ...(missingOptions ? { missingOptions: true } : {}),
       ...(typeof ran.code === 'number' && !ran.reason && !ran.signal ? { exitCode: ran.code } : {}),
     });
   } finally {
