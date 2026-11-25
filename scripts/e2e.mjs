@@ -6354,8 +6354,13 @@ async function firstSetupFlow() {
   mkdirSync(real, { recursive: true });
   const { home, claude, codex } = homeFor('home-setup');
   saved(skill(claude, 'notes', text('notes', 'Take notes.')), 5);
-  saved(skill(claude, 'review', text('review', 'Review gently.')), 48);
-  saved(skill(codex, 'review', text('review', 'Review hard.')), 2);
+  // review's two copies were unpacked together half a minute ago: both folders have that one time, and only their SKILL.md
+  // files' own times (48 and 2 hours ago) tell which was edited last.
+  const unpacked = new Date(Date.now() - 30_000);
+  for (const [folder, hours] of [[skill(claude, 'review', text('review', 'Review gently.')), 48], [skill(codex, 'review', text('review', 'Review hard.')), 2]]) {
+    utimesSync(join(folder, 'SKILL.md'), ago(hours), ago(hours));
+    utimesSync(folder, unpacked, unpacked);
+  }
   writeFileSync(join(home, '.claude.json'), `${JSON.stringify({ mcpServers: { docs: { type: 'http', url: 'https://docs.example.test/mcp' } } }, null, 2)}\n`);
   writeFileSync(join(home, '.codex/config.toml'), '[mcp_servers.docs]\nurl = "https://docs.example.test/mcp/v2"\n\n[mcp_servers.files]\ncommand = "files-mcp"\nargs = []\n');
   for (const path of [join(home, '.claude.json'), join(home, '.codex/config.toml')]) utimesSync(path, ago(5), ago(5));
@@ -6379,6 +6384,9 @@ async function firstSetupFlow() {
     [record().syncEverything, readNow(join(codex, 'notes/SKILL.md')), await a.text('#walkthrough .walk-place'), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'codex-cli')} .version-cta-main`), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'claude-cli')}`), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'claude-cli')} .version-cta-main`)],
     [true, text('notes', 'Take notes.'), ' · 1 of 2', true, true, false]);
   check('the band after Yes says what it took in and what the one Undo covers', /^Synchronize everything is on: it took in 2 items, and 2 items with copies that differ wait for your choice\. One Undo in History takes back what it takes in; a copy you choose has its own Undo\./.test(await a.text('[data-outcome] .band-text') ?? ''), await a.text('[data-outcome] .band-text'));
+  same('review’s folders tie, so each copy says when its files were edited, only Codex’s, edited 2 h ago, is marked Newer, and Use the latest for the rest can be used',
+    [await a.text(`#${rowPart('walk-use', 'skills', 'review', 'codex-cli')} .version-meta`), await a.text(`#${rowPart('walk-use', 'skills', 'review', 'claude-cli')} .version-meta`), await a.all('#walkthrough .version-latest'), await a.run(`document.querySelector('#walk-use-latest').disabled`)],
+    ['edited 2 h ago · Newer', 'edited 2 days ago', ['edited 2 h ago · Newer'], false]);
   same('beside Skip, the walkthrough says it changes no copy', await a.text('#walk-note'), 'Skip changes no copy.');
   await fitsAtMinimum(a, 'the walkthrough at its first item');
   await a.shot('setup-walkthrough');
