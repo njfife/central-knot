@@ -325,7 +325,7 @@ test('Two skill folders unpacked at one moment: their files’ own times tell th
     await utimes(join(scripts, 'run.sh'), new Date(1_000_000), new Date(1_000_000));
     for (const folder of [scripts, join(box.home, skillRoot['claude-cli'], 'notes'), join(box.home, skillRoot['codex-cli'], 'notes')]) await utimes(folder, unpacked, unpacked);
     const row = rowOf(await skillsView(box.context, tools), 'notes'), hashOf = (tool: HarnessId) => row.copies[tool]!.hash;
-    assert.deepEqual(row.takeInAnswers?.click, { wait: 'choice', latest: hashOf('codex-cli'), filesAt: { [hashOf('claude-cli')]: 1_000_000, [hashOf('codex-cli')]: 5_000_000 } });
+    assert.deepEqual(row.takeInAnswers?.click, { wait: 'choice', latest: hashOf('codex-cli'), datedByFiles: { [hashOf('claude-cli')]: 1_000_000, [hashOf('codex-cli')]: 5_000_000 } });
     assert.deepEqual(waitingForChoice(await homeView(box)).map(item => item.latest), [{ tool: 'codex-cli', hash: hashOf('codex-cli') }]);
   } finally { await box.cleanup(); }
 });

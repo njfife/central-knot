@@ -447,13 +447,29 @@ const HOUR = 3_600_000, unpacked = 100 * HOUR;
 test('Two skill folders unpacked at one moment tie by their copies’ times: their files’ own times tell the latest, and the answer says them', () => {
   // Claude Code's SKILL.md was saved 48 hours before the unpacking, Codex's 2 hours before; both folders have the unpacking's time.
   const copies = [copy('claude-cli', 'a', { at: unpacked, filesAt: unpacked - 48 * HOUR }), copy('codex-cli', 'x', { at: unpacked, filesAt: unpacked - 2 * HOUR })];
-  const said = { wait: 'choice', latest: 'x', filesAt: { a: unpacked - 48 * HOUR, x: unpacked - 2 * HOUR } };
+  const said = { wait: 'choice', latest: 'x', datedByFiles: { a: unpacked - 48 * HOUR, x: unpacked - 2 * HOUR } };
   assert.deepEqual(both(found(copies)), [said, said], 'the question and Synchronize everything’s Use the latest for the rest');
 });
-test('Of three contents, only those tied with the last by their copies’ times are compared by their files: an older one never wins, though its files are the newest', () =>
-  // 'c' was changed two seconds before the tied two, and its files are newer than theirs: it is out before the files are compared.
-  assert.deepEqual(latestCopy([{ hash: 'a', at: unpacked, filesAt: unpacked - 25 * HOUR }, { hash: 'b', at: unpacked, filesAt: unpacked - HOUR }, { hash: 'c', at: unpacked - 2_000, filesAt: unpacked - 2_000 }]),
-    { latest: 'b', filesAt: { a: unpacked - 25 * HOUR, b: unpacked - HOUR } }));
+test('Of three contents, only those tied with the last by their copies’ times are compared by their files, and the one their files tell wins only a second clear of the third’s own time', () => {
+  // 'c' was changed two seconds before the tied two, after 'b''s files were: none wins, and 'c', older by its copy's time, never does.
+  assert.deepEqual(latestCopy([{ hash: 'a', at: unpacked, filesAt: unpacked - 25 * HOUR }, { hash: 'b', at: unpacked, filesAt: unpacked - HOUR }, { hash: 'c', at: unpacked - 2_000, filesAt: unpacked - 2_000 }]), {});
+  // 'c' changed three days before: 'b''s files are later than every other content's date.
+  assert.deepEqual(latestCopy([{ hash: 'a', at: unpacked, filesAt: unpacked - 25 * HOUR }, { hash: 'b', at: unpacked, filesAt: unpacked - HOUR }, { hash: 'c', at: unpacked - 72 * HOUR, filesAt: unpacked - 72 * HOUR }]),
+    { latest: 'b', datedByFiles: { a: unpacked - 25 * HOUR, b: unpacked - HOUR } });
+});
+const clock = (hours: number, minutes = 0) => Date.UTC(2026, 10, 25, hours, minutes);
+test('His edit, then a restore that keeps files’ dates: the restored copies’ files can’t pass over it, so nothing is marked', () => {
+  // He edits Copilot CLI's copy at 10:00; at 10:30 a restore brings back Claude Code's (files from yesterday) and Codex's (files from 9:00).
+  const copies = [copy('claude-cli', 'c', { at: clock(10, 30), filesAt: clock(10) - 24 * HOUR }), copy('codex-cli', 'x', { at: clock(10, 30), filesAt: clock(9) }), copy('copilot-cli', 'p', { at: clock(10), filesAt: clock(10) })];
+  assert.deepEqual(both(found(copies)), [{ wait: 'choice' }, { wait: 'choice' }]);
+});
+test('Two copies unpacked together, a third two seconds older whose file is an hour old: the files’ 2 hours can’t be marked beside it', () => {
+  const copies = [copy('claude-cli', 'c', { at: unpacked, filesAt: unpacked - 2 * HOUR }), copy('codex-cli', 'x', { at: unpacked, filesAt: unpacked - 48 * HOUR }), copy('copilot-cli', 'p', { at: unpacked - 2_000, filesAt: unpacked - HOUR })];
+  assert.deepEqual(both(found(copies)), [{ wait: 'choice' }, { wait: 'choice' }]);
+});
+test('Where the copies’ times decide, the files’ times are no part of the answer', () =>
+  // Codex's folder is four seconds later (a file removed inside, say), though Claude Code's files are newer.
+  assert.deepEqual(latestCopy([{ hash: 'a', at: 1_000_000, filesAt: 900_000 }, { hash: 'x', at: 1_004_000, filesAt: 800_000 }]), { latest: 'x' }));
 test('No latest where the copies’ times tie and their files’ times tie too, or a tied content has no files’ time (an agent’s file): no dates to go by', () => {
   assert.deepEqual(latestCopy([{ hash: 'a', at: unpacked, filesAt: unpacked - HOUR }, { hash: 'x', at: unpacked, filesAt: unpacked - HOUR + 999 }]), {});
   assert.deepEqual(latestCopy([{ hash: 'a', at: unpacked, filesAt: unpacked - HOUR }, { hash: 'x', at: unpacked + 500 }]), {});

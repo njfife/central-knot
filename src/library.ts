@@ -860,7 +860,7 @@ export interface FoundCopy {
   harness: HarnessId; hash: string;
   /** When it was last changed (ms); absent where a copy has no time of its own (an MCP entry). */
   at?: number;
-  /** When its files alone were last changed (ms), where that can differ from `at` (a skill's folder); latestCopy reads it. */
+  /** When its files alone were last changed (ms): a skill copy's (librarypass.ts Seen filesAt); latestCopy reads it. */
   filesAt?: number;
   /** That harness's own switch turns it off there (skillswitch.ts, mcpswitch.ts). */
   switchedOff?: true;
@@ -910,9 +910,11 @@ export function takeInAnswer(by: TakenBy, found: FoundKey, chosen?: { harness: H
  * time of its own (an MCP entry, whose time is its whole file's: "no dates to go by").
  * Contents changed less than a second before the last one tie with it (some file systems, and copies made by unpacking or
  * copying, keep a file's time only to the second). Of tied contents, the files' own times (`filesAt`) are compared the same way,
- * by content, and where they tell the latest, said for the question's lines: a skill's folder takes the time it was made or
- * unpacked, whatever its files'. Only the tied are compared, so an older content never wins by its files. None where a tied
- * content has no such time (an agent's file), or the files' times tie too.
+ * by content: a skill's folder takes the time it was made or unpacked, whatever its files'. The one they tell is the latest only
+ * where its files are a second clear of every date its line is shown beside (another tied content's files' time, an older
+ * content's own time), and then those dates go with it for the question's lines (`datedByFiles`). Only the tied are compared,
+ * so an older content never wins by its files. None where a tied content has no such time (an agent's file), the files' times
+ * tie too, or an older content was changed after the winner's files.
  * Known weakness: a copy Central Knot wrote carries the time of that write, not of the edit it holds; one written into a tool
  * that was behind, alone with its content, reads as changed then.
  * Not `plan`'s "latest wins", which is for an item already in the library: there two edits made in harnesses are ordered by
@@ -921,19 +923,27 @@ export function takeInAnswer(by: TakenBy, found: FoundKey, chosen?: { harness: H
  */
 export function latestCopy(copies: readonly Pick<FoundCopy, 'hash' | 'at' | 'filesAt'>[]): LatestCopy {
   // When a content was made, by one of its times: its earliest copy's; NaN where a copy of it has no such time.
-  const made = (hash: string, time: 'at' | 'filesAt') => Math.min(...copies.filter(copy => copy.hash === hash).map(copy => copy[time] ?? NaN));
+  const made = (hash: string, time: 'at' | 'filesAt') => {
+    const times = copies.filter(copy => copy.hash === hash).map(copy => copy[time] ?? NaN);
+    return Math.min(...times);
+  };
   const contents = [...new Set(copies.map(copy => copy.hash))];
   if (contents.length < 2 || contents.some(hash => Number.isNaN(made(hash, 'at')))) return {};
   const last = Math.max(...contents.map(hash => made(hash, 'at')));
   const tied = contents.filter(hash => last - made(hash, 'at') < TIE_MS);
   if (tied.length === 1) return { latest: tied[0] };
   if (tied.some(hash => Number.isNaN(made(hash, 'filesAt')))) return {};
-  const filesAt = Object.fromEntries(tied.map(hash => [hash, made(hash, 'filesAt')]));
-  const [first, second] = tied.sort((one, other) => filesAt[other] - filesAt[one]);
-  return filesAt[first] - filesAt[second] >= TIE_MS ? { latest: first, filesAt } : {};
+  const datedByFiles = Object.fromEntries(tied.map(hash => [hash, made(hash, 'filesAt')]));
+  const [first] = tied.sort((one, other) => datedByFiles[other] - datedByFiles[one]);
+  // Every other content's date as its line shows it: a tied one's files' time, an older one's own time.
+  const others = contents.filter(hash => hash !== first).map(hash => (tied.includes(hash) ? datedByFiles[hash] : made(hash, 'at')));
+  return datedByFiles[first] - Math.max(...others) >= TIE_MS ? { latest: first, datedByFiles } : {};
 }
-/** latestCopy's answer: the content changed last, and where the files' times told it (their copies' times tied), each tied content's. */
-export type LatestCopy = { latest?: string; filesAt?: Record<string, number> };
+/**
+ * latestCopy's answer: the content changed last, and where its files' time told it (the copies' times tied), each tied
+ * content's files' time, by content (`datedByFiles`), which the question's lines say.
+ */
+export type LatestCopy = { latest?: string; datedByFiles?: Record<string, number> };
 /** Two contents changed less than this apart are a tie for latestCopy, by their copies' times as by their files'. */
 const TIE_MS = 1000;
 
