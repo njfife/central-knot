@@ -10348,7 +10348,7 @@ async function keepSessionCostsFlow() {
     await wait(2000);
     same('before the click: Start button and its info card match verbatim',
       [await a.text('#sessions-keep-start'), await a.text('#sessions-keep-info-card'), await a.exists('#sessions-collecting')],
-      ['Start keeping session costs', 'This home’s Central Knot folder keeps request times, models, token counts and estimated prices. No message text. You can turn this off in Settings; what was kept stays.', false]);
+      ['Start keeping session costs', 'This home’s Central Knot folder keeps each session’s project, request times, models, token counts and estimated prices. No message text. You can turn this off in Settings; what was kept stays.', false]);
     same('before the click: no sessions folder, no lock, no keepSessionCosts entry',
       [existsSync(sessionsDirA), existsSync(join(sessionsDirA, 'lock.sqlite')), jsonOrNothing(settingsPath)?.keepSessionCosts ?? null],
       [false, false, null]);
@@ -10408,7 +10408,7 @@ async function keepSessionCostsFlow() {
       [await a.run(`!!document.querySelector('#keep-session-costs')?.closest('section')?.querySelector('#settings-home')`),
         await a.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`),
         await a.text('#setting-session-costs-info-card')],
-      [true, 'true', 'This home’s Central Knot folder keeps request times, models, token counts and estimated prices. No message text. Turning this off keeps what was kept.']);
+      [true, 'true', 'This home’s Central Knot folder keeps each session’s project, request times, models, token counts and estimated prices. No message text. If you turn this off, what was kept stays.']);
     await captureAndCheck(a, 'settings-row', false, '#setting-session-costs');
     await captureCard860(a, '#setting-session-costs-info', '#setting-session-costs-info-card', 'settings-card', '#setting-session-costs');
     const beforeOffBytes = readFileSync(monthFileA, 'utf8');

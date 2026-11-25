@@ -35,7 +35,7 @@ const defaultSchedule = (fn: () => void, ms: number) => {
 export function createSessionKeeper(host: SessionKeepHost) {
   let open: { home: string; key: string } | undefined;
   let generation = 0;
-  let version = 0;
+  let seq = 0;
   let active: { generation: number; controller: AbortController } | undefined;
   let pendingStart = false;
   let quitting = false;
@@ -64,16 +64,16 @@ export function createSessionKeeper(host: SessionKeepHost) {
     const same = !!open && home === open.home;
     const on = same && host.isKept(open!.key);
     const collecting = same && !quitting && on && (pendingStart || active?.generation === generation);
-    return { home, on, collecting, ...(same && refused ? { refused } : {}), seq: version };
+    return { home, on, collecting, ...(same && refused ? { refused } : {}), seq };
   };
   const publish = () => {
     if (quitting || !open) return;
-    const { seq: _seq, ...state } = view();
+    const { seq: _dropped, ...state } = view();
     const encoded = JSON.stringify(state);
     if (encoded === lastSent) return;
     lastSent = encoded;
-    version++;
-    host.changed({ ...state, seq: version });
+    seq++;
+    host.changed({ ...state, seq });
   };
   const armTimer = () => {
     clearTimer();

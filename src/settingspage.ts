@@ -503,7 +503,7 @@ function syncEverythingRow(): HTMLElement | null {
 }
 
 /** Shared disclosure of what session-cost keeping stores, reused by the Sessions page and Settings info cards. */
-export const SESSION_COSTS_KEPT = 'This home’s Central Knot folder keeps request times, models, token counts and estimated prices. No message text.';
+export const SESSION_COSTS_KEPT = 'This home’s Central Knot folder keeps each session’s project, request times, models, token counts and estimated prices. No message text.';
 
 /** Turns keeping session costs on or off for the open home (sessionkeep.ts). */
 async function chooseSessionCosts(on: boolean): Promise<void> {
@@ -522,7 +522,7 @@ function sessionCostsRow(): HTMLElement {
   return settingRow('session-costs', 'Keep session costs', undefined,
     toggle({ on: !!costs?.on, label: 'Keep session costs', onchange: chosen => void chooseSessionCosts(chosen), id: 'keep-session-costs',
       attrs: { 'aria-describedby': notice ? `${infoCardId('setting-session-costs-info')} setting-session-costs-notice` : infoCardId('setting-session-costs-info'), title: null } }),
-    notice, undefined, `${SESSION_COSTS_KEPT} Turning this off keeps what was kept.`);
+    notice, undefined, `${SESSION_COSTS_KEPT} If you turn this off, what was kept stays.`);
 }
 
 /** What a settings file that couldn't be read at launch led to (types.ts HomeView settingsUnread), said first on the Overview (overview.ts needsYou) and here. */

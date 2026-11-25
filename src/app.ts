@@ -1802,6 +1802,7 @@ const noticesByKind = (view: HomeView): [PageKind, SyncNotice[]][] => [['skills'
  * folded into History by a newer one: main says each notice once, and a pass's own writes (a settings file it wrote) bring a read
  * with none right after the one that had them, so a page opened a moment later still tells what Synchronize everything, or an
  * edit, did. One the read brings a later save's notice of the same item for is superseded (matrix.ts supersedes): its save is in History.
+ * Also keeps the open home's newer `sessionCosts` when an older home read carries a lower `types.ts SessionCostsView.seq` (same rule as `applySessionCosts`).
  */
 function keepUnshown(was: HomeView | undefined, view: HomeView): HomeView {
   if (!was || was.home !== view.home) return view;
