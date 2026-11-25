@@ -13,7 +13,7 @@ import { access, constants, lstat, mkdir, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { sessionsDirectory, type HeldEntry } from './sessionrecord.ts';
-import { errorCode, writeAccess, type ShareContext } from './share.ts';
+import { errorCode, folderAccess, writeAccess, type ShareContext } from './share.ts';
 
 /** Permanent empty SQLite file inside `.central-knot/sessions/` used solely for OS-level store locking. */
 export const SESSION_LOCK_FILE = 'lock.sqlite';
@@ -84,7 +84,7 @@ export async function checkSessionStore(context: ShareContext): Promise<SessionL
   if (typeof dir !== 'string') return heldRefusal(dir);
   if (dir === 'missing') {
     const parent = await stat(dirname(dirPath)).catch(() => undefined);
-    const bad = parent && (!parent.isDirectory() || !(await access(dirname(dirPath), constants.W_OK).then(() => true, () => false)));
+    const bad = parent && (!parent.isDirectory() || !(await folderAccess(context, dirname(dirPath), constants.W_OK).then(() => true, () => false)));
     if (bad) return heldRefusal({ file: 'sessions', kind: parent.isDirectory() ? 'damaged' : 'not-a-file', reason: 'The sessions folder could not be created.' });
     return { status: 'ok', value: true };
   }

@@ -16,13 +16,13 @@
 //   goes and what was read) until the step is done, so recoverFolders puts it back after a crash and a copy moved aside is
 //   never read as gone.
 import { randomUUID } from 'node:crypto';
-import { access, constants, lstat, mkdir, readFile, readdir, readlink, realpath, rename, rm, stat, unlink } from 'node:fs/promises';
+import { constants, lstat, mkdir, readFile, readdir, readlink, realpath, rename, rm, stat, unlink } from 'node:fs/promises';
 import { dirname, join, relative, sep } from 'node:path';
 import { loadProblems, parseSkill } from './discovery.ts';
 import { configRoot, harnesses, writeRoot } from './harnesses.ts';
 import {
-  changedWhileSyncing, clearStaleStages, copyTree, errorCode, finishCopy, itemKey, landingOf, notCopied, placeCopy, readTree, removeTree,
-  retryWhileHeld, storeDirectory, vacant, writeDurably, type ShareContext, type Tree,
+  changedWhileSyncing, clearStaleStages, copyTree, denied, errorCode, finishCopy, folderAccess, itemKey, landingOf, notCopied, placeCopy,
+  readTree, removeTree, retryWhileHeld, storeDirectory, vacant, writeDurably, type ShareContext, type Tree,
 } from './share.ts';
 import type { HarnessId, Skill } from './types.ts';
 import { toolName } from './words.ts';
@@ -58,7 +58,7 @@ export async function rootProblem(context: ShareContext, tool: HarnessId): Promi
 export async function lockedRoot(context: ShareContext, tool: HarnessId): Promise<string | undefined> {
   const root = rootOf(context, tool);
   const there = await stat(root).then(info => info.isDirectory(), () => false);
-  if (!there || await access(root, constants.W_OK).then(() => true, () => false)) return undefined;
+  if (!there || await folderAccess(context, root, constants.W_OK).then(() => true, () => false)) return undefined;
   return `${toolName(tool)}’s skills folder can’t be written, so Central Knot can’t change the skill there. Once the folder’s permissions let it, ${toolName(tool)} catches up when sync runs.`;
 }
 
@@ -136,7 +136,7 @@ async function readFolder(directory: string): Promise<FolderContent> {
     if (tree.held) return { unseen: where => `${where} can’t be copied as it is: ${tree.held!.replace(/^It\b/, 'it')}`, isSkill: true };
     return { real: await realpath(directory), content, hash: tree.hash, at: await folderTime(directory) };
   } catch (error) {
-    return { unseen: where => `${where} is there but could not be read${errorCode(error) === 'EACCES' ? ' (permission denied)' : ''}. Nothing changes there until it reads again.` };
+    return { unseen: where => `${where} is there but could not be read${denied(error) ? ' (permission denied)' : ''}. Nothing changes there until it reads again.` };
   }
 }
 
@@ -189,7 +189,7 @@ export async function readSkillsFolder(tool: HarnessId, folder: string, rootLabe
 /** Beside a skills folder, on the same volume, where nothing loads as a skill (Claude Code lists dot-folders inside its own). */
 async function besideRoot(context: ShareContext, root: string): Promise<string> {
   const beside = await realpath(root).then(dirname, () => dirname(root));
-  if (await access(beside, constants.W_OK).then(() => true, () => false)) return beside;
+  if (await folderAccess(context, beside, constants.W_OK).then(() => true, () => false)) return beside;
   const fallback = join(storeDirectory(context.home), 'staging');
   await mkdir(fallback, { recursive: true });
   return fallback;
