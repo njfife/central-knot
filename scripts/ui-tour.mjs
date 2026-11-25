@@ -2121,10 +2121,10 @@ if (wanted('settings')) {
   await a.theme('light'); await shot(a, 'settings-history-prune-failed-light', 'The same, light.'); await a.theme('dark');
   chmodSync(store, 0o755);
   await keepFor(a, 30); await a.run(`document.activeElement?.blur()`);
-  // A wide row's hover: pointing at the hint lights the whole row, out to its button.
+  // A wide row's hover: pointing at the Log info mark lights the whole row, out to its button.
   await size(1728, 1117);
-  const hint = await a.run(`(() => { const box = document.querySelector('#setting-log-hint').getBoundingClientRect(); return { x: Math.round(box.left + 20), y: Math.round(box.top + box.height / 2) }; })()`);
-  await shot(a, 'settings-row-hover-1728', 'At 1728×1117, the pointer on the Log file hint: the whole row lights up, tying the text to its button far to the right.', hint);
+  const hint = await a.run(`(() => { const box = document.querySelector('#setting-log-info').getBoundingClientRect(); return { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) }; })()`);
+  await shot(a, 'settings-row-hover-1728', 'At 1728×1117, the pointer on the Log info mark: the whole row lights up, tying the text to its button far to the right.', hint);
   await size(860, 560);
   // The narrowest row: no real window reaches it (the window is at least 860 wide and has no zoom), so this emulates a
   // 573-px-wide page (860 at 150% zoom) with the sidebar open, to show the control moving under its text.
