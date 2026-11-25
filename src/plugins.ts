@@ -89,40 +89,72 @@ const fetchUrl = (source: string) => { const repo = githubRepo(source); return r
 export const gitEnv = () => ({ ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: '', SSH_ASKPASS: '', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o ConnectTimeout=15' });
 
 /**
- * What a run may also be given: `signal` stops it, as its timeout does; `input` is written to its input; `maxBytes` is the most
- * output kept per stream (4 MB unless said); `env`, variables added to its environment.
+ * What a run may also be given: `signal` stops it, as its timeout does; `input` is written to its input and closed; `maxBytes`
+ * is the most output kept per stream (4 MB unless said); `env`, variables added to its environment; `drainMs`, when positive,
+ * caps how long to wait after exit for inherited pipes to close and kills any lingering process group when the run ends;
+ * `catchStart`, when true (hookrun.ts), turns a synchronous start throw into `reason: 'error'` instead of rejecting.
  */
-export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; maxBytes?: number; env?: NodeJS.ProcessEnv }
+export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; maxBytes?: number; env?: NodeJS.ProcessEnv; drainMs?: number; catchStart?: boolean }
 /**
- * A command's outcome: `output` is both streams as trimmed text (what failures are worded from); `stdout` its output byte for
- * byte. A run stopped by its `signal` reads as one that timed out (`'timeout'`). `leftRunning`: set where a stop on Windows
- * was not known to end everything the command started (launch.ts stopTree).
+ * A command's outcome: `output` is both streams as trimmed text (what failures are worded from); `stdout` and `stderr` each
+ * stream byte for byte. A run stopped by its `signal` still reports `code: 'timeout'` for existing callers, while `reason`
+ * distinguishes `'timeout'`, `'aborted'`, `'overflow'`, `'missing'` and `'error'` (with `spawnError`), and `signal` names a
+ * signal that ended the process itself. `leftRunning`: set where a stop on Windows was not known to end everything the command
+ * started (launch.ts stopTree).
  */
-export type RunResult = { code: number | 'timeout' | 'missing'; output: string; stdout: Buffer; leftRunning?: boolean };
+export type RunResult = {
+  code: number | 'timeout' | 'missing'; output: string; stdout: Buffer; stderr: Buffer;
+  reason?: 'timeout' | 'aborted' | 'overflow' | 'missing' | 'error'; spawnError?: string; signal?: NodeJS.Signals; leftRunning?: boolean;
+};
 
 /**
  * Runs a command (started as launch.ts start says: on Windows a .cmd through cmd.exe), stopped at its timeout or its `signal`.
- * `group` (git's runs and mcpsigninrun.ts's, off Windows): it runs in a process group of its own, and stopping it stops the
- * whole group, the helpers it started (git's remote-http) with it. On Windows the stop and the end are launch.ts stopRun's:
- * the command and all it started are asked to stop; what could not be is said by `leftRunning`.
+ * `group` (git's, mcpsigninrun.ts's and hookrun.ts's runs, off Windows): it runs in a process group of its own, and stopping it
+ * stops the whole group, the helpers it started (git's remote-http, a hook's children) with it. On Windows the stop and the end
+ * are launch.ts stopRun's: the command and all it started are asked to stop; what could not be is said by `leftRunning`.
  */
 export function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number; group?: boolean } & RunOptions): Promise<RunResult> {
-  const maxBytes = options.maxBytes ?? 4 * 1024 * 1024, group = !!options.group && process.platform !== 'win32';
+  const maxBytes = options.maxBytes ?? 4 * 1024 * 1024;
+  const group = !!options.group && process.platform !== 'win32';
+  const drainMs = options.drainMs && options.drainMs > 0 ? options.drainMs : 0;
   return new Promise(done => {
     const out: Buffer[] = [], err: Buffer[] = [];
-    let stopped = false, cut = false, ended = false, leftRunning = false;
-    const child = start(file, args, { env: options.env, cwd: options.cwd, windowsHide: true, detached: group });
+    let stopped: 'timeout' | 'aborted' | undefined;
+    let cut = false;
+    let ended = false;
+    let leftRunning = false;
+    let errMsg: string | undefined;
+    let termSignal: NodeJS.Signals | undefined;
+    let drain: NodeJS.Timeout | undefined;
+    let child;
+    try {
+      child = start(file, args, { env: options.env, cwd: options.cwd, windowsHide: true, detached: group });
+    } catch (error) {
+      if (!options.catchStart) throw error;
+      const msg = error instanceof Error ? error.message : String(error);
+      done({ code: 1, output: msg, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0), reason: 'error', spawnError: msg });
+      return;
+    }
     const windows = process.platform === 'win32' ? stopRun<RunResult['code']>(child, (code, whole) => { leftRunning = !whole; end(code); }) : undefined;
     const kill = windows?.stop ?? (() => { try { if (group && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); } catch { /* already ended */ } });
-    const stop = () => { stopped = true; kill(); };
+    const stop = (why: 'timeout' | 'aborted') => {
+      if (ended) return;
+      stopped ??= why;
+      kill();
+    };
+    const onAbort = () => stop('aborted');
     // Past maxBytes on either stream it ran, it just said too much: it is stopped, and what it said up to maxBytes is kept.
     const take = (chunks: Buffer[]) => {
       let size = 0;
       return (chunk: Buffer) => {
         const room = maxBytes - size;
         size += chunk.length;
-        if (chunk.length <= room) { chunks.push(chunk); return; }
+        if (chunk.length <= room) {
+          chunks.push(chunk);
+          return;
+        }
         if (room > 0) chunks.push(chunk.subarray(0, room));
+        if (cut) return;
         cut = true;
         kill();
       };
@@ -131,20 +163,43 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
       if (ended) return;
       ended = true;
       clearTimeout(timer);
-      options.signal?.removeEventListener('abort', stop);
-      const stdout = Buffer.concat(out), output = `${stdout.toString('utf8')}${Buffer.concat(err).toString('utf8')}`.replace(/\r/g, '').trim();
+      clearTimeout(drain);
+      options.signal?.removeEventListener('abort', onAbort);
+      if (drainMs) {
+        if (group && child.pid) kill();
+        child.stdout.destroy();
+        child.stderr.destroy();
+      }
+      const stdout = Buffer.concat(out);
+      const stderr = Buffer.concat(err);
+      const output = `${stdout.toString('utf8')}${stderr.toString('utf8')}`.replace(/\r/g, '').trim();
       const left = leftRunning ? { leftRunning } : {};
-      if (cut) done({ code: 1, output: `${output.slice(-2000)}\n(output cut: more than ${maxBytes / 1024 / 1024} MB)`, stdout, ...left });
-      else done({ code: stopped && code !== 0 ? 'timeout' : code, output, stdout, ...left });
+      const sig = termSignal && !stopped && !cut ? { signal: termSignal } : {};
+      if (cut) done({ code: 1, output: `${output.slice(-2000)}\n(output cut: more than ${maxBytes / 1024 / 1024} MB)`, stdout, stderr, reason: 'overflow', ...left });
+      else if (errMsg !== undefined && (options.catchStart || !stopped)) done({ code, output, stdout, stderr, reason: code === 'missing' ? 'missing' : 'error', spawnError: errMsg, ...left });
+      else if (stopped && (code !== 0 || drainMs)) done({ code: 'timeout', output, stdout, stderr, reason: stopped, ...left });
+      else done({ code, output, stdout, stderr, ...left, ...sig });
     };
     const settle = windows?.settle ?? end;
     child.stdout.on('data', take(out));
     child.stderr.on('data', take(err));
-    child.on('error', error => settle(errorCode(error) === 'ENOENT' ? 'missing' : 1));
-    child.on('close', code => settle(code ?? 1));
+    child.on('error', error => {
+      errMsg = error.message;
+      settle(errorCode(error) === 'ENOENT' ? 'missing' : 1);
+    });
+    child.on('close', (code, sig) => {
+      if (code === null && sig) termSignal = sig;
+      settle(code ?? 1);
+    });
+    if (drainMs) {
+      child.on('exit', (code, sig) => {
+        if (code === null && sig) termSignal = sig;
+        if (!ended) drain = setTimeout(() => settle(code ?? 1), drainMs);
+      });
+    }
     // A timeout of zero (or less) is none, as it was for execFile.
-    const timer = options.timeoutMs > 0 ? setTimeout(stop, options.timeoutMs) : undefined;
-    if (options.signal?.aborted) stop(); else options.signal?.addEventListener('abort', stop, { once: true });
+    const timer = options.timeoutMs > 0 ? setTimeout(() => stop('timeout'), options.timeoutMs) : undefined;
+    if (options.signal?.aborted) onAbort(); else options.signal?.addEventListener('abort', onAbort, { once: true });
     // A command that ends without reading all its input (stopped, say) is no error here.
     child.stdin.on('error', () => undefined);
     if (options.input !== undefined) child.stdin.end(options.input);

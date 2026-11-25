@@ -308,6 +308,10 @@ export interface DesktopApi {
   pluginItemTexts(plugin: string, marketName: string, kind: PartKind, name: string): Promise<{ tool: HarnessId; text: string }[]>;
   /** One hook's declaring entry and the script its command names, read from disk on click (hooksource.ts). Nothing is run. */
   hookSource(home: string, ref: HookSourceRef): Promise<HookSource>;
+  /** Runs one hook's command once as its tool would on click (hookrun.ts); only on this computer's own home. */
+  hookRun(home: string, ref: HookSourceRef): Promise<HookRunResult>;
+  /** Stops a hook run currently under way for this home and hook identity (hookrun.ts). */
+  hookStop(home: string, ref: HookSourceRef): Promise<void>;
 }
 
 export interface PluginActionResult { stopped?: string; reports: ActionReport[] }
@@ -879,6 +883,10 @@ export interface NamedPart { name: string; description: string; text: string; pa
 export interface DeclaredHook {
   declaredIn: string; event: string; matcher?: string; at: number;
   launch?: { shell: string } | { program: string; args: string[] };
+  /** Non-command hook type when `launch` was still extracted for display (refused at run time by hookrun.ts). */
+  type?: string;
+  /** Claude Code's explicit `shell` field when set (e.g. 'bash', 'powershell'). */
+  shell?: string;
   timeout?: number; cwd?: string; env?: Record<string, string>;
 }
 /** Which owner declares a hook (own tool settings, a tool's installed plugin copy, or a marketplace copy by name). */
@@ -892,6 +900,16 @@ export type HookSourceRef = { declaredIn: string; event: string; at: number; com
 export interface HookSource {
   problem?: string; file?: string; entry?: string;
   script?: { path: string; text?: string; problem?: string };
+}
+/** What a hook run came to (hookrun.ts whatHookWouldAdd / runHook): each row of the tool output rules plus gate refusals. */
+export type HookRunOutcome = 'adds' | 'empty' | 'copilot-ignored' | 'claude-exit-2' | 'failed' | 'timeout' | 'stopped' | 'missing' | 'not-added' | 'refused';
+/** Why `HookRunOutcome` is `'not-added'` (cases outside the short outcome sentences, kept for A2's wording). */
+export type HookNotAddedDetail = 'json-no-context' | 'json-block' | 'invalid-json' | 'codex-prompt-exit-2' | 'overflow' | 'spawn-error';
+/** One hook run's complete result from main (hook:run), never stored. */
+export interface HookRunResult {
+  outcome: HookRunOutcome; detail?: HookNotAddedDetail; added?: string; allPrinted: string; stderr: string;
+  exitCode?: number; signal?: NodeJS.Signals; source?: string; durationMs: number; at: string; cwd: string; emptyPrompt: boolean;
+  overLimit?: { limit: number; unit: 'chars' | 'tokens' }; limitSec?: number; program?: string; problem?: string;
 }
 /** What a plugin holds, read from its files (catalogdetail.ts); the row counts come from the same read. */
 export interface PluginContents {
@@ -1151,6 +1169,8 @@ export interface InstructionFile {
   ownHooks?: DeclaredHook[];
   /** Each of those settings files that is there but couldn't be read or doesn't parse: its hooks aren't known. */
   ownHooksUnread?: string[];
+  /** Hooks turned off in the tool's settings (the setting key found: e.g. `disableAllHooks`, `[features] hooks = false`, `[features] codex_hooks = false`): declared, not run. */
+  ownHooksDisabled?: string;
   /** Pi's packages and OpenCode's plugins, each as its settings list it (pluginitems.ts sessionSettings): code that can add to its sessions. */
   extensions?: string[];
   /** Set when this tool gets the base instructions (`chosen`) or its file holds a base block: its own text, its copy of the base,
