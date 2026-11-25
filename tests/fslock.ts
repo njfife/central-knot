@@ -14,12 +14,6 @@ const execFileAsync = promisify(execFile);
 /** Skip value on macOS and Linux when running as root (root bypasses permission locks); false on Windows. */
 export const lockSkip: string | false = process.getuid?.() === 0 && 'root bypasses file and folder permission locks';
 
-/** Skip value on Windows while the app's own locked-folder checks (fs.access W_OK / EACCES-only) are fixed in step 6B. */
-export const winLockAppSkip: string | false = process.platform === 'win32' && 'App locked-folder checks on Windows are step 6B; covered on macOS and Linux.';
-
-/** Skip value on POSIX as root or on Windows for step 6B app locked-folder gaps. */
-export const lockAppSkip: string | false = lockSkip || winLockAppSkip;
-
 export type LockKind = 'dir-readonly' | 'dir-unreadable' | 'dir-unlistable' | 'file-unreadable' | 'dir-noremove';
 
 // Specific Windows rights only (never simple `W` or `D`, which include SYNCHRONIZE and break ordinary opens):

@@ -1,78 +1,108 @@
-// How Windows answers "can this folder be written?" when the folder itself is opened for writing and closed (the way
-// share.ts's one answer takes on Windows), measured before anything is built on it.
+// The one answer to "can this folder be written?" (share.ts folderAccess) and a refusal read as a denial (share.ts denied),
+// as worked examples: off Windows the answer is access itself; on Windows the folder itself opened for writing and closed,
+// once a folder a pass, leaving nothing behind and waking no watcher.
 import assert from 'node:assert/strict';
 import { constants, watch } from 'node:fs';
-import { chmod, mkdir, mkdtemp, open, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import fsp, { access, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { test } from 'node:test';
-import { lockPath, makeWritableTree, withLock } from './fslock.ts';
+import { dirname, join } from 'node:path';
+import { mock, test } from 'node:test';
+import { denied, folderAccess } from '../src/share.ts';
+import { lockPath, lockSkip, makeWritableTree, withLock } from './fslock.ts';
+import { pass, put, roots, sandbox, turnOn } from './skillclicks.ts';
 
 const windowsOnly = process.platform !== 'win32' && 'The Windows way only.';
-const openForWriting = async (folder: string) => { await (await open(folder, constants.O_WRONLY)).close(); };
 const outcome = (done: Promise<unknown>) => done.then(() => 'ok', (error: NodeJS.ErrnoException) => error.code ?? String(error));
 const pause = (ms: number) => new Promise(done => setTimeout(done, ms));
 
-async function inBase(work: (base: string) => Promise<void>) {
-  const base = await mkdtemp(join(tmpdir(), 'ck-folderaccess-'));
-  try { await work(base); } finally { await makeWritableTree(base); await rm(base, { recursive: true, force: true }); }
+async function inBase(work: (folder: string) => Promise<void>) {
+  const base = await mkdtemp(join(tmpdir(), 'ck-folderaccess-')), folder = join(base, 'skills');
+  await mkdir(folder);
+  try { await work(folder); } finally { await makeWritableTree(base); await rm(base, { recursive: true, force: true }); }
 }
 
-test('An empty folder opens for writing; under a read-only lock it is refused; once unlocked it opens again; nothing is made in it', { skip: windowsOnly }, () => inBase(async base => {
-  const folder = join(base, 'skills');
-  await mkdir(folder);
-  const before = await outcome(openForWriting(folder));
+test('On Windows a folder that can be written opens for writing; under a read-only or unreadable lock it is refused; unlocked, it opens again; nothing is made in it', { skip: windowsOnly }, () => inBase(async folder => {
+  const ask = () => outcome(folderAccess({}, folder, constants.W_OK));
+  const before = await ask();
   const unlock = await lockPath(folder, 'dir-readonly');
-  const locked = await outcome(openForWriting(folder));
+  const locked = await ask();
   await unlock();
-  const after = await outcome(openForWriting(folder));
-  const unreadable = await withLock(folder, 'dir-unreadable', () => outcome(openForWriting(folder)));
-  const unlistable = await withLock(folder, 'dir-unlistable', () => outcome(openForWriting(folder)));
-  console.log(`measured: open O_WRONLY before ${before}, dir-readonly ${locked}, after ${after}, dir-unreadable ${unreadable}, dir-unlistable ${unlistable}`);
-  assert.deepEqual([before, locked, after], ['ok', 'EPERM', 'ok']);
+  const unreadable = await withLock(folder, 'dir-unreadable', ask);
+  assert.deepEqual([before, locked, await ask(), unreadable], ['ok', 'EPERM', 'ok', 'EPERM']);
   assert.deepEqual(await readdir(folder), []);
 }));
 
-test('A folder that takes a new file but refuses a removal opens for writing', { skip: windowsOnly }, () => inBase(async base => {
-  const folder = join(base, 'skills');
-  await mkdir(folder);
+test('On Windows a folder that takes a new file but refuses a removal can be written: the removal itself says it failed', { skip: windowsOnly }, () => inBase(async folder => {
   await writeFile(join(folder, 'old.txt'), 'old\n');
-  const [opened, made, removed] = await withLock(folder, 'dir-noremove', async () =>
-    [await outcome(openForWriting(folder)), await outcome(writeFile(join(folder, 'new.txt'), 'new\n')), await outcome(rm(join(folder, 'old.txt')))]);
-  console.log(`measured: dir-noremove open ${opened}, new file ${made}, removal ${removed}`);
-  assert.deepEqual([opened, made], ['ok', 'ok']);
-  assert.notEqual(removed, 'ok');
+  await withLock(folder, 'dir-noremove', async () => {
+    assert.equal(await outcome(folderAccess({}, folder, constants.W_OK)), 'ok');
+    assert.notEqual(await outcome(rm(join(folder, 'old.txt'))), 'ok');
+  });
 }));
 
-test('A folder with the read-only attribute (chmod 0o555 on Windows)', { skip: windowsOnly }, () => inBase(async base => {
-  const folder = join(base, 'skills');
-  await mkdir(folder);
-  await chmod(folder, 0o555);
-  const opened = await outcome(openForWriting(folder));
-  const made = await outcome(writeFile(join(folder, 'new.txt'), 'new\n'));
-  await chmod(folder, 0o755);
-  console.log(`measured: read-only attribute open ${opened}, new file ${made}`);
+test('Off Windows the answer is access itself: the caller’s mode, its error, asked every time', { skip: process.platform === 'win32' ? 'Off Windows only.' : lockSkip }, () => inBase(async folder => {
+  const reads = new Map<string, Promise<unknown>>();
+  const both = (mode: number) => Promise.all([outcome(folderAccess({ reads }, folder, mode)), outcome(access(folder, mode))]);
+  assert.deepEqual(await both(constants.W_OK | constants.X_OK), ['ok', 'ok']);
+  await withLock(folder, 'dir-readonly', async () => {
+    assert.deepEqual(await both(constants.W_OK), ['EACCES', 'EACCES'], 'asked again once locked: nothing kept from the first ask');
+    assert.deepEqual(await both(constants.R_OK | constants.X_OK), ['ok', 'ok']);
+  });
+  await withLock(folder, 'dir-unlistable', async () => {
+    assert.deepEqual(await both(constants.X_OK), ['ok', 'ok']);
+    assert.deepEqual(await both(constants.W_OK | constants.X_OK), ['EACCES', 'EACCES']);
+  });
+  assert.deepEqual(await Promise.all([outcome(folderAccess({}, join(folder, 'gone'), constants.W_OK)), outcome(access(join(folder, 'gone'), constants.W_OK))]), ['ENOENT', 'ENOENT']);
+  assert.equal(reads.size, 0);
 }));
 
-test('Opening folders for writing gives a recursive watch, and one on the folder above, no event; a real entry gives one', { skip: windowsOnly }, () => inBase(async base => {
-  const tool = join(base, '.codex'), skills = join(tool, 'skills'), nested = join(skills, 'notes', 'scripts');
-  await mkdir(nested, { recursive: true });
-  await writeFile(join(skills, 'notes', 'SKILL.md'), '---\nname: notes\ndescription: Notes.\n---\n');
-  const recursive: string[] = [], above: string[] = [];
-  const watchers = [watch(skills, { recursive: true }, (event, name) => recursive.push(`${event}:${name}`)), watch(tool, (event, name) => above.push(`${event}:${name}`))];
+test('A refusal is a denial of permission by its code: EACCES everywhere, EPERM on Windows only', () => {
+  const said = (code: string | undefined) => (['darwin', 'linux', 'win32'] as const).map(platform => denied(code ? { code } : new Error('no code'), platform));
+  assert.deepEqual(said('EACCES'), [true, true, true]);
+  assert.deepEqual(said('EPERM'), [false, false, true]);
+  assert.deepEqual(said('ENOENT'), [false, false, false]);
+  assert.deepEqual(said(undefined), [false, false, false]);
+});
+
+test('On Windows a hundred passes over four tools open each folder once a pass at most and leave every tool’s folder as it was', { skip: windowsOnly }, async () => {
+  const box = await sandbox(['claude-cli', 'copilot-cli', 'codex-cli', 'opencode-cli']);
+  const opened: string[] = [], open = fsp.open;
+  const toolFolders = box.tools.map(tool => dirname(join(box.home, roots[tool as keyof typeof roots])));
+  const entries = () => Promise.all(toolFolders.map(folder => readdir(folder, { recursive: true }).then(names => names.sort())));
+  let before: string[][] = [];
   try {
-    await pause(300);
-    const entries = await readdir(skills, { recursive: true });
-    const times = await stat(skills);
-    for (let pass = 0; pass < 100; pass++) for (const folder of [tool, skills, join(skills, 'notes'), nested]) await openForWriting(folder);
+    await put(box, 'claude-cli');
+    await turnOn(box);
+    before = await entries();
+    mock.method(fsp, 'open', (path: string, flags: unknown, ...rest: []) => { if (flags === constants.O_WRONLY) opened.push(path); return open(path, flags as number, ...rest); });
+    syncBuiltinESMExports();
+    for (let at = 0; at < 100; at++) {
+      opened.length = 0;
+      await pass(box);
+      assert.ok(opened.length >= box.tools.length, `pass ${at}: each tool’s skills folder is asked about`);
+      assert.equal(new Set(opened).size, opened.length, `pass ${at}: ${opened.join(', ')}`);
+    }
+  } finally {
+    mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+  try { assert.deepEqual(await entries(), before); } finally { await box.cleanup(); }
+});
+
+test('On Windows the opens wake no watcher, the tool’s own or the folder above, nested folders included; a real entry does', { skip: windowsOnly }, () => inBase(async skills => {
+  const nested = join(skills, 'notes', 'scripts'), events: string[] = [];
+  await mkdir(nested, { recursive: true });
+  const watchers = [watch(skills, { recursive: true }, (event, name) => events.push(`${event} ${name}`)), watch(dirname(skills), (event, name) => events.push(`${event} ${name}`))];
+  try {
+    // What the watches' own start brings in (a folder's last access, on a disk that keeps it) is not the opens': it settles first.
     await pause(1000);
-    const fromOpens = { recursive: [...recursive], above: [...above] };
-    const timesAfter = await stat(skills);
-    assert.deepEqual(await readdir(skills, { recursive: true }), entries);
+    events.length = 0;
+    for (let at = 0; at < 100; at++) for (const folder of [skills, join(skills, 'notes'), nested]) await folderAccess({}, folder, constants.W_OK);
+    await pause(1000);
+    assert.equal(events.length, 0, events.join(', '));
     await writeFile(join(nested, 'real.txt'), 'real\n');
-    for (let wait = 0; wait < 40 && !recursive.some(event => event.includes('real.txt')); wait++) await pause(50);
-    console.log(`measured: events from opens ${JSON.stringify(fromOpens)}; skills mtime ${times.mtimeMs} -> ${timesAfter.mtimeMs}, atime ${times.atimeMs} -> ${timesAfter.atimeMs}; after a real entry ${JSON.stringify(recursive)}`);
-    assert.deepEqual(fromOpens, { recursive: [], above: [] });
-    assert.ok(recursive.some(event => event.includes('real.txt')));
+    for (let wait = 0; wait < 40 && !events.length; wait++) await pause(50);
+    assert.ok(events.some(event => event.includes('real.txt')), events.join(', '));
   } finally { for (const watcher of watchers) watcher.close(); }
 }));

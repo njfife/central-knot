@@ -12,6 +12,8 @@
 //   themselves where they can't be read (keepUnreadable); and a wait for Resume held in memory (ShareContext resumeFirst);
 // - on Windows only, a rename, link or removal another program holds up for a moment tried again for about a second
 //   (retryWhileHeld, used by the writes here and by skillfiles.ts), and a refusal that stays in words (plainError);
+// - the one answer to "can this folder be written?" (folderAccess: on Windows the folder opened for writing, once a pass), and
+//   whether a refusal is a denial of permission (denied, which discovery.ts and skillfiles.ts read a refusal by);
 // - a skill's folder read as one content (readTree), copied byte for byte (copyTree), staged beside its target and put in
 //   place (stagingFolder, placeCopy).
 // Not here: a kind's record (kindstore.ts and each kind's store), History (history.ts), a tool's folders and files
@@ -133,11 +135,16 @@ export const errorCode = (error: unknown) => (typeof error === 'object' && error
 /** What Windows answers while another program has a file open a moment, and for a read-only file or one not permitted alike. */
 const HELD_CODES = ['EPERM', 'EBUSY'];
 
+/** A refusal for want of permission: EACCES, and on Windows EPERM too, which is how a denial arrives there. */
+export const denied = (error: unknown, platform: NodeJS.Platform = process.platform) =>
+  errorCode(error) === 'EACCES' || (platform === 'win32' && errorCode(error) === 'EPERM');
+const DENIED_WORDS = 'Permission was denied.';
+
 /** An error in plain words. On Windows, HELD_CODES can't tell a file held open from a read-only one or one not permitted. */
 export function plainError(error: unknown, platform: NodeJS.Platform = process.platform): string {
   const code = errorCode(error);
   if (platform === 'win32' && HELD_CODES.includes(code)) return HELD_ON_WINDOWS;
-  if (code === 'EACCES' || code === 'EPERM') return 'Permission was denied.';
+  if (code === 'EACCES' || code === 'EPERM') return DENIED_WORDS;
   if (code === 'ENOSPC') return 'The disk is full.';
   if (code === 'EROFS') return 'That folder is read-only.';
   if (code === 'ENAMETOOLONG') return 'A file name is too long for this disk.';
@@ -581,8 +588,8 @@ export async function syncGate(context: ShareContext): Promise<SyncGate> {
   // Even a new home needs somewhere to save its first answer. A new store is created in the home.
   const store = storeDirectory(context.home);
   const folder = await exists(store) ? store : context.home;
-  try { await access(folder, constants.W_OK | constants.X_OK); }
-  catch (error) { return { state: 'stopped', reason: plainError(error) }; }
+  try { await folderAccess(context, folder, constants.W_OK | constants.X_OK); }
+  catch (error) { return { state: 'stopped', reason: denied(error) ? DENIED_WORDS : plainError(error) }; }
   const remembered = (await readSettings(context.settingsPath)).homes?.[context.home]?.generation;
   if (!record && remembered) return { state: 'stopped', reason: `The sync record this app created is missing. ${NOTHING_CHANGED}` };
   if (record && remembered && remembered !== record.generation) return { state: 'stopped', reason: `The sync record is not the one this app last used. ${NOTHING_CHANGED}` };
@@ -616,6 +623,24 @@ export async function takeOverSync(context: ShareContext): Promise<{ stopped?: s
 /** Whether this build syncs this home and may write it: History is kept tidy, and passes run, only where both hold. */
 export async function syncsHere(context: ShareContext): Promise<boolean> {
   return (await writeAccess(context)).allowed && (await syncGate(context)).state === 'ready';
+}
+
+/**
+ * The one answer to "can this folder be written?", for a folder that is there: it resolves where it can and rejects with the
+ * refusal where it can't, as access does. Off Windows it is access(folder, mode), asked each time. On Windows, where access looks
+ * at no folder's permissions, the folder itself is opened for writing and closed, and `mode` is not asked: nothing is made or
+ * changed in it, so nothing is left there and no watcher sees a name. A folder that lets a file be made but not its own
+ * attributes be written is refused, so the answer errs on holding back; one that lets a file be made but none removed passes
+ * (the removal then says it failed). Within a pass or a view (ShareContext reads, by the folder's real path) a folder is opened
+ * once; the next pass opens it again, which is when an unlock is seen.
+ */
+export async function folderAccess(context: Pick<ShareContext, 'reads'>, folder: string, mode: number): Promise<void> {
+  if (process.platform !== 'win32') return access(folder, mode);
+  const opened = () => open(folder, constants.O_WRONLY).then(handle => handle.close());
+  if (!context.reads) return opened();
+  const key = `folderAccess ${await realpath(folder).catch(() => folder)}`;
+  if (!context.reads.has(key)) context.reads.set(key, opened());
+  return context.reads.get(key) as Promise<void>;
 }
 
 /** Nothing is written while this build is held; the real home only by explicitly choosing it. A simulated home that reaches it stays read-only. */
@@ -665,7 +690,7 @@ export function storeFolder(key: string): string {
 export async function stagingFolder(context: ShareContext, root: string): Promise<string> {
   await mkdir(root, { recursive: true });
   const beside = dirname(await realpath(root));
-  try { await access(beside, constants.W_OK); return beside; }
+  try { await folderAccess(context, beside, constants.W_OK); return beside; }
   catch {
     const fallback = join(storeDirectory(context.home), 'staging');
     await mkdir(fallback, { recursive: true });

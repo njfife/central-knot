@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { winLockAppSkip, withLock } from './fslock.ts';
+import { withLock } from './fslock.ts';
 
 import { NO_PLUGINS, saveProfile, switchProfile } from '../src/profiles.ts';
 import { libraryGate, newRecord, remember, saveRecord, syncGate, type Entering, type ShareContext } from '../src/share.ts';
@@ -66,11 +66,11 @@ inBox('First setup requires write access to the existing store, or to the home t
   for (const folder of [box.home, store]) {
     if (folder === store) await mkdir(store);
     await withLock(folder, 'dir-readonly', async () => {
-      assert.equal((await syncGate(box.context)).state, 'stopped');
+      assert.deepEqual(await syncGate(box.context), { state: 'stopped', reason: 'Permission was denied.' });
     });
     assert.deepEqual(await syncGate(box.context), { state: 'first-setup' });
   }
-}, { skip: winLockAppSkip });
+});
 
 test('The gate in a home with no sync record: lets every write in; only `start` makes the record and remembers it', async () => {
   assert.deepEqual(await row('no record'), { 'only asked': 'let in', start: 'let in, with its record, record made, remembered', resume: 'let in', ownFile: 'let in' });
