@@ -6,6 +6,7 @@ import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { nameAndDescription } from './discovery.ts';
 import { displayPath } from './machine.ts';
 import { pluginTools } from './presence.ts';
+import type { NeutralServer } from './mcp.ts';
 import type { DeclaredHook, HarnessId, NamedPart, PluginContents, PluginDetail } from './types.ts';
 import { githubRepo, isFolder, isHttps, nameOfFile, record, strings, text } from './values.ts';
 import { commandLine } from './words.ts';
@@ -269,6 +270,11 @@ function serverRuns(server: unknown): string {
   if (!entry) return '';
   return text(entry.url) || (text(entry.command) ? commandLine(text(entry.command), strings(entry.args)) : '');
 }
+/** How an MCP server entry in Claude Code's shape runs: its `type`, else http where it has a URL, else stdio (mcp.ts fromJson reads the tools' own entries by it too). */
+export function entryTransport(entry: Record<string, unknown>): NeutralServer['transport'] {
+  const type = String(entry.type ?? (entry.url ? 'http' : 'stdio'));
+  return type === 'sse' ? 'sse' : type === 'http' || type === 'streamable-http' ? 'http' : 'stdio';
+}
 
 /** A plugin's own .claude-plugin/plugin.json as an object, or undefined when it has none. */
 export const pluginManifest = (folder: string, root = folder) => jsonInside(root, join(folder, '.claude-plugin/plugin.json'));
@@ -319,9 +325,11 @@ const listedPaths = (folder: string, ...lists: unknown[]) =>
 /** What the manifest and entry list for `key` (commands, agents), or with no list in either, the kind's own folder. */
 const listedOr = (folder: string, { own, added }: { own: Record<string, unknown>; added: Record<string, unknown> }, key: string) =>
   (own[key] === undefined && added[key] === undefined ? [join(folder, key)] : listedPaths(folder, own[key], added[key]));
-/** Each MCP server with what it runs or connects to, and its entry as JSON, by name. */
-const serverList = (servers: Record<string, unknown>) =>
-  Object.entries(servers).map(([name, server]) => ({ name, runs: serverRuns(server), entry: JSON.stringify(server) })).sort((first, second) => first.name.localeCompare(second.name));
+/** Each MCP server with what it runs or connects to, how (none where its entry isn't an object), and its entry as JSON, by name. */
+const serverList = (servers: Record<string, unknown>) => Object.entries(servers).map(([name, server]) => {
+  const entry = record(server);
+  return { name, runs: serverRuns(server), entry: JSON.stringify(server), ...(entry ? { transport: entryTransport(entry) } : {}) };
+}).sort((first, second) => first.name.localeCompare(second.name));
 
 /** A plugin's skills, read by each tool's rule (see pluginContents). */
 async function skillsOf(folder: string, entry: Record<string, unknown>, root: string, readAs: ReadAs, unread?: string[]): Promise<NamedPart[]> {

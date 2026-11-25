@@ -782,6 +782,7 @@ export interface PartRef { kind: PartKind; name: string }
  * `plugin:name`, and its own switch for the item takes that name). Its key in a profile's plan is profileplan.ts pluginItemKey's.
  */
 export interface PluginItem { kind: PartKind; name: string; description: string; /** MCP servers: what it runs or connects to. */ runs?: string;
+  /** MCP servers: how it runs, where its entry says (PluginContents mcpServers). */ transport?: NeutralServer['transport'];
   /**
    * Skills and agents: the name its plan key is made of (profileplan.ts pluginItemKey): a skill's folder's and an agent's file's
    * without .md (values.ts nameOfFile), as Pi, OpenCode and Antigravity name its placed copy; for the skill of a plugin that is one skill,
@@ -942,8 +943,8 @@ export interface PluginContents {
   hooksByTool: Partial<Record<HarnessId, DeclaredHook[]>>;
   /** Each hooks file it has that couldn't be read as JSON: what those declare isn't known (catalogdetail.ts pluginHooks). */
   hooksUnread?: string[];
-  /** Each MCP server with what it runs or connects to, and its entry as the plugin writes it, as JSON. */
-  mcpServers: { name: string; runs: string; entry: string }[];
+  /** Each MCP server with what it runs or connects to, how where its entry is an object (catalogdetail.ts entryTransport), and its entry as the plugin writes it, as JSON. */
+  mcpServers: { name: string; runs: string; transport?: NeutralServer['transport']; entry: string }[];
   /** Some server refers to ${CLAUDE_PLUGIN_ROOT}, which only Claude Code fills in. */
   mcpUsesPluginRoot: boolean;
   lspServers: string[];
@@ -1116,6 +1117,8 @@ export interface LibraryFacts {
   switchProblem?: Partial<Record<HarnessId, SwitchProblem>>;
   /** MCP servers: tools whose own switch turns it off there (mcpswitch.ts), read at each look: the entry stays, and the tool doesn't start it. */
   switchedOff?: HarnessId[];
+  /** MCP servers: how it runs (stdio: on this computer), as its version in the library or its first copy found holds it; none where that can't be read. */
+  transport?: NeutralServer['transport'];
   /** MCP servers: the exact name Copilot CLI will write from its kept own part (servers.ts writeServer) when it has no copy there now. */
   copilotName?: string;
   /** MCP servers: the server's exact Copilot CLI name while `disabledMcpServers` in Copilot CLI's settings.json holds it off (managed and not kept out). */
