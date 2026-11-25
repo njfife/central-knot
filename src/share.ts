@@ -38,6 +38,7 @@ import { instructionFiles } from './instructions.ts';
 import { displayPath } from './machine.ts';
 import { mcpFile } from './mcp.ts';
 import { managedTools } from './presence.ts';
+import { NOTHING_CHANGED } from './words.ts';
 import type { HarnessId, HistoryDays, HomeMode, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
 import type { KeptReads } from './librarypass.ts';
 import type { ToolWays } from './reload.ts';
@@ -520,8 +521,6 @@ export async function forgetStale(context: ShareContext, generation: string) {
   const { [context.home]: _stale, ...homes } = settings.homes!;
   await writeDurably(context.settingsPath, `${JSON.stringify({ ...settings, homes }, null, 2)}\n`);
 }
-
-export const NOTHING_CHANGED = 'Nothing was written or deleted. Put the record back, then try again.';
 
 /** What a write of the library asks of libraryGate. With none set, nothing is made or remembered; a format 2 record is lifted all the same. */
 export interface Entering {

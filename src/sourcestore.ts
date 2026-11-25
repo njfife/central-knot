@@ -23,7 +23,8 @@ import type { LibraryItem } from './library.ts';
 import { readPluginRecord } from './pluginrecord.ts';
 import { sameSource } from './plugins.ts';
 import { pluginLink, pluginOf } from './sourcelink.ts';
-import { NOTHING_CHANGED, errorCode, storeDirectory, writeDurably } from './share.ts';
+import { errorCode, storeDirectory, writeDurably } from './share.ts';
+import { NOTHING_CHANGED } from './words.ts';
 
 /** One source, as the home records it (sources.json). */
 export interface SourceRecord {
