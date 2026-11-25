@@ -14,7 +14,7 @@ import { readHistory } from '../src/history.ts';
 import { inLibrary, placeOf, rowClicks } from '../src/libraryrow.ts';
 import { heldWhole } from '../src/clickplan.ts';
 import { applySkills, restoreSkill } from '../src/skills.ts';
-import { withLock, winLockSkip } from './fslock.ts';
+import { lockSkip, withLock } from './fslock.ts';
 import { bytes, folderOf, historyActions, itemOf, pass, put, roots, sandbox, seen, skillText, tools, turnOff, turnOn, type Box } from './skillclicks.ts';
 
 /** Rows as the Library lists them, by name: a skill each (`skills-<name>`), none that can't be deleted. */
@@ -193,7 +193,7 @@ test('A tool’s copy that differed from Central Knot’s is not as before after
   } finally { await box.cleanup(); }
 });
 
-test('One of the ten can’t leave a tool when it runs (its folder in Copilot CLI can’t be written): the other nine leave every tool, it is said as held there, and each of the ten has its History entry and its Restore', { skip: winLockSkip }, async () => {
+test('One of the ten can’t leave a tool when it runs (its folder in Copilot CLI can’t be written): the other nine leave every tool, it is said as held there, and each of the ten has its History entry and its Restore', { skip: lockSkip || (process.platform === 'win32' && 'Windows allows moving a dir-readonly folder out of a writable parent (POSIX refuses reparenting .. on 0o555); covered on macOS and Linux.') }, async () => {
   const box = await tenSkills();
   try {
     const sent = await withLock(folderOf(box, 'copilot-cli', 'alpha'), 'dir-readonly', async () => applySkills(box.context, box.tools, await deletes(box)));

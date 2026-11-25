@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, truncate, writeFile } from 'node:fs/promises';
-import { winLockSkip, withLock } from './fslock.ts';
+import { withLock } from './fslock.ts';
 import { posixModeSkip } from './wincompat.ts';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -287,7 +287,7 @@ test('staging a custom build: its identity file, the carried release, its pictur
     assert.deepEqual((await readdir(out)).sort(), ['build-report.txt', 'custom-build.json']);
     assert.match(plain.report, /Marketplace: none/);
     // A staging that stopped halfway (its icon is there but can't be read) leaves a folder the next staging may clear.
-    await t.test('a staging stopped halfway by an unreadable icon leaves a folder the next staging may clear', { skip: winLockSkip }, async () => {
+    await t.test('a staging stopped halfway by an unreadable icon leaves a folder the next staging may clear', async () => {
       await writeFile(join(base, 'locked.png'), 'png');
       await withLock(join(base, 'locked.png'), 'file-unreadable', async () => {
         await assert.rejects(stageCustomBuild({ marketplace: source, appName: 'Acme Knot', appIcon: join(base, 'locked.png') }, { out: join(base, 'half'), work: join(base, 'work') }));

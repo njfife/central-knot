@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
-import { lockPath, winLockSkip } from './fslock.ts';
+import { lockPath } from './fslock.ts';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { agentKind, agentsView, applyAgents } from '../src/agents.ts';
@@ -161,7 +161,7 @@ test('A plugin.json that can’t be read holds back every kind: each item gone s
   } finally { await box.cleanup(); }
 });
 
-test('An agents folder in a plugin that can’t be listed holds back only the agents’ drops: skills and servers are read whole', { skip: winLockSkip }, async () => {
+test('An agents folder in a plugin that can’t be listed holds back only the agents’ drops: skills and servers are read whole', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'ck-plugin-copy-')));
   let unlock: (() => Promise<void>) | undefined;
   try {
