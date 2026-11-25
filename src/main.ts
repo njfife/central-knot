@@ -46,6 +46,7 @@ import { sessionRows } from './sessionrow.ts';
 import { checkSignin, stopChecks } from './mcpsigninrun.ts';
 import { linkLabel } from './sourcelink.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
+import { parseHookRef, readHookSource } from './hooksource.ts';
 import { trayIconPng } from './trayicon.ts';
 import { forgetMissing, SETTLE_MS } from './librarypass.ts';
 import { byHand, observe, passStarts, seenBefore, seenIn, type ToolsSeen } from './arrivals.ts';
@@ -1603,6 +1604,12 @@ app.whenReady().then(async () => {
   // One plugin item's file in each tool's copy, read when its row is opened (the home's read leaves file text out).
   handleNow('plugin-items:texts', async (plugin, marketName, kind, name) => (current && [plugin, marketName, name].every(value => typeof value === 'string') && (kind === 'skill' || kind === 'agent')
     ? readItemTexts(pluginItemsContext(context().overrides), harnessIds, { plugin: plugin as string, marketName: marketName as string, kind, name: name as string }) : []));
+  // One hook's declaring entry and script file, read from disk on click (hooksource.ts). Nothing is run, written or fetched.
+  handleNow('hook:source', async (home, ref) => {
+    const parsed = parseHookRef(ref);
+    if (!current || home !== current.home || !parsed) return { problem: 'This file couldn’t be read.' };
+    return readHookSource({ home: current.home, mode: current.mode, overrides: context().overrides, dataDir: join(app.getPath('userData'), 'plugins') }, parsed);
+  });
   // The window is read in the same turn as the events, so History's caption always describes the events it shows.
   handle('history:list', async (): Promise<HistoryList> => ({ events: current ? await readHistory(context()) : [], days: historyDays() }));
   // Instruction files: read fresh each time; a save writes only the file the editor opened, for the home on screen.

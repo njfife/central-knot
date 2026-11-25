@@ -306,6 +306,8 @@ export interface DesktopApi {
   pluginItems(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   /** One skill's or agent's file as each tool's installed copy of a plugin has it, read when its row is opened. */
   pluginItemTexts(plugin: string, marketName: string, kind: PartKind, name: string): Promise<{ tool: HarnessId; text: string }[]>;
+  /** One hook's declaring entry and the script its command names, read from disk on click (hooksource.ts). Nothing is run. */
+  hookSource(home: string, ref: HookSourceRef): Promise<HookSource>;
 }
 
 export interface PluginActionResult { stopped?: string; reports: ActionReport[] }
@@ -878,6 +880,17 @@ export interface DeclaredHook {
   declaredIn: string; event: string; matcher?: string; at: number;
   launch?: { shell: string } | { program: string; args: string[] };
   timeout?: number; cwd?: string; env?: Record<string, string>;
+}
+/** Which hook the page asks main to read (hook:source); main re-finds it on disk from that owner's files alone. */
+export type HookSourceRef = { declaredIn: string; event: string; at: number; command: string } & (
+  | { from: 'own'; tool: HarnessId }
+  | { from: 'installed'; tool: HarnessId; plugin: string; marketName: string }
+  | { from: 'marketplace'; source: string; plugin: string }
+);
+/** One hook's declaring entry and script (hooksource.ts readHookSource), or why it couldn't be read. */
+export interface HookSource {
+  problem?: string; file?: string; entry?: string;
+  script?: { path?: string; text?: string; problem?: string };
 }
 /** What a plugin holds, read from its files (catalogdetail.ts); the row counts come from the same read. */
 export interface PluginContents {

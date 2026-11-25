@@ -104,6 +104,7 @@ const api: DesktopApi = {
   setPluginPart: (source, marketName, plugin, part, tool, on, home) => ipcRenderer.invoke('plugins:part', source, marketName, plugin, part, tool, on, home),
   setPluginOn: (source, marketName, plugin, tool, on, home) => ipcRenderer.invoke('plugins:whole', source, marketName, plugin, tool, on, home),
   pluginItemTexts: (plugin, marketName, kind, name) => ipcRenderer.invoke('plugin-items:texts', plugin, marketName, kind, name),
+  hookSource: (home, ref) => ipcRenderer.invoke('hook:source', home, ref),
   pluginItems: (source, marketName, plugin, tools, home) => ipcRenderer.invoke('plugins:items', source, marketName, plugin, tools, home),
 };
 contextBridge.exposeInMainWorld('centralKnot', api);
