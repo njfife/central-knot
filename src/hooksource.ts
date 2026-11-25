@@ -1,4 +1,5 @@
-// Reading one hook's source on click (IPC hook:source): finds the hook again through the same readers the page was drawn with
+// Shared hook identity lookup (parseHookRef, findHook — called by both readHookSource here and hookrun.ts runHook) and reading
+// one hook's source on click (IPC hook:source): finds the hook again through the same readers the page was drawn with
 // (own tool settings, an installed plugin copy, or a marketplace copy resolved by marketplace name through marketplaces.ts,
 // without fetching), never reads a path or folder sent from the page, and shows only the hook's own entry (from JSON/JSONC,
 // the file's own bytes with common leading indentation removed; from TOML, its own bytes with trailing whitespace trimmed;
@@ -139,12 +140,15 @@ function tomlHookEntry(raw: string, event: string, at: number): string | undefin
   } catch { return undefined; }
 }
 
+/** Result of re-finding one hook on disk through its owner's readers (shared by readHookSource and hookrun.ts runHook). */
+export type FoundHook = { hook: DeclaredHook; pluginRoot?: string; hooksDisabled?: true } | { file?: string; problem: string };
+
 /** Re-reads the owner's hooks through the same readers the page uses (no network) and returns the folder bounding its declaring files. */
-async function findOwner(ctx: HookSourceContext, ref: HookSourceRef): Promise<{ hooks: DeclaredHook[]; unread: string[]; pluginRoot?: string; within: string } | undefined> {
+async function findOwner(ctx: HookSourceContext, ref: HookSourceRef): Promise<{ hooks: DeclaredHook[]; unread: string[]; pluginRoot?: string; within: string; hooksDisabled?: true } | undefined> {
   if (ref.from === 'own') {
     const root = toolConfigRoot(ctx, ref.tool);
-    const { ownHooks = [], ownHooksUnread = [] } = await sessionSettings(ref.tool, root);
-    return { hooks: ownHooks, unread: ownHooksUnread, within: root };
+    const { ownHooks = [], ownHooksUnread = [], ownHooksDisabled } = await sessionSettings(ref.tool, root);
+    return { hooks: ownHooks, unread: ownHooksUnread, within: root, ...(ownHooksDisabled ? { hooksDisabled: true as const } : {}) };
   }
   if (ref.from === 'installed') {
     if (!takesPlugins(ref.tool)) return undefined;
@@ -160,24 +164,32 @@ async function findOwner(ctx: HookSourceContext, ref: HookSourceRef): Promise<{ 
   return { hooks, unread: hooksUnread, pluginRoot: copy.folder, within: copy.root };
 }
 
-/** Reads one hook's declaring entry and script text from disk on demand. */
-export async function readHookSource(ctx: HookSourceContext, ref: HookSourceRef): Promise<HookSource> {
+/** Finds a hook's live declaration on disk through its owner's readers; refuses unknown owners, unreadable files and mismatched places/commands. */
+export async function findHook(ctx: HookSourceContext, ref: HookSourceRef): Promise<FoundHook> {
   const owner = await findOwner(ctx, ref);
   if (!owner) return { problem: HOOK_SOURCE_UNREADABLE };
   if (owner.unread.includes(ref.declaredIn)) return { file: ref.declaredIn, problem: HOOK_SOURCE_UNREADABLE };
-  const match = owner.hooks.find(hook => hook.declaredIn === ref.declaredIn && hook.event === ref.event && hook.at === ref.at && hookLine(hook) === ref.command);
-  if (!match) {
+  const hook = owner.hooks.find(candidate => candidate.declaredIn === ref.declaredIn && candidate.event === ref.event && candidate.at === ref.at && hookLine(candidate) === ref.command);
+  if (!hook) {
     if (!pathIn(owner.within, ref.declaredIn)) return { problem: HOOK_SOURCE_UNREADABLE };
     const shown = shownFromHome(ref.declaredIn, ctx);
-    const moved = owner.hooks.some(hook => hook.declaredIn === ref.declaredIn && hook.event === ref.event && hookLine(hook) === ref.command);
+    const moved = owner.hooks.some(candidate => candidate.declaredIn === ref.declaredIn && candidate.event === ref.event && hookLine(candidate) === ref.command);
     return { problem: moved ? `${shown} changed since this page was read. Refresh to see it.` : `This hook is no longer in ${shown}.` };
   }
-  const scriptPath = scriptInLaunch(match.launch, ctx.home, owner.pluginRoot);
+  return { hook, ...(owner.pluginRoot ? { pluginRoot: owner.pluginRoot } : {}), ...(owner.hooksDisabled ? { hooksDisabled: true as const } : {}) };
+}
+
+/** Reads one hook's declaring entry and script text from disk on demand. */
+export async function readHookSource(ctx: HookSourceContext, ref: HookSourceRef): Promise<HookSource> {
+  const found = await findHook(ctx, ref);
+  if ('problem' in found) return found;
+  const { hook: match, pluginRoot } = found;
+  const scriptPath = scriptInLaunch(match.launch, ctx.home, pluginRoot);
   const script = scriptPath ? await readScript(scriptPath) : undefined;
-  if (match.declaredIn === owner.pluginRoot) return script ? { script } : {};
+  if (match.declaredIn === pluginRoot) return script ? { script } : {};
   const file = await readCapped(match.declaredIn, 4 * 1024 * 1024);
   if (!file?.whole) return { file: match.declaredIn, problem: HOOK_SOURCE_UNREADABLE };
   const raw = file.bytes.toString('utf8');
-  const entry = match.declaredIn.endsWith('.toml') ? tomlHookEntry(raw, match.event, match.at) : jsonHookEntry(raw, match.event, match.at, !!owner.pluginRoot);
+  const entry = match.declaredIn.endsWith('.toml') ? tomlHookEntry(raw, match.event, match.at) : jsonHookEntry(raw, match.event, match.at, !!pluginRoot);
   return entry === undefined ? { file: match.declaredIn, problem: HOOK_SOURCE_UNREADABLE } : { file: match.declaredIn, entry, ...(script ? { script } : {}) };
 }

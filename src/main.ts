@@ -47,6 +47,7 @@ import { checkSignin, stopChecks } from './mcpsigninrun.ts';
 import { linkLabel } from './sourcelink.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { parseHookRef, readHookSource } from './hooksource.ts';
+import { hookRunRefused, runHook, stopHookRun, stopHookRuns } from './hookrun.ts';
 import { trayIconPng } from './trayicon.ts';
 import { forgetMissing, SETTLE_MS } from './librarypass.ts';
 import { byHand, observe, passStarts, seenBefore, seenIn, type ToolsSeen } from './arrivals.ts';
@@ -1407,14 +1408,14 @@ app.on('before-quit', event => {
   if (heldForWork) { if (heldForWork === 'waiting') event.preventDefault(); return; }
   drafting?.abort();
   const saving = pluginText?.stop();
-  // An MCP sign-in check under way is stopped, its tool's processes with it, and its folder removed before the app goes; none starts after.
-  const signins = stopChecks();
-  if (!pluginStep && !saving && !signins) return;
+  // An MCP sign-in check or hook run under way is stopped, its processes with it, and its temp folder removed before the app goes; none starts after.
+  const signins = stopChecks(), hooks = stopHookRuns();
+  if (!pluginStep && !saving && !signins && !hooks) return;
   heldForWork = 'waiting';
   event.preventDefault();
   if (pluginStep) log('quit waits for a plugin update under way');
   const check = pluginStep && (pluginUpdates?.underWay() ?? pluginStep).catch(() => undefined);
-  void Promise.race([Promise.all([check, saving, signins]), new Promise(done => setTimeout(done, 15_000))]).then(() => { heldForWork = 'done'; app.quit(); });
+  void Promise.race([Promise.all([check, saving, signins, hooks]), new Promise(done => setTimeout(done, 15_000))]).then(() => { heldForWork = 'done'; app.quit(); });
 });
 // A signal to stop is a Quit, not a window close: nothing waits in the menu bar.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { quitting = true; app.quit(); });
@@ -1610,6 +1611,20 @@ app.whenReady().then(async () => {
     if (!current || home !== current.home || !parsed) return { problem: HOOK_SOURCE_UNREADABLE };
     return readHookSource({ home: current.home, mode: current.mode, overrides: context().overrides, dataDir: join(app.getPath('userData'), 'plugins'),
       marketplace: (marketName, plugin) => markets.pluginCopy(marketName, plugin) }, parsed);
+  });
+  // One hook's command run once on click (hookrun.ts), outside the queue; only on this computer's own home, never by itself.
+  handleNow('hook:run', async (home, ref) => {
+    const parsed = parseHookRef(ref);
+    if (!current || home !== current.home || !parsed) return hookRunRefused(HOOK_SOURCE_UNREADABLE);
+    const openHome = current.home;
+    return runHook({
+      home: openHome, mode: current.mode, overrides: context().overrides, dataDir: join(app.getPath('userData'), 'plugins'),
+      toolsHome: homedir(), searchPath, stillOpen: () => current?.home === openHome && current.mode === 'actual',
+    }, parsed);
+  });
+  handleNow('hook:stop', async (home, ref) => {
+    const parsed = parseHookRef(ref);
+    if (current && home === current.home && parsed) stopHookRun(current.home, parsed);
   });
   // The window is read in the same turn as the events, so History's caption always describes the events it shows.
   handle('history:list', async (): Promise<HistoryList> => ({ events: current ? await readHistory(context()) : [], days: historyDays() }));

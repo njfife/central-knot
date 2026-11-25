@@ -57,7 +57,7 @@ export async function readPluginItems(context: PluginContext, tools: HarnessId[]
  * a hooks file that is there but can't be read, or doesn't parse, is named (`ownHooksUnread`), so it never reads as no hooks.
  * Read with the tool's instruction file (instructions.ts instructionsView); its lines are sessionhooks.ts's.
  */
-export async function sessionSettings(tool: HarnessId, root: string): Promise<Pick<InstructionFile, 'ownHooks' | 'ownHooksUnread' | 'extensions'>> {
+export async function sessionSettings(tool: HarnessId, root: string): Promise<Pick<InstructionFile, 'ownHooks' | 'ownHooksUnread' | 'ownHooksDisabled' | 'extensions'>> {
   const unread: string[] = [];
   /** A file's text: '' where there is none; undefined, and named in `unread`, where it is there but can't be read. */
   const textOf = (file: string) => readFile(file, 'utf8').catch((error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? '' : void unread.push(file)));
@@ -67,19 +67,22 @@ export async function sessionSettings(tool: HarnessId, root: string): Promise<Pi
     let settings: Record<string, unknown> | undefined;
     try { settings = raw ? record(readJsonc(raw)) : {}; } catch { /* named below */ }
     if (raw !== undefined && !settings) unread.push(file);
-    return readHooks(tool, file, record(settings?.hooks) ?? {});
+    return { hooks: readHooks(tool, file, record(settings?.hooks) ?? {}), disabled: settings?.disableAllHooks === true };
   };
   switch (tool) {
-    case 'claude-cli': return { ownHooks: await hooksIn(join(root, 'settings.json')), ownHooksUnread: unread };
+    case 'claude-cli': {
+      const { hooks, disabled } = await hooksIn(join(root, 'settings.json'));
+      return { ownHooks: hooks, ownHooksUnread: unread, ...(disabled ? { ownHooksDisabled: true as const } : {}) };
+    }
     case 'codex-cli': {
       const toml = join(root, 'config.toml'), inToml = tomlHooks((await textOf(toml)) ?? '');
       if (!inToml) unread.push(toml);
-      return { ownHooks: [...await hooksIn(join(root, 'hooks.json')), ...readHooks(tool, toml, inToml ?? {})], ownHooksUnread: unread };
+      return { ownHooks: [...(await hooksIn(join(root, 'hooks.json'))).hooks, ...readHooks(tool, toml, inToml ?? {})], ownHooksUnread: unread };
     }
     case 'copilot-cli': {
       const files = (await readdir(join(root, 'hooks')).catch(() => [])).filter(name => name.endsWith('.json')).sort().map(name => join(root, 'hooks', name));
       const ownHooks: DeclaredHook[] = [];
-      for (const file of [join(root, 'settings.json'), ...files]) ownHooks.push(...await hooksIn(file));
+      for (const file of [join(root, 'settings.json'), ...files]) ownHooks.push(...(await hooksIn(file)).hooks);
       return { ownHooks, ownHooksUnread: unread };
     }
     case 'pi-cli': {
