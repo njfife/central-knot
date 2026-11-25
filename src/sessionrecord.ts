@@ -19,7 +19,7 @@ import { join, resolve } from 'node:path';
 import { harnessIds } from './harnesses.ts';
 import type { PriceResult } from './rates.ts';
 import type { PricedRequest } from './sessionday.ts';
-import type { CodexState, Request, Tokens } from './sessionrequests.ts';
+import type { CodexState, Position, Request, Tokens } from './sessionrequests.ts';
 import { errorCode, landingOf, storeDirectory, writeAccess, writeDurably, type ShareContext } from './share.ts';
 import type { HarnessId } from './types.ts';
 import { jsonObject, record } from './values.ts';
@@ -43,27 +43,25 @@ export interface KeptSession {
   tool: HarnessId; session: string; parent?: string; project?: string;
   /** Count of unreadable lines/records reported by the latest reading of this session. */
   unread: number;
-  /** Tool-reported session total (never added to sums); `complete` is true only when the whole session tree was covered. */
+  /**
+   * Tool-reported session total (never added to sums); `complete` is true only when the tool left no model out
+   * (sessionrequests.ts SessionRead.reported) and the whole session tree was covered.
+   */
   reported?: { dollars: number; complete: boolean };
   /** Kept receipts keyed by request id as supplied to `upsertSessionRecord`. */
   requests: Record<string, Receipt>;
 }
 export interface SessionMonth { formatVersion: 1; month: string; pricings: PricingEntry[]; sessions: KeptSession[] }
-/** Tracked file checkpoints (`dev` and `ino` are strings because Windows file ids exceed 2^53). */
+/** Tracked file checkpoints: each a reader's `Position` (sessionrequests.ts), with its tool. */
 export interface Positions {
   formatVersion: 1;
   /** Epoch ms when the last sweep wrote checkpoints (`0` when no sweep has written yet). */
   sweptAt: number;
-  files: {
-    tool: HarnessId; dev: string; ino: string;
-    /** Byte offset after the last complete line read from this file. */
-    offset: number;
-    /** 16-hex SHA-256 prefix of the 4 KiB immediately before `offset`, catching inode reuse or same-length rewrites. */
-    before: string;
-    size: number; mtimeMs: number;
+  files: (Position & {
+    tool: HarnessId;
     /** Saved Codex rollout parser state for resuming at `offset`. */
     codex?: CodexState;
-  }[];
+  })[];
 }
 export interface HeldEntry { file: string; kind: 'newer' | 'damaged' | 'not-a-file' | 'link'; reason: string }
 export interface SessionRecord {

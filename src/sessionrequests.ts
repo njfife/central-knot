@@ -7,7 +7,8 @@
 // the caller already holds (Claude Code records a response in part before recording it whole): the later one replaces it.
 //
 // A file is read by `scanLines`, from where its last read ended: complete lines only, each parsed as it is read; a file that
-// shrank, or is another file now, is read from its start, and the read says it started over before its first line. What every
+// shrank, is another file now, or whose bytes before that point changed, is read from its start, and the read says it started
+// over before its first line. Whether a file changed since a read, without reading it, is `changedSince`'s. What every
 // tool's reader does with those lines is `readSession`'s: each made a record, the last request of each id kept, and counted as
 // unread a line that is not a JSON record or a record its tool's reader says should have been a request and is not one; every
 // other record is passed over uncounted. Claude Code's files are found by `claudeFiles` (every folder at every depth listed on
@@ -19,7 +20,9 @@
 // what both need (usage.ts's header names them).
 //
 // Not here: the other tools (each another reader beside these two), prices, a record kept, a page.
-import { open } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import type { BigIntStats } from 'node:fs';
+import { open, type FileHandle } from 'node:fs/promises';
 import { basename, join, sep } from 'node:path';
 import type { HarnessId } from './types.ts';
 import { claudeProjects, codexFolders, recordOf, sessionFiles, timeOf, type JsonRecord, type UsageWhere } from './usage.ts';
@@ -39,7 +42,7 @@ export interface Request {
   parent?: string;
   /**
    * An id that is the same however often the history repeats the record, or the file is read (Claude Code's: the message's
-   * id; Codex's: the response's id, or for its older counter the count's time and running total: readCodexRollout).
+   * id; Codex's: the response's id, or for its older counter the thread, the count's time and running total: counterRequest).
    */
   request: string;
   /** Its time (ms), as its record states it. */
@@ -56,44 +59,76 @@ export interface Request {
    * the tier asked for in the thread's settings (CodexState.serviceTier), the only one Codex saves.
    */
   serviceTier?: string;
-  /** A cost in dollars the tool saved for this request alone (Claude Code saves one only for the session: `SessionRead.treeReported`). */
+  /** A cost in dollars the tool saved for this request alone (Claude Code saves one only for the session: `SessionRead.reported`). */
   reported?: number;
 }
 
-/** Where a read of a file ended: the file's identity (device and inode) and the byte after its last complete line. */
-export interface Position { dev: number; ino: number; offset: number }
+/**
+ * Where a read of a file ended, and the file as that read found it: its identity, the byte after its last complete line, a
+ * hash of the bytes before that byte, and its size and modification time. The record's checkpoints (sessionrecord.ts
+ * Positions) have its shape.
+ */
+export interface Position {
+  /** The device and the inode, as strings from a `bigint` stat: a Windows file id is more than a number holds exactly. */
+  dev: string; ino: string;
+  /** The byte after the last complete line read: zero, or a line's end. */
+  offset: number;
+  /** Sixteen hex characters of the SHA-256 of the bytes from `max(0, offset - BEFORE)` to `offset` (at zero, of nothing). */
+  before: string;
+  /** The file's size and modification time (whole ms) as its `stat` gave them when the read began. */
+  size: number; mtimeMs: number;
+}
 
-const CHUNK = 64 * 1024;
+const CHUNK = 64 * 1024, BEFORE = 4096, NEWLINE = 0x0a;
+
+/** `Position.before` for `offset`, read through `handle`. */
+async function hashBefore(handle: FileHandle, offset: number): Promise<string> {
+  const start = Math.max(0, offset - BEFORE), bytes = Buffer.alloc(offset - start);
+  const { bytesRead } = await handle.read(bytes, 0, bytes.length, start);
+  return createHash('sha256').update(bytes.subarray(0, bytesRead)).digest('hex').slice(0, 16);
+}
+
+/**
+ * Whether a file changed since `position` was read, by its `stat` taken with `bigint` (its size or modification time differ),
+ * without reading it. The time is compared in whole milliseconds, as a `bigint` stat gives it and `Position.mtimeMs` holds it.
+ */
+export const changedSince = (position: Position, stats: BigIntStats): boolean =>
+  Number(stats.size) !== position.size || Number(stats.mtimeMs) !== position.mtimeMs;
 
 /**
  * Reads the complete lines appended to `file` since `from`, and says where this read ended. `reader` is told first, before any
- * line and for an empty file too, whether this read started over: the file is shorter than `from`, or another file now (its
- * identity changed: replaced), so it is read from its start. A first read (no `from`) has not. `reader` gives back what each
- * line is then handed to, in order. A last line with no newline yet is left for the next read. Held meanwhile: one chunk of
- * the file and the line it ends in.
+ * line and for an empty file too, whether this read started over: the file is another file now (its device or inode changed:
+ * replaced), smaller than `from` found it, or the bytes before `from.offset` are not those `from.before` hashed (written again
+ * in place), so it is read from its start. A first read (no `from`) has not. `reader` gives back what each line is then handed
+ * to, in order. A last line with no newline yet is left for the next read. One open handle gives the `stat`, the hash and the
+ * lines, so all three are of one file. Held meanwhile: one chunk of the file and the pieces of the line it ends in, joined once
+ * the line ends.
  */
 export async function scanLines(file: string, from: Position | undefined, reader: (startedOver: boolean) => (line: string) => void): Promise<Position> {
   const handle = await open(file, 'r');
   try {
-    const { dev, ino, size } = await handle.stat(), chunk = Buffer.alloc(CHUNK);
-    const goesOn = from !== undefined && from.dev === dev && from.ino === ino && from.offset <= size;
+    const stats = await handle.stat({ bigint: true }), chunk = Buffer.alloc(CHUNK);
+    const dev = String(stats.dev), ino = String(stats.ino), size = Number(stats.size), mtimeMs = Number(stats.mtimeMs);
+    const goesOn = from !== undefined && from.dev === dev && from.ino === ino && size >= from.size
+      && await hashBefore(handle, from.offset) === from.before;
     const line = reader(from !== undefined && !goesOn);
-    let read = goesOn ? from.offset : 0, rest = Buffer.alloc(0);
+    let read = goesOn ? from.offset : 0, pieces: Buffer[] = [];
     while (read < size) {
       const { bytesRead } = await handle.read(chunk, 0, Math.min(CHUNK, size - read), read);
       if (bytesRead === 0) break;
       read += bytesRead;
-      const text = Buffer.concat([rest, chunk.subarray(0, bytesRead)]);
+      const text = chunk.subarray(0, bytesRead);
       let start = 0;
-      let end = text.indexOf('\n');
-      while (end !== -1) {
-        line(text.toString('utf8', start, end));
+      for (let end = text.indexOf(NEWLINE); end !== -1; end = text.indexOf(NEWLINE, start)) {
+        line(Buffer.concat([...pieces, text.subarray(start, end)]).toString('utf8'));
+        pieces = [];
         start = end + 1;
-        end = text.indexOf('\n', start);
       }
-      rest = text.subarray(start);
+      if (start < bytesRead) pieces.push(Buffer.from(text.subarray(start)));
     }
-    return { dev, ino, offset: read - rest.length };
+    const offset = read - pieces.reduce((bytes, piece) => bytes + piece.length, 0);
+    const before = goesOn && offset === from.offset ? from.before : await hashBefore(handle, offset);
+    return { dev, ino, offset, before, size, mtimeMs };
   } finally { await handle.close(); }
 }
 
@@ -111,9 +146,11 @@ export interface SessionRead {
   project?: string;
   /**
    * The tool's own running total in dollars for the session file, as it last recorded it in these lines (zero too); whether it
-   * includes its agents' is not known. Absent where none is recorded, or where the tool says the last one leaves a model out.
+   * includes its agents' is not known. `complete` is false where the tool says that total leaves a model out (its cost not
+   * known): the Sessions page shows only a complete one (sessionday.ts); a later step may show the other as a lower bound.
+   * Absent where none is recorded.
    */
-  treeReported?: number;
+  reported?: { dollars: number; complete: boolean };
   /** Lines passed over that could have held a request: which, each tool's reader says (readClaudeSession, readCodexRollout). */
   unread: number;
   /** Where the next read starts. */
@@ -123,7 +160,7 @@ export interface SessionRead {
 /** What a tool's reader makes of one record: the request it is; `unread`, one that could have held a request and is not one; or nothing. */
 type Found = Request | 'unread' | undefined;
 /** What a tool's reader finds of a session besides its requests, as `SessionRead`'s fields of the same names say. */
-interface Besides { project?: string; treeReported?: number }
+interface Besides { project?: string; reported?: SessionRead['reported'] }
 
 /** A tool's reader, as readSession calls it once per read. */
 type Reader = (startedOver: boolean, besides: Besides) => (record: JsonRecord) => Found;
@@ -145,7 +182,7 @@ async function readSession(file: string, from: Position | undefined, reader: Rea
       else if (found) requests.set(found.request, found);
     };
   });
-  const { project, treeReported } = besides, stated = { ...(project ? { project } : {}), ...(treeReported !== undefined ? { treeReported } : {}) };
+  const { project, reported } = besides, stated = { ...(project ? { project } : {}), ...(reported ? { reported } : {}) };
   return { requests: [...requests.values()], startedOver, ...stated, unread, position };
 }
 
@@ -223,16 +260,16 @@ function claudeRequest(record: JsonRecord, of: ClaudeFile): Request | undefined 
  * once per content part and sometimes in part first: the last record of each message id stands. A `cost-state` record's
  * `totalCostUSD` is the tool's own running total for this file, small side calls that no record in it holds included; whether
  * it includes its agents' is not known (no agent's own file seen holds a `cost-state`). Where its `hasUnknownModelCost` is
- * true the total leaves a model out, and is not given. An older version writes none. Counted as unread: a line that is not a
- * JSON record, and an `assistant` record, or any other with `message.usage`, that is not a request (claudeRequest). Every
- * other record holds no request, and is passed over uncounted, an `assistant` record of model `<synthetic>` too: one Claude
- * Code wrote itself (an error or an interrupt), no model's.
+ * true the total leaves a model out, and is given as not complete. An older version writes none. Counted as unread: a line
+ * that is not a JSON record, and an `assistant` record, or any other with `message.usage`, that is not a request
+ * (claudeRequest). Every other record holds no request, and is passed over uncounted, an `assistant` record of model
+ * `<synthetic>` too: one Claude Code wrote itself (an error or an interrupt), no model's.
  */
 export function readClaudeSession(of: ClaudeFile, from?: Position): Promise<SessionRead> {
   return readSession(of.file, from, (_startedOver, besides) => record => {
     if (typeof record.cwd === 'string') besides.project ??= basename(record.cwd);
     if (record.type === 'cost-state' && Number.isFinite(record.totalCostUSD)) {
-      besides.treeReported = record.hasUnknownModelCost === true ? undefined : record.totalCostUSD;
+      besides.reported = { dollars: record.totalCostUSD, complete: record.hasUnknownModelCost !== true };
     }
     if (record.type !== 'assistant' && record.message?.usage === undefined) return undefined;
     if (record.type === 'assistant' && record.message?.model === '<synthetic>') return undefined;
@@ -311,7 +348,8 @@ function codexRequest(record: JsonRecord, id: unknown, tokens: Tokens | undefine
  * The older counter's count (`event_msg` `token_count`, its `info` the thread's running total) as a request, `state` brought up
  * to date with it: none where a modern record came since the last count; otherwise what its running total added since that
  * count, or, lower in a kind than that count (the counter began again), its whole total. A count that adds nothing (repeated)
- * is no request. Its id is its time and its running total's `total_tokens`, both as saved.
+ * is no request. Its id is the thread, then its time and its running total's `total_tokens` as saved: two threads can share
+ * the time and the total. A limit: older counts copied into a fork's rollout are kept once for each thread.
  */
 function counterRequest(record: JsonRecord, state: CodexState): Found {
   const saved = record.payload.info.total_token_usage, total = codexTokens(saved);
@@ -322,7 +360,7 @@ function counterRequest(record: JsonRecord, state: CodexState): Found {
   if (recorded) return undefined;
   const tokens = (before && added(total, before)) ?? total;
   if (KINDS.every(kind => tokens[kind] === 0)) return undefined;
-  return codexRequest(record, `${record.timestamp} ${saved.total_tokens}`, tokens, state) ?? 'unread';
+  return codexRequest(record, `${state.session} ${record.timestamp} ${saved.total_tokens}`, tokens, state) ?? 'unread';
 }
 
 /** What one record of a rollout is, as readCodexRollout says, `state` and `besides` brought up to date with it. */

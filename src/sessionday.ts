@@ -2,11 +2,11 @@
 // clock read here), lists each present supported tool's session files (presence.ts SESSION_TOOLS: Claude Code via sessionrequests.ts
 // claudeFiles, Codex via codexRollouts), reads session files modified at or after period.start, keeps requests inside
 // [start, end), deduplicates across files by (tool, session, request), prices each kept request (rates.ts priceRequest),
-// keeps the largest rates.ts reportedCost(treeReported) only on a root session whose whole tree lay inside the period, and
-// joins concurrent reads for the same home, period and tools. Nothing is written under the home; DayReading holds no message
-// text and no absolute path. Not here: rows and totals (sessionrow.ts), file listing and record parsing (sessionrequests.ts),
-// rate matching (rates.ts), tool presence and which tools are read (presence.ts), stored records, IPC (main.ts sessions:read), or the
-// Sessions page (sessionspage.ts).
+// keeps the largest rates.ts reportedCost of a complete SessionRead.reported only on a root session whose whole tree lay
+// inside the period, and joins concurrent reads for the same home, period and tools. Nothing is written under the home;
+// DayReading holds no message text and no absolute path. Not here: rows and totals (sessionrow.ts), file listing and record
+// parsing (sessionrequests.ts), rate matching (rates.ts), tool presence and which tools are read (presence.ts), stored
+// records, IPC (main.ts sessions:read), or the Sessions page (sessionspage.ts).
 import { stat } from 'node:fs/promises';
 import { bundledRates, priceRequest, reportedCost, type PriceResult } from './rates.ts';
 import { claudeFiles, codexRollouts, readClaudeSession, readCodexRollout, type Request, type SessionRead } from './sessionrequests.ts';
@@ -100,7 +100,7 @@ async function readTool(tool: SessionTool, at: UsageWhere, period: Period): Prom
     if (item.session && !item.parent) {
       // Keep the largest reported figure across copies of one session (rests on the figure never going down within a file as
       // seen; a file cut back after a copy was made would show the copy's larger figure).
-      const figure = reportedCost(read.treeReported);
+      const figure = read.reported?.complete ? reportedCost(read.reported.dollars) : undefined;
       if (figure !== undefined) {
         const entry = getMeta(item.session);
         entry.reported = Math.max(entry.reported ?? 0, figure);
