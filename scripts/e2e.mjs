@@ -10307,9 +10307,9 @@ async function sessionsFlow() {
   const dateOf = (ms, month = 'long') => a.run(`new Date(${ms}).toLocaleDateString(undefined, { day: 'numeric', month: '${month}' })`);
   same('opening the page asks for today’s reading and says so until it lands', arriving, 'Reading today’s sessions…');
   same('a day with nothing: the date, one sentence naming the tools read and no dollars; the tool present and not read yet named once',
-    [await a.text('#sessions-heading'), await a.exists('.sessions-head > .sessions-estimate'), await a.text('#sessions-none'), await a.text('#sessions-not-read'), await a.exists('.sessions-row')],
+    [await a.text('#sessions-heading'), await a.exists('.sessions-head .sessions-estimate'), await a.text('#sessions-none'), await a.text('#sessions-not-read'), await a.exists('.sessions-row')],
     [`Today, ${await dateOf(today)}`, false, 'No sessions today in Claude Code or Codex.', 'Not counted: Copilot CLI', false]);
-  same('the tool not counted says why on hover', await a.run(`document.querySelector('#sessions-not-read').title`), 'So far Central Knot reads Claude Code’s and Codex’s sessions.');
+  same('the tool not counted has no duplicate tooltip', await a.run(`document.querySelector('#sessions-not-read').getAttribute('title')`), null);
   // A Codex file of today whose one line can't be read: the day is not known to be empty.
   const day = new Date(today), dated = [day.getFullYear(), day.getMonth() + 1, day.getDate()].map(part => String(part).padStart(2, '0')).join('/');
   put(`.codex/sessions/${dated}/rollout-torn.jsonl`, ['a line that is not JSON'], todayAt(0.1));
@@ -10350,13 +10350,23 @@ async function sessionsFlow() {
       ['Codex', 'codex-app', '≈ $…', '2 unpriced', '', 'No price known.'], ['Agent', 'codex-app', '', '1 unpriced', '', 'No price known.']]);
   const ratesDate = JSON.parse(readFileSync(join(root, 'assets/model-rates.json'), 'utf8')).date.split('-').map(Number);
   const pricesDate = await a.run(`new Date(${ratesDate[0]}, ${ratesDate[1] - 1}, ${ratesDate[2]}).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })`);
-  const head = await a.run(`[...document.querySelector('.sessions-head').children].map(part => [part.textContent, part.title])`);
   const unreadCodex = 'Some of Codex’s session history could not be read.';
-  same('the heading: the day’s dollars, the price list’s date and each reason it is a lower bound on hover; the requests unpriced, each reason said once and true on hover; the day',
-    head.map(([text, title]) => [masked(text), title]), [['≈ $… or more', `Prices as of ${pricesDate}. ${unreadCodex} ${ONE_HOUR}`],
-      ['3 requests unpriced', 'No price known for 2 requests with no matching rate and a fast reply.'], [`Today, ${await dateOf(today)}`, '']]);
-  same('the caption once; what could not be read, for Codex', [await a.all('.sessions-caption:not(.sessions-unread)'), await a.all('.sessions-unread')],
-    [['At API prices, not your plan’s.'], [unreadCodex]]);
+  const head = await a.run(`(() => { const h = document.querySelector('.sessions-head');
+    return [h.querySelector('.sessions-estimate')?.textContent ?? '', h.querySelector('.sessions-unpriced')?.textContent ?? '',
+      h.querySelector('#sessions-heading')?.textContent ?? '', [...h.querySelectorAll('[title]')].length]; })()`);
+  same('the heading: dollars at API prices, unpriced count, date, and no native title where marks took their place',
+    [masked(head[0]), head[1], head[2], head[3]], ['≈ $… or more at API prices', '3 requests unpriced', `Today, ${await dateOf(today)}`, 0]);
+  same('the heading hover marks carry the price list date, lower-bound reasons and unpriced reasons',
+    [await a.text('#sessions-total-info-card'), await a.text('#sessions-unpriced-info-card')],
+    [`Prices as of ${pricesDate}. ${unreadCodex} ${ONE_HOUR}`, 'No price known for 2 requests with no matching rate and a fast reply.']);
+  await a.click('#sessions-total-info');
+  same('the heading estimate mark opens its card', await a.run(`document.querySelector('#sessions-total-info-card')?.matches(':popover-open') ?? false`), true);
+  await a.click('#sessions-total-info');
+  await a.click('#sessions-unpriced-info');
+  same('the heading unpriced mark opens its card', await a.run(`document.querySelector('#sessions-unpriced-info-card')?.matches(':popover-open') ?? false`), true);
+  await a.click('#sessions-unpriced-info');
+  same('no standing pricing caption; what could not be read stays visible for Codex', [await a.all('.sessions-caption:not(.sessions-unread)'), await a.all('.sessions-unread')],
+    [[], [unreadCodex]]);
   const tools = await a.all('#sessions-by-tool > .sessions-tool-total', '[e.dataset.tool, e.textContent.replace(/≈.*/, ""), e.querySelector(".sessions-estimate")?.textContent, e.querySelector(".sessions-unpriced")?.textContent, e.querySelector(".sessions-estimate")?.title]');
   same('the tools’ line: each tool’s dollars and unpriced count, a lower bound where some of its history could not be read; its top-level sessions, whose prices and why low on hover; the tool not counted',
     [tools.map(([tool, name, sum, unpriced, title]) => [tool, name, masked(sum), unpriced, title]), await a.text('#sessions-not-read')],
@@ -10389,8 +10399,11 @@ async function sessionsFlow() {
   // Yesterday, and back.
   await a.click('#sessions-day-yesterday');
   for (let tries = 0; tries < 100 && !(await a.exists('.sessions-row[data-session="gamma"]')); tries++) await wait(100);
-  same('Yesterday asks for its own day: its date, its one session', [await a.text('#sessions-heading'), await nesting(), await a.run(`document.querySelector('#sessions-day-yesterday').getAttribute('aria-pressed')`)],
-    [`Yesterday, ${await dateOf(yesterday)}`, [['gamma', null]], 'true']);
+  same('Yesterday asks for its own day: its date, estimate at API prices with mark, no unpriced mark, no caption, its one session',
+    [await a.text('#sessions-heading'), masked(await a.text('.sessions-head .sessions-estimate') ?? ''), await a.text('#sessions-total-info-card'),
+      await a.exists('#sessions-unpriced-info'), await a.all('.sessions-caption:not(.sessions-unread)'), await nesting(),
+      await a.run(`document.querySelector('#sessions-day-yesterday').getAttribute('aria-pressed')`)],
+    [`Yesterday, ${await dateOf(yesterday)}`, '≈ $… or more at API prices', `Prices as of ${pricesDate}. ${unreadCodex}`, false, [], [['gamma', null]], 'true']);
   await a.click('#sessions-day-today');
   for (let tries = 0; tries < 100 && !(await a.exists('.sessions-row[data-session="alpha"]')); tries++) await wait(100);
   same('Today again, and the rows opened before are open still', await a.all('.sessions-row > details[open]', 'e.parentElement.dataset.session'), ['x1', 'x2', 'beta', 'alpha']);
@@ -10431,6 +10444,32 @@ async function sessionsFlow() {
       if (!rail && [SMALLEST[0], 1316, 2560].includes(width)) await a.shot(`sessions-${width}-after`);
     }
   }
+  if (shots) {
+    for (const [width, height] of [[860, 560], [1316, 820]]) {
+      await sizeTo(a, width, height);
+      if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+      for (const look of ['light', 'dark']) {
+        await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+        await wait(150);
+        await a.shot(`sessions-heading-${look}-${width}`);
+      }
+      await a.click('#sessions-total-info');
+      await wait(100);
+      same(`heading total card open at ${width}×${height}`, await a.run(`document.querySelector('#sessions-total-info-card')?.matches(':popover-open') ?? false`), true);
+      for (const look of ['light', 'dark']) {
+        await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+        await wait(150);
+        await a.shot(`sessions-heading-card-${look}-${width}`);
+      }
+      await a.click('#sessions-total-info');
+    }
+    await a.send('Emulation.setEmulatedMedia', { features: [] });
+  }
+  await sizeTo(a, 860, 560);
+  if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+  same('at 860×560 wrapped heading and tools lines never start a line with a dot',
+    await a.run(`[...document.querySelectorAll('.sessions-sep > *')].map(e => getComputedStyle(e, '::before').content)`).then(list => list.every(c => c === 'none')),
+    true);
   await fullSize(a);
   same('no page error on the Sessions page', a.pageErrors, []);
   // A reading that fails says so (a development run only: it reaches main to make the request fail).
@@ -10540,22 +10579,24 @@ async function keepSessionCostsFlow() {
     await fullSize(a);
     return headingTops;
   };
-  const captureCard860 = async (a, buttonSelector, cardSelector, prefix, scrollTarget) => {
-    await sizeTo(a, 860, 560);
-    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
-    if (scrollTarget) await a.run(`document.querySelector(${JSON.stringify(scrollTarget)})?.scrollIntoView({ block: 'center' })`);
-    await a.click(buttonSelector);
-    await wait(100);
-    same(`info card open at 860×560 (${prefix})`, await a.run(`document.querySelector(${JSON.stringify(cardSelector)})?.matches(':popover-open') ?? false`), true);
-    if (shots) {
-      for (const look of ['light', 'dark']) {
-        await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
-        await wait(150);
-        await a.shot(`${prefix}-${look}-860`);
+  const captureCard = async (a, buttonSelector, cardSelector, prefix, scrollTarget) => {
+    for (const [width, height] of [[860, 560], [1316, 820]]) {
+      await sizeTo(a, width, height);
+      if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+      if (scrollTarget) await a.run(`document.querySelector(${JSON.stringify(scrollTarget)})?.scrollIntoView({ block: 'center' })`);
+      await a.click(buttonSelector);
+      await wait(100);
+      same(`info card open at ${width}×${height} (${prefix})`, await a.run(`document.querySelector(${JSON.stringify(cardSelector)})?.matches(':popover-open') ?? false`), true);
+      if (shots) {
+        for (const look of ['light', 'dark']) {
+          await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+          await wait(150);
+          await a.shot(`${prefix}-${look}-${width}`);
+        }
+        await a.send('Emulation.setEmulatedMedia', { features: [] });
       }
-      await a.send('Emulation.setEmulatedMedia', { features: [] });
+      await a.click(buttonSelector);
     }
-    await a.click(buttonSelector);
     await fullSize(a);
   };
 
@@ -10571,33 +10612,34 @@ async function keepSessionCostsFlow() {
     await a.click('#nav-sessions');
     for (let tries = 0; tries < 100 && !(await a.exists('#sessions-heading')); tries++) await wait(100);
     await wait(2000);
-    same('before the click: Start button and its info card match verbatim',
-      [await a.text('#sessions-keep-start'), await a.text('#sessions-keep-info-card'), await a.exists('#sessions-collecting')],
-      ['Start keeping session costs', 'Adds the last 7 days to this page. This home’s Central Knot folder keeps each session’s project, request times, models, token counts and estimated prices. No message text. You can turn this off in Settings; what was kept stays.', false]);
+    const startCard = await a.text('#sessions-keep-info-card');
+    same('before the click: Start button and its two-sentence info card match verbatim with no Stop button or Settings redirect',
+      [await a.text('#sessions-keep-start'), startCard, (startCard?.match(/[.!?](?:\s|$)/g) ?? []).length, /Settings/.test(startCard ?? ''), await a.exists('#sessions-collecting'), await a.exists('#sessions-keep-stop')],
+      ['Start keeping session costs', 'Adds a 7-day view here, keeping each session’s project, request times, models, token counts and estimated prices in this home’s Central Knot folder. No message text is kept; turning it off leaves what was kept.', 2, false, false, false]);
     same('before the click: no sessions folder, no lock, no keepSessionCosts entry',
       [existsSync(sessionsDirA), existsSync(join(sessionsDirA, 'lock.sqlite')), jsonOrNothing(settingsPath)?.keepSessionCosts ?? null],
       [false, false, null]);
     const topsBefore = await captureAndCheck(a, 'sessions-before', true);
-    await captureCard860(a, '#sessions-keep-info', '#sessions-keep-info-card', 'sessions-card');
+    await captureCard(a, '#sessions-keep-info', '#sessions-keep-info-card', 'sessions-card');
 
     // Click Start: enters Collecting… while FIFO blocks open(pipe1, 'r') until release().
     await a.click('#sessions-keep-start');
     for (let tries = 0; tries < 150 && !(await a.exists('#sessions-collecting')); tries++) await wait(50);
     await wait(300);
-    same('during the first sweep: Collecting… replaces the Start button and status bar announces keeping',
-      [await a.text('#sessions-collecting'), await a.exists('#sessions-keep-start'), await a.text('#announcement')],
-      ['Collecting…', false, 'Keeping session costs for this home.']);
+    same('during the first sweep: Collecting… replaces Start alone (no Stop keeping) and status bar announces keeping',
+      [await a.text('#sessions-collecting'), await a.exists('#sessions-keep-start'), await a.exists('#sessions-keep-stop'), await a.text('#announcement')],
+      ['Collecting…', false, false, 'Keeping session costs for this home.']);
     const topsCollecting = await captureAndCheck(a, 'sessions-collecting', true);
     same('still Collecting… until FIFO is released', await a.exists('#sessions-collecting'), true);
 
-    // Release FIFO so sweep finishes; button's place holds nothing, status bar still says keeping, and receipts landed.
+    // Release FIFO so sweep finishes; Stop keeping sits in Start's place, status bar still says keeping, and receipts landed.
     same('FIFO had an active sweep reader waiting', await pipe1.release(), true);
     pipe1.clean();
     for (let tries = 0; tries < 150 && await a.exists('#sessions-collecting'); tries++) await wait(50);
     await a.settle();
-    same('after the first sweep: button place holds nothing and status bar says keeping',
-      [await a.exists('#sessions-keep-start'), await a.exists('#sessions-collecting'), await a.exists('#sessions-keep-result'), await a.text('#announcement')],
-      [false, false, false, 'Keeping session costs for this home.']);
+    same('after the first sweep: Stop keeping sits in Start’s place and status bar says keeping',
+      [await a.exists('#sessions-keep-start'), await a.exists('#sessions-collecting'), await a.text('#sessions-keep-stop'), await a.exists('#sessions-keep-result'), await a.text('#announcement')],
+      [false, false, 'Stop keeping', false, 'Keeping session costs for this home.']);
     const saved1 = jsonOrNothing(settingsPath)?.keepSessionCosts ?? {};
     same('consent saved on for Home A alone', [saved1[canonA], Object.hasOwn(saved1, canonB)], [true, false]);
     const kept1 = jsonOrNothing(monthFileA);
@@ -10606,6 +10648,12 @@ async function keepSessionCostsFlow() {
     const topsAfter = await captureAndCheck(a, 'sessions-after', true);
     same('Fix 5: sessions bar keeps one height across before, collecting, and after (0 px jump at 860 and 1316)',
       [topsCollecting, topsAfter], [topsBefore, topsBefore]);
+    await sizeTo(a, 860, 560);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    same('at 860×560 with sidebar open: Stop keeping fits on the same line as Today | Yesterday | 7 days',
+      await a.run(`(() => { const stop = document.querySelector('#sessions-keep-stop').getBoundingClientRect(), seg = document.querySelector('#sessions-day-week').getBoundingClientRect();
+        return Math.abs(stop.top - seg.top) < 6 && stop.left >= seg.right; })()`), true);
+    await fullSize(a);
 
     // Fix 2: Refresh started during Collecting… whose reply lands after the sweep ends must not restore Collecting….
     const main = a.inspect ? await mainHelpers(a.inspect) : undefined;
@@ -10629,17 +10677,22 @@ async function keepSessionCostsFlow() {
     // Check 2: Settings switch under "This home" is On; turning Off stops sweeps, leaves record untouched, brings Start back.
     await a.click('#nav-settings');
     for (let tries = 0; tries < 100 && !(await a.exists('#keep-session-costs')); tries++) await wait(50);
-    same('Settings shows Keep session costs On under This home with shared card text',
+    const settingsCard = await a.text('#setting-session-costs-info-card');
+    same('Settings shows Keep session costs On under This home with two-sentence shared card text',
       [await a.run(`!!document.querySelector('#keep-session-costs')?.closest('section')?.querySelector('#settings-home')`),
         await a.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`),
-        await a.text('#setting-session-costs-info-card')],
-      [true, 'true', 'This home’s Central Knot folder keeps each session’s project, request times, models, token counts and estimated prices. No message text. If you turn this off, what was kept stays.']);
+        settingsCard, (settingsCard?.match(/[.!?](?:\s|$)/g) ?? []).length],
+      [true, 'true', 'Keeps each session’s project, request times, models, token counts and estimated prices in this home’s Central Knot folder. No message text is kept; turning it off leaves what was kept.', 2]);
     await captureAndCheck(a, 'settings-row', false, '#setting-session-costs');
-    await captureCard860(a, '#setting-session-costs-info', '#setting-session-costs-info-card', 'settings-card', '#setting-session-costs');
+    await captureCard(a, '#setting-session-costs-info', '#setting-session-costs-info-card', 'settings-card', '#setting-session-costs');
     const beforeOffBytes = readFileSync(monthFileA, 'utf8');
     await a.click('#keep-session-costs');
     for (let tries = 0; tries < 100 && (await a.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`)) !== 'false'; tries++) await wait(50);
-    same('Keep session costs turns Off in Settings', await a.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`), 'false');
+    same('Keep session costs turns Off in Settings and announces visibly',
+      [await a.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`),
+        await a.text('#announcement'),
+        await a.run(`document.querySelector('#announcement')?.classList.contains('visually-hidden')`)],
+      ['false', 'Stopped keeping session costs for this home.', false]);
     await captureAndCheck(a, 'settings-row-off', false, '#setting-session-costs');
     writeFileSync(claudeFile, `${JSON.stringify(reply('alpha', 'm3-while-off', Math.max(today, Date.now() - 1000), 'claude-haiku-4-5-20251001', 5_000, 500, '/work/central-knot'))}\n`, { flag: 'a' });
     await wait(2200);
@@ -10846,6 +10899,7 @@ async function sessionsWeekFlow() {
     await sizeTo(a, ...SMALLEST);
     if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
     await a.click(`${day(midnight(1))} > details > summary`);
+    await a.click('#sessions-by-model summary');
     const scrolled = await a.run(`(page => { page.scrollTop = page.scrollHeight; return page.scrollTop; })(document.querySelector('#sessions-scroll'))`);
     same('the sweep held so far is let go', await held.release(), true);
     for (let tries = 0; tries < 100 && (await dayTotal(today)) === older; tries++) await wait(100);
@@ -10853,12 +10907,13 @@ async function sessionsWeekFlow() {
       [(await dayTotal(today)) !== older, await a.all('.sessions-day > details[open]', 'Number(e.parentElement.dataset.day)'), scrolled > 0 && (await a.run(`document.querySelector('#sessions-scroll').scrollTop`)) === scrolled],
       [true, [today, midnight(1)], true]);
   } finally { held.clean(); }
+  await a.click('#sessions-by-model summary');
   await a.click(`${day(midnight(1))} > details > summary`);
   await fullSize(a);
   const weekToday = await dayTotal(today);
   await a.click('#sessions-day-today');
   await onToday();
-  same('the 7 days’ line for today says what Today says, read from the files', await a.text('.sessions-head > .sessions-estimate'), weekToday);
+  same('the 7 days’ line for today says what Today says, read from the files', await a.text('.sessions-head .sessions-estimate'), `${weekToday} at API prices`);
   // 7 days chosen and History opened in one go, before their first read lands: no sweep is asked for once he has left.
   const attempts = () => (readNow(join(data, 'central-knot.log')).match(/session costs: (swept|store is locked|sweep stopped|refused|failed)/g) ?? []).length;
   const attemptsBefore = attempts();
@@ -10869,12 +10924,49 @@ async function sessionsWeekFlow() {
   await a.click('#nav-sessions');
   await weekShown();
   for (let tries = 0; tries < 100 && await a.exists('#sessions-collecting'); tries++) await wait(50);
-  await a.click('#sessions-day-today');
+  await a.settle();
+
+  // From an idle 7 days, Stop keeping: refusal stays inline; then clean Stop goes back to Today in one read, Start returns, Settings agrees, kept files stay byte for byte identical.
+  const main = a.inspect ? await mainHelpers(a.inspect) : undefined;
+  if (!main) console.log('sessionsWeekFlow: the reads of the 7 days after a move and on Stop keeping are counted in a development run only (they are counted in main).');
+  const weekSettingsPath = join(data, 'app-settings.json');
+  if (process.platform !== 'win32' && process.getuid?.() !== 0) {
+    chmodSync(weekSettingsPath, 0o444);
+    try {
+      await a.click('#sessions-keep-stop');
+      for (let tries = 0; tries < 100 && !(await a.exists('#sessions-keep-result')); tries++) await wait(50);
+      check('Stop keeping refusal stays inline and leaves 7 days and Stop keeping in place',
+        /Couldn’t save/.test(await a.text('#sessions-keep-result') ?? '') && await a.exists('#sessions-keep-stop') && await a.exists('#sessions-days'),
+        { text: await a.text('#sessions-keep-result') });
+    } finally { chmodSync(weekSettingsPath, 0o644); }
+  }
+  const keptFiles = () => Object.fromEntries(readdirSync(sessionsDir).sort().map(name => [name, readFileSync(join(sessionsDir, name)).toString('hex')]));
+  const bytesBeforeStop = keptFiles();
+  const turnedCount = word => (readNow(join(data, 'central-knot.log')).match(new RegExp(`session costs: turned ${word} for `, 'g')) ?? []).length;
+  const offBefore = turnedCount('off');
+  await main?.noteCalls('sessions:read');
+  const stopBusy = await a.run(`(() => { const btn = document.querySelector('#sessions-keep-stop'); btn.click(); const busy = document.querySelector('#sessions-keep-stop')?.disabled ?? false; btn.click(); return busy; })()`);
   await onToday();
+  for (let tries = 0; tries < 100 && !(await a.exists('#sessions-keep-start')); tries++) await wait(50);
+  await a.settle();
+  const readsOnStop = main ? (await main.calls()).length : 1;
+  await main?.restore('sessions:read');
+  same('two clicks at once on Stop keeping from idle 7 days: disables while pending, stops once, Today shows, Start is back, status bar says stopped visibly, one live read only, kept files byte for byte unchanged',
+    [stopBusy, turnedCount('off') - offBefore, /^Today/.test(await a.text('#sessions-heading') ?? ''), await a.run(`document.querySelector('#sessions-day-today')?.getAttribute('aria-pressed')`),
+      await a.all('.sessions-bar .kind-seg', 'e.id'), await a.exists('#sessions-keep-start'), await a.exists('#sessions-keep-stop'), await a.exists('#sessions-keep-result'),
+      await a.text('#announcement'), await a.run(`document.querySelector('#announcement')?.classList.contains('visually-hidden')`), readsOnStop, keptFiles()],
+    [true, 1, true, 'true', ['sessions-day-today', 'sessions-day-yesterday'], true, false, false, 'Stopped keeping session costs for this home.', false, 1, bytesBeforeStop]);
+  await a.click('#nav-settings');
+  for (let tries = 0; tries < 100 && !(await a.exists('#keep-session-costs')); tries++) await wait(50);
+  same('after Stop keeping on Sessions, Settings switch agrees (Off)', await a.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`), 'false');
+  await a.click('#keep-session-costs');
+  for (let tries = 0; tries < 100 && (await a.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`)) !== 'true'; tries++) await wait(50);
+  await a.click('#nav-sessions');
+  await onToday();
+  for (let tries = 0; tries < 100 && (await a.exists('#sessions-collecting') || !(await a.exists('#sessions-keep-stop'))); tries++) await wait(50);
+  await a.settle();
 
   // A move while the sweep 7 days asked for runs: nothing of them drawn after it (a development run counts their reads in main too).
-  const main = a.inspect ? await mainHelpers(a.inspect) : undefined;
-  if (!main) console.log('sessionsWeekFlow: the reads of the 7 days after a move are counted in a development run only (they are counted in main).');
   const moveWhileSweeping = async (name, move, moved) => {
     const hold = holdPipe(home, `.claude/projects/-work-hold/${name.replace(/\W+/g, '-')}.jsonl`);
     try {
@@ -10929,8 +11021,14 @@ async function sessionsWeekFlow() {
   }
   if (shots) await a.send('Emulation.setEmulatedMedia', { features: [] });
   await fullSize(a);
-  await a.click('#sessions-keep-start');
+  const onBefore = turnedCount('on');
+  const startBusy = await a.run(`(() => { const btn = document.querySelector('#sessions-keep-start'); btn.click(); const busy = document.querySelector('#sessions-keep-start')?.disabled ?? false; btn.click(); document.querySelector('#sessions-keep-stop')?.click(); return busy; })()`);
   for (let tries = 0; tries < 100 && !(await a.exists('#sessions-day-week')); tries++) await wait(50);
+  for (let tries = 0; tries < 100 && await a.exists('#sessions-collecting'); tries++) await wait(50);
+  await a.settle();
+  same('two clicks at once on Start keeping in an empty home: disables while pending, starts once and keeps keeping on afterwards',
+    [startBusy, turnedCount('on') - onBefore, await a.exists('#sessions-day-week'), await a.exists('#sessions-keep-stop')],
+    [true, 1, true, true]);
   await a.click('#sessions-day-week');
   for (let tries = 0; tries < 100 && !(await a.exists('#sessions-none')); tries++) await wait(100);
   same('a home that keeps with nothing in 7 days: one sentence naming the tools read', await a.text('#sessions-none'), 'No Claude Code or Codex sessions in the last 7 days.');
