@@ -881,12 +881,13 @@ export interface DeclaredHook {
   launch?: { shell: string } | { program: string; args: string[] };
   timeout?: number; cwd?: string; env?: Record<string, string>;
 }
-/** Which hook the page asks main to read (hook:source); main re-finds it on disk from that owner's files alone. */
-export type HookSourceRef = { declaredIn: string; event: string; at: number; command: string } & (
+/** Which owner declares a hook (own tool settings, a tool's installed plugin copy, or a marketplace copy by name). */
+export type HookSourceOwner =
   | { from: 'own'; tool: HarnessId }
   | { from: 'installed'; tool: HarnessId; plugin: string; marketName: string }
-  | { from: 'marketplace'; source: string; plugin: string }
-);
+  | { from: 'marketplace'; marketName: string; plugin: string };
+/** Which hook the page asks main to read (hook:source); main re-finds it on disk from that owner's files alone. */
+export type HookSourceRef = { declaredIn: string; event: string; at: number; command: string } & HookSourceOwner;
 /** One hook's declaring entry and script (hooksource.ts readHookSource), or why it couldn't be read. */
 export interface HookSource {
   problem?: string; file?: string; entry?: string;

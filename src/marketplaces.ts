@@ -3,8 +3,8 @@
 // functions (tested), and registerMarketplaces wires them to IPC with a few host functions from main.ts.
 import { access, readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { installedContents, marketplacePage, pluginDetail, pluginFiles, readmeIn, sourceLabel, type PluginFiles } from './catalogdetail.ts';
+import { join, resolve } from 'node:path';
+import { inside, installedContents, marketplacePage, pluginDetail, pluginFiles, readmeIn, sourceLabel, type PluginFiles } from './catalogdetail.ts';
 import { searchPath } from './platform.ts';
 import { failedFor, reverse, runPlan, succeeded, type PlanApi, type PluginDone, type PluginOp } from './pluginplan.ts';
 import { clickGoes, clickHeld, clickRuns, entryOf, firstEntry, firstRecord, newEntry, owedTo, readPluginRecord, savePluginRecord, withEntry, type Holding, type Owed, type PluginEntry, type PluginRecord, type PluginSwitch, type WaitedBefore } from './pluginrecord.ts';
@@ -211,11 +211,13 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
    * Where a plugin's files are: its folder in the marketplace, or a copy of the repository it lives in (read now if
    * needed), with the entry listing its components (for a plugin elsewhere, without the `source` naming that repository).
    */
-  async function locate(ctx: engine.PluginContext, root: string, item: CatalogPlugin): Promise<{ folder: string; entry: Record<string, unknown>; root: string } | { problem: string; nowhere?: true }> {
+  async function locate(ctx: engine.PluginContext, root: string, item: CatalogPlugin, local = false): Promise<{ folder: string; entry: Record<string, unknown>; root: string } | { problem: string; nowhere?: true }> {
     if (item.folder) return { folder: item.folder, entry: item.entry ?? {}, root };
     if (!item.remote) return { problem: 'Its files can’t be read.', nowhere: true };
-    const copy = await use.readRemotePlugin(ctx, item.remote);
+    const copy = local ? { root: engine.remoteCopyFolder(ctx, item.remote), folder: resolve(engine.remoteCopyFolder(ctx, item.remote), item.remote.path || '.') }
+      : await use.readRemotePlugin(ctx, item.remote);
     if ('problem' in copy) return { problem: `Its files couldn’t be read from ${item.from?.label ?? item.remote.url}: ${copy.problem}` };
+    if (local && !(await inside(copy.root, copy.folder))) return { problem: 'Its files can’t be read.' };
     // The entry may list its components; its `source` names the repository, not a path in it.
     const { source: _where, ...listed } = item.entry ?? {};
     return { folder: copy.folder, entry: listed, root: copy.root };
@@ -942,7 +944,20 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { report, view: await view() };
   }
 
-  return { view, listings, detail, readme, add, forget, decline, install, update, uninstall, setSkill, setPart, setWhole, items, pendingUpdates, noteJoined, toolManaged, turn, undoTurn, take, addCarried, addCarriedTo, beforeParts };
+  /** One plugin's marketplace copy on disk among the open home's known marketplaces (no fetch). */
+  async function pluginCopy(marketName: string, plugin: string): Promise<{ folder: string; root: string; entry: Record<string, unknown>; atMarketplaceRoot: boolean } | undefined> {
+    const ctx = await context();
+    const { known } = await listedSources(ctx, columns((await host.read()).tools));
+    for (const { source } of known) {
+      const { catalog } = await catalogFor(ctx, source, { counts: false, local: true });
+      const item = catalog?.root && catalog.name === marketName ? catalog.plugins.find(entry => entry.name === plugin) : undefined;
+      const where = item ? await locate(ctx, catalog!.root!, item, true) : undefined;
+      if (where && !('problem' in where)) return { ...where, atMarketplaceRoot: !!item!.folder && !!item!.isMarketplaceRoot };
+    }
+    return undefined;
+  }
+
+  return { view, listings, detail, readme, add, forget, decline, install, update, uninstall, setSkill, setPart, setWhole, items, pendingUpdates, noteJoined, toolManaged, turn, undoTurn, take, addCarried, addCarriedTo, beforeParts, pluginCopy };
 }
 
 type Handle = (channel: string, work: (...args: unknown[]) => Promise<unknown>) => void;

@@ -1,30 +1,32 @@
-// Reading one hook's source on click (IPC hook:source): re-finds the hook from disk by its owner (own tool settings, an
-// installed plugin copy, or a marketplace copy without fetching), cuts its entry verbatim from JSON/JSONC or TOML (omitted for
-// inline plugin manifest hooks), and resolves and reads the script named by its command. Read-only: runs nothing, writes
-// nothing, and never trusts a path sent from the page to read outside the owner's own files.
-import { open, readFile, stat } from 'node:fs/promises';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { inside, installedContents, pluginContents } from './catalogdetail.ts';
+// Reading one hook's source on click (IPC hook:source): finds the hook again through the same readers the page was drawn with
+// (own tool settings, an installed plugin copy, or a marketplace copy resolved by marketplace name through marketplaces.ts,
+// without fetching), never reads a path or folder sent from the page, and shows only the hook's own entry (the file's own
+// bytes for that hook from JSON/JSONC or TOML moved left as a block — common leading indentation removed, nothing else;
+// omitted for inline plugin manifest hooks) and the script its command names (by rule). Read-only: runs and writes nothing.
+import { isAbsolute, join, resolve } from 'node:path';
+import { READ_LIMIT, installedContents, pathIn, pluginContents, readCapped } from './catalogdetail.ts';
 import { harnessIds, toolConfigRoot } from './harnesses.ts';
 import { shownFromHome } from './machine.ts';
 import { sessionSettings } from './pluginitems.ts';
-import { cachedCatalog, installedPlugins, parseCatalog, remoteCopyFolder, type PluginContext } from './plugins.ts';
+import { installedPlugins, type PluginContext } from './plugins.ts';
 import { takesPlugins } from './presence.ts';
 import { hookLine } from './sessionhooks.ts';
 import { jsonElements, members, ownEnd, readTomlTables, skipSpace } from './textedit.ts';
 import type { DeclaredHook, HarnessId, HomeMode, HookSource, HookSourceRef } from './types.ts';
-import { isFolder, record } from './values.ts';
-import { fileName } from './words.ts';
+import { record, text as asText } from './values.ts';
+import { HOOK_SOURCE_UNREADABLE, fileName } from './words.ts';
 
-export interface HookSourceContext { home: string; mode: HomeMode; overrides?: Partial<Record<HarnessId, string>>; dataDir: string }
+export interface HookSourceContext {
+  home: string; mode: HomeMode; overrides?: Partial<Record<HarnessId, string>>; dataDir: string;
+  marketplace?: (marketName: string, plugin: string) => Promise<{ folder: string; root: string; entry: Record<string, unknown>; atMarketplaceRoot: boolean } | undefined>;
+}
 
-const SCRIPT_LIMIT = 256 * 1024;
-const UNREADABLE = 'This file couldn’t be read.';
-const NO_SCRIPT = 'No script file found in the command.';
-const NOT_TEXT = 'Not a text file.';
 const INTERPRETERS = new Set(['sh', 'bash', 'zsh', 'node', 'python', 'python3', 'ruby', 'cat']);
-const NO_FILE_OPTIONS = new Set(['-c', '-e', '-m']);
+const SHELL_TOKEN = /([|&;<>])|(?:'[^']*(?:'|$)|"(?:\\.|[^"\\])*(?:"|$)|\\.|[^\s'"\\|&;<>])+/g;
+const ENV_ASSIGN = /^[A-Za-z_]\w*=/;
+const HOME_VAR = /^\$(?:HOME|\{HOME\})[\\/]/;
 const PLUGIN_VAR = /^\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\}[\\/]/;
+type ShellWord = { text: string; head: 'raw' | 'dbl' | 'lit'; raw: string };
 
 /** Validates an untrusted hook identity received over IPC. */
 export function parseHookRef(value: unknown): HookSourceRef | undefined {
@@ -33,69 +35,60 @@ export function parseHookRef(value: unknown): HookSourceRef | undefined {
   if (typeof ref.at !== 'number' || !Number.isInteger(ref.at) || ref.at < 0) return undefined;
   const base = { declaredIn: ref.declaredIn, event: ref.event, at: ref.at, command: ref.command };
   const tool = harnessIds.includes(ref.tool as HarnessId) ? (ref.tool as HarnessId) : undefined;
-  const nonEmpty = (text: unknown): text is string => typeof text === 'string' && text.length > 0;
   if (ref.from === 'own' && tool) return { ...base, from: 'own', tool };
-  if (ref.from === 'installed' && tool && nonEmpty(ref.plugin) && nonEmpty(ref.marketName)) return { ...base, from: 'installed', tool, plugin: ref.plugin, marketName: ref.marketName };
-  if (ref.from === 'marketplace' && nonEmpty(ref.source) && nonEmpty(ref.plugin)) return { ...base, from: 'marketplace', source: ref.source, plugin: ref.plugin };
+  if (ref.from === 'installed' && tool && asText(ref.plugin) && asText(ref.marketName)) return { ...base, from: 'installed', tool, plugin: asText(ref.plugin), marketName: asText(ref.marketName) };
+  if (ref.from === 'marketplace' && asText(ref.marketName) && asText(ref.plugin)) return { ...base, from: 'marketplace', marketName: asText(ref.marketName), plugin: asText(ref.plugin) };
   return undefined;
 }
 
-/** Splits a shell command line into words while honouring single quotes, double quotes and backslash escapes. */
-function splitShell(command: string): string[] {
-  return [...command.matchAll(/(?:'[^']*'|"[^"\\]*(?:\\.[^"\\]*)*"|\\.|[^\s'"\\])+/g)].map(match =>
-    match[0].replace(/'([^']*)'|"((?:\\.|[^"\\])*)"|\\(.)/g, (_all, single, dbl, esc) =>
-      single ?? esc ?? dbl.replace(/\\(["\\$`])/g, '$1')));
+/** Splits the first simple shell command (stopping at the first operator outside quotes), tracking how each word starts. */
+function firstCommandWords(command: string): ShellWord[] {
+  const words: ShellWord[] = [];
+  for (const [raw, op] of command.matchAll(SHELL_TOKEN)) {
+    if (op) break;
+    const head: ShellWord['head'] = raw.startsWith('~/') || raw.startsWith('~\\') ? 'raw' : raw.startsWith('$') || raw.startsWith('"$') ? 'dbl' : 'lit';
+    const text = raw.replace(/'([^']*)'?|"((?:\\.|[^"\\])*)"?|\\(.)/g, (_all, single, dbl, esc) =>
+      single ?? esc ?? dbl.replace(/\\(["\\$`])/g, '$1'));
+    words.push({ text, head, raw });
+  }
+  return words;
 }
 
-/** Resolves a word naming an absolute, ~/… (against `home`), or plugin-root path; undefined otherwise. */
-function resolveScriptPath(word: string, home: string, pluginRoot?: string): string | undefined {
-  if (!word || word.includes('\0')) return undefined;
-  if (word.startsWith('~/') || word.startsWith('~\\')) return join(home, word.slice(2));
-  const match = pluginRoot ? PLUGIN_VAR.exec(word) : null;
-  if (match) return resolve(pluginRoot!, word.slice(match[0].length));
-  return isAbsolute(word) ? word : undefined;
+/** Resolves a word naming an absolute, unquoted ~/…, non-single-quoted $HOME/${HOME}/… or plugin-root path. */
+function resolveScriptPath({ text, head }: ShellWord, home: string, pluginRoot?: string): string | undefined {
+  if (!text || text.includes('\0')) return undefined;
+  if (head === 'raw' && (text.startsWith('~/') || text.startsWith('~\\'))) return join(home, text.slice(2));
+  if (head !== 'lit' && HOME_VAR.test(text)) return join(home, text.replace(HOME_VAR, ''));
+  if (head !== 'lit' && pluginRoot && PLUGIN_VAR.test(text)) return resolve(pluginRoot, text.replace(PLUGIN_VAR, ''));
+  return isAbsolute(text) ? text : undefined;
 }
 
 /** Finds the script path named by a hook's launch by rule (never by guess); undefined when none is found. */
 export function scriptInLaunch(launch: DeclaredHook['launch'], home: string, pluginRoot?: string): string | undefined {
   if (!launch) return undefined;
-  const words = 'shell' in launch ? splitShell(launch.shell) : [launch.program, ...launch.args];
+  const words: ShellWord[] = 'shell' in launch ? firstCommandWords(launch.shell) : [launch.program, ...launch.args].map(text => ({ text, head: 'raw', raw: text }));
   let at = 0;
-  if (words[0] && fileName(words[0]) === 'env') {
-    at = 1;
-    while (at < words.length && (words[at]!.startsWith('-') || /^[A-Za-z_]\w*=/.test(words[at]!))) at++;
+  if ('shell' in launch) while (at < words.length && ENV_ASSIGN.test(words[at]!.raw)) at++;
+  if (words[at] && fileName(words[at]!.text) === 'env') {
+    const next = words[at + 1];
+    if (!next || next.text.startsWith('-')) return undefined;
+    at++;
+    while (at < words.length && ENV_ASSIGN.test(words[at]!.text)) at++;
   }
   const first = words[at];
   if (!first) return undefined;
-  if (!INTERPRETERS.has(fileName(first))) return resolveScriptPath(first, home, pluginRoot);
-  for (at++; at < words.length; at++) {
-    const arg = words[at]!;
-    if (arg === '--') return words[at + 1] ? resolveScriptPath(words[at + 1]!, home, pluginRoot) : undefined;
-    if (NO_FILE_OPTIONS.has(arg)) return undefined;
-    if (arg.startsWith('-') && arg.length > 1) continue;
-    return resolveScriptPath(arg, home, pluginRoot);
-  }
-  return undefined;
+  if (!INTERPRETERS.has(fileName(first.text))) return resolveScriptPath(first, home, pluginRoot);
+  const target = words[at + 1];
+  return !target || target.text.startsWith('-') ? undefined : resolveScriptPath(target, home, pluginRoot);
 }
 
-/** Reads a regular text file up to SCRIPT_LIMIT bytes; refuses non-regular files (folders, FIFOs) and NUL-byte binaries. */
+/** Reads a regular text file up to READ_LIMIT bytes via catalogdetail.ts readCapped; refuses non-regular files and NUL-byte binaries. */
 async function readScript(path: string): Promise<NonNullable<HookSource['script']>> {
-  const info = await stat(path).catch(() => undefined);
-  if (!info?.isFile()) return { path, problem: UNREADABLE };
-  let handle;
-  try {
-    handle = await open(path, 'r');
-    const buffer = Buffer.alloc(Math.min(info.size, SCRIPT_LIMIT) + 1);
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    const slice = buffer.subarray(0, Math.min(bytesRead, SCRIPT_LIMIT));
-    if (slice.includes(0)) return { path, problem: NOT_TEXT };
-    const text = slice.toString('utf8');
-    return { path, text: bytesRead <= SCRIPT_LIMIT ? text : `${text}\n\n[Central Knot shows the first ${SCRIPT_LIMIT / 1024} KB of this file.]` };
-  } catch {
-    return { path, problem: UNREADABLE };
-  } finally {
-    await handle?.close();
-  }
+  const read = await readCapped(path);
+  if (!read) return { path, problem: HOOK_SOURCE_UNREADABLE };
+  if (read.bytes.includes(0)) return { path, problem: 'Not a text file.' };
+  const text = read.bytes.toString('utf8');
+  return { path, text: read.whole ? text : `${text}\n\n[Central Knot shows the first ${READ_LIMIT / 1024} KB of this file.]` };
 }
 
 /** Shifts a multi-line JSON slice left by the indent on its opening line when every following non-empty line shares it. */
@@ -108,7 +101,7 @@ function dedent(raw: string, span: { start: number; end: number }): string {
   return [first, ...rest.map(line => (line.startsWith(indent) ? line.slice(indent.length) : line))].join('\n');
 }
 
-/** Cuts the `at`-th hook object (groups flattened, matching catalogdetail.ts readHooks) verbatim from a JSON/JSONC file. */
+/** Cuts the `at`-th hook object (groups flattened, matching catalogdetail.ts readHooks) from a JSON/JSONC file and moves it left. */
 function jsonHookEntry(raw: string, event: string, at: number, allowTopLevel: boolean): string | undefined {
   try {
     const root = skipSpace(raw, raw.charCodeAt(0) === 0xfeff ? 1 : 0);
@@ -123,9 +116,7 @@ function jsonHookEntry(raw: string, event: string, at: number, allowTopLevel: bo
       return inner && raw[inner.value.start] === '[' ? jsonElements(raw, inner.value.start) : [item];
     });
     return spans[at] ? dedent(raw, spans[at]) : undefined;
-  } catch {
-    return undefined;
-  }
+  } catch { return undefined; }
 }
 
 /** Cuts the `at`-th Codex hook for `event` from config.toml: a `[[hooks.<event>.hooks]]` table or an inline `hooks = [...]` line. */
@@ -145,19 +136,11 @@ function tomlHookEntry(raw: string, event: string, at: number): string | undefin
       }
     }
     return entries[at];
-  } catch {
-    return undefined;
-  }
+  } catch { return undefined; }
 }
 
-const withinFolder = (folder: string, target: string) => {
-  const way = relative(folder, target);
-  return way === '' || (!isAbsolute(way) && way !== '..' && !way.startsWith(`..${sep}`));
-};
-
-/** Re-reads the owner's hooks from disk (no network) and returns the folder bounding its declaring files. */
+/** Re-reads the owner's hooks through the same readers the page uses (no network) and returns the folder bounding its declaring files. */
 async function findOwner(ctx: HookSourceContext, ref: HookSourceRef): Promise<{ hooks: DeclaredHook[]; unread: string[]; pluginRoot?: string; within: string } | undefined> {
-  const pluginCtx: PluginContext = { home: ctx.home, dataDir: ctx.dataDir, binaries: {}, overrides: ctx.overrides };
   if (ref.from === 'own') {
     const root = toolConfigRoot(ctx, ref.tool);
     const { ownHooks = [], ownHooksUnread = [] } = await sessionSettings(ref.tool, root);
@@ -165,36 +148,36 @@ async function findOwner(ctx: HookSourceContext, ref: HookSourceRef): Promise<{ 
   }
   if (ref.from === 'installed') {
     if (!takesPlugins(ref.tool)) return undefined;
+    const pluginCtx: PluginContext = { home: ctx.home, dataDir: ctx.dataDir, binaries: {}, overrides: ctx.overrides };
     const install = (await installedPlugins(pluginCtx, ref.tool).catch(() => [])).find(candidate => candidate.plugin === ref.plugin && candidate.marketplace === ref.marketName);
     if (!install || install.state.state !== 'installed') return undefined;
-    const folder = install.state.path;
-    const { hooks, hooksUnread = [] } = await installedContents(ref.tool, folder, install.entry, install.atMarketplaceRoot);
-    return { hooks, unread: hooksUnread, pluginRoot: folder, within: folder };
+    const { hooks, hooksUnread = [] } = await installedContents(ref.tool, install.state.path, install.entry, install.atMarketplaceRoot);
+    return { hooks, unread: hooksUnread, pluginRoot: install.state.path, within: install.state.path };
   }
-  const catalog = isFolder(ref.source) ? await parseCatalog(ref.source, ref.source, 'folder', { counts: false }) : await cachedCatalog(pluginCtx, ref.source);
-  const item = catalog?.root ? catalog.plugins.find(entry => entry.name === ref.plugin) : undefined;
-  if (!catalog?.root || !item) return undefined;
-  const remoteRoot = !item.folder && item.remote ? remoteCopyFolder(pluginCtx, item.remote) : undefined;
-  const root = remoteRoot ?? catalog.root;
-  const folder = item.folder ?? (remoteRoot ? resolve(remoteRoot, item.remote!.path || '.') : undefined);
-  if (!folder || (remoteRoot && !(await inside(root, folder)))) return undefined;
-  const { source: _where, ...remoteEntry } = item.entry ?? {};
-  const { hooks, hooksUnread = [] } = await pluginContents(folder, remoteRoot ? remoteEntry : item.entry ?? {}, root, { atMarketplaceRoot: !!item.folder && !!item.isMarketplaceRoot });
-  return { hooks, unread: hooksUnread, pluginRoot: folder, within: root };
+  const copy = await ctx.marketplace?.(ref.marketName, ref.plugin);
+  if (!copy) return undefined;
+  const { hooks, hooksUnread = [] } = await pluginContents(copy.folder, copy.entry, copy.root, { atMarketplaceRoot: copy.atMarketplaceRoot });
+  return { hooks, unread: hooksUnread, pluginRoot: copy.folder, within: copy.root };
 }
 
 /** Reads one hook's declaring entry and script text from disk on demand. */
 export async function readHookSource(ctx: HookSourceContext, ref: HookSourceRef): Promise<HookSource> {
   const owner = await findOwner(ctx, ref);
-  if (!owner) return { problem: UNREADABLE };
-  if (owner.unread.includes(ref.declaredIn)) return { file: ref.declaredIn, problem: UNREADABLE };
+  if (!owner) return { problem: HOOK_SOURCE_UNREADABLE };
+  if (owner.unread.includes(ref.declaredIn)) return { file: ref.declaredIn, problem: HOOK_SOURCE_UNREADABLE };
   const match = owner.hooks.find(hook => hook.declaredIn === ref.declaredIn && hook.event === ref.event && hook.at === ref.at && hookLine(hook) === ref.command);
-  if (!match) return withinFolder(owner.within, ref.declaredIn) ? { problem: `This hook is no longer in ${shownFromHome(ref.declaredIn, ctx)}.` } : { problem: UNREADABLE };
+  if (!match) {
+    if (!pathIn(owner.within, ref.declaredIn)) return { problem: HOOK_SOURCE_UNREADABLE };
+    const shown = shownFromHome(ref.declaredIn, ctx);
+    const moved = owner.hooks.some(hook => hook.declaredIn === ref.declaredIn && hook.event === ref.event && hookLine(hook) === ref.command);
+    return { problem: moved ? `${shown} changed since this page was read. Refresh to see it.` : `This hook is no longer in ${shown}.` };
+  }
   const scriptPath = scriptInLaunch(match.launch, ctx.home, owner.pluginRoot);
-  const script = scriptPath ? await readScript(scriptPath) : { problem: NO_SCRIPT };
+  const script = scriptPath ? await readScript(scriptPath) : { problem: 'No script file found in the command.' };
   if (match.declaredIn === owner.pluginRoot) return { script };
-  const raw = await readFile(match.declaredIn, 'utf8').catch(() => undefined);
-  if (raw === undefined) return { file: match.declaredIn, problem: UNREADABLE };
+  const file = await readCapped(match.declaredIn, 4 * 1024 * 1024);
+  if (!file?.whole) return { file: match.declaredIn, problem: HOOK_SOURCE_UNREADABLE };
+  const raw = file.bytes.toString('utf8');
   const entry = match.declaredIn.endsWith('.toml') ? tomlHookEntry(raw, match.event, match.at) : jsonHookEntry(raw, match.event, match.at, !!owner.pluginRoot);
-  return entry === undefined ? { file: match.declaredIn, problem: UNREADABLE } : { file: match.declaredIn, entry, script };
+  return entry === undefined ? { file: match.declaredIn, problem: HOOK_SOURCE_UNREADABLE } : { file: match.declaredIn, entry, script };
 }

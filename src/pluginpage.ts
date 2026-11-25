@@ -160,14 +160,14 @@ function itemsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
  * One group of named parts, each description held to two lines. Once laid out, a description that was cut gets a "Show
  * more" button (see markClamped); one that fits has none.
  */
-const partList = (owner: string, parts: { name: string; text: string; mono?: boolean; key?: string; source?: HookSourceRef }[]) => h('ul.plugin-parts', {}, parts.map(part => {
+const partList = (owner: string, parts: { name: string; text: string; mono?: boolean; key?: string; source?: HookSourceRef; sourceId?: string }[]) => h('ul.plugin-parts', {}, parts.map(part => {
   // What is opened is kept by the part's name, or by its `key` where rows share a name (two commands of one hook event).
   const key = `${owner}\u0000${part.key ?? part.name}`;
   const open = market.opened.has(key);
   const more = h('button.part-more', { type: 'button', onclick: () => toggleOpened(key) }, open ? 'Show less' : 'Show more');
   const body = part.text ? h('span.plugin-part-body', {}, h(`span.plugin-part-what${part.mono ? '.mono' : ''}${open ? '.expanded' : ''}`, {}, part.text), more) : part.source ? h('span.plugin-part-body', {}) : null;
   return h(`li${open ? '.clamped' : ''}${part.source ? '.with-source' : ''}`, {},
-    h('code.plugin-name', {}, part.name), body, part.source ? hookSourceControls(part.source) : null);
+    h('code.plugin-name', {}, part.name), body, part.source && part.sourceId ? hookSourceControls(part.source, part.sourceId) : null);
 }));
 
 /**
@@ -249,11 +249,11 @@ const addsTextSomewhere = (hook: DeclaredHook) => pluginTools.some(tool => addsT
  * sessionhooks.ts hookLine, blank for one that starts nothing here), so the count in the heading is the rows under it. Both
  * groups under What it holds are drawn by it.
  */
-function hookGroup(owner: string, source: string, plugin: string, title: string, hooks: DeclaredHook[], about?: string) {
-  const rows = hooks.map((hook, at) => {
+function hookGroup(owner: string, groupId: string, marketName: string, plugin: string, title: string, hooks: DeclaredHook[], about?: string) {
+  const rows = hooks.map((hook, row) => {
     const command = hookLine(hook);
-    return { name: hook.event, text: command, mono: true, key: `${hook.event}\u0000${at}`,
-      source: { from: 'marketplace' as const, source, plugin, declaredIn: hook.declaredIn, event: hook.event, at: hook.at, command } };
+    return { name: hook.event, text: command, mono: true, key: `${hook.event}\u0000${row}`, sourceId: `${groupId}-${row}`,
+      source: { from: 'marketplace' as const, marketName, plugin, declaredIn: hook.declaredIn, event: hook.event, at: hook.at, command } };
   });
   return rows.length ? h('div.plugin-group', {}, h('h4', {}, `${title} (${rows.length})`), about ? h('p.plugin-group-note', {}, about) : null, partList(owner, rows)) : null;
 }
@@ -384,9 +384,9 @@ function contentsBlock(view: PluginsView, entry: MarketplaceView, marketIndex: n
         : 'Its files live outside this marketplace, so its skills, commands, agents and instruction files are read from the tools that installed it.') : null,
     empty && !detail.problem ? h('p.plugin-muted', {}, 'Nothing Central Knot recognizes: no skills, commands, agents, instruction files, hooks or servers.') : null,
     ...files.map(({ kind, parts }) => fileGroup(owner, idFor, kind, parts, detail.offered, kind === 'skills' ? skillColumns(view, entry, plugin, marketIndex, parts.map(part => part.name)) : undefined)),
-    hookGroup(`${owner}\u0000session`, entry.source, plugin.name, 'Hooks that can add text to sessions', detail.hooks.filter(addsTextSomewhere),
+    hookGroup(`${owner}\u0000session`, 'hook-source-session', entry.name, plugin.name, 'Hooks that can add text to sessions', detail.hooks.filter(addsTextSomewhere),
       sessionHooksAbout(componentsFrom(detail).sessionTextHooks, nativeTools(view, entry, plugin.name))),
-    hookGroup(`${owner}\u0000hooks`, entry.source, plugin.name, 'Other hooks', detail.hooks.filter(hook => !addsTextSomewhere(hook))),
+    hookGroup(`${owner}\u0000hooks`, 'hook-source-other', entry.name, plugin.name, 'Other hooks', detail.hooks.filter(hook => !addsTextSomewhere(hook))),
     detail.mcpServers.length ? h('div.plugin-group', {}, h('h4', {}, `MCP servers (${detail.mcpServers.length})`),
       partList(`${owner}\u0000mcp`, detail.mcpServers.map(server => ({ name: server.name, text: server.runs, mono: true })))) : null,
     detail.lspServers.length ? h('div.plugin-group', {}, h('h4', {}, `Language servers (${detail.lspServers.length})`), partList(`${owner}\u0000lsp`, detail.lspServers.map(name => ({ name, text: '' })))) : null,

@@ -1,7 +1,7 @@
 // What a marketplace says about itself and about each plugin, read from its own files: READMEs, where each plugin comes
 // from, and what each plugin holds. Read only; nothing here runs a plugin, a hook or a server.
 // Every file read must resolve, links followed, to a path inside the marketplace (or the plugin's own repository).
-import { lstat, open, readdir, realpath } from 'node:fs/promises';
+import { lstat, open, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { nameAndDescription } from './discovery.ts';
 import { displayPath } from './machine.ts';
@@ -11,8 +11,8 @@ import { githubRepo, isFolder, isHttps, nameOfFile, record, strings, text } from
 import { commandLine } from './words.ts';
 
 const README_LIMIT = 60_000;
-/** No file from a repository is read past this; front matter and READMEs need far less. */
-const READ_LIMIT = 256 * 1024;
+/** No file from a repository or hook script is read past this; front matter and READMEs need far less. */
+export const READ_LIMIT = 256 * 1024;
 /** A marketplace.json lists every plugin, so it may be far larger than any other file read here. */
 const MANIFEST_LIMIT = 8 * 1024 * 1024;
 /** Values only Claude Code fills in (the plugin's own folder, its data folder, install-time settings): such a server can't run on its own. */
@@ -22,13 +22,32 @@ export const MANIFEST = '.claude-plugin/marketplace.json';
 /** Where Codex's own marketplaces (such as the ones ChatGPT desktop adds) describe themselves; only Codex reads this one. */
 export const CODEX_MANIFEST = '.agents/plugins/marketplace.json';
 
+/** True when `path` lies inside `root` by path segments (no filesystem check). */
+export const pathIn = (root: string, target: string) => {
+  const way = relative(root, target);
+  return way === '' || (!isAbsolute(way) && way !== '..' && !way.startsWith(`..${sep}`));
+};
+
 /** True when `path` names something inside `root`, after both are resolved through links. A missing path is not inside. */
 export async function inside(root: string, path: string): Promise<boolean> {
   try {
     const [base, target] = await Promise.all([realpath(root), realpath(path)]);
-    const way = relative(base, target);
-    return way === '' || (!isAbsolute(way) && way !== '..' && !way.startsWith(`..${sep}`));
+    return pathIn(base, target);
   } catch { return false; }
+}
+
+/** Reads a regular file up to `limit` bytes (never folders, pipes or devices); undefined when missing or unreadable. */
+export async function readCapped(path: string, limit = READ_LIMIT): Promise<{ bytes: Buffer; whole: boolean } | undefined> {
+  const info = await stat(path).catch(() => undefined);
+  if (!info?.isFile()) return undefined;
+  let file;
+  try {
+    file = await open(path, 'r');
+    // Sized to the file, so a small file under a large limit doesn't cost the whole limit.
+    const buffer = Buffer.alloc(Math.min(info.size, limit) + 1);
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+    return { bytes: buffer.subarray(0, Math.min(bytesRead, limit)), whole: bytesRead <= limit };
+  } catch { return undefined; } finally { await file?.close(); }
 }
 
 /**
@@ -37,15 +56,8 @@ export async function inside(root: string, path: string): Promise<boolean> {
  */
 async function readInside(root: string, path: string, limit = READ_LIMIT): Promise<{ text: string; whole: boolean } | undefined> {
   if (!(await inside(root, path))) return undefined;
-  try {
-    const file = await open(path, 'r');
-    try {
-      // Sized to the file, so a small file under a large limit doesn't cost the whole limit.
-      const buffer = Buffer.alloc(Math.min((await file.stat()).size, limit) + 1);
-      const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
-      return { text: buffer.subarray(0, Math.min(bytesRead, limit)).toString('utf8'), whole: bytesRead <= limit };
-    } finally { await file.close(); }
-  } catch { return undefined; }
+  const read = await readCapped(path, limit);
+  return read && { text: read.bytes.toString('utf8'), whole: read.whole };
 }
 const textInside = async (root: string, path: string) => (await readInside(root, path))?.text;
 /** A skill, command or agent file is shown whole up to this size; past it, what is shown says so. */

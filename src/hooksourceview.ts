@@ -1,35 +1,39 @@
 // Shared View source / Hide source button and opened source block for every hook row: called by instructionspage.ts
 // sessionStripView (Instructions and each tool's Instructions tab) and pluginpage.ts partList (from hookGroup). Reads on click
-// over hook:source (hooksource.ts) and updates in place so open editors keep their caret; Escape hides it and refocuses the button.
+// over hook:source (hooksource.ts) and updates in place so open editors keep their caret; Escape hides it and refocuses the
+// button. Refresh and home switches close all open panels (resetHookSources); gone rows are pruned on redraw (pruneHookSources).
 import { shownPath, state } from './app.ts';
 import { button, h, pathText } from './dom.ts';
 import type { HookSource, HookSourceRef } from './types.ts';
-import { fileName } from './words.ts';
+import { HOOK_SOURCE_UNREADABLE, fileName } from './words.ts';
 
-let openHome: string | undefined;
-const opened = new Map<string, { seq: number; source?: HookSource }>();
-const ids = new Map<string, number>();
+const opened = new Map<string, { seq: number; panelId: string; source?: HookSource }>();
 let seq = 0;
 
-function sourceBlock(id: string, path?: string, text?: string, note?: string): HTMLElement {
+/** Closes all open hook source blocks and drops any in-flight reads (called on Refresh and home switch). */
+export function resetHookSources(): void {
+  opened.clear();
+  seq++;
+}
+
+/** Drops open hook source state for any row no longer drawn on screen (called after each page draw). */
+export function pruneHookSources(): void {
+  for (const [key, entry] of opened) if (!document.getElementById(entry.panelId)) opened.delete(key);
+}
+
+function sourceBlock(blockId: string, path?: string, text?: string, note?: string, prefix?: string): HTMLElement {
   return h('div.content-block', {},
-    path ? h('p.content-owner', {}, pathText(shownPath(path), path)) : null,
+    path ? h('p.content-owner', {}, prefix ? `${prefix} ` : null, pathText(shownPath(path), path)) : null,
     text !== undefined
-      ? h('pre.content.mono', { id, tabindex: '0', 'aria-label': `${fileName(path ?? '')} contents` }, text.replace(/\n$/, ''))
+      ? h('pre.content.mono', { id: blockId, tabindex: '0', 'aria-label': `${fileName(path ?? '')} contents` }, text.replace(/\n$/, ''))
       : h('p.hook-source-note', {}, note ?? ''));
 }
 
 /** Returns the row's View source / Hide source button, followed by its opened source block when open. */
-export function hookSourceControls(ref: HookSourceRef): HTMLElement[] {
-  const home = state.home?.home;
-  if (home !== openHome) {
-    opened.clear();
-    openHome = home;
-  }
-  const key = JSON.stringify(ref);
-  const baseId = `hook-source-${ids.get(key) ?? ids.set(key, ids.size).size - 1}`;
-  const btnId = `${baseId}-btn`;
-  const panelId = `${baseId}-panel`;
+export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[] {
+  const key = `${id}\u0000${JSON.stringify(ref)}`;
+  const btnId = `${id}-btn`;
+  const panelId = `${id}-panel`;
   const onEscape = (event: KeyboardEvent) => {
     if (event.key !== 'Escape' || !opened.has(key)) return;
     event.preventDefault();
@@ -37,11 +41,12 @@ export function hookSourceControls(ref: HookSourceRef): HTMLElement[] {
     toggle();
   };
   const panel = (source?: HookSource): HTMLElement => h('div.hook-source', { id: panelId, onkeydown: onEscape },
+    ref.from === 'marketplace' ? h('p.hook-source-note', {}, 'The marketplace’s copy.') : null,
     !source ? h('p.hook-source-note', {}, 'Reading…')
-      : source.problem ? sourceBlock(`${baseId}-err`, source.file, undefined, source.problem)
+      : source.problem ? sourceBlock(`${id}-err`, source.file, undefined, source.problem)
       : [
-        source.entry !== undefined && source.file ? sourceBlock(`${baseId}-entry`, source.file, source.entry) : null,
-        source.script ? sourceBlock(`${baseId}-script`, source.script.path, source.script.text, source.script.problem) : null,
+        source.script ? sourceBlock(`${id}-script`, source.script.path, source.script.text, source.script.problem) : null,
+        source.entry !== undefined && source.file ? sourceBlock(`${id}-entry`, source.file, source.entry, undefined, 'Declared in') : null,
       ]);
   const control = (open: boolean): HTMLElement => button({
     variant: 'link', size: 'micro', label: open ? 'Hide source' : 'View source', id: btnId,
@@ -58,13 +63,13 @@ export function hookSourceControls(ref: HookSourceRef): HTMLElement[] {
     next.focus({ preventScroll: true });
     if (isClosing) return;
     const call = ++seq;
-    opened.set(key, { seq: call });
+    opened.set(key, { seq: call, panelId });
     next.after(panel());
     void window.centralKnot.hookSource(activeHome, ref)
-      .catch((): HookSource => ({ problem: 'This file couldn’t be read.' }))
+      .catch((): HookSource => ({ problem: HOOK_SOURCE_UNREADABLE }))
       .then(source => {
-        if (openHome !== activeHome || opened.get(key)?.seq !== call) return;
-        opened.set(key, { seq: call, source });
+        if (state.home?.home !== activeHome || opened.get(key)?.seq !== call) return;
+        opened.set(key, { seq: call, panelId, source });
         document.getElementById(panelId)?.replaceWith(panel(source));
       });
   }

@@ -11,7 +11,7 @@
 // project's or an organisation's hooks, a skill's or an agent's own hooks, and `additionalContext` printed by other events.
 import { addsText, ignoresText, sessionTextNote, textEventsWords, whenItRuns } from './pluginoutcomes.ts';
 import { commandLine, toolNames } from './words.ts';
-import type { DeclaredHook, HarnessId, HookSourceRef, InstalledPlugin, InstructionFile } from './types.ts';
+import type { DeclaredHook, HarnessId, HookSourceOwner, HookSourceRef, InstalledPlugin, InstructionFile } from './types.ts';
 
 /** How a hook starts, in one line: its shell command as written, or its program with its arguments; '' for one that starts nothing here. */
 export const hookLine = (hook: DeclaredHook) => (!hook.launch ? '' : 'shell' in hook.launch ? hook.launch.shell : commandLine(hook.launch.program, hook.launch.args));
@@ -59,7 +59,7 @@ const EXTENSIONS: Partial<Record<HarnessId, string>> = { 'pi-cli': 'packages', '
  * why its hooks have no rows (Copilot CLI's prompt hooks) shows the note alone.
  */
 export function sessionStrip(tool: HarnessId, items: InstalledPlugin[], file: Pick<InstructionFile, 'ownHooks' | 'ownHooksUnread' | 'extensions'>): SessionStrip | undefined {
-  const rows = (hooks: DeclaredHook[] = [], owner: { from: 'own'; tool: HarnessId } | { from: 'installed'; tool: HarnessId; plugin: string; marketName: string }) =>
+  const rows = (hooks: DeclaredHook[] = [], owner: HookSourceOwner) =>
     hooks.filter(hook => addsText(tool, hook)).map(hook => {
       const command = hookLine(hook);
       return { when: whenItRuns(tool, hook), command, source: { ...owner, declaredIn: hook.declaredIn, event: hook.event, at: hook.at, command } };

@@ -243,7 +243,9 @@ function sessionStripView(file: InstructionFile) {
       h('p.session-head', {}, h(`span.origin-mark.${group.mark}`, { 'aria-hidden': 'true' }), h('strong.session-name', {}, group.settings ? `${group.name},` : group.name), where(group, at)),
       group.problem ? warning(group.problem) : null,
       ...group.unread.map(path => (path === group.settings ? warning('Its hooks couldn’t be read.') : warning('Its hooks couldn’t be read: ', path))),
-      group.hooks.length ? h('ul.session-hooks', {}, group.hooks.map(hook => h('li.session-hook', {}, h('span.session-when', {}, sentence(hook.when)), h('code.session-command', {}, hook.command), hookSourceControls(hook.source)))) : null))) : null);
+      group.hooks.length ? h('ul.session-hooks', {}, group.hooks.map((hook, row) => h('li.session-hook', {},
+        h('span.session-lead', {}, h('span.session-when', {}, sentence(hook.when)), h('code.session-command', {}, hook.command)),
+        hookSourceControls(hook.source, `hook-source-${file.tool}-${at}-${row}`)))) : null))) : null);
 }
 
 /**
