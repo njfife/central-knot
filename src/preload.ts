@@ -16,6 +16,8 @@ const api: DesktopApi = {
   agentVersion: (key, hash) => ipcRenderer.invoke('agents:version', key, hash),
   readUsage: home => ipcRenderer.invoke('usage:read', home),
   readSessions: (home, start, end, readId) => ipcRenderer.invoke('sessions:read', home, start, end, readId),
+  readKeptSessions: (home, bounds, readId) => ipcRenderer.invoke('sessions:read-kept', home, bounds, readId),
+  sweepSessions: home => ipcRenderer.invoke('sessions:sweep', home),
   setKeepSessionCosts: (home, on) => ipcRenderer.invoke('sessions:keep', home, on),
   onSessionCostsChanged: callback => { ipcRenderer.on('session-costs:changed', (_event, view) => callback(view)); },
   checkSignin: (tool, home, names) => ipcRenderer.invoke('mcp-signin:check', tool, home, names),

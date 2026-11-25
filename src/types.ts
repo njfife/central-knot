@@ -9,7 +9,7 @@ import type { NeutralServer } from './mcp.ts';
 import type { PluginDone, PluginOp } from './pluginplan.ts';
 import type { PluginEntry, PluginSwitch } from './pluginrecord.ts';
 import type { ReloadChange } from './reload.ts';
-import type { DayRows } from './sessionrow.ts';
+import type { DayRows, PeriodRows } from './sessionrow.ts';
 
 export type HomeMode = 'fixture' | 'custom' | 'actual';
 export type HarnessId = 'claude-cli' | 'copilot-cli' | 'codex-cli' | 'pi-cli' | 'opencode-cli' | 'antigravity-cli';
@@ -218,6 +218,14 @@ export interface DesktopApi {
    * sessionrow.ts sessionRows), for the Sessions page (sessionspage.ts loadSessions); null for another home than the open one.
    */
   readSessions(home: string, start: number, end: number, readId?: number): Promise<DayRows | null>;
+  /**
+   * Reads the kept record for the local days `bounds` cuts (oldest first, the end last) and makes them a day's rows each
+   * (sessionday.ts readKeptPeriod, sessionrow.ts dayByDay), for the Sessions page's 7 days; null for another home than the open
+   * one, or one that does not keep session costs.
+   */
+  readKeptSessions(home: string, bounds: number[], readId?: number): Promise<PeriodRows | null>;
+  /** Asks the keeper for a sweep of the open home while it keeps, or to join the one under way (sessionkeep.ts sweepNow); its news says when it ends. */
+  sweepSessions(home: string): Promise<void>;
   /** Turns keeping session costs on or off for `home` (sessionkeep.ts); refuses without writing when the home cannot be written. */
   setKeepSessionCosts(home: string, on: boolean): Promise<SessionCostsView>;
   /** Session-cost keeping or collection state changed for the open home (sessionkeep.ts). */
