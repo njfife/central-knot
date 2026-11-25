@@ -2,7 +2,8 @@
 // Top to bottom: what the last action did (matrix.ts outcomeBand) and the Practice copy's note; the lead, only while nothing is
 // on; what needs you (needsYou: one function, one order, nothing when nothing does; a tool that came under management by itself
 // last, until closed: arrivalLines, the one thing here kept for a home, by main.ts); a card per kind (kindCard: its counts and
-// whether it is in sync, then what the usage reading says of it); the usage strip (usageStrip); a row per managed tool
+// whether it is in sync, then what the usage reading says of it); the usage strip (usageStrip, with one link to everything
+// unused); a row per managed tool
 // (toolsTable: its version, what it has of each kind and of plugins, its sessions in the last 30 days); and where every change
 // is kept. Nothing is stored, and opening it reads nothing more than the home's view. The figures come from that view, the usage
 // reading on show and its sum (matrix.ts usageOnShow, usageSums: usagerow.ts usageSummary), Harnesses' counts (harnesspage.ts
@@ -154,17 +155,17 @@ function usedWords(total: number, sum: KindUsage | undefined): string {
 }
 
 /**
- * What the usage reading says of a kind: how many were used (usedWords); how many the page's "No use seen in 30 days" chip holds,
- * a link to the page narrowed to it, where Turn these off is; and the three most used, each a link to its row, its name shortened
- * in the middle. Its five lines' room is held by style.css (.kind-card-usage), so the card is as high before a reading lands as after.
+ * What the usage reading says of a kind: how many were used (usedWords), or why no tool can tell; and the three most used,
+ * each a link to its row, its name shortened in the middle. Its four lines' room is held by style.css (.kind-card-usage),
+ * so the card is as high before a reading lands as after.
  */
 function cardUsage(kind: PageKind, total: number, sum: KindUsage | undefined) {
-  const used = usedWords(total, sum), tell = !!total && !!sum?.figured;
-  const unused = tell && sum!.noUseSeen.length ? h('button.kind-card-link', { type: 'button', id: `overview-${kind}-unused`, onclick: () => openKind(kind, { filter: 'unused' }) },
-    `No use seen in ${USAGE_DAYS} days: ${sum!.noUseSeen.length}`) : null;
-  const second = total && sum && !tell ? 'No tool that has them on can tell.' : unused;
+  const used = usedWords(total, sum);
+  const tell = !!total && !!sum?.figured;
+  const cant = total && sum && !tell ? 'No tool that has them on can tell.' : null;
   return h('div.kind-card-usage', { id: `overview-${kind}-usage` },
-    used ? h('p.kind-card-line', {}, used) : null, second ? h('p.kind-card-line', {}, second) : null,
+    used ? h('p.kind-card-line', {}, used) : null,
+    cant ? h('p.kind-card-line', {}, cant) : null,
     (tell ? sum!.mostUsed : []).map((each, at) => h('p.kind-card-top-row', {}, h('span', {}, at ? '' : 'Most used'),
       h('button.kind-card-link.kind-card-top-name', { type: 'button', id: `overview-${kind}-top-${at}`, onclick: () => openKind(kind, { key: each.key }) }, middle(each.name, 8)),
       h('span', {}, plural(each.sessions, 'session')))));
@@ -205,16 +206,25 @@ function kindCard(kind: PageKind, home: HomeView) {
 
 /**
  * The usage reading's strip, as high in each state: its three sentences share one place, the others kept but not shown
- * (style.css .band-stack). Collecting (by itself when a home opens, or on Update); collected, when, with Update usage statistics;
- * or the history couldn't be read, with Try again, in a box. Both buttons collect without opening the item lists' band.
+ * (style.css .band-stack). Collecting (by itself when a home opens, or on Update); collected, when, with Update usage statistics
+ * and, where any kind has unused items, one link to them all on the Library; or the history couldn't be read, with Try again,
+ * in a box. Both buttons collect without opening the item lists' band.
  */
-function usageStrip() {
-  const read = usageOnShow(), now = state.usage.state === 'reading' ? 0 : state.usage.state === 'failed' || !read ? 2 : 1;
+function usageStrip(kinds: readonly PageKind[]) {
+  const read = usageOnShow();
+  const now = state.usage.state === 'reading' ? 0 : state.usage.state === 'failed' || !read ? 2 : 1;
+  const sum = usageSums();
+  const unused = sum ? kinds.reduce((total, kind) => total + sum.kinds[kind].noUseSeen.length, 0) : 0;
   const again = (label: string, id: string, shown: boolean) => button({ variant: 'link', size: 'micro', label, id: shown ? id : undefined, onclick: () => void collectUsage() });
+  const unusedLink = unused ? h('button.btn.link.micro', {
+    type: 'button',
+    id: now === 1 ? 'overview-unused' : undefined,
+    onclick: () => openKind('all', { filter: 'unused' }),
+  }, h('span.btn-label', {}, `No use seen in ${USAGE_DAYS} days: ${unused}`), icon('arrow-right', 13)) : null;
   const sentences = [
     [icon('refresh-cw', 14, 'spin tone-muted'), 'Collecting usage statistics: reading your tools’ session history on this computer. Nothing leaves it.'],
     [icon('history', 14, 'tone-muted'), `Usage collected ${dayAndTime(read?.at ?? new Date().toISOString())}. `,
-      again('Update usage statistics', 'overview-collect-usage', now === 1)],
+      again('Update usage statistics', 'overview-collect-usage', now === 1), ...(unusedLink ? [' · ', unusedLink] : [])],
     [icon('triangle-alert', 14, 'tone-warning'), 'Your tools’ session history couldn’t be read. ', again('Try again', 'overview-collect-again', now === 2)],
   ];
   return h(`div.overview-usage${now === 2 ? '.overview-usage-failed' : ''}`, { id: 'overview-usage', role: 'status' },
@@ -285,7 +295,7 @@ export function overviewPage() {
       empty ? noToolsLead('overview') : !anyOn(home) ? h('p.overview-lead', {}, leadSentence(home), nextStep(home, asksNow(home) === 'question')) : null,
       needsYou(home),
       empty ? null : h('div.kind-cards', { 'data-count': String(kinds.length) }, kinds.map(kind => kindCard(kind, home))),
-      empty ? null : usageStrip(),
+      empty ? null : usageStrip(kinds),
       empty ? null : toolsTable(home),
       h('div.overview-more', {},
         absent.length && !empty ? line('overview-absent', 'info', 'tone-muted', `No tool here holds ${orList(absent.map(kind => kindNames[kind]))}.`) : null,
