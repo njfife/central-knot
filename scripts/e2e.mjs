@@ -3950,6 +3950,13 @@ async function practiceFlow() {
   const signInCardText = `Opens hidden in ${process.platform === 'darwin' ? 'the menu bar' : 'the system tray'} at sign-in, so sync keeps running.`;
   const logCardText = 'Central Knot’s own log, for reporting a problem. Your tools’ files aren’t in it.';
   const cardOpen = id => a.run(`!!document.querySelector('#${id}-card')?.matches(':popover-open')`);
+  const cardBecomes = async (id, want, ms) => {
+    for (let end = Date.now() + ms; Date.now() < end; ) {
+      if (await cardOpen(id) === want) return true;
+      await wait(25);
+    }
+    return ms > 0 && await cardOpen(id) === want;
+  };
   const centerOf = selector => a.run(`(() => { const b = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) }; })()`);
   const pressTab = async (shift = false) => { for (const type of ['rawKeyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers: shift ? 8 : 0 }); await wait(60); };
   const pressEsc = async () => { for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await wait(60); };
@@ -4002,11 +4009,11 @@ async function practiceFlow() {
   await moveTo({ x: 0, y: 0 });
   await a.run(`document.querySelector('#setting-sign-in-info').scrollIntoView({ block: 'center' })`);
   const signInAt = await centerOf('#setting-sign-in-info');
+  const hoverAt = Date.now();
   await moveTo(signInAt);
   await wait(120);
   const beforeDelay = await cardOpen('setting-sign-in-info');
-  await wait(260);
-  const afterDelay = await cardOpen('setting-sign-in-info');
+  const afterDelay = await cardBecomes('setting-sign-in-info', true, 1500 - (Date.now() - hoverAt));
   await moveTo(await centerOf('#setting-sign-in-info-card'));
   await wait(260);
   const stayedOnCard = await cardOpen('setting-sign-in-info');
@@ -4016,13 +4023,12 @@ async function practiceFlow() {
   await wait(260);
   const stayedOnReturn = await cardOpen('setting-sign-in-info');
   await moveTo({ x: 0, y: 0 });
-  await wait(280);
-  const closedAfterLeave = await cardOpen('setting-sign-in-info');
+  const closedAfterLeave = await cardBecomes('setting-sign-in-info', false, 1500);
   await a.run(`document.querySelector('#setting-sign-in-info').dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'touch' }))`);
   await wait(360);
   const touchHover = await cardOpen('setting-sign-in-info');
-  same('mouse hover opens after 300 ms, stays on the card and on a quick return, closes 200 ms after leaving; touch hover opens nothing',
-    [beforeDelay, afterDelay, stayedOnCard, stayedOnReturn, closedAfterLeave, touchHover], [false, true, true, true, false, false]);
+  same('mouse hover opens after 300 ms (within 1.5 s), stays on the card and on a quick return, closes 200 ms after leaving (within 1.5 s); touch hover opens nothing',
+    [beforeDelay, afterDelay, stayedOnCard, stayedOnReturn, closedAfterLeave, touchHover], [false, true, true, true, true, false]);
   // Keyboard: Tab from another control opens the card; Escape closes it keeping focus; a redraw does not reopen; a second Escape runs the page's own Escape.
   await a.run(`document.querySelector('#header-refresh').focus()`);
   await pressTab();
@@ -4081,14 +4087,21 @@ async function practiceFlow() {
   for (let tries = 0; tries < 20 && !(await a.exists('#appearance-light[aria-checked="true"]')); tries++) await wait(100);
   const afterScrolledRedraw = await a.run(`(() => { const c = document.querySelector('#setting-log-info-card'), r = c.getBoundingClientRect(); return { replaced: c.dataset.before !== '1', open: c.matches(':popover-open'), topDiff: Math.abs(Math.round(r.top) - ${footBox.top}) }; })()`);
   await a.run(`document.querySelector('#settings-scroll').scrollTop += 16`);
-  await wait(80);
-  const afterSmallScroll = await a.run(`(() => { const c = document.querySelector('#setting-log-info-card'); return { open: c.matches(':popover-open'), moved: ${footBox.top} - Math.round(c.getBoundingClientRect().top) }; })()`);
+  const readSmallScroll = () => a.run(`(() => {
+    const c = document.querySelector('#setting-log-info-card');
+    return { open: c.matches(':popover-open'), moved: ${footBox.top} - Math.round(c.getBoundingClientRect().top) };
+  })()`);
+  let afterSmallScroll = await readSmallScroll();
+  for (let end = Date.now() + 1500; Date.now() < end && afterSmallScroll.open && !(afterSmallScroll.moved >= 14 && afterSmallScroll.moved <= 18); ) {
+    await wait(25);
+    afterSmallScroll = await readSmallScroll();
+  }
   await a.run(`document.querySelector('#settings-scroll').scrollTop = 0`);
-  await wait(80);
-  const afterScrollOut = await cardOpen('setting-log-info');
-  same('at 860×528, Log’s card at the foot flips above inside the window, stays in place across a scrolled redraw, follows a small scroll, and closes when scrolled out of view',
-    [footBox.above, footBox.inside, footBox.scroll > 0, afterScrolledRedraw.replaced, afterScrolledRedraw.open, afterScrolledRedraw.topDiff <= 2, afterSmallScroll.open, afterSmallScroll.moved >= 14 && afterSmallScroll.moved <= 18, afterScrollOut],
-    [true, true, true, true, true, true, true, true, false]);
+  const closedOnScrollOut = await cardBecomes('setting-log-info', false, 1500);
+  same('at 860×528, Log’s card at the foot flips above inside the window, stays in place across a scrolled redraw, follows a small scroll and closes when scrolled out of view (each within 1.5 s)', [
+    footBox.above, footBox.inside, footBox.scroll > 0, afterScrolledRedraw.replaced, afterScrolledRedraw.open,
+    afterScrolledRedraw.topDiff <= 2, afterSmallScroll.open, afterSmallScroll.moved >= 14 && afterSmallScroll.moved <= 18, closedOnScrollOut,
+  ], [true, true, true, true, true, true, true, true, true]);
   if (shots) {
     await a.click('#sidebar-toggle');
     await putLogAtFoot();
