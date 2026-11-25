@@ -209,3 +209,15 @@ test('One of the ten can’t leave a tool when it runs (its folder in Copilot CL
     assert.deepEqual(offered, names.map(() => ['Restore']));
   } finally { await box.cleanup(); }
 });
+
+test('A ticked row turned off since the question was asked: the Delete of many is refused for it alone, the other nine are deleted, and it stays Off in Central Knot', async () => {
+  const box = await tenSkills();
+  try {
+    const asked = await deletes(box);
+    await turnOff(box, box.context, 'alpha');
+    const sent = await applySkills(box.context, box.tools, asked);
+    assert.deepEqual([!!(await itemOf(box, 'alpha'))?.deleted, (await itemOf(box, 'alpha'))?.on], [false, false]);
+    assert.deepEqual(await Promise.all(names.filter(name => name !== 'alpha').map(async name => !!(await itemOf(box, name))?.deleted)), names.slice(1).map(() => true));
+    assert.equal(sent.made?.length, 9, 'a History entry for each of the nine');
+  } finally { await box.cleanup(); }
+});
