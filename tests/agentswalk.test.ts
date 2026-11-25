@@ -23,7 +23,8 @@
 // CK_ONLY=<seed>[,own] replays one walk, with CK_TRACE=1 step by step.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, readFile, rename, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, utimes, writeFile } from 'node:fs/promises';
+import { lockPath } from './fslock.ts';
 import { join } from 'node:path';
 import { agentHash, agentText, parseAgent } from '../src/agentfiles.ts';
 import { rowClicks, harnessIs, asksWhichCopy, placeOf } from '../src/libraryrow.ts';
@@ -70,7 +71,6 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
   /** Every content Central Knot wrote over or removed since the walk began: each must stay a version, or in a harness. */
   const taken = new Set<string>();
   const send = (change: Change, more: Partial<ShareContext> = {}) => applyAgents(context(more), tools, [change], syncOn ? {} : { only: new Set(['reviewer']) });
-  const readOnly = (tool: Tool, on: boolean) => chmod(join(box.home, files[tool], '..'), on ? 0o555 : 0o755).catch(() => undefined);
   const versionsNow = async () => new Set(((await seen(box, context())).item?.versions ?? []).map(version => version.hash));
   const writerNow = async () => Object.fromEntries(await Promise.all(allTools.map(async tool => [tool, await readFile(join(box.home, writerFiles[tool as Tool]), 'utf8').catch(() => undefined)] as const)));
   const historyCount = async () => (await readHistory(context())).filter(event => event.key === 'agent:reviewer').length;
@@ -165,7 +165,10 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
             if (done.results.some(entry => entry.outcome === 'removed')) fail(`an unseeable copy (${name}) had a copy removed`);
           } finally { await show(); }
         } });
-        if (process.getuid?.() !== 0) unseen('an unreadable file', () => chmod(fileOf(box, hidden), 0o000), () => chmod(fileOf(box, hidden), 0o644));
+        if (process.getuid?.() !== 0) {
+          let unlock: (() => Promise<void>) | undefined;
+          unseen('an unreadable file', async () => { unlock = await lockPath(fileOf(box, hidden), 'file-unreadable'); }, async () => { await unlock?.(); unlock = undefined; });
+        }
         unseen('a half-written save', () => write(box, hidden, hidden === 'codex-cli' ? 'name = "reviewer"\n' : '---\nname: rev'), () => write(box, hidden, text));
         // With no settle window a folder away is written afresh at once; the folder that comes back takes its place.
         unseen('its folder away', () => rename(folder, `${folder}-away`), async () => { await rm(folder, { recursive: true, force: true }); await rename(`${folder}-away`, folder); });
@@ -196,15 +199,15 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
       const act = pick(acts);
       const blocked = act.app && !act.byHand && process.getuid?.() !== 0 && next() < 0.12 ? pick(tools as Tool[]) : undefined;
       const crash = act.app && !act.byHand && !blocked && next() < 0.1 ? pick(['before-remove', 'before-rename'] as const) : undefined;
-      trace.push(`${act.name}${blocked ? ` [${blocked} read-only]` : ''}${crash ? ` [crash ${crash}]` : ''}`);
       const before = await filesOf(box), managedBefore = [...tools], entriesBefore = await historyCount(), settledBefore = settled;
       // What the pass of an acting step reads first: each managed harness's own part as it is now.
       if (act.app) for (const tool of managedBefore as Tool[]) { const own = ownOf(tool, before[tool]); if (own !== undefined && !blocked) lastOwn[tool] = own; }
       let done: unknown, crashed = false;
-      if (blocked) await readOnly(blocked, true);
+      const unlockBlocked = blocked ? await lockPath(join(box.home, files[blocked], '..'), 'dir-readonly') : undefined;
+      trace.push(`${act.name}${unlockBlocked ? ` [${blocked} read-only]` : ''}${crash ? ` [crash ${crash}]` : ''}`);
       try { done = await act.run(crash ? { fault: at => { if (at === crash) throw new Error('crash'); } } : {}); }
       catch (error) { if ((error as Error).message === 'crash') crashed = true; else { fail(`threw: ${(error as Error).message.slice(0, 140)}`); break; } }
-      finally { if (blocked) await readOnly(blocked, false); }
+      finally { if (unlockBlocked) await unlockBlocked(); }
       if (act.name.startsWith('hand') && syncOn && next() < 0.7) {
         trace.push('background pass');
         // That pass reads each managed harness's file first, then may write or remove it: both are what Central Knot keeps now.
@@ -271,7 +274,7 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
         if (!same(after, await filesOf(box))) fail('(d) Off then On left a harness’s file other than it was');
       });
     }
-  } finally { for (const tool of allTools as Tool[]) await readOnly(tool, false); await box.cleanup(); }
+  } finally { await box.cleanup(); }
   return found;
 }
 

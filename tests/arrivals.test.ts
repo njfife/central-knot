@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { winLockSkip, withLock } from './fslock.ts';
+import { withLock } from './fslock.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { byHand, observe, passStarts, seenBefore, seenIn, type ToolsSeen } from '../src/arrivals.ts';
@@ -124,7 +124,7 @@ test('A pass that didn’t bring the home into line fixes no count: one that may
   } finally { await b.cleanup(); }
 });
 
-test('A copy held at the pass that brought the home into line (an agents folder that can’t be written) lands later with its own entry; the line keeps that pass’s count', { skip: winLockSkip }, async () => {
+test('A copy held at the pass that brought the home into line (an agents folder that can’t be written) lands later with its own entry; the line keeps that pass’s count', async () => {
   const b = await box();
   try {
     await mkdir(join(b.home, '.claude/agents'), { recursive: true });

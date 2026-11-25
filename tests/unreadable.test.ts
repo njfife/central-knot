@@ -36,7 +36,7 @@ test('An unreadable file in a folder that can’t be written can’t be kept asi
   try {
     await writeFile(path, '');
     await withLock(folder, 'dir-readonly', async () => {
-      await assert.rejects(keepUnreadable(path), { code: 'EACCES' });
+      await assert.rejects(keepUnreadable(path), { code: process.platform === 'win32' ? 'EPERM' : 'EACCES' });
       assert.deepEqual(await readdir(folder), ['app-settings.json']);
     });
   } finally { await rm(folder, { recursive: true, force: true }); }

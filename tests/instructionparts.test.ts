@@ -10,7 +10,7 @@ import { applyBase, baseView, instructionsView, saveInstruction, undoBase } from
 import { PART_TEXT_LIMIT } from '../src/instructionparts.ts';
 import { sha256, type ShareContext } from '../src/share.ts';
 import type { HarnessId, InstructionPart } from '../src/types.ts';
-import { lockPath, winLockSkip } from './fslock.ts';
+import { lockPath } from './fslock.ts';
 import { slashPath } from './wincompat.ts';
 
 const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
@@ -147,7 +147,7 @@ test('Claude Code’s rules: every .md under rules/, sub-folders too, each follo
   } finally { await box.cleanup(); }
 });
 
-test('Claude Code’s rules: a linked folder is followed and each real folder read once, so a loop of links ends; one that can’t be read leaves the rest listed', async t => {
+test('Claude Code’s rules: a linked folder is followed and each real folder read once, so a loop of links ends; one that can’t be read leaves the rest listed', async () => {
   const box = await sandbox();
   const locked = join(box.home, '.claude/rules/locked');
   let unlock: (() => Promise<void>) | undefined;
@@ -157,16 +157,13 @@ test('Claude Code’s rules: a linked folder is followed and each real folder re
     await symlink('..', join(box.home, '.claude/rules/sub/back'));
     await box.write('shared-rules/linked.md', 'Linked.\n');
     await symlink(join(box.home, 'shared-rules'), join(box.home, '.claude/rules/team'));
-    if (!winLockSkip) {
-      await box.write('.claude/rules/locked/hidden.md', 'Not readable here.\n');
-      unlock = await lockPath(locked, 'dir-unreadable');
-    }
+    await box.write('.claude/rules/locked/hidden.md', 'Not readable here.\n');
+    unlock = await lockPath(locked, 'dir-unreadable');
     assert.deepEqual(await box.said('claude-cli'), [
       '.claude/rules/sub/inner.md · a rule · Inner.\n',
       '.claude/rules/team/linked.md · a rule · Linked.\n',
       '.claude/rules/top.md · a rule · Top.\n',
     ]);
-    if (winLockSkip) await t.test('an unreadable rules folder leaves the rest listed', { skip: winLockSkip }, () => {});
   } finally { await unlock?.(); await box.cleanup(); }
 });
 

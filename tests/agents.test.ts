@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { bandAfter, itemNotice } from './notices.ts';
 import assert from 'node:assert/strict';
 import fs, { mkdir, readFile, readdir, rename, rm, utimes, writeFile } from 'node:fs/promises';
-import { lockSkip, winLockSkip, withLock } from './fslock.ts';
+import { lockAppSkip, lockSkip, winLockAppSkip, withLock } from './fslock.ts';
 import { spawnSync } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { writeFileSync } from 'node:fs';
@@ -621,7 +621,7 @@ inBox('A look at a folder that fails for another reason than “not there” est
   const again = await applyAgents(waiting, tools, [], { now: 6000 });
   assert.deepEqual([again.settling, again.writes], [true, 0], 'a failed look in between ages nothing: the window starts again');
   assert.equal((await applyAgents(waiting, tools, [], { now: 8500 })).writes, 1, 'past it, the folder is written afresh');
-}, { skip: lockSkip });
+}, { skip: lockSkip || (process.platform === 'win32' && 'Windows Bypass traverse checking returns ENOENT when stat’ing a missing child inside an unreadable folder; covered on macOS and Linux.') });
 
 inBox('A folder that can’t be listed for a while ages no copy’s absence: once it can be, a copy deleted by hand gets the whole window', async box => {
   await on(box);
@@ -927,7 +927,7 @@ inPiBox('Every sentence that names Pi’s folder for an agent calls it its skill
   await rename(piSkills(box), `${piSkills(box)}-away`);
   await turnOff(box);
   assert.deepEqual(await piLine(box), ['unseen', 'Pi’s skills folder isn’t there. Its copy is removed once it is back.']);
-}, { skip: winLockSkip });
+}, { skip: winLockAppSkip });
 
 inPiBox('A loose file in Pi named like an agent that Central Knot never applied there is the person’s own skill: whether the agent is turned On, taken in by Add, or met on the first pass after the update, Pi is held and the file stays as it was', async box => {
   const mine = '---\nname: reviewer\ndescription: My own Pi skill\n---\n\nMine.\n';
@@ -1009,7 +1009,7 @@ inBox('A tool whose agents folder can’t be written says why on its line, pass 
     const tried = await pass(box);
     assert.deepEqual([tried.results.filter(entry => entry.harness === 'copilot-cli'), (await marks(box))['copilot-cli']], [[], 'cannot']);
   });
-}, { skip: lockSkip });
+}, { skip: lockAppSkip });
 
 inBox('Clicking Add, On, or a harness’s switch with a locked agents folder names that harness and says why, and says nothing on later passes', async box => {
   const codexAgents = join(box.home, '.codex/agents');
@@ -1037,7 +1037,7 @@ inBox('Clicking Add, On, or a harness’s switch with a locked agents folder nam
   assert.equal((await pass(box)).writes, 1);
   assert.ok(await readOf(box, 'codex-cli'));
   assert.deepEqual((await pass(box)).results, []);
-}, { skip: lockSkip });
+}, { skip: lockAppSkip });
 
 // ---------- Found agents ----------
 

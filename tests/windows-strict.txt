@@ -79,6 +79,7 @@ tests/serverswalk.test.ts
 tests/sessionday.test.ts
 tests/sessionhooks.test.ts
 tests/sessionlock.test.ts
+tests/sessionrecord.test.ts
 tests/sessionrequests.test.ts
 tests/sessionsweep.test.ts
 tests/share-recovery.test.ts

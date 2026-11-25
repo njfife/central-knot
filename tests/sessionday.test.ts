@@ -4,7 +4,7 @@ process.env.TZ = 'America/New_York';
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFile, chmod, mkdir, mkdtemp, readdir, realpath, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, readdir, realpath, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { managedTools, presentTools } from '../src/presence.ts';
@@ -12,18 +12,18 @@ import { bundledRates, type ModelRate, type PriceSet, type UnitPrice } from '../
 import { readSessionPeriod, type DayReading, type Period } from '../src/sessionday.ts';
 import { sessionRows } from '../src/sessionrow.ts';
 import type { HarnessId, Snapshot } from '../src/types.ts';
-import { winLockSkip } from './fslock.ts';
+import { lockPath } from './fslock.ts';
 
 /** Made-up homes under /tmp, restored writable and removed when tests end. */
 const homes: string[] = [];
-const lockedPaths: string[] = [];
+const unlocks: (() => Promise<void>)[] = [];
 const newHome = async () => {
   const home = await realpath(await mkdtemp(join(tmpdir(), 'ck-sessionday-')));
   homes.push(home);
   return home;
 };
 after(async () => {
-  for (const path of lockedPaths.reverse()) await chmod(path, 0o700).catch(() => undefined);
+  for (const unlock of unlocks.reverse()) await unlock().catch(() => undefined);
   await Promise.all(homes.map(home => rm(home, { recursive: true, force: true })));
 });
 
@@ -478,15 +478,14 @@ test('One-hour cache writes: exact on claude-opus-5-5 (has cacheWrite1h), and "a
   assert.equal(mixed.total.cost.atLeast, true);
 });
 
-test('Files not modified since midnight are never opened (unreadable 000 files before period.start cause no error or unread flag)', { skip: winLockSkip }, async () => {
+test('Files not modified since midnight are never opened (unreadable 000 files before period.start cause no error or unread flag)', async () => {
   const home = await newHome();
   const oldClaude = join(home, '.claude/projects/-work-app/old.jsonl');
   const oldCodex = join(home, '.codex/sessions/2026/11/23/rollout-old.jsonl');
   await put(oldClaude, [claudeReply('old1', TODAY.start - HOUR, claudeUsage(1_000, 0, 0, 100))], TODAY.start - 1);
   await put(oldCodex, [codexMeta('old', TODAY.start - HOUR)], TODAY.start - 1);
-  await chmod(oldClaude, 0o000);
-  await chmod(oldCodex, 0o000);
-  lockedPaths.push(oldClaude, oldCodex);
+  unlocks.push(await lockPath(oldClaude, 'file-unreadable'));
+  unlocks.push(await lockPath(oldCodex, 'file-unreadable'));
 
   const view = sessionRows(await readSessionPeriod({ home }, TODAY, ['claude-cli', 'codex-cli']));
   assert.equal(view.rows.length, 0);
@@ -533,33 +532,28 @@ test('Tool presence (whether or not managed): absent tool has no rows and is not
   assert.deepEqual(neither.rows, []);
 });
 
-test('An unreadable modified file and unread lines still return the readable sessions and flag only the affected tool', async ctx => {
+test('An unreadable modified file and unread lines still return the readable sessions and flag only the affected tool', async () => {
   const home = await newHome();
   const t = TODAY.start + 9 * HOUR;
 
-  if (winLockSkip) {
-    await ctx.test('an unreadable modified Claude file flags Claude without hiding readable sessions', { skip: winLockSkip }, () => {});
-  } else {
-    // Claude Code: one readable session and one modified unreadable file.
-    await put(join(home, '.claude/projects/-work-app/good.jsonl'), [
-      claudeReply('m1', t, claudeUsage(5_000, 0, 0, 500), 'claude-fable-5', '/work/app', 'good'),
-    ], t);
-    const badClaude = join(home, '.claude/projects/-work-app/bad.jsonl');
-    await put(badClaude, [claudeReply('m2', t, claudeUsage(5_000, 0, 0, 500))], t);
-    await chmod(badClaude, 0o000);
-    lockedPaths.push(badClaude);
+  // Claude Code: one readable session and one modified unreadable file.
+  await put(join(home, '.claude/projects/-work-app/good.jsonl'), [
+    claudeReply('m1', t, claudeUsage(5_000, 0, 0, 500), 'claude-fable-5', '/work/app', 'good'),
+  ], t);
+  const badClaude = join(home, '.claude/projects/-work-app/bad.jsonl');
+  await put(badClaude, [claudeReply('m2', t, claudeUsage(5_000, 0, 0, 500))], t);
+  unlocks.push(await lockPath(badClaude, 'file-unreadable'));
 
-    // Codex: one valid rollout with a broken JSON line (unread line).
-    const codexFile = join(home, '.codex/sessions/2026/11/24/rollout-partial.jsonl');
-    await putText(codexFile, [
-      lines([codexMeta('cx1', t), codexTurn('gpt-6-astra', t), codexUsage('r1', t, 10_000, 0, 1_000)]),
-      '{not valid json\n',
-    ].join(''), t);
+  // Codex: one valid rollout with a broken JSON line (unread line).
+  const codexFile = join(home, '.codex/sessions/2026/11/24/rollout-partial.jsonl');
+  await putText(codexFile, [
+    lines([codexMeta('cx1', t), codexTurn('gpt-6-astra', t), codexUsage('r1', t, 10_000, 0, 1_000)]),
+    '{not valid json\n',
+  ].join(''), t);
 
-    const bothUnread = sessionRows(await readSessionPeriod({ home }, TODAY, ['claude-cli', 'codex-cli']));
-    assert.equal(bothUnread.rows.length, 2, 'both readable sessions still return');
-    assert.deepEqual(bothUnread.byTool.map(each => [each.tool, each.unread]), [['claude-cli', true], ['codex-cli', true]]);
-  }
+  const bothUnread = sessionRows(await readSessionPeriod({ home }, TODAY, ['claude-cli', 'codex-cli']));
+  assert.equal(bothUnread.rows.length, 2, 'both readable sessions still return');
+  assert.deepEqual(bothUnread.byTool.map(each => [each.tool, each.unread]), [['claude-cli', true], ['codex-cli', true]]);
 
   // When only Codex has unread lines, Claude Code's unread flag stays false.
   const home2 = await newHome();
@@ -570,21 +564,16 @@ test('An unreadable modified file and unread lines still return the readable ses
   const oneUnread = sessionRows(await readSessionPeriod({ home: home2 }, TODAY, ['claude-cli', 'codex-cli']));
   assert.deepEqual(oneUnread.byTool.map(each => [each.tool, each.unread]), [['claude-cli', false], ['codex-cli', true]]);
 
-  // Unreadable tool folder (chmod 000 on .claude/projects) flags Claude without stopping Codex.
-  if (winLockSkip) {
-    await ctx.test('an unreadable .claude/projects folder flags Claude without stopping Codex', { skip: winLockSkip }, () => {});
-  } else {
-    const home3 = await newHome();
-    const lockedDir = join(home3, '.claude/projects');
-    await mkdir(lockedDir, { recursive: true });
-    await chmod(lockedDir, 0o000);
-    lockedPaths.push(lockedDir);
-    await put(join(home3, '.codex/sessions/2026/11/24/rollout-ok.jsonl'), [
-      codexMeta('ok', t), codexTurn('gpt-6-astra', t), codexUsage('r1', t, 5_000, 0, 500),
-    ], t);
-    const folderBlocked = sessionRows(await readSessionPeriod({ home: home3 }, TODAY, ['claude-cli', 'codex-cli']));
-    assert.deepEqual(folderBlocked.byTool.map(each => [each.tool, each.sessions, each.unread]), [['claude-cli', 0, true], ['codex-cli', 1, false]]);
-  }
+  // Unreadable tool folder (.claude/projects) flags Claude without stopping Codex.
+  const home3 = await newHome();
+  const lockedDir = join(home3, '.claude/projects');
+  await mkdir(lockedDir, { recursive: true });
+  unlocks.push(await lockPath(lockedDir, 'dir-unreadable'));
+  await put(join(home3, '.codex/sessions/2026/11/24/rollout-ok.jsonl'), [
+    codexMeta('ok', t), codexTurn('gpt-6-astra', t), codexUsage('r1', t, 5_000, 0, 500),
+  ], t);
+  const folderBlocked = sessionRows(await readSessionPeriod({ home: home3 }, TODAY, ['claude-cli', 'codex-cli']));
+  assert.deepEqual(folderBlocked.byTool.map(each => [each.tool, each.sessions, each.unread]), [['claude-cli', 0, true], ['codex-cli', 1, false]]);
 });
 
 test('Nothing is written anywhere under the home', async () => {
@@ -628,7 +617,7 @@ test('One message or response id appearing in two files of the same session coun
   assert.deepEqual(codexDup.tokens, { input: 6_000, cacheRead: 2_000, cacheWrite: 0, output: 400 }, 'resp_dup kept once across sessions and archive');
 });
 
-test('Tool-reported figure sits beside a root row only when its whole tree is inside the period, never added to any sum', async ctx => {
+test('Tool-reported figure sits beside a root row only when its whole tree is inside the period, never added to any sum', async () => {
   const home = await newHome();
   const t = TODAY.start + 14 * HOUR;
 
@@ -665,12 +654,7 @@ test('Tool-reported figure sits beside a root row only when its whole tree is in
   ], t);
   const oldChild = join(home, '.claude/projects/-work-app/unmod-child/subagents/agent-yest.jsonl');
   await put(oldChild, [claudeReply('uy', TODAY.start - HOUR, claudeUsage(1_000, 0, 0, 100))], TODAY.start - 1);
-  if (winLockSkip) {
-    await ctx.test('unmodified child file is locked unreadable to prove it is never opened', { skip: winLockSkip }, () => {});
-  } else {
-    await chmod(oldChild, 0o000);
-    lockedPaths.push(oldChild);
-  }
+  unlocks.push(await lockPath(oldChild, 'file-unreadable'));
 
   // (e) Zero cost-state (0), incomplete cost-state (hasUnknownModelCost), and request after period.end: none carries reported.
   await put(join(home, '.claude/projects/-work-app/zero-cost.jsonl'), [
@@ -781,7 +765,7 @@ test('Pure sessionRows guards against synthetic parent cycles without dropping r
   assert.deepEqual(view.total.cost.unpricedBy, { noRow: 1, speedOrTier: [], other: 1 });
 });
 
-test('An unreadable Codex archive or sibling Claude project folder flags the tool without hiding readable sessions, and makes its sum and the day\'s a lower bound', { skip: winLockSkip }, async () => {
+test('An unreadable Codex archive or sibling Claude project folder flags the tool without hiding readable sessions, and makes its sum and the day\'s a lower bound', async () => {
   const home = await newHome();
   const t = TODAY.start + 10 * HOUR;
   await put(join(home, '.claude/projects/readable/good.jsonl'), [
@@ -789,16 +773,14 @@ test('An unreadable Codex archive or sibling Claude project folder flags the too
   ], t);
   const blockedProject = join(home, '.claude/projects/blocked');
   await mkdir(blockedProject, { recursive: true });
-  await chmod(blockedProject, 0o000);
-  lockedPaths.push(blockedProject);
+  unlocks.push(await lockPath(blockedProject, 'dir-unreadable'));
 
   await put(join(home, '.codex/sessions/2026/11/24/rollout-good.jsonl'), [
     codexMeta('good', t), codexTurn('gpt-6.2-sol', t), codexUsage('r1', t, 4_000, 0, 500),
   ], t);
   const blockedArchive = join(home, '.codex/archived_sessions');
   await mkdir(blockedArchive, { recursive: true });
-  await chmod(blockedArchive, 0o000);
-  lockedPaths.push(blockedArchive);
+  unlocks.push(await lockPath(blockedArchive, 'dir-unreadable'));
 
   const view = sessionRows(await readSessionPeriod({ home }, TODAY, ['claude-cli', 'codex-cli']));
   assert.deepEqual(view.rows.map(r => `${r.tool}/${r.session}`).sort(), ['claude-cli/good', 'codex-cli/good']);
@@ -842,7 +824,7 @@ test('Restoring a stale partial copy with a newer mtime keeps the fuller reply a
   assert.equal(smaller.reported, 0.55, 'largest running total wins across files');
 });
 
-test('An older copy of the same root session, an unread line in the tree, or a listed file missing on open blocks the tool figure and flags the tool where unread', async ctx => {
+test('An older copy of the same root session, an unread line in the tree, or a listed file missing on open blocks the tool figure and flags the tool where unread', async () => {
   const home = await newHome();
   const t = TODAY.start + 14 * HOUR;
 
@@ -853,12 +835,7 @@ test('An older copy of the same root session, an unread line in the tree, or a l
   ], t);
   const oldCopy = join(home, '.claude/projects/old-proj/split-root.jsonl');
   await put(oldCopy, [claudeReply('sr0', TODAY.start - HOUR, claudeUsage(5_000, 0, 0, 500), 'claude-fable-5', '/work/app', 'split-root')], TODAY.start - 1);
-  if (winLockSkip) {
-    await ctx.test('older copy of same root session is locked unreadable to prove it is never opened', { skip: winLockSkip }, () => {});
-  } else {
-    await chmod(oldCopy, 0o000);
-    lockedPaths.push(oldCopy);
-  }
+  unlocks.push(await lockPath(oldCopy, 'file-unreadable'));
 
   const oldRootView = sessionRows(await readSessionPeriod({ home }, TODAY, ['claude-cli']));
   assert.equal(oldRootView.rows[0]!.reported, undefined, 'unopened older copy of same root session blocks tool figure');
@@ -874,7 +851,7 @@ test('An older copy of the same root session, an unread line in the tree, or a l
   assert.equal(dirtyView.rows[0]!.reported, undefined, 'tree with unread line carries no tool figure');
   assert.equal(dirtyView.byTool[0]!.unread, true);
 
-  // (c) Listed file missing when opened (ENOENT via broken symlink) or unreadable on read (EACCES): flags unread and blocks parent figure.
+  // (c) Listed file missing when opened (ENOENT via broken symlink) or unreadable on read (EACCES/EPERM): flags unread and blocks parent figure.
   const home3 = await newHome();
   await put(join(home3, '.claude/projects/p/vanish-parent.jsonl'), [
     claudeReply('vp1', t, claudeUsage(5_000, 0, 0, 500), 'claude-fable-5', '/work/app', 'vanish-parent'),
@@ -882,29 +859,22 @@ test('An older copy of the same root session, an unread line in the tree, or a l
   ], t);
   await mkdir(join(home3, '.claude/projects/p/vanish-parent/subagents'), { recursive: true });
   await symlink(join(home3, 'gone-target.jsonl'), join(home3, '.claude/projects/p/vanish-parent/subagents/agent-gone.jsonl'));
-  if (!winLockSkip) {
-    await put(join(home3, '.claude/projects/p/locked-parent.jsonl'), [
-      claudeReply('lp1', t, claudeUsage(5_000, 0, 0, 500), 'claude-fable-5', '/work/app', 'locked-parent'),
-      claudeCost(0.84, 'locked-parent'),
-    ], t);
-    const lockedChild = join(home3, '.claude/projects/p/locked-parent/subagents/agent-locked.jsonl');
-    await put(lockedChild, [claudeReply('lc1', t, claudeUsage(1_000, 0, 0, 100), 'claude-opus-5-5', '/work/app', 'agent-locked')], t);
-    await chmod(lockedChild, 0o000);
-    lockedPaths.push(lockedChild);
-  }
+  await put(join(home3, '.claude/projects/p/locked-parent.jsonl'), [
+    claudeReply('lp1', t, claudeUsage(5_000, 0, 0, 500), 'claude-fable-5', '/work/app', 'locked-parent'),
+    claudeCost(0.84, 'locked-parent'),
+  ], t);
+  const lockedChild = join(home3, '.claude/projects/p/locked-parent/subagents/agent-locked.jsonl');
+  await put(lockedChild, [claudeReply('lc1', t, claudeUsage(1_000, 0, 0, 100), 'claude-opus-5-5', '/work/app', 'agent-locked')], t);
+  unlocks.push(await lockPath(lockedChild, 'file-unreadable'));
   await mkdir(join(home3, '.codex/sessions/2026/11/24'), { recursive: true });
   await symlink(join(home3, 'moved-rollout.jsonl'), join(home3, '.codex/sessions/2026/11/24/rollout-moved.jsonl'));
   const goneView = sessionRows(await readSessionPeriod({ home: home3 }, TODAY, ['claude-cli', 'codex-cli']));
   assert.equal(goneView.rows.find(r => r.session === 'vanish-parent')!.reported, undefined, 'missing child file blocks parent figure');
-  if (winLockSkip) {
-    await ctx.test('an unreadable child file blocks the parent figure', { skip: winLockSkip }, () => {});
-  } else {
-    assert.equal(goneView.rows.find(r => r.session === 'locked-parent')!.reported, undefined, 'unreadable child file blocks parent figure');
-  }
+  assert.equal(goneView.rows.find(r => r.session === 'locked-parent')!.reported, undefined, 'unreadable child file blocks parent figure');
   assert.deepEqual(goneView.byTool.map(each => [each.tool, each.unread]), [['claude-cli', true], ['codex-cli', true]]);
 });
 
-test('An unreadable nested folder (Claude subagents or Codex dated day) flags unread without hiding siblings and blocks the parent figure', { skip: winLockSkip }, async () => {
+test('An unreadable nested folder (Claude subagents or Codex dated day) flags unread without hiding siblings and blocks the parent figure', async () => {
   const home = await newHome();
   const t = TODAY.start + 10 * HOUR;
 
@@ -917,16 +887,14 @@ test('An unreadable nested folder (Claude subagents or Codex dated day) flags un
   await put(join(blockedSubagents, 'agent-child.jsonl'), [
     claudeReply('c1', t, claudeUsage(1_000, 0, 0, 10), 'claude-fable-5', '/work/p', 'agent-child'),
   ], t);
-  await chmod(blockedSubagents, 0o111);
-  lockedPaths.push(blockedSubagents);
+  unlocks.push(await lockPath(blockedSubagents, 'dir-unlistable'));
 
   // Codex: unlistable dated folder sessions/2026/11/23 beside readable sessions/2026/11/24.
   const blockedDay = join(home, '.codex/sessions/2026/11/23');
   await put(join(blockedDay, 'rollout-old.jsonl'), [
     codexMeta('old', TODAY.start - 1_000), codexTurn('gpt-6.2-sol', TODAY.start - 1_000), codexUsage('r0', TODAY.start - 1_000, 5_000, 0, 10),
   ], TODAY.start - 1_000);
-  await chmod(blockedDay, 0o111);
-  lockedPaths.push(blockedDay);
+  unlocks.push(await lockPath(blockedDay, 'dir-unlistable'));
   await put(join(home, '.codex/sessions/2026/11/24/rollout-visible.jsonl'), [
     codexMeta('visible', t), codexTurn('gpt-6.2-sol', t), codexUsage('r1', t, 5_000, 0, 30),
   ], t);
