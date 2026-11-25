@@ -9385,12 +9385,19 @@ async function mcpSigninFlow() {
   };
   /** A picture of one state in the owner's window, 1316×819 with the sidebar open. */
   const owners = async name => { await sizeTo(a, 1316, 819); await shape(false); await shoot(name); await fullSize(a); };
-  /** A mark's card held open (its mark clicked), pictured in the owner's window, then closed: its words. */
+  /**
+   * A mark's card held open (its mark scrolled into view and clicked), pictured in the owner's window and at 860 with the sidebar
+   * open (a card closes when its mark leaves the view or another control is clicked, so it is opened again at each), then closed: its words.
+   */
   const card = async (mark, name) => {
-    await a.click(`#${mark}`);
+    const isOpen = () => a.run(`!!document.getElementById('${mark}-card')?.matches(':popover-open')`);
+    const open = async () => { await a.run(`document.getElementById('${mark}').scrollIntoView({ block: 'center' })`); if (!(await isOpen())) await a.click(`#${mark}`); };
+    await open();
     const words = await a.text(`#${mark}-card`);
-    await owners(name);
-    await a.click(`#${mark}`);
+    for (const [width, height, picture] of shots ? [[1316, 819, name], [...SMALLEST, `${name}-860`]] : []) { await sizeTo(a, width, height); await shape(false); await open(); await shoot(picture); }
+    await fullSize(a);
+    if (await isOpen()) await a.click(`#${mark}`);
+    await a.run(`document.querySelector('#mcpsignin-scroll').scrollTop = 0`);
     return words;
   };
 
