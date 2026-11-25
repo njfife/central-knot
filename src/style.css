@@ -1222,7 +1222,11 @@ span.ins-confirm { margin-top: 0; }
 .sessions-content { --sessions-columns: 12px 128px 100px minmax(0, 1fr) 190px repeat(4, 86px);
   display: flex; flex-direction: column; gap: 10px; }
 .sessions-content > * { flex: none; }
-.sessions-content > .kind-switch { align-self: flex-start; }
+.sessions-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.sessions-keep { display: inline-flex; align-items: center; gap: 4px; }
+.sessions-collecting { font-size: 12.5px; color: var(--ink-soft); }
+.sessions-result { display: flex; align-items: flex-start; gap: 6px; margin: 0; max-width: var(--measure); font-size: 12.5px; line-height: 1.5; color: var(--danger); }
+.sessions-result > svg { flex: none; margin-top: 2px; }
 .sessions-sep { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0; }
 .sessions-sep > * + *::before, .sessions-estimate + .sessions-unpriced::before { content: "·"; margin-right: 8px; font-weight: 400; color: var(--ink-faint); }
 .sessions-head { font-size: 16px; }

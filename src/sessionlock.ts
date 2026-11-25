@@ -1,10 +1,10 @@
 // Exclusive per-home lock for `.central-knot/sessions/` (`lock.sqlite`), shared by `sessionsweep.ts` and future store
-// mutators (Clear, retention). Owns: gating lock creation on `share.ts writeAccess` and verifying `sessions` and
-// `lock.sqlite` are real paths (not links, wrong file types, non-empty, or read-only) before making anything on disk; and
-// in-process and cross-process exclusion via `node:sqlite` `DatabaseSync` with zero busy timeout,
-// `PRAGMA journal_mode = MEMORY` (no `-journal` sidecar), and `BEGIN IMMEDIATE`, held until `work` settles and released
-// in `finally`. Removing `lock.sqlite` while it is held lets another process create a new inode and take a second lock, so
-// nothing removes it (Clear leaves it in place); process exit or crash releases the OS lock automatically.
+// mutators (Clear, retention). Owns: gating lock creation on `share.ts writeAccess` and verifying `sessions` and `lock.sqlite`
+// are real paths (`checkSessionStore`, also asked by `sessionkeep.ts` before saving consent); and in-process and cross-process
+// exclusion via `node:sqlite` `DatabaseSync` with zero busy timeout, `PRAGMA journal_mode = MEMORY` (no `-journal` sidecar),
+// and `BEGIN IMMEDIATE`, held until `work` settles and released in `finally`. Removing `lock.sqlite` while it is held lets
+// another process create a new inode and take a second lock, so nothing removes it (Clear leaves it in place); process exit or
+// crash releases the OS lock automatically.
 //
 // Limits: promises exclusion on a local file system only; a home on a network folder is not covered.
 // Not here: record shapes, reads, upserts, or turns (`sessionrecord.ts`); sweeping (`sessionsweep.ts`); Clear, retention,
@@ -75,18 +75,33 @@ function closeLock(db: DatabaseSync | undefined): void {
   }
 }
 
-/**
- * Runs `work` holding an exclusive local-filesystem OS lock on `context.home`'s session store (`lock.sqlite`).
- * Verifies `writeAccess` and store paths before creating `.central-knot/sessions/` or the lock file, and returns `busy`
- * without waiting if another caller in this process or another process holds the store.
- */
-export async function withSessionStoreLock<T>(context: ShareContext, work: () => Promise<T>): Promise<SessionLockResult<T>> {
+/** Checks `writeAccess` and store paths without creating anything (`value` is true when `sessions/` is absent). */
+export async function checkSessionStore(context: ShareContext): Promise<SessionLockResult<boolean>> {
   const accessCheck = await writeAccess(context);
   if (!accessCheck.allowed) return { status: 'refused', refused: accessCheck.reason };
   const dirPath = sessionsDirectory(context.home);
   const dir = await checkPath(dirPath, 'sessions', true);
   if (typeof dir !== 'string') return heldRefusal(dir);
   if (dir === 'missing') {
+    const parent = await stat(dirname(dirPath)).catch(() => undefined);
+    const bad = parent && (!parent.isDirectory() || !(await access(dirname(dirPath), constants.W_OK).then(() => true, () => false)));
+    if (bad) return heldRefusal({ file: 'sessions', kind: parent.isDirectory() ? 'damaged' : 'not-a-file', reason: 'The sessions folder could not be created.' });
+    return { status: 'ok', value: true };
+  }
+  const lock = await checkPath(sessionLockPath(context.home), SESSION_LOCK_FILE, false);
+  return typeof lock === 'string' ? { status: 'ok', value: false } : heldRefusal(lock);
+}
+
+/**
+ * Runs `work` holding an exclusive local-filesystem OS lock on `context.home`'s session store (`lock.sqlite`).
+ * Verifies `writeAccess` and store paths before creating `.central-knot/sessions/` or the lock file, and returns `busy`
+ * without waiting if another caller in this process or another process holds the store.
+ */
+export async function withSessionStoreLock<T>(context: ShareContext, work: () => Promise<T>): Promise<SessionLockResult<T>> {
+  const checked = await checkSessionStore(context);
+  if (checked.status !== 'ok') return checked;
+  const dirPath = sessionsDirectory(context.home);
+  if (checked.value) {
     const made = await mkdir(dirPath, { recursive: true }).then(() => true, () => false);
     if (!made) {
       const parent = await stat(dirname(dirPath)).catch(() => undefined);

@@ -1761,6 +1761,11 @@ api().onNavigate(page => {
 // Settings changed by a menu, a dialog or the system: main says so after every save and whenever the window comes back, and an
 // open Settings page reads them again, so it never shows (or writes back) a value that is no longer the saved one.
 api().onSettingsChanged(() => { if (state.page === 'settings') void loadSettings(); });
+api().onSessionCostsChanged(next => {
+  if (!state.home || next.home !== state.home.home) return;
+  state.home.sessionCosts = next;
+  if (state.page === 'sessions' || state.page === 'settings') rerender();
+});
 
 // A background pass may change what differs from the git repo too: its page and sidebar count read again soon (no fetch).
 // The Sources page reads its view again too: a read by itself (the daily check) changes what each name there is to the library.

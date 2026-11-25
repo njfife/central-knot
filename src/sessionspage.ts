@@ -1,16 +1,18 @@
-// The Sessions page (MAP.md, "Sessions"): one day's sessions, Today or Yesterday, read from the tools' own session history, with
-// what their tokens would cost at each model's API price. The day is read when the page opens, when a day is chosen and on the
-// header's Refresh (loadSessions → main.ts sessions:read → sessionday.ts readSessionPeriod, then sessionrow.ts sessionRows), and
-// the answer is held in app.ts state.sessions (pagedata.ts: a reply a newer ask supersedes is dropped); nothing is kept. This
-// module makes the day's two local midnights from the calendar (periodOf) and says the rows: every figure and sum is
+// The Sessions page (MAP.md, "Sessions"): one day's sessions, Today or Yesterday, read live from the tools' own session history,
+// with what their tokens would cost at each model's API price. The day is read when the page opens, when a day is chosen and on
+// the header's Refresh (loadSessions → main.ts sessions:read → sessionday.ts readSessionPeriod, then sessionrow.ts sessionRows),
+// and the answer is held in app.ts state.sessions (pagedata.ts). Beside the day's choice sits "Start keeping session costs"
+// (with its infoMark), "Collecting…" while sweeping, or nothing once kept (sessionkeep.ts); any refusal shows verbatim inline.
+// This module makes the day's two local midnights from the calendar (periodOf) and says the rows: every figure and sum is
 // sessionrow.ts's, and the tools read are presence.ts SESSION_TOOLS. What a person needs is on the page; why a figure is low,
 // whose prices they are and the price list's date are on hover (the native `title`). Not here: reading files, pricing, summing.
-import { rerender, state } from './app.ts';
+import { announce, rerender, state } from './app.ts';
 import { brandMark } from './brand.ts';
-import { h, icon } from './dom.ts';
+import { button, h, icon, infoCardId, infoMark } from './dom.ts';
 import { clockTime, plural } from './model.ts';
 import { readPageData, resetPageData } from './pagedata.ts';
 import { SESSION_TOOLS } from './presence.ts';
+import { saveFailure } from './settingspage.ts';
 import { andList, orList, toolNames } from './words.ts';
 import type { Period } from './sessionday.ts';
 import type { CostSum, DayRows, ModelCost, SessionRow, UnpricedBy } from './sessionrow.ts';
@@ -23,6 +25,8 @@ const providerNames: Record<string, string> = { anthropic: 'Anthropic', openai: 
 const opened = new Set<string>();
 const ONE_HOUR = 'One-hour cache writes are priced at the shorter cache’s rate; they cost more.';
 const TOKEN_HEADS = ['Input', 'Cached', 'Cache-written', 'Output'];
+const KEEP_INFO = 'This home’s Central Knot folder keeps request times, models, token counts and estimated prices without message text. You can turn this off in Settings.';
+let keepProblem: { home: string; text: string } | undefined;
 
 /** Local midnight `back` days before `now`'s day, from the calendar: a day is 23 or 25 hours when the clocks change, never 24 added. */
 const midnight = (now: Date, back: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - back).getTime();
@@ -151,11 +155,44 @@ function dayView(rows: DayRows, present: HarnessId[]) {
   ];
 }
 
-/** The page: the day's choice, then its reading, "Reading…" until there is one, or one sentence where it could not be read. */
+/** Enables keeping session costs for the home on screen and starts the first sweep; shows any refusal verbatim inline. */
+async function startKeeping(): Promise<void> {
+  const home = state.home?.home;
+  if (!home) return;
+  keepProblem = undefined;
+  try {
+    const view = await window.centralKnot.setKeepSessionCosts(home, true);
+    if (state.home?.home !== home) return;
+    state.home.sessionCosts = view;
+    if (view.refused) keepProblem = { home, text: view.refused };
+  } catch (error) {
+    if (state.home?.home === home) keepProblem = { home, text: saveFailure(String(error), '') };
+  }
+  if (keepProblem?.home === home) announce(keepProblem.text);
+  rerender();
+}
+
+/** Beside the day's choice: Start button with info mark while off, "Collecting…" while a sweep runs, nothing once kept. */
+function keepControl(home: HomeView): HTMLElement | null {
+  const costs = home.sessionCosts;
+  if (costs?.collecting) return h('span.sessions-collecting', { id: 'sessions-collecting', role: 'status' }, 'Collecting…');
+  if (costs?.on) return null;
+  return h('span.sessions-keep', { 'data-info-block': true },
+    button({ variant: 'outline', label: 'Start keeping session costs', id: 'sessions-keep-start', onclick: () => void startKeeping(), attrs: { 'aria-describedby': infoCardId('sessions-keep-info') } }),
+    infoMark('sessions-keep-info', 'Start keeping session costs', KEEP_INFO));
+}
+
+/** Verbatim refusal or settings save failure shown inline beneath the top bar. */
+function keepResult(home: HomeView): HTMLElement | null {
+  const text = (keepProblem?.home === home.home && !home.sessionCosts?.on ? keepProblem.text : undefined) ?? home.sessionCosts?.refused;
+  return text ? h('p.sessions-result', { id: 'sessions-keep-result', role: 'alert' }, icon('circle-alert', 14), h('span', {}, text)) : null;
+}
+
+/** The page: the day's choice and keeping control, any refusal, then its reading, "Reading…" until there is one, or one sentence where it could not be read. */
 export function sessionsPage(home: HomeView) {
   const slot = state.sessions, rows = slot.state === 'failed' ? undefined : slot.data;
   const waiting = slot.state === 'failed' ? h('p.sessions-caption', { id: 'sessions-failed' }, 'Sessions could not be read. Refresh to try again.')
     : h('p.sessions-caption', { id: 'sessions-reading' }, `Reading ${state.sessionsDay === 'today' ? 'today’s' : 'yesterday’s'} sessions…`);
   return h('div.page', {}, h('div.scroll.sessions-scroll', { id: 'sessions-scroll' },
-    h('div.sessions-content', {}, dayChoice(), ...(rows ? dayView(rows, home.sync.present) : [waiting]))));
+    h('div.sessions-content', {}, h('div.sessions-bar', {}, dayChoice(), keepControl(home)), keepResult(home), ...(rows ? dayView(rows, home.sync.present) : [waiting]))));
 }
