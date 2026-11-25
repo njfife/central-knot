@@ -19,7 +19,7 @@ import { lstat, mkdir, readFile, readlink, realpath, rmdir, stat } from 'node:fs
 import { dirname, isAbsolute, join } from 'node:path';
 import { PLUGIN_ONLY } from './catalogdetail.ts';
 import { configRoot, harnesses, openCodeSettings } from './harnesses.ts';
-import { errorCode, exists, recoverParked, sha256, writeFileChecked, type ShareContext } from './share.ts';
+import { errorCode, exists, plainError, recoverParked, sha256, writeFileChecked, type ShareContext } from './share.ts';
 import { readJsonc, readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import type { HarnessId } from './types.ts';
 
@@ -331,7 +331,7 @@ export function jsonEntry(tool: HarnessId, server: NeutralServer, extras: Record
 export async function editEntry(context: ShareContext, tool: HarnessId, name: string, expected: string | undefined, server: NeutralServer | undefined, extras?: Record<string, unknown>, place?: string[], urlKey?: 'url'): Promise<{ stopped: string; changed?: true; locked?: true } | undefined> {
   const file = mcpFile(context, tool), lock = tool === 'claude-cli' ? `${file}.lock` : undefined;
   // Any failure but a change (permissions, a full disk) stops this one write, never the rest of the pass.
-  const failed = (error: unknown) => ({ stopped: `Could not write ${harnesses[tool].name}'s settings file: ${error instanceof Error ? error.message : String(error)}` });
+  const failed = (error: unknown) => ({ stopped: `Could not write ${harnesses[tool].name}'s settings file. ${plainError(error)}` });
   try { if (lock && !await takeClaudeLock(lock)) return { stopped: 'Claude Code’s settings file is locked just now, so it was left as it is. Central Knot tries again when sync runs.', locked: true }; }
   catch (error) { return failed(error); }
   try {
