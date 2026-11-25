@@ -3825,14 +3825,29 @@ async function practiceFlow() {
   same('focus or click on another mark cancels a pending hover, and a timer whose mark vanished leaves the open card alone',
     [focusBeatHover, clickBeatHover, vanishedLeftOpen], [[true, false, 'setting-log-info'], [true, false], true]);
   // Hover: opens after 300 ms (mouse only), stays when moving onto the card or returning before 200 ms, closes 200 ms after leaving; touch never hover-opens.
+  await a.run(`(() => {
+    const log = window.__hm = [];
+    const ids = new Set(['setting-sign-in-info', 'setting-sign-in-info-card']);
+    const on = type => e => { if (ids.has(e.target?.id)) log.push({ ev: type, id: e.target.id, pt: e.pointerType ?? null, st: e.newState ?? null, t: +(performance.now().toFixed(1)), ts: +(e.timeStamp.toFixed(1)) }); };
+    const h = ['pointerenter', 'pointerleave', 'beforetoggle', 'toggle'].map(type => [type, on(type)]);
+    for (const [type, fn] of h) document.addEventListener(type, fn, true);
+    const mo = new MutationObserver(() => log.push({ ev: 'redraw', t: +(performance.now().toFixed(1)) }));
+    mo.observe(document.getElementById('page'), { childList: true });
+    window.__hmStop = () => { for (const [type, fn] of h) document.removeEventListener(type, fn, true); mo.disconnect(); };
+  })()`);
   await moveTo({ x: 0, y: 0 });
   await a.run(`document.querySelector('#setting-sign-in-info').scrollIntoView({ block: 'center' })`);
   const signInAt = await centerOf('#setting-sign-in-info');
+  const m0Page = await a.run(`+(performance.now().toFixed(1))`), m0Node = Date.now();
+  await a.run(`window.__hm.length = 0`);
   await moveTo(signInAt);
+  const mMoveNode = Date.now();
   await wait(120);
   const beforeDelay = await cardOpen('setting-sign-in-info');
+  const mBeforeNode = Date.now();
   await wait(260);
-  const afterDelay = await cardOpen('setting-sign-in-info');
+  const [afterDelay, mAfterPage, origState] = await a.run(`[!!document.querySelector('#setting-sign-in-info-card')?.matches(':popover-open'), +(performance.now().toFixed(1)), { vis: document.visibilityState, foc: document.hasFocus() }]`);
+  const mAfterNode = Date.now();
   await moveTo(await centerOf('#setting-sign-in-info-card'));
   await wait(260);
   const stayedOnCard = await cardOpen('setting-sign-in-info');
@@ -3844,11 +3859,68 @@ async function practiceFlow() {
   await moveTo({ x: 0, y: 0 });
   await wait(280);
   const closedAfterLeave = await cardOpen('setting-sign-in-info');
+  const origHoverLog = await a.run(`window.__hm.slice()`);
+  console.log(`[MAC-HOVER-MEASURE] orig: res=${JSON.stringify([beforeDelay, afterDelay, stayedOnCard, stayedOnReturn, closedAfterLeave])} state=${JSON.stringify(origState)} nodeMs={move:${mMoveNode - m0Node},before:${mBeforeNode - mMoveNode},after:${mAfterNode - mMoveNode},total:${mAfterNode - m0Node}} page0=${m0Page} pageAfter=${mAfterPage} ev=${JSON.stringify(origHoverLog)}`);
   await a.run(`document.querySelector('#setting-sign-in-info').dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'touch' }))`);
   await wait(360);
   const touchHover = await cardOpen('setting-sign-in-info');
   same('mouse hover opens after 300 ms, stays on the card and on a quick return, closes 200 ms after leaving; touch hover opens nothing',
     [beforeDelay, afterDelay, stayedOnCard, stayedOnReturn, closedAfterLeave, touchHover], [false, true, true, true, false, false]);
+  {
+    const tries = [];
+    for (let i = 0; i < 8; i++) {
+      if (i >= 5) {
+        await a.click('#header-refresh');
+        await fullSize(a);
+        await a.run(`document.querySelector('#setting-sign-in-info').scrollIntoView({ block: 'center' })`);
+      }
+      await moveTo({ x: 0, y: 0 });
+      for (let t = 0; t < 150 && await cardOpen('setting-sign-in-info'); t++) await wait(10);
+      await wait(60);
+      const pt = await centerOf('#setting-sign-in-info');
+      const [p0, vis, foc] = await a.run(`(window.__hm.length = 0, [+(performance.now().toFixed(1)), document.visibilityState, document.hasFocus()])`), n0 = Date.now();
+      await moveTo(pt);
+      const nMove = Date.now();
+      let nOpen = null;
+      for (let t = 0; t < 250; t++) {
+        if (await cardOpen('setting-sign-in-info')) { nOpen = Date.now(); break; }
+        await wait(10);
+      }
+      const openEv = await a.run(`window.__hm.slice()`);
+      const enters = openEv.filter(e => e.ev === 'pointerenter' && e.id === 'setting-sign-in-info');
+      const leaves = openEv.filter(e => e.ev === 'pointerleave' && e.id === 'setting-sign-in-info');
+      const redraws = openEv.filter(e => e.ev === 'redraw').length;
+      const opened = openEv.find(e => e.ev === 'beforetoggle' && e.st === 'open') ?? openEv.find(e => e.ev === 'toggle' && e.st === 'open');
+      const cp0 = await a.run(`(window.__hm.length = 0, +(performance.now().toFixed(1)))`), cn0 = Date.now();
+      await moveTo({ x: 0, y: 0 });
+      const cnMove = Date.now();
+      let cnClose = null;
+      for (let t = 0; t < 250; t++) {
+        if (!(await cardOpen('setting-sign-in-info'))) { cnClose = Date.now(); break; }
+        await wait(10);
+      }
+      const closeEv = await a.run(`window.__hm.slice()`);
+      const leave = closeEv.find(e => e.ev === 'pointerleave' && e.id === 'setting-sign-in-info');
+      const closed = closeEv.find(e => e.ev === 'beforetoggle' && e.st === 'closed') ?? closeEv.find(e => e.ev === 'toggle' && e.st === 'closed');
+      const row = {
+        i, kind: i >= 5 ? 'afterRefresh' : 'plain', vis, foc, moveRtt: nMove - n0,
+        moveToEnter: enters[0] ? +(enters[0].t - p0).toFixed(1) : null,
+        enterToOpen: enters[0] && opened ? +(opened.t - enters[0].t).toFixed(1) : null,
+        lastEnterToOpen: enters.at(-1) && opened ? +(opened.t - enters.at(-1).t).toFixed(1) : null,
+        pageTotal: opened ? +(opened.t - p0).toFixed(1) : null,
+        nodeFromStart: nOpen !== null ? nOpen - n0 : null,
+        nodeAfterMove: nOpen !== null ? nOpen - nMove : null,
+        enters: enters.length, leaves: leaves.length, redraws,
+        leaveToClose: leave && closed ? +(closed.t - leave.t).toFixed(1) : null,
+        nodeAfterLeave: cnClose !== null ? cnClose - cnMove : null,
+      };
+      tries.push(row);
+      console.log(`[MAC-HOVER-MEASURE] hover try ${i}: ${JSON.stringify(row)}${row.enters !== 1 || row.redraws > 0 || (row.enterToOpen ?? 0) > 350 ? ` openEv=${JSON.stringify(openEv)}` : ''}`);
+    }
+    const mm = key => { const v = tries.map(r => r[key]).filter(x => x !== null); return v.length ? [Math.min(...v), Math.max(...v)] : null; };
+    console.log(`[MAC-HOVER-MEASURE] hover summary: ${JSON.stringify({ moveRtt: mm('moveRtt'), moveToEnter: mm('moveToEnter'), enterToOpen: mm('enterToOpen'), pageTotal: mm('pageTotal'), nodeFromStart: mm('nodeFromStart'), nodeAfterMove: mm('nodeAfterMove'), leaveToClose: mm('leaveToClose'), nodeAfterLeave: mm('nodeAfterLeave') })}`);
+    await a.run(`window.__hmStop?.()`);
+  }
   // Keyboard: Tab from another control opens the card; Escape closes it keeping focus; a redraw does not reopen; a second Escape runs the page's own Escape.
   await a.run(`document.querySelector('#header-refresh').focus()`);
   await pressTab();
@@ -3909,12 +3981,126 @@ async function practiceFlow() {
   await a.run(`document.querySelector('#settings-scroll').scrollTop += 16`);
   await wait(80);
   const afterSmallScroll = await a.run(`(() => { const c = document.querySelector('#setting-log-info-card'); return { open: c.matches(':popover-open'), moved: ${footBox.top} - Math.round(c.getBoundingClientRect().top) }; })()`);
-  await a.run(`document.querySelector('#settings-scroll').scrollTop = 0`);
+  await a.run(`(() => {
+    const log = window.__sm = [];
+    const onScroll = e => { const s = document.querySelector('#settings-scroll'), m = document.querySelector('#setting-log-info'), c = document.querySelector('#setting-log-info-card'); log.push({ ev: 'scroll', id: e.target?.id ?? null, st: Math.round(s?.scrollTop ?? -1), open: !!c?.matches(':popover-open'), mTop: Math.round(m?.getBoundingClientRect().top ?? -1), sBot: Math.round(s?.getBoundingClientRect().bottom ?? -1), t: +(performance.now().toFixed(1)) }); };
+    const onToggle = type => e => { if (e.target?.id === 'setting-log-info-card') log.push({ ev: type, state: e.newState, t: +(performance.now().toFixed(1)) }); };
+    const h = [['scroll', onScroll], ['beforetoggle', onToggle('beforetoggle')], ['toggle', onToggle('toggle')]];
+    for (const [type, fn] of h) document.addEventListener(type, fn, true);
+    window.__smStop = () => { for (const [type, fn] of h) document.removeEventListener(type, fn, true); };
+  })()`);
+  const preScrollGeo = await a.run(`(() => { const s = document.querySelector('#settings-scroll'), m = document.querySelector('#setting-log-info').getBoundingClientRect(), sr = s.getBoundingClientRect(); return { iw: innerWidth, ih: innerHeight, st: Math.round(s.scrollTop), sh: s.scrollHeight, ch: s.clientHeight, sBot: Math.round(sr.bottom), mTop: Math.round(m.top), mBot: Math.round(m.bottom), t0: +(performance.now().toFixed(1)) }; })()`);
+  await a.run(`window.__sm.length = 0; document.querySelector('#settings-scroll').scrollTop = 0`);
   await wait(80);
   const afterScrollOut = await cardOpen('setting-log-info');
+  const postScrollGeo = await a.run(`(() => { const s = document.querySelector('#settings-scroll'), m = document.querySelector('#setting-log-info').getBoundingClientRect(), sr = s.getBoundingClientRect(); return { st: Math.round(s.scrollTop), sBot: Math.round(sr.bottom), mTop: Math.round(m.top), mBot: Math.round(m.bottom), t1: +(performance.now().toFixed(1)), ev: window.__sm.slice() }; })()`);
+  let lateCloseMs = null;
+  if (afterScrollOut) {
+    const start = Date.now();
+    for (let t = 0; t < 200; t++) {
+      if (!(await cardOpen('setting-log-info'))) { lateCloseMs = Date.now() - start; break; }
+      await wait(10);
+    }
+  }
+  console.log(`[MAC-HOVER-MEASURE] scroll orig: afterScrollOut=${afterScrollOut} lateCloseMs=${lateCloseMs} foot=${JSON.stringify(footBox)} small=${JSON.stringify(afterSmallScroll)} pre=${JSON.stringify(preScrollGeo)} post=${JSON.stringify(postScrollGeo)}`);
   same('at 860×528, Log’s card at the foot flips above inside the window, stays in place across a scrolled redraw, follows a small scroll, and closes when scrolled out of view',
     [footBox.above, footBox.inside, footBox.scroll > 0, afterScrolledRedraw.replaced, afterScrolledRedraw.open, afterScrolledRedraw.topDiff <= 2, afterSmallScroll.open, afterSmallScroll.moved >= 14 && afterSmallScroll.moved <= 18, afterScrollOut],
     [true, true, true, true, true, true, true, true, false]);
+  {
+    // Probe #2: fast jumps (0 ms wait + latency), back-to-back scroll after += 16 and after redraw, slow stepped scroll, wheel scroll.
+    const openAtFoot = async () => {
+      await putLogAtFoot();
+      await wait(40);
+      if (await cardOpen('setting-log-info')) await a.click('#setting-log-info');
+      await a.click('#setting-log-info');
+    };
+    const fastTries = [];
+    for (let i = 0; i < 6; i++) {
+      await openAtFoot();
+      const t0 = await a.run(`(window.__sm.length = 0, +(performance.now().toFixed(1)))`), n0 = Date.now();
+      const openAt0 = await a.run(`(document.querySelector('#settings-scroll').scrollTop = 0, !!document.querySelector('#setting-log-info-card')?.matches(':popover-open'))`);
+      let closeNode = null;
+      for (let t = 0; t < 200; t++) {
+        if (!(await cardOpen('setting-log-info'))) { closeNode = Date.now() - n0; break; }
+        await wait(10);
+      }
+      const ev = await a.run(`window.__sm.slice()`);
+      const sev = ev.find(e => e.ev === 'scroll'), cev = ev.find(e => e.ev === 'beforetoggle' && e.state === 'closed');
+      fastTries.push({ i, openAt0, scrollMs: sev ? +(sev.t - t0).toFixed(1) : null, closeMs: cev ? +(cev.t - t0).toFixed(1) : null, closeNode });
+    }
+    console.log(`[MAC-HOVER-MEASURE] scroll fast: ${JSON.stringify(fastTries)}`);
+    const b2b = [];
+    for (const gap of [0, 10, 40, 80]) {
+      await openAtFoot();
+      await a.run(`document.querySelector('#settings-scroll').scrollTop += 16`);
+      if (gap) await wait(gap);
+      const t0 = await a.run(`(window.__sm.length = 0, +(performance.now().toFixed(1)))`);
+      await a.run(`document.querySelector('#settings-scroll').scrollTop = 0`);
+      await wait(80);
+      const open80 = await cardOpen('setting-log-info');
+      const ev = await a.run(`window.__sm.slice()`);
+      const sev = ev.find(e => e.ev === 'scroll');
+      b2b.push({ gap, open80, scrollMs: sev ? +(sev.t - t0).toFixed(1) : null });
+    }
+    console.log(`[MAC-HOVER-MEASURE] scroll b2b: ${JSON.stringify(b2b)}`);
+    const slowRes = [];
+    for (const [step, delay] of [[25, 25], [12, 80]]) {
+      await openAtFoot();
+      let closedAt = null, steps = 0;
+      while (await a.run(`document.querySelector('#settings-scroll').scrollTop > 0`) && steps < 100) {
+        steps++;
+        await a.run(`document.querySelector('#settings-scroll').scrollTop = Math.max(0, document.querySelector('#settings-scroll').scrollTop - ${step})`);
+        await wait(delay);
+        if (closedAt === null && !(await cardOpen('setting-log-info'))) {
+          closedAt = await a.run(`(() => { const s = document.querySelector('#settings-scroll'), m = document.querySelector('#setting-log-info').getBoundingClientRect(); return { step: ${steps}, st: Math.round(s.scrollTop), mTop: Math.round(m.top), sBot: Math.round(s.getBoundingClientRect().bottom) }; })()`);
+        }
+      }
+      await wait(80);
+      slowRes.push({ step, delay, steps, closedAt, openEnd: await cardOpen('setting-log-info') });
+    }
+    console.log(`[MAC-HOVER-MEASURE] scroll slow: ${JSON.stringify(slowRes)}`);
+    // Wheel scroll: fast single wheel and slow small wheels.
+    const wheelRes = [];
+    for (const [count, dy, delay] of [[1, -600, 0], [15, -40, 50]]) {
+      await openAtFoot();
+      const box = await a.run(`(() => { const r = document.querySelector('#settings-scroll').getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+      const t0 = await a.run(`(window.__sm.length = 0, +(performance.now().toFixed(1)))`);
+      for (let k = 0; k < count; k++) {
+        await a.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: dy });
+        if (delay) await wait(delay);
+      }
+      await wait(80);
+      const st = await a.run(`Math.round(document.querySelector('#settings-scroll').scrollTop)`);
+      const open80 = await cardOpen('setting-log-info');
+      const ev = await a.run(`window.__sm.slice()`);
+      const cev = ev.find(e => e.ev === 'beforetoggle' && e.state === 'closed');
+      wheelRes.push({ count, dy, delay, st, open80, closeMs: cev ? +(cev.t - t0).toFixed(1) : null, scrolls: ev.filter(e => e.ev === 'scroll').length });
+    }
+    console.log(`[MAC-HOVER-MEASURE] scroll wheel: ${JSON.stringify(wheelRes)}`);
+    // Repeat the exact appearance-redraw -> scrollTop += 16 -> scrollTop = 0 sequence 5 times.
+    const redrawSeq = [];
+    for (let k = 0; k < 5; k++) {
+      const mode = k % 2 === 0 ? 'dark' : 'light';
+      await openAtFoot();
+      await a.run(`window.centralKnot.setAppearance(${JSON.stringify(mode)})`);
+      for (let tries = 0; tries < 20 && !(await a.exists(`#appearance-${mode}[aria-checked="true"]`)); tries++) await wait(100);
+      await a.run(`document.querySelector('#settings-scroll').scrollTop += 16`);
+      await wait(80);
+      const t0 = await a.run(`(window.__sm.length = 0, +(performance.now().toFixed(1)))`), n0 = Date.now();
+      await a.run(`document.querySelector('#settings-scroll').scrollTop = 0`);
+      await wait(80);
+      const open80 = await cardOpen('setting-log-info');
+      let lateMs = null;
+      if (open80) { for (let t = 0; t < 200; t++) { if (!(await cardOpen('setting-log-info'))) { lateMs = Date.now() - n0; break; } await wait(10); } }
+      const [rafMs, vis, foc, ev] = await a.run(`new Promise(done => { const r0 = performance.now(); requestAnimationFrame(() => done([+(performance.now() - r0).toFixed(1), document.visibilityState, document.hasFocus(), window.__sm.slice()])); })`);
+      const sev = ev.find(e => e.ev === 'scroll');
+      redrawSeq.push({ k, mode, open80, lateMs, scrollMs: sev ? +(sev.t - t0).toFixed(1) : null, rafMs, vis, foc });
+    }
+    await a.run(`window.centralKnot.setAppearance('light')`);
+    for (let tries = 0; tries < 20 && !(await a.exists('#appearance-light[aria-checked="true"]')); tries++) await wait(100);
+    console.log(`[MAC-HOVER-MEASURE] scroll redrawSeq: ${JSON.stringify(redrawSeq)}`);
+    await a.run(`window.__smStop?.()`);
+  }
   if (shots) {
     await a.click('#sidebar-toggle');
     await putLogAtFoot();
