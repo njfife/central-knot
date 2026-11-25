@@ -95,7 +95,7 @@ test('Examples 2, 5 and 13: inline commands, bare names, relative paths, options
     for (const at of [0, 1, 2, 3, 4]) {
       assert.equal(results[at]!.file, settings);
       assert.ok(results[at]!.entry);
-      assert.deepEqual(results[at]!.script, { problem: 'No script file found in the command.' });
+      assert.equal(results[at]!.script, undefined);
     }
 
     // Direct unit checks of scriptInLaunch for interpreter basename, /usr/bin/env, cat, options, quotes, deno/bun.
@@ -158,12 +158,12 @@ test('Example 3 and 9: Codex hooks.json and config.toml (table and inline hooks 
     const fromTomlTable = await readHookSource(ctx, strip.groups[1]!.hooks[0]!.source);
     assert.equal(fromTomlTable.file, toml);
     assert.equal(fromTomlTable.entry, '[[hooks.SessionStart.hooks]]\ntype = "command"\ncommand = "echo from toml"\ntimeout = 5');
-    assert.deepEqual(fromTomlTable.script, { problem: 'No script file found in the command.' });
+    assert.equal(fromTomlTable.script, undefined);
 
     const fromTomlInline = await readHookSource(ctx, strip.groups[1]!.hooks[1]!.source);
     assert.equal(fromTomlInline.file, toml);
     assert.equal(fromTomlInline.entry, 'hooks = [{ type = "command", command = "echo inline" }]');
-    assert.deepEqual(fromTomlInline.script, { problem: 'No script file found in the command.' });
+    assert.equal(fromTomlInline.script, undefined);
   } finally {
     await rm(base, { recursive: true, force: true });
   }
@@ -265,7 +265,7 @@ test('Example 4 and 17: installed plugin copy vs marketplace copy, and inline pl
     });
     assert.equal(flatRes.file, join(flatPlugin, 'hooks', 'hooks.json'));
     assert.match(flatRes.entry!, /"command": "echo flat"/);
-    assert.deepEqual(flatRes.script, { problem: 'No script file found in the command.' });
+    assert.equal(flatRes.script, undefined);
   } finally {
     await rm(base, { recursive: true, force: true });
   }
@@ -362,7 +362,7 @@ test('Examples 8, 10, 14 and 15: two hooks of one event, custom backup home, {pr
       hooks: {
         SessionStart: [
           { matcher: 'startup', hooks: [{ type: 'command', command: '~/bin/first.sh' }] },
-          { matcher: 'resume', hooks: [{ type: 'command', command: '~/bin/my script.sh', args: ['--flag'] }] },
+          { matcher: 'resume', hooks: [{ type: 'command', command: spacedScript, args: ['--flag'] }] },
         ],
       },
     }, null, 2));
@@ -389,7 +389,7 @@ test('Examples 8, 10, 14 and 15: two hooks of one event, custom backup home, {pr
       hooks: {
         sessionStart: [
           { type: 'command', bash: '~/bin/copilot-start.sh' },
-          { type: 'command', exec: 'node', args: ['~/bin/first.sh'] },
+          { type: 'command', exec: 'node', args: [firstScript] },
         ],
       },
     }, null, 2));
@@ -466,6 +466,45 @@ test('Item 4: inserting a hook ahead of a row says the file changed since this p
   }
 });
 
+test('Short list item 1: {program,args} launches do not expand ~ or $HOME, only absolute and plugin-root paths', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'ck-hooksrc-'));
+  try {
+    const home = join(base, 'home');
+    const root = join(base, 'plugin');
+    const abs = join(home, 'bin', 'a.sh');
+    const spaced = join(home, 'bin', 'my script.sh');
+    await put(abs, 'echo home-script\n');
+    // Direct argv must never expand ~, $HOME or ${HOME} in program or args.
+    assert.equal(scriptInLaunch({ program: 'node', args: ['~/bin/a.sh'] }, home), undefined);
+    assert.equal(scriptInLaunch({ program: 'node', args: ['$HOME/bin/a.sh'] }, home), undefined);
+    assert.equal(scriptInLaunch({ program: 'node', args: ['${HOME}/bin/a.sh'] }, home), undefined);
+    assert.equal(scriptInLaunch({ program: '~/bin/a.sh', args: ['--flag'] }, home), undefined);
+    assert.equal(scriptInLaunch({ program: '$HOME/bin/a.sh', args: [] }, home), undefined);
+    assert.equal(scriptInLaunch({ program: '${HOME}/bin/a.sh', args: [] }, home), undefined);
+    // Direct argv still takes absolute paths and tool-filled plugin-root paths.
+    assert.equal(scriptInLaunch({ program: 'node', args: [abs] }, home), abs);
+    assert.equal(scriptInLaunch({ program: spaced, args: ['--flag'] }, home), spaced);
+    assert.equal(scriptInLaunch({ program: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/hooks/remind.mjs'] }, home, root), join(root, 'hooks', 'remind.mjs'));
+    assert.equal(scriptInLaunch({ program: '${PLUGIN_ROOT}/hooks/run.sh', args: [] }, home, root), join(root, 'hooks', 'run.sh'));
+    assert.equal(scriptInLaunch({ program: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/hooks/remind.mjs'] }, home), undefined);
+    // Shell lines keep their expansion rule.
+    assert.equal(scriptInLaunch({ shell: 'node ~/bin/a.sh' }, home), abs);
+    assert.equal(scriptInLaunch({ shell: 'node "$HOME/bin/a.sh"' }, home), abs);
+    assert.equal(scriptInLaunch({ shell: 'node "${HOME}/bin/a.sh"' }, home), abs);
+    // End-to-end Copilot CLI exec + literal ~/bin/a.sh must not read home/bin/a.sh.
+    const copilot = join(home, '.copilot');
+    await put(join(copilot, 'hooks', 'team.json'), JSON.stringify({
+      version: 1,
+      hooks: { sessionStart: [{ type: 'command', exec: 'node', args: ['~/bin/a.sh'] }] },
+    }, null, 2));
+    const strip = sessionStrip('copilot-cli', [], await sessionSettings('copilot-cli', copilot))!;
+    const res = await readHookSource(makeCtx(home, join(base, 'data')), strip.groups[0]!.hooks[0]!.source);
+    assert.equal(res.script, undefined);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
 test('Items 5 and 6: distinct row ids for duplicate inline hooks, and reset on home switch / refresh / gone row', async () => {
   const nodes = new Map<string, any>();
   const makeNode = (tag = 'div') => {
@@ -482,7 +521,8 @@ test('Items 5 and 6: distinct row ids for duplicate inline hooks, and reset on h
     };
     return node;
   };
-  let answer = { script: { path: '/home/a.sh', text: 'v1' } };
+  let answer: any = { file: '/m/p/hooks/hooks.json', entry: '{"command":"echo x"}' };
+  const textOf = (node: any): string => (typeof node === 'string' ? node : node?.text ?? (node?.children ?? []).map(textOf).join(''));
   Object.assign(globalThis, {
     document: {
       body: makeNode('body'), documentElement: makeNode('html'), activeElement: null, hidden: false, hasFocus: () => true,
@@ -500,22 +540,33 @@ test('Items 5 and 6: distinct row ids for duplicate inline hooks, and reset on h
   const { state } = await import('../src/app.ts');
   const viewMod: any = await import('../src/hooksourceview.ts');
   state.home = { home: '/tmp/home-a', mode: 'custom', label: 'A' } as any;
-  const dupRef: any = { from: 'marketplace', marketName: 'team', plugin: 'p', declaredIn: '/m/p', event: 'SessionStart', at: 0, command: 'echo x' };
+  const dupRef: any = { from: 'marketplace', marketName: 'team', plugin: 'p', declaredIn: '/m/p/hooks/hooks.json', event: 'SessionStart', at: 0, command: 'echo x' };
   const row0 = viewMod.hookSourceControls(dupRef, 'hook-source-session-0');
   const row1 = viewMod.hookSourceControls(dupRef, 'hook-source-session-1');
   // Item 6: two identical inline hooks at separate row slots must never share a button id.
   assert.notEqual(row0[0].id, row1[0].id, 'duplicate inline hooks must get distinct ids');
-  // Item 5: opening row0, then Refresh / home switch clears it; a gone row is pruned.
+  // Item 5 & short list item 2: opening row0 renders Declared in <path> · the marketplace’s copy with no script-missing line.
   row0[0].onclick();
   await new Promise(resolve => setTimeout(resolve, 10));
-  assert.equal(viewMod.hookSourceControls(dupRef, 'hook-source-session-0').length, 2);
+  const openedRow = viewMod.hookSourceControls(dupRef, 'hook-source-session-0');
+  assert.equal(openedRow.length, 2);
+  const rendered = textOf(openedRow[1]);
+  assert.match(rendered, /Declared in .*hooks\.json · the marketplace’s copy/);
+  assert.doesNotMatch(rendered, /No script file found/);
+  assert.doesNotMatch(rendered, /The marketplace’s copy\./);
   assert.equal(typeof viewMod.resetHookSources, 'function');
   viewMod.resetHookSources();
   assert.equal(viewMod.hookSourceControls(dupRef, 'hook-source-session-0').length, 1);
-  viewMod.hookSourceControls(dupRef, 'hook-source-session-0')[0].onclick();
+  // Own hook with no script omits marketplace copy note too.
+  const ownRef: any = { from: 'own', tool: 'claude-cli', declaredIn: '/tmp/home-a/.claude/settings.json', event: 'SessionStart', at: 0, command: 'echo x' };
+  answer = { file: '/tmp/home-a/.claude/settings.json', entry: '{"command":"echo x"}' };
+  viewMod.hookSourceControls(ownRef, 'hook-source-own-0')[0].onclick();
   await new Promise(resolve => setTimeout(resolve, 10));
+  const ownRendered = textOf(viewMod.hookSourceControls(ownRef, 'hook-source-own-0')[1]);
+  assert.match(ownRendered, /Declared in .*settings\.json/);
+  assert.doesNotMatch(ownRendered, /marketplace’s copy/);
   nodes.clear();
   assert.equal(typeof viewMod.pruneHookSources, 'function');
   viewMod.pruneHookSources();
-  assert.equal(viewMod.hookSourceControls(dupRef, 'hook-source-session-0').length, 1);
+  assert.equal(viewMod.hookSourceControls(ownRef, 'hook-source-own-0').length, 1);
 });

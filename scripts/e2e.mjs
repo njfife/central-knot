@@ -12244,7 +12244,7 @@ echo "$*" >> "$HOME/claude-calls.txt"
   writeFileSync(record, JSON.stringify({ version: 2, plugins: { ...JSON.parse(readFileSync(record, 'utf8')).plugins, [`vanished@${name}`]: [{ scope: 'user', installPath: join(home, '.claude/plugins/cache', name, 'vanished/1.0.0'), version: '1.0.0' }] } }));
   // Added from Git, so Claude Code reads each plugin from its copy in the cache (one from a folder marketplace it reads in place).
   writeFileSync(join(home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ [name]: { source: { source: 'git', url: market } } }));
-  writeFileSync(join(home, '.claude/settings.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: '~/bin/greet.sh', args: ['--short'] }] }] } }, null, 2));
+  writeFileSync(join(home, '.claude/settings.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: '~/bin/greet.sh --short' }] }] } }, null, 2));
   mkdirSync(join(home, 'bin'), { recursive: true });
   writeFileSync(join(home, 'bin/greet.sh'), [
     '#!/bin/sh',
@@ -12356,7 +12356,7 @@ echo "$*" >> "$HOME/claude-calls.txt"
       return { owners, pres }; })()`);
     check('clicking View source shows the script first, then Declared in and the entry, with no marketplace-copy note',
       /bin\/greet\.sh/.test(ownOrder?.owners?.[0] ?? '') && /Welcome to this workspace/.test(ownOrder?.pres?.[0] ?? '')
-      && /Declared in .*\.claude\/settings\.json/.test(ownOrder?.owners?.[1] ?? '') && /"command": "~\/bin\/greet\.sh"/.test(ownOrder?.pres?.[1] ?? '')
+      && /Declared in .*\.claude\/settings\.json/.test(ownOrder?.owners?.[1] ?? '') && /"command": "~\/bin\/greet\.sh --short"/.test(ownOrder?.pres?.[1] ?? '')
       && !/marketplace’s copy/.test(ownSource ?? '')
       && (await a.text(byId(ownBtnId))) === 'Hide source', { ownSource, ownOrder });
     const checkBlockFit = async (width, height) => {
@@ -12382,6 +12382,13 @@ echo "$*" >> "$HOME/claude-calls.txt"
       })()`);
     };
     same('at 860×528 the opened script block fills its card width, scrolls, wraps, and the button sits at the right edge', await checkBlockFit(860, 528), [true, true, true, true, true, true, true]);
+    same('a wrapped script line has a hanging indent and the following line returns to the left edge', await a.run(`(() => {
+      const pre = document.querySelector('#session-claude-cli .session-group .session-hook .hook-source pre');
+      const text = pre?.firstChild?.textContent ?? '', start = text.indexOf('# long-note-'), end = text.indexOf('\\n', start), nextEnd = text.indexOf('\\n', end + 1);
+      const rects = (from, to) => { const r = document.createRange(); r.setStart(pre.firstChild, from); r.setEnd(pre.firstChild, to); return [...r.getClientRects()]; };
+      const wrapped = rects(start, end), next = rects(end + 1, nextEnd);
+      return [wrapped.length >= 2, wrapped[1]?.left > wrapped[0]?.left + 10, Math.abs(next[0]?.left - wrapped[0]?.left) <= 1];
+    })()`), [true, true, true]);
     same('at 2560×1440 the opened script block fills its card width without sideways scroll', await checkBlockFit(2560, 1440), [true, true, true, true, true, true, true]);
     await fullSize(a);
     // Escape inside the focused script block hides it and returns focus to View source.
@@ -12449,11 +12456,16 @@ echo "$*" >> "$HOME/claude-calls.txt"
   await pictures('session-strip', '#session-claude-cli', [...atTwo, [1316, 819, true], [1728, 1080, false], [2560, 1440, false]]);
   await pictures('session-codex', '#ins-head-codex-cli', [[1316, 819, false]]);
   await pictures('session-copilot-note', '#ins-head-copilot-cli', [[1316, 819, false]]);
-  // Pictures of a hook's source open on Instructions (860 and 1316, sidebar open and as a rail, light and dark).
+  // Pictures of a hook's source open on Instructions: own hook (860 and 1316, sidebar open and rail) and a plugin's hook (860 and 1316).
   if (shots && ownBtnId) {
     await openSource(ownBtnId, '#session-claude-cli .hook-source');
     await pictures('hook-source-instructions', '#session-claude-cli', [...atTwo, [1316, 819, true]]);
     await a.click(byId(ownBtnId));
+  }
+  if (shots && styleHookBtn) {
+    await openSource(styleHookBtn, '#session-claude-cli .hook-source');
+    await pictures('hook-source-instructions-plugin', '#session-claude-cli .session-group:has(.hook-source)', atTwo);
+    await a.click(byId(styleHookBtn));
   }
   // Its link opens release-helper's page; Back returns to the Instructions page with its strips.
   const helperLink = await a.run(`[...document.querySelectorAll('#session-claude-cli .session-group')].find(group => group.querySelector('.session-name').textContent === 'release-helper').querySelector('button').id`);
@@ -12465,19 +12477,29 @@ echo "$*" >> "$HOME/claude-calls.txt"
   check('on the plugin’s page every hook row has View source (both session-text hooks and other hooks)', pluginHookBtns.length === 3, pluginHookBtns);
   if (pluginHookBtns.length >= 3) {
     const inlineSrc = await openSource(pluginHookBtns[0], '.plugin-page .hook-source');
-    check('an inline echo hook on the plugin’s page says The marketplace’s copy., no script file found, and Declared in',
-      /The marketplace’s copy\./.test(inlineSrc ?? '') && /No script file found in the command\./.test(inlineSrc ?? '')
-      && /Declared in .*hooks\/hooks\.json/.test(inlineSrc ?? '') && /hookSpecificOutput/.test(inlineSrc ?? ''), inlineSrc);
+    const inlineBlocks = await a.run(`document.querySelectorAll('.plugin-page .hook-source .content-block').length`);
+    check('an inline echo hook on the plugin’s page shows only Declared in <path> · the marketplace’s copy and the entry',
+      inlineBlocks === 1 && !/No script file found/.test(inlineSrc ?? '') && !/The marketplace’s copy\./.test(inlineSrc ?? '')
+      && /Declared in .*hooks\/hooks\.json · the marketplace’s copy/.test(inlineSrc ?? '') && /hookSpecificOutput/.test(inlineSrc ?? ''), { inlineBlocks, inlineSrc });
+    same('a wrapped entry line also has a hanging indent', await a.run(`(() => {
+      const pre = document.querySelector('.plugin-page .hook-source pre');
+      const r = document.createRange(); r.selectNodeContents(pre.firstChild);
+      const rects = [...r.getClientRects()];
+      return [rects.length >= 2, rects[1]?.left > rects[0]?.left + 10];
+    })()`), [true, true]);
     await pictures('hook-source-no-script', '.plugin-parts li.with-source', atTwo);
     await a.click(byId(pluginHookBtns[0]));
     const marketSrc = await openSource(pluginHookBtns[1], '.plugin-page .hook-source');
-    check('the plugin’s page shows the marketplace copy’s script first, labelled as The marketplace’s copy.',
-      /The marketplace’s copy\./.test(marketSrc ?? '') && /hooks\/remind\.mjs/.test(marketSrc ?? '') && /marketplace copy/.test(marketSrc ?? '')
-      && /Declared in .*hooks\/hooks\.json/.test(marketSrc ?? '') && (marketSrc ?? '').indexOf('marketplace copy') < (marketSrc ?? '').indexOf('Declared in'), marketSrc);
+    const marketOwners = await a.run(`[...document.querySelectorAll('.plugin-page .hook-source .content-owner')].map(e => e.textContent)`);
+    check('the plugin’s page shows the marketplace copy’s script first, then Declared in <path> · the marketplace’s copy',
+      !/The marketplace’s copy\./.test(marketSrc ?? '') && /hooks\/remind\.mjs/.test(marketOwners?.[0] ?? '') && !/marketplace’s copy/.test(marketOwners?.[0] ?? '')
+      && /marketplace copy/.test(marketSrc ?? '') && /Declared in .*hooks\/hooks\.json · the marketplace’s copy/.test(marketOwners?.[1] ?? '')
+      && (marketSrc ?? '').indexOf('marketplace copy') < (marketSrc ?? '').indexOf('Declared in'), { marketOwners, marketSrc });
     await pictures('hook-source-plugin', '.plugin-parts li.with-source', [...atTwo, [1316, 819, true]]);
     await a.click(byId(pluginHookBtns[1]));
     const otherSrc = await openSource(pluginHookBtns[2], '.plugin-page .hook-source');
-    check('Other hooks rows also open View source cleanly', /The marketplace’s copy\./.test(otherSrc ?? '') && /echo checked/.test(otherSrc ?? '') && /No script file found in the command\./.test(otherSrc ?? ''), otherSrc);
+    check('Other hooks rows also open View source cleanly',
+      !/No script file found/.test(otherSrc ?? '') && /Declared in .*hooks\/hooks\.json · the marketplace’s copy/.test(otherSrc ?? '') && /echo checked/.test(otherSrc ?? ''), otherSrc);
     await a.click(byId(pluginHookBtns[2]));
   }
   const back = async () => { await a.send('Input.dispatchKeyEvent', { type: 'keyDown', key: process.platform === 'darwin' ? '[' : 'ArrowLeft', modifiers: process.platform === 'darwin' ? 4 : 1 }); await a.send('Input.dispatchKeyEvent', { type: 'keyUp', key: process.platform === 'darwin' ? '[' : 'ArrowLeft', modifiers: process.platform === 'darwin' ? 4 : 1 }); await a.settle(); await showStrips(); };

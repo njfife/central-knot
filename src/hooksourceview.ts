@@ -21,9 +21,9 @@ export function pruneHookSources(): void {
   for (const [key, entry] of opened) if (!document.getElementById(entry.panelId)) opened.delete(key);
 }
 
-function sourceBlock(blockId: string, path?: string, text?: string, note?: string, prefix?: string): HTMLElement {
+function sourceBlock(blockId: string, path?: string, text?: string, note?: string, prefix?: string, suffix?: string): HTMLElement {
   return h('div.content-block', {},
-    path ? h('p.content-owner', {}, prefix ? `${prefix} ` : null, pathText(shownPath(path), path)) : null,
+    path ? h('p.content-owner', {}, prefix ? `${prefix} ` : null, pathText(shownPath(path), path), suffix ?? null) : null,
     text !== undefined
       ? h('pre.content.mono', { id: blockId, tabindex: '0', 'aria-label': `${fileName(path ?? '')} contents` }, text.replace(/\n$/, ''))
       : h('p.hook-source-note', {}, note ?? ''));
@@ -40,13 +40,13 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
     event.stopPropagation();
     toggle();
   };
+  const copy = ref.from === 'marketplace' ? ' · the marketplace’s copy' : undefined;
   const panel = (source?: HookSource): HTMLElement => h('div.hook-source', { id: panelId, onkeydown: onEscape },
-    ref.from === 'marketplace' ? h('p.hook-source-note', {}, 'The marketplace’s copy.') : null,
     !source ? h('p.hook-source-note', {}, 'Reading…')
       : source.problem ? sourceBlock(`${id}-err`, source.file, undefined, source.problem)
       : [
-        source.script ? sourceBlock(`${id}-script`, source.script.path, source.script.text, source.script.problem) : null,
-        source.entry !== undefined && source.file ? sourceBlock(`${id}-entry`, source.file, source.entry, undefined, 'Declared in') : null,
+        source.script ? sourceBlock(`${id}-script`, source.script.path, source.script.text, source.script.problem, undefined, !source.file ? copy : undefined) : null,
+        source.entry !== undefined && source.file ? sourceBlock(`${id}-entry`, source.file, source.entry, undefined, 'Declared in', copy) : null,
       ]);
   const control = (open: boolean): HTMLElement => button({
     variant: 'link', size: 'micro', label: open ? 'Hide source' : 'View source', id: btnId,

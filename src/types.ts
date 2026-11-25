@@ -891,7 +891,7 @@ export type HookSourceRef = { declaredIn: string; event: string; at: number; com
 /** One hook's declaring entry and script (hooksource.ts readHookSource), or why it couldn't be read. */
 export interface HookSource {
   problem?: string; file?: string; entry?: string;
-  script?: { path?: string; text?: string; problem?: string };
+  script?: { path: string; text?: string; problem?: string };
 }
 /** What a plugin holds, read from its files (catalogdetail.ts); the row counts come from the same read. */
 export interface PluginContents {
