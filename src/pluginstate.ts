@@ -14,17 +14,25 @@
 // - Every other action here runs under app.ts busy, and is off while the page acts (app.ts acting: busy, or a run of clicks,
 //   which also says why), so a click on one lands on a disabled control and is dropped, never run twice. A switch is off under
 //   busy too.
+// - A tool's line on a plugin's item in the Library (pluginline.ts) makes a tool's box's own turn (Install the plugin, Put its
+//   items here, Remove the plugin): turnFromLine joins the page's one list as a run of its own; its line says it waits and runs
+//   (lineBusy), and its result, with the turn's Undo (undoLine), is a LineResult (its one lifetime is there), on its line or, when
+//   that isn't on screen, in the header. It sets no market.lastRun: the Plugins page's own result is its own clicks'. An act on a
+//   plugin from either page retires that plugin's earlier results and Undo on both (retire).
 // Steps that run by themselves (pluginupdates.ts) take their turn with the page's in main's one queue.
-import { noteMove, showPage, announce, busy, focusWhenDone, oweHomeRead, pinnedRows, readHomeOnce, rerender, saidInStatusBar, state as app, tell, toolWays, type Outcome } from './app.ts';
-import { pluginReloads, reloadAdvice, settleReloads, type ReloadAdvice } from './reload.ts';
+import { noteMove, showPage, announce, busy, focusWhenDone, oweHomeRead, pinnedRows, readHomeOnce, rerender, saidInStatusBar, setHome, state as app, tell, toolWays, withReloads, type Outcome } from './app.ts';
+import { pluginReloads, reloadAdvice, settleReloads, type ReloadAdvice, type ReloadChange } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Turn } from './clicklist.ts';
 import { pin, placeIn } from './itemrow.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { plural } from './model.ts';
 import { notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, succeeded, unreachedOps, type LastRun, type PluginDone, type PluginOp, type ResultLine } from './pluginplan.ts';
-import { FIND_FROM, categoriesOf, copiesToCompare, installedFrom, marketTitle, matches, pluginPlace, undoLimits } from './pluginstatus.ts';
+import { FIND_FROM, boxOf, categoriesOf, copiesToCompare, installedFrom, marketTitle, matches, pluginPlace, samePart, toolMark, undoLimits } from './pluginstatus.ts';
+import { counted } from './pluginswitch.ts';
+import { yoursStay } from './pluginline.ts';
+import type { PluginEntry } from './pluginrecord.ts';
 import { readInTurn, readInto, type Read } from './reads.ts';
-import type { HarnessId, MarketplaceView, PluginDetail, PluginTurn, PluginTurnResult, PluginsView, YourName } from './types.ts';
+import type { HarnessId, MarketplaceView, PartRef, PluginDetail, PluginTurn, PluginTurnResult, PluginsView, YourName } from './types.ts';
 import { andList, toolNames } from './words.ts';
 
 const api = () => window.centralKnot;
@@ -86,7 +94,9 @@ export function toggleOpened(key: string): void {
 /** A different home has other tools and other installs: nothing done or read in the last one carries over. */
 export function resetMarket(): void {
   // Its clicks leave the list: those not yet sent never run, and the result of one running is passed over (runClick).
-  drop(isPluginClick);
+  drop(turn => isPluginClick(turn) || isLineClick(turn));
+  viewFor = undefined;
+  results = [];
   resetPageData(market.read); market.problem = undefined; market.lastRun = undefined; market.working = undefined; market.addOpen = false;
   market.readmes.clear(); forgetDetails(); market.opened.clear(); market.nav = startNav();
 }
@@ -350,6 +360,7 @@ export const openLink = (url: string) => void api().openExternal(url);
  */
 export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'undoing' : 'applying', async () => {
   const home = app.home!.home;
+  for (const plugin of new Set(ops.map(op => op.plugin))) retire(plugin);
   market.problem = undefined;
   const planApi = { install: api().installPlugin, update: api().updatePlugin, uninstall: api().uninstallPlugin, setSkill: api().setPluginSkill, items: api().pluginItems };
   let result: Awaited<ReturnType<typeof runPlan>> = { done: [] };
@@ -461,6 +472,7 @@ function runEnded(): void {
  */
 async function runClick(click: PluginClick, home: string): Promise<void> {
   if (!clickList.turns.includes(click)) return;
+  retire(click.plugin);
   const view = market.view, entry = view?.marketplaces.find(each => each.source === click.source);
   market.working = { source: click.source, plugin: click.plugin, tools: click.tool ? [click.tool] : view?.tools ?? [] };
   rerender();
@@ -553,3 +565,181 @@ export function undoOps(): PluginOp[] {
   if (!last || last.home !== app.home?.home) return [];
   return last.undo ? last.rest ?? [] : last.turn?.back ?? reverse(last.done);
 }
+
+// ---------- A plugin's turn from a tool's line in the Library (pluginline.ts) ----------
+
+/**
+ * The listing of a plugin on this page's view: the marketplace listing it whose source is `source` as a tool spells it, else one
+ * of `marketName` (a tool may spell a source otherwise than the page lists it). The plugin's page opens there (matrix.ts
+ * openPlugin), and a Library line's turn names its source as listed, the spelling main's Undo compares (marketplaces.ts undoTurn).
+ */
+export function listingOf(plugin: string, marketName: string | undefined, source?: string): MarketplaceView | undefined {
+  const lists = (entry: MarketplaceView) => entry.plugins.some(item => item.name === plugin);
+  return market.view?.marketplaces.find(entry => entry.source === source && lists(entry)) ?? market.view?.marketplaces.find(entry => !!marketName && entry.name === marketName && lists(entry));
+}
+
+/**
+ * One tool's box for a plugin on its page (pluginstatus.ts boxOf, as pluginparts.ts toolBox asks it), for that tool's line in the
+ * Library (pluginline.ts LineFacts box): with the listing's source and what it lists in the plugin, and the tool's mark's words
+ * (what the plugin's page says of that tool). No box while this page's view is read (wantView); `unlisted` where no listing has it.
+ */
+export function lineBox(plugin: string, marketName: string, source: string | undefined, tool: HarnessId) {
+  const view = market.view, entry = listingOf(plugin, marketName, source);
+  if (!view || !view.tools.includes(tool)) return { box: undefined };
+  if (!entry) return { box: 'unlisted' as const };
+  // Found by its name alone, where another listing of that name has the plugin too: which one it comes from can't be told.
+  const named = view.marketplaces.filter(each => each.name === marketName && each.plugins.some(item => item.name === plugin));
+  if (entry.source !== source && named.length > 1) return { box: 'ambiguous' as const };
+  const marked = toolMark(view, entry, plugin, tool, entry.switches?.[plugin]?.tools[tool]);
+  return { box: boxOf(view, entry, plugin, tool, marked), words: marked.words, source: entry.source, parts: entry.plugins.find(item => item.name === plugin)?.components };
+}
+
+/** The read of the home this page's view was last asked for by the Library (wantView); another home starts over (resetMarket). */
+let viewFor: number | undefined;
+/** While a plugin's item is open in the Library, its lines need this page's view, as Harnesses does: read once for each read of the home. */
+export function wantView(readId: number | undefined): void {
+  if (viewFor === readId || app.page === 'plugins') return;
+  viewFor = readId;
+  // Asked while the page is drawn: the read starts after the drawing.
+  queueMicrotask(() => void loadPlugins(false, readId));
+}
+
+/**
+ * A line's click: the home it is made in, the plugin as listed (`source`, the listing's own spelling), the tool, and the item whose line
+ * it is (`item`), with the names his own there it said stay his (`yours`). Install and Put its items here are its box ticked
+ * (`let-in`); Remove, unticked (`keep-out`).
+ */
+export interface LineAim { home: string; source: string; marketName: string; plugin: string; tool: HarnessId; act: 'install' | 'place' | 'remove'; item: PartRef; yours?: PartRef[] }
+/** A line's click in the page's list (clicklist.ts), a run of its own: its line says it waits and runs (lineBusy). */
+interface LineClick extends Turn { aim: LineAim }
+const isLineClick = (turn: Turn): turn is LineClick => 'aim' in turn;
+const LINE_WORDS: Record<LineAim['act'], { waiting: string; running: string; done: string; not: string }> = {
+  install: { waiting: 'Waiting to install', running: 'Installing', done: 'Installed', not: 'Not installed in' },
+  place: { waiting: 'Waiting to put its items', running: 'Putting its items', done: 'Put', not: 'Not put in' },
+  remove: { waiting: 'Waiting to remove', running: 'Removing', done: 'Removed', not: 'Not removed from' },
+};
+
+/**
+ * A line's result: what its act did, with the one next step the tool needs (reload.ts reloadAdvice, as the header's chips say it),
+ * and its Undo. ONE LIFETIME: one per plugin, for the home its act ran in, on its item's line in its tool whatever row shows that
+ * item, until he closes it, an act on that plugin starts from either page (retire), he presses Refresh (forgetResults) or the
+ * home changes (resetMarket). Said in the header only when that line isn't on screen as the act ends (`told`); its line shows it
+ * once the header no longer does, never both at once.
+ */
+export interface LineResult { aim: LineAim; words: string; next: string; failed: boolean; undo?: () => void; told?: Outcome }
+let results: LineResult[] = [];
+/** The result a tool's line on an item shows now, if any (matrix.ts pluginLine, harnessLine). */
+export const resultOn = (tool: HarnessId, item: PartRef) => results.find(each => each.aim.tool === tool && samePart(each.aim.item, item) && !(each.told && app.outcome === each.told));
+/** × on a line's result, or the header's copy of it. */
+export function closeLineResult(result: LineResult): void {
+  results = results.filter(each => each !== result);
+  if (app.outcome === result.told) app.outcome = undefined;
+  rerender();
+}
+/** He pressed Refresh (app.ts readAgain): every line's result goes. */
+export const forgetResults = () => { results = []; };
+/**
+ * An act on a plugin starts, from either page (a line's, a box's or a switch's, the item lists' plugin switches: app.ts runSwitches):
+ * that plugin's earlier results and their Undo go, on its line, in the header (an Outcome naming it in `plugins`), and the Plugins
+ * page's last run where it was that plugin's. Only that plugin's.
+ */
+export function retire(plugin: string): void {
+  results = results.filter(each => each.aim.plugin !== plugin);
+  if (app.outcome?.plugins?.includes(plugin)) app.outcome = undefined;
+  if (market.lastRun?.turn?.plugin === plugin || market.lastRun?.done.some(step => step.plugin === plugin)) market.lastRun = undefined;
+}
+
+/** What a tool's line says while a click on its plugin in its tool waits or runs, on every row of the plugin's items. */
+export function lineBusy(plugin: string, marketName: string, tool: HarnessId): string | undefined {
+  const click = clickList.turns.filter(isLineClick).findLast(turn => turn.state !== 'ended' && turn.aim.plugin === plugin && turn.aim.marketName === marketName && turn.aim.tool === tool);
+  if (!click) return undefined;
+  const { aim } = click, words = LINE_WORDS[aim.act], into = aim.act === 'remove' ? 'from' : 'in';
+  if (click.state === 'waiting') return `${words.waiting} ${aim.act === 'place' ? 'in' : `${aim.plugin} ${into}`} ${toolNames[aim.tool]}…`;
+  return `${words.running} ${aim.act === 'place' ? `of ${aim.plugin} in` : `${aim.plugin} ${into}`} ${toolNames[aim.tool]}…${aim.act === 'install' ? ' This can take a few minutes.' : ''}`;
+}
+
+/**
+ * A line's click (pluginline.ts: Install the plugin, Put its items here, Remove the plugin): it joins the page's list as a run of its
+ * own, run in its turn by main as the plugin's box on its page is (marketplaces.ts turn).
+ */
+export function turnFromLine(aim: LineAim): void {
+  const click: LineClick = { state: 'waiting', run: { place: 'line', lastAt: 0 }, aim, work: () => runLine(click) };
+  join(click);
+  rerender();
+}
+
+/**
+ * One line's click in its turn: that plugin's earlier results retired, main's turn, the home and this page's view read again, then
+ * its result (sayResult) with its one Undo (undoPluginTurn) and what that Undo can't put back (pluginstatus.ts undoLimits), as the
+ * Plugins page says them.
+ */
+async function runLine(click: LineClick): Promise<void> {
+  const { aim } = click, view = market.view, entry = view?.marketplaces.find(each => each.source === aim.source), before = app.home?.pluginItems;
+  retire(aim.plugin);
+  rerender();
+  const result = await api().turnPlugin(aim.source, aim.plugin, aim.act === 'remove' ? 'keep-out' : 'let-in', aim.tool, aim.home)
+    .catch((): PluginTurnResult => ({ stopped: 'That could not finish. Click Refresh to see where things stand.', done: [] }));
+  if (!clickList.turns.includes(click)) return;
+  const mine = result.done.filter(step => step.tool === aim.tool), problem = result.stopped ?? mine.find(step => !succeeded(step.report))?.report.message;
+  // The home and this page's view read again. A read that fails is said beside the result, so the line never stays "running".
+  let read = true;
+  try {
+    const [home, view] = await Promise.all([api().refresh(), api().plugins()]);
+    setHome(home);
+    showView(view);
+  } catch { read = false; }
+  const where = toolNames[aim.tool], words = LINE_WORDS[aim.act], ran = mine.length > 0 || !!result.stopped;
+  const removed = result.done.filter(step => step.action === 'remove' && step.report.changed).map(step => step.tool);
+  const limits = view && entry ? undoLimits(view, entry, aim.plugin, removed, before) : [];
+  // The record as the plugin's page reads it now: a click that ran nothing (the tool was already as it asked, since the line was
+  // drawn) may still have changed which tools the plugin is kept out of.
+  const now = market.view?.marketplaces.find(each => each.source === aim.source)?.switches?.[aim.plugin]?.entry;
+  const recordChanged = !!now && (!result.before || now.on !== result.before.on || now.except.join() !== result.before.except.join());
+  // The tool's own words, without the "Not installed." its report leads with (plugins.ts install).
+  const theirs = problem?.replace(/^Not (installed|put in|removed)\.\s*/, '').replace(/\.$/, '');
+  // A placement says what it put there and what it left, as its own report counts and names them (pluginlibrary.ts reportIn).
+  const said = !ran ? `Nothing was run in ${where}: it ${aim.act === 'remove' ? 'doesn’t have' : 'has'} ${aim.plugin} already.${recordChanged ? ` Central Knot now keeps it ${aim.act === 'remove' ? 'out of' : 'in'} ${where}.` : ''}`
+    : problem ? `${words.not} ${where}: ${theirs}. ${lineBox(aim.plugin, aim.marketName, aim.source, aim.tool).words ?? ''}`.trim()
+    : aim.act === 'place' ? `Put ${aim.plugin}’s items in ${where}: ${mine[0]!.report.message}`
+    : `${words.done} ${aim.plugin} ${aim.act === 'remove' ? 'from' : 'in'} ${where}${aim.act === 'install' ? installedNow(aim) : ''}.${aim.yours?.length ? ` ${yoursStay(aim.yours)}` : ''}`;
+  const back = result.back ?? [], undoes = back.length > 0 || (!ran && recordChanged);
+  sayResult({ aim, words: [said, ...limits, read ? '' : 'The page couldn’t be read again after it: Refresh shows where things stand.'].filter(Boolean).join(' '),
+    next: reloadAdvice(settleReloads(pluginReloads(mine)), toolWays()).text, failed: !!problem, ...(undoes ? { undo: () => void undoLine(aim, result.before ?? null, back) } : {}) }, pluginReloads(mine));
+}
+
+/**
+ * A line's result kept (one per plugin), and said: on its line if that line is on screen now, else in the header, which has its
+ * Undo and next step there (as chips, withReloads: one next step either way) and names its plugin for retire.
+ */
+function sayResult(result: LineResult, changes: ReloadChange[]): void {
+  results = [...results.filter(each => each.aim.plugin !== result.aim.plugin), result];
+  rerender();
+  if (document.querySelector(`[data-result="${CSS.escape(resultKey(result.aim))}"]`)) { announce([result.words, result.next].filter(Boolean).join(' ')); return; }
+  result.told = withReloads({ page: 'library', text: result.words, band: true, warn: result.failed, plugins: [result.aim.plugin],
+    ...(result.undo ? { act: { label: 'Undo', id: 'outcome-undo', title: 'Put back what this did', run: result.undo } } : {}) }, changes);
+  tell(result.told);
+}
+/** The one key of the line a result is on: its tool and item (matrix.ts draws it as the result's data-result). */
+export const resultKey = (aim: Pick<LineAim, 'tool' | 'item'>) => `${aim.tool}:${aim.item.kind}:${aim.item.name.toLowerCase()}`;
+
+/** What the tool has of the plugin installed now, as read again after the click: ", with its 3 skills and 1 MCP server", or ''. */
+function installedNow(aim: LineAim): string {
+  const install = app.home?.pluginItems?.find(each => each.tool === aim.tool && each.plugin === aim.plugin && each.marketName === aim.marketName);
+  return install?.items.length ? `, with its ${counted(install.items)}` : '';
+}
+/**
+ * A line's Undo: the Plugins page's own (marketplaces.ts undoTurn), its record put back, then its steps, in the home its act ran in;
+ * the home and this page's view read again; said as its act's result was (it retires that result: an act on its plugin).
+ */
+const undoLine = (aim: LineAim, before: PluginEntry | null, back: PluginOp[]) => busy('Undoing…', async () => {
+  retire(aim.plugin);
+  const result = await api().undoPluginTurn(aim.source, aim.plugin, before, back, aim.home);
+  setHome(await api().refresh());
+  showView(await api().plugins().catch(() => null));
+  const worked = !result.stopped && result.done.every(step => succeeded(step.report)), where = toolNames[aim.tool];
+  // An Undo with no step to run put only the record back (a click that ran nothing).
+  const words = result.stopped ?? (back.length ? resultSentence(resultLines(result.done, true), true) || 'Nothing changed.'
+    : `Undone: Central Knot keeps ${aim.plugin} ${aim.act === 'remove' ? 'in' : 'out of'} ${where} again.`);
+  const failures = resultLines(result.done, true).filter(line => !line.ok).map(line => line.text);
+  sayResult({ aim, words: [words, ...failures].join(' '), next: reloadAdvice(settleReloads(pluginReloads(result.done)), toolWays()).text, failed: !worked }, pluginReloads(result.done));
+});
