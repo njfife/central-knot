@@ -1398,8 +1398,9 @@ app.on('second-instance', showWindow);
 // Opening Central Knot again (the Dock, Finder, Spotlight) while it runs: its window comes back.
 app.on('activate', () => { log('opened again'); showWindow(); });
 // A tool writing a draft is stopped with the app: it would otherwise keep working with nobody to read its answer. On Windows its
-// tree is stopped with taskkill (launch.ts stopTree) and its folder removed after, which Quit waits for: about 3.5 s at most (2 s
-// for taskkill, then 1.5 s for its output to close). Elsewhere its process group is killed at once, and nothing waits for it.
+// tree is stopped with taskkill (launch.ts stopRun) and its folder removed after, which Quit waits for: at most launch.ts
+// TREE_STOP_MS for taskkill, then CLOSE_GRACE_MS for its output to close. Elsewhere its process group is killed at once, and
+// nothing waits for it.
 // A plugin being updated by itself is let finish (a few seconds; fifteen at most): the tool's command runs on whatever the app
 // does, and what follows it here (turning a turned-off plugin off again, the note saved) must not be lost. No further step
 // starts, so the check ends with that one. A check that is only reading the marketplaces holds nothing up. The reading of what
@@ -1526,6 +1527,7 @@ app.whenReady().then(async () => {
     pickFolder: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Choose a marketplace folder', properties: ['openDirectory'] }); return choice.canceled ? undefined : choice.filePaths[0]; },
     openExternal: url => shell.openExternal(url),
     share: () => context(),
+    log,
     partsWait: () => partsWaiting,
     // A change to a plugin that worked (an update, an uninstall) settles what failed there by itself before.
     changed: (source, plugin, tools) => void pluginUpdates?.settled(source, plugin, tools).catch(error => logFailure('plugin updates', error)),

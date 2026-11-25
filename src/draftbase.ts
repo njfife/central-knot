@@ -11,7 +11,7 @@ import { findBinary } from './discovery.ts';
 import { harnessIds } from './harnesses.ts';
 import { baseView, instructionsView } from './instructions.ts';
 import { pathBeside } from './platform.ts';
-import { CLOSE_GRACE_MS, clearRunFolder, start, stopTree } from './launch.ts';
+import { CLOSE_GRACE_MS, clearRunFolder, start, stopRun } from './launch.ts';
 import { fileName, toolNames } from './words.ts';
 import type { ShareContext } from './share.ts';
 import type { BaseDraft, HarnessId, Snapshot } from './types.ts';
@@ -151,26 +151,19 @@ export function parseDraft(answer: string, tools: HarnessId[]): { base: string; 
 /** How a run ended; `leftRunning`: its stop on Windows was not known to end everything the tool started (launch.ts stopTree). */
 type Ran = { code: number | 'timeout' | 'missing' | 'cancelled'; output: string; said: string; leftRunning: boolean };
 
-/**
- * Runs the tool once with the prompt on its standard input. Stopping it (time up, or cancelled) stops what it started too; on
- * Windows through launch.ts stopTree, and the run ends once that has answered.
- */
+/** Runs the tool once with the prompt on its standard input. Stopping it (time up, or cancelled) stops what it started too (on
+ *  Windows, as launch.ts stopRun says). */
 function run(binary: string, args: string[], prompt: string, { cwd, signal, timeoutMs }: { cwd: string; signal?: AbortSignal; timeoutMs: number }): Promise<Ran> {
   return new Promise(done => {
     // Its own process group (not on Windows), so stopping it reaches helpers it started, such as MCP servers.
     const grouped = process.platform !== 'win32';
     const child = start(binary, args, { cwd, env: { ...process.env, PATH: pathBeside(binary) }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: grouped });
     let output = '', said = '', stoppedAs: 'timeout' | 'cancelled' | undefined, finished = false, leftRunning = false;
-    /** Windows: the stop under way (launch.ts stopTree), which every end below waits for. Never set elsewhere. */
-    let stopping: Promise<void> | undefined;
+    const windows = process.platform === 'win32' ? stopRun<Ran['code']>(child, (code, whole) => { leftRunning = !whole; finish(code); }) : undefined;
     const stop = (as: 'timeout' | 'cancelled') => {
       if (finished) return;
       stoppedAs ??= as;
-      // Windows: once the tree is stopped the run ends at `close`, or CLOSE_GRACE_MS later at most.
-      if (process.platform === 'win32') {
-        stopping ??= stopTree(child).then(whole => { leftRunning = !whole; setTimeout(() => finish(child.exitCode ?? 1), CLOSE_GRACE_MS); });
-        return;
-      }
+      if (windows) { windows.stop(); return; }
       try { if (grouped && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); } catch { child.kill('SIGKILL'); }
     };
     const timer = setTimeout(() => stop('timeout'), timeoutMs);
@@ -185,15 +178,14 @@ function run(binary: string, args: string[], prompt: string, { cwd, signal, time
       try { if (grouped && child.pid) process.kill(-child.pid, 'SIGKILL'); } catch { /* none left */ }
       done({ code: stoppedAs ?? code, output, said, leftRunning });
     };
-    // While a stop is under way (Windows), the run's end waits for it.
-    const settle = (code: Ran['code']) => { if (stopping) void stopping.then(() => finish(code)); else finish(code); };
+    const settle = windows?.settle ?? finish;
     child.stdout.setEncoding('utf8').on('data', (text: string) => { output += text; if (output.length > MOST_OUTPUT) stop('timeout'); });
     child.stderr.setEncoding('utf8').on('data', (text: string) => { said = (said + text).slice(-8000); });
     child.on('error', error => settle((error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 1));
     child.on('close', code => settle(code ?? 1));
     // A helper the tool left running can hold its output open, so its end is not waited for past the tool's own exit:
     // what the tool said has arrived by then, give or take a moment.
-    child.on('exit', code => { setTimeout(() => settle(code ?? 1), 1500); });
+    child.on('exit', code => { setTimeout(() => settle(code ?? 1), CLOSE_GRACE_MS); });
     // A tool that exits before reading its input (not signed in) closes the pipe: that is its failure to report, not ours.
     child.stdin.on('error', () => {});
     child.stdin.end(prompt);

@@ -1,7 +1,8 @@
 // Nothing is started once a stop is asked, on every platform: no taskkill for a child already seen to end (its process id may
 // be another program's by then: launch.ts stopTree), no tool for a draft stopped before its tool starts (draftbase.ts
 // writeDraft), and none for a sign-in check Quit stops while its folder is being made (mcpsigninrun.ts). What is started is
-// seen by wrapping child_process's spawn, which every one of them uses.
+// seen by wrapping child_process's spawn, which every one of them uses. And nothing more of a run's output is read once the run
+// has ended after a stop that could not end its tool (launch.ts stopRun, here with no taskkill to be had).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
@@ -9,7 +10,7 @@ import fsp from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { stopTree } from '../src/launch.ts';
+import { stopRun, stopTree } from '../src/launch.ts';
 import { draftPrompt, writeDraft, type DraftSources } from '../src/draftbase.ts';
 import { checkSignin, stopChecks } from '../src/mcpsigninrun.ts';
 import { standIn } from './standin.ts';
@@ -49,6 +50,27 @@ test('A child that never started has nothing to stop: no taskkill, and its stop 
   const before = started.length;
   assert.equal(await stopTree(child), true);
   assert.deepEqual(started.slice(before), []);
+});
+
+test('A run that ended after a stop that could not end its tool reads none of what the tool says after: it fills no memory', async () => {
+  // SystemRoot names a folder with no taskkill in it, so the stop is not whole and the tool talks on.
+  const shared = process.env.SystemRoot;
+  process.env.SystemRoot = join(tmpdir(), 'ck-nolaunch-no-system');
+  const tool = childProcess.spawn(process.execPath, ['-e', 'setInterval(() => process.stdout.write("x".repeat(1000)), 5); setTimeout(() => {}, 60_000);']);
+  try {
+    let read = 0;
+    tool.stdout.on('data', (chunk: Buffer) => { read += chunk.length; });
+    const ends: boolean[] = [];
+    stopRun(tool, (_code, whole) => ends.push(whole)).stop();
+    for (let tries = 0; tries < 250 && !ends.length; tries++) await new Promise(done => setTimeout(done, 20));
+    assert.deepEqual(ends, [false], 'the run ended, its stop not whole');
+    const atEnd = read;
+    await new Promise(done => setTimeout(done, 300));
+    assert.equal(read, atEnd, 'nothing more was read after the end');
+  } finally {
+    tool.kill('SIGKILL');
+    if (shared === undefined) delete process.env.SystemRoot; else process.env.SystemRoot = shared;
+  }
 });
 
 test('A draft stopped before its tool starts starts none, and leaves no folder', async () => {

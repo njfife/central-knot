@@ -5,7 +5,7 @@ import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { pathBeside } from './platform.ts';
-import { CLOSE_GRACE_MS, dropVariable, homeVariables, start, stopTree } from './launch.ts';
+import { NOT_ALL_STOPPED, dropVariable, homeVariables, start, stopRun } from './launch.ts';
 import { probeVersion } from './discovery.ts';
 import { configRoot, harnesses } from './harnesses.ts';
 import { CODEX_MANIFEST, MANIFEST, codexManifest, inside, installedContents, parseObject, pluginContents, pluginManifest, readManifest, remoteOf, skillName, skillNamesIn, sourceOf, type ReadAs } from './catalogdetail.ts';
@@ -46,6 +46,8 @@ export interface PluginContext {
   reads?: Map<string, Promise<unknown>>;
   /** Access checks made in one request, by URL, so tools installing from one Git marketplace check it once (MKT-05). */
   checked?: Map<string, Promise<AccessResult>>;
+  /** The app's log: a tool's plugin command whose stop was not whole is said there (native). */
+  log?: (line: string) => void;
 }
 
 /** A read done once per context when the context carries a cache. */
@@ -101,21 +103,17 @@ export type RunResult = { code: number | 'timeout' | 'missing'; output: string; 
 /**
  * Runs a command (started as launch.ts start says: on Windows a .cmd through cmd.exe), stopped at its timeout or its `signal`.
  * `group` (git's runs and mcpsigninrun.ts's, off Windows): it runs in a process group of its own, and stopping it stops the
- * whole group, the helpers it started (git's remote-http) with it. On Windows any stop is launch.ts stopTree's, the command
- * with everything it started, and the run ends once that has answered.
+ * whole group, the helpers it started (git's remote-http) with it. On Windows the stop and the end are launch.ts stopRun's:
+ * the command is stopped with everything it started, and the run ends after.
  */
 export function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number; group?: boolean } & RunOptions): Promise<RunResult> {
   const maxBytes = options.maxBytes ?? 4 * 1024 * 1024, group = !!options.group && process.platform !== 'win32';
   return new Promise(done => {
     const out: Buffer[] = [], err: Buffer[] = [];
     let stopped = false, cut = false, ended = false, leftRunning = false;
-    /** Windows: the stop under way (launch.ts stopTree), which the run's end waits for. Never set elsewhere. */
-    let stopping: Promise<void> | undefined;
     const child = start(file, args, { env: options.env, cwd: options.cwd, windowsHide: true, detached: group });
-    const kill = process.platform === 'win32'
-      // Once the tree is stopped the run ends at `close`, or CLOSE_GRACE_MS later at most.
-      ? () => { stopping ??= stopTree(child).then(whole => { leftRunning = !whole; setTimeout(() => end(child.exitCode ?? 1), CLOSE_GRACE_MS); }); }
-      : () => { try { if (group && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); } catch { /* already ended */ } };
+    const windows = process.platform === 'win32' ? stopRun<RunResult['code']>(child, (code, whole) => { leftRunning = !whole; end(code); }) : undefined;
+    const kill = windows?.stop ?? (() => { try { if (group && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); } catch { /* already ended */ } });
     const stop = () => { stopped = true; kill(); };
     // Past maxBytes on either stream it ran, it just said too much: it is stopped, and what it said up to maxBytes is kept.
     const take = (chunks: Buffer[]) => {
@@ -139,8 +137,7 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
       if (cut) done({ code: 1, output: `${output.slice(-2000)}\n(output cut: more than ${maxBytes / 1024 / 1024} MB)`, stdout, ...left });
       else done({ code: stopped && code !== 0 ? 'timeout' : code, output, stdout, ...left });
     };
-    // While a stop is under way (Windows), the run's end waits for it.
-    const settle = (code: RunResult['code']) => { if (stopping) void stopping.then(() => end(code)); else end(code); };
+    const settle = windows?.settle ?? end;
     child.stdout.on('data', take(out));
     child.stderr.on('data', take(err));
     child.on('error', error => settle(errorCode(error) === 'ENOENT' ? 'missing' : 1));
@@ -1185,6 +1182,7 @@ async function native(context: PluginContext, tool: PluginTool, args: string[]):
   else if (tool === 'codex-cli') env.CODEX_HOME = join(context.home, harnesses[tool].defaultConfig);
   else if (variable) dropVariable(env, variable);
   const result = await run(binary, args, { env, cwd: context.home, timeoutMs: context.timeoutMs ?? 180_000 });
+  if (result.leftRunning) context.log?.(`\`${command}\`: ${NOT_ALL_STOPPED}`);
   const after = await Promise.all(files.map(readOrNull));
   const changed = files.map((path, index) => ({ path, before: before[index], after: after[index] })).filter(entry => entry.before !== entry.after);
   // The record of what changed is kept beside the result, not instead of it: if it can't be written (a full disk), what

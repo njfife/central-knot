@@ -5,10 +5,10 @@
 // (through npm's own .cmd every argument does; see launchCommand for what another .cmd takes).
 // Its callers (plugins.ts run, draftbase.ts run, discovery.ts askVersion) keep their own output, limits and timer. On macOS
 // and Linux how a program and what it started are stopped is theirs (a process group of its own). On Windows the two runs
-// stop a program with everything it started through stopTree, and end only once it has answered: plugins.ts run (git's runs
-// and the MCP sign-in check go through it) and draftbase.ts run; askVersion's probe is still ended by execFile's timeout
-// alone. After a run, the folder it worked in is removed by clearRunFolder, which never throws. Where a tool's command is
-// found is platform.ts's. The app's other programs are started where they are used, as asked: git and tar are .exe files on
+// stop a program and end as stopRun says, with everything it started stopped through stopTree: plugins.ts run (git's runs,
+// the plugin commands and the MCP sign-in check go through it) and draftbase.ts run; askVersion's probe is still ended by
+// execFile's timeout alone. After a draft's or a sign-in check's run, the folder it worked in is removed by clearRunFolder,
+// which never throws (a plugin command runs in the home itself). Where a tool's command is found is platform.ts's. The app's other programs are started where they are used, as asked: git and tar are .exe files on
 // Windows, and the login shell, D-Bus, lsappinfo and codesign run only on macOS or Linux.
 import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
@@ -76,19 +76,21 @@ export function start(file: string, args: string[], options: SpawnOptionsWithout
 
 /** How long taskkill is given to end a tree: it is ended itself then, and the tree is not known to be gone. */
 const TREE_STOP_MS = 2000;
-/** How long a run stopped on Windows waits for its output to close once stopTree has answered: a helper outside the tree can hold it open. */
+/** How long a run waits for its output to close once its tool has ended (draftbase.ts run) or its stop has answered (stopRun): a helper can hold it open. */
 export const CLOSE_GRACE_MS = 1500;
+/** What the app's log says of a run whose stop was not known to end everything it started (clearRunFolder, plugins.ts native). */
+export const NOT_ALL_STOPPED = 'not everything it started could be stopped';
 /** Each child's one stop (stopTree), kept by the child itself: a later child may have the same process id, never the same object. */
 const treeStops = new WeakMap<ChildProcess, Promise<boolean>>();
 
 /**
  * Windows: stops `child` and everything started from it, and what those started, with the system's own taskkill (/PID <pid>
  * /T /F, by its full path under SystemRoot, read at each stop), with no window and its output not read, given two seconds.
- * True only where taskkill ended 0, so the tree is gone; false for anything else: another code, its two seconds passed (it
- * is ended then), it could not be started. Its words and its other codes are not read: they are in the system's language,
- * and one code is given for more than one cause. A child already seen to end gets no taskkill (its process id may be
- * another program's by then): false. One that never started has nothing to stop: true. Once at most for a child: a second
- * stop answers as the first. Not reached: a helper whose parent had ended before the stop, as no tree leads to it.
+ * True where taskkill ended 0 (the tree is gone), and for a child that never started (nothing to stop); false for anything
+ * else: another code, its two seconds passed (it is ended then), it could not be started, and a child already seen to end,
+ * which gets no taskkill (its process id may be another program's by then). Its words and its other codes are not read:
+ * they are in the system's language, and one code is given for more than one cause. Once at most for a child: a second stop
+ * answers as the first. Not reached: a helper whose parent had ended before the stop, as no tree leads to it.
  */
 export function stopTree(child: ChildProcess): Promise<boolean> {
   const asked = treeStops.get(child);
@@ -110,13 +112,29 @@ export function stopTree(child: ChildProcess): Promise<boolean> {
 }
 
 /**
+ * Windows: how plugins.ts run and draftbase.ts run stop a command and end. `stop` asks stopTree, once. `settle(code)` (from
+ * `close` or `error`) ends the run at once while no stop was asked, else once the stop has answered; that answer also ends it
+ * CLOSE_GRACE_MS later at most, with the child's exit code. `end` gets the code and whether the stop was whole (true with
+ * none asked); it may be called again and keeps the first. After it, the child's output is let go: a tool a failed stop left
+ * running fills no memory.
+ */
+export function stopRun<Code>(child: ChildProcessWithoutNullStreams, end: (code: Code | number, whole: boolean) => void): { stop: () => void; settle: (code: Code) => void } {
+  let stopping: Promise<boolean> | undefined;
+  const ended = (code: Code | number, whole: boolean) => { end(code, whole); child.stdout.destroy(); child.stderr.destroy(); };
+  return {
+    stop: () => { stopping ??= stopTree(child).then(whole => { setTimeout(() => ended(child.exitCode ?? 1, whole), CLOSE_GRACE_MS); return whole; }); },
+    settle: code => { if (stopping) void stopping.then(whole => ended(code, whole)); else ended(code, true); },
+  };
+}
+
+/**
  * Removes the folder a tool's run worked in, once the run has ended, and never throws. Where the folder can't be removed (on
  * Windows something the run started still holds it), or the run's stop was not known to end everything it started
  * (`leftRunning`), `log` gets one line naming the run (`who`) and the folder.
  */
 export async function clearRunFolder(folder: string, who: string, leftRunning: boolean | undefined, log?: (line: string) => void): Promise<void> {
   const failed = await rm(folder, { recursive: true, force: true }).then(() => '', (error: NodeJS.ErrnoException) => error.code ?? String(error));
-  const said = [leftRunning ? 'not everything it started could be stopped' : '', failed ? `its folder ${folder} was left behind (${failed})` : ''].filter(Boolean);
+  const said = [leftRunning ? NOT_ALL_STOPPED : '', failed ? `its folder ${folder} was left behind (${failed})` : ''].filter(Boolean);
   if (said.length) log?.(`${who}: ${said.join('; ')}`);
 }
 

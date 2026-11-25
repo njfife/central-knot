@@ -1,6 +1,6 @@
 // On Windows a tool that is stopped is stopped with everything it started, and its run ends only after that, so that the
-// folder it worked in can go: launch.ts stopTree, from plugins.ts run (git's runs and the MCP sign-in check go through it)
-// and draftbase.ts run. Windows only: on macOS and Linux a tool's process group is stopped instead, as tests/draftbase.test.ts
+// folder it worked in can go: launch.ts stopRun and stopTree, from plugins.ts run (git's runs, the plugin commands and the MCP
+// sign-in check go through it) and draftbase.ts run; what a stop could not end is said in the app's log. Windows only: on macOS and Linux a tool's process group is stopped instead, as tests/draftbase.test.ts
 // and tests/mcpsignin.test.ts show. Every stand-in here ends by itself after 60 s, and each test ends what it left by its
 // process ids.
 import { test } from 'node:test';
@@ -11,9 +11,11 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { start, stopTree } from '../src/launch.ts';
-import { run } from '../src/plugins.ts';
+import { addMarketplace, run, type PluginContext } from '../src/plugins.ts';
 import { draftPrompt, writeDraft, type DraftSources } from '../src/draftbase.ts';
 import { checkSignin } from '../src/mcpsigninrun.ts';
+import { readAnswer } from '../src/mcpsignin.ts';
+import type { Catalog } from '../src/types.ts';
 import { standIn } from './standin.ts';
 
 const skip = process.platform === 'win32' ? false
@@ -210,6 +212,66 @@ test('A taskkill that fails leaves the tree as it was: the draft still ends as t
     assert.match(logged[0], /^draft by Pi: not everything it started could be stopped; its folder .+central-knot-draft-.+ was left behind \(E[A-Z]+\)$/);
   } finally {
     for (const [key, value] of Object.entries(shared)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    const cmd = Number(await readFile(cmdPid, 'utf8').catch(() => ''));
+    if (cmd) { try { process.kill(cmd); } catch { /* already ended */ } }
+    await box.end();
+  }
+});
+
+test('A sign-in check whose tool answered and ended by itself, leaving a helper that holds its output, gives the tool’s answer at its limit; the log says what was left running', {
+  skip, timeout: 20_000,
+}, async () => {
+  const box = await sandbox();
+  const before = process.env.CK_TEST_HOME_ONLY, helperPid = join(box.base, 'helper.pid'), orphan = join(box.base, 'orphan.cjs');
+  const listed = join(import.meta.dirname, 'mcpsignin', 'claude-list.stdout'), names = ['plain', 'oauth'];
+  process.env.CK_TEST_HOME_ONLY = 'claude';
+  let left = '';
+  try {
+    await writeFile(orphan, ORPHAN);
+    // The tool starts the helper's parent, which ends at once, then prints its answer and ends with 0.
+    await standIn(join(box.base, 'tools/.local/bin/claude'), '#!/bin/sh\n',
+      `require("child_process").spawn(process.execPath, [${JSON.stringify(orphan)}, ${JSON.stringify(helperPid)}], { stdio: "inherit" }); process.stdout.write(require("fs").readFileSync(${JSON.stringify(listed)}));`);
+    const logged: string[] = [], kills = taskkills.length;
+    const answer = await checkSignin({ home: join(box.base, 'home'), actual: false, toolsHome: join(box.base, 'tools'), searchPath: '' }, 'claude-cli', names, 1000, line => logged.push(line));
+    const said = await readFile(listed, 'utf8');
+    assert.deepEqual(answer, readAnswer('claude-cli', said, said.replace(/\r/g, '').trim(), names), 'the tool’s own answer');
+    assert.equal(taskkills.length, kills, 'no taskkill for a tool already ended');
+    assert.equal(logged.length, 1, logged.join('\n'));
+    assert.match(logged[0], /^sign-in check in Claude Code: not everything it started could be stopped; its folder .+ was left behind \(E[A-Z]+\)$/);
+    left = logged[0].match(/its folder (.+) was left behind/)?.[1] ?? '';
+  } finally {
+    if (before === undefined) delete process.env.CK_TEST_HOME_ONLY; else process.env.CK_TEST_HOME_ONLY = before;
+    const helper = Number(await readFile(helperPid, 'utf8').catch(() => ''));
+    if (helper) { try { process.kill(helper); } catch { /* already ended */ } }
+    if (left) await rm(left, { recursive: true, force: true, maxRetries: 10 });
+    await box.end();
+  }
+});
+
+test('A plugin command whose stop is not whole is said in the app’s log, beside the failure the person reads', { skip, timeout: 30_000 }, async () => {
+  const box = await sandbox();
+  const cmdPid = join(box.base, 'cmd.pid'), home = join(box.base, 'home'), market = join(box.base, 'market'), shared = process.env.SystemRoot;
+  await mkdir(home);
+  await mkdir(market);
+  try {
+    // The system's folder as this test gives it: its taskkill is a copy of node, which finds no script named /PID and ends 1.
+    const fake = join(box.base, 'Windows');
+    await mkdir(join(fake, 'System32'), { recursive: true });
+    await copyFile(process.execPath, join(fake, 'System32', 'taskkill.exe'));
+    const claude = await box.tool('claude', `require("fs").writeFileSync(${JSON.stringify(cmdPid)}, String(process.ppid));`);
+    const logged: string[] = [];
+    const context: PluginContext = { home, dataDir: join(box.base, 'data'), binaries: { 'claude-cli': claude }, timeoutMs: 4000, log: line => logged.push(line) };
+    const catalog: Catalog = { name: 'tools', source: market, kind: 'folder', fetchedAt: '', plugins: [] };
+    const adding = addMarketplace(context, catalog, 'claude-cli');
+    await box.up();
+    process.env.SystemRoot = fake;
+    const added = await adding;
+    process.env.SystemRoot = shared;
+    assert.equal(added.outcome, 'failed');
+    assert.match(added.runs[0]?.output ?? '', /did not finish in time and was stopped/);
+    assert.deepEqual(logged, [`\`claude plugin marketplace add ${market}\`: not everything it started could be stopped`]);
+  } finally {
+    if (shared === undefined) delete process.env.SystemRoot; else process.env.SystemRoot = shared;
     const cmd = Number(await readFile(cmdPid, 'utf8').catch(() => ''));
     if (cmd) { try { process.kill(cmd); } catch { /* already ended */ } }
     await box.end();
