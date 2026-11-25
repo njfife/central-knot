@@ -177,7 +177,7 @@ export const state = {
   sessions: pageData<DayRows | PeriodRows>(),
   /** Which period the Sessions page reads: Today at launch, kept while the window is open, across pages and homes (7 days only where kept). */
   sessionsDay: 'today' as SessionsDay,
-  /** Inline refusal or save failure from the Sessions page's Start keeping button; cleared when keeping turns on or home changes. */
+  /** Inline refusal or save failure from the Sessions page's keeping control; cleared when keeping changes cleanly or home changes. */
   keepProblem: undefined as string | undefined,
 };
 
@@ -1804,14 +1804,15 @@ function readHistoryDays() {
   }, () => undefined);
 }
 readHistoryDays();
-/** Applies a keeper state to the open home unless a newer `seq` has already landed; forgets stale refusals once on. */
+/** Applies a keeper state to the open home unless a newer `seq` has already landed; forgets stale refusals on clean change. */
 function applySessionCosts(next: SessionCostsView): void {
   if (!state.home || next.home !== state.home.home) return;
   if ((state.home.sessionCosts?.seq ?? -1) > (next.seq ?? 0)) return;
+  const changed = state.home.sessionCosts?.on !== next.on;
   state.home.sessionCosts = next;
-  if (next.on) state.keepProblem = undefined;
+  if (next.on || (changed && !next.refused)) state.keepProblem = undefined;
 }
-/** Turns session-cost keeping on or off for the open home, updating its view and announcing once when turned on. */
+/** Turns session-cost keeping on or off for the open home, updating its view and announcing the change. */
 export async function switchSessionCosts(on: boolean): Promise<string | undefined> {
   const home = state.home?.home;
   if (!home) return undefined;
@@ -1819,7 +1820,7 @@ export async function switchSessionCosts(on: boolean): Promise<string | undefine
   if (state.home?.home !== home) return undefined;
   applySessionCosts(view);
   if (view.refused) return view.refused;
-  announce(on ? 'Keeping session costs for this home.' : 'Stopped keeping session costs for this home.', !on);
+  announce(on ? 'Keeping session costs for this home.' : 'Stopped keeping session costs for this home.');
   return undefined;
 }
 api().onSessionCostsChanged(next => {
