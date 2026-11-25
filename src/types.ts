@@ -894,8 +894,8 @@ export type HookSourceOwner =
   | { from: 'own'; tool: HarnessId }
   | { from: 'installed'; tool: HarnessId; plugin: string; marketName: string }
   | { from: 'marketplace'; marketName: string; plugin: string };
-/** Which hook the page asks main to read (hook:source); main re-finds it on disk from that owner's files alone. */
-export type HookSourceRef = { declaredIn: string; event: string; at: number; command: string } & HookSourceOwner;
+/** Which hook the page asks main to read or run (hook:source / hook:run); main re-finds it on disk and checks its declaration fingerprint. */
+export type HookSourceRef = { declaredIn: string; event: string; at: number; command: string; fingerprint: string } & HookSourceOwner;
 /** One hook's declaring entry and script (hooksource.ts readHookSource), or why it couldn't be read. */
 export interface HookSource {
   problem?: string; file?: string; entry?: string;

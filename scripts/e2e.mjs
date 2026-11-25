@@ -12610,6 +12610,8 @@ async function hookRunFlow() {
   putScript('bin/two-lines.sh', `#!/bin/sh\necho ran >> ${JSON.stringify(marker)}\nprintf 'First line from hook\\nSecond line from hook\\n'\n`);
   putScript('bin/json-extra.sh', `#!/bin/sh\necho 'debug trace on stderr' >&2\nprintf '{"hookSpecificOutput":{"additionalContext":"Context from JSON hook"},"extra":"raw-field"}\\n'\n`);
   putScript('bin/empty.sh', '#!/bin/sh\nexit 0\n');
+  putScript('bin/blank.sh', '#!/bin/sh\nprintf "\\n\\n"\n');
+  putScript('bin/long-out.sh', `#!/bin/sh\nprintf 'LONG_UNBROKEN_LINE_WITHOUT_SPACES_0123456789_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789_END\\n'\ni=1\nwhile [ "$i" -le 30 ]; do printf 'Output line %02d from hook with context details\\n' "$i"; i=$((i + 1)); done\n`);
   putScript('bin/exit2-start.sh', '#!/bin/sh\necho "Start hook blocked cleanly" >&2\nexit 2\n');
   putScript('bin/exit2-prompt.sh', '#!/bin/sh\necho "Prompt rejected by guard" >&2\nexit 2\n');
   putScript('bin/fail7.sh', '#!/bin/sh\necho "Something failed" >&2\necho "partial stdout"\nexit 7\n');
@@ -12628,6 +12630,8 @@ async function hookRunFlow() {
           { type: 'command', command: '~/bin/two-lines.sh' },
           { type: 'command', command: '~/bin/json-extra.sh' },
           { type: 'command', command: '~/bin/empty.sh' },
+          { type: 'command', command: '~/bin/blank.sh' },
+          { type: 'command', command: '~/bin/long-out.sh' },
           { type: 'command', command: '~/bin/exit2-start.sh' },
           { type: 'command', command: '~/bin/fail7.sh' },
           { type: 'command', command: '~/bin/no-ctx.sh' },
@@ -12707,7 +12711,7 @@ async function hookRunFlow() {
   // Check 3: standing line on runnable strips, none on non-runnable; Copilot prompt-only note; Codex T2.28 note; T1.23 once & <= 30 words.
   same('standing warning is on Claude Code and Codex strips and absent on Copilot CLI prompt-only strip',
     [await a.text('#session-claude-cli .session-run-warn'), await a.text('#session-codex-cli .session-run-warn'), await a.text('#session-copilot-cli .session-run-warn')],
-    ['Runs commands. May change your files.', 'Runs commands. May change your files.', null]);
+    ['Run it runs the command for real. It may change your files.', 'Run it runs the command for real. It may change your files.', null]);
   same('Codex runnable strip and Copilot CLI prompt-only strip show T2.28 lines in place of old notes',
     [await a.text('#session-codex-cli .session-note'), await a.text('#session-copilot-cli .session-note'), await a.run(`document.querySelectorAll('#session-copilot-cli button[data-hook-run]').length`)],
     ['Codex: Run it runs a hook even if it isn’t trusted in /hooks.', 'Copilot CLI ignores what prompt hooks print.', 0]);
@@ -12718,7 +12722,7 @@ async function hookRunFlow() {
   })()`);
   check('T1.23 info mark appears once on the page with exact wording and <= 30 words',
     helpInfo.count === 1 && helpInfo.id === 'session-hooks-info' && helpInfo.words <= 30
-    && helpInfo.card === 'Command hooks that run when a session starts or when you send a prompt; URL, MCP, project and organisation hooks aren’t listed. Run it runs in your home folder.', helpInfo);
+    && helpInfo.card === 'Session-start and prompt command hooks; URL, MCP, project and organisation hooks aren’t listed. Run it runs in your home folder, or in the folder the hook names.', helpInfo);
   const pluginRow = await rowOf('session-claude-cli', 'echo plugin-hook');
   same('installed plugin hook row on Instructions has View source alone and no Run it', [!!pluginRow?.srcId, pluginRow?.runId], [true, null]);
 
@@ -12740,8 +12744,8 @@ async function hookRunFlow() {
   await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(twoIds.runId)}); return b && b.textContent === 'Run it' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
   const addsText = await a.run(`document.getElementById(${JSON.stringify(twoIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`);
   const scrollAfter = await a.run(`document.getElementById('instructions-scroll')?.scrollTop ?? 0`);
-  check('Enter on Run it shows Would add with both lines and Run again, and page stays still when row is already in view',
-    /^Would add \(run in ~, .+, \d+\.\d s\)/.test(addsText) && addsText.includes('Run again')
+  check('Enter on Run it shows Would add with quiet meta, both lines, no Run again, and page stays still when row is already in view',
+    /^Would add run in ~, /.test(addsText) && !addsText.includes('Run again') && !/\d+\.\d s/.test(addsText)
     && addsText.includes('First line from hook\nSecond line from hook') && Math.abs(scrollAfter - scrollBefore) <= 1 && markerCount() === 1,
     { addsText, scrollBefore, scrollAfter, count: markerCount() });
   await pictures('result-adds', '#session-claude-cli', bothSizes);
@@ -12805,25 +12809,45 @@ async function hookRunFlow() {
     await pictures('result-adds-folds', `#session-claude-cli .session-hook:has(#${jsonIds.runId})`);
   }
 
-  // Check 2: empty, exit 2 (start & prompt), failed (exit 7), catch-all (json-no-context), timeout, double click + Running… + Stop, missing.
+  // Check 2: empty, blank lines, long output at 860, exit 2 (start & prompt), failed (exit 7), catch-all (json-no-context), timeout, double click + Running… + Stop, missing.
   const emptyRes = await runAndWait('session-claude-cli', 'empty.sh');
-  check('empty hook shows T4.23', /Would add nothing: it printed nothing \(run in ~, .+, \d+\.\d s\)/.test(emptyRes), emptyRes);
-  await pictures('result-empty', '#session-claude-cli .session-hook:has(.hook-run)');
+  check('empty hook says it printed nothing with quiet meta', /^Would add nothing: it printed nothing\. run in ~, /.test(emptyRes), emptyRes);
+  const blankRes = await runAndWait('session-claude-cli', 'blank.sh');
+  check('blank-lines hook says it printed only blank lines', /^Would add nothing: it printed only blank lines\. run in ~, /.test(blankRes), blankRes);
+  await pictures('result-empty', `#session-claude-cli .session-hook:has(#${(await rowOf('session-claude-cli', 'empty.sh')).runId})`);
+
+  const longIds = await rowOf('session-claude-cli', 'long-out.sh');
+  const longRes = await runAndWait('session-claude-cli', 'long-out.sh');
+  check('long output hook renders capped scrollable box without horizontal page overflow at 860',
+    longRes.includes('LONG_UNBROKEN_LINE_WITHOUT_SPACES') && longRes.includes('Output line 30'), longRes);
+  await sizeTo(a, 860, 560);
+  if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+  await a.run(`document.getElementById(${JSON.stringify(longIds.runId)})?.closest('.session-hook')?.scrollIntoView({ block: 'start' })`);
+  await a.settle();
+  same('long output box caps height and scrolls itself without overflowing 860 page width',
+    await a.run(`(() => { const sc = document.getElementById('instructions-scroll');
+      const pre = document.getElementById(${JSON.stringify(longIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run pre');
+      return [sc.scrollWidth <= sc.clientWidth + 1, pre.getBoundingClientRect().height <= 322, pre.scrollHeight > pre.clientHeight]; })()`),
+    [true, true, true]);
+  await pictures('long-output', `#session-claude-cli .session-hook:has(#${longIds.runId})`, [[860, 560, false]]);
 
   const exit2StartRes = await runAndWait('session-claude-cli', 'exit2-start.sh');
-  check('Claude Code start exit 2 shows T4.25 and stderr', /Exited 2 \(run in ~, .+\): Claude Code would show its error text only, and add nothing\./.test(exit2StartRes) && exit2StartRes.includes('Start hook blocked cleanly'), exit2StartRes);
+  check('Claude Code start exit 2 shows plain wording and stderr',
+    /^Exited 2: Claude Code would show you this error and add nothing\. run in ~, /.test(exit2StartRes) && exit2StartRes.includes('Start hook blocked cleanly'), exit2StartRes);
   const exit2PromptRes = await runAndWait('session-claude-cli', 'exit2-prompt.sh');
-  check('Claude Code prompt exit 2 shows T4.25 with empty prompt and stderr', /Exited 2 \(run in ~ with an empty prompt, .+\): Claude Code would block the prompt with its error text\./.test(exit2PromptRes) && exit2PromptRes.includes('Prompt rejected by guard'), exit2PromptRes);
+  check('Claude Code prompt exit 2 shows plain wording with empty prompt and stderr',
+    /^Exited 2: Claude Code would block the prompt and show this error\. run in ~ with an empty prompt, /.test(exit2PromptRes) && exit2PromptRes.includes('Prompt rejected by guard'), exit2PromptRes);
   await pictures('result-exit2', `#session-claude-cli .session-hook:has(#${(await rowOf('session-claude-cli', 'exit2-start.sh')).runId})`);
 
   const fail7Res = await runAndWait('session-claude-cli', 'fail7.sh');
-  check('non-zero exit shows T4.26 with stderr and stdout verbatim', /Exited 7 \(run in ~, .+\): it would add nothing\./.test(fail7Res) && fail7Res.includes('Something failed') && fail7Res.includes('partial stdout'), fail7Res);
+  check('non-zero exit shows stderr directly and stdout under Show all it printed fold',
+    /^Exited 7: it would add nothing\. run in ~, /.test(fail7Res) && fail7Res.includes('Something failed') && fail7Res.includes('Show all it printed') && !fail7Res.includes('Standard output'), fail7Res);
   const noCtxRes = await runAndWait('session-claude-cli', 'no-ctx.sh');
-  check('JSON without additionalContext shows catch-all sentence', /Would add nothing: its JSON has no additionalContext \(run in ~, .+, \d+\.\d s\)/.test(noCtxRes), noCtxRes);
+  check('JSON without additionalContext shows catch-all sentence with quiet meta', /^Would add nothing: its JSON has no additionalContext\. run in ~, /.test(noCtxRes), noCtxRes);
   await pictures('result-failed-and-not-added', `#session-claude-cli .session-hook:has(#${(await rowOf('session-claude-cli', 'fail7.sh')).runId})`);
 
   const timeoutRes = await runAndWait('session-claude-cli', 'slow-limit.sh', 12000);
-  check('timeout shows T4.27 limit sentence', /Stopped after 1 s, its time limit: it would add nothing\./.test(timeoutRes), timeoutRes);
+  check('timeout shows limit sentence with quiet meta', /^Stopped after 1 s, its time limit: it would add nothing\. run in ~, /.test(timeoutRes), timeoutRes);
 
   // Double click on slow-stop.sh starts one run and stops none; picture Running… + Stop at 860 & 1316, then click Stop!
   const stopRowIds = await rowOf('session-claude-cli', 'slow-stop.sh');
@@ -12874,17 +12898,18 @@ async function hookRunFlow() {
   await a.click(`#session-claude-cli .session-hook:has(#${stopRowIds.runId}) button[data-hook-stop]`);
   await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(stopRowIds.runId)}); return b && b.textContent === 'Run it' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
   const stoppedRes = await a.run(`document.getElementById(${JSON.stringify(stopRowIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`);
-  check('Stop click shows T4.27 Stopped caveat', stoppedRes.includes('Stopped. What it changed stays; a program it left running may too.'), stoppedRes);
+  check('Stop click shows Stopped caveat with quiet meta',
+    /^Stopped\. What it changed stays; a program it started may still be running\. run in ~, /.test(stoppedRes), stoppedRes);
 
   const missingRes = await runAndWait('session-claude-cli', '/nonexistent-ck-hook-bin-xyz');
-  check('missing executable shows T4.27 Couldn’t start without Run again',
-    missingRes.includes('Couldn’t start: /nonexistent-ck-hook-bin-xyz not found.') && !missingRes.includes('Run again'), missingRes);
+  check('missing executable shows Couldn’t start with quiet meta and no Run again',
+    /^Couldn’t start: \/nonexistent-ck-hook-bin-xyz not found\. run in ~, /.test(missingRes) && !missingRes.includes('Run again'), missingRes);
   await pictures('result-timeout-stopped-missing', `#session-claude-cli .session-hook:has(#${(await rowOf('session-claude-cli', 'slow-limit.sh')).runId})`);
 
   // Check 2: Codex refusal (hooks turned off in config.toml).
   const codexRefused = await runAndWait('session-codex-cli', 'codex-hook.sh');
-  check('Codex hooks-off refusal shows main’s words without Run again',
-    codexRefused.includes('Hooks are turned off in Codex’s settings ([features] codex_hooks = false).') && !codexRefused.includes('Run again'), codexRefused);
+  check('Codex hooks-off refusal says Not run: + main’s words',
+    codexRefused.includes('Not run: hooks are turned off in Codex’s settings ([features] codex_hooks = false).') && !codexRefused.includes('Run again'), codexRefused);
   await pictures('result-codex-refused', '#session-codex-cli');
 
   // Check 7: duplicate command in two places gets two distinct ids; clicking low row brings result into view!
@@ -12909,22 +12934,39 @@ async function hookRunFlow() {
   await steady();
   await waitFor(`!!document.querySelector('#session-copilot-cli button[data-hook-run]')`);
   const copRes = await runAndWait('session-copilot-cli', 'copilot-plain.sh');
-  check('Copilot CLI plain stdout shows T4.24 ignored sentence with Show all it printed fold',
-    /Copilot CLI would ignore this: no top-level additionalContext \(run in ~, .+, \d+\.\d s\)\./.test(copRes) && copRes.includes('Show all it printed'), copRes);
+  check('Copilot CLI plain stdout shows ignored sentence with quiet meta and Show all it printed fold',
+    /^Copilot CLI would ignore this: no top-level additionalContext\. run in ~, /.test(copRes) && copRes.includes('Show all it printed'), copRes);
   await pictures('result-copilot-ignored', '#session-copilot-cli');
 
-  // Check 6: late results dropped after leaving page (+ already running on quick return), after Refresh, and after home switch.
+  // Off-screen row does not jump the scroll container when its result arrives (item 4).
   const lateIds = await rowOf('session-claude-cli', 'slow-stop.sh');
+  await sizeTo(a, 1316, 820);
+  await a.run(`document.getElementById(${JSON.stringify(lateIds.runId)})?.scrollIntoView({ block: 'center' })`);
+  await a.click(byId(lateIds.runId));
+  await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'Running…'`);
+  await a.run(`document.querySelector('#session-codex-cli')?.scrollIntoView({ block: 'end' })`);
+  await a.settle();
+  const awayTop = await a.run(`document.querySelector('#session-codex-cli')?.getBoundingClientRect().top ?? 0`);
+  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(lateIds.runId)}); return b && b.textContent === 'Run it' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`, 8000);
+  const awayAfter = await a.run(`(() => { const sc = document.getElementById('instructions-scroll').getBoundingClientRect();
+    const row = document.getElementById(${JSON.stringify(lateIds.runId)}).closest('.session-hook').getBoundingClientRect();
+    return { codexTop: document.querySelector('#session-codex-cli')?.getBoundingClientRect().top ?? 0, rowOffTop: row.bottom <= sc.top + 1 }; })()`);
+  check('scrolled-away row does not jump the visible card when its result arrives',
+    Math.abs(awayAfter.codexTop - awayTop) <= 1 && awayAfter.rowOffTop, { awayTop, awayAfter });
+  await fullSize(a);
+
+  // Check 6: late results dropped after leaving page (+ already running on quick return), after Refresh, and after home switch.
   await a.click(byId(lateIds.runId));
   await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'Running…'`);
   await a.click('#nav-overview');
   await a.click('#nav-instructions');
   await waitFor(`!!document.getElementById(${JSON.stringify(lateIds.runId)})`);
   const alreadyMsg = await runAndWait('session-claude-cli', 'slow-stop.sh');
-  check('returning while hook still runs in main shows main’s refusal on Run it', alreadyMsg.includes('This hook is already running.'), alreadyMsg);
+  check('returning while hook still runs in main shows Not run: + already running on Run it',
+    alreadyMsg.includes('Not run: this hook is already running.'), alreadyMsg);
   await wait(3300);
   check('late result from before leaving page did not overwrite the returned page',
-    (await a.run(`document.getElementById(${JSON.stringify(lateIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`)).includes('This hook is already running.'));
+    (await a.run(`document.getElementById(${JSON.stringify(lateIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`)).includes('Not run: this hook is already running.'));
 
   // Late result after Refresh is dropped.
   await a.click(byId(lateIds.runId));
@@ -12945,7 +12987,7 @@ async function hookRunFlow() {
   same('Practice copy has no Run it and drops late result from previous home',
     [await a.run(`document.querySelectorAll('button[data-hook-run]').length`), await a.run(`document.querySelectorAll('.hook-run').length`)], [0, 0]);
 
-  // Switch back to actual home: Run again after hook edited on disk shows refusal!
+  // Switch back to actual home: clicking Run it after hook edited on disk shows Not run: refusal!
   await a.click('#home-actual');
   await steady();
   await a.click('#nav-instructions');
@@ -12953,10 +12995,11 @@ async function hookRunFlow() {
   await runAndWait('session-claude-cli', 'two-lines.sh');
   writeFileSync(claudeSettings, initialClaudeJson.replace('~/bin/two-lines.sh', '~/bin/edited-on-disk.sh'));
   const staleBtnId = (await rowOf('session-claude-cli', 'two-lines.sh')).runId;
-  await a.click(`#session-claude-cli .session-hook:has(#${staleBtnId}) button[data-hook-again]`);
+  await a.click(byId(staleBtnId));
   await waitFor(`document.getElementById(${JSON.stringify(staleBtnId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent?.includes('no longer in')`);
   const staleRes = await a.run(`document.getElementById(${JSON.stringify(staleBtnId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`);
-  check('Run again after hook edited on disk shows main’s refusal', staleRes.includes('This hook is no longer in ~/.claude/settings.json.'), staleRes);
+  check('Run it after hook edited on disk shows Not run: + main’s refusal',
+    staleRes.includes('Not run: this hook is no longer in ~/.claude/settings.json.'), staleRes);
   writeFileSync(claudeSettings, initialClaudeJson);
   await a.click('#header-refresh');
   await steady();
@@ -12975,7 +13018,7 @@ async function hookRunFlow() {
   await a.click('#harness-tab-instructions');
   await waitFor(`!!document.querySelector('#session-claude-cli button[data-hook-run]')`);
   const tabRes = await runAndWait('session-claude-cli', 'two-lines.sh');
-  check('tool’s Instructions tab runs hook and shows Would add', /^Would add \(run in ~, .+, \d+\.\d s\)/.test(tabRes) && tabRes.includes('First line from hook'), tabRes);
+  check('tool’s Instructions tab runs hook and shows Would add', /^Would add run in ~, /.test(tabRes) && tabRes.includes('First line from hook'), tabRes);
   await pictures('tab-claude', '#session-claude-cli', bothSizes);
   await fitsAtMinimum(a, 'Claude Code Instructions tab with Run it result');
   await sizeTo(a, 1316, 820);

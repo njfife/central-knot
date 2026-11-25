@@ -17,7 +17,7 @@ import { brandMark, openPlugin, outcomeBand } from './matrix.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { plural } from './model.ts';
 import { canRun, hookSourceControls } from './hooksourceview.ts';
-import { HOOK_RUN_WARN, hookStripHelp, hookStripNote, sessionStrip, type SessionGroup } from './sessionhooks.ts';
+import { HOOK_RUN_WARN, hookStripHelp, hookStripNote, sessionStrip, type SessionGroup, type SessionStrip } from './sessionhooks.ts';
 import type { HarnessId, InstructionFile, InstructionPart } from './types.ts';
 import { lineDiff } from './diff.ts';
 import { keepLineBreaks } from './drafts.ts';
@@ -195,9 +195,12 @@ function partView(tool: HarnessId, part: InstructionPart): HTMLElement {
  * draft's own card is on another page (another harness's), a link goes there.
  */
 interface HookStripPage {
-  markFirst: { seen: boolean };
+  marked: boolean;
   anyRunnable: boolean;
 }
+
+const stripHasRunnable = (strip?: SessionStrip): boolean =>
+  !!strip?.groups.some(group => group.hooks.some(hook => canRun(hook.source)));
 
 export function instructionCard(file: InstructionFile, { titled = true, goToOther, hookInfo }: { titled?: boolean; goToOther?: (tool: HarnessId) => void; hookInfo?: HookStripPage } = {}) {
   const editing = draftFile() === file;
@@ -238,8 +241,9 @@ function sessionStripView(file: InstructionFile, hookInfo?: HookStripPage) {
   const strip = sessionStrip(file.tool, state.home?.pluginItems ?? [], file);
   if (!strip) return null;
   const isHooks = strip.heading === 'Hooks that can add text';
-  const hasRunnable = strip.groups.some(group => group.hooks.some(hook => canRun(hook.source)));
-  const showMark = isHooks && (!hookInfo || (!hookInfo.markFirst.seen && (hookInfo.markFirst.seen = true)));
+  const hasRunnable = stripHasRunnable(strip);
+  const showMark = isHooks && (!hookInfo || !hookInfo.marked);
+  if (showMark && hookInfo) hookInfo.marked = true;
   const mark = showMark ? infoMark('session-hooks-info', strip.heading, hookStripHelp(file.tool, hookInfo ? hookInfo.anyRunnable : hasRunnable)) : null;
   const note = hookStripNote(file.tool, strip, hasRunnable);
   const where = ({ plugin, settings, says }: SessionGroup, at: number) => (plugin?.listed
@@ -296,9 +300,8 @@ export function instructionsPage() {
   if (!files) return h('div.page', {}, h('div.scroll', {}, instructionsNotRead()));
   if (!files.length) return h('div.page', {}, noToolsState('instructions'));
   const items = state.home?.pluginItems ?? [];
-  const anyRunnable = files.some(file =>
-    sessionStrip(file.tool, items, file)?.groups.some(group => group.hooks.some(hook => canRun(hook.source))));
-  const hookInfo: HookStripPage = { markFirst: { seen: false }, anyRunnable };
+  const anyRunnable = files.some(file => stripHasRunnable(sessionStrip(file.tool, items, file)));
+  const hookInfo: HookStripPage = { marked: false, anyRunnable };
   return h('div.page', {}, instructionBands(),
     h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
       aboutInstructions(files, !!state.base),

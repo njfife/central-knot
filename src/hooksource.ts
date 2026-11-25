@@ -11,7 +11,7 @@ import { shownFromHome } from './machine.ts';
 import { sessionSettings } from './pluginitems.ts';
 import { installedPlugins, type PluginContext } from './plugins.ts';
 import { takesPlugins } from './presence.ts';
-import { hookLine } from './sessionhooks.ts';
+import { hookFingerprint, hookLine } from './sessionhooks.ts';
 import { jsonElements, members, ownEnd, readTomlTables, skipSpace } from './textedit.ts';
 import type { DeclaredHook, HarnessId, HomeMode, HookSource, HookSourceRef } from './types.ts';
 import { record, text as asText } from './values.ts';
@@ -32,9 +32,9 @@ type ShellWord = { text: string; head: 'raw' | 'dbl' | 'arg' | 'lit'; raw: strin
 /** Validates an untrusted hook identity received over IPC. */
 export function parseHookRef(value: unknown): HookSourceRef | undefined {
   const ref = record(value);
-  if (!ref || typeof ref.declaredIn !== 'string' || typeof ref.event !== 'string' || typeof ref.command !== 'string') return undefined;
+  if (!ref || typeof ref.declaredIn !== 'string' || typeof ref.event !== 'string' || typeof ref.command !== 'string' || typeof ref.fingerprint !== 'string' || !ref.fingerprint) return undefined;
   if (typeof ref.at !== 'number' || !Number.isInteger(ref.at) || ref.at < 0) return undefined;
-  const base = { declaredIn: ref.declaredIn, event: ref.event, at: ref.at, command: ref.command };
+  const base = { declaredIn: ref.declaredIn, event: ref.event, at: ref.at, command: ref.command, fingerprint: ref.fingerprint };
   const tool = harnessIds.includes(ref.tool as HarnessId) ? (ref.tool as HarnessId) : undefined;
   if (ref.from === 'own' && tool) return { ...base, from: 'own', tool };
   if (ref.from === 'installed' && tool && asText(ref.plugin) && asText(ref.marketName)) return { ...base, from: 'installed', tool, plugin: asText(ref.plugin), marketName: asText(ref.marketName) };
@@ -169,7 +169,7 @@ export async function findHook(ctx: HookSourceContext, ref: HookSourceRef): Prom
   const owner = await findOwner(ctx, ref);
   if (!owner) return { problem: HOOK_SOURCE_UNREADABLE };
   if (owner.unread.includes(ref.declaredIn)) return { file: ref.declaredIn, problem: HOOK_SOURCE_UNREADABLE };
-  const hook = owner.hooks.find(candidate => candidate.declaredIn === ref.declaredIn && candidate.event === ref.event && candidate.at === ref.at && hookLine(candidate) === ref.command);
+  const hook = owner.hooks.find(candidate => candidate.declaredIn === ref.declaredIn && candidate.event === ref.event && candidate.at === ref.at && hookLine(candidate) === ref.command && hookFingerprint(candidate) === ref.fingerprint);
   if (!hook) {
     if (!pathIn(owner.within, ref.declaredIn)) return { problem: HOOK_SOURCE_UNREADABLE };
     const shown = shownFromHome(ref.declaredIn, ctx);

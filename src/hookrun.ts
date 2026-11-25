@@ -45,7 +45,7 @@ const SCRUB_EXACT = new Set([
 /** Canonical key identifying one hook in one home for one-at-a-time gating and Stop. */
 export const hookRunKey = (home: string, ref: HookSourceRef): string => JSON.stringify([
   home, ref.from, 'tool' in ref ? ref.tool : '', 'marketName' in ref ? ref.marketName : '', 'plugin' in ref ? ref.plugin : '',
-  ref.declaredIn, ref.event, ref.at, ref.command,
+  ref.declaredIn, ref.event, ref.at, ref.command, ref.fingerprint,
 ]);
 
 /** Time limit enforced for one hook run, in seconds: positive configured timeout capped at 60 s, else tool default capped at 60 s. */

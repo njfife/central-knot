@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { parseHookRef, readHookSource, scriptInLaunch, type HookSourceContext } from '../src/hooksource.ts';
 import { createMarketplaces } from '../src/marketplaces.ts';
 import { sessionSettings } from '../src/pluginitems.ts';
-import { sessionStrip } from '../src/sessionhooks.ts';
+import { sessionStrip, hookFingerprint } from '../src/sessionhooks.ts';
 import { slashPath } from './wincompat.ts';
 
 const put = async (path: string, content: string | Uint8Array) => {
@@ -228,6 +228,7 @@ test('Example 4 and 17: installed plugin copy vs marketplace copy, and inline pl
       from: 'installed', tool: 'claude-cli', plugin: 'helper', marketName: 'team',
       declaredIn: join(iPlugin, 'hooks', 'hooks.json'), event: 'SessionStart', at: 0,
       command: '${CLAUDE_PLUGIN_ROOT}/hooks/session-context.sh',
+      fingerprint: hookFingerprint({ declaredIn: join(iPlugin, 'hooks', 'hooks.json'), event: 'SessionStart', at: 0, timeout: 10, launch: { shell: '${CLAUDE_PLUGIN_ROOT}/hooks/session-context.sh' } }),
     });
     assert.equal(installedRes.file, join(iPlugin, 'hooks', 'hooks.json'));
     assert.match(installedRes.entry!, /"timeout": 10/);
@@ -237,6 +238,7 @@ test('Example 4 and 17: installed plugin copy vs marketplace copy, and inline pl
       from: 'marketplace', marketName: 'team', plugin: 'helper',
       declaredIn: join(mPlugin, 'hooks', 'hooks.json'), event: 'SessionStart', at: 0,
       command: '${CLAUDE_PLUGIN_ROOT}/hooks/session-context.sh',
+      fingerprint: hookFingerprint({ declaredIn: join(mPlugin, 'hooks', 'hooks.json'), event: 'SessionStart', at: 0, launch: { shell: '${CLAUDE_PLUGIN_ROOT}/hooks/session-context.sh' } }),
     });
     assert.equal(marketRes.file, join(mPlugin, 'hooks', 'hooks.json'));
     assert.doesNotMatch(marketRes.entry!, /timeout/);
@@ -247,12 +249,14 @@ test('Example 4 and 17: installed plugin copy vs marketplace copy, and inline pl
       from: 'marketplace', marketName: 'unlisted', plugin: 'helper',
       declaredIn: join(mPlugin, 'hooks', 'hooks.json'), event: 'SessionStart', at: 0,
       command: '${CLAUDE_PLUGIN_ROOT}/hooks/session-context.sh',
+      fingerprint: hookFingerprint({ declaredIn: join(mPlugin, 'hooks', 'hooks.json'), event: 'SessionStart', at: 0, launch: { shell: '${CLAUDE_PLUGIN_ROOT}/hooks/session-context.sh' } }),
     }), { problem: 'This file couldn’t be read.' });
 
     const inlineRes = await readHookSource(ctx, {
       from: 'marketplace', marketName: 'team', plugin: 'inline-one',
       declaredIn: inlinePlugin, event: 'SessionStart', at: 0,
       command: '${CLAUDE_PLUGIN_ROOT}/run.sh',
+      fingerprint: hookFingerprint({ declaredIn: inlinePlugin, event: 'SessionStart', at: 0, launch: { shell: '${CLAUDE_PLUGIN_ROOT}/run.sh' } }),
     });
     assert.equal(inlineRes.file, undefined);
     assert.equal(inlineRes.entry, undefined);
@@ -262,6 +266,7 @@ test('Example 4 and 17: installed plugin copy vs marketplace copy, and inline pl
       from: 'marketplace', marketName: 'team', plugin: 'flat-hooks',
       declaredIn: join(flatPlugin, 'hooks', 'hooks.json'), event: 'SessionStart', at: 0,
       command: 'echo flat',
+      fingerprint: hookFingerprint({ declaredIn: join(flatPlugin, 'hooks', 'hooks.json'), event: 'SessionStart', at: 0, launch: { shell: 'echo flat' } }),
     });
     assert.equal(flatRes.file, join(flatPlugin, 'hooks', 'hooks.json'));
     assert.match(flatRes.entry!, /"command": "echo flat"/);
@@ -340,7 +345,8 @@ test('Examples 6, 7 and 16: missing script, folder at path, binary file, 256 KB 
       const fifo = join(home, 'bin', 'pipe.sh');
       execFileSync('mkfifo', [fifo]);
       await put(settings, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: '~/bin/pipe.sh' }] }] } }));
-      const rPipe = await readHookSource(ctx, { from: 'own', tool: 'claude-cli', declaredIn: settings, event: 'SessionStart', at: 0, command: '~/bin/pipe.sh' });
+      const pipeRef = sessionStrip('claude-cli', [], await sessionSettings('claude-cli', join(home, '.claude')))!.groups[0]!.hooks[0]!.source;
+      const rPipe = await readHookSource(ctx, pipeRef);
       assert.deepEqual(rPipe.script, { path: fifo, problem: 'This file couldn’t be read.' });
     });
   } finally {
@@ -407,16 +413,18 @@ test('Examples 8, 10, 14 and 15: two hooks of one event, custom backup home, {pr
 });
 
 test('parseHookRef rejects malformed requests and accepts valid own, installed and marketplace refs', () => {
+  const fp = '["SessionStart",null,null,null,{"shell":"x"},null,null,null]';
   assert.equal(parseHookRef(null), undefined);
-  assert.equal(parseHookRef({ from: 'own', tool: 'bogus', declaredIn: '/a', event: 'E', at: 0, command: 'x' }), undefined);
-  assert.equal(parseHookRef({ from: 'own', tool: 'claude-cli', declaredIn: '/a', event: 'E', at: -1, command: 'x' }), undefined);
-  assert.equal(parseHookRef({ from: 'own', tool: 'claude-cli', declaredIn: '/a', event: 'E', at: 1.5, command: 'x' }), undefined);
-  assert.equal(parseHookRef({ from: 'installed', tool: 'claude-cli', plugin: '', marketName: 'm', declaredIn: '/a', event: 'E', at: 0, command: 'x' }), undefined);
-  assert.equal(parseHookRef({ from: 'marketplace', source: '', plugin: 'p', declaredIn: '/a', event: 'E', at: 0, command: 'x' }), undefined);
-  assert.ok(parseHookRef({ from: 'own', tool: 'claude-cli', declaredIn: '/a', event: 'SessionStart', at: 0, command: 'x' }));
-  assert.ok(parseHookRef({ from: 'installed', tool: 'codex-cli', plugin: 'p', marketName: 'm', declaredIn: '/a', event: 'SessionStart', at: 0, command: 'x' }));
-  assert.ok(parseHookRef({ from: 'marketplace', marketName: 'team', plugin: 'p', declaredIn: '/a', event: 'SessionStart', at: 0, command: 'x' }));
-  assert.equal(parseHookRef({ from: 'marketplace', source: '/unlisted/folder', plugin: 'p', declaredIn: '/a', event: 'SessionStart', at: 0, command: 'x' }), undefined);
+  assert.equal(parseHookRef({ from: 'own', tool: 'bogus', declaredIn: '/a', event: 'E', at: 0, command: 'x', fingerprint: fp }), undefined);
+  assert.equal(parseHookRef({ from: 'own', tool: 'claude-cli', declaredIn: '/a', event: 'E', at: -1, command: 'x', fingerprint: fp }), undefined);
+  assert.equal(parseHookRef({ from: 'own', tool: 'claude-cli', declaredIn: '/a', event: 'E', at: 1.5, command: 'x', fingerprint: fp }), undefined);
+  assert.equal(parseHookRef({ from: 'own', tool: 'claude-cli', declaredIn: '/a', event: 'SessionStart', at: 0, command: 'x' }), undefined);
+  assert.equal(parseHookRef({ from: 'installed', tool: 'claude-cli', plugin: '', marketName: 'm', declaredIn: '/a', event: 'E', at: 0, command: 'x', fingerprint: fp }), undefined);
+  assert.equal(parseHookRef({ from: 'marketplace', source: '', plugin: 'p', declaredIn: '/a', event: 'E', at: 0, command: 'x', fingerprint: fp }), undefined);
+  assert.ok(parseHookRef({ from: 'own', tool: 'claude-cli', declaredIn: '/a', event: 'SessionStart', at: 0, command: 'x', fingerprint: fp }));
+  assert.ok(parseHookRef({ from: 'installed', tool: 'codex-cli', plugin: 'p', marketName: 'm', declaredIn: '/a', event: 'SessionStart', at: 0, command: 'x', fingerprint: fp }));
+  assert.ok(parseHookRef({ from: 'marketplace', marketName: 'team', plugin: 'p', declaredIn: '/a', event: 'SessionStart', at: 0, command: 'x', fingerprint: fp }));
+  assert.equal(parseHookRef({ from: 'marketplace', source: '/unlisted/folder', plugin: 'p', declaredIn: '/a', event: 'SessionStart', at: 0, command: 'x', fingerprint: fp }), undefined);
 });
 
 test('Fix list items 2, 3, 4: marketplace name lookup, stricter script rule, and changed-file message', async () => {

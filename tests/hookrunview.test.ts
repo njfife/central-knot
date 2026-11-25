@@ -10,8 +10,9 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { runHook, stopHookRun, type HookRunContext } from '../src/hookrun.ts';
+import { readHookSource } from '../src/hooksource.ts';
 import { sessionSettings } from '../src/pluginitems.ts';
-import { HOOK_RUN_WARN, hookRunWords, hookStripHelp, hookStripNote, sessionStrip } from '../src/sessionhooks.ts';
+import { HOOK_RUN_WARN, hookFingerprint, hookRunWords, hookStripHelp, hookStripNote, sessionStrip } from '../src/sessionhooks.ts';
 import type { HookRunResult, HookSourceRef } from '../src/types.ts';
 import { standIn } from './standin.ts';
 
@@ -38,33 +39,34 @@ const wordCount = (text: string) => text.trim().split(/\s+/).length;
 
 // ---------- Pure unit tests: one per row of hookRunWords (Check 2) ----------
 
-test('Check 2: hookRunWords matches T4.22–T4.27 and every added outcome/detail sentence verbatim', () => {
+test('Check 2: hookRunWords matches every outcome, quiet trailing run place/time, blank lines, Not run, and IPC failure', () => {
   const time = '9:14 PM';
 
-  // T4.22: adds (session start, plain text matching stdout -> no extra stdout fold; with stderr -> stderr fold)
+  // adds (session start, plain text matching stdout -> no extra stdout fold; with stderr -> stderr fold; no duration, no Run again)
   const addStart = hookRunWords('claude-cli', baseResult({
     outcome: 'adds', added: 'Line one\nLine two\n', allPrinted: 'Line one\nLine two\n', stderr: 'warn\n', durationMs: 400,
   }), '~', time);
   assert.deepEqual(addStart, {
-    sentence: 'Would add (run in ~, 9:14 PM, 0.4 s)',
+    sentence: 'Would add',
+    meta: 'run in ~, 9:14 PM',
     notes: [],
-    canAgain: true,
     added: 'Line one\nLine two\n',
     allFold: undefined,
     errFold: 'warn\n',
   });
 
-  // T4.22: adds (prompt hook, JSON output -> Show all it printed fold, Copilot subfolder cwd)
+  // adds (prompt hook, JSON output -> Show all it printed fold, Copilot subfolder cwd)
   const addPrompt = hookRunWords('claude-cli', baseResult({
     outcome: 'adds', added: 'Extra context', allPrinted: '{"hookSpecificOutput":{"additionalContext":"Extra context"}}',
     emptyPrompt: true, durationMs: 400,
   }), '~/sub', time);
-  assert.equal(addPrompt.sentence, 'Would add (run in ~/sub with an empty prompt, 9:14 PM, 0.4 s)');
+  assert.equal(addPrompt.sentence, 'Would add');
+  assert.equal(addPrompt.meta, 'run in ~/sub with an empty prompt, 9:14 PM');
   assert.equal(addPrompt.added, 'Extra context');
   assert.equal(addPrompt.allFold, '{"hookSpecificOutput":{"additionalContext":"Extra context"}}');
   assert.equal(addPrompt.errFold, undefined);
 
-  // T4.22: Codex adds note + overLimit (2,500 tokens) and Claude Code overLimit (10,000 characters)
+  // Codex adds note + overLimit (2,500 tokens) and Claude Code overLimit (10,000 characters)
   const addCodex = hookRunWords('codex-cli', baseResult({
     outcome: 'adds', added: 'ok', allPrinted: 'ok\n', overLimit: { limit: 2500, unit: 'tokens' },
   }), '~', time);
@@ -80,133 +82,159 @@ test('Check 2: hookRunWords matches T4.22–T4.27 and every added outcome/detail
     'Longer than Claude Code’s limit of 10,000 characters: it would add only part.',
   ]);
 
-  // T4.23: empty (stderr shown directly, not folded)
+  // empty (nothing printed vs only blank lines; stderr shown directly)
   const empty = hookRunWords('claude-cli', baseResult({ outcome: 'empty', durationMs: 200, stderr: 'note\n' }), '~', time);
   assert.deepEqual(empty, {
-    sentence: 'Would add nothing: it printed nothing (run in ~, 9:14 PM, 0.2 s)',
+    sentence: 'Would add nothing: it printed nothing.',
+    meta: 'run in ~, 9:14 PM',
     notes: [],
-    canAgain: true,
     errDirect: 'note\n',
   });
+  const blankLines = hookRunWords('claude-cli', baseResult({ outcome: 'empty', allPrinted: '\n  \n' }), '~', time);
+  assert.equal(blankLines.sentence, 'Would add nothing: it printed only blank lines.');
+  assert.equal(blankLines.meta, 'run in ~, 9:14 PM');
 
-  // T4.24: copilot-ignored (Show all it printed fold + direct stderr)
+  // copilot-ignored (Show all it printed fold + direct stderr)
   const copIgnored = hookRunWords('copilot-cli', baseResult({
     outcome: 'copilot-ignored', allPrinted: 'plain hello\n', stderr: 'dbg\n', durationMs: 300,
-  }), '~', time);
+  }), '~/copilot-work', time);
   assert.deepEqual(copIgnored, {
-    sentence: 'Copilot CLI would ignore this: no top-level additionalContext (run in ~, 9:14 PM, 0.3 s).',
+    sentence: 'Copilot CLI would ignore this: no top-level additionalContext.',
+    meta: 'run in ~/copilot-work, 9:14 PM',
     notes: [],
-    canAgain: true,
     allFold: 'plain hello\n',
     errDirect: 'dbg\n',
   });
 
-  // T4.25: claude-exit-2 (session start and prompt hook, stderr verbatim)
+  // claude-exit-2 (session start and prompt hook, stderr verbatim)
   const exit2Start = hookRunWords('claude-cli', baseResult({ outcome: 'claude-exit-2', exitCode: 2, stderr: 'bad env\n' }), '~', time);
   assert.deepEqual(exit2Start, {
-    sentence: 'Exited 2 (run in ~, 9:14 PM): Claude Code would show its error text only, and add nothing.',
+    sentence: 'Exited 2: Claude Code would show you this error and add nothing.',
+    meta: 'run in ~, 9:14 PM',
     notes: [],
-    canAgain: true,
     errDirect: 'bad env\n',
   });
   const exit2Prompt = hookRunWords('claude-cli', baseResult({
     outcome: 'claude-exit-2', exitCode: 2, emptyPrompt: true, stderr: 'blocked\n',
   }), '~', time);
   assert.deepEqual(exit2Prompt, {
-    sentence: 'Exited 2 (run in ~ with an empty prompt, 9:14 PM): Claude Code would block the prompt with its error text.',
+    sentence: 'Exited 2: Claude Code would block the prompt and show this error.',
+    meta: 'run in ~ with an empty prompt, 9:14 PM',
     notes: [],
-    canAgain: true,
     errDirect: 'blocked\n',
   });
 
-  // T4.26: failed with exit code (stderr and stdout verbatim)
+  // failed with exit code (direct stderr + unified Show all it printed fold; no invented "Exited ?")
   const failed = hookRunWords('claude-cli', baseResult({
     outcome: 'failed', exitCode: 7, stderr: 'boom\n', allPrinted: 'partial\n',
   }), '~', time);
   assert.deepEqual(failed, {
-    sentence: 'Exited 7 (run in ~, 9:14 PM): it would add nothing.',
+    sentence: 'Exited 7: it would add nothing.',
+    meta: 'run in ~, 9:14 PM',
     notes: [],
-    canAgain: true,
+    allFold: 'partial\n',
     errDirect: 'boom\n',
-    outDirect: 'partial\n',
   });
+  const failedNoCode = hookRunWords('claude-cli', baseResult({ outcome: 'failed' }), '~', time);
+  assert.equal(failedNoCode.sentence, 'It would add nothing.');
 
   // Signal: ended by signal
   const signaled = hookRunWords('claude-cli', baseResult({ outcome: 'failed', signal: 'SIGTERM', stderr: 'killed\n' }), '~', time);
-  assert.equal(signaled.sentence, 'Ended by SIGTERM (run in ~, 9:14 PM): it would add nothing.');
+  assert.equal(signaled.sentence, 'Ended by SIGTERM: it would add nothing.');
+  assert.equal(signaled.meta, 'run in ~, 9:14 PM');
   assert.equal(signaled.errDirect, 'killed\n');
 
-  // T4.27: timeout, stopped, missing
+  // timeout, stopped, missing (all carry quiet meta; no invented "program not found")
   const timeout = hookRunWords('claude-cli', baseResult({ outcome: 'timeout', limitSec: 5 }), '~', time);
   assert.equal(timeout.sentence, 'Stopped after 5 s, its time limit: it would add nothing.');
-  assert.equal(timeout.canAgain, true);
+  assert.equal(timeout.meta, 'run in ~, 9:14 PM');
+  const timeoutNoLimit = hookRunWords('claude-cli', baseResult({ outcome: 'timeout' }), '~', time);
+  assert.equal(timeoutNoLimit.sentence, 'Stopped at its time limit: it would add nothing.');
 
   const stopped = hookRunWords('claude-cli', baseResult({ outcome: 'stopped' }), '~', time);
-  assert.equal(stopped.sentence, 'Stopped. What it changed stays; a program it left running may too.');
-  assert.equal(stopped.canAgain, true);
+  assert.equal(stopped.sentence, 'Stopped. What it changed stays; a program it started may still be running.');
+  assert.equal(stopped.meta, 'run in ~, 9:14 PM');
 
   const missing = hookRunWords('claude-cli', baseResult({ outcome: 'missing', program: '/no/such/bin' }), '~', time);
   assert.equal(missing.sentence, 'Couldn’t start: /no/such/bin not found.');
-  assert.equal(missing.canAgain, false);
+  assert.equal(missing.meta, 'run in ~, 9:14 PM');
+  const missingNoProg = hookRunWords('claude-cli', baseResult({ outcome: 'missing' }), '~', time);
+  assert.equal(missingNoProg.sentence, 'Couldn’t start.');
 
   // Added not-added details
   const noCtx = hookRunWords('claude-cli', baseResult({ outcome: 'not-added', detail: 'json-no-context', allPrinted: '{"ok":true}' }), '~', time);
-  assert.equal(noCtx.sentence, 'Would add nothing: its JSON has no additionalContext (run in ~, 9:14 PM, 0.4 s)');
+  assert.equal(noCtx.sentence, 'Would add nothing: its JSON has no additionalContext.');
+  assert.equal(noCtx.meta, 'run in ~, 9:14 PM');
   assert.equal(noCtx.allFold, '{"ok":true}');
 
   const block = hookRunWords('claude-cli', baseResult({ outcome: 'not-added', detail: 'json-block', allPrinted: '{"decision":"block"}' }), '~', time);
-  assert.equal(block.sentence, 'Would add nothing: its JSON says to block or stop (run in ~, 9:14 PM, 0.4 s)');
+  assert.equal(block.sentence, 'Would add nothing: its JSON says to block or stop.');
   assert.equal(block.allFold, '{"decision":"block"}');
 
   const badJsonClaude = hookRunWords('claude-cli', baseResult({ outcome: 'not-added', detail: 'invalid-json', allPrinted: '{bad' }), '~', time);
-  assert.equal(badJsonClaude.sentence, 'Would add nothing: Claude Code can’t read its JSON (run in ~, 9:14 PM, 0.4 s)');
+  assert.equal(badJsonClaude.sentence, 'Would add nothing: Claude Code can’t read its JSON.');
   assert.equal(badJsonClaude.allFold, '{bad');
 
   const badJsonCodex = hookRunWords('codex-cli', baseResult({ outcome: 'not-added', detail: 'invalid-json', allPrinted: '[bad' }), '~', time);
-  assert.equal(badJsonCodex.sentence, 'Would add nothing: Codex can’t read its JSON (run in ~, 9:14 PM, 0.4 s)');
+  assert.equal(badJsonCodex.sentence, 'Would add nothing: Codex can’t read its JSON.');
 
   const codexExit2 = hookRunWords('codex-cli', baseResult({
     outcome: 'not-added', detail: 'codex-prompt-exit-2', exitCode: 2, emptyPrompt: true, stderr: 'err', allPrinted: 'out',
   }), '~', time);
-  assert.equal(codexExit2.sentence, 'Exited 2 (run in ~ with an empty prompt, 9:14 PM): it would add nothing.');
+  assert.equal(codexExit2.sentence, 'Exited 2: it would add nothing.');
+  assert.equal(codexExit2.meta, 'run in ~ with an empty prompt, 9:14 PM');
   assert.equal(codexExit2.errDirect, 'err');
-  assert.equal(codexExit2.outDirect, 'out');
+  assert.equal(codexExit2.allFold, 'out');
 
   const overflow = hookRunWords('claude-cli', baseResult({ outcome: 'not-added', detail: 'overflow', allPrinted: 'big' }), '~', time);
   assert.equal(overflow.sentence, 'Stopped: it printed more than Central Knot reads.');
+  assert.equal(overflow.meta, 'run in ~, 9:14 PM');
   assert.equal(overflow.allFold, 'big');
 
   const spawnErr = hookRunWords('copilot-cli', baseResult({ outcome: 'not-added', detail: 'spawn-error', problem: 'Working folder not found: /nope' }), '~', time);
   assert.equal(spawnErr.sentence, 'Couldn’t start: Working folder not found: /nope');
-  assert.equal(spawnErr.canAgain, false);
+  assert.equal(spawnErr.meta, 'run in ~, 9:14 PM');
+  const spawnNoProblem = hookRunWords('copilot-cli', baseResult({ outcome: 'not-added', detail: 'spawn-error' }), '~', time);
+  assert.equal(spawnNoProblem.sentence, 'Couldn’t start.');
 
-  // Refusal: main's problem, no Run again
+  // Refusal: "Not run: " + main's words (lowercase ordinary lead, keep proper nouns and paths); no meta. IPC failure: "Couldn't run it."
   const refused = hookRunWords('codex-cli', baseResult({
-    outcome: 'refused', problem: 'Hooks are turned off in Codex’s settings (features.codex_hooks = false).',
+    outcome: 'refused', problem: 'Hooks are turned off in Codex’s settings ([features] codex_hooks = false).',
   }), '~', time);
-  assert.equal(refused.sentence, 'Hooks are turned off in Codex’s settings (features.codex_hooks = false).');
-  assert.equal(refused.canAgain, false);
+  assert.equal(refused.sentence, 'Not run: hooks are turned off in Codex’s settings ([features] codex_hooks = false).');
+  assert.equal(refused.meta, undefined);
+  const refusedPath = hookRunWords('claude-cli', baseResult({
+    outcome: 'refused', problem: '~/.claude/settings.json changed since this page was read. Refresh to see it.',
+  }), '~', time);
+  assert.equal(refusedPath.sentence, 'Not run: ~/.claude/settings.json changed since this page was read. Refresh to see it.');
+  const refusedProper = hookRunWords('claude-cli', baseResult({
+    outcome: 'refused', problem: 'Central Knot is quitting.',
+  }), '~', time);
+  assert.equal(refusedProper.sentence, 'Not run: Central Knot is quitting.');
+  const ipcFailed = hookRunWords('claude-cli', baseResult({ outcome: 'refused' }), '~', time);
+  assert.equal(ipcFailed.sentence, 'Couldn’t run it.');
+  assert.equal(ipcFailed.meta, undefined);
 });
 
 // ---------- Pure unit tests: T1.23 & T2.28 strip lines (Check 3) ----------
 
-test('Check 3: T1.23 help card stays within 30 words and T2.28 strip notes replace strip.note where they apply', () => {
-  assert.equal(HOOK_RUN_WARN, 'Runs commands. May change your files.');
+test('Check 3: standing line names Run it, T1.23 help card stays within 30 words and covers hook cwd, and T2.28 strip notes replace strip.note', () => {
+  assert.equal(HOOK_RUN_WARN, 'Run it runs the command for real. It may change your files.');
 
   const claudeRun = hookStripHelp('claude-cli', true);
-  assert.equal(claudeRun, 'Command hooks that run when a session starts or when you send a prompt; URL, MCP, project and organisation hooks aren’t listed. Run it runs in your home folder.');
+  assert.equal(claudeRun, 'Session-start and prompt command hooks; URL, MCP, project and organisation hooks aren’t listed. Run it runs in your home folder, or in the folder the hook names.');
   assert.ok(wordCount(claudeRun) <= 30, `expected <=30 words, got ${wordCount(claudeRun)}`);
 
   const claudeNoRun = hookStripHelp('claude-cli', false);
-  assert.equal(claudeNoRun, 'Command hooks that run when a session starts or when you send a prompt; URL, MCP, project and organisation hooks aren’t listed.');
+  assert.equal(claudeNoRun, 'Session-start and prompt command hooks; URL, MCP, project and organisation hooks aren’t listed.');
   assert.ok(wordCount(claudeNoRun) <= 30);
 
   const copilotRun = hookStripHelp('copilot-cli', true);
-  assert.equal(copilotRun, 'Command hooks that run when a session starts; URL, MCP, project and organisation hooks aren’t listed. Run it runs in your home folder.');
+  assert.equal(copilotRun, 'Session-start command hooks; URL, MCP, project and organisation hooks aren’t listed. Run it runs in your home folder, or in the folder the hook names.');
   assert.ok(wordCount(copilotRun) <= 30);
 
   const copilotNoRun = hookStripHelp('copilot-cli', false);
-  assert.equal(copilotNoRun, 'Command hooks that run when a session starts; URL, MCP, project and organisation hooks aren’t listed.');
+  assert.equal(copilotNoRun, 'Session-start command hooks; URL, MCP, project and organisation hooks aren’t listed.');
   assert.ok(wordCount(copilotNoRun) <= 30);
 
   // T2.28 Codex note replaces strip.note only when runnable.
@@ -227,22 +255,57 @@ test('Check 3: T1.23 help card stays within 30 words and T2.28 strip notes repla
 function makeDom() {
   const nodes = new Map<string, any>();
   const scrolled: { id: string; opts: any }[] = [];
+  const docListeners = new Map<string, ((event: any) => void)[]>();
+  const winListeners = new Map<string, ((event: any) => void)[]>();
   const register = (node: any) => {
     node.connected = true;
+    node.isConnected = true;
     if (node?.id) nodes.set(node.id, node);
     for (const child of node?.children ?? []) if (child && typeof child === 'object') register(child);
   };
   const unregister = (node: any) => {
     node.connected = false;
+    node.isConnected = false;
     if (node?.id && nodes.get(node.id) === node) nodes.delete(node.id);
     for (const child of node?.children ?? []) if (child && typeof child === 'object') unregister(child);
   };
   const makeNode = (tag = 'div') => {
     const node: any = {
       tag, children: [] as any[], attrs: {} as Record<string, unknown>, className: '', textContent: '', dataset: {},
+      isConnected: false, connected: false, rect: { top: 40, bottom: 60, left: 0, right: 200 },
       style: { setProperty() {} }, classList: { toggle() {}, add() {}, remove() {} }, content: {},
       setAttribute(k: string, v: string) { this.attrs[k] = v; if (k === 'id') this.id = v; },
       getAttribute(k: string) { return this.attrs[k] ?? null; },
+      matches(sel: string) {
+        if (sel === ':disabled') return Boolean(this.disabled || this.attrs.disabled);
+        if (sel === 'pre') return this.tag === 'pre';
+        if (sel === '.scroll') return this.className.split(/\s+/).includes('scroll');
+        if (sel === 'button[id]') return this.tag === 'button' && Boolean(this.id);
+        if (sel === 'button[id], pre[id]') return (this.tag === 'button' || this.tag === 'pre') && Boolean(this.id);
+        return false;
+      },
+      closest(sel: string) {
+        let cur: any = this;
+        while (cur) {
+          if (cur.matches?.(sel)) return cur;
+          cur = cur.parent;
+        }
+        return null;
+      },
+      contains(target: any) {
+        let cur: any = target;
+        while (cur) {
+          if (cur === this) return true;
+          cur = cur.parent;
+        }
+        return false;
+      },
+      getBoundingClientRect() { return this.rect; },
+      dispatchEvent(ev: any) {
+        ev.target = this;
+        if (ev.type === 'click' && typeof this.onclick === 'function') this.onclick(ev);
+        return true;
+      },
       append(...items: any[]) {
         for (const item of items) {
           this.children.push(item);
@@ -299,22 +362,53 @@ function makeDom() {
     walk(root);
     return out;
   };
+  const emit = (map: Map<string, ((e: any) => void)[]>, type: string, event: any) => {
+    const ev = { type, preventDefault() { this.defaultPrevented = true; }, stopPropagation() {}, defaultPrevented: false, ...event };
+    for (const fn of map.get(type) ?? []) fn(ev);
+    return ev;
+  };
+  class FakeMouseEvent {
+    type: string;
+    bubbles: boolean;
+    cancelable: boolean;
+    clientX: number;
+    clientY: number;
+    detail: number;
+    constructor(type: string, init: any = {}) {
+      this.type = type;
+      this.bubbles = Boolean(init.bubbles);
+      this.cancelable = Boolean(init.cancelable);
+      this.clientX = init.clientX ?? 0;
+      this.clientY = init.clientY ?? 0;
+      this.detail = init.detail ?? 0;
+    }
+  }
   const handlers: Record<string, (...args: any[]) => any> = {};
+  const announcement = makeNode('span');
+  announcement.id = 'announcement';
+  nodes.set('announcement', announcement);
   Object.assign(globalThis, {
+    MouseEvent: FakeMouseEvent,
     document: {
       body: makeNode('body'), documentElement: makeNode('html'), activeElement: null, hidden: false, hasFocus: () => true,
       createElement: (tag: string) => makeNode(tag), createTextNode: (text: string) => ({ text }),
-      getElementById: (id: string) => nodes.get(id) ?? null, querySelector: () => null, querySelectorAll: () => [], addEventListener() {},
+      getElementById: (id: string) => nodes.get(id) ?? null, querySelector: () => null, querySelectorAll: () => [],
+      addEventListener(type: string, fn: (e: any) => void) { (docListeners.get(type) ?? docListeners.set(type, []).get(type)!).push(fn); },
     },
     window: {
-      addEventListener() {}, matchMedia: () => ({ matches: false, addEventListener() {} }),
+      innerHeight: 600,
+      addEventListener(type: string, fn: (e: any) => void) { (winListeners.get(type) ?? winListeners.set(type, []).get(type)!).push(fn); },
+      matchMedia: () => ({ matches: false, addEventListener() {} }),
       centralKnot: new Proxy(handlers, { get: (target, prop) => (prop in target ? target[prop as string] : async () => null) }),
     },
     ResizeObserver: class { observe() {} disconnect() {} },
     requestAnimationFrame: () => 0,
   });
   Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Mozilla/5.0 (X11; Linux x86_64)' }, configurable: true });
-  return { nodes, scrolled, makeNode, textOf, findAll, handlers };
+  return {
+    nodes, scrolled, makeNode, textOf, findAll, handlers,
+    emitDoc: (type: string, event: any) => emit(docListeners, type, event),
+  };
 }
 
 test('Check 1 & 6: Claude Code start-of-session stand-in runs on click, shows Running… then Would add in view, and Run again after disk edit refuses', { skip: unixSkip, timeout: 15_000 }, async () => {
@@ -379,23 +473,21 @@ test('Check 1 & 6: Claude Code start-of-session stand-in runs on click, shows Ru
     const panel = dom.findAll(row, n => n.className === 'hook-run')[0];
     assert.ok(panel, 'expected .hook-run result panel');
     const panelText = dom.textOf(panel);
-    assert.match(panelText, /^Would add \(run in ~, .+, \d+\.\d s\)/);
-    assert.match(panelText, /Run again/);
+    assert.match(panelText, /^Would add run in ~, .+/);
+    assert.doesNotMatch(panelText, /Run again/);
     assert.match(panelText, /First line from hook\nSecond line from hook/);
     assert.deepEqual(dom.scrolled, [{ id: panel.id, opts: { block: 'nearest' } }]);
 
-    // Check 6: edit hook on disk, then click Run again -> shows main's refusal without Run again.
+    // Check 6: edit hook on disk, then click Run it -> shows "Not run:" + main's refusal.
     await put(settings, JSON.stringify({
       hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: '~/bin/changed.sh' }] }] },
     }, null, 2));
     gate = Promise.resolve();
-    const againBtn = dom.findAll(panel, n => 'data-hook-again' in (n.attrs ?? {}))[0];
-    againBtn.onclick({ detail: 1 });
+    dom.findAll(row, n => 'data-hook-run' in (n.attrs ?? {}))[0].onclick({ detail: 1 });
     await pending;
     await new Promise(resolve => setTimeout(resolve, 10));
     const refusedPanel = dom.findAll(row, n => n.className === 'hook-run')[0];
-    assert.match(dom.textOf(refusedPanel), /This hook is no longer in ~\/\.claude\/settings\.json\./);
-    assert.equal(dom.findAll(refusedPanel, n => 'data-hook-again' in (n.attrs ?? {})).length, 0);
+    assert.match(dom.textOf(refusedPanel), /Not run: this hook is no longer in ~\/\.claude\/settings\.json\./);
   } finally {
     await rm(base, { recursive: true, force: true });
   }
@@ -418,10 +510,10 @@ test('Checks 4, 5, 6, 7, 8: eligibility, hashed ids, double click & held Enter g
   const viewMod = await import('../src/hooksourceview.ts');
   viewMod.resetHookSources();
 
-  const ownRef: HookSourceRef = { from: 'own', tool: 'claude-cli', declaredIn: '/tmp/h/.claude/settings.json', event: 'SessionStart', at: 0, command: 'echo a' };
-  const ownRef2: HookSourceRef = { from: 'own', tool: 'claude-cli', declaredIn: '/tmp/h/.claude/settings.json', event: 'SessionStart', at: 1, command: 'echo a' };
-  const pluginRef: HookSourceRef = { from: 'installed', tool: 'claude-cli', plugin: 'p', marketName: 'm', declaredIn: '/p/hooks.json', event: 'SessionStart', at: 0, command: 'echo p' };
-  const marketRef: HookSourceRef = { from: 'marketplace', marketName: 'm', plugin: 'p', declaredIn: '/m/hooks.json', event: 'SessionStart', at: 0, command: 'echo m' };
+  const ownRef: HookSourceRef = { from: 'own', tool: 'claude-cli', declaredIn: '/tmp/h/.claude/settings.json', event: 'SessionStart', at: 0, command: 'echo a', fingerprint: 'fp-a' };
+  const ownRef2: HookSourceRef = { from: 'own', tool: 'claude-cli', declaredIn: '/tmp/h/.claude/settings.json', event: 'SessionStart', at: 1, command: 'echo a', fingerprint: 'fp-a' };
+  const pluginRef: HookSourceRef = { from: 'installed', tool: 'claude-cli', plugin: 'p', marketName: 'm', declaredIn: '/p/hooks.json', event: 'SessionStart', at: 0, command: 'echo p', fingerprint: 'fp-p' };
+  const marketRef: HookSourceRef = { from: 'marketplace', marketName: 'm', plugin: 'p', declaredIn: '/m/hooks.json', event: 'SessionStart', at: 0, command: 'echo m', fingerprint: 'fp-m' };
 
   // Check 4: eligibility gate (actual + own + non-Windows only).
   state.home = undefined;
@@ -522,7 +614,7 @@ test('Checks 4, 5, 6, 7, 8: eligibility, hashed ids, double click & held Enter g
   assert.deepEqual(afterFoldRedraw.children.map((c: any) => c.className), ['hook-actions', 'hook-run', 'hook-source']);
 
   // Check 6: late results dropped on Refresh (resetHookSources), home switch, and leaving page (pruneHookSources, without stopping main).
-  dom.findAll(afterFoldRedraw, n => 'data-hook-again' in (n.attrs ?? {}))[0].onclick({ detail: 1 });
+  dom.findAll(afterFoldRedraw, n => 'data-hook-run' in (n.attrs ?? {}))[0].onclick({ detail: 1 });
   const refreshResolver = pendingResolvers.shift()!;
   viewMod.resetHookSources();
   refreshResolver(baseResult({ outcome: 'adds', added: 'stale refresh' }));
@@ -565,4 +657,248 @@ test('Checks 4, 5, 6, 7, 8: eligibility, hashed ids, double click & held Enter g
   leaveResolver(baseResult({ outcome: 'adds', added: 'stale after leave' }));
   await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(dom.findAll(returnedRow, n => n.className === 'hook-run').length, 0);
+});
+
+// ---------- Fix-round failing checks for items 1 to 5 ----------
+
+test('Declaration fingerprint: matcher or Copilot cwd edit changes button id, drops open result, and refuses stale run and source reads', { skip: unixSkip, timeout: 15_000 }, async () => {
+  const base = await mkdtemp(join(tmpdir(), 'ck-hookfp-'));
+  try {
+    const home = join(base, 'home');
+    const tools = join(base, 'tools');
+    const data = join(base, 'data');
+    await mkdir(join(tools, '.local/bin'), { recursive: true });
+    await standIn(join(tools, '.local/bin/claude'), '#!/bin/sh\necho "2.1.327 (Claude Code)"\n', 'console.log("2.1.327");');
+    await standIn(join(tools, '.local/bin/copilot'), '#!/bin/sh\necho "GitHub Copilot CLI 1.0.107."\n', 'console.log("1.0.107");');
+    await mkdir(join(home, 'dir-a'), { recursive: true });
+    await mkdir(join(home, 'dir-b'), { recursive: true });
+    await put(join(home, 'bin/echo-ok.sh'), '#!/bin/sh\necho ok\n', 0o755);
+    const claudeFile = join(home, '.claude/settings.json');
+    const copilotFile = join(home, '.copilot/hooks/start.json');
+    await put(claudeFile, JSON.stringify({
+      hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: '~/bin/echo-ok.sh' }] }] },
+    }, null, 2));
+    await put(copilotFile, JSON.stringify({
+      version: 1, hooks: { sessionStart: [{ type: 'command', bash: '~/bin/echo-ok.sh', cwd: 'dir-a' }] },
+    }, null, 2));
+
+    const oldClaude = sessionStrip('claude-cli', [], await sessionSettings('claude-cli', join(home, '.claude')))!.groups[0]!.hooks[0]!.source;
+    const oldCopilot = sessionStrip('copilot-cli', [], await sessionSettings('copilot-cli', join(home, '.copilot')))!.groups[0]!.hooks[0]!.source;
+    const ctx: HookRunContext = {
+      home, mode: 'actual', dataDir: data, toolsHome: tools,
+      searchPath: process.env.PATH ?? '/usr/bin:/bin',
+      env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: home },
+    };
+
+    // Edit matcher in place (same slot, same command) and Copilot cwd in place.
+    await put(claudeFile, JSON.stringify({
+      hooks: { SessionStart: [{ matcher: 'resume', hooks: [{ type: 'command', command: '~/bin/echo-ok.sh' }] }] },
+    }, null, 2));
+    await put(copilotFile, JSON.stringify({
+      version: 1, hooks: { sessionStart: [{ type: 'command', bash: '~/bin/echo-ok.sh', cwd: 'dir-b' }] },
+    }, null, 2));
+
+    const claudeRefused = await runHook(ctx, oldClaude);
+    assert.equal(claudeRefused.outcome, 'refused', 'matcher change must refuse stale Run it');
+    assert.match(claudeRefused.problem ?? '', /changed since this page was read/);
+    const srcRefused = await readHookSource(ctx, oldClaude);
+    assert.match(srcRefused.problem ?? '', /changed since this page was read/);
+
+    const copilotRefused = await runHook(ctx, oldCopilot);
+    assert.equal(copilotRefused.outcome, 'refused', 'Copilot cwd change must refuse stale Run it');
+    assert.match(copilotRefused.problem ?? '', /changed since this page was read/);
+
+    // Page keys buttons and results by fingerprint: matcher edit produces a new row id with no carried result.
+    const newClaude = sessionStrip('claude-cli', [], await sessionSettings('claude-cli', join(home, '.claude')))!.groups[0]!.hooks[0]!.source;
+    const dom = makeDom();
+    dom.handlers.hookRun = async () => baseResult({ outcome: 'adds', added: 'startup text' });
+    await import('../src/settingspage.ts');
+    const { state } = await import('../src/app.ts');
+    const viewMod = await import('../src/hooksourceview.ts');
+    viewMod.resetHookSources();
+    state.home = { home, mode: 'actual', label: 'Home' } as any;
+
+    const oldRow = dom.makeNode('li');
+    oldRow.connected = true;
+    oldRow.append(...viewMod.hookSourceControls(oldClaude, 'hook-source-instructions-claude-cli-0-0'));
+    const oldBtn = dom.findAll(oldRow, n => 'data-hook-run' in (n.attrs ?? {}))[0];
+    oldBtn.onclick({ detail: 1 });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(dom.findAll(oldRow, n => n.className === 'hook-run').length, 1);
+
+    dom.nodes.clear();
+    const newRow = dom.makeNode('li');
+    newRow.connected = true;
+    newRow.append(...viewMod.hookSourceControls(newClaude, 'hook-source-instructions-claude-cli-0-0'));
+    viewMod.pruneHookSources();
+    const newBtn = dom.findAll(newRow, n => 'data-hook-run' in (n.attrs ?? {}))[0];
+    assert.notEqual(newBtn.id, oldBtn.id, 'matcher edit must change button id');
+    assert.equal(dom.findAll(newRow, n => n.className === 'hook-run').length, 0, 'old result must not stay under edited matcher row');
+
+    // Fingerprint covers env (order-independent), timeout, shell, launch form, type, cwd, matcher and event.
+    const baseHook = { declaredIn: claudeFile, event: 'SessionStart', at: 0, launch: { shell: 'echo ok' } as const };
+    assert.equal(
+      hookFingerprint({ ...baseHook, env: { B: '2', A: '1' } }),
+      hookFingerprint({ ...baseHook, env: { A: '1', B: '2' } }),
+      'env key order does not spuriously change fingerprint',
+    );
+    assert.notEqual(hookFingerprint({ ...baseHook, env: { A: '1' } }), hookFingerprint({ ...baseHook, env: { A: '2' } }));
+    assert.notEqual(hookFingerprint({ ...baseHook, timeout: 5 }), hookFingerprint({ ...baseHook, timeout: 10 }));
+    assert.notEqual(hookFingerprint({ ...baseHook, shell: 'sh' }), hookFingerprint({ ...baseHook, shell: 'bash' }));
+    assert.notEqual(hookFingerprint(baseHook), hookFingerprint({ ...baseHook, launch: { program: 'echo', args: ['ok'] } }));
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test('Replayed double click across a redraw keeps its click count and starts one run, not two', async () => {
+  const dom = makeDom();
+  let runCalls = 0;
+  dom.handlers.hookRun = async () => {
+    runCalls++;
+    return baseResult({ outcome: 'adds', added: 'fast' });
+  };
+  await import('../src/settingspage.ts');
+  const { state } = await import('../src/app.ts');
+  const { keepClicksAcrossRedraws } = await import('../src/dom.ts');
+  const viewMod = await import('../src/hooksourceview.ts');
+  viewMod.resetHookSources();
+  state.home = { home: '/tmp/h', mode: 'actual', label: 'Home' } as any;
+  keepClicksAcrossRedraws(() => 'instructions');
+
+  const ref: HookSourceRef = { from: 'own', tool: 'claude-cli', declaredIn: '/tmp/h/.claude/settings.json', event: 'SessionStart', at: 0, command: 'echo fast', fingerprint: 'fp-fast' };
+  const draw = () => {
+    dom.nodes.clear();
+    const row = dom.makeNode('li');
+    row.connected = true;
+    row.append(...viewMod.hookSourceControls(ref, 'hook-source-instructions-claude-cli-0-0'));
+    return dom.findAll(row, n => 'data-hook-run' in (n.attrs ?? {}))[0];
+  };
+
+  // Click 1 finishes immediately (returning idle Run it).
+  const btn1 = draw();
+  btn1.onclick({ detail: 1 });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(runCalls, 1);
+
+  // Click 2 (double-click: mousedown detail 2) starts on btnBefore, redraw replaces it, pointerup replays click.
+  const btnBefore = draw();
+  dom.emitDoc('pointerdown', { button: 0, pointerId: 1, clientX: 5, clientY: 5, detail: 0, shiftKey: false, target: btnBefore });
+  dom.emitDoc('mousedown', { button: 0, clientX: 5, clientY: 5, detail: 2, target: btnBefore });
+  const btnAfter = draw();
+  btnBefore.isConnected = false;
+  dom.emitDoc('pointerup', { button: 0, pointerId: 1, clientX: 5, clientY: 5, detail: 0, target: btnAfter });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(runCalls, 1, 'replayed second click of a double click must keep detail=2 and not start a second run');
+});
+
+test('Space held on Running… (aria-disabled) is not replayed onto Run it when the hook ends', async () => {
+  const dom = makeDom();
+  let runCalls = 0;
+  let resolveRun!: (r: HookRunResult) => void;
+  dom.handlers.hookRun = () => {
+    runCalls++;
+    return new Promise<HookRunResult>(resolve => { resolveRun = resolve; });
+  };
+  await import('../src/settingspage.ts');
+  const { state } = await import('../src/app.ts');
+  const { keepClicksAcrossRedraws } = await import('../src/dom.ts');
+  const viewMod = await import('../src/hooksourceview.ts');
+  viewMod.resetHookSources();
+  state.home = { home: '/tmp/h', mode: 'actual', label: 'Home' } as any;
+  keepClicksAcrossRedraws(() => 'instructions');
+
+  const ref: HookSourceRef = { from: 'own', tool: 'claude-cli', declaredIn: '/tmp/h/.claude/settings.json', event: 'SessionStart', at: 0, command: 'echo hold', fingerprint: 'fp-hold' };
+  const row = dom.makeNode('li');
+  row.connected = true;
+  row.append(...viewMod.hookSourceControls(ref, 'hook-source-instructions-claude-cli-0-0'));
+  const runBtn = dom.findAll(row, n => 'data-hook-run' in (n.attrs ?? {}))[0];
+  runBtn.onclick({ detail: 1 });
+  assert.equal(runCalls, 1);
+
+  const runningBtn = dom.findAll(row, n => 'data-hook-run' in (n.attrs ?? {}))[0];
+  assert.equal(runningBtn.getAttribute('aria-disabled'), 'true');
+  // Hold Space on Running… before the hook finishes.
+  dom.emitDoc('keydown', { key: ' ', repeat: false, target: runningBtn });
+  // Hook finishes: Run it returns under the same id with focus.
+  resolveRun(baseResult({ outcome: 'adds', added: 'done' }));
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const idleBtn = dom.findAll(row, n => 'data-hook-run' in (n.attrs ?? {}))[0];
+  assert.notEqual(idleBtn, runningBtn);
+  assert.equal((globalThis as any).document.activeElement, idleBtn);
+  // Release Space on Run it: must NOT start a second run!
+  dom.emitDoc('keyup', { key: ' ', target: idleBtn });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(runCalls, 1, 'Space press begun on aria-disabled Running… must not replay onto Run it');
+});
+
+test('Off-screen row does not scroll the page when its result arrives', async () => {
+  const dom = makeDom();
+  let resolveRun!: (r: HookRunResult) => void;
+  dom.handlers.hookRun = () => new Promise<HookRunResult>(resolve => { resolveRun = resolve; });
+  await import('../src/settingspage.ts');
+  const { state } = await import('../src/app.ts');
+  const viewMod = await import('../src/hooksourceview.ts');
+  viewMod.resetHookSources();
+  state.home = { home: '/tmp/h', mode: 'actual', label: 'Home' } as any;
+
+  const ref: HookSourceRef = { from: 'own', tool: 'claude-cli', declaredIn: '/tmp/h/.claude/settings.json', event: 'SessionStart', at: 0, command: 'echo slow', fingerprint: 'fp-slow' };
+  const scroller = dom.makeNode('div');
+  scroller.className = 'scroll';
+  scroller.rect = { top: 0, bottom: 500, left: 0, right: 800 };
+  scroller.connected = true;
+  const row = dom.makeNode('li');
+  scroller.append(row);
+  row.append(...viewMod.hookSourceControls(ref, 'hook-source-instructions-claude-cli-0-0'));
+  const actions = row.children[0];
+  const runBtn = dom.findAll(row, n => 'data-hook-run' in (n.attrs ?? {}))[0];
+  runBtn.onclick({ detail: 1 });
+  // User scrolls away to another card so this row sits above the scroll viewport.
+  actions.rect = { top: -180, bottom: -160, left: 0, right: 800 };
+  resolveRun(baseResult({ outcome: 'adds', added: 'late offscreen' }));
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(dom.scrolled.length, 0, 'off-screen row must not call scrollIntoView');
+});
+
+test('Refresh drops in-flight hook answers when Refresh starts, before refresh completes', async () => {
+  const dom = makeDom();
+  let resolveRun!: (r: HookRunResult) => void;
+  let resolveRefresh!: (v: any) => void;
+  dom.handlers.hookRun = () => new Promise<HookRunResult>(resolve => { resolveRun = resolve; });
+  dom.handlers.refresh = () => new Promise<any>(resolve => { resolveRefresh = resolve; });
+  await import('../src/settingspage.ts');
+  const { readAgain, setRenderer, state } = await import('../src/app.ts');
+  const viewMod = await import('../src/hooksourceview.ts');
+  setRenderer(() => {});
+  viewMod.resetHookSources();
+  state.home = {
+    home: '/tmp/h', mode: 'actual', label: 'Home',
+    presence: { tools: {} },
+    sync: { managed: [], access: { allowed: true }, gate: { state: 'ok' } },
+  } as any;
+
+  const ref: HookSourceRef = { from: 'own', tool: 'claude-cli', declaredIn: '/tmp/h/.claude/settings.json', event: 'SessionStart', at: 0, command: 'echo race', fingerprint: 'fp-race' };
+  const row = dom.makeNode('li');
+  row.connected = true;
+  row.append(...viewMod.hookSourceControls(ref, 'hook-source-instructions-claude-cli-0-0'));
+  dom.findAll(row, n => 'data-hook-run' in (n.attrs ?? {}))[0].onclick({ detail: 1 });
+
+  // Start Refresh; while api().refresh(true) is still in flight, the hook finishes.
+  const refreshing = readAgain();
+  resolveRun(baseResult({ outcome: 'adds', added: 'arrived during refresh' }));
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(dom.findAll(row, n => n.className === 'hook-run').length, 0, 'hook ending while Refresh is reading must be dropped');
+  assert.equal(dom.scrolled.length, 0, 'dropped answer during Refresh must not scroll');
+  resolveRefresh(null);
+  await refreshing;
+
+  // IPC call rejection renders "Couldn't run it." (never View source's unreadable-file message).
+  dom.handlers.hookRun = () => Promise.reject(new Error('ipc lost'));
+  const errRow = dom.makeNode('li');
+  errRow.connected = true;
+  errRow.append(...viewMod.hookSourceControls(ref, 'hook-source-instructions-claude-cli-0-0'));
+  dom.findAll(errRow, n => 'data-hook-run' in (n.attrs ?? {}))[0].onclick({ detail: 1 });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const errPanel = dom.findAll(errRow, n => n.className === 'hook-run')[0];
+  assert.equal(dom.textOf(errPanel), 'Couldn’t run it.');
 });

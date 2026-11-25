@@ -1,10 +1,10 @@
-// Shared hook-row controls and panels for every hook row: Run it / Running… + Stop (on runnable rows: actual home, own hooks,
-// non-Windows, decided by canRun) beside View source / Hide source inside one span, plus the opened run result (above) and
-// source block (below), called by instructionspage.ts sessionStripView (Instructions and a tool's Instructions tab) and
-// pluginpage.ts partList (from hookGroup). Reads source over hook:source (hooksource.ts) and runs/stops on click over hook:run /
-// hook:stop (hookrun.ts), wording results through sessionhooks.ts hookRunWords, updating in place so open editors keep their
-// caret. Nothing starts a run on draw; button ids carry a hash of the row key; Escape closes the focused block and refocuses
-// its button; leaving the page prunes state (without stopping an active run in main); Refresh and home switches clear all state.
+// Shared hook-row controls and panels for every hook row: Run it / Running… + Stop (offered by canRun; main's hookrun.ts
+// runHook decides) beside View source / Hide source inside one span, plus the opened run result (above) and source block
+// (below), called by instructionspage.ts sessionStripView (Instructions and a tool's Instructions tab) and pluginpage.ts
+// partList (from hookGroup). Reads source over hook:source (hooksource.ts) and runs/stops on click over hook:run / hook:stop
+// (hookrun.ts), wording results through sessionhooks.ts hookRunWords, updating in place so open editors keep their caret.
+// Nothing starts a run on draw; ids hash the row key and declaration fingerprint; Escape closes the focused block and refocuses
+// its button; leaving the page prunes state (without stopping main); Refresh and home switches clear all state.
 import { shownPath, state } from './app.ts';
 import { button, closeButton, h, icon, pathText } from './dom.ts';
 import { pagePlatform } from './machine.ts';
@@ -25,16 +25,26 @@ const opened = new Map<string, { seq: number; panelId: string; source?: HookSour
 const runs = new Map<string, RunEntry>();
 let seq = 0;
 
-/** Whether this row can offer Run it: this computer's own home, his own hooks, and not Windows. */
+/** Whether the page offers Run it (mirrors main's own deciding gate in hookrun.ts runHook): this computer's own home, his own hooks, and not Windows. */
 export function canRun(ref: HookSourceRef, mode: HomeMode | undefined = state.home?.mode, platform = pagePlatform(navigator.userAgent)): boolean {
   return mode === 'actual' && ref.from === 'own' && platform !== 'win32';
 }
 
-/** Short deterministic hash of a row key so re-read position shifts never reuse another hook's button id. */
+/** Short deterministic hash of a row key so re-read position shifts give another hook a different button id. */
 function keyHash(text: string): string {
   let hash = 2166136261;
   for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619) >>> 0;
   return hash.toString(36);
+}
+
+/** Whether a row's controls currently lie inside its scroll container (or the window) so arriving results never jump an away user back. */
+function rowOnScreen(actionsEl: HTMLElement): boolean {
+  const rect = actionsEl.getBoundingClientRect?.();
+  if (!rect) return true;
+  const box = actionsEl.closest?.('.scroll')?.getBoundingClientRect?.();
+  const top = box ? box.top : 0;
+  const bottom = box ? box.bottom : window.innerHeight;
+  return rect.bottom > top && rect.top < bottom;
 }
 
 /** Closes all open hook source and run blocks and drops any in-flight reads or runs (called on Refresh and home switch). */
@@ -59,11 +69,10 @@ const rowLink = (label: string, id: string, onclick: (event: MouseEvent) => void
 function sourceBlock(blockId: string, path?: string, text?: string, note?: string, prefix?: string, suffix?: string): HTMLElement {
   return h('div.content-block', {},
     path ? h('p.content-owner', {}, prefix ? `${prefix} ` : null, pathText(shownPath(path), path), suffix ?? null) : null,
-    text !== undefined ? textPre(blockId, `${fileName(path ?? '')} contents`, text) : h('p.hook-source-note', {}, note ?? ''));
+    text !== undefined
+      ? textPre(blockId, `${fileName(path ?? '')} contents`, text)
+      : h('p.hook-source-note', {}, note ?? ''));
 }
-
-const labeledOutput = (id: string, label: string, text: string): HTMLElement =>
-  h('div.content-block', {}, h('p.content-owner', {}, label), textPre(id, label, text));
 
 /** Returns the row's action span (Run it / Running… + Stop when runnable, beside View source), then any open result and source blocks. */
 export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[] {
@@ -129,14 +138,11 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
     };
     return h('div.hook-run', { id: runPanelId, role: 'region', 'aria-label': 'Hook run result', onkeydown: onRunEscape },
       h('div.hook-run-head', {},
-        h('span.hook-run-says', {}, view.sentence),
-        h('span.hook-run-controls', {},
-          view.canAgain ? rowLink('Run again', `${base}-again`, startRun, { 'data-hook-again': '', onkeydown: onRunKey }) : null,
-          closeButton(closeRun, { id: `${base}-close`, label: 'Close result' }))),
+        h('span.hook-run-says', {}, view.sentence, view.meta ? [' ', h('span.hook-run-meta', {}, view.meta)] : null),
+        closeButton(closeRun, { id: `${base}-close`, label: 'Close result' })),
       ...view.notes.map(note => h('p.hook-run-note', {}, note)),
       view.added !== undefined ? textPre(`${base}-added`, 'Text the hook would add', view.added) : null,
-      view.errDirect !== undefined ? labeledOutput(`${base}-stderr`, 'Standard error', view.errDirect) : null,
-      view.outDirect !== undefined ? labeledOutput(`${base}-stdout`, 'Standard output', view.outDirect) : null,
+      view.errDirect !== undefined ? h('div.content-block', {}, h('p.content-owner', {}, 'Standard error'), textPre(`${base}-stderr`, 'Standard error', view.errDirect)) : null,
       view.allFold !== undefined ? foldBlock(`${base}-all`, 'Show all it printed', view.allFold, entry.openAll, flip('openAll', `${base}-all`)) : null,
       view.errFold !== undefined ? foldBlock(`${base}-err-fold`, 'Standard error', view.errFold, entry.openErr, flip('openErr', `${base}-err-fold`)) : null);
   };
@@ -174,8 +180,13 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
     busy.focus({ preventScroll: true });
     void window.centralKnot.hookRun(activeHome, ref)
       .catch((): HookRunResult => ({
-        outcome: 'refused', problem: HOOK_SOURCE_UNREADABLE, allPrinted: '', stderr: '',
-        durationMs: 0, at: new Date().toISOString(), cwd: '', emptyPrompt: false,
+        outcome: 'refused',
+        allPrinted: '',
+        stderr: '',
+        durationMs: 0,
+        at: new Date().toISOString(),
+        cwd: '',
+        emptyPrompt: false,
       }))
       .then(result => {
         if (state.home?.home !== activeHome || runs.get(key)?.seq !== call) return;
@@ -184,6 +195,7 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
           runs.delete(key);
           return;
         }
+        const visible = rowOnScreen(actionsEl);
         const done: RunEntry = { seq: call, runBtnId, running: false, result, openAll: false, openErr: false };
         runs.set(key, done);
         const activeId = document.activeElement?.id;
@@ -196,7 +208,7 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
         const existing = document.getElementById(runPanelId);
         if (existing) existing.replaceWith(nextPanel);
         else actionsEl.after(nextPanel);
-        nextPanel.scrollIntoView?.({ block: 'nearest' });
+        if (visible) nextPanel.scrollIntoView?.({ block: 'nearest' });
       });
   }
 
