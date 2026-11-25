@@ -9,8 +9,8 @@
 // Limits: promises exclusion on a local file system only; a home on a network folder is not covered.
 // Not here: record shapes, reads, upserts, or turns (`sessionrecord.ts`); sweeping (`sessionsweep.ts`); Clear, retention,
 // callers, Settings, or timers.
-import { access, constants, lstat, mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { access, constants, lstat, mkdir, stat } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { sessionsDirectory, type HeldEntry } from './sessionrecord.ts';
 import { errorCode, writeAccess, type ShareContext } from './share.ts';
@@ -88,7 +88,10 @@ export async function withSessionStoreLock<T>(context: ShareContext, work: () =>
   if (typeof dir !== 'string') return heldRefusal(dir);
   if (dir === 'missing') {
     const made = await mkdir(dirPath, { recursive: true }).then(() => true, () => false);
-    if (!made) return heldRefusal({ file: 'sessions', kind: 'damaged', reason: 'The sessions folder could not be created.' });
+    if (!made) {
+      const parent = await stat(dirname(dirPath)).catch(() => undefined);
+      return heldRefusal({ file: 'sessions', kind: parent && !parent.isDirectory() ? 'not-a-file' : 'damaged', reason: 'The sessions folder could not be created.' });
+    }
   }
   const lockPath = sessionLockPath(context.home);
   const lock = await checkPath(lockPath, SESSION_LOCK_FILE, false);
