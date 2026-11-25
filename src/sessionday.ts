@@ -3,8 +3,7 @@
 // claudeFiles, Codex via codexRollouts), reads session files modified at or after period.start, keeps requests inside
 // [start, end), deduplicates across files by (tool, session, request), prices each kept request (rates.ts priceRequest),
 // keeps the largest rates.ts reportedCost of a complete SessionRead.reported only on a root session whose whole tree lay
-// inside the period (shared rule: propagateFigureBlocks and mergeReportedFigure, also used by sessionsweep.ts), and joins
-// concurrent reads for the same home, period and tools. Nothing is written under the home;
+// inside the period, and joins concurrent reads for the same home, period and tools. Nothing is written under the home;
 // DayReading holds no message text and no absolute path. Not here: rows and totals (sessionrow.ts), file listing and record
 // parsing (sessionrequests.ts), rate matching (rates.ts), tool presence and which tools are read (presence.ts), stored
 // records, IPC (main.ts sessions:read), or the Sessions page (sessionspage.ts).
@@ -34,40 +33,7 @@ export interface ToolReading { tool: SessionTool; sessions: ReadSession[]; unrea
 export interface DayReading { period: Period; ratesDate: string; tools: ToolReading[] }
 
 interface Candidate { file: string; session?: string; parent?: string; read: () => Promise<SessionRead> }
-interface SessionMeta { parent?: string; project?: string; reported?: { dollars: number; complete: boolean }; requests: Map<string, Request> }
-
-/**
- * Propagates reported-figure blocks up each session's `parent` chain (cycle-safe): any missing, unreadable, or partial
- * descendant makes its ancestors' tool-reported figures incomplete too. Shared by `readSessionPeriod` and `sessionsweep.ts`.
- */
-export function propagateFigureBlocks(blocked: Iterable<string>, parentOf: (session: string) => string | undefined): Set<string> {
-  const out = new Set(blocked);
-  for (const id of [...out]) {
-    const seen = new Set([id]);
-    for (let cur = parentOf(id); cur && !seen.has(cur); cur = parentOf(cur)) {
-      out.add(cur);
-      seen.add(cur);
-    }
-  }
-  return out;
-}
-
-/**
- * Combines tool-reported figures for one root session (`hasParent` false; children keep none): keeps the largest finite
- * non-negative running total across files/reads, and marks `complete` true only when both figures and the session tree are
- * complete. Shared by `readSessionPeriod` and `sessionsweep.ts`.
- */
-export function mergeReportedFigure(
-  current: { dollars: number; complete: boolean } | undefined, incoming: { dollars: number; complete: boolean } | undefined,
-  blocked: boolean, hasParent: boolean,
-): { dollars: number; complete: boolean } | undefined {
-  if (hasParent) return undefined;
-  const valid = incoming && Number.isFinite(incoming.dollars) && incoming.dollars >= 0 ? incoming : undefined;
-  if (!current && !valid) return undefined;
-  const dollars = current && valid ? Math.max(current.dollars, valid.dollars) : (valid ?? current)!.dollars;
-  const complete = !blocked && (current ? current.complete : true) && (valid ? valid.complete : true);
-  return { dollars, complete };
-}
+interface SessionMeta { parent?: string; project?: string; reported?: number; requests: Map<string, Request> }
 
 const reqTokens = (r: Request) => r.tokens.input + r.tokens.cacheRead + r.tokens.cacheWrite + r.tokens.output;
 
@@ -131,9 +97,14 @@ async function readTool(tool: SessionTool, at: UsageWhere, period: Period): Prom
       continue;
     }
     if (read.unread > 0) markUnread(item);
-    if (item.session && !item.parent && read.reported) {
-      const entry = getMeta(item.session);
-      entry.reported = mergeReportedFigure(entry.reported, read.reported, false, false);
+    if (item.session && !item.parent) {
+      // Keep the largest reported figure across copies of one session (rests on the figure never going down within a file as
+      // seen; a file cut back after a copy was made would show the copy's larger figure).
+      const figure = read.reported?.complete ? reportedCost(read.reported.dollars) : undefined;
+      if (figure !== undefined) {
+        const entry = getMeta(item.session);
+        entry.reported = Math.max(entry.reported ?? 0, figure);
+      }
     }
     for (const req of read.requests) {
       const entry = getMeta(req.session);
@@ -151,15 +122,20 @@ async function readTool(tool: SessionTool, at: UsageWhere, period: Period): Prom
   for (const [id, entry] of meta) {
     if ([...entry.requests.values()].some(r => r.at < period.start || r.at >= period.end)) figureBlocked.add(id);
   }
-  const blocked = propagateFigureBlocks(figureBlocked, id => meta.get(id)?.parent);
+  for (const id of [...figureBlocked]) {
+    const seen = new Set([id]);
+    for (let cur = meta.get(id)?.parent; cur && !seen.has(cur); cur = meta.get(cur)?.parent) {
+      figureBlocked.add(cur);
+      seen.add(cur);
+    }
+  }
 
   const sessions: ReadSession[] = [];
   for (const [session, entry] of meta) {
     const inPeriod = [...entry.requests.values()].filter(req => req.at >= period.start && req.at < period.end);
     if (!inPeriod.length) continue;
     inPeriod.sort((a, b) => a.at - b.at || a.request.localeCompare(b.request));
-    const figure = mergeReportedFigure(entry.reported, undefined, blocked.has(session), !!entry.parent);
-    const reported = figure?.complete ? reportedCost(figure.dollars) : undefined;
+    const reported = !entry.parent && !figureBlocked.has(session) ? entry.reported : undefined;
     sessions.push({
       tool, session,
       ...(entry.parent ? { parent: entry.parent } : {}),

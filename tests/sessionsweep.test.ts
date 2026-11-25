@@ -9,7 +9,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { SESSION_TOOLS, type SessionTool } from '../src/presence.ts';
-import { bundledRates, priceRequest, reportedCost, type PriceResult, type RatesTable } from '../src/rates.ts';
+import { bundledRates, priceRequest, type PriceResult, type RatesTable } from '../src/rates.ts';
 import { readSessionPeriod, type DayReading, type Period, type PricedRequest, type ReadSession } from '../src/sessionday.ts';
 import {
   emptyPositions,
@@ -206,7 +206,7 @@ function priceFromKept(entry: PricingEntry, rec: Receipt): PriceResult {
 
 /** Turns kept months into a `DayReading` for `sessionRows`, matching `readSessionPeriod` for a day with no unread history. */
 function keptToDayReading(months: Record<string, SessionMonth>, period: Period, ratesDate: string): DayReading {
-  const byTool = new Map<SessionTool, Map<string, { parent?: string; project?: string; reported?: number; requests: PricedRequest[] }>>();
+  const byTool = new Map<SessionTool, Map<string, { parent?: string; project?: string; requests: PricedRequest[] }>>();
   for (const tool of SESSION_TOOLS) byTool.set(tool, new Map());
   for (const data of Object.values(months)) {
     for (const s of data.sessions) {
@@ -215,10 +215,6 @@ function keptToDayReading(months: Record<string, SessionMonth>, period: Period, 
       const entry = toolMap.get(s.session) ?? { requests: [] };
       entry.parent ??= s.parent;
       entry.project ??= s.project;
-      if (!s.parent && s.reported?.complete) {
-        const fig = reportedCost(s.reported.dollars);
-        if (fig !== undefined) entry.reported = Math.max(entry.reported ?? 0, fig);
-      }
       for (const [reqId, rec] of Object.entries(s.requests)) {
         if (rec.at < period.start || rec.at >= period.end) continue;
         const req: Request = {
@@ -251,7 +247,6 @@ function keptToDayReading(months: Record<string, SessionMonth>, period: Period, 
           ...(entry.parent ? { parent: entry.parent } : {}),
           ...(entry.project ? { project: entry.project } : {}),
           requests: entry.requests,
-          ...(entry.reported !== undefined ? { reported: entry.reported } : {}),
         });
       }
       return { tool, sessions, unread: false };
@@ -259,7 +254,7 @@ function keptToDayReading(months: Record<string, SessionMonth>, period: Period, 
   };
 }
 
-test('1. First sweep: two Claude Code sessions (one with an agent) and one Codex rollout land once with prices, figures and positions', async () => {
+test('1. First sweep: two Claude Code sessions (one with an agent) and one Codex rollout land once with prices and positions', async () => {
   const ctx = await makeContext();
   const project = join(ctx.home, '.claude', 'projects', '-work-app');
   await put(join(project, 'sess-1.jsonl'), [
@@ -305,11 +300,11 @@ test('1. First sweep: two Claude Code sessions (one with an agent) and one Codex
   const codex = month.sessions.find(s => s.tool === 'codex-cli' && s.session === 'thread-1')!;
 
   assert.equal(s1.project, 'app');
-  assert.deepEqual(s1.reported, { dollars: 0.0125, complete: true });
+  assert.equal(s1.reported, undefined, 'sweep keeps no reported figure');
   assert.equal(agent.parent, 'sess-1');
   assert.equal(agent.project, 'app');
   assert.equal(s2.project, 'other');
-  assert.deepEqual(s2.reported, { dollars: 0.05, complete: false });
+  assert.equal(s2.reported, undefined, 'sweep keeps no reported figure');
   assert.equal(codex.project, 'codex-app');
 
   const expectedP1 = priceRequest({
@@ -427,7 +422,6 @@ test('4. Parity with the Sessions page: identical rows and sums for disjoint ses
   const project = join(ctx.home, '.claude', 'projects', '-work-app');
   await put(join(project, 'root.jsonl'), [
     claudeResp('msg_r1', atLocal(10, 0), claudeUsage(1000, 2000, 500, 250, 100), 'claude-haiku-4-5-20251001'),
-    claudeCost(0.021, false),
   ]);
   await put(join(project, 'root', 'subagents', 'agent-1.jsonl'), [
     {
@@ -1286,8 +1280,8 @@ test('21. Request at a month end met first from the later side: one receipt kept
   assert.equal(decRec.tokens.output, 400, 'updated with fuller tokens');
 });
 
-test('Facts-only tail invalidation, position-only progress, and writeAccess refusal', async () => {
-  // Facts-only tail in November patches a session whose requests live only in October.
+test('Facts-only tail patching, position-only progress, idle unread listing, and writeAccess refusal', async () => {
+  // Facts-only tail in November patches unread and continuing project on a session whose requests live only in October.
   const ctx = await makeContext({ now: () => Date.UTC(2026, 9, 31, 23, 50, 0) });
   const file = join(ctx.home, '.claude', 'projects', '-work-app', 'oct-sess.jsonl');
   await put(file, [
@@ -1295,20 +1289,21 @@ test('Facts-only tail invalidation, position-only progress, and writeAccess refu
     claudeCost(0.01, false),
   ]);
   await sweepSessions(ctx, { rates: RATES_V1 });
-  assert.deepEqual((await readSessionRecord(ctx.home, ['2026-10'])).months['2026-10']!.sessions[0]!.reported, { dollars: 0.01, complete: true });
+  assert.equal((await readSessionRecord(ctx.home, ['2026-10'])).months['2026-10']!.sessions[0]!.reported, undefined);
 
-  // In November (currentMonth = 2026-11), append ONLY a cost-state with unknown model (invalidating complete) and a malformed line.
-  await appendFile(file, `${lines([claudeCost(0.03, true)])}{broken-tail\n`);
+  // In November (currentMonth = 2026-11), append ONLY a malformed line and a continuing user line with a new cwd (project).
+  await appendFile(file, `{broken-tail\n${lines([claudeUser('2026-11-15T12:00:00.000Z', join('work', 'renamed'))])}`);
   const novCtx = { ...ctx, now: () => Date.UTC(2026, 10, 15, 12, 0, 0) };
   const tailRes = await sweepSessions(novCtx, { rates: RATES_V1 });
   assert.equal(tailRes.wrote, true);
   assert.equal(tailRes.byTool['claude-cli'].unreadLines, 1);
   const octAfter = (await readSessionRecord(ctx.home, ['2026-10', '2026-11'])).months['2026-10']!.sessions[0]!;
-  assert.deepEqual(octAfter.reported, { dollars: 0.03, complete: false }, 'facts-only tail invalidated complete in older kept month');
+  assert.equal(octAfter.reported, undefined);
   assert.equal(octAfter.unread, 1, 'facts-only tail updated unread in older kept month');
+  assert.equal(octAfter.project, 'renamed', 'facts-only tail updated continuing project in older kept month');
 
   // Position-only progress (non-request user line appended): writes positions so the next sweep does not reread.
-  await appendFile(file, lines([claudeUser('2026-11-15T12:01:00.000Z')]));
+  await appendFile(file, lines([claudeUser('2026-11-15T12:01:00.000Z', join('work', 'renamed'))]));
   const posOnly = await sweepSessions(novCtx, { rates: RATES_V1 });
   assert.equal(posOnly.wrote, true);
   assert.deepEqual(posOnly.taken, { requests: 0, sessions: 0 });
@@ -1319,6 +1314,31 @@ test('Facts-only tail invalidation, position-only progress, and writeAccess refu
   });
   assert.equal(readsAfterPosOnly, 0);
   assert.equal(idleAfter.wrote, false);
+
+  // Idle sweep with an unreadable subagents listing still opens no month file (even when current month is held).
+  const heldNov = join(sessionsDirectory(ctx.home), '2026-11.json');
+  await writeFile(heldNov, '{"formatVersion":2}\n');
+  const idleUnread = await sweepSessions(novCtx, {
+    rates: RATES_V1,
+    deps: {
+      listClaude: async () => ({ files: [{ file, session: 'oct-sess' }], unread: true, unreadSessions: ['oct-sess'] }),
+    },
+  });
+  assert.equal(idleUnread.wrote, false);
+  assert.equal(idleUnread.refused, undefined, 'idle sweep with unread listing did not open held current month');
+  assert.equal(idleUnread.byTool['claude-cli'].unreadListing, true);
+  await rm(heldNov);
+
+  // A bad-line-only file with no kept receipt moves its position, reports unreadLines in the answer, and writes no kept session.
+  const orphan = join(ctx.home, '.claude', 'projects', '-work-app', 'orphan-bad.jsonl');
+  await writeFile(orphan, '{orphan-broken-line\n');
+  const orphanRes = await sweepSessions(novCtx, { rates: RATES_V1 });
+  assert.equal(orphanRes.wrote, true);
+  assert.equal(orphanRes.byTool['claude-cli'].unreadLines, 1);
+  assert.equal((await readSessionRecord(ctx.home, ['2026-11'])).months['2026-11'], undefined);
+  const orphanIdle = await sweepSessions(novCtx, { rates: RATES_V1 });
+  assert.equal(orphanIdle.wrote, false);
+  assert.equal(orphanIdle.byTool['claude-cli'].unreadLines, 0);
 
   // writeAccess refusal: nothing written, no positions moved, taken stays zero, refused reports the reason.
   const deniedCtx = await makeContext({ held: 'Another build holds this computer.' });
@@ -1383,109 +1403,4 @@ test('An older Codex rollout rewritten shorter keeps its original receipt tokens
   const totalInput = Object.values(after.requests).reduce((sum, r) => sum + r.tokens.input, 0);
   const totalOutput = Object.values(after.requests).reduce((sum, r) => sum + r.tokens.output, 0);
   assert.deepEqual([totalInput, totalOutput], [200, 40]);
-});
-
-test('Reported figure completeness follows the page tree rule and keeps the largest figure across copies', async () => {
-  // (a) Corrupt subagent line marks parent reported incomplete (same sweep, and also when corruption arrives in a later sweep).
-  const ctxA = await makeContext();
-  const projA = join(ctxA.home, '.claude', 'projects', '-work-app');
-  await put(join(projA, 'parent.jsonl'), [
-    claudeResp('msg_p', '2026-11-24T12:00:00.000Z', claudeUsage(100, 0, 0, 10)),
-    claudeCost(0.25, false),
-  ]);
-  await mkdir(join(projA, 'parent', 'subagents'), { recursive: true });
-  await writeFile(
-    join(projA, 'parent', 'subagents', 'agent-x.jsonl'),
-    `${lines([claudeResp('msg_c', '2026-11-24T12:00:10.000Z', claudeUsage(50, 0, 0, 5))])}{broken-child\n`,
-  );
-  await sweepSessions(ctxA, { rates: RATES_V1 });
-  const parentA = (await readSessionRecord(ctxA.home, ['2026-11'])).months['2026-11']!.sessions.find(s => s.session === 'parent')!;
-  assert.deepEqual(parentA.reported, { dollars: 0.25, complete: false }, 'corrupt child marks parent reported incomplete');
-
-  // (b) Clean parent + child swept first, then child gains a corrupt line on Sweep 2 -> parent flips to complete: false.
-  const ctxB = await makeContext();
-  const projB = join(ctxB.home, '.claude', 'projects', '-work-app');
-  const childB = join(projB, 'root', 'subagents', 'agent-y.jsonl');
-  await put(join(projB, 'root.jsonl'), [
-    claudeResp('msg_r', '2026-11-24T12:00:00.000Z', claudeUsage(100, 0, 0, 10)),
-    claudeCost(0.4, false),
-  ]);
-  await put(childB, [claudeResp('msg_y', '2026-11-24T12:00:10.000Z', claudeUsage(50, 0, 0, 5))]);
-  await sweepSessions(ctxB, { rates: RATES_V1 });
-  assert.deepEqual(
-    (await readSessionRecord(ctxB.home, ['2026-11'])).months['2026-11']!.sessions.find(s => s.session === 'root')!.reported,
-    { dollars: 0.4, complete: true },
-  );
-  await appendFile(childB, '{corrupt-later\n');
-  await sweepSessions(ctxB, { rates: RATES_V1 });
-  assert.deepEqual(
-    (await readSessionRecord(ctxB.home, ['2026-11'])).months['2026-11']!.sessions.find(s => s.session === 'root')!.reported,
-    { dollars: 0.4, complete: false },
-    'later corrupt child line invalidates parent reported completeness',
-  );
-
-  // (c) Unreadable subagents listing (unreadSessions) blocks parent reported completeness, and two copies keep the largest figure.
-  const ctxC = await makeContext();
-  const origC = join(ctxC.home, '.claude', 'projects', 'a-orig', 'shared.jsonl');
-  const copyC = join(ctxC.home, '.claude', 'projects', 'b-copy', 'shared.jsonl');
-  await put(origC, [claudeResp('msg_s1', '2026-11-24T12:00:00.000Z', claudeUsage(100, 0, 0, 10)), claudeCost(0.55, false)]);
-  await put(copyC, [claudeResp('msg_s1', '2026-11-24T12:00:00.000Z', claudeUsage(100, 0, 0, 10)), claudeCost(0.15, false)]);
-  await sweepSessions(ctxC, { rates: RATES_V1 });
-  assert.deepEqual(
-    (await readSessionRecord(ctxC.home, ['2026-11'])).months['2026-11']!.sessions.find(s => s.session === 'shared')!.reported,
-    { dollars: 0.55, complete: true },
-    'largest reported figure wins across copies',
-  );
-  await sweepSessions(ctxC, {
-    rates: RATES_V1,
-    deps: {
-      listClaude: async () => ({ files: [{ file: origC, session: 'shared' }], unread: true, unreadSessions: ['shared'] }),
-    },
-  });
-  assert.deepEqual(
-    (await readSessionRecord(ctxC.home, ['2026-11'])).months['2026-11']!.sessions.find(s => s.session === 'shared')!.reported,
-    { dollars: 0.55, complete: false },
-    'unreadable subagents folder marks parent reported incomplete',
-  );
-});
-
-test('Unapplied facts (before first request, or when session month is held) do not advance the file position and apply once possible', async () => {
-  // (a) Cost line before the session's first request: position stays at 0 until the request arrives, so the figure is not lost.
-  const ctxA = await makeContext();
-  const early = join(ctxA.home, '.claude', 'projects', '-work-app', 'early.jsonl');
-  await put(early, [claudeCost(0.15, false)]);
-  const firstA = await sweepSessions(ctxA, { rates: RATES_V1 });
-  assert.equal(firstA.wrote, false);
-  assert.equal((await readSessionRecord(ctxA.home, ['2026-11'])).positions.files.length, 0, 'position did not pass unapplied figure');
-
-  await appendFile(early, lines([claudeResp('msg_first', '2026-11-24T15:00:00.000Z', claudeUsage(200, 0, 0, 20))]));
-  const secondA = await sweepSessions(ctxA, { rates: RATES_V1 });
-  assert.equal(secondA.taken.requests, 1);
-  const keptA = (await readSessionRecord(ctxA.home, ['2026-11'])).months['2026-11']!.sessions[0]!;
-  assert.deepEqual(keptA.reported, { dollars: 0.15, complete: true }, 'figure survived and attached to first request');
-
-  // (b) Facts-only correction when the session's only kept month (2026-10) is held: position stays old until 2026-10 is readable again.
-  const ctxB = await makeContext({ now: () => Date.UTC(2026, 9, 31, 23, 50, 0) });
-  const octFile = join(ctxB.home, '.claude', 'projects', '-work-app', 'oct-held.jsonl');
-  await put(octFile, [
-    claudeResp('msg_oct', '2026-10-31T23:45:00.000Z', claudeUsage(300, 0, 0, 30)),
-    claudeCost(0.1, false),
-  ]);
-  await sweepSessions(ctxB, { rates: RATES_V1 });
-  const octPath = join(sessionsDirectory(ctxB.home), '2026-10.json');
-  const savedOctBytes = await readFile(octPath);
-  const oldPos = (await readSessionRecord(ctxB.home, ['2026-10'])).positions.files[0]!;
-
-  await writeFile(octPath, '{"formatVersion":2}\n');
-  await appendFile(octFile, lines([claudeCost(0.25, true)]));
-  const novCtx = { ...ctxB, now: () => Date.UTC(2026, 10, 15, 12, 0, 0) };
-  const heldAttempt = await sweepSessions(novCtx, { rates: RATES_V1 });
-  assert.equal(heldAttempt.wrote, false);
-  assert.equal(heldAttempt.held.some(h => h.file === '2026-10.json'), true);
-  assert.deepEqual((await readSessionRecord(ctxB.home, ['2026-11'])).positions.files[0], oldPos, 'position did not pass unapplied correction');
-
-  await writeFile(octPath, savedOctBytes);
-  const applied = await sweepSessions(novCtx, { rates: RATES_V1 });
-  assert.equal(applied.wrote, true);
-  assert.deepEqual((await readSessionRecord(ctxB.home, ['2026-10'])).months['2026-10']!.sessions[0]!.reported, { dollars: 0.25, complete: false });
 });
