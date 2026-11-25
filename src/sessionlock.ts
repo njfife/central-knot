@@ -1,26 +1,25 @@
 // Exclusive per-home lock for `.central-knot/sessions/` (`lock.sqlite`), shared by `sessionsweep.ts` and future store
-// mutators (Clear, retention). Owns: gating lock creation on `share.ts writeAccess` and verifying `.central-knot`,
-// `sessions`, and `lock.sqlite` are real home-owned paths (not links or wrong file types) before making anything on disk;
-// in-process exclusion by canonical home (`share.ts landingOf`); and cross-process OS exclusion via `node:sqlite`
-// `DatabaseSync` with zero busy timeout, `PRAGMA journal_mode = MEMORY` (no sidecar journal), and `BEGIN IMMEDIATE`, held
-// until `work` settles and released in `finally`. The empty `lock.sqlite` file stays permanently; process exit or crash
-// releases the OS lock automatically.
+// mutators (Clear, retention). Owns: gating lock creation on `share.ts writeAccess` and verifying `sessions` and
+// `lock.sqlite` are real paths (not links, wrong file types, non-empty, or read-only) before making anything on disk; and
+// in-process and cross-process exclusion via `node:sqlite` `DatabaseSync` with zero busy timeout,
+// `PRAGMA journal_mode = MEMORY` (no `-journal` sidecar), and `BEGIN IMMEDIATE`, held until `work` settles and released
+// in `finally`. Removing `lock.sqlite` while it is held lets another process create a new inode and take a second lock, so
+// nothing removes it (Clear leaves it in place); process exit or crash releases the OS lock automatically.
 //
 // Limits: promises exclusion on a local file system only; a home on a network folder is not covered.
 // Not here: record shapes, reads, upserts, or turns (`sessionrecord.ts`); sweeping (`sessionsweep.ts`); Clear, retention,
 // callers, Settings, or timers.
 import { access, constants, lstat, mkdir } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { sessionsDirectory, type HeldEntry } from './sessionrecord.ts';
-import { errorCode, landingOf, storeDirectory, writeAccess, type ShareContext } from './share.ts';
+import { errorCode, writeAccess, type ShareContext } from './share.ts';
 
 /** Permanent empty SQLite file inside `.central-knot/sessions/` used solely for OS-level store locking. */
 export const SESSION_LOCK_FILE = 'lock.sqlite';
 
 const SQLITE_BUSY = 5;
 const SQLITE_LOCKED = 6;
-const inProcessLocks = new Set<string>();
 
 /** Outcome of `withSessionStoreLock`: `ok` with `work`'s answer, `busy` when held, or `refused` (with optional `held`). */
 export type SessionLockResult<T> =
@@ -39,15 +38,19 @@ function isBusyError(error: unknown): boolean {
 }
 
 async function checkPath(path: string, file: string, dir: boolean): Promise<'ok' | 'missing' | HeldEntry> {
-  const name = file === '.central-knot' ? 'The Central Knot' : file === 'sessions' ? 'The sessions' : file;
-  const label = dir ? `${name} folder` : name;
+  const label = dir ? 'The sessions folder' : file;
   try {
     const info = await lstat(path);
     if (info.isSymbolicLink()) return { file, kind: 'link', reason: `${label} is a link.` };
     if (dir ? !info.isDirectory() : !info.isFile()) {
-      return { file, kind: 'not-a-file', reason: dir ? `${name} path is not a folder.` : `${name} is not a regular file.` };
+      return { file, kind: 'not-a-file', reason: dir ? 'The sessions path is not a folder.' : `${file} is not a regular file.` };
     }
-    if (!dir) await access(path, constants.R_OK | constants.W_OK);
+    if (!dir) {
+      if (info.size > 0) return { file, kind: 'damaged', reason: `${file} is not empty. Remove it to clear the lock.` };
+      // SQLite opens a read-only 0-byte file without write-locking it, so require write access up front.
+      const writable = await access(path, constants.R_OK | constants.W_OK).then(() => true, () => false);
+      if (!writable) return { file, kind: 'damaged', reason: `${file} cannot be written. Remove it to clear the lock.` };
+    }
     return 'ok';
   } catch (error) {
     const code = errorCode(error);
@@ -78,36 +81,30 @@ function closeLock(db: DatabaseSync | undefined): void {
  * without waiting if another caller in this process or another process holds the store.
  */
 export async function withSessionStoreLock<T>(context: ShareContext, work: () => Promise<T>): Promise<SessionLockResult<T>> {
-  const access = await writeAccess(context);
-  if (!access.allowed) return { status: 'refused', refused: access.reason };
-  const key = (await landingOf(context.home)) ?? resolve(context.home);
-  if (inProcessLocks.has(key)) return { status: 'busy' };
-  inProcessLocks.add(key);
+  const accessCheck = await writeAccess(context);
+  if (!accessCheck.allowed) return { status: 'refused', refused: accessCheck.reason };
+  const dirPath = sessionsDirectory(context.home);
+  const dir = await checkPath(dirPath, 'sessions', true);
+  if (typeof dir !== 'string') return heldRefusal(dir);
+  if (dir === 'missing') {
+    const made = await mkdir(dirPath, { recursive: true }).then(() => true, () => false);
+    if (!made) return heldRefusal({ file: 'sessions', kind: 'damaged', reason: 'The sessions folder could not be created.' });
+  }
+  const lockPath = sessionLockPath(context.home);
+  const lock = await checkPath(lockPath, SESSION_LOCK_FILE, false);
+  if (typeof lock !== 'string') return heldRefusal(lock);
   let db: DatabaseSync | undefined;
   try {
-    const store = await checkPath(storeDirectory(context.home), '.central-knot', true);
-    if (typeof store !== 'string') return heldRefusal(store);
-    const dirPath = sessionsDirectory(context.home);
-    const dir = store === 'ok' ? await checkPath(dirPath, 'sessions', true) : 'missing';
-    if (typeof dir !== 'string') return heldRefusal(dir);
-    if (dir === 'missing') {
-      const made = await mkdir(dirPath, { recursive: true }).then(() => true, () => false);
-      if (!made) return heldRefusal({ file: 'sessions', kind: 'damaged', reason: 'The sessions folder could not be created.' });
-    }
-    const lockPath = sessionLockPath(context.home);
-    const lock = await checkPath(lockPath, SESSION_LOCK_FILE, false);
-    if (typeof lock !== 'string') return heldRefusal(lock);
     try {
       db = new DatabaseSync(lockPath, { timeout: 0 });
       db.exec('PRAGMA journal_mode = MEMORY');
       db.exec('BEGIN IMMEDIATE');
     } catch (error) {
       if (isBusyError(error)) return { status: 'busy' };
-      return heldRefusal({ file: SESSION_LOCK_FILE, kind: 'damaged', reason: `${SESSION_LOCK_FILE} could not be locked.` });
+      return heldRefusal({ file: SESSION_LOCK_FILE, kind: 'damaged', reason: `${SESSION_LOCK_FILE} could not be locked. Remove it to clear the lock.` });
     }
     return { status: 'ok', value: await work() };
   } finally {
     closeLock(db);
-    inProcessLocks.delete(key);
   }
 }

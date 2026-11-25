@@ -48,7 +48,7 @@ const BATCH_REQUESTS = 2_000;
 export interface ToolSweep { requests: number; sessions: number; unreadListing: boolean; unreadableFiles: number; unreadLines: number }
 /** Requests passed to upsert that were not kept, grouped by whether a later sweep can retry them. */
 export interface SweepNotTaken { held: number; notRead: number; never: number }
-/** Structured outcome of `sweepSessions` for the next step to display (`refused` and `held[].reason` pass through the record's and `writeAccess`'s own sentences). */
+/** Structured outcome of `sweepSessions` for the next step to display (`refused` and `held[].reason` pass through the record's, lock's, and `writeAccess`'s own sentences). */
 export interface SweepResult {
   /** Receipts newly added or updated (a receipt that grew is counted again) and distinct sessions touched, counted only after write succeeds. */
   taken: { requests: number; sessions: number };
@@ -447,8 +447,9 @@ const yieldTurn = (): Promise<void> => new Promise(resolve => setImmediate(resol
  * turn at a time, holding the store lock (`sessionlock.ts withSessionStoreLock`) from before reading `positions.json` to the
  * end. Does nothing when stopped, before `options.notBefore`, or while another caller holds the store (`skipped: 'busy'`);
  * refuses without creating the store when `writeAccess` or the store's own paths refuse; an idle sweep (no changed file and
- * no gone position to drop) reads only `positions.json`, lists and stats without opening any month; stops without writing
- * when `sessions`, `positions.json`, or (on a turn that needs it) the current UTC month is held.
+ * no gone position to drop) takes the lock, reads `positions.json`, lists and stats, opens no month and writes no receipts or
+ * positions; stops without writing when `sessions`, `positions.json`, or (on a turn that needs it) the current UTC month
+ * is held.
  */
 export async function sweepSessions(context: ShareContext, options: SweepOptions = {}): Promise<SweepResult> {
   const sweptAt = (context.now ?? Date.now)();

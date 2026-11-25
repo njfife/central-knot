@@ -3,9 +3,10 @@ process.env.TZ ||= 'America/New_York';
 
 import assert from 'node:assert/strict';
 import { fork, type ChildProcess } from 'node:child_process';
-import { appendFile, mkdir, mkdtemp, readdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { SESSION_LOCK_FILE, sessionLockPath, withSessionStoreLock } from '../src/sessionlock.ts';
@@ -84,6 +85,19 @@ const claudeResp = (id: string, at: string, input: number, output: number) => ({
 });
 
 const pathExists = (path: string) => stat(path).then(() => true, () => false);
+
+/** Probes whether the temporary filesystem distinguishes `CaseProbe` from `caseprobe`. */
+async function isCaseSensitive(dir: string): Promise<boolean> {
+  const upper = join(dir, 'CaseProbe');
+  await mkdir(upper);
+  const lower = await stat(join(dir, 'caseprobe'), { bigint: true }).catch(() => undefined);
+  if (!lower) return true;
+  const up = await stat(upper, { bigint: true });
+  return up.dev !== lower.dev || up.ino !== lower.ino;
+}
+
+const sidecarsOf = async (home: string) =>
+  (await readdir(sessionsDirectory(home))).filter(name => /^lock\.sqlite-(journal|wal|shm)$/.test(name));
 
 type WorkerMessage = Record<string, unknown>;
 interface WorkerExit { code: number | null; signal: NodeJS.Signals | null; messages: WorkerMessage[]; stderr: string }
@@ -288,6 +302,7 @@ test('4(c). In one process: concurrent sweep (direct or via linked path) answers
   const firstResult = await first;
   assert.equal(firstResult.wrote, true);
   assert.deepEqual(firstResult.taken, { requests: 1, sessions: 1 });
+  assert.deepEqual(await sidecarsOf(ctx.home), [], 'no SQLite sidecar after hold');
 
   // Re-entrant lock acquisition on the same home returns busy rather than deadlocking, and thrown errors release the lock.
   await assert.rejects(
@@ -298,9 +313,117 @@ test('4(c). In one process: concurrent sweep (direct or via linked path) answers
     }),
     /boom/,
   );
+  assert.deepEqual(await sidecarsOf(ctx.home), [], 'no SQLite sidecar after throw');
 
   const afterError = await withSessionStoreLock(ctx, async () => 'acquired');
   assert.deepEqual(afterError, { status: 'ok', value: 'acquired' });
+});
+
+test('Case-distinct homes A and a sweep concurrently on case-sensitive disks', async t => {
+  const root = await makeTemp('ck-case-');
+  if (!(await isCaseSensitive(root))) {
+    t.skip('Filesystem folds case (CaseProbe and caseprobe share one inode)');
+    return;
+  }
+  const makeHomeCtx = (name: string): ShareContext => ({
+    home: join(root, name),
+    mode: 'custom',
+    read: async () => [],
+    build: 'test-build',
+    settingsPath: join(root, 'settings.json'),
+    realHome: join(root, 'real'),
+    now: () => NOW,
+  });
+  const ctxUpper = makeHomeCtx('A');
+  const ctxLower = makeHomeCtx('a');
+  await put(join(ctxUpper.home, '.claude', 'projects', '-work-app', 'upper.jsonl'), [
+    claudeResp('msg_upper', '2026-11-24T15:00:00.000Z', 100, 10),
+  ]);
+  await put(join(ctxLower.home, '.claude', 'projects', '-work-app', 'lower.jsonl'), [
+    claudeResp('msg_lower', '2026-11-24T15:00:00.000Z', 120, 12),
+  ]);
+
+  let entered!: () => void;
+  let release!: () => void;
+  const inUpper = new Promise<void>(resolve => { entered = resolve; });
+  const holdUpper = new Promise<void>(resolve => { release = resolve; });
+
+  const upperSweep = sweepSessions(ctxUpper, {
+    deps: {
+      readClaude: async (of, from) => {
+        const res = await readClaudeSession(of, from);
+        entered();
+        await holdUpper;
+        return res;
+      },
+    },
+  });
+
+  await inUpper;
+  const lowerRes = await sweepSessions(ctxLower);
+  release();
+  const upperRes = await upperSweep;
+
+  assert.equal(lowerRes.skipped, undefined, 'distinct home a must not answer busy for A');
+  assert.equal(lowerRes.wrote, true);
+  assert.deepEqual(lowerRes.taken, { requests: 1, sessions: 1 });
+  assert.equal(upperRes.wrote, true);
+  assert.deepEqual(upperRes.taken, { requests: 1, sessions: 1 });
+});
+
+test('Foreign WAL-mode SQLite database at lock.sqlite is held with exact bytes and journal mode untouched', async () => {
+  const ctx = await makeContext();
+  await put(join(ctx.home, '.claude', 'projects', '-work-app', 'foreign.jsonl'), [
+    claudeResp('msg_foreign', '2026-11-24T15:00:00.000Z', 100, 10),
+  ]);
+  const lockPath = sessionLockPath(ctx.home);
+  await mkdir(dirname(lockPath), { recursive: true });
+  const foreign = new DatabaseSync(lockPath);
+  try {
+    foreign.exec("PRAGMA journal_mode = WAL; CREATE TABLE sample (label TEXT); INSERT INTO sample VALUES ('other app');");
+    assert.equal((foreign.prepare('PRAGMA journal_mode').get() as { journal_mode: string }).journal_mode, 'wal');
+  } finally {
+    foreign.close();
+  }
+  const bytesBefore = await readFile(lockPath);
+
+  const res = await sweepSessions(ctx);
+  const bytesAfter = await readFile(lockPath);
+  const check = new DatabaseSync(lockPath);
+  let modeAfter = '';
+  let rowsAfter: { label: string }[] = [];
+  try {
+    modeAfter = (check.prepare('PRAGMA journal_mode').get() as { journal_mode: string }).journal_mode;
+    rowsAfter = check.prepare('SELECT label FROM sample').all() as { label: string }[];
+  } finally {
+    check.close();
+  }
+
+  assert.equal(bytesAfter.equals(bytesBefore), true, 'foreign WAL database bytes must be unchanged');
+  assert.equal(modeAfter, 'wal', 'foreign WAL database journal mode must remain wal');
+  assert.deepEqual(rowsAfter.map(r => r.label), ['other app']);
+  assert.equal(res.wrote, false);
+  assert.equal(res.skipped, undefined);
+  assert.equal(res.held.some(h => h.file === SESSION_LOCK_FILE && h.kind === 'damaged'), true);
+  assert.match(res.refused ?? '', /Remove it/i);
+});
+
+test('Linked .central-knot folder is followed and store is created inside its target; linked sessions is still held', async () => {
+  const ctx = await makeContext();
+  await put(join(ctx.home, '.claude', 'projects', '-work-app', 'linked-store.jsonl'), [
+    claudeResp('msg_linked', '2026-11-24T15:00:00.000Z', 100, 10),
+  ]);
+  const target = await makeTemp('ck-store-target-');
+  await mkdir(ctx.home, { recursive: true });
+  await symlink(target, storeDirectory(ctx.home), 'junction');
+
+  const res = await sweepSessions(ctx);
+  assert.equal(res.refused, undefined, `expected linked .central-knot to succeed, got refused: ${res.refused}`);
+  assert.deepEqual(res.held, []);
+  assert.equal(res.wrote, true);
+  assert.deepEqual(res.taken, { requests: 1, sessions: 1 });
+  const targetSessions = join(target, 'sessions');
+  assert.deepEqual((await readdir(targetSessions)).sort(), ['2026-11.json', SESSION_LOCK_FILE, 'positions.json']);
 });
 
 test('4(d). Homes that cannot be written and symlinked or damaged store paths create no folder or lock file', async () => {
@@ -341,18 +464,6 @@ test('4(d). Homes that cannot be written and symlinked or damaged store paths cr
     assert.equal(await pathExists(sessionLockPath(ctx.home)), false, `${c.name}: no lock file created`);
   }
 
-  // Symlinked `.central-knot` store folder: refused before mkdir, outside target stays empty.
-  const storeLinkCtx = await makeContext();
-  const outsideStore = await makeTemp('ck-outside-store-');
-  await mkdir(storeLinkCtx.home, { recursive: true });
-  await symlink(outsideStore, storeDirectory(storeLinkCtx.home), 'junction');
-  const storeLinkRes = await sweepSessions(storeLinkCtx);
-  assert.equal(storeLinkRes.wrote, false);
-  assert.equal(storeLinkRes.skipped, undefined);
-  assert.ok(storeLinkRes.refused);
-  assert.equal(storeLinkRes.held.some(h => h.file === '.central-knot' && h.kind === 'link'), true);
-  assert.deepEqual(await readdir(outsideStore), [], 'nothing created inside symlinked .central-knot');
-
   // Symlinked `sessions` folder: refused before opening SQLite, outside target stays empty.
   const sessLinkCtx = await makeContext();
   const outsideSess = await makeTemp('ck-outside-sessions-');
@@ -381,7 +492,7 @@ test('4(d). Homes that cannot be written and symlinked or damaged store paths cr
   const storeFileRes = await sweepSessions(storeFileCtx);
   assert.equal(storeFileRes.wrote, false);
   assert.equal(storeFileRes.skipped, undefined);
-  assert.equal(storeFileRes.held.some(h => h.file === '.central-knot' && h.kind === 'not-a-file'), true);
+  assert.equal(storeFileRes.held.some(h => h.file === 'sessions' && h.kind === 'not-a-file'), true);
 
   const sessFileCtx = await makeContext();
   await mkdir(storeDirectory(sessFileCtx.home), { recursive: true });
