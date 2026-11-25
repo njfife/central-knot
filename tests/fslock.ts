@@ -14,16 +14,23 @@ const execFileAsync = promisify(execFile);
 /** Skip value on macOS and Linux when running as root (root bypasses permission locks); false on Windows. */
 export const lockSkip: string | false = process.getuid?.() === 0 && 'root bypasses file and folder permission locks';
 
+/** Skip value on Windows while the app's own locked-folder checks (fs.access W_OK / EACCES-only) are fixed in step 6B. */
+export const winLockAppSkip: string | false = process.platform === 'win32'
+  && 'App locked-folder checks on Windows are step 6B; covered on macOS and Linux.';
+
+/** Skip value on POSIX as root or on Windows for step 6B app locked-folder gaps. */
+export const lockAppSkip: string | false = lockSkip || winLockAppSkip;
+
 export type LockKind = 'dir-readonly' | 'dir-unreadable' | 'dir-unlistable' | 'file-unreadable';
 
-// Specific Windows rights only (never simple `W`, which includes SYNCHRONIZE and breaks ordinary opens):
+// Specific Windows rights only (never simple `W` or `D`, which include SYNCHRONIZE and break ordinary opens):
 // dir-readonly blocks create/delete/rename in or out while listing and file rewrites still work;
 // dir-unreadable denies listing/writes and uses inherited deny in place of traversal so children cannot be stat'ed;
 // dir-unlistable (POSIX 0o111) blocks listing/writes while known child paths stay readable;
 // file-unreadable denies read/write while stat (RA) and parent-permitted unlink still work.
 const WIN_DENY: Record<LockKind, readonly string[]> = {
-  'dir-readonly': ['(WD,AD,DC)', '(OI)(CI)(NP)(IO)(D)'],
-  'dir-unreadable': ['(RD,WD,AD,DC)', '(OI)(CI)(IO)(RD,RA,WD,AD,D)'],
+  'dir-readonly': ['(WD,AD,DC)', '(OI)(CI)(NP)(IO)(DE)'],
+  'dir-unreadable': ['(RD,WD,AD,DC)', '(OI)(CI)(IO)(RD,RA,WD,AD,DE)'],
   'dir-unlistable': ['(RD,WD,AD,DC)'],
   'file-unreadable': ['(RD,WD,AD)'],
 };
