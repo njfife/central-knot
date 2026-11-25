@@ -1240,6 +1240,8 @@ const ids = (value: unknown) => onlyAllowed(value, harnessIds);
 
 /** The draft of the base a tool is writing now, to stop it (draftbase.ts). */
 let drafting: AbortController | undefined;
+/** That draft's run once its turn in the queue has passed: what Quit waits for on Windows (before-quit). */
+let draftRun: Promise<BaseDraft> | undefined;
 /** What a write answers when the page shows another home than the one open here. */
 const elsewhere = 'The home on screen is not the one open. Nothing was written. Read it again.';
 
@@ -1395,7 +1397,10 @@ if (!primary) app.exit(0);
 app.on('second-instance', showWindow);
 // Opening Central Knot again (the Dock, Finder, Spotlight) while it runs: its window comes back.
 app.on('activate', () => { log('opened again'); showWindow(); });
-// A tool writing a draft is stopped with the app: it would otherwise keep working with nobody to read its answer.
+// A tool writing a draft is stopped with the app: it would otherwise keep working with nobody to read its answer. On Windows its
+// tree is asked to stop with taskkill (launch.ts stopRun), and its folder is removed after where it can be, else said in the log;
+// Quit waits for that: at most launch.ts TREE_STOP_MS for taskkill, then CLOSE_GRACE_MS for its output to close. Elsewhere its
+// process group is killed at once, and nothing waits for it.
 // A plugin being updated by itself is let finish (a few seconds; fifteen at most): the tool's command runs on whatever the app
 // does, and what follows it here (turning a turned-off plugin off again, the note saved) must not be lost. No further step
 // starts, so the check ends with that one. A check that is only reading the marketplaces holds nothing up. The reading of what
@@ -1406,15 +1411,16 @@ app.on('before-quit', event => {
   quitting = true;
   if (heldForWork) { if (heldForWork === 'waiting') event.preventDefault(); return; }
   drafting?.abort();
+  const draft = process.platform === 'win32' ? draftRun?.catch(() => undefined) : undefined;
   const saving = pluginText?.stop();
   // An MCP sign-in check under way is stopped, its tool's processes with it, and its folder removed before the app goes; none starts after.
   const signins = stopChecks();
-  if (!pluginStep && !saving && !signins) return;
+  if (!pluginStep && !saving && !signins && !draft) return;
   heldForWork = 'waiting';
   event.preventDefault();
   if (pluginStep) log('quit waits for a plugin update under way');
   const check = pluginStep && (pluginUpdates?.underWay() ?? pluginStep).catch(() => undefined);
-  void Promise.race([Promise.all([check, saving, signins]), new Promise(done => setTimeout(done, 15_000))]).then(() => { heldForWork = 'done'; app.quit(); });
+  void Promise.race([Promise.all([check, saving, signins, draft]), new Promise(done => setTimeout(done, 15_000))]).then(() => { heldForWork = 'done'; app.quit(); });
 });
 // A signal to stop is a Quit, not a window close: nothing waits in the menu bar.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { quitting = true; app.quit(); });
@@ -1521,6 +1527,7 @@ app.whenReady().then(async () => {
     pickFolder: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Choose a marketplace folder', properties: ['openDirectory'] }); return choice.canceled ? undefined : choice.filePaths[0]; },
     openExternal: url => shell.openExternal(url),
     share: () => context(),
+    log,
     partsWait: () => partsWaiting,
     // A change to a plugin that worked (an update, an uninstall) settles what failed there by itself before.
     changed: (source, plugin, tools) => void pluginUpdates?.settled(source, plugin, tools).catch(error => logFailure('plugin updates', error)),
@@ -1629,7 +1636,7 @@ app.whenReady().then(async () => {
   // outside the queue, as it can take 70 s and changes nothing of Central Knot's. This computer's own command lines are looked for,
   // as the Plugins page's are. CK_SIGNIN_LIMIT_MS: an end-to-end run's shorter limit (mcpsigninrun.ts checkLimit: never longer).
   handleNow('mcp-signin:check', async (tool, home, names) => (current && home === current.home && isTool(tool)
-    ? (await checkSignin({ home: current.home, actual: current.mode === 'actual', toolsHome: homedir(), searchPath: await searchPath() }, tool, strings(names) ?? [], Number(process.env.CK_SIGNIN_LIMIT_MS))) ?? null : null));
+    ? (await checkSignin({ home: current.home, actual: current.mode === 'actual', toolsHome: homedir(), searchPath: await searchPath() }, tool, strings(names) ?? [], Number(process.env.CK_SIGNIN_LIMIT_MS), log)) ?? null : null));
   // Word search: answered at once from the index last published (search.ts), which reads no file and waits for no pass.
   handleNow('search:ask', async (typed, shown) => search.ask(typeof typed === 'string' ? typed : '', Number.isInteger(shown) ? Number(shown) : 0));
   handleNow('agents:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await agentVersion(context(), key, hash)) ?? null : null));
@@ -1654,10 +1661,15 @@ app.whenReady().then(async () => {
     const binary = drafters[tool];
     if (!binary) return { stopped: 'That tool was not found on this computer, so it can’t write a draft.' };
     if (drafting) return { stopped: 'A draft is already being written.' };
+    // Once Quit has begun no draft starts; one waiting its turn when Quit comes is stopped there (writeDraft: no tool is started).
+    if (quitting) return { cancelled: true };
     const mine = drafting = new AbortController();
     const named = typeof model === 'string' && model.trim() ? model.trim() : undefined;
-    try { return await writeDraft(await queued(async () => draftSources(context(), await read())), tool, binary, { shown, model: named, signal: mine.signal }); }
-    finally { if (drafting === mine) drafting = undefined; }
+    try {
+      const sources = await queued(async () => draftSources(context(), await read()));
+      draftRun = writeDraft(sources, tool, binary, { shown, model: named, signal: mine.signal, log });
+      return await draftRun;
+    } finally { if (drafting === mine) drafting = draftRun = undefined; }
   });
   handleNow('instructions:cancel-draft', async () => { drafting?.abort(); });
   const otherHome = { stopped: notOpenHome, written: [], left: [] };
