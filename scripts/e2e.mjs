@@ -1360,8 +1360,8 @@ const headerResultWords = a => a.run(`(() => {
   return parts.join(' ');
 })()`);
 
-/** Checks that the header stays 48px and `sentence` is shown whole inside its box and the window without clicking Show all, with Undo and × inside the window. */
-const profileSentenceWhole = (a, sentence) => a.run(`((sentence) => {
+/** Checks that the header stays 48px and `sentence` (or its "stopped being..." words when `allowShortName`) is shown whole without Show all, with Undo and × inside the window. */
+const profileSentenceWhole = (a, sentence, { allowShortName = false } = {}) => a.run(`((sentence, allowShortName) => {
   const header = document.querySelector('#header');
   const result = header?.querySelector('.header-result:not(.result-whole)');
   const undo = header?.querySelector('#outcome-undo');
@@ -1369,31 +1369,21 @@ const profileSentenceWhole = (a, sentence) => a.run(`((sentence) => {
   if (!header || !result || !undo || !dismiss) return { ok: false, why: 'missing header/result/undo/dismiss' };
   const hRect = header.getBoundingClientRect(), rRect = result.getBoundingClientRect();
   const uRect = undo.getBoundingClientRect(), dRect = dismiss.getBoundingClientRect();
-  const el = [...result.querySelectorAll('.band-profile, .band-text')].find(node => (node.textContent ?? '').includes(sentence));
-  if (!el) return { ok: false, why: 'sentence not in result' };
-  const eRect = el.getBoundingClientRect();
-  const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-  let range = null;
-  for (let node = walk.nextNode(); node; node = walk.nextNode()) {
-    const at = node.textContent.indexOf(sentence);
-    if (at < 0) continue;
-    range = document.createRange();
-    range.setStart(node, at);
-    range.setEnd(node, at + sentence.length);
-    break;
-  }
-  if (!range) return { ok: false, why: 'range not found' };
-  const sRect = range.getBoundingClientRect();
-  const clipped = sRect.width <= 0 || sRect.bottom > eRect.bottom + 1 || sRect.bottom > hRect.bottom + 1
-    || sRect.right > eRect.right + 1 || sRect.right > rRect.right + 1 || sRect.right > window.innerWidth + 1
-    || el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1;
+  const el = result.querySelector('.band-profile');
+  if (!el || el.textContent !== sentence) return { ok: false, why: 'sentence not in .band-profile', got: el?.textContent };
+  const nameEl = el.querySelector('.band-profile-name'), restEl = el.querySelector('.band-profile-rest');
+  if (!nameEl || !restEl) return { ok: false, why: 'missing name/rest spans' };
+  const eRect = el.getBoundingClientRect(), nRect = nameEl.getBoundingClientRect(), restRect = restEl.getBoundingClientRect();
+  const restClipped = restRect.width <= 0 || restRect.bottom > hRect.bottom + 1 || restRect.right > eRect.right + 1
+    || restRect.right > rRect.right + 1 || restRect.right > window.innerWidth + 1 || restEl.scrollWidth > restEl.clientWidth + 1;
+  const nameShortened = nameEl.scrollWidth > nameEl.clientWidth + 1;
+  const nameClipped = nRect.width <= 0 || nRect.bottom > hRect.bottom + 1 || nRect.right > restRect.left + 1 || (!allowShortName && nameShortened);
   const controlsFit = uRect.width > 0 && uRect.right <= window.innerWidth + 1 && dRect.width > 0 && dRect.right <= window.innerWidth + 1
     && uRect.bottom <= hRect.bottom + 1 && dRect.bottom <= hRect.bottom + 1;
-  return { ok: Math.round(hRect.height) === 48 && !clipped && controlsFit, headerH: Math.round(hRect.height), clipped, controlsFit,
-    elClass: el.className, elScrollW: el.scrollWidth, elClientW: el.clientWidth, elScrollH: el.scrollHeight, elClientH: el.clientHeight,
-    sRect: { left: Math.round(sRect.left), right: Math.round(sRect.right), top: Math.round(sRect.top), bottom: Math.round(sRect.bottom) },
-    eRect: { left: Math.round(eRect.left), right: Math.round(eRect.right), top: Math.round(eRect.top), bottom: Math.round(eRect.bottom) } };
-})(${JSON.stringify(sentence)})`);
+  return { ok: Math.round(hRect.height) === 48 && !restClipped && !nameClipped && controlsFit && el.getAttribute('title') === sentence,
+    headerH: Math.round(hRect.height), restClipped, nameClipped, nameShortened, controlsFit, title: el.getAttribute('title'),
+    nameScrollW: nameEl.scrollWidth, nameClientW: nameEl.clientWidth, restScrollW: restEl.scrollWidth, restClientW: restEl.clientWidth };
+})(${JSON.stringify(sentence)}, ${JSON.stringify(allowShortName)})`);
 
 /**
  * What is wrong with the open copy question's layout (style.css "The copy question"); empty when it is as `shape` says:
@@ -2074,7 +2064,10 @@ async function practiceFlow() {
       }
     }
   }
-  if (shots) { await a.run(`window.centralKnot.setAppearance('system')`); await wait(80); }
+  if (shots) {
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    await wait(80);
+  }
   await fullSize(a);
   await a.click('#outcome-undo');
   same('its Undo restores Incident with no profile sentence',
@@ -2125,6 +2118,74 @@ async function practiceFlow() {
   await a.click('#profile-delete');
   await a.click('#profile-delete-confirm');
   await openKind(a, 'skills');
+  // At 860 with sidebar open: (1) sentence beside a problem line and reload chips, (2) 35-letter profile name, (3) two 35-letter profiles.
+  const shotAt860 = async name => {
+    if (!shots) return;
+    await a.run(`window.centralKnot.setAppearance('light')`);
+    await wait(80);
+    await a.shot(name);
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    await wait(80);
+  };
+  chmodSync(join(practice, '.claude/skills'), 0o555);
+  try {
+    await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
+    await sizeTo(a, ...SMALLEST);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    const withProblem = await profileSentenceWhole(a, 'Incident stopped being the profile in use.');
+    check('at 860 with sidebar open, the profile sentence stays whole beside a problem line and reload chips in the 48px header',
+      withProblem.ok && await a.exists('#header .problem-line') && await a.exists('#header .result-reloads'),
+      withProblem);
+    await shotAt860('profile-with-problem-and-chips-860-light');
+    await fullSize(a);
+  } finally { chmodSync(join(practice, '.claude/skills'), 0o755); }
+  await a.click('#outcome-undo');
+  // Long 35-letter single profile name, then two 35-letter profiles matching notes + standup (no extra profile switch in History).
+  const longOne = 'QuarterlyWorkspaceManagementReviews', longTwo = 'ProductionWorkspaceDeploymentGuides';
+  await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
+  await a.click('#nav-profiles');
+  await newProfile(a, longOne);
+  await a.click('#pf-skill\\:notes');
+  await a.click('#pf-skill\\:standup');
+  await openKind(a, 'skills');
+  await a.click(`#${rowPart('switch', 'skills', 'review')}`);
+  await sizeTo(a, ...SMALLEST);
+  if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+  const oneLong = await profileSentenceWhole(a, `${longOne} stopped being the profile in use.`, { allowShortName: true });
+  check('at 860 with sidebar open, a 35-letter profile name gives way while "stopped being the profile in use." stays whole, with hover title',
+    oneLong.ok && oneLong.nameShortened, oneLong);
+  await shotAt860('profile-long-name-860-light');
+  await a.click('#problems-show-all');
+  check('Show all reveals the whole 35-letter profile name', (await a.text('#header .result-whole .band-text') ?? '').includes(`${longOne} stopped being the profile in use.`), await a.text('#header .result-whole .band-text'));
+  await a.click('#problems-show-all');
+  await fullSize(a);
+  await a.click('#outcome-undo');
+  await a.click('#nav-profiles');
+  await newProfile(a, longTwo);
+  await a.click('#pf-skill\\:notes');
+  await a.click('#pf-skill\\:standup');
+  await openKind(a, 'skills');
+  await a.click(`#${rowPart('switch', 'skills', 'review')}`);
+  await sizeTo(a, ...SMALLEST);
+  if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+  const twoLong = await profileSentenceWhole(a, `${longOne} and ${longTwo} stopped being the profiles in use.`, { allowShortName: true });
+  check('at 860 with sidebar open, two 35-letter profile names give way while "stopped being the profiles in use." stays whole, with hover title',
+    twoLong.ok && twoLong.nameShortened, twoLong);
+  await shotAt860('profile-two-long-names-860-light');
+  await a.click('#problems-show-all');
+  check('Show all reveals both whole 35-letter profile names', (await a.text('#header .result-whole .band-text') ?? '').includes(`${longOne} and ${longTwo} stopped being the profiles in use.`), await a.text('#header .result-whole .band-text'));
+  await a.click('#problems-show-all');
+  await fullSize(a);
+  await a.click('#outcome-undo');
+  await a.click('#nav-profiles');
+  for (const name of [longOne, longTwo]) {
+    await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes(${JSON.stringify(name)})).click()`);
+    await a.settle();
+    await a.click('#profile-delete');
+    await a.click('#profile-delete-confirm');
+  }
+  await openKind(a, 'skills');
+  await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
   }
   // Turned back on by hand: the profile in use is worked out, so the status bar follows at once.
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
@@ -10199,7 +10260,10 @@ async function usageFlow() {
       }
     }
   }
-  if (shots) { await a.run(`window.centralKnot.setAppearance('system')`); await wait(80); }
+  if (shots) {
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    await wait(80);
+  }
   await fullSize(a);
   same('Turn these off: one click removes Central Knot’s copies, leaves spare’s shared copy, says Codex still reads spare another way and Everyday stopped being in use, with one Undo; the chip, now at 0, is gone',
     [await headerResultWords(a), (await a.text('#status-profile'))?.trim(), Object.entries(filesOf(['standup', 'spare'])).filter(([, body]) => body), (await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'spare')}"] .row-tag`))?.trim(), await a.exists('.chip[data-tip="No use seen in 30 days"]')],

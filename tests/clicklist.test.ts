@@ -1924,7 +1924,7 @@ test('History Undo that stops Everyday matching says so even when another profil
   historyRestoreWorld(t, HISTORY_STANDUP_OFF, { beforeOn: { notes: true, standup: false }, afterOn: { notes: true, standup: true }, profiles: [everyday, focus], reply: STANDUP_WRITTEN });
   await restoreEvent('off-1');
   assert.match(app.outcome?.text ?? '', /Everyday stopped being the profile in use\.$/);
-  assert.equal(app.outcome?.profileEnded, true);
+  assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
 });
 
 test('History Undo compares profiles by id, not name, when another profile of the same name matches after', async t => {
@@ -1933,10 +1933,10 @@ test('History Undo compares profiles by id, not name, when another profile of th
   historyRestoreWorld(t, HISTORY_STANDUP_OFF, { beforeOn: { notes: true, standup: false }, afterOn: { notes: true, standup: true }, profiles: [first, second], reply: STANDUP_WRITTEN });
   await restoreEvent('off-1');
   assert.match(app.outcome?.text ?? '', /Work stopped being the profile in use\.$/);
-  assert.equal(app.outcome?.profileEnded, true);
+  assert.equal(app.outcome?.profileLine, 'Work stopped being the profile in use.');
 });
 
-test('History Restore of a deleted library item that ends Everyday appends the profile sentence and marks profileEnded', async t => {
+test('History Restore of a deleted library item that ends Everyday appends the profile sentence and sets profileLine', async t => {
   const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
   const events = [
     { id: 'del-1', kind: 'deleted', item: 'standup', key: 'standup', of: 'skill', at: '2026-11-25T10:00:00.000Z', losers: [], orderProved: true, undoneBy: 'res-1' },
@@ -1946,7 +1946,7 @@ test('History Restore of a deleted library item that ends Everyday appends the p
   historyRestoreWorld(t, events, { beforeOn: { notes: true, standup: true }, afterOn: { notes: true, standup: true }, beforeDeleted: ['standup'], profiles: [everyday], reply });
   await restoreEvent('del-1');
   assert.match(app.outcome?.text ?? '', /^standup: restored to Central Knot.*Everyday stopped being the profile in use\.$/);
-  assert.equal(app.outcome?.profileEnded, true);
+  assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
 });
 
 test('History Undo ending two matching profiles uses the plural sentence', async t => {
@@ -1955,7 +1955,7 @@ test('History Undo ending two matching profiles uses the plural sentence', async
   historyRestoreWorld(t, HISTORY_STANDUP_OFF, { beforeOn: { notes: true, standup: false }, afterOn: { notes: true, standup: true }, profiles: [everyday, backup], reply: STANDUP_WRITTEN });
   await restoreEvent('off-1');
   assert.match(app.outcome?.text ?? '', /Everyday and Backup stopped being the profiles in use\.$/);
-  assert.equal(app.outcome?.profileEnded, true);
+  assert.equal(app.outcome?.profileLine, 'Everyday and Backup stopped being the profiles in use.');
 });
 
 test('History Restore when two profiles matched before and one of them still matches after adds no profile sentence', async t => {
@@ -1970,7 +1970,7 @@ test('History Restore when two profiles matched before and one of them still mat
   historyRestoreWorld(t, events, { beforeOn: { notes: true, standup: true }, afterOn: { notes: true, standup: true }, beforeDeleted: ['standup'], profiles: [everyday, focus], reply });
   await restoreEvent('del-1');
   assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
-  assert.equal(app.outcome?.profileEnded, undefined);
+  assert.equal(app.outcome?.profileLine, undefined);
 });
 
 test('History Undo refused whole (heldWhole, no made) adds no profile sentence even if the refreshed view matches no profile', async t => {
@@ -1982,7 +1982,7 @@ test('History Undo refused whole (heldWhole, no made) adds no profile sentence e
   assert.equal(app.outcome?.refused, true);
 });
 
-test('Synchronize everything Undo ending Everyday appends the profile sentence and marks profileEnded', async t => {
+test('Synchronize everything Undo ending Everyday appends the profile sentence and sets profileLine', async t => {
   const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
   const events = [
     { id: 'ev-on', kind: 'everything', item: 'Synchronize everything', key: 'home:everything', at: '2026-11-25T10:00:00.000Z', losers: [], orderProved: true, everything: { ruleOn: true } },
@@ -1992,10 +1992,10 @@ test('Synchronize everything Undo ending Everyday appends the profile sentence a
   historyRestoreWorld(t, events, { beforeOn: { notes: true, standup: false }, afterOn: { notes: false, standup: false }, profiles: [everyday], reply: { results: [], harnessWrites: 1, made: ['ev-undo'], reloads: [] } });
   await restoreEvent('ev-on');
   assert.match(app.outcome?.text ?? '', /Everyday stopped being the profile in use\.$/);
-  assert.equal(app.outcome?.profileEnded, true);
+  assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
 });
 
-test('Synchronize everything Restore ending Everyday appends the profile sentence and marks profileEnded', async t => {
+test('Synchronize everything Restore ending Everyday appends the profile sentence and sets profileLine', async t => {
   const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
   const events = [
     { id: 'ev-undo', kind: 'everything', item: 'Synchronize everything', key: 'home:everything', at: '2026-11-25T10:01:00.000Z', losers: [], orderProved: true,
@@ -2004,7 +2004,7 @@ test('Synchronize everything Restore ending Everyday appends the profile sentenc
   historyRestoreWorld(t, events, { beforeOn: { notes: true, standup: false }, afterOn: { notes: true, standup: true }, profiles: [everyday], reply: { results: [], harnessWrites: 1, made: ['r-1'], reloads: [] } });
   await restoreEvent('ev-undo');
   assert.match(app.outcome?.text ?? '', /Everyday stopped being the profile in use\.$/);
-  assert.equal(app.outcome?.profileEnded, true);
+  assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
 });
 
 test('Synchronize everything Restore that puts nothing back (made empty, 0 writes) adds no profile sentence', async t => {
@@ -2017,7 +2017,7 @@ test('Synchronize everything Restore that puts nothing back (made empty, 0 write
   historyRestoreWorld(t, events, { beforeOn: { notes: true, standup: false }, afterOn: { notes: true, standup: true }, profiles: [everyday], reply: none });
   await restoreEvent('ev-undo');
   assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
-  assert.equal(app.outcome?.profileEnded, undefined);
+  assert.equal(app.outcome?.profileLine, undefined);
 });
 
 test('Bulk Turn failure, differing Add, and already-on plugin row say exact facts on every path', async t => {
@@ -2295,7 +2295,6 @@ test('Row switch ending Everyday appends profileLeftUse; on then off in one run 
   await settled();
   await main.pass(did('standup', true));
   assert.equal(app.outcome?.text, 'standup is on. Everyday stopped being the profile in use.');
-  assert.equal(app.outcome?.profileEnded, true);
   assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
 
   // Turning standup back off in the same run brings Everyday back: no profile sentence.
@@ -2304,7 +2303,6 @@ test('Row switch ending Everyday appends profileLeftUse; on then off in one run 
   await settled();
   await main.pass(did('standup', false));
   assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
-  assert.equal(app.outcome?.profileEnded, undefined);
   assert.equal(app.outcome?.profileLine, undefined);
 
   // New run: refused whole click adds no sentence even when the refreshed view matches no profile.
@@ -2314,7 +2312,7 @@ test('Row switch ending Everyday appends profileLeftUse; on then off in one run 
   await settled();
   await main.pass(refusedAsStale('standup'));
   assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
-  assert.equal(app.outcome?.profileEnded, undefined);
+  assert.equal(app.outcome?.profileLine, undefined);
 });
 
 test('Leaving the Library mid-run still announces the ended profile in the status bar', async t => {
@@ -2340,7 +2338,7 @@ test('applyClick (tool switch / plugin switch) appends profileLeftUse when it en
   await settled();
   await main.pass(did('notes', false));
   assert.equal(app.outcome?.text, 'notes is off. Everyday stopped being the profile in use.');
-  assert.equal(app.outcome?.profileEnded, true);
+  assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
 
   // Stopped applyClick adds no profile sentence even if refreshed home matches no profile.
   app.home = viewWith({ notes: true, standup: false });
@@ -2349,7 +2347,7 @@ test('applyClick (tool switch / plugin switch) appends profileLeftUse when it en
   await settled();
   await main.pass({ stopped: 'The skills record is damaged.', results: [], writes: 0, reloads: [] });
   assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
-  assert.equal(app.outcome?.profileEnded, undefined);
+  assert.equal(app.outcome?.profileLine, undefined);
 });
 
 test('applyByKind (Turn these off) and Library Undo append profileLeftUse only when they end the profile in use', async t => {
@@ -2363,7 +2361,7 @@ test('applyByKind (Turn these off) and Library Undo append profileLeftUse only w
   await settled();
   await main.pass(offMade('skills', 'notes'));
   assert.match(app.outcome?.text ?? '', /Everyday stopped being the profile in use\.$/);
-  assert.equal(app.outcome?.profileEnded, true);
+  assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
 
   // Its Undo restores Everyday (no profile before): no sentence.
   nextView = viewWith({ notes: true, standup: false });
@@ -2382,7 +2380,7 @@ test('applyByKind (Turn these off) and Library Undo append profileLeftUse only w
   app.outcome!.act!.run();
   await settled();
   assert.equal(app.outcome?.text, 'Undone: standup is as before. Everyday stopped being the profile in use.');
-  assert.equal(app.outcome?.profileEnded, true);
+  assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
 
   // applyByKind refused whole adds no sentence.
   app.home = viewWith({ notes: true, standup: false });
@@ -2401,14 +2399,14 @@ test('Sync once appends profileLeftUse when it ends the profile and skips when n
   t.mock.method(api, 'syncNow', async () => ({ view: afterView, text: 'Took in standup.', reasons: [], warn: false, history: false, reloads: [], did: true }));
   await syncNow();
   assert.equal(app.outcome?.text, 'Took in standup. Everyday stopped being the profile in use.');
-  assert.equal(app.outcome?.profileEnded, true);
+  assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
 
   // Sync once with nothing synced (did: false) adds no sentence even if the returned view matches no profile.
   app.home = viewWith({ notes: true, standup: false });
   t.mock.method(api, 'syncNow', async () => ({ view: afterView, text: 'Not everything was synced.', reasons: ['The skills record is damaged.'], warn: true, history: false, reloads: [], did: false }));
   await syncNow();
   assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
-  assert.equal(app.outcome?.profileEnded, undefined);
+  assert.equal(app.outcome?.profileLine, undefined);
 });
 
 test('Git repo Pull appends profileLeftUse when it ends the profile, keeping History note, and skips when nothing moved', async t => {
@@ -2429,7 +2427,7 @@ test('Git repo Pull appends profileLeftUse when it ends the profile, keeping His
   await settled();
   assert.equal(app.outcome?.text, 'Pulled 1 change into your tools. Everyday stopped being the profile in use.');
   assert.equal(app.outcome?.note, 'Undo it in History.');
-  assert.equal(app.outcome?.profileEnded, true);
+  assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
 
   // Pull that moved nothing adds no profile sentence.
   app.home = viewWith({ notes: true, standup: false });
@@ -2438,7 +2436,7 @@ test('Git repo Pull appends profileLeftUse when it ends the profile, keeping His
   findById(repoPage(), 'repo-pull').onclick({ detail: 1 });
   await settled();
   assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
-  assert.equal(app.outcome?.profileEnded, undefined);
+  assert.equal(app.outcome?.profileLine, undefined);
 });
 
 test('Profile switches, profile definition edits/deletes, and home changes add no profile sentence', async t => {
@@ -2517,7 +2515,7 @@ test('Two runs queued side by side on two tabs: only the first run says the prof
   // Second run starts and finishes after Everyday already left use: must NOT say Everyday stopped being in use.
   await main.pass(did('github', false));
   assert.equal(app.outcome?.text, 'github is off.');
-  assert.equal(app.outcome?.profileEnded, undefined);
+  assert.equal(app.outcome?.profileLine, undefined);
 
   // Clicking × (endRun) while a click is in flight still preserves that click's before-snapshot.
   app.home = viewWith(true, true);
@@ -2530,7 +2528,7 @@ test('Two runs queued side by side on two tabs: only the first run says the prof
   endRun();
   await main.pass(did('standup', false));
   assert.equal(app.outcome?.text, 'standup is off. Everyday stopped being the profile in use.');
-  assert.equal(app.outcome?.profileEnded, true);
+  assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
 });
 
 test('First setup Yes opening the walkthrough carries its result without appending the profile sentence a second time', async t => {
@@ -2558,5 +2556,5 @@ test('First setup Yes opening the walkthrough carries its result without appendi
   assert.equal(app.page, 'library');
   const matches = (app.outcome?.text ?? '').match(/Everyday stopped being the profile in use\./g) ?? [];
   assert.equal(matches.length, 1, `expected sentence once, got: ${app.outcome?.text}`);
-  assert.equal(app.outcome?.profileEnded, true);
+  assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
 });

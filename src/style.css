@@ -268,10 +268,13 @@ ul { list-style: none; }
 .header-result:not(.result-whole) .result-row2 { height: 20px; }
 .header-result:not(.result-whole) .result-row2 > .band-lines { flex: 0 1 auto; max-width: 50%; min-width: 0; }
 .header-result:not(.result-whole) .result-row2 > .result-reloads { flex: 1 1 0; min-width: 64px; padding-left: 8px; border-left: 1px solid var(--line); }
-/* Profile-left-use sentence on folded Row 2 (matrix.ts listResult): stays whole while other words fold under Show all. */
+/* Profile-left-use sentence on folded Row 2 (matrix.ts listResult): long names give way, never the words. */
 .result-profile-row { display: flex; align-items: center; gap: 8px; height: 20px; min-width: 0; }
-.band-profile { flex: 0 0 auto; max-width: 100%; padding-left: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 16px; color: var(--ink); }
-.header-result:not(.result-whole) .result-row2:has(.band-profile) > .result-reloads { min-width: 0; }
+.band-profile { flex: 0 1 auto; min-width: 0; max-width: 100%; display: inline-flex; align-items: baseline; padding-left: 20px; font-size: 12px; line-height: 16px; color: var(--ink); }
+.band-profile-name { flex: 0 1 auto; min-width: 3em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.band-profile-rest { flex: none; white-space: pre; }
+.header-result:not(.result-whole) .result-row2:has(.band-profile) > .band-lines { flex: 0 1000 auto; }
+.header-result:not(.result-whole) .result-row2:has(.band-profile) > .result-reloads { flex: 1 1 58px; min-width: 0; }
 .reload-list { display: flex; flex-direction: column; gap: 4px; padding: 2px 0 4px 20px; font-size: 12px; line-height: 18px; }
 .reload-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--ink-soft); }
 .band-done:has(> .reload-list) { flex-wrap: wrap; row-gap: 4px; }

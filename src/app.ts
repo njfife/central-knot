@@ -1,6 +1,6 @@
 // The page's state and most pages' actions (MAP.md, "The app's shell and Settings"): the open home's view and each page's own
-// state (`state`), the page shown (showPage), what is said after a click (tell, announce; tell is the one place that appends
-// words.ts profileLeftUse when an act ended every profile in use, via withProfileEnded, profilesBefore and profileplan.ts endedProfiles) and when a result goes by itself
+// state (`state`), the page shown (showPage), what is said after a click (tell, announce; withProfileEnded is the one place that appends
+// words.ts profileLeftUse when an act ended every profile in use, called by tell and sayRun, via profilesBefore and profileplan.ts endedProfiles) and when a result goes by itself
 // (FADE_MS), the busy line (busy) and whether the page is acting (acting: busy, or a run of clicks: clicklist.ts); a click on an
 // item list sent to its kind's engine (carryOut, through kindPages), at once under busy (applyClick), one per kind as one
 // (applyByKind) or in its turn in the page's list (queueClick), its result kept for the page (lastResult), a run's said once
@@ -236,11 +236,11 @@ function profilesBefore(): ProfilesBefore | undefined {
 }
 /** Appends profileLeftUse when an act in the same home ended every profile that was in use before it. */
 function withProfileEnded(outcome: Outcome, { checkProfile = true, before = actBefore }: { checkProfile?: boolean; before?: ProfilesBefore } = {}): Outcome {
-  if (!checkProfile || !before || outcome.refused || outcome.profileEnded || !state.home || state.home.home !== before.home) return outcome;
+  if (!checkProfile || !before || outcome.refused || outcome.profileLine || !state.home || state.home.home !== before.home) return outcome;
   const ended = endedProfiles(before.profiles, inUseInHome(state.home));
   if (!ended.length) return outcome;
   const profileLine = profileLeftUse(ended.map(profile => profile.name));
-  return { ...outcome, text: [outcome.text, profileLine].filter(Boolean).join(' '), profileEnded: true, profileLine };
+  return { ...outcome, text: [outcome.text, profileLine].filter(Boolean).join(' '), profileLine };
 }
 
 /**
@@ -1125,7 +1125,7 @@ export function leaveResults(page = state.page) {
   if (!clickList.running) endRun();
   const carried = state.outcome?.carry ? { ...state.outcome, page, carry: false } : undefined;
   state.skillsResult = undefined; state.mcpResult = undefined; state.agentsResult = undefined;
-  tell(carried, '', { checkProfile: false });
+  tell(carried);
 }
 
 let moveRequested: 'visit' | 'back' | undefined;
@@ -1333,8 +1333,7 @@ export interface Outcome {
   refused?: boolean;
   /** Shown as a band even with nothing to offer: a click's result, which belongs where the click's Undo would be. */
   band?: boolean;
-  /** An act ended every profile in use, so the result stays a band on every page (saidInStatusBar), and `profileLine` keeps the sentence whole on Row 2 in the folded header (matrix.ts listResult). */
-  profileEnded?: boolean;
+  /** Appended profileLeftUse sentence when an act ended every profile in use; keeps the result in a band (saidInStatusBar) and whole on Row 2 (matrix.ts listResult). */
   profileLine?: string;
   /** The band goes after a few seconds: an Undo's confirmation. */
   fade?: boolean;
@@ -1368,7 +1367,7 @@ export const tellWritten = (outcome: Omit<Outcome, 'reloads'>, changes: readonly
  * Whether a result is said in the status bar rather than as a band: it offers nothing to do (no button, Undo, Copy or History
  * link, and no ended profile), so it needs no room of its own.
  */
-export const saidInStatusBar = (outcome: Outcome): boolean => !(outcome.act || outcome.undo || outcome.history || outcome.note || outcome.band || outcome.profileEnded || outcome.reloads?.length);
+export const saidInStatusBar = (outcome: Outcome): boolean => !(outcome.act || outcome.undo || outcome.history || outcome.note || outcome.band || outcome.profileLine || outcome.reloads?.length);
 
 // ---------- Instructions ----------
 

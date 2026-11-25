@@ -1051,8 +1051,7 @@ export function outcomeBand(cardResult?: Outcome, omitProfile = false): HTMLElem
   // Item names are tokens in result text too, so "files" does not read as a word.
   const names = [...new Set([...(outcome.item ? [outcome.item] : []), ...(outcome.items ?? [])])].filter(Boolean).sort((a, b) => b.length - a.length);
   const text: (string | Node)[] = [];
-  const strip = omitProfile && outcome.profileLine && outcome.text !== outcome.profileLine && outcome.text.endsWith(outcome.profileLine);
-  let rest = strip ? outcome.text.slice(0, -outcome.profileLine!.length).trimEnd() : outcome.text;
+  let rest = omitProfile && outcome.profileLine ? outcome.text.slice(0, -outcome.profileLine.length).trimEnd() : outcome.text;
   // Quoted text (a commit's subject, say) is shown as written: a name inside it isn't an item named.
   const quoted = (at: number) => { const open = rest.lastIndexOf('“', at); return open >= 0 && rest.indexOf('”', open) > at; };
   while (rest) {
@@ -1168,7 +1167,9 @@ export function listResult(): HTMLElement[] {
   // With no problem line, Show all follows the sentence, for one the header cuts or whose reload sentences live under Show all.
   if (done && !lines.length) done.querySelector('.band-text')!.after(wholeToggle(state.outcome, 0, hasAdvice));
   const chips = !whole && advice ? reloadChips(advice, of) : null;
-  const profile = done && !whole && state.outcome?.profileLine ? h('span.band-profile', {}, state.outcome.profileLine) : null;
+  const profileLine = done && !whole ? state.outcome?.profileLine : undefined;
+  const profileAt = profileLine ? profileLine.lastIndexOf(' stopped being the ') : -1;
+  const profile = profileLine ? h('span.band-profile', { title: profileLine }, h('span.band-profile-name', {}, profileLine.slice(0, profileAt)), h('span.band-profile-rest', {}, profileLine.slice(profileAt))) : null;
   const problem = lines.length ? h(`div.band${chips || profile ? '.result-row2' : ''}`, { role: 'status' }, profile, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, of, hasAdvice), chips, done ? null : closeButton(close, { id: 'problems-dismiss' })) : null;
   const row2 = whole && advice ? reloadLines(advice) : problem ? null : profile ? h('div.result-row2.result-profile-row', {}, profile, chips) : chips;
   return [done, row2, problem].filter((band): band is HTMLElement => !!band);

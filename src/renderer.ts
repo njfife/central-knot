@@ -300,7 +300,7 @@ function fitReloadChips(header: HTMLElement): boolean {
 }
 afterLayout(() => {
   const header = region('header'), more = header.querySelector<HTMLElement>('[data-when-cut]');
-  const textCut = more ? (more.hidden = true, [...header.querySelectorAll('.problem-text, .problem-text > *, .band-done > .band-text, .toolbar-result-text, .band-profile')].some(cut)) : false;
+  const textCut = more ? (more.hidden = true, [...header.querySelectorAll('.problem-text, .problem-text > *, .band-done > .band-text, .toolbar-result-text, .band-profile-name')].some(cut)) : false;
   if (more) more.hidden = !textCut;
   if (!fitReloadChips(header) && more && !textCut && more.hasAttribute('data-has-advice')) { more.hidden = false; fitReloadChips(header); }
 });
