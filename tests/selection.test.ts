@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { cp, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ask, askedNow, cancelAsk, cantWords, deletedWords, deleteLabel, headingState, isTicked, ofListed, questionWords, restoreWords, selectedWords, selectingIn,
+import { ask, askedNow, cancelAsk, cantWords, deletedWords, headingState, isTicked, ofListed, questionWords, restoreWords, selectedWords, selecting,
   startSelecting, stopSelecting, tickHeading, tickRow, whyLines, type Listed } from '../src/selection.ts';
 import { readHistory } from '../src/history.ts';
 import { rowClicks } from '../src/libraryrow.ts';
@@ -17,30 +17,27 @@ import { applySkills, restoreSkill } from '../src/skills.ts';
 import { withLock, winLockSkip } from './fslock.ts';
 import { bytes, folderOf, historyActions, itemOf, pass, put, roots, sandbox, seen, skillText, tools, turnOff, turnOn, type Box } from './skillclicks.ts';
 
-const HOME = '/home/someone', VISIT = 3;
 /** Rows as the Library lists them, by name: a skill each (`skills-<name>`), none that can't be deleted. */
 const listed = (...names: string[]): Listed[] => names.map(name => ({ id: `skills-${name}`, name }));
 const ids = (rows: Listed[]) => rows.map(row => row.id);
 const tickedOf = (rows: Listed[]) => ofListed(rows).ticked.map(row => row.name);
 
-test('Select starts with nothing ticked, for its home and visit: another visit, another home or Done ends it, and its ticks go with it', () => {
-  startSelecting(HOME, VISIT);
+// Another page and another home end the mode where they change (app.ts showPage, accept): on screen, scripts/e2e.mjs selectFlow.
+test('Select starts with nothing ticked; Done ends it and its ticks go, and Select again starts with none', () => {
+  startSelecting();
   tickRow('skills-notes', ['skills-notes'], false);
-  assert.deepEqual([selectingIn(HOME, VISIT), isTicked('skills-notes')], [true, true]);
-  assert.equal(selectingIn(HOME, VISIT + 1), false, 'another page: no mode');
-  assert.deepEqual([selectingIn(HOME, VISIT), isTicked('skills-notes')], [false, false], 'back on the visit it began on, it is still gone');
-  startSelecting(HOME, VISIT);
-  assert.deepEqual([selectingIn(HOME, VISIT), isTicked('skills-notes')], [true, false], 'Select again starts with nothing ticked');
-  assert.equal(selectingIn('/home/other', VISIT), false, 'another home: no mode');
-  startSelecting(HOME, VISIT);
+  assert.deepEqual([selecting(), isTicked('skills-notes')], [true, true]);
   stopSelecting();
-  assert.equal(selectingIn(HOME, VISIT), false, 'Done');
+  assert.deepEqual([selecting(), isTicked('skills-notes')], [false, false]);
+  startSelecting();
+  assert.deepEqual([selecting(), isTicked('skills-notes')], [true, false]);
+  stopSelecting();
 });
 
 test('A click ticks a row and a second unticks it; Shift ticks the run from the last row clicked to this one, in the order on screen, across a heading', () => {
   // On: alpha, bravo; Off: charlie (a server), delta.
   const rows: Listed[] = [...listed('alpha', 'bravo'), { id: 'mcp-charlie', name: 'charlie' }, ...listed('delta')], order = ids(rows);
-  startSelecting(HOME, VISIT);
+  startSelecting();
   tickRow('skills-bravo', order, false);
   tickRow('skills-delta', order, true);
   assert.deepEqual(tickedOf(rows), ['bravo', 'charlie', 'delta']);
@@ -56,7 +53,7 @@ test('A click ticks a row and a second unticks it; Shift ticks the run from the 
 
 test('A heading’s tick: unticked, it ticks every row under it; with some ticked it reads mixed and ticks them all; with all ticked it unticks them', () => {
   const under = ['skills-alpha', 'skills-bravo', 'skills-charlie'];
-  startSelecting(HOME, VISIT);
+  startSelecting();
   assert.equal(headingState(under), 'false');
   tickHeading(under);
   assert.deepEqual([headingState(under), under.every(isTicked)], ['true', true]);
@@ -71,7 +68,7 @@ test('A heading’s tick: unticked, it ticks every row under it; with some ticke
 
 test('Only the rows listed count: a tick Find hides stays and comes back with its row, and a Delete of many takes the listed rows it can delete and leaves the others with why', () => {
   const rows: Listed[] = [...listed('alpha', 'bravo'), { id: 'skills-clash', name: 'clash', cant: 'not in Central Knot' }, { id: 'skills-zulu', name: 'zulu', cant: 'Only through a plugin' }];
-  startSelecting(HOME, VISIT);
+  startSelecting();
   tickHeading(ids(rows));
   const found = rows.filter(row => row.name !== 'bravo');
   assert.deepEqual([tickedOf(found), ofListed(found).takes.map(row => row.name)], [['alpha', 'clash', 'zulu'], ['alpha']], 'Find hides bravo: it is neither counted nor taken');
@@ -83,7 +80,7 @@ test('Only the rows listed count: a tick Find hides stays and comes back with it
 
 test('The question keeps the rows it counted; it closes when one of them is no longer listed, another is, or one can no longer be deleted; Cancel keeps the ticks', () => {
   const rows = listed('alpha', 'bravo', 'charlie');
-  startSelecting(HOME, VISIT);
+  startSelecting();
   tickHeading(ids(rows));
   ask(rows);
   assert.equal(askedNow([...rows].reverse()), true, 'another Sort is the same rows');
@@ -98,14 +95,13 @@ test('The question keeps the rows it counted; it closes when one of them is no l
   stopSelecting();
 });
 
-test('Its words: the bar’s count, Delete… with its number only where it takes fewer than are ticked, the question with History’s days, the rows it leaves and why, and the result', () => {
+test('Its words: the bar’s count, the question with History’s days, the rows it leaves and why, and the result', () => {
   assert.deepEqual([selectedWords(0), selectedWords(3)], ['', '3 selected']);
-  assert.deepEqual([deleteLabel(3, 3), deleteLabel(10, 13), deleteLabel(0, 2)], ['Delete…', 'Delete 10…', 'Delete…']);
   // Thirteen ticked: ten that can be deleted, a found skill, a plugin's, and an agent whose kind's record stops writes.
-  const stop = 'agents.json is damaged. Nothing was changed.';
+  const stop = 'the agents record is damaged';
   const rows: Listed[] = [...listed('a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8', 'a9', 'a10'), { id: 'skills-clash', name: 'clash', cant: 'not in Central Knot' },
     { id: 'skills-zulu', name: 'zulu', cant: 'Only through a plugin' }, { id: 'agents-scout', name: 'scout', cant: stop }];
-  startSelecting(HOME, VISIT);
+  startSelecting();
   tickHeading(ids(rows));
   const { takes, leaves } = ofListed(rows);
   assert.equal(`${questionWords(takes.length, 30)} ${cantWords(leaves.length)}`, 'Delete 10 from every tool and Central Knot? History can restore them for 30 days. 3 can’t be deleted');

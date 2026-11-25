@@ -54,6 +54,9 @@ export const notAllThrough = (short: string[], of: number) => `${short.length} o
 /** Rows a lead has just named, said after it by count alone ("Both are off", "All 3 are deleted"), so a result names each row once. */
 export const countedAs = (count: number, of: number, now: 'on' | 'off' | 'deleted') => `${count === of && count > 1 ? (count === 2 ? 'Both' : `All ${count}`) : count} ${count === 1 ? 'is' : 'are'} ${now}`;
 
+/** What a record that stops writes adds after why, in the bands and results that say the stop (share.ts syncGate, kindstore.ts readLibraryFile); a row's reason before anything is tried leaves it out (matrix.ts stopFor). */
+export const NOTHING_CHANGED = 'Nothing was written or deleted. Put the record back, then try again.';
+
 /** The text with its first letter capitalised, to start a sentence. */
 export const sentence = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 

@@ -41,6 +41,7 @@ import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './cli
 import { followView, type SigninChecks } from './mcpsignin.ts';
 import { loadSessions, type SessionsDay } from './sessionspage.ts';
 import type { DayRows } from './sessionrow.ts';
+import { stopSelecting } from './selection.ts';
 import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
@@ -113,7 +114,7 @@ export const state = {
   agentsResult: undefined as PassResult | undefined,
   /** What sync and actions did, newest last: read when the History page opens or the home changes (pagedata.ts). */
   history: pageData<HistoryEvent[]>(),
-  /** How long History keeps things, for History's intro; read with History's events. */
+  /** How long History keeps things, as Settings saves it: History's intro and the Deletes say it; read with History's events, at launch and at each settings change (readHistoryDays). */
   historyDays: undefined as HistoryDays | undefined,
   /** What the last click on skills did, shown until the next action or read. */
   skillsResult: undefined as PassResult | undefined,
@@ -397,9 +398,10 @@ export async function busy(message: string, work: (page: Page) => Promise<void>)
  */
 function accept(view: HomeView): HomeView {
   state.home = undefined;
-  // The last results, and the rows pinned where they were, are the last home's.
+  // The last results, the rows pinned where they were, and Select's mode with its ticks, are the last home's.
   Object.assign(state, { skillsResult: undefined, mcpResult: undefined, agentsResult: undefined, item: undefined });
   unpin();
+  stopSelecting();
   // A harness page belongs to the home it was opened in.
   state.harness = undefined;
   if (!draftUnsaved()) state.instructionEdit = undefined;
@@ -1088,7 +1090,7 @@ export function showPage(page: Page, { repair = false } = {}) {
   const leavingHarness = page === 'harnesses' && !state.busy && !!state.harness;
   // A new page starts clean: the last action's message and results belong to the page they happened on.
   if (page !== state.page || leavingHarness) leaveResults(page);
-  if (page !== state.page) { state.libraryView = 'list'; state.visit += 1; forgetRepoPrompts(); forgetSourcePrompts(); }
+  if (page !== state.page) { state.libraryView = 'list'; state.visit += 1; stopSelecting(); forgetRepoPrompts(); forgetSourcePrompts(); }
   if (leavingHarness) state.harness = undefined;
   // Settings opens fresh (what its rows said last visit belongs to that visit); every other page reads its own data.
   state.page = page;
@@ -1766,7 +1768,16 @@ api().onNavigate(page => {
 });
 // Settings changed by a menu, a dialog or the system: main says so after every save and whenever the window comes back, and an
 // open Settings page reads them again, so it never shows (or writes back) a value that is no longer the saved one.
-api().onSettingsChanged(() => { if (state.page === 'settings') void loadSettings(); });
+api().onSettingsChanged(() => { readHistoryDays(); if (state.page === 'settings') void loadSettings(); });
+/** History's days as Settings saved them, read at launch and at each settings change, before any Delete says them; drawn again when they change. */
+function readHistoryDays() {
+  void api().getSettings().then(settings => {
+    if (state.historyDays === settings.historyDays) return;
+    state.historyDays = settings.historyDays;
+    rerender();
+  }, () => undefined);
+}
+readHistoryDays();
 
 // A background pass may change what differs from the git repo too: its page and sidebar count read again soon (no fetch).
 // The Sources page reads its view again too: a read by itself (the daily check) changes what each name there is to the library.

@@ -11114,13 +11114,11 @@ async function libraryFlow() {
     if (await tb.run(`document.body.classList.contains('rail')`)) await tb.click('#sidebar-toggle');
   };
   const wraps = () => tb.run(`document.querySelector('#main .toolbar').classList.contains('bar-wrap')`);
-  // Select, at the toolbar's end, takes its room: with the sidebar open the bar wraps at 1316 (1108 px of content), as at 1280;
-  // at the owner's window, 1316 wide with the sidebar folded, it adds no line (selectFlow).
-  let [wrapped, oneLine] = [860, 1400];
+  let [wrapped, oneLine] = [860, 1316];
   await openAt(wrapped);
   const wrapsAt860 = await wraps();
   await openAt(oneLine);
-  check('with the sidebar open, the bar wraps at 860 wide and keeps to one line at 1400', wrapsAt860 && !(await wraps()));
+  check('with the sidebar open, the bar wraps at 860 wide and keeps to one line at 1316', wrapsAt860 && !(await wraps()));
   while (oneLine - wrapped > 1) {
     const mid = (wrapped + oneLine) >> 1;
     await openAt(mid);
@@ -12231,7 +12229,8 @@ async function selectFlow() {
   await openKind(a, 'all');
   // zulu's row is its plugin's own, keyed by the plugin: its key as drawn.
   const zulu = await a.run(`[...document.querySelectorAll('.ov-plugin-row')].find(row => row.textContent.includes('zulu')).dataset.key`);
-  const id = (key, kind = 'skills') => (key === 'zulu' ? zulu : rowPart('', kind, key)), tick = (key, kind = 'skills') => `[id="tick-${id(key, kind)}"]`;
+  // A plugin's own row's tick is led by plugin- (matrix.ts selectId).
+  const id = (key, kind = 'skills') => (key === 'zulu' ? zulu : rowPart('', kind, key)), tick = (key, kind = 'skills') => `[id="tick-${key === 'zulu' ? 'plugin-' : ''}${id(key, kind)}"]`;
   const word = () => a.text('#library-select .band-stack > :not(.band-unshown)');
   const bar = () => a.run(`[...document.querySelectorAll('#select-bar > :not(.band-unshown) > *')].map(part => part.textContent.trim()).filter(Boolean)`);
   const ticked = () => a.all('.ov-row.row-ticked', 'e.dataset.key');
@@ -12244,8 +12243,12 @@ async function selectFlow() {
   const sidebarOpen = async open => { if (await a.run(`document.body.classList.contains('rail')`) === open) await a.click('#sidebar-toggle'); };
   const pictures = async name => {
     if (!shots) return;
-    for (const [width, height, open] of [[...SMALLEST, false], [...SMALLEST, true], [1316, 819, false], [2560, 1440, true]]) { await sizeTo(a, width, height); await sidebarOpen(open); await a.shot(`select-${name}-${width}${open ? '' : '-rail'}`); }
-    await sidebarOpen(true); await fullSize(a);
+    const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+    for (const [width, height, open, dark] of [[...SMALLEST, false], [...SMALLEST, true], [1316, 819, false], [1316, 819, true], [1316, 819, true, true], [...SMALLEST, true, true], [2560, 1440, true]]) {
+      await sizeTo(a, width, height); await sidebarOpen(open); await theme(dark ? 'dark' : 'light');
+      await a.shot(`select-${name}-${width}${open ? '' : '-rail'}${dark ? '-dark' : ''}`);
+    }
+    await theme('light'); await sidebarOpen(true); await fullSize(a);
   };
   // 1. One word on the toolbar, and nothing else of it until it is clicked.
   same('the Library has Select on its toolbar, and no bar and no tick until it is clicked',
@@ -12286,6 +12289,7 @@ async function selectFlow() {
   // 3. Shift-click: the run as listed, from clash under Found to zulu under Only through a plugin.
   await a.click(tick('india'));
   await a.click(tick('clash'));
+  same('three ticked, one of which can’t be deleted: the bar says so beside the count, and Delete… has no number', await bar(), ['3 selected', '1 can’t be deleted ›', 'Delete…']);
   await pictures('three');
   await shiftClick(`.ov-row[data-key="${zulu}"] .ov-name`);
   await a.settle();
@@ -12314,17 +12318,24 @@ async function selectFlow() {
   await find('');
   // 6. Thirteen ticked: ten can be deleted, and a found skill, a plugin's and a stopped kind's can't.
   await a.click('#library-select');
-  for (const heading of ['on', 'found', 'plugins']) await a.click(`#tick-heading-${heading}`);
-  same('thirteen ticked: Delete… says the ten it takes', await bar(), ['13 selected', 'Delete 10…']);
+  same('no tick on a heading none of whose rows can be deleted: Found, Only through a plugin', [await a.exists('#tick-heading-on'), await a.exists('#tick-heading-found'), await a.exists('#tick-heading-plugins')], [true, false, false]);
+  await a.click('#tick-heading-on');
+  for (const [key, kind] of [['clash'], ['scout', 'agents'], ['zulu']]) await a.click(tick(key, kind));
+  same('thirteen ticked: the bar says how many can’t be deleted', await bar(), ['13 selected', '3 can’t be deleted ›', 'Delete…']);
   const before = folders();
+  const rowTop = () => top('alpha');
+  const bare = await rowTop();
   await a.click('#select-delete');
-  same('the question, in the bar’s place', await bar(), ['Delete 10 from every tool and Central Knot? History can restore them for 7 days. 3 can’t be deleted ›', 'Cancel', 'Delete 10']);
+  same('the question, in the bar’s place, the focus on Cancel; no row moved', [await bar(), await a.run('document.activeElement?.id'), await rowTop()],
+    [['Delete 10 from every tool and Central Knot? History can restore them for 7 days. 3 can’t be deleted ›', 'Cancel', 'Delete 10'], 'select-cancel', bare]);
   await a.click('#select-why');
+  same('the list opens over the rows: no row moved', await rowTop(), bare);
   same('“3 can’t be deleted” names each with its reason', await a.all('#select-why-list p', 'e.textContent'),
     ['clash: not in Central Knot', 'scout: the agents record is damaged', 'zulu: Only through a plugin']);
   await pictures('question');
+  await a.click('#select-why');
   await a.click('#select-cancel');
-  same('Cancel: the bar again, the ticks kept, nothing changed', [await bar(), (await ticked()).length, folders()], [['13 selected', 'Delete 10…'], 13, before]);
+  same('Cancel: the bar again, the ticks kept, nothing changed', [await bar(), (await ticked()).length, folders()], [['13 selected', '3 can’t be deleted ›', 'Delete…'], 13, before]);
   // 7. Delete 10: ten leave every tool and the page; one result, which stays; the mode ends.
   await a.click('#select-delete');
   await a.click('#select-delete-now');
@@ -12374,12 +12385,14 @@ async function selectFlow() {
   await a.press('Escape');
   same('Escape leaves the mode', await word(), 'Select');
   // 13. Nothing cut off at 860 with the sidebar folded and open, in the mode and with the question open.
-  await a.click('#library-select');
-  for (const heading of ['on', 'found']) await a.click(`#tick-heading-${heading}`);
   await sizeTo(a, ...SMALLEST); await sidebarOpen(true);
-  const firstRow = () => a.run(`Math.round(document.querySelector('.ov-row[data-key]').getBoundingClientRect().top)`), counting = await firstRow();
+  await a.click('#library-select');
+  const firstRow = () => a.run(`Math.round(document.querySelector('.ov-row[data-key]').getBoundingClientRect().top)`), selecting = await firstRow();
+  await a.click('#tick-heading-on');
+  await a.click(tick('clash'));
+  const ticking = await firstRow();
   await a.click('#select-delete');
-  same('at 860 wide the question takes the bar’s place on two lines, and no row moves', [await a.run(`document.querySelector('#select-bar > :not(.band-unshown) .select-text').offsetHeight > 20`), await firstRow()], [true, counting]);
+  same('at 860 wide, from Select’s click on, no row moves: a tick of one that can’t be deleted, the question on two lines', [await a.run(`document.querySelector('#select-bar > :not(.band-unshown) .select-text').offsetHeight > 20`), ticking, await firstRow()], [true, selecting, selecting]);
   await a.click('#select-cancel');
   await fullSize(a);
   await fitsAtMinimum(a, 'the Library selecting');
