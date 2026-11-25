@@ -133,7 +133,7 @@ export interface DesktopApi {
   /** The home last opened, else this computer's home (dev builds: the practice copy). */
   startHome(): Promise<HomeView | null>;
   setSync(on: boolean): Promise<HomeView | null>;
-  syncNow(home: string): Promise<{ view: HomeView; text: string; reasons: Reason[]; warn: boolean; history: boolean; reloads: ReloadChange[] } | null>;
+  syncNow(home: string): Promise<{ view: HomeView; text: string; reasons: Reason[]; warn: boolean; history: boolean; reloads: ReloadChange[]; did?: boolean } | null>;
   onSyncRequest(callback: () => void): void;
   /**
    * Turns the open home's standing rule, Synchronize everything, on or off (everything.ts setSyncEverything), then reads and syncs

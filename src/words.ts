@@ -149,7 +149,7 @@ export const throughPlugin = (tool: HarnessId, given: { plugin: string; version?
 export const HOOK_SOURCE_UNREADABLE = 'This file couldn’t be read.';
 
 /**
- * Says that profiles stop (before an act: matrix.ts unusedBand) or stopped (after a History Undo: app.ts restoreEvent)
+ * Says that profiles stop (before an act: matrix.ts unusedBand) or stopped (after an act: app.ts withProfileEnded)
  * being in use: "Everyday stopped being the profile in use.", or for several "Everyday and Focus stopped being the profiles in use.".
  */
 export function profileLeftUse(names: readonly string[], tense: 'stops' | 'stopped' = 'stopped'): string {

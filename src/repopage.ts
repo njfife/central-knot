@@ -1,7 +1,7 @@
 // Git repo: the Managed set kept in a git repo (GitHub, GitLab or any git server), with Pull to bring the repo's changes into the
 // tools and Push to send this computer's. The page says which repo and commit are in use, when it last pulled and pushed, and
 // what differs each way; nothing moves until Pull or Push is clicked.
-import { acting, announce, busy, rerender, setHome, setSync, showPage, state } from './app.ts';
+import { acting, announce, busy, rerender, setHome, setSync, showPage, state, tell } from './app.ts';
 import { button, closeButton, emptyState, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { openKind, outcomeBand } from './matrix.ts';
@@ -103,14 +103,14 @@ export async function loadRepo(check = false): Promise<void> {
 }
 
 /** After a write: the page and the home both read again, so every page shows what Pull or Push left on disk. */
-async function settle(result: RepoResult, done: string, note?: string, warn?: boolean) {
+async function settle(result: RepoResult, done: string, note?: string, warn?: boolean, items?: string[]) {
   repo.view = result.view;
   repo.problem = result.stopped;
   repo.confirmDisconnect = false;
   setHome(await api().refresh(), { reload: false });
-  if (!result.stopped) state.outcome = { page: 'repo', text: done, note, warn };
-  // The status bar's "…ing" ends with the action: said quietly, since the band above already shows it.
-  announce(result.stopped ?? done, true);
+  const moved = !!result.pulled || result.results.some(entry => entry.outcome === 'written' || entry.outcome === 'removed');
+  if (result.stopped) announce(result.stopped, true);
+  else tell({ page: 'repo', text: done, note, warn, items }, '', { checkProfile: moved });
 }
 
 const connect = () => busy('Connecting to the repo…', async () => {
@@ -158,9 +158,7 @@ function pullSummary(result: RepoResult): { text: string; note?: string; warn: b
 const pullNow = () => busy('Pulling from the repo…', async () => {
   const result = await api().pullRepo(state.home!.home);
   const said = pullSummary(result);
-  await settle(result, said.text, said.note, said.warn);
-  if (!state.outcome) return;
-  state.outcome.items = said.names;
+  await settle(result, said.text, said.note, said.warn, said.names);
 });
 
 const push = (byKeyboard: boolean) => void pushNow().then(() => { if (byKeyboard) keepFocus('repo-push'); });
