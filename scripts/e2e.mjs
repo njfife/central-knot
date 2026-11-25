@@ -12197,6 +12197,31 @@ async function libraryFlow() {
 }
 
 /**
+ * Select on the Library (selection.ts, drawn by matrix.ts selectControl, selectBar and tickOf) on a home of ten skills in
+ * Central Knot, one found skill whose copies differ (clash) and one a plugin alone brings (zulu).
+ */
+async function selectFlow() {
+  const home = join(scratch, 'home-select'), claude = join(home, '.claude/skills'), copilot = join(home, '.copilot/skills');
+  const names = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet'];
+  for (const name of names) skill(claude, name);
+  skill(claude, 'clash', text('clash', 'One way.'));
+  skill(copilot, 'clash', text('clash', 'Another way.'));
+  writeClaudeInstall(home, 'local-market', 'kit', '1.0.0', { 'skills/zulu/SKILL.md': text('zulu', 'Plugin skill.') });
+  toolClis(home);
+  const a = await launch(join(scratch, 'select-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex' });
+  await a.click('#nav-overview');
+  await a.click('#setup-yes');
+  for (let tries = 0; tries < 100 && !(await a.exists('#walk-skip')); tries++) await wait(100);
+  await a.click('#walk-skip');
+  await openKind(a, 'all');
+  // 1. One word on the toolbar, and nothing else of it until it is clicked.
+  same('the Library has Select on its toolbar, and no bar and no tick until it is clicked',
+    [await a.text('#library-select'), await a.exists('#select-bar'), await a.exists('.ov [role="checkbox"]')], ['Select', false, false]);
+  same('no page errors, Select', a.pageErrors, []);
+  await a.quit();
+}
+
+/**
  * The strip on each tool's card that names the hooks and extensions that can add text to its sessions (sessionhooks.ts), on a
  * made-up home. Claude Code: a file with an import (so the files read with it show), the base applied (so the base strip and
  * Earlier versions show), your own hook, and a dozen plugins with hooks: release-helper's with arguments and one very long
@@ -15398,7 +15423,7 @@ if (tool === 'claude') {
 }
 
 const groups = [
-  [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, sessionStripFlow, fromFlow, claudeWholeFlow],
+  [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, selectFlow, sessionStripFlow, fromFlow, claudeWholeFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow, sessionsFlow],
   [fewToolsFlow, openCodeFlow, antigravityFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, pluginRecordHoldsFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow, clickReadsFlow],
   [backFlow, backPlaceFlow, libraryLinesFlow, harnessFlow, manageFlow, arrivalFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, mcpSigninFlow, firstSetupFlow, crashFlow],
