@@ -1,7 +1,7 @@
 // Words shared by the pages and by what the engines say: each tool's display name (toolNames), each kind's (kindNouns; the
 // rows of one result, of one kind or several: rowNouns, rowNames), the names of the pages called otherwise on screen
 // (pageNames), "Turn it on" (turnIt), where a copy was deleted (deletedIn), "a, b and c" lists, and a few sentences more than
-// one module says (a tool left out or not managed, through a plugin). A page's own words are its module's; a library row's are
+// one module says (a tool left out or not managed, through a plugin, a profile leaving use). A page's own words are its module's; a library row's are
 // libraryrow.ts libraryWords, a History entry's historyactions.ts and historypage.ts.
 import type { HomeKind } from './presence.ts';
 import type { NamedRow } from './itemrow.ts';
@@ -147,4 +147,14 @@ export const throughPlugin = (tool: HarnessId, given: { plugin: string; version?
 
 /** Shown in View source when a hook's declaring file or script cannot be read (hooksource.ts, hooksourceview.ts, main.ts). */
 export const HOOK_SOURCE_UNREADABLE = 'This file couldn’t be read.';
+
+/**
+ * Says that profiles stop (before an act: matrix.ts unusedBand) or stopped (after a History Undo: app.ts restoreEvent)
+ * being in use: "Everyday stopped being the profile in use.", or for several "Everyday and Focus stopped being the profiles in use.".
+ */
+export function profileLeftUse(names: readonly string[], tense: 'stops' | 'stopped' = 'stopped'): string {
+  if (!names.length) return '';
+  const verb = tense === 'stops' ? (names.length === 1 ? 'stops' : 'stop') : 'stopped';
+  return `${andList([...names])} ${verb} being the ${names.length === 1 ? 'profile' : 'profiles'} in use.`;
+}
 

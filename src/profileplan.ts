@@ -494,6 +494,20 @@ export function inUseName(profiles: Profile[], live: LiveItem[], plugins: Plugin
   return names.length ? andList(names) : NO_PROFILE;
 }
 
+/** The profiles in use in `home`, worked out from its live and plugin items as the status bar does. */
+export function inUseInHome(home: PluginHome | undefined): Profile[] {
+  if (!home?.profiles?.profiles?.length) return [];
+  const plugins = pluginLive(home);
+  return inUse(home.profiles.profiles, homeItems(home, plugins), plugins);
+}
+
+/** Every profile in `before` when none of its ids still matches in `after` (even if another now matches), else empty. */
+export function endedProfiles(before: readonly Profile[], after: readonly Profile[]): Profile[] {
+  if (!before.length) return [];
+  const still = new Set(after.map(profile => profile.id));
+  return before.some(profile => still.has(profile.id)) ? [] : [...before];
+}
+
 /**
  * A switch's items in two lists, each item once per direction: the library items it turns On and Off (switchPlan) and the
  * plugins' items some tool turns on or off (pluginPlan `on` and `off`). What the page's Switch offers and turnsWords counts.

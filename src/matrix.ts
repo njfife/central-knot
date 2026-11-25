@@ -31,9 +31,9 @@
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, noticeNames, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
-import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, pageNames, rowNames, rowNouns, saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind } from './words.ts';
+import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, pageNames, profileLeftUse, rowNames, rowNouns, saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind } from './words.ts';
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
-import { copilotSharesYours, homeItems, inUse, itemId, pluginLive } from './profileplan.ts';
+import { copilotSharesYours, endedProfiles, homeItems, inUse, inUseInHome, itemId, pluginLive } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
 import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, writeOff, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
@@ -334,8 +334,8 @@ interface Table { kinds: PageKind[]; tool?: Tool; view: View; used?: boolean; sh
 const rowsIn = (t: Table) => t.kinds.flatMap(rowsOf);
 /**
  * Each kind a table lists, with what it brings beside its rows: its own record's stop (the home's is said once, by listBands),
- * its problems beside that stop and its part of the usage reading (kindUsage). The bands (listBands), whether the No use seen
- * chip is offered and its band (usedColumn, unusedCount, unusedBand) go over the kinds here. Kept for the last home, reading,
+ * its problems beside that stop and its part of the usage reading (kindUsage). The bands (listBands), the Used column and
+ * the chip's band (usedColumn, unusedBand) go over the kinds here. Kept for the last home, reading,
  * kinds and tool asked for, one entry: the asks for one table share it,
  * and on a segment of one kind the segment's asks and the chips' (overEveryKind) take turns, each working it out again. Not here:
  * a kind's notices, kept as they are first shown (toldNotices).
@@ -511,7 +511,7 @@ function filterBar(t: Table) {
   // A chip is offered while something matches it, over every kind the Library holds (overEveryKind), or while it is the one on.
   const offered = (id: Filter, matching: boolean) => matching || view.filter === id;
   const chips = [offered('attention', copiesDifferChipShown(over)) ? chip('attention', chipNames.attention, 'diff', shows('attention'), true) : null,
-    offered('unused', !!unusedCount(over)) ? chip('unused', chipNames.unused, 'history', shows('unused')) : null].filter(Boolean);
+    offered('unused', !!reading(over) && !!unusedCount(over.kinds)) ? chip('unused', chipNames.unused, 'history', shows('unused')) : null].filter(Boolean);
   return chips.length ? h('div.chips', { role: 'group', 'aria-label': 'Show only' }, chips) : null;
 }
 
@@ -1561,7 +1561,7 @@ function tableOf(name: keyof typeof views, kinds: PageKind[], harness?: Tool, fi
   if (pinnedHere(t).rows.size > 0) return t;
   const over = overEveryKind(t);
   if (t.view.filter === 'attention' && !copiesDifferChipShown(over)) t.view.filter = 'all';
-  if (t.view.filter === 'unused' && !unusedCount(over)) t.view.filter = 'all';
+  if (t.view.filter === 'unused' && (!reading(over) || !unusedCount(over.kinds))) t.view.filter = 'all';
   return t;
 }
 /** The segment the Library was last drawn for (useLibrary), so another one starts its list afresh. */
@@ -2413,9 +2413,13 @@ export function usageSums(): UsageSummary | undefined {
 }
 /** A kind's items in the reading's sum, in a table: whether it has a Used column, the "No use seen in 30 days" chip's lists and what its band leaves out. */
 const kindUsage = (t: Table, kind: PageKind): KindUsage | undefined => (reading(t) ? usageSums()?.kinds[kind] : undefined);
-/** Whether a row is in the "No use seen in 30 days" chip, and how many it holds (no chip at 0). */
+/** Whether a row is in the "No use seen in 30 days" chip. */
 const inUnusedChip = (t: Table, skill: ItemRow) => !!kindUsage(t, skill.kind)?.noUseSeen.includes(skill.key);
-const unusedCount = (t: Table) => kindParts(t).reduce((sum, part) => sum + (part.usage?.noUseSeen.length ?? 0), 0);
+/** How many items the "No use seen in 30 days" chip holds across `kinds`, for the Library and the Overview alike. */
+export function unusedCount(kinds: readonly PageKind[]): number {
+  const sum = usageSums();
+  return sum ? kinds.reduce((total, kind) => total + sum.kinds[kind].noUseSeen.length, 0) : 0;
+}
 
 /**
  * The chip's band. Its lead: how many it holds, Turn these off and what it does (it skips a plugin's items and items linked to
@@ -2436,12 +2440,12 @@ function unusedBand(t: Table, shown: ItemRow[]) {
     const list = read.tools.filter(each => toolsFor(t, kind).includes(each.tool) && each.sessions && !each.unread && each.tells[partOfPage[kind]] === how).map(each => each.tool);
     return list.length ? `${toolsInWords(list)} ${list.length === 1 ? 'doesn’t' : 'don’t'}${word} record which ${kindNouns[kind].one} was used.` : '';
   }).filter(Boolean).join(' ');
-  const live = homeItems(home), plugins = pluginLive(home), ids = new Set(off.map(skill => itemId(partOfPage[skill.kind], skill.key))), before = inUse(home.profiles.profiles, live, plugins);
-  const ending = before.filter(profile => !inUse(home.profiles.profiles, live.map(item => (ids.has(item.id) ? { ...item, on: false } : item)), plugins).includes(profile));
+  const plugins = pluginLive(home), live = homeItems(home, plugins), ids = new Set(off.map(skill => itemId(partOfPage[skill.kind], skill.key)));
+  const ending = endedProfiles(inUseInHome(home), inUse(home.profiles.profiles, live.map(item => (ids.has(item.id) ? { ...item, on: false } : item)), plugins));
   const lead = [`${counted(shown)} with no use seen in the last ${USAGE_DAYS} days.`,
     off.length ? 'Turn these off: Central Knot takes its copies out of every tool it manages and keeps them; Undo turns them all back on.' : '',
     kept.length ? `${counted(kept)} from a plugin skipped: turn each off on its own row.` : '',
-    ending.length ? `With these off, ${andList(ending.map(profile => profile.name))} ${ending.length === 1 ? 'stops' : 'stop'} being the profile in use.` : ''];
+    ending.length ? `With these off, ${profileLeftUse(ending.map(profile => profile.name), 'stops')}` : ''];
   const more = ['A use on another computer or in a tool not read isn’t seen.', reachWords(read), record('seen', ' always'), record(undefined, ''),
     fresh.length ? `Left out: ${counted(fresh)} under ${USAGE_DAYS} days old.` : '', found.length ? `Left out: ${counted(found)} found, not yet in Central Knot.` : ''];
   const turn = off.length ? button({ variant: 'outline', size: 'micro', label: 'Turn these off', id: 'turn-unused-off',

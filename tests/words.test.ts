@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { capitalToolsPhrase, fewNames, pageNames, toolsPhrase } from '../src/words.ts';
+import { capitalToolsPhrase, fewNames, pageNames, profileLeftUse, toolsPhrase } from '../src/words.ts';
 
 test('A page named otherwise on screen is spelled once, in words.ts pageNames: every other sentence, link and button reads it from there', () => {
   const src = new URL('../src/', import.meta.url);
@@ -29,4 +29,13 @@ test('the same phrase can start a label: "All 3 tools", or the names as they are
 test('many names in a sentence: four in full, then the first three and how many more', () => {
   const names = (count: number) => Array.from({ length: count }, (_, index) => `item${index + 1}`);
   assert.deepEqual([fewNames(names(4)), fewNames(names(40))], ['item1, item2, item3 and item4', 'item1, item2, item3 and 37 more']);
+});
+
+test('a profile leaving use: one home for before the act and after it, singular and plural', () => {
+  assert.equal(profileLeftUse([]), '');
+  assert.equal(profileLeftUse(['Everyday']), 'Everyday stopped being the profile in use.');
+  assert.equal(profileLeftUse(['Everyday', 'Focus']), 'Everyday and Focus stopped being the profiles in use.');
+  assert.equal(profileLeftUse(['Everyday', 'Focus', 'Incident']), 'Everyday, Focus and Incident stopped being the profiles in use.');
+  assert.equal(profileLeftUse(['Everyday'], 'stops'), 'Everyday stops being the profile in use.');
+  assert.equal(profileLeftUse(['Everyday', 'Focus'], 'stops'), 'Everyday and Focus stop being the profiles in use.');
 });

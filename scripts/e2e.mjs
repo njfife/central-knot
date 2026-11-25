@@ -623,6 +623,8 @@ async function backPlaceFlow() {
   writeFileSync(join(P.home, '.claude/CLAUDE.md'), lines(60, 'Follow project convention'));
   mkdirSync(join(P.home, '.copilot'), { recursive: true });
   writeFileSync(join(P.home, '.copilot/copilot-instructions.md'), lines(60, 'Follow project convention'));
+  // Enough tools for the Overview to scroll at 1316×819 too.
+  for (const folder of ['.codex', '.pi/agent', '.config/opencode', '.gemini/config']) mkdirSync(join(P.home, folder), { recursive: true });
   // A folder marketplace of 30 plugins in two categories; pack-16, installed in Claude Code, brings 20 skills to the Library. pack-16's
   // and pack-17's pages hold those skills and a long README.
   const plugins = numbered('pack', 30), pluginSkills = Object.fromEntries(numbered('plugin-skill', 20).map(name => [`skills/${name}/SKILL.md`, text(name)]));
@@ -1844,6 +1846,175 @@ async function practiceFlow() {
   await switchFromBar('Incident');
   check('the switch’s result shows on Skills, with Undo switch', /^Switched to Incident/.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-undo'), await a.text('.bands'));
   same('a skill it leaves out is under Off, in Central Knot only', [(await sectionsNow(a, 'skills')).find(([section]) => section === 'off')?.[1], folders('standup')], [['release-notes', 'review', 'standup'], gone]);
+  // History’s Undo ending the profile in use says so after its own words, keeping warnings and buttons; an Undo that leaves it,
+  // a refused one, a profile switch’s own Undo, and an Undo with no profile in use add nothing.
+  {
+  // Give standup an earlier off entry in History while leaving Incident in use.
+  await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
+  await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
+  const clickHistory = async (kind, item, label) => {
+    await a.run(`(() => { const row = [...document.querySelectorAll('.history-row[data-kind=${JSON.stringify(kind)}]')].find(each => each.querySelector('.history-what strong')?.textContent === ${JSON.stringify(item)} && [...each.querySelectorAll('.history-actions button')].some(button => !${JSON.stringify(label ?? '')} || button.textContent.trim() === ${JSON.stringify(label ?? '')})); if (!row) throw new Error('No History row: ' + ${JSON.stringify(`${kind}:${item}:${label ?? ''}`)}); const button = [...row.querySelectorAll('.history-actions button')].find(each => !${JSON.stringify(label ?? '')} || each.textContent.trim() === ${JSON.stringify(label ?? '')}); button.click(); })()`);
+    await a.settle();
+  };
+  await openHistory(a, '#nav-history', () => a.exists('.history-row[data-kind="off"]'));
+  await clickHistory('off', 'standup');
+  const endedOnText = await a.text('.band-done .band-text') ?? '';
+  check('an item’s Undo in History that ends the profile in use says so after its own words, keeping its Undo and reloads',
+    endedOnText.startsWith('standup: turned on:') && endedOnText.endsWith('Incident stopped being the profile in use.') && (await a.text('#status-profile'))?.trim() === 'No profile' && await a.exists('#outcome-undo') && await a.exists('#outcome-copy-copilot-cli'),
+    [endedOnText, await a.text('#status-profile')]);
+  await fitsAtMinimum(a, 'History Undo ending a profile');
+  if (shots) {
+    const capture = async (width, height, tag) => {
+      await sizeTo(a, width, height);
+      if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+      for (const theme of ['dark', 'light']) {
+        await a.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+        await wait(80);
+        await a.shot(`${tag}-${width}-${theme}`);
+      }
+    };
+    await capture(...SMALLEST, 'history-undo-ends-profile');
+    await capture(1316, 819, 'history-undo-ends-profile');
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    await wait(80);
+    await fullSize(a);
+  }
+  // With no profile in use before the Undo, nothing about a profile is added.
+  await a.click('#outcome-undo');
+  same('an Undo with no profile in use before adds no profile sentence and restores Incident',
+    [(await a.text('#status-profile'))?.trim(), /stopped being the profile/.test((await a.text('.band-done')) ?? '') || /stopped being the profile/.test((await statusShown()) ?? '')],
+    ['Incident', false]);
+  // An Undo that turns an item off (no reload advice) and ends the profile still shows the band with the sentence.
+  await clickHistory('on', 'notes', 'Turn it off');
+  const endedOffText = await a.text('.band-done .band-text') ?? '';
+  check('an item’s Turn-it-off Undo in History (no reloads) that ends the profile shows the band and says so',
+    endedOffText.startsWith('notes: turned off:') && endedOffText.endsWith('Incident stopped being the profile in use.') && (await a.text('#status-profile'))?.trim() === 'No profile' && await a.exists('#outcome-undo'),
+    [endedOffText, await a.text('#status-profile')]);
+  await fitsAtMinimum(a, 'History Turn-it-off Undo ending a profile');
+  if (shots) {
+    await sizeTo(a, ...SMALLEST);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    for (const theme of ['dark', 'light']) {
+      await a.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+      await wait(80);
+      await a.shot(`history-undo-off-ends-profile-860-${theme}`);
+    }
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    await wait(80);
+    await fullSize(a);
+  }
+  if (await a.exists('#outcome-undo')) await a.click('#outcome-undo');
+  else await clickHistory('off', 'notes');
+  same('undoing that brings Incident back with no profile sentence',
+    [(await a.text('#status-profile'))?.trim(), /stopped being the profile/.test((await a.text('.band-done')) ?? '')],
+    ['Incident', false]);
+  // An Undo that leaves Incident in use (reverting an edit to notes) adds no profile sentence.
+  const notesPath = join(practice, '.claude/skills/notes/SKILL.md'), notesBefore = readFileSync(notesPath, 'utf8');
+  writeFileSync(notesPath, notesBefore.replace(/\n*$/, '\nEdited while Incident is in use.\n'));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 30 && !readNow(join(practice, '.copilot/skills/notes/SKILL.md')).includes('Edited while Incident'); tries++) await wait(100);
+  await openHistory(a, '#header-refresh', () => a.run(`[...document.querySelectorAll('.history-row[data-kind="edit"]')].some(row => row.querySelector('.history-what strong')?.textContent === 'notes' && [...row.querySelectorAll('.history-actions button')].some(button => button.textContent.trim() === 'Undo'))`));
+  await clickHistory('edit', 'notes', 'Undo');
+  same('an item’s Undo that leaves Incident in use adds no profile sentence',
+    [(await a.text('#status-profile'))?.trim(), readFileSync(notesPath, 'utf8') === notesBefore, /stopped being the profile/.test((await a.text('.band-done')) ?? '') || /stopped being the profile/.test((await statusShown()) ?? '')],
+    ['Incident', true, false]);
+  // A partly done Undo that still ends Incident keeps its warning and Undo button and appends the profile sentence.
+  if (process.platform !== 'win32' && process.getuid() !== 0) {
+    chmodSync(claudeSkills, 0o555);
+    try {
+      await clickHistory('off', 'standup');
+      const partialText = await a.text('.band-done .band-text') ?? '';
+      check('a partly done Undo that ends Incident keeps its warning and button and says so',
+        partialText.includes('Claude Code’s skills folder can’t be written') && partialText.endsWith('Incident stopped being the profile in use.') && (await a.text('#status-profile'))?.trim() === 'No profile' && await a.exists('.band-done .tone-warning') && await a.exists('#outcome-undo'),
+        [partialText, await a.text('#status-profile')]);
+      if (shots) {
+        await sizeTo(a, ...SMALLEST);
+        if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+        await a.run(`window.centralKnot.setAppearance('dark')`);
+        await wait(80);
+        await a.shot('history-undo-partial-860-dark');
+        await a.run(`window.centralKnot.setAppearance('system')`);
+        await wait(80);
+        await fullSize(a);
+      }
+    } finally { chmodSync(claudeSkills, 0o755); }
+    await a.click('#outcome-undo');
+    same('restoring after the partial Undo brings Incident back', (await a.text('#status-profile'))?.trim(), 'Incident');
+  }
+  // A refused-whole Undo adds no profile sentence, even when the damaged record prevents matching profiles after refresh.
+  const skillsRecordSaved = readFileSync(skillsRecordHere, 'utf8');
+  writeFileSync(skillsRecordHere, '{ damaged');
+  try {
+    await clickHistory('off', 'standup');
+    const refusedText = await a.text('.band-done .band-text') ?? '';
+    check('a refused-whole Undo shows its refusal with no profile sentence',
+      refusedText.includes('The skills record is damaged') && !/stopped being the profile/.test(refusedText),
+      refusedText);
+  } finally { writeFileSync(skillsRecordHere, skillsRecordSaved); }
+  await a.click('#header-refresh');
+  same('with the skills record back, Incident is in use again', (await a.text('#status-profile'))?.trim(), 'Incident');
+  // Two profiles matching before and neither after: plural sentence.
+  await a.click('#nav-profiles');
+  await newProfile(a, 'Backup');
+  await a.click('#pf-skill\\:notes');
+  await openHistory(a, '#nav-history', () => a.exists('.history-row[data-kind="off"]'));
+  same('both matching profiles are shown in the status bar before the Undo', (await a.text('#status-profile'))?.trim(), 'Incident and Backup');
+  await clickHistory('off', 'standup');
+  const pluralText = await a.text('.band-done .band-text') ?? '';
+  check('an Undo ending two matching profiles uses the plural sentence',
+    pluralText.endsWith('Incident and Backup stopped being the profiles in use.') && (await a.text('#status-profile'))?.trim() === 'No profile',
+    [pluralText, await a.text('#status-profile')]);
+  await fitsAtMinimum(a, 'History Undo ending two profiles');
+  // Wrapping text with reload lines at 860 wide (sidebar open) stays beside its icon and keeps Undo and × on row 1.
+  await sizeTo(a, ...SMALLEST);
+  if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+  same('wrapping History Undo band keeps icon, text, Undo and × on one row above reload lines at 860 wide', await a.run(`(() => {
+    const icon = document.querySelector('.band-done > svg').getBoundingClientRect();
+    const text = document.querySelector('.band-done > .band-text').getBoundingClientRect();
+    const actions = document.querySelector('.band-done > .band-actions').getBoundingClientRect();
+    const dismiss = document.querySelector('.band-done > .band-dismiss').getBoundingClientRect();
+    return [text.left > icon.right, actions.left >= text.right, dismiss.left >= actions.right, dismiss.top < text.bottom];
+  })()`), [true, true, true, true]);
+  if (shots) {
+    for (const theme of ['dark', 'light']) {
+      await a.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+      await wait(80);
+      await a.shot(`history-undo-two-profiles-860-${theme}`);
+    }
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    await wait(80);
+  }
+  await fullSize(a);
+  await a.click('#outcome-undo');
+  // Shifting from Incident ({notes}) to Backup ({notes, standup}): Backup now matches, Incident no longer does, so the result says so.
+  await a.click('#nav-profiles');
+  await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Backup')).click()`);
+  await a.settle();
+  await a.click('#pf-skill\\:standup');
+  await openHistory(a, '#nav-history', () => a.exists('.history-row[data-kind="off"]'));
+  same('only Incident is in use before the Undo shifts to Backup', (await a.text('#status-profile'))?.trim(), 'Incident');
+  await clickHistory('off', 'standup');
+  const shiftedText = await a.text('.band-done .band-text') ?? '';
+  check('an Undo that stops Incident matching says so even when another profile now matches',
+    shiftedText.endsWith('Incident stopped being the profile in use.') && (await a.text('#status-profile'))?.trim() === 'Backup',
+    [shiftedText, await a.text('#status-profile')]);
+  await a.click('#outcome-undo');
+  await a.click('#nav-profiles');
+  await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Backup')).click()`);
+  await a.settle();
+  await a.click('#profile-delete');
+  await a.click('#profile-delete-confirm');
+  // Undoing the profile’s own switch from History while Incident is in use adds no profile sentence.
+  await openHistory(a, '#nav-history', () => a.exists('.history-row[data-kind="profile"] .history-actions button'));
+  await a.run(`document.querySelector('.history-row[data-kind="profile"] .history-actions button').click()`);
+  await a.settle();
+  const profileUndoText = await a.text('.band-done .band-text') ?? '';
+  check('undoing a profile’s own switch from History adds no profile sentence',
+    /^Undone: 3 items turned on\./.test(profileUndoText) && !/stopped being the profile/.test(profileUndoText) && (await a.text('#status-profile'))?.trim() === 'No profile',
+    [profileUndoText, await a.text('#status-profile')]);
+  await openKind(a, 'skills');
+  await switchFromBar('Incident');
+  }
   // Turned back on by hand: the profile in use is worked out, so the status bar follows at once.
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
   same('after a hand click no profile is in use, and the status bar says so', (await a.text('#status-profile'))?.trim(), 'No profile');
@@ -10103,10 +10274,24 @@ async function usageFlow() {
   await a.quit();
 
   // ---------- The Overview, the page a launch opens on: its figures land with no click, and nothing on it moves ----------
+  // Seed five more On skills and two On agents older than 30 days with no use recorded (plus delta = 8 total unused).
+  const extraUnusedSkills = ['foxtrot', 'golf', 'hotel', 'india', 'juliet'];
+  for (const name of extraUnusedSkills) {
+    const folder = skill(realSkills, name);
+    for (const path of [folder, join(folder, 'SKILL.md')]) utimesSync(path, ago(40), ago(40));
+  }
+  const extraUnusedAgents = ['audit', 'triage'];
+  mkdirSync(join(real, '.claude/agents'), { recursive: true });
+  for (const name of extraUnusedAgents) {
+    const file = join(real, `.claude/agents/${name}.md`);
+    writeFileSync(file, `---\nname: ${name}\ndescription: The ${name} agent.\n---\n\nDo the ${name} work.\n`);
+    utimesSync(file, ago(40), ago(40));
+  }
   // Launched on this computer's home and nothing clicked: its first reading waits on the pipe. The cards, the tools table's rows
   // and its header cells, and the usage line are measured at 1280 and 860 while it runs, then again once it has landed.
   a = await launch(data, [], real);
   for (let tries = 0; tries < 100 && !(await a.exists('.kind-card')); tries++) await wait(50);
+  for (let tries = 0; tries < 100 && !(await a.run(`/10 skills · 9 on/.test(document.querySelector('.kind-card:has(#overview-skills) .kind-card-summary')?.textContent ?? '') && /2 agents · 2 on/.test(document.querySelector('.kind-card:has(#overview-agents) .kind-card-summary')?.textContent ?? '')`)); tries++) await wait(50);
   for (let tries = 0; tries < 200 && !reading(); tries++) await wait(25);
   const places = () => a.run(`[...document.querySelectorAll('.kind-card, .tools-table tr, .tools-table thead th, #overview-usage')].map(e => { const box = e.getBoundingClientRect(); return [box.left, box.top, box.width, box.height].map(Math.round).join(' '); })`);
   const usageSaid = async () => (await a.text('#overview-usage .overview-usage-text:not(.band-unshown)'))?.trim();
@@ -10119,20 +10304,46 @@ async function usageFlow() {
   for (let tries = 0; tries < 100 && !/^Usage collected/.test(await usageSaid() ?? ''); tries++) await wait(100);
   await a.settle();
   for (const [width, height] of [[860, 600], [1280, 800]]) { await sizeTo(a, width, height); placesAfter[width] = await places(); }
-  same('launched with nothing clicked, the Overview holds each figure’s room while the first reading runs: the line says it is collecting, the Skills card … where its count will be (its five lines’ room held by style.css), every sessions cell …',
+  same('launched with nothing clicked, the Overview holds each figure’s room while the first reading runs: the line says it is collecting, the Skills card … where its count will be (its four lines’ room held by style.css), every sessions cell …',
     whileRunning, ['Collecting usage statistics: reading your tools’ session history on this computer. Nothing leaves it.', ['Used in the last 30 days: …'], ['…']]);
   same('the figures land by themselves, and no card, table row, header cell or the usage line moved, at 1280 and at 860', [placesAfter[1280], placesAfter[860]], [placesWhile[1280], placesWhile[860]]);
-  same('the Skills card says the reading as its page does: 3 used, the No use seen chip’s 1 (delta; bravo is Off) as a link, and the three most used by sessions, equal ones by name; the line, when',
-    [await cardLines(), await a.text('#overview-skills-unused'), /^Usage collected today at [^.]+\. Update usage statistics$/.test(await usageSaid() ?? '')], [['Used in the last 30 days: 3', 'No use seen in 30 days: 1', 'Most usedalpha2 sessions', 'echo2 sessions', 'charlie1 session'], 'No use seen in 30 days: 1', true]);
+  const cardUnusedLinks = await a.all('.kind-card button[id$="-unused"]', 'e.id');
+  const unusedLinks = await a.all('#overview-usage #overview-unused', 'e.textContent.trim()');
+  const unusedHasArrow = await a.run(`(() => { const b = document.querySelector('#overview-usage #overview-unused'); const svg = b?.lastElementChild; return svg?.tagName.toLowerCase() === 'svg' && /m12 5 7 7-7 7/.test(svg.innerHTML); })()`);
+  same('the Skills card says 3 used and the three most used with no per-kind unused link, and the usage strip holds one combined link for all 8 unused items with an arrow',
+    [await cardLines(), cardUnusedLinks, unusedLinks, unusedHasArrow, /^Usage collected today at [^.]+\. Update usage statistics · No use seen in 30 days: 8$/.test(await usageSaid() ?? '')],
+    [['Used in the last 30 days: 3', 'Most usedalpha2 sessions', 'echo2 sessions', 'charlie1 session'], [], ['No use seen in 30 days: 8'], true, true]);
   check('every tool’s sessions cell has its figure, or why there is none', (await sessionsSaid()).every(said => said && said !== '…'), await sessionsSaid());
-  await a.click('#overview-skills-unused');
-  same('No use seen opens Skills on that chip, the rows the card counted', [await a.run(`document.querySelector('.chip-on')?.dataset.tip`), (await sectionsNow(a, 'skills'))[0]?.[1]], ['No use seen in 30 days', ['delta']]);
+  await a.click('#overview-unused');
+  const allRows = await a.all('.ov-row[data-key]', 'e.dataset.key');
+  const expectedUnused = [...['delta', ...extraUnusedSkills].map(key => rowPart('', 'skills', key)), ...extraUnusedAgents.map(key => rowPart('', 'agents', key))].sort();
+  same('the combined unused link opens Library on All with the No use seen chip active and all 8 matching rows',
+    [await a.run(`document.querySelector('#library-kind-all')?.getAttribute('aria-pressed')`), await a.run(`document.querySelector('.chip-on')?.dataset.tip`), [...allRows].sort()],
+    ['true', 'No use seen in 30 days', expectedUnused]);
   await a.click('#nav-overview');
   await a.click('#overview-skills-top-1');
   same('a most used name opens its row on Skills, under All', [await a.run(`document.querySelector('.chip-on')?.dataset.tip ?? 'All'`), await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'echo')}"]')?.getAttribute('aria-expanded')`)], ['All', 'true']);
   await a.click('#nav-overview');
   await fullSize(a);
   await fitsAtMinimum(a, 'the Overview with usage collected');
+  if (shots) {
+    const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+    for (const [label, width, height, openSidebar] of [['1316', 1316, 819, true], ['1316-rail', 1316, 819, false], ['860-open', 860, 560, true]]) {
+      await sizeTo(a, width, height);
+      const railNow = await a.run(`document.body.classList.contains('rail')`);
+      if (openSidebar ? railNow : !railNow) await a.click('#sidebar-toggle');
+      for (const mode of ['light', 'dark']) { await theme(mode); await wait(50); await a.shot(`overview-unused-${label}-${mode}`); }
+      const railAfter = await a.run(`document.body.classList.contains('rail')`);
+      if (railAfter !== railNow) await a.click('#sidebar-toggle');
+    }
+    await theme('');
+    await fullSize(a);
+  }
+  await a.click('#overview-unused');
+  await a.click('#turn-unused-off');
+  for (let tries = 0; tries < 50 && !(await a.exists('#outcome-undo')); tries++) await wait(100);
+  await a.click('#nav-overview');
+  same('with no unused items left, the usage strip shows no unused link', [await a.exists('#overview-unused'), await a.all('.kind-card button[id$="-unused"]', 'e.id'), /^Usage collected today at [^.]+\. Update usage statistics$/.test(await usageSaid() ?? '')], [false, [], true]);
   same('no page errors, the Overview', a.pageErrors, []);
   await a.quit();
   // Started at sign-in, with no window (--hidden): nothing is collected until the window first shows (a second launch shows it).
