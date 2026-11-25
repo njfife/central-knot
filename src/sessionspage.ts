@@ -1,11 +1,15 @@
 // The Sessions page (MAP.md, "Sessions"): one day's sessions, Today or Yesterday, read live from the tools' own session history,
-// with what their tokens would cost at each model's API price. The day is read when the page opens, when a day is chosen and on
-// the header's Refresh (loadSessions → main.ts sessions:read → sessionday.ts readSessionPeriod, then sessionrow.ts sessionRows),
-// and the answer is held in app.ts state.sessions (pagedata.ts). Beside the day's choice sits "Start keeping session costs"
-// (with its infoMark), "Collecting…" while sweeping, or nothing once kept (sessionkeep.ts); any refusal shows verbatim inline.
-// This module makes the day's two local midnights from the calendar (periodOf) and says the rows: every figure and sum is
-// sessionrow.ts's, and the tools read are presence.ts SESSION_TOOLS. What a person needs is on the page; why a figure is low,
-// whose prices they are and the price list's date are on hover (the native `title`). Not here: reading files, pricing, summing.
+// with what their tokens would cost at each model's API price; and, in a home that keeps session costs, 7 days (today and the
+// six before) read from the kept record, a line a day. The period is read when the page opens, when one is chosen and on the
+// header's Refresh (loadSessions → main.ts sessions:read → sessionday.ts readSessionPeriod, then sessionrow.ts sessionRows; for
+// 7 days main.ts sessions:read-kept → sessionday.ts readKeptPeriod, then sessionrow.ts dayByDay), and the answer is held in
+// app.ts state.sessions (pagedata.ts). 7 days, once drawn, ask the keeper for a sweep (askSweep → main.ts sessions:sweep →
+// sessionkeep.ts sweepNow) and are read once more when it ends (keeperNews); that read asks for none. Beside the choice sits
+// "Start keeping session costs" (with its infoMark), "Collecting…" while sweeping, or nothing once kept (sessionkeep.ts); any
+// refusal shows verbatim inline. This module makes the period's local midnights from the calendar (boundsOf) and says the rows:
+// every figure and sum is sessionrow.ts's, and the tools read are presence.ts SESSION_TOOLS. What a person needs is on the page;
+// why a figure is low, whose prices they are and the price lists' dates are on hover (the native `title`); a day's rows are built
+// only once it is opened. Not here: reading files or the record, pricing, summing, sweeping.
 import { announce, rerender, state, switchSessionCosts } from './app.ts';
 import { brandMark } from './brand.ts';
 import { button, h, icon, infoCardId, infoMark } from './dom.ts';
@@ -14,51 +18,106 @@ import { readPageData, resetPageData } from './pagedata.ts';
 import { SESSION_TOOLS } from './presence.ts';
 import { saveFailure, SESSION_COSTS_KEPT } from './settingspage.ts';
 import { andList, orList, toolNames } from './words.ts';
-import type { Period } from './sessionday.ts';
-import type { CostSum, DayRows, ModelCost, SessionRow, UnpricedBy } from './sessionrow.ts';
-import type { HarnessId, HomeView } from './types.ts';
+import type { CostSum, DayRows, ModelCost, PeriodRows, SessionRow, UnpricedBy } from './sessionrow.ts';
+import type { HarnessId, HomeView, SessionCostsView } from './types.ts';
 
-export type SessionsDay = 'today' | 'yesterday';
+/** The period the page reads: a day from the tools' files, or 7 days from the kept record. */
+export type SessionsDay = 'today' | 'yesterday' | 'week';
+/** Each period's name on its button, and what the page says while it is read the first time. */
+const choices: Record<SessionsDay, { label: string; reading: string }> = {
+  today: { label: 'Today', reading: 'Reading today’s sessions…' },
+  yesterday: { label: 'Yesterday', reading: 'Reading yesterday’s sessions…' },
+  week: { label: '7 days', reading: 'Reading the last 7 days…' },
+};
 /** The providers the two tools read can be priced under (rates.ts TOOL_PROVIDERS, and Codex's saved one), by name; another id is said as it is. */
 const providerNames: Record<string, string> = { anthropic: 'Anthropic', openai: 'OpenAI' };
-/** The rows opened (by tool and session) and By model ('by-model'), kept across redraws as editparts.ts infoBox keeps its boxes; never stored. */
+/**
+ * The rows opened (by tool and session), By model ('by-model') and the days of 7 days (by home and the day's start, their rows
+ * by that and tool and session), kept across redraws as editparts.ts infoBox keeps its boxes; never stored.
+ */
 const opened = new Set<string>();
+/** The days of 7 days drawn so far, by home and start: today's opens itself the first time it is drawn only. */
+const drawnDays = new Set<string>();
 const ONE_HOUR = 'One-hour cache writes are priced at the shorter cache’s rate; they cost more.';
 const TOKEN_HEADS = ['Input', 'Cached', 'Cache-written', 'Output'];
 
 /** Local midnight `back` days before `now`'s day, from the calendar: a day is 23 or 25 hours when the clocks change, never 24 added. */
 const midnight = (now: Date, back: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - back).getTime();
-/** The chosen day as the half-open period its reading asks for: its own midnight to the next, both from one reading of the clock. */
-function periodOf(day: SessionsDay, now = new Date()): Period {
-  const back = day === 'today' ? 0 : 1;
-  return { start: midnight(now, back), end: midnight(now, back - 1) };
+/**
+ * The chosen period's local midnights, oldest first, the one after its last day last, from one reading of the clock: Today and
+ * Yesterday are one day, 7 days today and the six before.
+ */
+function boundsOf(day: SessionsDay, now = new Date()): number[] {
+  const [first, last] = day === 'today' ? [0, 0] : day === 'yesterday' ? [1, 1] : [6, 0];
+  return Array.from({ length: first - last + 2 }, (_, index) => midnight(now, first - index));
 }
 /** "Today" or "Yesterday" for a reading's day as the clock stands now, so a page left open past midnight stays true; else none. */
 const dayName = (start: number, now = new Date()) => (start === midnight(now, 0) ? 'Today' : start === midnight(now, 1) ? 'Yesterday' : undefined);
+/** A day of 7 days as its line names it: Today, Yesterday, else as History heads a day (historypage.ts). */
+const dayLineName = (start: number) => dayName(start) ?? new Date(start).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+const dateOf = (at: number) => new Date(at).toLocaleDateString(undefined, { day: 'numeric', month: 'long' });
+/** A period's first and last day as one range ("November 19 – 25"). */
+const datesOf = ({ start, end }: { start: number; end: number }) => new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'long' }).formatRange(start, end - 1);
+/** A price list's date (`YYYY-MM-DD`) as the total's hover says it. */
+const priceDate = (date: string) => {
+  const [year, month, dayOfMonth] = date.split('-').map(Number);
+  return new Date(year!, month! - 1, dayOfMonth).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+};
 /** Which tools Central Knot reads, said where none is here and on the hover of the tools it does not count. */
 const readsSoFar = `So far Central Knot reads ${andList(SESSION_TOOLS.map(tool => `${toolNames[tool]}’s`))} sessions.`;
 const unreadWords = (tool: HarnessId) => `Some of ${toolNames[tool]}’s session history could not be read.`;
 
 /**
- * Reads the chosen day's rows into their slot: on opening the page and on Refresh (app.ts loadPageData), and on a press of a
- * day. Rows of another day (the one chosen, or Today after midnight) are let go first, so the page says "Reading…" meanwhile.
+ * Reads the chosen period's rows into their slot: on opening the page and on Refresh (app.ts loadPageData), on a press of a
+ * period, and once more when the sweep 7 days asked for ends (keeperNews, with `sweep` false). Rows of another period (the one
+ * chosen, or Today after midnight) are let go first, so the page says "Reading…" meanwhile. 7 days are read only while the home
+ * keeps session costs (else Today is), and once drawn, with `sweep`, ask for a sweep (askSweep).
  */
-export async function loadSessions(readId?: number) {
+export async function loadSessions(readId?: number, sweep = true) {
   const home = state.home;
   if (!home) return;
-  const { start, end } = periodOf(state.sessionsDay);
-  if (state.sessions.data && state.sessions.data.period.start !== start) resetPageData(state.sessions);
-  const reading = readPageData(state.sessions, () => window.centralKnot.readSessions(home.home, start, end, readId ?? home.readId));
+  if (state.sessionsDay === 'week' && !home.sessionCosts?.on) state.sessionsDay = 'today';
+  const week = state.sessionsDay === 'week';
+  const bounds = boundsOf(state.sessionsDay);
+  if (state.sessions.data && state.sessions.data.period.start !== bounds[0]) resetPageData(state.sessions);
+  const api = window.centralKnot, id = readId ?? home.readId;
+  const read = () => (week ? api.readKeptSessions(home.home, bounds, id) : api.readSessions(home.home, bounds[0]!, bounds[1]!, id));
+  const reading = readPageData<DayRows | PeriodRows>(state.sessions, read);
   rerender();
-  if ((await reading) !== 'dropped') rerender();
+  if ((await reading) === 'dropped') return;
+  rerender();
+  if (week && sweep) void askSweep(home.home);
 }
 
-/** Today | Yesterday, built as the Library's kind switch (matrix.ts kindSwitch): a press reads that day as it is now. */
-function dayChoice() {
-  const choice = (day: SessionsDay, label: string) => h(`button.kind-seg${state.sessionsDay === day ? '.kind-seg-on' : ''}`, {
+/** The sweep 7 days asked for and the keeper began or joined: its home, the keeper's `seq` then, and the slot's read that asked. */
+let asked: { home: string; seq: number; gen: number } | undefined;
+/** Asks the keeper for a sweep of the home on screen, or to join the one under way (main.ts sessions:sweep); waits for its end only if one runs. */
+async function askSweep(home: string) {
+  const gen = state.sessions.gen;
+  asked = undefined;
+  const view = await window.centralKnot.sweepSessions(home);
+  if (view?.collecting) asked = { home, seq: view.seq ?? 0, gen };
+}
+/**
+ * The keeper's news, once taken in (app.ts onSessionCostsChanged): when the sweep 7 days asked for has ended (`collecting` false
+ * on a later `seq`, whether it kept, was refused or found the store busy), they are read once more if the home, the page, the
+ * choice and the slot's read are still those that asked; after any move nothing is read. That read asks for no sweep.
+ */
+export function keeperNews(view: SessionCostsView) {
+  if (!asked || view.collecting || (view.seq ?? 0) <= asked.seq) return;
+  const same = view.home === asked.home && state.home?.home === asked.home && state.page === 'sessions' && state.sessionsDay === 'week'
+    && state.sessions.gen === asked.gen;
+  asked = undefined;
+  if (same) void loadSessions(undefined, false);
+}
+
+/** Today | Yesterday, and 7 days where the home keeps session costs, built as the Library's kind switch (matrix.ts kindSwitch): a press reads that period as it is now. */
+function dayChoice(home: HomeView) {
+  const choice = (day: SessionsDay) => h(`button.kind-seg${state.sessionsDay === day ? '.kind-seg-on' : ''}`, {
     type: 'button', id: `sessions-day-${day}`, 'aria-pressed': String(state.sessionsDay === day), onclick: () => { state.sessionsDay = day; void loadSessions(); },
-  }, h('span.kind-seg-label', {}, label));
-  return h('div.kind-switch', { role: 'group', 'aria-label': 'Day' }, choice('today', 'Today'), choice('yesterday', 'Yesterday'));
+  }, h('span.kind-seg-label', {}, choices[day].label));
+  const days: SessionsDay[] = home.sessionCosts?.on ? ['today', 'yesterday', 'week'] : ['today', 'yesterday'];
+  return h('div.kind-switch', { role: 'group', 'aria-label': 'Period' }, ...days.map(choice));
 }
 
 /** Dollars as money: cents, or two significant digits under a cent. */
@@ -97,30 +156,54 @@ function modelLines(models: ModelCost[]) {
     h('span.sessions-counts', {}, ...counts(model).map((count, index) => h('span', { 'data-label': TOKEN_HEADS[index]!.toLowerCase() }, count.toLocaleString())))))];
 }
 
+/** Notes whether a `<details>` was opened or closed, by its key, and gives it back. */
+const noteToggle = (key: string, event: Event) => {
+  const box = event.currentTarget as HTMLDetailsElement;
+  if (box.open) opened.add(key);
+  else opened.delete(key);
+  return box;
+};
 /** A `<details>` kept open across redraws by `key`. */
-const kept = (key: string, ...children: (Node | null)[]) => h('details', { open: opened.has(key),
-  ontoggle: (event: Event) => { if ((event.currentTarget as HTMLDetailsElement).open) opened.add(key); else opened.delete(key); } }, ...children);
+const kept = (key: string, ...children: (Node | null)[]) => h('details', { open: opened.has(key), ontoggle: (event: Event) => noteToggle(key, event) }, ...children);
+/** A `<details>` kept open as `kept` is, whose body `later` is built only while it is open: on a draw then, and on its opening. */
+const keptLater = (key: string, summary: Node, later: () => Node) => h('details', { open: opened.has(key), ontoggle: (event: Event) => {
+  const box = noteToggle(key, event);
+  if (box.open && box.childElementCount === 1) box.append(later());
+} }, summary, opened.has(key) ? later() : null);
 
 /**
  * One session's row: when, the tool (or "Agent" for a session another started), the project folder's name and its sum with
- * its agents'; opened, its own models, Claude Code's own figure and why a figure is low, then its agents' rows.
+ * its agents'; opened, its own models, Claude Code's own figure and why a figure is low, then its agents' rows. `scope` keeps
+ * a row of a day of 7 days opened apart from the same session's row under another day.
  */
-function sessionRow(row: SessionRow, agent = false): HTMLElement {
+function sessionRow(row: SessionRow, agent = false, scope = ''): HTMLElement {
   const [first, last] = [row.first, row.last].map(at => clockTime(new Date(at).toISOString()));
   const notes = [row.reported === undefined ? null : `${toolNames[row.tool]}’s own figure for this session: ${dollars(row.reported)}. Not in the totals.`,
     row.cost.oneHourLow ? ONE_HOUR : null];
-  return h('li.sessions-row', { 'data-session': row.session, 'data-tool': row.tool }, kept(`${row.tool}\0${row.session}`,
+  return h('li.sessions-row', { 'data-session': row.session, 'data-tool': row.tool }, kept(`${scope}${row.tool}\0${row.session}`,
     h('summary', {}, icon('chevron-right', 12, 'tone-faint sessions-chevron'),
       h('span.sessions-when', {}, first === last ? first : `${first}–${last}`),
       h('span.sessions-tool', {}, brandMark(row.tool, 14), agent ? 'Agent' : toolNames[row.tool]),
       h('span.sessions-project', {}, row.project ?? ''),
       h('span.sessions-cost', {}, ...sumView(row.withChildren.cost))),
     h('div.sessions-body', {}, ...modelLines(row.models), ...notes.map(note => note && h('p.sessions-aside', {}, note)),
-      row.children.length ? h('ul.sessions-children', {}, ...row.children.map(child => sessionRow(child, true))) : null)));
+      row.children.length ? h('ul.sessions-children', {}, ...row.children.map(child => sessionRow(child, true, scope))) : null)));
+}
+
+/** A day of 7 days: its name, how many sessions and its sum; opened, its rows, built only then. Today's is open the first time it is drawn. */
+function dayFold(day: DayRows, home: string): HTMLElement {
+  const key = `${home}\0${day.period.start}`;
+  if (!drawnDays.has(key) && dayName(day.period.start) === 'Today') opened.add(key);
+  drawnDays.add(key);
+  const rows = () => h('ul.sessions-rows', {}, ...day.rows.map(row => sessionRow(row, false, `${key}\0`)));
+  const label = h('span.sessions-day-label', {}, h('span.sessions-day-name', {}, dayLineName(day.period.start)),
+    h('span.sessions-day-count', {}, plural(day.total.sessions, 'session')));
+  const summary = h('summary', {}, icon('chevron-right', 12, 'tone-faint sessions-chevron'), label, h('span.sessions-cost', {}, ...sumView(day.total.cost, [], true)));
+  return h('li.sessions-day', { 'data-day': String(day.period.start) }, keptLater(key, summary, rows));
 }
 
 /** The line under the heading: each tool's sum (its sessions and whose prices on hover), the tools not read yet; or that there was none. */
-function toolsLine(rows: DayRows, day: string, present: HarnessId[]) {
+function toolsLine(rows: Omit<DayRows, 'rows'>, day: string, present: HarnessId[]) {
   const notYet = present.filter(tool => !(SESSION_TOOLS as readonly HarnessId[]).includes(tool));
   const none = !rows.byTool.length ? readsSoFar
     : rows.byTool.some(total => total.unread) ? 'No sessions found.' : `No sessions ${day} in ${orList(rows.byTool.map(total => toolNames[total.tool]))}.`;
@@ -131,24 +214,29 @@ function toolsLine(rows: DayRows, day: string, present: HarnessId[]) {
     return h('span.sessions-tool-total', { 'data-tool': total.tool, ...(total.sessions ? {} : { title: total.unread ? 'No sessions found.' : `No sessions ${day}.` }) },
       brandMark(total.tool, 14), toolNames[total.tool], ...(total.sessions ? sumView(total.cost, about) : []));
   });
-  return h('p.sessions-tools.sessions-sep', { id: 'sessions-by-tool' }, ...(rows.rows.length ? tools : [h('span', { id: 'sessions-none' }, none)]),
+  return h('p.sessions-tools.sessions-sep', { id: 'sessions-by-tool' }, ...(rows.total.sessions ? tools : [h('span', { id: 'sessions-none' }, none)]),
     notYet.length ? h('span', { id: 'sessions-not-read', title: readsSoFar }, `Not counted: ${andList(notYet.map(tool => toolNames[tool]))}`) : null);
 }
 
-/** A day's reading: its dollars, date and unpriced count; the tools' line; what could not be read; the rows; By model, folded. */
-function dayView(rows: DayRows, present: HarnessId[]) {
-  const date = new Date(rows.period.start).toLocaleDateString(undefined, { day: 'numeric', month: 'long' }), name = dayName(rows.period.start);
-  const [year, month, dayOfMonth] = rows.ratesDate.split('-').map(Number);
-  const prices = `Prices as of ${new Date(year!, month! - 1, dayOfMonth).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}.`;
+/**
+ * A reading: its dollars, dates and unpriced count; the tools' line; what could not be read; the rows, or for 7 days a line a
+ * day with sessions, newest first; By model, folded.
+ */
+function readingView(rows: DayRows | PeriodRows, home: HomeView) {
+  const { start } = rows.period, name = dayName(start), any = rows.total.sessions > 0;
+  const heading = 'days' in rows ? `7 days, ${datesOf(rows.period)}` : name ? `${name}, ${dateOf(start)}` : dateOf(start);
+  const when = 'days' in rows ? 'in the last 7 days' : name ? name.toLowerCase() : `on ${dateOf(start)}`;
+  const prices = rows.ratesDates.length ? [`Prices as of ${andList(rows.ratesDates.map(priceDate))}.`] : [];
   const unread = rows.byTool.filter(each => each.unread).map(each => unreadWords(each.tool));
-  const [total, unpriced] = rows.rows.length ? sumView(rows.total.cost, [prices, ...unread], true) : [null, null];
+  const [total, unpriced] = any ? sumView(rows.total.cost, [...prices, ...unread], true) : [null, null];
   return [
-    h('div.sessions-head.sessions-sep', {}, total, unpriced, h('h2.sessions-heading', { id: 'sessions-heading' }, name ? `${name}, ${date}` : date)),
-    rows.rows.length ? h('p.sessions-caption', {}, 'At API prices, not your plan’s.') : null,
-    toolsLine(rows, name ? name.toLowerCase() : `on ${date}`, present),
+    h('div.sessions-head.sessions-sep', {}, total, unpriced, h('h2.sessions-heading', { id: 'sessions-heading' }, heading)),
+    any ? h('p.sessions-caption', {}, 'At API prices, not your plan’s.') : null,
+    toolsLine(rows, when, home.sync.present),
     ...unread.map(words => h('p.sessions-caption.sessions-unread', {}, words)),
-    rows.rows.length ? h('ul.sessions-rows', {}, ...rows.rows.map(row => sessionRow(row))) : null,
-    rows.rows.length ? h('div.sessions-by-model', { id: 'sessions-by-model' }, kept('by-model', h('summary', {}, icon('chevron-right', 12, 'tone-faint sessions-chevron'), 'By model'),
+    'days' in rows ? h('ul.sessions-days', { id: 'sessions-days' }, ...rows.days.map(day => dayFold(day, home.home)))
+      : any ? h('ul.sessions-rows', {}, ...rows.rows.map(row => sessionRow(row))) : null,
+    any ? h('div.sessions-by-model', { id: 'sessions-by-model' }, kept('by-model', h('summary', {}, icon('chevron-right', 12, 'tone-faint sessions-chevron'), 'By model'),
       ...modelLines(rows.byModel))) : null,
   ];
 }
@@ -181,11 +269,11 @@ function keepResult(home: HomeView): HTMLElement | null {
   return text ? h('p.sessions-result', { id: 'sessions-keep-result', role: 'alert' }, icon('circle-alert', 14), h('span', {}, text)) : null;
 }
 
-/** The page: the day's choice and keeping control, any refusal, then its reading, "Reading…" until there is one, or one sentence where it could not be read. */
+/** The page: the period's choice and keeping control, any refusal, then its reading, "Reading…" until there is one, or one sentence where it could not be read. */
 export function sessionsPage(home: HomeView) {
   const slot = state.sessions, rows = slot.state === 'failed' ? undefined : slot.data;
   const waiting = slot.state === 'failed' ? h('p.sessions-caption', { id: 'sessions-failed' }, 'Sessions could not be read. Refresh to try again.')
-    : h('p.sessions-caption', { id: 'sessions-reading' }, `Reading ${state.sessionsDay === 'today' ? 'today’s' : 'yesterday’s'} sessions…`);
+    : h('p.sessions-caption', { id: 'sessions-reading' }, choices[state.sessionsDay].reading);
   return h('div.page', {}, h('div.scroll.sessions-scroll', { id: 'sessions-scroll' },
-    h('div.sessions-content', {}, h('div.sessions-bar', {}, dayChoice(), keepControl(home)), keepResult(home), ...(rows ? dayView(rows, home.sync.present) : [waiting]))));
+    h('div.sessions-content', {}, h('div.sessions-bar', {}, dayChoice(home), keepControl(home)), keepResult(home), ...(rows ? readingView(rows, home) : [waiting]))));
 }

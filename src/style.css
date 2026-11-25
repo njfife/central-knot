@@ -1213,8 +1213,8 @@ span.ins-confirm { margin-top: 0; }
 .signin-command { display: block; margin-top: 2px; font-family: var(--mono); font-size: 11px; line-height: 16px; color: var(--ink); }
 
 /* ---------- The Sessions page (sessionspage.ts) ----------
-   The day's choice; its dollars, date and unpriced count; a line of the tools' sums; a row a session and, opened, its models
-   and its agents' rows; By model, folded. Every row and model line shares one set of columns (--sessions-columns): the project's
+   The period's choice; its dollars, date and unpriced count; a line of the tools' sums; a row a session and, opened, its models
+   and its agents' rows (for 7 days, a line a day, its rows under it once opened); By model, folded. Every row and model line shares one set of columns (--sessions-columns): the project's
    takes the room there is, so a row's dollars begin where its name's column ends and are one column with an opened row's Cost,
    and the rows span the page. The rows scroll with the page. A narrow content area gives the project the room the token columns
    had: a model's tokens go to a second line. */
@@ -1237,13 +1237,18 @@ span.ins-confirm { margin-top: 0; }
 .sessions-tool, .sessions-tool-total { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 6px; }
 .sessions-cost { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
 .sessions-unpriced { color: var(--ink-soft); }
-.sessions-rows, .sessions-children { list-style: none; margin: 0; padding: 0; }
-.sessions-row summary, .sessions-line { display: grid; grid-template-columns: var(--sessions-columns); column-gap: 10px; align-items: baseline; padding: 6px 8px; font-size: 12.5px; }
-.sessions-row summary, .sessions-by-model summary { list-style: none; border-radius: 6px; cursor: pointer; }
-.sessions-row summary::-webkit-details-marker, .sessions-by-model summary::-webkit-details-marker { display: none; }
-.sessions-row summary:hover { background: var(--row-hover); }
+.sessions-rows, .sessions-children, .sessions-days { list-style: none; margin: 0; padding: 0; }
+.sessions-day + .sessions-day { border-top: 1px solid var(--line); }
+.sessions-day > details > summary { font-size: 13px; }
+.sessions-day-label { grid-column: 2 / 5; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
+.sessions-day-name { font-weight: 600; }
+.sessions-day-count { color: var(--ink-soft); }
+.sessions-row summary, .sessions-day summary, .sessions-line { display: grid; grid-template-columns: var(--sessions-columns); column-gap: 10px; align-items: baseline; padding: 6px 8px; font-size: 12.5px; }
+.sessions-row summary, .sessions-day summary, .sessions-by-model summary { list-style: none; border-radius: 6px; cursor: pointer; }
+.sessions-row summary::-webkit-details-marker, .sessions-day summary::-webkit-details-marker, .sessions-by-model summary::-webkit-details-marker { display: none; }
+.sessions-row summary:hover, .sessions-day summary:hover { background: var(--row-hover); }
 details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
-.sessions-row summary > *, .sessions-line > * { min-width: 0; }
+.sessions-row summary > *, .sessions-day summary > *, .sessions-line > * { min-width: 0; }
 .sessions-when, .sessions-cost, .sessions-counts > * { font-variant-numeric: tabular-nums; }
 .sessions-project { color: var(--ink-soft); overflow-wrap: anywhere; }
 .sessions-body { padding-bottom: 8px; }

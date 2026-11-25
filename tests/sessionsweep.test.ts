@@ -8,20 +8,17 @@ import fs, { appendFile, copyFile, mkdir, mkdtemp, readdir, readFile, realpath, 
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { SESSION_TOOLS, type SessionTool } from '../src/presence.ts';
-import { bundledRates, priceRequest, type PriceResult, type RatesTable } from '../src/rates.ts';
-import { readSessionPeriod, type DayReading, type Period, type PricedRequest, type ReadSession } from '../src/sessionday.ts';
+import { SESSION_TOOLS } from '../src/presence.ts';
+import { bundledRates, priceRequest, type RatesTable } from '../src/rates.ts';
+import { keptReading, readSessionPeriod, type Period } from '../src/sessionday.ts';
 import {
   emptyPositions,
   monthOf,
   readSessionRecord,
   sessionsDirectory,
   withSessionRecordTurn,
-  type PricingEntry,
-  type Receipt,
-  type SessionMonth,
 } from '../src/sessionrecord.ts';
-import { readClaudeSession, readCodexRollout, type Request } from '../src/sessionrequests.ts';
+import { readClaudeSession, readCodexRollout } from '../src/sessionrequests.ts';
 import { sessionRows } from '../src/sessionrow.ts';
 import { sweepSessions } from '../src/sessionsweep.ts';
 import type { ShareContext } from '../src/share.ts';
@@ -196,63 +193,6 @@ const codexCounter = (at: string, input: number, cached: number, output: number)
     },
   },
 });
-
-function priceFromKept(entry: PricingEntry, rec: Receipt): PriceResult {
-  if (!entry.priced) return entry;
-  if (entry.basis === 'list') return { ...entry, dollars: rec.dollars! };
-  if (entry.basis === 'credits') return { ...entry, dollars: rec.dollars! };
-  return { priced: true, basis: 'reported', dollars: rec.dollars! };
-}
-
-/** Turns kept months into a `DayReading` for `sessionRows`, matching `readSessionPeriod` for a day with no unread history. */
-function keptToDayReading(months: Record<string, SessionMonth>, period: Period, ratesDate: string): DayReading {
-  const byTool = new Map<SessionTool, Map<string, { parent?: string; project?: string; requests: PricedRequest[] }>>();
-  for (const tool of SESSION_TOOLS) byTool.set(tool, new Map());
-  for (const data of Object.values(months)) {
-    for (const s of data.sessions) {
-      if (s.tool !== 'claude-cli' && s.tool !== 'codex-cli') continue;
-      const toolMap = byTool.get(s.tool)!;
-      const entry = toolMap.get(s.session) ?? { requests: [] };
-      entry.parent ??= s.parent;
-      entry.project ??= s.project;
-      for (const [reqId, rec] of Object.entries(s.requests)) {
-        if (rec.at < period.start || rec.at >= period.end) continue;
-        const req: Request = {
-          tool: s.tool,
-          session: s.session,
-          ...(s.parent ? { parent: s.parent } : {}),
-          request: reqId,
-          at: rec.at,
-          model: rec.model,
-          tokens: rec.tokens,
-          ...(rec.speed !== undefined ? { speed: rec.speed } : {}),
-          ...(rec.serviceTier !== undefined ? { serviceTier: rec.serviceTier } : {}),
-        };
-        entry.requests.push({ request: req, price: priceFromKept(data.pricings[rec.pricing]!, rec) });
-      }
-      toolMap.set(s.session, entry);
-    }
-  }
-  return {
-    period,
-    ratesDate,
-    tools: SESSION_TOOLS.map(tool => {
-      const sessions: ReadSession[] = [];
-      for (const [session, entry] of byTool.get(tool)!) {
-        if (!entry.requests.length) continue;
-        entry.requests.sort((a, b) => a.request.at - b.request.at || a.request.request.localeCompare(b.request.request));
-        sessions.push({
-          tool,
-          session,
-          ...(entry.parent ? { parent: entry.parent } : {}),
-          ...(entry.project ? { project: entry.project } : {}),
-          requests: entry.requests,
-        });
-      }
-      return { tool, sessions, unread: false };
-    }),
-  };
-}
 
 test('1. First sweep: two Claude Code sessions (one with an agent) and one Codex rollout land once with prices and positions', async () => {
   const ctx = await makeContext();
@@ -439,7 +379,7 @@ test('4. Parity with the Sessions page: identical rows and sums for disjoint ses
   const kept = await readSessionRecord(ctx.home, periodMonths);
   const pageReading = await readSessionPeriod({ home: ctx.home }, period, [...SESSION_TOOLS]);
   const pageRows = sessionRows(pageReading);
-  const recordRows = sessionRows(keptToDayReading(kept.months, period, bundledRates.date));
+  const recordRows = sessionRows(keptReading(kept, period, SESSION_TOOLS));
   assert.deepEqual(recordRows, pageRows, 'disjoint sessions produce identical rows and sums');
 
   // Add a resumed Claude session repeating `msg_r1` and adding a new request `msg_r2`.
@@ -450,7 +390,7 @@ test('4. Parity with the Sessions page: identical rows and sums for disjoint ses
   await sweepSessions(ctx);
   const keptAfter = await readSessionRecord(ctx.home, periodMonths);
   const pageAfter = sessionRows(await readSessionPeriod({ home: ctx.home }, period, [...SESSION_TOOLS]));
-  const recordAfter = sessionRows(keptToDayReading(keptAfter.months, period, bundledRates.date));
+  const recordAfter = sessionRows(keptReading(keptAfter, period, SESSION_TOOLS));
 
   const repeatedPrice = priceRequest({
     tool: 'claude-cli',

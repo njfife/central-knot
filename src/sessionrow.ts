@@ -4,8 +4,10 @@
 // its children's, keeps a root session's tool-reported figure beside its sum without adding it to any total, and computes
 // period, per-tool and per-model totals (each request once; sessions counted at top level) with each present tool's unread
 // flag beside the rows, a tool's and the day's sum a lower bound where some of that history could not be read (the one place
-// that is decided), and the price list's date once.
-// Not here: reading session files (sessionday.ts, sessionrequests.ts), pricing requests (rates.ts), IPC, or page wording/DOM.
+// that is decided), and each price list date the requests were priced from, once (`ratesDates`). A period of several days is
+// cut at its local midnights into a DayRows a day beside the whole period's totals (dayByDay, the Sessions page's 7 days).
+// Not here: reading session files or the kept record (sessionday.ts, sessionrequests.ts), pricing requests (rates.ts), IPC,
+// or page wording/DOM.
 import type { UnpricedReason } from './rates.ts';
 import type { Tokens } from './sessionrequests.ts';
 import type { SessionTool } from './presence.ts';
@@ -51,13 +53,21 @@ export interface SessionRow {
 }
 /** One present tool's totals for the period (`sessions`: its top-level rows), with its `unread` flag beside the rows. */
 export interface ToolTotal { tool: SessionTool; sessions: number; tokens: Tokens; cost: CostSum; unread: boolean }
-/** All rows, totals, per-tool status and the price list's date once (never per row or sum) for a period reading. */
+/** All rows, totals, per-tool status and the price lists' dates once (never per row or sum) for a period reading. */
 export interface DayRows {
-  period: Period; ratesDate: string; rows: SessionRow[];
+  period: Period;
+  /** Each price list date a request here was priced from (rates.ts PriceResult's ratesDate), oldest first; none where none was. */
+  ratesDates: string[];
+  rows: SessionRow[];
   /** `sessions`: the top-level rows, a child counted in its parent's. */
   total: { sessions: number; tokens: Tokens; cost: CostSum };
   byTool: ToolTotal[]; byModel: ModelCost[];
 }
+/**
+ * A period day by day (dayByDay): the whole period's totals, with no rows of their own (its sessions' count is of the whole
+ * period, so a session on two days counts once there), and a DayRows a local day with sessions, newest first.
+ */
+export interface PeriodRows extends Omit<DayRows, 'rows'> { days: DayRows[] }
 
 const totalTokens = (t: Tokens) => t.input + t.cacheRead + t.cacheWrite + t.output;
 
@@ -177,8 +187,30 @@ export function sessionRows(reading: DayReading): DayRows {
     tool, sessions: rows.filter(row => row.tool === tool).length, ...lowerBound(tally(sessions.flatMap(s => s.requests)), unread), unread,
   }));
   const allRequests = reading.tools.flatMap(t => t.sessions.flatMap(s => s.requests));
+  const ratesDates = new Set(allRequests.flatMap(({ price }) => (price.priced && price.basis === 'list' ? [price.ratesDate] : [])));
   return {
-    period: reading.period, ratesDate: reading.ratesDate, rows,
+    period: reading.period, ratesDates: [...ratesDates].sort(), rows,
     total: { sessions: rows.length, ...lowerBound(tally(allRequests), reading.tools.some(t => t.unread)) }, byTool, byModel: modelsOf(allRequests),
   };
+}
+
+/** The reading's requests inside `period` (a session with none there left out), the period's own. */
+const within = (reading: DayReading, period: Period): DayReading => ({
+  period,
+  tools: reading.tools.map(tool => ({
+    ...tool,
+    sessions: tool.sessions.map(s => ({ ...s, requests: s.requests.filter(({ request }) => request.at >= period.start && request.at < period.end) }))
+      .filter(s => s.requests.length),
+  })),
+});
+
+/**
+ * A reading cut at the local midnights `bounds` (oldest first, the period's end last): the whole reading's totals with its rows
+ * left out, and each day's own sessionRows, a day with sessions only, newest first. A session that ran on two days is a row
+ * under each; its parts on one day are one row.
+ */
+export function dayByDay(reading: DayReading, bounds: readonly number[]): PeriodRows {
+  const { rows: _whole, ...totals } = sessionRows(reading);
+  const days = bounds.slice(0, -1).map((start, index) => sessionRows(within(reading, { start, end: bounds[index + 1]! })));
+  return { ...totals, days: days.filter(day => day.rows.length).reverse() };
 }

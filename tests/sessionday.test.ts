@@ -205,8 +205,7 @@ test('Claude Code present with one session of three claude-fable-5 responses: on
   const reading = await readSessionPeriod({ home }, TODAY, ['claude-cli']);
   const view = sessionRows(reading);
 
-  assert.equal(reading.ratesDate, bundledRates.date);
-  assert.equal(view.ratesDate, bundledRates.date);
+  assert.deepEqual(view.ratesDates, [bundledRates.date], 'the price list date its requests were priced from, once');
   assert.equal(view.rows.length, 1);
 
   const row = view.rows[0]!;
@@ -223,8 +222,8 @@ test('Claude Code present with one session of three claude-fable-5 responses: on
   assert.equal(row.cost.atLeast, false);
   assert.deepEqual(row.cost.pricedAs, []);
   assert.deepEqual(row.cost.providers, [{ provider: 'anthropic', from: 'tool' }]);
-  assert.equal('ratesDate' in row, false, 'ratesDate is once per reading, not per row');
-  assert.equal('ratesDate' in row.cost, false);
+  assert.equal('ratesDates' in row, false, 'ratesDates are once per reading, not per row');
+  assert.equal('ratesDates' in row.cost, false);
   approx(row.cost.dollars, expectedDollars, 'row dollars');
   assert.equal(row.models.length, 1);
   assert.equal(row.models[0]!.model, 'claude-fable-5');
@@ -765,7 +764,6 @@ test('Pure sessionRows guards against synthetic parent cycles without dropping r
   });
   const reading: DayReading = {
     period: TODAY,
-    ratesDate: bundledRates.date,
     tools: [{
       tool: 'claude-cli',
       unread: false,

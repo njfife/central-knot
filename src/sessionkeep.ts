@@ -1,6 +1,6 @@
 // Per-home session-cost keeping consent, preflight guards, and the 15-minute sweep timer (MAP.md, "Sessions").
 // Owns: canonical home consent keys (`canonicalHome`), pre-consent store checks via `sessionlock.ts checkSessionStore`,
-// post-open and 15-minute sweeps (`SWEEP_EVERY_MS`), single-flight joining, generation-based cancellation and re-entry
+// post-open and 15-minute sweeps (`SWEEP_EVERY_MS`), a sweep the Sessions page asks for (`sweepNow`), single-flight joining, generation-based cancellation and re-entry
 // (checking `host.context().home === open.home` before every check/sweep, monotonic `seq`, stale replies dropped), and synchronous Quit abort.
 // Not here: `app-settings.json` persistence (`main.ts`), locking (`sessionlock.ts`), sweeping (`sessionsweep.ts`), UI pages.
 import { resolve } from 'node:path';
@@ -147,9 +147,14 @@ export function createSessionKeeper(host: SessionKeepHost) {
     ops = work.catch(() => undefined);
     return work;
   };
+  /** A sweep the Sessions page asks for (its 7 days): started, or the one under way joined; only for the open home while it keeps. */
+  const sweepNow = (home: string): SessionCostsView => {
+    if (home === open?.home) startSweep();
+    return view(home);
+  };
   const quit = () => {
     quitting = true;
     cancelActive();
   };
-  return { view, homeOpened, setKeep, quit };
+  return { view, homeOpened, setKeep, sweepNow, quit };
 }
