@@ -628,11 +628,12 @@ export async function syncsHere(context: ShareContext): Promise<boolean> {
 /**
  * The one answer to "can this folder be written?", for a folder that is there: it resolves where it can and rejects with the
  * refusal where it can't, as access does. Off Windows it is access(folder, mode), asked each time. On Windows, where access looks
- * at no folder's permissions, the folder itself is opened for writing and closed, and `mode` is not asked: nothing is made or
- * changed in it, so nothing is left there and no watcher sees a name. A folder that lets a file be made but not its own
- * attributes be written is refused, so the answer errs on holding back; one that lets a file be made but none removed passes
- * (the removal then says it failed). Within a pass or a view (ShareContext reads, by the folder's real path) a folder is opened
- * once; the next pass opens it again, which is when an unlock is seen.
+ * at no folder's permissions, the folder itself is opened for writing and closed, and `mode` is not asked: nothing is made in
+ * it, so nothing is left there. A watch on the folder above may then see a change to the folder itself (seen on Windows, not
+ * once an open), which the app's watches there pass over: they look for the files they name alone (main.ts startWatching).
+ * A folder that lets a file be made but not its own attributes be written is refused, so the answer errs on holding back; one
+ * that lets a file be made but none removed passes (the removal then says it failed). Within a pass or a view (ShareContext
+ * reads, by the folder's real path) a folder is opened once; the next pass opens it again, which is when an unlock is seen.
  */
 export async function folderAccess(context: Pick<ShareContext, 'reads'>, folder: string, mode: number): Promise<void> {
   if (process.platform !== 'win32') return access(folder, mode);

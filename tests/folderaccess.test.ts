@@ -1,6 +1,6 @@
 // The one answer to "can this folder be written?" (share.ts folderAccess) and a refusal read as a denial (share.ts denied),
 // as worked examples: off Windows the answer is access itself; on Windows the folder itself opened for writing and closed,
-// once a folder a pass, leaving nothing behind and waking no watcher.
+// once a folder a pass, leaving nothing behind and waking none of the app's own watches.
 import assert from 'node:assert/strict';
 import { constants, watch } from 'node:fs';
 import fsp, { access, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
@@ -90,19 +90,25 @@ test('On Windows a hundred passes over four tools open each folder once a pass a
   try { assert.deepEqual(await entries(), before); } finally { await box.cleanup(); }
 });
 
-test('On Windows the opens wake no watcher, the tool’s own or the folder above, nested folders included; a real entry does', { skip: windowsOnly }, () => inBase(async skills => {
-  const nested = join(skills, 'notes', 'scripts'), events: string[] = [];
-  await mkdir(nested, { recursive: true });
-  const watchers = [watch(skills, { recursive: true }, (event, name) => events.push(`${event} ${name}`)), watch(dirname(skills), (event, name) => events.push(`${event} ${name}`))];
+test('On Windows the opens a pass makes wake none of the app’s own watches: within a tool’s skills folder, or for a file named in the folder above it; a real entry does', { skip: windowsOnly }, () => inBase(async skills => {
+  // As main.ts startWatching watches: the skills folder within, the folder above it for the files it names (here config.toml).
+  const above = dirname(skills), store = join(above, '.central-knot'), events: string[] = [];
+  await mkdir(join(skills, 'notes', 'scripts'), { recursive: true });
+  await mkdir(store);
+  await writeFile(join(store, 'sync.json'), '{}');
+  const watchers = [watch(skills, { recursive: true }, (event, name) => events.push(`${event} ${name}`)),
+    watch(above, (event, name) => { if (!name || name === 'config.toml') events.push(`${event} ${name}`); })];
   try {
-    // What the watches' own start brings in (a folder's last access, on a disk that keeps it) is not the opens': it settles first.
+    // What the watches' own start brings in is not the opens': it settles first.
     await pause(1000);
     events.length = 0;
-    for (let at = 0; at < 100; at++) for (const folder of [skills, join(skills, 'notes'), nested]) await folderAccess({}, folder, constants.W_OK);
+    // What a pass opens: the skills folder (lockedRoot), the folder above (besideRoot, stagingFolder), the home and its store (syncGate).
+    for (let at = 0; at < 100; at++) for (const folder of [skills, above, store]) await folderAccess({}, folder, constants.W_OK);
     await pause(1000);
     assert.equal(events.length, 0, events.join(', '));
-    await writeFile(join(nested, 'real.txt'), 'real\n');
-    for (let wait = 0; wait < 40 && !events.length; wait++) await pause(50);
-    assert.ok(events.some(event => event.includes('real.txt')), events.join(', '));
+    await writeFile(join(skills, 'notes', 'scripts', 'real.txt'), 'real\n');
+    await writeFile(join(above, 'config.toml'), '');
+    for (let wait = 0; wait < 40 && !(events.some(event => event.includes('real.txt')) && events.some(event => event.includes('config.toml'))); wait++) await pause(50);
+    assert.ok(events.some(event => event.includes('real.txt')) && events.some(event => event.includes('config.toml')), events.join(', '));
   } finally { for (const watcher of watchers) watcher.close(); }
 }));
