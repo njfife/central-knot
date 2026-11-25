@@ -2273,10 +2273,12 @@ button.harness-card-main:focus-visible { outline: 0; }
 /* Select on the Library (matrix.ts selectControl, selectBar, tickOf, headingTick): a tick in the switch's place and width (a
    heading's in line with its rows'); a ticked row's tint, with no bar (the opened row's), stronger than a row's under the pointer
    in either theme, and kept under it; the bar under the toolbar, its lines in one place (.band-stack) so it is as high whichever
-   shows; the rows a Delete of many leaves, and why, over the rows below it. */
+   shows; the rows a Delete of many leaves, and why, over the rows below it. Select itself is its word but where the bar's
+   controls are icons (bar-icons), there its icon alone. */
 .row-tick { display: grid; place-items: center; width: 32px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--ink-soft); cursor: pointer; }
 .row-tick[aria-checked="true"], .row-tick[aria-checked="mixed"] { color: var(--accent); }
 .ov-section-label > .row-tick { margin-right: 4px; }
+#library-select:not(.bar-icons *) > svg { display: none; }
 .ov-row.row-ticked:not(.open) { background: var(--ticked); }
 .select-place { position: relative; flex: none; }
 .select-bar { padding: 4px 16px; background: var(--surface); border-bottom: 1px solid var(--line); font-size: 12px; line-height: 16px; }

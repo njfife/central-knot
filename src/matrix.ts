@@ -1878,12 +1878,14 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
 /**
  * Select, at the toolbar's end on the Library's list (not a tool's tab: a Delete of many takes items from every tool), left of
  * Update usage: it starts Select's mode, and reads Done while the mode is on, which ends it. Its two words hold one width
- * (style.css .band-stack), so it never changes how the bar fits.
+ * (style.css .band-stack). Select folds with the bar's controls (dom.ts fitBars, at bar-icons): its tick's icon alone, Select its
+ * tooltip and name; Done is a word at every width, the way out always read.
  */
 function selectControl(t: Table) {
   if (t.tool || !state.home) return null;
   const on = !!t.selectable;
-  const go = button({ variant: 'outline', size: 'micro', label: 'Select', id: 'library-select', onclick: () => { if (on) stopSelecting(); else startSelecting(); rerender(); } });
+  const go = button({ variant: 'outline', size: 'micro', label: 'Select', icon: on ? undefined : 'square-check', collapse: !on, id: 'library-select',
+    onclick: () => { if (on) stopSelecting(); else startSelecting(); rerender(); } });
   go.querySelector('.btn-label')!.replaceChildren(h('span.band-stack', {}, h('span', {}, on ? 'Done' : 'Select'), h('span.band-unshown', {}, on ? 'Select' : 'Done')));
   return go;
 }

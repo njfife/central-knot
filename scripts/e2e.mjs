@@ -12427,6 +12427,54 @@ async function selectFlow() {
   same('no page errors, one key for two rows', k.pageErrors, []);
   await k.quit();
 
+  // Select folds with the toolbar's controls (bar-icons): in a home as libraryFlow's toolbar home is, at 1316 with the sidebar open
+  // (its bar one line at the icons step and past it), it is its icon, named Select, and enters the mode; Done is a word at every
+  // width. Select is the word wherever the bar is looser than the icons step.
+  const L = homeWith('select-light');
+  for (const name of ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta', 'iota', 'kappa', 'lambda', 'mu']) skill(L.claude, name);
+  mkdirSync(L.copilot, { recursive: true });
+  mkdirSync(join(L.home, '.claude/agents'), { recursive: true });
+  writeFileSync(join(L.home, '.claude/agents/checker.md'), '---\nname: checker\ndescription: The checker agent.\n---\n\nYou check.\n');
+  const l = await launch(L.data, [], L.real);
+  await l.click('#nav-overview');
+  await l.click('#setup-yes');
+  for (let tries = 0; tries < 100 && !(await l.exists(`#${rowPart('switch', 'skills', 'beta')}`)); tries++) { await openKind(l, 'all'); await wait(100); }
+  const lightOpen = async open => { if (await l.run(`document.body.classList.contains('rail')`) === open) await l.click('#sidebar-toggle'); };
+  // Select (or Done) as drawn: its icon shown, its word shown, its tooltip; the toolbar's fold steps and its lines.
+  const selectNow = () => l.run(`(b => { const shown = e => !!e && getComputedStyle(e).display !== 'none', bar = document.querySelector('#main .toolbar');
+    const middles = [...bar.children].filter(part => part.offsetWidth).map(part => { const box = part.getBoundingClientRect(); return (box.top + box.bottom) / 2; }).sort((x, y) => x - y);
+    return { icon: shown(b.querySelector('svg')), word: shown(b.querySelector('.btn-label')), title: b.title, steps: [...bar.classList].filter(c => c.startsWith('bar-')), lines: middles.filter((m, i) => !i || m - middles[i - 1] > 8).length,
+      content: document.getElementById('main').clientWidth }; })(document.getElementById('library-select'))`);
+  const lightTheme = value => l.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+  const lightShots = async name => {
+    if (!shots) return;
+    for (let tries = 0; tries < 300 && await l.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100);
+    for (const look of ['light', 'dark']) { await lightTheme(look); await l.settle(); await l.shot(`select-${name}-1316${look === 'dark' ? '-dark' : ''}`); }
+    await lightTheme('light');
+  };
+  await sizeTo(l, 1316, 819); await lightOpen(true);
+  const folded = await selectNow();
+  console.log(`selectFlow: libraryFlow's toolbar home at 1316×819, the sidebar open, not selecting: ${JSON.stringify(folded)}`);
+  same('at 1316 with the sidebar open, past the icons step, Select is its icon, named Select, and the toolbar one line', [folded.icon, folded.word, folded.title, folded.steps.includes('bar-icons'), folded.lines], [true, false, 'Select', true, 1]);
+  await lightShots('light-off');
+  await l.click('#library-select');
+  for (const name of ['alpha', 'gamma', 'zeta']) await l.click(`#${rowPart('tick', 'skills', name)}`);
+  const selectingThere = await selectNow();
+  console.log(`selectFlow: the same, selecting: ${JSON.stringify(selectingThere)}`);
+  same('its click enters the mode, and Done is a word', [await l.exists('#select-bar'), selectingThere.word, selectingThere.icon, await l.text('#library-select .band-stack > :not(.band-unshown)')], [true, true, false, 'Done']);
+  await lightShots('light-three');
+  await l.click('#library-select');
+  for (const [width, height, open] of [[1316, 819, false], [2560, 1440, true]]) {
+    await sizeTo(l, width, height); await lightOpen(open);
+    const there = await selectNow();
+    console.log(`selectFlow: libraryFlow's toolbar home at ${width}×${height}${open ? '' : ' on its rail'}: ${JSON.stringify(there)}`);
+    same(`at ${width}×${height}${open ? '' : ' on its rail'}, Select is its word unless the bar is at the icons step, then its icon`, [there.word, there.icon], [!there.steps.includes('bar-icons'), there.steps.includes('bar-icons')]);
+  }
+  same('at 2560 Select is its word', (await selectNow()).word, true);
+  await fullSize(l);
+  same('no page errors, Select folded', l.pageErrors, []);
+  await l.quit();
+
   // Another home taken while asking ends the mode where the home changes: a home with a tool and nothing in it (its Library drawn
   // without a list), then back. Two homes to switch between: a development run's Practice copy and this computer's home.
   if (!flag('--electron')) { console.log('selectFlow: another home while asking: skipped (the packaged app has no Practice copy to switch to)'); return; }
