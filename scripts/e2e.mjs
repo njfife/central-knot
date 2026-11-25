@@ -9305,7 +9305,9 @@ async function mcpSigninFlow() {
   const copilotFile = JSON.stringify({ mcpServers: Object.fromEntries(Object.entries(remote(['plain', 'oauth', 'github'])).map(([name, entry]) => [name, { ...entry, tools: ['*'] }])) });
   write('.copilot/mcp-config.json', copilotFile);
   write('.codex/config.toml', ['plain', 'oauth', 'down', 'silent', 'docs', 'calendar'].map((name, index) => `[mcp_servers.${name}]\nurl = "${P(47201 + index)}"\n${name === 'docs' ? 'enabled = false\n' : ''}`).join('\n'));
-  write('.pi/agent/mcp.json', JSON.stringify({ mcpServers: { ...Object.fromEntries(['plain', 'oauth', 'down', 'silent', 'tickets', 'calendar'].map((name, index) => [name, { url: P(47201 + index) }])), tickets: { command: server } } }));
+  /** Pi's servers (tickets a local one), with `more` added or changed. */
+  const piFile = (more = {}) => JSON.stringify({ mcpServers: { ...Object.fromEntries(['plain', 'oauth', 'down', 'silent', 'tickets', 'calendar'].map((name, index) => [name, { url: P(47201 + index) }])), tickets: { command: server }, ...more } });
+  write('.pi/agent/mcp.json', piFile());
   const longName = 'team-knowledge-base-for-the-platform-group';
   /** OpenCode's servers (search a local one), with `more` added or changed. */
   const openCodeFile = (more = {}) => JSON.stringify({ mcp: { ...Object.fromEntries(['plain', 'oauth', 'down', 'silent', 'search', longName].map((name, index) => [name, { type: 'remote', url: P(47201 + index) }])), search: { type: 'local', command: [server] }, ...more } });
@@ -9348,7 +9350,7 @@ async function mcpSigninFlow() {
   /** The page as drawn: the tools' columns, and each row's name, plugin and cells' words (a mark and a Copy's label aside). */
   const page = async () => {
     const tools = await a.all('.signin-head', 'e.dataset.tool');
-    const rows = await a.run(`[...document.querySelectorAll('.signin-table tbody tr')].map(row => [row.querySelector('.signin-server').textContent, row.querySelector('.signin-plugin')?.textContent ?? '', ...[...row.querySelectorAll('td')].map(cell => [...(cell.querySelector('.signin-words')?.childNodes ?? [])].filter(node => node.nodeType === 3).map(node => node.textContent).join(''))])`);
+    const rows = await a.run(`[...document.querySelectorAll('.signin-table tbody tr')].map(row => [row.querySelector('.signin-server').textContent, row.querySelector('.signin-plugin')?.textContent ?? '', ...[...row.querySelectorAll('td')].map(cell => [...(cell.querySelector('.signin-words')?.childNodes ?? [])].map(node => (node.nodeType === 3 ? node.textContent : node.matches('.signin-keep') ? node.firstChild.textContent : '')).join(''))])`);
     return { tools, rows };
   };
   /** A row by its name, and a plugin's by its name and the plugin's: "issues (tracker)". */
@@ -9360,7 +9362,16 @@ async function mcpSigninFlow() {
   /** A row's id on the page, by its name (and plugin): what its cells' and Copy's ids end with. */
   const rowIdOf = async name => (await a.run(`[...document.querySelectorAll('.signin-table tbody tr')].map(row => [row.querySelector('.signin-server').textContent, row.querySelector('.signin-plugin')?.textContent ?? '', row.dataset.row])`)).find(row => rowName(row) === name)?.[2];
   const cellId = async (tool, name) => `signin-cell-${tool}-${await rowIdOf(name)}`;
-  const head = tool => a.run(`document.querySelector('.signin-head[data-tool="${tool}"]')?.innerText ?? null`);
+  /** A column's head as it reads (a no-break space read as a space, the ends trimmed). */
+  const head = async tool => (await a.run(`document.querySelector('.signin-head[data-tool="${tool}"]')?.innerText ?? null`))?.replace(/\u00a0/g, ' ').trim() ?? null;
+  /** Each (?) on a line its word is on, never alone on a line: the ids of those that aren't. */
+  const KEPT = `[...document.querySelectorAll('#mcpsignin-scroll .info-mark')].flatMap(mark => {
+    const word = [...mark.closest('.info-wrap').parentElement.childNodes].filter(node => node.nodeType === 3 && node.textContent.trim()).at(-1);
+    const range = document.createRange();
+    range.selectNodeContents(word);
+    const line = [...range.getClientRects()].at(-1), own = mark.getBoundingClientRect();
+    return line && line.bottom > own.top && line.top < own.bottom ? [] : [mark.id];
+  })`;
   /** Above the table: the line saying what a check does, and whether Check all is there. */
   const top = async () => [await a.text('#signin-line'), await a.exists('#signin-check-all')];
   const until = async (ready, what) => { for (let tries = 0; tries < 200; tries++) { if (await ready()) return; await wait(100); } check(`in time: ${what}`, false); };
@@ -9377,6 +9388,7 @@ async function mcpSigninFlow() {
         await shape(rail);
         const how = rail ? 'rail' : 'open';
         same(`nothing cut off at ${width}×${height}, the sidebar ${how}: ${name}`, [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], []);
+        same(`each (?) keeps with its word at ${width}×${height}, the sidebar ${how}: ${name}`, await a.run(KEPT), []);
         same(`the table fits its page at ${width}×${height}, the sidebar ${how}: ${name}`, await a.run(`(t => t.getBoundingClientRect().right <= t.parentElement.getBoundingClientRect().right + 1)(document.querySelector('.signin-table'))`), true);
         if (width === 860 || width === 1316 || (width === 1728 && !rail)) await shoot(`${name}-${width}-${how}`);
       }
@@ -9420,7 +9432,7 @@ async function mcpSigninFlow() {
   same('a plugin’s server is its own row, beside the direct one of its name', opened.rows.filter(([name]) => name === 'issues').map(([, plugin, claude]) => [plugin, claude]), [['', 'Not checked'], ['In the plugin tracker', 'Not checked']]);
   same('a column’s head holds the tool’s name and its Check; a session-only tool’s says where its sign-in is, Antigravity’s with no command',
     [await a.exists('#signin-check-copilot-cli'), await head('copilot-cli'), await head('antigravity-cli'), await head('pi-cli')],
-    [false, 'Copilot CLI\nIn a session: /mcp auth <name>', 'Antigravity\nIn a session', 'Pi\nCheck']);
+    [false, 'Copilot CLI\nIn a session: /mcp auth <name>', 'Antigravity\nSign in inside a session', 'Pi\nCheck']);
   same('above the table only Check all and what a check does: no paragraphs, no time before a check',
     [await a.exists('.signin-intro'), await a.exists('#signin-checked'), ...await top()],
     [false, false, 'Check starts local servers in Claude Code, Pi and OpenCode; OpenCode adds $schema to its config files.', true]);
@@ -9431,6 +9443,15 @@ async function mcpSigninFlow() {
     [['copilot-cli'], 'Sign-in shows only inside a session of that tool. • means the tool has the server; blank means it doesn’t.']);
   same('Local’s card says where the server runs and nothing more', await card('signin-local-mark', 'local-card'), 'Runs on this computer.');
   await fits('not-checked');
+  // A server that arrives on disk while he is on the page (Pi's file, read again by itself) takes a place after the rows already
+  // there, though by its name it would come first; on Refresh it goes where its name puts it.
+  write('.pi/agent/mcp.json', piFile({ 'aaa-new': { url: P(47213) } }));
+  await until(async () => (await order()).includes('aaa-new'), 'the new server to arrive without a Refresh');
+  same('a server that arrives during the visit goes after the rows already there', (await order()).at(-1), 'aaa-new');
+  await a.click('#header-refresh');
+  same('on Refresh it goes where its name puts it', (await order())[0], 'aaa-new');
+  write('.pi/agent/mcp.json', piFile());
+  await a.click('#header-refresh');
 
   // Check on Codex, the pointer on calendar's row: one call, from an empty folder gone after; nothing of Central Knot's written.
   // oauth comes to need a sign-in there, and no row moves while he is on the page, the one under the pointer included.
@@ -9585,6 +9606,7 @@ async function mcpSigninFlow() {
   await a.click('#signin-check-opencode-cli');
   await until(async () => (await column('opencode-cli')).plain === 'No OpenCode command line here', 'OpenCode’s missing command line');
   check('a tool with no command line here says so in its cells', true);
+  same('a tool whose check can’t run here is left out of the line', await a.text('#signin-line'), 'Check starts local servers in Claude Code and Pi.');
   await owners('no-command-line');
   renameSync(join(scratch, 'opencode-aside'), join(home, '.local/bin/opencode'));
   // A check stopped at its limit (here 4 s): Didn’t answer in 70 s, the limit the app keeps.
@@ -9618,7 +9640,16 @@ async function mcpSigninFlow() {
   rmSync(join(said, 'claude.wait'));
   await a.click('#home-actual');
   await a.click('#nav-mcpsignin');
-  same('this home opened again starts with nothing checked', [(await column('claude-cli')).plain, await a.all('.signin-when', 'e.innerText.trim()'), await a.exists('#signin-checked')], ['Not checked', ['In a session: /mcp auth <name>', 'In a session'], false]);
+  same('this home opened again starts with nothing checked', [(await column('claude-cli')).plain, await a.all('.signin-when', 'e.innerText.trim()'), await a.exists('#signin-checked')], ['Not checked', ['In a session: /mcp auth <name>', 'Sign in inside a session'], false]);
+  same('… and its rows go by name again: the places of the visit before are let go with the home', await order(), opened.rows.map(rowName));
+  // A tool's only local server switched off there (Pi's tickets): it isn't started, so Pi, with only remote servers on, isn't named.
+  write('.pi/agent/mcp.json', piFile({ tickets: { command: server, enabled: false } }));
+  await a.click('#header-refresh');
+  same('a local server switched off in its tool isn’t counted in the line; its cell says Off', [await a.text('#signin-line'), (await column('pi-cli')).tickets],
+    ['Check starts local servers in Claude Code and OpenCode; OpenCode adds $schema to its config files.', 'Off in Pi']);
+  await owners('local-off');
+  write('.pi/agent/mcp.json', piFile());
+  await a.click('#header-refresh');
 
   // What a check does follows OpenCode's version, as its --version answers on Refresh: 2.x leaves a service running, 1.x adds
   // $schema (above), and one whose version isn't known may do either; it stays among those that start local servers.
@@ -9642,7 +9673,7 @@ async function mcpSigninFlow() {
   write('.gemini/config/mcp_config.json', antigravityFile);
   await a.click('#header-refresh');
   same('only Copilot CLI and Antigravity: no line and no Check all; Antigravity’s head names no command', [(await page()).tools, ...await top(), await head('antigravity-cli')],
-    [['copilot-cli', 'antigravity-cli'], null, false, 'Antigravity\nIn a session']);
+    [['copilot-cli', 'antigravity-cli'], null, false, 'Antigravity\nSign in inside a session']);
   await owners('session-only');
   // No server in any tool: the page says so.
   for (const path of ['.copilot/mcp-config.json', '.gemini/config/mcp_config.json']) write(path, '{}');

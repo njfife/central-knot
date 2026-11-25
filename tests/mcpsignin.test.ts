@@ -12,7 +12,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } f
 import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { answerFor, askedNow, cellSays, checkLine, connectedCard, followView, grouped, ownTime, readAnswer, signInCommand, signinRows, type SigninCell, type SigninChecks, type SigninRow } from '../src/mcpsignin.ts';
+import { answerFor, askedNow, cannotRun, cellSays, checkLine, connectedCard, followView, grouped, ownTime, readAnswer, signInCommand, signinRows, type SigninCell, type SigninChecks, type SigninRow } from '../src/mcpsignin.ts';
 import { harnessIds } from '../src/harnesses.ts';
 import { checkLimit, checkSignin, stopChecks } from '../src/mcpsigninrun.ts';
 import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, SigninAnswer } from '../src/types.ts';
@@ -120,8 +120,8 @@ test('A cell says what its tool’s answer says of it, and only that: not checke
   assert.equal(connectedCard(['claude-cli', 'copilot-cli', 'pi-cli', 'opencode-cli']), 'The server answered. Claude Code, Pi and OpenCode don’t say whether it needed a sign-in.');
 });
 
-/** A row named `name` running by `transport`, in each of `tools`. */
-const row = (name: string, transport: SigninRow['transport'], tools: HarnessId[]): SigninRow => ({ id: name, name, transport, cells: Object.fromEntries(tools.map(tool => [tool, { name, off: false }])) });
+/** A row named `name` whose copy runs by `transport` in each of `tools`, switched off there or not. */
+const row = (name: string, transport: SigninRow['transport'], tools: HarnessId[], off = false): SigninRow => ({ id: name, name, transport, cells: Object.fromEntries(tools.map(tool => [tool, { name, off }])) });
 
 test('A session-only tool’s cell is a mark: its hover says where that tool’s sign-in shows, or that the server is a local one', () => {
   const tools: HarnessId[] = ['copilot-cli', 'antigravity-cli'];
@@ -147,6 +147,10 @@ test('What a check does is said before it is pressed, each part only where it is
   assert.equal(checkLine([row('docs', 'http', ['codex-cli'])], ['codex-cli'], undefined), 'Check contacts remote servers in Codex.');
   assert.equal(checkLine([row('docs', 'sse', ['claude-cli', 'codex-cli'])], ['claude-cli', 'codex-cli'], undefined), 'Check contacts remote servers in Claude Code and Codex.');
   assert.equal(checkLine([row('docs', 'http', ['opencode-cli'])], ['opencode-cli'], '1.19.6'), 'Check contacts remote servers in OpenCode; OpenCode adds $schema to its config files.');
+  // A server switched off in a tool is neither started nor contacted there: the tool is named by its other servers alone.
+  assert.equal(checkLine([row('notes', 'stdio', ['claude-cli'], true), row('docs', 'http', ['claude-cli'])], ['claude-cli'], undefined), 'Check contacts remote servers in Claude Code.');
+  // OpenCode's clause stands wherever OpenCode is checked, its only server off too: its command writes or starts that as it runs.
+  assert.equal(checkLine([row('notes', 'stdio', ['opencode-cli'], true)], ['opencode-cli'], '1.19.6'), 'OpenCode adds $schema to its config files.');
   // Only session-only tools, or a check that would start and contact nothing: no line.
   assert.equal(checkLine([row('docs', 'http', ['copilot-cli', 'antigravity-cli'])], [], undefined), undefined);
   assert.equal(checkLine([row('notes', 'stdio', ['codex-cli'])], ['codex-cli'], undefined), undefined);
@@ -224,6 +228,16 @@ test('A row runs as its Library row or its plugin’s copy says, and isn’t sai
   const home = view(['claude-cli'], [fact('notes', { 'claude-cli': 'notes' }, { transport: 'stdio' }), fact('odd', { 'claude-cli': 'odd' })],
     [install('claude-cli', { items: [{ kind: 'mcp', name: 'issues', description: '', runs: 'http://127.0.0.1:47312/mcp', transport: 'http' }, { kind: 'mcp', name: 'broken', description: '', runs: '' }] })]);
   assert.deepEqual(signinRows(home).map(each => [each.name, each.transport]), [['broken', undefined], ['issues', 'http'], ['notes', 'stdio'], ['odd', undefined]]);
+});
+
+test('A tool whose check can’t run on this computer: its last check found no command line, or, before one, its probe found none', () => {
+  const home = { snapshots: [{ harness: 'claude-cli', probe: { state: 'missing' } }, { harness: 'pi-cli', probe: { state: 'ok', version: '1.6.0' } }] } as unknown as HomeView;
+  const checks: SigninChecks = { home: '/h', columns: {} };
+  assert.deepEqual([cannotRun(checks, home, 'claude-cli'), cannotRun(checks, home, 'pi-cli')], [true, false]);
+  // A check's answer is the later word: Claude Code's command found since, Pi's gone.
+  checks.columns['claude-cli'] = { at: '2026-11-21T10:00:00Z', answer: { servers: {} }, asked: [] };
+  checks.columns['pi-cli'] = { at: '2026-11-21T10:00:00Z', answer: { failed: 'missing' }, asked: [] };
+  assert.deepEqual([cannotRun(checks, home, 'claude-cli'), cannotRun(checks, home, 'pi-cli')], [false, true]);
 });
 
 test('Rows are the servers some managed tool has; a tool’s own switch and a plugin turned off are its Off marks', () => {

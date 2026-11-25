@@ -1212,6 +1212,7 @@ span.ins-confirm { margin-top: 0; }
 .signin-server { display: block; font-weight: 600; color: var(--ink); }
 .signin-plugin { display: block; font-size: 11.5px; color: var(--ink-soft); }
 .signin-local { display: flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--ink-soft); }
+.signin-keep { overflow-wrap: normal; }
 .signin-cell .signin-words { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; }
 .signin-words .btn { flex: none; }
 .signin-command { display: block; margin-top: 2px; font-family: var(--mono); font-size: 11px; line-height: 16px; color: var(--ink); }

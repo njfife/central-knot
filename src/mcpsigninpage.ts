@@ -4,12 +4,14 @@
 // time, beside it the line saying what a check does on this computer; a cell that needs a sign-in offers that tool's own command
 // to copy, and nothing else is started. What each check said lives in app.ts state.mcpSignin for the home it was made in, until
 // Central Knot quits; nothing is stored. The rows keep the places they had when he came to the page (inPlace). The rows, which
-// cells a check holds for, the words, the line and the commands are mcpsignin.ts's.
+// cells a check holds for, the cells' and heads' words, the line, the cards and the commands are mcpsignin.ts's; the page's own
+// words are its controls' (Check, Check all and its time, Copy and what it says), Local, a check's refusal and the empty state.
 import { pinnedRows, rerender, state } from './app.ts';
 import { brandMark } from './brand.ts';
 import { button, emptyState, h, infoMark } from './dom.ts';
 import { pin } from './itemrow.ts';
-import { answerFor, askedNow, cellSays, checkLine, connectedCard, grouped, IN_SESSION, listCommand, LOCAL_CARD, ownTime, SAID, SESSION_CARD, signinRows, type SigninRow } from './mcpsignin.ts';
+import { answerFor, askedNow, cannotRun, cellSays, checkLine, connectedCard, grouped,
+  IN_SESSION, listCommand, LOCAL_CARD, ownTime, SAID, SESSION_CARD, signinRows, type SigninRow } from './mcpsignin.ts';
 import { clockTime } from './model.ts';
 import { copyButton, noToolsState, notRead } from './pages.ts';
 import { toolNames } from './words.ts';
@@ -47,13 +49,18 @@ async function checkColumns(tools: HarnessId[], whole = false) {
 /**
  * The rows where they were when he came to the page, those that need him first then (mcpsignin.ts grouped): a check moves none,
  * so the row under the pointer stays and each Copy stays its own row's. Held as the Library holds a clicked row (itemrow.ts
- * Pinned), let go on Refresh and on another page; a row new since goes where its group puts it.
+ * Pinned), let go on Refresh, on another page and when a home opens (app.ts accept); a row that arrives meanwhile goes after them.
  */
 function inPlace(rows: SigninRow[]): SigninRow[] {
-  const pins = pinnedRows<number>('mcpsignin'), now = grouped(rows, state.mcpSignin);
-  now.forEach((row, at) => pin(pins, row.id, at));
+  const pins = pinnedRows<number>('mcpsignin');
+  const now = grouped(rows, state.mcpSignin);
+  // A pin's `group` holds the row's place here (this list has no groups): the next free one, so a row new since goes last.
+  for (const row of now) pin(pins, row.id, pins.rows.size);
   return now.sort((first, second) => pins.rows.get(first.id)!.group - pins.rows.get(second.id)!.group);
 }
+
+/** A word and its mark on one line, a no-break space between: a (?) never stands alone on a line. */
+const keep = (words: string | undefined, mark: HTMLElement | null) => (mark ? h('span.signin-keep', {}, words, '\u00a0', mark) : words);
 
 /** The page's three marks, each with its card on the first place it fits and nowhere after: Connected's, Local's and the session-only heads'. */
 function marksOnce(tools: HarnessId[]) {
@@ -76,7 +83,7 @@ function columnHead(tool: HarnessId, mark: Mark) {
     h('span.signin-tool', {}, brandMark(tool, 14), toolNames[tool]),
     listCommand[tool] ? h('span.signin-check', {},
       button({ size: 'small', label: 'Check', name: `Check: run ${toolNames[tool]}’s own command for its MCP servers`, id: `signin-check-${tool}`, disabled: waitsFor(), onclick: () => void checkColumns([tool]) }),
-      when ? h('span.signin-when', { id: `signin-when-${tool}` }, when) : null) : h('span.signin-when', {}, IN_SESSION[tool]?.head, mark('session')));
+      when ? h('span.signin-when', { id: `signin-when-${tool}` }, when) : null) : h('span.signin-when', {}, keep(IN_SESSION[tool]?.head, mark('session'))));
 }
 
 /** A row's first cell: the server's name, Local where it runs on this computer (by its transport alone), and the plugin it comes in. */
@@ -87,10 +94,12 @@ const nameCell = (row: SigninRow, mark: Mark) => h('th.signin-name', { scope: 'r
 /** A cell, its id and its Copy's by its row's id, so neither follows a place in the list. */
 function cellView(tool: HarnessId, row: SigninRow, mark: Mark) {
   if (!row.cells[tool]) return h('td.signin-cell', {});
-  const says = cellSays(tool, row, answerFor(state.mcpSignin, tool, row)), shown = says.command ?? says.line, id = `${tool}-${row.id}`;
+  const says = cellSays(tool, row, answerFor(state.mcpSignin, tool, row));
+  const shown = says.command ?? says.line;
+  const id = `${tool}-${row.id}`;
   return h(`td.signin-cell${says.tone ? `.tone-${says.tone}` : ''}`, { id: `signin-cell-${id}`, title: says.title },
     // The command or the unread line under the words, with the cell's whole width; Copy beside the words.
-    h('span.signin-words', {}, says.words, says.words === SAID.connected ? mark('connected') : null,
+    h('span.signin-words', {}, says.words === SAID.connected ? keep(says.words, mark('connected')) : says.words,
       says.command ? copyButton(says.command, says.command, `signin-copy-${id}`, 'Copy', 'Copied: run it in a terminal') : null),
     shown ? h('code.signin-command', {}, shown) : null);
 }
@@ -99,9 +108,14 @@ export function mcpSigninPage() {
   const home = state.home;
   if (!home) return notRead();
   if (!home.sync.managed.length) return h('div.page', {}, noToolsState('mcpsignin'));
-  const rows = inPlace(signinRows(home)), tools = columnsOf(home, rows), checked = tools.filter(tool => listCommand[tool]), mark = marksOnce(tools);
+  const rows = inPlace(signinRows(home));
+  const tools = columnsOf(home, rows);
+  const checked = tools.filter(tool => listCommand[tool]);
+  const mark = marksOnce(tools);
   if (!rows.length) return h('div.page', {}, emptyState('plug', 'No MCP servers in your tools.', undefined));
-  const line = checkLine(rows, checked, home.snapshots.find(snapshot => snapshot.harness === 'opencode-cli')?.probe.version), all = state.mcpSignin.all;
+  const runs = checked.filter(tool => !cannotRun(state.mcpSignin, home, tool));
+  const line = checkLine(rows, runs, home.snapshots.find(snapshot => snapshot.harness === 'opencode-cli')?.probe.version);
+  const all = state.mcpSignin.all;
   return h('div.page', {}, h('div.scroll.signin-scroll', { id: 'mcpsignin-scroll' },
     checked.length ? h('div.signin-top', {},
       button({ label: 'Check all', name: 'Check all: run each tool’s own command, one after another', id: 'signin-check-all', disabled: waitsFor(), onclick: () => void checkColumns(checked, true) }),

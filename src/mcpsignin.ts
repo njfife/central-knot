@@ -2,9 +2,9 @@
 // command each tool reports with (listCommand; Copilot CLI has none), one reader per tool turning what it printed into what it
 // said of each server it was asked about (readAnswer), the page's rows and cells from the view the Library already has
 // (signinRows), those that need him first (grouped), which cells a check holds for as views come (askedNow, followView,
-// answerFor), a cell's words (cellSays), the time a column shows of its own (ownTime), the line saying what
-// a check does on this computer (checkLine), a session-only tool's head (IN_SESSION), the marks' cards (connectedCard, SESSION_CARD, LOCAL_CARD), and each tool's own
-// sign-in command (signInCommand). Pure, for the page and main alike. Elsewhere: the run, in main (mcpsigninrun.ts
+// answerFor), a cell's words (cellSays), the time a column shows of its own (ownTime), the line saying what a check does on this
+// computer (checkLine, for the tools whose check can run here: cannotRun), a session-only tool's head (IN_SESSION), the marks'
+// cards (connectedCard, SESSION_CARD, LOCAL_CARD), and each tool's own sign-in command (signInCommand). Pure, for the page and main alike. Elsewhere: the run, in main (mcpsigninrun.ts
 // checkSignin); the page, its clicks and the order it holds its rows in (mcpsigninpage.ts); its state (app.ts state.mcpSignin);
 // the shapes (types.ts SigninAnswer, SigninSaid).
 // Only what a tool's command prints is read, and what can't be read is said so, never made a status: Central Knot reads, keeps and
@@ -157,7 +157,8 @@ export interface ColumnCheck { at: string; answer: SigninAnswer; asked: string[]
  * why one couldn't be run, and when the last whole Check all ended (`all`: each column it ran answered or said why it couldn't
  * run; mcpsigninpage.ts checkColumns). Never stored.
  */
-export interface SigninChecks { home: string; columns: Partial<Record<HarnessId, ColumnCheck>>; checking?: { tool: HarnessId; asked: string[] }; failed?: Partial<Record<HarnessId, string>>; all?: string }
+export interface SigninChecks { home: string; columns: Partial<Record<HarnessId, ColumnCheck>>; checking?: { tool: HarnessId; asked: string[] };
+  failed?: Partial<Record<HarnessId, string>>; all?: string }
 /** A cell as one copy: its row, the tool's name for the server, and what the copy is. */
 const cellKey = (row: SigninRow, cell: SigninCell) => JSON.stringify([row.id, cell.name ?? null, cell.copy ?? null]);
 /** The cells a check of `tool` asks about now: each one not switched off. */
@@ -191,7 +192,7 @@ export const SAID = { 'no-sign-in': 'No sign-in needed', 'signed-in': 'Signed in
 /** Where each session-only tool's sign-in shows: its head, in place of a Check, and its mark's hover in a server's cell (Antigravity has no command known for it). */
 export const IN_SESSION: Partial<Record<HarnessId, { head: string; hover: (server: string) => string }>> = {
   'copilot-cli': { head: 'In a session: /mcp auth <name>', hover: server => `In Copilot CLI. Sign in inside a session: /mcp auth ${server}` },
-  'antigravity-cli': { head: 'In a session', hover: () => 'In Antigravity. Sign-in shows only inside a session.' },
+  'antigravity-cli': { head: 'Sign in inside a session', hover: () => 'In Antigravity. Sign-in shows only inside a session.' },
 };
 
 /**
@@ -239,18 +240,28 @@ function openCodeLeaves(version: string | undefined): string {
   return line >= 2 ? 'OpenCode leaves a service running' : 'OpenCode may leave a service running or add $schema to its config files (its version isn’t known)';
 }
 /**
- * What a Check or Check all does on this computer, said before it is pressed, each part only where it is true for these rows: the
- * checked tools of STARTS_LOCAL with a server not known to be remote start their local servers, or else the checked tools with a
- * remote one contact it; then, where OpenCode is checked, what it leaves (`openCode`: its probed version, Snapshot probe.version).
- * None where neither: only session-only tools, or a tool with nothing a check would start or contact.
+ * What a Check or Check all does on this computer, said before it is pressed, each part only where it is true for these rows and
+ * `checked`, the tools whose check can run here (cannotRun): those of STARTS_LOCAL with a server on there that isn't known to be
+ * remote start their local servers, or else those with a remote one on contact it; then, wherever OpenCode is checked, what its
+ * command leaves as it runs (`openCode`: its probed version, Snapshot probe.version). A server switched off in a tool is neither
+ * started nor contacted there. None where nothing is said: only session-only tools, or nothing a check would start or contact.
  */
 export function checkLine(rows: SigninRow[], checked: HarnessId[], openCode: string | undefined): string | undefined {
-  const has = (tool: HarnessId, remote: boolean) => rows.some(row => row.cells[tool] && (row.transport === 'http' || row.transport === 'sse') === remote);
+  const knownRemote = (row: SigninRow) => row.transport === 'http' || row.transport === 'sse';
+  /** Whether `tool` has a server on (not switched off there) that passes `test`. */
+  const hasOn = (tool: HarnessId, test: (row: SigninRow) => boolean) => rows.some(row => !!row.cells[tool] && !row.cells[tool]!.off && test(row));
   const named = (tools: HarnessId[]) => andList(tools.map(tool => toolNames[tool]));
-  const starts = checked.filter(tool => STARTS_LOCAL.includes(tool) && has(tool, false)), contacts = checked.filter(tool => has(tool, true));
+  const starts = checked.filter(tool => STARTS_LOCAL.includes(tool) && hasOn(tool, row => !knownRemote(row)));
+  const contacts = checked.filter(tool => hasOn(tool, knownRemote));
   const first = starts.length ? `Check starts local servers in ${named(starts)}` : contacts.length ? `Check contacts remote servers in ${named(contacts)}` : undefined;
-  if (!first) return undefined;
-  return `${first}${checked.includes('opencode-cli') ? `; ${openCodeLeaves(openCode)}` : ''}.`;
+  const parts = [first, checked.includes('opencode-cli') ? openCodeLeaves(openCode) : undefined].filter(Boolean);
+  return parts.length ? `${parts.join('; ')}.` : undefined;
+}
+/** Whether `tool`'s check can't run on this computer: its column's last check found no command line, or, before one, the tool's own probe found none. */
+export function cannotRun(checks: SigninChecks, home: HomeView, tool: HarnessId): boolean {
+  const answer = checks.columns[tool]?.answer;
+  if (answer) return 'failed' in answer && answer.failed === 'missing';
+  return home.snapshots.find(snapshot => snapshot.harness === tool)?.probe.state === 'missing';
 }
 
 /** One literal argument a shell accepts: as it is with only letters, digits and `. _ : / @ -`, else in single quotes (one inside as '\''). */
