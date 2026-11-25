@@ -1,9 +1,12 @@
 // Shared hook identity lookup (parseHookRef, findHook — called by both readHookSource here and hookrun.ts runHook) and reading
 // one hook's source on click (IPC hook:source): finds the hook again through the same readers the page was drawn with
 // (own tool settings, an installed plugin copy, or a marketplace copy resolved by marketplace name through marketplaces.ts,
-// without fetching), never reads a path or folder sent from the page, and shows only the hook's own entry (from JSON/JSONC,
-// the file's own bytes with common leading indentation removed; from TOML, its own bytes with trailing whitespace trimmed;
-// omitted for inline plugin manifest hooks) and the script its command names (by rule). Read-only: runs and writes nothing.
+// without fetching). For both own and installed hooks, findOwner reads the tool's settings (pluginitems.ts sessionSettings) so
+// findHook reports whether the tool's hooks are off (hooksDisabled) or the plugin is off (pluginOff), while readHookSource
+// still shows the source. Never reads a path or folder sent from the page, and shows only the hook's own entry (from
+// JSON/JSONC, the file's own bytes with common leading indentation removed; from TOML, its own bytes with trailing whitespace
+// trimmed; omitted for inline plugin manifest hooks) and the script its command names (by rule). Read-only: runs and writes
+// nothing.
 import { isAbsolute, join, resolve } from 'node:path';
 import { READ_LIMIT, installedContents, pathIn, pluginContents, readCapped } from './catalogdetail.ts';
 import { harnessIds, toolConfigRoot } from './harnesses.ts';

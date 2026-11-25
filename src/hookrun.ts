@@ -6,10 +6,11 @@
 // Environment and launch: scrubs inherited control, session and plugin variables first, then sets tool and plugin variables
 // (including plain declared Claude Code userConfig options from settings.json or manifest defaults) and creates Claude Code's
 // plugin data folder on first use. Claude Code puts ${CLAUDE_PROJECT_DIR} (and for plugins, ${CLAUDE_PLUGIN_ROOT} and
-// ${CLAUDE_PLUGIN_DATA}) into shell lines as text (for own hooks too) and into exec-form program and each argument separately.
-// A Claude Code plugin command or argument holding ${user_config. is refused; Codex has no such placeholder and runs commands
-// as written. Runs through plugins.ts run (process group + launch.ts CLOSE_GRACE_MS drain), cleans up disposable Claude files,
-// and stops active runs on Stop or Quit. Nothing here stores results or draws a page; source reading stays in hooksource.ts.
+// ${CLAUDE_PLUGIN_DATA}) into shell lines as text (for own hooks too) and into exec-form program and each argument separately;
+// Codex puts its four plugin variables into the command before the shell. A Claude Code plugin command or argument holding
+// ${user_config. is refused; Codex has no ${user_config.…} and leaves that as written. Runs through plugins.ts run (process
+// group + launch.ts CLOSE_GRACE_MS drain), cleans up disposable Claude files, and stops active runs on Stop or Quit.
+// Nothing here stores results or draws a page; source reading stays in hooksource.ts.
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';

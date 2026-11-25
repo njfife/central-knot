@@ -1137,7 +1137,7 @@ test('Spaced install paths work in both shell and exec launch forms, and one plu
   } finally { await rm(base, { recursive: true, force: true }); }
 });
 
-test('Codex top-level dotted features.hooks and features.codex_hooks disable hooks in sessionSettings and refuse plugin Run it', { skip: unixSkip, timeout: 15_000 }, async () => {
+test('Codex top-level dotted and inline-table features.hooks / features.codex_hooks disable hooks in sessionSettings and refuse plugin Run it', { skip: unixSkip, timeout: 15_000 }, async () => {
   const box = await sandbox(['codex']);
   try {
     const codexDir = join(box.home, '.codex');
@@ -1167,12 +1167,30 @@ test('Codex top-level dotted features.hooks and features.codex_hooks disable hoo
     assert.equal(refusedAlias.problem, 'Hooks are turned off in Codex’s settings ([features] codex_hooks = false).');
     await assert.rejects(stat(marker), { code: 'ENOENT' });
 
+    // Inline table at the top: features = { hooks = false }, features = { codex_hooks = false }, and boolean hooks precedence.
+    await put(codexConfig, 'features = { hooks = false }\n\n[plugins."helper@team"]\nenabled = true\n');
+    assert.equal((await sessionSettings('codex-cli', codexDir)).ownHooksDisabled, '[features] hooks = false');
+    const refusedInlineHooks = await runHook(box.ctx(), ref);
+    assert.equal(refusedInlineHooks.outcome, 'refused');
+    assert.equal(refusedInlineHooks.problem, 'Hooks are turned off in Codex’s settings ([features] hooks = false).');
+    await assert.rejects(stat(marker), { code: 'ENOENT' });
+
+    await put(codexConfig, 'features = { codex_hooks = false }\n\n[plugins."helper@team"]\nenabled = true\n');
+    assert.equal((await sessionSettings('codex-cli', codexDir)).ownHooksDisabled, '[features] codex_hooks = false');
+    const refusedInlineAlias = await runHook(box.ctx(), ref);
+    assert.equal(refusedInlineAlias.outcome, 'refused');
+    assert.equal(refusedInlineAlias.problem, 'Hooks are turned off in Codex’s settings ([features] codex_hooks = false).');
+    await assert.rejects(stat(marker), { code: 'ENOENT' });
+
+    await put(codexConfig, 'features = { hooks = true, codex_hooks = false }\n\n[plugins."helper@team"]\nenabled = true\n');
+    assert.equal((await sessionSettings('codex-cli', codexDir)).ownHooksDisabled, undefined);
+
     // Explicit boolean features.hooks = true overrides features.codex_hooks = false (and [features] codex_hooks = false).
     await put(codexConfig, 'features.hooks = true\nfeatures.codex_hooks = false\n\n[plugins."helper@team"]\nenabled = true\n');
     assert.equal((await sessionSettings('codex-cli', codexDir)).ownHooksDisabled, undefined);
 
-    // Dotted key inside another table is not top-level features.hooks.
-    await put(codexConfig, '[other]\nfeatures.hooks = false\n\n[plugins."helper@team"]\nenabled = true\n');
+    // Dotted key or inline table inside another table is not top-level features.hooks.
+    await put(codexConfig, '[other]\nfeatures.hooks = false\nfeatures = { hooks = false }\n\n[plugins."helper@team"]\nenabled = true\n');
     assert.equal((await sessionSettings('codex-cli', codexDir)).ownHooksDisabled, undefined);
     const allowed = await runHook(box.ctx(), ref);
     assert.equal(allowed.outcome, 'adds');
