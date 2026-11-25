@@ -15,6 +15,7 @@ import type { ShareContext } from '../src/share.ts';
 import {
   emptyPositions,
   monthOf,
+  monthsAround,
   nextMonth,
   previousMonth,
   readSessionRecord,
@@ -723,13 +724,26 @@ test('A turn for a request at a month\'s end reads the month before it and the m
   // Seen again, each a little later or earlier, with more tokens: in November now, by UTC.
   const grown = { tokens: { input: 1000, cacheRead: 2000, cacheWrite: 500, output: 900 } };
   const seen = [claudeReq('s1', 'kept-in-october', utcTime(2026, 11, 1, 0, 1), grown), claudeReq('s1', 'kept-in-december', utcTime(2026, 11, 30, 23, 59), grown)];
-  const own = monthOf(seen[0]!.at), months = [previousMonth(own), own, nextMonth(own)];
+  const months = monthsAround(seen[0]!.at);
+  assert.deepEqual([months, monthsAround(seen[1]!.at), monthsAround(Number.NaN)], [['2026-10', '2026-11', '2026-12'], months, []]);
   await withSessionRecordTurn(ctx.home, async ({ read }) => {
-    assert.deepEqual(months, ['2026-10', '2026-11', '2026-12']);
     const up = upsertSessionRecord(await read(months), update(seen));
     assert.deepEqual(up.changed, ['2026-10', '2026-12'], 'each found where it was kept, and grown there');
     assert.equal(up.months['2026-11'], undefined, 'neither kept a second time in November');
   });
+});
+
+test('A kept position whose offset is past its file\'s size is held as damaged: a read would go on from beyond the end', async () => {
+  const ctx = await makeContext(), dir = sessionsDirectory(ctx.home);
+  await mkdir(dir, { recursive: true });
+  const positions = (offset: number) => JSON.stringify({
+    formatVersion: 1, sweptAt: 1, files: [{ tool: 'claude-cli', dev: '1', ino: '2', offset, before: 'e3b0c44298fc1c14', size: 512, mtimeMs: 1 }],
+  });
+  await writeFile(join(dir, 'positions.json'), positions(512));
+  assert.deepEqual((await readSessionRecord(ctx.home, ['2026-11'])).held, [], 'at its size: kept');
+  await writeFile(join(dir, 'positions.json'), positions(513));
+  const past = await readSessionRecord(ctx.home, ['2026-11']);
+  assert.deepEqual([past.held.map(h => [h.file, h.kind]), past.positions], [[['positions.json', 'damaged']], emptyPositions()]);
 });
 
 test('A month is named by UTC: 23:30 UTC on 30 November is November in Auckland, in Los Angeles and in UTC alike', () => {

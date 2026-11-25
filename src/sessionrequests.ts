@@ -7,8 +7,8 @@
 // the caller already holds (Claude Code records a response in part before recording it whole): the later one replaces it.
 //
 // A file is read by `scanLines`, from where its last read ended: complete lines only, each parsed as it is read; a file that
-// shrank, is another file now, or whose bytes before that point changed, is read from its start, and the read says it started
-// over before its first line. Whether a file changed since a read, without reading it, is `changedSince`'s. What every
+// shrank, is another file now, or whose last 4 KiB before that point changed, is read from its start, and the read says it
+// started over before its first line. Whether a file changed since a read, without reading it, is `changedSince`'s. What every
 // tool's reader does with those lines is `readSession`'s: each made a record, the last request of each id kept, and counted as
 // unread a line that is not a JSON record or a record its tool's reader says should have been a request and is not one; every
 // other record is passed over uncounted. Claude Code's files are found by `claudeFiles` (every folder at every depth listed on
@@ -137,9 +137,10 @@ export interface SessionRead {
   /** Its requests, one per request id: the last record of each in these lines. */
   requests: Request[];
   /**
-   * Whether this read began again at the file's start, because the file shrank or is another file now: what a caller took from
-   * its earlier reads of it may no longer be in it. False on a first read (no position given): there was nothing to start over
-   * from, and a caller that holds nothing from the file has nothing to set aside.
+   * Whether this read began again at the file's start, because the file shrank, is another file now, or was written over in
+   * place before the point reached: what a caller took from its earlier reads of it may no longer be in it. False on a first
+   * read (no position given): there was nothing to start over from, and a caller that holds nothing from the file has nothing
+   * to set aside.
    */
   startedOver: boolean;
   /** The working folder's name, from the first record in these lines that states one. */
@@ -349,7 +350,8 @@ function codexRequest(record: JsonRecord, id: unknown, tokens: Tokens | undefine
  * to date with it: none where a modern record came since the last count; otherwise what its running total added since that
  * count, or, lower in a kind than that count (the counter began again), its whole total. A count that adds nothing (repeated)
  * is no request. Its id is the thread, then its time and its running total's `total_tokens` as saved: two threads can share
- * the time and the total. A limit: older counts copied into a fork's rollout are kept once for each thread.
+ * the time and the total. Limits: older counts copied into a fork's rollout are kept once for each thread; a modern response
+ * whose own id were literally this text would be taken for the same request.
  */
 function counterRequest(record: JsonRecord, state: CodexState): Found {
   const saved = record.payload.info.total_token_usage, total = codexTokens(saved);

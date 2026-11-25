@@ -5,14 +5,14 @@
 // liftFirst; stray temps removed, durable months, folder fsync where supported, then positions).
 //
 // Caller contract for a sweep: enter `withSessionRecordTurn(home, async ({ read, write }) => ...)` and await every `write`
-// inside it. Call `read` with the current month plus every month the batch's requests fall in and the months before and after
-// each (a key's time can differ a little between two sightings across a month's end); stop if `sessions`, the current month or
-// `positions.json` is held. Call `upsertSessionRecord`: for `notTaken`, keep the file's old checkpoint and retry later on
-// `held` or `not-read`, while `empty-key`, `invalid-time` and `invalid-tokens` can never be kept (count them and move on).
+// inside it. Call `read` with the current month plus `monthsAround` each request's time (a key's time can differ a little
+// between two sightings across a month's end); stop if `sessions`, the current month or `positions.json` is held. Call
+// `upsertSessionRecord`: for `notTaken`, keep the file's old checkpoint and retry later on `held` or `not-read`, while
+// `empty-key`, `invalid-time` and `invalid-tokens` can never be kept (count them and move on).
 // Then `await write(...)` (checks every changed month and `positions.json` with the reader's own v1 validator before writing
 // months durably, fsyncing `sessions/` and writing `positions.json`). Read-only callers (such as a page reading one kept
-// month) call `readSessionRecord` directly. Limit: a key is seen only in the months the turn read, so a request whose time
-// moved by more than a month is kept a second time.
+// month) call `readSessionRecord` directly. Limit: a key is seen only in the months the turn read, so a request whose earlier
+// receipt is in a month that was not read, or is held, is kept again.
 // Not here: finding, reading or sweeping session files (sessionrequests.ts), sums and rows (sessionrow.ts), pricing rules
 // (rates.ts), callers, timers, Settings, Clear, retention, folding, or pages. Two app copies on one home are not coordinated here.
 import { lstat, mkdir, open, readdir, readFile, rm } from 'node:fs/promises';
@@ -107,6 +107,14 @@ export function nextMonth(month: string): string {
   const [y, m] = month.split('-').map(Number);
   return m === 12 ? `${String(y + 1).padStart(4, '0')}-01` : `${String(y).padStart(4, '0')}-${String(m + 1).padStart(2, '0')}`;
 }
+/**
+ * The months a turn reads for a request at `at`: its own UTC month, the one before and the one after, where a sighting's key
+ * may already be kept. None for a time with no month (the upsert's `invalid-time`).
+ */
+export function monthsAround(at: number): string[] {
+  const own = monthOf(at);
+  return MONTH_RE.test(own) ? [previousMonth(own), own, nextMonth(own)] : [];
+}
 function assertMonth(month: string): void {
   if (!MONTH_RE.test(month)) throw new RangeError(`Invalid session month: ${month}`);
 }
@@ -165,6 +173,7 @@ function validPositions(obj: Record<string, unknown>): Positions | undefined {
     const f = record(raw);
     if (!f || !isTool(f.tool) || typeof f.dev !== 'string' || typeof f.ino !== 'string' || !whole(f.offset)
       || typeof f.before !== 'string' || !whole(f.size) || typeof f.mtimeMs !== 'number' || !Number.isFinite(f.mtimeMs)
+      || f.offset > f.size
       || (f.codex !== undefined && !isCodexState(f.codex))) return undefined;
   }
   return obj as unknown as Positions;
@@ -253,9 +262,9 @@ function makeReceipt(at: number, req: Request, price: PriceResult, pricing: numb
  * Pure upsert keyed by `(tool, request)` as supplied (an older Codex count's key carries its thread from the reader:
  * sessionrequests.ts counterRequest). Empty keys, unrepresentable/out-of-range times, invalid token counts, held own months
  * and unread own months return in `notTaken` before any lookup and are never stored. Otherwise the key is looked up across
- * every non-held month in `source.readMonths` (the months read): a key is seen only in the months the turn read (each
- * request's month and the months before and after it, by the caller contract), so a request whose time moved out of those,
- * or out of a held month, is kept a second time. Tokens only grow: a sighting whose every count is no more than the kept
+ * every non-held month in `source.readMonths` (the months read; by the caller contract, `monthsAround` each request): a key
+ * is seen only in the months the turn read, so a request whose earlier receipt is in a month that was not read, or is held,
+ * is kept again. Tokens only grow: a sighting whose every count is no more than the kept
  * receipt's changes nothing; a receipt is priced again only when a count grows (or `cacheWrite1h` becomes known) or the model
  * differs, keeping first session, month and `at`. Supplied session facts (ignoring non-finite/negative `reported.dollars`) are
  * applied in every non-held read month holding the session, whether or not any of its requests was taken.
@@ -414,12 +423,11 @@ async function writeUnlocked(context: ShareContext, input: WriteInput, readInTur
 
 /**
  * The one exported way to change a home's session record: serializes one read-to-commit turn per home via a plain promise chain.
- * Every `write` inside `work` must be awaited before `work` returns. Call `read` with the current month plus every month the
- * batch's requests fall in and the months before and after each, stop if `sessions`, the current month or `positions.json` is
- * held, call `upsertSessionRecord` (keep old checkpoints on `held`/`not-read`; count and move on for `empty-key`,
- * `invalid-time` and `invalid-tokens`), then `await write(...)` (refuses any unread or invalid v1 month/positions before
- * touching disk; writes months durably and fsyncs `sessions/` before writing `positions.json`). A key is seen only in the
- * months the turn read.
+ * Every `write` inside `work` must be awaited before `work` returns. Call `read` with the current month plus `monthsAround`
+ * each request's time, stop if `sessions`, the current month or `positions.json` is held, call `upsertSessionRecord` (keep
+ * old checkpoints on `held`/`not-read`; count and move on for `empty-key`, `invalid-time` and `invalid-tokens`), then
+ * `await write(...)` (refuses any unread or invalid v1 month/positions before touching disk; writes months durably and fsyncs
+ * `sessions/` before writing `positions.json`). A key is seen only in the months the turn read.
  * Not re-entrant: calling this from inside `work` for the same home deadlocks.
  */
 export async function withSessionRecordTurn<T>(
