@@ -861,13 +861,18 @@ async function harnessFlow() {
     const card = document.querySelector('.harness-card:has(#harness-claude-cli)');
     const main = card?.querySelector(':scope > .harness-card-main');
     const head = card?.querySelector('#harness-claude-cli');
+    const name = head?.querySelector('.harness-card-name');
+    const arrow = head?.querySelector(':scope > svg:last-child');
+    const arrowGap = name && arrow ? Math.round(arrow.getBoundingClientRect().left - name.getBoundingClientRect().right) : null;
+    const sameInk = !!(name && arrow && getComputedStyle(arrow).color === getComputedStyle(name).color && getComputedStyle(arrow).opacity === '1');
     const buttons = [...(card?.querySelectorAll('button') ?? [])].map(button => button.id);
     return { mainTag: main?.tagName ?? null, headTag: head?.tagName ?? null, headClass: head?.classList.contains('harness-card-head') ?? false,
+      label: head?.getAttribute('aria-label') ?? null, arrowGap, sameInk,
       inMain: !!(main && head && main !== head && main.contains(head)), nestedButtons: document.querySelectorAll('.harness-cards button button').length, buttons };
   })()`);
-  same('a managed card’s main part is a div and its heading is the link button, first in keyboard order, with no nested buttons',
-    [cardShape.mainTag, cardShape.headTag, cardShape.headClass, cardShape.inMain, cardShape.nestedButtons, cardShape.buttons],
-    ['DIV', 'BUTTON', true, true, 0, ['harness-claude-cli', 'harness-claude-cli-differ-skills', 'manage-claude-cli']]);
+  same('a managed card’s main part is a div and its heading is the link button, first in keyboard order, with the arrow beside the name in its ink and no nested buttons',
+    [cardShape.mainTag, cardShape.headTag, cardShape.headClass, cardShape.label, cardShape.arrowGap, cardShape.sameInk, cardShape.inMain, cardShape.nestedButtons, cardShape.buttons],
+    ['DIV', 'BUTTON', true, 'Claude Code. Open its page.', 8, true, true, 0, ['harness-claude-cli', 'harness-claude-cli-differ-skills', 'manage-claude-cli']]);
   // Clicking the card's body outside its heading does nothing (both DOM click on counts and real pointer click on the body).
   await a.click('.harness-card:has(#harness-claude-cli) .harness-counts');
   const bodyPoint = await a.run(`(() => {
@@ -1031,9 +1036,15 @@ async function manageFlow() {
     // Not a.click: it waits for the page to be idle.
     await a.run(`document.querySelector('#manage-codex-cli').click()`);
     await wait(300);
-    const during = [await a.run(`document.body.dataset.busy`), await a.run(`document.querySelector('#manage-claude-cli').disabled`), await a.run(`document.querySelector('button#harness-claude-cli.harness-card-head')?.disabled ?? null`), leftOut()];
+    const during = [
+      await a.run(`document.body.dataset.busy`),
+      await a.run(`document.querySelector('#manage-claude-cli').disabled`),
+      await a.run(`document.querySelector('button#harness-claude-cli.harness-card-head')?.disabled ?? null`),
+      await a.run(`(() => { const link = document.querySelector('#harness-claude-cli-differ-skills'); return link ? [link.disabled, getComputedStyle(link).opacity] : null; })()`),
+      leftOut(),
+    ];
     await held.release();
-    same('a switch clicked while a pass runs waits for it, the other switches and headings wait too, and it lands after', [during, leftOut()], [['true', true, true, []], ['codex-cli']]);
+    same('a switch clicked while a pass runs waits for it, the other switches, headings and card links wait too, and it lands after', [during, leftOut()], [['true', true, true, [true, '0.5'], []], ['codex-cli']]);
     await a.click('#manage-codex-cli');
     main.close();
   }

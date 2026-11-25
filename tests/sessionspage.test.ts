@@ -5,69 +5,11 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { DayRows } from '../src/sessionrow.ts';
 import type { HomeView, SessionCostsView } from '../src/types.ts';
-
-interface FakeNode {
-  tag: string;
-  className: string;
-  attrs: Record<string, string>;
-  dataset: Record<string, string>;
-  style: Record<string, unknown>;
-  classList: { toggle: (name: string, on?: boolean) => void; add: () => void; remove: () => void };
-  children: unknown[];
-  content: { firstElementChild?: FakeNode };
-  onclick?: (event: unknown) => void;
-  setAttribute: (key: string, value: string) => void;
-  addEventListener: () => void;
-  replaceChildren: (...kids: unknown[]) => void;
-  append: (...kids: unknown[]) => void;
-  focus: () => void;
-  click: () => void;
-}
-
-const makeElement = (tag = 'div'): FakeNode => {
-  const node: FakeNode = {
-    tag,
-    className: '',
-    attrs: {},
-    dataset: {},
-    style: { setProperty() {} },
-    classList: { toggle() {}, add() {}, remove() {} },
-    children: [],
-    content: {},
-    setAttribute(key: string, value: string) { this.attrs[key] = value; },
-    addEventListener() {},
-    replaceChildren(...kids: unknown[]) { this.children = [...kids]; },
-    append(...kids: unknown[]) { this.children.push(...kids); },
-    focus() {},
-    click() {
-      if ('disabled' in this.attrs) return;
-      this.onclick?.({ stopPropagation() {} });
-    },
-  };
-  return node;
-};
-
-const findById = (node: unknown, id: string): FakeNode | undefined => {
-  if (!node || typeof node !== 'object') return undefined;
-  const el = node as FakeNode;
-  if (el.attrs?.id === id) return el;
-  for (const child of el.children ?? []) {
-    const hit = findById(child, id);
-    if (hit) return hit;
-  }
-  return undefined;
-};
-
-const textOf = (node: unknown): string => {
-  if (typeof node === 'string') return node;
-  if (!node || typeof node !== 'object') return '';
-  return ((node as FakeNode).children ?? []).map(textOf).join('');
-};
+import { findById, installDom, textOf, type FakeNode } from './domstub.ts';
 
 const pending: { home: string; on: boolean; resolve: (view: SessionCostsView) => void }[] = [];
 let onChanged: ((view: SessionCostsView) => void) | undefined;
 let rendered: FakeNode | undefined;
-const announcement = makeElement('span');
 
 const api = {
   setKeepSessionCosts: (home: string, on: boolean) =>
@@ -80,29 +22,7 @@ const api = {
   getSettings: async () => null,
 };
 
-Object.assign(globalThis, {
-  window: {
-    centralKnot: new Proxy(api, { get: (known, name) => (known as Record<string | symbol, unknown>)[name] ?? (() => Promise.resolve(null)) }),
-    addEventListener() {},
-    matchMedia: () => ({ matches: false, addEventListener() {} }),
-  },
-  document: {
-    body: makeElement('body'),
-    documentElement: makeElement('html'),
-    activeElement: null,
-    hidden: false,
-    hasFocus: () => true,
-    getElementById: (id: string) => (id === 'announcement' ? announcement : makeElement('span')),
-    querySelector: () => null,
-    querySelectorAll: () => [],
-    addEventListener() {},
-    createElement: makeElement,
-    createTextNode: (text: string) => text,
-  },
-  ResizeObserver: class { observe() {} disconnect() {} },
-  requestAnimationFrame: () => 0,
-});
-Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Linux' } });
+installDom(api);
 
 await import('../src/settingspage.ts');
 const { setRenderer, state, switchSessionCosts } = await import('../src/app.ts');

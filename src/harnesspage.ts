@@ -139,7 +139,7 @@ function attentionLinks(snapshot: Snapshot, kinds: ReturnType<typeof tally>[]) {
 }
 
 /**
- * One harness on the list. A managed tool's heading opens its page above its counts and Manage switch;
+ * One harness on the list. A managed tool's heading opens its page, and its card shows its counts and Manage switch;
  * a tool left out has its name, how it was found, its switch and its folder, and does not open; a tool not found has nothing
  * to count, so its card is its name, how to fix that, and its folder, and does not open.
  */
@@ -149,8 +149,8 @@ function summaryCard(snapshot: Snapshot, home: HomeView) {
   const title = [brandMark(tool, 18), h('strong.harness-card-name', {}, names[tool])];
   // While an action runs, its result belongs to the harness it started on: the heading waits.
   const head = here
-    ? h('button.harness-card-head', { type: 'button', id: `harness-${tool}`, disabled: !!state.busy, 'aria-label': `${names[tool]}: ${detectionLine(snapshot, home)}. Open its page.`, onclick: () => goHarness(tool) },
-      ...title, icon('arrow-right', 14, 'tone-faint'))
+    ? h('button.harness-card-head', { type: 'button', id: `harness-${tool}`, disabled: !!state.busy, 'aria-label': `${names[tool]}. Open its page.`, onclick: () => goHarness(tool) },
+      ...title, icon('arrow-right', 14))
     : h('span.harness-card-head', {}, ...title);
   // On this computer each card says how its tool was found; a sample or chosen folder is said once, in the note above.
   const status = home.mode === 'actual' ? h(`span.harness-card-status${installed ? '' : '.tone-faint'}`, {}, detectionLine(snapshot, home)) : null;

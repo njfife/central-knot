@@ -2042,12 +2042,10 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .harness-card-links { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 0 10px 10px; margin-top: -4px; }
 .harness-card-missing { color: var(--ink-soft); }
 .harness-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.harness-card-head > svg:last-child { margin-left: auto; flex: none; }
 button.harness-card-head { margin: 0; padding: 0; border: 0; border-radius: 4px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 button.harness-card-head:hover:not(:disabled) .harness-card-name { text-decoration: underline; }
-button.harness-card-head:hover:not(:disabled) > svg:last-child { color: var(--ink); opacity: 1; }
 button.harness-card-head:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-button.harness-card-head:disabled { cursor: default; opacity: 0.6; }
+button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .harness-card-name { font-size: 14px; line-height: 20px; font-weight: 600; }
 .harness-card-status { font-size: 12px; line-height: 16px; color: var(--ink-soft); margin-top: -6px; }
 .harness-counts { display: grid; grid-template-columns: max-content minmax(2ch, max-content) minmax(0, 1fr); column-gap: 12px; row-gap: 4px; align-items: baseline; padding-top: 10px; border-top: 1px solid var(--line); }
@@ -2058,7 +2056,8 @@ button.harness-card-head:disabled { cursor: default; opacity: 0.6; }
 .harness-count-value:empty::before { content: "\00a0"; }
 .harness-count-note { color: var(--ink-soft); font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
 .harness-card-attention { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 0 6px; border-radius: 6px; font-size: 12px; color: var(--warning); cursor: pointer; }
-.harness-card-attention:hover { background: var(--hover); text-decoration: underline; }
+.harness-card-attention:hover:not(:disabled) { background: var(--hover); text-decoration: underline; }
+.harness-card-attention:disabled { opacity: 0.5; cursor: default; }
 .harness-card-attention:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .harness-card-path { font-size: 12px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: auto; padding: 0 16px 14px; }
 .harness-card-next { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
