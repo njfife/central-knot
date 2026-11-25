@@ -1812,16 +1812,27 @@ function applySessionCosts(next: SessionCostsView): void {
   state.home.sessionCosts = next;
   if (next.on || (changed && !next.refused)) state.keepProblem = undefined;
 }
-/** Turns session-cost keeping on or off for the open home, updating its view and announcing the change. */
+/** Whether a session-cost keeping change (Start, Stop or Settings toggle) is currently being carried out. */
+let keepBusy = false;
+export const keepingBusy = (): boolean => keepBusy;
+/** Turns session-cost keeping on or off for the open home, updating its view and announcing once when it changed. */
 export async function switchSessionCosts(on: boolean): Promise<string | undefined> {
   const home = state.home?.home;
-  if (!home) return undefined;
-  const view = await api().setKeepSessionCosts(home, on);
-  if (state.home?.home !== home) return undefined;
-  applySessionCosts(view);
-  if (view.refused) return view.refused;
-  announce(on ? 'Keeping session costs for this home.' : 'Stopped keeping session costs for this home.');
-  return undefined;
+  if (!home || keepBusy) return undefined;
+  const wasOn = !!state.home?.sessionCosts?.on;
+  keepBusy = true;
+  rerender();
+  try {
+    const view = await api().setKeepSessionCosts(home, on);
+    if (state.home?.home !== home) return undefined;
+    applySessionCosts(view);
+    if (view.refused) return view.refused;
+    if (view.on !== wasOn) announce(on ? 'Keeping session costs for this home.' : 'Stopped keeping session costs for this home.');
+    return undefined;
+  } finally {
+    keepBusy = false;
+    rerender();
+  }
 }
 api().onSessionCostsChanged(next => {
   applySessionCosts(next);

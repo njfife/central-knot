@@ -10246,6 +10246,11 @@ async function sessionsFlow() {
     }
     await a.send('Emulation.setEmulatedMedia', { features: [] });
   }
+  await sizeTo(a, 860, 560);
+  if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+  same('at 860×560 wrapped heading and tools lines never start a line with a dot',
+    await a.run(`[...document.querySelectorAll('.sessions-sep > *')].map(e => getComputedStyle(e, '::before').content)`).then(list => list.every(c => c === 'none')),
+    true);
   await fullSize(a);
   same('no page error on the Sessions page', a.pageErrors, []);
   // A reading that fails says so (a development run only: it reaches main to make the request fail).
@@ -10718,18 +10723,20 @@ async function sessionsWeekFlow() {
   }
   const keptFiles = () => Object.fromEntries(readdirSync(sessionsDir).sort().map(name => [name, readFileSync(join(sessionsDir, name)).toString('hex')]));
   const bytesBeforeStop = keptFiles();
+  const turnedCount = word => (readNow(join(data, 'central-knot.log')).match(new RegExp(`session costs: turned ${word} for `, 'g')) ?? []).length;
+  const offBefore = turnedCount('off');
   await main?.noteCalls('sessions:read');
-  await a.click('#sessions-keep-stop');
+  const stopBusy = await a.run(`(() => { const btn = document.querySelector('#sessions-keep-stop'); btn.click(); const busy = document.querySelector('#sessions-keep-stop')?.disabled ?? false; btn.click(); return busy; })()`);
   await onToday();
   for (let tries = 0; tries < 100 && !(await a.exists('#sessions-keep-start')); tries++) await wait(50);
   await a.settle();
   const readsOnStop = main ? (await main.calls()).length : 1;
   await main?.restore('sessions:read');
-  same('Stop keeping from idle 7 days: Today shows, Start is back, status bar says stopped visibly, one live read only, kept files byte for byte unchanged',
-    [/^Today/.test(await a.text('#sessions-heading') ?? ''), await a.run(`document.querySelector('#sessions-day-today')?.getAttribute('aria-pressed')`),
+  same('two clicks at once on Stop keeping from idle 7 days: disables while pending, stops once, Today shows, Start is back, status bar says stopped visibly, one live read only, kept files byte for byte unchanged',
+    [stopBusy, turnedCount('off') - offBefore, /^Today/.test(await a.text('#sessions-heading') ?? ''), await a.run(`document.querySelector('#sessions-day-today')?.getAttribute('aria-pressed')`),
       await a.all('.sessions-bar .kind-seg', 'e.id'), await a.exists('#sessions-keep-start'), await a.exists('#sessions-keep-stop'), await a.exists('#sessions-keep-result'),
       await a.text('#announcement'), await a.run(`document.querySelector('#announcement')?.classList.contains('visually-hidden')`), readsOnStop, keptFiles()],
-    [true, 'true', ['sessions-day-today', 'sessions-day-yesterday'], true, false, false, 'Stopped keeping session costs for this home.', false, 1, bytesBeforeStop]);
+    [true, 1, true, 'true', ['sessions-day-today', 'sessions-day-yesterday'], true, false, false, 'Stopped keeping session costs for this home.', false, 1, bytesBeforeStop]);
   await a.click('#nav-settings');
   for (let tries = 0; tries < 100 && !(await a.exists('#keep-session-costs')); tries++) await wait(50);
   same('after Stop keeping on Sessions, Settings switch agrees (Off)', await a.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`), 'false');
@@ -10795,8 +10802,14 @@ async function sessionsWeekFlow() {
   }
   if (shots) await a.send('Emulation.setEmulatedMedia', { features: [] });
   await fullSize(a);
-  await a.click('#sessions-keep-start');
+  const onBefore = turnedCount('on');
+  const startBusy = await a.run(`(() => { const btn = document.querySelector('#sessions-keep-start'); btn.click(); const busy = document.querySelector('#sessions-keep-start')?.disabled ?? false; btn.click(); document.querySelector('#sessions-keep-stop')?.click(); return busy; })()`);
   for (let tries = 0; tries < 100 && !(await a.exists('#sessions-day-week')); tries++) await wait(50);
+  for (let tries = 0; tries < 100 && await a.exists('#sessions-collecting'); tries++) await wait(50);
+  await a.settle();
+  same('two clicks at once on Start keeping in an empty home: disables while pending, starts once and keeps keeping on afterwards',
+    [startBusy, turnedCount('on') - onBefore, await a.exists('#sessions-day-week'), await a.exists('#sessions-keep-stop')],
+    [true, 1, true, true]);
   await a.click('#sessions-day-week');
   for (let tries = 0; tries < 100 && !(await a.exists('#sessions-none')); tries++) await wait(100);
   same('a home that keeps with nothing in 7 days: one sentence naming the tools read', await a.text('#sessions-none'), 'No Claude Code or Codex sessions in the last 7 days.');

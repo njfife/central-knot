@@ -12,7 +12,7 @@
 // the heading's price dates, lower-bound reasons and unpriced reasons live in conditional infoMark cards, while per-tool and per-row
 // details stay on hover (the native `title`); a day's rows are built only once it is opened. Not here: reading files or the record,
 // pricing, summing, sweeping.
-import { announce, rerender, state, switchSessionCosts, windowVisible } from './app.ts';
+import { announce, keepingBusy, rerender, state, switchSessionCosts, windowVisible } from './app.ts';
 import { brandMark } from './brand.ts';
 import { button, h, icon, infoCardId, infoMark } from './dom.ts';
 import { clockTime, plural } from './model.ts';
@@ -264,10 +264,10 @@ function readingView(rows: DayRows | PeriodRows, home: HomeView) {
   ];
 }
 
-/** Turns keeping session costs on or off for the home on screen; shows any refusal verbatim inline. */
+/** Turns keeping session costs on or off for the home on screen; ignores repeat clicks while saving and shows any refusal verbatim inline. */
 async function changeKeeping(on: boolean): Promise<void> {
   const home = state.home?.home;
-  if (!home) return;
+  if (!home || keepingBusy()) return;
   state.keepProblem = undefined;
   const problem = await switchSessionCosts(on).catch(error => saveFailure(String(error), ''));
   if (state.home?.home !== home) return;
@@ -280,9 +280,10 @@ async function changeKeeping(on: boolean): Promise<void> {
 function keepControl(home: HomeView): HTMLElement {
   const costs = home.sessionCosts;
   if (costs?.collecting) return h('span.sessions-collecting', { id: 'sessions-collecting', role: 'status' }, 'Collecting…');
-  if (costs?.on) return button({ variant: 'outline', label: 'Stop keeping', id: 'sessions-keep-stop', onclick: () => void changeKeeping(false) });
+  const busy = keepingBusy();
+  if (costs?.on) return button({ variant: 'outline', label: 'Stop keeping', id: 'sessions-keep-stop', disabled: busy, onclick: () => void changeKeeping(false) });
   return h('span.sessions-keep', { 'data-info-block': true },
-    button({ variant: 'outline', label: 'Start keeping session costs', id: 'sessions-keep-start', onclick: () => void changeKeeping(true), attrs: { 'aria-describedby': infoCardId('sessions-keep-info') } }),
+    button({ variant: 'outline', label: 'Start keeping session costs', id: 'sessions-keep-start', disabled: busy, onclick: () => void changeKeeping(true), attrs: { 'aria-describedby': infoCardId('sessions-keep-info') } }),
     infoMark('sessions-keep-info', 'Start keeping session costs', `Adds a 7-day view here, keeping ${SESSION_COSTS_KEPT}`));
 }
 

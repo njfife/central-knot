@@ -5,7 +5,7 @@
 // (sessionkeep.ts). Help's Log row also shows Central Knot's own log under it (Show log: its
 // last lines, read by main.ts readLog, never stored); the log is written by main.ts log. A settings file that couldn't be read at
 // launch is said in a note at the top (keptNote) until it is closed, and first on the Overview (overview.ts needsYou).
-import { acting, announce, machine, rerender, switchSessionCosts, switchSyncEverything, showPage, state, whyReadOnly } from './app.ts';
+import { acting, announce, keepingBusy, machine, rerender, switchSessionCosts, switchSyncEverything, showPage, state, whyReadOnly } from './app.ts';
 import { outcomeBand } from './matrix.ts';
 import { oneUndoCovers } from './historyactions.ts';
 import { button, h, icon, infoCardId, infoMark, toggle } from './dom.ts';
@@ -502,11 +502,12 @@ function syncEverythingRow(): HTMLElement | null {
     notice, added.length ? h('div.setting-added', {}, added) : undefined);
 }
 
-/** Shared disclosure of what session-cost keeping stores, reused by the Sessions page and Settings info cards. */
+/** Shared end of the disclosure sentence that each keep-costs info card (Sessions and Settings) begins. */
 export const SESSION_COSTS_KEPT = 'each session’s project, request times, models, token counts and estimated prices in this home’s Central Knot folder. No message text is kept; turning it off leaves what was kept.';
 
 /** Turns keeping session costs on or off for the open home (sessionkeep.ts). */
 async function chooseSessionCosts(on: boolean): Promise<void> {
+  if (keepingBusy()) return;
   const kept = `Session costs are still ${state.home?.sessionCosts?.on ? 'kept' : 'not kept'} in this home.`;
   await act('session-costs', async () => {
     const refused = await switchSessionCosts(on);
@@ -520,7 +521,7 @@ function sessionCostsRow(): HTMLElement {
   const costs = state.home!.sessionCosts;
   const notice: RowMessage | undefined = !messages.has('session-costs') && costs?.refused ? { text: costs.refused, tone: 'failure' } : undefined;
   return settingRow('session-costs', 'Keep session costs', undefined,
-    toggle({ on: !!costs?.on, label: 'Keep session costs', onchange: chosen => void chooseSessionCosts(chosen), id: 'keep-session-costs',
+    toggle({ on: !!costs?.on, label: 'Keep session costs', onchange: chosen => void chooseSessionCosts(chosen), disabled: keepingBusy(), id: 'keep-session-costs',
       attrs: { 'aria-describedby': notice ? `${infoCardId('setting-session-costs-info')} setting-session-costs-notice` : infoCardId('setting-session-costs-info'), title: null } }),
     notice, undefined, `Keeps ${SESSION_COSTS_KEPT}`);
 }
