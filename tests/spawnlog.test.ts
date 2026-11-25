@@ -1,6 +1,7 @@
 // The recorder of every program the unit tests start or stop (tests/spawnlog.mjs), as worked examples: what it keeps of a
-// start (the environment the program was given, every option, and a stand-in's bytes), and that its comparison tells two
-// runs apart by any one of them, and by any path but a temporary folder's random ending. It proves macOS and Linux
+// start (the environment the program was given, every option, and a stand-in's bytes) and of a change to a file (its paths
+// and how it ended), and that its comparison tells two runs apart by any one of them, and by any path but a temporary
+// folder's random ending. It proves macOS and Linux
 // unchanged, so it is run there.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -17,14 +18,14 @@ const recorder = join(import.meta.dirname, 'spawnlog.mjs');
  * and `options`; with `helper`, it then starts a helper process, recorded too, as a test starts a fixture server: a Node that
  * starts a program in `<that folder>/<helper>/bin`, named there in its environment too.
  */
-interface Run { script?: string; env?: Record<string, string>; options?: Record<string, unknown>; helper?: string }
+interface Run { script?: string; env?: Record<string, string>; options?: Record<string, unknown>; helper?: string; moves?: string }
 const RUN = `
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { standIn } from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, 'standin.ts')).href)};
-const { script = '#!/bin/sh\\nexit 0\\n', env = { PROBE: 'one' }, options = { windowsHide: true }, helper } = JSON.parse(process.argv[2]);
+const { script = '#!/bin/sh\\nexit 0\\n', env = { PROBE: 'one' }, options = { windowsHide: true }, helper, moves } = JSON.parse(process.argv[2]);
 const folder = mkdtempSync(join(tmpdir(), 'ck-spawnlog-tool-'));
 const tool = await standIn(join(folder, 'tool'), script, '');
 spawnSync(tool, ['--version'], { env: { PATH: process.env.PATH, ...env }, ...options });
@@ -34,6 +35,12 @@ if (helper) {
   writeFileSync(join(folder, 'helper.mjs'), 'import { spawnSync } from "node:child_process"; spawnSync(process.execPath, ["-e", ""], { cwd: '
     + JSON.stringify(bin) + ', env: { PATH: process.env.PATH, TOOL_HOME: ' + JSON.stringify(bin) + ' } });');
   spawnSync(process.execPath, ['--import', ${JSON.stringify(recorder)}, join(folder, 'helper.mjs')]);
+}
+if (moves) {
+  const { rename, unlink, writeFile } = await import('node:fs/promises');
+  await writeFile(join(folder, 'a'), 'a');
+  await rename(join(folder, 'a'), join(folder, moves));
+  await unlink(join(folder, 'gone')).catch(() => undefined);
 }
 rmSync(folder, { recursive: true, force: true });
 `;
@@ -92,5 +99,17 @@ test('A helper processâ€™s paths compare as they are but for a temporary folderâ
     const stable = await runs.run({ helper: 'tool-stable' }), again = await runs.run({ helper: 'tool-stable' }), latest = await runs.run({ helper: 'tool-latest' });
     assert.ok(compared(stable, again).same, compared(stable, again).words);
     assert.equal(compared(stable, latest).same, false, compared(stable, latest).words);
+  } finally { await runs.done(); }
+});
+
+test('A change to a file is recorded with its paths and how it ended; two runs that move a file to different names compare as different', { skip }, async () => {
+  const runs = await runner();
+  try {
+    const first = await runs.run({ moves: 'b' }), again = await runs.run({ moves: 'b' }), other = await runs.run({ moves: 'c' });
+    const all = await records(first);
+    assert.ok(all.some(record => record.rename?.[1]?.endsWith('-tool-*/b')), JSON.stringify(all));
+    assert.ok(all.some(record => record.unlink?.[0]?.endsWith('-tool-*/gone') && record.error === 'ENOENT'), JSON.stringify(all));
+    assert.ok(compared(first, again).same, compared(first, again).words);
+    assert.equal(compared(first, other).same, false, compared(first, other).words);
   } finally { await runs.done(); }
 });
