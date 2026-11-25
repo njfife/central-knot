@@ -36,7 +36,7 @@ export async function readPluginItems(context: PluginContext, tools: HarnessId[]
         ...(part.path === '.' ? { keyName: plugin } : { keyName: kind === 'agent' ? nameOfFile(basename(part.path)) : basename(part.path) }) });
       const items: PluginItem[] = [
         ...contents.skills.map(file('skill')),
-        ...contents.mcpServers.map(server => ({ kind: 'mcp' as const, name: server.name, description: '', runs: server.runs })),
+        ...contents.mcpServers.map(server => ({ kind: 'mcp' as const, name: server.name, description: '', runs: server.runs, ...(server.transport ? { transport: server.transport } : {}) })),
         ...(loadsKind(tool, 'agent') ? contents.agents.map(file('agent')) : []),
       ];
       const skillsOff = (state.skillsOff ?? []).map(entry => entry.skill);

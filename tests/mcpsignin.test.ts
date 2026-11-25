@@ -2,8 +2,9 @@
 // (tests/mcpsignin/: a server that needs nothing, one that needs a sign-in, one that is down and one that never answers, measured
 // 2026-11-21 with Claude Code 2.1.330, Codex 0.169.1, Pi 1.6.0 and OpenCode 1.19.6, each in a throwaway home, never signed in;
 // a plugin's server beside a direct one of the same name with Claude Code 2.1.330 and Codex 0.171.0; names holding ": " and a
-// quote, and OpenCode with no servers, the same way); the page's rows from the view the Library has, and which cells an answer
-// still holds for as views come; and one check run for a home (mcpsigninrun.ts), on stand-in commands.
+// quote, and OpenCode with no servers, the same way); the page's rows from the view the Library has, those that need him first,
+// which cells an answer still holds for as views come, the time a column shows of its own, and the line saying what a check does
+// for each mix of tools; and one check run for a home (mcpsigninrun.ts), on stand-in commands.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -11,17 +12,19 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } f
 import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { answerFor, askedNow, cellSays, connectedLine, followView, readAnswer, signInCommand, signinRows, type SigninCell, type SigninChecks } from '../src/mcpsignin.ts';
+import { answerFor, askedNow, cannotRun, cellSays, checkLine, connectedCard, followView, grouped, ownTime, readAnswer, signInCommand, signinRows, type SigninCell, type SigninChecks, type SigninRow } from '../src/mcpsignin.ts';
+import { harnessIds } from '../src/harnesses.ts';
 import { checkLimit, checkSignin, stopChecks } from '../src/mcpsigninrun.ts';
 import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, SigninAnswer } from '../src/types.ts';
 import { standIn } from './standin.ts';
 
 const captured = (file: string) => readFileSync(join(import.meta.dirname, 'mcpsignin', file), 'utf8');
-const cell = (name: string, off = false): SigninCell => ({ name, off });
+/** A server every tool has under its name, Off there or not, its transport not known. */
+const server = (name: string, off = false): SigninRow => ({ id: name, name, cells: Object.fromEntries(harnessIds.map(tool => [tool, { name, off }])) });
 /** What each named server's cell says in `tool`'s column, after its command printed `stdout`. */
 const words = (tool: HarnessId, stdout: string, names: string[]) => {
   const answer = readAnswer(tool, stdout, stdout, names);
-  return Object.fromEntries(names.map(name => [name, cellSays(tool, cell(name), answer).words]));
+  return Object.fromEntries(names.map(name => [name, cellSays(tool, server(name), answer).words]));
 };
 const four = ['plain', 'oauth', 'down', 'silent'];
 
@@ -69,23 +72,23 @@ test('OpenCode’s text is read line by line, its colours left out, a failed ser
 
 test('What a reader could not read is never made into a status: a state it doesn’t know is that server’s unread line', () => {
   const claude = readAnswer('claude-cli', 'Checking MCP server health…\n\nplain: http://127.0.0.1:1/mcp (HTTP) - ⏳ Pending approval\noauth: http://127.0.0.1:2/mcp (HTTP) - ✔ Connected\n', '', ['plain', 'oauth']);
-  assert.deepEqual(['plain', 'oauth'].map(name => cellSays('claude-cli', cell(name), claude)), [{ words: 'Couldn’t read Claude Code’s answer', line: 'plain: http://127.0.0.1:1/mcp (HTTP) - ⏳ Pending approval' }, { words: 'Connected' }]);
+  assert.deepEqual(['plain', 'oauth'].map(name => cellSays('claude-cli', server(name), claude)), [{ words: 'Couldn’t read Claude Code’s answer', line: 'plain: http://127.0.0.1:1/mcp (HTTP) - ⏳ Pending approval', heed: true }, { words: 'Connected' }]);
   const openCode = readAnswer('opencode-cli', '┌  MCP Servers\n│\n●  ○ plain needs client registration\n│      http://127.0.0.1:1/mcp\n│\n└  1 server(s)\n', '', ['plain']);
-  assert.deepEqual(cellSays('opencode-cli', cell('plain'), openCode), { words: 'Couldn’t read OpenCode’s answer', line: '●  ○ plain needs client registration' });
+  assert.deepEqual(cellSays('opencode-cli', server('plain'), openCode), { words: 'Couldn’t read OpenCode’s answer', line: '●  ○ plain needs client registration', heed: true });
   // OpenCode's heading and then an error is no list: the whole answer is unread, its first line kept for every cell.
   const cut = readAnswer('opencode-cli', '\u001b[0m┌  MCP Servers\n│\n\u001b[91mError: Unexpected end of JSON input\u001b[0m\n', '', ['plain']);
-  assert.deepEqual(cellSays('opencode-cli', cell('plain'), cut), { words: 'Couldn’t read OpenCode’s answer', line: 'Error: Unexpected end of JSON input' });
+  assert.deepEqual(cellSays('opencode-cli', server('plain'), cut), { words: 'Couldn’t read OpenCode’s answer', line: 'Error: Unexpected end of JSON input', heed: true });
   // Claude Code's heading is no listing either: followed by an error, or by lines naming none of the servers asked about, it is unread.
   assert.deepEqual(readAnswer('claude-cli', 'Checking MCP server health…\n\nError: Failed to read the configuration\n', '', ['plain']), { unreadable: 'Error: Failed to read the configuration' });
   assert.deepEqual(readAnswer('claude-cli', 'Checking MCP server health…\n\nplain → reachable\n', '', ['plain']), { unreadable: 'plain → reachable' });
   // A server named like an object's own member is a server like any other.
-  assert.equal(cellSays('codex-cli', cell('__proto__'), readAnswer('codex-cli', JSON.stringify([{ name: '__proto__', auth_status: 'unsupported' }]), '')).words, 'No sign-in needed');
+  assert.equal(cellSays('codex-cli', server('__proto__'), readAnswer('codex-cli', JSON.stringify([{ name: '__proto__', auth_status: 'unsupported' }]), '')).words, 'No sign-in needed');
 });
 
 test('An answer in a shape the reader doesn’t know says so for every server, with the first line the tool printed', () => {
   const unreadable = readAnswer('pi-cli', '', 'Error: unknown command "mcp"\nRun pi --help.');
   assert.deepEqual(unreadable, { unreadable: 'Error: unknown command "mcp"' });
-  assert.deepEqual(cellSays('pi-cli', cell('plain'), unreadable), { words: 'Couldn’t read Pi’s answer', line: 'Error: unknown command "mcp"' });
+  assert.deepEqual(cellSays('pi-cli', server('plain'), unreadable), { words: 'Couldn’t read Pi’s answer', line: 'Error: unknown command "mcp"', heed: true });
   assert.deepEqual(readAnswer('codex-cli', '{"servers": []}', '{"servers": []}'), { unreadable: '{"servers": []}' });
   assert.deepEqual(readAnswer('codex-cli', JSON.stringify([{ name: 'a', auth_status: 'a_new_state' }]), ''), { unreadable: '[{"name":"a","auth_status":"a_new_state"}]' });
   assert.deepEqual(readAnswer('opencode-cli', 'Usage: opencode mcp list', 'Usage: opencode mcp list'), { unreadable: 'Usage: opencode mcp list' });
@@ -99,23 +102,79 @@ test('An answer in a shape the reader doesn’t know says so for every server, w
 
 test('A cell says what its tool’s answer says of it, and only that: not checked, not reported, switched off, the column’s failure', () => {
   const answer = readAnswer('claude-cli', captured('claude-list.stdout'), '', four);
-  assert.deepEqual(cellSays('claude-cli', cell('plain'), undefined), { words: 'Not checked', tone: 'muted' });
-  assert.equal(cellSays('claude-cli', cell('elsewhere'), answer).words, 'Not reported by Claude Code');
-  assert.equal(cellSays('claude-cli', { off: false }, answer).words, 'Not reported by Claude Code');
+  assert.deepEqual(cellSays('claude-cli', server('plain'), undefined), { words: 'Not checked', tone: 'muted' });
+  assert.equal(cellSays('claude-cli', server('elsewhere'), answer).words, 'Not reported by Claude Code');
+  assert.equal(cellSays('claude-cli', { id: 'unnamed', name: 'unnamed', cells: { 'claude-cli': { off: false } } }, answer).words, 'Not reported by Claude Code');
   // A name that is also a member every object has is a server like any other.
-  assert.equal(cellSays('claude-cli', cell('constructor'), answer).words, 'Not reported by Claude Code');
+  assert.equal(cellSays('claude-cli', server('constructor'), answer).words, 'Not reported by Claude Code');
   // Switched off with the tool's own switch: said so, never matched against the answer.
-  assert.deepEqual(cellSays('claude-cli', cell('oauth', true), answer), { words: 'Off in Claude Code', tone: 'muted' });
-  assert.equal(cellSays('codex-cli', cell('plain'), { failed: 'missing' }).words, 'No Codex command line here');
-  assert.equal(cellSays('codex-cli', cell('plain'), { failed: 'timeout' }).words, 'Didn’t answer in 70 s');
-  // Needs sign-in offers the tool's own command; Copilot CLI's cells say where its sign-in is, and nothing is run for them.
-  assert.deepEqual(cellSays('claude-cli', cell('oauth'), answer), { words: 'Needs sign-in', tone: 'warning', command: 'claude mcp login oauth' });
-  assert.deepEqual(cellSays('copilot-cli', cell('github'), undefined), { words: 'Check inside a session', tone: 'muted' });
-  assert.deepEqual(cellSays('copilot-cli', cell('github', true), undefined), { words: 'Off in Copilot CLI', tone: 'muted' });
-  // The line above the table names only the columns whose Connected can't tell a sign-in from none needed.
-  assert.equal(connectedLine(['copilot-cli', 'codex-cli']), undefined);
-  assert.equal(connectedLine(['codex-cli', 'pi-cli']), 'Connected means the server answered: Pi does not say whether it needed a sign-in. For Needs sign-in: copy the command, run it in a terminal, then Check again.');
-  assert.equal(connectedLine(['claude-cli', 'pi-cli', 'opencode-cli']), 'Connected means the server answered: Claude Code, Pi and OpenCode do not say whether it needed a sign-in. For Needs sign-in: copy the command, run it in a terminal, then Check again.');
+  assert.deepEqual(cellSays('claude-cli', server('oauth', true), answer), { words: 'Off in Claude Code', tone: 'muted' });
+  assert.equal(cellSays('codex-cli', server('plain'), { failed: 'missing' }).words, 'No Codex command line here');
+  assert.equal(cellSays('codex-cli', server('plain'), { failed: 'timeout' }).words, 'Didn’t answer in 70 s');
+  // Needs sign-in offers the tool's own command; it and every fault above need him (heed), the good answers and Not checked don't.
+  assert.deepEqual(cellSays('claude-cli', server('oauth'), answer), { words: 'Needs sign-in', tone: 'warning', command: 'claude mcp login oauth', heed: true });
+  assert.deepEqual([cellSays('codex-cli', server('plain'), { failed: 'missing' }).heed, cellSays('claude-cli', server('elsewhere'), answer).heed, cellSays('claude-cli', server('plain'), answer).heed], [true, true, undefined]);
+  assert.deepEqual(cellSays('copilot-cli', server('github', true), undefined), { words: 'Off in Copilot CLI', tone: 'muted' });
+  // Connected's card names only the columns whose Connected can't tell a sign-in from none needed.
+  assert.equal(connectedCard(['codex-cli', 'pi-cli']), 'The server answered. Pi doesn’t say whether it needed a sign-in.');
+  assert.equal(connectedCard(['claude-cli', 'copilot-cli', 'pi-cli', 'opencode-cli']), 'The server answered. Claude Code, Pi and OpenCode don’t say whether it needed a sign-in.');
+});
+
+/** A row named `name` whose copy runs by `transport` in each of `tools`, switched off there or not. */
+const row = (name: string, transport: SigninRow['transport'], tools: HarnessId[], off = false): SigninRow => ({ id: name, name, transport, cells: Object.fromEntries(tools.map(tool => [tool, { name, off }])) });
+
+test('A session-only tool’s cell is a mark: its hover says where that tool’s sign-in shows, or that the server is a local one', () => {
+  const tools: HarnessId[] = ['copilot-cli', 'antigravity-cli'];
+  assert.deepEqual(tools.map(tool => cellSays(tool, row('github', 'http', tools), undefined)), [
+    { words: '•', tone: 'muted', title: 'In Copilot CLI. Sign in inside a session: /mcp auth github' },
+    // Antigravity has no command known for its sign-in: none is named.
+    { words: '•', tone: 'muted', title: 'In Antigravity. Sign-in shows only inside a session.' },
+  ]);
+  assert.deepEqual(tools.map(tool => cellSays(tool, row('notes', 'stdio', tools), undefined).title), ['In Copilot CLI. Local server.', 'In Antigravity. Local server.']);
+});
+
+test('What a check does is said before it is pressed, each part only where it is true, for every mix of tools', () => {
+  const all: HarnessId[] = ['claude-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
+  const mixed = [row('docs', 'http', all), row('notes', 'stdio', all)];
+  // OpenCode's version decides what it leaves: 1.x adds $schema, 2.x leaves its service running; either, where it isn't known.
+  assert.equal(checkLine(mixed, all, '1.19.6'), 'Check starts local servers in Claude Code, Pi and OpenCode; OpenCode adds $schema to its config files.');
+  assert.equal(checkLine(mixed, all, '2.2.5'), 'Check starts local servers in Claude Code, Pi and OpenCode; OpenCode leaves a service running.');
+  assert.equal(checkLine(mixed, all, undefined), 'Check starts local servers in Claude Code, Pi and OpenCode; OpenCode may leave a service running or add $schema to its config files (its version isn’t known).');
+  // Codex starts no local server; a tool is named for one only where it has one, or one whose transport isn't known.
+  assert.equal(checkLine([row('docs', 'http', ['codex-cli', 'pi-cli']), row('tickets', 'stdio', ['pi-cli'])], ['codex-cli', 'pi-cli'], undefined), 'Check starts local servers in Pi.');
+  assert.equal(checkLine([row('docs', 'http', ['claude-cli']), row('odd', undefined, ['claude-cli'])], ['claude-cli'], undefined), 'Check starts local servers in Claude Code.');
+  // No local server in any checked column: it contacts the remote ones, in each column that has one.
+  assert.equal(checkLine([row('docs', 'http', ['codex-cli'])], ['codex-cli'], undefined), 'Check contacts remote servers in Codex.');
+  assert.equal(checkLine([row('docs', 'sse', ['claude-cli', 'codex-cli'])], ['claude-cli', 'codex-cli'], undefined), 'Check contacts remote servers in Claude Code and Codex.');
+  assert.equal(checkLine([row('docs', 'http', ['opencode-cli'])], ['opencode-cli'], '1.19.6'), 'Check contacts remote servers in OpenCode; OpenCode adds $schema to its config files.');
+  // A server switched off in a tool is neither started nor contacted there: the tool is named by its other servers alone.
+  assert.equal(checkLine([row('notes', 'stdio', ['claude-cli'], true), row('docs', 'http', ['claude-cli'])], ['claude-cli'], undefined), 'Check contacts remote servers in Claude Code.');
+  // OpenCode's clause stands wherever OpenCode is checked, its only server off too: its command writes or starts that as it runs.
+  assert.equal(checkLine([row('notes', 'stdio', ['opencode-cli'], true)], ['opencode-cli'], '1.19.6'), 'OpenCode adds $schema to its config files.');
+  // Only session-only tools, or a check that would start and contact nothing: no line.
+  assert.equal(checkLine([row('docs', 'http', ['copilot-cli', 'antigravity-cli'])], [], undefined), undefined);
+  assert.equal(checkLine([row('notes', 'stdio', ['codex-cli'])], ['codex-cli'], undefined), undefined);
+});
+
+test('A column shows its own time before a whole Check all, and after one only where its minute or day differs', () => {
+  const at = (iso: string) => ({ at: iso, answer: { servers: {} }, asked: [] });
+  const checks: SigninChecks = { home: '/h', columns: { 'claude-cli': at('2026-11-21T10:00:05Z'), 'pi-cli': at('2026-11-21T10:00:50Z'), 'codex-cli': at('2026-11-21T10:02:00Z'), 'opencode-cli': at('2026-11-22T10:00:10Z') } };
+  assert.equal(ownTime(checks, 'claude-cli'), '2026-11-21T10:00:05Z');
+  checks.all = '2026-11-21T10:00:59Z';
+  assert.deepEqual((['claude-cli', 'pi-cli', 'codex-cli', 'opencode-cli', 'copilot-cli'] as HarnessId[]).map(tool => ownTime(checks, tool)), [undefined, undefined, '2026-11-21T10:02:00Z', '2026-11-22T10:00:10Z', undefined]);
+});
+
+test('The rows that need him come first, each group in the order given: a sign-in to make, or a check that went wrong', () => {
+  const tools: HarnessId[] = ['claude-cli', 'copilot-cli'];
+  const home = view(tools, ['calendar', 'docs', 'notes', 'oauth', 'plain'].map(name => fact(name, { 'claude-cli': name, 'copilot-cli': name })));
+  const rows = signinRows(home);
+  const answer = readAnswer('claude-cli', ['calendar: x - ✔ Connected', 'docs: x - ✘ Failed to connect — refused', 'oauth: x - ! Needs authentication', 'plain: x - ✔ Connected'].join('\n'), '', rows.map(each => each.name));
+  const checks: SigninChecks = { home: '/h', columns: { 'claude-cli': { at: '2026-11-21T10:00:00Z', answer, asked: [] } } };
+  // Before the answer holds for any cell, nothing needs him: the order is the one given.
+  assert.deepEqual(grouped(rows, checks).map(each => each.name), ['calendar', 'docs', 'notes', 'oauth', 'plain']);
+  checks.columns['claude-cli']!.asked = askedNow(home, 'claude-cli');
+  // docs couldn't be reached, notes isn't reported, oauth needs a sign-in; Copilot CLI's marks need nothing.
+  assert.deepEqual(grouped(rows, checks).map(each => each.name), ['docs', 'notes', 'oauth', 'calendar', 'plain']);
 });
 
 const windows = process.platform === 'win32';
@@ -145,7 +204,7 @@ const install = (tool: HarnessId, more: Partial<InstalledPlugin> = {}): Installe
 });
 const view = (tools: HarnessId[], items: LibraryFacts[], pluginItems: InstalledPlugin[] = []) => {
   const empty = { tools, items: [], library: {} };
-  return { mcp: { tools, items, library: {} }, skills: empty, agents: empty, pluginItems } as unknown as HomeView;
+  return { mcp: { tools, items, library: {} }, skills: empty, agents: empty, pluginItems, snapshots: [] } as unknown as HomeView;
 };
 /** A row's cells by what they name and whether they are off (`copy`, what each copy is, aside). */
 const named = (cells: Partial<Record<HarnessId, SigninCell>>) => Object.fromEntries(Object.entries(cells).map(([tool, { name, off }]) => [tool, name === undefined ? { off } : { name, off }]));
@@ -159,10 +218,33 @@ test('A plugin’s server in Claude Code beside a direct server of the same bare
     ['issues', 'tracker', { 'claude-cli': { name: 'plugin:tracker:issues', off: false }, 'codex-cli': { off: false } }],
   ]);
   const claude = readAnswer('claude-cli', captured('claude-plugin-list.stdout'), '', ['issues', 'plugin:tracker:issues']);
-  assert.deepEqual(rows.map(row => cellSays('claude-cli', row.cells['claude-cli']!, claude).words), ['Connected', 'Needs sign-in']);
+  assert.deepEqual(rows.map(row => cellSays('claude-cli', row, claude).words), ['Connected', 'Needs sign-in']);
   // Codex reports only the direct server: the plugin's row isn't given the direct one's status.
   const codex = readAnswer('codex-cli', JSON.stringify([{ name: 'issues', enabled: true, auth_status: 'unsupported' }]), '');
-  assert.deepEqual(rows.map(row => cellSays('codex-cli', row.cells['codex-cli']!, codex).words), ['No sign-in needed', 'Not reported by Codex']);
+  assert.deepEqual(rows.map(row => cellSays('codex-cli', row, codex).words), ['No sign-in needed', 'Not reported by Codex']);
+});
+
+test('A row runs as its Library row or its plugin’s copy says, and isn’t said to where neither does', () => {
+  const home = view(['claude-cli'], [fact('notes', { 'claude-cli': 'notes' }, { transport: 'stdio' }), fact('odd', { 'claude-cli': 'odd' })],
+    [install('claude-cli', { items: [{ kind: 'mcp', name: 'issues', description: '', runs: 'http://127.0.0.1:47312/mcp', transport: 'http' }, { kind: 'mcp', name: 'broken', description: '', runs: '' }] })]);
+  assert.deepEqual(signinRows(home).map(each => [each.name, each.transport]), [['broken', undefined], ['issues', 'http'], ['notes', 'stdio'], ['odd', undefined]]);
+});
+
+test('A tool whose check can’t run on this computer: its last check found no command line, or, before one, its probe found none', () => {
+  const home = { snapshots: [{ harness: 'claude-cli', probe: { state: 'missing' } }, { harness: 'pi-cli', probe: { state: 'ok', version: '1.6.0' } }] } as unknown as HomeView;
+  const checks: SigninChecks = { home: '/h', columns: {} };
+  assert.deepEqual([cannotRun(checks, home, 'claude-cli'), cannotRun(checks, home, 'pi-cli')], [true, false]);
+  // A check's answer is the later word: Claude Code's command found since, Pi's gone.
+  checks.columns['claude-cli'] = { at: '2026-11-21T10:00:00Z', answer: { servers: {} }, asked: [] };
+  checks.columns['pi-cli'] = { at: '2026-11-21T10:00:00Z', answer: { failed: 'missing' }, asked: [] };
+  assert.deepEqual([cannotRun(checks, home, 'claude-cli'), cannotRun(checks, home, 'pi-cli')], [false, true]);  // Pi installed since, and a Refresh: the view's probe finds it, which is newer than the check; its old answer goes.
+  const after = { snapshots: [{ harness: 'pi-cli', probe: { state: 'ok', version: '1.6.0' } }], mcp: { tools: [], items: [] } } as unknown as HomeView;
+  followView(checks, after);
+  assert.deepEqual([cannotRun(checks, after, 'pi-cli'), checks.columns['pi-cli']], [false, undefined]);
+  // A view whose probe still finds no Pi, or that ran no probe (another folder's home), keeps the check's word.
+  checks.columns['pi-cli'] = { at: '2026-11-21T10:00:00Z', answer: { failed: 'missing' }, asked: [] };
+  followView(checks, { ...after, snapshots: [{ harness: 'pi-cli', probe: { state: 'not-run' } }] } as unknown as HomeView);
+  assert.equal(cannotRun(checks, after, 'pi-cli'), true);
 });
 
 test('Rows are the servers some managed tool has; a tool’s own switch and a plugin turned off are its Off marks', () => {
@@ -191,7 +273,7 @@ test('An answer holds only for the copies it was asked about: one changed, gone 
   const names = ['keep', 'paused', 'plain', 'solo', 'plugin:tracker:issues'];
   const answer = readAnswer('claude-cli', ['Checking MCP server health…', '', ...names.map(name => `${name}: http://127.0.0.1:1/mcp (HTTP) - ✔ Connected`)].join('\n'), '', names);
   const before = home('plain#1', true, '1.0.0', false);
-  const said = (checks: SigninChecks, now: HomeView) => Object.fromEntries(signinRows(now).map(row => [`${row.name}${row.plugin ? ' (plugin)' : ''}`, cellSays('claude-cli', row.cells['claude-cli']!, answerFor(checks, 'claude-cli', row)).words]));
+  const said = (checks: SigninChecks, now: HomeView) => Object.fromEntries(signinRows(now).map(row => [`${row.name}${row.plugin ? ' (plugin)' : ''}`, cellSays('claude-cli', row, answerFor(checks, 'claude-cli', row)).words]));
   const checks: SigninChecks = { home: '/h', columns: { 'claude-cli': { at: '2026-11-21T10:00:00Z', answer, asked: askedNow(before, 'claude-cli') } } };
   assert.deepEqual(said(checks, before), { 'issues (plugin)': 'Connected', keep: 'Connected', paused: 'Connected', plain: 'Connected', solo: 'Connected' });
   // One view in between: plain's address changed (another copy), solo gone, the plugin updated, paused switched off. Then all as before.
@@ -218,7 +300,7 @@ test('A copy is its shared content and that tool’s own part: one tool’s own 
   // Only OpenCode's own part of the copy changed (its sign-in setting, say): OpenCode's answer is the old copy's; Claude Code's stands.
   followView(checks, after);
   const [row] = signinRows(after);
-  assert.deepEqual(tools.map(tool => cellSays(tool, row.cells[tool]!, answerFor(checks, tool, row)).words), ['Connected', 'Not checked']);
+  assert.deepEqual(tools.map(tool => cellSays(tool, row, answerFor(checks, tool, row)).words), ['Connected', 'Not checked']);
 });
 
 // ---------- One check, run for a home ----------
@@ -258,7 +340,7 @@ test('Check runs the tool’s command once, from an empty folder that is gone af
     await sandbox.put('codex', `cat ${join(import.meta.dirname, 'mcpsignin/codex-list.stdout')}`, printOut('codex-list.stdout'));
     const kept = await readdir(join(sandbox.home, '.central-knot'));
     const answer: SigninAnswer | undefined = await checkSignin(sandbox.where(), 'codex-cli', []);
-    assert.equal(cellSays('codex-cli', cell('oauth'), answer).words, 'Needs sign-in');
+    assert.equal(cellSays('codex-cli', server('oauth'), answer).words, 'Needs sign-in');
     const calls = await sandbox.calledWith();
     assert.equal(calls.length, 1);
     const [[folder, entries, home, , args]] = calls;
@@ -268,7 +350,7 @@ test('Check runs the tool’s command once, from an empty folder that is gone af
     assert.deepEqual(await readdir(join(sandbox.home, '.central-knot')), kept);
     // Pi ends with exit code 1 when a server failed: its answer is read all the same.
     await sandbox.put('pi', `cat ${join(import.meta.dirname, 'mcpsignin/pi-list.stdout')}\nexit 1`, `${printOut('pi-list.stdout')} process.exitCode = 1;`);
-    assert.equal(cellSays('pi-cli', cell('plain'), await checkSignin(sandbox.where(), 'pi-cli', [])).words, 'Connected');
+    assert.equal(cellSays('pi-cli', server('plain'), await checkSignin(sandbox.where(), 'pi-cli', [])).words, 'Connected');
   } finally { await sandbox.done(); }
 });
 
@@ -356,7 +438,7 @@ test('Only a command line outside an app bundle is run: a link into one is passe
     await symlink(bundled, join(sandbox.tools, '.local/bin', basename(bundled)));
     await sandbox.put('codex', `cat ${join(import.meta.dirname, 'mcpsignin/codex-list.stdout')}`, printOut('codex-list.stdout'), join(sandbox.tools, 'later-bin'));
     const answer = await checkSignin(sandbox.where(true, join(sandbox.tools, 'later-bin')), 'codex-cli', []);
-    assert.equal(cellSays('codex-cli', cell('plain'), answer).words, 'No sign-in needed');
+    assert.equal(cellSays('codex-cli', server('plain'), answer).words, 'No sign-in needed');
     assert.equal((await sandbox.calledWith()).length, 1);
   } finally { await sandbox.done(); }
 });
