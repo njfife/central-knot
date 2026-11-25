@@ -366,7 +366,7 @@ const sectionsNow = async (a, kind) => (await a.run(`[...document.querySelectorA
 /** Read one tool's Skills counts on its card, tab and Overview row, and the sections on its tab. */
 async function skillsOf(a, tool, pictureRow) {
   await a.click(await a.exists('#harness-back') ? '#harness-back' : '#nav-harnesses');
-  const card = await a.text(`#harness-${tool} .harness-count-value`); // Skills is the first kind.
+  const card = await a.text(`.harness-card:has(#harness-${tool}) .harness-count-value`); // Skills is the first kind.
   await a.click(`#harness-${tool}`);
   await a.click('#harness-tab-skills');
   const tab = await a.text('#harness-tab-skills .harness-tab-count');
@@ -856,6 +856,55 @@ async function harnessFlow() {
   await a.click('#nav-harnesses');
   const list = await a.text('#harnesses-scroll') ?? '';
   check('Harnesses sums up each tool found', ['Claude Code', 'Copilot CLI', 'Codex'].every(name => list.includes(name)) && list.includes('none synced'), list.slice(0, 400));
+  // A managed card's main part is a plain div and its heading is the button that opens the tool; no button sits inside another.
+  const cardShape = await a.run(`(() => {
+    const card = document.querySelector('.harness-card:has(#harness-claude-cli)');
+    const main = card?.querySelector(':scope > .harness-card-main');
+    const head = card?.querySelector('#harness-claude-cli');
+    const buttons = [...(card?.querySelectorAll('button') ?? [])].map(button => button.id);
+    return { mainTag: main?.tagName ?? null, headTag: head?.tagName ?? null, headClass: head?.classList.contains('harness-card-head') ?? false,
+      inMain: !!(main && head && main !== head && main.contains(head)), nestedButtons: document.querySelectorAll('.harness-cards button button').length, buttons };
+  })()`);
+  same('a managed card’s main part is a div and its heading is the link button, first in keyboard order, with no nested buttons',
+    [cardShape.mainTag, cardShape.headTag, cardShape.headClass, cardShape.inMain, cardShape.nestedButtons, cardShape.buttons],
+    ['DIV', 'BUTTON', true, true, 0, ['harness-claude-cli', 'harness-claude-cli-differ-skills', 'manage-claude-cli']]);
+  // Clicking the card's body outside its heading does nothing (both DOM click on counts and real pointer click on the body).
+  await a.click('.harness-card:has(#harness-claude-cli) .harness-counts');
+  const bodyPoint = await a.run(`(() => {
+    const rect = document.querySelector('.harness-card:has(#harness-claude-cli) .harness-counts')?.getBoundingClientRect();
+    return rect ? { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) } : null;
+  })()`);
+  if (bodyPoint) {
+    for (const type of ['mousePressed', 'mouseReleased']) await a.send('Input.dispatchMouseEvent', { type, x: bodyPoint.x, y: bodyPoint.y, button: 'left', clickCount: 1 });
+    await a.settle();
+  }
+  const stayedAfterBody = await a.exists('.harness-cards') && !(await a.exists('#harness-back'));
+  check('clicking a managed card’s body outside its heading does nothing', stayedAfterBody, await a.text('#header'));
+  if (!stayedAfterBody) await a.click('#nav-harnesses');
+  // Keyboard Enter on the heading opens the tool, and keyboard Back returns focus to that heading button.
+  const pressEnter = async () => { for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r' } : {}) }); await a.settle(); };
+  await a.run(`document.querySelector('button#harness-claude-cli.harness-card-head')?.focus()`);
+  await pressEnter();
+  const openedByKey = await a.text('.title-harness');
+  if (await a.exists('#harness-back')) {
+    await a.run(`document.querySelector('#harness-back')?.focus()`);
+    await pressEnter();
+  }
+  const returnedFocus = await a.run(`(() => {
+    const el = document.activeElement;
+    return { id: el?.id ?? null, tag: el?.tagName ?? null, head: el?.classList.contains('harness-card-head') ?? false, visible: el?.matches(':focus-visible') ?? false };
+  })()`);
+  same('keyboard Enter on a card’s heading opens the tool, and keyboard Back returns focus to that heading',
+    [openedByKey, returnedFocus], ['Claude Code', { id: 'harness-claude-cli', tag: 'BUTTON', head: true, visible: true }]);
+  // Manage switch never navigates, and an unmanaged card's heading and body never navigate.
+  await a.click('#manage-codex-cli');
+  const codexOut = await a.exists('.harness-cards') && !(await a.exists('#harness-back')) && !(await a.exists('button#harness-codex-cli'));
+  await a.click('#harness-codex-cli .harness-card-head');
+  await a.click('#harness-codex-cli .harness-card-main');
+  const outStayed = await a.exists('.harness-cards') && !(await a.exists('#harness-back'));
+  await a.click('#manage-codex-cli');
+  const managedBack = await a.exists('.harness-cards') && !(await a.exists('#harness-back')) && await a.exists('button#harness-codex-cli.harness-card-head');
+  same('Manage and an unmanaged card never navigate, and re-enabling restores the heading button', [codexOut, outStayed, managedBack], [true, true, true]);
   // The card's count and the tab it opens agree; another harness starts with the filter off.
   const cardDiffer = parseInt(await a.text('#harness-claude-cli-differ-skills') ?? '', 10);
   await a.click('#harness-claude-cli-differ-skills');
@@ -863,7 +912,7 @@ async function harnessFlow() {
   await a.click('#harness-switch-codex-cli');
   check('the switcher opens another harness with every row, not an empty filter', (await a.text('.title-harness')) === 'Codex' && ((await a.text('.chip-on')) ?? 'All') === 'All' && (await rowKeys(a, 'skills')).length > 0, `${await a.text('#header')} ${await a.text('.chips')}`);
   await a.click('#harness-back');
-  await a.click('#harness-copilot-cli');
+  await a.click('button#harness-copilot-cli.harness-card-head');
   await a.click('#harness-tab-skills');
   const firstMark = () => a.run(`document.querySelector('.ov-row[data-key] .tool-mark')?.dataset.tool ?? null`);
   same('a harness’s skills put its own mark first on each row, and have no column heads', [await firstMark(), await a.exists('.ov-head')], ['copilot-cli', false]);
@@ -879,7 +928,7 @@ async function harnessFlow() {
   await openKind(a, 'skills');
   check('the Library’s skills shows the same change and is its usual self: Claude Code first, no "Not in" section', (await switchOn(a, 'skills', 'release-notes')) && (await firstMark()) === 'claude-cli' && !(await a.all('.ov-section-label strong')).some(label => label.startsWith('Not in')), await a.text('#page'));
   await a.click('#nav-harnesses');
-  await a.click('#harness-copilot-cli');
+  await a.click('button#harness-copilot-cli.harness-card-head');
   await a.click('#harness-tab-skills');
   await a.click('#nav-overview');
   // While first setup's question is asked it says the copies that differ itself; answered No, a line of their own says them.
@@ -889,7 +938,7 @@ async function harnessFlow() {
   await a.click('#overview-skills-differ');
   check('after a harness’s Skills tab, the Overview’s Show them still opens Skills narrowed to them', (await a.text('.chip-on') ?? '').startsWith('Copies differ'), await a.text('.chips'));
   await a.click('#nav-harnesses');
-  await a.click('#harness-copilot-cli');
+  await a.click('button#harness-copilot-cli.harness-card-head');
   await a.click('#harness-tab-instructions');
   await a.click('#harness-switch-claude-cli');
   // At the smallest window nothing on a harness's page is cut off: every tab, and the instruction file while it is edited
@@ -911,7 +960,12 @@ async function harnessFlow() {
   // Another home: the instruction file shown is that home's, not the practice copy's.
   await a.click('#home-actual');
   await a.click('#nav-harnesses');
-  await a.click('#harness-claude-cli');
+  // A missing tool's card has no heading button and clicking its heading or body never navigates.
+  const piMissing = await a.exists('#harness-pi-cli.harness-card-missing') && !(await a.exists('button#harness-pi-cli'));
+  await a.click('#harness-pi-cli .harness-card-head');
+  await a.click('#harness-pi-cli .harness-card-main');
+  same('a missing tool’s card has no heading button and clicking it never navigates', [piMissing, await a.exists('.harness-cards') && !(await a.exists('#harness-back'))], [true, true]);
+  await a.click('button#harness-claude-cli.harness-card-head');
   await a.click('#harness-tab-instructions');
   check('after a home switch, instructions are that home’s', (await a.text('#harness-body') ?? '').includes('~/.claude/CLAUDE.md'), await a.text('#harness-body'));
   same('no page errors, harnesses', a.pageErrors, []);
@@ -967,7 +1021,7 @@ async function manageFlow() {
   same('turned on again, the band says what the pass did there, not what the card said before', await a.text('.band-done .band-text'),
     'Central Knot manages Codex now: Central Knot’s version written there for 1 item (over its copy there, which a version keeps). Each change there is in History.');
   same('turning it on put Central Knot’s version back over the hand edit: Codex holds what it held before', codex(), before);
-  check('and its card opens its page again', await a.exists('button#harness-codex-cli'));
+  check('and its card heading opens its page again', await a.exists('button#harness-codex-cli.harness-card-head'));
   // Clicked while main is busy (a held queue standing in for a long pass): the flip waits its turn behind it, the page says it
   // is busy and takes no other switch meanwhile, and the flip lands once the pass is done.
   if (a.main) {
@@ -977,9 +1031,9 @@ async function manageFlow() {
     // Not a.click: it waits for the page to be idle.
     await a.run(`document.querySelector('#manage-codex-cli').click()`);
     await wait(300);
-    const during = [await a.run(`document.body.dataset.busy`), await a.run(`document.querySelector('#manage-claude-cli').disabled`), leftOut()];
+    const during = [await a.run(`document.body.dataset.busy`), await a.run(`document.querySelector('#manage-claude-cli').disabled`), await a.run(`document.querySelector('button#harness-claude-cli.harness-card-head')?.disabled ?? null`), leftOut()];
     await held.release();
-    same('a switch clicked while a pass runs waits for it, the other switches wait too, and it lands after', [during, leftOut()], [['true', true, []], ['codex-cli']]);
+    same('a switch clicked while a pass runs waits for it, the other switches and headings wait too, and it lands after', [during, leftOut()], [['true', true, true, []], ['codex-cli']]);
     await a.click('#manage-codex-cli');
     main.close();
   }
@@ -5142,7 +5196,7 @@ async function fewToolsFlow() {
   await a.click('#header-refresh');
   same('a tool that holds plugins brings them back', await pages(), ['overview', 'harnesses', 'library', 'mcpsignin', 'instructions', 'plugins', 'sources', 'profiles', 'history', 'sessions', 'repo', 'settings']);
   await a.click('#nav-harnesses');
-  check('Claude Code’s CLI alone says nothing of Cowork', !(await a.text('#harness-claude-cli')).includes('Cowork'), await a.text('#harness-claude-cli'));
+  check('Claude Code’s CLI alone says nothing of Cowork', !(await a.text('.harness-card:has(#harness-claude-cli)')).includes('Cowork'), await a.text('.harness-card:has(#harness-claude-cli)'));
   // On Plugins, its only tool goes away (Pi, still here, holds no plugins): the page it was on no longer exists here, so the
   // Overview opens.
   await a.click('#nav-plugins');
@@ -5159,7 +5213,7 @@ async function fewToolsFlow() {
   await a.click('#header-refresh');
   check('Claude desktop alone brings Claude Code back, with agents and plugins', (await pages()).includes('plugins'), await pages());
   await a.click('#nav-harnesses');
-  const desktopCard = await a.text('#harness-claude-cli');
+  const desktopCard = await a.text('.harness-card:has(#harness-claude-cli)');
   check('its card names the app, its version, its Code tab’s version and no CLI', desktopCard.includes('Claude desktop 4.16336.0 (Code tab 2.1.317) · no CLI found'), desktopCard);
   // Cowork comes with Claude desktop and is no tool here: the card says which plugins it uses (capability-data section 7).
   check('with Claude desktop here, the card says Cowork uses the Claude account’s plugins', /Cowork—?uses the plugins in your Claude account/.test(desktopCard), desktopCard);
@@ -5229,7 +5283,7 @@ async function antigravityFlow() {
   check('the Overview’s key says what its dash means', (await a.text('#overview-tools-key') ?? '').startsWith('—: that kind isn’t handled for that tool'), await a.text('#overview-tools-key'));
   await pictures('antigravity-overview');
   await a.click('#nav-harnesses');
-  const card = await a.text('#harness-antigravity-cli');
+  const card = await a.text('.harness-card:has(#harness-antigravity-cli)');
   check('Antigravity’s card names its CLI with its version, and says its agents aren’t handled', card.includes('Installed · 1.5.14') && card.includes('Agents aren’t handled for Antigravity'), card);
   await pictures('antigravity-harnesses');
   await openKind(a, 'skills');
@@ -5299,7 +5353,7 @@ async function openCodeFlow() {
   // With --shots, a page's picture at each window size the app must fit.
   const pictures = async (page, name) => { if (!shots) return; for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(page, width, height); await page.shot(`${name}-${width}`); } await fullSize(page); };
   await a.click('#nav-harnesses');
-  const card = await a.text('#harness-opencode-cli');
+  const card = await a.text('.harness-card:has(#harness-opencode-cli)');
   await pictures(a, 'opencode-harnesses');
   check('OpenCode’s card names its CLI and its desktop app, each with its version, once', card.includes('Installed · 1.19.5; OpenCode desktop 2.2.5') && !card.includes('(OpenCode'), card);
   const pages = await a.all('#nav [id^="nav-"]', 'e.id.slice(4)');
@@ -5636,7 +5690,7 @@ async function otherAppsFlow() {
   await a.click('#header-refresh');
   const also = await a.text('#other-apps') ?? '';
   check('T3 Code and VS Code are named under the cards, each with its version (a nightly build’s shortened) and what it means here', /T3 Code 0\.1\.9-nightlyRuns your tools for you\./.test(also) && /VS Code 1\.99\.0Its built-in Copilot lists skills/.test(also), also);
-  const pi = await a.text('#harness-pi-cli') ?? '';
+  const pi = await a.text('.harness-card:has(#harness-pi-cli)') ?? '';
   check('pi-gui alone makes Pi a tool here, named as the third-party app it is, with no CLI', pi.includes('pi-gui (third-party) 0.4.0 · no CLI found') && await a.exists('button#harness-pi-cli'), pi);
   await fitsAtMinimum(a, 'Harnesses with other apps named');
   if (shots) for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); await a.shot(`other-apps-${width}`); }
@@ -6000,7 +6054,7 @@ async function realHomeFlow() {
   const tools = await a.text('#harnesses-scroll');
   check('versions probed', tools.includes('2.1.309') && tools.includes('1.0.107') && tools.includes('0.142.3'), tools.slice(0, 300));
   // Cowork comes with Claude desktop: Claude Code's card says which plugins it uses exactly when that app was found.
-  const claudeCard = await a.text('#harness-claude-cli');
+  const claudeCard = await a.text('.harness-card:has(#harness-claude-cli)');
   same('Claude Code’s card speaks of Cowork only where Claude desktop is here', /Cowork—?uses the plugins in your Claude account/.test(claudeCard), claudeCard.includes('Claude desktop'));
   await a.click('#harness-codex-cli');
   await a.click('#harness-tab-about');
@@ -6058,7 +6112,7 @@ async function realHomeFlow() {
   await a.click(byId(rowPart('add', 'skills', 'linked')));
   await a.click('#nav-harnesses');
   same('taking linked in leaves 12 skills on Claude Code’s card and none synced there',
-    [await a.text('#harness-claude-cli .harness-count-value'), await a.text('#harness-claude-cli .harness-count-note')], ['12', 'none synced']);
+    [await a.text('.harness-card:has(#harness-claude-cli) .harness-count-value'), await a.text('.harness-card:has(#harness-claude-cli) .harness-count-note')], ['12', 'none synced']);
   if (shots) { await sizeTo(a, 1280, 800); await a.shot('claude-card-linked-on'); await fullSize(a); }
   await openKind(a, 'skills');
   const wrongHome = await a.run(`window.centralKnot.applySkills([{ key: 'rich', on: true, except: [] }], false, '/somewhere/else')`);
@@ -14347,7 +14401,7 @@ echo "$*" >> "$HOME/claude-calls.txt"
   for (let tries = 0; tries < 100 && !(await a.exists('#overview-tools-key')); tries++) await wait(100);
   check('the Overview’s key says Pi and OpenCode take a plugin’s items, not the plugin', /that tool takes a plugin’s items, not the plugin\./.test(await a.text('#overview-tools-key') ?? ''), await a.text('#overview-tools-key'));
   await pictures('overview-tools-key', '#overview-tools-key', atTwo, true);
-  if (shots) { await a.click('#nav-harnesses'); await pictures('harness-pi-card', '#harness-pi-cli', atTwo); await a.click('#harness-pi-cli'); await a.click('#harness-tab-plugins'); await pictures('harness-pi-plugins', '#harness-body', atTwo); }
+  if (shots) { await a.click('#nav-harnesses'); await pictures('harness-pi-card', '.harness-card:has(#harness-pi-cli)', atTwo); await a.click('#harness-pi-cli'); await a.click('#harness-tab-plugins'); await pictures('harness-pi-plugins', '#harness-body', atTwo); }
   // A marketplace only Codex reads: the reason Claude Code and Copilot CLI share is said once over its plugins.
   const codexOnly = join(scratch, 'market-codex-only');
   for (const [path, value] of Object.entries({ '.agents/plugins/marketplace.json': { name: 'codex-only', plugins: [{ name: 'latex', source: { source: 'local', path: './plugins/latex' } }] }, 'plugins/latex/.codex-plugin/plugin.json': { name: 'latex', version: '0.2.8' } })) {

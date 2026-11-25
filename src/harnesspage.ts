@@ -139,14 +139,19 @@ function attentionLinks(snapshot: Snapshot, kinds: ReturnType<typeof tally>[]) {
 }
 
 /**
- * One harness on the list. A managed tool's whole card opens its page and shows its counts, with its Manage switch under them;
+ * One harness on the list. A managed tool's heading opens its page above its counts and Manage switch;
  * a tool left out has its name, how it was found, its switch and its folder, and does not open; a tool not found has nothing
  * to count, so its card is its name, how to fix that, and its folder, and does not open.
  */
 function summaryCard(snapshot: Snapshot, home: HomeView) {
   const tool = snapshot.harness;
   const here = managed(home, tool), installed = home.sync.present.includes(tool);
-  const head = h('span.harness-card-head', {}, brandMark(tool, 18), h('strong.harness-card-name', {}, names[tool]), here ? icon('arrow-right', 14, 'tone-faint') : null);
+  const title = [brandMark(tool, 18), h('strong.harness-card-name', {}, names[tool])];
+  // While an action runs, its result belongs to the harness it started on: the heading waits.
+  const head = here
+    ? h('button.harness-card-head', { type: 'button', id: `harness-${tool}`, disabled: !!state.busy, 'aria-label': `${names[tool]}: ${detectionLine(snapshot, home)}. Open its page.`, onclick: () => goHarness(tool) },
+      ...title, icon('arrow-right', 14, 'tone-faint'))
+    : h('span.harness-card-head', {}, ...title);
   // On this computer each card says how its tool was found; a sample or chosen folder is said once, in the note above.
   const status = home.mode === 'actual' ? h(`span.harness-card-status${installed ? '' : '.tone-faint'}`, {}, detectionLine(snapshot, home)) : null;
   const path = h('span.harness-card-path', { title: snapshot.root }, h('span.mono', {}, shownPath(snapshot.root)));
@@ -162,9 +167,8 @@ function summaryCard(snapshot: Snapshot, home: HomeView) {
     h('span.harness-count-group', {}, countRow(tabLabel('instructions'), instructionCount(tool)), countRow(tabLabel('plugins'), pluginCount(tool)),
       // Cowork comes with Claude desktop and is no tool here: it uses the Claude account's plugins, said once on Claude Code's card.
       tool === 'claude-cli' && hasCowork(home.snapshots) ? countRow('Cowork', { value: '—', note: coworkWords.card, faint: true }) : null))];
-  // While an action runs, its result belongs to the harness it started on: the cards wait.
   return h('div.card.harness-card', {},
-    h('button.harness-card-main', { type: 'button', id: `harness-${tool}`, disabled: !!state.busy, 'aria-label': `${names[tool]}: ${detectionLine(snapshot, home)}. Open its page.`, onclick: () => goHarness(tool) }, body),
+    h('div.harness-card-main', {}, body),
     attentionLinks(snapshot, kinds), manageRow(home, tool), path);
 }
 
@@ -172,7 +176,7 @@ function summaryCard(snapshot: Snapshot, home: HomeView) {
  * The one way to move within Harnesses: to a harness's page (on `tab` if given, else the tab last used) or, with no harness,
  * back to the list. The last action's result and what the last page showed stay behind; another harness starts with its
  * tables closed and Copies differ filters off. `showOnly`: open that kind's tab showing only items whose copies differ.
- * `fromKeyboard`: going back to the list from the keyboard puts focus (and its ring) on the harness's card; a mouse return leaves it alone.
+ * `fromKeyboard`: going back to the list from the keyboard puts focus (and its ring) on the harness's heading; a mouse return leaves it alone.
  */
 export function goHarness(tool: HarnessId | undefined, tab?: HarnessTab, { fromKeyboard = true, showOnly }: { fromKeyboard?: boolean; showOnly?: PageKind } = {}) {
   noteMove();
