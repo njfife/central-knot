@@ -12217,6 +12217,9 @@ async function selectFlow() {
   mkdirSync(join(home, '.claude/agents'), { recursive: true });
   writeFileSync(join(home, '.claude/agents/scout.md'), '---\nname: scout\ndescription: The scout agent.\n---\n\nYou scout.\n');
   toolClis(home);
+  // History kept for 7 days: what the question says, from the start, with History never opened.
+  mkdirSync(join(scratch, 'select-data'), { recursive: true });
+  writeFileSync(join(scratch, 'select-data/app-settings.json'), JSON.stringify({ historyDays: 7 }));
   const a = await launch(join(scratch, 'select-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex' });
   await a.click('#nav-overview');
   await a.click('#setup-yes');
@@ -12301,7 +12304,7 @@ async function selectFlow() {
   await find('kilo');
   for (let tries = 0; tries < 50 && (await a.all('.ov-row[data-key]', 'e.dataset.key')).length !== 1; tries++) await wait(100);
   await a.click('#select-delete');
-  same('its question is about the one row listed', (await bar())[0], 'Delete 1 from every tool and Central Knot? History can restore it for 30 days.');
+  same('its question is about the one row listed', (await bar())[0], 'Delete 1 from every tool and Central Knot? History can restore it for 7 days.');
   const placed = names.map(inTools);
   await a.click('#select-delete-now');
   await done();
@@ -12315,10 +12318,10 @@ async function selectFlow() {
   same('thirteen ticked: Delete… says the ten it takes', await bar(), ['13 selected', 'Delete 10…']);
   const before = folders();
   await a.click('#select-delete');
-  same('the question, in the bar’s place', await bar(), ['Delete 10 from every tool and Central Knot? History can restore them for 30 days. 3 can’t be deleted ›', 'Cancel', 'Delete 10']);
+  same('the question, in the bar’s place', await bar(), ['Delete 10 from every tool and Central Knot? History can restore them for 7 days. 3 can’t be deleted ›', 'Cancel', 'Delete 10']);
   await a.click('#select-why');
   same('“3 can’t be deleted” names each with its reason', await a.all('#select-why-list p', 'e.textContent'),
-    ['clash: not in Central Knot', `scout: ${(await a.text('.band-danger .band-text') ?? '').replace(/^Agents: /, '')}`, 'zulu: Only through a plugin']);
+    ['clash: not in Central Knot', 'scout: the agents record is damaged', 'zulu: Only through a plugin']);
   await pictures('question');
   await a.click('#select-cancel');
   same('Cancel: the bar again, the ticks kept, nothing changed', [await bar(), (await ticked()).length, folders()], [['13 selected', 'Delete 10…'], 13, before]);
@@ -12391,6 +12394,45 @@ async function selectFlow() {
   same('no Select on a tool’s tab', await a.exists('#library-select'), false);
   same('no page errors, Select', a.pageErrors, []);
   await a.quit();
+
+  // A server of his named as a plugin's server's row is keyed (kit@local-market/search) beside that plugin's server search: a
+  // tick on the plugin's row ticks it alone, and Delete has nothing to take.
+  const keyed = join(scratch, 'home-select-key');
+  mkdirSync(keyed, { recursive: true });
+  writeFileSync(join(keyed, '.claude.json'), `${JSON.stringify({ mcpServers: { 'kit@local-market/search': { type: 'http', url: 'https://own.example.test/mcp' } } }, null, 2)}\n`);
+  writeClaudeInstall(keyed, 'local-market', 'kit', '1.0.0', { '.mcp.json': JSON.stringify({ mcpServers: { search: { type: 'http', url: 'https://plugin.example.test/mcp' } } }) });
+  toolClis(keyed);
+  const k = await launch(join(scratch, 'select-key-data'), flag('--electron') ? ['--as-released'] : [], keyed, { CK_TEST_HOME_ONLY: 'claude,copilot,codex' });
+  await k.click('#nav-overview');
+  await k.click('#setup-yes');
+  await openKind(k, 'all');
+  for (let tries = 0; tries < 100 && (await k.all('.ov-row[data-key]', 'e.dataset.key')).length < 2; tries++) await wait(100);
+  await k.click('#library-select');
+  await k.click('.ov-plugin-row .ov-name');
+  same('a tick on the plugin’s row ticks it alone, not his server whose name is that row’s key; Delete has nothing to take',
+    [await k.all('.ov-row.row-ticked', 'e.classList.contains("ov-plugin-row") ? "plugin" : "his"'), await k.run(`document.getElementById('select-delete').disabled`)], [['plugin'], true]);
+  same('no page errors, one key for two rows', k.pageErrors, []);
+  await k.quit();
+
+  // Another home taken while asking ends the mode where the home changes: a home with a tool and nothing in it (its Library drawn
+  // without a list), then back. Two homes to switch between: a development run's Practice copy and this computer's home.
+  if (!flag('--electron')) { console.log('selectFlow: another home while asking: skipped (the packaged app has no Practice copy to switch to)'); return; }
+  const empty = join(scratch, 'home-select-empty');
+  mkdirSync(join(empty, '.claude/skills'), { recursive: true });
+  toolClis(empty);
+  const p = await launch(join(scratch, 'select-practice-data'), [], empty, { CK_TEST_HOME_ONLY: 'claude,copilot,codex' });
+  await openKind(p, 'all');
+  await p.click('#library-select');
+  await p.click('.ov-row:not(.ov-plugin-row)[data-key] .ov-name');
+  await p.click('#select-delete');
+  await p.click('#home-actual');
+  for (let tries = 0; tries < 100 && (await p.text('#home-label')) === 'Practice copy'; tries++) await wait(100);
+  check('this computer’s home, with nothing in it, shows no list', !(await p.exists('.ov-row[data-key]')));
+  await p.click('#home-fixture');
+  for (let tries = 0; tries < 100 && (await p.text('#home-label')) !== 'Practice copy'; tries++) await wait(100);
+  same('back on the Practice copy: no mode, no tick, no question', [await p.text('#library-select .band-stack > :not(.band-unshown)'), await p.exists('#select-bar'), await p.exists('.ov-row.row-ticked')], ['Select', false, false]);
+  same('no page errors, another home while asking', p.pageErrors, []);
+  await p.quit();
 }
 
 /**

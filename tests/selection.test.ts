@@ -12,6 +12,7 @@ import { ask, askedNow, cancelAsk, cantWords, deletedWords, deleteLabel, heading
   startSelecting, stopSelecting, tickHeading, tickRow, whyLines, type Listed } from '../src/selection.ts';
 import { readHistory } from '../src/history.ts';
 import { rowClicks } from '../src/libraryrow.ts';
+import { heldWhole } from '../src/clickplan.ts';
 import { applySkills, restoreSkill } from '../src/skills.ts';
 import { withLock, winLockSkip } from './fslock.ts';
 import { bytes, folderOf, historyActions, itemOf, pass, put, roots, sandbox, seen, skillText, tools, turnOff, turnOn, type Box } from './skillclicks.ts';
@@ -219,5 +220,18 @@ test('A ticked row turned off since the question was asked: the Delete of many i
     assert.deepEqual([!!(await itemOf(box, 'alpha'))?.deleted, (await itemOf(box, 'alpha'))?.on], [false, false]);
     assert.deepEqual(await Promise.all(names.filter(name => name !== 'alpha').map(async name => !!(await itemOf(box, name))?.deleted)), names.slice(1).map(() => true));
     assert.equal(sent.made?.length, 9, 'a History entry for each of the nine');
+  } finally { await box.cleanup(); }
+});
+
+test('A ticked Off row deleted by another writer since the question was asked: the Delete of many says it was not deleted, by name, and makes no History entry for it', async () => {
+  const box = await tenSkills();
+  try {
+    await turnOff(box, box.context, 'hotel');
+    const asked = (await deletes(box)).filter(change => change.key === 'golf' || change.key === 'hotel');
+    const { row, item } = await seen(box, box.context, 'golf');
+    await applySkills(box.context, box.tools, [rowClicks.remove(row, item)]);
+    const sent = await applySkills(box.context, box.tools, asked);
+    assert.deepEqual(sent.results.filter(heldWhole).map(result => result.item), ['golf'], 'golf is said as not deleted');
+    assert.equal(sent.made?.length, 1, 'a History entry for hotel alone');
   } finally { await box.cleanup(); }
 });
