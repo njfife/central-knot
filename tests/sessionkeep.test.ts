@@ -728,3 +728,31 @@ test('A sweep the Sessions page asks for: started for the open home that keeps, 
   h.keeper.sweepNow(home);
   assert.deepEqual([h.keeper.view(home).collecting, calls.length], [false, 1], 'a home that does not keep: no sweep');
 });
+
+async function withPlatform<T>(platform: NodeJS.Platform, run: () => Promise<T>): Promise<T> {
+  const original = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+  try {
+    return await run();
+  } finally {
+    Object.defineProperty(process, 'platform', original);
+  }
+}
+
+test('canonicalHome folds capitals on macOS, preserves them on Linux, and misses a raw realpath entry on macOS', async () => {
+  const root = await makeTemp();
+  const mixedHome = join(root, 'KeepCostsMac', 'HomeA');
+  await mkdir(mixedHome, { recursive: true });
+  const real = await realpath(mixedHome);
+  assert.notEqual(real, real.toLowerCase(), 'fixture path contains capitals');
+
+  const macKey = await withPlatform('darwin', () => canonicalHome(mixedHome));
+  const linuxKey = await withPlatform('linux', () => canonicalHome(mixedHome));
+  assert.equal(macKey, real.toLowerCase(), 'macOS consent key folds capitals');
+  assert.notEqual(macKey, real, 'macOS consent key differs from raw realpath when path has capitals');
+  assert.equal(linuxKey, real, 'Linux consent key preserves capitals');
+
+  const rawSeeded = await makeHarness({ initialSettings: { keepSessionCosts: { [real]: true } } });
+  rawSeeded.current.context = { ...rawSeeded.current.context, home: mixedHome };
+  assert.equal(rawSeeded.keeper.homeOpened(mixedHome, macKey).on, false, 'pre-seeding raw realpath misses consent on macOS');
+});
