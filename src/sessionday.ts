@@ -188,16 +188,15 @@ function keptRequest(session: KeptSession, request: string, receipt: Receipt, pr
 }
 
 /**
- * One tool's requests found, by request id: each at its earliest kept time so far, with the kept session it was found in, and
- * priced where that time is inside the period.
+ * One tool's requests found, by request id: the earliest kept time of each seen before the period's end (`first`), and those
+ * whose earliest is inside the period, priced, with the kept session they were found in (`inside`).
  */
-type Found = Map<string, { at: number; session: KeptSession; priced?: PricedRequest }>;
+interface Found { first: Map<string, number>; inside: Map<string, { session: KeptSession; priced: PricedRequest }> }
 
 /** A tool's requests found inside the period as sessions: a session's parts, from any month read, one; its requests in time order. */
 function sessionsOf(tool: SessionTool, found: Found): ReadSession[] {
   const sessions = new Map<string, ReadSession>();
-  for (const { session, priced } of found.values()) {
-    if (!priced) continue;
+  for (const { session, priced } of found.inside.values()) {
     const parts = sessions.get(session.session) ?? { tool, session: session.session, requests: [] };
     parts.parent ??= session.parent;
     parts.project ??= session.project;
@@ -218,7 +217,7 @@ function sessionsOf(tool: SessionTool, found: Found): ReadSession[] {
  */
 export function keptReading(record: SessionMonths, period: Period, present: readonly HarnessId[]): DayReading {
   const tools = SESSION_TOOLS.filter(tool => present.includes(tool));
-  const found = new Map<HarnessId, Found>(tools.map(tool => [tool, new Map()]));
+  const found = new Map<HarnessId, Found>(tools.map(tool => [tool, { first: new Map(), inside: new Map() }]));
   const heldRead = record.held.some(held => held.file === 'sessions' || record.readMonths.some(month => held.file === `${month}.json`));
   const unread = new Set<HarnessId>();
   for (const kept of record.readMonths.flatMap(month => record.months[month] ?? [])) {
@@ -229,9 +228,10 @@ export function keptReading(record: SessionMonths, period: Period, present: read
       for (const request in session.requests) {
         const receipt = session.requests[request]!;
         // Its earliest kept time decides: a request first kept before the period is not in it, though kept again inside.
-        if (receipt.at >= period.end || (ofTool.get(request)?.at ?? Infinity) <= receipt.at) continue;
-        const priced = receipt.at >= period.start ? keptRequest(session, request, receipt, kept.pricings) : undefined;
-        ofTool.set(request, { at: receipt.at, session, ...(priced ? { priced } : {}) });
+        if (receipt.at >= period.end || (ofTool.first.get(request) ?? Infinity) <= receipt.at) continue;
+        ofTool.first.set(request, receipt.at);
+        if (receipt.at < period.start) ofTool.inside.delete(request);
+        else ofTool.inside.set(request, { session, priced: keptRequest(session, request, receipt, kept.pricings) });
       }
     }
   }
@@ -241,5 +241,9 @@ export function keptReading(record: SessionMonths, period: Period, present: read
 /** The kept record's reading of `period` (keptReading), from the UTC months of its start and of its last moment; read only. */
 export async function readKeptPeriod(home: string, period: Period, present: readonly HarnessId[]): Promise<DayReading> {
   const months = new Set([monthOf(period.start), monthOf(period.end - 1)]);
-  return keptReading(await readSessionMonths(home, [...months]), period, present);
+  const record = await readSessionMonths(home, [...months]);
+  // A whole turn of the event loop (a timer: an immediate would run before what waits) between the last month's parse and the
+  // reading, so that main is not held for both at once.
+  await new Promise(resolve => setTimeout(resolve, 0));
+  return keptReading(record, period, present);
 }
