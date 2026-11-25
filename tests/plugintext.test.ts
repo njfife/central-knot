@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer, request as forward, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -15,6 +15,7 @@ import { searchedParts } from '../src/catalogdetail.ts';
 import { readCatalog, runGit } from '../src/plugins.ts';
 import { pluginTextJob, type PluginText } from '../src/plugintext.ts';
 import type { PluginTextView } from '../src/types.ts';
+import { withLock } from './fslock.ts';
 
 const noPosix = process.platform === 'win32';
 const put = async (path: string, text: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, text); };
@@ -493,11 +494,10 @@ test('A save that failed is made at the next chance, quitting included', { skip:
     w.proxy.hold = 'solo.git';
     kept.job.restart();
     await until(() => kept.text('alpha') !== undefined && w.proxy.waiting.length > 0, 'alpha read (its fetch made the data folder), solo held');
-    await chmod(w.dataDir, 0o555);
-    try {
+    await withLock(w.dataDir, 'dir-readonly', async () => {
       w.proxy.release();
       await until(() => kept.logs.some(line => line.includes('not saved')) && !kept.job.view().reading, 'the save refused');
-    } finally { await chmod(w.dataDir, 0o755); }
+    });
     // The next chance is quitting.
     await kept.job.stop();
     assert.deepEqual(await saved(w.dataDir), ['alpha', 'inside', 'solo']);

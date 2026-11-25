@@ -1,10 +1,12 @@
 // Checks for the Windows CI helper (scripts/windows-check.mjs parseUnitLog), shared path helper (tests/wincompat.ts),
 // and shared test lock cleanup (tests/fslock.ts).
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { test } from 'node:test';
+import { pathToFileURL } from 'node:url';
 import { parseUnitLog } from '../scripts/windows-check.mjs';
 import { lockPath, lockSkip, makeWritableTree } from './fslock.ts';
 import { slashPath } from './wincompat.ts';
@@ -91,19 +93,62 @@ test('parseUnitLog reports advisory files under Not run (never Clean files) when
   assert.match(summary, /## Output \(advisory, before node --test summary\)\nError: worker crashed/);
 });
 
-test('lockPath unlock is idempotent on an existing path and throws if the locked path disappeared', { skip: lockSkip }, async () => {
+test('lockPath enforces all four lock kinds, unlocks idempotently, rejects ENOENT if gone, and unlocks on child exit after throw', { skip: lockSkip }, async () => {
   const base = await mkdtemp(join(tmpdir(), 'ck-fslock-unlock-'));
   try {
+    const roDir = join(base, 'ro');
+    const roFile = join(roDir, 'existing.txt');
+    await mkdir(roDir);
+    await writeFile(roFile, 'before\n');
+    const unlockRo = await lockPath(roDir, 'dir-readonly');
+    await assert.rejects(writeFile(join(roDir, 'added.txt'), 'x'));
+    await assert.rejects(rm(roFile));
+    assert.deepEqual(await readdir(roDir), ['existing.txt']);
+    assert.equal(await readFile(roFile, 'utf8'), 'before\n');
+    await writeFile(roFile, 'after\n');
+    assert.equal(await readFile(roFile, 'utf8'), 'after\n');
+    await unlockRo();
+    await unlockRo();
+    await writeFile(join(roDir, 'added.txt'), 'ok\n');
+    await rm(roFile);
+    const noReadDir = join(base, 'noread');
+    await mkdir(noReadDir);
+    await writeFile(join(noReadDir, 'secret.txt'), 'hidden\n');
+    const unlockNoRead = await lockPath(noReadDir, 'dir-unreadable');
+    await assert.rejects(readdir(noReadDir));
+    await assert.rejects(stat(join(noReadDir, 'secret.txt')));
+    await unlockNoRead();
+    assert.deepEqual(await readdir(noReadDir), ['secret.txt']);
+    const noListDir = join(base, 'nolist');
+    await mkdir(noListDir);
+    await writeFile(join(noListDir, 'known.txt'), 'known\n');
+    const unlockNoList = await lockPath(noListDir, 'dir-unlistable');
+    await assert.rejects(readdir(noListDir));
+    await assert.rejects(writeFile(join(noListDir, 'new.txt'), 'x'));
+    assert.equal(await readFile(join(noListDir, 'known.txt'), 'utf8'), 'known\n');
+    await unlockNoList();
+    assert.deepEqual(await readdir(noListDir), ['known.txt']);
     const okFile = join(base, 'ok.txt');
     await writeFile(okFile, 'ok\n');
     const unlockOk = await lockPath(okFile, 'file-unreadable');
+    await assert.rejects(readFile(okFile, 'utf8'));
     await unlockOk();
     await unlockOk();
+    assert.equal(await readFile(okFile, 'utf8'), 'ok\n');
     const goneFile = join(base, 'gone.txt');
     await writeFile(goneFile, 'gone\n');
     const unlockGone = await lockPath(goneFile, 'file-unreadable');
     await rm(goneFile);
     await assert.rejects(unlockGone(), { code: 'ENOENT' });
+    const crashDir = join(base, 'crash');
+    await mkdir(crashDir);
+    const childEnv: NodeJS.ProcessEnv = { ...process.env, CK_LOCK_TARGET: crashDir };
+    delete childEnv.NODE_TEST_CONTEXT;
+    const script = `import { lockPath } from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, 'fslock.ts')).href)}; await lockPath(process.env.CK_LOCK_TARGET, 'dir-readonly'); throw new Error('boom');`;
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { env: childEnv, encoding: 'utf8' });
+    assert.notEqual(child.status, 0);
+    assert.match(child.stderr, /Error: boom/);
+    await writeFile(join(crashDir, 'after-crash.txt'), 'unlocked\n');
   } finally {
     await makeWritableTree(base);
     await rm(base, { recursive: true, force: true });

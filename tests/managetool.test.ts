@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
-import { winLockSkip, withLock } from './fslock.ts';
+import { withLock } from './fslock.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
@@ -465,7 +465,7 @@ test('Use Codex’s copy on an entry about Codex still works once Codex is not m
   } finally { await b.cleanup(); }
 });
 
-test('A copy a pass could not put in a tool has no entry until a later pass puts it there: a skills folder that can’t be written', { skip: winLockSkip }, async () => {
+test('A copy a pass could not put in a tool has no entry until a later pass puts it there: a skills folder that can’t be written', async () => {
   const b = await box();
   try {
     await b.turnOn();
