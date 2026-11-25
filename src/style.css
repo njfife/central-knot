@@ -803,6 +803,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .version:focus-visible { outline: none; }
 .version:focus-visible .version-cta { outline: 2px solid var(--focus); outline-offset: 1px; }
 .version:disabled { cursor: default; }
+.version:disabled .version-cta { opacity: 0.5; }
 .version-who { grid-column: who; }
 .version-says { grid-column: says; }
 .version-who, .version-says { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
@@ -1891,6 +1892,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .details-outside .details-note { overflow-wrap: anywhere; }
 .details-outside > .details-actions { margin-top: 0; }
 .tool-switch-word { min-width: 56px; text-align: right; }
+.ov-page:has(#select-bar) .tool-switch:has(> .switch:disabled) .tool-switch-word { opacity: 0.4; }
 /* A tool whose own settings switch the item off: that state, said in its own word in place of Central Knot's switch. */
 .tool-switch-word-own { min-width: 0; color: var(--ink-soft); white-space: nowrap; }
 /* A tool whose switch file can't be used says so where its switch would be. */
@@ -2313,6 +2315,8 @@ button.harness-card-main:focus-visible { outline: 0; }
 .select-place { position: relative; flex: none; }
 .selection-bar { padding: 4px 16px; background: var(--surface); border-bottom: 1px solid var(--line); font-size: 12px; line-height: 16px; }
 .select-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.select-count { flex: none; white-space: nowrap; }
+.select-line > .inline-link { min-width: 0; }
 .select-why { position: absolute; top: 100%; left: 0; right: 0; z-index: 5; padding: 6px 16px; background: var(--surface); border-bottom: 1px solid var(--line); box-shadow: 0 8px 20px rgb(0 0 0 / 18%); font-size: 12px; line-height: 18px; color: var(--ink-soft); }
 .select-why > p { margin: 0; }
 /* A found item's Add, in the switch's place and as wide, so its name starts where an On row's does (matrix.ts addButton). */

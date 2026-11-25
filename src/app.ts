@@ -41,7 +41,7 @@ import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './cli
 import { followView, type SigninChecks } from './mcpsignin.ts';
 import { keeperNews, loadSessions, windowBack, type SessionsDay } from './sessionspage.ts';
 import type { DayRows, PeriodRows } from './sessionrow.ts';
-import { stopSelecting } from './selection.ts';
+import { DIFFERS_REASON, selecting, stopSelecting } from './selection.ts';
 import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
@@ -564,7 +564,7 @@ export interface Done {
   reloads: ReloadChange[];
   /** Why it did nothing, where it was refused whole or stopped: its outcome's text then (applyByKind names its kind by it). */
   refused?: string;
-  /** The rows it changed (carryOut): all of its rows but one whose own change was refused whole (clickplan.ts heldWhole). */
+  /** The rows it changed (carryOut): all of its rows but those refused whole (clickplan.ts heldWhole) or held because their copies differ (`differs`). */
   changed?: NamedRow[];
   kept?: { kind: PageKind; results: DestinationResult[]; notices?: SyncNotice[] };
   focus?: string;
@@ -599,7 +599,8 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   const done = did || made.length > 0 || !!plugged?.done.some(entry => succeeded(entry.report));
   // Said from what happened: a tool whose write failed, copy or plugin switch, is not called on (or off).
   const wrote = [...new Set(ours.filter(entry => entry.outcome === 'written' && entry.harness).map(entry => entry.harness!))];
-  const notClaimed = [...notIn, ...(plugged?.failedIn ?? [])], held = new Set(ours.filter(heldWhole).map(entry => entry.item.toLowerCase()));
+  const notClaimed = [...notIn, ...(plugged?.failedIn ?? [])];
+  const held = new Set(ours.filter(entry => heldWhole(entry) || (entry.outcome === 'held' && entry.differs)).map(entry => entry.item.toLowerCase()));
   const changed = click.rows.map((row, at) => ({ ...row, name: click.items[at] ?? row.key })).filter(row => !held.has(row.name.toLowerCase()));
   // What the click also changed in a tool's own settings with its copies (Pi's skills list: librarypass.ts Kind.follow) follows.
   const settings = [...new Set(ours.flatMap(entry => (entry.settingsChanged ? [entry.settingsChanged] : [])))];
@@ -666,10 +667,16 @@ const stillRead = (rows: NamedRow[], among: NamedRow[]) => [...groupBy(rows, row
  * one, is no row changed: Done changed) and what tools still read another way of them (stillRead). Its result names the rows
  * that changed, and only they flash; one Undo, only when every click that changed something has one, puts them back (undoClick).
  * `now`: what the rows changed are, where the result counts them instead of naming them ("All 10 are off"); `withoutUndo`: what
- * it adds where it offers no Undo, given how many changed; `stays`: it stays until closed or replaced (Outcome stays).
+ * it adds where it offers no Undo, given how many changed; `stays`: it stays until closed or replaced (Outcome stays); `reasons`:
+ * extra problem lines after any failures (rows a bulk Turn skipped, with why); `tail`: counts appended on every path (rows already
+ * in the asked state or skipped); `failedRow`: per-row reason line for each row kept back in one or more tools (when given, failed
+ * rows are named there instead of counted as `now`).
  */
 export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], stayed: string[]) => string,
-  { now = 'off', withoutUndo, stays }: { now?: 'off' | 'deleted'; withoutUndo?: (count: number) => string; stays?: boolean } = {}) => busy('Applying…', async page => {
+  { now = 'off', withoutUndo, stays, reasons: extra = [], tail, failedRow }: {
+    now?: 'on' | 'off' | 'deleted'; withoutUndo?: (count: number) => string; stays?: boolean; reasons?: string[];
+    tail?: string; failedRow?: (name: string, failedTools: HarnessId[]) => string;
+  } = {}) => busy('Applying…', async page => {
   const several = new Set(clicks.map(click => click.kind)).size > 1, parts: { click: Click; done: Done }[] = [];
   for (const click of clicks) parts.push({ click, done: await carryOut(click, page) });
   const went = parts.filter(part => !part.done.refused), did = parts.filter(part => part.done.did), changed = parts.flatMap(part => part.done.changed ?? []);
@@ -679,16 +686,23 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], stayed:
   keepOwn(parts.map(({ done }) => done.kept));
   // Each row that didn't go through in every tool (its kind refused, its own change held, or a tool kept it back) is said first
   // (words.ts notAllThrough), by its kind where another row asked has its name; `said` then names the rows that went through, or
-  // the lead's rows are counted, or nothing changed. Each kind's refusal is a reason of its own.
+  // `failedRow` names each row's failed tools in `reasons` (else the lead's count covers them), or nothing changed; `tail` follows on every path.
   const asked = parts.flatMap(({ click, done }) => click.rows.map((row, at) => ({ row: { ...row, name: click.items[at] ?? row.key }, done })));
+  const isRow = (entry: DestinationResult, row: NamedRow) => entry.item.toLowerCase() === row.name.toLowerCase();
+  const differed = asked.filter(({ row, done }) => done.kept?.results.some(entry => entry.outcome === 'held' && entry.differs && isRow(entry, row))).map(({ row }) => row);
   const left = asked.filter(({ row, done }) => done.refused || !done.changed?.some(each => sameRow(each, row))
-    || done.kept?.results.some(entry => keptBack(entry) && entry.item.toLowerCase() === row.name.toLowerCase())).map(({ row }) => row);
+    || done.kept?.results.some(entry => keptBack(entry) && isRow(entry, row))).map(({ row }) => row);
   const through = changed.filter(row => !left.some(each => sameRow(each, row))), all = asked.map(({ row }) => row);
+  const failedReasons = failedRow ? asked.flatMap(({ row, done }) => {
+    const failedTools = [...new Set((done.kept?.results ?? []).filter(entry => keptBack(entry) && entry.harness && isRow(entry, row)).map(entry => entry.harness!))];
+    return failedTools.length ? [failedRow(rowNames([row], all)[0]!, failedTools)] : [];
+  }) : [];
   const lead = left.length ? notAllThrough(rowNames(left, all), asked.length) : '';
-  const after = !changed.length ? 'Nothing changed.' : through.length ? said(through, stillRead(through, all)) : `${countedAs(changed.length, asked.length, now)}.`;
+  const after = !changed.length ? 'Nothing changed.' : through.length ? said(through, stillRead(through, all)) : failedRow ? '' : `${countedAs(changed.length, asked.length, now)}.`;
   const back = changed.length && !undo ? withoutUndo?.(changed.length) : undefined;
-  tellWritten({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(clicks.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn), stays,
-    text: [lead, after, back].filter(Boolean).join(' '), reasons: [...stops, ...went.flatMap(part => part.done.outcome.reasons ?? [])],
+  const diffReasons = differed.map(row => `${rowNames([row], all)[0]}: ${DIFFERS_REASON}`);
+  tellWritten({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(clicks.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn) || differed.length > 0, stays,
+    text: [lead, after, tail, back].filter(Boolean).join(' '), reasons: [...stops, ...went.flatMap(part => part.done.outcome.reasons ?? []), ...failedReasons, ...diffReasons, ...extra],
     act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } }, parts.flatMap(part => part.done.reloads));
   for (const row of changed) flashRow(row);
   if (regroups) unpin();
@@ -1008,6 +1022,10 @@ export const whyReadOnly = (home: HomeView) => (!home.sync.access.allowed ? home
  * kind's own record stopping its writes alone (its view's gate is the home's, or its record's stop: types.ts LibraryView gate).
  */
 export const whyKindReadOnly = (home: HomeView, kind: PageKind) => whyReadOnly(home) ?? (home[kind].gate.state === 'stopped' ? home[kind].gate.reason : undefined);
+/** Why writing controls on the Library's list are off while Select's mode is active (selection.ts): none on any other view or page. */
+export const selectOff = (): string | undefined => (state.page === 'library' && state.libraryView === 'list' && selecting() ? 'Done ends selecting' : undefined);
+/** Why a write other than a row's own switch or Add is off now, if it is: the page acts (acting), Select's mode is on (selectOff), or `stops`. */
+export const writeOff = (stops: boolean): string | boolean => acting() ?? selectOff() ?? stops;
 
 /**
  * Reads what a page shows beyond the home itself: History, Settings, Instructions, Sessions or Plugins, into its slot
