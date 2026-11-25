@@ -2500,13 +2500,13 @@ test('Two runs queued side by side on two tabs: only the first run says the prof
   t.mock.method(api, 'refresh', async () => refreshed.shift()!);
 
   // First run starts on Claude Code's Skills tab (turning standup off ends Everyday).
-  queueClick({ kind: 'skills', key: 'standup' }, 'standup',
+  queueClick({ kind: 'skills', key: 'standup', on: false }, 'standup',
     () => ({ kind: 'skills', items: ['standup'], rows: [{ kind: 'skills', key: 'standup' }], changes: [{ key: 'standup', on: false, except: [], seenOn: true }], said: 'standup is off.' }),
     () => false);
   await settled();
   // While the first run is still running, switch to the MCP tab and queue a second run turning github off.
   app.harnessTab = 'mcp';
-  queueClick({ kind: 'mcp', key: 'github' }, 'github',
+  queueClick({ kind: 'mcp', key: 'github', on: false }, 'github',
     () => ({ kind: 'mcp', items: ['github'], rows: [{ kind: 'mcp', key: 'github' }], changes: [{ key: 'github', on: false, except: [], seenOn: true }], said: 'github is off.' }),
     () => false);
   await settled();
@@ -2523,7 +2523,7 @@ test('Two runs queued side by side on two tabs: only the first run says the prof
   app.home = viewWith(true, true);
   app.harnessTab = 'skills';
   refreshed.push(viewWith(false, true));
-  queueClick({ kind: 'skills', key: 'standup' }, 'standup',
+  queueClick({ kind: 'skills', key: 'standup', on: false }, 'standup',
     () => ({ kind: 'skills', items: ['standup'], rows: [{ kind: 'skills', key: 'standup' }], changes: [{ key: 'standup', on: false, except: [], seenOn: true }], said: 'standup is off.' }),
     () => false);
   await settled();
