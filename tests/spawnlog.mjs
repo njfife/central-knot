@@ -12,10 +12,11 @@
 //   the number named a process group, its sign kept), with the target named by the start that made it, or "another";
 // - each chmod by which a test makes a file executable (the mode, and a digest of the file's bytes with its temporary folders
 //   named as below): the tests' stand-in tools are made this way, so their place, bytes and mode are compared too.
-// What no two runs share is written the same way on every run: the folders mkdtemp made, the checkout, the home, the record
-// folder itself; and, when compared, ids, hashes, times, ports and process numbers (never a stand-in's digest). Each test
-// file's records are compared as a multiset (its tests may start things side by side), its liveness probes as a set (how
-// often a wait asks depends on timing).
+// What no two runs share is written the same way on every run: the folders mkdtemp made (each process lists the ones it
+// makes in <folder>/made.jsonl, so a helper process's records name its test's folders too), the checkout, the home, the
+// record folder itself; and, when compared, ids, hashes, times, ports, process numbers and the test runner's slot (never a
+// stand-in's digest, and no other path). Each test file's records are compared as a multiset (its tests may start things
+// side by side), its liveness probes as a set (how often a wait asks depends on timing).
 import { createHash } from 'node:crypto';
 import childProcess from 'node:child_process';
 import fs from 'node:fs';
@@ -35,19 +36,18 @@ export function normal(text) {
   return home.length > 1 ? said.split(home).join('<home>') : said;
 }
 /**
- * A recorded value with what else no two runs share written the same way: ids, hashes (Git's, and folders named by one),
- * times, ports, a process number in a stand-in's arguments, and the test runner's slot for a file (NODE_TEST_WORKER_ID,
- * which depends on scheduling). A stand-in's digest (`bytes`) is kept as it is. For a helper process (`helper`: a fixture
- * server, a stand-in running Node), which can't know the folders its test made, a name ending as mkdtemp ends one is written
- * as `<prefix>*` too.
+ * A recorded value with what else no two runs share written the same way: the folders the run's mkdtemp made (`named`, from
+ * madeIn), ids, hashes (Git's, and folders named by one), times, ports, a process number in a stand-in's arguments, and the
+ * test runner's slot for a file (NODE_TEST_WORKER_ID, which depends on scheduling). A stand-in's digest (`bytes`) is kept
+ * as it is.
  */
-const stable = (value, key, helper = false) => {
+const stable = (value, key, named) => {
   if (key === 'bytes') return value;
   if (key === 'NODE_TEST_WORKER_ID') return '<worker>';
-  if (Array.isArray(value)) return value.map(each => stable(each, undefined, helper));
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([name, each]) => [name, stable(each, name, helper)]));
+  if (Array.isArray(value)) return value.map(each => stable(each, undefined, named));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([name, each]) => [name, stable(each, name, named)]));
   if (typeof value !== 'string') return value;
-  return (helper ? madeLike(value) : value)
+  return named(value)
     .replace(/0x[0-9a-f]+/g, '0x<n>')
     .replace(/\b1[6-9]\d{8}(\d{3})?\b/g, '<time>')
     .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g, '<uuid>')
@@ -55,8 +55,45 @@ const stable = (value, key, helper = false) => {
     .replace(/\d{4}-\d\d-\d\dT\d\d[-:]\d\d[-:]\d\d[-.:]\d{3}Z/g, '<time>')
     .replace(/(127\.0\.0\.1|localhost):\d+/g, '$1:<port>');
 };
-/** A folder's name ending as mkdtemp ends one (a prefix ending in -, then six letters or digits), written `<prefix>*`. */
-const madeLike = text => text.replace(/(\/[\w.]+(?:-[\w.]+)*-)[A-Za-z0-9]{6}(?=\/|$)/g, '$1*');
+/**
+ * The folders mkdtemp made in one run, by any of its processes (made.jsonl), as a function that writes each one found in a
+ * text as `<prefix>*`: mkdtemp adds six characters to its prefix, and they are what no two runs share. Only a folder made so
+ * is written so; any other path is kept as it is. A folder made inside another is named whole.
+ */
+function madeIn(from) {
+  let paths = [];
+  try { paths = fs.readFileSync(join(from, 'made.jsonl'), 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line).path); } catch { /* none made */ }
+  const names = new Map();
+  const named = text => {
+    let said = '', at = 0;
+    for (let start = earliest(text, 0); start >= 0; start = earliest(text, at)) {
+      // The longest made folder that starts here and ends at a / or at the end of the path.
+      let end = start + 1, found;
+      while (end <= text.length && !/[\s"'`,;:=]/.test(text[end - 1] ?? '')) {
+        if ((end === text.length || text[end] === '/' || /[\s"'`,;:=]/.test(text[end])) && names.has(text.slice(start, end))) found = end;
+        end++;
+      }
+      if (!found) { said += text.slice(at, start + 1); at = start + 1; continue; }
+      said += text.slice(at, start) + names.get(text.slice(start, found));
+      at = found;
+    }
+    return said + text.slice(at);
+  };
+  // Where each made folder can begin: the folders they were made in that were not made themselves (the temporary folders).
+  const roots = [];
+  const earliest = (text, from) => {
+    let first = -1;
+    for (const root of roots) { const index = text.indexOf(root, from); if (index >= 0 && (first < 0 || index < first)) first = index; }
+    return first;
+  };
+  for (const path of [...new Set(paths)].sort((x, y) => x.length - y.length)) {
+    if (path.lastIndexOf('/') <= 0) continue; // made relative to a working folder: no temporary folder to find it by
+    const parent = path.slice(0, path.lastIndexOf('/'));
+    if (![...names.keys()].some(made => parent === made || parent.startsWith(`${made}/`)) && !roots.includes(parent)) roots.push(parent);
+    names.set(path, `${named(path.slice(0, -6))}*`);
+  }
+  return named;
+}
 
 const folder = process.env.CK_SPAWN_LOG;
 if (folder && process.argv[2] !== 'compare') record(folder);
@@ -132,8 +169,15 @@ function record(into) {
     write({ chmod: normal(path), mode: mode.toString(8), bytes });
     return original.call(this, path, mode, ...rest);
   };
-  // Longest first, so a folder made inside another is named whole.
-  const remember = (prefix, path) => { made.set(path, `${normal(prefix)}*`); const sorted = [...made].sort(([x], [y]) => y.length - x.length); made.clear(); for (const [k, v] of sorted) made.set(k, v); return path; };
+  // Longest first, so a folder made inside another is named whole; and listed for the run (madeIn), for other processes' records.
+  const remember = (prefix, path) => {
+    made.set(path, `${normal(prefix)}*`);
+    const sorted = [...made].sort(([x], [y]) => y.length - x.length);
+    made.clear();
+    for (const [k, v] of sorted) made.set(k, v);
+    fs.appendFileSync(join(into, 'made.jsonl'), `${JSON.stringify({ path })}\n`);
+    return path;
+  };
   const mkdtempAsync = fs.promises.mkdtemp, mkdtempSync = fs.mkdtempSync;
   fs.promises.mkdtemp = async (prefix, ...rest) => remember(prefix, await mkdtempAsync(prefix, ...rest));
   fs.mkdtempSync = (prefix, ...rest) => remember(prefix, mkdtempSync(prefix, ...rest));
@@ -144,16 +188,14 @@ function record(into) {
 
 /** Each process's records, by the test file (or other script) it ran: starts and stops as a multiset, probes as a set. */
 function read(from) {
-  const files = new Map();
-  for (const name of fs.readdirSync(from).filter(entry => entry.endsWith('.jsonl'))) {
+  const files = new Map(), named = madeIn(from);
+  for (const name of fs.readdirSync(from).filter(entry => entry.endsWith('.jsonl') && entry !== 'made.jsonl')) {
     const [head, ...lines] = fs.readFileSync(join(from, name), 'utf8').split('\n').filter(Boolean);
-    const script = stable(JSON.parse(head).process);
-    // Any other process (a test's stand-in or fixture server running Node) by its script alone: its arguments, and the folder
-    // its parent made for it, differ from run to run.
-    const testFile = /\btests\/[\w.-]+\.test\.ts\b/.exec(script)?.[0];
-    const owner = testFile ?? madeLike(script.split(' ')[0]);
+    const script = stable(JSON.parse(head).process, undefined, named);
+    // Any other process (a test's stand-in or fixture server running Node) by its script alone: its arguments differ from run to run.
+    const owner = /\btests\/[\w.-]+\.test\.ts\b/.exec(script)?.[0] ?? script.split(' ')[0];
     const kept = files.get(owner) ?? { records: [], probes: new Set() };
-    for (const recorded of lines.map(line => stable(JSON.parse(line), undefined, !testFile))) {
+    for (const recorded of lines.map(line => stable(JSON.parse(line), undefined, named))) {
       const line = JSON.stringify(recorded);
       if (recorded.probe) kept.probes.add(line); else kept.records.push(line);
     }
