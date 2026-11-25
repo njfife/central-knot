@@ -176,7 +176,7 @@ export function historyPage() {
   const ordered = [...events].reverse(), times = timesApart(ordered.map(event => event.at));
   const reread = rereadBand(state.history);
   // A refused Undo, a Restore with reload advice, or an Undo that ended the profile in use shows in a band; other results here are in the status bar.
-  const shown = state.outcome?.page === 'history' && (state.outcome.warn || !!state.outcome.reloads?.length || state.outcome.profileEnded) ? outcomeBand() : null;
+  const shown = state.outcome?.page === 'history' && (state.outcome.warn || !!state.outcome.reloads?.length || !!state.outcome.profileLine) ? outcomeBand() : null;
   return h('div.page', {}, reread || shown ? h('div.bands', {}, reread, shown) : null, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, `What sync, your switches, Pull, sources and profile switches changed, newest first. Undo puts the earlier version back; Restore brings back what was deleted or removed.`, ...keptFor()), h('ul.history-list', {}, ordered.flatMap((event, index) => {
     // What it also changed in a tool's own settings (Pi's skills list: HistoryEvent settingsChanged) follows its words.
     const about = (said => (event.settingsChanged ? { ...said, text: `${said.text} ${event.settingsChanged.join(' ')}` } : said))(describe(event));

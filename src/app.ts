@@ -1,5 +1,6 @@
 // The page's state and most pages' actions (MAP.md, "The app's shell and Settings"): the open home's view and each page's own
-// state (`state`), the page shown (showPage), what is said after a click (tell, announce) and when a result goes by itself
+// state (`state`), the page shown (showPage), what is said after a click (tell, announce; withProfileEnded is the one place that appends
+// words.ts profileLeftUse when an act ended every profile in use, called by tell and sayRun, via profilesBefore and profileplan.ts endedProfiles) and when a result goes by itself
 // (FADE_MS), the busy line (busy) and whether the page is acting (acting: busy, or a run of clicks: clicklist.ts); a click on an
 // item list sent to its kind's engine (carryOut, through kindPages), at once under busy (applyClick), one per kind as one
 // (applyByKind) or in its turn in the page's list (queueClick), its result kept for the page (lastResult), a run's said once
@@ -16,7 +17,7 @@ import { forgetSourcePrompts, loadSources } from './sourcespage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
-import type { Reason, ApplyResult, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SessionCostsView, SyncNotice, UsageReading } from './types.ts';
+import type { Reason, ApplyResult, Profile, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SessionCostsView, SyncNotice, UsageReading } from './types.ts';
 import { anyOn, kindSource, noPins, pinsOn, rowId, sameRow, type NamedRow, type Pinned, type RowKey } from './itemrow.ts';
 import { itemKey, wantedIn } from './library.ts';
 import { caughtUpNames, groupBy, noticeNames, plural, withSetAside } from './model.ts';
@@ -226,17 +227,34 @@ export function announce(text: string, quiet = false, link?: { label: string; ru
   paintStatusMessage();
 }
 
+/** Profiles in use before an act began, with its home, so tell can say when the act ended all of them. */
+export interface ProfilesBefore { home: string; profiles: Profile[] }
+let actBefore: ProfilesBefore | undefined;
+/** Snapshots the open home and the profiles in use in it before an act starts (busy, and queueClick). */
+function profilesBefore(): ProfilesBefore | undefined {
+  return state.home ? { home: state.home.home, profiles: inUseInHome(state.home) } : undefined;
+}
+/** Appends profileLeftUse when an act in the same home ended every profile that was in use before it. */
+function withProfileEnded(outcome: Outcome, { checkProfile = true, before = actBefore }: { checkProfile?: boolean; before?: ProfilesBefore } = {}): Outcome {
+  if (!checkProfile || !before || outcome.refused || outcome.profileLine || !state.home || state.home.home !== before.home) return outcome;
+  const ended = endedProfiles(before.profiles, inUseInHome(state.home));
+  if (!ended.length) return outcome;
+  const profileLine = profileLeftUse(ended.map(profile => profile.name));
+  return { ...outcome, text: [outcome.text, profileLine].filter(Boolean).join(' '), profileLine };
+}
+
 /**
  * Sets what the last action did (or clears it, saying `otherwise`), and says it. A result with nothing to offer (no
  * button, Undo or History link) is said in the status bar; one with a band is heard by screen readers, since the band
  * already shows it.
  */
-export function tell(outcome: Outcome | undefined, otherwise = ''): void {
-  state.outcome = outcome;
+export function tell(outcome: Outcome | undefined, otherwise = '', options?: { checkProfile?: boolean; before?: ProfilesBefore }): void {
+  const told = outcome && withProfileEnded(outcome, options);
+  state.outcome = told;
   // Said on Plugins in the run's place, it is the newer result: the run's goes, so this one's × uncovers nothing older.
-  if (overRun(outcome)) closeRun();
-  if (!outcome) announce(otherwise);
-  else { announce(spoken(outcome), !saidInStatusBar(outcome)); outcome.said = state.said.seq; }
+  if (overRun(told)) closeRun();
+  if (!told) announce(otherwise);
+  else { announce(spoken(told), !saidInStatusBar(told)); told.said = state.said.seq; }
   fadeLater();
 }
 
@@ -377,8 +395,11 @@ export async function busy(message: string, work: (page: Page) => Promise<void>)
   announce(message);
   const working = state.said.seq;
   rerender();
+  const previousBefore = actBefore;
+  actBefore = profilesBefore();
   try { await work(page); }
   catch { announce(couldNotFinish()); }
+  finally { actBefore = previousBefore; }
   // When the work said nothing since its "Reading…", what was said before comes back.
   if (state.said.seq === working) announce(before.text, before.quiet, before.link, before.notices);
   state.busy = undefined;
@@ -399,6 +420,7 @@ export async function busy(message: string, work: (page: Page) => Promise<void>)
  * offers to copy or discard it.
  */
 function accept(view: HomeView): HomeView {
+  actBefore = undefined;
   state.home = undefined;
   // The last results, the rows pinned where they were, and Select's mode with its ticks, are the last home's.
   Object.assign(state, { skillsResult: undefined, mcpResult: undefined, agentsResult: undefined, item: undefined });
@@ -642,7 +664,7 @@ export const applyClick = (click: Click) => busy(click.undoing ? 'Undoing…' : 
 /** What a click applied at once did, said in the header (renderer.ts resultHere) or its band, its rows flashed, the focus on its control. */
 function sayDone(done: Done, click: Click) {
   keepOwn([done.kept]);
-  tell(click.undoing ? done.outcome : notDoneFirst(done.outcome));
+  tell(click.undoing ? done.outcome : notDoneFirst(done.outcome), '', { checkProfile: done.did });
   focusAfterBusy = done.focus;
   for (const row of click.rows) flashRow(row);
 }
@@ -703,7 +725,7 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], stayed:
   const diffReasons = differed.map(row => `${rowNames([row], all)[0]}: ${DIFFERS_REASON}`);
   tellWritten({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(clicks.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn) || differed.length > 0, stays,
     text: [lead, after, tail, back].filter(Boolean).join(' '), reasons: [...stops, ...went.flatMap(part => part.done.outcome.reasons ?? []), ...failedReasons, ...diffReasons, ...extra],
-    act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } }, parts.flatMap(part => part.done.reloads));
+    act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } }, parts.flatMap(part => part.done.reloads), did.length > 0);
   for (const row of changed) flashRow(row);
   if (regroups) unpin();
 });
@@ -737,10 +759,14 @@ const once = (turns: ItemTurn[]) => turns.filter((turn, at) => turns.findIndex(o
  */
 export function queueClick(row: ItemTurn['row'], name: string, make: () => Click | undefined, isOn: ItemTurn['isOn']): void {
   const turn: ItemTurn = { state: 'waiting', row, name, page: state.page, isOn, run: runAt(placeNow()), work: async () => {
+    const before = profilesBefore();
+    turn.run.before ??= before;
     const click = make();
     // Nothing left to change in its turn (the click before it took its whole plugin with it, say): as asked already.
     if (!click) turn.done = { did: false, reloads: [], outcome: { page: turn.page, items: [name], rows: [row], text: `${name}: nothing left to change.` } };
     else turn.done = await carryOut(click, turn.page).catch((): Done => ({ did: false, reloads: [], refused: `${name}: ${couldNotFinish()}`, outcome: { page: turn.page, items: [name], rows: [row], warn: true, band: true, text: `${name}: ${couldNotFinish()}` } }));
+    // If × ended the run while this click was running, the new run it moved to still compares with before this click ran.
+    turn.run.before ??= before;
     sayRun(turn);
   } };
   join(turn);
@@ -754,11 +780,12 @@ export function queueClick(row: ItemTurn['row'], name: string, make: () => Click
  */
 function sayRun(turn: ItemTurn) {
   const done = turn.done!, turns = itemTurns(turn.run);
+  const check = { checkProfile: turns.some(each => each.done?.did), before: turn.run.before };
   const outcome = turns.length === 1 ? notDoneFirst(done.outcome) : runOutcome(turns);
-  if (placeNow() !== turn.run.place) { announce(spoken(outcome)); return; }
+  if (placeNow() !== turn.run.place) { announce(spoken(withProfileEnded(outcome, check))); return; }
   // Its problem lines are its own: the last click of each of the run's rows.
   keepOwn(stillSaid(turns).map(each => each.done!.kept));
-  tell(outcome);
+  tell(outcome, '', check);
   flashRow(turn.row);
   if (done.focus && document.activeElement === document.body) document.getElementById(done.focus)?.focus({ preventScroll: true });
 }
@@ -831,11 +858,14 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   type UndoEntry = { key?: string; entry: DestinationResult; answeredLater?: boolean };
   const raw = new Map(parts.map(part => [part.kind, [] as UndoEntry[]])), restored = new Map(parts.map(part => [part.kind, new Set<string>()])), stops = new Map<PageKind, string>();
   const reloads: ReloadChange[] = unswitched ? pluginReloads(unswitched.done) : [];
+  let anyDid = !!unswitched?.done.some(entry => succeeded(entry.report));
   for (const event of events) {
     const kind = kindOfEntry.get(event.id)!;
     if (stops.has(kind)) continue;
     const result = await api().restore(event.id, home.home);
     if (result.stopped) { stops.set(kind, result.stopped); continue; }
+    const held = result.results.some(entry => heldWhole(entry) || keptBack(entry));
+    if (result.made?.length || result.harnessWrites > 0 || !held) anyDid = true;
     reloads.push(...result.reloads);
     const key = libraryEntry(event)?.key, list = raw.get(kind)!;
     // A later restore of the same item in this Undo answers an earlier tool problem: replaced if that tool failed again,
@@ -887,7 +917,7 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   const failed = names(about.rows.filter(row => switchesShort.has(row.kind) || kept.get(row.kind)?.some(each => keptBack(each.entry) && (each.key ? each.key === row.key : each.entry.item.toLowerCase() === row.name.toLowerCase()))));
   const are = (list: string[]) => `${fewNames(list)} ${list.length === 1 ? 'is' : 'are'} as before`;
   tellWritten({ page, items: all, rows: about.rows, warn: !undone, band: true, fade: undone, reasons,
-    text: undone ? `Undone: ${are(all)}.` : short.size ? `Not all of it could be undone${several && asBefore.length ? `; ${are(asBefore)}` : ''}.` : `Not all of ${fewNames(failed.length ? failed : all)} could be put back.` }, reloads);
+    text: undone ? `Undone: ${are(all)}.` : short.size ? `Not all of it could be undone${several && asBefore.length ? `; ${are(asBefore)}` : ''}.` : `Not all of ${fewNames(failed.length ? failed : all)} could be put back.` }, reloads, anyDid);
   for (const row of about.rows) flashRow(row);
   if (about.regroups) unpin();
 });
@@ -1176,7 +1206,6 @@ async function putHistory() {
 /** A History entry's action: Undo, Restore, or one of its choices; what it did is said in the band, with its own way back. */
 export const restoreEvent = (eventId: string, choice?: string) => busy('Restoring…', async page => {
   const home = state.home!;
-  const before = inUseInHome(home);
   // A Restore of Synchronize everything's Undo: whether it switches the rule on again, as its plan says before the click (the
   // one place that decides it: historyactions.ts restorePlan), for the words after it.
   const clicked = state.history.data?.find(event => event.id === eventId);
@@ -1208,9 +1237,8 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
     return;
   }
   const did = !result.stopped && (!!result.made?.length || result.harnessWrites > 0);
-  const ended = did ? profileLeftUse(endedProfiles(before, inUseInHome(state.home)).map(profile => profile.name)) : '';
-  if (past && libraryEntry(past)) { sayLibraryAction(page, past, result, ended); return; }
-  if (past?.kind === 'everything') { sayEverything(page, past, result, switchesOn, ended); return; }
+  if (past && libraryEntry(past)) { sayLibraryAction(page, past, result, did); return; }
+  if (past?.kind === 'everything') { sayEverything(page, past, result, switchesOn, did); return; }
   // A Pull's change to an agent's Claude Code settings alone (gitrepo.ts undoSettingsChange): the one entry with an Undo of its own,
   // an agent's (its row flashes in the Library).
   const item = restored[0]?.item ?? past?.item ?? '', row = { kind: 'agents' as const, key: itemKey(item) };
@@ -1223,7 +1251,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
  * After a History action on a library item, a skill, an MCP server or an agent (historyactions.ts): what it did, in the words of the entry
  * it made, with that entry's own action as the way back. A refusal is said on the page, where the action was clicked.
  */
-function sayLibraryAction(page: Page, past: HistoryEvent, result: ApplyResult, ended = '') {
+function sayLibraryAction(page: Page, past: HistoryEvent, result: ApplyResult, did = true) {
   const entry = libraryEntry(past)!, rows = [entry];
   // Refused whole (it waits for the shared skills folder, say: librarypass.ts click), it is said as a stop: nothing was done.
   const refused = result.stopped ?? (result.made?.length ? undefined : result.results.find(heldWhole)?.message);
@@ -1234,8 +1262,8 @@ function sayLibraryAction(page: Page, past: HistoryEvent, result: ApplyResult, e
   const said = made && librarySentence(made, libraryWords[entry.kind], view?.tools ?? [], item, true)?.text;
   const back = made && libraryAction(made, item, entriesNow(state.home!)(made).now);
   const notDone = result.results.filter(keptBack).map(entry => entry.message);
-  const text = [`${past.item}: ${said ? said.replace(/^./, first => first.toLowerCase()) : 'done.'}`, ...notDone, ended].filter(Boolean).join(' ');
-  tellWritten({ page, item: past.item, rows, warn: notDone.length > 0, text, profileEnded: ended ? true : undefined, undo: back && made ? { id: made.id, label: back.label } : undefined }, result.reloads);
+  const text = [`${past.item}: ${said ? said.replace(/^./, first => first.toLowerCase()) : 'done.'}`, ...notDone].filter(Boolean).join(' ');
+  tellWritten({ page, item: past.item, rows, warn: notDone.length > 0, text, undo: back && made ? { id: made.id, label: back.label } : undefined }, result.reloads, did);
   flashRow(entry);
 }
 
@@ -1245,12 +1273,12 @@ function sayLibraryAction(page: Page, past: HistoryEvent, result: ApplyResult, e
  * an Undo's entry (`undo`) offers the Restore, a switch-on the Undo. `switchedOn`: the Restore switched the rule on again
  * (restoreEvent, from restorePlan before the click); a switch made in Settings since is not its doing.
  */
-function sayEverything(page: Page, past: HistoryEvent, result: ApplyResult, switchedOn: boolean, ended = '') {
+function sayEverything(page: Page, past: HistoryEvent, result: ApplyResult, switchedOn: boolean, did = true) {
   if (result.stopped) { tell({ page, item: past.item, text: result.stopped, warn: true, history: true, refused: true }); return; }
   const made = (result.made ?? []).map(id => state.history.data?.find(event => event.id === id));
   const text = everythingDone(past, made, made.filter(event => event?.kind === 'restored').length, switchedOn);
   const notDone = [...new Set(result.results.filter(keptBack).map(entry => entry.message))];
-  tellWritten({ page, item: past.item, warn: notDone.length > 0, history: true, profileEnded: ended ? true : undefined, text: [text, ...notDone.slice(0, 3), ended].filter(Boolean).join(' ') }, result.reloads);
+  tellWritten({ page, item: past.item, warn: notDone.length > 0, history: true, text: [text, ...notDone.slice(0, 3)].filter(Boolean).join(' ') }, result.reloads, did);
 }
 
 // ---------- A skill's own two actions ----------
@@ -1267,7 +1295,7 @@ export const skillAction = (action: 'clear-switch' | 'take-over', key: string, t
     setHome(await api().refresh());
     keepOwn([{ kind, results: result.results, notices: result.notices }]);
     const row = { kind, key };
-    if (result.stopped) { tell({ page, item: name, rows: [row], text: result.stopped, warn: true, band: true }); return; }
+    if (result.stopped) { tell({ page, item: name, rows: [row], text: result.stopped, warn: true, band: true, refused: true }); return; }
     // Letting a tool load it again has an Undo (its History entry's: the switch set again); a take-over has none, and says so.
     const said = `${name}: ${result.results[0]?.message ?? 'done.'}${action === 'take-over' ? ' This has no Undo.' : ''}`;
     const entry = action === 'clear-switch' ? result.made?.[0] : undefined;
@@ -1305,8 +1333,8 @@ export interface Outcome {
   refused?: boolean;
   /** Shown as a band even with nothing to offer: a click's result, which belongs where the click's Undo would be. */
   band?: boolean;
-  /** An Undo ended every profile in use, so the result stays a band on every page (saidInStatusBar) including History even without a warning or reload advice. */
-  profileEnded?: boolean;
+  /** Appended profileLeftUse sentence when an act ended every profile in use; keeps the result in a band (saidInStatusBar) and whole on Row 2 (matrix.ts listResult). */
+  profileLine?: string;
   /** The band goes after a few seconds: an Undo's confirmation. */
   fade?: boolean;
   /** It stays in the header until closed or replaced, problems or none: a Delete of many's, whose Undo is many History Restores (fadeNow). */
@@ -1333,13 +1361,13 @@ export function withReloads(outcome: Omit<Outcome, 'reloads'>, changes: readonly
   return hasReloadAdvice(reloads, toolWays()) ? { ...outcome, reloads } : outcome;
 }
 /** The one door for every writing route's result: settles its required reload changes and tells the page. */
-export const tellWritten = (outcome: Omit<Outcome, 'reloads'>, changes: readonly ReloadChange[]): void => tell(withReloads(outcome, changes));
+export const tellWritten = (outcome: Omit<Outcome, 'reloads'>, changes: readonly ReloadChange[], checkProfile = true): void => tell(withReloads(outcome, changes), '', { checkProfile });
 
 /**
  * Whether a result is said in the status bar rather than as a band: it offers nothing to do (no button, Undo, Copy or History
  * link, and no ended profile), so it needs no room of its own.
  */
-export const saidInStatusBar = (outcome: Outcome): boolean => !(outcome.act || outcome.undo || outcome.history || outcome.note || outcome.band || outcome.profileEnded || outcome.reloads?.length);
+export const saidInStatusBar = (outcome: Outcome): boolean => !(outcome.act || outcome.undo || outcome.history || outcome.note || outcome.band || outcome.profileLine || outcome.reloads?.length);
 
 // ---------- Instructions ----------
 
@@ -1766,7 +1794,7 @@ export async function syncNow(home = state.home?.home) {
     setHome(result.view);
     // A new result: no click's reasons from before stay under it.
     keepOwn([]);
-    tellWritten({ page, band: true, history: result.history, text: result.text, reasons: result.reasons, warn: result.warn }, result.reloads);
+    tellWritten({ page, band: true, history: result.history, text: result.text, reasons: result.reasons, warn: result.warn }, result.reloads, result.did !== false);
   });
 }
 api().onSyncRequest(() => { if (acting()) menuSyncHome = state.home?.home; else void syncNow(); });
@@ -1953,7 +1981,7 @@ function turnedOutcome(page: Page, lead: string, turned: NonNullable<ApplyResult
   const sinceSaid = turned.since?.length ? ` Left as ${turned.since.length === 1 ? 'it is' : 'they are'}: ${turned.since.join('; ')}.` : '';
   const notDone = results.length ? ` ${results.slice(0, 2).map(entry => entry.message).join(' ')}${results.length > 2 ? ' …' : ''}` : '';
   const warn = results.length > 0 || turned.left.length > 0 || !!turned.since?.length;
-  tellWritten({ page, band: true, fade: !!fade && !warn && !act, text: `${lead}: ${changeWords(turned, turned.plugins ?? { on: 0, off: 0 }, 'did', still) || 'nothing changed'}.${whole}${leftSaid}${sinceSaid}${notDone}`, warn, act }, reloads);
+  tellWritten({ page, band: true, fade: !!fade && !warn && !act, text: `${lead}: ${changeWords(turned, turned.plugins ?? { on: 0, off: 0 }, 'did', still) || 'nothing changed'}.${whole}${leftSaid}${sinceSaid}${notDone}`, warn, act }, reloads, false);
 }
 
 /**
@@ -2001,7 +2029,7 @@ export const saveProfileDef = (profile: ProfileEdit, said?: string, band = false
   if (result.problem) { announce(result.problem); return; }
   if (result.id && (!profile.id || profile.restore)) profileState.open = result.id;
   if (result.id && !profile.id) profileState.renaming = result.id;
-  if (band && said) tell({ page, band: true, text: said });
+  if (band && said) tell({ page, band: true, text: said }, '', { checkProfile: false });
   else announce(said ?? 'Profile saved.', true);
 });
 
@@ -2014,5 +2042,5 @@ export const deleteProfileDef = (id: string) => busy('Deleting profile…', asyn
   if (result.problem || !gone) { announce(result.problem ?? 'That profile is gone.'); return; }
   profileState.open = undefined;
   tell({ page: 'profiles', item: gone.name, text: `Deleted the profile ${gone.name}. No item changed.`,
-    act: { label: 'Undo', id: 'outcome-undo-delete-profile', title: `Make ${gone.name} again, with the same items`, run: () => void saveProfileDef({ ...gone, restore: true }, `${gone.name} is back.`) } });
+    act: { label: 'Undo', id: 'outcome-undo-delete-profile', title: `Make ${gone.name} again, with the same items`, run: () => void saveProfileDef({ ...gone, restore: true }, `${gone.name} is back.`) } }, '', { checkProfile: false });
 });

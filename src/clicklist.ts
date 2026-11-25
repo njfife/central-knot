@@ -11,14 +11,15 @@
 // Here: the list, the runs, a click's place in them, taking a waiting click back, and the state a row's switch is drawn in
 // meanwhile (wantedOn). Each route keeps its own work, its row while its click waits (the item lists draw the new state; Plugins
 // say "Waiting to…": pluginparts.ts clickNote) and its result with its Undo (app.ts sayRun; pluginstate.ts market.lastRun).
-import { afterActing, FADE_MS, homeReadOwed, readHomeOnce, rerender, showActing, type PageKind } from './app.ts';
+import { afterActing, FADE_MS, homeReadOwed, readHomeOnce, rerender, showActing, type PageKind, type ProfilesBefore } from './app.ts';
 import type { RowKey } from './itemrow.ts';
 
 /**
- * A run of clicks: its place (an item list, or a tool's tab of one kind under Harnesses: app.ts placeNow; or Plugins), and
- * when its last click ended (0 before one has). Its clicks are the turns that name it.
+ * A run of clicks: its place (an item list, or a tool's tab of one kind under Harnesses: app.ts placeNow; or Plugins),
+ * when its last click ended (0 before one has), and the profiles in use when its first click starts to be carried out
+ * (app.ts queueClick). Its clicks are the turns that name it.
  */
-export interface Run { place: string; lastAt: number }
+export interface Run { place: string; lastAt: number; before?: ProfilesBefore }
 
 /** One click in the list: waiting its turn, running (its work, through main, and the read after it), or ended. */
 export interface Turn {
