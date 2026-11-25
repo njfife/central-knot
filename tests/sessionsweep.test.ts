@@ -1,6 +1,6 @@
 // The session sweep (src/sessionsweep.ts), as worked examples on made-up session files in made-up homes.
-// TZ is fixed away from UTC so UTC-month handling is exercised independently of the host time zone.
-process.env.TZ = 'America/New_York';
+// Defaults TZ away from UTC when unset so UTC-month handling is exercised independently of the host time zone.
+process.env.TZ ||= 'America/New_York';
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,6 +13,7 @@ import { bundledRates, priceRequest, reportedCost, type PriceResult, type RatesT
 import { readSessionPeriod, type DayReading, type Period, type PricedRequest, type ReadSession } from '../src/sessionday.ts';
 import {
   emptyPositions,
+  monthOf,
   readSessionRecord,
   sessionsDirectory,
   withSessionRecordTurn,
@@ -416,30 +417,32 @@ test('3. A file that grew: only that file is read from its position; partial req
 });
 
 test('4. Parity with the Sessions page: identical rows and sums for disjoint sessions, and page less repeats for resumed sessions', async () => {
-  const ctx = await makeContext();
   const period: Period = {
     start: new Date(2026, 10, 24, 0, 0, 0, 0).getTime(),
     end: new Date(2026, 10, 25, 0, 0, 0, 0).getTime(),
   };
+  const atLocal = (hours: number, mins = 0, secs = 0) => new Date(period.start + ((hours * 60 + mins) * 60 + secs) * 1000).toISOString();
+  const periodMonths = [...new Set([monthOf(period.start), monthOf(period.end - 1)])];
+  const ctx = await makeContext({ now: () => period.start + 16 * 3_600_000 });
   const project = join(ctx.home, '.claude', 'projects', '-work-app');
   await put(join(project, 'root.jsonl'), [
-    claudeResp('msg_r1', '2026-11-24T14:00:00.000Z', claudeUsage(1000, 2000, 500, 250, 100), 'claude-haiku-4-5-20251001'),
+    claudeResp('msg_r1', atLocal(10, 0), claudeUsage(1000, 2000, 500, 250, 100), 'claude-haiku-4-5-20251001'),
     claudeCost(0.021, false),
   ]);
   await put(join(project, 'root', 'subagents', 'agent-1.jsonl'), [
     {
-      ...claudeResp('msg_c1', '2026-11-24T14:05:00.000Z', claudeUsage(400, 100, 0, 90), 'claude-haiku-4-5-20251001'),
+      ...claudeResp('msg_c1', atLocal(10, 5), claudeUsage(400, 100, 0, 90), 'claude-haiku-4-5-20251001'),
       isSidechain: true,
     },
   ]);
   await put(join(ctx.home, '.codex', 'sessions', '2026', '11', '24', 'rollout-a.jsonl'), [
     codexMeta('thread-a'),
-    codexTurn('gpt-5', '2026-11-24T14:10:00.000Z'),
-    codexUsage('resp_a1', '2026-11-24T14:10:05.000Z', 1000, 200, 120),
+    codexTurn('gpt-5', atLocal(10, 10)),
+    codexUsage('resp_a1', atLocal(10, 10, 5), 1000, 200, 120),
   ]);
 
   await sweepSessions(ctx);
-  const kept = await readSessionRecord(ctx.home, ['2026-11']);
+  const kept = await readSessionRecord(ctx.home, periodMonths);
   const pageReading = await readSessionPeriod({ home: ctx.home }, period, [...SESSION_TOOLS]);
   const pageRows = sessionRows(pageReading);
   const recordRows = sessionRows(keptToDayReading(kept.months, period, bundledRates.date));
@@ -447,17 +450,17 @@ test('4. Parity with the Sessions page: identical rows and sums for disjoint ses
 
   // Add a resumed Claude session repeating `msg_r1` and adding a new request `msg_r2`.
   await put(join(project, 'resumed.jsonl'), [
-    claudeResp('msg_r1', '2026-11-24T14:00:00.000Z', claudeUsage(1000, 2000, 500, 250, 100), 'claude-haiku-4-5-20251001'),
-    claudeResp('msg_r2', '2026-11-24T15:00:00.000Z', claudeUsage(600, 0, 0, 100), 'claude-haiku-4-5-20251001'),
+    claudeResp('msg_r1', atLocal(10, 0), claudeUsage(1000, 2000, 500, 250, 100), 'claude-haiku-4-5-20251001'),
+    claudeResp('msg_r2', atLocal(11, 0), claudeUsage(600, 0, 0, 100), 'claude-haiku-4-5-20251001'),
   ]);
   await sweepSessions(ctx);
-  const keptAfter = await readSessionRecord(ctx.home, ['2026-11']);
+  const keptAfter = await readSessionRecord(ctx.home, periodMonths);
   const pageAfter = sessionRows(await readSessionPeriod({ home: ctx.home }, period, [...SESSION_TOOLS]));
   const recordAfter = sessionRows(keptToDayReading(keptAfter.months, period, bundledRates.date));
 
   const repeatedPrice = priceRequest({
     tool: 'claude-cli',
-    at: Date.parse('2026-11-24T14:00:00.000Z'),
+    at: Date.parse(atLocal(10, 0)),
     model: 'claude-haiku-4-5-20251001',
     tokens: { input: 1000, cacheRead: 2000, cacheWrite: 500, cacheWrite1h: 100, output: 250 },
     speed: 'standard',
@@ -974,7 +977,7 @@ test('13. notBefore: a sweep asked before notBefore does nothing and returns ski
   assert.equal(ran.taken.requests, 1);
 });
 
-test('14 (light). Twenty files per tool (40 requests each): first sweep, no-op sweep, and ten grown files stay fast and compact', async () => {
+test('14 (light). Twenty files per tool (40 requests each): first sweep, no-op sweep, and ten grown files take every request once and stay under 1 MB', async () => {
   const ctx = await makeContext();
   const claudeDir = join(ctx.home, '.claude', 'projects', '-work-app');
   const codexDir = join(ctx.home, '.codex', 'sessions', '2026', '11', '24');
@@ -1095,7 +1098,7 @@ test('16. A malformed line between two valid lines is counted, passed, and both 
   assert.equal(kept2.unread, 1, 'clean tail does not wipe earlier unread count');
 });
 
-test('17. Global holds (current month, positions.json, or sessions symlink): nothing written, no position moved, answer says why', async () => {
+test('17. Global holds stop a sweep that has something to take (nothing written, answer says why); an idle sweep does not open the current month', async () => {
   for (const kind of ['current-month', 'positions', 'sessions-link'] as const) {
     const ctx = await makeContext();
     await put(join(ctx.home, '.claude', 'projects', '-work-app', 'one.jsonl'), [
@@ -1126,6 +1129,25 @@ test('17. Global holds (current month, positions.json, or sessions symlink): not
       }
     }
   }
+
+  // An idle sweep reads positions.json, lists and stats without opening the current month (even if it is held).
+  const idleCtx = await makeContext();
+  const file = join(idleCtx.home, '.claude', 'projects', '-work-app', 'idle.jsonl');
+  await put(file, [claudeResp('msg_i1', '2026-11-24T15:00:00.000Z', claudeUsage(100, 0, 0, 10))]);
+  await sweepSessions(idleCtx, { rates: RATES_V1 });
+  const monthPath = join(sessionsDirectory(idleCtx.home), '2026-11.json');
+  await writeFile(monthPath, '{"formatVersion":2}\n');
+  const idle = await sweepSessions(idleCtx, { rates: RATES_V1 });
+  assert.equal(idle.wrote, false);
+  assert.equal(idle.refused, undefined, 'idle sweep never opened the current month');
+  assert.deepEqual(idle.held, []);
+
+  // Once the file grows (something to take), the turn reads the current month, reports the hold, and writes nothing.
+  await appendFile(file, lines([claudeResp('msg_i2', '2026-11-24T15:05:00.000Z', claudeUsage(100, 0, 0, 10))]));
+  const active = await sweepSessions(idleCtx, { rates: RATES_V1 });
+  assert.equal(active.wrote, false);
+  assert.equal(active.held.some(h => h.file === '2026-11.json'), true);
+  assert.ok(active.refused && active.refused.includes('2026-11.json'));
 });
 
 test('18. Yielding between batches: a timer set before three batches fires between them (and batchRequests caps a batch at 2,000)', async () => {
@@ -1308,4 +1330,162 @@ test('Facts-only tail invalidation, position-only progress, and writeAccess refu
   assert.equal(denied.refused, 'Another build holds this computer.');
   assert.deepEqual(denied.taken, { requests: 0, sessions: 0 });
   assert.equal(await stat(sessionsDirectory(deniedCtx.home)).then(() => true, () => false), false);
+});
+
+test('A bad line in a held-back file is reported in unreadLines each sweep and added to kept unread only once its position advances', async () => {
+  const ctx = await makeContext();
+  const file = join(ctx.home, '.claude', 'projects', '-work-app', 'held-bad.jsonl');
+  await put(file, [claudeResp('msg_good', '2026-11-24T12:00:00.000Z', claudeUsage(100, 0, 0, 10))]);
+  await sweepSessions(ctx, { rates: RATES_V1 });
+
+  const heldMonth = join(sessionsDirectory(ctx.home), '2026-09.json');
+  await writeFile(heldMonth, '{"formatVersion":2}\n');
+  await appendFile(file, `{bad-tail}\n${lines([
+    claudeResp('msg_sept_held', '2026-09-24T12:00:00.000Z', claudeUsage(100, 0, 0, 10)),
+    claudeResp('msg_nov_sibling', '2026-11-24T13:00:00.000Z', claudeUsage(150, 0, 0, 15)),
+  ])}`);
+
+  for (let retry = 1; retry <= 3; retry++) {
+    const res = await sweepSessions(ctx, { rates: RATES_V1 });
+    assert.equal(res.byTool['claude-cli'].unreadLines, 1, `retry ${retry} reports the bad line met`);
+    const kept = (await readSessionRecord(ctx.home, ['2026-11'])).months['2026-11']!.sessions[0]!;
+    assert.equal(kept.unread, 0, `retry ${retry} does not increment kept unread while file is held back`);
+    assert.ok(kept.requests['msg_nov_sibling'], 'accepted sibling landed');
+  }
+
+  await rm(heldMonth);
+  const cleared = await sweepSessions(ctx, { rates: RATES_V1 });
+  assert.equal(cleared.byTool['claude-cli'].unreadLines, 1);
+  const after = await readSessionRecord(ctx.home, ['2026-09', '2026-11']);
+  assert.equal(after.months['2026-09']!.sessions[0]!.unread, 1);
+  assert.equal(after.months['2026-11']!.sessions[0]!.unread, 1, 'unread added once when position advances');
+});
+
+test('An older Codex rollout rewritten shorter keeps its original receipt tokens and price under the older counter key', async () => {
+  const ctx = await makeContext();
+  const file = join(ctx.home, '.codex', 'sessions', '2026', '11', '24', 'rollout-legacy.jsonl');
+  const firstCount = codexCounter('2026-11-24T12:00:00.000Z', 100, 0, 20);
+  const secondCount = codexCounter('2026-11-24T12:00:01.000Z', 200, 0, 40);
+  await put(file, [codexMeta('legacy'), codexTurn('gpt-5', '2026-11-24T11:59:59.000Z'), firstCount, secondCount]);
+  await sweepSessions(ctx, { rates: RATES_V1 });
+
+  const before = (await readSessionRecord(ctx.home, ['2026-11'])).months['2026-11']!.sessions[0]!;
+  const secondKey = 'legacy 2026-11-24T12:00:01.000Z 240';
+  assert.deepEqual(before.requests[secondKey]!.tokens, { input: 100, cacheRead: 0, cacheWrite: 0, output: 20 });
+  const originalDollars = before.requests[secondKey]!.dollars;
+
+  // Rewrite shorter without the first counter: read from start, secondCount looks like (200, 40) whole, but its kept receipt must stay (100, 20).
+  await put(file, [codexMeta('legacy'), codexTurn('gpt-5', '2026-11-24T11:59:59.000Z'), secondCount]);
+  await sweepSessions(ctx, { rates: RATES_V1 });
+  const after = (await readSessionRecord(ctx.home, ['2026-11'])).months['2026-11']!.sessions[0]!;
+  assert.deepEqual(after.requests[secondKey]!.tokens, { input: 100, cacheRead: 0, cacheWrite: 0, output: 20 });
+  assert.equal(after.requests[secondKey]!.dollars, originalDollars);
+  const totalInput = Object.values(after.requests).reduce((sum, r) => sum + r.tokens.input, 0);
+  const totalOutput = Object.values(after.requests).reduce((sum, r) => sum + r.tokens.output, 0);
+  assert.deepEqual([totalInput, totalOutput], [200, 40]);
+});
+
+test('Reported figure completeness follows the page tree rule and keeps the largest figure across copies', async () => {
+  // (a) Corrupt subagent line marks parent reported incomplete (same sweep, and also when corruption arrives in a later sweep).
+  const ctxA = await makeContext();
+  const projA = join(ctxA.home, '.claude', 'projects', '-work-app');
+  await put(join(projA, 'parent.jsonl'), [
+    claudeResp('msg_p', '2026-11-24T12:00:00.000Z', claudeUsage(100, 0, 0, 10)),
+    claudeCost(0.25, false),
+  ]);
+  await mkdir(join(projA, 'parent', 'subagents'), { recursive: true });
+  await writeFile(
+    join(projA, 'parent', 'subagents', 'agent-x.jsonl'),
+    `${lines([claudeResp('msg_c', '2026-11-24T12:00:10.000Z', claudeUsage(50, 0, 0, 5))])}{broken-child\n`,
+  );
+  await sweepSessions(ctxA, { rates: RATES_V1 });
+  const parentA = (await readSessionRecord(ctxA.home, ['2026-11'])).months['2026-11']!.sessions.find(s => s.session === 'parent')!;
+  assert.deepEqual(parentA.reported, { dollars: 0.25, complete: false }, 'corrupt child marks parent reported incomplete');
+
+  // (b) Clean parent + child swept first, then child gains a corrupt line on Sweep 2 -> parent flips to complete: false.
+  const ctxB = await makeContext();
+  const projB = join(ctxB.home, '.claude', 'projects', '-work-app');
+  const childB = join(projB, 'root', 'subagents', 'agent-y.jsonl');
+  await put(join(projB, 'root.jsonl'), [
+    claudeResp('msg_r', '2026-11-24T12:00:00.000Z', claudeUsage(100, 0, 0, 10)),
+    claudeCost(0.4, false),
+  ]);
+  await put(childB, [claudeResp('msg_y', '2026-11-24T12:00:10.000Z', claudeUsage(50, 0, 0, 5))]);
+  await sweepSessions(ctxB, { rates: RATES_V1 });
+  assert.deepEqual(
+    (await readSessionRecord(ctxB.home, ['2026-11'])).months['2026-11']!.sessions.find(s => s.session === 'root')!.reported,
+    { dollars: 0.4, complete: true },
+  );
+  await appendFile(childB, '{corrupt-later\n');
+  await sweepSessions(ctxB, { rates: RATES_V1 });
+  assert.deepEqual(
+    (await readSessionRecord(ctxB.home, ['2026-11'])).months['2026-11']!.sessions.find(s => s.session === 'root')!.reported,
+    { dollars: 0.4, complete: false },
+    'later corrupt child line invalidates parent reported completeness',
+  );
+
+  // (c) Unreadable subagents listing (unreadSessions) blocks parent reported completeness, and two copies keep the largest figure.
+  const ctxC = await makeContext();
+  const origC = join(ctxC.home, '.claude', 'projects', 'a-orig', 'shared.jsonl');
+  const copyC = join(ctxC.home, '.claude', 'projects', 'b-copy', 'shared.jsonl');
+  await put(origC, [claudeResp('msg_s1', '2026-11-24T12:00:00.000Z', claudeUsage(100, 0, 0, 10)), claudeCost(0.55, false)]);
+  await put(copyC, [claudeResp('msg_s1', '2026-11-24T12:00:00.000Z', claudeUsage(100, 0, 0, 10)), claudeCost(0.15, false)]);
+  await sweepSessions(ctxC, { rates: RATES_V1 });
+  assert.deepEqual(
+    (await readSessionRecord(ctxC.home, ['2026-11'])).months['2026-11']!.sessions.find(s => s.session === 'shared')!.reported,
+    { dollars: 0.55, complete: true },
+    'largest reported figure wins across copies',
+  );
+  await sweepSessions(ctxC, {
+    rates: RATES_V1,
+    deps: {
+      listClaude: async () => ({ files: [{ file: origC, session: 'shared' }], unread: true, unreadSessions: ['shared'] }),
+    },
+  });
+  assert.deepEqual(
+    (await readSessionRecord(ctxC.home, ['2026-11'])).months['2026-11']!.sessions.find(s => s.session === 'shared')!.reported,
+    { dollars: 0.55, complete: false },
+    'unreadable subagents folder marks parent reported incomplete',
+  );
+});
+
+test('Unapplied facts (before first request, or when session month is held) do not advance the file position and apply once possible', async () => {
+  // (a) Cost line before the session's first request: position stays at 0 until the request arrives, so the figure is not lost.
+  const ctxA = await makeContext();
+  const early = join(ctxA.home, '.claude', 'projects', '-work-app', 'early.jsonl');
+  await put(early, [claudeCost(0.15, false)]);
+  const firstA = await sweepSessions(ctxA, { rates: RATES_V1 });
+  assert.equal(firstA.wrote, false);
+  assert.equal((await readSessionRecord(ctxA.home, ['2026-11'])).positions.files.length, 0, 'position did not pass unapplied figure');
+
+  await appendFile(early, lines([claudeResp('msg_first', '2026-11-24T15:00:00.000Z', claudeUsage(200, 0, 0, 20))]));
+  const secondA = await sweepSessions(ctxA, { rates: RATES_V1 });
+  assert.equal(secondA.taken.requests, 1);
+  const keptA = (await readSessionRecord(ctxA.home, ['2026-11'])).months['2026-11']!.sessions[0]!;
+  assert.deepEqual(keptA.reported, { dollars: 0.15, complete: true }, 'figure survived and attached to first request');
+
+  // (b) Facts-only correction when the session's only kept month (2026-10) is held: position stays old until 2026-10 is readable again.
+  const ctxB = await makeContext({ now: () => Date.UTC(2026, 9, 31, 23, 50, 0) });
+  const octFile = join(ctxB.home, '.claude', 'projects', '-work-app', 'oct-held.jsonl');
+  await put(octFile, [
+    claudeResp('msg_oct', '2026-10-31T23:45:00.000Z', claudeUsage(300, 0, 0, 30)),
+    claudeCost(0.1, false),
+  ]);
+  await sweepSessions(ctxB, { rates: RATES_V1 });
+  const octPath = join(sessionsDirectory(ctxB.home), '2026-10.json');
+  const savedOctBytes = await readFile(octPath);
+  const oldPos = (await readSessionRecord(ctxB.home, ['2026-10'])).positions.files[0]!;
+
+  await writeFile(octPath, '{"formatVersion":2}\n');
+  await appendFile(octFile, lines([claudeCost(0.25, true)]));
+  const novCtx = { ...ctxB, now: () => Date.UTC(2026, 10, 15, 12, 0, 0) };
+  const heldAttempt = await sweepSessions(novCtx, { rates: RATES_V1 });
+  assert.equal(heldAttempt.wrote, false);
+  assert.equal(heldAttempt.held.some(h => h.file === '2026-10.json'), true);
+  assert.deepEqual((await readSessionRecord(ctxB.home, ['2026-11'])).positions.files[0], oldPos, 'position did not pass unapplied correction');
+
+  await writeFile(octPath, savedOctBytes);
+  const applied = await sweepSessions(novCtx, { rates: RATES_V1 });
+  assert.equal(applied.wrote, true);
+  assert.deepEqual((await readSessionRecord(ctxB.home, ['2026-10'])).months['2026-10']!.sessions[0]!.reported, { dollars: 0.25, complete: false });
 });
