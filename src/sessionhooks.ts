@@ -1,6 +1,7 @@
-// A hook as the pages show it (hookLine, on a plugin's page and the Instructions page alike), and the strip on each tool's card on
-// the Instructions page, "Hooks that can add text" (Pi's packages, OpenCode's plugins), drawn by instructionspage.ts
-// sessionStripView. Pure: nothing here reads a file or runs a hook. Its facts:
+// A hook as the pages show it (hookLine, hookFingerprint, on a plugin's page and the Instructions page alike), the strip on
+// each tool's card on the Instructions page ("Hooks that can add text", Pi's packages, OpenCode's plugins; its info-card text
+// hookStripHelp and rendered note hookStripNote), and what a hook run's result says in words (hookRunWords), drawn by
+// instructionspage.ts sessionStripView and hooksourceview.ts. Pure: nothing here reads a file or runs a hook. Its facts:
 // - each plugin installed whole in the tool and On there, with its hooks as its installed copy declares them (HomeView
 //   pluginItems, read by pluginitems.ts readPluginItems);
 // - the person's own hooks, and Pi's packages and OpenCode's plugins, as the tool's own settings name them (InstructionFile
@@ -9,12 +10,19 @@
 // addsText, whenItRuns, and the tool's own note, sessionTextNote). A hook's text is known only when it runs, so the strip says
 // when it runs, never what it adds. Not listed: other kinds of hook (one that calls a URL or an MCP tool, or asks a model), a
 // project's or an organisation's hooks, a skill's or an agent's own hooks, and `additionalContext` printed by other events.
+import { clockTime } from './model.ts';
 import { addsText, ignoresText, sessionTextNote, textEventsWords, whenItRuns } from './pluginoutcomes.ts';
 import { commandLine, toolNames } from './words.ts';
-import type { DeclaredHook, HarnessId, HookSourceOwner, HookSourceRef, InstalledPlugin, InstructionFile } from './types.ts';
+import type { DeclaredHook, HarnessId, HookRunResult, HookSourceOwner, HookSourceRef, InstalledPlugin, InstructionFile } from './types.ts';
 
 /** How a hook starts, in one line: its shell command as written, or its program with its arguments; '' for one that starts nothing here. */
 export const hookLine = (hook: DeclaredHook) => (!hook.launch ? '' : 'shell' in hook.launch ? hook.launch.shell : commandLine(hook.launch.program, hook.launch.args));
+
+/** Canonical fingerprint of every field of a hook's declaration that decides how it runs (checked by hooksource.ts findHook and keyed on the page). */
+export function hookFingerprint(hook: DeclaredHook): string {
+  const env = hook.env ? Object.entries(hook.env).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)) : null;
+  return JSON.stringify([hook.event, hook.matcher ?? null, hook.type ?? null, hook.shell ?? null, hook.launch ?? null, hook.cwd ?? null, env, hook.timeout ?? null]);
+}
 
 /** How many colours a plugin's or an extension's mark is drawn in: style.css .origin-0 onwards, light and dark. */
 export const ORIGIN_COLOURS = 8;
@@ -62,7 +70,7 @@ export function sessionStrip(tool: HarnessId, items: InstalledPlugin[], file: Pi
   const rows = (hooks: DeclaredHook[] = [], owner: HookSourceOwner) =>
     hooks.filter(hook => addsText(tool, hook)).map(hook => {
       const command = hookLine(hook);
-      return { when: whenItRuns(tool, hook), command, source: { ...owner, declaredIn: hook.declaredIn, event: hook.event, at: hook.at, command } };
+      return { when: whenItRuns(tool, hook), command, source: { ...owner, declaredIn: hook.declaredIn, event: hook.event, at: hook.at, command, fingerprint: hookFingerprint(hook) } };
     });
   const plugins = items.filter(install => install.tool === tool && !install.off)
     .sort((first, second) => first.plugin.localeCompare(second.plugin) || first.marketName.localeCompare(second.marketName));
@@ -85,4 +93,87 @@ export function sessionStrip(tool: HarnessId, items: InstalledPlugin[], file: Pi
     ? { heading: `${word[0]!.toUpperCase()}${word.slice(1)} that can add text`, about: `${toolNames[tool]} loads these ${word} into every session, and they can add text to it; what they add is known only when they run.`, groups }
     : { heading: 'Hooks that can add text', groups, ...(note ? { note } : {}),
       about: `These hooks run a program ${textEventsWords(tool)}, and what it prints can be added to the session; that is known only when it runs. Other kinds of hook (one that calls a URL or an MCP tool), and a project’s or an organisation’s hooks, aren’t listed.` };
+}
+
+/** Standing line above the first row of every strip that has a runnable hook. */
+export const HOOK_RUN_WARN = 'Run it runs the command for real. It may change your files.';
+
+/** Information-mark card text on the first hooks strip of a page (30 words at most). */
+export function hookStripHelp(tool: HarnessId, runnable: boolean): string {
+  const when = tool === 'copilot-cli' ? 'Session-start' : 'Session-start and prompt';
+  const base = `${when} command hooks; URL, MCP, project and organisation hooks aren’t listed.`;
+  return runnable ? `${base} Run it runs in your home folder, or in the folder the hook names.` : base;
+}
+
+/** Note rendered under a hooks strip's heading: T2.28's tool lines replace strip.note where they apply. */
+export function hookStripNote(tool: HarnessId, strip: Pick<SessionStrip, 'note' | 'groups'>, runnable: boolean): string | undefined {
+  if (tool === 'codex-cli' && runnable) return 'Codex: Run it runs a hook even if it isn’t trusted in `/hooks`.';
+  if (tool === 'copilot-cli' && !strip.groups.length) return 'Copilot CLI ignores what prompt hooks print.';
+  return strip.note ? `${strip.note}.` : undefined;
+}
+
+const KEEP_CAP = /^(?:Central Knot|Claude Code|Codex|Copilot CLI|Windows)\b/;
+const lowerLead = (text: string) => (KEEP_CAP.test(text) ? text : text.replace(/^[A-Z](?=[a-z])/, ch => ch.toLowerCase()));
+
+/** What a hook run's result block shows (sentence, quiet trailing run place/time, notes, and output slots), pure. */
+export interface HookRunView {
+  sentence: string;
+  meta?: string;
+  notes: string[];
+  added?: string;
+  allFold?: string;
+  errFold?: string;
+  errDirect?: string;
+}
+
+/** Maps one HookRunResult to its exact sentence, quiet trailing place/time, notes, and stdout/stderr display slots. */
+export function hookRunWords(tool: HarnessId, result: HookRunResult, shownCwd: string, time = clockTime(result.at)): HookRunView {
+  if (result.outcome === 'refused') return { sentence: result.problem ? `Not run: ${lowerLead(result.problem)}` : 'Couldn’t run it.', notes: [] };
+  const place = shownCwd || '~';
+  const promptPart = result.emptyPrompt ? ' with an empty prompt' : '';
+  const meta = result.outcome === 'missing' || result.detail === 'spawn-error' ? `tried at ${time}` : `run in ${place}${promptPart}, ${time}`;
+  const err = result.stderr || undefined;
+  const out = result.allPrinted || undefined;
+  const view = (sentence: string, more: Partial<HookRunView> = {}): HookRunView => ({ sentence, meta, notes: [], ...more });
+  if (result.outcome === 'adds') {
+    const notes: string[] = [];
+    if (tool === 'codex-cli') notes.push('Codex adds it only once trusted in /hooks.');
+    if (result.overLimit) {
+      const unit = result.overLimit.unit === 'chars' ? 'characters' : 'tokens';
+      const limit = result.overLimit.limit.toLocaleString('en-US');
+      notes.push(`Longer than ${toolNames[tool]}’s limit of ${limit} ${unit}: it would add only part.`);
+    }
+    const added = result.added ?? '';
+    const allFold = out && out.trim() !== added.trim() ? out : undefined;
+    return view('Would add', { notes, added, allFold, errFold: err });
+  }
+  if (result.outcome === 'empty') {
+    const why = result.allPrinted.length ? 'it printed only blank lines.' : 'it printed nothing.';
+    return view(`Would add nothing: ${why}`, { errDirect: err });
+  }
+  if (result.outcome === 'copilot-ignored') return view('Copilot CLI would ignore this: no top-level additionalContext.', { allFold: out, errDirect: err });
+  if (result.outcome === 'claude-exit-2') {
+    const hasErr = !!err?.trim();
+    const what = result.emptyPrompt
+      ? (hasErr ? 'Claude Code would block the prompt and show this error.' : 'Claude Code would block the prompt.')
+      : (hasErr ? 'Claude Code would show you this error and add nothing.' : 'Claude Code would add nothing.');
+    return view(`Exited 2: ${what}`, { errDirect: hasErr ? err : undefined });
+  }
+  if (result.outcome === 'failed' || result.detail === 'codex-prompt-exit-2') {
+    const lead = result.signal ? `Ended by ${result.signal}: it` : result.exitCode !== undefined ? `Exited ${result.exitCode}: it` : 'It';
+    return view(`${lead} would add nothing.`, { allFold: out, errDirect: err });
+  }
+  if (result.outcome === 'timeout') {
+    const after = result.limitSec !== undefined ? `after ${result.limitSec} s, its time limit` : 'at its time limit';
+    return view(`Stopped ${after}: it would add nothing.`, { errDirect: err });
+  }
+  if (result.outcome === 'stopped') return view('Stopped. What it changed stays; a program it started may still be running.');
+  if (result.outcome === 'missing') return view(result.program ? `Couldn’t start: ${result.program} not found.` : 'Couldn’t start.');
+  if (result.detail === 'spawn-error') return view(result.problem ? `Couldn’t start: ${result.problem}` : 'Couldn’t start.', { errDirect: err });
+  const detailLine = result.detail === 'json-no-context' ? 'Would add nothing: its JSON has no additionalContext.'
+    : result.detail === 'json-block' ? 'Would add nothing: its JSON says to block or stop.'
+    : result.detail === 'invalid-json' ? `Would add nothing: ${toolNames[tool]} can’t read its JSON.`
+    : result.detail === 'overflow' ? 'Stopped: it printed more than Central Knot reads.'
+    : 'Would add nothing.';
+  return view(detailLine, { allFold: out, errDirect: err });
 }

@@ -17,7 +17,7 @@ import { hasCowork, pluginTools, takesPlugins } from './presence.ts';
 import { applyPluginOps, market, openLink, shownDetail, toggleOpened, usePlugins } from './pluginstate.ts';
 import type { Components, DeclaredHook, HarnessId, HookSourceRef, MarketplaceView, Outcome, PluginDetail, PluginItemLine, PluginView, PluginsView, YourName } from './types.ts';
 import { hookSourceControls } from './hooksourceview.ts';
-import { hookLine } from './sessionhooks.ts';
+import { hookFingerprint, hookLine } from './sessionhooks.ts';
 import { plural } from './model.ts';
 import { andList, coworkWords, toolNames as names } from './words.ts';
 import { openKind } from './matrix.ts';
@@ -253,7 +253,7 @@ function hookGroup(owner: string, groupId: string, marketName: string, plugin: s
   const rows = hooks.map((hook, row) => {
     const command = hookLine(hook);
     return { name: hook.event, text: command, mono: true, key: `${hook.event}\u0000${row}`, sourceId: `${groupId}-${row}`,
-      source: { from: 'marketplace' as const, marketName, plugin, declaredIn: hook.declaredIn, event: hook.event, at: hook.at, command } };
+      source: { from: 'marketplace' as const, marketName, plugin, declaredIn: hook.declaredIn, event: hook.event, at: hook.at, command, fingerprint: hookFingerprint(hook) } };
   });
   return rows.length ? h('div.plugin-group', {}, h('h4', {}, `${title} (${rows.length})`), about ? h('p.plugin-group-note', {}, about) : null, partList(owner, rows)) : null;
 }

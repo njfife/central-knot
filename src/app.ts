@@ -980,6 +980,7 @@ export async function readAgain() {
   // What a list of plugin clicks said is not restated over a home read again, nor a line's result (pluginstate.ts LineResult).
   endListNews();
   forgetResults();
+  resetHookSources();
   await busy(noToolManaged() ? 'Reading…' : `Reading ${heldKindNames()}…`, async () => {
     const view = await api().refresh(true);
     if (!view) return;

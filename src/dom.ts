@@ -118,8 +118,8 @@ function selectIn(text: Element, anchor: number, focus: number) {
 
 /** A pressed control a redraw may replace, as the press (the pointer's or Space's) found it (keepClicksAcrossRedraws). */
 interface Held { control: Element; id: string; says: string | null; where: string; disabled: boolean }
-/** A press of the main button, from the press to its release: the pointer that pressed, and on a text the character it landed on. */
-interface Press extends Held { pointer: number; at?: number; dragged: boolean }
+/** A press of the main button, from the press to its release: the pointer that pressed, its click count, and on a text the character it landed on. */
+interface Press extends Held { pointer: number; at?: number; dragged: boolean; detail: number }
 let pressed: Press | undefined;
 /** A text's release whose own click is still to come, in the same task (the Mac measured it): was it a drag (pressWasDrag). */
 let released: { id: string; drag: boolean } | undefined;
@@ -152,17 +152,21 @@ const isDrag = (press: Press, releasedAt: number | undefined) => press.dragged |
  * A window that loses the focus ends Space's record: its key-up goes to the other window.
  */
 export function keepClicksAcrossRedraws(where: () => string): void {
-  const held = (control: Element): Held => ({ control, id: control.id, says: says(control), where: where(), disabled: control.matches(':disabled') });
+  const isDisabled = (control: Element) => control.matches(':disabled') || control.getAttribute('aria-disabled') === 'true';
+  const held = (control: Element): Held => ({ control, id: control.id, says: says(control), where: where(), disabled: isDisabled(control) });
   const nowThere = (press: Held) => {
     if (press.control.isConnected) return press.control;
     const now = document.getElementById(press.id);
-    return now && !press.disabled && !now.matches(':disabled') && says(now) === press.says && where() === press.where ? now : null;
+    return now && !press.disabled && !isDisabled(now) && says(now) === press.says && where() === press.where ? now : null;
   };
   document.addEventListener('pointerdown', event => {
     const control = event.button === 0 ? (event.target as Element | null)?.closest?.('button[id], pre[id]') : null;
     const at = control?.matches('pre') ? offsetIn(control, event.clientX, event.clientY) : undefined;
     released = undefined;
-    pressed = control ? { ...held(control), pointer: event.pointerId, at, dragged: event.shiftKey } : undefined;
+    pressed = control ? { ...held(control), pointer: event.pointerId, at, dragged: event.shiftKey, detail: event.detail || 1 } : undefined;
+  }, true);
+  document.addEventListener('mousedown', event => {
+    if (pressed && event.button === 0 && event.detail > 0) pressed.detail = event.detail;
   }, true);
   document.addEventListener('pointermove', event => {
     const text = pressed?.at !== undefined && event.pointerId === pressed.pointer && event.buttons & 1 ? nowThere(pressed) : null;
@@ -176,7 +180,7 @@ export function keepClicksAcrossRedraws(where: () => string): void {
     const now = nowThere(was), text = was.at !== undefined, at = text && now ? offsetIn(now, event.clientX, event.clientY) : undefined;
     if (now === was.control) { if (text) released = { id: was.id, drag: isDrag(was, at) }; return; }
     if (!now) { if (text) getSelection()?.removeAllRanges(); return; }
-    const click = () => now.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: event.clientX, clientY: event.clientY, shiftKey: event.shiftKey }));
+    const click = () => now.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: event.clientX, clientY: event.clientY, detail: was.detail, shiftKey: event.shiftKey }));
     if (!text) { if (now.contains(event.target as Node)) click(); }
     else if (!isDrag(was, at)) click();
     else if (at === undefined) getSelection()?.removeAllRanges();

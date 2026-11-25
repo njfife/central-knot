@@ -569,9 +569,9 @@ test('Gates and refusals: wrong home mode, Windows, uninstalled tool, plugin hoo
     assert.equal(winRes.outcome, 'refused');
     assert.match(winRes.problem ?? '', /Windows/);
     // Plugin hooks refused in A1.
-    const pluginRef: HookSourceRef = { from: 'installed', tool: 'claude-cli', plugin: 'p', marketName: 'm', declaredIn: '/x', event: 'SessionStart', at: 0, command: 'echo x' };
+    const pluginRef: HookSourceRef = { from: 'installed', tool: 'claude-cli', plugin: 'p', marketName: 'm', declaredIn: '/x', event: 'SessionStart', at: 0, command: 'echo x', fingerprint: 'fp' };
     assert.equal((await runHook(box.ctx(), pluginRef)).outcome, 'refused');
-    const marketRef: HookSourceRef = { from: 'marketplace', plugin: 'p', marketName: 'm', declaredIn: '/x', event: 'SessionStart', at: 0, command: 'echo x' };
+    const marketRef: HookSourceRef = { from: 'marketplace', plugin: 'p', marketName: 'm', declaredIn: '/x', event: 'SessionStart', at: 0, command: 'echo x', fingerprint: 'fp' };
     assert.equal((await runHook(box.ctx(), marketRef)).outcome, 'refused');
     // Uninstalled tool refused (codex not installed in this sandbox).
     await put(join(box.home, '.codex/hooks.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: `echo codex >> ${JSON.stringify(marker)}` }] }] } }));
@@ -582,7 +582,7 @@ test('Gates and refusals: wrong home mode, Windows, uninstalled tool, plugin hoo
     // Unmatched start matcher, unsupported Claude shell, non-text event refused.
     assert.equal((await runHook(box.ctx(), await box.ownRef('claude-cli', 1))).outcome, 'refused');
     assert.equal((await runHook(box.ctx(), await box.ownRef('claude-cli', 2))).outcome, 'refused');
-    const preRef: HookSourceRef = { from: 'own', tool: 'claude-cli', declaredIn: settings, event: 'PreToolUse', at: 0, command: `echo pre >> ${JSON.stringify(marker)}` };
+    const preRef: HookSourceRef = { from: 'own', tool: 'claude-cli', declaredIn: settings, event: 'PreToolUse', at: 0, command: `echo pre >> ${JSON.stringify(marker)}`, fingerprint: 'fp' };
     assert.equal((await runHook(box.ctx(), preRef)).outcome, 'refused');
 
     // disableAllHooks: View source still reads it, Run it refuses.
