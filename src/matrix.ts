@@ -9,7 +9,7 @@
 // Usage, collected when a home opens and on Update usage statistics (app.ts collectUsage): when it was collected and the button
 // at the toolbar's end, a band an Update opens (closed by its button), a figure on each row and a line per tool in
 // an opened row, the Last used and Most used orders (which a reading that lands never redraws: holdOrder), and the "No use seen in 30 days"
-// chip with its band and one Turn these off (built from each row's own Off: rowClicks.off); what the reading says of a row, and
+// chip with its band and one Turn N off everywhere (built from each row's own Off: rowClicks.off); what the reading says of a row, and
 // the chip's rule, are usagerow.ts's.
 // A table is told the kinds it lists and its tool by its caller (useLibrary, useTab give a Table): the Library's, its segment's
 // kinds (its kind switch: kindSwitch; the segment is app.ts state.libraryKind), a tab's, its one kind. Its view is kept here
@@ -31,9 +31,9 @@
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, noticeNames, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
-import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, pageNames, profileLeftUse, rowNames, rowNouns, saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind } from './words.ts';
+import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, pageNames, rowNames, rowNouns, saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind } from './words.ts';
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
-import { copilotSharesYours, endedProfiles, homeItems, inUse, inUseInHome, itemId, pluginLive } from './profileplan.ts';
+import { copilotSharesYours } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
 import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, writeOff, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
@@ -417,6 +417,8 @@ const newView = () => ({
   openedAt: 0,
   /** The Files view's "Where each copy is", once the person opens or closes it; until then it follows the pane's width. */
   whereOpen: undefined as boolean | undefined,
+  /** Whether the unused band's "Limits and left out" disclosure is open. */
+  unusedLimits: false,
 });
 /** What one table keeps between draws. */
 type View = ReturnType<typeof newView>;
@@ -429,7 +431,7 @@ const views: Record<PageKind | 'library', View> = { library: newView(), skills: 
 export const showFiltered = (which: PageKind, filter: Filter, harness: Tool) => { startFresh(views[which], harness); views[which].filter = filter; };
 /** A view drawn for another place (a tool's tab, or the Library) starts with no filter, From, Find text, open row or menu from the last one. */
 function startFresh(table: View, harness: Tool | undefined) {
-  Object.assign(table, { filter: 'all', from: 'anywhere', comparing: undefined, shownFor: harness });
+  Object.assign(table, { filter: 'all', from: 'anywhere', comparing: undefined, shownFor: harness, unusedLimits: false });
   newFind(table, '');
 }
 /**
@@ -528,6 +530,7 @@ const fromOffered = (from: From) => fromMenu().flat().some(entry => entry.value 
  */
 function relist(t: Table, choice: Partial<Pick<View, 'from' | 'filter'>>) {
   Object.assign(t.view, choice);
+  if (choice.filter && choice.filter !== 'unused') t.view.unusedLimits = false;
   if (!listedRows(t).some(row => idOf(row) === t.view.comparing)) Object.assign(t.view, { comparing: undefined, confirmDelete: undefined });
   listFromTop(t);
   rerender();
@@ -581,6 +584,14 @@ const sharedNames = (t: Table) => {
   return new Set([...kindsOf].filter(([, rows]) => new Set(rows.map(kindOf)).size > 1).map(([name]) => name));
 };
 
+/** How many rows of `kind` Find, From and the chip leave (shared by kindSwitch and unusedBand). */
+const segmentCount = (t: Table, kind: PageKind, view = t.view) => listedRows({ ...t, kinds: [kind], view }).length;
+/** Switches the Library's segment, keeping Find, From and the chip, and writing nothing (shared by kindSwitch and unusedBand). */
+const pickSegment = (id: PageKind | 'all') => () => {
+  state.libraryKind = id;
+  rerender();
+};
+
 /**
  * The Library's kind switch, first in its toolbar: All and each kind a managed tool here can hold (presence.ts heldKinds), its
  * words always shown (dom.ts fitBars folds the chips' words first, then the captions of From and Sort, then wraps the bar, the
@@ -591,14 +602,15 @@ const sharedNames = (t: Table) => {
 function kindSwitch(t: Table) {
   const home = state.home, kinds = home ? heldKinds(home) : [];
   if (!home || t.tool || kinds.length < 2) return null;
-  const every: Table = { ...t, kinds }, count = (kind: PageKind, view = t.view) => listedRows({ ...every, kinds: [kind], view }).length;
+  const every: Table = { ...t, kinds };
+  const count = (kind: PageKind, view = t.view) => segmentCount(every, kind, view);
   const whole = (kind: PageKind) => count(kind, { ...t.view, filter: 'all', from: 'anywhere', find: '' });
   const unread = (kind: PageKind) => notAllRead(home, kind);
   // A kind not on show whose automatic change wasn't painted is marked, as the sidebar's dot says (renderer.ts).
   const news = (id: PageKind | 'all') => id !== 'all' && !t.kinds.includes(id) && unseenNotices(id).length > 0;
   const choice = (id: PageKind | 'all', label: string, glyph: IconName, counted: number, most: number, unsure: boolean) => h(`button.kind-seg${segment() === id ? '.kind-seg-on' : ''}`, {
     type: 'button', id: `library-kind-${id}`, 'aria-pressed': String(segment() === id), title: unsure ? `${label}: ${counted} known; some couldn’t be read` : news(id) ? `${label}: an automatic change to see` : undefined,
-    onclick: () => { state.libraryKind = id; rerender(); } }, icon(glyph, 13, 'tone-muted'), h('span.kind-seg-label', {}, label), heldCount('span.kind-seg-count', `${counted}${unsure ? '?' : ''}`, most), news(id) ? h('span.kind-seg-news') : null);
+    onclick: pickSegment(id) }, icon(glyph, 13, 'tone-muted'), h('span.kind-seg-label', {}, label), heldCount('span.kind-seg-count', `${counted}${unsure ? '?' : ''}`, most), news(id) ? h('span.kind-seg-news') : null);
   const sum = (each: (kind: PageKind) => number) => kinds.reduce((total, kind) => total + each(kind), 0);
   return h('div.kind-switch', { role: 'group', 'aria-label': 'Kind' }, choice('all', 'All', 'layers', sum(count), sum(whole), kinds.some(unread)),
     ...kinds.map(kind => choice(kind, kindNouns[kind].title, kindGlyph[kind], count(kind), whole(kind), unread(kind))));
@@ -1237,7 +1249,7 @@ function forgetOtherHomes(t: Table, name: keyof typeof views) {
   if (now === was) return;
   tableHomes[name] = now;
   // A view's first table has no other home's to forget (a link may have opened its row before it was drawn).
-  if (was !== undefined) Object.assign(t.view, { comparing: undefined, confirmDelete: undefined, from: 'anywhere' });
+  if (was !== undefined) Object.assign(t.view, { comparing: undefined, confirmDelete: undefined, from: 'anywhere', unusedLimits: false });
 }
 
 // ---------- See change: what an edit did, before Undo ----------
@@ -1567,7 +1579,10 @@ function tableOf(name: keyof typeof views, kinds: PageKind[], harness?: Tool, fi
   if (pinnedHere(t).rows.size > 0) return t;
   const over = overEveryKind(t);
   if (t.view.filter === 'attention' && !copiesDifferChipShown(over)) t.view.filter = 'all';
-  if (t.view.filter === 'unused' && (!reading(over) || !unusedCount(over.kinds))) t.view.filter = 'all';
+  if (t.view.filter === 'unused' && (!reading(over) || !unusedCount(over.kinds))) {
+    t.view.filter = 'all';
+    t.view.unusedLimits = false;
+  }
   return t;
 }
 /** The segment the Library was last drawn for (useLibrary), so another one starts its list afresh. */
@@ -1583,6 +1598,7 @@ function useLibrary(): Table {
   const t = tableOf('library', segmentKinds());
   if (!moved) return t;
   view.confirmDelete = undefined;
+  view.unusedLimits = false;
   if (view.comparing && ![...rowsIn(t), ...plugged(t).rows].some(row => idOf(row) === view.comparing)) view.comparing = undefined;
   return t;
 }
@@ -2428,14 +2444,33 @@ export function unusedCount(kinds: readonly PageKind[]): number {
 }
 
 /**
- * The chip's band. Its lead: how many it holds, Turn these off and what it does (it skips a plugin's items and items linked to
- * a plugin), and a profile it stops being in use. Then, fainter: that a use elsewhere isn't seen, how far back each tool's
- * history goes, which of this page's tools never or not always record this kind, and what it left out (new, found). Turn these
- * off at the band's end.
+ * The chip's band: one line with the count, a keyboard-accessible "Limits and left out" disclosure (other computers, unread
+ * tools, each tool's reach, recording limits and excluded new/found items) and "Turn N off everywhere" (skipping plugin items
+ * and items linked to a plugin). When the current kind runs out while other kinds still have unused items, names the rest with
+ * a segment button ("Show Agents" or "Show all N"); omitted when Find or From leaves none.
  */
 function unusedBand(t: Table, shown: ItemRow[]) {
   const read = reading(t), home = state.home, sums = kindParts(t).flatMap(({ kind, usage }) => (usage ? [{ kind, sum: usage }] : []));
   if (!read || !home || !sums.length) return null;
+  if (!shown.length) {
+    const current = segment();
+    if (t.tool || current === 'all' || t.view.find.trim() || t.view.from !== 'anywhere') return null;
+    const other = heldKinds(home)
+      .filter(kind => kind !== current)
+      .map(kind => ({ kind, count: segmentCount(t, kind) }))
+      .filter(each => each.count > 0);
+    if (!other.length) return null;
+    const total = other.reduce((sum, each) => sum + each.count, 0);
+    const rest = andList(other.map(({ kind, count }) => plural(count, kindNouns[kind].one, kindNouns[kind].many)));
+    const lead = `No unused ${kindNouns[current].many} left. ${rest} ${total === 1 ? 'has' : 'have'} no use seen in ${USAGE_DAYS} days.`;
+    const target = other.length === 1 ? other[0]!.kind : 'all';
+    const label = other.length === 1 ? `Show ${kindNouns[other[0]!.kind].title}` : `Show all ${total}`;
+    const show = button({ variant: 'outline', size: 'micro', label, id: 'unused-show-other', onclick: pickSegment(target) });
+    return h('div.band.usage-band', { role: 'status', id: 'unused-band' },
+      icon('history', 14, 'tone-muted'),
+      h('span.band-text', {}, h('span.usage-lead', {}, lead)),
+      show);
+  }
   // How many, in the nouns of the kinds counted ("3 skills", or "3 items" of several kinds: words.ts rowNouns).
   const counted = (rows: { kind: PageKind }[]) => { const { one, many } = rowNouns(rows.map(row => row.kind)); return plural(rows.length, one, many); };
   const left = (pick: (sum: KindUsage) => unknown[]) => sums.flatMap(({ kind, sum }) => pick(sum).map(() => ({ kind })));
@@ -2446,19 +2481,28 @@ function unusedBand(t: Table, shown: ItemRow[]) {
     const list = read.tools.filter(each => toolsFor(t, kind).includes(each.tool) && each.sessions && !each.unread && each.tells[partOfPage[kind]] === how).map(each => each.tool);
     return list.length ? `${toolsInWords(list)} ${list.length === 1 ? 'doesn’t' : 'don’t'}${word} record which ${kindNouns[kind].one} was used.` : '';
   }).filter(Boolean).join(' ');
-  const plugins = pluginLive(home), live = homeItems(home, plugins), ids = new Set(off.map(skill => itemId(partOfPage[skill.kind], skill.key)));
-  const ending = endedProfiles(inUseInHome(home), inUse(home.profiles.profiles, live.map(item => (ids.has(item.id) ? { ...item, on: false } : item)), plugins));
-  const lead = [`${counted(shown)} with no use seen in the last ${USAGE_DAYS} days.`,
-    off.length ? 'Turn these off: Central Knot takes its copies out of every tool it manages and keeps them; Undo turns them all back on.' : '',
-    kept.length ? `${counted(kept)} from a plugin skipped: turn each off on its own row.` : '',
-    ending.length ? `With these off, ${profileLeftUse(ending.map(profile => profile.name), 'stops')}` : ''];
+  const lead = [`${shown.length} with no use seen in ${USAGE_DAYS} days.`, kept.length ? `${kept.length} from a plugin skipped.` : ''].filter(Boolean).join(' ');
+  const open = t.view.unusedLimits;
+  const toggleLimits = h('button.inline-link.usage-limits-toggle', {
+    type: 'button',
+    id: 'unused-limits-toggle',
+    'aria-expanded': String(open),
+    ...(open ? { 'aria-controls': 'unused-limits' } : {}),
+    onclick: () => {
+      t.view.unusedLimits = !open;
+      rerender();
+    },
+  }, 'Limits and left out', icon(open ? 'chevron-down' : 'chevron-right', 12));
   const more = ['A use on another computer or in a tool not read isn’t seen.', reachWords(read), record('seen', ' always'), record(undefined, ''),
     fresh.length ? `Left out: ${counted(fresh)} under ${USAGE_DAYS} days old.` : '', found.length ? `Left out: ${counted(found)} found, not yet in Central Knot.` : ''];
-  const turn = off.length ? button({ variant: 'outline', size: 'micro', label: 'Turn these off', id: 'turn-unused-off',
+  const turn = off.length ? button({ variant: 'outline', size: 'micro', label: `Turn ${off.length} off everywhere`, id: 'turn-unused-off',
     // The home's gate: a kind whose own record stops its writes is skipped and named by the click (app.ts applyByKind).
     disabled: writeOff(homeStops()) || state.usage.state === 'reading', onclick: () => turnTheseOff(off) }) : null;
-  return h('div.band.usage-band', { role: 'status', id: 'unused-band' }, icon('history', 14, 'tone-muted'),
-    h('span.band-text', {}, h('span.usage-lead', {}, lead.filter(Boolean).join(' ')), h('span.usage-more', {}, more.filter(Boolean).join(' '))), turn);
+  return h('div.band.usage-band', { role: 'status', id: 'unused-band' },
+    icon('history', 14, 'tone-muted'),
+    h('span.band-text', {}, h('span.usage-lead', {}, lead), toggleLimits),
+    turn,
+    open ? h('span.usage-more', { id: 'unused-limits' }, more.filter(Boolean).join(' ')) : null);
 }
 
 /** The rows Turn these off takes of those the chip shows: all but a plugin's items and items linked to a plugin, each left to its own row (usagerow.ts leftToItsRow). */
@@ -2956,5 +3000,6 @@ document.addEventListener('keydown', event => {
   const t = useTableShown(), view = t?.view;
   if (id === 'skills-find' && view?.listFind) { view.listFind = ''; rerender(); }
   else if (id === 'find' && t && view?.find) findTyped(t, '');
+  else if (id === 'unused-limits-toggle' && view?.unusedLimits) { view.unusedLimits = false; rerender(); }
   else if (state.page === 'library' && state.libraryView === 'list' && selecting()) { if (!cancelAsk()) stopSelecting(); rerender(); }
 });

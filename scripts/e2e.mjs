@@ -9035,7 +9035,7 @@ esac
     same(`${chip}, with spare: its count is the Library’s rows’ alone, and the group shows under no chip`, [count, drawn], { 'chip-attention': ['0', null], 'chip-unused': ['1', null] }[chip]);
     if (chip === 'chip-unused') {
       const before = readFileSync(join(H.home, '.claude/plugins/installed_plugins.json'), 'utf8');
-      check('No use seen’s band counts spare alone, with Turn these off', (await a.text('#unused-band .usage-lead') ?? '').startsWith('1 skill with no use seen') && await a.exists('#turn-unused-off'), await a.text('#unused-band'));
+      check('No use seen’s band counts spare alone, with Turn 1 off everywhere', (await a.text('#unused-band .usage-lead') ?? '') === '1 with no use seen in 30 days.' && (await a.text('#turn-unused-off'))?.trim() === 'Turn 1 off everywhere', await a.text('#unused-band'));
       await a.click('#turn-unused-off');
       await done();
       await until(() => a.exists('#outcome-undo'));
@@ -10237,10 +10237,14 @@ async function usageFlow() {
   same('after a reading, the chip counts what has no use seen in 30 days, old enough', await a.all('.chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]'), [['No use seen in 30 days', '2']]);
   await a.click('.chip[data-tip="No use seen in 30 days"]');
   same('with the chip on, the table holds standup and spare', await sectionsNow(a, 'skills'), [['on', ['standup', 'spare']]]);
-  same('its band leads with how many, what Turn these off does and the profile it ends; then, fainter, that a use elsewhere isn’t seen, how far back each tool’s history goes, what Codex doesn’t always record and the new one left out',
-    [await a.text('#unused-band .usage-lead'), (await a.text('#unused-band .usage-more'))?.replace(/ /g, ' ').replace(/from \w+ \d+/g, 'from <day>')],
-    ['2 skills with no use seen in the last 30 days. Turn these off: Central Knot takes its copies out of every tool it manages and keeps them; Undo turns them all back on. With these off, Everyday stops being the profile in use.',
-      'A use on another computer or in a tool not read isn’t seen. Each tool’s history: Claude Code, 30 days or more; Copilot CLI, from <day>; Codex, from <day>. Codex doesn’t always record which skill was used. Left out: 1 skill under 30 days old.']);
+  same('its band is one line with the count, disclosure closed, and Turn 2 off everywhere; opening the disclosure reveals limits and left-out items',
+    [await a.text('#unused-band .usage-lead'), (await a.text('#unused-limits-toggle'))?.trim(), await a.run(`document.querySelector('#unused-limits-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-limits'), (await a.text('#turn-unused-off'))?.trim()],
+    ['2 with no use seen in 30 days.', 'Limits and left out', 'false', false, 'Turn 2 off everywhere']);
+  if (await a.exists('#unused-limits-toggle')) await a.click('#unused-limits-toggle');
+  same('the opened disclosure shows other computers, each tool’s history, what Codex doesn’t always record and the new one left out',
+    [await a.run(`document.querySelector('#unused-limits-toggle')?.getAttribute('aria-expanded')`), (await a.text('#unused-limits'))?.replace(/ /g, ' ').replace(/from \w+ \d+/g, 'from <day>')],
+    ['true', 'A use on another computer or in a tool not read isn’t seen. Each tool’s history: Claude Code, 30 days or more; Copilot CLI, from <day>; Codex, from <day>. Codex doesn’t always record which skill was used. Left out: 1 skill under 30 days old.']);
+  if (await a.exists('#unused-limits-toggle')) await a.click('#unused-limits-toggle');
   same('Turn these off sits at the band’s end, at 1280 and 2560 alike', await (async () => { const ends = []; for (const [width, height] of [[1280, 800], [2560, 1440]]) { await sizeTo(a, width, height);
     ends.push(await a.run(`Math.round(document.querySelector('#unused-band').getBoundingClientRect().right - document.querySelector('#turn-unused-off').getBoundingClientRect().right)`)); } await fullSize(a); return ends[0] === ends[1]; })(), true);
   await fitsAtMinimum(a, 'Skills with the No use seen chip on and its band');
@@ -10550,6 +10554,200 @@ async function usageFlow() {
   same('with no unused items left, the usage strip shows no unused link', [await a.exists('#overview-unused'), await a.all('.kind-card button[id$="-unused"]', 'e.id'), /^Usage collected today at [^.]+\. Update usage statistics$/.test(await usageSaid() ?? '')], [false, [], true]);
   same('no page errors, the Overview', a.pageErrors, []);
   await a.quit();
+  // ---------- Step UX-1A: one-line unused band (8 shown, 2 skipped, 6 turned off; keyboard disclosure; two ended profiles; emptied kind -> Show Agents / Show all N; Find/From miss -> no band) ----------
+  {
+    const uxHome = join(scratch, 'ux1a-home'), uxData = join(scratch, 'ux1a-data'), uxReal = join(scratch, 'ux1a-real');
+    for (const folder of [uxHome, uxData, uxReal]) mkdirSync(folder, { recursive: true });
+    toolClis(uxHome);
+    const uxSkills = ['legacy-a', 'legacy-b', 'legacy-c', 'legacy-d', 'legacy-e', 'legacy-f'];
+    for (const name of [...uxSkills, 'active-skill', 'young-skill']) skill(join(uxHome, '.claude/skills'), name);
+    const agentBody = name => `---\nname: ${name}\ndescription: The ${name} agent.\n---\n\nDo ${name}.\n`;
+    for (const name of ['plug-audit', 'plug-triage']) {
+      mkdirSync(join(uxHome, '.copilot/agents'), { recursive: true });
+      writeFileSync(join(uxHome, `.copilot/agents/${name}.agent.md`), agentBody(name));
+    }
+    writeClaudeInstall(uxHome, 'local-market', 'team-kit', '1.0.0', {
+      'agents/plug-audit.md': agentBody('plug-audit'),
+      'agents/plug-triage.md': agentBody('plug-triage'),
+    });
+    writeFileSync(join(uxHome, '.claude.json'), `${JSON.stringify({ mcpServers: { 'quiet-srv': { type: 'http', url: 'https://quiet.example.test/mcp' } } }, null, 2)}\n`);
+    lines(join(uxHome, '.claude/projects/-work/u0.jsonl'), [{ type: 'user', message: { content: 'hello' }, timestamp: ago(45).toISOString() }, skillCall('active-skill', 2)]);
+    lines(join(uxHome, '.codex/sessions/2026/11/12/rollout-u.jsonl'), [{ type: 'session_meta', payload: {}, timestamp: ago(12).toISOString() }]);
+    writeFileSync(join(uxData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: uxHome } }));
+    const uxRecord = kind => join(uxHome, `.central-knot/${kind}.json`);
+    const uxUntil = async (fn, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return true; await wait(100); } return false; };
+    const uxDone = async app => { for (let tries = 0; tries < 200 && await app.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await app.settle(); };
+    // Take everything into Central Knot once, then age records, leave quiet-srv Off, add a Found skill and two matching profiles.
+    a = await launch(uxData, [], uxReal);
+    await a.click('#nav-overview');
+    await a.click('#setup-yes');
+    check('ux1a: setup took every item into Central Knot', await uxUntil(() => [...uxSkills, 'active-skill', 'young-skill'].every(key => !!jsonOrNothing(uxRecord('skills'))?.items?.[key])
+      && ['plug-audit', 'plug-triage'].every(key => !!jsonOrNothing(uxRecord('agents'))?.items?.[key]) && !!jsonOrNothing(uxRecord('mcp'))?.items?.['quiet-srv']));
+    await a.quit();
+    for (const [kind, keys, days] of [['skills', [...uxSkills, 'active-skill'], 40], ['skills', ['young-skill'], 2], ['agents', ['plug-audit', 'plug-triage'], 40], ['mcp', ['quiet-srv'], 40]]) {
+      const kept = JSON.parse(readFileSync(uxRecord(kind), 'utf8'));
+      for (const key of keys) {
+        kept.items[key].versions = kept.items[key].versions.map(v => ({ ...v, at: ago(days).toISOString() }));
+        if (key === 'quiet-srv') kept.items[key].on = false;
+      }
+      writeFileSync(uxRecord(kind), JSON.stringify(kept, null, 2));
+    }
+    const syncState = jsonOrNothing(join(uxHome, '.central-knot/sync.json')) ?? {};
+    writeFileSync(join(uxHome, '.central-knot/sync.json'), JSON.stringify({ ...syncState, syncEverything: false }, null, 2));
+    const foundFolder = skill(join(uxHome, '.claude/skills'), 'found-only');
+    for (const p of [foundFolder, join(foundFolder, 'SKILL.md')]) utimesSync(p, ago(40), ago(40));
+    const profileItems = [...uxSkills.map(k => `skill:${k}`), 'skill:active-skill', 'skill:young-skill', 'agent:plug-audit', 'agent:plug-triage'];
+    writeFileSync(join(uxHome, '.central-knot/profiles.json'), JSON.stringify({
+      formatVersion: 2,
+      profiles: [
+        { id: 'everyday', name: 'Everyday', items: profileItems },
+        { id: 'focus', name: 'Focus', items: profileItems },
+      ],
+    }, null, 2));
+
+    a = await launch(uxData, [], uxReal);
+    await openKind(a, 'all');
+    check('ux1a: usage collected and chip shows 8', await uxUntil(async () => (await a.text('#chip-unused .chip-count'))?.trim() === '8'));
+    await a.click('#chip-unused');
+    const bandWords = () => a.run(`(() => {
+      const band = document.querySelector('#unused-band');
+      if (!band) return null;
+      const text = band.innerText.replace(/\\s+/g, ' ').trim();
+      return { text, words: text.split(/\\s+/).filter(Boolean).length, height: Math.round(band.getBoundingClientRect().height) };
+    })()`);
+    const captureUx1a = async label => {
+      const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+      const countsByWidth = {};
+      for (const [width, height] of [[860, 560], [1316, 819]]) {
+        await sizeTo(a, width, height);
+        const railNow = await a.run(`document.body.classList.contains('rail')`);
+        if (railNow) await a.click('#sidebar-toggle');
+        countsByWidth[width] = await bandWords();
+        same(`ux1a: nothing cut off for ${label} at ${width} with sidebar open`, [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], []);
+        if (shots) {
+          for (const mode of ['light', 'dark']) {
+            await theme(mode);
+            await wait(80);
+            await a.shot(`ux1a-${label}-${width}-${mode}`);
+          }
+        }
+      }
+      if (shots) await theme('');
+      await fullSize(a);
+      return countsByWidth;
+    };
+    same('ux1a: band is one line for 8 shown, 2 from a plugin skipped, 6 turned off, with no Undo or profile prose',
+      [await a.text('#unused-band .usage-lead'), (await a.text('#unused-limits-toggle'))?.trim(), await a.run(`document.querySelector('#unused-limits-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-limits'), (await a.text('#turn-unused-off'))?.trim()],
+      ['8 with no use seen in 30 days. 2 from a plugin skipped.', 'Limits and left out', 'false', false, 'Turn 6 off everywhere']);
+    const collapsedCounts = await captureUx1a('band');
+    same('ux1a: collapsed band word count at 860 and 1316 is 21 words', [collapsedCounts[860]?.words, collapsedCounts[1316]?.words], [21, 21]);
+    console.log(`usageFlow ux1a collapsed band: 860=${JSON.stringify(collapsedCounts[860])} 1316=${JSON.stringify(collapsedCounts[1316])}`);
+
+    // Expand [Limits and left out] by keyboard: writes nothing, focus stays, all four limits/left-out groups appear.
+    const beforeDisclose = [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')];
+    if (await a.exists('#unused-limits-toggle')) {
+      await a.run(`document.querySelector('#unused-limits-toggle').focus()`);
+      await a.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+      await a.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+      await a.settle();
+    }
+    const limitsShown = (await a.text('#unused-limits'))?.replace(/\u00a0/g, ' ') ?? '';
+    same('ux1a: Enter opens Limits and left out, keeps focus, writes nothing, and reveals limits and left-out items',
+      [await a.run(`document.querySelector('#unused-limits-toggle')?.getAttribute('aria-expanded')`), await a.run(`document.activeElement?.id`),
+        limitsShown.includes('A use on another computer or in a tool not read isn’t seen.'),
+        limitsShown.includes('Each tool’s history:'),
+        limitsShown.includes('Codex doesn’t always record which skill was used.'),
+        limitsShown.includes('Left out: 1 skill under 30 days old.'),
+        limitsShown.includes('Left out: 1 skill found, not yet in Central Knot.'),
+        [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')]],
+      ['true', 'unused-limits-toggle', true, true, true, true, true, beforeDisclose]);
+    await captureUx1a('band-open');
+    if (await a.exists('#unused-limits-toggle')) {
+      await a.run(`document.querySelector('#unused-limits-toggle').focus()`);
+      await a.press(' ', 'Space');
+    }
+    same('ux1a: Space closes Limits and left out again', [await a.run(`document.querySelector('#unused-limits-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-limits')], ['false', false]);
+
+    // Refused click names no profile and keeps both Everyday and Focus in use.
+    const savedSkills = readFileSync(uxRecord('skills'), 'utf8');
+    writeFileSync(uxRecord('skills'), '{');
+    await a.click('#turn-unused-off');
+    await uxDone(a);
+    same('ux1a: refused Turn 6 off everywhere names no profile', [/stopped being the profile/.test(await headerResultWords(a) ?? ''), (await a.text('#status-profile'))?.trim()], [false, 'Everyday and Focus']);
+    writeFileSync(uxRecord('skills'), savedSkills);
+    await a.click('#header-refresh');
+    await uxUntil(async () => !(await a.run(`(document.querySelector('.bands')?.textContent ?? '').includes('damaged')`)));
+
+    // Turn 6 off everywhere: 6 skills off, 2 plugin agents stay on, result alone names BOTH ended profiles.
+    await a.click('#turn-unused-off');
+    await uxDone(a);
+    check('ux1a: Undo appears after Turn 6 off everywhere', await uxUntil(() => a.exists('#outcome-undo')));
+    const endedWords = await headerResultWords(a);
+    same('ux1a: Turn 6 off everywhere turns off 6 skills, skips 2 plugin agents, and the result alone names both ended profiles',
+      [uxSkills.every(k => jsonOrNothing(uxRecord('skills'))?.items?.[k]?.on === false),
+        ['plug-audit', 'plug-triage'].every(k => jsonOrNothing(uxRecord('agents'))?.items?.[k]?.on === true),
+        (endedWords ?? '').includes('Everyday and Focus stopped being the profiles in use.'),
+        (await a.text('#status-profile'))?.trim()],
+      [true, true, true, 'No profile']);
+    await a.click('#outcome-undo');
+    await uxDone(a);
+    check('ux1a: Undo restores all 6 skills', await uxUntil(() => uxSkills.every(k => jsonOrNothing(uxRecord('skills'))?.items?.[k]?.on === true)));
+
+    // Emptied kind: switch to Skills (chip stays on), check Find miss and From miss show no band, then turn off all 6 skills -> Show Agents.
+    await a.click('#library-kind-skills');
+    check('ux1a: Skills segment shows 6 unused skills', await uxUntil(async () => (await a.text('#unused-band .usage-lead')) === '6 with no use seen in 30 days.', 3000));
+    await a.run(`(() => { const i = document.querySelector('#find'); i.value = 'zzz-no-match'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.settle();
+    same('ux1a: Find miss shows no unused band', await a.exists('#unused-band'), false);
+    await a.run(`(() => { const i = document.querySelector('#find'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.settle();
+    check('ux1a: clearing Find restores band', await uxUntil(() => a.exists('#unused-band')));
+    await a.run(`(() => { const s = document.querySelector('#item-from'); const opt = [...s.options].find(o => o.value.startsWith('plugin:')); s.value = opt.value; s.dispatchEvent(new Event('change')); })()`);
+    await a.settle();
+    same('ux1a: From miss shows no unused band', await a.exists('#unused-band'), false);
+    await a.run(`(() => { const s = document.querySelector('#item-from'); s.value = 'anywhere'; s.dispatchEvent(new Event('change')); })()`);
+    await a.settle();
+    await a.click('#turn-unused-off');
+    await uxDone(a);
+    check('ux1a: turning off the last unused skill leaves the emptied-kind band', await uxUntil(() => a.exists('#unused-show-other'), 3000));
+    same('ux1a: emptied Skills band names the 2 remaining agents and offers Show Agents',
+      [await a.text('#unused-band .usage-lead'), (await a.text('#unused-show-other'))?.trim(), await a.exists('#unused-limits-toggle'), await a.exists('#turn-unused-off')],
+      ['No unused skills left. 2 agents have no use seen in 30 days.', 'Show Agents', false, false]);
+    const emptiedCounts = await captureUx1a('emptied-kind');
+    same('ux1a: emptied-kind band word count at 860 and 1316 is 15 words', [emptiedCounts[860]?.words, emptiedCounts[1316]?.words], [15, 15]);
+    console.log(`usageFlow ux1a emptied band: 860=${JSON.stringify(emptiedCounts[860])} 1316=${JSON.stringify(emptiedCounts[1316])}`);
+    const beforeNav = [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')];
+    if (await a.exists('#unused-show-other')) await a.click('#unused-show-other');
+    same('ux1a: Show Agents switches to Agents, keeps the unused chip on, lists both agents and writes nothing',
+      [await a.run(`document.querySelector('#library-kind-agents')?.getAttribute('aria-pressed')`),
+        await a.run(`document.querySelector('#chip-unused')?.getAttribute('aria-pressed')`),
+        (await a.all('.ov-row[data-key]', 'e.dataset.key')).sort(),
+        [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')]],
+      ['true', 'true', [rowPart('', 'agents', 'plug-audit'), rowPart('', 'agents', 'plug-triage')], beforeNav]);
+
+    // Two other kinds: turn quiet-srv On so MCP servers (1) and Agents (2) both have unused items, then visit Skills -> Show all 3.
+    await a.click('#library-kind-mcp');
+    await a.click('#chip-unused');
+    await a.click(`#${rowPart('switch', 'mcp', 'quiet-srv')}`);
+    await uxDone(a);
+    await a.click('#chip-unused');
+    await a.click('#library-kind-skills');
+    check('ux1a: two other kinds offer Show all 3', await uxUntil(async () => (await a.text('#unused-show-other'))?.trim() === 'Show all 3', 3000));
+    same('ux1a: emptied Skills with 1 MCP server and 2 agents remaining names both and offers Show all 3',
+      [await a.text('#unused-band .usage-lead'), (await a.text('#unused-show-other'))?.trim()],
+      ['No unused skills left. 1 MCP server and 2 agents have no use seen in 30 days.', 'Show all 3']);
+    const beforeAll = [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('mcp'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')];
+    if (await a.exists('#unused-show-other')) await a.click('#unused-show-other');
+    same('ux1a: Show all 3 switches to All, keeps the unused chip on, shows all 3 items and writes nothing',
+      [await a.run(`document.querySelector('#library-kind-all')?.getAttribute('aria-pressed')`),
+        await a.run(`document.querySelector('#chip-unused')?.getAttribute('aria-pressed')`),
+        (await a.all('.ov-row[data-key]', 'e.dataset.key')).sort(),
+        [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('mcp'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')]],
+      ['true', 'true', [rowPart('', 'agents', 'plug-audit'), rowPart('', 'agents', 'plug-triage'), rowPart('', 'mcp', 'quiet-srv')].sort(), beforeAll]);
+    same('no page errors, ux1a unused band', a.pageErrors, []);
+    await a.quit();
+  }
+
   // Started at sign-in, with no window (--hidden): nothing is collected until the window first shows (a second launch shows it).
   a = await launch(data, ['--hidden'], real);
   await openKind(a, 'skills');
@@ -11995,7 +12193,7 @@ async function libraryFlow() {
   await done(a);
   // 9b: Turn these off across kinds, the MCP record damaged just before the click.
   await a.click('#chip-unused');
-  check('its band counts the five in one noun (spare is used now)', (await a.text('#unused-band .usage-lead') ?? '').startsWith('5 items with no use seen in the last 30 days.'), await a.text('#unused-band'));
+  check('its band counts the five in one line (spare is used now)', (await a.text('#unused-band .usage-lead') ?? '') === '5 with no use seen in 30 days. 1 from a plugin skipped.', await a.text('#unused-band'));
   await pictures(a, 'unused-across-kinds');
   // Copilot CLI refuses to let go of either tidy (its folders can't be written), and the MCP record is damaged.
   const mcpRecord = readFileSync(record('mcp'), 'utf8'), copilotFolders = [A.copilot, join(A.home, '.copilot/agents')];
@@ -12062,7 +12260,7 @@ async function libraryFlow() {
   await press(`#${rowPart('switch', 'skills', 'idle')}`);
   await done(a);
   same('idle, off now, keeps its place by its pin, and the heading, the kind switch and the band count tidy alone',
-    [await a.all('.ov-row[data-key]', 'e.dataset.key'), await a.text('.ov-section[data-section="results"] .ov-section-count'), (await counts(a)).all, (await a.text('#unused-band .usage-lead') ?? '').startsWith('1 skill with no use seen in the last 30 days.')],
+    [await a.all('.ov-row[data-key]', 'e.dataset.key'), await a.text('.ov-section[data-section="results"] .ov-section-count'), (await counts(a)).all, (await a.text('#unused-band .usage-lead') ?? '') === '1 with no use seen in 30 days.'],
     [[rowPart('', 'skills', 'idle'), rowPart('', 'skills', 'tidy')], '1', '1', true]);
   await press('#turn-unused-off');
   await done(a);
