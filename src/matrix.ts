@@ -138,7 +138,7 @@ function lineFacts(kind: PartKind, plugin: string, marketName: string, tool: Har
 /**
  * A tool's line on a plugin's item (pluginline.ts lineControl), after `lead` (what the tool has): its sentence and its control, the
  * item's switch or a button that names its act; while its click waits or runs, what it is doing, then its result with its Undo
- * (pluginstate.ts lineSaid). Install, Put its items here and Remove wait their turn (turnFromLine); Turn the plugin on or off is the
+ * (resultLine: pluginstate.ts LineResult). Install, Put its items here and Remove wait their turn (turnFromLine); Turn the plugin on or off is the
  * item's own switch's click (switchPluginItem).
  */
 function pluginLine(row: ItemRow | PluginRow, facts: LineFacts & { source?: string }, lead: string, reload: string) {

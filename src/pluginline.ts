@@ -36,7 +36,7 @@ export interface LineFacts {
    * here lists the plugin, `ambiguous` where more than one of that name does and the row can't tell which it comes from.
    */
   box?: LineBox | 'unlisted' | 'ambiguous';
-  /** Names of the plugin's items this tool has of his own, which a placement leaves his (library.ts TAKE; pluginrows.ts placedIn). */
+  /** Names of the plugin's items this tool has of his own, which an install or a placement leaves his (library.ts TAKE; pluginrows.ts yoursIn). */
   yours?: PartRef[];
   /** What its marketplace lists in it, for the counts; undefined where that isn't known. */
   parts?: Components;
