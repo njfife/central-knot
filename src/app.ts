@@ -1772,7 +1772,7 @@ api().onSettingsChanged(() => { readHistoryDays(); if (state.page === 'settings'
 /** History's days as Settings saved them, read at launch and at each settings change, before any Delete says them; drawn again when they change. */
 function readHistoryDays() {
   void api().getSettings().then(settings => {
-    if (state.historyDays === settings.historyDays) return;
+    if (!settings?.historyDays || state.historyDays === settings.historyDays) return;
     state.historyDays = settings.historyDays;
     rerender();
   }, () => undefined);
