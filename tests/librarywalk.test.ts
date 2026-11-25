@@ -57,6 +57,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, lstat, mkdir, readFile, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { lockPath } from './fslock.ts';
 import { join } from 'node:path';
 import { agentHash, parseAgent } from '../src/agentfiles.ts';
 import { agentsView, applyAgents } from '../src/agents.ts';
@@ -159,7 +160,6 @@ async function walk(seed: number): Promise<Finding[]> {
     return { ...switches, 'pi-cli': pi && JSON.stringify({ ...pi, skills: pi.skills?.filter((entry: string) => !ours(entry)) }) };
   };
   const historyCount = async () => (await readHistory(context())).filter(event => event.key === 'notes').length;
-  const readOnly = (tool: Tool, on: boolean) => chmod(join(box.home, roots[tool]), on ? 0o555 : 0o755).catch(() => undefined);
   let agentAsWritten: Record<string, string | undefined> = {};
   let clock = Date.now() + 1e9;
   // The source: a repository of this walk's own, whose root is a notes skill until it drops it (renamed jottings there); every
@@ -496,7 +496,10 @@ async function walk(seed: number): Promise<Finding[]> {
         whole('renamed away', () => rename(root, aside), () => rename(aside, root));
         whole('replaced by a folder of other things', async () => { await rename(root, aside); await mkdir(root); await writeFile(join(root, 'README.md'), 'Not mounted.\n'); },
           async () => { await rm(root, { recursive: true }); await rename(aside, root); });
-        if (process.getuid?.() !== 0) whole('unreadable', () => chmod(root, 0), () => chmod(root, 0o755));
+        if (process.getuid?.() !== 0) {
+          let unlock: (() => Promise<void>) | undefined;
+          whole('unreadable', async () => { unlock = await lockPath(root, 'dir-unreadable'); }, async () => { await unlock?.(); unlock = undefined; });
+        }
         // Another skills folder in its place, with a skill of its own, for two passes with Synchronize everything on: nothing in it
         // is found or taken in, so no folder of any tool changes (library.ts THE SHARED FOLDER).
         add(1, { name: 'the shared folder replaced by one with a skill of its own, two passes, Synchronize everything on', app: true, byHand: true, run: async () => {
@@ -528,14 +531,14 @@ async function walk(seed: number): Promise<Finding[]> {
       const act = pick(acts);
       const blocked = act.app && !act.byHand && process.getuid?.() !== 0 && next() < 0.12 ? pick(tools as Tool[]) : undefined;
       const crash = act.app && !act.byHand && !blocked && next() < 0.1 ? pick(['before-remove', 'before-rename', 'mid-replace'] as const) : undefined;
-      trace.push(`${act.name}${blocked ? ` [${blocked} read-only]` : ''}${crash ? ` [crash ${crash}]` : ''}`);
       const before = await folders(), contentsBefore = await contents(), managedBefore = [...tools], entriesBefore = await historyCount(), settledBefore = settled;
       const switchesBefore = await switchesNow(), criticBefore = await criticNow(), relayBefore = await relayNow(), tomeBefore = await contentAt(tomeInPi);
       let done: unknown, crashed = false;
-      if (blocked) await readOnly(blocked, true);
+      const unlockBlocked = blocked ? await lockPath(join(box.home, roots[blocked]), 'dir-readonly') : undefined;
+      trace.push(`${act.name}${unlockBlocked ? ` [${blocked} read-only]` : ''}${crash ? ` [crash ${crash}]` : ''}`);
       try { done = await act.run(crash ? { fault: at => { if (at === crash) throw new Error('crash'); } } : {}); }
       catch (error) { if ((error as Error).message === 'crash') crashed = true; else { fail(`threw: ${(error as Error).message.slice(0, 140)}`); break; } }
-      finally { if (blocked) await readOnly(blocked, false); }
+      finally { if (unlockBlocked) await unlockBlocked(); }
       if (!act.app && syncOn && next() < 0.7) { trace.push('background pass'); await pass(); }
       last = act.click && !crashed ? done as PassResult : act.app ? undefined : last;
       const after = await folders(), versions = await versionsNow();
@@ -622,7 +625,7 @@ async function walk(seed: number): Promise<Finding[]> {
         if (!same(after, await folders())) fail('(d) Off then On left a folder other than it was');
       });
     }
-  } finally { for (const tool of allTools as Tool[]) await readOnly(tool, false); await box.cleanup(); }
+  } finally { await box.cleanup(); }
   return found;
 }
 

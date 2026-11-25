@@ -7,7 +7,7 @@ import { itemNotice } from './notices.ts';
 import assert from 'node:assert/strict';
 import fs, { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
-import { lockPath, lockSkip, withLock } from './fslock.ts';
+import { lockAppSkip, lockPath, lockSkip, withLock } from './fslock.ts';
 import { colonNameSkip, posixModeSkip } from './wincompat.ts';
 import { join } from 'node:path';
 import { readHistory } from '../src/history.ts';
@@ -202,7 +202,7 @@ test('A folder seen again in part ends its absence: moved away by a save, back w
   } finally { await box.cleanup(); }
 });
 
-test('A copy held while it is missing (its skills folder can’t be written) ends its absence too: once the folder can be, the window starts again', { skip: lockSkip }, async () => {
+test('A copy held while it is missing (its skills folder can’t be written) ends its absence too: once the folder can be, the window starts again', { skip: lockAppSkip }, async () => {
   const box = await sandbox();
   const folder = join(box.home, roots['codex-cli']);
   try {
@@ -1148,7 +1148,7 @@ test('The tool choice lets go of a tool’s folder: a tool left out and back get
   } finally { await box.cleanup(); }
 });
 
-test('A folder that can’t be written holds the write there, and the tool catches up once it can', { skip: lockSkip }, async () => {
+test('A folder that can’t be written holds the write there, and the tool catches up once it can', { skip: lockAppSkip }, async () => {
   const box = await sandbox();
   try {
     await put(box, 'claude-cli');
@@ -1163,7 +1163,7 @@ test('A folder that can’t be written holds the write there, and the tool catch
   } finally { await box.cleanup(); }
 });
 
-test('Clicking Add, On, or a tool’s switch with a locked skills folder names that tool and says why, while background passes and History stay unchanged', { skip: lockSkip }, async t => {
+test('Clicking Add, On, or a tool’s switch with a locked skills folder names that tool and says why, while background passes and History stay unchanged', { skip: lockAppSkip }, async t => {
   const lockedWhy = 'Codex’s skills folder can’t be written, so Central Knot can’t change the skill there. Once the folder’s permissions let it, Codex catches up when sync runs.';
   const withLockedCodex = async (run: (box: Box, codexRoot: string) => Promise<void>) => {
     const box = await sandbox(), codexRoot = join(box.home, roots['codex-cli']);

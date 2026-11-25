@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { discover, findApp, forgetVersions, probeVersion } from '../src/discovery.ts';
 import { appCandidates, executableCandidates, hasStatusNotifierWatcher, shellPath, TRAY_ASKS, TRAY_PAUSE_MS, trayWithin } from '../src/platform.ts';
 import { isPresent } from '../src/presence.ts';
-import { lockSkip, withLock } from './fslock.ts';
+import { lockAppSkip, withLock } from './fslock.ts';
 import { slashPath } from './wincompat.ts';
 
 async function fixture() {
@@ -119,7 +119,7 @@ test('AT-01/DET-02: version probe is bounded and uses only --version', { skip: p
   } finally { await setup.cleanup(); }
 });
 
-test('AT-01: permission restriction is not an empty skill list', { skip: lockSkip }, async () => {
+test('AT-01: permission restriction is not an empty skill list', { skip: lockAppSkip }, async () => {
   const setup = await fixture();
   const skillsRoot = join(setup.home, '.claude/skills');
   try {
