@@ -2,7 +2,7 @@
 // command each tool reports with (listCommand; Copilot CLI has none), one reader per tool turning what it printed into what it
 // said of each server it was asked about (readAnswer), the page's rows and cells from the view the Library already has
 // (signinRows), those that need him first (grouped), which cells a check holds for as views come (askedNow, followView,
-// answerFor), a cell's words (saysIn: cellSays, sessionSays), the time a column shows of its own (ownTime), the line saying what
+// answerFor), a cell's words (cellSays), the time a column shows of its own (ownTime), the line saying what
 // a check does on this computer (checkLine), a session-only tool's head (IN_SESSION), the marks' cards (connectedCard, SESSION_CARD, LOCAL_CARD), and each tool's own
 // sign-in command (signInCommand). Pure, for the page and main alike. Elsewhere: the run, in main (mcpsigninrun.ts
 // checkSignin); the page, its clicks and the order it holds its rows in (mcpsigninpage.ts); its state (app.ts state.mcpSignin);
@@ -144,7 +144,7 @@ export function signinRows(home: HomeView): SigninRow[] {
 
 /** The rows that need him first (a cell that needs a sign-in or says what went wrong: CellSays heed), each group in the order given. */
 export function grouped(rows: SigninRow[], checks: SigninChecks): SigninRow[] {
-  const needed = rows.filter(row => (Object.keys(row.cells) as HarnessId[]).some(tool => saysIn(tool, row, checks).heed));
+  const needed = rows.filter(row => (Object.keys(row.cells) as HarnessId[]).some(tool => cellSays(tool, row, answerFor(checks, tool, row)).heed));
   return [...needed, ...rows.filter(row => !needed.includes(row))];
 }
 
@@ -188,17 +188,21 @@ export function ownTime(checks: SigninChecks, tool: HarnessId): string | undefin
  */
 export interface CellSays { words: string; tone?: 'muted' | 'warning'; line?: string; command?: string; heed?: true; title?: string }
 export const SAID = { 'no-sign-in': 'No sign-in needed', 'signed-in': 'Signed in', connected: 'Connected' };
+/** Where each session-only tool's sign-in shows: its head, in place of a Check, and its mark's hover in a server's cell (Antigravity has no command known for it). */
+export const IN_SESSION: Partial<Record<HarnessId, { head: string; hover: (server: string) => string }>> = {
+  'copilot-cli': { head: 'In a session: /mcp auth <name>', hover: server => `In Copilot CLI. Sign in inside a session: /mcp auth ${server}` },
+  'antigravity-cli': { head: 'In a session', hover: () => 'In Antigravity. Sign-in shows only inside a session.' },
+};
 
-/** What a row's cell in `tool` says: a session-only tool's mark where it has the server on (sessionSays), else cellSays's. */
-export function saysIn(tool: HarnessId, row: SigninRow, checks: SigninChecks): CellSays {
-  const cell = row.cells[tool]!;
-  return listCommand[tool] || cell.off ? cellSays(tool, cell, answerFor(checks, tool, row)) : sessionSays(tool, row);
-}
-
-/** What a cell says: its tool's switch first (never matched against an answer), then its column's answer of this server (a session-only tool's server that is on: sessionSays). */
-export function cellSays(tool: HarnessId, cell: SigninCell, answer: SigninAnswer | undefined): CellSays {
-  const name = toolNames[tool];
+/**
+ * What a row's cell in `tool` says: its tool's switch first (never matched against an answer); for a session-only tool (no command
+ * of its reports a sign-in) a mark, whose hover says where its sign-in shows or that the server is a local one; else its column's
+ * answer of this server.
+ */
+export function cellSays(tool: HarnessId, row: SigninRow, answer: SigninAnswer | undefined): CellSays {
+  const name = toolNames[tool], cell = row.cells[tool]!;
   if (cell.off) return { words: `Off in ${name}`, tone: 'muted' };
+  if (!listCommand[tool]) return { words: '•', tone: 'muted', title: row.transport === 'stdio' ? `In ${name}. Local server.` : IN_SESSION[tool]?.hover(cell.name ?? row.name) };
   if (!answer) return { words: 'Not checked', tone: 'muted' };
   if ('failed' in answer) return { words: answer.failed === 'missing' ? `No ${name} command line here` : `Didn’t answer in ${CHECK_LIMIT_MS / 1000} s`, heed: true };
   if ('unreadable' in answer) return { words: `Couldn’t read ${name}’s answer`, line: answer.unreadable, heed: true };
@@ -210,16 +214,6 @@ export function cellSays(tool: HarnessId, cell: SigninCell, answer: SigninAnswer
   return { words: said.is === 'not-known' ? `${name} can’t tell if it needs a sign-in` : SAID[said.is] };
 }
 
-/** Where each session-only tool's sign-in shows: its head, in place of a Check, and its mark's hover in a server's cell (Antigravity has no command known for it). */
-export const IN_SESSION: Partial<Record<HarnessId, { head: string; hover: (server: string) => string }>> = {
-  'copilot-cli': { head: 'In a session: /mcp auth <name>', hover: server => `In Copilot CLI. Sign in inside a session: /mcp auth ${server}` },
-  'antigravity-cli': { head: 'In a session', hover: () => 'In Antigravity. Sign-in shows only inside a session.' },
-};
-/** A session-only tool's cell for a server it has on (no command of its reports a sign-in): a mark, whose hover says where its sign-in shows, or that the server is a local one. */
-export function sessionSays(tool: HarnessId, row: SigninRow): CellSays {
-  const name = toolNames[tool], server = row.cells[tool]?.name ?? row.name;
-  return { words: '•', tone: 'muted', title: row.transport === 'stdio' ? `In ${name}. Local server.` : IN_SESSION[tool]?.hover(server) };
-}
 /** The card on the first session-only head. */
 export const SESSION_CARD = 'Sign-in shows only inside a session of that tool. • means the tool has the server; blank means it doesn’t.';
 /** The card on the first Local: where the server runs, and nothing of signing in, which its transport doesn't tell. */

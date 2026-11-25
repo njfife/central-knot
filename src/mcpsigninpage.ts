@@ -9,7 +9,7 @@ import { pinnedRows, rerender, state } from './app.ts';
 import { brandMark } from './brand.ts';
 import { button, emptyState, h, infoMark } from './dom.ts';
 import { pin } from './itemrow.ts';
-import { askedNow, checkLine, connectedCard, grouped, IN_SESSION, listCommand, LOCAL_CARD, ownTime, SAID, saysIn, SESSION_CARD, signinRows, type SigninRow } from './mcpsignin.ts';
+import { answerFor, askedNow, cellSays, checkLine, connectedCard, grouped, IN_SESSION, listCommand, LOCAL_CARD, ownTime, SAID, SESSION_CARD, signinRows, type SigninRow } from './mcpsignin.ts';
 import { clockTime } from './model.ts';
 import { copyButton, noToolsState, notRead } from './pages.ts';
 import { toolNames } from './words.ts';
@@ -87,7 +87,7 @@ const nameCell = (row: SigninRow, mark: Mark) => h('th.signin-name', { scope: 'r
 /** A cell, its id and its Copy's by its row's id, so neither follows a place in the list. */
 function cellView(tool: HarnessId, row: SigninRow, mark: Mark) {
   if (!row.cells[tool]) return h('td.signin-cell', {});
-  const says = saysIn(tool, row, state.mcpSignin), shown = says.command ?? says.line, id = `${tool}-${row.id}`;
+  const says = cellSays(tool, row, answerFor(state.mcpSignin, tool, row)), shown = says.command ?? says.line, id = `${tool}-${row.id}`;
   return h(`td.signin-cell${says.tone ? `.tone-${says.tone}` : ''}`, { id: `signin-cell-${id}`, title: says.title },
     // The command or the unread line under the words, with the cell's whole width; Copy beside the words.
     h('span.signin-words', {}, says.words, says.words === SAID.connected ? mark('connected') : null,
