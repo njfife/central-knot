@@ -35,7 +35,7 @@ import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, t
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
-import { changeWords, homeItems, inUse, pluginLive, stillLoadAfter, undoOffered, wholeCounts, wholeSaid } from './profileplan.ts';
+import { changeWords, endedProfiles, inUseInHome, stillLoadAfter, undoOffered, wholeCounts, wholeSaid } from './profileplan.ts';
 import { hasReloadAdvice, pluginReloads, reloadAdvice, reloadsFor, settleReloads, waysFrom, type ReloadChange } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
 import { followView, type SigninChecks } from './mcpsignin.ts';
@@ -1155,17 +1155,10 @@ async function putHistory() {
   state.historyDays = days;
 }
 
-/** The names of the profiles in use in `home`, worked out as the status bar does (profilespage.ts profileStatus). */
-function profilesInUse(home: HomeView | undefined): string[] {
-  if (!home?.profiles?.profiles?.length) return [];
-  const plugins = pluginLive(home);
-  return inUse(home.profiles.profiles, homeItems(home, plugins), plugins).map(profile => profile.name);
-}
-
 /** A History entry's action: Undo, Restore, or one of its choices; what it did is said in the band, with its own way back. */
 export const restoreEvent = (eventId: string, choice?: string) => busy('Restoring…', async page => {
   const home = state.home!;
-  const before = profilesInUse(home);
+  const before = inUseInHome(home);
   // A Restore of Synchronize everything's Undo: whether it switches the rule on again, as its plan says before the click (the
   // one place that decides it: historyactions.ts restorePlan), for the words after it.
   const clicked = state.history.data?.find(event => event.id === eventId);
@@ -1197,7 +1190,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
     return;
   }
   const did = !result.stopped && (!!result.made?.length || result.harnessWrites > 0);
-  const ended = did && before.length && !profilesInUse(state.home).length ? profileLeftUse(before) : '';
+  const ended = did ? profileLeftUse(endedProfiles(before, inUseInHome(state.home)).map(profile => profile.name)) : '';
   if (past && libraryEntry(past)) { sayLibraryAction(page, past, result, ended); return; }
   if (past?.kind === 'everything') { sayEverything(page, past, result, switchesOn, ended); return; }
   // A Pull's change to an agent's Claude Code settings alone (gitrepo.ts undoSettingsChange): the one entry with an Undo of its own,
@@ -1224,8 +1217,7 @@ function sayLibraryAction(page: Page, past: HistoryEvent, result: ApplyResult, e
   const back = made && libraryAction(made, item, entriesNow(state.home!)(made).now);
   const notDone = result.results.filter(keptBack).map(entry => entry.message);
   const text = [`${past.item}: ${said ? said.replace(/^./, first => first.toLowerCase()) : 'done.'}`, ...notDone, ended].filter(Boolean).join(' ');
-  const profileEnded = ended ? { profileEnded: true } : {};
-  tellWritten({ page, item: past.item, rows, warn: notDone.length > 0, text, ...profileEnded, undo: back && made ? { id: made.id, label: back.label } : undefined }, result.reloads);
+  tellWritten({ page, item: past.item, rows, warn: notDone.length > 0, text, profileEnded: ended ? true : undefined, undo: back && made ? { id: made.id, label: back.label } : undefined }, result.reloads);
   flashRow(entry);
 }
 
@@ -1240,8 +1232,7 @@ function sayEverything(page: Page, past: HistoryEvent, result: ApplyResult, swit
   const made = (result.made ?? []).map(id => state.history.data?.find(event => event.id === id));
   const text = everythingDone(past, made, made.filter(event => event?.kind === 'restored').length, switchedOn);
   const notDone = [...new Set(result.results.filter(keptBack).map(entry => entry.message))];
-  const profileEnded = ended ? { profileEnded: true } : {};
-  tellWritten({ page, item: past.item, warn: notDone.length > 0, history: true, ...profileEnded, text: [text, ...notDone.slice(0, 3), ended].filter(Boolean).join(' ') }, result.reloads);
+  tellWritten({ page, item: past.item, warn: notDone.length > 0, history: true, profileEnded: ended ? true : undefined, text: [text, ...notDone.slice(0, 3), ended].filter(Boolean).join(' ') }, result.reloads);
 }
 
 // ---------- A skill's own two actions ----------
@@ -1296,7 +1287,7 @@ export interface Outcome {
   refused?: boolean;
   /** Shown as a band even with nothing to offer: a click's result, which belongs where the click's Undo would be. */
   band?: boolean;
-  /** An Undo ended every profile in use, so History shows the result in a band even without a warning or reload advice. */
+  /** An Undo ended every profile in use, so the result stays a band on every page (saidInStatusBar) including History even without a warning or reload advice. */
   profileEnded?: boolean;
   /** The band goes after a few seconds: an Undo's confirmation. */
   fade?: boolean;
@@ -1328,7 +1319,7 @@ export const tellWritten = (outcome: Omit<Outcome, 'reloads'>, changes: readonly
 
 /**
  * Whether a result is said in the status bar rather than as a band: it offers nothing to do (no button, Undo, Copy or History
- * link), so it needs no room of its own.
+ * link, and no ended profile), so it needs no room of its own.
  */
 export const saidInStatusBar = (outcome: Outcome): boolean => !(outcome.act || outcome.undo || outcome.history || outcome.note || outcome.band || outcome.profileEnded || outcome.reloads?.length);
 

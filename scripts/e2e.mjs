@@ -1984,6 +1984,19 @@ async function practiceFlow() {
   }
   await fullSize(a);
   await a.click('#outcome-undo');
+  // Shifting from Incident ({notes}) to Backup ({notes, standup}): Backup now matches, Incident no longer does, so the result says so.
+  await a.click('#nav-profiles');
+  await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Backup')).click()`);
+  await a.settle();
+  await a.click('#pf-skill\\:standup');
+  await openHistory(a, '#nav-history', () => a.exists('.history-row[data-kind="off"]'));
+  same('only Incident is in use before the Undo shifts to Backup', (await a.text('#status-profile'))?.trim(), 'Incident');
+  await clickHistory('off', 'standup');
+  const shiftedText = await a.text('.band-done .band-text') ?? '';
+  check('an Undo that stops Incident matching says so even when another profile now matches',
+    shiftedText.endsWith('Incident stopped being the profile in use.') && (await a.text('#status-profile'))?.trim() === 'Backup',
+    [shiftedText, await a.text('#status-profile')]);
+  await a.click('#outcome-undo');
   await a.click('#nav-profiles');
   await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Backup')).click()`);
   await a.settle();

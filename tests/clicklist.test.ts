@@ -1882,70 +1882,134 @@ test('On another plugin’s page (or after Refresh), the header omits "Last chan
   assert.equal(resultText(), '1 of 1 didn’t go through in every tool: alpha. ');
 });
 
-test('History Undo and Synchronize everything Undo/Restore say when every matching profile leaves use, and stay quiet when one still matches or the Undo did nothing', async t => {
-  const makeView = (on: Record<string, boolean>, profiles: { id: string; name: string; items: string[] }[]): HomeView => {
-    const view = structuredClone(app.home!);
+/** Builds a History-page restore fixture with `notes` and `standup`, mocked restore/refresh replies, and profiles. */
+function historyRestoreWorld(t: TestContext, events: Record<string, unknown>[],
+  { beforeOn, afterOn, beforeDeleted = [], profiles, reply }: {
+    beforeOn: Record<string, boolean>; afterOn: Record<string, boolean>; beforeDeleted?: string[];
+    profiles: { id: string; name: string; items: string[] }[]; reply: Record<string, unknown>;
+  }) {
+  start();
+  const slot = homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'skills', key: 'standup' }], { on: false });
+  (slot as unknown[]).splice(0, slot.length, ...events);
+  app.page = 'history';
+  const base = app.home!;
+  const viewWith = (on: Record<string, boolean>, deleted: string[]): HomeView => {
+    const view = structuredClone(base);
     for (const [key, isOn] of Object.entries(on)) view.skills.library[key]!.on = isOn;
+    for (const key of deleted) view.skills.library[key]!.deleted = { at: '2026-11-25T09:00:00.000Z' };
     view.profiles = { profiles: profiles.map(profile => ({ ...profile, switchesPluginItems: true })), plugins: [] };
     return view;
   };
-  start();
-  const events = homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'skills', key: 'standup' }], { on: false });
-  app.page = 'history';
+  app.home = viewWith(beforeOn, beforeDeleted);
+  const nextView = viewWith(afterOn, []);
+  t.mock.method(api, 'restore', async () => reply as never);
+  t.mock.method(api, 'refresh', async () => nextView);
+}
+
+const HISTORY_STANDUP_OFF = [
+  { id: 'off-1', kind: 'off', item: 'standup', key: 'standup', of: 'skill', at: '2026-11-25T10:02:00.000Z', losers: [], orderProved: true, undoneBy: 'on-1' },
+  { id: 'on-1', kind: 'on', item: 'standup', key: 'standup', of: 'skill', at: '2026-11-25T10:03:00.000Z', losers: [{ tool: 'claude-cli', hash: 'h1' }], orderProved: true },
+];
+const STANDUP_WRITTEN = { results: [{ item: 'standup', harness: 'claude-cli', outcome: 'written', message: 'Written.' }], harnessWrites: 1, made: ['on-1'], reloads: [] };
+
+test('History Undo that stops Everyday matching says so even when another profile (Focus) now matches', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
+  const focus = { id: 'p-2', name: 'Focus', items: ['skill:notes', 'skill:standup'] };
+  historyRestoreWorld(t, HISTORY_STANDUP_OFF, { beforeOn: { notes: true, standup: false }, afterOn: { notes: true, standup: true }, profiles: [everyday, focus], reply: STANDUP_WRITTEN });
+  await restoreEvent('off-1');
+  assert.match(app.outcome?.text ?? '', /Everyday stopped being the profile in use\.$/);
+  assert.equal(app.outcome?.profileEnded, true);
+});
+
+test('History Undo compares profiles by id, not name, when another profile of the same name matches after', async t => {
+  const first = { id: 'p-1', name: 'Work', items: ['skill:notes'] };
+  const second = { id: 'p-2', name: 'Work', items: ['skill:notes', 'skill:standup'] };
+  historyRestoreWorld(t, HISTORY_STANDUP_OFF, { beforeOn: { notes: true, standup: false }, afterOn: { notes: true, standup: true }, profiles: [first, second], reply: STANDUP_WRITTEN });
+  await restoreEvent('off-1');
+  assert.match(app.outcome?.text ?? '', /Work stopped being the profile in use\.$/);
+  assert.equal(app.outcome?.profileEnded, true);
+});
+
+test('History Restore of a deleted library item that ends Everyday appends the profile sentence and marks profileEnded', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
+  const events = [
+    { id: 'del-1', kind: 'deleted', item: 'standup', key: 'standup', of: 'skill', at: '2026-11-25T10:00:00.000Z', losers: [], orderProved: true, undoneBy: 'res-1' },
+    { id: 'res-1', kind: 'restored', item: 'standup', key: 'standup', of: 'skill', at: '2026-11-25T10:01:00.000Z', losers: [{ tool: 'claude-cli', hash: '' }], orderProved: true },
+  ];
+  const reply = { results: [{ item: 'standup', harness: 'claude-cli', outcome: 'written', message: 'Restored.' }], harnessWrites: 1, made: ['res-1'], reloads: [] };
+  historyRestoreWorld(t, events, { beforeOn: { notes: true, standup: true }, afterOn: { notes: true, standup: true }, beforeDeleted: ['standup'], profiles: [everyday], reply });
+  await restoreEvent('del-1');
+  assert.match(app.outcome?.text ?? '', /^standup: restored to Central Knot.*Everyday stopped being the profile in use\.$/);
+  assert.equal(app.outcome?.profileEnded, true);
+});
+
+test('History Undo ending two matching profiles uses the plural sentence', async t => {
   const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
   const backup = { id: 'p-2', name: 'Backup', items: ['skill:notes'] };
-  const focus = { id: 'p-3', name: 'Focus', items: ['skill:notes', 'skill:standup'] };
-  let restoreReply: Record<string, unknown> = { results: [], harnessWrites: 0, reloads: [] };
-  let nextView: HomeView | null = null;
-  t.mock.method(api, 'restore', async () => restoreReply as never);
-  t.mock.method(api, 'refresh', async () => nextView);
-  // 1. Synchronize everything Undo ends Everyday: appends the sentence and marks profileEnded.
-  const evOn = { id: 'ev-on', kind: 'everything', item: 'Synchronize everything', key: 'home:everything', at: '2026-11-25T10:00:00.000Z', losers: [], orderProved: true, everything: { ruleOn: true } };
-  const evUndo = { id: 'ev-undo', kind: 'everything', item: 'Synchronize everything', key: 'home:everything', at: '2026-11-25T10:01:00.000Z', losers: [], orderProved: true,
-    everything: { ruleOn: false, undo: { switchedOff: true, itemUndos: ['u-1'], left: [], keptIn: [] } } };
-  (events as unknown[]).splice(0, events.length, evOn, evUndo);
-  app.home = makeView({ notes: true, standup: false }, [everyday]);
-  restoreReply = { results: [], harnessWrites: 1, made: ['ev-undo'], reloads: [] };
-  nextView = makeView({ notes: false, standup: false }, [everyday]);
-  await restoreEvent('ev-on');
-  assert.match(app.outcome?.text ?? '', /Everyday stopped being the profile in use\.$/);
-  assert.equal(app.outcome?.profileEnded, true);
-  // 2. Synchronize everything Restore ends Everyday (notes+standup restored while Everyday wants notes only).
-  app.home = makeView({ notes: true, standup: false }, [everyday]);
-  restoreReply = { results: [], harnessWrites: 1, made: ['r-1'], reloads: [] };
-  nextView = makeView({ notes: true, standup: true }, [everyday]);
-  await restoreEvent('ev-undo');
-  assert.match(app.outcome?.text ?? '', /Everyday stopped being the profile in use\.$/);
-  assert.equal(app.outcome?.profileEnded, true);
-  // 3. Synchronize everything Restore where nothing was restored (made empty, 0 writes) adds nothing.
-  app.home = makeView({ notes: true, standup: false }, [everyday]);
-  restoreReply = { results: [{ item: 'standup', outcome: 'held', message: 'standup was added, changed or deleted since the Undo, so it stays as it is.' }], harnessWrites: 0, made: [], reloads: [] };
-  nextView = makeView({ notes: true, standup: true }, [everyday]);
-  await restoreEvent('ev-undo');
-  assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
-  assert.equal(app.outcome?.profileEnded, undefined);
-  // 4. Library item Undo ending Everyday & Backup together uses the plural sentence.
-  const offRow = { id: 'off-1', kind: 'off', item: 'standup', key: 'standup', of: 'skill', at: '2026-11-25T10:02:00.000Z', losers: [], orderProved: true, undoneBy: 'on-1' };
-  const onRow = { id: 'on-1', kind: 'on', item: 'standup', key: 'standup', of: 'skill', at: '2026-11-25T10:03:00.000Z', losers: [{ tool: 'claude-cli', hash: 'h1' }], orderProved: true };
-  (events as unknown[]).splice(0, events.length, offRow, onRow);
-  app.home = makeView({ notes: true, standup: false }, [everyday, backup]);
-  restoreReply = { results: [{ item: 'standup', harness: 'claude-cli', outcome: 'written', message: 'Written.' }], harnessWrites: 1, made: ['on-1'], reloads: [] };
-  nextView = makeView({ notes: true, standup: true }, [everyday, backup]);
+  historyRestoreWorld(t, HISTORY_STANDUP_OFF, { beforeOn: { notes: true, standup: false }, afterOn: { notes: true, standup: true }, profiles: [everyday, backup], reply: STANDUP_WRITTEN });
   await restoreEvent('off-1');
   assert.match(app.outcome?.text ?? '', /Everyday and Backup stopped being the profiles in use\.$/);
   assert.equal(app.outcome?.profileEnded, true);
-  // 5. Library item Undo moving from Everyday to Focus (a profile still matches after) adds nothing.
-  app.home = makeView({ notes: true, standup: false }, [everyday, focus]);
-  restoreReply = { results: [{ item: 'standup', harness: 'claude-cli', outcome: 'written', message: 'Written.' }], harnessWrites: 1, made: ['on-1'], reloads: [] };
-  nextView = makeView({ notes: true, standup: true }, [everyday, focus]);
-  await restoreEvent('off-1');
+});
+
+test('History Restore when two profiles matched before and one of them still matches after adds no profile sentence', async t => {
+  // While standup is deleted, both Everyday and Focus match; restoring standup leaves Focus still matching.
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
+  const focus = { id: 'p-2', name: 'Focus', items: ['skill:notes', 'skill:standup'] };
+  const events = [
+    { id: 'del-1', kind: 'deleted', item: 'standup', key: 'standup', of: 'skill', at: '2026-11-25T10:00:00.000Z', losers: [], orderProved: true, undoneBy: 'res-1' },
+    { id: 'res-1', kind: 'restored', item: 'standup', key: 'standup', of: 'skill', at: '2026-11-25T10:01:00.000Z', losers: [{ tool: 'claude-cli', hash: '' }], orderProved: true },
+  ];
+  const reply = { results: [{ item: 'standup', harness: 'claude-cli', outcome: 'written', message: 'Restored.' }], harnessWrites: 1, made: ['res-1'], reloads: [] };
+  historyRestoreWorld(t, events, { beforeOn: { notes: true, standup: true }, afterOn: { notes: true, standup: true }, beforeDeleted: ['standup'], profiles: [everyday, focus], reply });
+  await restoreEvent('del-1');
   assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
   assert.equal(app.outcome?.profileEnded, undefined);
-  // 6. Library item Undo refused whole (heldWhole, no made) adds nothing even if the refreshed view matches no profile.
-  app.home = makeView({ notes: true, standup: false }, [everyday]);
-  restoreReply = { results: [{ item: 'standup', outcome: 'held', message: 'Waits for the shared skills folder.' }], harnessWrites: 0, made: [], reloads: [] };
-  nextView = makeView({ notes: false, standup: false }, [everyday]);
+});
+
+test('History Undo refused whole (heldWhole, no made) adds no profile sentence even if the refreshed view matches no profile', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
+  const reply = { results: [{ item: 'standup', outcome: 'held', message: 'Waits for the shared skills folder.' }], harnessWrites: 0, made: [], reloads: [] };
+  historyRestoreWorld(t, HISTORY_STANDUP_OFF, { beforeOn: { notes: true, standup: false }, afterOn: { notes: false, standup: false }, profiles: [everyday], reply });
   await restoreEvent('off-1');
   assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
   assert.equal(app.outcome?.refused, true);
+});
+
+test('Synchronize everything Undo ending Everyday appends the profile sentence and marks profileEnded', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
+  const events = [
+    { id: 'ev-on', kind: 'everything', item: 'Synchronize everything', key: 'home:everything', at: '2026-11-25T10:00:00.000Z', losers: [], orderProved: true, everything: { ruleOn: true } },
+    { id: 'ev-undo', kind: 'everything', item: 'Synchronize everything', key: 'home:everything', at: '2026-11-25T10:01:00.000Z', losers: [], orderProved: true,
+      everything: { ruleOn: false, undo: { switchedOff: true, itemUndos: ['u-1'], left: [], keptIn: [] } } },
+  ];
+  historyRestoreWorld(t, events, { beforeOn: { notes: true, standup: false }, afterOn: { notes: false, standup: false }, profiles: [everyday], reply: { results: [], harnessWrites: 1, made: ['ev-undo'], reloads: [] } });
+  await restoreEvent('ev-on');
+  assert.match(app.outcome?.text ?? '', /Everyday stopped being the profile in use\.$/);
+  assert.equal(app.outcome?.profileEnded, true);
+});
+
+test('Synchronize everything Restore ending Everyday appends the profile sentence and marks profileEnded', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
+  const events = [
+    { id: 'ev-undo', kind: 'everything', item: 'Synchronize everything', key: 'home:everything', at: '2026-11-25T10:01:00.000Z', losers: [], orderProved: true,
+      everything: { ruleOn: false, undo: { switchedOff: true, itemUndos: ['u-1'], left: [], keptIn: [] } } },
+  ];
+  historyRestoreWorld(t, events, { beforeOn: { notes: true, standup: false }, afterOn: { notes: true, standup: true }, profiles: [everyday], reply: { results: [], harnessWrites: 1, made: ['r-1'], reloads: [] } });
+  await restoreEvent('ev-undo');
+  assert.match(app.outcome?.text ?? '', /Everyday stopped being the profile in use\.$/);
+  assert.equal(app.outcome?.profileEnded, true);
+});
+
+test('Synchronize everything Restore that puts nothing back (made empty, 0 writes) adds no profile sentence', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
+  const events = [
+    { id: 'ev-undo', kind: 'everything', item: 'Synchronize everything', key: 'home:everything', at: '2026-11-25T10:01:00.000Z', losers: [], orderProved: true,
+      everything: { ruleOn: false, undo: { switchedOff: true, itemUndos: ['u-1'], left: [], keptIn: [] } } },
+  ];
+  const none = { results: [{ item: 'standup', outcome: 'held', message: 'standup was added, changed or deleted since the Undo, so it stays as it is.' }], harnessWrites: 0, made: [], reloads: [] };
+  historyRestoreWorld(t, events, { beforeOn: { notes: true, standup: false }, afterOn: { notes: true, standup: true }, profiles: [everyday], reply: none });
+  await restoreEvent('ev-undo');
+  assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
+  assert.equal(app.outcome?.profileEnded, undefined);
 });
