@@ -7,7 +7,7 @@ import { itemNotice } from './notices.ts';
 import assert from 'node:assert/strict';
 import fs, { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
-import { lockAppSkip, lockPath, lockSkip, withLock } from './fslock.ts';
+import { lockPath, lockSkip, withLock } from './fslock.ts';
 import { colonNameSkip, posixModeSkip } from './wincompat.ts';
 import { join } from 'node:path';
 import { readHistory } from '../src/history.ts';
@@ -214,7 +214,7 @@ test('A folder seen again in part ends its absence: moved away by a save, back w
   } finally { await box.cleanup(); }
 });
 
-test('A copy held while it is missing (its skills folder can’t be written) ends its absence too: once the folder can be, the window starts again', { skip: lockAppSkip }, async () => {
+test('A copy held while it is missing (its skills folder can’t be written) ends its absence too: once the folder can be, the window starts again', { skip: lockSkip }, async () => {
   const box = await sandbox();
   const folder = join(box.home, roots['codex-cli']);
   try {
@@ -1160,7 +1160,7 @@ test('The tool choice lets go of a tool’s folder: a tool left out and back get
   } finally { await box.cleanup(); }
 });
 
-test('A folder that can’t be written holds the write there, and the tool catches up once it can', { skip: lockAppSkip }, async () => {
+test('A folder that can’t be written holds the write there, and the tool catches up once it can', { skip: lockSkip }, async () => {
   const box = await sandbox();
   try {
     await put(box, 'claude-cli');
@@ -1175,7 +1175,7 @@ test('A folder that can’t be written holds the write there, and the tool catch
   } finally { await box.cleanup(); }
 });
 
-test('Clicking Add, On, or a tool’s switch with a locked skills folder names that tool and says why, while background passes and History stay unchanged', { skip: lockAppSkip }, async t => {
+test('Clicking Add, On, or a tool’s switch with a locked skills folder names that tool and says why, while background passes and History stay unchanged', { skip: lockSkip }, async t => {
   const lockedWhy = 'Codex’s skills folder can’t be written, so Central Knot can’t change the skill there. Once the folder’s permissions let it, Codex catches up when sync runs.';
   const withLockedCodex = async (run: (box: Box, codexRoot: string) => Promise<void>) => {
     const box = await sandbox(), codexRoot = join(box.home, roots['codex-cli']);
@@ -1236,6 +1236,23 @@ test('Clicking Add, On, or a tool’s switch with a locked skills folder names t
       assert.deepEqual((await pass(box)).results, [], 'not repeated on the next pass');
     });
   }));
+});
+
+test('On Windows a skills folder that takes a new copy but refuses a removal holds nothing back: the removal says it failed, and goes once it can', { skip: process.platform !== 'win32' && 'A folder that takes a new entry but refuses a removal is a Windows lock only.' }, async () => {
+  const box = await sandbox();
+  try {
+    await put(box, 'claude-cli');
+    await turnOn(box);
+    await withLock(join(box.home, roots['codex-cli']), 'dir-noremove', async () => {
+      assert.equal((await seen(box)).fact!.cannot?.['codex-cli'], undefined);
+      const off = await turnOff(box);
+      assert.deepEqual(off.results.filter(entry => entry.harness === 'codex-cli'),
+        [{ item: 'notes', harness: 'codex-cli', outcome: 'failed', removal: true, message: 'Could not remove Codex’s copy yet. Central Knot will try again.' }]);
+      assert.ok(await bytes(folderOf(box, 'codex-cli')));
+    });
+    await pass(box);
+    assert.equal(await bytes(folderOf(box, 'codex-cli')), undefined);
+  } finally { await box.cleanup(); }
 });
 
 test('A click names a tool whose skills folder is a dangling link, and says why', async () => {
@@ -1305,6 +1322,7 @@ test('Only a tool held by its locked skills folder is named on a click, not one 
       const turnedOn = await turnOn(box, box.context, 'fifth');
       assert.ok(turnedOn !== 'choose');
       assert.deepEqual(clickResults(turnedOn.results, ['fifth']).notIn, ['codex-cli'], 'kept out and plugin tools are not named');
+      assert.match(turnedOn.results.find(entry => entry.harness === 'codex-cli')?.message ?? '', /^Codex’s skills folder can’t be written/, 'held by the folder check, before any write');
       // Even if Claude Code's own folder is also locked, Claude Code is held by the plugin (Disk.held), not by the lock.
       await turnOff(box, box.context, 'fifth');
       await withLock(claudeRoot, 'dir-readonly', async () => {

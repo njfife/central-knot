@@ -654,6 +654,8 @@ export interface PassOptions<Content> {
 export async function runPass<C, E extends Seen, D extends Disk<E>>(
   kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[], clicks: Change[], options: PassOptions<C> = {},
 ): Promise<PassResult> {
+  // On Windows a folder's write check is made once a pass (share.ts folderAccess, kept in ShareContext reads): a pass given none has its own.
+  if (process.platform === 'win32' && !context.reads) context = { ...context, reads: new Map() };
   const gate = await libraryGate(context, { start: clicks.length > 0 || !!options.pulled?.size || !!options.source, resume: options.resume });
   if ('refused' in gate) return { stopped: gate.refused, results: [], writes: 0, reloads: [] };
   // A home with no sync record gets one only when something is asked of the pass (a click, what Pull brings, or what a source holds).

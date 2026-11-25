@@ -15,6 +15,7 @@ import { launchCommand } from './launch.ts';
 import type { DesktopApp, HarnessId, HomeMode, OtherApp, ProbeResult, Skill, Snapshot } from './types.ts';
 import { machineNames } from './machine.ts';
 import { compareVersions } from './values.ts';
+import { denied } from './share.ts';
 
 function errorCode(error: unknown): string {
   return typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : 'UNKNOWN';
@@ -37,7 +38,7 @@ export async function probeVersion(binary: string, timeoutMs = 1500, platform: s
   try {
     await access(binary, constants.X_OK);
   } catch (error) {
-    return { state: errorCode(error) === 'EACCES' ? 'restricted' : 'missing', detail: 'Executable unavailable.' };
+    return { state: denied(error) ? 'restricted' : 'missing', detail: 'Executable unavailable.' };
   }
   const file = await stat(binary).then(({ ino, size, mtimeMs }) => `${ino} ${size} ${mtimeMs}`, () => undefined);
   const known = versions.get(binary);
@@ -305,7 +306,7 @@ export async function discover(options: {
     configExists = (await stat(root)).isDirectory();
   } catch (error) {
     if (errorCode(error) !== 'ENOENT') {
-      snapshot.discovery = errorCode(error) === 'EACCES' ? 'restricted' : 'failed';
+      snapshot.discovery = denied(error) ? 'restricted' : 'failed';
       snapshot.issues.push('Configuration folder could not be read.');
       return snapshot;
     }
@@ -334,7 +335,7 @@ export async function discover(options: {
     try {
       entries = await readdir(skillRoot.path, { withFileTypes: true });
     } catch (error) {
-      const result = errorCode(error) === 'ENOENT' ? 'missing' : errorCode(error) === 'EACCES' ? 'restricted' : 'failed';
+      const result = errorCode(error) === 'ENOENT' ? 'missing' : denied(error) ? 'restricted' : 'failed';
       rootResults.push(result);
       if (result !== 'missing') snapshot.issues.push(`${skillRoot.label}: folder could not be read.`);
       continue;
@@ -363,7 +364,7 @@ export async function discover(options: {
         });
       } catch (error) {
         if (errorCode(error) === 'ENOENT') continue;
-        const reason = errorCode(error) === 'EACCES' ? 'Permission restricted.' : error instanceof Error && errorCode(error) === 'UNKNOWN' ? error.message : 'Could not read skill.';
+        const reason = denied(error) ? 'Permission restricted.' : error instanceof Error && errorCode(error) === 'UNKNOWN' ? error.message : 'Could not read skill.';
         snapshot.issues.push(`${entry.name}: ${reason}`);
       }
     }

@@ -12,6 +12,8 @@
 //   themselves where they can't be read (keepUnreadable); and a wait for Resume held in memory (ShareContext resumeFirst);
 // - on Windows only, a rename, link or removal another program holds up for a moment tried again for about a second
 //   (retryWhileHeld, used by the writes here and by skillfiles.ts), and a refusal that stays in words (plainError);
+// - the one answer to "can this folder be written?" (folderAccess: on Windows the folder opened for writing, once a pass), and
+//   whether a refusal is a denial of permission (denied, which discovery.ts and skillfiles.ts read a refusal by);
 // - a skill's folder read as one content (readTree), copied byte for byte (copyTree), staged beside its target and put in
 //   place (stagingFolder, placeCopy).
 // Not here: a kind's record (kindstore.ts and each kind's store), History (history.ts), a tool's folders and files
@@ -82,7 +84,11 @@ export interface ShareContext {
   overrides?: Partial<Record<HarnessId, string>>;
   /** How each tool was found here (CLI, desktop app, or both), for reload advice (reload.ts). */
   ways?: ToolWays;
-  /** Reads shared within one pass or one view (what each tool has through its plugins): set only on a context made for that one use. */
+  /**
+   * Reads shared within one pass or one view (what each tool has through its plugins; on Windows each folder's answer to
+   * folderAccess): set only on a context made for that one use. On Windows a pass given none, a click's, has its own
+   * (librarypass.ts runPass); the view made right after a pass takes the pass's reads but its folder answers (withoutFolderAnswers).
+   */
   reads?: Map<string, Promise<unknown>>;
   /** Each kind's read its pass of the whole home left standing, for the view made right after, whose look takes it (librarypass.ts KeptReads, lookFor): main.ts pass and syncAndView only. */
   kept?: KeptReads;
@@ -133,11 +139,16 @@ export const errorCode = (error: unknown) => (typeof error === 'object' && error
 /** What Windows answers while another program has a file open a moment, and for a read-only file or one not permitted alike. */
 const HELD_CODES = ['EPERM', 'EBUSY'];
 
+/** A refusal for want of permission: EACCES, and on Windows EPERM too, which is how a denial arrives there. */
+export const denied = (error: unknown, platform: NodeJS.Platform = process.platform) =>
+  errorCode(error) === 'EACCES' || (platform === 'win32' && errorCode(error) === 'EPERM');
+const DENIED_WORDS = 'Permission was denied.';
+
 /** An error in plain words. On Windows, HELD_CODES can't tell a file held open from a read-only one or one not permitted. */
 export function plainError(error: unknown, platform: NodeJS.Platform = process.platform): string {
   const code = errorCode(error);
   if (platform === 'win32' && HELD_CODES.includes(code)) return HELD_ON_WINDOWS;
-  if (code === 'EACCES' || code === 'EPERM') return 'Permission was denied.';
+  if (code === 'EACCES' || code === 'EPERM') return DENIED_WORDS;
   if (code === 'ENOSPC') return 'The disk is full.';
   if (code === 'EROFS') return 'That folder is read-only.';
   if (code === 'ENAMETOOLONG') return 'A file name is too long for this disk.';
@@ -581,8 +592,8 @@ export async function syncGate(context: ShareContext): Promise<SyncGate> {
   // Even a new home needs somewhere to save its first answer. A new store is created in the home.
   const store = storeDirectory(context.home);
   const folder = await exists(store) ? store : context.home;
-  try { await access(folder, constants.W_OK | constants.X_OK); }
-  catch (error) { return { state: 'stopped', reason: plainError(error) }; }
+  try { await folderAccess(context, folder, constants.W_OK | constants.X_OK); }
+  catch (error) { return { state: 'stopped', reason: denied(error) ? DENIED_WORDS : plainError(error) }; }
   const remembered = (await readSettings(context.settingsPath)).homes?.[context.home]?.generation;
   if (!record && remembered) return { state: 'stopped', reason: `The sync record this app created is missing. ${NOTHING_CHANGED}` };
   if (record && remembered && remembered !== record.generation) return { state: 'stopped', reason: `The sync record is not the one this app last used. ${NOTHING_CHANGED}` };
@@ -617,6 +628,43 @@ export async function takeOverSync(context: ShareContext): Promise<{ stopped?: s
 export async function syncsHere(context: ShareContext): Promise<boolean> {
   return (await writeAccess(context)).allowed && (await syncGate(context)).state === 'ready';
 }
+
+/** What a folder's answer is kept under in ShareContext reads (folderAccess on Windows); withoutFolderAnswers leaves those out. */
+const FOLDER_ANSWER = 'folderAccess ';
+
+/**
+ * The one answer to "can this folder be written?", for a folder that is there: it resolves where it can and rejects with the
+ * refusal where it can't, as access does. Off Windows it is access(folder, mode) itself, its own promise, asked each time. On
+ * Windows, where access looks at no folder's permissions, the folder itself is opened for writing and closed (openedOnWindows),
+ * and `mode` is not asked. Within a pass or a view (ShareContext reads, by the folder's real path) a folder is opened once; the
+ * next pass, and the view made right after a pass (withoutFolderAnswers), open it again, which is when an unlock is seen.
+ */
+export function folderAccess(context: Pick<ShareContext, 'reads'>, folder: string, mode: number): Promise<void> {
+  return process.platform === 'win32' ? openedOnWindows(context, folder) : access(folder, mode);
+}
+
+/**
+ * folderAccess on Windows. Nothing is made in the folder, so nothing is left there. Its limits, measured on Windows: a folder
+ * that lets a file be made but not its own attributes be written is refused (the answer errs on holding back); one that lets a
+ * file be made but none removed passes (the removal then says it failed); one with the read-only attribute passes, as a file
+ * can be made in it. Opening a folder that holds files makes one change event, named for it, in the watch on the folder above
+ * (once in a hundred opens): in the app's own layout no watch that sees it acts on it (main.ts startWatching acts there on the
+ * file names it holds alone); a tool's skills folder placed inside another tool's watched skills folder is not covered by that.
+ */
+async function openedOnWindows(context: Pick<ShareContext, 'reads'>, folder: string): Promise<void> {
+  const opened = () => open(folder, constants.O_WRONLY).then(handle => handle.close());
+  if (!context.reads) return opened();
+  const key = `${FOLDER_ANSWER}${await realpath(folder).catch(() => folder)}`;
+  if (!context.reads.has(key)) context.reads.set(key, opened());
+  return context.reads.get(key) as Promise<void>;
+}
+
+/**
+ * A pass's reads as the view made right after it takes them (main.ts pass): every read but its folder answers, asked again;
+ * off Windows, where no folder answer is kept, the very map the pass had.
+ */
+export const withoutFolderAnswers = (reads: ShareContext['reads']) =>
+  process.platform !== 'win32' || !reads ? reads : new Map([...reads].filter(([key]) => !key.startsWith(FOLDER_ANSWER)));
 
 /** Nothing is written while this build is held; the real home only by explicitly choosing it. A simulated home that reaches it stays read-only. */
 export async function writeAccess(context: ShareContext): Promise<WriteAccess> {
@@ -665,7 +713,7 @@ export function storeFolder(key: string): string {
 export async function stagingFolder(context: ShareContext, root: string): Promise<string> {
   await mkdir(root, { recursive: true });
   const beside = dirname(await realpath(root));
-  try { await access(beside, constants.W_OK); return beside; }
+  try { await folderAccess(context, beside, constants.W_OK); return beside; }
   catch {
     const fallback = join(storeDirectory(context.home), 'staging');
     await mkdir(fallback, { recursive: true });
