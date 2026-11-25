@@ -21,12 +21,16 @@
 // The Library's Find is answered by word search in main (search.ts, asked by askFind): while it has text the list is one list,
 // best first, under one heading (foundRows), and after it the items of listed plugins installed in no managed tool, which are
 // no rows of the Library's (catalogGroup). A tool's tabs match their Find here (holdsFindText); the Files view, itself.
-// From (fromChoice: where a row came from, origins.ts) and the chip narrow what Find leaves (picked), and every count and
-// Turn these off goes by that one list (listedRows). A choice of From, a chip or Find's text shows its list from the top (listFromTop).
+// From (fromChoice: where a row came from, origins.ts) and the chip narrow what Find leaves (picked), and the counts of the kind
+// switch, the chips and the headings, and Turn these off, go by that one list (listedRows). A choice of From, a chip or Find's text
+// shows its list from the top (listFromTop).
+// Select on the Library's list (selection.ts keeps its mode and ticks): a tick in each switch's place and on each heading, its bar
+// under the toolbar, and a Delete of many (selectControl, selectBar, deleteTicked), what can be deleted being cantDelete's. It goes
+// by the rows drawn, in their order on screen (drawTable: Table selectable), which holds a pinned row the chip dropped too.
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, noticeNames, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
-import { andList, byToolOrder, fewNames, kindNouns, pageNames, rowNames, rowNouns, saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind } from './words.ts';
+import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, pageNames, rowNames, rowNouns, saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind } from './words.ts';
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
 import { copilotSharesYours, homeItems, inUse, itemId, pluginLive } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
@@ -56,6 +60,7 @@ import { sources } from './sourcespage.ts';
 import { folded, lineDiff } from './diff.ts';
 import { reloadAdvice, rowReload, toItemKind, type ReloadAdvice } from './reload.ts';
 import { pageData, readPageData, resetPageData } from './pagedata.ts';
+import { ask, askedNow, cancelAsk, cantWords, deletedWords, headingState, isTicked, ofListed, questionWords, selectedWords, selecting, listDrawn, startSelecting, stopSelecting, restoreWords, tickHeading, tickRow, toggleWhy, whyLines, whyShown, type Listed } from './selection.ts';
 
 const names = toolNames as Record<Tool, string>;
 
@@ -244,8 +249,8 @@ function pluginRowEl(t: Table, row: PluginRow) {
     return drawn;
   };
   return [
-    h(`div.ov-row.ov-switch-row.unmanaged.ov-plugin-row${takeFlash(idOf(row)) ? '.row-flash' : ''}${open ? '.open' : ''}${t.used ? '.ov-usage' : ''}`, { role: 'row', 'data-key': idOf(row), 'aria-expanded': String(open), onclick: () => openRow(t, row) },
-      h('div.ov-managed', { role: 'cell' }, pluginRowSwitch(t, row)),
+    h(`div.ov-row.ov-switch-row.unmanaged.ov-plugin-row${takeFlash(idOf(row)) ? '.row-flash' : ''}${open ? '.open' : ''}${t.used ? '.ov-usage' : ''}${tickedLook(t, row)}`, { role: 'row', 'data-key': idOf(row), 'aria-expanded': String(open), onclick: rowClick(t, row) },
+      h('div.ov-managed', { role: 'cell' }, t.selectable ? tickOf(t, row) : pluginRowSwitch(t, row)),
       h('div.ov-name.ov-name-fit.ov-name-bare', { role: 'cell', title: row.description ? `${row.name}: ${row.description}` : row.name },
         h('span.ov-name-main', {}, kindMark(t, kindOf(row)), h('span.ov-name-text', {}, row.name), kindWord(t, kindOf(row), row.name)),
         pluginTag(row.plugin, insideTitle(row)),
@@ -261,7 +266,7 @@ function pluginRowEl(t: Table, row: PluginRow) {
 function pluginSection(t: Table, list: PluginRow[]) {
   if (!list.length) return null;
   return h('div', { role: 'rowgroup' },
-    h('div.ov-section.ov-section-plugins', { role: 'row' }, h('div.ov-section-label', { role: 'cell' }, h('strong', {}, 'Only through a plugin'), h('span.ov-section-count', {}, String(list.length)),
+    h('div.ov-section.ov-section-plugins', { role: 'row' }, h('div.ov-section-label', { role: 'cell' }, headingTick(t, 'plugins', 'Only through a plugin', list), h('strong', {}, 'Only through a plugin'), h('span.ov-section-count', {}, String(list.length)),
       sectionNote(true, 'installed with their plugin · switched here like any other'))),
     list.flatMap(row => pluginRowEl(t, row)));
 }
@@ -270,7 +275,7 @@ function pluginSection(t: Table, list: PluginRow[]) {
 function foundSection(t: Table, rows: (ItemRow | PluginRow)[]) {
   if (!rows.length) return null;
   return h('div', { role: 'rowgroup' },
-    h('div.ov-section', { role: 'row', 'data-section': 'results' }, h('div.ov-section-label', { role: 'cell' }, h('strong', {}, 'Results'), h('span.ov-section-count', {}, String(listedRows(t).length)))),
+    h('div.ov-section', { role: 'row', 'data-section': 'results' }, h('div.ov-section-label', { role: 'cell' }, headingTick(t, 'results', 'Results', rows), h('strong', {}, 'Results'), h('span.ov-section-count', {}, String(listedRows(t).length)))),
     rows.flatMap(each => (isPluginRow(each) ? pluginRowEl(t, each) : row(t, each))));
 }
 
@@ -318,11 +323,12 @@ export const rowByKey = (kind: PageKind, key: string) => rowsOf(kind).find(row =
 /**
  * A table (useLibrary, useTab): the kinds it lists (the Library's segment's; a tab's one) and the harness whose page it is on
  * (`tool`, none on the Library: its column comes first, and the rows it has before the others), as its caller names them; its
- * view (views); and, as drawTable draws it, whether it has the Used column (`used`: usedColumn) and the names rows of two kinds
- * share in it (`shared`: sharedNames), each worked out once per draw. A
+ * view (views); and, as drawTable draws it, whether it has the Used column (`used`: usedColumn), the names rows of two kinds
+ * share in it (`shared`: sharedNames) and, while Select's mode is on (selection.ts), the rows it can tick, by selectId, in
+ * their order on screen (`selectable`: each row and heading then draws its tick), each worked out once per draw. A
  * row's drawing and its clicks read the row and its table.
  */
-interface Table { kinds: PageKind[]; tool?: Tool; view: View; used?: boolean; shared?: Set<string> }
+interface Table { kinds: PageKind[]; tool?: Tool; view: View; used?: boolean; shared?: Set<string>; selectable?: string[] }
 /** Every row the table lists, of each of its kinds, as the kinds' views have them (rowsOf). */
 const rowsIn = (t: Table) => t.kinds.flatMap(rowsOf);
 /**
@@ -611,6 +617,21 @@ const kindStops = (kind: PageKind) => !state.home || !!whyKindReadOnly(state.hom
 const writeOff = (stops: boolean): string | boolean => acting() ?? stops;
 /** A row's own switch or Add takes a click while a run of clicks goes on (app.ts queueClick): off only under other work, or by `stops`. */
 const queueOff = (stops: boolean) => stops || !!state.busy;
+/**
+ * Why Delete from Central Knot can't take a row now, in the row's own words, or none where it can: the one rule the Delete in an
+ * opened row (libraryDelete) and Select's Delete of many (selection.ts ofListed) ask. Not a plugin's own row; not while its kind's
+ * record, or the home's, stops writes (kindStops, said by stopFor); not a found item, which has nothing in Central Knot to delete.
+ */
+const cantDelete = (row: ItemRow | PluginRow): string | undefined => (isPluginRow(row) ? 'Only through a plugin'
+  : stopFor(row.kind) ?? (inLibrary(itemOf(row)) ? undefined : 'not in Central Knot'));
+/**
+ * What stops a kind's writes (app.ts whyKindReadOnly) as a row's reason before anything is tried: the stop alone ("the agents
+ * record is damaged"), without what its band adds of what was not done (words.ts NOTHING_CHANGED).
+ */
+function stopFor(kind: PageKind) {
+  const why = state.home ? whyKindReadOnly(state.home, kind) : 'Not read yet.';
+  return why?.replace(` ${NOTHING_CHANGED}`, '').replace(/\.$/, '').replace(/^./, first => first.toLowerCase());
+}
 
 /** What could not be done, item by item (the first four, then how many more), as a warning band. */
 export const problemsBand = (problems: DestinationResult[]) => h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
@@ -1817,8 +1838,14 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
   const openRow = docked() && !open ? plugins.find(isOpen) : undefined;
   // Off goes last, under its own heading. Of the rest, the rows a harness's page is about (it has a copy) split into On and
   // Found; the others, only other tools have. A row whose own switch was clicked here stays under the heading it was under.
-  const under = (role: Role) => [shown.filter(skill => placeIn(pins, idOf(skill), sectionOf(t, skill)) === role), shown.filter(skill => sectionOf(t, skill) === role)] as const;
-  const sections = found ? [foundSection(t, found), inPlugins && catalogGroup(t, inPlugins)] : [section(t, 'on', ...under('on')), section(t, 'found', ...under('found')), pluginSection(t, plugins), tool ? section(t, 'away', ...under('away')) : null, section(t, 'off', ...under('off'))];
+  // Under each, its rows in the chosen order (itemrow.ts inOrder), then the rows whose own heading it is.
+  const under = (role: Role) => [inOrder(shown.filter(skill => placeIn(pins, idOf(skill), sectionOf(t, skill)) === role), chosenOrder(t), itemOf, usageIn(t), pins), shown.filter(skill => sectionOf(t, skill) === role)] as const;
+  const on = under('on'), foundHere = under('found'), away = under('away'), off = under('off');
+  // Every row drawn, in its order on screen, but the catalog's (pinned rows the chip dropped too): what Select's mode lists (selection.ts).
+  const rowsDrawn = found ?? [...on[0], ...foundHere[0], ...plugins, ...away[0], ...off[0]];
+  if (!tool) listDrawn();
+  t.selectable = !tool && selecting() ? rowsDrawn.map(selectId) : undefined;
+  const sections = found ? [foundSection(t, found), inPlugins && catalogGroup(t, inPlugins)] : [section(t, 'on', ...on), section(t, 'found', ...foundHere), pluginSection(t, plugins), tool ? section(t, 'away', ...away) : null, section(t, 'off', ...off)];
   // Nothing listed: none of the segment's kind here (Find empty), or nothing Find, From and the chip leave, whatever the segment.
   const nothing = shown.length || plugins.length || inPlugins?.length ? null : !view.find.trim() && !all.length && !plugged(t).rows.length && none ? none(t.kinds[0]!)
     : emptyState('search-x', 'Nothing matches', [view.find.trim() ? `“${view.find.trim()}”` : '', view.filter !== 'all' ? `Only: ${chipNames[view.filter]}` : '',
@@ -1828,7 +1855,8 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
   const said = nothing && inPlugins && coverageLine();
   if (said) nothing!.append(h('p.catalog-coverage', {}, said[0], ' · ', said[1]));
   const table = [
-    h('div.toolbar.fit-bar', {}, kindSwitch(t), h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(t), fromChoice(t), orderChoice(t), h('div.toolbar-end', {}, toolbarState(t), usageControls(t))),
+    h('div.toolbar.fit-bar', {}, kindSwitch(t), h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(t), fromChoice(t), orderChoice(t), h('div.toolbar-end', {}, selectControl(t), toolbarState(t), usageControls(t))),
+    t.selectable ? selectBar(t, rowsDrawn) : null,
     usageBand(t),
     view.filter === 'unused' ? unusedBand(t, listedRows(t).filter((row): row is ItemRow => !isPluginRow(row))) : null,
     bands(t),
@@ -1843,7 +1871,92 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
     : h('div.page.ov-page', {}, table);
 }
 
+// ---------- Select: ticks, and a Delete of many (selection.ts) ----------
 
+/**
+ * Select, at the toolbar's end on the Library's list (not a tool's tab: a Delete of many takes items from every tool), left of
+ * Update usage: it starts Select's mode, and reads Done while the mode is on, which ends it. Its two words hold one width
+ * (style.css .band-stack). Select folds with the bar's controls (dom.ts fitBars, at bar-icons): its tick's icon alone, Select its
+ * tooltip and name; Done is a word at every width, the way out always read.
+ */
+function selectControl(t: Table) {
+  if (t.tool || !state.home) return null;
+  const on = !!t.selectable;
+  const go = button({ variant: 'outline', size: 'micro', label: 'Select', icon: on ? undefined : 'square-check', collapse: !on, id: 'library-select',
+    onclick: () => { if (on) stopSelecting(); else startSelecting(); rerender(); } });
+  go.querySelector('.btn-label')!.replaceChildren(h('span.band-stack', {}, h('span', {}, on ? 'Done' : 'Select'), h('span.band-unshown', {}, on ? 'Select' : 'Done')));
+  return go;
+}
+/**
+ * A drawn row as Select's mode knows it (selection.ts) and its tick's id: its row id, a plugin's own row's led by `plugin-`. A
+ * plugin's row and one of his can share a kind and key (a server of his named `kit@local/search`, and the plugin kit@local's
+ * server `search`), and are never one tick; no row id starts so (itemrow.ts rowId starts with a kind).
+ */
+const selectId = (row: ItemRow | PluginRow) => (isPluginRow(row) ? `plugin-${idOf(row)}` : idOf(row));
+/** A tick, a row's or a heading's: a button with an id, so a click on it outlasts a redraw (dom.ts keepClicksAcrossRedraws), read as a checkbox. */
+const tickButton = (id: string, checked: 'true' | 'mixed' | 'false', label: string, onclick: (event: MouseEvent) => void, title?: string) =>
+  h('button.row-tick', { type: 'button', id, role: 'checkbox', 'aria-checked': checked, 'aria-label': label, title, onclick: (event: MouseEvent) => { event.stopPropagation(); onclick(event); } },
+    icon(checked === 'true' ? 'square-check' : checked === 'mixed' ? 'square-minus' : 'square', 16));
+/** A row's tick in Select's mode, in its switch's place and width: a click on it ticks the row, as a click on the row does (rowClick). */
+const tickOf = (t: Table, row: ItemRow | PluginRow) => tickButton(partId('tick', selectId(row)), isTicked(selectId(row)) ? 'true' : 'false', nameOf(row), event => tick(t, row, event.shiftKey), 'Shift-click selects a run');
+const tick = (t: Table, row: ItemRow | PluginRow, run: boolean) => { tickRow(selectId(row), t.selectable!, run); rerender(); };
+/** A row's click: in Select's mode it ticks the row (with Shift, a run: selection.ts tickRow), else it opens or closes it. Its chevron always opens it (openButton). */
+const rowClick = (t: Table, row: ItemRow | PluginRow) => (event: MouseEvent) => (t.selectable ? tick(t, row, event.shiftKey) : openRow(t, row));
+/** A ticked row's look in Select's mode: its tick, and a tint stronger than a row's under the pointer (style.css .row-ticked). */
+const tickedLook = (t: Table, row: ItemRow | PluginRow) => (t.selectable && isTicked(selectId(row)) ? '.row-ticked' : '');
+/**
+ * A heading's tick in Select's mode (`role` names it, `name` is its word), over the rows drawn under it (selection.ts
+ * tickHeading); none out of the mode, nor over rows none of which can be deleted (cantDelete), such as Only through a plugin's.
+ */
+function headingTick(t: Table, role: string, name: string, rows: (ItemRow | PluginRow)[]) {
+  const ids = rows.map(selectId);
+  return t.selectable && rows.some(row => !cantDelete(row)) ? tickButton(`tick-heading-${role}`, headingState(ids), `Every row under ${name}`, () => { tickHeading(ids); rerender(); }) : null;
+}
+
+/**
+ * Select's bar, after the toolbar and outside the list's scrolling box, while the mode is on: how many rows listed are ticked,
+ * how many of them can't be deleted, and Delete…; once that is clicked, the question in the same place, the focus on its Cancel.
+ * "N can't be deleted ›", on the bar and after the question, opens their names and reasons over the rows (style.css .select-why).
+ * From Select's click on, the bar holds the room of the question about every row listed, the longest it can ask here, drawn
+ * unseen in the same place (style.css .band-stack): no tick and no question moves a row. `rows`: the rows listed, in their order on screen.
+ */
+function selectBar(t: Table, rows: (ItemRow | PluginRow)[]) {
+  const listed: Listed[] = rows.map(row => ({ id: selectId(row), name: nameSaid(t, kindOf(row), nameOf(row)), cant: cantDelete(row) }));
+  const { ticked, takes, leaves } = ofListed(listed);
+  const days = state.historyDays ?? defaultHistoryDays;
+  const taken = rows.filter((row): row is ItemRow => !isPluginRow(row) && takes.some(each => each.id === selectId(row)));
+  const off = acting() ?? !takes.length;
+  const idIf = (shown: boolean, id: string) => (shown ? id : undefined);
+  const why = (shown: boolean, count: number) => (count ? h('button.inline-link', { type: 'button', id: idIf(shown, 'select-why'), 'aria-expanded': String(whyShown()),
+    onclick: () => { toggleWhy(); rerender(); } }, `${cantWords(count)} ›`) : null);
+  // Delete…: the question in the bar's place, the focus on its Cancel.
+  const askNow = () => {
+    ask(listed);
+    rerender();
+    document.getElementById('select-cancel')?.focus();
+  };
+  const counting = () => h('span.select-line', {}, h('span.select-text', {}, selectedWords(ticked.length)), why(true, leaves.length),
+    button({ variant: 'outline', size: 'small', label: 'Delete…', id: 'select-delete', disabled: off, onclick: askNow }));
+  const question = (shown: boolean, deletes: number, cant: number) => {
+    const now = button({ variant: 'outline', size: 'small', label: `Delete ${deletes}`, id: idIf(shown, 'select-delete-now'), disabled: off, onclick: () => deleteTicked(taken, leaves.length) });
+    now.classList.add('delete-now');
+    return h('span.select-line', {}, h('span.select-text', {}, questionWords(deletes, days), cant ? [' ', why(shown, cant)] : null),
+      button({ variant: 'ghost', size: 'small', label: 'Cancel', id: idIf(shown, 'select-cancel'), onclick: () => { cancelAsk(); rerender(); } }), now);
+  };
+  const room = question(false, listed.filter(row => !row.cant).length, listed.filter(row => row.cant).length);
+  room.classList.add('band-unshown');
+  return h('div.select-place', {}, h('div.selection-bar.band-stack', { id: 'select-bar', role: 'group', 'aria-label': 'Selected rows' }, askedNow(listed) ? question(true, takes.length, leaves.length) : counting(), room),
+    whyShown() && leaves.length ? h('div.select-why', { id: 'select-why-list' }, whyLines(leaves).map(line => h('p', {}, line))) : null);
+}
+/**
+ * Delete N in the question: the rows it counted, each deleted as its own Delete would (rowClicks.remove), one click per kind with
+ * one Undo (app.ts applyByKind), its result saying "deleted" and staying until closed. `left`: the ticked rows it leaves. The mode ends.
+ */
+function deleteTicked(rows: ItemRow[], left: number) {
+  stopSelecting();
+  void applyByKind(clicksByKind(rows, row => rowClicks.remove(row, itemOf(row))), deleted => deletedWords(rowNames(deleted), rowNouns(deleted.map(row => row.kind)), left),
+    { now: 'deleted', withoutUndo: restoreWords, stays: true });
+}
 
 // ---------- One switch per item ----------
 
@@ -2137,12 +2250,12 @@ function markLegend(t: Table, list: ItemRow[], plugins: PluginRow[]) {
   return keyed.childElementCount ? keyed : null;
 }
 
-/** One row: its switch, its name, a mark per tool, and the chevron that opens its details. */
+/** One row: its switch (in Select's mode, its tick), its name, a mark per tool, and the chevron that opens its details. */
 function row(t: Table, skill: ItemRow) {
   const id = idOf(skill), open = t.view.comparing === id, when = dated(t);
   return [
-    h(`div.ov-row.ov-switch-row${takeFlash(id) ? '.row-flash' : ''}${skill.on ? '' : '.unmanaged'}${open ? '.open' : ''}${when ? '.ov-dated' : ''}${t.used ? '.ov-usage' : ''}`, { role: 'row', 'data-key': id, 'aria-expanded': String(open), onclick: () => openRow(t, skill) },
-      h('div.ov-managed', { role: 'cell' }, itemSwitch(t, skill)),
+    h(`div.ov-row.ov-switch-row${takeFlash(id) ? '.row-flash' : ''}${skill.on ? '' : '.unmanaged'}${open ? '.open' : ''}${when ? '.ov-dated' : ''}${t.used ? '.ov-usage' : ''}${tickedLook(t, skill)}`, { role: 'row', 'data-key': id, 'aria-expanded': String(open), onclick: rowClick(t, skill) },
+      h('div.ov-managed', { role: 'cell' }, t.selectable ? tickOf(t, skill) : itemSwitch(t, skill)),
       nameCell(t, skill, differs(skill)),
       when ? whenCell(skill) : null,
       t.used ? usedCell(t, skill) : null,
@@ -2300,16 +2413,19 @@ function unusedBand(t: Table, shown: ItemRow[]) {
 export const toTurnOff = (shown: ItemRow[]) => shown.filter(row => !leftToItsRow(factsOf(row)!));
 
 /**
+ * One click per kind over `rows`, each row's change made by `change`, for app.ts applyByKind, whose `said` words the whole (each
+ * click's own is empty): Turn these off's, and Select's Delete of many (deleteTicked).
+ */
+const clicksByKind = (rows: ItemRow[], change: (row: ItemRow) => Change): Click[] => KINDS.map(kind => rows.filter(row => row.kind === kind)).filter(list => list.length)
+  .map(list => ({ kind: list[0]!.kind, items: list.map(nameOf), rows: list.map(rowKey), regroups: true, changes: list.map(change), said: '' }));
+/**
  * Turn these off, over rows of any kinds: each kind's rows one click with each row's own Off (libraryrow.ts rowClicks.off), the
  * kinds in turn (app.ts applyByKind: a kind that refuses is skipped and named), with one Undo that puts them all back. Its words
  * name the rows that went through (what didn't is said first: app.ts applyByKind; a row's kind named where another kind shares its
  * name: words.ts rowNames), then any tools still reading them another way (from applyByKind's stillRead), then that Central Knot keeps them.
  */
 export function turnTheseOff(rows: ItemRow[]) {
-  const clicks = KINDS.map(kind => rows.filter(row => row.kind === kind)).filter(list => list.length).map((list): Click => ({
-    // Its words are the whole click's, over every kind (applyByKind's `said`, below).
-    kind: list[0]!.kind, items: list.map(nameOf), rows: list.map(rowKey), regroups: true, changes: list.map(row => rowClicks.off(row, itemOf(row))), said: '' }));
-  void applyByKind(clicks, (off, stayed) => {
+  void applyByKind(clicksByKind(rows, row => rowClicks.off(row, itemOf(row))), (off, stayed) => {
     const { one, many } = rowNouns(off.map(row => row.kind));
     return [`Turned off ${plural(off.length, one, many)} with no use seen in the last ${USAGE_DAYS} days: ${fewNames(rowNames(off))}.`,
       ...stayed, `Central Knot keeps ${off.length === 1 ? 'it, and turning it on puts it' : 'them, and turning one on puts it'} back as it was.`].join(' ');
@@ -2408,7 +2524,7 @@ function whenCell(skill: ItemRow) {
 
 /**
  * Rows under one heading: On, Found, Off, or (on a harness's page) the ones only other tools have. `rows`: the rows drawn under
- * it; `truly`: the rows whose own heading it is, which its count counts. They differ once a row's own switch is clicked: the row
+ * it, in their order (drawTable); `truly`: the rows whose own heading it is, which its count counts. They differ once a row's own switch is clicked: the row
  * stays under the heading it was under (itemrow.ts Pinned), and its switch and its line say its state, so "On 11" may head 12
  * rows, one drawn Off. The note speaks for every row under it, so it shows only while each is truly its own: no "no tool
  * has these" over a row just turned On, no "Add one" over one just added. While rows are pinned under it, its room stays
@@ -2422,8 +2538,8 @@ function section(t: Table, role: Role, rows: ItemRow[], truly: ItemRow[]) {
   return h('div', { role: 'rowgroup' },
     h(`div.ov-section${role === 'off' || role === 'away' ? '.ov-section-away' : ''}`, { role: 'row', 'data-section': role },
       // Counts are of the rows that match (Find, From and the chip), as the kind switch's are: a pin keeps a row's place, not a count.
-      h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(truly.filter(row => picked(t, row)).length)), note ? sectionNote(own, note) : null)),
-    inOrder(rows, chosenOrder(t), itemOf, usageIn(t), pinnedHere(t)).flatMap(skill => row(t, skill)));
+      h('div.ov-section-label', { role: 'cell' }, headingTick(t, role, label, rows), h('strong', {}, label), h('span.ov-section-count', {}, String(truly.filter(row => picked(t, row)).length)), note ? sectionNote(own, note) : null)),
+    rows.flatMap(skill => row(t, skill)));
 }
 
 /**
@@ -2518,21 +2634,22 @@ function libraryHarnessSwitch(lib: LibraryPage, skill: ItemRow, tool: Tool) {
 
 /**
  * Delete from Central Knot, the one real delete of a library item: quiet until armed, then it runs at once. The item leaves
- * every harness and its page; the library keeps it, deleted, and History's Restore (or this click's Undo) puts it back.
+ * every harness and its page; the library keeps it, deleted, and History's Restore (or this click's Undo) puts it back. Drawn
+ * for an item in the library; off where cantDelete says it can't be deleted now (Select's Delete of many asks the same).
  */
 function libraryDelete(t: Table, lib: LibraryPage, skill: ItemRow) {
-  const item = inLibrary(itemOf(skill));
+  const item = inLibrary(itemOf(skill)), cant = !!cantDelete(skill);
   if (!item) return null;
   const name = nameOf(skill), id = idOf(skill), view = t.view, tools = toolsFor(t, skill.kind), disarm = () => { view.confirmDelete = undefined; rerender(); };
   if (view.confirmDelete !== id) {
-    const arm = button({ variant: 'outline', size: 'micro', label: 'Delete from Central Knot…', id: elId('delete', skill), disabled: writeOff(kindStops(skill.kind)), onclick: () => { view.confirmDelete = id; rerender(); } });
+    const arm = button({ variant: 'outline', size: 'micro', label: 'Delete from Central Knot…', id: elId('delete', skill), disabled: writeOff(cant), onclick: () => { view.confirmDelete = id; rerender(); } });
     arm.classList.add('delete-quiet');
     return h('span.delete-offer', {}, arm, h('span.delete-offer-note', {}, lib.say.said.deleteOffer));
   }
   const said = (notIn: HarnessId[]) => lib.say.said.deleted(name, item.on, stillIn(skill, item, notIn, tools), tools);
   const run = () => { view.confirmDelete = undefined; click({ kind: skill.kind, items: [name], rows: [rowKey(skill)], changes: [rowClicks.remove(skill, item)], said }); };
   // Armed, it is still a button (outlined in red); Cancel beside it is a link.
-  const now = button({ variant: 'outline', size: 'micro', label: 'Delete it now', id: elId('delete-confirm', skill), disabled: writeOff(kindStops(skill.kind)), onclick: run });
+  const now = button({ variant: 'outline', size: 'micro', label: 'Delete it now', id: elId('delete-confirm', skill), disabled: writeOff(cant), onclick: run });
   now.classList.add('delete-now');
   now.title = `Delete ${name} from Central Knot now. History can restore it.`;
   return h('span.delete-armed', {}, smallAction('Cancel', elId('delete-cancel', skill), disarm), now,
@@ -2779,11 +2896,13 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
         layout.tail.length ? h('div.files-tail', {}, layout.tail) : null))));
 }
 
-// Escape in a find box clears it.
+// Escape in a find box with text clears it. Elsewhere on the Library's list in Select's mode, it closes a Delete of many's
+// question, or else ends the mode. A card open (an info card, the header's) is closed first, and this doesn't hear it (renderer.ts).
 document.addEventListener('keydown', event => {
   const id = (event.target as HTMLElement | null)?.id;
-  if (event.key !== 'Escape' || (id !== 'find' && id !== 'skills-find')) return;
+  if (event.key !== 'Escape') return;
   const t = useTableShown(), view = t?.view;
   if (id === 'skills-find' && view?.listFind) { view.listFind = ''; rerender(); }
-  if (id === 'find' && t && view?.find) findTyped(t, '');
+  else if (id === 'find' && t && view?.find) findTyped(t, '');
+  else if (state.page === 'library' && state.libraryView === 'list' && selecting()) { if (!cancelAsk()) stopSelecting(); rerender(); }
 });

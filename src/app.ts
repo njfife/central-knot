@@ -41,6 +41,7 @@ import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './cli
 import { followView, type SigninChecks } from './mcpsignin.ts';
 import { loadSessions, type SessionsDay } from './sessionspage.ts';
 import type { DayRows } from './sessionrow.ts';
+import { stopSelecting } from './selection.ts';
 import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
@@ -113,7 +114,7 @@ export const state = {
   agentsResult: undefined as PassResult | undefined,
   /** What sync and actions did, newest last: read when the History page opens or the home changes (pagedata.ts). */
   history: pageData<HistoryEvent[]>(),
-  /** How long History keeps things, for History's intro; read with History's events. */
+  /** How long History keeps things, as Settings saves it: History's intro and the Deletes say it; read with History's events, at launch and at each settings change (readHistoryDays). */
   historyDays: undefined as HistoryDays | undefined,
   /** What the last click on skills did, shown until the next action or read. */
   skillsResult: undefined as PassResult | undefined,
@@ -248,7 +249,7 @@ export const notDoneFirst = (outcome: Outcome): Outcome => (outcome.warn ? { ...
 
 /**
  * How long a result stays once the page stops acting, when it goes by itself: in a list page's header (matrix.ts resultInHeader),
- * one with no problem line, whose Undo stays in History (Plugins' run too, whose Undo goes with it: pluginstate.ts fadeRun); on
+ * one with no problem line that doesn't stay (Outcome stays), whose Undo stays in History (Plugins' run too, whose Undo goes with it: pluginstate.ts fadeRun); on
  * another page, an Undo's confirmation (Outcome fade).
  */
 export const FADE_MS = 8000;
@@ -265,7 +266,7 @@ function fadeNow(): void {
   if (acting() || !windowVisible()) return;
   if (heldInHeader()) { fading = setTimeout(() => (heldInHeader() ? fadeNow() : fadeLater()), 250); return; }
   const outcome = state.outcome;
-  if (outcome?.fade || (outcome && resultInHeader() && !outcome.warn && !outcome.reasons?.length)) state.outcome = undefined;
+  if (outcome?.fade || (outcome && resultInHeader() && !outcome.warn && !outcome.reasons?.length && !outcome.stays)) state.outcome = undefined;
   // Drawn only when a result went: a redraw that changes nothing would replace a text field he is typing in, and its Undo.
   if (fadeRun() || state.outcome !== outcome) rerender();
 }
@@ -399,9 +400,10 @@ export async function busy(message: string, work: (page: Page) => Promise<void>)
  */
 function accept(view: HomeView): HomeView {
   state.home = undefined;
-  // The last results, and the rows pinned where they were, are the last home's.
+  // The last results, the rows pinned where they were, and Select's mode with its ticks, are the last home's.
   Object.assign(state, { skillsResult: undefined, mcpResult: undefined, agentsResult: undefined, item: undefined });
   unpin();
+  stopSelecting();
   // A harness page belongs to the home it was opened in.
   state.harness = undefined;
   if (!draftUnsaved()) state.instructionEdit = undefined;
@@ -659,8 +661,11 @@ const stillRead = (rows: NamedRow[], among: NamedRow[]) => [...groupBy(rows, row
  * on (busy). `said`: what was done, given the rows that went through in every tool (a row whose own change was refused, a stale
  * one, is no row changed: Done changed) and what tools still read another way of them (stillRead). Its result names the rows
  * that changed, and only they flash; one Undo, only when every click that changed something has one, puts them back (undoClick).
+ * `now`: what the rows changed are, where the result counts them instead of naming them ("All 10 are off"); `withoutUndo`: what
+ * it adds where it offers no Undo, given how many changed; `stays`: it stays until closed or replaced (Outcome stays).
  */
-export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], stayed: string[]) => string) => busy('Applying…', async page => {
+export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], stayed: string[]) => string,
+  { now = 'off', withoutUndo, stays }: { now?: 'off' | 'deleted'; withoutUndo?: (count: number) => string; stays?: boolean } = {}) => busy('Applying…', async page => {
   const several = new Set(clicks.map(click => click.kind)).size > 1, parts: { click: Click; done: Done }[] = [];
   for (const click of clicks) parts.push({ click, done: await carryOut(click, page) });
   const went = parts.filter(part => !part.done.refused), did = parts.filter(part => part.done.did), changed = parts.flatMap(part => part.done.changed ?? []);
@@ -676,9 +681,10 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], stayed:
     || done.kept?.results.some(entry => keptBack(entry) && entry.item.toLowerCase() === row.name.toLowerCase())).map(({ row }) => row);
   const through = changed.filter(row => !left.some(each => sameRow(each, row))), all = asked.map(({ row }) => row);
   const lead = left.length ? notAllThrough(rowNames(left, all), asked.length) : '';
-  const after = !changed.length ? 'Nothing changed.' : through.length ? said(through, stillRead(through, all)) : `${countedAs(changed.length, asked.length, false)}.`;
-  tellWritten({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(clicks.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn),
-    text: [lead, after].filter(Boolean).join(' '), reasons: [...stops, ...went.flatMap(part => part.done.outcome.reasons ?? [])],
+  const after = !changed.length ? 'Nothing changed.' : through.length ? said(through, stillRead(through, all)) : `${countedAs(changed.length, asked.length, now)}.`;
+  const back = changed.length && !undo ? withoutUndo?.(changed.length) : undefined;
+  tellWritten({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(clicks.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn), stays,
+    text: [lead, after, back].filter(Boolean).join(' '), reasons: [...stops, ...went.flatMap(part => part.done.outcome.reasons ?? [])],
     act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } }, parts.flatMap(part => part.done.reloads));
   for (const row of changed) flashRow(row);
   if (regroups) unpin();
@@ -762,7 +768,7 @@ function runOutcome(turns: ItemTurn[]): Outcome {
   // has it: the tools still reading them another way.
   const stayed = stillRead(byState(once(each).filter(turn => !waits(turn)))[0]!.map(named), among);
   const namedAs = (group: ItemTurn[], on: boolean) => `${plural(group.length, nouns.one, nouns.many)} ${group.length === 1 ? 'is' : 'are'} ${on ? 'on' : 'off'}: ${fewNames(rowNames(group.map(named), among))}`;
-  const said = byState(through.length ? through : rows).map((group, on) => (!group.length ? '' : through.length ? namedAs(group, !!on) : countedAs(group.length, once(each).length, !!on))).filter(Boolean).join('; ');
+  const said = byState(through.length ? through : rows).map((group, on) => (!group.length ? '' : through.length ? namedAs(group, !!on) : countedAs(group.length, once(each).length, on ? 'on' : 'off'))).filter(Boolean).join('; ');
   const along = did.flatMap(turn => (turn.done!.along ? [`${rowNames([named(turn)], among)[0]}: ${turn.done!.along.replace(/^./, first => first.toLowerCase())}`] : []));
   const undos = did.flatMap(turn => (turn.done!.undo ? [turn.done!.undo] : [])).reverse();
   const undo = did.length && undos.length === did.length ? () => void undoClick({ rows: did.map(named) }, undos) : undefined;
@@ -1276,6 +1282,8 @@ export interface Outcome {
   band?: boolean;
   /** The band goes after a few seconds: an Undo's confirmation. */
   fade?: boolean;
+  /** It stays in the header until closed or replaced, problems or none: a Delete of many's, whose Undo is many History Restores (fadeNow). */
+  stays?: boolean;
   /** The plugins whose acts its Undo turns back: an act on one of them, from either page, retires it (pluginstate.ts retire). */
   plugins?: string[];
   undo?: { id: string; label: string };
@@ -1764,7 +1772,16 @@ api().onNavigate(page => {
 });
 // Settings changed by a menu, a dialog or the system: main says so after every save and whenever the window comes back, and an
 // open Settings page reads them again, so it never shows (or writes back) a value that is no longer the saved one.
-api().onSettingsChanged(() => { if (state.page === 'settings') void loadSettings(); });
+api().onSettingsChanged(() => { readHistoryDays(); if (state.page === 'settings') void loadSettings(); });
+/** History's days as Settings saved them, read at launch and at each settings change, before any Delete says them; drawn again when they change. */
+function readHistoryDays() {
+  void api().getSettings().then(settings => {
+    if (!settings?.historyDays || state.historyDays === settings.historyDays) return;
+    state.historyDays = settings.historyDays;
+    rerender();
+  }, () => undefined);
+}
+readHistoryDays();
 /** Applies a keeper state to the open home unless a newer `seq` has already landed; forgets stale refusals once on. */
 function applySessionCosts(next: SessionCostsView): void {
   if (!state.home || next.home !== state.home.home) return;

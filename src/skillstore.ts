@@ -18,7 +18,8 @@ import { dirname, join } from 'node:path';
 import { emptyLibrary, readLibraryFile, saveLibraryFile, type RecordFile, type StoredLibrary } from './kindstore.ts';
 import type { LibraryItem } from './library.ts';
 import type { KindLibrary } from './librarypass.ts';
-import { FORMAT_VERSION, NOTHING_CHANGED, copyTree, exists, finishCopy, readRecord, readTree, removeTree, saveRecord, storeDirectory, storeFolder, writeDurably, type ShareContext } from './share.ts';
+import { FORMAT_VERSION, copyTree, exists, finishCopy, readRecord, readTree, removeTree, saveRecord, storeDirectory, storeFolder, writeDurably, type ShareContext } from './share.ts';
+import { NOTHING_CHANGED } from './words.ts';
 import { migrateSkills, type Migrated, type ToolsRead } from './skillmigrate.ts';
 import type { HarnessId } from './types.ts';
 
