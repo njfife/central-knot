@@ -15,8 +15,7 @@ const execFileAsync = promisify(execFile);
 export const lockSkip: string | false = process.getuid?.() === 0 && 'root bypasses file and folder permission locks';
 
 /** Skip value on Windows while the app's own locked-folder checks (fs.access W_OK / EACCES-only) are fixed in step 6B. */
-export const winLockAppSkip: string | false = process.platform === 'win32'
-  && 'App locked-folder checks on Windows are step 6B; covered on macOS and Linux.';
+export const winLockAppSkip: string | false = process.platform === 'win32' && 'App locked-folder checks on Windows are step 6B; covered on macOS and Linux.';
 
 /** Skip value on POSIX as root or on Windows for step 6B app locked-folder gaps. */
 export const lockAppSkip: string | false = lockSkip || winLockAppSkip;
@@ -40,7 +39,7 @@ const heldLocks = new Set<HeldLock>();
 let cachedSid: string | undefined;
 
 const norm = (path: string) => (process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path));
-const inside = (path: string, root: string) => path === root || path.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
+const isEnoent = (error: unknown) => (error as NodeJS.ErrnoException)?.code === 'ENOENT';
 const runIcacls = (args: string[]) => execFileAsync('icacls', args, { windowsHide: true });
 const shallowFirst = () => [...heldLocks].sort((a, b) => a.path.length - b.path.length);
 
@@ -58,15 +57,13 @@ async function releaseLock(entry: HeldLock): Promise<void> {
   if (!heldLocks.has(entry)) return;
   try {
     if (process.platform === 'win32') {
-      const err = await lstat(entry.path).then(() => undefined, error => error as NodeJS.ErrnoException);
-      if (err?.code === 'ENOENT') throw err;
+      const err = await lstat(entry.path).then(() => undefined, error => error);
+      if (isEnoent(err)) throw err;
       await runIcacls([entry.path, '/remove:d', `*${currentSid()}`]);
-    } else {
-      await chmod(entry.path, entry.restored);
-    }
+    } else await chmod(entry.path, entry.restored);
     heldLocks.delete(entry);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') heldLocks.delete(entry);
+    if (isEnoent(error)) heldLocks.delete(entry);
     throw error;
   }
 }
@@ -79,17 +76,14 @@ function releaseLockSync(entry: HeldLock): void {
     } else chmodSync(entry.path, entry.restored);
     heldLocks.delete(entry);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') heldLocks.delete(entry);
+    if (isEnoent(error)) heldLocks.delete(entry);
   }
 }
 
 process.on('exit', () => { for (const entry of shallowFirst()) releaseLockSync(entry); });
 if (process.env.NODE_TEST_CONTEXT) after(async () => { for (const entry of shallowFirst()) await releaseLock(entry).catch(() => undefined); });
 
-/**
- * Locks `path` (read-only folder, unreadable folder, unlistable folder, or unreadable file) and returns an idempotent
- * unlock function. Recorded locks are also released in `after` (under the test runner) and synchronously on exit.
- */
+/** Locks `path` and returns an idempotent unlock function; recorded locks also release in `after` (under the test runner) and on exit. */
 export async function lockPath(path: string, kind: LockKind): Promise<() => Promise<void>> {
   const target = process.platform === 'win32' ? resolve(path) : path;
   const locked = kind === 'dir-readonly' ? 0o555 : kind === 'dir-unlistable' ? 0o111 : 0o000;
@@ -99,11 +93,8 @@ export async function lockPath(path: string, kind: LockKind): Promise<() => Prom
   const key = norm(join(parent, basename(resolve(path))));
   if (process.platform === 'win32') {
     await lstat(target);
-    const sid = currentSid();
-    await runIcacls([target, ...WIN_DENY[kind].flatMap(rights => ['/deny', `*${sid}:${rights}`])]);
-  } else {
-    await chmod(target, locked);
-  }
+    await runIcacls([target, ...WIN_DENY[kind].flatMap(rights => ['/deny', `*${currentSid()}:${rights}`])]);
+  } else await chmod(target, locked);
   const entry: HeldLock = { path: target, key, restored };
   heldLocks.add(entry);
   return () => releaseLock(entry);
@@ -115,23 +106,20 @@ export async function withLock<T>(path: string, kind: LockKind, work: () => Prom
   try { return await work(); } finally { await unlock(); }
 }
 
-/**
- * Unlocks any recorded locks under `root` and restores owner write/read/traverse permissions across a temp tree without
- * shelling out to `chmod` or `icacls /reset /T`, so `rm` succeeds after a test leaves read-only files or locked folders
- * behind. Never follows symlinks.
- */
+/** Unlocks recorded locks under `root` and restores write/read/traverse permissions across a temp tree without shelling out to `chmod` or `icacls /reset /T`. Never follows symlinks. */
 export async function makeWritableTree(root: string): Promise<void> {
   const roots = [norm(root), norm(await realpath(root).catch(() => resolve(root)))];
   for (const entry of shallowFirst()) {
-    if (roots.some(base => inside(entry.key, base))) await releaseLock(entry).catch(() => undefined);
+    if (roots.some(base => entry.key === base || entry.key.startsWith(base.endsWith(sep) ? base : `${base}${sep}`))) {
+      await releaseLock(entry).catch(() => undefined);
+    }
   }
   const walk = async (at: string): Promise<void> => {
     const info = await lstat(at).catch(() => undefined);
     if (!info || info.isSymbolicLink()) return;
     if (info.isDirectory()) {
       if (process.platform !== 'win32') await chmod(at, 0o700).catch(() => undefined);
-      const entries = await readdir(at).catch(() => []);
-      for (const name of entries) await walk(join(at, name));
+      for (const name of await readdir(at).catch(() => [])) await walk(join(at, name));
       return;
     }
     await chmod(at, process.platform === 'win32' ? 0o666 : 0o600).catch(() => undefined);
