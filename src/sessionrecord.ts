@@ -11,8 +11,8 @@
 // `upsertSessionRecord`: for `notTaken`, keep the file's old checkpoint and retry later on `held` or `not-read`, while
 // `empty-key`, `invalid-time` and `invalid-tokens` can never be kept (count them and move on).
 // Then `await write(...)` (checks every changed month and `positions.json` with the reader's own v1 validator before writing
-// months durably, fsyncing `sessions/` and writing `positions.json`). Read-only callers (such as a page reading one kept
-// month) call `readSessionRecord` directly. Limit: a key is seen only in the months the turn read, so a request whose earlier
+// months durably, fsyncing `sessions/` and writing `positions.json`). Read-only callers call `readSessionRecord` directly, or
+// `readSessionMonths` for the receipts alone (the Sessions page's 7 days). Limit: a key is seen only in the months the turn read, so a request whose earlier
 // receipt is in a month that was not read, or is held, is kept again.
 // Not here: finding, reading or sweeping session files (sessionrequests.ts), sums and rows (sessionrow.ts), pricing rules
 // (rates.ts), callers, timers, Settings, Clear, retention, folding, or pages. Two app copies on one home are not coordinated here.
@@ -72,6 +72,8 @@ export interface SessionRecord {
   readMonths: string[];
   months: Record<string, SessionMonth>; positions: Positions; held: HeldEntry[];
 }
+/** A read of months alone (readSessionMonths): the record without its positions. */
+export type SessionMonths = Omit<SessionRecord, 'positions'>;
 export interface UpsertResult {
   months: Record<string, SessionMonth>; changed: string[];
   notTaken: {
@@ -186,8 +188,7 @@ function validPositions(obj: Record<string, unknown>): Positions | undefined {
   return obj as unknown as Positions;
 }
 
-const emptyRead = (readMonths: string[], held: HeldEntry[] = []): SessionRecord =>
-  ({ readMonths, months: {}, positions: emptyPositions(), held });
+const emptyRead = (readMonths: string[], held: HeldEntry[] = []): SessionMonths => ({ readMonths, months: {}, held });
 
 const checkV1 = <T>(obj: Record<string, unknown> | undefined, validate: (o: Record<string, unknown>) => T | undefined): T | undefined =>
   obj && obj.formatVersion === FORMAT_VERSION ? validate(obj) : undefined;
@@ -214,11 +215,11 @@ async function readRecordFile<T>(filePath: string, file: string, validate: (obj:
 }
 
 /**
- * Reads the named `YYYY-MM` months and `positions.json` without listing or creating anything on disk (for read-only callers;
- * mutations must read and write through `withSessionRecordTurn`). Checks `sessions` with `lstat` first; symlinks, non-files,
- * newer, damaged or unreadable files are reported in `held`.
+ * Reads the named `YYYY-MM` months without listing or creating anything on disk, and without `positions.json` (for a reader of
+ * receipts alone, as the Sessions page's 7 days). Checks `sessions` with `lstat` first; symlinks, non-files, newer, damaged or
+ * unreadable files are reported in `held`.
  */
-export async function readSessionRecord(home: string, months: readonly string[]): Promise<SessionRecord> {
+export async function readSessionMonths(home: string, months: readonly string[]): Promise<SessionMonths> {
   const names = [...new Set(months)].sort();
   names.forEach(assertMonth);
   const dir = sessionsDirectory(home);
@@ -238,9 +239,18 @@ export async function readSessionRecord(home: string, months: readonly string[])
     if (res.held) holds.push(res.held);
     else if (res.value) kept[month] = res.value;
   }
-  const pos = await readRecordFile(join(dir, POSITIONS_FILE), POSITIONS_FILE, validPositions);
-  if (pos.held) holds.push(pos.held);
-  return { readMonths: names, months: kept, positions: pos.value ?? emptyPositions(), held: holds };
+  return { readMonths: names, months: kept, held: holds };
+}
+
+/**
+ * The named months (readSessionMonths) and `positions.json` with them, held as they are, for read-only callers; mutations must
+ * read and write through `withSessionRecordTurn`.
+ */
+export async function readSessionRecord(home: string, months: readonly string[]): Promise<SessionRecord> {
+  const read = await readSessionMonths(home, months);
+  if (read.held.some(held => held.file === 'sessions')) return { ...read, positions: emptyPositions() };
+  const pos = await readRecordFile(join(sessionsDirectory(home), POSITIONS_FILE), POSITIONS_FILE, validPositions);
+  return { ...read, positions: pos.value ?? emptyPositions(), held: pos.held ? [...read.held, pos.held] : read.held };
 }
 
 const tokensGrew = (old: Tokens, next: Tokens) =>

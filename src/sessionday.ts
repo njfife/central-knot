@@ -4,13 +4,19 @@
 // [start, end), deduplicates across files by (tool, session, request), prices each kept request (rates.ts priceRequest),
 // keeps the largest rates.ts reportedCost of a complete SessionRead.reported only on a root session whose whole tree lay
 // inside the period, and joins concurrent reads for the same home, period and tools. Nothing is written under the home;
-// DayReading holds no message text and no absolute path. Not here: rows and totals (sessionrow.ts), file listing and record
-// parsing (sessionrequests.ts), rate matching (rates.ts), tool presence and which tools are read (presence.ts), stored
-// records, IPC (main.ts sessions:read), or the Sessions page (sessionspage.ts).
+// DayReading holds no message text and no absolute path.
+// The same reading made from the kept record instead (readKeptPeriod, keptReading, priceFromKept: the Sessions page's 7 days,
+// through main.ts sessions:read-kept): the months the period touches, read only; each request at the price it was kept with.
+// Where it can differ from the files' reading of the same day: a request repeated in a resumed session counts once in the
+// record, and the record keeps a request's first time where the files' reading takes its last.
+// Not here: rows and totals (sessionrow.ts), file listing and record parsing (sessionrequests.ts), rate matching (rates.ts),
+// tool presence and which tools are read (presence.ts), the record's shapes, reads and writes (sessionrecord.ts), IPC
+// (main.ts sessions:read, sessions:read-kept), or the Sessions page (sessionspage.ts).
 import { stat } from 'node:fs/promises';
-import { bundledRates, priceRequest, reportedCost, type PriceResult } from './rates.ts';
+import { priceRequest, reportedCost, type PriceResult } from './rates.ts';
 import { claudeFiles, codexRollouts, readClaudeSession, readCodexRollout, type Request, type SessionRead } from './sessionrequests.ts';
 import { SESSION_TOOLS, type SessionTool } from './presence.ts';
+import { monthOf, readSessionMonths, type KeptSession, type PricingEntry, type Receipt, type SessionMonths } from './sessionrecord.ts';
 import type { HarnessId } from './types.ts';
 import type { UsageWhere } from './usage.ts';
 
@@ -29,8 +35,8 @@ export interface ReadSession {
 }
 /** One present tool's reading for the period (`unread`: true if a folder, a listed file, or a line could not be read). */
 export interface ToolReading { tool: SessionTool; sessions: ReadSession[]; unread: boolean }
-/** What reading a home for a period returns: no message text, no absolute path, and the table's date (`ratesDate`). */
-export interface DayReading { period: Period; ratesDate: string; tools: ToolReading[] }
+/** What reading a home for a period returns: no message text and no absolute path. */
+export interface DayReading { period: Period; tools: ToolReading[] }
 
 interface Candidate { file: string; session?: string; parent?: string; read: () => Promise<SessionRead> }
 interface SessionMeta { parent?: string; project?: string; reported?: number; requests: Map<string, Request> }
@@ -160,8 +166,84 @@ export function readSessionPeriod(at: UsageWhere, period: Period, present: reado
   const running = inFlight.get(key);
   if (running) return running;
   const run = Promise.all(tools.map(tool => readTool(tool, at, period)))
-    .then((read): DayReading => ({ period, ratesDate: bundledRates.date, tools: read }))
+    .then((read): DayReading => ({ period, tools: read }))
     .finally(() => { inFlight.delete(key); });
   inFlight.set(key, run);
   return run;
+}
+
+/** The price a kept receipt was given, as rates.ts priceRequest gave it: its kept pricing entry with the receipt's dollars. */
+export function priceFromKept(entry: PricingEntry, receipt: Receipt): PriceResult {
+  return entry.priced ? { ...entry, dollars: receipt.dollars! } : entry;
+}
+
+/** A kept receipt as the request it records, at the price it was kept with. */
+function keptRequest(session: KeptSession, request: string, receipt: Receipt, pricings: readonly PricingEntry[]): PricedRequest {
+  const { at, model, tokens, speed, serviceTier } = receipt;
+  const kept: Request = {
+    tool: session.tool, session: session.session, ...(session.parent ? { parent: session.parent } : {}), request, at, model, tokens,
+    ...(speed !== undefined ? { speed } : {}), ...(serviceTier !== undefined ? { serviceTier } : {}),
+  };
+  return { request: kept, price: priceFromKept(pricings[receipt.pricing]!, receipt) };
+}
+
+/**
+ * One tool's requests found, by request id: the earliest kept time of each seen before the period's end (`first`), and those
+ * whose earliest is inside the period, priced, with the kept session they were found in (`inside`).
+ */
+interface Found { first: Map<string, number>; inside: Map<string, { session: KeptSession; priced: PricedRequest }> }
+
+/** A tool's requests found inside the period as sessions: a session's parts, from any month read, one; its requests in time order. */
+function sessionsOf(tool: SessionTool, found: Found): ReadSession[] {
+  const sessions = new Map<string, ReadSession>();
+  for (const { session, priced } of found.inside.values()) {
+    const parts = sessions.get(session.session) ?? { tool, session: session.session, requests: [] };
+    parts.parent ??= session.parent;
+    parts.project ??= session.project;
+    parts.requests.push(priced);
+    sessions.set(session.session, parts);
+  }
+  for (const parts of sessions.values()) {
+    parts.requests.sort((a, b) => a.request.at - b.request.at || a.request.request.localeCompare(b.request.request));
+  }
+  return [...sessions.values()];
+}
+
+/**
+ * The kept record's requests inside `period`, as readSessionPeriod's reading, for the present supported tools: a request kept in
+ * two months taken once, by tool and request id, its earliest kept time deciding whether it is inside; a session's parts in the
+ * months read made one; each priced as kept (priceFromKept); no tool's own figure (none is kept). A tool is unread where a month
+ * read holds one of its sessions with unread lines, and every tool is where a month read or the folder is held.
+ */
+export function keptReading(record: SessionMonths, period: Period, present: readonly HarnessId[]): DayReading {
+  const tools = SESSION_TOOLS.filter(tool => present.includes(tool));
+  const found = new Map<HarnessId, Found>(tools.map(tool => [tool, { first: new Map(), inside: new Map() }]));
+  const heldRead = record.held.some(held => held.file === 'sessions' || record.readMonths.some(month => held.file === `${month}.json`));
+  const unread = new Set<HarnessId>();
+  for (const kept of record.readMonths.flatMap(month => record.months[month] ?? [])) {
+    for (const session of kept.sessions) {
+      const ofTool = found.get(session.tool);
+      if (!ofTool) continue;
+      if (session.unread > 0) unread.add(session.tool);
+      for (const request in session.requests) {
+        const receipt = session.requests[request]!;
+        // Its earliest kept time decides: a request first kept before the period is not in it, though kept again inside.
+        if (receipt.at >= period.end || (ofTool.first.get(request) ?? Infinity) <= receipt.at) continue;
+        ofTool.first.set(request, receipt.at);
+        if (receipt.at < period.start) ofTool.inside.delete(request);
+        else ofTool.inside.set(request, { session, priced: keptRequest(session, request, receipt, kept.pricings) });
+      }
+    }
+  }
+  return { period, tools: tools.map(tool => ({ tool, sessions: sessionsOf(tool, found.get(tool)!), unread: heldRead || unread.has(tool) })) };
+}
+
+/** The kept record's reading of `period` (keptReading), from the UTC months of its start and of its last moment; read only. */
+export async function readKeptPeriod(home: string, period: Period, present: readonly HarnessId[]): Promise<DayReading> {
+  const months = new Set([monthOf(period.start), monthOf(period.end - 1)]);
+  const record = await readSessionMonths(home, [...months]);
+  // A whole turn of the event loop (a timer: an immediate would run before what waits) between the last month's parse and the
+  // reading, so that main is not held for both at once.
+  await new Promise(resolve => setTimeout(resolve, 0));
+  return keptReading(record, period, present);
 }

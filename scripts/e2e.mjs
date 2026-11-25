@@ -10229,6 +10229,26 @@ async function sessionsFlow() {
 }
 
 /**
+ * A 60-day-old FIFO standing as a session file at `rel` in `home`, so Today, Yesterday and the 30-day usage skip it while a
+ * sweep that meets it waits in open(pipe, 'r') until `release()`; `clean()` removes it.
+ */
+function holdPipe(home, rel) {
+  const pipe = join(home, rel);
+  mkdirSync(dirname(pipe), { recursive: true });
+  spawnSync('mkfifo', [pipe]);
+  const old = new Date(Date.now() - 60 * 86_400_000);
+  utimesSync(pipe, old, old);
+  const release = async () => {
+    for (let tries = 0; tries < 200; tries++) {
+      try { const fd = openSync(pipe, fsConstants.O_WRONLY | fsConstants.O_NONBLOCK); closeSync(fd); return true; } catch { await wait(25); }
+    }
+    return false;
+  };
+  const clean = () => { if (existsSync(pipe)) rmSync(pipe); };
+  return { pipe, release, clean };
+}
+
+/**
  * Per-home session-cost keeping (sessionkeep.ts, sessionspage.ts, settingspage.ts): nothing written before the click; the
  * Sessions page button, info card, Collecting… state, and clean removal once swept; the Settings switch turning sweeps off
  * without touching the record; a failed settings save leaving consent off; Automatic sync off leaving sweeps running; Quit
@@ -10240,7 +10260,8 @@ async function keepSessionCostsFlow() {
   if (midnight(-1) - Date.now() < 120_000) await wait(midnight(-1) - Date.now() + 1000);
   const today = midnight(0), started = Date.now();
   const todayAt = part => today + Math.floor((started - today) * part);
-  const monthKey = ms => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+  /** The record's month of a time: its UTC month (sessionrecord.ts monthOf), not the local one. */
+  const monthKey = ms => new Date(ms).toISOString().slice(0, 7);
   const homeA = join(scratch, 'keep-costs-a'), homeB = join(scratch, 'keep-costs-b'), outside = join(scratch, 'keep-costs-outside');
   const data = join(scratch, 'keep-costs-data'), real = join(scratch, 'keep-costs-real');
   for (const dir of [join(homeA, '.claude'), join(homeA, '.codex'), join(homeB, '.claude'), join(homeB, '.central-knot'), outside, data, real]) mkdirSync(dir, { recursive: true });
@@ -10273,22 +10294,7 @@ async function keepSessionCostsFlow() {
   ], todayAt(0.45));
   put(homeA, `.codex/sessions/${dated}/rollout-c1.jsonl`, rollout('c1', todayAt(0.6), 'gpt-6-astra', 'r1', 30_000, 3_000), todayAt(0.6));
 
-  /** Makes a 60-day-old FIFO so Today/Yesterday and 30-day Usage skip it while sweepSessions blocks in open(pipe, 'r') until release(). */
-  const makeHoldPipe = rel => {
-    const pipe = join(homeA, rel);
-    mkdirSync(dirname(pipe), { recursive: true });
-    spawnSync('mkfifo', [pipe]);
-    const old = new Date(Date.now() - 60 * 86_400_000);
-    utimesSync(pipe, old, old);
-    const release = async () => {
-      for (let tries = 0; tries < 200; tries++) {
-        try { const fd = openSync(pipe, fsConstants.O_WRONLY | fsConstants.O_NONBLOCK); closeSync(fd); return true; } catch { await wait(25); }
-      }
-      return false;
-    };
-    const clean = () => { if (existsSync(pipe)) rmSync(pipe); };
-    return { pipe, release, clean };
-  };
+  const makeHoldPipe = rel => holdPipe(homeA, rel);
 
   const SPILLS = `(() => { const page = document.querySelector('#sessions-scroll'); if (!page) return [];
     const edge = page.getBoundingClientRect().right - parseFloat(getComputedStyle(page).paddingRight);
@@ -10348,7 +10354,7 @@ async function keepSessionCostsFlow() {
     await wait(2000);
     same('before the click: Start button and its info card match verbatim',
       [await a.text('#sessions-keep-start'), await a.text('#sessions-keep-info-card'), await a.exists('#sessions-collecting')],
-      ['Start keeping session costs', 'This home’s Central Knot folder keeps each session’s project, request times, models, token counts and estimated prices. No message text. You can turn this off in Settings; what was kept stays.', false]);
+      ['Start keeping session costs', 'Adds the last 7 days to this page. This home’s Central Knot folder keeps each session’s project, request times, models, token counts and estimated prices. No message text. You can turn this off in Settings; what was kept stays.', false]);
     same('before the click: no sessions folder, no lock, no keepSessionCosts entry',
       [existsSync(sessionsDirA), existsSync(join(sessionsDirA, 'lock.sqlite')), jsonOrNothing(settingsPath)?.keepSessionCosts ?? null],
       [false, false, null]);
@@ -10509,6 +10515,279 @@ async function keepSessionCostsFlow() {
     await b.exists('#sessions-keep-result'), false);
   same('no page errors on Home B', b.pageErrors, []);
   await b.quit();
+}
+
+/**
+ * The Sessions page's 7 days, read from the kept record (sessionday.ts readKeptPeriod, sessionrow.ts dayByDay, sessionspage.ts
+ * readingView and dayFold): offered in a home that keeps session costs; a session whose file is gone still under its day; a line
+ * for each day with sessions, newest first, today's open where it has few, and a day closed again holding no row; not behind
+ * Today (what was kept drawn at once, then read again when the sweep the choice asked for ends, the opened days and the scroll
+ * kept); no sweep asked for once he has left, and no read of them after a move to Today or another page while that sweep runs;
+ * then a move to a home that does not keep: Today | Yesterday and Start, the card behind it, the period refused in main, and
+ * that home's empty week once it keeps. A second launch, its sweeps every few seconds, on a heavy week: its first draw with
+ * every day closed, an opened day's line held in view while its rows scroll, the page following a sweep it did not ask for,
+ * and, with the window hidden, nothing read until it is shown again. Nothing cut off at 860×560 and 1316×820 with the sidebar
+ * open; pictures light and dark with --shots.
+ */
+async function sessionsWeekFlow() {
+  const midnight = (back = 0, at = new Date()) => new Date(at.getFullYear(), at.getMonth(), at.getDate() - back).getTime();
+  if (midnight(-1) - Date.now() < 300_000) await wait(midnight(-1) - Date.now() + 1000);
+  const today = midnight(0), started = Date.now(), HOUR = 3_600_000;
+  const todayAt = part => today + Math.floor((started - today) * part);
+  const home = join(scratch, 'week-home'), data = join(scratch, 'week-data'), real = join(scratch, 'week-real');
+  for (const dir of [join(home, '.claude'), join(home, '.codex'), data, real]) mkdirSync(dir, { recursive: true });
+  const put = (rel, records, mtime) => {
+    const file = join(home, rel);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, records.map(r => JSON.stringify(r)).join('\n') + '\n');
+    utimesSync(file, new Date(mtime), new Date(mtime));
+    return file;
+  };
+  const reply = (session, id, at, input, output, cwd = '/work/app') => ({ type: 'assistant', sessionId: session, cwd, timestamp: new Date(at).toISOString(),
+    message: { id, type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'Stand-in.' }],
+      usage: { input_tokens: input, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: output, speed: 'standard', service_tier: 'standard' } } });
+  const noon = back => midnight(back) + 12 * HOUR;
+  const dated = ms => { const d = new Date(ms); return [d.getFullYear(), d.getMonth() + 1, d.getDate()].map(p => String(p).padStart(2, '0')).join('/'); };
+  // Five days: today's session, yesterday's, a Codex rollout two days back, one three days back whose file goes once kept, two replies four days back.
+  const nowFile = put('.claude/projects/-work-app/now.jsonl', [reply('now', 'n1', todayAt(0.3), 30_000, 3_000)], todayAt(0.3));
+  put('.claude/projects/-work-app/yest.jsonl', [reply('yest', 'y1', noon(1), 20_000, 2_000)], noon(1));
+  put(`.codex/sessions/${dated(noon(2))}/rollout-c2.jsonl`, [
+    { timestamp: new Date(noon(2)).toISOString(), type: 'session_meta', payload: { id: 'c2', session_id: 'c2', cwd: '/work/codex-app', model_provider: 'openai' } },
+    { timestamp: new Date(noon(2)).toISOString(), type: 'turn_context', payload: { turn_id: 'turn-c2', cwd: '/work/codex-app', model: 'gpt-6-astra' } },
+    { timestamp: new Date(noon(2) + 1).toISOString(), type: 'token_usage_record', payload: { response_id: 'r2',
+      usage: { input_tokens: 40_000, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: 4_000, reasoning_output_tokens: 0, total_tokens: 44_000 } } },
+  ], noon(2) + 1);
+  const goneFile = put('.claude/projects/-work-gone/gone.jsonl', [reply('gone', 'g1', noon(3), 10_000, 1_000, '/work/gone')], noon(3));
+  put('.claude/projects/-work-app/four.jsonl', [reply('four', 'f1', noon(4), 5_000, 500), reply('four', 'f2', noon(4) + 60_000, 5_000, 500)], noon(4) + 60_000);
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, keepSessionCosts: { [realpathSync(home)]: true } }));
+  let a = await launch(data, ['--practice-copy'], real);
+  const sessionsDir = join(home, '.central-knot/sessions');
+  const keptIds = () => (existsSync(sessionsDir) ? readdirSync(sessionsDir) : []).filter(name => /^\d{4}-\d{2}\.json$/.test(name))
+    .flatMap(name => (jsonOrNothing(join(sessionsDir, name))?.sessions ?? []).flatMap(s => Object.keys(s.requests))).sort();
+  for (let tries = 0; tries < 150 && keptIds().length < 6; tries++) await wait(100);
+  same('the sweep after the home opened kept every request of the five days', keptIds(), ['f1', 'f2', 'g1', 'n1', 'r2', 'y1']);
+  rmSync(goneFile);
+
+  // A home that keeps: 7 days offered; chosen, what was kept, a line for each day with sessions.
+  await a.click('#nav-sessions');
+  for (let tries = 0; tries < 100 && !(await a.exists('#sessions-heading')); tries++) await wait(100);
+  await a.settle();
+  same('a home that keeps session costs offers 7 days beside Today and Yesterday', await a.all('.sessions-bar .kind-seg', '[e.id, e.textContent]'),
+    [['sessions-day-today', 'Today'], ['sessions-day-yesterday', 'Yesterday'], ['sessions-day-week', '7 days']]);
+  const weekShown = async () => { for (let tries = 0; tries < 100 && !(await a.exists('#sessions-days')); tries++) await wait(100); await a.settle(); };
+  await a.click('#sessions-day-week');
+  await weekShown();
+  const dayName = ms => a.run(`new Date(${ms}).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })`);
+  const dayLines = () => a.all('.sessions-day', '[Number(e.dataset.day), e.querySelector(".sessions-day-name").textContent, e.querySelector(".sessions-day-count").textContent, e.querySelector(":scope > details").open, e.querySelectorAll(".sessions-row").length]');
+  same('7 days: its dates in the heading; a line a day with sessions, newest first, its name and count; today’s open, every other closed and holding no row',
+    [await a.text('#sessions-heading'), await dayLines()],
+    [`7 days, ${await a.run(`new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'long' }).formatRange(new Date(${midnight(6)}), new Date(${today}))`)}`,
+      [[today, 'Today', '1 session', true, 1], [midnight(1), 'Yesterday', '1 session', false, 0], [midnight(2), await dayName(midnight(2)), '1 session', false, 0],
+        [midnight(3), await dayName(midnight(3)), '1 session', false, 0], [midnight(4), await dayName(midnight(4)), '1 session', false, 0]]]);
+  const day = ms => `.sessions-day[data-day="${ms}"]`;
+  await a.click(`${day(midnight(3))} > details > summary`);
+  same('the session whose file is gone, opened under its day from what was kept: the tool and its project',
+    await a.all(`${day(midnight(3))} .sessions-row`, '[e.dataset.session, e.querySelector(".sessions-tool").textContent, e.querySelector(".sessions-project").textContent]'), [['gone', 'Claude Code', 'gone']]);
+  await a.click(`${day(midnight(3))} > details > summary`);
+  same('a day closed again holds no row', await a.run(`document.querySelectorAll('.sessions-day > details:not([open]) .sessions-row').length`), 0);
+  /** Nothing cut off at 860×560 and 1316×820 with the sidebar open; with --shots, `name` light and dark at each. */
+  const fits = async name => {
+    for (const [width, height] of [[860, 560], [1316, 820]]) {
+      await sizeTo(a, width, height);
+      if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+      const spills = await a.run(`(() => { const page = document.querySelector('#sessions-scroll'), edge = page.getBoundingClientRect().right - parseFloat(getComputedStyle(page).paddingRight);
+        return [...page.querySelectorAll('*')].filter(e => e.getBoundingClientRect().right > edge + 1).map(e => e.id || e.className || e.tagName); })()`);
+      same(`${name}: nothing cut off at ${width}×${height}, the sidebar open`, [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT), ...spills], []);
+      if (shots) for (const look of ['light', 'dark']) {
+        await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+        await wait(150);
+        await a.shot(`${name}-${look}-${width}`);
+      }
+    }
+    if (shots) await a.send('Emulation.setEmulatedMedia', { features: [] });
+    await fullSize(a);
+  };
+  await fits('sessions-week');
+
+  // Not behind Today: the record a request behind the file; 7 days chosen draws what was kept, then the newer once the sweep it asked for ends.
+  const dayTotal = ms => a.run(`document.querySelector('${day(ms)} > details > summary .sessions-estimate')?.textContent ?? null`);
+  const older = await dayTotal(today);
+  const onToday = async () => { for (let tries = 0; tries < 100 && !/^Today/.test(await a.text('#sessions-heading') ?? ''); tries++) await wait(100); await a.settle(); };
+  await a.click('#sessions-day-today');
+  await onToday();
+  writeFileSync(nowFile, `${JSON.stringify(reply('now', 'n2', Math.max(today, Date.now() - 1000), 50_000, 5_000))}\n`, { flag: 'a' });
+  const held = holdPipe(home, '.claude/projects/-work-hold/held-1.jsonl');
+  try {
+    await a.click('#sessions-day-week');
+    await weekShown();
+    const drawn = await dayTotal(today);
+    for (let tries = 0; tries < 100 && !(await a.exists('#sessions-collecting')); tries++) await wait(50);
+    same('7 days chosen with the record a request behind the file: what was kept drawn at once, and the sweep the choice asked for under way',
+      [drawn, await a.exists('#sessions-collecting')], [older, true]);
+    await sizeTo(a, ...SMALLEST);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    await a.click(`${day(midnight(1))} > details > summary`);
+    const scrolled = await a.run(`(page => { page.scrollTop = page.scrollHeight; return page.scrollTop; })(document.querySelector('#sessions-scroll'))`);
+    same('the sweep held so far is let go', await held.release(), true);
+    for (let tries = 0; tries < 100 && (await dayTotal(today)) === older; tries++) await wait(100);
+    same('when that sweep ends the 7 days are read again: today’s figure the newer, the days opened still open, the page scrolled where it was',
+      [(await dayTotal(today)) !== older, await a.all('.sessions-day > details[open]', 'Number(e.parentElement.dataset.day)'), scrolled > 0 && (await a.run(`document.querySelector('#sessions-scroll').scrollTop`)) === scrolled],
+      [true, [today, midnight(1)], true]);
+  } finally { held.clean(); }
+  await a.click(`${day(midnight(1))} > details > summary`);
+  await fullSize(a);
+  const weekToday = await dayTotal(today);
+  await a.click('#sessions-day-today');
+  await onToday();
+  same('the 7 days’ line for today says what Today says, read from the files', await a.text('.sessions-head > .sessions-estimate'), weekToday);
+  // 7 days chosen and History opened in one go, before their first read lands: no sweep is asked for once he has left.
+  const attempts = () => (readNow(join(data, 'central-knot.log')).match(/session costs: (swept|store is locked|sweep stopped|refused|failed)/g) ?? []).length;
+  const attemptsBefore = attempts();
+  await a.run(`(() => { document.querySelector('#sessions-day-week').click(); document.querySelector('#nav-history').click(); })()`);
+  await a.settle();
+  await wait(1500);
+  same('7 days chosen and History opened before their first read lands: no sweep asked for after he left', [attempts() - attemptsBefore, await a.exists('#sessions-scroll')], [0, false]);
+  await a.click('#nav-sessions');
+  await weekShown();
+  for (let tries = 0; tries < 100 && await a.exists('#sessions-collecting'); tries++) await wait(50);
+  await a.click('#sessions-day-today');
+  await onToday();
+
+  // A move while the sweep 7 days asked for runs: nothing of them drawn after it (a development run counts their reads in main too).
+  const main = a.inspect ? await mainHelpers(a.inspect) : undefined;
+  if (!main) console.log('sessionsWeekFlow: the reads of the 7 days after a move are counted in a development run only (they are counted in main).');
+  const moveWhileSweeping = async (name, move, moved) => {
+    const hold = holdPipe(home, `.claude/projects/-work-hold/${name.replace(/\W+/g, '-')}.jsonl`);
+    try {
+      if (!(await a.exists('#sessions-scroll'))) await a.click('#nav-sessions');
+      else await a.click((await a.exists('#sessions-day-week[aria-pressed="true"]')) ? '#header-refresh' : '#sessions-day-week');
+      await weekShown();
+      for (let tries = 0; tries < 100 && !(await a.exists('#sessions-collecting')); tries++) await wait(50);
+      same(`${name}: the sweep 7 days asked for is under way`, await a.exists('#sessions-collecting'), true);
+      await main?.noteCalls('sessions:read-kept');
+      await move();
+      same(`${name}: the sweep held so far is let go`, await hold.release(), true);
+      await wait(1500);
+      const reads = main ? (await main.calls()).length : 0;
+      await main?.restore('sessions:read-kept');
+      same(`${name} while that sweep runs: the page stays as moved, and the 7 days are not read again`, [await moved(), reads], [true, 0]);
+    } finally { hold.clean(); }
+  };
+  await moveWhileSweeping('Today chosen', () => a.click('#sessions-day-today'), async () => /^Today/.test(await a.text('#sessions-heading') ?? ''));
+  await moveWhileSweeping('History opened', () => a.click('#nav-history'), async () => !(await a.exists('#sessions-scroll')));
+
+  // A heavy week: 930 sessions of 40 replies over the 7 days, kept by the sweep 7 days asks for; its first draw, and no row of a closed day.
+  for (let s = 0; s < 930; s++) {
+    const back = s % 7, from = back ? midnight(back) + HOUR : todayAt(0.05), to = back ? midnight(back) + 20 * HOUR : todayAt(0.95);
+    const at = i => from + Math.floor((to - from) * (Math.floor(s / 7) * 40 + i) / (133 * 40));
+    put(`.claude/projects/-work-heavy/heavy-${s}.jsonl`, Array.from({ length: 40 }, (_, i) => reply(`heavy-${s}`, `h-${s}-${i}`, at(i), 1_000, 100, '/work/heavy')), at(39));
+  }
+  await a.click('#nav-sessions');
+  await weekShown();
+  const todayCount = () => a.text(`${day(today)} .sessions-day-count`);
+  for (let tries = 0; tries < 1200 && (await todayCount()) !== '134 sessions'; tries++) await wait(100);
+  same('the heavy week kept and read: today’s 133 heavy sessions and its own', await todayCount(), '134 sessions');
+
+  // A home that does not keep, opened while the sweep 7 days asked for runs: Today | Yesterday and Start, as before; the period refused in main.
+  await moveWhileSweeping('Another home opened', () => a.click('#home-fixture'), async () => /^Today/.test(await a.text('#sessions-heading') ?? ''));
+  const practice = await a.run(`document.querySelector('.status-home').title`);
+  same('a home that does not keep: Today | Yesterday and Start keeping session costs, as before', [practice !== home, await a.all('.sessions-bar .kind-seg', 'e.id'), await a.exists('#sessions-keep-start')],
+    [true, ['sessions-day-today', 'sessions-day-yesterday'], true]);
+  const bounds = JSON.stringify([6, 5, 4, 3, 2, 1, 0, -1].map(back => midnight(back)));
+  same('the 7 days asked for from the page in a home that does not keep, or for a home not open: refused in main',
+    [await a.run(`window.centralKnot.readKeptSessions(${JSON.stringify(practice)}, ${bounds})`), await a.run(`window.centralKnot.readKeptSessions(${JSON.stringify(home)}, ${bounds})`)], [null, null]);
+  // The card behind Start, then that home kept: its empty week.
+  for (const [width, height] of [[860, 560], [1316, 820]]) {
+    await sizeTo(a, width, height);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    await a.click('#sessions-keep-info');
+    if (shots) for (const look of ['light', 'dark']) {
+      await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+      await wait(150);
+      await a.shot(`sessions-card-${look}-${width}`);
+    }
+    await a.click('#sessions-keep-info');
+  }
+  if (shots) await a.send('Emulation.setEmulatedMedia', { features: [] });
+  await fullSize(a);
+  await a.click('#sessions-keep-start');
+  for (let tries = 0; tries < 100 && !(await a.exists('#sessions-day-week')); tries++) await wait(50);
+  await a.click('#sessions-day-week');
+  for (let tries = 0; tries < 100 && !(await a.exists('#sessions-none')); tries++) await wait(100);
+  same('a home that keeps with nothing in 7 days: one sentence naming the tools read', await a.text('#sessions-none'), 'No Claude Code or Codex sessions in the last 7 days.');
+  await fits('sessions-week-empty');
+  same('no page error on the 7 days', a.pageErrors, []);
+  main?.close();
+  await a.quit();
+
+  // A second launch, its sweep every 4 s, on the heavy week: its first draw, every day closed, an opened day's line held in view.
+  const data2 = join(scratch, 'week-data-2');
+  mkdirSync(data2, { recursive: true });
+  writeFileSync(join(data2, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, keepSessionCosts: { [realpathSync(home)]: true } }));
+  a = await launch(data2, [], real, { CK_SESSION_SWEEP_EVERY_MS: '4000' });
+  await a.click('#nav-sessions');
+  for (let tries = 0; tries < 100 && !(await a.exists('#sessions-heading')); tries++) await wait(100);
+  await a.settle();
+  const drawMs = await a.run(`new Promise(done => { const t0 = performance.now(), seen = new MutationObserver(() => { if (document.querySelectorAll('.sessions-day').length === 7) { seen.disconnect(); done(Math.round(performance.now() - t0)); } });
+    seen.observe(document.body, { childList: true, subtree: true }); document.querySelector('#sessions-day-week').click(); })`);
+  await a.settle();
+  console.log(`sessionsWeekFlow: a heavy week (37,200 requests in 930 sessions) chosen to its days drawn in ${drawMs} ms`);
+  check(`a heavy week chosen: its days drawn within 3 s (${drawMs} ms)`, drawMs < 3000, { drawMs });
+  same('a heavy week: every day starts closed, today’s 134 sessions too, and no row is built',
+    [await a.text(`${day(today)} .sessions-day-count`), await a.all('.sessions-day', '[e.querySelector(":scope > details").open, e.querySelectorAll(".sessions-row").length]')],
+    ['134 sessions', Array.from({ length: 7 }, () => [false, 0])]);
+  await fits('sessions-week-heavy');
+  for (const [width, height] of [[860, 560], [1316, 820]]) {
+    await sizeTo(a, width, height);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    if (!(await a.run(`document.querySelector('${day(midnight(1))} > details').open`))) await a.click(`${day(midnight(1))} > details > summary`);
+    const stuck = await a.run(`(() => { const page = document.querySelector('#sessions-scroll'), line = document.querySelector('${day(midnight(1))} > details > summary');
+      page.scrollTop += line.getBoundingClientRect().top - page.getBoundingClientRect().top + 600;
+      return Math.abs(line.getBoundingClientRect().top - page.getBoundingClientRect().top) < 2 && document.querySelector('${day(midnight(1))} .sessions-row').getBoundingClientRect().top < page.getBoundingClientRect().top; })()`);
+    same(`an opened day's line held at the top of the page while its rows scroll under it, at ${width}×${height}`, stuck, true);
+    if (shots) for (const look of ['light', 'dark']) {
+      await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+      await wait(150);
+      await a.shot(`sessions-week-heavy-open-${look}-${width}`);
+    }
+  }
+  if (shots) await a.send('Emulation.setEmulatedMedia', { features: [] });
+  await fullSize(a);
+  // A sweep the page did not ask for (the timer's) ends while 7 days are shown: they are read again, with no click.
+  for (let tries = 0; tries < 100 && await a.exists('#sessions-collecting'); tries++) await wait(50);
+  const beforeTick = await dayTotal(today);
+  writeFileSync(nowFile, `${JSON.stringify(reply('now', 'n3', Math.max(today, Date.now() - 1000), 80_000, 8_000))}\n`, { flag: 'a' });
+  for (let tries = 0; tries < 150 && (await dayTotal(today)) === beforeTick; tries++) await wait(100);
+  same('a sweep the page did not ask for ends while 7 days are shown: today’s figure the newer, with no click', (await dayTotal(today)) !== beforeTick, true);
+  // The window hidden (closed to the tray): a sweep that ends reads nothing; shown again, 7 days are read once (the next sweep
+  // held meanwhile, so that only the showing reads). The window is hidden and counted from main: a development run only.
+  const mainB = a.inspect ? await mainHelpers(a.inspect) : undefined;
+  if (mainB) {
+    const inMain = await a.main();
+    const sweepsEnded = () => (readNow(join(data2, 'central-knot.log')).match(/session costs: (swept|store is locked|sweep stopped|refused|failed)/g) ?? []).length;
+    await mainB.noteCalls('sessions:read-kept');
+    await inMain.run(`electron.BrowserWindow.getAllWindows()[0].hide()`);
+    for (let tries = 0; tries < 50 && !(await a.run('document.hidden')); tries++) await wait(100);
+    const endedBefore = sweepsEnded();
+    for (let tries = 0; tries < 150 && sweepsEnded() === endedBefore; tries++) await wait(100);
+    await wait(500);
+    const whileHidden = [await a.run('document.hidden'), sweepsEnded() > endedBefore, (await mainB.calls()).length];
+    const hold = holdPipe(home, '.claude/projects/-work-hold/while-hidden.jsonl');
+    try {
+      const endedThen = sweepsEnded();
+      await wait(4500);
+      await inMain.run(`electron.BrowserWindow.getAllWindows()[0].show()`);
+      for (let tries = 0; tries < 50 && (await a.run('document.hidden')); tries++) await wait(100);
+      await wait(1000);
+      same('hidden, a sweep that ends reads nothing; shown again, the 7 days are read once', [...whileHidden, sweepsEnded() === endedThen, (await mainB.calls()).length], [true, true, 0, true, 1]);
+      await mainB.restore('sessions:read-kept');
+      same('the sweep held while shown is let go', await hold.release(), true);
+    } finally { hold.clean(); }
+    inMain.close();
+    mainB.close();
+  } else console.log('sessionsWeekFlow: reads while the window is hidden are counted in a development run only (it is hidden from main).');
+  same('no page error on the heavy week', a.pageErrors, []);
+  await a.quit();
 }
 
 /**
@@ -16719,7 +16998,7 @@ if (tool === 'claude') {
 
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, selectFlow, sessionStripFlow, hookRunFlow, fromFlow, claudeWholeFlow],
-  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow, sessionsFlow, keepSessionCostsFlow],
+  [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow, sessionsFlow, keepSessionCostsFlow, sessionsWeekFlow],
   [fewToolsFlow, openCodeFlow, antigravityFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, pluginRecordHoldsFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow, clickReadsFlow],
   [backFlow, backPlaceFlow, libraryLinesFlow, harnessFlow, manageFlow, arrivalFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, mcpSigninFlow, firstSetupFlow, crashFlow],
 ];
