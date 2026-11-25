@@ -15205,6 +15205,7 @@ if (tool === 'claude') {
   await open('skills', 'incident-triage');
   const piSaid = await resultOf('Pi');
   same('placed from the Off row: Pi’s line keeps its switch, and the result is on it, with Undo', [await a.exists(byId(rowPart('enable', 'skills', 'incident-triage', 'pi-cli'))), /^Put varo-incident-response’s items in Pi/.test(piSaid?.[0] ?? ''), piSaid?.[1]], [true, true, true]);
+  if (shots) { await sizeTo(a, 1316, 819); await a.shot('lines-placed-from-off-1316'); await fullSize(a); }
   await a.run(`(document.querySelector(${JSON.stringify(byId(rowPart('line-undo', 'skills', 'incident-triage', 'pi-cli')))}) ?? document.querySelector('#outcome-undo')).click()`);
   await idle();
   same('and its Undo takes them out again', existsSync(join(home, '.pi/agent/skills/incident-triage/SKILL.md')), false);
@@ -15217,7 +15218,7 @@ if (tool === 'claude') {
     ['Put its items here', 'Puts varo-incident-response’s skills, agents and MCP servers into OpenCode, following the plugin. Your own incident-triage stays as it is.']);
   await a.click(act('agents', 'incident-lead', 'opencode-cli'));
   await until(async () => /in OpenCode:/.test(await saidAnywhere('OpenCode')), 300);
-  check('the result counts what the placement put there, and names his own it left, from its own report', /Put varo-incident-response’s items in OpenCode: 2 of its 3 items are on in OpenCode\. incident-triage: /.test(await saidAnywhere('OpenCode'))
+  check('the result counts what the placement put there, and names his own it left, from its own report', /Put varo-incident-response’s items in OpenCode: 2 of its 3 items are on in OpenCode\. incident-triage\b/.test(await saidAnywhere('OpenCode'))
     && readNow(join(home, '.config/opencode/skills/incident-triage/SKILL.md')).includes('Mine, not the plugin’s.'), await saidAnywhere('OpenCode'));
   await undoLast();
   await idle();

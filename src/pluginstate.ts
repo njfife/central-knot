@@ -629,7 +629,7 @@ const LINE_WORDS: Record<LineAim['act'], { waiting: string; running: string; don
 export interface LineResult { aim: LineAim; words: string; next: string; failed: boolean; undo?: () => void; told?: Outcome }
 let results: LineResult[] = [];
 /** The result a tool's line on an item shows now, if any (matrix.ts pluginLine, harnessLine). */
-export const resultOn = (tool: HarnessId, item: PartRef) => results.find(each => each.aim.tool === tool && samePart(each.aim.item, item) && app.outcome !== each.told);
+export const resultOn = (tool: HarnessId, item: PartRef) => results.find(each => each.aim.tool === tool && samePart(each.aim.item, item) && !(each.told && app.outcome === each.told));
 /** × on a line's result, or the header's copy of it. */
 export function closeLineResult(result: LineResult): void {
   results = results.filter(each => each !== result);
