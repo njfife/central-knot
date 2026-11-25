@@ -224,8 +224,28 @@ export async function swapFolder(context: ShareContext, source: string, target: 
     const { parked, note } = await park(context, target);
     if (await hashOf(parked) !== expected) { await rename(parked, target); await done(note); throw changedWhileSyncing(); }
     context.fault?.('mid-replace');
-    try { await retryWhileHeld(() => rename(stage, target), () => vacant(target)); }
-    catch (error) { await rename(parked, target).catch(() => undefined); await done(note); throw error; }
+    // On Windows the new one may wait to go in (retryWhileHeld): before each further try the copy moved aside must still be what
+    // was read and its place empty, and once it is in after a wait, that copy is compared again before it goes. A save made into
+    // it meanwhile goes back, and the write says it changed just now.
+    let waited = false;
+    const parkedHolds = async () => {
+      waited = true;
+      if (await hashOf(parked) !== expected) throw changedWhileSyncing();
+      await vacant(target);
+    };
+    try {
+      await retryWhileHeld(() => rename(stage, target), parkedHolds);
+    } catch (error) {
+      // A put-back that is refused keeps its note, so recoverFolders finishes it.
+      await rename(parked, target).then(() => done(note), () => undefined);
+      throw error;
+    }
+    if (waited && await hashOf(parked) !== expected) {
+      await rename(target, stage);
+      await rename(parked, target);
+      await done(note);
+      throw changedWhileSyncing();
+    }
     await finishCopy(source, target);
     await removeTree(parked).catch(() => undefined);
     await done(note);

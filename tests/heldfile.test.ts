@@ -380,7 +380,7 @@ test('a skill’s copy whose place fills while its placement waits: what is ther
   } finally { await box.cleanup(); }
 });
 
-test('a skill’s copy written over, whose place fills while the new one waits to go in: what is there stays, and the copy moved aside is kept beside it', { skip: windowsOnly }, async () => {
+test('a skill’s copy written over, whose place fills while the new one waits to go in: what is there stays; the copy moved aside keeps its note, and recovery lets it go', { skip: windowsOnly }, async () => {
   const box = await home(), claude = join(box.home, '.claude');
   try {
     const source = await newerSkill(box.base), expected = (await readTree(box.skill)).hash;
@@ -390,21 +390,29 @@ test('a skill’s copy written over, whose place fills while the new one waits t
     });
     try { await assert.rejects(swapFolder(box.context, source, box.skill, expected), { code: 'CK_EXISTS' }); } finally { restore(); }
     assert.equal(await readFile(join(box.skill, 'SKILL.md'), 'utf8'), 'made meanwhile\n');
-    // Its way back is taken, so it stays beside, with its note gone: recovery does not put it back (the report's "Seen, not done").
-    const [parked, ...rest] = await box.listed(claude);
-    assert.deepEqual(rest, ['skills']);
-    assert.match(await readFile(join(claude, parked!, 'SKILL.md'), 'utf8'), /Before\./);
+    // Its way back is taken, so it stays beside with its note; recovery finds its place taken and lets it go (its content was the
+    // one read, which the library keeps before it writes).
+    assert.match(await readFile(join(await parkedIn(claude), 'SKILL.md'), 'utf8'), /Before\./);
+    assert.equal((await box.listed(claude)).filter(name => name.endsWith('.json')).length, 1, 'its note is kept');
+    await recoverFolders(box.context, 'claude-cli');
+    assert.deepEqual(await box.listed(claude), ['skills']);
+    assert.equal(await readFile(join(box.skill, 'SKILL.md'), 'utf8'), 'made meanwhile\n');
   } finally { await box.cleanup(); }
 });
 
-test('a save made into a skill’s moved-aside copy while its replacement waits to go in: it goes back in place, and the write says it changed just now', { skip: windowsOnly }, async () => {
+test('a save made into a skill’s moved-aside copy while its replacement waits to go in: the replacement never goes in, the save goes back, and the write says it changed just now', { skip: windowsOnly }, async () => {
   const box = await home(), claude = join(box.home, '.claude'), saved = '---\nname: review\ndescription: Reviews.\n---\nSaved meanwhile.\n';
   try {
     const source = await newerSkill(box.base), expected = (await readTree(box.skill)).hash;
-    const restore = refuse('rename', 'EPERM', ([from, to]) => basename(from!).startsWith('.ck-stage-') && to === box.skill, async () => {
+    let tries = 0;
+    const restore = standIn('rename', async (original, ...args) => {
+      if (!basename(String(args[0])).startsWith('.ck-stage-') || String(args[1]) !== box.skill) return original(...args);
+      if (++tries > 1) return original(...args);
       await writeFile(join(await parkedIn(claude), 'SKILL.md'), saved);
+      throw refusal('EPERM');
     });
     try { await assert.rejects(swapFolder(box.context, source, box.skill, expected), { code: 'CK_CHANGED' }); } finally { restore(); }
+    assert.equal(tries, 1, 'the refused try is the only one');
     assert.equal(await readFile(join(box.skill, 'SKILL.md'), 'utf8'), saved);
     assert.deepEqual(await box.listed(claude), ['skills'], 'nothing moved aside, staged or noted is left');
   } finally { await box.cleanup(); }
