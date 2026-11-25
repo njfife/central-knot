@@ -11,7 +11,7 @@
 // project's or an organisation's hooks, a skill's or an agent's own hooks, and `additionalContext` printed by other events.
 import { addsText, ignoresText, sessionTextNote, textEventsWords, whenItRuns } from './pluginoutcomes.ts';
 import { commandLine, toolNames } from './words.ts';
-import type { DeclaredHook, HarnessId, InstalledPlugin, InstructionFile } from './types.ts';
+import type { DeclaredHook, HarnessId, HookSourceOwner, HookSourceRef, InstalledPlugin, InstructionFile } from './types.ts';
 
 /** How a hook starts, in one line: its shell command as written, or its program with its arguments; '' for one that starts nothing here. */
 export const hookLine = (hook: DeclaredHook) => (!hook.launch ? '' : 'shell' in hook.launch ? hook.launch.shell : commandLine(hook.launch.program, hook.launch.args));
@@ -44,8 +44,8 @@ export interface SessionGroup {
   problem?: string;
   /** Each of its hooks files that couldn't be read: what those declare isn't known. */
   unread: string[];
-  /** Each hook that can add text: when it runs, and its command (hookLine). */
-  hooks: { when: string; command: string }[];
+  /** Each hook that can add text: when it runs, its command (hookLine), and what identifies it for View source. */
+  hooks: { when: string; command: string; source: HookSourceRef }[];
 }
 export interface SessionStrip { heading: string; about: string; note?: string; groups: SessionGroup[] }
 
@@ -59,7 +59,11 @@ const EXTENSIONS: Partial<Record<HarnessId, string>> = { 'pi-cli': 'packages', '
  * why its hooks have no rows (Copilot CLI's prompt hooks) shows the note alone.
  */
 export function sessionStrip(tool: HarnessId, items: InstalledPlugin[], file: Pick<InstructionFile, 'ownHooks' | 'ownHooksUnread' | 'extensions'>): SessionStrip | undefined {
-  const rows = (hooks: DeclaredHook[] = []) => hooks.filter(hook => addsText(tool, hook)).map(hook => ({ when: whenItRuns(tool, hook), command: hookLine(hook) }));
+  const rows = (hooks: DeclaredHook[] = [], owner: HookSourceOwner) =>
+    hooks.filter(hook => addsText(tool, hook)).map(hook => {
+      const command = hookLine(hook);
+      return { when: whenItRuns(tool, hook), command, source: { ...owner, declaredIn: hook.declaredIn, event: hook.event, at: hook.at, command } };
+    });
   const plugins = items.filter(install => install.tool === tool && !install.off)
     .sort((first, second) => first.plugin.localeCompare(second.plugin) || first.marketName.localeCompare(second.marketName));
   // One plugin name in two marketplaces is told apart by its marketplace.
@@ -67,10 +71,11 @@ export function sessionStrip(tool: HarnessId, items: InstalledPlugin[], file: Pi
   const own = file.ownHooks ?? [], unread = file.ownHooksUnread ?? [];
   const groups: SessionGroup[] = [
     ...[...new Set([...own.filter(hook => addsText(tool, hook)).map(hook => hook.declaredIn), ...unread])].map(settings =>
-      ({ name: 'yours', mark: YOURS, settings, unread: unread.filter(path => path === settings), hooks: rows(own.filter(hook => hook.declaredIn === settings)) })),
+      ({ name: 'yours', mark: YOURS, settings, unread: unread.filter(path => path === settings), hooks: rows(own.filter(hook => hook.declaredIn === settings), { from: 'own', tool }) })),
     ...plugins.map((install): SessionGroup => ({ name: named(install), mark: originMark(`${install.plugin}@${install.marketName}`), plugin: install,
       ...(install.listed ? {} : { says: `${toolNames[tool]}’s own plugin commands turn it off.` }),
-      ...(install.problem ? { problem: `${install.problem} What its hooks add isn’t known.` } : {}), unread: install.hooksUnread ?? [], hooks: rows(install.hooks) }))
+      ...(install.problem ? { problem: `${install.problem} What its hooks add isn’t known.` } : {}), unread: install.hooksUnread ?? [],
+      hooks: rows(install.hooks, { from: 'installed', tool, plugin: install.plugin, marketName: install.marketName }) }))
       .filter(group => group.problem || group.unread.length || group.hooks.length),
     ...(file.extensions ?? []).map(name => ({ name, mark: originMark(name), unread: [], hooks: [] })),
   ];

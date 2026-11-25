@@ -1,8 +1,9 @@
 // Preserving edits (FIL-02): change one entry in a config file's text and leave every other byte as it was. JSON (and JSONC):
-// a member of an object at a path (setJsonMember). TOML: a table and its subtables (setTomlTable: an MCP server's
-// [mcp_servers.<name>]), or the tables of an array (arrayBlocks, editTomlArray, setTomlArrayKey: Codex's [[skills.config]]). Text only: which entry changes
-// is its caller's (mcp.ts, mcpswitch.ts, skillswitch.ts, partswitch.ts, plugins.ts, agentfiles.ts), and writing the file,
-// checked, is share.ts writeFileChecked.
+// a member of an object at a path (setJsonMember), or read-only spans (skipSpace, members, jsonElements) for cutting one
+// entry verbatim (hooksource.ts). TOML: a table and its subtables (setTomlTable: an MCP server's [mcp_servers.<name>]), its
+// own-line end (ownEnd), or the tables of an array (arrayBlocks, editTomlArray, setTomlArrayKey: Codex's
+// [[skills.config]]). Text only: which entry changes is its caller's (mcp.ts, mcpswitch.ts, skillswitch.ts, partswitch.ts,
+// plugins.ts, agentfiles.ts), and writing the file, checked, is share.ts writeFileChecked.
 
 // ---------- JSON ----------
 
@@ -11,7 +12,7 @@ interface Member { key: string; keySpan: Span; value: Span; whole: Span }
 
 const isSpace = (char: string) => char === ' ' || char === '\t' || char === '\n' || char === '\r';
 
-function skipSpace(text: string, at: number): number {
+export function skipSpace(text: string, at: number): number {
   for (;;) {
     while (at < text.length && isSpace(text[at])) at++;
     // Comments are tolerated (JSONC) and kept: they sit outside any value we replace.
@@ -69,7 +70,7 @@ export function readJsonc(text: string): unknown {
 }
 
 /** The members of the object starting at `at` (the "{"). */
-function members(text: string, at: number): { members: Member[]; close: number } {
+export function members(text: string, at: number): { members: Member[]; close: number } {
   const list: Member[] = [];
   let index = at + 1;
   for (;;) {
@@ -88,6 +89,20 @@ function members(text: string, at: number): { members: Member[]; close: number }
     if (text[index] === '}') return { members: list, close: index };
     throw new Error('Expected "," or "}".');
   }
+}
+
+/** Each element's span in the JSON array starting at `at` ("["). */
+export function jsonElements(text: string, at: number): Span[] {
+  const list: Span[] = [];
+  let index = skipSpace(text, at + 1);
+  while (text[index] !== ']') {
+    const end = scanValue(text, index);
+    list.push({ start: index, end });
+    index = skipSpace(text, end);
+    if (text[index] === ',') index = skipSpace(text, index + 1);
+    else if (text[index] !== ']') throw new Error('Expected "," or "]".');
+  }
+  return list;
 }
 
 /** The indentation used for members of an object, guessed from its first member, else one step deeper than its opening line. */
@@ -368,7 +383,7 @@ function appendToml(text: string, body: string, eol = '\n'): string {
  * Where a table's own lines end. Its text runs to the next header, but comment lines at its end sit just above that
  * header and belong to what follows: they stay.
  */
-function ownEnd(text: string, table: TomlTable): number {
+export function ownEnd(text: string, table: TomlTable): number {
   const lines = text.slice(table.start, table.end).split(/(?<=\n)/);
   let cut = lines.length;
   for (let index = lines.length - 1; index > 0; index--) {

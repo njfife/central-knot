@@ -30,6 +30,7 @@ import { andList, countedAs, fewNames, fileName, kindNames, kindNouns, noToolsSe
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform, shownFromHome } from './machine.ts';
 import { closeRun, endListNews, fadeRun, forgetResults, loadPlugins, overRun, resetMarket, retire } from './pluginstate.ts';
+import { pruneHookSources, resetHookSources } from './hooksourceview.ts';
 import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, type LastRun, type PluginDone, type PluginOp } from './pluginplan.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
@@ -192,7 +193,7 @@ export const pinnedRows = <Group extends string | number>(list: string): Pinned<
   return (state.pinned.list === list ? state.pinned : noPins()) as Pinned<Group>;
 };
 /** Draws the page (renderer.ts render): a draw that asked for no pinned rows lets them go. */
-export function drawPage(draw: () => void) { drawing = true; asked = false; try { draw(); } finally { drawing = false; } if (!asked) unpin(); }
+export function drawPage(draw: () => void) { drawing = true; asked = false; try { draw(); } finally { drawing = false; } pruneHookSources(); if (!asked) unpin(); }
 /** Every pinned row is let go: each takes its own place in the order again. */
 export const unpin = () => { state.pinned = noPins(); };
 
@@ -416,6 +417,7 @@ function accept(view: HomeView): HomeView {
   drop(turn => turn.state === 'waiting');
   endRun();
   resetMarket();
+  resetHookSources();
   // The note of what plugin updates did by themselves is about one home.
   void loadPluginUpdates();
   setHome(view, { reload: false });
@@ -975,6 +977,7 @@ export async function readAgain() {
   await busy(noToolManaged() ? 'Reading…' : `Reading ${heldKindNames()}…`, async () => {
     const view = await api().refresh(true);
     if (!view) return;
+    resetHookSources();
     state.skillsResult = undefined;
     // Said first, so a page that leaves (setHome) adds its reason after what was read.
     setHome(view, { reload: false, say: taken => announce(readSummary(taken)) });
