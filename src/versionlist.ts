@@ -24,6 +24,8 @@ export interface VersionListView {
   /** Its row's id (itemrow.ts rowId), which its controls' ids carry (partId). */
   rowId: string;
   canWrite: boolean;
+  /** Why Make current is off in Select's mode (app.ts selectOff), shown as its tooltip instead of its own. */
+  why?: string;
   /** Whether the whole list shows (else its newest few: libraryrow.ts foldVersions). */
   unfolded: boolean;
   /** Each listed version's note (types.ts LibraryFacts versionChanges). */
@@ -45,10 +47,10 @@ function versionRow(view: VersionListView, version: Version, index: number, when
   const readLabel = read ? 'Hide' : current ? 'Read current' : 'Read';
   const readIt = button({ variant: 'link', size: 'small', label: readLabel, id: id('version-read'), name: `${read ? 'Hide' : 'Read'} ${which}`, onclick: () => view.onRead(index) });
   const makeCurrent = current ? null
-    : button({ variant: 'outline', size: 'micro', label: 'Make current', id: id('version-current'), name: `Make ${which} current`, disabled: !view.canWrite,
+    : button({ variant: 'outline', size: 'micro', label: 'Make current', id: id('version-current'), name: `Make ${which} current`, disabled: view.why ?? !view.canWrite,
       onclick: () => view.onMakeCurrent(version) });
   const everywhere = item.on ? ', in every tool it is on in' : '';
-  if (makeCurrent) makeCurrent.title = `Make this the current version of ${item.name}${everywhere}. Undo makes today’s current again.`;
+  if (makeCurrent && !view.why) makeCurrent.title = `Make this the current version of ${item.name}${everywhere}. Undo makes today’s current again.`;
   const change = view.changes?.[index], note = versionChange(change);
   return h(`li.version-row${current ? '.version-row-current' : ''}`, { 'data-version': version.hash },
     h('span.version-when', { title: new Date(version.at).toLocaleString() }, when),
