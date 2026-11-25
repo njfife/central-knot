@@ -886,3 +886,150 @@ test('Pricing entry kinds and CodexState fields are validated on read and bad sh
     assert.deepEqual(posRead.held.map(h => [h.file, h.kind]), [['positions.json', 'damaged']]);
   }
 });
+
+test('Tokens only grow: partial replay under newer rates leaves a whole receipt frozen', () => {
+  const at = localTime(2026, 11, 8, 9, 0);
+  const partial = claudeReq('s1', 'msg-grow', at, { tokens: { input: 1000, cacheRead: 200, cacheWrite: 100, cacheWrite1h: 50, output: 10 } });
+  const whole = claudeReq('s1', 'msg-grow', at + 1000, { tokens: { input: 1000, cacheRead: 200, cacheWrite: 100, cacheWrite1h: 50, output: 400 } });
+  const wholePriceV1 = priceRequest(whole, RATES_V1);
+  assert.ok(wholePriceV1.priced);
+
+  const up1 = upsertSessionRecord(emptySource(['2026-11']), [
+    { tool: 'claude-cli', session: 's1', requests: [{ request: whole, price: wholePriceV1 }] },
+  ]);
+  const snap = structuredClone(up1.months);
+  // Replaying partial then whole under newer rates must not reprice the already-whole receipt.
+  const up2 = upsertSessionRecord({ readMonths: ['2026-11'], months: up1.months, held: [] }, [
+    { tool: 'claude-cli', session: 's1', requests: [{ request: partial, price: priceRequest(partial, RATES_V2) }] },
+    { tool: 'claude-cli', session: 's1', requests: [{ request: whole, price: priceRequest(whole, RATES_V2) }] },
+  ]);
+  assert.deepEqual(up2.changed, []);
+  assert.deepEqual(up2.months, snap);
+  assert.equal(up2.months['2026-11']!.sessions[0]!.requests['msg-grow']!.dollars, wholePriceV1.dollars);
+
+  // Dropping or shrinking cacheWrite1h also leaves the receipt frozen; growing output reprices.
+  const dropped1h = claudeReq('s1', 'msg-grow', at + 2000, { tokens: { input: 1000, cacheRead: 200, cacheWrite: 100, output: 400 } });
+  const smaller1h = claudeReq('s1', 'msg-grow', at + 2000, { tokens: { input: 1000, cacheRead: 200, cacheWrite: 100, cacheWrite1h: 30, output: 400 } });
+  const up3 = upsertSessionRecord({ readMonths: ['2026-11'], months: up2.months, held: [] }, [
+    { tool: 'claude-cli', session: 's1', requests: [{ request: dropped1h, price: priceRequest(dropped1h, RATES_V2) }, { request: smaller1h, price: priceRequest(smaller1h, RATES_V2) }] },
+  ]);
+  assert.deepEqual(up3.changed, []);
+
+  const larger = claudeReq('s1', 'msg-grow', at + 3000, { tokens: { input: 1000, cacheRead: 200, cacheWrite: 100, cacheWrite1h: 50, output: 500 } });
+  const largerPriceV2 = priceRequest(larger, RATES_V2);
+  assert.ok(largerPriceV2.priced);
+  const up4 = upsertSessionRecord({ readMonths: ['2026-11'], months: up3.months, held: [] }, [
+    { tool: 'claude-cli', session: 's1', requests: [{ request: larger, price: largerPriceV2 }] },
+  ]);
+  assert.deepEqual(up4.changed, ['2026-11']);
+  assert.equal(up4.months['2026-11']!.sessions[0]!.requests['msg-grow']!.dollars, largerPriceV2.dollars);
+});
+
+test('Not taken is never stored, bad reported figures are ignored, and write refuses invalid v1 output before touching disk', async () => {
+  const ctx = await makeContext();
+  const good = claudeReq('s1', 'msg-good', localTime(2026, 11, 5));
+  await withSessionRecordTurn(ctx.home, async ({ read, write }) => {
+    const seed = upsertSessionRecord(await read(['2026-11']), [{
+      tool: 'claude-cli', session: 's1', reported: { dollars: 0.5, complete: false },
+      requests: [{ request: good, price: priceRequest(good, RATES_V1) }],
+    }]);
+    assert.deepEqual(await write(ctx, { months: seed.months, changed: seed.changed, positions: emptyPositions(), currentMonth: '2026-11' }), { written: true, held: [] });
+  });
+  const monthPath = join(sessionsDirectory(ctx.home), '2026-11.json');
+  const goodBytes = await readFile(monthPath);
+
+  const negTok = claudeReq('s1', 'msg-neg', localTime(2026, 11, 6), { tokens: { input: -1, cacheRead: 0, cacheWrite: 0, output: 10 } });
+  const nanTok = claudeReq('s1', 'msg-nan-tok', localTime(2026, 11, 6), { tokens: { input: 10, cacheRead: 0, cacheWrite: 0, output: Number.NaN } });
+  await withSessionRecordTurn(ctx.home, async ({ read, write }) => {
+    const before = await read(['2026-11']);
+    const up = upsertSessionRecord(before, [
+      {
+        tool: 'claude-cli', session: 's1', reported: { dollars: -2, complete: true },
+        requests: [{ request: negTok, price: priceRequest(negTok, RATES_V1) }, { request: nanTok, price: priceRequest(nanTok, RATES_V1) }],
+      },
+      { tool: 'claude-cli', session: 's1', reported: { dollars: Number.NaN, complete: true }, requests: [] },
+    ]);
+    assert.deepEqual(up.notTaken.map(n => [n.request.request.request, n.reason, n.month]), [
+      ['msg-neg', 'invalid-tokens', undefined],
+      ['msg-nan-tok', 'invalid-tokens', undefined],
+    ]);
+    assert.deepEqual(up.changed, []);
+    assert.deepEqual(Object.keys(up.months['2026-11']!.sessions[0]!.requests), ['msg-good']);
+    assert.deepEqual(up.months['2026-11']!.sessions[0]!.reported, { dollars: 0.5, complete: false });
+    assert.deepEqual(await write(ctx, { months: up.months, changed: up.changed, positions: emptyPositions(), currentMonth: '2026-11' }), { written: true, held: [] });
+
+    // A zero reported figure is finite and >= 0, so it is accepted.
+    const upZero = upsertSessionRecord(before, [{ tool: 'claude-cli', session: 's1', reported: { dollars: 0, complete: true }, requests: [] }]);
+    assert.deepEqual(upZero.changed, ['2026-11']);
+    assert.deepEqual(upZero.months['2026-11']!.sessions[0]!.reported, { dollars: 0, complete: true });
+
+    // Direct write of a month or positions that the reader would hold is refused before touching disk.
+    const badMonth = structuredClone(before.months['2026-11']!);
+    badMonth.sessions[0]!.reported = { dollars: -1, complete: true };
+    const refusedMonth = await write(ctx, { months: { '2026-11': badMonth }, changed: ['2026-11'], positions: emptyPositions(), currentMonth: '2026-11' });
+    assert.equal(refusedMonth.written, false);
+    assert.match(refusedMonth.refused ?? '', /2026-11\.json/);
+    assert.deepEqual(refusedMonth.held, []);
+
+    const badPos = {
+      formatVersion: 1 as const, sweptAt: 1,
+      files: [{ tool: 'codex-cli' as const, dev: '1', ino: '2', offset: 1, before: 'ab', size: 1, mtimeMs: 1, codex: { recordedSince: 'false' as unknown as boolean } }],
+    };
+    const refusedPos = await write(ctx, { months: before.months, changed: [], positions: badPos, currentMonth: '2026-11' });
+    assert.equal(refusedPos.written, false);
+    assert.match(refusedPos.refused ?? '', /positions\.json/);
+    assert.deepEqual(refusedPos.held, []);
+  });
+  assert.deepEqual(await readFile(monthPath), goodBytes);
+  const reread = await readSessionRecord(ctx.home, ['2026-11']);
+  assert.deepEqual(reread.held, []);
+  assert.deepEqual(Object.keys(reread.months['2026-11']!.sessions[0]!.requests), ['msg-good']);
+});
+
+test('Session facts are applied in every read month holding the session even when none of its requests was taken', () => {
+  const sepOther = claudeReq('other-sess', 'copied-id', localTime(2026, 9, 10));
+  const octOwn = claudeReq('s1', 'oct-id', localTime(2026, 10, 15));
+  const novOwn = claudeReq('s1', 'nov-id', localTime(2026, 11, 15));
+  const up1 = upsertSessionRecord(emptySource(['2026-09', '2026-10', '2026-11']), [
+    { tool: 'claude-cli', session: 'other-sess', requests: [{ request: sepOther, price: priceRequest(sepOther, RATES_V1) }] },
+    {
+      tool: 'claude-cli', session: 's1', parent: 'p1', project: 'before', unread: 1, reported: { dollars: 1.25, complete: false },
+      requests: [{ request: octOwn, price: priceRequest(octOwn, RATES_V1) }, { request: novOwn, price: priceRequest(novOwn, RATES_V1) }],
+    },
+  ]);
+
+  const copiedSighting = claudeReq('s1', 'copied-id', localTime(2026, 11, 16));
+  const up2 = upsertSessionRecord({ readMonths: ['2026-09', '2026-10', '2026-11'], months: up1.months, held: [] }, [{
+    tool: 'claude-cli', session: 's1', parent: 'p2', project: 'after', unread: 4, reported: { dollars: 2.0, complete: true },
+    requests: [{ request: copiedSighting, price: priceRequest(copiedSighting, RATES_V1) }],
+  }]);
+  assert.deepEqual(up2.notTaken, []);
+  assert.deepEqual(up2.changed, ['2026-10', '2026-11']);
+  for (const m of ['2026-10', '2026-11']) {
+    const s = up2.months[m]!.sessions.find(x => x.session === 's1')!;
+    assert.equal(s.parent, 'p2');
+    assert.equal(s.project, 'after');
+    assert.equal(s.unread, 4);
+    assert.deepEqual(s.reported, { dollars: 2.0, complete: true });
+  }
+});
+
+test('Out-of-range timestamps and years past 9999 return invalid-time, never not-read', () => {
+  const cases = [
+    claudeReq('s1', 'overflow-pos', 8640000000000001),
+    claudeReq('s1', 'overflow-neg', -8640000000000001),
+    claudeReq('s1', 'year-10000', Date.UTC(10000, 5, 1)),
+    claudeReq('s1', 'year-neg', Date.UTC(-1, 5, 1)),
+  ];
+  const up = upsertSessionRecord(emptySource(['2026-11']), [{
+    tool: 'claude-cli', session: 's1',
+    requests: cases.map(req => ({ request: req, price: priceRequest(req, RATES_V1) })),
+  }]);
+  assert.deepEqual(up.changed, []);
+  assert.deepEqual(up.notTaken.map(n => [n.request.request.request, n.reason, n.month]), [
+    ['overflow-pos', 'invalid-time', undefined],
+    ['overflow-neg', 'invalid-time', undefined],
+    ['year-10000', 'invalid-time', undefined],
+    ['year-neg', 'invalid-time', undefined],
+  ]);
+});

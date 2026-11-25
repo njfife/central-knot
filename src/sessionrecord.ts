@@ -4,11 +4,14 @@
 // tool and request key, per-home read-to-commit serialization, and the safe write (writeAccess only, never libraryGate or
 // liftFirst; stray temps removed, durable months, folder fsync where supported, then positions).
 //
-// Caller contract for a sweep: enter `withSessionRecordTurn(home, async ({ read, write }) => ...)`, call `read` with every
-// month its requests fall in plus the month before each, stop if `sessions`, the current month or `positions.json` is held,
-// call `upsertSessionRecord`, keep old checkpoints for files whose requests came back in `notTaken` (`held` or `not-read`),
-// then call `write` (which writes changed months durably and fsyncs `sessions/` before writing `positions.json`). Read-only
-// callers (such as a page reading one kept month) call `readSessionRecord` directly.
+// Caller contract for a sweep: enter `withSessionRecordTurn(home, async ({ read, write }) => ...)` and await every `write`
+// inside it. Call `read` with the current month plus every month the batch's requests fall in and the month before each; stop
+// if `sessions`, the current month or `positions.json` is held. Call `upsertSessionRecord`: for `notTaken`, keep the file's
+// old checkpoint and retry later on `held` or `not-read`, while `empty-key`, `invalid-time` and `invalid-tokens` can never be
+// kept (count them and move on). Then `await write(...)` (checks every changed month and `positions.json` with the reader's
+// own v1 validator before writing months durably, fsyncing `sessions/` and writing `positions.json`). Read-only callers (such
+// as a page reading one kept month) call `readSessionRecord` directly. Limit: a key is seen only in the months the turn read,
+// so a request whose time moved from a month that was not read is kept a second time (in tool files a request's time does not move).
 // Not here: finding, reading or sweeping session files (sessionrequests.ts), sums and rows (sessionrow.ts), pricing rules
 // (rates.ts), callers, timers, Settings, Clear, retention, folding, or pages. Two app copies on one home are not coordinated here.
 import { lstat, mkdir, open, readdir, readFile, rm } from 'node:fs/promises';
@@ -23,6 +26,7 @@ import { jsonObject, record } from './values.ts';
 
 const FORMAT_VERSION = 1;
 const POSITIONS_FILE = 'positions.json';
+const MONTH_RE = /^\d{4}-(?:0[1-9]|1[0-2])$/;
 const TEMP_FILE_RE = /^(?:positions|\d{4}-(?:0[1-9]|1[0-2]))\.json\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/;
 
 type OmitUnion<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -71,7 +75,7 @@ export interface UpsertResult {
   months: Record<string, SessionMonth>; changed: string[];
   notTaken: {
     tool: HarnessId; session: string; request: PricedRequest; month?: string;
-    reason: 'empty-key' | 'invalid-time' | 'held' | 'not-read';
+    reason: 'empty-key' | 'invalid-time' | 'invalid-tokens' | 'held' | 'not-read';
   }[];
 }
 export interface WriteInput {
@@ -96,7 +100,7 @@ export function previousMonth(month: string): string {
   return m === 1 ? `${String(y - 1).padStart(4, '0')}-12` : `${String(y).padStart(4, '0')}-${String(m - 1).padStart(2, '0')}`;
 }
 function assertMonth(month: string): void {
-  if (!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month)) throw new RangeError(`Invalid session month: ${month}`);
+  if (!MONTH_RE.test(month)) throw new RangeError(`Invalid session month: ${month}`);
 }
 
 const whole = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
@@ -161,6 +165,9 @@ function validPositions(obj: Record<string, unknown>): Positions | undefined {
 const emptyRead = (readMonths: string[], held: HeldEntry[] = []): SessionRecord =>
   ({ readMonths, months: {}, positions: emptyPositions(), held });
 
+const checkV1 = <T>(obj: Record<string, unknown> | undefined, validate: (o: Record<string, unknown>) => T | undefined): T | undefined =>
+  obj && obj.formatVersion === FORMAT_VERSION ? validate(obj) : undefined;
+
 async function readRecordFile<T>(filePath: string, file: string, validate: (obj: Record<string, unknown>) => T | undefined)
   : Promise<{ value?: T; held?: HeldEntry }> {
   let text: string;
@@ -178,7 +185,7 @@ async function readRecordFile<T>(filePath: string, file: string, validate: (obj:
   if (Number.isSafeInteger(obj.formatVersion) && (obj.formatVersion as number) > FORMAT_VERSION) {
     return { held: { file, kind: 'newer', reason: `${file} was written by a newer Central Knot.` } };
   }
-  const value = obj.formatVersion === FORMAT_VERSION ? validate(obj) : undefined;
+  const value = checkV1(obj, validate);
   return value ? { value } : { held: { file, kind: 'damaged', reason: `${file} is damaged.` } };
 }
 
@@ -212,9 +219,9 @@ export async function readSessionRecord(home: string, months: readonly string[])
   return { readMonths: names, months: kept, positions: pos.value ?? emptyPositions(), held: holds };
 }
 
-const sameTokens = (a: Tokens, b: Tokens) =>
-  a.input === b.input && a.cacheRead === b.cacheRead && a.cacheWrite === b.cacheWrite
-  && a.cacheWrite1h === b.cacheWrite1h && a.output === b.output;
+const tokensGrew = (old: Tokens, next: Tokens) =>
+  next.input > old.input || next.cacheRead > old.cacheRead || next.cacheWrite > old.cacheWrite || next.output > old.output
+  || (next.cacheWrite1h !== undefined && (old.cacheWrite1h === undefined || next.cacheWrite1h > old.cacheWrite1h));
 
 function toPricingEntry(p: PriceResult | PricingEntry): PricingEntry {
   if (!p.priced) return { priced: false, reason: p.reason, detail: p.detail };
@@ -235,13 +242,14 @@ function makeReceipt(at: number, req: Request, price: PriceResult, pricing: numb
 }
 
 /**
- * Pure upsert keyed by `(tool, request)` as supplied (callers must tag legacy thread-local Codex keys upstream before calling;
- * empty keys and non-finite times return in `notTaken`). A request whose own month is held or was not read returns in `notTaken`
- * before any lookup and changes nothing anywhere. Otherwise the key is looked up across every non-held month in `source.months`
- * (a key in an unread month cannot be seen, so a sweep must read each request's month and the month before it; if a month before
- * the request's own is held, a request re-timed out of that held month can be kept twice). Exact model + token match freezes the
- * receipt; otherwise model, tokens and price are replaced keeping first session, month and `at`. Supplied session facts replace
- * the kept ones in every read month that holds the session.
+ * Pure upsert keyed by `(tool, request)` as supplied (callers must tag legacy thread-local Codex keys upstream before calling).
+ * Empty keys, unrepresentable/out-of-range times, invalid token counts, held own months and unread own months return in
+ * `notTaken` before any lookup and are never stored. Otherwise the key is looked up across every non-held month in
+ * `source.readMonths` (the months read): a key is seen only in the months the turn read, so a request whose time moved out of
+ * an unread or held month is kept a second time. Tokens only grow: a sighting whose every count is no more than the kept
+ * receipt's changes nothing; a receipt is priced again only when a count grows (or `cacheWrite1h` becomes known) or the model
+ * differs, keeping first session, month and `at`. Supplied session facts (ignoring non-finite/negative `reported.dollars`) are
+ * applied in every non-held read month holding the session, whether or not any of its requests was taken.
  */
 export function upsertSessionRecord(
   source: Pick<SessionRecord, 'readMonths' | 'months' | 'held'>,
@@ -287,13 +295,17 @@ export function upsertSessionRecord(
       { value: makeReceipt(at, req, price, pi), enumerable: true, writable: true, configurable: true });
   };
   for (const update of updates) {
-    let accepted = update.requests.length === 0;
     const sk = `${update.tool}\0${update.session}`;
+    const unread = whole(update.unread) ? update.unread : undefined;
+    const rep = update.reported && nonNeg(update.reported.dollars) && typeof update.reported.complete === 'boolean'
+      ? update.reported : undefined;
     for (const priced of update.requests) {
       const { request: req, price } = priced;
-      const own = Number.isFinite(req.at) ? monthOf(req.at) : undefined;
+      const rawOwn = Number.isFinite(req.at) ? monthOf(req.at) : undefined;
+      const own = rawOwn && MONTH_RE.test(rawOwn) ? rawOwn : undefined;
       const skip = !req.request ? { reason: 'empty-key' as const }
         : !own ? { reason: 'invalid-time' as const }
+        : !isTokens(req.tokens) ? { reason: 'invalid-tokens' as const }
         : isHeld(own) ? { month: own, reason: 'held' as const }
         : !readSet.has(own) ? { month: own, reason: 'not-read' as const }
         : undefined;
@@ -304,31 +316,26 @@ export function upsertSessionRecord(
       const rk = `${update.tool}\0${req.request}`;
       const hit = byKey.get(rk);
       if (hit) {
-        const found = months[hit.month]!.sessions[hit.si]!;
-        const old = found.requests[req.request]!;
-        if (found.session === update.session) accepted = true;
-        if (old.model !== req.model || !sameTokens(old.tokens, req.tokens)) putReceipt(hit.month, hit.si, old.at, req, price);
+        const old = months[hit.month]!.sessions[hit.si]!.requests[req.request]!;
+        if (old.model !== req.model || tokensGrew(old.tokens, req.tokens)) putReceipt(hit.month, hit.si, old.at, req, price);
         continue;
       }
       let si = bySess.get(`${own!}\0${sk}`);
       if (si === undefined) {
-        si = mutable(own!).sessions.push({ tool: update.tool, session: update.session, unread: update.unread ?? 0, requests: {} }) - 1;
+        si = mutable(own!).sessions.push({ tool: update.tool, session: update.session, unread: unread ?? 0, requests: {} }) - 1;
         bySess.set(`${own!}\0${sk}`, si);
       }
       putReceipt(own!, si, req.at, req, price);
       byKey.set(rk, { month: own!, si });
-      accepted = true;
     }
-    if (!accepted) continue;
     for (const m of readable) {
       const si = bySess.get(`${m}\0${sk}`);
       if (si === undefined) continue;
       const cur = months[m]!.sessions[si]!;
-      const rep = update.reported;
       const patch = {
         ...(update.parent !== undefined && update.parent !== cur.parent ? { parent: update.parent } : {}),
         ...(update.project !== undefined && update.project !== cur.project ? { project: update.project } : {}),
-        ...(update.unread !== undefined && update.unread !== cur.unread ? { unread: update.unread } : {}),
+        ...(unread !== undefined && unread !== cur.unread ? { unread } : {}),
         ...(rep && (rep.dollars !== cur.reported?.dollars || rep.complete !== cur.reported?.complete) ? { reported: { ...rep } } : {}),
       };
       if (Object.keys(patch).length) Object.assign(mutable(m).sessions[si]!, patch);
@@ -355,9 +362,18 @@ async function writeUnlocked(context: ShareContext, input: WriteInput, readInTur
   if (!access.allowed) return { written: false, refused: access.reason, held: [] };
   const current = input.currentMonth ?? monthOf((context.now ?? Date.now)());
   const changed = [...new Set(input.changed)].sort();
+  const payload = new Map<string, string>();
   for (const m of changed) {
     if (!readInTurn.has(m)) return { written: false, refused: `${m}.json was not read in this turn.`, held: [] };
-    if (!Object.hasOwn(input.months, m) || input.months[m]!.month !== m) throw new Error(`Missing month: ${m}`);
+    const text = Object.hasOwn(input.months, m) ? JSON.stringify(input.months[m]) : undefined;
+    if (!text || !checkV1(jsonObject(text), obj => validMonth(obj, m))) {
+      return { written: false, refused: `${m}.json is invalid and would be held on read.`, held: [] };
+    }
+    payload.set(m, text);
+  }
+  const posText = JSON.stringify(input.positions);
+  if (!posText || !checkV1(jsonObject(posText), validPositions)) {
+    return { written: false, refused: `${POSITIONS_FILE} is invalid and would be held on read.`, held: [] };
   }
   const check = await readSessionRecord(context.home, [current, ...changed]);
   if (check.held.length) return refuseHeld(check.held);
@@ -377,22 +393,24 @@ async function writeUnlocked(context: ShareContext, input: WriteInput, readInTur
     }
   }
   if (!dirExisted) await mkdir(dir, { recursive: true });
-  for (const m of changed) await writeDurably(join(dir, `${m}.json`), JSON.stringify(input.months[m]));
+  for (const m of changed) await writeDurably(join(dir, `${m}.json`), payload.get(m)!);
   if (!dirExisted) {
     if (!storeExisted) await syncDir(context.home);
     await syncDir(store);
   }
   await syncDir(dir);
-  await writeDurably(join(dir, POSITIONS_FILE), JSON.stringify(input.positions));
+  await writeDurably(join(dir, POSITIONS_FILE), posText);
   return { written: true, held: [] };
 }
 
 /**
  * The one exported way to change a home's session record: serializes one read-to-commit turn per home via a plain promise chain.
- * Inside `work`, call `read` with every month the batch's requests fall in plus the month before each, inspect `held` (stop if
- * `sessions`, the current month or `positions.json` is held), call `upsertSessionRecord`, keep old checkpoints for files whose
- * requests returned in `notTaken`, then call `write` (refuses any month not read in this turn; writes months durably and fsyncs
- * `sessions/` before writing `positions.json`). Not re-entrant: calling this from inside `work` for the same home deadlocks.
+ * Every `write` inside `work` must be awaited before `work` returns. Call `read` with the current month plus every month the
+ * batch's requests fall in and the month before each, stop if `sessions`, the current month or `positions.json` is held, call
+ * `upsertSessionRecord` (keep old checkpoints on `held`/`not-read`; count and move on for `empty-key`, `invalid-time` and
+ * `invalid-tokens`), then `await write(...)` (refuses any unread or invalid v1 month/positions before touching disk; writes
+ * months durably and fsyncs `sessions/` before writing `positions.json`). A key is seen only in the months the turn read.
+ * Not re-entrant: calling this from inside `work` for the same home deadlocks.
  */
 export async function withSessionRecordTurn<T>(
   home: string,
