@@ -694,3 +694,37 @@ test('Fix 2 (monotonic keeper sequence): a sweep completion view outranks an ear
   assert.ok(typeof during.seq === 'number' && typeof after.seq === 'number' && after.seq > during.seq,
     `completion seq (${after.seq}) must exceed earlier collecting snapshot seq (${during.seq})`);
 });
+
+test('A sweep the Sessions page asks for: started for the open home that keeps, the one under way joined, none for another home or one that does not keep', async () => {
+  const calls: string[] = [];
+  let gate: ReturnType<typeof deferred<void>> | undefined;
+  const h = await makeHarness({
+    sweep: async (ctx, opts) => {
+      calls.push(ctx.home);
+      if (gate) await gate.promise;
+      return sweepSessions(ctx, opts);
+    },
+  });
+  const home = join(h.root, 'home-ask');
+  await writeLines(join(home, '.claude/projects/-work-app/s1.jsonl'), [claudeRecord('s1', 'm1', new Date(NOW - 60_000).toISOString())]);
+  await h.openHome(home);
+  await h.keeper.setKeep(home, true);
+  await h.waitIdle();
+  calls.length = 0;
+  gate = deferred();
+  h.keeper.sweepNow(home);
+  const asked = h.keeper.view(home);
+  assert.deepEqual([asked.collecting, calls.length], [true, 1], 'a sweep starts');
+  h.keeper.sweepNow(home);
+  assert.deepEqual([h.keeper.view(home).collecting, h.keeper.view(home).seq, calls.length], [true, asked.seq, 1], 'asked again while it runs: joined, not started twice');
+  gate.resolve();
+  gate = undefined;
+  await h.waitIdle();
+  const ended = h.views.at(-1)!;
+  assert.deepEqual([ended.collecting, ended.seq! > asked.seq!], [false, true], 'its end is news on a later seq');
+  h.keeper.sweepNow(join(h.root, 'home-other'));
+  assert.deepEqual([h.keeper.view(home).collecting, calls.length], [false, 1], 'another home than the open one: no sweep');
+  await h.keeper.setKeep(home, false);
+  h.keeper.sweepNow(home);
+  assert.deepEqual([h.keeper.view(home).collecting, calls.length], [false, 1], 'a home that does not keep: no sweep');
+});

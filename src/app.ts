@@ -39,8 +39,8 @@ import { changeWords, stillLoadAfter, undoOffered, wholeCounts, wholeSaid } from
 import { hasReloadAdvice, pluginReloads, reloadAdvice, reloadsFor, settleReloads, waysFrom, type ReloadChange } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
 import { followView, type SigninChecks } from './mcpsignin.ts';
-import { loadSessions, type SessionsDay } from './sessionspage.ts';
-import type { DayRows } from './sessionrow.ts';
+import { keeperNews, loadSessions, windowBack, type SessionsDay } from './sessionspage.ts';
+import type { DayRows, PeriodRows } from './sessionrow.ts';
 import { DIFFERS_REASON, selecting, stopSelecting } from './selection.ts';
 import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
 
@@ -173,9 +173,9 @@ export const state = {
   pinned: noPins(),
   /** MCP sign-in: what each column's last Check said in the open home (mcpsigninpage.ts), made again when a home opens; never stored. */
   mcpSignin: { home: '', columns: {} } as SigninChecks,
-  /** The Sessions page's day (sessionspage.ts): read when the page opens, on Refresh and on a choice of day (loadSessions); never stored. */
-  sessions: pageData<DayRows>(),
-  /** Which day the Sessions page reads: Today at launch, kept while the window is open, across pages and homes. */
+  /** The Sessions page's period (sessionspage.ts): read when the page opens, on Refresh and on a choice of period (loadSessions); never stored. */
+  sessions: pageData<DayRows | PeriodRows>(),
+  /** Which period the Sessions page reads: Today at launch, kept while the window is open, across pages and homes (7 days only where kept). */
   sessionsDay: 'today' as SessionsDay,
   /** Inline refusal or save failure from the Sessions page's Start keeping button; cleared when keeping turns on or home changes. */
   keepProblem: undefined as string | undefined,
@@ -254,7 +254,7 @@ export const notDoneFirst = (outcome: Outcome): Outcome => (outcome.warn ? { ...
  */
 export const FADE_MS = 8000;
 let fading: ReturnType<typeof setTimeout> | undefined;
-const windowVisible = () => windowShown && !document.hidden;
+export const windowVisible = () => windowShown && !document.hidden;
 /** The result's time starts again from now; none runs while the page acts (afterActing) or while the window is hidden. */
 function fadeLater(): void {
   clearTimeout(fading);
@@ -441,7 +441,11 @@ function accept(view: HomeView): HomeView {
 /** Whether the window has shown: false only after a start at sign-in with no window (main.ts startedHidden, the page's `start`), until it first shows. */
 let windowShown = new URLSearchParams(globalThis.location?.search).get('start') !== 'hidden';
 api().onWindowShown(() => { const first = !windowShown; windowShown = true; if (first) void collectUsage(); fadeLater(); });
-document.addEventListener('visibilitychange', () => { if (windowVisible()) fadeLater(); else clearTimeout(fading); });
+document.addEventListener('visibilitychange', () => {
+  if (!windowVisible()) return clearTimeout(fading);
+  fadeLater();
+  windowBack();
+});
 
 /**
  * Collects usage: main's usage:read reads the tools' own session history on this computer, and nothing leaves it. By itself
@@ -1815,6 +1819,7 @@ export async function switchSessionCosts(on: boolean): Promise<string | undefine
 }
 api().onSessionCostsChanged(next => {
   applySessionCosts(next);
+  if (state.home?.sessionCosts === next) keeperNews(next);
   if (state.page === 'sessions' || state.page === 'settings') rerender();
 });
 
