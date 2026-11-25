@@ -12253,6 +12253,8 @@ async function selectFlow() {
   // 1. One word on the toolbar, and nothing else of it until it is clicked.
   same('the Library has Select on its toolbar, and no bar and no tick until it is clicked',
     [await word(), await a.exists('#select-bar'), await a.exists('.ov [role="checkbox"]')], ['Select', false, false]);
+  same('From’s and Sort’s menus have nothing of Select’s bar: no padding, no line under them, as on next',
+    await a.run(`[...document.querySelectorAll('.ov-page .toolbar .select')].map(each => { const look = getComputedStyle(each); return [look.paddingLeft, look.paddingRight, look.borderBottomWidth]; })`), [['0px', '0px', '0px'], ['0px', '0px', '0px']]);
   await pictures('off');
   // 13. The toolbar's lines with Select and without it (hidden by a rule a redraw keeps), where it fits on a line it already has.
   const toolbarLines = () => a.run(`(() => { const middles = [...document.querySelector('.ov-page .toolbar').children].filter(part => part.offsetWidth).map(part => { const box = part.getBoundingClientRect(); return (box.top + box.bottom) / 2; }).sort((x, y) => x - y);
@@ -12474,6 +12476,45 @@ async function selectFlow() {
   await fullSize(l);
   same('no page errors, Select folded', l.pageErrors, []);
   await l.quit();
+
+  // Whenever the Library's rows are not what is drawn, the mode ends: an empty Library (the one item deleted by its own row's
+  // Delete, then its Undo), and the held screen (another build installed, then gone).
+  const solo = join(scratch, 'home-select-solo'), soloMac = standInMac(join(scratch, 'mac-select-solo'));
+  skill(join(solo, '.claude/skills'), 'solo');
+  toolClis(solo);
+  const o = await launch(join(scratch, 'select-solo-data'), flag('--electron') ? ['--as-released'] : [], solo,
+    { CK_TEST_HOME_ONLY: 'claude,copilot,codex', CK_TEST_APPS: soloMac.root, CK_TEST_OWN_BUNDLE: join(soloMac.applications, 'Central Knot.app') });
+  await o.click('#nav-overview');
+  await o.click('#setup-yes');
+  for (let tries = 0; tries < 100 && !(await o.exists(`#${rowPart('switch', 'skills', 'solo')}`)); tries++) { await openKind(o, 'all'); await wait(100); }
+  const soloDone = async () => { for (let tries = 0; tries < 300 && await o.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await o.settle(); };
+  const soloMode = async () => [await o.text('#library-select .band-stack > :not(.band-unshown)'), await o.exists('#select-bar'), await o.exists('.ov-row.row-ticked')];
+  // solo ticked and the question open, from wherever the page is.
+  const asking = async () => {
+    if ((await soloMode())[0] === 'Select') await o.click('#library-select');
+    if (!(await o.exists('.ov-row.row-ticked'))) await o.click(`#${rowPart('tick', 'skills', 'solo')}`);
+    if (await o.exists('#select-delete')) await o.click('#select-delete');
+  };
+  await asking();
+  await o.click(`#${rowPart('open', 'skills', 'solo')}`);
+  await o.click(`#${rowPart('delete', 'skills', 'solo')}`);
+  await o.click(`#${rowPart('delete-confirm', 'skills', 'solo')}`);
+  await soloDone();
+  check('its own Delete leaves the Library empty: no list drawn', !(await o.exists('.ov-row[data-key]')));
+  await o.click('#outcome-undo');
+  await soloDone();
+  same('its Undo brings the row back, and no mode, tick or question with it', [await o.exists(`#${rowPart('switch', 'skills', 'solo')}`), ...await soloMode()], [true, 'Select', false, false]);
+  await asking();
+  const acme = soloMac.bundle(soloMac.applications, 'Acme Knot', 'com.centralknot.custom.acme');
+  await o.click('#header-refresh');
+  for (let tries = 0; tries < 100 && !(await o.exists('#held')); tries++) await wait(100);
+  check('another build installed: the held screen takes the Library’s place', await o.exists('#held'));
+  rmSync(acme, { recursive: true, force: true });
+  await o.click('#header-refresh');
+  for (let tries = 0; tries < 100 && (await o.exists('#held') || !(await o.exists('.ov-row[data-key]'))); tries++) await wait(100);
+  same('that build gone: the Library is back, and no mode, tick or question with it', [await o.exists('#held'), ...await soloMode()], [false, 'Select', false, false]);
+  same('no page errors, the Library away while asking', o.pageErrors, []);
+  await o.quit();
 
   // Another home taken while asking ends the mode where the home changes: a home with a tool and nothing in it (its Library drawn
   // without a list), then back. Two homes to switch between: a development run's Practice copy and this computer's home.
