@@ -623,6 +623,8 @@ async function backPlaceFlow() {
   writeFileSync(join(P.home, '.claude/CLAUDE.md'), lines(60, 'Follow project convention'));
   mkdirSync(join(P.home, '.copilot'), { recursive: true });
   writeFileSync(join(P.home, '.copilot/copilot-instructions.md'), lines(60, 'Follow project convention'));
+  // Enough tools for the Overview to scroll at 1316×819 too.
+  for (const folder of ['.codex', '.pi/agent', '.config/opencode', '.gemini/config']) mkdirSync(join(P.home, folder), { recursive: true });
   // A folder marketplace of 30 plugins in two categories; pack-16, installed in Claude Code, brings 20 skills to the Library. pack-16's
   // and pack-17's pages hold those skills and a long README.
   const plugins = numbered('pack', 30), pluginSkills = Object.fromEntries(numbered('plugin-skill', 20).map(name => [`skills/${name}/SKILL.md`, text(name)]));
