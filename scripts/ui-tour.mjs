@@ -2331,7 +2331,7 @@ if (wanted('harnesses')) {
   await a.theme('light'); await shot(a, 'list-light', 'The same, light appearance.'); await a.theme('dark');
   await sizes('list', 'The Harnesses list.');
   if (await a.has('[id^="harness-claude-cli-differ-"]')) { await a.click('[id^="harness-claude-cli-differ-"]'); await shot(a, 'claude-differ-link', 'Clicked "1 skill with different copies" on the Claude Code card: its page, showing only those.'); await a.run(`[...document.querySelectorAll('.chip')].find(chip => chip.textContent.trim() === 'All')?.click()`); await a.settle(); await a.click('#harness-back'); }
-  await a.click('#harness-claude-cli'); await shot(a, 'claude-skills', 'Clicked the Claude Code card: its page, on the Skills tab. Its column comes first; skills only other tools have are under "Not in Claude Code".');
+  await a.click('#harness-claude-cli'); await shot(a, 'claude-skills', 'Clicked the Claude Code heading: its page, on the Skills tab. Its column comes first; skills only other tools have are under "Not in Claude Code".');
   await sizes('claude-skills', 'Claude Code’s Skills tab.');
   if (await a.has(`#${rowPart('add', 'skills', 'standup')}, #${rowPart('switch', 'skills', 'standup')}:not([aria-checked="true"])`)) { await turnOnRow('skills', 'standup'); await shot(a, 'claude-switched', 'Turned standup on from Claude Code’s page: it is copied to every tool at once.'); }
   await a.click(`#${rowPart('open', 'skills', 'release-notes')}`); await shot(a, 'claude-details', 'Opened release-notes’ details from its row.');
