@@ -93,7 +93,7 @@ test('parseUnitLog reports advisory files under Not run (never Clean files) when
   assert.match(summary, /## Output \(advisory, before node --test summary\)\nError: worker crashed/);
 });
 
-test('lockPath enforces all four lock kinds, unlocks idempotently, rejects ENOENT if gone, and unlocks on child exit after throw', { skip: lockSkip }, async () => {
+test('lockPath enforces each lock kind (dir-noremove on Windows, refused elsewhere), unlocks idempotently, rejects ENOENT if gone, and unlocks on child exit after throw', { skip: lockSkip }, async () => {
   const base = await mkdtemp(join(tmpdir(), 'ck-fslock-unlock-'));
   try {
     const roDir = join(base, 'ro');
@@ -129,6 +129,13 @@ test('lockPath enforces all four lock kinds, unlocks idempotently, rejects ENOEN
     assert.equal(await readFile(join(noListDir, 'known.txt'), 'utf8'), 'known\n');
     await unlockNoList();
     assert.deepEqual(await readdir(noListDir), ['known.txt']);
+    if (process.platform === 'win32') {
+      const unlockNoRemove = await lockPath(noListDir, 'dir-noremove');
+      await writeFile(join(noListDir, 'new.txt'), 'new\n');
+      await assert.rejects(rm(join(noListDir, 'known.txt')));
+      await unlockNoRemove();
+      await rm(join(noListDir, 'known.txt'));
+    } else await assert.rejects(lockPath(noListDir, 'dir-noremove'), /Windows lock only/);
     const okFile = join(base, 'ok.txt');
     await writeFile(okFile, 'ok\n');
     const unlockOk = await lockPath(okFile, 'file-unreadable');

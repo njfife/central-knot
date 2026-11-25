@@ -14,24 +14,20 @@ const execFileAsync = promisify(execFile);
 /** Skip value on macOS and Linux when running as root (root bypasses permission locks); false on Windows. */
 export const lockSkip: string | false = process.getuid?.() === 0 && 'root bypasses file and folder permission locks';
 
-/** Skip value on Windows while the app's own locked-folder checks (fs.access W_OK / EACCES-only) are fixed in step 6B. */
-export const winLockAppSkip: string | false = process.platform === 'win32' && 'App locked-folder checks on Windows are step 6B; covered on macOS and Linux.';
-
-/** Skip value on POSIX as root or on Windows for step 6B app locked-folder gaps. */
-export const lockAppSkip: string | false = lockSkip || winLockAppSkip;
-
-export type LockKind = 'dir-readonly' | 'dir-unreadable' | 'dir-unlistable' | 'file-unreadable';
+export type LockKind = 'dir-readonly' | 'dir-unreadable' | 'dir-unlistable' | 'file-unreadable' | 'dir-noremove';
 
 // Specific Windows rights only (never simple `W` or `D`, which include SYNCHRONIZE and break ordinary opens):
 // dir-readonly blocks create/delete/rename in or out while listing and file rewrites still work;
 // dir-unreadable denies listing/writes; nothing denies traversal on Windows, so the inherited deny stands in for it and blocks existing children from being stat'ed or read;
 // dir-unlistable (POSIX 0o111) blocks listing and adding entries while known child paths stay readable (on Windows a known child can still be removed or moved out);
-// file-unreadable denies read/write while stat (RA) and parent-permitted unlink still work.
+// file-unreadable denies read/write while stat (RA) and parent-permitted unlink still work;
+// dir-noremove (Windows only: no POSIX mode takes a new entry and refuses a removal) refuses removals and renames out while new files can still be made.
 const WIN_DENY: Record<LockKind, readonly string[]> = {
   'dir-readonly': ['(WD,AD,DC)', '(OI)(CI)(NP)(IO)(DE)'],
   'dir-unreadable': ['(RD,WD,AD,DC)', '(OI)(CI)(IO)(RD,RA,WD,AD,DE)'],
   'dir-unlistable': ['(RD,WD,AD,DC)'],
   'file-unreadable': ['(RD,WD,AD)'],
+  'dir-noremove': ['(DC)', '(OI)(CI)(NP)(IO)(DE)'],
 };
 
 type HeldLock = { path: string; key: string; restored: number };
@@ -85,6 +81,7 @@ if (process.env.NODE_TEST_CONTEXT) after(async () => { for (const entry of shall
 
 /** Locks `path` and returns an idempotent unlock function; recorded locks also release in `after` (under the test runner) and on exit. */
 export async function lockPath(path: string, kind: LockKind): Promise<() => Promise<void>> {
+  if (kind === 'dir-noremove' && process.platform !== 'win32') throw new Error('dir-noremove is a Windows lock only.');
   const target = process.platform === 'win32' ? resolve(path) : path;
   const locked = kind === 'dir-readonly' ? 0o555 : kind === 'dir-unlistable' ? 0o111 : 0o000;
   const restored = kind === 'file-unreadable' ? 0o644 : 0o755;

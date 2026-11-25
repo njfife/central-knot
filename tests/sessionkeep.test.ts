@@ -13,7 +13,7 @@ import { sweepSessions, type SweepOptions, type SweepResult } from '../src/sessi
 import { writeDurably, type ShareContext } from '../src/share.ts';
 import type { SessionCostsView } from '../src/types.ts';
 import { record } from '../src/values.ts';
-import { lockAppSkip, withLock } from './fslock.ts';
+import { lockSkip, withLock } from './fslock.ts';
 
 const NOW = Date.UTC(2026, 10, 25, 14, 0, 0);
 const tempRoots: string[] = [];
@@ -553,8 +553,8 @@ test('Check 7: an unwritable home or bad store path refuses in the record’s ow
   assert.match(r5.refused ?? '', /not the one open/i);
   assert.equal(await h.readSavedSettings(), undefined);
 
-  // (f) Read-only .central-knot folder: refused before saving consent (src/sessionlock.ts:87 uses access W_OK; step 6B).
-  if (!lockAppSkip) {
+  // (f) Read-only .central-knot folder: refused before saving consent.
+  if (!lockSkip) {
     const roHome = join(h.root, 'readonly-store');
     await mkdir(join(roHome, '.central-knot'), { recursive: true });
     await h.openHome(roHome);
