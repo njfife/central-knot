@@ -12370,11 +12370,11 @@ async function selectFlow() {
   same('Escape leaves the mode', await word(), 'Select');
   // 13. Nothing cut off at 860 with the sidebar folded and open, in the mode and with the question open.
   await a.click('#library-select');
-  await a.click('#tick-heading-on');
+  for (const heading of ['on', 'found']) await a.click(`#tick-heading-${heading}`);
   await sizeTo(a, ...SMALLEST); await sidebarOpen(true);
   const firstRow = () => a.run(`Math.round(document.querySelector('.ov-row[data-key]').getBoundingClientRect().top)`), counting = await firstRow();
   await a.click('#select-delete');
-  same('at 860 wide the question takes the bar’s place on two lines, and no row moves', [await a.run(`document.querySelector('#select-bar > :not(.band-unshown) .select-text').getClientRects().length > 1 || document.querySelector('#select-bar').offsetHeight > 40`), await firstRow()], [true, counting]);
+  same('at 860 wide the question takes the bar’s place on two lines, and no row moves', [await a.run(`document.querySelector('#select-bar > :not(.band-unshown) .select-text').offsetHeight > 20`), await firstRow()], [true, counting]);
   await a.click('#select-cancel');
   await fullSize(a);
   await fitsAtMinimum(a, 'the Library selecting');
