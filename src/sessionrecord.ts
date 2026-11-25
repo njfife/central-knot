@@ -1,17 +1,18 @@
-// The kept session-costs record under `.central-knot/sessions/`: compact JSON files per local month (`YYYY-MM.json`) holding
+// The kept session-costs record under `.central-knot/sessions/`: compact JSON files per UTC month (`YYYY-MM.json`) holding
 // deduplicated receipts and interned pricing metadata, plus `positions.json` for file checkpoints. Owns: the record's shapes,
-// local-month helpers, reading and v1 shape checks, holding newer/damaged/non-file/symlink paths untouched, the pure upsert by
+// UTC-month helpers, reading and v1 shape checks, holding newer/damaged/non-file/symlink paths untouched, the pure upsert by
 // tool and request key, per-home read-to-commit serialization, and the safe write (writeAccess only, never libraryGate or
 // liftFirst; stray temps removed, durable months, folder fsync where supported, then positions).
 //
 // Caller contract for a sweep: enter `withSessionRecordTurn(home, async ({ read, write }) => ...)` and await every `write`
-// inside it. Call `read` with the current month plus every month the batch's requests fall in and the month before each; stop
-// if `sessions`, the current month or `positions.json` is held. Call `upsertSessionRecord`: for `notTaken`, keep the file's
-// old checkpoint and retry later on `held` or `not-read`, while `empty-key`, `invalid-time` and `invalid-tokens` can never be
-// kept (count them and move on). Then `await write(...)` (checks every changed month and `positions.json` with the reader's
-// own v1 validator before writing months durably, fsyncing `sessions/` and writing `positions.json`). Read-only callers (such
-// as a page reading one kept month) call `readSessionRecord` directly. Limit: a key is seen only in the months the turn read,
-// so a request whose time moved from a month that was not read is kept a second time (in tool files a request's time does not move).
+// inside it. Call `read` with the current month plus `monthsAround` each request's time (a key's time can differ a little
+// between two sightings across a month's end); stop if `sessions`, the current month or `positions.json` is held. Call
+// `upsertSessionRecord`: for `notTaken`, keep the file's old checkpoint and retry later on `held` or `not-read`, while
+// `empty-key`, `invalid-time` and `invalid-tokens` can never be kept (count them and move on).
+// Then `await write(...)` (checks every changed month and `positions.json` with the reader's own v1 validator before writing
+// months durably, fsyncing `sessions/` and writing `positions.json`). Read-only callers (such as a page reading one kept
+// month) call `readSessionRecord` directly. Limit: a key is seen only in the months the turn read, so a request whose earlier
+// receipt is in a month that was not read, or is held, is kept again.
 // Not here: finding, reading or sweeping session files (sessionrequests.ts), sums and rows (sessionrow.ts), pricing rules
 // (rates.ts), callers, timers, Settings, Clear, retention, folding, or pages. Two app copies on one home are not coordinated here.
 import { lstat, mkdir, open, readdir, readFile, rm } from 'node:fs/promises';
@@ -19,7 +20,7 @@ import { join, resolve } from 'node:path';
 import { harnessIds } from './harnesses.ts';
 import type { PriceResult } from './rates.ts';
 import type { PricedRequest } from './sessionday.ts';
-import type { CodexState, Request, Tokens } from './sessionrequests.ts';
+import type { CodexState, Position, Request, Tokens } from './sessionrequests.ts';
 import { errorCode, landingOf, storeDirectory, writeAccess, writeDurably, type ShareContext } from './share.ts';
 import type { HarnessId } from './types.ts';
 import { jsonObject, record } from './values.ts';
@@ -43,27 +44,25 @@ export interface KeptSession {
   tool: HarnessId; session: string; parent?: string; project?: string;
   /** Count of unreadable lines/records reported by the latest reading of this session. */
   unread: number;
-  /** Tool-reported session total (never added to sums); `complete` is true only when the whole session tree was covered. */
+  /**
+   * Tool-reported session total (never added to sums); `complete` is true only when the tool left no model out
+   * (sessionrequests.ts SessionRead.reported) and the whole session tree was covered.
+   */
   reported?: { dollars: number; complete: boolean };
   /** Kept receipts keyed by request id as supplied to `upsertSessionRecord`. */
   requests: Record<string, Receipt>;
 }
 export interface SessionMonth { formatVersion: 1; month: string; pricings: PricingEntry[]; sessions: KeptSession[] }
-/** Tracked file checkpoints (`dev` and `ino` are strings because Windows file ids exceed 2^53). */
+/** Tracked file checkpoints: each a reader's `Position` (sessionrequests.ts), with its tool. */
 export interface Positions {
   formatVersion: 1;
   /** Epoch ms when the last sweep wrote checkpoints (`0` when no sweep has written yet). */
   sweptAt: number;
-  files: {
-    tool: HarnessId; dev: string; ino: string;
-    /** Byte offset after the last complete line read from this file. */
-    offset: number;
-    /** 16-hex SHA-256 prefix of the 4 KiB immediately before `offset`, catching inode reuse or same-length rewrites. */
-    before: string;
-    size: number; mtimeMs: number;
+  files: (Position & {
+    tool: HarnessId;
     /** Saved Codex rollout parser state for resuming at `offset`. */
     codex?: CodexState;
-  }[];
+  })[];
 }
 export interface HeldEntry { file: string; kind: 'newer' | 'damaged' | 'not-a-file' | 'link'; reason: string }
 export interface SessionRecord {
@@ -80,7 +79,7 @@ export interface UpsertResult {
 }
 export interface WriteInput {
   months: Record<string, SessionMonth>; changed: readonly string[]; positions: Positions;
-  /** Local `YYYY-MM` treated as the current month for the hold gate; defaults to `monthOf((context.now ?? Date.now)())`. */
+  /** UTC `YYYY-MM` treated as the current month for the hold gate; defaults to `monthOf((context.now ?? Date.now)())`. */
   currentMonth?: string;
 }
 export interface WriteResult { written: boolean; refused?: string; held: HeldEntry[] }
@@ -88,16 +87,33 @@ export interface WriteResult { written: boolean; refused?: string; held: HeldEnt
 export const sessionsDirectory = (home: string): string => join(storeDirectory(home), 'sessions');
 export const emptyPositions = (): Positions => ({ formatVersion: 1, sweptAt: 0, files: [] });
 
-/** Local `YYYY-MM` bucket for a timestamp in ms, matching the Sessions page's local calendar days. */
+/**
+ * The UTC `YYYY-MM` a timestamp in ms falls in, the same in every time zone: a change of zone never moves a request to another
+ * month's file. A local day of the Sessions page can span two of these months.
+ */
 export function monthOf(at: number): string {
   const d = new Date(at);
-  return `${String(d.getFullYear()).padStart(4, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  return `${String(d.getUTCFullYear()).padStart(4, '0')}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 /** The calendar month before `YYYY-MM`. */
 export function previousMonth(month: string): string {
   assertMonth(month);
   const [y, m] = month.split('-').map(Number);
   return m === 1 ? `${String(y - 1).padStart(4, '0')}-12` : `${String(y).padStart(4, '0')}-${String(m - 1).padStart(2, '0')}`;
+}
+/** The calendar month after `YYYY-MM`. */
+export function nextMonth(month: string): string {
+  assertMonth(month);
+  const [y, m] = month.split('-').map(Number);
+  return m === 12 ? `${String(y + 1).padStart(4, '0')}-01` : `${String(y).padStart(4, '0')}-${String(m + 1).padStart(2, '0')}`;
+}
+/**
+ * The months a turn reads for a request at `at`: its own UTC month, the one before and the one after, where a sighting's key
+ * may already be kept. None for a time with no month (the upsert's `invalid-time`).
+ */
+export function monthsAround(at: number): string[] {
+  const own = monthOf(at);
+  return MONTH_RE.test(own) ? [previousMonth(own), own, nextMonth(own)] : [];
 }
 function assertMonth(month: string): void {
   if (!MONTH_RE.test(month)) throw new RangeError(`Invalid session month: ${month}`);
@@ -157,6 +173,7 @@ function validPositions(obj: Record<string, unknown>): Positions | undefined {
     const f = record(raw);
     if (!f || !isTool(f.tool) || typeof f.dev !== 'string' || typeof f.ino !== 'string' || !whole(f.offset)
       || typeof f.before !== 'string' || !whole(f.size) || typeof f.mtimeMs !== 'number' || !Number.isFinite(f.mtimeMs)
+      || f.offset > f.size
       || (f.codex !== undefined && !isCodexState(f.codex))) return undefined;
   }
   return obj as unknown as Positions;
@@ -242,11 +259,12 @@ function makeReceipt(at: number, req: Request, price: PriceResult, pricing: numb
 }
 
 /**
- * Pure upsert keyed by `(tool, request)` as supplied (callers must tag legacy thread-local Codex keys upstream before calling).
- * Empty keys, unrepresentable/out-of-range times, invalid token counts, held own months and unread own months return in
- * `notTaken` before any lookup and are never stored. Otherwise the key is looked up across every non-held month in
- * `source.readMonths` (the months read): a key is seen only in the months the turn read, so a request whose time moved out of
- * an unread or held month is kept a second time. Tokens only grow: a sighting whose every count is no more than the kept
+ * Pure upsert keyed by `(tool, request)` as supplied (an older Codex count's key carries its thread from the reader:
+ * sessionrequests.ts counterRequest). Empty keys, unrepresentable/out-of-range times, invalid token counts, held own months
+ * and unread own months return in `notTaken` before any lookup and are never stored. Otherwise the key is looked up across
+ * every non-held month in `source.readMonths` (the months read; by the caller contract, `monthsAround` each request): a key
+ * is seen only in the months the turn read, so a request whose earlier receipt is in a month that was not read, or is held,
+ * is kept again. Tokens only grow: a sighting whose every count is no more than the kept
  * receipt's changes nothing; a receipt is priced again only when a count grows (or `cacheWrite1h` becomes known) or the model
  * differs, keeping first session, month and `at`. Supplied session facts (ignoring non-finite/negative `reported.dollars`) are
  * applied in every non-held read month holding the session, whether or not any of its requests was taken.
@@ -405,11 +423,11 @@ async function writeUnlocked(context: ShareContext, input: WriteInput, readInTur
 
 /**
  * The one exported way to change a home's session record: serializes one read-to-commit turn per home via a plain promise chain.
- * Every `write` inside `work` must be awaited before `work` returns. Call `read` with the current month plus every month the
- * batch's requests fall in and the month before each, stop if `sessions`, the current month or `positions.json` is held, call
- * `upsertSessionRecord` (keep old checkpoints on `held`/`not-read`; count and move on for `empty-key`, `invalid-time` and
- * `invalid-tokens`), then `await write(...)` (refuses any unread or invalid v1 month/positions before touching disk; writes
- * months durably and fsyncs `sessions/` before writing `positions.json`). A key is seen only in the months the turn read.
+ * Every `write` inside `work` must be awaited before `work` returns. Call `read` with the current month plus `monthsAround`
+ * each request's time, stop if `sessions`, the current month or `positions.json` is held, call `upsertSessionRecord` (keep
+ * old checkpoints on `held`/`not-read`; count and move on for `empty-key`, `invalid-time` and `invalid-tokens`), then
+ * `await write(...)` (refuses any unread or invalid v1 month/positions before touching disk; writes months durably and fsyncs
+ * `sessions/` before writing `positions.json`). A key is seen only in the months the turn read.
  * Not re-entrant: calling this from inside `work` for the same home deadlocks.
  */
 export async function withSessionRecordTurn<T>(
