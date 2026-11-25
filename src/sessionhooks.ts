@@ -101,8 +101,8 @@ export const HOOK_RUN_WARN = 'Run it runs the command for real. It may change yo
 /** Information-mark card text on the first hooks strip of a page (30 words at most). */
 export function hookStripHelp(tool: HarnessId, runnable: boolean): string {
   const when = tool === 'copilot-cli' ? 'Session-start' : 'Session-start and prompt';
-  const base = `${when} command hooks; URL, MCP, project and organisation hooks aren’t listed.`;
-  return runnable ? `${base} Run it runs in your home folder, or in the folder the hook names.` : base;
+  const base = `${when} hooks; not URL, MCP, project or organisation.`;
+  return runnable ? `${base} Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.` : base;
 }
 
 /** Note rendered under a hooks strip's heading: T2.28's tool lines replace strip.note where they apply. */
@@ -112,7 +112,7 @@ export function hookStripNote(tool: HarnessId, strip: Pick<SessionStrip, 'note' 
   return strip.note ? `${strip.note}.` : undefined;
 }
 
-const KEEP_CAP = /^(?:Central Knot|Claude Code|Codex|Copilot CLI|Windows)\b/;
+const KEEP_CAP = /^(?:Central Knot|Claude Code|Codex|Copilot CLI|Windows)\b|^\S+ is turned off in /;
 const lowerLead = (text: string) => (KEEP_CAP.test(text) ? text : text.replace(/^[A-Z](?=[a-z])/, ch => ch.toLowerCase()));
 
 /** What a hook run's result block shows (sentence, quiet trailing run place/time, notes, and output slots), pure. */
@@ -131,10 +131,12 @@ export function hookRunWords(tool: HarnessId, result: HookRunResult, shownCwd: s
   if (result.outcome === 'refused') return { sentence: result.problem ? `Not run: ${lowerLead(result.problem)}` : 'Couldn’t run it.', notes: [] };
   const place = shownCwd || '~';
   const promptPart = result.emptyPrompt ? ' with an empty prompt' : '';
-  const meta = result.outcome === 'missing' || result.detail === 'spawn-error' ? `tried at ${time}` : `run in ${place}${promptPart}, ${time}`;
+  const started = result.outcome !== 'missing' && result.detail !== 'spawn-error';
+  const meta = started ? `run in ${place}${promptPart}, ${time}` : `tried at ${time}`;
+  const baseNotes = started && result.missingOptions ? ['Ran without some of the plugin’s options.'] : [];
   const err = result.stderr || undefined;
   const out = result.allPrinted || undefined;
-  const view = (sentence: string, more: Partial<HookRunView> = {}): HookRunView => ({ sentence, meta, notes: [], ...more });
+  const view = (sentence: string, more: Partial<HookRunView> = {}): HookRunView => ({ sentence, meta, ...more, notes: [...(more.notes ?? []), ...baseNotes] });
   if (result.outcome === 'adds') {
     const notes: string[] = [];
     if (tool === 'codex-cli') notes.push('Codex adds it only once trusted in /hooks.');
