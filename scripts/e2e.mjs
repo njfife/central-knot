@@ -9364,13 +9364,13 @@ async function mcpSigninFlow() {
   const cellId = async (tool, name) => `signin-cell-${tool}-${await rowIdOf(name)}`;
   /** A column's head as it reads (a no-break space read as a space, the ends trimmed). */
   const head = async tool => (await a.run(`document.querySelector('.signin-head[data-tool="${tool}"]')?.innerText ?? null`))?.replace(/\u00a0/g, ' ').trim() ?? null;
-  /** Each (?) on a line its word is on, never alone on a line: the ids of those that aren't. */
+  /** Each (?) on a line its word is on, never alone on a line, and inside its cell's edges: the ids of those that aren't. */
   const KEPT = `[...document.querySelectorAll('#mcpsignin-scroll .info-mark')].flatMap(mark => {
     const word = [...mark.closest('.info-wrap').parentElement.childNodes].filter(node => node.nodeType === 3 && node.textContent.trim()).at(-1);
     const range = document.createRange();
     range.selectNodeContents(word);
-    const line = [...range.getClientRects()].at(-1), own = mark.getBoundingClientRect();
-    return line && line.bottom > own.top && line.top < own.bottom ? [] : [mark.id];
+    const line = [...range.getClientRects()].at(-1), own = mark.getBoundingClientRect(), cell = mark.closest('th, td').getBoundingClientRect();
+    return line && line.bottom > own.top && line.top < own.bottom && own.left >= cell.left - 0.5 && own.right <= cell.right + 0.5 ? [] : [mark.id];
   })`;
   /** Above the table: the line saying what a check does, and whether Check all is there. */
   const top = async () => [await a.text('#signin-line'), await a.exists('#signin-check-all')];
@@ -9388,7 +9388,7 @@ async function mcpSigninFlow() {
         await shape(rail);
         const how = rail ? 'rail' : 'open';
         same(`nothing cut off at ${width}×${height}, the sidebar ${how}: ${name}`, [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], []);
-        same(`each (?) keeps with its word at ${width}×${height}, the sidebar ${how}: ${name}`, await a.run(KEPT), []);
+        same(`each (?) keeps with its word, inside its cell, at ${width}×${height}, the sidebar ${how}: ${name}`, await a.run(KEPT), []);
         same(`the table fits its page at ${width}×${height}, the sidebar ${how}: ${name}`, await a.run(`(t => t.getBoundingClientRect().right <= t.parentElement.getBoundingClientRect().right + 1)(document.querySelector('.signin-table'))`), true);
         if (width === 860 || width === 1316 || (width === 1728 && !rail)) await shoot(`${name}-${width}-${how}`);
       }

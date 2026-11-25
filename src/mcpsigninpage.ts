@@ -59,8 +59,8 @@ function inPlace(rows: SigninRow[]): SigninRow[] {
   return now.sort((first, second) => pins.rows.get(first.id)!.group - pins.rows.get(second.id)!.group);
 }
 
-/** A word and its mark on one line, a no-break space between: a (?) never stands alone on a line. */
-const keep = (words: string | undefined, mark: HTMLElement | null) => (mark ? h('span.signin-keep', {}, words, '\u00a0', mark) : words);
+/** A mark kept on one line with the last word before it, the words before still wrapping: a (?) never stands alone on a line. */
+const keep = (words = '', mark: HTMLElement | null) => (mark ? [words.replace(/\S+$/, ''), h('span.signin-keep', {}, words.match(/\S+$/)?.[0], '\u00a0', mark)] : words);
 
 /** The page's three marks, each with its card on the first place it fits and nowhere after: Connected's, Local's and the session-only heads'. */
 function marksOnce(tools: HarnessId[]) {
