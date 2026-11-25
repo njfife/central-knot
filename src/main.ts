@@ -42,6 +42,7 @@ import { searchFollower, type SearchDoc } from './search.ts';
 import { catalogDocs, libraryDocs } from './searchdocs.ts';
 import { readUsage } from './usage.ts';
 import { readSessionPeriod } from './sessionday.ts';
+import { canonicalHome, createSessionKeeper } from './sessionkeep.ts';
 import { sessionRows } from './sessionrow.ts';
 import { checkSignin, stopChecks } from './mcpsigninrun.ts';
 import { linkLabel } from './sourcelink.ts';
@@ -221,7 +222,7 @@ async function pluginUpdatesSwitched(on: boolean) {
 }
 
 /** Sends the page a message, when there is a window to send it to. */
-function send(channel: 'sync:changed' | 'sync:request' | 'settings:changed' | 'navigate' | 'updates:changed' | 'plugin-updates:changed' | 'plugin-text:changed' | 'said' | 'window:shown' | 'search:published', ...args: unknown[]) {
+function send(channel: 'sync:changed' | 'sync:request' | 'settings:changed' | 'navigate' | 'updates:changed' | 'plugin-updates:changed' | 'plugin-text:changed' | 'session-costs:changed' | 'said' | 'window:shown' | 'search:published', ...args: unknown[]) {
   if (window && !window.isDestroyed()) window.webContents.send(channel, ...args);
 }
 
@@ -229,7 +230,8 @@ function send(channel: 'sync:changed' | 'sync:request' | 'settings:changed' | 'n
 
 /** The home last opened, so a start at sign-in syncs it again; and whether to start at sign-in (on by default). */
 interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean; /** The first close said once that Central Knot keeps running. */ closeExplained?: boolean; /** Light, dark, or as the system is set (the default). */ appearance?: Appearance; /** How long History keeps things. */ historyDays?: HistoryDays; /** Plugins are updated automatically (pluginupdates.ts). */ pluginUpdates?: boolean; /** What marketplace plugins hold is read (plugintext.ts); on unless turned off. */ pluginText?: boolean; /** An update prepared for the next launch to report on (updater.ts). */ update?: PendingUpdate;
-  /** Each home's managed tools as its last pass saw them, and the arrivals its Overview says, by home (arrivals.ts ToolsSeen; read through seenIn). */ toolsSeen?: Record<string, unknown> }
+  /** Each home's managed tools as its last pass saw them, and the arrivals its Overview says, by home (arrivals.ts ToolsSeen; read through seenIn). */ toolsSeen?: Record<string, unknown>;
+  /** Each home where session costs are kept under `.central-knot/sessions/`, by canonical home path (sessionkeep.ts); absent until enabled. */ keepSessionCosts?: Record<string, unknown> }
 const appSettingsPath = () => join(app.getPath('userData'), 'app-settings.json');
 let appSettings: AppSettings = {};
 /** app-settings.json as read: {} where there is none (a first launch), its object, or undefined where it is there and can't be read as one (values.ts jsonObject). */
@@ -259,9 +261,10 @@ async function loadAppSettings() {
  * only once the file is written, so a failed save leaves the last saved value in force; the page hears of every saved change.
  */
 let settingsWrites: Promise<unknown> = Promise.resolve();
-function saveAppSettings(change: Partial<AppSettings>): Promise<void> {
+function saveAppSettings(change: Partial<AppSettings> | ((saved: AppSettings) => Partial<AppSettings>)): Promise<void> {
   const write = settingsWrites.then(async () => {
-    const next = { ...appSettings, ...change };
+    const patch = typeof change === 'function' ? change(appSettings) : change;
+    const next = { ...appSettings, ...patch };
     if (!smoke) {
       const path = appSettingsPath();
       // Renaming needs only the folder's permission. Respect a read-only settings file too.
@@ -272,7 +275,7 @@ function saveAppSettings(change: Partial<AppSettings>): Promise<void> {
     }
     appSettings = next;
     // The login item follows the saved choice before anyone hears of it, so what they read back is the system's answer to it.
-    if ('startAtSignIn' in change) await applySignIn();
+    if ('startAtSignIn' in patch) await applySignIn();
     refreshTray();
     send('settings:changed');
   });
@@ -411,6 +414,8 @@ let pluginStep: Promise<unknown> | undefined;
 let pluginUpdates: ReturnType<typeof autoUpdates> | undefined;
 /** The reading of what marketplace plugins hold (plugintext.ts): begun when a home opens, stopped at quit. */
 let pluginText: PluginTextJob | undefined;
+/** Per-home session-cost keeping consent and 15-minute sweep scheduler (sessionkeep.ts). */
+let sessionKeep: ReturnType<typeof createSessionKeeper> | undefined;
 /** Whether plugin checks run by themselves in this launch (an end-to-end run holds them still). */
 let pluginChecksRun = false;
 function showWindow() {
@@ -759,6 +764,7 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passes: 
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   // How many items are managed, so the first-close note says truthfully whether anything syncs (nothing does with no tool managed).
   lastManagedCount = managed.length ? [...made.skills.items, ...made.mcp.items, ...made.agents.items].filter(fact => fact.on).length : 0;
+  if (sessionKeep) made.sessionCosts = sessionKeep.view(current!.home);
   return { view: made, passes };
 }
 
@@ -1201,6 +1207,7 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
     // Saving the settings rebuilds the menus with the new home.
     await saveAppSettings({ home: { mode: next.mode, path: next.mode === 'custom' ? next.home : undefined } });
     pluginText?.restart();
+    if (sessionKeep) shown.sessionCosts = sessionKeep.homeOpened(next.home, await canonicalHome(next.home));
     // Only once the switch has succeeded: passes due on the home before are dropped, and the new home is watched; a window its
     // first pass started is looked at again, as after any pass.
     stopWatching();
@@ -1412,6 +1419,7 @@ app.on('before-quit', event => {
   quitting = true;
   if (heldForWork) { if (heldForWork === 'waiting') event.preventDefault(); return; }
   drafting?.abort();
+  sessionKeep?.quit();
   const draft = process.platform === 'win32' ? draftRun?.catch(() => undefined) : undefined;
   const saving = pluginText?.stop();
   // An MCP sign-in check or hook run under way is stopped, its processes with it, and its temp folder removed before the app goes; none starts after.
@@ -1489,6 +1497,18 @@ app.whenReady().then(async () => {
     return preferences();
   });
   handleNow('plugin-text:view', async () => pluginText?.view() ?? { read: 0, of: 0, elsewhere: 0, reading: false, on: pluginTextOn() });
+  sessionKeep = smoke ? undefined : createSessionKeeper({
+    context,
+    isKept: key => record(appSettings.keepSessionCosts)?.[key] === true,
+    saveConsent: (key, on) => saveAppSettings(saved => ({ keepSessionCosts: { ...(record(saved.keepSessionCosts) ?? {}), [key]: on } })),
+    changed: view => send('session-costs:changed', view),
+    log,
+    everyMs: Number(process.env.CK_SESSION_SWEEP_EVERY_MS),
+  });
+  handleNow('sessions:keep', async (home, on) => {
+    if (typeof home !== 'string' || typeof on !== 'boolean') throw new Error('Invalid session costs request.');
+    return sessionKeep ? sessionKeep.setKeep(home, on) : { home, on: false, collecting: false, refused: 'Session costs cannot be kept in this mode.' };
+  });
   // Updates (PLT-02): checks run outside the queue; the restart waits in it, so it never lands in the middle of a write.
   // A custom build never asks for, or takes, the standard app's releases (ORG-07): it has no updater until it has a location of its own.
   updater = smoke || custom ? undefined : startUpdater({
@@ -1843,4 +1863,4 @@ app.whenReady().then(async () => {
 }).catch(() => { console.error('Central Knot could not open.'); app.exit(1); });
 
 app.on('window-all-closed', () => { if (tray && !quitting) return; stopWatching(); app.quit(); });
-app.on('will-quit', () => { stopWatching(); search.close(); if (practiceHome) rmSync(practiceHome, { recursive: true, force: true }); });
+app.on('will-quit', () => { sessionKeep?.quit(); stopWatching(); search.close(); if (practiceHome) rmSync(practiceHome, { recursive: true, force: true }); });

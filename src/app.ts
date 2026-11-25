@@ -16,7 +16,7 @@ import { forgetSourcePrompts, loadSources } from './sourcespage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
-import type { Reason, ApplyResult, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SyncNotice, UsageReading } from './types.ts';
+import type { Reason, ApplyResult, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SessionCostsView, SyncNotice, UsageReading } from './types.ts';
 import { anyOn, kindSource, noPins, pinsOn, rowId, sameRow, type NamedRow, type Pinned, type RowKey } from './itemrow.ts';
 import { itemKey, wantedIn } from './library.ts';
 import { caughtUpNames, groupBy, noticeNames, plural, withSetAside } from './model.ts';
@@ -176,6 +176,8 @@ export const state = {
   sessions: pageData<DayRows>(),
   /** Which day the Sessions page reads: Today at launch, kept while the window is open, across pages and homes. */
   sessionsDay: 'today' as SessionsDay,
+  /** Inline refusal or save failure from the Sessions page's Start keeping button; cleared when keeping turns on or home changes. */
+  keepProblem: undefined as string | undefined,
 };
 
 /**
@@ -411,6 +413,7 @@ function accept(view: HomeView): HomeView {
   resetPageData(state.history);
   resetPageData(state.usage);
   resetPageData(state.sessions);
+  state.keepProblem = undefined;
   state.usageBand = false;
   // What the MCP sign-in checks said is the last home's; one still running there is dropped when it answers.
   state.mcpSignin = { home: view.home, columns: {} };
@@ -1762,6 +1765,28 @@ api().onNavigate(page => {
 // Settings changed by a menu, a dialog or the system: main says so after every save and whenever the window comes back, and an
 // open Settings page reads them again, so it never shows (or writes back) a value that is no longer the saved one.
 api().onSettingsChanged(() => { if (state.page === 'settings') void loadSettings(); });
+/** Applies a keeper state to the open home unless a newer `seq` has already landed; forgets stale refusals once on. */
+function applySessionCosts(next: SessionCostsView): void {
+  if (!state.home || next.home !== state.home.home) return;
+  if ((state.home.sessionCosts?.seq ?? -1) > (next.seq ?? 0)) return;
+  state.home.sessionCosts = next;
+  if (next.on) state.keepProblem = undefined;
+}
+/** Turns session-cost keeping on or off for the open home, updating its view and announcing once when turned on. */
+export async function switchSessionCosts(on: boolean): Promise<string | undefined> {
+  const home = state.home?.home;
+  if (!home) return undefined;
+  const view = await api().setKeepSessionCosts(home, on);
+  if (state.home?.home !== home) return undefined;
+  applySessionCosts(view);
+  if (view.refused) return view.refused;
+  announce(on ? 'Keeping session costs for this home.' : 'Stopped keeping session costs for this home.', !on);
+  return undefined;
+}
+api().onSessionCostsChanged(next => {
+  applySessionCosts(next);
+  if (state.page === 'sessions' || state.page === 'settings') rerender();
+});
 
 // A background pass may change what differs from the git repo too: its page and sidebar count read again soon (no fetch).
 // The Sources page reads its view again too: a read by itself (the daily check) changes what each name there is to the library.
@@ -1777,6 +1802,7 @@ const noticesByKind = (view: HomeView): [PageKind, SyncNotice[]][] => [['skills'
  * folded into History by a newer one: main says each notice once, and a pass's own writes (a settings file it wrote) bring a read
  * with none right after the one that had them, so a page opened a moment later still tells what Synchronize everything, or an
  * edit, did. One the read brings a later save's notice of the same item for is superseded (matrix.ts supersedes): its save is in History.
+ * Also keeps the open home's newer `sessionCosts` when an older home read carries a lower `types.ts SessionCostsView.seq` (same rule as `applySessionCosts`).
  */
 function keepUnshown(was: HomeView | undefined, view: HomeView): HomeView {
   if (!was || was.home !== view.home) return view;
@@ -1785,7 +1811,8 @@ function keepUnshown(was: HomeView | undefined, view: HomeView): HomeView {
     const unshown = was[kind].notices.filter(notice => !known.has(notice.history) && noticeUnseen(notice.history) && !now.some(newer => supersedes(newer, notice)));
     return unshown.length ? { ...view[kind], notices: [...unshown, ...now] } : view[kind];
   };
-  return { ...view, skills: kept('skills'), mcp: kept('mcp'), agents: kept('agents') };
+  const sessionCosts = was.sessionCosts && (!view.sessionCosts || (view.sessionCosts.seq ?? 0) < (was.sessionCosts.seq ?? 0)) ? was.sessionCosts : view.sessionCosts;
+  return { ...view, skills: kept('skills'), mcp: kept('mcp'), agents: kept('agents'), sessionCosts };
 }
 
 /**

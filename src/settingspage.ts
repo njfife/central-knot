@@ -1,10 +1,11 @@
 // Settings: Central Knot's own preferences, kept apart from the tools' settings. The main process stores them
-// (app-settings.json) and applies them; this page shows them, one full-width row each, and changes one at a time. One row is
-// the open home's, not the app's: Synchronize everything, kept in the home's sync record (share.ts SyncRecord syncEverything)
-// and switched through app.ts switchSyncEverything. Help's Log row also shows Central Knot's own log under it (Show log: its
+// (app-settings.json) and applies them; this page shows them, one full-width row each, and changes one at a time. Under "This
+// home" sit two per-home switches: Synchronize everything, kept in the home's sync record (share.ts SyncRecord syncEverything)
+// and switched through app.ts switchSyncEverything, and Keep session costs, kept per canonical home in app-settings.json
+// (sessionkeep.ts). Help's Log row also shows Central Knot's own log under it (Show log: its
 // last lines, read by main.ts readLog, never stored); the log is written by main.ts log. A settings file that couldn't be read at
 // launch is said in a note at the top (keptNote) until it is closed, and first on the Overview (overview.ts needsYou).
-import { acting, announce, machine, rerender, switchSyncEverything, showPage, state, whyReadOnly } from './app.ts';
+import { acting, announce, machine, rerender, switchSessionCosts, switchSyncEverything, showPage, state, whyReadOnly } from './app.ts';
 import { outcomeBand } from './matrix.ts';
 import { oneUndoCovers } from './historyactions.ts';
 import { button, h, icon, infoCardId, infoMark, toggle } from './dom.ts';
@@ -33,7 +34,7 @@ interface RowMessage { text: string; detail?: string; tone: 'note' | 'info' | 'f
 /** What each row's last action said, by row id. */
 const messages = new Map<string, RowMessage>();
 /** What each row shows of the settings, so a message can say which value it is about. */
-const shownBy: Record<string, (settings: AppPreferences) => unknown> = { 'sign-in': settings => settings.signIn, appearance: settings => settings.appearance, history: settings => settings.historyDays, 'plugin-updates': settings => settings.pluginUpdates, 'plugin-text': settings => settings.pluginText };
+const shownBy: Record<string, (settings: AppPreferences) => unknown> = { 'sign-in': settings => settings.signIn, appearance: settings => settings.appearance, history: settings => settings.historyDays, 'plugin-updates': settings => settings.pluginUpdates, 'plugin-text': settings => settings.pluginText, 'session-costs': () => `${state.home?.home ?? ''}:${!!state.home?.sessionCosts?.on}` };
 const shownIn = (row: string, settings: AppPreferences | undefined) => settings && shownBy[row] ? JSON.stringify(shownBy[row](settings)) : undefined;
 /** A message about a value its row no longer shows was settled by a newer read (put right in the system, changed from a menu). */
 const settled = (row: string, message: RowMessage | undefined) => message?.about !== undefined && message.about !== shownIn(row, current);
@@ -137,7 +138,7 @@ const writeProblems: [RegExp, string, string][] = [
  * A failed save in plain words: why (for the usual reasons), what is still in effect, and what to do. The error itself
  * stays out of the sentence; main has logged it, which the last resort points to.
  */
-function saveFailure(error: string, kept: string): string {
+export function saveFailure(error: string, kept: string): string {
   const [, why, next] = writeProblems.find(([code]) => code.test(error)) ?? [, '', 'Try again. If it keeps failing, the log file says why.'];
   return [why ? `Couldn’t save: ${why}` : 'Couldn’t save this change.', kept, next].filter(Boolean).join(' ');
 }
@@ -501,6 +502,29 @@ function syncEverythingRow(): HTMLElement | null {
     notice, added.length ? h('div.setting-added', {}, added) : undefined);
 }
 
+/** Shared disclosure of what session-cost keeping stores, reused by the Sessions page and Settings info cards. */
+export const SESSION_COSTS_KEPT = 'This home’s Central Knot folder keeps each session’s project, request times, models, token counts and estimated prices. No message text.';
+
+/** Turns keeping session costs on or off for the open home (sessionkeep.ts). */
+async function chooseSessionCosts(on: boolean): Promise<void> {
+  const kept = `Session costs are still ${state.home?.sessionCosts?.on ? 'kept' : 'not kept'} in this home.`;
+  await act('session-costs', async () => {
+    const refused = await switchSessionCosts(on);
+    return refused ? { text: refused, tone: 'failure', about: shownIn('session-costs', current) } : undefined;
+  }, error => saveFailure(error, kept));
+}
+
+/** Keep session costs, under "This home": one switch, on or off for the open home. */
+function sessionCostsRow(): HTMLElement {
+  if (settled('session-costs', messages.get('session-costs'))) messages.delete('session-costs');
+  const costs = state.home!.sessionCosts;
+  const notice: RowMessage | undefined = !messages.has('session-costs') && costs?.refused ? { text: costs.refused, tone: 'failure' } : undefined;
+  return settingRow('session-costs', 'Keep session costs', undefined,
+    toggle({ on: !!costs?.on, label: 'Keep session costs', onchange: chosen => void chooseSessionCosts(chosen), id: 'keep-session-costs',
+      attrs: { 'aria-describedby': notice ? `${infoCardId('setting-session-costs-info')} setting-session-costs-notice` : infoCardId('setting-session-costs-info'), title: null } }),
+    notice, undefined, `${SESSION_COSTS_KEPT} If you turn this off, what was kept stays.`);
+}
+
 /** What a settings file that couldn't be read at launch led to (types.ts HomeView settingsUnread), said first on the Overview (overview.ts needsYou) and here. */
 export const settingsReset = 'Central Knot couldn’t read its settings file, so it started with the defaults.';
 /** The note at the top of the page: what happened, where the old file is, and Close, which ends it here and on the Overview. */
@@ -541,7 +565,7 @@ export function settingsPage(): HTMLElement {
             tabindex: (chosen ?? 'system') === choice.value ? '0' : '-1', onclick: () => void chooseAppearance(choice.value),
           }, icon(choice.glyph, 20), h('span', {}, choice.label))))),
       updatesRow(), buildRow()),
-    state.home ? settingsSection('home', 'This home', syncEverythingRow()) : null,
+    state.home ? settingsSection('home', 'This home', syncEverythingRow(), sessionCostsRow()) : null,
     settingsSection('plugins', 'Plugins', pluginUpdatesRow(), pluginTextRow()),
     settingsSection('history', 'History',
       settingRow('history', 'Keep history for', 'Changes and deleted items stay in History, ready to restore, for this long.',

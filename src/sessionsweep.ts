@@ -25,8 +25,8 @@
 //
 // Not here: record shapes, holds, saved-month listing, upsert and writes (sessionrecord.ts); the store lock itself
 // (sessionlock.ts); line scanning, identity/hash and record parsing (sessionrequests.ts); pricing rules (rates.ts); sums and
-// rows (sessionrow.ts); session-reported figures (their own step); callers, timers, Settings, Clear, and retention. Nothing
-// calls this module yet.
+// rows (sessionrow.ts); session-reported figures (their own step); consent, callers and timers (`sessionkeep.ts`), Settings,
+// Clear, and retention. Called by `sessionkeep.ts`.
 import type { BigIntStats } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { SESSION_TOOLS, type SessionTool } from './presence.ts';
