@@ -125,7 +125,7 @@ test('two clicks at once on Stop keeping disable the button while pending, send 
   state.home = fakeHome(true, 1);
   state.page = 'sessions';
   state.sessionsDay = 'today';
-  state.sessions = { state: 'ready', data: undefined, seq: 0, home: state.home.home };
+  state.sessions = { state: 'ready', data: undefined, gen: 0 };
   redraw();
 
   const stopBefore = findById(rendered, 'sessions-keep-stop')!;
@@ -161,7 +161,7 @@ test('two clicks at once on Start keeping disable both controls while pending an
   state.home = fakeHome(false, 2);
   state.page = 'sessions';
   state.sessionsDay = 'today';
-  state.sessions = { state: 'ready', data: undefined, seq: 0, home: state.home.home };
+  state.sessions = { state: 'ready', data: undefined, gen: 0 };
   redraw();
 
   const startBefore = findById(rendered, 'sessions-keep-start')!;
@@ -230,13 +230,13 @@ test('a priced heading total with no price dates, unread faults or one-hour cach
   state.home = fakeHome(false, 5);
   state.page = 'sessions';
   state.sessionsDay = 'today';
-  state.sessions = { state: 'ready', data: reading([]), seq: 1, home: state.home.home };
+  state.sessions = { state: 'ready', data: reading([]), gen: 1 };
   const withoutDates = sessionsPage(state.home) as unknown as FakeNode;
   assert.match(textOf(withoutDates), /≈ \$0\.50 at API prices/);
   assert.equal(findById(withoutDates, 'sessions-total-info'), undefined, 'no total info mark when nothing to explain');
   assert.equal(findById(withoutDates, 'sessions-unpriced-info'), undefined);
 
-  state.sessions = { state: 'ready', data: reading(['2026-11-24']), seq: 2, home: state.home.home };
+  state.sessions = { state: 'ready', data: reading(['2026-11-24']), gen: 2 };
   const withDate = sessionsPage(state.home) as unknown as FakeNode;
   assert.ok(findById(withDate, 'sessions-total-info'), 'total info mark appears when a price date is supplied');
 });
