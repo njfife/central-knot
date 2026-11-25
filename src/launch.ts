@@ -4,12 +4,12 @@
 // command as a .cmd): such a file is run through cmd.exe with each argument encoded so that it arrives as it was given
 // (through npm's own .cmd every argument does; see launchCommand for what another .cmd takes).
 // Its callers (plugins.ts run, draftbase.ts run, discovery.ts askVersion) keep their own output, limits and timer. On macOS
-// and Linux how a program and what it started are stopped is theirs (a process group of its own). On Windows the two runs
-// stop a program and end as stopRun says, with everything it started stopped through stopTree: plugins.ts run (git's runs,
-// the plugin commands and the MCP sign-in check go through it) and draftbase.ts run; askVersion's probe is still ended by
-// execFile's timeout alone. After a draft's or a sign-in check's run, the folder it worked in is removed by clearRunFolder,
-// which never throws (a plugin command runs in the home itself). Where a tool's command is found is platform.ts's. The app's other programs are started where they are used, as asked: git and tar are .exe files on
-// Windows, and the login shell, D-Bus, lsappinfo and codesign run only on macOS or Linux.
+// and Linux how a program and what it started are stopped is theirs (a process group of its own). On Windows plugins.ts run
+// (git's runs, the plugin commands, the MCP sign-in check) and draftbase.ts run ask a program and all it started to stop
+// through stopTree and end as stopRun says; what a stop could not end is said in the app's log. askVersion's probe is ended
+// by execFile's timeout alone. A draft's or a sign-in check's folder is removed by clearRunFolder where it can be, else said
+// in the log. Where a tool's command is found is platform.ts's. The app's other programs are started where they are used, as
+// asked: git and tar are .exe files on Windows, and the login shell, D-Bus, lsappinfo and codesign run only on macOS or Linux.
 import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from 'node:child_process';
@@ -113,17 +113,29 @@ export function stopTree(child: ChildProcess): Promise<boolean> {
 
 /**
  * Windows: how plugins.ts run and draftbase.ts run stop a command and end. `stop` asks stopTree, once. `settle(code)` (from
- * `close` or `error`) ends the run at once while no stop was asked, else once the stop has answered; that answer also ends it
- * CLOSE_GRACE_MS later at most, with the child's exit code. `end` gets the code and whether the stop was whole (true with
- * none asked); it may be called again and keeps the first. After it, the child's output is let go: a tool a failed stop left
- * running fills no memory.
+ * `close`, `error` or draftbase.ts run's exit timer) ends the run at once while no stop was asked, else once the stop has
+ * answered; that answer also ends it CLOSE_GRACE_MS later at most, with the exit code. `end` gets the code and whether the
+ * stop was whole (true with none asked); it may be called again and keeps the first. After it, the output is let go: a tool
+ * a failed stop left running fills no memory.
  */
 export function stopRun<Code>(child: ChildProcessWithoutNullStreams, end: (code: Code | number, whole: boolean) => void): { stop: () => void; settle: (code: Code) => void } {
   let stopping: Promise<boolean> | undefined;
-  const ended = (code: Code | number, whole: boolean) => { end(code, whole); child.stdout.destroy(); child.stderr.destroy(); };
+  const ended = (code: Code | number, whole: boolean) => {
+    end(code, whole);
+    child.stdout.destroy();
+    child.stderr.destroy();
+  };
   return {
-    stop: () => { stopping ??= stopTree(child).then(whole => { setTimeout(() => ended(child.exitCode ?? 1, whole), CLOSE_GRACE_MS); return whole; }); },
-    settle: code => { if (stopping) void stopping.then(whole => ended(code, whole)); else ended(code, true); },
+    stop: () => {
+      stopping ??= stopTree(child).then(whole => {
+        setTimeout(() => ended(child.exitCode ?? 1, whole), CLOSE_GRACE_MS);
+        return whole;
+      });
+    },
+    settle: code => {
+      if (stopping) void stopping.then(whole => ended(code, whole));
+      else ended(code, true);
+    },
   };
 }
 

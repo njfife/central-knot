@@ -104,7 +104,7 @@ export type RunResult = { code: number | 'timeout' | 'missing'; output: string; 
  * Runs a command (started as launch.ts start says: on Windows a .cmd through cmd.exe), stopped at its timeout or its `signal`.
  * `group` (git's runs and mcpsigninrun.ts's, off Windows): it runs in a process group of its own, and stopping it stops the
  * whole group, the helpers it started (git's remote-http) with it. On Windows the stop and the end are launch.ts stopRun's:
- * the command is stopped with everything it started, and the run ends after.
+ * the command and all it started are asked to stop; what could not be is said by `leftRunning`.
  */
 export function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number; group?: boolean } & RunOptions): Promise<RunResult> {
   const maxBytes = options.maxBytes ?? 4 * 1024 * 1024, group = !!options.group && process.platform !== 'win32';

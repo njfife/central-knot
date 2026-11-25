@@ -1,8 +1,8 @@
 // On Windows a tool that is stopped is stopped with everything it started, and its run ends only after that, so that the
 // folder it worked in can go: launch.ts stopRun and stopTree, from plugins.ts run (git's runs, the plugin commands and the MCP
-// sign-in check go through it) and draftbase.ts run; what a stop could not end is said in the app's log. Windows only: on macOS and Linux a tool's process group is stopped instead, as tests/draftbase.test.ts
-// and tests/mcpsignin.test.ts show. Every stand-in here ends by itself after 60 s, and each test ends what it left by its
-// process ids.
+// sign-in check go through it) and draftbase.ts run; what a stop could not end is said in the app's log. Windows only: on
+// macOS and Linux a tool's process group is stopped instead, as tests/draftbase.test.ts and tests/mcpsignin.test.ts show.
+// Every stand-in here ends by itself after 60 s, and each test ends what it left by its process ids.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
@@ -232,7 +232,9 @@ test('A sign-in check whose tool answered and ended by itself, leaving a helper 
     await standIn(join(box.base, 'tools/.local/bin/claude'), '#!/bin/sh\n',
       `require("child_process").spawn(process.execPath, [${JSON.stringify(orphan)}, ${JSON.stringify(helperPid)}], { stdio: "inherit" }); process.stdout.write(require("fs").readFileSync(${JSON.stringify(listed)}));`);
     const logged: string[] = [], kills = taskkills.length;
-    const answer = await checkSignin({ home: join(box.base, 'home'), actual: false, toolsHome: join(box.base, 'tools'), searchPath: '' }, 'claude-cli', names, 1000, line => logged.push(line));
+    // A limit of 3 s, as this file's other runs have: room for a slow machine to start the tool and let it end first.
+    const where = { home: join(box.base, 'home'), actual: false, toolsHome: join(box.base, 'tools'), searchPath: '' };
+    const answer = await checkSignin(where, 'claude-cli', names, 3000, line => logged.push(line));
     const said = await readFile(listed, 'utf8');
     assert.deepEqual(answer, readAnswer('claude-cli', said, said.replace(/\r/g, '').trim(), names), 'the tool’s own answer');
     assert.equal(taskkills.length, kills, 'no taskkill for a tool already ended');

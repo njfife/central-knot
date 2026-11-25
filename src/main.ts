@@ -1398,9 +1398,9 @@ app.on('second-instance', showWindow);
 // Opening Central Knot again (the Dock, Finder, Spotlight) while it runs: its window comes back.
 app.on('activate', () => { log('opened again'); showWindow(); });
 // A tool writing a draft is stopped with the app: it would otherwise keep working with nobody to read its answer. On Windows its
-// tree is stopped with taskkill (launch.ts stopRun) and its folder removed after, which Quit waits for: at most launch.ts
-// TREE_STOP_MS for taskkill, then CLOSE_GRACE_MS for its output to close. Elsewhere its process group is killed at once, and
-// nothing waits for it.
+// tree is asked to stop with taskkill (launch.ts stopRun), and its folder is removed after where it can be, else said in the log;
+// Quit waits for that: at most launch.ts TREE_STOP_MS for taskkill, then CLOSE_GRACE_MS for its output to close. Elsewhere its
+// process group is killed at once, and nothing waits for it.
 // A plugin being updated by itself is let finish (a few seconds; fifteen at most): the tool's command runs on whatever the app
 // does, and what follows it here (turning a turned-off plugin off again, the note saved) must not be lost. No further step
 // starts, so the check ends with that one. A check that is only reading the marketplaces holds nothing up. The reading of what
