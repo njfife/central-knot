@@ -4,7 +4,8 @@
 // waits; a refusal that stays is said in words (share.ts plainError). The worked examples run on Windows on real files, held
 // two ways: open in this process, as Node opens a file (a rename over it is refused), or open in a PowerShell child that lets
 // it be read and written but not moved (moving it, or its folder, is refused); each is let go 300 ms after the first refusal
-// is seen. A save landing between two tries, and a refusal of one call, are stood in for by replacing fs's own function.
+// is seen. A save landing between two tries, and a refusal of one call, are stood in for by replacing fs's own function. The
+// helper's own rule and the words, which name the platform they stand for, are checked first, everywhere.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -14,7 +15,9 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { editEntry, readTool, type NeutralServer } from '../src/mcp.ts';
-import { errorCode, placeCopy, plainError, readTree, recoverParked, removeFileChecked, writeDurably, writeFileChecked, type ShareContext } from '../src/share.ts';
+import {
+  errorCode, placeCopy, plainError, readTree, recoverParked, removeFileChecked, retryWhileHeld, writeDurably, writeFileChecked, type ShareContext,
+} from '../src/share.ts';
 import { recoverFolders, removeFolder, swapFolder } from '../src/skillfiles.ts';
 import { within } from './within.ts';
 
@@ -79,9 +82,17 @@ function firstRefusal(step: Step) {
   return { refused, restore };
 }
 
-/** Once a step is refused: `meanwhile` (a save made while the write waits), then 300 ms on, the holder lets go. */
-const letGo = (refused: Promise<void>, release: () => Promise<void>, meanwhile = async () => {}) =>
-  within('a step refused while the file is held', refused).then(meanwhile).then(() => sleep(300)).finally(release);
+/**
+ * Runs `write` while a file is held: once a step is refused, `meanwhile` (a save made while the write waits), then 300 ms on,
+ * the holder lets go. The write's own outcome comes back once both are over, so nothing is cleaned up while the file is held.
+ */
+async function whileHeld<T>(write: Promise<T>, refused: Promise<void>, release: () => Promise<void>, meanwhile = async () => {}): Promise<T> {
+  const hold = within('a step refused while the file is held', refused).then(meanwhile).then(() => sleep(300)).finally(release);
+  const [written, held] = await Promise.allSettled([write, hold]);
+  if (written.status === 'rejected') throw written.reason;
+  if (held.status === 'rejected') throw held.reason;
+  return written.value;
+}
 
 /** Refuses the first call of `step` that `matches` its paths with `code`, as Windows refuses a held file, `meanwhile` landing first; `times` such calls in all. */
 function refuse(step: Step, code: 'EPERM' | 'EBUSY', matches: (paths: string[]) => boolean, meanwhile = async (_paths: string[]) => {}, times = 1) {
@@ -104,11 +115,59 @@ async function newerSkill(base: string) {
 /** The file a write moved aside in `folder`. */
 const moved = async (folder: string) => join(folder, (await readdir(folder)).find(name => name.endsWith('.old'))!);
 
+const refusal = (code: string) => Object.assign(new Error(code), { code });
+
+test('off Windows a change is called once and is its own promise: a refusal comes back as it came, and nothing is asked or waited for', async () => {
+  for (const platform of ['darwin', 'linux'] as const) {
+    let calls = 0, asked = 0;
+    const done = Promise.resolve('done'), held = refusal('EPERM'), refused = Promise.reject(held);
+    assert.equal(retryWhileHeld(() => done, undefined, platform), done);
+    assert.equal(retryWhileHeld(() => { calls++; return refused; }, async () => { asked++; }, platform), refused);
+    await assert.rejects(refused, error => error === held);
+    assert.deepEqual([calls, asked], [1, 0]);
+  }
+});
+
+test('on Windows a change refused with EPERM or EBUSY is tried again 100, 200, 300 and 400 ms apart, five tries in all, then the last refusal comes back', async () => {
+  const refusals: Error[] = [], at: number[] = [];
+  const change = async () => { at.push(Date.now()); refusals.push(refusal(refusals.length % 2 ? 'EBUSY' : 'EPERM')); throw refusals.at(-1); };
+  await assert.rejects(retryWhileHeld(change, undefined, 'win32'), error => error === refusals[4]);
+  const gaps = at.slice(1).map((time, index) => time - at[index]!);
+  assert.equal(refusals.length, 5);
+  assert.ok([100, 200, 300, 400].every((wait, index) => gaps[index]! >= wait - 10), `gaps ${gaps.join(', ')} ms`);
+  assert.ok(at.at(-1)! - at[0]! < 1500, `gaps ${gaps.join(', ')} ms`);
+});
+
+test('on Windows a change refused for another reason comes back at once; one that lands on a later try lands; a check that no longer holds ends the wait with its own error', async () => {
+  for (const code of ['ENOENT', 'EACCES', 'EEXIST']) {
+    let calls = 0;
+    await assert.rejects(retryWhileHeld(async () => { calls++; throw refusal(code); }, undefined, 'win32'), { code });
+    assert.equal(calls, 1, code);
+  }
+  let calls = 0, asked = 0;
+  assert.equal(await retryWhileHeld(async () => { if (++calls < 3) throw refusal('EBUSY'); return 'landed'; }, async () => { asked++; }, 'win32'), 'landed');
+  assert.deepEqual([calls, asked], [3, 2], 'the check is asked before each further try');
+  calls = 0;
+  await assert.rejects(retryWhileHeld(async () => { calls++; throw refusal('EPERM'); }, async () => { throw refusal('CK_CHANGED'); }, 'win32'), { code: 'CK_CHANGED' });
+  assert.equal(calls, 1, 'no try after the check fails');
+});
+
+test('a refusal Windows gives for a file held, read-only or not permitted is said in one sentence there; elsewhere the words are as before', () => {
+  assert.equal(plainError(refusal('EPERM'), 'win32'), HELD);
+  assert.equal(plainError(refusal('EBUSY'), 'win32'), HELD);
+  assert.equal(plainError(refusal('EACCES'), 'win32'), 'Permission was denied.');
+  for (const platform of ['darwin', 'linux'] as const) {
+    assert.equal(plainError(refusal('EPERM'), platform), 'Permission was denied.');
+    assert.equal(plainError(refusal('EACCES'), platform), 'Permission was denied.');
+    assert.equal(plainError(refusal('EBUSY'), platform), 'It could not finish.');
+  }
+});
+
 test('Claude Code’s settings file held open by another program for 300 ms while an MCP entry is written: the entry lands once it is let go, on what was there', { skip: windowsOnly }, async () => {
   const box = await home(), watch = firstRefusal('rename');
   try {
     const release = await holdOpen(box.file);
-    const [result] = await Promise.all([editEntry(box.context, 'claude-cli', 'docs', undefined, docs), letGo(watch.refused, release)]);
+    const result = await whileHeld(editEntry(box.context, 'claude-cli', 'docs', undefined, docs), watch.refused, release);
     assert.equal(result, undefined, JSON.stringify(result));
     assert.deepEqual(await box.servers(), ['docs']);
     assert.equal(JSON.parse(await readFile(box.file, 'utf8')).numStartups, 1, 'what was there stays');
@@ -120,7 +179,7 @@ test('a save the holding program makes while the entry waits is never written ov
   const box = await home(), watch = firstRefusal('rename'), saved = `${JSON.stringify({ numStartups: 2, mcpServers: {} }, null, 2)}\n`;
   try {
     const release = await holdOpen(box.file);
-    const [result] = await Promise.all([editEntry(box.context, 'claude-cli', 'docs', undefined, docs), letGo(watch.refused, release, () => writeFile(box.file, saved))]);
+    const result = await whileHeld(editEntry(box.context, 'claude-cli', 'docs', undefined, docs), watch.refused, release, () => writeFile(box.file, saved));
     assert.equal(result?.changed, true, JSON.stringify(result));
     assert.equal(await readFile(box.file, 'utf8'), saved);
     assert.deepEqual(await box.listed(box.home), ['.claude', '.claude.json']);
@@ -132,7 +191,7 @@ test('a tool’s file held so it can’t be moved aside, and saved while the wri
   try {
     const release = await holdUnmovable(box.tool);
     const saved = () => writeFile(box.tool, 'saved meanwhile\n');
-    await Promise.all([assert.rejects(writeFileChecked(box.tool, 'written\n', 'before\n'), { code: 'CK_CHANGED' }), letGo(watch.refused, release, saved)]);
+    await whileHeld(assert.rejects(writeFileChecked(box.tool, 'written\n', 'before\n'), { code: 'CK_CHANGED' }), watch.refused, release, saved);
     assert.equal(await readFile(box.tool, 'utf8'), 'saved meanwhile\n');
     assert.deepEqual(await box.listed(box.folder), ['config.toml'], 'nothing moved aside or temporary is left');
   } finally { watch.restore(); await box.cleanup(); }
@@ -176,7 +235,7 @@ test('a tool’s file held 300 ms can be written, then held 300 ms again, remove
   try {
     for (const step of [() => writeFileChecked(box.tool, 'written\n', 'before\n'), () => removeFileChecked(box.tool, 'written\n')]) {
       const watch = firstRefusal('rename'), release = await holdUnmovable(box.tool);
-      try { await Promise.all([step(), letGo(watch.refused, release)]); } finally { watch.restore(); }
+      try { await whileHeld(step(), watch.refused, release); } finally { watch.restore(); }
     }
     assert.deepEqual(await box.listed(box.folder), []);
   } finally { await box.cleanup(); }
@@ -188,7 +247,7 @@ test('a skill’s folder with its SKILL.md held 300 ms can be written over, then
     const source = await newerSkill(box.base);
     const held = async (step: (expected: string) => Promise<void>) => {
       const expected = (await readTree(box.skill)).hash, watch = firstRefusal('rename'), release = await holdUnmovable(join(box.skill, 'SKILL.md'));
-      try { await Promise.all([step(expected), letGo(watch.refused, release)]); } finally { watch.restore(); }
+      try { await whileHeld(step(expected), watch.refused, release); } finally { watch.restore(); }
     };
     await held(expected => swapFolder(box.context, source, box.skill, expected));
     assert.match(await readFile(join(box.skill, 'SKILL.md'), 'utf8'), /After\./);
@@ -222,7 +281,7 @@ test('Central Knot’s own record held open by another program for 300 ms: it is
     await mkdir(join(box.home, '.central-knot'));
     await writeFile(record, '{"events":[]}\n');
     const release = await holdOpen(record);
-    await Promise.all([writeDurably(record, '{"events":[1]}\n'), letGo(watch.refused, release)]);
+    await whileHeld(writeDurably(record, '{"events":[1]}\n'), watch.refused, release);
     assert.equal(await readFile(record, 'utf8'), '{"events":[1]}\n');
     assert.deepEqual(await box.listed(join(box.home, '.central-knot')), ['history.json']);
   } finally { watch.restore(); await box.cleanup(); }

@@ -18,7 +18,7 @@ import { takesPlugins, type PluginTool } from './presence.ts';
 import { reloadAdvice, reloadStep, settleReloads, type ReloadChange, type ToolWays } from './reload.ts';
 import type { LibraryItem } from './library.ts';
 import { readPluginRecord } from './pluginrecord.ts';
-import { errorCode, itemKey, writeFileChecked } from './share.ts';
+import { errorCode, itemKey, plainError, writeFileChecked } from './share.ts';
 import { SAFE_NAME, compareVersions, githubRepo, isCommitHash, isFolder, isHttps, record, strings, text, withoutBom } from './values.ts';
 
 /** Names the tools accept (values.ts holds it, so the page can check a skill's name too). */
@@ -921,7 +921,7 @@ async function switchCodexSkill(context: PluginContext, plugin: string, skill: s
   const after = edit.text;
   if (after === before) return undefined;
   try { await writeFileChecked(path, after, before ?? undefined); }
-  catch (error) { return errorCode(error) === 'CK_CHANGED' ? 'Codex’s config.toml changed just then, so it was left as it is. Try again.' : `Codex’s config.toml couldn’t be written: ${error instanceof Error ? error.message : String(error)}`; }
+  catch (error) { return errorCode(error) === 'CK_CHANGED' ? 'Codex’s config.toml changed just then, so it was left as it is. Try again.' : `Codex’s config.toml couldn’t be written. ${plainError(error)}`; }
   codexWrites.set(key, { before, after, on });
   await keepRecord(context, 'codex-cli', `config.toml [[skills.config]] ${qualified(plugin, skill)} turned ${on ? 'on' : 'off'}`, '', [{ path, before, after }]).catch(() => undefined);
   return undefined;

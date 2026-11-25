@@ -1,7 +1,8 @@
-// A record of every program a run of the unit tests starts or stops, for proving that a change leaves macOS and Linux
-// launching exactly as before: load it before anything else with NODE_OPTIONS=--import=<this file> and CK_SPAWN_LOG=<folder>,
-// then compare two such folders (`node tests/spawnlog.mjs compare <before> <after> [<before again>]`). It is test plumbing,
-// never shipped; its worked examples are tests/spawnlog.test.ts.
+// A record of every program a run of the unit tests starts or stops, and of the files it changes, for proving that a change
+// leaves macOS and Linux launching and writing exactly as before: load it before anything else with
+// NODE_OPTIONS=--import=<this file> and CK_SPAWN_LOG=<folder>, then compare two such folders
+// (`node tests/spawnlog.mjs compare <before> <after> [<before again>]`). It is test plumbing, never shipped; its worked
+// examples are tests/spawnlog.test.ts.
 //
 // What it records, one JSON line per call, in a file per process (<folder>/<pid>.jsonl, named on its first line by the
 // script that process runs, a test file for each of `node --test`'s children):
@@ -11,7 +12,10 @@
 // - each stop: a child's own kill() (the signal), and process.kill (the signal, 0 told apart as a liveness probe, and whether
 //   the number named a process group, its sign kept), with the target named by the start that made it, or "another";
 // - each chmod by which a test makes a file executable (the mode, and a digest of the file's bytes with its temporary folders
-//   named as below): the tests' stand-in tools are made this way, so their place, bytes and mode are compared too.
+//   named as below): the tests' stand-in tools are made this way, so their place, bytes and mode are compared too;
+// - each change to a file through fs.promises (rename, link, unlink, rm and writeFile): its paths, its options and how it
+//   ended (an error's code), so a run shows the same files written, moved and removed as before, and the same refused; not
+//   what is written, nor the order, the timers or a write through a file handle.
 // What no two runs share is written the same way on every run: the folders mkdtemp made (each process lists the ones it
 // makes in <folder>/made.jsonl, so a helper process's records name its test's folders too), the checkout, the home, the
 // record folder itself; and, when compared, ids, hashes, times, ports, process numbers and the test runner's slot (never a
@@ -183,6 +187,13 @@ function record(into) {
   fs.mkdtempSync = (prefix, ...rest) => remember(prefix, mkdtempSync(prefix, ...rest));
   fs.promises.chmod = chmodOf(fs.promises.chmod);
   fs.chmodSync = chmodOf(fs.chmodSync);
+  const changeOf = (name, original) => async function (...args) {
+    const options = { rm: args[1], writeFile: args[2] }[name];
+    const entry = { [name]: args.slice(0, name === 'rename' || name === 'link' ? 2 : 1).map(path => normal(path)), ...(options === undefined ? {} : { options: shown(options) }) };
+    try { const result = await original.apply(this, args); write(entry); return result; }
+    catch (error) { write({ ...entry, error: error?.code ?? 'error' }); throw error; }
+  };
+  for (const name of ['rename', 'link', 'unlink', 'rm', 'writeFile']) fs.promises[name] = changeOf(name, fs.promises[name]);
   syncBuiltinESMExports();
 }
 

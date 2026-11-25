@@ -20,8 +20,8 @@ import { dirname, join, relative, sep } from 'node:path';
 import { loadProblems, parseSkill } from './discovery.ts';
 import { configRoot, harnesses, writeRoot } from './harnesses.ts';
 import {
-  changedWhileSyncing, clearStaleStages, copyTree, errorCode, finishCopy, itemKey, landingOf, notCopied, placeCopy, readTree, removeTree, storeDirectory,
-  writeDurably, type ShareContext, type Tree,
+  changedWhileSyncing, clearStaleStages, copyTree, errorCode, finishCopy, itemKey, landingOf, notCopied, placeCopy, readTree, removeTree,
+  retryWhileHeld, storeDirectory, vacant, writeDurably, type ShareContext, type Tree,
 } from './share.ts';
 import type { HarnessId, Skill } from './types.ts';
 import { toolName } from './words.ts';
@@ -199,7 +199,7 @@ const PARKED = /^\.ck-parked-[0-9a-f-]{36}$/;
 async function park(context: ShareContext, directory: string): Promise<{ parked: string; note: string }> {
   const parked = join(await besideRoot(context, dirname(directory)), `.ck-parked-${randomUUID()}`), note = `${parked}.json`;
   await writeDurably(note, JSON.stringify({ target: directory }));
-  await rename(directory, parked);
+  await retryWhileHeld(() => rename(directory, parked));
   return { parked, note };
 }
 const done = (note: string) => rm(note, { force: true });
@@ -224,7 +224,7 @@ export async function swapFolder(context: ShareContext, source: string, target: 
     const { parked, note } = await park(context, target);
     if (await hashOf(parked) !== expected) { await rename(parked, target); await done(note); throw changedWhileSyncing(); }
     context.fault?.('mid-replace');
-    try { await rename(stage, target); }
+    try { await retryWhileHeld(() => rename(stage, target), () => vacant(target)); }
     catch (error) { await rename(parked, target).catch(() => undefined); await done(note); throw error; }
     await finishCopy(source, target);
     await removeTree(parked).catch(() => undefined);
