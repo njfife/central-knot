@@ -492,9 +492,16 @@ test('Pure classification table (whatHookWouldAdd): every row, edge case and too
   assert.deepEqual(classify('claude-cli', 'UserPromptSubmit', 0, JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'wrong event' } })), { outcome: 'not-added', detail: 'json-no-context' });
   assert.deepEqual(classify('claude-cli', 'UserPromptSubmit', 0, JSON.stringify({ decision: 'block', reason: 'stop', hookSpecificOutput: { additionalContext: 'also' } })), { outcome: 'not-added', detail: 'json-block' });
   assert.deepEqual(classify('codex-cli', 'SessionStart', 0, JSON.stringify({ continue: false, stopReason: 'halt' })), { outcome: 'not-added', detail: 'json-block' });
-  // Codex looks_like_json treats brace-prefixed invalid JSON as a hook failure (user_prompt_submit.rs:212).
+  // Codex looks_like_json treats brace- or bracket-prefixed output as JSON (codex-rs/hooks/src/engine/output_parser.rs:321-339).
   assert.deepEqual(classify('codex-cli', 'SessionStart', 0, '{ broken json'), { outcome: 'not-added', detail: 'invalid-json' });
   assert.deepEqual(classify('codex-cli', 'SessionStart', 0, '{}\n{}'), { outcome: 'not-added', detail: 'invalid-json' });
+  assert.deepEqual(classify('codex-cli', 'SessionStart', 0, '[ready] loaded instructions\n'), { outcome: 'not-added', detail: 'invalid-json' });
+  assert.deepEqual(classify('codex-cli', 'UserPromptSubmit', 0, '["one","two"]\n'), { outcome: 'not-added', detail: 'invalid-json' });
+  // Intentional cut: a JSON object carrying additionalContext is treated as added without judging other fields' types.
+  assert.deepEqual(
+    classify('claude-cli', 'UserPromptSubmit', 0, JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'nested' }, systemMessage: false })),
+    { outcome: 'adds', added: 'nested' },
+  );
   assert.deepEqual(classify('codex-cli', 'UserPromptSubmit', 2, ''), { outcome: 'not-added', detail: 'codex-prompt-exit-2' });
   assert.deepEqual(
     classify('codex-cli', 'UserPromptSubmit', 2, JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'ignored' } })),
@@ -628,11 +635,12 @@ test('Gates and refusals: wrong home mode, Windows, uninstalled tool, plugin hoo
       const offRes = await runHook(codexBox.ctx(), cRef);
       assert.equal(offRes.outcome, 'refused');
       assert.match(offRes.problem ?? '', /\[features\] hooks = false/);
-      // Deprecated alias codex_hooks = false also disables hooks.
+      // Deprecated alias codex_hooks = false also disables hooks and names the key that was read.
       await put(join(codexBox.home, '.codex/config.toml'), '[features]\ncodex_hooks = false\n');
       const aliasRes = await runHook(codexBox.ctx(), cRef);
       assert.equal(aliasRes.outcome, 'refused');
-      assert.match(aliasRes.problem ?? '', /\[features\] hooks = false/);
+      assert.match(aliasRes.problem ?? '', /\[features\] codex_hooks = false/);
+      assert.doesNotMatch(aliasRes.problem ?? '', /\bhooks = false/);
       await assert.rejects(stat(codexMarker), { code: 'ENOENT' }, 'disabled Codex hook did not execute');
       // Explicit hooks = true wins over deprecated codex_hooks = false.
       await put(join(codexBox.home, '.codex/config.toml'), '[features]\nhooks = true\ncodex_hooks = false\n');
@@ -776,11 +784,16 @@ test('Fix list checks: signal exit, plugins.ts sync throw rejection, Codex disab
     } finally { await box.done(); }
   });
 
-  await t.test('Item 3 (plugins.ts run): non-hook callers reject on sync start throw; catchStart resolves reason error', async () => {
+  await t.test('Item 3 (plugins.ts run): non-hook callers reject on sync start throw and keep next’s abort-over-missing precedence; catchStart resolves reason error', async () => {
     await assert.rejects(() => run('echo', ['bad\0arg'], { timeoutMs: 5_000 }));
     const caught = await run('echo', ['bad\0arg'], { timeoutMs: 5_000, catchStart: true });
     assert.equal(caught.reason, 'error');
     assert.ok(caught.spawnError);
+    const abort = new AbortController();
+    abort.abort();
+    const missingAborted = await run('/no/such/program-ck-aborted', [], { timeoutMs: 5_000, signal: abort.signal });
+    assert.equal(missingAborted.code, 'timeout');
+    assert.equal(missingAborted.reason, 'aborted');
   });
 
   await t.test('Item 4 (catalogdetail.ts): non-command hook with command stays listed on pages, refused at run', async () => {

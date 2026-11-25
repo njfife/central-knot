@@ -114,16 +114,22 @@ export type RunResult = {
  * are launch.ts stopRun's: the command and all it started are asked to stop; what could not be is said by `leftRunning`.
  */
 export function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number; group?: boolean } & RunOptions): Promise<RunResult> {
-  const maxBytes = options.maxBytes ?? 4 * 1024 * 1024, group = !!options.group && process.platform !== 'win32';
+  const maxBytes = options.maxBytes ?? 4 * 1024 * 1024;
+  const group = !!options.group && process.platform !== 'win32';
   const drainMs = options.drainMs && options.drainMs > 0 ? options.drainMs : 0;
   return new Promise(done => {
     const out: Buffer[] = [], err: Buffer[] = [];
-    let stopped: 'timeout' | 'aborted' | undefined, cut = false, ended = false, leftRunning = false;
+    let stopped: 'timeout' | 'aborted' | undefined;
+    let cut = false;
+    let ended = false;
+    let leftRunning = false;
     let errMsg: string | undefined;
     let termSignal: NodeJS.Signals | undefined;
     let drain: NodeJS.Timeout | undefined;
     let child;
-    try { child = start(file, args, { env: options.env, cwd: options.cwd, windowsHide: true, detached: group }); } catch (error) {
+    try {
+      child = start(file, args, { env: options.env, cwd: options.cwd, windowsHide: true, detached: group });
+    } catch (error) {
       if (!options.catchStart) throw error;
       const msg = error instanceof Error ? error.message : String(error);
       done({ code: 1, output: msg, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0), reason: 'error', spawnError: msg });
@@ -143,7 +149,10 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
       return (chunk: Buffer) => {
         const room = maxBytes - size;
         size += chunk.length;
-        if (chunk.length <= room) { chunks.push(chunk); return; }
+        if (chunk.length <= room) {
+          chunks.push(chunk);
+          return;
+        }
         if (room > 0) chunks.push(chunk.subarray(0, room));
         if (cut) return;
         cut = true;
@@ -167,7 +176,7 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
       const left = leftRunning ? { leftRunning } : {};
       const sig = termSignal && !stopped && !cut ? { signal: termSignal } : {};
       if (cut) done({ code: 1, output: `${output.slice(-2000)}\n(output cut: more than ${maxBytes / 1024 / 1024} MB)`, stdout, stderr, reason: 'overflow', ...left });
-      else if (errMsg !== undefined) done({ code, output, stdout, stderr, reason: code === 'missing' ? 'missing' : 'error', spawnError: errMsg, ...left });
+      else if (errMsg !== undefined && (options.catchStart || !stopped)) done({ code, output, stdout, stderr, reason: code === 'missing' ? 'missing' : 'error', spawnError: errMsg, ...left });
       else if (stopped && (code !== 0 || drainMs)) done({ code: 'timeout', output, stdout, stderr, reason: stopped, ...left });
       else done({ code, output, stdout, stderr, ...left, ...sig });
     };

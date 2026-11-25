@@ -108,31 +108,38 @@ function buildHookLaunch(tool: HarnessId, hook: DeclaredHook, home: string, code
     if (hook.shell && hook.shell !== 'bash' && hook.shell !== 'sh') return { problem: `Uses shell “${hook.shell}”, which isn’t run here.` };
     return { file: hook.shell === 'bash' ? 'bash' : '/bin/sh', args: ['-c', launch.shell] };
   }
-  if (tool === 'codex-cli') return 'shell' in launch ? { file: codexShell, args: ['-lc', launch.shell] } : { problem: 'Codex hooks must declare a shell command.' };
+  if (tool === 'codex-cli') return { file: codexShell, args: ['-lc', (launch as { shell: string }).shell] };
   return 'program' in launch ? { file: launch.program, args: launch.args } : { file: 'bash', args: ['-c', launch.shell] };
 }
 
 const nonEmpty = (value: unknown) => (typeof value === 'string' && value.trim() ? value : undefined);
+const BAD_JSON = Symbol('bad-json');
+function tryJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return BAD_JSON;
+  }
+}
 
 /** Copilot CLI strips single-line JSON objects with `"type": "progress"` before parsing the remaining stdout as one JSON object. */
 function stripCopilotProgress(stdout: string): string {
   return stdout.split(/\r?\n/).filter(line => {
     const trimmed = line.trim();
     if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return true;
-    try { return record(JSON.parse(trimmed))?.type !== 'progress'; } catch { return true; }
+    return record(tryJson(trimmed))?.type !== 'progress';
   }).join('\n').trim();
 }
 
 /** Claude Code stdout JSON rule (hooks#exit-code-0): one JSON object; non-{…} or multi-line JSON with no fields set is plain text. */
 function parseClaudeJson(trimmed: string): Record<string, unknown> | 'invalid' | undefined {
   if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return undefined;
-  try { return record(JSON.parse(trimmed)) ?? 'invalid'; } catch { /* check multi-line rule */ }
+  const single = tryJson(trimmed);
+  if (single !== BAD_JSON) return record(single) ?? 'invalid';
   const lines = trimmed.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   if (lines.length < 2) return 'invalid';
-  const items: unknown[] = [];
-  for (const line of lines) {
-    try { items.push(JSON.parse(line)); } catch { return 'invalid'; }
-  }
+  const items = lines.map(tryJson);
+  if (items.includes(BAD_JSON)) return 'invalid';
   const setsField = items.some(item => {
     const obj = record(item);
     return obj !== undefined && Object.keys(obj).length > 0;
@@ -140,10 +147,10 @@ function parseClaudeJson(trimmed: string): Record<string, unknown> | 'invalid' |
   return setsField ? 'invalid' : undefined;
 }
 
-/** Codex stdout JSON rule (user_prompt_submit.rs): anything starting with `{` is parsed as JSON, else plain text. */
+/** Codex stdout JSON rule (output_parser.rs): anything starting with `{` or `[` is parsed as JSON, else plain text. */
 function parseCodexJson(trimmed: string): Record<string, unknown> | 'invalid' | undefined {
-  if (!trimmed.startsWith('{')) return undefined;
-  try { return record(JSON.parse(trimmed)) ?? 'invalid'; } catch { return 'invalid'; }
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return undefined;
+  return record(tryJson(trimmed)) ?? 'invalid';
 }
 
 function toolLimit(tool: HarnessId, added: string): Pick<HookRunResult, 'overLimit'> {
@@ -152,6 +159,7 @@ function toolLimit(tool: HarnessId, added: string): Pick<HookRunResult, 'overLim
   return {};
 }
 
+/** A JSON object carrying context is given as what would be added; whether the tool would reject it for another field is not judged here. */
 function classifyJsonContext(tool: HarnessId, event: string, parsed: Record<string, unknown>): Pick<HookRunResult, 'outcome' | 'detail' | 'added' | 'overLimit'> {
   if (parsed.decision === 'block' || parsed.continue === false) return { outcome: 'not-added', detail: 'json-block' };
   const specific = record(parsed.hookSpecificOutput);
@@ -185,8 +193,7 @@ export function whatHookWouldAdd(raw: HookRunRaw): Pick<HookRunResult, 'outcome'
   if (!trimmed) return { outcome: 'empty' };
   if (raw.tool === 'copilot-cli') {
     const body = stripCopilotProgress(raw.stdout);
-    let parsed: Record<string, unknown> | undefined;
-    try { parsed = body ? record(JSON.parse(body)) : undefined; } catch { /* non-JSON ignored by Copilot */ }
+    const parsed = body ? record(tryJson(body)) : undefined;
     const context = parsed ? nonEmpty(parsed.additionalContext) : undefined;
     return context ? { outcome: 'adds', added: context } : { outcome: 'copilot-ignored' };
   }
@@ -235,7 +242,11 @@ export async function runHook(ctx: HookRunContext, ref: HookSourceRef): Promise<
   const stop = new AbortController();
   const work = executeHook(ctx, ref, stop.signal);
   active.set(key, { stop, ended: work.catch(() => undefined) });
-  try { return await work; } finally { active.delete(key); }
+  try {
+    return await work;
+  } finally {
+    active.delete(key);
+  }
 }
 
 async function executeHook(ctx: HookRunContext, ref: Extract<HookSourceRef, { from: 'own' }>, signal: AbortSignal): Promise<HookRunResult> {
@@ -263,8 +274,8 @@ async function executeHook(ctx: HookRunContext, ref: Extract<HookSourceRef, { fr
   if (afterFind) return afterFind;
   if ('problem' in found) return hookRunRefused(found.problem);
   if (found.hooksDisabled) {
-    const why = ref.tool === 'codex-cli' ? 'Codex’s settings ([features] hooks = false)' : 'Claude Code’s settings (disableAllHooks)';
-    return hookRunRefused(`Hooks are turned off in ${why}.`);
+    const where = ref.tool === 'codex-cli' ? 'Codex’s settings' : 'Claude Code’s settings';
+    return hookRunRefused(`Hooks are turned off in ${where} (${found.hooksDisabled}).`);
   }
   const { hook } = found;
   if (hook.type && hook.type !== 'command') return hookRunRefused(`Not a command hook (type “${hook.type}”).`);

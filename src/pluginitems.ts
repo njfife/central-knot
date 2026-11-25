@@ -72,20 +72,26 @@ export async function sessionSettings(tool: HarnessId, root: string): Promise<Pi
   switch (tool) {
     case 'claude-cli': {
       const { hooks, disabled } = await hooksIn(join(root, 'settings.json'));
-      return { ownHooks: hooks, ownHooksUnread: unread, ...(disabled ? { ownHooksDisabled: true as const } : {}) };
+      return { ownHooks: hooks, ownHooksUnread: unread, ...(disabled ? { ownHooksDisabled: 'disableAllHooks' } : {}) };
     }
     case 'codex-cli': {
       const toml = join(root, 'config.toml');
       let tables: ReturnType<typeof readTomlTables> | undefined;
-      try { tables = readTomlTables((await textOf(toml)) ?? ''); } catch { unread.push(toml); }
+      try {
+        tables = readTomlTables((await textOf(toml)) ?? '');
+      } catch {
+        unread.push(toml);
+      }
       const features = tables?.filter(table => !table.array && table.path.length === 1 && table.path[0] === 'features').flatMap(table => table.entries);
       const flag = (name: string) => features?.findLast(entry => entry.key === name)?.value;
       const hooksFlag = flag('hooks');
-      const disabled = typeof hooksFlag === 'boolean' ? !hooksFlag : flag('codex_hooks') === false;
+      const disabledBy = typeof hooksFlag === 'boolean'
+        ? (hooksFlag ? undefined : '[features] hooks = false')
+        : (flag('codex_hooks') === false ? '[features] codex_hooks = false' : undefined);
       return {
         ownHooks: [...(await hooksIn(join(root, 'hooks.json'))).hooks, ...readHooks(tool, toml, tables ? tomlHooks(tables) : {})],
         ownHooksUnread: unread,
-        ...(disabled ? { ownHooksDisabled: true as const } : {}),
+        ...(disabledBy ? { ownHooksDisabled: disabledBy } : {}),
       };
     }
     case 'copilot-cli': {

@@ -1169,8 +1169,8 @@ export interface InstructionFile {
   ownHooks?: DeclaredHook[];
   /** Each of those settings files that is there but couldn't be read or doesn't parse: its hooks aren't known. */
   ownHooksUnread?: string[];
-  /** Hooks turned off in the tool's settings (Claude Code `disableAllHooks: true`, Codex `[features] hooks = false`): declared, not run. */
-  ownHooksDisabled?: true;
+  /** Hooks turned off in the tool's settings (the setting key found: e.g. `disableAllHooks`, `[features] hooks = false`, `[features] codex_hooks = false`): declared, not run. */
+  ownHooksDisabled?: string;
   /** Pi's packages and OpenCode's plugins, each as its settings list it (pluginitems.ts sessionSettings): code that can add to its sessions. */
   extensions?: string[];
   /** Set when this tool gets the base instructions (`chosen`) or its file holds a base block: its own text, its copy of the base,
