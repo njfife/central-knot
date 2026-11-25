@@ -313,6 +313,23 @@ test('No latest to preselect where the dates can’t tell: MCP entries (no time 
   } finally { await box.cleanup(); }
 });
 
+test('Two skill folders unpacked at one moment: their files’ own times tell the latest, for the question’s lines and button and for “Use the latest for the rest”', async () => {
+  const box = await sandbox();
+  try {
+    await putSkill(box, skillRoot['claude-cli'], 'notes', 'Older.', 1_000_000);
+    await putSkill(box, skillRoot['codex-cli'], 'notes', 'Newer.', 5_000_000);
+    // Claude Code's copy has a script in a folder of its own, which the unpacking made anew too: no folder's time is a file's.
+    const scripts = join(box.home, skillRoot['claude-cli'], 'notes/scripts'), unpacked = new Date(9_000_000);
+    await mkdir(scripts);
+    await writeFile(join(scripts, 'run.sh'), 'echo notes\n');
+    await utimes(join(scripts, 'run.sh'), new Date(1_000_000), new Date(1_000_000));
+    for (const folder of [scripts, join(box.home, skillRoot['claude-cli'], 'notes'), join(box.home, skillRoot['codex-cli'], 'notes')]) await utimes(folder, unpacked, unpacked);
+    const row = rowOf(await skillsView(box.context, tools), 'notes'), hashOf = (tool: HarnessId) => row.copies[tool]!.hash;
+    assert.deepEqual(row.takeInAnswers?.click, { wait: 'choice', latest: hashOf('codex-cli'), datedByFiles: { [hashOf('claude-cli')]: 1_000_000, [hashOf('codex-cli')]: 5_000_000 } });
+    assert.deepEqual(waitingForChoice(await homeView(box)).map(item => item.latest), [{ tool: 'codex-cli', hash: hashOf('codex-cli') }]);
+  } finally { await box.cleanup(); }
+});
+
 // ---------- The walkthrough, left half way ----------
 
 test('The walkthrough left half way: nothing is stored about where it was; what was chosen is in, the rest found and unchanged, through a background pass, a choice’s Undo and “Use the latest for the rest” with three that have no dates', async () => {

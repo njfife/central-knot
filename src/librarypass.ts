@@ -97,6 +97,8 @@ export interface Seen {
   hash: string;
   /** When it was last changed (ms); absent where a copy has no time of its own (library.ts HarnessCopy). */
   at?: number;
+  /** When its files alone were last changed (ms): every skill copy's (skillfiles.ts SkillCopy filesAt); absent for the other kinds. */
+  filesAt?: number;
 }
 
 /** The managed harnesses' copies of one kind now, read once (Kind.read) for a pass, or for a look of the page. */
@@ -551,6 +553,7 @@ export function foundCopies<E extends Seen>(look: Look<unknown, E, Disk<E>>, key
 export function foundKey(look: AnyLook, key: string, except: readonly HarnessId[] = []): FoundKey {
   const switchedOff = look.disk.switchedOff?.get(key) ?? [];
   const copies = foundCopies(look, key, except).map((copy): FoundCopy => ({ harness: copy.tool, hash: copy.hash, at: copy.at,
+    ...(copy.filesAt === undefined ? {} : { filesAt: copy.filesAt }),
     ...(switchedOff.includes(copy.tool) ? { switchedOff: true } : {}) }));
   const heldBack = look.managed.map(tool => (except.includes(tool) ? undefined : look.disk.holdsBack?.get(`${tool}:${key}`))).find(Boolean);
   return { copies, deleted: !!look.library.items[key]?.deleted, ...(heldBack ? { heldBack } : {}) };
