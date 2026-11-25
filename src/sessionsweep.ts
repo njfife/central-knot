@@ -2,18 +2,21 @@
 // record turn at a time. Owns: listing both tools' session files, matching each to its kept position via bigint stat and
 // changedSince, reading changed files in bounded batches (64 candidates or 2,000 requests read, finishing the last file),
 // pricing requests (rates.ts), committing each batch in one turn (holding back any file with a held or unread-month request),
-// updating and dropping positions after complete listings, yielding between batches, honoring a stop signal and notBefore,
-// and answering with structured counts (no user-facing sentences).
+// updating readable files' positions and dropping gone positions only after complete listings with no unresolved stat,
+// yielding between batches, honoring a stop signal and notBefore, and answering with structured counts (except `refused` and
+// `held[].reason`, which pass through the record's and `writeAccess`'s own refusal sentences).
 //
-// Limits: (1) a file rewritten to the same size and whole-ms mtime, or whose last 4 KiB before the kept offset match after a
-// rewrite, is not seen as changed; (2) a request whose earlier sighting lives in a held or unread month beyond monthsAround
-// is kept again (sessionrecord.ts); (3) a facts-only tail (unread count, or continuing project/parent, with no requests)
-// patches matching sessions in read months or scans saved months newest-first (sessionrecord.ts listSessionMonths); no file
-// is held back because a fact could not be applied, so its position moves past such a tail, and a bad line in such a tail is
-// in that sweep's unreadLines answer and, where the session has no receipt in a month the turn reads, is not added to a kept
-// count; (4) a file's unread lines are added to KeptSession.unread only in the turn that moves that file's position past them
-// (a held file keeps its old saved unread while its position is held back, while the sweep's unreadLines answer reports what
-// that sweep met; a crash mid-commit of an incremental tail with unread lines can overcount unread on replay, never
+// Limits: (1) a file rewritten to the same size and whole-ms mtime is not seen as changed; when its stat changes, a matching
+// last-4 KiB digest before the kept offset lets the tail read continue without noticing edits before that offset; (2) a
+// request whose earlier sighting lives in a held month (including a held neighbour in monthsAround) or in an unread month
+// beyond monthsAround is kept again (sessionrecord.ts); (3) a facts-only tail (unread count, or continuing project/parent,
+// with no requests) patches matching sessions in read months or scans saved months newest-first (sessionrecord.ts
+// listSessionMonths); no file is held back because a fact could not be applied, so its position moves past such a tail, and
+// a bad line in such a tail is in that sweep's unreadLines answer and, where the session has no receipt in a month the turn
+// reads, is not added to a kept count; (4) a file's unread lines are added to KeptSession.unread only in the turn that moves
+// that file's position past them (a held file with unread lines keeps its old saved unread while its position is held back,
+// though a clean rewrite beside a held-month request can still reset kept unread to 0; the sweep's unreadLines answer reports
+// what that sweep met; a crash mid-commit of an incremental tail with unread lines can overcount unread on replay, never
 // undercount); (5) a session's own reported figure is not kept yet (its own step); (6) one sweep at a time for a home: the
 // caller's to keep (before anything calls sweepSessions for real, the next step takes an exclusive crash-released lock on
 // the store).
@@ -41,7 +44,7 @@ const BATCH_REQUESTS = 2_000;
 export interface ToolSweep { requests: number; sessions: number; unreadListing: boolean; unreadableFiles: number; unreadLines: number }
 /** Requests passed to upsert that were not kept, grouped by whether a later sweep can retry them. */
 export interface SweepNotTaken { held: number; notRead: number; never: number }
-/** Structured outcome of `sweepSessions` for the next step to display (no user-facing sentences). */
+/** Structured outcome of `sweepSessions` for the next step to display (`refused` and `held[].reason` pass through the record's and `writeAccess`'s own sentences). */
 export interface SweepResult {
   /** Receipts newly added or updated (a receipt that grew is counted again) and distinct sessions touched, counted only after write succeeds. */
   taken: { requests: number; sessions: number };
@@ -242,12 +245,17 @@ function nextUnreadFor(file: BatchFile, sk: string, knownUnread: Map<string, num
   if (!file.read.startedOver && file.read.unread === 0) return undefined;
   const prev = knownUnread.get(sk) ?? 0;
   let next = file.read.unread;
+  // Continuing reads add newly scanned unread lines; first reads (no saved position, e.g. a copy) take max so copies do not double-count.
   if (!file.read.startedOver) next = file.prev ? prev + next : Math.max(prev, next);
   knownUnread.set(sk, next);
   return next;
 }
 
-function buildUpsertInputs(batch: readonly BatchFile[], months: Record<string, SessionMonth>, heldBack: ReadonlySet<BatchFile>) {
+function buildUpsertInputs(
+  batch: readonly BatchFile[],
+  months: Record<string, SessionMonth>,
+  heldBack: ReadonlySet<BatchFile>,
+) {
   const knownUnread = new Map<string, number>();
   for (const s of Object.values(months).flatMap(m => m.sessions)) {
     const sk = `${s.tool}\0${s.session}`;
@@ -309,8 +317,10 @@ async function commitTurn(st: SweepState, batch: readonly BatchFile[], pruneTool
         batchNotTaken.never++;
       }
     }
+    // Recompute in memory without held-back files' unread lines so a held file's bad lines are not kept before its position
+    // moves; nothing is written between the two runs.
     if ([...heldBack].some(file => file.read.unread > 0)) pass = runUpsert(heldBack);
-    const merged = mergePositions(base.positions, batch, heldBack, st.seenFiles, pruneTools, st.sweptAt);
+    const merged = mergePositionsAndSeen(base.positions, batch, heldBack, st.seenFiles, pruneTools, st.sweptAt);
     if (pass.up.changed.length > 0 || merged.changed) {
       const diff = diffTakenReceipts(source.months, pass.up.months, pass.up.changed);
       const written = await write(st.context, {
@@ -336,7 +346,8 @@ async function commitTurn(st: SweepState, batch: readonly BatchFile[], pruneTool
 
 // ---------- Positions written and dropped ----------
 
-function mergePositions(
+/** Marks this batch's files in `seenFiles`, advances non-held positions, and drops unseen positions for `pruneTools`. */
+function mergePositionsAndSeen(
   current: Positions,
   batch: readonly BatchFile[],
   heldBack: ReadonlySet<BatchFile>,

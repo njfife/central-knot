@@ -1315,13 +1315,13 @@ test('Facts-only tail patching, position-only progress, idle unread listing, and
   assert.equal(readsAfterPosOnly, 0);
   assert.equal(idleAfter.wrote, false);
 
-  // Idle sweep with an unreadable subagents listing still opens no month file (even when current month is held).
+  // Idle sweep with an unreadable listing still opens no month file (even when current month is held).
   const heldNov = join(sessionsDirectory(ctx.home), '2026-11.json');
   await writeFile(heldNov, '{"formatVersion":2}\n');
   const idleUnread = await sweepSessions(novCtx, {
     rates: RATES_V1,
     deps: {
-      listClaude: async () => ({ files: [{ file, session: 'oct-sess' }], unread: true, unreadSessions: ['oct-sess'] }),
+      listClaude: async () => ({ files: [{ file, session: 'oct-sess' }], unread: true }),
     },
   });
   assert.equal(idleUnread.wrote, false);
