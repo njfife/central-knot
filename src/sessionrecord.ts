@@ -1,8 +1,9 @@
 // The kept session-costs record under `.central-knot/sessions/`: compact JSON files per UTC month (`YYYY-MM.json`) holding
 // deduplicated receipts and interned pricing metadata, plus `positions.json` for file checkpoints. Owns: the record's shapes,
-// UTC-month helpers, reading and v1 shape checks, holding newer/damaged/non-file/symlink paths untouched, the pure upsert by
-// tool and request key, per-home read-to-commit serialization, and the safe write (writeAccess only, never libraryGate or
-// liftFirst; stray temps removed, durable months, folder fsync where supported, then positions).
+// UTC-month helpers and saved-month listing (`listSessionMonths`), reading and v1 shape checks, holding newer/damaged/non-file/
+// symlink paths untouched, the pure upsert by tool and request key (older Codex counter keys keep their first receipt's tokens
+// once kept: sessionrequests.ts isCodexCounterKey), per-home read-to-commit serialization, and the safe write (writeAccess
+// only, never libraryGate or liftFirst; stray temps removed, durable months, folder fsync where supported, then positions).
 //
 // Caller contract for a sweep: enter `withSessionRecordTurn(home, async ({ read, write }) => ...)` and await every `write`
 // inside it. Call `read` with the current month plus `monthsAround` each request's time (a key's time can differ a little
@@ -20,7 +21,7 @@ import { join, resolve } from 'node:path';
 import { harnessIds } from './harnesses.ts';
 import type { PriceResult } from './rates.ts';
 import type { PricedRequest } from './sessionday.ts';
-import type { CodexState, Position, Request, Tokens } from './sessionrequests.ts';
+import { isCodexCounterKey, type CodexState, type Position, type Request, type Tokens } from './sessionrequests.ts';
 import { errorCode, landingOf, storeDirectory, writeAccess, writeDurably, type ShareContext } from './share.ts';
 import type { HarnessId } from './types.ts';
 import { jsonObject, record } from './values.ts';
@@ -28,6 +29,7 @@ import { jsonObject, record } from './values.ts';
 const FORMAT_VERSION = 1;
 const POSITIONS_FILE = 'positions.json';
 const MONTH_RE = /^\d{4}-(?:0[1-9]|1[0-2])$/;
+const MONTH_FILE_RE = /^(\d{4}-(?:0[1-9]|1[0-2]))\.json$/;
 const TEMP_FILE_RE = /^(?:positions|\d{4}-(?:0[1-9]|1[0-2]))\.json\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/;
 
 type OmitUnion<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -113,7 +115,12 @@ export function nextMonth(month: string): string {
  */
 export function monthsAround(at: number): string[] {
   const own = monthOf(at);
-  return MONTH_RE.test(own) ? [previousMonth(own), own, nextMonth(own)] : [];
+  return MONTH_RE.test(own) ? [previousMonth(own), own, nextMonth(own)].filter(m => MONTH_RE.test(m)) : [];
+}
+/** Lists saved `YYYY-MM` month files under `.central-knot/sessions/`, newest first (empty if absent or unreadable). */
+export async function listSessionMonths(home: string): Promise<string[]> {
+  const names = await readdir(sessionsDirectory(home)).catch(() => [] as string[]);
+  return names.map(name => MONTH_FILE_RE.exec(name)?.[1]).filter((m): m is string => !!m).sort((a, b) => b.localeCompare(a));
 }
 function assertMonth(month: string): void {
   if (!MONTH_RE.test(month)) throw new RangeError(`Invalid session month: ${month}`);
@@ -266,8 +273,10 @@ function makeReceipt(at: number, req: Request, price: PriceResult, pricing: numb
  * is seen only in the months the turn read, so a request whose earlier receipt is in a month that was not read, or is held,
  * is kept again. Tokens only grow: a sighting whose every count is no more than the kept
  * receipt's changes nothing; a receipt is priced again only when a count grows (or `cacheWrite1h` becomes known) or the model
- * differs, keeping first session, month and `at`. Supplied session facts (ignoring non-finite/negative `reported.dollars`) are
- * applied in every non-held read month holding the session, whether or not any of its requests was taken.
+ * differs, keeping first session, month and `at`. Older Codex counter keys (`sessionrequests.ts isCodexCounterKey`) name one
+ * finished counter event and never grow in place, so once kept their receipt stays untouched. Supplied session facts (ignoring
+ * non-finite/negative `reported.dollars`) are applied in every non-held read month holding the session, whether or not any of
+ * its requests was taken.
  */
 export function upsertSessionRecord(
   source: Pick<SessionRecord, 'readMonths' | 'months' | 'held'>,
@@ -335,7 +344,8 @@ export function upsertSessionRecord(
       const hit = byKey.get(rk);
       if (hit) {
         const old = months[hit.month]!.sessions[hit.si]!.requests[req.request]!;
-        if (old.model !== req.model || tokensGrew(old.tokens, req.tokens)) putReceipt(hit.month, hit.si, old.at, req, price);
+        const frozenCounter = update.tool === 'codex-cli' && isCodexCounterKey(req.request);
+        if (!frozenCounter && (old.model !== req.model || tokensGrew(old.tokens, req.tokens))) putReceipt(hit.month, hit.si, old.at, req, price);
         continue;
       }
       let si = bySess.get(`${own!}\0${sk}`);
