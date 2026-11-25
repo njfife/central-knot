@@ -15,7 +15,7 @@
 // historyactions.ts; what the opened row says Pi gets, librarypages.ts; the Git repo's Push and Pull, gitrepo.ts (agentsForRepo,
 // and Pull through applyAgents).
 import { constants } from 'node:fs';
-import { access, readdir, stat } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { agentHash, agentText, agentsFolder, changedFields, fileFor, isAgentTool, nameProblem, oneFileName, parseAgent, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
 import { fileTextFor, keepOwn, openLibrary, readVersion, saveLibrary, storeVersion } from './agentstore.ts';
@@ -28,7 +28,7 @@ import { copiesOf, lookFor, restore, runPass, takeInAnswers, unreadIn, unseenIn,
 import { mergeAgent } from './merge.ts';
 import { partsHolding, pluginHolds, type ThroughWhichPlugin } from './plugins.ts';
 import { agentsKeptIn, type AgentTool } from './presence.ts';
-import { errorCode, exists, recoverParked, removeFileChecked, syncGate, writeAccess, writeFileChecked } from './share.ts';
+import { errorCode, exists, folderAccess, recoverParked, removeFileChecked, syncGate, writeAccess, writeFileChecked } from './share.ts';
 import { followCopy, isDisabled, readSwitchFile } from './skillswitch.ts';
 import { sourceFacts } from './sources.ts';
 import type { ShareContext } from './share.ts';
@@ -76,7 +76,7 @@ async function readDisk(context: ShareContext, managed: HarnessId[], library: Ki
     for (const key of read.skills) disk.skills.get(tool)?.add(key);
     const locked = `${nameOf(tool)}’s ${agentsKeptIn[tool]} can’t be written, so Central Knot can’t change the agent there. `
       + `Once the folder’s permissions let it, ${nameOf(tool)} catches up when sync runs.`;
-    if (await exists(folder) && await access(folder, constants.W_OK).then(() => false, () => true)) disk.locked.set(tool, { why: locked });
+    if (await exists(folder) && await folderAccess(context, folder, constants.W_OK).then(() => false, () => true)) disk.locked.set(tool, { why: locked });
     for (const key of read.unreadable.keys()) {
       const what = key === '*' ? agentsKeptIn[tool] : 'file for this agent';
       disk.unseen.set(`${tool}:${key}`, `${nameOf(tool)}’s ${what} is there but could not be read. Nothing changes there until it reads again.`);
