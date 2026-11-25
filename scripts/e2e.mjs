@@ -12880,12 +12880,14 @@ async function hookRunFlow() {
     // Capture Running… + Stop before the 3s sleep finishes (click Stop right after on a fresh run if needed).
     await a.shot('running-860x560-light');
     await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+    await wait(250);
     await a.shot('running-860x560-dark');
     await sizeTo(a, 1316, 820);
     await a.run(`document.getElementById(${JSON.stringify(stopRowIds.runId)})?.scrollIntoView({ block: 'center' })`);
     await a.settle();
     await a.shot('running-1316x820-dark');
     await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+    await wait(250);
     await a.shot('running-1316x820-light');
     await a.send('Emulation.setEmulatedMedia', { features: [] });
     await fullSize(a);
@@ -12902,8 +12904,8 @@ async function hookRunFlow() {
     /^Stopped\. What it changed stays; a program it started may still be running\. run in ~, /.test(stoppedRes), stoppedRes);
 
   const missingRes = await runAndWait('session-claude-cli', '/nonexistent-ck-hook-bin-xyz');
-  check('missing executable shows Couldn’t start with quiet meta and no Run again',
-    /^Couldn’t start: \/nonexistent-ck-hook-bin-xyz not found\. run in ~, /.test(missingRes) && !missingRes.includes('Run again'), missingRes);
+  check('missing executable shows Couldn’t start with tried at <time> and no Run again',
+    /^Couldn’t start: \/nonexistent-ck-hook-bin-xyz not found\. tried at /.test(missingRes) && !missingRes.includes('Run again'), missingRes);
   await pictures('result-timeout-stopped-missing', `#session-claude-cli .session-hook:has(#${(await rowOf('session-claude-cli', 'slow-limit.sh')).runId})`);
 
   // Check 2: Codex refusal (hooks turned off in config.toml).

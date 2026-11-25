@@ -157,9 +157,10 @@ test('Check 2: hookRunWords matches every outcome, quiet trailing run place/time
 
   const missing = hookRunWords('claude-cli', baseResult({ outcome: 'missing', program: '/no/such/bin' }), '~', time);
   assert.equal(missing.sentence, 'Couldn’t start: /no/such/bin not found.');
-  assert.equal(missing.meta, 'run in ~, 9:14 PM');
+  assert.equal(missing.meta, 'tried at 9:14 PM');
   const missingNoProg = hookRunWords('claude-cli', baseResult({ outcome: 'missing' }), '~', time);
   assert.equal(missingNoProg.sentence, 'Couldn’t start.');
+  assert.equal(missingNoProg.meta, 'tried at 9:14 PM');
 
   // Added not-added details
   const noCtx = hookRunWords('claude-cli', baseResult({ outcome: 'not-added', detail: 'json-no-context', allPrinted: '{"ok":true}' }), '~', time);
@@ -191,11 +192,12 @@ test('Check 2: hookRunWords matches every outcome, quiet trailing run place/time
   assert.equal(overflow.meta, 'run in ~, 9:14 PM');
   assert.equal(overflow.allFold, 'big');
 
-  const spawnErr = hookRunWords('copilot-cli', baseResult({ outcome: 'not-added', detail: 'spawn-error', problem: 'Working folder not found: /nope' }), '~', time);
+  const spawnErr = hookRunWords('copilot-cli', baseResult({ outcome: 'not-added', detail: 'spawn-error', problem: 'Working folder not found: /nope' }), '~/nope', time);
   assert.equal(spawnErr.sentence, 'Couldn’t start: Working folder not found: /nope');
-  assert.equal(spawnErr.meta, 'run in ~, 9:14 PM');
+  assert.equal(spawnErr.meta, 'tried at 9:14 PM');
   const spawnNoProblem = hookRunWords('copilot-cli', baseResult({ outcome: 'not-added', detail: 'spawn-error' }), '~', time);
   assert.equal(spawnNoProblem.sentence, 'Couldn’t start.');
+  assert.equal(spawnNoProblem.meta, 'tried at 9:14 PM');
 
   // Refusal: "Not run: " + main's words (lowercase ordinary lead, keep proper nouns and paths); no meta. IPC failure: "Couldn't run it."
   const refused = hookRunWords('codex-cli', baseResult({
@@ -901,4 +903,37 @@ test('Refresh drops in-flight hook answers when Refresh starts, before refresh c
   await new Promise(resolve => setTimeout(resolve, 10));
   const errPanel = dom.findAll(errRow, n => n.className === 'hook-run')[0];
   assert.equal(dom.textOf(errPanel), 'Couldn’t run it.');
+});
+
+// ---------- Short-list checks (1, 2, 3) ----------
+
+test('Short list 1: commands that never started (missing and spawn-error) say tried at <time> with no folder', () => {
+  const time = '9:14 PM';
+  const missing = hookRunWords('claude-cli', baseResult({ outcome: 'missing', program: '/no/such/bin' }), '~', time);
+  assert.equal(missing.meta, 'tried at 9:14 PM');
+  const missingCwd = hookRunWords('copilot-cli', baseResult({
+    outcome: 'not-added', detail: 'spawn-error', problem: 'Working folder not found: /nope',
+  }), '~/nope', time);
+  assert.equal(missingCwd.meta, 'tried at 9:14 PM');
+});
+
+test('Short list 2: Claude Code exit 2 with no stderr does not promise an error', () => {
+  const time = '9:14 PM';
+  const startQuiet = hookRunWords('claude-cli', baseResult({ outcome: 'claude-exit-2', exitCode: 2, stderr: '' }), '~', time);
+  assert.equal(startQuiet.sentence, 'Exited 2: Claude Code would add nothing.');
+  assert.equal(startQuiet.errDirect, undefined);
+  const promptQuiet = hookRunWords('claude-cli', baseResult({ outcome: 'claude-exit-2', exitCode: 2, emptyPrompt: true, stderr: '' }), '~', time);
+  assert.equal(promptQuiet.sentence, 'Exited 2: Claude Code would block the prompt.');
+  assert.equal(promptQuiet.errDirect, undefined);
+  const promptBlankErr = hookRunWords('claude-cli', baseResult({ outcome: 'claude-exit-2', exitCode: 2, emptyPrompt: true, stderr: ' \n' }), '~', time);
+  assert.equal(promptBlankErr.sentence, 'Exited 2: Claude Code would block the prompt.');
+  assert.equal(promptBlankErr.errDirect, undefined);
+});
+
+test('Short list 3: hookFingerprint sorts env keys by plain code-unit order (<), not locale', () => {
+  const base = { declaredIn: '/tmp/h/.copilot/hooks/h.json', event: 'sessionStart', at: 0, launch: { shell: 'echo hi' } };
+  const fpAB = hookFingerprint({ ...base, env: { a: '1', B: '2' } });
+  const fpBA = hookFingerprint({ ...base, env: { B: '2', a: '1' } });
+  assert.equal(fpAB, fpBA);
+  assert.ok(fpAB.indexOf('"B"') >= 0 && fpAB.indexOf('"B"') < fpAB.indexOf('"a"'), `expected B before a in ${fpAB}`);
 });

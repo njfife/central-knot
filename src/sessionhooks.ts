@@ -20,7 +20,7 @@ export const hookLine = (hook: DeclaredHook) => (!hook.launch ? '' : 'shell' in 
 
 /** Canonical fingerprint of every field of a hook's declaration that decides how it runs (checked by hooksource.ts findHook and keyed on the page). */
 export function hookFingerprint(hook: DeclaredHook): string {
-  const env = hook.env ? Object.entries(hook.env).sort(([a], [b]) => a.localeCompare(b)) : null;
+  const env = hook.env ? Object.entries(hook.env).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)) : null;
   return JSON.stringify([hook.event, hook.matcher ?? null, hook.type ?? null, hook.shell ?? null, hook.launch ?? null, hook.cwd ?? null, env, hook.timeout ?? null]);
 }
 
@@ -131,7 +131,7 @@ export function hookRunWords(tool: HarnessId, result: HookRunResult, shownCwd: s
   if (result.outcome === 'refused') return { sentence: result.problem ? `Not run: ${lowerLead(result.problem)}` : 'Couldn’t run it.', notes: [] };
   const place = shownCwd || '~';
   const promptPart = result.emptyPrompt ? ' with an empty prompt' : '';
-  const meta = `run in ${place}${promptPart}, ${time}`;
+  const meta = result.outcome === 'missing' || result.detail === 'spawn-error' ? `tried at ${time}` : `run in ${place}${promptPart}, ${time}`;
   const err = result.stderr || undefined;
   const out = result.allPrinted || undefined;
   const view = (sentence: string, more: Partial<HookRunView> = {}): HookRunView => ({ sentence, meta, notes: [], ...more });
@@ -153,8 +153,11 @@ export function hookRunWords(tool: HarnessId, result: HookRunResult, shownCwd: s
   }
   if (result.outcome === 'copilot-ignored') return view('Copilot CLI would ignore this: no top-level additionalContext.', { allFold: out, errDirect: err });
   if (result.outcome === 'claude-exit-2') {
-    const what = result.emptyPrompt ? 'Claude Code would block the prompt and show this error.' : 'Claude Code would show you this error and add nothing.';
-    return view(`Exited 2: ${what}`, { errDirect: err });
+    const hasErr = !!err?.trim();
+    const what = result.emptyPrompt
+      ? (hasErr ? 'Claude Code would block the prompt and show this error.' : 'Claude Code would block the prompt.')
+      : (hasErr ? 'Claude Code would show you this error and add nothing.' : 'Claude Code would add nothing.');
+    return view(`Exited 2: ${what}`, { errDirect: hasErr ? err : undefined });
   }
   if (result.outcome === 'failed' || result.detail === 'codex-prompt-exit-2') {
     const lead = result.signal ? `Ended by ${result.signal}: it` : result.exitCode !== undefined ? `Exited ${result.exitCode}: it` : 'It';

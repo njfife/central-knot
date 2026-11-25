@@ -1756,7 +1756,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .hook-source, .hook-run { grid-column: 1 / -1; min-width: 0; margin: 4px 0 6px; display: flex; flex-direction: column; gap: 6px; }
 .hook-run { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--hover); }
 .hook-run-head { display: flex; align-items: flex-start; gap: 8px; min-width: 0; font-size: 12px; line-height: 18px; color: var(--ink); }
-.hook-run-says { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.hook-run-says { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 12px; overflow-wrap: anywhere; }
 .hook-run-meta { color: var(--ink-soft); }
 .hook-run-note { margin: 0; font-size: 12px; color: var(--ink-soft); }
 .hook-run-fold { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
