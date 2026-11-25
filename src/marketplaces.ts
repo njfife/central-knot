@@ -56,6 +56,8 @@ export interface MarketplaceHost {
   partsWait?(): string | undefined;
   /** A plugin was installed, updated or uninstalled in these tools, and it worked. */
   changed?(source: string, plugin: string, tools: HarnessId[]): void;
+  /** The app's log, for what a tool's plugin command left running (plugins.ts PluginContext log). */
+  log?(line: string): void;
   /** A bundled build's own marketplace (bundle.ts): the folder it is unpacked in, and how the page shows it. Always listed, first. */
   bundled?(): { source: string; view: BundledView } | undefined;
   /** What a run on a plugin's items told the Library (pluginlibrary.ts runItems), to show there once, as a pass's notices are. */
@@ -143,7 +145,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     if (!open) throw new Error('No home is open.');
     const routes = clis ? await use.findClis() : { binaries: {}, apps: {} };
     return { home: open.home, actual: open.actual, dataDir: join(host.dataDir, 'plugins'), binaries: routes.binaries, apps: routes.apps,
-      ...(ways ? { ways: waysFrom((await host.read()).snapshots) } : {}), overrides: open.overrides };
+      ...(ways ? { ways: waysFrom((await host.read()).snapshots) } : {}), overrides: open.overrides, log: host.log };
   };
 
   /**
