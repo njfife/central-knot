@@ -730,13 +730,13 @@ test('Pi reads his own found copy only from the shared skills folder: heldOut an
   } finally { await solo.cleanup(); }
 });
 
-test('On while the shared skills folder can’t be read: the skills wait in Pi, which reads that folder, so its report counts the items there now and says why', async () => {
+test('On while the shared skills folder can’t be read: the skills wait in Pi, which reads that folder, so its report counts the items there now and says why, then why the server local isn’t there', async () => {
   const box = await kitHome();
   try {
     await put(join(box.home, '.agents/skills'), 'Not a folder.\n');
     const pi = (await box.turn('on')).done.find(step => step.tool === 'pi-cli')!.report;
     assert.equal(await exists(box.pi('skills/notes')), false);
-    assert.match(pi.message, /^2 of its 5 items are on in Pi\. Pi waits for the shared skills folder \(.*\) to be back: nothing is written there until then\.$/);
+    assert.match(pi.message, /^2 of its 5 items are on in Pi\. Pi waits for the shared skills folder \(.*\) to be back: nothing is written there until then\. local: it names a plugin’s own folder or settings, which only Claude Code fills in/);
   } finally { await box.cleanup(); }
 });
 

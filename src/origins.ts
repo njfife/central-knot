@@ -10,7 +10,7 @@ import type { PageKind } from './app.ts';
 import { kindSource } from './itemrow.ts';
 import { pageRows, type PluginRow } from './pluginrows.ts';
 import { heldKinds } from './presence.ts';
-import { pluginLink, pluginOf, shortLabels } from './sourcelink.ts';
+import { pluginLink, pluginMarketOf, pluginOf, shortLabels } from './sourcelink.ts';
 import type { HomeView, LibraryFacts } from './types.ts';
 
 /** Where one row came from. */
@@ -71,7 +71,7 @@ export interface FromEntry { value: From; label: string; title?: string }
  * records, `sources` by link, labelled by sourcelink.ts shortLabels). Whatever Find and the kind switch say.
  */
 export function fromChoices(home: HomeView, sources: readonly string[]): { plugins: FromEntry[]; sources: FromEntry[] } {
-  const named = [...pluginsHere(home)].map(link => ({ link, name: pluginOf(link)!, marketName: link.slice(link.lastIndexOf('@') + 1) }));
+  const named = [...pluginsHere(home)].map(link => ({ link, name: pluginOf(link)!, marketName: pluginMarketOf(link)! }));
   const twice = (name: string) => named.filter(each => each.name === name).length > 1;
   const plugins = named.map(({ link, name, marketName }) => ({ value: link as From, label: twice(name) ? `${name} (${marketName})` : name }));
   const labels = shortLabels(sources), byLabel = (first: FromEntry, second: FromEntry) => first.label.localeCompare(second.label);

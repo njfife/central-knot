@@ -180,7 +180,10 @@ export async function runItems(context: ShareContext, tools: HarnessId[], entry:
     ...sourced.flatMap(({ kind, said }) => (['differs', 'another', 'alike'].includes(said.answer) ? [{ kind, key: said.name, name: said.name, state: 'not-brought' as const, why: { another: ANOTHER, alike: SAME }[said.answer as string] ?? YOURS }] : []))];
   const looks = await lookAtKinds(context, tools);
   const madeOut = (tool: HarnessId) => (item: LibraryItem, kind: ItemKind) => item.except.includes(tool) && made.has(`${kind}:${item.name}`);
-  const why = (tool: HarnessId) => files.problem ?? `Nothing of ${entry.plugin} is on in ${toolNames[tool]}. ${notInWhy(tool, entry.plugin, outsIn(tool, lines, after, madeOut(tool), heldByShared(looks, tool))).join(' ')}`;
+  const outs = (tool: HarnessId) => outsIn(tool, lines, after, madeOut(tool), heldByShared(looks, tool));
+  const why = (tool: HarnessId) => files.problem ?? `Nothing of ${entry.plugin} is on in ${toolNames[tool]}. ${notInWhy(tool, entry.plugin, outs(tool)).join(' ')}`;
+  // Where some are on and not all, why the others aren't, each named: what the report says after its count.
+  const left = (tool: HarnessId) => (on(tool) > 0 && on(tool) < of(tool) && outs(tool).length ? notInWhy(tool, entry.plugin, outs(tool)).join(' ') : '');
   // A take that can't land says why, and nothing changed. What is on in each tool, and of how many, is counted as the box counts it
   // (onThere, and the view's `of`: the kinds the tool holds).
   const refused = sourced.find(({ said }) => said.held)?.said, his = sourced.filter(({ said }) => said.answer === 'differs');
@@ -188,7 +191,7 @@ export async function runItems(context: ShareContext, tools: HarnessId[], entry:
   const on = (tool: HarnessId) => onThere(looks, [...after, ...(!('outOf' in ask) && entry.on && !entry.except.includes(tool) ? alike : [])], tool);
   const ticks = await movedTicks(context, entry, before, after, moved, folder);
   const done = named.map((tool): PluginDone => ({ ...op, tool, report: refused ? { tool, outcome: 'held', message: `${refused.name}: ${refused.held}`, runs: [], changed: false }
-    : reportIn(tool, ask, before, after, results, why(tool), !!files.problem, on(tool), of(tool), ticks) }));
+    : reportIn(tool, ask, before, after, results, why(tool), !!files.problem, on(tool), of(tool), [left(tool), ticks].filter(Boolean).join(' ')) }));
   return { ...ran(done, results), ...(undo.length ? { back: undo } : {}) };
 }
 /**
@@ -239,10 +242,10 @@ function clickOn(ask: ItemsAsk, item: LibraryItem, own: (tool: HarnessId) => boo
 
 /**
  * One tool's report of a run on a plugin's items: how many of its `of` are on there now (onThere), and whether the run changed what
- * it has. `why`: why none is on there, the plugin's files unreadable (`unread`) or each item's reason (notInWhy). `ticks`: what the
- * run says of profiles after every message (movedTicks).
+ * it has. `why`: why none is on there, the plugin's files unreadable (`unread`) or each item's reason (notInWhy). `more`: what the
+ * report says after every message: why the others aren't on where some are (notInWhy), and what the run says of profiles (movedTicks).
  */
-function reportIn(tool: HarnessId, ask: ItemsAsk, before: Linked[], after: Linked[], results: Passed[], why: string, unread: boolean, on: number, of: number, ticks?: string): PluginDone['report'] {
+function reportIn(tool: HarnessId, ask: ItemsAsk, before: Linked[], after: Linked[], results: Passed[], why: string, unread: boolean, on: number, of: number, more?: string): PluginDone['report'] {
   const has = on > 0, name = toolNames[tool];
   const changed = onIn(after, tool) > 0 !== onIn(before, tool) > 0 || wroteIn(results, tool);
   // Why an item its pass held in the tool isn't there yet (it waits for the shared skills folder, say), each reason once.
@@ -251,7 +254,7 @@ function reportIn(tool: HarnessId, ask: ItemsAsk, before: Linked[], after: Linke
   // Its notes: what the run also changed in the tool's own settings with its items' copies (Pi's list: librarypass.ts Kind.follow).
   const notes = results.flatMap(({ result }) => result.results.flatMap(each => (each.harness === tool && each.settingsChanged ? [each.settingsChanged] : [])));
   const reloads = reloadsIn(results, tool);
-  const report = (outcome: PluginDone['report']['outcome'], message = said) => ({ tool, outcome, message: ticks ? `${message} ${ticks}` : message, runs: [], changed, ...(notes.length ? { notes } : {}), ...(reloads.length ? { reloads } : {}) });
+  const report = (outcome: PluginDone['report']['outcome'], message = said) => ({ tool, outcome, message: more ? `${message} ${more}` : message, runs: [], changed, ...(notes.length ? { notes } : {}), ...(reloads.length ? { reloads } : {}) });
   if ('outOf' in ask) return report(has ? 'failed' : 'uninstalled');
   if (!has && 'into' in ask) return report('held', held.size ? said : why);
   if (unread && 'read' in ask) return report('failed', why);
