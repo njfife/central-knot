@@ -243,9 +243,12 @@ async function standIns() {
   process.env.CK_TEST_HOME_ONLY = BINARIES;
   return { base, home, tools, put, calledWith, where, done: async () => { process.env.CK_TEST_HOME_ONLY = before; await rm(base, { recursive: true, force: true }); } };
 }
-/** The Windows stand-ins' words for `cat <file>`, and for `sleep 300 & echo $! > <pidFile>; wait`: a child left waiting, its number written down. */
+/**
+ * The Windows stand-ins' words for `cat <file>`, and for `sleep 300 & echo $! > <pidFile>; wait`: a child left waiting, its number
+ * written down (60 s there, so that one a failed test leaves can't hold the hosted run).
+ */
 const printOut = (file: string) => `process.stdout.write(fs.readFileSync(${JSON.stringify(join(import.meta.dirname, 'mcpsignin', file))}));`;
-const leaveChild = (pidFile: string) => `fs.writeFileSync(${JSON.stringify(pidFile)}, String(require("child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 300_000)"], { stdio: "ignore" }).pid));`;
+const leaveChild = (pidFile: string) => `fs.writeFileSync(${JSON.stringify(pidFile)}, String(require("child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 60_000)"], { stdio: "ignore" }).pid));`;
 const isRunning = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const until = async (ready: () => Promise<boolean>) => { for (let tries = 0; tries < 250 && !(await ready()); tries++) await new Promise(done => setTimeout(done, 20)); };
 

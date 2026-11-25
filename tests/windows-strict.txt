@@ -17,6 +17,7 @@ tests/copywords.test.ts
 tests/cowork.test.ts
 tests/discovery-copilot.test.ts
 tests/discovery.test.ts
+tests/draftbase.test.ts
 tests/drafts.test.ts
 tests/firstsetup.test.ts
 tests/gitrepo-edits.test.ts
@@ -41,8 +42,10 @@ tests/managetool.test.ts
 tests/map.test.ts
 tests/markdown.test.ts
 tests/marketplaces.test.ts
+tests/mcpsignin.test.ts
 tests/merge.test.ts
 tests/model.test.ts
+tests/nolaunch.test.ts
 tests/opencode.test.ts
 tests/origins.test.ts
 tests/otherbuilds.test.ts
@@ -87,6 +90,7 @@ tests/sourcelink.test.ts
 tests/sourceplugins.test.ts
 tests/sources.test.ts
 tests/sourceservers.test.ts
+tests/stoptree.test.ts
 tests/synceverything.test.ts
 tests/textedit.test.ts
 tests/undo.test.ts
