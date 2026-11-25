@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { parseDocument } from 'yaml';
 import { configRoot, harnesses, type HarnessDefinition } from './harnesses.ts';
 import { appCandidates, executableCandidates, otherAppCandidates, pathBeside, type AppCandidate } from './platform.ts';
+import { launchCommand } from './launch.ts';
 import type { DesktopApp, HarnessId, HomeMode, OtherApp, ProbeResult, Skill, Snapshot } from './types.ts';
 import { machineNames } from './machine.ts';
 import { compareVersions } from './values.ts';
@@ -50,9 +51,10 @@ export async function probeVersion(binary: string, timeoutMs = 1500, platform: s
 function askVersion(binary: string, timeoutMs: number): Promise<ProbeResult> {
   return new Promise(resolveResult => {
     try {
-      execFile(binary, ['--version'], {
+      const launch = launchCommand(binary, ['--version']);
+      execFile(launch.file, launch.args, {
         cwd: tmpdir(), env: { ...process.env, PATH: pathBeside(binary) }, timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 16 * 1024,
-        windowsHide: true, encoding: 'utf8',
+        windowsHide: true, encoding: 'utf8', ...launch.options,
       }, (error, stdout) => {
         if (error) {
           resolveResult({ state: error.killed ? 'timeout' : 'failed', detail: error.killed ? 'Version probe timed out.' : 'Version probe failed.' });
