@@ -183,8 +183,8 @@ export const state = {
 
 /**
  * The rows pinned on the list on screen (itemrow.ts Pinned): the list asks for them each time it is drawn, by its own name; a
- * click on a row's own switch pins that row (itemrow.ts pin), and a usage reading as it lands pins the rows it could move
- * (matrix.ts holdOrder). A draw lets them go that asks for another list or for none (another page, tab, view or plugin's
+ * click on a row's own switch pins that row (itemrow.ts pin), a usage reading as it lands pins the rows it could move
+ * (matrix.ts holdOrder), and MCP sign-in pins each row as it is first drawn (mcpsigninpage.ts inPlace). A draw lets them go that asks for another list or for none (another page, tab, view or plugin's
  * page, another Sort or chip: drawPage); so do Refresh (readAgain), Put in order (unpin, from matrix.ts rowsHeld) and a new text
  * in the Library's Find (matrix.ts newFind). A tool's tab's Find keeps them. Asked for outside a draw (a click, a reading
  * landing), they are the ones kept when the name is the list on screen's, else a set kept nowhere, so a pin there is lost. In

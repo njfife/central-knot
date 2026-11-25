@@ -319,7 +319,7 @@ async function rowFacts(look: ServerLook, key: string, item: LibraryItem | undef
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
       : { takeInAnswers: takeInAnswers(look, key) }),
     ...some('plugin', plugin), ...some('unseen', unseen), ...some('switchedOff', switchedOff), ...some('switchProblem', switchProblem),
-    ...(copilotName ? { copilotName } : {}), ...(copilotOff ? { copilotOff } : {}),
+    ...(copilotName ? { copilotName } : {}), ...(copilotOff ? { copilotOff } : {}), ...(shape ? { transport: shape.transport } : {}),
     ...(fromSource ? { fromSource } : {}),
   };
 }

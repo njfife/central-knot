@@ -1191,18 +1191,19 @@ span.ins-confirm { margin-top: 0; }
 .history-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 2px 12px; text-align: right; }
 .history-actions .btn.link { flex: 0 1 auto; min-width: 0; height: auto; padding: 0; white-space: normal; text-align: right; }
 
-/* ---------- MCP sign-in (mcpsigninpage.ts): a row per server, a column per tool; every word wraps in its cell, none is cut; the
-   head row stays at the top of the page's scroll while the rows go under it ---------- */
+/* ---------- MCP sign-in (mcpsigninpage.ts): a row per server, a column per tool (14% each, six beside the name's 16%); every word
+   wraps in its cell but the last before a (?), kept with it, its column widening for the pair; none is cut; the head row stays at
+   the top of the page's scroll while the rows go under it ---------- */
 .signin-scroll { --signin-pad-top: 16px; display: flex; flex-direction: column; gap: 14px; padding: var(--signin-pad-top) var(--pad-end) 32px 16px; }
 .signin-scroll > * { flex: none; }
-.signin-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.signin-intro { margin: 0; max-width: 72ch; font-size: 12.5px; line-height: 1.55; color: var(--ink-soft); }
-.signin-intro + .signin-intro { margin-top: 6px; }
+.signin-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
 .signin-top > .btn { flex: none; }
-.signin-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 12.5px; line-height: 1.45; }
+.signin-line { font-size: 12.5px; line-height: 1.55; color: var(--ink-soft); }
+.signin-table { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 12.5px; line-height: 1.45; }
 .signin-table th, .signin-table td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; font-weight: 400; vertical-align: top; overflow-wrap: anywhere; }
 .signin-table tbody tr:last-child > * { border-bottom: 0; }
 .signin-table th.signin-name { width: 16%; }
+.signin-table th.signin-head { width: 14%; }
 /* Sticky within the scroll area's top padding, which Chromium keeps: at its very top edge, so no row shows above the head. */
 .signin-table thead th { position: sticky; top: calc(-1 * var(--signin-pad-top)); z-index: 1; background: var(--surface); }
 .signin-table thead th:first-child { border-top-left-radius: 10px; }
@@ -1216,6 +1217,8 @@ span.ins-confirm { margin-top: 0; }
 .signin-when { font-size: 11.5px; color: var(--ink-soft); }
 .signin-server { display: block; font-weight: 600; color: var(--ink); }
 .signin-plugin { display: block; font-size: 11.5px; color: var(--ink-soft); }
+.signin-local { display: flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--ink-soft); }
+.signin-keep { white-space: nowrap; }
 .signin-cell .signin-words { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; }
 .signin-words .btn { flex: none; }
 .signin-command { display: block; margin-top: 2px; font-family: var(--mono); font-size: 11px; line-height: 16px; color: var(--ink); }
