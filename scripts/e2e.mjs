@@ -1376,12 +1376,14 @@ const profileSentenceWhole = (a, sentence, { allowShortName = false } = {}) => a
   const eRect = el.getBoundingClientRect(), nRect = nameEl.getBoundingClientRect(), restRect = restEl.getBoundingClientRect();
   const restClipped = restRect.width <= 0 || restRect.bottom > hRect.bottom + 1 || restRect.right > eRect.right + 1
     || restRect.right > rRect.right + 1 || restRect.right > window.innerWidth + 1 || restEl.scrollWidth > restEl.clientWidth + 1;
-  const nameShortened = nameEl.scrollWidth > nameEl.clientWidth + 1;
+  const nameShortened = nameEl.scrollWidth > nameEl.clientWidth;
   const nameClipped = nRect.width <= 0 || nRect.bottom > hRect.bottom + 1 || nRect.right > restRect.left + 1 || (!allowShortName && nameShortened);
+  const moreEl = result.querySelector('#outcome-reload-more');
+  const moreOk = !moreEl || moreEl.hidden || (moreEl.getBoundingClientRect().height <= 20 && moreEl.scrollWidth <= moreEl.clientWidth + 1);
   const controlsFit = uRect.width > 0 && uRect.right <= window.innerWidth + 1 && dRect.width > 0 && dRect.right <= window.innerWidth + 1
     && uRect.bottom <= hRect.bottom + 1 && dRect.bottom <= hRect.bottom + 1;
-  return { ok: Math.round(hRect.height) === 48 && !restClipped && !nameClipped && controlsFit && el.getAttribute('title') === sentence,
-    headerH: Math.round(hRect.height), restClipped, nameClipped, nameShortened, controlsFit, title: el.getAttribute('title'),
+  return { ok: Math.round(hRect.height) === 48 && !restClipped && !nameClipped && moreOk && controlsFit && el.getAttribute('title') === sentence,
+    headerH: Math.round(hRect.height), restClipped, nameClipped, nameShortened, moreOk, controlsFit, title: el.getAttribute('title'),
     nameScrollW: nameEl.scrollWidth, nameClientW: nameEl.clientWidth, restScrollW: restEl.scrollWidth, restClientW: restEl.clientWidth };
 })(${JSON.stringify(sentence)}, ${JSON.stringify(allowShortName)})`);
 
