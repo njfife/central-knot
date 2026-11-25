@@ -253,7 +253,12 @@ test('A file left holding the old base as plain text keeps what a draft kept for
   } finally { await box.cleanup(); }
 });
 
-test('A tool that ends leaving a helper running still gives its draft at once, and the helper ends with it', async () => {
+// On Windows nothing reaches such a helper (no process group there; launch.ts stopTree stops the tree of a tool still running):
+// it runs on until it ends, a limit of the first Windows alpha. Its stand-in's helper ends there all the same, as Node ends a
+// child it did not detach when it exits, so a pass there would prove nothing of Central Knot's.
+test('A tool that ends leaving a helper running still gives its draft at once, and the helper ends with it', {
+  skip: process.platform === 'win32' ? 'on Windows a helper left running after its tool has ended is reached by nothing of Central Knot’s (no process group there): it runs on until it ends; covered on macOS and Linux' : false,
+}, async () => {
   const box = await sandbox();
   try {
     await writeFile(box.file('.claude/CLAUDE.md'), 'Be brief.\n');
