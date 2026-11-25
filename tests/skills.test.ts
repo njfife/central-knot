@@ -202,7 +202,7 @@ test('A folder seen again in part ends its absence: moved away by a save, back w
   } finally { await box.cleanup(); }
 });
 
-test('A copy held while it is missing (its skills folder can’t be written) ends its absence too: once the folder can be, the window starts again', { skip: lockAppSkip }, async () => {
+test('A copy held while it is missing (its skills folder can’t be written) ends its absence too: once the folder can be, the window starts again', { skip: lockSkip }, async () => {
   const box = await sandbox();
   const folder = join(box.home, roots['codex-cli']);
   try {
