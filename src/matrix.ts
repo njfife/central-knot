@@ -629,7 +629,7 @@ const cantDelete = (row: ItemRow | PluginRow): string | undefined => (isPluginRo
  * found row whose copies differ or that can't be added yet. The one function selectBar and headingTick ask.
  */
 function cantTurn(t: Table, row: ItemRow | PluginRow, on: boolean): string | undefined {
-  const pluginWhy = (plugin: string) => `its switch also turns the plugin “${plugin}”: use the row’s own switch`;
+  const pluginWhy = (plugin: string) => `comes with the plugin “${plugin}”: use its row’s own switch`;
   if (isPluginRow(row)) return pluginWhy(row.plugin);
   const through = throughItems(t, row);
   if (through.length) return pluginWhy(through[0]!.install.plugin);
@@ -1992,11 +1992,12 @@ function deleteTicked(rows: ItemRow[], left: number) {
  */
 function turnTicked(on: boolean, rows: ItemRow[], already: number, leaves: Listed[]) {
   stopSelecting();
-  const change = on ? rowClicks.on : rowClicks.off, tools = state.home?.sync.managed ?? [];
+  const change = on ? rowClicks.on : rowClicks.off;
+  const tools = state.home?.sync.managed ?? [];
   void applyByKind(clicksByKind(rows, row => change(row, itemOf(row))),
-    (changed, stayed) => turnedWords(on, rowNames(changed), rowNouns(changed.map(row => row.kind)), 0, 0, on ? [] : stayed),
+    (changed, stayed) => turnedWords(on, rowNames(changed), rowNouns(changed.map(row => row.kind)), on ? [] : stayed),
     { now: on ? 'on' : 'off', stays: true, reasons: whyLines(leaves), tail: turnTail(on, already, leaves.length),
-      partial: notIn => (notIn.length ? `${on ? 'Not' : 'Still'} in ${toolsPhrase(notIn, tools)}.` : '') });
+      failedRow: (name, failed) => `${name}: ${on ? 'not' : 'still'} in ${toolsPhrase(failed, tools)}` });
 }
 
 // ---------- One switch per item ----------

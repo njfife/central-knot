@@ -1892,7 +1892,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .details-outside .details-note { overflow-wrap: anywhere; }
 .details-outside > .details-actions { margin-top: 0; }
 .tool-switch-word { min-width: 56px; text-align: right; }
-.tool-switch:has(> .switch:disabled) .tool-switch-word { opacity: 0.4; }
+.ov-page:has(#select-bar) .tool-switch:has(> .switch:disabled) .tool-switch-word { opacity: 0.4; }
 /* A tool whose own settings switch the item off: that state, said in its own word in place of Central Knot's switch. */
 .tool-switch-word-own { min-width: 0; color: var(--ink-soft); white-space: nowrap; }
 /* A tool whose switch file can't be used says so where its switch would be. */

@@ -111,8 +111,12 @@ export const selectedWords = (ticked: number) => (ticked ? `${ticked} selected` 
 export const questionWords = (takes: number, days: number) => `Delete ${takes} from every tool and Central Knot? History can restore ${takes === 1 ? 'it' : 'them'} for ${days} days.`;
 /** The link, on the bar and after the question, that names the rows a Delete of many leaves. */
 export const cantWords = (leaves: number) => `${leaves} can’t be deleted`;
-/** Each reason an action can't take a row, after the names of its rows: "clash: not in Central Knot". */
-export const whyLines = (leaves: Listed[]) => [...groupBy(leaves, row => row.cant!)].map(([why, rows]) => `${andList(rows.map(row => row.name))}: ${why}`);
+/** Each reason an action can't take a row, after the names of its rows: "clash: not in Central Knot" (or "zulu comes with…"). */
+export const whyLines = (leaves: Listed[]) => [...groupBy(leaves, row => row.cant!)].map(([why, rows]) => {
+  const names = andList(rows.map(row => row.name));
+  if (!why.startsWith('comes with ')) return `${names}: ${why}`;
+  return rows.length === 1 ? `${names} ${why}` : `${names} ${why.replace(/^comes/, 'come').replace('its row’s', 'each row’s')}`;
+});
 /** Reason a found row whose copies differ can't be turned on in bulk (shared by matrix.ts cantTurn and app.ts applyByKind). */
 export const DIFFERS_REASON = 'its copies differ (its row asks which to use)';
 /** A Turn button's label: its own count when it takes fewer than are ticked (`Turn off 3`), plain (`Turn off`) when it takes all or none. */
@@ -123,9 +127,9 @@ export function turnTail(on: boolean, already: number, left: number): string {
   const state = on ? 'on' : 'off';
   return [already ? `${already} ${already === 1 ? 'was' : 'were'} already ${state}.` : '', left ? `${left} not turned ${state}.` : ''].filter(Boolean).join(' ');
 }
-/** The result of Turn on or Turn off of many: the rows changed, how many ticked rows were already so, how many it left, and any tools still reading them another way (`stayed`). */
-export function turnedWords(on: boolean, names: string[], nouns: { one: string; many: string }, already: number, left: number, stayed: string[] = []): string {
-  return [`Turned ${on ? 'on' : 'off'} ${plural(names.length, nouns.one, nouns.many)}: ${fewNames(names)}.`, turnTail(on, already, left), ...stayed].filter(Boolean).join(' ');
+/** The result of Turn on or Turn off of many: the rows that went through, and any tools still reading them another way (`stayed`). */
+export function turnedWords(on: boolean, names: string[], nouns: { one: string; many: string }, stayed: string[] = []): string {
+  return [`Turned ${on ? 'on' : 'off'} ${plural(names.length, nouns.one, nouns.many)}: ${fewNames(names)}.`, ...stayed].filter(Boolean).join(' ');
 }
 /** The result: the rows deleted (`names`, in the kinds' words: words.ts rowNouns), and how many ticked rows it left (`left`). */
 export const deletedWords = (names: string[], nouns: { one: string; many: string }, left: number) =>

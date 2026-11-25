@@ -13063,7 +13063,7 @@ async function selectFlow() {
   await a.click('#problems-show-all');
   same('Turn off skips plugin, damaged, and found rows with their reasons; plugin state byte for byte untouched',
     [inAllTools('bravo'), await a.text('#header [data-outcome] .band-text'), await a.all('#header .problem-line .problem-text', 'e.textContent'), tree(join(home, '.claude/plugins')), readNow(join(home, '.claude/settings.json'))],
-    [[], 'Turned off 1 skill: bravo. 4 not turned off.', ['clash and lima: not in Central Knot', 'scout: the agents record is damaged', 'zulu: its switch also turns the plugin “kit”: use the row’s own switch'], pluginsBefore, claudeSettingsBefore]);
+    [[], 'Turned off 1 skill: bravo. 4 not turned off.', ['clash and lima: not in Central Knot', 'scout: the agents record is damaged', 'zulu comes with the plugin “kit”: use its row’s own switch'], pluginsBefore, claudeSettingsBefore]);
   await bulkShots('turn-off-reasons', async () => { if (await a.run(`document.getElementById('problems-show-all')?.getAttribute('aria-expanded') === 'false'`)) await a.click('#problems-show-all'); });
   await a.click('#outcome-undo');
   await done();
@@ -13174,6 +13174,8 @@ async function selectFlow() {
   same('Escape inside an opened row ends Select mode, keeps row open, and re-enables its controls',
     [await word(), await a.exists('#select-bar'), (await controlInfo(charlieSwitch))?.disabled, await switchWordOpacity(), (await controlInfo(charlieDelete))?.disabled, (await controlInfo(charlieSwitch))?.title !== 'Done ends selecting'],
     ['Select', false, false, '1', false, true]);
+  same('outside Select mode, a disabled switch keeps its On label at full opacity',
+    await a.run(`(() => { const s = document.querySelector(${JSON.stringify(charlieSwitch)}); s.disabled = true; const op = getComputedStyle(s.closest('.tool-switch').querySelector('.tool-switch-word')).opacity; s.disabled = false; return op; })()`), '1');
   await a.click(charlieSwitch);
   same('after Escape/Done, the opened row’s tool switch works again', inAllTools('charlie').includes('.claude/skills'), false);
   await a.click('#outcome-undo');

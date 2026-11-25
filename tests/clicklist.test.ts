@@ -1896,12 +1896,14 @@ test('Bulk Turn failure, differing Add, and already-on plugin row say exact fact
       skills: {
         ...empty,
         items: [
+          skillFact('alpha', { on: true, copies: { 'claude-cli': {}, 'copilot-cli': {}, 'codex-cli': {} } }),
           skillFact('charlie', { on: true, copies: { 'claude-cli': {}, 'copilot-cli': {}, 'codex-cli': {} } }),
           skillFact('delta', { on: false }),
           skillFact('clash', { on: false, copies: { 'claude-cli': { hash: 'a' }, 'copilot-cli': { hash: 'b' } }, takeInAnswers: { click: { wait: 'copies-differ' }, rule: { wait: 'copies-differ' } } }),
           skillFact('lima', { on: false, copies: { 'claude-cli': { hash: 'l' } }, takeInAnswers: { click: { take: 'claude-cli' }, rule: { take: 'claude-cli' } } }),
         ],
         library: {
+          alpha: { ...newItem('alpha', 'alpha'), on: true },
           charlie: { ...newItem('charlie', 'charlie'), on: true },
           delta: { ...newItem('delta', 'delta'), on: false },
         },
@@ -1913,6 +1915,44 @@ test('Bulk Turn failure, differing Add, and already-on plugin row say exact fact
     t.mock.method(api, 'refresh', async () => app.home);
   };
   try {
+    await t.test('1c. Two rows failing in two different tools each get their own reason line with no pooled sentence; mixed path also names the failed row’s tool', async () => {
+      setupSelectHome();
+      startSelecting();
+      const order = ['skills-alpha', 'skills-charlie', 'skills-delta', 'skills-clash'];
+      for (const row of order) tickRow(row, order, false);
+      findById(libraryTable(), 'select-turn-off').onclick();
+      await settled();
+      await main.pass({ results: [
+        { item: 'alpha', harness: 'claude-cli', outcome: 'failed', message: 'couldn’t remove' },
+        { item: 'alpha', harness: 'copilot-cli', outcome: 'removed', message: '' },
+        { item: 'alpha', harness: 'codex-cli', outcome: 'removed', message: '' },
+        { item: 'charlie', harness: 'claude-cli', outcome: 'removed', message: '' },
+        { item: 'charlie', harness: 'copilot-cli', outcome: 'removed', message: '' },
+        { item: 'charlie', harness: 'codex-cli', outcome: 'failed', message: 'couldn’t remove' },
+      ], writes: 4, made: ['off-alpha', 'off-charlie'], reloads: [] });
+      await settled();
+      assert.equal(app.outcome?.text, '2 of 2 didn’t go through in every tool: alpha and charlie. 1 was already off. 1 not turned off.');
+      assert.deepEqual(app.outcome?.reasons, ['alpha: still in Claude Code', 'charlie: still in Codex', 'clash: not in Central Knot']);
+
+      // Mixed path: alpha goes through, charlie fails in Copilot CLI -> charlie still has its own reason line.
+      setupSelectHome();
+      startSelecting();
+      for (const row of order) tickRow(row, order, false);
+      findById(libraryTable(), 'select-turn-off').onclick();
+      await settled();
+      await main.pass({ results: [
+        { item: 'alpha', harness: 'claude-cli', outcome: 'removed', message: '' },
+        { item: 'alpha', harness: 'copilot-cli', outcome: 'removed', message: '' },
+        { item: 'alpha', harness: 'codex-cli', outcome: 'removed', message: '' },
+        { item: 'charlie', harness: 'claude-cli', outcome: 'removed', message: '' },
+        { item: 'charlie', harness: 'codex-cli', outcome: 'removed', message: '' },
+        { item: 'charlie', harness: 'copilot-cli', outcome: 'failed', message: 'couldn’t remove' },
+      ], writes: 5, made: ['off-alpha', 'off-charlie'], reloads: [] });
+      await settled();
+      assert.equal(app.outcome?.text, '1 of 2 didn’t go through in every tool: charlie. Turned off 1 skill: alpha. 1 was already off. 1 not turned off.');
+      assert.deepEqual(app.outcome?.reasons, ['charlie: still in Copilot CLI', 'clash: not in Central Knot']);
+    });
+
     await t.test('1. Only taken row fails in a tool: names Copilot CLI, never claims "1 is off", keeps already/not-turned-off counts', async () => {
       setupSelectHome();
       startSelecting();
@@ -1927,8 +1967,8 @@ test('Bulk Turn failure, differing Add, and already-on plugin row say exact fact
         { item: 'charlie', harness: 'copilot-cli', outcome: 'failed', message: 'couldn’t remove' },
       ], writes: 2, made: ['off-charlie'], reloads: [] });
       await settled();
-      assert.equal(app.outcome?.text, '1 of 1 didn’t go through in every tool: charlie. Still in Copilot CLI. 1 was already off. 1 not turned off.');
-      assert.deepEqual(app.outcome?.reasons, ['clash: not in Central Knot']);
+      assert.equal(app.outcome?.text, '1 of 1 didn’t go through in every tool: charlie. 1 was already off. 1 not turned off.');
+      assert.deepEqual(app.outcome?.reasons, ['charlie: still in Copilot CLI', 'clash: not in Central Knot']);
     });
 
     await t.test('2. Found row whose copies came to differ before Refresh: not counted as turned on, named with its reason', async () => {
@@ -1989,8 +2029,8 @@ test('Bulk Turn failure, differing Add, and already-on plugin row say exact fact
         { item: 'delta', harness: 'copilot-cli', outcome: 'failed', message: 'locked' },
       ], writes: 2, made: ['on-delta'], reloads: [] });
       await settled();
-      assert.equal(app.outcome?.text, '1 of 1 didn’t go through in every tool: delta. Not in Copilot CLI. 1 was already on. 1 not turned on.');
-      assert.deepEqual(app.outcome?.reasons, ['clash: its copies differ (its row asks which to use)']);
+      assert.equal(app.outcome?.text, '1 of 1 didn’t go through in every tool: delta. 1 was already on. 1 not turned on.');
+      assert.deepEqual(app.outcome?.reasons, ['delta: not in Copilot CLI', 'clash: its copies differ (its row asks which to use)']);
 
       // Only taken row is a found skill whose copies came to differ before Refresh, alongside an already-on row.
       setupSelectHome();
@@ -2030,7 +2070,7 @@ test('Bulk Turn failure, differing Add, and already-on plugin row say exact fact
       await settled();
       assert.equal(app.outcome?.text, 'Turned off 1 skill: loose. 2 not turned off.');
       assert.deepEqual(app.outcome?.reasons, [
-        'bound: its switch also turns the plugin “kit”: use the row’s own switch',
+        'bound comes with the plugin “kit”: use its row’s own switch',
         'unreadable: not in Central Knot',
       ]);
       // Turn on with delta (off) + unreadable (!canAdd) leaves unreadable with "nothing can be added yet".
@@ -2049,9 +2089,10 @@ test('Bulk Turn failure, differing Add, and already-on plugin row say exact fact
       const { libraryPages } = await import('../src/librarypages.ts');
       const { versionList } = await import('../src/versionlist.ts');
       setupSelectHome();
-      app.home!.skills.items[0]!.switchedOff = ['claude-cli'];
-      app.home!.skills.items[0]!.takeOver = { 'claude-cli': { kind: 'shared', path: '/home/.agents/skills/charlie' } } as any;
-      const charlieRow = { kind: 'skills' as const, ...app.home!.skills.items[0]! };
+      const charlie = app.home!.skills.items.find(each => each.key === 'charlie')!;
+      charlie.switchedOff = ['claude-cli'];
+      charlie.takeOver = { 'claude-cli': { kind: 'shared', path: '/home/.agents/skills/charlie' } } as any;
+      const charlieRow = { kind: 'skills' as const, ...charlie };
       // Arm Take over… while idle.
       const idleBox = libraryPages.skills.tool!(charlieRow as any, 'claude-cli')!;
       findById(idleBox, 'take-over-skills-charlie-claude-cli').onclick({ stopPropagation() {} });

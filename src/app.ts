@@ -564,7 +564,7 @@ export interface Done {
   reloads: ReloadChange[];
   /** Why it did nothing, where it was refused whole or stopped: its outcome's text then (applyByKind names its kind by it). */
   refused?: string;
-  /** The rows it changed (carryOut): all of its rows but one whose own change was refused whole (clickplan.ts heldWhole). */
+  /** The rows it changed (carryOut): all of its rows but those refused whole (clickplan.ts heldWhole) or held because their copies differ (`differs`). */
   changed?: NamedRow[];
   kept?: { kind: PageKind; results: DestinationResult[]; notices?: SyncNotice[] };
   focus?: string;
@@ -668,12 +668,14 @@ const stillRead = (rows: NamedRow[], among: NamedRow[]) => [...groupBy(rows, row
  * that changed, and only they flash; one Undo, only when every click that changed something has one, puts them back (undoClick).
  * `now`: what the rows changed are, where the result counts them instead of naming them ("All 10 are off"); `withoutUndo`: what
  * it adds where it offers no Undo, given how many changed; `stays`: it stays until closed or replaced (Outcome stays); `reasons`:
- * extra problem lines after any failures (rows a bulk Turn skipped, with why).
+ * extra problem lines after any failures (rows a bulk Turn skipped, with why); `tail`: counts appended on every path (rows already
+ * in the asked state or skipped); `failedRow`: per-row reason line for each row kept back in one or more tools (when given, failed
+ * rows are named there instead of counted as `now`).
  */
 export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], stayed: string[]) => string,
-  { now = 'off', withoutUndo, stays, reasons: extra = [], tail, partial }: {
+  { now = 'off', withoutUndo, stays, reasons: extra = [], tail, failedRow }: {
     now?: 'on' | 'off' | 'deleted'; withoutUndo?: (count: number) => string; stays?: boolean; reasons?: string[];
-    tail?: string; partial?: (notIn: HarnessId[]) => string;
+    tail?: string; failedRow?: (name: string, failedTools: HarnessId[]) => string;
   } = {}) => busy('Applying…', async page => {
   const several = new Set(clicks.map(click => click.kind)).size > 1, parts: { click: Click; done: Done }[] = [];
   for (const click of clicks) parts.push({ click, done: await carryOut(click, page) });
@@ -684,20 +686,23 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], stayed:
   keepOwn(parts.map(({ done }) => done.kept));
   // Each row that didn't go through in every tool (its kind refused, its own change held, or a tool kept it back) is said first
   // (words.ts notAllThrough), by its kind where another row asked has its name; `said` then names the rows that went through, or
-  // `partial` / the lead's count covers rows held in a tool, or nothing changed; `tail` follows on every path.
+  // `failedRow` names each row's failed tools in `reasons` (else the lead's count covers them), or nothing changed; `tail` follows on every path.
   const asked = parts.flatMap(({ click, done }) => click.rows.map((row, at) => ({ row: { ...row, name: click.items[at] ?? row.key }, done })));
   const isRow = (entry: DestinationResult, row: NamedRow) => entry.item.toLowerCase() === row.name.toLowerCase();
   const differed = asked.filter(({ row, done }) => done.kept?.results.some(entry => entry.outcome === 'held' && entry.differs && isRow(entry, row))).map(({ row }) => row);
   const left = asked.filter(({ row, done }) => done.refused || !done.changed?.some(each => sameRow(each, row))
     || done.kept?.results.some(entry => keptBack(entry) && isRow(entry, row))).map(({ row }) => row);
-  const notIn = [...new Set(parts.flatMap(({ done }) => (done.kept?.results ?? []).filter(entry => keptBack(entry) && entry.harness).map(entry => entry.harness!)))];
   const through = changed.filter(row => !left.some(each => sameRow(each, row))), all = asked.map(({ row }) => row);
+  const failedReasons = failedRow ? asked.flatMap(({ row, done }) => {
+    const failedTools = [...new Set((done.kept?.results ?? []).filter(entry => keptBack(entry) && entry.harness && isRow(entry, row)).map(entry => entry.harness!))];
+    return failedTools.length ? [failedRow(rowNames([row], all)[0]!, failedTools)] : [];
+  }) : [];
   const lead = left.length ? notAllThrough(rowNames(left, all), asked.length) : '';
-  const after = !changed.length ? 'Nothing changed.' : through.length ? said(through, stillRead(through, all)) : partial ? partial(notIn) : `${countedAs(changed.length, asked.length, now)}.`;
+  const after = !changed.length ? 'Nothing changed.' : through.length ? said(through, stillRead(through, all)) : failedRow ? '' : `${countedAs(changed.length, asked.length, now)}.`;
   const back = changed.length && !undo ? withoutUndo?.(changed.length) : undefined;
   const diffReasons = differed.map(row => `${rowNames([row], all)[0]}: ${DIFFERS_REASON}`);
   tellWritten({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(clicks.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn) || differed.length > 0, stays,
-    text: [lead, after, tail, back].filter(Boolean).join(' '), reasons: [...stops, ...went.flatMap(part => part.done.outcome.reasons ?? []), ...diffReasons, ...extra],
+    text: [lead, after, tail, back].filter(Boolean).join(' '), reasons: [...stops, ...went.flatMap(part => part.done.outcome.reasons ?? []), ...failedReasons, ...diffReasons, ...extra],
     act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } }, parts.flatMap(part => part.done.reloads));
   for (const row of changed) flashRow(row);
   if (regroups) unpin();

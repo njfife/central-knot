@@ -9,7 +9,7 @@ import { cp, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ask, askedNow, cancelAsk, cantWords, deletedWords, headingState, isTicked, ofListed, questionWords, restoreWords, selectedWords, selecting,
-  startSelecting, stopSelecting, tickHeading, tickRow, turnedWords, turnLabel, whyLines, type Listed } from '../src/selection.ts';
+  startSelecting, stopSelecting, tickHeading, tickRow, turnedWords, turnLabel, turnTail, whyLines, type Listed } from '../src/selection.ts';
 import { readHistory } from '../src/history.ts';
 import { inLibrary, placeOf, rowClicks } from '../src/libraryrow.ts';
 import { heldWhole } from '../src/clickplan.ts';
@@ -238,7 +238,7 @@ test('Turn on and Turn off of many: ofListed splits takes, already and leaves; t
     { id: 'skills-bravo', name: 'bravo', already: true },
     { id: 'skills-charlie', name: 'charlie', already: true },
     { id: 'skills-clash', name: 'clash', cant: 'not in Central Knot' },
-    { id: 'skills-zulu', name: 'zulu', cant: 'its switch also turns the plugin “kit”: use the row’s own switch', already: true },
+    { id: 'skills-zulu', name: 'zulu', cant: 'comes with the plugin “kit”: use its row’s own switch', already: true },
   ];
   startSelecting();
   tickHeading(ids(rows));
@@ -247,12 +247,24 @@ test('Turn on and Turn off of many: ofListed splits takes, already and leaves; t
   assert.deepEqual(split.already.map(row => row.name), ['bravo', 'charlie', 'zulu'], 'already takes precedence over cant');
   assert.deepEqual(split.leaves.map(row => row.name), ['clash']);
   assert.deepEqual(
+    whyLines([{ id: 'skills-zulu', name: 'zulu', cant: 'comes with the plugin “kit”: use its row’s own switch' }]),
+    ['zulu comes with the plugin “kit”: use its row’s own switch'],
+  );
+  assert.deepEqual(
+    whyLines([
+      { id: 'skills-yankee', name: 'yankee', cant: 'comes with the plugin “kit”: use its row’s own switch' },
+      { id: 'skills-zulu', name: 'zulu', cant: 'comes with the plugin “kit”: use its row’s own switch' },
+    ]),
+    ['yankee and zulu come with the plugin “kit”: use each row’s own switch'],
+  );
+  assert.deepEqual(
     [turnLabel(true, 0, 0), turnLabel(true, 0, 5), turnLabel(true, 5, 5), turnLabel(true, 2, 5), turnLabel(false, 3, 5), turnLabel(false, 3, 3)],
     ['Turn on', 'Turn on', 'Turn on', 'Turn on 2', 'Turn off 3', 'Turn off'],
   );
-  assert.equal(turnedWords(false, ['a', 'b', 'c'], { one: 'skill', many: 'skills' }, 2, 1), 'Turned off 3 skills: a, b and c. 2 were already off. 1 not turned off.');
-  assert.equal(turnedWords(true, ['a', 'b'], { one: 'item', many: 'items' }, 1, 0), 'Turned on 2 items: a and b. 1 was already on.');
-  assert.equal(turnedWords(false, ['a', 'b', 'c', 'd', 'e'], { one: 'skill', many: 'skills' }, 0, 0, ['Codex still reads a another way.']),
+  assert.equal(turnTail(false, 2, 1), '2 were already off. 1 not turned off.');
+  assert.equal(turnTail(true, 1, 0), '1 was already on.');
+  assert.equal(turnedWords(false, ['a', 'b', 'c'], { one: 'skill', many: 'skills' }), 'Turned off 3 skills: a, b and c.');
+  assert.equal(turnedWords(false, ['a', 'b', 'c', 'd', 'e'], { one: 'skill', many: 'skills' }, ['Codex still reads a another way.']),
     'Turned off 5 skills: a, b, c and 2 more. Codex still reads a another way.');
   stopSelecting();
 });
