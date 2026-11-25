@@ -4,14 +4,14 @@
 // chosen and on the header's Refresh (loadSessions → main.ts sessions:read → sessionday.ts readSessionPeriod, then sessionrow.ts
 // sessionRows; for 7 days main.ts sessions:read-kept → sessionday.ts readKeptPeriod, then sessionrow.ts dayByDay), and the answer
 // is held in app.ts state.sessions (pagedata.ts). 7 days, once drawn, ask the keeper for a sweep (main.ts sessions:sweep →
-// sessionkeep.ts sweepNow) and, while shown, are read again whenever an attempt of the keeper's ends (keeperNews); such a read
-// asks for none. Beside the choice sits
+// sessionkeep.ts sweepNow) and, while in view, are read again whenever an attempt of the keeper's ends (keeperNews), and once
+// when the window is shown again (windowBack); such a read asks for none. Beside the choice sits
 // "Start keeping session costs" (with its infoMark), "Collecting…" while sweeping, or nothing once kept (sessionkeep.ts); any
 // refusal shows verbatim inline. This module makes the period's local midnights from the calendar (boundsOf) and says the rows:
 // every figure and sum is sessionrow.ts's, and the tools read are presence.ts SESSION_TOOLS. What a person needs is on the page;
 // why a figure is low, whose prices they are and the price lists' dates are on hover (the native `title`); a day's rows are built
 // only once it is opened. Not here: reading files or the record, pricing, summing, sweeping.
-import { announce, rerender, state, switchSessionCosts } from './app.ts';
+import { announce, rerender, state, switchSessionCosts, windowVisible } from './app.ts';
 import { brandMark } from './brand.ts';
 import { button, h, icon, infoCardId, infoMark } from './dom.ts';
 import { clockTime, plural } from './model.ts';
@@ -95,14 +95,20 @@ export async function loadSessions(readId?: number, sweep = true) {
   if (week && sweep && still) void api.sweepSessions(home.home);
 }
 
+/** Whether 7 days are in view: the Sessions page, 7 days chosen, and the window not hidden (app.ts windowVisible). */
+const weekInView = () => state.page === 'sessions' && state.sessionsDay === 'week' && windowVisible();
 /**
- * The keeper's news, once taken in (app.ts onSessionCostsChanged): while the page shows 7 days of that home, each time an
- * attempt has ended (`collecting` false: it kept, found nothing new, was refused or found the store busy), whether the page asked
- * for it or the 15-minute timer began it, or keeping was turned off, they are read once more. That read asks for no sweep.
+ * The keeper's news, once taken in (app.ts onSessionCostsChanged): while 7 days of that home are in view, each time an attempt
+ * has ended (`collecting` false: it kept, found nothing new, was refused or found the store busy), whether the page asked for it
+ * or the 15-minute timer began it, or keeping was turned off, they are read once more. That read asks for no sweep.
  */
 export function keeperNews(view: SessionCostsView) {
-  if (view.collecting || view.home !== state.home?.home || state.page !== 'sessions' || state.sessionsDay !== 'week') return;
+  if (view.collecting || view.home !== state.home?.home || !weekInView()) return;
   void loadSessions(undefined, false);
+}
+/** The window shown again (app.ts, on the page's visibilitychange): 7 days in view are read once, as nothing was read while it was hidden. */
+export function windowBack() {
+  if (weekInView()) void loadSessions(undefined, false);
 }
 
 /** Today | Yesterday, and 7 days where the home keeps session costs, built as the Library's kind switch (matrix.ts kindSwitch): a press reads that period as it is now. */

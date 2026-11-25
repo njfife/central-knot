@@ -10525,8 +10525,9 @@ async function keepSessionCostsFlow() {
  * kept); no sweep asked for once he has left, and no read of them after a move to Today or another page while that sweep runs;
  * then a move to a home that does not keep: Today | Yesterday and Start, the card behind it, the period refused in main, and
  * that home's empty week once it keeps. A second launch, its sweeps every few seconds, on a heavy week: its first draw with
- * every day closed, an opened day's line held in view while its rows scroll, and the page following a sweep it did not ask
- * for. Nothing cut off at 860×560 and 1316×820 with the sidebar open; pictures light and dark with --shots.
+ * every day closed, an opened day's line held in view while its rows scroll, the page following a sweep it did not ask for,
+ * and, with the window hidden, nothing read until it is shown again. Nothing cut off at 860×560 and 1316×820 with the sidebar
+ * open; pictures light and dark with --shots.
  */
 async function sessionsWeekFlow() {
   const midnight = (back = 0, at = new Date()) => new Date(at.getFullYear(), at.getMonth(), at.getDate() - back).getTime();
@@ -10758,6 +10759,33 @@ async function sessionsWeekFlow() {
   writeFileSync(nowFile, `${JSON.stringify(reply('now', 'n3', Math.max(today, Date.now() - 1000), 80_000, 8_000))}\n`, { flag: 'a' });
   for (let tries = 0; tries < 150 && (await dayTotal(today)) === beforeTick; tries++) await wait(100);
   same('a sweep the page did not ask for ends while 7 days are shown: today’s figure the newer, with no click', (await dayTotal(today)) !== beforeTick, true);
+  // The window hidden (closed to the tray): a sweep that ends reads nothing; shown again, 7 days are read once (the next sweep
+  // held meanwhile, so that only the showing reads). The window is hidden and counted from main: a development run only.
+  const mainB = a.inspect ? await mainHelpers(a.inspect) : undefined;
+  if (mainB) {
+    const inMain = await a.main();
+    const sweepsEnded = () => (readNow(join(data2, 'central-knot.log')).match(/session costs: (swept|store is locked|sweep stopped|refused|failed)/g) ?? []).length;
+    await mainB.noteCalls('sessions:read-kept');
+    await inMain.run(`electron.BrowserWindow.getAllWindows()[0].hide()`);
+    for (let tries = 0; tries < 50 && !(await a.run('document.hidden')); tries++) await wait(100);
+    const endedBefore = sweepsEnded();
+    for (let tries = 0; tries < 150 && sweepsEnded() === endedBefore; tries++) await wait(100);
+    await wait(500);
+    const whileHidden = [await a.run('document.hidden'), sweepsEnded() > endedBefore, (await mainB.calls()).length];
+    const hold = holdPipe(home, '.claude/projects/-work-hold/while-hidden.jsonl');
+    try {
+      const endedThen = sweepsEnded();
+      await wait(4500);
+      await inMain.run(`electron.BrowserWindow.getAllWindows()[0].show()`);
+      for (let tries = 0; tries < 50 && (await a.run('document.hidden')); tries++) await wait(100);
+      await wait(1000);
+      same('hidden, a sweep that ends reads nothing; shown again, the 7 days are read once', [...whileHidden, sweepsEnded() === endedThen, (await mainB.calls()).length], [true, true, 0, true, 1]);
+      await mainB.restore('sessions:read-kept');
+      same('the sweep held while shown is let go', await hold.release(), true);
+    } finally { hold.clean(); }
+    inMain.close();
+    mainB.close();
+  } else console.log('sessionsWeekFlow: reads while the window is hidden are counted in a development run only (it is hidden from main).');
   same('no page error on the heavy week', a.pageErrors, []);
   await a.quit();
 }

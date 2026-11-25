@@ -39,7 +39,7 @@ import { changeWords, stillLoadAfter, undoOffered, wholeCounts, wholeSaid } from
 import { hasReloadAdvice, pluginReloads, reloadAdvice, reloadsFor, settleReloads, waysFrom, type ReloadChange } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
 import { followView, type SigninChecks } from './mcpsignin.ts';
-import { keeperNews, loadSessions, type SessionsDay } from './sessionspage.ts';
+import { keeperNews, loadSessions, windowBack, type SessionsDay } from './sessionspage.ts';
 import type { DayRows, PeriodRows } from './sessionrow.ts';
 import { stopSelecting } from './selection.ts';
 import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
@@ -254,7 +254,7 @@ export const notDoneFirst = (outcome: Outcome): Outcome => (outcome.warn ? { ...
  */
 export const FADE_MS = 8000;
 let fading: ReturnType<typeof setTimeout> | undefined;
-const windowVisible = () => windowShown && !document.hidden;
+export const windowVisible = () => windowShown && !document.hidden;
 /** The result's time starts again from now; none runs while the page acts (afterActing) or while the window is hidden. */
 function fadeLater(): void {
   clearTimeout(fading);
@@ -441,7 +441,11 @@ function accept(view: HomeView): HomeView {
 /** Whether the window has shown: false only after a start at sign-in with no window (main.ts startedHidden, the page's `start`), until it first shows. */
 let windowShown = new URLSearchParams(globalThis.location?.search).get('start') !== 'hidden';
 api().onWindowShown(() => { const first = !windowShown; windowShown = true; if (first) void collectUsage(); fadeLater(); });
-document.addEventListener('visibilitychange', () => { if (windowVisible()) fadeLater(); else clearTimeout(fading); });
+document.addEventListener('visibilitychange', () => {
+  if (!windowVisible()) return clearTimeout(fading);
+  fadeLater();
+  windowBack();
+});
 
 /**
  * Collects usage: main's usage:read reads the tools' own session history on this computer, and nothing leaves it. By itself

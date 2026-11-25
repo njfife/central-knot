@@ -1243,9 +1243,10 @@ span.ins-confirm { margin-top: 0; }
 .sessions-rows, .sessions-children, .sessions-days { list-style: none; margin: 0; padding: 0; }
 .sessions-day + .sessions-day { border-top: 1px solid var(--line); }
 /* A day's line: its figure at the line's end, so the days' figures stand in a column; open, it stays in view at the page's top
-   edge (less .sessions-scroll's top padding, which a sticky line keeps clear) while its rows, set in by its chevron and gap, scroll. */
+   edge (less .sessions-scroll's top padding, which a sticky line keeps clear), a hairline under it, while its rows, set in by its
+   chevron and gap, scroll. */
 .sessions-day > details > summary { display: flex; font-size: 13px; }
-.sessions-day > details[open] > summary { position: sticky; top: -16px; z-index: 1; background: var(--surface); }
+.sessions-day > details[open] > summary { position: sticky; top: -16px; z-index: 1; background: var(--surface); box-shadow: inset 0 -1px 0 var(--line); }
 .sessions-day > details > summary > .sessions-cost { justify-content: flex-end; }
 .sessions-day .sessions-rows { padding-left: 22px; }
 .sessions-day-label { flex: 1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
