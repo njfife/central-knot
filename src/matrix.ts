@@ -60,7 +60,7 @@ import { sources } from './sourcespage.ts';
 import { folded, lineDiff } from './diff.ts';
 import { reloadAdvice, rowReload, toItemKind, type ReloadAdvice } from './reload.ts';
 import { pageData, readPageData, resetPageData } from './pagedata.ts';
-import { ask, askedNow, cancelAsk, cantWords, deletedWords, headingState, isTicked, ofListed, questionWords, selectedWords, selecting, startSelecting, stopSelecting, restoreWords, tickHeading, tickRow, toggleWhy, whyLines, whyShown, type Listed } from './selection.ts';
+import { ask, askedNow, cancelAsk, cantWords, deletedWords, headingState, isTicked, ofListed, questionWords, selectedWords, selecting, listDrawn, startSelecting, stopSelecting, restoreWords, tickHeading, tickRow, toggleWhy, whyLines, whyShown, type Listed } from './selection.ts';
 
 const names = toolNames as Record<Tool, string>;
 
@@ -1564,11 +1564,8 @@ function useLibrary(): Table {
 }
 /** A tool's tab of one kind under Harnesses: that kind alone, with that tool first, in the kind's own view. */
 const useTab = (kind: PageKind, tool: Tool) => tableOf(kind, [kind], tool);
-/** The Library's Files view: a list of the skills beside one skill's files, in the Library's view, which it gives back as it was (backFromFiles). Select's mode ends there. */
-function useFiles() {
-  stopSelecting();
-  return tableOf('library', ['skills'], undefined, true);
-}
+/** The Library's Files view: a list of the skills beside one skill's files, in the Library's view, which it gives back as it was (backFromFiles). */
+const useFiles = () => tableOf('library', ['skills'], undefined, true);
 /**
  * The id of a table's list: the Library's names its segment, a tab's its kind and tool. A redraw keeps a list's scroll place by its
  * id (renderer.ts), so another segment or tab opens at its own top.
@@ -1846,6 +1843,7 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
   const on = under('on'), foundHere = under('found'), away = under('away'), off = under('off');
   // Every row drawn, in its order on screen, but the catalog's (pinned rows the chip dropped too): what Select's mode lists (selection.ts).
   const rowsDrawn = found ?? [...on[0], ...foundHere[0], ...plugins, ...away[0], ...off[0]];
+  if (!tool) listDrawn();
   t.selectable = !tool && selecting() ? rowsDrawn.map(selectId) : undefined;
   const sections = found ? [foundSection(t, found), inPlugins && catalogGroup(t, inPlugins)] : [section(t, 'on', ...on), section(t, 'found', ...foundHere), pluginSection(t, plugins), tool ? section(t, 'away', ...away) : null, section(t, 'off', ...off)];
   // Nothing listed: none of the segment's kind here (Find empty), or nothing Find, From and the chip leave, whatever the segment.
@@ -1924,9 +1922,11 @@ function headingTick(t: Table, role: string, name: string, rows: (ItemRow | Plug
  */
 function selectBar(t: Table, rows: (ItemRow | PluginRow)[]) {
   const listed: Listed[] = rows.map(row => ({ id: selectId(row), name: nameSaid(t, kindOf(row), nameOf(row)), cant: cantDelete(row) }));
-  const { ticked, takes, leaves } = ofListed(listed), days = state.historyDays ?? defaultHistoryDays;
+  const { ticked, takes, leaves } = ofListed(listed);
+  const days = state.historyDays ?? defaultHistoryDays;
   const taken = rows.filter((row): row is ItemRow => !isPluginRow(row) && takes.some(each => each.id === selectId(row)));
-  const off = acting() ?? !takes.length, idIf = (shown: boolean, id: string) => (shown ? id : undefined);
+  const off = acting() ?? !takes.length;
+  const idIf = (shown: boolean, id: string) => (shown ? id : undefined);
   const why = (shown: boolean, count: number) => (count ? h('button.inline-link', { type: 'button', id: idIf(shown, 'select-why'), 'aria-expanded': String(whyShown()),
     onclick: () => { toggleWhy(); rerender(); } }, `${cantWords(count)} ›`) : null);
   // Delete…: the question in the bar's place, the focus on its Cancel.
@@ -1945,7 +1945,7 @@ function selectBar(t: Table, rows: (ItemRow | PluginRow)[]) {
   };
   const room = question(false, listed.filter(row => !row.cant).length, listed.filter(row => row.cant).length);
   room.classList.add('band-unshown');
-  return h('div.select-place', {}, h('div.select-bar.band-stack', { id: 'select-bar', role: 'group', 'aria-label': 'Selected rows' }, askedNow(listed) ? question(true, takes.length, leaves.length) : counting(), room),
+  return h('div.select-place', {}, h('div.selection-bar.band-stack', { id: 'select-bar', role: 'group', 'aria-label': 'Selected rows' }, askedNow(listed) ? question(true, takes.length, leaves.length) : counting(), room),
     whyShown() && leaves.length ? h('div.select-why', { id: 'select-why-list' }, whyLines(leaves).map(line => h('p', {}, line))) : null);
 }
 /**

@@ -2281,7 +2281,7 @@ button.harness-card-main:focus-visible { outline: 0; }
 #library-select:not(.bar-icons *) > svg { display: none; }
 .ov-row.row-ticked:not(.open) { background: var(--ticked); }
 .select-place { position: relative; flex: none; }
-.select-bar { padding: 4px 16px; background: var(--surface); border-bottom: 1px solid var(--line); font-size: 12px; line-height: 16px; }
+.selection-bar { padding: 4px 16px; background: var(--surface); border-bottom: 1px solid var(--line); font-size: 12px; line-height: 16px; }
 .select-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .select-why { position: absolute; top: 100%; left: 0; right: 0; z-index: 5; padding: 6px 16px; background: var(--surface); border-bottom: 1px solid var(--line); box-shadow: 0 8px 20px rgb(0 0 0 / 18%); font-size: 12px; line-height: 18px; color: var(--ink-soft); }
 .select-why > p { margin: 0; }

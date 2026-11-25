@@ -1,9 +1,9 @@
 // Select on the Library (the owner, 2026-11-24: "selecting a whole bunch of skills and deleting them"): the one place that keeps
 // the mode and its ticks, and says what a Delete of many would take and leave, in its words. Nothing is stored: it lives in the
 // page while the window is open.
-// - The mode (startSelecting, stopSelecting, selecting): begun by Select on the Library's list; Done, Escape, a Delete of many
-//   sent and the Files view end it (matrix.ts), as another page and another home do where they change (app.ts showPage, accept),
-//   and its ticks go.
+// - The mode (startSelecting, stopSelecting, selecting): begun by Select on the Library's list; Done, Escape and a Delete of many
+//   sent end it (matrix.ts), another home where it changes (app.ts accept), and every draw of the page that doesn't draw the
+//   Library's list (another page, the Files view, the held screen, an empty Library: afterPageDrawn); its ticks go with it.
 // - The ticks, by the id matrix.ts selectId gives a row (its row id, a plugin's own row's apart): a row's (tickRow: with Shift,
 //   the run from the last row clicked, in the order on screen) and a heading's (tickHeading, headingState). A tick stays while
 //   Find, a chip, From or the kind switch hides its row, and shows again when the row comes back; only the rows listed are
@@ -35,9 +35,17 @@ let mode: Mode | undefined;
 
 /** Select clicked: the mode, nothing ticked. */
 export const startSelecting = () => { mode = { ticked: new Set(), whyOpen: false }; };
-/** Done, Escape, a Delete of many sent, the Files view, another page or another home: no mode, and its ticks go. */
+/** Done, Escape, a Delete of many sent, another home: no mode, and its ticks go. */
 export const stopSelecting = () => { mode = undefined; };
 export const selecting = () => !!mode;
+/** Whether this draw of the page drew the Library's list (listDrawn, from matrix.ts drawTable), read and let go by afterPageDrawn. */
+let listShown = false;
+export const listDrawn = () => { listShown = true; };
+/** After each draw of the page (renderer.ts renderWindow): a mode its draw didn't show ends, and the next draw starts unmarked. */
+export function afterPageDrawn() {
+  if (!listShown) mode = undefined;
+  listShown = false;
+}
 export const isTicked = (id: string) => !!mode?.ticked.has(id);
 
 /**

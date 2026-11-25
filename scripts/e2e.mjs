@@ -12244,6 +12244,7 @@ async function selectFlow() {
   const pictures = async name => {
     if (!shots) return;
     const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+    for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100);
     for (const [width, height, open, dark] of [[...SMALLEST, false], [...SMALLEST, true], [1316, 819, false], [1316, 819, true], [1316, 819, true, true], [...SMALLEST, true, true], [2560, 1440, true]]) {
       await sizeTo(a, width, height); await sidebarOpen(open); await theme(dark ? 'dark' : 'light');
       await a.shot(`select-${name}-${width}${open ? '' : '-rail'}${dark ? '-dark' : ''}`);

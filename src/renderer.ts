@@ -11,6 +11,7 @@ import { settingsPage } from './settingspage.ts';
 import packageInfo from '../package.json' with { type: 'json' };
 import { absentKinds, acting, drawPage, keepingFocus, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, state, type Page } from './app.ts';
 import { afterLayout, button, closeInfoCard, fitBars, h, icon, keepClicksAcrossRedraws, keepSelection, runAfterLayout, syncInfoCard, whyOff } from './dom.ts';
+import { afterPageDrawn } from './selection.ts';
 import type { IconName } from './icons.ts';
 import { heldKinds, type HomeKind } from './presence.ts';
 import { kindNouns, pageNames } from './words.ts';
@@ -326,6 +327,8 @@ function renderWindow() {
   const { rail } = applyLayout();
   renderHeader(rail);
   drawPage(renderPage);
+  // Select's mode lives only while the Library's list is drawn: a draw without it (the held screen too) ends it.
+  afterPageDrawn();
   // After the header, which marks the notices it draws seen: the sidebar's dot is for those it didn't.
   renderSidebar();
   recordDraw(visitOffsets);
