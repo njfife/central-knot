@@ -9,9 +9,9 @@ import { cp, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ask, askedNow, cancelAsk, cantWords, deletedWords, headingState, isTicked, ofListed, questionWords, restoreWords, selectedWords, selecting,
-  startSelecting, stopSelecting, tickHeading, tickRow, whyLines, type Listed } from '../src/selection.ts';
+  startSelecting, stopSelecting, tickHeading, tickRow, turnedWords, turnLabel, whyLines, type Listed } from '../src/selection.ts';
 import { readHistory } from '../src/history.ts';
-import { rowClicks } from '../src/libraryrow.ts';
+import { inLibrary, placeOf, rowClicks } from '../src/libraryrow.ts';
 import { heldWhole } from '../src/clickplan.ts';
 import { applySkills, restoreSkill } from '../src/skills.ts';
 import { withLock, winLockSkip } from './fslock.ts';
@@ -229,5 +229,123 @@ test('A ticked Off row deleted by another writer since the question was asked: t
     const sent = await applySkills(box.context, box.tools, asked);
     assert.deepEqual(sent.results.filter(heldWhole).map(result => result.item), ['golf'], 'golf is said as not deleted');
     assert.equal(sent.made?.length, 1, 'a History entry for hotel alone');
+  } finally { await box.cleanup(); }
+});
+
+test('Turn on and Turn off of many: ofListed splits takes, already and leaves; turnLabel shows a number only when fewer than ticked; turnedWords says already, left and stayed', () => {
+  const rows: Listed[] = [
+    { id: 'skills-alpha', name: 'alpha' },
+    { id: 'skills-bravo', name: 'bravo', already: true },
+    { id: 'skills-charlie', name: 'charlie', already: true },
+    { id: 'skills-clash', name: 'clash', cant: 'not in Central Knot' },
+    { id: 'skills-zulu', name: 'zulu', cant: 'part of the plugin kit', already: true },
+  ];
+  startSelecting();
+  tickHeading(ids(rows));
+  const split = ofListed(rows);
+  assert.deepEqual(split.takes.map(row => row.name), ['alpha']);
+  assert.deepEqual(split.already.map(row => row.name), ['bravo', 'charlie']);
+  assert.deepEqual(split.leaves.map(row => row.name), ['clash', 'zulu'], 'cant takes precedence over already');
+  assert.deepEqual(
+    [turnLabel(true, 0, 0), turnLabel(true, 0, 5), turnLabel(true, 5, 5), turnLabel(true, 2, 5), turnLabel(false, 3, 5), turnLabel(false, 3, 3)],
+    ['Turn on', 'Turn on', 'Turn on', 'Turn on 2', 'Turn off 3', 'Turn off'],
+  );
+  assert.equal(turnedWords(false, ['a', 'b', 'c'], { one: 'skill', many: 'skills' }, 2, 1), 'Turned off 3 skills: a, b and c. 2 were already off. 1 not turned off.');
+  assert.equal(turnedWords(true, ['a', 'b'], { one: 'item', many: 'items' }, 1, 0), 'Turned on 2 items: a and b. 1 was already on.');
+  assert.equal(turnedWords(false, ['a', 'b', 'c', 'd', 'e'], { one: 'skill', many: 'skills' }, 0, 0, ['Codex still reads a another way.']),
+    'Turned off 5 skills: a, b, c and 2 more. Codex still reads a another way.');
+  stopSelecting();
+});
+
+test('Turn off of many on real folders: 3 on (one kept out of Codex) and 2 off; only the 3 are sent, 2 untouched, Undo puts each back in the same tools', async () => {
+  const box = await tenSkills();
+  try {
+    // Keep alpha out of codex-cli (on in claude-cli and copilot-cli only); turn echo off too (golf is already off).
+    const alphaSeen = await seen(box, box.context, 'alpha');
+    await applySkills(box.context, box.tools, [rowClicks.inHarness(alphaSeen.row, alphaSeen.item, 'codex-cli', true)]);
+    await turnOff(box, box.context, 'echo');
+    const before = await toolFolders(box);
+    const historyBefore = (await readHistory(box.context)).length;
+    const onThree = ['alpha', 'bravo', 'charlie'];
+    const offChanges = await Promise.all(onThree.map(async name => { const { row, item } = await seen(box, box.context, name); return rowClicks.off(row, item); }));
+    const sent = await applySkills(box.context, box.tools, offChanges);
+    assert.equal(sent.made?.length, 3, 'one History entry per changed row, none for echo or golf');
+    assert.equal((await readHistory(box.context)).length - historyBefore, 3);
+    for (const name of [...onThree, 'echo', 'golf']) for (const tool of tools) assert.equal(await bytes(folderOf(box, tool, name)), undefined, `${name} off in ${tool}`);
+    assert.deepEqual((await itemOf(box, 'alpha'))?.except, ['codex-cli'], 'alpha keeps its except');
+    await undoAll(box, sent.made ?? []);
+    assert.deepEqual(await toolFolders(box), before, 'every tool folder back as before, alpha still out of Codex');
+    assert.equal(await bytes(folderOf(box, 'codex-cli', 'alpha')), undefined);
+    assert.ok(await bytes(folderOf(box, 'claude-cli', 'alpha')));
+    assert.ok(await bytes(folderOf(box, 'copilot-cli', 'alpha')));
+  } finally { await box.cleanup(); }
+});
+
+test('Turn on of many on real folders: 2 off (one kept out of Codex) and 1 addable found row; Undo puts all 3 back with found files byte for byte', async () => {
+  const box = await tenSkills();
+  try {
+    const alphaSeen = await seen(box, box.context, 'alpha');
+    await applySkills(box.context, box.tools, [rowClicks.inHarness(alphaSeen.row, alphaSeen.item, 'codex-cli', true)]);
+    await turnOff(box, box.context, 'alpha');
+    await turnOff(box, box.context, 'echo');
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Found skill lima.', 'lima'), 'scripts/run.sh': { text: '#!/bin/sh\necho lima\n', mode: 0o755 } }, [], 'lima');
+    const before = await toolFolders(box);
+    const onThree = ['alpha', 'echo', 'lima'];
+    const onChanges = await Promise.all(onThree.map(async name => { const { row, item } = await seen(box, box.context, name); return rowClicks.on(row, item); }));
+    const sent = await applySkills(box.context, box.tools, onChanges);
+    assert.equal(sent.made?.length, 3);
+    assert.equal(await bytes(folderOf(box, 'codex-cli', 'alpha')), undefined, 'alpha stays out of Codex');
+    assert.ok(await bytes(folderOf(box, 'claude-cli', 'alpha')));
+    assert.ok(await bytes(folderOf(box, 'copilot-cli', 'alpha')));
+    for (const tool of tools) {
+      assert.ok(await bytes(folderOf(box, tool, 'echo')), `echo on in ${tool}`);
+      assert.ok(await bytes(folderOf(box, tool, 'lima')), `lima added in ${tool}`);
+    }
+    await undoAll(box, sent.made ?? []);
+    assert.deepEqual(await toolFolders(box), before, 'found row lima back in claude-cli only, byte for byte; alpha and echo off again');
+    assert.deepEqual([inLibrary(await itemOf(box, 'lima')), placeOf(await itemOf(box, 'lima'))], [undefined, 'found'], 'lima is found again, not in Central Knot');
+    assert.deepEqual([(await itemOf(box, 'alpha'))?.on, (await itemOf(box, 'alpha'))?.except, (await itemOf(box, 'echo'))?.on], [false, ['codex-cli'], false]);
+  } finally { await box.cleanup(); }
+});
+
+test('Turn off of many with one row locked in one tool: reports the locked tool as held, turns off the others, and Undo covers what was done', { skip: winLockSkip }, async () => {
+  const box = await tenSkills();
+  try {
+    const before = await toolFolders(box);
+    const three = ['alpha', 'bravo', 'charlie'];
+    const changes = async () => Promise.all(three.map(async name => { const { row, item } = await seen(box, box.context, name); return rowClicks.off(row, item); }));
+    const sent = await withLock(folderOf(box, 'copilot-cli', 'alpha'), 'dir-readonly', async () => applySkills(box.context, box.tools, await changes()));
+    const held = sent.results.filter(result => result.outcome !== 'removed' && result.outcome !== 'written');
+    assert.deepEqual(held.map(result => [result.item, result.harness]), [['alpha', 'copilot-cli']]);
+    assert.ok(await bytes(folderOf(box, 'copilot-cli', 'alpha')), 'alpha stayed in Copilot CLI');
+    assert.equal(await bytes(folderOf(box, 'claude-cli', 'alpha')), undefined, 'alpha left Claude Code');
+    for (const name of ['bravo', 'charlie']) for (const tool of tools) assert.equal(await bytes(folderOf(box, tool, name)), undefined, `${name} left ${tool}`);
+    assert.equal(sent.made?.length, 3);
+    await undoAll(box, sent.made ?? []);
+    const after = await toolFolders(box);
+    assert.deepEqual([after['claude-cli'], after['codex-cli']], [before['claude-cli'], before['codex-cli']], 'Claude Code and Codex folders back as before');
+    // withLock restores the locked folder's own mode to 0o755; every file inside copilot-cli matches before.
+    assert.deepEqual({ ...after['copilot-cli'], 'alpha/': before['copilot-cli']!['alpha/'] }, before['copilot-cli'], 'Copilot CLI copies back as before');
+  } finally { await box.cleanup(); }
+});
+
+test('Turn on of many with one tool’s skills folder locked: reports the locked tool as held, writes the other tools, and Undo covers what was done', { skip: winLockSkip }, async () => {
+  const box = await tenSkills();
+  try {
+    const three = ['alpha', 'bravo', 'charlie'];
+    for (const name of three) await turnOff(box, box.context, name);
+    const before = await toolFolders(box);
+    const changes = async () => Promise.all(three.map(async name => { const { row, item } = await seen(box, box.context, name); return rowClicks.on(row, item); }));
+    const sent = await withLock(join(box.home, roots['copilot-cli']), 'dir-readonly', async () => applySkills(box.context, box.tools, await changes()));
+    const held = sent.results.filter(result => result.outcome !== 'removed' && result.outcome !== 'written');
+    assert.deepEqual(held.map(result => [result.item, result.harness]), three.map(name => [name, 'copilot-cli']));
+    for (const name of three) {
+      assert.ok(await bytes(folderOf(box, 'claude-cli', name)), `${name} written in Claude Code`);
+      assert.ok(await bytes(folderOf(box, 'codex-cli', name)), `${name} written in Codex`);
+      assert.equal(await bytes(folderOf(box, 'copilot-cli', name)), undefined, `${name} not written in locked Copilot CLI`);
+    }
+    assert.equal(sent.made?.length, 3);
+    await undoAll(box, sent.made ?? []);
+    assert.deepEqual(await toolFolders(box), before, 'Undo turns all three back off everywhere');
   } finally { await box.cleanup(); }
 });

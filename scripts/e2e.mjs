@@ -12564,18 +12564,18 @@ async function selectFlow() {
   await a.click('#library-select');
   same('Select reads Done, as wide; the bar shows, Delete… off with nothing ticked; each row has a tick and no switch',
     [await word(), await width(), await bar(), await a.run(`document.getElementById('select-delete').disabled`), await a.exists(tick('alpha')), await a.exists(tick('zulu')), await a.exists('.ov .switch, .ov .add-item')],
-    ['Done', selectWidth, ['Delete…'], true, true, true, false]);
+    ['Done', selectWidth, ['Turn on', 'Turn off', 'Delete…'], true, true, true, false]);
   const record = () => readNow(join(home, '.central-knot/skills.json')), was = { record: record(), bravo: await top('bravo') };
   await a.click(`.ov-row[data-key="${id('alpha')}"] .ov-name`);
   same('a click on a row ticks it, and flips nothing: the bar counts it, no row moved, nothing written',
-    [await ticked(), await bar(), await top('bravo'), record() === was.record], [[id('alpha')], ['1 selected', 'Delete…'], was.bravo, true]);
+    [await ticked(), await bar(), await top('bravo'), record() === was.record], [[id('alpha')], ['1 selected', 'Turn on', 'Turn off', 'Delete…'], was.bravo, true]);
   await a.click(`#${rowPart('open', 'skills', 'bravo')}`);
   same('the chevron opens a row and ticks nothing', [await a.all('.ov-row[aria-expanded="true"]', 'e.dataset.key'), await ticked()], [[id('bravo')], [id('alpha')]]);
   await a.click(`#${rowPart('open', 'skills', 'bravo')}`);
   // 3. Shift-click: the run as listed, from clash under Found to zulu under Only through a plugin.
   await a.click(tick('india'));
   await a.click(tick('clash'));
-  same('three ticked, one of which can’t be deleted: the bar says so beside the count, and Delete… has no number', await bar(), ['3 selected', '1 can’t be deleted ›', 'Delete…']);
+  same('three ticked, one of which can’t be deleted: the bar says so beside the count, and Delete… has no number', await bar(), ['3 selected', '1 can’t be deleted ›', 'Turn on', 'Turn off 2', 'Delete…']);
   await pictures('three');
   await shiftClick(`.ov-row[data-key="${zulu}"] .ov-name`);
   await a.settle();
@@ -12588,7 +12588,7 @@ async function selectFlow() {
   const find = async text => { await a.run(`(i => { i.value = ${JSON.stringify(text)}; i.dispatchEvent(new Event('input', { bubbles: true })); })(document.querySelector('#find'))`); await a.settle(); };
   await find('kilo');
   for (let tries = 0; tries < 50 && (await a.all('.ov-row[data-key]', 'e.dataset.key')).length !== 1; tries++) await wait(100);
-  same('Find leaves kilo: the bar counts one', await bar(), ['1 selected', 'Delete…']);
+  same('Find leaves kilo: the bar counts one', await bar(), ['1 selected', 'Turn on', 'Turn off', 'Delete…']);
   await find('');
   same('Find cleared: every tick is back', (await ticked()).length, 14);
   await find('kilo');
@@ -12607,7 +12607,7 @@ async function selectFlow() {
   same('no tick on a heading none of whose rows can be deleted: Found, Only through a plugin', [await a.exists('#tick-heading-on'), await a.exists('#tick-heading-found'), await a.exists('#tick-heading-plugins')], [true, false, false]);
   await a.click('#tick-heading-on');
   for (const [key, kind] of [['clash'], ['scout', 'agents'], ['zulu']]) await a.click(tick(key, kind));
-  same('thirteen ticked: the bar says how many can’t be deleted', await bar(), ['13 selected', '3 can’t be deleted ›', 'Delete…']);
+  same('thirteen ticked: the bar says how many can’t be deleted', await bar(), ['13 selected', '3 can’t be deleted ›', 'Turn on', 'Turn off 10', 'Delete…']);
   const before = folders();
   const rowTop = () => top('alpha');
   const bare = await rowTop();
@@ -12621,7 +12621,7 @@ async function selectFlow() {
   await pictures('question');
   await a.click('#select-why');
   await a.click('#select-cancel');
-  same('Cancel: the bar again, the ticks kept, nothing changed', [await bar(), (await ticked()).length, folders()], [['13 selected', '3 can’t be deleted ›', 'Delete…'], 13, before]);
+  same('Cancel: the bar again, the ticks kept, nothing changed', [await bar(), (await ticked()).length, folders()], [['13 selected', '3 can’t be deleted ›', 'Turn on', 'Turn off 10', 'Delete…'], 13, before]);
   // 7. Delete 10: ten leave every tool and the page; one result, which stays; the mode ends.
   await a.click('#select-delete');
   await a.click('#select-delete-now');
@@ -12686,6 +12686,219 @@ async function selectFlow() {
   await fitsAtMinimum(a, 'the Library asking a Delete of many');
   await a.click('#select-cancel');
   await a.click('#library-select');
+  // 14. Turn off of many (Example 1): five ticked rows — alpha (on in 2 of 3, kept out of Codex), bravo and charlie (on in 3),
+  // delta and echo (off). Turn off takes the three, leaves delta and echo untouched, says "2 were already off", and Undo puts
+  // each back in the exact tools it was in before.
+  const allRoots = () => ['.claude/skills', '.copilot/skills', '.codex/skills'].filter(root => existsSync(join(home, root)));
+  const allFolders = () => Object.fromEntries(allRoots().map(root => [root, tree(join(home, root))]));
+  const inAllTools = name => allRoots().filter(root => existsSync(join(home, root, name)));
+  const bulkShots = async (name, prep = async () => {}) => {
+    if (!shots) return;
+    const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+    for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100);
+    for (const [width, height, open, dark] of [[...SMALLEST, true, false], [...SMALLEST, true, true], [1316, 819, true, false], [1316, 819, true, true], [1316, 819, false, false]]) {
+      await sizeTo(a, width, height); await sidebarOpen(open); await theme(dark ? 'dark' : 'light'); await wait(160); await prep();
+      await a.shot(`bulk-${name}-${width}${open ? '' : '-rail'}${dark ? '-dark' : ''}`);
+    }
+    await theme('light'); await wait(160); await sidebarOpen(true); await fullSize(a);
+  };
+  await a.click(`#${rowPart('open', 'skills', 'alpha')}`);
+  await a.click(`#${rowPart('enable', 'skills', 'alpha', 'codex-cli')}`);
+  await a.click(`#${rowPart('open', 'skills', 'alpha')}`);
+  await a.click(`#${rowPart('switch', 'skills', 'delta')}`);
+  await a.click(`#${rowPart('switch', 'skills', 'echo')}`);
+  await a.click('#header-refresh');
+  const beforeTurn = allFolders();
+  const historyBefore = () => jsonOrNothing(join(home, '.central-knot/history.json'))?.events?.length ?? 0;
+  const histCount0 = historyBefore();
+  await a.click('#library-select');
+  for (const name of ['alpha', 'bravo', 'charlie', 'delta', 'echo']) await a.click(tick(name));
+  same('five ticked (three on, two off): buttons show their own counts', await bar(), ['5 selected', 'Turn on 2', 'Turn off 3', 'Delete…']);
+  same('Turn off button exists in the select bar', await a.exists('#select-turn-off'), true);
+  await bulkShots('turn-bar');
+  await a.click('#select-turn-off');
+  await done();
+  same('Turn off takes the three on rows, leaves delta and echo untouched, says 2 were already off, ends the mode',
+    [['alpha', 'bravo', 'charlie', 'delta', 'echo'].map(inAllTools), await a.text('#header [data-outcome] .band-text'), await a.exists('#outcome-undo'), await word(), await a.exists('#select-bar'), historyBefore() - histCount0],
+    [[[], [], [], [], []], 'Turned off 3 skills: alpha, bravo and charlie. 2 were already off.', true, 'Select', false, 3]);
+  await bulkShots('turn-off-result');
+  await wait(FADE_WAIT);
+  same('Turn off result stays until closed', await a.exists('#outcome-undo'), true);
+  await a.click('#outcome-undo');
+  await done();
+  same('Undo puts the three back in the same tools as before (alpha still out of Codex)',
+    [allFolders(), inAllTools('alpha'), inAllTools('bravo').length, ['alpha', 'bravo', 'charlie', 'delta', 'echo'].map(name => JSON.parse(record()).items[name]?.on)],
+    [beforeTurn, ['.claude/skills', '.copilot/skills'], 3, [true, true, true, false, false]]);
+
+  // 15. Turn on of many (Example 2 + partly on + Found heading tick): turn Synchronize everything off, turn alpha off
+  // (keeping its except: codex-cli), keep bravo out of Codex (partly on), write addable found skill lima after setup.
+  await a.click('#nav-settings');
+  for (let tries = 0; tries < 30 && !(await a.exists('#sync-everything-on')); tries++) await wait(100);
+  await a.click('#sync-everything-on');
+  await openKind(a, 'all');
+  await a.click(`#${rowPart('switch', 'skills', 'alpha')}`);
+  await a.click(`#${rowPart('open', 'skills', 'bravo')}`);
+  await a.click(`#${rowPart('enable', 'skills', 'bravo', 'codex-cli')}`);
+  await a.click(`#${rowPart('open', 'skills', 'bravo')}`);
+  const limaDir = skill(claude, 'lima', text('lima', 'Found addable skill.'));
+  mkdirSync(join(limaDir, 'scripts'), { recursive: true });
+  writeFileSync(join(limaDir, 'scripts/run.sh'), '#!/bin/sh\necho lima\n', { mode: 0o755 });
+  await a.click('#header-refresh');
+  const beforeOn = allFolders();
+  await a.click('#library-select');
+  same('Found heading tick shows once a row under Found can be taken by Turn on', await a.exists('#tick-heading-found'), true);
+  for (const name of ['alpha', 'echo', 'lima', 'bravo']) await a.click(tick(name));
+  same('bar with two off, one addable found, one partly on: Turn on 3, Turn off 1, Delete reasons link',
+    await bar(), ['4 selected', '1 can’t be deleted ›', 'Turn on 3', 'Turn off 1', 'Delete…']);
+  await bulkShots('bar-with-reasons');
+  await fitsAtMinimum(a, 'Select bar with all three buttons and reasons link');
+  await a.click('#select-turn-on');
+  await done();
+  same('Turn on takes alpha (out of Codex), echo, and adds lima; bravo is already on; one result',
+    [inAllTools('alpha'), inAllTools('echo').length, inAllTools('lima').length, await a.text('#header [data-outcome] .band-text'), await a.exists('#outcome-undo')],
+    [['.claude/skills', '.copilot/skills'], 3, 3, 'Turned on 3 skills: lima, alpha and echo. 1 was already on.', true]);
+  await bulkShots('turn-on-result');
+  await a.click('#outcome-undo');
+  await done();
+  same('Undo takes Turn on back: lima found again with bytes intact, alpha and echo off again',
+    [allFolders(), !!JSON.parse(record()).items.lima?.deleted, await a.exists(`#${rowPart('add', 'skills', 'lima')}`), JSON.parse(record()).items.alpha?.on, JSON.parse(record()).items.alpha?.except, JSON.parse(record()).items.echo?.on],
+    [beforeOn, true, true, false, ['codex-cli'], false]);
+
+  // 16. Examples 3 & 4 + found row with Turn off + plain labels when taking all ticked.
+  const pluginsBefore = tree(join(home, '.claude/plugins'));
+  const claudeSettingsBefore = readNow(join(home, '.claude/settings.json'));
+  await a.click('#library-select');
+  for (const [key, kind] of [['clash'], ['scout', 'agents'], ['zulu']]) await a.click(tick(key, kind));
+  same('only untakeable rows ticked: both Turn buttons disabled with plain labels',
+    [await bar(), await a.run(`['select-turn-on', 'select-turn-off', 'select-delete'].map(id => document.getElementById(id).disabled)`)],
+    [['3 selected', '3 can’t be deleted ›', 'Turn on', 'Turn off', 'Delete…'], [true, true, true]]);
+  await a.run(`document.getElementById('select-turn-on').click(); document.getElementById('select-turn-off').click();`);
+  await a.settle();
+  same('clicking disabled Turn buttons does nothing and stays in Select mode', await word(), 'Done');
+  // Add bravo (on) and lima (found addable), click Turn off: bravo goes off; clash, lima, scout, zulu listed in reasons.
+  await a.click(tick('bravo'));
+  await a.click(tick('lima'));
+  same('mixed Turn off selection shows exact button numbers', await bar(), ['5 selected', '4 can’t be deleted ›', 'Turn on 1', 'Turn off 1', 'Delete…']);
+  await a.click('#select-turn-off');
+  await done();
+  await a.click('#problems-show-all');
+  same('Turn off skips plugin, damaged, and found rows with their reasons; plugin state byte for byte untouched',
+    [inAllTools('bravo'), await a.text('#header [data-outcome] .band-text'), await a.all('#header .problem-line .problem-text', 'e.textContent'), tree(join(home, '.claude/plugins')), readNow(join(home, '.claude/settings.json'))],
+    [[], 'Turned off 1 skill: bravo. 4 not turned off.', ['clash and lima: not in Central Knot', 'scout: the agents record is damaged', 'zulu: part of the plugin kit'], pluginsBefore, claudeSettingsBefore]);
+  await bulkShots('turn-off-reasons', async () => { if (await a.run(`document.getElementById('problems-show-all')?.getAttribute('aria-expanded') === 'false'`)) await a.click('#problems-show-all'); });
+  await a.click('#outcome-undo');
+  await done();
+  same('Undo puts bravo back on in Claude Code and Copilot CLI', inAllTools('bravo'), ['.claude/skills', '.copilot/skills']);
+  // Turn on with echo (off), clash (differs), scout (damaged), zulu (plugin): echo goes on; other three in reasons.
+  await a.click('#library-select');
+  for (const [key, kind] of [['echo'], ['clash'], ['scout', 'agents'], ['zulu']]) await a.click(tick(key, kind));
+  await a.click('#select-turn-on');
+  await done();
+  await a.click('#problems-show-all');
+  same('Turn on skips differing found, damaged, and plugin rows with their reasons; plugin state untouched',
+    [inAllTools('echo').length, await a.text('#header [data-outcome] .band-text'), await a.all('#header .problem-line .problem-text', 'e.textContent'), tree(join(home, '.claude/plugins')), readNow(join(home, '.claude/settings.json'))],
+    [3, 'Turned on 1 skill: echo. 3 not turned on.', ['clash: its copies differ: its own row asks which to use', 'scout: the agents record is damaged', 'zulu: part of the plugin kit'], pluginsBefore, claudeSettingsBefore]);
+  await bulkShots('turn-on-reasons', async () => { if (await a.run(`document.getElementById('problems-show-all')?.getAttribute('aria-expanded') === 'false'`)) await a.click('#problems-show-all'); });
+  await a.click('#outcome-undo');
+  await done();
+  // Plain labels (no count) when a button takes every ticked row.
+  await a.click('#library-select');
+  await a.click(tick('charlie'));
+  await a.click(tick('foxtrot'));
+  same('all ticked rows on: Turn off has no number', await bar(), ['2 selected', 'Turn on', 'Turn off', 'Delete…']);
+  await a.click(tick('charlie'));
+  await a.click(tick('foxtrot'));
+  await a.click(tick('delta'));
+  await a.click(tick('echo'));
+  same('all ticked rows off: Turn on has no number', await bar(), ['2 selected', 'Turn on', 'Turn off', 'Delete…']);
+  await a.click('#library-select');
+
+  // 17. Example 6 (Opened row in Select mode) + Escape inside opened row.
+  // Give charlie a second version (backdated past settle window, taken in by a quick switch pass) and list local-market so zulu has Its page & line buttons.
+  const charlieFile = join(claude, 'charlie/SKILL.md');
+  writeFileSync(charlieFile, text('charlie', 'Updated body for versions.'));
+  const older = new Date(Date.now() - 15_000);
+  utimesSync(charlieFile, older, older);
+  const selMarket = join(scratch, 'select-market');
+  mkdirSync(join(selMarket, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(selMarket, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'local-market', owner: { name: 'Test' }, plugins: [{ name: 'kit', source: './plugins/kit', version: '1.0.0', description: 'Test kit.' }] }));
+  mkdirSync(join(selMarket, 'plugins/kit/skills/zulu'), { recursive: true });
+  writeFileSync(join(selMarket, 'plugins/kit/skills/zulu/SKILL.md'), text('zulu', 'Plugin skill.'));
+  writeFileSync(join(home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'local-market': { source: { source: 'directory', path: selMarket }, installLocation: selMarket } }));
+  writeFileSync(join(scratch, 'select-data/marketplaces.json'), JSON.stringify([selMarket]));
+  // Turn foxtrot off and back on so a skills pass runs immediately and records charlie's edit as a second version.
+  await a.click(`#${rowPart('switch', 'skills', 'foxtrot')}`);
+  await a.click('#outcome-undo');
+  await done();
+  await a.click('#header-refresh');
+  const beforeOpen = allFolders();
+  const histOpen0 = historyBefore();
+  const controlInfo = selector => a.run(`(e => e ? { disabled: !!e.disabled, title: e.title } : null)(document.querySelector(${JSON.stringify(selector)}))`);
+  await a.click('#library-select');
+  await a.click(`#${rowPart('open', 'skills', 'charlie')}`);
+  const charlieSwitch = `#${rowPart('enable', 'skills', 'charlie', 'claude-cli')}`;
+  const charlieDelete = `#${rowPart('delete', 'skills', 'charlie')}`;
+  const charlieCurrent = `#${rowPart('version-current', 'skills', 'charlie', '1')}`;
+  const charlieRead = `#${rowPart('version-read', 'skills', 'charlie', '0')}`;
+  const charlieFiles = `#${rowPart('files', 'skills', 'charlie')}`;
+  same('opened row in Select mode: tool switch, Delete… and Make current are dimmed with Done ends selecting; Read and Files stay live',
+    [await controlInfo(charlieSwitch), await controlInfo(charlieDelete), await controlInfo(charlieCurrent), (await controlInfo(charlieRead))?.disabled, (await controlInfo(charlieFiles))?.disabled],
+    [{ disabled: true, title: 'Done ends selecting' }, { disabled: true, title: 'Done ends selecting' }, { disabled: true, title: 'Done ends selecting' }, false, false]);
+  await a.run(`for (const s of ${JSON.stringify([charlieSwitch, charlieDelete, charlieCurrent])}) document.querySelector(s)?.click()`);
+  await a.settle();
+  same('clicking dimmed controls in an opened row changes nothing on disk or in History', [allFolders(), historyBefore()], [beforeOpen, histOpen0]);
+  await bulkShots('opened-row');
+  await fitsAtMinimum(a, 'opened row while selecting');
+  // Open file (Files and contents) works and its controls are live immediately on the first draw of the Files view.
+  await a.click(charlieFiles);
+  same('Files and contents opens the Files view with controls live immediately',
+    [await a.exists('#skill-detail'), (await controlInfo(`#${rowPart('delete', 'skills', 'charlie')}`))?.disabled, (await controlInfo(`#${rowPart('delete', 'skills', 'charlie')}`))?.title !== 'Done ends selecting'],
+    [true, false, true]);
+  await a.click('#files-back');
+  // Opened copy-question row (clash) in Select mode: Use this copy dimmed with Done ends selecting; Read both copies and Close live.
+  await a.click('#library-select');
+  await a.click(`#${rowPart('open', 'skills', 'clash')}`);
+  const clashUse = `#${rowPart('use', 'skills', 'clash', 'claude-cli')}`;
+  const clashRead = `#${rowPart('diff', 'skills', 'clash')}`;
+  same('opened differing row in Select mode: Use this copy dimmed with Done ends selecting; Read both copies live',
+    [await controlInfo(clashUse), (await controlInfo(clashRead))?.disabled],
+    [{ disabled: true, title: 'Done ends selecting' }, false]);
+  await a.run(`document.querySelector(${JSON.stringify(clashUse)})?.click()`);
+  await a.settle();
+  same('clicking dimmed Use this copy changes nothing', [allFolders(), historyBefore()], [beforeOpen, histOpen0]);
+  await bulkShots('opened-differs', async () => { await a.run(`document.querySelector('.details-differs')?.scrollIntoView({ block: 'center' })`); });
+  await a.click(`#${rowPart('close', 'skills', 'clash')}`);
+  same('row close button works in Select mode', await a.exists(clashUse), false);
+  // Opened plugin row (zulu) in Select mode: switch and line button dimmed; Show its SKILL.md and Its page live.
+  const zuluOpen = `[id="open-${zulu}"]`;
+  const zuluSwitch = `[id="enable-${zulu}-claude-cli"]`;
+  const zuluLine = `[id="line-${zulu}-copilot-cli"]`;
+  const zuluFile = `[id="pfile-${zulu}"]`;
+  const zuluFileShown = `[id="pfile-${zulu}-shown"]`;
+  const zuluPage = `[id="open-whole-${zulu}"]`;
+  await a.click(zuluOpen);
+  for (let tries = 0; tries < 40 && !(await a.exists(zuluLine)); tries++) await wait(100);
+  same('opened plugin row in Select mode: plugin switch and line button dimmed with Done ends selecting; Show file and Its page live',
+    [await controlInfo(zuluSwitch), await controlInfo(zuluLine), (await controlInfo(zuluFile))?.disabled, (await controlInfo(zuluPage))?.disabled],
+    [{ disabled: true, title: 'Done ends selecting' }, { disabled: true, title: 'Done ends selecting' }, false, false]);
+  await a.click(zuluFile);
+  same('Show its SKILL.md works in Select mode', await a.exists(zuluFileShown), true);
+  await a.click(zuluPage);
+  same('Its page works in Select mode and opens Plugin marketplaces', await a.exists('#nav-plugins[aria-current="page"]'), true);
+  await openKind(a, 'all');
+  // Escape inside an opened row ends the mode and re-enables the row's controls.
+  await a.click('#library-select');
+  await a.click(`#${rowPart('open', 'skills', 'charlie')}`);
+  await a.run(`document.querySelector(${JSON.stringify(charlieFiles)}).focus()`);
+  await a.press('Escape');
+  same('Escape inside an opened row ends Select mode, keeps row open, and re-enables its controls',
+    [await word(), await a.exists('#select-bar'), (await controlInfo(charlieSwitch))?.disabled, (await controlInfo(charlieDelete))?.disabled, (await controlInfo(charlieSwitch))?.title !== 'Done ends selecting'],
+    ['Select', false, false, false, true]);
+  await a.click(charlieSwitch);
+  same('after Escape/Done, the opened row’s tool switch works again', inAllTools('charlie').includes('.claude/skills'), false);
+  await a.click('#outcome-undo');
+  await done();
+  await a.click(`#${rowPart('open', 'skills', 'charlie')}`);
   // No Select on a tool's tab.
   await a.click('#nav-harnesses');
   await a.click('#harness-claude-cli');
@@ -12780,14 +12993,19 @@ async function selectFlow() {
     if (await o.exists('#select-delete')) await o.click('#select-delete');
   };
   await asking();
+  // An opened row's Delete is dimmed while selecting; remove the sole item externally to draw an empty Library while asking.
   await o.click(`#${rowPart('open', 'skills', 'solo')}`);
-  await o.click(`#${rowPart('delete', 'skills', 'solo')}`);
-  await o.click(`#${rowPart('delete-confirm', 'skills', 'solo')}`);
-  await soloDone();
-  check('its own Delete leaves the Library empty: no list drawn', !(await o.exists('.ov-row[data-key]')));
-  await o.click('#outcome-undo');
-  await soloDone();
-  same('its Undo brings the row back, and no mode, tick or question with it', [await o.exists(`#${rowPart('switch', 'skills', 'solo')}`), ...await soloMode()], [true, 'Select', false, false]);
+  same('opened row Delete is dimmed while selecting', await o.run(`(e => [!!e?.disabled, e?.title])(document.getElementById(${JSON.stringify(rowPart('delete', 'skills', 'solo'))}))`), [true, 'Done ends selecting']);
+  const soloRecord = readNow(join(solo, '.central-knot/skills.json'));
+  const soloCopy = readNow(join(solo, '.claude/skills/solo/SKILL.md'));
+  for (const root of ['.claude/skills/solo', '.copilot/skills/solo', '.codex/skills/solo']) rmSync(join(solo, root), { recursive: true, force: true });
+  rmSync(join(solo, '.central-knot/skills.json'), { force: true });
+  await o.click('#header-refresh');
+  check('emptying the Library draws no list', !(await o.exists('.ov-row[data-key]')));
+  writeFileSync(join(solo, '.central-knot/skills.json'), soloRecord);
+  skill(join(solo, '.claude/skills'), 'solo', soloCopy);
+  await o.click('#header-refresh');
+  same('when the row returns, no mode, tick or question came back with it', [await o.exists(`#${rowPart('switch', 'skills', 'solo')}`), ...await soloMode()], [true, 'Select', false, false]);
   await asking();
   const acme = soloMac.bundle(soloMac.applications, 'Acme Knot', 'com.centralknot.custom.acme');
   await o.click('#header-refresh');

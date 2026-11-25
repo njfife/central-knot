@@ -41,7 +41,7 @@ import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './cli
 import { followView, type SigninChecks } from './mcpsignin.ts';
 import { loadSessions, type SessionsDay } from './sessionspage.ts';
 import type { DayRows } from './sessionrow.ts';
-import { stopSelecting } from './selection.ts';
+import { selecting, stopSelecting } from './selection.ts';
 import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
@@ -662,10 +662,11 @@ const stillRead = (rows: NamedRow[], among: NamedRow[]) => [...groupBy(rows, row
  * one, is no row changed: Done changed) and what tools still read another way of them (stillRead). Its result names the rows
  * that changed, and only they flash; one Undo, only when every click that changed something has one, puts them back (undoClick).
  * `now`: what the rows changed are, where the result counts them instead of naming them ("All 10 are off"); `withoutUndo`: what
- * it adds where it offers no Undo, given how many changed; `stays`: it stays until closed or replaced (Outcome stays).
+ * it adds where it offers no Undo, given how many changed; `stays`: it stays until closed or replaced (Outcome stays); `reasons`:
+ * extra problem lines after any failures (rows a bulk Turn skipped, with why).
  */
 export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], stayed: string[]) => string,
-  { now = 'off', withoutUndo, stays }: { now?: 'off' | 'deleted'; withoutUndo?: (count: number) => string; stays?: boolean } = {}) => busy('Applying…', async page => {
+  { now = 'off', withoutUndo, stays, reasons: extra = [] }: { now?: 'on' | 'off' | 'deleted'; withoutUndo?: (count: number) => string; stays?: boolean; reasons?: string[] } = {}) => busy('Applying…', async page => {
   const several = new Set(clicks.map(click => click.kind)).size > 1, parts: { click: Click; done: Done }[] = [];
   for (const click of clicks) parts.push({ click, done: await carryOut(click, page) });
   const went = parts.filter(part => !part.done.refused), did = parts.filter(part => part.done.did), changed = parts.flatMap(part => part.done.changed ?? []);
@@ -684,7 +685,7 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], stayed:
   const after = !changed.length ? 'Nothing changed.' : through.length ? said(through, stillRead(through, all)) : `${countedAs(changed.length, asked.length, now)}.`;
   const back = changed.length && !undo ? withoutUndo?.(changed.length) : undefined;
   tellWritten({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(clicks.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn), stays,
-    text: [lead, after, back].filter(Boolean).join(' '), reasons: [...stops, ...went.flatMap(part => part.done.outcome.reasons ?? [])],
+    text: [lead, after, back].filter(Boolean).join(' '), reasons: [...stops, ...went.flatMap(part => part.done.outcome.reasons ?? []), ...extra],
     act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } }, parts.flatMap(part => part.done.reloads));
   for (const row of changed) flashRow(row);
   if (regroups) unpin();
@@ -1004,6 +1005,8 @@ export const whyReadOnly = (home: HomeView) => (!home.sync.access.allowed ? home
  * kind's own record stopping its writes alone (its view's gate is the home's, or its record's stop: types.ts LibraryView gate).
  */
 export const whyKindReadOnly = (home: HomeView, kind: PageKind) => whyReadOnly(home) ?? (home[kind].gate.state === 'stopped' ? home[kind].gate.reason : undefined);
+/** Why writing controls on the Library's list are off while Select's mode is active (selection.ts): none on any other view or page. */
+export const selectOff = (): string | undefined => (state.page === 'library' && state.libraryView === 'list' && selecting() ? 'Done ends selecting' : undefined);
 
 /**
  * Reads what a page shows beyond the home itself: History, Settings, Instructions, Sessions or Plugins, into its slot

@@ -67,7 +67,7 @@ Object.assign(globalThis, {
 Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh' } });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
-const { acting, applyClick, askFlash, closeResult, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, whyKindReadOnly, whyReadOnly,
+const { acting, applyByKind, applyClick, askFlash, closeResult, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, selectOff, whyKindReadOnly, whyReadOnly,
   loadHome, problemKey, queueClick, readAgain, restoreEvent, setRenderer, showPage, syncNow, state: app } = await import('../src/app.ts');
 const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, runReloads, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
@@ -1880,4 +1880,33 @@ test('On another plugin’s page (or after Refresh), the header omits "Last chan
   market.lastRun = { done: refused('alpha').done, undo: true, home: '/home', rest: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'remove' }] };
   market.nav = { source: '/market', tab: 'plugins', find: '', plugin: 'beta' };
   assert.equal(resultText(), '1 of 1 didn’t go through in every tool: alpha. ');
+});
+
+test('applyByKind supports now: "on" when every asked row has a tool failure, and appends extra reasons', async t => {
+  onLibrary();
+  homeWith(t, [{ kind: 'skills', key: 'alpha' }], { on: false });
+  const done = applyByKind(
+    [{ kind: 'skills', items: ['alpha'], rows: [{ kind: 'skills', key: 'alpha' }], changes: [{ key: 'alpha', on: true, except: [], seenOn: false }], said: '' }],
+    () => 'unused',
+    { now: 'on', stays: true, reasons: ['zulu: part of the plugin kit'] },
+  );
+  await settled();
+  await main.pass({ results: [{ item: 'alpha', harness: 'copilot-cli', outcome: 'failed', message: 'locked' }], writes: 0, made: ['on-alpha'], reloads: [] });
+  await done;
+  assert.equal(app.outcome?.text, '1 of 1 didn’t go through in every tool: alpha. 1 is on.');
+  assert.deepEqual(app.outcome?.reasons, ['zulu: part of the plugin kit']);
+  assert.equal(app.outcome?.stays, true);
+  // selectOff is active only on the Library's list while Select's mode is on, never on the Files view or another page.
+  const { startSelecting, stopSelecting } = await import('../src/selection.ts');
+  app.page = 'library';
+  app.libraryView = 'list';
+  assert.equal(selectOff(), undefined);
+  startSelecting();
+  assert.equal(selectOff(), 'Done ends selecting');
+  app.libraryView = 'files';
+  assert.equal(selectOff(), undefined);
+  app.libraryView = 'list';
+  app.page = 'harnesses';
+  assert.equal(selectOff(), undefined);
+  stopSelecting();
 });
