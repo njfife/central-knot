@@ -199,13 +199,27 @@ test('A rollout begun by an older Codex and resumed by a newer: each response on
   ]);
   const read = await readCodexRollout(file);
   assert.deepEqual(said(read.requests), [
-    ['2026-11-24T15:29:04.762Z 342', 'gpt-6-astra', tokens(220, 81, 41)],
-    ['2026-11-24T15:29:06.137Z 1686', 'gpt-6-astra', tokens(302, 1_000, 42)],
+    [`${THREAD} 2026-11-24T15:29:04.762Z 342`, 'gpt-6-astra', tokens(220, 81, 41)],
+    [`${THREAD} 2026-11-24T15:29:06.137Z 1686`, 'gpt-6-astra', tokens(302, 1_000, 42)],
     ['resp_3', 'gpt-6-astra', tokens(303, 2_000, 43)],
     ['resp_4', 'gpt-6-astra', tokens(304, 3_000, 44)],
-  ], 'an older count\'s id is its time and running total; a newer response\'s is its own');
+  ], 'an older count\'s id is its thread, its time and its running total; a newer response\'s is its own');
   assert.deepEqual(sum(read.requests), asTokens(total));
   assert.deepEqual(read.state.lastTotal, asTokens(total), 'every count moves the baseline, a recorded response\'s too');
+});
+
+test('Two threads whose older counts share a time and a running total give two request ids; a thread read twice gives the same ids', async () => {
+  const home = await newHome(), day = join(home, '.codex/sessions/2026/11/24'), other = '01a20e2c-be50-7391-8319-0e3b60899d85';
+  const older = (thread: string) => [
+    meta(thread), turn('gpt-6-astra', '2026-11-24T15:29:03.502Z'),
+    ...respond(runningTotal(), 'resp_1', '2026-11-24T15:29:04.762Z', counts(301, 81, 41), 'older'),
+  ];
+  await put(join(day, 'rollout-one.jsonl'), older(THREAD));
+  await put(join(day, 'rollout-two.jsonl'), older(other));
+  const ids = async (name: string) => (await readCodexRollout(join(day, name))).requests.map(each => each.request);
+  assert.deepEqual([await ids('rollout-one.jsonl'), await ids('rollout-two.jsonl'), await ids('rollout-one.jsonl')], [
+    [`${THREAD} 2026-11-24T15:29:04.762Z 342`], [`${other} 2026-11-24T15:29:04.762Z 342`], [`${THREAD} 2026-11-24T15:29:04.762Z 342`],
+  ]);
 });
 
 test('The older counter read in two goes: no response lost or doubled at the cut; and the file written again shorter is measured afresh', async () => {
@@ -230,7 +244,7 @@ test('The older counter read in two goes: no response lost or doubled at the cut
   await put(file, [meta(), turn('gpt-6-astra', '2026-11-24T16:00:00.000Z'), ...respond(shorter, 'resp_9', '2026-11-24T16:00:01.000Z', counts(5_000, 4_000, 500), 'older')]);
   const again = await readCodexRollout(file, second);
   assert.equal(again.position.ino, second.position.ino, 'the same file, shorter');
-  assert.deepEqual([again.startedOver, said(again.requests)], [true, [['2026-11-24T16:00:01.000Z 5500', 'gpt-6-astra', tokens(1_000, 4_000, 500)]]],
+  assert.deepEqual([again.startedOver, said(again.requests)], [true, [[`${THREAD} 2026-11-24T16:00:01.000Z 5500`, 'gpt-6-astra', tokens(1_000, 4_000, 500)]]],
     'its count is measured from nothing, not from the old file\'s last total');
 });
 
