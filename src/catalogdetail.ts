@@ -199,9 +199,12 @@ export function readHooks(tool: HarnessId | undefined, declaredIn: string, hooks
   return Object.keys(hooks).sort().flatMap(event => (Array.isArray(hooks[event]) ? hooks[event] : []).map(record)
     .flatMap(entry => (Array.isArray(entry?.hooks) ? entry.hooks.map(hook => ({ hook: record(hook), matcher: entry.matcher })) : [{ hook: entry, matcher: entry?.matcher }]))
     .map(({ hook, matcher }, at): DeclaredHook => {
-      const launch = launchOf(tool ?? (hook?.bash !== undefined || hook?.exec !== undefined ? 'copilot-cli' : 'claude-cli'), hook ?? {});
+      const target = tool ?? (hook?.bash !== undefined || hook?.exec !== undefined ? 'copilot-cli' : 'claude-cli');
+      const launch = launchOf(target, hook ?? {});
+      const type = launch && hook?.type !== undefined && hook.type !== 'command' ? String(hook.type) : '';
+      const shell = target === 'claude-cli' ? text(hook?.shell) : '';
       const timeout = hook?.timeoutSec ?? hook?.timeout, env = record(hook?.env);
-      return { declaredIn, event, at, ...(text(matcher) ? { matcher: text(matcher) } : {}), ...(launch ? { launch } : {}), ...(typeof timeout === 'number' ? { timeout } : {}),
+      return { declaredIn, event, at, ...(text(matcher) ? { matcher: text(matcher) } : {}), ...(launch ? { launch } : {}), ...(type ? { type } : {}), ...(shell ? { shell } : {}), ...(typeof timeout === 'number' ? { timeout } : {}),
         ...(text(hook?.cwd) ? { cwd: text(hook?.cwd) } : {}), ...(env ? { env: Object.fromEntries(Object.entries(env).map(([name, value]) => [name, text(value)])) } : {}) };
     }));
 }
