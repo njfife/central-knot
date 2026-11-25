@@ -17,7 +17,7 @@
 import { record, withoutBom } from './values.ts';
 import { lstat, mkdir, readFile, readlink, realpath, rmdir, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
-import { PLUGIN_ONLY } from './catalogdetail.ts';
+import { entryTransport, PLUGIN_ONLY } from './catalogdetail.ts';
 import { configRoot, harnesses, openCodeSettings } from './harnesses.ts';
 import { errorCode, exists, plainError, recoverParked, sha256, writeFileChecked, type ShareContext } from './share.ts';
 import { readJsonc, readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
@@ -102,9 +102,8 @@ function hostBound(name: string, server: NeutralServer): string | undefined {
 }
 
 export function fromJson(name: string, tool: HarnessId, file: string, raw: Record<string, unknown>): McpEntry {
-  const type = String(raw.type ?? (raw.url ? 'http' : 'stdio'));
   const server: NeutralServer = {
-    transport: type === 'sse' ? 'sse' : type === 'http' || type === 'streamable-http' ? 'http' : 'stdio',
+    transport: entryTransport(raw),
     command: typeof raw.command === 'string' ? raw.command : undefined, args: nonEmpty(list(raw.args)), env: nonEmpty(strings(raw.env)),
     cwd: typeof raw.cwd === 'string' ? raw.cwd : undefined, url: typeof raw.url === 'string' ? raw.url : undefined, headers: nonEmpty(strings(raw.headers)),
   };

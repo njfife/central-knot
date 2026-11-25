@@ -1190,10 +1190,9 @@ span.ins-confirm { margin-top: 0; }
    head row stays at the top of the page's scroll while the rows go under it ---------- */
 .signin-scroll { --signin-pad-top: 16px; display: flex; flex-direction: column; gap: 14px; padding: var(--signin-pad-top) var(--pad-end) 32px 16px; }
 .signin-scroll > * { flex: none; }
-.signin-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.signin-intro { margin: 0; max-width: 72ch; font-size: 12.5px; line-height: 1.55; color: var(--ink-soft); }
-.signin-intro + .signin-intro { margin-top: 6px; }
+.signin-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
 .signin-top > .btn { flex: none; }
+.signin-line { font-size: 12.5px; line-height: 1.55; color: var(--ink-soft); }
 .signin-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 12.5px; line-height: 1.45; }
 .signin-table th, .signin-table td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; font-weight: 400; vertical-align: top; overflow-wrap: anywhere; }
 .signin-table tbody tr:last-child > * { border-bottom: 0; }
@@ -1211,6 +1210,7 @@ span.ins-confirm { margin-top: 0; }
 .signin-when { font-size: 11.5px; color: var(--ink-soft); }
 .signin-server { display: block; font-weight: 600; color: var(--ink); }
 .signin-plugin { display: block; font-size: 11.5px; color: var(--ink-soft); }
+.signin-local { display: flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--ink-soft); }
 .signin-cell .signin-words { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; }
 .signin-words .btn { flex: none; }
 .signin-command { display: block; margin-top: 2px; font-family: var(--mono); font-size: 11px; line-height: 16px; color: var(--ink); }
