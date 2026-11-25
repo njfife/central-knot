@@ -1045,13 +1045,14 @@ export const reloadLines = (advice: ReloadAdvice): HTMLElement | null => (advice
  * acted on was (noticeLines), whatever the page shows; unmarked so the status bar says it too (app.ts paintStatusMessage), with no
  * ×, its actions only while it is the last result.
  */
-export function outcomeBand(cardResult?: Outcome): HTMLElement | null {
+export function outcomeBand(cardResult?: Outcome, omitProfile = false): HTMLElement | null {
   const outcome = cardResult ?? state.outcome;
   if (!outcome || (!cardResult && !outcomeShown(outcome, useTableShown())) || saidInStatusBar(outcome)) return null;
   // Item names are tokens in result text too, so "files" does not read as a word.
   const names = [...new Set([...(outcome.item ? [outcome.item] : []), ...(outcome.items ?? [])])].filter(Boolean).sort((a, b) => b.length - a.length);
   const text: (string | Node)[] = [];
-  let rest = outcome.text;
+  const strip = omitProfile && outcome.profileLine && outcome.text !== outcome.profileLine && outcome.text.endsWith(outcome.profileLine);
+  let rest = strip ? outcome.text.slice(0, -outcome.profileLine!.length).trimEnd() : outcome.text;
   // Quoted text (a commit's subject, say) is shown as written: a name inside it isn't an item named.
   const quoted = (at: number) => { const open = rest.lastIndexOf('“', at); return open >= 0 && rest.indexOf('”', open) > at; };
   while (rest) {
@@ -1147,7 +1148,8 @@ export function listResult(): HTMLElement[] {
   // Outcome kinds), so two alike are told apart.
   const table = useTableShown(), kinds = !table ? [] : table.tool || !state.home ? table.kinds : heldKinds(state.home);
   const kept = kinds.flatMap(kind => (lastResult(kind)?.results ?? []).filter(keptBack).map(problem => ({ kind, problem })));
-  const done = outcomeBand(), several = new Set([...kept.map(each => each.kind), ...(done ? state.outcome?.kinds ?? [] : [])]).size > 1;
+  const foldProfile = state.outcome !== undefined && state.shownWhole !== state.outcome && !!state.outcome.profileLine;
+  const done = outcomeBand(undefined, foldProfile), several = new Set([...kept.map(each => each.kind), ...(done ? state.outcome?.kinds ?? [] : [])]).size > 1;
   // The background's lines wait while a result or a click's problem line is on show, and come back with the next read after it.
   const background = !table || done || kept.length ? [] : backgroundProblems();
   // A tool's refusal is said in parts (problemLines): its kind where several, the item's name, then its tool and what failed. A
@@ -1166,9 +1168,10 @@ export function listResult(): HTMLElement[] {
   // With no problem line, Show all follows the sentence, for one the header cuts or whose reload sentences live under Show all.
   if (done && !lines.length) done.querySelector('.band-text')!.after(wholeToggle(state.outcome, 0, hasAdvice));
   const chips = !whole && advice ? reloadChips(advice, of) : null;
-  const problem = lines.length ? h(`div.band${chips ? '.result-row2' : ''}`, { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, of, hasAdvice), chips, done ? null : closeButton(close, { id: 'problems-dismiss' })) : null;
-  return [done, whole && advice ? reloadLines(advice) : !problem ? chips : null, problem]
-    .filter((band): band is HTMLElement => !!band);
+  const profile = done && !whole && state.outcome?.profileLine ? h('span.band-profile', {}, state.outcome.profileLine) : null;
+  const problem = lines.length ? h(`div.band${chips || profile ? '.result-row2' : ''}`, { role: 'status' }, profile, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, of, hasAdvice), chips, done ? null : closeButton(close, { id: 'problems-dismiss' })) : null;
+  const row2 = whole && advice ? reloadLines(advice) : problem ? null : profile ? h('div.result-row2.result-profile-row', {}, profile, chips) : chips;
+  return [done, row2, problem].filter((band): band is HTMLElement => !!band);
 }
 
 /**

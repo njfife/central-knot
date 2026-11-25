@@ -47,6 +47,7 @@ const api = {
   switchProfile: async (_id: string, _home: string): Promise<unknown> => null,
   saveProfile: async (_profile: unknown, _home: string): Promise<unknown> => null,
   deleteProfile: async (_id: string, _home: string): Promise<unknown> => null,
+  setSyncEverything: async (_on: boolean, _home: string, _first?: boolean): Promise<unknown> => null,
   // A home's usage, read as it opens (app.ts collectUsage): none here; one that failed would be said in the status bar.
   readUsage: async () => ({ at: '2026-11-20T00:00:00.000Z', tools: [] }),
 };
@@ -78,7 +79,7 @@ const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, runReload
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
 const { backgroundProblems, copyQuestion, headerNotices, libraryTable, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
-const { openWalkthrough, walkthroughBand } = await import('../src/firstsetup.ts');
+const { openWalkthrough, setupLead, walkthroughBand } = await import('../src/firstsetup.ts');
 const { pluginsResult } = await import('../src/pluginspage.ts');
 const { versionsList } = await import('../src/editparts.ts');
 const { timesApart } = await import('../src/model.ts');
@@ -2295,6 +2296,7 @@ test('Row switch ending Everyday appends profileLeftUse; on then off in one run 
   await main.pass(did('standup', true));
   assert.equal(app.outcome?.text, 'standup is on. Everyday stopped being the profile in use.');
   assert.equal(app.outcome?.profileEnded, true);
+  assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
 
   // Turning standup back off in the same run brings Everyday back: no profile sentence.
   nextView = viewWith({ notes: true, standup: false });
@@ -2303,6 +2305,7 @@ test('Row switch ending Everyday appends profileLeftUse; on then off in one run 
   await main.pass(did('standup', false));
   assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
   assert.equal(app.outcome?.profileEnded, undefined);
+  assert.equal(app.outcome?.profileLine, undefined);
 
   // New run: refused whole click adds no sentence even when the refreshed view matches no profile.
   closeResult();
@@ -2475,4 +2478,85 @@ test('Profile switches, profile definition edits/deletes, and home changes add n
   t.mock.method(api, 'selectHome', async () => viewWith({ notes: true, standup: true }, '/home-a'));
   await loadHome('fixture');
   assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
+});
+
+test('Two runs queued side by side on two tabs: only the first run says the profile stopped being in use', async t => {
+  start();
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:standup', 'mcp:github'] };
+  homeWith(t, [{ kind: 'skills', key: 'standup' }, { kind: 'mcp', key: 'github' }], { on: true });
+  const base = app.home!;
+  const viewWith = (skillOn: boolean, mcpOn: boolean): HomeView => {
+    const view = structuredClone(base);
+    view.skills.library.standup!.on = skillOn;
+    view.mcp.library.github!.on = mcpOn;
+    view.profiles = { profiles: [{ ...everyday, switchesPluginItems: true }], plugins: [] };
+    return view;
+  };
+  app.home = viewWith(true, true);
+  app.page = 'harnesses';
+  app.harness = 'claude-cli';
+  app.harnessTab = 'skills';
+  const refreshed = [viewWith(false, true), viewWith(false, false)];
+  t.mock.method(api, 'refresh', async () => refreshed.shift()!);
+
+  // First run starts on Claude Code's Skills tab (turning standup off ends Everyday).
+  queueClick({ kind: 'skills', key: 'standup' }, 'standup',
+    () => ({ kind: 'skills', items: ['standup'], rows: [{ kind: 'skills', key: 'standup' }], changes: [{ key: 'standup', on: false, except: [], seenOn: true }], said: 'standup is off.' }),
+    () => false);
+  await settled();
+  // While the first run is still running, switch to the MCP tab and queue a second run turning github off.
+  app.harnessTab = 'mcp';
+  queueClick({ kind: 'mcp', key: 'github' }, 'github',
+    () => ({ kind: 'mcp', items: ['github'], rows: [{ kind: 'mcp', key: 'github' }], changes: [{ key: 'github', on: false, except: [], seenOn: true }], said: 'github is off.' }),
+    () => false);
+  await settled();
+
+  // First run finishes (announced in status bar since MCP tab is open): names Everyday leaving use.
+  await main.pass(did('standup', false));
+  assert.equal(app.said.text, 'standup is off. Everyday stopped being the profile in use.');
+  // Second run starts and finishes after Everyday already left use: must NOT say Everyday stopped being in use.
+  await main.pass(did('github', false));
+  assert.equal(app.outcome?.text, 'github is off.');
+  assert.equal(app.outcome?.profileEnded, undefined);
+
+  // Clicking × (endRun) while a click is in flight still preserves that click's before-snapshot.
+  app.home = viewWith(true, true);
+  app.harnessTab = 'skills';
+  refreshed.push(viewWith(false, true));
+  queueClick({ kind: 'skills', key: 'standup' }, 'standup',
+    () => ({ kind: 'skills', items: ['standup'], rows: [{ kind: 'skills', key: 'standup' }], changes: [{ key: 'standup', on: false, except: [], seenOn: true }], said: 'standup is off.' }),
+    () => false);
+  await settled();
+  endRun();
+  await main.pass(did('standup', false));
+  assert.equal(app.outcome?.text, 'standup is off. Everyday stopped being the profile in use.');
+  assert.equal(app.outcome?.profileEnded, true);
+});
+
+test('First setup Yes opening the walkthrough carries its result without appending the profile sentence a second time', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
+  const { viewWith } = profileActWorld(t, { beforeOn: { notes: true, standup: false }, profiles: [everyday] });
+  const clash = {
+    key: 'clash', name: 'clash', description: '', on: false, copies: { 'claude-cli': { hash: 'a' }, 'copilot-cli': { hash: 'b' } },
+    except: [], cannot: {}, edited: [], takeInAnswers: { click: { wait: 'copies-differ' }, rule: { wait: 'copies-differ' } },
+  };
+  const before = viewWith({ notes: true, standup: false });
+  before.syncOn = true;
+  before.sync.syncEverything = undefined;
+  before.skills.items.push(clash as never);
+  const after = viewWith({ notes: true, standup: true });
+  after.syncOn = true;
+  after.sync.syncEverything = true;
+  after.skills.items.push(clash as never);
+  after.skills.notices = [{ kind: 'taken-in', items: ['standup'] } as never];
+  app.home = before;
+  app.page = 'overview';
+  t.mock.method(api, 'setSyncEverything', async () => ({ view: after, reloads: [] }));
+
+  findById(setupLead(app.home!)!, 'setup-yes').onclick();
+  await settled();
+  assert.equal(app.page, 'library');
+  const matches = (app.outcome?.text ?? '').match(/Everyday stopped being the profile in use\./g) ?? [];
+  assert.equal(matches.length, 1, `expected sentence once, got: ${app.outcome?.text}`);
+  assert.equal(app.outcome?.profileEnded, true);
 });

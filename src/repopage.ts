@@ -110,7 +110,7 @@ async function settle(result: RepoResult, done: string, note?: string, warn?: bo
   setHome(await api().refresh(), { reload: false });
   const moved = !!result.pulled || result.results.some(entry => entry.outcome === 'written' || entry.outcome === 'removed');
   if (result.stopped) announce(result.stopped, true);
-  else tell({ page: 'repo', text: done, note, warn, items }, '', moved ? undefined : false);
+  else tell({ page: 'repo', text: done, note, warn, items }, '', { checkProfile: moved });
 }
 
 const connect = () => busy('Connecting to the repo…', async () => {

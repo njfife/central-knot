@@ -11,12 +11,13 @@
 // Here: the list, the runs, a click's place in them, taking a waiting click back, and the state a row's switch is drawn in
 // meanwhile (wantedOn). Each route keeps its own work, its row while its click waits (the item lists draw the new state; Plugins
 // say "Waiting to…": pluginparts.ts clickNote) and its result with its Undo (app.ts sayRun; pluginstate.ts market.lastRun).
-import { afterActing, FADE_MS, homeReadOwed, profilesBefore, readHomeOnce, rerender, showActing, type PageKind, type ProfilesBefore } from './app.ts';
+import { afterActing, FADE_MS, homeReadOwed, readHomeOnce, rerender, showActing, type PageKind, type ProfilesBefore } from './app.ts';
 import type { RowKey } from './itemrow.ts';
 
 /**
  * A run of clicks: its place (an item list, or a tool's tab of one kind under Harnesses: app.ts placeNow; or Plugins),
- * when its last click ended (0 before one has), and the profiles in use when the run began (app.ts profilesBefore). Its clicks are the turns that name it.
+ * when its last click ended (0 before one has), and the profiles in use when its first click starts to be carried out
+ * (app.ts queueClick). Its clicks are the turns that name it.
  */
 export interface Run { place: string; lastAt: number; before?: ProfilesBefore }
 
@@ -46,13 +47,13 @@ const unended = (run: Run) => clickList.turns.filter(turn => turn.run === run &&
 export function runAt(place: string): Run {
   if (open?.place === place && (unended(open).length || Date.now() - open.lastAt < FADE_MS)) return open;
   drop(turn => turn.state === 'ended' && turn.run.place === place);
-  return (open = { place, lastAt: 0, before: profilesBefore() });
+  return (open = { place, lastAt: 0 });
 }
 
 /** The open run ends; its clicks still waiting or running go on as a run of their own, which says only them. */
 export function endRun(): void {
   const left = open ? unended(open) : [];
-  open = left.length ? { place: open!.place, lastAt: 0, before: profilesBefore() } : undefined;
+  open = left.length ? { place: open!.place, lastAt: 0 } : undefined;
   for (const turn of left) turn.run = open!;
 }
 
