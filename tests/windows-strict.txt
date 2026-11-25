@@ -24,6 +24,7 @@ tests/gitrepo-edits.test.ts
 tests/gitrepo-pull.test.ts
 tests/gitrepo.test.ts
 tests/held.test.ts
+tests/heldfile.test.ts
 tests/historyactions.test.ts
 tests/homepass.test.ts
 tests/instructionparts.test.ts

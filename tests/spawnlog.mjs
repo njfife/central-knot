@@ -18,9 +18,9 @@
 //   what is written, nor the order, the timers or a write through a file handle.
 // What no two runs share is written the same way on every run: the folders mkdtemp made (each process lists the ones it
 // makes in <folder>/made.jsonl, so a helper process's records name its test's folders too), the checkout, the home, the
-// record folder itself; and, when compared, ids, hashes, times, ports, process numbers and the test runner's slot (never a
-// stand-in's digest, and no other path). Each test file's records are compared as a multiset (its tests may start things
-// side by side), its liveness probes as a set (how often a wait asks depends on timing).
+// record folder itself; and, when compared, ids (a short one after a time too), hashes, times, ports, process numbers and
+// the test runner's slot (never a stand-in's digest, and no other path). Each test file's records are compared as a
+// multiset (its tests may start things side by side), its liveness probes as a set (how often a wait asks depends on timing).
 import { createHash } from 'node:crypto';
 import childProcess from 'node:child_process';
 import fs from 'node:fs';
@@ -57,6 +57,8 @@ const stable = (value, key, named) => {
     .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g, '<uuid>')
     .replace(/\b[0-9a-f]{16,}\b/g, '<hex>')
     .replace(/\d{4}-\d\d-\d\dT\d\d[-:]\d\d[-:]\d\d[-.:]\d{3}Z/g, '<time>')
+    // The short random part the app names a file by after a time: a backup (share.ts keepAsBackup), a plugin command's record.
+    .replace(/(<time>-(?:[a-z]+-cli-)?)[0-9a-f]{8}\b/g, '$1<id>')
     .replace(/(127\.0\.0\.1|localhost):\d+/g, '$1:<port>');
 };
 /**

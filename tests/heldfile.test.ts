@@ -267,7 +267,7 @@ test('a skill’s folder that stays held: the write gives up in plain words, the
     assert.equal(plainError(refusal), HELD, `refused with ${errorCode(refusal)}`);
     assert.match(await readFile(join(box.skill, 'SKILL.md'), 'utf8'), /Before\./);
     // The note written before the move stays: recovery reads notes only beside a folder moved aside (the report's "Seen, not done").
-    const leftBeside = async () => (await box.listed(claude)).map(name => name.replace(/[0-9a-f-]{36}/, '<id>'));
+    const leftBeside = async () => (await box.listed(claude)).map(name => name.replace(/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}/, '<id>'));
     assert.deepEqual(await leftBeside(), ['.ck-parked-<id>.json', 'skills']);
     await recoverFolders(box.context, 'claude-cli');
     assert.deepEqual(await leftBeside(), ['.ck-parked-<id>.json', 'skills']);
@@ -372,5 +372,22 @@ test('a skill’s copy whose place fills while its placement waits: what is ther
   try {
     assert.equal(await readFile(join(target, 'SKILL.md'), 'utf8'), 'made meanwhile\n');
     assert.deepEqual(await box.listed(join(box.home, '.claude')), ['skills']);
+  } finally { await box.cleanup(); }
+});
+
+test('a skill’s copy written over, whose place fills while the new one waits to go in: what is there stays, and the copy moved aside is kept beside it', { skip: windowsOnly }, async () => {
+  const box = await home(), claude = join(box.home, '.claude');
+  try {
+    const source = await newerSkill(box.base), expected = (await readTree(box.skill)).hash;
+    const restore = refuse('rename', 'EPERM', ([from, to]) => basename(from!).startsWith('.ck-stage-') && to === box.skill, async () => {
+      await mkdir(box.skill);
+      await writeFile(join(box.skill, 'SKILL.md'), 'made meanwhile\n');
+    });
+    try { await assert.rejects(swapFolder(box.context, source, box.skill, expected), { code: 'CK_EXISTS' }); } finally { restore(); }
+    assert.equal(await readFile(join(box.skill, 'SKILL.md'), 'utf8'), 'made meanwhile\n');
+    // Its way back is taken, so it stays beside, with its note gone: recovery does not put it back (the report's "Seen, not done").
+    const [parked, ...rest] = await box.listed(claude);
+    assert.deepEqual(rest, ['skills']);
+    assert.match(await readFile(join(claude, parked!, 'SKILL.md'), 'utf8'), /Before\./);
   } finally { await box.cleanup(); }
 });
