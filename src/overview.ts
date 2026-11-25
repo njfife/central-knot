@@ -3,14 +3,13 @@
 // on; what needs you (needsYou: one function, one order, nothing when nothing does; a tool that came under management by itself
 // last, until closed: arrivalLines, the one thing here kept for a home, by main.ts); a card per kind (kindCard: its counts and
 // whether it is in sync, then what the usage reading says of it); the usage strip (usageStrip, with one link to everything
-// unused); a row per managed tool
-// (toolsTable: its version, what it has of each kind and of plugins, its sessions in the last 30 days); and where every change
-// is kept. Nothing is stored, and opening it reads nothing more than the home's view. The figures come from that view, the usage
-// reading on show and its sum (matrix.ts usageOnShow, usageSums: usagerow.ts usageSummary), Harnesses' counts (harnesspage.ts
-// tally, pluginstatus.ts pluginsInstalled) and the update state (updateview.ts updateLine). While a home's first reading runs (matrix.ts
-// firstReadingRuns) every place a reading fills is drawn at its final size, so nothing moves when it lands. The Library opens
-// through matrix.ts openKind. Not here: the empty states every page shares (pages.ts noToolsLead, notRead, previewReason) and
-// first setup's question (firstsetup.ts setupLead).
+// unused); a row per managed tool (toolsTable: its version, what it has of each kind and of plugins, its sessions in the last
+// 30 days); and where every change is kept. Nothing is stored, and opening it reads nothing more than the home's view. The
+// figures come from that view, the usage reading on show and its sum (matrix.ts usageOnShow, usageSums, unusedCount:
+// usagerow.ts usageSummary), Harnesses' counts (harnesspage.ts tally, pluginstatus.ts pluginsInstalled) and the update state
+// (updateview.ts updateLine). While a home's first reading runs (matrix.ts firstReadingRuns) every place a reading fills is
+// drawn at its final size, so nothing moves when it lands. The Library opens through matrix.ts openKind. Not here: the empty
+// states every page shares (pages.ts noToolsLead, notRead, previewReason) and first setup's question (firstsetup.ts setupLead).
 import { absentKinds, collectUsage, homeTools, loadHome, noToolManaged, practiceNoteOpen, realHomeName, rerender, setPracticeNote } from './app.ts';
 import { acting, showPage, state, syncNow, whyReadOnly, type PageKind } from './app.ts';
 import { brandMark } from './brand.ts';
@@ -19,7 +18,7 @@ import { setupLead } from './firstsetup.ts';
 import { goHarness, tally } from './harnesspage.ts';
 import { anyOn, kindSource } from './itemrow.ts';
 import { asksWhichCopy, waitsForSync } from './libraryrow.ts';
-import { firstReadingRuns, kindGlyph, openKind, outcomeBand, problemsBesideStop, usageOnShow, usageSums } from './matrix.ts';
+import { firstReadingRuns, kindGlyph, openKind, outcomeBand, problemsBesideStop, unusedCount, usageOnShow, usageSums } from './matrix.ts';
 import { dayAndTime, dayWords, plural } from './model.ts';
 import { noToolsLead, notRead, previewReason } from './pages.ts';
 import { rowCount } from './pluginrows.ts';
@@ -155,9 +154,9 @@ function usedWords(total: number, sum: KindUsage | undefined): string {
 }
 
 /**
- * What the usage reading says of a kind: how many were used (usedWords), or why no tool can tell; and the three most used,
- * each a link to its row, its name shortened in the middle. Its four lines' room is held by style.css (.kind-card-usage),
- * so the card is as high before a reading lands as after.
+ * What the usage reading says of a kind: how many were used (usedWords), followed by either why no tool can tell or the three
+ * most used, each a link to its row with its name shortened in the middle. Its four lines' room is held by style.css
+ * (.kind-card-usage), so the card is as high before a reading lands as after.
  */
 function cardUsage(kind: PageKind, total: number, sum: KindUsage | undefined) {
   const used = usedWords(total, sum);
@@ -213,8 +212,7 @@ function kindCard(kind: PageKind, home: HomeView) {
 function usageStrip(kinds: readonly PageKind[]) {
   const read = usageOnShow();
   const now = state.usage.state === 'reading' ? 0 : state.usage.state === 'failed' || !read ? 2 : 1;
-  const sum = usageSums();
-  const unused = sum ? kinds.reduce((total, kind) => total + sum.kinds[kind].noUseSeen.length, 0) : 0;
+  const unused = unusedCount(kinds);
   const again = (label: string, id: string, shown: boolean) => button({ variant: 'link', size: 'micro', label, id: shown ? id : undefined, onclick: () => void collectUsage() });
   const unusedLink = unused ? h('button.btn.link.micro', {
     type: 'button',
