@@ -11114,11 +11114,13 @@ async function libraryFlow() {
     if (await tb.run(`document.body.classList.contains('rail')`)) await tb.click('#sidebar-toggle');
   };
   const wraps = () => tb.run(`document.querySelector('#main .toolbar').classList.contains('bar-wrap')`);
-  let [wrapped, oneLine] = [860, 1316];
+  // Select, at the toolbar's end, takes its room: with the sidebar open the bar wraps at 1316 (1108 px of content), as at 1280;
+  // at the owner's window, 1316 wide with the sidebar folded, it adds no line (selectFlow).
+  let [wrapped, oneLine] = [860, 1400];
   await openAt(wrapped);
   const wrapsAt860 = await wraps();
   await openAt(oneLine);
-  check('with the sidebar open, the bar wraps at 860 wide and keeps to one line at 1316', wrapsAt860 && !(await wraps()));
+  check('with the sidebar open, the bar wraps at 860 wide and keeps to one line at 1400', wrapsAt860 && !(await wraps()));
   while (oneLine - wrapped > 1) {
     const mid = (wrapped + oneLine) >> 1;
     await openAt(mid);
