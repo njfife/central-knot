@@ -3,6 +3,7 @@
 tests/agentmigrate.test.ts
 tests/agents.test.ts
 tests/agentswalk.test.ts
+tests/antigravity.test.ts
 tests/arrivals.test.ts
 tests/baseinstructions.test.ts
 tests/bundle.test.ts
@@ -28,6 +29,7 @@ tests/instructionparts.test.ts
 tests/instructions.test.ts
 tests/itemrow.test.ts
 tests/kindstore.test.ts
+tests/launch.test.ts
 tests/library.test.ts
 tests/librarygate.test.ts
 tests/librarypass.test.ts
@@ -63,6 +65,7 @@ tests/pluginupdates.test.ts
 tests/presence.test.ts
 tests/rates.test.ts
 tests/releasetag.test.ts
+tests/reload.test.ts
 tests/scratch.test.ts
 tests/search.test.ts
 tests/searchdocs.test.ts

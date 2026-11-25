@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, write
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { standIn } from './standin.ts';
 import { tomlValue } from '../src/textedit.ts';
 import { compareVersions } from '../src/values.ts';
 import { INLINE_SKILLS_CONFIG } from '../src/pluginstatus.ts';
@@ -241,7 +242,7 @@ test('Clones and pinned checkouts keep exact LF bytes (even under text=auto) and
   } finally { await box.cleanup(); }
 });
 
-test('The access check finds Git missing, and asks only once per source within one request', { skip: noPosix }, async () => {
+test('The access check finds Git missing, and asks only once per source within one request', async () => {
   const box = await sandbox();
   const savedPath = process.env.PATH;
   try {
@@ -402,7 +403,7 @@ test('Codex loads the copy it chooses from its cache: the highest version, or "l
   } finally { await box.cleanup(); }
 });
 
-test('A Git marketplace is checked, then read from a fresh shallow copy; the last copy stays browsable', { skip: noPosix }, async () => {
+test('A Git marketplace is checked, then read from a fresh shallow copy; the last copy stays browsable', async () => {
   const box = await sandbox();
   const server = spawn(process.execPath, [join(import.meta.dirname, '../scripts/git-http-fixture.mjs'), join(box.base, 'served'), '0']);
   try {
@@ -506,7 +507,47 @@ test('Codex is told the chosen home outright, since on Windows it finds its own 
   } finally { if (saved === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = saved; await box.cleanup(); }
 });
 
-test('A folder marketplace named through a link is the same marketplace, so it is listed once', { skip: noPosix }, async () => {
+test('A plugin command for a home that is not this computer’s own is given, on Windows, that home’s own variables; this computer’s own keeps the person’s', async () => {
+  const box = await sandbox();
+  const names = ['USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'APPDATA', 'LOCALAPPDATA', 'CODEX_HOME'];
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root);
+    const codex = await standIn(join(box.base, 'bin/codex'), `#!/bin/sh\necho "${names.map(name => `$${name}`).join('|')}" >> "$HOME/calls.txt"\nexit 3\n`,
+      `require("fs").appendFileSync(process.env.HOME + "/calls.txt", ${JSON.stringify(names)}.map(name => process.env[name] ?? "").join("|") + "\\n"); process.exitCode = 3;`);
+    /** What the first command of an install was given, run for the box's home as this computer's own (`actual`) or not. */
+    const given = async (actual: boolean) => {
+      await writeFile(join(box.home, 'calls.txt'), '');
+      await install({ ...box.context, actual, binaries: { 'codex-cli': codex } }, await parseCatalog(root, root, 'folder'), 'marker', 'codex-cli');
+      return Object.fromEntries((await readFile(join(box.home, 'calls.txt'), 'utf8')).split('\n')[0].split('|').map((value, at) => [names[at], value]));
+    };
+    // USERPROFILE and CODEX_HOME were the chosen home's for every home before; the person's own values otherwise.
+    const own = { ...Object.fromEntries(names.map(name => [name, process.env[name] ?? ''])), USERPROFILE: box.home, CODEX_HOME: join(box.home, '.codex') };
+    assert.deepEqual(await given(false), process.platform === 'win32' ? { USERPROFILE: box.home, HOMEDRIVE: box.home.slice(0, 2), HOMEPATH: box.home.slice(2),
+      APPDATA: join(box.home, 'AppData', 'Roaming'), LOCALAPPDATA: join(box.home, 'AppData', 'Local'), CODEX_HOME: join(box.home, '.codex') } : own);
+    assert.deepEqual(await given(true), own);
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin command for a home that is not this computer’s own is given no Copilot CLI home of the person’s, in whatever case Windows has its name', async () => {
+  const box = await sandbox();
+  // Windows reads a variable's name in any case: there the person's may be Copilot_Home.
+  const name = process.platform === 'win32' ? 'Copilot_Home' : 'COPILOT_HOME', saved = process.env[name];
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root);
+    const copilot = await standIn(join(box.base, 'bin/copilot'), '#!/bin/sh\necho "${COPILOT_HOME-none}" >> "$HOME/calls.txt"\nexit 3\n',
+      'require("fs").appendFileSync(process.env.HOME + "/calls.txt", (process.env.COPILOT_HOME ?? "none") + "\\n"); process.exitCode = 3;');
+    process.env[name] = join(box.base, 'his-copilot');
+    await install({ ...box.context, actual: false, binaries: { 'copilot-cli': copilot } }, await parseCatalog(root, root, 'folder'), 'marker', 'copilot-cli');
+    assert.equal((await readFile(join(box.home, 'calls.txt'), 'utf8')).split('\n')[0], 'none');
+  } finally {
+    if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
+    await box.cleanup();
+  }
+});
+
+test('A folder marketplace named through a link is the same marketplace, so it is listed once', async () => {
   const box = await sandbox();
   try {
     await symlink(box.home, join(box.base, 'linked'));
@@ -514,7 +555,7 @@ test('A folder marketplace named through a link is the same marketplace, so it i
   } finally { await box.cleanup(); }
 });
 
-test('A plugin from another repository is copied once; a pinned commit that can’t be read leaves no copy behind', { skip: noPosix }, async () => {
+test('A plugin from another repository is copied once; a pinned commit that can’t be read leaves no copy behind', async () => {
   const box = await sandbox();
   try {
     const repo = join(box.base, 'repo');
@@ -589,7 +630,7 @@ test('A repository key is spelled as Claude Code keys the Anthropic Directory, h
   assert.equal(repositoryKey('https://github.com/HubSpot/hubspot-mcp-plugins', 'HubSpot-Sales'), 'github.com/hubspot/hubspot-mcp-plugins#HubSpot-Sales');
 });
 
-test('A plugin Claude Code has from the Anthropic Directory is the marketplace’s same plugin, installed: Install runs nothing', { skip: noPosix }, async () => {
+test('A plugin Claude Code has from the Anthropic Directory is the marketplace’s same plugin, installed: Install runs nothing', async () => {
   const box = await sandbox();
   try {
     const root = join(box.base, 'market');
@@ -633,7 +674,7 @@ test('A directory install’s key is also read from plugin-directory-bindings.js
   } finally { await box.cleanup(); }
 });
 
-test('A directory install whose files are gone is held, not offered for Install: Claude Code would refuse the marketplace’s copy', { skip: noPosix }, async () => {
+test('A directory install whose files are gone is held, not offered for Install: Claude Code would refuse the marketplace’s copy', async () => {
   const box = await sandbox();
   try {
     const root = join(box.base, 'market');

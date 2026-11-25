@@ -5,7 +5,7 @@
 // Synchronize everything take-ins vs catch-up, Sync once, and History Restore.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { applyAgents, restoreAgent } from '../src/agents.ts';
@@ -26,11 +26,24 @@ import type { HarnessId } from '../src/types.ts';
 import type { PluginDone } from '../src/pluginplan.ts';
 import { repository, standInHosts } from './sourcerepo.ts';
 import { winLockSkip, withLock } from './fslock.ts';
+import { standIn } from './standin.ts';
 
 const ALL_FIVE: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
 const put = async (path: string, text: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, text); };
 const skillText = (name: string, body = 'Body.') => `---\nname: ${name}\ndescription: ${name} skill.\n---\n\n${body}\n`;
 const agentText = (name: string, body = 'Help.') => `---\nname: ${name}\ndescription: ${name} agent.\n---\n\n${body}\n`;
+/**
+ * Stand-ins for a tool's `plugin enable|disable <id>` (tests/standin.ts), as the tool's own command records it: Claude Code in
+ * enabledPlugins in its settings.json, Copilot CLI in its config.json (the plugin by name, or the first). Each is the Node code a
+ * shell script runs with `node -e`, or on Windows runs itself.
+ */
+const CLAUDE_SWITCH = 'const fs = require("fs"), p = process.env.HOME + "/.claude/settings.json"; const d = JSON.parse(fs.readFileSync(p, "utf8")); d.enabledPlugins[process.argv[3]] = process.argv[2] === "enable"; fs.writeFileSync(p, JSON.stringify(d));';
+const COPILOT_SWITCH = 'const fs = require("fs"), p = process.env.HOME + "/.copilot/config.json"; const d = JSON.parse(fs.readFileSync(p, "utf8")); const name = process.argv[3].split("@")[0]; for (const e of d.installedPlugins) if (e.name === name) e.enabled = process.argv[2] === "enable"; fs.writeFileSync(p, JSON.stringify(d));';
+const COPILOT_FIRST_SWITCH = 'const fs = require("fs"), p = process.env.HOME + "/.copilot/config.json"; const d = JSON.parse(fs.readFileSync(p, "utf8")); d.installedPlugins[0].enabled = process.argv[2] === "enable"; fs.writeFileSync(p, JSON.stringify(d));';
+const nodeStandIn = (path: string, js: string) => standIn(path, `#!/bin/sh\nnode -e '${js}' "$@"\n`, js);
+/** A stand-in whose every run writes `json` to `target`: a path, or one under `$HOME`, the home it is run in. */
+const writesFile = (path: string, json: string, target: string) => standIn(path, `#!/bin/sh\necho '${json}' > "${target}"\n`,
+  `require("fs").writeFileSync(${JSON.stringify(target)}.replace("$HOME", () => process.env.HOME), ${JSON.stringify(`${json}\n`)});`);
 
 async function tempHome(tools: HarnessId[] = ALL_FIVE) {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-reload-')));
@@ -154,11 +167,7 @@ test('Item 2: enabling a whole Claude Code plugin counts its actually enabled it
     const settingsPath = join(box.home, '.claude/settings.json');
     await put(settingsPath, JSON.stringify({ enabledPlugins: { 'kit@team': false } }));
     // Stub claude binary that flips enabledPlugins['kit@team'] in HOME/.claude/settings.json.
-    const fakeClaude = join(box.base, 'claude');
-    await put(fakeClaude, `#!/bin/sh
-node -e 'const fs = require("fs"), p = process.env.HOME + "/.claude/settings.json"; const d = JSON.parse(fs.readFileSync(p, "utf8")); d.enabledPlugins[process.argv[3]] = process.argv[2] === "enable"; fs.writeFileSync(p, JSON.stringify(d));' "$@"
-`);
-    await chmod(fakeClaude, 0o755);
+    const fakeClaude = await nodeStandIn(join(box.base, 'claude'), CLAUDE_SWITCH);
     const pctx: PluginContext = { home: box.home, dataDir: join(box.base, 'data'), binaries: { 'claude-cli': fakeClaude } };
     const report = await setWhole(pctx, 'team', 'kit', 'claude-cli', true, join(box.base, 'market'));
     assert.equal(report.changed, true);
@@ -490,11 +499,7 @@ test('Short list 2: setWhole keeps empty reloads array and profile switch never 
     }));
     await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'directory', path: join(box.base, 'market') } } }));
     await put(join(box.home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'empty-kit@team': false }, deniedMcpServers: [{ serverName: 'plugin:empty-kit:issues' }] }));
-    const fakeClaude = join(box.base, 'claude');
-    await put(fakeClaude, `#!/bin/sh
-node -e 'const fs = require("fs"), p = process.env.HOME + "/.claude/settings.json"; const d = JSON.parse(fs.readFileSync(p, "utf8")); d.enabledPlugins[process.argv[3]] = process.argv[2] === "enable"; fs.writeFileSync(p, JSON.stringify(d));' "$@"
-`);
-    await chmod(fakeClaude, 0o755);
+    const fakeClaude = await nodeStandIn(join(box.base, 'claude'), CLAUDE_SWITCH);
     const pctx: PluginContext = { home: box.home, dataDir: join(box.base, 'data'), binaries: { 'claude-cli': fakeClaude } };
     const report = await setWhole(pctx, 'team', 'empty-kit', 'claude-cli', true, join(box.base, 'market'));
     assert.equal(report.changed, true);
@@ -678,11 +683,7 @@ test('Whole plugin install and switch advise plugin-level reload per tool and wa
       { name: 'skills-kit', marketplace: 'team', cache_path: copilotSkills, version: '1.0.0', enabled: false },
       { name: 'mcp-kit', marketplace: 'team', cache_path: copilotMcp, version: '1.0.0', enabled: false },
     ] }));
-    const fakeCopilot = join(box.base, 'copilot');
-    await put(fakeCopilot, `#!/bin/sh
-node -e 'const fs = require("fs"), p = process.env.HOME + "/.copilot/config.json"; const d = JSON.parse(fs.readFileSync(p, "utf8")); const name = process.argv[3].split("@")[0]; for (const e of d.installedPlugins) if (e.name === name) e.enabled = process.argv[2] === "enable"; fs.writeFileSync(p, JSON.stringify(d));' "$@"
-`);
-    await chmod(fakeCopilot, 0o755);
+    const fakeCopilot = await nodeStandIn(join(box.base, 'copilot'), COPILOT_SWITCH);
     const copilotWays: ['cli' | 'app' | 'both', string][] = [
       ['cli', 'In Copilot CLI, start a new session.'],
       ['app', 'Restart the GitHub Copilot app.'],
@@ -725,11 +726,7 @@ node -e 'const fs = require("fs"), p = process.env.HOME + "/.copilot/config.json
       'mcp-kit@team': [{ scope: 'user', installPath: claudeMcp, version: '1.0.0' }],
     } }));
     await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'directory', path: market } } }));
-    const fakeClaude = join(box.base, 'claude');
-    await put(fakeClaude, `#!/bin/sh
-node -e 'const fs = require("fs"), p = process.env.HOME + "/.claude/settings.json"; const d = JSON.parse(fs.readFileSync(p, "utf8")); d.enabledPlugins[process.argv[3]] = process.argv[2] === "enable"; fs.writeFileSync(p, JSON.stringify(d));' "$@"
-`);
-    await chmod(fakeClaude, 0o755);
+    const fakeClaude = await nodeStandIn(join(box.base, 'claude'), CLAUDE_SWITCH);
     const claudeWays: ['cli' | 'app' | 'both', string, string][] = [
       ['cli', 'In Claude Code, type /reload-plugins.', 'Restart Claude Code (claude --continue keeps the chat).'],
       ['app', 'In Claude desktop’s Code tab, type /reload-plugins or start a new session.', 'Restart Claude desktop.'],
@@ -762,11 +759,7 @@ test('A plugin bringing only commands or hooks still says reload words when inst
     await put(join(claudeCache, '.claude-plugin/plugin.json'), '{"name":"cmd-only","version":"1.0.0"}');
     await put(join(claudeCache, 'commands/check.md'), '---\ndescription: Check.\n---\nRun check.\n');
     await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'directory', path: market } } }));
-    const fakeClaude = join(box.base, 'claude');
-    await put(fakeClaude, `#!/bin/sh
-echo '${JSON.stringify({ plugins: { 'cmd-only@team': [{ scope: 'user', installPath: claudeCache, version: '1.0.0' }] } })}' > "$HOME/.claude/plugins/installed_plugins.json"
-`);
-    await chmod(fakeClaude, 0o755);
+    const fakeClaude = await writesFile(join(box.base, 'claude'), JSON.stringify({ plugins: { 'cmd-only@team': [{ scope: 'user', installPath: claudeCache, version: '1.0.0' }] } }), '$HOME/.claude/plugins/installed_plugins.json');
     const catalog = await parseCatalog(market, market, 'folder');
     const claudeCtx: PluginContext = { home: box.home, dataDir: join(box.base, 'data'), binaries: { 'claude-cli': fakeClaude }, ways: { 'claude-cli': 'cli' } };
     const claudeInstall = await install(claudeCtx, catalog, 'cmd-only', 'claude-cli');
@@ -775,11 +768,7 @@ echo '${JSON.stringify({ plugins: { 'cmd-only@team': [{ scope: 'user', installPa
     const copilotCache = join(box.home, '.copilot/cache/team/hook-only');
     await put(join(copilotCache, 'hooks/hooks.json'), JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo ok' }] }] } }));
     await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { team: { source: { source: 'directory', path: market } } } }));
-    const fakeCopilot = join(box.base, 'copilot');
-    await put(fakeCopilot, `#!/bin/sh
-echo '${JSON.stringify({ installedPlugins: [{ name: 'hook-only', marketplace: 'team', cache_path: copilotCache, version: '1.0.0', enabled: true }] })}' > "$HOME/.copilot/config.json"
-`);
-    await chmod(fakeCopilot, 0o755);
+    const fakeCopilot = await writesFile(join(box.base, 'copilot'), JSON.stringify({ installedPlugins: [{ name: 'hook-only', marketplace: 'team', cache_path: copilotCache, version: '1.0.0', enabled: true }] }), '$HOME/.copilot/config.json');
     const copilotCtx: PluginContext = { home: box.home, dataDir: join(box.base, 'data'), binaries: { 'copilot-cli': fakeCopilot }, ways: { 'copilot-cli': 'cli' } };
     const copilotInstall = await install(copilotCtx, catalog, 'hook-only', 'copilot-cli');
     assert.equal(copilotInstall.message, 'Installed. In Copilot CLI, start a new session.');
@@ -850,11 +839,7 @@ test('A plugin updated while turned off emits no reload changes so no reload chi
     const record = join(box.home, '.claude/plugins/installed_plugins.json');
     await put(record, JSON.stringify({ plugins: { 'kit@team': [{ scope: 'user', installPath: oldCopy, version: '1.0.0' }] } }));
     await put(join(box.home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'kit@team': false } }));
-    const fakeClaude = join(box.base, 'claude');
-    await put(fakeClaude, `#!/bin/sh
-echo '${JSON.stringify({ plugins: { 'kit@team': [{ scope: 'user', installPath: newCopy, version: '2.0.0' }] } })}' > "${record}"
-`);
-    await chmod(fakeClaude, 0o755);
+    const fakeClaude = await writesFile(join(box.base, 'claude'), JSON.stringify({ plugins: { 'kit@team': [{ scope: 'user', installPath: newCopy, version: '2.0.0' }] } }), record);
     const pctx: PluginContext = { home: box.home, dataDir: join(box.base, 'data'), binaries: { 'claude-cli': fakeClaude }, ways: { 'claude-cli': 'cli' } };
     const report = await update(pctx, await parseCatalog(market, market, 'folder'), 'kit', 'claude-cli');
     assert.equal(report.changed, true);
@@ -876,15 +861,7 @@ test('A whole plugin turned off advises its tool’s plugin row while single-ite
     await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'directory', path: market } } }));
     await put(join(copilotCopy, 'skills/triage/SKILL.md'), skillText('triage'));
     await put(join(box.home, '.codex/plugins/cache/team/kit/1.0.0/skills/triage/SKILL.md'), skillText('triage'));
-    const fakeClaude = join(box.base, 'claude'), fakeCopilot = join(box.base, 'copilot');
-    await put(fakeClaude, `#!/bin/sh
-node -e 'const fs = require("fs"), p = process.env.HOME + "/.claude/settings.json"; const d = JSON.parse(fs.readFileSync(p, "utf8")); d.enabledPlugins[process.argv[3]] = process.argv[2] === "enable"; fs.writeFileSync(p, JSON.stringify(d));' "$@"
-`);
-    await put(fakeCopilot, `#!/bin/sh
-node -e 'const fs = require("fs"), p = process.env.HOME + "/.copilot/config.json"; const d = JSON.parse(fs.readFileSync(p, "utf8")); d.installedPlugins[0].enabled = process.argv[2] === "enable"; fs.writeFileSync(p, JSON.stringify(d));' "$@"
-`);
-    await chmod(fakeClaude, 0o755);
-    await chmod(fakeCopilot, 0o755);
+    const fakeClaude = await nodeStandIn(join(box.base, 'claude'), CLAUDE_SWITCH), fakeCopilot = await nodeStandIn(join(box.base, 'copilot'), COPILOT_FIRST_SWITCH);
     const cases: ['claude-cli' | 'copilot-cli' | 'codex-cli', 'cli' | 'app' | 'both', string][] = [
       ['claude-cli', 'cli', 'Turned off in Claude Code. In Claude Code, type /reload-plugins.'],
       ['claude-cli', 'app', 'Turned off in Claude Code. In Claude desktop’s Code tab, type /reload-plugins or start a new session.'],
