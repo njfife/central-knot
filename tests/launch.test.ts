@@ -1,6 +1,8 @@
-// How a program is started (src/launch.ts), as worked examples: on macOS and Linux exactly as asked; on Windows a .cmd or .bat
-// through cmd.exe, each argument arriving as it was given, through npm's own .cmd (which cmd reads twice) and any other (once);
-// an argument holding a line break refused, saying so; and what a home that is not this computer's own is named by there.
+// How a tool's command is started (src/launch.ts), as worked examples: on macOS and Linux exactly as asked; on Windows a .cmd
+// or .bat through cmd.exe: through npm's own .cmd (which cmd reads twice) every argument arrives as it was given; through
+// another (once), every argument without a double quote does, one with a quote is refused, and to one that reads its own
+// arguments a trailing backslash arrives doubled; an argument holding a line break is refused; and what a home that is not
+// this computer's own is named by there.
 // The examples that run a real .cmd run on Windows only, under the tests' Node and the packaged app's own
 // (scripts/windows-check.mjs --smoke runs this file under it).
 import { test } from 'node:test';
@@ -27,10 +29,10 @@ test('On Windows a program that is not a .cmd or .bat is started as asked', () =
   assert.deepEqual(launchCommand('C:\\Tools\\claude.exe', ['a b', '%PATH%'], 'win32'), { file: 'C:\\Tools\\claude.exe', args: ['a b', '%PATH%'], options: {} });
 });
 
-test('On Windows a .cmd runs through cmd.exe with delayed expansion off: each argument quoted as a program reads it, then each of cmd’s characters, in it and in the path, given a caret', () => {
+test('On Windows a .cmd runs through cmd.exe with delayed expansion off and no window: each argument quoted as a program reads it, then each of cmd’s characters, in it and in the path, given a caret', () => {
   const ran = launchCommand('C:\\My Tools (x86)\\a&b %PATH%\\tool.CMD', ['a b', 'say hi\\', '', '50%'], 'win32');
   assert.equal(ran.file, process.env.ComSpec ?? 'cmd.exe');
-  assert.deepEqual(ran.options, { windowsVerbatimArguments: true });
+  assert.deepEqual(ran.options, { windowsVerbatimArguments: true, windowsHide: true });
   assert.deepEqual(ran.args, ['/d', '/s', '/v:off', '/c', '"C:\\My^ Tools^ ^(x86^)\\a^&b^ ^%PATH^%\\tool.CMD ^"a^ b^" ^"say^ hi\\\\^" ^"^" ^"50^%^""']);
   assert.deepEqual(launchCommand('C:\\t\\old.bat', [], 'win32').args.at(-1), '"C:\\t\\old.bat"');
 });

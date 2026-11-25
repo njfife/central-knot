@@ -5,12 +5,11 @@
 // recognises as passing its arguments on.
 import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
-
-/** How every .cmd npm writes for an installed command begins (npm's cmd-shim, the same in its versions 6.0.2 and 9.0.2). */
-export const NPM_SHIM_HEAD = '@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n';
+import { NPM_SHIM_HEAD } from '../src/launch.ts';
 
 /**
- * npm's .cmd for `script`, a Node script beside it, as cmd-shim 9.0.2 writes it for a script that starts `#!/usr/bin/env node`;
+ * npm's .cmd for `script`, a Node script beside it, as cmd-shim 9.0.2 writes it for a script that starts `#!/usr/bin/env node`
+ * (its head is src/launch.ts NPM_SHIM_HEAD);
  * `node` is the one it falls back to when none is beside it (cmd-shim writes `node`, found on PATH; here, the one running the tests).
  */
 export const npmShim = (script: string, node = process.execPath) => `${NPM_SHIM_HEAD}\r\n`
