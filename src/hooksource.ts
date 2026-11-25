@@ -141,10 +141,10 @@ function tomlHookEntry(raw: string, event: string, at: number): string | undefin
 }
 
 /** Result of re-finding one hook on disk through its owner's readers (shared by readHookSource and hookrun.ts runHook). */
-export type FoundHook = { hook: DeclaredHook; pluginRoot?: string; hooksDisabled?: string } | { file?: string; problem: string };
+export type FoundHook = { hook: DeclaredHook; pluginRoot?: string; hooksDisabled?: string; pluginOff?: boolean } | { file?: string; problem: string };
 
 /** Re-reads the owner's hooks through the same readers the page uses (no network) and returns the folder bounding its declaring files. */
-async function findOwner(ctx: HookSourceContext, ref: HookSourceRef): Promise<{ hooks: DeclaredHook[]; unread: string[]; pluginRoot?: string; within: string; hooksDisabled?: string } | undefined> {
+async function findOwner(ctx: HookSourceContext, ref: HookSourceRef): Promise<{ hooks: DeclaredHook[]; unread: string[]; pluginRoot?: string; within: string; hooksDisabled?: string; pluginOff?: boolean } | undefined> {
   if (ref.from === 'own') {
     const root = toolConfigRoot(ctx, ref.tool);
     const { ownHooks = [], ownHooksUnread = [], ownHooksDisabled } = await sessionSettings(ref.tool, root);
@@ -156,7 +156,7 @@ async function findOwner(ctx: HookSourceContext, ref: HookSourceRef): Promise<{ 
     const install = (await installedPlugins(pluginCtx, ref.tool).catch(() => [])).find(candidate => candidate.plugin === ref.plugin && candidate.marketplace === ref.marketName);
     if (!install || install.state.state !== 'installed') return undefined;
     const { hooks, hooksUnread = [] } = await installedContents(ref.tool, install.state.path, install.entry, install.atMarketplaceRoot);
-    return { hooks, unread: hooksUnread, pluginRoot: install.state.path, within: install.state.path };
+    return { hooks, unread: hooksUnread, pluginRoot: install.state.path, within: install.state.path, ...(install.off ? { pluginOff: true } : {}) };
   }
   const copy = await ctx.marketplace?.(ref.marketName, ref.plugin);
   if (!copy) return undefined;
@@ -176,7 +176,12 @@ export async function findHook(ctx: HookSourceContext, ref: HookSourceRef): Prom
     const moved = owner.hooks.some(candidate => candidate.declaredIn === ref.declaredIn && candidate.event === ref.event && hookLine(candidate) === ref.command);
     return { problem: moved ? `${shown} changed since this page was read. Refresh to see it.` : `This hook is no longer in ${shown}.` };
   }
-  return { hook, ...(owner.pluginRoot ? { pluginRoot: owner.pluginRoot } : {}), ...(owner.hooksDisabled ? { hooksDisabled: owner.hooksDisabled } : {}) };
+  return {
+    hook,
+    ...(owner.pluginRoot ? { pluginRoot: owner.pluginRoot } : {}),
+    ...(owner.hooksDisabled ? { hooksDisabled: owner.hooksDisabled } : {}),
+    ...(owner.pluginOff ? { pluginOff: true } : {}),
+  };
 }
 
 /** Reads one hook's declaring entry and script text from disk on demand. */

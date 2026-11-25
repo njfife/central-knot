@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { findHook, readHookSource } from '../src/hooksource.ts';
 import { hookTimeoutSec, runHook, stopHookRun, stopHookRuns, whatHookWouldAdd, type HookRunContext } from '../src/hookrun.ts';
 import { pickStartSource } from '../src/pluginoutcomes.ts';
-import { sessionSettings } from '../src/pluginitems.ts';
+import { readPluginItems, sessionSettings } from '../src/pluginitems.ts';
 import { run } from '../src/plugins.ts';
 import { sessionStrip } from '../src/sessionhooks.ts';
 import type { HarnessId, HookSourceRef } from '../src/types.ts';
@@ -568,11 +568,17 @@ test('Gates and refusals: wrong home mode, Windows, uninstalled tool, plugin hoo
     const winRes = await runHook(box.ctx({ platform: 'win32' }), ref);
     assert.equal(winRes.outcome, 'refused');
     assert.match(winRes.problem ?? '', /Windows/);
-    // Plugin hooks refused in A1.
+    // Unmatched installed plugin ref, Copilot CLI installed plugin ref, and marketplace ref are refused.
     const pluginRef: HookSourceRef = { from: 'installed', tool: 'claude-cli', plugin: 'p', marketName: 'm', declaredIn: '/x', event: 'SessionStart', at: 0, command: 'echo x', fingerprint: 'fp' };
     assert.equal((await runHook(box.ctx(), pluginRef)).outcome, 'refused');
+    const copilotPluginRef: HookSourceRef = { from: 'installed', tool: 'copilot-cli', plugin: 'p', marketName: 'm', declaredIn: '/x', event: 'sessionStart', at: 0, command: 'echo x', fingerprint: 'fp' };
+    const copilotPluginRes = await runHook(box.ctx(), copilotPluginRef);
+    assert.equal(copilotPluginRes.outcome, 'refused');
+    assert.equal(copilotPluginRes.problem, 'Copilot CLI plugin hooks aren’t supported here.');
     const marketRef: HookSourceRef = { from: 'marketplace', plugin: 'p', marketName: 'm', declaredIn: '/x', event: 'SessionStart', at: 0, command: 'echo x', fingerprint: 'fp' };
-    assert.equal((await runHook(box.ctx(), marketRef)).outcome, 'refused');
+    const marketRes = await runHook(box.ctx(), marketRef);
+    assert.equal(marketRes.outcome, 'refused');
+    assert.equal(marketRes.problem, 'Marketplace hooks aren’t run.');
     // Uninstalled tool refused (codex not installed in this sandbox).
     await put(join(box.home, '.codex/hooks.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: `echo codex >> ${JSON.stringify(marker)}` }] }] } }));
     const codexRef = await box.ownRef('codex-cli', 0);
@@ -818,6 +824,317 @@ test('Fix list checks: signal exit, plugins.ts sync throw rejection, Codex disab
     const hookrunSrc = await readFile(join(import.meta.dirname, '../src/hookrun.ts'), 'utf8');
     assert.equal(hookrunSrc.includes('START_SOURCES'), false, 'hookrun.ts does not duplicate START_SOURCES');
   });
+});
+
+test('Installed Claude Code plugin hook runs from installed copy with CLAUDE_PLUGIN_ROOT, CLAUDE_PLUGIN_DATA (created on first use) and declared option', { skip: unixSkip, timeout: 15_000 }, async () => {
+  const box = await sandbox(['claude']);
+  try {
+    const marketCopy = join(box.base, 'market/plugins/helper');
+    const installPath = join(box.home, '.claude/plugins/cache/team.tools/helper/1.0.0');
+    const expectedData = join(box.home, '.claude/plugins/data/helper-team-tools');
+    await put(join(marketCopy, 'hooks/hello.sh'), '#!/bin/sh\necho "WRONG_MARKETPLACE_COPY"\n', 0o755);
+    await put(join(installPath, '.claude-plugin/plugin.json'), JSON.stringify({
+      name: 'helper',
+      version: '1.0.0',
+      userConfig: {
+        greeting: { description: 'Greeting text', default: 'default-hi' },
+        retries: { type: 'number', default: 3 },
+        strict: { type: 'boolean', default: true },
+        prefix: { type: 'string', default: 'x' },
+      },
+    }));
+    await put(join(installPath, 'hooks/hooks.json'), JSON.stringify({
+      hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: '${CLAUDE_PLUGIN_ROOT}/hooks/hello.sh' }] }] },
+    }));
+    await put(join(installPath, 'hooks/hello.sh'), '#!/bin/sh\nprintf "root=%s\\ndata=%s\\ngreeting=%s\\nretries=%s\\nstrict=%s\\nprefix=[%s]\\n" "$CLAUDE_PLUGIN_ROOT" "$CLAUDE_PLUGIN_DATA" "$CLAUDE_PLUGIN_OPTION_GREETING" "$CLAUDE_PLUGIN_OPTION_RETRIES" "$CLAUDE_PLUGIN_OPTION_STRICT" "$CLAUDE_PLUGIN_OPTION_PREFIX"\n', 0o755);
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({
+      version: 2,
+      plugins: { 'helper@team.tools': [{ scope: 'user', installPath, version: '1.0.0' }] },
+    }));
+    await put(join(box.home, '.claude/settings.json'), JSON.stringify({
+      pluginConfigs: {
+        'helper@team.tools': {
+          options: { greeting: 'hello-team', retries: 0, strict: false, prefix: '' },
+        },
+      },
+    }));
+
+    const items = await readPluginItems({ home: box.home, dataDir: box.data, binaries: {} }, ['claude-cli']);
+    const strip = sessionStrip('claude-cli', items, {})!;
+    const ref = strip.groups[0]!.hooks[0]!.source;
+    await assert.rejects(stat(expectedData), { code: 'ENOENT' }, 'data folder absent before first use');
+
+    const res = await runHook(box.ctx(), ref);
+    assert.equal(res.outcome, 'adds');
+    assert.equal(res.missingOptions, undefined);
+    assert.equal(res.added, `root=${installPath}\ndata=${expectedData}\ngreeting=hello-team\nretries=0\nstrict=false\nprefix=[]\n`);
+    assert.equal((await stat(expectedData)).isDirectory(), true, 'Claude Code data folder created on first use');
+
+    // Data folder creation failure (a file blocks the data folder path) refuses cleanly.
+    const blockedInstall = join(box.home, '.claude/plugins/cache/team.tools/blocked/1.0.0');
+    const blockedData = join(box.home, '.claude/plugins/data/blocked-team-tools');
+    await put(join(blockedInstall, 'hooks/hooks.json'), JSON.stringify({
+      hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo should-not-run' }] }] },
+    }));
+    await put(blockedData, 'not-a-directory');
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({
+      version: 2,
+      plugins: {
+        'helper@team.tools': [{ scope: 'user', installPath, version: '1.0.0' }],
+        'blocked@team.tools': [{ scope: 'user', installPath: blockedInstall, version: '1.0.0' }],
+      },
+    }));
+    const blockedItems = await readPluginItems({ home: box.home, dataDir: box.data, binaries: {} }, ['claude-cli']);
+    const blockedRef = sessionStrip('claude-cli', blockedItems, {})!.groups.find(g => g.name === 'blocked')!.hooks[0]!.source;
+    const blockedRes = await runHook(box.ctx(), blockedRef);
+    assert.equal(blockedRes.outcome, 'refused');
+    assert.equal(blockedRes.problem, 'Couldn’t create the plugin’s data folder.');
+  } finally { await box.done(); }
+});
+
+test('Installed Codex plugin hook substitutes all four braced variables, exports them in env, and does not create its data folder', { skip: unixSkip, timeout: 15_000 }, async () => {
+  const box = await sandbox(['codex']);
+  try {
+    const installPath = join(box.home, '.codex/plugins/cache/team.tools/helper/1.0.0');
+    const expectedData = join(box.home, '.codex/plugins/data/helper-team.tools');
+    await put(join(installPath, 'hooks/hooks.json'), JSON.stringify({
+      hooks: {
+        SessionStart: [{
+          matcher: 'startup',
+          hooks: [{ type: 'command', command: '${PLUGIN_ROOT}/hooks/hello.sh "${CLAUDE_PLUGIN_ROOT}" "${PLUGIN_DATA}" "${CLAUDE_PLUGIN_DATA}"' }],
+        }],
+      },
+    }));
+    await put(join(installPath, 'hooks/hello.sh'), '#!/bin/sh\nprintf "args=%s|%s|%s\\nenv=%s|%s|%s|%s\\n" "$1" "$2" "$3" "$PLUGIN_ROOT" "$CLAUDE_PLUGIN_ROOT" "$PLUGIN_DATA" "$CLAUDE_PLUGIN_DATA"\n', 0o755);
+    await put(join(box.home, '.codex/config.toml'), '[features]\nhooks = true\n\n[plugins."helper@team.tools"]\nenabled = true\n');
+
+    const items = await readPluginItems({ home: box.home, dataDir: box.data, binaries: {} }, ['codex-cli']);
+    const ref = sessionStrip('codex-cli', items, {})!.groups[0]!.hooks[0]!.source;
+    await assert.rejects(stat(expectedData), { code: 'ENOENT' }, 'Codex data folder absent before run');
+
+    const res = await runHook(box.ctx(), ref);
+    assert.equal(res.outcome, 'adds');
+    assert.equal(res.added, `args=${installPath}|${expectedData}|${expectedData}\nenv=${installPath}|${installPath}|${expectedData}|${expectedData}`);
+    await assert.rejects(stat(expectedData), { code: 'ENOENT' }, 'Codex data folder stays absent after run');
+  } finally { await box.done(); }
+});
+
+test('Installed plugin refusals: turned off in tool, tool hooks disabled after render, and changed declaration timeout', { skip: unixSkip, timeout: 15_000 }, async () => {
+  const box = await sandbox(['claude', 'codex']);
+  try {
+    const marker = join(box.base, 'plugin-refused.marker');
+    const claudeInstall = join(box.home, '.claude/plugins/cache/team/ReleaseHelper/1.0.0');
+    const claudeData = join(box.home, '.claude/plugins/data/ReleaseHelper-team');
+    const claudeHooks = join(claudeInstall, 'hooks/hooks.json');
+    await put(claudeHooks, JSON.stringify({
+      hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: `echo ran >> ${JSON.stringify(marker)} && echo hi`, timeout: 10 }] }] },
+    }));
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({
+      version: 2,
+      plugins: { 'ReleaseHelper@team': [{ scope: 'user', installPath: claudeInstall, version: '1.0.0' }] },
+    }));
+    const claudeRef = sessionStrip('claude-cli', await readPluginItems({ home: box.home, dataDir: box.data, binaries: {} }, ['claude-cli']), {})!.groups[0]!.hooks[0]!.source;
+
+    // 1. Plugin turned off in Claude Code after page read: View source still works, Run it refuses, no marker, no data dir.
+    await put(join(box.home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'ReleaseHelper@team': false } }));
+    assert.equal((await readHookSource({ home: box.home, mode: 'actual', dataDir: box.data }, claudeRef)).problem, undefined);
+    const claudeOff = await runHook(box.ctx(), claudeRef);
+    assert.equal(claudeOff.outcome, 'refused');
+    assert.equal(claudeOff.problem, 'ReleaseHelper is turned off in Claude Code.');
+    await assert.rejects(stat(claudeData), { code: 'ENOENT' });
+
+    // 2. Claude Code disableAllHooks after page read: View source works, Run it refuses, no data dir.
+    await put(join(box.home, '.claude/settings.json'), JSON.stringify({ disableAllHooks: true }));
+    assert.equal((await readHookSource({ home: box.home, mode: 'actual', dataDir: box.data }, claudeRef)).problem, undefined);
+    const claudeDisabled = await runHook(box.ctx(), claudeRef);
+    assert.equal(claudeDisabled.outcome, 'refused');
+    assert.equal(claudeDisabled.problem, 'Hooks are turned off in Claude Code’s settings (disableAllHooks).');
+    await assert.rejects(stat(claudeData), { code: 'ENOENT' });
+
+    // 3. Declaration timeout edited in place: refused with changed-since-read message matching readHookSource.
+    await put(join(box.home, '.claude/settings.json'), JSON.stringify({}));
+    await put(claudeHooks, JSON.stringify({
+      hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: `echo ran >> ${JSON.stringify(marker)} && echo hi`, timeout: 25 }] }] },
+    }));
+    const changedSrc = await readHookSource({ home: box.home, mode: 'actual', dataDir: box.data }, claudeRef);
+    const changedRun = await runHook(box.ctx(), claudeRef);
+    assert.equal(changedRun.outcome, 'refused');
+    assert.equal(changedRun.problem, changedSrc.problem);
+    assert.match(changedRun.problem ?? '', /changed since this page was read\. Refresh to see it\.$/);
+    await assert.rejects(stat(claudeData), { code: 'ENOENT' });
+
+    // 4. Codex: plugin turned off and tool hooks turned off after page read.
+    const codexInstall = join(box.home, '.codex/plugins/cache/team/helper/1.0.0');
+    await put(join(codexInstall, 'hooks/hooks.json'), JSON.stringify({
+      hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: `echo ran >> ${JSON.stringify(marker)} && echo hi` }] }] },
+    }));
+    await put(join(box.home, '.codex/config.toml'), '[features]\nhooks = true\n\n[plugins."helper@team"]\nenabled = true\n');
+    const codexRef = sessionStrip('codex-cli', await readPluginItems({ home: box.home, dataDir: box.data, binaries: {} }, ['codex-cli']), {})!.groups[0]!.hooks[0]!.source;
+
+    await put(join(box.home, '.codex/config.toml'), '[features]\nhooks = true\n\n[plugins."helper@team"]\nenabled = false\n');
+    assert.equal((await readHookSource({ home: box.home, mode: 'actual', dataDir: box.data }, codexRef)).problem, undefined);
+    const codexOff = await runHook(box.ctx(), codexRef);
+    assert.equal(codexOff.outcome, 'refused');
+    assert.equal(codexOff.problem, 'helper is turned off in Codex.');
+
+    await put(join(box.home, '.codex/config.toml'), '[features]\nhooks = false\n\n[plugins."helper@team"]\nenabled = true\n');
+    const codexHooksOff = await runHook(box.ctx(), codexRef);
+    assert.equal(codexHooksOff.outcome, 'refused');
+    assert.equal(codexHooksOff.problem, 'Hooks are turned off in Codex’s settings ([features] hooks = false).');
+
+    await put(join(box.home, '.codex/config.toml'), '[features]\ncodex_hooks = false\n\n[plugins."helper@team"]\nenabled = true\n');
+    const codexAliasOff = await runHook(box.ctx(), codexRef);
+    assert.equal(codexAliasOff.outcome, 'refused');
+    assert.equal(codexAliasOff.problem, 'Hooks are turned off in Codex’s settings ([features] codex_hooks = false).');
+
+    await assert.rejects(stat(marker), { code: 'ENOENT' }, 'no refused plugin hook ever executed');
+  } finally { await box.done(); }
+});
+
+test('Anthropic Directory plugin resolves View source and Run it; declared options without plain value flag missingOptions; ${user_config.} refused', { skip: unixSkip, timeout: 15_000 }, async () => {
+  const box = await sandbox(['claude']);
+  try {
+    // 1. Anthropic Directory plugin: View source and Run it both work.
+    const dirInstall = join(box.home, '.claude/plugins/cache/anthropic-plugin-directory/dir-helper/2.0.0');
+    const dirData = join(box.home, '.claude/plugins/data/dir-helper-anthropic-plugin-directory');
+    await put(join(dirInstall, 'hooks/hooks.json'), JSON.stringify({
+      hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: '${CLAUDE_PLUGIN_ROOT}/hooks/run.sh' }] }] },
+    }));
+    await put(join(dirInstall, 'hooks/run.sh'), '#!/bin/sh\nprintf "dir=%s|%s\\n" "$CLAUDE_PLUGIN_ROOT" "$CLAUDE_PLUGIN_DATA"\n', 0o755);
+
+    // 2. Plugin with declared options: one manifest default, one list-valued in settings.json, one unset (with stale env scrubbed), plus ${user_config.} hooks.
+    const optInstall = join(box.home, '.claude/plugins/cache/team/opt-plug/1.0.0');
+    const optData = join(box.home, '.claude/plugins/data/opt-plug-team');
+    await put(join(optInstall, '.claude-plugin/plugin.json'), JSON.stringify({
+      name: 'opt-plug',
+      version: '1.0.0',
+      userConfig: {
+        mode: { description: 'Mode', default: 'fast' },
+        tags: { description: 'List option' },
+        api_key: { description: 'Stored elsewhere' },
+      },
+    }));
+    await put(join(optInstall, 'hooks/hooks.json'), JSON.stringify({
+      hooks: {
+        SessionStart: [{
+          matcher: 'startup',
+          hooks: [
+            { type: 'command', command: 'printf "mode=%s|tags=[%s]|key=[%s]|stale=[%s]\\n" "$CLAUDE_PLUGIN_OPTION_MODE" "$CLAUDE_PLUGIN_OPTION_TAGS" "$CLAUDE_PLUGIN_OPTION_API_KEY" "$CLAUDE_PLUGIN_OPTION_API"' },
+            { type: 'command', command: 'echo ${user_config.mode}' },
+            { type: 'command', command: process.execPath, args: ['-e', 'console.log(process.argv[1])', '${user_config.mode}'] },
+          ],
+        }],
+      },
+    }));
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({
+      version: 2,
+      plugins: {
+        'dir-helper@anthropic-plugin-directory': [{ scope: 'user', installPath: dirInstall, version: '2.0.0' }],
+        'opt-plug@team': [{ scope: 'user', installPath: optInstall, version: '1.0.0' }],
+      },
+    }));
+    await put(join(box.home, '.claude/settings.json'), JSON.stringify({
+      pluginConfigs: { 'opt-plug@team': { options: { tags: ['a', 'b'] } } },
+    }));
+
+    const items = await readPluginItems({ home: box.home, dataDir: box.data, binaries: {} }, ['claude-cli']);
+    const strip = sessionStrip('claude-cli', items, {})!;
+    const dirRef = strip.groups.find(g => g.name === 'dir-helper')!.hooks[0]!.source;
+    const dirSrc = await readHookSource({ home: box.home, mode: 'actual', dataDir: box.data }, dirRef);
+    assert.equal(dirSrc.problem, undefined);
+    assert.match(dirSrc.script?.text ?? '', /dir=/);
+    const dirRes = await runHook(box.ctx(), dirRef);
+    assert.equal(dirRes.outcome, 'adds');
+    assert.equal(dirRes.added, `dir=${dirInstall}|${dirData}\n`);
+
+    const optHooks = strip.groups.find(g => g.name === 'opt-plug')!.hooks.map(h => h.source);
+    // ${user_config.} in shell form and exec form both refused before creating data folder!
+    const shellUc = await runHook(box.ctx(), optHooks[1]!);
+    assert.equal(shellUc.outcome, 'refused');
+    assert.equal(shellUc.problem, 'This hook’s command uses a plugin option, which isn’t supported here.');
+    const execUc = await runHook(box.ctx(), optHooks[2]!);
+    assert.equal(execUc.outcome, 'refused');
+    assert.equal(execUc.problem, 'This hook’s command uses a plugin option, which isn’t supported here.');
+    await assert.rejects(stat(optData), { code: 'ENOENT' }, 'data folder not created on ${user_config.} refusal');
+
+    // Missing/list options: runs with manifest default, scrubs stale CLAUDE_PLUGIN_OPTION_API, sets missingOptions: true.
+    const optRes = await runHook(box.ctx({ env: { ...box.baseEnv, CLAUDE_PLUGIN_OPTION_API_KEY: 'inherited-stale' } }), optHooks[0]!);
+    assert.equal(optRes.outcome, 'adds');
+    assert.equal(optRes.missingOptions, true);
+    assert.equal(optRes.added, 'mode=fast|tags=[]|key=[]|stale=[]\n');
+  } finally { await box.done(); }
+});
+
+test('Spaced install paths work in both shell and exec launch forms, and one plugin installed in two tools runs each tool’s own copy', { skip: unixSkip, timeout: 15_000 }, async () => {
+  const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-hookrun-space dir-')));
+  try {
+    const home = join(base, 'my home');
+    const tools = join(base, 'tools');
+    const data = join(base, 'data');
+    await mkdir(home, { recursive: true });
+    await mkdir(join(tools, '.local/bin'), { recursive: true });
+    for (const bin of ['claude', 'codex']) await standIn(join(tools, '.local/bin', bin), '#!/bin/sh\necho "1.0.0"\n', 'console.log("1.0.0");');
+
+    // Same plugin installed in Claude Code and Codex, inside a home path containing a space.
+    const claudeInstall = join(home, '.claude/plugins/cache/team/dual/1.0.0');
+    const claudeData = join(home, '.claude/plugins/data/dual-team');
+    const codexInstall = join(home, '.codex/plugins/cache/team/dual/1.0.0');
+    const codexData = join(home, '.codex/plugins/data/dual-team');
+    await put(join(claudeInstall, 'hooks/hello.sh'), '#!/bin/sh\nprintf "claude-shell|%s|%s\\n" "$1" "$2"\n', 0o755);
+    await put(join(claudeInstall, 'hooks/exec.mjs'), 'console.log(`claude-exec|${process.argv.slice(2).length}|${process.argv[2]}|${process.argv[3]}`);\n');
+    await put(join(claudeInstall, 'hooks/hooks.json'), JSON.stringify({
+      hooks: {
+        SessionStart: [{
+          matcher: 'startup',
+          hooks: [
+            { type: 'command', command: '"${CLAUDE_PLUGIN_ROOT}/hooks/hello.sh" "${CLAUDE_PLUGIN_DATA}" "${CLAUDE_PROJECT_DIR}"' },
+            { type: 'command', command: process.execPath, args: ['${CLAUDE_PLUGIN_ROOT}/hooks/exec.mjs', '${CLAUDE_PLUGIN_DATA}', '${CLAUDE_PLUGIN_ROOT}'] },
+            { type: 'command', command: '${CLAUDE_PLUGIN_ROOT}/hooks/hello.sh', args: ['${CLAUDE_PLUGIN_DATA}', '${CLAUDE_PROJECT_DIR}'] },
+          ],
+        }],
+      },
+    }));
+    await put(join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({
+      version: 2,
+      plugins: { 'dual@team': [{ scope: 'user', installPath: claudeInstall, version: '1.0.0' }] },
+    }));
+
+    await put(join(codexInstall, 'hooks/hello.sh'), '#!/bin/sh\nprintf "codex-copy|%s|%s\\n" "$1" "$2"\n', 0o755);
+    await put(join(codexInstall, 'hooks/hooks.json'), JSON.stringify({
+      hooks: {
+        SessionStart: [{
+          matcher: 'startup',
+          hooks: [{ type: 'command', command: '"${PLUGIN_ROOT}/hooks/hello.sh" "${PLUGIN_DATA}" "${CLAUDE_PLUGIN_ROOT}"' }],
+        }],
+      },
+    }));
+    await put(join(home, '.codex/config.toml'), '[features]\nhooks = true\n\n[plugins."dual@team"]\nenabled = true\n');
+
+    const ctx: HookRunContext = {
+      home, mode: 'actual', dataDir: data, toolsHome: tools, searchPath: process.env.PATH ?? '/usr/bin:/bin',
+      env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: home },
+    };
+    const items = await readPluginItems({ home, dataDir: data, binaries: {} }, ['claude-cli', 'codex-cli']);
+    const claudeHooks = sessionStrip('claude-cli', items, {})!.groups[0]!.hooks.map(h => h.source);
+    const codexHook = sessionStrip('codex-cli', items, {})!.groups[0]!.hooks[0]!.source;
+
+    const shellRes = await runHook(ctx, claudeHooks[0]!);
+    assert.equal(shellRes.outcome, 'adds');
+    assert.equal(shellRes.added, `claude-shell|${claudeData}|${home}\n`);
+
+    const execNodeRes = await runHook(ctx, claudeHooks[1]!);
+    assert.equal(execNodeRes.outcome, 'adds');
+    assert.equal(execNodeRes.added, `claude-exec|2|${claudeData}|${claudeInstall}\n`);
+
+    const execProgRes = await runHook(ctx, claudeHooks[2]!);
+    assert.equal(execProgRes.outcome, 'adds');
+    assert.equal(execProgRes.added, `claude-shell|${claudeData}|${home}\n`);
+
+    const codexRes = await runHook(ctx, codexHook);
+    assert.equal(codexRes.outcome, 'adds');
+    assert.equal(codexRes.added, `codex-copy|${codexData}|${codexInstall}`);
+    await assert.rejects(stat(codexData), { code: 'ENOENT' }, 'Codex data folder stays absent even when Claude created its own');
+  } finally { await rm(base, { recursive: true, force: true }); }
 });
 
 // Last in this file: Quit closes the door to new hook runs for the rest of the process, as it does for the app.

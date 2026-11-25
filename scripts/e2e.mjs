@@ -12623,6 +12623,7 @@ async function hookRunFlow() {
   putScript('bin/copilot-plain.sh', '#!/bin/sh\necho "plain text ignored by copilot"\n');
   const claudeSettings = join(home, '.claude/settings.json');
   const initialClaudeJson = JSON.stringify({
+    pluginConfigs: { [`release-helper@${marketName}`]: { options: { team_note: 'Tuesday-releases' } } },
     hooks: {
       SessionStart: [{
         matcher: 'startup',
@@ -12652,13 +12653,27 @@ async function hookRunFlow() {
   mkdirSync(dirname(claudeSettings), { recursive: true });
   writeFileSync(claudeSettings, initialClaudeJson);
   writeFileSync(join(home, '.claude/CLAUDE.md'), '# Workspace rules\n- Keep things simple.\n');
+  const pluginMarker = join(home, 'plugin-marker.txt');
+  const claudePluginRoot = join(home, '.claude/plugins/cache', marketName, 'release-helper/0.4.1');
+  const claudePluginData = join(home, '.claude/plugins/data', `release-helper-${marketName}`);
   writeClaudeInstall(home, marketName, 'release-helper', '0.4.1', {
-    'hooks/hooks.json': JSON.stringify({ hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: 'echo plugin-hook' }] }] } }),
+    '.claude-plugin/plugin.json': JSON.stringify({ name: 'release-helper', version: '0.4.1', userConfig: { team_note: { description: 'Release note' } } }),
+    'hooks/hooks.json': JSON.stringify({ hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: '${CLAUDE_PLUGIN_ROOT}/hooks/hello.sh' }] }] } }),
+    'hooks/hello.sh': `#!/bin/sh\necho ran >> ${JSON.stringify(pluginMarker)}\nprintf 'root=%s\\ndata=%s\\nnote=%s\\n' "$CLAUDE_PLUGIN_ROOT" "$CLAUDE_PLUGIN_DATA" "$CLAUDE_PLUGIN_OPTION_TEAM_NOTE"\n`,
   });
+  chmodSync(join(claudePluginRoot, 'hooks/hello.sh'), 0o755);
   writeFileSync(join(home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ [marketName]: { source: { source: 'git', url: market } } }));
   mkdirSync(join(home, '.codex'), { recursive: true });
   writeFileSync(join(home, '.codex/AGENTS.md'), '# Codex rules\n');
-  writeFileSync(join(home, '.codex/config.toml'), '[features]\ncodex_hooks = false\n\n[[hooks.SessionStart]]\nmatcher = "startup"\n\n[[hooks.SessionStart.hooks]]\ntype = "command"\ncommand = "~/bin/codex-hook.sh"\n');
+  const codexPluginRoot = join(home, '.codex/plugins/cache', marketName, 'release-helper/0.4.1');
+  const codexPluginData = join(home, '.codex/plugins/data', `release-helper-${marketName}`);
+  mkdirSync(join(codexPluginRoot, 'hooks'), { recursive: true });
+  writeFileSync(join(codexPluginRoot, 'hooks/hooks.json'), JSON.stringify({
+    hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: '${PLUGIN_ROOT}/hooks/codex-hello.sh' }] }] },
+  }));
+  writeFileSync(join(codexPluginRoot, 'hooks/codex-hello.sh'), '#!/bin/sh\nprintf "codex-root=%s\\ncodex-data=%s\\n" "$PLUGIN_ROOT" "$PLUGIN_DATA"\n', { mode: 0o755 });
+  const codexConfig = join(home, '.codex/config.toml');
+  writeFileSync(codexConfig, `[features]\ncodex_hooks = false\n\n[plugins."release-helper@${marketName}"]\nenabled = true\n\n[[hooks.SessionStart]]\nmatcher = "startup"\n\n[[hooks.SessionStart.hooks]]\ntype = "command"\ncommand = "~/bin/codex-hook.sh"\n`);
   mkdirSync(join(home, '.copilot/hooks'), { recursive: true });
   writeFileSync(join(home, '.copilot/hooks/prompt-only.json'), JSON.stringify({ version: 1, hooks: { userPromptSubmitted: [{ type: 'command', bash: './prompt-only.sh' }] } }));
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'actual' }, closeExplained: true }));
@@ -12706,7 +12721,7 @@ async function hookRunFlow() {
   await steady();
   await waitFor(`!!document.querySelector('#session-claude-cli')`);
   await redrawUnder(a, '#session-claude-cli .session-title');
-  same('nothing ran on opening Instructions, Refresh, or a redraw landing', markerCount(), 0);
+  same('nothing ran on opening Instructions, Refresh, or a redraw landing', [markerCount(), existsSync(pluginMarker)], [0, false]);
 
   // Check 3: standing line on runnable strips, none on non-runnable; Copilot prompt-only note; Codex T2.28 note; T1.23 once & <= 30 words.
   same('standing warning is on Claude Code and Codex strips and absent on Copilot CLI prompt-only strip',
@@ -12722,17 +12737,59 @@ async function hookRunFlow() {
   })()`);
   check('T1.23 info mark appears once on the page with exact wording and <= 30 words',
     helpInfo.count === 1 && helpInfo.id === 'session-hooks-info' && helpInfo.words <= 30
-    && helpInfo.card === 'Session-start and prompt command hooks; URL, MCP, project and organisation hooks aren’t listed. Run it runs in your home folder, or in the folder the hook names.', helpInfo);
-  const pluginRow = await rowOf('session-claude-cli', 'echo plugin-hook');
-  same('installed plugin hook row on Instructions has View source alone and no Run it', [!!pluginRow?.srcId, pluginRow?.runId], [true, null]);
+    && helpInfo.card === 'Session-start and prompt command hooks; not URL, MCP, project or organisation. Run it runs in your home or the hook’s folder. Plugin hooks can change their installed files and data.', helpInfo);
+  const pluginRow = await rowOf('session-claude-cli', 'hello.sh');
+  const codexPluginRow = await rowOf('session-codex-cli', 'codex-hello.sh');
+  same('installed plugin hook rows on Instructions have Run it and View source for Claude Code and Codex',
+    [!!pluginRow?.srcId, !!pluginRow?.runId, !!codexPluginRow?.srcId, !!codexPluginRow?.runId],
+    [true, true, true, true]);
 
-  // Picture: before clicking Run it (860 sidebar open + 1316×820 sidebar open, light & dark) and T1.23 card open.
+  // Picture: before clicking Run it (860 sidebar open + 1316×820 sidebar open, light & dark), plugin row before, and T1.23 card open.
   await pictures('before', '#session-claude-cli', bothSizes);
+  await pictures('plugin-before', `#session-claude-cli .session-group:has(#${pluginRow.runId})`, bothSizes);
   if (shots) {
+    await sizeTo(a, 1316, 820);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    await a.run(`document.querySelector('#session-claude-cli')?.scrollIntoView({ block: 'start' })`);
+    await steady();
     await a.click('#session-hooks-info');
-    await pictures('t1-23-card', '#session-claude-cli');
+    await steady();
+    for (const scheme of ['light', 'dark']) {
+      await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] });
+      await steady();
+      await a.shot(`t1-23-card-1316x820-${scheme}`);
+    }
     await a.press('Escape');
+    await a.send('Emulation.setEmulatedMedia', { features: [] });
+    await fullSize(a);
   }
+
+  // Worked example 1 & 3 (plugin hook): Claude Code installed plugin hook runs with root, data (created on first use) and option, fits at 860 & 1316, then refuses once turned off.
+  same('Claude Code plugin data folder absent before first run', existsSync(claudePluginData), false);
+  const pluginRes = await runAndWait('session-claude-cli', 'hello.sh');
+  check('Claude Code plugin hook shows Would add with installed root, data path and option',
+    /^Would add run in ~, /.test(pluginRes) && pluginRes.includes(`root=${claudePluginRoot}`)
+    && pluginRes.includes(`data=${claudePluginData}`) && pluginRes.includes('note=Tuesday-releases'), pluginRes);
+  same('Claude Code plugin data folder created on first run', existsSync(claudePluginData), true);
+  for (const [w, h] of [[860, 560], [1316, 820]]) {
+    await sizeTo(a, w, h);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    await a.run(`document.getElementById(${JSON.stringify(pluginRow.runId)})?.closest('.session-hook')?.scrollIntoView({ block: 'start' })`);
+    await a.settle();
+    same(`plugin hook result fits without horizontal overflow at ${w}×${h} with sidebar open`,
+      await a.run(`(() => { const sc = document.getElementById('instructions-scroll'); return sc.scrollWidth <= sc.clientWidth + 1; })()`), true);
+  }
+  await fullSize(a);
+  await pictures('plugin-result', `#session-claude-cli .session-group:has(#${pluginRow.runId})`, bothSizes);
+  const pluginCountAfterRun = readNow(pluginMarker).trim().split('\n').filter(Boolean).length;
+  writeFileSync(claudeSettings, JSON.stringify({ ...JSON.parse(initialClaudeJson), enabledPlugins: { [`release-helper@${marketName}`]: false } }, null, 2));
+  const pluginOffRes = await runAndWait('session-claude-cli', 'hello.sh');
+  check('turning the plugin off after page read refuses Run it and leaves no marker',
+    pluginOffRes.includes('Not run: release-helper is turned off in Claude Code.')
+    && readNow(pluginMarker).trim().split('\n').filter(Boolean).length === pluginCountAfterRun, pluginOffRes);
+  await pictures('plugin-refused', `#session-claude-cli .session-group:has(#${pluginRow.runId})`);
+  await a.run(`document.getElementById(${JSON.stringify(pluginRow.runId)})?.closest('.session-hook')?.querySelector('.hook-run button[aria-label="Close result"]')?.click()`);
+  writeFileSync(claudeSettings, initialClaudeJson);
 
   // Check 1 & 8 & page-stays-still: keyboard Enter runs two-lines.sh, keeps scrollTop when in view, Escape closes & refocuses Run it, Space runs again.
   const twoIds = await rowOf('session-claude-cli', 'two-lines.sh');
@@ -12908,11 +12965,21 @@ async function hookRunFlow() {
     /^Couldn’t start: \/nonexistent-ck-hook-bin-xyz not found\. tried at /.test(missingRes) && !missingRes.includes('Run again'), missingRes);
   await pictures('result-timeout-stopped-missing', `#session-claude-cli .session-hook:has(#${(await rowOf('session-claude-cli', 'slow-limit.sh')).runId})`);
 
-  // Check 2: Codex refusal (hooks turned off in config.toml).
+  // Check 2: Codex refusal (hooks turned off in config.toml), then Codex plugin hook runs with trust note and no data folder created.
   const codexRefused = await runAndWait('session-codex-cli', 'codex-hook.sh');
   check('Codex hooks-off refusal says Not run: + main’s words',
     codexRefused.includes('Not run: hooks are turned off in Codex’s settings ([features] codex_hooks = false).') && !codexRefused.includes('Run again'), codexRefused);
+  const codexPluginRefused = await runAndWait('session-codex-cli', 'codex-hello.sh');
+  check('Codex plugin hook also refuses when tool hooks are disabled',
+    codexPluginRefused.includes('Not run: hooks are turned off in Codex’s settings ([features] codex_hooks = false).'), codexPluginRefused);
   await pictures('result-codex-refused', '#session-codex-cli');
+  writeFileSync(codexConfig, `[features]\nhooks = true\n\n[plugins."release-helper@${marketName}"]\nenabled = true\n\n[[hooks.SessionStart]]\nmatcher = "startup"\n\n[[hooks.SessionStart.hooks]]\ntype = "command"\ncommand = "~/bin/codex-hook.sh"\n`);
+  const codexPluginRes = await runAndWait('session-codex-cli', 'codex-hello.sh');
+  check('Codex installed plugin hook runs with PLUGIN_ROOT, PLUGIN_DATA, trust note and no data folder created',
+    /^Would add run in ~, /.test(codexPluginRes) && codexPluginRes.includes('Codex adds it only once trusted in /hooks.')
+    && codexPluginRes.includes(`codex-root=${codexPluginRoot}`) && codexPluginRes.includes(`codex-data=${codexPluginData}`)
+    && !existsSync(codexPluginData), codexPluginRes);
+  await pictures('plugin-codex-result', '#session-codex-cli');
 
   // Check 7: duplicate command in two places gets two distinct ids; clicking low row brings result into view!
   const dupIds = await a.run(`[...document.querySelectorAll('#session-claude-cli .session-hook')]
@@ -12930,11 +12997,17 @@ async function hookRunFlow() {
       return head.top >= sc.top - 1 && head.bottom <= sc.bottom + 1; })()`), true);
   await fullSize(a);
 
-  // Check 2: Copilot CLI ignored output (add start hook, Refresh, run).
+  // Check 2 & Worked example 6: Copilot CLI own start hook runs (ignored plain stdout) while Copilot CLI installed plugin hook keeps View source alone.
+  const copilotPluginRoot = join(home, '.copilot/plugins/cache', marketName, 'release-helper/0.4.1');
+  mkdirSync(join(copilotPluginRoot, 'hooks'), { recursive: true });
+  writeFileSync(join(copilotPluginRoot, 'hooks/hooks.json'), JSON.stringify({ version: 1, hooks: { sessionStart: [{ type: 'command', bash: 'echo copilot-plugin-hook' }] } }));
+  writeFileSync(join(home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'release-helper', marketplace: marketName, version: '0.4.1', cache_path: copilotPluginRoot, enabled: true }] }));
   writeFileSync(join(home, '.copilot/hooks/start.json'), JSON.stringify({ version: 1, hooks: { sessionStart: [{ type: 'command', bash: '~/bin/copilot-plain.sh' }] } }));
   await a.click('#header-refresh');
   await steady();
   await waitFor(`!!document.querySelector('#session-copilot-cli button[data-hook-run]')`);
+  const copilotPluginRow = await rowOf('session-copilot-cli', 'copilot-plugin-hook');
+  same('Copilot CLI installed plugin hook keeps View source alone and no Run it', [!!copilotPluginRow?.srcId, copilotPluginRow?.runId], [true, null]);
   const copRes = await runAndWait('session-copilot-cli', 'copilot-plain.sh');
   check('Copilot CLI plain stdout shows ignored sentence with quiet meta and Show all it printed fold',
     /^Copilot CLI would ignore this: no top-level additionalContext\. run in ~, /.test(copRes) && copRes.includes('Show all it printed'), copRes);
@@ -13021,6 +13094,9 @@ async function hookRunFlow() {
   await waitFor(`!!document.querySelector('#session-claude-cli button[data-hook-run]')`);
   const tabRes = await runAndWait('session-claude-cli', 'two-lines.sh');
   check('tool’s Instructions tab runs hook and shows Would add', /^Would add run in ~, /.test(tabRes) && tabRes.includes('First line from hook'), tabRes);
+  const tabPluginRes = await runAndWait('session-claude-cli', 'hello.sh');
+  check('tool’s Instructions tab runs installed plugin hook and shows Would add',
+    /^Would add run in ~, /.test(tabPluginRes) && tabPluginRes.includes(`root=${claudePluginRoot}`) && tabPluginRes.includes('note=Tuesday-releases'), tabPluginRes);
   await pictures('tab-claude', '#session-claude-cli', bothSizes);
   await fitsAtMinimum(a, 'Claude Code Instructions tab with Run it result');
   await sizeTo(a, 1316, 820);
