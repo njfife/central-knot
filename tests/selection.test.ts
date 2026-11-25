@@ -14,7 +14,7 @@ import { readHistory } from '../src/history.ts';
 import { inLibrary, placeOf, rowClicks } from '../src/libraryrow.ts';
 import { heldWhole } from '../src/clickplan.ts';
 import { applySkills, restoreSkill } from '../src/skills.ts';
-import { lockSkip, withLock } from './fslock.ts';
+import { lockAppSkip, lockSkip, withLock } from './fslock.ts';
 import { bytes, folderOf, historyActions, itemOf, pass, put, roots, sandbox, seen, skillText, tools, turnOff, turnOn, type Box } from './skillclicks.ts';
 
 /** Rows as the Library lists them, by name: a skill each (`skills-<name>`), none that can't be deleted. */
@@ -308,7 +308,7 @@ test('Turn on of many on real folders: 2 off (one kept out of Codex) and 1 addab
   } finally { await box.cleanup(); }
 });
 
-test('Turn off of many with one row locked in one tool: reports the locked tool as held, turns off the others, and Undo covers what was done', { skip: winLockSkip }, async () => {
+test('Turn off of many with one row locked in one tool: reports the locked tool as held, turns off the others, and Undo covers what was done', { skip: lockSkip || (process.platform === 'win32' && 'Windows allows moving a dir-readonly folder out of a writable parent (POSIX refuses reparenting .. on 0o555); covered on macOS and Linux.') }, async () => {
   const box = await tenSkills();
   try {
     const before = await toolFolders(box);
@@ -329,7 +329,7 @@ test('Turn off of many with one row locked in one tool: reports the locked tool 
   } finally { await box.cleanup(); }
 });
 
-test('Turn on of many with one tool’s skills folder locked: reports the locked tool as held, writes the other tools, and Undo covers what was done', { skip: winLockSkip }, async () => {
+test('Turn on of many with one tool’s skills folder locked: reports the locked tool as held, writes the other tools, and Undo covers what was done', { skip: lockAppSkip }, async () => {
   const box = await tenSkills();
   try {
     const three = ['alpha', 'bravo', 'charlie'];
