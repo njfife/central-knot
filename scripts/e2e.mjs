@@ -23,6 +23,7 @@ import { writesRealHome } from '../src/machine.ts';
 import { executableCandidates } from '../src/platform.ts';
 import { STANDARD_BUILD } from '../src/values.ts';
 import { applySkills } from '../src/skills.ts';
+import { canonicalHome } from '../src/sessionkeep.ts';
 
 const args = process.argv.slice(2);
 const flag = name => args.includes(name);
@@ -10604,7 +10605,8 @@ async function keepSessionCostsFlow() {
   writeFileSync(settingsPath, JSON.stringify({ home: { mode: 'custom', path: homeA } }));
   const pipe1 = makeHoldPipe('.claude/projects/-work-hold/held-1.jsonl');
   const a = await launch(data, [], real, { CK_SESSION_SWEEP_EVERY_MS: '1500' });
-  const canonA = realpathSync(homeA), canonB = realpathSync(homeB);
+  const canonA = await canonicalHome(homeA);
+  const canonB = await canonicalHome(homeB);
   const sessionsDirA = join(homeA, '.central-knot/sessions');
   const monthFileA = join(sessionsDirA, `${monthKey(todayAt(0.45))}.json`);
   try {
@@ -10831,7 +10833,8 @@ async function sessionsWeekFlow() {
   ], noon(2) + 1);
   const goneFile = put('.claude/projects/-work-gone/gone.jsonl', [reply('gone', 'g1', noon(3), 10_000, 1_000, '/work/gone')], noon(3));
   put('.claude/projects/-work-app/four.jsonl', [reply('four', 'f1', noon(4), 5_000, 500), reply('four', 'f2', noon(4) + 60_000, 5_000, 500)], noon(4) + 60_000);
-  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, keepSessionCosts: { [realpathSync(home)]: true } }));
+  const keepKey = await canonicalHome(home);
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, keepSessionCosts: { [keepKey]: true } }));
   let a = await launch(data, ['--practice-copy'], real);
   const sessionsDir = join(home, '.central-knot/sessions');
   const keptIds = () => (existsSync(sessionsDir) ? readdirSync(sessionsDir) : []).filter(name => /^\d{4}-\d{2}\.json$/.test(name))
@@ -11040,7 +11043,7 @@ async function sessionsWeekFlow() {
   // A second launch, its sweep every 4 s, on the heavy week: its first draw, every day closed, an opened day's line held in view.
   const data2 = join(scratch, 'week-data-2');
   mkdirSync(data2, { recursive: true });
-  writeFileSync(join(data2, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, keepSessionCosts: { [realpathSync(home)]: true } }));
+  writeFileSync(join(data2, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, keepSessionCosts: { [keepKey]: true } }));
   a = await launch(data2, [], real, { CK_SESSION_SWEEP_EVERY_MS: '4000' });
   await a.click('#nav-sessions');
   for (let tries = 0; tries < 100 && !(await a.exists('#sessions-heading')); tries++) await wait(100);
