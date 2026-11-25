@@ -5,7 +5,7 @@
 // (scripts/windows-check.mjs --smoke runs this file under it).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { homeVariables, launchCommand, start } from '../src/launch.ts';
@@ -28,10 +28,10 @@ test('On Windows a program that is not a .cmd or .bat is started as asked', () =
 });
 
 test('On Windows a .cmd runs through cmd.exe with delayed expansion off: each argument quoted as a program reads it, then each of cmd’s characters, in it and in the path, given a caret', () => {
-  const ran = launchCommand('C:\\My Tools (x86)\\a&b %PATH%\\tool.CMD', ['a b', 'say "hi"\\', '', '50%'], 'win32');
+  const ran = launchCommand('C:\\My Tools (x86)\\a&b %PATH%\\tool.CMD', ['a b', 'say hi\\', '', '50%'], 'win32');
   assert.equal(ran.file, process.env.ComSpec ?? 'cmd.exe');
   assert.deepEqual(ran.options, { windowsVerbatimArguments: true });
-  assert.deepEqual(ran.args, ['/d', '/s', '/v:off', '/c', '"C:\\My^ Tools^ ^(x86^)\\a^&b^ ^%PATH^%\\tool.CMD ^"a^ b^" ^"say^ \\^"hi\\^"\\\\^" ^"^" ^"50^%^""']);
+  assert.deepEqual(ran.args, ['/d', '/s', '/v:off', '/c', '"C:\\My^ Tools^ ^(x86^)\\a^&b^ ^%PATH^%\\tool.CMD ^"a^ b^" ^"say^ hi\\\\^" ^"^" ^"50^%^""']);
   assert.deepEqual(launchCommand('C:\\t\\old.bat', [], 'win32').args.at(-1), '"C:\\t\\old.bat"');
 });
 
@@ -47,6 +47,20 @@ test('npm’s own .cmd passes its arguments on, so cmd reads them twice and each
     assert.equal(last(other), `"${other} ^"a^&b^""`);
     assert.equal(last(lookalike), `"${lookalike} ^"a^&b^""`);
     assert.equal(last(join(base, 'gone.cmd')), `"${join(base, 'gone.cmd')} ^"a^&b^""`);
+    // A quote, and the backslashes before one or at the end, as a program reads them: written once, then given carets twice.
+    assert.equal(launchCommand(npm, ['say "hi"\\', 'a\\"b'], 'win32').args.at(-1), `"${npm} ^^^"say^^^ \\^^^"hi\\^^^"\\\\^^^" ^^^"a\\\\\\^^^"b^^^""`);
+  } finally { await rm(base, { recursive: true, force: true }); }
+});
+
+test('On Windows an argument holding a double quote is not passed to a .cmd or .bat other than npm’s own: cmd.exe would read what follows it as commands; the refusal names it', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'ck-launch-'));
+  try {
+    const npm = join(base, 'codex.cmd'), other = join(base, 'other.bat');
+    await writeFile(npm, npmShim('codex.js'));
+    await writeFile(other, '@echo off\r\n"C:\\node.exe" "%~dp0\\codex.js" %*\r\n');
+    assert.throws(() => launchCommand(other, ['--model', 'a"&echo x'], 'win32'),
+      { message: `other.bat was not run: on Windows an argument to a .cmd or .bat other than npm’s own can’t hold a double quote (${JSON.stringify('a"&echo x')}), as cmd.exe would read what follows it as commands.` });
+    assert.doesNotThrow(() => launchCommand(npm, ['--model', 'a"&echo x'], 'win32'));
   } finally { await rm(base, { recursive: true, force: true }); }
 });
 
@@ -91,17 +105,32 @@ test('On Windows each argument reaches a Node script through npm’s own .cmd as
   } finally { await rm(base, { recursive: true, force: true }); }
 });
 
-test('On Windows a .cmd of another form, from a folder whose name has & and ^ in it, is run, and passes on each argument holding no quote as given', { skip: onWindows }, async () => {
+test('On Windows a .cmd of another form, from a folder whose name has & and ^ in it, is run and passes on each argument as given; one holding a quote is refused before it runs', { skip: onWindows }, async () => {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-launch-')));
   try {
     const folder = join(base, 'R&D ^ tools (x86)');
     await mkdir(folder, { recursive: true });
     await writeFile(join(base, 'echo.js'), 'process.stdout.write(JSON.stringify(process.argv.slice(2)));\n');
-    // Not npm's form, so its arguments get their carets once, and cmd reads them twice here: one holding a quote doesn't pass whole.
+    // Not npm's form, so its arguments get their carets once, though cmd reads them twice here: without a quote, that is enough.
     await writeFile(join(folder, 'echo.cmd'), `@"${process.execPath}" "${join(base, 'echo.js')}" %*\r\n`);
     const plain = awkward.filter(arg => !arg.includes('"'));
     const ran = await output(join(folder, 'echo.cmd'), plain);
     assert.equal(ran.code, 0, ran.stderr);
     assert.deepEqual(JSON.parse(ran.stdout), plain);
+    // With one, cmd would read `echo x"` as a second command: nothing is started.
+    assert.throws(() => start(join(folder, 'echo.cmd'), ['a"&echo x'], { windowsHide: true }), /can’t hold a double quote/);
+  } finally { await rm(base, { recursive: true, force: true }); }
+});
+
+test('On Windows a .cmd that reads its own arguments gets each as given, but one ending in a backslash: that arrives doubled, as a program would read it', { skip: onWindows }, async () => {
+  const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-launch-')));
+  try {
+    // %~1 is the first argument without its quotes; `set` writes a variable's value as it is, so cmd reads it no further.
+    await writeFile(join(base, 'first.cmd'), '@echo off\r\nset "ckfirst=%~1"\r\nset ckfirst>"%~dp0said.txt"\r\n');
+    for (const arg of awkward.filter(each => each && !each.includes('"') && !each.endsWith('\\'))) {
+      const ran = await output(join(base, 'first.cmd'), [arg]);
+      assert.equal(ran.code, 0, ran.stderr);
+      assert.equal((await readFile(join(base, 'said.txt'), 'utf8')).replace(/\r?\n$/, ''), `ckfirst=${arg}`, arg);
+    }
   } finally { await rm(base, { recursive: true, force: true }); }
 });

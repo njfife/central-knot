@@ -529,6 +529,24 @@ test('A plugin command for a home that is not this computer’s own is given, on
   } finally { await box.cleanup(); }
 });
 
+test('A plugin command for a home that is not this computer’s own is given no Copilot CLI home of the person’s, in whatever case Windows has its name', async () => {
+  const box = await sandbox();
+  // Windows reads a variable's name in any case: there the person's may be Copilot_Home.
+  const name = process.platform === 'win32' ? 'Copilot_Home' : 'COPILOT_HOME', saved = process.env[name];
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root);
+    const copilot = await standIn(join(box.base, 'bin/copilot'), '#!/bin/sh\necho "${COPILOT_HOME-none}" >> "$HOME/calls.txt"\nexit 3\n',
+      'require("fs").appendFileSync(process.env.HOME + "/calls.txt", (process.env.COPILOT_HOME ?? "none") + "\\n"); process.exitCode = 3;');
+    process.env[name] = join(box.base, 'his-copilot');
+    await install({ ...box.context, actual: false, binaries: { 'copilot-cli': copilot } }, await parseCatalog(root, root, 'folder'), 'marker', 'copilot-cli');
+    assert.equal((await readFile(join(box.home, 'calls.txt'), 'utf8')).split('\n')[0], 'none');
+  } finally {
+    if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
+    await box.cleanup();
+  }
+});
+
 test('A folder marketplace named through a link is the same marketplace, so it is listed once', async () => {
   const box = await sandbox();
   try {
