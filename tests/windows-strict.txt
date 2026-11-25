@@ -20,6 +20,7 @@ tests/discovery.test.ts
 tests/draftbase.test.ts
 tests/drafts.test.ts
 tests/firstsetup.test.ts
+tests/folderaccess.test.ts
 tests/gitrepo-edits.test.ts
 tests/gitrepo-pull.test.ts
 tests/gitrepo.test.ts

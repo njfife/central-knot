@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
-import { winLockAppSkip, withLock } from './fslock.ts';
+import { withLock } from './fslock.ts';
 import { join } from 'node:path';
 import { agentsView, applyAgents } from '../src/agents.ts';
 import { readHistory } from '../src/history.ts';
@@ -1033,7 +1033,7 @@ test('A placed copy counts as turned only in the tools whose own removal went th
   } finally { await box.cleanup(); }
 });
 
-test('A plugin’s skill and server of one name placed in Pi, one held there: the other’s change is the switch’s, by its kind, and its Undo puts it back', { skip: winLockAppSkip }, async () => {
+test('A plugin’s skill and server of one name placed in Pi, one held there: the other’s change is the switch’s, by its kind, and its Undo puts it back', async () => {
   for (const held of ['skill', 'mcp'] as const) {
     // docs's skill issues and server issues in Pi, each taken in from Pi and linked to the plugin, as its own run leaves them; his anchor beside them.
     const box = await sandbox(['pi-cli']), mcp = join(box.home, '.pi/agent/mcp.json');
