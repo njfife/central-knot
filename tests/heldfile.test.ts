@@ -25,7 +25,7 @@ const windowsOnly = process.platform !== 'win32'
   && 'only Windows refuses a rename or a move of a file another program has open; on macOS and Linux each step is called once (the checks naming the platform, and the file operations the unit suite records: tests/spawnlog.mjs)';
 const HELD = 'Windows couldn’t change this file or folder. Check whether it’s in use or read-only and whether you have permission, then try again.';
 const docs: NeutralServer = { transport: 'stdio', command: 'npx', args: ['-y', 'docs'] };
-type Step = 'rename' | 'link' | 'unlink';
+type Step = 'rename' | 'link' | 'unlink' | 'lstat';
 type Call = (...args: unknown[]) => Promise<unknown>;
 
 /** A made-up home: Claude Code's settings file with no server, a skill in Claude Code's skills folder, and a tool's file in a folder of its own. */
@@ -56,11 +56,14 @@ async function holdUnmovable(path: string) {
   const script = '$f = [IO.File]::Open($env:CK_HOLD, "Open", "ReadWrite", "ReadWrite"); try { [Console]::Out.WriteLine("ready"); [Console]::Out.Flush(); [void][Console]::In.ReadLine() } finally { $f.Dispose() }';
   const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { env: { ...process.env, CK_HOLD: path }, stdio: ['pipe', 'pipe', 'inherit'] });
   const exited = new Promise(done => child.once('exit', done));
-  await within(`PowerShell holding ${basename(path)}`, new Promise<void>((ready, fail) => {
-    child.stdout.on('data', chunk => { if (String(chunk).includes('ready')) ready(); });
+  const ready = new Promise<void>((holding, fail) => {
+    child.stdout.on('data', chunk => { if (String(chunk).includes('ready')) holding(); });
     child.once('error', fail);
     child.once('exit', code => fail(new Error(`PowerShell ended (${code}) before holding the file`)));
-  }));
+  });
+  // A hold that fails, or never says it is ready, leaves no PowerShell behind: it is stopped by its process id.
+  try { await within(`PowerShell holding ${basename(path)}`, ready); }
+  catch (error) { if (child.exitCode === null && child.pid) process.kill(child.pid); throw error; }
   return async () => { child.stdin.end('\n'); await exited; };
 }
 
@@ -112,6 +115,8 @@ async function newerSkill(base: string) {
   await writeFile(join(source, 'SKILL.md'), '---\nname: review\ndescription: Reviews.\n---\nAfter.\n');
   return source;
 }
+/** The skill folder a swap moved aside beside its skills folder (`beside`). */
+const parkedIn = async (beside: string) => join(beside, (await readdir(beside)).find(name => /^\.ck-parked-[0-9a-f-]+$/.test(name))!);
 /** The file a write moved aside in `folder`. */
 const moved = async (folder: string) => join(folder, (await readdir(folder)).find(name => name.endsWith('.old'))!);
 
@@ -234,7 +239,7 @@ test('a tool’s file held 300 ms can be written, then held 300 ms again, remove
   const box = await home();
   try {
     for (const step of [() => writeFileChecked(box.tool, 'written\n', 'before\n'), () => removeFileChecked(box.tool, 'written\n')]) {
-      const watch = firstRefusal('rename'), release = await holdUnmovable(box.tool);
+      const release = await holdUnmovable(box.tool), watch = firstRefusal('rename');
       try { await whileHeld(step(), watch.refused, release); } finally { watch.restore(); }
     }
     assert.deepEqual(await box.listed(box.folder), []);
@@ -246,7 +251,7 @@ test('a skill’s folder with its SKILL.md held 300 ms can be written over, then
   try {
     const source = await newerSkill(box.base);
     const held = async (step: (expected: string) => Promise<void>) => {
-      const expected = (await readTree(box.skill)).hash, watch = firstRefusal('rename'), release = await holdUnmovable(join(box.skill, 'SKILL.md'));
+      const expected = (await readTree(box.skill)).hash, release = await holdUnmovable(join(box.skill, 'SKILL.md')), watch = firstRefusal('rename');
       try { await whileHeld(step(expected), watch.refused, release); } finally { watch.restore(); }
     };
     await held(expected => swapFolder(box.context, source, box.skill, expected));
@@ -389,5 +394,82 @@ test('a skill’s copy written over, whose place fills while the new one waits t
     const [parked, ...rest] = await box.listed(claude);
     assert.deepEqual(rest, ['skills']);
     assert.match(await readFile(join(claude, parked!, 'SKILL.md'), 'utf8'), /Before\./);
+  } finally { await box.cleanup(); }
+});
+
+test('a save made into a skill’s moved-aside copy while its replacement waits to go in: it goes back in place, and the write says it changed just now', { skip: windowsOnly }, async () => {
+  const box = await home(), claude = join(box.home, '.claude'), saved = '---\nname: review\ndescription: Reviews.\n---\nSaved meanwhile.\n';
+  try {
+    const source = await newerSkill(box.base), expected = (await readTree(box.skill)).hash;
+    const restore = refuse('rename', 'EPERM', ([from, to]) => basename(from!).startsWith('.ck-stage-') && to === box.skill, async () => {
+      await writeFile(join(await parkedIn(claude), 'SKILL.md'), saved);
+    });
+    try { await assert.rejects(swapFolder(box.context, source, box.skill, expected), { code: 'CK_CHANGED' }); } finally { restore(); }
+    assert.equal(await readFile(join(box.skill, 'SKILL.md'), 'utf8'), saved);
+    assert.deepEqual(await box.listed(claude), ['skills'], 'nothing moved aside, staged or noted is left');
+  } finally { await box.cleanup(); }
+});
+
+test('a save landing in a skill’s moved-aside copy as its replacement goes in after a wait: the replacement comes out, the save goes back, and the write says it changed just now', { skip: windowsOnly }, async () => {
+  const box = await home(), claude = join(box.home, '.claude'), saved = '---\nname: review\ndescription: Reviews.\n---\nSaved meanwhile.\n';
+  try {
+    const source = await newerSkill(box.base), expected = (await readTree(box.skill)).hash;
+    let tries = 0;
+    const placing = (from: string, to: string) => basename(from).startsWith('.ck-stage-') && to === box.skill;
+    const restore = standIn('rename', async (original, ...args) => {
+      if (!placing(String(args[0]), String(args[1]))) return original(...args);
+      if (++tries === 1) throw refusal('EPERM');
+      const placed = await original(...args);
+      await writeFile(join(await parkedIn(claude), 'SKILL.md'), saved);
+      return placed;
+    });
+    try { await assert.rejects(swapFolder(box.context, source, box.skill, expected), { code: 'CK_CHANGED' }); } finally { restore(); }
+    assert.equal(await readFile(join(box.skill, 'SKILL.md'), 'utf8'), saved);
+    assert.deepEqual(await box.listed(claude), ['skills']);
+  } finally { await box.cleanup(); }
+});
+
+test('a save into the moved-aside original while the write waited on another step: it is compared before its first removal, and kept beside the new file as a backup', { skip: windowsOnly }, async () => {
+  const box = await home();
+  const restore = refuse('unlink', 'EBUSY', ([path]) => path!.endsWith('.tmp'), async () => writeFile(await moved(box.folder), 'changed meanwhile\n'));
+  try { await writeFileChecked(box.tool, 'written\n', 'before\n'); } finally { restore(); }
+  try {
+    assert.equal(await readFile(box.tool, 'utf8'), 'written\n');
+    const [file, backup, ...rest] = await box.listed(box.folder);
+    assert.deepEqual([file, rest], ['config.toml', []]);
+    assert.equal(await readFile(join(box.folder, backup ?? 'none'), 'utf8'), 'changed meanwhile\n');
+  } finally { await box.cleanup(); }
+});
+
+test('a fresh skill copy is renamed into place in the very step that found its place empty: nothing runs between the look and the rename', async () => {
+  const box = await home(), target = join(box.home, '.claude', 'skills', 'fresh');
+  let looked = false, lookedFirst: boolean | undefined;
+  // The marker runs in the first step after the one the look's answer wakes: set by the time the rename comes only if a step came between.
+  const restoreLook = standIn('lstat', (original, ...args) => (String(args[0]) !== target ? original(...args) : new Promise((_, refused) => {
+    original(...args).catch(error => { refused(error); queueMicrotask(() => { looked = true; }); });
+  })));
+  const restoreRename = standIn('rename', (original, ...args) => {
+    if (String(args[1]) === target) lookedFirst = looked;
+    return original(...args);
+  });
+  try {
+    await placeCopy(box.context, box.skill, { harness: 'claude-cli', directory: target, limits: [] }, await readTree(box.skill));
+    assert.equal(lookedFirst, false);
+    assert.match(await readFile(join(target, 'SKILL.md'), 'utf8'), /Before\./);
+  } finally { restoreRename(); restoreLook(); await box.cleanup(); }
+});
+
+test('a skill’s replacement that can’t go in, whose copy can’t go back either: the copy moved aside keeps its note, and recovery puts it back', async () => {
+  const box = await home(), claude = join(box.home, '.claude');
+  try {
+    const source = await newerSkill(box.base), expected = (await readTree(box.skill)).hash;
+    const restorePlace = refuse('rename', 'EPERM', ([from, to]) => basename(from!).startsWith('.ck-stage-') && to === box.skill, undefined, Infinity);
+    const restoreBack = refuse('rename', 'EPERM', ([from, to]) => basename(from!).startsWith('.ck-parked-') && to === box.skill);
+    try { await assert.rejects(swapFolder(box.context, source, box.skill, expected), { code: 'EPERM' }); } finally { restoreBack(); restorePlace(); }
+    const left = (await box.listed(claude)).map(name => name.replace(/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}/, '<id>'));
+    assert.deepEqual(left, ['.ck-parked-<id>', '.ck-parked-<id>.json', 'skills']);
+    await recoverFolders(box.context, 'claude-cli');
+    assert.match(await readFile(join(box.skill, 'SKILL.md'), 'utf8'), /Before\./);
+    assert.deepEqual(await box.listed(claude), ['skills']);
   } finally { await box.cleanup(); }
 });
