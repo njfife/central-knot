@@ -1,10 +1,13 @@
 // Sweeping Claude Code's and Codex's session files into the kept session-costs record (sessionrecord.ts), one batch and one
-// record turn at a time. Owns: listing both tools' session files, matching each to its kept position via bigint stat and
-// changedSince, reading changed files in bounded batches (64 candidates or 2,000 requests read, finishing the last file),
-// pricing requests (rates.ts), committing each batch in one turn (holding back any file with a held or unread-month request),
-// updating readable files' positions and dropping gone positions only after complete listings with no unresolved stat,
-// yielding between batches, honoring a stop signal and notBefore, and answering with structured counts (except `refused` and
-// `held[].reason`, which pass through the record's and `writeAccess`'s own refusal sentences).
+// record turn at a time. Owns: taking the home's exclusive session-store lock (sessionlock.ts withSessionStoreLock) after
+// stop and notBefore checks and before reading positions.json (returning `skipped: 'busy'` when another caller holds it, and
+// refusing without creating the store when `writeAccess` or the store's own paths refuse), listing both tools' session files,
+// matching each to its kept position via bigint stat and changedSince, reading changed files in bounded batches (64 candidates
+// or 2,000 requests read, finishing the last file), pricing requests (rates.ts), committing each batch in one turn (holding
+// back any file with a held or unread-month request), updating readable files' positions and dropping gone positions only
+// after complete listings with no unresolved stat, yielding between batches, honoring a stop signal and notBefore, and
+// answering with structured counts (except `refused` and `held[].reason`, which pass through the record's, lock's, and
+// `writeAccess`'s own refusal sentences).
 //
 // Limits: (1) a file rewritten to the same size and whole-ms mtime is not seen as changed; when its stat changes, a matching
 // last-4 KiB digest before the kept offset lets the tail read continue without noticing edits before that offset; (2) a
@@ -17,18 +20,19 @@
 // that file's position past them (a held file with unread lines keeps its old saved unread while its position is held back,
 // though a clean rewrite beside a held-month request can still reset kept unread to 0; the sweep's unreadLines answer reports
 // what that sweep met; a crash mid-commit of an incremental tail with unread lines can overcount unread on replay, never
-// undercount); (5) a session's own reported figure is not kept yet (its own step); (6) one sweep at a time for a home: the
-// caller's to keep (before anything calls sweepSessions for real, the next step takes an exclusive crash-released lock on
-// the store).
+// undercount); (5) a session's own reported figure is not kept yet (its own step); (6) the store lock promises exclusion on a
+// local file system only (sessionlock.ts); a home on a network folder is not covered.
 //
-// Not here: record shapes, holds, saved-month listing, upsert and writes (sessionrecord.ts); line scanning, identity/hash
-// and record parsing (sessionrequests.ts); pricing rules (rates.ts); sums and rows (sessionrow.ts); session-reported figures
-// (their own step); callers, timers, Settings, Clear, retention, and cross-process locking. Nothing calls this module yet.
+// Not here: record shapes, holds, saved-month listing, upsert and writes (sessionrecord.ts); the store lock itself
+// (sessionlock.ts); line scanning, identity/hash and record parsing (sessionrequests.ts); pricing rules (rates.ts); sums and
+// rows (sessionrow.ts); session-reported figures (their own step); callers, timers, Settings, Clear, and retention. Nothing
+// calls this module yet.
 import type { BigIntStats } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { SESSION_TOOLS, type SessionTool } from './presence.ts';
 import { bundledRates, priceRequest, type RatesTable } from './rates.ts';
 import type { PricedRequest } from './sessionday.ts';
+import { withSessionStoreLock } from './sessionlock.ts';
 import { listSessionMonths, monthOf, monthsAround, readSessionRecord, upsertSessionRecord, withSessionRecordTurn } from './sessionrecord.ts';
 import type { HeldEntry, Positions, SessionMonth, SessionRecord } from './sessionrecord.ts';
 import { changedSince, claudeFiles, codexRollouts, readClaudeSession, readCodexRollout } from './sessionrequests.ts';
@@ -44,7 +48,7 @@ const BATCH_REQUESTS = 2_000;
 export interface ToolSweep { requests: number; sessions: number; unreadListing: boolean; unreadableFiles: number; unreadLines: number }
 /** Requests passed to upsert that were not kept, grouped by whether a later sweep can retry them. */
 export interface SweepNotTaken { held: number; notRead: number; never: number }
-/** Structured outcome of `sweepSessions` for the next step to display (`refused` and `held[].reason` pass through the record's and `writeAccess`'s own sentences). */
+/** Structured outcome of `sweepSessions` for the next step to display (`refused` and `held[].reason` pass through the record's, lock's, and `writeAccess`'s own sentences). */
 export interface SweepResult {
   /** Receipts newly added or updated (a receipt that grew is counted again) and distinct sessions touched, counted only after write succeeds. */
   taken: { requests: number; sessions: number };
@@ -52,7 +56,7 @@ export interface SweepResult {
   notTaken: SweepNotTaken;
   held: HeldEntry[];
   refused?: string;
-  skipped?: 'not-before';
+  skipped?: 'not-before' | 'busy';
   stopped: boolean;
   wrote: boolean;
   sweptAt: number;
@@ -440,15 +444,27 @@ const yieldTurn = (): Promise<void> => new Promise(resolve => setImmediate(resol
 
 /**
  * Sweeps Claude Code's and Codex's session files in `context.home` into `.central-knot/sessions/`, one batch and one record
- * turn at a time. Does nothing when stopped or before `options.notBefore`; an idle sweep (no changed file and no gone
- * position to drop) reads only `positions.json`, lists and stats without opening any month; stops without writing when
- * `sessions`, `positions.json`, or (on a turn that needs it) the current UTC month is held.
+ * turn at a time, holding the store lock (`sessionlock.ts withSessionStoreLock`) from before reading `positions.json` to the
+ * end. Does nothing when stopped, before `options.notBefore`, or while another caller holds the store (`skipped: 'busy'`);
+ * refuses without creating the store when `writeAccess` or the store's own paths refuse; an idle sweep (no changed file and
+ * no gone position to drop) takes the lock, reads `positions.json`, lists and stats, opens no month and writes no receipts or
+ * positions; stops without writing when `sessions`, `positions.json`, or (on a turn that needs it) the current UTC month
+ * is held.
  */
 export async function sweepSessions(context: ShareContext, options: SweepOptions = {}): Promise<SweepResult> {
   const sweptAt = (context.now ?? Date.now)();
   const result = emptyResult(sweptAt);
   if (options.signal?.aborted) return { ...result, stopped: true };
   if (options.notBefore !== undefined && sweptAt < options.notBefore) return { ...result, skipped: 'not-before' };
+  const locked = await withSessionStoreLock(context, () => sweepLocked(context, options, sweptAt, result));
+  if (locked.status === 'ok') return locked.value;
+  if (locked.status === 'busy') return { ...result, skipped: 'busy' };
+  if (locked.held) recordHeld(result, [locked.held]);
+  return { ...result, refused: locked.refused };
+}
+
+async function sweepLocked(context: ShareContext, options: SweepOptions, sweptAt: number, result: SweepResult): Promise<SweepResult> {
+  if (options.signal?.aborted) return { ...result, stopped: true };
   const currentMonth = monthOf(sweptAt);
   const initial = await readSessionRecord(context.home, []);
   if (stopOnGlobalHold(result, initial.held, currentMonth)) return result;
