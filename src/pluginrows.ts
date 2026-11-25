@@ -8,7 +8,7 @@
 import { DIRECTORY, partOfPage, samePart, versionWord } from './pluginstatus.ts';
 import { lacksIt } from './pluginline.ts';
 import { onNow, type PluginItemAt } from './pluginswitch.ts';
-import { agentsKeptIn, takesPlugins, type AgentTool } from './presence.ts';
+import { takesPlugins } from './presence.ts';
 import { andList, byToolOrder, toolNames as names } from './words.ts';
 import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, PartKind, PartRef, PluginItem, ThroughPlugin } from './types.ts';
 import { kindSource } from './itemrow.ts';
@@ -193,13 +193,8 @@ export function withPluginOnly(home: Pick<HomeView, 'pluginItems' | Page> | unde
 export function yoursIn(home: HomeView, plugin: string, marketName: string, tool: HarnessId): PartRef[] {
   const link = pluginLink(plugin, marketName);
   const installed = (home.pluginItems ?? []).filter(install => install.plugin === plugin && install.marketName === marketName).flatMap(install => install.items);
-  // The plugin's items a copy of his holds the name of: in a tool that keeps agents in its skills folder (Pi: presence.ts
-  // agentsKeptIn), a skill of his holds an agent's name too, as its file is where the agent's would go.
-  const holds = (part: PartRef) => [part, ...(part.kind === 'skill' && agentsKeptIn[tool as AgentTool] === 'skills folder' ? [{ kind: 'agent' as const, name: part.name }] : [])]
-    .filter(each => installed.some(item => samePart(item, each)));
   return (['skills', 'mcp', 'agents'] as const).flatMap(page => (home[page].tools.includes(tool) ? home[page].items : []).flatMap(fact => {
-    const copy = fact.copies[tool], part = { kind: partOfPage[page], name: fact.name };
-    if (!copy) return [];
-    return fact.fromSource?.link === link ? (copy.hash !== home[page].library[fact.key]?.hash ? [part] : []) : holds(part);
+    const copy = fact.copies[tool], linked = fact.fromSource?.link === link, part = { kind: partOfPage[page], name: fact.name };
+    return copy && (linked ? copy.hash !== home[page].library[fact.key]?.hash : installed.some(item => samePart(item, part))) ? [part] : [];
   }));
 }

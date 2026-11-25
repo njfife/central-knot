@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { readItemTexts, readPluginItems } from '../src/pluginitems.ts';
 import { pluginFiles } from '../src/catalogdetail.ts';
 import { readPlugin } from '../src/pluginlibrary.ts';
-import { inTool, cellWords, handledWhere, offIn, pageRows, pluginItemCount, rowCount, toolWords, yoursIn } from '../src/pluginrows.ts';
+import { inTool, cellWords, handledWhere, offIn, pageRows, pluginItemCount, rowCount, toolWords } from '../src/pluginrows.ts';
 import { newItem } from '../src/library.ts';
 import { pluginItemKey, pluginLive } from '../src/profileplan.ts';
 import type { PluginContext } from '../src/plugins.ts';
@@ -206,14 +206,6 @@ test('a shared skill belongs to a tool that loads it now, even through a link, b
     anotherWay: { 'opencode-cli': 'OpenCode gets it once it is on in Claude Code.' },
   });
   assert.deepEqual((['claude-cli', 'codex-cli', 'opencode-cli'] as const).map(tool => inTool(review, tool)), [true, true, false]);
-});
-
-test('the names of a plugin’s items a tool has of his own: in Pi a skill of his holds an agent’s name too, its file being where the agent’s goes; in Claude Code, which has an agents folder, it doesn’t', () => {
-  const withLead = install('claude-cli', { items: [...install('claude-cli').items, { kind: 'agent', name: 'lead', description: 'Leads.' }] });
-  const home = { pluginItems: [withLead], skills: { tools: ['pi-cli', 'claude-cli'], items: [fact('triage', { 'pi-cli': true }), fact('lead', { 'pi-cli': true, 'claude-cli': true })], library: {} },
-    mcp: { tools: ['pi-cli', 'claude-cli'], items: [], library: {} }, agents: { tools: ['pi-cli', 'claude-cli'], items: [], library: {} } } as unknown as HomeView;
-  assert.deepEqual(yoursIn(home, 'issue-tracker', 'm', 'pi-cli'), [{ kind: 'skill', name: 'triage' }, { kind: 'agent', name: 'lead' }]);
-  assert.deepEqual(yoursIn(home, 'issue-tracker', 'm', 'claude-cli'), []);
 });
 
 test('a personal skill that only shares the name stays its own row beside the plugin’s', () => {
