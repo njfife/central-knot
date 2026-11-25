@@ -41,6 +41,8 @@ import { addSource, checkDue, checkSource, previewSource, removeSource, rowClick
 import { searchFollower, type SearchDoc } from './search.ts';
 import { catalogDocs, libraryDocs } from './searchdocs.ts';
 import { readUsage } from './usage.ts';
+import { readSessionPeriod } from './sessionday.ts';
+import { sessionRows } from './sessionrow.ts';
 import { checkSignin, stopChecks } from './mcpsigninrun.ts';
 import { linkLabel } from './sourcelink.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
@@ -1611,6 +1613,10 @@ app.whenReady().then(async () => {
   // computer's home reads OpenCode's data where XDG_DATA_HOME moves it, as each tool's folder follows its own variable.
   handleNow('usage:read', async home => (current && home === current.home
     ? readUsage({ home: current.home, overrides: context().overrides, dataHome: current.mode === 'actual' ? process.env.XDG_DATA_HOME : undefined }) : null));
+  // The Sessions page's day: the present tools' session files read for [start, end) and made into rows, outside the queue, since
+  // nothing is written; the tools present as the page's view read them (readFor).
+  handleNow('sessions:read', async (home, start, end, readId) => (current && home === current.home && Number.isFinite(start) && Number.isFinite(end)
+    ? sessionRows(await readSessionPeriod({ home: current.home, overrides: context().overrides }, { start: start as number, end: end as number }, presentTools(await readFor(readId as number | undefined)))) : null));
   // MCP sign-in: one tool's own list command for the home on screen, of the servers the page names, run on a click (mcpsigninrun.ts):
   // outside the queue, as it can take 70 s and changes nothing of Central Knot's. This computer's own command lines are looked for,
   // as the Plugins page's are. CK_SIGNIN_LIMIT_MS: an end-to-end run's shorter limit (mcpsigninrun.ts checkLimit: never longer).

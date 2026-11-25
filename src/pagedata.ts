@@ -1,4 +1,4 @@
-// A page's own data (Instructions, History, Plugins, and the usage the item lists show, collected when a home opens), read
+// A page's own data (Instructions, History, Plugins, Sessions, and the usage the item lists show, collected when a home opens), read
 // apart from the home itself: one slot per kind, which says where its read is. The pages render from the slot alone: the data
 // once read, "Reading…" while there is none yet, and "could not be read" only after a read really failed.
 //

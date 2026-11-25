@@ -1,20 +1,19 @@
 // A period's session reading, in main: for a home and a half-open period [start, end) (two local midnights passed in; no
-// clock read here), lists each present supported tool's session files (SESSION_TOOLS: Claude Code via sessionrequests.ts
+// clock read here), lists each present supported tool's session files (presence.ts SESSION_TOOLS: Claude Code via sessionrequests.ts
 // claudeFiles, Codex via codexRollouts), reads session files modified at or after period.start, keeps requests inside
 // [start, end), deduplicates across files by (tool, session, request), prices each kept request (rates.ts priceRequest),
 // keeps the largest rates.ts reportedCost(treeReported) only on a root session whose whole tree lay inside the period, and
 // joins concurrent reads for the same home, period and tools. Nothing is written under the home; DayReading holds no message
 // text and no absolute path. Not here: rows and totals (sessionrow.ts), file listing and record parsing (sessionrequests.ts),
-// rate matching (rates.ts), tool presence (presence.ts), stored records, IPC, or the Sessions page.
+// rate matching (rates.ts), tool presence and which tools are read (presence.ts), stored records, IPC (main.ts sessions:read), or the
+// Sessions page (sessionspage.ts).
 import { stat } from 'node:fs/promises';
 import { bundledRates, priceRequest, reportedCost, type PriceResult } from './rates.ts';
 import { claudeFiles, codexRollouts, readClaudeSession, readCodexRollout, type Request, type SessionRead } from './sessionrequests.ts';
+import { SESSION_TOOLS, type SessionTool } from './presence.ts';
 import type { HarnessId } from './types.ts';
 import type { UsageWhere } from './usage.ts';
 
-/** Tools whose session files this reader reads for costs. */
-export type SessionTool = 'claude-cli' | 'codex-cli';
-export const SESSION_TOOLS: readonly SessionTool[] = ['claude-cli', 'codex-cli'];
 /** A half-open period [start, end) in ms (two local midnights passed in by the caller). */
 export interface Period { start: number; end: number }
 /** One request inside the period paired with its price result (no message text, no file path). */

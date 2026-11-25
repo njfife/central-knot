@@ -15,13 +15,14 @@ import type { IconName } from './icons.ts';
 import { heldKinds, type HomeKind } from './presence.ts';
 import { kindNouns, pageNames } from './words.ts';
 import { rowCount } from './pluginrows.ts';
-import { libraryPage } from './pages.ts';
+import { libraryPage, notRead } from './pages.ts';
 import { overviewPage } from './overview.ts';
 import { harnessesPage, harnessTitle } from './harnesspage.ts';
 import { pluginsPage, pluginsResult } from './pluginspage.ts';
 import { backFromFiles, headerNotices, listResult, noticeKindsShown, resultInHeader, unseenNotices } from './matrix.ts';
 import { historyPage } from './historypage.ts';
 import { mcpSigninPage } from './mcpsigninpage.ts';
+import { sessionsPage } from './sessionspage.ts';
 import { instructionsPage } from './instructionspage.ts';
 import { repo, repoPage, waitingCounts, waitingWords } from './repopage.ts';
 import { sources, sourcesPage } from './sourcespage.ts';
@@ -37,7 +38,7 @@ import { placeKey } from './visits.ts';
 
 const region = (id: string) => document.getElementById(id)!;
 /** Each page's title, in the header and the sidebar: Instructions' and the plugins' page by their kind's title (words.ts kindNouns). */
-const titles: Record<Page, string> = { overview: 'Overview', library: 'Library', mcpsignin: 'MCP sign-in', instructions: kindNouns.instructions.title, plugins: kindNouns.plugins.title, profiles: 'Profiles', history: 'History', sources: pageNames.sources, repo: 'Git repo', harnesses: 'Harnesses', settings: 'Settings' };
+const titles: Record<Page, string> = { overview: 'Overview', library: 'Library', mcpsignin: 'MCP sign-in', instructions: kindNouns.instructions.title, plugins: kindNouns.plugins.title, profiles: 'Profiles', history: 'History', sessions: 'Sessions', sources: pageNames.sources, repo: 'Git repo', harnesses: 'Harnesses', settings: 'Settings' };
 /** Below this window width the sidebar folds to its icon rail, unless the person chose a shape with the toggle. */
 const RAIL_BELOW = 968;
 /** From this content width (laptop full screen and up), an open row's details dock beside its table instead of under the row. */
@@ -134,6 +135,8 @@ function renderSidebar() {
     !noToolManaged() ? navRow('profiles', titles.profiles, 'sliders-horizontal') : null,
     !noToolManaged() ? h('div.nav-divider', { role: 'separator' }) : null,
     navRow('history', titles.history, 'history'),
+    // Each day's sessions and what their tokens would cost, read from the tools' own history (sessionspage.ts).
+    navRow('sessions', titles.sessions, 'clock'),
     repoRow(),
     navRow('settings', titles.settings, 'settings'),
   ].filter((entry): entry is HTMLElement => !!entry));
@@ -168,7 +171,7 @@ function renderPage() {
   const held = heldBy(state.home);
   if (held) { region('page').replaceChildren(heldScreen(state.home!, held)); return; }
   forgetHeldResult();
-  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'library' ? libraryPage() : state.page === 'mcpsignin' ? mcpSigninPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'profiles' ? profilesPage() : state.page === 'history' ? historyPage() : state.page === 'repo' ? repoPage() : state.page === 'sources' ? sourcesPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : harnessesPage());
+  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'library' ? libraryPage() : state.page === 'mcpsignin' ? mcpSigninPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'profiles' ? profilesPage() : state.page === 'history' ? historyPage() : state.page === 'sessions' ? (state.home ? sessionsPage(state.home) : notRead()) : state.page === 'repo' ? repoPage() : state.page === 'sources' ? sourcesPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : harnessesPage());
 }
 
 /** What the home lets Central Knot write, said in the status bar; `short` stands in when the bar is narrow (style.css). */

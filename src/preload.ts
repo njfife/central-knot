@@ -15,6 +15,7 @@ const api: DesktopApi = {
   instructions: readId => ipcRenderer.invoke('instructions:view', readId),
   agentVersion: (key, hash) => ipcRenderer.invoke('agents:version', key, hash),
   readUsage: home => ipcRenderer.invoke('usage:read', home),
+  readSessions: (home, start, end, readId) => ipcRenderer.invoke('sessions:read', home, start, end, readId),
   checkSignin: (tool, home, names) => ipcRenderer.invoke('mcp-signin:check', tool, home, names),
   search: (typed, shown) => ipcRenderer.invoke('search:ask', typed, shown),
   onSearchPublished: callback => { ipcRenderer.on('search:published', (_event, home, readId) => callback(String(home), Number(readId))); },
