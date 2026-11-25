@@ -31,9 +31,9 @@
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, noticeNames, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
-import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, pageNames, rowNames, rowNouns, saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind } from './words.ts';
+import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, pageNames, profileLeftUse, rowNames, rowNouns, saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind } from './words.ts';
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
-import { copilotSharesYours, homeItems, inUse, itemId, pluginLive } from './profileplan.ts';
+import { copilotSharesYours, endedProfiles, homeItems, inUse, inUseInHome, itemId, pluginLive } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
 import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, writeOff, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
@@ -2436,12 +2436,12 @@ function unusedBand(t: Table, shown: ItemRow[]) {
     const list = read.tools.filter(each => toolsFor(t, kind).includes(each.tool) && each.sessions && !each.unread && each.tells[partOfPage[kind]] === how).map(each => each.tool);
     return list.length ? `${toolsInWords(list)} ${list.length === 1 ? 'doesn’t' : 'don’t'}${word} record which ${kindNouns[kind].one} was used.` : '';
   }).filter(Boolean).join(' ');
-  const live = homeItems(home), plugins = pluginLive(home), ids = new Set(off.map(skill => itemId(partOfPage[skill.kind], skill.key))), before = inUse(home.profiles.profiles, live, plugins);
-  const ending = before.filter(profile => !inUse(home.profiles.profiles, live.map(item => (ids.has(item.id) ? { ...item, on: false } : item)), plugins).includes(profile));
+  const plugins = pluginLive(home), live = homeItems(home, plugins), ids = new Set(off.map(skill => itemId(partOfPage[skill.kind], skill.key)));
+  const ending = endedProfiles(inUseInHome(home), inUse(home.profiles.profiles, live.map(item => (ids.has(item.id) ? { ...item, on: false } : item)), plugins));
   const lead = [`${counted(shown)} with no use seen in the last ${USAGE_DAYS} days.`,
     off.length ? 'Turn these off: Central Knot takes its copies out of every tool it manages and keeps them; Undo turns them all back on.' : '',
     kept.length ? `${counted(kept)} from a plugin skipped: turn each off on its own row.` : '',
-    ending.length ? `With these off, ${andList(ending.map(profile => profile.name))} ${ending.length === 1 ? 'stops' : 'stop'} being the profile in use.` : ''];
+    ending.length ? `With these off, ${profileLeftUse(ending.map(profile => profile.name), 'stops')}` : ''];
   const more = ['A use on another computer or in a tool not read isn’t seen.', reachWords(read), record('seen', ' always'), record(undefined, ''),
     fresh.length ? `Left out: ${counted(fresh)} under ${USAGE_DAYS} days old.` : '', found.length ? `Left out: ${counted(found)} found, not yet in Central Knot.` : ''];
   const turn = off.length ? button({ variant: 'outline', size: 'micro', label: 'Turn these off', id: 'turn-unused-off',
