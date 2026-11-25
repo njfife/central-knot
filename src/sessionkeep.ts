@@ -148,9 +148,8 @@ export function createSessionKeeper(host: SessionKeepHost) {
     return work;
   };
   /** A sweep the Sessions page asks for (its 7 days): started, or the one under way joined; only for the open home while it keeps. */
-  const sweepNow = (home: string): SessionCostsView => {
+  const sweepNow = (home: string) => {
     if (home === open?.home) startSweep();
-    return view(home);
   };
   const quit = () => {
     quitting = true;

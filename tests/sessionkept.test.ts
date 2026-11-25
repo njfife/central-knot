@@ -106,13 +106,14 @@ test('Prices as kept: each list date the receipts were priced on, once, oldest f
   const priced = record.months['2026-11']!.sessions[0]!.requests['b']!;
   const bounds = weekTo(12, 2);
   const week = dayByDay(keptReading(record, periodOf(bounds), BOTH), bounds);
-  assert.deepEqual([week.ratesDates, ...week.days.map(day => day.ratesDates)], [['2026-10-01', '2026-11-15'], [], ['2026-10-01', '2026-11-15'], ['2026-10-01']]);
+  const firstOfDecember = sessionRows(keptReading(record, { start: local(12, 1, 0), end: local(12, 2, 0) }, BOTH));
+  assert.deepEqual([week.ratesDates, firstOfDecember.ratesDates], [['2026-10-01', '2026-11-15'], []]);
   const kept = week.days[1]!.rows[0]!.models[0]!.cost.dollars!;
   close(kept, priced.dollars! + record.months['2026-11']!.sessions[0]!.requests['c']!.dollars!, 'the dollars each receipt was kept with, not priced again');
   assert.equal(week.days[0]!.total.cost.unpriced, 1);
 });
 
-test('Each day of 7 days says what the same kept requests say read for that day alone', async () => {
+test('Each day of 7 days says what the same kept requests say read for that day alone, and the period what they say read whole', async () => {
   const ctx = await newContext();
   await keep(ctx, [
     { session: 'p', request: 'p1', at: local(11, 27, 9) }, { session: 'kid', parent: 'p', request: 'k1', at: local(11, 27, 9, 5) },
@@ -124,7 +125,10 @@ test('Each day of 7 days says what the same kept requests say read for that day 
   const bounds = weekTo(12, 2);
   const week = dayByDay(keptReading(record, periodOf(bounds), BOTH), bounds);
   const alone = bounds.slice(0, -1).map((start, index) => sessionRows(keptReading(record, { start, end: bounds[index + 1]! }, BOTH)));
-  assert.deepEqual(week.days, alone.filter(day => day.rows.length).reverse());
+  assert.deepEqual(week.days, alone.filter(day => day.rows.length).reverse().map(({ period, total, rows }) => ({ period, total, rows })), 'a day sends its total and rows only');
+  const { rows: _rows, ...whole } = sessionRows(keptReading(record, periodOf(bounds), BOTH));
+  const { days: _days, ...totals } = week;
+  assert.deepEqual(totals, whole, 'the period’s totals, its top-level sessions counted without building its rows');
   assert.deepEqual(week.days.map(day => day.rows.map(row => [row.session, row.children.map(child => child.session)])),
     [[['q', []], ['c1', []]], [['p', []]], [['p', []]], [['c1', []]], [['p', ['kid']]]], 'an agent’s session set in its parent’s on their day');
 });
@@ -161,6 +165,8 @@ test('A heavy week: 7 days across the end of two months of 160,000 requests in 4
   const reading = await readKeptPeriod(ctx.home, periodOf(bounds), BOTH);
   const week = dayByDay(reading, bounds);
   const took = performance.now() - started;
+  // One more tick, so that the last stretch of work without a break is counted as a stall too.
+  await new Promise(resolve => setTimeout(resolve, 20));
   clearInterval(lag);
   clearInterval(heap);
   peak = Math.max(peak, process.memoryUsage().heapUsed);

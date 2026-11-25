@@ -1676,7 +1676,7 @@ app.whenReady().then(async () => {
   handleNow('sessions:read-kept', async (home, bounds, readId) => (current && home === current.home && sessionKeep?.view(current.home).on && dayBounds(bounds)
     ? dayByDay(await readKeptPeriod(current.home, { start: bounds[0]!, end: bounds.at(-1)! }, presentTools(await readFor(readId as number | undefined))), bounds) : null));
   // A sweep the 7 days ask for once drawn: started or joined by the keeper, for the open home while it keeps; its news says when it ends.
-  handleNow('sessions:sweep', async home => (typeof home === 'string' && sessionKeep ? sessionKeep.sweepNow(home) : null));
+  handleNow('sessions:sweep', async home => { if (typeof home === 'string') sessionKeep?.sweepNow(home); });
   // MCP sign-in: one tool's own list command for the home on screen, of the servers the page names, run on a click (mcpsigninrun.ts):
   // outside the queue, as it can take 70 s and changes nothing of Central Knot's. This computer's own command lines are looked for,
   // as the Plugins page's are. CK_SIGNIN_LIMIT_MS: an end-to-end run's shorter limit (mcpsigninrun.ts checkLimit: never longer).

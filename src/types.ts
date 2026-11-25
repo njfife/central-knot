@@ -224,8 +224,8 @@ export interface DesktopApi {
    * one, or one that does not keep session costs.
    */
   readKeptSessions(home: string, bounds: number[], readId?: number): Promise<PeriodRows | null>;
-  /** Asks the keeper for a sweep of the open home, or to join the one under way (sessionkeep.ts sweepNow); answers its state after (null where none keeps). */
-  sweepSessions(home: string): Promise<SessionCostsView | null>;
+  /** Asks the keeper for a sweep of the open home while it keeps, or to join the one under way (sessionkeep.ts sweepNow); its news says when it ends. */
+  sweepSessions(home: string): Promise<void>;
   /** Turns keeping session costs on or off for `home` (sessionkeep.ts); refuses without writing when the home cannot be written. */
   setKeepSessionCosts(home: string, on: boolean): Promise<SessionCostsView>;
   /** Session-cost keeping or collection state changed for the open home (sessionkeep.ts). */

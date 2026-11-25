@@ -1242,8 +1242,13 @@ span.ins-confirm { margin-top: 0; }
 .sessions-unpriced { color: var(--ink-soft); }
 .sessions-rows, .sessions-children, .sessions-days { list-style: none; margin: 0; padding: 0; }
 .sessions-day + .sessions-day { border-top: 1px solid var(--line); }
-.sessions-day > details > summary { font-size: 13px; }
-.sessions-day-label { grid-column: 2 / 5; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
+/* A day's line: its figure at the line's end, so the days' figures stand in a column; open, it stays in view while its rows
+   scroll, which are set in by the line's chevron and gap. */
+.sessions-day > details > summary { display: flex; font-size: 13px; }
+.sessions-day > details[open] > summary { position: sticky; top: 0; z-index: 1; background: var(--surface); }
+.sessions-day > details > summary > .sessions-cost { justify-content: flex-end; }
+.sessions-day .sessions-rows { padding-left: 22px; }
+.sessions-day-label { flex: 1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
 .sessions-day-name { font-weight: 600; }
 .sessions-day-count { color: var(--ink-soft); }
 .sessions-row summary, .sessions-day summary, .sessions-line { display: grid; grid-template-columns: var(--sessions-columns); column-gap: 10px; align-items: baseline; padding: 6px 8px; font-size: 12.5px; }
