@@ -1,48 +1,70 @@
 // A record of every program a run of the unit tests starts or stops, for proving that a change leaves macOS and Linux
 // launching exactly as before: load it before anything else with NODE_OPTIONS=--import=<this file> and CK_SPAWN_LOG=<folder>,
 // then compare two such folders (`node tests/spawnlog.mjs compare <before> <after> [<before again>]`). It is test plumbing,
-// never shipped.
+// never shipped; its worked examples are tests/spawnlog.test.ts.
 //
 // What it records, one JSON line per call, in a file per process (<folder>/<pid>.jsonl, named on its first line by the
 // script that process runs, a test file for each of `node --test`'s children):
-// - each start through child_process (spawn, execFile, spawnSync, execFileSync, fork): the function, the program, its
-//   arguments, and the options cwd, stdio, detached, shell, timeout and windowsVerbatimArguments;
+// - each start through child_process (spawn, execFile and its promisified form, spawnSync, execFileSync, execSync, fork;
+//   exec goes through execFile): the function, the program, its arguments, every option given, and the environment the
+//   program was given (every name and value: the one passed, else the process's own, which it inherits);
 // - each stop: a child's own kill() (the signal), and process.kill (the signal, 0 told apart as a liveness probe, and whether
 //   the number named a process group, its sign kept), with the target named by the start that made it, or "another";
-// - each chmod by which a test makes a file executable (the mode, and a hash of the file's bytes with its temporary folders
+// - each chmod by which a test makes a file executable (the mode, and a digest of the file's bytes with its temporary folders
 //   named as below): the tests' stand-in tools are made this way, so their place, bytes and mode are compared too.
-// Folders mkdtemp made, the checkout, hashes, ports and process numbers are written the same way on every run, so two
-// runs of the same code give the same records. Each test file's records are compared as a multiset (its tests may start
-// things side by side), its liveness probes as a set (how often a wait asks depends on timing).
+// What no two runs share is written the same way on every run: the folders mkdtemp made, the checkout, the home, the record
+// folder itself; and, when compared, ids, hashes, times, ports and process numbers (never a stand-in's digest). Each test
+// file's records are compared as a multiset (its tests may start things side by side), its liveness probes as a set (how
+// often a wait asks depends on timing).
 import { createHash } from 'node:crypto';
 import childProcess from 'node:child_process';
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
+import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 
-const root = resolve(import.meta.dirname, '..');
+const root = resolve(import.meta.dirname, '..'), home = homedir();
 /** The folders mkdtemp made in this process, each with its name written as `<prefix>*`: the one part of a path no two runs share. */
 const made = new Map();
-/** A path or argument with each folder mkdtemp made, and the checkout, written the same way on every run. */
+/** A path or argument with each folder mkdtemp made, the checkout and the home written the same way on every run. */
 export function normal(text) {
   let said = String(text);
   for (const [path, name] of made) said = said.split(path).join(name);
-  return said.split(root).join('<repo>');
+  said = said.split(root).join('<repo>');
+  return home.length > 1 ? said.split(home).join('<home>') : said;
 }
 /**
- * A recorded line with what else no two runs share written the same way: ids, hashes (Git's, and folders named by one),
- * times, ports, and a process number in a stand-in's arguments.
+ * A recorded value with what else no two runs share written the same way: ids, hashes (Git's, and folders named by one),
+ * times, ports, and a process number in a stand-in's arguments. A stand-in's digest (`bytes`) is kept as it is.
  */
-const stable = line => line
-  .replace(/0x[0-9a-f]+/g, '0x<n>')
-  .replace(/\b1[6-9]\d{8}(\d{3})?\b/g, '<time>')
-  .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g, '<uuid>')
-  .replace(/\b[0-9a-f]{16,}\b/g, '<hex>')
-  .replace(/\d{4}-\d\d-\d\dT\d\d[-:]\d\d[-:]\d\d[-.:]\d{3}Z/g, '<time>')
-  .replace(/(127\.0\.0\.1|localhost):\d+/g, '$1:<port>');
+const stable = (value, key) => {
+  if (key === 'bytes') return value;
+  if (Array.isArray(value)) return value.map(each => stable(each));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([name, each]) => [name, stable(each, name)]));
+  if (typeof value !== 'string') return value;
+  return value
+    .replace(/0x[0-9a-f]+/g, '0x<n>')
+    .replace(/\b1[6-9]\d{8}(\d{3})?\b/g, '<time>')
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g, '<uuid>')
+    .replace(/\b[0-9a-f]{16,}\b/g, '<hex>')
+    .replace(/\d{4}-\d\d-\d\dT\d\d[-:]\d\d[-:]\d\d[-.:]\d{3}Z/g, '<time>')
+    .replace(/(127\.0\.0\.1|localhost):\d+/g, '$1:<port>');
+};
 
 const folder = process.env.CK_SPAWN_LOG;
 if (folder && process.argv[2] !== 'compare') record(folder);
+
+/** An option's value as recorded: text as `normal` writes it, a function or an object of a class by its kind. */
+const shown = value => {
+  if (typeof value === 'string') return normal(value);
+  if (typeof value === 'function') return '<function>';
+  if (Array.isArray(value)) return value.map(shown);
+  if (value && typeof value === 'object') {
+    return Object.getPrototypeOf(value) === Object.prototype ? Object.fromEntries(Object.entries(value).map(([key, each]) => [key, shown(each)])) : `<${value.constructor?.name ?? 'object'}>`;
+  }
+  return value;
+};
 
 function record(into) {
   const file = join(into, `${process.pid}.jsonl`);
@@ -52,25 +74,37 @@ function record(into) {
     fs.appendFileSync(file, `${JSON.stringify(entry)}\n`);
   };
   const named = new WeakMap(), byPid = new Map();
-  const startOf = (fn, file, args, options) => {
-    const picked = Object.fromEntries(['cwd', 'stdio', 'detached', 'shell', 'timeout', 'windowsVerbatimArguments']
-      .filter(key => options?.[key] !== undefined).map(key => [key, key === 'cwd' ? normal(options[key]) : options[key]]));
-    return { start: fn, file: normal(file), args: (args ?? []).map(normal), ...picked };
+  /** The environment a start gives its program: the one passed, else this process's own, every name in order, the record folder named. */
+  const envOf = options => {
+    const env = options?.env ?? process.env;
+    return Object.fromEntries(Object.keys(env).sort().map(name => [name, name === 'CK_SPAWN_LOG' ? '<records>' : shown(env[name])]));
+  };
+  const startOf = (fn, file, args, options) => ({
+    start: fn, file: normal(file), args: (args ?? []).map(normal),
+    options: Object.fromEntries(Object.keys(options ?? {}).filter(key => key !== 'env').sort().map(key => [key, shown(options[key])])),
+    env: envOf(options),
+  });
+  /** The record of a call with child_process's own arguments (file, [args], [options], ...): its args when given as a list. */
+  const entryOf = (fn, file, args, options) => {
+    const list = Array.isArray(args) ? args : [];
+    const opts = Array.isArray(args) ? options : (args && typeof args === 'object' ? args : undefined);
+    return startOf(fn, file, list, opts && typeof opts === 'object' ? opts : undefined);
   };
   const wrap = fn => {
     const original = childProcess[fn];
-    childProcess[fn] = function (file, args, options, ...rest) {
-      const list = Array.isArray(args) ? args : [];
-      const opts = Array.isArray(args) ? options : (args && typeof args === 'object' ? args : undefined);
-      const entry = startOf(fn, file, list, typeof opts === 'object' ? opts : undefined);
+    const wrapped = function (file, args, options, ...rest) {
+      const entry = entryOf(fn, file, args, options);
       write(entry);
       const child = original.call(this, file, args, options, ...rest);
       const id = `${entry.file} ${entry.args.join(' ')}`;
       if (child && typeof child === 'object' && 'pid' in child) { named.set(child, id); if (child.pid) byPid.set(child.pid, id); }
       return child;
     };
+    // Node's promisified execFile is its own function (it gives stdout and stderr); kept so, and recorded too.
+    if (original[promisify.custom]) wrapped[promisify.custom] = (file, args, options, ...rest) => { write(entryOf(fn, file, args, options)); return original[promisify.custom](file, args, options, ...rest); };
+    childProcess[fn] = wrapped;
   };
-  for (const fn of ['spawn', 'execFile', 'spawnSync', 'execFileSync', 'fork']) wrap(fn);
+  for (const fn of ['spawn', 'execFile', 'spawnSync', 'execFileSync', 'execSync', 'fork']) wrap(fn);
   const kill = childProcess.ChildProcess.prototype.kill;
   childProcess.ChildProcess.prototype.kill = function (signal) {
     write({ kill: 'child', target: named.get(this) ?? 'another', signal: signal ?? 'SIGTERM' });
@@ -89,7 +123,7 @@ function record(into) {
     if (!ours || typeof mode !== 'number' || !(mode & 0o100)) return original.call(this, path, mode, ...rest);
     let bytes = 'unread';
     try { bytes = createHash('sha256').update(normal(fs.readFileSync(path, 'latin1'))).digest('hex').slice(0, 16); } catch { /* a folder */ }
-    write({ chmod: normal(path), mode: typeof mode === 'number' ? mode.toString(8) : String(mode), bytes });
+    write({ chmod: normal(path), mode: mode.toString(8), bytes });
     return original.call(this, path, mode, ...rest);
   };
   // Longest first, so a folder made inside another is named whole.
@@ -112,7 +146,10 @@ function read(from) {
     // its parent made for it, differ from run to run.
     const owner = /\btests\/[\w.-]+\.test\.ts\b/.exec(script)?.[0] ?? script.split(' ')[0].replace(/(\/[\w.]+(?:-[\w.]+)*-)[A-Za-z0-9]{6}(?=\/|$)/g, '$1*');
     const kept = files.get(owner) ?? { records: [], probes: new Set() };
-    for (const line of lines.map(stable)) { if (JSON.parse(line).probe) kept.probes.add(line); else kept.records.push(line); }
+    for (const recorded of lines.map(line => stable(JSON.parse(line)))) {
+      const line = JSON.stringify(recorded);
+      if (recorded.probe) kept.probes.add(line); else kept.records.push(line);
+    }
     files.set(owner, kept);
   }
   return files;
