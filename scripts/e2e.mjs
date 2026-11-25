@@ -1149,6 +1149,11 @@ const CUT_OFF = `(() => {
   }
   for (const node of document.querySelectorAll('.scroll, .toolbar, .band, #header, .market-chips')) if (node.scrollWidth > node.clientWidth + 1) out.push('scrolls sideways: ' + (node.id || node.className));
   for (const bar of document.querySelectorAll('.fit-bar[data-overflows]')) out.push('too wide even when fitted: ' + bar.className);
+  for (const card of document.querySelectorAll('.info-card:popover-open')) {
+    const own = card.getBoundingClientRect();
+    if (own.width < 2 || own.height < 2) out.push('empty info card: ' + card.id);
+    else if (!inside(own, view, 'x') || !inside(own, view, 'y') || card.scrollWidth > card.clientWidth + 1) out.push('info card cut off: ' + card.id);
+  }
   return out;
 })()`;
 
@@ -1605,6 +1610,10 @@ async function appImageSignIn(a, savedSettings) {
   const exec = path => readNow(path).split('\n').find(line => line.startsWith('Exec='));
   const state = () => a.run(`(({ disabled, ariaChecked }) => [ariaChecked, disabled])(document.querySelector('#start-at-sign-in'))`);
   const firstOpen = [await state(), exec(autostart), exec(launcher), existsSync(icon) && readFileSync(icon).equals(readFileSync(join(root, 'assets/icon.png')))];
+  const signInCardWords = `Opens hidden in ${process.platform === 'darwin' ? 'the menu bar' : 'the system tray'} at sign-in, so sync keeps running.`;
+  same('when Start at sign-in can change, its standing sentence is gone and its info card describes the switch',
+    [await a.exists('#setting-sign-in-hint'), await a.run(`document.querySelector('#start-at-sign-in').getAttribute('aria-describedby')`), await a.text('#setting-sign-in-info-card')],
+    [false, 'setting-sign-in-info-card', signInCardWords]);
   await a.click('#start-at-sign-in');
   for (let tries = 0; tries < 30 && existsSync(autostart); tries++) await wait(100);
   const off = [await state(), existsSync(autostart), existsSync(launcher), (await savedSettings()).startAtSignIn];
@@ -3534,6 +3543,10 @@ async function practiceFlow() {
     // Coming back to the window: the row can be changed now.
     await refocus(main);
     await until(false, () => a.run(`document.querySelector('#start-at-sign-in').disabled`));
+    const signInCardWords = `Opens hidden in ${process.platform === 'darwin' ? 'the menu bar' : 'the system tray'} at sign-in, so sync keeps running.`;
+    same('when Start at sign-in can change, its standing sentence is gone and its info card describes the switch',
+      [await a.exists('#setting-sign-in-hint'), await a.run(`document.querySelector('#start-at-sign-in').getAttribute('aria-describedby')`), await a.text('#setting-sign-in-info-card')],
+      [false, 'setting-sign-in-info-card', signInCardWords]);
     await a.click('#start-at-sign-in');
     const fromSettings = await until(['true', null, null], row);
     // The menu's item turns it off while Settings is open: the row follows.
@@ -3584,6 +3597,189 @@ async function practiceFlow() {
       [['Only the AppImage can start at sign-in.', { label: 'Start at sign-in (AppImage only)', enabled: false, checked: false }], [false, ['false', null, null], false],
         [['true', null, null], `Exec="${appImage}" --hidden`, { label: 'Start at sign-in', enabled: true, checked: true }], [['false', null, null], false], [['Start Central Knot at sign-in', false]], true, []]);
     main.close();
+  }
+  // Info marks and their top-layer detail cards (dom.ts infoMark) on Settings: Start at sign-in and Log.
+  const signInCardText = `Opens hidden in ${process.platform === 'darwin' ? 'the menu bar' : 'the system tray'} at sign-in, so sync keeps running.`;
+  const logCardText = 'Central Knot’s own log, for reporting a problem. Your tools’ files aren’t in it.';
+  const cardOpen = id => a.run(`!!document.querySelector('#${id}-card')?.matches(':popover-open')`);
+  const centerOf = selector => a.run(`(() => { const b = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) }; })()`);
+  const pressTab = async (shift = false) => { for (const type of ['rawKeyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers: shift ? 8 : 0 }); await wait(60); };
+  const pressEsc = async () => { for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await wait(60); };
+  const moveTo = async at => a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
+  same('Settings has info marks for Start at sign-in and Log with no title, tooltip cards always drawn, and Log’s standing sentence moved into its card', await a.run(`(() => {
+    const read = id => { const m = document.querySelector('#' + id), c = document.querySelector('#' + id + '-card'); return [m?.tagName, m?.getAttribute('aria-label'), m?.hasAttribute('title'), m?.getAttribute('aria-describedby'), c?.getAttribute('role'), c?.getAttribute('popover'), c?.textContent]; };
+    return [read('setting-sign-in-info'), read('setting-log-info'), !!document.querySelector('#setting-log-hint'), document.querySelector('#show-log')?.getAttribute('aria-describedby'), document.querySelector('#open-log-folder')?.getAttribute('aria-describedby')];
+  })()`), [
+    ['BUTTON', 'About Start at sign-in', false, 'setting-sign-in-info-card', 'tooltip', 'manual', signInCardText],
+    ['BUTTON', 'About Log', false, 'setting-log-info-card', 'tooltip', 'manual', logCardText],
+    false, 'setting-log-info-card', 'setting-log-info-card',
+  ]);
+  // In the fault state (Start at sign-in unavailable), the open card sits clear of the fault line beneath the label.
+  if (await a.exists('#setting-sign-in-hint')) {
+    await a.click('#setting-sign-in-info');
+    const clearOfFault = await a.run(`(() => { const h = document.querySelector('#setting-sign-in-hint').getBoundingClientRect(), c = document.querySelector('#setting-sign-in-info-card').getBoundingClientRect(); return c.top >= h.bottom + 3 || c.bottom <= h.top - 3; })()`);
+    same('when Start at sign-in shows its fault line, its open info card does not meet that line', clearOfFault, true);
+    await a.click('#setting-sign-in-info');
+  }
+  // A focus or click cancels a pending hover on another mark, and a hover timer whose mark vanished leaves an open card alone.
+  await sizeTo(a, 1728, 1117);
+  await moveTo({ x: 0, y: 0 });
+  const bothStartAt = await centerOf('#setting-sign-in-info');
+  await moveTo(bothStartAt);
+  await wait(60);
+  await a.run(`document.querySelector('#show-log').focus({ preventScroll: true })`);
+  await pressTab(true);
+  await wait(360);
+  const focusBeatHover = [await cardOpen('setting-log-info'), await cardOpen('setting-sign-in-info'), await a.run(`document.activeElement?.id`)];
+  await pressEsc();
+  await moveTo({ x: 0, y: 0 });
+  await wait(40);
+  await moveTo(bothStartAt);
+  await wait(60);
+  await a.click('#setting-log-info');
+  await wait(360);
+  const clickBeatHover = [await cardOpen('setting-log-info'), await cardOpen('setting-sign-in-info')];
+  await moveTo({ x: 0, y: 0 });
+  await wait(40);
+  await moveTo(bothStartAt);
+  await wait(60);
+  await a.run(`document.querySelector('#setting-sign-in-info').closest('.info-wrap').remove()`);
+  await wait(360);
+  const vanishedLeftOpen = await cardOpen('setting-log-info');
+  await a.click('#header-refresh');
+  await fullSize(a);
+  same('focus or click on another mark cancels a pending hover, and a timer whose mark vanished leaves the open card alone',
+    [focusBeatHover, clickBeatHover, vanishedLeftOpen], [[true, false, 'setting-log-info'], [true, false], true]);
+  // Hover: opens after 300 ms (mouse only), stays when moving onto the card or returning before 200 ms, closes 200 ms after leaving; touch never hover-opens.
+  await moveTo({ x: 0, y: 0 });
+  await a.run(`document.querySelector('#setting-sign-in-info').scrollIntoView({ block: 'center' })`);
+  const signInAt = await centerOf('#setting-sign-in-info');
+  await moveTo(signInAt);
+  await wait(120);
+  const beforeDelay = await cardOpen('setting-sign-in-info');
+  await wait(260);
+  const afterDelay = await cardOpen('setting-sign-in-info');
+  await moveTo(await centerOf('#setting-sign-in-info-card'));
+  await wait(260);
+  const stayedOnCard = await cardOpen('setting-sign-in-info');
+  await moveTo({ x: 0, y: 0 });
+  await wait(80);
+  await moveTo(signInAt);
+  await wait(260);
+  const stayedOnReturn = await cardOpen('setting-sign-in-info');
+  await moveTo({ x: 0, y: 0 });
+  await wait(280);
+  const closedAfterLeave = await cardOpen('setting-sign-in-info');
+  await a.run(`document.querySelector('#setting-sign-in-info').dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'touch' }))`);
+  await wait(360);
+  const touchHover = await cardOpen('setting-sign-in-info');
+  same('mouse hover opens after 300 ms, stays on the card and on a quick return, closes 200 ms after leaving; touch hover opens nothing',
+    [beforeDelay, afterDelay, stayedOnCard, stayedOnReturn, closedAfterLeave, touchHover], [false, true, true, true, false, false]);
+  // Keyboard: Tab from another control opens the card; Escape closes it keeping focus; a redraw does not reopen; a second Escape runs the page's own Escape.
+  await a.run(`document.querySelector('#header-refresh').focus()`);
+  await pressTab();
+  const onFocus = [await a.run(`document.activeElement?.id`), await cardOpen('setting-sign-in-info')];
+  await pressEsc();
+  const afterEsc = [await a.run(`document.activeElement?.id`), await cardOpen('setting-sign-in-info')];
+  await a.run(`window.centralKnot.setAppearance('dark')`);
+  for (let tries = 0; tries < 20 && !(await a.exists('#appearance-dark[aria-checked="true"]')); tries++) await wait(100);
+  const afterFocusRedraw = [await a.run(`document.activeElement?.id`), await cardOpen('setting-sign-in-info')];
+  await a.run(`window.centralKnot.setAppearance('system')`);
+  for (let tries = 0; tries < 20 && !(await a.exists('#appearance-system[aria-checked="true"]')); tries++) await wait(100);
+  await keepFor(a, 30);
+  await keepFor(a, 7);
+  await a.click('#setting-sign-in-info');
+  await a.run(`document.querySelector('#history-days').focus()`);
+  await pressEsc();
+  const firstEsc = [await cardOpen('setting-sign-in-info'), await a.exists('#history-shorten')];
+  await pressEsc();
+  const secondEsc = await a.exists('#history-shorten');
+  same('Tab opens the card, Escape closes it keeping focus and a redraw stays closed; a second Escape runs the page’s own Escape',
+    [onFocus, afterEsc, afterFocusRedraw, firstEsc, secondEsc],
+    [['setting-sign-in-info', true], ['setting-sign-in-info', false], ['setting-sign-in-info', false], [false, true], false]);
+  // Click pins, a second mark closes the first, a second click on a pinned mark closes it, and a click elsewhere closes it.
+  await a.click('#setting-sign-in-info');
+  await moveTo({ x: 0, y: 0 });
+  await wait(280);
+  const pinnedStays = await cardOpen('setting-sign-in-info');
+  await a.run(`document.querySelector('#setting-log-info').scrollIntoView({ block: 'center' })`);
+  await a.click('#setting-log-info');
+  const secondClosesFirst = [await cardOpen('setting-sign-in-info'), await cardOpen('setting-log-info')];
+  await a.click('#setting-log-info');
+  const toggleOff = await cardOpen('setting-log-info');
+  await a.click('#setting-log-info');
+  await a.click('#setting-appearance-title');
+  const outsideCloses = await cardOpen('setting-log-info');
+  same('click pins, a second mark closes the first, clicking a pinned mark or clicking elsewhere closes it',
+    [pinnedStays, secondClosesFirst, toggleOff, outsideCloses], [true, [false, true], false, false]);
+  // At 860×528 with the Log row at the foot: top-layer card flips above, stays inside the window, survives a scrolled redraw in place, tracks small scrolls, and closes when scrolled out of view.
+  const putLogAtFoot = () => a.run(`(() => { const s = document.querySelector('#settings-scroll'), m = document.querySelector('#setting-log-info'); s.scrollTop += m.getBoundingClientRect().bottom - s.getBoundingClientRect().bottom + 4; })()`);
+  await sizeTo(a, ...SMALLEST);
+  await putLogAtFoot();
+  await wait(60);
+  if (shots) {
+    await a.click('#appearance-dark');
+    await putLogAtFoot();
+    await moveTo(await centerOf('#setting-log-info'));
+    await wait(380);
+    await a.shot('info-card-860-foot-mouse-dark');
+    await moveTo({ x: 0, y: 0 });
+    await wait(280);
+  }
+  await a.click('#setting-log-info');
+  const footBox = await a.run(`(() => { const m = document.querySelector('#setting-log-info').getBoundingClientRect(), c = document.querySelector('#setting-log-info-card').getBoundingClientRect(); return { above: c.bottom <= m.top + 0.5, inside: c.left >= 7 && c.right <= innerWidth - 7 && c.top >= 7 && c.bottom <= innerHeight - 7 && c.width <= 321, top: Math.round(c.top), scroll: Math.round(document.querySelector('#settings-scroll').scrollTop) }; })()`);
+  await a.run(`document.querySelector('#setting-log-info-card').dataset.before = '1'`);
+  await a.run(`window.centralKnot.setAppearance('light')`);
+  for (let tries = 0; tries < 20 && !(await a.exists('#appearance-light[aria-checked="true"]')); tries++) await wait(100);
+  const afterScrolledRedraw = await a.run(`(() => { const c = document.querySelector('#setting-log-info-card'), r = c.getBoundingClientRect(); return { replaced: c.dataset.before !== '1', open: c.matches(':popover-open'), topDiff: Math.abs(Math.round(r.top) - ${footBox.top}) }; })()`);
+  await a.run(`document.querySelector('#settings-scroll').scrollTop += 16`);
+  await wait(80);
+  const afterSmallScroll = await a.run(`(() => { const c = document.querySelector('#setting-log-info-card'); return { open: c.matches(':popover-open'), moved: ${footBox.top} - Math.round(c.getBoundingClientRect().top) }; })()`);
+  await a.run(`document.querySelector('#settings-scroll').scrollTop = 0`);
+  await wait(80);
+  const afterScrollOut = await cardOpen('setting-log-info');
+  same('at 860×528, Log’s card at the foot flips above inside the window, stays in place across a scrolled redraw, follows a small scroll, and closes when scrolled out of view',
+    [footBox.above, footBox.inside, footBox.scroll > 0, afterScrolledRedraw.replaced, afterScrolledRedraw.open, afterScrolledRedraw.topDiff <= 2, afterSmallScroll.open, afterSmallScroll.moved >= 14 && afterSmallScroll.moved <= 18, afterScrollOut],
+    [true, true, true, true, true, true, true, true, false]);
+  if (shots) {
+    await a.click('#sidebar-toggle');
+    await putLogAtFoot();
+    await a.run(`document.querySelector('#show-log').focus()`);
+    await pressTab(true);
+    await a.shot('info-card-860-foot-focus-light');
+    await pressEsc();
+    await a.click('#sidebar-toggle');
+  }
+  await a.run(`window.centralKnot.setAppearance('system')`);
+  for (let tries = 0; tries < 20 && !(await a.exists('#appearance-system[aria-checked="true"]')); tries++) await wait(100);
+  await fitsAtMinimum(a, 'Settings with the Log info card open', async () => {
+    await putLogAtFoot();
+    await a.click('#setting-log-info');
+  });
+  if (shots) {
+    await sizeTo(a, 1316, 819);
+    await a.click('#appearance-dark');
+    await a.run(`document.querySelector('#settings-scroll').scrollTop = 0; document.activeElement?.blur()`);
+    await moveTo(await centerOf('#setting-sign-in-info'));
+    await wait(380);
+    await a.shot(await a.exists('#setting-sign-in-hint') ? 'info-card-1316-fault-mouse-dark' : 'info-card-1316-mouse-dark');
+    await moveTo({ x: 0, y: 0 });
+    await wait(280);
+    await a.click('#sidebar-toggle');
+    await a.run(`document.querySelector('#header-refresh').focus()`);
+    await pressTab();
+    await a.shot('info-card-1316-focus-dark');
+    await pressEsc();
+    await a.click('#sidebar-toggle');
+    await a.click('#appearance-light');
+    await a.run(`document.activeElement?.blur()`);
+    await moveTo(await centerOf('#setting-sign-in-info'));
+    await wait(380);
+    await a.shot('info-card-1316-mouse-light');
+    await moveTo({ x: 0, y: 0 });
+    await wait(280);
+    await a.click('#appearance-system');
+    await fullSize(a);
   }
   await openKind(a, 'skills');
   // Full screen: nothing on the Overview, History or Plugins is cut off at 2560×1440.

@@ -418,6 +418,13 @@ ul { list-style: none; }
 .inline-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 .band-dismiss { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex: none; border: 0; border-radius: 6px; background: transparent; color: var(--ink-faint); cursor: pointer; }
 .band-dismiss:hover { background: var(--hover); color: var(--ink); }
+/* Small circled-? button and its top-layer detail card (dom.ts infoMark): UA popover inset/margin reset so cardPlace places it. */
+.info-wrap { display: inline-flex; align-items: center; }
+.info-mark { appearance: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-soft); cursor: pointer; }
+.info-mark:hover, .info-mark:focus-visible { color: var(--ink); background: var(--press); }
+.info-mark:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.info-card { position: fixed; inset: auto; margin: 0; width: max-content; max-width: min(320px, calc(100vw - 16px)); padding: 8px 10px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); box-shadow: var(--overlay); color: var(--ink); font: 400 12px/17px var(--sans); white-space: normal; overflow: visible; overflow-wrap: break-word; }
+@media (prefers-color-scheme: dark) { .info-card { background: color-mix(in oklab, var(--surface) 84%, white); border-color: var(--cell-line); box-shadow: 0 10px 24px rgb(0 0 0 / 70%); } }
 
 /* ---------- Toolbar, find and filters ---------- */
 .toolbar { flex: none; min-height: 37px; display: flex; align-items: center; gap: 8px; padding: 2px 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
@@ -1625,7 +1632,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .setting-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px 24px; padding: 12px 8px; border-bottom: 1px solid var(--line); }
 /* As on the app's list rows: pointing anywhere on a wide row, or focus inside it, lights it all, tying its text to a control far to the right. */
 .setting-row:hover, .setting-row:focus-within { background: var(--hover); }
-.setting-title { font-weight: 500; }
+.setting-title { display: flex; align-items: center; gap: 4px; font-weight: 500; }
 .setting-hint, .setting-message { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 /* Only the prose keeps the reading measure: a message's action sits right after its text, on the same line where there's room. */
 .setting-hint, .setting-message-text { max-width: 72ch; }
