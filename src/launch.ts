@@ -1,5 +1,5 @@
 // How Central Knot starts a tool's command (start, launchCommand), and what a tool is given on Windows for a home that is not
-// this computer's own (homeVariables). On macOS and Linux a command is started exactly as asked. On Windows Node refuses to
+// this computer's own (homeVariables, dropVariable). On macOS and Linux a command is started exactly as asked. On Windows Node refuses to
 // start a .cmd or .bat without a shell (since April 2024), and most of the tools' commands there are one (npm installs a
 // command as a .cmd): such a file is run through cmd.exe with each argument encoded so that it arrives as it was given
 // (through npm's own .cmd every argument does; see launchCommand for what another .cmd takes).
@@ -82,4 +82,9 @@ export function homeVariables(home: string, platform: string = process.platform)
   const drive = win32.parse(home).root.replace(/\\$/, '');
   return { USERPROFILE: home, HOMEDRIVE: drive, HOMEPATH: home.slice(drive.length) || '\\', APPDATA: win32.join(home, 'AppData', 'Roaming'),
     LOCALAPPDATA: win32.join(home, 'AppData', 'Local'), CODEX_HOME: win32.join(home, '.codex') };
+}
+
+/** Takes the variable `name` out of `env`: on Windows, which reads a variable's name in any case, in every case it is written there. */
+export function dropVariable(env: NodeJS.ProcessEnv, name: string, platform: string = process.platform): void {
+  for (const key of Object.keys(env)) if (key === name || (platform === 'win32' && key.toUpperCase() === name.toUpperCase())) delete env[key];
 }

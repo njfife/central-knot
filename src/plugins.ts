@@ -5,7 +5,7 @@ import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { pathBeside } from './platform.ts';
-import { homeVariables, start } from './launch.ts';
+import { dropVariable, homeVariables, start } from './launch.ts';
 import { probeVersion } from './discovery.ts';
 import { configRoot, harnesses } from './harnesses.ts';
 import { CODEX_MANIFEST, MANIFEST, codexManifest, inside, installedContents, parseObject, pluginContents, pluginManifest, readManifest, remoteOf, skillName, skillNamesIn, sourceOf, type ReadAs } from './catalogdetail.ts';
@@ -1173,7 +1173,7 @@ async function native(context: PluginContext, tool: PluginTool, args: string[]):
   const variable = harnesses[tool].configEnv;
   if (override && variable) env[variable] = override;
   else if (tool === 'codex-cli') env.CODEX_HOME = join(context.home, harnesses[tool].defaultConfig);
-  else if (variable) delete env[variable];
+  else if (variable) dropVariable(env, variable);
   const result = await run(binary, args, { env, cwd: context.home, timeoutMs: context.timeoutMs ?? 180_000 });
   const after = await Promise.all(files.map(readOrNull));
   const changed = files.map((path, index) => ({ path, before: before[index], after: after[index] })).filter(entry => entry.before !== entry.after);

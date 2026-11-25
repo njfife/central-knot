@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { homeVariables, launchCommand, start } from '../src/launch.ts';
+import { dropVariable, homeVariables, launchCommand, start } from '../src/launch.ts';
 import { npmShim } from './standin.ts';
 
 const windows = process.platform === 'win32';
@@ -78,6 +78,14 @@ test('A home that is not this computer’s own is named, on Windows, by every va
     APPDATA: 'D:\\Practice\\home\\AppData\\Roaming', LOCALAPPDATA: 'D:\\Practice\\home\\AppData\\Local', CODEX_HOME: 'D:\\Practice\\home\\.codex' });
   assert.deepEqual(homeVariables('/tmp/home', 'linux'), {});
   assert.deepEqual(homeVariables('/tmp/home', 'darwin'), {});
+});
+
+test('A variable taken out of a command’s environment goes in every case its name is written on Windows, which reads names in any case; elsewhere that name alone', () => {
+  const given = () => ({ COPILOT_HOME: 'a', Copilot_Home: 'b', copilot_home: 'c', PATH: 'p' });
+  const windows = given(), linux = given();
+  dropVariable(windows, 'COPILOT_HOME', 'win32');
+  dropVariable(linux, 'COPILOT_HOME', 'linux');
+  assert.deepEqual([windows, linux], [{ PATH: 'p' }, { Copilot_Home: 'b', copilot_home: 'c', PATH: 'p' }]);
 });
 
 /** What `file` printed when started with `args`, and how it ended. */
