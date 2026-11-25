@@ -13,7 +13,8 @@
 //   a link in a skills folder is no copy of Central Knot's, read as the copy it leads to (`links`).
 // - Writing and removing, each checked: a copy is written over (swapFolder) or removed (removeFolder) only while it still
 //   holds what was read, and the folder moved aside for it is named beside its target (`.ck-parked-*` with a note of where it
-//   goes) until the step is done, so recoverFolders puts it back after a crash and a copy moved aside is never read as gone.
+//   goes and what was read) until the step is done, so recoverFolders puts it back after a crash and a copy moved aside is
+//   never read as gone.
 import { randomUUID } from 'node:crypto';
 import { access, constants, lstat, mkdir, readFile, readdir, readlink, realpath, rename, rm, stat, unlink } from 'node:fs/promises';
 import { dirname, join, relative, sep } from 'node:path';
@@ -196,9 +197,9 @@ async function besideRoot(context: ShareContext, root: string): Promise<string> 
 
 /** A folder moved aside while a write or removal is under way, and the note beside it that says where it goes back. */
 const PARKED = /^\.ck-parked-[0-9a-f-]{36}$/;
-async function park(context: ShareContext, directory: string): Promise<{ parked: string; note: string }> {
+async function park(context: ShareContext, directory: string, expected: string): Promise<{ parked: string; note: string }> {
   const parked = join(await besideRoot(context, dirname(directory)), `.ck-parked-${randomUUID()}`), note = `${parked}.json`;
-  await writeDurably(note, JSON.stringify({ target: directory }));
+  await writeDurably(note, JSON.stringify({ target: directory, expected }));
   await retryWhileHeld(() => rename(directory, parked));
   return { parked, note };
 }
@@ -221,7 +222,7 @@ export async function swapFolder(context: ShareContext, source: string, target: 
   try {
     if (await hashOf(stage) !== tree.hash) throw new Error('The staged copy did not match its source.');
     context.fault?.('before-rename');
-    const { parked, note } = await park(context, target);
+    const { parked, note } = await park(context, target, expected);
     if (await hashOf(parked) !== expected) { await rename(parked, target); await done(note); throw changedWhileSyncing(); }
     context.fault?.('mid-replace');
     // On Windows the new one may wait to go in (retryWhileHeld): before each further try the copy moved aside must still be what
@@ -236,8 +237,9 @@ export async function swapFolder(context: ShareContext, source: string, target: 
     try {
       await retryWhileHeld(() => rename(stage, target), parkedHolds);
     } catch (error) {
-      // A put-back that is refused keeps its note, so recoverFolders finishes it.
-      await rename(parked, target).then(() => done(note), () => undefined);
+      // A put-back refused on Windows keeps its note, so recoverFolders finishes it; elsewhere the note goes, as before.
+      const back = await rename(parked, target).then(() => true, () => false);
+      if (back || process.platform !== 'win32') await done(note);
       throw error;
     }
     if (waited && await hashOf(parked) !== expected) {
@@ -272,7 +274,7 @@ export async function removeFolder(context: ShareContext, directory: string, exp
   context.fault?.('before-remove');
   if ((await lstat(directory)).isSymbolicLink()) throw Object.assign(new Error('That copy is a link.'), { code: 'CK_LINK' });
   if (await hashOf(directory) !== expected) throw changedWhileSyncing();
-  const { parked, note } = await park(context, directory);
+  const { parked, note } = await park(context, directory, expected);
   if (await hashOf(parked) !== expected) { await rename(parked, directory); await done(note); throw changedWhileSyncing(); }
   await removeTree(parked);
   await done(note);
@@ -280,8 +282,9 @@ export async function removeFolder(context: ShareContext, directory: string, exp
 
 /**
  * Finishes what a crash interrupted beside a tool's skills folder: a copy moved aside (`.ck-parked-*`) goes back where its
- * note says, if nothing is there; if something is (the write landed), it goes, since its content was kept before the write.
- * Stray staged folders go too. Only names Central Knot makes are touched.
+ * note says, if nothing is there. If something is (the write landed), it goes while it is still what its note says was read,
+ * since that content was kept before the write; one not known to be stays beside it, and the app's log names it (ShareContext
+ * log). Stray staged folders go too. Only names Central Knot makes are touched.
  */
 export async function recoverFolders(context: ShareContext, tool: HarnessId): Promise<void> {
   const root = rootOf(context, tool);
@@ -289,9 +292,13 @@ export async function recoverFolders(context: ShareContext, tool: HarnessId): Pr
   for (const folder of new Set(beside)) {
     for (const name of (await readdir(folder).catch(() => [] as string[])).filter(entry => PARKED.test(entry))) {
       const parked = join(folder, name), note = `${parked}.json`;
-      const target = await readFile(note, 'utf8').then(text => JSON.parse(text).target as string, () => undefined);
+      const said = await readFile(note, 'utf8').then(text => JSON.parse(text) as { target?: string; expected?: string }, () => undefined);
+      const target = said?.target;
       if (!target || relative(root, target).startsWith('..')) continue;
-      if (await lstat(target).then(() => true, () => false)) await removeTree(parked).catch(() => undefined);
+      const taken = await lstat(target).then(() => true, () => false);
+      const asRead = taken && said?.expected !== undefined && await hashOf(parked) === said.expected;
+      if (asRead) await removeTree(parked).catch(() => undefined);
+      else if (taken) context.log?.(`Kept ${parked} beside ${target}: its place was taken, and it isn't known to be the copy read before it was moved aside.`);
       else await rename(parked, target).catch(() => undefined);
       await done(note);
     }

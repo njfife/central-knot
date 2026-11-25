@@ -85,6 +85,8 @@ export interface ShareContext {
   reads?: Map<string, Promise<unknown>>;
   /** Each kind's read its pass of the whole home left standing, for the view made right after, whose look takes it (librarypass.ts KeptReads, lookFor): main.ts pass and syncAndView only. */
   kept?: KeptReads;
+  /** The app's log (main.ts log): where recovery leaves a copy it would otherwise remove, it says so there (skillfiles.ts recoverFolders). */
+  log?: (line: string) => void;
   /** Test seam: throws at a named step, standing in for a crash. */
   fault?: (step: 'before-rename' | 'after-rename' | 'before-replace' | 'mid-replace' | 'before-remove' | 'parts-kind-saved' | 'parts-before-rename') => void;
   /** The clock for observation intervals (CON-04); tests pass their own. */
@@ -405,10 +407,11 @@ export async function writeFileChecked(path: string, text: string, expected: str
     // Once its replacement is in place, the moved-aside original goes: its content was kept before the write (one changed since
     // it was read is kept as a backup, on Windows). Otherwise, if it could not go back, it is kept beside it as a backup, never deleted; even if
     // no backup can be placed, it stays for the next pass to find.
-    const removal = () => retryWhileHeld(() => unlink(parked), parkedHolds);
+    const unlinkParked = () => retryWhileHeld(() => unlink(parked), parkedHolds);
+    const removal = process.platform === 'win32' ? () => parkedHolds().then(unlinkParked) : unlinkParked;
     const keptIfChanged = (error: unknown) => (errorCode(error) === 'CK_CHANGED' ? keepAsBackup(parked, path) : undefined);
     if (expected !== undefined && !replaced) await keepAsBackup(parked, path);
-    if (expected !== undefined && replaced) await (process.platform === 'win32' ? parkedHolds().then(removal) : removal()).catch(keptIfChanged);
+    if (expected !== undefined && replaced) await removal().catch(keptIfChanged);
   }
 }
 

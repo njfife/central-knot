@@ -505,11 +505,24 @@ test('a save made into a skill’s moved-aside copy while a tool makes its place
       await writeFile(join(box.skill, 'SKILL.md'), 'made again\n');
     });
     try { await assert.rejects(swapFolder(box.context, source, box.skill, expected), { code: 'CK_CHANGED' }); } finally { restore(); }
-    await recoverFolders({ ...box.context, log: (line: string) => lines.push(line) } as ShareContext, 'claude-cli');
+    await recoverFolders({ ...box.context, log: line => lines.push(line) }, 'claude-cli');
     assert.equal(await readFile(join(box.skill, 'SKILL.md'), 'utf8'), 'made again\n', 'what the tool made stays');
     const kept = await parkedIn(claude);
     assert.equal(await readFile(join(kept, 'SKILL.md'), 'utf8'), saved, 'and so does the save, beside it');
     assert.equal(lines.length, 1, lines.join('\n'));
     assert.ok(lines[0]!.includes(kept), lines[0]);
+  } finally { await box.cleanup(); }
+});
+
+test('a copy moved aside under a note that doesn’t say what was read (an earlier build’s), its place taken: recovery keeps it beside, and the log names it', async () => {
+  const box = await home(), claude = join(box.home, '.claude'), lines: string[] = [], parked = join(claude, `.ck-parked-${'0'.repeat(8)}-0000-0000-0000-${'0'.repeat(12)}`);
+  try {
+    await mkdir(parked);
+    await writeFile(join(parked, 'SKILL.md'), 'kept from before\n');
+    await writeFile(`${parked}.json`, JSON.stringify({ target: box.skill }));
+    await recoverFolders({ ...box.context, log: line => lines.push(line) }, 'claude-cli');
+    assert.equal(await readFile(join(parked, 'SKILL.md'), 'utf8'), 'kept from before\n');
+    assert.match(await readFile(join(box.skill, 'SKILL.md'), 'utf8'), /Before\./);
+    assert.equal(lines.length, 1, lines.join('\n'));
   } finally { await box.cleanup(); }
 });
