@@ -101,8 +101,8 @@ export const HOOK_RUN_WARN = 'Run it runs the command for real. It may change yo
 /** Information-mark card text on the first hooks strip of a page (30 words at most). */
 export function hookStripHelp(tool: HarnessId, runnable: boolean): string {
   const when = tool === 'copilot-cli' ? 'Session-start' : 'Session-start and prompt';
-  const base = `${when} command hooks; not URL, MCP, project or organisation.`;
-  return runnable ? `${base} Run it runs in your home or the hook’s folder. Plugin hooks can change their installed files and data.` : base;
+  const base = `${when} hooks; not URL, MCP, project or organisation.`;
+  return runnable ? `${base} Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.` : base;
 }
 
 /** Note rendered under a hooks strip's heading: T2.28's tool lines replace strip.note where they apply. */
@@ -133,7 +133,7 @@ export function hookRunWords(tool: HarnessId, result: HookRunResult, shownCwd: s
   const promptPart = result.emptyPrompt ? ' with an empty prompt' : '';
   const started = result.outcome !== 'missing' && result.detail !== 'spawn-error';
   const meta = started ? `run in ${place}${promptPart}, ${time}` : `tried at ${time}`;
-  const baseNotes = started && result.missingOptions ? ['Run without some of the plugin’s options.'] : [];
+  const baseNotes = started && result.missingOptions ? ['Ran without some of the plugin’s options.'] : [];
   const err = result.stderr || undefined;
   const out = result.allPrinted || undefined;
   const view = (sentence: string, more: Partial<HookRunView> = {}): HookRunView => ({ sentence, meta, ...more, notes: [...(more.notes ?? []), ...baseNotes] });

@@ -12737,7 +12737,7 @@ async function hookRunFlow() {
   })()`);
   check('T1.23 info mark appears once on the page with exact wording and <= 30 words',
     helpInfo.count === 1 && helpInfo.id === 'session-hooks-info' && helpInfo.words <= 30
-    && helpInfo.card === 'Session-start and prompt command hooks; not URL, MCP, project or organisation. Run it runs in your home or the hook’s folder. Plugin hooks can change their installed files and data.', helpInfo);
+    && helpInfo.card === 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.', helpInfo);
   const pluginRow = await rowOf('session-claude-cli', 'hello.sh');
   const codexPluginRow = await rowOf('session-codex-cli', 'codex-hello.sh');
   same('installed plugin hook rows on Instructions have Run it and View source for Claude Code and Codex',
@@ -12781,6 +12781,15 @@ async function hookRunFlow() {
   }
   await fullSize(a);
   await pictures('plugin-result', `#session-claude-cli .session-group:has(#${pluginRow.runId})`, bothSizes);
+  // Missing declared plugin option shows "Ran without some of the plugin’s options." note under the result.
+  const claudeManifest = join(claudePluginRoot, '.claude-plugin/plugin.json');
+  const initialManifest = readNow(claudeManifest);
+  writeFileSync(claudeManifest, JSON.stringify({ name: 'release-helper', version: '0.4.1', userConfig: { team_note: { description: 'Release note' }, extra_opt: { description: 'Extra option' } } }));
+  const pluginNoteRes = await runAndWait('session-claude-cli', 'hello.sh');
+  check('plugin hook with an unavailable declared option shows Ran without some of the plugin’s options. note',
+    /^Would add run in ~, /.test(pluginNoteRes) && pluginNoteRes.includes('Ran without some of the plugin’s options.'), pluginNoteRes);
+  await pictures('plugin-note', `#session-claude-cli .session-group:has(#${pluginRow.runId})`);
+  writeFileSync(claudeManifest, initialManifest);
   const pluginCountAfterRun = readNow(pluginMarker).trim().split('\n').filter(Boolean).length;
   writeFileSync(claudeSettings, JSON.stringify({ ...JSON.parse(initialClaudeJson), enabledPlugins: { [`release-helper@${marketName}`]: false } }, null, 2));
   const pluginOffRes = await runAndWait('session-claude-cli', 'hello.sh');

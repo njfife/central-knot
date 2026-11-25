@@ -82,8 +82,9 @@ export async function sessionSettings(tool: HarnessId, root: string): Promise<Pi
       } catch {
         unread.push(toml);
       }
-      const features = tables?.filter(table => !table.array && table.path.length === 1 && table.path[0] === 'features').flatMap(table => table.entries);
-      const flag = (name: string) => features?.findLast(entry => entry.key === name)?.value;
+      const featureEntries = tables?.filter(table => !table.array)
+        .flatMap(table => table.entries.map(entry => ({ path: [...table.path, ...entry.keys], value: entry.value })));
+      const flag = (name: string) => featureEntries?.findLast(entry => entry.path.length === 2 && entry.path[0] === 'features' && entry.path[1] === name)?.value;
       const hooksFlag = flag('hooks');
       const disabledBy = typeof hooksFlag === 'boolean'
         ? (hooksFlag ? undefined : '[features] hooks = false')

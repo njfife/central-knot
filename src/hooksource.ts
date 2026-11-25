@@ -155,8 +155,15 @@ async function findOwner(ctx: HookSourceContext, ref: HookSourceRef): Promise<{ 
     const pluginCtx: PluginContext = { home: ctx.home, dataDir: ctx.dataDir, binaries: {}, overrides: ctx.overrides };
     const install = (await installedPlugins(pluginCtx, ref.tool).catch(() => [])).find(candidate => candidate.plugin === ref.plugin && candidate.marketplace === ref.marketName);
     if (!install || install.state.state !== 'installed') return undefined;
-    const { hooks, hooksUnread = [] } = await installedContents(ref.tool, install.state.path, install.entry, install.atMarketplaceRoot);
-    return { hooks, unread: hooksUnread, pluginRoot: install.state.path, within: install.state.path, ...(install.off ? { pluginOff: true } : {}) };
+    const [{ hooks, hooksUnread = [] }, { ownHooksDisabled }] = await Promise.all([
+      installedContents(ref.tool, install.state.path, install.entry, install.atMarketplaceRoot),
+      sessionSettings(ref.tool, toolConfigRoot(ctx, ref.tool)),
+    ]);
+    return {
+      hooks, unread: hooksUnread, pluginRoot: install.state.path, within: install.state.path,
+      ...(ownHooksDisabled ? { hooksDisabled: ownHooksDisabled } : {}),
+      ...(install.off ? { pluginOff: true } : {}),
+    };
   }
   const copy = await ctx.marketplace?.(ref.marketName, ref.plugin);
   if (!copy) return undefined;

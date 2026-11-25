@@ -1,12 +1,15 @@
-// Running one hook's command once on click (IPC hook:run / hook:stop), in main, and classifying what the tool would add
-// (whatHookWouldAdd, pure): re-finds the hook on disk through hooksource.ts findHook, enforces the main-side gate (actual
-// home, non-Windows, own hooks plus installed Claude Code and Codex plugin hooks, tool installed, plugin on, tool hooks not
-// disabled via pluginitems.ts sessionSettings, command type, event adds text by pluginoutcomes.ts addsText, matching start
-// source by pluginoutcomes.ts pickStartSource, no ${user_config.} placeholder, one run at a time per hook), builds each tool's
-// scrubbed environment (with plugin root, data path and plain declared Claude Code options), launch form with braced
-// substitution and stdin JSON, creates Claude Code's plugin data folder on first use, runs through plugins.ts run (process
-// group + launch.ts CLOSE_GRACE_MS drain), cleans up disposable Claude files and stops active runs on Stop or Quit.
-// Nothing here stores results or draws a page; hook source extraction stays in hooksource.ts.
+// Runs one hook's command once on click (IPC hook:run / hook:stop) in main and classifies what the tool would add
+// (whatHookWouldAdd, pure).
+// Gate: re-finds the hook via hooksource.ts findHook; requires actual home, non-Windows, own hooks or installed Claude Code /
+// Codex plugin hooks, installed tool binary, plugin on, tool hooks not disabled, command type, event adding text
+// (pluginoutcomes.ts addsText), matching start source (pluginoutcomes.ts pickStartSource), and one run at a time per hook.
+// Environment and launch: scrubs inherited control, session and plugin variables first, then sets tool and plugin variables
+// (including plain declared Claude Code userConfig options from settings.json or manifest defaults) and creates Claude Code's
+// plugin data folder on first use. Claude Code puts ${CLAUDE_PROJECT_DIR} (and for plugins, ${CLAUDE_PLUGIN_ROOT} and
+// ${CLAUDE_PLUGIN_DATA}) into shell lines as text (for own hooks too) and into exec-form program and each argument separately.
+// A Claude Code plugin command or argument holding ${user_config. is refused; Codex has no such placeholder and runs commands
+// as written. Runs through plugins.ts run (process group + launch.ts CLOSE_GRACE_MS drain), cleans up disposable Claude files,
+// and stops active runs on Stop or Quit. Nothing here stores results or draws a page; source reading stays in hooksource.ts.
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
@@ -17,7 +20,6 @@ import { findBinary } from './discovery.ts';
 import { harnesses, toolConfigRoot } from './harnesses.ts';
 import { findHook, type HookSourceContext } from './hooksource.ts';
 import { CLOSE_GRACE_MS } from './launch.ts';
-import { sessionSettings } from './pluginitems.ts';
 import { addsText, pickStartSource } from './pluginoutcomes.ts';
 import { run, type RunResult } from './plugins.ts';
 import { readJsonc } from './textedit.ts';
@@ -60,6 +62,7 @@ export function hookTimeoutSec(tool: HarnessId, isPrompt: boolean, configured?: 
 }
 
 interface PluginLaunch {
+  id: string;
   root: string;
   data: string;
   vars: Record<string, string>;
@@ -68,16 +71,17 @@ interface PluginLaunch {
 const isPlainOption = (value: unknown): value is string | number | boolean =>
   typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value)) || typeof value === 'boolean';
 
-/** Computes a plugin's root, data folder and tool-supplied path variables for Claude Code or Codex. */
+/** Computes a plugin's id, root, data folder and tool-supplied path variables for Claude Code or Codex. */
 function pluginPaths(tool: 'claude-cli' | 'codex-cli', toolRoot: string, plugin: string, marketName: string, pluginRoot: string): PluginLaunch {
+  const id = `${plugin}@${marketName}`;
   const root = resolve(pluginRoot);
   if (tool === 'claude-cli') {
-    const safeId = `${plugin}@${marketName}`.replace(/[^A-Za-z0-9_-]/g, '-');
+    const safeId = id.replace(/[^A-Za-z0-9_-]/g, '-');
     const data = join(toolRoot, 'plugins', 'data', safeId);
-    return { root, data, vars: { CLAUDE_PLUGIN_ROOT: root, CLAUDE_PLUGIN_DATA: data } };
+    return { id, root, data, vars: { CLAUDE_PLUGIN_ROOT: root, CLAUDE_PLUGIN_DATA: data } };
   }
   const data = join(toolRoot, 'plugins', 'data', `${plugin}-${marketName}`);
-  return { root, data, vars: { PLUGIN_ROOT: root, CLAUDE_PLUGIN_ROOT: root, PLUGIN_DATA: data, CLAUDE_PLUGIN_DATA: data } };
+  return { id, root, data, vars: { PLUGIN_ROOT: root, CLAUDE_PLUGIN_ROOT: root, PLUGIN_DATA: data, CLAUDE_PLUGIN_DATA: data } };
 }
 
 /** Reads a Claude Code plugin's declared userConfig options from settings.json (or manifest defaults); flags any declared option without a plain value. */
@@ -334,14 +338,8 @@ async function executeHook(ctx: HookRunContext, ref: Extract<HookSourceRef, { fr
   if (afterFind) return afterFind;
   if ('problem' in found) return hookRunRefused(found.problem);
   if (ref.from === 'installed' && found.pluginOff) return hookRunRefused(`${ref.plugin} is turned off in ${toolNames[ref.tool]}.`);
+  if (found.hooksDisabled) return hookRunRefused(`Hooks are turned off in ${toolNames[ref.tool]}’s settings (${found.hooksDisabled}).`);
   const toolRoot = toolConfigRoot(ctx, ref.tool);
-  let hooksDisabled = found.hooksDisabled;
-  if (ref.from === 'installed' && !hooksDisabled) {
-    hooksDisabled = (await sessionSettings(ref.tool, toolRoot)).ownHooksDisabled;
-    const afterSettings = halt();
-    if (afterSettings) return afterSettings;
-  }
-  if (hooksDisabled) return hookRunRefused(`Hooks are turned off in ${toolNames[ref.tool]}’s settings (${hooksDisabled}).`);
   const { hook } = found;
   if (hook.type && hook.type !== 'command') return hookRunRefused(`Not a command hook (type “${hook.type}”).`);
   if (!addsText(ref.tool, hook)) return hookRunRefused('This hook does not add text to sessions.');
@@ -365,8 +363,8 @@ async function executeHook(ctx: HookRunContext, ref: Extract<HookSourceRef, { fr
   }
   let pluginEnv: Record<string, string> | undefined = plugin?.vars;
   let missingOptions = false;
-  if (plugin && ref.tool === 'claude-cli' && ref.from === 'installed') {
-    const opts = await claudePluginOptions(plugin.root, toolRoot, `${ref.plugin}@${ref.marketName}`);
+  if (plugin && ref.tool === 'claude-cli') {
+    const opts = await claudePluginOptions(plugin.root, toolRoot, plugin.id);
     const afterOpts = halt(cwd, isPrompt, limitSec, source);
     if (afterOpts) return afterOpts;
     pluginEnv = { ...plugin.vars, ...opts.env };
@@ -402,11 +400,10 @@ async function executeHook(ctx: HookRunContext, ref: Extract<HookSourceRef, { fr
     const stdout = ran.stdout.toString('utf8');
     const stderr = ran.stderr.toString('utf8');
     const classified = whatHookWouldAdd({ tool: ref.tool, event: hook.event, code: ran.code, reason: ran.reason, signal: ran.signal, stdout, program: launch.file, spawnError: ran.spawnError });
-    const startedRun = classified.outcome !== 'missing' && classified.detail !== 'spawn-error';
     return makeResult({
       ...classified, allPrinted: stdout, stderr, durationMs: Date.now() - runStart, cwd, emptyPrompt: isPrompt, limitSec,
       ...(source ? { source } : {}),
-      ...(missingOptions && startedRun ? { missingOptions: true } : {}),
+      ...(missingOptions ? { missingOptions: true } : {}),
       ...(typeof ran.code === 'number' && !ran.reason && !ran.signal ? { exitCode: ran.code } : {}),
     });
   } finally {

@@ -1137,6 +1137,120 @@ test('Spaced install paths work in both shell and exec launch forms, and one plu
   } finally { await rm(base, { recursive: true, force: true }); }
 });
 
+test('Codex top-level dotted features.hooks and features.codex_hooks disable hooks in sessionSettings and refuse plugin Run it', { skip: unixSkip, timeout: 15_000 }, async () => {
+  const box = await sandbox(['codex']);
+  try {
+    const codexDir = join(box.home, '.codex');
+    const codexConfig = join(codexDir, 'config.toml');
+    const marker = join(box.base, 'codex-dotted.marker');
+    const codexInstall = join(codexDir, 'plugins/cache/team/helper/1.0.0');
+    await put(join(codexInstall, 'hooks/hooks.json'), JSON.stringify({
+      hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: `echo ran >> ${JSON.stringify(marker)} && echo dotted-ran` }] }] },
+    }));
+    await put(codexConfig, 'features.hooks = true\n\n[plugins."helper@team"]\nenabled = true\n');
+    const ref = sessionStrip('codex-cli', await readPluginItems({ home: box.home, dataDir: box.data, binaries: {} }, ['codex-cli']), {})!.groups[0]!.hooks[0]!.source;
+
+    // Reader checks: top-level dotted features.hooks, features.codex_hooks, boolean hooks precedence, and unrelated table ignored.
+    await put(codexConfig, 'features.hooks = false\n\n[plugins."helper@team"]\nenabled = true\n');
+    assert.equal((await sessionSettings('codex-cli', codexDir)).ownHooksDisabled, '[features] hooks = false');
+
+    // Run check (exact break-it pass sequence): clicking Run it refuses and writes no marker.
+    const refusedHooks = await runHook(box.ctx(), ref);
+    assert.equal(refusedHooks.outcome, 'refused');
+    assert.equal(refusedHooks.problem, 'Hooks are turned off in Codex’s settings ([features] hooks = false).');
+    await assert.rejects(stat(marker), { code: 'ENOENT' });
+
+    await put(codexConfig, 'features.codex_hooks = false\n\n[plugins."helper@team"]\nenabled = true\n');
+    assert.equal((await sessionSettings('codex-cli', codexDir)).ownHooksDisabled, '[features] codex_hooks = false');
+    const refusedAlias = await runHook(box.ctx(), ref);
+    assert.equal(refusedAlias.outcome, 'refused');
+    assert.equal(refusedAlias.problem, 'Hooks are turned off in Codex’s settings ([features] codex_hooks = false).');
+    await assert.rejects(stat(marker), { code: 'ENOENT' });
+
+    // Explicit boolean features.hooks = true overrides features.codex_hooks = false (and [features] codex_hooks = false).
+    await put(codexConfig, 'features.hooks = true\nfeatures.codex_hooks = false\n\n[plugins."helper@team"]\nenabled = true\n');
+    assert.equal((await sessionSettings('codex-cli', codexDir)).ownHooksDisabled, undefined);
+
+    // Dotted key inside another table is not top-level features.hooks.
+    await put(codexConfig, '[other]\nfeatures.hooks = false\n\n[plugins."helper@team"]\nenabled = true\n');
+    assert.equal((await sessionSettings('codex-cli', codexDir)).ownHooksDisabled, undefined);
+    const allowed = await runHook(box.ctx(), ref);
+    assert.equal(allowed.outcome, 'adds');
+    assert.equal(allowed.added, 'dotted-ran');
+  } finally { await box.done(); }
+});
+
+test('Own Claude Code shell hook substitutes ${CLAUDE_PROJECT_DIR} as text; Codex plugin runs ${user_config.} as written; plugin options preserve false, 0 and empty string in both settings and manifest defaults', { skip: unixSkip, timeout: 15_000 }, async () => {
+  const box = await sandbox(['claude', 'codex']);
+  try {
+    // Own Claude Code shell hook: ${CLAUDE_PROJECT_DIR} is put into the shell line as text (even inside single quotes).
+    await put(join(box.home, '.claude/settings.json'), JSON.stringify({
+      hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: "echo '${CLAUDE_PROJECT_DIR}'" }] }] },
+    }));
+    const ownShellRes = await runHook(box.ctx(), await box.ownRef('claude-cli', 0));
+    assert.equal(ownShellRes.outcome, 'adds');
+    assert.equal(ownShellRes.added, `${box.home}\n`);
+
+    // Codex plugin hook has no ${user_config.} placeholder and runs the command as written.
+    const codexInstall = join(box.home, '.codex/plugins/cache/team/lit/1.0.0');
+    await put(join(codexInstall, 'hooks/hooks.json'), JSON.stringify({
+      hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: "echo '${user_config.mode}'" }] }] },
+    }));
+    await put(join(box.home, '.codex/config.toml'), '[features]\nhooks = true\n\n[plugins."lit@team"]\nenabled = true\n');
+    const codexRef = sessionStrip('codex-cli', await readPluginItems({ home: box.home, dataDir: box.data, binaries: {} }, ['codex-cli']), {})!.groups[0]!.hooks[0]!.source;
+    const codexLitRes = await runHook(box.ctx(), codexRef);
+    assert.equal(codexLitRes.outcome, 'adds');
+    assert.equal(codexLitRes.added, '${user_config.mode}');
+
+    // Claude Code plugin options: false, 0 and empty string preserved from both settings.json and manifest defaults without setting missingOptions.
+    const optInstall = join(box.home, '.claude/plugins/cache/team/falsy-opts/1.0.0');
+    await put(join(optInstall, '.claude-plugin/plugin.json'), JSON.stringify({
+      name: 'falsy-opts',
+      version: '1.0.0',
+      userConfig: {
+        cfg_bool: { default: true },
+        cfg_num: { default: 9 },
+        cfg_str: { default: 'nonempty' },
+        def_bool: { default: false },
+        def_num: { default: 0 },
+        def_str: { default: '' },
+      },
+    }));
+    await put(join(optInstall, 'hooks/hooks.json'), JSON.stringify({
+      hooks: {
+        SessionStart: [{
+          matcher: 'startup',
+          hooks: [{
+            type: 'command',
+            command: `${JSON.stringify(process.execPath)} -e "const keys = ['CFG_BOOL','CFG_NUM','CFG_STR','DEF_BOOL','DEF_NUM','DEF_STR']; console.log(JSON.stringify(Object.fromEntries(keys.map(k => [k, process.env['CLAUDE_PLUGIN_OPTION_' + k]]))));"`,
+          }],
+        }],
+      },
+    }));
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({
+      version: 2,
+      plugins: { 'falsy-opts@team': [{ scope: 'user', installPath: optInstall, version: '1.0.0' }] },
+    }));
+    await put(join(box.home, '.claude/settings.json'), JSON.stringify({
+      pluginConfigs: {
+        'falsy-opts@team': { options: { cfg_bool: false, cfg_num: 0, cfg_str: '' } },
+      },
+    }));
+    const falsyRef = sessionStrip('claude-cli', await readPluginItems({ home: box.home, dataDir: box.data, binaries: {} }, ['claude-cli']), {})!.groups[0]!.hooks[0]!.source;
+    const falsyRes = await runHook(box.ctx(), falsyRef);
+    assert.equal(falsyRes.outcome, 'not-added');
+    assert.equal(falsyRes.missingOptions, undefined);
+    assert.deepEqual(JSON.parse(falsyRes.allPrinted), {
+      CFG_BOOL: 'false',
+      CFG_NUM: '0',
+      CFG_STR: '',
+      DEF_BOOL: 'false',
+      DEF_NUM: '0',
+      DEF_STR: '',
+    });
+  } finally { await box.done(); }
+});
+
 // Last in this file: Quit closes the door to new hook runs for the rest of the process, as it does for the app.
 test('Quit aborts running hooks and pending runs before spawn, kills their children, removes temp files, and blocks further runs', { skip: unixSkip, timeout: 15_000 }, async () => {
   const box = await sandbox(['claude']);

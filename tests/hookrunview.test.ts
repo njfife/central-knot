@@ -229,9 +229,9 @@ test('Check 2: hookRunWords matches every outcome, quiet trailing run place/time
   const missingOptsAdds = hookRunWords('claude-cli', baseResult({
     outcome: 'adds', added: 'ok', allPrinted: 'ok', missingOptions: true,
   }), '~', time);
-  assert.deepEqual(missingOptsAdds.notes, ['Run without some of the plugin’s options.']);
+  assert.deepEqual(missingOptsAdds.notes, ['Ran without some of the plugin’s options.']);
   const missingOptsEmpty = hookRunWords('claude-cli', baseResult({ outcome: 'empty', missingOptions: true }), '~', time);
-  assert.deepEqual(missingOptsEmpty.notes, ['Run without some of the plugin’s options.']);
+  assert.deepEqual(missingOptsEmpty.notes, ['Ran without some of the plugin’s options.']);
   const missingOptsNotStarted = hookRunWords('claude-cli', baseResult({ outcome: 'missing', program: '/nope', missingOptions: true }), '~', time);
   assert.deepEqual(missingOptsNotStarted.notes, []);
 });
@@ -242,19 +242,19 @@ test('Check 3: standing line names Run it, T1.23 help card stays within 30 words
   assert.equal(HOOK_RUN_WARN, 'Run it runs the command for real. It may change your files.');
 
   const claudeRun = hookStripHelp('claude-cli', true);
-  assert.equal(claudeRun, 'Session-start and prompt command hooks; not URL, MCP, project or organisation. Run it runs in your home or the hook’s folder. Plugin hooks can change their installed files and data.');
+  assert.equal(claudeRun, 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.');
   assert.ok(wordCount(claudeRun) <= 30, `expected <=30 words, got ${wordCount(claudeRun)}`);
 
   const claudeNoRun = hookStripHelp('claude-cli', false);
-  assert.equal(claudeNoRun, 'Session-start and prompt command hooks; not URL, MCP, project or organisation.');
+  assert.equal(claudeNoRun, 'Session-start and prompt hooks; not URL, MCP, project or organisation.');
   assert.ok(wordCount(claudeNoRun) <= 30);
 
   const copilotRun = hookStripHelp('copilot-cli', true);
-  assert.equal(copilotRun, 'Session-start command hooks; not URL, MCP, project or organisation. Run it runs in your home or the hook’s folder. Plugin hooks can change their installed files and data.');
+  assert.equal(copilotRun, 'Session-start hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.');
   assert.ok(wordCount(copilotRun) <= 30);
 
   const copilotNoRun = hookStripHelp('copilot-cli', false);
-  assert.equal(copilotNoRun, 'Session-start command hooks; not URL, MCP, project or organisation.');
+  assert.equal(copilotNoRun, 'Session-start hooks; not URL, MCP, project or organisation.');
   assert.ok(wordCount(copilotNoRun) <= 30);
 
   // T2.28 Codex note replaces strip.note only when runnable.
@@ -986,7 +986,7 @@ test('Installed plugin hook row renders Run it for Claude Code (with missingOpti
   await new Promise(resolve => setTimeout(resolve, 10));
   const claudePanelText = dom.textOf(dom.findAll(claudeRow, n => n.className === 'hook-run')[0]);
   assert.match(claudePanelText, /Would add/);
-  assert.match(claudePanelText, /Run without some of the plugin’s options\./);
+  assert.match(claudePanelText, /Ran without some of the plugin’s options\./);
 
   nextResult = baseResult({ outcome: 'adds', added: 'codex plugin text', allPrinted: 'codex plugin text' });
   const codexRow = dom.makeNode('li');
