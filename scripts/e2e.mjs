@@ -12480,6 +12480,348 @@ async function libraryFlow() {
 }
 
 /**
+ * Select on the Library (selection.ts, drawn by matrix.ts selectControl, selectBar, tickOf and headingTick) on a home of eleven
+ * skills in Central Knot, a found skill whose copies differ (clash), one a plugin alone brings (zulu) and an agent whose kind's
+ * record stops writes (scout): the word Select and nothing else until it is clicked; ticks in the switches' place, a row's click,
+ * a Shift-click's run across headings, a heading's tick; Find hiding ticks and a Delete of the one listed; the question over
+ * thirteen, its rows left and why, Cancel; the Delete of ten, its one result that stays, and its one Undo, byte for byte; what
+ * ends the mode (Done, Escape, another page, the Files view), a redraw between a press and its release, the keyboard; the
+ * toolbar's lines with and without Select, and nothing cut off. With --shots, the four states at 860, 1316 and 2560 wide.
+ */
+async function selectFlow() {
+  const home = join(scratch, 'home-select'), claude = join(home, '.claude/skills'), copilot = join(home, '.copilot/skills');
+  const names = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet'];
+  for (const name of [...names, 'kilo']) skill(claude, name);
+  skill(claude, 'clash', text('clash', 'One way.'));
+  skill(copilot, 'clash', text('clash', 'Another way.'));
+  writeClaudeInstall(home, 'local-market', 'kit', '1.0.0', { 'skills/zulu/SKILL.md': text('zulu', 'Plugin skill.') });
+  mkdirSync(join(home, '.claude/agents'), { recursive: true });
+  writeFileSync(join(home, '.claude/agents/scout.md'), '---\nname: scout\ndescription: The scout agent.\n---\n\nYou scout.\n');
+  toolClis(home);
+  // History kept for 7 days: what the question says, from the start, with History never opened.
+  mkdirSync(join(scratch, 'select-data'), { recursive: true });
+  writeFileSync(join(scratch, 'select-data/app-settings.json'), JSON.stringify({ historyDays: 7 }));
+  const a = await launch(join(scratch, 'select-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex' });
+  await a.click('#nav-overview');
+  await a.click('#setup-yes');
+  for (let tries = 0; tries < 100 && !(await a.exists('#walk-skip')); tries++) await wait(100);
+  await a.click('#walk-skip');
+  // The agents' record damaged: its kind stops writes, and scout can't be deleted.
+  writeFileSync(join(home, '.central-knot/agents.json'), '{');
+  await a.click('#header-refresh');
+  await openKind(a, 'all');
+  // zulu's row is its plugin's own, keyed by the plugin: its key as drawn.
+  const zulu = await a.run(`[...document.querySelectorAll('.ov-plugin-row')].find(row => row.textContent.includes('zulu')).dataset.key`);
+  // A plugin's own row's tick is led by plugin- (matrix.ts selectId).
+  const id = (key, kind = 'skills') => (key === 'zulu' ? zulu : rowPart('', kind, key)), tick = (key, kind = 'skills') => `[id="tick-${key === 'zulu' ? 'plugin-' : ''}${id(key, kind)}"]`;
+  const word = () => a.text('#library-select .band-stack > :not(.band-unshown)');
+  const bar = () => a.run(`[...document.querySelectorAll('#select-bar > :not(.band-unshown) > *')].map(part => part.textContent.trim()).filter(Boolean)`);
+  const ticked = () => a.all('.ov-row.row-ticked', 'e.dataset.key');
+  const top = key => a.run(`Math.round(document.querySelector('.ov-row[data-key="${id(key)}"]').getBoundingClientRect().top)`);
+  const shiftClick = selector => a.run(`document.querySelector(${JSON.stringify(selector)}).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true }))`);
+  const done = async () => { for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  const roots = ['.claude/skills', '.copilot/skills', '.codex/skills', '.agents/skills'].filter(root => existsSync(join(home, root)));
+  const folders = () => Object.fromEntries(roots.map(root => [root, tree(join(home, root))]));
+  const inTools = name => roots.filter(root => existsSync(join(home, root, name)));
+  const sidebarOpen = async open => { if (await a.run(`document.body.classList.contains('rail')`) === open) await a.click('#sidebar-toggle'); };
+  const pictures = async name => {
+    if (!shots) return;
+    const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+    for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100);
+    for (const [width, height, open, dark] of [[...SMALLEST, false], [...SMALLEST, true], [1316, 819, false], [1316, 819, true], [1316, 819, true, true], [...SMALLEST, true, true], [2560, 1440, true]]) {
+      await sizeTo(a, width, height); await sidebarOpen(open); await theme(dark ? 'dark' : 'light');
+      await a.shot(`select-${name}-${width}${open ? '' : '-rail'}${dark ? '-dark' : ''}`);
+    }
+    await theme('light'); await sidebarOpen(true); await fullSize(a);
+  };
+  // 1. One word on the toolbar, and nothing else of it until it is clicked.
+  same('the Library has Select on its toolbar, and no bar and no tick until it is clicked',
+    [await word(), await a.exists('#select-bar'), await a.exists('.ov [role="checkbox"]')], ['Select', false, false]);
+  same('From’s and Sort’s menus have nothing of Select’s bar: no padding, no line under them, as on next',
+    await a.run(`[...document.querySelectorAll('.ov-page .toolbar .select')].map(each => { const look = getComputedStyle(each); return [look.paddingLeft, look.paddingRight, look.borderBottomWidth]; })`), [['0px', '0px', '0px'], ['0px', '0px', '0px']]);
+  await pictures('off');
+  // 13. The toolbar's lines with Select and without it (hidden by a rule a redraw keeps), where it fits on a line it already has.
+  const toolbarLines = () => a.run(`(() => { const middles = [...document.querySelector('.ov-page .toolbar').children].filter(part => part.offsetWidth).map(part => { const box = part.getBoundingClientRect(); return (box.top + box.bottom) / 2; }).sort((x, y) => x - y);
+    return middles.filter((middle, index) => !index || middle - middles[index - 1] > 8).length; })()`);
+  const linesWithout = async () => {
+    await a.run(`(sheet => { window.ckHide = sheet.insertRule('#library-select { display: none !important; }', sheet.cssRules.length); window.dispatchEvent(new Event('focus')); })(document.styleSheets[0])`);
+    await a.settle();
+    const lines = await toolbarLines();
+    await a.run(`document.styleSheets[0].deleteRule(window.ckHide); window.dispatchEvent(new Event('focus'))`);
+    await a.settle();
+    return lines;
+  };
+  const measured = {};
+  for (const [width, height, open] of [[860, 560, true], [860, 560, false], [1280, 800, true], [1316, 819, true], [1316, 819, false]]) {
+    await sizeTo(a, width, height); await sidebarOpen(open);
+    measured[`${width}×${height}${open ? '' : ' rail'}`] = [await linesWithout(), await toolbarLines()];
+  }
+  await sidebarOpen(true); await fullSize(a);
+  console.log(`selectFlow: the toolbar's lines without Select, then with it: ${JSON.stringify(measured)}`);
+  same('at the owner’s window (1316×819, the sidebar folded and open), Select adds no line to the toolbar', [measured['1316×819 rail'][1] - measured['1316×819 rail'][0], measured['1316×819'][1] - measured['1316×819'][0]], [0, 0]);
+  // 2. In the mode: Done in Select's width, the bar, a tick in each switch's place.
+  const width = () => a.run(`document.getElementById('library-select').offsetWidth`), selectWidth = await width();
+  await a.click('#library-select');
+  same('Select reads Done, as wide; the bar shows, Delete… off with nothing ticked; each row has a tick and no switch',
+    [await word(), await width(), await bar(), await a.run(`document.getElementById('select-delete').disabled`), await a.exists(tick('alpha')), await a.exists(tick('zulu')), await a.exists('.ov .switch, .ov .add-item')],
+    ['Done', selectWidth, ['Delete…'], true, true, true, false]);
+  const record = () => readNow(join(home, '.central-knot/skills.json')), was = { record: record(), bravo: await top('bravo') };
+  await a.click(`.ov-row[data-key="${id('alpha')}"] .ov-name`);
+  same('a click on a row ticks it, and flips nothing: the bar counts it, no row moved, nothing written',
+    [await ticked(), await bar(), await top('bravo'), record() === was.record], [[id('alpha')], ['1 selected', 'Delete…'], was.bravo, true]);
+  await a.click(`#${rowPart('open', 'skills', 'bravo')}`);
+  same('the chevron opens a row and ticks nothing', [await a.all('.ov-row[aria-expanded="true"]', 'e.dataset.key'), await ticked()], [[id('bravo')], [id('alpha')]]);
+  await a.click(`#${rowPart('open', 'skills', 'bravo')}`);
+  // 3. Shift-click: the run as listed, from clash under Found to zulu under Only through a plugin.
+  await a.click(tick('india'));
+  await a.click(tick('clash'));
+  same('three ticked, one of which can’t be deleted: the bar says so beside the count, and Delete… has no number', await bar(), ['3 selected', '1 can’t be deleted ›', 'Delete…']);
+  await pictures('three');
+  await shiftClick(`.ov-row[data-key="${zulu}"] .ov-name`);
+  await a.settle();
+  same('a Shift-click ticks the run between two rows as listed, across a heading', await ticked(), [id('alpha'), id('india'), id('clash'), id('scout', 'agents'), id('zulu')]);
+  // 4. A heading's tick.
+  same('with some of its rows ticked, On’s tick is mixed', await a.run(`document.getElementById('tick-heading-on').getAttribute('aria-checked')`), 'mixed');
+  await a.click('#tick-heading-on');
+  same('On’s tick ticks every row under it', [await a.run(`document.getElementById('tick-heading-on').getAttribute('aria-checked')`), (await ticked()).length], ['true', 14]);
+  // 5. Find narrows: the bar counts the rows listed; cleared, the ticks are back; a Delete takes the listed row alone.
+  const find = async text => { await a.run(`(i => { i.value = ${JSON.stringify(text)}; i.dispatchEvent(new Event('input', { bubbles: true })); })(document.querySelector('#find'))`); await a.settle(); };
+  await find('kilo');
+  for (let tries = 0; tries < 50 && (await a.all('.ov-row[data-key]', 'e.dataset.key')).length !== 1; tries++) await wait(100);
+  same('Find leaves kilo: the bar counts one', await bar(), ['1 selected', 'Delete…']);
+  await find('');
+  same('Find cleared: every tick is back', (await ticked()).length, 14);
+  await find('kilo');
+  for (let tries = 0; tries < 50 && (await a.all('.ov-row[data-key]', 'e.dataset.key')).length !== 1; tries++) await wait(100);
+  await a.click('#select-delete');
+  same('its question is about the one row listed', (await bar())[0], 'Delete 1 from every tool and Central Knot? History can restore it for 7 days.');
+  const placed = names.map(inTools);
+  await a.click('#select-delete-now');
+  await done();
+  same('Delete takes kilo alone, the rows Find hid stay in the tools, and the mode ends',
+    [inTools('kilo'), names.map(inTools), await word(), await a.exists('#select-bar')], [[], placed, 'Select', false]);
+  check('kilo was in the tools, as the others are', placed.every(where => where.length >= 2), placed);
+  await find('');
+  // 6. Thirteen ticked: ten can be deleted, and a found skill, a plugin's and a stopped kind's can't.
+  await a.click('#library-select');
+  same('no tick on a heading none of whose rows can be deleted: Found, Only through a plugin', [await a.exists('#tick-heading-on'), await a.exists('#tick-heading-found'), await a.exists('#tick-heading-plugins')], [true, false, false]);
+  await a.click('#tick-heading-on');
+  for (const [key, kind] of [['clash'], ['scout', 'agents'], ['zulu']]) await a.click(tick(key, kind));
+  same('thirteen ticked: the bar says how many can’t be deleted', await bar(), ['13 selected', '3 can’t be deleted ›', 'Delete…']);
+  const before = folders();
+  const rowTop = () => top('alpha');
+  const bare = await rowTop();
+  await a.click('#select-delete');
+  same('the question, in the bar’s place, the focus on Cancel; no row moved', [await bar(), await a.run('document.activeElement?.id'), await rowTop()],
+    [['Delete 10 from every tool and Central Knot? History can restore them for 7 days. 3 can’t be deleted ›', 'Cancel', 'Delete 10'], 'select-cancel', bare]);
+  await a.click('#select-why');
+  same('the list opens over the rows: no row moved', await rowTop(), bare);
+  same('“3 can’t be deleted” names each with its reason', await a.all('#select-why-list p', 'e.textContent'),
+    ['clash: not in Central Knot', 'scout: the agents record is damaged', 'zulu: Only through a plugin']);
+  await pictures('question');
+  await a.click('#select-why');
+  await a.click('#select-cancel');
+  same('Cancel: the bar again, the ticks kept, nothing changed', [await bar(), (await ticked()).length, folders()], [['13 selected', '3 can’t be deleted ›', 'Delete…'], 13, before]);
+  // 7. Delete 10: ten leave every tool and the page; one result, which stays; the mode ends.
+  await a.click('#select-delete');
+  await a.click('#select-delete-now');
+  await done();
+  same('ten leave every tool and the page, one result, the mode ended',
+    [names.filter(name => inTools(name).length), await a.text('#header [data-outcome] .band-text'), await a.exists('#outcome-undo'), await word(), await a.exists('.ov [role="checkbox"]')],
+    [[], 'Deleted 10 skills: alpha, bravo, charlie and 7 more. 3 not deleted.', true, 'Select', false]);
+  same('none of the ten is listed', (await a.all('.ov-row[data-key]', 'e.dataset.key')).filter(key => names.some(name => key === id(name))), []);
+  await pictures('result');
+  await wait(FADE_WAIT);
+  same('the result stays past the time a result goes by itself', await a.exists('#outcome-undo'), true);
+  // 8. Undo: all ten back, each tool's copy as before.
+  await a.click('#outcome-undo');
+  await done();
+  same('one Undo puts the ten back in every tool, byte for byte, On as they were', [folders(), names.map(name => JSON.parse(record()).items[name]?.on)], [before, names.map(() => true)]);
+  // 10. What ends the mode: Done, Escape, another page, the Files view; each clears the ticks.
+  const ends = async (how, act) => { await a.click('#library-select'); await a.click(tick('alpha')); await act(); same(`${how} ends the mode`, [await word(), await a.exists('#select-bar')], ['Select', false]); };
+  await ends('Done', () => a.click('#library-select'));
+  await ends('Escape', () => a.press('Escape'));
+  await ends('another page', async () => { await a.click('#nav-overview'); await openKind(a, 'all'); });
+  await ends('the Files view', async () => { await a.click(`#${rowPart('open', 'skills', 'alpha')}`); await a.click(`#${rowPart('files', 'skills', 'alpha')}`); await a.click('#files-back'); });
+  await a.click('#library-select');
+  same('Select again starts with nothing ticked', await ticked(), []);
+  // Escape in Find with text clears it and keeps the mode; with Delete's question open it closes the question first.
+  await a.click(tick('alpha'));
+  await find('bravo');
+  await a.run(`document.getElementById('find').focus()`);
+  await a.press('Escape');
+  same('Escape in Find clears it, the mode and its tick kept', [await a.run(`document.getElementById('find').value`), await word(), await ticked()], ['', 'Done', [id('alpha')]]);
+  await a.click('#select-delete');
+  await a.press('Escape');
+  same('Escape with the question open closes it, the mode kept', [(await bar())[0], await word()], ['1 selected', 'Done']);
+  // 11. A redraw keeps the ticks, and a press on a tick that a redraw replaces before its release, with Shift, ticks the run.
+  await a.click('#collect-usage');
+  for (let tries = 0; tries < 100 && await a.exists('#collect-usage:disabled'); tries++) await wait(100);
+  same('usage collected: the ticks are kept', await ticked(), [id('alpha')]);
+  const at = await a.run(`(box => [box.x + box.width / 2, box.y + box.height / 2])(document.querySelector('${tick('delta')}').getBoundingClientRect())`);
+  await a.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: at[0], y: at[1], button: 'left', buttons: 1, clickCount: 1, modifiers: 8 });
+  await a.run(`window.dispatchEvent(new Event('focus'))`);
+  await a.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: at[0], y: at[1], button: 'left', buttons: 0, clickCount: 1, modifiers: 8 });
+  await a.settle();
+  same('a Shift-click a redraw split ticks the run', await ticked(), [id('alpha'), id('bravo'), id('charlie'), id('delta')]);
+  // 12. The keyboard: a tick takes the focus, Space ticks, Escape leaves.
+  await a.run(`document.querySelector('${tick('echo')}').focus()`);
+  await a.press(' ', 'Space');
+  same('Space on a tick ticks its row', (await ticked()).includes(id('echo')), true);
+  await a.press('Escape');
+  same('Escape leaves the mode', await word(), 'Select');
+  // 13. Nothing cut off at 860 with the sidebar folded and open, in the mode and with the question open.
+  await sizeTo(a, ...SMALLEST); await sidebarOpen(true);
+  await a.click('#library-select');
+  const firstRow = () => a.run(`Math.round(document.querySelector('.ov-row[data-key]').getBoundingClientRect().top)`), selecting = await firstRow();
+  await a.click('#tick-heading-on');
+  await a.click(tick('clash'));
+  const ticking = await firstRow();
+  await a.click('#select-delete');
+  same('at 860 wide, from Select’s click on, no row moves: a tick of one that can’t be deleted, the question on two lines', [await a.run(`document.querySelector('#select-bar > :not(.band-unshown) .select-text').offsetHeight > 20`), ticking, await firstRow()], [true, selecting, selecting]);
+  await a.click('#select-cancel');
+  await fullSize(a);
+  await fitsAtMinimum(a, 'the Library selecting');
+  await a.click('#select-delete');
+  await fitsAtMinimum(a, 'the Library asking a Delete of many');
+  await a.click('#select-cancel');
+  await a.click('#library-select');
+  // No Select on a tool's tab.
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-skills');
+  same('no Select on a tool’s tab', await a.exists('#library-select'), false);
+  same('no page errors, Select', a.pageErrors, []);
+  await a.quit();
+
+  // A server of his named as a plugin's server's row is keyed (kit@local-market/search) beside that plugin's server search: a
+  // tick on the plugin's row ticks it alone, and Delete has nothing to take.
+  const keyed = join(scratch, 'home-select-key');
+  mkdirSync(keyed, { recursive: true });
+  writeFileSync(join(keyed, '.claude.json'), `${JSON.stringify({ mcpServers: { 'kit@local-market/search': { type: 'http', url: 'https://own.example.test/mcp' } } }, null, 2)}\n`);
+  writeClaudeInstall(keyed, 'local-market', 'kit', '1.0.0', { '.mcp.json': JSON.stringify({ mcpServers: { search: { type: 'http', url: 'https://plugin.example.test/mcp' } } }) });
+  toolClis(keyed);
+  const k = await launch(join(scratch, 'select-key-data'), flag('--electron') ? ['--as-released'] : [], keyed, { CK_TEST_HOME_ONLY: 'claude,copilot,codex' });
+  await k.click('#nav-overview');
+  await k.click('#setup-yes');
+  await openKind(k, 'all');
+  for (let tries = 0; tries < 100 && (await k.all('.ov-row[data-key]', 'e.dataset.key')).length < 2; tries++) await wait(100);
+  await k.click('#library-select');
+  await k.click('.ov-plugin-row .ov-name');
+  same('a tick on the plugin’s row ticks it alone, not his server whose name is that row’s key; Delete has nothing to take',
+    [await k.all('.ov-row.row-ticked', 'e.classList.contains("ov-plugin-row") ? "plugin" : "his"'), await k.run(`document.getElementById('select-delete').disabled`)], [['plugin'], true]);
+  same('no page errors, one key for two rows', k.pageErrors, []);
+  await k.quit();
+
+  // Select folds with the toolbar's controls (bar-icons): in a home as libraryFlow's toolbar home is, at 1316 with the sidebar open
+  // (its bar one line at the icons step and past it), it is its icon, named Select, and enters the mode; Done is a word at every
+  // width. Select is the word wherever the bar is looser than the icons step.
+  const L = homeWith('select-light');
+  for (const name of ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta', 'iota', 'kappa', 'lambda', 'mu']) skill(L.claude, name);
+  mkdirSync(L.copilot, { recursive: true });
+  mkdirSync(join(L.home, '.claude/agents'), { recursive: true });
+  writeFileSync(join(L.home, '.claude/agents/checker.md'), '---\nname: checker\ndescription: The checker agent.\n---\n\nYou check.\n');
+  const l = await launch(L.data, [], L.real);
+  await l.click('#nav-overview');
+  await l.click('#setup-yes');
+  for (let tries = 0; tries < 100 && !(await l.exists(`#${rowPart('switch', 'skills', 'beta')}`)); tries++) { await openKind(l, 'all'); await wait(100); }
+  const lightOpen = async open => { if (await l.run(`document.body.classList.contains('rail')`) === open) await l.click('#sidebar-toggle'); };
+  // Select (or Done) as drawn: its icon shown, its word shown, its tooltip; the toolbar's fold steps and its lines.
+  const selectNow = () => l.run(`(b => { const shown = e => !!e && getComputedStyle(e).display !== 'none', bar = document.querySelector('#main .toolbar');
+    const middles = [...bar.children].filter(part => part.offsetWidth).map(part => { const box = part.getBoundingClientRect(); return (box.top + box.bottom) / 2; }).sort((x, y) => x - y);
+    return { icon: shown(b.querySelector('svg')), word: shown(b.querySelector('.btn-label')), title: b.title, steps: [...bar.classList].filter(c => c.startsWith('bar-')), lines: middles.filter((m, i) => !i || m - middles[i - 1] > 8).length,
+      content: document.getElementById('main').clientWidth }; })(document.getElementById('library-select'))`);
+  const lightTheme = value => l.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+  const lightShots = async name => {
+    if (!shots) return;
+    for (let tries = 0; tries < 300 && await l.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100);
+    for (const look of ['light', 'dark']) { await lightTheme(look); await l.settle(); await l.shot(`select-${name}-1316${look === 'dark' ? '-dark' : ''}`); }
+    await lightTheme('light');
+  };
+  await sizeTo(l, 1316, 819); await lightOpen(true);
+  const folded = await selectNow();
+  console.log(`selectFlow: libraryFlow's toolbar home at 1316×819, the sidebar open, not selecting: ${JSON.stringify(folded)}`);
+  same('at 1316 with the sidebar open, past the icons step, Select is its icon, named Select, and the toolbar one line', [folded.icon, folded.word, folded.title, folded.steps.includes('bar-icons'), folded.lines], [true, false, 'Select', true, 1]);
+  await lightShots('light-off');
+  await l.click('#library-select');
+  for (const name of ['alpha', 'gamma', 'zeta']) await l.click(`#${rowPart('tick', 'skills', name)}`);
+  const selectingThere = await selectNow();
+  console.log(`selectFlow: the same, selecting: ${JSON.stringify(selectingThere)}`);
+  same('its click enters the mode, and Done is a word', [await l.exists('#select-bar'), selectingThere.word, selectingThere.icon, await l.text('#library-select .band-stack > :not(.band-unshown)')], [true, true, false, 'Done']);
+  await lightShots('light-three');
+  await l.click('#library-select');
+  for (const [width, height, open] of [[1316, 819, false], [2560, 1440, true]]) {
+    await sizeTo(l, width, height); await lightOpen(open);
+    const there = await selectNow();
+    console.log(`selectFlow: libraryFlow's toolbar home at ${width}×${height}${open ? '' : ' on its rail'}: ${JSON.stringify(there)}`);
+    same(`at ${width}×${height}${open ? '' : ' on its rail'}, Select is its word unless the bar is at the icons step, then its icon`, [there.word, there.icon], [!there.steps.includes('bar-icons'), there.steps.includes('bar-icons')]);
+  }
+  same('at 2560 Select is its word', (await selectNow()).word, true);
+  await fullSize(l);
+  same('no page errors, Select folded', l.pageErrors, []);
+  await l.quit();
+
+  // Whenever the Library's rows are not what is drawn, the mode ends: an empty Library (the one item deleted by its own row's
+  // Delete, then its Undo), and the held screen (another build installed, then gone).
+  const solo = join(scratch, 'home-select-solo'), soloMac = standInMac(join(scratch, 'mac-select-solo'));
+  skill(join(solo, '.claude/skills'), 'solo');
+  toolClis(solo);
+  const o = await launch(join(scratch, 'select-solo-data'), flag('--electron') ? ['--as-released'] : [], solo,
+    { CK_TEST_HOME_ONLY: 'claude,copilot,codex', CK_TEST_APPS: soloMac.root, CK_TEST_OWN_BUNDLE: join(soloMac.applications, 'Central Knot.app') });
+  await o.click('#nav-overview');
+  await o.click('#setup-yes');
+  for (let tries = 0; tries < 100 && !(await o.exists(`#${rowPart('switch', 'skills', 'solo')}`)); tries++) { await openKind(o, 'all'); await wait(100); }
+  const soloDone = async () => { for (let tries = 0; tries < 300 && await o.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await o.settle(); };
+  const soloMode = async () => [await o.text('#library-select .band-stack > :not(.band-unshown)'), await o.exists('#select-bar'), await o.exists('.ov-row.row-ticked')];
+  // solo ticked and the question open, from wherever the page is.
+  const asking = async () => {
+    if ((await soloMode())[0] === 'Select') await o.click('#library-select');
+    if (!(await o.exists('.ov-row.row-ticked'))) await o.click(`#${rowPart('tick', 'skills', 'solo')}`);
+    if (await o.exists('#select-delete')) await o.click('#select-delete');
+  };
+  await asking();
+  await o.click(`#${rowPart('open', 'skills', 'solo')}`);
+  await o.click(`#${rowPart('delete', 'skills', 'solo')}`);
+  await o.click(`#${rowPart('delete-confirm', 'skills', 'solo')}`);
+  await soloDone();
+  check('its own Delete leaves the Library empty: no list drawn', !(await o.exists('.ov-row[data-key]')));
+  await o.click('#outcome-undo');
+  await soloDone();
+  same('its Undo brings the row back, and no mode, tick or question with it', [await o.exists(`#${rowPart('switch', 'skills', 'solo')}`), ...await soloMode()], [true, 'Select', false, false]);
+  await asking();
+  const acme = soloMac.bundle(soloMac.applications, 'Acme Knot', 'com.centralknot.custom.acme');
+  await o.click('#header-refresh');
+  for (let tries = 0; tries < 100 && !(await o.exists('#held')); tries++) await wait(100);
+  check('another build installed: the held screen takes the Library’s place', await o.exists('#held'));
+  rmSync(acme, { recursive: true, force: true });
+  await o.click('#header-refresh');
+  for (let tries = 0; tries < 100 && (await o.exists('#held') || !(await o.exists('.ov-row[data-key]'))); tries++) await wait(100);
+  same('that build gone: the Library is back, and no mode, tick or question with it', [await o.exists('#held'), ...await soloMode()], [false, 'Select', false, false]);
+  same('no page errors, the Library away while asking', o.pageErrors, []);
+  await o.quit();
+
+  // Another home taken while asking ends the mode where the home changes: a home with a tool and nothing in it (its Library drawn
+  // without a list), then back. Two homes to switch between: a development run's Practice copy and this computer's home.
+  if (!flag('--electron')) { console.log('selectFlow: another home while asking: skipped (the packaged app has no Practice copy to switch to)'); return; }
+  const empty = join(scratch, 'home-select-empty');
+  mkdirSync(join(empty, '.claude/skills'), { recursive: true });
+  toolClis(empty);
+  const p = await launch(join(scratch, 'select-practice-data'), [], empty, { CK_TEST_HOME_ONLY: 'claude,copilot,codex' });
+  await openKind(p, 'all');
+  await p.click('#library-select');
+  await p.click('.ov-row:not(.ov-plugin-row)[data-key] .ov-name');
+  await p.click('#select-delete');
+  await p.click('#home-actual');
+  for (let tries = 0; tries < 100 && (await p.text('#home-label')) === 'Practice copy'; tries++) await wait(100);
+  check('this computer’s home, with nothing in it, shows no list', !(await p.exists('.ov-row[data-key]')));
+  await p.click('#home-fixture');
+  for (let tries = 0; tries < 100 && (await p.text('#home-label')) !== 'Practice copy'; tries++) await wait(100);
+  same('back on the Practice copy: no mode, no tick, no question', [await p.text('#library-select .band-stack > :not(.band-unshown)'), await p.exists('#select-bar'), await p.exists('.ov-row.row-ticked')], ['Select', false, false]);
+  same('no page errors, another home while asking', p.pageErrors, []);
+  await p.quit();
+}
+
+/**
  * The strip on each tool's card that names the hooks and extensions that can add text to its sessions (sessionhooks.ts), on a
  * made-up home. Claude Code: a file with an import (so the files read with it show), the base applied (so the base strip and
  * Earlier versions show), your own hook, and a dozen plugins with hooks: release-helper's with arguments and one very long
@@ -16376,7 +16718,7 @@ if (tool === 'claude') {
 }
 
 const groups = [
-  [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, sessionStripFlow, hookRunFlow, fromFlow, claudeWholeFlow],
+  [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, selectFlow, sessionStripFlow, hookRunFlow, fromFlow, claudeWholeFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow, sessionsFlow, keepSessionCostsFlow],
   [fewToolsFlow, openCodeFlow, antigravityFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, pluginRecordHoldsFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow, clickReadsFlow],
   [backFlow, backPlaceFlow, libraryLinesFlow, harnessFlow, manageFlow, arrivalFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, mcpSigninFlow, firstSetupFlow, crashFlow],

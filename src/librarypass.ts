@@ -1086,6 +1086,8 @@ async function click(pass: Pass, asked: Change) {
     pass.asked.set(known.key, { kind: 'restored', fill: 'written' });
   } else if (!item) {
     if (asked.on) await addClicked(pass, asked, refuse);
+    // A Delete of an item no longer in Central Knot (deleted meanwhile: another click, a Pull) is said, never passed over.
+    else if (asked.deleted) refuse(`${name} wasn’t deleted: it is no longer in Central Knot.`);
   } else if (asked.deleted) {
     item.deleted = { at: now() };
     pass.asked.set(item.key, { kind: 'deleted', fill: 'removed' });
