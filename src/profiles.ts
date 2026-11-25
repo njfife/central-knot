@@ -29,7 +29,7 @@ import { click } from './pluginswitch.ts';
 import { changes, copilotKeptOnBy, copilotUndo, heldWords, wholeCounts, liveItems, onAfterUndo, pluginPlan, pluginUndo, switchPlan, undoPlan, wholeRuns, withCopilotOff, type CopilotRule, type CopyTurn, type Libraries, type LiveItem, type PluginLive, type PluginTurn, type Turns, type WholeRun } from './profileplan.ts';
 import type { ReloadChange } from './reload.ts';
 import { applyServers, serverKind, serversView } from './servers.ts';
-import { errorCode, libraryGate, storeDirectory, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { errorCode, libraryGate, plainError, storeDirectory, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { applySkills, skillKind } from './skills.ts';
 import { recordedIds } from './sourcestore.ts';
 import { groupBy } from './model.ts';
@@ -330,7 +330,7 @@ async function runCopilotRules(context: ShareContext, rules: CopilotRule[], disa
       after = withMcpSwitch('copilot-cli', before ?? '', rule.server, disabled);
     } catch { fail(rule, 'Copilot CLI’s settings.json couldn’t be read, so it was left as it is.'); continue; }
     try { await writeFileChecked(path, after, before ?? undefined); }
-    catch (error) { fail(rule, errorCode(error) === 'CK_CHANGED' ? 'Copilot CLI’s settings.json changed just then, so it was left as it is. Try again.' : `Copilot CLI’s settings.json couldn’t be written: ${error instanceof Error ? error.message : String(error)}`); continue; }
+    catch (error) { fail(rule, errorCode(error) === 'CK_CHANGED' ? 'Copilot CLI’s settings.json changed just then, so it was left as it is. Try again.' : `Copilot CLI’s settings.json couldn’t be written. ${plainError(error)}`); continue; }
     const now = await readFile(path, 'utf8').catch(() => null);
     if (now !== null && mcpDisabled('copilot-cli', now, rule.server) === disabled) confirmed.push(rule);
     else fail(rule, `Still ${disabled ? 'on' : 'off'} in Copilot CLI: its settings.json did not take the change.`);

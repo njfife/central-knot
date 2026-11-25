@@ -10,6 +10,8 @@
 // - checked writes: a tool's file written or removed only while it holds what was read (writeFileChecked, removeFileChecked,
 //   with a file moved aside put back: recoverParked), and Central Knot's own files written whole (writeDurably), or kept beside
 //   themselves where they can't be read (keepUnreadable); and a wait for Resume held in memory (ShareContext resumeFirst);
+// - on Windows only, a rename, link or removal another program holds up for a moment tried again for about a second
+//   (retryWhileHeld, used by the writes here and by skillfiles.ts), and a refusal that stays in words (plainError);
 // - a skill's folder read as one content (readTree), copied byte for byte (copyTree), staged beside its target and put in
 //   place (stagingFolder, placeCopy).
 // Not here: a kind's record (kindstore.ts and each kind's store), History (history.ts), a tool's folders and files
@@ -83,6 +85,8 @@ export interface ShareContext {
   reads?: Map<string, Promise<unknown>>;
   /** Each kind's read its pass of the whole home left standing, for the view made right after, whose look takes it (librarypass.ts KeptReads, lookFor): main.ts pass and syncAndView only. */
   kept?: KeptReads;
+  /** The app's log (main.ts log): where recovery leaves a copy it would otherwise remove, it says so there (skillfiles.ts recoverFolders). */
+  log?: (line: string) => void;
   /** Test seam: throws at a named step, standing in for a crash. */
   fault?: (step: 'before-rename' | 'after-rename' | 'before-replace' | 'mid-replace' | 'before-remove' | 'parts-kind-saved' | 'parts-before-rename') => void;
   /** The clock for observation intervals (CON-04); tests pass their own. */
@@ -125,8 +129,13 @@ export { itemKey } from './library.ts';
 
 export const errorCode = (error: unknown) => (typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '');
 
-export function plainError(error: unknown): string {
+/** What Windows answers while another program has a file open a moment, and for a read-only file or one not permitted alike. */
+const HELD_CODES = ['EPERM', 'EBUSY'];
+
+/** An error in plain words. On Windows, HELD_CODES can't tell a file held open from a read-only one or one not permitted. */
+export function plainError(error: unknown, platform: NodeJS.Platform = process.platform): string {
   const code = errorCode(error);
+  if (platform === 'win32' && HELD_CODES.includes(code)) return HELD_ON_WINDOWS;
   if (code === 'EACCES' || code === 'EPERM') return 'Permission was denied.';
   if (code === 'ENOSPC') return 'The disk is full.';
   if (code === 'EROFS') return 'That folder is read-only.';
@@ -134,6 +143,30 @@ export function plainError(error: unknown): string {
   if (code === 'EXDEV') return 'That folder is on a different disk from its parent.';
   if (code === 'CK_EXISTS') return 'Something appeared at the destination, so it was left alone.';
   return 'It could not finish.';
+}
+const HELD_ON_WINDOWS = 'Windows couldn’t change this file or folder. Check whether it’s in use or read-only and whether you have permission, then try again.';
+
+/** The waits between tries of a change Windows refused (retryWhileHeld; removeTree's rm, as Node's own), in ms: one second in all. */
+const HELD_WAITS = [100, 200, 300, 400];
+
+/**
+ * Runs `change` (a rename, a link or a removal) and, on Windows only, runs it again where it failed with EPERM or EBUSY, which
+ * Windows gives while another program has the file open a moment (an antivirus scan, a tool's own open file): five tries in all,
+ * HELD_WAITS apart, then the last error. Before each further try `stillSo` is asked: it throws where what the change relies on
+ * no longer holds (a save made meanwhile), and that ends it. Each call waits by itself. Off Windows it is `change()`'s own promise.
+ */
+export function retryWhileHeld<T>(change: () => Promise<T>, stillSo?: () => Promise<void>, platform: NodeJS.Platform = process.platform): Promise<T> {
+  if (platform !== 'win32') return change();
+  const attempt = async (waits: number[]): Promise<T> => {
+    try { return await change(); }
+    catch (error) {
+      if (!waits.length || !HELD_CODES.includes(errorCode(error))) throw error;
+      await new Promise(done => setTimeout(done, waits[0]));
+      await stillSo?.();
+      return attempt(waits.slice(1));
+    }
+  };
+  return attempt(HELD_WAITS);
 }
 
 // ---------- Trees ----------
@@ -201,7 +234,9 @@ export async function removeTree(path: string) {
     for (const entry of await readdir(directory, { withFileTypes: true })) if (entry.isDirectory()) await openUp(join(directory, entry.name));
   };
   await openUp(path);
-  await rm(path, { recursive: true, force: true });
+  // Windows refuses a file another program has open a moment: Node's own tries, each retryDelay longer, are HELD_WAITS.
+  const held = process.platform === 'win32' ? { maxRetries: HELD_WAITS.length, retryDelay: HELD_WAITS[0] } : {};
+  await rm(path, { recursive: true, force: true, ...held });
 }
 
 const copilotLosses: Record<string, string> = {
@@ -296,8 +331,11 @@ export async function writeDurably(path: string, text: string | Uint8Array) {
   const handle = await open(temporary, 'wx', 0o600);
   try {
     try { await handle.writeFile(text); await handle.sync(); } finally { await handle.close(); }
-    await rename(temporary, path);
-  } catch (error) { await rm(temporary, { force: true }); throw error; }
+    await retryWhileHeld(() => rename(temporary, path));
+  } catch (error) {
+    await retryWhileHeld(() => rm(temporary, { force: true }));
+    throw error;
+  }
 }
 /** A file changed between being read and being written: nothing is written, and the next pass reads it again. */
 export const changedWhileSyncing = () => Object.assign(new Error('It changed while syncing, so it was left as it is. The next pass looks at it again.'), { code: 'CK_CHANGED' });
@@ -321,42 +359,68 @@ export async function writeFileChecked(path: string, text: string, expected: str
   const parked = join(dirname(path), `.${basename(path)}.ck-${randomUUID()}.old`);
   let replaced = false;
   await writeFile(temporary, text, { mode });
+  // On Windows a step waits while another program holds the file (retryWhileHeld), and stops where a save lands meanwhile: the
+  // file renamed over must still hold `expected`, and the moved-aside original what was read. On Windows that original is
+  // compared again before it is removed, at the first try too, since a wait here may have come between.
+  const replace = () => retryWhileHeld(() => rename(temporary, path), () => stillHolds(path, expected));
+  const parkedHolds = () => stillHolds(parked, expected);
   if (inPlace) {
     try {
       const now = await readFile(path, 'utf8').catch(error => { if (errorCode(error) === 'ENOENT') return undefined; throw error; });
       if (now !== expected) throw expected === undefined ? occupiedError() : changedWhileSyncing();
-      return await rename(temporary, path);
-    } finally { await unlink(temporary).catch(() => undefined); }
+      return await replace();
+    } finally { await retryWhileHeld(() => unlink(temporary)).catch(() => undefined); }
   }
   try {
     if (expected !== undefined) {
-      try { await rename(path, parked); } catch (error) { if (errorCode(error) === 'ENOENT') throw changedWhileSyncing(); throw error; }
+      try {
+        await retryWhileHeld(() => rename(path, parked));
+      } catch (error) {
+        if (errorCode(error) === 'ENOENT') throw changedWhileSyncing();
+        throw error;
+      }
       let held: string | undefined;
       try { held = await readFile(parked, 'utf8'); } catch { /* checked below */ }
       if (held !== expected) { await putBack(parked, path); throw changedWhileSyncing(); }
     }
-    try { await link(temporary, path); replaced = true; }
-    catch (error) {
+    try {
+      await retryWhileHeld(() => link(temporary, path), parkedHolds);
+      replaced = true;
+    } catch (error) {
       // Something was saved there after the old file was moved aside: that save stays, and the old file (as read) is kept beside
       // it under a plain backup name, never deleted, since only this entry was kept in the store.
       if (errorCode(error) === 'EEXIST') throw expected === undefined ? occupiedError() : changedWhileSyncing();
-      // No hard links on this disk: the old file goes back first, then the new one replaces it the ordinary way.
+      // The old file goes back first, where the new one was not linked in: no hard links on this disk (it then replaces the old
+      // one the ordinary way, below), the original changed while the link waited (CK_CHANGED), or the hold stayed (EBUSY).
       if (expected !== undefined) await putBack(parked, path);
       if (errorCode(error) === 'EPERM' || errorCode(error) === 'ENOTSUP' || errorCode(error) === 'EXDEV') {
         if (expected === undefined) { try { await lstat(path); throw occupiedError(); } catch (missing) { if (errorCode(missing) !== 'ENOENT') throw missing; } }
         else if ((await readFile(path, 'utf8').catch(() => undefined)) !== expected) throw changedWhileSyncing();
-        await rename(temporary, path);
+        await replace();
         replaced = true;
         return;
       }
       throw error;
     }
   } finally {
-    await unlink(temporary).catch(() => undefined);
-    // Once its replacement is in place, the moved-aside original goes: its content was kept before the write. Otherwise, if it could
-    // not go back, it is kept beside it as a backup, never deleted; even if no backup can be placed, it stays for the next pass to find.
-    if (expected !== undefined) await (replaced ? unlink(parked).catch(() => undefined) : keepAsBackup(parked, path));
+    await retryWhileHeld(() => unlink(temporary)).catch(() => undefined);
+    // Once its replacement is in place, the moved-aside original goes: its content was kept before the write (one changed since
+    // it was read is kept as a backup, on Windows). Otherwise, if it could not go back, it is kept beside it as a backup, never deleted; even if
+    // no backup can be placed, it stays for the next pass to find.
+    const unlinkParked = () => retryWhileHeld(() => unlink(parked), parkedHolds);
+    const removal = process.platform === 'win32' ? () => parkedHolds().then(unlinkParked) : unlinkParked;
+    const keptIfChanged = (error: unknown) => (errorCode(error) === 'CK_CHANGED' ? keepAsBackup(parked, path) : undefined);
+    if (expected !== undefined && !replaced) await keepAsBackup(parked, path);
+    if (expected !== undefined && replaced) await removal().catch(keptIfChanged);
   }
+}
+
+/** Before a further try of a write Windows refused: `path` still holds `expected` (undefined: nothing there), else it changed just now. */
+async function stillHolds(path: string, expected: string | undefined) {
+  const now = expected === undefined
+    ? lstat(path).then(() => null, error => (errorCode(error) === 'ENOENT' ? undefined : null))
+    : readFile(path, 'utf8').catch(() => null);
+  if (await now !== expected) throw changedWhileSyncing();
 }
 
 /**
@@ -408,11 +472,17 @@ export async function recoverParked(folder: string) {
 /** Removes a tool's file only if it still holds `expected`: moved aside and checked there, so an edit saved meanwhile is put back. */
 export async function removeFileChecked(path: string, expected: string) {
   const parked = join(dirname(path), `.${basename(path)}.ck-${randomUUID()}.old`);
-  await rename(path, parked);
+  await retryWhileHeld(() => rename(path, parked));
   let held: string | undefined;
   try { held = await readFile(parked, 'utf8'); } catch { /* checked below */ }
   if (held !== expected) { await putBack(parked, path); throw changedWhileSyncing(); }
-  await unlink(parked);
+  // One changed while its removal waited on Windows goes back.
+  try {
+    await retryWhileHeld(() => unlink(parked), () => stillHolds(parked, expected));
+  } catch (error) {
+    if (errorCode(error) === 'CK_CHANGED') await putBack(parked, path);
+    throw error;
+  }
 }
 
 /** The tools Central Knot manages in this home now: those installed, less the ones the sync record leaves out (presence.ts managedTools). */
@@ -624,9 +694,16 @@ export async function placeCopy(context: ShareContext, source: string, target: P
     context.fault?.('before-rename');
     try { await lstat(target.directory); throw Object.assign(new Error('Something appeared at the destination.'), { code: 'CK_EXISTS' }); }
     catch (error) { if (errorCode(error) !== 'ENOENT') throw error; }
-    await rename(stage, target.directory);
+    // A further try on Windows looks again first (vacant).
+    await retryWhileHeld(() => rename(stage, target.directory), () => vacant(target.directory));
     await finishCopy(source, target.directory);
   } catch (error) { await removeTree(stage).catch(() => undefined); throw error; }
+}
+
+/** Throws CK_EXISTS where something is at `path` now (or lstat's own error, where it gives one other than ENOENT), as placeCopy's first look does. */
+export async function vacant(path: string) {
+  try { await lstat(path); } catch (error) { if (errorCode(error) === 'ENOENT') return; throw error; }
+  throw Object.assign(new Error('Something appeared at the destination.'), { code: 'CK_EXISTS' });
 }
 
 export async function exists(path: string): Promise<boolean> {
