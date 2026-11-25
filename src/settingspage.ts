@@ -5,7 +5,7 @@
 // (sessionkeep.ts). Help's Log row also shows Central Knot's own log under it (Show log: its
 // last lines, read by main.ts readLog, never stored); the log is written by main.ts log. A settings file that couldn't be read at
 // launch is said in a note at the top (keptNote) until it is closed, and first on the Overview (overview.ts needsYou).
-import { acting, announce, machine, rerender, switchSyncEverything, showPage, state, whyReadOnly } from './app.ts';
+import { acting, announce, machine, rerender, switchSessionCosts, switchSyncEverything, showPage, state, whyReadOnly } from './app.ts';
 import { outcomeBand } from './matrix.ts';
 import { oneUndoCovers } from './historyactions.ts';
 import { button, h, icon, infoCardId, infoMark, toggle } from './dom.ts';
@@ -502,18 +502,15 @@ function syncEverythingRow(): HTMLElement | null {
     notice, added.length ? h('div.setting-added', {}, added) : undefined);
 }
 
+/** Shared disclosure of what session-cost keeping stores, reused by the Sessions page and Settings info cards. */
+export const SESSION_COSTS_KEPT = 'This home’s Central Knot folder keeps request times, models, token counts and estimated prices. No message text.';
+
 /** Turns keeping session costs on or off for the open home (sessionkeep.ts). */
 async function chooseSessionCosts(on: boolean): Promise<void> {
-  const home = state.home?.home;
-  if (!home) return;
   const kept = `Session costs are still ${state.home?.sessionCosts?.on ? 'kept' : 'not kept'} in this home.`;
   await act('session-costs', async () => {
-    const view = await window.centralKnot.setKeepSessionCosts(home, on);
-    if (state.home?.home !== home) return undefined;
-    state.home.sessionCosts = view;
-    if (view.refused) return { text: view.refused, tone: 'failure', about: shownIn('session-costs', current) };
-    announce(on ? 'Keeping session costs in this home.' : 'Stopped keeping session costs in this home.', true);
-    return undefined;
+    const refused = await switchSessionCosts(on);
+    return refused ? { text: refused, tone: 'failure', about: shownIn('session-costs', current) } : undefined;
   }, error => saveFailure(error, kept));
 }
 
@@ -525,7 +522,7 @@ function sessionCostsRow(): HTMLElement {
   return settingRow('session-costs', 'Keep session costs', undefined,
     toggle({ on: !!costs?.on, label: 'Keep session costs', onchange: chosen => void chooseSessionCosts(chosen), id: 'keep-session-costs',
       attrs: { 'aria-describedby': notice ? `${infoCardId('setting-session-costs-info')} setting-session-costs-notice` : infoCardId('setting-session-costs-info'), title: null } }),
-    notice, undefined, 'This home’s Central Knot folder keeps request times, models, token counts and estimated prices without message text.');
+    notice, undefined, `${SESSION_COSTS_KEPT} Turning this off keeps what was kept.`);
 }
 
 /** What a settings file that couldn't be read at launch led to (types.ts HomeView settingsUnread), said first on the Overview (overview.ts needsYou) and here. */

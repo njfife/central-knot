@@ -436,7 +436,7 @@ test('Check 4: rapid re-entry (off/on twice, and A→B→A) finishes one sweep f
 
   started[2]!.done.resolve(okResult());
   await h.waitIdle();
-  assert.deepEqual(h.keeper.view(homeA), { home: homeA, on: true, collecting: false });
+  assert.deepEqual(h.keeper.view(homeA), { home: homeA, on: true, collecting: false, seq: h.keeper.view(homeA).seq });
 
   // Stale refusal arriving after turning off (no pending restart) is also dropped.
   await h.clock.advance(SWEEP_EVERY_MS);
@@ -628,4 +628,69 @@ test('Check 9: sweeps continue on schedule independently of Automatic sync', asy
   const rec = await readSessionRecord(home, [month]);
   const ids = Object.keys(rec.months[month]!.sessions[0]!.requests).sort();
   assert.deepEqual(ids, ['m1', 'm2']);
+});
+
+test('Fix 1 (slow home switch): timer and Start never check or sweep an unconsented home whose context swapped before homeOpened', async () => {
+  for (const trigger of ['timer', 'Start'] as const) {
+    const h = await makeHarness();
+    const a = join(h.root, 'a');
+    const b = join(h.root, 'b');
+    const at = new Date(NOW - 60_000).toISOString();
+    await writeLines(join(a, '.claude/projects/-work-a/a.jsonl'), [claudeRecord('a', 'a-id', at)]);
+    await writeLines(join(b, '.claude/projects/-work-b/b.jsonl'), [claudeRecord('b', 'b-id', at, 40_000, 3000)]);
+    await h.openHome(a);
+    if (trigger === 'timer') {
+      await h.keeper.setKeep(a, true);
+      await h.waitIdle();
+    }
+    await h.clock.advance(SWEEP_EVERY_MS - 1);
+    assert.equal(await pathExists(sessionsDirectory(b)), false);
+    const delay = deferred();
+    // main.ts assigns current before awaiting the opening read, then calls homeOpened later.
+    const switching = (async () => {
+      h.current.context = { ...h.current.context, home: b };
+      await delay.promise;
+      return h.keeper.homeOpened(b, await canonicalHome(b));
+    })();
+    try {
+      if (trigger === 'timer') {
+        await h.clock.advance(1);
+      } else {
+        const reply = await h.keeper.setKeep(a, true);
+        assert.match(reply.refused ?? '', /not the one open/i, 'Start during a slow switch refuses without checking B');
+        assert.equal(await h.readSavedSettings(), undefined, 'Start during a slow switch saves no consent');
+      }
+      await h.waitIdle();
+      assert.equal(await pathExists(sessionsDirectory(b)), false, `${trigger}: unconsented destination B gets no sessions folder`);
+      assert.equal(await pathExists(sessionLockPath(b)), false, `${trigger}: unconsented destination B gets no lock.sqlite`);
+    } finally {
+      delay.resolve();
+      await switching;
+      h.keeper.quit();
+    }
+    assert.equal(h.keeper.view(b).on, false);
+    assert.equal(h.keeper.view(b).collecting, false);
+    assert.equal(await pathExists(sessionsDirectory(b)), false, `${trigger}: B stays untouched after homeOpened finishes`);
+  }
+});
+
+test('Fix 2 (monotonic keeper sequence): a sweep completion view outranks an earlier collecting snapshot', async () => {
+  const gate = deferred<void>();
+  const h = await makeHarness({
+    sweep: async (ctx, opts) => {
+      await gate.promise;
+      return sweepSessions(ctx, opts);
+    },
+  });
+  const home = join(h.root, 'seq-home');
+  await h.openHome(home);
+  await h.keeper.setKeep(home, true);
+  const during = h.keeper.view(home);
+  assert.equal(during.collecting, true);
+  gate.resolve();
+  await h.waitIdle();
+  const after = h.keeper.view(home);
+  assert.equal(after.collecting, false);
+  assert.ok(typeof during.seq === 'number' && typeof after.seq === 'number' && after.seq > during.seq,
+    `completion seq (${after.seq}) must exceed earlier collecting snapshot seq (${during.seq})`);
 });

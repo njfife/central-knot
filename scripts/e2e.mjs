@@ -10294,11 +10294,13 @@ async function keepSessionCostsFlow() {
     const edge = page.getBoundingClientRect().right - parseFloat(getComputedStyle(page).paddingRight);
     return [...page.querySelectorAll('*')].flatMap(e => e.getBoundingClientRect().right > edge + 1 ? ['past the page’s edge: ' + (e.id || e.className || e.tagName)] : []); })()`;
   const captureAndCheck = async (a, prefix, checkSessionsSpills, scrollTarget) => {
+    const headingTops = {};
     for (const [width, height] of [[860, 560], [1316, 820]]) {
       await sizeTo(a, width, height);
       if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
       if (scrollTarget) await a.run(`document.querySelector(${JSON.stringify(scrollTarget)})?.scrollIntoView({ block: 'center' })`);
       await wait(100);
+      if (checkSessionsSpills) headingTops[width] = Math.round(await a.run(`document.querySelector('#sessions-heading')?.getBoundingClientRect().top ?? 0`));
       const cut = [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT), ...(checkSessionsSpills ? await a.run(SPILLS) : [])];
       same(`nothing cut off at ${width}×${height} with sidebar open (${prefix})`, cut, []);
       if (shots) {
@@ -10310,6 +10312,25 @@ async function keepSessionCostsFlow() {
         await a.send('Emulation.setEmulatedMedia', { features: [] });
       }
     }
+    await fullSize(a);
+    return headingTops;
+  };
+  const captureCard860 = async (a, buttonSelector, cardSelector, prefix, scrollTarget) => {
+    await sizeTo(a, 860, 560);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    if (scrollTarget) await a.run(`document.querySelector(${JSON.stringify(scrollTarget)})?.scrollIntoView({ block: 'center' })`);
+    await a.click(buttonSelector);
+    await wait(100);
+    same(`info card open at 860×560 (${prefix})`, await a.run(`document.querySelector(${JSON.stringify(cardSelector)})?.matches(':popover-open') ?? false`), true);
+    if (shots) {
+      for (const look of ['light', 'dark']) {
+        await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+        await wait(150);
+        await a.shot(`${prefix}-${look}-860`);
+      }
+      await a.send('Emulation.setEmulatedMedia', { features: [] });
+    }
+    await a.click(buttonSelector);
     await fullSize(a);
   };
 
@@ -10327,47 +10348,74 @@ async function keepSessionCostsFlow() {
     await wait(2000);
     same('before the click: Start button and its info card match verbatim',
       [await a.text('#sessions-keep-start'), await a.text('#sessions-keep-info-card'), await a.exists('#sessions-collecting')],
-      ['Start keeping session costs', 'This home’s Central Knot folder keeps request times, models, token counts and estimated prices without message text. You can turn this off in Settings.', false]);
+      ['Start keeping session costs', 'This home’s Central Knot folder keeps request times, models, token counts and estimated prices. No message text. You can turn this off in Settings; what was kept stays.', false]);
     same('before the click: no sessions folder, no lock, no keepSessionCosts entry',
       [existsSync(sessionsDirA), existsSync(join(sessionsDirA, 'lock.sqlite')), jsonOrNothing(settingsPath)?.keepSessionCosts ?? null],
       [false, false, null]);
-    await captureAndCheck(a, 'sessions-before', true);
+    const topsBefore = await captureAndCheck(a, 'sessions-before', true);
+    await captureCard860(a, '#sessions-keep-info', '#sessions-keep-info-card', 'sessions-card');
 
     // Click Start: enters Collecting… while FIFO blocks open(pipe1, 'r') until release().
     await a.click('#sessions-keep-start');
     for (let tries = 0; tries < 150 && !(await a.exists('#sessions-collecting')); tries++) await wait(50);
     await wait(300);
-    same('during the first sweep: Collecting… replaces the Start button',
-      [await a.text('#sessions-collecting'), await a.exists('#sessions-keep-start')], ['Collecting…', false]);
-    await captureAndCheck(a, 'sessions-collecting', true);
+    same('during the first sweep: Collecting… replaces the Start button and status bar announces keeping',
+      [await a.text('#sessions-collecting'), await a.exists('#sessions-keep-start'), await a.text('#announcement')],
+      ['Collecting…', false, 'Keeping session costs for this home.']);
+    const topsCollecting = await captureAndCheck(a, 'sessions-collecting', true);
     same('still Collecting… until FIFO is released', await a.exists('#sessions-collecting'), true);
 
-    // Release FIFO so sweep finishes; button's place holds nothing and receipts landed.
+    // Release FIFO so sweep finishes; button's place holds nothing, status bar still says keeping, and receipts landed.
     same('FIFO had an active sweep reader waiting', await pipe1.release(), true);
     pipe1.clean();
     for (let tries = 0; tries < 150 && await a.exists('#sessions-collecting'); tries++) await wait(50);
     await a.settle();
-    same('after the first sweep: button place holds nothing',
-      [await a.exists('#sessions-keep-start'), await a.exists('#sessions-collecting'), await a.exists('#sessions-keep-result')], [false, false, false]);
+    same('after the first sweep: button place holds nothing and status bar says keeping',
+      [await a.exists('#sessions-keep-start'), await a.exists('#sessions-collecting'), await a.exists('#sessions-keep-result'), await a.text('#announcement')],
+      [false, false, false, 'Keeping session costs for this home.']);
     const saved1 = jsonOrNothing(settingsPath)?.keepSessionCosts ?? {};
     same('consent saved on for Home A alone', [saved1[canonA], Object.hasOwn(saved1, canonB)], [true, false]);
     const kept1 = jsonOrNothing(monthFileA);
     const ids1 = (kept1?.sessions ?? []).flatMap(s => Object.keys(s.requests).map(id => `${s.tool}:${id}`)).sort();
     same('kept record holds stand-in Claude Code and Codex requests', ids1, ['claude-cli:m1', 'claude-cli:m2', 'codex-cli:r1']);
-    await captureAndCheck(a, 'sessions-after', true);
+    const topsAfter = await captureAndCheck(a, 'sessions-after', true);
+    same('Fix 5: sessions bar keeps one height across before, collecting, and after (0 px jump at 860 and 1316)',
+      [topsCollecting, topsAfter], [topsBefore, topsBefore]);
+
+    // Fix 2: Refresh started during Collecting… whose reply lands after the sweep ends must not restore Collecting….
+    const main = a.inspect ? await mainHelpers(a.inspect) : undefined;
+    if (main) {
+      const pipeRefresh = makeHoldPipe('.claude/projects/-work-hold/held-refresh.jsonl');
+      try {
+        for (let tries = 0; tries < 160 && !(await a.exists('#sessions-collecting')); tries++) await wait(50);
+        await main.holdRefresh('view.sessionCosts?.collecting === true');
+        await a.run(`document.querySelector('#header-refresh').click()`);
+        for (let tries = 0; tries < 100 && !(await main.refreshHeld()); tries++) await wait(50);
+        same('Refresh snapshot held while Collecting…', await main.refreshHeld(), true);
+        same('Refresh FIFO released', await pipeRefresh.release(), true);
+        pipeRefresh.clean();
+        for (let tries = 0; tries < 150 && await a.exists('#sessions-collecting'); tries++) await wait(50);
+        await main.releaseRefresh();
+        await a.settle();
+        same('older Refresh reply arriving after sweep ends does not restore Collecting…', await a.exists('#sessions-collecting'), false);
+      } finally { pipeRefresh.clean(); main.close(); }
+    } else console.log('keepSessionCostsFlow: stale Refresh during Collecting… is checked in a development run only (it holds discovery:refresh in main).');
 
     // Check 2: Settings switch under "This home" is On; turning Off stops sweeps, leaves record untouched, brings Start back.
     await a.click('#nav-settings');
     for (let tries = 0; tries < 100 && !(await a.exists('#keep-session-costs')); tries++) await wait(50);
-    same('Settings shows Keep session costs On under This home',
+    same('Settings shows Keep session costs On under This home with shared card text',
       [await a.run(`!!document.querySelector('#keep-session-costs')?.closest('section')?.querySelector('#settings-home')`),
-        await a.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`)],
-      [true, 'true']);
+        await a.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`),
+        await a.text('#setting-session-costs-info-card')],
+      [true, 'true', 'This home’s Central Knot folder keeps request times, models, token counts and estimated prices. No message text. Turning this off keeps what was kept.']);
     await captureAndCheck(a, 'settings-row', false, '#setting-session-costs');
+    await captureCard860(a, '#setting-session-costs-info', '#setting-session-costs-info-card', 'settings-card', '#setting-session-costs');
     const beforeOffBytes = readFileSync(monthFileA, 'utf8');
     await a.click('#keep-session-costs');
     for (let tries = 0; tries < 100 && (await a.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`)) !== 'false'; tries++) await wait(50);
     same('Keep session costs turns Off in Settings', await a.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`), 'false');
+    await captureAndCheck(a, 'settings-row-off', false, '#setting-session-costs');
     writeFileSync(claudeFile, `${JSON.stringify(reply('alpha', 'm3-while-off', Math.max(today, Date.now() - 1000), 'claude-haiku-4-5-20251001', 5_000, 500, '/work/central-knot'))}\n`, { flag: 'a' });
     await wait(2200);
     same('while Off: next ticks do not sweep and record is untouched', readFileSync(monthFileA, 'utf8'), beforeOffBytes);
@@ -10435,6 +10483,30 @@ async function keepSessionCostsFlow() {
   same('refused home in Settings shows record refusal verbatim and leaves switch Off',
     [await b.text('#setting-session-costs-message'), await b.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`)],
     ['The sessions folder is a link.', 'false']);
+
+  // Fix 3 & Item 4: mend the refused store, turn On in Settings (announces keeping), then Off; old refusal must not come back on Sessions.
+  rmSync(join(homeB, '.central-knot/sessions'));
+  await b.click('#keep-session-costs');
+  for (let tries = 0; tries < 100 && (await b.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`)) !== 'true'; tries++) await wait(50);
+  same('turning On in Settings announces keeping in status bar', await b.text('#announcement'), 'Keeping session costs for this home.');
+  if (shots) {
+    await sizeTo(b, 1316, 820);
+    if (await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
+    await b.run(`document.querySelector('#setting-session-costs')?.scrollIntoView({ block: 'center' })`);
+    for (const look of ['light', 'dark']) {
+      await b.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+      await wait(150);
+      await b.shot(`settings-row-on-result-${look}-1316`);
+    }
+    await b.send('Emulation.setEmulatedMedia', { features: [] });
+    await fullSize(b);
+  }
+  await b.click('#keep-session-costs');
+  for (let tries = 0; tries < 100 && (await b.run(`document.querySelector('#keep-session-costs')?.getAttribute('aria-checked')`)) !== 'false'; tries++) await wait(50);
+  await b.click('#nav-sessions');
+  for (let tries = 0; tries < 100 && !(await b.exists('#sessions-keep-start')); tries++) await wait(50);
+  same('after mending store and turning On then Off in Settings, old refusal does not return on Sessions',
+    await b.exists('#sessions-keep-result'), false);
   same('no page errors on Home B', b.pageErrors, []);
   await b.quit();
 }

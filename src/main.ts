@@ -732,7 +732,7 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passes: 
   const syncEverything = (await readRecord(current!.home)).record?.syncEverything;
   const readId = handoff.id + 1;
   const made: HomeView = {
-    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), readId, profiles, ...(tookOver ? { tookOver } : {}), ...(settingsUnread ? { settingsUnread } : {}), ...(sessionKeep ? { sessionCosts: sessionKeep.view(current!.home) } : {}),
+    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), readId, profiles, ...(tookOver ? { tookOver } : {}), ...(settingsUnread ? { settingsUnread } : {}),
     // Apps that run the tools or read their files are looked for only on this computer, like the tools' own apps.
     ...(current!.mode === 'actual' ? { otherApps: await findOtherApps(current!.home) } : {}),
     sync: { managed, present, joining: await joiningCounts(shared, managed, present, syncEverything === true), writes: await skillFolders(shared, managed), access: await writeAccess(shared), gate: await syncGate(shared),
@@ -763,6 +763,7 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passes: 
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   // How many items are managed, so the first-close note says truthfully whether anything syncs (nothing does with no tool managed).
   lastManagedCount = managed.length ? [...made.skills.items, ...made.mcp.items, ...made.agents.items].filter(fact => fact.on).length : 0;
+  if (sessionKeep) made.sessionCosts = sessionKeep.view(current!.home);
   return { view: made, passes };
 }
 

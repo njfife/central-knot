@@ -1,7 +1,7 @@
 // Per-home session-cost keeping consent, preflight guards, and the 15-minute sweep timer (MAP.md, "Sessions").
 // Owns: canonical home consent keys (`canonicalHome`), pre-consent store checks via `sessionlock.ts checkSessionStore`,
 // post-open and 15-minute sweeps (`SWEEP_EVERY_MS`), single-flight joining, generation-based cancellation and re-entry
-// (captured context, stale replies dropped), and synchronous Quit abort. Runs outside sync.
+// (checking `host.context().home === open.home` before every check/sweep, monotonic `seq`, stale replies dropped), and synchronous Quit abort.
 // Not here: `app-settings.json` persistence (`main.ts`), locking (`sessionlock.ts`), sweeping (`sessionsweep.ts`), UI pages.
 import { resolve } from 'node:path';
 import { checkSessionStore } from './sessionlock.ts';
@@ -35,6 +35,7 @@ const defaultSchedule = (fn: () => void, ms: number) => {
 export function createSessionKeeper(host: SessionKeepHost) {
   let open: { home: string; key: string } | undefined;
   let generation = 0;
+  let version = 0;
   let active: { generation: number; controller: AbortController } | undefined;
   let pendingStart = false;
   let quitting = false;
@@ -44,6 +45,10 @@ export function createSessionKeeper(host: SessionKeepHost) {
   let ops: Promise<unknown> = Promise.resolve();
 
   const eligible = () => !quitting && !!open && host.isKept(open.key);
+  const openContext = (home = open?.home) => {
+    const ctx = !quitting && open && home === open.home ? host.context() : undefined;
+    return ctx && ctx.home === open!.home ? ctx : undefined;
+  };
   const clearTimer = () => {
     cancelTimer?.();
     cancelTimer = undefined;
@@ -59,15 +64,16 @@ export function createSessionKeeper(host: SessionKeepHost) {
     const same = !!open && home === open.home;
     const on = same && host.isKept(open!.key);
     const collecting = same && !quitting && on && (pendingStart || active?.generation === generation);
-    return { home, on, collecting, ...(same && refused ? { refused } : {}) };
+    return { home, on, collecting, ...(same && refused ? { refused } : {}), seq: version };
   };
   const publish = () => {
     if (quitting || !open) return;
-    const next = view();
-    const encoded = JSON.stringify(next);
+    const { seq: _seq, ...state } = view();
+    const encoded = JSON.stringify(state);
     if (encoded === lastSent) return;
     lastSent = encoded;
-    host.changed(next);
+    version++;
+    host.changed({ ...state, seq: version });
   };
   const armTimer = () => {
     clearTimer();
@@ -81,7 +87,8 @@ export function createSessionKeeper(host: SessionKeepHost) {
     }, host.everyMs && host.everyMs > 0 ? host.everyMs : SWEEP_EVERY_MS);
   };
   const startSweep = () => {
-    if (!eligible()) return;
+    const ctx = eligible() ? openContext() : undefined;
+    if (!ctx) return;
     refused = undefined;
     if (active) {
       if (active.generation !== generation) pendingStart = true;
@@ -90,7 +97,7 @@ export function createSessionKeeper(host: SessionKeepHost) {
     const run = { generation, controller: new AbortController() };
     active = run;
     publish();
-    void (host.sweep ?? sweepSessions)(host.context(), { signal: run.controller.signal })
+    void (host.sweep ?? sweepSessions)(ctx, { signal: run.controller.signal })
       .then(result => {
         if (result.refused && !quitting && run.generation === generation) refused = result.refused;
         host.log(result.skipped === 'busy' ? 'session costs: store is locked by another sweep; skipped'
@@ -122,13 +129,14 @@ export function createSessionKeeper(host: SessionKeepHost) {
   };
   const setKeep = (home: string, on: boolean): Promise<SessionCostsView> => {
     const work = ops.then(async () => {
-      if (quitting || !open || home !== open.home) return { ...view(), refused: NOT_OPEN };
+      const ctx = openContext(home);
+      if (!ctx) return { ...view(), refused: NOT_OPEN };
       if (on) {
-        const checked = await checkSessionStore(host.context());
-        if (quitting || open?.home !== home) return { ...view(), refused: NOT_OPEN };
+        const checked = await checkSessionStore(ctx);
+        if (!openContext(home)) return { ...view(), refused: NOT_OPEN };
         if (checked.status === 'refused') return { ...view(), refused: checked.refused };
       }
-      if (on !== host.isKept(open.key)) await host.saveConsent(open.key, on);
+      if (on !== host.isKept(open!.key)) await host.saveConsent(open!.key, on);
       if (quitting || open?.home !== home) return view();
       host.log(`session costs: turned ${on ? 'on' : 'off'} for ${home}`);
       if (on) start();

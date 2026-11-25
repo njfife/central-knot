@@ -6,13 +6,13 @@
 // This module makes the day's two local midnights from the calendar (periodOf) and says the rows: every figure and sum is
 // sessionrow.ts's, and the tools read are presence.ts SESSION_TOOLS. What a person needs is on the page; why a figure is low,
 // whose prices they are and the price list's date are on hover (the native `title`). Not here: reading files, pricing, summing.
-import { announce, rerender, state } from './app.ts';
+import { announce, rerender, state, switchSessionCosts } from './app.ts';
 import { brandMark } from './brand.ts';
 import { button, h, icon, infoCardId, infoMark } from './dom.ts';
 import { clockTime, plural } from './model.ts';
 import { readPageData, resetPageData } from './pagedata.ts';
 import { SESSION_TOOLS } from './presence.ts';
-import { saveFailure } from './settingspage.ts';
+import { saveFailure, SESSION_COSTS_KEPT } from './settingspage.ts';
 import { andList, orList, toolNames } from './words.ts';
 import type { Period } from './sessionday.ts';
 import type { CostSum, DayRows, ModelCost, SessionRow, UnpricedBy } from './sessionrow.ts';
@@ -25,8 +25,6 @@ const providerNames: Record<string, string> = { anthropic: 'Anthropic', openai: 
 const opened = new Set<string>();
 const ONE_HOUR = 'One-hour cache writes are priced at the shorter cache’s rate; they cost more.';
 const TOKEN_HEADS = ['Input', 'Cached', 'Cache-written', 'Output'];
-const KEEP_INFO = 'This home’s Central Knot folder keeps request times, models, token counts and estimated prices without message text. You can turn this off in Settings.';
-let keepProblem: { home: string; text: string } | undefined;
 
 /** Local midnight `back` days before `now`'s day, from the calendar: a day is 23 or 25 hours when the clocks change, never 24 added. */
 const midnight = (now: Date, back: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - back).getTime();
@@ -159,16 +157,11 @@ function dayView(rows: DayRows, present: HarnessId[]) {
 async function startKeeping(): Promise<void> {
   const home = state.home?.home;
   if (!home) return;
-  keepProblem = undefined;
-  try {
-    const view = await window.centralKnot.setKeepSessionCosts(home, true);
-    if (state.home?.home !== home) return;
-    state.home.sessionCosts = view;
-    if (view.refused) keepProblem = { home, text: view.refused };
-  } catch (error) {
-    if (state.home?.home === home) keepProblem = { home, text: saveFailure(String(error), '') };
-  }
-  if (keepProblem?.home === home) announce(keepProblem.text);
+  state.keepProblem = undefined;
+  const problem = await switchSessionCosts(true).catch(error => saveFailure(String(error), ''));
+  if (state.home?.home !== home) return;
+  state.keepProblem = problem;
+  if (problem) announce(problem);
   rerender();
 }
 
@@ -179,12 +172,12 @@ function keepControl(home: HomeView): HTMLElement | null {
   if (costs?.on) return null;
   return h('span.sessions-keep', { 'data-info-block': true },
     button({ variant: 'outline', label: 'Start keeping session costs', id: 'sessions-keep-start', onclick: () => void startKeeping(), attrs: { 'aria-describedby': infoCardId('sessions-keep-info') } }),
-    infoMark('sessions-keep-info', 'Start keeping session costs', KEEP_INFO));
+    infoMark('sessions-keep-info', 'Start keeping session costs', `${SESSION_COSTS_KEPT} You can turn this off in Settings; what was kept stays.`));
 }
 
 /** Verbatim refusal or settings save failure shown inline beneath the top bar. */
 function keepResult(home: HomeView): HTMLElement | null {
-  const text = (keepProblem?.home === home.home && !home.sessionCosts?.on ? keepProblem.text : undefined) ?? home.sessionCosts?.refused;
+  const text = state.keepProblem ?? home.sessionCosts?.refused;
   return text ? h('p.sessions-result', { id: 'sessions-keep-result', role: 'alert' }, icon('circle-alert', 14), h('span', {}, text)) : null;
 }
 
