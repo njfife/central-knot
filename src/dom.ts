@@ -472,7 +472,7 @@ if (typeof document !== 'undefined') {
   window.addEventListener('resize', () => syncInfoCard(true));
 }
 /**
- * A small circled-`?` button (`icon('circle-help', 14)`) with a top-layer detail card beside it (text only, ≤2 sentences).
+ * A small circled-`?` button (`icon('circle-question-mark', 14)`) with a top-layer detail card beside it (text only, ≤2 sentences).
  * - `id` must be unique on the page and stable across redraws (redraws reopen the card and keep focus by it).
  * - The card's id is `infoCardId(id)` (`<id>-card`); use it for `aria-describedby` on related controls too.
  * - Do not place the mark inside a `<button>` or `<label>`.
@@ -502,7 +502,7 @@ export function infoMark(id: string, label: string, text: string): HTMLElement {
       if (openCard?.id === id && openCard.pinned) closeInfoCard();
       else openInfoCard(id, true);
     },
-  }, icon('circle-help', 14));
+  }, icon('circle-question-mark', 14));
   const card = h('span.info-card', { id: infoCardId(id), role: 'tooltip', popover: 'manual', onpointerenter: enter, onpointerleave: leave }, text);
   return h('span.info-wrap', {}, mark, card);
 }
