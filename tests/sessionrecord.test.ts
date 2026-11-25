@@ -1,5 +1,5 @@
 // The session costs record (src/sessionrecord.ts), as worked examples.
-// TZ is fixed before any Date runs so local month boundaries are deterministic.
+// TZ is fixed, away from UTC, before any Date runs: the record's months are UTC months, which a local time does not show.
 process.env.TZ = 'America/New_York';
 
 import { after, test } from 'node:test';
@@ -15,6 +15,7 @@ import type { ShareContext } from '../src/share.ts';
 import {
   emptyPositions,
   monthOf,
+  nextMonth,
   previousMonth,
   readSessionRecord,
   sessionsDirectory,
@@ -41,6 +42,8 @@ after(async () => {
 
 const localTime = (year: number, month: number, day: number, hour = 12, minute = 0) =>
   new Date(year, month - 1, day, hour, minute, 0, 0).getTime();
+/** A time by the UTC calendar: a check across a month's end gives its times so, as the record names its months by UTC. */
+const utcTime = (year: number, month: number, day: number, hour = 12, minute = 0) => Date.UTC(year, month - 1, day, hour, minute);
 
 const makeContext = async (overrides: Partial<ShareContext> = {}): Promise<ShareContext> => {
   const root = await makeTemp();
@@ -214,8 +217,8 @@ test('Partial reading made whole: more tokens reprice with the new table while k
 
 test('Month before: Oct 31 request updated on Nov 1 stays in Oct; a key in an unread older month cannot be seen and is treated as new', () => {
   assert.equal(previousMonth('2026-01'), '2025-12');
-  const octAt = localTime(2026, 10, 31, 23, 55);
-  const novAt = localTime(2026, 11, 1, 0, 5);
+  const octAt = utcTime(2026, 10, 31, 23, 55);
+  const novAt = utcTime(2026, 11, 1, 0, 5);
   const first = claudeReq('s1', 'msg-midnight', octAt, { tokens: { input: 1000, cacheRead: 0, cacheWrite: 0, output: 20 } });
   const second = claudeReq('s1', 'msg-midnight', novAt, { tokens: { input: 1000, cacheRead: 0, cacheWrite: 0, output: 300 } });
 
@@ -602,9 +605,9 @@ test('Malformed v1 shape and non-regular month entry (directory, link): held and
 });
 
 test('Same key and tokens with another model: model and price replaced while first time, session and month stay', () => {
-  const firstAt = localTime(2026, 10, 31, 23, 50);
+  const firstAt = utcTime(2026, 10, 31, 23, 50);
   const r1 = claudeReq('s1', 'msg-remodel', firstAt, { model: 'claude-fable-5' });
-  const r2 = claudeReq('s1', 'msg-remodel', localTime(2026, 11, 1, 0, 10), { model: 'claude-opus-5-2026' });
+  const r2 = claudeReq('s1', 'msg-remodel', utcTime(2026, 11, 1, 0, 10), { model: 'claude-opus-5-2026' });
   const p1 = priceRequest(r1, RATES_V1), p2 = priceRequest(r2, RATES_V1);
   assert.ok(p1.priced && p2.priced && p1.dollars !== p2.dollars);
 
@@ -708,6 +711,38 @@ test('Per-home serialization: concurrent turns never overlap, each sees the prev
   );
 });
 
+test('A turn for a request at a month\'s end reads the month before it and the month after it, and finds its key kept in either', async () => {
+  assert.deepEqual([nextMonth('2026-12'), nextMonth('2026-11'), previousMonth('2026-01')], ['2027-01', '2026-12', '2025-12']);
+  const ctx = await makeContext();
+  const update = (requests: Request[]) => [{ tool: 'claude-cli' as const, session: 's1', requests: requests.map(request => ({ request, price: priceRequest(request, RATES_V1) })) }];
+  const kept = [claudeReq('s1', 'kept-in-october', utcTime(2026, 10, 31, 23, 59)), claudeReq('s1', 'kept-in-december', utcTime(2026, 12, 1, 0, 1))];
+  await withSessionRecordTurn(ctx.home, async ({ read, write }) => {
+    const up = upsertSessionRecord(await read(['2026-10', '2026-12']), update(kept));
+    assert.equal((await write(ctx, { months: up.months, changed: up.changed, positions: emptyPositions(), currentMonth: '2026-12' })).written, true);
+  });
+  // Seen again, each a little later or earlier, with more tokens: in November now, by UTC.
+  const grown = { tokens: { input: 1000, cacheRead: 2000, cacheWrite: 500, output: 900 } };
+  const seen = [claudeReq('s1', 'kept-in-october', utcTime(2026, 11, 1, 0, 1), grown), claudeReq('s1', 'kept-in-december', utcTime(2026, 11, 30, 23, 59), grown)];
+  const own = monthOf(seen[0]!.at), months = [previousMonth(own), own, nextMonth(own)];
+  await withSessionRecordTurn(ctx.home, async ({ read }) => {
+    assert.deepEqual(months, ['2026-10', '2026-11', '2026-12']);
+    const up = upsertSessionRecord(await read(months), update(seen));
+    assert.deepEqual(up.changed, ['2026-10', '2026-12'], 'each found where it was kept, and grown there');
+    assert.equal(up.months['2026-11'], undefined, 'neither kept a second time in November');
+  });
+});
+
+test('A month is named by UTC: 23:30 UTC on 30 November is November in Auckland, in Los Angeles and in UTC alike', () => {
+  const at = Date.UTC(2026, 10, 30, 23, 30);
+  try {
+    assert.deepEqual(['Pacific/Auckland', 'America/Los_Angeles', 'UTC'].map(zone => {
+      process.env.TZ = zone;
+      return [zone, new Date(at).getDate(), monthOf(at)];
+    }), [['Pacific/Auckland', 1, '2026-11'], ['America/Los_Angeles', 30, '2026-11'], ['UTC', 30, '2026-11']],
+    'the local day differs; the month does not');
+  } finally { process.env.TZ = 'America/New_York'; }
+});
+
 test('Prototype-property keys (constructor, toString, __proto__) and all PricingEntry variants round-trip safely', async () => {
   const ctx = await makeContext();
   const at = localTime(2026, 11, 6);
@@ -792,8 +827,8 @@ test('Unread month is never overwritten: requests for unread months return notTa
 });
 
 test('Reverse-order cross-month duplicate keeps one receipt across all read months, not two', () => {
-  const novSighting = claudeReq('nov-sess', 'shared', localTime(2026, 11, 1, 0, 5));
-  const octSighting = claudeReq('oct-sess', 'shared', localTime(2026, 10, 31, 23, 55), {
+  const novSighting = claudeReq('nov-sess', 'shared', utcTime(2026, 11, 1, 0, 5));
+  const octSighting = claudeReq('oct-sess', 'shared', utcTime(2026, 10, 31, 23, 55), {
     tokens: { input: 1000, cacheRead: 2000, cacheWrite: 500, output: 600 },
   });
   const up = upsertSessionRecord(emptySource(['2026-10', '2026-11']), [
@@ -831,8 +866,8 @@ test('Held own month defers before any lookup and leaves earlier months unchange
 });
 
 test('Session facts (parent, project, unread, reported) are replaced in every read month that holds the session', () => {
-  const octReq = claudeReq('s1', 'msg-oct', localTime(2026, 10, 31, 23, 55));
-  const novReq = claudeReq('s1', 'msg-nov', localTime(2026, 11, 1, 0, 5));
+  const octReq = claudeReq('s1', 'msg-oct', utcTime(2026, 10, 31, 23, 55));
+  const novReq = claudeReq('s1', 'msg-nov', utcTime(2026, 11, 1, 0, 5));
   const up1 = upsertSessionRecord(emptySource(['2026-10', '2026-11']), [{
     tool: 'claude-cli', session: 's1', parent: 'p-old', project: 'before', unread: 1, reported: { dollars: 0.5, complete: false },
     requests: [{ request: octReq, price: priceRequest(octReq, RATES_V1) }],
