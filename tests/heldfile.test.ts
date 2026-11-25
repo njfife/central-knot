@@ -467,17 +467,49 @@ test('a fresh skill copy is renamed into place in the very step that found its p
   } finally { restoreRename(); restoreLook(); await box.cleanup(); }
 });
 
-test('a skill’s replacement that can’t go in, whose copy can’t go back either: the copy moved aside keeps its note, and recovery puts it back', async () => {
+/** A swap whose replacement is refused every time, and whose put-back is refused once: what it leaves beside the skills folder. */
+async function refusedBothWays(box: Awaited<ReturnType<typeof home>>) {
+  const source = await newerSkill(box.base), expected = (await readTree(box.skill)).hash;
+  const restorePlace = refuse('rename', 'EPERM', ([from, to]) => basename(from!).startsWith('.ck-stage-') && to === box.skill, undefined, Infinity);
+  const restoreBack = refuse('rename', 'EPERM', ([from, to]) => basename(from!).startsWith('.ck-parked-') && to === box.skill);
+  try { await assert.rejects(swapFolder(box.context, source, box.skill, expected), { code: 'EPERM' }); } finally { restoreBack(); restorePlace(); }
+  return (await box.listed(join(box.home, '.claude'))).map(name => name.replace(/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}/, '<id>'));
+}
+
+test('on Windows a skill’s replacement that can’t go in, whose copy can’t go back either: the copy moved aside keeps its note, and recovery puts it back', { skip: windowsOnly }, async () => {
   const box = await home(), claude = join(box.home, '.claude');
   try {
-    const source = await newerSkill(box.base), expected = (await readTree(box.skill)).hash;
-    const restorePlace = refuse('rename', 'EPERM', ([from, to]) => basename(from!).startsWith('.ck-stage-') && to === box.skill, undefined, Infinity);
-    const restoreBack = refuse('rename', 'EPERM', ([from, to]) => basename(from!).startsWith('.ck-parked-') && to === box.skill);
-    try { await assert.rejects(swapFolder(box.context, source, box.skill, expected), { code: 'EPERM' }); } finally { restoreBack(); restorePlace(); }
-    const left = (await box.listed(claude)).map(name => name.replace(/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}/, '<id>'));
-    assert.deepEqual(left, ['.ck-parked-<id>', '.ck-parked-<id>.json', 'skills']);
+    assert.deepEqual(await refusedBothWays(box), ['.ck-parked-<id>', '.ck-parked-<id>.json', 'skills']);
     await recoverFolders(box.context, 'claude-cli');
     assert.match(await readFile(join(box.skill, 'SKILL.md'), 'utf8'), /Before\./);
     assert.deepEqual(await box.listed(claude), ['skills']);
+  } finally { await box.cleanup(); }
+});
+
+test('off Windows a skill’s replacement that can’t go in, whose copy can’t go back either: the note goes, as before, and recovery leaves the copy beside', { skip: process.platform === 'win32' && 'on Windows the note is kept: the check above' }, async () => {
+  const box = await home(), claude = join(box.home, '.claude');
+  try {
+    assert.deepEqual(await refusedBothWays(box), ['.ck-parked-<id>', 'skills']);
+    await recoverFolders(box.context, 'claude-cli');
+    assert.match(await readFile(join(await parkedIn(claude), 'SKILL.md'), 'utf8'), /Before\./);
+  } finally { await box.cleanup(); }
+});
+
+test('a save made into a skill’s moved-aside copy while a tool makes its place again, its put-back refused: recovery keeps both, and one line of the log names the copy kept', { skip: windowsOnly }, async () => {
+  const box = await home(), claude = join(box.home, '.claude'), saved = '---\nname: review\ndescription: Reviews.\n---\nSaved meanwhile.\n', lines: string[] = [];
+  try {
+    const source = await newerSkill(box.base), expected = (await readTree(box.skill)).hash;
+    const restore = refuse('rename', 'EPERM', ([from, to]) => basename(from!).startsWith('.ck-stage-') && to === box.skill, async () => {
+      await writeFile(join(await parkedIn(claude), 'SKILL.md'), saved);
+      await mkdir(box.skill);
+      await writeFile(join(box.skill, 'SKILL.md'), 'made again\n');
+    });
+    try { await assert.rejects(swapFolder(box.context, source, box.skill, expected), { code: 'CK_CHANGED' }); } finally { restore(); }
+    await recoverFolders({ ...box.context, log: (line: string) => lines.push(line) } as ShareContext, 'claude-cli');
+    assert.equal(await readFile(join(box.skill, 'SKILL.md'), 'utf8'), 'made again\n', 'what the tool made stays');
+    const kept = await parkedIn(claude);
+    assert.equal(await readFile(join(kept, 'SKILL.md'), 'utf8'), saved, 'and so does the save, beside it');
+    assert.equal(lines.length, 1, lines.join('\n'));
+    assert.ok(lines[0]!.includes(kept), lines[0]);
   } finally { await box.cleanup(); }
 });
