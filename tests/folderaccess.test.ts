@@ -56,6 +56,7 @@ test('Off Windows the answer is access itself: its very promise, with the caller
   });
   assert.deepEqual(await Promise.all([outcome(folderAccess({}, join(folder, 'gone'), constants.W_OK)), outcome(access(join(folder, 'gone'), constants.W_OK))]), ['ENOENT', 'ENOENT']);
   assert.equal(reads.size, 0);
+  assert.equal(withoutFolderAnswers(reads), reads, 'the view made after a pass gets the pass’s very map');
   // What access gives is what the caller gets, the same promise: its settling and its error object are access's own.
   const given = Promise.reject(Object.assign(new Error('refused'), { code: 'EACCES' }));
   given.catch(() => undefined);

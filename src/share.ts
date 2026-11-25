@@ -659,9 +659,12 @@ async function openedOnWindows(context: Pick<ShareContext, 'reads'>, folder: str
   return context.reads.get(key) as Promise<void>;
 }
 
-/** A pass's reads as the view made right after it takes them (main.ts pass): every read but its folder answers, asked again. */
+/**
+ * A pass's reads as the view made right after it takes them (main.ts pass): every read but its folder answers, asked again;
+ * off Windows, where no folder answer is kept, the very map the pass had.
+ */
 export const withoutFolderAnswers = (reads: ShareContext['reads']) =>
-  reads && new Map([...reads].filter(([key]) => !key.startsWith(FOLDER_ANSWER)));
+  process.platform !== 'win32' || !reads ? reads : new Map([...reads].filter(([key]) => !key.startsWith(FOLDER_ANSWER)));
 
 /** Nothing is written while this build is held; the real home only by explicitly choosing it. A simulated home that reaches it stays read-only. */
 export async function writeAccess(context: ShareContext): Promise<WriteAccess> {
