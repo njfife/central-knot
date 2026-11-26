@@ -252,7 +252,7 @@ function anotherWay(disk: SkillDisk, managed: HarnessId[], item: Wanted, tool: H
   if (!source || !managed.includes(source) || depth) return undefined;
   const there = toolName(source);
   const reallyThere = wantedIn(item, source) && !disk.locked.has(source) && !disk.cannotTake(item, source) && !anotherWay(disk, managed, item, source, depth + 1);
-  // Said as it is now: a copy there, or (a found skill, say) the folder it will be in once it is on there.
+  // Said as it is now: a copy there, or (a found skill, say) the folder it will be in once it is on there (libraryrow.ts detailLine shortens it for found rows).
   if (reallyThere) return disk.byKey.get(item.key)?.[source]
     ? { readsFrom: source, why: `${nameOf(tool)} reads ${there}’s copy, in ${there}’s skills folder.` }
     : { why: `${nameOf(tool)} reads ${there}’s skills folder, so it gets the skill from there once it is on in ${there}.` };

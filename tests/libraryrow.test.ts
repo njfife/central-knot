@@ -533,8 +533,8 @@ test('Opened-row shared cards, own-settings label, and armed Delete use the shor
     'Own settings kept: timeout',
     '',
   ]);
-  assert.equal(said.deleteArmed(7), 'Removed from every tool and Central Knot. History can restore it for 7 days.');
-  assert.equal(said.deleteArmed(30), 'Removed from every tool and Central Knot. History can restore it for 30 days.');
+  assert.equal(said.deleteArmed(7), 'Removed from Central Knot and every tool it manages. History can restore it for 7 days.');
+  assert.equal(said.deleteArmed(30), 'Removed from Central Knot and every tool it manages. History can restore it for 30 days.');
   assert.equal('deleteOffer' in said, false);
 });
 
@@ -561,7 +561,7 @@ test('Opened-row tool lines (detailLine) drop standing filler while closed-row m
   assert.equal(skills.harnessLine(pluginOff, offTwo, 'pi-cli', 'Pi'), 'No copy while it is off.');
   // Found row with no copy keeps its line.
   assert.deepEqual(skills.detailLine(row({ 'claude-cli': 'a' }), undefined, 'codex-cli', 'Codex'), [{ text: 'No copy. Adding it puts it here.' }]);
-  // Reads another tool's folder (skills.ts:254-255 -> readsFrom): short label with T1.10 card; kept-out another-way (:561), link, shared folder, and non-CK copy (:257) stay whole.
+  // Reads another tool's folder (skills.ts anotherWay -> readsFrom): short label with T1.10 card; kept-out another-way, link, shared folder, and non-CK copy stay whole.
   const opencodeReads = row({ 'claude-cli': 'b' }, {
     anotherWay: { 'opencode-cli': 'OpenCode reads Claude Code’s copy, in Claude Code’s skills folder.' },
     readsFrom: { 'opencode-cli': 'claude-cli' },
@@ -621,9 +621,18 @@ test('Pi agent detailLine shows As a skill (?) only where Pi holds the file, not
   const all = { 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'b' };
   const onItem = item(), withPi = item({ applied: { ...onItem.applied, 'pi-cli': 'b' } });
   const piRow: LibraryRow = { key: 'reviewer', hashes: { ...all, 'pi-cli': 'b' }, plan: { orderProved: true, write: [], remove: [], keep: [], forget: [], ownCopy: [], current: ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'] } };
-  const card = 'Pi has no agents: this is a skill file, with no context, tool limits or model of its own. Deleting it in Pi turns the agent off everywhere.';
+  const shortCard = 'Pi has no agents: this is a skill file, with no context, tool limits or model of its own.';
+  const card = `${shortCard} Deleting it in Pi turns the agent off everywhere.`;
   assert.deepEqual(agents.detailLine(piRow, withPi, 'pi-cli', 'Pi'), [{ text: 'As a skill', card }]);
   assert.deepEqual(agents.detailLine({ ...piRow, switchedOff: ['pi-cli'] }, withPi, 'pi-cli', 'Pi'), [{ text: 'As a skill', card }, { text: 'Off in Pi’s settings' }]);
+  // Leaving and Pi's own copy: deleting it in Pi does not turn the agent off everywhere, so the card omits that sentence.
+  const piLeaving: LibraryRow = { key: 'reviewer', hashes: { ...all, 'pi-cli': 'b' }, plan: { orderProved: true, write: [], remove: ['pi-cli'], keep: [], forget: [], ownCopy: [], current: ['claude-cli', 'copilot-cli', 'codex-cli'] } };
+  const keptOutPi = item({ except: ['pi-cli'], applied: { ...onItem.applied, 'pi-cli': 'b' } });
+  assert.deepEqual(agents.detailLine(piLeaving, keptOutPi, 'pi-cli', 'Pi'), [{ text: agents.harnessLine(piLeaving, keptOutPi, 'pi-cli', 'Pi') }, { text: 'As a skill', card: shortCard }]);
+  const piOwnOff = item({ on: false, applied: {} });
+  const piOwnRow: LibraryRow = { key: 'reviewer', hashes: { 'pi-cli': 'x' }, plan: { orderProved: true, write: [], remove: [], keep: [], forget: [], ownCopy: ['pi-cli'], current: [] } };
+  assert.deepEqual(agents.detailLine(piOwnRow, piOwnOff, 'pi-cli', 'Pi'), [{ text: agents.harnessLine(piOwnRow, piOwnOff, 'pi-cli', 'Pi') }, { text: 'As a skill', card: shortCard }]);
+  assert.deepEqual(agents.detailLine({ key: 'reviewer', hashes: { 'pi-cli': 'x' } }, undefined, 'pi-cli', 'Pi'), [{ text: 'Has it.' }, { text: 'As a skill', card: shortCard }]);
   const piDeleted: LibraryRow = { key: 'reviewer', hashes: all, plan: { orderProved: true, write: [], remove: ['claude-cli', 'copilot-cli', 'codex-cli'], keep: [], forget: [], ownCopy: [], current: [], turnedOffBy: 'pi-cli' } };
   assert.deepEqual(agents.detailLine(piDeleted, withPi, 'pi-cli', 'Pi'), [{ text: agents.harnessLine(piDeleted, withPi, 'pi-cli', 'Pi') }]);
   const piPending: LibraryRow = { key: 'reviewer', hashes: all, plan: { orderProved: true, write: ['pi-cli'], remove: [], keep: [], forget: [], ownCopy: [], current: ['claude-cli', 'copilot-cli', 'codex-cli'] } };
@@ -639,10 +648,12 @@ test('MCP server Off in settings carries a card explaining Central Knot leaves t
   assert.deepEqual(servers.detailLine(row(all, { switchedOff: ['copilot-cli'] }, onItem), onItem, 'copilot-cli', 'Copilot CLI', ['tools']), [
     {
       text: 'Off in Copilot CLI’s settings',
-      card: 'Copilot CLI doesn’t start it. Central Knot leaves that switch as it is, so it is still off there after Off and On. Turn it back on in that tool’s own settings.',
+      card: 'Copilot CLI doesn’t start it. Central Knot leaves that switch as it is, so it is still off there after Off and On. Turn it back on in Copilot CLI’s own settings.',
     },
     { text: 'Own settings kept: tools' },
   ]);
+  assert.equal(servers.placeTag(row(all, { switchedOff: ['copilot-cli'] }, onItem), onItem, tools)?.title,
+    'Switched off in Copilot CLI’s own settings: each tool’s own switch, which Central Knot leaves as it is. Turn it back on in that tool’s own settings.');
   assert.deepEqual(skills.detailLine(row(all, { switchedOff: ['copilot-cli'] }, onItem), onItem, 'copilot-cli', 'Copilot CLI'), [
     { text: 'Off in Copilot CLI’s settings' },
   ]);

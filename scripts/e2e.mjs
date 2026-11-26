@@ -2752,7 +2752,7 @@ async function practiceFlow() {
   const mcpOffMark = rowPart('line-info', 'mcp', 'docs', 'copilot-cli');
   same('its line says Off in Copilot CLI’s settings with a card saying Central Knot leaves the switch and how to turn it back on',
     await a.run(`[document.querySelector('#${mcpOffMark}')?.closest('.details-tool-line')?.innerText?.replace(/\\s+/g, ' ').trim() ?? '', document.querySelector('#${mcpOffMark}-card')?.textContent?.trim() ?? '']`),
-    ['Off in Copilot CLI’s settings · Own settings kept: tools', 'Copilot CLI doesn’t start it. Central Knot leaves that switch as it is, so it is still off there after Off and On. Turn it back on in that tool’s own settings.']);
+    ['Off in Copilot CLI’s settings · Own settings kept: tools', 'Copilot CLI doesn’t start it. Central Knot leaves that switch as it is, so it is still off there after Off and On. Turn it back on in Copilot CLI’s own settings.']);
   const codexBefore = readNow(mcpFiles[2]);
   await a.click(`#${rowPart('enable', 'mcp', 'docs', 'codex-cli')}`);
   same('its Codex switch keeps it out of Codex at once', [readNow(mcpFiles[2]).includes('[mcp_servers.docs]'), /docs is kept out of Codex/.test(await a.text('.band-done') ?? '')], [false, true]);
@@ -2858,7 +2858,7 @@ async function practiceFlow() {
   const notesBefore = notesFiles.map(file => readFileSync(file, 'utf8'));
   await a.click(`#${rowPart('open', 'agents', 'release-notes')}`);
   await a.click(`#${rowPart('delete', 'agents', 'release-notes')}`);
-  same('armed, it says what Delete removes and how many days History can restore it', (await a.text(`#${rowPart('delete-note', 'agents', 'release-notes')}`) ?? '').trim(), 'Removed from every tool and Central Knot. History can restore it for 30 days.');
+  same('armed, it says what Delete removes and how many days History can restore it', (await a.text(`#${rowPart('delete-note', 'agents', 'release-notes')}`) ?? '').trim(), 'Removed from Central Knot and every tool it manages. History can restore it for 30 days.');
   await a.click(`#${rowPart('delete-confirm', 'agents', 'release-notes')}`);
   same('Delete from Central Knot takes the agent out of every harness and off the page', [notesFiles.map(file => existsSync(file)), (await rowKeys(a, 'agents')).includes('release-notes')], [[false, false, false], false]);
   await a.click('#nav-history');
@@ -4316,7 +4316,7 @@ async function practiceFlow() {
       versionsNote: false,
       deleteLabel: 'Delete…',
       deleteOfferNote: false,
-    }, true, 'Removed from every tool and Central Knot. History can restore it for 7 days.', true]);
+    }, true, 'Removed from Central Knot and every tool it manages. History can restore it for 7 days.', true]);
   // Own-copy line stays whole, and an Off row's Codex switch still works.
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
   const copilotOwnStandup = join(practice, '.copilot/skills/standup');

@@ -438,8 +438,10 @@ test('A found skill only Codex has: OpenCode’s line says what is true before i
     assert.match(beforeWhy, /^OpenCode reads Claude Code’s skills folder, so it gets the skill from there once it is on in Claude Code\.$/);
     assert.equal(before.fact!.readsFrom?.['opencode-cli'], undefined);
     assert.deepEqual(say.detailLine(before.row, before.item, 'opencode-cli', 'OpenCode'), [{
-      text: 'Not in Central Knot · OpenCode reads Claude Code’s skills folder, so it gets the skill from there once it is on in Claude Code.',
+      text: 'Gets it from Claude Code’s skills folder once it is on there.',
     }]);
+    assert.equal(say.harnessLine(before.row, before.item, 'opencode-cli', 'OpenCode'),
+      'Not in Central Knot · OpenCode reads Claude Code’s skills folder, so it gets the skill from there once it is on in Claude Code.');
     await turnOn(box);
     const on = await seen(box);
     assert.match(on.fact!.anotherWay?.['opencode-cli'] ?? '', /^OpenCode reads Claude Code’s copy, in Claude Code’s skills folder\./);

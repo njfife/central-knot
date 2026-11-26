@@ -54,13 +54,13 @@ export interface RowWords {
    * after "It is switched off in Codex’s own settings:" (`line`, `where` the tool's name), what the tag's tooltip adds, and
    * (`card`: MCP servers, which have no button to clear it) whether the opened row's short label carries both in a `(?)` card.
    */
-  switchedOff?: { line(where: string): string; tag: string; card?: true };
+  switchedOff?: { line(where: string): string; tag(where?: string): string; card?: true };
   /** Agents: tools listed as `'skills folder'` in presence.ts agentsKeptIn (Pi) show `As a skill (?)` on their opened-row line. */
   asSkill?: true;
 }
 
 /** A skill's, or an agent's in Pi (a skill there), that the tool's own switch keeps out: the opened row's Let … load it clears it. */
-const notLoaded = { line: (where: string) => `${where} doesn’t load it.`, tag: 'The opened row can clear it.' };
+const notLoaded = { line: (where: string) => `${where} doesn’t load it.`, tag: () => 'The opened row can clear it.' };
 /**
  * Each kind on the library, in its words, keyed by the page's name for it (app.ts PageKind); the one place they are written
  * (agents.ts takes its Kind's from here). Every other place a kind is wired in is in librarypass.ts's recipe.
@@ -87,7 +87,7 @@ export const libraryWords = {
     // Claude Code's and Copilot's switch is kept apart from the entry, Codex's, Pi's and OpenCode's in it: either way it stays.
     switchedOff: {
       line: where => `${where} doesn’t start it. Central Knot leaves that switch as it is, so it is still off there after Off and On.`,
-      tag: 'Turn it back on in that tool’s own settings.',
+      tag: where => `Turn it back on in ${where ? `${where}’s` : 'that tool’s'} own settings.`,
       card: true,
     },
   },
@@ -576,15 +576,17 @@ export function sentences(words: RowWords) {
     } else if (is === 'none' && inLib) {
       if (inLib.except.includes(tool as HarnessId)) parts.push({ text: 'Kept out' });
     } else if (is !== 'current' && is !== 'kept-out') {
-      parts.push({ text: hasLine(row, item, tool, where) });
+      const waits = !inLib && is === 'another-way' ? row.anotherWay?.[tool]?.match(/^.+ reads (.+)’s skills folder, so it gets the skill from there once it is on in \1\.$/)?.[1] : undefined;
+      parts.push({ text: waits ? `Gets it from ${waits}’s skills folder once it is on there.` : hasLine(row, item, tool, where) });
     }
     if (words.asSkill && (agentsKeptIn as Partial<Record<string, string>>)[tool] === 'skills folder'
       && has && ['current', 'gets-it', 'edited', 'leaving', 'own-copy'].includes(is)) {
-      const card = `${where} has no agents: this is a skill file, with no context, tool limits or model of its own. Deleting it in ${where} turns the agent off everywhere.`;
+      const turnsOff = is !== 'leaving' && is !== 'own-copy' && !!inLib && wantedIn(inLib, tool as HarnessId) && inLib.applied[tool as HarnessId] !== undefined;
+      const card = `${where} has no agents: this is a skill file, with no context, tool limits or model of its own.${turnsOff ? ` Deleting it in ${where} turns the agent off everywhere.` : ''}`;
       parts.push({ text: 'As a skill', card });
     }
     if (row.switchedOff?.includes(tool) && words.switchedOff) {
-      const card = words.switchedOff.card ? `${words.switchedOff.line(where)} ${words.switchedOff.tag}` : undefined;
+      const card = words.switchedOff.card ? `${words.switchedOff.line(where)} ${words.switchedOff.tag(where)}` : undefined;
       parts.push({ text: `Off in ${where}’s settings`, ...(card ? { card } : {}) });
     }
     const ownText = own.length ? words.own(own) : '';
@@ -669,7 +671,7 @@ export function sentences(words: RowWords) {
     const switched = tools.filter(tool => row.switchedOff?.includes(tool) && !out.includes(tool as HarnessId));
     const off = !switched.length ? '' : switched.length === tools.length && switched.length > 1 ? `switched off in all ${switched.length} tools` : `switched off in ${andList(switched.map(toolName))}`;
     const whose = sentence(andList(switched.map(offInOwnSettings)));
-    const offTitle = switched.length ? `${whose}: each tool’s own switch, which Central Knot leaves as it is. ${words.switchedOff?.tag ?? ''}`.trim() : '';
+    const offTitle = switched.length ? `${whose}: each tool’s own switch, which Central Knot leaves as it is. ${words.switchedOff?.tag() ?? ''}`.trim() : '';
     const text = [where, off].filter(Boolean).join(' · ');
     return text ? { text, title: [whereTitle, offTitle].filter(Boolean).join(' ') } : undefined;
   }
@@ -720,7 +722,7 @@ export function sentences(words: RowWords) {
     deleted: (name: string, wasOn: boolean, left: readonly string[] = [], tools: readonly string[] = []) =>
       `${name} is deleted from Central Knot${!wasOn ? '' : left.length ? `, but still in ${named(left, tools)}` : ', and out of every tool'}. History can restore it.`,
     /** Under Delete it now: what happens, and for how long History can restore it (`days`: History's days, from Settings). */
-    deleteArmed: (days: number) => `Removed from every tool and Central Knot. History can restore it for ${days} days.`,
+    deleteArmed: (days: number) => `Removed from Central Knot and every tool it manages. History can restore it for ${days} days.`,
   };
 
   /**
