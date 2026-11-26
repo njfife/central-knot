@@ -23,7 +23,7 @@ import { originWords, theVersion, wantedIn, type LibraryItem, type Plan, type Ta
 import { clockTimesApart, dayAndTime } from './model.ts';
 import { linkLabel, pluginOf } from './sourcelink.ts';
 import type { Change, HarnessId, ItemNotice, LibraryFacts, PluginItemNotice, TakenInNotice } from './types.ts';
-import { andList, deletedIn, kindNouns, orList, pageNames, sentence, toolName, toolsPhrase } from './words.ts';
+import { andList, deletedIn, harnessIds, kindNouns, orList, pageNames, sentence, toolName, toolsPhrase } from './words.ts';
 
 // ---------- What a kind supplies ----------
 
@@ -89,6 +89,8 @@ export const libraryWords = {
 /** What the page knows of an item besides its library item (the kind's view gives it: types.ts LibraryFacts). */
 export interface LibraryRow {
   key: string; name?: string;
+  /** A library item linked to a source or plugin (types.ts LibraryFacts fromSource). */
+  fromSource?: LibraryFacts['fromSource'];
   /** Each harness's copy, by its content. */
   hashes?: Partial<Record<string, string>>;
   /** In the library: what the next pass does in each harness. */
@@ -247,6 +249,9 @@ export const rowClicks = {
     const now = rowAsItIs(row, item);
     return { ...now, except: out ? [...now.except, tool as HarnessId] : now.except.filter(other => other !== tool) };
   },
+  /** An Off item's tool switch: on in this tool only, kept out of every other tool so one managed later doesn't get it. */
+  onOnly: (row: LibraryRow, item: LibraryItem | undefined, tool: string): Change =>
+    ({ ...rowAsItIs(row, item), on: true, except: harnessIds.filter(other => other !== tool) }),
   /** Make current, on an earlier version in the opened row. */
   makeCurrent: (row: LibraryRow, item: LibraryItem | undefined, version: string): Change => ({ ...rowAsItIs(row, item), version }),
   /** Delete from Central Knot. */
@@ -388,6 +393,15 @@ const harnessesWhere = (row: LibraryRow, item: LibraryItem | undefined, tools: r
 /** The home's harnesses whose mark says they have a copy of their own, which Central Knot didn't put there (`own-copy`). */
 export const ownCopies = (row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]) => harnessesWhere(row, item, tools, 'own-copy');
 
+/** Where turning an Off item On puts it back, given its kept-out tools, for statusLine and switchLabel. */
+function offOnWords(item: LibraryItem | undefined, tools: readonly string[], forSwitch: boolean, ownClause = ''): string {
+  const back = tools.filter(tool => !item?.except.includes(tool as HarnessId));
+  if (back.length === tools.length) return forSwitch ? `Click to put it in every tool${ownClause}.` : 'On puts it in every tool.';
+  if (!back.length) return forSwitch ? 'Click to turn it on (kept out of every tool).' : 'Kept out of every tool; turn on in a tool below.';
+  const place = back.length === 1 ? toolName(back[0]!) : `${back.length} of ${tools.length} tools`;
+  return forSwitch ? `Click to put it back in ${place}${ownClause}.` : `On puts it back in ${place}${back.length === 1 ? ' only' : ''}.`;
+}
+
 /**
  * An item's status in one line: on and where, in Central Knot only, or found in a harness and not in Central Knot yet (and,
  * with Synchronize everything on: `everything`, what it does with it). `leftOut`: the installed tools left out (offWhere).
@@ -403,8 +417,11 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
     return `Not in Central Knot · ${foundWhere(row, item, tools)}${differ}. Add it to keep it in Central Knot${whereAdded(row, item, tools)}${below}.${rule}`;
   }
   const ownSaid = own.length ? ` ${sentence(named(own, tools))} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there.` : '';
-  if (place === 'off') return [`Off · ${offPlace(row, item, tools, leftOut)}.`,
-    ...otherReadLines(row, tools), `Turn it on to put it in every tool.${ownSaid}`].join(' ');
+  if (place === 'off') {
+    const at = offPlace(row, item, tools, leftOut);
+    const placePart = at === 'in Central Knot only' ? '' : `${at}.`;
+    return ['Off ·', placePart, ...otherReadLines(row, tools), `${offOnWords(item, tools, false)}${ownSaid}`].filter(Boolean).join(' ');
+  }
   // A copy deleted by hand turns the item Off at the next pass: that is what it is about to be.
   const deletedBy = row.plan?.turnedOffBy;
   if (deletedBy) return `On · its copy was deleted in ${deletedIn(deletedBy, row.plan?.sharedWay)}, so it turns off when sync runs. Central Knot keeps it.`;
@@ -413,7 +430,7 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
   // A tool that gets it only with its plugin is its line's to say (pluginline.ts): not said here as one that can't take it.
   const gets = where('gets-it').filter(tool => !waitsForEdit(tool)), out = where('kept-out', 'leaving'), cannot = where('cannot').filter(tool => !row.getsWithPlugin?.includes(tool)), unseen = where('unseen');
   const switched = tools.filter(tool => row.switchedOff?.includes(tool) && !out.includes(tool));
-  const another = where('another-way').filter(tool => wantedIn(item!, tool as HarnessId) && !row.pluginOn?.includes(tool));
+  const another = where('another-way').filter(tool => !row.pluginOn?.includes(tool));
   // A tool whose own switch has it off doesn't load it: it is no tool it is on in (the parts below say it). One that has it on
   // through its plugin is (pluginrows.ts pluginOnIn), as its line's switch says.
   const onIn = tools.filter(tool => row.pluginOn?.includes(tool) || (!row.switchedOff?.includes(tool) && (['current', 'edited'].includes(harnessIs(row, item, tool)) || (harnessIs(row, item, tool) === 'gets-it' && waitsForEdit(tool)))));
@@ -443,9 +460,10 @@ export function switchLabel(row: LibraryRow, item: LibraryItem | undefined, tool
     const where = loads.loading.length < tools.length || said.length ? [` in ${loads.loading.length} of ${tools.length} tools`, ...said].join('; ') : '';
     return `${name}: on${where}. Click to take it out of every tool; Central Knot keeps it.`;
   }
-  const own = ownCopies(row, item, tools);
+  const own = ownCopies(row, item, tools).filter(tool => !item?.except.includes(tool as HarnessId));
   const kept = own.length === 1 ? 'has a copy of its own, which is' : 'have copies of their own, which are';
-  return `${name}: off, ${offPlace(row, item, tools, leftOut)}. Click to put it in every tool${own.length ? `; ${named(own, tools)} ${kept} kept as versions first` : ''}.`;
+  const ownClause = own.length ? `; ${named(own, tools)} ${kept} kept as versions first` : '';
+  return `${name}: off, ${offPlace(row, item, tools, leftOut)}. ${offOnWords(item, tools, true, ownClause)}`;
 }
 
 /**
@@ -526,8 +544,8 @@ export function sentences(words: RowWords) {
    * `where` is the harness's name.
    */
   function harnessLine(row: LibraryRow, item: LibraryItem | undefined, tool: string, where: string): string {
-    const off = row.switchedOff?.includes(tool) && words.switchedOff ? ` It is ${offInOwnSettings(tool)}: ${words.switchedOff.line(where)}` : '';
-    return `${hasLine(row, item, tool, where)}${off}`;
+    const off = row.switchedOff?.includes(tool) && words.switchedOff ? `It is ${offInOwnSettings(tool)}: ${words.switchedOff.line(where)}` : '';
+    return [hasLine(row, item, tool, where), off].filter(Boolean).join(' ');
   }
   function hasLine(row: LibraryRow, item: LibraryItem | undefined, tool: string, where: string): string {
     const inLib = inLibrary(item), has = row.hashes?.[tool] !== undefined, other = row.anotherWay?.[tool];
@@ -568,7 +586,10 @@ export function sentences(words: RowWords) {
         if (!inLib) return 'Has it.';
         return `Has a copy Central Knot didn’t put there. It is left alone while ${inLib.on ? 'this tool is kept out' : `the ${noun} is off`}; ${KEPT_FIRST}.`;
       case 'kept-out': return `Kept out of this tool. Central Knot keeps its ${copy} for when you turn it on here.`;
-      case 'none': return inLib ? 'No copy while it is off.' : canAdd(row) ? 'No copy. Adding it puts it here.' : 'No copy.';
+      case 'none':
+        if (!inLib) return canAdd(row) ? 'No copy. Adding it puts it here.' : 'No copy.';
+        if (pluginOf(row.fromSource?.link ?? '')) return 'No copy while it is off.';
+        return inLib.except.includes(tool as HarnessId) ? 'Kept out' : '';
       case 'cannot': return row.cannot![tool]!;
       case 'unseen': return row.unseen![tool]!;
     }
@@ -630,6 +651,21 @@ export function sentences(words: RowWords) {
       const where = toolName(tool);
       if (!out) return failed ? `${name} couldn’t be put in ${where}.` : `${name} is on in ${where} again.`;
       return failed ? `${name} couldn’t be taken out of ${where} yet.` : `${name} is kept out of ${where}. Central Knot keeps its ${copy} for when you turn it on there.`;
+    },
+    /** An Off row's tool switch: on in one tool, naming every other tool holding it; "only" when every installed tool is managed. */
+    onOnly(name: string, tool: string, failed: boolean, row?: LibraryRow, tools: readonly string[] = [], item?: LibraryItem, leftOut: readonly string[] = []): string {
+      const where = toolName(tool);
+      if (failed) return `${name} couldn’t be put in ${where}.`;
+      if (!row) return `${name} is on in ${where}.`;
+      const left = (taken: readonly string[]) => tools.filter(each => each !== tool && !taken.includes(each));
+      const through = onThrough(row, left([]));
+      const readers = otherReaders(row, left(through));
+      const own = ownCopies(row, item, left([...through, ...readers]));
+      const still = left([...through, ...readers, ...own]).filter(each => row.hashes?.[each] !== undefined || stillIn(row, item, [], [each]).length > 0);
+      const say = (list: readonly string[], one: string, many: string) => (list.length ? `${andList(list.map(toolName))} ${list.length === 1 ? one : many}.` : '');
+      const extra = [say(readers, 'reads it too', 'read it too'), say(own, 'has its own copy', 'have their own copies'),
+        say(through, 'has it on through its plugin', 'have it on through its plugin'), say(still, 'still has a copy', 'still have copies')].filter(Boolean);
+      return extra.length ? [`${name} is on in ${where}.`, ...extra].join(' ') : `${name} is on in ${where}${leftOut.length ? '' : ' only'}.`;
     },
     /** `when`: the version's time (versionClock). `on`: the harnesses it was written to; undefined for an item that is Off. */
     madeCurrent(name: string, version: Version, when: string, on: readonly string[] | undefined, tools: readonly string[]): string {
