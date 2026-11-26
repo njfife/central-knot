@@ -4090,8 +4090,8 @@ async function practiceFlow() {
   await keepFor(a, 7);
   const question = await a.text('#history-shorten-text') ?? '';
   same('a shorter window asks first, naming from when, and keeps the saved choice until confirmed (which its other button names)',
-    [/^History before .+ will be removed and can’t be restored\. Your other homes remove it too the next time they record a change\.$/.test(question), await a.text('#history-shorten'), await a.text('#history-shorten-cancel'), await a.run(`document.querySelector('#history-days').value`), (await savedSettings()).historyDays],
-    [true, 'Shorten to 7 days', 'Keep 90 days', '90', 90]);
+    [/^History before .+ will be removed and can’t be restored\. Your other homes remove it too the next time they record a change\.$/.test(question), await a.text('#history-shorten'), await a.text('#history-shorten-cancel'), await a.run(`document.querySelector('#history-days').value`), (await savedSettings()).historyDays, await a.exists('#setting-history-hint'), await a.run(`document.querySelector('#history-days')?.getAttribute('aria-describedby')`)],
+    [true, 'Shorten to 7 days', 'Keep 90 days', '90', 90, false, null]);
   await a.shot('settings-history-confirm');
   await a.run(`document.querySelector('#history-days').focus()`);
   for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
@@ -4236,8 +4236,12 @@ async function practiceFlow() {
         [['true', null, null], `Exec="${appImage}" --hidden`, { label: 'Start at sign-in', enabled: true, checked: true }], [['false', null, null], false], [['Start Central Knot at sign-in', false]], true, []]);
     main.close();
   }
-  // Info marks and their top-layer detail cards (dom.ts infoMark) on Settings: Start at sign-in and Log.
+  // Info marks and their top-layer detail cards (dom.ts infoMark) on Settings: Start at sign-in, Synchronize everything,
+  // Update plugins automatically, Read what plugins hold and Log.
   const signInCardText = `Opens hidden in ${process.platform === 'darwin' ? 'the menu bar' : 'the system tray'} at sign-in, so sync keeps running.`;
+  const syncCardText = 'What turns up in a tool is turned on in every tool. Items whose copies differ wait for your choice.';
+  const pluginUpdatesCardText = 'Every four hours, window closed too. A plugin you turned off stays off.';
+  const pluginTextCardText = 'Keeps plugin items’ names, descriptions and first lines, so Find can search them.';
   const logCardText = 'Central Knot’s own log, for reporting a problem. Your tools’ files aren’t in it.';
   const cardOpen = id => a.run(`!!document.querySelector('#${id}-card')?.matches(':popover-open')`);
   const cardBecomes = async (id, want, bound, from = Date.now()) => {
@@ -4256,14 +4260,38 @@ async function practiceFlow() {
   const pressTab = async (shift = false) => { for (const type of ['rawKeyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers: shift ? 8 : 0 }); await wait(60); };
   const pressEsc = async () => { for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await wait(60); };
   const moveTo = async at => a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
-  same('Settings has info marks for Start at sign-in and Log with no title, tooltip cards always drawn, and Log’s standing sentence moved into its card', await a.run(`(() => {
+  same('Settings has named info marks for all five explained rows, drops removed filler, keeps Updates can’t be undone., and every aria-describedby points at a drawn element', await a.run(`(() => {
     const read = id => { const m = document.querySelector('#' + id), c = document.querySelector('#' + id + '-card'); return [m?.tagName, m?.getAttribute('aria-label'), m?.hasAttribute('title'), m?.getAttribute('aria-describedby'), c?.getAttribute('role'), c?.getAttribute('popover'), c?.textContent]; };
-    return [read('setting-sign-in-info'), read('setting-log-info'), !!document.querySelector('#setting-log-hint'), document.querySelector('#show-log')?.getAttribute('aria-describedby'), document.querySelector('#open-log-folder')?.getAttribute('aria-describedby')];
+    const text = document.querySelector('#settings-scroll')?.textContent ?? '';
+    const gone = ['System follows your computer’s light or dark setting.', 'Changes and deleted items stay in History, ready to restore, for this long.', 'checks GitHub for a newer release', 'A new release shows at the bottom of the sidebar.', 'For this home: a skill, MCP server or agent', 'Central Knot checks your marketplaces every four hours', 'Central Knot keeps the names, descriptions and first lines', 'Nothing is installed or run.'];
+    const dangling = [...document.querySelectorAll('#settings-scroll [aria-describedby]')].flatMap(el => (el.getAttribute('aria-describedby') ?? '').split(/\\s+/).filter(Boolean).filter(id => !document.getElementById(id)).map(id => (el.id || el.className) + '->' + id));
+    return [read('setting-sign-in-info'), read('setting-sync-everything-info'), read('setting-plugin-updates-info'), read('setting-plugin-text-info'), read('setting-log-info'),
+      !!document.querySelector('#setting-appearance-hint'), !!document.querySelector('#setting-history-hint'), !!document.querySelector('#setting-log-hint'),
+      document.querySelector('.appearance-choices')?.getAttribute('aria-describedby'), document.querySelector('#setting-plugin-updates-hint')?.textContent,
+      document.querySelector('#show-log')?.getAttribute('aria-describedby'), document.querySelector('#open-log-folder')?.getAttribute('aria-describedby'),
+      gone.filter(phrase => text.includes(phrase)), dangling];
   })()`), [
     ['BUTTON', 'About Start at sign-in', false, 'setting-sign-in-info-card', 'tooltip', 'manual', signInCardText],
+    ['BUTTON', 'About Synchronize everything', false, 'setting-sync-everything-info-card', 'tooltip', 'manual', syncCardText],
+    ['BUTTON', 'About Update plugins automatically', false, 'setting-plugin-updates-info-card', 'tooltip', 'manual', pluginUpdatesCardText],
+    ['BUTTON', 'About Read what plugins hold', false, 'setting-plugin-text-info-card', 'tooltip', 'manual', pluginTextCardText],
     ['BUTTON', 'About Log', false, 'setting-log-info-card', 'tooltip', 'manual', logCardText],
-    false, 'setting-log-info-card', 'setting-log-info-card',
+    false, false, false, null, 'Updates can’t be undone.', 'setting-log-info-card', 'setting-log-info-card', [], [],
   ]);
+  for (const [id, text, label] of [['setting-sync-everything-info', syncCardText, 'Synchronize everything card'], ['setting-plugin-updates-info', pluginUpdatesCardText, 'Update plugins automatically card'], ['setting-plugin-text-info', pluginTextCardText, 'Read what plugins hold card']]) {
+    await a.run(`document.getElementById(${JSON.stringify(id)}).scrollIntoView({ block: 'center' })`);
+    await checkCard(a, id, text, label);
+  }
+  for (const [width, height] of [[860, 560], [1316, 819]]) {
+    await withSidebarOpen(a, width, height, async () => {
+      await a.run(`document.getElementById('setting-plugin-updates-info').scrollIntoView({ block: 'center' })`);
+      await a.click('#setting-plugin-updates-info');
+      const clear = await a.run(`(() => { const h = document.getElementById('setting-plugin-updates-hint').getBoundingClientRect(), c = document.getElementById('setting-plugin-updates-info-card').getBoundingClientRect(), s = document.getElementById('status').getBoundingClientRect(); return (c.top >= h.bottom + 3 || c.bottom <= h.top - 3) && c.bottom <= s.top + 1; })()`);
+      same(`at ${width}×${height} with sidebar open, plugin updates card clears Updates can’t be undone. and the status bar, with nothing cut off`, [clear, await a.run(CUT_OFF)], [true, []]);
+      await pressEsc();
+    });
+  }
+  await fullSize(a);
   // In the fault state (Start at sign-in unavailable), the open card sits clear of the fault line beneath the label.
   if (await a.exists('#setting-sign-in-hint')) {
     await a.click('#setting-sign-in-info');
@@ -5360,7 +5388,40 @@ async function updateFlow() {
     for (let i = 0; i < 80 && !(await control())?.title.startsWith('Up to date'); i++) await wait(250);
     same('a newer release with Mac files alone is no update here: after the first check the control is the quiet arrows', [(await control())?.look, (await control())?.title], ['check', 'Up to date. Click to check now.']);
     await a.click('#nav-settings');
-    same('Settings › Updates says this copy doesn’t install updates itself, with the releases page, beside Check now', [await line('setting-updates-reason'), await a.exists('#check-updates'), await a.exists('#setting-update')], [[why, 'Open the releases page'], true, false]);
+    same('Settings › Updates says the build without schedule or sidebar directions, names Check now for updates with live aria-describedby, and says this copy doesn’t install updates itself', [
+      await a.text('#setting-updates-hint'), await a.run(`document.getElementById('check-updates')?.getAttribute('aria-label')`),
+      await a.run(`(document.getElementById('check-updates')?.getAttribute('aria-describedby') ?? '').split(/\\s+/).filter(Boolean).every(id => !!document.getElementById(id))`),
+      await line('setting-updates-reason'), await a.exists('#check-updates'), await a.exists('#setting-update'),
+    ], ['This is Central Knot 0.5.0 preview 4.', 'Check now for updates', true, [why, 'Open the releases page'], true, false]);
+    // Update check progress is announced via role="status" without moving focus from another control.
+    await a.run(`(() => {
+      window.ckUpdateSeen = [];
+      const watch = () => {
+        const n = document.getElementById('setting-updates-notice');
+        if (n && /Checking for updates/.test(n.textContent ?? '')) window.ckUpdateSeen.push([n.getAttribute('role'), n.textContent.trim(), document.activeElement?.id ?? '']);
+      };
+      new MutationObserver(watch).observe(document.getElementById('page'), { subtree: true, childList: true, characterData: true, attributes: true });
+      document.getElementById('appearance-system').focus();
+      return true;
+    })()`);
+    await a.run(`window.centralKnot.checkForUpdates().then(() => true)`);
+    check('update check progress announces through role="status" without moving focus', await a.run(`window.ckUpdateSeen.some(([role, text, active]) => role === 'status' && text === 'Checking for updates…' && active === 'appearance-system') && document.activeElement?.id === 'appearance-system'`), await a.run(`[window.ckUpdateSeen, document.activeElement?.id]`));
+    if (a.main) {
+      const main = await a.main();
+      const push = view => main.run(`(contents => (Object.getPrototypeOf(contents).send.call(contents, 'updates:changed', ${JSON.stringify(view)}), true))(electron.BrowserWindow.getAllWindows()[0].webContents)`);
+      const beforeView = await a.run(`window.centralKnot.updates()`);
+      const dlBase = { shown: true, version: beforeView.version, tag: 'v0.5.0-preview.4', checking: false, available: { tag: 'v0.5.0-preview.5', download: 'https://example.test/u.zip', size: 1000, page } };
+      await a.run(`document.getElementById('appearance-system').focus()`);
+      await push({ ...dlBase, step: 'downloading', progress: 0.1 });
+      for (let i = 0; i < 30 && !/10%/.test(await a.text('#setting-updates-notice') ?? ''); i++) await wait(50);
+      await a.run(`(window.ckDlNode = document.getElementById('setting-updates-notice'), true)`);
+      await push({ ...dlBase, step: 'downloading', progress: 0.55 });
+      for (let i = 0; i < 30 && !/55%/.test(await a.text('#setting-updates-notice') ?? ''); i++) await wait(50);
+      same('update download progress paints in place with role="status" without moving focus', await a.run(`(() => { const n = document.getElementById('setting-updates-notice'); return [n === window.ckDlNode, n?.getAttribute('role'), n?.querySelector('.setting-message-text')?.textContent?.trim(), document.activeElement?.id]; })()`),
+        [true, 'status', 'Downloading 0.5.0 preview 5… 55%', 'appearance-system']);
+      await push(beforeView);
+      main.close();
+    } else console.log('updateFlow: skipped in-process download progress push on packaged Linux run');
     releases.splice(0, 1, { tag: 'v0.5.0-preview.5', zip, asset: 'Central-Knot-0.5.0-linux-x86_64.AppImage' });
     await a.click('#check-updates');
     same('a newer release with an AppImage: the control becomes Update available', await reaches('elsewhere'), 'elsewhere');
@@ -5416,7 +5477,7 @@ async function updateFlow() {
       ['Central Knot 0.5.0 preview 5 is available. What’s new', 'Update to 0.5.0 preview 5']);
     await a.click('#nav-settings');
     const row = await a.text('#setting-updates') ?? '';
-    check('Settings › Updates names the build and what is available', row.includes('This is Central Knot 0.5.0 preview 4.') && row.includes('0.5.0 preview 5 is available.') && await a.exists('#check-updates') && await a.exists('#setting-update'), row);
+    check('Settings › Updates names the build and what is available, without schedule or sidebar directions', await a.text('#setting-updates-hint') === 'This is Central Knot 0.5.0 preview 4.' && row.includes('0.5.0 preview 5 is available.') && await a.exists('#check-updates') && await a.exists('#setting-update') && await a.run(`document.getElementById('check-updates')?.getAttribute('aria-label') === 'Check now for updates'`), row);
     // Check now from the keyboard: the button is disabled under the focus while it checks, and takes the focus back.
     const focused = () => a.run(`document.activeElement?.id ?? ''`);
     const press = id => a.run(`(document.getElementById('${id}').focus(), document.getElementById('${id}').click(), true)`);
@@ -7087,8 +7148,10 @@ async function syncEverythingFlow() {
     [null, 'In a tool, not yet in Central Knot. Add turns an item on in managed tools.', false]);
   await a.click('#nav-settings');
   for (let tries = 0; tries < 30 && !(await a.exists('#setting-sync-everything')); tries++) await wait(100);
-  same('Settings › This home: Synchronize everything is off, and says how many found items it would add now and how many wait for a choice of copy',
-    [await ruleOn(), await ruleSays()], ['false', 'Turning it on adds the 2 items found in your tools now. 1 found item has copies that differ and waits for your choice of copy.']);
+  same('Settings › This home: Synchronize everything is off, moves its paragraph behind its mark with live aria-describedby, and says what it would add now and what waits',
+    [await ruleOn(), await ruleSays(), await a.exists('#setting-sync-everything-hint'), await a.run(`document.getElementById('setting-sync-everything-info')?.getAttribute('aria-label')`), await a.run(`document.getElementById('sync-everything-on')?.getAttribute('aria-describedby')`)],
+    ['false', 'Turning it on puts the 2 items found in your tools into every tool now. 1 found item has copies that differ and waits for your choice of copy.', false, 'About Synchronize everything', 'setting-sync-everything-info-card setting-sync-everything-notice']);
+  await checkCard(a, 'setting-sync-everything-info', 'What turns up in a tool is turned on in every tool. Items whose copies differ wait for your choice.', 'Synchronize everything card');
   await fitsAtMinimum(a, 'Settings with Synchronize everything off');
   await a.shot('everything-off');
   await openAgainOnSettings('before switching on');
@@ -9493,7 +9556,14 @@ esac
   check('with nothing behind, the first check by itself changes nothing and says so', await until(() => noted().checked?.at) && noted().checked.updated === 0 && calls().length === 0 && versions()['issue-tracker'] === '1.9.0', JSON.stringify(noted()));
   await a.click('#nav-settings');
   for (let tries = 0; tries < 50 && !/Last checked/.test(await a.text('#setting-plugin-updates') ?? ''); tries++) await wait(100);
-  check('Settings has the switch, on, and what the last check came to', await a.run(`document.querySelector('#plugin-updates-on')?.getAttribute('aria-checked')`) === 'true' && /Last checked today at .*\. Nothing needed updating\./.test(await a.text('#setting-plugin-updates-notice') ?? '') && await a.exists('#check-plugin-updates'), await a.text('#setting-plugin-updates'));
+  check('Settings has the switch, on, keeps Updates can’t be undone., names Check now for plugin updates and its mark with live aria-describedby, and says what the last check came to',
+    await a.run(`document.querySelector('#plugin-updates-on')?.getAttribute('aria-checked')`) === 'true'
+    && await a.text('#setting-plugin-updates-hint') === 'Updates can’t be undone.'
+    && await a.run(`document.getElementById('setting-plugin-updates-info')?.getAttribute('aria-label')`) === 'About Update plugins automatically'
+    && await a.run(`document.getElementById('check-plugin-updates')?.getAttribute('aria-label')`) === 'Check now for plugin updates'
+    && await a.run(`['check-plugin-updates', 'plugin-updates-on'].every(id => (document.getElementById(id)?.getAttribute('aria-describedby') ?? '').split(/\\s+/).filter(Boolean).every(ref => !!document.getElementById(ref)))`)
+    && /Last checked today at .*\. Nothing needed updating\./.test(await a.text('#setting-plugin-updates-notice') ?? '') && await a.exists('#check-plugin-updates'), await a.text('#setting-plugin-updates'));
+  await checkCard(a, 'setting-plugin-updates-info', 'Every four hours, window closed too. A plugin you turned off stays off.', 'Update plugins automatically card');
   // A page-made close destroys the window outright (see the practice flow): from here on this launch has no window at all.
   await a.run(`setTimeout(() => window.close(), 50), true`);
   await wait(800);
@@ -9539,8 +9609,10 @@ esac
   writeFileSync(join(home, 'issue-next'), '3.0.0');
   writeFileSync(join(home, 'issue-fails'), '');
   await a.click('#nav-settings');
+  await a.run(`(() => { window.ckPluginChecking = []; const watch = () => { const n = document.getElementById('setting-plugin-updates-notice'); if (n && /Checking your marketplaces/.test(n.textContent ?? '')) window.ckPluginChecking.push([n.getAttribute('role'), n.textContent.trim()]); }; new MutationObserver(watch).observe(document.getElementById('page'), { subtree: true, childList: true, characterData: true, attributes: true }); return true; })()`);
   await a.click('#check-plugin-updates');
   for (let tries = 0; tries < 100 && !/couldn’t be made/.test(await a.text('#setting-plugin-updates-notice') ?? ''); tries++) await wait(100);
+  check('Checking your marketplaces… announces through role="status"', await a.run(`window.ckPluginChecking.some(([role]) => role === 'status')`), await a.run(`window.ckPluginChecking`));
   check('Check now says what it came to: one update couldn’t be made, with the way to the note', /Last checked today at .*\. 1 update couldn’t be made\./.test(await a.text('#setting-plugin-updates-notice') ?? '') && (await a.text('#setting-plugin-updates-notice-action')) === 'See Plugin marketplaces', await a.text('#setting-plugin-updates'));
   check('Check now takes the focus back once it can be pressed again', await a.run(`document.activeElement?.id`) === 'check-plugin-updates', await a.run(`document.activeElement?.id`));
   await a.click('#setting-plugin-updates-notice-action');
@@ -9552,7 +9624,11 @@ esac
   await a.click('#nav-settings');
   await a.click('#plugin-updates-on');
   for (let tries = 0; tries < 50 && (await a.run(`document.querySelector('#plugin-updates-on')?.getAttribute('aria-checked')`)) !== 'false'; tries++) await wait(100);
-  check('the switch turns it off: saved, with no Check now and no status', JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).pluginUpdates === false && !(await a.exists('#check-plugin-updates')) && !(await a.exists('#setting-plugin-updates-notice')), await a.text('#setting-plugin-updates'));
+  check('the switch turns it off: saved, with no Check now and no status, keeping Updates can’t be undone. and live aria-describedby',
+    JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).pluginUpdates === false
+    && !(await a.exists('#check-plugin-updates')) && !(await a.exists('#setting-plugin-updates-notice'))
+    && await a.text('#setting-plugin-updates-hint') === 'Updates can’t be undone.'
+    && await a.run(`document.getElementById('plugin-updates-on')?.getAttribute('aria-describedby')`) === 'setting-plugin-updates-info-card setting-plugin-updates-hint', await a.text('#setting-plugin-updates'));
   same('no page errors, plugin updates', a.pageErrors, []);
   await a.quit();
   rmSync(join(home, 'issue-fails'));
@@ -9628,9 +9704,12 @@ async function pluginTextFlow() {
     await a.click('#nav-settings');
   };
   await toSettings();
-  check('Settings has the switch, on, how much is read and that the fifth is tried again, and what the first reading downloads', await switched() === 'true'
+  check('Settings has the switch, on, how much is read and that the fifth is tried again, only the download estimate in the hint, and live aria-describedby', await switched() === 'true'
     && await saying(/^Read 4 of 5 plugins\. 1 couldn’t be read; Central Knot tries again later\.$/)
-    && /Nothing is installed or run\. The one plugin outside its marketplace is downloaded once \(under 1 MB\), then only changes, or daily if on a branch\.$/.test((await said())[1]), await said());
+    && (await said())[1] === 'The one plugin outside its marketplace is downloaded once (under 1 MB), then only changes, or daily if on a branch.'
+    && await a.run(`document.getElementById('setting-plugin-text-info')?.getAttribute('aria-label')`) === 'About Read what plugins hold'
+    && await a.run(`document.getElementById('plugin-text-on')?.getAttribute('aria-describedby')`) === 'setting-plugin-text-info-card setting-plugin-text-hint setting-plugin-text-notice', await said());
+  await checkCard(a, 'setting-plugin-text-info', 'Keeps plugin items’ names, descriptions and first lines, so Find can search them.', 'Read what plugins hold card');
   same('the four kept in the marketplace are kept as text; nothing of the one Git could not reach', kept().map(entry => entry.plugin).sort(), ['document-tools', 'issue-tracker', 'release-helper', 'starter-skills']);
   check('a skill is kept by its name and description', kept().find(entry => entry.plugin === 'document-tools')?.items.some(item => item.kind === 'skill' && item.name === 'pdf-reader' && item.description), kept().find(entry => entry.plugin === 'document-tools'));
   await pictures('failed', [[860, 600]], ['dark']);
@@ -9673,7 +9752,19 @@ async function pluginTextFlow() {
   for (const name of ['app-settings.json', 'marketplaces.json']) writeFileSync(join(fresh, name), readFileSync(join(data, name)));
   a = await launch(fresh, [], real, { CK_PLUGIN_TEXT: 'on', ...silent.instead });
   await toSettings();
-  check('while the fifth is read, the row says how far it has got', await saying(/^Reading: 4 of 5 plugins\.$/), await said());
+  check('while the fifth is read, the row says how far it has got with role="status"', await saying(/^Reading: 4 of 5 plugins\.$/) && await a.run(`document.getElementById('setting-plugin-text-notice')?.getAttribute('role')`) === 'status', [await said(), await a.run(`document.getElementById('setting-plugin-text-notice')?.getAttribute('role')`)]);
+  if (a.inspect) {
+    const main = await a.main();
+    const push = view => main.run(`(contents => (Object.getPrototypeOf(contents).send.call(contents, 'plugin-text:changed', ${JSON.stringify(view)}), true))(electron.BrowserWindow.getAllWindows()[0].webContents)`);
+    await push({ read: 2, of: 5, elsewhere: 0, reading: true, on: true });
+    await saying(/^Reading: 2 of 5 plugins\.$/);
+    await a.run(`(document.getElementById('plugin-text-on').focus(), window.ckTextNode = document.getElementById('setting-plugin-text-notice'), true)`);
+    await push({ read: 3, of: 5, elsewhere: 0, reading: true, on: true });
+    await saying(/^Reading: 3 of 5 plugins\.$/);
+    same('with elsewhere zero, plugin text progress updates in place with role="status", no hint, live aria-describedby, and focus kept', await a.run(`(() => { const n = document.getElementById('setting-plugin-text-notice'); return [n === window.ckTextNode, n?.getAttribute('role'), !!document.getElementById('setting-plugin-text-hint'), document.getElementById('plugin-text-on')?.getAttribute('aria-describedby'), document.activeElement?.id]; })()`),
+      [true, 'status', false, 'setting-plugin-text-info-card setting-plugin-text-notice', 'plugin-text-on']);
+    main.close();
+  } else console.log('pluginTextFlow: skipped in-process elsewhere=0 progress push on packaged run');
   await pictures('reading', [[860, 600]]);
   await a.quit();
   silent.close();
