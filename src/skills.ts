@@ -253,8 +253,9 @@ function anotherWay(disk: SkillDisk, managed: HarnessId[], item: Wanted, tool: H
   const there = toolName(source);
   const reallyThere = wantedIn(item, source) && !disk.locked.has(source) && !disk.cannotTake(item, source) && !anotherWay(disk, managed, item, source, depth + 1);
   // Said as it is now: a copy there, or (a found skill, say) the folder it will be in once it is on there.
-  if (reallyThere) return { readsFrom: source, why: disk.byKey.get(item.key)?.[source] ? `${nameOf(tool)} reads ${there}’s copy, in ${there}’s skills folder.`
-    : `${nameOf(tool)} reads ${there}’s skills folder, so it gets the skill from there once it is on in ${there}.` };
+  if (reallyThere) return disk.byKey.get(item.key)?.[source]
+    ? { readsFrom: source, why: `${nameOf(tool)} reads ${there}’s copy, in ${there}’s skills folder.` }
+    : { why: `${nameOf(tool)} reads ${there}’s skills folder, so it gets the skill from there once it is on in ${there}.` };
   const left = !!disk.byKey.get(item.key)?.[source] && item.applied[source] === undefined;
   const leftThere = { why: `${nameOf(tool)} reads a copy in ${there}’s skills folder, which is not Central Knot’s.` };
   if (!wantedIn(item, source) && (left || unseenIn(disk, source, item.key))) return leftThere;

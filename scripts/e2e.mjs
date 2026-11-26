@@ -2749,7 +2749,10 @@ async function practiceFlow() {
   await sizeTo(a, 1728, 1117);
   same('docked at full screen, a closed row’s line is shortened only when it has no room', await a.all('.ov-row[data-key] .ov-name-about', 'e.scrollWidth <= e.clientWidth'), [true]);
   await fullSize(a);
-  check('its line says Off in Copilot CLI’s settings', /Off in Copilot CLI’s settings/.test(await a.text('.details') ?? ''), await a.text('.details'));
+  const mcpOffMark = rowPart('line-info', 'mcp', 'docs', 'copilot-cli');
+  same('its line says Off in Copilot CLI’s settings with a card saying Central Knot leaves the switch and how to turn it back on',
+    await a.run(`[document.querySelector('#${mcpOffMark}')?.closest('.details-tool-line')?.innerText?.trim() ?? '', document.querySelector('#${mcpOffMark}-card')?.textContent?.trim() ?? '']`),
+    ['Off in Copilot CLI’s settings · Own settings kept: tools', 'Copilot CLI doesn’t start it. Central Knot leaves that switch as it is, so it is still off there after Off and On. Turn it back on in that tool’s own settings.']);
   const codexBefore = readNow(mcpFiles[2]);
   await a.click(`#${rowPart('enable', 'mcp', 'docs', 'codex-cli')}`);
   same('its Codex switch keeps it out of Codex at once', [readNow(mcpFiles[2]).includes('[mcp_servers.docs]'), /docs is kept out of Codex/.test(await a.text('.band-done') ?? '')], [false, true]);
@@ -2855,7 +2858,7 @@ async function practiceFlow() {
   const notesBefore = notesFiles.map(file => readFileSync(file, 'utf8'));
   await a.click(`#${rowPart('open', 'agents', 'release-notes')}`);
   await a.click(`#${rowPart('delete', 'agents', 'release-notes')}`);
-  same('armed, it says what Delete removes and how many days History can restore it', (await a.text(`#${rowPart('delete-note', 'agents', 'release-notes')}`) ?? '').trim(), 'Leaves every tool and Central Knot. History can restore it for 30 days.');
+  same('armed, it says what Delete removes and how many days History can restore it', (await a.text(`#${rowPart('delete-note', 'agents', 'release-notes')}`) ?? '').trim(), 'Removed from every tool and Central Knot. History can restore it for 30 days.');
   await a.click(`#${rowPart('delete-confirm', 'agents', 'release-notes')}`);
   same('Delete from Central Knot takes the agent out of every harness and off the page', [notesFiles.map(file => existsSync(file)), (await rowKeys(a, 'agents')).includes('release-notes')], [[false, false, false], false]);
   await a.click('#nav-history');
@@ -4270,6 +4273,7 @@ async function practiceFlow() {
   const standupRowSel = `.ov-row[data-key="${rowPart('', 'skills', 'standup')}"]`;
   const standupClosedAbout = await a.exists(`${standupRowSel} .ov-name-about`);
   const standupMarkTitleBefore = await a.run(`document.querySelector('#${rowPart('cell', 'skills', 'standup', 'claude-cli')}')?.title ?? ''`);
+  const standupMarksLabelBefore = await a.run(`document.querySelector('${standupRowSel} .tool-marks')?.getAttribute('aria-label') ?? ''`);
   await opened('standup');
   const standupOpenState = await a.run(`(() => {
     const row = document.querySelector(${JSON.stringify(standupRowSel)});
@@ -4281,6 +4285,7 @@ async function practiceFlow() {
       hasWholeDesc: !!document.querySelector('.details .details-description-whole'),
       hasCurrentLine: lines.some(line => /Has the current version/i.test(line)),
       markTitle: document.querySelector('#${rowPart('cell', 'skills', 'standup', 'claude-cli')}')?.title ?? '',
+      marksLabelHasCurrent: /Claude Code: has the current version\./.test(row?.querySelector('.tool-marks')?.getAttribute('aria-label') ?? ''),
       inEachToolMarks: document.querySelectorAll('.details .details-tools-head .info-mark').length,
       inEachToolLabel: mark?.getAttribute('aria-label') ?? null,
       inEachToolCard: card?.textContent?.trim() ?? null,
@@ -4297,20 +4302,21 @@ async function practiceFlow() {
   await a.click(`#${rowPart('delete-cancel', 'skills', 'standup')}`);
   await opened('standup', false);
   const standupClosedAgain = await a.exists(`${standupRowSel} .ov-name-about`);
-  same('opened standup row says each thing once: no row description while open (back on close), no current-version filler (mark title keeps it), one In each tool card, no versions or delete offer note, armed Delete names 7 days',
-    [standupClosedAbout, standupMarkTitleBefore, standupOpenState, sharedCardOpens, armedSevenDays, standupClosedAgain],
-    [true, 'Claude Code: has the current version.', {
+  same('opened standup row says each thing once: no row description while open (back on close), no current-version filler (mark title and aria-label keep it), one In each tool card, no versions or delete offer note, armed Delete names 7 days',
+    [standupClosedAbout, standupMarkTitleBefore, /Claude Code: has the current version\./.test(standupMarksLabelBefore), standupOpenState, sharedCardOpens, armedSevenDays, standupClosedAgain],
+    [true, 'Claude Code: has the current version.', true, {
       aboutOpen: false,
       hasWholeDesc: true,
       hasCurrentLine: false,
       markTitle: 'Claude Code: has the current version.',
+      marksLabelHasCurrent: true,
       inEachToolMarks: 1,
       inEachToolLabel: 'About In each tool',
       inEachToolCard: 'Each tool it is on in gets the same folder: files as they are, scripts runnable.',
       versionsNote: false,
       deleteLabel: 'Delete…',
       deleteOfferNote: false,
-    }, true, 'Leaves every tool and Central Knot. History can restore it for 7 days.', true]);
+    }, true, 'Removed from every tool and Central Knot. History can restore it for 7 days.', true]);
   // Own-copy line stays whole, and an Off row's Codex switch still works.
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
   const copilotOwnStandup = join(practice, '.copilot/skills/standup');

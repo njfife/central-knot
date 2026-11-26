@@ -2727,11 +2727,12 @@ function rowPluginFacts(skill: ItemRow, tool: Tool) {
 }
 
 /**
- * One tool's line in an item's details: what it has, in a sentence (with any reload step from the active click result), and its own
- * controls, each applied at once: a plugin's line where it is one (rowPluginFacts); else the item's switch for that harness and what
- * its kind adds there (libraryHarnessSwitch), or nothing where the tool has it through a plugin whose copy isn't read.
+ * One tool's line in an item's details: its short labels and optional `(?)` cards from `libraryrow.ts detailLine` (or a plugin's
+ * line from `pluginLine`, plus any reload step from the active click result), and its own controls, each applied at once: the item's
+ * switch for that harness and what its kind adds there (libraryHarnessSwitch), or nothing where the tool has it through a plugin
+ * whose copy isn't read.
  */
-function harnessLine(t: Table, skill: ItemRow, tool: Tool): { text?: string; parts?: DetailPart[]; control: HTMLElement | null; result: HTMLElement | null } {
+function detailToolLine(t: Table, skill: ItemRow, tool: Tool): { text?: string; parts?: DetailPart[]; control: HTMLElement | null; result: HTMLElement | null } {
   const plugged = rowPluginFacts(skill, tool), through = plugged?.through;
   const reload = state.outcome && outcomeShown(state.outcome, useTableShown())
     ? rowReload(state.outcome.reloads, toItemKind(skill.kind), through ? itemKey(through.name) : skill.key, tool as HarnessId, through ? `${through.install.plugin}@${through.install.marketName}` : undefined, toolWays()) : '';
@@ -2853,7 +2854,7 @@ function details(t: Table, skill: ItemRow, placement: Placement = 'row'): HTMLEl
       part.card ? infoMark(elId('line-info', skill, tool), part.text, part.card) : null,
     ]));
   const toolRow = (tool: Tool) => {
-    const line = harnessLine(t, skill, tool);
+    const line = detailToolLine(t, skill, tool);
     return h('div.details-tool', {},
       h('div.details-tool-head', {},
         h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),

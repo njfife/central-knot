@@ -432,11 +432,29 @@ test('A found skill only Codex has: OpenCode’s line says what is true before i
   const box = await sandbox(['claude-cli', 'codex-cli', 'opencode-cli']);
   try {
     await put(box, 'codex-cli');
-    const before = (await seen(box)).fact!.anotherWay?.['opencode-cli'] ?? '';
-    assert.doesNotMatch(before, /reads Claude Code’s copy/);
-    assert.match(before, /^OpenCode reads Claude Code’s skills folder, so it gets the skill from there once it is on in Claude Code\.$/);
+    const before = await seen(box);
+    const beforeWhy = before.fact!.anotherWay?.['opencode-cli'] ?? '';
+    assert.doesNotMatch(beforeWhy, /reads Claude Code’s copy/);
+    assert.match(beforeWhy, /^OpenCode reads Claude Code’s skills folder, so it gets the skill from there once it is on in Claude Code\.$/);
+    assert.equal(before.fact!.readsFrom?.['opencode-cli'], undefined);
+    assert.deepEqual(say.detailLine(before.row, before.item, 'opencode-cli', 'OpenCode'), [{
+      text: 'Not in Central Knot · OpenCode reads Claude Code’s skills folder, so it gets the skill from there once it is on in Claude Code.',
+    }]);
     await turnOn(box);
-    assert.match((await seen(box)).fact!.anotherWay?.['opencode-cli'] ?? '', /^OpenCode reads Claude Code’s copy, in Claude Code’s skills folder\./);
+    const on = await seen(box);
+    assert.match(on.fact!.anotherWay?.['opencode-cli'] ?? '', /^OpenCode reads Claude Code’s copy, in Claude Code’s skills folder\./);
+    assert.equal(on.fact!.readsFrom?.['opencode-cli'], 'claude-cli');
+    assert.deepEqual(say.detailLine(on.row, on.item, 'opencode-cli', 'OpenCode'), [{
+      text: 'Reads Claude Code’s copy',
+      card: 'OpenCode reads this skill from Claude Code’s folder; Central Knot writes nothing to OpenCode meanwhile.',
+    }]);
+    // Claude Code's copy deleted by hand with no sync yet: OpenCode does not hold a live copy from Claude Code, so no short label.
+    await rm(folderOf(box, 'claude-cli'), { recursive: true });
+    const afterDelete = await seen(box);
+    assert.equal(afterDelete.fact!.readsFrom?.['opencode-cli'], undefined);
+    assert.deepEqual(say.detailLine(afterDelete.row, afterDelete.item, 'opencode-cli', 'OpenCode'), [{
+      text: 'OpenCode reads Claude Code’s skills folder, so it gets the skill from there once it is on in Claude Code. Nothing of Central Knot’s goes there while it does.',
+    }]);
   } finally { await box.cleanup(); }
 });
 
