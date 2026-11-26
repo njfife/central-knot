@@ -53,9 +53,14 @@ test('A tool’s box: ticked where the plugin is; off before the click where its
   // Unticked: kept out, said on its line. A tool whose own add refused the marketplace says so on its line.
   assert.deepEqual(box(on(['copilot-cli']), 'copilot-cli'), { ticked: false, line: 'Kept out: tick to put it back' });
   assert.deepEqual(box({ ...on(), refusedBy: { 'copilot-cli': 'Copilot CLI refused this marketplace: “Invalid marketplace.json”' } }, 'copilot-cli').line, 'Copilot CLI refused this marketplace');
-  // On, kept out of Claude Code, which has its copy again: the mark `stays`, the box ticked and free, and its untick takes the copy out (row 9).
+  // On, kept out of Claude Code, which has its copy on again: the mark `stays`, the box ticked and free, and its untick turns the copy off there, kept installed (row 9).
   const keptOut: MarketplaceView = on(['claude-cli']), owed = owedTo({ on: true, except: ['claude-cli'] }, 'claude-cli', toolNow(view, keptOut, 'p', 'claude-cli', undefined, false), view.tools);
-  assert.deepEqual([toolMark(view, keptOut, 'p', 'claude-cli', owed).mark, box(keptOut, 'claude-cli'), clickRuns('keep-out', owed)], ['stays', { ticked: true }, 'uninstall']);
+  assert.deepEqual([toolMark(view, keptOut, 'p', 'claude-cli', owed).mark, box(keptOut, 'claude-cli'), clickRuns('keep-out', owed)], ['stays', { ticked: true }, 'plugin-off']);
+  // Turned off there and kept installed: the mark `kept-off`, the box unticked, and a tick turns the same copy on (row 3).
+  const offThere: MarketplaceView = { ...keptOut, states: { p: { 'claude-cli': { state: 'installed', path: '/x', version: '1.0.0', off: true } } } };
+  const now = toolNow(view, offThere, 'p', 'claude-cli', undefined, false);
+  assert.deepEqual([toolMark(view, offThere, 'p', 'claude-cli', owedTo({ on: true, except: ['claude-cli'] }, 'claude-cli', now, view.tools)), box(offThere, 'claude-cli'), clickRuns('let-in', owedTo({ on: true, except: [] }, 'claude-cli', now, view.tools))],
+    [{ mark: 'kept-off', words: 'Off in Claude Code: still installed at 1.0.0, with its data and settings.' }, { ticked: false }, 'plugin-on']);
 });
 
 test('Only a known version that names another release is a difference', () => {
@@ -83,7 +88,7 @@ test('Update is offered only where a tool’s copy is older and can be changed h
   assert.deepEqual(updateTools(view, copies, 'p', undefined), [], 'nothing to compare with');
   // Claude Code's copy from the Anthropic Directory is installed, and left to Claude Code: behind or not, no Update, no Uninstall.
   const directory = at({ 'claude-cli': { state: 'installed', path: '/x', version: '1.9.0', directory: 'p@anthropic-plugin-directory' } });
-  assert.deepEqual([updateTools(view, directory, 'p', '2.0.0'), toolNow(view, directory, 'p', 'claude-cli', undefined, false)], [[], { has: 'whole', route: 'whole', stuck: FROM_DIRECTORY }]);
+  assert.deepEqual([updateTools(view, directory, 'p', '2.0.0'), toolNow(view, directory, 'p', 'claude-cli', undefined, false)], [[], { has: 'whole', route: 'whole', stuck: FROM_DIRECTORY, keeps: true }]);
   assert.equal(cantUninstall(view, directory, 'p', 'claude-cli'), FROM_DIRECTORY);
   assert.deepEqual(copiesToCompare(view, directory), [], 'its files aren’t compared with the marketplace’s');
 });
@@ -174,6 +179,9 @@ test('A plugin every tool that can take it has comes first, one some tool has ne
   assert.equal(pluginPlace(view, at({}), 'p'), 2);
   assert.equal(pluginPlace(view, at({ 'claude-cli': here }), 'p'), 1);
   assert.equal(pluginPlace(view, at({ 'claude-cli': here, 'copilot-cli': here, 'codex-cli': here }), 'p'), 0);
+  // Off, its copy kept installed and off in Claude Code: no tool has it in use. Off there by his own switch while On: still in use.
+  const switched = (on: boolean) => ({ switches: { p: { entry: { on, except: [] }, tools: {} } } });
+  assert.deepEqual([pluginPlace(view, at({ 'claude-cli': { ...here, off: true } }, switched(false)), 'p'), pluginPlace(view, at({ 'claude-cli': { ...here, off: true } }, switched(true)), 'p')], [2, 1]);
   // A tool that can't take it (Copilot refuses the marketplace, or holds another of this name) doesn't keep it from the top.
   assert.equal(pluginPlace(view, at({ 'claude-cli': here, 'codex-cli': here }, { copilotRefuses: 'Copilot refuses npm.' }), 'p'), 0);
   assert.equal(pluginPlace(view, at({ 'claude-cli': here, 'copilot-cli': here, 'codex-cli': { state: 'held', reason: 'other' } }), 'p'), 0);

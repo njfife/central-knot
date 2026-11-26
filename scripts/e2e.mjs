@@ -3253,10 +3253,10 @@ async function practiceFlow() {
   check('the click updates it at once, read back from Claude Code’s record, says it can’t be undone, and offers no Undo', /Installed · 2\.0\.0/.test(await a.text('.plugin-panel') ?? '') && !/Marketplace has/.test(await a.text('.plugin-panel') ?? '')
     && /updated to 2\.0\.0 in Claude Code, which can’t be undone/i.test(await a.run(`document.querySelector('#announcement')?.dataset.text ?? ''`)) && !(await a.exists('#plugins-undo')), [await a.text('.plugin-panel'), await a.run(`document.querySelector('#announcement')?.dataset.text`), await a.text('.bands')]);
   // The copy changes at the same version (2.0.0): once read again, the page says so and offers Update. Claude Code's own
-  // update keeps its copy ("already at the latest"), so Update uninstalls and installs it again, and compares after.
+  // update keeps its copy ("already at the latest"), so Update uninstalls it (keeping its data: --keep-data) and installs it again, and compares after.
   const triage = join(newCopy, 'skills/triage/SKILL.md'), record = readFileSync(join(practice, '.claude/plugins/installed_plugins.json'), 'utf8');
   writeFileSync(triage, readFileSync(triage, 'utf8') + '\nA line added by hand.\n');
-  writeFileSync(claudeStub, `#!/bin/sh\ncase "$*" in\n  "plugin update issue-tracker@ck-test-market --scope user") echo 'issue-tracker is already at the latest version (2.0.0).' ;;\n  "plugin uninstall issue-tracker@ck-test-market --scope user") printf '{"version":2,"plugins":{}}' > "$HOME/.claude/plugins/installed_plugins.json" ;;\n  "plugin install issue-tracker@ck-test-market --scope user") cp '${join(market, 'plugins/issue-tracker/skills/triage/SKILL.md')}' '${triage}' && printf '%s' '${record}' > "$HOME/.claude/plugins/installed_plugins.json" ;;\n  *) exit 9 ;;\nesac\n`);
+  writeFileSync(claudeStub, `#!/bin/sh\ncase "$*" in\n  "plugin update issue-tracker@ck-test-market --scope user") echo 'issue-tracker is already at the latest version (2.0.0).' ;;\n  "plugin uninstall issue-tracker@ck-test-market --scope user --keep-data") printf '{"version":2,"plugins":{}}' > "$HOME/.claude/plugins/installed_plugins.json" ;;\n  "plugin install issue-tracker@ck-test-market --scope user") cp '${join(market, 'plugins/issue-tracker/skills/triage/SKILL.md')}' '${triage}' && printf '%s' '${record}' > "$HOME/.claude/plugins/installed_plugins.json" ;;\n  *) exit 9 ;;\nesac\n`);
   await openKind(a, 'skills');
   await a.click('#nav-plugins');
   if (!(await a.exists('#pfile-0-skills-triage'))) await a.click('#popen-0-issue-tracker');
@@ -7519,6 +7519,9 @@ async function pluginSwitchFlow() {
   const piSettings = join(home, '.pi/agent/settings.json'), hisList = ['!*', '+skills/other-skill/SKILL.md'], piSkills = () => jsonOrNothing(piSettings)?.skills;
   writeFileSync(piSettings, `${JSON.stringify({ skills: hisList }, null, 2)}\n`);
   const copy = join(home, '.claude/plugins/cache/ck-test-market/issue-tracker/2.0.0'), triage = join(market, 'plugins/issue-tracker/skills/triage/SKILL.md');
+  // Claude Code's stand-in does to its files what its own commands do (measured on 2.1.332): disable and enable write enabledPlugins;
+  // uninstall deletes the plugin's saved options (pluginConfigs) and its enabledPlugins entry, and its data folder unless --keep-data.
+  const settingsEdit = change => `const fs = require('fs'), f = process.env.HOME + '/.claude/settings.json', id = 'issue-tracker@ck-test-market', now = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {}; ${change} fs.writeFileSync(f, JSON.stringify(now))`;
   mkdirSync(join(tools, '.local/bin'), { recursive: true });
   writeFileSync(join(tools, '.local/bin/claude'), `#!/bin/sh
 [ "$1" = "--version" ] && echo "2.1.322 (Claude Code)" && exit 0
@@ -7526,7 +7529,10 @@ echo "$*" >> "$HOME/claude-calls.txt"
 case "$*" in
   "plugin marketplace add ${market}") mkdir -p "$HOME/.claude/plugins" && printf '{"ck-test-market":{"source":{"source":"git","url":"${market}"}}}' > "$HOME/.claude/plugins/known_marketplaces.json" ;;
   "plugin install issue-tracker@ck-test-market --scope user") mkdir -p '${copy}/skills/triage' && cp '${triage}' '${copy}/skills/triage/' && printf '{"version":2,"plugins":{"issue-tracker@ck-test-market":[{"scope":"user","installPath":"${copy}","version":"2.0.0"}]}}' > "$HOME/.claude/plugins/installed_plugins.json" ;;
-  "plugin uninstall issue-tracker@ck-test-market --scope user") printf '{"version":2,"plugins":{}}' > "$HOME/.claude/plugins/installed_plugins.json" ;;
+  "plugin uninstall issue-tracker@ck-test-market --scope user"*) printf '{"version":2,"plugins":{}}' > "$HOME/.claude/plugins/installed_plugins.json"; [ "$6" = "--keep-data" ] || rm -rf "$HOME/.claude/plugins/data/issue-tracker-ck-test-market"
+    "${process.execPath}" -e "${settingsEdit('delete now.pluginConfigs?.[id]; delete now.enabledPlugins?.[id];')}" ;;
+  "plugin disable issue-tracker@ck-test-market --scope user") "${process.execPath}" -e "${settingsEdit('now.enabledPlugins = { ...now.enabledPlugins, [id]: false };')}" ;;
+  "plugin enable issue-tracker@ck-test-market --scope user") "${process.execPath}" -e "${settingsEdit('now.enabledPlugins = { ...now.enabledPlugins, [id]: true };')}" ;;
   "plugin install starter-skills@ck-test-market --scope user") [ -f "$HOME/slow" ] && sleep 3; "${process.execPath}" -e "const fs = require('fs'), file = '$HOME/.claude/plugins/installed_plugins.json', now = JSON.parse(fs.readFileSync(file, 'utf8')); now.plugins['starter-skills@ck-test-market'] = [{ scope: 'user', installPath: '${market}', version: '1.0.0' }]; fs.writeFileSync(file, JSON.stringify(now))" ;;
   *) exit 9 ;;
 esac
@@ -7725,15 +7731,63 @@ esac
   same('the list’s switch is partial too', await switchIs('#pswitch-0-issue-tracker'), 'true partial');
   await pictures('plugin-switch-list-partial');
   await fitsAtMinimum(a, 'the plugin list with a partial switch');
-  // Off: out of every tool; the result says what its Undo can't put back.
-  await a.click('#pswitch-0-issue-tracker');
+  // Off, from its page: Claude Code's own switch turns it off there and keeps it installed; Pi stays kept out. What an uninstall
+  // would lose (its data folder, the options saved for it, its install record) is the same, byte for byte, after the click and
+  // after its Undo.
+  const id = 'issue-tracker@ck-test-market', settingsPath = join(home, '.claude/settings.json');
+  mkdirSync(join(home, '.claude/plugins/data/issue-tracker-ck-test-market'), { recursive: true });
+  writeFileSync(join(home, '.claude/plugins/data/issue-tracker-ck-test-market/state.log'), 'ran 3 times\n');
+  writeFileSync(settingsPath, JSON.stringify({ ...jsonOrNothing(settingsPath), pluginConfigs: { [id]: { endpoint: 'https://issues.example.test' } } }));
+  const kept = () => ({ files: Object.entries(treeOf(join(home, '.claude/plugins'))).filter(([path]) => /^(data\/|installed_plugins\.json$)/.test(path.replaceAll('\\', '/'))).sort(), options: jsonOrNothing(settingsPath)?.pluginConfigs?.[id] });
+  const keptBefore = kept();
+  /** The theme settled: every colour change that ends has ended. */
+  const themeSettled = () => a.run(`Promise.all(document.getAnimations().filter(each => each.effect?.getTiming().iterations !== Infinity).map(each => each.finished)).then(() => true)`);
+  /** With --shots: the plugin's page as it is, at 860 with the sidebar open and at 1316, light and dark, each once its theme has settled. */
+  const keptShots = async name => {
+    if (!shots) return;
+    for (const [width, height] of [SMALLEST, [1316, 819]]) {
+      await sizeTo(a, width, height);
+      if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+      for (const look of ['light', 'dark']) {
+        await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+        await themeSettled();
+        await a.shot(`${name}-${width}-${look}`);
+      }
+    }
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+    await fullSize(a);
+  };
+  await a.click('#popen-0-issue-tracker');
+  for (let tries = 0; tries < 50 && !(await a.exists('#pswitch-page-0-issue-tracker')); tries++) await wait(100);
+  check('Claude Code’s box says an untick turns it off there and keeps it', /Click to turn issue-tracker off in Claude Code, kept installed: it stays off until you tick it again\. Undo turns it on again\./.test(await a.run(`document.querySelector('${box('claude-cli')}').title`) ?? ''),
+    await a.run(`document.querySelector('${box('claude-cli')}').title`));
+  await a.click('#pswitch-page-0-issue-tracker');
   await done();
-  same('Off uninstalls it from Claude Code; Pi stays kept out; the record is Off', [installed(), calls().at(-1), entry()?.on, entry()?.except, await marks()], [false, 'plugin uninstall issue-tracker@ck-test-market --scope user', false, ['pi-cli'], ['absent', 'absent']]);
-  check('its result says Undo installs the marketplace’s copy as it is now', /uninstalled from Claude Code\..*Undo installs the marketplace’s copy as it is now\./.test(await a.text('#plugins-result') ?? ''), await a.text('#plugins-result'));
+  same('Off turns it off in Claude Code with its own switch, keeps it installed and the record Off; Pi stays kept out', [installed(), calls().at(-1), entry()?.on, entry()?.except, await boxIs('claude-cli'), await a.text('.plugin-tool[data-tool="claude-cli"] .plugin-tool-state')],
+    [true, 'plugin disable issue-tracker@ck-test-market --scope user', false, ['pi-cli'], ['false', false, 'kept-off'], 'Off, kept installed']);
+  same('Off loses nothing: its data folder, saved options and install record are as they were', kept(), keptBefore);
+  const keptLine = '.plugin-tool[data-tool="claude-cli"] .plugin-tool-state';
+  same('the hover on “Off, kept installed” says what is kept', await a.run(`document.querySelector('${keptLine}').title`), 'Off in Claude Code: still installed at 2.0.0, with its data and settings.');
+  check('its result says it was turned off, and nothing Undo can’t put back', /^Turned off in Claude Code$/.test(await a.text('.plugin-panel .plugin-click') ?? '') && !/Undo installs/.test(await a.text('#plugins-result') ?? ''),
+    [await a.text('.plugin-panel .plugin-click'), await a.text('#plugins-result')]);
+  await keptShots('plugin-keep-off');
+  if (shots) {
+    // The pointer on “Off, kept installed”, at 860, light (its tooltip, the words just checked, doesn't show in a picture).
+    await sizeTo(a, ...SMALLEST);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    const [x, y] = await a.run(`(() => { const r = document.querySelector('${keptLine}').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
+    await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+    await themeSettled();
+    await a.shot('plugin-keep-kept-hover-860-light');
+    await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 });
+    await fullSize(a);
+  }
   await pictures('plugin-switch-off-result');
   await a.click('#plugins-undo');
   await done();
-  same('Undo installs it again where it was, and the record is On, kept out of Pi; the focus is on its switch as Undo goes', [installed(), calls().at(-1), entry()?.on, entry()?.except, await switchIs('#pswitch-0-issue-tracker'), await a.run(`document.activeElement?.id`)], [true, 'plugin install issue-tracker@ck-test-market --scope user', true, ['pi-cli'], 'true partial', 'pswitch-0-issue-tracker']);
+  same('Undo turns the same copy on again where it was, and the record is On, kept out of Pi; the focus is on its switch as Undo goes', [installed(), calls().at(-1), entry()?.on, entry()?.except, await switchIs('#pswitch-page-0-issue-tracker'), await a.run(`document.activeElement?.id`)], [true, 'plugin enable issue-tracker@ck-test-market --scope user', true, ['pi-cli'], 'true partial', 'pswitch-page-0-issue-tracker']);
+  same('after the Undo too, nothing is lost', kept(), keptBefore);
+  await a.click('#plugin-back');
   // Taken out of Claude Code with its own command: nothing puts it back by itself; its box is empty, and a tick does.
   writeFileSync(join(home, '.claude/plugins/installed_plugins.json'), '{"version":2,"plugins":{}}');
   const before = calls().length;
@@ -7746,23 +7800,35 @@ esac
   await done();
   same('a tick puts it back', [installed(), await boxIs('claude-cli')], [true, ['true', false, 'installed']]);
   // Unticked in Claude Code, the only tool that has it (Pi is kept out): the plugin's Off, kept out of Pi as before, so its On
-  // brings it back to Claude Code. Then put back there with its own command: its box is ticked, and unticking takes it out.
+  // brings it back to Claude Code. Then turned on there with its own command: its box is ticked, and unticking turns it off.
+  writeFileSync(settingsPath, JSON.stringify({ ...jsonOrNothing(settingsPath), pluginConfigs: { [id]: { endpoint: 'https://issues.example.test' } } }));
+  const untickBefore = kept();
   await a.click(box('claude-cli'));
   await done();
-  same('unticking the only tool that has it turns the plugin Off, its except as it was', [installed(), entry()?.on, entry()?.except, await switchIs('#pswitch-page-0-issue-tracker')], [false, false, ['pi-cli'], 'false']);
-  writeFileSync(join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'issue-tracker@ck-test-market': [{ scope: 'user', installPath: copy, version: '2.0.0' }] } }));
+  same('unticking the only tool that has it turns it off there, kept installed, and the plugin Off, its except as it was', [installed(), calls().at(-1), entry()?.on, entry()?.except, await switchIs('#pswitch-page-0-issue-tracker'), await boxIs('claude-cli')],
+    [true, 'plugin disable issue-tracker@ck-test-market --scope user', false, ['pi-cli'], 'false', ['false', false, 'kept-off']]);
+  same('the untick loses nothing either', kept(), untickBefore);
+  check('the run’s header says Claude Code once, as the untick, its last click there, left it', /^Turned off in Claude Code\.\s*$/.test(await a.text('#plugins-result .toolbar-result-text') ?? ''), await a.text('#plugins-result'));
+  await keptShots('plugin-keep-untick');
+  await a.click('#plugins-undo');
+  await done();
+  same('its Undo turns the same copy on again, ticked, nothing lost', [calls().at(-1), await boxIs('claude-cli'), kept()], ['plugin enable issue-tracker@ck-test-market --scope user', ['true', false, 'installed'], untickBefore]);
+  await a.click(box('claude-cli'));
+  await done();
+  // Then turned on there with Claude Code's own command: Off, but on in Claude Code, its box ticked, and unticking turns it off.
+  writeFileSync(settingsPath, JSON.stringify({ ...jsonOrNothing(settingsPath), enabledPlugins: { [id]: true } }));
   await a.click('#header-refresh');
   for (let tries = 0; tries < 50 && (await boxIs('claude-cli'))?.[2] !== 'stays'; tries++) await wait(100);
   same('an Off plugin a tool has again keeps a ticked box there', await boxIs('claude-cli'), ['true', false, 'stays']);
   await pictures('plugin-switch-take-out');
   await a.click(box('claude-cli'));
   await done();
-  same('unticking takes it out there, and records nothing: the plugin is Off', [installed(), calls().at(-1), entry()?.on, entry()?.except], [false, 'plugin uninstall issue-tracker@ck-test-market --scope user', false, ['pi-cli']]);
+  same('unticking turns it off there, kept installed, and records nothing: the plugin is Off', [installed(), calls().at(-1), entry()?.on, entry()?.except], [true, 'plugin disable issue-tracker@ck-test-market --scope user', false, ['pi-cli']]);
   // Off, one box ticked: On in Claude Code alone, every other tool kept out, Pi too.
   await a.click(box('claude-cli'));
   await done();
-  same('one tick on an Off plugin turns it On in that tool alone', [installed(), entry()?.on, entry()?.except, inPi(), await boxIs('pi-cli'), await switchIs('#pswitch-page-0-issue-tracker')],
-    [true, true, ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'], [true, false], ['false', false, 'absent'], 'true partial']);
+  same('one tick on an Off plugin turns its kept copy on in that tool alone', [installed(), calls().at(-1), entry()?.on, entry()?.except, inPi(), await boxIs('pi-cli'), await switchIs('#pswitch-page-0-issue-tracker')],
+    [true, 'plugin enable issue-tracker@ck-test-market --scope user', true, ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'], [true, false], ['false', false, 'absent'], 'true partial']);
   // A plugin installed in Claude Code with its own command and no record here: its row offers Add.
   const helper = join(home, '.claude/plugins/cache/ck-test-market/release-helper/0.4.1');
   mkdirSync(join(helper, 'commands'), { recursive: true });
@@ -8120,6 +8186,7 @@ if (verb === 'marketplace') fs.writeFileSync(dir + '/known_marketplaces.json', J
 else if (/^plug-(07|13|14|16)@/.test(id ?? '') || fs.existsSync(process.env.HOME + '/fail-' + (id ?? '').split('@')[0])) { console.error('Error: failed to install plugin ' + id + ': the marketplace entry points at a folder whose plugin manifest could not be parsed (unexpected token at line 3, column 14); fix the manifest and try again.'); process.exit(1); }
 else if (verb === 'install') now.plugins[id] = [{ scope: 'user', installPath: ${JSON.stringify(market)} + '/plugins/' + id.split('@')[0], version: '1.0.0' }];
 else if (verb === 'uninstall') delete now.plugins[id];
+else if ((verb === 'disable' || verb === 'enable') && !id.startsWith('plug-03@')) { const f = process.env.HOME + '/.claude/settings.json', s = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {}; fs.writeFileSync(f, JSON.stringify({ ...s, enabledPlugins: { ...s.enabledPlugins, [id]: verb === 'enable' } })); }
 else process.exit(9);
 fs.writeFileSync(record, JSON.stringify(now));
 `, { mode: 0o755 });
@@ -8153,7 +8220,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   /**
    * Holds the page's run of clicks open, however far apart the clicks after it land: a click on plug-03's skill on Claude Code's
    * Skills tab (a place of its own, so not a click of the Library's run), whose command waits (hold), so each click made after it
-   * waits its turn behind it. Let go, it fails (the stand-in has no disable) and changes nothing. It ends on the Library's MCP
+   * waits its turn behind it. Let go, it fails (the stand-in has no disable for plug-03) and changes nothing. It ends on the Library's MCP
    * servers, the list at its top.
    */
   const holdRun = async () => {
@@ -8527,12 +8594,13 @@ fs.writeFileSync(record, JSON.stringify(now));
   const stillAtTop = await placesNow(list, 'data-plugin');
   same('at the top of the list, a failure that goes from the header moves no row, nor does the click after it', [bandBefore, await a.exists('.plugin-problems'), ['plug-06', 'plug-09'].map(name => afterClose.at[name]), ['plug-06', 'plug-09'].map(name => stillAtTop.at[name])],
     [true, false, ['plug-06', 'plug-09'].map(name => atItsTop.at[name]), ['plug-06', 'plug-09'].map(name => atItsTop.at[name])]);
-  // Three failing plugins (plug-04, -05, -08) and one that installs (plug-10), in one list (each takes a second): one ×, the first
-  // reason and Show all 3 reasons; shown, each reason whole; × closes it all.
-  const failNow = ['plug-04', 'plug-05', 'plug-08'];
+  // Three failing plugins (plug-04, -05, -17) and one that installs (plug-10), in one list (each takes a second): one ×, the first
+  // reason and Show all 3 reasons; shown, each reason whole; × closes it all. (Not plug-08: Central Knot can't read its copy, empty,
+  // so its Off above left that copy where it is, and its On now finds it there: pluginstatus.ts cantUninstall.)
+  const failNow = ['plug-04', 'plug-05', 'plug-17'];
   for (const name of failNow) writeFileSync(join(home, `fail-${name}`), '');
   await putAt(list, '[data-plugin="plug-04"]', 20);
-  const fourPoints = []; for (const name of ['plug-04', 'plug-05', 'plug-08', 'plug-10']) fourPoints.push(await middleOf(`#pswitch-0-${name}`));
+  const fourPoints = []; for (const name of ['plug-04', 'plug-05', 'plug-17', 'plug-10']) fourPoints.push(await middleOf(`#pswitch-0-${name}`));
   for (const point of fourPoints) { await clickAt(point); await wait(150); }
   for (let tries = 0; tries < 150 && await a.exists('.plugin-click:not([data-click="ended"])'); tries++) await wait(100);
   await done();
@@ -8540,7 +8608,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   const plugReasons = () => a.run(`[...document.querySelectorAll('#header .problem-text')].map(text => [text, ...text.children].some(part => part.scrollWidth > part.clientWidth) ? 'cut' : 'whole')`);
   // (The run holds plug-06's click before them too, within its time: 3 of 5.)
   same('three failing plugins and one installed: the sentence says first what didn’t go through, then one ×, the first reason and Show all 3 reasons',
-    [/^3 of \d didn’t go through in every tool: plug-04, plug-05 and plug-08\./.test(await a.text('#plugins-result .toolbar-result-text') ?? ''), await a.run(`document.querySelectorAll('#header .band-dismiss').length`), (await plugReasons()).length, await a.text('#problems-show-all')],
+    [/^3 of \d didn’t go through in every tool: plug-04, plug-05 and plug-17\./.test(await a.text('#plugins-result .toolbar-result-text') ?? ''), await a.run(`document.querySelectorAll('#header .band-dismiss').length`), (await plugReasons()).length, await a.text('#problems-show-all')],
     [true, 1, 1, 'Show all 3 reasons']);
   // Folded, only the name gives way, and no more than its own width: what failed begins right after it.
   same('folded, what failed begins right after the plugin’s name, with no gap', await a.run(`(text => { const name = text.querySelector('.item-name'), range = document.createRange(); range.selectNodeContents(name); const next = name.nextElementSibling; if (!next) return null; const end = range.getBoundingClientRect().right; range.selectNodeContents(next); return Math.round(range.getBoundingClientRect().left - end); })(document.querySelector('#header .problem-text'))`), 0);
@@ -8581,7 +8649,8 @@ fs.writeFileSync(record, JSON.stringify(now));
   // A plugin's page and back, then Refresh: the list in its order again, installed first.
   // On another plugin's page while plug-11's refused result is still up, the header omits any empty "Last change: .".
   const inOrder = on => [...plugins.filter(name => on.includes(name)), ...plugins.filter(name => !on.includes(name))];
-  const installedNow = [...installedFirst.filter(name => name !== 'plug-06'), 'plug-01', 'plug-10', 'plug-20', 'plug-22', ...fivePlugins[1], ...fiveWide[1]];
+  // plug-11 too: its Off kept it installed (turned off there), and the refused On just now left it so, On with its copy off.
+  const installedNow = [...installedFirst.filter(name => name !== 'plug-06'), 'plug-01', 'plug-10', 'plug-11', 'plug-20', 'plug-22', ...fivePlugins[1], ...fiveWide[1]];
   await a.click('#popen-0-plug-20');
   same('on another plugin’s page after a switch that changed nothing, the header has no empty “Last change: .”', await a.text('#plugins-result .toolbar-result-text'), '1 of 1 didn’t go through in every tool: plug-11. ');
   await a.click('#plugin-back');
@@ -14727,14 +14796,14 @@ async function sessionStripFlow() {
   for (const [cli, version] of [['copilot', 'GitHub Copilot CLI 1.0.113.'], ['codex', 'codex-cli 0.169.1'], ['pi', '1.5.2']]) writeFileSync(join(bin, cli), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`, { mode: 0o755 });
   mkdirSync(join(tools, '.opencode/bin'), { recursive: true });
   writeFileSync(join(tools, '.opencode/bin/opencode'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "1.19.6" && exit 0\nexit 9\n', { mode: 0o755 });
-  // Claude Code's stand-in takes release-helper out as its own uninstall does, and refuses anything else. Central Knot runs it
-  // with HOME set to the home it shows, so its log is there.
+  // Claude Code's stand-in turns release-helper off as its own disable does (enabledPlugins in its settings), and refuses anything
+  // else. Central Knot runs it with HOME set to the home it shows, so its log is there.
   const record = join(home, '.claude/plugins/installed_plugins.json');
   writeFileSync(join(bin, 'claude'), `#!/bin/sh
 [ "$1" = "--version" ] && echo "2.1.327 (Claude Code)" && exit 0
 echo "$*" >> "$HOME/claude-calls.txt"
-[ "$*" = "plugin uninstall release-helper@${name} --scope user" ] || exit 9
-"${process.execPath}" -e "const fs = require('fs'), now = JSON.parse(fs.readFileSync('${record}', 'utf8')); delete now.plugins['release-helper@${name}']; fs.writeFileSync('${record}', JSON.stringify(now))"
+[ "$*" = "plugin disable release-helper@${name} --scope user" ] || exit 9
+"${process.execPath}" -e "const fs = require('fs'), f = '${join(home, '.claude/settings.json')}', now = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {}; now.enabledPlugins = { ...now.enabledPlugins, 'release-helper@${name}': false }; fs.writeFileSync(f, JSON.stringify(now))"
 `, { mode: 0o755 });
   const long = `"\${CLAUDE_PLUGIN_ROOT}/hooks/start.sh" --with-a-very-long-option-name=${'x'.repeat(120)} --from /${'deep-folder/'.repeat(14)}notes.md`;
   const hooks = (event, matcher, ...commands) => JSON.stringify({ hooks: { [event]: [{ matcher, hooks: commands }], PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo checked' }] }] } });
@@ -15018,7 +15087,7 @@ echo "$*" >> "$HOME/claude-calls.txt"
   const back = async () => { await a.send('Input.dispatchKeyEvent', { type: 'keyDown', key: process.platform === 'darwin' ? '[' : 'ArrowLeft', modifiers: process.platform === 'darwin' ? 4 : 1 }); await a.send('Input.dispatchKeyEvent', { type: 'keyUp', key: process.platform === 'darwin' ? '[' : 'ArrowLeft', modifiers: process.platform === 'darwin' ? 4 : 1 }); await a.settle(); await showStrips(); };
   await back();
   same('Back returns to the Instructions page with the same strips', [await a.run(`document.querySelector('.nav-row[aria-current=page]')?.id`), (await names('claude-cli')).length, (await names('codex-cli')).length], ['nav-instructions', 15, 1]);
-  // Taken out of Claude Code on its page (its box unticked), it leaves Claude Code's strip; Codex's group stays.
+  // Turned off in Claude Code on its page (its box unticked; kept installed), it leaves Claude Code's strip; Codex's group stays.
   await a.click(byId(helperLink));
   // Its box for Claude Code, on its page (the marketplace is the first listed); drawn once the page has read the tools' copies.
   const box = '#pbox-0-release-helper-claude-cli';
@@ -15029,10 +15098,10 @@ echo "$*" >> "$HOME/claude-calls.txt"
   await a.click(box);
   for (let tries = 0; tries < 300 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100);
   await a.settle();
-  same('its own uninstall ran in Claude Code alone', readNow(join(home, 'claude-calls.txt')).trim().split('\n'), [`plugin uninstall release-helper@${name} --scope user`]);
+  same('its own disable ran in Claude Code alone', readNow(join(home, 'claude-calls.txt')).trim().split('\n'), [`plugin disable release-helper@${name} --scope user`]);
   await back();
   for (let tries = 0; tries < 100 && (await names('claude-cli')).includes('release-helper'); tries++) await wait(100);
-  same('taken out of Claude Code, its group leaves Claude Code’s strip, and Codex’s stays', [(await names('claude-cli')).includes('release-helper'), (await names('claude-cli')).length, await names('codex-cli')], [false, 14, ['release-helper']]);
+  same('turned off in Claude Code, its group leaves Claude Code’s strip, and Codex’s stays', [(await names('claude-cli')).includes('release-helper'), (await names('claude-cli')).length, await names('codex-cli')], [false, 14, ['release-helper']]);
   // A tool's own Instructions tab under Harnesses has the same strip.
   await a.click(byId('nav-harnesses'));
   await a.click(byId('harness-codex-cli'));
@@ -15057,10 +15126,10 @@ echo "$*" >> "$HOME/claude-calls.txt"
   same('on superpowers’ page, the line under its hooks that can add text names Codex as taking text from none, with no wait for trust', await a.run(`[...document.querySelectorAll('.plugin-group')]
     .find(group => group.querySelector('h4')?.textContent.startsWith('Hooks that can add text to sessions'))?.querySelector('.plugin-group-note')?.textContent`),
   'These run when a session starts or you send a prompt; what they add is known only when they run. In Codex, none of them adds text.');
-  // Nothing the strips offer wrote a file: in the tools' folders, only the uninstall's record changed.
+  // Nothing the strips offer wrote a file: in the tools' folders, only Claude Code's settings changed, where its disable turned it off.
   const after = toolFolders();
-  same('in the tools’ folders only the uninstall’s record changed', Object.entries(after).flatMap(([folder, files]) => Object.keys({ ...files, ...before[folder] }).filter(path => files[path] !== before[folder][path]).map(path => join(folder, path))),
-    ['.claude/plugins/installed_plugins.json']);
+  same('in the tools’ folders only the disable’s settings changed', Object.entries(after).flatMap(([folder, files]) => Object.keys({ ...files, ...before[folder] }).filter(path => files[path] !== before[folder][path]).map(path => join(folder, path))),
+    ['.claude/settings.json']);
   // A plugin whose only hooks run at Stop: In each tool says Copilot CLI and Codex aren't confirmed to run them, nothing of start-of-session hooks.
   await a.click('#plugin-back');
   await a.click('#popen-0-stop-hooks');

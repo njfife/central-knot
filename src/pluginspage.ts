@@ -325,6 +325,7 @@ function legend(view: PluginsView, entry: MarketplaceView) {
     [['parts-waiting'], 'Waits to be moved: parts from an earlier version', 'cell-waiting', 'clock'],
     [['not-brought'], 'Not brought by itself: off in a tool’s own settings', 'cell-not-brought', 'circle-off'],
     [['missing'], 'Not in that tool, though on: tick it on its page', 'cell-differs', 'circle-alert'],
+    [['kept-off'], 'Off there, kept installed', 'cell-not-brought', 'unplug'],
     [['stays'], 'Still there, though off or kept out', 'cell-differs.cell-on', 'circle-alert'],
     [['unknown', 'not-known'], 'Unknown: its record can’t be read', 'cell-differs', 'circle-question-mark'],
   ];

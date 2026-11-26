@@ -15,8 +15,11 @@ import { holds, takesPlugins } from './presence.ts';
 import { andList, toolNames as names } from './words.ts';
 import type { Components, HarnessId, InstalledPlugin, PartKind, PartRef } from './types.ts';
 
-/** What a line's button does: install the plugin, put its items in a tool that takes no plugins, uninstall a plugin Copilot CLI loads live, or turn the whole plugin there. */
-export type LineAct = 'install' | 'place' | 'remove' | 'plugin-on' | 'plugin-off';
+/**
+ * What a line's button does: install the plugin, put its items in a tool that takes no plugins, uninstall a plugin Copilot CLI loads
+ * live, turn the whole plugin there, or turn on a copy the plugins record keeps off there as its box ticked does (`let-in`).
+ */
+export type LineAct = 'install' | 'place' | 'remove' | 'plugin-on' | 'plugin-off' | 'let-in';
 export type LineControl = { control: 'switch' } | { control: 'button'; act: LineAct; label: string; sentence: string } | { control: 'none'; sentence: string };
 /** A tool's box on the plugin's page, as pluginstatus.ts boxOf answers it: ticked, and off with why. */
 export type LineBox = { ticked: boolean; off?: string };
@@ -42,7 +45,7 @@ export interface LineFacts {
   parts?: Components;
 }
 
-const LABELS: Record<LineAct, string> = { install: 'Install the plugin', place: 'Put its items here', remove: 'Remove the plugin', 'plugin-on': 'Turn the plugin on', 'plugin-off': 'Turn the plugin off' };
+const LABELS: Record<LineAct, string> = { install: 'Install the plugin', place: 'Put its items here', remove: 'Remove the plugin', 'plugin-on': 'Turn the plugin on', 'plugin-off': 'Turn the plugin off', 'let-in': 'Turn the plugin on' };
 const SWITCH: LineControl = { control: 'switch' };
 const button = (act: LineAct, sentence: string): LineControl => ({ control: 'button', act, label: LABELS[act], sentence });
 const none = (sentence: string): LineControl => ({ control: 'none', sentence });
@@ -75,6 +78,8 @@ function hasIt(item: PluginItemAt, { box, marketName }: LineFacts): LineControl 
     if (typeof box !== 'object' || !box.ticked || box.off) return none([lead, typeof box === 'object' ? box.off : undefined].filter(Boolean).join(' '));
     return button('remove', `${lead} Uninstalls ${plugin} from ${tool}. Its marketplace folder stays.`);
   }
+  // Kept off by the plugins record: on again only as its box on the plugin's page is ticked (marketplaces.ts turn), never by the item's switch.
+  if (item.install.keptOff && typeof box === 'object' && !box.off) return button('let-in', `Turns ${plugin} on in ${tool}, as ticking its box on its page does.`);
   // The switch: a click that turns this item alone, one that can't be written (said beside it), and a plugin that is this item alone.
   const whole = wholeTurn(item);
   if (!whole || cantSwitch(item) || !bringsMore(item)) return SWITCH;

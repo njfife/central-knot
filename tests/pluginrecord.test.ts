@@ -59,6 +59,17 @@ test('Rows 7 to 10: not wanted (Off, or kept out): in line where it lacks it; un
   assert.deepEqual(owedTo(off, 'pi-cli', now('items', 'items'), ['pi-cli']), { wanted: false, has: 'items', takes: true, act: 'remove-items' });
 });
 
+test('Row 9 by the tool’s own switch: a copy it can keep is turned off there and kept installed; one already off is in line; Copilot CLI’s live copy, whose switch is its uninstall, is uninstalled', () => {
+  const kept = { on: true, except: ['codex-cli' as const] }, keeps = (more: Partial<ToolNow> = {}): ToolNow => ({ ...now('whole'), keeps: true, ...more });
+  assert.deepEqual(codex(kept, keeps()), { wanted: false, has: 'whole', takes: true, keeps: true, act: 'plugin-off' });
+  assert.deepEqual(codex(off, keeps({ off: true })), { wanted: false, has: 'whole', takes: true, keeps: true });
+  assert.deepEqual(owedTo(off, 'copilot-cli', now('whole'), ['copilot-cli']), { wanted: false, has: 'whole', takes: true, act: 'uninstall' });
+  // Wanted again (On, or its box ticked): the copy kept off there is turned on, never installed again; a click out never turns it on,
+  // and nor does Add, which leaves a copy he turned off himself.
+  const back = codex(on, keeps({ off: true }));
+  assert.deepEqual([back.act, clickRuns('on', back), clickRuns('let-in', back), clickRuns('off', back), clickRuns('add', back)], ['plugin-on', 'plugin-on', 'plugin-on', undefined, undefined]);
+});
+
 const team = '/markets/team';
 const has = (tool: Holding['tool'], plugin: string, source = team): Holding => ({ tool, source, marketName: 'team', plugin });
 

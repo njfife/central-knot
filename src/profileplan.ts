@@ -147,10 +147,11 @@ export function leftOutWords(counts: Record<ItemKind, number>): string {
  * OpenCode and Antigravity its library item's On). `way`:
  * - `switch`: the item's own switch there (pluginswitch.ts ownSwitch; in Pi, OpenCode and Antigravity its library item's On and Off);
  * - `whole`: in Claude Code, its whole plugin's switch there (takenWhole): a skill's always, an MCP server's or agent's while
- *   the plugin is off (its own switch is set before the plugin comes on: wholeRuns);
+ *   the plugin is off (its own switch is set before the plugin comes on: wholeRuns), but not while the plugins record keeps it off;
  * - `stays`: the tool has none for one item of its kind (an agent in Copilot CLI), so the copy is left as its plugin has it and
  *   agrees with any profile;
- * - `plugin-off`: the whole plugin is off in that tool (placed: Off on Plugins), so the copy is off; no switch turns it on;
+ * - `plugin-off`: the whole plugin is off in that tool (placed: Off on Plugins; in Claude Code, only where the plugins record keeps it
+ *   off: InstalledPlugin `keptOff`), so the copy is off; no switch turns it on;
  * - `held`: its own switch can't be used now, and `why`;
  * - `unread`: that tool's copy of the plugin couldn't be read (types.ts InstalledPlugin `problem`), so whether it is on isn't
  *   known (`on` is false): it agrees with no profile, and nothing is written there.
@@ -196,6 +197,8 @@ export const copilotSharesYours = (home: PluginHome, at: PluginItemAt): boolean 
  * CLI MCP server, carrying `sharesWith` for the exact-name rule).
  */
 function installedWay(home: PluginHome, at: PluginItemAt): Pick<PluginCopy, 'way' | 'sharesWith'> & { why?: string } {
+  // Kept off by the plugins record (InstalledPlugin `keptOff`): no profile turns it on, in Claude Code either.
+  if (at.install.keptOff) return { way: 'plugin-off', why: pluginOff(at.install.plugin, at.tool) };
   if (at.tool === 'claude-cli' && (at.install.off || !ownSwitch(at))) return { way: 'whole' };
   if (at.install.off) return { way: 'plugin-off', why: pluginOff(at.install.plugin, at.tool) };
   if (!ownSwitch(at)) return { way: 'stays' };
@@ -301,9 +304,9 @@ export function takenWhole(profile: Pick<Profile, 'items'>, install: InstalledPl
   const ticked = install.items.filter(part => profile.items.includes(pluginItemId(part.kind, pluginItemKey(install, part))));
   return { ticked, brought: ticked.length ? install.items.filter(part => part.kind === 'skill' && !ticked.includes(part)) : [] };
 }
-/** The plugin a plugin's item comes from as Claude Code has it installed and could read, if it does: what takenWhole is asked of. */
+/** The plugin a plugin's item comes from as Claude Code has it installed, could read and may turn (not kept off), if it does: what takenWhole is asked of. */
 export const claudeInstall = (item: PluginLive): InstalledPlugin | undefined =>
-  item.copies.flatMap(copy => (copy.tool === 'claude-cli' && copy.way !== 'unread' && 'install' in copy.target ? [copy.target.install] : []))[0];
+  item.copies.flatMap(copy => (copy.tool === 'claude-cli' && copy.way !== 'unread' && copy.way !== 'plugin-off' && 'install' in copy.target ? [copy.target.install] : []))[0];
 /** Whether a plugin's skill comes on in Claude Code only with a ticked item of its plugin there, the profile leaving it out (takenWhole `brought`). */
 export const comesWith = (profile: Pick<Profile, 'items'>, item: PluginLive) => {
   const install = claudeInstall(item);
@@ -400,7 +403,8 @@ export function pluginUndo(event: Pick<HistoryEvent, 'profile'>, items: PluginLi
   const installs = items.flatMap(item => item.copies.flatMap(copy => (copy.tool === 'claude-cli' && 'install' in copy.target ? [copy.target.install] : [])));
   const runs = [...groupBy(event.profile?.wholeSteps ?? [], op => `${op.tool}\u0000${op.marketName}\u0000${op.plugin}`).values()].map(steps => {
     const install = installs.find(each => each.tool === steps[0]!.tool && each.plugin === steps[0]!.plugin && each.marketName === steps[0]!.marketName);
-    return { steps, install, asLeft: !!install && !install.problem && asLeft(install, steps), run: { copies: [] as CopyTurn[], ops: opposites(steps) } };
+    // A plugin the plugins record keeps off there since (InstalledPlugin `keptOff`) is not turned on by the Undo.
+    return { steps, install, asLeft: !!install && !install.problem && !install.keptOff && asLeft(install, steps), run: { copies: [] as CopyTurn[], ops: opposites(steps) } };
   });
   for (const done of event.profile?.plugins ?? []) {
     const item = items.find(each => each.id === done.id), copy = item?.copies.find(each => each.tool === done.tool);
