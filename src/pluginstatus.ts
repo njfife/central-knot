@@ -28,6 +28,9 @@ export const takesItemsOnly = (who: string) => `${who} takes a plugin’s items,
 export function takenItems(tools: HarnessId[], none = tools.filter(tool => !holds(tool, 'agent'))) {
   return `its ${andList(['skills', ...(none.length === tools.length ? [] : [`agents${none.length ? ` (not in ${andList(none.map(tool => names[tool]))})` : ''}`]), 'MCP servers'])}`;
 }
+/** What a native tool's Harnesses → Plugins tab says above its installed plugins: turning on or off and installing elsewhere when writable, or only seeing which tools have it in Preview only. */
+export const pluginsTabNote = (tool: HarnessId, canWrite: boolean) =>
+  `Installed in ${names[tool]} from your marketplaces. Open one to ${canWrite ? 'turn it on or off here, or to install it in another tool.' : 'see which tools have it.'}`;
 
 /**
  * Whether a marketplace's plugin is installed in no tool managed now, so Find may offer its items as ones the person doesn't

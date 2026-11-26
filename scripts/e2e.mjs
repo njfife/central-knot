@@ -481,8 +481,8 @@ async function backFlow() {
   await a.click(byId('harness-claude-cli'));
   await a.click(byId('harness-tab-plugins'));
   const pluginsNote = (await a.text('#harness-body .tools-note'))?.trim() ?? '';
-  check('Claude Code’s Plugins tab says opening a plugin turns it off, not uninstalls it',
-    pluginsNote === 'Installed in Claude Code from your marketplaces. Open one to turn it off here, or to install it in another tool.' && !/uninstall/i.test(pluginsNote), pluginsNote);
+  check('Claude Code’s Plugins tab says opening a plugin turns it on or off, not uninstalls it',
+    pluginsNote === 'Installed in Claude Code from your marketplaces. Open one to turn it on or off here, or to install it in another tool.' && !/uninstall/i.test(pluginsNote), pluginsNote);
   await a.click(byId('harness-plugin-back-market-issue-tracker'));
   await thumb();
   check('one Back from the plugin returns to the tool’s Plugins tab', await a.exists(byId('harness-tab-plugins') + '[aria-selected=true]'));
@@ -7610,7 +7610,7 @@ async function draftFlow() {
 /**
  * A plugin's one switch, on the list and on its page (pluginrecord.ts): On puts issue-tracker into Claude Code by its own
  * installer (a stand-in that writes its record as the real one does) and into Pi as its items; Pi's box on its page,
- * unticked, takes it out of Pi alone; Off uninstalls it, and Undo installs it again where it was; a tick on one box of an Off
+ * unticked, takes it out of Pi alone; Off turns it off in Claude Code (kept installed), and Undo turns it on again there; a tick on one box of an Off
  * plugin turns it On in that tool alone. Each step reads what the page shows and the files.
  */
 async function pluginSwitchFlow() {

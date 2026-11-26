@@ -208,7 +208,7 @@ function skillColumns(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const line = (text: string, mark?: HarnessId) => h('p.plugin-group-note', {}, mark ? brandMark(mark, 13) : null, ...inlineMarkdown(text, openLink));
   return {
     head: [
-      switchable.length ? line('Turn a skill off, or back on, without uninstalling the plugin.') : null,
+      switchable.length ? line('Turn a skill off, or back on, without turning the whole plugin off.') : null,
       ...tools.filter(tool => NO_SKILL_SWITCH[tool]).map(tool => line(NO_SKILL_SWITCH[tool]!, tool)),
       ...[...columnWide].map(reason => line(reason)),
       // Disable is best effort: on a build older than the one exercised, or one whose version can't be read, only said.
