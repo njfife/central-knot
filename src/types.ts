@@ -578,6 +578,9 @@ export interface HistoryEvent {
   managing?: { tool: HarnessId; on: boolean };
   /** 'on' / 'off': the one harness it was turned on or off in, or (`cause` 'in-line') put in. */
   only?: HarnessId;
+  /** 'on' / 'off' (`cause` 'switch'): keep-outs before and after when `on` changed with `except` or >1 keep-out changed. */
+  wasExcept?: HarnessId[];
+  nowExcept?: HarnessId[];
   /**
    * A library item's: what made it happen, read by historyactions.ts alone. `switch`: the person's switch ('on' / 'off'). `found`:
    * a found item taken in by a click on Add ('on'; `winner`: where it was found). `sync-everything`: the same, taken in by the

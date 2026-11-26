@@ -352,7 +352,7 @@ test('The source drops an On server: it leaves every tool, Claude Code’s too; 
     assert.deepEqual(done.sourced?.map(({ answer, on, removed }) => [answer, on, removed]), [['drop', undefined, ['claude-cli', 'copilot-cli', 'codex-cli']]]);
     const { fact, item } = await server(box, 'docs');
     assert.deepEqual([fact?.fromSource, await claudeEntry(box, 'docs')], [{ link: 'https://github.com/team/drop', removed: true }, undefined]);
-    assert.deepEqual([fromSourceWords(fact!.fromSource!).tag?.text, statusLine(fact!, item, box.tools)], ['removed at its source', 'Off · in Central Knot only. Turn it on to put it in every tool.']);
+    assert.deepEqual([fromSourceWords(fact!.fromSource!).tag?.text, statusLine(fact!, item, box.tools)], ['removed at its source', 'Off · On puts it in every tool.']);
     // Its line on Sources reads the same facts (sourcespage.ts removedRow).
     assert.deepEqual(linesOf((await sourcesView(box.context, box.tools)).sources[0]), ['skill notes: nothing']);
     await turn(box, 'docs', true);

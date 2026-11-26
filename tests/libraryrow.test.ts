@@ -189,7 +189,7 @@ test('The status line says where the agent stands, and in which harnesses', () =
   assert.equal(statusLine(row(all, {}, item()), item(), tools), 'On in all 3 tools');
   assert.equal(statusLine(...withItem({ 'claude-cli': 'b', 'copilot-cli': 'b' }, item({ except: ['codex-cli'], applied: { 'claude-cli': 'b', 'copilot-cli': 'b' } })), tools), 'On in Claude Code and Copilot CLI · kept out of Codex');
   assert.equal(statusLine(...withItem({ 'claude-cli': 'b' }, item({ applied: { 'claude-cli': 'b' } })), tools), 'On in Claude Code · Copilot CLI and Codex get it when sync runs');
-  assert.equal(statusLine(...withItem({ 'codex-cli': 'x' }, item({ on: false, applied: {} })), tools), 'Off · in Central Knot and Codex. Turn it on to put it in every tool. Codex has a copy Central Knot didn’t put there.');
+  assert.equal(statusLine(...withItem({ 'codex-cli': 'x' }, item({ on: false, applied: {} })), tools), 'Off · in Central Knot and Codex. On puts it in every tool. Codex has a copy Central Knot didn’t put there.');
   const differing = row({ 'claude-cli': 'a', 'codex-cli': 'x' }, { takeInAnswers: { click: { wait: 'choice' }, rule: { wait: 'choice' } } });
   assert.equal(statusLine(differing, undefined, tools), 'Not in Central Knot · in Claude Code and Codex, with different copies. Add it to keep it in Central Knot and put it in every tool.');
   // With Synchronize everything on, a found row says what the rule does with it.
@@ -225,7 +225,7 @@ test('An Off agent on through its plugin in two tools names them in its page’s
   const through = row({}, { pluginOn: ['claude-cli', 'codex-cli'] }), off = item({ on: false, applied: {} }), onCodexPage = ['codex-cli', 'claude-cli', 'copilot-cli'];
   assert.deepEqual([placeTag(through, off, tools)?.text, placeTag(through, off, onCodexPage)?.text, statusLine(through, off, onCodexPage, false, [])],
     ['on in Claude Code and Codex only, through its plugin', 'on in Codex and Claude Code only, through its plugin',
-      'Off · on in Codex and Claude Code only, through its plugin. Turn it on to put it in every tool.']);
+      'Off · on in Codex and Claude Code only, through its plugin. On puts it in every tool.']);
   assert.equal(placeTag(through, off, onCodexPage)?.title, 'Central Knot keeps this agent and its versions. Codex and Claude Code have it on through its plugin: its switch there, in the opened row, turns that off.');
 });
 
@@ -439,4 +439,56 @@ test('An On item unseen in every tool says so instead of an empty "On in "; one 
     'On · Codex can’t take it (see below)');
   assert.equal(statusLine(row({ 'codex-cli': 'a' }, { cannot: { 'claude-cli': pluginOnly['claude-cli'], 'codex-cli': keptOld } }, item({ applied: { 'codex-cli': 'a' } })),
     item({ applied: { 'codex-cli': 'a' } }), ['claude-cli', 'codex-cli']), 'On · not in Claude Code · Codex can’t take it (see below)');
+});
+
+test('An Off row offers one tool only: rowClicks.onOnly keeps every other tool out, Off lines mark kept-out tools, status and switch label tell where On puts it back, and said.onOnly names any other tool that still has it', () => {
+  const six = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'] as const;
+  const skills = sentences(libraryWords.skills);
+  const offTwo = item({ on: false, except: ['codex-cli', 'pi-cli'], applied: {} });
+  // One click: on in Claude Code only, keeping every other known harness out so a tool managed later doesn't get it.
+  assert.deepEqual(rowClicks.onOnly(row({}), offTwo, 'claude-cli'), {
+    key: 'reviewer', on: true, except: ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'], seenOn: false,
+  });
+  // Off lines: Kept out where in except, blank otherwise; plugin-sourced Off rows keep today's line; On rows unchanged.
+  assert.deepEqual(six.map(tool => skills.harnessLine(row({}, {}, offTwo), offTwo, tool, tool)), ['', '', 'Kept out', 'Kept out', '', '']);
+  const pluginOff = row({}, { fromSource: { link: 'plugin:kit@market' } }, offTwo);
+  assert.equal(skills.harnessLine(pluginOff, offTwo, 'pi-cli', 'Pi'), 'No copy while it is off.');
+  assert.equal(skills.harnessLine(row({}, {}, item({ except: ['codex-cli'], applied: {} })), item({ except: ['codex-cli'], applied: {} }), 'codex-cli', 'Codex'),
+    'Kept out of this tool. Central Knot keeps its folder for when you turn it on here.');
+  // Off status and switch label: every tool, 4 of 6, 1 tool only, kept out of every tool, and removal still owed.
+  const offAll = item({ on: false, except: [], applied: {} });
+  const offOne = item({ on: false, except: ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'], applied: {} });
+  const offNone = item({ on: false, except: [...six], applied: {} });
+  assert.deepEqual([statusLine(row({}), offAll, six), statusLine(row({}), offTwo, six), statusLine(row({}), offOne, six), statusLine(row({}), offNone, six)], [
+    'Off · On puts it in every tool.',
+    'Off · On puts it back in 4 of 6 tools.',
+    'Off · On puts it back in Claude Code only.',
+    'Off · Kept out of every tool; turn on in a tool below.',
+  ]);
+  assert.deepEqual([switchLabel(row({}), offAll, six), switchLabel(row({}), offTwo, six), switchLabel(row({}), offOne, six), switchLabel(row({}), offNone, six)], [
+    'reviewer: off, in Central Knot only. Click to put it in every tool.',
+    'reviewer: off, in Central Knot only. Click to put it back in 4 of 6 tools.',
+    'reviewer: off, in Central Knot only. Click to put it back in Claude Code.',
+    'reviewer: off, in Central Knot only. Click to turn it on (kept out of every tool).',
+  ]);
+  // A removal still owed keeps offPlace's "still in … until sync runs" before the On sentence.
+  const owed = item({ on: false, except: ['codex-cli'], applied: { 'codex-cli': 'b' } });
+  assert.equal(statusLine(row({ 'codex-cli': 'b' }, {}, owed), owed, tools), 'Off · still in Codex until sync runs. On puts it back in 2 of 3 tools.');
+  // said.onOnly: failure, clean one-tool-only, OpenCode reading Claude Code's folder, shared folder, and pluginOn (never "only" while another remains).
+  assert.equal(skills.said.onOnly('bench-runner', 'claude-cli', true, row({}), six), 'bench-runner couldn’t be put in Claude Code.');
+  assert.equal(skills.said.onOnly('bench-runner', 'codex-cli', false, { key: 'bench-runner', hashes: { 'codex-cli': 'b' } }, six), 'bench-runner is on in Codex only.');
+  const openReads: LibraryRow = {
+    key: 'bench-runner', hashes: { 'claude-cli': 'b' },
+    anotherWay: { 'opencode-cli': 'OpenCode reads Claude Code’s copy, in Claude Code’s skills folder.' },
+    loads: { 'opencode-cli': { folder: 'bench-runner', name: 'bench-runner', skillFile: '~/.claude/skills/bench-runner/SKILL.md', switchedOff: false, in: 'claude-cli' } },
+  };
+  assert.equal(skills.said.onOnly('bench-runner', 'claude-cli', false, openReads, six),
+    'bench-runner is on in Claude Code. OpenCode reads Claude Code’s copy, in Claude Code’s skills folder.');
+  const sharedAndPlugin: LibraryRow = {
+    key: 'bench-runner', hashes: { 'claude-cli': 'b' }, pluginOn: ['copilot-cli'],
+    anotherWay: { 'codex-cli': 'Codex also reads a copy at ~/.agents/skills/bench-runner, which is not Central Knot’s.' },
+    loads: { 'codex-cli': { folder: 'bench-runner', name: 'bench-runner', skillFile: '~/.agents/skills/bench-runner/SKILL.md', switchedOff: false } },
+  };
+  assert.equal(skills.said.onOnly('bench-runner', 'claude-cli', false, sharedAndPlugin, six),
+    'bench-runner is on in Claude Code. Codex also reads a copy at ~/.agents/skills/bench-runner, which is not Central Knot’s. Copilot CLI has it on through its plugin.');
 });

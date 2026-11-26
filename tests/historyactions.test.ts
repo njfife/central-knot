@@ -239,3 +239,26 @@ test('Use the plugin’s (library.ts TAKE): its entry says what happened; its Un
   assert.equal(librarySentence(undone, libraryWords.agents, tools, item(), true)?.text, 'Undone: reviewer is yours again, as it was in every tool.');
   assert.equal(offered(undone, item({ hash: 'a' })), undefined);
 });
+
+test('An Off row turned on in one tool only records wasExcept and nowExcept: exact Undo restores earlier keep-outs while still as left, else plain Turn it off, and older entries undo as before', () => {
+  const onlyClaude: HarnessId[] = ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
+  const onOnly = entry({ kind: 'on', cause: 'switch', wasExcept: ['codex-cli', 'pi-cli'], nowExcept: onlyClaude, losers: [{ tool: 'claude-cli', hash: '' }] });
+  assert.equal(librarySentence(onOnly, libraryWords.skills, tools)?.text, 'Turned on in Claude Code only.');
+  // While keep-outs still equal nowExcept (order-independent), Undo puts Off and the earlier keep-outs back exactly.
+  assert.deepEqual(offered(onOnly, item({ except: [...onlyClaude].reverse() })), ['Undo', { key: 'reviewer', on: false, except: ['codex-cli', 'pi-cli'] }]);
+  // Empty wasExcept (kept out of nothing before) still restores exact Undo.
+  const fromNone = entry({ kind: 'on', cause: 'switch', wasExcept: [], nowExcept: onlyClaude, losers: [{ tool: 'claude-cli', hash: '' }] });
+  assert.deepEqual(offered(fromNone, item({ except: onlyClaude })), ['Undo', { key: 'reviewer', on: false, except: [] }]);
+  // Once keep-outs changed since (Codex let back in), only plain Turn it off is offered, keeping the current keep-outs.
+  const codexIn: HarnessId[] = ['copilot-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
+  assert.deepEqual(offered(onOnly, item({ except: codexIn })), ['Turn it off', { key: 'reviewer', on: false, except: codexIn }]);
+  assert.equal(offered(onOnly, item({ on: false, except: onlyClaude })), undefined);
+  // Undo's own Off entry records the reverse pair and can undo back to one tool only while still as left.
+  const undoEntry = entry({ kind: 'off', cause: 'switch', wasExcept: onlyClaude, nowExcept: ['codex-cli', 'pi-cli'], losers: [{ tool: 'claude-cli', hash: 'b' }] });
+  assert.equal(librarySentence(undoEntry, libraryWords.skills, tools)?.text, 'Turned off: removed from Claude Code. Central Knot keeps it.');
+  assert.deepEqual(offered(undoEntry, item({ on: false, except: ['codex-cli', 'pi-cli'] })), ['Undo', { key: 'reviewer', on: true, except: onlyClaude }]);
+  assert.equal(offered(undoEntry, item({ on: true, except: ['codex-cli', 'pi-cli'] })), undefined);
+  // An older entry without wasExcept/nowExcept still offers plain Turn it off, leaving current keep-outs as they are.
+  const older = entry({ kind: 'on', cause: 'switch', losers: [{ tool: 'claude-cli', hash: '' }] });
+  assert.deepEqual(offered(older, item({ except: onlyClaude })), ['Turn it off', { key: 'reviewer', on: false, except: onlyClaude }]);
+});

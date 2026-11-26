@@ -214,7 +214,7 @@ test('Off, the item turned Off meanwhile, On: its copy in the tool goes then, an
     const off = await skillsView(b.context, tools), row = off.items.find(fact => fact.key === 'notes')!, say = sentences(libraryWords.skills);
     const hashes = Object.fromEntries(Object.entries(row.copies).map(([tool, copy]) => [tool, copy!.hash]));
     assert.deepEqual([statusLine({ ...row, hashes }, off.library.notes, tools, false, ['codex-cli']), say.placeTag({ ...row, hashes }, off.library.notes, tools, ['codex-cli'])?.text, say.said.off('notes', [], tools, ['codex-cli'])],
-      ['Off · in no tool Central Knot manages. Turn it on to put it in every tool.', 'in no tool Central Knot manages', 'notes is off: no tool Central Knot manages has it. Central Knot keeps it, and turning it on puts each folder back as it was.']);
+      ['Off · in no tool Central Knot manages. On puts it in every tool.', 'in no tool Central Knot manages', 'notes is off: no tool Central Knot manages has it. Central Knot keeps it, and turning it on puts each folder back as it was.']);
     const { said, did } = await turnCodexOn(b);
     assert.deepEqual([said, did], [counts({ removed: 1 }), counts({ removed: 1 })]);
     assert.equal(await b.read(CODEX.skill), undefined);

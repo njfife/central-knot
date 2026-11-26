@@ -12,7 +12,8 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { wantedIn } from '../src/library.ts';
-import { copiesOf, lookFor, runPass, type Disk, type Kind, type KindLibrary, type Seen } from '../src/librarypass.ts';
+import { copiesOf, lookFor, restore, runPass, type Disk, type Kind, type KindLibrary, type Seen } from '../src/librarypass.ts';
+import { libraryAction } from '../src/historyactions.ts';
 import { readRecord, takeOverSync, type ShareContext } from '../src/share.ts';
 import { readHistory } from '../src/history.ts';
 import type { Change, HarnessId } from '../src/types.ts';
@@ -166,4 +167,58 @@ test('A pass that changes nothing leaves its read for the look made right after 
     assert.deepEqual(copiesOf(taken.look, taken.live[0]), copiesOf(own.look, own.live[0]));
     assert.equal(copiesOf(taken.look, taken.live[0])['opencode-cli']?.is, 'absent');
   } finally { await cleanup(); }
+});
+
+test('turn records wasExcept and nowExcept (no single only) when on changes with except or when more than one keep-out changes; ordinary On/Off and single keep-outs stay unchanged, and restore puts earlier keep-outs back', async () => {
+  const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-toy-turn-')));
+  const home = join(base, 'home'), three: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
+  const context: ShareContext = { home, mode: 'custom', read: async () => [], build: 'test', settingsPath: join(base, 'settings.json'), realHome: join(base, 'real'), settleMs: 0 };
+  const dirOf = (at: ShareContext, tool: HarnessId) => join(at.home, tool);
+  const toy = noteKind();
+  const kind: Kind<string, Note> = {
+    ...toy, harnesses: managed => managed.filter(tool => three.includes(tool)), folder: dirOf,
+    read: async (at, managed) => {
+      const disk: Disk<Note> = { byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], held: () => undefined };
+      for (const tool of managed) for (const name of await readdir(dirOf(at, tool)).catch(() => [])) {
+        const file = join(dirOf(at, tool), name), text = await readFile(file, 'utf8'), key = name.replace(/\.txt$/, '');
+        disk.byKey.set(key, { ...disk.byKey.get(key), [tool]: { tool, name: key, hash: hashOf(text), at: 0, file, text } });
+      }
+      return disk;
+    },
+    write: async (at, item, tool, _here, text) => { await mkdir(dirOf(at, tool), { recursive: true }); await writeFile(join(dirOf(at, tool), `${item.name}.txt`), text); return undefined; },
+    historyAction: (event, item, now, version) => libraryAction(event, item, now, version),
+  };
+  const files = () => Promise.all(three.map(tool => readFile(join(dirOf(context, tool), 'plan.txt'), 'utf8').catch(() => undefined)));
+  try {
+    for (const tool of three) await mkdir(dirOf(context, tool), { recursive: true });
+    await writeFile(join(dirOf(context, 'claude-cli'), 'plan.txt'), 'Plan.\n');
+    await runPass(kind, context, three, [click(true, [])]);
+    // Ordinary single keep-out on On row: records only, no wasExcept/nowExcept.
+    await runPass(kind, context, three, [click(true, ['codex-cli'])]);
+    const singleOut = (await readHistory(context)).at(-1)!;
+    assert.deepEqual([singleOut.kind, singleOut.only, singleOut.wasExcept, singleOut.nowExcept], ['off', 'codex-cli', undefined, undefined]);
+    // Ordinary On -> Off (except unchanged): records neither only nor wasExcept/nowExcept.
+    await runPass(kind, context, three, [click(false, ['codex-cli'])]);
+    const plainOff = (await readHistory(context)).at(-1)!;
+    assert.deepEqual([plainOff.kind, plainOff.only, plainOff.wasExcept, plainOff.nowExcept], ['off', undefined, undefined, undefined]);
+    // Off -> On in Claude Code only (except changes from ['codex-cli'] to ['copilot-cli', 'codex-cli']): records wasExcept/nowExcept and no only.
+    const onOnly = await runPass(kind, context, three, [click(true, ['copilot-cli', 'codex-cli'])]);
+    const onOnlyEvent = (await readHistory(context)).at(-1)!;
+    assert.deepEqual(await files(), ['Plan.\n', undefined, undefined]);
+    assert.deepEqual([onOnlyEvent.kind, onOnlyEvent.only, onOnlyEvent.wasExcept, onOnlyEvent.nowExcept], ['on', undefined, ['codex-cli'], ['copilot-cli', 'codex-cli']]);
+    // Undo (restore) puts the item Off with ['codex-cli'] back, removes Claude Code's file, and logs the reverse pair without only.
+    await restore(kind, context, three, onOnly.made![0]!);
+    const { live } = await lookFor(kind, context, three);
+    const undoEvent = (await readHistory(context)).at(-1)!;
+    assert.deepEqual([live[0].on, live[0].except, await files()], [false, ['codex-cli'], [undefined, undefined, undefined]]);
+    assert.deepEqual([undoEvent.kind, undoEvent.only, undoEvent.wasExcept, undoEvent.nowExcept], ['off', undefined, ['copilot-cli', 'codex-cli'], ['codex-cli']]);
+    // Ordinary Off -> On (except unchanged): records neither only nor wasExcept/nowExcept.
+    await runPass(kind, context, three, [click(true, ['codex-cli'])]);
+    const plainOn = (await readHistory(context)).at(-1)!;
+    assert.deepEqual([plainOn.kind, plainOn.only, plainOn.wasExcept, plainOn.nowExcept], ['on', undefined, undefined, undefined]);
+    // On -> On with >1 keep-outs changed: records wasExcept and nowExcept and NO single only.
+    await runPass(kind, context, three, [click(true, ['claude-cli', 'copilot-cli'])]);
+    const multiOn = (await readHistory(context)).at(-1)!;
+    assert.deepEqual([multiOn.only, multiOn.wasExcept, multiOn.nowExcept], [undefined, ['codex-cli'], ['claude-cli', 'copilot-cli']]);
+  } finally { await rm(base, { recursive: true, force: true }); }
 });
