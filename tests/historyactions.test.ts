@@ -240,10 +240,10 @@ test('Use the plugin’s (library.ts TAKE): its entry says what happened; its Un
   assert.equal(offered(undone, item({ hash: 'a' })), undefined);
 });
 
-test('An Off row turned on in one tool only records wasExcept and nowExcept: exact Undo restores earlier keep-outs while still as left, else plain Turn it off, and older entries undo as before', () => {
+test('An Off row turned on in one tool records wasExcept and nowExcept: exact Undo restores earlier keep-outs while still as left (even with tookFrom), else plain Turn it off, and older entries undo as before', () => {
   const onlyClaude: HarnessId[] = ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
   const onOnly = entry({ kind: 'on', cause: 'switch', wasExcept: ['codex-cli', 'pi-cli'], nowExcept: onlyClaude, losers: [{ tool: 'claude-cli', hash: '' }] });
-  assert.equal(librarySentence(onOnly, libraryWords.skills, tools)?.text, 'Turned on in Claude Code only.');
+  assert.equal(librarySentence(onOnly, libraryWords.skills, tools)?.text, 'Turned on in Claude Code; kept out of every other tool.');
   // While keep-outs still equal nowExcept (order-independent), Undo puts Off and the earlier keep-outs back exactly.
   assert.deepEqual(offered(onOnly, item({ except: [...onlyClaude].reverse() })), ['Undo', { key: 'reviewer', on: false, except: ['codex-cli', 'pi-cli'] }]);
   // Empty wasExcept (kept out of nothing before) still restores exact Undo.
@@ -253,7 +253,24 @@ test('An Off row turned on in one tool only records wasExcept and nowExcept: exa
   const codexIn: HarnessId[] = ['copilot-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
   assert.deepEqual(offered(onOnly, item({ except: codexIn })), ['Turn it off', { key: 'reviewer', on: false, except: codexIn }]);
   assert.equal(offered(onOnly, item({ on: false, except: onlyClaude })), undefined);
-  // Undo's own Off entry records the reverse pair and can undo back to one tool only while still as left.
+  // With both wasExcept/nowExcept and tookFrom (Claude Code had its own copy): Undo is offered only while keep-outs AND copies are as left.
+  const withOwn = entry({ kind: 'on', cause: 'switch', version: 'b', wasExcept: ['codex-cli'], nowExcept: onlyClaude,
+    tookFrom: [{ tool: 'claude-cli', hash: 'a' }], losers: [{ tool: 'claude-cli', hash: 'a' }] });
+  assert.deepEqual(offered(withOwn, item({ except: onlyClaude })),
+    ['Undo', { key: 'reviewer', on: false, except: ['codex-cli'], giveBack: { 'claude-cli': 'a' } }]);
+  assert.deepEqual(offered(withOwn, item({ except: codexIn })),
+    ['Turn it off', { key: 'reviewer', on: false, except: codexIn }]);
+  assert.deepEqual(offered(withOwn, item({ hash: 'c', except: onlyClaude })),
+    ['Turn it off', { key: 'reviewer', on: false, except: onlyClaude }]);
+  // An entry where more than one keep-out changed leaving several tools on does not claim "every other tool" and still offers exact Undo while as left.
+  const multiKeepOuts = entry({ kind: 'on', cause: 'switch', wasExcept: ['codex-cli'], nowExcept: ['codex-cli', 'pi-cli', 'antigravity-cli'],
+    losers: [{ tool: 'claude-cli', hash: '' }, { tool: 'copilot-cli', hash: '' }] });
+  assert.equal(librarySentence(multiKeepOuts, libraryWords.skills, tools)?.text, 'Turned on: put in Claude Code and Copilot CLI.');
+  assert.deepEqual(offered(multiKeepOuts, item({ except: ['codex-cli', 'pi-cli', 'antigravity-cli'] })),
+    ['Undo', { key: 'reviewer', on: false, except: ['codex-cli'] }]);
+  assert.deepEqual(offered(multiKeepOuts, item({ except: ['codex-cli'] })),
+    ['Turn it off', { key: 'reviewer', on: false, except: ['codex-cli'] }]);
+  // Undo's own Off entry records the reverse pair and can undo back to one tool while still as left.
   const undoEntry = entry({ kind: 'off', cause: 'switch', wasExcept: onlyClaude, nowExcept: ['codex-cli', 'pi-cli'], losers: [{ tool: 'claude-cli', hash: 'b' }] });
   assert.equal(librarySentence(undoEntry, libraryWords.skills, tools)?.text, 'Turned off: removed from Claude Code. Central Knot keeps it.');
   assert.deepEqual(offered(undoEntry, item({ on: false, except: ['codex-cli', 'pi-cli'] })), ['Undo', { key: 'reviewer', on: true, except: onlyClaude }]);

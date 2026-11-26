@@ -169,7 +169,7 @@ test('A pass that changes nothing leaves its read for the look made right after 
   } finally { await cleanup(); }
 });
 
-test('turn records wasExcept and nowExcept (no single only) when on changes with except or when more than one keep-out changes; ordinary On/Off and single keep-outs stay unchanged, and restore puts earlier keep-outs back', async () => {
+test('turn records wasExcept and nowExcept (no single only) when a person’s switch changes on with except; ordinary On/Off, single keep-outs and plugin ticks stay unchanged, and restore puts earlier keep-outs back', async () => {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-toy-turn-')));
   const home = join(base, 'home'), three: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
   const context: ShareContext = { home, mode: 'custom', read: async () => [], build: 'test', settingsPath: join(base, 'settings.json'), realHome: join(base, 'real'), settleMs: 0 };
@@ -216,9 +216,13 @@ test('turn records wasExcept and nowExcept (no single only) when on changes with
     await runPass(kind, context, three, [click(true, ['codex-cli'])]);
     const plainOn = (await readHistory(context)).at(-1)!;
     assert.deepEqual([plainOn.kind, plainOn.only, plainOn.wasExcept, plainOn.nowExcept], ['on', undefined, undefined, undefined]);
-    // On -> On with >1 keep-outs changed: records wasExcept and nowExcept and NO single only.
-    await runPass(kind, context, three, [click(true, ['claude-cli', 'copilot-cli'])]);
-    const multiOn = (await readHistory(context)).at(-1)!;
-    assert.deepEqual([multiOn.only, multiOn.wasExcept, multiOn.nowExcept], [undefined, ['codex-cli'], ['claude-cli', 'copilot-cli']]);
+    // A plugin's tick on an Off item (forPlugin set, changing on and except) behaves as on next: no wasExcept/nowExcept.
+    await runPass(kind, context, three, [click(false, ['codex-cli'])]);
+    const { library } = await kind.open(context, true);
+    library.items.plan.source = 'plug-id';
+    await kind.save(context.home, library);
+    await runPass(kind, context, three, [{ ...click(true, ['copilot-cli', 'codex-cli']), forPlugin: 'plug-id' }]);
+    const pluginTick = (await readHistory(context)).at(-1)!;
+    assert.deepEqual([pluginTick.kind, pluginTick.only, pluginTick.wasExcept, pluginTick.nowExcept], ['on', undefined, undefined, undefined]);
   } finally { await rm(base, { recursive: true, force: true }); }
 });

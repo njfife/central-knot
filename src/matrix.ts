@@ -2162,18 +2162,18 @@ function pluginRowSwitch(t: Table, row: PluginRow) {
 /** A switch's label while a click on its row is unfinished: what it is being turned to. */
 const turningLabel = (name: string, on: boolean) => `${name}: being turned ${on ? 'on' : 'off'}.`;
 
-/**
- * The switch's click: off everywhere, or on everywhere (a found item taken in, after a copy choice where its copies differ). It
- * joins the page's list (app.ts queueClick), its row drawn in its new state at once and worked out in its turn, from the view as
- * the clicks before it left it; a second click while it waits takes it back (clicklist.ts takeBack). Its row is pinned where it is
- * (itemrow.ts Pinned; while the Library's Find has text, every row drawn: holdFound) until app.ts pinnedRows lets it go.
- */
 /** Pins a clicked row (or every found row while Find has text) so turning it on or off doesn't jump it out of view. */
 function pinRow(t: Table, skill: ItemRow) {
   if (searching(t)) holdFound(t);
   else pin(pinnedHere(t), idOf(skill), sectionOf(t, skill), rankIn(skill, chosenOrder(t), itemOf, usageIn(t)));
 }
 
+/**
+ * The switch's click: off everywhere, or on everywhere (a found item taken in, after a copy choice where its copies differ). It
+ * joins the page's list (app.ts queueClick), its row drawn in its new state at once and worked out in its turn, from the view as
+ * the clicks before it left it; a second click while it waits takes it back (clicklist.ts takeBack). Its row is pinned where it is
+ * (itemrow.ts Pinned; while the Library's Find has text, every row drawn: holdFound) until app.ts pinnedRows lets it go.
+ */
 function flip(t: Table, skill: ItemRow, on: boolean) {
   const { kind, key } = skill;
   pinRow(t, skill);
@@ -2746,13 +2746,19 @@ function libraryHarnessSwitch(t: Table, lib: LibraryPage, skill: ItemRow, tool: 
   const ownState = item.on && out ? undefined : skill.switchedOff?.includes(tool) ? 'Switched off' : harnessIs(skill, item, tool) === 'another-way' ? 'Another way' : undefined;
   if (ownState) return h('span.details-tool-actions', {}, own, h('span.tool-switch', {}, h('span.tool-switch-word.tool-switch-word-own', {}, ownState)));
   if (!item.on) {
-    const said = (notIn: HarnessId[]) => lib.say.said.onOnly(name, tool, notIn.includes(tool as HarnessId), rowByKey(skill.kind, skill.key), toolsFor(t, skill.kind));
+    const said = (notIn: HarnessId[]) => {
+      const now = rowByKey(skill.kind, skill.key);
+      return lib.say.said.onOnly(name, tool, notIn.includes(tool as HarnessId), now, toolsFor(t, skill.kind), now && itemOf(now));
+    };
     const turnHere = () => {
       pinRow(t, skill);
       click({ kind: skill.kind, items: [name], rows: [rowKey(skill)], changes: [rowClicks.onOnly(skill, item, tool)], said });
     };
     return h('span.details-tool-actions', {}, own, h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, 'Off'),
-      toggle({ on: false, disabled: writeOff(kindStops(skill.kind)), id: elId('enable', skill, tool), label: `${name} in ${where}: off. Click to turn it on in ${where} only.`, onchange: turnHere })));
+      toggle({
+        on: false, disabled: writeOff(kindStops(skill.kind)), id: elId('enable', skill, tool),
+        label: `${name} in ${where}: off. Click to turn it on in ${where} only.`, onchange: turnHere,
+      })));
   }
   const said = (notIn: HarnessId[]) => lib.say.said.inHarness(name, tool, !out, notIn.includes(tool as HarnessId));
   const does = out ? `Click to put it in ${where} again, its ${lib.words.copy} as it was.` : `Click to keep it out of ${where}: its copy there goes, and Central Knot keeps it.`;

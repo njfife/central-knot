@@ -13863,6 +13863,7 @@ async function libraryFlow() {
   skill(O.claude, 'active-skill', text('active-skill', 'Always on.'));
   skill(O.claude, 'bench-runner', text('bench-runner', 'Runs overnight throughput suites against local fixtures.'));
   skill(O.claude, 'legacy-skill', text('legacy-skill', 'Legacy skill.'));
+  skill(O.claude, 'own-test', text('own-test', 'Checks an independent copy kept in another tool.'));
   agent(O.home, 'claude-cli', 'release-scribe', agentText('release-scribe', 'Drafts detailed post-release summaries.'));
   writeFileSync(join(O.home, '.claude.json'), `${JSON.stringify({ mcpServers: { docs: { type: 'http', url: 'https://docs.example.test/mcp' } } }, null, 2)}\n`);
   writeClaudeInstall(O.home, 'ck-test-market', 'release-helper', '0.4.1', {
@@ -13888,6 +13889,9 @@ async function libraryFlow() {
   sJson.items['bench-runner'].on = false;
   sJson.items['bench-runner'].except = ['codex-cli', 'pi-cli'];
   sJson.items['bench-runner'].applied = {};
+  sJson.items['own-test'].on = false;
+  sJson.items['own-test'].except = [];
+  sJson.items['own-test'].applied = {};
   sJson.items['legacy-skill'].except = ['codex-cli'];
   delete sJson.items['legacy-skill'].applied['codex-cli'];
   // A plugin-sourced Off skill (linked to a plugin): must keep today's lines and draw no Off-row switch in no-plugin tools.
@@ -13906,6 +13910,8 @@ async function libraryFlow() {
   mJson.items.docs.applied = {};
   writeFileSync(oMcpRec, `${JSON.stringify(mJson, null, 2)}\n`);
   for (const rel of oSkillDirs) rmSync(join(O.home, rel, 'bench-runner'), { recursive: true, force: true });
+  for (const rel of oSkillDirs) rmSync(join(O.home, rel, 'own-test'), { recursive: true, force: true });
+  skill(join(O.home, '.copilot/skills'), 'own-test', text('own-test', 'Copilot CLI own copy.'));
   rmSync(join(O.home, '.codex/skills/legacy-skill'), { recursive: true, force: true });
   for (const rel of oAgentDirs) if (existsSync(join(O.home, rel))) for (const file of readdirSync(join(O.home, rel)).filter(f => f.startsWith('release-scribe'))) rmSync(join(O.home, rel, file), { force: true });
   for (const rel of oMcpFiles) rmSync(join(O.home, rel), { force: true });
@@ -13961,12 +13967,37 @@ async function libraryFlow() {
   await done(o);
   const skillsAfterClaude = snapDirs(oSkillDirs);
   const claudeOnlyOthers = oSkillDirs.filter(rel => rel !== '.claude/skills');
-  same('skill on in Claude Code: only Claude Code gained files, result names OpenCode folder read (never "only"), and profile line shows Everyday ended',
+  same('skill on in Claude Code: only Claude Code gained files, bold line names OpenCode, result says OpenCode reads it too, and profile line shows Everyday ended',
     [existsSync(join(O.home, '.claude/skills/bench-runner/SKILL.md')),
       claudeOnlyOthers.every(rel => JSON.stringify(skillsAfterClaude[rel]) === JSON.stringify(skillsBefore[rel])),
+      await o.text('.details-status'),
       await o.text('#header [data-outcome] .band-text'),
       await o.text('#header .band-profile')],
-    [true, true, 'bench-runner is on in Claude Code. OpenCode reads Claude Code’s copy, in Claude Code’s skills folder.', 'Everyday stopped being the profile in use.']);
+    [true, true, 'On in Claude Code · OpenCode has it another way · kept out of Copilot CLI, Codex, Pi and Antigravity',
+      'bench-runner is on in Claude Code. OpenCode reads it too.', 'Everyday stopped being the profile in use.']);
+  const checkFitsAt860 = async (win, expected, shotName) => {
+    await sizeTo(win, 860, 600);
+    if (await win.run(`document.getElementById('sidebar-toggle')?.getAttribute('aria-label') === 'Expand the sidebar'`)) await win.click('#sidebar-toggle');
+    await win.run(`document.querySelector('.ov-row[aria-expanded="true"]')?.scrollIntoView({ block: 'start' })`);
+    await theme(win, 'light');
+    await win.settle();
+    const fit = await win.run(`(() => {
+      const band = document.querySelector('#header [data-outcome] .band-text');
+      const more = document.getElementById('outcome-more');
+      const rect = band?.getBoundingClientRect();
+      return {
+        text: band?.textContent?.trim() ?? '',
+        whole: !!band && band.scrollWidth <= band.clientWidth + 1,
+        inside: !!rect && rect.left >= 0 && rect.right <= window.innerWidth,
+        moreHidden: !more || getComputedStyle(more).display === 'none' || more.hidden,
+      };
+    })()`);
+    same(`at 860 with sidebar open, result "${expected}" is whole and inside the window without Show all`,
+      fit, { text: expected, whole: true, inside: true, moreHidden: true });
+    if (shotName && shots) await win.shot(shotName);
+    await fullSize(win);
+  };
+  await checkFitsAt860(o, 'bench-runner is on in Claude Code. OpenCode reads it too.');
   await o.run(`document.getElementById('outcome-undo')?.focus()`);
   await shots14a(o, '02-after-click');
   // Undo: item Off, earlier keep-outs back, status & lines back, every folder byte for byte as before, Everyday back in use.
@@ -13988,6 +14019,20 @@ async function libraryFlow() {
   await o.click('#outcome-undo');
   await done(o);
   same('Codex skill Undo restores folders byte for byte', snapDirs(oSkillDirs), skillsBefore);
+  // Off skill with Copilot CLI holding its own copy: clicking Codex names Copilot CLI's own copy (never "only"), fits at 860, and Undo restores byte for byte.
+  await o.click(`#${rowPart('open', 'skills', 'own-test')}`);
+  await o.click(`#${rowPart('enable', 'skills', 'own-test', 'codex-cli')}`);
+  await done(o);
+  const skillsAfterOwn = snapDirs(oSkillDirs);
+  same('own-test on in Codex: only Codex gained files, Copilot CLI own copy untouched, and result names Copilot CLI',
+    [existsSync(join(O.home, '.codex/skills/own-test/SKILL.md')),
+      oSkillDirs.filter(rel => rel !== '.codex/skills').every(rel => JSON.stringify(skillsAfterOwn[rel]) === JSON.stringify(skillsBefore[rel])),
+      await o.text('#header [data-outcome] .band-text')],
+    [true, true, 'own-test is on in Codex. Copilot CLI has its own copy.']);
+  await checkFitsAt860(o, 'own-test is on in Codex. Copilot CLI has its own copy.', 'ux-14a-04-own-copy-860-light');
+  await o.click('#outcome-undo');
+  await done(o);
+  same('own-test Undo restores folders byte for byte with Copilot CLI own copy intact', snapDirs(oSkillDirs), skillsBefore);
 
   // Agent: release-scribe on in Claude Code only, then Undo byte for byte.
   const agentsBefore = snapDirs(oAgentDirs);
@@ -14038,7 +14083,7 @@ async function libraryFlow() {
   await o.click('#nav-history');
   await until(() => o.exists('.history-row'));
   const latestBench = await o.run(`(() => { const row = [...document.querySelectorAll('.history-row')].find(el => el.querySelector('.history-what strong')?.textContent === 'bench-runner'); return { about: row?.querySelector('.history-about')?.textContent?.trim(), act: row?.querySelector('.history-actions button')?.textContent?.trim(), id: row?.querySelector('.history-actions button')?.id }; })()`);
-  same('History entry says Turned on in Claude Code only with Undo', [latestBench.about, latestBench.act], ['Turned on in Claude Code only.', 'Undo']);
+  same('History entry says Turned on in Claude Code; kept out of every other tool with Undo', [latestBench.about, latestBench.act], ['Turned on in Claude Code; kept out of every other tool.', 'Undo']);
   await o.click(`#${latestBench.id}`);
   await done(o);
   same('History Undo restores bench-runner Off with earlier keep-outs', [jsonOrNothing(oSkillRec)?.items['bench-runner']?.on, jsonOrNothing(oSkillRec)?.items['bench-runner']?.except], [false, ['codex-cli', 'pi-cli']]);

@@ -15,9 +15,9 @@ export const coworkWords = {
   plugin: 'Cowork in Claude desktop uses the plugins in your Claude account, so Central Knot doesn’t install there. Plugins for Cowork are added in Claude desktop, under Customize › Plugins.',
 };
 
-/** Sorts tool ids into the order the app lists tools everywhere (columns, notes, results). */
-const TOOL_ORDER = Object.keys(toolNames);
-export const byToolOrder = (first: HarnessId, second: HarnessId) => TOOL_ORDER.indexOf(first) - TOOL_ORDER.indexOf(second);
+/** Every tool id in the order the app lists tools everywhere (columns, notes, results). */
+export const harnessIds = Object.keys(toolNames) as HarnessId[];
+export const byToolOrder = (first: HarnessId, second: HarnessId) => harnessIds.indexOf(first) - harnessIds.indexOf(second);
 
 /** A tool's display name from an id that may come from a file or a report (an unknown id is shown as it is). */
 export const toolName = (tool: string) => (toolNames as Record<string, string>)[tool] ?? tool;

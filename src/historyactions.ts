@@ -29,9 +29,9 @@
 //     there (`in-line`)
 //   on or off in one harness (`only`) while  none: its switch there would change nothing now (the entry says that
 //     that harness is not managed            harness isn't managed now)
-//   on or off whose click took tools' own    Undo: that action,     the item is as the click left it (asTheClickLeftIt);
-//     copies over (`tookFrom`) or changed    earlier keep-outs      after that, the plain action above, which leaves
-//     keep-outs with `on` (`wasExcept`)      and copies back        keep-outs and copies as they are
+//   on or off whose click took tools' own    Undo: that action,     still as the click left it (copies: asTheClickLeftIt;
+//     copies over (`tookFrom`) or changed    earlier keep-outs      keep-outs: sameTools); after that, the plain action
+//     keep-outs with `on` (`wasExcept`)      and copies back        above, which leaves keep-outs and copies as they are
 //   a found item taken in (on, `found`, or   Undo: out of Central   every place it was found in still holds the copy it
 //     `sync-everything` with no click;       Knot again, found      held then, in a tool still managed, as the copies
 //     chosen)                                again, each tool it    are now (takeInHeld); after that, an `on` one
@@ -79,7 +79,7 @@ import { itemKey, pendingChanges, theVersion, type LibraryItem } from './library
 import { linkLabel, pluginOf } from './sourcelink.ts';
 import { asItIs, noTimeTells, versionClock, type RowWords } from './libraryrow.ts';
 import type { Change, HarnessId, HistoryEvent, HomeView, LibraryFacts, PartKind } from './types.ts';
-import { andList, deletedIn, sentence, toolName, toolNames, toolsPhrase, turnIt } from './words.ts';
+import { andList, deletedIn, harnessIds, sentence, toolName, toolsPhrase, turnIt } from './words.ts';
 
 /**
  * Whose a History entry is among the library's kinds, by the page's name for the kind (app.ts PageKind), with the item's key.
@@ -140,8 +140,8 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       if (event.cause === 'in-line' && event.only) return { glyph: 'circle-check', text: `Copied to ${where}.${away}` };
       if (event.cause === 'in-line') return { glyph: 'circle-check', text: `Written over in ${tools} with the current version when sync reached ${event.losers.length === 1 ? 'it' : 'them'}; what was there is one of its versions.` };
       if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}${named(event.only) ? `: its ${words.copy} there is back` : ''}.${overSaid}${gaveSaid}${away}` };
-      const onlyIn = event.cause === 'switch' && event.nowExcept ? (Object.keys(toolNames) as HarnessId[]).filter(tool => !event.nowExcept!.includes(tool)) : [];
-      if (onlyIn.length === 1) return { glyph: 'circle-check', text: `Turned on in ${toolName(onlyIn[0]!)} only.${overSaid}${gaveSaid}` };
+      const onlyIn = event.cause === 'switch' && event.nowExcept ? harnessIds.filter(tool => !event.nowExcept!.includes(tool)) : [];
+      if (onlyIn.length === 1) return { glyph: 'circle-check', text: `Turned on in ${toolName(onlyIn[0]!)}; kept out of every other tool.${overSaid}${gaveSaid}` };
       // A plugin's read brought it in with the plugin's On (library.ts A PLUGIN).
       if (event.cause === 'source') return { glyph: 'link-2', text: `Brought in from ${source}${also(': put in')}.` };
       const said = {
@@ -313,14 +313,13 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
     if (!action) return undefined;
     const exact = !!(event.wasExcept && event.nowExcept && sameTools(item.except, event.nowExcept));
     const back = givenBack(event, item).giveBack;
-    const giveBack = back && asTheClickLeftIt(event, item) ? back : undefined;
-    // Earlier keep-outs and copies go back only with an Undo, while as the click left it; otherwise the plain Turn it off / on.
-    if (!exact && !giveBack) return action;
-    const tools = giveBack ? (Object.keys(giveBack) as HarnessId[]).map(toolName) : [];
+    // Earlier keep-outs and copies go back only with an exact Undo; otherwise the plain Turn it off / on.
+    if ((event.wasExcept && !exact) || (back && !asTheClickLeftIt(event, item)) || (!exact && !back)) return action;
+    const tools = back ? (Object.keys(back) as HarnessId[]).map(toolName) : [];
     const own = tools.length ? `${andList(tools)} ${tools.length === 1 ? 'has its own copy' : 'have their own copies'} back, as before` : '';
     const kept = exact ? 'with its earlier kept-out tools back' : '';
     return { label: 'Undo', help: [action.help, kept, own].filter(Boolean).join('; '),
-      change: { ...action.change, ...(exact ? { except: [...event.wasExcept!] } : {}), ...(giveBack ? { giveBack } : {}) } };
+      change: { ...action.change, ...(exact ? { except: [...event.wasExcept!] } : {}), ...(back ? { giveBack: back } : {}) } };
   }
   // Keep mine moved only `seen` on: its Undo moves it back (librarypass.ts makeCurrent, asked for the current version), while
   // the item is at the version it kept. The entry that Undo makes (previous = version) offers nothing: Keep mine is on the source's row.

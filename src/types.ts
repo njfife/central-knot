@@ -578,7 +578,7 @@ export interface HistoryEvent {
   managing?: { tool: HarnessId; on: boolean };
   /** 'on' / 'off': the one harness it was turned on or off in, or (`cause` 'in-line') put in. */
   only?: HarnessId;
-  /** 'on' / 'off' (`cause` 'switch'): keep-outs before and after when `on` changed with `except` or >1 keep-out changed. */
+  /** 'on' / 'off' (`cause` 'switch'): keep-outs before and after when a person's switch changed `on` together with `except`. */
   wasExcept?: HarnessId[];
   nowExcept?: HarnessId[];
   /**

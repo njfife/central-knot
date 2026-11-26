@@ -474,21 +474,46 @@ test('An Off row offers one tool only: rowClicks.onOnly keeps every other tool o
   // A removal still owed keeps offPlace's "still in … until sync runs" before the On sentence.
   const owed = item({ on: false, except: ['codex-cli'], applied: { 'codex-cli': 'b' } });
   assert.equal(statusLine(row({ 'codex-cli': 'b' }, {}, owed), owed, tools), 'Off · still in Codex until sync runs. On puts it back in 2 of 3 tools.');
-  // said.onOnly: failure, clean one-tool-only, OpenCode reading Claude Code's folder, shared folder, and pluginOn (never "only" while another remains).
-  assert.equal(skills.said.onOnly('bench-runner', 'claude-cli', true, row({}), six), 'bench-runner couldn’t be put in Claude Code.');
-  assert.equal(skills.said.onOnly('bench-runner', 'codex-cli', false, { key: 'bench-runner', hashes: { 'codex-cli': 'b' } }, six), 'bench-runner is on in Codex only.');
+  // On status line still names a tool that has it another way even when that tool is in except (as after an Off-row tool switch).
+  const onClaudeOnly = item({ on: true, except: ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'], applied: { 'claude-cli': 'b' } });
   const openReads: LibraryRow = {
     key: 'bench-runner', hashes: { 'claude-cli': 'b' },
+    plan: { orderProved: true, write: [], remove: [], keep: [], forget: [], ownCopy: [], current: ['claude-cli'] },
     anotherWay: { 'opencode-cli': 'OpenCode reads Claude Code’s copy, in Claude Code’s skills folder.' },
     loads: { 'opencode-cli': { folder: 'bench-runner', name: 'bench-runner', skillFile: '~/.claude/skills/bench-runner/SKILL.md', switchedOff: false, in: 'claude-cli' } },
   };
-  assert.equal(skills.said.onOnly('bench-runner', 'claude-cli', false, openReads, six),
-    'bench-runner is on in Claude Code. OpenCode reads Claude Code’s copy, in Claude Code’s skills folder.');
+  assert.equal(statusLine(openReads, onClaudeOnly, six),
+    'On in Claude Code · OpenCode has it another way · kept out of Copilot CLI, Codex, Pi and Antigravity');
+  // said.onOnly: failure, clean one-tool-only, OpenCode reading Claude Code's folder, link reader, own copy in another tool, shared folder + pluginOn (never "only" while another has it).
+  assert.equal(skills.said.onOnly('bench-runner', 'claude-cli', true, row({}), six), 'bench-runner couldn’t be put in Claude Code.');
+  assert.equal(skills.said.onOnly('bench-runner', 'codex-cli', false, { key: 'bench-runner', hashes: { 'codex-cli': 'b' } }, six), 'bench-runner is on in Codex only.');
+  assert.equal(skills.said.onOnly('bench-runner', 'claude-cli', false, openReads, six, onClaudeOnly),
+    'bench-runner is on in Claude Code. OpenCode reads it too.');
+  const linkedOther: LibraryRow = {
+    key: 'bench-runner', hashes: { 'claude-cli': 'b' },
+    anotherWay: { 'pi-cli': 'Pi has a link at ~/.pi/agent/skills/bench-runner to ~/shared/bench-runner.' },
+    loads: { 'pi-cli': { folder: 'bench-runner', name: 'bench-runner', skillFile: '~/.pi/agent/skills/bench-runner/SKILL.md', switchedOff: false } },
+  };
+  assert.equal(skills.said.onOnly('bench-runner', 'claude-cli', false, linkedOther, six, onClaudeOnly),
+    'bench-runner is on in Claude Code. Pi reads it too.');
+  const onCodexOnly = item({ on: true, except: ['claude-cli', 'copilot-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'], applied: { 'codex-cli': 'b' } });
+  const ownInCopilot: LibraryRow = {
+    key: 'own-test', hashes: { 'codex-cli': 'b', 'copilot-cli': 'x' },
+    plan: { orderProved: true, write: [], remove: [], keep: [], forget: [], ownCopy: ['copilot-cli'], current: ['codex-cli'] },
+  };
+  assert.equal(skills.said.onOnly('own-test', 'codex-cli', false, ownInCopilot, six, onCodexOnly),
+    'own-test is on in Codex. Copilot CLI has its own copy.');
+  const ownInTwo: LibraryRow = {
+    key: 'own-test', hashes: { 'codex-cli': 'b', 'copilot-cli': 'x', 'pi-cli': 'y' },
+    plan: { orderProved: true, write: [], remove: [], keep: [], forget: [], ownCopy: ['copilot-cli', 'pi-cli'], current: ['codex-cli'] },
+  };
+  assert.equal(skills.said.onOnly('own-test', 'codex-cli', false, ownInTwo, six, onCodexOnly),
+    'own-test is on in Codex. Copilot CLI and Pi have their own copies.');
   const sharedAndPlugin: LibraryRow = {
     key: 'bench-runner', hashes: { 'claude-cli': 'b' }, pluginOn: ['copilot-cli'],
     anotherWay: { 'codex-cli': 'Codex also reads a copy at ~/.agents/skills/bench-runner, which is not Central Knot’s.' },
     loads: { 'codex-cli': { folder: 'bench-runner', name: 'bench-runner', skillFile: '~/.agents/skills/bench-runner/SKILL.md', switchedOff: false } },
   };
-  assert.equal(skills.said.onOnly('bench-runner', 'claude-cli', false, sharedAndPlugin, six),
-    'bench-runner is on in Claude Code. Codex also reads a copy at ~/.agents/skills/bench-runner, which is not Central Knot’s. Copilot CLI has it on through its plugin.');
+  assert.equal(skills.said.onOnly('bench-runner', 'claude-cli', false, sharedAndPlugin, six, onClaudeOnly),
+    'bench-runner is on in Claude Code. Codex reads it too. Copilot CLI has it on through its plugin.');
 });
