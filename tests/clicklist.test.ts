@@ -53,7 +53,7 @@ const api = {
 };
 // The page's modules, loaded under node with no window: the little of the DOM they touch as they load and redraw. An element keeps
 // what is appended to it, so a test can read the words a part draws (textOf).
-const element = (): any => ({ attrs: {} as Record<string, string>, dataset: {}, style: { setProperty() {} }, classList: { toggle() {}, add() {}, remove() {} }, children: [], content: {}, setAttribute(k: string, v: string) { this.attrs[k] = v; }, addEventListener() {}, replaceChildren() {},
+const element = (): any => ({ attrs: {} as Record<string, string>, dataset: {}, style: { setProperty() {} }, classList: { toggle() {}, add() {}, remove() {} }, children: [], content: {}, setAttribute(k: string, v: string) { this.attrs[k] = v; }, addEventListener() {}, replaceChildren(...kids: unknown[]) { this.children = kids; },
   append(...kids: unknown[]) { this.children.push(...kids); }, appendChild() {}, focus() {}, querySelector: () => element(), after() {} });
 const findById = (node: any, id: string): any => {
   if (!node || typeof node === 'string') return undefined;
@@ -72,7 +72,7 @@ Object.assign(globalThis, {
 Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh' } });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
-const { acting, applyByKind, applyClick, askFlash, closeResult, deleteProfileDef, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, profileEndedLine, profilesBefore, saveProfileDef, selectOff, switchToProfile, whyKindReadOnly, whyReadOnly,
+const { acting, applyByKind, applyClick, askFlash, busy, closeResult, deleteProfileDef, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, profileEndedLine, profilesBefore, saveProfileDef, selectOff, switchToProfile, whyKindReadOnly, whyReadOnly,
   loadHome, problemKey, queueClick, readAgain, restoreEvent, setRenderer, showPage, syncNow, state: app } = await import('../src/app.ts');
 const { repo, repoPage } = await import('../src/repopage.ts');
 const { applyPluginOps, clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, resultOn, runReloads, shownPlugins, turnFromLine, turnPlugin, undoLabel, undoLast, usePlugins } = await import('../src/pluginstate.ts');
@@ -2843,7 +2843,7 @@ test('Unused band: skipped rows marked, unread managed tool cue, 3-line disclosu
 
 // ---------- Step UX-6D: plugin acts say when a profile stops being in use ----------
 
-test('profileEndedLine gives the line when all profiles before stop being in use, and nothing otherwise', t => {
+test('profileEndedLine gives the line when all profiles before stop being in use, and falls back to busy’s actBefore when before is omitted', async t => {
   const { viewWith } = pluginProfileWorld(t);
   const work = app.home!.profiles.profiles[0]!;
   const before = profilesBefore();
@@ -2852,7 +2852,11 @@ test('profileEndedLine gives the line when all profiles before stop being in use
   assert.equal(profileEndedLine(before, viewWith(true)), undefined);
   assert.equal(profileEndedLine(before, viewWith(false, '/other-home')), undefined);
   assert.equal(profileEndedLine({ home: '/home', profiles: [] }, viewWith(false)), undefined);
+  // Outside busy (actBefore unset), omitted/undefined before gives undefined; inside busy, it defaults to busy's actBefore.
   assert.equal(profileEndedLine(undefined, viewWith(false)), undefined);
+  let insideBusy: string | undefined;
+  await busy('Working…', async () => { insideBusy = profileEndedLine(undefined, viewWith(false)); });
+  assert.equal(insideBusy, 'Work stopped being the profile in use.');
   assert.equal(profileEndedLine(before, undefined), undefined);
   const focus = { id: 'p-focus', name: 'Focus', items: ['skill:notes'], switchesPluginItems: true };
   assert.equal(profileEndedLine({ home: '/home', profiles: [work, focus] }, viewWith(false)), 'Work and Focus stopped being the profiles in use.');
@@ -3006,7 +3010,7 @@ test('Library plugin line (sayResult): carries profileLine on LineResult when li
   };
   const aim = { home: '/home', source: '/market', marketName: 'team', plugin: 'alpha', tool: 'copilot-cli' as HarnessId, act: 'remove' as const, item: { kind: 'agent' as const, name: 'lead' } };
 
-  // Line on screen: LineResult carries profileLine and announce speaks it.
+  // Line on screen: LineResult carries profileLine; spoken text has the whole result while the visible status bar keeps the prior wording.
   t.mock.method(document, 'querySelector', () => element());
   turnFromLine(aim);
   await settled();
@@ -3015,6 +3019,11 @@ test('Library plugin line (sayResult): carries profileLine on LineResult when li
   const onLine = resultOn('copilot-cli', { kind: 'agent', name: 'lead' }) as { profileLine?: string } | undefined;
   assert.equal(onLine?.profileLine, 'Work stopped being the profile in use.');
   assert.match(app.said.text, /Work stopped being the profile in use\.$/);
+  assert.match(textOf(announcement), /Work stopped being the profile in use\.$/);
+  const visibleStatus = announcement.children.filter((kid: any) => !String(kid?.className ?? '').includes('visually-hidden')).map(textOf).join('');
+  assert.doesNotMatch(visibleStatus, /stopped being the profile/);
+  assert.doesNotMatch(String(announcement.title ?? ''), /stopped being the profile/);
+  assert.match(visibleStatus, /^Removed alpha from Copilot CLI\./);
 
   // Line off screen (header path): tell receives before, sets app.outcome.profileLine, and resultOn stays hidden while header shows it.
   app.home = viewWith(true);
@@ -3064,4 +3073,114 @@ test('Library plugin line (sayResult): carries profileLine on LineResult when li
   await settled();
   assert.equal(resultOn('codex-cli', { kind: 'skill', name: 'triage' })?.profileLine, undefined);
   assert.doesNotMatch(app.said.text, /stopped being the profile/);
+});
+
+test('One plugin click announces once, with its result and profile sentence together; a successful click leaving Work in use says nothing', async t => {
+  const { viewWith } = pluginProfileWorld(t);
+  let nextHome = viewWith(false);
+  t.mock.method(api, 'refresh', async () => { main.reads.home++; return nextHome; });
+  const turnedOff: PluginTurnResult = {
+    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-off', report: { tool: 'claude-cli', outcome: 'plugin-off', changed: true, message: 'Turned off.', runs: [] } }],
+    before: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: [] },
+    back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-on' }],
+  };
+  const seqBefore = app.said.seq;
+  turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
+  await settled();
+  await main.answer(turnedOff);
+  await settled();
+  assert.equal(app.said.seq - seqBefore, 1, 'one click announces once, not before and after reading home');
+  assert.match(app.said.text, /Work stopped being the profile in use\.$/);
+
+  // One successful click leaving Work in use says nothing about any profile and announces once.
+  closeRun();
+  app.home = viewWith(true);
+  nextHome = viewWith(true);
+  const seqStay = app.said.seq;
+  turnPlugin(entry, 'alpha', 'let-in', 'claude-cli');
+  await settled();
+  await main.answer(installed('alpha'));
+  await settled();
+  assert.equal(app.said.seq - seqStay, 1);
+  assert.equal(market.lastRun?.profileLine, undefined);
+  assert.doesNotMatch(app.said.text, /stopped being the profile/);
+});
+
+test('Overlapping plugin click and Library line act: only the act that ended Work says so (both orders)', async t => {
+  const { viewWith } = pluginProfileWorld(t);
+  const prevCss = (globalThis as Record<string, unknown>).CSS;
+  (globalThis as Record<string, unknown>).CSS = { escape: (value: string) => value };
+  t.after(() => {
+    if (prevCss === undefined) delete (globalThis as Record<string, unknown>).CSS;
+    else (globalThis as Record<string, unknown>).CSS = prevCss;
+  });
+  t.mock.method(document, 'querySelector', () => element());
+  let diskHome = viewWith(true);
+  t.mock.method(api, 'refresh', async () => { main.reads.home++; return diskHome; });
+  const turnedOff: PluginTurnResult = {
+    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'codex-cli', action: 'plugin-off', report: { tool: 'codex-cli', outcome: 'plugin-off', changed: true, message: 'Turned off.', runs: [] } }],
+    before: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: [] },
+    back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'codex-cli', action: 'plugin-on' }],
+  };
+  const removedBeta: PluginTurnResult = {
+    done: [{ source: '/market', marketName: 'team', plugin: 'beta', tool: 'copilot-cli', action: 'remove', report: { tool: 'copilot-cli', outcome: 'uninstalled', changed: true, message: 'Uninstalled.', runs: [] } }],
+    before: { id: 'e2', source: '/market', marketName: 'team', plugin: 'beta', on: true, except: [] },
+    back: [{ source: '/market', marketName: 'team', plugin: 'beta', tool: 'copilot-cli', action: 'install' }],
+  };
+  const betaAim = { home: '/home', source: '/market', marketName: 'team', plugin: 'beta', tool: 'copilot-cli' as HarnessId, act: 'remove' as const, item: { kind: 'agent' as const, name: 'lead' } };
+
+  // (a) Forward: alpha untick ends Work; while it runs, Remove on beta's line queues behind it. Only alpha's run credits Work ending.
+  turnPlugin(entry, 'alpha', 'keep-out', 'codex-cli');
+  await settled();
+  turnFromLine(betaAim);
+  await settled();
+  diskHome = viewWith(false);
+  await main.answer(turnedOff);
+  await main.answer(removedBeta);
+  await settled();
+  assert.equal(market.lastRun?.profileLine, 'Work stopped being the profile in use.');
+  assert.equal(resultOn('copilot-cli', { kind: 'agent', name: 'lead' })?.profileLine, undefined);
+
+  // (a) Reverse: alpha untick ends Work; while it runs, let-in on beta's line restores Work. Alpha's run still credits Work ending.
+  closeRun();
+  app.home = viewWith(true);
+  diskHome = viewWith(true);
+  const letInBeta = { ...betaAim, act: 'let-in' as const, tool: 'codex-cli' as HarnessId, item: { kind: 'skill' as const, name: 'other' } };
+  const onBeta: PluginTurnResult = {
+    done: [{ source: '/market', marketName: 'team', plugin: 'beta', tool: 'codex-cli', action: 'plugin-on', report: { tool: 'codex-cli', outcome: 'plugin-on', changed: true, message: 'Turned on.', runs: [] } }],
+    before: { id: 'e2', source: '/market', marketName: 'team', plugin: 'beta', on: true, except: ['codex-cli'] },
+    back: [{ source: '/market', marketName: 'team', plugin: 'beta', tool: 'codex-cli', action: 'plugin-off' }],
+  };
+  turnPlugin(entry, 'alpha', 'keep-out', 'codex-cli');
+  await settled();
+  turnFromLine(letInBeta);
+  await settled();
+  diskHome = viewWith(false);
+  await main.answer(turnedOff);
+  // Before beta's turnPlugin finishes, alpha's run has already read diskHome=false and ended.
+  diskHome = viewWith(true);
+  await main.answer(onBeta);
+  await settled();
+  assert.equal(market.lastRun?.profileLine, 'Work stopped being the profile in use.');
+  assert.equal(resultOn('codex-cli', { kind: 'skill', name: 'other' })?.profileLine, undefined);
+});
+
+test('Overlapping slow plugin install and Library skill switch: only the Library switch says Work ended', async t => {
+  const { viewWith } = pluginProfileWorld(t);
+  let diskHome = viewWith(true);
+  t.mock.method(api, 'refresh', async () => { main.reads.home++; return diskHome; });
+  // Start a slow plugin install that leaves Work in use; while it runs, open Library and switch off skill "notes" (which ends Work).
+  turnPlugin(entry, 'alpha', 'on');
+  await settled();
+  showPage('library');
+  flip('notes', false);
+  await settled();
+  // Alpha finishes first with diskHome still having Work in use.
+  await main.answer(installed('alpha'));
+  // Now the Library switch runs and turns notes off, ending Work.
+  diskHome = viewWith(false);
+  await main.pass(offMade('skills', 'notes'));
+  await settled();
+  assert.equal(app.outcome?.profileLine, 'Work stopped being the profile in use.');
+  assert.equal(market.lastRun?.profileLine, undefined);
 });

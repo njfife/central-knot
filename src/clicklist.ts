@@ -17,7 +17,7 @@ import type { RowKey } from './itemrow.ts';
 /**
  * A run of clicks: its place (an item list, or a tool's tab of one kind under Harnesses: app.ts placeNow; or Plugins),
  * when its last click ended (0 before one has), and the profiles in use when its first click starts to be carried out
- * (app.ts queueClick). Its clicks are the turns that name it.
+ * (app.ts queueClick, pluginstate.ts runClick). Its clicks are the turns that name it.
  */
 export interface Run { place: string; lastAt: number; before?: ProfilesBefore }
 
@@ -86,7 +86,8 @@ async function runList(): Promise<void> {
   const ran: Turn[] = [];
   for (;;) {
     const next = clickList.turns.find(turn => turn.state === 'waiting');
-    if (next) {
+    // Before another run writes, finish the earlier run's home read and end callback against the home it left.
+    if (next && (!ran.length || ran.at(-1)!.run === next.run)) {
       // Not drawn: a row looks the same while its click waits and while it runs (Plugins' runClick draws its own row's words).
       next.state = 'running';
       ran.push(next);
@@ -95,8 +96,10 @@ async function runList(): Promise<void> {
       next.run.lastAt = Date.now();
       rerender();
     } else if (homeReadOwed()) await readHomeOnce();
-    // A click made during that read runs too, and the home is read again after it.
-    else break;
+    else if (next) {
+      for (const said of new Set(ran.splice(0).map(turn => turn.ended))) said?.();
+      rerender();
+    } else break;
   }
   clickList.running = false;
   for (const said of new Set(ran.map(turn => turn.ended))) said?.();

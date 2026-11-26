@@ -17068,6 +17068,14 @@ async function profilePluginsFlow() {
   same('unticking Codex’s box ends Work: #plugins-result row 2 and spoken text say Work stopped being the profile in use',
     [(await a.text('#status-profile'))?.trim(), await a.exists('#plugins-result'), await pluginProfile(), (await spoken()).includes('Work stopped being the profile in use.')],
     ['No profile', true, 'Work stopped being the profile in use.', true]);
+  same('plugins result line 1 and profile line match the item list’s 12px ink with no 3em name gap',
+    await a.run(`(() => {
+      const r = getComputedStyle(document.querySelector('#plugins-result'));
+      const p = getComputedStyle(document.querySelector('#header .band-profile'));
+      const n = getComputedStyle(document.querySelector('#header .band-profile-name'));
+      return [r.fontSize, p.fontSize, r.color === p.color, n.minWidth];
+    })()`),
+    ['12px', '12px', true, '0px']);
   for (const [width, height] of [SMALLEST, [1316, 819]]) {
     await sizeTo(a, width, height);
     if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
@@ -17130,8 +17138,18 @@ async function profilePluginsFlow() {
   same('its Undo restores Work with no profile sentence',
     [(await a.text('#status-profile'))?.trim(), await pluginProfile(), /stopped being the profile/.test(await spoken())],
     ['Work', '', false]);
-  // Remove on the Library's plugin line ending Work: live Copilot CLI issue-tracker with an agent beside another plugin sharing MCP server "issues".
+  // One successful click leaving Work in use says nothing: install issue-tracker in Copilot CLI while Work already ticks triage & issues.
   const snapProfiles = readNow(join(home, '.central-knot/profiles.json')), snapPlugins = readNow(join(home, '.central-knot/plugins.json'));
+  mkdirSync(join(home, '.copilot'), { recursive: true });
+  writeFileSync(join(home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'directory', path: market } } } }));
+  await a.click('#header-refresh');
+  await waitEnabled('#pbox-0-issue-tracker-copilot-cli');
+  await a.click('#pbox-0-issue-tracker-copilot-cli');
+  await done();
+  same('one successful click leaving Work in use says nothing about any profile',
+    [(await a.text('#status-profile'))?.trim(), await a.exists('#plugins-result'), await pluginProfile(), /stopped being the profile/.test(await spoken())],
+    ['Work', true, '', false]);
+  // Remove on the Library's plugin line ending Work: live Copilot CLI issue-tracker with an agent beside another plugin sharing MCP server "issues".
   const agentMd = '---\nname: triage-lead\ndescription: Leads triage.\n---\n\nLead triage.\n';
   const marketAgent = join(plugin, 'agents/triage-lead.md'), claudeAgent = join(home, '.claude/plugins/cache/ck-test-market/issue-tracker/2.0.0/agents/triage-lead.md');
   for (const dest of [marketAgent, claudeAgent]) { mkdirSync(dirname(dest), { recursive: true }); writeFileSync(dest, agentMd); }
@@ -17158,9 +17176,14 @@ async function profilePluginsFlow() {
   await done();
   for (let tries = 0; tries < 60 && !(await a.exists('[data-result="copilot-cli:agent:triage-lead"]')); tries++) await wait(100);
   const lineProfile = () => a.run(`document.querySelector('[data-result="copilot-cli:agent:triage-lead"]')?.parentElement?.querySelector('.band-profile')?.textContent ?? ''`);
-  same('Remove on the Library’s plugin line ends Work: profile line draws under the line’s result and is spoken',
-    [(await a.text('#status-profile'))?.trim(), await lineProfile(), (await spoken()).includes('Work stopped being the profile in use.')],
-    ['No profile', 'Work stopped being the profile in use.', true]);
+  const lineStatusCheck = await a.run(`(() => {
+    const el = document.querySelector('#announcement');
+    const visible = [...el.children].filter(k => !k.classList.contains('visually-hidden')).map(k => k.textContent).join('');
+    return [visible.startsWith('Removed issue-tracker from Copilot CLI.'), /stopped being the profile/.test(visible), /stopped being the profile/.test(el.title), (el.textContent ?? '').includes('Work stopped being the profile in use.')];
+  })()`);
+  same('Remove on the Library’s plugin line ends Work: profile line draws under the line’s result, spoken text carries the whole result, and status bar keeps prior wording',
+    [(await a.text('#status-profile'))?.trim(), await lineProfile(), (await spoken()).includes('Work stopped being the profile in use.'), ...lineStatusCheck],
+    ['No profile', 'Work stopped being the profile in use.', true, true, false, false, true]);
   await a.click(byId(rowPart('line-undo', 'agents', leadKey, 'copilot-cli')));
   await done();
   same('its line Undo restores Work with no profile sentence',

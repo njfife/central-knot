@@ -132,7 +132,7 @@ export const state = {
    * What the status bar says (announce): the newest message, whether it is for screen readers only, and its place in
    * the order messages were said, so the newest always wins.
    */
-  said: { text: '', quiet: false, seq: 0 } as { text: string; quiet: boolean; seq: number; link?: { label: string; run: () => void }; notices?: string[] },
+  said: { text: '', quiet: false, seq: 0 } as { text: string; quiet: boolean; seq: number; link?: { label: string; run: () => void }; notices?: string[]; shown?: string },
   /** What the last action did, said on the page it happened on until the next action or page (Outcome). */
   outcome: undefined as Outcome | undefined,
   /**
@@ -222,8 +222,8 @@ export const setPracticeNote = (open: boolean): void => writeFlag(PRACTICE_NOTE,
  * the one shown. A quiet announcement is for screen readers only: the page already shows the same thing (a band), or, for
  * one about sync notices (`notices`), will once each is seen (paintStatusMessage).
  */
-export function announce(text: string, quiet = false, link?: { label: string; run: () => void }, notices?: string[]) {
-  state.said = { text, quiet, seq: state.said.seq + 1, link, notices };
+export function announce(text: string, quiet = false, link?: { label: string; run: () => void }, notices?: string[], shown?: string) {
+  state.said = { text, quiet, seq: state.said.seq + 1, link, notices, shown };
   paintStatusMessage();
 }
 
@@ -234,7 +234,7 @@ let actBefore: ProfilesBefore | undefined;
 export function profilesBefore(): ProfilesBefore | undefined {
   return state.home ? { home: state.home.home, profiles: inUseInHome(state.home) } : undefined;
 }
-/** Gives profileLeftUse when every profile in `before` stopped being in use in `after` (same home), else undefined. */
+/** Gives profileLeftUse when every profile in `before` (defaults to busy's `actBefore` when omitted/undefined) stopped being in use in `after` (same home), else undefined. */
 export function profileEndedLine(before: ProfilesBefore | undefined = actBefore, after: HomeView | undefined = state.home): string | undefined {
   if (!before || !after || after.home !== before.home) return undefined;
   const ended = endedProfiles(before.profiles, inUseInHome(after));
@@ -298,12 +298,15 @@ export function paintStatusMessage() {
   const region = document.getElementById('announcement')!;
   const told = state.said;
   // The first sentence, then the rest, so a narrow bar can drop the rest whole rather than cut a word (style.css).
-  if (region.dataset.text !== told.text) {
+  const shown = told.shown ?? told.text;
+  if (region.dataset.text !== told.text || region.title !== shown) {
     region.dataset.text = told.text;
-    const [, first, rest] = /^(.+?[.!?])(\s.+)?$/s.exec(told.text) ?? [told.text, told.text, ''];
-    region.replaceChildren(...(told.text ? [h('span.said-first', {}, first), rest ? h('span.said-rest', {}, ` ${rest.trim()}`) : null].filter((part): part is HTMLElement => !!part) : []));
+    const [, first, rest] = /^(.+?[.!?])(\s.+)?$/s.exec(shown) ?? [shown, shown, ''];
+    const tail = told.shown !== undefined ? told.text.slice(shown.length) : '';
+    const parts = [shown ? h('span.said-first', {}, first) : null, rest ? h('span.said-rest', {}, ` ${rest.trim()}`) : null, tail ? h('span.visually-hidden', {}, tail) : null];
+    region.replaceChildren(...parts.filter((part): part is HTMLElement => !!part));
   }
-  region.title = told.text;
+  region.title = shown;
   // A link that belongs to the message (the release notes after an update) goes with it.
   const link = document.getElementById('said-link');
   if (link) { link.hidden = !told.link || told.quiet; link.textContent = told.link?.label ?? ''; link.onclick = told.link?.run ?? null; }
@@ -314,7 +317,7 @@ export function paintStatusMessage() {
   region.classList.toggle('visually-hidden', quiet);
   // A narrow status bar shows a small mark instead of a message cut to a stub; its tooltip has the message (style.css).
   const mark = document.getElementById('message-mark');
-  if (mark) { mark.title = told.text; mark.hidden = !told.text || quiet; }
+  if (mark) { mark.title = shown; mark.hidden = !shown || quiet; }
 }
 
 /**
@@ -405,7 +408,7 @@ export async function busy(message: string, work: (page: Page) => Promise<void>)
   catch { announce(couldNotFinish()); }
   finally { actBefore = previousBefore; }
   // When the work said nothing since its "Reading…", what was said before comes back.
-  if (state.said.seq === working) announce(before.text, before.quiet, before.link, before.notices);
+  if (state.said.seq === working) announce(before.text, before.quiet, before.link, before.notices, before.shown);
   state.busy = undefined;
   showActing();
   rerender();
