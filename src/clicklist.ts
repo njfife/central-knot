@@ -1,6 +1,6 @@
 // The page's one list of clicks, carried out one at a time in the order clicked: a row's switch or Add on the item lists
 // (app.ts queueClick), a plugin's switch or tool's box on Plugins (pluginstate.ts turnPlugin) and a tool's line's Install, Put its
-// items here or Remove in the Library (pluginstate.ts turnFromLine, a run of its own: its result is the Library header's) join it,
+// items here or Turn the plugin on (for a kept-off copy) in the Library (pluginstate.ts turnFromLine, a run of its own: its result is the Library header's) join it,
 // each a Turn. While
 // clicks wait or run, the page acts (app.ts acting): the writes it names are off and say why, the page stays live (it scrolls,
 // rows open, switches take clicks), and the background refresh waits: the home is read once when a run gives way to another run

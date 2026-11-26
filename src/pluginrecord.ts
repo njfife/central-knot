@@ -19,14 +19,13 @@
 //   6. wanted, lacks it, no way in         → held, with why.             On, Copilot CLI refuses the marketplace: said.
 //   7. not wanted, lacks it                → nothing.                    Off, nowhere: in line.
 //   8. not wanted, has it, can't take out  → held, with why.             Off, Claude Code's copy is the Anthropic Directory's.
-//   9. not wanted, has it whole, on        → plugin-off (`keeps`).       Kept out of Codex: `enabled = false`, kept installed.
+//   9. not wanted, has it whole, on        → plugin-off.                 Kept out of Codex: `enabled = false`, kept installed.
 //      … off there already                 → nothing.                    Off, Claude Code has it disabled: in line, kept installed.
-//      … its switch is its uninstall       → uninstall.                  Off, Copilot CLI loads it live from a folder.
 //  10. not wanted, has its items           → remove-items.               Off, Pi has its items: they turn Off there.
 // An install (rows 4, 5) is also owed to the automatic updates where the tool is not on the home's `tools` (it is new here,
 // or managed again): `background`; but not while some tool has the plugin off by its own switch (`offElsewhere`: one turned
-// off somewhere it is wanted is not wanted everywhere, read from the tools at each look). Nothing else is: a copy is turned off or
-// uninstalled only at the plugin's own click (its switch, a tool's box unticked), and an install in a tool already on `tools` (one that failed, one
+// off somewhere it is wanted is not wanted everywhere, read from the tools at each look). Nothing else is: a copy is turned off
+// only at the plugin's own click (its switch, a tool's box unticked), and an install in a tool already on `tools` (one that failed, one
 // removed there by hand) waits for its box to be ticked on the plugin's page. "Has it" is installed whole, or (in Pi, OpenCode
 // and Antigravity, which have no plugin installer) some item linked to the plugin wanted in that tool (`items`). In Pi, OpenCode and Antigravity a
 // plugin whose parts from before the library wait to be moved has none and can't go in (rows 7 and 6: pluginstatus.ts toolNow,
@@ -37,7 +36,7 @@
 //
 // The first read (firstRecord) makes plugins.json for a home that has none, from what the tools hold now, writing nothing to
 // any tool: each plugin some managed tool has is On, kept out of every tool that lacks it while some managed tool lacks it.
-// What a click runs of the table's answer is clickRuns (On only installs or turns on, Off only turns off or uninstalls), beside it.
+// What a click runs of the table's answer is clickRuns (On only installs or turns on, Off only turns off), beside it.
 // A TOOL'S BOX on the plugin's page (marketplaces.ts turnedEntry) changes the entry, then the table answers for that tool alone:
 //   On, ticked                → the tool leaves `except` (row 4 or 5 installs).
 //   On, unticked              → the tool joins `except` (row 9 or 10 turns it off there); where no other tool it is let into has it, the plugin's Off
@@ -93,8 +92,6 @@ export interface ToolNow {
   stuck?: string;
   /** Its copy is turned off by the tool's own switch, still installed. */
   off?: true;
-  /** Its own switch can turn its copy off and keep it installed: every copy but Copilot CLI's loaded live, whose switch is its uninstall. */
-  keeps?: true;
 }
 /** The table's answer for one tool. */
 export interface Owed {
@@ -102,10 +99,8 @@ export interface Owed {
   has: ToolNow['has'];
   /** It could take the plugin: by its installer or as items (a tool that can't is never what makes a plugin partial). */
   takes: boolean;
-  /** Its own switch can turn its copy off and keep it installed (ToolNow `keeps`). */
-  keeps?: true;
   /** What brings the tool into line; none when it is in line, held (`held`) or unknown. */
-  act?: 'install' | 'install-items' | 'plugin-on' | 'plugin-off' | 'uninstall' | 'remove-items';
+  act?: 'install' | 'install-items' | 'plugin-on' | 'plugin-off' | 'remove-items';
   /** Why it can't be brought into line here. */
   held?: string;
   /** The install is the automatic updates' to make too: the tool is not on the home's `tools`. */
@@ -123,7 +118,7 @@ export interface PluginSwitch { entry?: Pick<PluginEntry, 'on' | 'except'>; tool
 
 /** THE TABLE (the header's rows), for one tool. `seen`: the home's `tools`; `offSomewhere`: some tool has the plugin off by its own switch. */
 export function owedTo(entry: Pick<PluginEntry, 'on' | 'except'> | undefined, tool: HarnessId, now: ToolNow, seen: readonly HarnessId[], offSomewhere = false): Owed {
-  const is: Owed = { wanted: !!entry && wantedIn(entry, tool), has: now.has, takes: typeof now.route !== 'object', ...(now.keeps ? { keeps: true } : {}) };
+  const is: Owed = { wanted: !!entry && wantedIn(entry, tool), has: now.has, takes: typeof now.route !== 'object' };
   if (is.has === 'unknown' || !entry) return is;
   if (is.wanted) {
     if (now.off && !now.stuck) return { ...is, act: 'plugin-on' };
@@ -134,14 +129,14 @@ export function owedTo(entry: Pick<PluginEntry, 'on' | 'except'> | undefined, to
     return offSomewhere ? { ...owes, offElsewhere: true } : { ...owes, background: true };
   }
   if (is.has === 'none') return is;
-  if (is.has === 'whole') return now.stuck ? { ...is, held: now.stuck } : now.off ? is : { ...is, act: now.keeps ? 'plugin-off' : 'uninstall' };
+  if (is.has === 'whole') return now.stuck ? { ...is, held: now.stuck } : now.off ? is : { ...is, act: 'plugin-off' };
   return { ...is, act: 'remove-items' };
 }
 
 /** Which way a click on a plugin goes: On, Add and a tool's box ticked (`let-in`) put it in; Off and a box unticked (`keep-out`) take it out. */
 export const clickGoes = (what: PluginTurn): 'in' | 'out' => (what === 'on' || what === 'add' || what === 'let-in' ? 'in' : 'out');
 /**
- * What a click runs in one tool: what the table owes there, only where it goes the click's way (On never turns off or uninstalls,
+ * What a click runs in one tool: what the table owes there, only where it goes the click's way (On never turns off,
  * Off never turns on or installs). A copy off there is turned on by On and a tick only: Add leaves what he turned off himself.
  */
 export function clickRuns(what: PluginTurn, owed: Owed): Owed['act'] {

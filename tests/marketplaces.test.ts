@@ -7,9 +7,9 @@ import { syncBuiltinESMExports } from 'node:module';
 import { dirname, join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
-import { resultLines } from '../src/pluginplan.ts';
+import { resultLines, resultParts, resultSentence, undoTitle } from '../src/pluginplan.ts';
 import * as engine from '../src/plugins.ts';
-import { WAITS_TO_MOVE, boxOf, toolMark } from '../src/pluginstatus.ts';
+import { WAITS_TO_MOVE, boxOf, foundIn, toolMark } from '../src/pluginstatus.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { readProfiles } from '../src/profiles.ts';
 import { pluginLive, pluginPlan, wholeTurns, type PluginHome } from '../src/profileplan.ts';
@@ -1275,6 +1275,147 @@ test('A copy whose files can’t be read is left as it is by Off, and the result
     assert.deepEqual(off.done.filter(step => step.tool === 'codex-cli').map(step => [step.report.outcome, step.report.message]), [['held', 'Codex lists it, but its files are not in its plugin cache: left as it is.']]);
     const view = await box.markets.view(), entry = view.marketplaces.find(each => each.source === box.root)!;
     assert.equal(toolMark(view, entry, 'pdf', 'codex-cli', entry.switches!.pdf!.tools['codex-cli']).words, 'Codex lists it, but its files are not in its plugin cache. The plugin is off.', 'its box says why once');
+  } finally { await box.cleanup(); }
+});
+
+test('Copilot CLI’s live copy turned off with Copilot CLI’s own command reads Off, kept installed: box unticked, automatic updates and profiles leave it off, and a tick turns it on via setWhole', async () => {
+  const box = await switchHome({
+    tools: ['copilot-cli'],
+    engine: {
+      findClis: async () => ({ binaries: { 'copilot-cli': '/bin/true' }, apps: {} }),
+      setWhole: async (_context, marketplace, plugin, tool, on) => {
+        box.calls.push(`whole ${plugin}@${marketplace} ${tool} ${on}`);
+        const now = await box.json('.copilot/settings.json');
+        await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ ...now, enabledPlugins: { ...now.enabledPlugins, [`${plugin}@${marketplace}`]: on } }));
+        return { tool, outcome: on ? 'plugin-on' : 'plugin-off', message: '', runs: [], changed: true };
+      },
+    },
+  });
+  try {
+    await put(join(box.home, '.copilot/settings.json'), JSON.stringify({
+      extraKnownMarketplaces: { team: { source: { source: 'directory', path: box.root } } },
+      enabledPlugins: { 'pdf@team': true },
+    }));
+    await box.markets.view();
+    box.calls.length = 0;
+    await box.markets.turn(box.root, 'pdf', 'off', undefined, box.home);
+    assert.deepEqual(box.calls, ['whole pdf@team copilot-cli false'], 'Off runs setWhole, never uninstall');
+    const view = await box.markets.view(), entry = view.marketplaces.find(each => each.source === box.root)!;
+    const mark = toolMark(view, entry, 'pdf', 'copilot-cli', entry.switches!.pdf!.tools['copilot-cli']);
+    const boxState = boxOf(view, entry, 'pdf', 'copilot-cli', mark);
+    assert.deepEqual([mark.mark, boxState.ticked], ['kept-off', false]);
+    const page = { tools: [], library: {}, items: [] };
+    const home = { pluginItems: await readPluginItems({ home: box.home, dataDir: '', binaries: {} }, ['copilot-cli']), profiles: await readProfiles(box.home), skills: page, mcp: page, agents: page } as unknown as PluginHome;
+    const skill = pluginLive(home).find(item => item.name === 'pdf');
+    assert.deepEqual(skill?.copies.map(copy => [copy.tool, copy.way]), [['copilot-cli', 'plugin-off']]);
+    assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops.filter(op => op.plugin === 'pdf'), []);
+    box.calls.length = 0;
+    await box.markets.turn(box.root, 'pdf', 'let-in', 'copilot-cli', box.home);
+    assert.deepEqual(box.calls, ['whole pdf@team copilot-cli true'], 'a tick turns the kept copy on through setWhole');
+  } finally { await box.cleanup(); }
+});
+
+test('Undo of a fresh install of Copilot CLI’s live copy keeps the record with Copilot CLI out, reads Off, kept installed, says turned off (never removed), and a tick turns it on', async () => {
+  const box = await switchHome({
+    tools: ['claude-cli', 'copilot-cli'],
+    engine: {
+      findClis: async () => ({ binaries: { 'claude-cli': '/bin/true', 'copilot-cli': '/bin/true' }, apps: {} }),
+      install: async (_context, catalog, plugin, tool) => {
+        box.calls.push(`install ${plugin}@${catalog.name} ${tool}`);
+        if (tool === 'copilot-cli') {
+          const now = await box.json('.copilot/settings.json');
+          await put(join(box.home, '.copilot/settings.json'), JSON.stringify({
+            ...now,
+            extraKnownMarketplaces: { ...now.extraKnownMarketplaces, [catalog.name]: { source: { source: 'directory', path: catalog.source } } },
+            enabledPlugins: { ...now.enabledPlugins, [`${plugin}@${catalog.name}`]: true },
+          }));
+        } else {
+          await claudeHas(box.home, catalog.name, { [plugin]: { version: '1.0.0' } });
+        }
+        return { tool, outcome: 'installed', message: 'Installed.', runs: [], changed: true, ...(tool === 'copilot-cli' ? { live: true as const } : {}) };
+      },
+      uninstall: async (_context, marketplace, plugin, tool) => {
+        box.calls.push(`uninstall ${plugin}@${marketplace} ${tool}`);
+        if (tool === 'copilot-cli') {
+          const now = await box.json('.copilot/settings.json');
+          await put(join(box.home, '.copilot/settings.json'), JSON.stringify({
+            ...now,
+            enabledPlugins: { ...now.enabledPlugins, [`${plugin}@${marketplace}`]: false },
+          }));
+        } else {
+          const now = await box.json('.claude/plugins/installed_plugins.json');
+          const plugins = { ...(now.plugins ?? {}) };
+          delete plugins[`${plugin}@${marketplace}`];
+          await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins }));
+        }
+        return { tool, outcome: 'uninstalled', message: 'Uninstalled.', runs: [], changed: true };
+      },
+      setWhole: async (_context, marketplace, plugin, tool, on) => {
+        box.calls.push(`whole ${plugin}@${marketplace} ${tool} ${on}`);
+        const now = await box.json('.copilot/settings.json');
+        await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ ...now, enabledPlugins: { ...now.enabledPlugins, [`${plugin}@${marketplace}`]: on } }));
+        return { tool, outcome: on ? 'plugin-on' : 'plugin-off', message: '', runs: [], changed: true };
+      },
+    },
+  });
+  try {
+    await box.markets.view();
+    // Case 1: tick Copilot CLI's box on a never-installed live plugin (no record), then Undo.
+    box.calls.length = 0;
+    const ticked = await box.markets.turn(box.root, 'pdf', 'let-in', 'copilot-cli', box.home);
+    assert.deepEqual([ticked.before, box.calls], [null, ['install pdf@team copilot-cli']]);
+    assert.equal(undoTitle(ticked.back!, { plugin: 'pdf' }),
+      'Reverses what changed for pdf, through each tool’s own command or switch: turns it off in Copilot CLI, kept installed.');
+    box.calls.length = 0;
+    const undone = await box.markets.undoTurn(box.root, 'pdf', ticked.before!, ticked.back!, box.home);
+    assert.deepEqual(box.calls, ['uninstall pdf@team copilot-cli']);
+    assert.equal(resultSentence(resultLines(undone.done, true), true), 'Undone: pdf turned off in Copilot CLI.');
+    assert.deepEqual(resultParts(resultLines(undone.done, true), true, { short: true, here: { plugin: 'pdf', source: box.root } }), ['Undone: ', 'turned off in Copilot CLI', '.']);
+    const saved = (await box.record()).plugins.find(each => each.plugin === 'pdf');
+    assert.deepEqual([saved?.on, saved?.except.includes('copilot-cli')], [false, false], 'record keeps the plugin Off');
+    const view = await box.markets.view(), entry = view.marketplaces.find(each => each.source === box.root)!;
+    const mark = toolMark(view, entry, 'pdf', 'copilot-cli', entry.switches!.pdf!.tools['copilot-cli']);
+    assert.deepEqual([foundIn(view, entry.switches!.pdf), mark.mark, boxOf(view, entry, 'pdf', 'copilot-cli', mark)], [[], 'kept-off', { ticked: false }]);
+    // A tick afterwards turns the live copy back on through setWhole (one install, never uninstall).
+    box.calls.length = 0;
+    await box.markets.turn(box.root, 'pdf', 'let-in', 'copilot-cli', box.home);
+    assert.deepEqual(box.calls, ['whole pdf@team copilot-cli true']);
+
+    // Case 2: turn On a never-installed live plugin (no record) across Claude Code and Copilot CLI, then Undo.
+    box.calls.length = 0;
+    const turnedOn = await box.markets.turn(box.root, 'notes', 'on', undefined, box.home);
+    assert.equal(turnedOn.before, null);
+    assert.equal(undoTitle(turnedOn.back!, { plugin: 'notes' }),
+      'Reverses what changed for notes, through each tool’s own command or switch: uninstalls it from Claude Code and turns it off in Copilot CLI, kept installed.');
+    box.calls.length = 0;
+    const undoneOn = await box.markets.undoTurn(box.root, 'notes', turnedOn.before!, turnedOn.back!, box.home);
+    assert.equal(resultSentence(resultLines(undoneOn.done, true), true), 'Undone: notes removed from Claude Code; turned off in Copilot CLI.');
+    const notesSaved = (await box.record()).plugins.find(each => each.plugin === 'notes');
+    assert.deepEqual([notesSaved?.on, notesSaved?.except], [false, []]);
+    const view2 = await box.markets.view(), entry2 = view2.marketplaces.find(each => each.source === box.root)!;
+    assert.deepEqual([foundIn(view2, entry2.switches!.notes), toolMark(view2, entry2, 'notes', 'copilot-cli', entry2.switches!.notes!.tools['copilot-cli']).mark], [[], 'kept-off']);
+
+    // Case 3: installed by hand in Claude Code (no record), tick Copilot CLI's box, then Undo keeps Claude Code On and Copilot CLI kept out.
+    await put(join(box.root, 'plugins/extra/skills/extra/SKILL.md'), '---\nname: extra\ndescription: extra\n---\n');
+    await put(join(box.root, '.claude-plugin/marketplace.json'), JSON.stringify({
+      name: 'team',
+      plugins: ['pdf', 'notes', 'extra'].map(name => ({ name, source: `./plugins/${name}` })),
+    }));
+    await claudeHas(box.home, 'team', { extra: { version: '1.0.0' } });
+    await box.markets.view(true);
+    box.calls.length = 0;
+    const tickedExtra = await box.markets.turn(box.root, 'extra', 'let-in', 'copilot-cli', box.home);
+    assert.equal(tickedExtra.before, null);
+    const undoneExtra = await box.markets.undoTurn(box.root, 'extra', tickedExtra.before!, tickedExtra.back!, box.home);
+    assert.equal(resultSentence(resultLines(undoneExtra.done, true), true), 'Undone: extra turned off in Copilot CLI.');
+    const extraSaved = (await box.record()).plugins.find(each => each.plugin === 'extra');
+    assert.deepEqual([extraSaved?.on, extraSaved?.except.includes('claude-cli'), extraSaved?.except.includes('copilot-cli')], [true, false, true]);
+    const view3 = await box.markets.view(), entry3 = view3.marketplaces.find(each => each.source === box.root)!;
+    assert.deepEqual([
+      foundIn(view3, entry3.switches!.extra),
+      toolMark(view3, entry3, 'extra', 'claude-cli', entry3.switches!.extra!.tools['claude-cli']).mark,
+      toolMark(view3, entry3, 'extra', 'copilot-cli', entry3.switches!.extra!.tools['copilot-cli']).mark,
+    ], [[], 'installed', 'kept-off']);
   } finally { await box.cleanup(); }
 });
 
