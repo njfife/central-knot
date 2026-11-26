@@ -1,16 +1,17 @@
-// Shared hook-row controls and panels for every hook row: Run it / Running… + Stop (offered by canRun; main's hookrun.ts
+// Shared hook-row controls, rows (hookRow) and panels for every hook row: Run it / Running… + Stop (offered by canRun; main's hookrun.ts
 // runHook decides) beside View source / Hide source inside one span, plus the opened run result (above) and source block
 // (below), called by instructionspage.ts sessionStripView (Instructions and a tool's Instructions tab) and pluginpage.ts
-// partList (from hookGroup). Reads source over hook:source (hooksource.ts) and runs/stops on click over hook:run / hook:stop
+// (sessionHookStrip and partList from hookGroup). Reads source over hook:source (hooksource.ts) and runs/stops on click over hook:run / hook:stop
 // (hookrun.ts), wording results through sessionhooks.ts hookRunWords, updating in place so open editors keep their caret.
 // Nothing starts a run on draw; ids hash the row key and declaration fingerprint; Escape closes the focused block and refocuses
 // its button; leaving the page prunes state (without stopping main); Refresh and home switches clear all state.
 import { shownPath, state } from './app.ts';
 import { button, closeButton, h, icon, pathText } from './dom.ts';
 import { pagePlatform } from './machine.ts';
-import { hookRunWords } from './sessionhooks.ts';
-import type { HomeMode, HookRunResult, HookSource, HookSourceRef } from './types.ts';
-import { HOOK_SOURCE_UNREADABLE, fileName } from './words.ts';
+import { isTextEvent } from './pluginoutcomes.ts';
+import { hookRunWords, type TextHookRow } from './sessionhooks.ts';
+import type { HomeMode, HomeView, HookRunResult, HookSource, HookSourceRef } from './types.ts';
+import { HOOK_SOURCE_UNREADABLE, fileName, sentence } from './words.ts';
 
 interface RunEntry {
   seq: number;
@@ -25,10 +26,14 @@ const opened = new Map<string, { seq: number; panelId: string; source?: HookSour
 const runs = new Map<string, RunEntry>();
 let seq = 0;
 
-/** Whether the page offers Run it (mirrors main's own deciding gate in hookrun.ts runHook): this computer's own home, not Windows, and his own hooks or Claude Code / Codex installed plugin hooks. */
-export function canRun(ref: HookSourceRef, mode: HomeMode | undefined = state.home?.mode, platform = pagePlatform(navigator.userAgent)): boolean {
-  if (mode !== 'actual' || platform === 'win32') return false;
-  return ref.from === 'own' || (ref.from === 'installed' && (ref.tool === 'claude-cli' || ref.tool === 'codex-cli'));
+/** Whether the page offers Run it (mirrors main's deciding gate in hookrun.ts runHook): actual home, non-Windows, own or Claude Code / Codex installed plugin hook that adds text, with the tool's CLI found and the plugin on. */
+export function canRun(ref: HookSourceRef, mode: HomeMode | undefined = state.home?.mode, platform = pagePlatform(navigator.userAgent), home: Pick<HomeView, 'snapshots' | 'pluginItems'> | undefined = state.home): boolean {
+  if (mode !== 'actual' || platform === 'win32' || ref.from === 'marketplace') return false;
+  if (ref.from === 'installed' && ref.tool !== 'claude-cli' && ref.tool !== 'codex-cli') return false;
+  if (!ref.command || !isTextEvent(ref.tool, ref.event)) return false;
+  if (home?.snapshots && !home.snapshots.some(s => s.harness === ref.tool && (s.detection === 'Installed' || s.detection === 'Version unknown' || !!s.app?.binary))) return false;
+  if (ref.from === 'installed' && home?.pluginItems && !home.pluginItems.some(i => i.tool === ref.tool && i.plugin === ref.plugin && i.marketName === ref.marketName && !i.off && !i.problem)) return false;
+  return true;
 }
 
 /** Short deterministic hash of a row key so re-read position shifts give another hook a different button id. */
@@ -245,4 +250,11 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
     currentRun?.result ? runPanel(currentRun) : null,
     currentSource ? panel(currentSource.source) : null,
   ].filter((node): node is HTMLElement => !!node);
+}
+
+/** One hook row (when it runs, its command, and its Run it / Stop / View source controls and inline panels), shared by Instructions and a plugin's page. */
+export function hookRow(hook: TextHookRow, id: string): HTMLElement {
+  return h('li.session-hook', {},
+    h('span.session-lead', {}, h('span.session-when', {}, sentence(hook.when)), h('code.session-command', {}, hook.command)),
+    hookSourceControls(hook.source, id));
 }

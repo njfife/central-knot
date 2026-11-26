@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { runHook, stopHookRun, type HookRunContext } from '../src/hookrun.ts';
 import { readHookSource } from '../src/hooksource.ts';
 import { sessionSettings } from '../src/pluginitems.ts';
-import { HOOK_RUN_WARN, hookFingerprint, hookRunWords, hookStripHelp, hookStripNote, sessionStrip } from '../src/sessionhooks.ts';
+import { HOOK_RUN_WARN, PLUGIN_HOOK_RUN_WARN, hookFingerprint, hookRunWarn, hookRunWords, hookStripHelp, hookStripNote, sessionStrip } from '../src/sessionhooks.ts';
 import type { HookRunResult, HookSourceRef } from '../src/types.ts';
 import { standIn } from './standin.ts';
 
@@ -238,11 +238,14 @@ test('Check 2: hookRunWords matches every outcome, quiet trailing run place/time
 
 // ---------- Pure unit tests: T1.23 & T2.28 strip lines (Check 3) ----------
 
-test('Check 3: standing line names Run it, T1.23 help card stays within 30 words and covers hook cwd and plugin files/data, and T2.28 strip notes replace strip.note', () => {
+test('Check 3: standing lines name Run it and plugin files/data, T1.23 help card drops the plugin sentence and stays within 30 words, and T2.28 strip notes replace strip.note', () => {
   assert.equal(HOOK_RUN_WARN, 'Run it runs the command for real. It may change your files.');
+  assert.equal(PLUGIN_HOOK_RUN_WARN, 'Plugin hooks can change their installed files and data.');
+  assert.equal(hookRunWarn(false), 'Run it runs the command for real. It may change your files.');
+  assert.equal(hookRunWarn(true), 'Run it runs the command for real. It may change your files. Plugin hooks can change their installed files and data.');
 
   const claudeRun = hookStripHelp('claude-cli', true);
-  assert.equal(claudeRun, 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.');
+  assert.equal(claudeRun, 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names.');
   assert.ok(wordCount(claudeRun) <= 30, `expected <=30 words, got ${wordCount(claudeRun)}`);
 
   const claudeNoRun = hookStripHelp('claude-cli', false);
@@ -250,7 +253,7 @@ test('Check 3: standing line names Run it, T1.23 help card stays within 30 words
   assert.ok(wordCount(claudeNoRun) <= 30);
 
   const copilotRun = hookStripHelp('copilot-cli', true);
-  assert.equal(copilotRun, 'Session-start hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.');
+  assert.equal(copilotRun, 'Session-start hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names.');
   assert.ok(wordCount(copilotRun) <= 30);
 
   const copilotNoRun = hookStripHelp('copilot-cli', false);
@@ -1005,4 +1008,158 @@ test('Installed plugin hook row renders Run it for Claude Code (with missingOpti
   copilotRow.append(...viewMod.hookSourceControls(copilotRef, 'hook-source-instructions-copilot-cli-1-0'));
   assert.equal(dom.findAll(copilotRow, n => 'data-hook-run' in (n.attrs ?? {})).length, 0);
   assert.equal(dom.findAll(copilotRow, n => 'data-hook-source' in (n.attrs ?? {})).length, 1);
+});
+
+test('canRun hides Run it without the CLI, for off plugins, and for non-text hooks, while allowing app-carried binaries', async () => {
+  makeDom();
+  await import('../src/settingspage.ts');
+  const { state } = await import('../src/app.ts');
+  const viewMod = await import('../src/hooksourceview.ts');
+  const claudeRef: HookSourceRef = { from: 'installed', tool: 'claude-cli', plugin: 'helper', marketName: 'team', declaredIn: '/p/hooks.json', event: 'SessionStart', at: 0, command: 'echo hi', fingerprint: 'fp-1' };
+  const nonTextEventRef: HookSourceRef = { ...claudeRef, event: 'PreToolUse' };
+  const emptyCommandRef: HookSourceRef = { ...claudeRef, command: '' };
+  const copilotPromptRef: HookSourceRef = { from: 'own', tool: 'copilot-cli', declaredIn: '/c/hooks.json', event: 'UserPromptSubmit', at: 0, command: 'echo hi', fingerprint: 'fp-2' };
+  const snap = (harness: string, detection: string, binary?: string) => ({
+    harness, harnessName: harness, surface: 'CLI', mode: 'actual', label: 'Home', root: '/tmp/h',
+    detection, probe: { state: detection === 'Installed' ? 'ok' : 'missing', detail: '' },
+    ...(binary ? { app: { name: 'App', carries: 'CLI', binary } } : {}), discovery: 'ready', skills: [], issues: [],
+  });
+  const install = (off?: boolean) => ({ tool: 'claude-cli', plugin: 'helper', marketName: 'team', items: [], listed: true, ...(off ? { off: true } : {}) });
+
+  state.home = { home: '/tmp/h', mode: 'actual', label: 'Home', snapshots: [snap('claude-cli', 'Config found but app not detected')], pluginItems: [install()] } as any;
+  assert.equal(viewMod.canRun(claudeRef, 'actual', 'linux'), false, 'missing CLI hides Run it');
+
+  state.home = { home: '/tmp/h', mode: 'actual', label: 'Home', snapshots: [snap('claude-cli', 'App only')], pluginItems: [install()] } as any;
+  assert.equal(viewMod.canRun(claudeRef, 'actual', 'linux'), false, 'app without binary hides Run it');
+
+  state.home = { home: '/tmp/h', mode: 'actual', label: 'Home', snapshots: [snap('claude-cli', 'App only', '/app/claude')], pluginItems: [install()] } as any;
+  assert.equal(viewMod.canRun(claudeRef, 'actual', 'linux'), true, 'app carrying binary allows Run it');
+
+  state.home = { home: '/tmp/h', mode: 'actual', label: 'Home', snapshots: [snap('claude-cli', 'Installed'), snap('copilot-cli', 'Installed')], pluginItems: [install(true)] } as any;
+  assert.equal(viewMod.canRun(claudeRef, 'actual', 'linux'), false, 'off plugin hides Run it');
+
+  state.home = { home: '/tmp/h', mode: 'actual', label: 'Home', snapshots: [snap('claude-cli', 'Installed'), snap('copilot-cli', 'Installed')], pluginItems: [install()] } as any;
+  assert.equal(viewMod.canRun(nonTextEventRef, 'actual', 'linux'), false, 'non-text event hides Run it');
+  assert.equal(viewMod.canRun(emptyCommandRef, 'actual', 'linux'), false, 'hook with no command hides Run it');
+  assert.equal(viewMod.canRun(copilotPromptRef, 'actual', 'linux'), false, 'Copilot prompt hook hides Run it');
+  assert.equal(viewMod.canRun(claudeRef, 'actual', 'linux'), true, 'installed on Claude Code text hook with CLI allows Run it');
+});
+
+test('Plugin page runs installed hooks as arriving or first eligible tool, shows As <tool>, differing version, both standing warnings, and hides Run it where ineligible', async () => {
+  const dom = makeDom();
+  await import('../src/settingspage.ts');
+  const { state } = await import('../src/app.ts');
+  const { market } = await import('../src/pluginstate.ts');
+  const { pluginPage } = await import('../src/pluginpage.ts');
+  const { instructionCard } = await import('../src/instructionspage.ts');
+  const { resetHookSources } = await import('../src/hooksourceview.ts');
+  resetHookSources();
+
+  const claudeHook = { declaredIn: '/tmp/h/.claude/plugins/cache/team/helper/0.4.0/hooks/hooks.json', event: 'SessionStart', at: 0, launch: { shell: 'echo claude-installed' } };
+  const codexHook = { declaredIn: '/tmp/h/.codex/plugins/cache/team/helper/0.5.0/hooks/hooks.json', event: 'SessionStart', at: 0, launch: { shell: 'echo codex-installed' } };
+  const marketHook = { declaredIn: '/markets/team/plugins/helper/hooks/hooks.json', event: 'SessionStart', at: 0, launch: { shell: 'echo market-only' } };
+  const otherHook = { declaredIn: '/markets/team/plugins/helper/hooks/hooks.json', event: 'PreToolUse', at: 0, launch: { shell: 'echo checked' } };
+  const snap = (harness: string, detection = 'Installed') => ({
+    harness, harnessName: harness, surface: 'CLI', mode: 'actual', label: 'Home', root: '/tmp/h',
+    detection, probe: { state: detection === 'Installed' ? 'ok' : 'missing', detail: '' }, discovery: 'ready', skills: [], issues: [],
+  });
+  state.home = {
+    home: '/tmp/h', mode: 'actual', label: 'Home',
+    snapshots: [snap('claude-cli'), snap('codex-cli'), snap('copilot-cli')],
+    sync: { managed: ['claude-cli', 'codex-cli', 'copilot-cli'], writes: {}, access: { allowed: true, reason: '' } },
+    skills: { tools: [], items: [], found: [], issues: [] },
+    mcp: { tools: [], items: [], found: [], issues: [] },
+    agents: { tools: [], items: [], found: [], issues: [] },
+    pluginItems: [
+      { tool: 'claude-cli', plugin: 'helper', marketName: 'team', version: '0.4.0', items: [], listed: true, source: '/markets/team', hooks: [claudeHook] },
+      { tool: 'codex-cli', plugin: 'helper', marketName: 'team', version: '0.5.0', items: [], listed: true, source: '/markets/team', hooks: [codexHook] },
+      { tool: 'copilot-cli', plugin: 'copilot-only', marketName: 'team', version: '1.0.0', items: [], listed: true, source: '/markets/team', hooks: [{ declaredIn: '/c/hooks.json', event: 'sessionStart', at: 0, launch: { shell: 'echo cop' } }] },
+      { tool: 'claude-cli', plugin: 'off-one', marketName: 'team', version: '1.0.0', off: true, items: [], listed: true, source: '/markets/team', hooks: [claudeHook] },
+    ],
+  } as any;
+  const view: any = {
+    home: '/tmp/h', tools: ['claude-cli', 'copilot-cli', 'codex-cli'], clis: { 'claude-cli': true, 'copilot-cli': true, 'codex-cli': true },
+    canWrite: true, marketplaces: [],
+  };
+  const makeEntry = (states: any): any => ({
+    source: '/markets/team', origins: ['central-knot'], name: 'team', kind: 'folder', sourceLabel: 'Folder: team',
+    plugins: [{ name: 'helper', version: '0.5.0', description: 'Helper', folder: 'plugins/helper' }],
+    states,
+  });
+  const detail: any = {
+    skills: [], commands: [], agents: [], instructions: [], onlyInstructions: false,
+    hooks: [marketHook, otherHook], hooksByTool: { 'claude-cli': [marketHook, otherHook], 'codex-cli': [marketHook, otherHook] },
+    mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false, version: '0.5.0', offered: true,
+  };
+  market.details.set('/markets/team\u0000helper', { reading: false, value: detail });
+
+  // Arriving from Codex selects Codex, shows Codex hook, trust note, both standing lines, differing version, and As <tool>.
+  market.nav = { source: '/markets/team', tab: 'plugins', plugin: 'helper', find: '', category: undefined, hookTool: 'codex-cli' } as any;
+  const entry = makeEntry({
+    helper: {
+      'claude-cli': { state: 'installed', version: '0.4.0', path: '/tmp/h/.claude/plugins/cache/team/helper/0.4.0' },
+      'codex-cli': { state: 'installed', version: '0.5.0', path: '/tmp/h/.codex/plugins/cache/team/helper/0.5.0' },
+    },
+  });
+  const codexPage = pluginPage(view, entry, 0, entry.plugins[0]);
+  const codexText = dom.textOf(codexPage);
+  assert.match(codexText, /Run it runs the command for real\. It may change your files\./);
+  assert.match(codexText, /Plugin hooks can change their installed files and data\./);
+  assert.match(codexText, /Codex: Run it runs a hook even if it isn’t trusted in \/hooks\./);
+  assert.match(codexText, /echo codex-installed/);
+  assert.doesNotMatch(codexText, /echo market-only/);
+  assert.match(codexText, /Codex’s installed copy \(0\.5\.0\); Claude Code has\u00a00\.4\.0/);
+  const select = dom.findAll(codexPage, n => n.tag === 'select')[0];
+  assert.ok(select, 'As <tool> selector shown when multiple eligible tools exist');
+  assert.deepEqual(select.children.map((o: any) => dom.textOf(o)), ['As Claude Code', 'As Codex']);
+  assert.equal(dom.findAll(codexPage, n => 'data-hook-run' in (n.attrs ?? {})).length, 1, 'Run it on text hook only, not on Other hooks');
+  const helpCard = dom.findAll(codexPage, n => n.attrs?.role === 'tooltip')[0];
+  assert.equal(dom.textOf(helpCard), 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names.');
+
+  // Without an arriving tool, selects first eligible tool in display order (Claude Code) and shows differing marketplace version.
+  market.nav = { source: '/markets/team', tab: 'plugins', plugin: 'helper', find: '', category: undefined } as any;
+  const claudePage = pluginPage(view, entry, 0, entry.plugins[0]);
+  const claudeText = dom.textOf(claudePage);
+  assert.match(claudeText, /echo claude-installed/);
+  assert.match(claudeText, /Claude Code’s installed copy \(0\.4\.0\); marketplace has 0\.5\.0/);
+  assert.doesNotMatch(claudeText, /trusted in \/hooks/);
+
+  // Marketplace-only, off, Copilot-only, and non-actual home all keep View source alone with no Run it or standing warning.
+  const marketOnlyPage = pluginPage(view, makeEntry({ helper: {} }), 0, entry.plugins[0]);
+  assert.equal(dom.findAll(marketOnlyPage, n => 'data-hook-run' in (n.attrs ?? {})).length, 0);
+  assert.equal(dom.findAll(marketOnlyPage, n => n.className === 'session-run-warn').length, 0);
+  assert.match(dom.textOf(marketOnlyPage), /echo market-only/);
+
+  const offEntry = makeEntry({ helper: { 'claude-cli': { state: 'installed', version: '0.4.0', path: '/p', off: true } } });
+  const offPage = pluginPage(view, offEntry, 0, entry.plugins[0]);
+  assert.equal(dom.findAll(offPage, n => 'data-hook-run' in (n.attrs ?? {})).length, 0);
+  assert.equal(dom.findAll(offPage, n => n.className === 'session-run-warn').length, 0);
+
+  const copEntry = makeEntry({ helper: { 'copilot-cli': { state: 'installed', version: '0.4.0', path: '/c' } } });
+  const copPage = pluginPage(view, copEntry, 0, entry.plugins[0]);
+  assert.equal(dom.findAll(copPage, n => 'data-hook-run' in (n.attrs ?? {})).length, 0);
+
+  state.home!.mode = 'custom';
+  const customPage = pluginPage(view, entry, 0, entry.plugins[0]);
+  assert.equal(dom.findAll(customPage, n => 'data-hook-run' in (n.attrs ?? {})).length, 0);
+  state.home!.mode = 'actual';
+
+  // Instructions strip with own hooks alone omits the plugin sentence; strip with a runnable plugin hook shows both.
+  const ownOnlyCard = instructionCard({
+    tool: 'claude-cli', path: '/tmp/h/.claude/CLAUDE.md', exists: true, text: '# Hi', hash: 'h1',
+    readers: 'Claude Code', notes: [], versions: [],
+    ownHooks: [{ declaredIn: '/tmp/h/.claude/settings.json', event: 'SessionStart', at: 0, launch: { shell: 'echo mine' } }],
+  } as any);
+  const warnText = dom.textOf(dom.findAll(ownOnlyCard, n => n.className === 'session-run-warn')[0]);
+  assert.match(warnText, /Run it runs the command for real\. It may change your files\./);
+  assert.match(warnText, /Plugin hooks can change their installed files and data\./, 'strip with runnable plugin hook shows both sentences');
+
+  state.home!.pluginItems = [];
+  const ownAloneCard = instructionCard({
+    tool: 'claude-cli', path: '/tmp/h/.claude/CLAUDE.md', exists: true, text: '# Hi', hash: 'h1',
+    readers: 'Claude Code', notes: [], versions: [],
+    ownHooks: [{ declaredIn: '/tmp/h/.claude/settings.json', event: 'SessionStart', at: 0, launch: { shell: 'echo mine' } }],
+  } as any);
+  const ownAloneWarn = dom.textOf(dom.findAll(ownAloneCard, n => n.className === 'session-run-warn')[0]);
+  assert.equal(ownAloneWarn, 'Run it runs the command for real. It may change your files.');
 });

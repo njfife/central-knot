@@ -4,20 +4,20 @@
 // it, and its README. The switch and each tool's box wait their turn in the page's list (pluginstate.ts turnPlugin), and
 // the panel says how its click stands (pluginparts.ts clickNote); Update and the skill switches under What it holds act at
 // once (pluginstate.ts applyPluginOps).
-import { acting, showPage, state as app } from './app.ts';
-import { afterLayout, button, fileBlocks, h, icon, toggle as switchToggle, withToolCount } from './dom.ts';
+import { acting, rerender, showPage, state as app } from './app.ts';
+import { afterLayout, button, fileBlocks, h, icon, infoMark, toggle as switchToggle, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { groupBy } from './model.ts';
 import { addsText, componentsFrom, outcomes, sessionHooksAbout } from './pluginoutcomes.ts';
 import { clickNote, componentsOf, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, toolBox, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { pluginKey } from './pluginplan.ts';
-import { boxOf, cantSwitchSkill, comparableText, itemsOnWords, takenItems, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, waitingWords, waitsToMove, whyNotCarried, yourSaid, type ToolMark } from './pluginstatus.ts';
+import { DIRECTORY, boxOf, cantSwitchSkill, comparableText, itemsOnWords, takenItems, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, otherVersionsLine, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionDiffers, versionToCompare, waitingWords, waitsToMove, whyNotCarried, yourSaid, type ToolMark } from './pluginstatus.ts';
 import { hasCowork, pluginTools, takesPlugins } from './presence.ts';
 import { applyPluginOps, market, openLink, shownDetail, toggleOpened, usePlugins } from './pluginstate.ts';
-import type { Components, DeclaredHook, HarnessId, HookSourceRef, MarketplaceView, Outcome, PluginDetail, PluginItemLine, PluginView, PluginsView, YourName } from './types.ts';
-import { hookSourceControls } from './hooksourceview.ts';
-import { hookFingerprint, hookLine } from './sessionhooks.ts';
+import type { Components, DeclaredHook, HarnessId, HookSourceRef, InstalledPlugin, MarketplaceView, Outcome, PluginDetail, PluginItemLine, PluginView, PluginsView, YourName } from './types.ts';
+import { canRun, hookRow, hookSourceControls } from './hooksourceview.ts';
+import { hookFingerprint, hookLine, hookRunWarn, hookStripHelp, hookStripNote, textHookRows, type TextHookRow } from './sessionhooks.ts';
 import { plural } from './model.ts';
 import { andList, coworkWords, toolNames as names } from './words.ts';
 import { openKind } from './matrix.ts';
@@ -258,6 +258,51 @@ function hookGroup(owner: string, groupId: string, marketName: string, plugin: s
   return rows.length ? h('div.plugin-group', {}, h('h4', {}, `${title} (${rows.length})`), about ? h('p.plugin-group-note', {}, about) : null, partList(owner, rows)) : null;
 }
 
+interface EligibleHooks { tool: HarnessId; install: InstalledPlugin; rows: TextHookRow[] }
+
+/** Installed copies of this plugin that can run at least one text-adding hook here (decided by canRun), in display order. */
+function eligibleHookTools(view: PluginsView, entry: MarketplaceView, plugin: PluginView): EligibleHooks[] {
+  return view.tools.flatMap(tool => {
+    const st = stateOf(entry, plugin.name, tool);
+    if (st.state !== 'installed' || st.off) return [];
+    const install = app.home?.pluginItems?.find(item => item.tool === tool && item.plugin === plugin.name && item.marketName === (st.directory ? DIRECTORY : entry.name));
+    const rows = install ? textHookRows(tool, install.hooks, { from: 'installed', tool, plugin: install.plugin, marketName: install.marketName }).filter(row => canRun(row.source)) : [];
+    return rows.length ? [{ tool, install: install!, rows }] : [];
+  });
+}
+
+/** Version note when the selected installed copy's version differs from the marketplace's or another eligible tool's. */
+function hookCopyNote(selected: EligibleHooks, eligible: EligibleHooks[], offered: string | undefined): string | undefined {
+  const ver = selected.install.version;
+  const others = eligible.filter(other => other !== selected && versionDiffers(other.install.version, ver)).map(other => ({ tool: other.tool, version: other.install.version! }));
+  const parts = [versionDiffers(ver, offered) ? `marketplace has ${offered}` : '', others.length ? otherVersionsLine(others) : ''].filter(Boolean);
+  return parts.length ? `${names[selected.tool]}’s installed copy${ver ? ` (${ver})` : ''}; ${parts.join('; ')}` : undefined;
+}
+
+/** Hooks that can add text: runnable strip from the chosen installed copy when eligible, else marketplace View-source rows. */
+function sessionHookStrip(view: PluginsView, entry: MarketplaceView, plugin: PluginView, detail: PluginDetail, owner: string, compareTo: string | undefined) {
+  const eligible = eligibleHookTools(view, entry, plugin);
+  if (!eligible.length) return hookGroup(`${owner}\u0000session`, 'hook-source-session', entry.name, plugin.name, 'Hooks that can add text to sessions',
+    detail.hooks.filter(addsTextSomewhere), sessionHooksAbout(componentsFrom(detail).sessionTextHooks, nativeTools(view, entry, plugin.name)));
+  const selected = eligible.find(each => each.tool === market.nav.hookTool) ?? eligible[0]!;
+  const choose = (event: Event) => {
+    market.nav.hookTool = (event.target as HTMLSelectElement).value as HarnessId;
+    rerender();
+  };
+  const picker = eligible.length > 1 ? h('span.select.select-bar.plugin-hook-as', {},
+    h('select', { id: 'plugin-hook-tool', 'aria-label': 'Run hooks as', onchange: choose },
+      eligible.map(each => h('option', { value: each.tool, selected: each.tool === selected.tool }, `As ${names[each.tool]}`))), icon('chevrons-up-down', 14)) : null;
+  const copy = hookCopyNote(selected, eligible, compareTo);
+  const note = hookStripNote(selected.tool, { groups: [] }, true);
+  return h('section.plugin-group.session-strip', { id: 'plugin-session-hooks', 'aria-label': 'Hooks that can add text' },
+    h('div.session-title-row', {}, h('h4.session-title', {}, `Hooks that can add text (${selected.rows.length})`),
+      infoMark('plugin-hooks-info', 'Hooks that can add text', hookStripHelp(selected.tool, true)), picker),
+    copy ? h('p.plugin-group-note', {}, versionNote(copy)) : null,
+    h('p.session-run-warn', {}, hookRunWarn(true)),
+    note ? h('p.session-note', {}, ...inlineMarkdown(note, () => undefined)) : null,
+    h('ul.session-hooks.plugin-session-hooks', {}, selected.rows.map((hook, row) => hookRow(hook, `hook-source-plugin-${selected.tool}-${row}`))));
+}
+
 
 /**
  * Lays out "Your tools" by the box's width, decided here once (data-layout, which style.css keys off): with room for a
@@ -376,7 +421,8 @@ function contentsBlock(view: PluginsView, entry: MarketplaceView, marketIndex: n
   if (!detail) return section(h('p.plugin-muted', {}, whyNotCarried(entry, plugin.name) ? `Its files aren’t in ${entry.bundled!.app}, so what it holds can’t be shown here.`
     : plugin.folder ? 'Its files couldn’t be read.' : plugin.gone ? 'The marketplace no longer has its files, and no tool’s copy could be read.' : 'Its files live outside this marketplace and couldn’t be read, so what it holds shows once a tool installs it.'));
   const files = (['skills', 'commands', 'agents', 'instructions'] as const).map(kind => ({ kind, parts: filePartsOf(kind, detail, offered) }));
-  const empty = files.every(({ parts }) => !parts.length) && !detail.hooks.length && !detail.mcpServers.length && !detail.lspServers.length && !detail.bin;
+  const sessionHooks = sessionHookStrip(view, entry, plugin, detail, owner, versionToCompare(plugin, detail));
+  const empty = files.every(({ parts }) => !parts.length) && !sessionHooks && !detail.hooks.length && !detail.mcpServers.length && !detail.lspServers.length && !detail.bin;
   const idFor = partIds(`pfile-${marketIndex}`);
   return section(
     detail.problem ? h('p.plugin-muted', {}, detail.problem)
@@ -384,8 +430,7 @@ function contentsBlock(view: PluginsView, entry: MarketplaceView, marketIndex: n
         : 'Its files live outside this marketplace, so its skills, commands, agents and instruction files are read from the tools that installed it.') : null,
     empty && !detail.problem ? h('p.plugin-muted', {}, 'Nothing Central Knot recognizes: no skills, commands, agents, instruction files, hooks or servers.') : null,
     ...files.map(({ kind, parts }) => fileGroup(owner, idFor, kind, parts, detail.offered, kind === 'skills' ? skillColumns(view, entry, plugin, marketIndex, parts.map(part => part.name)) : undefined)),
-    hookGroup(`${owner}\u0000session`, 'hook-source-session', entry.name, plugin.name, 'Hooks that can add text to sessions', detail.hooks.filter(addsTextSomewhere),
-      sessionHooksAbout(componentsFrom(detail).sessionTextHooks, nativeTools(view, entry, plugin.name))),
+    sessionHooks,
     hookGroup(`${owner}\u0000hooks`, 'hook-source-other', entry.name, plugin.name, 'Other hooks', detail.hooks.filter(hook => !addsTextSomewhere(hook))),
     detail.mcpServers.length ? h('div.plugin-group', {}, h('h4', {}, `MCP servers (${detail.mcpServers.length})`),
       partList(`${owner}\u0000mcp`, detail.mcpServers.map(server => ({ name: server.name, text: server.runs, mono: true })))) : null,

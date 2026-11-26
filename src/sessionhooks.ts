@@ -1,7 +1,7 @@
-// A hook as the pages show it (hookLine, hookFingerprint, on a plugin's page and the Instructions page alike), the strip on
-// each tool's card on the Instructions page ("Hooks that can add text", Pi's packages, OpenCode's plugins; its info-card text
-// hookStripHelp and rendered note hookStripNote), and what a hook run's result says in words (hookRunWords), drawn by
-// instructionspage.ts sessionStripView and hooksourceview.ts. Pure: nothing here reads a file or runs a hook. Its facts:
+// A hook as the pages show it (hookLine, hookFingerprint, textHookRows, on a plugin's page and the Instructions page alike), the strip on
+// each tool's card on the Instructions page ("Hooks that can add text", Pi's packages, OpenCode's plugins; its standing warnings
+// HOOK_RUN_WARN, PLUGIN_HOOK_RUN_WARN, hookRunWarn, info-card text hookStripHelp and rendered note hookStripNote), and what a hook run's result says in words (hookRunWords), drawn by
+// instructionspage.ts sessionStripView, pluginpage.ts sessionHookStrip and hooksourceview.ts. Pure: nothing here reads a file or runs a hook. Its facts:
 // - each plugin installed whole in the tool and On there, with its hooks as its installed copy declares them (HomeView
 //   pluginItems, read by pluginitems.ts readPluginItems);
 // - the person's own hooks, and Pi's packages and OpenCode's plugins, as the tool's own settings name them (InstructionFile
@@ -38,6 +38,17 @@ export function originMark(name: string): string {
 }
 const YOURS = 'origin-yours';
 
+/** One text-adding hook row as Instructions and a plugin's own page draw it: when it runs, its command, and its HookSourceRef. */
+export interface TextHookRow { when: string; command: string; source: HookSourceRef }
+
+/** Hooks of `hooks` that can add text in `tool`, mapped to their rows and HookSourceRefs for `owner`. */
+export function textHookRows(tool: HarnessId, hooks: DeclaredHook[] | undefined, owner: HookSourceOwner): TextHookRow[] {
+  return (hooks ?? []).filter(hook => addsText(tool, hook)).map(hook => {
+    const command = hookLine(hook);
+    return { when: whenItRuns(tool, hook), command, source: { ...owner, declaredIn: hook.declaredIn, event: hook.event, at: hook.at, command, fingerprint: hookFingerprint(hook) } };
+  });
+}
+
 /** One origin on the strip: whose it is (`name`, beside its `mark`), where it is turned off, and its hooks beneath. */
 export interface SessionGroup {
   name: string;
@@ -53,7 +64,7 @@ export interface SessionGroup {
   /** Each of its hooks files that couldn't be read: what those declare isn't known. */
   unread: string[];
   /** Each hook that can add text: when it runs, its command (hookLine), and what identifies it for View source. */
-  hooks: { when: string; command: string; source: HookSourceRef }[];
+  hooks: TextHookRow[];
 }
 export interface SessionStrip { heading: string; about: string; note?: string; groups: SessionGroup[] }
 
@@ -67,11 +78,6 @@ const EXTENSIONS: Partial<Record<HarnessId, string>> = { 'pi-cli': 'packages', '
  * why its hooks have no rows (Copilot CLI's prompt hooks) shows the note alone.
  */
 export function sessionStrip(tool: HarnessId, items: InstalledPlugin[], file: Pick<InstructionFile, 'ownHooks' | 'ownHooksUnread' | 'extensions'>): SessionStrip | undefined {
-  const rows = (hooks: DeclaredHook[] = [], owner: HookSourceOwner) =>
-    hooks.filter(hook => addsText(tool, hook)).map(hook => {
-      const command = hookLine(hook);
-      return { when: whenItRuns(tool, hook), command, source: { ...owner, declaredIn: hook.declaredIn, event: hook.event, at: hook.at, command, fingerprint: hookFingerprint(hook) } };
-    });
   const plugins = items.filter(install => install.tool === tool && !install.off)
     .sort((first, second) => first.plugin.localeCompare(second.plugin) || first.marketName.localeCompare(second.marketName));
   // One plugin name in two marketplaces is told apart by its marketplace.
@@ -79,11 +85,11 @@ export function sessionStrip(tool: HarnessId, items: InstalledPlugin[], file: Pi
   const own = file.ownHooks ?? [], unread = file.ownHooksUnread ?? [];
   const groups: SessionGroup[] = [
     ...[...new Set([...own.filter(hook => addsText(tool, hook)).map(hook => hook.declaredIn), ...unread])].map(settings =>
-      ({ name: 'yours', mark: YOURS, settings, unread: unread.filter(path => path === settings), hooks: rows(own.filter(hook => hook.declaredIn === settings), { from: 'own', tool }) })),
+      ({ name: 'yours', mark: YOURS, settings, unread: unread.filter(path => path === settings), hooks: textHookRows(tool, own.filter(hook => hook.declaredIn === settings), { from: 'own', tool }) })),
     ...plugins.map((install): SessionGroup => ({ name: named(install), mark: originMark(`${install.plugin}@${install.marketName}`), plugin: install,
       ...(install.listed ? {} : { says: `${toolNames[tool]}’s own plugin commands turn it off.` }),
       ...(install.problem ? { problem: `${install.problem} What its hooks add isn’t known.` } : {}), unread: install.hooksUnread ?? [],
-      hooks: rows(install.hooks, { from: 'installed', tool, plugin: install.plugin, marketName: install.marketName }) }))
+      hooks: textHookRows(tool, install.hooks, { from: 'installed', tool, plugin: install.plugin, marketName: install.marketName }) }))
       .filter(group => group.problem || group.unread.length || group.hooks.length),
     ...(file.extensions ?? []).map(name => ({ name, mark: originMark(name), unread: [], hooks: [] })),
   ];
@@ -97,12 +103,16 @@ export function sessionStrip(tool: HarnessId, items: InstalledPlugin[], file: Pi
 
 /** Standing line above the first row of every strip that has a runnable hook. */
 export const HOOK_RUN_WARN = 'Run it runs the command for real. It may change your files.';
+/** Second standing sentence on every runnable strip that includes a plugin hook (moved out of hookStripHelp). */
+export const PLUGIN_HOOK_RUN_WARN = 'Plugin hooks can change their installed files and data.';
+/** Standing warning text above runnable rows; includes the plugin sentence whenever a plugin hook can run on the strip. */
+export const hookRunWarn = (hasPlugin: boolean): string => (hasPlugin ? `${HOOK_RUN_WARN} ${PLUGIN_HOOK_RUN_WARN}` : HOOK_RUN_WARN);
 
 /** Information-mark card text on the first hooks strip of a page (30 words at most). */
 export function hookStripHelp(tool: HarnessId, runnable: boolean): string {
   const when = tool === 'copilot-cli' ? 'Session-start' : 'Session-start and prompt';
   const base = `${when} hooks; not URL, MCP, project or organisation.`;
-  return runnable ? `${base} Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.` : base;
+  return runnable ? `${base} Run it uses your home or the folder the hook names.` : base;
 }
 
 /** Note rendered under a hooks strip's heading: T2.28's tool lines replace strip.note where they apply. */

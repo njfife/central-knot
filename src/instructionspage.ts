@@ -10,14 +10,14 @@
 import { acting, announce, baseDraftTyped, draftFile, draftUnsaved, harnessTabShown, savingOff, loadInstructionVersion, ownText, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { baseCard, baseStrip } from './basecard.ts';
 import { changeCounts, diffView, discardConfirm, escapeTo, infoBox, keys, legend, previewBlock, versionsList, type Stage } from './editparts.ts';
-import { fileName, lineCount, sentence, toolNames } from './words.ts';
+import { fileName, lineCount, toolNames } from './words.ts';
 import { button, h, icon, infoMark, lockAttrs, pathText, rereadBand } from './dom.ts';
 import { noToolsState } from './pages.ts';
 import { brandMark, openPlugin, outcomeBand } from './matrix.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { plural } from './model.ts';
-import { canRun, hookSourceControls } from './hooksourceview.ts';
-import { HOOK_RUN_WARN, hookStripHelp, hookStripNote, sessionStrip, type SessionGroup, type SessionStrip } from './sessionhooks.ts';
+import { canRun, hookRow } from './hooksourceview.ts';
+import { hookRunWarn, hookStripHelp, hookStripNote, sessionStrip, type SessionGroup, type SessionStrip } from './sessionhooks.ts';
 import type { HarnessId, InstructionFile, InstructionPart } from './types.ts';
 import { lineDiff } from './diff.ts';
 import { keepLineBreaks } from './drafts.ts';
@@ -242,26 +242,25 @@ function sessionStripView(file: InstructionFile, hookInfo?: HookStripPage) {
   if (!strip) return null;
   const isHooks = strip.heading === 'Hooks that can add text';
   const hasRunnable = stripHasRunnable(strip);
+  const hasRunnablePlugin = strip.groups.some(group => group.hooks.some(hook => hook.source.from === 'installed' && canRun(hook.source)));
   const showMark = isHooks && (!hookInfo || !hookInfo.marked);
   if (showMark && hookInfo) hookInfo.marked = true;
   const mark = showMark ? infoMark('session-hooks-info', strip.heading, hookStripHelp(file.tool, hookInfo ? hookInfo.anyRunnable : hasRunnable)) : null;
   const note = hookStripNote(file.tool, strip, hasRunnable);
   const where = ({ plugin, settings, says }: SessionGroup, at: number) => (plugin?.listed
-    ? button({ variant: 'link', size: 'micro', label: 'Plugin’s page: turn it off there', id: `session-page-${file.tool}-${at}`, onclick: () => openPlugin({ source: plugin.source, plugin: plugin.plugin, marketplace: plugin.marketName }) })
+    ? button({ variant: 'link', size: 'micro', label: 'Plugin’s page: turn it off there', id: `session-page-${file.tool}-${at}`, onclick: () => openPlugin({ source: plugin.source, plugin: plugin.plugin, marketplace: plugin.marketName, tool: file.tool }) })
     : settings ? h('span.session-in', {}, 'in ', pathText(shownPath(settings), settings)) : says ? h('span', {}, says) : null);
   const warning = (words: string, path?: string) => h('p.session-warning.tone-warning', {}, icon('triangle-alert', 12), h('span', {}, words, path ? pathText(shownPath(path), path) : null));
   return h('section.session-strip', { id: `session-${file.tool}`, 'aria-label': `${strip.heading}: ${toolNames[file.tool]}` },
     h('div.session-title-row', {}, h('h4.session-title', {}, strip.heading), mark),
-    hasRunnable ? h('p.session-run-warn', {}, HOOK_RUN_WARN) : null,
+    hasRunnable ? h('p.session-run-warn', {}, hookRunWarn(hasRunnablePlugin)) : null,
     h('p.session-about', {}, strip.about),
     note ? h('p.session-note', {}, ...inlineMarkdown(note, () => undefined)) : null,
     strip.groups.length ? h('ul.session-groups', {}, strip.groups.map((group, at) => h('li.session-group', {},
       h('p.session-head', {}, h(`span.origin-mark.${group.mark}`, { 'aria-hidden': 'true' }), h('strong.session-name', {}, group.settings ? `${group.name},` : group.name), where(group, at)),
       group.problem ? warning(group.problem) : null,
       ...group.unread.map(path => (path === group.settings ? warning('Its hooks couldn’t be read.') : warning('Its hooks couldn’t be read: ', path))),
-      group.hooks.length ? h('ul.session-hooks', {}, group.hooks.map((hook, row) => h('li.session-hook', {},
-        h('span.session-lead', {}, h('span.session-when', {}, sentence(hook.when)), h('code.session-command', {}, hook.command)),
-        hookSourceControls(hook.source, `hook-source-${state.page}-${file.tool}-${at}-${row}`)))) : null))) : null);
+      group.hooks.length ? h('ul.session-hooks', {}, group.hooks.map((hook, row) => hookRow(hook, `hook-source-${state.page}-${file.tool}-${at}-${row}`))) : null))) : null);
 }
 
 /**
