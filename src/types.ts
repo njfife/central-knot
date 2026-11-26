@@ -125,8 +125,10 @@ export interface DesktopApi {
   takeOverSkill(key: string, tool: HarnessId, resume: boolean, home: string): Promise<PassResult>;
   /** One version of a skill: its SKILL.md and the names of its other files (skills.ts skillVersion). */
   skillVersion(key: string, hash: string): Promise<{ skill: string; files: string[] } | null>;
-  /** One regular file of a skill version, with every regular file of its folder (skills.ts skillVersionFile). */
-  skillVersionFile(key: string, hash: string, file: string): Promise<{ files: string[]; text?: string; note?: string } | null>;
+  /** One regular file of a stored skill version, with every regular file of its folder (skills.ts skillVersionFile). */
+  skillVersionFile(key: string, hash: string, file: string): Promise<SkillFileRead | null>;
+  /** One regular file of a found skill copy in `tool` (narrowed by `rootLabel`), with every regular file of its folder (skills.ts skillFoundFile). */
+  skillFoundFile(key: string, tool: HarnessId, rootLabel: string | undefined, file: string): Promise<SkillFileRead | null>;
   history(): Promise<HistoryList>;
   applyServers(changes: Change[], resume: boolean, home: string): Promise<PassResult>;
   /** One version of an MCP server: its shared part (servers.ts serverVersion). */
@@ -339,6 +341,9 @@ export interface PluginTurnResult { stopped?: string; done: PluginDone[]; before
 
 // ---------- Managing skills across tools ----------
 
+
+/** One regular file of a skill's folder, with every regular file listed by name (skills.ts skillVersionFile, skillFoundFile). */
+export interface SkillFileRead { files: string[]; text?: string; note?: string }
 
 export interface ToolCopy {
   hash: string;
@@ -1128,6 +1133,8 @@ export interface LibraryFacts {
   copilotName?: string;
   /** MCP servers: the server's exact Copilot CLI name while `disabledMcpServers` in Copilot CLI's settings.json holds it off (managed and not kept out). */
   copilotOff?: string;
+  /** Skills, found: each read copy's folder content hash by its real directory (own and outside copies), for deduplication and reload detection. */
+  folderHashes?: Record<string, string>;
   /**
    * In the library, from a source the home records: that source's link, as given. Linked to it (library.ts LibraryItem source):
    * whether its last read has a version that waits because the item was changed here (`waits`: library.ts A SOURCE `wait`), or
