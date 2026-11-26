@@ -17,7 +17,7 @@
 // addMarketplace), run on that page, which tells its outcome. Its own page rather than the Git repo's: that page is Pull and Push of the whole set, two-way
 // and in Central Knot's layout, while a source is read only, holds a few items, and its rows grow one per link.
 import { acting, announce, applyClick, busy, rerender, setHome, showPage, state, tellWritten, type PageKind } from './app.ts';
-import { button, closeButton, h, icon, infoCardId, infoMark } from './dom.ts';
+import { button, closeButton, fold, h, icon, infoCardId, infoMark } from './dom.ts';
 import { asItIs } from './libraryrow.ts';
 import { dayAndTime, plural } from './model.ts';
 import { linkLabel } from './sourcelink.ts';
@@ -108,7 +108,7 @@ async function toPlugins(address: string) {
   if (!market.problem) { sources.preview = undefined; sources.draft = ''; }
 }
 
-const checkNow = (source: SourceView) => busy(`Checking ${linkLabel(source.link)}…`, async () => {
+const checkNow = (source: SourceView) => busy(`Syncing ${linkLabel(source.link)}…`, async () => {
   const result = await api().checkSource(source.id, state.home!.home);
   await settle(result, whatItDid(result, linkLabel(source.link)));
 });
@@ -117,7 +117,7 @@ const checkNow = (source: SourceView) => busy(`Checking ${linkLabel(source.link)
 const running: Record<SourceRowClick, (called: string) => string> = {
   bringBack: called => `Bringing ${called} back…`, replace: called => `Replacing ${called}…`, merge: called => `Merging ${called}…`, keep: called => `Keeping ${called} as it is…`,
 };
-/** A click on one name's line (sources.ts rowClick), in its kind. A Replace's band says that name has the source's version. */
+/** A click on one name's line (sources.ts rowClick), in its kind. A Replace mine's band says that name has the source's version. */
 const onLine = (source: SourceView, name: SourceName, click: SourceRowClick) => busy(running[click](name.name ?? name.key), async () => {
   const result = await api().rowClick(source.id, name.kind, name.key, click, state.home!.home);
   await settle(result, whatItDid(result, linkLabel(source.link), click === 'replace' ? { kind: name.kind, name: name.name ?? name.key } : undefined));
@@ -148,7 +148,7 @@ interface Said { text: string; warns: boolean; note?: string; undo?: { id: strin
  * What a source's click did, from what its passes did (types.ts SourcedItem: each item's kind and answer, the History entry that
  * says it, whether it is On, what a Merge did, and the tools it was written to or taken out of), and the kinds it wasn't read
  * whole for. An item its source dropped leads, with Turn on, and it, a read not whole or a Merge that changed nothing is a
- * warning; else the one update or merge has Undo. Open goes to the page of the first that changed. `replaced`: the item a click on Replace asked for, by kind and name, whose
+ * warning; else the one update or merge has Undo. Open goes to the page of the first that changed. `replaced`: the item a click on Replace mine asked for, by kind and name, whose
  * update says so.
  */
 export function whatItDid(result: Pick<SourceResult, 'sourced' | 'notWhole'>, label: string, replaced?: { kind: ItemKind; name: string }): Said {
@@ -184,7 +184,7 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'notWhole'>, la
   const undo = !turnOn && one?.history ? { id: one.history, label: undoLabel(one) } : undefined;
   const opens = [...dropped, ...changed, ...made, ...linked][0];
   return {
-    text: said.length ? said.join(' ') : `Checked ${label}: nothing came in from it.`, warns: dropped.length > 0 || !!result.notWhole || unmerged.length > 0,
+    text: said.length ? said.join(' ') : `Synced ${label}: nothing came in from it.`, warns: dropped.length > 0 || !!result.notWhole || unmerged.length > 0,
     ...(changed.length + keptAll.length ? { note: `See each change, or undo it, in History.` } : {}), ...(turnOn ?? undo ? { undo: turnOn ?? undo } : {}),
     // Open the page where something changed: not for a read that only says what can't be read, or what waits.
     ...(opens ? { open: pageOfPart[opens.kind] } : {}),
@@ -359,7 +359,7 @@ function addForm(allowed: boolean) {
 function sourceRow(source: SourceView, firstSync: boolean) {
   const label = linkLabel(source.link), locked = !!acting() || !state.home?.sync.access.allowed;
   const asking = sources.confirmRemove === source.id;
-  const read = source.readAt ? `Read ${dayAndTime(source.readAt)}` : 'Branch and commit';
+  const detailsLabel = source.readAt ? `Details · read ${dayAndTime(source.readAt)}` : 'Details';
   const syncButton = button({ variant: 'outline', size: 'small', icon: 'refresh-cw', label: 'Sync this source', id: `source-check-${source.id}`, disabled: locked,
     attrs: { 'aria-describedby': infoCardId('source-sync-info') }, onclick: () => void checkNow(source) });
   const actions = asking ? null : h('span.source-actions', {},
@@ -378,18 +378,11 @@ function sourceRow(source: SourceView, firstSync: boolean) {
       button({ variant: 'link', size: 'micro', label: 'Keep mine', id: idOf('keep', name), disabled: locked,
         attrs: { title: `Keep your ${called(name)} current: this source’s version no longer waits and is kept as a version, and the source’s next change`
           + ' is compared with it. Nothing is written to a tool, and Undo takes it back' }, onclick: () => void onLine(source, name, 'keep') })) : null);
-  let whereOpen = sources.openWhere.has(source.id);
-  const whereFold = h('details.source-fold', {
-    id: `source-where-${source.id}`, open: whereOpen,
-    ontoggle: (event: Event) => {
-      const now = (event.currentTarget as HTMLDetailsElement).open;
-      if (now === whereOpen) return;
-      whereOpen = now;
-      if (now) sources.openWhere.add(source.id); else sources.openWhere.delete(source.id);
-    },
-  },
-    h('summary.source-fold-head', { id: `source-where-toggle-${source.id}` }, icon('chevron-right', 12, 'tone-faint source-fold-chevron'), read),
-    h('span.source-where.tone-muted', {}, whereWords(source)));
+  const whereFold = fold({
+    id: `source-where-${source.id}`, toggleId: `source-where-toggle-${source.id}`, label: detailsLabel,
+    open: sources.openWhere.has(source.id),
+    onToggle: open => { if (open) sources.openWhere.add(source.id); else sources.openWhere.delete(source.id); },
+  }, h('span.source-where.tone-muted', {}, whereWords(source)));
   // Each item this source removed, as its kind's view says it.
   const removed = (Object.entries(pageOfPart) as [ItemKind, PageKind][]).flatMap(([kind, page]) => (state.home?.[page].items ?? [])
     .filter(fact => fact.fromSource?.removed && fact.fromSource.link === source.link).map(fact => ({ fact, kind })));

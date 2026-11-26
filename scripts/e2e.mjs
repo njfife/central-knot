@@ -1446,6 +1446,31 @@ async function fullSize(a) {
   await a.run(`window.dispatchEvent(new Event('resize'))`);
   await a.settle();
 }
+/** Opens info mark `markId`'s card, checks its words, status-bar clearance and fit, then checks Escape closes it. */
+async function checkCard(a, markId, expected, label) {
+  await a.click(`#${markId}`);
+  const got = await a.run(`(() => {
+    const card = document.getElementById(${JSON.stringify(`${markId}-card`)});
+    if (!card) return { exists: false };
+    const box = card.getBoundingClientRect();
+    const status = document.getElementById('status')?.getBoundingClientRect();
+    const clearStatus = !status || !status.height || box.bottom <= status.top + 1;
+    return { exists: true, open: card.matches(':popover-open'), text: card.textContent, clearStatus };
+  })()`);
+  same(label, got, { exists: true, open: true, text: expected, clearStatus: true });
+  same(`${label}: nothing cut off`, await a.run(CUT_OFF), []);
+  await a.press('Escape');
+  same(`${label}: Escape closes the card`, await a.run(`!!document.getElementById(${JSON.stringify(`${markId}-card`)})?.matches(':popover-open')`), false);
+}
+/** Sizes `a` to width × height with the sidebar open, runs `fn`, and puts the rail back if it was folded. */
+async function withSidebarOpen(a, width, height, fn) {
+  await sizeTo(a, width, height);
+  const rail = await a.run(`document.body.classList.contains('rail')`);
+  if (rail) await a.click('#sidebar-toggle');
+  try { await fn(); } finally {
+    if (rail && !(await a.run(`document.body.classList.contains('rail')`))) await a.click('#sidebar-toggle');
+  }
+}
 /** Chooses `value` in the item list's From menu (matrix.ts fromChoice) as its menu chooses: a press opens a system menu on the Mac. */
 async function chooseFrom(a, value) {
   await a.run(`(select => { select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change')); })(document.querySelector('#item-from'))`);
@@ -4691,38 +4716,15 @@ async function repoBaseFlow() {
   };
 
   const first = await open('first');
-  const checkCard = async (a, markId, expected, label) => {
-    await a.click(`#${markId}`);
-    const got = await a.run(`(() => {
-      const card = document.getElementById(${JSON.stringify(`${markId}-card`)});
-      if (!card) return { exists: false };
-      const box = card.getBoundingClientRect();
-      const status = document.getElementById('status')?.getBoundingClientRect();
-      const clearStatus = !status || !status.height || box.bottom <= status.top + 1;
-      return { exists: true, open: card.matches(':popover-open'), text: card.textContent, clearStatus };
-    })()`);
-    same(label, got, { exists: true, open: true, text: expected, clearStatus: true });
-    same(`${label}: nothing cut off`, await a.run(CUT_OFF), []);
-    await a.press('Escape');
-    same(`${label}: Escape closes the card`, await a.run(`!!document.getElementById(${JSON.stringify(`${markId}-card`)})?.matches(':popover-open')`), false);
-  };
-  const withSidebarOpen = async (a, width, height, run) => {
-    await sizeTo(a, width, height);
-    const rail = await a.run(`document.body.classList.contains('rail')`);
-    if (rail) await a.click('#sidebar-toggle');
-    try { await run(); } finally {
-      if (rail && !(await a.run(`document.body.classList.contains('rail')`))) await a.click('#sidebar-toggle');
-    }
-  };
   const REPO_STATE_CARD = 'Pull brings the repo’s changes into your tools; Push sends yours. Only Managed skills, MCP servers, agents and base instructions go to the repo; other files stay as they are.';
 
-  // Not connected: standing intro and connect note gone; paths, sign-in and Managed link folded behind What goes where.
+  // Not connected: standing intro gone; Connect note kept; paths, sign-in and Managed link folded behind What goes where.
   await first.click('#nav-repo');
   await until(() => first.exists('#repo-url'));
   const startPage = await first.text('.repo-page') ?? '';
-  check('not connected Git repo drops the introduction and connect note, keeps the form and starts What goes where folded',
-    !(await first.exists('.empty-body')) && !(await first.exists('.repo-connect-note'))
-    && !startPage.includes('Connecting changes nothing in your tools') && !startPage.includes('can live in any git repo')
+  check('not connected Git repo drops the introduction, keeps the form and Connect note, and starts What goes where folded',
+    !(await first.exists('.empty-body')) && !startPage.includes('can live in any git repo')
+    && (await first.text('.repo-connect-note'))?.trim() === 'Connecting changes nothing in your tools. You choose when to Pull or Push.'
     && await first.run(`(() => { const d = document.getElementById('repo-what-goes-where'), s = document.getElementById('repo-what-goes-where-toggle'), l = document.querySelector('.repo-layout'); return d?.open === false && l?.checkVisibility() === false && d.getBoundingClientRect().height <= s.getBoundingClientRect().height + 2; })()`), startPage);
   await first.click('#repo-what-goes-where-toggle');
   check('opening What goes where shows the 4 paths, git sign-in note and See what’s Managed link',
@@ -4731,6 +4733,9 @@ async function repoBaseFlow() {
     && (await first.text('#repo-what-goes-where') ?? '').includes('instructions/base.md')
     && (await first.text('#repo-what-goes-where') ?? '').includes('Central Knot uses this computer’s git')
     && await first.text('#repo-see-library') === 'See what’s Managed', await first.text('#repo-what-goes-where'));
+  await first.click('#header-refresh');
+  check('an opened What goes where fold stays open through Refresh',
+    await first.run(`(() => { const d = document.getElementById('repo-what-goes-where'), s = document.getElementById('repo-what-goes-where-toggle'), l = document.querySelector('.repo-layout'); return d?.open === true && l?.checkVisibility() === true && d.getBoundingClientRect().height > s.getBoundingClientRect().height + 2; })()`));
   for (const [w, h] of [[860, 560], [1316, 819]]) {
     await withSidebarOpen(first, w, h, async () => { same(`not connected Git repo with fold open fits at ${w}×${h}`, await first.run(CUT_OFF), []); });
   }
@@ -4914,29 +4919,6 @@ async function sourcesFlow() {
   await fullSize(a);
   await a.click('#nav-plugins');
   same('the Plugins page’s title says Plugin marketplaces', await a.text('.page-title'), 'Plugin marketplaces');
-  const checkCard = async (markId, expected, label) => {
-    await a.click(`#${markId}`);
-    const got = await a.run(`(() => {
-      const card = document.getElementById(${JSON.stringify(`${markId}-card`)});
-      if (!card) return { exists: false };
-      const box = card.getBoundingClientRect();
-      const status = document.getElementById('status')?.getBoundingClientRect();
-      const clearStatus = !status || !status.height || box.bottom <= status.top + 1;
-      return { exists: true, open: card.matches(':popover-open'), text: card.textContent, clearStatus };
-    })()`);
-    same(label, got, { exists: true, open: true, text: expected, clearStatus: true });
-    same(`${label}: nothing cut off`, await a.run(CUT_OFF), []);
-    await a.press('Escape');
-    same(`${label}: Escape closes the card`, await a.run(`!!document.getElementById(${JSON.stringify(`${markId}-card`)})?.matches(':popover-open')`), false);
-  };
-  const withSidebarOpen = async (width, height, run) => {
-    await sizeTo(a, width, height);
-    const rail = await a.run(`document.body.classList.contains('rail')`);
-    if (rail) await a.click('#sidebar-toggle');
-    try { await run(); } finally {
-      if (rail && !(await a.run(`document.body.classList.contains('rail')`))) await a.click('#sidebar-toggle');
-    }
-  };
   const LINK_CARD = 'Any link to a repository, branch, folder or file; owner/repo or a git clone address works too. Uses this computer’s git sign-in.';
   const SYNC_CARD = 'Reads the link now and applies it: changed items update unless changed here; removed ones turn off, with Undo.';
   const WAIT_CARD = 'Changed here, or a tool’s copy couldn’t be read. Merge takes changes that don’t clash; Replace mine takes the source’s and keeps yours as a version.';
@@ -4951,8 +4933,8 @@ async function sourcesFlow() {
     await a.run(`document.querySelector('#source-link')?.getAttribute('aria-describedby')`),
   ], ['Library sources', false, false, false, false, 'source-link-info-card']);
   check('the Sources page opens empty, with its field and No sources yet', await a.exists('#source-link') && /No sources yet/.test(emptyPage), emptyPage);
-  await checkCard('source-link-info', LINK_CARD, 'link field info card');
-  await checkCard('source-empty-info', EMPTY_CARD, 'No sources yet info card');
+  await checkCard(a, 'source-link-info', LINK_CARD, 'link field info card');
+  await checkCard(a, 'source-empty-info', EMPTY_CARD, 'No sources yet info card');
   await type('https://github.com/stephenturner/skill-deslop/tree/main');
   await a.run(`document.querySelector('#source-link').focus()`);
   await a.press('Enter');
@@ -4967,19 +4949,23 @@ async function sourcesFlow() {
   same('in Central Knot, Off, in no tool', [record()?.on, Object.values(roots).some(root => existsSync(join(home, root, 'deslop')))], [false, false]);
   const id = await a.run(`document.querySelector('.source-row').dataset.source`);
   const rowText = await a.text('.source-row') ?? '';
-  check('its row says In Central Knot, Off, renames Check now to Sync this source, drops the standing paragraph and folds branch/folder/commit behind › while keeping the read time visible',
+  check('its row says In Central Knot, Off, renames Check now to Sync this source, drops the standing paragraph and folds branch/folder/commit behind Details · read',
     /In Central Knot, Off/.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '')
     && (await a.text(`#source-check-${id}`))?.trim() === 'Sync this source'
     && await a.run(`document.getElementById('source-check-${id}')?.getAttribute('aria-describedby')`) === 'source-sync-info-card'
     && !(await a.exists('.source-does')) && !rowText.includes('Check now reads the link again')
     && await a.run(`(() => { const d = document.getElementById('source-where-${id}'), s = document.getElementById('source-where-toggle-${id}'), w = d?.querySelector('.source-where'); return d?.open === false && w?.checkVisibility() === false && d.getBoundingClientRect().height <= s.getBoundingClientRect().height + 2; })()`)
-    && /^Read /.test((await a.text(`#source-where-toggle-${id}`) ?? '').trim()), rowText);
-  await checkCard('source-sync-info', SYNC_CARD, 'first Sync this source info card');
+    && /^Details · read /.test((await a.text(`#source-where-toggle-${id}`) ?? '').trim()), rowText);
+  await checkCard(a, 'source-sync-info', SYNC_CARD, 'first Sync this source info card');
   await a.click(`#source-where-toggle-${id}`);
   const foldedWhere = await a.text(`#source-where-${id} .source-where`) ?? '';
   check('opening the source’s fold shows its branch, folder and commit',
     await a.run(`(() => { const d = document.getElementById('source-where-${id}'), s = document.getElementById('source-where-toggle-${id}'), w = d?.querySelector('.source-where'); return d?.open === true && w?.checkVisibility() === true && d.getBoundingClientRect().height > s.getBoundingClientRect().height + 2; })()`)
     && /Branch main · its root folder · commit [0-9a-f]{7}/.test(foldedWhere), foldedWhere);
+  await a.click(`#source-check-${id}`);
+  check('Sync this source keeps the opened source fold open through the redraw and says Synced when nothing came in',
+    await a.run(`(() => { const d = document.getElementById('source-where-${id}'), s = document.getElementById('source-where-toggle-${id}'), w = d?.querySelector('.source-where'); return d?.open === true && w?.checkVisibility() === true && d.getBoundingClientRect().height > s.getBoundingClientRect().height + 2; })()`)
+    && /Synced github\.com\/stephenturner\/skill-deslop \(main\): nothing came in from it\./.test(await a.text('.band-done .band-text') ?? ''), await a.text('.band-done'));
   await a.click(`#source-where-toggle-${id}`);
 
   await openKind(a, 'skills');
@@ -5014,8 +5000,8 @@ async function sourcesFlow() {
     && await a.exists(`#source-merge-${id}-skill-deslop`) && await a.exists(`#source-keep-${id}-skill-deslop`)
     && Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('my way')), [await a.text('.band-done'), await a.text('.source-row')]);
   for (const [w, h] of [[860, 560], [1316, 819]]) {
-    await withSidebarOpen(w, h, async () => {
-      await checkCard(`source-wait-info-${id}-skill-deslop`, WAIT_CARD, `Update waiting info card at ${w}×${h}`);
+    await withSidebarOpen(a, w, h, async () => {
+      await checkCard(a, `source-wait-info-${id}-skill-deslop`, WAIT_CARD, `Update waiting info card at ${w}×${h}`);
     });
   }
   await fullSize(a);
@@ -5152,7 +5138,7 @@ async function sourcesFlow() {
     && await a.exists(`#source-${kitId} #source-sync-info`), await a.text('.source-rows'));
   await a.click(`#source-remove-cancel-${id}`);
   for (const [w, h] of [[860, 560], [1316, 819]]) {
-    await withSidebarOpen(w, h, async () => { same(`two sources fit at ${w}×${h} with sidebar open`, await a.run(CUT_OFF), []); });
+    await withSidebarOpen(a, w, h, async () => { same(`two sources fit at ${w}×${h} with sidebar open`, await a.run(CUT_OFF), []); });
   }
   await fullSize(a);
   await openKind(a, 'agents');
@@ -5226,7 +5212,7 @@ async function sourcesFlow() {
     && /Not brought in: its 2 commands and its hooks\./.test(pluginLook)
     && !pluginLook.includes('Central Knot installs plugins only from a marketplace')
     && (await a.text('#source-add'))?.trim() === 'Add 1 skill', pluginLook);
-  await checkCard('source-preview-not-coming-info', NOT_COMING_CARD, 'preview Not brought in info card');
+  await checkCard(a, 'source-preview-not-coming-info', NOT_COMING_CARD, 'preview Not brought in info card');
   await fitsAtMinimum(a, 'Sources, with a source and a look open');
   await a.click('#source-add');
   await until(async () => /pdf is in Central Knot, Off/.test(await a.text('.band-done .band-text') ?? ''));
@@ -5236,7 +5222,7 @@ async function sourcesFlow() {
   check('Add brings pdf in, Off, in no tool, and its row says what doesn’t come with its card', pdfRecord()?.on === false && !existsSync(join(home, roots['claude-cli'], 'pdf'))
     && /Not brought in: its 2 commands and its hooks\./.test(pdfRowText)
     && !pdfRowText.includes('Central Knot installs plugins only from a marketplace'), [pdfRecord(), pdfRowText]);
-  await checkCard(`source-not-coming-info-${pdfId}`, NOT_COMING_CARD, 'saved row Not brought in info card');
+  await checkCard(a, `source-not-coming-info-${pdfId}`, NOT_COMING_CARD, 'saved row Not brought in info card');
   await openKind(a, 'skills');
   await until(() => a.exists(`#${rowPart('switch', 'skills', 'pdf')}`));
   await a.click(`#${rowPart('switch', 'skills', 'pdf')}`);

@@ -439,6 +439,13 @@ ul { list-style: none; }
 .info-mark:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .info-card { position: fixed; inset: auto; margin: 0; width: max-content; max-width: min(320px, calc(100vw - 16px)); padding: 8px 10px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); box-shadow: var(--overlay); color: var(--ink); font: 400 12px/17px var(--sans); white-space: normal; overflow: visible; overflow-wrap: break-word; }
 @media (prefers-color-scheme: dark) { .info-card { background: color-mix(in oklab, var(--surface) 84%, white); border-color: var(--cell-line); box-shadow: 0 10px 24px rgb(0 0 0 / 70%); } }
+/* Collapsible fold (dom.ts fold): one look on every page. */
+.fold > summary { list-style: none; display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; margin-left: -6px; border-radius: 6px; font-size: 12.5px; color: var(--accent-ink); cursor: pointer; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary:hover { background: var(--hover); text-decoration: underline; }
+.fold > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.fold[open] > summary > .fold-chevron { transform: rotate(90deg); }
+.fold-body { margin-top: 4px; }
 
 /* ---------- Toolbar, find and filters ---------- */
 .toolbar { flex: none; min-height: 37px; display: flex; align-items: center; gap: 8px; padding: 2px 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
@@ -2254,11 +2261,6 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .repo-page > .scroll > .empty { justify-content: flex-start; padding-top: 40px; }
 .repo-page > .scroll { container-type: inline-size; }
 .repo-start { width: 100%; display: flex; flex-direction: column; gap: 12px; margin-top: 8px; text-align: left; }
-.repo-fold > summary { list-style: none; display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; margin-left: -6px; border-radius: 6px; font-size: 12.5px; color: var(--accent-ink); cursor: pointer; }
-.repo-fold > summary::-webkit-details-marker { display: none; }
-.repo-fold > summary:hover { background: var(--hover); text-decoration: underline; }
-.repo-fold > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.repo-fold[open] > summary > .repo-fold-chevron { transform: rotate(90deg); }
 .repo-fold-body { container-type: inline-size; display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 .repo-connect { container-type: inline-size; display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--lift); }
 .repo-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -2269,6 +2271,7 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .repo-field-hint { margin-left: 6px; font-weight: 400; color: var(--ink-faint); }
 .repo-connect-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .repo-start .btn { margin-top: 0; }
+.repo-connect-note { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .repo-layout { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; font-size: 12px; line-height: 18px; }
 .repo-layout dt { color: var(--ink); }
 .repo-layout dd { margin: 0; color: var(--ink-soft); }
@@ -2450,12 +2453,6 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .source-preview-head, .source-row-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; }
 .source-link { font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
 .source-where { font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
-.source-fold > summary { list-style: none; display: inline-flex; align-items: center; gap: 4px; padding: 1px 4px; margin-left: -4px; border-radius: 6px; font-size: 12px; line-height: 16px; color: var(--ink-soft); cursor: pointer; }
-.source-fold > summary::-webkit-details-marker { display: none; }
-.source-fold > summary:hover { background: var(--hover); color: var(--ink); }
-.source-fold > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.source-fold[open] > summary > .source-fold-chevron { transform: rotate(90deg); }
-.source-fold > .source-where { display: block; margin-top: 2px; padding-left: 16px; }
 .source-preview-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .source-preview-actions .btn { flex: none; }
 .source-note { font-size: 12px; line-height: 16px; color: var(--ink-soft); }

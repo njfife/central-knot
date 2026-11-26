@@ -2,7 +2,7 @@
 // tools and Push to send this computer's. The page says which repo and commit are in use, when it last pulled and pushed, and
 // what differs each way; nothing moves until Pull or Push is clicked.
 import { acting, announce, busy, rerender, setHome, setSync, showPage, state, tell } from './app.ts';
-import { button, closeButton, emptyState, h, icon, infoMark } from './dom.ts';
+import { button, closeButton, emptyState, fold, h, icon, infoMark } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { openKind, outcomeBand } from './matrix.ts';
 import { dayAndTime, plural } from './model.ts';
@@ -492,7 +492,8 @@ function connectForm(allowed: boolean) {
     h('div.repo-fields', {},
       field('repo-url', 'Repo address', 'https://github.com/you/agent-config.git', repo.draftUrl, text => { repo.draftUrl = text; }, undefined, sshHint),
       field('repo-branch', 'Branch', 'Default branch', repo.draftBranch, text => { repo.draftBranch = text; }, 'optional')),
-    h('div.repo-connect-actions', {}, button({ variant: 'primary', size: 'small', icon: 'git-branch', label: 'Connect', id: 'repo-connect', disabled: !ready(), onclick: go })));
+    h('div.repo-connect-actions', {}, button({ variant: 'primary', size: 'small', icon: 'git-branch', label: 'Connect', id: 'repo-connect', disabled: !ready(), onclick: go }),
+      h('span.repo-connect-note', {}, 'Connecting changes nothing in your tools. You choose when to Pull or Push.')));
 }
 
 export function repoPage(): HTMLElement {
@@ -502,21 +503,13 @@ export function repoPage(): HTMLElement {
   if (!view) return h('div.page.repo-page', {}, h('div.toolbar.repo-toolbar', {}, h('span.toolbar-spacer'), repo.confirmDisconnect ? null : disconnectButton(!!acting())),
     h('div.bands', {}, disconnectQuestion(), problemBand(lastReadFailure)));
   if (view.connected) return connectedPage(view);
-  let layoutShown = repo.layoutOpen;
-  const whatGoesWhere = h('details.repo-fold', {
-    id: 'repo-what-goes-where', open: layoutShown,
-    ontoggle: (event: Event) => {
-      const now = (event.currentTarget as HTMLDetailsElement).open;
-      if (now === layoutShown) return;
-      layoutShown = now;
-      repo.layoutOpen = now;
-    },
+  const whatGoesWhere = fold({
+    id: 'repo-what-goes-where', toggleId: 'repo-what-goes-where-toggle', label: 'What goes where',
+    open: repo.layoutOpen, onToggle: open => { repo.layoutOpen = open; }, bodyClass: 'repo-fold-body',
   },
-    h('summary.repo-fold-head', { id: 'repo-what-goes-where-toggle' }, 'What goes where', icon('chevron-right', 12, 'tone-faint repo-fold-chevron')),
-    h('div.repo-fold-body', {},
-      layout(),
-      h('p.empty-aside', {}, 'Central Knot uses this computer’s git and the sign-in it already has (HTTPS or SSH). It never asks for or keeps a password or token.'),
-      h('p.empty-aside', {}, 'Only what’s Managed goes to the repo. ', h('button.inline-link', { type: 'button', id: 'repo-see-library', onclick: () => openKind('all') }, 'See what’s Managed'), '.')));
+    layout(),
+    h('p.empty-aside', {}, 'Central Knot uses this computer’s git and the sign-in it already has (HTTPS or SSH). It never asks for or keeps a password or token.'),
+    h('p.empty-aside', {}, 'Only what’s Managed goes to the repo. ', h('button.inline-link', { type: 'button', id: 'repo-see-library', onclick: () => openKind('all') }, 'See what’s Managed'), '.'));
   return h('div.page.repo-page', {},
     h('div.bands', {}, view.access.allowed ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.access.reason)), problemBand(undefined), outcomeBand()),
     h('div.scroll', { id: 'repo-scroll' }, emptyState('git-branch', 'Keep your Managed set in a git repo', undefined,
