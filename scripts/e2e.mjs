@@ -8580,12 +8580,13 @@ fs.writeFileSync(record, JSON.stringify(now));
   const stillAtTop = await placesNow(list, 'data-plugin');
   same('at the top of the list, a failure that goes from the header moves no row, nor does the click after it', [bandBefore, await a.exists('.plugin-problems'), ['plug-06', 'plug-09'].map(name => afterClose.at[name]), ['plug-06', 'plug-09'].map(name => stillAtTop.at[name])],
     [true, false, ['plug-06', 'plug-09'].map(name => atItsTop.at[name]), ['plug-06', 'plug-09'].map(name => atItsTop.at[name])]);
-  // Three failing plugins (plug-04, -05, -08) and one that installs (plug-10), in one list (each takes a second): one ×, the first
-  // reason and Show all 3 reasons; shown, each reason whole; × closes it all.
-  const failNow = ['plug-04', 'plug-05', 'plug-08'];
+  // Three failing plugins (plug-04, -05, -17) and one that installs (plug-10), in one list (each takes a second): one ×, the first
+  // reason and Show all 3 reasons; shown, each reason whole; × closes it all. (Not plug-08: Claude Code can't read its copy, empty,
+  // so its Off above left that copy where it is, and its On now finds it there: pluginstatus.ts cantUninstall.)
+  const failNow = ['plug-04', 'plug-05', 'plug-17'];
   for (const name of failNow) writeFileSync(join(home, `fail-${name}`), '');
   await putAt(list, '[data-plugin="plug-04"]', 20);
-  const fourPoints = []; for (const name of ['plug-04', 'plug-05', 'plug-08', 'plug-10']) fourPoints.push(await middleOf(`#pswitch-0-${name}`));
+  const fourPoints = []; for (const name of ['plug-04', 'plug-05', 'plug-17', 'plug-10']) fourPoints.push(await middleOf(`#pswitch-0-${name}`));
   for (const point of fourPoints) { await clickAt(point); await wait(150); }
   for (let tries = 0; tries < 150 && await a.exists('.plugin-click:not([data-click="ended"])'); tries++) await wait(100);
   await done();
@@ -8593,7 +8594,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   const plugReasons = () => a.run(`[...document.querySelectorAll('#header .problem-text')].map(text => [text, ...text.children].some(part => part.scrollWidth > part.clientWidth) ? 'cut' : 'whole')`);
   // (The run holds plug-06's click before them too, within its time: 3 of 5.)
   same('three failing plugins and one installed: the sentence says first what didn’t go through, then one ×, the first reason and Show all 3 reasons',
-    [/^3 of \d didn’t go through in every tool: plug-04, plug-05 and plug-08\./.test(await a.text('#plugins-result .toolbar-result-text') ?? ''), await a.run(`document.querySelectorAll('#header .band-dismiss').length`), (await plugReasons()).length, await a.text('#problems-show-all')],
+    [/^3 of \d didn’t go through in every tool: plug-04, plug-05 and plug-17\./.test(await a.text('#plugins-result .toolbar-result-text') ?? ''), await a.run(`document.querySelectorAll('#header .band-dismiss').length`), (await plugReasons()).length, await a.text('#problems-show-all')],
     [true, 1, 1, 'Show all 3 reasons']);
   // Folded, only the name gives way, and no more than its own width: what failed begins right after it.
   same('folded, what failed begins right after the plugin’s name, with no gap', await a.run(`(text => { const name = text.querySelector('.item-name'), range = document.createRange(); range.selectNodeContents(name); const next = name.nextElementSibling; if (!next) return null; const end = range.getBoundingClientRect().right; range.selectNodeContents(next); return Math.round(range.getBoundingClientRect().left - end); })(document.querySelector('#header .problem-text'))`), 0);
