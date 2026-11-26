@@ -2675,8 +2675,8 @@ function whenCell(skill: ItemRow) {
   return h('div.ov-when', { role: 'cell', title: `Last updated ${dayAndTime(new Date(at).toISOString())}` }, sinceThen(at));
 }
 
-const PLUGIN_HEADING_CARD = 'Installed with their plugin, not copied. Open a row to switch it in one tool.';
-const OFF_HEADING_CARD = 'Kept in Central Knot, on in no tool it manages. Where a tool still has a copy, its row says so.';
+const PLUGIN_HEADING_CARD = 'Installed with their plugin, not copied. Open a row for the controls each tool has.';
+const OFF_HEADING_CARD = 'Kept in Central Knot, switched off. Where a tool still has it, its row says so.';
 
 /**
  * Rows under one heading: On, Found, Off, or (on a harness's page) the ones only other tools have. `rows`: the rows drawn under

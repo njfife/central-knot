@@ -1050,8 +1050,8 @@ async function harnessFlow() {
 
     const FOUND_OFF_CARD = 'In a tool, not yet in Central Knot. Add turns an item on in managed tools.';
     const FOUND_ON_CARD = 'Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.';
-    const PLUGIN_CARD = 'Installed with their plugin, not copied. Open a row to switch it in one tool.';
-    const OFF_CARD = 'Kept in Central Knot, on in no tool it manages. Where a tool still has a copy, its row says so.';
+    const PLUGIN_CARD = 'Installed with their plugin, not copied. Open a row for the controls each tool has.';
+    const OFF_CARD = 'Kept in Central Knot, switched off. Where a tool still has it, its row says so.';
 
     // Library Skills: 3 Off rows with 1 pending Codex removal, card closed; keyboard-focusable marks on Found, Only through a plugin and Off; stable heading heights.
     same('Library Skills: no heading says Synchronize everything in Settings, On has no mark, and Off 3 shows 1 still in Codex until sync runs with card closed',

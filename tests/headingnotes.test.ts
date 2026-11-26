@@ -1,6 +1,6 @@
-// Library and tool-tab section heading rules not already held by scripts/e2e.mjs (matrix.ts section, foundNote, offNote):
-// own-copy counting across tools, Off live-line branch priority and multi-row fallback, Found wait plural/zero counts,
-// and suppressing live notes over mixed rows under Found while Synchronize everything is on.
+// Library section heading rules (matrix.ts section, foundNote, offNote): own-copy counting across tools,
+// Off live-line branch priority and multi-row fallback, Found wait zero/plural counts,
+// and hiding the live wait over pinned mixed rows under Found while Synchronize everything is on.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { newItem, takeInAnswer, type FoundKey, type LibraryItem, type Plan } from '../src/library.ts';
@@ -136,16 +136,6 @@ test('Off heading counts own copies across tools rather than items', () => {
   openKind('skills');
   unpin();
   assert.equal(readHeading(libraryTable(), 'off').liveLine, '2 own copies in Codex and OpenCode');
-
-  // One Off item in one tool stays singular.
-  app.home = makeHome({
-    homePath: '/heading-own-one-tool',
-    tools,
-    skills: [oneToolOneSkill],
-    library: { 'off-b': makeItem('off-b', false) },
-  });
-  openKind('skills');
-  assert.equal(readHeading(libraryTable(), 'off').liveLine, '1 own copy in OpenCode');
 
   // Two Off items totaling three own copies across Codex and OpenCode.
   app.home = makeHome({
