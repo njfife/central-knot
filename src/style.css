@@ -2298,9 +2298,16 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .ov-used { width: 16em; font-size: 12px; color: var(--ink-soft); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ov-used-faint { color: var(--ink-faint); }
 .ov-used-count { color: var(--ink-faint); }
-/* The chip's band (matrix.ts unusedBand): its lead, then a fainter line; Turn these off at the band's end at every width. */
-.usage-band > .band-text { flex: 1 1 auto; display: flex; flex-direction: column; }
-.usage-more { color: var(--ink-faint); }
+.ov-used-skip { color: var(--ink); font-weight: 500; }
+/* The chip's band (matrix.ts unusedBand): one line beside its button; limits unfold full width under it. */
+.usage-band { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; }
+.usage-band > .band-text { color: var(--ink); }
+.usage-band .btn { padding: 0 7px; }
+.usage-lead { margin-right: 6px; }
+.usage-counted-toggle { display: inline-flex; align-items: center; gap: 1px;
+  font-size: 12px; line-height: 16px; color: var(--accent-ink); white-space: nowrap; }
+.usage-more { grid-column: 2 / -1; display: flex; flex-direction: column; gap: 2px; color: var(--ink-soft); }
+.usage-more > p { margin: 0; }
 /* The usage band (matrix.ts usageBand): its three sentences in one place, the one on show over the others, so it never changes height. */
 .band-stack { display: grid; }
 .band-stack > * { grid-area: 1 / 1; }
