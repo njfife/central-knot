@@ -2751,7 +2751,7 @@ async function practiceFlow() {
   await fullSize(a);
   const mcpOffMark = rowPart('line-info', 'mcp', 'docs', 'copilot-cli');
   same('its line says Off in Copilot CLI’s settings with a card saying Central Knot leaves the switch and how to turn it back on',
-    await a.run(`[document.querySelector('#${mcpOffMark}')?.closest('.details-tool-line')?.innerText?.trim() ?? '', document.querySelector('#${mcpOffMark}-card')?.textContent?.trim() ?? '']`),
+    await a.run(`[document.querySelector('#${mcpOffMark}')?.closest('.details-tool-line')?.innerText?.replace(/\\s+/g, ' ').trim() ?? '', document.querySelector('#${mcpOffMark}-card')?.textContent?.trim() ?? '']`),
     ['Off in Copilot CLI’s settings · Own settings kept: tools', 'Copilot CLI doesn’t start it. Central Knot leaves that switch as it is, so it is still off there after Off and On. Turn it back on in that tool’s own settings.']);
   const codexBefore = readNow(mcpFiles[2]);
   await a.click(`#${rowPart('enable', 'mcp', 'docs', 'codex-cli')}`);
