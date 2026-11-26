@@ -289,14 +289,14 @@ function instructionsTab(tool: HarnessId) {
 }
 
 /** One installed plugin: its name, version and marketplace, and Open, which shows it on the plugins' page. */
-function pluginRow({ entry, plugin }: MarketPlugin) {
+function pluginRow({ entry, plugin }: MarketPlugin, tool: HarnessId) {
   const note = [entry.name, plugin.description].filter(Boolean).join(' · ');
   return h('div.harness-plugin', { role: 'listitem' },
     h('div.harness-plugin-text', {},
       h('strong', {}, pluginTitle(plugin), plugin.version ? h('span.harness-plugin-version', {}, ` ${plugin.version}`) : null),
       h('span.harness-plugin-note', { title: note }, note)),
     button({ variant: 'ghost', size: 'small', label: 'Open', name: `Open ${pluginTitle(plugin)} in ${pageNames.plugins}`, id: `harness-plugin-${entry.name}-${plugin.name}`,
-      onclick: () => { showPage('plugins'); browse({ source: entry.source, plugin: plugin.name, tab: 'plugins', find: '', category: undefined }); } }));
+      onclick: () => { showPage('plugins'); browse({ source: entry.source, plugin: plugin.name, tab: 'plugins', find: '', category: undefined, hookTool: tool }); } }));
 }
 
 function pluginsTab(tool: HarnessId) {
@@ -323,7 +323,7 @@ function pluginsTab(tool: HarnessId) {
   if (!plugins.installed.length && !unlisted.length) return page(unsureNote, emptyState('puzzle', `No plugins in ${names[tool]}`, `None of the plugins in your marketplaces is installed in ${names[tool]}.`,
     button({ variant: 'outline', label: 'Browse plugins', id: 'harness-browse-plugins', onclick: () => showPage('plugins') })));
   return page(unread, plugins.installed.length ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), `Installed in ${names[tool]} from your marketplaces. Open one to uninstall it, or to install it in another tool.`) : null,
-    unsureNote, unlistedNote, plugins.installed.length ? h('div.harness-plugins', { role: 'list' }, plugins.installed.map(pluginRow)) : null);
+    unsureNote, unlistedNote, plugins.installed.length ? h('div.harness-plugins', { role: 'list' }, plugins.installed.map(item => pluginRow(item, tool))) : null);
 }
 
 /** Where the tool's files are, how it was found, and which other products read them. */
