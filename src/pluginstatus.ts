@@ -116,7 +116,7 @@ export function unavailable(view: PluginsView, entry: MarketplaceView, plugin: s
   const state = stateOf(entry, plugin, tool);
   if (state.state === 'held') return state.reason;
   if (state.state === 'installed') return undefined;
-  // A plugin its marketplace dropped can't go anywhere new; where a tool still has it, it shows as installed and can be turned off (kept installed; uninstalled for Copilot CLI's live copy).
+  // A plugin its marketplace dropped can't go anywhere new; where a tool still has it, it shows as installed and can be turned off (kept installed).
   // One listed only because its marketplace can't be read now (no read time) can't either, for that reason.
   if (entry.plugins.find(candidate => candidate.name === plugin)?.gone) return entry.fetchedAt ? 'It is no longer offered in this marketplace.' : MARKET_UNREAD;
   return whyNotCarried(entry, plugin) ?? blocked(view, entry, tool);
@@ -155,7 +155,7 @@ export function toolNow(view: PluginsView, entry: MarketplaceView, plugin: strin
     : { cannot: elsewhere ?? (items ? whyNoneIn(entry, plugin, tool).join(' ') || `${names[tool]} gets none of its items: Its items, below, says why each isn’t brought in.` : notInWhy(tool, plugin, [], components && andList(summaryOf(components).split(' · ').filter(Boolean)))[0]!) };
   // What is installed whole is known from the tool's own record; items only once the record of parts from before is read.
   if (unknown && !(whole && takesPlugins(tool))) return { has: 'unknown', route };
-  const kept = state.state === 'installed' ? { ...(state.off ? { off: true as const } : {}), ...(tool === 'copilot-cli' && state.live ? {} : { keeps: true as const }) } : {};
+  const kept = state.state === 'installed' && state.off ? { off: true as const } : {};
   return { has: whole ? 'whole' : itemsIn(entry, plugin, tool) ? 'items' : 'none', route, ...(whole ? { stuck: cantUninstall(view, entry, plugin, tool), ...kept } : {}) };
 }
 
@@ -534,22 +534,6 @@ export function switchWords(view: PluginsView, entry: MarketplaceView, plugin: s
 /** Add's words for a plugin found in some tools with no entry here. */
 export const addWords = (plugin: string, tools: HarnessId[]) =>
   `${plugin} is in ${andList(tools.map(tool => names[tool]))}, installed outside Central Knot. Add turns it on here: it goes into every other tool here that takes it, and Undo takes it out again.`;
-
-/**
- * What the Undo of a plugin's turn can't put back, said beside its result: an uninstall's Undo installs the marketplace's copy
- * as it is now, not the copy that was there; a plugin its marketplace no longer offers (or whose marketplace can't be read)
- * can't be installed again; and a tool's own switches for its single skills, MCP servers or agents go with its copy.
- * `items`: the home's plugin items as read before the click (HomeView pluginItems), for those switches. Empty when no copy
- * was uninstalled.
- */
-export function undoLimits(view: PluginsView, entry: MarketplaceView, plugin: string, removed: HarnessId[], items: { tool: HarnessId; plugin: string; marketName: string; serversOff?: string[]; agentsOff?: string[] }[] = []): string[] {
-  if (!removed.length) return [];
-  const gone = entry.plugins.find(candidate => candidate.name === plugin)?.gone;
-  const switched = removed.filter(tool => { const state = stateOf(entry, plugin, tool); const item = items.find(each => each.tool === tool && each.plugin === plugin && each.marketName === entry.name);
-    return (state.state === 'installed' && !!state.skillsOff?.length) || !!item?.serversOff?.length || !!item?.agentsOff?.length; });
-  return [gone ? `Undo can’t install it again: ${unavailable(view, entry, plugin, removed[0]!) ?? MARKET_UNREAD}` : 'Undo installs the marketplace’s copy as it is now.',
-    switched.length ? `${andList(switched.map(tool => names[tool]))}’s own switches for its single items aren’t put back.` : ''].filter(Boolean);
-}
 
 /** Why one of a plugin's items is not on in a tool (OUT), or a reason of its own: it couldn't be read, or the tool can't hold it. */
 export type ItemOut = keyof typeof OUT | { cannot: string };

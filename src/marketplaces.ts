@@ -15,7 +15,7 @@ import { itemTools, itemsBack, itemsView, lookAtKinds, readPlugin, runItems, wit
 import { recordedIds } from './sourcestore.ts';
 import { holds, pluginTools, takesPlugins, type PluginTool } from './presence.ts';
 import { waysFrom } from './reload.ts';
-import type { ItemKind } from './library.ts';
+import { wantedIn, type ItemKind } from './library.ts';
 import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartRef, PluginActionResult, PluginDetail, PluginTurn, PluginTurnResult, PluginView, PluginsView, Snapshot, SyncNotice, YourName } from './types.ts';
 import { harnessIds } from './harnesses.ts';
 import { errorCode, liftFirst, syncGate, writeDurably, type ShareContext } from './share.ts';
@@ -758,7 +758,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
    * A click on a whole plugin (`what`): its switch On or Off, Add for a plugin found in a tool, or one tool's box unticked or
    * ticked. The entry is recorded first; then the table (pluginrecord.ts owedTo) is asked once with it, and what it owes runs by
    * each tool's own route: On, Add and a tick run only installs and turn kept copies on, Off and an untick only turn copies off
-   * (kept installed) or uninstall, a box only in its tool. A tool where nothing can run (held, or its record can't be read) is a
+   * (kept installed), a box only in its tool. A tool where nothing can run (held, or its record can't be read) is a
    * report saying why. `back` is the Undo: what changed, reversed (pluginplan.ts reverse).
    */
   async function turn(source: string, plugin: string, what: PluginTurn, tool: HarnessId | undefined, home: unknown): Promise<PluginTurnResult> {
@@ -783,7 +783,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       if (tool && each !== tool) continue;
       const act = clickRuns(what, owed);
       if (act === 'install-items' || act === 'remove-items') itemsIn.push(each);
-      else if (act) ops.push({ source: entry.source, marketName, plugin, tool: each, action: act === 'uninstall' ? 'remove' : act });
+      else if (act) ops.push({ source: entry.source, marketName, plugin, tool: each, action: act });
       // Said on the result, and nothing run there: a record that can't be read; held in this click's way; and for Off and Keep
       // out, a tool holding another marketplace under this name (read from its state: its plugins are not this one's), or a copy
       // off there already (pluginrecord.ts row 9), whose words are the result's "already off in" (nothing changed there: no Undo).
@@ -794,7 +794,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       const otherMarket = clickGoes(what) === 'out' && other?.state === 'held' ? other.reason : undefined;
       const why = owed.has === 'unknown' ? recordUnread(each) : clickHeld(what, owed) ?? otherMarket;
       // A tool's refusal of this marketplace is said once, where its state is (pluginstatus.ts blocked), not on every click.
-      if (why && why !== entry.refusedBy?.[each]) held.push({ source: entry.source, marketName, plugin, tool: each, action: clickGoes(what) === 'out' ? 'remove' : 'install', report: { tool: each, outcome: 'held', message: why, runs: [] } });
+      if (why && why !== entry.refusedBy?.[each]) held.push({ source: entry.source, marketName, plugin, tool: each, action: clickGoes(what) === 'out' ? 'plugin-off' : 'install', report: { tool: each, outcome: 'held', message: why, runs: [] } });
     }
     const ran = ops.length ? await runPlan(ops, ownApi, String(home)) : { done: [] as PluginDone[] };
     const back = reverse(ran.done);
@@ -821,13 +821,33 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   async function undoTurn(source: string, plugin: string, before: PluginEntry | null, back: PluginOp[], home: unknown): Promise<{ stopped?: string; done: PluginDone[] }> {
     const stopped = await guard(home);
     if (stopped) return { stopped, done: [] };
-    const { problem, record } = await readPluginRecord(String(home)), id = entryOf(record, source, plugin)?.id ?? before?.id;
+    const { problem, record } = await readPluginRecord(String(home));
+    const current = entryOf(record, source, plugin);
+    const id = current?.id ?? before?.id;
     if (problem || !(await changeRecord(String(home), now => withEntry(now, source, plugin, before ?? undefined)))) return { stopped: problem ?? 'The plugins record isn’t there. Nothing was changed.', done: [] };
     // Its items as they were (pluginlibrary.ts itemsBack), by the plugin's id as the click knew it; then the tools' own steps.
     const items = back.filter(op => op.action === 'items-back'), tools = (await host.read()).tools;
     const done: PluginDone[] = [];
     for (const op of items) if (id && host.share) done.push(...(await itemsBack(host.share(), tools, id, op.items ?? [], op, itemTools(tools))).done);
     const ran = await runPlan(back.filter(op => op.action !== 'items-back'), ownApi, String(home));
+    // Undoing a fresh install of Copilot CLI's live folder copy leaves enabledPlugins false, installed and off (plugins.ts
+    // uninstall counts that as `gone`; pluginplan.ts reverse marks the op `keptOff`): end as an Off does so the result says
+    // "turned off" (never "removed") and the record keeps Copilot CLI out (`Off, kept installed`).
+    const liveOff = ran.done.find(step => step.action === 'remove' && step.tool === 'copilot-cli' && step.report.outcome === 'uninstalled' && step.report.changed);
+    if (liveOff) {
+      const state = await engine.installState(await context(), 'copilot-cli', liveOff.marketName, plugin);
+      if (state.state === 'installed' && state.live && state.off) {
+        liveOff.report = { ...liveOff.report, outcome: 'plugin-off', message: 'Turned off in Copilot CLI.' };
+        if (!before || wantedIn(before, 'copilot-cli')) {
+          const { view: afterView } = await look(false, undefined, source);
+          const afterEntry = afterView.marketplaces.find(candidate => engine.sameSource(candidate.source, source));
+          const has = afterEntry ? afterView.tools.filter(each => each !== 'copilot-cli' && inUseIn(afterEntry, plugin, each)) : [];
+          const fallback = () => current ?? newEntry(source, liveOff.marketName, plugin, false);
+          const kept = turnedEntry(before ?? (has.length ? undefined : current), 'keep-out', 'copilot-cli', fallback, has, afterView.tools);
+          if (kept) await changeRecord(String(home), now => withEntry(now, source, plugin, kept));
+        }
+      }
+    }
     return { ...ran, done: [...done, ...ran.done] };
   }
 
@@ -1032,6 +1052,7 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
     const step = record(op);
     return !!step && step.source === source && step.plugin === plugin && isName(step.marketName) && harnessIds.includes(step.tool as HarnessId)
       && ['install', 'remove', 'plugin-off', 'plugin-on', 'items-back'].includes(step.action as string)
+      && (step.keptOff === undefined || step.keptOff === true)
       && (step.items === undefined || (step.action === 'items-back' && Array.isArray(step.items) && step.items.length <= 5000 && step.items.every(isItemState)));
   };
   const isEntry = (source: string, plugin: string) => (value: unknown): value is PluginEntry => {

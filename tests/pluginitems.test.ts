@@ -66,7 +66,7 @@ test('Claude Code reads the marketplace entry from its own copy of the marketpla
   } finally { await box.cleanup(); }
 });
 
-test('Copilot CLI: a cached plugin turned off, a skill switched off, and a folder-marketplace plugin, which only enabledPlugins records and false means uninstalled', async () => {
+test('Copilot CLI: a cached plugin turned off, a skill switched off, and a folder-marketplace plugin, which enabledPlugins records as on or off while its folder exists', async () => {
   const box = await sandbox();
   try {
     const cached = join(box.home, '.copilot/installed-plugins/m/demo');
@@ -81,8 +81,14 @@ test('Copilot CLI: a cached plugin turned off, a skill switched off, and a folde
       { tool: 'copilot-cli', plugin: 'demo', marketName: 'm', off: true, skillsOff: undefined, listed: false, problem: undefined, items: ['skill:hello', 'mcp:tracker', 'agent:checker'] },
       { tool: 'copilot-cli', plugin: 'live', marketName: 'local', off: undefined, skillsOff: ['near'], listed: true, problem: undefined, items: ['skill:near'] },
     ]);
-    // Copilot CLI's own uninstall of a folder marketplace's plugin leaves its record false: it brings nothing any more.
+    // Copilot CLI's uninstall of a folder marketplace's plugin sets its record to false while its folder stays: installed and off.
     await put(settings, (await readFile(settings, 'utf8')).replace('"live@local":true', '"live@local":false'));
+    assert.deepEqual(brief(await readPluginItems(box.context, ['copilot-cli'])), [
+      { tool: 'copilot-cli', plugin: 'demo', marketName: 'm', off: true, skillsOff: undefined, listed: false, problem: undefined, items: ['skill:hello', 'mcp:tracker', 'agent:checker'] },
+      { tool: 'copilot-cli', plugin: 'live', marketName: 'local', off: true, skillsOff: ['near'], listed: true, problem: undefined, items: ['skill:near'] },
+    ]);
+    // Once its folder is gone, false no longer counts as installed.
+    await rm(join(market, 'live'), { recursive: true });
     assert.deepEqual((await readPluginItems(box.context, ['copilot-cli'])).map(install => install.plugin), ['demo']);
   } finally { await box.cleanup(); }
 });

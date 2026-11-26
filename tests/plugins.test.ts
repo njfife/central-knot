@@ -1,15 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { standIn } from './standin.ts';
+import { slashPath } from './wincompat.ts';
 import { tomlValue } from '../src/textedit.ts';
 import { compareVersions } from '../src/values.ts';
 import { INLINE_SKILLS_CONFIG } from '../src/pluginstatus.ts';
-import { cachedCatalog, checkAccess, copySource, forgetRefusals, fromDirectory, gitFailure, gitPrefix, readRemotePlugin, refusedBy, repositoryKey, whyGitFailed, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, setSkill, uninstall, update, type PluginContext } from '../src/plugins.ts';
+import { cachedCatalog, checkAccess, copySource, forgetRefusals, fromDirectory, gitFailure, gitPrefix, readRemotePlugin, refusedBy, repositoryKey, whyGitFailed, install, installedPlugins, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, setSkill, setWhole, uninstall, update, type PluginContext } from '../src/plugins.ts';
 
 const noPosix = process.platform === 'win32';
 
@@ -364,9 +366,16 @@ test('Installed means files where the tool records them; a record with no files 
     await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'directory', path: live } } }, enabledPlugins: { 'marker@ck-test-market': true } }));
     const liveState = await installState(box.context, 'copilot-cli', 'ck-test-market', 'marker');
     assert.ok(liveState.state === 'installed' && liveState.live, JSON.stringify(liveState));
-    // Copilot CLI's uninstall of a folder marketplace's plugin only sets its record to false: that is not installed.
+    // Copilot CLI's uninstall of a folder marketplace's plugin sets its record to false while its folder stays: installed, live and off.
     await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'directory', path: live } } }, enabledPlugins: { 'marker@ck-test-market': false } }));
+    assert.partialDeepStrictEqual(await installState(box.context, 'copilot-cli', 'ck-test-market', 'marker'), { state: 'installed', path: join(live, 'plugins/marker'), live: true, off: true, version: '0.3.0' });
+    // False where the marketplace is not a directory, or where the plugin's folder exists but is empty, both read not installed.
+    await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'github', repo: 'acme/market' } } }, enabledPlugins: { 'marker@ck-test-market': false } }));
     assert.equal((await installState(box.context, 'copilot-cli', 'ck-test-market', 'marker')).state, 'not-installed');
+    await rm(join(live, 'plugins/full'), { recursive: true });
+    await mkdir(join(live, 'plugins/full'), { recursive: true });
+    await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'directory', path: live } } }, enabledPlugins: { 'full@ck-test-market': false } }));
+    assert.equal((await installState(box.context, 'copilot-cli', 'ck-test-market', 'full')).state, 'not-installed');
     // Claude Code records a cache copy of a folder marketplace's plugin, and its version then, but loads the folder.
     await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'ck-test-market': { source: { source: 'directory', path: live }, installLocation: live } }));
     await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'marker@ck-test-market': [{ scope: 'user', installPath: cache, version: '0.1.0' }] } }));
@@ -1288,5 +1297,65 @@ exit 0
     assert.match(held.message, /every skill named “one”/);
     const claude = await setSkill(context, 'ck-test-market', 'full', 'one', 'claude-cli', false, '/m');
     assert.deepEqual([claude.outcome, claude.message], ['failed', 'Claude Code has no switch for a single skill of a plugin: only the whole plugin turns off there.']);
+  } finally { await box.cleanup(); }
+});
+
+test('Copilot CLI’s live folder copy: setWhole Off then On runs uninstall then install, settings.json returns byte for byte with nothing else changed, and false reads installed and off', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const market = join(box.home, 'market'), id = 'marker@ck-test-market', settingsPath = join(box.home, '.copilot/settings.json');
+    await marketplace(market);
+    await put(join(box.home, '.copilot/plugin-data/marker/state.log'), 'kept\n');
+    const beforeSettings = `${JSON.stringify({
+      extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'directory', path: market } } },
+      enabledPlugins: { [id]: true },
+      disabledSkills: ['other:quiet'],
+      disabledMcpServers: ['local'],
+      trustedFolders: [market],
+    }, null, 2)}\n`;
+    await put(settingsPath, beforeSettings);
+    const listing = async (root: string): Promise<Record<string, string>> => {
+      const files = (await readdir(root, { recursive: true, withFileTypes: true })).filter(entry => entry.isFile());
+      return Object.fromEntries(await Promise.all(files.map(async file => {
+        const path = join(file.parentPath, file.name);
+        return [slashPath(relative(root, path)), createHash('sha256').update(await readFile(path)).digest('hex')] as const;
+      })));
+    };
+    const callsPath = join(box.base, 'calls.txt'), bin = join(box.base, 'bin');
+    // Stand-in for `copilot`: accepts only `plugin install` and `plugin uninstall` for a live copy (never `enable`/`disable`), flipping enabledPlugins[id] alone.
+    await put(join(bin, 'copilot'), `#!/bin/sh
+echo "$*" >> ${JSON.stringify(callsPath)}
+[ "$1" = "plugin" ] && { [ "$2" = "uninstall" ] || [ "$2" = "install" ]; } || exit 9
+exec ${JSON.stringify(process.execPath)} -e 'const fs=require("fs"),f=process.argv[1],id=process.argv[2],on=process.argv[3]==="install";const j=JSON.parse(fs.readFileSync(f,"utf8"));j.enabledPlugins={...j.enabledPlugins,[id]:on};fs.writeFileSync(f,JSON.stringify(j,null,2)+"\\n");' ${JSON.stringify(settingsPath)} "$3" "$2"
+`);
+    execFileSync('chmod', ['+x', join(bin, 'copilot')]);
+    const context = { ...box.context, binaries: { 'copilot-cli': join(bin, 'copilot') } as PluginContext['binaries'] };
+    const homeBefore = await listing(box.home);
+    const off = await setWhole(context, 'ck-test-market', 'marker', 'copilot-cli', false, market);
+    assert.deepEqual([off.outcome, off.changed, off.runs.map(run => run.command)], ['plugin-off', true, [`copilot plugin uninstall ${id}`]], off.message);
+    assert.match(off.message, /^Turned off in Copilot CLI\./);
+    assert.partialDeepStrictEqual(await installState(context, 'copilot-cli', 'ck-test-market', 'marker'), { state: 'installed', path: join(market, 'plugins/marker'), live: true, off: true, version: '0.3.0' });
+    const listed = await installedPlugins(context, 'copilot-cli');
+    assert.equal(listed.length, 1);
+    assert.deepEqual([listed[0]!.plugin, listed[0]!.off, listed[0]!.state.state === 'installed' && listed[0]!.state.live], ['marker', true, true]);
+    const alreadyOff = await setWhole(context, 'ck-test-market', 'marker', 'copilot-cli', false, market);
+    assert.deepEqual([alreadyOff.outcome, alreadyOff.changed, alreadyOff.runs.length], ['plugin-off', undefined, 0], 'wholeOff reads false as off');
+    const homeOff = await listing(box.home);
+    const withoutSettings = (all: Record<string, string>) => Object.fromEntries(Object.entries(all).filter(([path]) => path !== '.copilot/settings.json'));
+    assert.deepEqual(withoutSettings(homeOff), withoutSettings(homeBefore), 'folder, plugin-data and every other file keep their exact bytes while off');
+    const on = await setWhole(context, 'ck-test-market', 'marker', 'copilot-cli', true, market);
+    assert.deepEqual([on.outcome, on.changed, on.runs.map(run => run.command)], ['plugin-on', true, [`copilot plugin install ${id}`]], on.message);
+    assert.equal(await readFile(settingsPath, 'utf8'), beforeSettings, 'settings.json returns byte for byte');
+    assert.deepEqual(await listing(box.home), homeBefore, 'every file in the home returns byte for byte');
+    // Fresh install of another live plugin, then its Undo (uninstall): flips enabledPlugins to false and succeeds, never "Still installed."
+    const catalog = await parseCatalog(market, market, 'folder');
+    const fresh = await install(context, catalog, 'full', 'copilot-cli');
+    assert.deepEqual([fresh.outcome, fresh.changed, fresh.live], ['installed', true, true], fresh.message);
+    const undone = await uninstall(context, 'ck-test-market', 'full', 'copilot-cli', market);
+    assert.deepEqual([undone.outcome, undone.changed], ['uninstalled', true], undone.message);
+    assert.partialDeepStrictEqual(await installState(context, 'copilot-cli', 'ck-test-market', 'full'), { state: 'installed', path: join(market, 'plugins/full'), live: true, off: true, version: '1.0.0' });
+    // Once its folder is gone, false is no longer installed in either read (while marker, still true and present, stays).
+    await rm(join(market, 'plugins/full'), { recursive: true });
+    assert.deepEqual([await installState(context, 'copilot-cli', 'ck-test-market', 'full'), (await installedPlugins(context, 'copilot-cli')).map(each => each.plugin)], [{ state: 'not-installed' }, ['marker']]);
   } finally { await box.cleanup(); }
 });

@@ -11,7 +11,7 @@ import { brandMark } from './brand.ts';
 import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
 import { clickNote, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
-import { pluginKey, resultParts, resultSentence, shortOf, type PluginOp, type ResultLine } from './pluginplan.ts';
+import { pluginKey, resultParts, resultSentence, shortOf, undoTitle, type PluginOp, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, blocked, categoriesOf, copyStale, installedFrom, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
 import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, forgetMarketplace, lastLines, market, openLink, overRun, pickMarketplaceFolder, runReloads, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
@@ -20,7 +20,7 @@ import type { ReloadAdvice } from './reload.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginUpdateNotes } from './pluginupdateview.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
-import { andList, byToolOrder, notAllThrough, orList, pageNames, toolName, toolNames as names } from './words.ts';
+import { andList, notAllThrough, orList, pageNames, toolName, toolNames as names } from './words.ts';
 
 /** "9:20 AM" today, else "Nov 8". */
 const when = (iso: string) => (new Date(iso).toDateString() === new Date().toDateString() ? clockTime(iso) : new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
@@ -342,26 +342,12 @@ function undoButton(): HTMLElement | null {
   const back = undoOps();
   if (!back.length) return null;
   const undo = button({ variant: 'outline', size: 'small', label: undoLabel(), id: 'plugins-undo', disabled: acting(), onclick: undoLast });
-  undo.title = acting() ?? undoTitle(back);
-  return undo;
-}
-
-/**
- * What each kind of step an Undo runs does, in Undo's tooltip, before the tools it runs in. A plugin's items in Pi, OpenCode and Antigravity
- * (items-back) have no words: Central Knot puts them back itself, through no tool's command.
- */
-const UNDO_WORDS: [PluginOp['action'][], string][] = [[['remove'], 'uninstalls it from'], [['install'], 'reinstalls it in'],
-  [['skill-on', 'skill-off', 'part-on', 'part-off', 'plugin-on', 'plugin-off'], 'turns each switch back as it was in']];
-
-/** Undo's tooltip, from what it will run (`back`): what it reverses where, that an update in the same run stays, and what a switch's Undo can't put back. */
-function undoTitle(back: PluginOp[]): string {
-  const where = (actions: PluginOp['action'][]) => andList([...new Set(back.filter(op => actions.includes(op.action)).map(op => op.tool))].sort(byToolOrder).map(tool => names[tool]));
-  const does = UNDO_WORDS.filter(([actions]) => where(actions)).map(([actions, verb]) => `${verb} ${where(actions)}`);
-  const updated = !market.lastRun?.undo && market.lastRun?.done.some(entry => entry.action === 'update' && entry.report.changed);
+  const last = market.lastRun;
+  const updated = !last?.undo && !!last?.done.some(entry => entry.action === 'update' && entry.report.changed);
   // A switch's Undo names its plugin: several plugins' clicks may have run since the page was last read.
-  const plugin = !market.lastRun?.undo && market.lastRun?.turn ? ` for ${market.lastRun.turn.plugin}` : '';
-  const said = [`Reverses what changed${plugin}${does.length ? `, through each tool’s own command or switch: ${andList(does)}` : ''}.`, updated ? 'The update itself stays: it can’t be undone.' : ''];
-  return [...said, ...(market.lastRun?.turn?.limits ?? [])].filter(Boolean).join(' ');
+  const plugin = !last?.undo ? last?.turn?.plugin : undefined;
+  undo.title = acting() ?? undoTitle(back, { plugin, updated });
+  return undo;
 }
 
 const dismiss = (onclick: () => void, id?: string) => closeButton(() => { onclick(); rerender(); }, { id });
@@ -409,12 +395,10 @@ function runLine(lines: ResultLine[], advice: ReloadAdvice, elsewhere: boolean, 
     const sentence = elsewhere
       ? changed.length ? [last.undo ? 'Undone: ' : 'Last change: ', ...changed.flatMap((part, at) => [at ? ', ' : '', link(part, at)]), '.'] : []
       : parts.map((part, at) => (typeof part === 'string' ? part : link(part, at)));
-    // What a switch's Undo can't put back is said with the result, so the promise beside Undo is the whole of it.
-    const limits = !last.undo && last.turn?.limits.length ? ` ${last.turn.limits.join(' ')}` : '';
     const lead = failed.length ? `${notAllThrough(failed, short.of)} ` : '';
     const profile = whole && last.profileLine ? ` ${last.profileLine}` : '';
     return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, failed.length ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'),
-      h('span.toolbar-result-text', { title: `${lead}${resultSentence(lines, last.undo)}${limits}${profile}` }, lead, sentence, limits ? h('span.toolbar-result-more', {}, limits) : null, profile || null), back, dismiss(closeRun, 'report-dismiss'));
+      h('span.toolbar-result-text', { title: `${lead}${resultSentence(lines, last.undo)}${profile}` }, lead, sentence, profile || null), back, dismiss(closeRun, 'report-dismiss'));
   }
   // An Undo that undid nothing still offers its way back here, whether or not its failures are still shown.
   if (last && back) return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, h('span.toolbar-result-text', {}, 'Not everything was undone.'), back, dismiss(closeRun, 'report-dismiss'));

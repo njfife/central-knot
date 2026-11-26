@@ -65,6 +65,13 @@ test('A tool’s box: ticked where the plugin is; off before the click where its
   const now = toolNow(view, offThere, 'p', 'claude-cli', undefined, false);
   assert.deepEqual([toolMark(view, offThere, 'p', 'claude-cli', owedTo({ on: true, except: ['claude-cli'] }, 'claude-cli', now, view.tools)), box(offThere, 'claude-cli'), clickRuns('let-in', owedTo({ on: true, except: [] }, 'claude-cli', now, view.tools))],
     [{ mark: 'kept-off', words: 'Off in Claude Code: still installed at 1.0.0, with its data and settings.' }, { ticked: false }, 'plugin-on']);
+  // Copilot CLI's live folder copy follows the same rule: on + kept out owes plugin-off; off reads kept-off and a tick owes plugin-on.
+  const liveOn: MarketplaceView = { ...on(['copilot-cli']), states: { p: { 'copilot-cli': { state: 'installed', path: '/y', version: '1.0.0', live: true } } } };
+  assert.equal(clickRuns('keep-out', owedTo({ on: true, except: ['copilot-cli'] }, 'copilot-cli', toolNow(view, liveOn, 'p', 'copilot-cli', undefined, false), view.tools)), 'plugin-off');
+  const liveOff: MarketplaceView = { ...on(['copilot-cli']), states: { p: { 'copilot-cli': { state: 'installed', path: '/y', version: '1.0.0', live: true, off: true } } } };
+  const liveNow = toolNow(view, liveOff, 'p', 'copilot-cli', undefined, false);
+  assert.deepEqual([toolMark(view, liveOff, 'p', 'copilot-cli', owedTo({ on: true, except: ['copilot-cli'] }, 'copilot-cli', liveNow, view.tools)), box(liveOff, 'copilot-cli'), clickRuns('let-in', owedTo({ on: true, except: [] }, 'copilot-cli', liveNow, view.tools))],
+    [{ mark: 'kept-off', words: 'Off in Copilot CLI: still installed at 1.0.0, with its data and settings.' }, { ticked: false }, 'plugin-on']);
 });
 
 test('Only a known version that names another release is a difference', () => {
@@ -92,7 +99,7 @@ test('Update is offered only where a tool’s copy is older and can be changed h
   assert.deepEqual(updateTools(view, copies, 'p', undefined), [], 'nothing to compare with');
   // Claude Code's copy from the Anthropic Directory is installed, and left to Claude Code: behind or not, no Update, no Uninstall.
   const directory = at({ 'claude-cli': { state: 'installed', path: '/x', version: '1.9.0', directory: 'p@anthropic-plugin-directory' } });
-  assert.deepEqual([updateTools(view, directory, 'p', '2.0.0'), toolNow(view, directory, 'p', 'claude-cli', undefined, false)], [[], { has: 'whole', route: 'whole', stuck: FROM_DIRECTORY, keeps: true }]);
+  assert.deepEqual([updateTools(view, directory, 'p', '2.0.0'), toolNow(view, directory, 'p', 'claude-cli', undefined, false)], [[], { has: 'whole', route: 'whole', stuck: FROM_DIRECTORY }]);
   assert.equal(cantUninstall(view, directory, 'p', 'claude-cli'), FROM_DIRECTORY);
   assert.deepEqual(copiesToCompare(view, directory), [], 'its files aren’t compared with the marketplace’s');
 });

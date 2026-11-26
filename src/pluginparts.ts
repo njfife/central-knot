@@ -117,7 +117,7 @@ function boxDoes(view: PluginsView, entry: MarketplaceView, plugin: string, tool
   const state = stateOf(entry, plugin, tool);
   // Off there already: the click runs nothing in the tool, so it has no Undo there to promise.
   if (ticked && state.state === 'installed' && state.off) return `Click to keep ${what} out of ${where}, where it is off already and stays installed.`;
-  if (ticked && sw?.tools[tool]?.keeps) return `Click to turn ${what} off in ${where}, kept installed: it stays off until you tick it again. Undo turns it on again.`;
+  if (ticked && takesPlugins(tool)) return `Click to turn ${what} off in ${where}, kept installed: it stays off until you tick it again. Undo turns it on again.`;
   if (ticked) return `Click to take ${what} out of ${where}: it stays out until you tick it again. Undo puts it back.`;
   if (on && mark !== 'kept-off') return `Click to put ${what} in ${where}. Undo takes it out again.`;
   // A tick on an Off plugin turns it On where another tool has it in use too (marketplaces.ts turnedEntry): "alone" only where none does.
