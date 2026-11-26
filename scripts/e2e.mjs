@@ -15477,10 +15477,12 @@ async function hookRunFlow() {
     [0, 0, true]);
   await a.click('#home-actual');
   await steady();
-  // Missing CLI hides Run it for Codex, drops As <tool> on release-helper, and explains why on Codex's Instructions strip.
+  // Missing CLI (app only, no binary) hides Run it for Codex, drops As <tool> on release-helper, and explains why on Codex's Instructions strip.
   const codexBin = join(home, '.local/bin/codex');
   const codexBinBody = readNow(codexBin);
+  const codexApp = join(home, 'Applications/ChatGPT.app');
   rmSync(codexBin, { force: true });
+  mkdirSync(codexApp, { recursive: true });
   await a.click('#header-refresh');
   await steady();
   await a.click('#nav-plugins');
@@ -15508,6 +15510,7 @@ async function hookRunFlow() {
     await a.send('Emulation.setEmulatedMedia', { features: [] });
     await fullSize(a);
   }
+  rmSync(codexApp, { recursive: true, force: true });
   writeFileSync(codexBin, codexBinBody, { mode: 0o755 });
   await a.click('#header-refresh');
   await steady();
