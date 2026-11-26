@@ -367,12 +367,12 @@ export async function readCatalog(context: PluginContext, source: string): Promi
 }
 
 /** The last fetched copy of a Git catalog, if any, so it stays browsable when the source can't be reached (MKT-04). */
-export async function cachedCatalog(context: PluginContext, source: string): Promise<Catalog | undefined> {
+export async function cachedCatalog(context: PluginContext, source: string, { counts = true } = {}): Promise<Catalog | undefined> {
   if (isFolder(source)) return undefined;
   const target = catalogFolder(context, source);
   const fetched = await stat(join(target, MANIFEST)).catch(() => stat(join(target, CODEX_MANIFEST))).catch(() => undefined);
   if (!fetched) return undefined;
-  return { ...(await parseCatalog(target, source, 'git')), fetchedAt: fetched.mtime.toISOString() };
+  return { ...(await parseCatalog(target, source, 'git', { counts })), fetchedAt: fetched.mtime.toISOString() };
 }
 
 /** Why Copilot CLI would refuse a whole marketplace because of this one entry's source (MKT-06), if it would. */

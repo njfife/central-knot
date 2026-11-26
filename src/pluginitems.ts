@@ -21,7 +21,7 @@ export const UNREADABLE = 'Its files couldn’t be read.';
  * Every plugin installed whole in these tools, with what it brings. Codex leaves a plugin's agents out (it copies them but
  * never loads them, capability-data Appendix D), so its copies list none. Its hooks are kept as its copy declares them
  * (sessionhooks.ts draws those that can add text); commands and the rest stay on the plugin's page.
- * Names, descriptions, and for skills their listed path and real folder: no companion files are walked or hashed,
+ * Names, descriptions, and for skills their listed path and real folder: no companion files are opened or hashed,
  * and only an opened item reads its files (readItemTexts, skills.ts skillPluginFile).
  */
 export async function readPluginItems(context: PluginContext, tools: HarnessId[]): Promise<InstalledPlugin[]> {

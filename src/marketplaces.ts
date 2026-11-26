@@ -172,11 +172,11 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     }
     const known = fetched.get(source);
     if (known && !fresh && (known.catalog || Date.now() - (known.at ?? 0) < RETRY_MS)) return known;
-    const onDisk = fresh ? undefined : await engine.cachedCatalog(ctx, source);
+    const onDisk = fresh ? undefined : await engine.cachedCatalog(ctx, source, { counts });
     // `local`: only the copy on disk; with none, nothing (the Refresh rules decide when a Git marketplace is fetched).
     if (!onDisk && local) return {};
     const result = onDisk ? { catalog: onDisk } : await fetchFresh(ctx, source, fresh);
-    fetched.set(source, result.catalog ? result : { ...result, at: Date.now() });
+    if (counts || !onDisk) fetched.set(source, result.catalog ? result : { ...result, at: Date.now() });
     return result;
   }
   /** Fetches a Git marketplace; on failure, the copy on disk (if any) is kept and marked stale. */
@@ -954,7 +954,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { report, view: await view() };
   }
 
-  /** One plugin's marketplace copy on disk among the open home's known marketplaces (no fetch). */
+  /** One plugin's marketplace copy on disk among the open home's known marketplaces (no fetch; `wantedSource` narrows for skills:plugin-file, omitted by hook:source). */
   async function pluginCopy(marketName: string, plugin: string, wantedSource?: string): Promise<PluginCopy | undefined> {
     const ctx = await context();
     const { known } = await listedSources(ctx, columns((await host.read()).tools));

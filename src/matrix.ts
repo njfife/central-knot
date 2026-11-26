@@ -1731,14 +1731,14 @@ function followHold() {
  * Turn these off (listedRows) count and touch none.
  */
 const catalogHits = (t: Table) => (t.view.filter === 'all' && ['anywhere', 'plugins'].includes(t.view.from) ? answerFor(t)?.catalog.filter(hit => t.kinds.includes(pageOfPart[hit.kind!])) ?? [] : undefined);
+/** The catalog hits revealed and ready with item details (shared by catalogGroup and drawTable). */
+const shownCatalog = (t: Table, hits?: SearchHit[]): CatalogTarget[] => (hits ? hits.slice(0, t.view.revealed).filter(hit => hit.item).map(hit => ({ kind: 'catalog', hit })) : []);
 /**
  * The group, after the Library's own results while Find has text: "Nothing in your Library matches" above it where nothing of
  * his does; its heading, with the count of its matches, how to get one, and how much is read (coverageLine), the heading shown
  * for that alone with no hit; its first `revealed` rows (catalogRow; after "Show 10 more", once main has sent their details);
  * "Show 10 more" while there are more.
  */
-/** The catalog hits revealed and ready with item details (shared by catalogGroup and drawTable). */
-const shownCatalog = (t: Table, hits?: SearchHit[]): CatalogTarget[] => (hits ? hits.slice(0, t.view.revealed).filter(hit => hit.item).map(hit => ({ kind: 'catalog', hit })) : []);
 function catalogGroup(t: Table, hits: SearchHit[]) {
   const rows = shownCatalog(t, hits), left = Math.max(0, hits.length - t.view.revealed), said = coverageLine();
   const reading = said && said.map(part => sectionNote(true, part));

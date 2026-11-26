@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import fs, { realpathSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { dirname, join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
@@ -1300,5 +1302,59 @@ test('pluginCopy and skillPluginFile open the Find hit’s own marketplace sourc
     const fromUnlisted = await skillPluginFile(ctx, { marketName: 'team', plugin: 'docs', part: 'skills/pdf-reader', from: 'marketplace', source: unlisted }, 'SKILL.md', lookup);
     const fromUncloned = await skillPluginFile(ctx, { marketName: 'team', plugin: 'docs', part: 'skills/pdf-reader', from: 'marketplace', source: uncloned }, 'SKILL.md', lookup);
     assert.deepEqual([fromUnlisted, fromUncloned, box.calls, remoteFetches], [undefined, undefined, [], 0]);
+  } finally { await box.cleanup(); }
+});
+
+test('a cold-cache Find click on a cached Git marketplace opens no sibling plugin skills to count parts, and a later Plugins view still has counts', async () => {
+  const box = await setup();
+  try {
+    const gitSource = 'https://github.com/acme/cached-team.git';
+    const cached = engine.catalogFolder({ dataDir: join(box.host.dataDir, 'plugins') }, gitSource);
+    await put(join(cached, '.claude-plugin/marketplace.json'), JSON.stringify({
+      name: 'team',
+      plugins: [
+        { name: 'docs', source: './plugins/docs' },
+        { name: 'other', source: './plugins/other' },
+      ],
+    }));
+    await put(join(cached, 'plugins/docs/.claude-plugin/plugin.json'), JSON.stringify({
+      name: 'docs', version: '1.0.0', skills: ['../other/skills/sneaky'],
+    }));
+    await put(join(cached, 'plugins/docs/skills/pdf-reader/SKILL.md'), '---\nname: pdf-reader\ndescription: Reads PDFs.\n---\nFrom cached git copy.\n');
+    await put(join(cached, 'plugins/other/skills/sneaky/SKILL.md'), '---\nname: sneaky\ndescription: Sibling skill.\n---\nSibling text.\n');
+    await put(join(cached, 'plugins/other/skills/helper/SKILL.md'), '---\nname: helper\ndescription: Other plugin skill.\n---\nHelper text.\n');
+    await put(join(box.host.dataDir, 'marketplaces.json'), JSON.stringify([gitSource], null, 2));
+
+    const opened: string[] = [];
+    const origPromiseOpen = fs.promises.open;
+    fs.promises.open = ((path: fs.PathLike, ...rest: unknown[]) => {
+      if (typeof path === 'string') {
+        try {
+          opened.push(realpathSync(path));
+        } catch {
+          opened.push(path);
+        }
+      }
+      return (origPromiseOpen as (...args: unknown[]) => unknown).call(fs.promises, path, ...rest);
+    }) as typeof fs.promises.open;
+    syncBuiltinESMExports();
+    const ctx = { home: box.home, dataDir: box.host.dataDir, binaries: {} };
+    const lookup = (market: string, plugin: string, source?: string) => box.markets.pluginCopy(market, plugin, source);
+    let read;
+    try {
+      read = await skillPluginFile(ctx, { marketName: 'team', plugin: 'docs', part: 'skills/pdf-reader', from: 'marketplace', source: gitSource }, 'SKILL.md', lookup);
+    } finally {
+      fs.promises.open = origPromiseOpen;
+      syncBuiltinESMExports();
+    }
+    assert.equal(read?.directory, join(cached, 'plugins/docs/skills/pdf-reader'));
+    assert.match(read?.text ?? '', /From cached git copy\./);
+    const siblingSkillOpens = opened.map(slashPath).filter(path => path.includes('/plugins/other/skills/'));
+    assert.deepEqual(siblingSkillOpens, [], 'cold-cache click opens no sibling plugin SKILL.md to count parts');
+
+    // Visiting Plugin marketplaces afterwards still computes component counts for every plugin in the cached Git marketplace.
+    const shown = await box.markets.view();
+    const market = shown.marketplaces.find(entry => entry.source === gitSource);
+    assert.equal(market?.plugins.find(plugin => plugin.name === 'other')?.components?.skills, 2);
   } finally { await box.cleanup(); }
 });

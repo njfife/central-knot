@@ -265,14 +265,30 @@ test('reading plugin items for one plugin in two tools walks and hashes no files
     const origPromiseOpen = fs.promises.open;
     const note = (list: string[], path: fs.PathLike) => {
       if (typeof path !== 'string') return;
-      try { list.push(realpathSync(path)); } catch { list.push(path); }
+      try {
+        list.push(realpathSync(path));
+      } catch {
+        list.push(path);
+      }
     };
-    fs.open = ((path: fs.PathLike, ...rest: unknown[]) => { note(hashed, path); note(opened, path); return (origOpen as (...args: unknown[]) => unknown).call(fs, path, ...rest); }) as typeof fs.open;
-    fs.promises.open = ((path: fs.PathLike, ...rest: unknown[]) => { note(opened, path); return (origPromiseOpen as (...args: unknown[]) => unknown).call(fs.promises, path, ...rest); }) as typeof fs.promises.open;
+    fs.open = ((path: fs.PathLike, ...rest: unknown[]) => {
+      note(hashed, path);
+      note(opened, path);
+      return (origOpen as (...args: unknown[]) => unknown).call(fs, path, ...rest);
+    }) as typeof fs.open;
+    fs.promises.open = ((path: fs.PathLike, ...rest: unknown[]) => {
+      note(opened, path);
+      return (origPromiseOpen as (...args: unknown[]) => unknown).call(fs.promises, path, ...rest);
+    }) as typeof fs.promises.open;
     syncBuiltinESMExports();
     let installs: InstalledPlugin[];
-    try { installs = await readPluginItems(box.context, ['claude-cli', 'codex-cli']); }
-    finally { fs.open = origOpen; fs.promises.open = origPromiseOpen; syncBuiltinESMExports(); }
+    try {
+      installs = await readPluginItems(box.context, ['claude-cli', 'codex-cli']);
+    } finally {
+      fs.open = origOpen;
+      fs.promises.open = origPromiseOpen;
+      syncBuiltinESMExports();
+    }
     const skillOpens = opened.map(slashPath).filter(path => path.includes('/skills/hello/'));
     assert.deepEqual(hashed.map(slashPath).filter(path => path.includes('/skills/hello/')), [], 'no file in either tool’s skill folder is hashed');
     assert.deepEqual(skillOpens.filter(path => !path.endsWith('/SKILL.md')), [], 'no companion file in either tool’s skill folder is opened');

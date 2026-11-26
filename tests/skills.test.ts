@@ -1765,12 +1765,22 @@ test('skillPluginFile reads installed (on and off), root-skill, symlinked-root a
       const opened: string[] = [];
       const orig = fs.promises.open;
       fs.promises.open = ((path: fs.PathLike, ...rest: unknown[]) => {
-        if (typeof path === 'string') { try { opened.push(realpathSync(path)); } catch { opened.push(path); } }
+        if (typeof path === 'string') {
+          try {
+            opened.push(realpathSync(path));
+          } catch {
+            opened.push(path);
+          }
+        }
         return (orig as (...args: unknown[]) => unknown).call(fs.promises, path, ...rest);
       }) as typeof fs.promises.open;
       syncBuiltinESMExports();
-      try { return { result: await run(), opened }; }
-      finally { fs.promises.open = orig; syncBuiltinESMExports(); }
+      try {
+        return { result: await run(), opened };
+      } finally {
+        fs.promises.open = orig;
+        syncBuiltinESMExports();
+      }
     };
 
     const expectedFiles = ['SKILL.md', 'asset.bin', 'exact.txt', 'notes/rubric.md', 'over.txt'];
