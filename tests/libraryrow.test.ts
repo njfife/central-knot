@@ -521,3 +521,99 @@ test('An Off row offers one tool only: rowClicks.onOnly keeps every other tool o
   assert.equal(skills.said.onOnly('bench-runner', 'claude-cli', false, sharedAndPlugin, six, onClaudeOnly),
     'bench-runner is on in Claude Code. Codex reads it too. Copilot CLI has it on through its plugin.');
 });
+
+test('Opened-row shared cards, own-settings label, and armed Delete use the short wording with History’s days and no deleteOffer', () => {
+  assert.deepEqual([libraryWords.skills.shared, libraryWords.agents.shared, libraryWords.mcp.shared], [
+    'Each tool it is on in gets the same folder: files as they are, scripts runnable.',
+    'Name, description and prompt are shared; the rest stays in each tool’s file.',
+    'Command, arguments, environment, or URL and headers are shared; the rest stays in each tool’s file.',
+  ]);
+  assert.deepEqual([libraryWords.agents.own(['tools', 'model']), libraryWords.mcp.own(['timeout']), libraryWords.skills.own()], [
+    'Own settings kept: tools and model',
+    'Own settings kept: timeout',
+    '',
+  ]);
+  assert.equal(said.deleteArmed(7), 'Leaves every tool and Central Knot. History can restore it for 7 days.');
+  assert.equal(said.deleteArmed(30), 'Leaves every tool and Central Knot. History can restore it for 30 days.');
+  assert.equal('deleteOffer' in said, false);
+});
+
+test('Opened-row tool lines (detailLine) drop standing filler while closed-row marks (harnessLine) keep whole sentences', () => {
+  const skills = sentences(libraryWords.skills), agents = sentences(libraryWords.agents), servers = sentences(libraryWords.mcp);
+  const all = { 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'b' };
+  const onItem = item();
+  // Current: opened row is blank; closed row's mark keeps the whole sentence.
+  assert.deepEqual(skills.detailLine(row(all, {}, onItem), onItem, 'claude-cli', 'Claude Code'), []);
+  assert.equal(skills.harnessLine(row(all, {}, onItem), onItem, 'claude-cli', 'Claude Code'), 'Has the current version.');
+  // Kept out on an On row: opened row is blank; closed row's mark keeps the whole sentence.
+  const out = item({ except: ['codex-cli'], applied: { 'claude-cli': 'b', 'copilot-cli': 'b' } });
+  assert.deepEqual(skills.detailLine(row({ 'claude-cli': 'b', 'copilot-cli': 'b' }, {}, out), out, 'codex-cli', 'Codex'), []);
+  assert.equal(skills.harnessLine(row({ 'claude-cli': 'b', 'copilot-cli': 'b' }, {}, out), out, 'codex-cli', 'Codex'),
+    'Kept out of this tool. Central Knot keeps its folder for when you turn it on here.');
+  // Off row (ordinary and plugin-sourced): Kept out where in except, blank otherwise; closed mark keeps plugin-sourced line.
+  const offTwo = item({ on: false, except: ['codex-cli', 'pi-cli'], applied: {} });
+  const pluginOff = row({}, { fromSource: { link: 'plugin:kit@market' } }, offTwo);
+  assert.deepEqual(skills.detailLine(pluginOff, offTwo, 'pi-cli', 'Pi'), [{ text: 'Kept out' }]);
+  assert.deepEqual(skills.detailLine(pluginOff, offTwo, 'claude-cli', 'Claude Code'), []);
+  assert.equal(skills.harnessLine(pluginOff, offTwo, 'pi-cli', 'Pi'), 'No copy while it is off.');
+  // Found row with no copy keeps its line.
+  assert.deepEqual(skills.detailLine(row({ 'claude-cli': 'a' }), undefined, 'codex-cli', 'Codex'), [{ text: 'No copy. Adding it puts it here.' }]);
+  // Reads another tool's folder (skills.ts:254-255 -> readsFrom): short label with T1.10 card; kept-out another-way (:561), link, shared folder, and non-CK copy (:257) stay whole.
+  const opencodeReads = row({ 'claude-cli': 'b' }, {
+    anotherWay: { 'opencode-cli': 'OpenCode reads Claude Code’s copy, in Claude Code’s skills folder.' },
+    readsFrom: { 'opencode-cli': 'claude-cli' },
+  }, onItem);
+  assert.deepEqual(skills.detailLine(opencodeReads, onItem, 'opencode-cli', 'OpenCode'), [{
+    text: 'Reads Claude Code’s copy',
+    card: 'OpenCode reads this skill from Claude Code’s folder; Central Knot writes nothing to OpenCode meanwhile.',
+  }]);
+  assert.equal(skills.harnessLine(opencodeReads, onItem, 'opencode-cli', 'OpenCode'),
+    'OpenCode reads Claude Code’s copy, in Claude Code’s skills folder. Nothing of Central Knot’s goes there while it does.');
+  const opencodeKeptOut = item({ except: ['opencode-cli'], applied: { 'claude-cli': 'b' } });
+  assert.deepEqual(skills.detailLine(opencodeReads, opencodeKeptOut, 'opencode-cli', 'OpenCode'), [{
+    text: 'Kept out of this tool, but it still has it another way. OpenCode reads Claude Code’s copy, in Claude Code’s skills folder. Keeping it out stops only a folder of Central Knot’s here.',
+  }]);
+  const notCkCopy = row({}, { anotherWay: { 'opencode-cli': 'OpenCode reads a copy in Claude Code’s skills folder, which is not Central Knot’s.' } }, onItem);
+  assert.deepEqual(skills.detailLine(notCkCopy, onItem, 'opencode-cli', 'OpenCode'), [{
+    text: 'OpenCode reads a copy in Claude Code’s skills folder, which is not Central Knot’s. Nothing of Central Knot’s goes there while it does.',
+  }]);
+  const sharedWay = row({}, { anotherWay: { 'codex-cli': 'Codex also reads a copy at ~/.agents/skills, which is not Central Knot’s.' } }, onItem);
+  assert.deepEqual(skills.detailLine(sharedWay, onItem, 'codex-cli', 'Codex'), [{
+    text: 'Codex also reads a copy at ~/.agents/skills, which is not Central Knot’s. Nothing of Central Knot’s goes there while it does.',
+  }]);
+  // Own switch & own settings kept; closed mark keeps whole own-switch sentence.
+  assert.deepEqual(servers.detailLine(row(all, { switchedOff: ['copilot-cli'] }, onItem), onItem, 'copilot-cli', 'Copilot CLI', ['tools']), [
+    { text: 'Off in Copilot CLI’s settings' },
+    { text: 'Own settings kept: tools' },
+  ]);
+  assert.match(servers.harnessLine(row(all, { switchedOff: ['copilot-cli'] }, onItem), onItem, 'copilot-cli', 'Copilot CLI'),
+    /It is switched off in Copilot CLI’s own settings: Copilot CLI doesn’t start it\. Central Knot leaves that switch as it is/);
+  // Pi agent: As a skill (?) on Pi's line when Pi has/gets it; omitted when Pi cannot take it or agent is Off.
+  const withPi = item({ applied: { ...onItem.applied, 'pi-cli': 'b' } });
+  const piRow: LibraryRow = { key: 'reviewer', hashes: { ...all, 'pi-cli': 'b' }, plan: { orderProved: true, write: [], remove: [], keep: [], forget: [], ownCopy: [], current: ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'] } };
+  assert.deepEqual(agents.detailLine(piRow, withPi, 'pi-cli', 'Pi'), [{
+    text: 'As a skill',
+    card: 'Pi has no agents: this is a skill file, with no context, tool limits or model of its own. Deleting it in Pi turns the agent off everywhere.',
+  }]);
+  assert.deepEqual(agents.detailLine({ ...piRow, switchedOff: ['pi-cli'] }, withPi, 'pi-cli', 'Pi'), [
+    { text: 'As a skill', card: 'Pi has no agents: this is a skill file, with no context, tool limits or model of its own. Deleting it in Pi turns the agent off everywhere.' },
+    { text: 'Off in Pi’s settings' },
+  ]);
+  assert.deepEqual(agents.detailLine({ key: 'reviewer', hashes: all, cannot: { 'pi-cli': 'Pi already has a skill named reviewer.' } }, onItem, 'pi-cli', 'Pi'),
+    [{ text: 'Pi already has a skill named reviewer.' }]);
+  assert.deepEqual(agents.detailLine(row({}, {}, item({ on: false, applied: {} })), item({ on: false, applied: {} }), 'pi-cli', 'Pi'), []);
+  // Kept-whole states: own-copy, gets-it, edited, deleted-by-hand, leaving, cannot, unseen.
+  const ownCopyItem = item({ on: false, applied: {} });
+  assert.deepEqual(skills.detailLine(row({ 'codex-cli': 'x' }, {}, ownCopyItem), ownCopyItem, 'codex-cli', 'Codex'), [{
+    text: skills.harnessLine(row({ 'codex-cli': 'x' }, {}, ownCopyItem), ownCopyItem, 'codex-cli', 'Codex'),
+  }]);
+  const waiting = { 'claude-cli': 'b', 'copilot-cli': 'c', 'codex-cli': 'b' };
+  for (const [tool, where] of [['claude-cli', 'Claude Code'], ['copilot-cli', 'Copilot CLI']] as const) {
+    assert.deepEqual(agents.detailLine(row(waiting, {}, onItem), onItem, tool, where), [{ text: agents.harnessLine(row(waiting, {}, onItem), onItem, tool, where) }]);
+  }
+  const deletedRow = row({ 'copilot-cli': 'b', 'codex-cli': 'b' }, {}, onItem);
+  assert.deepEqual(agents.detailLine(deletedRow, onItem, 'claude-cli', 'Claude Code'), [{ text: agents.harnessLine(deletedRow, onItem, 'claude-cli', 'Claude Code') }]);
+  assert.deepEqual(agents.detailLine(deletedRow, onItem, 'copilot-cli', 'Copilot CLI'), [{ text: agents.harnessLine(deletedRow, onItem, 'copilot-cli', 'Copilot CLI') }]);
+  const unseenWhy = { unseen: { 'copilot-cli': 'Copilot CLI’s file could not be read.' } };
+  assert.deepEqual(agents.detailLine(row(all, unseenWhy, onItem), onItem, 'copilot-cli', 'Copilot CLI'), [{ text: unseenWhy.unseen['copilot-cli'] }]);
+});

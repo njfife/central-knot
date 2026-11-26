@@ -21,6 +21,7 @@
 // never something of its own.
 import { originWords, theVersion, wantedIn, type LibraryItem, type Plan, type TakeInAnswer, type Version, type VersionChange } from './library.ts';
 import { clockTimesApart, dayAndTime } from './model.ts';
+import { agentsKeptIn } from './presence.ts';
 import { linkLabel, pluginOf } from './sourcelink.ts';
 import type { Change, HarnessId, ItemNotice, LibraryFacts, PluginItemNotice, TakenInNotice } from './types.ts';
 import { andList, deletedIn, harnessIds, kindNouns, orList, pageNames, sentence, toolName, toolsPhrase } from './words.ts';
@@ -49,10 +50,12 @@ export interface RowWords {
    */
   body?: string;
   /**
-   * A kind with a tool's own switch for an item (skills, MCP servers; LibraryRow `switchedOff`): what a tool's line says after "It is switched
-   * off in Codex’s own settings:" (`line`, `where` the tool's name), and what the tag's tooltip adds.
+   * A kind with a tool's own switch for an item (skills, MCP servers; LibraryRow `switchedOff`): what a closed-row mark says
+   * after "It is switched off in Codex’s own settings:" (`line`, `where` the tool's name), and what the tag's tooltip adds.
    */
   switchedOff?: { line(where: string): string; tag: string };
+  /** Agents: tools listed as `'skills folder'` in presence.ts agentsKeptIn (Pi) show `As a skill (?)` on their opened-row line. */
+  asSkill?: true;
 }
 
 /** A skill's, or an agent's in Pi (a skill there), that the tool's own switch keeps out: the opened row's Let … load it clears it. */
@@ -64,27 +67,31 @@ const notLoaded = { line: (where: string) => `${where} doesn’t load it.`, tag:
 export const libraryWords = {
   agents: {
     item: kindNouns.agents.one, an: kindNouns.agents.a, many: kindNouns.agents.many, copy: 'file', body: 'Prompt',
-    shared: 'Name, description and prompt are the same in every tool; other settings stay in each tool’s file.',
-    own: names => `Its own settings stay in its file: ${andList([...names])}.`,
+    shared: 'Name, description and prompt are shared; the rest stays in each tool’s file.',
+    own: names => `Own settings kept: ${andList([...names])}`,
     switchedOff: notLoaded,
+    asSkill: true,
   },
   skills: {
     item: kindNouns.skills.one, an: kindNouns.skills.a, many: kindNouns.skills.many, copy: 'folder',
-    shared: 'Every tool it is on in gets the same folder: every file as it is, and its scripts still runnable.',
+    shared: 'Each tool it is on in gets the same folder: files as they are, scripts runnable.',
     // A skill's folder is the same in every tool: no part of it stays one tool's own.
     own: () => '',
     switchedOff: notLoaded,
   },
   mcp: {
     item: kindNouns.mcp.one, an: kindNouns.mcp.a, many: kindNouns.mcp.many, copy: 'entry',
-    shared: 'What it runs (its command, arguments and environment, or its URL and headers) is the same in every tool; other settings stay in each tool’s entry.',
-    own: names => `Its own settings stay in its entry: ${andList([...names])}.`,
+    shared: 'Command, arguments, environment, or URL and headers are shared; the rest stays in each tool’s file.',
+    own: names => `Own settings kept: ${andList([...names])}`,
     // Claude Code's and Copilot's switch is kept apart from the entry, Codex's, Pi's and OpenCode's in it: either way it stays.
     switchedOff: { line: where => `${where} doesn’t start it. Central Knot leaves that switch as it is, so it is still off there after Off and On.`, tag: 'Turn it back on in that tool’s own settings.' },
   },
 } satisfies Record<string, RowWords>;
 
 // ---------- Where it stands, and each harness's mark ----------
+
+/** One piece of an opened row's tool line (sentences.detailLine): plain text, with an optional info-card text. */
+export interface DetailPart { text: string; card?: string }
 
 /** What the page knows of an item besides its library item (the kind's view gives it: types.ts LibraryFacts). */
 export interface LibraryRow {
@@ -102,6 +109,8 @@ export interface LibraryRow {
   takeInAnswers?: { click: TakeInAnswer; rule: TakeInAnswer };
   /** How a harness has it another way (a link, a folder Central Knot doesn't own, another tool's folder, a plugin), in words. */
   anotherWay?: Partial<Record<string, string>>;
+  /** Skills: for a tool reading another managed tool's skills folder (skills.ts anotherWay), which tool's copy it reads. */
+  readsFrom?: LibraryFacts['readsFrom'];
   loads?: LibraryFacts['loads']; alsoLoads?: LibraryFacts['alsoLoads']; takeOver?: LibraryFacts['takeOver'];
   /** Harnesses whose own switch turns it off there (types.ts LibraryFacts switchedOff), said as offInOwnSettings says it. */
   switchedOff?: readonly string[];
@@ -533,19 +542,46 @@ function foundWhere(row: LibraryRow, item: LibraryItem | undefined, tools: reado
 }
 
 /**
- * The sentences that name the item or its copies, in one kind's words: a harness's line in the opened row (harnessLine),
- * the tag after its name (placeTag), what each click's result says (said), and what a notice of sync's says (noticeWords).
+ * The sentences that name the item or its copies, in one kind's words: closed-row marks (harnessLine), opened-row lines
+ * (detailLine), the tag after its name (placeTag), what each click's result says (said), and sync notices (noticeWords).
  */
 export function sentences(words: RowWords) {
   const { item: noun, copy } = words;
 
   /**
-   * A harness's line in the opened row: what it has, in a sentence, then that its own switch turns it off there, if it does.
-   * `where` is the harness's name.
+   * Closed-row tool marks' whole sentence (matrix.ts libraryMark hover and aria-label); kept whole so marks never fall back to
+   * "No copy while it is off." for an On or kept-out tool. Opened-row lines use `detailLine` below from the same facts.
    */
   function harnessLine(row: LibraryRow, item: LibraryItem | undefined, tool: string, where: string): string {
     const off = row.switchedOff?.includes(tool) && words.switchedOff ? `It is ${offInOwnSettings(tool)}: ${words.switchedOff.line(where)}` : '';
     return [hasLine(row, item, tool, where), off].filter(Boolean).join(' ');
+  }
+
+  /**
+   * Opened-row tool line (matrix.ts harnessLine): short labels and optional `(?)` cards from the same `harnessIs`/`hasLine`
+   * facts as `harnessLine`, cutting standing filler while keeping action-needed and outside-copy lines whole.
+   */
+  function detailLine(row: LibraryRow, item: LibraryItem | undefined, tool: string, where: string, own: readonly string[] = []): DetailPart[] {
+    const inLib = inLibrary(item), has = row.hashes?.[tool] !== undefined, other = row.anotherWay?.[tool], is = harnessIs(row, item, tool);
+    const parts: DetailPart[] = [];
+    const reads = is === 'another-way' && !(inLib?.on && !wantedIn(inLib, tool as HarnessId)) && !has ? row.readsFrom?.[tool as HarnessId] : undefined;
+    if (reads) {
+      const from = toolName(reads);
+      parts.push({ text: `Reads ${from}’s copy`, card: `${where} reads this skill from ${from}’s folder; Central Knot writes nothing to ${where} meanwhile.` });
+    } else if (is === 'none' && inLib) {
+      if (inLib.except.includes(tool as HarnessId)) parts.push({ text: 'Kept out' });
+    } else if ((other && has) || (is !== 'current' && is !== 'kept-out')) {
+      parts.push({ text: hasLine(row, item, tool, where) });
+    }
+    if (words.asSkill && (agentsKeptIn as Partial<Record<string, string>>)[tool] === 'skills folder'
+      && ['current', 'gets-it', 'edited', 'leaving', 'deleted-by-hand', 'own-copy'].includes(is)) {
+      const card = `${where} has no agents: this is a skill file, with no context, tool limits or model of its own. Deleting it in ${where} turns the agent off everywhere.`;
+      parts.push({ text: 'As a skill', card });
+    }
+    if (row.switchedOff?.includes(tool) && words.switchedOff) parts.push({ text: `Off in ${where}’s settings` });
+    const ownText = own.length ? words.own(own) : '';
+    if (ownText) parts.push({ text: ownText });
+    return parts;
   }
   function hasLine(row: LibraryRow, item: LibraryItem | undefined, tool: string, where: string): string {
     const inLib = inLibrary(item), has = row.hashes?.[tool] !== undefined, other = row.anotherWay?.[tool];
@@ -675,10 +711,8 @@ export function sentences(words: RowWords) {
     /** `left`: the tools it is still in (stillIn). */
     deleted: (name: string, wasOn: boolean, left: readonly string[] = [], tools: readonly string[] = []) =>
       `${name} is deleted from Central Knot${!wasOn ? '' : left.length ? `, but still in ${named(left, tools)}` : ', and out of every tool'}. History can restore it.`,
-    /** Beside Delete from Central Knot, before it is armed: how it differs from Off. */
-    deleteOffer: 'Off keeps it here; Delete removes it from Central Knot.',
-    /** Under Delete it now: what happens, and for how long History can undo it (`days`: History's days, from Settings). */
-    deleteArmed: (days: number) => `It leaves every tool and this page. History keeps it, with its versions, for ${days} days, and can restore it.`,
+    /** Under Delete it now: what happens, and for how long History can restore it (`days`: History's days, from Settings). */
+    deleteArmed: (days: number) => `Leaves every tool and Central Knot. History can restore it for ${days} days.`,
   };
 
   /**
@@ -721,5 +755,5 @@ export function sentences(words: RowWords) {
     return `Synchronize everything took in ${count} ${many}, found in ${andList(notice.from.map(toolName))}: ${andList(notice.items)}.${notice.settingsChanged ? ` ${notice.settingsChanged.join(' ')}` : ''} History can undo ${count === 1 ? 'it' : 'each'}.`;
   }
 
-  return { harnessLine, placeTag, said, noticeWords, takenInWords };
+  return { harnessLine, detailLine, placeTag, said, noticeWords, takenInWords };
 }

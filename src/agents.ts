@@ -12,7 +12,7 @@
 // do; agentsForRepo is what the Git repo's Push sends. Elsewhere: where each thing is kept on disk, agentstore.ts; the
 // harnesses' file formats, agentfiles.ts; an agent's row, the clicks its controls send and its words, libraryrow.ts (the
 // same row for every kind on the library) with librarypages.ts; History's sentences and actions for agents,
-// historyactions.ts; what the opened row says Pi gets, librarypages.ts; the Git repo's Push and Pull, gitrepo.ts (agentsForRepo,
+// historyactions.ts; the Git repo's Push and Pull, gitrepo.ts (agentsForRepo,
 // and Pull through applyAgents).
 import { constants } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';

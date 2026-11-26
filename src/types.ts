@@ -1099,6 +1099,8 @@ export interface LibraryFacts {
    * says it, On or Off (skills.ts anotherWay, toolFacts). Nothing of Central Knot's goes there while it does.
    */
   anotherWay?: Partial<Record<HarnessId, string>>;
+  /** Skills: for a tool reading another managed tool's skills folder (skills.ts anotherWay), which tool's copy it reads. */
+  readsFrom?: Partial<Record<HarnessId, HarnessId>>;
   /**
    * Skills, found with copies that differ: what stops one tool's copy being the one every tool takes (the copy question): a
    * tool holding another copy that wouldn't load this one, with why (copywords.ts cantUse leads it in).

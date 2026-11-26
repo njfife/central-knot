@@ -1590,7 +1590,7 @@ async function agentInPi(a, practice) {
   await a.click('#header-refresh');
   await opened();
   const letPi = `#${rowPart('clear-switch', 'agents', 'code-reviewer', 'pi-cli')}`;
-  check('under his !*, the agent’s Pi line says Pi doesn’t load it, with Let Pi load it', /switched off in Pi’s own settings: Pi doesn’t load it\./.test(await a.text('.details') ?? '') && await a.exists(letPi), await a.text('.details'));
+  check('under his !*, the agent’s Pi line says Off in Pi’s settings, with Let Pi load it', /Off in Pi’s settings/.test(await a.text('.details') ?? '') && await a.exists(letPi), await a.text('.details'));
   const before = piList();
   await a.click(letPi);
   same('Let Pi load it adds the agent’s file to his Pi list, and nothing else', piList(), [...before, '+skills/code-reviewer.md']);
@@ -1599,9 +1599,10 @@ async function agentInPi(a, practice) {
   rmSync(piSettings);
   await a.click('#header-refresh');
   await opened();
-  const note = (await a.text(`#${rowPart('as-skill', 'agents', 'code-reviewer')}`) ?? '').trim();
-  check('the opened row says once what Pi gets, and that deleting its file there turns the agent off everywhere',
-    /^Pi holds no agents of its own, so there an agent is a skill[\s\S]*no isolated context of its own, tool restrictions and model selection[\s\S]*Deleting that file in Pi turns the agent off in every tool/.test(note), note);
+  const piMark = rowPart('line-info', 'agents', 'code-reviewer', 'pi-cli');
+  const piNote = await a.run(`[document.querySelector('#${piMark}')?.closest('.details-tool-line')?.innerText?.trim() ?? '', document.querySelector('#${piMark}-card')?.textContent?.trim() ?? '', !!document.querySelector('#${rowPart('as-skill', 'agents', 'code-reviewer')}')]`);
+  same('Pi’s line says As a skill with a card explaining what Pi gets and that deleting it turns the agent off everywhere',
+    piNote, ['As a skill', 'Pi has no agents: this is a skill file, with no context, tool limits or model of its own. Deleting it in Pi turns the agent off everywhere.', false]);
   await a.click(`#${rowPart('open', 'agents', 'code-reviewer')}`);
   await a.click('#nav-harnesses'); await a.click('#harness-pi-cli'); await a.click('#harness-tab-about');
   check('Pi’s About says its agents are in its skills folder, each as a skill', /Agents\s*In its skills folder, each as a skill/.test(await a.text('#harness-body') ?? ''), await a.text('#harness-body'));
@@ -1884,7 +1885,7 @@ async function practiceFlow() {
   for (let tries = 0; tries < 80 && !(await offMarks(a, 'skills', 'release-notes')).length; tries++) await wait(100);
   same('a switch set in Claude Code’s settings reaches the open page, and is read, not undone: the folder stays, the mark is off, the tag says so', [folders('release-notes').every(Boolean), await offMarks(a, 'skills', 'release-notes'), /switched off in Claude Code/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'release-notes')}"]`) ?? ''), await switchOn(a, 'skills', 'release-notes')], [true, ['claude-cli'], true, true]);
   await opened('release-notes');
-  check('its line in the opened row says the tool doesn’t load it', /switched off in Claude Code’s own settings: Claude Code doesn’t load it\./.test(await a.text('.details') ?? ''), await a.text('.details'));
+  check('its line in the opened row says Off in Claude Code’s settings', /Off in Claude Code’s settings/.test(await a.text('.details') ?? ''), await a.text('.details'));
   // While the skills record is damaged, Let Claude Code load it is drawn and off, as the row's other controls are (that a click
   // writes nothing then is tests/librarygate.test.ts's).
   const clearSwitch = `#${rowPart('clear-switch', 'skills', 'release-notes', 'claude-cli')}`, skillsRecordHere = join(practice, '.central-knot/skills.json'), skillsRecordGood = readFileSync(skillsRecordHere, 'utf8');
@@ -2732,9 +2733,9 @@ async function practiceFlow() {
   same('usage collected on a home whose tools keep no sessions: no Used column, and beside the button the time and that there are no sessions yet', [await a.exists('.ov-used'), /^Collected .+ · no sessions yet$/.test(await a.text('#usage-when') ?? '')], [false, true]);
   // Full screen on a 1728×1117 display: the details dock beside the table, and a row's line, its tag and URL here, still shows whole.
   await sizeTo(a, 1728, 1117);
-  same('docked at full screen, a row’s line is shortened only when it has no room', await a.all('.ov-row[data-key] .ov-name-about', 'e.scrollWidth <= e.clientWidth'), [true, true]);
+  same('docked at full screen, a closed row’s line is shortened only when it has no room', await a.all('.ov-row[data-key] .ov-name-about', 'e.scrollWidth <= e.clientWidth'), [true]);
   await fullSize(a);
-  check('its line says Central Knot leaves that switch as it is', /switched off in Copilot CLI’s own settings: Copilot CLI doesn’t start it\. Central Knot leaves that switch as it is/.test(await a.text('.details') ?? ''), await a.text('.details'));
+  check('its line says Off in Copilot CLI’s settings', /Off in Copilot CLI’s settings/.test(await a.text('.details') ?? ''), await a.text('.details'));
   const codexBefore = readNow(mcpFiles[2]);
   await a.click(`#${rowPart('enable', 'mcp', 'docs', 'codex-cli')}`);
   same('its Codex switch keeps it out of Codex at once', [readNow(mcpFiles[2]).includes('[mcp_servers.docs]'), /docs is kept out of Codex/.test(await a.text('.band-done') ?? '')], [false, true]);
@@ -2791,10 +2792,10 @@ async function practiceFlow() {
   await agentInPi(a, practice);
   // The opened row: each harness's line with what stays its own, and the agent's versions.
   await a.click(`#${rowPart('open', 'agents', 'code-reviewer')}`);
-  check('the opened row says which settings stay Claude Code’s own', /Its own settings stay in its file: tools and model/.test(await a.text('.details') ?? ''), await a.text('.details'));
+  check('the opened row says which settings stay Claude Code’s own', /Own settings kept: tools and model/.test(await a.text('.details') ?? ''), await a.text('.details'));
   same('and lists its versions, the current one marked, each saying what it changed', await versionsShown(), ['found in Claude Codefirst versionCurrent']);
-  check('the opened row shows the whole description, and Delete from Central Knot says how it differs from Off',
-    /Reviews a change for correctness and clarity before it is merged\./.test(await a.text('.details-description-whole') ?? '') && /Off keeps it here; Delete removes it from Central Knot\./.test(await a.text('.delete-offer') ?? ''), await a.text('.details'));
+  check('the opened row shows the whole description, and Delete is a quiet button with no offer note',
+    /Reviews a change for correctness and clarity before it is merged\./.test(await a.text('.details-description-whole') ?? '') && (await a.text(`#${rowPart('delete', 'agents', 'code-reviewer')}`))?.trim() === 'Delete…' && !(await a.exists('.delete-offer-note')), await a.text('.details'));
   await a.shot('practice-agents');
   // An edit made in a harness becomes the current version and reaches the others: an agent syncs both ways, whatever fields
   // its harnesses keep of their own.
@@ -2840,7 +2841,7 @@ async function practiceFlow() {
   const notesBefore = notesFiles.map(file => readFileSync(file, 'utf8'));
   await a.click(`#${rowPart('open', 'agents', 'release-notes')}`);
   await a.click(`#${rowPart('delete', 'agents', 'release-notes')}`);
-  check('armed, it says History keeps it, with its versions, for History’s days', /History keeps it, with its versions, for 30 days, and can restore it\./.test(await a.text(`#${rowPart('delete-note', 'agents', 'release-notes')}`) ?? ''), await a.text(`#${rowPart('delete-note', 'agents', 'release-notes')}`));
+  same('armed, it says what Delete removes and how many days History can restore it', (await a.text(`#${rowPart('delete-note', 'agents', 'release-notes')}`) ?? '').trim(), 'Leaves every tool and Central Knot. History can restore it for 30 days.');
   await a.click(`#${rowPart('delete-confirm', 'agents', 'release-notes')}`);
   same('Delete from Central Knot takes the agent out of every harness and off the page', [notesFiles.map(file => existsSync(file)), (await rowKeys(a, 'agents')).includes('release-notes')], [[false, false, false], false]);
   await a.click('#nav-history');
@@ -4242,7 +4243,93 @@ async function practiceFlow() {
     await a.click('#appearance-system');
     await fullSize(a);
   }
+  // Set History to 7 days so armed Delete's days come from History's own setting, then restore 30 days after.
+  await a.click('#nav-settings');
+  await keepFor(a, 7);
+  await a.click('#history-shorten');
+  for (let tries = 0; tries < 30 && (await savedSettings()).historyDays !== 7; tries++) await wait(100);
   await openKind(a, 'skills');
+  // Opened row says each thing once (with History at 7 days): description gives way on the row's line while open and returns
+  // on close; no tool line says "Has the current version" while the closed row's mark title still does; one "In each tool" mark
+  // with its card; armed Delete says 7 days; own-copy line stays whole; Off row's Codex switch still works; a row whose copies
+  // differ keeps its line after the name.
+  const standupRowSel = `.ov-row[data-key="${rowPart('', 'skills', 'standup')}"]`;
+  const standupClosedAbout = await a.exists(`${standupRowSel} .ov-name-about`);
+  const standupMarkTitleBefore = await a.run(`document.querySelector('#${rowPart('cell', 'skills', 'standup', 'claude-cli')}')?.title ?? ''`);
+  await opened('standup');
+  const standupOpenState = await a.run(`(() => {
+    const row = document.querySelector(${JSON.stringify(standupRowSel)});
+    const lines = [...document.querySelectorAll('.details .details-tool-line')].map(e => e.innerText.trim());
+    const mark = document.querySelector('#${rowPart('shared', 'skills', 'standup')}');
+    const card = document.querySelector('#${rowPart('shared', 'skills', 'standup')}-card');
+    return {
+      aboutOpen: !!row?.querySelector('.ov-name-about'),
+      hasWholeDesc: !!document.querySelector('.details .details-description-whole'),
+      hasCurrentLine: lines.some(line => /Has the current version/i.test(line)),
+      markTitle: document.querySelector('#${rowPart('cell', 'skills', 'standup', 'claude-cli')}')?.title ?? '',
+      inEachToolMarks: document.querySelectorAll('.details .details-tools-head .info-mark').length,
+      inEachToolLabel: mark?.getAttribute('aria-label') ?? null,
+      inEachToolCard: card?.textContent?.trim() ?? null,
+      versionsNote: !!document.querySelector('.details .versions-note'),
+      deleteLabel: document.querySelector('#${rowPart('delete', 'skills', 'standup')}')?.textContent?.trim() ?? null,
+      deleteOfferNote: !!document.querySelector('.details .delete-offer-note'),
+    };
+  })()`);
+  await a.click(`#${rowPart('shared', 'skills', 'standup')}`);
+  const sharedCardOpens = await a.run(`!!document.querySelector('#${rowPart('shared', 'skills', 'standup')}-card')?.matches(':popover-open')`);
+  await a.press('Escape');
+  await a.click(`#${rowPart('delete', 'skills', 'standup')}`);
+  const armedSevenDays = (await a.text(`#${rowPart('delete-note', 'skills', 'standup')}`) ?? '').trim();
+  await a.click(`#${rowPart('delete-cancel', 'skills', 'standup')}`);
+  await opened('standup', false);
+  const standupClosedAgain = await a.exists(`${standupRowSel} .ov-name-about`);
+  same('opened standup row says each thing once: no row description while open (back on close), no current-version filler (mark title keeps it), one In each tool card, no versions or delete offer note, armed Delete names 7 days',
+    [standupClosedAbout, standupMarkTitleBefore, standupOpenState, sharedCardOpens, armedSevenDays, standupClosedAgain],
+    [true, 'Claude Code: has the current version.', {
+      aboutOpen: false,
+      hasWholeDesc: true,
+      hasCurrentLine: false,
+      markTitle: 'Claude Code: has the current version.',
+      inEachToolMarks: 1,
+      inEachToolLabel: 'About In each tool',
+      inEachToolCard: 'Each tool it is on in gets the same folder: files as they are, scripts runnable.',
+      versionsNote: false,
+      deleteLabel: 'Delete…',
+      deleteOfferNote: false,
+    }, true, 'Leaves every tool and Central Knot. History can restore it for 7 days.', true]);
+  // Own-copy line stays whole, and an Off row's Codex switch still works.
+  await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
+  const copilotOwnStandup = join(practice, '.copilot/skills/standup');
+  skill(join(practice, '.copilot/skills'), 'standup', text('standup', 'Copilot own copy.'));
+  await a.click('#header-refresh');
+  await opened('standup');
+  const copilotOwnLine = await a.run(`(() => {
+    const row = [...document.querySelectorAll('.details .details-tool')].find(e => e.querySelector('.details-tool-label strong')?.textContent?.trim() === 'Copilot CLI');
+    return row?.querySelector('.details-tool-line')?.innerText?.trim() ?? '';
+  })()`);
+  await a.click(`#${rowPart('enable', 'skills', 'standup', 'codex-cli')}`);
+  const codexSwitchedOn = existsSync(join(practice, '.codex/skills/standup/SKILL.md'));
+  await a.click('#outcome-undo');
+  await opened('standup', false);
+  rmSync(copilotOwnStandup, { recursive: true, force: true });
+  await a.click('#header-refresh');
+  await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
+  same('own-copy line stays whole and an Off row’s Codex switch still works',
+    [copilotOwnLine, codexSwitchedOn],
+    ['Has a copy Central Knot didn’t put there. It is left alone while the skill is off; before it is written over, a copy Central Knot doesn’t have yet is kept as a version.', true]);
+  // A row whose copies differ shows no description in its details, so it keeps its line after the name while open.
+  skill(join(practice, '.claude/skills'), 'diff-about', text('diff-about', 'Claude body.'));
+  skill(join(practice, '.copilot/skills'), 'diff-about', text('diff-about', 'Copilot body.'));
+  await a.click('#header-refresh');
+  await a.click(`#${rowPart('open', 'skills', 'diff-about')}`);
+  check('a row whose copies differ keeps its line after the name while open',
+    await a.exists(`.ov-row.open[data-key="${rowPart('', 'skills', 'diff-about')}"] .ov-name-about`));
+  await a.click(`#${rowPart('open', 'skills', 'diff-about')}`);
+  for (const root of ['.claude/skills', '.copilot/skills']) rmSync(join(practice, root, 'diff-about'), { recursive: true, force: true });
+  await a.click('#nav-settings');
+  await keepFor(a, 30);
+  await openKind(a, 'skills');
+  await a.click('#header-refresh');
   // Full screen: nothing on the Overview, History or Plugins is cut off at 2560×1440.
   await sizeTo(a, 2560, 1440);
   for (const page of ['overview', 'history', 'plugins']) {
@@ -5424,7 +5511,10 @@ async function openCodeFlow() {
     [await cellState(a, 'skills', 'notes', 'opencode-cli'), await cellState(a, 'skills', 'oc-only', 'opencode-cli'), await cellState(a, 'skills', 'shared', 'opencode-cli'), await cellState(a, 'skills', 'notes', 'claude-cli'), await cellState(a, 'skills', 'oc-only', 'claude-cli')],
     ['another-way', 'own-copy', 'another-way', 'own-copy', 'none']);
   await a.click(`#${rowPart('open', 'skills', 'notes')}`);
-  check('a skill OpenCode reads in Claude Code’s folder says so: the copy is Claude Code’s', (await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'notes')}"] + *`) ?? '').includes('Not in Central Knot · OpenCode reads Claude Code’s copy, in Claude Code’s skills folder.'), await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'notes')}"] + *`));
+  const openCodeMark = rowPart('line-info', 'skills', 'notes', 'opencode-cli');
+  same('a skill OpenCode reads in Claude Code’s folder says Reads Claude Code’s copy with its card',
+    await a.run(`[document.querySelector('#${openCodeMark}')?.closest('.details-tool-line')?.innerText?.trim() ?? '', document.querySelector('#${openCodeMark}-card')?.textContent?.trim() ?? '']`),
+    ['Reads Claude Code’s copy', 'OpenCode reads this skill from Claude Code’s folder; Central Knot writes nothing to OpenCode meanwhile.']);
   await fitsAtMinimum(a, 'Skills with OpenCode, a skill open');
   await pictures(a, 'opencode-skill-open');
   const view = await a.run('window.centralKnot.refresh()');
@@ -5482,8 +5572,12 @@ async function openCodeFlow() {
   await p.click(`#${rowPart('add', 'skills', 'notes')}`);
   same('a skill OpenCode reads in Claude Code’s folder gets no second copy in OpenCode', [existsSync(join(mine, 'skills/notes')), await cellState(p, 'skills', 'notes', 'opencode-cli')], [false, 'another-way']);
   if (await p.run(`document.querySelector('#${rowPart('open', 'skills', 'notes')}')?.getAttribute('aria-expanded')`) !== 'true') await p.click(`#${rowPart('open', 'skills', 'notes')}`);
-  same('OpenCode’s line says it reads Claude Code’s copy, has no switch there, and its settings are untouched',
-    [/OpenCode reads Claude Code’s copy/.test(await p.text(`.ov-row[data-key="${rowPart('', 'skills', 'notes')}"] + *`) ?? ''), await p.exists(`#${rowPart('enable', 'skills', 'notes', 'opencode-cli')}`), readNow(join(mine, 'opencode.json')) === settingsBefore], [true, false, true]);
+  same('OpenCode’s line says Reads Claude Code’s copy with its card, has no switch there, and its settings are untouched',
+    [await p.run(`document.querySelector('#${openCodeMark}')?.closest('.details-tool-line')?.innerText?.trim() ?? ''`),
+      await p.text(`#${openCodeMark}-card`),
+      await p.exists(`#${rowPart('enable', 'skills', 'notes', 'opencode-cli')}`),
+      readNow(join(mine, 'opencode.json')) === settingsBefore],
+    ['Reads Claude Code’s copy', 'OpenCode reads this skill from Claude Code’s folder; Central Knot writes nothing to OpenCode meanwhile.', false, true]);
   // Its server goes to the other tools in their own forms, values as they are.
   await openKind(p, 'mcp');
   await p.click(`#${rowPart('add', 'mcp', 'oc-docs')}`);
@@ -7605,7 +7699,7 @@ esac
   writeFileSync(piSettings, `${JSON.stringify({ skills: hisList }, null, 2)}\n`);
   await a.click('#header-refresh');
   if ((await a.run(`document.querySelector('#${rowPart('open', 'skills', 'triage')}')?.getAttribute('aria-expanded')`)) !== 'true') await a.click(`#${rowPart('open', 'skills', 'triage')}`);
-  check('with no inclusion, triage is off in Pi: its mark, its line, and Let Pi load it', await offInPi() && /Pi doesn’t load it/.test(await a.text('.details') ?? '') && await a.exists(`#${rowPart('clear-switch', 'skills', 'triage', 'pi-cli')}`), await a.text('.details'));
+  check('with no inclusion, triage is off in Pi: its mark, its line, and Let Pi load it', await offInPi() && /Off in Pi’s settings/.test(await a.text('.details') ?? '') && await a.exists(`#${rowPart('clear-switch', 'skills', 'triage', 'pi-cli')}`), await a.text('.details'));
   // The plugin's page counts what Pi loads: triage, which his list keeps out, is said apart.
   await a.click('#nav-plugins');
   if (!(await a.exists('#pbox-0-issue-tracker-pi-cli'))) await a.click('#popen-0-issue-tracker');
@@ -14079,11 +14173,11 @@ async function libraryFlow() {
   same('MCP server Undo: Off with earlier keep-out back and config files byte for byte as before',
     [mcpUndoRec?.on, mcpUndoRec?.except, snapFiles(oMcpFiles)], [false, ['codex-cli'], mcpBefore]);
 
-  // Plugin-sourced Off row keeps today's line and draws no Off-row switch; Claude Code whole-plugin row keeps whole-plugin control.
+  // Plugin-sourced Off row shows Kept out where in except (cutting "No copy while it is off.") and draws no Off-row switch; Claude Code whole-plugin row keeps whole-plugin control.
   await o.click(`#${rowPart('open', 'skills', 'plug-off')}`);
   const plugOffPi = (await readToolLines(o)).find(entry => entry.tool === 'Pi');
-  same('plugin-sourced Off row keeps today’s line and draws no tool switch in Pi',
-    [plugOffPi?.line, plugOffPi?.label], ['No copy while it is off.', '']);
+  same('plugin-sourced Off row marks kept-out tool and draws no tool switch in Pi',
+    [plugOffPi?.line, plugOffPi?.label], ['Kept out', '']);
   await o.click(byId(rowPart('open', 'skills', 'release-helper@ck-test-market/release-notes')));
   const claudePlugLabel = await o.run(`document.querySelector('.details .details-tool')?.querySelector('[role="switch"]')?.getAttribute('aria-label') ?? ''`);
   check('Claude Code whole-plugin line never offers one skill only', !/only\./.test(claudePlugLabel), claudePlugLabel);
