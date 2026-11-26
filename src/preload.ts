@@ -11,6 +11,7 @@ const api: DesktopApi = {
   clearSkillSwitch: (key, tool, resume, home, of) => ipcRenderer.invoke('skills:clear-switch', key, tool, resume, home, of),
   takeOverSkill: (key, tool, resume, home) => ipcRenderer.invoke('skills:take-over', key, tool, resume, home),
   skillVersion: (key, hash) => ipcRenderer.invoke('skills:version', key, hash),
+  skillVersionFile: (key, hash, file) => ipcRenderer.invoke('skills:version-file', key, hash, file),
   history: () => ipcRenderer.invoke('history:list'),
   instructions: readId => ipcRenderer.invoke('instructions:view', readId),
   agentVersion: (key, hash) => ipcRenderer.invoke('agents:version', key, hash),
