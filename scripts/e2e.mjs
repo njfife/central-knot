@@ -84,15 +84,27 @@ function keepFresh(path) {
   const timer = setInterval(() => { const now = new Date(); try { utimesSync(path, now, now); } catch { /* gone: the check that needed it says so */ } }, 100);
   return () => clearInterval(timer);
 }
+/**
+ * Lists `directory` file by file (links, folders, modes and hashes). An entry gone between its folder's listing and its own look
+ * is left out (the app renames its temporary files away while a listing runs); every other error, and a missing root, still throw.
+ */
 function tree(directory, options = {}) {
   const out = {};
-  const visit = current => {
-    for (const name of readdirSync(current).sort()) {
+  const visit = (current, names = readdirSync(current)) => {
+    for (const name of names.sort()) {
       if (name === '.git' && !options.git) continue;
-      const path = join(current, name), info = lstatSync(path), key = relative(directory, path);
-      if (info.isSymbolicLink()) out[key] = `link:${readlinkSync(path)}`;
-      else if (info.isDirectory()) { out[key] = 'dir'; visit(path); }
-      else out[key] = `${info.mode & 0o777}:${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
+      const path = join(current, name), key = relative(directory, path);
+      let kids;
+      try {
+        const info = lstatSync(path);
+        if (info.isSymbolicLink()) out[key] = `link:${readlinkSync(path)}`;
+        else if (info.isDirectory()) { kids = readdirSync(path); out[key] = 'dir'; }
+        else out[key] = `${info.mode & 0o777}:${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+        continue;
+      }
+      if (kids) visit(path, kids);
     }
   };
   visit(directory);
@@ -11429,12 +11441,28 @@ async function keepSessionCostsFlow() {
     same('still Collecting… until FIFO is released', await a.exists('#sessions-collecting'), true);
 
     // Release FIFO so sweep finishes; Stop keeping sits in Start's place, status bar still says keeping, and receipts landed.
+    /** Waits for any periodic 1500 ms sweep's Collecting… to end, then runs `read` in the same page turn so the next tick cannot land mid-read. */
+    const whenIdle = (read, ms = 7500) => a.run(`new Promise(done => {
+      const end = Date.now() + ${ms};
+      const tick = () => {
+        const collecting = !!document.querySelector('#sessions-collecting');
+        if (collecting && Date.now() < end) return setTimeout(tick, 25);
+        done((${read})(collecting));
+      };
+      tick();
+    })`);
     same('FIFO had an active sweep reader waiting', await pipe1.release(), true);
     pipe1.clean();
-    for (let tries = 0; tries < 150 && await a.exists('#sessions-collecting'); tries++) await wait(50);
     await a.settle();
+    const afterFirst = await whenIdle(collecting => ({
+      start: !!document.querySelector('#sessions-keep-start'),
+      collecting,
+      stop: document.querySelector('#sessions-keep-stop')?.textContent ?? null,
+      result: !!document.querySelector('#sessions-keep-result'),
+      announcement: document.querySelector('#announcement')?.textContent ?? null,
+    }));
     same('after the first sweep: Stop keeping sits in Start’s place and status bar says keeping',
-      [await a.exists('#sessions-keep-start'), await a.exists('#sessions-collecting'), await a.text('#sessions-keep-stop'), await a.exists('#sessions-keep-result'), await a.text('#announcement')],
+      [afterFirst.start, afterFirst.collecting, afterFirst.stop, afterFirst.result, afterFirst.announcement],
       [false, false, 'Stop keeping', false, 'Keeping session costs for this home.']);
     const saved1 = jsonOrNothing(settingsPath)?.keepSessionCosts ?? {};
     same('consent saved on for Home A alone', [saved1[canonA], Object.hasOwn(saved1, canonB)], [true, false]);
@@ -11446,9 +11474,14 @@ async function keepSessionCostsFlow() {
       [topsCollecting, topsAfter], [topsBefore, topsBefore]);
     await sizeTo(a, 860, 560);
     if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
-    same('at 860×560 with sidebar open: Stop keeping fits on the same line as Today | Yesterday | 7 days',
-      await a.run(`(() => { const stop = document.querySelector('#sessions-keep-stop').getBoundingClientRect(), seg = document.querySelector('#sessions-day-week').getBoundingClientRect();
-        return Math.abs(stop.top - seg.top) < 6 && stop.left >= seg.right; })()`), true);
+    await a.settle();
+    const fit = await whenIdle(collecting => {
+      const stop = document.querySelector('#sessions-keep-stop'), seg = document.querySelector('#sessions-day-week');
+      if (!stop || !seg) return { ok: false, collecting, missing: ['#sessions-keep-stop', '#sessions-day-week'].filter(id => !document.querySelector(id)) };
+      const s = stop.getBoundingClientRect(), w = seg.getBoundingClientRect();
+      return { ok: Math.abs(s.top - w.top) < 6 && s.left >= w.right, stop: { top: s.top, left: s.left }, seg: { top: w.top, right: w.right } };
+    }, 5000);
+    check('at 860×560 with sidebar open: Stop keeping fits on the same line as Today | Yesterday | 7 days', fit.ok, fit);
     await fullSize(a);
 
     // Fix 2: Refresh started during Collecting… whose reply lands after the sweep ends must not restore Collecting….
