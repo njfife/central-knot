@@ -78,7 +78,7 @@ const { repo, repoPage } = await import('../src/repopage.ts');
 const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, runReloads, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
-const { backgroundProblems, copyQuestion, headerNotices, libraryTable, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
+const { backgroundProblems, copyQuestion, headerNotices, libraryTable, openKind, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
 const { openWalkthrough, setupLead, walkthroughBand } = await import('../src/firstsetup.ts');
 const { pluginsResult } = await import('../src/pluginspage.ts');
 const { versionsList } = await import('../src/editparts.ts');
@@ -2557,4 +2557,258 @@ test('First setup Yes opening the walkthrough carries its result without appendi
   const matches = (app.outcome?.text ?? '').match(/Everyday stopped being the profile in use\./g) ?? [];
   assert.equal(matches.length, 1, `expected sentence once, got: ${app.outcome?.text}`);
   assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
+});
+
+test('Unused band: skipped rows marked, unread managed tool cue, 3-line disclosure, all-plugin own-row wording, emptied kind and misses', async t => {
+  const oldAt = '2026-09-01T00:00:00.000Z', newAt = '2026-11-23T00:00:00.000Z', readAt = '2026-11-25T00:00:00.000Z';
+  const copy = (name: string) => ({ directory: `/home/.claude/skills/${name}`, hash: `h-${name}`, modified: oldAt });
+  const oldItem = (key: string, on = true) => ({ ...newItem(key, key), on, versions: [{ hash: `h-${key}`, at: oldAt, from: { how: 'found' as const, in: 'claude-cli' as const } }] });
+  const findAll = (node: any, match: (node: any) => boolean, out: any[] = []): any[] => {
+    if (!node || typeof node === 'string') return out;
+    if (match(node)) out.push(node);
+    for (const child of node.children ?? []) findAll(child, match, out);
+    return out;
+  };
+  const usedCells = (tree: any) => Object.fromEntries(findAll(tree, n => !!n.attrs?.['data-key']).map(row => {
+    const cell = findAll(row, n => String(n.className ?? '').includes('ov-used'))[0];
+    return [row.attrs['data-key'], { text: textOf(cell), skip: String(cell?.className ?? '').includes('ov-used-skip') }];
+  }));
+  const makeHome = (opts: { skillsOn?: string[]; agentsOn?: string[]; mcpOn?: string[]; homePath?: string; managed?: HarnessId[]; extraAgents?: string[] } = {}) => {
+    const tools: HarnessId[] = opts.managed ?? ['claude-cli', 'codex-cli'];
+    const skillKeys = ['old-1', 'old-2', 'old-3', 'old-4', 'old-5', 'old-6'];
+    const skillsOn = new Set(opts.skillsOn ?? skillKeys);
+    const agentKeys = ['plug-1', 'plug-2', ...(opts.extraAgents ?? [])];
+    const agentsOn = new Set(opts.agentsOn ?? agentKeys);
+    const mcpOn = new Set(opts.mcpOn ?? []);
+    const skillFacts = [
+      ...skillKeys.map(key => ({ key, name: key, description: '', copies: { 'claude-cli': copy(key) }, on: skillsOn.has(key), except: [], cannot: {}, edited: [] })),
+      { key: 'young', name: 'young', description: '', copies: { 'claude-cli': copy('young') }, on: true, except: [], cannot: {}, edited: [] },
+      { key: 'found-one', name: 'found-one', description: '', copies: { 'claude-cli': copy('found-one') }, on: false, except: [], cannot: {}, edited: [] },
+    ];
+    const skillLib: Record<string, ReturnType<typeof oldItem>> = {
+      ...Object.fromEntries(skillKeys.map(key => [key, oldItem(key, skillsOn.has(key))])),
+      young: { ...newItem('young', 'young'), on: true, versions: [{ hash: 'h-young', at: newAt, from: { how: 'found' as const, in: 'claude-cli' as const } }] },
+    };
+    const agentFacts = agentKeys.map(key => ({
+      key, name: key, description: '', copies: { 'codex-cli': copy(key) }, on: agentsOn.has(key), except: [], cannot: {}, edited: [],
+      plugin: { 'claude-cli': { plugin: 'team-kit', marketplace: 'local-market', name: key } },
+    }));
+    const agentLib = Object.fromEntries(agentKeys.map(key => [key, oldItem(key, agentsOn.has(key))]));
+    const mcpFacts = [{ key: 'quiet-srv', name: 'quiet-srv', description: '', copies: { 'claude-cli': copy('quiet-srv') }, on: mcpOn.has('quiet-srv'), except: [], cannot: {}, edited: [] }];
+    const mcpLib = { 'quiet-srv': oldItem('quiet-srv', mcpOn.has('quiet-srv')) };
+    const allItems = [...skillKeys.map(key => `skill:${key}`), 'skill:young', ...agentKeys.map(key => `agent:${key}`)];
+    return {
+      home: opts.homePath ?? '/unused-band-test-home',
+      mode: 'actual',
+      syncOn: true,
+      sync: { managed: tools, present: ['claude-cli', 'codex-cli', 'copilot-cli'], access: { allowed: true }, gate: { state: 'ready' }, syncEverything: false },
+      skills: { tools, items: skillFacts, library: skillLib, access: { allowed: true }, gate: { state: 'ready' }, problems: [], notices: [], unread: [] },
+      mcp: { tools, items: mcpFacts, library: mcpLib, access: { allowed: true }, gate: { state: 'ready' }, problems: [], notices: [], unread: [] },
+      agents: { tools, items: agentFacts, library: agentLib, access: { allowed: true }, gate: { state: 'ready' }, problems: [], notices: [], unread: [] },
+      pluginItems: [{ tool: 'claude-cli', plugin: 'team-kit', source: '/market', marketName: 'local-market', off: false, items: agentKeys.map(name => ({ kind: 'agent', name })) }],
+      profiles: { profiles: [
+        { id: 'p-1', name: 'Everyday', items: allItems, switchesPluginItems: false },
+        { id: 'p-2', name: 'Focus', items: allItems, switchesPluginItems: false },
+      ], plugins: [] },
+    } as unknown as HomeView;
+  };
+  const makeReading = (tools: any[] = [
+    { tool: 'claude-cli' as const, sessions: 5, recent: 5, from: oldAt, tells: { skill: 'sure' as const, mcp: 'sure' as const, agent: 'sure' as const }, used: [] },
+    { tool: 'codex-cli' as const, sessions: 2, recent: 2, from: '2026-11-12T00:00:00.000Z', tells: { skill: 'seen' as const, mcp: 'sure' as const, agent: 'seen' as const }, used: [] },
+  ]) => ({ at: readAt, tools });
+  const prevUsage = app.usage;
+  t.after(() => { app.usage = prevUsage; app.libraryKind = 'all'; });
+  const reset = (homeOpts?: Parameters<typeof makeHome>[0], readTools?: any[], kind: PageKind | 'all' = 'all', filter: 'all' | 'unused' = 'unused') => {
+    app.home = makeHome(homeOpts);
+    app.usage = { state: 'ready', data: makeReading(readTools), gen: 1 };
+    app.outcome = undefined;
+    main.sent.length = 0;
+    openKind(kind as any, filter === 'unused' ? { filter: 'unused' } : {});
+  };
+
+  await t.test('one-line band for 8/2/6 and skipped plugin rows marked on the row while unused filter is on', () => {
+    reset();
+    const tree = libraryTable();
+    const band = findById(tree, 'unused-band');
+    assert.ok(band, 'unused-band should render');
+    const bandText = textOf(band);
+    assert.ok(bandText.includes('8 with no use seen in 30 days. 2 from a plugin skipped.'), bandText);
+    assert.equal(bandText.includes('Undo'), false, 'Undo explanation must be gone');
+    assert.equal(bandText.includes('Everyday'), false, 'profile sentence must be gone from band');
+    assert.equal(bandText.includes('another computer'), false, 'limits must start closed');
+    assert.equal(bandText.includes('not counted'), false, 'no unread cue when every managed tool was read');
+    const toggle = findById(band, 'unused-counted-toggle');
+    assert.ok(toggle, 'disclosure button must exist');
+    assert.equal(textOf(toggle), 'What’s counted');
+    assert.equal(toggle.attrs['aria-expanded'], 'false');
+    assert.equal(findById(band, 'unused-counted'), undefined);
+    assert.equal(textOf(findById(band, 'turn-unused-off')), 'Turn 6 off everywhere');
+  });
+
+  await t.test('skipped plugin rows are marked on the row while unused filter is on, hidden while selecting, and normal when filter is off', () => {
+    reset();
+    const cells = usedCells(libraryTable());
+    for (const key of ['old-1', 'old-2', 'old-3', 'old-4', 'old-5', 'old-6']) {
+      assert.deepEqual(cells[rowId('skills', key)], { text: 'no use seen in 30 days', skip: false });
+    }
+    for (const key of ['plug-1', 'plug-2']) {
+      assert.deepEqual(cells[rowId('agents', key)], { text: 'from a plugin · skipped', skip: true });
+    }
+    findById(libraryTable(), 'library-select').onclick();
+    const selectCells = usedCells(libraryTable());
+    for (const key of ['plug-1', 'plug-2']) {
+      assert.deepEqual(selectCells[rowId('agents', key)], { text: 'no use seen in 30 days', skip: false });
+    }
+    findById(libraryTable(), 'library-select').onclick();
+    openKind('all');
+    const allCells = usedCells(libraryTable());
+    for (const key of ['plug-1', 'plug-2']) {
+      assert.deepEqual(allCells[rowId('agents', key)], { text: 'no use seen in 30 days', skip: false });
+    }
+  });
+
+  await t.test('What’s counted disclosure opens as a 3-line list with Codex caveats merged, writes nothing, and closes when chip turns off', () => {
+    reset();
+    findById(libraryTable(), 'unused-counted-toggle').onclick();
+    const openedBand = findById(libraryTable(), 'unused-band');
+    assert.equal(findById(openedBand, 'unused-counted-toggle').attrs['aria-expanded'], 'true');
+    const counted = findById(openedBand, 'unused-counted');
+    const lines = (counted.children ?? []).map((child: any) => textOf(child).replace(/\u00a0/g, ' '));
+    assert.deepEqual(lines, [
+      'History read: Claude Code, 30 days or more; Codex, only since Nov 12.',
+      'Not seen from here: uses on another computer or in tools not read; Codex doesn’t always record skills or agents.',
+      'Not counted: 1 skill under 30 days old; 1 skill found, not yet in Central Knot.',
+    ]);
+    assert.deepEqual(main.sent, []);
+    // Turning the unused chip off resets the disclosure so re-enabling the chip starts closed.
+    findById(libraryTable(), 'chip-unused').onclick();
+    libraryTable();
+    findById(libraryTable(), 'chip-unused').onclick();
+    assert.equal(findById(libraryTable(), 'unused-counted'), undefined);
+  });
+
+  await t.test('What’s counted keeps each tool’s caveat truthful (Copilot CLI, OpenCode, Codex) and marks other-computer use as not seen from here', () => {
+    const tools: HarnessId[] = ['claude-cli', 'codex-cli', 'copilot-cli', 'opencode-cli'];
+    reset({ managed: tools }, [
+      { tool: 'claude-cli', sessions: 5, recent: 5, from: oldAt, tells: { skill: 'sure', mcp: 'sure', agent: 'sure' }, used: [] },
+      { tool: 'codex-cli', sessions: 2, recent: 2, from: '2026-11-12T00:00:00.000Z', tells: { skill: 'seen', mcp: 'sure', agent: 'seen' }, used: [] },
+      { tool: 'copilot-cli', sessions: 2, recent: 2, from: oldAt, tells: { skill: 'sure', mcp: 'seen' }, used: [] },
+      { tool: 'opencode-cli', sessions: 2, recent: 2, from: oldAt, tells: { skill: 'sure', agent: 'sure' }, used: [] },
+    ]);
+    findById(libraryTable(), 'unused-counted-toggle').onclick();
+    const lines = (findById(libraryTable(), 'unused-counted').children ?? []).map((child: any) => textOf(child).replace(/\u00a0/g, ' '));
+    assert.equal(lines[1],
+      'Not seen from here: uses on another computer or in tools not read; Codex doesn’t always record skills or agents; Copilot CLI doesn’t always record MCP servers and doesn’t record agents; OpenCode doesn’t record MCP servers.');
+  });
+
+  await t.test('unread managed tool history is cued on the band line; no sessions, partial, late start and unread unmanaged tools add nothing', () => {
+    const claude = { tool: 'claude-cli' as const, sessions: 5, recent: 5, from: oldAt, tells: { skill: 'sure' as const, mcp: 'sure' as const, agent: 'sure' as const }, used: [] };
+    const codexBase = { tool: 'codex-cli' as const, tells: { skill: 'seen' as const, mcp: 'sure' as const, agent: 'seen' as const }, used: [] };
+
+    reset({}, [claude, { ...codexBase, sessions: 0, recent: 0, unread: true }]);
+    const unreadBand = findById(libraryTable(), 'unused-band');
+    assert.ok(textOf(unreadBand).includes('Use in Codex not counted.'), textOf(unreadBand));
+    findById(unreadBand, 'unused-counted-toggle').onclick();
+    const unreadLine1 = textOf(findById(libraryTable(), 'unused-counted').children[0]).replace(/\u00a0/g, ' ');
+    assert.ok(unreadLine1.includes('Codex, not read'), unreadLine1);
+
+    reset({ managed: ['claude-cli', 'copilot-cli', 'codex-cli'] }, [
+      claude,
+      { tool: 'copilot-cli' as const, sessions: 0, recent: 0, tells: { skill: 'sure' as const, mcp: 'seen' as const }, used: [], unread: true },
+      { ...codexBase, sessions: 0, recent: 0, unread: true },
+    ]);
+    assert.ok(textOf(findById(libraryTable(), 'unused-band')).includes('Use in Copilot CLI and Codex not counted.'));
+
+    reset({}, [claude, { ...codexBase, sessions: 0, recent: 0 }]);
+    const noneBand = findById(libraryTable(), 'unused-band');
+    assert.equal(textOf(noneBand).includes('not counted'), false, textOf(noneBand));
+    findById(noneBand, 'unused-counted-toggle').onclick();
+    const noneLine1 = textOf(findById(libraryTable(), 'unused-counted').children[0]).replace(/\u00a0/g, ' ');
+    assert.ok(noneLine1.includes('Codex, no sessions found'), noneLine1);
+
+    reset({}, [claude, { ...codexBase, sessions: 2, recent: 2, from: '2026-11-12T00:00:00.000Z', skipped: 1 }]);
+    assert.equal(textOf(findById(libraryTable(), 'unused-band')).includes('not counted'), false);
+
+    reset({ managed: ['claude-cli', 'codex-cli'] }, [
+      claude,
+      { ...codexBase, sessions: 2, recent: 2, from: '2026-11-12T00:00:00.000Z' },
+      { tool: 'copilot-cli' as const, sessions: 0, recent: 0, tells: { skill: 'sure' as const, mcp: 'seen' as const }, used: [], unread: true },
+    ]);
+    assert.equal(textOf(findById(libraryTable(), 'unused-band')).includes('not counted'), false);
+  });
+
+  await t.test('Turn 6 off everywhere result names both ended profiles; refused click names none', async sub => {
+    reset();
+    let nextView = makeHome({});
+    sub.mock.method(api, 'refresh', async () => nextView);
+    findById(libraryTable(), 'turn-unused-off').onclick();
+    await settled();
+    await main.pass({ stopped: 'The skills record is damaged.', results: [], writes: 0, reloads: [] });
+    assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
+
+    nextView = makeHome({ skillsOn: [] });
+    findById(libraryTable(), 'turn-unused-off').onclick();
+    await settled();
+    await main.pass({
+      results: ['old-1', 'old-2', 'old-3', 'old-4', 'old-5', 'old-6'].map(item => ({ item, harness: 'claude-cli' as const, outcome: 'removed' as const, message: '' })),
+      writes: 6, reloads: [], made: ['off-skills-all'],
+    });
+    assert.match(app.outcome?.text ?? '', /Everyday and Focus stopped being the profiles in use\.$/);
+  });
+
+  await t.test('emptied kind offers Show Agents and lands on all-plugin band without skipping words (1, 2, 3+); singular and two-kind forms work', () => {
+    reset({ skillsOn: [], agentsOn: ['plug-1', 'plug-2'] }, undefined, 'skills', 'unused');
+    const emptyOne = findById(libraryTable(), 'unused-band');
+    assert.ok(emptyOne, 'emptied kind band should render');
+    assert.equal(textOf(emptyOne), 'No unused skills left. 2 agents have no use seen in 30 days.Show Agents');
+    assert.equal(findById(emptyOne, 'unused-counted-toggle'), undefined);
+    assert.equal(findById(emptyOne, 'turn-unused-off'), undefined);
+    const showOther = findById(emptyOne, 'unused-show-other');
+    assert.equal(textOf(showOther), 'Show Agents');
+    showOther.onclick();
+    assert.equal(app.libraryKind, 'agents');
+    const agentsTree = libraryTable();
+    assert.equal(findById(agentsTree, 'chip-unused').attrs['aria-pressed'], 'true');
+    const allPluginBand = findById(agentsTree, 'unused-band');
+    assert.equal(findById(allPluginBand, 'turn-unused-off'), undefined);
+    assert.ok(textOf(allPluginBand).includes('2 with no use seen in 30 days, both from a plugin: turn each off on its own row.'), textOf(allPluginBand));
+    const agentCells = usedCells(agentsTree);
+    assert.deepEqual(agentCells[rowId('agents', 'plug-1')], { text: 'from a plugin', skip: true });
+    assert.deepEqual(agentCells[rowId('agents', 'plug-2')], { text: 'from a plugin', skip: true });
+    assert.deepEqual(main.sent, []);
+
+    reset({ skillsOn: [], agentsOn: ['plug-1'] }, undefined, 'agents', 'unused');
+    const onePluginTree = libraryTable();
+    assert.ok(textOf(findById(onePluginTree, 'unused-band')).includes('1 with no use seen in 30 days, from a plugin: turn it off on its own row.'));
+    assert.deepEqual(usedCells(onePluginTree)[rowId('agents', 'plug-1')], { text: 'from a plugin', skip: true });
+
+    reset({ skillsOn: [], extraAgents: ['plug-3'], agentsOn: ['plug-1', 'plug-2', 'plug-3'] }, undefined, 'agents', 'unused');
+    assert.ok(textOf(findById(libraryTable(), 'unused-band')).includes('3 with no use seen in 30 days, all from a plugin: turn each off on its own row.'));
+
+    reset({ skillsOn: [], agentsOn: ['plug-1'] }, undefined, 'skills', 'unused');
+    assert.equal(textOf(findById(libraryTable(), 'unused-band')), 'No unused skills left. 1 agent has no use seen in 30 days.Show Agents');
+
+    reset({ skillsOn: [], agentsOn: ['plug-1', 'plug-2'], mcpOn: ['quiet-srv'] }, undefined, 'skills', 'unused');
+    const emptyTwo = findById(libraryTable(), 'unused-band');
+    assert.equal(textOf(emptyTwo), 'No unused skills left. 1 MCP server and 2 agents have no use seen in 30 days.Show all 3');
+    findById(emptyTwo, 'unused-show-other').onclick();
+    assert.equal(app.libraryKind, 'all');
+    assert.equal(findById(libraryTable(), 'chip-unused').attrs['aria-pressed'], 'true');
+  });
+
+  await t.test('Find miss and From miss omit the unused band', async sub => {
+    reset({ skillsOn: [], agentsOn: ['plug-1', 'plug-2'], mcpOn: ['quiet-srv'] }, undefined, 'skills', 'unused');
+    findById(libraryTable(), 'item-from').onchange({ target: { value: 'yours' } });
+    assert.equal(findById(libraryTable(), 'unused-band'), undefined);
+    reset({ skillsOn: [], agentsOn: ['plug-1', 'plug-2'], mcpOn: ['quiet-srv'] }, undefined, 'skills', 'unused');
+    const prevSearch = (api as Record<string, unknown>).search;
+    sub.after(() => {
+      if (prevSearch === undefined) delete (api as Record<string, unknown>).search;
+      else (api as Record<string, unknown>).search = prevSearch;
+    });
+    (api as Record<string, unknown>).search = async () => ({ ready: true, home: '/unused-band-test-home', rows: [] });
+    findById(libraryTable(), 'find').oninput({ target: { value: 'zzz' } });
+    await settled();
+    assert.equal(findById(libraryTable(), 'unused-band'), undefined);
+  });
 });

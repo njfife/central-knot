@@ -13,7 +13,7 @@
 // callers outside it: skills.ts takeOver keeps a version (library.ts keepVersion), and the profiles migration turns items Off,
 // once (profilemigrate.ts). This module only reads and writes what it is given.
 import { randomUUID } from 'node:crypto';
-import { mkdir, rename } from 'node:fs/promises';
+import { lstat, mkdir, rename } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { emptyLibrary, readLibraryFile, saveLibraryFile, type RecordFile, type StoredLibrary } from './kindstore.ts';
 import type { LibraryItem } from './library.ts';
@@ -107,10 +107,12 @@ export async function storeVersion(context: ShareContext, key: string, { directo
 
 /** Versions a migration found that no writer has stored yet (openLibrary), by where they will be stored: where they are now. */
 const notStoredYet = new Map<string, string>();
-/** A version's content, or undefined when the store no longer has it. */
+const VERSION_ID = /^[0-9a-f]{64}$/;
+/** A version's content, or undefined when the store no longer has it or `hash` is not a store version id. */
 export async function readVersion(context: ShareContext, key: string, hash: string): Promise<SkillContent | undefined> {
+  if (!VERSION_ID.test(hash)) return undefined;
   const path = versionPath(context, key, hash);
-  if (await exists(path)) return { directory: path, hash };
+  if ((await lstat(path).catch(() => undefined))?.isDirectory()) return { directory: path, hash };
   const before = notStoredYet.get(path);
   return before && (await exists(before)) ? { directory: before, hash } : undefined;
 }

@@ -5655,6 +5655,20 @@ async function dockedListFlow() {
     await a.settle();
     for (const content of widths) await fits(`the Library by ${label}`, content, 4);
   }
+  // A 30-letter skill name with the Open file mark beside it stays whole, its mark visible on the row's single line, and row height 40.
+  await a.run(`(() => { const sort = document.querySelector('#item-order'); sort.value = 'updated'; sort.dispatchEvent(new Event('change')); })()`);
+  await a.settle();
+  for (const content of [1200, 1260, 1520]) {
+    const [width, height, sidebar] = { 1200: [1256, 787, false], 1260: [1316, 787, false], 1520: [1728, 980, true] }[content];
+    await sizeTo(a, width, height); await sidebarOpen(sidebar);
+    const longMark = await a.run(`(() => {
+      const row = document.querySelector('.dock-main .ov-row[data-key="${rowPart('', 'skills', 'finishing-a-development-branch')}"]');
+      const cell = row?.querySelector('.ov-name'), text = row?.querySelector('.ov-name-text'), btn = row?.querySelector('.row-file-btn');
+      const rr = row?.getBoundingClientRect(), cr = cell?.getBoundingClientRect(), br = btn?.getBoundingClientRect();
+      return { nameWhole: !!(text && text.scrollWidth <= text.clientWidth), markVisible: !!(br && cr && br.width >= 20 && br.right <= cr.right + 1 && br.bottom <= cr.bottom + 1), rowHeight: Math.round(rr?.height ?? 0) };
+    })()`);
+    same(`at ${content} px docked by Last updated, finishing-a-development-branch keeps its name whole with the Open file mark visible on its 40px row`, longMark, { nameWhole: true, markVisible: true, rowHeight: 40 });
+  }
   for (const selector of ['#nav-harnesses', '#harness-claude-cli', '#harness-tab-skills', `#${rowPart('open', 'skills', 'research')}`]) await a.click(selector);
   await fits('Claude Code’s Skills tab', 1260, 0);
   // Across the dock's breakpoint (the sidebar opened at 1316: 1108 px of content), the opened row stays open where it was in its table.
@@ -9196,7 +9210,7 @@ esac
     same(`${chip}, with spare: its count is the Library’s rows’ alone, and the group shows under no chip`, [count, drawn], { 'chip-attention': ['0', null], 'chip-unused': ['1', null] }[chip]);
     if (chip === 'chip-unused') {
       const before = readFileSync(join(H.home, '.claude/plugins/installed_plugins.json'), 'utf8');
-      check('No use seen’s band counts spare alone, with Turn these off', (await a.text('#unused-band .usage-lead') ?? '').startsWith('1 skill with no use seen') && await a.exists('#turn-unused-off'), await a.text('#unused-band'));
+      check('No use seen’s band counts spare alone, with Turn 1 off everywhere', (await a.text('#unused-band .usage-lead') ?? '') === '1 with no use seen in 30 days.' && (await a.text('#turn-unused-off'))?.trim() === 'Turn 1 off everywhere', await a.text('#unused-band'));
       await a.click('#turn-unused-off');
       await done();
       await until(() => a.exists('#outcome-undo'));
@@ -10398,10 +10412,19 @@ async function usageFlow() {
   same('after a reading, the chip counts what has no use seen in 30 days, old enough', await a.all('.chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]'), [['No use seen in 30 days', '2']]);
   await a.click('.chip[data-tip="No use seen in 30 days"]');
   same('with the chip on, the table holds standup and spare', await sectionsNow(a, 'skills'), [['on', ['standup', 'spare']]]);
-  same('its band leads with how many, what Turn these off does and the profile it ends; then, fainter, that a use elsewhere isn’t seen, how far back each tool’s history goes, what Codex doesn’t always record and the new one left out',
-    [await a.text('#unused-band .usage-lead'), (await a.text('#unused-band .usage-more'))?.replace(/ /g, ' ').replace(/from \w+ \d+/g, 'from <day>')],
-    ['2 skills with no use seen in the last 30 days. Turn these off: Central Knot takes its copies out of every tool it manages and keeps them; Undo turns them all back on. With these off, Everyday stops being the profile in use.',
-      'A use on another computer or in a tool not read isn’t seen. Each tool’s history: Claude Code, 30 days or more; Copilot CLI, from <day>; Codex, from <day>. Codex doesn’t always record which skill was used. Left out: 1 skill under 30 days old.']);
+  same('its band is one line with the count, disclosure closed, and Turn 2 off everywhere; opening the disclosure reveals coverage and exclusions',
+    [await a.text('#unused-band .usage-lead'), (await a.text('#unused-counted-toggle'))?.trim(), await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-counted'), (await a.text('#turn-unused-off'))?.trim()],
+    ['2 with no use seen in 30 days.', 'What’s counted', 'false', false, 'Turn 2 off everywhere']);
+  if (await a.exists('#unused-counted-toggle')) await a.click('#unused-counted-toggle');
+  same('the opened disclosure shows three short lines: history read, not seen from here, and not counted',
+    [await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`),
+      (await a.all('#unused-counted > p', 'e.textContent')).map(line => line.replace(/ /g, ' ').replace(/only since \w+ \d+/g, 'only since <day>'))],
+    ['true', [
+      'History read: Claude Code, 30 days or more; Copilot CLI, only since <day>; Codex, only since <day>.',
+      'Not seen from here: uses on another computer or in tools not read; Codex doesn’t always record skills.',
+      'Not counted: 1 skill under 30 days old.',
+    ]]);
+  if (await a.exists('#unused-counted-toggle')) await a.click('#unused-counted-toggle');
   same('Turn these off sits at the band’s end, at 1280 and 2560 alike', await (async () => { const ends = []; for (const [width, height] of [[1280, 800], [2560, 1440]]) { await sizeTo(a, width, height);
     ends.push(await a.run(`Math.round(document.querySelector('#unused-band').getBoundingClientRect().right - document.querySelector('#turn-unused-off').getBoundingClientRect().right)`)); } await fullSize(a); return ends[0] === ends[1]; })(), true);
   await fitsAtMinimum(a, 'Skills with the No use seen chip on and its band');
@@ -10711,6 +10734,327 @@ async function usageFlow() {
   same('with no unused items left, the usage strip shows no unused link', [await a.exists('#overview-unused'), await a.all('.kind-card button[id$="-unused"]', 'e.id'), /^Usage collected today at [^.]+\. Update usage statistics$/.test(await usageSaid() ?? '')], [false, [], true]);
   same('no page errors, the Overview', a.pageErrors, []);
   await a.quit();
+  // ---------- Step UX-1A: one-line unused band (8 shown, 2 skipped, 6 turned off; keyboard disclosure; two ended profiles; emptied kind -> Show Agents / Show all N; Find/From miss -> no band) ----------
+  {
+    const uxHome = join(scratch, 'ux1a-home'), uxData = join(scratch, 'ux1a-data'), uxReal = join(scratch, 'ux1a-real');
+    for (const folder of [uxHome, uxData, uxReal]) mkdirSync(folder, { recursive: true });
+    toolClis(uxHome);
+    const uxSkills = ['legacy-a', 'legacy-b', 'legacy-c', 'legacy-d', 'legacy-e', 'legacy-f'];
+    for (const name of [...uxSkills, 'active-skill', 'young-skill']) skill(join(uxHome, '.claude/skills'), name);
+    const agentBody = name => `---\nname: ${name}\ndescription: The ${name} agent.\n---\n\nDo ${name}.\n`;
+    for (const name of ['plug-audit', 'plug-triage']) {
+      mkdirSync(join(uxHome, '.copilot/agents'), { recursive: true });
+      writeFileSync(join(uxHome, `.copilot/agents/${name}.agent.md`), agentBody(name));
+    }
+    writeClaudeInstall(uxHome, 'local-market', 'team-kit', '1.0.0', {
+      'agents/plug-audit.md': agentBody('plug-audit'),
+      'agents/plug-triage.md': agentBody('plug-triage'),
+    });
+    writeFileSync(join(uxHome, '.claude.json'), `${JSON.stringify({ mcpServers: { 'quiet-srv': { type: 'http', url: 'https://quiet.example.test/mcp' } } }, null, 2)}\n`);
+    lines(join(uxHome, '.claude/projects/-work/u0.jsonl'), [{ type: 'user', message: { content: 'hello' }, timestamp: ago(45).toISOString() }, skillCall('active-skill', 2)]);
+    lines(join(uxHome, '.codex/sessions/2026/11/12/rollout-u.jsonl'), [{ type: 'session_meta', payload: {}, timestamp: ago(12).toISOString() }]);
+    writeFileSync(join(uxData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: uxHome } }));
+    const uxRecord = kind => join(uxHome, `.central-knot/${kind}.json`);
+    const uxUntil = async (fn, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return true; await wait(100); } return false; };
+    const uxDone = async app => { for (let tries = 0; tries < 200 && await app.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await app.settle(); };
+    // Take everything into Central Knot once, then age records, leave quiet-srv Off, add a Found skill and two matching profiles.
+    a = await launch(uxData, [], uxReal);
+    await a.click('#nav-overview');
+    await a.click('#setup-yes');
+    check('ux1a: setup took every item into Central Knot', await uxUntil(() => [...uxSkills, 'active-skill', 'young-skill'].every(key => !!jsonOrNothing(uxRecord('skills'))?.items?.[key])
+      && ['plug-audit', 'plug-triage'].every(key => !!jsonOrNothing(uxRecord('agents'))?.items?.[key]) && !!jsonOrNothing(uxRecord('mcp'))?.items?.['quiet-srv']));
+    await a.quit();
+    for (const [kind, keys, days] of [['skills', [...uxSkills, 'active-skill'], 40], ['skills', ['young-skill'], 2], ['agents', ['plug-audit', 'plug-triage'], 40], ['mcp', ['quiet-srv'], 40]]) {
+      const kept = JSON.parse(readFileSync(uxRecord(kind), 'utf8'));
+      for (const key of keys) {
+        kept.items[key].versions = kept.items[key].versions.map(v => ({ ...v, at: ago(days).toISOString() }));
+        if (key === 'quiet-srv') kept.items[key].on = false;
+      }
+      writeFileSync(uxRecord(kind), JSON.stringify(kept, null, 2));
+    }
+    const syncState = jsonOrNothing(join(uxHome, '.central-knot/sync.json')) ?? {};
+    writeFileSync(join(uxHome, '.central-knot/sync.json'), JSON.stringify({ ...syncState, syncEverything: false }, null, 2));
+    const foundFolder = skill(join(uxHome, '.claude/skills'), 'found-only');
+    for (const p of [foundFolder, join(foundFolder, 'SKILL.md')]) utimesSync(p, ago(40), ago(40));
+    const profileItems = [...uxSkills.map(k => `skill:${k}`), 'skill:active-skill', 'skill:young-skill', 'agent:plug-audit', 'agent:plug-triage'];
+    writeFileSync(join(uxHome, '.central-knot/profiles.json'), JSON.stringify({
+      formatVersion: 2,
+      profiles: [
+        { id: 'everyday', name: 'Everyday', items: profileItems },
+        { id: 'focus', name: 'Focus', items: profileItems },
+      ],
+    }, null, 2));
+
+    a = await launch(uxData, [], uxReal);
+    await openKind(a, 'all');
+    check('ux1a: usage collected and chip shows 8', await uxUntil(async () => (await a.text('#chip-unused .chip-count'))?.trim() === '8'));
+    await a.click('#chip-unused');
+    const bandMetrics = () => a.run(`(() => {
+      const band = document.querySelector('#unused-band');
+      if (!band) return null;
+      const text = band.innerText.replace(/\\s+/g, ' ').trim();
+      const bRect = band.getBoundingClientRect();
+      const lead = band.querySelector('.usage-lead');
+      const lRect = lead?.getBoundingClientRect();
+      const toggle = band.querySelector('#unused-counted-toggle');
+      const tRect = toggle?.getBoundingClientRect();
+      const btn = band.querySelector('#turn-unused-off, #unused-show-other');
+      const aRect = btn?.getBoundingClientRect();
+      const oneLine = !!lRect && lRect.height <= 22 && bRect.height <= 42
+        && (!tRect || Math.abs(tRect.top - lRect.top) < 10)
+        && (!aRect || Math.abs((aRect.top + aRect.height / 2) - (lRect.top + lRect.height / 2)) < 10);
+      const bTextRect = band.querySelector('.band-text')?.getBoundingClientRect();
+      const lastLead = lead ? [...lead.getClientRects()].at(-1) : undefined;
+      const wrapFlush = !tRect || !bTextRect || !lastLead
+        || (Math.abs(tRect.top - lastLead.top) < 10 ? Math.abs(lastLead.left - bTextRect.left) < 1 : Math.abs(tRect.left - bTextRect.left) < 1)
+        && getComputedStyle(toggle).marginLeft === '0px';
+      return { text, words: text.split(/\\s+/).filter(Boolean).length, height: Math.round(bRect.height), oneLine, wrapFlush };
+    })()`);
+    const skippedRowsState = () => a.run(`(() => Object.fromEntries([...document.querySelectorAll('.ov-row[data-key]')].map(row => {
+      const cell = row.querySelector('.ov-used');
+      const name = row.querySelector('.ov-name-text');
+      return [row.dataset.key, {
+        text: cell?.textContent?.trim() ?? '',
+        skip: !!cell?.classList.contains('ov-used-skip'),
+        cellWhole: !!cell && cell.scrollWidth <= cell.clientWidth + 1,
+        nameWhole: !!name && name.scrollWidth <= name.clientWidth + 1,
+      }];
+    })))()`);
+    const captureUx1a = async label => {
+      const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+      const countsByWidth = {};
+      for (const [width, height] of [[860, 560], [1316, 819]]) {
+        await sizeTo(a, width, height);
+        const railNow = await a.run(`document.body.classList.contains('rail')`);
+        if (railNow) await a.click('#sidebar-toggle');
+        countsByWidth[width] = await bandMetrics();
+        same(`ux1a: nothing cut off for ${label} at ${width} with sidebar open`, [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], []);
+        if (shots) {
+          for (const mode of ['light', 'dark']) {
+            await theme(mode);
+            await wait(80);
+            await a.shot(`ux1a-${label}-${width}-${mode}`);
+          }
+        }
+      }
+      if (shots) await theme('');
+      await fullSize(a);
+      return countsByWidth;
+    };
+    const capture860Light = async label => {
+      const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+      await sizeTo(a, 860, 560);
+      if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+      await a.run(`document.activeElement?.blur()`);
+      const metrics = await bandMetrics();
+      same(`ux1a: nothing cut off for ${label} at 860 with sidebar open`, [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], []);
+      if (shots) {
+        await theme('light');
+        await wait(80);
+        await a.shot(`ux1a-${label}-860-light`);
+        await theme('');
+      }
+      await fullSize(a);
+      return metrics;
+    };
+    same('ux1a: band is one line for 8 shown, 2 from a plugin skipped, 6 turned off, with no Undo or profile prose',
+      [await a.text('#unused-band .usage-lead'), (await a.text('#unused-counted-toggle'))?.trim(), await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-counted'), (await a.text('#turn-unused-off'))?.trim()],
+      ['8 with no use seen in 30 days. 2 from a plugin skipped.', 'What’s counted', 'false', false, 'Turn 6 off everywhere']);
+    const collapsedCounts = await captureUx1a('band');
+    same('ux1a: collapsed band is visually one line high at 860 and 1316 with sidebar open', [collapsedCounts[860]?.oneLine, collapsedCounts[1316]?.oneLine], [true, true]);
+    console.log(`usageFlow ux1a collapsed band: 860=${JSON.stringify(collapsedCounts[860])} 1316=${JSON.stringify(collapsedCounts[1316])}`);
+    // Skipped plugin rows are visibly marked at 860 with sidebar open without cutting their names or usage cells, and unmarked while selecting.
+    await sizeTo(a, 860, 560);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    const markedAt860 = await skippedRowsState();
+    same('ux1a: at 860 with sidebar open, both skipped plugin rows say from a plugin · skipped whole without cutting names, and the 6 skills stay normal',
+      [...uxSkills.map(k => [markedAt860[rowPart('', 'skills', k)]?.text, markedAt860[rowPart('', 'skills', k)]?.skip]),
+        ...['plug-audit', 'plug-triage'].map(k => markedAt860[rowPart('', 'agents', k)])],
+      [...uxSkills.map(() => ['no use seen in 30 days', false]),
+        { text: 'from a plugin · skipped', skip: true, cellWhole: true, nameWhole: true },
+        { text: 'from a plugin · skipped', skip: true, cellWhole: true, nameWhole: true }]);
+    await a.click('#library-select');
+    const selectingAt860 = await skippedRowsState();
+    same('ux1a: while Select is on, plugin rows show no skipped mark',
+      ['plug-audit', 'plug-triage'].map(k => [selectingAt860[rowPart('', 'agents', k)]?.text, selectingAt860[rowPart('', 'agents', k)]?.skip]),
+      [['no use seen in 30 days', false], ['no use seen in 30 days', false]]);
+    await capture860Light('band-select');
+    await a.click('#library-select');
+    await fullSize(a);
+
+    // Expand [What’s counted] by keyboard: writes nothing, focus stays, three short lines appear; Space and Escape both close it.
+    const beforeDisclose = [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')];
+    if (await a.exists('#unused-counted-toggle')) {
+      await a.run(`document.querySelector('#unused-counted-toggle').focus()`);
+      await a.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+      await a.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+      await a.settle();
+    }
+    const countedLines = (await a.all('#unused-counted > p', 'e.textContent')).map(line => line.replace(/\u00a0/g, ' ').replace(/only since \w+ \d+/g, 'only since <day>'));
+    same('ux1a: Enter opens What’s counted as three short lines, keeps focus, writes nothing',
+      [await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`), await a.run(`document.activeElement?.id`),
+        countedLines, [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')]],
+      ['true', 'unused-counted-toggle', [
+        'History read: Claude Code, 30 days or more; Copilot CLI, no sessions found; Codex, only since <day>.',
+        'Not seen from here: uses on another computer or in tools not read; Codex doesn’t always record skills or agents.',
+        'Not counted: 1 skill under 30 days old; 1 skill found, not yet in Central Knot.',
+      ], beforeDisclose]);
+    await captureUx1a('band-open');
+    if (await a.exists('#unused-counted-toggle')) {
+      await a.run(`document.querySelector('#unused-counted-toggle').focus()`);
+      await a.press(' ', 'Space');
+    }
+    same('ux1a: Space closes What’s counted again', [await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-counted')], ['false', false]);
+    if (await a.exists('#unused-counted-toggle')) {
+      await a.run(`document.querySelector('#unused-counted-toggle').focus()`);
+      await a.press(' ', 'Space');
+      await a.run(`document.querySelector('#unused-counted-toggle').focus()`);
+      await a.press('Escape', 'Escape');
+    }
+    same('ux1a: Escape closes focused What’s counted disclosure', [await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-counted')], ['false', false]);
+
+    // Unread managed tool history: cued on the band line before the click; disappears once readable again.
+    const codexSessions = join(uxHome, '.codex/sessions');
+    try {
+      chmodSync(codexSessions, 0o000);
+      await a.click('#collect-usage');
+      await uxUntil(async () => /Use in Codex not counted\./.test((await a.text('#unused-band .usage-lead')) ?? ''), 5000);
+      if (await a.exists('#usage-line-close')) await a.click('#usage-line-close');
+      same('ux1a: unreadable managed Codex history is cued on the band line',
+        await a.text('#unused-band .usage-lead'),
+        '8 with no use seen in 30 days. 2 from a plugin skipped. Use in Codex not counted.');
+      const unreadMetrics = await capture860Light('band-unread');
+      same('ux1a: unread band toggle starts flush left when wrapped at 860', unreadMetrics?.wrapFlush, true);
+      console.log(`usageFlow ux1a unread band 860=${JSON.stringify(unreadMetrics)}`);
+    } finally {
+      chmodSync(codexSessions, 0o755);
+    }
+    await a.click('#collect-usage');
+    check('ux1a: cue clears once Codex history is readable again', await uxUntil(async () => (await a.text('#unused-band .usage-lead')) === '8 with no use seen in 30 days. 2 from a plugin skipped.', 5000));
+    if (await a.exists('#usage-line-close')) await a.click('#usage-line-close');
+
+    // Refused click names no profile and keeps both Everyday and Focus in use.
+    const savedSkills = readFileSync(uxRecord('skills'), 'utf8');
+    writeFileSync(uxRecord('skills'), '{');
+    await a.click('#turn-unused-off');
+    await uxDone(a);
+    same('ux1a: refused Turn 6 off everywhere names no profile', [/stopped being the profile/.test(await headerResultWords(a) ?? ''), (await a.text('#status-profile'))?.trim()], [false, 'Everyday and Focus']);
+    writeFileSync(uxRecord('skills'), savedSkills);
+    await a.click('#header-refresh');
+    await uxUntil(async () => !(await a.run(`(document.querySelector('.bands')?.textContent ?? '').includes('damaged')`)));
+
+    // Turn 6 off everywhere: 6 skills off, 2 plugin agents stay on, result alone names BOTH ended profiles.
+    await a.click('#turn-unused-off');
+    await uxDone(a);
+    check('ux1a: Undo appears after Turn 6 off everywhere', await uxUntil(() => a.exists('#outcome-undo')));
+    const endedWords = await headerResultWords(a);
+    same('ux1a: Turn 6 off everywhere turns off 6 skills, skips 2 plugin agents, and the result alone names both ended profiles',
+      [uxSkills.every(k => jsonOrNothing(uxRecord('skills'))?.items?.[k]?.on === false),
+        ['plug-audit', 'plug-triage'].every(k => jsonOrNothing(uxRecord('agents'))?.items?.[k]?.on === true),
+        (endedWords ?? '').includes('Everyday and Focus stopped being the profiles in use.'),
+        (await a.text('#status-profile'))?.trim()],
+      [true, true, true, 'No profile']);
+    await a.click('#outcome-undo');
+    await uxDone(a);
+    check('ux1a: Undo restores all 6 skills', await uxUntil(() => uxSkills.every(k => jsonOrNothing(uxRecord('skills'))?.items?.[k]?.on === true)));
+
+    // Emptied kind: switch to Skills (chip stays on), check Find miss and From miss show no band, then turn off all 6 skills -> Show Agents.
+    await a.click('#library-kind-skills');
+    check('ux1a: Skills segment shows 6 unused skills', await uxUntil(async () => (await a.text('#unused-band .usage-lead')) === '6 with no use seen in 30 days.', 3000));
+    await a.run(`(() => { const i = document.querySelector('#find'); i.value = 'zzz-no-match'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.settle();
+    same('ux1a: Find miss shows no unused band', await a.exists('#unused-band'), false);
+    await a.run(`(() => { const i = document.querySelector('#find'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.settle();
+    check('ux1a: clearing Find restores band', await uxUntil(() => a.exists('#unused-band')));
+    await a.run(`(() => { const s = document.querySelector('#item-from'); const opt = [...s.options].find(o => o.value.startsWith('plugin:')); s.value = opt.value; s.dispatchEvent(new Event('change')); })()`);
+    await a.settle();
+    same('ux1a: From miss shows no unused band', await a.exists('#unused-band'), false);
+    await a.run(`(() => { const s = document.querySelector('#item-from'); s.value = 'anywhere'; s.dispatchEvent(new Event('change')); })()`);
+    await a.settle();
+    await a.click('#turn-unused-off');
+    await uxDone(a);
+    check('ux1a: turning off the last unused skill leaves the emptied-kind band', await uxUntil(() => a.exists('#unused-show-other'), 3000));
+    same('ux1a: emptied Skills band names the 2 remaining agents and offers Show Agents',
+      [await a.text('#unused-band .usage-lead'), (await a.text('#unused-show-other'))?.trim(), await a.exists('#unused-counted-toggle'), await a.exists('#turn-unused-off')],
+      ['No unused skills left. 2 agents have no use seen in 30 days.', 'Show Agents', false, false]);
+    const emptiedCounts = await captureUx1a('emptied-kind');
+    same('ux1a: emptied-kind band is visually one line high at 860 and 1316 with sidebar open', [emptiedCounts[860]?.oneLine, emptiedCounts[1316]?.oneLine], [true, true]);
+    console.log(`usageFlow ux1a emptied band: 860=${JSON.stringify(emptiedCounts[860])} 1316=${JSON.stringify(emptiedCounts[1316])}`);
+    const beforeNav = [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')];
+    if (await a.exists('#unused-show-other')) await a.click('#unused-show-other');
+    const allPluginRows = await skippedRowsState();
+    same('ux1a: Show Agents switches to Agents, keeps the unused chip on, lists both agents marked from a plugin, shows own-row wording with no Turn button, and writes nothing',
+      [await a.run(`document.querySelector('#library-kind-agents')?.getAttribute('aria-pressed')`),
+        await a.run(`document.querySelector('#chip-unused')?.getAttribute('aria-pressed')`),
+        (await a.all('.ov-row[data-key]', 'e.dataset.key')).sort(),
+        await a.text('#unused-band .usage-lead'),
+        await a.exists('#turn-unused-off'),
+        ['plug-audit', 'plug-triage'].map(k => allPluginRows[rowPart('', 'agents', k)]),
+        [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')]],
+      ['true', 'true', [rowPart('', 'agents', 'plug-audit'), rowPart('', 'agents', 'plug-triage')],
+        '2 with no use seen in 30 days, both from a plugin: turn each off on its own row.', false,
+        [{ text: 'from a plugin', skip: true, cellWhole: true, nameWhole: true },
+          { text: 'from a plugin', skip: true, cellWhole: true, nameWhole: true }], beforeNav]);
+    const allPluginMetrics = await capture860Light('band-all-plugin');
+    same('ux1a: all-plugin band is visually one line high at 860 with sidebar open', allPluginMetrics?.oneLine, true);
+    console.log(`usageFlow ux1a all-plugin band 860=${JSON.stringify(allPluginMetrics)}`);
+
+    // Two other kinds: turn quiet-srv On so MCP servers (1) and Agents (2) both have unused items, then visit Skills -> Show all 3.
+    await a.click('#library-kind-mcp');
+    await a.click('#chip-unused');
+    await a.click(`#${rowPart('switch', 'mcp', 'quiet-srv')}`);
+    await uxDone(a);
+    await a.click('#chip-unused');
+    await a.click('#library-kind-skills');
+    check('ux1a: two other kinds offer Show all 3', await uxUntil(async () => (await a.text('#unused-show-other'))?.trim() === 'Show all 3', 3000));
+    same('ux1a: emptied Skills with 1 MCP server and 2 agents remaining names both and offers Show all 3',
+      [await a.text('#unused-band .usage-lead'), (await a.text('#unused-show-other'))?.trim()],
+      ['No unused skills left. 1 MCP server and 2 agents have no use seen in 30 days.', 'Show all 3']);
+    const beforeAll = [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('mcp'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')];
+    if (await a.exists('#unused-show-other')) await a.click('#unused-show-other');
+    same('ux1a: Show all 3 switches to All, keeps the unused chip on, shows all 3 items and writes nothing',
+      [await a.run(`document.querySelector('#library-kind-all')?.getAttribute('aria-pressed')`),
+        await a.run(`document.querySelector('#chip-unused')?.getAttribute('aria-pressed')`),
+        (await a.all('.ov-row[data-key]', 'e.dataset.key')).sort(),
+        [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('mcp'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')]],
+      ['true', 'true', [rowPart('', 'agents', 'plug-audit'), rowPart('', 'agents', 'plug-triage'), rowPart('', 'mcp', 'quiet-srv')].sort(), beforeAll]);
+
+    // Three-digit count (128 with no use seen, 2 from a plugin skipped, Turn 126 off everywhere) at 860 with sidebar open.
+    const skillsRec = JSON.parse(readFileSync(uxRecord('skills'), 'utf8'));
+    const templateItem = skillsRec.items['legacy-a'];
+    for (const key of uxSkills) {
+      skillsRec.items[key].on = true;
+      for (const root of ['.claude/skills', '.codex/skills', '.copilot/skills']) {
+        const folder = skill(join(uxHome, root), key);
+        for (const p of [folder, join(folder, 'SKILL.md')]) utimesSync(p, ago(40), ago(40));
+      }
+    }
+    for (let i = 1; i <= 120; i++) {
+      const key = `extra-${String(i).padStart(3, '0')}`;
+      skillsRec.items[key] = { ...templateItem, name: key, on: true, versions: [{ ...templateItem.versions[0], at: ago(40).toISOString() }] };
+      for (const root of ['.claude/skills', '.codex/skills', '.copilot/skills']) {
+        const folder = skill(join(uxHome, root), key);
+        for (const p of [folder, join(folder, 'SKILL.md')]) utimesSync(p, ago(40), ago(40));
+      }
+    }
+    writeFileSync(uxRecord('skills'), JSON.stringify(skillsRec, null, 2));
+    const mcpRec = JSON.parse(readFileSync(uxRecord('mcp'), 'utf8'));
+    mcpRec.items['quiet-srv'].on = false;
+    writeFileSync(uxRecord('mcp'), JSON.stringify(mcpRec, null, 2));
+    await a.click('#header-refresh');
+    await uxDone(a);
+    check('ux1a: three-digit count reaches 128 on All', await uxUntil(async () => (await a.text('#chip-unused .chip-count'))?.trim() === '128', 8000));
+    same('ux1a: three-digit band text and button',
+      [await a.text('#unused-band .usage-lead'), (await a.text('#turn-unused-off'))?.trim()],
+      ['128 with no use seen in 30 days. 2 from a plugin skipped.', 'Turn 126 off everywhere']);
+    const threeDigitMetrics = await capture860Light('band-three-digits');
+    same('ux1a: three-digit band stays one line high at 860 with sidebar open', threeDigitMetrics?.oneLine, true);
+    console.log(`usageFlow ux1a three-digit band 860=${JSON.stringify(threeDigitMetrics)}`);
+    same('no page errors, ux1a unused band', a.pageErrors, []);
+    await a.quit();
+  }
+
   // Started at sign-in, with no window (--hidden): nothing is collected until the window first shows (a second launch shows it).
   a = await launch(data, ['--hidden'], real);
   await openKind(a, 'skills');
@@ -12156,7 +12500,7 @@ async function libraryFlow() {
   await done(a);
   // 9b: Turn these off across kinds, the MCP record damaged just before the click.
   await a.click('#chip-unused');
-  check('its band counts the five in one noun (spare is used now)', (await a.text('#unused-band .usage-lead') ?? '').startsWith('5 items with no use seen in the last 30 days.'), await a.text('#unused-band'));
+  check('its band counts the five in one line (spare is used now)', (await a.text('#unused-band .usage-lead') ?? '') === '5 with no use seen in 30 days. 1 from a plugin skipped.', await a.text('#unused-band'));
   await pictures(a, 'unused-across-kinds');
   // Copilot CLI refuses to let go of either tidy (its folders can't be written), and the MCP record is damaged.
   const mcpRecord = readFileSync(record('mcp'), 'utf8'), copilotFolders = [A.copilot, join(A.home, '.copilot/agents')];
@@ -12223,7 +12567,7 @@ async function libraryFlow() {
   await press(`#${rowPart('switch', 'skills', 'idle')}`);
   await done(a);
   same('idle, off now, keeps its place by its pin, and the heading, the kind switch and the band count tidy alone',
-    [await a.all('.ov-row[data-key]', 'e.dataset.key'), await a.text('.ov-section[data-section="results"] .ov-section-count'), (await counts(a)).all, (await a.text('#unused-band .usage-lead') ?? '').startsWith('1 skill with no use seen in the last 30 days.')],
+    [await a.all('.ov-row[data-key]', 'e.dataset.key'), await a.text('.ov-section[data-section="results"] .ov-section-count'), (await counts(a)).all, (await a.text('#unused-band .usage-lead') ?? '') === '1 with no use seen in 30 days.'],
     [[rowPart('', 'skills', 'idle'), rowPart('', 'skills', 'tidy')], '1', '1', true]);
   await press('#turn-unused-off');
   await done(a);
@@ -18068,11 +18412,406 @@ if (tool === 'claude') {
   await c.quit();
 }
 
+/**
+ * Step 15a: one-click Open file on closed skill rows (Library list and a tool's Skills tab), with every file of the skill's
+ * folder as wrapping tabs, text/binary/cap states, real path footer (or Stored in Central Knot when Off), Escape/close mark,
+ * and tasks 3 and 7 one click from the closed row without opening the row's details.
+ */
+async function skillFileFlow() {
+  const until = async (test, tries = 80) => { for (let count = 0; count < tries && !(await test()); count++) await wait(100); return test(); };
+  const home = join(scratch, 'skill-file-home'), data = join(scratch, 'skill-file-data'), real = join(scratch, 'skill-file-real');
+  const ago = days => new Date(Date.now() - days * 86_400_000);
+  mkdirSync(real, { recursive: true });
+  toolClis(home);
+  const claudeSkills = join(home, '.claude/skills');
+  const sixtyLines = Array.from({ length: 60 }, (_, index) => `Line ${index + 1}: review check item ${index + 1}.`).join('\n');
+  const reviewBody = text('code-review', `${sixtyLines}\nValues stay as written: token=demo-raw-001.`);
+  const reviewDir = skill(claudeSkills, 'code-review', reviewBody);
+  writeFileSync(join(reviewDir, 'checklist.md'), '# Review checklist\n\n- Check error handling\n- Check edge cases\n');
+  mkdirSync(join(reviewDir, 'scripts'), { recursive: true });
+  writeFileSync(join(reviewDir, 'scripts/check-all.sh'), '#!/bin/sh\necho "all checks passed"\n');
+  chmodSync(join(reviewDir, 'scripts/check-all.sh'), 0o755);
+  mkdirSync(join(reviewDir, 'references'), { recursive: true });
+  writeFileSync(join(reviewDir, 'references/style-guide.md'), '# Style guide\n\nKeep lines clear.\n');
+  mkdirSync(join(reviewDir, 'assets'), { recursive: true });
+  writeFileSync(join(reviewDir, 'assets/preview.bin'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02]));
+  writeFileSync(join(reviewDir, 'large.txt'), 'x'.repeat(1024 * 1024 + 1));
+
+  const craftDir = skill(claudeSkills, 'commit-craft', text('commit-craft', 'Writes concise commit messages.'));
+  writeFileSync(join(craftDir, 'template.md'), 'Subject line\n\nBody details.\n');
+  skill(claudeSkills, 'stored-only', text('stored-only', 'Kept only in Central Knot when turned off.'));
+
+  // An agent and an MCP server (must NOT get an Open file mark in 15a).
+  mkdirSync(join(home, '.claude/agents'), { recursive: true });
+  writeFileSync(join(home, '.claude/agents/helper-agent.md'), '---\nname: helper-agent\ndescription: Helps review.\n---\n\nPrompt body.\n');
+  writeFileSync(join(home, '.claude.json'), JSON.stringify({ mcpServers: { 'demo-mcp': { command: 'node', args: ['-e', '0'] } } }, null, 2));
+
+  // A plugin-only skill (must NOT get an Open file mark in 15a).
+  const market = join(scratch, 'skill-file-market');
+  writeMarket(market, 'skill-file-market');
+  const pluginSkill = readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8');
+  writeClaudeInstall(home, 'skill-file-market', 'issue-tracker', '2.0.0', { 'skills/triage/SKILL.md': pluginSkill });
+
+  // Claude Code sessions so code-review leads under Sort by Most used (task 7).
+  const writeLines = (path, records) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, records.map(record => JSON.stringify(record)).join('\n') + '\n'); };
+  const skillCall = (name, days) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: name } }] }, timestamp: ago(days).toISOString() });
+  for (let s = 1; s <= 12; s++) writeLines(join(home, `.claude/projects/-work/cr-${s}.jsonl`), [skillCall('code-review', s)]);
+  for (let s = 1; s <= 3; s++) writeLines(join(home, `.claude/projects/-work/cc-${s}.jsonl`), [skillCall('commit-craft', s)]);
+
+  mkdirSync(data, { recursive: true });
+  const actualHome = canWriteRealHome;
+  const prefix = actualHome ? '~' : '…';
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: actualHome ? { mode: 'actual' } : { mode: 'custom', path: home } }));
+  const a = await launch(data, [], actualHome ? home : real);
+
+  // Add the three skills, the agent, and the MCP server to Central Knot, turn stored-only off, and leave local-draft Found only.
+  await openKind(a, 'all');
+  for (const [kind, key] of [['skills', 'code-review'], ['skills', 'commit-craft'], ['skills', 'stored-only'], ['agents', 'helper-agent'], ['mcp', 'demo-mcp']]) {
+    await a.click(`#${rowPart('add', kind, key)}`);
+  }
+  await a.click(`#${rowPart('switch', 'skills', 'stored-only')}`);
+  skill(claudeSkills, 'local-draft', text('local-draft', 'Found only in Claude Code.'));
+  await a.click('#header-refresh');
+  await until(() => a.exists(`.ov-row[data-key="${rowPart('', 'skills', 'local-draft')}"]`));
+
+  const capture = async (tag, prep = async () => {}) => {
+    if (!shots) return;
+    for (const [width, height] of [SMALLEST, [1316, 819]]) {
+      await sizeTo(a, width, height);
+      const wasRail = await a.run(`document.body.classList.contains('rail')`);
+      if (wasRail) await a.click('#sidebar-toggle');
+      await a.settle();
+      await prep();
+      for (const theme of ['light', 'dark']) {
+        await a.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+        await wait(80);
+        await a.shot(`${tag}-${width}-${theme}`);
+      }
+      if (wasRail) await a.click('#sidebar-toggle');
+    }
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    await wait(80);
+    await fullSize(a);
+  };
+
+  // Mark placement: library skills only (On and Off); none on Found-only skill, agent, MCP server, or plugin-only skill.
+  const reviewBtn = `#${rowPart('file', 'skills', 'code-review')}`;
+  const craftBtn = `#${rowPart('file', 'skills', 'commit-craft')}`;
+  const storedBtn = `#${rowPart('file', 'skills', 'stored-only')}`;
+  const marksCheck = await a.run(`(() => {
+    const row = document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'code-review')}"]');
+    const btn = row?.querySelector('${reviewBtn}');
+    const nameEl = row?.querySelector('.ov-name-text');
+    const aboutEl = row?.querySelector('.ov-name-about');
+    const markEl = row?.querySelector('.ov-marks');
+    const br = btn?.getBoundingClientRect(), nr = nameEl?.getBoundingClientRect(), ar = aboutEl?.getBoundingClientRect(), mr = markEl?.getBoundingClientRect();
+    return {
+      exists: !!btn,
+      title: btn?.title ?? null,
+      label: btn?.getAttribute('aria-label') ?? null,
+      pressed: btn?.getAttribute('aria-pressed') ?? null,
+      rightAfterName: !!(btn && nameEl && nameEl.nextElementSibling === btn),
+      beforeAboutAndMarks: !!(br && nr && mr && br.left >= nr.right - 2 && br.right <= mr.left + 1 && (!ar || br.right <= ar.left + 1)),
+      craft: !!document.querySelector('${craftBtn}'),
+      stored: !!document.querySelector('${storedBtn}'),
+      foundSkill: !!document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'local-draft')}"] .row-file-btn'),
+      agent: !!document.querySelector('.ov-row[data-key="${rowPart('', 'agents', 'helper-agent')}"] .row-file-btn'),
+      mcp: !!document.querySelector('.ov-row[data-key="${rowPart('', 'mcp', 'demo-mcp')}"] .row-file-btn'),
+      pluginSkill: !!document.querySelector('.ov-row[data-key^="plugin-"] .row-file-btn'),
+    };
+  })()`);
+  same('Open file mark sits right after the name on Library skills only, never on Found-only, agent, MCP, or plugin-only rows', marksCheck, {
+    exists: true, title: 'Open file', label: 'Open file: code-review', pressed: 'false',
+    rightAfterName: true, beforeAboutAndMarks: true, craft: true, stored: true,
+    foundSkill: false, agent: false, mcp: false, pluginSkill: false,
+  });
+
+  if (marksCheck.exists) {
+    await a.run(`document.activeElement?.blur()`);
+    await capture('row-with-mark');
+
+    // Task 3: from Overview, 1 click to Library + 1 click on closed row's Open file mark = 2 clicks total, 1 from closed row.
+    await a.click('#nav-overview');
+    let task3Clicks = 0;
+    await a.click('#nav-library'); task3Clicks++;
+    await a.click(reviewBtn); task3Clicks++;
+    await until(() => a.exists('.file-open-box pre.content'));
+    const opened = await a.run(`(() => {
+      const row = document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'code-review')}"]');
+      const box = document.querySelector('.file-open-box');
+      const pre = box?.querySelector('pre.content');
+      const tabs = [...(box?.querySelectorAll('.file-tab') ?? [])].map(tab => [tab.textContent.trim(), tab.getAttribute('aria-selected')]);
+      const footPath = box?.querySelector('.file-open-foot .path-text')?.textContent?.trim() ?? null;
+      const showBtn = box?.querySelector('.file-open-foot .details-path-show');
+      const copyBtn = box?.querySelector('.file-open-foot [data-copy]');
+      return {
+        rowExpanded: row?.getAttribute('aria-expanded'),
+        hasDetailsTools: !!document.querySelector('.details-tools'),
+        pressed: document.querySelector('${reviewBtn}')?.getAttribute('aria-pressed'),
+        hasRepeatedName: !!box?.querySelector('.file-open-name'),
+        tabs,
+        startsWithLine1: (pre?.textContent ?? '').includes('Line 1: review check item 1.') && pre?.scrollTop === 0,
+        hasLine60: (pre?.textContent ?? '').includes('Line 60: review check item 60.'),
+        preservesRawValue: (pre?.textContent ?? '').includes('token=demo-raw-001.'),
+        scrollsInternally: !!(pre && pre.scrollHeight > pre.clientHeight),
+        footPath,
+        hasShowInFolder: showBtn?.textContent?.trim() === 'Show in folder',
+        copyValue: copyBtn?.getAttribute('data-copy') ?? null,
+        copyTitle: copyBtn?.title ?? null,
+        copyLabel: copyBtn?.getAttribute('aria-label') ?? null,
+      };
+    })()`);
+    same('Task 3 opens SKILL.md in 1 click from the closed row (2 from Overview), keeps row details closed, omits repeated name, lists SKILL.md first with sorted relative paths, preserves raw values, and shows real path + Show in folder + Copy path',
+      [task3Clicks, opened],
+      [2, {
+        rowExpanded: 'false',
+        hasDetailsTools: false,
+        pressed: 'true',
+        hasRepeatedName: false,
+        tabs: [
+          ['SKILL.md', 'true'],
+          ['assets/preview.bin', 'false'],
+          ['checklist.md', 'false'],
+          ['large.txt', 'false'],
+          ['references/style-guide.md', 'false'],
+          ['scripts/check-all.sh', 'false'],
+        ],
+        startsWithLine1: true,
+        hasLine60: true,
+        preservesRawValue: true,
+        scrollsInternally: true,
+        footPath: `${prefix}/.claude/skills/code-review/SKILL.md`,
+        hasShowInFolder: true,
+        copyValue: join(home, '.claude/skills/code-review/SKILL.md'),
+        copyTitle: 'Copy path',
+        copyLabel: 'Copy path',
+      }]);
+
+    await capture('panel-skill-md');
+
+    // Scrolling the box alone reaches line 60.
+    const reachedEnd = await a.run(`(() => {
+      const pre = document.querySelector('.file-open-box pre.content');
+      pre.scrollTop = pre.scrollHeight;
+      return pre.scrollTop > 0 && pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 2;
+    })()`);
+    same('scrolling the file box alone reaches line 60', reachedEnd, true);
+    await capture('panel-long-scrolled', async () => {
+      await a.run(`(() => { const pre = document.querySelector('.file-open-box pre.content'); if (pre) pre.scrollTop = pre.scrollHeight; })()`);
+    });
+
+    // Show in folder and Copy in the footer act on the active file's real path.
+    if (a.inspect) {
+      const main = await mainHelpers(a.inspect);
+      try {
+        await main.noteCalls('file:show');
+        await a.click('.file-open-foot .details-path-show');
+        await until(async () => (await main.calls()).length > 0);
+        same('Show in folder passes the active file’s real path', await main.calls(), [[join(home, '.claude/skills/code-review/SKILL.md')]]);
+      } finally {
+        await main.restore('file:show');
+        main.close();
+      }
+    } else if (process.platform === 'linux') {
+      const beforeOpened = readNow(fileManagerAsked);
+      await a.click('.file-open-foot .details-path-show');
+      await until(() => readNow(fileManagerAsked).length > beforeOpened.length);
+      check('Show in folder calls the file manager on Linux', readNow(fileManagerAsked).length > beforeOpened.length);
+    }
+
+    // 860 with sidebar open: nothing cut off, panel bottom inside window, footer inside box, tabs wrap without sideways scroll.
+    await fitsAtMinimum(a, 'skill file panel open on SKILL.md');
+    await sizeTo(a, ...SMALLEST);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    await a.settle();
+    const fit860 = await a.run(`(() => {
+      const box = document.querySelector('.file-open-box');
+      const foot = box?.querySelector('.file-open-foot');
+      const tabs = [...(box?.querySelectorAll('.file-tab') ?? [])];
+      const status = document.querySelector('#status')?.getBoundingClientRect();
+      const br = box?.getBoundingClientRect(), fr = foot?.getBoundingClientRect();
+      const tabRows = new Set(tabs.map(tab => Math.round(tab.getBoundingClientRect().top))).size;
+      const tabWrap = box?.querySelector('.file-open-tabs');
+      return {
+        boxInsideWindow: !!(br && status && br.top >= 0 && br.bottom <= status.top + 1),
+        footInsideBox: !!(br && fr && fr.bottom <= br.bottom + 1),
+        tabsWrapped: tabRows >= 2,
+        noHorizontalOverflow: !!(tabWrap && tabWrap.scrollWidth <= tabWrap.clientWidth + 1 && box.scrollWidth <= box.clientWidth + 1),
+      };
+    })()`);
+    same('at 860 with sidebar open, panel sits inside window, footer stays inside box, and tabs wrap cleanly', fit860, {
+      boxInsideWindow: true, footInsideBox: true, tabsWrapped: true, noHorizontalOverflow: true,
+    });
+    await a.click('#sidebar-toggle');
+    await fullSize(a);
+
+    // Second file, nested file, binary file, over-1-MB file.
+    const clickTab = async name => {
+      await a.run(`([...document.querySelectorAll('.file-open-box .file-tab')].find(tab => tab.textContent.trim() === ${JSON.stringify(name)}))?.click()`);
+      await a.settle();
+    };
+    await clickTab('checklist.md');
+    await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('# Review checklist'));
+    same('second file tab shows its text and updates footer path', [
+      (await a.text('.file-open-box pre.content') ?? '').includes('Check error handling'),
+      await a.run(`document.querySelector('.file-open-box pre.content')?.scrollTop === 0`),
+      (await a.text('.file-open-foot .path-text'))?.trim(),
+    ], [true, true, `${prefix}/.claude/skills/code-review/checklist.md`]);
+    await capture('panel-second-file');
+
+    await clickTab('scripts/check-all.sh');
+    await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('all checks passed'));
+    same('nested file tab shows its text and updates footer path', [
+      (await a.text('.file-open-box pre.content') ?? '').includes('#!/bin/sh'),
+      (await a.text('.file-open-foot .path-text'))?.trim(),
+    ], [true, `${prefix}/.claude/skills/code-review/scripts/check-all.sh`]);
+
+    await clickTab('assets/preview.bin');
+    await until(async () => (await a.text('.file-open-box .file-open-state'))?.trim() === 'Not a text file.');
+    same('binary file shows Not a text file., no pre block, and Copy path label', [
+      (await a.text('.file-open-box .file-open-state'))?.trim(),
+      await a.exists('.file-open-box pre.content'),
+      await a.run(`document.querySelector('.file-open-foot [data-copy]')?.getAttribute('aria-label')`),
+    ], ['Not a text file.', false, 'Copy path']);
+    await capture('panel-not-text');
+
+    await clickTab('large.txt');
+    await until(async () => /1 MB/.test((await a.text('.file-open-box .file-open-state')) ?? ''));
+    same('over-1-MB file says so and shows no pre block', [
+      (await a.text('.file-open-box .file-open-state'))?.trim(),
+      await a.exists('.file-open-box pre.content'),
+    ], ['Over 1 MB, so not shown here.', false]);
+
+    // External edit adopted by sync while panel is open: text reloads for the new version on the same tab, footer matches.
+    await clickTab('checklist.md');
+    await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Check error handling'));
+    const updatedChecklist = '# Review checklist\n\n- Check error handling.\n- Check edge cases.\n- Verify updated text reloads.\n';
+    writeFileSync(join(reviewDir, 'checklist.md'), updatedChecklist);
+    await a.click('#header-refresh');
+    await until(() => readNow(join(home, '.copilot/skills/code-review/checklist.md')).includes('Verify updated text reloads.'));
+    await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Verify updated text reloads.'), 30);
+    same('when an edit in a tool is adopted by sync, the open panel reloads the new text on the same tab with matching footer', [
+      await a.run(`document.querySelector('.file-open-box .file-tab[aria-selected="true"]')?.textContent?.trim() ?? null`),
+      (await a.text('.file-open-box pre.content') ?? '').includes('Verify updated text reloads.'),
+      (await a.text('.file-open-foot .path-text'))?.trim(),
+    ], ['checklist.md', true, `${prefix}/.claude/skills/code-review/checklist.md`]);
+    if (shots) {
+      await sizeTo(a, ...SMALLEST);
+      const wasRail = await a.run(`document.body.classList.contains('rail')`);
+      if (wasRail) await a.click('#sidebar-toggle');
+      await a.settle();
+      await a.run(`window.centralKnot.setAppearance('light')`);
+      await wait(80);
+      await a.shot('panel-updated-860-light');
+      await a.run(`window.centralKnot.setAppearance('system')`);
+      await wait(80);
+      if (wasRail) await a.click('#sidebar-toggle');
+      await fullSize(a);
+    }
+
+    // Deleting an open non-SKILL.md file in a tool: once adopted, the panel falls back cleanly to SKILL.md.
+    await clickTab('references/style-guide.md');
+    await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Keep lines clear.'));
+    rmSync(join(reviewDir, 'references/style-guide.md'));
+    await a.click('#header-refresh');
+    await until(() => !existsSync(join(home, '.copilot/skills/code-review/references/style-guide.md')));
+    await until(async () => (await a.run(`document.querySelector('.file-open-box .file-tab[aria-selected="true"]')?.textContent?.trim()`)) === 'SKILL.md', 30);
+    same('when the open tab’s file is deleted and adopted by sync, the panel falls back to SKILL.md and drops the deleted tab', [
+      await a.run(`document.querySelector('.file-open-box .file-tab[aria-selected="true"]')?.textContent?.trim() ?? null`),
+      (await a.all('.file-open-box .file-tab', 'e.textContent.trim()')).includes('references/style-guide.md'),
+      (await a.text('.file-open-box pre.content') ?? '').includes('Line 1: review check item 1.'),
+      (await a.text('.file-open-foot .path-text'))?.trim(),
+    ], ['SKILL.md', false, true, `${prefix}/.claude/skills/code-review/SKILL.md`]);
+
+    // One file panel open at a time, and Off skill shows Stored in Central Knot with no Show in folder or Copy.
+    await a.click(storedBtn);
+    await until(() => a.exists('.file-open-box pre.content'));
+    const storedOpen = await a.run(`(() => ({
+      panels: document.querySelectorAll('.file-open-box').length,
+      regionLabel: document.querySelector('.details-file-only')?.getAttribute('aria-label') ?? null,
+      footText: document.querySelector('.file-open-foot')?.textContent?.trim() ?? null,
+      hasShow: !!document.querySelector('.file-open-foot .details-path-show'),
+      hasCopy: !!document.querySelector('.file-open-foot [data-copy]'),
+      firstUnpressed: document.querySelector('${reviewBtn}')?.getAttribute('aria-pressed'),
+    }))()`);
+    same('only one file panel open at a time, and Off skill footer says Stored in Central Knot with no Show in folder or Copy', storedOpen, {
+      panels: 1, regionLabel: 'File for stored-only', footText: 'Stored in Central Knot', hasShow: false, hasCopy: false, firstUnpressed: 'false',
+    });
+
+    // Closing via the mark itself, via ✕, and via Escape (after Find's Escape).
+    await a.click(storedBtn);
+    same('clicking the mark again closes the file panel', [await a.exists('.file-open-box'), await a.run(`document.querySelector('${storedBtn}')?.getAttribute('aria-pressed')`)], [false, 'false']);
+
+    await a.click(reviewBtn);
+    await until(() => a.exists('.file-open-box'));
+    await a.click('.file-open-close');
+    same('clicking ✕ closes the file panel', await a.exists('.file-open-box'), false);
+
+    await a.click(reviewBtn);
+    await until(() => a.exists('.file-open-box'));
+    await a.run(`(() => { const f = document.querySelector('#find'); f.focus(); f.value = 'code'; f.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.settle();
+    await a.press('Escape');
+    same('Escape in Find clears Find first while leaving the file panel open', [await a.run(`document.querySelector('#find')?.value`), await a.exists('.file-open-box')], ['', true]);
+    await a.press('Escape');
+    same('a second Escape closes the file panel', await a.exists('.file-open-box'), false);
+
+    // Row click still opens details with Files and contents and Versions Read current untouched.
+    await a.click(`.ov-row[data-key="${rowPart('', 'skills', 'code-review')}"]`);
+    const detailsIntact = await a.run(`(() => ({
+      expanded: document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'code-review')}"]')?.getAttribute('aria-expanded'),
+      hasFilesAndContents: [...document.querySelectorAll('.details button, .dock button')].some(b => b.textContent.trim() === 'Files and contents'),
+      hasReadCurrent: [...document.querySelectorAll('.details button, .dock button')].some(b => /^Read/.test(b.textContent.trim())),
+      noFilePanel: !document.querySelector('.file-open-box'),
+    }))()`);
+    same('row click still opens details with Files and contents and Read untouched', detailsIntact, {
+      expanded: 'true', hasFilesAndContents: true, hasReadCurrent: true, noFilePanel: true,
+    });
+    await a.click(`.ov-row[data-key="${rowPart('', 'skills', 'code-review')}"]`);
+
+    // Task 7: Sort by Most used, then open the top skill's file in 1 click from the closed row.
+    await until(() => a.run(`/^Collected /.test(document.querySelector('#usage-when')?.textContent ?? '')`), 150);
+    await a.run(`(() => { const s = document.querySelector('#item-order'); s.value = 'most-used'; s.dispatchEvent(new Event('change')); })()`);
+    await a.settle();
+    const topKey = await a.run(`document.querySelector('.ov-row[data-key]')?.dataset.key ?? null`);
+    let task7Clicks = 0;
+    await a.click(`.ov-row[data-key="${topKey}"] .row-file-btn`); task7Clicks++;
+    await until(() => a.exists('.file-open-box pre.content'));
+    same('Task 7: under Sort by Most used, top closed skill opens its file in 1 click without opening row details', [
+      topKey, task7Clicks,
+      await a.run(`document.querySelector('.details-file-only')?.getAttribute('aria-label')`),
+      await a.run(`document.querySelector('.ov-row[data-key="${topKey}"]')?.getAttribute('aria-expanded')`),
+    ], [rowPart('', 'skills', 'code-review'), 1, 'File for code-review', 'false']);
+    await a.press('Escape');
+
+    // A tool's Skills tab (Harnesses -> Claude Code -> Skills) has the same one-click mark; Agents and MCP tabs have none.
+    await a.click('#nav-harnesses');
+    await a.click('button#harness-claude-cli.harness-card-head');
+    await a.click('#harness-tab-skills');
+    await a.click(reviewBtn);
+    await until(() => a.exists('.file-open-box pre.content'));
+    same('on Claude Code’s Skills tab, Open file opens in 1 click with Claude Code’s path and details closed', [
+      await a.run(`document.querySelector('.details-file-only')?.getAttribute('aria-label')`),
+      (await a.text('.file-open-foot .path-text'))?.trim(),
+      await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'code-review')}"]')?.getAttribute('aria-expanded')`),
+    ], ['File for code-review', `${prefix}/.claude/skills/code-review/SKILL.md`, 'false']);
+    await a.press('Escape');
+    same('Escape closes the panel on a tool’s Skills tab', await a.exists('.file-open-box'), false);
+    await a.click('#harness-tab-agents');
+    same('a tool’s Agents tab has no Open file mark yet', await a.exists('.row-file-btn'), false);
+    await a.click('#harness-tab-mcp');
+    same('a tool’s MCP servers tab has no Open file mark yet', await a.exists('.row-file-btn'), false);
+  }
+
+  same('no page errors', a.pageErrors, []);
+  await a.quit();
+}
+
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, selectFlow, sessionStripFlow, hookRunFlow, fromFlow, claudeWholeFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow, sessionsFlow, keepSessionCostsFlow, sessionsWeekFlow],
   [fewToolsFlow, openCodeFlow, antigravityFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, pluginRecordHoldsFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow, clickReadsFlow],
-  [backFlow, backPlaceFlow, libraryLinesFlow, harnessFlow, manageFlow, arrivalFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, mcpSigninFlow, firstSetupFlow, crashFlow],
+  [backFlow, backPlaceFlow, libraryLinesFlow, harnessFlow, manageFlow, arrivalFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, mcpSigninFlow, firstSetupFlow, skillFileFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.
 const runs = flow => flow !== crashFlow || (canWriteRealHome && crashRounds > 0);
