@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { capitalToolsPhrase, fewNames, pageNames, profileLeftUse, toolsPhrase } from '../src/words.ts';
+import { capitalToolsPhrase, coworkWords, fewNames, pageNames, profileLeftUse, toolsPhrase } from '../src/words.ts';
 
 test('A page named otherwise on screen is spelled once, in words.ts pageNames: every other sentence, link and button reads it from there', () => {
   const src = new URL('../src/', import.meta.url);
@@ -36,4 +36,8 @@ test('a profile leaving use: singular and plural', () => {
   assert.equal(profileLeftUse(['Everyday']), 'Everyday stopped being the profile in use.');
   assert.equal(profileLeftUse(['Everyday', 'Focus']), 'Everyday and Focus stopped being the profiles in use.');
   assert.equal(profileLeftUse(['Everyday', 'Focus', 'Incident']), 'Everyday, Focus and Incident stopped being the profiles in use.');
+});
+
+test('Cowork plugin note names the Claude desktop route concisely', () => {
+  assert.equal(coworkWords.plugin, 'Cowork: add plugins in Claude desktop, under Customize › Plugins.');
 });

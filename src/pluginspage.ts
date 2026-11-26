@@ -2,7 +2,7 @@
 // or off with its one switch (pluginrecord.ts).
 // The list of marketplaces sits at the left; the chosen one shows its plugins or its README, and a plugin opens its own page
 // (pluginpage.ts). A switch's click waits its turn in the page's list (pluginstate.ts turnPlugin), its row saying how it stands;
-// Update, Update all and the switches under a plugin's What it holds act at once (pluginstate.ts applyPluginOps). Each tool's
+// Update, Update all and the switches under a plugin's Skills act at once (pluginstate.ts applyPluginOps). Each tool's
 // mark only says what it has.
 import { acting, noteMove, noToolManaged, rerender, showPage, state as app } from './app.ts';
 import { noToolsState } from './pages.ts';

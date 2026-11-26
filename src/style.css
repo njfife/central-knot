@@ -1463,6 +1463,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 /* A tool's box on a plugin's page that can't act now keeps its outline, faded: its tooltip says why. */
 .cell-button.cell-box:disabled { border-color: var(--cell-line); opacity: .6; }
 .plugin-panel-switch { display: inline-flex; align-items: center; gap: 10px; }
+.plugin-head-label { display: inline-flex; align-items: center; gap: 4px; }
 .toolbar-result-more { color: var(--ink-soft); }
 .plugin-row-name { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; padding: 8px 12px 8px 0; text-align: left; }
 .plugin-row-name > span { max-width: 100%; }
@@ -1525,9 +1526,9 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .plugin-tool-rows { --tool-min: 170px; --tool-gap: 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 40px; }
 /* With room for them (pluginpage.ts settlePluginTools, which reads --tool-min and --tool-gap): a column per tool, sharing the box's width as the sections below share the page's. */
 .plugin-tool-rows[data-layout="columns"] { display: grid; grid-template-columns: repeat(var(--tool-count, 3), minmax(var(--tool-min), 1fr)); justify-items: start; align-items: start; column-gap: var(--tool-gap); }
-/* What it holds and how each tool takes it sit beside the README from about 1100px of page; below that, one above the other. */
+/* The plugin's parts and In each tool sit beside the README from about 1100px of page; below that, one above the other. */
 .plugin-columns { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 48px; }
-/* What it holds gets the larger share: its rows carry a description and a switch per tool, the README only prose. */
+/* The plugin's parts get the larger share: their rows carry a description and a switch per tool, the README only prose. */
 @container plugin (width >= 1100px) { .plugin-columns:has(> .plugin-readme) { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); } }
 .plugin-tool { display: flex; align-items: flex-start; gap: 10px; min-width: var(--tool-min); }
 .plugin-tool-text { display: flex; flex-direction: column; gap: 1px; }
@@ -1536,7 +1537,13 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 /* A name of his under a tool's box (pluginpage.ts yourLines): its sentence, then Use the plugin's under it, at its start. */
 .plugin-tool-yours { align-items: flex-start; gap: 4px; }
 .plugin-section { margin: 22px 0 0; }
+.plugin-section > .plugin-group:first-child { margin-top: 0; }
 .plugin-section .plugin-outcome-list { margin-top: 8px; }
+.plugin-fold > summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; padding: 2px 6px; margin-left: -6px; border-radius: 6px; cursor: pointer; }
+.plugin-fold > summary::-webkit-details-marker { display: none; }
+.plugin-fold > summary:hover { background: var(--hover); }
+.plugin-fold > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.plugin-fold[open] > summary > .plugin-fold-chevron { transform: rotate(90deg); }
 .plugin-outcome-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 .plugin-outcome-row { display: grid; grid-template-columns: minmax(200px, auto) minmax(0, 1fr); gap: 4px 16px; align-items: baseline; padding: 8px 12px; }
 .plugin-outcome-row + .plugin-outcome-row { border-top: 1px solid var(--line); }
@@ -1553,7 +1560,9 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .plugin-outcome-tools { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
 .plugin-group { margin: 10px 0 0; }
 .plugin-group h4 { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--ink-soft); }
-/* A line under a group's heading in What it holds: what is true of the whole group. */
+.plugin-group-head { display: flex; align-items: center; gap: 4px; margin: 0 0 4px; }
+.plugin-group-head h4 { margin: 0; }
+/* A line under a group's heading: what is true of the whole group. */
 .plugin-group-note { margin: 0 0 6px; font-size: 12px; color: var(--ink-soft); max-width: 76ch; }
 .plugin-parts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .plugin-parts li { display: grid; grid-template-columns: minmax(120px, max-content) minmax(0, 1fr); column-gap: 12px; font-size: 12.5px; }
@@ -1592,7 +1601,6 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 /* One that can't change here: full strength, a lock beside it, and its reason on the row or above the list. */
 .skill-switch-stuck .switch { cursor: not-allowed; }
 .skill-switch-lock { position: absolute; right: 13px; color: var(--ink-soft); }
-.plugin-group-note .brand-mark { display: inline-block; vertical-align: -2px; margin-right: 6px; }
 .plugin-group-note code, .plugin-part-note code { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; }
 .plugin-part-note { font-size: 12px; color: var(--ink-soft); }
 /* A skill, command, agent or instruction file: the whole row opens its file, shown as the Library's Files view shows a skill's SKILL.md */
@@ -1626,7 +1634,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .plugin-click.failed { color: var(--warning); }
 .plugin-panel > .plugin-click { margin: -4px 0 10px; font-size: 12px; }
 .plugin-muted { margin: 6px 0 0; font-size: 12.5px; color: var(--ink-soft); }
-.plugin-readme h3 { margin-bottom: 8px; }
+.plugin-readme .plugin-readme-body { margin-top: 8px; }
 /* Narrow content: the marketplaces become a strip above the page they open. */
 @container content (width < 880px) {
   .market-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
@@ -1752,7 +1760,6 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .plugin-panel-hint { margin: -4px 0 10px; font-size: 12px; color: var(--ink-soft); }
 .plugin-panel-note { max-width: var(--measure); margin: 10px 0 0; font-size: 12px; color: var(--ink-soft); }
 .plugin-section-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 28px; }
-.plugin-parts-about { margin: 6px 0 10px; max-width: var(--measure); font-size: 13px; line-height: 20px; color: var(--ink-soft); }
 .plugin-outcome-what code { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
 .plugin-part-link .plugin-name { color: var(--accent); }
 .plugin-part-link:hover .plugin-name { text-decoration: underline; }
