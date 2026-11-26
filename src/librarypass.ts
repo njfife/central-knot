@@ -985,10 +985,10 @@ interface Told { events: HistoryEvent[]; named: Map<HistoryEvent | ItemNotice, H
 
 /**
  * Takes each harness whose write or removal was held (carryOut's answer) out of what History was told first for this item:
- * out of each entry and notice that names it as written or removed, out of `alsoRead` when its write was held, and out of an
- * Undo's copies given back (`gaveBack`). An `in-line` entry left naming no harness told nothing that happened, and goes. The
- * rest stays as told: the edits kept, the copies that gave way, and the copies a click took over (`tookFrom`: its Undo gives
- * each back once the write has landed).
+ * out of each entry and notice that names it as written or removed, dropping `alsoRead` when the write into the tool that
+ * was turned on was held, and out of an Undo's copies given back (`gaveBack`). An `in-line` entry left naming no harness
+ * told nothing that happened, and goes. The rest stays as told: the edits kept, the copies that gave way, and the copies a
+ * click took over (`tookFrom`: its Undo gives each back once the write has landed).
  */
 async function untell(pass: Pass, told: Told, held: HarnessId[]) {
   const before = JSON.stringify(told.events);
@@ -1109,7 +1109,10 @@ async function click(pass: Pass, asked: Change) {
   else turn(pass, item, asked);
 }
 
-/** The switches: the item On or Off (recording changed keep-outs for a person's switch), or one harness kept out or let in. */
+/**
+ * The switches: the item On or Off (recording changed keep-outs for a person's switch), or one harness kept out or let in.
+ * Records `alsoRead` when a person's switch turns the item on in one managed harness alone and `disk.readers` names readers for it.
+ */
 function turn(pass: Pass, item: LibraryItem, asked: Change) {
   const was = { on: item.on, except: item.except };
   Object.assign(item, { on: asked.on, except: [...asked.except] } satisfies Partial<LibraryItem>);
