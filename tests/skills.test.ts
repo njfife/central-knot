@@ -15,7 +15,7 @@ import { readHistory } from '../src/history.ts';
 import { libraryEntry, librarySentence } from '../src/historyactions.ts';
 import { addLabel, canAdd, harnessIs, isPartial, libraryWords, ownCopies, placeOf, rowClicks, sentences, statusLine, switchLabel } from '../src/libraryrow.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
-import { applySkills, clearSwitch, readDisk, skillChange, skillsView, skillVersionFile, takeOver } from '../src/skills.ts';
+import { applySkills, clearSwitch, readDisk, skillChange, skillsView, skillVersion, skillVersionFile, takeOver } from '../src/skills.ts';
 import { serversView } from '../src/servers.ts';
 import { agentsView } from '../src/agents.ts';
 import { homePass } from '../src/homepass.ts';
@@ -1544,9 +1544,16 @@ test('skillVersionFile reads regular files in a stored skill version, lists SKIL
     await turnOn(box);
     const hash = (await itemOf(box))!.hash;
     const stored = join(box.home, '.central-knot/items/skills/notes/versions', hash);
-    // Plant a symlink and a special file (FIFO) inside the stored version folder, plus an outside file beside it.
-    await writeFile(join(box.home, '.central-knot/items/skills/notes/versions/outside.txt'), 'secret\n');
+    // Plant symlinks (inward, outward, and at a version folder), an outside file, and a file in the skill folder above versions/.
+    const outside = join(box.home, '.central-knot/items/skills/notes/versions/outside.txt');
+    const escaped = join(box.home, '.central-knot/items/skills/notes/escape.txt');
+    const fakeHex = '0'.repeat(64);
+    await writeFile(outside, 'secret\n');
+    await writeFile(escaped, 'above-versions\n');
+    await writeFile(join(box.home, '.central-knot/items/skills/notes/SKILL.md'), 'above-versions-skill\n');
     await symlink('SKILL.md', join(stored, 'alias.md'));
+    await symlink(outside, join(stored, 'out-link.md'));
+    await symlink(stored, join(box.home, '.central-knot/items/skills/notes/versions', fakeHex));
 
     const expectedFiles = ['SKILL.md', 'asset.bin', 'checklist.md', 'exact.txt', 'over.txt', 'scripts/run.sh'];
     assert.deepEqual(await skillVersionFile(box.context, 'notes', hash, 'SKILL.md'), { files: expectedFiles, text: skillBody });
@@ -1556,12 +1563,16 @@ test('skillVersionFile reads regular files in a stored skill version, lists SKIL
     assert.deepEqual(await skillVersionFile(box.context, 'notes', hash, 'exact.txt'), { files: expectedFiles, text: exactLimit });
     assert.deepEqual(await skillVersionFile(box.context, 'notes', hash, 'over.txt'), { files: expectedFiles, note: 'Over 1 MB, so not shown here.' });
 
-    // Refused: paths outside the folder, non-canonical paths, missing names/hashes, and symlinks (also absent from files).
-    for (const bad of ['../outside.txt', '/etc/passwd', './SKILL.md', 'scripts/../SKILL.md', 'missing.md', '', 'alias.md']) {
+    // Refused: paths outside the folder, non-canonical paths, case mismatches, directories, missing names, and inward/outward symlinks.
+    for (const bad of ['../outside.txt', '/etc/passwd', './SKILL.md', 'scripts/../SKILL.md', 'skill.md', 'CHECKLIST.MD', 'scripts', 'missing.md', '', 'alias.md', 'out-link.md']) {
       assert.equal(await skillVersionFile(box.context, 'notes', hash, bad), undefined, `refuses ${JSON.stringify(bad)}`);
     }
     assert.equal(await skillVersionFile(box.context, 'missing-skill', hash, 'SKILL.md'), undefined);
-    assert.equal(await skillVersionFile(box.context, 'notes', 'deadbeef', 'SKILL.md'), undefined);
+    // Refused: version ids not in the store's 64-char lowercase hex form (.., path traversal, wrong case/length) or symlinked version folders.
+    for (const badHash of ['..', `../versions/${hash}`, hash.toUpperCase(), hash.slice(0, 63), 'deadbeef', fakeHex]) {
+      assert.equal(await skillVersionFile(box.context, 'notes', badHash, badHash === '..' ? 'escape.txt' : 'SKILL.md'), undefined, `skillVersionFile refuses hash ${JSON.stringify(badHash)}`);
+      assert.equal(await skillVersion(box.context, 'notes', badHash), undefined, `skillVersion refuses hash ${JSON.stringify(badHash)}`);
+    }
 
     await t.test('refuses a special file (FIFO) without hanging and omits it from files', { skip: posixModeSkip }, async () => {
       const fifo = join(stored, 'pipe');

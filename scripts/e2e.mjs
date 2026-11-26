@@ -5655,6 +5655,20 @@ async function dockedListFlow() {
     await a.settle();
     for (const content of widths) await fits(`the Library by ${label}`, content, 4);
   }
+  // A 30-letter skill name with the Open file mark beside it stays whole, its mark visible on the row's single line, and row height 40.
+  await a.run(`(() => { const sort = document.querySelector('#item-order'); sort.value = 'updated'; sort.dispatchEvent(new Event('change')); })()`);
+  await a.settle();
+  for (const content of [1200, 1260, 1520]) {
+    const [width, height, sidebar] = { 1200: [1256, 787, false], 1260: [1316, 787, false], 1520: [1728, 980, true] }[content];
+    await sizeTo(a, width, height); await sidebarOpen(sidebar);
+    const longMark = await a.run(`(() => {
+      const row = document.querySelector('.dock-main .ov-row[data-key="${rowPart('', 'skills', 'finishing-a-development-branch')}"]');
+      const cell = row?.querySelector('.ov-name'), text = row?.querySelector('.ov-name-text'), btn = row?.querySelector('.row-file-btn');
+      const rr = row?.getBoundingClientRect(), cr = cell?.getBoundingClientRect(), br = btn?.getBoundingClientRect();
+      return { nameWhole: !!(text && text.scrollWidth <= text.clientWidth), markVisible: !!(br && cr && br.width >= 20 && br.right <= cr.right + 1 && br.bottom <= cr.bottom + 1), rowHeight: Math.round(rr?.height ?? 0) };
+    })()`);
+    same(`at ${content} px docked by Last updated, finishing-a-development-branch keeps its name whole with the Open file mark visible on its 40px row`, longMark, { nameWhole: true, markVisible: true, rowHeight: 40 });
+  }
   for (const selector of ['#nav-harnesses', '#harness-claude-cli', '#harness-tab-skills', `#${rowPart('open', 'skills', 'research')}`]) await a.click(selector);
   await fits('Claude Code’s Skills tab', 1260, 0);
   // Across the dock's breakpoint (the sidebar opened at 1316: 1108 px of content), the opened row stays open where it was in its table.
@@ -18486,7 +18500,7 @@ async function skillFileFlow() {
         rowExpanded: row?.getAttribute('aria-expanded'),
         hasDetailsTools: !!document.querySelector('.details-tools'),
         pressed: document.querySelector('${reviewBtn}')?.getAttribute('aria-pressed'),
-        heading: box?.querySelector('.file-open-name')?.textContent?.trim() ?? null,
+        hasRepeatedName: !!box?.querySelector('.file-open-name'),
         tabs,
         startsWithLine1: (pre?.textContent ?? '').includes('Line 1: review check item 1.') && pre?.scrollTop === 0,
         hasLine60: (pre?.textContent ?? '').includes('Line 60: review check item 60.'),
@@ -18495,15 +18509,17 @@ async function skillFileFlow() {
         footPath,
         hasShowInFolder: showBtn?.textContent?.trim() === 'Show in folder',
         copyValue: copyBtn?.getAttribute('data-copy') ?? null,
+        copyTitle: copyBtn?.title ?? null,
+        copyLabel: copyBtn?.getAttribute('aria-label') ?? null,
       };
     })()`);
-    same('Task 3 opens SKILL.md in 1 click from the closed row (2 from Overview), keeps row details closed, lists SKILL.md first with sorted relative paths, preserves raw values, and shows real path + Show in folder + Copy',
+    same('Task 3 opens SKILL.md in 1 click from the closed row (2 from Overview), keeps row details closed, omits repeated name, lists SKILL.md first with sorted relative paths, preserves raw values, and shows real path + Show in folder + Copy path',
       [task3Clicks, opened],
       [2, {
         rowExpanded: 'false',
         hasDetailsTools: false,
         pressed: 'true',
-        heading: 'code-review',
+        hasRepeatedName: false,
         tabs: [
           ['SKILL.md', 'true'],
           ['assets/preview.bin', 'false'],
@@ -18519,6 +18535,8 @@ async function skillFileFlow() {
         footPath: `${prefix}/.claude/skills/code-review/SKILL.md`,
         hasShowInFolder: true,
         copyValue: join(home, '.claude/skills/code-review/SKILL.md'),
+        copyTitle: 'Copy path',
+        copyLabel: 'Copy path',
       }]);
 
     await capture('panel-skill-md');
@@ -18602,10 +18620,11 @@ async function skillFileFlow() {
 
     await clickTab('assets/preview.bin');
     await until(async () => (await a.text('.file-open-box .file-open-state'))?.trim() === 'Not a text file.');
-    same('binary file shows Not a text file. and no pre block', [
+    same('binary file shows Not a text file., no pre block, and Copy path label', [
       (await a.text('.file-open-box .file-open-state'))?.trim(),
       await a.exists('.file-open-box pre.content'),
-    ], ['Not a text file.', false]);
+      await a.run(`document.querySelector('.file-open-foot [data-copy]')?.getAttribute('aria-label')`),
+    ], ['Not a text file.', false, 'Copy path']);
     await capture('panel-not-text');
 
     await clickTab('large.txt');
@@ -18615,19 +18634,60 @@ async function skillFileFlow() {
       await a.exists('.file-open-box pre.content'),
     ], ['Over 1 MB, so not shown here.', false]);
 
+    // External edit adopted by sync while panel is open: text reloads for the new version on the same tab, footer matches.
+    await clickTab('checklist.md');
+    await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Check error handling'));
+    const updatedChecklist = '# Review checklist\n\n- Check error handling.\n- Check edge cases.\n- Verify updated text reloads.\n';
+    writeFileSync(join(reviewDir, 'checklist.md'), updatedChecklist);
+    await a.click('#header-refresh');
+    await until(() => readNow(join(home, '.copilot/skills/code-review/checklist.md')).includes('Verify updated text reloads.'));
+    await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Verify updated text reloads.'), 30);
+    same('when an edit in a tool is adopted by sync, the open panel reloads the new text on the same tab with matching footer', [
+      await a.run(`document.querySelector('.file-open-box .file-tab[aria-selected="true"]')?.textContent?.trim() ?? null`),
+      (await a.text('.file-open-box pre.content') ?? '').includes('Verify updated text reloads.'),
+      (await a.text('.file-open-foot .path-text'))?.trim(),
+    ], ['checklist.md', true, `${prefix}/.claude/skills/code-review/checklist.md`]);
+    if (shots) {
+      await sizeTo(a, ...SMALLEST);
+      const wasRail = await a.run(`document.body.classList.contains('rail')`);
+      if (wasRail) await a.click('#sidebar-toggle');
+      await a.settle();
+      await a.run(`window.centralKnot.setAppearance('light')`);
+      await wait(80);
+      await a.shot('panel-updated-860-light');
+      await a.run(`window.centralKnot.setAppearance('system')`);
+      await wait(80);
+      if (wasRail) await a.click('#sidebar-toggle');
+      await fullSize(a);
+    }
+
+    // Deleting an open non-SKILL.md file in a tool: once adopted, the panel falls back cleanly to SKILL.md.
+    await clickTab('references/style-guide.md');
+    await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Keep lines clear.'));
+    rmSync(join(reviewDir, 'references/style-guide.md'));
+    await a.click('#header-refresh');
+    await until(() => !existsSync(join(home, '.copilot/skills/code-review/references/style-guide.md')));
+    await until(async () => (await a.run(`document.querySelector('.file-open-box .file-tab[aria-selected="true"]')?.textContent?.trim()`)) === 'SKILL.md', 30);
+    same('when the open tab’s file is deleted and adopted by sync, the panel falls back to SKILL.md and drops the deleted tab', [
+      await a.run(`document.querySelector('.file-open-box .file-tab[aria-selected="true"]')?.textContent?.trim() ?? null`),
+      (await a.all('.file-open-box .file-tab', 'e.textContent.trim()')).includes('references/style-guide.md'),
+      (await a.text('.file-open-box pre.content') ?? '').includes('Line 1: review check item 1.'),
+      (await a.text('.file-open-foot .path-text'))?.trim(),
+    ], ['SKILL.md', false, true, `${prefix}/.claude/skills/code-review/SKILL.md`]);
+
     // One file panel open at a time, and Off skill shows Stored in Central Knot with no Show in folder or Copy.
     await a.click(storedBtn);
     await until(() => a.exists('.file-open-box pre.content'));
     const storedOpen = await a.run(`(() => ({
       panels: document.querySelectorAll('.file-open-box').length,
-      heading: document.querySelector('.file-open-name')?.textContent?.trim() ?? null,
+      regionLabel: document.querySelector('.details-file-only')?.getAttribute('aria-label') ?? null,
       footText: document.querySelector('.file-open-foot')?.textContent?.trim() ?? null,
       hasShow: !!document.querySelector('.file-open-foot .details-path-show'),
       hasCopy: !!document.querySelector('.file-open-foot [data-copy]'),
       firstUnpressed: document.querySelector('${reviewBtn}')?.getAttribute('aria-pressed'),
     }))()`);
     same('only one file panel open at a time, and Off skill footer says Stored in Central Knot with no Show in folder or Copy', storedOpen, {
-      panels: 1, heading: 'stored-only', footText: 'Stored in Central Knot', hasShow: false, hasCopy: false, firstUnpressed: 'false',
+      panels: 1, regionLabel: 'File for stored-only', footText: 'Stored in Central Knot', hasShow: false, hasCopy: false, firstUnpressed: 'false',
     });
 
     // Closing via the mark itself, via ✕, and via Escape (after Find's Escape).
@@ -18671,9 +18731,9 @@ async function skillFileFlow() {
     await until(() => a.exists('.file-open-box pre.content'));
     same('Task 7: under Sort by Most used, top closed skill opens its file in 1 click without opening row details', [
       topKey, task7Clicks,
-      (await a.text('.file-open-name'))?.trim(),
+      await a.run(`document.querySelector('.details-file-only')?.getAttribute('aria-label')`),
       await a.run(`document.querySelector('.ov-row[data-key="${topKey}"]')?.getAttribute('aria-expanded')`),
-    ], [rowPart('', 'skills', 'code-review'), 1, 'code-review', 'false']);
+    ], [rowPart('', 'skills', 'code-review'), 1, 'File for code-review', 'false']);
     await a.press('Escape');
 
     // A tool's Skills tab (Harnesses -> Claude Code -> Skills) has the same one-click mark; Agents and MCP tabs have none.
@@ -18683,10 +18743,10 @@ async function skillFileFlow() {
     await a.click(reviewBtn);
     await until(() => a.exists('.file-open-box pre.content'));
     same('on Claude Code’s Skills tab, Open file opens in 1 click with Claude Code’s path and details closed', [
-      (await a.text('.file-open-name'))?.trim(),
+      await a.run(`document.querySelector('.details-file-only')?.getAttribute('aria-label')`),
       (await a.text('.file-open-foot .path-text'))?.trim(),
       await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'code-review')}"]')?.getAttribute('aria-expanded')`),
-    ], ['code-review', `${prefix}/.claude/skills/code-review/SKILL.md`, 'false']);
+    ], ['File for code-review', `${prefix}/.claude/skills/code-review/SKILL.md`, 'false']);
     await a.press('Escape');
     same('Escape closes the panel on a tool’s Skills tab', await a.exists('.file-open-box'), false);
     await a.click('#harness-tab-agents');

@@ -590,19 +590,23 @@ export async function skillVersion(context: ShareContext, key: string, hash: str
   return { skill: await readFile(join(version.directory, 'SKILL.md'), 'utf8').catch(() => ''), files: [...tree.files.keys()].filter(name => name !== 'SKILL.md').sort() };
 }
 const FILE_LIMIT = 1024 * 1024;
+type SkillFileRead = { files: string[]; text?: string; note?: string };
 /** One regular file of a stored skill version, listed by readTree; refuses links, specials, paths outside the folder, binary and >1 MB. */
-export async function skillVersionFile(context: ShareContext, key: string, hash: string, file: string): Promise<{ files: string[]; text?: string; note?: string } | undefined> {
+export async function skillVersionFile(context: ShareContext, key: string, hash: string, file: string): Promise<SkillFileRead | undefined> {
   const version = await readVersion(context, key, hash);
   if (!version) return undefined;
   const tree = await readTree(version.directory);
-  const files = [...tree.files].filter(([, entry]) => entry.sha256 !== 'link' && entry.sha256 !== 'special').map(([name]) => name).sort((a, b) => (a === 'SKILL.md' ? -1 : b === 'SKILL.md' ? 1 : a < b ? -1 : a > b ? 1 : 0));
+  const regular = [...tree.files].filter(([, entry]) => entry.sha256 !== 'link' && entry.sha256 !== 'special').map(([name]) => name);
+  const files = regular.sort((a, b) => (a === 'SKILL.md' ? -1 : b === 'SKILL.md' ? 1 : a < b ? -1 : a > b ? 1 : 0));
   if (!files.includes(file)) return undefined;
   const path = join(version.directory, file);
   const info = await lstat(path).catch(() => undefined);
   if (!info?.isFile()) return undefined;
   if (info.size > FILE_LIMIT) return { files, note: 'Over 1 MB, so not shown here.' };
   const bytes = await readFile(path).catch(() => undefined);
-  return !bytes ? undefined : bytes.includes(0) ? { files, note: 'Not a text file.' } : { files, text: bytes.toString('utf8') };
+  if (!bytes) return undefined;
+  if (bytes.includes(0)) return { files, note: 'Not a text file.' };
+  return { files, text: bytes.toString('utf8') };
 }
 
 /**
