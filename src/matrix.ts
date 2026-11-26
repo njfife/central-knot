@@ -272,8 +272,12 @@ function pluginRowEl(t: Table, row: PluginRow) {
 function pluginSection(t: Table, list: PluginRow[]) {
   if (!list.length) return null;
   return h('div', { role: 'rowgroup' },
-    h('div.ov-section.ov-section-plugins', { role: 'row' }, h('div.ov-section-label', { role: 'cell' }, headingTick(t, 'plugins', 'Only through a plugin', list), h('strong', {}, 'Only through a plugin'), h('span.ov-section-count', {}, String(list.length)),
-      sectionNote(true, 'installed with their plugin · switched here like any other'))),
+    h('div.ov-section.ov-section-plugins', { role: 'row', 'data-info-block': true },
+      h('div.ov-section-label', { role: 'cell' },
+        headingTick(t, 'plugins', 'Only through a plugin', list),
+        h('strong', {}, 'Only through a plugin'),
+        h('span.ov-section-count', {}, String(list.length)),
+        infoMark('section-plugins-info', 'Only through a plugin', PLUGIN_HEADING_CARD))),
     list.flatMap(row => pluginRowEl(t, row)));
 }
 
@@ -2671,53 +2675,70 @@ function whenCell(skill: ItemRow) {
   return h('div.ov-when', { role: 'cell', title: `Last updated ${dayAndTime(new Date(at).toISOString())}` }, sinceThen(at));
 }
 
+const PLUGIN_HEADING_CARD = 'Installed with their plugin, not copied. Open a row for the controls each tool has.';
+const OFF_HEADING_CARD = 'Kept in Central Knot, switched off. Where a tool still has it, its row says so.';
+
 /**
  * Rows under one heading: On, Found, Off, or (on a harness's page) the ones only other tools have. `rows`: the rows drawn under
- * it, in their order (drawTable); `truly`: the rows whose own heading it is, which its count counts. They differ once a row's own switch is clicked: the row
- * stays under the heading it was under (itemrow.ts Pinned), and its switch and its line say its state, so "On 11" may head 12
- * rows, one drawn Off. The note speaks for every row under it, so it shows only while each is truly its own: no "no tool
- * has these" over a row just turned On, no "Add one" over one just added. While rows are pinned under it, its room stays
- * (hidden), so no row below moves.
+ * it, in their order (drawTable); `truly`: the rows whose own heading it is, whose picked rows its count counts. They differ once
+ * a row's own switch is clicked: the row stays under the heading it was under (itemrow.ts Pinned), and its switch and its line say
+ * its state, so "On 11" may head 12 rows, one drawn Off. Standing words sit behind `infoMark`; the live note speaks only while every
+ * drawn row is truly a matching row of this heading (otherwise its room stays hidden so no row below moves).
  */
 function section(t: Table, role: Role, rows: ItemRow[], truly: ItemRow[]) {
   if (!rows.length) return null;
   const label = role === 'away' ? `Not in ${names[t.tool!]}` : placeNames[role === 'on' ? 0 : role === 'found' ? 1 : 2];
-  const own = rows.every(skill => truly.includes(skill)), about = own ? truly : rows;
-  const note = role === 'found' ? foundNote(about) : role === 'off' ? offNote(t, about) : role === 'away' ? 'only other tools have these' : null;
+  const matching = truly.filter(row => picked(t, row));
+  const own = rows.every(skill => matching.includes(skill));
+  const about = own ? matching : rows;
+  const card = role === 'found' ? foundCard() : role === 'off' ? OFF_HEADING_CARD : '';
+  const mark = card ? infoMark(`section-${role}-info`, label, card) : null;
+  const note = role === 'found' ? foundNote(about) : role === 'off' ? offNote(t, about) : '';
   return h('div', { role: 'rowgroup' },
-    h(`div.ov-section${role === 'off' || role === 'away' ? '.ov-section-away' : ''}`, { role: 'row', 'data-section': role },
+    h(`div.ov-section${role === 'off' || role === 'away' ? '.ov-section-away' : ''}`,
+      { role: 'row', 'data-section': role, ...(mark ? { 'data-info-block': true } : {}) },
       // Counts are of the rows that match (Find, From and the chip), as the kind switch's are: a pin keeps a row's place, not a count.
-      h('div.ov-section-label', { role: 'cell' }, headingTick(t, role, label, rows), h('strong', {}, label), h('span.ov-section-count', {}, String(truly.filter(row => picked(t, row)).length)), note ? sectionNote(own, note) : null)),
+      h('div.ov-section-label', { role: 'cell' },
+        headingTick(t, role, label, rows),
+        h('strong', {}, label),
+        h('span.ov-section-count', {}, String(matching.length)),
+        mark,
+        note ? sectionNote(own, note) : null)),
     rows.flatMap(skill => row(t, skill)));
 }
 
-/**
- * The Found heading's note: which rule is in force. Off, Add takes each in, and Settings holds the rule that takes them all.
- * On, Synchronize everything has left these (the opened row says why), and how many wait for a choice of copy (the take-in table's answer for the rule: libraryrow.ts ruleSays).
- */
-function foundNote(list: ItemRow[]) {
-  if (!state.home?.sync.syncEverything) return 'in a tool, not in Central Knot yet. Add one to keep it in Central Knot and turn it on. Synchronize everything, in Settings, adds every one it can by itself.';
+/** The card behind the Found heading's mark: what Add does, or what Synchronize everything skips. */
+function foundCard(): string {
+  if (state.home?.sync.syncEverything) {
+    return 'Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.';
+  }
+  return 'In a tool, not yet in Central Knot. Add turns an item on in managed tools.';
+}
+
+/** The Found heading's live line while Synchronize everything is on: how many rows wait for a choice of copy, or empty. */
+function foundNote(list: ItemRow[]): string {
+  if (!state.home?.sync.syncEverything) return '';
   const choosing = list.filter(skill => skill.takeInAnswers && 'wait' in skill.takeInAnswers.rule).length;
-  return `in a tool, not in Central Knot: Synchronize everything leaves these (open a row to see why)${choosing ? `. ${choosing} ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy` : ''}`;
+  return choosing ? `${choosing} ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy` : '';
 }
 
 /**
- * The Off heading's note: no tool has these, or the tools that still have some on through a plugin, or how many are still in a
- * tool until sync runs, whose removal there was held (Claude Code's lock, a file that couldn't be written), or how many a tool
- * has a copy of its own of, which Central Knot left alone (libraryrow.ts ownCopies, as each row's mark and tag say).
+ * The Off heading's live line, in order: tools that still have some on through a plugin; removals waiting until sync runs;
+ * copies Central Knot didn't place; or other-reader/switched-off copies (whole sentence for one row, short summary for several).
  */
-function offNote(t: Table, list: ItemRow[]) {
+function offNote(t: Table, list: ItemRow[]): string {
   const through = columns(t).filter(tool => list.some(skill => skill.pluginOn?.includes(tool)));
-  if (through.length) return `in Central Knot; some on in ${andList(through.map(tool => names[tool]))} through a plugin`;
-  const owed = list.filter(skill => skill.plan?.remove.length), still = [...new Set(owed.flatMap(skill => skill.plan!.remove))];
-  if (owed.length) return `in Central Knot; ${owed.length} still in ${andList(still.map(tool => names[tool]))} until sync runs`;
-  const ownIn = (skill: ItemRow) => ownCopies(skill, itemOf(skill), toolsFor(t, skill.kind));
-  const own = list.filter(skill => ownIn(skill).length), where = [...new Set(own.flatMap(ownIn))];
-  if (own.length) return `in Central Knot; ${own.length} also in ${andList(where.map(tool => names[tool]))}, ${own.length === 1 ? 'a copy' : 'copies'} Central Knot didn’t put there`;
+  if (through.length) return `some on in ${andList(through.map(tool => names[tool]))} through a plugin`;
+  const owed = list.filter(skill => skill.plan?.remove.length);
+  const still = [...new Set(owed.flatMap(skill => skill.plan!.remove))];
+  if (owed.length) return `${owed.length} still in ${andList(still.map(tool => names[tool]))} until sync runs`;
+  const ownTools = list.flatMap(skill => ownCopies(skill, itemOf(skill), toolsFor(t, skill.kind)));
+  const where = [...new Set(ownTools)];
+  if (ownTools.length) return `${plural(ownTools.length, 'own copy', 'own copies')} in ${andList(where.map(tool => names[tool]))}`;
   // A tool that has a copy another way still has it, whether it reads it or its own switch has it off.
   const ways = list.flatMap(row => [...otherReadLines(row, toolsFor(t, row.kind)), ...switchedOffWords(row, toolsFor(t, row.kind))]);
-  if (ways.length) return list.length === 1 ? ways.join(' ') : 'in Central Knot; some tools still have copies elsewhere (see each row)';
-  return leftOutTools().length ? 'in Central Knot; no tool it manages has these' : 'in Central Knot only; no tool has these';
+  if (ways.length) return list.length === 1 ? ways.join(' ') : 'some tools still have copies elsewhere';
+  return '';
 }
 
 /** What the item is now, in one line (libraryrow.ts statusLine), and for a found one, what Synchronize everything does with it while it is on. */

@@ -17,6 +17,7 @@ export interface FakeNode {
   focus: () => void;
   scrollTo: () => void;
   click: () => void;
+  querySelector: (selector: string) => FakeNode;
 }
 
 export const makeElement = (tag = 'div'): FakeNode => ({
@@ -47,6 +48,7 @@ export const makeElement = (tag = 'div'): FakeNode => ({
     if ('disabled' in this.attrs) return;
     this.onclick?.({ stopPropagation() {} });
   },
+  querySelector: () => makeElement(),
 });
 
 export const findNode = (node: unknown, match: (el: FakeNode) => boolean): FakeNode | undefined => {
