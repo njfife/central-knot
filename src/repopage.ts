@@ -2,7 +2,7 @@
 // tools and Push to send this computer's. The page says which repo and commit are in use, when it last pulled and pushed, and
 // what differs each way; nothing moves until Pull or Push is clicked.
 import { acting, announce, busy, rerender, setHome, setSync, showPage, state, tell } from './app.ts';
-import { button, closeButton, emptyState, h, icon } from './dom.ts';
+import { button, closeButton, emptyState, fold, h, icon, infoMark } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { openKind, outcomeBand } from './matrix.ts';
 import { dayAndTime, plural } from './model.ts';
@@ -24,15 +24,18 @@ export const repo = {
   problemField: 'url' as 'url' | 'branch',
   /** Disconnect asks once, in place. */
   confirmDisconnect: false,
+  /** Whether the unconnected page's "What goes where" fold is open on this visit. */
+  layoutOpen: false,
 };
 
 /**
- * Leaving the page or the home: what the last Connect, Pull, Push or Disconnect said, and an open question, belong to it alone.
+ * Leaving the page or the home: what the last Connect, Pull, Push or Disconnect said, and an open question or fold, belong to it alone.
  * `homeChanged`: the view was the other home's too, so it goes, and the next read starts afresh.
  */
 export function forgetRepoPrompts(homeChanged = false): void {
   repo.problem = undefined;
   repo.confirmDisconnect = false;
+  repo.layoutOpen = false;
   if (homeChanged) { repo.view = undefined; lastReadFailure = undefined; }
 }
 
@@ -237,9 +240,7 @@ function rowNote(change: RepoChange, side: 'in' | 'out'): { text: string | HTMLE
 /** What happened to one item on the side it comes from, and what Pull or Push will do about it. */
 function changeRow(change: RepoChange, side: 'in' | 'out') {
   const kind = kinds[change.kind];
-  const label = side === 'in'
-    ? { added: 'New in the repo', changed: 'Changed in the repo', removed: 'Removed in the repo' }[change.change]
-    : { added: 'New here', changed: 'Changed here', removed: 'Removed here' }[change.change];
+  const label = { added: 'New', changed: 'Changed', removed: 'Removed' }[change.change];
   const note = rowNote(change, side);
   // A row its button won't move is muted, change label and all.
   const quiet = stuckRow(change, side);
@@ -304,6 +305,10 @@ function sameCommitText(counts: Waiting): string {
 /** Push's count as the toolbar says it: waiting on Pull when Push can't run yet. */
 const pushCountText = (view: ConnectedRepoView, count: number) => (view.pushBlocked ? `${count} to push after Pull` : `${count} to push`);
 
+/** What goes to the repo, as words. */
+const carried = 'skills, MCP servers, agents and base instructions';
+const REPO_STATE_INFO = `Pull brings the repo’s changes into your tools; Push sends yours. Only Managed ${carried} go to the repo; other files stay as they are.`;
+
 /** The state in one line: up to date, what waits each way, or that the repo couldn't be reached. */
 function stateLine(view: ConnectedRepoView, counts: Waiting): HTMLElement {
   const part = (glyph: IconName, tone: string, text: string, muted = false) => h(`span.repo-state-part${muted ? '.tone-muted' : ''}`, {}, icon(glyph, 14, tone), h('span', {}, text));
@@ -328,7 +333,9 @@ function stateLine(view: ConnectedRepoView, counts: Waiting): HTMLElement {
     : nothingMoves ? [stuck ? part('triangle-alert', 'tone-warning', stuck) : null, settled]
     : [...moving, stuck ? part('triangle-alert', 'tone-warning', stuck, true) : null];
   // Focusable, so focus has somewhere to land when the button just used goes away (nothing left to pull or push).
-  return h('span.repo-state', { id: 'repo-state', role: 'status', tabindex: '-1' }, parts);
+  return h('span.repo-state-wrap', { 'data-info-block': true },
+    h('span.repo-state', { id: 'repo-state', role: 'status', tabindex: '-1' }, parts),
+    infoMark('repo-state-info', 'Git repo', REPO_STATE_INFO));
 }
 
 /** What a check found, for the status bar: the state line's words, so the two never disagree. */
@@ -425,7 +432,7 @@ function connectedPage(view: ConnectedRepoView) {
       !view.held && view.problem ? h('p.repo-stale', { id: WAITING_ID }, icon('info', 12), `${view.latest ? 'These lists are from the last time the repo was reached' : 'The repo hasn’t been reached yet'}; Pull and Push wait until it can be.`) : null,
       view.held ? null : inSync && view.branchGone ? h('div.repo-in-sync', {}, h('span', {}, `Nothing else differs. Push puts the branch ${view.branch} back in the repo.`), pushControl)
         : inSync && view.pushBlocked ? h('div.repo-in-sync', {}, h('span', {}, 'The repo has a newer commit that changes nothing in your Managed set. Pull to move to it.'), pullControl)
-        : inSync ? h('p.repo-in-sync', {}, 'Refresh checks the repo for new commits.')
+        : inSync ? null
         : h('div.repo-sides', {},
           // When Pull moves none of the rows, the note under it explains the list, so no count beside it.
           changeList({ id: 'repo-incoming', title: 'From the repo', changes: view.incoming, side: 'in', action: pullControl,
@@ -433,8 +440,7 @@ function connectedPage(view: ConnectedRepoView) {
             note: pullMovesNone && !view.problem ? { id: PULL_NOTE_ID, text: movesNoneText, warns: false, act: turnSyncOn } : undefined }),
           changeList({ id: 'repo-outgoing', title: 'From this computer', changes: view.outgoing, side: 'out', action: pushControl,
             empty: 'Nothing here that the repo doesn’t have.', stuck: words.stuckOut,
-            note: counts.push && !view.problem && view.pushBlocked ? { id: 'repo-outgoing-blocked', text: view.pushBlocked, warns: true } : undefined })),
-      h('p.repo-aside', {}, `Only Managed ${carried} go to the repo; other files there stay as they are. A skill from a source is sent like any other, without its link.`)));
+            note: counts.push && !view.problem && view.pushBlocked ? { id: 'repo-outgoing-blocked', text: view.pushBlocked, warns: true } : undefined }))));
 }
 
 /** Turns Automatic sync on, beside the words that ask for it (none while it is already on). */
@@ -462,10 +468,7 @@ function problemBand(unreachable: string | undefined) {
       : button({ variant: 'outline', size: 'small', icon: 'refresh-cw', label: 'Try again', id: 'repo-try-again', disabled: !!state.busy, onclick: () => void loadRepo(true) }));
 }
 
-/** What goes to the repo, as words. */
-const carried = 'skills, MCP servers, agents and base instructions';
-
-/** The repo's layout, shown before connecting so people can set one up by hand or know what Push will make. */
+/** The repo's layout, folded before connecting so people can set one up by hand or know what Push will make. */
 const layout = () => h('dl.repo-layout', { 'aria-label': 'What goes where in the repo' },
   h('dt.mono', {}, 'skills/<folder>/'), h('dd', {}, 'one folder per skill, byte for byte'),
   h('dt.mono', {}, 'mcp/<name>.json'), h('dd', {}, 'one MCP server, in Claude Code’s shape'),
@@ -500,12 +503,15 @@ export function repoPage(): HTMLElement {
   if (!view) return h('div.page.repo-page', {}, h('div.toolbar.repo-toolbar', {}, h('span.toolbar-spacer'), repo.confirmDisconnect ? null : disconnectButton(!!acting())),
     h('div.bands', {}, disconnectQuestion(), problemBand(lastReadFailure)));
   if (view.connected) return connectedPage(view);
+  const whatGoesWhere = fold({
+    id: 'repo-what-goes-where', toggleId: 'repo-what-goes-where-toggle', label: 'What goes where',
+    open: repo.layoutOpen, onToggle: open => { repo.layoutOpen = open; }, bodyClass: 'repo-fold-body',
+  },
+    layout(),
+    h('p.empty-aside', {}, 'Central Knot uses this computer’s git and the sign-in it already has (HTTPS or SSH). It never asks for or keeps a password or token.'),
+    h('p.empty-aside', {}, 'Only what’s Managed goes to the repo. ', h('button.inline-link', { type: 'button', id: 'repo-see-library', onclick: () => openKind('all') }, 'See what’s Managed'), '.'));
   return h('div.page.repo-page', {},
     h('div.bands', {}, view.access.allowed ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.access.reason)), problemBand(undefined), outcomeBand()),
-    h('div.scroll', { id: 'repo-scroll' }, emptyState('git-branch', 'Keep your Managed set in a git repo',
-      `Your Managed ${carried} can live in any git repo: GitHub, GitLab or a server of your own. Pull brings the repo’s changes into your tools; Push sends yours.`,
-      h('div.repo-start', {}, connectForm(view.access.allowed),
-        h('div.repo-start-side', {}, h('h2.eyebrow', {}, 'What goes where'), layout(),
-          h('p.empty-aside', {}, 'Central Knot uses this computer’s git and the sign-in it already has (HTTPS or SSH). It never asks for or keeps a password or token.'),
-          h('p.empty-aside', {}, 'Only what’s Managed goes to the repo. ', h('button.inline-link', { type: 'button', id: 'repo-see-library', onclick: () => openKind('all') }, 'See what’s Managed'), '.'))))));
+    h('div.scroll', { id: 'repo-scroll' }, emptyState('git-branch', 'Keep your Managed set in a git repo', undefined,
+      h('div.repo-start', {}, connectForm(view.access.allowed), whatGoesWhere))));
 }
