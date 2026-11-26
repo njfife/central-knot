@@ -4777,7 +4777,11 @@ async function repoBaseFlow() {
   same('the first home saves a base and pushes it', [await setBase(first, 'Be brief.\n'), await api(first, `return (await api.connectRepo(${JSON.stringify(remote)}, '', home)).stopped ?? 'connected';`), await push(first)], ['saved', 'connected', 'pushed']);
   await first.click('#nav-overview');
   await first.click('#nav-repo');
-  await until(() => first.exists('#repo-state'));
+  // Wait for the page's repo check to finish: #repo-state renders "Checking the repo…" while the fetch runs.
+  await until(async () => {
+    const state = await first.text('#repo-state');
+    return !!state && !state.includes('Checking the repo…');
+  });
   const connectedPageText = await first.text('.repo-page') ?? '';
   check('connected in-sync Git repo drops Refresh checks… and the scope aside, keeping the state line',
     !(await first.exists('p.repo-in-sync')) && !(await first.exists('.repo-aside'))
