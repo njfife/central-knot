@@ -14,8 +14,8 @@ import type { UpdateRelease, UpdateView } from './types.ts';
 /**
  * When releases are read: shortly after launch, then every quarter of an hour (a failed check too), and when the person comes
  * back to the window if the last check is older than FRESH_MS. A copy left running in the menu bar all day hears of a new
- * release within minutes, and coming back to its window shows it at once. Settings' Updates row says this schedule in words
- * (settingspage.ts updatesRow). At most a few requests an hour: GitHub allows 60 an hour to each address without a token.
+ * release within minutes, and coming back to its window shows it at once. At most a few requests an hour: GitHub allows 60 an
+ * hour to each address without a token.
  */
 export const FIRST_CHECK_MS = 10_000;
 export const CHECK_EVERY_MS = 15 * 60_000;

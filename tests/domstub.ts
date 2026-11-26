@@ -5,7 +5,7 @@ export interface FakeNode {
   attrs: Record<string, string>;
   dataset: Record<string, string>;
   style: Record<string, unknown>;
-  classList: { toggle: (name: string, on?: boolean) => void; add: () => void; remove: () => void };
+  classList: { toggle: (name: string, on?: boolean) => void; add: () => void; remove: () => void; contains: (name: string) => boolean };
   children: unknown[];
   content: { firstElementChild?: FakeNode };
   onclick?: (event: unknown) => void;
@@ -20,36 +20,39 @@ export interface FakeNode {
   querySelector: (selector: string) => FakeNode;
 }
 
-export const makeElement = (tag = 'div'): FakeNode => ({
-  tag,
-  className: '',
-  attrs: {},
-  dataset: {},
-  style: { setProperty() {} },
-  classList: { toggle() {}, add() {}, remove() {} },
-  children: [],
-  content: {},
-  focused: 0,
-  setAttribute(key: string, value: string) {
-    this.attrs[key] = value;
-  },
-  addEventListener() {},
-  replaceChildren(...kids: unknown[]) {
-    this.children = [...kids];
-  },
-  append(...kids: unknown[]) {
-    this.children.push(...kids);
-  },
-  focus() {
-    this.focused++;
-  },
-  scrollTo() {},
-  click() {
-    if ('disabled' in this.attrs) return;
-    this.onclick?.({ stopPropagation() {} });
-  },
-  querySelector: () => makeElement(),
-});
+export const makeElement = (tag = 'div'): FakeNode => {
+  const node: FakeNode = {
+    tag,
+    className: '',
+    attrs: {},
+    dataset: {},
+    style: { setProperty() {} },
+    classList: { toggle() {}, add() {}, remove() {}, contains(name: string) { return node.className.split(/\s+/).includes(name); } },
+    children: [],
+    content: {},
+    focused: 0,
+    setAttribute(key: string, value: string) {
+      this.attrs[key] = value;
+    },
+    addEventListener() {},
+    replaceChildren(...kids: unknown[]) {
+      this.children = [...kids];
+    },
+    append(...kids: unknown[]) {
+      this.children.push(...kids);
+    },
+    focus() {
+      this.focused++;
+    },
+    scrollTo() {},
+    click() {
+      if ('disabled' in this.attrs) return;
+      this.onclick?.({ stopPropagation() {} });
+    },
+    querySelector: () => makeElement(),
+  };
+  return node;
+};
 
 export const findNode = (node: unknown, match: (el: FakeNode) => boolean): FakeNode | undefined => {
   if (!node || typeof node !== 'object') return undefined;
