@@ -14922,7 +14922,7 @@ async function hookRunFlow() {
   writeClaudeInstall(home, marketName, 'release-helper', '0.4.1', {
     '.claude-plugin/plugin.json': JSON.stringify({ name: 'release-helper', version: '0.4.1', userConfig: { team_note: { description: 'Release note' } } }),
     'hooks/hooks.json': JSON.stringify({ hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: '${CLAUDE_PLUGIN_ROOT}/hooks/hello.sh' }] }] } }),
-    'hooks/hello.sh': `#!/bin/sh\necho ran >> ${JSON.stringify(pluginMarker)}\nprintf 'Releases ship on Tuesdays. Run smoke checks before tagging.\\nroot=%s\\ndata=%s\\nnote=%s\\n' "$CLAUDE_PLUGIN_ROOT" "$CLAUDE_PLUGIN_DATA" "$CLAUDE_PLUGIN_OPTION_TEAM_NOTE"\n`,
+    'hooks/hello.sh': `#!/bin/sh\necho ran >> ${JSON.stringify(pluginMarker)}\n[ -f "$CLAUDE_PLUGIN_ROOT/hooks/slow" ] && sleep 2.5\nprintf 'Releases ship on Tuesdays. Run smoke checks before tagging.\\nroot=%s\\ndata=%s\\nnote=%s\\n' "$CLAUDE_PLUGIN_ROOT" "$CLAUDE_PLUGIN_DATA" "$CLAUDE_PLUGIN_OPTION_TEAM_NOTE"\n`,
   });
   chmodSync(join(claudePluginRoot, 'hooks/hello.sh'), 0o755);
   writeClaudeInstall(home, marketName, 'off-plugin', '1.0.0', {
@@ -15309,26 +15309,38 @@ async function hookRunFlow() {
     Math.abs(awayAfter.codexTop - awayTop) <= 1 && awayAfter.rowOffTop, { awayTop, awayAfter });
   await fullSize(a);
 
-  // Check 6: late results dropped after leaving page (+ already running on quick return), after Refresh, and after home switch.
+  // Check 6: returning while still running keeps Running… + Stop; settling while off-page drops the late result; Refresh resets state (and clicking Run it shows already running).
   await a.click(byId(lateIds.runId));
   await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'Running…'`);
   await a.click('#nav-overview');
   await a.click('#nav-instructions');
   await waitFor(`!!document.getElementById(${JSON.stringify(lateIds.runId)})`);
-  const alreadyMsg = await runAndWait('session-claude-cli', 'slow-stop.sh');
-  check('returning while hook still runs in main shows Not run: + already running on Run it',
-    alreadyMsg.includes('Not run: this hook is already running.'), alreadyMsg);
+  same('returning while hook still runs keeps Running… and Stop',
+    await a.run(`(() => { const b = document.getElementById(${JSON.stringify(lateIds.runId)}); return [b?.textContent, !!b?.closest('.session-hook')?.querySelector('button[data-hook-stop]')]; })()`),
+    ['Running…', true]);
+  await a.click(`#session-claude-cli .session-hook:has(#${lateIds.runId}) button[data-hook-stop]`);
+  await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'Run it'`);
+  // Settling while away on Overview drops the late result.
+  await a.click(byId(lateIds.runId));
+  await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'Running…'`);
+  await a.click('#nav-overview');
   await wait(3300);
-  check('late result from before leaving page did not overwrite the returned page',
-    (await a.run(`document.getElementById(${JSON.stringify(lateIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`)).includes('Not run: this hook is already running.'));
+  await a.click('#nav-instructions');
+  await waitFor(`!!document.getElementById(${JSON.stringify(lateIds.runId)})`);
+  same('late result settled while off the page is dropped', await a.run(`document.querySelectorAll('.hook-run').length`), 0);
 
-  // Late result after Refresh is dropped.
+  // Refresh clears renderer state (clicking Run it while main still runs refuses as already running; abandoned run does not overwrite).
   await a.click(byId(lateIds.runId));
   await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'Running…'`);
   await a.click('#header-refresh');
   await steady();
+  await waitFor(`!!document.getElementById(${JSON.stringify(lateIds.runId)})`);
+  const alreadyMsg = await runAndWait('session-claude-cli', 'slow-stop.sh');
+  check('clicking Run it after Refresh while hook still runs in main shows Not run: + already running',
+    alreadyMsg.includes('Not run: this hook is already running.'), alreadyMsg);
   await wait(3300);
-  same('late result after Refresh is dropped', await a.run(`document.querySelectorAll('.hook-run').length`), 0);
+  check('abandoned run after Refresh did not overwrite the refusal',
+    (await a.run(`document.getElementById(${JSON.stringify(lateIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`)).includes('Not run: this hook is already running.'));
 
   // Late result after switching to Practice copy is dropped, and Practice copy has no Run it.
   await a.click(byId(lateIds.runId));
@@ -15383,16 +15395,21 @@ async function hookRunFlow() {
   same('arriving from Claude Code selects As Claude Code and lists both eligible tools',
     await a.run(`(() => { const s = document.getElementById('plugin-hook-tool'); return [s?.value, [...(s?.options ?? [])].map(o => o.textContent)]; })()`),
     ['claude-cli', ['As Claude Code', 'As Codex']]);
-  same('plugin page shows installed runnable row first, marketplace-only text row below with View source alone, and Other hooks View source alone',
+  same('plugin page shows installed runnable row first, marketplace-only text row below with version tag and View source alone, and Other hooks View source alone',
     await a.run(`(() => {
       const rows = [...document.querySelectorAll('#plugin-session-hooks .session-hook')].map(r => [
-        r.querySelector('.session-command')?.textContent, !!r.querySelector('button[data-hook-run]'), !!r.querySelector('button[data-hook-source]'),
+        r.querySelector('.session-command')?.textContent,
+        [...r.querySelectorAll('.session-when')].map(w => w.textContent),
+        !!r.querySelector('button[data-hook-run]'), !!r.querySelector('button[data-hook-source]'),
       ]);
       return [document.querySelector('#plugin-session-hooks .session-title')?.textContent, rows,
         document.querySelectorAll('.plugin-parts li.with-source button[data-hook-run]').length,
         document.querySelectorAll('.plugin-parts li.with-source button[data-hook-source]').length];
     })()`),
-    ['Hooks that can add text (2)', [['${CLAUDE_PLUGIN_ROOT}/hooks/hello.sh', true, true], ['echo "Marketplace only text"', false, true]], 0, 1]);
+    ['Hooks that can add text (2)', [
+      ['${CLAUDE_PLUGIN_ROOT}/hooks/hello.sh', ['When a session starts'], true, true],
+      ['echo "Marketplace only text"', ['When you send a prompt', '0.5.0 only'], false, true],
+    ], 0, 1]);
   await pictures('plugin-hooks-before', '#plugin-session-hooks', bothSizes);
   await pictures('plugin-hooks-market-extra', '#plugin-session-hooks', [[860, 560, false]]);
   // View source on row 1 reads installed copy; View source on row 2 reads marketplace copy; neither starts a run.
@@ -15425,6 +15442,26 @@ async function hookRunFlow() {
   }
   await fullSize(a);
   await pictures('plugin-hooks-result', '#plugin-session-hooks', bothSizes);
+  // Short list item 1: Run it as Claude Code, switch to As Codex and back before it ends -> Stop stays reachable and result lands in place.
+  const slowFlag = join(claudePluginRoot, 'hooks/slow');
+  writeFileSync(slowFlag, '1');
+  const claudePluginRunId = (await rowOf('plugin-session-hooks', 'hello.sh')).runId;
+  await a.click(byId(claudePluginRunId));
+  await waitFor(`document.getElementById(${JSON.stringify(claudePluginRunId)})?.textContent === 'Running…'`);
+  await a.run(`(() => { const s = document.getElementById('plugin-hook-tool'); s.value = 'codex-cli'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await waitFor(`document.querySelector('#plugin-session-hooks .session-command')?.textContent?.includes('codex-hello.sh')`);
+  same('while Claude Code hook runs, switching to As Codex shows Codex idle without Stop or Claude result',
+    await a.run(`(() => { const b = document.querySelector('#plugin-session-hooks button[data-hook-run]'); return [b?.textContent, document.querySelectorAll('#plugin-session-hooks button[data-hook-stop]').length, document.querySelectorAll('#plugin-session-hooks .hook-run').length]; })()`),
+    ['Run it', 0, 0]);
+  await a.run(`(() => { const s = document.getElementById('plugin-hook-tool'); s.value = 'claude-cli'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await waitFor(`document.querySelector('#plugin-session-hooks .session-command')?.textContent?.includes('hello.sh')`);
+  same('switching back to As Claude Code while still running keeps Running… and Stop reachable',
+    await a.run(`(() => { const b = document.getElementById(${JSON.stringify(claudePluginRunId)}); return [b?.textContent, !!b?.closest('.session-hook')?.querySelector('button[data-hook-stop]')]; })()`),
+    ['Running…', true]);
+  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(claudePluginRunId)}); return b && b.textContent === 'Run it' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`, 8000);
+  check('Claude Code hook result lands in place after switching back from As Codex',
+    (await a.text('#plugin-session-hooks .hook-run') ?? '').includes('Releases ship on Tuesdays. Run smoke checks before tagging.'));
+  rmSync(slowFlag, { force: true });
   // Switch As <tool> to Codex and run Codex's installed hook.
   await a.run(`(() => { const s = document.getElementById('plugin-hook-tool'); s.value = 'codex-cli'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   await waitFor(`document.querySelector('#plugin-session-hooks .session-command')?.textContent?.includes('codex-hello.sh')`);

@@ -39,7 +39,7 @@ export function originMark(name: string): string {
 const YOURS = 'origin-yours';
 
 /** One text-adding hook row as Instructions and a plugin's own page draw it: when it runs, its command, and its HookSourceRef. */
-export interface TextHookRow { when: string; command: string; source: HookSourceRef }
+export interface TextHookRow { when: string; command: string; source: HookSourceRef; tag?: string }
 
 /** Hooks of `hooks` that can add text in `tool`, mapped to their rows and HookSourceRefs for `owner`. */
 export function textHookRows(tool: HarnessId, hooks: DeclaredHook[] | undefined, owner: HookSourceOwner): TextHookRow[] {

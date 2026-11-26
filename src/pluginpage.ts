@@ -12,7 +12,7 @@ import { addsText, componentsFrom, outcomes, sessionHooksAbout, whenItRuns } fro
 import { clickNote, componentsOf, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, toolBox, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { pluginKey } from './pluginplan.ts';
-import { DIRECTORY, boxOf, cantSwitchSkill, comparableText, itemsOnWords, takenItems, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, otherVersionsLine, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionDiffers, versionToCompare, waitingWords, waitsToMove, whyNotCarried, yourSaid, type ToolMark } from './pluginstatus.ts';
+import { DIRECTORY, boxOf, cantSwitchSkill, comparableText, itemsIn, itemsOnWords, takenItems, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, otherVersionsLine, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionDiffers, versionToCompare, waitingWords, waitsToMove, whyNotCarried, yourSaid, type ToolMark } from './pluginstatus.ts';
 import { hasCowork, pluginTools, takesPlugins } from './presence.ts';
 import { applyPluginOps, market, openLink, shownDetail, toggleOpened, usePlugins } from './pluginstate.ts';
 import type { Components, DeclaredHook, HarnessId, HookSourceRef, InstalledPlugin, MarketplaceView, Outcome, PluginDetail, PluginItemLine, PluginView, PluginsView, YourName } from './types.ts';
@@ -279,8 +279,11 @@ function sessionHookStrip(view: PluginsView, entry: MarketplaceView, plugin: Plu
     const rows = textHookRows(install.tool, install.hooks, { from: 'installed', tool: install.tool, plugin: install.plugin, marketName: install.marketName }).filter(row => canRun(row.source));
     return rows.length ? [{ install, rows }] : [];
   });
+  const marketText = detail.hooks.filter(addsTextSomewhere);
+  const unknown = view.tools.some(tool => stateOf(entry, plugin.name, tool).state === 'not-known' || (installed(entry, plugin.name, tool) && !installs.some(item => item.tool === tool)));
+  const inAnyTool = installs.length > 0 || view.tools.some(tool => itemsIn(entry, plugin.name, tool));
   if (!eligible.length) return hookGroup(`${owner}\u0000session`, 'hook-source-session', entry.name, plugin.name, 'Hooks that can add text to sessions',
-    detail.hooks.filter(addsTextSomewhere), hookCantRunReason(installs) ?? sessionHooksAbout(componentsFrom(detail).sessionTextHooks, nativeTools(view, entry, plugin.name)));
+    marketText, (unknown ? undefined : hookCantRunReason({ inAnyTool, installs, fingerprints: marketText.map(hookFingerprint) })) ?? sessionHooksAbout(componentsFrom(detail).sessionTextHooks, nativeTools(view, entry, plugin.name)));
   const selected = eligible.find(each => each.install.tool === market.nav.hookTool) ?? eligible[0]!;
   const tool = selected.install.tool;
   const picker = eligible.length > 1 ? h('span.select.select-bar.plugin-hook-as', {},
@@ -291,10 +294,11 @@ function sessionHookStrip(view: PluginsView, entry: MarketplaceView, plugin: Plu
   const copy = hookCopyNote(selected.install, eligible.map(each => each.install), compareTo);
   const note = hookStripNote(tool, { groups: [] }, true);
   const seen = new Set(selected.rows.map(row => row.source.fingerprint));
-  const marketRows = detail.hooks.filter(hook => addsTextSomewhere(hook) && !seen.has(hookFingerprint(hook))).map((hook): TextHookRow => {
+  const tag = compareTo && selected.install.version !== compareTo ? `${compareTo} only` : 'marketplace only';
+  const marketRows = marketText.filter(hook => !seen.has(hookFingerprint(hook))).map((hook): TextHookRow => {
     const command = hookLine(hook);
     const whenTool = addsText(tool, hook) ? tool : pluginTools.find(each => addsText(each, hook))!;
-    return { when: whenItRuns(whenTool, hook), command, source: marketRef(entry.name, plugin.name, hook, command) };
+    return { when: whenItRuns(whenTool, hook), command, tag, source: marketRef(entry.name, plugin.name, hook, command) };
   });
   return h('section.plugin-group.session-strip', { id: 'plugin-session-hooks', 'aria-label': 'Hooks that can add text' },
     h('div.session-title-row', {}, h('h4.session-title', {}, `Hooks that can add text (${selected.rows.length + marketRows.length})`),

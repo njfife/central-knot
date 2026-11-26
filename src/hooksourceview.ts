@@ -8,8 +8,8 @@
 import { shownPath, state } from './app.ts';
 import { button, closeButton, h, icon, pathText } from './dom.ts';
 import { pagePlatform } from './machine.ts';
-import { isTextEvent } from './pluginoutcomes.ts';
-import { hookRunWords, type TextHookRow } from './sessionhooks.ts';
+import { addsText, isTextEvent } from './pluginoutcomes.ts';
+import { hookFingerprint, hookRunWords, type TextHookRow } from './sessionhooks.ts';
 import type { HarnessId, HomeMode, HomeView, HookRunResult, HookSource, HookSourceRef, InstalledPlugin } from './types.ts';
 import { HOOK_SOURCE_UNREADABLE, andList, fileName, sentence, toolNames } from './words.ts';
 
@@ -39,18 +39,20 @@ export function canRun(ref: HookSourceRef, mode: HomeMode | undefined = state.ho
   return true;
 }
 
-/** Why text hooks can't run in this home on Mac/Linux (one place for the words); undefined for another home, Windows, Copilot CLI or other causes. */
-export function hookCantRunReason(target: HarnessId | InstalledPlugin[], mode: HomeMode | undefined = state.home?.mode,
-  platform = pagePlatform(navigator.userAgent), home: Pick<HomeView, 'snapshots'> | undefined = state.home): string | undefined {
+/** Why text hooks can't run in this home on Mac/Linux (one place for the words); undefined for another home, Windows, Copilot CLI or mixed/unknown causes. */
+export function hookCantRunReason(target: HarnessId | { inAnyTool: boolean; installs: InstalledPlugin[]; fingerprints: string[] },
+  mode: HomeMode | undefined = state.home?.mode, platform = pagePlatform(navigator.userAgent), home: Pick<HomeView, 'snapshots'> | undefined = state.home): string | undefined {
   if (mode !== 'actual' || platform === 'win32') return undefined;
   const noCli = (tool: HarnessId) => `${toolNames[tool]}’s command line isn’t on this computer, so these can’t be run here.`;
   if (typeof target === 'string') return target !== 'copilot-cli' && !hasCli(target, home) ? noCli(target) : undefined;
-  if (!target.length) return 'Not installed, so these can’t be run here.';
-  const supported = target.filter(item => item.tool === 'claude-cli' || item.tool === 'codex-cli');
-  const missing = supported.find(item => !item.off && !item.problem && !hasCli(item.tool, home));
-  if (missing) return noCli(missing.tool);
-  const off = target.some(item => !item.off) ? [] : supported.map(item => toolNames[item.tool]);
-  return off.length ? `Off in ${andList(off)}, so these can’t be run here.` : undefined;
+  if (!target.inAnyTool && !target.installs.length) return 'Not installed, so these can’t be run here.';
+  if (!target.installs.length || target.installs.some(item => item.problem || item.hooksUnread?.length)) return undefined;
+  const withText = target.installs.filter(item => item.hooks?.some(hook => addsText(item.tool, hook)));
+  if (!withText.length || withText.some(item => item.tool !== 'claude-cli' && item.tool !== 'codex-cli')) return undefined;
+  const covered = new Set(withText.flatMap(item => (item.hooks ?? []).filter(hook => addsText(item.tool, hook)).map(hookFingerprint)));
+  if (target.fingerprints.some(fp => !covered.has(fp))) return undefined;
+  if (withText.every(item => item.off)) return `Off in ${andList(withText.map(item => toolNames[item.tool]))}, so these can’t be run here.`;
+  return withText.length === 1 && !withText[0]!.off && !hasCli(withText[0]!.tool, home) ? noCli(withText[0]!.tool) : undefined;
 }
 
 /** Short deterministic hash of a row key so re-read position shifts give another hook a different button id. */
@@ -77,10 +79,10 @@ export function resetHookSources(): void {
   seq++;
 }
 
-/** Drops open hook source and run state for any row no longer drawn on screen (called after each page draw). */
+/** Drops open hook source and finished run state for any row no longer drawn on screen; in-flight runs stay so returning keeps Stop and receives the result. */
 export function pruneHookSources(): void {
   for (const [key, entry] of opened) if (!document.getElementById(entry.panelId)) opened.delete(key);
-  for (const [key, entry] of runs) if (!document.getElementById(entry.runBtnId)) runs.delete(key);
+  for (const [key, entry] of runs) if (!entry.running && !document.getElementById(entry.runBtnId)) runs.delete(key);
 }
 
 const textPre = (id: string, label: string, text: string): HTMLElement =>
@@ -269,9 +271,10 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
   ].filter((node): node is HTMLElement => !!node);
 }
 
-/** One hook row (when it runs, its command, and its Run it / Stop / View source controls and inline panels), shared by Instructions and a plugin's page. */
+/** One hook row (when it runs, its command, optional quiet tag, and its Run it / Stop / View source controls and inline panels), shared by Instructions and a plugin's page. */
 export function hookRow(hook: TextHookRow, id: string): HTMLElement {
   return h('li.session-hook', {},
-    h('span.session-lead', {}, h('span.session-when', {}, sentence(hook.when)), h('code.session-command', {}, hook.command)),
+    h('span.session-lead', {}, h('span.session-when', {}, sentence(hook.when)), h('code.session-command', {}, hook.command),
+      hook.tag ? h('span.session-when', {}, hook.tag) : null),
     hookSourceControls(hook.source, id));
 }
