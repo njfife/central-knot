@@ -1,10 +1,10 @@
-// A tool's Manage switch, on its card on the Harnesses list: the switch, the line beside it that says what a click will do there
-// before it is made, and the band after it. The engine is toolchoice.ts: chooseTools turns it, and what turning a left-out tool on
-// would do there is counted by its whatJoiningDoes, which reaches the page in the view (types.ts SyncView joining). The band says
-// what the pass after the click did there, from its results (main.ts `tools:manage`, `did`). The cards themselves, the left-out
-// one included, are harnesspage.ts's.
+// A tool's Manage switch, on its card on the Harnesses list: the switch (with one Managed (?) card on the first managed tool),
+// an unmanaged tool's line saying what turning it on would do there before a click, and the band after a click. The engine is
+// toolchoice.ts: chooseTools turns it, and what turning a left-out tool on would do there is counted by its whatJoiningDoes,
+// which reaches the page in the view (types.ts SyncView joining). The band says what the pass after the click did there, from
+// its results (main.ts `tools:manage`, `did`). The cards themselves, the left-out one included, are harnesspage.ts's.
 import { acting, busy, clickResumes, setHome, state, tell } from './app.ts';
-import { h, toggle } from './dom.ts';
+import { h, infoMark, toggle } from './dom.ts';
 import { plural } from './model.ts';
 import { market } from './pluginstate.ts';
 import { wantedIn } from './library.ts';
@@ -24,23 +24,27 @@ export function manageLocked(home: HomeView): string | undefined {
 }
 
 /**
- * The switch and its line, for an installed tool's card. Where no switch can be turned (manageLocked), it is disabled with the
- * reason as its tooltip, and the line is left out: the list's note says the reason once.
+ * The switch and its status for an installed tool's card: Managed (with one `(?)` card on the first managed card) or Not
+ * managed (with the rejoin consequences line beneath). Every switch keeps its tool-named accessible label even when locked;
+ * the lock's reason comes from toggle's whyOff (title and aria-description), with no card or line.
  */
-export function manageRow(home: HomeView, tool: HarnessId): HTMLElement {
+export function manageRow(home: HomeView, tool: HarnessId, showInfo = false): HTMLElement {
   const on = home.sync.managed.includes(tool), why = manageLocked(home), name = names[tool];
   const label = on ? `Manage ${name}: on. Click to leave ${name} out: Central Knot then writes nothing there until you turn it on again. Its copies stay, and every item stays as it is.`
     : `Manage ${name}: off. Click to have Central Knot manage it.`;
+  const mark = on && !why && showInfo ? infoMark('manage-info', 'Managed', MANAGE_INFO) : null;
+  const line = !why && !on ? h('span.harness-manage-line', { id: `manage-${tool}-line` }, onLine(home, tool)) : null;
   return h('div.harness-manage', {},
-    h('span.harness-manage-head', {},
-      toggle({ on, label: why ?? label, id: `manage-${tool}`, disabled: why ?? acting(), onchange: next => void manageTool(tool, next),
-        attrs: why ? {} : { 'aria-describedby': `manage-${tool}-line` } }),
-      h('span.harness-manage-label', {}, on ? 'Managed' : 'Not managed')),
-    why ? null : h('span.harness-manage-line', { id: `manage-${tool}-line` }, on ? offLine(name) : onLine(home, tool)));
+    h('span.harness-manage-head', mark ? { 'data-info-block': true } : {},
+      toggle({ on, label, id: `manage-${tool}`, disabled: why ?? acting(), onchange: next => void manageTool(tool, next),
+        attrs: line ? { 'aria-describedby': `manage-${tool}-line` } : {} }),
+      h('span.harness-manage-label', {}, on ? 'Managed' : 'Not managed'),
+      mark),
+    line);
 }
 
-/** Said beside the switch of a managed tool, before a click turns it off (the switch's tooltip says the rest). */
-const offLine = (name: string) => `Off leaves ${name} as it is: its copies stay, and every item stays as it is.`;
+/** Said behind Managed (?) on the first managed card. */
+const MANAGE_INFO = 'Turning a tool off keeps its copies. Central Knot stops writing to it until you turn it on again.';
 /** With Automatic sync off, what brings a tool turned on into line (a click's pass is about its own item: librarypass.ts PassOptions only). */
 const SYNC_OFF = 'With Automatic sync off, Sync once brings it into line; a click on an item brings that item.';
 
@@ -61,7 +65,7 @@ function onLine(home: HomeView, tool: HarnessId): string {
   // (pluginrecord.ts, pluginupdates.ts): said only where such a plugin is listed, as the marketplaces were last read.
   const bring = !!market.view?.marketplaces.some(entry => Object.values(entry.switches ?? {}).some(sw => !!sw.entry && wantedIn(sw.entry, tool)));
   const auto = pluginUpdates.view?.on && !pluginUpdates.view.paused;
-  const also = bring && auto ? ' It also gets each plugin that is on and not kept out of it, and its instruction file is back on Instructions.' : ' Its instruction file is back on Instructions.';
+  const also = bring && auto ? ' It also gets each plugin that is on and not kept out of it.' : '';
   return `${then}${also}${home.syncOn ? '' : ` ${SYNC_OFF}`}`;
 }
 const listed = (clauses: string[]) => (clauses.length < 2 ? clauses.join('') : `${clauses.slice(0, -1).join(', ')} and ${clauses.at(-1)}`);
