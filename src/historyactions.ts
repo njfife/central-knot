@@ -141,7 +141,10 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       if (event.cause === 'in-line') return { glyph: 'circle-check', text: `Written over in ${tools} with the current version when sync reached ${event.losers.length === 1 ? 'it' : 'them'}; what was there is one of its versions.` };
       if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}${named(event.only) && !over.length ? `: its ${words.copy} there is back` : ''}.${overSaid}${gaveSaid}${away}` };
       const onlyIn = event.cause === 'switch' && event.nowExcept ? harnessIds.filter(tool => !event.nowExcept!.includes(tool)) : [];
-      if (onlyIn.length === 1) return { glyph: 'circle-check', text: `Turned on in ${toolName(onlyIn[0]!)}; kept out of every other tool.${overSaid}${gaveSaid}` };
+      if (onlyIn.length === 1) {
+        const also = event.alsoRead?.length ? `; ${andList(event.alsoRead.map(toolName))} ${event.alsoRead.length === 1 ? 'reads' : 'read'} it too` : '';
+        return { glyph: 'circle-check', text: `Turned on in ${toolName(onlyIn[0]!)}; kept out of every other tool${also}.${overSaid}${gaveSaid}` };
+      }
       // A plugin's read brought it in with the plugin's On (library.ts A PLUGIN).
       if (event.cause === 'source') return { glyph: 'link-2', text: `Brought in from ${source}${also(': put in')}.` };
       const said = {

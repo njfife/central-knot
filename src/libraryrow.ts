@@ -116,6 +116,8 @@ export interface LibraryRow {
   anotherWay?: Partial<Record<string, string>>;
   /** Skills: for a tool reading another managed tool's skills folder (skills.ts anotherWay), which tool's copy it reads. */
   readsFrom?: LibraryFacts['readsFrom'];
+  /** Skills: for each tool, managed tools that read its skills folder and would load the skill from there (skills.ts readers). */
+  readBy?: LibraryFacts['readBy'];
   loads?: LibraryFacts['loads']; alsoLoads?: LibraryFacts['alsoLoads']; takeOver?: LibraryFacts['takeOver'];
   /** Harnesses whose own switch turns it off there (types.ts LibraryFacts switchedOff), said as offInOwnSettings says it. */
   switchedOff?: readonly string[];
@@ -578,9 +580,11 @@ export function sentences(words: RowWords) {
       parts.push({ text: `Reads ${from}’s copy`, card: `${where} reads this skill from ${from}’s folder; Central Knot writes nothing to ${where} meanwhile.` });
     } else if (is === 'none' && inLib) {
       if (inLib.except.includes(tool as HarnessId)) parts.push({ text: 'Kept out' });
+      const also = !inLib.on && !pluginOf(row.fromSource?.link ?? '') ? row.readBy?.[tool as HarnessId] : undefined;
+      if (also?.length) parts.push({ text: `On here, ${andList(also.map(toolName))} ${also.length === 1 ? 'reads' : 'read'} it too` });
     } else if (is !== 'current' && is !== 'kept-out') {
-      const waits = !inLib && is === 'another-way' ? row.anotherWay?.[tool]?.match(/^.+ reads (.+)’s skills folder, so it gets the skill from there once it is on in \1\.$/)?.[1] : undefined;
-      parts.push({ text: waits ? `Gets it from ${waits}’s skills folder once it is on there.` : hasLine(row, item, tool, where) });
+      const waits = !inLib && is === 'another-way' ? Object.entries(row.readBy ?? {}).find(([, list]) => list?.includes(tool as HarnessId))?.[0] : undefined;
+      parts.push({ text: waits ? `Gets it from ${toolName(waits)}’s skills folder once it is on there.` : hasLine(row, item, tool, where) });
     }
     if (words.asSkill && (agentsKeptIn as Partial<Record<string, string>>)[tool] === 'skills folder'
       && has && ['current', 'gets-it', 'edited', 'leaving', 'own-copy'].includes(is)) {

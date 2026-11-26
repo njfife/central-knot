@@ -461,6 +461,62 @@ test('A found skill only Codex has: OpenCode’s line says what is true before i
   } finally { await box.cleanup(); }
 });
 
+test('An Off skill names managed readers in readBy and History alsoRead, and omits them when the reader has its own way, denies it, or a folder is locked or unmanaged', async () => {
+  const box = await sandbox(['claude-cli', 'opencode-cli']);
+  try {
+    await put(box, 'claude-cli');
+    await turnOn(box);
+    await turnOff(box);
+    const clean = await seen(box);
+    assert.deepEqual(clean.fact!.readBy, { 'claude-cli': ['opencode-cli'] });
+    assert.equal(clean.fact!.readBy?.['opencode-cli'], undefined);
+    // Turning on in Claude Code records alsoRead in History; Undo ignores it and restores Off.
+    const onOnly = await send(box, rowClicks.onOnly(clean.row, clean.item, 'claude-cli'));
+    const onEvent = (await historyOf(box)).at(-1)!;
+    assert.deepEqual(onEvent.alsoRead, ['opencode-cli']);
+    assert.equal(librarySentence(onEvent, libraryWords.skills, box.tools)?.text, 'Turned on in Claude Code; kept out of every other tool; OpenCode reads it too.');
+    await restore(box, onOnly.made![0]!);
+    assert.equal((await historyOf(box)).at(-1)!.alsoRead, undefined);
+    // OpenCode has its own link: no readBy.
+    const outside = join(box.home, 'outside/notes');
+    await mkdir(outside, { recursive: true });
+    await writeFile(join(outside, 'SKILL.md'), skillText('Outside.'));
+    await symlink(outside, folderOf(box, 'opencode-cli'));
+    assert.equal((await seen(box)).fact!.readBy, undefined);
+    await rm(folderOf(box, 'opencode-cli'), { force: true });
+    // OpenCode has a copy through ~/.agents/skills: no readBy.
+    const shared = join(box.home, '.agents/skills/notes');
+    await mkdir(shared, { recursive: true });
+    await writeFile(join(shared, 'SKILL.md'), skillText('Shared.'));
+    assert.equal((await seen(box)).fact!.readBy, undefined);
+    await rm(shared, { recursive: true, force: true });
+    // OpenCode has a copy of its own: no readBy.
+    await put(box, 'opencode-cli');
+    assert.equal((await seen(box)).fact!.readBy, undefined);
+    await rm(folderOf(box, 'opencode-cli'), { recursive: true, force: true });
+    // OpenCode's own switch denies the skill in advance (by name in opencode.json): no readBy and no alsoRead on the click.
+    const ocConfig = join(box.home, '.config/opencode/opencode.json');
+    await writeFile(ocConfig, JSON.stringify({ permission: { skill: { notes: 'deny' } } }));
+    const denied = await seen(box);
+    assert.equal(denied.fact!.readBy, undefined);
+    const onDenied = await send(box, rowClicks.onOnly(denied.row, denied.item, 'claude-cli'));
+    assert.equal((await historyOf(box)).at(-1)!.alsoRead, undefined);
+    await restore(box, onDenied.made![0]!);
+    await rm(ocConfig, { force: true });
+    // Claude Code's skills folder locked (cannot be written): no readBy.
+    if (!lockSkip) {
+      await withLock(join(box.home, roots['claude-cli']), 'dir-readonly', async () => {
+        assert.equal((await seen(box)).fact!.readBy, undefined);
+      });
+    }
+    // Claude Code unmanaged or OpenCode unmanaged: no readBy.
+    const onlyOpenCode = (await skillsView(box.context, ['opencode-cli'])).items.find(entry => entry.key === 'notes');
+    const onlyClaude = (await skillsView(box.context, ['claude-cli'])).items.find(entry => entry.key === 'notes');
+    assert.equal(onlyOpenCode?.readBy, undefined);
+    assert.equal(onlyClaude?.readBy, undefined);
+  } finally { await box.cleanup(); }
+});
+
 test('A copy in ~/.agents/skills is not Central Knot’s: the tools that read it have the skill another way, an Off row says so, and Take over makes Central Knot’s copy theirs', async () => {
   const box = await sandbox();
   try {

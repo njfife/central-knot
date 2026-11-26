@@ -157,6 +157,8 @@ export interface Disk<Entry extends Seen> {
    * plugin's stays the person's own, both ways.
    */
   viaPlugin?: ThroughWhichPlugin;
+  /** Skills: managed tools reading `harness`'s skills folder that would load `item` from there (skills.ts readers). */
+  readers?(item: Wanted, harness: HarnessId): HarnessId[];
 }
 /**
  * An item as Disk.held is told of it: its name, where it is wanted (library.ts wantedIn), what was applied where, and its
@@ -571,7 +573,7 @@ export const takeInAnswers = (look: AnyLook, key: string) => {
  * What was asked of a pass for one item (a click, what Pull brings, or what a source holds), as the History entry it becomes:
  * begun when it is recorded, finished with the harnesses its plan writes or removes (`fill`: which of them it names).
  */
-type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'wasExcept' | 'nowExcept' | 'version' | 'previous' | 'foundIn' | 'tookFrom' | 'link' | 'seen' | 'took'>
+type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'wasExcept' | 'nowExcept' | 'alsoRead' | 'version' | 'previous' | 'foundIn' | 'tookFrom' | 'link' | 'seen' | 'took'>
   & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed' };
 /**
  * What Pull brings for one item (gitrepo.ts): its name and content, and where the repo holds one harness's own part, that
@@ -1112,7 +1114,12 @@ function turn(pass: Pass, item: LibraryItem, asked: Change) {
   const back = was.except.find(tool => !item.except.includes(tool));
   if (was.on !== item.on) {
     const entry: Asked = item.on ? { kind: 'on', cause: 'switch', fill: 'written' } : { kind: 'off', cause: 'switch', fill: 'removed' };
-    if (!asked.forPlugin && (out || back)) Object.assign(entry, { wasExcept: [...was.except], nowExcept: [...item.except] });
+    if (!asked.forPlugin && (out || back)) {
+      Object.assign(entry, { wasExcept: [...was.except], nowExcept: [...item.except] });
+      const onlyIn = item.on ? harnessIds.filter(tool => !item.except.includes(tool)) : [];
+      const alsoRead = onlyIn.length === 1 ? pass.disk.readers?.(item, onlyIn[0]!) : undefined;
+      if (alsoRead?.length) entry.alsoRead = alsoRead;
+    }
     pass.asked.set(item.key, entry);
     return;
   }

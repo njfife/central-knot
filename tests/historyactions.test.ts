@@ -244,6 +244,12 @@ test('An Off row turned on in one tool records wasExcept and nowExcept: exact Un
   const onlyClaude: HarnessId[] = ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
   const onOnly = entry({ kind: 'on', cause: 'switch', wasExcept: ['codex-cli', 'pi-cli'], nowExcept: onlyClaude, losers: [{ tool: 'claude-cli', hash: '' }] });
   assert.equal(librarySentence(onOnly, libraryWords.skills, tools)?.text, 'Turned on in Claude Code; kept out of every other tool.');
+  // With alsoRead recorded at the click: names the readers, and Undo ignores the field.
+  const onAlsoRead = { ...onOnly, alsoRead: ['opencode-cli' as HarnessId] };
+  assert.equal(librarySentence(onAlsoRead, libraryWords.skills, tools)?.text, 'Turned on in Claude Code; kept out of every other tool; OpenCode reads it too.');
+  assert.deepEqual(offered(onAlsoRead, item({ except: onlyClaude })), ['Undo', { key: 'reviewer', on: false, except: ['codex-cli', 'pi-cli'] }]);
+  assert.equal(librarySentence({ ...onOnly, alsoRead: ['opencode-cli', 'pi-cli'] }, libraryWords.skills, tools)?.text,
+    'Turned on in Claude Code; kept out of every other tool; OpenCode and Pi read it too.');
   // While keep-outs still equal nowExcept (order-independent), Undo puts Off and the earlier keep-outs back exactly.
   assert.deepEqual(offered(onOnly, item({ except: [...onlyClaude].reverse() })), ['Undo', { key: 'reviewer', on: false, except: ['codex-cli', 'pi-cli'] }]);
   // Empty wasExcept (kept out of nothing before) still restores exact Undo.

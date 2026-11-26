@@ -592,6 +592,8 @@ export interface HistoryEvent {
   /** 'on' / 'off' (`cause` 'switch'): keep-outs before and after when a person's switch changed `on` together with `except`. */
   wasExcept?: HarnessId[];
   nowExcept?: HarnessId[];
+  /** 'on' (`cause` 'switch', one tool): managed tools that also read that tool's skills folder at the click (skills.ts readers). */
+  alsoRead?: HarnessId[];
   /**
    * A library item's: what made it happen, read by historyactions.ts alone. `switch`: the person's switch ('on' / 'off'). `found`:
    * a found item taken in by a click on Add ('on'; `winner`: where it was found). `sync-everything`: the same, taken in by the
@@ -1115,6 +1117,8 @@ export interface LibraryFacts {
   anotherWay?: Partial<Record<HarnessId, string>>;
   /** Skills: for a tool reading another managed tool's skills folder (skills.ts anotherWay), which tool's copy it reads, set only where that tool holds a copy now. */
   readsFrom?: Partial<Record<HarnessId, HarnessId>>;
+  /** Skills: for each tool, managed tools that read its skills folder and would load the skill from there (skills.ts readers). */
+  readBy?: Partial<Record<HarnessId, HarnessId[]>>;
   /**
    * Skills, found with copies that differ: what stops one tool's copy being the one every tool takes (the copy question): a
    * tool holding another copy that wouldn't load this one, with why (copywords.ts cantUse leads it in).
