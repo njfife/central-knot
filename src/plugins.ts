@@ -563,7 +563,8 @@ async function folderItem(context: PluginContext, folderPath: string, plugin: st
 }
 
 /**
- * Installed only with files at the path the tool records; a record with no files is Not known yet (PLG-03). Never scans.
+ * Installed only with files at the path the tool records; an enabled record with no files is Not known yet (PLG-03), while
+ * Copilot CLI's live `false` record with no folder is not installed. Never scans.
  * `entry` (the plugin's marketplace.json entry) says where its skills are, for the skills an installed copy holds.
  */
 export async function installState(context: PluginContext, tool: PluginTool, marketplace: string, plugin: string, entry?: Record<string, unknown>): Promise<InstallState> {
@@ -600,7 +601,10 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
       if (typeof enabled === 'boolean' && source?.source === 'directory' && folderPath) {
         const item = await folderItem(context, folderPath, plugin);
         const folder = item?.folder;
-        if (folder && (await hasFiles(folder))) return { ...(await installedCopy(folder, item.entry ?? entry, { live: true, version: item.version, readAs: { skillsListReplaces: true } }, async skills => copilotSkillsOff(settings, plugin, skills))), ...(enabled ? {} : { off: true as const }) };
+        if (folder && (await hasFiles(folder))) {
+          const copy = await installedCopy(folder, item.entry ?? entry, { live: true, version: item.version, readAs: { skillsListReplaces: true } }, async skills => copilotSkillsOff(settings, plugin, skills));
+          return enabled ? copy : { ...copy, off: true };
+        }
         if (enabled) return { state: 'not-known', reason: 'Copilot CLI lists it, but the folder it loads from is gone.' };
       }
       return { state: 'not-installed' };
@@ -1436,6 +1440,7 @@ export async function uninstall(context: PluginContext, marketplace: string, plu
   const held = await heldBy(context, tool, marketplace, source);
   if (held) return { tool, outcome: 'held', message: heldReason(tool, marketplace, held), runs: [] };
   const before = await installState(context, tool, marketplace, plugin);
+  // Copilot CLI's uninstall of a live folder copy only sets enabledPlugins to false (its folder stays), which installState reads as installed, live and off; that counts as uninstalled here.
   const gone = (at: InstallState) => at.state === 'not-installed' || (tool === 'copilot-cli' && at.state === 'installed' && !!at.live && !!at.off);
   if (gone(before)) return { tool, outcome: 'uninstalled', message: `Not installed in ${name}.`, runs: [] };
   const id = `${plugin}@${marketplace}`, beforeReloads = await installedReloads(context, tool, marketplace, plugin, false);

@@ -535,22 +535,6 @@ export function switchWords(view: PluginsView, entry: MarketplaceView, plugin: s
 export const addWords = (plugin: string, tools: HarnessId[]) =>
   `${plugin} is in ${andList(tools.map(tool => names[tool]))}, installed outside Central Knot. Add turns it on here: it goes into every other tool here that takes it, and Undo takes it out again.`;
 
-/**
- * What the Undo of a plugin's turn can't put back, said beside its result: an uninstall's Undo installs the marketplace's copy
- * as it is now, not the copy that was there; a plugin its marketplace no longer offers (or whose marketplace can't be read)
- * can't be installed again; and a tool's own switches for its single skills, MCP servers or agents go with its copy.
- * `items`: the home's plugin items as read before the click (HomeView pluginItems), for those switches. Empty when no copy
- * was uninstalled.
- */
-export function undoLimits(view: PluginsView, entry: MarketplaceView, plugin: string, removed: HarnessId[], items: { tool: HarnessId; plugin: string; marketName: string; serversOff?: string[]; agentsOff?: string[] }[] = []): string[] {
-  if (!removed.length) return [];
-  const gone = entry.plugins.find(candidate => candidate.name === plugin)?.gone;
-  const switched = removed.filter(tool => { const state = stateOf(entry, plugin, tool); const item = items.find(each => each.tool === tool && each.plugin === plugin && each.marketName === entry.name);
-    return (state.state === 'installed' && !!state.skillsOff?.length) || !!item?.serversOff?.length || !!item?.agentsOff?.length; });
-  return [gone ? `Undo can’t install it again: ${unavailable(view, entry, plugin, removed[0]!) ?? MARKET_UNREAD}` : 'Undo installs the marketplace’s copy as it is now.',
-    switched.length ? `${andList(switched.map(tool => names[tool]))}’s own switches for its single items aren’t put back.` : ''].filter(Boolean);
-}
-
 /** Why one of a plugin's items is not on in a tool (OUT), or a reason of its own: it couldn't be read, or the tool can't hold it. */
 export type ItemOut = keyof typeof OUT | { cannot: string };
 /** "a skill", "an agent", or several: "MCP servers". */

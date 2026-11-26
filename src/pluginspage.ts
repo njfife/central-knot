@@ -353,7 +353,7 @@ function undoButton(): HTMLElement | null {
 const UNDO_WORDS: [PluginOp['action'][], string][] = [[['remove'], 'uninstalls it from'], [['install'], 'reinstalls it in'],
   [['skill-on', 'skill-off', 'part-on', 'part-off', 'plugin-on', 'plugin-off'], 'turns each switch back as it was in']];
 
-/** Undo's tooltip, from what it will run (`back`): what it reverses where, that an update in the same run stays, and what a switch's Undo can't put back. */
+/** Undo's tooltip, from what it will run (`back`): what it reverses where, and that an update in the same run stays. */
 function undoTitle(back: PluginOp[]): string {
   const where = (actions: PluginOp['action'][]) => andList([...new Set(back.filter(op => actions.includes(op.action)).map(op => op.tool))].sort(byToolOrder).map(tool => names[tool]));
   const does = UNDO_WORDS.filter(([actions]) => where(actions)).map(([actions, verb]) => `${verb} ${where(actions)}`);
@@ -361,7 +361,7 @@ function undoTitle(back: PluginOp[]): string {
   // A switch's Undo names its plugin: several plugins' clicks may have run since the page was last read.
   const plugin = !market.lastRun?.undo && market.lastRun?.turn ? ` for ${market.lastRun.turn.plugin}` : '';
   const said = [`Reverses what changed${plugin}${does.length ? `, through each tool’s own command or switch: ${andList(does)}` : ''}.`, updated ? 'The update itself stays: it can’t be undone.' : ''];
-  return [...said, ...(market.lastRun?.turn?.limits ?? [])].filter(Boolean).join(' ');
+  return said.filter(Boolean).join(' ');
 }
 
 const dismiss = (onclick: () => void, id?: string) => closeButton(() => { onclick(); rerender(); }, { id });
@@ -409,12 +409,10 @@ function runLine(lines: ResultLine[], advice: ReloadAdvice, elsewhere: boolean, 
     const sentence = elsewhere
       ? changed.length ? [last.undo ? 'Undone: ' : 'Last change: ', ...changed.flatMap((part, at) => [at ? ', ' : '', link(part, at)]), '.'] : []
       : parts.map((part, at) => (typeof part === 'string' ? part : link(part, at)));
-    // What a switch's Undo can't put back is said with the result, so the promise beside Undo is the whole of it.
-    const limits = !last.undo && last.turn?.limits.length ? ` ${last.turn.limits.join(' ')}` : '';
     const lead = failed.length ? `${notAllThrough(failed, short.of)} ` : '';
     const profile = whole && last.profileLine ? ` ${last.profileLine}` : '';
     return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, failed.length ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'),
-      h('span.toolbar-result-text', { title: `${lead}${resultSentence(lines, last.undo)}${limits}${profile}` }, lead, sentence, limits ? h('span.toolbar-result-more', {}, limits) : null, profile || null), back, dismiss(closeRun, 'report-dismiss'));
+      h('span.toolbar-result-text', { title: `${lead}${resultSentence(lines, last.undo)}${profile}` }, lead, sentence, profile || null), back, dismiss(closeRun, 'report-dismiss'));
   }
   // An Undo that undid nothing still offers its way back here, whether or not its failures are still shown.
   if (last && back) return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, h('span.toolbar-result-text', {}, 'Not everything was undone.'), back, dismiss(closeRun, 'report-dismiss'));

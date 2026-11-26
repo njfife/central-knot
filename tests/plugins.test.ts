@@ -369,6 +369,13 @@ test('Installed means files where the tool records them; a record with no files 
     // Copilot CLI's uninstall of a folder marketplace's plugin sets its record to false while its folder stays: installed, live and off.
     await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'directory', path: live } } }, enabledPlugins: { 'marker@ck-test-market': false } }));
     assert.partialDeepStrictEqual(await installState(box.context, 'copilot-cli', 'ck-test-market', 'marker'), { state: 'installed', path: join(live, 'plugins/marker'), live: true, off: true, version: '0.3.0' });
+    // False where the marketplace is not a directory, or where the plugin's folder exists but is empty, both read not installed.
+    await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'github', repo: 'acme/market' } } }, enabledPlugins: { 'marker@ck-test-market': false } }));
+    assert.equal((await installState(box.context, 'copilot-cli', 'ck-test-market', 'marker')).state, 'not-installed');
+    await rm(join(live, 'plugins/full'), { recursive: true });
+    await mkdir(join(live, 'plugins/full'), { recursive: true });
+    await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'directory', path: live } } }, enabledPlugins: { 'full@ck-test-market': false } }));
+    assert.equal((await installState(box.context, 'copilot-cli', 'ck-test-market', 'full')).state, 'not-installed');
     // Claude Code records a cache copy of a folder marketplace's plugin, and its version then, but loads the folder.
     await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'ck-test-market': { source: { source: 'directory', path: live }, installLocation: live } }));
     await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'marker@ck-test-market': [{ scope: 'user', installPath: cache, version: '0.1.0' }] } }));

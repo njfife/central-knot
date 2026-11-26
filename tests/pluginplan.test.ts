@@ -74,6 +74,12 @@ test('An Undo says what came back, and keeps what it did not get to', () => {
   ];
   assert.equal(resultSentence(resultLines(done.slice(0, 2), true), true), 'Undone: pdf removed from Claude Code; docx put back in Codex.');
   assert.deepEqual(resultParts(resultLines(done.slice(0, 1), true), true), ['Undone: ', { plugin: 'pdf', source: 'anthropics/skills' }, ' removed from Claude Code', '.']);
+  // Undo of a fresh live Copilot CLI install leaves it off rather than removed: "turned off in", distinct from an Off-then-On's "off again in".
+  const liveUndone: PluginDone[] = [
+    { ...op('pdf', 'copilot-cli', 'remove'), report: { tool: 'copilot-cli', outcome: 'plugin-off', message: '', runs: [], changed: true } },
+    { ...op('docx', 'claude-cli', 'plugin-off'), report: { tool: 'claude-cli', outcome: 'plugin-off', message: '', runs: [], changed: true } },
+  ];
+  assert.equal(resultSentence(resultLines(liveUndone, true), true), 'Undone: pdf turned off in Copilot CLI; docx off again in Claude Code.');
   assert.deepEqual(notUndone(undoOps, done).map(entry => entry.plugin), ['xlsx']);
   // A run where nothing succeeded has no result sentence (its failures show in the problem band).
   const failed: PluginDone[] = [{ ...undoOps[2]!, report: { tool: 'claude-cli', outcome: 'failed', message: 'x', runs: [] } }];

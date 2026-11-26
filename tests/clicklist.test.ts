@@ -2946,7 +2946,7 @@ test('Plugin act (applyPluginOps, usePlugins, undoTurn): plain Undo and Update d
   nextHome = viewWith(false);
   market.lastRun = {
     done: [], undo: false, home: '/home',
-    turn: { source: '/market', plugin: 'alpha', before: null, back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-off' }], limits: [] },
+    turn: { source: '/market', plugin: 'alpha', before: null, back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-off' }] },
   };
   t.mock.method(api, 'undoPluginTurn', async () => ({
     done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-off', report: { tool: 'claude-cli', outcome: 'plugin-off', changed: true, message: 'Off again.', runs: [] } }],

@@ -11,8 +11,9 @@ import { andList, byToolOrder, toolNames as names } from './words.ts';
 /**
  * Install, update or uninstall a plugin, turn one of its skills (ENB-06: skill-off, skill-on) or one of its MCP servers or
  * agents (part-off, part-on) off or back on, or turn the whole plugin off or back on in the tool's own settings (plugin-off,
- * plugin-on), in one tool. The Plugins page's clicks run update and a skill's switch; install and remove come from a plugin's
- * switch and an Undo. The four items actions (isItems) are a plugin's items in Pi, OpenCode and Antigravity (pluginlibrary.ts).
+ * plugin-on), in one tool. The Plugins page's clicks run update and a skill's switch; a plugin's switch runs install, plugin-on
+ * and plugin-off; `remove` is only the Undo of a fresh install (uninstalling a cached copy, or turning a live Copilot CLI copy
+ * off in marketplaces.ts undoTurn). The four items actions (isItems) are a plugin's items in Pi, OpenCode and Antigravity (pluginlibrary.ts).
  */
 export type PluginAction = 'install' | 'update' | 'remove' | 'skill-off' | 'skill-on' | 'part-off' | 'part-on' | 'plugin-off' | 'plugin-on'
   | 'install-items' | 'remove-items' | 'update-items' | 'items-back';
@@ -181,12 +182,15 @@ export function resultLines(ran: PluginDone[], undo = false, { after = false } =
     const noted = (outcome: ActionReport['outcome']) => itemRuns(outcome, true).flatMap(entry => entry.report.notes ?? []).map(note => `; ${note.replace(/\.$/, '')}`).join('');
     const itemGroups: Group[] = [[items('installed', true), undo ? 'its items as they were in' : 'its items put in', noted('installed')], [items('uninstalled', true), undo ? 'its items as they were, out of' : 'its items taken out of', noted('uninstalled')],
       [items('updated', true), 'its items updated in', noted('updated')], [items('installed', false), 'its items already in'], [items('uninstalled', false), 'its items already out of'], [items('updated', false), 'its items already up to date in']];
+    const turnedOff = mine.filter(entry => entry.action === 'remove' && entry.report.outcome === 'plugin-off' && !!entry.report.changed)
+      .sort((first, second) => byToolOrder(first.tool, second.tool)).map(entry => names[entry.tool]);
+    const offAgain = tools('plugin-off', true).filter(tool => !turnedOff.includes(tool));
     const groups: Group[] = item
       ? [[tools(off, true), undo ? `${item} off again in` : `${item} turned off in`], [tools(on, true), undo ? `${item} back on in` : `${item} turned on in`],
         [tools(off, false), `${item} already off in`], [tools(on, false), `${item} already on in`]]
       : [[tools('installed', true), undo ? 'put back in' : 'installed in'], ...updatedGroups(mine, !after), [tools('updated', false), 'already up to date in'], [tools('uninstalled', true), undo ? 'removed from' : 'uninstalled from'],
         [tools('installed', false), 'already in'], [tools('uninstalled', false), 'wasn’t installed in'],
-        [tools('plugin-off', true), undo ? 'off again in' : 'turned off in'], [tools('plugin-on', true).filter(tool => !onWith.some(entry => names[entry.tool] === tool)), undo ? 'back on in' : 'turned on in'],
+        [offAgain, undo ? 'off again in' : 'turned off in'], [turnedOff, 'turned off in'], [tools('plugin-on', true).filter(tool => !onWith.some(entry => names[entry.tool] === tool)), undo ? 'back on in' : 'turned on in'],
         // Past three, the items left off are counted, not named.
         ...onWith.map((entry): Group => { const held = heldWith(entry); return [[names[entry.tool]], 'turned on in', ` with ${held.length > 3 ? `${held.length} items` : andList(held.map(itemSaid))} left off`]; }),
         [tools('plugin-off', false), 'already off in'], [tools('plugin-on', false), 'already on in'], ...itemGroups];
@@ -280,10 +284,9 @@ export interface LastRun { done: PluginDone[]; undo: boolean; home: string; rest
   /** Appended profileLeftUse sentence when the run ended every profile in use (pluginstate.ts, pluginspage.ts). */
   profileLine?: string;
   /**
-   * Set when a plugin's switch made the run (marketplaces.ts turn): the plugin's entry before it (null: none), its Undo as main
-   * gave it (`back`), and what that Undo can't put back (pluginstatus.ts undoLimits).
+   * Set when a plugin's switch made the run (marketplaces.ts turn): the plugin's entry before it (null: none) and its Undo as main gave it (`back`).
    */
-  turn?: { source: string; plugin: string; before: PluginEntry | null; back: PluginOp[]; limits: string[] } }
+  turn?: { source: string; plugin: string; before: PluginEntry | null; back: PluginOp[] } }
 
 /** The calls a run needs, as the page's API gives them (tests pass their own). */
 export interface PlanApi {

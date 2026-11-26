@@ -27,7 +27,7 @@ import { pin, placeIn } from './itemrow.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { plural } from './model.ts';
 import { notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, succeeded, unreachedOps, type LastRun, type PluginDone, type PluginOp, type ResultLine } from './pluginplan.ts';
-import { FIND_FROM, boxOf, categoriesOf, copiesToCompare, installedFrom, marketTitle, matches, pluginPlace, samePart, toolMark, undoLimits } from './pluginstatus.ts';
+import { FIND_FROM, boxOf, categoriesOf, copiesToCompare, installedFrom, marketTitle, matches, pluginPlace, samePart, toolMark } from './pluginstatus.ts';
 import { counted } from './pluginswitch.ts';
 import { yoursStay } from './pluginline.ts';
 import type { PluginEntry } from './pluginrecord.ts';
@@ -394,7 +394,7 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
 export const usePlugins = (entry: MarketplaceView, plugin: string, tool: HarnessId, item: Pick<YourName, 'kind' | 'key'>) => act('applying', async () => {
   const home = app.home!.home, result = await api().takePluginItem(entry.source, plugin, { kind: item.kind, key: item.key }, tool, home)
     .catch((): PluginTurnResult => ({ stopped: 'That could not finish. Click Refresh to see where things stand.', done: [] }));
-  market.lastRun = { done: result.done, undo: false, home, ...(result.back ? { turn: { source: entry.source, plugin, before: result.before ?? null, back: result.back, limits: [] } } : {}) };
+  market.lastRun = { done: result.done, undo: false, home, ...(result.back ? { turn: { source: entry.source, plugin, before: result.before ?? null, back: result.back } } : {}) };
   market.problem = result.stopped;
   await readAgain();
   return market.problem ?? (resultSentence(resultLines(result.done, false), false) || `Nothing changed for ${plugin}.`);
@@ -484,7 +484,7 @@ function runEnded(): void {
 /**
  * One click, in its turn, through main (marketplaces.ts turn: recorded first, then what its table owes): its row says it runs,
  * then what main returned; then the view is read back, so its switch and marks are true and it is free again, and the home owes
- * a read at the run's end. The last click to end holds the one Undo, with what that Undo can't put back. A click another home
+ * a read at the run's end. The last click to end holds the one Undo. A click another home
  * dropped (resetMarket) is passed over.
  */
 async function runClick(click: PluginClick, home: string): Promise<void> {
@@ -492,7 +492,7 @@ async function runClick(click: PluginClick, home: string): Promise<void> {
   const before = profilesBefore();
   click.run.before ??= before;
   retire(click.plugin);
-  const view = market.view, entry = view?.marketplaces.find(each => each.source === click.source);
+  const view = market.view;
   market.working = { source: click.source, plugin: click.plugin, tools: click.tool ? [click.tool] : view?.tools ?? [] };
   rerender();
   const result = await api().turnPlugin(click.source, click.plugin, click.what, click.tool, home).catch((): PluginTurnResult => ({ stopped: 'That could not finish. Click Refresh to see where things stand.', done: [] }));
@@ -502,9 +502,7 @@ async function runClick(click: PluginClick, home: string): Promise<void> {
   oweHomeRead();
   click.ran = result;
   market.working = undefined;
-  const removed = result.done.filter(step => step.action === 'remove' && step.report.changed).map(step => step.tool);
-  const limits = view && entry ? undoLimits(view, entry, click.plugin, removed, app.home?.pluginItems) : [];
-  market.lastRun = { done: result.done, undo: false, home, ...(result.back ? { turn: { source: click.source, plugin: click.plugin, before: result.before ?? null, back: result.back, limits } } : {}) };
+  market.lastRun = { done: result.done, undo: false, home, ...(result.back ? { turn: { source: click.source, plugin: click.plugin, before: result.before ?? null, back: result.back } } : {}) };
   if (clickList.turns.some(turn => turn.run === click.run && turn.state === 'waiting'))
     announce(result.stopped ?? (resultSentence(resultLines(result.done, false), false) || `Nothing changed for ${click.plugin}.`), !result.stopped && undoOps().length > 0);
   rerender();
