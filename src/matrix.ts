@@ -3058,6 +3058,7 @@ function foundSkillCopies(t: Table, skill: ItemRow): FoundCopy[] {
   }
   return unique;
 }
+/** Change token for a found copy: its folder hash when hashed, else the home's readId so an unhashed copy reloads on every new view. */
 const copyToken = (copy: FoundCopy) => copy.hash ?? `read:${state.home?.readId ?? 0}`;
 const hasSkillFile = (t: Table, skill: ItemRow) => skill.kind === 'skills' && (!!inLibrary(itemOf(skill)) || foundSkillCopies(t, skill).length > 0);
 /** Reloads an open inline file panel when its stored version or found copy's token moves (or its chosen found copy disappears). */
@@ -3080,8 +3081,10 @@ function setSkillFile(t: Table, skill?: ItemRow, file = 'SKILL.md', refocus = fa
   const kept = skill && inLibrary(itemOf(skill));
   const chosen = !kept && skill ? (copy ?? foundSkillCopies(t, skill)[0]) : undefined;
   const sameHolder = !!prev && prev.id === id && prev.copy?.tool === chosen?.tool && prev.copy?.rootLabel === chosen?.rootLabel;
+  const sameFile = sameHolder && prev.file === file;
   const next: View['openFile'] = id && (kept || chosen)
-    ? { id, token: kept ? kept.hash : copyToken(chosen!), file, ...(chosen ? { copy: { tool: chosen.tool, rootLabel: chosen.rootLabel } } : {}), files: sameHolder ? prev?.files : undefined }
+    ? { id, token: kept ? kept.hash : copyToken(chosen!), file, ...(chosen ? { copy: { tool: chosen.tool, rootLabel: chosen.rootLabel } } : {}),
+      files: sameHolder ? prev.files : undefined, loaded: sameFile ? prev.loaded : undefined }
     : undefined;
   if (next && t.view.comparing === next.id) t.view.comparing = undefined;
   t.view.openFile = next;
@@ -3092,10 +3095,13 @@ function setSkillFile(t: Table, skill?: ItemRow, file = 'SKILL.md', refocus = fa
   void load.catch(() => null).then(found => {
     if (t.view.openFile !== next) return;
     if (!found && file !== 'SKILL.md') return setSkillFile(t, skill, 'SKILL.md', false, undefined, true, chosen);
-    next.loaded = found ? { text: found.text, note: found.note } : null;
+    const loaded = found ? { text: found.text, note: found.note } : null;
+    const unchanged = sameFile && (next.loaded === loaded || (!!next.loaded && !!loaded && next.loaded.text === loaded.text && next.loaded.note === loaded.note))
+      && (!found || JSON.stringify(next.files) === JSON.stringify(found.files));
+    next.loaded = loaded;
     if (found) next.files = found.files;
     if (draw && prev?.id !== next.id) revealUnderRow(next.id);
-    rerender();
+    if (!unchanged) rerender();
   });
 }
 /** Open file mark right after a library or found skill's name (Library list and a tool's Skills tab; skills only). */

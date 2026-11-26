@@ -1065,7 +1065,7 @@ let touched = false, settingsTouched = false;
 /** How many watcher events have come since launch: a view compares it across its pass (syncAndView). */
 let nudges = 0;
 
-/** The tools Central Knot manages in the open home, read now: the one way the requests below learn them. */
+/** The tools Central Knot manages in the open home, read fresh (read-only calls that follow the latest view use readFor). */
 const toolsNow = async (): Promise<HarnessId[]> => managedNow(context(), await read());
 
 /**
@@ -1834,7 +1834,7 @@ app.whenReady().then(async () => {
   handleNow('skills:found-file', async (key, tool, rootLabel, file) => {
     if (!current || typeof key !== 'string' || !isTool(tool) || (rootLabel !== undefined && typeof rootLabel !== 'string') || typeof file !== 'string') return null;
     const shared = context();
-    if (!(await managedNow(shared, handoff.home === shared.home ? handoff.snapshots : await read())).includes(tool)) return null;
+    if (!(await managedNow(shared, await readFor(handoff.id))).includes(tool)) return null;
     return (await skillFoundFile(shared, key, tool, rootLabel, file)) ?? null;
   });
   // The git repo the Managed set lives in. Reading it, and asking the repo for its latest commit, waits for no sync pass;

@@ -102,7 +102,7 @@ export function configRoot(definition: HarnessDefinition, home: string, override
   return override === undefined ? join(home, definition.defaultConfig) : override;
 }
 
-/** Whether a directory entry in a skills folder counts as a skill: a folder or link, not reserved, and not a skipped dot-folder. */
+/** Whether a directory entry in a skills folder may hold a skill (a folder or link, not reserved, and not a skipped dot-folder; callers still check SKILL.md). */
 export const isSkillEntry = (definition: HarnessDefinition, entry: Dirent): boolean =>
   !(entry.name.startsWith('.') && !definition.loadsDotFolders) && !definition.reservedSkills.includes(entry.name)
   && (entry.isDirectory() || entry.isSymbolicLink());

@@ -19331,8 +19331,9 @@ async function skillFileFlow() {
 
       // Same SKILL.md in two tools, differing plan.md, plus an inner link in each (unhashed): chooser stays and Refresh reloads edits.
       const unhashedBody = text('linked-plan', 'Shared SKILL.md across unhashed copies.');
+      const unhashedPlan = Array.from({ length: 60 }, (_, index) => `Plan step ${index + 1}: Claude unhashed plan.`).join('\n') + '\n';
       const unhashedClaude = skill(claudeSkills, 'linked-plan', unhashedBody);
-      writeFileSync(join(unhashedClaude, 'plan.md'), 'Claude unhashed plan.\n');
+      writeFileSync(join(unhashedClaude, 'plan.md'), unhashedPlan);
       symlinkSync('SKILL.md', join(unhashedClaude, 'alias.md'));
       const unhashedCopilot = skill(copilotSkills, 'linked-plan', unhashedBody);
       writeFileSync(join(unhashedCopilot, 'plan.md'), 'Copilot unhashed plan.\n');
@@ -19538,7 +19539,28 @@ async function skillFileFlow() {
         await a.all('.file-open-box .file-tab', 'e.textContent.trim()'),
       ], [['Claude Code’s copy', 'Copilot CLI’s copy'], ['SKILL.md', 'plan.md']]);
       await clickTab('plan.md');
-      await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Claude unhashed plan.'));
+      await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Plan step 60: Claude unhashed plan.'));
+      // Unchanged unhashed file scrolled halfway: Refresh keeps the text and scroll place without showing Reading….
+      const beforeScroll = await a.run(`(() => {
+        const pre = document.querySelector('.file-open-box pre.content');
+        pre.scrollTop = Math.round((pre.scrollHeight - pre.clientHeight) / 2);
+        window.ckSawReading = false;
+        window.ckReadObs = new MutationObserver(() => {
+          if (document.querySelector('.file-open-box .file-open-state')?.textContent?.includes('Reading')) window.ckSawReading = true;
+        });
+        window.ckReadObs.observe(document.getElementById('main'), { childList: true, subtree: true, characterData: true });
+        return Math.round(pre.scrollTop);
+      })()`);
+      await a.click('#header-refresh');
+      await a.run('window.centralKnot.getSettings().then(() => true)');
+      await a.settle();
+      const afterUnchanged = await a.run(`(() => {
+        window.ckReadObs?.disconnect();
+        const pre = document.querySelector('.file-open-box pre.content');
+        return [window.ckSawReading, Math.round(pre?.scrollTop ?? -1)];
+      })()`);
+      same('refreshing an unchanged unhashed file keeps the shown text and scroll place without flashing Reading…',
+        [beforeScroll > 0, ...afterUnchanged], [true, false, beforeScroll]);
       writeFileSync(join(unhashedClaude, 'plan.md'), 'Claude unhashed plan, edited.\n');
       await a.click('#header-refresh');
       await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Claude unhashed plan, edited.'), 40);
@@ -19546,16 +19568,14 @@ async function skillFileFlow() {
         (await a.text('.file-open-box pre.content') ?? '').includes('Claude unhashed plan, edited.'),
         (await a.text('.file-open-foot .path-text'))?.trim(),
       ], [true, `${prefix}/.claude/skills/linked-plan/plan.md`]);
-      if (await a.exists('.file-open-box .file-copy-select select')) {
-        await a.run(`(() => { const s = document.querySelector('.file-open-box .file-copy-select select'); s.value = '1'; s.dispatchEvent(new Event('change')); })()`);
-        await until(async () => (await a.text('.file-open-foot .path-text') ?? '').includes('.copilot/skills/linked-plan/SKILL.md'));
-        await clickTab('plan.md');
-        await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Copilot unhashed plan.'));
-        same('switching to the second unhashed copy reads its own plan.md', [
-          (await a.text('.file-open-box pre.content') ?? '').includes('Copilot unhashed plan.'),
-          (await a.text('.file-open-foot .path-text'))?.trim(),
-        ], [true, `${prefix}/.copilot/skills/linked-plan/plan.md`]);
-      }
+      await a.run(`(() => { const s = document.querySelector('.file-open-box .file-copy-select select'); s.value = '1'; s.dispatchEvent(new Event('change')); })()`);
+      await until(async () => (await a.text('.file-open-foot .path-text') ?? '').includes('.copilot/skills/linked-plan/SKILL.md'));
+      await clickTab('plan.md');
+      await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Copilot unhashed plan.'));
+      same('switching to the second unhashed copy reads its own plan.md', [
+        (await a.text('.file-open-box pre.content') ?? '').includes('Copilot unhashed plan.'),
+        (await a.text('.file-open-foot .path-text'))?.trim(),
+      ], [true, `${prefix}/.copilot/skills/linked-plan/plan.md`]);
       await a.press('Escape');
 
       // Same content in two tools: no chooser.

@@ -618,7 +618,7 @@ async function readSkillFile(directory: string, file: string): Promise<SkillFile
   let handle;
   try {
     handle = await open(path, 'r');
-    let buffer = Buffer.allocUnsafe(Math.min(info.size, FILE_LIMIT) + 1);
+    let buffer = Buffer.allocUnsafe(info.size + 1);
     let read = 0;
     while (read <= FILE_LIMIT) {
       if (read === buffer.length) buffer = Buffer.concat([buffer, Buffer.allocUnsafe(Math.min(buffer.length, FILE_LIMIT + 1 - read))]);
