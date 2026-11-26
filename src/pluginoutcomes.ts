@@ -23,8 +23,10 @@ const TEXT_EVENTS: Partial<Record<HarnessId, Record<string, string>>> = {
 const COPILOT_PROMPTS = ['userPromptSubmitted', 'UserPromptSubmit'];
 /** When a hook runs, if it is of a kind the tool is known to run (Appendix D): one of its TEXT_EVENTS, or Copilot CLI's prompt hook. */
 const knownToRun = (tool: HarnessId, hook: DeclaredHook) => TEXT_EVENTS[tool]?.[hook.event] ?? (tool === 'copilot-cli' && COPILOT_PROMPTS.includes(hook.event) ? PROMPT : undefined);
+/** Whether `event` can add text to `tool`'s sessions (the one table addsText and hooksourceview.ts canRun check). */
+export const isTextEvent = (tool: HarnessId, event: string) => Object.hasOwn(TEXT_EVENTS[tool] ?? {}, event);
 /** Whether a hook can add text to the tool's sessions: one of its events, and a program it starts. What it adds is known only when it runs. */
-export const addsText = (tool: HarnessId, hook: DeclaredHook) => !!hook.launch && Object.hasOwn(TEXT_EVENTS[tool] ?? {}, hook.event);
+export const addsText = (tool: HarnessId, hook: DeclaredHook) => !!hook.launch && isTextEvent(tool, hook.event);
 /** Copilot CLI runs a prompt hook and takes nothing it prints: its note says so where such a hook has no row. */
 export const ignoresText = (tool: HarnessId, hook: DeclaredHook) => tool === 'copilot-cli' && !!hook.launch && COPILOT_PROMPTS.includes(hook.event);
 /** When a tool's hooks that can add text run, in words: "when a session starts or when you send a prompt". */
