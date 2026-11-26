@@ -17,7 +17,7 @@ import { addsText, componentsFrom, outcomes, sessionHooksAbout, whenItRuns } fro
 import { clickNote, componentsOf, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, toolBox, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { pluginKey } from './pluginplan.ts';
-import { DIRECTORY, boxOf, cantSwitchSkill, comparableText, itemsIn, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, notInWhy, offeredVersion, otherVersionsLine, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionDiffers, versionToCompare, waitingWords, waitsToMove, whyNotCarried, yourSaid, type ToolMark } from './pluginstatus.ts';
+import { DIRECTORY, boxOf, cantSwitchSkill, comparableText, copyOff, itemsIn, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, notInWhy, offeredVersion, otherVersionsLine, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionDiffers, versionToCompare, waitingWords, waitsToMove, whyNotCarried, yourSaid, type ToolMark } from './pluginstatus.ts';
 import { hasCowork, pluginTools, takesPlugins } from './presence.ts';
 import { applyPluginOps, loadPlugins, market, openLink, shownDetail, toggleOpened, usePlugins } from './pluginstate.ts';
 import { pluginLink } from './sourcelink.ts';
@@ -242,8 +242,7 @@ const partList = (owner: string, parts: { name: string; text: string; mono?: boo
  * own) shows where it stands with a lock, can't be clicked, and its row or column says why.
  */
 function skillSwitch(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, skill: string, marketIndex: number) {
-  const state = stateOf(entry, plugin.name, tool);
-  const on = !(state.state === 'installed' && state.off) && !skillOff(entry, plugin.name, tool, skill);
+  const on = !copyOff(entry, plugin.name, tool) && !skillOff(entry, plugin.name, tool, skill);
   const why = cantSwitchSkill(view, entry, plugin.name, tool, skill);
   const label = `${skill} in ${names[tool]}: ${on ? 'on' : 'off'}. ${why ?? `Click to turn it ${on ? 'off' : 'on'} now; Undo turns it back.`}`;
   const control = switchToggle({ on, label, disabled: acting() || !!why, id: `pskill-${marketIndex}-${plugin.name}-${skill}-${tool}`,
@@ -267,8 +266,7 @@ function skillColumns(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   // A reason every skill in a column shares (a missing CLI, a preview-only home) is said once above the list. A held
   // skill's reason is its own, so held skills don't count against the rest of their column.
   const sharedReason = (tool: HarnessId) => {
-    const state = stateOf(entry, plugin.name, tool);
-    const wholeOff = state.state === 'installed' && !!state.off;
+    const wholeOff = copyOff(entry, plugin.name, tool);
     const reasons = skills.filter(skill => wholeOff || !skillOff(entry, plugin.name, tool, skill)?.held).map(skill => why(tool, skill));
     return reasons[0] && reasons.every(reason => reason === reasons[0]) ? reasons[0] : undefined;
   };

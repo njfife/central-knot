@@ -770,7 +770,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     if (shown.switchProblem || !known.record) return { stopped: shown.switchProblem ?? 'The plugins record isn’t there. Nothing was changed.', done: [] };
     if (!entry || !listed || (tool && !shown.tools.includes(tool))) return { stopped: 'It is no longer listed here, so nothing was changed. Read the page again.', done: [] };
     const before = entryOf(known.record, source, plugin);
-    // A copy the record keeps off (row 9) is not counted as having it: a tick elsewhere doesn't let it in.
+    // A copy that is off is not counted as having it: a tick elsewhere doesn't let it in, and unticking the last copy on turns the plugin Off.
     const has = shown.tools.filter(each => inUseIn(entry, plugin, each));
     const after = turnedEntry(before, what, tool, () => newEntry(entry.source, entry.name || before?.marketName || '', plugin, false), has, shown.tools);
     if (!after) return { stopped: 'That doesn’t apply to this plugin now, so nothing was changed. Read the page again.', done: [] };

@@ -730,7 +730,7 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], stayed:
   for (const click of clicks) parts.push({ click, done: await carryOut(click, page) });
   const went = parts.filter(part => !part.done.refused), did = parts.filter(part => part.done.did), changed = parts.flatMap(part => part.done.changed ?? []);
   const stops = saidByKind(parts.flatMap(part => (part.done.refused ? [[part.click.kind, part.done.refused] as [PageKind, string]] : [])), several);
-  const undos = did.flatMap(part => (part.done.undo ? [part.done.undo] : [])), regroups = clicks.some(click => click.regroups);
+  const undos = did.flatMap(part => (part.done.undo ? [part.done.undo] : [])).reverse(), regroups = clicks.some(click => click.regroups);
   const undo = did.length && undos.length === did.length ? () => void undoClick({ rows: changed, regroups }, undos) : undefined;
   keepOwn(parts.map(({ done }) => done.kept));
   // Each row that didn't go through in every tool (its kind refused, its own change held, or a tool kept it back) is said first
@@ -875,8 +875,8 @@ interface Undoable { kind: PageKind; made: string[]; back: PluginOp[]; turns?: T
  */
 const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async page => {
   const home = state.home!, several = new Set(parts.map(part => part.kind)).size > 1;
-  // The plugin items' switches go back first: other tools than the copies', so the rest is undone whatever they do.
-  const switchedBack = parts.flatMap(part => part.back), turnsBack = [...parts].reverse().flatMap(part => part.turns ?? []);
+  // The plugin items' switches go back first: other tools than the copies', so the rest is undone whatever they do (`parts` arrives newest first).
+  const switchedBack = parts.flatMap(part => part.back), turnsBack = parts.flatMap(part => part.turns ?? []);
   const unswitched = switchedBack.length || turnsBack.length ? await runSwitches(switchedBack, true, turnsBack) : undefined;
   const kindOfEntry = new Map(parts.flatMap(part => part.made.map(id => [id, part.kind] as const)));
   // History is stored newest-last (history.ts); reversing first keeps entries written in the same millisecond newest-first.
@@ -967,9 +967,10 @@ export const switchReasons = (ran: Awaited<ReturnType<typeof runSwitches>> | und
 export const problemKey = (entry: DestinationResult) => `problem:${entry.of ?? ''}:${entry.item}:${entry.harness ?? ''}:${entry.message}`;
 
 /**
- * Runs plugin switch choices (pluginswitch.ts) with each tool's own switch. A plugin that failed to come on leaves no item
- * switched off for it: those written before it are put back. Returns what ran, in lines, the tools where something didn't,
- * and the choices that turn it all back.
+ * Runs plugin switch choices (pluginswitch.ts): whole-plugin turns for listed plugins go through `turn` (`plugins:turn`, writing
+ * the plugins record and undoing through `undoTurn`), while per-item switches and unlisted plugins use each tool's own switch. A
+ * plugin that failed to come on leaves no item switched off for it: those written before it are put back. Returns what ran, in
+ * lines, the tools where something didn't, and the choices and turns that turn it all back.
  */
 export async function runSwitches(ops: PluginOp[], undo = false, turnsIn: TurnUndo[] = []) {
   // A plugin changes here as it does on its own page: the Plugins list's rows from before are no longer true (pluginstate.ts), and

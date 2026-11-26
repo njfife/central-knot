@@ -452,17 +452,15 @@ export type ToolMark = 'installed' | 'outdated' | 'items' | 'kept-off' | 'stays'
 
 /**
  * A copy the plugins record keeps installed and off (pluginrecord.ts row 9): the plugin isn't wanted in that tool, and the tool's own
- * switch has it off (`off`). It is not in use (pluginPlace, inUseIn), the automatic updates leave it (marketplaces.ts
- * pendingUpdates), a tick elsewhere doesn't count it as having the plugin (marketplaces.ts turn), and profiles and their Undo
- * leave it off (types.ts InstalledPlugin `keptOff`). Any copy that is `off` reads `kept-off` (toolMark), recorded or not.
+ * switch has it off (`off`). Distinct from the ToolMark `kept-off` below, which marks any installed copy that is `off`, recorded or not.
+ * It is not in use (pluginPlace), the automatic updates leave it (marketplaces.ts pendingUpdates), and profiles and their Undo
+ * leave it off (types.ts InstalledPlugin `keptOff`).
  */
 export const keptOff = (entry: Pick<PluginEntry, 'on' | 'except'> | undefined, tool: HarnessId, off: boolean | undefined) => !!entry && !!off && !wantedIn(entry, tool);
-/** Whether a tool has the plugin in use, as the view's switch reads it: installed whole or its items there, and not a copy kept off (keptOff). */
+/** Whether a tool has the plugin in use, as the view's switch reads it: installed whole and on, or its items there. */
 export const inUseIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) => {
-  const sw = entry.switches?.[plugin];
-  const has = sw?.tools[tool]?.has;
-  const state = stateOf(entry, plugin, tool);
-  return (has === 'whole' || has === 'items') && !keptOff(sw?.entry, tool, state.state === 'installed' && state.off);
+  const has = entry.switches?.[plugin]?.tools[tool]?.has;
+  return (has === 'whole' && !copyOff(entry, plugin, tool)) || has === 'items';
 };
 
 /**
@@ -482,6 +480,7 @@ export function toolMark(view: PluginsView, entry: MarketplaceView, plugin: stri
   const unwanted = recorded && !owed.wanted ? ` ${kept ? `It is kept out of ${name}` : 'The plugin is off'}${heldWhy}` : '';
   if (state.state === 'not-known') return { mark: 'not-known', words: `${state.reason}${unwanted}` };
   if (state.state === 'installed') {
+    // ToolMark `kept-off` is any copy that is `off`, recorded or not (unlike `keptOff` above, which requires the record to keep the tool out).
     if (state.off) return { mark: 'kept-off', words: `Off in ${name}: still installed${state.version ? ` at ${state.version}` : ''}, with its data and settings.` };
     const version = state.version ? ` ${state.version}` : '';
     const how = [state.live ? 'loaded live from the marketplace folder' : '', state.directory ? 'from the Anthropic Directory' : '', stale ? 'which differs from the marketplace’s copy' : ''].filter(Boolean).join(', ');
@@ -522,16 +521,19 @@ export function waitingWords(view: PluginsView, entry: MarketplaceView, plugin: 
 }
 
 /** Whether a tool has the plugin installed whole and turned off by its own switch. */
-const copyOff = (entry: MarketplaceView, plugin: string, tool: HarnessId) => {
+export const copyOff = (entry: MarketplaceView, plugin: string, tool: HarnessId) => {
   const state = stateOf(entry, plugin, tool);
   return state.state === 'installed' && !!state.off;
 };
 
-/** Whether a plugin's switch shows partial: On, and kept out of some tool here that could take it or off in one. */
-export const switchPartial = (view: PluginsView, entry: MarketplaceView, plugin: string) => {
+/** The tools here where an On plugin is off: kept out of a tool that takes it, or installed and off by its own switch. */
+const offHere = (view: PluginsView, entry: MarketplaceView, plugin: string) => {
   const sw = entry.switches?.[plugin];
-  return !!sw?.entry?.on && view.tools.some(tool => (sw.entry!.except.includes(tool) && !!sw.tools[tool]?.takes) || copyOff(entry, plugin, tool));
+  return sw?.entry?.on ? view.tools.filter(tool => (sw.entry!.except.includes(tool) && !!sw.tools[tool]?.takes) || copyOff(entry, plugin, tool)) : [];
 };
+
+/** Whether a plugin's switch shows partial: On, and off in some tool here (offHere). */
+export const switchPartial = (view: PluginsView, entry: MarketplaceView, plugin: string) => offHere(view, entry, plugin).length > 0;
 
 /** The tools a plugin with no entry is installed in whole and on: it is found there, and its row offers Add. */
 export const foundIn = (view: PluginsView, entry: MarketplaceView, plugin: string) => {
@@ -542,8 +544,8 @@ export const foundIn = (view: PluginsView, entry: MarketplaceView, plugin: strin
 /** What a plugin's switch says it is and what a click does, for its label and tooltip. */
 export function switchWords(view: PluginsView, entry: MarketplaceView, plugin: string): string {
   const sw = entry.switches?.[plugin];
-  const kept = view.tools.filter(tool => sw?.entry?.except.includes(tool) && sw.tools[tool]?.takes);
-  if (sw?.entry?.on) return `${plugin}: on${kept.length ? `, kept out of ${andList(kept.map(tool => names[tool]))}` : ''}. Click to turn it off in each tool here that Central Knot can turn it off in, kept installed where the tool can keep it; Undo turns it on again.`;
+  const off = offHere(view, entry, plugin);
+  if (sw?.entry?.on) return `${plugin}: on${off.length ? `, off in ${andList(off.map(tool => names[tool]))}` : ''}. Click to turn it off in each tool here that Central Knot can turn it off in, kept installed where the tool can keep it; Undo turns it on again.`;
   return `${plugin}: off. Click to turn it on: it goes into every tool here that takes it${sw?.entry?.except.length ? ' and that it isn’t kept out of' : ''}, and the result says where it went; Undo takes out what it put in and turns off what it turned on.`;
 }
 

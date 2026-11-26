@@ -243,7 +243,7 @@ test('a main switch turns a kept-off plugin back on in Claude Code whole and in 
   );
   assert.deepEqual(
     chosen(on.draft),
-    ['claude-cli plugin-on', 'codex-cli skill-off two', 'codex-cli part-off mcp issues', 'codex-cli part-off mcp wiki', 'codex-cli plugin-on'],
+    ['codex-cli skill-off two', 'codex-cli part-off mcp issues', 'codex-cli part-off mcp wiki', 'claude-cli plugin-on', 'codex-cli plugin-on'],
   );
 });
 

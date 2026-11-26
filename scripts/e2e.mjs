@@ -19912,7 +19912,7 @@ if (tool === 'claude') {
   await idle();
   const codexAfterSheetOn = readNow(codexTomlPath);
   same('Codex row switch On over a kept-off copy turns the plugin on for that skill alone and updates the record',
-    [/\[plugins\."document-tools@ck-test-market"\]\s*\nenabled = true/.test(codexAfterSheetOn), /pdf-reader\/SKILL\.md"\s*\nenabled = false/.test(codexAfterSheetOn),
+    [/\[plugins\."document-tools@ck-test-market"\]\s*\nenabled = true/.test(codexAfterSheetOn), /name = "document-tools:pdf-reader"\s*\nenabled = false/.test(codexAfterSheetOn),
       entryNow('document-tools')?.on, entryNow('document-tools')?.except.includes('codex-cli'), await rowSwitchState('skills', sheet)],
     [true, true, true, false, ['true', false]]);
   await a.click('#outcome-undo-plugin');
