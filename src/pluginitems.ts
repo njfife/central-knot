@@ -24,11 +24,13 @@ export const UNREADABLE = 'Its files couldn’t be read.';
  * Names and descriptions only: the read runs often, and only an opened item shows its file (readItemTexts).
  */
 export async function readPluginItems(context: PluginContext, tools: HarnessId[]): Promise<InstalledPlugin[]> {
-  const read = { ...context, reads: context.reads ?? new Map() }, { record } = await readPluginRecord(context.home);
+  const read = { ...context, reads: context.reads ?? new Map() };
+  const { record } = await readPluginRecord(context.home);
   const perTool = await Promise.all(tools.filter(takesPlugins).map(async tool => {
     const [plugins, markets] = await Promise.all([installedCopies(read, tool).catch(() => []), registeredMarketplaces(read, tool).catch(() => [])]);
     return plugins.map(({ plugin, marketplace, state, off, contents, serversOff, agentsOff, serversHeld }): InstalledPlugin => {
-      const source = markets.find(market => market.name === marketplace)?.source, kept = keptOff(source ? entryOf(record, source, plugin) : undefined, tool, off);
+      const source = markets.find(market => market.name === marketplace)?.source;
+      const kept = keptOff(source ? entryOf(record, source, plugin) : undefined, tool, off);
       const base: InstalledPlugin = { tool, plugin, marketName: marketplace, ...(off ? { off } : {}), ...(kept ? { keptOff: true as const } : {}), items: [], listed: !!source, ...(source ? { source } : {}) };
       if (state.state !== 'installed') return { ...base, problem: state.state === 'not-known' ? state.reason : UNREADABLE };
       if (!contents) return { ...base, problem: UNREADABLE };

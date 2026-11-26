@@ -3239,10 +3239,10 @@ async function practiceFlow() {
   check('the click updates it at once, read back from Claude Code’s record, says it can’t be undone, and offers no Undo', /Installed · 2\.0\.0/.test(await a.text('.plugin-panel') ?? '') && !/Marketplace has/.test(await a.text('.plugin-panel') ?? '')
     && /updated to 2\.0\.0 in Claude Code, which can’t be undone/i.test(await a.run(`document.querySelector('#announcement')?.dataset.text ?? ''`)) && !(await a.exists('#plugins-undo')), [await a.text('.plugin-panel'), await a.run(`document.querySelector('#announcement')?.dataset.text`), await a.text('.bands')]);
   // The copy changes at the same version (2.0.0): once read again, the page says so and offers Update. Claude Code's own
-  // update keeps its copy ("already at the latest"), so Update uninstalls and installs it again, and compares after.
+  // update keeps its copy ("already at the latest"), so Update uninstalls it (keeping its data: --keep-data) and installs it again, and compares after.
   const triage = join(newCopy, 'skills/triage/SKILL.md'), record = readFileSync(join(practice, '.claude/plugins/installed_plugins.json'), 'utf8');
   writeFileSync(triage, readFileSync(triage, 'utf8') + '\nA line added by hand.\n');
-  writeFileSync(claudeStub, `#!/bin/sh\ncase "$*" in\n  "plugin update issue-tracker@ck-test-market --scope user") echo 'issue-tracker is already at the latest version (2.0.0).' ;;\n  "plugin uninstall issue-tracker@ck-test-market --scope user") printf '{"version":2,"plugins":{}}' > "$HOME/.claude/plugins/installed_plugins.json" ;;\n  "plugin install issue-tracker@ck-test-market --scope user") cp '${join(market, 'plugins/issue-tracker/skills/triage/SKILL.md')}' '${triage}' && printf '%s' '${record}' > "$HOME/.claude/plugins/installed_plugins.json" ;;\n  *) exit 9 ;;\nesac\n`);
+  writeFileSync(claudeStub, `#!/bin/sh\ncase "$*" in\n  "plugin update issue-tracker@ck-test-market --scope user") echo 'issue-tracker is already at the latest version (2.0.0).' ;;\n  "plugin uninstall issue-tracker@ck-test-market --scope user --keep-data") printf '{"version":2,"plugins":{}}' > "$HOME/.claude/plugins/installed_plugins.json" ;;\n  "plugin install issue-tracker@ck-test-market --scope user") cp '${join(market, 'plugins/issue-tracker/skills/triage/SKILL.md')}' '${triage}' && printf '%s' '${record}' > "$HOME/.claude/plugins/installed_plugins.json" ;;\n  *) exit 9 ;;\nesac\n`);
   await openKind(a, 'skills');
   await a.click('#nav-plugins');
   if (!(await a.exists('#pfile-0-skills-triage'))) await a.click('#popen-0-issue-tracker');
@@ -7726,13 +7726,19 @@ esac
   writeFileSync(settingsPath, JSON.stringify({ ...jsonOrNothing(settingsPath), pluginConfigs: { [id]: { endpoint: 'https://issues.example.test' } } }));
   const kept = () => ({ files: Object.entries(treeOf(join(home, '.claude/plugins'))).filter(([path]) => /^(data\/|installed_plugins\.json$)/.test(path.replaceAll('\\', '/'))).sort(), options: jsonOrNothing(settingsPath)?.pluginConfigs?.[id] });
   const keptBefore = kept();
-  /** With --shots: the plugin's page as it is, at 860 with the sidebar open and at 1316, light and dark. */
+  /** The theme settled: every colour change that ends has ended. */
+  const themeSettled = () => a.run(`Promise.all(document.getAnimations().filter(each => each.effect?.getTiming().iterations !== Infinity).map(each => each.finished)).then(() => true)`);
+  /** With --shots: the plugin's page as it is, at 860 with the sidebar open and at 1316, light and dark, each once its theme has settled. */
   const keptShots = async name => {
     if (!shots) return;
     for (const [width, height] of [SMALLEST, [1316, 819]]) {
       await sizeTo(a, width, height);
       if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
-      for (const look of ['light', 'dark']) { await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] }); await a.shot(`${name}-${width}-${look}`); }
+      for (const look of ['light', 'dark']) {
+        await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: look }] });
+        await themeSettled();
+        await a.shot(`${name}-${width}-${look}`);
+      }
     }
     await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
     await fullSize(a);
@@ -7746,9 +7752,22 @@ esac
   same('Off turns it off in Claude Code with its own switch, keeps it installed and the record Off; Pi stays kept out', [installed(), calls().at(-1), entry()?.on, entry()?.except, await boxIs('claude-cli'), await a.text('.plugin-tool[data-tool="claude-cli"] .plugin-tool-state')],
     [true, 'plugin disable issue-tracker@ck-test-market --scope user', false, ['pi-cli'], ['false', false, 'kept-off'], 'Off, kept installed']);
   same('Off loses nothing: its data folder, saved options and install record are as they were', kept(), keptBefore);
+  const keptLine = '.plugin-tool[data-tool="claude-cli"] .plugin-tool-state';
+  same('the hover on “Off, kept installed” says what is kept', await a.run(`document.querySelector('${keptLine}').title`), 'Off in Claude Code: still installed at 2.0.0, with its data and settings. The plugin is off.');
   check('its result says it was turned off, and nothing Undo can’t put back', /^Turned off in Claude Code$/.test(await a.text('.plugin-panel .plugin-click') ?? '') && !/Undo installs/.test(await a.text('#plugins-result') ?? ''),
     [await a.text('.plugin-panel .plugin-click'), await a.text('#plugins-result')]);
   await keptShots('plugin-keep-off');
+  if (shots) {
+    // The pointer on “Off, kept installed”, at 860, light (its tooltip, the words just checked, doesn't show in a picture).
+    await sizeTo(a, ...SMALLEST);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    const [x, y] = await a.run(`(() => { const r = document.querySelector('${keptLine}').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
+    await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+    await themeSettled();
+    await a.shot('plugin-keep-kept-hover-860-light');
+    await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 });
+    await fullSize(a);
+  }
   await pictures('plugin-switch-off-result');
   await a.click('#plugins-undo');
   await done();
@@ -7767,7 +7786,7 @@ esac
   await done();
   same('a tick puts it back', [installed(), await boxIs('claude-cli')], [true, ['true', false, 'installed']]);
   // Unticked in Claude Code, the only tool that has it (Pi is kept out): the plugin's Off, kept out of Pi as before, so its On
-  // brings it back to Claude Code. Then put back there with its own command: its box is ticked, and unticking takes it out.
+  // brings it back to Claude Code. Then turned on there with its own command: its box is ticked, and unticking turns it off.
   writeFileSync(settingsPath, JSON.stringify({ ...jsonOrNothing(settingsPath), pluginConfigs: { [id]: { endpoint: 'https://issues.example.test' } } }));
   const untickBefore = kept();
   await a.click(box('claude-cli'));
@@ -7775,6 +7794,7 @@ esac
   same('unticking the only tool that has it turns it off there, kept installed, and the plugin Off, its except as it was', [installed(), calls().at(-1), entry()?.on, entry()?.except, await switchIs('#pswitch-page-0-issue-tracker'), await boxIs('claude-cli')],
     [true, 'plugin disable issue-tracker@ck-test-market --scope user', false, ['pi-cli'], 'false', ['false', false, 'kept-off']]);
   same('the untick loses nothing either', kept(), untickBefore);
+  check('the run’s header says Claude Code once, as the untick, its last click there, left it', /^Turned off in Claude Code\.\s*$/.test(await a.text('#plugins-result .toolbar-result-text') ?? ''), await a.text('#plugins-result'));
   await keptShots('plugin-keep-untick');
   await a.click('#plugins-undo');
   await done();

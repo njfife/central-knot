@@ -1242,3 +1242,29 @@ test('A box unticked keeps the plugin in that tool, off; a tool new here still g
     assert.deepEqual([(await box.switchOf('pdf')).tools['claude-cli']!.has, due.ops.filter(op => op.newHere).map(op => [op.tool, op.action])], ['whole', [['pi-cli', 'install-items']]]);
   } finally { await box.cleanup(); }
 });
+
+test('Add turns on no copy he turned off himself: found off in Claude Code and Codex with no entry here, Add records it On and runs nothing there', async () => {
+  const box = await keptHome();
+  try {
+    await box.markets.view();
+    // Installed by hand in both, then turned off there with each tool's own switch.
+    await box.markets.install(box.root, 'team', 'notes', ['claude-cli', 'codex-cli'], box.home);
+    for (const tool of ['claude-cli', 'codex-cli'] as const) await box.markets.setWhole(box.root, 'team', 'notes', tool, false, box.home);
+    box.calls.length = 0;
+    const added = await box.markets.turn(box.root, 'notes', 'add', undefined, box.home);
+    assert.deepEqual([box.calls, added.done.filter(step => step.report.changed), (await box.record()).plugins.map(entry => [entry.plugin, entry.on])], [[], [], [['notes', true]]]);
+  } finally { await box.cleanup(); }
+});
+
+test('A copy whose files can’t be read is left as it is by Off, and the result says so: Codex’s cache gone, its entry and its server’s switch stay', async () => {
+  const box = await keptHome();
+  try {
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    await box.seed();
+    await rm(join(box.home, '.codex/plugins/cache/team/pdf'), { recursive: true });
+    box.calls.length = 0;
+    const off = await box.markets.turn(box.root, 'pdf', 'off', undefined, box.home);
+    assert.deepEqual([box.calls, (await box.kept()).serverSwitch], [['whole pdf@team claude-cli false'], true]);
+    assert.deepEqual(off.done.filter(step => step.tool === 'codex-cli').map(step => [step.report.outcome, step.report.message]), [['held', 'Codex lists it, but its files are not in its plugin cache.']]);
+  } finally { await box.cleanup(); }
+});

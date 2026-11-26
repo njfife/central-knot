@@ -303,6 +303,14 @@ test('The Undo of a switch turns back each plugin copy still as the switch left 
   assert.deepEqual(pluginUndo(entry, pluginLive(pluginOff)).back.map(turn => turn.copy.tool), ['pi-cli']);
 });
 
+test('The Undo of a switch that turned a plugin off in Claude Code leaves it off where the plugins record keeps it off since', () => {
+  const op = { source: '', marketName: 'team-tools', plugin: 'document-tools', tool: 'claude-cli' as const, action: 'plugin-off' as const };
+  const entry = { profile: { toName: 'Lean', on: [], off: [], plugins: [], wholeSteps: [op] } };
+  // Off there as the switch left it: its Undo turns it on. Turned Off on its page since (kept off): its Undo leaves it.
+  const offThere = (more: Partial<InstalledPlugin>) => pluginLive(docsHome([docsIn('claude-cli', { off: true, ...more })]));
+  assert.deepEqual([pluginUndo(entry, offThere({})).whole.flatMap(run => run.ops.map(each => each.action)), pluginUndo(entry, offThere({ keptOff: true })).whole], [['plugin-on'], []]);
+});
+
 test('His own server not in Copilot CLI now is compared by the exact spelling Copilot CLI will write (kept copilotName, else its item name)', () => {
   const issues = { kind: 'mcp' as const, name: 'issues', description: '' }, issuesId = 'plugin:mcp:document-tools@team-tools/issues';
   const installs = [docsIn('copilot-cli', { items: [issues] }), docsIn('codex-cli', { items: [issues] })];

@@ -140,9 +140,12 @@ export function owedTo(entry: Pick<PluginEntry, 'on' | 'except'> | undefined, to
 
 /** Which way a click on a plugin goes: On, Add and a tool's box ticked (`let-in`) put it in; Off and a box unticked (`keep-out`) take it out. */
 export const clickGoes = (what: PluginTurn): 'in' | 'out' => (what === 'on' || what === 'add' || what === 'let-in' ? 'in' : 'out');
-/** What a click runs in one tool: what the table owes there, only where it goes the click's way (On never turns off or uninstalls, Off never turns on or installs). */
+/**
+ * What a click runs in one tool: what the table owes there, only where it goes the click's way (On never turns off or uninstalls,
+ * Off never turns on or installs). A copy off there is turned on by On and a tick only: Add leaves what he turned off himself.
+ */
 export function clickRuns(what: PluginTurn, owed: Owed): Owed['act'] {
-  const inward = owed.act === 'install' || owed.act === 'install-items' || owed.act === 'plugin-on';
+  const inward = owed.act === 'install' || owed.act === 'install-items' || (owed.act === 'plugin-on' && what !== 'add');
   return owed.act && inward === (clickGoes(what) === 'in') ? owed.act : undefined;
 }
 /** Why a click can do nothing in one tool, as the table holds it, where that hold is the click's way. */

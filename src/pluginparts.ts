@@ -8,7 +8,7 @@ import { markdown } from './markdown.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginKey, resultLines, succeeded, type PluginOp } from './pluginplan.ts';
 import { applyPluginOps, clickOn, market, openLink, pluginBusy, shownDetail, turnPlugin, type PluginClick } from './pluginstate.ts';
-import { PREVIEW_ONLY, addWords, boxOf, cantUninstall, copyStale, foundIn, itemsAllIn, itemsIn, outdated, switchPartial, switchWords, toolMark, updateTools, versionToCompare, type ToolMark } from './pluginstatus.ts';
+import { PREVIEW_ONLY, addWords, boxOf, cantUninstall, copyStale, foundIn, inUseIn, itemsAllIn, itemsIn, outdated, stateOf, switchPartial, switchWords, toolMark, updateTools, versionToCompare, type ToolMark } from './pluginstatus.ts';
 import { pluginUpdates } from './pluginupdateview.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, PluginTurn, PluginView, PluginsView } from './types.ts';
 import { takesPlugins } from './presence.ts';
@@ -99,19 +99,25 @@ export function markCell(view: PluginsView, entry: MarketplaceView, plugin: Plug
 export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, marketIndex: number, offered: string | undefined) {
   const id = `pbox-${marketIndex}-${plugin.name}-${tool}`;
   const { mark, words } = markOf(view, entry, plugin, tool, offered), box = boxOf(view, entry, plugin.name, tool, { mark, words });
-  const what = takesPlugins(tool) ? plugin.name : `${plugin.name}’s items`, where = names[tool];
-  // Unticked, a copy the tool's own switch can keep is turned off there and stays installed (pluginrecord.ts row 9).
-  const sw = entry.switches?.[plugin.name], on = !!sw?.entry?.on;
-  const does = box.ticked && sw?.tools[tool]?.keeps ? `Click to turn ${what} off in ${where}, kept installed: it stays off until you tick it again. Undo turns it on again.`
-    : box.ticked ? `Click to take ${what} out of ${where}: it stays out until you tick it again. Undo puts it back.`
-    : on && mark !== 'kept-off' ? `Click to put ${what} in ${where}. Undo takes it out again.` : `Click to turn ${plugin.name} on in ${where}${on ? '' : ' alone'}. Undo turns it off again.`;
-  const label = box.held ? words : `${words} ${box.off ?? does}`;
+  const label = box.held ? words : `${words} ${box.off ?? boxDoes(view, entry, plugin.name, tool, mark, box.ticked)}`;
   // Ticked with its items in full only where each is on there or the same as his (pluginstatus.ts itemsAllIn); else a dash, mixed.
   const some = mark === 'items' && !itemsAllIn(entry, plugin.name, tool), shown = some ? { ...MARK_LOOKS[mark], glyph: () => icon('minus', 16) } : MARK_LOOKS[mark];
   const { look, glyph } = box.ticked || box.held ? shown : { look: 'cell-absent', glyph: () => null };
   return workingCell(entry, plugin, tool, id) ?? waitingCell(entry, plugin, tool, id) ?? h('div.ov-cell', { role: 'cell' }, h(`button.cell-button.cell-box.${look}`, { type: 'button', id, role: 'checkbox', 'aria-checked': some ? 'mixed' : String(box.ticked),
     'aria-label': label, title: label, 'data-state': mark, disabled: !!box.off || pluginBusy(entry.source, plugin.name),
     onclick: () => turnPlugin(entry, plugin.name, box.ticked ? 'keep-out' : 'let-in', tool) }, glyph()));
+}
+
+/** What a click on a tool's box does there, and its Undo, in the state it is drawn in (pluginrecord.ts A TOOL'S BOX and row 9). */
+function boxDoes(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, mark: ToolMark, ticked: boolean): string {
+  const what = takesPlugins(tool) ? plugin : `${plugin}’s items`, where = names[tool], sw = entry.switches?.[plugin], on = !!sw?.entry?.on, state = stateOf(entry, plugin, tool);
+  if (ticked && state.state === 'installed' && state.off) return `Click to keep ${what} out of ${where}, where it is off already and stays installed. Undo lets it in again.`;
+  if (ticked && sw?.tools[tool]?.keeps) return `Click to turn ${what} off in ${where}, kept installed: it stays off until you tick it again. Undo turns it on again.`;
+  if (ticked) return `Click to take ${what} out of ${where}: it stays out until you tick it again. Undo puts it back.`;
+  if (on && mark !== 'kept-off') return `Click to put ${what} in ${where}. Undo takes it out again.`;
+  // A tick on an Off plugin turns it On where another tool has it in use too (marketplaces.ts turnedEntry): "alone" only where none does.
+  const alone = on || view.tools.some(other => other !== tool && inUseIn(entry, plugin, other)) ? '' : ' alone';
+  return `Click to turn ${plugin} on in ${where}${alone}. Undo ${mark === 'kept-off' ? 'turns it off' : 'takes it out'} again.`;
 }
 
 /**

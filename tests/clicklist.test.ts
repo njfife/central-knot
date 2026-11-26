@@ -4,7 +4,7 @@
 // on the same code, a background notice taken during a click or a home read, and when the rows a click pins are let go (app.ts pinnedRows, drawPage).
 import { mock, test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import type { Change, HarnessId, HomeView, ItemNotice, PassResult, PluginTurn, PluginTurnResult, PluginsView, ProfileSwitchResult } from '../src/types.ts';
+import type { Change, HarnessId, HomeView, ItemNotice, MarketplaceView, PassResult, PluginTurn, PluginTurnResult, PluginsView, ProfileSwitchResult } from '../src/types.ts';
 import type { PageKind } from '../src/app.ts';
 
 /** Main, as the page sees it: each switch click waits until the test answers it; every other call is counted. */
@@ -85,7 +85,9 @@ const { versionsList } = await import('../src/editparts.ts');
 const { timesApart } = await import('../src/model.ts');
 const { newItem } = await import('../src/library.ts');
 const { keptBack } = await import('../src/clickplan.ts');
-const { clickWords } = await import('../src/pluginparts.ts');
+const { clickWords, toolBox } = await import('../src/pluginparts.ts');
+const { owedTo } = await import('../src/pluginrecord.ts');
+const { toolNow } = await import('../src/pluginstatus.ts');
 
 /** Lets the page's awaits run on to the next call to main (not by a timer: the fade's test holds them). */
 const settled = async () => { for (let round = 0; round < 20; round++) await new Promise(done => setImmediate(done)); };
@@ -289,6 +291,32 @@ test('After two clicks on one plugin’s boxes, Undo names the click it reverses
   await main.answer(installed('alpha'));
   await main.answer(installed('alpha'));
   assert.equal(undoLabel(), 'Undo alpha in Claude Code');
+});
+
+test('A later click on a plugin in a tool is what the run’s sentence says of that tool: a tick then an untick of Claude Code reads turned off', async () => {
+  start();
+  turnPlugin(entry, 'alpha', 'let-in', 'claude-cli');
+  turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
+  await settled();
+  await main.answer(installed('alpha'));
+  await main.answer({ done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-off', report: { tool: 'claude-cli', outcome: 'plugin-off', changed: true, message: '', runs: [] } }], before: null, back: [] });
+  assert.deepEqual(lastLines().map(line => line.text), ['turned off in Claude Code']);
+});
+
+test('A box’s hover says only what its click and its Undo do there: a copy already off in its tool’s own settings; a tick on an Off plugin another tool has on', () => {
+  const two = { ...view, tools: ['claude-cli', 'copilot-cli'], clis: { 'claude-cli': true, 'copilot-cli': true } } as PluginsView;
+  const drawn = (on: boolean, states: MarketplaceView['states'][string]) => {
+    const shown = { ...entry, states: { alpha: states } } as MarketplaceView;
+    const tools = Object.fromEntries(two.tools.map(tool => [tool, owedTo({ on, except: [] }, tool, toolNow(two, shown, 'alpha', tool, undefined, false), two.tools)]));
+    return { ...shown, switches: { alpha: { entry: { on, except: [] }, tools } } };
+  };
+  const hover = (shown: MarketplaceView, tool: HarnessId) => findById(toolBox(two, shown, plugin('alpha'), tool, 0, undefined), `pbox-0-alpha-${tool}`)?.attrs.title;
+  // On here, and turned off in Claude Code with its own command: its untick keeps it out, and its Undo turns nothing on.
+  assert.equal(hover(drawn(true, { 'claude-cli': { state: 'installed', path: '/x', off: true } }), 'claude-cli'),
+    'Claude Code: installed, turned off in Claude Code’s own settings. Click to keep alpha out of Claude Code, where it is off already and stays installed. Undo lets it in again.');
+  // Off here, and on in Claude Code by its own command: a tick on Copilot CLI's kept copy turns it on there, not there alone.
+  assert.equal(hover(drawn(false, { 'claude-cli': { state: 'installed', path: '/x' }, 'copilot-cli': { state: 'installed', path: '/y', off: true } }), 'copilot-cli'),
+    'Off in Copilot CLI: still installed, with its data and settings. The plugin is off. Click to turn alpha on in Copilot CLI. Undo turns it off again.');
 });
 
 test('A new run on Plugins clears what an earlier action’s stop said, as before; a click joining a run leaves it', async () => {

@@ -403,7 +403,8 @@ export function pluginUndo(event: Pick<HistoryEvent, 'profile'>, items: PluginLi
   const installs = items.flatMap(item => item.copies.flatMap(copy => (copy.tool === 'claude-cli' && 'install' in copy.target ? [copy.target.install] : [])));
   const runs = [...groupBy(event.profile?.wholeSteps ?? [], op => `${op.tool}\u0000${op.marketName}\u0000${op.plugin}`).values()].map(steps => {
     const install = installs.find(each => each.tool === steps[0]!.tool && each.plugin === steps[0]!.plugin && each.marketName === steps[0]!.marketName);
-    return { steps, install, asLeft: !!install && !install.problem && asLeft(install, steps), run: { copies: [] as CopyTurn[], ops: opposites(steps) } };
+    // A plugin the plugins record keeps off there since (InstalledPlugin `keptOff`) is not turned on by the Undo.
+    return { steps, install, asLeft: !!install && !install.problem && !install.keptOff && asLeft(install, steps), run: { copies: [] as CopyTurn[], ops: opposites(steps) } };
   });
   for (const done of event.profile?.plugins ?? []) {
     const item = items.find(each => each.id === done.id), copy = item?.copies.find(each => each.tool === done.tool);

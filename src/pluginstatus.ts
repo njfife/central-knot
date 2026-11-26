@@ -176,11 +176,12 @@ export function pluginPlace(view: PluginsView, entry: MarketplaceView, plugin: s
 
 /**
  * Why this plugin can't be uninstalled from this tool here, if it can't (only asked of an installed plugin): the tool
- * holds another marketplace of this name, its CLI is missing, or writing isn't allowed in this home.
+ * holds another marketplace of this name, its files can't be read (so whether its own switch would keep it isn't known: it is
+ * left as it is), its CLI is missing, or writing isn't allowed in this home.
  */
 export function cantUninstall(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): string | undefined {
   const state = stateOf(entry, plugin, tool);
-  if (state.state === 'held') return state.reason;
+  if (state.state === 'held' || state.state === 'not-known') return state.reason;
   if (state.state === 'installed' && state.directory) return FROM_DIRECTORY;
   if (!view.canWrite) return PREVIEW_ONLY;
   return view.clis[tool] ? undefined : `${cliMissing(tool)}.`;
@@ -442,10 +443,15 @@ export type ToolMark = 'installed' | 'outdated' | 'items' | 'kept-off' | 'stays'
 /**
  * A copy the plugins record keeps installed and off (pluginrecord.ts row 9): the plugin isn't wanted in that tool, and the tool's own
  * switch has it off (`off`). Its mark is `kept-off`; it is not in use (pluginPlace), the automatic updates leave it (marketplaces.ts
- * pendingUpdates), a tick elsewhere doesn't count it as having the plugin (marketplaces.ts turn), and nothing but its box ticked turns it
- * on: not an item's switch in the Library, not a profile (types.ts InstalledPlugin `keptOff`).
+ * pendingUpdates), a tick elsewhere doesn't count it as having the plugin (marketplaces.ts turn), and only the plugin's switch or its
+ * box turns it on: not an item's switch in the Library, not a profile or its Undo (types.ts InstalledPlugin `keptOff`).
  */
 export const keptOff = (entry: Pick<PluginEntry, 'on' | 'except'> | undefined, tool: HarnessId, off: boolean | undefined) => !!entry && !!off && !wantedIn(entry, tool);
+/** Whether a tool has the plugin in use, as the view's switch reads it: installed whole or its items there, and not a copy kept off (keptOff). */
+export const inUseIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) => {
+  const sw = entry.switches?.[plugin], has = sw?.tools[tool]?.has, state = stateOf(entry, plugin, tool);
+  return (has === 'whole' || has === 'items') && !keptOff(sw?.entry, tool, state.state === 'installed' && state.off);
+};
 
 /**
  * A tool's mark and the sentence its tooltip and the plugin page's line say. `outdated`: an Update is offered there
@@ -465,7 +471,7 @@ export function toolMark(view: PluginsView, entry: MarketplaceView, plugin: stri
     const version = state.version ? ` ${state.version}` : '';
     const how = [state.live ? 'loaded live from the marketplace folder' : '', state.directory ? 'from the Anthropic Directory' : '', state.off ? `turned off in ${name}’s own settings` : '', stale ? 'which differs from the marketplace’s copy' : ''].filter(Boolean).join(', ');
     const words = `${name}: installed${version}${how ? `, ${how}` : ''}.`;
-    if (keptOff(entry.switches?.[plugin]?.entry, tool, state.off)) return { mark: 'kept-off', words: `Off in ${name}, kept installed${state.version ? ` at ${state.version}` : ''}.${unwanted}` };
+    if (keptOff(entry.switches?.[plugin]?.entry, tool, state.off)) return { mark: 'kept-off', words: `Off in ${name}: still installed${state.version ? ` at ${state.version}` : ''}, with its data and settings.${unwanted}` };
     if (unwanted) return { mark: 'stays', words: `${words}${unwanted}` };
     return { mark: outdated ? 'outdated' : 'installed', words: outdated ? `${words} An update is offered: Update on its row.` : words };
   }
@@ -512,7 +518,7 @@ export function switchWords(view: PluginsView, entry: MarketplaceView, plugin: s
   const sw = entry.switches?.[plugin];
   const kept = view.tools.filter(tool => sw?.entry?.except.includes(tool) && sw.tools[tool]?.takes);
   if (sw?.entry?.on) return `${plugin}: on${kept.length ? `, kept out of ${andList(kept.map(tool => names[tool]))}` : ''}. Click to turn it off in each tool here that Central Knot can turn it off in, kept installed where the tool can keep it; Undo turns it on again.`;
-  return `${plugin}: off. Click to turn it on: it goes into every tool here that takes it${sw?.entry?.except.length ? ' and that it isn’t kept out of' : ''}, and the result says where it went; Undo turns it off again.`;
+  return `${plugin}: off. Click to turn it on: it goes into every tool here that takes it${sw?.entry?.except.length ? ' and that it isn’t kept out of' : ''}, and the result says where it went; Undo takes out what it put in and turns off what it turned on.`;
 }
 
 /** Add's words for a plugin found in some tools with no entry here. */

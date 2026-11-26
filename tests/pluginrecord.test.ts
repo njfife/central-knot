@@ -64,9 +64,10 @@ test('Row 9 by the tool’s own switch: a copy it can keep is turned off there a
   assert.deepEqual(codex(kept, keeps()), { wanted: false, has: 'whole', takes: true, keeps: true, act: 'plugin-off' });
   assert.deepEqual(codex(off, keeps({ off: true })), { wanted: false, has: 'whole', takes: true, keeps: true });
   assert.deepEqual(owedTo(off, 'copilot-cli', now('whole'), ['copilot-cli']), { wanted: false, has: 'whole', takes: true, act: 'uninstall' });
-  // Wanted again (On, or its box ticked): the copy kept off there is turned on, never installed again; a click out never turns it on.
+  // Wanted again (On, or its box ticked): the copy kept off there is turned on, never installed again; a click out never turns it on,
+  // and nor does Add, which leaves a copy he turned off himself.
   const back = codex(on, keeps({ off: true }));
-  assert.deepEqual([back.act, clickRuns('on', back), clickRuns('let-in', back), clickRuns('off', back)], ['plugin-on', 'plugin-on', 'plugin-on', undefined]);
+  assert.deepEqual([back.act, clickRuns('on', back), clickRuns('let-in', back), clickRuns('off', back), clickRuns('add', back)], ['plugin-on', 'plugin-on', 'plugin-on', undefined, undefined]);
 });
 
 const team = '/markets/team';

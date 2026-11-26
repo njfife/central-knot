@@ -496,7 +496,10 @@ async function runClick(click: PluginClick, home: string): Promise<void> {
 export function lastLines(): ResultLine[] {
   const last = market.lastRun, ran = market.clicks.filter(click => click.ran);
   if (!last || !ran.length) return last ? resultLines(last.done, last.undo) : [];
-  return ran.flatMap(({ source, plugin, ran: { done, stopped } = { done: [] } }) => [...resultLines(done), ...(stopped ? [{ source, plugin, ok: false, text: stopped, short: stopped }] : [])]);
+  // One clause a tool: a later click on the plugin in that tool is what the run says of it (a tick then an untick: turned off).
+  const there = (step: PluginDone) => (each: PluginDone) => each.source === step.source && each.plugin === step.plugin && each.tool === step.tool;
+  const later = (at: number, step: PluginDone) => ran.slice(at + 1).some(click => click.ran!.done.some(there(step)));
+  return ran.flatMap(({ source, plugin, ran: { done, stopped } = { done: [] } }, at) => [...resultLines(done.filter(step => !later(at, step))), ...(stopped ? [{ source, plugin, ok: false, text: stopped, short: stopped }] : [])]);
 }
 
 /** Reload advice for the Plugins page's current run, settled chronologically so a later removal cancels an earlier write. */
