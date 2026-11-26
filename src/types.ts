@@ -336,7 +336,7 @@ export interface DesktopApi {
 }
 
 export interface PluginActionResult { stopped?: string; reports: ActionReport[] }
-/** What a click on a whole plugin asks (DesktopApi.turnPlugin): its switch On or Off, Add, or one tool's box on its page unticked (`keep-out`: uninstalled there, and kept out) or ticked (`let-in`: let in, and installed there). */
+/** What a click on a whole plugin asks (DesktopApi.turnPlugin): its switch On or Off, Add, or one tool's box on its page unticked (`keep-out`: turned off there, kept installed where the tool can, and kept out) or ticked (`let-in`: let in, and turned on or installed there). */
 export type PluginTurn = 'on' | 'off' | 'add' | 'keep-out' | 'let-in';
 /** What a turn did: each tool's report (`done`), the plugin's entry before it (`before`, null: none), and its Undo (`back`). */
 export interface PluginTurnResult { stopped?: string; done: PluginDone[]; before?: PluginEntry | null; back?: PluginOp[] }

@@ -168,7 +168,7 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
   const someCan = view.canWrite && (pluginColumns.some(tool => !blocked(view, entry, tool)) || view.tools.length > pluginColumns.length);
   // The hint heads the name column, wrapping within it when the column is narrow.
   const head = h('div.ov-row.ov-head', { role: 'row' }, h('div.ov-managed', { role: 'columnheader', 'aria-label': 'On or off' }),
-    h('div.ov-name.plugin-hint', { role: 'columnheader' }, someCan ? [h('span.hint-long', {}, 'A switch installs or removes it in every tool that takes the plugin; clicks run in turn.'), h('span.hint-short', {}, 'Clicks run in turn.')] : 'Plugin'),
+    h('div.ov-name.plugin-hint', { role: 'columnheader' }, someCan ? [h('span.hint-long', {}, 'A switch turns it on or off (kept installed where the tool can) in every tool that takes it; clicks run in turn.'), h('span.hint-short', {}, 'Clicks run in turn.')] : 'Plugin'),
     view.tools.map(tool => h('div.ov-cell.ov-tool-head', { role: 'columnheader' }, brandMark(tool, 16), h('span', {}, names[tool]))), h('div.ov-cell.plugin-row-go', { role: 'columnheader' }));
   // With more than one plugin behind, one button runs every update in this marketplace at once, those the filter hides too.
   const behind = view.canWrite ? entry.plugins.filter(plugin => updateOps(view, entry, plugin).length) : [];
