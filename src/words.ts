@@ -64,6 +64,8 @@ export const sentence = (text: string) => `${text.charAt(0).toUpperCase()}${text
 export const andList = (items: string[]) => joined(items, 'and');
 /** Tools by name, as an and-list: "Claude Code, Copilot CLI and Codex". */
 export const toolList = (tools: HarnessId[]) => andList(tools.map(tool => toolNames[tool]));
+/** "<Tool> reads it" or "<Tool> and <Tool> read it", for a skill read from another tool's folder (libraryrow.ts, matrix.ts, historyactions.ts). */
+export const readsIt = (tools: readonly string[]) => `${andList(tools.map(toolName))} ${tools.length === 1 ? 'reads' : 'read'} it`;
 
 /** "a", "a or b", "a, b or c": for choices, such as where something can be added. */
 export const orList = (items: string[]) => joined(items, 'or');
