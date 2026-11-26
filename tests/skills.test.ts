@@ -336,6 +336,7 @@ test('A tool that reads Claude Code’s folder has the skill one way: from Claud
     const { fact, item, row } = await seen(box);
     assert.equal(harnessIs(row, item, 'opencode-cli'), 'another-way');
     assert.match(fact!.anotherWay?.['opencode-cli'] ?? '', /reads Claude Code’s copy/);
+    assert.equal(fact!.readsFrom?.['opencode-cli'], 'claude-cli');
     // Kept out of Claude Code: its copy goes, and OpenCode gets one of its own.
     await inTool(box, 'claude-cli', true);
     assert.deepEqual([await bytes(folderOf(box, 'claude-cli')), !!(await bytes(folderOf(box, 'opencode-cli')))], [undefined, true]);
@@ -393,6 +394,7 @@ test('Kept out of Claude Code, which holds a copy of its own, OpenCode reads tha
     const { fact } = await seen(box);
     assert.deepEqual([await bytes(folderOf(box, 'opencode-cli')), await readFile(join(folderOf(box, 'claude-cli'), 'SKILL.md'), 'utf8')], [undefined, skillText('Mine, in Claude Code.')]);
     assert.match(fact!.anotherWay?.['opencode-cli'] ?? '', /^OpenCode reads a copy in Claude Code’s skills folder, which is not Central Knot’s\.$/);
+    assert.equal(fact!.readsFrom?.['opencode-cli'], undefined);
   } finally { await box.cleanup(); }
 });
 
@@ -411,7 +413,9 @@ test('A tool whose skills folder is itself a link is never written through: its 
     assert.match(fact!.cannot['copilot-cli'] ?? '', /skills folder is a link/);
     await mkdir(join(shared, 'gamma'));
     await writeFile(join(shared, 'gamma/SKILL.md'), skillText('In the shared folder.', 'gamma'));
-    assert.match((await seen(box, box.context, 'gamma')).fact!.anotherWay?.['copilot-cli'] ?? '', /reads it in .*skills folder is a link/);
+    const linkedFact = (await seen(box, box.context, 'gamma')).fact!;
+    assert.match(linkedFact.anotherWay?.['copilot-cli'] ?? '', /reads it in .*skills folder is a link/);
+    assert.equal(linkedFact.readsFrom?.['copilot-cli'], undefined);
   } finally { await box.cleanup(); }
 });
 
@@ -429,11 +433,31 @@ test('A found skill only Codex has: OpenCode’s line says what is true before i
   const box = await sandbox(['claude-cli', 'codex-cli', 'opencode-cli']);
   try {
     await put(box, 'codex-cli');
-    const before = (await seen(box)).fact!.anotherWay?.['opencode-cli'] ?? '';
-    assert.doesNotMatch(before, /reads Claude Code’s copy/);
-    assert.match(before, /^OpenCode reads Claude Code’s skills folder, so it gets the skill from there once it is on in Claude Code\.$/);
+    const before = await seen(box);
+    const beforeWhy = before.fact!.anotherWay?.['opencode-cli'] ?? '';
+    assert.doesNotMatch(beforeWhy, /reads Claude Code’s copy/);
+    assert.match(beforeWhy, /^OpenCode reads Claude Code’s skills folder, so it gets the skill from there once it is on in Claude Code\.$/);
+    assert.equal(before.fact!.readsFrom?.['opencode-cli'], undefined);
+    assert.deepEqual(say.detailLine(before.row, before.item, 'opencode-cli', 'OpenCode'), [{
+      text: 'Gets it from Claude Code’s skills folder once it is on there.',
+    }]);
+    assert.equal(say.harnessLine(before.row, before.item, 'opencode-cli', 'OpenCode'),
+      'Not in Central Knot · OpenCode reads Claude Code’s skills folder, so it gets the skill from there once it is on in Claude Code.');
     await turnOn(box);
-    assert.match((await seen(box)).fact!.anotherWay?.['opencode-cli'] ?? '', /^OpenCode reads Claude Code’s copy, in Claude Code’s skills folder\./);
+    const on = await seen(box);
+    assert.match(on.fact!.anotherWay?.['opencode-cli'] ?? '', /^OpenCode reads Claude Code’s copy, in Claude Code’s skills folder\./);
+    assert.equal(on.fact!.readsFrom?.['opencode-cli'], 'claude-cli');
+    assert.deepEqual(say.detailLine(on.row, on.item, 'opencode-cli', 'OpenCode'), [{
+      text: 'Reads Claude Code’s copy',
+      card: 'OpenCode reads this skill from Claude Code’s folder; Central Knot writes nothing to OpenCode meanwhile.',
+    }]);
+    // Claude Code's copy deleted by hand with no sync yet: OpenCode does not hold a live copy from Claude Code, so no short label.
+    await rm(folderOf(box, 'claude-cli'), { recursive: true });
+    const afterDelete = await seen(box);
+    assert.equal(afterDelete.fact!.readsFrom?.['opencode-cli'], undefined);
+    assert.deepEqual(say.detailLine(afterDelete.row, afterDelete.item, 'opencode-cli', 'OpenCode'), [{
+      text: 'OpenCode reads Claude Code’s skills folder, so it gets the skill from there once it is on in Claude Code. Nothing of Central Knot’s goes there while it does.',
+    }]);
   } finally { await box.cleanup(); }
 });
 
@@ -564,6 +588,7 @@ test('A link to a copy the tool also reads in ~/.agents/skills (as the skills in
     await turnOn(box);
     const { fact } = await seen(box);
     assert.match(fact!.anotherWay?.['copilot-cli'] ?? '', /^Copilot CLI also reads a copy at .*\.agents\/skills/);
+    assert.equal(fact!.readsFrom?.['copilot-cli'], undefined);
     assert.deepEqual(fact!.takeOver?.['copilot-cli'], { kind: 'shared', path: shared });
     assert.equal((await takeOver(box.context, box.tools, 'notes', 'copilot-cli')).stopped, undefined);
     // The shared copy is gone, so the link led nowhere: Central Knot's copy is in its place, in every tool.

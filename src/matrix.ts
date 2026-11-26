@@ -39,11 +39,11 @@ import { copilotSharesYours } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
 import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, writeOff, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
-import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, whyOff, withToolCount, type Child } from './dom.ts';
+import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, infoMark, middle, pathText, toggle, whyOff, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { byName, byUsage, inOrder, kindSource, lastUpdated, noPins, partId, pin, placeIn, rankIn, rowId, type ItemRow, type KindSource, type Pinned, type RowKey, type RowOrder, type RowUsage, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
-import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, rowClicks, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
+import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, rowClicks, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { itemKey, listed, type Version } from './library.ts';
@@ -307,7 +307,7 @@ const fromFacts = (kind: PageKind, facts: LibraryFacts): ItemRow => ({
   // An MCP entry has no lines or edit time of its own: the copy question quotes its summary alone.
   versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.lines ? { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), at: copy!.modified, text: copy!.summary || facts.description, ...(copy!.body !== undefined ? { body: copy!.body } : {}) } : { lines: '', changed: '', text: copy!.summary }])),
   ownPart: Object.fromEntries(Object.entries(facts.copies).flatMap(([tool, copy]) => (copy!.ownPart?.length ? [[tool, copy!.ownPart]] : []))),
-  loads: facts.loads, alsoLoads: facts.alsoLoads, anotherWay: facts.anotherWay, takeOver: facts.takeOver, switchedOff: facts.switchedOff,
+  loads: facts.loads, alsoLoads: facts.alsoLoads, anotherWay: facts.anotherWay, readsFrom: facts.readsFrom, takeOver: facts.takeOver, switchedOff: facts.switchedOff,
 });
 
 /** The kind's column header ("Server") and its title ("MCP servers"), from words.ts kindNouns. */
@@ -972,7 +972,8 @@ function nameCell(t: Table, skill: ItemRow, attention: boolean) {
       attention ? h('span.row-tag.row-tag-differs', { id: elId('decide', skill) }, 'Copies differ') : null),
     libraryTag(t, skill),
     sourceTag(skill),
-    aboutLine(t, skill));
+    // While the row is open, its details show the description whole, except for differing copies (which show the chooser alone).
+    t.view.comparing === idOf(skill) && !attention ? null : aboutLine(t, skill));
 }
 /**
  * The line after a row's name: its description; or where Find found the row only in its file's text, that text's excerpt,
@@ -2734,19 +2735,21 @@ function rowPluginFacts(skill: ItemRow, tool: Tool) {
 }
 
 /**
- * One tool's line in an item's details: what it has, in a sentence (with any reload step from the active click result), and its own
- * controls, each applied at once: a plugin's line where it is one (rowPluginFacts); else the item's switch for that harness and what
- * its kind adds there (libraryHarnessSwitch), or nothing where the tool has it through a plugin whose copy isn't read.
+ * One tool's line in an item's details: its short labels and optional `(?)` cards from `libraryrow.ts detailLine` (or a plugin's
+ * line from `pluginLine`, plus any reload step from the active click result), and its own controls, each applied at once: the item's
+ * switch for that harness and what its kind adds there (libraryHarnessSwitch), or nothing where the tool has it through a plugin
+ * whose copy isn't read.
  */
-function harnessLine(t: Table, skill: ItemRow, tool: Tool): { text: string; control: HTMLElement | null; result: HTMLElement | null } {
+function detailToolLine(t: Table, skill: ItemRow, tool: Tool): { text?: string; parts?: DetailPart[]; control: HTMLElement | null; result: HTMLElement | null } {
   const plugged = rowPluginFacts(skill, tool), through = plugged?.through;
   const reload = state.outcome && outcomeShown(state.outcome, useTableShown())
     ? rowReload(state.outcome.reloads, toItemKind(skill.kind), through ? itemKey(through.name) : skill.key, tool as HarnessId, through ? `${through.install.plugin}@${through.install.marketName}` : undefined, toolWays()) : '';
   // Through a plugin: where it comes from first.
   if (plugged) return pluginLine(skill, plugged, through ? skill.cannot?.[tool] ?? '' : '', reload);
   const lib = libraryPages[skill.kind], own = skill.ownPart?.[tool];
-  return { text: [lib.say.harnessLine(skill, itemOf(skill), tool, names[tool]), own?.length ? lib.words.own(own) : '', reload].filter(Boolean).join(' '),
-    control: throughPluginHere(skill, tool) ? null : libraryHarnessSwitch(t, lib, skill, tool), result: resultLine(skill, tool) };
+  const parts = lib.say.detailLine(skill, itemOf(skill), tool, names[tool], own);
+  if (reload) parts.push({ text: reload });
+  return { parts, control: throughPluginHere(skill, tool) ? null : libraryHarnessSwitch(t, lib, skill, tool), result: resultLine(skill, tool) };
 }
 
 /**
@@ -2798,9 +2801,9 @@ function libraryDelete(t: Table, lib: LibraryPage, skill: ItemRow) {
   if (!item) return null;
   const name = nameOf(skill), id = idOf(skill), view = t.view, tools = toolsFor(t, skill.kind), disarm = () => { view.confirmDelete = undefined; rerender(); };
   if (view.confirmDelete !== id) {
-    const arm = button({ variant: 'outline', size: 'micro', label: 'Delete from Central Knot…', id: elId('delete', skill), disabled: writeOff(cant), onclick: () => { view.confirmDelete = id; rerender(); } });
+    const arm = button({ variant: 'outline', size: 'micro', label: 'Delete…', id: elId('delete', skill), disabled: writeOff(cant), onclick: () => { view.confirmDelete = id; rerender(); } });
     arm.classList.add('delete-quiet');
-    return h('span.delete-offer', {}, arm, h('span.delete-offer-note', {}, lib.say.said.deleteOffer));
+    return arm;
   }
   const said = (notIn: HarnessId[]) => lib.say.said.deleted(name, item.on, stillIn(skill, item, notIn, tools), tools);
   const run = () => { view.confirmDelete = undefined; click({ kind: skill.kind, items: [name], rows: [rowKey(skill)], changes: [rowClicks.remove(skill, item)], said }); };
@@ -2844,8 +2847,7 @@ function libraryVersions(t: Table, lib: LibraryPage, skill: ItemRow) {
 }
 
 /**
- * An item's details: its status, each tool with its own controls, its versions, where each copy is, what its kind shows of its
- * own (librarypages.ts), and its Delete from Central Knot last. While a found item's copies differ, only the question of which
+ * An item's details: its status, each tool with its own controls, its versions, where each copy is, and its Delete last. While a found item's copies differ, only the question of which
  * copy every tool uses, and the copies.
  */
 function details(t: Table, skill: ItemRow, placement: Placement = 'row'): HTMLElement {
@@ -2853,13 +2855,19 @@ function details(t: Table, skill: ItemRow, placement: Placement = 'row'): HTMLEl
   const differs = isDiffering(skill);
   // MCP: each tool's row has its settings file and Show in folder, where a server is changed.
   const settingsFile = (tool: Tool) => (skill.kind === 'mcp' && skill.paths?.[tool] ? [wrappingPath(skill.paths[tool]!), showInFolder(skill.paths[tool]!)] : []);
+  const toolLine = (tool: Tool, parts: DetailPart[]) => h('span.details-tool-line', { 'data-info-block': true },
+    parts.flatMap((part, index) => [
+      index ? (/[.!?]$/.test(parts[index - 1]!.text) ? ' ' : ' · ') : null,
+      part.text,
+      part.card ? infoMark(elId('line-info', skill, tool), part.text, part.card) : null,
+    ]));
   const toolRow = (tool: Tool) => {
-    const line = harnessLine(t, skill, tool);
+    const line = detailToolLine(t, skill, tool);
     return h('div.details-tool', {},
       h('div.details-tool-head', {},
         h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
         ...settingsFile(tool),
-        h('span.details-tool-line', {}, line.text),
+        toolLine(tool, line.parts ?? (line.text ? [{ text: line.text }] : [])),
         line.control),
       lib.toolNote?.(skill, tool as HarnessId),
       line.result ?? usageLine(t, skill, tool));
@@ -2883,11 +2891,11 @@ function details(t: Table, skill: ItemRow, placement: Placement = 'row'): HTMLEl
       files ? h('div.details-actions', {}, files) : null),
     // What every tool shares of it, and what stays each harness's own, said where it is true: an item in Central Knot, or a
     // found one that can be taken in.
-    tools.length > 1 && (inLibrary(itemOf(skill)) || canAdd(skill)) ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), lib.words.shared) : null,
+    tools.length > 1 && (inLibrary(itemOf(skill)) || canAdd(skill))
+      ? h('p.details-tools-head', { 'data-info-block': true }, 'In each tool', infoMark(elId('shared', skill), 'In each tool', lib.words.shared)) : null,
     h('div.details-tools', {}, tools.map(tool => toolRow(tool)), usageElsewhere(t, skill)),
     libraryVersions(t, lib, skill),
     inFiles || skill.kind === 'mcp' ? null : wherePaths(t, skill),
-    lib.own?.(skill) ?? null,
     skill.fromSource ? fromSourceLine(skill, skill.fromSource) : null,
     remove ? h('div.details-actions.details-danger', {}, remove) : null);
 }

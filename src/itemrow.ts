@@ -63,6 +63,7 @@ export interface ItemRow {
   loads?: LibraryFacts['loads']; alsoLoads?: LibraryFacts['alsoLoads'];
   /** A library kind: how a tool has it another way, in words, which copies Take over can make Central Knot's, and (skills, MCP servers) the tools whose own switch has it off (types.ts LibraryFacts). */
   anotherWay?: Partial<Record<Tool, string>>;
+  readsFrom?: LibraryFacts['readsFrom'];
   takeOver?: Partial<Record<Tool, { kind: 'link' | 'shared'; path: string }>>;
   switchedOff?: Tool[];
   /** `pluginOn`: the tools with no copy of their own that have it on through an installed plugin (pluginrows.ts pluginOnIn; libraryrow.ts LibraryRow says it). */
