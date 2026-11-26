@@ -2287,7 +2287,9 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .usage-band { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; }
 .usage-band > .band-text { color: var(--ink); }
 .usage-band .btn { padding: 0 7px; }
-.usage-limits-toggle { display: inline-flex; align-items: center; gap: 1px; margin-left: 6px; font-size: 12px; line-height: 16px; color: var(--accent-ink); white-space: nowrap; }
+.usage-lead { margin-right: 6px; }
+.usage-counted-toggle { display: inline-flex; align-items: center; gap: 1px;
+  font-size: 12px; line-height: 16px; color: var(--accent-ink); white-space: nowrap; }
 .usage-more { grid-column: 2 / -1; display: flex; flex-direction: column; gap: 2px; color: var(--ink-soft); }
 .usage-more > p { margin: 0; }
 /* The usage band (matrix.ts usageBand): its three sentences in one place, the one on show over the others, so it never changes height. */

@@ -10303,18 +10303,18 @@ async function usageFlow() {
   await a.click('.chip[data-tip="No use seen in 30 days"]');
   same('with the chip on, the table holds standup and spare', await sectionsNow(a, 'skills'), [['on', ['standup', 'spare']]]);
   same('its band is one line with the count, disclosure closed, and Turn 2 off everywhere; opening the disclosure reveals coverage and exclusions',
-    [await a.text('#unused-band .usage-lead'), (await a.text('#unused-limits-toggle'))?.trim(), await a.run(`document.querySelector('#unused-limits-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-limits'), (await a.text('#turn-unused-off'))?.trim()],
+    [await a.text('#unused-band .usage-lead'), (await a.text('#unused-counted-toggle'))?.trim(), await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-counted'), (await a.text('#turn-unused-off'))?.trim()],
     ['2 with no use seen in 30 days.', 'What’s counted', 'false', false, 'Turn 2 off everywhere']);
-  if (await a.exists('#unused-limits-toggle')) await a.click('#unused-limits-toggle');
-  same('the opened disclosure shows three short lines: history read, not recorded, and not counted',
-    [await a.run(`document.querySelector('#unused-limits-toggle')?.getAttribute('aria-expanded')`),
-      (await a.all('#unused-limits > p', 'e.textContent')).map(line => line.replace(/ /g, ' ').replace(/from \w+ \d+/g, 'from <day>'))],
+  if (await a.exists('#unused-counted-toggle')) await a.click('#unused-counted-toggle');
+  same('the opened disclosure shows three short lines: history read, not seen from here, and not counted',
+    [await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`),
+      (await a.all('#unused-counted > p', 'e.textContent')).map(line => line.replace(/ /g, ' ').replace(/only since \w+ \d+/g, 'only since <day>'))],
     ['true', [
-      'History read: Claude Code, 30 days or more; Copilot CLI, from <day>; Codex, from <day>.',
-      'Not recorded: uses on another computer or in tools not read; Codex doesn’t always record skills.',
+      'History read: Claude Code, 30 days or more; Copilot CLI, only since <day>; Codex, only since <day>.',
+      'Not seen from here: uses on another computer or in tools not read; Codex doesn’t always record skills.',
       'Not counted: 1 skill under 30 days old.',
     ]]);
-  if (await a.exists('#unused-limits-toggle')) await a.click('#unused-limits-toggle');
+  if (await a.exists('#unused-counted-toggle')) await a.click('#unused-counted-toggle');
   same('Turn these off sits at the band’s end, at 1280 and 2560 alike', await (async () => { const ends = []; for (const [width, height] of [[1280, 800], [2560, 1440]]) { await sizeTo(a, width, height);
     ends.push(await a.run(`Math.round(document.querySelector('#unused-band').getBoundingClientRect().right - document.querySelector('#turn-unused-off').getBoundingClientRect().right)`)); } await fullSize(a); return ends[0] === ends[1]; })(), true);
   await fitsAtMinimum(a, 'Skills with the No use seen chip on and its band');
@@ -10686,14 +10686,19 @@ async function usageFlow() {
       const bRect = band.getBoundingClientRect();
       const lead = band.querySelector('.usage-lead');
       const lRect = lead?.getBoundingClientRect();
-      const toggle = band.querySelector('#unused-limits-toggle');
+      const toggle = band.querySelector('#unused-counted-toggle');
       const tRect = toggle?.getBoundingClientRect();
       const btn = band.querySelector('#turn-unused-off, #unused-show-other');
       const aRect = btn?.getBoundingClientRect();
       const oneLine = !!lRect && lRect.height <= 22 && bRect.height <= 42
         && (!tRect || Math.abs(tRect.top - lRect.top) < 10)
         && (!aRect || Math.abs((aRect.top + aRect.height / 2) - (lRect.top + lRect.height / 2)) < 10);
-      return { text, words: text.split(/\\s+/).filter(Boolean).length, height: Math.round(bRect.height), oneLine };
+      const bTextRect = band.querySelector('.band-text')?.getBoundingClientRect();
+      const lastLead = lead ? [...lead.getClientRects()].at(-1) : undefined;
+      const wrapFlush = !tRect || !bTextRect || !lastLead
+        || (Math.abs(tRect.top - lastLead.top) < 10 ? Math.abs(lastLead.left - bTextRect.left) < 1 : Math.abs(tRect.left - bTextRect.left) < 1)
+        && getComputedStyle(toggle).marginLeft === '0px';
+      return { text, words: text.split(/\\s+/).filter(Boolean).length, height: Math.round(bRect.height), oneLine, wrapFlush };
     })()`);
     const skippedRowsState = () => a.run(`(() => Object.fromEntries([...document.querySelectorAll('.ov-row[data-key]')].map(row => {
       const cell = row.querySelector('.ov-used');
@@ -10743,12 +10748,12 @@ async function usageFlow() {
       return metrics;
     };
     same('ux1a: band is one line for 8 shown, 2 from a plugin skipped, 6 turned off, with no Undo or profile prose',
-      [await a.text('#unused-band .usage-lead'), (await a.text('#unused-limits-toggle'))?.trim(), await a.run(`document.querySelector('#unused-limits-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-limits'), (await a.text('#turn-unused-off'))?.trim()],
+      [await a.text('#unused-band .usage-lead'), (await a.text('#unused-counted-toggle'))?.trim(), await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-counted'), (await a.text('#turn-unused-off'))?.trim()],
       ['8 with no use seen in 30 days. 2 from a plugin skipped.', 'What’s counted', 'false', false, 'Turn 6 off everywhere']);
     const collapsedCounts = await captureUx1a('band');
     same('ux1a: collapsed band is visually one line high at 860 and 1316 with sidebar open', [collapsedCounts[860]?.oneLine, collapsedCounts[1316]?.oneLine], [true, true]);
     console.log(`usageFlow ux1a collapsed band: 860=${JSON.stringify(collapsedCounts[860])} 1316=${JSON.stringify(collapsedCounts[1316])}`);
-    // Skipped plugin rows are visibly marked at 860 with sidebar open without cutting their names or usage cells.
+    // Skipped plugin rows are visibly marked at 860 with sidebar open without cutting their names or usage cells, and unmarked while selecting.
     await sizeTo(a, 860, 560);
     if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
     const markedAt860 = await skippedRowsState();
@@ -10758,50 +10763,58 @@ async function usageFlow() {
       [...uxSkills.map(() => ['no use seen in 30 days', false]),
         { text: 'from a plugin · skipped', skip: true, cellWhole: true, nameWhole: true },
         { text: 'from a plugin · skipped', skip: true, cellWhole: true, nameWhole: true }]);
+    await a.click('#library-select');
+    const selectingAt860 = await skippedRowsState();
+    same('ux1a: while Select is on, plugin rows show no skipped mark',
+      ['plug-audit', 'plug-triage'].map(k => [selectingAt860[rowPart('', 'agents', k)]?.text, selectingAt860[rowPart('', 'agents', k)]?.skip]),
+      [['no use seen in 30 days', false], ['no use seen in 30 days', false]]);
+    await capture860Light('band-select');
+    await a.click('#library-select');
     await fullSize(a);
 
     // Expand [What’s counted] by keyboard: writes nothing, focus stays, three short lines appear; Space and Escape both close it.
     const beforeDisclose = [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')];
-    if (await a.exists('#unused-limits-toggle')) {
-      await a.run(`document.querySelector('#unused-limits-toggle').focus()`);
+    if (await a.exists('#unused-counted-toggle')) {
+      await a.run(`document.querySelector('#unused-counted-toggle').focus()`);
       await a.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
       await a.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
       await a.settle();
     }
-    const limitsLines = (await a.all('#unused-limits > p', 'e.textContent')).map(line => line.replace(/\u00a0/g, ' ').replace(/from \w+ \d+/g, 'from <day>'));
+    const countedLines = (await a.all('#unused-counted > p', 'e.textContent')).map(line => line.replace(/\u00a0/g, ' ').replace(/only since \w+ \d+/g, 'only since <day>'));
     same('ux1a: Enter opens What’s counted as three short lines, keeps focus, writes nothing',
-      [await a.run(`document.querySelector('#unused-limits-toggle')?.getAttribute('aria-expanded')`), await a.run(`document.activeElement?.id`),
-        limitsLines, [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')]],
-      ['true', 'unused-limits-toggle', [
-        'History read: Claude Code, 30 days or more; Copilot CLI, no sessions found; Codex, from <day>.',
-        'Not recorded: uses on another computer or in tools not read; Codex doesn’t always record skills or agents.',
+      [await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`), await a.run(`document.activeElement?.id`),
+        countedLines, [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')]],
+      ['true', 'unused-counted-toggle', [
+        'History read: Claude Code, 30 days or more; Copilot CLI, no sessions found; Codex, only since <day>.',
+        'Not seen from here: uses on another computer or in tools not read; Codex doesn’t always record skills or agents.',
         'Not counted: 1 skill under 30 days old; 1 skill found, not yet in Central Knot.',
       ], beforeDisclose]);
     await captureUx1a('band-open');
-    if (await a.exists('#unused-limits-toggle')) {
-      await a.run(`document.querySelector('#unused-limits-toggle').focus()`);
+    if (await a.exists('#unused-counted-toggle')) {
+      await a.run(`document.querySelector('#unused-counted-toggle').focus()`);
       await a.press(' ', 'Space');
     }
-    same('ux1a: Space closes What’s counted again', [await a.run(`document.querySelector('#unused-limits-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-limits')], ['false', false]);
-    if (await a.exists('#unused-limits-toggle')) {
-      await a.run(`document.querySelector('#unused-limits-toggle').focus()`);
+    same('ux1a: Space closes What’s counted again', [await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-counted')], ['false', false]);
+    if (await a.exists('#unused-counted-toggle')) {
+      await a.run(`document.querySelector('#unused-counted-toggle').focus()`);
       await a.press(' ', 'Space');
-      await a.run(`document.querySelector('#unused-limits-toggle').focus()`);
+      await a.run(`document.querySelector('#unused-counted-toggle').focus()`);
       await a.press('Escape', 'Escape');
     }
-    same('ux1a: Escape closes focused What’s counted disclosure', [await a.run(`document.querySelector('#unused-limits-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-limits')], ['false', false]);
+    same('ux1a: Escape closes focused What’s counted disclosure', [await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-counted')], ['false', false]);
 
     // Unread managed tool history: cued on the band line before the click; disappears once readable again.
     const codexSessions = join(uxHome, '.codex/sessions');
     try {
       chmodSync(codexSessions, 0o000);
       await a.click('#collect-usage');
-      await uxUntil(async () => /Codex history not read\./.test((await a.text('#unused-band .usage-lead')) ?? ''), 5000);
+      await uxUntil(async () => /Use in Codex not counted\./.test((await a.text('#unused-band .usage-lead')) ?? ''), 5000);
       if (await a.exists('#usage-line-close')) await a.click('#usage-line-close');
       same('ux1a: unreadable managed Codex history is cued on the band line',
         await a.text('#unused-band .usage-lead'),
-        '8 with no use seen in 30 days. 2 from a plugin skipped. Codex history not read.');
+        '8 with no use seen in 30 days. 2 from a plugin skipped. Use in Codex not counted.');
       const unreadMetrics = await capture860Light('band-unread');
+      same('ux1a: unread band toggle starts flush left when wrapped at 860', unreadMetrics?.wrapFlush, true);
       console.log(`usageFlow ux1a unread band 860=${JSON.stringify(unreadMetrics)}`);
     } finally {
       chmodSync(codexSessions, 0o755);
@@ -10853,22 +10866,26 @@ async function usageFlow() {
     await uxDone(a);
     check('ux1a: turning off the last unused skill leaves the emptied-kind band', await uxUntil(() => a.exists('#unused-show-other'), 3000));
     same('ux1a: emptied Skills band names the 2 remaining agents and offers Show Agents',
-      [await a.text('#unused-band .usage-lead'), (await a.text('#unused-show-other'))?.trim(), await a.exists('#unused-limits-toggle'), await a.exists('#turn-unused-off')],
+      [await a.text('#unused-band .usage-lead'), (await a.text('#unused-show-other'))?.trim(), await a.exists('#unused-counted-toggle'), await a.exists('#turn-unused-off')],
       ['No unused skills left. 2 agents have no use seen in 30 days.', 'Show Agents', false, false]);
     const emptiedCounts = await captureUx1a('emptied-kind');
     same('ux1a: emptied-kind band is visually one line high at 860 and 1316 with sidebar open', [emptiedCounts[860]?.oneLine, emptiedCounts[1316]?.oneLine], [true, true]);
     console.log(`usageFlow ux1a emptied band: 860=${JSON.stringify(emptiedCounts[860])} 1316=${JSON.stringify(emptiedCounts[1316])}`);
     const beforeNav = [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')];
     if (await a.exists('#unused-show-other')) await a.click('#unused-show-other');
-    same('ux1a: Show Agents switches to Agents, keeps the unused chip on, lists both agents, shows own-row wording with no Turn button, and writes nothing',
+    const allPluginRows = await skippedRowsState();
+    same('ux1a: Show Agents switches to Agents, keeps the unused chip on, lists both agents marked from a plugin, shows own-row wording with no Turn button, and writes nothing',
       [await a.run(`document.querySelector('#library-kind-agents')?.getAttribute('aria-pressed')`),
         await a.run(`document.querySelector('#chip-unused')?.getAttribute('aria-pressed')`),
         (await a.all('.ov-row[data-key]', 'e.dataset.key')).sort(),
         await a.text('#unused-band .usage-lead'),
         await a.exists('#turn-unused-off'),
+        ['plug-audit', 'plug-triage'].map(k => allPluginRows[rowPart('', 'agents', k)]),
         [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')]],
       ['true', 'true', [rowPart('', 'agents', 'plug-audit'), rowPart('', 'agents', 'plug-triage')],
-        '2 with no use seen in 30 days. 2 from a plugin skipped: turn each off on its own row.', false, beforeNav]);
+        '2 with no use seen in 30 days, both from a plugin: turn each off on its own row.', false,
+        [{ text: 'from a plugin', skip: true, cellWhole: true, nameWhole: true },
+          { text: 'from a plugin', skip: true, cellWhole: true, nameWhole: true }], beforeNav]);
     const allPluginMetrics = await capture860Light('band-all-plugin');
     same('ux1a: all-plugin band is visually one line high at 860 with sidebar open', allPluginMetrics?.oneLine, true);
     console.log(`usageFlow ux1a all-plugin band 860=${JSON.stringify(allPluginMetrics)}`);
