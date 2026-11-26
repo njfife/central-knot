@@ -9148,7 +9148,7 @@ esac
     same(`${chip}, with spare: its count is the Library’s rows’ alone, and the group shows under no chip`, [count, drawn], { 'chip-attention': ['0', null], 'chip-unused': ['1', null] }[chip]);
     if (chip === 'chip-unused') {
       const before = readFileSync(join(H.home, '.claude/plugins/installed_plugins.json'), 'utf8');
-      check('No use seen’s band counts spare alone, with Turn these off', (await a.text('#unused-band .usage-lead') ?? '').startsWith('1 skill with no use seen') && await a.exists('#turn-unused-off'), await a.text('#unused-band'));
+      check('No use seen’s band counts spare alone, with Turn 1 off everywhere', (await a.text('#unused-band .usage-lead') ?? '') === '1 with no use seen in 30 days.' && (await a.text('#turn-unused-off'))?.trim() === 'Turn 1 off everywhere', await a.text('#unused-band'));
       await a.click('#turn-unused-off');
       await done();
       await until(() => a.exists('#outcome-undo'));
@@ -10350,10 +10350,19 @@ async function usageFlow() {
   same('after a reading, the chip counts what has no use seen in 30 days, old enough', await a.all('.chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]'), [['No use seen in 30 days', '2']]);
   await a.click('.chip[data-tip="No use seen in 30 days"]');
   same('with the chip on, the table holds standup and spare', await sectionsNow(a, 'skills'), [['on', ['standup', 'spare']]]);
-  same('its band leads with how many, what Turn these off does and the profile it ends; then, fainter, that a use elsewhere isn’t seen, how far back each tool’s history goes, what Codex doesn’t always record and the new one left out',
-    [await a.text('#unused-band .usage-lead'), (await a.text('#unused-band .usage-more'))?.replace(/ /g, ' ').replace(/from \w+ \d+/g, 'from <day>')],
-    ['2 skills with no use seen in the last 30 days. Turn these off: Central Knot takes its copies out of every tool it manages and keeps them; Undo turns them all back on. With these off, Everyday stops being the profile in use.',
-      'A use on another computer or in a tool not read isn’t seen. Each tool’s history: Claude Code, 30 days or more; Copilot CLI, from <day>; Codex, from <day>. Codex doesn’t always record which skill was used. Left out: 1 skill under 30 days old.']);
+  same('its band is one line with the count, disclosure closed, and Turn 2 off everywhere; opening the disclosure reveals coverage and exclusions',
+    [await a.text('#unused-band .usage-lead'), (await a.text('#unused-counted-toggle'))?.trim(), await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-counted'), (await a.text('#turn-unused-off'))?.trim()],
+    ['2 with no use seen in 30 days.', 'What’s counted', 'false', false, 'Turn 2 off everywhere']);
+  if (await a.exists('#unused-counted-toggle')) await a.click('#unused-counted-toggle');
+  same('the opened disclosure shows three short lines: history read, not seen from here, and not counted',
+    [await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`),
+      (await a.all('#unused-counted > p', 'e.textContent')).map(line => line.replace(/ /g, ' ').replace(/only since \w+ \d+/g, 'only since <day>'))],
+    ['true', [
+      'History read: Claude Code, 30 days or more; Copilot CLI, only since <day>; Codex, only since <day>.',
+      'Not seen from here: uses on another computer or in tools not read; Codex doesn’t always record skills.',
+      'Not counted: 1 skill under 30 days old.',
+    ]]);
+  if (await a.exists('#unused-counted-toggle')) await a.click('#unused-counted-toggle');
   same('Turn these off sits at the band’s end, at 1280 and 2560 alike', await (async () => { const ends = []; for (const [width, height] of [[1280, 800], [2560, 1440]]) { await sizeTo(a, width, height);
     ends.push(await a.run(`Math.round(document.querySelector('#unused-band').getBoundingClientRect().right - document.querySelector('#turn-unused-off').getBoundingClientRect().right)`)); } await fullSize(a); return ends[0] === ends[1]; })(), true);
   await fitsAtMinimum(a, 'Skills with the No use seen chip on and its band');
@@ -10663,6 +10672,327 @@ async function usageFlow() {
   same('with no unused items left, the usage strip shows no unused link', [await a.exists('#overview-unused'), await a.all('.kind-card button[id$="-unused"]', 'e.id'), /^Usage collected today at [^.]+\. Update usage statistics$/.test(await usageSaid() ?? '')], [false, [], true]);
   same('no page errors, the Overview', a.pageErrors, []);
   await a.quit();
+  // ---------- Step UX-1A: one-line unused band (8 shown, 2 skipped, 6 turned off; keyboard disclosure; two ended profiles; emptied kind -> Show Agents / Show all N; Find/From miss -> no band) ----------
+  {
+    const uxHome = join(scratch, 'ux1a-home'), uxData = join(scratch, 'ux1a-data'), uxReal = join(scratch, 'ux1a-real');
+    for (const folder of [uxHome, uxData, uxReal]) mkdirSync(folder, { recursive: true });
+    toolClis(uxHome);
+    const uxSkills = ['legacy-a', 'legacy-b', 'legacy-c', 'legacy-d', 'legacy-e', 'legacy-f'];
+    for (const name of [...uxSkills, 'active-skill', 'young-skill']) skill(join(uxHome, '.claude/skills'), name);
+    const agentBody = name => `---\nname: ${name}\ndescription: The ${name} agent.\n---\n\nDo ${name}.\n`;
+    for (const name of ['plug-audit', 'plug-triage']) {
+      mkdirSync(join(uxHome, '.copilot/agents'), { recursive: true });
+      writeFileSync(join(uxHome, `.copilot/agents/${name}.agent.md`), agentBody(name));
+    }
+    writeClaudeInstall(uxHome, 'local-market', 'team-kit', '1.0.0', {
+      'agents/plug-audit.md': agentBody('plug-audit'),
+      'agents/plug-triage.md': agentBody('plug-triage'),
+    });
+    writeFileSync(join(uxHome, '.claude.json'), `${JSON.stringify({ mcpServers: { 'quiet-srv': { type: 'http', url: 'https://quiet.example.test/mcp' } } }, null, 2)}\n`);
+    lines(join(uxHome, '.claude/projects/-work/u0.jsonl'), [{ type: 'user', message: { content: 'hello' }, timestamp: ago(45).toISOString() }, skillCall('active-skill', 2)]);
+    lines(join(uxHome, '.codex/sessions/2026/11/12/rollout-u.jsonl'), [{ type: 'session_meta', payload: {}, timestamp: ago(12).toISOString() }]);
+    writeFileSync(join(uxData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: uxHome } }));
+    const uxRecord = kind => join(uxHome, `.central-knot/${kind}.json`);
+    const uxUntil = async (fn, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return true; await wait(100); } return false; };
+    const uxDone = async app => { for (let tries = 0; tries < 200 && await app.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await app.settle(); };
+    // Take everything into Central Knot once, then age records, leave quiet-srv Off, add a Found skill and two matching profiles.
+    a = await launch(uxData, [], uxReal);
+    await a.click('#nav-overview');
+    await a.click('#setup-yes');
+    check('ux1a: setup took every item into Central Knot', await uxUntil(() => [...uxSkills, 'active-skill', 'young-skill'].every(key => !!jsonOrNothing(uxRecord('skills'))?.items?.[key])
+      && ['plug-audit', 'plug-triage'].every(key => !!jsonOrNothing(uxRecord('agents'))?.items?.[key]) && !!jsonOrNothing(uxRecord('mcp'))?.items?.['quiet-srv']));
+    await a.quit();
+    for (const [kind, keys, days] of [['skills', [...uxSkills, 'active-skill'], 40], ['skills', ['young-skill'], 2], ['agents', ['plug-audit', 'plug-triage'], 40], ['mcp', ['quiet-srv'], 40]]) {
+      const kept = JSON.parse(readFileSync(uxRecord(kind), 'utf8'));
+      for (const key of keys) {
+        kept.items[key].versions = kept.items[key].versions.map(v => ({ ...v, at: ago(days).toISOString() }));
+        if (key === 'quiet-srv') kept.items[key].on = false;
+      }
+      writeFileSync(uxRecord(kind), JSON.stringify(kept, null, 2));
+    }
+    const syncState = jsonOrNothing(join(uxHome, '.central-knot/sync.json')) ?? {};
+    writeFileSync(join(uxHome, '.central-knot/sync.json'), JSON.stringify({ ...syncState, syncEverything: false }, null, 2));
+    const foundFolder = skill(join(uxHome, '.claude/skills'), 'found-only');
+    for (const p of [foundFolder, join(foundFolder, 'SKILL.md')]) utimesSync(p, ago(40), ago(40));
+    const profileItems = [...uxSkills.map(k => `skill:${k}`), 'skill:active-skill', 'skill:young-skill', 'agent:plug-audit', 'agent:plug-triage'];
+    writeFileSync(join(uxHome, '.central-knot/profiles.json'), JSON.stringify({
+      formatVersion: 2,
+      profiles: [
+        { id: 'everyday', name: 'Everyday', items: profileItems },
+        { id: 'focus', name: 'Focus', items: profileItems },
+      ],
+    }, null, 2));
+
+    a = await launch(uxData, [], uxReal);
+    await openKind(a, 'all');
+    check('ux1a: usage collected and chip shows 8', await uxUntil(async () => (await a.text('#chip-unused .chip-count'))?.trim() === '8'));
+    await a.click('#chip-unused');
+    const bandMetrics = () => a.run(`(() => {
+      const band = document.querySelector('#unused-band');
+      if (!band) return null;
+      const text = band.innerText.replace(/\\s+/g, ' ').trim();
+      const bRect = band.getBoundingClientRect();
+      const lead = band.querySelector('.usage-lead');
+      const lRect = lead?.getBoundingClientRect();
+      const toggle = band.querySelector('#unused-counted-toggle');
+      const tRect = toggle?.getBoundingClientRect();
+      const btn = band.querySelector('#turn-unused-off, #unused-show-other');
+      const aRect = btn?.getBoundingClientRect();
+      const oneLine = !!lRect && lRect.height <= 22 && bRect.height <= 42
+        && (!tRect || Math.abs(tRect.top - lRect.top) < 10)
+        && (!aRect || Math.abs((aRect.top + aRect.height / 2) - (lRect.top + lRect.height / 2)) < 10);
+      const bTextRect = band.querySelector('.band-text')?.getBoundingClientRect();
+      const lastLead = lead ? [...lead.getClientRects()].at(-1) : undefined;
+      const wrapFlush = !tRect || !bTextRect || !lastLead
+        || (Math.abs(tRect.top - lastLead.top) < 10 ? Math.abs(lastLead.left - bTextRect.left) < 1 : Math.abs(tRect.left - bTextRect.left) < 1)
+        && getComputedStyle(toggle).marginLeft === '0px';
+      return { text, words: text.split(/\\s+/).filter(Boolean).length, height: Math.round(bRect.height), oneLine, wrapFlush };
+    })()`);
+    const skippedRowsState = () => a.run(`(() => Object.fromEntries([...document.querySelectorAll('.ov-row[data-key]')].map(row => {
+      const cell = row.querySelector('.ov-used');
+      const name = row.querySelector('.ov-name-text');
+      return [row.dataset.key, {
+        text: cell?.textContent?.trim() ?? '',
+        skip: !!cell?.classList.contains('ov-used-skip'),
+        cellWhole: !!cell && cell.scrollWidth <= cell.clientWidth + 1,
+        nameWhole: !!name && name.scrollWidth <= name.clientWidth + 1,
+      }];
+    })))()`);
+    const captureUx1a = async label => {
+      const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+      const countsByWidth = {};
+      for (const [width, height] of [[860, 560], [1316, 819]]) {
+        await sizeTo(a, width, height);
+        const railNow = await a.run(`document.body.classList.contains('rail')`);
+        if (railNow) await a.click('#sidebar-toggle');
+        countsByWidth[width] = await bandMetrics();
+        same(`ux1a: nothing cut off for ${label} at ${width} with sidebar open`, [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], []);
+        if (shots) {
+          for (const mode of ['light', 'dark']) {
+            await theme(mode);
+            await wait(80);
+            await a.shot(`ux1a-${label}-${width}-${mode}`);
+          }
+        }
+      }
+      if (shots) await theme('');
+      await fullSize(a);
+      return countsByWidth;
+    };
+    const capture860Light = async label => {
+      const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+      await sizeTo(a, 860, 560);
+      if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+      await a.run(`document.activeElement?.blur()`);
+      const metrics = await bandMetrics();
+      same(`ux1a: nothing cut off for ${label} at 860 with sidebar open`, [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], []);
+      if (shots) {
+        await theme('light');
+        await wait(80);
+        await a.shot(`ux1a-${label}-860-light`);
+        await theme('');
+      }
+      await fullSize(a);
+      return metrics;
+    };
+    same('ux1a: band is one line for 8 shown, 2 from a plugin skipped, 6 turned off, with no Undo or profile prose',
+      [await a.text('#unused-band .usage-lead'), (await a.text('#unused-counted-toggle'))?.trim(), await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-counted'), (await a.text('#turn-unused-off'))?.trim()],
+      ['8 with no use seen in 30 days. 2 from a plugin skipped.', 'What’s counted', 'false', false, 'Turn 6 off everywhere']);
+    const collapsedCounts = await captureUx1a('band');
+    same('ux1a: collapsed band is visually one line high at 860 and 1316 with sidebar open', [collapsedCounts[860]?.oneLine, collapsedCounts[1316]?.oneLine], [true, true]);
+    console.log(`usageFlow ux1a collapsed band: 860=${JSON.stringify(collapsedCounts[860])} 1316=${JSON.stringify(collapsedCounts[1316])}`);
+    // Skipped plugin rows are visibly marked at 860 with sidebar open without cutting their names or usage cells, and unmarked while selecting.
+    await sizeTo(a, 860, 560);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    const markedAt860 = await skippedRowsState();
+    same('ux1a: at 860 with sidebar open, both skipped plugin rows say from a plugin · skipped whole without cutting names, and the 6 skills stay normal',
+      [...uxSkills.map(k => [markedAt860[rowPart('', 'skills', k)]?.text, markedAt860[rowPart('', 'skills', k)]?.skip]),
+        ...['plug-audit', 'plug-triage'].map(k => markedAt860[rowPart('', 'agents', k)])],
+      [...uxSkills.map(() => ['no use seen in 30 days', false]),
+        { text: 'from a plugin · skipped', skip: true, cellWhole: true, nameWhole: true },
+        { text: 'from a plugin · skipped', skip: true, cellWhole: true, nameWhole: true }]);
+    await a.click('#library-select');
+    const selectingAt860 = await skippedRowsState();
+    same('ux1a: while Select is on, plugin rows show no skipped mark',
+      ['plug-audit', 'plug-triage'].map(k => [selectingAt860[rowPart('', 'agents', k)]?.text, selectingAt860[rowPart('', 'agents', k)]?.skip]),
+      [['no use seen in 30 days', false], ['no use seen in 30 days', false]]);
+    await capture860Light('band-select');
+    await a.click('#library-select');
+    await fullSize(a);
+
+    // Expand [What’s counted] by keyboard: writes nothing, focus stays, three short lines appear; Space and Escape both close it.
+    const beforeDisclose = [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')];
+    if (await a.exists('#unused-counted-toggle')) {
+      await a.run(`document.querySelector('#unused-counted-toggle').focus()`);
+      await a.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+      await a.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+      await a.settle();
+    }
+    const countedLines = (await a.all('#unused-counted > p', 'e.textContent')).map(line => line.replace(/\u00a0/g, ' ').replace(/only since \w+ \d+/g, 'only since <day>'));
+    same('ux1a: Enter opens What’s counted as three short lines, keeps focus, writes nothing',
+      [await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`), await a.run(`document.activeElement?.id`),
+        countedLines, [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')]],
+      ['true', 'unused-counted-toggle', [
+        'History read: Claude Code, 30 days or more; Copilot CLI, no sessions found; Codex, only since <day>.',
+        'Not seen from here: uses on another computer or in tools not read; Codex doesn’t always record skills or agents.',
+        'Not counted: 1 skill under 30 days old; 1 skill found, not yet in Central Knot.',
+      ], beforeDisclose]);
+    await captureUx1a('band-open');
+    if (await a.exists('#unused-counted-toggle')) {
+      await a.run(`document.querySelector('#unused-counted-toggle').focus()`);
+      await a.press(' ', 'Space');
+    }
+    same('ux1a: Space closes What’s counted again', [await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-counted')], ['false', false]);
+    if (await a.exists('#unused-counted-toggle')) {
+      await a.run(`document.querySelector('#unused-counted-toggle').focus()`);
+      await a.press(' ', 'Space');
+      await a.run(`document.querySelector('#unused-counted-toggle').focus()`);
+      await a.press('Escape', 'Escape');
+    }
+    same('ux1a: Escape closes focused What’s counted disclosure', [await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-counted')], ['false', false]);
+
+    // Unread managed tool history: cued on the band line before the click; disappears once readable again.
+    const codexSessions = join(uxHome, '.codex/sessions');
+    try {
+      chmodSync(codexSessions, 0o000);
+      await a.click('#collect-usage');
+      await uxUntil(async () => /Use in Codex not counted\./.test((await a.text('#unused-band .usage-lead')) ?? ''), 5000);
+      if (await a.exists('#usage-line-close')) await a.click('#usage-line-close');
+      same('ux1a: unreadable managed Codex history is cued on the band line',
+        await a.text('#unused-band .usage-lead'),
+        '8 with no use seen in 30 days. 2 from a plugin skipped. Use in Codex not counted.');
+      const unreadMetrics = await capture860Light('band-unread');
+      same('ux1a: unread band toggle starts flush left when wrapped at 860', unreadMetrics?.wrapFlush, true);
+      console.log(`usageFlow ux1a unread band 860=${JSON.stringify(unreadMetrics)}`);
+    } finally {
+      chmodSync(codexSessions, 0o755);
+    }
+    await a.click('#collect-usage');
+    check('ux1a: cue clears once Codex history is readable again', await uxUntil(async () => (await a.text('#unused-band .usage-lead')) === '8 with no use seen in 30 days. 2 from a plugin skipped.', 5000));
+    if (await a.exists('#usage-line-close')) await a.click('#usage-line-close');
+
+    // Refused click names no profile and keeps both Everyday and Focus in use.
+    const savedSkills = readFileSync(uxRecord('skills'), 'utf8');
+    writeFileSync(uxRecord('skills'), '{');
+    await a.click('#turn-unused-off');
+    await uxDone(a);
+    same('ux1a: refused Turn 6 off everywhere names no profile', [/stopped being the profile/.test(await headerResultWords(a) ?? ''), (await a.text('#status-profile'))?.trim()], [false, 'Everyday and Focus']);
+    writeFileSync(uxRecord('skills'), savedSkills);
+    await a.click('#header-refresh');
+    await uxUntil(async () => !(await a.run(`(document.querySelector('.bands')?.textContent ?? '').includes('damaged')`)));
+
+    // Turn 6 off everywhere: 6 skills off, 2 plugin agents stay on, result alone names BOTH ended profiles.
+    await a.click('#turn-unused-off');
+    await uxDone(a);
+    check('ux1a: Undo appears after Turn 6 off everywhere', await uxUntil(() => a.exists('#outcome-undo')));
+    const endedWords = await headerResultWords(a);
+    same('ux1a: Turn 6 off everywhere turns off 6 skills, skips 2 plugin agents, and the result alone names both ended profiles',
+      [uxSkills.every(k => jsonOrNothing(uxRecord('skills'))?.items?.[k]?.on === false),
+        ['plug-audit', 'plug-triage'].every(k => jsonOrNothing(uxRecord('agents'))?.items?.[k]?.on === true),
+        (endedWords ?? '').includes('Everyday and Focus stopped being the profiles in use.'),
+        (await a.text('#status-profile'))?.trim()],
+      [true, true, true, 'No profile']);
+    await a.click('#outcome-undo');
+    await uxDone(a);
+    check('ux1a: Undo restores all 6 skills', await uxUntil(() => uxSkills.every(k => jsonOrNothing(uxRecord('skills'))?.items?.[k]?.on === true)));
+
+    // Emptied kind: switch to Skills (chip stays on), check Find miss and From miss show no band, then turn off all 6 skills -> Show Agents.
+    await a.click('#library-kind-skills');
+    check('ux1a: Skills segment shows 6 unused skills', await uxUntil(async () => (await a.text('#unused-band .usage-lead')) === '6 with no use seen in 30 days.', 3000));
+    await a.run(`(() => { const i = document.querySelector('#find'); i.value = 'zzz-no-match'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.settle();
+    same('ux1a: Find miss shows no unused band', await a.exists('#unused-band'), false);
+    await a.run(`(() => { const i = document.querySelector('#find'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.settle();
+    check('ux1a: clearing Find restores band', await uxUntil(() => a.exists('#unused-band')));
+    await a.run(`(() => { const s = document.querySelector('#item-from'); const opt = [...s.options].find(o => o.value.startsWith('plugin:')); s.value = opt.value; s.dispatchEvent(new Event('change')); })()`);
+    await a.settle();
+    same('ux1a: From miss shows no unused band', await a.exists('#unused-band'), false);
+    await a.run(`(() => { const s = document.querySelector('#item-from'); s.value = 'anywhere'; s.dispatchEvent(new Event('change')); })()`);
+    await a.settle();
+    await a.click('#turn-unused-off');
+    await uxDone(a);
+    check('ux1a: turning off the last unused skill leaves the emptied-kind band', await uxUntil(() => a.exists('#unused-show-other'), 3000));
+    same('ux1a: emptied Skills band names the 2 remaining agents and offers Show Agents',
+      [await a.text('#unused-band .usage-lead'), (await a.text('#unused-show-other'))?.trim(), await a.exists('#unused-counted-toggle'), await a.exists('#turn-unused-off')],
+      ['No unused skills left. 2 agents have no use seen in 30 days.', 'Show Agents', false, false]);
+    const emptiedCounts = await captureUx1a('emptied-kind');
+    same('ux1a: emptied-kind band is visually one line high at 860 and 1316 with sidebar open', [emptiedCounts[860]?.oneLine, emptiedCounts[1316]?.oneLine], [true, true]);
+    console.log(`usageFlow ux1a emptied band: 860=${JSON.stringify(emptiedCounts[860])} 1316=${JSON.stringify(emptiedCounts[1316])}`);
+    const beforeNav = [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')];
+    if (await a.exists('#unused-show-other')) await a.click('#unused-show-other');
+    const allPluginRows = await skippedRowsState();
+    same('ux1a: Show Agents switches to Agents, keeps the unused chip on, lists both agents marked from a plugin, shows own-row wording with no Turn button, and writes nothing',
+      [await a.run(`document.querySelector('#library-kind-agents')?.getAttribute('aria-pressed')`),
+        await a.run(`document.querySelector('#chip-unused')?.getAttribute('aria-pressed')`),
+        (await a.all('.ov-row[data-key]', 'e.dataset.key')).sort(),
+        await a.text('#unused-band .usage-lead'),
+        await a.exists('#turn-unused-off'),
+        ['plug-audit', 'plug-triage'].map(k => allPluginRows[rowPart('', 'agents', k)]),
+        [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')]],
+      ['true', 'true', [rowPart('', 'agents', 'plug-audit'), rowPart('', 'agents', 'plug-triage')],
+        '2 with no use seen in 30 days, both from a plugin: turn each off on its own row.', false,
+        [{ text: 'from a plugin', skip: true, cellWhole: true, nameWhole: true },
+          { text: 'from a plugin', skip: true, cellWhole: true, nameWhole: true }], beforeNav]);
+    const allPluginMetrics = await capture860Light('band-all-plugin');
+    same('ux1a: all-plugin band is visually one line high at 860 with sidebar open', allPluginMetrics?.oneLine, true);
+    console.log(`usageFlow ux1a all-plugin band 860=${JSON.stringify(allPluginMetrics)}`);
+
+    // Two other kinds: turn quiet-srv On so MCP servers (1) and Agents (2) both have unused items, then visit Skills -> Show all 3.
+    await a.click('#library-kind-mcp');
+    await a.click('#chip-unused');
+    await a.click(`#${rowPart('switch', 'mcp', 'quiet-srv')}`);
+    await uxDone(a);
+    await a.click('#chip-unused');
+    await a.click('#library-kind-skills');
+    check('ux1a: two other kinds offer Show all 3', await uxUntil(async () => (await a.text('#unused-show-other'))?.trim() === 'Show all 3', 3000));
+    same('ux1a: emptied Skills with 1 MCP server and 2 agents remaining names both and offers Show all 3',
+      [await a.text('#unused-band .usage-lead'), (await a.text('#unused-show-other'))?.trim()],
+      ['No unused skills left. 1 MCP server and 2 agents have no use seen in 30 days.', 'Show all 3']);
+    const beforeAll = [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('mcp'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')];
+    if (await a.exists('#unused-show-other')) await a.click('#unused-show-other');
+    same('ux1a: Show all 3 switches to All, keeps the unused chip on, shows all 3 items and writes nothing',
+      [await a.run(`document.querySelector('#library-kind-all')?.getAttribute('aria-pressed')`),
+        await a.run(`document.querySelector('#chip-unused')?.getAttribute('aria-pressed')`),
+        (await a.all('.ov-row[data-key]', 'e.dataset.key')).sort(),
+        [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('mcp'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')]],
+      ['true', 'true', [rowPart('', 'agents', 'plug-audit'), rowPart('', 'agents', 'plug-triage'), rowPart('', 'mcp', 'quiet-srv')].sort(), beforeAll]);
+
+    // Three-digit count (128 with no use seen, 2 from a plugin skipped, Turn 126 off everywhere) at 860 with sidebar open.
+    const skillsRec = JSON.parse(readFileSync(uxRecord('skills'), 'utf8'));
+    const templateItem = skillsRec.items['legacy-a'];
+    for (const key of uxSkills) {
+      skillsRec.items[key].on = true;
+      for (const root of ['.claude/skills', '.codex/skills', '.copilot/skills']) {
+        const folder = skill(join(uxHome, root), key);
+        for (const p of [folder, join(folder, 'SKILL.md')]) utimesSync(p, ago(40), ago(40));
+      }
+    }
+    for (let i = 1; i <= 120; i++) {
+      const key = `extra-${String(i).padStart(3, '0')}`;
+      skillsRec.items[key] = { ...templateItem, name: key, on: true, versions: [{ ...templateItem.versions[0], at: ago(40).toISOString() }] };
+      for (const root of ['.claude/skills', '.codex/skills', '.copilot/skills']) {
+        const folder = skill(join(uxHome, root), key);
+        for (const p of [folder, join(folder, 'SKILL.md')]) utimesSync(p, ago(40), ago(40));
+      }
+    }
+    writeFileSync(uxRecord('skills'), JSON.stringify(skillsRec, null, 2));
+    const mcpRec = JSON.parse(readFileSync(uxRecord('mcp'), 'utf8'));
+    mcpRec.items['quiet-srv'].on = false;
+    writeFileSync(uxRecord('mcp'), JSON.stringify(mcpRec, null, 2));
+    await a.click('#header-refresh');
+    await uxDone(a);
+    check('ux1a: three-digit count reaches 128 on All', await uxUntil(async () => (await a.text('#chip-unused .chip-count'))?.trim() === '128', 8000));
+    same('ux1a: three-digit band text and button',
+      [await a.text('#unused-band .usage-lead'), (await a.text('#turn-unused-off'))?.trim()],
+      ['128 with no use seen in 30 days. 2 from a plugin skipped.', 'Turn 126 off everywhere']);
+    const threeDigitMetrics = await capture860Light('band-three-digits');
+    same('ux1a: three-digit band stays one line high at 860 with sidebar open', threeDigitMetrics?.oneLine, true);
+    console.log(`usageFlow ux1a three-digit band 860=${JSON.stringify(threeDigitMetrics)}`);
+    same('no page errors, ux1a unused band', a.pageErrors, []);
+    await a.quit();
+  }
+
   // Started at sign-in, with no window (--hidden): nothing is collected until the window first shows (a second launch shows it).
   a = await launch(data, ['--hidden'], real);
   await openKind(a, 'skills');
@@ -12108,7 +12438,7 @@ async function libraryFlow() {
   await done(a);
   // 9b: Turn these off across kinds, the MCP record damaged just before the click.
   await a.click('#chip-unused');
-  check('its band counts the five in one noun (spare is used now)', (await a.text('#unused-band .usage-lead') ?? '').startsWith('5 items with no use seen in the last 30 days.'), await a.text('#unused-band'));
+  check('its band counts the five in one line (spare is used now)', (await a.text('#unused-band .usage-lead') ?? '') === '5 with no use seen in 30 days. 1 from a plugin skipped.', await a.text('#unused-band'));
   await pictures(a, 'unused-across-kinds');
   // Copilot CLI refuses to let go of either tidy (its folders can't be written), and the MCP record is damaged.
   const mcpRecord = readFileSync(record('mcp'), 'utf8'), copilotFolders = [A.copilot, join(A.home, '.copilot/agents')];
@@ -12175,7 +12505,7 @@ async function libraryFlow() {
   await press(`#${rowPart('switch', 'skills', 'idle')}`);
   await done(a);
   same('idle, off now, keeps its place by its pin, and the heading, the kind switch and the band count tidy alone',
-    [await a.all('.ov-row[data-key]', 'e.dataset.key'), await a.text('.ov-section[data-section="results"] .ov-section-count'), (await counts(a)).all, (await a.text('#unused-band .usage-lead') ?? '').startsWith('1 skill with no use seen in the last 30 days.')],
+    [await a.all('.ov-row[data-key]', 'e.dataset.key'), await a.text('.ov-section[data-section="results"] .ov-section-count'), (await counts(a)).all, (await a.text('#unused-band .usage-lead') ?? '') === '1 with no use seen in 30 days.'],
     [[rowPart('', 'skills', 'idle'), rowPart('', 'skills', 'tidy')], '1', '1', true]);
   await press('#turn-unused-off');
   await done(a);
