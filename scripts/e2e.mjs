@@ -20355,7 +20355,7 @@ async function pluginPageSaysLessFlow() {
   const home = join(scratch, 'home-plugin-says-less'), data = join(scratch, 'plugin-says-less-data'), market = join(scratch, 'market-plugin-says-less');
   const put = (path, content) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content); };
   const skillMd = (name, desc) => `---\nname: ${name}\ndescription: ${desc}\n---\n\nSteps for ${name}.\n`;
-  // Four local plugins: plain (skills + instruction file + README), limited (skill + command + README), failed (MCP with
+  // Five local plugins: plain (skills + instruction file + README), limited (skill + command + README), failed (MCP with
   // ${CLAUDE_PLUGIN_ROOT} + README), ignored-only (agent + README), and instructions-only (CLAUDE.md alone).
   put(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({
     name: 'ck-less-market',
