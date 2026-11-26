@@ -774,6 +774,12 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .file-open-box { display: flex; flex-direction: column; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); overflow: hidden; }
 .file-open-head, .file-open-foot { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 12px; background: var(--chrome); font-size: 12px; color: var(--ink); }
 .file-open-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; line-height: 22px; border-bottom: 1px solid var(--line); }
+.file-open-controls { display: inline-flex; align-items: center; gap: 6px; flex: none; max-width: 100%; }
+.select.file-copy-select select {
+  height: 24px; min-width: 0; max-width: 260px; padding: 0 24px 0 8px; border-radius: 6px; font-size: 12px; line-height: 18px;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.select.file-copy-select .icon { right: 6px; }
 .file-open-close { color: var(--ink-soft); }
 .file-open-foot { border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-soft); }
 .file-open-tabs { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
@@ -2294,12 +2300,13 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 /* While the rows go by last updated, each says when (matrix.ts whenCell) in a column of its own before the marks, at least 6.5em wide. */
 .ov-row.ov-switch-row.ov-dated { grid-template-columns: auto minmax(0, 1fr) minmax(6.5em, auto) auto auto; }
 .ov-when { font-size: 12px; color: var(--ink-soft); text-align: right; white-space: nowrap; }
-/* Usage (matrix.ts usedCell): each row says its figure in a column of its own before the marks, one width on every row so the
-   marks stay in line, wide enough for the longest ("used 13 days ago · 999 sessions"), the count fainter; an opened row says
-   each tool's (matrix.ts usageLine). */
+/* Usage (matrix.ts usedCell): each row says its figure in a column of its own before the marks, sized to its words up to the
+   longest ("used 13 days ago · 999 sessions") so a long name uses the room before it (dated rows and empty collecting cells
+   keep the full width so dates line up and the column holds its room); the count fainter; an opened row says each tool's (matrix.ts usageLine). */
 .ov-row.ov-switch-row.ov-usage { grid-template-columns: auto minmax(0, 1fr) auto auto auto; }
 .ov-row.ov-switch-row.ov-dated.ov-usage { grid-template-columns: auto minmax(0, 1fr) minmax(6.5em, auto) auto auto auto; }
-.ov-used { width: 16em; font-size: 12px; color: var(--ink-soft); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-used { max-width: 16em; font-size: 12px; color: var(--ink-soft); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-dated .ov-used, .ov-used:empty { width: 16em; }
 .ov-used-faint { color: var(--ink-faint); }
 .ov-used-count { color: var(--ink-faint); }
 .ov-used-skip { color: var(--ink); font-weight: 500; }

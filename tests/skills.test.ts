@@ -15,7 +15,7 @@ import { readHistory } from '../src/history.ts';
 import { libraryEntry, librarySentence } from '../src/historyactions.ts';
 import { addLabel, canAdd, harnessIs, isPartial, libraryWords, ownCopies, placeOf, rowClicks, sentences, statusLine, switchLabel } from '../src/libraryrow.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
-import { applySkills, clearSwitch, readDisk, skillChange, skillsView, skillVersion, skillVersionFile, takeOver } from '../src/skills.ts';
+import { applySkills, clearSwitch, readDisk, skillChange, skillFoundFile, skillsView, skillVersion, skillVersionFile, takeOver } from '../src/skills.ts';
 import { serversView } from '../src/servers.ts';
 import { agentsView } from '../src/agents.ts';
 import { homePass } from '../src/homepass.ts';
@@ -1529,7 +1529,7 @@ test('An Add while Synchronize everything takes in a skill found elsewhere: the 
   } finally { await box.cleanup(); }
 });
 
-test('skillVersionFile reads regular files in a stored skill version, lists SKILL.md first, enforces the 1 MB cap and text check, and refuses links, specials, and paths outside the folder', async t => {
+test('skillVersionFile and skillFoundFile read regular files through one reader without hashing, enforce the 1 MB cap and text check, and refuse links, specials and outside paths', async t => {
   const box = await sandbox();
   try {
     const skillBody = skillText('Preserves config value: api_key=ck-raw-12345.');
@@ -1537,53 +1537,141 @@ test('skillVersionFile reads regular files in a stored skill version, lists SKIL
     const script = '#!/bin/sh\necho ok\n';
     const exactLimit = 'a'.repeat(1024 * 1024);
     const overLimit = 'b'.repeat(1024 * 1024 + 1);
-    await put(box, 'claude-cli', {
+    const binary = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02]);
+    const files = {
       'SKILL.md': skillBody,
       'scripts/run.sh': { text: script, mode: 0o755 },
       'checklist.md': checklist,
+      'empty.md': '',
       'exact.txt': exactLimit,
       'over.txt': overLimit,
-    });
-    const binary = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02]);
+    };
+    await put(box, 'claude-cli', files);
     await writeFile(join(folderOf(box, 'claude-cli'), 'asset.bin'), binary);
     await turnOn(box);
     const hash = (await itemOf(box))!.hash;
     const stored = join(box.home, '.central-knot/items/skills/notes/versions', hash);
-    // Plant symlinks (inward, outward, and at a version folder), an outside file, and a file in the skill folder above versions/.
+    // Found copy in Claude Code with identical files, plus an outside file for symlink targets.
+    await put(box, 'claude-cli', files, [], 'draft');
+    const foundDir = folderOf(box, 'claude-cli', 'draft');
+    await writeFile(join(foundDir, 'asset.bin'), binary);
     const outside = join(box.home, '.central-knot/items/skills/notes/versions/outside.txt');
     const escaped = join(box.home, '.central-knot/items/skills/notes/escape.txt');
+    const outsideSub = join(box.base, 'outside-sub');
     const fakeHex = '0'.repeat(64);
+    await mkdir(outsideSub, { recursive: true });
+    await writeFile(join(outsideSub, 'inside.md'), 'from-outside-dir\n');
     await writeFile(outside, 'secret\n');
     await writeFile(escaped, 'above-versions\n');
     await writeFile(join(box.home, '.central-knot/items/skills/notes/SKILL.md'), 'above-versions-skill\n');
-    await symlink('SKILL.md', join(stored, 'alias.md'));
-    await symlink(outside, join(stored, 'out-link.md'));
+    for (const dir of [stored, foundDir]) {
+      await symlink('SKILL.md', join(dir, 'alias.md'));
+      await symlink(outside, join(dir, 'out-link.md'));
+      await symlink(outsideSub, join(dir, 'sub-link'));
+    }
     await symlink(stored, join(box.home, '.central-knot/items/skills/notes/versions', fakeHex));
 
-    const expectedFiles = ['SKILL.md', 'asset.bin', 'checklist.md', 'exact.txt', 'over.txt', 'scripts/run.sh'];
-    assert.deepEqual(await skillVersionFile(box.context, 'notes', hash, 'SKILL.md'), { files: expectedFiles, text: skillBody });
-    assert.deepEqual(await skillVersionFile(box.context, 'notes', hash, 'checklist.md'), { files: expectedFiles, text: checklist });
-    assert.deepEqual(await skillVersionFile(box.context, 'notes', hash, 'scripts/run.sh'), { files: expectedFiles, text: script });
-    assert.deepEqual(await skillVersionFile(box.context, 'notes', hash, 'asset.bin'), { files: expectedFiles, note: 'Not a text file.' });
-    assert.deepEqual(await skillVersionFile(box.context, 'notes', hash, 'exact.txt'), { files: expectedFiles, text: exactLimit });
-    assert.deepEqual(await skillVersionFile(box.context, 'notes', hash, 'over.txt'), { files: expectedFiles, note: 'Over 1 MB, so not shown here.' });
+    const expectedFiles = ['SKILL.md', 'asset.bin', 'checklist.md', 'empty.md', 'exact.txt', 'over.txt', 'scripts/run.sh'];
+    const readers: [string, string, (file: string) => ReturnType<typeof skillVersionFile>][] = [
+      ['stored version', stored, file => skillVersionFile(box.context, 'notes', hash, file)],
+      ['found copy', foundDir, file => skillFoundFile(box.context, 'draft', 'claude-cli', 'Claude Code skills', file)],
+    ];
+    for (const [label, dir, read] of readers) {
+      await t.test(`${label}: reads regular files without hashing, enforces cap and NUL, refuses traversal, links and specials`, async st => {
+        const listed = await countOpens(() => read('SKILL.md'));
+        assert.deepEqual(listed.result, { files: expectedFiles, text: skillBody });
+        assert.equal(listed.opens.size, 0, 'listing does not hash files');
+        assert.deepEqual(await read('checklist.md'), { files: expectedFiles, text: checklist });
+        assert.deepEqual(await read('empty.md'), { files: expectedFiles, text: '' });
+        assert.deepEqual(await read('scripts/run.sh'), { files: expectedFiles, text: script });
+        assert.deepEqual(await read('asset.bin'), { files: expectedFiles, note: 'Not a text file.' });
+        assert.deepEqual(await read('exact.txt'), { files: expectedFiles, text: exactLimit });
+        assert.deepEqual(await read('over.txt'), { files: expectedFiles, note: 'Over 1 MB, so not shown here.' });
 
-    // Refused: paths outside the folder, non-canonical paths, case mismatches, directories, missing names, and inward/outward symlinks.
-    for (const bad of ['../outside.txt', '/etc/passwd', './SKILL.md', 'scripts/../SKILL.md', 'skill.md', 'CHECKLIST.MD', 'scripts', 'missing.md', '', 'alias.md', 'out-link.md']) {
-      assert.equal(await skillVersionFile(box.context, 'notes', hash, bad), undefined, `refuses ${JSON.stringify(bad)}`);
+        // Refused: paths outside the folder, non-canonical paths, case mismatches, directories, missing names, and inward/outward/dir symlinks.
+        for (const bad of ['../outside.txt', '/etc/passwd', './SKILL.md', 'scripts/../SKILL.md', 'skill.md', 'CHECKLIST.MD', 'scripts', 'missing.md', '', 'alias.md', 'out-link.md', 'sub-link/inside.md']) {
+          assert.equal(await read(bad), undefined, `refuses ${JSON.stringify(bad)}`);
+        }
+        await st.test('refuses a special file (FIFO) without hanging and omits it from files', { skip: posixModeSkip }, async () => {
+          const fifo = join(dir, 'pipe');
+          assert.equal(spawnSync('mkfifo', [fifo]).status, 0);
+          assert.equal(await read('pipe'), undefined);
+          assert.deepEqual((await read('SKILL.md'))?.files, expectedFiles);
+        });
+      });
     }
+
     assert.equal(await skillVersionFile(box.context, 'missing-skill', hash, 'SKILL.md'), undefined);
     // Refused: version ids not in the store's 64-char lowercase hex form (.., path traversal, wrong case/length) or symlinked version folders.
     for (const badHash of ['..', `../versions/${hash}`, hash.toUpperCase(), hash.slice(0, 63), 'deadbeef', fakeHex]) {
       assert.equal(await skillVersionFile(box.context, 'notes', badHash, badHash === '..' ? 'escape.txt' : 'SKILL.md'), undefined, `skillVersionFile refuses hash ${JSON.stringify(badHash)}`);
       assert.equal(await skillVersion(box.context, 'notes', badHash), undefined, `skillVersion refuses hash ${JSON.stringify(badHash)}`);
     }
+  } finally { await box.cleanup(); }
+});
 
-    await t.test('refuses a special file (FIFO) without hanging and omits it from files', { skip: posixModeSkip }, async () => {
-      const fifo = join(stored, 'pipe');
-      assert.equal(spawnSync('mkfifo', [fifo]).status, 0);
-      assert.equal(await skillVersionFile(box.context, 'notes', hash, 'pipe'), undefined);
-      assert.deepEqual((await skillVersionFile(box.context, 'notes', hash, 'SKILL.md'))?.files, expectedFiles);
-    });
+test('skillFoundFile resolves shared folders, symlinked skill folders and multiple roots per tool in main, and refuses invalid identities', async () => {
+  const box = await sandbox();
+  try {
+    // Copy in shared .agents/skills (read by Copilot CLI and Codex).
+    const sharedDir = join(box.home, '.agents/skills/shared-one');
+    await mkdir(join(sharedDir, 'ref'), { recursive: true });
+    const sharedSkill = skillText('Shared copy.', 'shared-one');
+    await writeFile(join(sharedDir, 'SKILL.md'), sharedSkill);
+    await writeFile(join(sharedDir, 'ref/note.md'), 'Shared nested note.\n');
+    assert.deepEqual(await skillFoundFile(box.context, 'shared-one', 'copilot-cli', 'Shared .agents skills', 'SKILL.md'), { files: ['SKILL.md', 'ref/note.md'], text: sharedSkill });
+    assert.deepEqual(await skillFoundFile(box.context, 'shared-one', 'codex-cli', undefined, 'ref/note.md'), { files: ['SKILL.md', 'ref/note.md'], text: 'Shared nested note.\n' });
+    assert.equal(await skillFoundFile(box.context, 'shared-one', 'claude-cli', undefined, 'SKILL.md'), undefined, 'Claude Code does not read .agents/skills');
+
+    // Symlink in a tool's skills folder: read through its real folder, while a symlink below it is still refused.
+    const realTarget = join(box.base, 'linked-target');
+    await mkdir(join(realTarget, 'sub'), { recursive: true });
+    const linkedSkill = skillText('Linked copy.', 'linked-one');
+    await writeFile(join(realTarget, 'SKILL.md'), linkedSkill);
+    await writeFile(join(realTarget, 'sub/detail.md'), 'Inside linked folder.\n');
+    await symlink('SKILL.md', join(realTarget, 'inner-link.md'));
+    await symlink(realTarget, folderOf(box, 'claude-cli', 'linked-one'));
+    assert.deepEqual(await skillFoundFile(box.context, 'linked-one', 'claude-cli', 'Claude Code skills', 'SKILL.md'), { files: ['SKILL.md', 'sub/detail.md'], text: linkedSkill });
+    assert.deepEqual(await skillFoundFile(box.context, 'linked-one', 'claude-cli', 'Claude Code skills', 'sub/detail.md'), { files: ['SKILL.md', 'sub/detail.md'], text: 'Inside linked folder.\n' });
+    assert.equal(await skillFoundFile(box.context, 'linked-one', 'claude-cli', 'Claude Code skills', 'inner-link.md'), undefined);
+    // Remove the inner link so readDisk accepts the linked skill into disk.outside for the skillsView check below.
+    await rm(join(realTarget, 'inner-link.md'));
+
+    // Two roots in one tool (Copilot skills + Shared .agents skills), distinguished by rootLabel.
+    const dualOwn = skillText('Copilot own copy.', 'dual');
+    const dualShared = skillText('Shared copy of dual.', 'dual');
+    await put(box, 'copilot-cli', { 'SKILL.md': dualOwn }, [], 'dual');
+    const dualSharedDir = join(box.home, '.agents/skills/dual');
+    await mkdir(dualSharedDir, { recursive: true });
+    await writeFile(join(dualSharedDir, 'SKILL.md'), dualShared);
+    assert.deepEqual(await skillFoundFile(box.context, 'dual', 'copilot-cli', 'Copilot skills', 'SKILL.md'), { files: ['SKILL.md'], text: dualOwn });
+    assert.deepEqual(await skillFoundFile(box.context, 'dual', 'copilot-cli', 'Shared .agents skills', 'SKILL.md'), { files: ['SKILL.md'], text: dualShared });
+
+    // Refused: unknown rootLabel, reserved folder name, dot-folder in Codex, traversal keys, folder without SKILL.md, symlinked SKILL.md.
+    await mkdir(folderOf(box, 'claude-cli', 'synced'), { recursive: true });
+    await writeFile(join(folderOf(box, 'claude-cli', 'synced'), 'SKILL.md'), skillText('Reserved.', 'synced'));
+    await mkdir(folderOf(box, 'codex-cli', '.system'), { recursive: true });
+    await writeFile(join(folderOf(box, 'codex-cli', '.system'), 'SKILL.md'), skillText('Hidden.', '.system'));
+    await mkdir(folderOf(box, 'claude-cli', 'no-skill'), { recursive: true });
+    await writeFile(join(folderOf(box, 'claude-cli', 'no-skill'), 'readme.md'), 'not a skill\n');
+    await mkdir(folderOf(box, 'claude-cli', 'sym-skill'), { recursive: true });
+    await symlink(join(realTarget, 'SKILL.md'), join(folderOf(box, 'claude-cli', 'sym-skill'), 'SKILL.md'));
+    assert.equal(await skillFoundFile(box.context, 'dual', 'copilot-cli', 'Unknown root', 'SKILL.md'), undefined);
+    assert.equal(await skillFoundFile(box.context, 'synced', 'claude-cli', 'Claude Code skills', 'SKILL.md'), undefined);
+    assert.equal(await skillFoundFile(box.context, '.system', 'codex-cli', 'Codex skills', 'SKILL.md'), undefined);
+    assert.equal(await skillFoundFile(box.context, '..', 'claude-cli', 'Claude Code skills', 'SKILL.md'), undefined);
+    assert.equal(await skillFoundFile(box.context, 'no-skill', 'claude-cli', 'Claude Code skills', 'readme.md'), undefined);
+    assert.equal(await skillFoundFile(box.context, 'sym-skill', 'claude-cli', 'Claude Code skills', 'SKILL.md'), undefined);
+
+    // skillsView provides folderHashes for both own-folder and outside (shared and linked) found copies.
+    const view = await skillsView(box.context, tools);
+    const dualFact = view.items.find(item => item.key === 'dual')!;
+    const sharedFact = view.items.find(item => item.key === 'shared-one')!;
+    const linkedFact = view.items.find(item => item.key === 'linked-one')!;
+    assert.ok(dualFact.folderHashes?.[realpathSync(folderOf(box, 'copilot-cli', 'dual'))]);
+    assert.ok(dualFact.folderHashes?.[realpathSync(dualSharedDir)]);
+    assert.notEqual(dualFact.folderHashes?.[realpathSync(folderOf(box, 'copilot-cli', 'dual'))], dualFact.folderHashes?.[realpathSync(dualSharedDir)]);
+    assert.ok(sharedFact.folderHashes?.[realpathSync(sharedDir)]);
+    assert.ok(linkedFact.folderHashes?.[realpathSync(realTarget)]);
   } finally { await box.cleanup(); }
 });

@@ -2,7 +2,7 @@
 // loads skills from, and the skill folder names it keeps for itself. What a running session needs to pick up a change is
 // reload.ts reloadTable. Facts only, for the main process: which tools are in a home is discovery.ts and presence.ts, their
 // names in words words.ts toolNames, and each kind's reader and writer for a tool its own module's (MAP.md, "To add or change": a tool).
-import { existsSync } from 'node:fs';
+import { existsSync, type Dirent } from 'node:fs';
 import { join } from 'node:path';
 import type { HarnessId } from './types.ts';
 
@@ -19,9 +19,9 @@ export interface HarnessDefinition {
   configUnder?: string;
   defaultConfig: string;
   /**
-   * Skill folder names this tool keeps for itself (Claude Code's `synced`): never read as a skill and never given one. Read in
-   * three places: discovery.ts (what a tool has), skillfiles.ts readSkillsFolder (what a pass reads) and skills.ts cannotTake
-   * (why a skill of that name can't go there). Tests: skills.test.ts (a name a tool keeps for itself), discovery.test.ts.
+   * Skill folder names this tool keeps for itself (Claude Code's `synced`): never read as a skill and never given one. Checked
+   * through `isSkillEntry` by discovery.ts, skillfiles.ts readSkillsFolder and skills.ts foundSkillFolder, and by skills.ts
+   * cannotTake (why a skill of that name can't go there). Tests: skills.test.ts (a name a tool keeps for itself), discovery.test.ts.
    */
   reservedSkills: string[];
   /** Observed: Claude Code 2.1.309 lists dot-folders as skills; Copilot CLI 1.0.107 and Codex 0.142.3 skip them. */
@@ -101,6 +101,11 @@ export { harnessIds } from './words.ts';
 export function configRoot(definition: HarnessDefinition, home: string, override?: string): string {
   return override === undefined ? join(home, definition.defaultConfig) : override;
 }
+
+/** Whether a directory entry in a skills folder may hold a skill (a folder or link, not reserved, and not a skipped dot-folder; callers still check SKILL.md). */
+export const isSkillEntry = (definition: HarnessDefinition, entry: Dirent): boolean =>
+  !(entry.name.startsWith('.') && !definition.loadsDotFolders) && !definition.reservedSkills.includes(entry.name)
+  && (entry.isDirectory() || entry.isSymbolicLink());
 
 /** A tool's config folder in a home, following its override (CLAUDE_CONFIG_DIR, COPILOT_HOME, CODEX_HOME, PI_CODING_AGENT_DIR, XDG_CONFIG_HOME for OpenCode; none for Antigravity). */
 export const envOverride = (definition: HarnessDefinition, env: Record<string, string | undefined>) => {

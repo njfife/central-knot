@@ -12,6 +12,7 @@ const api: DesktopApi = {
   takeOverSkill: (key, tool, resume, home) => ipcRenderer.invoke('skills:take-over', key, tool, resume, home),
   skillVersion: (key, hash) => ipcRenderer.invoke('skills:version', key, hash),
   skillVersionFile: (key, hash, file) => ipcRenderer.invoke('skills:version-file', key, hash, file),
+  skillFoundFile: (key, tool, rootLabel, file) => ipcRenderer.invoke('skills:found-file', key, tool, rootLabel, file),
   history: () => ipcRenderer.invoke('history:list'),
   instructions: readId => ipcRenderer.invoke('instructions:view', readId),
   agentVersion: (key, hash) => ipcRenderer.invoke('agents:version', key, hash),

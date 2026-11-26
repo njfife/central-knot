@@ -9,7 +9,7 @@ import { execFile } from 'node:child_process';
 import { isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parseDocument } from 'yaml';
-import { configRoot, harnesses, type HarnessDefinition } from './harnesses.ts';
+import { configRoot, harnesses, isSkillEntry, type HarnessDefinition } from './harnesses.ts';
 import { appCandidates, executableCandidates, otherAppCandidates, pathBeside, type AppCandidate } from './platform.ts';
 import { launchCommand } from './launch.ts';
 import type { DesktopApp, HarnessId, HomeMode, OtherApp, ProbeResult, Skill, Snapshot } from './types.ts';
@@ -342,7 +342,7 @@ export async function discover(options: {
     }
     rootResults.push('empty');
     for (const entry of entries.sort((first, second) => first.name.localeCompare(second.name))) {
-      if ((entry.name.startsWith('.') && !definition.loadsDotFolders) || definition.reservedSkills.includes(entry.name) || (!entry.isDirectory() && !entry.isSymbolicLink())) continue;
+      if (!isSkillEntry(definition, entry)) continue;
       const directory = join(skillRoot.path, entry.name);
       const skillPath = join(directory, 'SKILL.md');
       try {

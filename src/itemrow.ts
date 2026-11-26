@@ -43,6 +43,8 @@ export interface ItemRow {
   edited?: Tool[];
   /** Each tool's main copy's content ID, to tie a choice to what was seen. */
   hashes?: Partial<Record<Tool, string>>;
+  /** Found skills: each read copy's folder content hash by real directory (own and outside copies). */
+  folderHashes?: Record<string, string>;
   /** Where each copy lives, for the details. */
   paths?: Partial<Record<Tool, string>>;
   /** For the compare view: one line per copy that differs. */
