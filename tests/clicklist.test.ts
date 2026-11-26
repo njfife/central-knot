@@ -72,7 +72,7 @@ Object.assign(globalThis, {
 Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh' } });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
-const { acting, applyByKind, applyClick, askFlash, busy, closeResult, deleteProfileDef, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, profileEndedLine, profilesBefore, saveProfileDef, selectOff, switchToProfile, whyKindReadOnly, whyReadOnly,
+const { acting, announce, applyByKind, applyClick, askFlash, busy, closeResult, deleteProfileDef, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, profileEndedLine, profilesBefore, saveProfileDef, selectOff, switchToProfile, whyKindReadOnly, whyReadOnly,
   loadHome, problemKey, queueClick, readAgain, restoreEvent, setRenderer, showPage, syncNow, state: app } = await import('../src/app.ts');
 const { repo, repoPage } = await import('../src/repopage.ts');
 const { applyPluginOps, clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, resultOn, runReloads, shownPlugins, turnFromLine, turnPlugin, undoLabel, undoLast, usePlugins } = await import('../src/pluginstate.ts');
@@ -3184,3 +3184,44 @@ test('Overlapping slow plugin install and Library skill switch: only the Library
   assert.equal(app.outcome?.profileLine, 'Work stopped being the profile in use.');
   assert.equal(market.lastRun?.profileLine, undefined);
 });
+
+test('Single plugin click that fails or partly fails speaks the failure (never Nothing changed) and stays quiet on Plugins', async t => {
+  const { viewWith } = pluginProfileWorld(t);
+  let diskHome = viewWith(true);
+  t.mock.method(api, 'refresh', async () => { main.reads.home++; return diskHome; });
+
+  // Complete refusal on Plugins: spoken text names the failure, never "Nothing changed", and is quiet on Plugins.
+  turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
+  await settled();
+  await main.answer(refused('alpha'));
+  await settled();
+  assert.doesNotMatch(app.said.text, /Nothing changed/);
+  assert.match(app.said.text, /alpha: Claude Code: /);
+  assert.equal(app.said.quiet, true);
+
+  // Partial failure with Undo on Plugins: spoken text includes "not in Codex", and stays quiet on Plugins.
+  closeRun();
+  const codexRefused = { ...report('failed', 'Not installed. Codex refused it.'), tool: 'codex-cli' as const };
+  turnPlugin(entry, 'alpha', 'on');
+  await settled();
+  await main.answer({ ...installed('alpha'), done: [...installed('alpha').done, { source: '/market', marketName: 'team', plugin: 'alpha', tool: 'codex-cli', action: 'install', report: codexRefused }] });
+  await settled();
+  assert.equal(app.said.text, 'alpha: installed in Claude Code, not in Codex.');
+  assert.equal(app.said.quiet, true);
+
+  // Off Plugins: a failed single click is shown in the status bar (not quiet).
+  closeRun();
+  turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
+  await settled();
+  showPage('library');
+  await main.answer(refused('alpha'));
+  await settled();
+  assert.doesNotMatch(app.said.text, /Nothing changed/);
+  assert.match(app.said.text, /alpha: Claude Code: /);
+  assert.equal(app.said.quiet, false);
+
+  // announce's shown prefix guard: when shown is not a prefix of text, paintStatusMessage emits no sliced hidden tail.
+  announce('Completely different full sentence.', false, undefined, undefined, 'Prefix.');
+  assert.equal(announcement.children.some((kid: any) => String(kid?.className ?? '').includes('visually-hidden')), false);
+});
+

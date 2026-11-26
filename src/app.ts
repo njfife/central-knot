@@ -220,7 +220,9 @@ export const setPracticeNote = (open: boolean): void => writeFlag(PRACTICE_NOTE,
 /**
  * Says something in the status bar, kept in state (state.said) so a redraw paints the same thing. The newest message is
  * the one shown. A quiet announcement is for screen readers only: the page already shows the same thing (a band), or, for
- * one about sync notices (`notices`), will once each is seen (paintStatusMessage).
+ * one about sync notices (`notices`), will once each is seen (paintStatusMessage). When `shown` is given (pluginstate.ts
+ * sayResult, where the Library line already draws the ended-profile sentence), it must be a prefix of `text`: the bar
+ * shows and tooltips `shown`, while the rest of `text` stays visually hidden so screen readers still hear the whole string.
  */
 export function announce(text: string, quiet = false, link?: { label: string; run: () => void }, notices?: string[], shown?: string) {
   state.said = { text, quiet, seq: state.said.seq + 1, link, notices, shown };
@@ -293,7 +295,7 @@ function fadeNow(): void {
   if (fadeRun() || state.outcome !== outcome) rerender();
 }
 
-/** Paints the status bar's message from state.said, keeping its whole text as its tooltip. */
+/** Paints the status bar's message from state.said (`shown` when given, else `text`, with that visible string as its tooltip and any spoken suffix visually hidden). */
 export function paintStatusMessage() {
   const region = document.getElementById('announcement')!;
   const told = state.said;
@@ -302,7 +304,7 @@ export function paintStatusMessage() {
   if (region.dataset.text !== told.text || region.title !== shown) {
     region.dataset.text = told.text;
     const [, first, rest] = /^(.+?[.!?])(\s.+)?$/s.exec(shown) ?? [shown, shown, ''];
-    const tail = told.shown !== undefined ? told.text.slice(shown.length) : '';
+    const tail = told.shown !== undefined && told.text.startsWith(shown) ? told.text.slice(shown.length) : '';
     const parts = [shown ? h('span.said-first', {}, first) : null, rest ? h('span.said-rest', {}, ` ${rest.trim()}`) : null, tail ? h('span.visually-hidden', {}, tail) : null];
     region.replaceChildren(...parts.filter((part): part is HTMLElement => !!part));
   }

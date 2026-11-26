@@ -10,7 +10,7 @@
 //   (clicklist.ts runAt), the run's clicks are the list's (market.clicks), and each row says its own click's state (pluginparts.ts
 //   clickNote). That plugin's switch and boxes stay off from its click until
 //   the view is read back after it (pluginBusy); every other plugin's switch, and the rest of the app, stay usable meanwhile. The
-//   home is read once, when the list empties (app.ts oweHomeRead). Its one Undo is its last click's.
+//   home is read once, when its run ends (app.ts oweHomeRead). Its one Undo is its last click's.
 // - Every other action here runs under app.ts busy, and is off while the page acts (app.ts acting: busy, or a run of clicks,
 //   which also says why), so a click on one lands on a disabled control and is dropped, never run twice. A switch is off under
 //   busy too.
@@ -20,7 +20,7 @@
 //   that isn't on screen, in the header. It sets no market.lastRun: the Plugins page's own result is its own clicks'. An act on a
 //   plugin from either page retires that plugin's earlier results and Undo on both (retire).
 // Steps that run by themselves (pluginupdates.ts) take their turn with the page's in main's one queue.
-import { noteMove, showPage, announce, busy, focusWhenDone, homeReadOwed, oweHomeRead, pinnedRows, profileEndedLine, profilesBefore, readHomeOnce, rerender, saidInStatusBar, setHome, state as app, tell, toolWays, withReloads, type Outcome, type ProfilesBefore } from './app.ts';
+import { noteMove, showPage, announce, busy, focusWhenDone, oweHomeRead, pinnedRows, profileEndedLine, profilesBefore, readHomeOnce, rerender, saidInStatusBar, setHome, state as app, tell, toolWays, withReloads, type Outcome, type ProfilesBefore } from './app.ts';
 import { pluginReloads, reloadAdvice, settleReloads, type ReloadAdvice, type ReloadChange } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Turn } from './clicklist.ts';
 import { pin, placeIn } from './itemrow.ts';
@@ -456,8 +456,8 @@ function aimWords(what: PluginTurn, tool?: HarnessId): PluginClick['said'] {
 }
 
 /**
- * The run's end (clicklist.ts): a run of plugin clicks has its ended-profile line worked out after the home read, said even
- * after one click when a profile left use (and as a whole for several), and focus returns to the control clicked last.
+ * The run's end (clicklist.ts): after the home read, a run of plugin clicks has its ended-profile line worked out and its
+ * result said once (whether one click or several), and focus returns to the control clicked last.
  */
 function runEnded(): void {
   const list = market.clicks, last = market.lastRun, lastRan = list.findLast(click => click.ran);
@@ -467,15 +467,17 @@ function runEnded(): void {
   // one that went nowhere is named as failed.
   const lines = lastLines(), went = new Set(lines.filter(line => line.ok).map(line => line.plugin));
   const notIn = (plugin: string) => [...new Set(ran.filter(click => click.plugin === plugin).flatMap(click => click.ran?.done ?? []).filter(step => !succeeded(step.report)).map(step => toolNames[step.tool]))];
-  const said = lines.map(line => (line.ok && notIn(line.plugin).length ? { ...line, text: `${line.text}, not in ${andList(notIn(line.plugin))}` } : line));
+  const withNotIn = (list: ResultLine[]) => list.map(line => (line.ok && notIn(line.plugin).length ? { ...line, text: `${line.text}, not in ${andList(notIn(line.plugin))}` } : line));
   const failed = [...new Set(lines.filter(line => !line.ok && !went.has(line.plugin)).map(line => line.plugin))];
   const did = ran.some(click => click.ran?.done.some(step => succeeded(step.report)));
   const profileLine = last && did ? profileEndedLine(lastRan!.run.before) : undefined;
   if (last) last.profileLine = profileLine;
   const one = ran.length === 1 ? ran[0]!.ran : undefined;
-  const multi = [resultSentence(said, false), failed.length ? `${andList(failed)} failed.` : ''].filter(Boolean).join(' ') || 'Nothing changed.';
-  const base = one ? (one.stopped ?? (resultSentence(resultLines(one.done, false), false) || `Nothing changed for ${ran[0]!.plugin}.`)) : multi;
-  announce([base, profileLine].filter(Boolean).join(' '), app.page === 'plugins' && !lines.some(line => !line.ok) && (undoOps().length > 0 || !!profileLine));
+  const oneLines = one ? resultLines(one.done, false) : [];
+  const oneFailed = oneLines.filter(line => !line.ok).map(line => `${line.plugin}: ${line.text}`).join(' ');
+  const multi = [resultSentence(withNotIn(lines), false), failed.length ? `${andList(failed)} failed.` : ''].filter(Boolean).join(' ') || 'Nothing changed.';
+  const base = one ? (one.stopped ?? (resultSentence(withNotIn(oneLines), false) || oneFailed || `Nothing changed for ${ran[0]!.plugin}.`)) : multi;
+  announce([base, profileLine].filter(Boolean).join(' '), app.page === 'plugins' && (one ? !!one.stopped || !!oneFailed || undoOps().length > 0 || !!profileLine : !lines.some(line => !line.ok) && (undoOps().length > 0 || !!profileLine)));
   if (document.activeElement === document.body && clickedLast) document.getElementById(clickedLast)?.focus({ preventScroll: true });
 }
 
@@ -486,7 +488,6 @@ function runEnded(): void {
  * dropped (resetMarket) is passed over.
  */
 async function runClick(click: PluginClick, home: string): Promise<void> {
-  if (clickList.turns.includes(click) && !click.run.before && homeReadOwed()) await readHomeOnce();
   if (!clickList.turns.includes(click)) return;
   const before = profilesBefore();
   click.run.before ??= before;
@@ -699,8 +700,6 @@ export function turnFromLine(aim: LineAim): void {
  * Plugins page says them.
  */
 async function runLine(click: LineClick): Promise<void> {
-  if (homeReadOwed()) await readHomeOnce();
-  if (!clickList.turns.includes(click)) return;
   const { aim } = click, view = market.view, entry = view?.marketplaces.find(each => each.source === aim.source), before = app.home?.pluginItems, atStart = profilesBefore();
   retire(aim.plugin);
   rerender();
