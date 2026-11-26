@@ -389,7 +389,7 @@ export const comparableText = (text: string) => text.replace(/\r\n/g, '\n');
  * its place in the plugin): what marks that tool's copy "differs from the marketplace's copy" and offers Update there. A
  * part only one side has is left out, since each tool reads its copy by its own rules (Codex's manifest, Copilot CLI's
  * skills list). An instruction file is left out too: no tool reads it, so a difference there offers no Update (its own row
- * under What it holds still says which copy differs: pluginpage.ts differsNote). The page and the update both ask this.
+ * on the plugin's page still says which copy differs: pluginpage.ts differsNote). The page and the update both ask this.
  */
 export const copyDiffers = (offered: Pick<PluginContents, 'skills' | 'commands' | 'agents'>, copy: InstalledCopy | undefined) => !!copy && (['skills', 'commands', 'agents'] as const)
   .some(kind => offered[kind].some(part => copy[kind].some(other => other.path === part.path && comparableText(other.text) !== comparableText(part.text))));
@@ -603,14 +603,14 @@ const TICKED: readonly ToolMark[] = ['installed', 'outdated', 'items', 'stays'],
  * A tool's box on the plugin's page (pluginparts.ts toolBox; what a click records: pluginrecord.ts A TOOL'S BOX), from its mark
  * (toolMark): ticked or not; off where it can't act, with why (`off`): its mark held, a ticked copy that can't be taken out here
  * (cantUninstall: never an untick that couldn't be taken back), or a home that can't change; and its line where that says more
- * than the mark (`line`): why it is off, short, or that he unticked it.
+ * than the mark (`line`): why it is off, short.
  */
 export function boxOf(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, { mark, words }: { mark: ToolMark; words: string }): { ticked: boolean; held?: true; off?: string; line?: string } {
   const name = names[tool], ticked = TICKED.includes(mark), held = HELD.includes(mark), recorded = entry.switches?.[plugin];
   const kept = !!recorded?.entry?.on && recorded.entry.except.includes(tool);
   const stuck = ticked && takesPlugins(tool) && view.canWrite ? cantUninstall(view, entry, plugin, tool) : undefined;
   const off = held ? words : stuck ? `${stuck}${kept ? ` It is kept out of ${name}: uninstall it in ${name} itself, then tick to put it back.` : ''}` : !view.canWrite ? view.reason ?? PREVIEW_ONLY : view.switchProblem;
-  const line = !held && !stuck ? (mark === 'absent' && kept ? 'Kept out: tick to put it back' : undefined)
+  const line = !held && !stuck ? undefined
     : takesPlugins(tool) && !view.clis[tool] ? `No ${name} command-line tool here` : entry.refusedBy?.[tool] ? `${name} refused this marketplace`
     : stuck ? 'Can’t be taken out here' : mark === 'cannot' ? recorded?.tools[tool]?.held ?? unavailable(view, entry, plugin, tool) : undefined;
   return { ticked, ...(held ? { held: true as const } : {}), ...(off ? { off } : {}), ...(line ? { line } : {}) };
