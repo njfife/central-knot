@@ -8,7 +8,7 @@ import { manageLocked, manageRow } from './managecard.ts';
 import { installsIn, pluginsInstalled, pluginsTabNote, takenItems, takesItemsOnly, type InstalledMarketPlugin } from './pluginstatus.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { pluginTitle } from './pluginparts.ts';
-import { button, emptyState, h, icon, pathText, section } from './dom.ts';
+import { button, emptyState, h, icon, pathText, section, type Child } from './dom.ts';
 import { fullToolName, plural } from './model.ts';
 import { andList, coworkWords, fileName, kindNouns, pageNames, sentence, toolNames as names } from './words.ts';
 import { agentsKeptIn, hasCowork, takesPlugins, type AgentTool } from './presence.ts';
@@ -75,7 +75,7 @@ const detectionLine = (snapshot: Snapshot, home: HomeView) => {
   if (home.mode === 'fixture') return 'Sample folder';
   if (home.mode === 'custom') return 'Folder only';
   const app = snapshot.app ? appLine(snapshot.app) : '';
-  if (snapshot.detection === 'Installed') return [`Installed${snapshot.probe.version ? ` · ${snapshot.probe.version}` : ''}`, app].filter(Boolean).join('; ');
+  if (snapshot.detection === 'Installed') return [snapshot.probe.version || 'Installed', app].filter(Boolean).join('; ');
   if (snapshot.detection === 'App only') return `${app} · no CLI found`;
   // A folder with no tool beside it: the tool is not installed, and its folder (shown under this line) is all that is here.
   if (snapshot.detection === 'Config found but app not detected') return 'Not found · only its folder is here';
@@ -91,17 +91,20 @@ const appLine = (app: DesktopApp) => `${app.name}${app.version ? ` ${app.version
 
 type Count = { value: string; note?: string; faint?: boolean };
 /** One line of a card's counts: what, how many, and a short note. `faint` for a count that is not there or not known. */
-function countRow(label: string, { value, note, faint = false }: Count) {
+function countRow(label: string, count: Count | null) {
+  if (!count) return null;
+  const { value, note, faint = false } = count;
   return h('div.harness-count', {}, h('span.harness-count-label', {}, label), h(`span.harness-count-value${faint ? '.tone-faint' : ''}`, {}, value), h('span.harness-count-note', {}, note ?? ''));
 }
 
-function kindCount({ kind, supported, total, plugins, on }: ReturnType<typeof tally>, tool: HarnessId): Count {
+function kindCount(home: HomeView, { kind, supported, total, plugins, on }: ReturnType<typeof tally>, tool: HarnessId): Count | null {
   if (!supported) return { value: '—', note: kindNotUsed(tool, kind), faint: true };
-  // None: the words say it, without a 0 beside them.
-  if (!total) return { value: '', note: 'none yet', faint: true };
+  // Unread comes before any total, as on the Overview; known zero is omitted.
+  if (home[kind]?.unread?.includes(tool)) return { value: '?', note: 'couldn’t be read', faint: true };
+  if (!total) return null;
   // A plugin's items are counted and said apart: they are never synced.
   const own = total - plugins;
-  const mine = !own ? '' : on === own ? (plugins ? `${own} synced` : 'all synced') : !on ? (plugins ? `${own} not synced` : 'none synced') : `${on} synced · ${own - on} not synced`;
+  const mine = !own ? '' : on === own ? (plugins ? `${own} synced` : '') : !on ? `${own} not synced` : `${on} synced · ${own - on} not synced`;
   return { value: String(total), note: [mine, plugins ? `${plugins} from plugins` : ''].filter(Boolean).join(' · ') };
 }
 
@@ -117,11 +120,11 @@ function instructionCount(tool: HarnessId): Count {
 }
 
 /** A tool's plugins on its card (pluginstatus.ts pluginsInstalled, the Overview's count too). */
-function pluginCount(tool: HarnessId): Count {
+function pluginCount(tool: HarnessId): Count | null {
   const plugins = pluginsInstalled(state.home, tool);
   if (plugins.state === 'unsupported') return { value: '—', note: takesItemsOnly(names[tool]), faint: true };
   if (plugins.state === 'unknown') return { value: '?', note: 'its record couldn’t be read', faint: true };
-  return { value: plugins.count ? String(plugins.count) : '', note: plugins.count ? 'installed' : 'none installed', faint: !plugins.count };
+  return plugins.count ? { value: String(plugins.count), note: 'installed' } : null;
 }
 
 /** What needs a look on a card, each a link: differing copies (to that kind's tab, showing only those) and read problems (to About). */
@@ -143,7 +146,7 @@ function attentionLinks(snapshot: Snapshot, kinds: ReturnType<typeof tally>[]) {
  * a tool left out has its name, how it was found, its switch and its folder, and does not open; a tool not found has nothing
  * to count, so its card is its name, how to fix that, and its folder, and does not open.
  */
-function summaryCard(snapshot: Snapshot, home: HomeView) {
+function summaryCard(snapshot: Snapshot, home: HomeView, showManageInfo = false) {
   const tool = snapshot.harness;
   const here = managed(home, tool), installed = home.sync.present.includes(tool);
   const title = [brandMark(tool, 18), h('strong.harness-card-name', {}, names[tool])];
@@ -161,15 +164,17 @@ function summaryCard(snapshot: Snapshot, home: HomeView) {
     // When no tool at all was found, the note above already says to install one; each card need not repeat it.
     h('div.harness-card-main', {}, head, status, home.sync.present.length ? h('span.harness-card-next', {}, `Install ${names[tool]}, then Refresh.`) : null), path);
   const kinds = KINDS.map(kind => tally(home, kind, tool));
+  const kindRows = kinds.map(entry => countRow(tabLabel(entry.kind), kindCount(home, entry, tool))).filter((row): row is HTMLElement => !!row);
+  const extraRows = [countRow(tabLabel('instructions'), instructionCount(tool)), countRow(tabLabel('plugins'), pluginCount(tool)),
+    // Cowork comes with Claude desktop and is no tool here: it uses the Claude account's plugins, said once on Claude Code's card.
+    tool === 'claude-cli' && hasCowork(home.snapshots) ? countRow('Cowork', { value: '—', note: coworkWords.card, faint: true }) : null]
+    .filter((row): row is HTMLElement => !!row);
+  const groups = [kindRows, extraRows].filter(rows => rows.length);
   // Two groups (the three kinds, then its file and plugins), which sit side by side on a wide card.
-  const body = [head, status, h('span.harness-counts', {},
-    h('span.harness-count-group', {}, kinds.map(entry => countRow(tabLabel(entry.kind), kindCount(entry, tool)))),
-    h('span.harness-count-group', {}, countRow(tabLabel('instructions'), instructionCount(tool)), countRow(tabLabel('plugins'), pluginCount(tool)),
-      // Cowork comes with Claude desktop and is no tool here: it uses the Claude account's plugins, said once on Claude Code's card.
-      tool === 'claude-cli' && hasCowork(home.snapshots) ? countRow('Cowork', { value: '—', note: coworkWords.card, faint: true }) : null))];
+  const body = [head, status, groups.length ? h('span.harness-counts', {}, groups.map(rows => h('span.harness-count-group', {}, rows))) : null];
   return h('div.card.harness-card', {},
     h('div.harness-card-main', {}, body),
-    attentionLinks(snapshot, kinds), manageRow(home, tool), path);
+    attentionLinks(snapshot, kinds), manageRow(home, tool, showManageInfo), path);
 }
 
 /**
@@ -214,18 +219,20 @@ function everyHarness(home: HomeView) {
     const looked = home.mode === 'actual' ? `Not found on ${thisMachine}: ${andList(home.snapshots.map(snapshot => names[snapshot.harness]))}. Central Knot looks for them again each time it reads this home.` : undefined;
     return h('div.page', {}, noToolsState('harnesses', looked));
   }
+  const locked = manageLocked(home);
+  const notes: Child[][] = [
+    // Where no Manage switch can be turned, said once here (each disabled switch's tooltip says it too).
+    ...(locked ? [[locked]] : []),
+    ...(home.mode === 'actual' ? [] : [[home.mode === 'fixture' ? 'Practice copy: installed apps aren’t checked; ' : 'A folder: installed apps aren’t checked; ',
+      button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', disabled: acting(), onclick: () => void loadHome('actual') }), ' shows their versions.']]),
+    // A profile switches items in every tool at once, so the one in use is said once here, as Profiles names it.
+    ...(home.profiles.profiles.length ? [['Profile in use: ', button({ variant: 'link', size: 'micro', label: inUseName(home.profiles.profiles, homeItems(home), pluginLive(home)), id: 'harnesses-profile', onclick: () => showPage('profiles') }), '.']] : []),
+  ];
+  const firstManaged = cards.find(snapshot => managed(home, snapshot.harness))?.harness;
   return h('div.page', {}, caught ? h('div.bands', {}, caught) : null,
     h('div.scroll.harness-scroll', { id: 'harnesses-scroll' },
-      h('p.tools-note', {}, icon('info', 14, 'tone-muted'),
-        h('span', {}, home.sync.managed.length ? 'Each AI coding tool and what it has. Open one to manage its skills, MCP servers, agents, instructions and plugins; its switch says whether Central Knot manages it at all.'
-          : 'Central Knot manages none of your tools here. Turn one on to manage it; its items not in Central Knot yet then show as found, and Add keeps them. What Central Knot keeps already stays kept.',
-          // Where no Manage switch can be turned, said once here (each disabled switch's tooltip says it too).
-          manageLocked(home) ? ` ${manageLocked(home)}` : null,
-          home.mode === 'actual' ? null : [home.mode === 'fixture' ? ' Practice copy: installed apps aren’t checked; ' : ' A folder: installed apps aren’t checked; ',
-            button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', disabled: acting(), onclick: () => void loadHome('actual') }), ' shows their versions.'],
-          // A profile switches items in every tool at once, so the one in use is said once here, as Profiles names it.
-          home.profiles.profiles.length ? [' Profile in use: ', button({ variant: 'link', size: 'micro', label: inUseName(home.profiles.profiles, homeItems(home), pluginLive(home)), id: 'harnesses-profile', onclick: () => showPage('profiles') }), '.'] : null)),
-      h('div.harness-cards', { 'data-count': String(cards.length) }, cards.map(snapshot => summaryCard(snapshot, home))),
+      notes.length ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), h('span', {}, notes.flatMap((part, index) => (index ? [' ', ...part] : part)))) : null,
+      h('div.harness-cards', { 'data-count': String(cards.length) }, cards.map(snapshot => summaryCard(snapshot, home, snapshot.harness === firstManaged))),
       otherApps(home)));
 }
 

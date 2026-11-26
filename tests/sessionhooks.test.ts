@@ -40,10 +40,10 @@ test('a plugin’s hooks that can add text are one group under its name, each wi
   assert.deepEqual([strip!.groups[0]!.plugin, strip!.note], [helper, undefined]);
 });
 
-test('the strip says once what it lists and what it doesn’t, and no hook’s row repeats it', () => {
+test('the strip has its heading and no standing prose paragraph, and no hook’s row repeats a standing note', () => {
   const strip = sessionStrip('claude-cli', [plugin('claude-cli', 'a', atStart('one', 'two'))], {})!;
   assert.equal(strip.heading, 'Hooks that can add text');
-  assert.equal(strip.about, 'These hooks run a program when a session starts or when you send a prompt, and what it prints can be added to the session; that is known only when it runs. Other kinds of hook (one that calls a URL or an MCP tool), and a project’s or an organisation’s hooks, aren’t listed.');
+  assert.equal('about' in strip, false);
   assert.ok(strip.groups.every(group => group.hooks.every(hook => !/known only/.test(hook.when))));
 });
 
@@ -56,8 +56,7 @@ test('can it add text is each tool’s own rule: Copilot CLI takes only start-of
   // Copilot CLI with only prompt hooks: no row, and its note says why.
   const prompts = sessionStrip('copilot-cli', [plugin('copilot-cli', 'p', [declared('userPromptSubmitted', './prompt.sh')])], {})!;
   assert.deepEqual([prompts.groups, prompts.note], [[], sessionTextNote('copilot-cli')]);
-  // Its sentence names only the hooks it takes.
-  assert.match(prompts.about, /^These hooks run a program when a session starts, and what it prints/);
+  assert.equal('about' in prompts, false);
   // The outcome table asks the same rule, tool by tool.
   const table = (tool: HarnessId, sessionTextHooks: HarnessId[]) => outcomes(tool, { skills: 0, commands: 0, agents: 0, hooks: true, hooksIn: [tool], startHooksIn: [tool], promptHooksIn: [], mcp: 0, mcpRootVariable: false, bin: false, sessionTextHooks })
     .some(outcome => outcome.component === 'Session text');
@@ -171,9 +170,9 @@ test('Pi’s packages and OpenCode’s plugins are named as their settings list 
     const piStrip = sessionStrip('pi-cli', [], await sessionSettings('pi-cli', pi))!;
     // A package told to load no extensions (`"extensions": []`) can't add text, so it isn't named.
     assert.deepEqual(shown(piStrip), [['npm:@example/pi-tools@1.0.0', []], ['git:github.com/example/pi-style@v1', []]]);
-    assert.deepEqual([piStrip.heading, piStrip.about, piStrip.note], ['Packages that can add text', 'Pi loads these packages into every session, and they can add text to it; what they add is known only when they run.', undefined]);
+    assert.deepEqual([piStrip.heading, 'about' in piStrip, piStrip.note], ['Packages that can add text', false, undefined]);
     const openCodeStrip = sessionStrip('opencode-cli', [], await sessionSettings('opencode-cli', opencode))!;
-    assert.deepEqual([shown(openCodeStrip)!.map(([name]) => name), openCodeStrip.heading], [['opencode-wakatime', 'file:///home/example/pkgs/plug-one'], 'Plugins that can add text']);
+    assert.deepEqual([shown(openCodeStrip)!.map(([name]) => name), openCodeStrip.heading, 'about' in openCodeStrip], [['opencode-wakatime', 'file:///home/example/pkgs/plug-one'], 'Plugins that can add text', false]);
     assert.equal(sessionStrip('pi-cli', [], await sessionSettings('pi-cli', join(base, 'nowhere'))), undefined);
   } finally { await rm(base, { recursive: true, force: true }); }
 });
