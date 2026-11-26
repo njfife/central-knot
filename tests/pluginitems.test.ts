@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { readItemTexts, readPluginItems } from '../src/pluginitems.ts';
 import { pluginFiles } from '../src/catalogdetail.ts';
 import { readPlugin } from '../src/pluginlibrary.ts';
-import { inTool, cellWords, handledWhere, offIn, pageRows, pluginItemCount, rowCount, toolWords, withPluginOnly } from '../src/pluginrows.ts';
+import { inTool, cellWords, handledWhere, offIn, pageRows, pluginItemCount, pluginKindNotLoaded, rowCount, toolWords, withPluginOnly } from '../src/pluginrows.ts';
 import { newItem } from '../src/library.ts';
 import { pluginItemKey, pluginLive } from '../src/profileplan.ts';
 import type { PluginContext } from '../src/plugins.ts';
@@ -247,7 +247,7 @@ test('a plugin whose marketplace is on no tool any more says where it is handled
   assert.equal(handledWhere(directory!), 'Installed in Claude Code from the Anthropic Directory. Claude Code’s own /plugin updates, turns off or removes it.');
 });
 
-test('withPluginOnly leaves out tools that do not load a plugin’s kind: Codex for an agent, while keeping Codex for a skill', () => {
+test('withPluginOnly and pluginKindNotLoaded follow loadsKind: Codex for a plugin’s agent is unloaded, while Codex for a skill or own agent is not', () => {
   const five: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
   const installed: InstalledPlugin = {
     tool: 'claude-cli',
@@ -266,6 +266,18 @@ test('withPluginOnly leaves out tools that do not load a plugin’s kind: Codex 
   const linked = { fromSource: { link: 'plugin:release-helper@team-tools' }, on: true, except: ['pi-cli', 'opencode-cli'] };
   assert.deepEqual(withPluginOnly(home, 'agents', linked), ['copilot-cli']);
   assert.deepEqual(withPluginOnly(home, 'skills', linked), ['copilot-cli', 'codex-cli']);
+  assert.deepEqual(
+    [
+      pluginKindNotLoaded('agents', { ...linked, on: false }, 'codex-cli'),
+      pluginKindNotLoaded('agents', linked, 'codex-cli'),
+      pluginKindNotLoaded('agents', { ...linked, except: ['codex-cli'] }, 'codex-cli'),
+      pluginKindNotLoaded('skills', linked, 'codex-cli'),
+      pluginKindNotLoaded('agents', { on: false, except: [] }, 'codex-cli'),
+      pluginKindNotLoaded('agents', linked, 'claude-cli'),
+      pluginKindNotLoaded('agents', linked, 'pi-cli'),
+    ],
+    [true, true, false, false, false, false, false],
+  );
 });
 
 test('reading plugin items for one plugin in two tools walks and hashes no files of its skill folders beyond SKILL.md', async () => {

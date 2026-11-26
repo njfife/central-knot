@@ -19132,9 +19132,9 @@ if (tool === 'claude') {
   await fullSize(a);
   await a.click(`.ov-row[data-key="${row('agents', 'incident-lead')}"] .switch`);
   await idle();
-  same('an On library agent from a plugin names Codex as unable to take it, never tools it is on in through its plugin, and keeps Codex’s line',
-    [(await a.text('.details-status'))?.trim(), await lineOf('Codex')],
-    ['On in Claude Code, Copilot CLI and Pi only · Codex can’t take it (see below) · kept out of OpenCode', 'Codex doesn’t load a plugin’s agents.']);
+  same('an On library agent from a plugin names Codex as unable to take it, never tools it is on in through its plugin, leaves Codex out of the header result, and keeps Codex’s line',
+    [(await a.text('#header [data-outcome] .band-text'))?.trim(), (await a.text('.details-status'))?.trim(), await lineOf('Codex')],
+    ['incident-lead is on in Claude Code, Copilot CLI and Pi.', 'On in Claude Code, Copilot CLI and Pi only · Codex can’t take it (see below) · kept out of OpenCode', 'Codex doesn’t load a plugin’s agents.']);
   same('no page errors', a.pageErrors, []);
   await a.quit();
 

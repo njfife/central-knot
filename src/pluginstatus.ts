@@ -91,12 +91,14 @@ export const installedFrom = (view: PluginsView, entry: MarketplaceView) => entr
 
 /** A plugin in a marketplace. */
 export type MarketPlugin = { entry: MarketplaceView; plugin: PluginView };
+/** A marketplace plugin installed in one tool, carrying that tool's recorded version from InstallState.version (if any). */
+export type InstalledMarketPlugin = MarketPlugin & { version?: string };
 /**
  * What one tool has from every marketplace read: plugins installed there (each carrying that tool's recorded version from
  * InstallState.version, if any), plugins whose state there could not be checked (with why), and marketplaces that could not be
  * read at all, so an incomplete answer never reads as "nothing installed". Null when the tool takes no marketplace plugins (Pi).
  */
-export function installsIn(view: PluginsView, tool: HarnessId): { installed: (MarketPlugin & { version?: string })[]; unknown: (MarketPlugin & { reason: string })[]; unreadable: string[] } | null {
+export function installsIn(view: PluginsView, tool: HarnessId): { installed: InstalledMarketPlugin[]; unknown: (MarketPlugin & { reason: string })[]; unreadable: string[] } | null {
   if (!view.tools.includes(tool) || !takesPlugins(tool)) return null;
   const each = view.marketplaces.flatMap(entry => entry.plugins.map(plugin => ({ entry, plugin, install: stateOf(entry, plugin.name, tool) })));
   return {

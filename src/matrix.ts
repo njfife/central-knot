@@ -56,8 +56,8 @@ import { closeLineResult, lineBox, lineBusy, listingOf, market, resultKey, resul
 import { lineControl, type LineFacts } from './pluginline.ts';
 import { succeeded, type PluginDone, type PluginDraft } from './pluginplan.ts';
 import { alongWords, cantSwitch, click as clickPluginItem, clickWords, copilotByName, itemSaid, onNow as itemOn, switchWords, turnEvery, wholeWords, type PluginItemAt } from './pluginswitch.ts';
-import { loadsKind, pageOfPart, partOfPage } from './pluginstatus.ts';
-import { cellWords, handledWhere, inTool, insideTitle, itemThrough, offIn, pageRows, pluginOnIn, rowCount, pluginTools, throughPluginHere, toolWords, withPluginOnly, yoursIn, type PluginRow } from './pluginrows.ts';
+import { pageOfPart, partOfPage } from './pluginstatus.ts';
+import { cellWords, handledWhere, inTool, insideTitle, itemThrough, offIn, pageRows, pluginKindNotLoaded, pluginOnIn, rowCount, pluginTools, throughPluginHere, toolWords, withPluginOnly, yoursIn, type PluginRow } from './pluginrows.ts';
 import { fromChoices, fromShows, originOf, type From, type FromEntry } from './origins.ts';
 import { sources } from './sourcespage.ts';
 import { folded, lineDiff } from './diff.ts';
@@ -2095,7 +2095,8 @@ function turnOff(t: Table, skill: ItemRow, seen: boolean): Click {
 }
 
 /** Every tool that can have it: where it is on once it is on everywhere. */
-const canHave = (t: Table, skill: ItemRow) => toolsFor(t, skill.kind).filter(tool => (!skill.cannot?.[tool] && !skill.getsWithPlugin?.includes(tool)) || throughPluginHere(skill, tool));
+const canHave = (t: Table, skill: ItemRow) => toolsFor(t, skill.kind).filter(tool =>
+  (!skill.cannot?.[tool] && !skill.getsWithPlugin?.includes(tool) && !pluginKindNotLoaded(skill.kind, skill, tool)) || throughPluginHere(skill, tool));
 /** Where it is on once it is on everywhere, but `left`: tools it stays off in (a plugin's with no switch for one item, a write that failed). */
 const onPhrase = (t: Table, skill: ItemRow, left: readonly string[] = []) => toolsPhrase(canHave(t, skill).filter(tool => !left.includes(tool)), toolsFor(t, skill.kind));
 
@@ -2726,7 +2727,7 @@ const switchStatus = (t: Table, skill: ItemRow) => statusLine(skill, itemOf(skil
 /**
  * A library row's line in one tool that is a plugin's (pluginline.ts): the tool has the item through a plugin, or the item is from a
  * plugin (library.ts A PLUGIN) that this tool gets only with the plugin (pluginrows.ts withPluginOnly) or cannot load as a plugin's
- * kind (pluginstatus.ts loadsKind), or, Off, that this tool, which takes no plugins, has none of placed. An item On and kept out
+ * kind (pluginrows.ts pluginKindNotLoaded), or, Off, that this tool, which takes no plugins, has none of placed. An item On and kept out
  * of a tool keeps the library's own switch there, which lets it in.
  */
 function rowPluginFacts(skill: ItemRow, tool: Tool) {
@@ -2735,7 +2736,7 @@ function rowPluginFacts(skill: ItemRow, tool: Tool) {
   const link = skill.fromSource?.link ?? '', plugin = pluginOf(link), marketName = pluginMarketOf(link);
   if (!plugin || !marketName) return undefined;
   if (skill.getsWithPlugin?.includes(tool)) return lineFacts(kind, plugin, marketName, tool as HarnessId);
-  if (takesPlugins(tool) && !loadsKind(tool as HarnessId, kind) && !skill.copies[tool] && !(skill.on && skill.except.includes(tool))) {
+  if (!skill.copies[tool] && pluginKindNotLoaded(skill.kind, skill, tool)) {
     const installed = state.home?.pluginItems?.find(entry => entry.tool === tool && entry.plugin === plugin && entry.marketName === marketName);
     return lineFacts(kind, plugin, marketName, tool as HarnessId, undefined, installed);
   }

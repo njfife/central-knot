@@ -172,6 +172,11 @@ export function handledWhere(row: PluginRow): string {
   return `Installed in ${andList(tools)} from the marketplace “${row.marketName}”, which isn’t added in Central Knot or in ${tools.length === 1 ? 'that tool' : 'those tools'} now, so the plugin has no page here. ${tools.length === 1 ? `${tools[0]}’s` : 'Each tool’s'} own plugin commands update, turn off or remove it.`;
 }
 
+type PluginRowRef = { fromSource?: { link: string }; on?: boolean; except?: readonly string[] };
+/** Whether a library item from a plugin (library.ts A PLUGIN) goes through the plugin in `tool`, which takes plugins, unless it is On and kept out of `tool` (where its own switch lets it in). */
+const pluginHandles = (row: PluginRowRef, tool: string) =>
+  !!pluginOf(row.fromSource?.link ?? '') && takesPlugins(tool as HarnessId) && !(row.on && row.except?.includes(tool));
+
 /**
  * The tools a library item from a plugin (library.ts A PLUGIN) gets only by installing that plugin: those that take plugins,
  * load its kind (pluginstatus.ts loadsKind) and don't have it installed, but one the item is On and kept out of, where its own
@@ -179,12 +184,21 @@ export function handledWhere(row: PluginRow): string {
  * gets it with the plugin (matrix.ts markOf, libraryrow.ts statusLine); its switch's result doesn't count it among the tools it
  * is on in (matrix.ts canHave).
  */
-export function withPluginOnly(home: Pick<HomeView, 'pluginItems' | Page> | undefined, page: Page, row: { fromSource?: { link: string }; on?: boolean; except?: readonly string[] }): HarnessId[] {
+export function withPluginOnly(home: Pick<HomeView, 'pluginItems' | Page> | undefined, page: Page, row: PluginRowRef): HarnessId[] {
   const link = row.fromSource?.link ?? '', plugin = pluginOf(link), marketName = pluginMarketOf(link);
   if (!home || !plugin) return [];
-  return kindSource(home, page).tools.filter(tool => takesPlugins(tool) && loadsKind(tool, partOfPage[page]) && !(row.on && row.except?.includes(tool))
+  return kindSource(home, page).tools.filter(tool => pluginHandles(row, tool) && loadsKind(tool, partOfPage[page])
     && !home.pluginItems?.some(install => install.tool === tool && install.plugin === plugin && install.marketName === marketName));
 }
+
+/**
+ * Whether a library item from a plugin (library.ts A PLUGIN) cannot load in `tool`, which takes plugins, because `tool` does
+ * not load a plugin's items of this kind (pluginstatus.ts loadsKind), unless it is On and kept out of `tool` (where its own
+ * switch lets it in). Asked by matrix.ts canHave (never counted as on in a click's result) and matrix.ts rowPluginFacts (its
+ * opened-row line still explains why).
+ */
+export const pluginKindNotLoaded = (page: Page, row: PluginRowRef, tool: string): boolean =>
+  pluginHandles(row, tool) && !loadsKind(tool as HarnessId, partOfPage[page]);
 
 /**
  * The names of a plugin's items a tool has of his own (any copy there but Central Knot's current copy of an item from the plugin),

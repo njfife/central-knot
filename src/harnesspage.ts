@@ -5,7 +5,7 @@
 // engine: every change goes through the pages it mirrors, or the switch's toolchoice.ts.
 import { noteMove, KINDS, acting, harnessManaged as managed, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type PageKind } from './app.ts';
 import { manageLocked, manageRow } from './managecard.ts';
-import { installsIn, pluginsInstalled, pluginsTabNote, takenItems, takesItemsOnly, type MarketPlugin } from './pluginstatus.ts';
+import { installsIn, pluginsInstalled, pluginsTabNote, takenItems, takesItemsOnly, type InstalledMarketPlugin } from './pluginstatus.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { pluginTitle } from './pluginparts.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
@@ -289,7 +289,7 @@ function instructionsTab(tool: HarnessId) {
 }
 
 /** One installed plugin: its name, the tool's recorded version (if any), its marketplace, and Open, which shows it on the plugins' page. */
-function pluginRow({ entry, plugin, version }: MarketPlugin & { version?: string }, tool: HarnessId) {
+function pluginRow({ entry, plugin, version }: InstalledMarketPlugin, tool: HarnessId) {
   const note = [entry.name, plugin.description].filter(Boolean).join(' · ');
   return h('div.harness-plugin', { role: 'listitem' },
     h('div.harness-plugin-text', {},
