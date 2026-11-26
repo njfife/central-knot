@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { lineControl, type LineFacts } from '../src/pluginline.ts';
-import { DIRECTORY } from '../src/pluginstatus.ts';
+import { DIRECTORY, FROM_DIRECTORY } from '../src/pluginstatus.ts';
 import type { Components, HarnessId, InstalledPlugin, PartKind } from '../src/types.ts';
 
 /** varo-risk as a tool has it installed: skills `handoff`, `review` and `notes`, MCP server `jira`, agent `lead` (none in Codex, which loads no plugin agents). */
@@ -29,28 +29,32 @@ const cases: [string, LineFacts, ReturnType<typeof lineControl>][] = [
   ['its own switch, the plugin on there: the switch, as before', through('copilot-cli', 'skill', 'handoff'), SWITCH],
   ['its own switch can’t be written (Codex’s inline rules): the switch, drawn off with its reason, as before',
     through('codex-cli', 'skill', 'handoff', { switchesHeld: 'Codex’s config.toml writes skills.config as a value.' }), SWITCH],
-  ['its own switch, the plugin off there with other items: Turn the plugin on, with only this item on', through('codex-cli', 'skill', 'handoff', { off: true }),
-    { control: 'button', act: 'plugin-on', label: 'Turn the plugin on', sentence: 'Turns the plugin varo-risk on in Codex with only this skill on.' }],
-  ['its own switch, the plugin off there, and it is all the plugin has: the switch', through('codex-cli', 'skill', 'handoff', { off: true, items: [{ kind: 'skill', name: 'handoff', description: '' }] }), SWITCH],
+  ['its own switch, the plugin off there without keptOff: Turn the plugin on as its box ticked (let-in)', { ...through('codex-cli', 'skill', 'handoff', { off: true }), box: { ticked: false } },
+    { control: 'button', act: 'let-in', label: 'Turn the plugin on', sentence: 'Turns varo-risk on in Codex, as ticking its box on its page does.' }],
+  ['its own switch, the plugin off there, and it is all the plugin has: Turn the plugin on as its box ticked (let-in)', { ...through('codex-cli', 'skill', 'handoff', { off: true, items: [{ kind: 'skill', name: 'handoff', description: '' }] }), box: { ticked: false } },
+    { control: 'button', act: 'let-in', label: 'Turn the plugin on', sentence: 'Turns varo-risk on in Codex, as ticking its box on its page does.' }],
   ['the plugin kept off there by the plugins record (its box unticked): Turn the plugin on, as its box ticked, never the item’s switch', { ...through('codex-cli', 'skill', 'handoff', { off: true, keptOff: true }), box: { ticked: false } },
     { control: 'button', act: 'let-in', label: 'Turn the plugin on', sentence: 'Turns varo-risk on in Codex, as ticking its box on its page does.' }],
-  ['kept off there, its box off (a home that can’t be written): the switch, drawn off with its reason', { ...through('codex-cli', 'skill', 'handoff', { off: true, keptOff: true }), box: { ticked: false, off: 'Preview only.' } }, SWITCH],
-  ['Copilot CLI’s MCP server, the plugin off there: Turn the plugin on, and that the switch goes by its bare name', through('copilot-cli', 'mcp', 'jira', { off: true }),
-    { control: 'button', act: 'plugin-on', label: 'Turn the plugin on', sentence: 'Turns the plugin varo-risk on in Copilot CLI with only this MCP server on; its 1 agent comes on too. Copilot CLI goes by the name, so any other server named “jira” there goes on too.' }],
-  ['a skill in Claude Code, which has no switch for one: Turn the plugin off, with what goes with it, as an agent in Copilot CLI', through('claude-cli', 'skill', 'handoff'),
-    { control: 'button', act: 'plugin-off', label: 'Turn the plugin off', sentence: 'Turns the whole plugin varo-risk off in Claude Code, with its 2 skills, 1 MCP server and 1 agent.' }],
-  ['an agent in Copilot CLI, which has no switch for one, the plugin on: Turn the plugin off, with what goes with it', through('copilot-cli', 'agent', 'lead'),
-    { control: 'button', act: 'plugin-off', label: 'Turn the plugin off', sentence: 'Turns the whole plugin varo-risk off in Copilot CLI, with its 3 skills and 1 MCP server.' }],
-  ['an agent in Copilot CLI, the plugin off: Turn the plugin on', through('copilot-cli', 'agent', 'lead', { off: true }),
-    { control: 'button', act: 'plugin-on', label: 'Turn the plugin on', sentence: 'Turns the whole plugin varo-risk on in Copilot CLI, with its 3 skills and 1 MCP server.' }],
+  ['off there, its box held (a home that can’t be written): why, and no control', { ...through('codex-cli', 'skill', 'handoff', { off: true, keptOff: true }), box: { ticked: false, off: 'Preview only.' } },
+    { control: 'none', sentence: 'Preview only.' }],
+  ['off there without keptOff, its box held (Anthropic Directory): why, and no control', { ...through('claude-cli', 'skill', 'handoff', { off: true }), box: { ticked: false, off: FROM_DIRECTORY } },
+    { control: 'none', sentence: FROM_DIRECTORY }],
+  ['Copilot CLI’s MCP server, the plugin off there: Turn the plugin on as its box ticked (let-in)', { ...through('copilot-cli', 'mcp', 'jira', { off: true }), box: { ticked: false } },
+    { control: 'button', act: 'let-in', label: 'Turn the plugin on', sentence: 'Turns varo-risk on in Copilot CLI, as ticking its box on its page does.' }],
+  ['a skill in Claude Code, which has no switch for one: Turn the plugin off (keep-out), with what goes with it, as an agent in Copilot CLI', through('claude-cli', 'skill', 'handoff'),
+    { control: 'button', act: 'keep-out', label: 'Turn the plugin off', sentence: 'Turns the whole plugin varo-risk off in Claude Code, with its 2 skills, 1 MCP server and 1 agent.' }],
+  ['an agent in Copilot CLI, which has no switch for one, the plugin on: Turn the plugin off (keep-out), with what goes with it', through('copilot-cli', 'agent', 'lead'),
+    { control: 'button', act: 'keep-out', label: 'Turn the plugin off', sentence: 'Turns the whole plugin varo-risk off in Copilot CLI, with its 3 skills and 1 MCP server.' }],
+  ['an agent in Copilot CLI, the plugin off without keptOff: Turn the plugin on (let-in)', { ...through('copilot-cli', 'agent', 'lead', { off: true }), box: { ticked: false } },
+    { control: 'button', act: 'let-in', label: 'Turn the plugin on', sentence: 'Turns varo-risk on in Copilot CLI, as ticking its box on its page does.' }],
   ['an agent in Copilot CLI that is all the plugin has: the switch', through('copilot-cli', 'agent', 'lead', { items: [{ kind: 'agent', name: 'lead', description: '' }] }), SWITCH],
-  ['an agent of a plugin Copilot CLI loads live from a folder: Turn the plugin off, as any other copy', through('copilot-cli', 'agent', 'lead', { live: true }),
-    { control: 'button', act: 'plugin-off', label: 'Turn the plugin off', sentence: 'Turns the whole plugin varo-risk off in Copilot CLI, with its 3 skills and 1 MCP server.' }],
+  ['an agent of a plugin Copilot CLI loads live from a folder: Turn the plugin off (keep-out), as any other copy', through('copilot-cli', 'agent', 'lead', { live: true }),
+    { control: 'button', act: 'keep-out', label: 'Turn the plugin off', sentence: 'Turns the whole plugin varo-risk off in Copilot CLI, with its 3 skills and 1 MCP server.' }],
   ['the same, kept off by the plugins record: Turn the plugin on, as its box ticked',
     { ...through('copilot-cli', 'agent', 'lead', { live: true, off: true, keptOff: true }), box: { ticked: false } },
     { control: 'button', act: 'let-in', label: 'Turn the plugin on', sentence: 'Turns varo-risk on in Copilot CLI, as ticking its box on its page does.' }],
-  ['the same, off in Copilot CLI’s own settings: Turn the plugin on', through('copilot-cli', 'agent', 'lead', { live: true, off: true }),
-    { control: 'button', act: 'plugin-on', label: 'Turn the plugin on', sentence: 'Turns the whole plugin varo-risk on in Copilot CLI, with its 3 skills and 1 MCP server.' }],
+  ['the same, off in Copilot CLI’s own settings without keptOff: Turn the plugin on (let-in)', { ...through('copilot-cli', 'agent', 'lead', { live: true, off: true }), box: { ticked: false } },
+    { control: 'button', act: 'let-in', label: 'Turn the plugin on', sentence: 'Turns varo-risk on in Copilot CLI, as ticking its box on its page does.' }],
 
   // The tool has the plugin, but its copy lacks this item.
   ['its copy can’t be read', lacks('copilot-cli', 'agent', { ticked: true }, { installed: installed('copilot-cli', { problem: 'unreadable', items: [] }) }),

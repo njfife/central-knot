@@ -233,11 +233,18 @@ test('a main switch turns a plugin’s skill off in every tool that has it, the 
   assert.deepEqual(everyItem(back), everyItem(installs));
 });
 
-test('a plugin the plugins record keeps off in a tool is not turned on there by an item’s switch: a main switch leaves it, saying why', () => {
-  const kept = item(installed('claude-cli', { off: true, keptOff: true }), 'skill', 'one'), other = item(installed('codex-cli', { off: true }), 'skill', 'one');
-  const said = 'full is off in Claude Code, kept installed: Turn the plugin on, on its line in the opened row, turns it on again.';
-  const on = turnEvery([kept, other], true);
-  assert.deepEqual([cantSwitch(kept), on.turned.map(entry => entry.tool), chosen(on.draft).filter(step => step.startsWith('claude-cli')), on.left, on.leftIn], [said, ['codex-cli'], [], [`Still off in Claude Code: ${said}`], ['claude-cli']]);
+test('a main switch turns a kept-off plugin back on in Claude Code whole and in Codex for the clicked item alone', () => {
+  const keptClaude = item(installed('claude-cli', { off: true, keptOff: true }), 'skill', 'one');
+  const keptCodex = item(installed('codex-cli', { off: true, keptOff: true }), 'skill', 'one');
+  const on = turnEvery([keptClaude, keptCodex], true);
+  assert.deepEqual(
+    [cantSwitch(keptClaude), cantSwitch(keptCodex), on.turned.map(entry => entry.tool), on.left, on.leftIn],
+    [undefined, undefined, ['claude-cli', 'codex-cli'], undefined, []],
+  );
+  assert.deepEqual(
+    chosen(on.draft),
+    ['codex-cli skill-off two', 'codex-cli part-off mcp issues', 'codex-cli part-off mcp wiki', 'claude-cli plugin-on', 'codex-cli plugin-on'],
+  );
 });
 
 test('a main switch’s result says the item first, then what came with it: a plugin turned on for it, with what was left off; one other item by name', () => {
@@ -259,10 +266,10 @@ test('a main switch turns an agent off in Copilot CLI with its whole plugin, and
   assert.deepEqual(off.turned.map(entry => alongWords(entry, off.ops)).filter(Boolean), ['Its whole plugin full was turned off in Copilot CLI, with its 2 skills and 2 MCP servers.']);
 });
 
-test('the row turned Off: plugins.json still has the plugin On, and Claude Code has it off in its own settings, which both pages say', () => {
+test('the row turned Off: Claude Code has the plugin off in its own settings, which reads Off, kept installed on Plugins', () => {
   const { after } = mainSwitch([installed('claude-cli'), installed('copilot-cli'), installed('codex-cli')], 'one', false);
   const [claude] = after;
-  assert.equal(pluginsPageSays(claude), 'Claude Code: installed 1.0.0, turned off in Claude Code’s own settings.');
+  assert.equal(pluginsPageSays(claude), 'Off in Claude Code: still installed at 1.0.0, with its data and settings.');
   // On Skills, the library row (Pi, OpenCode) is Off with no tool left on: in Central Knot only.
   assert.deepEqual(after.map(install => item(install, 'skill', 'one')).filter(onNow), []);
   assert.equal(offRowSays('one', []), 'Off · On puts it in every tool.');
