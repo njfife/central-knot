@@ -7,7 +7,6 @@
 // launch is said in a note at the top (keptNote) until it is closed, and first on the Overview (overview.ts needsYou).
 import { acting, announce, keepingBusy, machine, rerender, switchSessionCosts, switchSyncEverything, showPage, state, whyReadOnly } from './app.ts';
 import { outcomeBand } from './matrix.ts';
-import { oneUndoCovers } from './historyactions.ts';
 import { button, h, icon, infoCardId, infoMark, toggle } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { DAY_MS, defaultHistoryDays, historyDayChoices } from './model.ts';
@@ -373,7 +372,7 @@ function settingRow(id: string, title: string, hint: string | undefined, control
       hint ? h('p.setting-hint', { id: `setting-${id}-hint` }, hint) : null),
     h('div.setting-control', {}, control),
     message && messageLine(message, { id: `setting-${id}-message` }),
-    notice && messageLine(notice, { id: `setting-${id}-notice`, announce: false }),
+    notice && messageLine(notice, { id: `setting-${id}-notice`, announce: notice.tone === 'progress' }),
     below);
 }
 
@@ -385,19 +384,20 @@ function updatesRow(): HTMLElement | null {
   const view = updates.view;
   if (!view?.shown) return null;
   const checks = !!view.tag && view.reason?.key !== 'dev' && view.reason?.key !== 'untagged';
-  // The schedule, in words: updateflow.ts has it.
-  const hint = `This is Central Knot ${buildWords(view)}.${checks ? ' It checks GitHub for a newer release every 15 minutes, and when you come back to its window. A new release shows at the bottom of the sidebar.' : ''}`;
+  const hint = `This is Central Knot ${buildWords(view)}.`;
   // A restart held for unsaved work says so here too, not only on the button.
   const held = view.step === 'ready' && view.available ? unsavedWork() : undefined;
-  const { page: about, ...status } = (held ? { text: `${tagWords(view.available!.tag)} is ready. ${held}`, tone: 'info' as const, page: view.available!.page } : updateStatus(view)) ?? {};
+  const shown = updates.checking && !view.step ? { ...view, checking: true, failed: undefined } : view;
+  const { page: about, ...status } = (held ? { text: `${tagWords(view.available!.tag)} is ready. ${held}`, tone: 'info' as const, page: view.available!.page } : updateStatus(shown)) ?? {};
   const page = view.available?.page;
   const notice: RowMessage | undefined = 'text' in status ? { ...status, action: about && !view.reason ? { label: status.tone === 'failure' ? 'Open the release page' : 'Release notes', run: () => void window.centralKnot.openExternal(about) } : undefined } : undefined;
   const why = view.reason && messageLine({ text: view.reason.text, tone: 'attention', action: { label: page ? `Open ${tagWords(view.available!.tag)}’s page` : 'Open the releases page', run: () => void window.centralKnot.openExternal(page ?? releasesPage) } },
     { id: 'setting-updates-reason', announce: false });
+  const described = ['setting-updates-hint', notice && 'setting-updates-notice', why && 'setting-updates-reason'].filter(Boolean).join(' ');
   return settingRow('updates', 'Updates', hint,
     h('div.setting-actions', {},
       settingUpdateButton(),
-      checks ? button({ variant: 'outline', label: 'Check now', id: 'check-updates', disabled: updates.checking || view.checking || !!view.step, onclick: () => void checkNow(), attrs: { 'aria-describedby': 'setting-updates-hint' } }) : null),
+      checks ? button({ variant: 'outline', label: 'Check now', name: 'Check now for updates', id: 'check-updates', disabled: updates.checking || view.checking || !!view.step, onclick: () => void checkNow(), attrs: { 'aria-describedby': described } }) : null),
     notice, why || undefined);
 }
 
@@ -408,35 +408,42 @@ async function choosePluginUpdates(on: boolean): Promise<void> {
 }
 
 /**
- * Plugins: whether they are updated automatically, what that does, Check now, and what the last check came to (the note
- * on the Plugins page says which plugins).
+ * Plugins: whether they are updated automatically, that updates can't be undone, Check now, and what the last check came to
+ * (the note on the Plugins page says which plugins).
  */
 function pluginUpdatesRow(): HTMLElement {
   const on = !!current?.pluginUpdates;
   const view = pluginUpdates.view;
-  const hint = 'Central Knot checks your marketplaces every four hours, with its window closed too, and updates the plugins your tools have, through each tool’s own command. A plugin you turned off stays off. An update can’t be undone.';
   const checked = on ? checkedWords(pluginUpdates.asked && view ? { ...view, checking: true } : view) : undefined;
   const notice: RowMessage | undefined = checked && { text: checked.text, tone: checked.tone, action: checked.note ? { label: `See ${pageNames.plugins}`, run: () => showPage('plugins') } : undefined };
-  return settingRow('plugin-updates', 'Update plugins automatically', hint,
+  const described = [infoCardId('setting-plugin-updates-info'), 'setting-plugin-updates-hint', notice && 'setting-plugin-updates-notice'].filter(Boolean).join(' ');
+  return settingRow('plugin-updates', 'Update plugins automatically', 'Updates can’t be undone.',
     h('div.setting-actions', {},
-      on ? button({ variant: 'outline', label: 'Check now', id: 'check-plugin-updates', disabled: !view || view.checking || pluginUpdates.asked, onclick: () => void checkPluginsNow(), attrs: { 'aria-describedby': 'setting-plugin-updates-hint' } }) : null,
+      on ? button({ variant: 'outline', label: 'Check now', name: 'Check now for plugin updates', id: 'check-plugin-updates', disabled: !view || view.checking || pluginUpdates.asked, onclick: () => void checkPluginsNow(), attrs: { 'aria-describedby': described } }) : null,
       // Unchangeable until main has said, so a click never acts on a guess.
       toggle({ on, label: 'Update plugins automatically', onchange: chosen => void choosePluginUpdates(chosen), disabled: !current, id: 'plugin-updates-on',
-        attrs: { 'aria-describedby': notice ? 'setting-plugin-updates-hint setting-plugin-updates-notice' : 'setting-plugin-updates-hint', title: null } })),
-    notice);
+        attrs: { 'aria-describedby': described, title: null } })),
+    notice, undefined, 'Every four hours, window closed too. A plugin you turned off stays off.');
 }
 
 /** How much of what plugins hold is read (plugintext.ts), as main last said; undefined until asked. */
 let textRead: PluginTextView | undefined;
+const isReadingText = (view: PluginTextView | undefined) => !!(view?.of && current?.pluginText && view.reading && view.read < view.of);
 /**
  * A new count from main: its words change in place, so a click on the page is never lost to a redraw; the page is drawn again
- * only when the line comes or goes.
+ * only when the download-estimate hint, the count line, or its reading state comes or goes.
  */
 function showTextRead(view: PluginTextView) {
   textRead = view;
-  const hint = document.getElementById('setting-plugin-text-hint'), line = document.querySelector('#setting-plugin-text-notice .setting-message-text');
-  if (hint && line && view.of) { hint.textContent = textHint(view); line.textContent = textCoverage(view, !!current?.pluginText); }
-  else if (state.page === 'settings') rerender();
+  const nextHint = textHint(view);
+  const hint = document.getElementById('setting-plugin-text-hint');
+  const notice = document.getElementById('setting-plugin-text-notice');
+  const line = notice?.querySelector('.setting-message-text');
+  if (!!hint === !!nextHint && !view.of && !notice) return;
+  if (!!hint === !!nextHint && notice && line && view.of && notice.classList.contains('setting-progress') === isReadingText(view)) {
+    if (hint && nextHint) hint.textContent = nextHint;
+    line.textContent = textCoverage(view, !!current?.pluginText);
+  } else if (state.page === 'settings') rerender();
 }
 window.centralKnot.onPluginTextChanged(showTextRead);
 
@@ -447,8 +454,9 @@ async function choosePluginText(on: boolean): Promise<void> {
 }
 /** The first download, estimated: about 0.1 MB a plugin kept outside its marketplace (measured 2026-11-19: 26 to 29 MB on the wire for 277). */
 const firstSize = (plugins: number) => { const mb = plugins * 0.1; return mb < 1 ? 'under 1 MB' : `about ${mb < 10 ? Math.round(mb) : Math.round(mb / 5) * 5} MB`; };
-const textHint = (view: PluginTextView | undefined) => `Central Knot keeps the names, descriptions and first lines of skills, agents and MCP servers in your marketplaces’ plugins on this computer. Nothing is installed or run.${
-  view?.elsewhere ? ` ${view.elsewhere === 1 ? 'The one plugin outside its marketplace is' : `The ${view.elsewhere} outside their marketplace are`} downloaded once (${firstSize(view.elsewhere)}), then only changes, or daily if on a branch.` : ''}`;
+const textHint = (view: PluginTextView | undefined) => (view?.elsewhere
+  ? `${view.elsewhere === 1 ? 'The one plugin outside its marketplace is' : `The ${view.elsewhere} outside their marketplace are`} downloaded once (${firstSize(view.elsewhere)}), then only changes, or daily if on a branch.`
+  : undefined);
 /** The count: while it reads, when it is done (and how many couldn't be read), and while it is off. */
 const textCoverage = (view: PluginTextView, on: boolean) => {
   const counted = `${view.read} of ${plural(view.of, 'plugin')}`, left = view.of - view.read;
@@ -457,14 +465,16 @@ const textCoverage = (view: PluginTextView, on: boolean) => {
   return `Read ${counted}.${left ? ` ${left} couldn’t be read; Central Knot tries again later.` : ''}`;
 };
 
-/** Plugins: whether what they hold is read, what that costs, and how much is read. */
+/** Plugins: whether what they hold is read, what that downloads when plugins sit elsewhere, and how much is read. */
 function pluginTextRow(): HTMLElement {
   if (!textRead) void window.centralKnot.pluginText().then(showTextRead);
-  const notice: RowMessage | undefined = textRead?.of ? { text: textCoverage(textRead, !!current?.pluginText), tone: 'info' } : undefined;
-  return settingRow('plugin-text', 'Read what plugins hold', textHint(textRead),
+  const hint = textHint(textRead);
+  const notice: RowMessage | undefined = textRead?.of ? { text: textCoverage(textRead, !!current?.pluginText), tone: isReadingText(textRead) ? 'progress' : 'info' } : undefined;
+  const described = [infoCardId('setting-plugin-text-info'), hint && 'setting-plugin-text-hint', notice && 'setting-plugin-text-notice'].filter(Boolean).join(' ');
+  return settingRow('plugin-text', 'Read what plugins hold', hint,
     toggle({ on: !!current?.pluginText, label: 'Read what plugins hold', onchange: chosen => void choosePluginText(chosen), disabled: !current, id: 'plugin-text-on',
-      attrs: { 'aria-describedby': notice ? 'setting-plugin-text-hint setting-plugin-text-notice' : 'setting-plugin-text-hint', title: null } }),
-    notice);
+      attrs: { 'aria-describedby': described, title: null } }),
+    notice, undefined, 'Keeps plugin items’ names, descriptions and first lines, so Find can search them.');
 }
 
 /** A custom build's own lines about itself (what it is, and that it doesn't update itself), where the standard app has Updates. */
@@ -474,18 +484,17 @@ function buildRow(): HTMLElement | null {
 }
 
 /**
- * Synchronize everything, for the open home: what it does, and, while it is off, how many found items it would add now; either
- * way, how many found items wait for a choice of copy, with the way into first setup's walkthrough of them (firstsetup.ts, which
- * counts both as its question does). Unchangeable where a pass may not write.
+ * Synchronize everything, for the open home: what it does (in its card), and, while it is off, how many found items it would
+ * add now; either way, how many found items wait for a choice of copy, with the way into first setup's walkthrough of them
+ * (firstsetup.ts, which counts both as its question does). Unchangeable where a pass may not write.
  */
 function syncEverythingRow(): HTMLElement | null {
   const home = state.home;
   if (!home) return null;
   const on = !!home.sync.syncEverything, cannot = whyReadOnly(home) ?? (home.sync.gate.state === 'needs-resume' ? home.sync.gate.reason : undefined);
-  const hint = cannot ?? 'For this home: a skill, MCP server or agent that turns up in one of your tools is taken into Central Knot and turned on in every tool by itself. Switching it on is one entry in History: ' + oneUndoCovers.replace(/^One Undo in History/, 'its Undo') + ' Off, what turns up waits on its page for Add.';
   const { takes, choosing } = whatYesDoes(home);
   const waiting = choosing ? `${plural(choosing, 'found item')} ${choosing === 1 ? 'has' : 'have'} copies that differ and ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy.` : '';
-  const adds = !on ? (takes ? `Turning it on adds the ${plural(takes, 'item')} found in your tools now.` : 'Nothing found in your tools now would be added.') : '';
+  const adds = !on ? (takes ? `Turning it on puts the ${plural(takes, 'item')} found in your tools into every tool now.` : 'Nothing found in your tools now would be added.') : '';
   const later = on && !home.syncOn ? 'Automatic sync is off, so it takes items in at Sync once.' : '';
   // What it leaves for good, said beside what it would add: found items taken out of Central Knot earlier.
   const out = takenOutEarlier(home);
@@ -496,10 +505,11 @@ function syncEverythingRow(): HTMLElement | null {
   // What it took in, as each page's notice says it (until shown there), with History: Settings says what the switch did.
   const added = (['skills', 'mcp', 'agents'] as const).flatMap(kind => home[kind].notices.flatMap(told => (told.kind === 'taken-in' && !state.dismissed.has(told.history)
     ? [messageLine({ text: sentences(libraryWords[kind]).takenInWords(told), tone: 'done', action: { label: 'History', run: () => showPage('history') } }, { id: `setting-sync-everything-added-${kind}` })] : [])));
-  return settingRow('sync-everything', 'Synchronize everything', hint,
+  const described = [cannot ? 'setting-sync-everything-hint' : infoCardId('setting-sync-everything-info'), notice && 'setting-sync-everything-notice'].filter(Boolean).join(' ');
+  return settingRow('sync-everything', 'Synchronize everything', cannot,
     toggle({ on, label: 'Synchronize everything', onchange: chosen => void switchSyncEverything(chosen), disabled: cannot || acting(), id: 'sync-everything-on',
-      attrs: { 'aria-describedby': notice ? 'setting-sync-everything-hint setting-sync-everything-notice' : 'setting-sync-everything-hint', title: null } }),
-    notice, added.length ? h('div.setting-added', {}, added) : undefined);
+      attrs: { 'aria-describedby': described, title: null } }),
+    notice, added.length ? h('div.setting-added', {}, added) : undefined, 'What turns up in a tool is turned on in every tool. Items whose copies differ wait for your choice.');
 }
 
 /** Shared end of the disclosure sentence that each keep-costs info card (Sessions and Settings) begins. */
@@ -558,9 +568,9 @@ export function settingsPage(): HTMLElement {
         toggle({ on: !!signIn?.on, label: 'Start at sign-in', onchange: on => void chooseSignIn(on), disabled: !signIn?.available, id: 'start-at-sign-in',
           attrs: { 'aria-describedby': systemSays ? `${signInDescribed} setting-sign-in-notice` : signInDescribed, title: null } }),
         systemSays, undefined, `Opens hidden in ${machine.tray} at sign-in, so sync keeps running.`),
-      settingRow('appearance', 'Appearance', 'System follows your computer’s light or dark setting.',
+      settingRow('appearance', 'Appearance', undefined,
         // Until the settings arrive, no card is chosen; the cards look as usual (not dimmed) and System holds the Tab stop.
-        h('div.appearance-choices', { role: 'radiogroup', 'aria-labelledby': 'setting-appearance-title', 'aria-describedby': 'setting-appearance-hint', 'aria-busy': String(!current), onkeydown: moveAppearance },
+        h('div.appearance-choices', { role: 'radiogroup', 'aria-labelledby': 'setting-appearance-title', 'aria-busy': String(!current), onkeydown: moveAppearance },
           appearances.map(choice => h(`button.appearance-choice${chosen === choice.value ? '.selected' : ''}`, {
             type: 'button', role: 'radio', id: `appearance-${choice.value}`, 'aria-checked': String(chosen === choice.value),
             tabindex: (chosen ?? 'system') === choice.value ? '0' : '-1', onclick: () => void chooseAppearance(choice.value),
@@ -569,10 +579,10 @@ export function settingsPage(): HTMLElement {
     state.home ? settingsSection('home', 'This home', syncEverythingRow(), sessionCostsRow()) : null,
     settingsSection('plugins', 'Plugins', pluginUpdatesRow(), pluginTextRow()),
     settingsSection('history', 'History',
-      settingRow('history', 'Keep history for', 'Changes and deleted items stay in History, ready to restore, for this long.',
+      settingRow('history', 'Keep history for', undefined,
         // Unchangeable until main has said, so a shorter choice is never mistaken for a longer one, and while a change is under way.
         h('span.select', {},
-          h('select', { id: 'history-days', 'aria-labelledby': 'setting-history-title', 'aria-describedby': 'setting-history-hint', disabled: !current || updatingHistory,
+          h('select', { id: 'history-days', 'aria-labelledby': 'setting-history-title', 'aria-describedby': updatingHistory ? 'setting-history-notice' : undefined, disabled: !current || updatingHistory,
             onchange: (event: Event) => chooseHistoryDays(Number((event.target as HTMLSelectElement).value) as HistoryDays), onkeydown: cancelOnEscape },
           historyDayChoices.map(days => h('option', { value: String(days), selected: days === (current?.historyDays ?? defaultHistoryDays) }, `${days} days`))),
           icon('chevrons-up-down', 14)),

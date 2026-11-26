@@ -462,7 +462,7 @@ export function versionChoices(event: HistoryEvent, item: LibraryItem | undefine
  */
 export type LeftIn = { item: string; why: TakeInHeld | 'chosen' | 'claude-code' };
 
-/** What the one Undo of a switch-on covers, as every place that promises it says it (the question, Yes's band, Settings, History). */
+/** What the one Undo of a switch-on covers, as every place that promises it says it (the question, Yes's band, History). */
 export const oneUndoCovers = 'One Undo in History takes back what it takes in; a copy you choose has its own Undo.';
 
 /**
