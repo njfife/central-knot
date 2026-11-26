@@ -1178,7 +1178,7 @@ test('Plugin page runs installed hooks, keeps marketplace-only text hooks View s
   assert.ok(select, 'As <tool> selector shown when multiple eligible tools exist');
   assert.deepEqual(select.children.map((o: any) => dom.textOf(o)), ['As Claude Code', 'As Codex']);
   assert.equal(dom.findAll(codexPage, n => 'data-hook-run' in (n.attrs ?? {})).length, 1, 'Run it on installed text hook only, not on marketplace-only or Other hooks');
-  const helpCard = dom.findAll(codexPage, n => n.attrs?.role === 'tooltip')[0];
+  const helpCard = dom.findAll(codexPage, n => n.id === 'plugin-hooks-info-card')[0];
   assert.equal(dom.textOf(helpCard), 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.');
 
   // Without an arriving tool, selects Claude Code: matching marketplace hook is not duplicated, while marketplace-only prompt hook appears under it with View source alone.

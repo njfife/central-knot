@@ -439,8 +439,11 @@ export function syncInfoCard(checkView = false): void {
   // Reset to 0 before measuring so a card placed near the right edge measures its natural width after a narrower resize.
   card.style.left = card.style.top = '0px';
   const block = (mark.closest('[data-info-block]') ?? mark).getBoundingClientRect();
+  // No card covers the status bar: the height cards are placed in ends at #status's top when shown.
+  const status = document.getElementById('status')?.getBoundingClientRect();
+  const height = status && status.height > 0 && status.top > 0 ? Math.min(window.innerHeight, status.top) : window.innerHeight;
   const { left, top } = cardPlace(
-    mark.getBoundingClientRect(), card.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight }, block,
+    mark.getBoundingClientRect(), card.getBoundingClientRect(), { width: window.innerWidth, height }, block,
   );
   Object.assign(card.style, { left: `${left}px`, top: `${top}px` });
 }
