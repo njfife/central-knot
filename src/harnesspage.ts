@@ -5,7 +5,7 @@
 // engine: every change goes through the pages it mirrors, or the switch's toolchoice.ts.
 import { noteMove, KINDS, acting, harnessManaged as managed, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type PageKind } from './app.ts';
 import { manageLocked, manageRow } from './managecard.ts';
-import { installsIn, pluginsInstalled, takenItems, takesItemsOnly, type MarketPlugin } from './pluginstatus.ts';
+import { installsIn, pluginsInstalled, pluginsTabNote, takenItems, takesItemsOnly, type MarketPlugin } from './pluginstatus.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { pluginTitle } from './pluginparts.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
@@ -322,7 +322,7 @@ function pluginsTab(tool: HarnessId) {
   if (unread && !plugins.installed.length && !unlisted.length) return page(unread, unsureNote);
   if (!plugins.installed.length && !unlisted.length) return page(unsureNote, emptyState('puzzle', `No plugins in ${names[tool]}`, `None of the plugins in your marketplaces is installed in ${names[tool]}.`,
     button({ variant: 'outline', label: 'Browse plugins', id: 'harness-browse-plugins', onclick: () => showPage('plugins') })));
-  return page(unread, plugins.installed.length ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), `Installed in ${names[tool]} from your marketplaces. Open one to uninstall it, or to install it in another tool.`) : null,
+  return page(unread, plugins.installed.length ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), pluginsTabNote(tool, !!market.view?.canWrite)) : null,
     unsureNote, unlistedNote, plugins.installed.length ? h('div.harness-plugins', { role: 'list' }, plugins.installed.map(item => pluginRow(item, tool))) : null);
 }
 

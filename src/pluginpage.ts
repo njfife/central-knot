@@ -64,7 +64,7 @@ const MARK_WORDS: Record<ToolMark, string> = {
 
 /**
  * Your tools: the plugin's switch at the heading, Update at its right where a copy or its items are behind, and a line per
- * tool: its box (pluginparts.ts toolBox: ticked while the plugin is there; a click uninstalls or installs it there) and what it
+ * tool: its box (pluginparts.ts toolBox: ticked while the plugin is there; a click turns it off, kept installed where the tool can, or puts it in) and what it
  * has (always there; a tool on another version than the marketplace offers adds "Marketplace has …"). `compareTo`: the
  * version an installed copy is compared with (see versionToCompare).
  */
@@ -208,7 +208,7 @@ function skillColumns(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const line = (text: string, mark?: HarnessId) => h('p.plugin-group-note', {}, mark ? brandMark(mark, 13) : null, ...inlineMarkdown(text, openLink));
   return {
     head: [
-      switchable.length ? line('Turn a skill off, or back on, without uninstalling the plugin.') : null,
+      switchable.length ? line('Turn a skill off, or back on, without turning the whole plugin off.') : null,
       ...tools.filter(tool => NO_SKILL_SWITCH[tool]).map(tool => line(NO_SKILL_SWITCH[tool]!, tool)),
       ...[...columnWide].map(reason => line(reason)),
       // Disable is best effort: on a build older than the one exercised, or one whose version can't be read, only said.
