@@ -95,8 +95,7 @@ export function versionList(view: VersionListView): HTMLElement {
   const more = `Show ${rest} earlier ${rest === 1 ? 'version' : 'versions'}`;
   const unfold = rest > 0 ? button({ variant: 'link', size: 'small', label: more, id: partId('versions-all', view.rowId), onclick: view.onUnfold }) : null;
   return h('div.versions', { role: 'group', 'aria-label': `Versions of ${item.name}` },
-    h('p.versions-title', {}, h('strong', {}, 'Versions'), h('span.versions-count', {}, String(all.length)),
-      h('span.versions-note', {}, 'Central Knot keeps every version.')),
+    h('p.versions-title', {}, h('strong', {}, 'Versions'), h('span.versions-count', {}, String(all.length))),
     h('ul.version-rows', {}, shown.map((version, index) => versionRow(view, version, index, times[index], backWhen))),
     unfold);
 }

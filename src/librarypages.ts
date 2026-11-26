@@ -1,15 +1,14 @@
 // The kinds on Central Knot's library (library.ts) as the item lists show them, and what each supplies to its page besides
 // its words (libraryrow.ts libraryWords, pure, so the tests read them too): how Read gets one of its versions, whether it has
-// a Files view, what else its opened row shows of its own (an agent: what Pi gets of it), and what a tool's line adds
+// a Files view, and what a tool's line adds
 // (a skill: clear that tool's own switch, take over a copy outside Central Knot's). The table is keyed by the page's name
 // for a kind (app.ts PageKind: 'agents'), not the library's (library.ts ItemKind: 'agent'). matrix.ts draws every row of a
 // kind here as a library row (librarySwitch, libraryMark, libraryVersions, libraryDelete, …). Every place a kind is wired in
 // is in librarypass.ts's recipe; this is one.
 import { acting, rerender, selectOff, shownPath, skillAction, state, whyKindReadOnly, writeOff, type PageKind } from './app.ts';
-import { h, icon, whyOff } from './dom.ts';
+import { h, whyOff } from './dom.ts';
 import { partId, rowId, type ItemRow } from './itemrow.ts';
 import type { NeutralServer } from './mcp.ts';
-import { agentsKeptIn } from './presence.ts';
 import type { HarnessId } from './types.ts';
 import { libraryWords, sentences, type RowWords } from './libraryrow.ts';
 import type { VersionText } from './versionlist.ts';
@@ -21,8 +20,6 @@ export interface LibraryPage {
   say: ReturnType<typeof sentences>;
   /** One of an item's versions, as Read shows it (versionlist.ts VersionPart). */
   version(key: string, hash: string): Promise<VersionText>;
-  /** What else an item's opened row shows, after where each copy is. */
-  own?(row: ItemRow): HTMLElement | null;
   /** Its own actions on one tool's line in the opened row, beside that tool's switch. */
   tool?(row: ItemRow, tool: HarnessId): HTMLElement | null;
   /** Under one tool's line in the opened row: what an armed action of its own will do, said before the second click. */
@@ -44,7 +41,7 @@ export const libraryPages: Record<PageKind, LibraryPage> = {
     version: (key, hash) => window.centralKnot.serverVersion(key, hash).then(server => server && serverParts(server)),
   },
   agents: {
-    words: libraryWords.agents, say: sentences(libraryWords.agents), own: asSkillNote, tool: skillToolActions,
+    words: libraryWords.agents, say: sentences(libraryWords.agents), tool: skillToolActions,
     version: (key, hash) => window.centralKnot.agentVersion(key, hash)
       .then(agent => agent && [{ name: 'description', text: agent.description }, { name: 'prompt', text: agent.prompt, block: true as const }]),
   },
@@ -57,21 +54,6 @@ function serverParts(server: NeutralServer): { name: string; text: string; block
     ['command', server.command], ['arguments', server.args?.join(' ')], ['environment', server.env && lines(server.env), true], ['working folder', server.cwd],
     ['URL', server.url], ['headers', server.headers && lines(server.headers), true]];
   return parts.flatMap(([name, text, block]) => (text ? [{ name, text, ...(block ? { block: true as const } : {}) }] : []));
-}
-
-/**
- * What a managed tool that keeps agents as skills (Pi: presence.ts agentsKeptIn) gets of an agent, said once in its opened row:
- * what a skill lacks; and, where that tool can take the agent (its line has a switch), that deleting its file there turns the
- * agent off everywhere (library.ts THE RULE), before it happens.
- */
-function asSkillNote(agent: ItemRow) {
-  const asSkills = (state.home?.sync.managed ?? []).filter(tool => (agentsKeptIn as Partial<Record<HarnessId, string>>)[tool] === 'skills folder');
-  if (!asSkills.length) return null;
-  const there = andList(asSkills.map(toolName)), takes = andList(asSkills.filter(tool => !agent.cannot?.[tool]).map(toolName));
-  const lacks = `${there} holds no agents of its own, so there an agent is a skill, a file in its skills folder: it has no `
-    + `${andList(['isolated context of its own', 'tool restrictions', 'model selection'])}, and it is invoked as a skill rather than picked as an agent.`;
-  const deleting = takes ? ` Deleting that file in ${takes} turns the agent off in every tool; to keep it out of ${takes} only, use ${takes}’s switch above.` : '';
-  return h('p.details-limits.details-note', { id: partId('as-skill', rowId(agent.kind, agent.key)) }, icon('info', 12, 'tone-muted'), lacks + deleting);
 }
 
 /** A take-over that asks to be confirmed (it removes a copy other apps may read): its skill and tool, until another click. */
