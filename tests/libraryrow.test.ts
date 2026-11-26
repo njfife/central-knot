@@ -658,3 +658,40 @@ test('MCP server Off in settings carries a card explaining Central Knot leaves t
     { text: 'Off in Copilot CLI’s settings' },
   ]);
 });
+
+test('A plugin’s agent on in Claude Code through the plugin names Codex as unable to take it, never Claude Code; with the plugin off in Claude Code, the line says not in Claude Code or Codex', () => {
+  const five = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
+  const held = {
+    'claude-cli': 'Claude Code has it with the plugin release-helper, so no separate copy is placed there.',
+    'copilot-cli': 'Copilot CLI gets it only with the plugin release-helper, and the plugin is kept out of Copilot CLI.',
+    'codex-cli': 'Codex gets it only with the plugin release-helper, and the plugin is kept out of Codex.',
+  };
+  const agent = {
+    ...newItem('release-reviewer', 'release-reviewer'),
+    on: true,
+    hash: 'b',
+    except: ['pi-cli', 'opencode-cli'] as HarnessId[],
+    applied: {},
+  };
+  const copies: Copies = Object.fromEntries(five.map(tool => [
+    tool,
+    held[tool as keyof typeof held] ? { is: 'held' as const, why: held[tool as keyof typeof held] } : { is: 'absent' as const },
+  ]));
+  const base: LibraryRow = {
+    key: 'release-reviewer',
+    name: 'release-reviewer',
+    fromSource: { link: 'plugin:release-helper@team-tools' },
+    hashes: {},
+    cannot: held,
+    getsWithPlugin: ['copilot-cli'],
+    plan: plan(agent, copies),
+  };
+  assert.equal(
+    statusLine({ ...base, pluginOn: ['claude-cli'] }, agent, five),
+    'On in Claude Code only · Codex can’t take it (see below) · kept out of Pi and OpenCode',
+  );
+  assert.equal(
+    statusLine({ ...base, pluginOn: [] }, agent, five),
+    'On · not in Claude Code or Codex (see below) · kept out of Pi and OpenCode',
+  );
+});

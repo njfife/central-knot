@@ -2279,7 +2279,7 @@ function markOf(skill: ItemRow, tool: Tool): { look: MarkLook; words: string; gl
     return { look: on ? 'on' : 'off', state: on ? 'plugin' : 'plugin-off', key: on ? 'on' : 'plugin-off', words: `${skill.anotherWay?.[tool] ?? skill.cannot?.[tool] ?? `${names[tool]} has it through the plugin ${given.plugin}.`}${on ? '' : ' It is turned off there.'}` };
   }
   // A tool that gets it only with its plugin, which it lacks (pluginrows.ts withPluginOnly): not "can't take it".
-  if (skill.getsWithPlugin?.includes(tool) && loadsKind(tool as HarnessId, partOfPage[skill.kind])) return { look: 'none', state: 'with-plugin', key: 'with-plugin', words: `${names[tool]}: not there; it gets it with the plugin ${pluginOf(skill.fromSource!.link)}, which its line installs.` };
+  if (skill.getsWithPlugin?.includes(tool)) return { look: 'none', state: 'with-plugin', key: 'with-plugin', words: `${names[tool]}: not there; it gets it with the plugin ${pluginOf(skill.fromSource!.link)}, which its line installs.` };
   return libraryMark(libraryPages[skill.kind], skill, tool);
 }
 
@@ -2725,8 +2725,9 @@ const switchStatus = (t: Table, skill: ItemRow) => statusLine(skill, itemOf(skil
 
 /**
  * A library row's line in one tool that is a plugin's (pluginline.ts): the tool has the item through a plugin, or the item is from a
- * plugin (library.ts A PLUGIN) that this tool gets only with the plugin (pluginrows.ts withPluginOnly), or, Off, that this tool,
- * which takes no plugins, has none of placed. An item On and kept out of a tool keeps the library's own switch there, which lets it in.
+ * plugin (library.ts A PLUGIN) that this tool gets only with the plugin (pluginrows.ts withPluginOnly) or cannot load as a plugin's
+ * kind (pluginstatus.ts loadsKind), or, Off, that this tool, which takes no plugins, has none of placed. An item On and kept out
+ * of a tool keeps the library's own switch there, which lets it in.
  */
 function rowPluginFacts(skill: ItemRow, tool: Tool) {
   const through = itemThrough(state.home, skill.kind, skill, tool), kind = partOfPage[skill.kind];
@@ -2734,6 +2735,10 @@ function rowPluginFacts(skill: ItemRow, tool: Tool) {
   const link = skill.fromSource?.link ?? '', plugin = pluginOf(link), marketName = pluginMarketOf(link);
   if (!plugin || !marketName) return undefined;
   if (skill.getsWithPlugin?.includes(tool)) return lineFacts(kind, plugin, marketName, tool as HarnessId);
+  if (takesPlugins(tool) && !loadsKind(tool as HarnessId, kind) && !skill.copies[tool] && !(skill.on && skill.except.includes(tool))) {
+    const installed = state.home?.pluginItems?.find(entry => entry.tool === tool && entry.plugin === plugin && entry.marketName === marketName);
+    return lineFacts(kind, plugin, marketName, tool as HarnessId, undefined, installed);
+  }
   if (takesPlugins(tool) || skill.on) return undefined;
   // A tool that takes no plugins, the item Off, where none of the plugin's items is placed (its box on the plugin's page unticked:
   // after a placement's Undo they are in the Library, Off): its line puts them there again. On, its own switch is its line.

@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { readItemTexts, readPluginItems } from '../src/pluginitems.ts';
 import { pluginFiles } from '../src/catalogdetail.ts';
 import { readPlugin } from '../src/pluginlibrary.ts';
-import { inTool, cellWords, handledWhere, offIn, pageRows, pluginItemCount, rowCount, toolWords } from '../src/pluginrows.ts';
+import { inTool, cellWords, handledWhere, offIn, pageRows, pluginItemCount, rowCount, toolWords, withPluginOnly } from '../src/pluginrows.ts';
 import { newItem } from '../src/library.ts';
 import { pluginItemKey, pluginLive } from '../src/profileplan.ts';
 import type { PluginContext } from '../src/plugins.ts';
@@ -245,6 +245,27 @@ test('a plugin whose marketplace is on no tool any more says where it is handled
   // A plugin from the Anthropic Directory is said to be from there, not from a marketplace that went missing.
   const [directory] = pageRows(homeOf([], [{ ...install('claude-cli', { listed: false }), marketName: 'anthropic-plugin-directory' }]), 'skills').rows;
   assert.equal(handledWhere(directory!), 'Installed in Claude Code from the Anthropic Directory. Claude Code’s own /plugin updates, turns off or removes it.');
+});
+
+test('withPluginOnly leaves out tools that do not load a plugin’s kind: Codex for an agent, while keeping Codex for a skill', () => {
+  const five: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
+  const installed: InstalledPlugin = {
+    tool: 'claude-cli',
+    plugin: 'release-helper',
+    marketName: 'team-tools',
+    version: '0.4.1',
+    listed: true,
+    items: [{ kind: 'agent', name: 'release-reviewer', description: '' }],
+  };
+  const home = {
+    skills: { tools: five, items: [], library: {} },
+    mcp: { tools: five, items: [], library: {} },
+    agents: { tools: five, items: [], library: {} },
+    pluginItems: [installed],
+  } as unknown as HomeView;
+  const linked = { fromSource: { link: 'plugin:release-helper@team-tools' }, on: true, except: ['pi-cli', 'opencode-cli'] };
+  assert.deepEqual(withPluginOnly(home, 'agents', linked), ['copilot-cli']);
+  assert.deepEqual(withPluginOnly(home, 'skills', linked), ['copilot-cli', 'codex-cli']);
 });
 
 test('reading plugin items for one plugin in two tools walks and hashes no files of its skill folders beyond SKILL.md', async () => {

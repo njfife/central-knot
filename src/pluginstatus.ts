@@ -92,15 +92,15 @@ export const installedFrom = (view: PluginsView, entry: MarketplaceView) => entr
 /** A plugin in a marketplace. */
 export type MarketPlugin = { entry: MarketplaceView; plugin: PluginView };
 /**
- * What one tool has from every marketplace read: plugins installed there, plugins whose state there could not be checked
- * (with why), and marketplaces that could not be read at all, so an incomplete answer never reads as "nothing installed".
- * Null when the tool takes no marketplace plugins (Pi).
+ * What one tool has from every marketplace read: plugins installed there (each carrying that tool's recorded version from
+ * InstallState.version, if any), plugins whose state there could not be checked (with why), and marketplaces that could not be
+ * read at all, so an incomplete answer never reads as "nothing installed". Null when the tool takes no marketplace plugins (Pi).
  */
-export function installsIn(view: PluginsView, tool: HarnessId): { installed: MarketPlugin[]; unknown: (MarketPlugin & { reason: string })[]; unreadable: string[] } | null {
+export function installsIn(view: PluginsView, tool: HarnessId): { installed: (MarketPlugin & { version?: string })[]; unknown: (MarketPlugin & { reason: string })[]; unreadable: string[] } | null {
   if (!view.tools.includes(tool) || !takesPlugins(tool)) return null;
   const each = view.marketplaces.flatMap(entry => entry.plugins.map(plugin => ({ entry, plugin, install: stateOf(entry, plugin.name, tool) })));
   return {
-    installed: each.filter(({ install }) => install.state === 'installed').map(({ entry, plugin }) => ({ entry, plugin })),
+    installed: each.flatMap(({ entry, plugin, install }) => (install.state === 'installed' ? [{ entry, plugin, ...(install.version ? { version: install.version } : {}) }] : [])),
     unknown: each.flatMap(({ entry, plugin, install }) => (install.state === 'not-known' ? [{ entry, plugin, reason: install.reason }] : [])),
     unreadable: view.marketplaces.filter(entry => entry.problem && !entry.plugins.length).map(entry => entry.name),
   };

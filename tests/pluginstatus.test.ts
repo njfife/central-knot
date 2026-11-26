@@ -212,3 +212,22 @@ test('A native tool’s Plugins tab note names turning on or off and installing 
   assert.equal(pluginsTabNote('claude-cli', true), 'Installed in Claude Code from your marketplaces. Open one to turn it on or off here, or to install it in another tool.');
   assert.equal(pluginsTabNote('claude-cli', false), 'Installed in Claude Code from your marketplaces. Open one to see which tools have it.');
 });
+
+test('installsIn carries each tool’s own recorded version rather than the marketplace catalog’s, and none when the tool records no version', () => {
+  const catalog: MarketplaceView = {
+    ...entry,
+    plugins: [
+      { name: 'release-helper', description: '', version: '0.5.0' },
+      { name: 'unversioned', description: '', version: '1.0.0' },
+    ],
+    states: {
+      'release-helper': { 'claude-cli': { state: 'installed', path: '/x', version: '0.4.1' } },
+      unversioned: { 'claude-cli': { state: 'installed', path: '/y' } },
+    },
+  };
+  const installs = installsIn({ ...view, marketplaces: [catalog] }, 'claude-cli')!;
+  assert.deepEqual(
+    installs.installed.map(({ plugin, version }) => [plugin.name, version]),
+    [['release-helper', '0.4.1'], ['unversioned', undefined]],
+  );
+});

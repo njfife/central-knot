@@ -3240,7 +3240,13 @@ async function practiceFlow() {
     [await placeThroughRedraw(a, '.plugin-readme-body .md pre', () => a.click('#market-tab-about'), { sideways: true }), await placeThroughRedraw(a, '.plugin-readme-body .md-table', () => a.click('#market-tab-about'), { sideways: true })], [[true, 40], [true, 40]]);
   await a.click('#market-tab-plugins');
   check('a row shows the version offered, and a tool that has another', /2\.0\.0/.test(await a.text('[data-plugin="issue-tracker"] .plugin-row-version')) && /Claude Code has\s1\.9\.0/.test(await a.text('[data-plugin="issue-tracker"] .plugin-version-differs')), await a.text('[data-plugin="issue-tracker"]'));
-  await a.click('#popen-0-issue-tracker');
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-plugins');
+  for (let tries = 0; tries < 50 && !(await a.exists('#harness-plugin-ck-test-market-issue-tracker')); tries++) await wait(100);
+  same('Claude Code’s Plugins tab shows the version Claude Code has, not the marketplace catalog’s',
+    (await a.text('.harness-plugin:has(#harness-plugin-ck-test-market-issue-tracker) strong'))?.trim() ?? '', 'issue-tracker 1.9.0');
+  await a.click('#harness-plugin-ck-test-market-issue-tracker');
   for (let tries = 0; tries < 30 && !(await a.exists('#pfile-0-skills-triage')); tries++) await wait(100);
   check('the plugin page says which version Claude Code has', /Installed · 1\.9\.0\s*Marketplace has 2\.0\.0/.test(await a.text('.plugin-panel')), await a.text('.plugin-panel'));
   check('a skill only an installed copy has says where it is', (await a.text('#pfile-0-skills-old-triage')).includes('Only in Claude Code (1.9.0)'), await a.text('.plugin-page'));
@@ -7892,6 +7898,8 @@ esac
   await a.click('#plugins-undo');
   await done();
   same('Undo turns the same copy on again where it was, and the record is On, kept out of Pi; the focus is on its switch as Undo goes', [installed(), calls().at(-1), entry()?.on, entry()?.except, await switchIs('#pswitch-page-0-issue-tracker'), await a.run(`document.activeElement?.id`)], [true, 'plugin enable issue-tracker@ck-test-market --scope user', true, ['pi-cli'], 'true partial', 'pswitch-page-0-issue-tracker']);
+  const focusRing = await a.run(`(() => { const el = document.activeElement, style = el && getComputedStyle(el); return el && style ? { id: el.id, visible: el.matches(':focus-visible'), outline: style.outlineStyle, offset: parseFloat(style.outlineOffset) } : null; })()`);
+  check('after Undo, the focused switch draws its focus ring outside its track', focusRing?.id === 'pswitch-page-0-issue-tracker' && focusRing.visible && focusRing.outline !== 'none' && focusRing.offset > 0, focusRing);
   same('after the Undo too, nothing is lost', kept(), keptBefore);
   await a.click('#plugin-back');
   // Taken out of Claude Code with its own command: nothing puts it back by itself; its box is empty, and a tick does.
@@ -19118,9 +19126,15 @@ if (tool === 'claude') {
 
   // Example 12: nothing cut off with the long plugin name and six tools' lines, at each size and his own window.
   await open('agents', 'incident-lead');
+  same('a library agent from a plugin still shows Codex’s line', await lineOf('Codex'), 'Codex doesn’t load a plugin’s agents.');
   await fitsAtMinimum(a, 'an agent of varo-incident-response opened, with six tools’ lines');
   for (const [width, height] of [[1280, 800], [1316, 819], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); same(`nothing cut off at ${width}×${height}: the plugin’s agent opened`, await a.run(CUT_OFF), []); await a.shot(`lines-agent-after-${width}`); }
   await fullSize(a);
+  await a.click(`.ov-row[data-key="${row('agents', 'incident-lead')}"] .switch`);
+  await idle();
+  same('an On library agent from a plugin names Codex as unable to take it, never tools it is on in through its plugin, and keeps Codex’s line',
+    [(await a.text('.details-status'))?.trim(), await lineOf('Codex')],
+    ['On in Claude Code, Copilot CLI and Pi only · Codex can’t take it (see below) · kept out of OpenCode', 'Codex doesn’t load a plugin’s agents.']);
   same('no page errors', a.pageErrors, []);
   await a.quit();
 

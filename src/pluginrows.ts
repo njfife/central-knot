@@ -5,7 +5,7 @@
 // opened row turns the item on or off there, or installs the plugin, puts its items in or removes it (pluginline.ts), and a profile
 // ticks the item by its own rows (profileplan.ts pluginLive). Which tools have such a row of his on through a plugin is decided here
 // too (pluginOnIn), for the Library's rows and for what a profile switch leaves loaded.
-import { DIRECTORY, partOfPage, samePart, versionWord } from './pluginstatus.ts';
+import { DIRECTORY, loadsKind, partOfPage, samePart, versionWord } from './pluginstatus.ts';
 import { lacksIt } from './pluginline.ts';
 import { onNow, type PluginItemAt } from './pluginswitch.ts';
 import { takesPlugins } from './presence.ts';
@@ -173,15 +173,16 @@ export function handledWhere(row: PluginRow): string {
 }
 
 /**
- * The tools a library item from a plugin (library.ts A PLUGIN) gets only by installing that plugin: those that take plugins and
- * don't have it installed, but one the item is On and kept out of, where its own switch lets it in. There its row's line offers
- * Install the plugin (pluginline.ts), and its mark and its status line say it gets it with the plugin (matrix.ts markOf,
- * libraryrow.ts statusLine); its switch's result doesn't count it among the tools it is on in (matrix.ts canHave).
+ * The tools a library item from a plugin (library.ts A PLUGIN) gets only by installing that plugin: those that take plugins,
+ * load its kind (pluginstatus.ts loadsKind) and don't have it installed, but one the item is On and kept out of, where its own
+ * switch lets it in. There its row's line offers Install the plugin (pluginline.ts), and its mark and its status line say it
+ * gets it with the plugin (matrix.ts markOf, libraryrow.ts statusLine); its switch's result doesn't count it among the tools it
+ * is on in (matrix.ts canHave).
  */
 export function withPluginOnly(home: Pick<HomeView, 'pluginItems' | Page> | undefined, page: Page, row: { fromSource?: { link: string }; on?: boolean; except?: readonly string[] }): HarnessId[] {
   const link = row.fromSource?.link ?? '', plugin = pluginOf(link), marketName = pluginMarketOf(link);
   if (!home || !plugin) return [];
-  return kindSource(home, page).tools.filter(tool => takesPlugins(tool) && !(row.on && row.except?.includes(tool))
+  return kindSource(home, page).tools.filter(tool => takesPlugins(tool) && loadsKind(tool, partOfPage[page]) && !(row.on && row.except?.includes(tool))
     && !home.pluginItems?.some(install => install.tool === tool && install.plugin === plugin && install.marketName === marketName));
 }
 
