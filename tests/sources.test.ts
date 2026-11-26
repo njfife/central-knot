@@ -1146,13 +1146,20 @@ test('Two checks at once, and Remove during a check: each check’s fetch waits 
     await removed;
     assert.deepEqual([(await sourcesView(box.context, box.tools)).sources, await bodyOf(box, 'notes')], [[], 'Third.']);
 
-    const { id: again } = await oneSkill(box, 'other');
+    const { repo: other, id: again } = await oneSkill(box, 'other');
+    await other.commit({ 'SKILL.md': skillMd('other', 'Second.') });
+    const before = { item: await itemOf(box, 'other'), history: (await readHistory(box.context)).length, tools: await everywhere(box, 'other') };
     queue = new Promise<void>(done => { release = done; });
+    // Remove waits behind the held entry; the check reads sources.json and fetches outside the queue, then joins behind Remove before release.
     const removing = turn(() => removeSource(box.context, box.tools, again));
+    const lateJoined = new Promise<void>(done => { joined = done; });
     const late = checkSource(box.context, now(box), again, turn);
+    await within('the late check joining the queue', lateJoined);
     release();
     await removing;
     assert.equal((await late).stopped, 'That source was removed meanwhile. Nothing was changed.');
+    assert.deepEqual([{ item: await itemOf(box, 'other'), history: (await readHistory(box.context)).length, tools: await everywhere(box, 'other') },
+      await readdir(join(box.home, '.central-knot/sources'))], [before, []]);
   } finally { await box.cleanup(); }
 });
 
