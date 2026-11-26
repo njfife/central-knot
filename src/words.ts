@@ -68,15 +68,17 @@ export const toolList = (tools: HarnessId[]) => andList(tools.map(tool => toolNa
 /** "a", "a or b", "a, b or c": for choices, such as where something can be added. */
 export const orList = (items: string[]) => joined(items, 'or');
 
-/**
- * The tools an action touched, as a sentence names them: "all 3 tools" when they are exactly the home's tools and there
- * are more than two, else their names ("Claude Code and Codex"). Takes ids, so it compares which tools, not how many:
- * an event from before a tool was added or removed is named tool by tool.
- */
-export function toolsPhrase(touched: string[], inHome: string[]): string {
+/** Deduplicated touched tool ids, whether they match all 3+ home tools (by id, not count), and their and-list names. */
+export function touchedTools(touched: string[], inHome: string[]): { tools: string[]; all: boolean; names: string } {
   const tools = [...new Set(touched)];
-  const everyOne = tools.length > 2 && tools.length === inHome.length && inHome.every(tool => tools.includes(tool));
-  return everyOne ? `all ${tools.length} tools` : andList(tools.map(toolName));
+  const all = tools.length > 2 && tools.length === inHome.length && inHome.every(tool => tools.includes(tool));
+  return { tools, all, names: andList(tools.map(toolName)) };
+}
+
+/** Touched tools in a sentence: "all 3 tools" when they match all 3+ home tools, else their names ("Claude Code and Codex"). */
+export function toolsPhrase(touched: string[], inHome: string[]): string {
+  const { tools, all, names } = touchedTools(touched, inHome);
+  return all ? `all ${tools.length} tools` : names;
 }
 
 /** The same, starting a label or a sentence: "All 3 tools", "Claude Code and Codex". */

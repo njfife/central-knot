@@ -1,11 +1,12 @@
 // Settings: Central Knot's own preferences, kept apart from the tools' settings. The main process stores them
-// (app-settings.json) and applies them; this page shows them, one full-width row each, and changes one at a time. Under "This
+// (app-settings.json) and applies them; this page shows them, one full-width row each, and changes one at a time. History's
+// time control (historyWindowControl, openHistoryWindow) is shared with historypage.ts. Under "This
 // home" sit two per-home switches: Synchronize everything, kept in the home's sync record (share.ts SyncRecord syncEverything)
 // and switched through app.ts switchSyncEverything, and Keep session costs, kept per canonical home in app-settings.json
 // (sessionkeep.ts). Help's Log row also shows Central Knot's own log under it (Show log: its
 // last lines, read by main.ts readLog, never stored); the log is written by main.ts log. A settings file that couldn't be read at
 // launch is said in a note at the top (keptNote) until it is closed, and first on the Overview (overview.ts needsYou).
-import { acting, announce, keepingBusy, machine, rerender, switchSessionCosts, switchSyncEverything, showPage, state, whyReadOnly } from './app.ts';
+import { acting, announce, keepingBusy, loadHistory, machine, rerender, switchSessionCosts, switchSyncEverything, showPage, state, whyReadOnly } from './app.ts';
 import { outcomeBand } from './matrix.ts';
 import { button, h, icon, infoCardId, infoMark, toggle } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -67,12 +68,15 @@ let shownRank = 0;
  * so the page must not lag behind the save it reports on. Settings that match the page leave it alone: rebuilding it when the
  * window is focused would swallow the click that focused it. A row's message that the settings settle goes with it.
  */
-function showNewest(settings: AppPreferences, rank: number) {
-  if (rank < shownRank) return;
+function showNewest(settings: AppPreferences | null | undefined, rank: number) {
+  if (!settings || rank < shownRank) return;
   shownRank = rank;
+  const daysChanged = current !== undefined && current.historyDays !== settings.historyDays;
+  if (state.historyDays !== settings.historyDays) state.historyDays = settings.historyDays;
   if (JSON.stringify(settings) === JSON.stringify(current)) return;
   current = settings;
   for (const [row, message] of messages) if (settled(row, message)) messages.delete(row);
+  if (daysChanged && !updatingHistory && state.page === 'history') void loadHistory();
   rerender();
 }
 
@@ -89,6 +93,13 @@ export async function loadSettings() {
   return settings;
 }
 
+/** Opens History's own time control fresh: clears its last visit's outcome and open warning, keeping an in-flight save's attempt. */
+export function openHistoryWindow() {
+  messages.delete('history');
+  shortening = undefined;
+  if (!updatingHistory) attempts.delete('history');
+}
+
 /** Opens the page fresh: what the rows said last time (a failure since put right elsewhere, say) belongs to that visit. */
 export function openSettings() {
   messages.clear();
@@ -96,7 +107,7 @@ export function openSettings() {
   logAsked++;
   shownLog = undefined;
   // An action still running from the last visit keeps its effect (a save still saves) but no longer speaks for its row, except
-  // a History window change still under way: its outcome (removed, or couldn't be) is only ever said in that row.
+  // a History window change still under way: its outcome (removed, or couldn't be) is only ever said in that control.
   const updating = attempts.get('history');
   attempts.clear();
   if (updatingHistory && updating !== undefined) attempts.set('history', updating);
@@ -197,7 +208,8 @@ function moveAppearance(event: KeyboardEvent) {
 
 /** A longer window saves at once. A shorter one removes History for good, so the row asks first, and says so once. (The select works only once `current` is known.) */
 function chooseHistoryDays(days: HistoryDays) {
-  if (days >= current!.historyDays) { void saveHistoryDays(days); return; }
+  if (!current || updatingHistory) return;
+  if (days >= current.historyDays) { void saveHistoryDays(days); return; }
   shortening = days;
   // What the row said last was about an earlier choice; the question replaces it, and is the one thing the page says now.
   messages.delete('history');
@@ -231,6 +243,7 @@ const pruneNotes: Record<HistoryPrune, (before: string) => Pick<RowMessage, 'tex
  * pruned for a longer window, or for a request a newer one overtook in its queue.
  */
 async function saveHistoryDays(days: HistoryDays) {
+  if (updatingHistory) return;
   const kept = current ? `History is still kept for ${current.historyDays} days.` : '';
   const before = removedBefore(days);
   shortening = undefined;
@@ -238,8 +251,9 @@ async function saveHistoryDays(days: HistoryDays) {
   rerender();
   announce('Updating History…', true);
   try {
-    await save('history', () => window.centralKnot.setHistoryDays(days), kept,
+    const worked = await save('history', () => window.centralKnot.setHistoryDays(days), kept,
       ({ settings, pruned }) => pruned && { ...pruneNotes[pruned](before), about: shownIn('history', settings) });
+    if (worked && state.page === 'history') await loadHistory();
   } finally {
     updatingHistory = false;
     rerender();
@@ -265,6 +279,25 @@ function shortenConfirmation(days: HistoryDays): HTMLElement {
       button({ variant: 'danger', size: 'small', label: `Shorten to ${days} days`, id: 'history-shorten', onclick: () => void saveHistoryDays(days) }),
       // Says what it keeps: the saved window, which the select still shows.
       button({ variant: 'outline', size: 'small', label: `Keep ${current!.historyDays} days`, id: 'history-shorten-cancel', onclick: closeShortening })));
+}
+
+/** The History retention select shared by Settings and History; disabled until settings load and while saving. */
+const historySelect = (labelId: string): HTMLElement => h('span.select', {},
+  h('select', { id: 'history-days', 'aria-labelledby': labelId, 'aria-describedby': updatingHistory ? 'setting-history-notice' : undefined, disabled: !current || updatingHistory,
+    onchange: (event: Event) => chooseHistoryDays(Number((event.target as HTMLSelectElement).value) as HistoryDays), onkeydown: cancelOnEscape },
+  historyDayChoices.map(days => h('option', { value: String(days), selected: days === (current?.historyDays ?? state.historyDays ?? defaultHistoryDays) }, `${days} days`))),
+  icon('chevrons-up-down', 14));
+const historyNotice = (): RowMessage | undefined => (updatingHistory ? { text: 'Updating History…', tone: 'progress' } : undefined);
+
+/** History's own time control ("Keep [30 days ▾]"), sharing Settings' choices, warning, save and outcomes. */
+export function historyWindowControl(): HTMLElement {
+  const message = messages.get('history');
+  const notice = historyNotice();
+  return h('div.history-keep', { id: 'history-keep' },
+    h('div.history-keep-row', {}, h('label.history-keep-label', { id: 'history-keep-label', for: 'history-days' }, 'Keep'), historySelect('history-keep-label')),
+    message && messageLine(message, { id: 'setting-history-message' }),
+    notice && messageLine(notice, { id: 'setting-history-notice', announce: true }),
+    shortening && shortenConfirmation(shortening));
 }
 
 /** Opens the log's folder in the file manager. Where the log could not be selected there, the row names the file to look for. */
@@ -579,15 +612,7 @@ export function settingsPage(): HTMLElement {
     state.home ? settingsSection('home', 'This home', syncEverythingRow(), sessionCostsRow()) : null,
     settingsSection('plugins', 'Plugins', pluginUpdatesRow(), pluginTextRow()),
     settingsSection('history', 'History',
-      settingRow('history', 'Keep history for', undefined,
-        // Unchangeable until main has said, so a shorter choice is never mistaken for a longer one, and while a change is under way.
-        h('span.select', {},
-          h('select', { id: 'history-days', 'aria-labelledby': 'setting-history-title', 'aria-describedby': updatingHistory ? 'setting-history-notice' : undefined, disabled: !current || updatingHistory,
-            onchange: (event: Event) => chooseHistoryDays(Number((event.target as HTMLSelectElement).value) as HistoryDays), onkeydown: cancelOnEscape },
-          historyDayChoices.map(days => h('option', { value: String(days), selected: days === (current?.historyDays ?? defaultHistoryDays) }, `${days} days`))),
-          icon('chevrons-up-down', 14)),
-        updatingHistory ? { text: 'Updating History…', tone: 'progress' } : undefined,
-        shortening ? shortenConfirmation(shortening) : undefined)),
+      settingRow('history', 'Keep history for', undefined, historySelect('setting-history-title'), historyNotice(), shortening ? shortenConfirmation(shortening) : undefined)),
     // Help stays the last section, so the log's lines lengthen the page's own scroll.
     settingsSection('help', 'Help',
       settingRow('log', 'Log', undefined, logButtons('row'), undefined, undefined, 'Central Knot’s own log, for reporting a problem. Your tools’ files aren’t in it.'),

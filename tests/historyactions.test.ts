@@ -279,3 +279,25 @@ test('An Off row turned on in one tool records wasExcept and nowExcept: exact Un
   const older = entry({ kind: 'on', cause: 'switch', losers: [{ tool: 'claude-cli', hash: '' }] });
   assert.deepEqual(offered(older, item({ except: onlyClaude })), ['Turn it off', { key: 'reviewer', on: false, except: onlyClaude }]);
 });
+
+test('History rows drop “Central Knot keeps it.” and “until you turn it on.” and pass touched tool ids to a custom formatter; announcements keep the plain sentence', () => {
+  const five = ['claude-cli', 'copilot-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'] as HarnessId[];
+  const six = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
+  const off = entry({ kind: 'off', cause: 'switch', losers: five.map(tool => ({ tool, hash: 'b' })) });
+  const byHand = entry({ kind: 'off', cause: 'deleted-by-hand', winner: { tool: 'claude-cli', hash: 'b' }, losers: [{ tool: 'codex-cli', hash: 'b' }] });
+  const out = entry({ kind: 'off', only: 'codex-cli', losers: [{ tool: 'codex-cli', hash: 'b' }] });
+  const brought = entry({ kind: 'off', cause: 'source', link: 'https://github.com/team/skills/tree/main', losers: [] });
+  const dropped = entry({ kind: 'off', cause: 'source-dropped', link: 'https://github.com/team/skills/tree/main', losers: [{ tool: 'claude-cli', hash: 'b' }] });
+  const inLine = entry({ kind: 'off', cause: 'in-line', losers: [{ tool: 'claude-cli', hash: 'b' }] });
+  const seen: [string[], string[]][] = [];
+  const row = { row: true, tools: (touched: string[], inHome: string[]) => (seen.push([touched, inHome]), `[${touched.length}]`) };
+  assert.equal(librarySentence(off, libraryWords.skills, six, undefined, false, row)?.text, 'Turned off: removed from [5].');
+  assert.deepEqual(seen, [[five, six]]);
+  assert.equal(librarySentence(off, libraryWords.skills, six)?.text, 'Turned off: removed from Claude Code, Copilot CLI, Pi, OpenCode and Antigravity. Central Knot keeps it.');
+  assert.equal(librarySentence(byHand, libraryWords.skills, tools, undefined, false, { row: true })?.text, 'Its copy was deleted in Claude Code, so it was turned off and removed from Codex.');
+  assert.equal(librarySentence(out, libraryWords.skills, tools, undefined, false, { row: true })?.text, 'Kept out of Codex: its copy there was removed.');
+  assert.equal(librarySentence(brought, libraryWords.skills, tools, undefined, false, { row: true })?.text, 'Brought in from github.com/team/skills (main): in Central Knot, Off.');
+  assert.equal(librarySentence(brought, libraryWords.skills, tools)?.text, 'Brought in from github.com/team/skills (main): in Central Knot, Off, until you turn it on.');
+  assert.equal(librarySentence(dropped, libraryWords.skills, tools, undefined, false, { row: true })?.text, 'github.com/team/skills (main) no longer has it, so it is off and removed from Claude Code, and no longer from that source.');
+  assert.equal(librarySentence(inLine, libraryWords.agents, tools, undefined, false, { row: true })?.text, 'Off in Claude Code, so its file there was removed when sync reached it.');
+});
