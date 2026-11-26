@@ -8,7 +8,7 @@ import { markdown } from './markdown.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginKey, resultLines, succeeded, type PluginOp } from './pluginplan.ts';
 import { applyPluginOps, clickOn, market, openLink, pluginBusy, shownDetail, turnPlugin, type PluginClick } from './pluginstate.ts';
-import { PREVIEW_ONLY, addWords, boxOf, cantUninstall, copyStale, foundIn, inUseIn, itemsAllIn, itemsIn, outdated, stateOf, switchPartial, switchWords, toolMark, updateTools, versionToCompare, type ToolMark } from './pluginstatus.ts';
+import { PREVIEW_ONLY, addWords, boxOf, cantUninstall, copyStale, foundIn, inUseIn, itemsAllIn, itemsIn, outdated, switchPartial, switchWords, toolMark, updateTools, versionToCompare, type ToolMark } from './pluginstatus.ts';
 import { pluginUpdates } from './pluginupdateview.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, PluginTurn, PluginView, PluginsView } from './types.ts';
 import { takesPlugins } from './presence.ts';
@@ -114,9 +114,6 @@ function boxDoes(view: PluginsView, entry: MarketplaceView, plugin: string, tool
   const where = names[tool];
   const sw = entry.switches?.[plugin];
   const on = !!sw?.entry?.on;
-  const state = stateOf(entry, plugin, tool);
-  // Off there already: the click runs nothing in the tool, so it has no Undo there to promise.
-  if (ticked && state.state === 'installed' && state.off) return `Click to keep ${what} out of ${where}, where it is off already and stays installed.`;
   if (ticked && takesPlugins(tool)) return `Click to turn ${what} off in ${where}, kept installed: it stays off until you tick it again. Undo turns it on again.`;
   if (ticked) return `Click to take ${what} out of ${where}: it stays out until you tick it again. Undo puts it back.`;
   if (on && mark !== 'kept-off') return `Click to put ${what} in ${where}. Undo takes it out again.`;
@@ -126,12 +123,12 @@ function boxDoes(view: PluginsView, entry: MarketplaceView, plugin: string, tool
 }
 
 /**
- * A plugin's one switch (pluginrecord.ts): On (striped where it is kept out of a tool that takes it) or Off; for a plugin
+ * A plugin's one switch (pluginrecord.ts): On (striped where it is kept out of a tool that takes it or off in one) or Off; for a plugin
  * found in a tool with no entry here, Add in its place. A click joins the page's list (pluginstate.ts turnPlugin).
  */
 export function pluginSwitch(view: PluginsView, entry: MarketplaceView, plugin: PluginView, id: string) {
   const sw = entry.switches?.[plugin.name];
-  const found = foundIn(view, sw);
+  const found = foundIn(view, entry, plugin.name);
   const stopped = !view.canWrite ? view.reason ?? PREVIEW_ONLY : view.switchProblem;
   // Off while its click waits or runs, yet it keeps the focus (aria-disabled), so the keyboard stays on its row; a click is dropped.
   const busy = pluginBusy(entry.source, plugin.name), waits = busy ? { 'aria-disabled': 'true' } : {};
@@ -141,7 +138,7 @@ export function pluginSwitch(view: PluginsView, entry: MarketplaceView, plugin: 
       onclick: (event: Event) => { event.stopPropagation(); if (!busy) turnPlugin(entry, plugin.name, 'add'); } }, 'Add');
   }
   const words = switchWords(view, entry, plugin.name);
-  return toggle({ on: !!sw?.entry?.on, partial: switchPartial(view, sw), label: stopped ? `${words.slice(0, words.indexOf('.') + 1)} ${stopped}` : words, disabled: !!stopped, id, attrs: waits,
+  return toggle({ on: !!sw?.entry?.on, partial: switchPartial(view, entry, plugin.name), label: stopped ? `${words.slice(0, words.indexOf('.') + 1)} ${stopped}` : words, disabled: !!stopped, id, attrs: waits,
     onchange: on => { if (!busy) turnPlugin(entry, plugin.name, on ? 'on' : 'off'); } });
 }
 

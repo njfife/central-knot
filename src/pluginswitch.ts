@@ -55,13 +55,11 @@ export function standing(draft: PluginDraft, item: PluginItemAt): { now: boolean
 export const onNow = (item: PluginItemAt) => !item.install.off && !(ownSwitch(item) && itemOffNow(item.install, item));
 
 /**
- * Why this item can't be switched here, if it can't: its plugin is kept off there by the plugins record (InstalledPlugin `keptOff`),
- * or its own switch can't be written (switchHeld).
- * (A plugin whose marketplace the tool no longer lists is switched all the same: the tool still loads it, and has no other
- * marketplace of that name to mistake it for.)
+ * Why this item can't be switched here, if it can't: its own switch can't be written (switchHeld).
+ * (A plugin whose copy is off is turned back on through `turn` (`let-in`), as its box does; one whose marketplace the tool no
+ * longer lists is switched all the same: the tool still loads it, and has no other marketplace of that name to mistake it for.)
  */
 export function cantSwitch(item: PluginItemAt): string | undefined {
-  if (item.install.keptOff) return `${item.install.plugin} is off in ${names[item.tool]}, kept installed: Turn the plugin on, on its line in the opened row, turns it on again.`;
   if (!ownSwitch(item)) return undefined;
   return switchHeld(item.install, item);
 }

@@ -121,7 +121,7 @@ export function owedTo(entry: Pick<PluginEntry, 'on' | 'except'> | undefined, to
   const is: Owed = { wanted: !!entry && wantedIn(entry, tool), has: now.has, takes: typeof now.route !== 'object' };
   if (is.has === 'unknown' || !entry) return is;
   if (is.wanted) {
-    if (now.off && !now.stuck) return { ...is, act: 'plugin-on' };
+    if (now.off) return now.stuck ? { ...is, held: now.stuck } : { ...is, act: 'plugin-on' };
     if (is.has !== 'none') return is;
     if (typeof now.route === 'object') return { ...is, held: now.route.cannot };
     const owes = { ...is, act: now.route === 'whole' ? 'install' as const : 'install-items' as const };
