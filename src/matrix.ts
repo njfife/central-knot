@@ -169,9 +169,11 @@ function pluginLine(row: ItemRow | PluginRow, facts: LineFacts & { source?: stri
  */
 function resultLine(row: ItemRow | PluginRow, tool: Tool) {
   const said = resultOn(tool as HarnessId, { kind: partOfPage[kindOf(row)], name: nameOf(row) });
-  return said ? h('p.details-tool-result', { 'data-result': resultKey(said.aim), 'data-failed': String(said.failed) }, icon(said.failed ? 'triangle-alert' : 'check', 12, said.failed ? 'tone-warning' : 'tone-success'),
+  if (!said) return null;
+  const main = h('p.details-tool-result', { 'data-result': resultKey(said.aim), 'data-failed': String(said.failed) }, icon(said.failed ? 'triangle-alert' : 'check', 12, said.failed ? 'tone-warning' : 'tone-success'),
     h('span.details-tool-result-text', {}, [said.words, said.next].filter(Boolean).join(' ')), said.undo ? smallAction('Undo', elId('line-undo', row, tool), said.undo, '', selectOff() ?? !!acting()) : null,
-    closeButton(() => closeLineResult(said), { id: elId('line-close', row, tool), label: 'Close this result' })) : null;
+    closeButton(() => closeLineResult(said), { id: elId('line-close', row, tool), label: 'Close this result' }));
+  return said.profileLine ? h('div.details-tool-results', {}, main, profileSpan(said.profileLine)) : main;
 }
 
 /** A plugin's row: an item of a plugin installed whole, not the person's own (pluginrows.ts PluginRow). */
@@ -1187,12 +1189,17 @@ export function listResult(): HTMLElement[] {
   // With no problem line, Show all follows the sentence, for one the header cuts or whose reload sentences live under Show all.
   if (done && !lines.length) done.querySelector('.band-text')!.after(wholeToggle(state.outcome, 0, hasAdvice));
   const chips = !whole && advice ? reloadChips(advice, of) : null;
-  const profileLine = done && !whole ? state.outcome?.profileLine : undefined;
-  const profileAt = profileLine ? profileLine.lastIndexOf(' stopped being the ') : -1;
-  const profile = profileLine ? h('span.band-profile', { title: profileLine }, h('span.band-profile-name', {}, profileLine.slice(0, profileAt)), h('span.band-profile-rest', {}, profileLine.slice(profileAt))) : null;
+  const profile = profileSpan(done && !whole ? state.outcome?.profileLine : undefined);
   const problem = lines.length ? h(`div.band${chips || profile ? '.result-row2' : ''}`, { role: 'status' }, profile, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, of, hasAdvice), chips, done ? null : closeButton(close, { id: 'problems-dismiss' })) : null;
   const row2 = whole && advice ? reloadLines(advice) : problem ? null : profile ? h('div.result-row2.result-profile-row', {}, profile, chips) : chips;
   return [done, row2, problem].filter((band): band is HTMLElement => !!band);
+}
+
+/** The profile-left-use sentence for a result's second line: long names give way while the rest stays whole (style.css .band-profile). */
+export function profileSpan(line: string | undefined): HTMLElement | null {
+  if (!line) return null;
+  const at = line.lastIndexOf(' stopped being the ');
+  return h('span.band-profile', { title: line }, h('span.band-profile-name', {}, line.slice(0, at)), h('span.band-profile-rest', {}, line.slice(at)));
 }
 
 /**

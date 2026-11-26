@@ -1,6 +1,6 @@
 // The page's state and most pages' actions (MAP.md, "The app's shell and Settings"): the open home's view and each page's own
-// state (`state`), the page shown (showPage), what is said after a click (tell, announce; withProfileEnded is the one place that appends
-// words.ts profileLeftUse when an act ended every profile in use, called by tell and sayRun, via profilesBefore and profileplan.ts endedProfiles) and when a result goes by itself
+// state (`state`), the page shown (showPage), what is said after a click (tell, announce; profileEndedLine, via profilesBefore and
+// profileplan.ts endedProfiles, gives words.ts profileLeftUse when an act ended every profile in use, called by withProfileEnded and pluginstate.ts) and when a result goes by itself
 // (FADE_MS), the busy line (busy) and whether the page is acting (acting: busy, or a run of clicks: clicklist.ts); a click on an
 // item list sent to its kind's engine (carryOut, through kindPages), at once under busy (applyClick), one per kind as one
 // (applyByKind) or in its turn in the page's list (queueClick), its result kept for the page (lastResult), a run's said once
@@ -132,7 +132,7 @@ export const state = {
    * What the status bar says (announce): the newest message, whether it is for screen readers only, and its place in
    * the order messages were said, so the newest always wins.
    */
-  said: { text: '', quiet: false, seq: 0 } as { text: string; quiet: boolean; seq: number; link?: { label: string; run: () => void }; notices?: string[] },
+  said: { text: '', quiet: false, seq: 0 } as { text: string; quiet: boolean; seq: number; link?: { label: string; run: () => void }; notices?: string[]; shown?: string },
   /** What the last action did, said on the page it happened on until the next action or page (Outcome). */
   outcome: undefined as Outcome | undefined,
   /**
@@ -220,27 +220,33 @@ export const setPracticeNote = (open: boolean): void => writeFlag(PRACTICE_NOTE,
 /**
  * Says something in the status bar, kept in state (state.said) so a redraw paints the same thing. The newest message is
  * the one shown. A quiet announcement is for screen readers only: the page already shows the same thing (a band), or, for
- * one about sync notices (`notices`), will once each is seen (paintStatusMessage).
+ * one about sync notices (`notices`), will once each is seen (paintStatusMessage). When `shown` is given (pluginstate.ts
+ * sayResult, where the Library line already draws the ended-profile sentence), it must be a prefix of `text`: the bar
+ * shows and tooltips `shown`, while the rest of `text` stays visually hidden so screen readers still hear the whole string.
  */
-export function announce(text: string, quiet = false, link?: { label: string; run: () => void }, notices?: string[]) {
-  state.said = { text, quiet, seq: state.said.seq + 1, link, notices };
+export function announce(text: string, quiet = false, link?: { label: string; run: () => void }, notices?: string[], shown?: string) {
+  state.said = { text, quiet, seq: state.said.seq + 1, link, notices, shown };
   paintStatusMessage();
 }
 
-/** Profiles in use before an act began, with its home, so tell can say when the act ended all of them. */
+/** Profiles in use before an act began, with its home, so tell and pluginstate can say when the act ended all of them. */
 export interface ProfilesBefore { home: string; profiles: Profile[] }
 let actBefore: ProfilesBefore | undefined;
-/** Snapshots the open home and the profiles in use in it before an act starts (busy, and queueClick). */
-function profilesBefore(): ProfilesBefore | undefined {
+/** Snapshots the open home and the profiles in use in it before an act starts (busy, queueClick, pluginstate.ts). */
+export function profilesBefore(): ProfilesBefore | undefined {
   return state.home ? { home: state.home.home, profiles: inUseInHome(state.home) } : undefined;
+}
+/** Gives profileLeftUse when every profile in `before` (defaults to busy's `actBefore` when omitted/undefined) stopped being in use in `after` (same home), else undefined. */
+export function profileEndedLine(before: ProfilesBefore | undefined = actBefore, after: HomeView | undefined = state.home): string | undefined {
+  if (!before || !after || after.home !== before.home) return undefined;
+  const ended = endedProfiles(before.profiles, inUseInHome(after));
+  return ended.length ? profileLeftUse(ended.map(profile => profile.name)) : undefined;
 }
 /** Appends profileLeftUse when an act in the same home ended every profile that was in use before it. */
 function withProfileEnded(outcome: Outcome, { checkProfile = true, before = actBefore }: { checkProfile?: boolean; before?: ProfilesBefore } = {}): Outcome {
-  if (!checkProfile || !before || outcome.refused || outcome.profileLine || !state.home || state.home.home !== before.home) return outcome;
-  const ended = endedProfiles(before.profiles, inUseInHome(state.home));
-  if (!ended.length) return outcome;
-  const profileLine = profileLeftUse(ended.map(profile => profile.name));
-  return { ...outcome, text: [outcome.text, profileLine].filter(Boolean).join(' '), profileLine };
+  if (!checkProfile || outcome.refused || outcome.profileLine) return outcome;
+  const profileLine = profileEndedLine(before);
+  return profileLine ? { ...outcome, text: [outcome.text, profileLine].filter(Boolean).join(' '), profileLine } : outcome;
 }
 
 /**
@@ -289,17 +295,20 @@ function fadeNow(): void {
   if (fadeRun() || state.outcome !== outcome) rerender();
 }
 
-/** Paints the status bar's message from state.said, keeping its whole text as its tooltip. */
+/** Paints the status bar's message from state.said (`shown` when given, else `text`, with that visible string as its tooltip and any spoken suffix visually hidden). */
 export function paintStatusMessage() {
   const region = document.getElementById('announcement')!;
   const told = state.said;
   // The first sentence, then the rest, so a narrow bar can drop the rest whole rather than cut a word (style.css).
-  if (region.dataset.text !== told.text) {
+  const shown = told.shown ?? told.text;
+  if (region.dataset.text !== told.text || region.title !== shown) {
     region.dataset.text = told.text;
-    const [, first, rest] = /^(.+?[.!?])(\s.+)?$/s.exec(told.text) ?? [told.text, told.text, ''];
-    region.replaceChildren(...(told.text ? [h('span.said-first', {}, first), rest ? h('span.said-rest', {}, ` ${rest.trim()}`) : null].filter((part): part is HTMLElement => !!part) : []));
+    const [, first, rest] = /^(.+?[.!?])(\s.+)?$/s.exec(shown) ?? [shown, shown, ''];
+    const tail = told.shown !== undefined && told.text.startsWith(shown) ? told.text.slice(shown.length) : '';
+    const parts = [shown ? h('span.said-first', {}, first) : null, rest ? h('span.said-rest', {}, ` ${rest.trim()}`) : null, tail ? h('span.visually-hidden', {}, tail) : null];
+    region.replaceChildren(...parts.filter((part): part is HTMLElement => !!part));
   }
-  region.title = told.text;
+  region.title = shown;
   // A link that belongs to the message (the release notes after an update) goes with it.
   const link = document.getElementById('said-link');
   if (link) { link.hidden = !told.link || told.quiet; link.textContent = told.link?.label ?? ''; link.onclick = told.link?.run ?? null; }
@@ -310,7 +319,7 @@ export function paintStatusMessage() {
   region.classList.toggle('visually-hidden', quiet);
   // A narrow status bar shows a small mark instead of a message cut to a stub; its tooltip has the message (style.css).
   const mark = document.getElementById('message-mark');
-  if (mark) { mark.title = told.text; mark.hidden = !told.text || quiet; }
+  if (mark) { mark.title = shown; mark.hidden = !shown || quiet; }
 }
 
 /**
@@ -401,7 +410,7 @@ export async function busy(message: string, work: (page: Page) => Promise<void>)
   catch { announce(couldNotFinish()); }
   finally { actBefore = previousBefore; }
   // When the work said nothing since its "Reading…", what was said before comes back.
-  if (state.said.seq === working) announce(before.text, before.quiet, before.link, before.notices);
+  if (state.said.seq === working) announce(before.text, before.quiet, before.link, before.notices, before.shown);
   state.busy = undefined;
   showActing();
   rerender();

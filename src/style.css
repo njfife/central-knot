@@ -271,7 +271,7 @@ ul { list-style: none; }
 /* Profile-left-use sentence on folded Row 2 (matrix.ts listResult): long names give way, never the words. */
 .result-profile-row { display: flex; align-items: center; gap: 8px; height: 20px; min-width: 0; }
 .band-profile { flex: 0 1 auto; min-width: 0; max-width: 100%; display: inline-flex; align-items: baseline; padding-left: 20px; font-size: 12px; line-height: 16px; color: var(--ink); }
-.band-profile-name { flex: 0 1 auto; min-width: 3em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.band-profile-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .band-profile-rest { flex: none; white-space: pre; }
 .header-result:not(.result-whole) .result-row2:has(.band-profile) > .band-lines { flex: 4 1 0; min-width: 48px; }
 .header-result:not(.result-whole) .result-row2:has(.band-profile) > .result-reloads { flex: 1 0 58px; min-width: 0; }
@@ -1420,7 +1420,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .crumb-here { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .crumb-link { all: unset; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--ink-soft); white-space: nowrap; }
 .crumb-link:hover { color: var(--ink); text-decoration: underline; }
-.toolbar-result { flex: none; display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; font-size: 12.5px; color: var(--ink-soft); }
+.toolbar-result { flex: none; display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; font-size: 12px; line-height: 16px; color: var(--ink); }
 /* What the list did is said whole: it wraps where room runs out, on a line of its own when the bar has to (fitBars). */
 .toolbar-result-text { min-width: 0; overflow-wrap: anywhere; }
 .toolbar-result .band-dismiss { margin-left: 0; }
@@ -2335,6 +2335,8 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .details-tool-result { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 12px; color: var(--ink); }
 .details-tool-result > svg { flex: none; align-self: center; }
 .details-tool-result > .text-action { flex: none; }
+.details-tool-results { display: flex; flex-direction: column; gap: 2px; }
+.details-tool-results > .band-profile { padding-left: 18px; }
 .ov-switch-row > .ov-managed { justify-content: flex-start; }
 .ov-name-fit.ov-name-bare { padding: 0; }
 @container table (width < 840px) { .ov-row.ov-switch-row { column-gap: 8px; padding-right: 6px; } }

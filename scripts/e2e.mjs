@@ -1442,14 +1442,14 @@ const headerResultWords = a => a.run(`(() => {
 })()`);
 
 /** Checks that the header stays 48px and `sentence` (or its "stopped being..." words when `allowShortName`) is shown whole without Show all, with Undo and × inside the window. */
-const profileSentenceWhole = (a, sentence, { allowShortName = false } = {}) => a.run(`((sentence, allowShortName) => {
+const profileSentenceWhole = (a, sentence, { allowShortName = false, undoId = '#outcome-undo', dismissId = '#outcome-dismiss' } = {}) => a.run(`((sentence, allowShortName, undoId, dismissId) => {
   const header = document.querySelector('#header');
   const result = header?.querySelector('.header-result:not(.result-whole)');
-  const undo = header?.querySelector('#outcome-undo');
-  const dismiss = header?.querySelector('#outcome-dismiss');
-  if (!header || !result || !undo || !dismiss) return { ok: false, why: 'missing header/result/undo/dismiss' };
+  const undo = undoId ? header?.querySelector(undoId) : null;
+  const dismiss = header?.querySelector(dismissId);
+  if (!header || !result || (undoId && !undo) || !dismiss) return { ok: false, why: 'missing header/result/undo/dismiss' };
   const hRect = header.getBoundingClientRect(), rRect = result.getBoundingClientRect();
-  const uRect = undo.getBoundingClientRect(), dRect = dismiss.getBoundingClientRect();
+  const uRect = undo?.getBoundingClientRect(), dRect = dismiss.getBoundingClientRect();
   const el = result.querySelector('.band-profile');
   if (!el || el.textContent !== sentence) return { ok: false, why: 'sentence not in .band-profile', got: el?.textContent };
   const nameEl = el.querySelector('.band-profile-name'), restEl = el.querySelector('.band-profile-rest');
@@ -1461,12 +1461,12 @@ const profileSentenceWhole = (a, sentence, { allowShortName = false } = {}) => a
   const nameClipped = nRect.width <= 0 || nRect.bottom > hRect.bottom + 1 || nRect.right > restRect.left + 1 || (!allowShortName && nameShortened);
   const moreEl = result.querySelector('#outcome-reload-more');
   const moreOk = !moreEl || moreEl.hidden || (moreEl.getBoundingClientRect().height <= 20 && moreEl.scrollWidth <= moreEl.clientWidth + 1);
-  const controlsFit = uRect.width > 0 && uRect.right <= window.innerWidth + 1 && dRect.width > 0 && dRect.right <= window.innerWidth + 1
-    && uRect.bottom <= hRect.bottom + 1 && dRect.bottom <= hRect.bottom + 1;
+  const controlsFit = (!uRect || (uRect.width > 0 && uRect.right <= window.innerWidth + 1 && uRect.bottom <= hRect.bottom + 1))
+    && dRect.width > 0 && dRect.right <= window.innerWidth + 1 && dRect.bottom <= hRect.bottom + 1;
   return { ok: Math.round(hRect.height) === 48 && !restClipped && !nameClipped && moreOk && controlsFit && el.getAttribute('title') === sentence,
     headerH: Math.round(hRect.height), restClipped, nameClipped, nameShortened, moreOk, controlsFit, title: el.getAttribute('title'),
     nameScrollW: nameEl.scrollWidth, nameClientW: nameEl.clientWidth, restScrollW: restEl.scrollWidth, restClientW: restEl.clientWidth };
-})(${JSON.stringify(sentence)}, ${JSON.stringify(allowShortName)})`);
+})(${JSON.stringify(sentence)}, ${JSON.stringify(allowShortName)}, ${JSON.stringify(undoId)}, ${JSON.stringify(dismissId)})`);
 
 /**
  * What is wrong with the open copy question's layout (style.css "The copy question"); empty when it is as `shape` says:
@@ -17036,7 +17036,7 @@ async function profilePluginsFlow() {
   mkdirSync(join(tools, '.local/bin'), { recursive: true });
   writeFileSync(join(tools, '.local/bin/codex'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli 0.142.3" && exit 0\nexit 9\n', { mode: 0o755 });
   claudeCli(tools);
-  writeFileSync(join(tools, '.local/bin/copilot'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.107." && exit 0\nexec ${JSON.stringify(process.execPath)} -e 'const fs=require("fs"),p=require("path"),[a,b,c]=process.argv.slice(1);if(a==="skill"&&(b==="enable"||b==="disable")&&c){const f=p.join(process.env.HOME,".copilot/settings.json"),j=fs.existsSync(f)?JSON.parse(fs.readFileSync(f,"utf8")):{};const l=(Array.isArray(j.disabledSkills)?j.disabledSkills:[]).filter(x=>x!==c);if(b==="disable")l.push(c);if(l.length)j.disabledSkills=l;else delete j.disabledSkills;fs.writeFileSync(f,JSON.stringify(j,null,2)+"\\n");process.exit(0);}process.exit(9);' "$@"\n`, { mode: 0o755 });
+  writeFileSync(join(tools, '.local/bin/copilot'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.107." && exit 0\nexec ${JSON.stringify(process.execPath)} -e 'const fs=require("fs"),p=require("path"),[a,b,c]=process.argv.slice(1);const f=p.join(process.env.HOME,".copilot/settings.json"),j=fs.existsSync(f)?JSON.parse(fs.readFileSync(f,"utf8")):{};if(a==="skill"&&(b==="enable"||b==="disable")&&c){const l=(Array.isArray(j.disabledSkills)?j.disabledSkills:[]).filter(x=>x!==c);if(b==="disable")l.push(c);if(l.length)j.disabledSkills=l;else delete j.disabledSkills;fs.writeFileSync(f,JSON.stringify(j,null,2)+"\\n");process.exit(0);}if(a==="plugin"&&(b==="install"||b==="uninstall")&&c){j.enabledPlugins={...j.enabledPlugins,[c]:b==="install"};fs.writeFileSync(f,JSON.stringify(j,null,2)+"\\n");process.exit(0);}process.exit(9);' "$@"\n`, { mode: 0o755 });
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
   const claudeSettings = () => readNow(join(home, '.claude/settings.json')), piTriage = () => (existsSync(join(home, '.pi/agent/skills/triage')) ? tree(join(home, '.pi/agent/skills/triage')) : undefined);
@@ -17160,6 +17160,148 @@ async function profilePluginsFlow() {
   same('undoing the plugin item’s tool switch restores Work and Codex’s config byte for byte with no profile sentence',
     [readNow(config), (await a.text('#status-profile'))?.trim(), /stopped being the profile/.test(await headerResultWords(a))],
     [codexBefore, 'Work', false]);
+
+  // Plugin acts ending Work say "Work stopped being the profile in use." on Row 2 of #plugins-result (or under a Library plugin line) and in the spoken announcement.
+  const spoken = () => a.run(`document.querySelector('#announcement')?.dataset.text ?? ''`);
+  const pluginProfile = () => a.run(`document.querySelector('#header .band-profile')?.textContent ?? ''`);
+  const waitEnabled = async sel => { for (let tries = 0; tries < 80 && !(await a.exists(`${sel}:not([disabled])`)); tries++) await wait(100); };
+  await a.click('#nav-plugins');
+  for (let tries = 0; tries < 50 && !(await a.exists('#pbox-0-issue-tracker-codex-cli') || await a.exists('#popen-0-issue-tracker')); tries++) await wait(100);
+  if (!(await a.exists('#pbox-0-issue-tracker-codex-cli'))) await a.click('#popen-0-issue-tracker');
+  await waitEnabled('#pbox-0-issue-tracker-codex-cli');
+  await a.click('#pbox-0-issue-tracker-codex-cli');
+  await done();
+  same('unticking Codex’s box ends Work: #plugins-result row 2 and spoken text say Work stopped being the profile in use',
+    [(await a.text('#status-profile'))?.trim(), await a.exists('#plugins-result'), await pluginProfile(), (await spoken()).includes('Work stopped being the profile in use.')],
+    ['No profile', true, 'Work stopped being the profile in use.', true]);
+  same('plugins result line 1 and profile line match the item list’s 12px ink with no 3em name gap',
+    await a.run(`(() => {
+      const r = getComputedStyle(document.querySelector('#plugins-result'));
+      const p = getComputedStyle(document.querySelector('#header .band-profile'));
+      const n = getComputedStyle(document.querySelector('#header .band-profile-name'));
+      return [r.fontSize, p.fontSize, r.color === p.color, n.minWidth];
+    })()`),
+    ['12px', '12px', true, '0px']);
+  for (const [width, height] of [SMALLEST, [1316, 819]]) {
+    await sizeTo(a, width, height);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    const whole = await profileSentenceWhole(a, 'Work stopped being the profile in use.', { undoId: '#plugins-undo', dismissId: '#report-dismiss' });
+    check(`unticking Codex’s box shows the profile sentence whole at ${width} with sidebar open, keeping 48px header`, whole.ok, whole);
+  }
+  await fullSize(a);
+  await a.click('#plugins-undo');
+  await done();
+  same('its Undo restores Work with no profile sentence',
+    [(await a.text('#status-profile'))?.trim(), await pluginProfile(), /stopped being the profile/.test(await spoken())],
+    ['Work', '', false]);
+  // Tick Codex's box while Work is out of use (brings Work in: says nothing), then plain Undo ends Work and still draws #plugins-result.
+  await waitEnabled('#pbox-0-issue-tracker-codex-cli');
+  await a.click('#pbox-0-issue-tracker-codex-cli');
+  await done();
+  await a.click('#report-dismiss');
+  await waitEnabled('#pbox-0-issue-tracker-codex-cli');
+  await a.click('#pbox-0-issue-tracker-codex-cli');
+  await done();
+  same('ticking Codex’s box brings Work into use with no profile sentence',
+    [(await a.text('#status-profile'))?.trim(), await pluginProfile(), /stopped being the profile/.test(await spoken())],
+    ['Work', '', false]);
+  await a.click('#plugins-undo');
+  await done();
+  same('plain Undo ending Work draws #plugins-result row 2 and speaks Work stopped being the profile in use',
+    [(await a.text('#status-profile'))?.trim(), await a.exists('#plugins-result'), await a.exists('#plugins-undo'), await pluginProfile(), (await spoken()).includes('Work stopped being the profile in use.')],
+    ['No profile', true, false, 'Work stopped being the profile in use.', true]);
+  for (const [width, height] of [SMALLEST, [1316, 819]]) {
+    await sizeTo(a, width, height);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    const whole = await profileSentenceWhole(a, 'Work stopped being the profile in use.', { undoId: null, dismissId: '#report-dismiss' });
+    check(`plain Undo ending Work shows the profile sentence whole at ${width} with sidebar open, keeping 48px header`, whole.ok, whole);
+  }
+  await fullSize(a);
+  // Restore Work, then untick and re-tick Codex's box in one run: Work stays in use and says nothing.
+  await waitEnabled('#pbox-0-issue-tracker-codex-cli');
+  await a.click('#pbox-0-issue-tracker-codex-cli');
+  await done();
+  await a.click('#report-dismiss');
+  await waitEnabled('#pbox-0-issue-tracker-codex-cli');
+  await a.click('#pbox-0-issue-tracker-codex-cli');
+  await done();
+  await waitEnabled('#pbox-0-issue-tracker-codex-cli');
+  await a.click('#pbox-0-issue-tracker-codex-cli');
+  await done();
+  same('unticking then re-ticking Codex’s box in one run leaves Work in use with no profile sentence',
+    [(await a.text('#status-profile'))?.trim(), await pluginProfile(), /stopped being the profile/.test(await spoken())],
+    ['Work', '', false]);
+  // A skill's switch under the plugin ending Work says so on #plugins-result row 2 and in spoken text; its Undo restores Work with no sentence.
+  const triageSkillSwitch = '#pskill-0-issue-tracker-triage-codex-cli';
+  await waitEnabled(triageSkillSwitch);
+  await a.click(triageSkillSwitch);
+  await done();
+  same('turning triage off via its plugin-page switch ends Work and says so on #plugins-result row 2 and in spoken text',
+    [(await a.text('#status-profile'))?.trim(), await a.exists('#plugins-result'), await pluginProfile(), (await spoken()).includes('Work stopped being the profile in use.')],
+    ['No profile', true, 'Work stopped being the profile in use.', true]);
+  await a.click('#plugins-undo');
+  await done();
+  same('its Undo restores Work with no profile sentence',
+    [(await a.text('#status-profile'))?.trim(), await pluginProfile(), /stopped being the profile/.test(await spoken())],
+    ['Work', '', false]);
+  // One successful click leaving Work in use says nothing: install issue-tracker in Copilot CLI while Work already ticks triage & issues.
+  const snapProfiles = readNow(join(home, '.central-knot/profiles.json')), snapPlugins = readNow(join(home, '.central-knot/plugins.json'));
+  mkdirSync(join(home, '.copilot'), { recursive: true });
+  writeFileSync(join(home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'directory', path: market } } } }));
+  await a.click('#header-refresh');
+  await waitEnabled('#pbox-0-issue-tracker-copilot-cli');
+  await a.click('#pbox-0-issue-tracker-copilot-cli');
+  await done();
+  same('one successful click leaving Work in use says nothing about any profile',
+    [(await a.text('#status-profile'))?.trim(), await a.exists('#plugins-result'), await pluginProfile(), /stopped being the profile/.test(await spoken())],
+    ['Work', true, '', false]);
+  // Remove on the Library's plugin line ending Work: live Copilot CLI issue-tracker with an agent beside another plugin sharing MCP server "issues".
+  const agentMd = '---\nname: triage-lead\ndescription: Leads triage.\n---\n\nLead triage.\n';
+  const marketAgent = join(plugin, 'agents/triage-lead.md'), claudeAgent = join(home, '.claude/plugins/cache/ck-test-market/issue-tracker/2.0.0/agents/triage-lead.md');
+  for (const dest of [marketAgent, claudeAgent]) { mkdirSync(dirname(dest), { recursive: true }); writeFileSync(dest, agentMd); }
+  const otherCopy = join(home, '.copilot/installed-plugins/ck-test-market/other-tracker');
+  mkdirSync(otherCopy, { recursive: true });
+  writeFileSync(join(otherCopy, '.mcp.json'), servers);
+  writeFileSync(join(home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'other-tracker', marketplace: 'ck-test-market', version: '1.0.0', cache_path: otherCopy, enabled: true }] }));
+  writeFileSync(join(home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'directory', path: market } } }, enabledPlugins: { 'issue-tracker@ck-test-market': true } }));
+  const agentId = 'plugin:agent:issue-tracker@ck-test-market/triage-lead';
+  await a.click('#nav-profiles');
+  await a.click('#header-refresh');
+  await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Work')).click()`);
+  await a.settle();
+  await a.click(byId(`pf-${agentId}`));
+  await done();
+  same('with live Copilot CLI issue-tracker and triage-lead ticked, Work is in use', (await a.text('#status-profile'))?.trim(), 'Work');
+  const leadKey = 'issue-tracker@ck-test-market/triage-lead';
+  await openKind(a, 'agents');
+  for (let tries = 0; tries < 60 && !(await a.exists(byId(rowPart('open', 'agents', leadKey)))); tries++) await wait(100);
+  await a.click(byId(rowPart('open', 'agents', leadKey)));
+  const removeBtn = byId(rowPart('line', 'agents', leadKey, 'copilot-cli'));
+  await waitEnabled(removeBtn);
+  await a.click(removeBtn);
+  await done();
+  for (let tries = 0; tries < 60 && !(await a.exists('[data-result="copilot-cli:agent:triage-lead"]')); tries++) await wait(100);
+  const lineProfile = () => a.run(`document.querySelector('[data-result="copilot-cli:agent:triage-lead"]')?.parentElement?.querySelector('.band-profile')?.textContent ?? ''`);
+  const lineStatusCheck = await a.run(`(() => {
+    const el = document.querySelector('#announcement');
+    const visible = [...el.children].filter(k => !k.classList.contains('visually-hidden')).map(k => k.textContent).join('');
+    return [visible.startsWith('Removed issue-tracker from Copilot CLI.'), /stopped being the profile/.test(visible), /stopped being the profile/.test(el.title), (el.textContent ?? '').includes('Work stopped being the profile in use.')];
+  })()`);
+  same('Remove on the Library’s plugin line ends Work: profile line draws under the line’s result, spoken text carries the whole result, and status bar keeps prior wording',
+    [(await a.text('#status-profile'))?.trim(), await lineProfile(), (await spoken()).includes('Work stopped being the profile in use.'), ...lineStatusCheck],
+    ['No profile', 'Work stopped being the profile in use.', true, true, false, false, true]);
+  await a.click(byId(rowPart('line-undo', 'agents', leadKey, 'copilot-cli')));
+  await done();
+  same('its line Undo restores Work with no profile sentence',
+    [(await a.text('#status-profile'))?.trim(), await lineProfile(), /stopped being the profile/.test(await spoken())],
+    ['Work', '', false]);
+  // Clean up temporary live Copilot CLI + agent files so what follows starts from the exact same home state.
+  rmSync(join(home, '.copilot'), { recursive: true, force: true });
+  rmSync(dirname(marketAgent), { recursive: true, force: true });
+  rmSync(dirname(claudeAgent), { recursive: true, force: true });
+  writeFileSync(join(home, '.central-knot/profiles.json'), snapProfiles);
+  writeFileSync(join(home, '.central-knot/plugins.json'), snapPlugins);
+  writeFileSync(config, codexBefore);
 
   // The whole plugin off in Codex: a switch can't turn its items on there, so the rows say so, with the way to its page.
   writeFileSync(config, readNow(config).replace('enabled = true', 'enabled = false'));
