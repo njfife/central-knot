@@ -15095,7 +15095,7 @@ async function hookRunFlow() {
   }));
   mkdirSync(join(market, 'plugins/off-plugin/hooks'), { recursive: true });
   writeFileSync(join(market, 'plugins/off-plugin/hooks/hooks.json'), JSON.stringify({
-    hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo "Off plugin hook"' }] }] },
+    hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: 'echo "Off plugin hook"' }] }] },
   }));
   const putScript = (rel, body) => {
     const file = join(home, rel);
