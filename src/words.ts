@@ -149,12 +149,11 @@ export const throughPlugin = (tool: HarnessId, given: { plugin: string; version?
 export const HOOK_SOURCE_UNREADABLE = 'This file couldn’t be read.';
 
 /**
- * Says that profiles stop (before an act: matrix.ts unusedBand) or stopped (after an act: app.ts withProfileEnded)
- * being in use: "Everyday stopped being the profile in use.", or for several "Everyday and Focus stopped being the profiles in use.".
+ * Says that profiles stopped being in use (after an act: app.ts withProfileEnded):
+ * "Everyday stopped being the profile in use.", or for several "Everyday and Focus stopped being the profiles in use.".
  */
-export function profileLeftUse(names: readonly string[], tense: 'stops' | 'stopped' = 'stopped'): string {
+export function profileLeftUse(names: readonly string[]): string {
   if (!names.length) return '';
-  const verb = tense === 'stops' ? (names.length === 1 ? 'stops' : 'stop') : 'stopped';
-  return `${andList([...names])} ${verb} being the ${names.length === 1 ? 'profile' : 'profiles'} in use.`;
+  return `${andList([...names])} stopped being the ${names.length === 1 ? 'profile' : 'profiles'} in use.`;
 }
 

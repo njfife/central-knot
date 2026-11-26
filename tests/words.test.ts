@@ -31,11 +31,9 @@ test('many names in a sentence: four in full, then the first three and how many 
   assert.deepEqual([fewNames(names(4)), fewNames(names(40))], ['item1, item2, item3 and item4', 'item1, item2, item3 and 37 more']);
 });
 
-test('a profile leaving use: one home for before the act and after it, singular and plural', () => {
+test('a profile leaving use: singular and plural', () => {
   assert.equal(profileLeftUse([]), '');
   assert.equal(profileLeftUse(['Everyday']), 'Everyday stopped being the profile in use.');
   assert.equal(profileLeftUse(['Everyday', 'Focus']), 'Everyday and Focus stopped being the profiles in use.');
   assert.equal(profileLeftUse(['Everyday', 'Focus', 'Incident']), 'Everyday, Focus and Incident stopped being the profiles in use.');
-  assert.equal(profileLeftUse(['Everyday'], 'stops'), 'Everyday stops being the profile in use.');
-  assert.equal(profileLeftUse(['Everyday', 'Focus'], 'stops'), 'Everyday and Focus stop being the profiles in use.');
 });
