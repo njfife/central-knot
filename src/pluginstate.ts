@@ -53,8 +53,8 @@ export const ACTIVITIES: Record<MarketActivity, { label: string; band: string }>
   listing: { label: 'Listing the marketplace…', band: 'Listing the marketplace in the tool’s own plugin list… Nothing is installed by this.' },
 };
 
-/** `marketName`: the marketplace to open when `source` is spelled as a tool recorded it, not as the page lists it (a plugin item's link). */
-const startNav = (): { source?: string; tab: MarketTab; plugin?: string; find: string; category?: string; marketName?: string } => ({ source: undefined, tab: 'plugins', plugin: undefined, find: '', category: undefined });
+/** `marketName`: the marketplace to open when `source` is spelled as a tool recorded it, not as the page lists it (a plugin item's link); `hookTool`: tool selected for running hooks on the plugin's page. */
+const startNav = (): { source?: string; tab: MarketTab; plugin?: string; find: string; category?: string; marketName?: string; hookTool?: HarnessId } => ({ source: undefined, tab: 'plugins', plugin: undefined, find: '', category: undefined });
 
 export const market = {
   /** Marketplaces and what each tool has installed: read when the page opens or the home changes (pagedata.ts). */
@@ -237,7 +237,8 @@ function settleNav(): void {
 export function browse(patch: Partial<typeof market.nav>): void {
   if ('source' in patch || 'tab' in patch || 'plugin' in patch) noteMove();
   const base = 'source' in patch && patch.source !== current()?.entry.source ? startNav() : market.nav;
-  market.nav = { ...base, ...patch };
+  const resetTool = 'plugin' in patch && patch.plugin !== market.nav.plugin && !('hookTool' in patch);
+  market.nav = { ...base, ...patch, ...(resetTool ? { hookTool: undefined } : {}) };
   if (app.page !== 'plugins') { showPage('plugins'); return; }
   clearNotice();
   readShown();

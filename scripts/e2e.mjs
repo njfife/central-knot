@@ -84,15 +84,27 @@ function keepFresh(path) {
   const timer = setInterval(() => { const now = new Date(); try { utimesSync(path, now, now); } catch { /* gone: the check that needed it says so */ } }, 100);
   return () => clearInterval(timer);
 }
+/**
+ * Lists `directory` file by file (links, folders, modes and hashes). An entry gone between its folder's listing and its own look
+ * is left out (the app renames its temporary files away while a listing runs); every other error, and a missing root, still throw.
+ */
 function tree(directory, options = {}) {
   const out = {};
-  const visit = current => {
-    for (const name of readdirSync(current).sort()) {
+  const visit = (current, names = readdirSync(current)) => {
+    for (const name of names.sort()) {
       if (name === '.git' && !options.git) continue;
-      const path = join(current, name), info = lstatSync(path), key = relative(directory, path);
-      if (info.isSymbolicLink()) out[key] = `link:${readlinkSync(path)}`;
-      else if (info.isDirectory()) { out[key] = 'dir'; visit(path); }
-      else out[key] = `${info.mode & 0o777}:${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
+      const path = join(current, name), key = relative(directory, path);
+      let kids;
+      try {
+        const info = lstatSync(path);
+        if (info.isSymbolicLink()) out[key] = `link:${readlinkSync(path)}`;
+        else if (info.isDirectory()) { kids = readdirSync(path); out[key] = 'dir'; }
+        else out[key] = `${info.mode & 0o777}:${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+        continue;
+      }
+      if (kids) visit(path, kids);
     }
   };
   visit(directory);
@@ -11523,12 +11535,28 @@ async function keepSessionCostsFlow() {
     same('still Collecting… until FIFO is released', await a.exists('#sessions-collecting'), true);
 
     // Release FIFO so sweep finishes; Stop keeping sits in Start's place, status bar still says keeping, and receipts landed.
+    /** Waits for any periodic 1500 ms sweep's Collecting… to end, then runs `read` in the same page turn so the next tick cannot land mid-read. */
+    const whenIdle = (read, ms = 7500) => a.run(`new Promise(done => {
+      const end = Date.now() + ${ms};
+      const tick = () => {
+        const collecting = !!document.querySelector('#sessions-collecting');
+        if (collecting && Date.now() < end) return setTimeout(tick, 25);
+        done((${read})(collecting));
+      };
+      tick();
+    })`);
     same('FIFO had an active sweep reader waiting', await pipe1.release(), true);
     pipe1.clean();
-    for (let tries = 0; tries < 150 && await a.exists('#sessions-collecting'); tries++) await wait(50);
     await a.settle();
+    const afterFirst = await whenIdle(collecting => ({
+      start: !!document.querySelector('#sessions-keep-start'),
+      collecting,
+      stop: document.querySelector('#sessions-keep-stop')?.textContent ?? null,
+      result: !!document.querySelector('#sessions-keep-result'),
+      announcement: document.querySelector('#announcement')?.textContent ?? null,
+    }));
     same('after the first sweep: Stop keeping sits in Start’s place and status bar says keeping',
-      [await a.exists('#sessions-keep-start'), await a.exists('#sessions-collecting'), await a.text('#sessions-keep-stop'), await a.exists('#sessions-keep-result'), await a.text('#announcement')],
+      [afterFirst.start, afterFirst.collecting, afterFirst.stop, afterFirst.result, afterFirst.announcement],
       [false, false, 'Stop keeping', false, 'Keeping session costs for this home.']);
     const saved1 = jsonOrNothing(settingsPath)?.keepSessionCosts ?? {};
     same('consent saved on for Home A alone', [saved1[canonA], Object.hasOwn(saved1, canonB)], [true, false]);
@@ -11540,9 +11568,14 @@ async function keepSessionCostsFlow() {
       [topsCollecting, topsAfter], [topsBefore, topsBefore]);
     await sizeTo(a, 860, 560);
     if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
-    same('at 860×560 with sidebar open: Stop keeping fits on the same line as Today | Yesterday | 7 days',
-      await a.run(`(() => { const stop = document.querySelector('#sessions-keep-stop').getBoundingClientRect(), seg = document.querySelector('#sessions-day-week').getBoundingClientRect();
-        return Math.abs(stop.top - seg.top) < 6 && stop.left >= seg.right; })()`), true);
+    await a.settle();
+    const fit = await whenIdle(collecting => {
+      const stop = document.querySelector('#sessions-keep-stop'), seg = document.querySelector('#sessions-day-week');
+      if (!stop || !seg) return { ok: false, collecting, missing: ['#sessions-keep-stop', '#sessions-day-week'].filter(id => !document.querySelector(id)) };
+      const s = stop.getBoundingClientRect(), w = seg.getBoundingClientRect();
+      return { ok: Math.abs(s.top - w.top) < 6 && s.left >= w.right, stop: { top: s.top, left: s.left }, seg: { top: w.top, right: w.right } };
+    }, 5000);
+    check('at 860×560 with sidebar open: Stop keeping fits on the same line as Today | Yesterday | 7 days', fit.ok, fit);
     await fullSize(a);
 
     // Fix 2: Refresh started during Collecting… whose reply lands after the sweep ends must not restore Collecting….
@@ -15170,6 +15203,27 @@ async function hookRunFlow() {
   mkdirSync(data, { recursive: true });
   toolClis(home);
   writeMarket(market, marketName);
+  // Give release-helper a different marketplace version and hook command/output than the installed copy, add a marketplace-only
+  // hook on document-tools, and add an installed-but-off plugin (off-plugin) so Step 24a checks every plugin-page rule.
+  const marketCatalogPath = join(market, '.claude-plugin/marketplace.json');
+  const marketCatalog = JSON.parse(readFileSync(marketCatalogPath, 'utf8'));
+  marketCatalog.plugins = marketCatalog.plugins.map(p => (p.name === 'release-helper' ? { ...p, version: '0.5.0' } : p));
+  marketCatalog.plugins.push({ name: 'off-plugin', source: './plugins/off-plugin', version: '1.0.0', category: 'development', description: 'Plugin turned off in settings.' });
+  writeFileSync(marketCatalogPath, JSON.stringify(marketCatalog, null, 2));
+  writeFileSync(join(market, 'plugins/release-helper/hooks/hooks.json'), JSON.stringify({
+    hooks: {
+      UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'echo "Marketplace only text"' }] }],
+      PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo checked' }] }],
+    },
+  }));
+  mkdirSync(join(market, 'plugins/document-tools/hooks'), { recursive: true });
+  writeFileSync(join(market, 'plugins/document-tools/hooks/hooks.json'), JSON.stringify({
+    hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo "Uninstalled marketplace hook"' }] }] },
+  }));
+  mkdirSync(join(market, 'plugins/off-plugin/hooks'), { recursive: true });
+  writeFileSync(join(market, 'plugins/off-plugin/hooks/hooks.json'), JSON.stringify({
+    hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: 'echo "Off plugin hook"' }] }] },
+  }));
   const putScript = (rel, body) => {
     const file = join(home, rel);
     mkdirSync(dirname(file), { recursive: true });
@@ -15193,6 +15247,7 @@ async function hookRunFlow() {
   putScript('bin/copilot-plain.sh', '#!/bin/sh\necho "plain text ignored by copilot"\n');
   const claudeSettings = join(home, '.claude/settings.json');
   const initialClaudeJson = JSON.stringify({
+    enabledPlugins: { [`off-plugin@${marketName}`]: false },
     pluginConfigs: { [`release-helper@${marketName}`]: { options: { team_note: 'Tuesday-releases' } } },
     hooks: {
       SessionStart: [{
@@ -15229,9 +15284,13 @@ async function hookRunFlow() {
   writeClaudeInstall(home, marketName, 'release-helper', '0.4.1', {
     '.claude-plugin/plugin.json': JSON.stringify({ name: 'release-helper', version: '0.4.1', userConfig: { team_note: { description: 'Release note' } } }),
     'hooks/hooks.json': JSON.stringify({ hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: '${CLAUDE_PLUGIN_ROOT}/hooks/hello.sh' }] }] } }),
-    'hooks/hello.sh': `#!/bin/sh\necho ran >> ${JSON.stringify(pluginMarker)}\nprintf 'root=%s\\ndata=%s\\nnote=%s\\n' "$CLAUDE_PLUGIN_ROOT" "$CLAUDE_PLUGIN_DATA" "$CLAUDE_PLUGIN_OPTION_TEAM_NOTE"\n`,
+    'hooks/hello.sh': `#!/bin/sh\necho ran >> ${JSON.stringify(pluginMarker)}\n[ -f "$CLAUDE_PLUGIN_ROOT/hooks/slow" ] && sleep 2.5\nprintf 'Releases ship on Tuesdays. Run smoke checks before tagging.\\nroot=%s\\ndata=%s\\nnote=%s\\n' "$CLAUDE_PLUGIN_ROOT" "$CLAUDE_PLUGIN_DATA" "$CLAUDE_PLUGIN_OPTION_TEAM_NOTE"\n`,
   });
   chmodSync(join(claudePluginRoot, 'hooks/hello.sh'), 0o755);
+  writeClaudeInstall(home, marketName, 'off-plugin', '1.0.0', {
+    '.claude-plugin/plugin.json': JSON.stringify({ name: 'off-plugin', version: '1.0.0' }),
+    'hooks/hooks.json': JSON.stringify({ hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: 'echo "Off plugin hook"' }] }] } }),
+  });
   writeFileSync(join(home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ [marketName]: { source: { source: 'git', url: market } } }));
   mkdirSync(join(home, '.codex'), { recursive: true });
   writeFileSync(join(home, '.codex/AGENTS.md'), '# Codex rules\n');
@@ -15243,7 +15302,7 @@ async function hookRunFlow() {
   }));
   writeFileSync(join(codexPluginRoot, 'hooks/codex-hello.sh'), '#!/bin/sh\nprintf "codex-root=%s\\ncodex-data=%s\\n" "$PLUGIN_ROOT" "$PLUGIN_DATA"\n', { mode: 0o755 });
   const codexConfig = join(home, '.codex/config.toml');
-  writeFileSync(codexConfig, `[features]\ncodex_hooks = false\n\n[plugins."release-helper@${marketName}"]\nenabled = true\n\n[[hooks.SessionStart]]\nmatcher = "startup"\n\n[[hooks.SessionStart.hooks]]\ntype = "command"\ncommand = "~/bin/codex-hook.sh"\n`);
+  writeFileSync(codexConfig, `[features]\ncodex_hooks = false\n\n[marketplaces.${marketName}]\nsource = ${JSON.stringify(market)}\n\n[plugins."release-helper@${marketName}"]\nenabled = true\n\n[[hooks.SessionStart]]\nmatcher = "startup"\n\n[[hooks.SessionStart.hooks]]\ntype = "command"\ncommand = "~/bin/codex-hook.sh"\n`);
   mkdirSync(join(home, '.copilot/hooks'), { recursive: true });
   writeFileSync(join(home, '.copilot/hooks/prompt-only.json'), JSON.stringify({ version: 1, hooks: { userPromptSubmitted: [{ type: 'command', bash: './prompt-only.sh' }] } }));
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'actual' }, closeExplained: true }));
@@ -15293,10 +15352,12 @@ async function hookRunFlow() {
   await redrawUnder(a, '#session-claude-cli .session-title');
   same('nothing ran on opening Instructions, Refresh, or a redraw landing', [markerCount(), existsSync(pluginMarker)], [0, false]);
 
-  // Check 3: standing line on runnable strips, none on non-runnable; Copilot prompt-only note; Codex T2.28 note; T1.23 once & <= 30 words.
+  // Check 3: single standing line on runnable strips, none on non-runnable; Copilot prompt-only note; Codex T2.28 note; T1.23 once & <= 30 words with plugin sentence.
+  const runWarn = 'Run it runs the command for real. It may change your files.';
+  const helpCardText = 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.';
   same('standing warning is on Claude Code and Codex strips and absent on Copilot CLI prompt-only strip',
     [await a.text('#session-claude-cli .session-run-warn'), await a.text('#session-codex-cli .session-run-warn'), await a.text('#session-copilot-cli .session-run-warn')],
-    ['Run it runs the command for real. It may change your files.', 'Run it runs the command for real. It may change your files.', null]);
+    [runWarn, runWarn, null]);
   same('Codex runnable strip and Copilot CLI prompt-only strip show T2.28 lines in place of old notes',
     [await a.text('#session-codex-cli .session-note'), await a.text('#session-copilot-cli .session-note'), await a.run(`document.querySelectorAll('#session-copilot-cli button[data-hook-run]').length`)],
     ['Codex: Run it runs a hook even if it isn’t trusted in /hooks.', 'Copilot CLI ignores what prompt hooks print.', 0]);
@@ -15306,8 +15367,7 @@ async function hookRunFlow() {
     return { count: marks.length, id: marks[0]?.id, card, words: card.trim().split(/\\s+/).length };
   })()`);
   check('T1.23 info mark appears once on the page with exact wording and <= 30 words',
-    helpInfo.count === 1 && helpInfo.id === 'session-hooks-info' && helpInfo.words <= 30
-    && helpInfo.card === 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.', helpInfo);
+    helpInfo.count === 1 && helpInfo.id === 'session-hooks-info' && helpInfo.words <= 30 && helpInfo.card === helpCardText, helpInfo);
   const pluginRow = await rowOf('session-claude-cli', 'hello.sh');
   const codexPluginRow = await rowOf('session-codex-cli', 'codex-hello.sh');
   same('installed plugin hook rows on Instructions have Run it and View source for Claude Code and Codex',
@@ -15552,7 +15612,7 @@ async function hookRunFlow() {
   check('Codex plugin hook also refuses when tool hooks are disabled',
     codexPluginRefused.includes('Not run: hooks are turned off in Codex’s settings ([features] codex_hooks = false).'), codexPluginRefused);
   await pictures('result-codex-refused', '#session-codex-cli');
-  writeFileSync(codexConfig, `[features]\nhooks = true\n\n[plugins."release-helper@${marketName}"]\nenabled = true\n\n[[hooks.SessionStart]]\nmatcher = "startup"\n\n[[hooks.SessionStart.hooks]]\ntype = "command"\ncommand = "~/bin/codex-hook.sh"\n`);
+  writeFileSync(codexConfig, `[features]\nhooks = true\n\n[marketplaces.${marketName}]\nsource = ${JSON.stringify(market)}\n\n[plugins."release-helper@${marketName}"]\nenabled = true\n\n[[hooks.SessionStart]]\nmatcher = "startup"\n\n[[hooks.SessionStart.hooks]]\ntype = "command"\ncommand = "~/bin/codex-hook.sh"\n`);
   const codexPluginRes = await runAndWait('session-codex-cli', 'codex-hello.sh');
   check('Codex installed plugin hook runs with PLUGIN_ROOT, PLUGIN_DATA, trust note and no data folder created',
     /^Would add run in ~, /.test(codexPluginRes) && codexPluginRes.includes('Codex adds it only once trusted in /hooks.')
@@ -15587,6 +15647,8 @@ async function hookRunFlow() {
   await waitFor(`!!document.querySelector('#session-copilot-cli button[data-hook-run]')`);
   const copilotPluginRow = await rowOf('session-copilot-cli', 'copilot-plugin-hook');
   same('Copilot CLI installed plugin hook keeps View source alone and no Run it', [!!copilotPluginRow?.srcId, copilotPluginRow?.runId], [true, null]);
+  same('Copilot CLI strip with runnable own hook and non-runnable plugin hook omits the plugin standing line',
+    await a.text('#session-copilot-cli .session-run-warn'), 'Run it runs the command for real. It may change your files.');
   const copRes = await runAndWait('session-copilot-cli', 'copilot-plain.sh');
   check('Copilot CLI plain stdout shows ignored sentence with quiet meta and Show all it printed fold',
     /^Copilot CLI would ignore this: no top-level additionalContext\. run in ~, /.test(copRes) && copRes.includes('Show all it printed'), copRes);
@@ -15609,26 +15671,38 @@ async function hookRunFlow() {
     Math.abs(awayAfter.codexTop - awayTop) <= 1 && awayAfter.rowOffTop, { awayTop, awayAfter });
   await fullSize(a);
 
-  // Check 6: late results dropped after leaving page (+ already running on quick return), after Refresh, and after home switch.
+  // Check 6: returning while still running keeps Running… + Stop; settling while off-page drops the late result; Refresh resets state (and clicking Run it shows already running).
   await a.click(byId(lateIds.runId));
   await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'Running…'`);
   await a.click('#nav-overview');
   await a.click('#nav-instructions');
   await waitFor(`!!document.getElementById(${JSON.stringify(lateIds.runId)})`);
-  const alreadyMsg = await runAndWait('session-claude-cli', 'slow-stop.sh');
-  check('returning while hook still runs in main shows Not run: + already running on Run it',
-    alreadyMsg.includes('Not run: this hook is already running.'), alreadyMsg);
+  same('returning while hook still runs keeps Running… and Stop',
+    await a.run(`(() => { const b = document.getElementById(${JSON.stringify(lateIds.runId)}); return [b?.textContent, !!b?.closest('.session-hook')?.querySelector('button[data-hook-stop]')]; })()`),
+    ['Running…', true]);
+  await a.click(`#session-claude-cli .session-hook:has(#${lateIds.runId}) button[data-hook-stop]`);
+  await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'Run it'`);
+  // Settling while away on Overview drops the late result.
+  await a.click(byId(lateIds.runId));
+  await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'Running…'`);
+  await a.click('#nav-overview');
   await wait(3300);
-  check('late result from before leaving page did not overwrite the returned page',
-    (await a.run(`document.getElementById(${JSON.stringify(lateIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`)).includes('Not run: this hook is already running.'));
+  await a.click('#nav-instructions');
+  await waitFor(`!!document.getElementById(${JSON.stringify(lateIds.runId)})`);
+  same('late result settled while off the page is dropped', await a.run(`document.querySelectorAll('.hook-run').length`), 0);
 
-  // Late result after Refresh is dropped.
+  // Refresh clears renderer state (clicking Run it while main still runs refuses as already running; abandoned run does not overwrite).
   await a.click(byId(lateIds.runId));
   await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'Running…'`);
   await a.click('#header-refresh');
   await steady();
+  await waitFor(`!!document.getElementById(${JSON.stringify(lateIds.runId)})`);
+  const alreadyMsg = await runAndWait('session-claude-cli', 'slow-stop.sh');
+  check('clicking Run it after Refresh while hook still runs in main shows Not run: + already running',
+    alreadyMsg.includes('Not run: this hook is already running.'), alreadyMsg);
   await wait(3300);
-  same('late result after Refresh is dropped', await a.run(`document.querySelectorAll('.hook-run').length`), 0);
+  check('abandoned run after Refresh did not overwrite the refusal',
+    (await a.run(`document.getElementById(${JSON.stringify(lateIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`)).includes('Not run: this hook is already running.'));
 
   // Late result after switching to Practice copy is dropped, and Practice copy has no Run it.
   await a.click(byId(lateIds.runId));
@@ -15658,19 +15732,195 @@ async function hookRunFlow() {
   await a.click('#header-refresh');
   await steady();
 
-  // Check 4: plugin page has no Run it.
+  // Step 24a: plugin's own page runs installed hooks for Claude Code and Codex (3 clicks from Overview).
+  const pluginMarkerCount = () => { const raw = readNow(pluginMarker).trim(); return raw ? raw.split('\n').filter(Boolean).length : 0; };
+  await a.click('#nav-overview');
+  await steady();
+  const pluginMarkerBefore = pluginMarkerCount();
+  // Click 1: Overview -> Instructions.
+  await a.click('#nav-instructions');
+  await waitFor(`!!document.querySelector('#session-claude-cli .session-group')`);
+  await steady();
+  // Click 2: Instructions (Claude Code) -> release-helper's own page.
   await a.run(`[...document.querySelectorAll('#session-claude-cli .session-group')].find(g => g.querySelector('.session-name')?.textContent === 'release-helper')?.querySelector('button')?.click()`);
   await waitFor(`document.querySelector('.crumb-here')?.textContent === 'release-helper'`);
-  await waitFor(`!!document.querySelector('.plugin-parts li.with-source button[data-hook-source]')`);
-  same('plugin page has View source and no Run it',
-    [await a.run(`document.querySelectorAll('.plugin-parts li.with-source button[data-hook-source]').length > 0`),
-      await a.run(`document.querySelectorAll('button[data-hook-run]').length`)], [true, 0]);
+  await waitFor(`!!document.querySelector('#plugin-session-hooks button[data-hook-run]')`);
+  await steady();
+  // Refresh and View source start nothing; standing warnings, differing version, As <tool>, installed command, and View source from installed copy.
+  await a.click('#header-refresh');
+  await steady();
+  await waitFor(`!!document.querySelector('#plugin-session-hooks button[data-hook-run]')`);
+  same('plugin page shows single standing warning, copy-note wording, and plugin sentence inside (?)',
+    [await a.text('#plugin-session-hooks .session-run-warn'), await a.text('#plugin-session-hooks .plugin-version-differs'),
+      await a.run(`document.getElementById('plugin-hooks-info-card')?.textContent ?? ''`)],
+    [runWarn, 'Runs Claude Code’s installed copy (0.4.1). The marketplace has 0.5.0.', helpCardText]);
+  same('arriving from Claude Code selects As Claude Code and lists both eligible tools',
+    await a.run(`(() => { const s = document.getElementById('plugin-hook-tool'); return [s?.value, [...(s?.options ?? [])].map(o => o.textContent)]; })()`),
+    ['claude-cli', ['As Claude Code', 'As Codex']]);
+  same('plugin page shows installed runnable row first, marketplace-only text row below with version tag and View source alone, and Other hooks View source alone',
+    await a.run(`(() => {
+      const rows = [...document.querySelectorAll('#plugin-session-hooks .session-hook')].map(r => [
+        r.querySelector('.session-command')?.textContent,
+        [...r.querySelectorAll('.session-when')].map(w => w.textContent),
+        !!r.querySelector('button[data-hook-run]'), !!r.querySelector('button[data-hook-source]'),
+      ]);
+      return [document.querySelector('#plugin-session-hooks .session-title')?.textContent, rows,
+        document.querySelectorAll('.plugin-parts li.with-source button[data-hook-run]').length,
+        document.querySelectorAll('.plugin-parts li.with-source button[data-hook-source]').length];
+    })()`),
+    ['Hooks that can add text (2)', [
+      ['${CLAUDE_PLUGIN_ROOT}/hooks/hello.sh', ['When a session starts'], true, true],
+      ['echo "Marketplace only text"', ['When you send a prompt', '0.5.0 only'], false, true],
+    ], 0, 1]);
+  await pictures('plugin-hooks-before', '#plugin-session-hooks', bothSizes);
+  await pictures('plugin-hooks-market-extra', '#plugin-session-hooks', [[860, 560, false]]);
+  // View source on row 1 reads installed copy; View source on row 2 reads marketplace copy; neither starts a run.
+  const pluginSrcIds = await a.run(`[...document.querySelectorAll('#plugin-session-hooks button[data-hook-source]')].map(b => b.id)`);
+  await a.click(byId(pluginSrcIds[0]));
+  await waitFor(`!!document.querySelector('#plugin-session-hooks .hook-source pre')`);
+  const pluginSrcText = await a.text('#plugin-session-hooks .hook-source');
+  check('View source on runnable row reads installed script and hooks.json without marketplace copy note',
+    pluginSrcText.includes('Releases ship on Tuesdays. Run smoke checks before tagging.') && !pluginSrcText.includes('Marketplace only text') && !pluginSrcText.includes('marketplace’s copy'), pluginSrcText);
+  await a.click(byId(pluginSrcIds[0]));
+  await a.click(byId(pluginSrcIds[1]));
+  await waitFor(`!!document.querySelector('#plugin-session-hooks .hook-source pre')`);
+  const marketExtraSrc = await a.text('#plugin-session-hooks .hook-source');
+  check('View source on marketplace-only text hook row reads marketplace hooks.json',
+    marketExtraSrc.includes('Marketplace only text') && marketExtraSrc.includes('marketplace’s copy'), marketExtraSrc);
+  await a.click(byId(pluginSrcIds[1]));
+  same('opening plugin page, Refresh and View source ran nothing', pluginMarkerCount(), pluginMarkerBefore);
+  // Click 3: Run it runs installed copy and shows text inline in place.
+  const pluginPageRes = await runAndWait('plugin-session-hooks', 'hello.sh');
+  check('Run it on plugin page shows installed hook text inline (not marketplace copy)',
+    /^Would add run in ~, /.test(pluginPageRes) && pluginPageRes.includes('Releases ship on Tuesdays. Run smoke checks before tagging.')
+    && !pluginPageRes.includes('Marketplace only text') && pluginMarkerCount() === pluginMarkerBefore + 1, pluginPageRes);
+  for (const [w, h] of [[860, 560], [1316, 820]]) {
+    await sizeTo(a, w, h);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    await a.run(`document.querySelector('#plugin-session-hooks')?.scrollIntoView({ block: 'start' })`);
+    await a.settle();
+    same(`plugin page hook result fits without horizontal overflow at ${w}×${h} with sidebar open`,
+      await a.run(`(() => { const sc = document.getElementById('plugins-scroll'); return sc.scrollWidth <= sc.clientWidth + 1; })()`), true);
+  }
+  await fullSize(a);
+  await pictures('plugin-hooks-result', '#plugin-session-hooks', bothSizes);
+  // Short list item 1: Run it as Claude Code, switch to As Codex and back before it ends -> Stop stays reachable and result lands in place.
+  const slowFlag = join(claudePluginRoot, 'hooks/slow');
+  writeFileSync(slowFlag, '1');
+  const claudePluginRunId = (await rowOf('plugin-session-hooks', 'hello.sh')).runId;
+  await a.click(byId(claudePluginRunId));
+  await waitFor(`document.getElementById(${JSON.stringify(claudePluginRunId)})?.textContent === 'Running…'`);
+  await a.run(`(() => { const s = document.getElementById('plugin-hook-tool'); s.value = 'codex-cli'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await waitFor(`document.querySelector('#plugin-session-hooks .session-command')?.textContent?.includes('codex-hello.sh')`);
+  same('while Claude Code hook runs, switching to As Codex shows Codex idle without Stop or Claude result',
+    await a.run(`(() => { const b = document.querySelector('#plugin-session-hooks button[data-hook-run]'); return [b?.textContent, document.querySelectorAll('#plugin-session-hooks button[data-hook-stop]').length, document.querySelectorAll('#plugin-session-hooks .hook-run').length]; })()`),
+    ['Run it', 0, 0]);
+  await a.run(`(() => { const s = document.getElementById('plugin-hook-tool'); s.value = 'claude-cli'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await waitFor(`document.querySelector('#plugin-session-hooks .session-command')?.textContent?.includes('hello.sh')`);
+  same('switching back to As Claude Code while still running keeps Running… and Stop reachable',
+    await a.run(`(() => { const b = document.getElementById(${JSON.stringify(claudePluginRunId)}); return [b?.textContent, !!b?.closest('.session-hook')?.querySelector('button[data-hook-stop]')]; })()`),
+    ['Running…', true]);
+  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(claudePluginRunId)}); return b && b.textContent === 'Run it' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`, 8000);
+  check('Claude Code hook result lands in place after switching back from As Codex',
+    (await a.text('#plugin-session-hooks .hook-run') ?? '').includes('Releases ship on Tuesdays. Run smoke checks before tagging.'));
+  rmSync(slowFlag, { force: true });
+  // Switch As <tool> to Codex and run Codex's installed hook.
+  await a.run(`(() => { const s = document.getElementById('plugin-hook-tool'); s.value = 'codex-cli'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await waitFor(`document.querySelector('#plugin-session-hooks .session-command')?.textContent?.includes('codex-hello.sh')`);
+  same('switching to As Codex shows Codex trust note and Codex installed hook',
+    [await a.text('#plugin-session-hooks .session-note'), await a.text('#plugin-session-hooks .session-command')],
+    ['Codex: Run it runs a hook even if it isn’t trusted in /hooks.', '${PLUGIN_ROOT}/hooks/codex-hello.sh']);
+  const codexPageRes = await runAndWait('plugin-session-hooks', 'codex-hello.sh');
+  check('Run it as Codex on plugin page runs Codex installed hook with trust note',
+    /^Would add run in ~, /.test(codexPageRes) && codexPageRes.includes(`codex-root=${codexPluginRoot}`)
+    && codexPageRes.includes('Codex adds it only once trusted in /hooks.'), codexPageRes);
+  // Arriving from Codex's strip on Instructions selects As Codex directly.
+  await a.click('#nav-instructions');
+  await waitFor(`!!document.querySelector('#session-codex-cli .session-group')`);
+  await a.run(`[...document.querySelectorAll('#session-codex-cli .session-group')].find(g => g.querySelector('.session-name')?.textContent === 'release-helper')?.querySelector('button')?.click()`);
+  await waitFor(`document.querySelector('.crumb-here')?.textContent === 'release-helper' && document.getElementById('plugin-hook-tool')?.value === 'codex-cli'`);
+  same('arriving from Codex selects As Codex', await a.run(`document.getElementById('plugin-hook-tool')?.value`), 'codex-cli');
+  // Marketplace-only plugin (document-tools) and off plugin (off-plugin) keep View source alone and explain why in actual home.
+  await a.click('#plugin-back');
+  await waitFor(`!!document.querySelector('#popen-0-document-tools')`);
+  await a.click('#popen-0-document-tools');
+  await waitFor(`document.querySelector('.crumb-here')?.textContent === 'document-tools' && !!document.querySelector('.plugin-parts li.with-source button[data-hook-source]')`);
+  same('marketplace-only plugin keeps View source alone and states why it cannot be run',
+    [await a.run(`document.querySelectorAll('.plugin-parts li.with-source button[data-hook-source]').length`),
+      await a.run(`document.querySelectorAll('button[data-hook-run]').length`),
+      await a.run(`document.querySelectorAll('.session-run-warn').length`),
+      await a.text('.plugin-group:has(.plugin-parts li.with-source) .plugin-group-note')],
+    [1, 0, 0, 'Not installed, so these can’t be run here.']);
+  await pictures('plugin-hooks-view-only', '.plugin-group:has(.plugin-parts li.with-source)', bothSizes);
+  await a.click('#plugin-back');
+  await waitFor(`!!document.querySelector('#popen-0-off-plugin')`);
+  await a.click('#popen-0-off-plugin');
+  await waitFor(`document.querySelector('.crumb-here')?.textContent === 'off-plugin' && !!document.querySelector('.plugin-parts li.with-source button[data-hook-source]')`);
+  same('off plugin keeps View source alone and states Off in Claude Code',
+    [await a.run(`document.querySelectorAll('.plugin-parts li.with-source button[data-hook-source]').length`),
+      await a.run(`document.querySelectorAll('button[data-hook-run]').length`),
+      await a.run(`document.querySelectorAll('.session-run-warn').length`),
+      await a.text('.plugin-group:has(.plugin-parts li.with-source) .plugin-group-note')],
+    [1, 0, 0, 'Off in Claude Code, so these can’t be run here.']);
+  // Non-actual home (Practice copy) on plugin page keeps View source alone and does not show the actual-home reason line.
+  await a.click('#home-fixture');
+  await steady();
+  await a.click('#nav-plugins');
+  await waitFor(`!!document.querySelector('#popen-0-release-helper')`);
+  await a.click('#popen-0-release-helper');
+  await waitFor(`document.querySelector('.crumb-here')?.textContent === 'release-helper' && !!document.querySelector('.plugin-parts li.with-source button[data-hook-source]')`);
+  same('Practice copy plugin page has View source alone and keeps sessionHooksAbout',
+    [await a.run(`document.querySelectorAll('button[data-hook-run]').length`),
+      await a.run(`document.querySelectorAll('.session-run-warn').length`),
+      (await a.text('.plugin-group:has(.plugin-parts li.with-source) .plugin-group-note') ?? '').includes('known only when they run')],
+    [0, 0, true]);
+  await a.click('#home-actual');
+  await steady();
+  // Missing CLI (app only, no binary) hides Run it for Codex, drops As <tool> on release-helper, and explains why on Codex's Instructions strip.
+  const codexBin = join(home, '.local/bin/codex');
+  const codexBinBody = readNow(codexBin);
+  const codexApp = join(home, 'Applications/ChatGPT.app');
+  rmSync(codexBin, { force: true });
+  mkdirSync(codexApp, { recursive: true });
+  await a.click('#header-refresh');
+  await steady();
+  await a.click('#nav-plugins');
+  await waitFor(`!!document.querySelector('#popen-0-release-helper')`);
+  await a.click('#popen-0-release-helper');
+  await waitFor(`document.querySelector('.crumb-here')?.textContent === 'release-helper' && !!document.querySelector('#plugin-session-hooks button[data-hook-run]')`);
+  same('without Codex CLI, As <tool> disappears and only Claude Code remains runnable',
+    [await a.exists('#plugin-hook-tool'), await a.text('#plugin-session-hooks .session-command')],
+    [false, '${CLAUDE_PLUGIN_ROOT}/hooks/hello.sh']);
+  await a.click('#nav-instructions');
+  await waitFor(`!!document.querySelector('#session-codex-cli')`);
+  await steady();
+  same('Instructions strip whose tool has no command line hides Run it and states why in the standing line’s place',
+    [await a.run(`document.querySelectorAll('#session-codex-cli button[data-hook-run]').length`),
+      await a.text('#session-codex-cli .session-run-warn'),
+      await a.text('#session-codex-cli .session-note')],
+    [0, null, 'Codex’s command line isn’t on this computer, so these can’t be run here.']);
+  if (shots) {
+    await sizeTo(a, 860, 560);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+    await a.run(`document.querySelector('#session-codex-cli')?.scrollIntoView({ block: 'start' })`);
+    await steady();
+    await a.shot('instructions-no-cli-860x560-light');
+    await a.send('Emulation.setEmulatedMedia', { features: [] });
+    await fullSize(a);
+  }
+  rmSync(codexApp, { recursive: true, force: true });
+  writeFileSync(codexBin, codexBinBody, { mode: 0o755 });
+  await a.click('#header-refresh');
+  await steady();
 
-  // Tool's Instructions tab (Harnesses -> Claude Code -> Instructions): Run it works, pictures at 860 & 1316.
+  // Tool's Instructions tab (Harnesses -> Claude Code -> Instructions): Run it works with single standing warning, pictures at 860 & 1316.
   await a.click('#nav-harnesses');
   await a.click('#harness-claude-cli');
   await a.click('#harness-tab-instructions');
   await waitFor(`!!document.querySelector('#session-claude-cli button[data-hook-run]')`);
+  same('tool’s Instructions tab with runnable plugin hook shows single standing warning',
+    await a.text('#session-claude-cli .session-run-warn'), runWarn);
   const tabRes = await runAndWait('session-claude-cli', 'two-lines.sh');
   check('tool’s Instructions tab runs hook and shows Would add', /^Would add run in ~, /.test(tabRes) && tabRes.includes('First line from hook'), tabRes);
   const tabPluginRes = await runAndWait('session-claude-cli', 'hello.sh');

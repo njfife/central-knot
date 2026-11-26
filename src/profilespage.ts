@@ -157,7 +157,7 @@ function copyNote(profile: Profile, item: PluginLive, copy: PluginCopy): HTMLEle
   if (copy.way === 'held') return note(`Stays ${copy.on ? 'on' : 'off'} in ${tool}: ${copy.why}`);
   const source = 'install' in copy.target ? copy.target.install.source : undefined;
   return note(`Off in ${tool}: its plugin is off there. `, button({ variant: 'link', size: 'micro', label: 'Open its plugin', id: `pf-plugin-${item.id}-${copy.tool}`,
-    attrs: { title: `Open ${item.plugin} on Plugins, where it is turned on or off in each tool` }, onclick: () => openPlugin({ source, plugin: item.plugin, marketplace: item.marketName }) }));
+    attrs: { title: `Open ${item.plugin} on Plugins, where it is turned on or off in each tool` }, onclick: () => openPlugin({ source, plugin: item.plugin, marketplace: item.marketName, tool: copy.tool }) }));
 }
 
 /**
@@ -328,7 +328,7 @@ function switchButton(profile: Profile, plan: Plan, all: LiveItem[], plugged: Pl
   if (profileState.renaming === profile.id) return null;
   const off = plan.said ? undefined : heldWords(plan.plugs, plugged).off;
   if (off) return button({ variant: 'outline', size: 'small', label: 'Open its plugin', id: 'profile-open-plugin', attrs: { title: `Open ${off.item.plugin} on Plugins, where it is turned on or off in each tool` },
-    onclick: () => openPlugin({ source: 'install' in off.copy.target ? off.copy.target.install.source : undefined, plugin: off.item.plugin, marketplace: off.item.marketName }) });
+    onclick: () => openPlugin({ source: 'install' in off.copy.target ? off.copy.target.install.source : undefined, plugin: off.item.plugin, marketplace: off.item.marketName, tool: off.copy.tool }) });
   if (!plan.said || !switchable(profile, all, plugged)) return null;
   const label = profile.name.length > 18 ? 'Switch to this profile' : `Switch to ${profile.name}`;
   const title = whyReadOnly(state.home!) ?? `Use ${profile.name}: ${plan.said}.${profile.switchesPluginItems ? '' : ` ${pluginStayNote(plan.plugs, plugged)}`} One step in History, with Undo.`;

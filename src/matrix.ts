@@ -71,9 +71,9 @@ const names = toolNames as Record<Tool, string>;
  * Opens a plugin's page on Plugins, where the plugin itself is handled. `marketplace`: its
  * marketplace's name, to find it by when the page lists that marketplace under another spelling of its address.
  */
-export function openPlugin({ source, plugin, marketplace }: { source?: string; plugin: string; marketplace?: string }) {
+export function openPlugin({ source, plugin, marketplace, tool }: { source?: string; plugin: string; marketplace?: string; tool?: HarnessId }) {
   const listed = listingOf(plugin, marketplace, source);
-  market.nav = { source: listed?.source ?? source, marketName: listed ? undefined : marketplace, plugin, tab: 'plugins', find: '', category: undefined };
+  market.nav = { source: listed?.source ?? source, marketName: listed ? undefined : marketplace, plugin, tab: 'plugins', find: '', category: undefined, hookTool: tool };
   showPage('plugins');
 }
 
