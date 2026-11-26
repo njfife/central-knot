@@ -44,6 +44,7 @@ const MARK_LOOKS: Record<ToolMark, { look: string; glyph: () => Element }> = {
   installed: { look: 'cell-synced.cell-on', glyph: () => icon('check', 16) },
   outdated: { look: 'cell-differs.cell-on', glyph: () => icon('refresh-cw', 14) },
   items: { look: 'cell-synced.cell-on', glyph: () => icon('check', 16) },
+  'kept-off': { look: 'cell-not-brought', glyph: () => icon('unplug', 14) },
   stays: { look: 'cell-differs.cell-on', glyph: () => icon('circle-alert', 14) },
   waits: { look: 'cell-waiting', glyph: () => icon('clock', 14) },
   'not-brought': { look: 'cell-not-brought', glyph: () => icon('circle-off', 14) },
@@ -99,8 +100,11 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
   const id = `pbox-${marketIndex}-${plugin.name}-${tool}`;
   const { mark, words } = markOf(view, entry, plugin, tool, offered), box = boxOf(view, entry, plugin.name, tool, { mark, words });
   const what = takesPlugins(tool) ? plugin.name : `${plugin.name}’s items`, where = names[tool];
-  const does = box.ticked ? `Click to take ${what} out of ${where}: it stays out until you tick it again. Undo puts it back.`
-    : entry.switches?.[plugin.name]?.entry?.on ? `Click to put ${what} in ${where}. Undo takes it out again.` : `Click to turn ${plugin.name} on in ${where} alone. Undo turns it off again.`;
+  // Unticked, a copy the tool's own switch can keep is turned off there and stays installed (pluginrecord.ts row 9).
+  const sw = entry.switches?.[plugin.name], on = !!sw?.entry?.on;
+  const does = box.ticked && sw?.tools[tool]?.keeps ? `Click to turn ${what} off in ${where}, kept installed: it stays off until you tick it again. Undo turns it on again.`
+    : box.ticked ? `Click to take ${what} out of ${where}: it stays out until you tick it again. Undo puts it back.`
+    : on && mark !== 'kept-off' ? `Click to put ${what} in ${where}. Undo takes it out again.` : `Click to turn ${plugin.name} on in ${where}${on ? '' : ' alone'}. Undo turns it off again.`;
   const label = box.held ? words : `${words} ${box.off ?? does}`;
   // Ticked with its items in full only where each is on there or the same as his (pluginstatus.ts itemsAllIn); else a dash, mixed.
   const some = mark === 'items' && !itemsAllIn(entry, plugin.name, tool), shown = some ? { ...MARK_LOOKS[mark], glyph: () => icon('minus', 16) } : MARK_LOOKS[mark];
@@ -146,7 +150,7 @@ export function clickWords(click: PluginClick, onRow = false): { text: string; f
   return { text: `${text.charAt(0).toUpperCase()}${text.slice(1)}`, failed };
 }
 /** Each click's verb on a row, and the word before its tools. */
-const ROW_VERBS: Record<PluginTurn, [string, string]> = { on: ['Installed', 'in'], 'let-in': ['Put', 'in'], add: ['Added', 'in'], off: ['Uninstalled', 'from'], 'keep-out': ['Taken out', 'of'] };
+const ROW_VERBS: Record<PluginTurn, [string, string]> = { on: ['Turned on', 'in'], 'let-in': ['Turned on', 'in'], add: ['Added', 'in'], off: ['Turned off', 'in'], 'keep-out': ['Turned off', 'in'] };
 function rowWords(what: PluginTurn, { done, stopped }: NonNullable<PluginClick['ran']>): string {
   const [verb, to] = ROW_VERBS[what], missed = [...new Set(done.filter(step => !succeeded(step.report)).map(step => step.tool))];
   const went = [...new Set(done.map(step => step.tool))].filter(tool => !missed.includes(tool));

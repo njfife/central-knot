@@ -160,15 +160,15 @@ test('A row says its click’s aim while it waits and runs, then what main retur
   turnPlugin(entry, 'beta', 'keep-out', 'claude-cli');
   turnPlugin(entry, 'gamma', 'let-in', 'claude-cli');
   await settled();
-  assert.deepEqual([words('alpha'), words('beta'), words('gamma')], ['Installing…', 'Waiting to uninstall from Claude Code', 'Waiting to install in Claude Code']);
+  assert.deepEqual([words('alpha'), words('beta'), words('gamma')], ['Turning on…', 'Waiting to turn off in Claude Code', 'Waiting to turn on in Claude Code']);
   await main.answer(installed('alpha'));
-  assert.deepEqual([words('alpha'), words('beta')], ['Installed in Claude Code', 'Uninstalling from Claude Code…']);
+  assert.deepEqual([words('alpha'), words('beta')], ['Turned on in Claude Code', 'Turning off in Claude Code…']);
   await main.answer({ stopped, done: [] });
   await main.answer(refused('gamma'));
   assert.deepEqual([words('beta'), words('gamma')], [stopped, 'Claude Code: Not installed. Plugin "gamma" not found.']);
   assert.deepEqual(['alpha', 'beta', 'gamma'].map(name => clickWords(clickOn('/market', name)!).failed), [false, true, true]);
   // On the list's row, in one short line: what it did and where; the reasons are in the band above and on the plugin's page.
-  assert.deepEqual(['alpha', 'beta', 'gamma'].map(name => clickWords(clickOn('/market', name)!, true).text), ['Installed in Claude Code', 'Not done', 'Not put in Claude Code']);
+  assert.deepEqual(['alpha', 'beta', 'gamma'].map(name => clickWords(clickOn('/market', name)!, true).text), ['Turned on in Claude Code', 'Not done', 'Not turned on in Claude Code']);
 });
 
 test('A click that fails in the middle says why on its row, the clicks after it still run, and the list’s end is said as a whole', async () => {

@@ -444,7 +444,7 @@ let clickedLast: string | undefined;
 /** What a row says of its click while it waits and while it runs: a tool's box names its tool ("Waiting to install in Codex"). */
 function aimWords(what: PluginTurn, tool?: HarnessId): PluginClick['said'] {
   const name = tool ? ` ${toolNames[tool]}` : '';
-  const [to, doing] = { on: ['install', 'Installing'], off: ['uninstall', 'Uninstalling'], add: ['add', 'Adding'], 'keep-out': ['uninstall from', 'Uninstalling from'], 'let-in': ['install in', 'Installing in'] }[what];
+  const [to, doing] = { on: ['turn on', 'Turning on'], off: ['turn off', 'Turning off'], add: ['add', 'Adding'], 'keep-out': ['turn off in', 'Turning off in'], 'let-in': ['turn on in', 'Turning on in'] }[what];
   return { waiting: `Waiting to ${to}${name}`, running: `${doing}${name}…` };
 }
 
@@ -606,10 +606,10 @@ export function wantView(readId: number | undefined): void {
 
 /**
  * A line's click: the home it is made in, the plugin as listed (`source`, the listing's own spelling), the tool, and the item whose line
- * it is (`item`), with the names his own there it said stay his (`yours`). Install and Put its items here are its box ticked
- * (`let-in`); Remove, unticked (`keep-out`).
+ * it is (`item`), with the names his own there it said stay his (`yours`). Install, Put its items here and Turn the plugin on (`let-in`,
+ * for a copy the plugins record keeps off there: pluginline.ts) are its box ticked (`let-in`); Remove, unticked (`keep-out`).
  */
-export interface LineAim { home: string; source: string; marketName: string; plugin: string; tool: HarnessId; act: 'install' | 'place' | 'remove'; item: PartRef; yours?: PartRef[] }
+export interface LineAim { home: string; source: string; marketName: string; plugin: string; tool: HarnessId; act: 'install' | 'place' | 'remove' | 'let-in'; item: PartRef; yours?: PartRef[] }
 /** A line's click in the page's list (clicklist.ts), a run of its own: its line says it waits and runs (lineBusy). */
 interface LineClick extends Turn { aim: LineAim }
 const isLineClick = (turn: Turn): turn is LineClick => 'aim' in turn;
@@ -617,6 +617,7 @@ const LINE_WORDS: Record<LineAim['act'], { waiting: string; running: string; don
   install: { waiting: 'Waiting to install', running: 'Installing', done: 'Installed', not: 'Not installed in' },
   place: { waiting: 'Waiting to put its items', running: 'Putting its items', done: 'Put', not: 'Not put in' },
   remove: { waiting: 'Waiting to remove', running: 'Removing', done: 'Removed', not: 'Not removed from' },
+  'let-in': { waiting: 'Waiting to turn on', running: 'Turning on', done: 'Turned on', not: 'Not turned on in' },
 };
 
 /**

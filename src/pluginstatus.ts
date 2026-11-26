@@ -7,7 +7,8 @@ import { groupBy, plural } from './model.ts';
 import { SAFE_NAME, compareVersions, isCommitHash } from './values.ts';
 import { andList, orList, toolNames as names } from './words.ts';
 import { holds, takesPlugins } from './presence.ts';
-import type { Owed, PluginSwitch, ToolNow } from './pluginrecord.ts';
+import type { Owed, PluginEntry, PluginSwitch, ToolNow } from './pluginrecord.ts';
+import { wantedIn } from './library.ts';
 
 /**
  * How many plugins a tool has installed, the one count the Overview's tools table and a tool's card and Plugins tab on Harnesses
@@ -149,7 +150,8 @@ export function toolNow(view: PluginsView, entry: MarketplaceView, plugin: strin
     : { cannot: elsewhere ?? (items ? whyNoneIn(entry, plugin, tool).join(' ') || `${names[tool]} gets none of its items: Its items, below, says why each isn’t brought in.` : notInWhy(tool, plugin, [], components && andList(summaryOf(components).split(' · ').filter(Boolean)))[0]!) };
   // What is installed whole is known from the tool's own record; items only once the record of parts from before is read.
   if (unknown && !(whole && takesPlugins(tool))) return { has: 'unknown', route };
-  return { has: whole ? 'whole' : itemsIn(entry, plugin, tool) ? 'items' : 'none', route, ...(whole ? { stuck: cantUninstall(view, entry, plugin, tool) } : {}) };
+  const kept = state.state === 'installed' ? { ...(state.off ? { off: true as const } : {}), ...(tool === 'copilot-cli' && state.live ? {} : { keeps: true as const }) } : {};
+  return { has: whole ? 'whole' : itemsIn(entry, plugin, tool) ? 'items' : 'none', route, ...(whole ? { stuck: cantUninstall(view, entry, plugin, tool), ...kept } : {}) };
 }
 
 /**
@@ -164,10 +166,10 @@ export const recordUnread = (tool: HarnessId) => `${names[tool]}’s record of i
 
 /**
  * A plugin's place among its marketplace's: 0 when every tool that can take it has it, 1 when some tool has it, 2 when no
- * tool has it. Having it means installed whole; a tool that can't take the plugin doesn't hold it back from 0.
+ * tool has it. Having it means installed whole and not kept off (pluginrecord.ts row 9); a tool that can't take the plugin doesn't hold it back from 0.
  */
 export function pluginPlace(view: PluginsView, entry: MarketplaceView, plugin: string): 0 | 1 | 2 {
-  const has = (tool: HarnessId) => installed(entry, plugin, tool);
+  const has = (tool: HarnessId) => { const state = stateOf(entry, plugin, tool); return state.state === 'installed' && !keptOff(entry.switches?.[plugin]?.entry, tool, state.off); };
   if (!view.tools.some(has)) return 2;
   return view.tools.every(tool => has(tool) || !!unavailable(view, entry, plugin, tool)) ? 0 : 1;
 }
@@ -429,13 +431,21 @@ export function updateTools(view: PluginsView, entry: MarketplaceView, plugin: s
 
 /**
  * One managed tool's mark for a plugin, from the table's answer (`owed`) and the tool's copy: installed (`outdated` when an
- * Update is offered), its items on there (`items`: Pi, OpenCode, Antigravity), installed though not wanted (`stays`: Off, or kept out of
- * it), not in it though wanted (`waits` for the automatic updates' check; `not-brought`, new here while some tool has it off
+ * Update is offered), its items on there (`items`: Pi, OpenCode, Antigravity), installed and off by its own switch though not wanted (`kept-off`: Off,
+ * or kept out of it; pluginrecord.ts row 9), installed and on though not wanted (`stays`), not in it though wanted (`waits` for the automatic updates' check; `not-brought`, new here while some tool has it off
  * in its own settings; `missing`), its parts from before the library waiting to be moved (`parts-waiting`: Pi, OpenCode), a
  * tool that can't take it (`cannot`), not in it (`absent`, kept out of it or not), its record unreadable (`unknown`), or
  * listed with its files gone (`not-known`). The plugin's page draws each as its tool's box (boxOf).
  */
-export type ToolMark = 'installed' | 'outdated' | 'items' | 'stays' | 'waits' | 'not-brought' | 'missing' | 'parts-waiting' | 'cannot' | 'absent' | 'unknown' | 'not-known';
+export type ToolMark = 'installed' | 'outdated' | 'items' | 'kept-off' | 'stays' | 'waits' | 'not-brought' | 'missing' | 'parts-waiting' | 'cannot' | 'absent' | 'unknown' | 'not-known';
+
+/**
+ * A copy the plugins record keeps installed and off (pluginrecord.ts row 9): the plugin isn't wanted in that tool, and the tool's own
+ * switch has it off (`off`). Its mark is `kept-off`; it is not in use (pluginPlace), the automatic updates leave it (marketplaces.ts
+ * pendingUpdates), a tick elsewhere doesn't count it as having the plugin (marketplaces.ts turn), and nothing but its box ticked turns it
+ * on: not an item's switch in the Library, not a profile (types.ts InstalledPlugin `keptOff`).
+ */
+export const keptOff = (entry: Pick<PluginEntry, 'on' | 'except'> | undefined, tool: HarnessId, off: boolean | undefined) => !!entry && !!off && !wantedIn(entry, tool);
 
 /**
  * A tool's mark and the sentence its tooltip and the plugin page's line say. `outdated`: an Update is offered there
@@ -455,6 +465,7 @@ export function toolMark(view: PluginsView, entry: MarketplaceView, plugin: stri
     const version = state.version ? ` ${state.version}` : '';
     const how = [state.live ? 'loaded live from the marketplace folder' : '', state.directory ? 'from the Anthropic Directory' : '', state.off ? `turned off in ${name}’s own settings` : '', stale ? 'which differs from the marketplace’s copy' : ''].filter(Boolean).join(', ');
     const words = `${name}: installed${version}${how ? `, ${how}` : ''}.`;
+    if (keptOff(entry.switches?.[plugin]?.entry, tool, state.off)) return { mark: 'kept-off', words: `Off in ${name}, kept installed${state.version ? ` at ${state.version}` : ''}.${unwanted}` };
     if (unwanted) return { mark: 'stays', words: `${words}${unwanted}` };
     return { mark: outdated ? 'outdated' : 'installed', words: outdated ? `${words} An update is offered: Update on its row.` : words };
   }
@@ -500,8 +511,8 @@ export const foundIn = (view: PluginsView, sw: PluginSwitch | undefined) => (sw 
 export function switchWords(view: PluginsView, entry: MarketplaceView, plugin: string): string {
   const sw = entry.switches?.[plugin];
   const kept = view.tools.filter(tool => sw?.entry?.except.includes(tool) && sw.tools[tool]?.takes);
-  if (sw?.entry?.on) return `${plugin}: on${kept.length ? `, kept out of ${andList(kept.map(tool => names[tool]))}` : ''}. Click to turn it off: it is taken out of each tool here that Central Knot can take it out of, and the result says what was left and what Undo can put back.`;
-  return `${plugin}: off. Click to turn it on: it goes into every tool here that takes it${sw?.entry?.except.length ? ' and that it isn’t kept out of' : ''}, and the result says where it went; Undo takes it out again.`;
+  if (sw?.entry?.on) return `${plugin}: on${kept.length ? `, kept out of ${andList(kept.map(tool => names[tool]))}` : ''}. Click to turn it off in each tool here that Central Knot can turn it off in, kept installed where the tool can keep it; Undo turns it on again.`;
+  return `${plugin}: off. Click to turn it on: it goes into every tool here that takes it${sw?.entry?.except.length ? ' and that it isn’t kept out of' : ''}, and the result says where it went; Undo turns it off again.`;
 }
 
 /** Add's words for a plugin found in some tools with no entry here. */

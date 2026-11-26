@@ -792,7 +792,7 @@ esac
     const report = await update(context, catalog, 'full', 'claude-cli', differs);
     assert.deepEqual([report.outcome, report.changed, report.byContent, report.version], ['updated', true, 'reinstall', '1.0.0'], report.message);
     assert.equal(report.message, 'Reinstalled from the marketplace’s copy of 1.0.0: Claude Code’s own update kept the copy it had. It is still off in Claude Code.');
-    assert.deepEqual(report.runs.map(run => run.command), ['claude plugin update full@ck-test-market --scope user', 'claude plugin uninstall full@ck-test-market --scope user', 'claude plugin install full@ck-test-market --scope user', 'claude plugin disable full@ck-test-market --scope user']);
+    assert.deepEqual(report.runs.map(run => run.command), ['claude plugin update full@ck-test-market --scope user', 'claude plugin uninstall full@ck-test-market --scope user --keep-data', 'claude plugin install full@ck-test-market --scope user', 'claude plugin disable full@ck-test-market --scope user']);
     assert.equal(JSON.parse(await readFile(join(box.home, '.claude/settings.json'), 'utf8')).enabledPlugins['full@ck-test-market'], false);
     const again = await update(context, catalog, 'full', 'claude-cli', differs);
     assert.deepEqual([again.outcome, again.changed, again.runs.length], ['updated', undefined, 0], 'the same copy runs nothing');
