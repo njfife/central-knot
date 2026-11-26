@@ -14836,7 +14836,7 @@ async function hookRunFlow() {
   writeFileSync(marketCatalogPath, JSON.stringify(marketCatalog, null, 2));
   writeFileSync(join(market, 'plugins/release-helper/hooks/hooks.json'), JSON.stringify({
     hooks: {
-      SessionStart: [{ hooks: [{ type: 'command', command: 'echo "Marketplace only text"' }] }],
+      UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'echo "Marketplace only text"' }] }],
       PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo checked' }] }],
     },
   }));
@@ -14976,11 +14976,12 @@ async function hookRunFlow() {
   await redrawUnder(a, '#session-claude-cli .session-title');
   same('nothing ran on opening Instructions, Refresh, or a redraw landing', [markerCount(), existsSync(pluginMarker)], [0, false]);
 
-  // Check 3: standing lines on runnable plugin strips, none on non-runnable; Copilot prompt-only note; Codex T2.28 note; T1.23 once & <= 30 words without plugin sentence.
-  const pluginStripWarn = 'Run it runs the command for real. It may change your files. Plugin hooks can change their installed files and data.';
-  same('standing warnings are on Claude Code and Codex plugin strips and absent on Copilot CLI prompt-only strip',
+  // Check 3: single standing line on runnable strips, none on non-runnable; Copilot prompt-only note; Codex T2.28 note; T1.23 once & <= 30 words with plugin sentence.
+  const runWarn = 'Run it runs the command for real. It may change your files.';
+  const helpCardText = 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.';
+  same('standing warning is on Claude Code and Codex strips and absent on Copilot CLI prompt-only strip',
     [await a.text('#session-claude-cli .session-run-warn'), await a.text('#session-codex-cli .session-run-warn'), await a.text('#session-copilot-cli .session-run-warn')],
-    [pluginStripWarn, pluginStripWarn, null]);
+    [runWarn, runWarn, null]);
   same('Codex runnable strip and Copilot CLI prompt-only strip show T2.28 lines in place of old notes',
     [await a.text('#session-codex-cli .session-note'), await a.text('#session-copilot-cli .session-note'), await a.run(`document.querySelectorAll('#session-copilot-cli button[data-hook-run]').length`)],
     ['Codex: Run it runs a hook even if it isn’t trusted in /hooks.', 'Copilot CLI ignores what prompt hooks print.', 0]);
@@ -14990,8 +14991,7 @@ async function hookRunFlow() {
     return { count: marks.length, id: marks[0]?.id, card, words: card.trim().split(/\\s+/).length };
   })()`);
   check('T1.23 info mark appears once on the page with exact wording and <= 30 words',
-    helpInfo.count === 1 && helpInfo.id === 'session-hooks-info' && helpInfo.words <= 30
-    && helpInfo.card === 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names.', helpInfo);
+    helpInfo.count === 1 && helpInfo.id === 'session-hooks-info' && helpInfo.words <= 30 && helpInfo.card === helpCardText, helpInfo);
   const pluginRow = await rowOf('session-claude-cli', 'hello.sh');
   const codexPluginRow = await rowOf('session-codex-cli', 'codex-hello.sh');
   same('installed plugin hook rows on Instructions have Run it and View source for Claude Code and Codex',
@@ -15362,29 +15362,39 @@ async function hookRunFlow() {
   await a.click('#header-refresh');
   await steady();
   await waitFor(`!!document.querySelector('#plugin-session-hooks button[data-hook-run]')`);
-  same('plugin page shows both standing lines before any run and differs version note',
+  same('plugin page shows single standing warning, copy-note wording, and plugin sentence inside (?)',
     [await a.text('#plugin-session-hooks .session-run-warn'), await a.text('#plugin-session-hooks .plugin-version-differs'),
       await a.run(`document.getElementById('plugin-hooks-info-card')?.textContent ?? ''`)],
-    [pluginStripWarn, 'Claude Code’s installed copy (0.4.1); marketplace has 0.5.0',
-      'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names.']);
+    [runWarn, 'Runs Claude Code’s installed copy (0.4.1). The marketplace has 0.5.0.', helpCardText]);
   same('arriving from Claude Code selects As Claude Code and lists both eligible tools',
     await a.run(`(() => { const s = document.getElementById('plugin-hook-tool'); return [s?.value, [...(s?.options ?? [])].map(o => o.textContent)]; })()`),
     ['claude-cli', ['As Claude Code', 'As Codex']]);
-  same('plugin page displays installed hook command (not marketplace) and Other hooks has View source alone',
-    [await a.text('#plugin-session-hooks .session-command'),
-      await a.run(`document.querySelectorAll('#plugin-session-hooks button[data-hook-run]').length`),
-      await a.run(`document.querySelectorAll('.plugin-parts li.with-source button[data-hook-run]').length`),
-      await a.run(`document.querySelectorAll('.plugin-parts li.with-source button[data-hook-source]').length`)],
-    ['${CLAUDE_PLUGIN_ROOT}/hooks/hello.sh', 1, 0, 1]);
+  same('plugin page shows installed runnable row first, marketplace-only text row below with View source alone, and Other hooks View source alone',
+    await a.run(`(() => {
+      const rows = [...document.querySelectorAll('#plugin-session-hooks .session-hook')].map(r => [
+        r.querySelector('.session-command')?.textContent, !!r.querySelector('button[data-hook-run]'), !!r.querySelector('button[data-hook-source]'),
+      ]);
+      return [document.querySelector('#plugin-session-hooks .session-title')?.textContent, rows,
+        document.querySelectorAll('.plugin-parts li.with-source button[data-hook-run]').length,
+        document.querySelectorAll('.plugin-parts li.with-source button[data-hook-source]').length];
+    })()`),
+    ['Hooks that can add text (2)', [['${CLAUDE_PLUGIN_ROOT}/hooks/hello.sh', true, true], ['echo "Marketplace only text"', false, true]], 0, 1]);
   await pictures('plugin-hooks-before', '#plugin-session-hooks', bothSizes);
-  // View source reads installed copy and starts nothing.
-  const pluginSrcId = await a.run(`document.querySelector('#plugin-session-hooks button[data-hook-source]')?.id`);
-  await a.click(byId(pluginSrcId));
+  await pictures('plugin-hooks-market-extra', '#plugin-session-hooks', [[860, 560, false]]);
+  // View source on row 1 reads installed copy; View source on row 2 reads marketplace copy; neither starts a run.
+  const pluginSrcIds = await a.run(`[...document.querySelectorAll('#plugin-session-hooks button[data-hook-source]')].map(b => b.id)`);
+  await a.click(byId(pluginSrcIds[0]));
   await waitFor(`!!document.querySelector('#plugin-session-hooks .hook-source pre')`);
   const pluginSrcText = await a.text('#plugin-session-hooks .hook-source');
-  check('View source on plugin page reads installed script and hooks.json without marketplace copy note',
+  check('View source on runnable row reads installed script and hooks.json without marketplace copy note',
     pluginSrcText.includes('Releases ship on Tuesdays. Run smoke checks before tagging.') && !pluginSrcText.includes('Marketplace only text') && !pluginSrcText.includes('marketplace’s copy'), pluginSrcText);
-  await a.click(byId(pluginSrcId));
+  await a.click(byId(pluginSrcIds[0]));
+  await a.click(byId(pluginSrcIds[1]));
+  await waitFor(`!!document.querySelector('#plugin-session-hooks .hook-source pre')`);
+  const marketExtraSrc = await a.text('#plugin-session-hooks .hook-source');
+  check('View source on marketplace-only text hook row reads marketplace hooks.json',
+    marketExtraSrc.includes('Marketplace only text') && marketExtraSrc.includes('marketplace’s copy'), marketExtraSrc);
+  await a.click(byId(pluginSrcIds[1]));
   same('opening plugin page, Refresh and View source ran nothing', pluginMarkerCount(), pluginMarkerBefore);
   // Click 3: Run it runs installed copy and shows text inline in place.
   const pluginPageRes = await runAndWait('plugin-session-hooks', 'hello.sh');
@@ -15417,36 +15427,43 @@ async function hookRunFlow() {
   await a.run(`[...document.querySelectorAll('#session-codex-cli .session-group')].find(g => g.querySelector('.session-name')?.textContent === 'release-helper')?.querySelector('button')?.click()`);
   await waitFor(`document.querySelector('.crumb-here')?.textContent === 'release-helper' && document.getElementById('plugin-hook-tool')?.value === 'codex-cli'`);
   same('arriving from Codex selects As Codex', await a.run(`document.getElementById('plugin-hook-tool')?.value`), 'codex-cli');
-  // Marketplace-only plugin (document-tools) and off plugin (off-plugin) keep View source alone with no Run it or standing warning.
+  // Marketplace-only plugin (document-tools) and off plugin (off-plugin) keep View source alone and explain why in actual home.
   await a.click('#plugin-back');
   await waitFor(`!!document.querySelector('#popen-0-document-tools')`);
   await a.click('#popen-0-document-tools');
   await waitFor(`document.querySelector('.crumb-here')?.textContent === 'document-tools' && !!document.querySelector('.plugin-parts li.with-source button[data-hook-source]')`);
-  same('marketplace-only plugin keeps View source alone and no Run it or standing warning',
+  same('marketplace-only plugin keeps View source alone and states why it cannot be run',
     [await a.run(`document.querySelectorAll('.plugin-parts li.with-source button[data-hook-source]').length`),
       await a.run(`document.querySelectorAll('button[data-hook-run]').length`),
-      await a.run(`document.querySelectorAll('.session-run-warn').length`)], [1, 0, 0]);
+      await a.run(`document.querySelectorAll('.session-run-warn').length`),
+      await a.text('.plugin-group:has(.plugin-parts li.with-source) .plugin-group-note')],
+    [1, 0, 0, 'Not installed, so these can’t be run here.']);
   await pictures('plugin-hooks-view-only', '.plugin-group:has(.plugin-parts li.with-source)', bothSizes);
   await a.click('#plugin-back');
   await waitFor(`!!document.querySelector('#popen-0-off-plugin')`);
   await a.click('#popen-0-off-plugin');
   await waitFor(`document.querySelector('.crumb-here')?.textContent === 'off-plugin' && !!document.querySelector('.plugin-parts li.with-source button[data-hook-source]')`);
-  same('off plugin keeps View source alone and no Run it or standing warning',
+  same('off plugin keeps View source alone and states Off in Claude Code',
     [await a.run(`document.querySelectorAll('.plugin-parts li.with-source button[data-hook-source]').length`),
       await a.run(`document.querySelectorAll('button[data-hook-run]').length`),
-      await a.run(`document.querySelectorAll('.session-run-warn').length`)], [1, 0, 0]);
-  // Non-actual home (Practice copy) on plugin page keeps View source alone and no Run it.
+      await a.run(`document.querySelectorAll('.session-run-warn').length`),
+      await a.text('.plugin-group:has(.plugin-parts li.with-source) .plugin-group-note')],
+    [1, 0, 0, 'Off in Claude Code, so these can’t be run here.']);
+  // Non-actual home (Practice copy) on plugin page keeps View source alone and does not show the actual-home reason line.
   await a.click('#home-fixture');
   await steady();
   await a.click('#nav-plugins');
   await waitFor(`!!document.querySelector('#popen-0-release-helper')`);
   await a.click('#popen-0-release-helper');
   await waitFor(`document.querySelector('.crumb-here')?.textContent === 'release-helper' && !!document.querySelector('.plugin-parts li.with-source button[data-hook-source]')`);
-  same('Practice copy plugin page has View source alone and no Run it or standing warning',
-    [await a.run(`document.querySelectorAll('button[data-hook-run]').length`), await a.run(`document.querySelectorAll('.session-run-warn').length`)], [0, 0]);
+  same('Practice copy plugin page has View source alone and keeps sessionHooksAbout',
+    [await a.run(`document.querySelectorAll('button[data-hook-run]').length`),
+      await a.run(`document.querySelectorAll('.session-run-warn').length`),
+      (await a.text('.plugin-group:has(.plugin-parts li.with-source) .plugin-group-note') ?? '').includes('known only when they run')],
+    [0, 0, true]);
   await a.click('#home-actual');
   await steady();
-  // Missing CLI hides Run it for Codex and drops As <tool> selector on release-helper's page.
+  // Missing CLI hides Run it for Codex, drops As <tool> on release-helper, and explains why on Codex's Instructions strip.
   const codexBin = join(home, '.local/bin/codex');
   const codexBinBody = readNow(codexBin);
   rmSync(codexBin, { force: true });
@@ -15459,17 +15476,35 @@ async function hookRunFlow() {
   same('without Codex CLI, As <tool> disappears and only Claude Code remains runnable',
     [await a.exists('#plugin-hook-tool'), await a.text('#plugin-session-hooks .session-command')],
     [false, '${CLAUDE_PLUGIN_ROOT}/hooks/hello.sh']);
+  await a.click('#nav-instructions');
+  await waitFor(`!!document.querySelector('#session-codex-cli')`);
+  await steady();
+  same('Instructions strip whose tool has no command line hides Run it and states why in the standing line’s place',
+    [await a.run(`document.querySelectorAll('#session-codex-cli button[data-hook-run]').length`),
+      await a.text('#session-codex-cli .session-run-warn'),
+      await a.text('#session-codex-cli .session-note')],
+    [0, null, 'Codex’s command line isn’t on this computer, so these can’t be run here.']);
+  if (shots) {
+    await sizeTo(a, 860, 560);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+    await a.run(`document.querySelector('#session-codex-cli')?.scrollIntoView({ block: 'start' })`);
+    await steady();
+    await a.shot('instructions-no-cli-860x560-light');
+    await a.send('Emulation.setEmulatedMedia', { features: [] });
+    await fullSize(a);
+  }
   writeFileSync(codexBin, codexBinBody, { mode: 0o755 });
   await a.click('#header-refresh');
   await steady();
 
-  // Tool's Instructions tab (Harnesses -> Claude Code -> Instructions): Run it works with both standing lines, pictures at 860 & 1316.
+  // Tool's Instructions tab (Harnesses -> Claude Code -> Instructions): Run it works with single standing warning, pictures at 860 & 1316.
   await a.click('#nav-harnesses');
   await a.click('#harness-claude-cli');
   await a.click('#harness-tab-instructions');
   await waitFor(`!!document.querySelector('#session-claude-cli button[data-hook-run]')`);
-  same('tool’s Instructions tab with runnable plugin hook shows both standing lines',
-    await a.text('#session-claude-cli .session-run-warn'), pluginStripWarn);
+  same('tool’s Instructions tab with runnable plugin hook shows single standing warning',
+    await a.text('#session-claude-cli .session-run-warn'), runWarn);
   const tabRes = await runAndWait('session-claude-cli', 'two-lines.sh');
   check('tool’s Instructions tab runs hook and shows Would add', /^Would add run in ~, /.test(tabRes) && tabRes.includes('First line from hook'), tabRes);
   const tabPluginRes = await runAndWait('session-claude-cli', 'hello.sh');

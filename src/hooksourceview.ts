@@ -10,8 +10,8 @@ import { button, closeButton, h, icon, pathText } from './dom.ts';
 import { pagePlatform } from './machine.ts';
 import { isTextEvent } from './pluginoutcomes.ts';
 import { hookRunWords, type TextHookRow } from './sessionhooks.ts';
-import type { HomeMode, HomeView, HookRunResult, HookSource, HookSourceRef } from './types.ts';
-import { HOOK_SOURCE_UNREADABLE, fileName, sentence } from './words.ts';
+import type { HarnessId, HomeMode, HomeView, HookRunResult, HookSource, HookSourceRef, InstalledPlugin } from './types.ts';
+import { HOOK_SOURCE_UNREADABLE, andList, fileName, sentence, toolNames } from './words.ts';
 
 interface RunEntry {
   seq: number;
@@ -26,14 +26,31 @@ const opened = new Map<string, { seq: number; panelId: string; source?: HookSour
 const runs = new Map<string, RunEntry>();
 let seq = 0;
 
+const hasCli = (tool: HarnessId, home?: Pick<HomeView, 'snapshots'>) =>
+  !home?.snapshots || home.snapshots.some(s => s.harness === tool && (s.detection === 'Installed' || s.detection === 'Version unknown' || !!s.app?.binary));
+
 /** Whether the page offers Run it (mirrors main's deciding gate in hookrun.ts runHook): actual home, non-Windows, own or Claude Code / Codex installed plugin hook that adds text, with the tool's CLI found and the plugin on. */
 export function canRun(ref: HookSourceRef, mode: HomeMode | undefined = state.home?.mode, platform = pagePlatform(navigator.userAgent), home: Pick<HomeView, 'snapshots' | 'pluginItems'> | undefined = state.home): boolean {
   if (mode !== 'actual' || platform === 'win32' || ref.from === 'marketplace') return false;
   if (ref.from === 'installed' && ref.tool !== 'claude-cli' && ref.tool !== 'codex-cli') return false;
   if (!ref.command || !isTextEvent(ref.tool, ref.event)) return false;
-  if (home?.snapshots && !home.snapshots.some(s => s.harness === ref.tool && (s.detection === 'Installed' || s.detection === 'Version unknown' || !!s.app?.binary))) return false;
+  if (!hasCli(ref.tool, home)) return false;
   if (ref.from === 'installed' && home?.pluginItems && !home.pluginItems.some(i => i.tool === ref.tool && i.plugin === ref.plugin && i.marketName === ref.marketName && !i.off && !i.problem)) return false;
   return true;
+}
+
+/** Why text hooks can't run in this home on Mac/Linux (one place for the words); undefined for another home, Windows, Copilot CLI or other causes. */
+export function hookCantRunReason(target: HarnessId | InstalledPlugin[], mode: HomeMode | undefined = state.home?.mode,
+  platform = pagePlatform(navigator.userAgent), home: Pick<HomeView, 'snapshots'> | undefined = state.home): string | undefined {
+  if (mode !== 'actual' || platform === 'win32') return undefined;
+  const noCli = (tool: HarnessId) => `${toolNames[tool]}’s command line isn’t on this computer, so these can’t be run here.`;
+  if (typeof target === 'string') return target !== 'copilot-cli' && !hasCli(target, home) ? noCli(target) : undefined;
+  if (!target.length) return 'Not installed, so these can’t be run here.';
+  const supported = target.filter(item => item.tool === 'claude-cli' || item.tool === 'codex-cli');
+  const missing = supported.find(item => !item.off && !item.problem && !hasCli(item.tool, home));
+  if (missing) return noCli(missing.tool);
+  const off = target.some(item => !item.off) ? [] : supported.map(item => toolNames[item.tool]);
+  return off.length ? `Off in ${andList(off)}, so these can’t be run here.` : undefined;
 }
 
 /** Short deterministic hash of a row key so re-read position shifts give another hook a different button id. */

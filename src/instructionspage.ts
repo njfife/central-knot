@@ -16,8 +16,8 @@ import { noToolsState } from './pages.ts';
 import { brandMark, openPlugin, outcomeBand } from './matrix.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { plural } from './model.ts';
-import { canRun, hookRow } from './hooksourceview.ts';
-import { hookRunWarn, hookStripHelp, hookStripNote, sessionStrip, type SessionGroup, type SessionStrip } from './sessionhooks.ts';
+import { canRun, hookCantRunReason, hookRow } from './hooksourceview.ts';
+import { HOOK_RUN_WARN, hookStripHelp, hookStripNote, sessionStrip, type SessionGroup, type SessionStrip } from './sessionhooks.ts';
 import type { HarnessId, InstructionFile, InstructionPart } from './types.ts';
 import { lineDiff } from './diff.ts';
 import { keepLineBreaks } from './drafts.ts';
@@ -242,10 +242,10 @@ function sessionStripView(file: InstructionFile, hookInfo?: HookStripPage) {
   if (!strip) return null;
   const isHooks = strip.heading === 'Hooks that can add text';
   const hasRunnable = stripHasRunnable(strip);
-  const hasRunnablePlugin = strip.groups.some(group => group.hooks.some(hook => hook.source.from === 'installed' && canRun(hook.source)));
   const showMark = isHooks && (!hookInfo || !hookInfo.marked);
   if (showMark && hookInfo) hookInfo.marked = true;
   const mark = showMark ? infoMark('session-hooks-info', strip.heading, hookStripHelp(file.tool, hookInfo ? hookInfo.anyRunnable : hasRunnable)) : null;
+  const whyNot = isHooks && !hasRunnable && strip.groups.some(group => group.hooks.length) ? hookCantRunReason(file.tool) : undefined;
   const note = hookStripNote(file.tool, strip, hasRunnable);
   const where = ({ plugin, settings, says }: SessionGroup, at: number) => (plugin?.listed
     ? button({ variant: 'link', size: 'micro', label: 'Plugin’s page: turn it off there', id: `session-page-${file.tool}-${at}`, onclick: () => openPlugin({ source: plugin.source, plugin: plugin.plugin, marketplace: plugin.marketName, tool: file.tool }) })
@@ -253,7 +253,7 @@ function sessionStripView(file: InstructionFile, hookInfo?: HookStripPage) {
   const warning = (words: string, path?: string) => h('p.session-warning.tone-warning', {}, icon('triangle-alert', 12), h('span', {}, words, path ? pathText(shownPath(path), path) : null));
   return h('section.session-strip', { id: `session-${file.tool}`, 'aria-label': `${strip.heading}: ${toolNames[file.tool]}` },
     h('div.session-title-row', {}, h('h4.session-title', {}, strip.heading), mark),
-    hasRunnable ? h('p.session-run-warn', {}, hookRunWarn(hasRunnablePlugin)) : null,
+    hasRunnable ? h('p.session-run-warn', {}, HOOK_RUN_WARN) : whyNot ? h('p.session-note', {}, whyNot) : null,
     h('p.session-about', {}, strip.about),
     note ? h('p.session-note', {}, ...inlineMarkdown(note, () => undefined)) : null,
     strip.groups.length ? h('ul.session-groups', {}, strip.groups.map((group, at) => h('li.session-group', {},

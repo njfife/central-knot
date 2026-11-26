@@ -1,6 +1,6 @@
 // A hook as the pages show it (hookLine, hookFingerprint, textHookRows, on a plugin's page and the Instructions page alike), the strip on
-// each tool's card on the Instructions page ("Hooks that can add text", Pi's packages, OpenCode's plugins; its standing warnings
-// HOOK_RUN_WARN, PLUGIN_HOOK_RUN_WARN, hookRunWarn, info-card text hookStripHelp and rendered note hookStripNote), and what a hook run's result says in words (hookRunWords), drawn by
+// each tool's card on the Instructions page ("Hooks that can add text", Pi's packages, OpenCode's plugins; its standing warning
+// HOOK_RUN_WARN, info-card text hookStripHelp and rendered note hookStripNote), and what a hook run's result says in words (hookRunWords), drawn by
 // instructionspage.ts sessionStripView, pluginpage.ts sessionHookStrip and hooksourceview.ts. Pure: nothing here reads a file or runs a hook. Its facts:
 // - each plugin installed whole in the tool and On there, with its hooks as its installed copy declares them (HomeView
 //   pluginItems, read by pluginitems.ts readPluginItems);
@@ -103,16 +103,12 @@ export function sessionStrip(tool: HarnessId, items: InstalledPlugin[], file: Pi
 
 /** Standing line above the first row of every strip that has a runnable hook. */
 export const HOOK_RUN_WARN = 'Run it runs the command for real. It may change your files.';
-/** Second standing sentence on every runnable strip that includes a plugin hook (moved out of hookStripHelp). */
-export const PLUGIN_HOOK_RUN_WARN = 'Plugin hooks can change their installed files and data.';
-/** Standing warning text above runnable rows; includes the plugin sentence whenever a plugin hook can run on the strip. */
-export const hookRunWarn = (hasPlugin: boolean): string => (hasPlugin ? `${HOOK_RUN_WARN} ${PLUGIN_HOOK_RUN_WARN}` : HOOK_RUN_WARN);
 
 /** Information-mark card text on the first hooks strip of a page (30 words at most). */
 export function hookStripHelp(tool: HarnessId, runnable: boolean): string {
   const when = tool === 'copilot-cli' ? 'Session-start' : 'Session-start and prompt';
   const base = `${when} hooks; not URL, MCP, project or organisation.`;
-  return runnable ? `${base} Run it uses your home or the folder the hook names.` : base;
+  return runnable ? `${base} Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.` : base;
 }
 
 /** Note rendered under a hooks strip's heading: T2.28's tool lines replace strip.note where they apply. */

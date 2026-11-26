@@ -8,7 +8,7 @@ import { acting, rerender, showPage, state as app } from './app.ts';
 import { afterLayout, button, fileBlocks, h, icon, infoMark, toggle as switchToggle, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { groupBy } from './model.ts';
-import { addsText, componentsFrom, outcomes, sessionHooksAbout } from './pluginoutcomes.ts';
+import { addsText, componentsFrom, outcomes, sessionHooksAbout, whenItRuns } from './pluginoutcomes.ts';
 import { clickNote, componentsOf, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, toolBox, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { pluginKey } from './pluginplan.ts';
@@ -16,8 +16,8 @@ import { DIRECTORY, boxOf, cantSwitchSkill, comparableText, itemsOnWords, takenI
 import { hasCowork, pluginTools, takesPlugins } from './presence.ts';
 import { applyPluginOps, market, openLink, shownDetail, toggleOpened, usePlugins } from './pluginstate.ts';
 import type { Components, DeclaredHook, HarnessId, HookSourceRef, InstalledPlugin, MarketplaceView, Outcome, PluginDetail, PluginItemLine, PluginView, PluginsView, YourName } from './types.ts';
-import { canRun, hookRow, hookSourceControls } from './hooksourceview.ts';
-import { hookFingerprint, hookLine, hookRunWarn, hookStripHelp, hookStripNote, textHookRows, type TextHookRow } from './sessionhooks.ts';
+import { canRun, hookCantRunReason, hookRow, hookSourceControls } from './hooksourceview.ts';
+import { HOOK_RUN_WARN, hookFingerprint, hookLine, hookStripHelp, hookStripNote, textHookRows, type TextHookRow } from './sessionhooks.ts';
 import { plural } from './model.ts';
 import { andList, coworkWords, toolNames as names } from './words.ts';
 import { openKind } from './matrix.ts';
@@ -244,65 +244,68 @@ const fileKinds: Record<FileKind, { title: string; file: string; about?: string 
 /** A hook of the marketplace's copy that can add text in one of the tools that take plugins (pluginoutcomes.ts addsText). */
 const addsTextSomewhere = (hook: DeclaredHook) => pluginTools.some(tool => addsText(tool, hook));
 
+const marketRef = (marketName: string, plugin: string, hook: DeclaredHook, command: string): HookSourceRef =>
+  ({ from: 'marketplace', marketName, plugin, declaredIn: hook.declaredIn, event: hook.event, at: hook.at, command, fingerprint: hookFingerprint(hook) });
+
 /**
- * One group of hooks: its heading, an optional line under it, and a row per hook (its event, then how it starts:
- * sessionhooks.ts hookLine, blank for one that starts nothing here), so the count in the heading is the rows under it. Both
- * groups under What it holds are drawn by it.
+ * One group of marketplace hooks (View source alone): its heading, an optional line under it, and a row per hook (its event,
+ * then how it starts: sessionhooks.ts hookLine, blank for one that starts nothing here), so the count in the heading is the
+ * rows under it. Draws Other hooks, and the text-adding group when no installed copy can run here.
  */
 function hookGroup(owner: string, groupId: string, marketName: string, plugin: string, title: string, hooks: DeclaredHook[], about?: string) {
   const rows = hooks.map((hook, row) => {
     const command = hookLine(hook);
-    return { name: hook.event, text: command, mono: true, key: `${hook.event}\u0000${row}`, sourceId: `${groupId}-${row}`,
-      source: { from: 'marketplace' as const, marketName, plugin, declaredIn: hook.declaredIn, event: hook.event, at: hook.at, command, fingerprint: hookFingerprint(hook) } };
+    return { name: hook.event, text: command, mono: true, key: `${hook.event}\u0000${row}`, sourceId: `${groupId}-${row}`, source: marketRef(marketName, plugin, hook, command) };
   });
   return rows.length ? h('div.plugin-group', {}, h('h4', {}, `${title} (${rows.length})`), about ? h('p.plugin-group-note', {}, about) : null, partList(owner, rows)) : null;
 }
 
-interface EligibleHooks { tool: HarnessId; install: InstalledPlugin; rows: TextHookRow[] }
-
-/** Installed copies of this plugin that can run at least one text-adding hook here (decided by canRun), in display order. */
-function eligibleHookTools(view: PluginsView, entry: MarketplaceView, plugin: PluginView): EligibleHooks[] {
-  return view.tools.flatMap(tool => {
-    const st = stateOf(entry, plugin.name, tool);
-    if (st.state !== 'installed' || st.off) return [];
-    const install = app.home?.pluginItems?.find(item => item.tool === tool && item.plugin === plugin.name && item.marketName === (st.directory ? DIRECTORY : entry.name));
-    const rows = install ? textHookRows(tool, install.hooks, { from: 'installed', tool, plugin: install.plugin, marketName: install.marketName }).filter(row => canRun(row.source)) : [];
-    return rows.length ? [{ tool, install: install!, rows }] : [];
-  });
-}
-
 /** Version note when the selected installed copy's version differs from the marketplace's or another eligible tool's. */
-function hookCopyNote(selected: EligibleHooks, eligible: EligibleHooks[], offered: string | undefined): string | undefined {
-  const ver = selected.install.version;
-  const others = eligible.filter(other => other !== selected && versionDiffers(other.install.version, ver)).map(other => ({ tool: other.tool, version: other.install.version! }));
-  const parts = [versionDiffers(ver, offered) ? `marketplace has ${offered}` : '', others.length ? otherVersionsLine(others) : ''].filter(Boolean);
-  return parts.length ? `${names[selected.tool]}’s installed copy${ver ? ` (${ver})` : ''}; ${parts.join('; ')}` : undefined;
+function hookCopyNote(selected: InstalledPlugin, eligible: InstalledPlugin[], offered: string | undefined): string | undefined {
+  const others = eligible.filter(other => other !== selected && versionDiffers(other.version, selected.version)).map(other => ({ tool: other.tool, version: other.version! }));
+  const parts = [versionDiffers(selected.version, offered) ? `The marketplace has ${offered}.` : '', others.length ? `${otherVersionsLine(others)}.` : ''].filter(Boolean);
+  return parts.length ? `Runs ${names[selected.tool]}’s installed copy${selected.version ? ` (${selected.version})` : ''}. ${parts.join(' ')}` : undefined;
 }
 
-/** Hooks that can add text: runnable strip from the chosen installed copy when eligible, else marketplace View-source rows. */
+/** Hooks that can add text: runnable installed-copy rows (with any marketplace-only text hooks below), else marketplace View-source rows. */
 function sessionHookStrip(view: PluginsView, entry: MarketplaceView, plugin: PluginView, detail: PluginDetail, owner: string, compareTo: string | undefined) {
-  const eligible = eligibleHookTools(view, entry, plugin);
+  const installs = view.tools.flatMap(tool => {
+    const st = stateOf(entry, plugin.name, tool);
+    const item = st.state === 'installed' ? app.home?.pluginItems?.find(each => each.tool === tool && each.plugin === plugin.name && each.marketName === (st.directory ? DIRECTORY : entry.name)) : undefined;
+    return item ? [item] : [];
+  });
+  // canRun alone decides whether an installed copy (on/off, CLI, tool, home) can run here.
+  const eligible = installs.flatMap(install => {
+    const rows = textHookRows(install.tool, install.hooks, { from: 'installed', tool: install.tool, plugin: install.plugin, marketName: install.marketName }).filter(row => canRun(row.source));
+    return rows.length ? [{ install, rows }] : [];
+  });
   if (!eligible.length) return hookGroup(`${owner}\u0000session`, 'hook-source-session', entry.name, plugin.name, 'Hooks that can add text to sessions',
-    detail.hooks.filter(addsTextSomewhere), sessionHooksAbout(componentsFrom(detail).sessionTextHooks, nativeTools(view, entry, plugin.name)));
-  const selected = eligible.find(each => each.tool === market.nav.hookTool) ?? eligible[0]!;
-  const choose = (event: Event) => {
-    market.nav.hookTool = (event.target as HTMLSelectElement).value as HarnessId;
-    rerender();
-  };
+    detail.hooks.filter(addsTextSomewhere), hookCantRunReason(installs) ?? sessionHooksAbout(componentsFrom(detail).sessionTextHooks, nativeTools(view, entry, plugin.name)));
+  const selected = eligible.find(each => each.install.tool === market.nav.hookTool) ?? eligible[0]!;
+  const tool = selected.install.tool;
   const picker = eligible.length > 1 ? h('span.select.select-bar.plugin-hook-as', {},
-    h('select', { id: 'plugin-hook-tool', 'aria-label': 'Run hooks as', onchange: choose },
-      eligible.map(each => h('option', { value: each.tool, selected: each.tool === selected.tool }, `As ${names[each.tool]}`))), icon('chevrons-up-down', 14)) : null;
-  const copy = hookCopyNote(selected, eligible, compareTo);
-  const note = hookStripNote(selected.tool, { groups: [] }, true);
+    h('select', { id: 'plugin-hook-tool', 'aria-label': 'Run hooks as', onchange: (event: Event) => {
+      market.nav.hookTool = (event.target as HTMLSelectElement).value as HarnessId;
+      rerender();
+    } }, eligible.map(each => h('option', { value: each.install.tool, selected: each.install.tool === tool }, `As ${names[each.install.tool]}`))), icon('chevrons-up-down', 14)) : null;
+  const copy = hookCopyNote(selected.install, eligible.map(each => each.install), compareTo);
+  const note = hookStripNote(tool, { groups: [] }, true);
+  const seen = new Set(selected.rows.map(row => row.source.fingerprint));
+  const marketRows = detail.hooks.filter(hook => addsTextSomewhere(hook) && !seen.has(hookFingerprint(hook))).map((hook): TextHookRow => {
+    const command = hookLine(hook);
+    const whenTool = addsText(tool, hook) ? tool : pluginTools.find(each => addsText(each, hook))!;
+    return { when: whenItRuns(whenTool, hook), command, source: marketRef(entry.name, plugin.name, hook, command) };
+  });
   return h('section.plugin-group.session-strip', { id: 'plugin-session-hooks', 'aria-label': 'Hooks that can add text' },
-    h('div.session-title-row', {}, h('h4.session-title', {}, `Hooks that can add text (${selected.rows.length})`),
-      infoMark('plugin-hooks-info', 'Hooks that can add text', hookStripHelp(selected.tool, true)), picker),
+    h('div.session-title-row', {}, h('h4.session-title', {}, `Hooks that can add text (${selected.rows.length + marketRows.length})`),
+      infoMark('plugin-hooks-info', 'Hooks that can add text', hookStripHelp(tool, true)), picker),
     copy ? h('p.plugin-group-note', {}, versionNote(copy)) : null,
-    h('p.session-run-warn', {}, hookRunWarn(true)),
+    h('p.session-run-warn', {}, HOOK_RUN_WARN),
     note ? h('p.session-note', {}, ...inlineMarkdown(note, () => undefined)) : null,
-    h('ul.session-hooks.plugin-session-hooks', {}, selected.rows.map((hook, row) => hookRow(hook, `hook-source-plugin-${selected.tool}-${row}`))));
+    h('ul.session-hooks.plugin-session-hooks', {},
+      selected.rows.map((hook, row) => hookRow(hook, `hook-source-plugin-${tool}-${row}`)),
+      marketRows.map((hook, row) => hookRow(hook, `hook-source-session-${row}`))));
 }
-
 
 /**
  * Lays out "Your tools" by the box's width, decided here once (data-layout, which style.css keys off): with room for a
@@ -410,8 +413,8 @@ function fileGroup(owner: string, idFor: (key: string) => string, kind: FileKind
 
 /**
  * The plugin's parts by name, with what each says it does; skills, commands, agents and instruction files open their files.
- * The hooks that can add text to sessions in some tool (addsTextSomewhere) are a group before the others, under the line
- * pluginoutcomes.ts sessionHooksAbout makes for the tools "In each tool" describes; both groups are drawn by hookGroup.
+ * The hooks that can add text come first (`sessionHookStrip`: runnable installed-copy rows with any marketplace-only text
+ * hooks below, or marketplace `hookGroup` with `hookCantRunReason` / `sessionHooksAbout`); `Other hooks` stays `hookGroup`.
  * What is opened is kept per plugin; element ids start with the marketplace's place in the list (`marketIndex`).
  */
 function contentsBlock(view: PluginsView, entry: MarketplaceView, marketIndex: number, plugin: PluginView, detail: PluginDetail | null | undefined, reading: boolean, offered: string | undefined) {
