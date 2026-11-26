@@ -56,3 +56,10 @@ test('clears a taller block of text its mark heads: 4 px below the block, or 4 p
   // Near the foot, no room below the block: flips 4 px above the block's first line.
   assert.deepEqual(cardPlace(markAt(180, 452), CARD, SMALLEST, { top: 452, bottom: 488 }), { left: 180, top: 384 });
 });
+
+test('in a view whose height ends at the status bar (500 px at 860×528), a panel card short of room below flips above its panel', () => {
+  const aboveStatus = { width: 860, height: 500 };
+  const panel = { top: 288, bottom: 444 };
+  // Below would put a 69 px card at top 448..517 (over the 28 px status bar); ending view.height at 500 flips it 4 px above the panel.
+  assert.deepEqual(cardPlace(markAt(353, 304), { width: 320, height: 69 }, aboveStatus, panel), { left: 353, top: 215 });
+});

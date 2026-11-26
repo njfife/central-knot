@@ -4,6 +4,7 @@
 // Readme folds. The switch and each tool's box wait their turn in the page's list (pluginstate.ts turnPlugin), and
 // the panel says how its click stands (pluginparts.ts clickNote); Update and the skill switches under Skills act at
 // once (pluginstate.ts applyPluginOps).
+// Fold state lives here while that plugin's page is drawn (shownFolds, drawnPlugin; cleared by afterPluginPageDrawn).
 import { acting, rerender, state as app } from './app.ts';
 import { afterLayout, button, fileBlocks, h, icon, infoMark, toggle as switchToggle, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';

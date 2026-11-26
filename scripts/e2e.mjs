@@ -5559,7 +5559,7 @@ async function fewToolsFlow() {
     await a.shot(`app-only-plugin-${width}`);
     check(`at ${width}×${height} the app-only plugin box’s route line is not cut off`, await a.run(`(() => { const line = document.querySelector('.plugin-tool-via'); const box = line.getBoundingClientRect(); return box.width > 0 && line.scrollWidth <= line.clientWidth + 1 && box.right <= innerWidth; })()`));
     await a.click('#plugin-tools-info');
-    check(`at ${width}×${height} the Your tools card with Cowork fits inside the window and clears the boxes`, await a.run(`(() => { const card = document.getElementById('plugin-tools-info-card'); if (!card?.matches(':popover-open')) return false; const r = card.getBoundingClientRect(); const boxes = [...document.querySelectorAll('[id^="pbox-"]')].map(b => b.getBoundingClientRect()); const clear = boxes.every(b => r.bottom <= b.top || r.top >= b.bottom || r.right <= b.left || r.left >= b.right); return r.width > 0 && card.scrollWidth <= card.clientWidth + 1 && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight && clear; })()`));
+    check(`at ${width}×${height} the Your tools card with Cowork fits above the status bar and clears the boxes`, await a.run(`(() => { const card = document.getElementById('plugin-tools-info-card'); if (!card?.matches(':popover-open')) return false; const r = card.getBoundingClientRect(); const statusTop = document.getElementById('status')?.getBoundingClientRect().top ?? innerHeight; const boxes = [...document.querySelectorAll('[id^="pbox-"]')].map(b => b.getBoundingClientRect()); const clear = boxes.every(b => r.bottom <= b.top || r.top >= b.bottom || r.right <= b.left || r.left >= b.right); return r.width > 0 && card.scrollWidth <= card.clientWidth + 1 && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= statusTop && clear; })()`));
     await a.press('Escape');
   }
   await a.send('Emulation.clearDeviceMetricsOverride');
@@ -20588,11 +20588,11 @@ async function pluginPageSaysLessFlow() {
   await a.click('#nav-plugins');
   await openPluginPage('plain-kit');
 
-  // 1 & 3. Your tools (?) card wording (no Cowork when Claude desktop is absent) and opens clear of every pbox-* at 860 and 1316.
+  // 1 & 3. Your tools (?) card wording (no Cowork when Claude desktop is absent); clears every pbox-* and #status at 860 (opening above its panel) and opens below its panel at 1316.
   same('Your tools has an infoMark whose card explains ticking and unticking without Cowork when Claude desktop is absent',
     [await a.exists('#plugin-cowork-note'), await openCard('plugin-tools-info')],
     [false, [true, 'Tick to turn the plugin or its items on in that tool. Untick to turn them off.']]);
-  for (const [width, height] of [SMALLEST, [1316, 819]]) {
+  for (const [width, height, expectedPlace] of [[...SMALLEST, 'above'], [1316, 819, 'below']]) {
     await sizeTo(a, width, height);
     if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
     await a.click('#plugin-tools-info');
@@ -20600,14 +20600,18 @@ async function pluginPageSaysLessFlow() {
       const card = document.getElementById('plugin-tools-info-card');
       if (!card?.matches(':popover-open')) return { open: false };
       const r = card.getBoundingClientRect();
+      const panel = document.querySelector('.plugin-panel').getBoundingClientRect();
+      const status = document.getElementById('status').getBoundingClientRect();
       const hits = [...document.querySelectorAll('[id^="pbox-"]')].filter(b => {
         const br = b.getBoundingClientRect();
         return !(r.bottom <= br.top || r.top >= br.bottom || r.right <= br.left || r.left >= br.right);
       }).map(b => b.id);
-      return { open: true, hits };
+      const place = r.bottom <= panel.top ? 'above' : r.top >= panel.bottom ? 'below' : 'overlap';
+      const clearsStatus = r.top >= 8 && r.bottom <= status.top - 8;
+      return { open: true, hits, clearsStatus, place, ...(clearsStatus && place === ${JSON.stringify(expectedPlace)} ? {} : { cardTop: Math.round(r.top), cardBottom: Math.round(r.bottom), panelTop: Math.round(panel.top), panelBottom: Math.round(panel.bottom), statusTop: Math.round(status.top) }) };
     })()`);
     await sendKey('Escape', 'Escape', 27);
-    same(`at ${width}×${height} the Your tools card overlaps no pbox-*`, clear, { open: true, hits: [] });
+    same(`at ${width}×${height} the Your tools card overlaps neither a pbox-* nor the status bar and opens ${expectedPlace} the panel`, clear, { open: true, hits: [], clearsStatus: true, place: expectedPlace });
   }
   await fullSize(a);
 
