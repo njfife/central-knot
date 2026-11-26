@@ -157,6 +157,8 @@ export interface Disk<Entry extends Seen> {
    * plugin's stays the person's own, both ways.
    */
   viaPlugin?: ThroughWhichPlugin;
+  /** Skills: managed tools reading `harness`'s skills folder that would load `item` from there (skills.ts readers). */
+  readers?(item: Wanted, harness: HarnessId): HarnessId[];
 }
 /**
  * An item as Disk.held is told of it: its name, where it is wanted (library.ts wantedIn), what was applied where, and its
@@ -571,7 +573,7 @@ export const takeInAnswers = (look: AnyLook, key: string) => {
  * What was asked of a pass for one item (a click, what Pull brings, or what a source holds), as the History entry it becomes:
  * begun when it is recorded, finished with the harnesses its plan writes or removes (`fill`: which of them it names).
  */
-type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'wasExcept' | 'nowExcept' | 'version' | 'previous' | 'foundIn' | 'tookFrom' | 'link' | 'seen' | 'took'>
+type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'wasExcept' | 'nowExcept' | 'alsoRead' | 'version' | 'previous' | 'foundIn' | 'tookFrom' | 'link' | 'seen' | 'took'>
   & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed' };
 /**
  * What Pull brings for one item (gitrepo.ts): its name and content, and where the repo holds one harness's own part, that
@@ -983,16 +985,19 @@ interface Told { events: HistoryEvent[]; named: Map<HistoryEvent | ItemNotice, H
 
 /**
  * Takes each harness whose write or removal was held (carryOut's answer) out of what History was told first for this item:
- * out of each entry and notice that names it as written or removed, and out of an Undo's copies given back (`gaveBack`). An
- * `in-line` entry left naming no harness told nothing that happened, and goes. The rest stays as told: the edits kept, the
- * copies that gave way, and the copies a click took over (`tookFrom`: its Undo gives each back once the write has landed).
+ * out of each entry and notice that names it as written or removed, dropping `alsoRead` when the write into the tool that
+ * was turned on was held, and out of an Undo's copies given back (`gaveBack`). An `in-line` entry left naming no harness
+ * told nothing that happened, and goes. The rest stays as told: the edits kept, the copies that gave way, and the copies a
+ * click took over (`tookFrom`: its Undo gives each back once the write has landed).
  */
 async function untell(pass: Pass, told: Told, held: HarnessId[]) {
   const before = JSON.stringify(told.events);
   for (const [said, writes] of told.named) {
     const out = writes.filter(tool => held.includes(tool));
-    if ('id' in said) said.losers = said.losers.filter(loser => !out.includes(loser.tool));
-    else said.losers = said.losers.filter(tool => !out.includes(tool));
+    if ('id' in said) {
+      said.losers = said.losers.filter(loser => !out.includes(loser.tool));
+      if (out.length) delete said.alsoRead;
+    } else said.losers = said.losers.filter(tool => !out.includes(tool));
   }
   for (const event of told.events) {
     const gaveBack = event.gaveBack?.filter(tool => !held.includes(tool));
@@ -1104,7 +1109,10 @@ async function click(pass: Pass, asked: Change) {
   else turn(pass, item, asked);
 }
 
-/** The switches: the item On or Off (recording changed keep-outs for a person's switch), or one harness kept out or let in. */
+/**
+ * The switches: the item On or Off (recording changed keep-outs for a person's switch), or one harness kept out or let in.
+ * Records `alsoRead` when a person's switch turns the item on in one managed harness alone and `disk.readers` names readers for it.
+ */
 function turn(pass: Pass, item: LibraryItem, asked: Change) {
   const was = { on: item.on, except: item.except };
   Object.assign(item, { on: asked.on, except: [...asked.except] } satisfies Partial<LibraryItem>);
@@ -1113,6 +1121,11 @@ function turn(pass: Pass, item: LibraryItem, asked: Change) {
   if (was.on !== item.on) {
     const entry: Asked = item.on ? { kind: 'on', cause: 'switch', fill: 'written' } : { kind: 'off', cause: 'switch', fill: 'removed' };
     if (!asked.forPlugin && (out || back)) Object.assign(entry, { wasExcept: [...was.except], nowExcept: [...item.except] });
+    if (item.on && !asked.forPlugin) {
+      const onlyIn = pass.managed.filter(tool => !item.except.includes(tool));
+      const alsoRead = onlyIn.length === 1 ? pass.disk.readers?.(item, onlyIn[0]!) : undefined;
+      if (alsoRead?.length) entry.alsoRead = alsoRead;
+    }
     pass.asked.set(item.key, entry);
     return;
   }

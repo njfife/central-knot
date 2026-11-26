@@ -32,7 +32,7 @@
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, noticeNames, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
-import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, orList, pageNames, rowNames, rowNouns,
+import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, orList, pageNames, readsIt, rowNames, rowNouns,
   saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind } from './words.ts';
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
 import { copilotSharesYours } from './profileplan.ts';
@@ -313,7 +313,7 @@ const fromFacts = (kind: PageKind, facts: LibraryFacts): ItemRow => ({
   // An MCP entry has no lines or edit time of its own: the copy question quotes its summary alone.
   versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.lines ? { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), at: copy!.modified, text: copy!.summary || facts.description, ...(copy!.body !== undefined ? { body: copy!.body } : {}) } : { lines: '', changed: '', text: copy!.summary }])),
   ownPart: Object.fromEntries(Object.entries(facts.copies).flatMap(([tool, copy]) => (copy!.ownPart?.length ? [[tool, copy!.ownPart]] : []))),
-  loads: facts.loads, alsoLoads: facts.alsoLoads, anotherWay: facts.anotherWay, readsFrom: facts.readsFrom, takeOver: facts.takeOver, switchedOff: facts.switchedOff,
+  loads: facts.loads, alsoLoads: facts.alsoLoads, anotherWay: facts.anotherWay, readsFrom: facts.readsFrom, readBy: facts.readBy, takeOver: facts.takeOver, switchedOff: facts.switchedOff,
 });
 
 /** The kind's column header ("Server") and its title ("MCP servers"), from words.ts kindNouns. */
@@ -2814,10 +2814,12 @@ function libraryHarnessSwitch(t: Table, lib: LibraryPage, skill: ItemRow, tool: 
       pinRow(t, skill);
       click({ kind: skill.kind, items: [name], rows: [rowKey(skill)], changes: [rowClicks.onOnly(skill, item, tool)], said });
     };
+    const also = skill.readBy?.[tool as HarnessId];
+    const whereOn = also?.length ? `${where}; ${readsIt(also)} from there too` : `${where} only`;
     return h('span.details-tool-actions', {}, own, h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, 'Off'),
       toggle({
         on: false, disabled: writeOff(kindStops(skill.kind)), id: elId('enable', skill, tool),
-        label: `${name} in ${where}: off. Click to turn it on in ${where} only.`, onchange: turnHere,
+        label: `${name} in ${where}: off. Click to turn it on in ${whereOn}.`, onchange: turnHere,
       })));
   }
   const said = (notIn: HarnessId[]) => lib.say.said.inHarness(name, tool, !out, notIn.includes(tool as HarnessId));
