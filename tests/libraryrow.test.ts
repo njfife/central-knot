@@ -551,17 +551,30 @@ test('Opened-row tool lines (detailLine) drop standing filler while closed-row m
   assert.deepEqual(skills.detailLine(row({ 'claude-cli': 'b', 'copilot-cli': 'b' }, {}, out), out, 'codex-cli', 'Codex'), []);
   assert.equal(skills.harnessLine(row({ 'claude-cli': 'b', 'copilot-cli': 'b' }, {}, out), out, 'codex-cli', 'Codex'),
     'Kept out of this tool. Central Knot keeps its folder for when you turn it on here.');
-  // Off row (ordinary and plugin-sourced): Kept out where in except, blank otherwise; closed mark keeps plugin-sourced line.
+  // Off row (ordinary and plugin-sourced): Kept out where in except, blank otherwise; readBy names readers before the click on ordinary Off rows only (never plugin-sourced or On rows).
   const offTwo = item({ on: false, except: ['codex-cli', 'pi-cli'], applied: {} });
   const plainOff = row({}, {}, offTwo);
   assert.deepEqual(skills.detailLine(plainOff, offTwo, 'codex-cli', 'Codex'), [{ text: 'Kept out' }]);
   assert.deepEqual(skills.detailLine(plainOff, offTwo, 'claude-cli', 'Claude Code'), []);
-  const pluginOff = row({}, { fromSource: { link: 'plugin:kit@market' } }, offTwo);
+  const offWithReader = row({}, { readBy: { 'claude-cli': ['opencode-cli'] } }, offTwo);
+  assert.deepEqual(skills.detailLine(offWithReader, offTwo, 'claude-cli', 'Claude Code'), [{ text: 'If on, OpenCode reads it too' }]);
+  assert.deepEqual(skills.detailLine(offWithReader, offTwo, 'opencode-cli', 'OpenCode'), []);
+  const offClaudeOut = item({ on: false, except: ['claude-cli'], applied: {} });
+  assert.deepEqual(skills.detailLine(row({}, { readBy: { 'claude-cli': ['opencode-cli'] } }, offClaudeOut), offClaudeOut, 'claude-cli', 'Claude Code'),
+    [{ text: 'Kept out' }, { text: 'If on, OpenCode reads it too' }]);
+  assert.deepEqual(skills.detailLine(row({}, { readBy: { 'claude-cli': ['opencode-cli', 'pi-cli'] } }, offTwo), offTwo, 'claude-cli', 'Claude Code'),
+    [{ text: 'If on, OpenCode and Pi read it too' }]);
+  assert.deepEqual(skills.detailLine(row(all, { readBy: { 'claude-cli': ['opencode-cli'] } }, onItem), onItem, 'claude-cli', 'Claude Code'), []);
+  const onClaudeOut = item({ except: ['claude-cli'], applied: { 'copilot-cli': 'b', 'codex-cli': 'b' } });
+  assert.deepEqual(skills.detailLine(row({ 'copilot-cli': 'b', 'codex-cli': 'b' }, { readBy: { 'claude-cli': ['opencode-cli'] } }, onClaudeOut), onClaudeOut, 'claude-cli', 'Claude Code'), []);
+  const pluginOff = row({}, { fromSource: { link: 'plugin:kit@market' }, readBy: { 'claude-cli': ['opencode-cli'] } }, offTwo);
   assert.deepEqual(skills.detailLine(pluginOff, offTwo, 'pi-cli', 'Pi'), [{ text: 'Kept out' }]);
   assert.deepEqual(skills.detailLine(pluginOff, offTwo, 'claude-cli', 'Claude Code'), []);
   assert.equal(skills.harnessLine(pluginOff, offTwo, 'pi-cli', 'Pi'), 'No copy while it is off.');
-  // Found row with no copy keeps its line.
+  // Found row with no copy keeps its line; a tool waiting on another's folder reads readBy (not the sentence text).
   assert.deepEqual(skills.detailLine(row({ 'claude-cli': 'a' }), undefined, 'codex-cli', 'Codex'), [{ text: 'No copy. Adding it puts it here.' }]);
+  assert.deepEqual(skills.detailLine(row({ 'codex-cli': 'a' }, { anotherWay: { 'opencode-cli': 'Any wording.' }, readBy: { 'claude-cli': ['opencode-cli'] } }), undefined, 'opencode-cli', 'OpenCode'),
+    [{ text: 'Gets it from Claude Code’s skills folder once it is on there.' }]);
   // Reads another tool's folder (skills.ts anotherWay -> readsFrom): short label with T1.10 card; kept-out another-way, link, shared folder, and non-CK copy stay whole.
   const opencodeReads = row({ 'claude-cli': 'b' }, {
     anotherWay: { 'opencode-cli': 'OpenCode reads Claude Code’s copy, in Claude Code’s skills folder.' },

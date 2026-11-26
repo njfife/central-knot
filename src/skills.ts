@@ -124,6 +124,7 @@ export async function readDisk(context: ShareContext, managed: HarnessId[]): Pro
     // A tool that won't take the skill (its shape, a name it reserves) keeps any copy it has.
     refuses: (item, tool) => disk.cannotTake(item, tool),
     lostShared: (item, tool) => lostShared(context, disk, item, tool),
+    readers: (item, tool) => readers(context, disk, managed, item, tool),
   };
   const sound: HarnessId[] = [];
   for (const tool of managed) if (await readOwnFolder(context, disk, tool, sharedAt, reads)) sound.push(tool);
@@ -256,7 +257,8 @@ function anotherWay(disk: SkillDisk, managed: HarnessId[], item: Wanted, tool: H
   if (!source || !managed.includes(source) || depth) return undefined;
   const there = toolName(source);
   const reallyThere = wantedIn(item, source) && !disk.locked.has(source) && !disk.cannotTake(item, source) && !anotherWay(disk, managed, item, source, depth + 1);
-  // Said as it is now: a copy there, or (a found skill, say) the folder it will be in once it is on there (libraryrow.ts detailLine shortens it for found rows).
+  // Said as it is now: a copy there, or (a found skill, say) the folder it will be in once it is on there;
+  // for found rows, libraryrow.ts detailLine shortens this using readBy (who would read that folder per readers).
   if (reallyThere) return disk.byKey.get(item.key)?.[source]
     ? { readsFrom: source, why: `${nameOf(tool)} reads ${there}’s copy, in ${there}’s skills folder.` }
     : { why: `${nameOf(tool)} reads ${there}’s skills folder, so it gets the skill from there once it is on in ${there}.` };
@@ -264,6 +266,19 @@ function anotherWay(disk: SkillDisk, managed: HarnessId[], item: Wanted, tool: H
   const leftThere = { why: `${nameOf(tool)} reads a copy in ${there}’s skills folder, which is not Central Knot’s.` };
   if (!wantedIn(item, source) && (left || unseenIn(disk, source, item.key))) return leftThere;
   return undefined;
+}
+
+/**
+ * Managed tools that read `source`'s skills folder and would load `item` from there (can take its shape, no copy or way of
+ * their own, not denied in their own settings), when `source` itself is managed, writable and can take a copy of its own.
+ */
+function readers(context: ShareContext, disk: SkillDisk, managed: HarnessId[], item: Wanted, source: HarnessId): HarnessId[] {
+  if (!managed.includes(source) || disk.locked.has(source) || disk.cannotTake(item, source) || anotherWay(disk, managed, item, source, 1) || unseenIn(disk, source, item.key)) return [];
+  const shape = disk.shapes.get(item.key);
+  const target: SwitchTarget = { folder: item.name, name: shape && !shape.opencodeProblem ? shape.name : item.name, skillFile: join(rootOf(context, source), item.name, 'SKILL.md') };
+  return managed.filter(tool => disk.readsFrom[tool] === source && !disk.byKey.get(item.key)?.[tool] && !unseenIn(disk, tool, item.key)
+    && !disk.cannotTake(item, tool) && !disk.linked(item, tool) && !pluginFor(disk, item.key, tool) && !disk.ways.get(item.key)?.[tool]
+    && !isDisabled(context, disk.switches.get(tool)!, target));
 }
 
 /**
@@ -804,7 +819,7 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
   const copies: Partial<Record<HarnessId, ToolCopy>> = {};
   for (const copy of entries) copies[copy.tool] = toolCopy(copy);
   const copiesNow = item ? copiesOf(look, item) : undefined, made = item && copiesNow ? plan(item, copiesNow) : undefined;
-  const facts: ToolFacts = { cannot: {}, unseen: {}, plugin: {}, anotherWay: {}, readsFrom: {}, takeOver: {}, loads: {}, alsoLoads: {} };
+  const facts: ToolFacts = { cannot: {}, unseen: {}, plugin: {}, anotherWay: {}, readsFrom: {}, readBy: {}, takeOver: {}, loads: {}, alsoLoads: {} };
   for (const tool of look.managed) toolFacts(look, { key, name, item, copiesNow, made, link: fromSource?.link }, tool, facts);
   const switchProblem = Object.fromEntries(Object.keys(facts.loads).flatMap(tool => { const problem = disk.switches.get(tool as HarnessId)?.problem; return problem ? [[tool, problem]] : []; }));
   // Its description is the current version's, else a copy's (readDisk's shapes).
@@ -816,7 +831,8 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
     key, name, description, copies, on: !!item?.on, except: item?.except ?? [], cannot: facts.cannot, edited,
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
       : { takeInAnswers: takeInAnswers(look, key), choiceBlocks: choiceBlocksOf(entries), ...some('folderHashes', folderHashes) }),
-    ...some('plugin', facts.plugin), ...some('unseen', facts.unseen), ...some('anotherWay', facts.anotherWay), ...some('readsFrom', facts.readsFrom), ...some('takeOver', facts.takeOver),
+    ...some('plugin', facts.plugin), ...some('unseen', facts.unseen), ...some('anotherWay', facts.anotherWay),
+    ...some('readsFrom', facts.readsFrom), ...some('readBy', facts.readBy), ...some('takeOver', facts.takeOver),
     ...some('loads', facts.loads), ...some('alsoLoads', facts.alsoLoads), ...some('switchedOff', Object.keys(facts.loads).filter(tool => facts.loads[tool as HarnessId]!.switchedOff)), ...some('switchProblem', switchProblem),
     ...(fromSource ? { fromSource } : {}),
   };
@@ -825,8 +841,8 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
 /** What a row says of each tool, filled in by toolFacts: one map per kind of fact, by tool. */
 interface ToolFacts {
   cannot: LibraryFacts['cannot']; unseen: NonNullable<LibraryFacts['unseen']>; plugin: NonNullable<LibraryFacts['plugin']>;
-  anotherWay: NonNullable<LibraryFacts['anotherWay']>; readsFrom: NonNullable<LibraryFacts['readsFrom']>; takeOver: NonNullable<LibraryFacts['takeOver']>; loads: NonNullable<LibraryFacts['loads']>;
-  alsoLoads: NonNullable<LibraryFacts['alsoLoads']>;
+  anotherWay: NonNullable<LibraryFacts['anotherWay']>; readsFrom: NonNullable<LibraryFacts['readsFrom']>; readBy: NonNullable<LibraryFacts['readBy']>;
+  takeOver: NonNullable<LibraryFacts['takeOver']>; loads: NonNullable<LibraryFacts['loads']>; alsoLoads: NonNullable<LibraryFacts['alsoLoads']>;
 }
 type RowOf = { key: string; name: string; item: LibraryItem | undefined; copiesNow?: ReturnType<typeof copiesOf>; made?: ReturnType<typeof plan>; link?: string };
 
@@ -853,6 +869,8 @@ function toolFacts(look: SkillLook, row: RowOf, tool: HarnessId, facts: ToolFact
   if (way) facts.anotherWay[tool] = `${way.why}${outsideCopy && movedOn(item, outsideCopy.hash) ? ` ${MOVED_ON}` : ''}`;
   else if (why && (copy?.is === 'held' || touched || (!copiesNow && !here))) facts.cannot[tool] = why;
   if (way?.readsFrom) facts.readsFrom[tool] = way.readsFrom;
+  const readBy = readers(look.context, disk, look.managed, asIf, tool);
+  if (readBy.length) facts.readBy[tool] = readBy;
   // Take over is for a skill in Central Knot: a found one is taken in first.
   if (item && !item.deleted && outsideWay?.take && outsideCopy) facts.takeOver[tool] = { kind: outsideWay.take, path: outsideWay.path };
   const loaded = pluginLoads && !here ? undefined : loadedCopy(look, key, tool), also = pluginLoads ? undefined : copyInRead(disk, key, tool);

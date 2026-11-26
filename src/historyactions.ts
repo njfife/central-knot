@@ -79,7 +79,7 @@ import { itemKey, pendingChanges, theVersion, type LibraryItem } from './library
 import { linkLabel, pluginOf } from './sourcelink.ts';
 import { asItIs, noTimeTells, versionClock, type RowWords } from './libraryrow.ts';
 import type { Change, HarnessId, HistoryEvent, HomeView, LibraryFacts, PartKind } from './types.ts';
-import { andList, deletedIn, harnessIds, sentence, toolName, toolsPhrase, turnIt } from './words.ts';
+import { andList, deletedIn, harnessIds, readsIt, sentence, toolName, toolsPhrase, turnIt } from './words.ts';
 
 /**
  * Whose a History entry is among the library's kinds, by the page's name for the kind (app.ts PageKind), with the item's key.
@@ -140,12 +140,16 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       if (event.cause === 'in-line' && event.only) return { glyph: 'circle-check', text: `Copied to ${where}.${away}` };
       if (event.cause === 'in-line') return { glyph: 'circle-check', text: `Written over in ${tools} with the current version when sync reached ${event.losers.length === 1 ? 'it' : 'them'}; what was there is one of its versions.` };
       if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}${named(event.only) && !over.length ? `: its ${words.copy} there is back` : ''}.${overSaid}${gaveSaid}${away}` };
+      const reads = event.alsoRead?.length ? `${readsIt(event.alsoRead)} too` : '';
       const onlyIn = event.cause === 'switch' && event.nowExcept ? harnessIds.filter(tool => !event.nowExcept!.includes(tool)) : [];
-      if (onlyIn.length === 1) return { glyph: 'circle-check', text: `Turned on in ${toolName(onlyIn[0]!)}; kept out of every other tool.${overSaid}${gaveSaid}` };
+      if (onlyIn.length === 1) {
+        const rest = reads ? `${reads}; kept out of the rest` : 'kept out of every other tool';
+        return { glyph: 'circle-check', text: `Turned on in ${toolName(onlyIn[0]!)}; ${rest}.${overSaid}${gaveSaid}` };
+      }
       // A plugin's read brought it in with the plugin's On (library.ts A PLUGIN).
       if (event.cause === 'source') return { glyph: 'link-2', text: `Brought in from ${source}${also(': put in')}.` };
       const said = {
-        switch: { glyph: 'circle-check', text: `Turned on${also(': put in')}.` },
+        switch: { glyph: 'circle-check', text: `Turned on${also(': put in')}${reads ? `; ${reads}` : ''}.` },
         found: { glyph: 'plus', text: `Found in ${from} and taken into Central Knot${also('; put in')}.` },
         'sync-everything': { glyph: 'plus', text: `Found in ${from} and taken into Central Knot by Synchronize everything${also('; put in')}.` },
         pulled: { glyph: 'git-branch', text: `Pulled from the Git repo into Central Knot${also('; put in')}.` },
