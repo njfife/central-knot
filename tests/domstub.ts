@@ -1,4 +1,4 @@
-// Shared minimal fake DOM for renderer page unit tests (sessionspage.test.ts, harnesspage.test.ts).
+// Shared minimal fake DOM for renderer page unit tests (sessionspage.test.ts, harnesspage.test.ts, settingspage.test.ts).
 export interface FakeNode {
   tag: string;
   className: string;
@@ -10,6 +10,7 @@ export interface FakeNode {
   content: { firstElementChild?: FakeNode };
   onclick?: (event: unknown) => void;
   focused: number;
+  textContent: string;
   setAttribute: (key: string, value: string) => void;
   addEventListener: () => void;
   replaceChildren: (...kids: unknown[]) => void;
@@ -17,8 +18,19 @@ export interface FakeNode {
   focus: () => void;
   scrollTo: () => void;
   click: () => void;
-  querySelector: (selector: string) => FakeNode;
+  querySelector: (selector: string) => FakeNode | null;
 }
+
+const queryIn = (root: FakeNode, selector: string): FakeNode | null => {
+  let scope: FakeNode | undefined = root;
+  for (const part of selector.trim().split(/\s+/)) {
+    if (!scope) return null;
+    if (part.startsWith('#')) scope = findById(scope, part.slice(1));
+    else if (part.startsWith('.')) scope = findNode(scope, el => el.className.split(/\s+/).includes(part.slice(1)));
+    else return makeElement();
+  }
+  return scope ?? null;
+};
 
 export const makeElement = (tag = 'div'): FakeNode => {
   const node: FakeNode = {
@@ -31,6 +43,12 @@ export const makeElement = (tag = 'div'): FakeNode => {
     children: [],
     content: {},
     focused: 0,
+    get textContent() {
+      return textOf(node);
+    },
+    set textContent(value: string) {
+      node.children = [value];
+    },
     setAttribute(key: string, value: string) {
       this.attrs[key] = value;
     },
@@ -49,7 +67,9 @@ export const makeElement = (tag = 'div'): FakeNode => {
       if ('disabled' in this.attrs) return;
       this.onclick?.({ stopPropagation() {} });
     },
-    querySelector: () => makeElement(),
+    querySelector(selector: string) {
+      return queryIn(node, selector);
+    },
   };
   return node;
 };

@@ -5384,11 +5384,11 @@ async function updateFlow() {
     for (let i = 0; i < 80 && !(await control())?.title.startsWith('Up to date'); i++) await wait(250);
     same('a newer release with Mac files alone is no update here: after the first check the control is the quiet arrows', [(await control())?.look, (await control())?.title], ['check', 'Up to date. Click to check now.']);
     await a.click('#nav-settings');
-    same('Settings › Updates says the build without schedule or sidebar directions, names Check for updates with live aria-describedby, and says this copy doesn’t install updates itself', [
+    same('Settings › Updates says the build without schedule or sidebar directions, names Check now for updates with live aria-describedby, and says this copy doesn’t install updates itself', [
       await a.text('#setting-updates-hint'), await a.run(`document.getElementById('check-updates')?.getAttribute('aria-label')`),
       await a.run(`(document.getElementById('check-updates')?.getAttribute('aria-describedby') ?? '').split(/\\s+/).filter(Boolean).every(id => !!document.getElementById(id))`),
       await line('setting-updates-reason'), await a.exists('#check-updates'), await a.exists('#setting-update'),
-    ], ['This is Central Knot 0.5.0 preview 4.', 'Check for updates', true, [why, 'Open the releases page'], true, false]);
+    ], ['This is Central Knot 0.5.0 preview 4.', 'Check now for updates', true, [why, 'Open the releases page'], true, false]);
     // Update check progress is announced via role="status" without moving focus from another control.
     await a.run(`(() => {
       window.ckUpdateSeen = [];
@@ -5473,7 +5473,7 @@ async function updateFlow() {
       ['Central Knot 0.5.0 preview 5 is available. What’s new', 'Update to 0.5.0 preview 5']);
     await a.click('#nav-settings');
     const row = await a.text('#setting-updates') ?? '';
-    check('Settings › Updates names the build and what is available, without schedule or sidebar directions', await a.text('#setting-updates-hint') === 'This is Central Knot 0.5.0 preview 4.' && row.includes('0.5.0 preview 5 is available.') && await a.exists('#check-updates') && await a.exists('#setting-update') && await a.run(`document.getElementById('check-updates')?.getAttribute('aria-label') === 'Check for updates'`), row);
+    check('Settings › Updates names the build and what is available, without schedule or sidebar directions', await a.text('#setting-updates-hint') === 'This is Central Knot 0.5.0 preview 4.' && row.includes('0.5.0 preview 5 is available.') && await a.exists('#check-updates') && await a.exists('#setting-update') && await a.run(`document.getElementById('check-updates')?.getAttribute('aria-label') === 'Check now for updates'`), row);
     // Check now from the keyboard: the button is disabled under the focus while it checks, and takes the focus back.
     const focused = () => a.run(`document.activeElement?.id ?? ''`);
     const press = id => a.run(`(document.getElementById('${id}').focus(), document.getElementById('${id}').click(), true)`);
@@ -7146,7 +7146,7 @@ async function syncEverythingFlow() {
   for (let tries = 0; tries < 30 && !(await a.exists('#setting-sync-everything')); tries++) await wait(100);
   same('Settings › This home: Synchronize everything is off, moves its paragraph behind its mark with live aria-describedby, and says what it would add now and what waits',
     [await ruleOn(), await ruleSays(), await a.exists('#setting-sync-everything-hint'), await a.run(`document.getElementById('setting-sync-everything-info')?.getAttribute('aria-label')`), await a.run(`document.getElementById('sync-everything-on')?.getAttribute('aria-describedby')`)],
-    ['false', 'Turning it on adds the 2 items found in your tools now. 1 found item has copies that differ and waits for your choice of copy.', false, 'About Synchronize everything', 'setting-sync-everything-info-card setting-sync-everything-notice']);
+    ['false', 'Turning it on puts the 2 items found in your tools into every tool now. 1 found item has copies that differ and waits for your choice of copy.', false, 'About Synchronize everything', 'setting-sync-everything-info-card setting-sync-everything-notice']);
   await checkCard(a, 'setting-sync-everything-info', 'What turns up in a tool is turned on in every tool. Items whose copies differ wait for your choice.', 'Synchronize everything card');
   await fitsAtMinimum(a, 'Settings with Synchronize everything off');
   await a.shot('everything-off');
@@ -9552,11 +9552,11 @@ esac
   check('with nothing behind, the first check by itself changes nothing and says so', await until(() => noted().checked?.at) && noted().checked.updated === 0 && calls().length === 0 && versions()['issue-tracker'] === '1.9.0', JSON.stringify(noted()));
   await a.click('#nav-settings');
   for (let tries = 0; tries < 50 && !/Last checked/.test(await a.text('#setting-plugin-updates') ?? ''); tries++) await wait(100);
-  check('Settings has the switch, on, keeps Updates can’t be undone., names Check for plugin updates and its mark with live aria-describedby, and says what the last check came to',
+  check('Settings has the switch, on, keeps Updates can’t be undone., names Check now for plugin updates and its mark with live aria-describedby, and says what the last check came to',
     await a.run(`document.querySelector('#plugin-updates-on')?.getAttribute('aria-checked')`) === 'true'
     && await a.text('#setting-plugin-updates-hint') === 'Updates can’t be undone.'
     && await a.run(`document.getElementById('setting-plugin-updates-info')?.getAttribute('aria-label')`) === 'About Update plugins automatically'
-    && await a.run(`document.getElementById('check-plugin-updates')?.getAttribute('aria-label')`) === 'Check for plugin updates'
+    && await a.run(`document.getElementById('check-plugin-updates')?.getAttribute('aria-label')`) === 'Check now for plugin updates'
     && await a.run(`['check-plugin-updates', 'plugin-updates-on'].every(id => (document.getElementById(id)?.getAttribute('aria-describedby') ?? '').split(/\\s+/).filter(Boolean).every(ref => !!document.getElementById(ref)))`)
     && /Last checked today at .*\. Nothing needed updating\./.test(await a.text('#setting-plugin-updates-notice') ?? '') && await a.exists('#check-plugin-updates'), await a.text('#setting-plugin-updates'));
   await checkCard(a, 'setting-plugin-updates-info', 'Every four hours, window closed too. A plugin you turned off stays off.', 'Update plugins automatically card');

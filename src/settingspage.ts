@@ -397,7 +397,7 @@ function updatesRow(): HTMLElement | null {
   return settingRow('updates', 'Updates', hint,
     h('div.setting-actions', {},
       settingUpdateButton(),
-      checks ? button({ variant: 'outline', label: 'Check now', name: 'Check for updates', id: 'check-updates', disabled: updates.checking || view.checking || !!view.step, onclick: () => void checkNow(), attrs: { 'aria-describedby': described } }) : null),
+      checks ? button({ variant: 'outline', label: 'Check now', name: 'Check now for updates', id: 'check-updates', disabled: updates.checking || view.checking || !!view.step, onclick: () => void checkNow(), attrs: { 'aria-describedby': described } }) : null),
     notice, why || undefined);
 }
 
@@ -419,7 +419,7 @@ function pluginUpdatesRow(): HTMLElement {
   const described = [infoCardId('setting-plugin-updates-info'), 'setting-plugin-updates-hint', notice && 'setting-plugin-updates-notice'].filter(Boolean).join(' ');
   return settingRow('plugin-updates', 'Update plugins automatically', 'Updates can’t be undone.',
     h('div.setting-actions', {},
-      on ? button({ variant: 'outline', label: 'Check now', name: 'Check for plugin updates', id: 'check-plugin-updates', disabled: !view || view.checking || pluginUpdates.asked, onclick: () => void checkPluginsNow(), attrs: { 'aria-describedby': described } }) : null,
+      on ? button({ variant: 'outline', label: 'Check now', name: 'Check now for plugin updates', id: 'check-plugin-updates', disabled: !view || view.checking || pluginUpdates.asked, onclick: () => void checkPluginsNow(), attrs: { 'aria-describedby': described } }) : null,
       // Unchangeable until main has said, so a click never acts on a guess.
       toggle({ on, label: 'Update plugins automatically', onchange: chosen => void choosePluginUpdates(chosen), disabled: !current, id: 'plugin-updates-on',
         attrs: { 'aria-describedby': described, title: null } })),
@@ -494,7 +494,7 @@ function syncEverythingRow(): HTMLElement | null {
   const on = !!home.sync.syncEverything, cannot = whyReadOnly(home) ?? (home.sync.gate.state === 'needs-resume' ? home.sync.gate.reason : undefined);
   const { takes, choosing } = whatYesDoes(home);
   const waiting = choosing ? `${plural(choosing, 'found item')} ${choosing === 1 ? 'has' : 'have'} copies that differ and ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy.` : '';
-  const adds = !on ? (takes ? `Turning it on adds the ${plural(takes, 'item')} found in your tools now.` : 'Nothing found in your tools now would be added.') : '';
+  const adds = !on ? (takes ? `Turning it on puts the ${plural(takes, 'item')} found in your tools into every tool now.` : 'Nothing found in your tools now would be added.') : '';
   const later = on && !home.syncOn ? 'Automatic sync is off, so it takes items in at Sync once.' : '';
   // What it leaves for good, said beside what it would add: found items taken out of Central Knot earlier.
   const out = takenOutEarlier(home);
