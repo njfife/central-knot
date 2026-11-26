@@ -31,7 +31,7 @@
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, noticeNames, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
-import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, pageNames, rowNames, rowNouns, saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind } from './words.ts';
+import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, orList, pageNames, rowNames, rowNouns, saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind } from './words.ts';
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
 import { copilotSharesYours } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
@@ -417,7 +417,7 @@ const newView = () => ({
   openedAt: 0,
   /** The Files view's "Where each copy is", once the person opens or closes it; until then it follows the pane's width. */
   whereOpen: undefined as boolean | undefined,
-  /** Whether the unused band's "Limits and left out" disclosure is open. */
+  /** Whether the unused band's "What’s counted" disclosure is open. */
   unusedLimits: false,
 });
 /** What one table keeps between draws. */
@@ -530,7 +530,6 @@ const fromOffered = (from: From) => fromMenu().flat().some(entry => entry.value 
  */
 function relist(t: Table, choice: Partial<Pick<View, 'from' | 'filter'>>) {
   Object.assign(t.view, choice);
-  if (choice.filter && choice.filter !== 'unused') t.view.unusedLimits = false;
   if (!listedRows(t).some(row => idOf(row) === t.view.comparing)) Object.assign(t.view, { comparing: undefined, confirmDelete: undefined });
   listFromTop(t);
   rerender();
@@ -1579,10 +1578,8 @@ function tableOf(name: keyof typeof views, kinds: PageKind[], harness?: Tool, fi
   if (pinnedHere(t).rows.size > 0) return t;
   const over = overEveryKind(t);
   if (t.view.filter === 'attention' && !copiesDifferChipShown(over)) t.view.filter = 'all';
-  if (t.view.filter === 'unused' && (!reading(over) || !unusedCount(over.kinds))) {
-    t.view.filter = 'all';
-    t.view.unusedLimits = false;
-  }
+  if (t.view.filter === 'unused' && (!reading(over) || !unusedCount(over.kinds))) t.view.filter = 'all';
+  if (t.view.filter !== 'unused') t.view.unusedLimits = false;
   return t;
 }
 /** The segment the Library was last drawn for (useLibrary), so another one starts its list afresh. */
@@ -1598,7 +1595,6 @@ function useLibrary(): Table {
   const t = tableOf('library', segmentKinds());
   if (!moved) return t;
   view.confirmDelete = undefined;
-  view.unusedLimits = false;
   if (view.comparing && ![...rowsIn(t), ...plugged(t).rows].some(row => idOf(row) === view.comparing)) view.comparing = undefined;
   return t;
 }
@@ -2387,12 +2383,12 @@ function usageBand(t: Table) {
     closeButton(() => { state.usageBand = false; rerender(); }, { id: 'usage-line-close', label: 'Close this line about usage statistics', title: 'Close' }));
 }
 
-/** How far back each tool's history goes (usagerow.ts toolHistories), as a sentence: "Each tool’s history: Claude Code, 30 days or more; Codex, from Nov 2." A tool's phrase never wraps inside. */
+/** How far back each tool's history goes (usagerow.ts toolHistories), as a line: "History read: Claude Code, 30 days or more; Codex, from Nov 2." A tool's phrase never wraps inside. */
 function reachWords(read: UsageReading) {
-  const back = (each: ToolHistory) => (each.goes === 'unread' ? 'couldn’t be read' : each.goes === 'partial' ? 'partly read' : each.goes === 'none' ? 'no sessions'
+  const back = (each: ToolHistory) => (each.goes === 'unread' ? 'not read' : each.goes === 'partial' ? 'partly read' : each.goes === 'none' ? 'no sessions found'
     : each.goes === 'from' ? `from ${dayWords(each.from)}` : `${USAGE_DAYS} days or more`);
   const tools = state.home ? toolHistories(read, state.home) : [];
-  return tools.length ? `Each tool’s history: ${tools.map(each => `${names[each.tool]}, ${back(each)}`.replace(/ /g, '\u00a0')).join('; ')}.` : '';
+  return tools.length ? `History read: ${tools.map(each => `${names[each.tool]}, ${back(each)}`.replace(/ /g, '\u00a0')).join('; ')}.` : '';
 }
 
 /**
@@ -2410,7 +2406,10 @@ function usedCell(t: Table, row: ItemRow | PluginRow) {
   const words = !figure ? 'can’t say' : 'used' in figure ? `used ${sinceThen(Date.parse(figure.used))}`
     : figure.since ? `no use seen since ${dayWords(figure.since)}` : `no use seen in ${USAGE_DAYS} days`;
   const count = figure && 'used' in figure ? ` · ${plural(figure.sessions, 'session')}` : '';
-  const title = figure ? `${sentence(words + count)}. Open the row for each tool’s figure.` : 'No tool that has it on can tell whether it was used. Open the row for why.';
+  const skipped = t.view.filter === 'unused' && !isPluginRow(row) && inUnusedChip(t, row) && !!factsOf(row) && leftToItsRow(factsOf(row)!);
+  const title = !figure ? 'No tool that has it on can tell whether it was used. Open the row for why.'
+    : `${sentence(words + count)}.${skipped ? ' Skipped by Turn off (from a plugin).' : ''} Open the row for each tool’s figure.`;
+  if (skipped) return h('div.ov-used.ov-used-skip', { role: 'cell', title }, 'from a plugin · skipped');
   return h(`div.ov-used${figure ? '' : '.ov-used-faint'}`, { role: 'cell', title }, words, count ? h('span.ov-used-count', {}, count) : null);
 }
 
@@ -2444,14 +2443,19 @@ export function unusedCount(kinds: readonly PageKind[]): number {
 }
 
 /**
- * The chip's band: one line with the count, a keyboard-accessible "Limits and left out" disclosure (other computers, unread
- * tools, each tool's reach, recording limits and excluded new/found items) and "Turn N off everywhere" (skipping plugin items
- * and items linked to a plugin). When the current kind runs out while other kinds still have unused items, names the rest with
- * a segment button ("Show Agents" or "Show all N"); omitted when Find or From leaves none.
+ * The chip's band: one line with the count, any skipped plugin count (with own-row wording when every row is skipped),
+ * any managed tool whose history was not read at all, a keyboard-accessible "What’s counted" disclosure (three lines:
+ * history read, what is not recorded, and excluded new/found items) and "Turn N off everywhere". When the current kind
+ * runs out while other kinds still have unused items, names the rest with a segment button ("Show Agents" or "Show all N").
+ * No band on a tool's tab, on All with nothing shown, when Find or From leaves none, or when pinned rows alone hold the
+ * chip on with no other kinds left.
  */
 function unusedBand(t: Table, shown: ItemRow[]) {
   const read = reading(t), home = state.home, sums = kindParts(t).flatMap(({ kind, usage }) => (usage ? [{ kind, sum: usage }] : []));
   if (!read || !home || !sums.length) return null;
+  const shell = (lead: string, action: HTMLElement | null, extra?: HTMLElement, more?: HTMLElement | null) =>
+    h('div.band.usage-band', { role: 'status', id: 'unused-band' },
+      icon('history', 14, 'tone-muted'), h('span.band-text', {}, h('span.usage-lead', {}, lead), extra ?? null), action, more ?? null);
   if (!shown.length) {
     const current = segment();
     if (t.tool || current === 'all' || t.view.find.trim() || t.view.from !== 'anywhere') return null;
@@ -2465,23 +2469,26 @@ function unusedBand(t: Table, shown: ItemRow[]) {
     const lead = `No unused ${kindNouns[current].many} left. ${rest} ${total === 1 ? 'has' : 'have'} no use seen in ${USAGE_DAYS} days.`;
     const target = other.length === 1 ? other[0]!.kind : 'all';
     const label = other.length === 1 ? `Show ${kindNouns[other[0]!.kind].title}` : `Show all ${total}`;
-    const show = button({ variant: 'outline', size: 'micro', label, id: 'unused-show-other', onclick: pickSegment(target) });
-    return h('div.band.usage-band', { role: 'status', id: 'unused-band' },
-      icon('history', 14, 'tone-muted'),
-      h('span.band-text', {}, h('span.usage-lead', {}, lead)),
-      show);
+    return shell(lead, button({ variant: 'outline', size: 'micro', label, id: 'unused-show-other', onclick: pickSegment(target) }));
   }
   // How many, in the nouns of the kinds counted ("3 skills", or "3 items" of several kinds: words.ts rowNouns).
   const counted = (rows: { kind: PageKind }[]) => { const { one, many } = rowNouns(rows.map(row => row.kind)); return plural(rows.length, one, many); };
   const left = (pick: (sum: KindUsage) => unknown[]) => sums.flatMap(({ kind, sum }) => pick(sum).map(() => ({ kind })));
   const off = toTurnOff(shown), kept = shown.filter(row => !off.includes(row));
   const fresh = left(sum => sum.tooNew), found = left(sum => sum.foundNoneSeen);
-  // The page's tools that record a kind only sometimes ('seen'), or never (no entry), kind by kind.
-  const record = (how: 'seen' | undefined, word: string) => sums.map(({ kind }) => {
-    const list = read.tools.filter(each => toolsFor(t, kind).includes(each.tool) && each.sessions && !each.unread && each.tells[partOfPage[kind]] === how).map(each => each.tool);
-    return list.length ? `${toolsInWords(list)} ${list.length === 1 ? 'doesn’t' : 'don’t'}${word} record which ${kindNouns[kind].one} was used.` : '';
-  }).filter(Boolean).join(' ');
-  const lead = [`${shown.length} with no use seen in ${USAGE_DAYS} days.`, kept.length ? `${kept.length} from a plugin skipped.` : ''].filter(Boolean).join(' ');
+  const unread = toolHistories(read, home).filter(each => home.sync.managed.includes(each.tool) && each.goes === 'unread').map(each => each.tool);
+  // The page's tools that record a kind only sometimes ('seen'), or never (no entry), merged per tool.
+  const caveats = read.tools.filter(each => each.sessions && !each.unread).flatMap(each => {
+    const of = (how: 'seen' | undefined) => sums.filter(({ kind }) => toolsFor(t, kind).includes(each.tool) && each.tells[partOfPage[kind]] === how).map(({ kind }) => kindNouns[kind].many);
+    const bits = [of('seen').length ? `always record ${orList(of('seen'))}` : '', of(undefined).length ? `record ${orList(of(undefined))}` : ''].filter(Boolean);
+    return bits.length ? [`${names[each.tool]} doesn’t ${bits.join(' or ')}`] : [];
+  });
+  const excluded = [fresh.length ? `${counted(fresh)} under ${USAGE_DAYS} days old` : '', found.length ? `${counted(found)} found, not yet in Central Knot` : ''].filter(Boolean);
+  const lead = [
+    `${shown.length} with no use seen in ${USAGE_DAYS} days.`,
+    kept.length ? `${kept.length} from a plugin skipped${off.length ? '.' : ': turn each off on its own row.'}` : '',
+    unread.length ? `${toolsInWords(unread)} history not read.` : '',
+  ].filter(Boolean).join(' ');
   const open = t.view.unusedLimits;
   const toggleLimits = h('button.inline-link.usage-limits-toggle', {
     type: 'button',
@@ -2492,17 +2499,16 @@ function unusedBand(t: Table, shown: ItemRow[]) {
       t.view.unusedLimits = !open;
       rerender();
     },
-  }, 'Limits and left out', icon(open ? 'chevron-down' : 'chevron-right', 12));
-  const more = ['A use on another computer or in a tool not read isn’t seen.', reachWords(read), record('seen', ' always'), record(undefined, ''),
-    fresh.length ? `Left out: ${counted(fresh)} under ${USAGE_DAYS} days old.` : '', found.length ? `Left out: ${counted(found)} found, not yet in Central Knot.` : ''];
+  }, 'What’s counted', icon(open ? 'chevron-down' : 'chevron-right', 12));
+  const more = [
+    reachWords(read),
+    `Not recorded: ${['uses on another computer or in tools not read', ...caveats].join('; ')}.`,
+    excluded.length ? `Not counted: ${excluded.join('; ')}.` : '',
+  ].filter(Boolean);
   const turn = off.length ? button({ variant: 'outline', size: 'micro', label: `Turn ${off.length} off everywhere`, id: 'turn-unused-off',
     // The home's gate: a kind whose own record stops its writes is skipped and named by the click (app.ts applyByKind).
     disabled: writeOff(homeStops()) || state.usage.state === 'reading', onclick: () => turnTheseOff(off) }) : null;
-  return h('div.band.usage-band', { role: 'status', id: 'unused-band' },
-    icon('history', 14, 'tone-muted'),
-    h('span.band-text', {}, h('span.usage-lead', {}, lead), toggleLimits),
-    turn,
-    open ? h('span.usage-more', { id: 'unused-limits' }, more.filter(Boolean).join(' ')) : null);
+  return shell(lead, turn, toggleLimits, open ? h('div.usage-more', { id: 'unused-limits' }, more.map(line => h('p', {}, line))) : null);
 }
 
 /** The rows Turn these off takes of those the chip shows: all but a plugin's items and items linked to a plugin, each left to its own row (usagerow.ts leftToItsRow). */
@@ -2992,8 +2998,9 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
         layout.tail.length ? h('div.files-tail', {}, layout.tail) : null))));
 }
 
-// Escape in a find box with text clears it. Elsewhere on the Library's list in Select's mode, it closes a Delete of many's
-// question, or else ends the mode. A card open (an info card, the header's) is closed first, and this doesn't hear it (renderer.ts).
+// Escape in a find box with text clears it; on the unused band's disclosure button it closes the disclosure. Elsewhere on
+// the Library's list in Select's mode, it closes a Delete of many's question, or else ends the mode. A card open (an info
+// card, the header's) is closed first, and this doesn't hear it (renderer.ts).
 document.addEventListener('keydown', event => {
   const id = (event.target as HTMLElement | null)?.id;
   if (event.key !== 'Escape') return;
