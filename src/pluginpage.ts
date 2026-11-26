@@ -8,7 +8,7 @@
 import { acting, applyClick, rerender, setHome, state as app, whyKindReadOnly } from './app.ts';
 import { afterLayout, button, fileBlocks, h, icon, infoMark, toggle as switchToggle, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
-import { librarySentence } from './historyactions.ts';
+import { libraryEntry, librarySentence } from './historyactions.ts';
 import { kindSource } from './itemrow.ts';
 import { libraryPages } from './librarypages.ts';
 import { harnessIs, libraryWords, rowClicks } from './libraryrow.ts';
@@ -151,14 +151,14 @@ function letToolIn(entry: MarketplaceView, plugin: string, clash: PluginItemClas
     }
     const name = row.name ?? clash.name;
     return {
-      kind, items: [name], rows: [{ kind, key: clash.key }],
+      kind, items: [name], rows: [{ kind, key: clash.key }], undoSentence: true,
       changes: [rowClicks.inHarness(row, item, clash.tool, false)],
-      said: (notIn, wrote) => {
+      said: (notIn, _wrote, recorded) => {
         if (notIn.includes(clash.tool)) return libraryPages[kind].say.said.inHarness(name, clash.tool, false, true);
-        const losers = wrote.includes(clash.tool) ? [{ tool: clash.tool, hash: '' }] : [];
-        const sentence = librarySentence({ id: '', at: '', key: clash.key, item: name, kind: 'on', cause: 'switch', only: clash.tool,
-          losers, tookFrom: [{ tool: clash.tool, hash: '' }], orderProved: true }, libraryWords[kind], app.home?.[kind].tools ?? [])!.text;
-        return `${name}: ${sentence.replace(/^./, first => first.toLowerCase())}`;
+        const same = recorded?.filter(each => { const hit = libraryEntry(each); return hit?.kind === kind && hit.key === clash.key; }) ?? [];
+        const recordedEvent = same.find(each => each.kind === 'on') ?? same[0];
+        const sentence = recordedEvent && librarySentence(recordedEvent, libraryWords[kind], app.home?.[kind].tools ?? [], app.home?.[kind].library[clash.key])?.text;
+        return sentence ? `${name}: ${sentence.replace(/^./, first => first.toLowerCase())}` : libraryPages[kind].say.said.inHarness(name, clash.tool, false, false);
       },
     };
   });

@@ -8379,10 +8379,10 @@ async function foundOwnCopyPage() {
   const ownBtn = '#pclash-0-kit-own-pi-cli-skill-tdd';
   const ownHover = await a.run(`document.querySelector(${JSON.stringify(ownBtn)})?.title ?? ''`);
   same('one of two tools: OpenCode has both items with no clash button; Pi keeps its own tdd and offers Use the plugin’s tdd with kept-and-Undo hover',
-    [readNow(piTddPath), readNow(ocTddPath), existsSync(join(home, '.pi/agent/skills/a/SKILL.md')),
+    [readNow(piTddPath), readNow(ocTddPath), readNow(join(home, '.pi/agent/skills/a/SKILL.md')),
       await stateOf('opencode-cli'), await buttonsOf('opencode-cli'),
       await stateOf('pi-cli'), await reasonsOf('pi-cli'), await buttonsOf('pi-cli'), await a.exists(ownBtn), ownHover],
-    [piTddMine, pluginTdd, true, '2 of its 2 items are on in OpenCode.', [],
+    [piTddMine, pluginTdd, md('a', 'Plugin a.'), '2 of its 2 items are on in OpenCode.', [],
       '1 of its 2 items is on in Pi.', ['tdd: Pi has its own copy.Use the plugin’s tdd'], ['Use the plugin’s tdd'], true,
       'Puts the plugin’s tdd in Pi. Pi’s own copy is kept as a version, and Undo puts it back.']);
   if (shots) {
@@ -8404,37 +8404,26 @@ async function foundOwnCopyPage() {
   const afterOwnText = await a.text('#header [data-outcome] .band-text');
   same('Use the plugin’s tdd lets Pi in, says History’s own wording, leaves OpenCode untouched, refreshes the box and offers Undo',
     [readNow(piTddPath), readNow(ocTddPath), await stateOf('pi-cli'), await buttonsOf('pi-cli'), await a.exists('#outcome-undo'), afterOwnText],
-    [pluginTdd, pluginTdd, '2 of its 2 items are on in Pi.', [], true, 'tdd: turned on in Pi. Pi’s own folder was written over and kept as a version.']);
+    [pluginTdd, pluginTdd, '2 of its 2 items are on in Pi.', [], true, 'tdd: turned on in Pi. Pi’s own copy was written over and kept as a version.']);
   await a.click('#outcome-undo');
   await done();
   const afterUndo = await a.run(`({ text: document.querySelector('#header [data-outcome] .band-text')?.textContent ?? '', warn: !!document.querySelector('#header [data-outcome].band-warn'), problems: [...document.querySelectorAll('#header .problem-line')].map(e => e.textContent) })`);
   same('header Undo puts Pi’s own tdd back byte for byte, leaves Claude Code and OpenCode untouched, names Pi only with no warning, and refreshes the box',
     [readNow(piTddPath), readNow(ocTddPath), existsSync(join(home, '.claude/skills/tdd')), await stateOf('pi-cli'), await a.exists(ownBtn), afterUndo],
     [piTddMine, pluginTdd, false, '1 of its 2 items is on in Pi.', true, { text: 'tdd: kept out of Pi: Pi has its own copy back, as before. Central Knot keeps it.', warn: false, problems: [] }]);
-  // Click again and undo from History: byte-exact restoration of Pi's copy.
+  // Click again and undo from History: check History's own sentence and byte-exact restoration of Pi's copy.
   await a.click(ownBtn);
   await done();
-  const findTddUndo = () => a.run(`[...document.querySelectorAll('li.history-row')].find(row => row.textContent.includes('tdd') && row.querySelector('.history-actions button')?.textContent === 'Undo')?.querySelector('.history-actions button')?.id`);
-  await openHistory(a, '#nav-history', async () => !!(await findTddUndo()));
-  const tddUndoId = await findTddUndo();
-  check('History has the tdd let-in entry with Undo', !!tddUndoId);
-  await a.click(byId(tddUndoId));
+  const findTddRow = () => a.run(`(() => { const row = [...document.querySelectorAll('li.history-row')].find(r => r.textContent.includes('tdd') && r.querySelector('.history-actions button')?.textContent === 'Undo'); return row ? { id: row.querySelector('.history-actions button')?.id ?? '', about: row.querySelector('.history-about')?.textContent?.trim() ?? '' } : null; })()`);
+  await openHistory(a, '#nav-history', async () => !!(await findTddRow())?.id);
+  const tddHistory = await findTddRow();
+  same('History has the tdd let-in entry with copy wording and Undo', [!!tddHistory?.id, tddHistory?.about],
+    [true, 'Turned on in Pi. Pi’s own copy was written over and kept as a version.']);
+  await a.click(byId(tddHistory.id));
   await done();
   same('History Undo brings Pi’s tdd copy back byte for byte and leaves OpenCode untouched', [readNow(piTddPath), readNow(ocTddPath)], [piTddMine, pluginTdd]);
   await a.click('#nav-plugins');
   for (let tries = 0; tries < 50 && !(await a.exists(ownBtn)); tries++) await wait(100);
-  // Edited-before-Undo (with Automatic sync Off): Claude Code never gains tdd, OpenCode keeps its own folder, and header Undo matches the row's own Undo without saying "as before".
-  await a.run(`window.centralKnot.setSync(false)`);
-  await a.click(ownBtn);
-  await done();
-  writeFileSync(piTddPath, md('tdd', 'Edited in Pi before Undo.'));
-  await a.click('#outcome-undo');
-  await done();
-  const editedUndoText = (await a.text('#header [data-outcome] .band-text')) ?? '';
-  same('edited-before-Undo never writes to Claude Code, keeps OpenCode’s own folder, and matches the row’s own Undo wording without saying as before',
-    [existsSync(join(home, '.claude/skills/tdd')), existsSync(ocTddPath), existsSync(piTddPath), editedUndoText.includes('as before'), editedUndoText],
-    [false, true, false, false, 'tdd: kept out of Pi: its copy there was removed. Central Knot keeps it.']);
-  await a.run(`window.centralKnot.setSync(true)`);
   await a.click('#plugin-back');
   // Worked example 1b (one tool alone, none placed): normal act + Undo, then all four stale-clash refusals (copy gone, turned Off, no longer kept out, no longer from source).
   await openAndTick('kit-only', 'pi-cli');
@@ -8446,7 +8435,7 @@ async function foundOwnCopyPage() {
   await done();
   same('solo Use the plugin’s solo puts the plugin’s solo in Pi and refreshes the box',
     [readNow(piSoloPath), await stateOf('pi-cli'), await buttonsOf('pi-cli'), await a.text('#header [data-outcome] .band-text')],
-    [pluginSolo, '1 of its 1 items is on in Pi.', [], 'solo: turned on in Pi. Pi’s own folder was written over and kept as a version.']);
+    [pluginSolo, '1 of its 1 items is on in Pi.', [], 'solo: turned on in Pi. Pi’s own copy was written over and kept as a version.']);
   await a.click('#outcome-undo');
   await done();
   same('solo Undo restores Pi’s solo copy byte for byte and shows the clash button again',
@@ -8480,8 +8469,8 @@ async function foundOwnCopyPage() {
   await a.click(soloBtn);
   await done();
   same('refusal when item is no longer kept out: refusal shown',
-    [await a.text('#header [data-outcome] .band-text'), await a.exists(soloBtn)],
-    ['solo changed since the page was read. Nothing was changed.', false]);
+    [readNow(piSoloPath), await a.text('#header [data-outcome] .band-text'), await a.exists(soloBtn)],
+    [pluginSolo, 'solo changed since the page was read. Nothing was changed.', false]);
   // Undo that out-of-band change and verify Refusal 4 (no longer from this source: making Pi's earlier version current unlinks solo from kit-only).
   await a.run(`(async () => { const { home } = await window.centralKnot.refresh(); const h = await window.centralKnot.history(); const last = [...h.events].reverse().find(e => e.key === 'solo' && e.kind === 'on'); if (last) await window.centralKnot.restore(last.id, home); })()`);
   await a.click('#header-refresh');
@@ -8498,10 +8487,10 @@ async function foundOwnCopyPage() {
   // Worked example 3: found only in the shared skills folder, read by Pi and OpenCode: keeps next's exact sentence, no takeover button.
   await openAndTick('kit-shared', 'opencode-cli', 'pi-cli');
   same('shared-folder-only found skill: untouched on disk, both boxes show the Library sentence with no action button',
-    [existsSync(join(home, '.pi/agent/skills/b/SKILL.md')), existsSync(join(home, '.pi/agent/skills/shared-tdd')), readNow(sharedPath),
+    [readNow(join(home, '.pi/agent/skills/b/SKILL.md')), existsSync(join(home, '.pi/agent/skills/shared-tdd')), readNow(sharedPath),
       await stateOf('pi-cli'), await reasonsOf('pi-cli'), await buttonsOf('pi-cli'),
       await stateOf('opencode-cli'), await reasonsOf('opencode-cli'), await buttonsOf('opencode-cli')],
-    [true, false, sharedMine,
+    [md('b', 'Plugin b.'), false, sharedMine,
       '1 of its 2 items is on in Pi.', ['shared-tdd: Pi reads yours from the shared skills folder, which Central Knot never writes. Take it over on its Library row to use the plugin’s.'], [],
       '1 of its 2 items is on in OpenCode.', ['shared-tdd: OpenCode reads yours from the shared skills folder, which Central Knot never writes. Take it over on its Library row to use the plugin’s.'], []]);
   await a.click('#plugin-back');

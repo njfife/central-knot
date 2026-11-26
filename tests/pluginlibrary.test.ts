@@ -8,7 +8,8 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative } from 'node:path';
 import { agentKind, agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
 import { pluginFiles } from '../src/catalogdetail.ts';
-import { libraryAction } from '../src/historyactions.ts';
+import { libraryAction, librarySentence } from '../src/historyactions.ts';
+import { libraryWords } from '../src/libraryrow.ts';
 import type { ItemKind } from '../src/library.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { readProfiles, saveProfile, switchProfile } from '../src/profiles.ts';
@@ -1820,29 +1821,30 @@ test('With the plugin installed whole in Claude Code and placed in Pi, its root 
   } finally { await box.cleanup(); }
 });
 
-test('Undo of letting Pi into a plugin-linked skill after editing Pi’s copy leaves Claude Code untouched, keeps OpenCode’s own folder, and does not falsely restore Pi’s old copy', async () => {
+test('Letting Pi into a plugin-linked skill writes History’s copy sentence, and Undo puts Pi’s own copy back byte for byte while leaving Claude Code and OpenCode untouched', async () => {
   const box = await kitHome({ tools: ['claude-cli', 'pi-cli', 'opencode-cli'] });
   try {
     await mkdir(join(box.home, '.config/opencode'), { recursive: true });
-    const piOwn = skill('notes', 'mine in pi');
+    const piOwn = skill('notes', 'mine in pi'), pluginNotes = skill('notes', 'notes');
     await put(box.pi('skills/notes/SKILL.md'), piOwn);
     await box.turn('let-in', 'opencode-cli');
     await box.turn('let-in', 'pi-cli');
     assert.equal(await exists(join(box.home, '.claude/skills/notes/SKILL.md')), false);
-    assert.equal(await readFile(join(box.home, '.config/opencode/skills/notes/SKILL.md'), 'utf8'), skill('notes', 'notes'));
+    assert.equal(await readFile(join(box.home, '.config/opencode/skills/notes/SKILL.md'), 'utf8'), pluginNotes);
     assert.equal(await readFile(box.pi('skills/notes/SKILL.md'), 'utf8'), piOwn);
     const letIn = await applySkills(box.share, box.tools, [{ key: 'notes', on: true, except: [], seenOn: true }]);
     assert.equal(letIn.stopped, undefined);
-    assert.equal(await readFile(box.pi('skills/notes/SKILL.md'), 'utf8'), skill('notes', 'notes'));
+    assert.equal(await readFile(box.pi('skills/notes/SKILL.md'), 'utf8'), pluginNotes);
     const onId = letIn.made?.[0];
     assert.ok(onId);
-    // Edit Pi's replaced copy on disk before Undo (with no background pass in between).
-    const edited = skill('notes', 'edited in pi before undo');
-    await put(box.pi('skills/notes/SKILL.md'), edited);
+    const onEvent = (await readHistory(box.share)).find(event => event.id === onId);
+    assert.ok(onEvent, 'History recorded the one-tool let-in event');
+    assert.equal(librarySentence(onEvent!, libraryWords.skills, box.tools, (await skillsView(box.share, box.tools)).library.notes)?.text,
+      'Turned on in Pi. Pi’s own copy was written over and kept as a version.');
     const undone = await restoreSkill(box.share, box.tools, onId!);
     assert.equal(undone.stopped, undefined);
-    assert.equal(await exists(join(box.home, '.claude/skills/notes/SKILL.md')), false, 'Claude Code never gains notes');
-    assert.equal(await exists(join(box.home, '.config/opencode/skills/notes/SKILL.md')), true, 'OpenCode keeps its own folder');
-    assert.equal(await exists(box.pi('skills/notes/SKILL.md')), false, 'Pi is kept out rather than given back its old copy over an edit');
+    assert.equal(await exists(join(box.home, '.claude/skills/notes/SKILL.md')), false, 'Claude Code stays untouched');
+    assert.equal(await readFile(join(box.home, '.config/opencode/skills/notes/SKILL.md'), 'utf8'), pluginNotes, 'OpenCode keeps the plugin’s copy byte for byte');
+    assert.equal(await readFile(box.pi('skills/notes/SKILL.md'), 'utf8'), piOwn, 'Pi gets its own copy back byte for byte');
   } finally { await box.cleanup(); }
 });

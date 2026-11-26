@@ -615,8 +615,6 @@ interface Pass extends AnyLook {
   results: DestinationResult[]; notices: SyncNotice[]; writes: number; made: string[];
   /** What a kind's `follow` changed with each item's copies, by key: added to the entries and notices of it (syncItem). */
   followed: Map<string, string[]>;
-  /** Harnesses `letGo` added to an item's `except` in this pass, so a click's `turn` after it keeps them out. */
-  letGoExcept: Map<string, HarnessId[]>;
 }
 /** What a kind's `follow` did to a harness's own settings: what it changed there, in words; `off`: they keep the copy just put in out. */
 export interface Followed { changed?: string; off?: true }
@@ -674,7 +672,7 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   const look: AnyLook = await lookAt(kind, context, managed, library, settle);
   const asRead = context.kept && new Map(look.disk.unseen); // before this pass's guards note more on it (guardFolders)
   const store = (item: LibraryItem, hash: string, content: unknown) => kind.store(context, item, hash, content as C);
-  const pass: Pass = { ...look, shelf: { store, save: () => saveIfChanged(pass) }, saved, asked: new Map(), giveBack: new Map(), told: !!options.told, takenIn: [], sourced: new Map(), results: [], notices: [], writes: 0, made: [], followed: new Map(), letGoExcept: new Map() };
+  const pass: Pass = { ...look, shelf: { store, save: () => saveIfChanged(pass) }, saved, asked: new Map(), giveBack: new Map(), told: !!options.told, takenIn: [], sourced: new Map(), results: [], notices: [], writes: 0, made: [], followed: new Map() };
   await deletionsTold(pass);
   await letGo(pass, pass.recorded);
   for (const [key, brought] of options.pulled ?? []) await pull(pass, key, brought);
@@ -1109,8 +1107,7 @@ async function click(pass: Pass, asked: Change) {
 /** The switches: the item On or Off (recording changed keep-outs for a person's switch), or one harness kept out or let in. */
 function turn(pass: Pass, item: LibraryItem, asked: Change) {
   const was = { on: item.on, except: item.except };
-  const keepOut = pass.letGoExcept.get(item.key) ?? [];
-  Object.assign(item, { on: asked.on, except: keepOut.length ? [...new Set([...asked.except, ...keepOut])] : [...asked.except] } satisfies Partial<LibraryItem>);
+  Object.assign(item, { on: asked.on, except: [...asked.except] } satisfies Partial<LibraryItem>);
   const out = item.except.find(tool => !was.except.includes(tool));
   const back = was.except.find(tool => !item.except.includes(tool));
   if (was.on !== item.on) {
@@ -1300,13 +1297,7 @@ async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Se
     if (answer === 'let-go' && item) {
       delete item.source; delete item.seen;
       // On, it is kept where it is: out of each managed tool with no copy of it now (library.ts A PLUGIN); Off, its except stays.
-      if (item.on) {
-        const added = pass.managed.filter(tool => !item.except.includes(tool) && !pass.disk.byKey.get(key)?.[tool] && !unseenIn(pass.disk, tool, key));
-        if (added.length) {
-          item.except = [...item.except, ...added].sort(byToolOrder);
-          pass.letGoExcept.set(key, added);
-        }
-      }
+      if (item.on) item.except = [...new Set([...item.except, ...pass.managed.filter(tool => !pass.disk.byKey.get(key)?.[tool] && !unseenIn(pass.disk, tool, key))])].sort(byToolOrder);
       const history = randomUUID();
       await appendHistory(pass.context, [{ id: history, at: now(), key: `${pass.kind.historyPrefix}${key}`, of: pass.kind.kind, item: item.name, kind: 'edit', cause: 'own-now', previous: item.hash, version: item.hash, link, losers: [], orderProved: true }]);
       pass.notices.push({ kind: 'let-go', key, item: item.name, link, history });

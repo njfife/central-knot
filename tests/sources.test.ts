@@ -789,7 +789,7 @@ test('Turned On again, the revert: the notice goes, the next read changes nothin
     assert.deepEqual(done.results.filter(entry => entry.outcome === 'written').map(entry => entry.harness), managed);
     assert.deepEqual([await toolBody(box, 'claude-cli', 'notes'), await toolBody(box, 'copilot-cli', 'notes'), (await everywhere(box))['codex-cli']], ['First.', 'First.', undefined]);
     assert.ok((await itemOf(box, 'notes'))!.versions.some(version => version.from.how === 'was-in' && version.from.harness === 'copilot-cli'), 'the copy made by hand is a version');
-    assert.equal((await sentences(box, 'notes')).at(-1), 'Turned on: put in Claude Code and Copilot CLI. Copilot CLI’s own folder was written over and kept as a version.');
+    assert.equal((await sentences(box, 'notes')).at(-1), 'Turned on: put in Claude Code and Copilot CLI. Copilot CLI’s own copy was written over and kept as a version.');
     assert.equal(await fromSourceOf(box), undefined);
     assert.deepEqual(answered(await checkSource(box.context, async () => managed, id, inTurn)), [], 'the read leaves it: it is no longer from the source');
     assert.deepEqual([(await itemOf(box, 'notes'))!.on, await fromSourceOf(box)], [true, undefined]);

@@ -132,7 +132,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
   const named = (tool: HarnessId) => event.losers.some(loser => loser.tool === tool);
   // A click that wrote over a copy a tool had of its own (tookFrom, and written: in `losers`), which is kept as a version.
   const over = (event.tookFrom ?? []).filter(copy => named(copy.tool)).map(copy => toolName(copy.tool));
-  const overSaid = over.length ? ` ${andList(over)}’s own ${words.copy}${over.length === 1 ? ' was' : 's were'} written over and kept as a version.` : '';
+  const overSaid = over.length ? ` ${andList(over)}’s own ${over.length === 1 ? 'copy was' : 'copies were'} written over and kept as a version.` : '';
   switch (event.kind) {
     case 'on': {
       // A pass no click asked put a copy in one tool that had none (`only`: a tool that came under management, say), or wrote
@@ -314,7 +314,7 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
     const exact = !!(event.wasExcept && event.nowExcept && sameTools(item.except, event.nowExcept));
     const back = givenBack(event, item).giveBack;
     // Earlier keep-outs and copies go back only with an exact Undo; otherwise the plain Turn it off / on.
-    if ((event.wasExcept && !exact) || (back && !asTheClickLeftIt(event, item, itemNow)) || (!exact && !back)) return action;
+    if ((event.wasExcept && !exact) || (back && !asTheClickLeftIt(event, item)) || (!exact && !back)) return action;
     const tools = back ? (Object.keys(back) as HarnessId[]).map(toolName) : [];
     const own = tools.length ? `${andList(tools)} ${tools.length === 1 ? 'has its own copy' : 'have their own copies'} back, as before` : '';
     const kept = exact ? 'with its earlier kept-out tools back' : '';
@@ -405,9 +405,9 @@ const sameTools = (first: readonly HarnessId[], second: readonly HarnessId[]) =>
  * `winner` a take-in took), and no tool it took a copy from kept out since (that tool has no copy to give back). An Undo
  * that gives copies back is offered only then.
  */
-function asTheClickLeftIt(event: HistoryEvent, item: LibraryItem, itemNow: ItemNow): boolean {
+function asTheClickLeftIt(event: HistoryEvent, item: LibraryItem): boolean {
   const left = event.version ?? event.winner?.hash;
-  return !!left && left === item.hash && !(event.tookFrom ?? []).some(copy => item.except.includes(copy.tool) || itemNow.pending.includes(copy.tool));
+  return !!left && left === item.hash && !(event.tookFrom ?? []).some(copy => item.except.includes(copy.tool));
 }
 
 /** The copies an entry's click took over from tools (`tookFrom`), each a version still, for its Undo to give back (types.ts Change giveBack). */
