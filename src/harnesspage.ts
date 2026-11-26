@@ -5,7 +5,7 @@
 // engine: every change goes through the pages it mirrors, or the switch's toolchoice.ts.
 import { noteMove, KINDS, acting, harnessManaged as managed, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type PageKind } from './app.ts';
 import { manageLocked, manageRow } from './managecard.ts';
-import { installsIn, pluginsInstalled, pluginsTabNote, takenItems, takesItemsOnly, type MarketPlugin } from './pluginstatus.ts';
+import { installsIn, pluginsInstalled, pluginsTabNote, takenItems, takesItemsOnly, type InstalledMarketPlugin } from './pluginstatus.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { pluginTitle } from './pluginparts.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
@@ -288,12 +288,12 @@ function instructionsTab(tool: HarnessId) {
   return h('div.page', {}, instructionBands(), h('div.scroll.harness-scroll', { id: 'harness-body' }, body));
 }
 
-/** One installed plugin: its name, version and marketplace, and Open, which shows it on the plugins' page. */
-function pluginRow({ entry, plugin }: MarketPlugin, tool: HarnessId) {
+/** One installed plugin: its name, the tool's recorded version (if any), its marketplace, and Open, which shows it on the plugins' page. */
+function pluginRow({ entry, plugin, version }: InstalledMarketPlugin, tool: HarnessId) {
   const note = [entry.name, plugin.description].filter(Boolean).join(' · ');
   return h('div.harness-plugin', { role: 'listitem' },
     h('div.harness-plugin-text', {},
-      h('strong', {}, pluginTitle(plugin), plugin.version ? h('span.harness-plugin-version', {}, ` ${plugin.version}`) : null),
+      h('strong', {}, pluginTitle(plugin), version ? h('span.harness-plugin-version', {}, ` ${version}`) : null),
       h('span.harness-plugin-note', { title: note }, note)),
     button({ variant: 'ghost', size: 'small', label: 'Open', name: `Open ${pluginTitle(plugin)} in ${pageNames.plugins}`, id: `harness-plugin-${entry.name}-${plugin.name}`,
       onclick: () => { showPage('plugins'); browse({ source: entry.source, plugin: plugin.name, tab: 'plugins', find: '', category: undefined, hookTool: tool }); } }));

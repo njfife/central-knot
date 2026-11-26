@@ -662,6 +662,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .switch:disabled, .switch[aria-disabled="true"] { opacity: 0.4; cursor: not-allowed; }
 /* On in some tools only (kept out of others by the person, or switched off in a tool's own settings): on, its track striped, so it never reads as on everywhere nor as halfway. */
 .switch.switch-partial[aria-checked="true"] { background: repeating-linear-gradient(135deg, var(--switch-on) 0 4px, color-mix(in oklab, var(--switch-on) 52%, var(--switch-off)) 4px 7px); }
+/* Draw the focus ring outside the track so an off switch never looks filled in with the focus colour. */
+.switch:focus-visible { outline-offset: 2px; }
 
 /* A cell says what that tool has: green synced, blue pending (dashed), amber differing or waiting, striped can't. */
 .cell-button, .legend-cell { position: relative; display: grid; place-items: center; width: 30px; height: 26px; border-radius: 7px; border: 1px solid var(--cell-line); background: transparent; color: var(--ink-faint); }
@@ -1745,8 +1747,6 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .setting-control .switch:disabled { opacity: 0.6; cursor: default; box-shadow: inset 0 0 0 1px var(--ink-faint); }
 /* On a dark page that much dimming still reads as an ordinary Off switch. */
 @media (prefers-color-scheme: dark) { .setting-control .switch:disabled { opacity: 0.35; } }
-/* The ring sits outside the track, as on the status bar's sync switch; inside, the knob would cover it. */
-.setting-control .switch:focus-visible { outline-offset: 2px; }
 /* The sidebar takes width, so the row's own width decides when the control moves under its text. */
 @container (max-width: 511px) { .setting-row { grid-template-columns: minmax(0, 1fr); } .setting-control { justify-self: start; } }
 .appearance-choices { display: flex; gap: 10px; flex-wrap: wrap; }
@@ -1953,8 +1953,6 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 /* Beside a plugin item's switch, where an own copy has Remove: the way to the plugin's page. */
 .text-action.tool-link { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; white-space: nowrap; }
 .tool-remove-slot { display: inline-block; }
-/* Focus always shows as focus: outside the small switch. */
-.tool-switch .switch:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* Profiles page: the list of profiles beside the open one, and the open one's header (rename, Delete, its setup step) */
 .profiles-split { min-height: 0; }

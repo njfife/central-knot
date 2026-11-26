@@ -441,8 +441,11 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
   if (deletedBy) return `On · its copy was deleted in ${deletedIn(deletedBy, row.plan?.sharedWay)}, so it turns off when sync runs. Central Knot keeps it.`;
   // A harness holding the current version that only waits for an edit made elsewhere has it on.
   const waitsForEdit = (tool: string) => row.hashes?.[tool] === item!.hash;
-  // A tool that gets it only with its plugin is its line's to say (pluginline.ts): not said here as one that can't take it.
-  const gets = where('gets-it').filter(tool => !waitsForEdit(tool)), out = where('kept-out', 'leaving'), cannot = where('cannot').filter(tool => !row.getsWithPlugin?.includes(tool)), unseen = where('unseen');
+  // A tool that gets it only with its plugin (pluginline.ts), or has it on through its plugin, is not said here as one that can't take it.
+  const gets = where('gets-it').filter(tool => !waitsForEdit(tool));
+  const out = where('kept-out', 'leaving');
+  const cannot = where('cannot').filter(tool => !row.getsWithPlugin?.includes(tool) && !row.pluginOn?.includes(tool));
+  const unseen = where('unseen');
   const switched = tools.filter(tool => row.switchedOff?.includes(tool) && !out.includes(tool));
   const another = where('another-way').filter(tool => !row.pluginOn?.includes(tool));
   // A tool whose own switch has it off doesn't load it: it is no tool it is on in (the parts below say it). One that has it on
