@@ -162,7 +162,7 @@ test('A row says its click’s aim while it waits and runs, then what main retur
   await settled();
   assert.deepEqual([words('alpha'), words('beta'), words('gamma')], ['Turning on…', 'Waiting to turn off in Claude Code', 'Waiting to turn on in Claude Code']);
   await main.answer(installed('alpha'));
-  assert.deepEqual([words('alpha'), words('beta')], ['Turned on in Claude Code', 'Turning off in Claude Code…']);
+  assert.deepEqual([words('alpha'), words('beta')], ['Installed in Claude Code', 'Turning off in Claude Code…']);
   await main.answer({ stopped, done: [] });
   await main.answer(refused('gamma'));
   assert.deepEqual([words('beta'), words('gamma')], [stopped, 'Claude Code: Not installed. Plugin "gamma" not found.']);
