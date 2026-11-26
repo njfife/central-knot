@@ -1046,9 +1046,9 @@ async function harnessFlow() {
     await openKind(h, 'skills');
 
     const FOUND_OFF_CARD = 'In a tool, not yet in Central Knot. Add turns an item on in managed tools.';
-    const FOUND_ON_CARD = 'Synchronize everything skips items whose copies differ, can’t be read, or were removed earlier.';
-    const PLUGIN_CARD = 'Installed with their plugin, not copied. Each tool’s line switches it there.';
-    const OFF_CARD = 'Off in Central Knot. Where a tool still has a copy until sync runs, or has one on through a plugin, the heading says so.';
+    const FOUND_ON_CARD = 'Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.';
+    const PLUGIN_CARD = 'Installed with their plugin, not copied. Open a row to switch it in one tool.';
+    const OFF_CARD = 'Kept in Central Knot, on in no tool it manages. Where a tool still has a copy, its row says so.';
 
     // Library Skills: 3 Off rows with 1 pending Codex removal, card closed; keyboard-focusable marks on Found, Only through a plugin and Off; stable heading heights.
     same('Library Skills: no heading says Synchronize everything in Settings, On has no mark, and Off 3 shows 1 still in Codex until sync runs with card closed',
@@ -6780,7 +6780,7 @@ async function syncEverythingFlow() {
   same('on the Library’s skills notes and fresh are On and review stays found', await sectionsNow(a, 'skills'), [['on', ['fresh', 'notes']], ['found', ['review']]]);
   same('the Found heading’s card says what Synchronize everything skips, and its live line counts what waits for a choice',
     [await a.text('#section-found-info-card'), (await foundNote())?.replace(/^·\s*/, '')],
-    ['Synchronize everything skips items whose copies differ, can’t be read, or were removed earlier.', '1 waits for your choice of copy']);
+    ['Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.', '1 waits for your choice of copy']);
   const notice = '.sync-notice[data-kind="taken-in"] .notice-text';
   await openNotices(a);
   same('one notice per pass says how many it took in, where they were found, and their names, in the notices’ card', await a.all(`#notices-card ${notice}`, 'e.textContent.replace(/ · .*$/, "")'),

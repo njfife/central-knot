@@ -2675,8 +2675,8 @@ function whenCell(skill: ItemRow) {
   return h('div.ov-when', { role: 'cell', title: `Last updated ${dayAndTime(new Date(at).toISOString())}` }, sinceThen(at));
 }
 
-const PLUGIN_HEADING_CARD = 'Installed with their plugin, not copied. Each tool’s line switches it there.';
-const OFF_HEADING_CARD = 'Off in Central Knot. Where a tool still has a copy until sync runs, or has one on through a plugin, the heading says so.';
+const PLUGIN_HEADING_CARD = 'Installed with their plugin, not copied. Open a row to switch it in one tool.';
+const OFF_HEADING_CARD = 'Kept in Central Knot, on in no tool it manages. Where a tool still has a copy, its row says so.';
 
 /**
  * Rows under one heading: On, Found, Off, or (on a harness's page) the ones only other tools have. `rows`: the rows drawn under
@@ -2710,7 +2710,7 @@ function section(t: Table, role: Role, rows: ItemRow[], truly: ItemRow[]) {
 /** The card behind the Found heading's mark: what Add does, or what Synchronize everything skips. */
 function foundCard(): string {
   if (state.home?.sync.syncEverything) {
-    return 'Synchronize everything skips items whose copies differ, can’t be read, or were removed earlier.';
+    return 'Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.';
   }
   return 'In a tool, not yet in Central Knot. Add turns an item on in managed tools.';
 }
@@ -2732,10 +2732,9 @@ function offNote(t: Table, list: ItemRow[]): string {
   const owed = list.filter(skill => skill.plan?.remove.length);
   const still = [...new Set(owed.flatMap(skill => skill.plan!.remove))];
   if (owed.length) return `${owed.length} still in ${andList(still.map(tool => names[tool]))} until sync runs`;
-  const ownIn = (skill: ItemRow) => ownCopies(skill, itemOf(skill), toolsFor(t, skill.kind));
-  const own = list.filter(skill => ownIn(skill).length);
-  const where = [...new Set(own.flatMap(ownIn))];
-  if (own.length) return `${plural(own.length, 'own copy', 'own copies')} in ${andList(where.map(tool => names[tool]))}`;
+  const ownTools = list.flatMap(skill => ownCopies(skill, itemOf(skill), toolsFor(t, skill.kind)));
+  const where = [...new Set(ownTools)];
+  if (ownTools.length) return `${plural(ownTools.length, 'own copy', 'own copies')} in ${andList(where.map(tool => names[tool]))}`;
   // A tool that has a copy another way still has it, whether it reads it or its own switch has it off.
   const ways = list.flatMap(row => [...otherReadLines(row, toolsFor(t, row.kind)), ...switchedOffWords(row, toolsFor(t, row.kind))]);
   if (ways.length) return list.length === 1 ? ways.join(' ') : 'some tools still have copies elsewhere';
