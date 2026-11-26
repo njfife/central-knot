@@ -20,15 +20,18 @@
 // libraryrow.ts with librarypages.ts; History's sentences and actions, historyactions.ts.
 import { randomUUID } from 'node:crypto';
 import { lstat, open, readFile, readdir, realpath, stat, unlink } from 'node:fs/promises';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { inside, pathIn, pluginSkills } from './catalogdetail.ts';
 import { appendHistory, readHistory, replaceHistory } from './history.ts';
 import { isClearedSwitch, libraryAction, libraryEntry } from './historyactions.ts';
 import { keepVersion, listed, noteAgainst, pendingEdits, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, foundCopies, lookFor, restore, runPass, takeInAnswers, unreadIn, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords } from './libraryrow.ts';
+import type { PluginCopy } from './marketplaces.ts';
 import { comparableText } from './pluginstatus.ts';
-import { pluginHolds, throughPlugins, type GivenByPlugin, type PluginHold } from './plugins.ts';
+import { installedPlugins, pluginHolds, SAFE_NAME, throughPlugins, type GivenByPlugin, type PluginContext, type PluginHold } from './plugins.ts';
+import { takesPlugins } from './presence.ts';
 import { destinationReloads } from './reload.ts';
 import { errorCode, itemKey, landingOf, libraryGate, notCopied, plainError, readTree, syncGate, targetFor, writeAccess, type ShareContext, type Tree } from './share.ts';
 import { alsoReads, lockedRoot, placeFolder, readCopy, readShape, readSkillsFolder, recoverFolders, removeFolder,
@@ -43,7 +46,7 @@ import { agentInPi, agentKind, applyAgents } from './agents.ts';
 import { harnesses, isSkillEntry, toolConfigRoot } from './harnesses.ts';
 import { displayPath } from './machine.ts';
 import type {
-  Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, Skill, SkillFileRead, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy,
+  Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, PluginSkillRef, Skill, SkillFileRead, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy,
 } from './types.ts';
 import { andList, notManagedHere, throughPlugin, toolName } from './words.ts';
 
@@ -240,7 +243,7 @@ async function readAlsoRead(context: ShareContext, disk: SkillDisk, managed: Har
  * really there (wanted in that tool, which can be given it), or where a copy Central Knot didn't put stays. A reader of a
  * tool the skill is kept out of, whose copy there is Central Knot's and leaves this pass, has it no other way.
  */
-function anotherWay(disk: SkillDisk, managed: HarnessId[], item: Wanted, tool: HarnessId, depth = 0): Pick<Way, 'why' | 'throughShared'> | undefined {
+function anotherWay(disk: SkillDisk, managed: HarnessId[], item: Wanted, tool: HarnessId, depth = 0): Pick<Way, 'why' | 'throughShared'> & { readsFrom?: HarnessId } | undefined {
   // A plugin's item, in a tool that takes the plugin, has no other way than the plugin (cannotTake says the rest).
   const linked = disk.linked(item, tool);
   if (linked) return linked.anotherWay ? { why: linked.why } : undefined;
@@ -252,9 +255,10 @@ function anotherWay(disk: SkillDisk, managed: HarnessId[], item: Wanted, tool: H
   if (!source || !managed.includes(source) || depth) return undefined;
   const there = toolName(source);
   const reallyThere = wantedIn(item, source) && !disk.locked.has(source) && !disk.cannotTake(item, source) && !anotherWay(disk, managed, item, source, depth + 1);
-  // Said as it is now: a copy there, or (a found skill, say) the folder it will be in once it is on there.
-  if (reallyThere) return { why: disk.byKey.get(item.key)?.[source] ? `${nameOf(tool)} reads ${there}’s copy, in ${there}’s skills folder.`
-    : `${nameOf(tool)} reads ${there}’s skills folder, so it gets the skill from there once it is on in ${there}.` };
+  // Said as it is now: a copy there, or (a found skill, say) the folder it will be in once it is on there (libraryrow.ts detailLine shortens it for found rows).
+  if (reallyThere) return disk.byKey.get(item.key)?.[source]
+    ? { readsFrom: source, why: `${nameOf(tool)} reads ${there}’s copy, in ${there}’s skills folder.` }
+    : { why: `${nameOf(tool)} reads ${there}’s skills folder, so it gets the skill from there once it is on in ${there}.` };
   const left = !!disk.byKey.get(item.key)?.[source] && item.applied[source] === undefined;
   const leftThere = { why: `${nameOf(tool)} reads a copy in ${there}’s skills folder, which is not Central Knot’s.` };
   if (!wantedIn(item, source) && (left || unseenIn(disk, source, item.key))) return leftThere;
@@ -659,6 +663,28 @@ export async function skillFoundFile(context: ShareContext, key: string, tool: H
   const folder = await foundSkillFolder(context, key, tool, rootLabel);
   return folder ? readSkillFile(folder, file) : undefined;
 }
+type MarketplaceLookup = (marketName: string, plugin: string, source?: string) => Promise<PluginCopy | undefined>;
+/** Resolves a plugin skill's folder (installed or marketplace copy) through catalogdetail.ts pluginSkills; refuses parts leaving the plugin's root. */
+async function pluginSkillFolder(context: PluginContext, ref: PluginSkillRef, marketplace?: MarketplaceLookup): Promise<{ directory: string; real: string } | undefined> {
+  if (!SAFE_NAME.test(ref.marketName) || !SAFE_NAME.test(ref.plugin) || !ref.part || ref.part.includes('\0') || isAbsolute(ref.part)) return undefined;
+  const installed = ref.from !== 'marketplace' && takesPlugins(ref.from)
+    ? (await installedPlugins(context, ref.from).catch(() => [])).find(entry => entry.plugin === ref.plugin && entry.marketplace === ref.marketName) : undefined;
+  const copy = ref.from === 'marketplace' ? await marketplace?.(ref.marketName, ref.plugin, ref.source)
+    : installed?.state.state === 'installed' ? { folder: installed.state.path, root: installed.state.path, entry: installed.entry ?? {}, atMarketplaceRoot: !!installed.atMarketplaceRoot } : undefined;
+  if (!copy || (ref.from === 'marketplace' && !(await inside(copy.root, copy.folder)))) return undefined;
+  const listed = await pluginSkills(copy.folder, copy.entry, ref.from === 'marketplace' ? undefined : ref.from, copy.atMarketplaceRoot, copy.codexOnly);
+  if (!listed.some(skill => skill.path === ref.part)) return undefined;
+  const candidate = resolve(copy.folder, ref.part);
+  if (!pathIn(copy.folder, candidate) || !(await inside(copy.folder, candidate))) return undefined;
+  const real = await realpath(candidate).catch(() => undefined);
+  return real && (await lstat(join(real, 'SKILL.md')).catch(() => undefined))?.isFile() ? { directory: candidate, real } : undefined;
+}
+/** One regular file of a plugin skill (installed copy in a tool, or its marketplace copy), through readSkillFile. */
+export async function skillPluginFile(context: PluginContext, ref: PluginSkillRef, file: string, marketplace?: MarketplaceLookup): Promise<SkillFileRead | undefined> {
+  const found = await pluginSkillFolder(context, ref, marketplace);
+  const read = found && await readSkillFile(found.real, file);
+  return read ? { ...read, directory: found.directory } : undefined;
+}
 
 /**
  * What the Git repo holds for each skill in the library, On or Off (gitrepo.ts Push): its current version's folder, or the
@@ -772,7 +798,7 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
   const copies: Partial<Record<HarnessId, ToolCopy>> = {};
   for (const copy of entries) copies[copy.tool] = toolCopy(copy);
   const copiesNow = item ? copiesOf(look, item) : undefined, made = item && copiesNow ? plan(item, copiesNow) : undefined;
-  const facts: ToolFacts = { cannot: {}, unseen: {}, plugin: {}, anotherWay: {}, takeOver: {}, loads: {}, alsoLoads: {} };
+  const facts: ToolFacts = { cannot: {}, unseen: {}, plugin: {}, anotherWay: {}, readsFrom: {}, takeOver: {}, loads: {}, alsoLoads: {} };
   for (const tool of look.managed) toolFacts(look, { key, name, item, copiesNow, made, link: fromSource?.link }, tool, facts);
   const switchProblem = Object.fromEntries(Object.keys(facts.loads).flatMap(tool => { const problem = disk.switches.get(tool as HarnessId)?.problem; return problem ? [[tool, problem]] : []; }));
   // Its description is the current version's, else a copy's (readDisk's shapes).
@@ -784,7 +810,7 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
     key, name, description, copies, on: !!item?.on, except: item?.except ?? [], cannot: facts.cannot, edited,
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
       : { takeInAnswers: takeInAnswers(look, key), choiceBlocks: choiceBlocksOf(entries), ...some('folderHashes', folderHashes) }),
-    ...some('plugin', facts.plugin), ...some('unseen', facts.unseen), ...some('anotherWay', facts.anotherWay), ...some('takeOver', facts.takeOver),
+    ...some('plugin', facts.plugin), ...some('unseen', facts.unseen), ...some('anotherWay', facts.anotherWay), ...some('readsFrom', facts.readsFrom), ...some('takeOver', facts.takeOver),
     ...some('loads', facts.loads), ...some('alsoLoads', facts.alsoLoads), ...some('switchedOff', Object.keys(facts.loads).filter(tool => facts.loads[tool as HarnessId]!.switchedOff)), ...some('switchProblem', switchProblem),
     ...(fromSource ? { fromSource } : {}),
   };
@@ -793,7 +819,7 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
 /** What a row says of each tool, filled in by toolFacts: one map per kind of fact, by tool. */
 interface ToolFacts {
   cannot: LibraryFacts['cannot']; unseen: NonNullable<LibraryFacts['unseen']>; plugin: NonNullable<LibraryFacts['plugin']>;
-  anotherWay: NonNullable<LibraryFacts['anotherWay']>; takeOver: NonNullable<LibraryFacts['takeOver']>; loads: NonNullable<LibraryFacts['loads']>;
+  anotherWay: NonNullable<LibraryFacts['anotherWay']>; readsFrom: NonNullable<LibraryFacts['readsFrom']>; takeOver: NonNullable<LibraryFacts['takeOver']>; loads: NonNullable<LibraryFacts['loads']>;
   alsoLoads: NonNullable<LibraryFacts['alsoLoads']>;
 }
 type RowOf = { key: string; name: string; item: LibraryItem | undefined; copiesNow?: ReturnType<typeof copiesOf>; made?: ReturnType<typeof plan>; link?: string };
@@ -815,11 +841,12 @@ function toolFacts(look: SkillLook, row: RowOf, tool: HarnessId, facts: ToolFact
   // A plugin's part on there is what the tool loads. Turned off there, it loads none: a copy the tool has another way is what it
   // loads, and its line says that way (the pass's `held` still answers with the plugin: anotherWay).
   const pluginLoads = !!given && !given.off, outsideWay = disk.ways.get(key)?.[tool];
-  const way = (given?.off && !here && outsideWay?.why) || disk.anotherWay(asIf, tool);
+  const way = given?.off && !here && outsideWay?.why ? { why: outsideWay.why } : anotherWay(disk, look.managed, asIf, tool);
   const why = copy?.is === 'held' ? copy.why : (here ? undefined : disk.cannotTake(asIf, tool)) ?? disk.locked.get(tool)?.why;
   const touched = made?.write.includes(tool) || made?.remove.includes(tool);
-  if (way) facts.anotherWay[tool] = `${way}${outsideCopy && movedOn(item, outsideCopy.hash) ? ` ${MOVED_ON}` : ''}`;
+  if (way) facts.anotherWay[tool] = `${way.why}${outsideCopy && movedOn(item, outsideCopy.hash) ? ` ${MOVED_ON}` : ''}`;
   else if (why && (copy?.is === 'held' || touched || (!copiesNow && !here))) facts.cannot[tool] = why;
+  if (way?.readsFrom) facts.readsFrom[tool] = way.readsFrom;
   // Take over is for a skill in Central Knot: a found one is taken in first.
   if (item && !item.deleted && outsideWay?.take && outsideCopy) facts.takeOver[tool] = { kind: outsideWay.take, path: outsideWay.path };
   const loaded = pluginLoads && !here ? undefined : loadedCopy(look, key, tool), also = pluginLoads ? undefined : copyInRead(disk, key, tool);

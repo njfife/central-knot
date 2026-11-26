@@ -1602,7 +1602,7 @@ async function agentInPi(a, practice) {
   await a.click('#header-refresh');
   await opened();
   const letPi = `#${rowPart('clear-switch', 'agents', 'code-reviewer', 'pi-cli')}`;
-  check('under his !*, the agent’s Pi line says Pi doesn’t load it, with Let Pi load it', /switched off in Pi’s own settings: Pi doesn’t load it\./.test(await a.text('.details') ?? '') && await a.exists(letPi), await a.text('.details'));
+  check('under his !*, the agent’s Pi line says Off in Pi’s settings, with Let Pi load it', /Off in Pi’s settings/.test(await a.text('.details') ?? '') && await a.exists(letPi), await a.text('.details'));
   const before = piList();
   await a.click(letPi);
   same('Let Pi load it adds the agent’s file to his Pi list, and nothing else', piList(), [...before, '+skills/code-reviewer.md']);
@@ -1611,9 +1611,10 @@ async function agentInPi(a, practice) {
   rmSync(piSettings);
   await a.click('#header-refresh');
   await opened();
-  const note = (await a.text(`#${rowPart('as-skill', 'agents', 'code-reviewer')}`) ?? '').trim();
-  check('the opened row says once what Pi gets, and that deleting its file there turns the agent off everywhere',
-    /^Pi holds no agents of its own, so there an agent is a skill[\s\S]*no isolated context of its own, tool restrictions and model selection[\s\S]*Deleting that file in Pi turns the agent off in every tool/.test(note), note);
+  const piMark = rowPart('line-info', 'agents', 'code-reviewer', 'pi-cli');
+  const piNote = await a.run(`[document.querySelector('#${piMark}')?.closest('.details-tool-line')?.innerText?.trim() ?? '', document.querySelector('#${piMark}-card')?.textContent?.trim() ?? '', !!document.querySelector('#${rowPart('as-skill', 'agents', 'code-reviewer')}')]`);
+  same('Pi’s line says As a skill with a card explaining what Pi gets and that deleting it turns the agent off everywhere',
+    piNote, ['As a skill', 'Pi has no agents: this is a skill file, with no context, tool limits or model of its own. Deleting it in Pi turns the agent off everywhere.', false]);
   await a.click(`#${rowPart('open', 'agents', 'code-reviewer')}`);
   await a.click('#nav-harnesses'); await a.click('#harness-pi-cli'); await a.click('#harness-tab-about');
   check('Pi’s About says its agents are in its skills folder, each as a skill', /Agents\s*In its skills folder, each as a skill/.test(await a.text('#harness-body') ?? ''), await a.text('#harness-body'));
@@ -1898,7 +1899,7 @@ async function practiceFlow() {
   for (let tries = 0; tries < 80 && !(await offMarks(a, 'skills', 'release-notes')).length; tries++) await wait(100);
   same('a switch set in Claude Code’s settings reaches the open page, and is read, not undone: the folder stays, the mark is off, the tag says so', [folders('release-notes').every(Boolean), await offMarks(a, 'skills', 'release-notes'), /switched off in Claude Code/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'release-notes')}"]`) ?? ''), await switchOn(a, 'skills', 'release-notes')], [true, ['claude-cli'], true, true]);
   await opened('release-notes');
-  check('its line in the opened row says the tool doesn’t load it', /switched off in Claude Code’s own settings: Claude Code doesn’t load it\./.test(await a.text('.details') ?? ''), await a.text('.details'));
+  check('its line in the opened row says Off in Claude Code’s settings', /Off in Claude Code’s settings/.test(await a.text('.details') ?? ''), await a.text('.details'));
   // While the skills record is damaged, Let Claude Code load it is drawn and off, as the row's other controls are (that a click
   // writes nothing then is tests/librarygate.test.ts's).
   const clearSwitch = `#${rowPart('clear-switch', 'skills', 'release-notes', 'claude-cli')}`, skillsRecordHere = join(practice, '.central-knot/skills.json'), skillsRecordGood = readFileSync(skillsRecordHere, 'utf8');
@@ -2746,9 +2747,12 @@ async function practiceFlow() {
   same('usage collected on a home whose tools keep no sessions: no Used column, and beside the button the time and that there are no sessions yet', [await a.exists('.ov-used'), /^Collected .+ · no sessions yet$/.test(await a.text('#usage-when') ?? '')], [false, true]);
   // Full screen on a 1728×1117 display: the details dock beside the table, and a row's line, its tag and URL here, still shows whole.
   await sizeTo(a, 1728, 1117);
-  same('docked at full screen, a row’s line is shortened only when it has no room', await a.all('.ov-row[data-key] .ov-name-about', 'e.scrollWidth <= e.clientWidth'), [true, true]);
+  same('docked at full screen, a closed row’s line is shortened only when it has no room', await a.all('.ov-row[data-key] .ov-name-about', 'e.scrollWidth <= e.clientWidth'), [true]);
   await fullSize(a);
-  check('its line says Central Knot leaves that switch as it is', /switched off in Copilot CLI’s own settings: Copilot CLI doesn’t start it\. Central Knot leaves that switch as it is/.test(await a.text('.details') ?? ''), await a.text('.details'));
+  const mcpOffMark = rowPart('line-info', 'mcp', 'docs', 'copilot-cli');
+  same('its line says Off in Copilot CLI’s settings with a card saying Central Knot leaves the switch and how to turn it back on',
+    await a.run(`[document.querySelector('#${mcpOffMark}')?.closest('.details-tool-line')?.innerText?.replace(/\\s+/g, ' ').trim() ?? '', document.querySelector('#${mcpOffMark}-card')?.textContent?.trim() ?? '']`),
+    ['Off in Copilot CLI’s settings · Own settings kept: tools', 'Copilot CLI doesn’t start it. Central Knot leaves that switch as it is, so it is still off there after Off and On. Turn it back on in Copilot CLI’s own settings.']);
   const codexBefore = readNow(mcpFiles[2]);
   await a.click(`#${rowPart('enable', 'mcp', 'docs', 'codex-cli')}`);
   same('its Codex switch keeps it out of Codex at once', [readNow(mcpFiles[2]).includes('[mcp_servers.docs]'), /docs is kept out of Codex/.test(await a.text('.band-done') ?? '')], [false, true]);
@@ -2805,10 +2809,10 @@ async function practiceFlow() {
   await agentInPi(a, practice);
   // The opened row: each harness's line with what stays its own, and the agent's versions.
   await a.click(`#${rowPart('open', 'agents', 'code-reviewer')}`);
-  check('the opened row says which settings stay Claude Code’s own', /Its own settings stay in its file: tools and model/.test(await a.text('.details') ?? ''), await a.text('.details'));
+  check('the opened row says which settings stay Claude Code’s own', /Own settings kept: tools and model/.test(await a.text('.details') ?? ''), await a.text('.details'));
   same('and lists its versions, the current one marked, each saying what it changed', await versionsShown(), ['found in Claude Codefirst versionCurrent']);
-  check('the opened row shows the whole description, and Delete from Central Knot says how it differs from Off',
-    /Reviews a change for correctness and clarity before it is merged\./.test(await a.text('.details-description-whole') ?? '') && /Off keeps it here; Delete removes it from Central Knot\./.test(await a.text('.delete-offer') ?? ''), await a.text('.details'));
+  check('the opened row shows the whole description, and Delete is a quiet button with no offer note',
+    /Reviews a change for correctness and clarity before it is merged\./.test(await a.text('.details-description-whole') ?? '') && (await a.text(`#${rowPart('delete', 'agents', 'code-reviewer')}`))?.trim() === 'Delete…' && !(await a.exists('.delete-offer-note')), await a.text('.details'));
   await a.shot('practice-agents');
   // An edit made in a harness becomes the current version and reaches the others: an agent syncs both ways, whatever fields
   // its harnesses keep of their own.
@@ -2854,7 +2858,7 @@ async function practiceFlow() {
   const notesBefore = notesFiles.map(file => readFileSync(file, 'utf8'));
   await a.click(`#${rowPart('open', 'agents', 'release-notes')}`);
   await a.click(`#${rowPart('delete', 'agents', 'release-notes')}`);
-  check('armed, it says History keeps it, with its versions, for History’s days', /History keeps it, with its versions, for 30 days, and can restore it\./.test(await a.text(`#${rowPart('delete-note', 'agents', 'release-notes')}`) ?? ''), await a.text(`#${rowPart('delete-note', 'agents', 'release-notes')}`));
+  same('armed, it says what Delete removes and how many days History can restore it', (await a.text(`#${rowPart('delete-note', 'agents', 'release-notes')}`) ?? '').trim(), 'Removed from Central Knot and every tool it manages. History can restore it for 30 days.');
   await a.click(`#${rowPart('delete-confirm', 'agents', 'release-notes')}`);
   same('Delete from Central Knot takes the agent out of every harness and off the page', [notesFiles.map(file => existsSync(file)), (await rowKeys(a, 'agents')).includes('release-notes')], [[false, false, false], false]);
   await a.click('#nav-history');
@@ -4256,7 +4260,96 @@ async function practiceFlow() {
     await a.click('#appearance-system');
     await fullSize(a);
   }
+  // Set History to 7 days so armed Delete's days come from History's own setting, then restore 30 days after.
+  await a.click('#nav-settings');
+  await keepFor(a, 7);
+  await a.click('#history-shorten');
+  for (let tries = 0; tries < 30 && (await savedSettings()).historyDays !== 7; tries++) await wait(100);
   await openKind(a, 'skills');
+  // Opened row says each thing once (with History at 7 days): description gives way on the row's line while open and returns
+  // on close; no tool line says "Has the current version" while the closed row's mark title still does; one "In each tool" mark
+  // with its card; armed Delete says 7 days; own-copy line stays whole; Off row's Codex switch still works; a row whose copies
+  // differ keeps its line after the name.
+  const standupRowSel = `.ov-row[data-key="${rowPart('', 'skills', 'standup')}"]`;
+  const standupClosedAbout = await a.exists(`${standupRowSel} .ov-name-about`);
+  const standupMarkTitleBefore = await a.run(`document.querySelector('#${rowPart('cell', 'skills', 'standup', 'claude-cli')}')?.title ?? ''`);
+  const standupMarksLabelBefore = await a.run(`document.querySelector('${standupRowSel} .tool-marks')?.getAttribute('aria-label') ?? ''`);
+  await opened('standup');
+  const standupOpenState = await a.run(`(() => {
+    const row = document.querySelector(${JSON.stringify(standupRowSel)});
+    const lines = [...document.querySelectorAll('.details .details-tool-line')].map(e => e.innerText.trim());
+    const mark = document.querySelector('#${rowPart('shared', 'skills', 'standup')}');
+    const card = document.querySelector('#${rowPart('shared', 'skills', 'standup')}-card');
+    return {
+      aboutOpen: !!row?.querySelector('.ov-name-about'),
+      hasWholeDesc: !!document.querySelector('.details .details-description-whole'),
+      hasCurrentLine: lines.some(line => /Has the current version/i.test(line)),
+      markTitle: document.querySelector('#${rowPart('cell', 'skills', 'standup', 'claude-cli')}')?.title ?? '',
+      marksLabelHasCurrent: /Claude Code: has the current version\./.test(row?.querySelector('.tool-marks')?.getAttribute('aria-label') ?? ''),
+      inEachToolMarks: document.querySelectorAll('.details .details-tools-head .info-mark').length,
+      inEachToolLabel: mark?.getAttribute('aria-label') ?? null,
+      inEachToolCard: card?.textContent?.trim() ?? null,
+      versionsNote: !!document.querySelector('.details .versions-note'),
+      deleteLabel: document.querySelector('#${rowPart('delete', 'skills', 'standup')}')?.textContent?.trim() ?? null,
+      deleteOfferNote: !!document.querySelector('.details .delete-offer-note'),
+    };
+  })()`);
+  await a.click(`#${rowPart('shared', 'skills', 'standup')}`);
+  const sharedCardOpens = await a.run(`!!document.querySelector('#${rowPart('shared', 'skills', 'standup')}-card')?.matches(':popover-open')`);
+  await a.press('Escape');
+  await a.click(`#${rowPart('delete', 'skills', 'standup')}`);
+  const armedSevenDays = (await a.text(`#${rowPart('delete-note', 'skills', 'standup')}`) ?? '').trim();
+  await a.click(`#${rowPart('delete-cancel', 'skills', 'standup')}`);
+  await opened('standup', false);
+  const standupClosedAgain = await a.exists(`${standupRowSel} .ov-name-about`);
+  same('opened standup row says each thing once: no row description while open (back on close), no current-version filler (mark title and aria-label keep it), one In each tool card, no versions or delete offer note, armed Delete names 7 days',
+    [standupClosedAbout, standupMarkTitleBefore, /Claude Code: has the current version\./.test(standupMarksLabelBefore), standupOpenState, sharedCardOpens, armedSevenDays, standupClosedAgain],
+    [true, 'Claude Code: has the current version.', true, {
+      aboutOpen: false,
+      hasWholeDesc: true,
+      hasCurrentLine: false,
+      markTitle: 'Claude Code: has the current version.',
+      marksLabelHasCurrent: true,
+      inEachToolMarks: 1,
+      inEachToolLabel: 'About In each tool',
+      inEachToolCard: 'Each tool it is on in gets the same folder: files as they are, scripts runnable.',
+      versionsNote: false,
+      deleteLabel: 'Delete…',
+      deleteOfferNote: false,
+    }, true, 'Removed from Central Knot and every tool it manages. History can restore it for 7 days.', true]);
+  // Own-copy line stays whole, and an Off row's Codex switch still works.
+  await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
+  const copilotOwnStandup = join(practice, '.copilot/skills/standup');
+  skill(join(practice, '.copilot/skills'), 'standup', text('standup', 'Copilot own copy.'));
+  await a.click('#header-refresh');
+  await opened('standup');
+  const copilotOwnLine = await a.run(`(() => {
+    const row = [...document.querySelectorAll('.details .details-tool')].find(e => e.querySelector('.details-tool-label strong')?.textContent?.trim() === 'Copilot CLI');
+    return row?.querySelector('.details-tool-line')?.innerText?.trim() ?? '';
+  })()`);
+  await a.click(`#${rowPart('enable', 'skills', 'standup', 'codex-cli')}`);
+  const codexSwitchedOn = existsSync(join(practice, '.codex/skills/standup/SKILL.md'));
+  await a.click('#outcome-undo');
+  await opened('standup', false);
+  rmSync(copilotOwnStandup, { recursive: true, force: true });
+  await a.click('#header-refresh');
+  await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
+  same('own-copy line stays whole and an Off row’s Codex switch still works',
+    [copilotOwnLine, codexSwitchedOn],
+    ['Has a copy Central Knot didn’t put there. It is left alone while the skill is off; before it is written over, a copy Central Knot doesn’t have yet is kept as a version.', true]);
+  // A row whose copies differ shows no description in its details, so it keeps its line after the name while open.
+  skill(join(practice, '.claude/skills'), 'diff-about', text('diff-about', 'Claude body.'));
+  skill(join(practice, '.copilot/skills'), 'diff-about', text('diff-about', 'Copilot body.'));
+  await a.click('#header-refresh');
+  await a.click(`#${rowPart('open', 'skills', 'diff-about')}`);
+  check('a row whose copies differ keeps its line after the name while open',
+    await a.exists(`.ov-row.open[data-key="${rowPart('', 'skills', 'diff-about')}"] .ov-name-about`));
+  await a.click(`#${rowPart('open', 'skills', 'diff-about')}`);
+  for (const root of ['.claude/skills', '.copilot/skills']) rmSync(join(practice, root, 'diff-about'), { recursive: true, force: true });
+  await a.click('#nav-settings');
+  await keepFor(a, 30);
+  await openKind(a, 'skills');
+  await a.click('#header-refresh');
   // Full screen: nothing on the Overview, History or Plugins is cut off at 2560×1440.
   await sizeTo(a, 2560, 1440);
   for (const page of ['overview', 'history', 'plugins']) {
@@ -5438,7 +5531,10 @@ async function openCodeFlow() {
     [await cellState(a, 'skills', 'notes', 'opencode-cli'), await cellState(a, 'skills', 'oc-only', 'opencode-cli'), await cellState(a, 'skills', 'shared', 'opencode-cli'), await cellState(a, 'skills', 'notes', 'claude-cli'), await cellState(a, 'skills', 'oc-only', 'claude-cli')],
     ['another-way', 'own-copy', 'another-way', 'own-copy', 'none']);
   await a.click(`#${rowPart('open', 'skills', 'notes')}`);
-  check('a skill OpenCode reads in Claude Code’s folder says so: the copy is Claude Code’s', (await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'notes')}"] + *`) ?? '').includes('Not in Central Knot · OpenCode reads Claude Code’s copy, in Claude Code’s skills folder.'), await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'notes')}"] + *`));
+  const openCodeMark = rowPart('line-info', 'skills', 'notes', 'opencode-cli');
+  same('a skill OpenCode reads in Claude Code’s folder says Reads Claude Code’s copy with its card',
+    await a.run(`[document.querySelector('#${openCodeMark}')?.closest('.details-tool-line')?.innerText?.trim() ?? '', document.querySelector('#${openCodeMark}-card')?.textContent?.trim() ?? '']`),
+    ['Reads Claude Code’s copy', 'OpenCode reads this skill from Claude Code’s folder; Central Knot writes nothing to OpenCode meanwhile.']);
   await fitsAtMinimum(a, 'Skills with OpenCode, a skill open');
   await pictures(a, 'opencode-skill-open');
   const view = await a.run('window.centralKnot.refresh()');
@@ -5496,8 +5592,12 @@ async function openCodeFlow() {
   await p.click(`#${rowPart('add', 'skills', 'notes')}`);
   same('a skill OpenCode reads in Claude Code’s folder gets no second copy in OpenCode', [existsSync(join(mine, 'skills/notes')), await cellState(p, 'skills', 'notes', 'opencode-cli')], [false, 'another-way']);
   if (await p.run(`document.querySelector('#${rowPart('open', 'skills', 'notes')}')?.getAttribute('aria-expanded')`) !== 'true') await p.click(`#${rowPart('open', 'skills', 'notes')}`);
-  same('OpenCode’s line says it reads Claude Code’s copy, has no switch there, and its settings are untouched',
-    [/OpenCode reads Claude Code’s copy/.test(await p.text(`.ov-row[data-key="${rowPart('', 'skills', 'notes')}"] + *`) ?? ''), await p.exists(`#${rowPart('enable', 'skills', 'notes', 'opencode-cli')}`), readNow(join(mine, 'opencode.json')) === settingsBefore], [true, false, true]);
+  same('OpenCode’s line says Reads Claude Code’s copy with its card, has no switch there, and its settings are untouched',
+    [await p.run(`document.querySelector('#${openCodeMark}')?.closest('.details-tool-line')?.innerText?.trim() ?? ''`),
+      await p.text(`#${openCodeMark}-card`),
+      await p.exists(`#${rowPart('enable', 'skills', 'notes', 'opencode-cli')}`),
+      readNow(join(mine, 'opencode.json')) === settingsBefore],
+    ['Reads Claude Code’s copy', 'OpenCode reads this skill from Claude Code’s folder; Central Knot writes nothing to OpenCode meanwhile.', false, true]);
   // Its server goes to the other tools in their own forms, values as they are.
   await openKind(p, 'mcp');
   await p.click(`#${rowPart('add', 'mcp', 'oc-docs')}`);
@@ -7625,7 +7725,7 @@ esac
   writeFileSync(piSettings, `${JSON.stringify({ skills: hisList }, null, 2)}\n`);
   await a.click('#header-refresh');
   if ((await a.run(`document.querySelector('#${rowPart('open', 'skills', 'triage')}')?.getAttribute('aria-expanded')`)) !== 'true') await a.click(`#${rowPart('open', 'skills', 'triage')}`);
-  check('with no inclusion, triage is off in Pi: its mark, its line, and Let Pi load it', await offInPi() && /Pi doesn’t load it/.test(await a.text('.details') ?? '') && await a.exists(`#${rowPart('clear-switch', 'skills', 'triage', 'pi-cli')}`), await a.text('.details'));
+  check('with no inclusion, triage is off in Pi: its mark, its line, and Let Pi load it', await offInPi() && /Off in Pi’s settings/.test(await a.text('.details') ?? '') && await a.exists(`#${rowPart('clear-switch', 'skills', 'triage', 'pi-cli')}`), await a.text('.details'));
   // The plugin's page counts what Pi loads: triage, which his list keeps out, is said apart.
   await a.click('#nav-plugins');
   if (!(await a.exists('#pbox-0-issue-tracker-pi-cli'))) await a.click('#popen-0-issue-tracker');
@@ -14183,11 +14283,11 @@ async function libraryFlow() {
   same('MCP server Undo: Off with earlier keep-out back and config files byte for byte as before',
     [mcpUndoRec?.on, mcpUndoRec?.except, snapFiles(oMcpFiles)], [false, ['codex-cli'], mcpBefore]);
 
-  // Plugin-sourced Off row keeps today's line and draws no Off-row switch; Claude Code whole-plugin row keeps whole-plugin control.
+  // Plugin-sourced Off row shows Kept out where in except (cutting "No copy while it is off.") and draws no Off-row switch; Claude Code whole-plugin row keeps whole-plugin control.
   await o.click(`#${rowPart('open', 'skills', 'plug-off')}`);
   const plugOffPi = (await readToolLines(o)).find(entry => entry.tool === 'Pi');
-  same('plugin-sourced Off row keeps today’s line and draws no tool switch in Pi',
-    [plugOffPi?.line, plugOffPi?.label], ['No copy while it is off.', '']);
+  same('plugin-sourced Off row marks kept-out tool and draws no tool switch in Pi',
+    [plugOffPi?.line, plugOffPi?.label], ['Kept out', '']);
   await o.click(byId(rowPart('open', 'skills', 'release-helper@ck-test-market/release-notes')));
   const claudePlugLabel = await o.run(`document.querySelector('.details .details-tool')?.querySelector('[role="switch"]')?.getAttribute('aria-label') ?? ''`);
   check('Claude Code whole-plugin line never offers one skill only', !/only\./.test(claudePlugLabel), claudePlugLabel);
@@ -19096,11 +19196,24 @@ async function skillFileFlow() {
   writeFileSync(join(home, '.claude/agents/helper-agent.md'), '---\nname: helper-agent\ndescription: Helps review.\n---\n\nPrompt body.\n');
   writeFileSync(join(home, '.claude.json'), JSON.stringify({ mcpServers: { 'demo-mcp': { command: 'node', args: ['-e', '0'] } } }, null, 2));
 
-  // A plugin-only skill (must NOT get an Open file mark in 15a).
+  // A plugin-only skill (gets the same Open file mark in 15a2-B, with a nested file in its folder).
   const market = join(scratch, 'skill-file-market');
   writeMarket(market, 'skill-file-market');
   const pluginSkill = readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8');
-  writeClaudeInstall(home, 'skill-file-market', 'issue-tracker', '2.0.0', { 'skills/triage/SKILL.md': pluginSkill });
+  const pluginRubric = '# Triage rubric\n\n- P0: outage or data loss.\n- P1: broken primary flow.\n';
+  writeClaudeInstall(home, 'skill-file-market', 'issue-tracker', '2.0.0', {
+    'skills/triage/SKILL.md': pluginSkill,
+    'skills/triage/notes/rubric.md': pluginRubric,
+  });
+
+  // A local-only marketplace (no remote plugins) added in Central Knot so Find can match an uninstalled plugin's skill from its marketplace copy on disk.
+  const catalogMarket = join(home, 'markets/catalog-market');
+  writeMarket(catalogMarket, 'catalog-market');
+  const catalogManifest = JSON.parse(readFileSync(join(catalogMarket, '.claude-plugin/marketplace.json'), 'utf8'));
+  catalogManifest.plugins = catalogManifest.plugins.filter(plugin => typeof plugin.source === 'string');
+  writeFileSync(join(catalogMarket, '.claude-plugin/marketplace.json'), JSON.stringify(catalogManifest, null, 2));
+  mkdirSync(join(catalogMarket, 'plugins/document-tools/skills/pdf-reader/notes'), { recursive: true });
+  writeFileSync(join(catalogMarket, 'plugins/document-tools/skills/pdf-reader/notes/tables.md'), '# Table rules\n\nKeep each table as Markdown.\n');
 
   // Claude Code sessions so code-review leads under Sort by Most used (task 7).
   const writeLines = (path, records) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, records.map(record => JSON.stringify(record)).join('\n') + '\n'); };
@@ -19112,7 +19225,8 @@ async function skillFileFlow() {
   const actualHome = canWriteRealHome;
   const prefix = actualHome ? '~' : '…';
   writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: actualHome ? { mode: 'actual' } : { mode: 'custom', path: home } }));
-  const a = await launch(data, [], actualHome ? home : real);
+  writeFileSync(join(data, 'marketplaces.json'), JSON.stringify([catalogMarket], null, 2));
+  const a = await launch(data, [], actualHome ? home : real, { CK_PLUGIN_TEXT: 'on' });
 
   // Add the three skills, the agent, and the MCP server to Central Knot, turn stored-only off, and leave local-draft Found only.
   await openKind(a, 'all');
@@ -19126,8 +19240,9 @@ async function skillFileFlow() {
   await a.click('#header-refresh');
   await until(() => a.exists(`.ov-row[data-key="${rowPart('', 'skills', 'local-draft')}"]`));
 
+  const shotOnly = process.env.CK_SHOT_ONLY ? new Set(process.env.CK_SHOT_ONLY.split(',')) : null;
   const capture = async (tag, prep = async () => {}) => {
-    if (!shots) return;
+    if (!shots || (shotOnly && !shotOnly.has(tag))) return;
     for (const [width, height] of [SMALLEST, [1316, 819]]) {
       await sizeTo(a, width, height);
       const wasRail = await a.run(`document.body.classList.contains('rail')`);
@@ -19158,12 +19273,43 @@ async function skillFileFlow() {
     await wait(80);
     await fullSize(a);
   };
+  const capture860Light = async (tag, prep = async () => {}, after = async () => {}) => {
+    if (!shots || (shotOnly && !shotOnly.has(tag))) return;
+    await sizeTo(a, ...SMALLEST);
+    const wasRail = await a.run(`document.body.classList.contains('rail')`);
+    if (wasRail) await a.click('#sidebar-toggle');
+    await a.settle();
+    await a.run(`(() => {
+      const rowEl = document.querySelector('.ov-row.ov-file-anchored');
+      const under = rowEl?.nextElementSibling, list = rowEl?.closest('.scroll');
+      if (!rowEl || !under || !list) return;
+      const box = list.getBoundingClientRect();
+      const rowTop = rowEl.getBoundingClientRect().top - box.top;
+      if (rowTop < 8) list.scrollTop += rowTop - 8;
+      const past = under.getBoundingClientRect().bottom - box.bottom;
+      const room = rowEl.getBoundingClientRect().top - box.top - parseFloat(getComputedStyle(rowEl).scrollMarginTop);
+      if (past > 0) list.scrollTop += Math.min(past, room);
+      window.dispatchEvent(new Event('resize'));
+    })()`);
+    await a.settle();
+    await a.run(`window.centralKnot.setAppearance('light')`);
+    await wait(80);
+    await prep();
+    await a.shot(`${tag}-860-light`);
+    await after();
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    await wait(80);
+    if (wasRail) await a.click('#sidebar-toggle');
+    await fullSize(a);
+  };
 
-  // Mark placement: library skills (On and Off) and found skills; none on agent, MCP server, or plugin-only skill.
+  // Mark placement: library skills (On and Off), found skills, and plugin skills; none on agent or MCP server.
   const reviewBtn = `#${rowPart('file', 'skills', 'code-review')}`;
   const craftBtn = `#${rowPart('file', 'skills', 'commit-craft')}`;
   const storedBtn = `#${rowPart('file', 'skills', 'stored-only')}`;
   const draftBtn = `#${rowPart('file', 'skills', 'local-draft')}`;
+  const triageRowKey = rowPart('', 'skills', 'issue-tracker@skill-file-market/triage');
+  const triageBtn = `[id="${rowPart('file', 'skills', 'issue-tracker@skill-file-market/triage')}"]`;
   const marksCheck = await a.run(`(() => {
     const row = document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'code-review')}"]');
     const btn = row?.querySelector('${reviewBtn}');
@@ -19174,6 +19320,9 @@ async function skillFileFlow() {
     const draftRow = document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'local-draft')}"]');
     const draftName = draftRow?.querySelector('.ov-name-text');
     const draftMark = draftRow?.querySelector('${draftBtn}');
+    const triageRow = document.querySelector('.ov-row[data-key="${triageRowKey}"]');
+    const triageName = triageRow?.querySelector('.ov-name-text');
+    const triageMark = triageRow?.querySelector('.row-file-btn');
     return {
       exists: !!btn,
       title: btn?.title ?? null,
@@ -19184,15 +19333,16 @@ async function skillFileFlow() {
       craft: !!document.querySelector('${craftBtn}'),
       stored: !!document.querySelector('${storedBtn}'),
       foundSkill: !!(draftMark && draftName && draftName.nextElementSibling === draftMark),
+      pluginSkill: !!(triageMark && triageName && triageName.nextElementSibling === triageMark),
+      totalMarks: document.querySelectorAll('.row-file-btn').length,
       agent: !!document.querySelector('.ov-row[data-key="${rowPart('', 'agents', 'helper-agent')}"] .row-file-btn'),
       mcp: !!document.querySelector('.ov-row[data-key="${rowPart('', 'mcp', 'demo-mcp')}"] .row-file-btn'),
-      pluginSkill: !!document.querySelector('.ov-row[data-key^="plugin-"] .row-file-btn'),
     };
   })()`);
-  same('Open file mark sits right after the name on Library and Found skills, never on agent, MCP, or plugin-only rows', marksCheck, {
+  same('Open file mark sits right after the name on Library, Found and plugin skills (all 5), never on agent or MCP rows', marksCheck, {
     exists: true, title: 'Open file', label: 'Open file: code-review', pressed: 'false',
     rightAfterName: true, beforeAboutAndMarks: true, craft: true, stored: true,
-    foundSkill: true, agent: false, mcp: false, pluginSkill: false,
+    foundSkill: true, pluginSkill: true, totalMarks: 5, agent: false, mcp: false,
   });
 
   if (marksCheck.exists) {
@@ -19364,7 +19514,7 @@ async function skillFileFlow() {
       (await a.text('.file-open-box pre.content') ?? '').includes('Verify updated text reloads.'),
       (await a.text('.file-open-foot .path-text'))?.trim(),
     ], ['checklist.md', true, `${prefix}/.claude/skills/code-review/checklist.md`]);
-    if (shots) {
+    if (shots && !shotOnly) {
       await sizeTo(a, ...SMALLEST);
       const wasRail = await a.run(`document.body.classList.contains('rail')`);
       if (wasRail) await a.click('#sidebar-toggle');
@@ -19478,6 +19628,20 @@ async function skillFileFlow() {
         await a.exists('.file-open-box .file-copy-select'),
         await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'local-draft')}"]')?.getAttribute('aria-expanded')`),
       ], [true, `${prefix}/.claude/skills/local-draft/SKILL.md`, false, 'false']);
+      await a.press('Escape');
+    }
+
+    // Step 15a2-B: plugin skill on a tool's Skills tab (triage).
+    same('triage has the Open file mark on Claude Code’s Skills tab', await a.exists(triageBtn), true);
+    if (await a.exists(triageBtn)) {
+      await a.click(triageBtn);
+      await until(() => a.exists('.file-open-box pre.content'));
+      same('on Claude Code’s Skills tab, triage opens SKILL.md in 1 click with its installed plugin path and details closed', [
+        (await a.text('.file-open-box pre.content') ?? '').includes('Sorts new issues by area and urgency.'),
+        (await a.text('.file-open-foot .path-text'))?.trim(),
+        await a.exists('.file-open-box .file-copy-select'),
+        await a.run(`document.querySelector('.ov-row[data-key="${triageRowKey}"]')?.getAttribute('aria-expanded')`),
+      ], [true, `${prefix}/.claude/plugins/cache/skill-file-market/issue-tracker/2.0.0/skills/triage/SKILL.md`, false, 'false']);
       await a.press('Escape');
     }
 
@@ -19596,7 +19760,7 @@ async function skillFileFlow() {
         len: 40, rightAfterName: true, markVisible: true, nameUsesRoom: true, rowHeight: 40,
       });
       same('nothing cut off at 860 with sidebar open and 40-letter found skill', await a.run(CUT_OFF), []);
-      if (shots) {
+      if (shots && !shotOnly) {
         await a.run(`document.activeElement?.blur()`);
         for (const theme of ['light', 'dark']) {
           await a.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
@@ -19704,7 +19868,7 @@ async function skillFileFlow() {
         (await a.text('.file-open-box pre.content') ?? '').includes('Identical SKILL.md in both tools; other files differ.'),
         (await a.text('.file-open-foot .path-text'))?.trim(),
       ], [['Claude Code’s copy', 'Copilot CLI’s copy'], ['SKILL.md', 'plan.md'], true, `${prefix}/.claude/skills/same-md-notes/SKILL.md`]);
-      if (shots) {
+      if (shots && !shotOnly) {
         await sizeTo(a, ...SMALLEST);
         const wasRailSame = await a.run(`document.body.classList.contains('rail')`);
         if (wasRailSame) await a.click('#sidebar-toggle');
@@ -19900,18 +20064,270 @@ async function skillFileFlow() {
       ], ['File for local-draft', 'notes/plan.md', true, 'Stored in Central Knot']);
       await a.press('Escape');
 
+      // Step 15a2-B: plugin skill on Library's list (triage SKILL.md, nested file, off plugin, update while open, two versions chooser, equal copies, Find hit for uninstalled plugin, gone root).
+      if (await a.exists(triageBtn)) {
+        await a.click(triageBtn);
+        await until(() => a.exists('.file-open-box pre.content'));
+        same('triage opens SKILL.md in 1 click from closed row on Library with tabs, no chooser, and installed plugin path footer', [
+          await a.run(`document.querySelector('.ov-row[data-key="${triageRowKey}"]')?.getAttribute('aria-expanded')`),
+          await a.all('.file-open-box .file-tab', 'e.textContent.trim()'),
+          (await a.text('.file-open-box pre.content') ?? '').includes('Sorts new issues by area and urgency.'),
+          await a.exists('.file-open-box .file-copy-select'),
+          (await a.text('.file-open-foot .path-text'))?.trim(),
+          await a.run(`document.querySelector('.file-open-foot .details-path-show')?.textContent?.trim() ?? null`),
+          await a.run(`document.querySelector('.file-open-foot [data-copy]')?.getAttribute('data-copy') ?? null`),
+        ], ['false', ['SKILL.md', 'notes/rubric.md'], true, false,
+          `${prefix}/.claude/plugins/cache/skill-file-market/issue-tracker/2.0.0/skills/triage/SKILL.md`,
+          'Show in folder', join(home, '.claude/plugins/cache/skill-file-market/issue-tracker/2.0.0/skills/triage/SKILL.md')]);
+        await capture('plugin-skill-md');
+
+        await clickTab('notes/rubric.md');
+        await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('# Triage rubric'));
+        same('second click reads triage’s nested file with its installed plugin path in the footer', [
+          (await a.text('.file-open-box pre.content') ?? '').includes('P0: outage or data loss.'),
+          (await a.text('.file-open-foot .path-text'))?.trim(),
+          await a.run(`document.querySelector('.file-open-foot [data-copy]')?.getAttribute('data-copy')`),
+        ], [true, `${prefix}/.claude/plugins/cache/skill-file-market/issue-tracker/2.0.0/skills/triage/notes/rubric.md`,
+          join(home, '.claude/plugins/cache/skill-file-market/issue-tracker/2.0.0/skills/triage/notes/rubric.md')]);
+        await capture('plugin-nested-file');
+
+        // Plugin turned off: still readable while open, and opens from closed row while off.
+        writeFileSync(join(home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'issue-tracker@skill-file-market': false } }, null, 2));
+        await a.click('#header-refresh');
+        await until(() => a.exists(`.ov-row[data-key="${triageRowKey}"] .switch[aria-checked="false"]`));
+        same('turning the plugin off keeps its open file panel readable on the same tab', [
+          await a.run(`document.querySelector('.file-open-box .file-tab[aria-selected="true"]')?.textContent?.trim() ?? null`),
+          (await a.text('.file-open-box pre.content') ?? '').includes('P0: outage or data loss.'),
+        ], ['notes/rubric.md', true]);
+        await a.press('Escape');
+        await a.click(triageBtn);
+        await until(() => a.exists('.file-open-box pre.content'));
+        same('an off plugin’s skill still opens SKILL.md from the closed row with its installed path', [
+          (await a.text('.file-open-box pre.content') ?? '').includes('Sorts new issues by area and urgency.'),
+          (await a.text('.file-open-foot .path-text'))?.trim(),
+        ], [true, `${prefix}/.claude/plugins/cache/skill-file-market/issue-tracker/2.0.0/skills/triage/SKILL.md`]);
+        await capture('plugin-off');
+
+        // Plugin updated while the panel is open: reloads new text and updates footer path to the new version.
+        await clickTab('notes/rubric.md');
+        await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('P0: outage or data loss.'));
+        const updatedSkill = pluginSkill.replace('Follow the steps.', 'Follow the updated v2.1.0 steps.');
+        const updatedRubric = '# Triage rubric v2.1.0\n\n- P0: outage or data loss.\n- P1: updated guidance.\n';
+        writeClaudeInstall(home, 'skill-file-market', 'issue-tracker', '2.1.0', {
+          'skills/triage/SKILL.md': updatedSkill,
+          'skills/triage/notes/rubric.md': updatedRubric,
+        });
+        writeFileSync(join(home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'issue-tracker@skill-file-market': true } }, null, 2));
+        await a.click('#header-refresh');
+        await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('P1: updated guidance.'), 40);
+        same('updating the plugin while its panel is open reloads the new version’s text and footer path', [
+          await a.run(`document.querySelector('.file-open-box .file-tab[aria-selected="true"]')?.textContent?.trim() ?? null`),
+          (await a.text('.file-open-box pre.content') ?? '').includes('P1: updated guidance.'),
+          (await a.text('.file-open-foot .path-text'))?.trim(),
+        ], ['notes/rubric.md', true, `${prefix}/.claude/plugins/cache/skill-file-market/issue-tracker/2.1.0/skills/triage/notes/rubric.md`]);
+        await a.press('Escape');
+
+        // Two tools holding different versions of the plugin: first shown, chooser there, choosing second switches text and resets tab to SKILL.md.
+        const copilotPluginDir = join(home, '.copilot/installed-plugins/skill-file-market/issue-tracker');
+        const writeCopilotPlugin = (version, files) => {
+          rmSync(copilotPluginDir, { recursive: true, force: true });
+          for (const [rel, body] of Object.entries(files)) {
+            mkdirSync(dirname(join(copilotPluginDir, rel)), { recursive: true });
+            writeFileSync(join(copilotPluginDir, rel), body);
+          }
+          writeFileSync(join(home, '.copilot/config.json'), JSON.stringify({
+            installedPlugins: [{ name: 'issue-tracker', marketplace: 'skill-file-market', ...(version ? { version } : {}), cache_path: copilotPluginDir, enabled: true }],
+          }, null, 2));
+        };
+        const copilotSkill = pluginSkill.replace('Follow the steps.', 'Copilot CLI v1.0.0 triage instructions.');
+        writeCopilotPlugin('1.0.0', {
+          'skills/triage/SKILL.md': copilotSkill,
+          'skills/triage/copilot-only.md': 'Copilot plugin companion file.\n',
+        });
+        await a.click('#header-refresh');
+        await until(() => a.exists(`.ov-row[data-key="${triageRowKey}"] [data-tool="copilot-cli"][data-state="plugin"]`));
+        await a.click(triageBtn);
+        await until(() => a.exists('.file-open-box .file-copy-select select'));
+        same('two tools holding different plugin versions open the first tool’s copy with the chooser listing both versions', [
+          await a.all('.file-open-box .file-copy-select select option', 'e.textContent'),
+          await a.run(`document.querySelector('.file-open-box .file-copy-select select')?.selectedOptions[0]?.textContent ?? null`),
+          await a.all('.file-open-box .file-tab', 'e.textContent.trim()'),
+          (await a.text('.file-open-box pre.content') ?? '').includes('Follow the updated v2.1.0 steps.'),
+          (await a.text('.file-open-foot .path-text'))?.trim(),
+        ], [['Claude Code’s copy · 2.1.0', 'Copilot CLI’s copy · 1.0.0'], 'Claude Code’s copy · 2.1.0', ['SKILL.md', 'notes/rubric.md'], true,
+          `${prefix}/.claude/plugins/cache/skill-file-market/issue-tracker/2.1.0/skills/triage/SKILL.md`]);
+        await fitsAtMinimum(a, 'plugin skill panel with version chooser');
+        await capture('plugin-differs');
+        await capture860Light('plugin-differs-chooser-open', async () => {
+          const at = await a.run(`(() => { const r = document.querySelector('.file-open-box .file-copy-select select')?.getBoundingClientRect(); return r ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } : null; })()`);
+          if (at) {
+            await a.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: at.x, y: at.y, button: 'left', buttons: 1, clickCount: 1 });
+            await a.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: at.x, y: at.y, button: 'left', buttons: 0, clickCount: 1 });
+            await wait(150);
+          }
+        }, async () => { await a.press('Escape'); });
+
+        await clickTab('notes/rubric.md');
+        await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('P1: updated guidance.'));
+        await a.run(`(() => { const s = document.querySelector('.file-open-box .file-copy-select select'); s.value = '1'; s.dispatchEvent(new Event('change')); })()`);
+        await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Copilot CLI v1.0.0 triage instructions.'));
+        same('choosing the second tool’s plugin copy shows its text, resets tab to SKILL.md, and updates the footer path', [
+          await a.run(`document.querySelector('.file-open-box .file-copy-select select')?.selectedOptions[0]?.textContent ?? null`),
+          await a.all('.file-open-box .file-tab', 'e.textContent.trim()'),
+          await a.run(`document.querySelector('.file-open-box .file-tab[aria-selected="true"]')?.textContent?.trim() ?? null`),
+          (await a.text('.file-open-box pre.content') ?? '').includes('Copilot CLI v1.0.0 triage instructions.'),
+          (await a.text('.file-open-foot .path-text'))?.trim(),
+        ], ['Copilot CLI’s copy · 1.0.0', ['SKILL.md', 'copilot-only.md'], 'SKILL.md', true,
+          `${prefix}/.copilot/installed-plugins/skill-file-market/issue-tracker/skills/triage/SKILL.md`]);
+        await capture860Light('plugin-differs-second');
+        await a.press('Escape');
+
+        // On Copilot CLI's own Skills tab, triage opens Copilot CLI's copy first.
+        await a.click('#nav-harnesses');
+        await a.click('button#harness-copilot-cli.harness-card-head');
+        await a.click('#harness-tab-skills');
+        await a.click(triageBtn);
+        await until(() => a.exists('.file-open-box pre.content'));
+        same('on Copilot CLI’s Skills tab, differing plugin copies open Copilot CLI’s copy first', [
+          await a.all('.file-open-box .file-copy-select select option', 'e.textContent'),
+          (await a.text('.file-open-box pre.content') ?? '').includes('Copilot CLI v1.0.0 triage instructions.'),
+          (await a.text('.file-open-foot .path-text'))?.trim(),
+        ], [['Copilot CLI’s copy · 1.0.0', 'Claude Code’s copy · 2.1.0'], true,
+          `${prefix}/.copilot/installed-plugins/skill-file-market/issue-tracker/skills/triage/SKILL.md`]);
+        await a.press('Escape');
+
+        // Equal installed version in both tools collapses to one (no chooser); missing version stays a separate choice showing tool alone.
+        await openKind(a, 'all');
+        writeCopilotPlugin('2.1.0', {
+          'skills/triage/SKILL.md': updatedSkill,
+          'skills/triage/notes/rubric.md': updatedRubric,
+        });
+        await a.click('#header-refresh');
+        await a.click(triageBtn);
+        await until(() => a.exists('.file-open-box pre.content'));
+        same('equal plugin versions in two tools collapse with no chooser', [
+          await a.exists('.file-open-box .file-copy-select'),
+          (await a.text('.file-open-foot .path-text'))?.trim(),
+        ], [false, `${prefix}/.claude/plugins/cache/skill-file-market/issue-tracker/2.1.0/skills/triage/SKILL.md`]);
+        await a.press('Escape');
+
+        writeCopilotPlugin(undefined, {
+          'skills/triage/SKILL.md': updatedSkill,
+          'skills/triage/notes/rubric.md': updatedRubric,
+        });
+        await a.click('#header-refresh');
+        await a.click(triageBtn);
+        await until(() => a.exists('.file-open-box .file-copy-select select'));
+        same('a tool with no known plugin version stays a separate choice and shows the tool name alone', [
+          await a.all('.file-open-box .file-copy-select select option', 'e.textContent'),
+        ], [['Claude Code’s copy · 2.1.0', 'Copilot CLI’s copy']]);
+        await a.press('Escape');
+
+        // Restore Copilot CLI's distinct copy, select it, then remove Copilot CLI's install while open: falls back to Claude Code on SKILL.md.
+        writeCopilotPlugin('1.0.0', { 'skills/triage/SKILL.md': copilotSkill, 'skills/triage/copilot-only.md': 'Copilot plugin companion file.\n' });
+        await a.click('#header-refresh');
+        await a.click(triageBtn);
+        await until(() => a.exists('.file-open-box .file-copy-select select'));
+        await a.run(`(() => { const s = document.querySelector('.file-open-box .file-copy-select select'); s.value = '1'; s.dispatchEvent(new Event('change')); })()`);
+        await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Copilot CLI v1.0.0 triage instructions.'));
+        await clickTab('copilot-only.md');
+        await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Copilot plugin companion file.'));
+        writeFileSync(join(home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [] }, null, 2));
+        await a.click('#header-refresh');
+        await until(async () => !(await a.exists('.file-open-box .file-copy-select')) && (await a.text('.file-open-box pre.content') ?? '').includes('Follow the updated v2.1.0 steps.'), 40);
+        same('when the chosen plugin copy is removed while open, Refresh falls back to the remaining tool on SKILL.md', [
+          await a.exists('.file-open-box .file-copy-select'),
+          await a.run(`document.querySelector('.file-open-box .file-tab[aria-selected="true"]')?.textContent?.trim() ?? null`),
+          (await a.text('.file-open-foot .path-text'))?.trim(),
+        ], [false, 'SKILL.md', `${prefix}/.claude/plugins/cache/skill-file-market/issue-tracker/2.1.0/skills/triage/SKILL.md`]);
+        await a.press('Escape');
+
+        // Find hit for a plugin that is not installed: opens marketplace copy on disk, nested file, and name link still navigates.
+        const typeFind = async value => {
+          await a.run(`(() => { const f = document.querySelector('#find'); f.focus(); f.value = ${JSON.stringify(value)}; f.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+          await a.settle();
+        };
+        await until(async () => {
+          await typeFind('pdf-reader');
+          return a.exists('.ov-catalog-row .ov-name-text');
+        }, 120);
+        const catalogMark = await a.run(`(() => {
+          const row = document.querySelector('.ov-catalog-row');
+          const link = row?.querySelector('button.ov-name-text');
+          const btn = row?.querySelector('.row-file-btn');
+          return { name: link?.textContent?.trim() ?? null, rightAfterLink: !!(link && btn && link.nextElementSibling === btn) };
+        })()`);
+        same('Find hit for an uninstalled plugin skill has the Open file mark right after its name link', catalogMark, { name: 'pdf-reader', rightAfterLink: true });
+        if (catalogMark.rightAfterLink) {
+          await a.click('.ov-catalog-row .row-file-btn');
+          await until(() => a.exists('.file-open-box pre.content'));
+          same('clicking the Find hit’s mark opens the marketplace copy’s SKILL.md without leaving the Library', [
+            await a.exists('#find'),
+            await a.all('.file-open-box .file-tab', 'e.textContent.trim()'),
+            (await a.text('.file-open-box pre.content') ?? '').includes('Extract the text page by page'),
+            await a.exists('.file-open-box .file-copy-select'),
+            (await a.text('.file-open-foot .path-text'))?.trim(),
+          ], [true, ['SKILL.md', 'notes/tables.md'], true, false,
+            `${prefix}/markets/catalog-market/plugins/document-tools/skills/pdf-reader/SKILL.md`]);
+          await fitsAtMinimum(a, 'catalog Find hit skill file panel');
+          await capture('catalog-skill-md');
+
+          await clickTab('notes/tables.md');
+          await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Keep each table as Markdown.'));
+          same('second click reads the marketplace copy’s nested file with its marketplace path in the footer', [
+            (await a.text('.file-open-box pre.content') ?? '').includes('Keep each table as Markdown.'),
+            (await a.text('.file-open-foot .path-text'))?.trim(),
+          ], [true, `${prefix}/markets/catalog-market/plugins/document-tools/skills/pdf-reader/notes/tables.md`]);
+
+          // Clicking the catalog row's name link still opens its plugin's page.
+          await a.click('.ov-catalog-row button.ov-name-text');
+          await until(() => a.exists('.crumb-here'));
+          same('clicking the catalog hit’s name link still opens its plugin’s page', (await a.text('.crumb-here'))?.trim(), 'document-tools');
+          await a.click('#nav-library');
+          await until(() => a.exists('#find'));
+        }
+        // A catalog agent hit still has no Open file mark.
+        await typeFind('release-reviewer');
+        await until(() => a.exists('.ov-catalog-row'));
+        same('a Find hit for a catalog agent has no Open file mark', await a.exists('.ov-catalog-row .row-file-btn'), false);
+        // Marketplace with no local copy on disk: clicking the Find hit's mark shows Its file couldn't be read.
+        rmSync(catalogMarket, { recursive: true, force: true });
+        await typeFind('pdf-reader');
+        await until(() => a.exists('.ov-catalog-row .row-file-btn'));
+        await a.click('.ov-catalog-row .row-file-btn');
+        await until(async () => (await a.text('.file-open-box .file-open-state'))?.trim() === 'Its file couldn’t be read.');
+        same('a marketplace Find hit with no local copy on disk shows Its file couldn’t be read.', (await a.text('.file-open-box .file-open-state'))?.trim(), 'Its file couldn’t be read.');
+        await a.press('Escape');
+        await typeFind('');
+        await until(() => a.exists(triageBtn));
+
+        // Gone plugin root before Refresh: panel says Its file couldn't be read.
+        rmSync(join(home, '.claude/plugins/cache/skill-file-market/issue-tracker/2.1.0'), { recursive: true, force: true });
+        await a.click(triageBtn);
+        await until(async () => (await a.text('.file-open-box .file-open-state'))?.trim() === 'Its file couldn’t be read.');
+        same('gone plugin root shows Its file couldn’t be read.', (await a.text('.file-open-box .file-open-state'))?.trim(), 'Its file couldn’t be read.');
+        await a.press('Escape');
+
+        // Reinstall Copilot CLI's copy briefly so we can verify main refuses an unmanaged tool for skillPluginFile below.
+        writeCopilotPlugin('1.0.0', { 'skills/triage/SKILL.md': copilotSkill });
+      }
+
       // Main refuses a tool that is not managed in the open home.
       const beforeUnmanage = await a.run(`window.centralKnot.skillFoundFile('twin-notes', 'copilot-cli', 'Copilot skills', 'SKILL.md')`);
+      const beforePluginUnmanage = await a.run(`window.centralKnot.skillPluginFile?.({ marketName: 'skill-file-market', plugin: 'issue-tracker', part: 'skills/triage', from: 'copilot-cli' }, 'SKILL.md') ?? null`);
       await a.click('#nav-harnesses');
       await a.click('#manage-copilot-cli');
       await until(() => a.exists('#manage-copilot-cli[aria-checked="false"]'));
       const afterUnmanage = await a.run(`window.centralKnot.skillFoundFile('twin-notes', 'copilot-cli', 'Copilot skills', 'SKILL.md')`);
       const absentTool = await a.run(`window.centralKnot.skillFoundFile('twin-notes', 'pi-cli', undefined, 'SKILL.md')`);
-      same('main reads a managed tool’s found skill and refuses an unmanaged or absent tool', [
+      const afterPluginUnmanage = await a.run(`window.centralKnot.skillPluginFile?.({ marketName: 'skill-file-market', plugin: 'issue-tracker', part: 'skills/triage', from: 'copilot-cli' }, 'SKILL.md') ?? null`);
+      same('main reads a managed tool’s found and plugin skill and refuses an unmanaged or absent tool', [
         !!beforeUnmanage?.text?.includes('Identical text in two tools.'),
         afterUnmanage,
         absentTool,
-      ], [true, null, null]);
+        !!beforePluginUnmanage?.text?.includes('Copilot CLI v1.0.0 triage instructions.'),
+        afterPluginUnmanage,
+      ], [true, null, null, true, null]);
     }
   }
 

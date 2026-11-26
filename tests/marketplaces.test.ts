@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import fs, { realpathSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { dirname, join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
@@ -13,7 +15,7 @@ import { readProfiles } from '../src/profiles.ts';
 import { pluginLive, pluginPlan, wholeTurns, type PluginHome } from '../src/profileplan.ts';
 import { slashPath } from './wincompat.ts';
 import { componentsFrom, outcomes } from '../src/pluginoutcomes.ts';
-import { applySkills } from '../src/skills.ts';
+import { applySkills, skillPluginFile } from '../src/skills.ts';
 import type { ActionReport, DesktopApp, HarnessId } from '../src/types.ts';
 
 const put = async (path: string, text: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, text); };
@@ -1273,5 +1275,86 @@ test('A copy whose files can’t be read is left as it is by Off, and the result
     assert.deepEqual(off.done.filter(step => step.tool === 'codex-cli').map(step => [step.report.outcome, step.report.message]), [['held', 'Codex lists it, but its files are not in its plugin cache: left as it is.']]);
     const view = await box.markets.view(), entry = view.marketplaces.find(each => each.source === box.root)!;
     assert.equal(toolMark(view, entry, 'pdf', 'codex-cli', entry.switches!.pdf!.tools['codex-cli']).words, 'Codex lists it, but its files are not in its plugin cache. The plugin is off.', 'its box says why once');
+  } finally { await box.cleanup(); }
+});
+
+test('pluginCopy and skillPluginFile open the Find hit’s own marketplace source when two marketplaces share a name, start no fetch, and return undefined when no local copy exists', async () => {
+  let remoteFetches = 0;
+  const box = await setup({ engine: { readRemotePlugin: async () => { remoteFetches++; return { problem: 'should not fetch' }; } } });
+  try {
+    const orig = join(box.base, 'orig-market'), fork = join(box.base, 'fork-market'), unlisted = join(box.base, 'unlisted-market');
+    for (const [root, body] of [[orig, 'Original copy.'], [fork, 'Fork-only guidance.'], [unlisted, 'Unlisted copy.']] as const) {
+      await put(join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'team', plugins: [{ name: 'docs', source: './plugins/docs' }] }));
+      await put(join(root, 'plugins/docs/skills/pdf-reader/SKILL.md'), `---\nname: pdf-reader\ndescription: Reads PDFs.\n---\n${body}\n`);
+    }
+    const uncloned = 'https://github.com/acme/uncloned.git';
+    await box.markets.add(orig);
+    await box.markets.add(fork);
+    await put(join(box.host.dataDir, 'marketplaces.json'), JSON.stringify([orig, fork, uncloned], null, 2));
+    box.calls.length = 0;
+
+    const ctx = { home: box.home, dataDir: box.host.dataDir, binaries: {} };
+    const lookup = (market: string, plugin: string, source?: string) => box.markets.pluginCopy(market, plugin, source);
+    const fromFork = await skillPluginFile(ctx, { marketName: 'team', plugin: 'docs', part: 'skills/pdf-reader', from: 'marketplace', source: fork }, 'SKILL.md', lookup);
+    assert.equal(fromFork?.directory, join(fork, 'plugins/docs/skills/pdf-reader'));
+    assert.match(fromFork?.text ?? '', /Fork-only guidance\./);
+    // Unlisted source and an added Git marketplace with no local clone return undefined and start zero fetches.
+    const fromUnlisted = await skillPluginFile(ctx, { marketName: 'team', plugin: 'docs', part: 'skills/pdf-reader', from: 'marketplace', source: unlisted }, 'SKILL.md', lookup);
+    const fromUncloned = await skillPluginFile(ctx, { marketName: 'team', plugin: 'docs', part: 'skills/pdf-reader', from: 'marketplace', source: uncloned }, 'SKILL.md', lookup);
+    assert.deepEqual([fromUnlisted, fromUncloned, box.calls, remoteFetches], [undefined, undefined, [], 0]);
+  } finally { await box.cleanup(); }
+});
+
+test('a cold-cache Find click on a cached Git marketplace opens no sibling plugin skills to count parts, and a later Plugins view still has counts', async () => {
+  const box = await setup();
+  try {
+    const gitSource = 'https://github.com/acme/cached-team.git';
+    const cached = engine.catalogFolder({ dataDir: join(box.host.dataDir, 'plugins') }, gitSource);
+    await put(join(cached, '.claude-plugin/marketplace.json'), JSON.stringify({
+      name: 'team',
+      plugins: [
+        { name: 'docs', source: './plugins/docs' },
+        { name: 'other', source: './plugins/other' },
+      ],
+    }));
+    await put(join(cached, 'plugins/docs/.claude-plugin/plugin.json'), JSON.stringify({
+      name: 'docs', version: '1.0.0', skills: ['../other/skills/sneaky'],
+    }));
+    await put(join(cached, 'plugins/docs/skills/pdf-reader/SKILL.md'), '---\nname: pdf-reader\ndescription: Reads PDFs.\n---\nFrom cached git copy.\n');
+    await put(join(cached, 'plugins/other/skills/sneaky/SKILL.md'), '---\nname: sneaky\ndescription: Sibling skill.\n---\nSibling text.\n');
+    await put(join(cached, 'plugins/other/skills/helper/SKILL.md'), '---\nname: helper\ndescription: Other plugin skill.\n---\nHelper text.\n');
+    await put(join(box.host.dataDir, 'marketplaces.json'), JSON.stringify([gitSource], null, 2));
+
+    const opened: string[] = [];
+    const origPromiseOpen = fs.promises.open;
+    fs.promises.open = ((path: fs.PathLike, ...rest: unknown[]) => {
+      if (typeof path === 'string') {
+        try {
+          opened.push(realpathSync(path));
+        } catch {
+          opened.push(path);
+        }
+      }
+      return (origPromiseOpen as (...args: unknown[]) => unknown).call(fs.promises, path, ...rest);
+    }) as typeof fs.promises.open;
+    syncBuiltinESMExports();
+    const ctx = { home: box.home, dataDir: box.host.dataDir, binaries: {} };
+    const lookup = (market: string, plugin: string, source?: string) => box.markets.pluginCopy(market, plugin, source);
+    let read;
+    try {
+      read = await skillPluginFile(ctx, { marketName: 'team', plugin: 'docs', part: 'skills/pdf-reader', from: 'marketplace', source: gitSource }, 'SKILL.md', lookup);
+    } finally {
+      fs.promises.open = origPromiseOpen;
+      syncBuiltinESMExports();
+    }
+    assert.equal(read?.directory, join(cached, 'plugins/docs/skills/pdf-reader'));
+    assert.match(read?.text ?? '', /From cached git copy\./);
+    const siblingSkillOpens = opened.map(slashPath).filter(path => path.includes('/plugins/other/skills/'));
+    assert.deepEqual(siblingSkillOpens, [], 'cold-cache click opens no sibling plugin SKILL.md to count parts');
+
+    // Visiting Plugin marketplaces afterwards still computes component counts for every plugin in the cached Git marketplace.
+    const shown = await box.markets.view();
+    const market = shown.marketplaces.find(entry => entry.source === gitSource);
+    assert.equal(market?.plugins.find(plugin => plugin.name === 'other')?.components?.skills, 2);
   } finally { await box.cleanup(); }
 });
