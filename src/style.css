@@ -1538,12 +1538,13 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .plugin-columns { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 48px; }
 /* The plugin's parts get the larger share: their rows carry a description and a switch per tool, the README only prose. */
 @container plugin (width >= 1100px) { .plugin-columns:has(> .plugin-readme) { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); } }
-.plugin-tool { display: flex; align-items: flex-start; gap: 10px; min-width: var(--tool-min); }
-.plugin-tool-text { display: flex; flex-direction: column; gap: 1px; }
+.plugin-tool { display: flex; align-items: flex-start; gap: 10px; min-width: var(--tool-min); max-width: 100%; }
+.plugin-tool-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .plugin-tool-name { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .plugin-tool-state { display: flex; flex-direction: column; font-size: 11.5px; color: var(--ink-soft); }
-/* A name of his under a tool's box (pluginpage.ts yourLines): its sentence, then Use the plugin's under it, at its start. */
-.plugin-tool-yours { align-items: flex-start; gap: 4px; }
+/* A name of his or a clash under a tool's box (pluginpage.ts yourLines, clashLines): its sentence, then its control under it, at its start. */
+.plugin-tool-yours, .plugin-tool-clash { align-items: flex-start; gap: 4px; max-width: 100%; }
+.plugin-tool-yours .btn, .plugin-tool-clash .btn { max-width: 100%; height: auto; min-height: 28px; padding: 3px 8px; white-space: normal; overflow-wrap: anywhere; text-align: left; }
 .plugin-section { margin: 22px 0 0; }
 .plugin-section > .plugin-group:first-child { margin-top: 0; }
 .plugin-section .plugin-outcome-list { margin-top: 8px; }
