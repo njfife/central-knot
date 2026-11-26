@@ -2172,6 +2172,7 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 
 /* Git repo: the Managed set kept in a git repo, with Pull and Push. */
 /* The state line wraps to a second row rather than clip; each part stays whole. */
+.repo-state-wrap { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; min-width: 0; }
 .repo-state { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 16px; min-width: 0; font-weight: 500; }
 .toolbar.repo-toolbar { height: auto; min-height: 37px; padding-top: 4px; padding-bottom: 4px; }
 .repo-state-part { display: inline-flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
@@ -2238,27 +2239,27 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .band-danger #repo-try-again { margin-left: auto; height: 26px; padding: 0 10px; flex: none; color: var(--ink); }
 .repo-row-held .repo-row-name { color: var(--ink-soft); }
 .repo-empty-side { margin: 0; padding: 10px 0; color: var(--ink-soft); }
-.repo-aside { max-width: 80ch; margin: 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .repo-confirm .btn { flex: none; height: 24px; padding: 0 10px; }
 #repo-disconnect-confirm { border-color: currentColor; }
 /* The result's "Undo … in History" reads in the sentence's own ink; only the link is blue. */
 .repo-page .band-done .tone-faint { color: inherit; opacity: 1; }
 /* The Undo sentence moves down whole rather than leave a word or two behind. */
 .repo-page .band-done .band-text > .tone-faint { white-space: nowrap; }
-/* Wide windows: the intro lines up with the form and "What goes where" below it. */
-/* The intro lines up with the form at every width, as the connected page does. */
+/* The start heading lines up with the form at every width, as the connected page does. */
 .repo-page > .scroll > .empty { align-items: flex-start; text-align: left; }
-.repo-page > .scroll > .empty .empty-body { max-width: 72ch; }
 /* The question and its buttons sit together at the right, under Disconnect…. */
 .band.repo-confirm { justify-content: flex-end; }
 .band.repo-confirm .band-text { flex: 0 1 auto; text-align: right; }
 /* The start page begins at the top, as the connected page does, not floating mid-window. */
 .repo-page > .scroll > .empty { justify-content: flex-start; padding-top: 40px; }
 .repo-page > .scroll { container-type: inline-size; }
-.repo-start { width: 100%; display: flex; flex-direction: column; gap: 16px; margin-top: 8px; text-align: left; }
-.repo-start-side { container-type: inline-size; display: flex; flex-direction: column; gap: 10px; }
-/* Wide windows: the form and what goes where sit side by side, so the start page uses the room instead of a narrow column. */
-@container (min-width: 960px) { .repo-start { width: 100%; display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); align-items: start; gap: 24px 40px; } .repo-start-side { padding-top: 16px; } }
+.repo-start { width: 100%; display: flex; flex-direction: column; gap: 12px; margin-top: 8px; text-align: left; }
+.repo-fold > summary { list-style: none; display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; margin-left: -6px; border-radius: 6px; font-size: 12.5px; color: var(--accent-ink); cursor: pointer; }
+.repo-fold > summary::-webkit-details-marker { display: none; }
+.repo-fold > summary:hover { background: var(--hover); text-decoration: underline; }
+.repo-fold > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.repo-fold[open] > summary > .repo-fold-chevron { transform: rotate(90deg); }
+.repo-fold-body { container-type: inline-size; display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 .repo-connect { container-type: inline-size; display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--lift); }
 .repo-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 /* The form's fields take their column's width (the Plugins page sizes its own add field at short heights). */
@@ -2268,7 +2269,6 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .repo-field-hint { margin-left: 6px; font-weight: 400; color: var(--ink-faint); }
 .repo-connect-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .repo-start .btn { margin-top: 0; }
-.repo-connect-note { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .repo-layout { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; font-size: 12px; line-height: 18px; }
 .repo-layout dt { color: var(--ink); }
 .repo-layout dd { margin: 0; color: var(--ink-soft); }
@@ -2438,17 +2438,24 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .page.sources-page > .bands > .band { padding-right: 16px; }
 .sources-scroll { display: flex; flex-direction: column; gap: 24px; padding: 16px calc(16px + var(--overlay-gutter, 0px)) 24px 16px; }
 .sources-scroll > * { flex: none; }
-.source-empty { max-width: 80ch; margin: 0; font-size: 13px; line-height: 20px; color: var(--ink-soft); }
+.source-empty { display: inline-flex; align-items: center; gap: 4px; max-width: 80ch; margin: 0; font-size: 13px; line-height: 20px; color: var(--ink-soft); }
 .source-empty strong { color: var(--ink); font-weight: 600; }
 .source-add { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .source-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.source-label-row { display: inline-flex; align-items: center; gap: 4px; }
 .source-field-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .source-field-row .market-add-input { flex: 1 1 auto; width: auto; min-width: 0; }
 .source-field-row .btn { flex: none; }
 .source-preview { display: flex; flex-direction: column; gap: 10px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--lift); min-width: 0; }
 .source-preview-head, .source-row-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; }
 .source-link { font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
-.source-where, .source-does { font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
+.source-where { font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
+.source-fold > summary { list-style: none; display: inline-flex; align-items: center; gap: 4px; padding: 1px 4px; margin-left: -4px; border-radius: 6px; font-size: 12px; line-height: 16px; color: var(--ink-soft); cursor: pointer; }
+.source-fold > summary::-webkit-details-marker { display: none; }
+.source-fold > summary:hover { background: var(--hover); color: var(--ink); }
+.source-fold > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.source-fold[open] > summary > .source-fold-chevron { transform: rotate(90deg); }
+.source-fold > .source-where { display: block; margin-top: 2px; padding-left: 16px; }
 .source-preview-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .source-preview-actions .btn { flex: none; }
 .source-note { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
@@ -2463,6 +2470,7 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .source-name-text { font-weight: 500; overflow-wrap: anywhere; }
 .source-name-where { font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
 .source-name-state { font-size: 12px; line-height: 16px; }
+.source-name-state .info-wrap, .source-not-coming .info-wrap { vertical-align: middle; }
 .source-name-actions { display: inline-flex; gap: 4px; white-space: nowrap; }
 .source-name[data-state='differs'] .source-name-state, .source-name[data-state='another'] .source-name-state, .source-name[data-state='deleted'] .source-name-state, .source-name[data-state='unreadable'] .source-name-state { color: var(--ink-soft); }
 .source-files { font-size: 12px; line-height: 16px; color: var(--ink-soft); overflow-wrap: anywhere; }
@@ -2473,6 +2481,7 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .source-row-head { align-items: center; justify-content: space-between; }
 .source-row-title { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .source-row-title > svg { flex: none; }
-.source-actions { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+.source-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: none; }
+.source-sync-wrap { display: inline-flex; align-items: center; gap: 2px; }
 .source-confirm { border: 1px solid var(--line); border-radius: 8px; flex-wrap: wrap; }
 .source-confirm .btn { flex: none; height: 24px; padding: 0 10px; }

@@ -2,7 +2,7 @@
 // stands, what each harness's mark says, when its switch asks which copy, and the click each control sends.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FOLDED_VERSIONS, addLabel, asksWhichCopy, copiesDiffer, waitsForSync, canAdd, rowClicks, foldVersions, harnessIs, loadsFrom, madeFrom, placeOf, libraryWords, ruleSays, sentences, statusLine, stillIn, stillReadWords, switchLabel, switchedOffWords, versionChange, versionOrigin, type LibraryRow } from '../src/libraryrow.ts';
+import { FOLDED_VERSIONS, addLabel, asksWhichCopy, copiesDiffer, waitsForSync, canAdd, fromSourceWords, rowClicks, foldVersions, harnessIs, loadsFrom, madeFrom, placeOf, libraryWords, ruleSays, sentences, statusLine, stillIn, stillReadWords, switchLabel, switchedOffWords, versionChange, versionOrigin, type LibraryRow } from '../src/libraryrow.ts';
 import { readAgainst, wordDiff } from '../src/diff.ts';
 import { newItem, plan, takeInAnswer, type Copies, type FoundKey, type LibraryItem } from '../src/library.ts';
 import { anyOn, kindSource } from '../src/itemrow.ts';
@@ -696,4 +696,15 @@ test('A plugin’s agent on in Claude Code through the plugin names Codex as una
     statusLine(rowWith('Claude Code has it with the plugin release-helper, turned off there, so no separate copy is placed there.', []), agent, five),
     'On · not in Claude Code or Codex (see below) · kept out of Pi and OpenCode',
   );
+});
+
+test('A library row from a Git source names Sync this source and Replace mine in its directions', () => {
+  const link = 'https://github.com/team/notes';
+  assert.equal(fromSourceWords({ link }).before,
+    'From github.com/team/notes, a source. What changes there comes in once a day while Automatic sync is on, and at Sync this source on ');
+  assert.equal(fromSourceWords({ link, nextWaits: true }).before,
+    'From github.com/team/notes, a source. You changed it here, or a tool’s copy of it can’t be read just now, so the source’s next change will wait for you to Merge, Replace mine or Keep mine on ');
+  const waiting = fromSourceWords({ link, waits: true });
+  assert.match(waiting.after, /and Replace mine takes it as it is; either keeps yours as a version\./);
+  assert.match(waiting.tag?.title ?? '', /and Replace mine takes it as it is; either keeps yours as a version\./);
 });
