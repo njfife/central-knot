@@ -5,6 +5,7 @@
 import { test } from 'node:test';
 import { itemNotice } from './notices.ts';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs, { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { lockPath, lockSkip, withLock } from './fslock.ts';
@@ -14,7 +15,7 @@ import { readHistory } from '../src/history.ts';
 import { libraryEntry, librarySentence } from '../src/historyactions.ts';
 import { addLabel, canAdd, harnessIs, isPartial, libraryWords, ownCopies, placeOf, rowClicks, sentences, statusLine, switchLabel } from '../src/libraryrow.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
-import { applySkills, clearSwitch, readDisk, skillChange, skillsView, takeOver } from '../src/skills.ts';
+import { applySkills, clearSwitch, readDisk, skillChange, skillsView, skillVersionFile, takeOver } from '../src/skills.ts';
 import { serversView } from '../src/servers.ts';
 import { agentsView } from '../src/agents.ts';
 import { homePass } from '../src/homepass.ts';
@@ -1520,5 +1521,53 @@ test('An Add while Synchronize everything takes in a skill found elsewhere: the 
     assert.deepEqual([passed.untouched, untouchedFiles.map(file => counted.opens.get(file))], [undefined, [3, 3]], 'the click’s read, the pass’s, and the view’s own');
     assert.equal(skills.items.find(fact => fact.key === 'spare')?.on, true, 'taken in by the pass');
     assert.deepEqual(skills, await skillsView(box.context, box.tools), 'the page is given the home as the pass’s writes left it');
+  } finally { await box.cleanup(); }
+});
+
+test('skillVersionFile reads regular files in a stored skill version, lists SKILL.md first, enforces the 1 MB cap and text check, and refuses links, specials, and paths outside the folder', async t => {
+  const box = await sandbox();
+  try {
+    const skillBody = skillText('Preserves config value: api_key=ck-raw-12345.');
+    const checklist = '# Checklist\n\n- Keep values as-is.\n';
+    const script = '#!/bin/sh\necho ok\n';
+    const exactLimit = 'a'.repeat(1024 * 1024);
+    const overLimit = 'b'.repeat(1024 * 1024 + 1);
+    await put(box, 'claude-cli', {
+      'SKILL.md': skillBody,
+      'scripts/run.sh': { text: script, mode: 0o755 },
+      'checklist.md': checklist,
+      'exact.txt': exactLimit,
+      'over.txt': overLimit,
+    });
+    const binary = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02]);
+    await writeFile(join(folderOf(box, 'claude-cli'), 'asset.bin'), binary);
+    await turnOn(box);
+    const hash = (await itemOf(box))!.hash;
+    const stored = join(box.home, '.central-knot/items/skills/notes/versions', hash);
+    // Plant a symlink and a special file (FIFO) inside the stored version folder, plus an outside file beside it.
+    await writeFile(join(box.home, '.central-knot/items/skills/notes/versions/outside.txt'), 'secret\n');
+    await symlink('SKILL.md', join(stored, 'alias.md'));
+
+    const expectedFiles = ['SKILL.md', 'asset.bin', 'checklist.md', 'exact.txt', 'over.txt', 'scripts/run.sh'];
+    assert.deepEqual(await skillVersionFile(box.context, 'notes', hash, 'SKILL.md'), { files: expectedFiles, text: skillBody });
+    assert.deepEqual(await skillVersionFile(box.context, 'notes', hash, 'checklist.md'), { files: expectedFiles, text: checklist });
+    assert.deepEqual(await skillVersionFile(box.context, 'notes', hash, 'scripts/run.sh'), { files: expectedFiles, text: script });
+    assert.deepEqual(await skillVersionFile(box.context, 'notes', hash, 'asset.bin'), { files: expectedFiles, note: 'Not a text file.' });
+    assert.deepEqual(await skillVersionFile(box.context, 'notes', hash, 'exact.txt'), { files: expectedFiles, text: exactLimit });
+    assert.deepEqual(await skillVersionFile(box.context, 'notes', hash, 'over.txt'), { files: expectedFiles, note: 'Over 1 MB, so not shown here.' });
+
+    // Refused: paths outside the folder, non-canonical paths, missing names/hashes, and symlinks (also absent from files).
+    for (const bad of ['../outside.txt', '/etc/passwd', './SKILL.md', 'scripts/../SKILL.md', 'missing.md', '', 'alias.md']) {
+      assert.equal(await skillVersionFile(box.context, 'notes', hash, bad), undefined, `refuses ${JSON.stringify(bad)}`);
+    }
+    assert.equal(await skillVersionFile(box.context, 'missing-skill', hash, 'SKILL.md'), undefined);
+    assert.equal(await skillVersionFile(box.context, 'notes', 'deadbeef', 'SKILL.md'), undefined);
+
+    await t.test('refuses a special file (FIFO) without hanging and omits it from files', { skip: posixModeSkip }, async () => {
+      const fifo = join(stored, 'pipe');
+      assert.equal(spawnSync('mkfifo', [fifo]).status, 0);
+      assert.equal(await skillVersionFile(box.context, 'notes', hash, 'pipe'), undefined);
+      assert.deepEqual((await skillVersionFile(box.context, 'notes', hash, 'SKILL.md'))?.files, expectedFiles);
+    });
   } finally { await box.cleanup(); }
 });

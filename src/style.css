@@ -594,7 +594,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
  * History, from its description across to its actions. (The plugin table has its own, below.)
  */
 @container table (width >= 1000px) {
-  [role="rowgroup"] > .ov-row:nth-child(even of .ov-row):not(:hover):not(.open):not(.row-ticked):not(:has(:focus-visible)) { background: var(--row-stripe); }
+  [role="rowgroup"] > .ov-row:nth-child(even of .ov-row):not(:hover):not(.open):not(.ov-file-anchored):not(.row-ticked):not(:has(:focus-visible)) { background: var(--row-stripe); }
 }
 @container content (width >= 1000px) {
   .history-row:nth-child(even of .history-row):not(:hover):not(:has(:focus-visible)) { background: var(--row-stripe); }
@@ -605,7 +605,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
  * The row keeps the look under the pointer and with the keyboard's focus in it (its control's own ring shows where), and a
  * docked row (its details beside the table) has it too. It scrolls with the list like any row.
  */
-.ov-row.open, .ov-row.open:hover, .ov-row.open:has(:focus-visible), .details { background: var(--picked); box-shadow: inset 3px 0 0 var(--accent); }
+.ov-row.open, .ov-row.open:hover, .ov-row.open:has(:focus-visible), .ov-row.ov-file-anchored, .ov-row.ov-file-anchored:hover, .ov-row.ov-file-anchored:has(:focus-visible), .details { background: var(--picked); box-shadow: inset 3px 0 0 var(--accent); }
 .ov-row.open:has(+ .details-differs), .details-differs { box-shadow: inset 3px 0 0 var(--warning); }
 .ov-head { position: sticky; top: 0; z-index: 3; height: 60px; background: var(--surface); font-size: 12px; font-weight: 500; color: var(--ink-soft); }
 .ov-head > * { align-self: center; }
@@ -640,7 +640,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ov-name-fit.name-cut > .ov-name-main { max-width: 50%; }
 .ov-name-fit > .row-tag, .ov-name-fit > .ov-name-about { line-height: 40px; }
 .row-open { display: grid; place-items: center; width: 18px; height: 18px; margin-left: -6px; flex: none; border: 0; background: none; border-radius: 4px; cursor: pointer; color: inherit; }
-.row-open:hover { background: var(--press); }
+.row-open:hover, .row-file-btn:hover, .file-tab:hover { background: var(--press); color: var(--ink); }
+/* Open file mark right after a library skill's name (matrix.ts fileButton). */
+.row-file-btn { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; margin-left: -3px; padding: 0; border: 1px solid transparent; border-radius: 5px; background: none; color: var(--ink-soft); cursor: pointer; }
+.row-file-btn[aria-pressed="true"] { background: color-mix(in oklab, var(--accent) 14%, var(--surface)); border-color: color-mix(in oklab, var(--accent) 42%, transparent); color: var(--accent-ink); }
 .row-tag { flex: none; font-size: 11.5px; color: var(--ink-soft); white-space: nowrap; }
 .ov-managed { display: flex; justify-content: center; }
 .ov-cell { position: relative; display: flex; justify-content: center; align-items: center; gap: 6px; }
@@ -765,6 +768,19 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* A skill's own actions, together under its heading. */
 .details-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 6px; }
 .details-actions > .text-action { padding-left: 0; padding-right: 0; }
+/* Inline skill file panel directly under a closed row (matrix.ts filePanel). */
+.file-open-box { display: flex; flex-direction: column; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); overflow: hidden; }
+.file-open-head, .file-open-foot { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 12px; background: var(--chrome); font-size: 12px; color: var(--ink); }
+.file-open-head { display: grid; grid-template-columns: fit-content(40%) minmax(0, 1fr) auto; align-items: start; line-height: 22px; border-bottom: 1px solid var(--line); }
+.file-open-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-open-foot { border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-soft); }
+.file-open-tabs { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
+.file-tab { appearance: none; max-width: 100%; overflow-wrap: anywhere; border: 1px solid transparent; border-radius: 6px; padding: 2px 8px; background: transparent; color: var(--ink-soft); font: 500 11.5px/16px var(--mono); cursor: pointer; }
+.file-tab.is-active { background: var(--surface); border-color: var(--control-line); color: var(--ink); box-shadow: var(--lift); }
+.file-open-box > .content-block { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.file-open-box .content { flex: 1 1 auto; min-height: 0; max-width: none; padding: 10px 12px; border: 0; border-radius: 0; line-height: 17.5px; overflow-y: auto; overscroll-behavior: contain; }
+.file-open-state { margin: 0; padding: 12px; font-size: 12.5px; color: var(--ink-soft); }
+.file-open-foot-actions { display: inline-flex; align-items: center; gap: 8px; flex: none; margin-left: auto; }
 
 /* ---------- The copy question (matrix.ts compareChoices) ---------- */
 /*

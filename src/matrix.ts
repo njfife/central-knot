@@ -399,6 +399,8 @@ const newView = () => ({
   // A row's fields name it by its row id (itemrow.ts rowId).
   /** The row whose details are open. */
   comparing: undefined as string | undefined,
+  /** The closed skill row whose inline file panel is open, its active relative path, its tab list, and its loaded file. */
+  openFile: undefined as { id: string; file: string; files?: string[]; loaded?: { files: string[]; text?: string; note?: string } | null } | undefined,
   /** The row whose copy question shows every copy's body side by side (RowWords body). */
   reading: undefined as string | undefined,
   /** The row whose versions list shows every version, not only its newest few. */
@@ -429,7 +431,7 @@ const views: Record<PageKind | 'library', View> = { library: newView(), skills: 
 export const showFiltered = (which: PageKind, filter: Filter, harness: Tool) => { startFresh(views[which], harness); views[which].filter = filter; };
 /** A view drawn for another place (a tool's tab, or the Library) starts with no filter, From, Find text, open row or menu from the last one. */
 function startFresh(table: View, harness: Tool | undefined) {
-  Object.assign(table, { filter: 'all', from: 'anywhere', comparing: undefined, shownFor: harness });
+  Object.assign(table, { filter: 'all', from: 'anywhere', comparing: undefined, openFile: undefined, shownFor: harness });
   newFind(table, '');
 }
 /**
@@ -899,6 +901,7 @@ const markOpen = (view: View, id: string | undefined) => Object.assign(view, { c
 /** Opening a row's details brings them into view, so a choice below the fold is not missed. */
 function openRow(t: Table, row: ItemRow | PluginRow) {
   const id = idOf(row), view = t.view;
+  if (view.openFile?.id === id) view.openFile = undefined;
   markOpen(view, view.comparing === id ? undefined : id);
   rerender();
   // The table moves the least that shows the details: by what runs past its bottom, but never past the row's top (less its
@@ -949,7 +952,7 @@ function nameCell(t: Table, skill: ItemRow, attention: boolean) {
   const name = skill.name ?? skill.key;
   return h('div.ov-name.ov-name-fit.ov-name-bare', { role: 'cell', title: skill.description ? `${name}: ${skill.description}` : name },
     h('span.ov-name-main', {}, kindMark(t, skill.kind),
-      h('span.ov-name-text', {}, name), kindWord(t, skill.kind, name),
+      h('span.ov-name-text', {}, name), fileButton(t, skill), kindWord(t, skill.kind, name),
       attention ? h('span.row-tag.row-tag-differs', { id: elId('decide', skill) }, 'Copies differ') : null),
     libraryTag(t, skill),
     sourceTag(skill),
@@ -1006,9 +1009,9 @@ function outcomeShown(outcome: Outcome, t: Table | undefined): boolean {
 export const resultInHeader = () => state.page === 'library' || state.page === 'plugins'
   || (state.page === 'harnesses' && !(state.harness && state.harnessTab === 'instructions'));
 
-/** One tool's Copy button (icon and title carry "Copy"); flashes check and announces on click. */
-function reloadButton(item: { chip: string; command: string; title: string }, id: string): HTMLElement {
-  const control = button({ variant: 'outline', size: 'micro', icon: 'copy', label: item.chip, name: `${item.chip}. ${item.title}`, id,
+/** A Copy button (icon and title carry "Copy"; optional chip label); flashes check and announces on click. */
+function reloadButton(item: { chip?: string; command: string; title: string }, id: string): HTMLElement {
+  const control = button({ variant: 'outline', size: 'micro', icon: 'copy', label: item.chip, name: item.chip ? `${item.chip}. ${item.title}` : item.title, id,
     attrs: { title: item.title, 'data-copy': item.command }, onclick: (event: Event) => {
       event.stopPropagation();
       void navigator.clipboard.writeText(item.command).then(() => {
@@ -1237,7 +1240,7 @@ function forgetOtherHomes(t: Table, name: keyof typeof views) {
   if (now === was) return;
   tableHomes[name] = now;
   // A view's first table has no other home's to forget (a link may have opened its row before it was drawn).
-  if (was !== undefined) Object.assign(t.view, { comparing: undefined, confirmDelete: undefined, from: 'anywhere' });
+  if (was !== undefined) Object.assign(t.view, { comparing: undefined, openFile: undefined, confirmDelete: undefined, from: 'anywhere' });
 }
 
 // ---------- See change: what an edit did, before Undo ----------
@@ -1858,6 +1861,7 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
   const isOpen = (row: ItemRow | PluginRow) => idOf(row) === view.comparing;
   if (view.comparing && view.openedOn !== state.visit && all.some(skill => isOpen(skill) && isDiffering(skill))) view.comparing = undefined;
   if (found && view.comparing && !found.some(isOpen)) view.comparing = undefined;
+  if (view.openFile && !shown.some(skill => idOf(skill) === view.openFile!.id && skill.kind === 'skills' && !!inLibrary(itemOf(skill)))) view.openFile = undefined;
   const open = docked() && view.comparing && !underRow(t, view.comparing) ? all.find(isOpen) : undefined;
   const openRow = docked() && !open ? plugins.find(isOpen) : undefined;
   // Off goes last, under its own heading. Of the rest, the rows a harness's page is about (it has a copy) split into On and
@@ -2300,9 +2304,9 @@ function markLegend(t: Table, list: ItemRow[], plugins: PluginRow[]) {
 
 /** One row: its switch (in Select's mode, its tick), its name, a mark per tool, and the chevron that opens its details. */
 function row(t: Table, skill: ItemRow) {
-  const id = idOf(skill), open = t.view.comparing === id, when = dated(t);
+  const id = idOf(skill), open = t.view.comparing === id, fileOpen = t.view.openFile?.id === id, when = dated(t);
   return [
-    h(`div.ov-row.ov-switch-row${takeFlash(id) ? '.row-flash' : ''}${skill.on ? '' : '.unmanaged'}${open ? '.open' : ''}${when ? '.ov-dated' : ''}${t.used ? '.ov-usage' : ''}${tickedLook(t, skill)}`, { role: 'row', 'data-key': id, 'aria-expanded': String(open), onclick: rowClick(t, skill) },
+    h(`div.ov-row.ov-switch-row${takeFlash(id) ? '.row-flash' : ''}${skill.on ? '' : '.unmanaged'}${open ? '.open' : ''}${fileOpen ? '.ov-file-anchored' : ''}${when ? '.ov-dated' : ''}${t.used ? '.ov-usage' : ''}${tickedLook(t, skill)}`, { role: 'row', 'data-key': id, 'aria-expanded': String(open), onclick: rowClick(t, skill) },
       h('div.ov-managed', { role: 'cell' }, t.selectable ? tickOf(t, skill) : itemSwitch(t, skill)),
       nameCell(t, skill, differs(skill)),
       when ? whenCell(skill) : null,
@@ -2310,6 +2314,7 @@ function row(t: Table, skill: ItemRow) {
       h('div.ov-marks', { role: 'cell' }, rowMarks(t, skill)),
       h('div.ov-open', { role: 'cell' }, openButton(t, skill))),
     open && underRow(t, id) ? details(t, skill) : null,
+    fileOpen ? filePanel(t, skill, itemOf(skill)!, t.view.openFile!) : null,
   ];
 }
 
@@ -2947,8 +2952,65 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
         layout.head ? h('div.files-details', {}, layout.head) : null,
         layout.tail.length ? h('div.files-tail', {}, layout.tail) : null))));
 }
-
-// Escape in a find box with text clears it. Elsewhere on the Library's list in Select's mode, it closes a Delete of many's
+let revealFile = false;
+/** Opens a skill's file tab or closes the inline file panel, returning focus to its mark when asked. */
+function setSkillFile(t: Table, skill?: ItemRow, file = 'SKILL.md', refocus = false, event?: Event) {
+  event?.stopPropagation();
+  const prev = t.view.openFile;
+  const item = skill && itemOf(skill);
+  const next: View['openFile'] = skill && item ? { id: idOf(skill), file, files: prev?.id === idOf(skill) ? prev.files : undefined } : undefined;
+  if (next && t.view.comparing === next.id) t.view.comparing = undefined;
+  t.view.openFile = next;
+  rerender();
+  if (!next && refocus && prev) document.getElementById(partId('file', prev.id))?.focus();
+  if (next) void window.centralKnot.skillVersionFile(skill!.key, item!.hash, file).catch(() => null).then(found => {
+    if (t.view.openFile !== next) return;
+    Object.assign(next, { loaded: found, ...(found ? { files: found.files } : {}) });
+    revealFile = prev?.id !== next.id;
+    rerender();
+  });
+}
+/** Open file mark right after a library skill's name (Library list and a tool's Skills tab; skills only). */
+function fileButton(t: Table, skill: ItemRow) {
+  if (skill.kind !== 'skills' || !inLibrary(itemOf(skill))) return null;
+  const open = t.view.openFile?.id === idOf(skill);
+  return h('button.row-file-btn', { type: 'button', id: elId('file', skill), title: 'Open file', 'aria-label': `Open file: ${skill.name ?? skill.key}`, 'aria-pressed': String(open), onclick: (event: Event) => setSkillFile(t, open ? undefined : skill, 'SKILL.md', false, event) }, icon('file-text', 14));
+}
+/** Inline file panel directly under a closed library skill row: heading, wrapping tabs, fileBlocks body and real-path footer. */
+function filePanel(t: Table, skill: ItemRow, item: NonNullable<ReturnType<typeof itemOf>>, open: NonNullable<View['openFile']>) {
+  const name = skill.name ?? skill.key;
+  const tabs = open.files ?? [open.file];
+  const dir = skill.paths?.[toolsFor(t, skill.kind).find(each => skill.hashes?.[each] === item.hash && skill.paths?.[each]) ?? ''];
+  const full = dir && (dir.includes('\\') ? `${dir}\\${open.file.replaceAll('/', '\\')}` : `${dir}/${open.file}`);
+  const note = open.loaded === undefined ? 'Reading…' : !open.loaded ? 'Its file couldn’t be read.' : open.loaded.note;
+  return h('div.details.details-file-only', { role: 'region', 'aria-label': `File for ${name}` }, h('div.file-open-box', {},
+    h('div.file-open-head', {}, h('strong.file-open-name', { title: name }, name),
+      h('span.file-open-tabs', { role: 'tablist', 'aria-label': `Files in ${name}` }, tabs.map(file =>
+        h(`button.file-tab${file === open.file ? '.is-active' : ''}`, { type: 'button', role: 'tab', 'aria-selected': String(file === open.file), onclick: () => { if (file !== open.file) setSkillFile(t, skill, file); } }, file))),
+      closeButton(() => setSkillFile(t, undefined, 'SKILL.md', true), { id: elId('file-close', skill), label: `Close file for ${name}`, title: 'Close', look: '.file-open-close' })),
+    ...(note ? [h('p.file-open-state', {}, note)]
+      : fileBlocks(elId('file-text', skill, String(Math.max(0, tabs.indexOf(open.file)))), `${name} ${open.file}`, [{ text: open.loaded!.text ?? '' }], () => 'Central Knot’s current version')),
+    h('div.file-open-foot', {}, ...(full ? [pathText(shownPath(full), full), h('span.file-open-foot-actions', {}, showInFolder(full), reloadButton({ command: full, title: 'Copy' }, elId('file-copy', skill)))]
+      : [h('span.file-open-stored', {}, 'Stored in Central Knot')]))));
+}
+/** Sizes an open inline file panel to the height left under its row, scrolling the row up once if opened near the bottom. */
+function settleFileBox(): void {
+  const box = document.querySelector<HTMLElement>('.file-open-box');
+  const list = box?.closest<HTMLElement>('.scroll');
+  const rowEl = box?.parentElement?.previousElementSibling as HTMLElement | null;
+  if (!box || !list || !rowEl) return;
+  const rect = list.getBoundingClientRect();
+  const room = Math.floor(rect.height - rowEl.getBoundingClientRect().height - 20);
+  const floor = Math.min(200, Math.max(120, room));
+  const under = () => Math.floor(rect.bottom - box.getBoundingClientRect().top - 8);
+  if (revealFile) {
+    revealFile = false;
+    if (under() < floor) list.scrollTop += Math.min(room - under(), Math.max(0, rowEl.getBoundingClientRect().top - rect.top));
+  }
+  box.style.maxHeight = `${Math.max(floor, under() >= floor ? Math.min(under(), room) : room)}px`;
+}
+afterLayout(settleFileBox);
+// Escape in a find box with text clears it, then closes an open skill file panel. Elsewhere on the Library's list in Select's mode, it closes a Delete of many's
 // question, or else ends the mode. A card open (an info card, the header's) is closed first, and this doesn't hear it (renderer.ts).
 document.addEventListener('keydown', event => {
   const id = (event.target as HTMLElement | null)?.id;
@@ -2956,5 +3018,6 @@ document.addEventListener('keydown', event => {
   const t = useTableShown(), view = t?.view;
   if (id === 'skills-find' && view?.listFind) { view.listFind = ''; rerender(); }
   else if (id === 'find' && t && view?.find) findTyped(t, '');
+  else if (t && view?.openFile && !(state.page === 'library' && state.libraryView === 'files')) setSkillFile(t, undefined, 'SKILL.md', true);
   else if (state.page === 'library' && state.libraryView === 'list' && selecting()) { if (!cancelAsk()) stopSelecting(); rerender(); }
 });
