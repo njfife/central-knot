@@ -886,13 +886,14 @@ export interface PluginItemLine { kind: ItemKind; key: string; name: string; sta
  * A plugin's items as its page shows them: its lines; of its `of` items (those linked to it and the names he has), how many are
  * there in each tool with no installer, as the page's look reads them, his of the same content counting (`on`); whether Update has
  * something to do (`ready`), and whether the automatic check has (`due`: library.ts TAKEN BACK); and why the plugin can't be read now. `notIn`: for a plugin On, each tool it is wanted in where none is on, why,
- * one sentence per reason but a name of his (pluginstatus.ts notInWhy), and whether a tick on that tool's box brings some in
- * (`tickHelps`). `heldOut`: for a plugin On, each tool it is wanted in not covered by `notIn`, each reason a linked item is held
- * out by a copy of his own there (not a Library item, or only in the shared skills folder), in `OUT.own` / `OUT.shared`'s words.
+ * one sentence per reason but a name of his (pluginstatus.ts notInWhy), whether a tick on that tool's box brings some in
+ * (`tickHelps`), and `nonClash`, the reasons other than own/shared clashes shown by the page alongside `clashes`.
+ * `clashes`: structured `own` and `shared` clashes per tool, before names are grouped (never stored).
  * `yours`: for a plugin On, each tool with no installer it is wanted in, each name it has that he has his own of,
  * whatever else is so, said under that tool's box (pluginstatus.ts yourSaid).
  */
-export interface PluginItemsView { lines: PluginItemLine[]; on: Partial<Record<HarnessId, number>>; /** Of those on, how many the tool's own settings keep out (it doesn't load them). */ keptOut?: Partial<Record<HarnessId, number>>; /** Its items each tool holds the kind of (presence.ts holds). */ of: Partial<Record<HarnessId, number>>; ready?: true; due?: true; problem?: string; notIn?: Partial<Record<HarnessId, { reasons: string[]; tickHelps: boolean }>>; heldOut?: Partial<Record<HarnessId, string[]>>; yours?: Partial<Record<HarnessId, YourName[]>> }
+export interface PluginItemClash { tool: HarnessId; kind: ItemKind; key: string; name: string; clash: 'own' | 'shared' }
+export interface PluginItemsView { lines: PluginItemLine[]; on: Partial<Record<HarnessId, number>>; /** Of those on, how many the tool's own settings keep out (it doesn't load them). */ keptOut?: Partial<Record<HarnessId, number>>; /** Its items each tool holds the kind of (presence.ts holds). */ of: Partial<Record<HarnessId, number>>; ready?: true; due?: true; problem?: string; notIn?: Partial<Record<HarnessId, { reasons: string[]; tickHelps: boolean; nonClash?: string[] }>>; clashes?: PluginItemClash[]; yours?: Partial<Record<HarnessId, YourName[]>> }
 /**
  * A name of a plugin's he has his own of, in one tool (PluginItemsView yours): Use the plugin's is offered there, but where it is
  * the same content (`same`) or the take can't land there (`held`: why, librarypass.ts takeHeld; `shared`: his through the shared skills folder).

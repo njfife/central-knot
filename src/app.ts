@@ -43,6 +43,8 @@ import { followView, type SigninChecks } from './mcpsignin.ts';
 import { keeperNews, loadSessions, windowBack, type SessionsDay } from './sessionspage.ts';
 import type { DayRows, PeriodRows } from './sessionrow.ts';
 import { DIFFERS_REASON, selecting, stopSelecting } from './selection.ts';
+import { takesPlugins } from './presence.ts';
+import { pluginOf } from './sourcelink.ts';
 import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
@@ -522,9 +524,9 @@ export interface Click {
   items: string[];
   /**
    * What was done, as the result's sentence ("notes is on in all 3 tools"); as a function, given the tools where the click's
-   * write failed or was held, so it never claims those, and the tools it wrote.
+   * write failed or was held, so it never claims those, the tools it wrote, and the History events the click recorded.
    */
-  said: string | ((notIn: HarnessId[], wrote: HarnessId[]) => string);
+  said: string | ((notIn: HarnessId[], wrote: HarnessId[], recorded?: HistoryEvent[]) => string);
   /** Said as its reasons, a problem line each: what the click left as it is in each tool, and why ("Still on in Codex: its settings file can’t be read."). */
   also?: string[];
   /**
@@ -549,6 +551,8 @@ export interface Click {
    * item): carryOut runs only those switches (switchesOnly); `undone` is what its Undo says once done ("Undone: triage is back on in Codex."). */
   pluginsOnly?: boolean;
   undone?: string;
+  /** On Undo of this single-tool click, say History's own sentence rather than "Undone: X is as before." (pluginpage.ts letToolIn). */
+  undoSentence?: boolean;
 }
 
 /** Each kind's own: how its changes are sent, and where its last result is kept. Its items are itemrow.ts kindSource's. */
@@ -578,6 +582,12 @@ function keepOwn(own: Done['kept'][]) {
  * everything's switch send nothing, and are refused there until Resume.
  */
 export const clickResumes = (home: HomeView) => home.sync.gate.state === 'needs-resume';
+/** Re-reads Plugins when it is on screen; `clearNews` drops stale click-list lines after a library click on Plugins. */
+async function refreshPlugins(clearNews = false): Promise<void> {
+  if (state.page !== 'plugins') return;
+  if (clearNews) endListNews();
+  await loadPlugins(false, state.home?.readId);
+}
 /** Sends one kind's changes for the open home. */
 const send = (kind: PageKind, changes: Change[]) => kindPages[kind].send(changes, clickResumes(state.home!), state.home!.home).then(received);
 /** A pass's answer, its notices given their place in the order of arrival as it comes (matrix.ts noticeArrived), before the read after it. */
@@ -627,6 +637,7 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   // The plugins' part, once the copies' part went through (a whole-click refusal leaves it unrun).
   const plugged = click.plugins?.ops.length && (did || made.length || !refusal) ? await runSwitches(click.plugins.ops) : undefined;
   if (plugged) setHome(await api().refresh());
+  await refreshPlugins(true);
   const done = did || made.length > 0 || !!plugged?.done.some(entry => succeeded(entry.report));
   // Said from what happened: a tool whose write failed, copy or plugin switch, is not called on (or off).
   const wrote = [...new Set(ours.filter(entry => entry.outcome === 'written' && entry.harness).map(entry => entry.harness!))];
@@ -635,18 +646,20 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   const changed = click.rows.map((row, at) => ({ ...row, name: click.items[at] ?? row.key })).filter(row => !held.has(row.name.toLowerCase()));
   // What the click also changed in a tool's own settings with its copies (Pi's skills list: librarypass.ts Kind.follow) follows.
   const settings = [...new Set(ours.flatMap(entry => (entry.settingsChanged ? [entry.settingsChanged] : [])))];
-  const said = [typeof click.said === 'string' ? click.said : click.said(notClaimed, wrote), ...settings].join(' ');
+  const recorded = made.length && (!click.undoing || typeof click.said === 'function')
+    ? (await api().history()).events.filter(event => made.includes(event.id)) : [];
+  const said = [typeof click.said === 'string' ? click.said : click.said(notClaimed, wrote, recorded), ...settings].join(' ');
   const choose = differs ? ` ${copiesDiffer(click.items)}` : '';
   const along = plugged && !switchProblems(plugged).length ? click.plugins?.said : undefined;
   const text = done || !refusal ? [said, along].filter(Boolean).join(' ') + choose : refusal.message;
   const back = plugged?.back ?? [];
-  const undo = !click.undoing && done && ((made.length && await allUndoable(made)) || back.length) ? { kind: click.kind, made, back } : undefined;
+  const undo = !click.undoing && done && ((made.length && allUndoable(recorded)) || back.length) ? { kind: click.kind, made, back } : undefined;
   const warned = failed || !!plugged?.failed.length || !!plugged?.stopped;
   const own = click.changes.length ? reloadsFor(result.reloads, new Set(click.changes.map(change => change.key))) : result.reloads;
   const reloads = [...own, ...(plugged ? pluginReloads(plugged.done) : [])];
   return { kept, did: done, reloads, refused: done || !refusal ? undefined : refusal.message, changed, undo, along, focus: click.focus?.(),
     outcome: withReloads({ page, items: click.items, rows: click.rows, warn: warned || !!click.also?.length || !!refusal, band: true, fade: click.undoing && !warned,
-      text, reasons: [...(done && refusal ? [refusal.message] : []), ...switchReasons(plugged, click.also)], plugins: [...new Set(back.map(op => op.plugin))], act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: () => void undoClick({ rows: changed, focus: click.focus, regroups: click.regroups }, [undo]) } }, reloads) };
+      text, reasons: [...(done && refusal ? [refusal.message] : []), ...switchReasons(plugged, click.also)], plugins: [...new Set(back.map(op => op.plugin))], act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: () => void undoClick({ rows: changed, focus: click.focus, regroups: click.regroups, sentence: click.undoSentence }, [undo]) } }, reloads) };
 }
 
 /**
@@ -669,7 +682,11 @@ async function switchesOnly(click: Click, ops: PluginOp[], page: Page): Promise<
 }
 
 /** A click applied at once, under busy: one tool's control in an opened row, Delete, Make current, Resume, a copy chosen (Turn these off: applyByKind). */
-export const applyClick = (click: Click) => busy(click.undoing ? 'Undoing…' : 'Applying…', async page => sayDone(await carryOut(click, page), click));
+export const applyClick = (click: Click | (() => Promise<Click | Outcome>)) => busy(typeof click === 'function' || !click.undoing ? 'Applying…' : 'Undoing…', async page => {
+  const resolved = typeof click === 'function' ? await click() : click;
+  if ('changes' in resolved) sayDone(await carryOut(resolved, page), resolved);
+  else tell({ ...resolved, page });
+});
 /** What a click applied at once did, said in the header (renderer.ts resultHere) or its band, its rows flashed, the focus on its control. */
 function sayDone(done: Done, click: Click) {
   keepOwn([done.kept]);
@@ -835,14 +852,13 @@ function runOutcome(turns: ItemTurn[]): Outcome {
 }
 
 /** Whether each History entry a click made still offers its own action, so the click's Undo can run them all. */
-async function allUndoable(made: string[]) {
-  const events = (await api().history()).events.filter(event => made.includes(event.id));
+function allUndoable(events: HistoryEvent[]) {
   const about = entriesNow(state.home!);
   return events.every(event => !libraryEntry(event) || !!libraryAction(event, about(event).item, about(event).now));
 }
 
-/** What an Undo puts back: the rows its clicks changed (named in its result and flashed once it is done), where the focus goes, and whether every pinned row is let go. */
-interface UndoOf { rows: NamedRow[]; focus?: () => string; regroups?: boolean }
+/** What an Undo puts back: the rows its clicks changed (named in its result and flashed once it is done), where the focus goes, whether every pinned row is let go, and whether a single-tool Undo says History's own sentence. */
+interface UndoOf { rows: NamedRow[]; focus?: () => string; regroups?: boolean; sentence?: boolean }
 /** What one click can take back (Done undo): its kind, the History entries it made, and the plugin switches that turn its plugins' part back. */
 interface Undoable { kind: PageKind; made: string[]; back: PluginOp[] }
 
@@ -865,7 +881,7 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
     .sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
   const gone = [...kindOfEntry].filter(([id]) => !events.some(event => event.id === id));
   type UndoEntry = { key?: string; entry: DestinationResult; answeredLater?: boolean };
-  const raw = new Map(parts.map(part => [part.kind, [] as UndoEntry[]])), restored = new Map(parts.map(part => [part.kind, new Set<string>()])), stops = new Map<PageKind, string>();
+  const raw = new Map(parts.map(part => [part.kind, [] as UndoEntry[]])), restored = new Map(parts.map(part => [part.kind, new Map<string, Set<HarnessId> | null>()])), stops = new Map<PageKind, string>();
   const reloads: ReloadChange[] = unswitched ? pluginReloads(unswitched.done) : [];
   let anyDid = !!unswitched?.done.some(entry => succeeded(entry.report));
   for (const event of events) {
@@ -880,7 +896,8 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
     // A later restore of the same item in this Undo answers an earlier tool problem: replaced if that tool failed again,
     // or dropped below once settled. restore runs with `only`, so every result in result.results belongs to this item.
     if (key) {
-      restored.get(kind)!.add(key);
+      const scope = restored.get(kind)!, prev = scope.get(key);
+      scope.set(key, !event.only || prev === null ? null : new Set([...(prev ?? []), event.only]));
       const failedNow = new Set(result.results.filter(entry => entry.harness && keptBack(entry)).map(entry => entry.harness!));
       for (let at = list.length - 1; at >= 0; at--) {
         const earlier = list[at]!;
@@ -891,19 +908,22 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
     list.push(...result.results.map(entry => ({ key, entry })));
   }
   setHome(await api().refresh());
+  await refreshPlugins(true);
   // Settled: managed, readable, and matching what the library now wants (not held or owed a write/removal; nothing applied if deleted).
   const settledIn = (kind: PageKind, key: string, tool: HarnessId) => {
     const view = state.home?.[kind], row = view?.items.find(fact => fact.key === key), item = view?.library[key];
     const live = item && !item.deleted;
+    const heldByPlugin = !!row?.fromSource && !!pluginOf(row.fromSource.link) && takesPlugins(tool);
     return !!view?.tools.includes(tool) && !row?.unseen?.[tool]
-      && (live ? !(row?.cannot?.[tool] && !row?.plugin?.[tool]) && !row?.plan?.write.includes(tool) && !row?.plan?.remove.includes(tool) : item?.applied[tool] === undefined);
+      && (live ? !(row?.cannot?.[tool] && !row?.plugin?.[tool] && !heldByPlugin) && !row?.plan?.write.includes(tool) && !row?.plan?.remove.includes(tool) : item?.applied[tool] === undefined);
   };
   // One look at the refreshed view, both ways: drop answered problems now settled, and add any wanted or owed tool still unsettled.
   const kept = new Map([...raw].map(([kind, list]) => {
     const entries = list.filter(each => !(each.answeredLater && each.key && each.entry.harness && settledIn(kind, each.key, each.entry.harness)));
-    if (!stops.has(kind)) for (const key of restored.get(kind)!) {
+    if (!stops.has(kind)) for (const [key, onlyTools] of restored.get(kind)!) {
       const view = state.home?.[kind], row = view?.items.find(fact => fact.key === key), item = view?.library[key];
-      if (view && item) for (const tool of view.tools) {
+      const checkTools = view && (onlyTools ? view.tools.filter(each => onlyTools.has(each)) : view.tools);
+      if (checkTools && item) for (const tool of checkTools) {
         if (!((!item.deleted && wantedIn(item, tool)) || item.applied[tool] !== undefined) || settledIn(kind, key, tool)) continue;
         if (entries.some(each => each.key === key && each.entry.harness === tool && keptBack(each.entry))) continue;
         entries.push({ key, entry: { item: item.name, harness: tool, outcome: 'held', message: row?.cannot?.[tool] ?? row?.unseen?.[tool] ?? `Could not put ${toolName(tool)}’s copy back yet.` } });
@@ -925,8 +945,13 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   const all = names(about.rows), asBefore = names(about.rows.filter(row => !short.has(row.kind) && !switchesShort.has(row.kind) && !results.get(row.kind)?.some(keptBack)));
   const failed = names(about.rows.filter(row => switchesShort.has(row.kind) || kept.get(row.kind)?.some(each => keptBack(each.entry) && (each.key ? each.key === row.key : each.entry.item.toLowerCase() === row.name.toLowerCase()))));
   const are = (list: string[]) => `${fewNames(list)} ${list.length === 1 ? 'is' : 'are'} as before`;
+  const single = about.sentence && undone && !unswitched && events.length === 1 && events[0]!.only ? events[0]! : undefined;
+  const singleKind = single && kindOfEntry.get(single.id);
+  const singleMade = single && state.history.data?.find(each => each.id === state.history.data?.find(past => past.id === single.id)?.undoneBy);
+  const singleView = singleKind ? state.home?.[singleKind] : undefined;
+  const singleSaid = singleMade && singleKind && librarySentence(singleMade, libraryWords[singleKind], singleView?.tools ?? [], singleView?.library[libraryEntry(single!)!.key], true)?.text;
   tellWritten({ page, items: all, rows: about.rows, warn: !undone, band: true, fade: undone, reasons,
-    text: undone ? `Undone: ${are(all)}.` : short.size ? `Not all of it could be undone${several && asBefore.length ? `; ${are(asBefore)}` : ''}.` : `Not all of ${fewNames(failed.length ? failed : all)} could be put back.` }, reloads, anyDid);
+    text: singleSaid ? `${single!.item}: ${singleSaid.replace(/^./, first => first.toLowerCase())}` : undone ? `Undone: ${are(all)}.` : short.size ? `Not all of it could be undone${several && asBefore.length ? `; ${are(asBefore)}` : ''}.` : `Not all of ${fewNames(failed.length ? failed : all)} could be put back.` }, reloads, anyDid);
   for (const row of about.rows) flashRow(row);
   if (about.regroups) unpin();
 });
@@ -1227,6 +1252,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   await putHistory();
   // A source's band offers its click's Undo (sourcespage.ts whatItDid): its rows say what waits there now.
   if (state.page === 'sources') await loadSources();
+  await refreshPlugins();
   const restored = result.results.filter(entry => entry.outcome === 'written');
   const where = [...new Set(restored.map(entry => entry.harness ?? ''))].filter(Boolean);
   const past = state.history.data?.find(event => event.id === eventId);

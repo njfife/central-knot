@@ -520,7 +520,7 @@ test('Turned on over a different copy made by hand in one tool: History says tha
     await turnOn(box);
     const on = (await historyOf(box)).at(-1)!;
     const { item } = await seen(box);
-    assert.equal(librarySentence(on, libraryWords.skills, tools, item)?.text, 'Turned on: put in all 3 tools. Codex’s own folder was written over and kept as a version.');
+    assert.equal(librarySentence(on, libraryWords.skills, tools, item)?.text, 'Turned on: put in all 3 tools. Codex’s own copy was written over and kept as a version.');
     const use = (await historyActions(box)).find(action => action.event.id === on.id && action.label === 'Use codex-cli’s');
     assert.ok(use, 'History offers that version');
     await use!.run();
