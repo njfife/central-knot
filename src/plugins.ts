@@ -1441,8 +1441,8 @@ export async function uninstall(context: PluginContext, marketplace: string, plu
   if (held) return { tool, outcome: 'held', message: heldReason(tool, marketplace, held), runs: [] };
   const before = await installState(context, tool, marketplace, plugin);
   // Copilot CLI's uninstall of a live folder copy only sets enabledPlugins to false (its folder stays), which installState reads
-  // as installed, live and off; that counts as uninstalled here (marketplaces.ts undoTurn rewrites the report to plugin-off and
-  // keeps the record off; pluginplan.ts reverse marks the op keptOff for Undo's hover).
+  // as installed, live and off; that counts as uninstalled here (marketplaces.ts undoTurn rewrites the report to plugin-off;
+  // pluginplan.ts reverse marks the op keptOff for Undo's hover).
   const gone = (at: InstallState) => at.state === 'not-installed' || (tool === 'copilot-cli' && at.state === 'installed' && !!at.live && !!at.off);
   if (gone(before)) return { tool, outcome: 'uninstalled', message: `Not installed in ${name}.`, runs: [] };
   const id = `${plugin}@${marketplace}`, beforeReloads = await installedReloads(context, tool, marketplace, plugin, false);

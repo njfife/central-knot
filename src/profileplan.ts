@@ -29,7 +29,7 @@ import { hashesOf, keptByOff, placeOf, type LoadWay } from './libraryrow.ts';
 import { plural } from './model.ts';
 import { itemThrough, pluginOnIn } from './pluginrows.ts';
 import { isWhole, opposites, type PluginOp } from './pluginplan.ts';
-import { loadsKind, pageOfPart, samePart } from './pluginstatus.ts';
+import { loadsKind, pageOfPart, pluginOff, samePart } from './pluginstatus.ts';
 import { cantSwitch, hasOwnSwitch, itemOffNow, itemSaid, onNow, ownSwitch, type PluginItemAt } from './pluginswitch.ts';
 import { takesPlugins } from './presence.ts';
 import { groupBy } from './model.ts';
@@ -171,8 +171,6 @@ export interface PluginLive { id: string; kind: ItemKind; name: string; plugin: 
 /** What pluginLive reads of a home: a page's view, or the read a switch makes (main.ts pluginSide). */
 export type PluginHome = Pick<HomeView, 'pluginItems' | 'profiles' | 'skills' | 'mcp' | 'agents'>;
 
-/** Why a copy can't be switched while its whole plugin is off in its tool (installed whole), or on Plugins (placed). */
-const pluginOff = (plugin: string, tool: HarnessId) => `The whole plugin ${plugin} is off in ${toolNames[tool]}.`;
 /** Other Copilot CLI servers sharing the exact bare name of a plugin's MCP server there (PluginCopy `sharesWith`). */
 function copilotShares(home: PluginHome, at: PluginItemAt): PluginCopy['sharesWith'] {
   if (at.tool !== 'copilot-cli' || at.kind !== 'mcp') return undefined;

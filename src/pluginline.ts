@@ -4,22 +4,21 @@
 // that names the plugin and the tool; a sentence alone where nothing can be done. Where the tool has the item, what a click turns
 // is pluginswitch.ts's answer (wholeTurn); where the tool lacks the plugin, whether it may go in is the plugin's box on its own
 // page (pluginstatus.ts boxOf), asked of the Plugins page's view (pluginstate.ts lineBox): no second set of rules here.
-// Elsewhere: the buttons' clicks (Install and Put its items here: pluginstate.ts turnFromLine, a plugin's turn in main;
-// Turn the plugin on or off: matrix.ts switchPluginItem, the item's own switch's click), and their result on the line that acted
+// Elsewhere: the buttons' clicks (pluginstate.ts turnFromLine, a plugin's turn in main), and their result on the line that acted
 // (pluginstate.ts LineResult); the line drawn (matrix.ts pluginLine); which of a library row's lines are a plugin's (matrix.ts
 // rowPluginFacts: in a tool that takes plugins and lacks it, and in Pi, OpenCode and Antigravity while the item is Off, where Put its
 // items here puts them there again after its Undo); and the others, the library's own (libraryrow.ts hasLine).
-import { DIRECTORY, loadsKind, partWords, samePart } from './pluginstatus.ts';
-import { cantSwitch, copilotByName, onNow, wholeTurn, type PluginItemAt } from './pluginswitch.ts';
+import { DIRECTORY, FROM_DIRECTORY, loadsKind, partWords, samePart } from './pluginstatus.ts';
+import { cantSwitch, wholeTurn, type PluginItemAt } from './pluginswitch.ts';
 import { holds, takesPlugins } from './presence.ts';
 import { andList, toolNames as names } from './words.ts';
 import type { Components, HarnessId, InstalledPlugin, PartKind, PartRef } from './types.ts';
 
 /**
- * What a line's button does: install the plugin, put its items in a tool that takes no plugins, turn the whole plugin there,
- * or turn on a copy the plugins record keeps off there as its box ticked does (`let-in`).
+ * What a line's button does: install the plugin, put its items in a tool that takes no plugins, or turn the whole plugin off or on
+ * there as its box on the plugin's page does (`keep-out`, `let-in`).
  */
-export type LineAct = 'install' | 'place' | 'plugin-on' | 'plugin-off' | 'let-in';
+export type LineAct = 'install' | 'place' | 'keep-out' | 'let-in';
 export type LineControl = { control: 'switch' } | { control: 'button'; act: LineAct; label: string; sentence: string } | { control: 'none'; sentence: string };
 /** A tool's box on the plugin's page, as pluginstatus.ts boxOf answers it: ticked, and off with why. */
 export type LineBox = { ticked: boolean; off?: string };
@@ -45,7 +44,7 @@ export interface LineFacts {
   parts?: Components;
 }
 
-const LABELS: Record<LineAct, string> = { install: 'Install the plugin', place: 'Put its items here', 'plugin-on': 'Turn the plugin on', 'plugin-off': 'Turn the plugin off', 'let-in': 'Turn the plugin on' };
+const LABELS: Record<LineAct, string> = { install: 'Install the plugin', place: 'Put its items here', 'keep-out': 'Turn the plugin off', 'let-in': 'Turn the plugin on' };
 const SWITCH: LineControl = { control: 'switch' };
 const button = (act: LineAct, sentence: string): LineControl => ({ control: 'button', act, label: LABELS[act], sentence });
 const none = (sentence: string): LineControl => ({ control: 'none', sentence });
@@ -69,15 +68,24 @@ const unlisted = (marketName: string) => `its marketplace “${marketName}” is
 /** Whether the plugin brings anything in its tool besides this item: another item, or hooks. */
 const bringsMore = (item: PluginItemAt) => item.install.items.some(entry => !samePart(entry, item)) || !!item.install.hooks?.length;
 
-function hasIt(item: PluginItemAt, { box }: LineFacts): LineControl {
+function hasIt(item: PluginItemAt, { box, marketName }: LineFacts): LineControl {
   const tool = names[item.tool], plugin = item.install.plugin;
-  // Kept off by the plugins record: on again only as its box on the plugin's page is ticked (marketplaces.ts turn), never by the item's switch.
-  if (item.install.keptOff && typeof box === 'object' && !box.off) return button('let-in', `Turns ${plugin} on in ${tool}, as ticking its box on its page does.`);
+  // Installed whole and off: shown one way, whoever turned it off; one click ticks its box (marketplaces.ts turn let-in).
+  if (item.install.off) {
+    if (box === 'unlisted') return none(marketName === DIRECTORY ? FROM_DIRECTORY : `Off in ${tool}. ${capital(unlisted(marketName))}, so it can’t be turned on from here.`);
+    if (box === 'ambiguous') return none(`Off in ${tool}. ${twoNamed(marketName, plugin)}, so which one to turn on can’t be told here.`);
+    if (box?.off) return none(box.off);
+    if (!box) return none(`Off in ${tool}.`);
+    return button('let-in', `Turns ${plugin} on in ${tool}, as ticking its box on its page does.`);
+  }
   // The switch: a click that turns this item alone, one that can't be written (said beside it), and a plugin that is this item alone.
   const whole = wholeTurn(item);
   if (!whole || cantSwitch(item) || !bringsMore(item)) return SWITCH;
-  const byName = item.kind === 'mcp' && item.tool === 'copilot-cli' && !onNow(item) ? ` ${copilotByName(item.name, true)}` : '';
-  return button(onNow(item) ? 'plugin-off' : 'plugin-on', `Turns ${whole}.${byName}`);
+  if (box === 'unlisted') return none(marketName === DIRECTORY ? FROM_DIRECTORY : `${capital(unlisted(marketName))}, so it can’t be turned off from here.`);
+  if (box === 'ambiguous') return none(`${twoNamed(marketName, plugin)}, so which one to turn off can’t be told here.`);
+  if (box?.off) return none(box.off);
+  if (!box) return none('');
+  return button('keep-out', `Turns ${whole}.`);
 }
 
 function install({ tool, kind, plugin, marketName, box, parts, yours = [] }: LineFacts): LineControl {
