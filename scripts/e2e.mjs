@@ -8622,9 +8622,9 @@ async function nameClashPage() {
 }
 
 /**
- * A plugin's skill held out of Pi by a copy of his own not in the Library (found in Pi's folder, or only in the shared skills
- * folder): Pi's box gives the reason line with another item on (no action button), never duplicates it with no item on, and
- * keeps his own Library item (Off) as before.
+ * A plugin's skill held out by a copy of his own not in the Library (found in one tool's folder, solo or one of two tools, or
+ * only in the shared skills folder): own-copy clashes settle directly under the tool's box with History/Undo byte-exact and
+ * stale-clash refusals; shared-folder clashes keep their Library sentence with no button; Library items (On and Off) stay unchanged.
  */
 async function foundOwnCopyPage() {
   const home = join(scratch, 'home-found-own'), data = join(scratch, 'found-own-data'), market = join(scratch, 'market-found-own');
@@ -8640,16 +8640,18 @@ async function foundOwnCopyPage() {
       { name: 'kit-lib-off', source: './plugins/kit-lib-off', version: '1.0.0' },
     ],
   }, null, 2));
+  const pluginTdd = md('tdd', 'Plugin tdd.'), pluginSolo = md('solo', 'Plugin solo.'), pluginShared = md('shared-tdd', 'Plugin shared-tdd.');
   put(join(market, 'plugins/kit-own/skills/a/SKILL.md'), md('a', 'Plugin a.'));
-  put(join(market, 'plugins/kit-own/skills/tdd/SKILL.md'), md('tdd', 'Plugin tdd.'));
-  put(join(market, 'plugins/kit-only/skills/solo/SKILL.md'), md('solo', 'Plugin solo.'));
+  put(join(market, 'plugins/kit-own/skills/tdd/SKILL.md'), pluginTdd);
+  put(join(market, 'plugins/kit-only/skills/solo/SKILL.md'), pluginSolo);
   put(join(market, 'plugins/kit-shared/skills/b/SKILL.md'), md('b', 'Plugin b.'));
-  put(join(market, 'plugins/kit-shared/skills/shared-tdd/SKILL.md'), md('shared-tdd', 'Plugin shared-tdd.'));
+  put(join(market, 'plugins/kit-shared/skills/shared-tdd/SKILL.md'), pluginShared);
   put(join(market, 'plugins/kit-lib-on/skills/d/SKILL.md'), md('d', 'Plugin d.'));
   put(join(market, 'plugins/kit-lib-on/skills/lib-on/SKILL.md'), md('lib-on', 'Plugin lib-on.'));
   put(join(market, 'plugins/kit-lib-off/skills/c/SKILL.md'), md('c', 'Plugin c.'));
   put(join(market, 'plugins/kit-lib-off/skills/lib-tdd/SKILL.md'), md('lib-tdd', 'Plugin lib-tdd.'));
   const piTddPath = join(home, '.pi/agent/skills/tdd/SKILL.md'), piTddMine = md('tdd', 'My own tdd in Pi.');
+  const ocTddPath = join(home, '.config/opencode/skills/tdd/SKILL.md');
   const piSoloPath = join(home, '.pi/agent/skills/solo/SKILL.md'), piSoloMine = md('solo', 'My own solo in Pi.');
   const sharedPath = join(home, '.agents/skills/shared-tdd/SKILL.md'), sharedMine = md('shared-tdd', 'My own shared-tdd.');
   put(piTddPath, piTddMine);
@@ -8658,7 +8660,8 @@ async function foundOwnCopyPage() {
   put(join(home, '.pi/agent/skills/lib-on/SKILL.md'), md('lib-on', 'My own library on.'));
   put(join(home, '.pi/agent/skills/lib-tdd/SKILL.md'), md('lib-tdd', 'My own library tdd.'));
   mkdirSync(join(home, '.claude'), { recursive: true });
-  // Claude Code is here too (Pi alone has no Plugins page): a stand-in that only says its version, so any other call fails.
+  mkdirSync(join(home, '.config/opencode'), { recursive: true });
+  // Claude Code is here too (Pi/OpenCode alone have no Plugins page): a stand-in that only says its version, so any other call fails.
   const tools = join(scratch, 'tools-found-own');
   mkdirSync(join(tools, '.local/bin'), { recursive: true });
   writeFileSync(join(tools, '.local/bin/claude'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.322 (Claude Code)" && exit 0\nexit 9\n', { mode: 0o755 });
@@ -8671,20 +8674,29 @@ async function foundOwnCopyPage() {
     await window.centralKnot.applySkills([{ key: 'lib-tdd', on: false, except: [], seenOn: true }], false, home);
     await window.centralKnot.addMarketplace(${JSON.stringify(market)}); })()`);
   await a.click('#nav-plugins');
-  const tickPi = async plugin => {
+  const openAndTick = async (plugin, ...tickTools) => {
     for (let tries = 0; tries < 50 && !(await a.exists(`#popen-0-${plugin}`)); tries++) await wait(100);
     await a.click(`#popen-0-${plugin}`);
-    for (let tries = 0; tries < 50 && !(await a.exists(`#pbox-0-${plugin}-pi-cli`)); tries++) await wait(100);
-    await a.click(`#pbox-0-${plugin}-pi-cli`);
-    await done();
+    for (const tool of tickTools) {
+      for (let tries = 0; tries < 50 && !(await a.exists(`#pbox-0-${plugin}-${tool}`)); tries++) await wait(100);
+      await a.click(`#pbox-0-${plugin}-${tool}`);
+      await done();
+    }
   };
-  const piReasons = () => a.all('.plugin-tool[data-tool="pi-cli"] .plugin-tool-why', 'e.textContent');
-  // Worked example 1 (with a on): Pi's own tdd is kept untouched, and Pi's box shows OUT.own's sentence with no action button.
-  await tickPi('kit-own');
-  const ownSentence = 'tdd: Pi has a skill of its own by that name, never written over; turn it on in Pi on its row to put the plugin’s there, keeping Pi’s as a version.';
-  same('Pi’s own found tdd is untouched and Pi’s box shows its reason beside 1 of 2 on, with no action button',
-    [readNow(piTddPath), existsSync(join(home, '.pi/agent/skills/a/SKILL.md')), await a.text('.plugin-tool[data-tool="pi-cli"] .plugin-tool-state:not(.plugin-tool-why)'), await piReasons(), await a.exists('.plugin-tool[data-tool="pi-cli"] button.btn')],
-    [piTddMine, true, '1 of its 2 items is on in Pi.', [ownSentence], false]);
+  const reasonsOf = tool => a.all(`.plugin-tool[data-tool="${tool}"] .plugin-tool-why`, 'e.textContent');
+  const stateOf = tool => a.text(`.plugin-tool[data-tool="${tool}"] .plugin-tool-state:not(.plugin-tool-why)`);
+  const buttonsOf = tool => a.all(`.plugin-tool[data-tool="${tool}"] button.btn`, 'e.textContent');
+  // Worked example 1 (one of two tools, some placed): OpenCode gets both items; Pi keeps its own tdd and offers one button to use the plugin's.
+  await openAndTick('kit-own', 'opencode-cli', 'pi-cli');
+  const ownBtn = '#pclash-0-kit-own-pi-cli-skill-tdd';
+  const ownHover = await a.run(`document.querySelector(${JSON.stringify(ownBtn)})?.title ?? ''`);
+  same('one of two tools: OpenCode has both items with no clash button; Pi keeps its own tdd and offers Use the plugin’s tdd with kept-and-Undo hover',
+    [readNow(piTddPath), readNow(ocTddPath), readNow(join(home, '.pi/agent/skills/a/SKILL.md')),
+      await stateOf('opencode-cli'), await buttonsOf('opencode-cli'),
+      await stateOf('pi-cli'), await reasonsOf('pi-cli'), await buttonsOf('pi-cli'), await a.exists(ownBtn), ownHover],
+    [piTddMine, pluginTdd, md('a', 'Plugin a.'), '2 of its 2 items are on in OpenCode.', [],
+      '1 of its 2 items is on in Pi.', ['tdd: Pi has its own copy.Use the plugin’s tdd'], ['Use the plugin’s tdd'], true,
+      'Puts the plugin’s tdd in Pi. Pi’s own copy is kept as a version, and Undo puts it back.']);
   if (shots) {
     for (const theme of ['light', 'dark']) {
       await a.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
@@ -8699,29 +8711,110 @@ async function foundOwnCopyPage() {
     await a.run(`window.centralKnot.setAppearance('system')`);
     await fullSize(a);
   }
+  await a.click(ownBtn);
+  await done();
+  const afterOwnText = await a.text('#header [data-outcome] .band-text');
+  same('Use the plugin’s tdd lets Pi in, says History’s own wording, leaves OpenCode untouched, refreshes the box and offers Undo',
+    [readNow(piTddPath), readNow(ocTddPath), await stateOf('pi-cli'), await buttonsOf('pi-cli'), await a.exists('#outcome-undo'), afterOwnText],
+    [pluginTdd, pluginTdd, '2 of its 2 items are on in Pi.', [], true, 'tdd: turned on in Pi. Pi’s own copy was written over and kept as a version.']);
+  await a.click('#outcome-undo');
+  await done();
+  const afterUndo = await a.run(`({ text: document.querySelector('#header [data-outcome] .band-text')?.textContent ?? '', warn: !!document.querySelector('#header [data-outcome].band-warn'), problems: [...document.querySelectorAll('#header .problem-line')].map(e => e.textContent) })`);
+  same('header Undo puts Pi’s own tdd back byte for byte, leaves Claude Code and OpenCode untouched, names Pi only with no warning, and refreshes the box',
+    [readNow(piTddPath), readNow(ocTddPath), existsSync(join(home, '.claude/skills/tdd')), await stateOf('pi-cli'), await a.exists(ownBtn), afterUndo],
+    [piTddMine, pluginTdd, false, '1 of its 2 items is on in Pi.', true, { text: 'tdd: kept out of Pi: Pi has its own copy back, as before. Central Knot keeps it.', warn: false, problems: [] }]);
+  // Click again and undo from History: check History's own sentence and byte-exact restoration of Pi's copy.
+  await a.click(ownBtn);
+  await done();
+  const findTddRow = () => a.run(`(() => { const row = [...document.querySelectorAll('li.history-row')].find(r => r.textContent.includes('tdd') && r.querySelector('.history-actions button')?.textContent === 'Undo'); return row ? { id: row.querySelector('.history-actions button')?.id ?? '', about: row.querySelector('.history-about')?.textContent?.trim() ?? '' } : null; })()`);
+  await openHistory(a, '#nav-history', async () => !!(await findTddRow())?.id);
+  const tddHistory = await findTddRow();
+  same('History has the tdd let-in entry with copy wording and Undo', [!!tddHistory?.id, tddHistory?.about],
+    [true, 'Turned on in Pi. Pi’s own copy was written over and kept as a version.']);
+  await a.click(byId(tddHistory.id));
+  await done();
+  same('History Undo brings Pi’s tdd copy back byte for byte and leaves OpenCode untouched', [readNow(piTddPath), readNow(ocTddPath)], [piTddMine, pluginTdd]);
+  await a.click('#nav-plugins');
+  for (let tries = 0; tries < 50 && !(await a.exists(ownBtn)); tries++) await wait(100);
   await a.click('#plugin-back');
-  // Worked example 1 (with no item on): the box reads exactly as today, never saying the reason twice.
-  await tickPi('kit-only');
-  same('with no item on, Pi’s box shows solo’s own-copy reason exactly once',
-    [readNow(piSoloPath), await piReasons()],
-    [piSoloMine, ['solo: Pi has a skill of its own by that name, never written over; turn it on in Pi on its row to put the plugin’s there, keeping Pi’s as a version.']]);
+  // Worked example 1b (one tool alone, none placed): normal act + Undo, then all four stale-clash refusals (copy gone, turned Off, no longer kept out, no longer from source).
+  await openAndTick('kit-only', 'pi-cli');
+  const soloBtn = '#pclash-0-kit-only-pi-cli-skill-solo';
+  same('solo own copy: Pi’s box shows solo once with Use the plugin’s solo and no old redirect',
+    [readNow(piSoloPath), await reasonsOf('pi-cli'), await buttonsOf('pi-cli'), await a.exists(soloBtn)],
+    [piSoloMine, ['solo: Pi has its own copy.Use the plugin’s solo'], ['Use the plugin’s solo'], true]);
+  await a.click(soloBtn);
+  await done();
+  same('solo Use the plugin’s solo puts the plugin’s solo in Pi and refreshes the box',
+    [readNow(piSoloPath), await stateOf('pi-cli'), await buttonsOf('pi-cli'), await a.text('#header [data-outcome] .band-text')],
+    [pluginSolo, '1 of its 1 items is on in Pi.', [], 'solo: turned on in Pi. Pi’s own copy was written over and kept as a version.']);
+  await a.click('#outcome-undo');
+  await done();
+  same('solo Undo restores Pi’s solo copy byte for byte and shows the clash button again',
+    [readNow(piSoloPath), await a.exists(soloBtn)], [piSoloMine, true]);
+  // Refusal 1: move Pi's own folder away while the page is open -> clicking refuses without clearing except or writing the plugin's copy.
+  const soloAside = join(scratch, 'solo-aside');
+  renameSync(dirname(piSoloPath), soloAside);
+  await a.click(soloBtn);
+  await done();
+  const soloExcept1 = await a.run(`(async () => (await window.centralKnot.refresh()).skills.library['solo']?.except)()`);
+  same('refusal when Pi’s own copy vanished: nothing written, exception kept, refusal shown',
+    [existsSync(piSoloPath), soloExcept1?.includes('pi-cli'), await a.exists(soloBtn), await a.text('#header [data-outcome] .band-text')],
+    [false, true, false, 'solo changed since the page was read. Nothing was changed.']);
+  renameSync(soloAside, dirname(piSoloPath));
+  await a.click('#header-refresh');
+  await done();
+  for (let tries = 0; tries < 50 && !(await a.exists(soloBtn)); tries++) await wait(100);
+  // Refusal 2: turn solo Off behind the open page -> clicking refuses and leaves Pi's own copy untouched.
+  await a.run(`(async () => { const { home } = await window.centralKnot.refresh(); await window.centralKnot.applySkills([{ key: 'solo', on: false, except: ['pi-cli'], seenOn: true }], false, home); })()`);
+  await a.click(soloBtn);
+  await done();
+  same('refusal when item is no longer On: Pi’s copy untouched and refusal shown',
+    [readNow(piSoloPath), await a.text('#header [data-outcome] .band-text')],
+    [piSoloMine, 'solo changed since the page was read. Nothing was changed.']);
+  await a.run(`(async () => { const { home } = await window.centralKnot.refresh(); await window.centralKnot.applySkills([{ key: 'solo', on: true, except: ['pi-cli'], seenOn: false }], false, home); })()`);
+  await a.click('#header-refresh');
+  await done();
+  for (let tries = 0; tries < 50 && !(await a.exists(soloBtn)); tries++) await wait(100);
+  // Refusal 3: clear except behind the open page -> clicking refuses cleanly.
+  await a.run(`(async () => { const { home } = await window.centralKnot.refresh(); await window.centralKnot.applySkills([{ key: 'solo', on: true, except: [], seenOn: true }], false, home); })()`);
+  await a.click(soloBtn);
+  await done();
+  same('refusal when item is no longer kept out: refusal shown',
+    [readNow(piSoloPath), await a.text('#header [data-outcome] .band-text'), await a.exists(soloBtn)],
+    [pluginSolo, 'solo changed since the page was read. Nothing was changed.', false]);
+  // Undo that out-of-band change and verify Refusal 4 (no longer from this source: making Pi's earlier version current unlinks solo from kit-only).
+  await a.run(`(async () => { const { home } = await window.centralKnot.refresh(); const h = await window.centralKnot.history(); const last = [...h.events].reverse().find(e => e.key === 'solo' && e.kind === 'on'); if (last) await window.centralKnot.restore(last.id, home); })()`);
+  await a.click('#header-refresh');
+  await done();
+  for (let tries = 0; tries < 50 && !(await a.exists(soloBtn)); tries++) await wait(100);
+  const unlinked = await a.run(`(async () => { const view = await window.centralKnot.refresh(); const solo = view.skills.library['solo']; const other = solo?.versions.find(v => v.hash !== solo.hash); if (!other) return false; await window.centralKnot.applySkills([{ key: 'solo', on: true, except: ['pi-cli'], version: other.hash }], false, view.home); return !(await window.centralKnot.refresh()).skills.library['solo']?.source; })()`);
+  check('out-of-band makeCurrent unlinked solo from kit-only before Refusal 4', unlinked);
+  await a.click(soloBtn);
+  await done();
+  same('refusal when item is no longer from this source: Pi’s copy untouched and refusal shown',
+    [readNow(piSoloPath), await a.text('#header [data-outcome] .band-text')],
+    [piSoloMine, 'solo changed since the page was read. Nothing was changed.']);
   await a.click('#plugin-back');
-  // Worked example 3: found only in the shared skills folder, which Pi reads.
-  await tickPi('kit-shared');
-  same('shared-folder-only found skill: Pi’s own folder has no copy, shared copy is untouched, and Pi’s box says Pi reads yours from the shared skills folder',
-    [existsSync(join(home, '.pi/agent/skills/b/SKILL.md')), existsSync(join(home, '.pi/agent/skills/shared-tdd')), readNow(sharedPath),
-      await a.text('.plugin-tool[data-tool="pi-cli"] .plugin-tool-state:not(.plugin-tool-why)'), await piReasons(), await a.exists('.plugin-tool[data-tool="pi-cli"] button.btn')],
-    [true, false, sharedMine, '1 of its 2 items is on in Pi.', ['shared-tdd: Pi reads yours from the shared skills folder, which Central Knot never writes. Take it over on its Library row to use the plugin’s.'], false]);
+  // Worked example 3: found only in the shared skills folder, read by Pi and OpenCode: keeps next's exact sentence, no takeover button.
+  await openAndTick('kit-shared', 'opencode-cli', 'pi-cli');
+  same('shared-folder-only found skill: untouched on disk, both boxes show the Library sentence with no action button',
+    [readNow(join(home, '.pi/agent/skills/b/SKILL.md')), existsSync(join(home, '.pi/agent/skills/shared-tdd')), readNow(sharedPath),
+      await stateOf('pi-cli'), await reasonsOf('pi-cli'), await buttonsOf('pi-cli'),
+      await stateOf('opencode-cli'), await reasonsOf('opencode-cli'), await buttonsOf('opencode-cli')],
+    [md('b', 'Plugin b.'), false, sharedMine,
+      '1 of its 2 items is on in Pi.', ['shared-tdd: Pi reads yours from the shared skills folder, which Central Knot never writes. Take it over on its Library row to use the plugin’s.'], [],
+      '1 of its 2 items is on in OpenCode.', ['shared-tdd: OpenCode reads yours from the shared skills folder, which Central Knot never writes. Take it over on its Library row to use the plugin’s.'], []]);
   await a.click('#plugin-back');
   // Worked example 2 (Library item On, and Off): unchanged, Use the plugin's offered, no duplicate line.
-  await tickPi('kit-lib-on');
+  await openAndTick('kit-lib-on', 'pi-cli');
   same('his own Library skill (On) still shows its yours line with Use the plugin’s and no duplicate line',
-    [await piReasons(), await a.exists('#ptake-0-kit-lib-on-pi-cli-skill-lib-on')],
+    [await reasonsOf('pi-cli'), await a.exists('#ptake-0-kit-lib-on-pi-cli-skill-lib-on')],
     [['lib-on: you keep your own skill by that name, not the plugin’s.Use the plugin’s lib-on', 'Using the plugin’s keeps yours as a version, and your other tools keep their copies.'], true]);
   await a.click('#plugin-back');
-  await tickPi('kit-lib-off');
+  await openAndTick('kit-lib-off', 'pi-cli');
   same('his own Library skill (Off) still shows its yours line with Use the plugin’s and no duplicate line',
-    [await piReasons(), await a.exists('#ptake-0-kit-lib-off-pi-cli-skill-lib-tdd')],
+    [await reasonsOf('pi-cli'), await a.exists('#ptake-0-kit-lib-off-pi-cli-skill-lib-tdd')],
     [['lib-tdd: you keep your own skill by that name, not the plugin’s.Use the plugin’s lib-tdd', 'Using the plugin’s keeps yours as a version, and your other tools keep their copies.'], true]);
   same('no page errors, found-own plugin box', a.pageErrors, []);
   await a.quit();

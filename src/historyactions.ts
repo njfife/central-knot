@@ -132,14 +132,14 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
   const named = (tool: HarnessId) => event.losers.some(loser => loser.tool === tool);
   // A click that wrote over a copy a tool had of its own (tookFrom, and written: in `losers`), which is kept as a version.
   const over = (event.tookFrom ?? []).filter(copy => named(copy.tool)).map(copy => toolName(copy.tool));
-  const overSaid = over.length ? ` ${andList(over)}’s own ${words.copy}${over.length === 1 ? ' was' : 's were'} written over and kept as a version.` : '';
+  const overSaid = over.length ? ` ${andList(over)}’s own ${over.length === 1 ? 'copy was' : 'copies were'} written over and kept as a version.` : '';
   switch (event.kind) {
     case 'on': {
       // A pass no click asked put a copy in one tool that had none (`only`: a tool that came under management, say), or wrote
       // the current version over copies there (a tool managed again, a folder writable again).
       if (event.cause === 'in-line' && event.only) return { glyph: 'circle-check', text: `Copied to ${where}.${away}` };
       if (event.cause === 'in-line') return { glyph: 'circle-check', text: `Written over in ${tools} with the current version when sync reached ${event.losers.length === 1 ? 'it' : 'them'}; what was there is one of its versions.` };
-      if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}${named(event.only) ? `: its ${words.copy} there is back` : ''}.${overSaid}${gaveSaid}${away}` };
+      if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}${named(event.only) && !over.length ? `: its ${words.copy} there is back` : ''}.${overSaid}${gaveSaid}${away}` };
       const onlyIn = event.cause === 'switch' && event.nowExcept ? harnessIds.filter(tool => !event.nowExcept!.includes(tool)) : [];
       if (onlyIn.length === 1) return { glyph: 'circle-check', text: `Turned on in ${toolName(onlyIn[0]!)}; kept out of every other tool.${overSaid}${gaveSaid}` };
       // A plugin's read brought it in with the plugin's On (library.ts A PLUGIN).

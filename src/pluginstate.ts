@@ -571,9 +571,9 @@ export function undoLast(): void {
 export function closeRun(): void { endRun(); clearRun(); }
 /**
  * Whether the app's result `outcome` is said in the header in the run's place (pluginspage.ts pluginsResult): one made on Plugins,
- * not in the status bar, with no action of the page's own (Sync once from the menu). It is newer, so app.ts tell lets the run go.
+ * not in the status bar, either with no action of the page's own (Sync once from the menu) or a library-item click result (`rows`). It is newer, so app.ts tell lets the run go.
  */
-export const overRun = (outcome: Outcome | undefined): boolean => outcome?.page === 'plugins' && !outcome.act && !saidInStatusBar(outcome);
+export const overRun = (outcome: Outcome | undefined): boolean => outcome?.page === 'plugins' && (!outcome.act || !!outcome.rows?.length) && !saidInStatusBar(outcome);
 const clearRun = () => { market.lastRun = undefined; market.problem = undefined; };
 /** The run's result with no problem line goes by itself, as a list page's result does (app.ts FADE_MS); its Undo with it. Answers whether it went. */
 export function fadeRun(): boolean {

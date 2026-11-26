@@ -5,23 +5,28 @@
 // the panel says how its click stands (pluginparts.ts clickNote); Update and the skill switches under Skills act at
 // once (pluginstate.ts applyPluginOps).
 // Fold state lives here while that plugin's page is drawn (shownFolds, drawnPlugin; cleared by afterPluginPageDrawn).
-import { acting, rerender, state as app } from './app.ts';
+import { acting, applyClick, rerender, setHome, state as app, whyKindReadOnly } from './app.ts';
 import { afterLayout, button, fileBlocks, h, icon, infoMark, toggle as switchToggle, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
+import { libraryEntry, librarySentence } from './historyactions.ts';
+import { kindSource } from './itemrow.ts';
+import { libraryPages } from './librarypages.ts';
+import { harnessIs, libraryWords, rowClicks } from './libraryrow.ts';
 import { groupBy } from './model.ts';
 import { addsText, componentsFrom, outcomes, sessionHooksAbout, whenItRuns } from './pluginoutcomes.ts';
 import { clickNote, componentsOf, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, toolBox, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { pluginKey } from './pluginplan.ts';
-import { DIRECTORY, boxOf, cantSwitchSkill, comparableText, itemsIn, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, otherVersionsLine, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionDiffers, versionToCompare, waitingWords, waitsToMove, whyNotCarried, yourSaid, type ToolMark } from './pluginstatus.ts';
+import { DIRECTORY, boxOf, cantSwitchSkill, comparableText, itemsIn, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, notInWhy, offeredVersion, otherVersionsLine, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionDiffers, versionToCompare, waitingWords, waitsToMove, whyNotCarried, yourSaid, type ToolMark } from './pluginstatus.ts';
 import { hasCowork, pluginTools, takesPlugins } from './presence.ts';
-import { applyPluginOps, market, openLink, shownDetail, toggleOpened, usePlugins } from './pluginstate.ts';
-import type { Components, DeclaredHook, HarnessId, HookSourceRef, InstalledPlugin, MarketplaceView, Outcome, PluginDetail, PluginItemLine, PluginView, PluginsView, YourName } from './types.ts';
+import { applyPluginOps, loadPlugins, market, openLink, shownDetail, toggleOpened, usePlugins } from './pluginstate.ts';
+import { pluginLink } from './sourcelink.ts';
+import type { Components, DeclaredHook, HarnessId, HookSourceRef, InstalledPlugin, MarketplaceView, Outcome, PluginDetail, PluginItemClash, PluginItemLine, PluginView, PluginsView, YourName } from './types.ts';
 import { canRun, hookCantRunReason, hookRow, hookSourceControls } from './hooksourceview.ts';
 import { HOOK_RUN_WARN, hookFingerprint, hookLine, hookStripHelp, hookStripNote, textHookRows, type TextHookRow } from './sessionhooks.ts';
 import { plural } from './model.ts';
 import { andList, coworkWords, toolNames as names } from './words.ts';
-import { openKind } from './matrix.ts';
+import { openKind, rowByKey } from './matrix.ts';
 
 /** Tools that can take the plugin itself here (or have it): what "In each tool" describes. A tool that can't is left out. */
 const nativeTools = (view: PluginsView, entry: MarketplaceView, plugin: string) =>
@@ -110,19 +115,71 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     shownDetail(pluginKey(entry.source, plugin.name))?.onlyInstructions
       ? h('p.plugin-panel-hint', { id: 'plugin-only-instructions' }, 'No tool reads these files by itself: copy the text into your own instructions.') : null,
     withToolCount(h('div.plugin-tool-rows', {}, view.tools.map(tool => {
-      const { mark, words } = markOf(view, entry, plugin, tool, compareTo), box = boxOf(view, entry, plugin.name, tool, { mark, words });
+      const { mark, words } = markOf(view, entry, plugin, tool, compareTo);
+      const box = boxOf(view, entry, plugin.name, tool, { mark, words });
       // Under the box: what it has, or what the box says more (why it is off); in Pi, OpenCode and Antigravity, where none
-      // of its items is on, each reason on its own line (pluginstatus.ts notInWhy), as its run's report says; then each name
-      // of his (yourLines), whatever else is so, which say why on their own where the box is held by those alone.
-      const why = entry.items?.[plugin.name]?.notIn?.[tool]?.reasons ?? [], heldOut = entry.items?.[plugin.name]?.heldOut?.[tool] ?? [], yours = entry.items?.[plugin.name]?.yours?.[tool] ?? [];
+      // of its items is on, each non-clash reason on its own line, then own/shared clashes and each name of his (yourLines).
+      const items = entry.items?.[plugin.name];
+      const notIn = items?.notIn?.[tool];
+      const why = notIn?.nonClash ?? notIn?.reasons ?? [];
+      const clashes = (items?.clashes ?? []).filter(clash => clash.tool === tool);
+      const yours = items?.yours?.[tool] ?? [];
       const state = why.length ? why.map(reason => h('span.plugin-tool-state.plugin-tool-why', {}, reason))
-        : box.held && yours.length ? null : h('span.plugin-tool-state', { title: words }, box.line ?? status(tool, mark));
+        : box.held && (yours.length || clashes.length) ? null : h('span.plugin-tool-state', { title: words }, box.line ?? status(tool, mark));
       return h('div.plugin-tool', { 'data-tool': tool }, toolBox(view, entry, plugin, tool, marketIndex, compareTo),
         h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]),
-          state, heldOut.map(reason => h('span.plugin-tool-state.plugin-tool-why', {}, reason)), yourLines(view, entry, plugin, tool, yours, marketIndex),
+          state, clashLines(view, entry, plugin, tool, clashes, marketIndex), yourLines(view, entry, plugin, tool, yours, marketIndex),
           // With no CLI, its plugin commands run through the copy its desktop app carries: said so, never as the CLI.
           view.via?.[tool] ? h('span.plugin-tool-state.plugin-tool-via', { title: `${names[tool]}’s command-line tool wasn’t found, so its plugin commands run through ${view.via[tool]}.` }, `Through ${view.via[tool]}`) : null));
     })), view.tools.length));
+}
+
+/** Lets one tool into a plugin-linked Library item via the Library row's own `rowClicks.inHarness(..., false)` act, re-reading first. */
+function letToolIn(entry: MarketplaceView, plugin: string, clash: PluginItemClash) {
+  const kind = pageOfPart[clash.kind];
+  void applyClick(async () => {
+    setHome(await window.centralKnot.refresh());
+    await loadPlugins(false, app.home?.readId);
+    const live = market.view?.marketplaces.find(each => each.source === entry.source);
+    const stillClashes = !!live?.items?.[plugin]?.clashes?.some(each =>
+      each.clash === 'own' && each.tool === clash.tool && each.kind === clash.kind && each.key === clash.key);
+    const row = rowByKey(kind, clash.key);
+    const item = app.home ? kindSource(app.home, kind).library[clash.key] : undefined;
+    const linked = !!item && !item.deleted && !!item.source && row?.fromSource?.link === pluginLink(plugin, entry.name) && !row.fromSource.removed;
+    if (!stillClashes || !row || !linked || !item.on || !item.except.includes(clash.tool) || harnessIs(row, item, clash.tool) === 'cannot') {
+      return { page: 'plugins', item: clash.name, warn: true, band: true, refused: true, text: `${clash.name} changed since the page was read. Nothing was changed.` };
+    }
+    const name = row.name ?? clash.name;
+    return {
+      kind, items: [name], rows: [{ kind, key: clash.key }], undoSentence: true,
+      changes: [rowClicks.inHarness(row, item, clash.tool, false)],
+      said: (notIn, _wrote, recorded) => {
+        if (notIn.includes(clash.tool)) return libraryPages[kind].say.said.inHarness(name, clash.tool, false, true);
+        const same = recorded?.filter(each => { const hit = libraryEntry(each); return hit?.kind === kind && hit.key === clash.key; }) ?? [];
+        const recordedEvent = same.find(each => each.kind === 'on') ?? same[0];
+        const sentence = recordedEvent && librarySentence(recordedEvent, libraryWords[kind], app.home?.[kind].tools ?? [], app.home?.[kind].library[clash.key])?.text;
+        return sentence ? `${name}: ${sentence.replace(/^./, first => first.toLowerCase())}` : libraryPages[kind].say.said.inHarness(name, clash.tool, false, false);
+      },
+    };
+  });
+}
+
+const cantChange = (view: PluginsView, kind: 'skills' | 'agents' | 'mcp') =>
+  acting() || (!view.canWrite ? view.reason ?? true : app.home ? whyKindReadOnly(app.home, kind) ?? false : true);
+
+/** Clashes under a tool's box (`PluginItemsView clashes`): own copies settled right here; shared-folder skills keep their Library sentence. */
+function clashLines(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, clashes: PluginItemClash[], marketIndex: number) {
+  const own = clashes.filter(clash => clash.clash === 'own');
+  const shared = clashes.filter(clash => clash.clash === 'shared');
+  const sharedLines = shared.length ? notInWhy(tool, plugin.name, shared.map(clash => ({ name: clash.name, kind: clash.kind, out: 'shared' as const })))
+    .map(line => h('span.plugin-tool-state.plugin-tool-why', {}, line)) : [];
+  return [...own.map(clash => {
+    const disabled = cantChange(view, pageOfPart[clash.kind]);
+    const title = `Puts the plugin’s ${clash.name} in ${names[tool]}. ${names[tool]}’s own copy is kept as a version, and Undo puts it back.`;
+    const id = `pclash-${marketIndex}-${plugin.name}-${tool}-${clash.kind}-${clash.key}`;
+    return h('span.plugin-tool-state.plugin-tool-why.plugin-tool-clash', {}, `${clash.name}: ${names[tool]} has its own copy.`,
+      button({ size: 'small', label: `Use the plugin’s ${clash.name}`, id, disabled, attrs: { title }, onclick: () => letToolIn(entry, plugin.name, clash) }));
+  }), ...sharedLines];
 }
 
 /**

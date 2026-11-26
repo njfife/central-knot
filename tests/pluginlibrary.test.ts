@@ -8,7 +8,8 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative } from 'node:path';
 import { agentKind, agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
 import { pluginFiles } from '../src/catalogdetail.ts';
-import { libraryAction } from '../src/historyactions.ts';
+import { libraryAction, librarySentence } from '../src/historyactions.ts';
+import { libraryWords } from '../src/libraryrow.ts';
 import type { ItemKind } from '../src/library.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { readProfiles, saveProfile, switchProfile } from '../src/profiles.ts';
@@ -680,7 +681,7 @@ test('His own skill of that name already in Central Knot: the plugin’s isn’t
   } finally { await box.cleanup(); }
 });
 
-test('Pi has a found copy of one of the plugin’s skills (not in Central Knot) while another item goes on: Pi’s copy stays untouched, heldOut gives OUT.own, and no-item-on never duplicates it', async () => {
+test('Pi has a found copy of one of the plugin’s skills (not in Central Knot) while another item goes on: Pi’s copy stays untouched, clashes carries own, and no-item-on keeps notIn', async () => {
   const box = await kitHome();
   try {
     await put(box.pi('skills/notes/SKILL.md'), skill('notes', 'mine in pi'));
@@ -688,31 +689,31 @@ test('Pi has a found copy of one of the plugin’s skills (not in Central Knot) 
     assert.equal(await readFile(box.pi('skills/notes/SKILL.md'), 'utf8'), skill('notes', 'mine in pi'));
     assert.equal(await exists(box.pi('skills/review/SKILL.md')), true);
     const items = (await box.view()).items!.kit!;
-    assert.deepEqual([items.on['pi-cli'], items.notIn?.['pi-cli'], items.heldOut?.['pi-cli'], items.yours?.['pi-cli']],
-      [4, undefined, [OWN], undefined]);
-    // Also when copies differ across tools ("Copies differ" before the click): still held out cleanly with OUT.own.
+    assert.deepEqual([items.on['pi-cli'], items.notIn?.['pi-cli'], items.clashes, items.yours?.['pi-cli']],
+      [4, undefined, [{ tool: 'pi-cli', kind: 'skill', key: 'notes', name: 'notes', clash: 'own' }], undefined]);
+    // Also when copies differ across tools ("Copies differ" before the click): still held out cleanly with clash own.
     await put(join(box.home, '.claude/skills/notes/SKILL.md'), skill('notes', 'mine in claude'));
-    assert.deepEqual((await box.view()).items!.kit!.heldOut?.['pi-cli'], [OWN]);
-    // With his own Library item (On, and Off): stays in yours, never duplicated in heldOut.
+    assert.deepEqual((await box.view()).items!.kit!.clashes, [{ tool: 'pi-cli', kind: 'skill', key: 'notes', name: 'notes', clash: 'own' }]);
+    // With his own Library item (On, and Off): stays in yours, never duplicated in clashes.
     await put(box.pi('skills/review/SKILL.md'), skill('review', 'mine edited'));
     await applySkills(box.share, box.tools, []);
     const afterLibOn = (await box.view()).items!.kit!;
-    assert.deepEqual([afterLibOn.heldOut?.['pi-cli'], afterLibOn.yours?.['pi-cli']], [[OWN], [{ kind: 'skill', key: 'review', name: 'review' }]]);
+    assert.deepEqual([afterLibOn.clashes, afterLibOn.yours?.['pi-cli']], [[{ tool: 'pi-cli', kind: 'skill', key: 'notes', name: 'notes', clash: 'own' }], [{ kind: 'skill', key: 'review', name: 'review' }]]);
     await applySkills(box.share, box.tools, [{ key: 'review', on: false, except: [] }]);
     const afterLibOff = (await box.view()).items!.kit!;
-    assert.deepEqual([afterLibOff.heldOut?.['pi-cli'], afterLibOff.yours?.['pi-cli']], [[OWN], [{ kind: 'skill', key: 'review', name: 'review' }]]);
+    assert.deepEqual([afterLibOff.clashes, afterLibOff.yours?.['pi-cli']], [[{ tool: 'pi-cli', kind: 'skill', key: 'notes', name: 'notes', clash: 'own' }], [{ kind: 'skill', key: 'review', name: 'review' }]]);
   } finally { await box.cleanup(); }
-  // With no item on in Pi: notIn carries OUT.own, heldOut does not duplicate it.
+  // With no item on in Pi: notIn carries OUT.own with empty nonClash, and clashes carries own.
   const solo = await notesOnly();
   try {
     await put(solo.pi('skills/notes/SKILL.md'), skill('notes', 'mine'));
     await solo.turn('on');
     const items = (await solo.view()).items!.kit!;
-    assert.deepEqual([items.notIn?.['pi-cli']?.reasons, items.heldOut?.['pi-cli']], [[OWN], undefined]);
+    assert.deepEqual([items.notIn?.['pi-cli']?.reasons, items.notIn?.['pi-cli']?.nonClash, items.clashes], [[OWN], [], [{ tool: 'pi-cli', kind: 'skill', key: 'notes', name: 'notes', clash: 'own' }]]);
   } finally { await solo.cleanup(); }
 });
 
-test('Pi reads his own found copy only from the shared skills folder: heldOut and notIn/report say OUT.shared, and Take over clears it', async () => {
+test('Pi reads his own found copy only from the shared skills folder: clashes and notIn/report carry shared, and Take over clears it', async () => {
   const SHARED = 'notes: Pi reads yours from the shared skills folder, which Central Knot never writes. Take it over on its Library row to use the plugin’s.';
   const box = await kitHome();
   try {
@@ -721,20 +722,80 @@ test('Pi reads his own found copy only from the shared skills folder: heldOut an
     assert.equal(await exists(box.pi('skills/notes')), false);
     assert.equal(await readFile(join(box.home, '.agents/skills/notes/SKILL.md'), 'utf8'), skill('notes', 'mine in shared'));
     const items = (await box.view()).items!.kit!;
-    assert.deepEqual([items.on['pi-cli'], items.notIn?.['pi-cli'], items.heldOut?.['pi-cli']], [4, undefined, [SHARED]]);
-    // Take over on its Library row puts the plugin's copy in Pi and clears heldOut.
+    assert.deepEqual([items.on['pi-cli'], items.notIn?.['pi-cli'], items.clashes], [4, undefined, [{ tool: 'pi-cli', kind: 'skill', key: 'notes', name: 'notes', clash: 'shared' }]]);
+    // Take over puts the plugin's copy in Pi and clears the shared clash.
     await takeOver(box.share, box.tools, 'notes', 'pi-cli');
     assert.equal(await readFile(box.pi('skills/notes/SKILL.md'), 'utf8'), skill('notes', 'notes'));
-    assert.equal((await box.view()).items!.kit!.heldOut?.['pi-cli'], undefined);
+    assert.equal((await box.view()).items!.kit!.clashes, undefined);
   } finally { await box.cleanup(); }
-  // Alone (0 on in Pi): notIn and the run's report both give OUT.shared, never duplicated in heldOut.
+  // Alone (0 on in Pi): notIn and the run's report both give OUT.shared, and clashes carries shared.
   const solo = await notesOnly();
   try {
     await put(join(solo.home, '.agents/skills/notes/SKILL.md'), skill('notes', 'mine in shared'));
     assert.deepEqual(await solo.piSays(await solo.turn('on')), { report: [`held: ${LEAD} ${SHARED}`], box: `off: ${SHARED}` });
     const items = (await solo.view()).items!.kit!;
-    assert.deepEqual([items.notIn?.['pi-cli']?.reasons, items.heldOut?.['pi-cli']], [[SHARED], undefined]);
+    assert.deepEqual([items.notIn?.['pi-cli']?.reasons, items.clashes], [[SHARED], [{ tool: 'pi-cli', kind: 'skill', key: 'notes', name: 'notes', clash: 'shared' }]]);
   } finally { await solo.cleanup(); }
+});
+
+test('itemsView clashes carries structured own and shared clashes for none placed and some placed, keeping actual keys and display names while preserving notIn.nonClash', async () => {
+  // None placed: solo own clash preserves notIn.reasons and tickHelps, with notIn.nonClash empty (never claiming the plugin brings nothing).
+  const solo = await notesOnly();
+  try {
+    await put(solo.pi('skills/notes/SKILL.md'), skill('notes', 'mine'));
+    await solo.turn('on');
+    const items = (await solo.view()).items!.kit!;
+    assert.deepEqual(items.clashes, [{ tool: 'pi-cli', kind: 'skill', key: 'notes', name: 'notes', clash: 'own' }]);
+    assert.deepEqual([items.notIn?.['pi-cli']?.reasons, items.notIn?.['pi-cli']?.nonClash, items.notIn?.['pi-cli']?.tickHelps], [[OWN], [], false]);
+  } finally { await solo.cleanup(); }
+
+  // None placed with a mix of own (mixed-case folder), shared, and another plugin's item: clashes keeps own & shared with actual keys and display names, notIn.nonClash keeps another.
+  const mixed = await notesOnly();
+  try {
+    await rm(join(mixed.kit, 'skills/notes'), { recursive: true });
+    await put(join(mixed.root, '.claude-plugin/marketplace.json'), JSON.stringify({
+      name: 'team',
+      plugins: [{ name: 'kit', source: './plugins/kit', version: '1.0.0' }, { name: 'rival', source: './plugins/rival', version: '1.0.0' }],
+    }));
+    await put(join(mixed.root, 'plugins/rival/skills/other-one/SKILL.md'), skill('other-one', 'from rival'));
+    await put(join(mixed.kit, 'skills/MyNotes/SKILL.md'), skill('MyNotes', 'from kit'));
+    await put(join(mixed.kit, 'skills/shared-one/SKILL.md'), skill('shared-one', 'from kit'));
+    await put(join(mixed.kit, 'skills/other-one/SKILL.md'), skill('other-one', 'from kit'));
+    await put(mixed.pi('skills/MyNotes/SKILL.md'), skill('MyNotes', 'mine in pi'));
+    await put(join(mixed.home, '.agents/skills/shared-one/SKILL.md'), skill('shared-one', 'mine in shared'));
+    await mixed.markets.turn(mixed.root, 'rival', 'on', undefined, mixed.home);
+    await mixed.turn('on');
+    const items = (await mixed.view()).items!.kit!;
+    assert.deepEqual(items.clashes, [
+      { tool: 'pi-cli', kind: 'skill', key: 'mynotes', name: 'MyNotes', clash: 'own' },
+      { tool: 'pi-cli', kind: 'skill', key: 'shared-one', name: 'shared-one', clash: 'shared' },
+    ]);
+    assert.equal(items.notIn?.['pi-cli']?.reasons.length, 3);
+    assert.deepEqual(items.notIn?.['pi-cli']?.nonClash, ['other-one: another source has a skill by that name here; delete it on its row to take the plugin’s.']);
+    assert.equal(items.notIn?.['pi-cli']?.tickHelps, false);
+  } finally { await mixed.cleanup(); }
+
+  // Some placed across Pi and OpenCode: Pi has own notes + shared review; OpenCode has shared review (notes placed there).
+  const some = await kitHome({ tools: ['claude-cli', 'pi-cli', 'opencode-cli'] });
+  try {
+    await mkdir(join(some.home, '.config/opencode'), { recursive: true });
+    await put(join(some.root, '.claude-plugin/marketplace.json'), JSON.stringify({
+      name: 'team',
+      plugins: [{ name: 'kit', source: './plugins/kit', version: '1.0.0' }, { name: 'rival', source: './plugins/rival', version: '1.0.0' }],
+    }));
+    await put(join(some.root, 'plugins/rival/skills/tools/SKILL.md'), skill('tools', 'from rival'));
+    await put(some.pi('skills/notes/SKILL.md'), skill('notes', 'mine in pi'));
+    await put(join(some.home, '.agents/skills/review/SKILL.md'), skill('review', 'mine in shared'));
+    await some.markets.turn(some.root, 'rival', 'on', undefined, some.home);
+    await some.turn('on');
+    const items = (await some.view()).items!.kit!;
+    assert.equal(items.notIn, undefined);
+    assert.deepEqual(items.clashes, [
+      { tool: 'pi-cli', kind: 'skill', key: 'notes', name: 'notes', clash: 'own' },
+      { tool: 'pi-cli', kind: 'skill', key: 'review', name: 'review', clash: 'shared' },
+      { tool: 'opencode-cli', kind: 'skill', key: 'review', name: 'review', clash: 'shared' },
+    ]);
+  } finally { await some.cleanup(); }
 });
 
 test('On while the shared skills folder can’t be read: the skills wait in Pi, which reads that folder, so its report counts the items there now and says why, then why the server local isn’t there', async () => {
@@ -1757,5 +1818,33 @@ test('With the plugin installed whole in Claude Code and placed in Pi, its root 
     await box.updateOf('root-fixture');
     assert.deepEqual((await box.live()).filter(item => item.plugin === 'root-fixture').map(item => [item.id, item.copies.map(copy => copy.tool)]),
       [[rootId('root-fixture'), ['claude-cli']], [rootId('root-fixture', 'notes'), ['pi-cli']]]);
+  } finally { await box.cleanup(); }
+});
+
+test('Letting Pi into a plugin-linked skill writes History’s copy sentence, and Undo puts Pi’s own copy back byte for byte while leaving Claude Code and OpenCode untouched', async () => {
+  const box = await kitHome({ tools: ['claude-cli', 'pi-cli', 'opencode-cli'] });
+  try {
+    await mkdir(join(box.home, '.config/opencode'), { recursive: true });
+    const piOwn = skill('notes', 'mine in pi'), pluginNotes = skill('notes', 'notes');
+    await put(box.pi('skills/notes/SKILL.md'), piOwn);
+    await box.turn('let-in', 'opencode-cli');
+    await box.turn('let-in', 'pi-cli');
+    assert.equal(await exists(join(box.home, '.claude/skills/notes/SKILL.md')), false);
+    assert.equal(await readFile(join(box.home, '.config/opencode/skills/notes/SKILL.md'), 'utf8'), pluginNotes);
+    assert.equal(await readFile(box.pi('skills/notes/SKILL.md'), 'utf8'), piOwn);
+    const letIn = await applySkills(box.share, box.tools, [{ key: 'notes', on: true, except: [], seenOn: true }]);
+    assert.equal(letIn.stopped, undefined);
+    assert.equal(await readFile(box.pi('skills/notes/SKILL.md'), 'utf8'), pluginNotes);
+    const onId = letIn.made?.[0];
+    assert.ok(onId);
+    const onEvent = (await readHistory(box.share)).find(event => event.id === onId);
+    assert.ok(onEvent, 'History recorded the one-tool let-in event');
+    assert.equal(librarySentence(onEvent!, libraryWords.skills, box.tools, (await skillsView(box.share, box.tools)).library.notes)?.text,
+      'Turned on in Pi. Pi’s own copy was written over and kept as a version.');
+    const undone = await restoreSkill(box.share, box.tools, onId!);
+    assert.equal(undone.stopped, undefined);
+    assert.equal(await exists(join(box.home, '.claude/skills/notes/SKILL.md')), false, 'Claude Code stays untouched');
+    assert.equal(await readFile(join(box.home, '.config/opencode/skills/notes/SKILL.md'), 'utf8'), pluginNotes, 'OpenCode keeps the plugin’s copy byte for byte');
+    assert.equal(await readFile(box.pi('skills/notes/SKILL.md'), 'utf8'), piOwn, 'Pi gets its own copy back byte for byte');
   } finally { await box.cleanup(); }
 });
