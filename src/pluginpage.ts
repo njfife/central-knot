@@ -64,7 +64,7 @@ const MARK_WORDS: Record<ToolMark, string> = {
 
 /**
  * Your tools: the plugin's switch at the heading, Update at its right where a copy or its items are behind, and a line per
- * tool: its box (pluginparts.ts toolBox: ticked while the plugin is there; a click uninstalls or installs it there) and what it
+ * tool: its box (pluginparts.ts toolBox: ticked while the plugin is there; a click turns it off, kept installed where the tool can, or puts it in) and what it
  * has (always there; a tool on another version than the marketplace offers adds "Marketplace has …"). `compareTo`: the
  * version an installed copy is compared with (see versionToCompare).
  */

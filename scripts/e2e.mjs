@@ -480,6 +480,9 @@ async function backFlow() {
   await a.click(byId('nav-harnesses'));
   await a.click(byId('harness-claude-cli'));
   await a.click(byId('harness-tab-plugins'));
+  const pluginsNote = (await a.text('#harness-body .tools-note'))?.trim() ?? '';
+  check('Claude Code’s Plugins tab says opening a plugin turns it off, not uninstalls it',
+    pluginsNote === 'Installed in Claude Code from your marketplaces. Open one to turn it off here, or to install it in another tool.' && !/uninstall/i.test(pluginsNote), pluginsNote);
   await a.click(byId('harness-plugin-back-market-issue-tracker'));
   await thumb();
   check('one Back from the plugin returns to the tool’s Plugins tab', await a.exists(byId('harness-tab-plugins') + '[aria-selected=true]'));
@@ -7647,6 +7650,9 @@ esac
   same('the marketplace is added', await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)}).then(result => result.problem ?? 'added')`), 'added');
   await a.click('#nav-plugins');
   for (let tries = 0; tries < 50 && !(await a.exists('#pswitch-0-issue-tracker')); tries++) await wait(100);
+  const pluginHint = (await a.text('.plugin-hint .hint-long'))?.trim() ?? '';
+  check('Plugin marketplaces’ switch hint says off is kept installed where the tool can, not removes',
+    pluginHint === 'A switch turns it on or off (kept installed where the tool can) in every tool that takes it; clicks run in turn.' && !/removes|uninstall/i.test(pluginHint), pluginHint);
   const marks = (plugin = 'issue-tracker') => a.run(`[...document.querySelectorAll('[data-plugin="${plugin}"] .cell-button')].map(cell => cell.dataset.state)`);
   const switchIs = selector => a.run(`(() => { const s = document.querySelector('${selector}'); return s ? s.getAttribute('aria-checked') + (s.classList.contains('switch-partial') ? ' partial' : '') : 'missing'; })()`);
   const done = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };

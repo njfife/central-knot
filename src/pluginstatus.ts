@@ -111,7 +111,7 @@ export function unavailable(view: PluginsView, entry: MarketplaceView, plugin: s
   const state = stateOf(entry, plugin, tool);
   if (state.state === 'held') return state.reason;
   if (state.state === 'installed') return undefined;
-  // A plugin its marketplace dropped can't go anywhere new; where a tool still has it, it shows as installed and can be uninstalled.
+  // A plugin its marketplace dropped can't go anywhere new; where a tool still has it, it shows as installed and can be turned off (kept installed; uninstalled for Copilot CLI's live copy).
   // One listed only because its marketplace can't be read now (no read time) can't either, for that reason.
   if (entry.plugins.find(candidate => candidate.name === plugin)?.gone) return entry.fetchedAt ? 'It is no longer offered in this marketplace.' : MARKET_UNREAD;
   return whyNotCarried(entry, plugin) ?? blocked(view, entry, tool);

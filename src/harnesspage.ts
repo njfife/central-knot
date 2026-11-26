@@ -322,7 +322,7 @@ function pluginsTab(tool: HarnessId) {
   if (unread && !plugins.installed.length && !unlisted.length) return page(unread, unsureNote);
   if (!plugins.installed.length && !unlisted.length) return page(unsureNote, emptyState('puzzle', `No plugins in ${names[tool]}`, `None of the plugins in your marketplaces is installed in ${names[tool]}.`,
     button({ variant: 'outline', label: 'Browse plugins', id: 'harness-browse-plugins', onclick: () => showPage('plugins') })));
-  return page(unread, plugins.installed.length ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), `Installed in ${names[tool]} from your marketplaces. Open one to uninstall it, or to install it in another tool.`) : null,
+  return page(unread, plugins.installed.length ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), `Installed in ${names[tool]} from your marketplaces. Open one to turn it off here, or to install it in another tool.`) : null,
     unsureNote, unlistedNote, plugins.installed.length ? h('div.harness-plugins', { role: 'list' }, plugins.installed.map(item => pluginRow(item, tool))) : null);
 }
 
