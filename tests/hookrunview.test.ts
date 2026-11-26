@@ -1190,7 +1190,7 @@ test('Plugin page runs installed hooks, keeps marketplace-only text hooks View s
 
   // Missing CLI explains why on both the plugin page and the Instructions strip.
   const prevSnaps = state.home!.snapshots;
-  state.home!.snapshots = [snap('claude-cli', 'Config found but app not detected'), snap('codex-cli', 'Config found but app not detected'), snap('copilot-cli')];
+  state.home!.snapshots = [snap('claude-cli', 'Config found but app not detected'), snap('codex-cli', 'Config found but app not detected'), snap('copilot-cli')] as any;
   const noCliPluginPage = pluginPage(view, entry, 0, entry.plugins[0]);
   assert.equal(dom.findAll(noCliPluginPage, n => 'data-hook-run' in (n.attrs ?? {})).length, 0);
   assert.match(dom.textOf(noCliPluginPage), /Claude Code’s command line isn’t on this computer, so these can’t be run here\./);
