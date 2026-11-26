@@ -40,7 +40,7 @@ test('A tool the plugin is kept out of is said as not installed there, kept out;
   assert.deepEqual(mark('codex-cli'), { mark: 'cannot', words: 'Codex: other' }, 'Codex holds another marketplace of this name: its box is off, saying why');
 });
 
-test('A tool’s box: ticked where the plugin is; off before the click where its copy can’t be taken out here, saying why on its line; kept out of an absent tool while On is explicitly blank', () => {
+test('A tool’s box: ticked where the plugin is; off before the click where its copy can’t be taken out here, saying why on its line; kept out of an absent tool while On has no line of its own', () => {
   const on = (except: HarnessId[] = []): MarketplaceView => ({ ...entry, switches: { p: { entry: { on: true, except }, tools: {} } } });
   const box = (at: MarketplaceView, tool: HarnessId, shown = view) => boxOf(shown, at, 'p', tool, toolMark(shown, at, 'p', tool, owedTo({ on: true, except: at.switches!.p!.entry!.except }, tool, toolNow(shown, at, 'p', tool, undefined, false), shown.tools)));
   assert.deepEqual(box(on(), 'claude-cli'), { ticked: true });
@@ -50,9 +50,9 @@ test('A tool’s box: ticked where the plugin is; off before the click where its
   assert.deepEqual(box(on(), 'claude-cli', { ...view, clis: {} }), { ticked: true, off: 'Claude Code’s command-line tool wasn’t found.', line: 'No Claude Code command-line tool here' });
   // Already kept out of a tool holding such a copy: the box says the way out, in words.
   assert.equal(box({ ...directory, switches: { p: { entry: { on: true, except: ['claude-cli'] }, tools: {} } } }, 'claude-cli').off, `${FROM_DIRECTORY} It is kept out of Claude Code: uninstall it in Claude Code itself, then tick to put it back.`);
-  // Kept out of an absent tool while On: explicitly blank under the box (empty override so status doesn't fall back to "Not installed").
-  // Ordinary absence (Off, or no entry) has no override, so "Not installed" still shows. A tool whose own add refused the marketplace says so on its line.
-  assert.deepEqual(box(on(['copilot-cli']), 'copilot-cli'), { ticked: false, line: '' });
+  // Kept out of an absent tool while On: no line of its own, so the page shows ordinary absence ("Not installed").
+  // Ordinary absence (Off, or no entry) has no line either. A tool whose own add refused the marketplace says so on its line.
+  assert.deepEqual(box(on(['copilot-cli']), 'copilot-cli'), { ticked: false });
   const off: MarketplaceView = { ...entry, switches: { p: { entry: { on: false, except: ['copilot-cli'] }, tools: {} } } };
   assert.deepEqual(boxOf(view, off, 'p', 'copilot-cli', toolMark(view, off, 'p', 'copilot-cli', owedTo(off.switches!.p!.entry, 'copilot-cli', toolNow(view, off, 'p', 'copilot-cli', undefined, false), view.tools))), { ticked: false });
   assert.deepEqual(boxOf(view, entry, 'p', 'copilot-cli', toolMark(view, entry, 'p', 'copilot-cli', owedTo(undefined, 'copilot-cli', toolNow(view, entry, 'p', 'copilot-cli', undefined, false), view.tools))), { ticked: false });

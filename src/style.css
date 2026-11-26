@@ -1758,7 +1758,6 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .details .details-limits.details-part { margin-left: 0; }
 .row-tag.row-part { display: inline-flex; align-items: center; gap: 4px; }
 .plugin-panel-hint { margin: -4px 0 10px; font-size: 12px; color: var(--ink-soft); }
-.plugin-panel-note { max-width: var(--measure); margin: 10px 0 0; font-size: 12px; color: var(--ink-soft); }
 .plugin-section-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 28px; }
 .plugin-outcome-what code { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
 .plugin-part-link .plugin-name { color: var(--accent); }

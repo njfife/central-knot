@@ -69,7 +69,7 @@ const MARK_WORDS: Record<ToolMark, string> = {
 /**
  * Your tools: the plugin's switch at the heading, Update at its right where a copy or its items are behind, and a line per
  * tool: its box (pluginparts.ts toolBox: ticked while the plugin is there; a click turns it off, kept installed where the tool can, or puts it in) and what it
- * has (blank where the plugin is On and kept out of an absent tool; a tool on another version than the marketplace offers adds "Marketplace has …"). `compareTo`: the
+ * has (always there; a tool on another version than the marketplace offers adds "Marketplace has …"). `compareTo`: the
  * version an installed copy is compared with (see versionToCompare).
  */
 function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, compareTo: string | undefined, components?: Components) {
@@ -90,13 +90,15 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const notIncluded = whyNotCarried(entry, plugin.name);
   // Parts of it from before the library wait to be moved: why, and what ends it, said once on the page, not only on hover.
   const waiting = waitsToMove(entry, plugin.name) ? view.tools.filter(tool => !takesPlugins(tool)) : [];
-  return h('section.plugin-panel', { 'aria-label': 'Your tools' },
+  // Cowork has no box: with Claude desktop here, the Your tools card carries its route after the box help.
+  const toolsCard = `Tick to turn the plugin or its items on in that tool. Untick to turn them off.${hasCowork(app.home?.snapshots ?? []) ? ` ${coworkWords.plugin}` : ''}`;
+  return h('section.plugin-panel', { 'aria-label': 'Your tools', 'data-info-block': true },
     h('div.plugin-panel-head', {},
       h('span.plugin-panel-switch', {},
         pluginSwitch(view, entry, plugin, `pswitch-page-${marketIndex}-${plugin.name}`),
-        h('span.plugin-head-label', { 'data-info-block': true },
+        h('span.plugin-head-label', {},
           h('h3', {}, 'Your tools'),
-          infoMark('plugin-tools-info', 'Your tools', 'Tick to turn the plugin or its items on in that tool. Untick to turn them off.'))),
+          infoMark('plugin-tools-info', 'Your tools', toolsCard))),
       updates.length ? updateButton(updates, `pupdate-${marketIndex}-${plugin.name}`) : null),
     clickNote(entry, plugin.name),
     // A plugin a bundled build doesn't include says why here, on the page, once for every tool.
@@ -108,21 +110,18 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
       ? h('p.plugin-panel-hint', { id: 'plugin-only-instructions' }, 'No tool reads these files by itself: copy the text into your own instructions.') : null,
     withToolCount(h('div.plugin-tool-rows', {}, view.tools.map(tool => {
       const { mark, words } = markOf(view, entry, plugin, tool, compareTo), box = boxOf(view, entry, plugin.name, tool, { mark, words });
-      // Under the box: what it has, or what the box overrides (why it is off, or blank where absent and kept out while On); in Pi,
-      // OpenCode and Antigravity, where none of its items is on, each reason on its own line (pluginstatus.ts notInWhy), as its
-      // run's report says; then each name of his (yourLines), whatever else is so, which say why on their own where held alone.
+      // Under the box: what it has, or what the box says more (why it is off); in Pi, OpenCode and Antigravity, where none
+      // of its items is on, each reason on its own line (pluginstatus.ts notInWhy), as its run's report says; then each name
+      // of his (yourLines), whatever else is so, which say why on their own where the box is held by those alone.
       const why = entry.items?.[plugin.name]?.notIn?.[tool]?.reasons ?? [], heldOut = entry.items?.[plugin.name]?.heldOut?.[tool] ?? [], yours = entry.items?.[plugin.name]?.yours?.[tool] ?? [];
-      const line = box.line ?? status(tool, mark);
       const state = why.length ? why.map(reason => h('span.plugin-tool-state.plugin-tool-why', {}, reason))
-        : (box.held && yours.length) || !line ? null : h('span.plugin-tool-state', { title: words }, line);
+        : box.held && yours.length ? null : h('span.plugin-tool-state', { title: words }, box.line ?? status(tool, mark));
       return h('div.plugin-tool', { 'data-tool': tool }, toolBox(view, entry, plugin, tool, marketIndex, compareTo),
         h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]),
           state, heldOut.map(reason => h('span.plugin-tool-state.plugin-tool-why', {}, reason)), yourLines(view, entry, plugin, tool, yours, marketIndex),
           // With no CLI, its plugin commands run through the copy its desktop app carries: said so, never as the CLI.
           view.via?.[tool] ? h('span.plugin-tool-state.plugin-tool-via', { title: `${names[tool]}’s command-line tool wasn’t found, so its plugin commands run through ${view.via[tool]}.` }, `Through ${view.via[tool]}`) : null));
-    })), view.tools.length),
-    // Cowork has no box: with Claude desktop here, one line says where to add plugins for Cowork.
-    hasCowork(app.home?.snapshots ?? []) ? h('p.plugin-panel-note', { id: 'plugin-cowork-note' }, coworkWords.plugin) : null);
+    })), view.tools.length));
 }
 
 /**
@@ -198,11 +197,12 @@ interface RowExtras { info?: string; head: (HTMLElement | null)[]; end?: (skill:
 
 /**
  * What the skills' rows add: where the plugin is installed, a switch per skill under each tool that can turn one skill off
- * (ENB-06). Claude Code's whole-plugin rule goes on a `(?)` beside `Skills (N)` where Claude Code has the plugin installed;
- * a reason a column shares, an untested-build note and a held skill's row reason stay on the page.
+ * (ENB-06). Any installed tool with no per-skill switch (`NO_SKILL_SWITCH`) puts its whole-plugin rule on a `(?)` beside
+ * `Skills (N)`; a reason a column shares, an untested-build note and a held skill's row reason stay on the page.
  */
 function skillColumns(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, skills: string[]): RowExtras {
   const tools = view.tools.filter(tool => installed(entry, plugin.name, tool));
+  const noSwitch = tools.filter(tool => NO_SKILL_SWITCH[tool]);
   const switchable = tools.filter(tool => !NO_SKILL_SWITCH[tool]);
   const why = (tool: HarnessId, skill: string) => cantSwitchSkill(view, entry, plugin.name, tool, skill);
   // A reason every skill in a column shares (a missing CLI, a preview-only home) is said once above the list. A held
@@ -215,7 +215,7 @@ function skillColumns(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const rowNote = (skill: string) => [...new Set(switchable.map(tool => why(tool, skill)).filter((reason): reason is string => !!reason && !columnWide.has(reason)))].join(' ') || undefined;
   const line = (text: string) => h('p.plugin-group-note', {}, ...inlineMarkdown(text, openLink));
   return {
-    info: tools.some(tool => NO_SKILL_SWITCH[tool]) ? 'Claude Code takes a plugin whole: its skills are on or off together there.' : undefined,
+    info: noSwitch.length ? `${andList(noSwitch.map(tool => names[tool]))} ${noSwitch.length > 1 ? 'take' : 'takes'} a plugin whole: its skills are on or off together there.` : undefined,
     head: [
       ...[...columnWide].map(reason => line(reason)),
       // Disable is best effort: on a build older than the one exercised, or one whose version can't be read, only said.
@@ -456,9 +456,19 @@ function contentsBlock(view: PluginsView, entry: MarketplaceView, marketIndex: n
     detail.bin ? h('div.plugin-group', {}, h('h4', {}, 'Programs'), partList(`${owner}\u0000bin`, [{ name: 'bin/', text: 'A folder of programs the plugin puts on the tool’s path.' }])) : null);
 }
 
-/** A fold (`In each tool`, `Readme`): keyboard-toggleable, keeping the state he gave it while the plugin's page stays open. */
-function fold(kind: 'outcomes' | 'readme', title: string, defaultOpen: boolean, body: HTMLElement, extraClass = '') {
-  let shown = market.nav.folds?.[kind] ?? defaultOpen;
+/** Open/closed state the person gave `In each tool` or `Readme` while this plugin's page is shown; cleared on any draw that isn't this page (afterPluginPageDrawn). */
+let shownFolds: { key: string; folds: Partial<Record<'outcomes' | 'readme', boolean>> } | undefined;
+let drawnPlugin: string | undefined;
+
+/** After each draw of the page (renderer.ts renderWindow): fold state lives only while that plugin's page is drawn. */
+export function afterPluginPageDrawn(): void {
+  if (drawnPlugin !== shownFolds?.key) shownFolds = undefined;
+  drawnPlugin = undefined;
+}
+
+/** A fold (`In each tool`, `Readme`): keyboard-toggleable, keeping the state he gave it only while this plugin's page is shown. */
+function fold(key: string, kind: 'outcomes' | 'readme', title: string, defaultOpen: boolean, body: HTMLElement, extraClass = '') {
+  let shown = shownFolds?.key === key ? shownFolds.folds[kind] ?? defaultOpen : defaultOpen;
   return h(`section.plugin-section${extraClass}`, {},
     h('details.plugin-fold', {
       id: `plugin-${kind}`, open: shown,
@@ -466,7 +476,7 @@ function fold(kind: 'outcomes' | 'readme', title: string, defaultOpen: boolean, 
         const now = (event.currentTarget as HTMLDetailsElement).open;
         if (now === shown) return;
         shown = now;
-        (market.nav.folds ??= {})[kind] = now;
+        if (shownFolds?.key === key) shownFolds.folds[kind] = now;
       },
     },
     h('summary.plugin-fold-head', { id: `plugin-${kind}-toggle` }, icon('chevron-right', 14, 'tone-faint plugin-fold-chevron'), h('h3', {}, title)),
@@ -474,6 +484,9 @@ function fold(kind: 'outcomes' | 'readme', title: string, defaultOpen: boolean, 
 }
 
 export function pluginPage(view: PluginsView, entry: MarketplaceView, marketIndex: number, plugin: PluginView) {
+  const pageKey = `${app.home?.home ?? ''}\u0000${pluginKey(entry.source, plugin.name)}`;
+  drawnPlugin = pageKey;
+  if (shownFolds?.key !== pageKey) shownFolds = { key: pageKey, folds: {} };
   const detail = shownDetail(pluginKey(entry.source, plugin.name));
   const reading = detail === undefined;
   // A plugin kept elsewhere has no counts from the catalog; once its files are read, its contents give them (componentsOf).
@@ -504,6 +517,6 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
     h('div.plugin-columns', {},
       h('div.plugin-column', {},
         contentsBlock(view, entry, marketIndex, plugin, detail, reading, offered),
-        inEachTool ? fold('outcomes', 'In each tool', hasLimitedOutcome(native, inEachTool), outcomesBlock(view, entry, plugin, inEachTool)) : null),
-      detail?.readme ? fold('readme', 'Readme', false, h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions, parts)), '.plugin-readme') : null));
+        inEachTool ? fold(pageKey, 'outcomes', 'In each tool', hasLimitedOutcome(native, inEachTool), outcomesBlock(view, entry, plugin, inEachTool)) : null),
+      detail?.readme ? fold(pageKey, 'readme', 'Readme', false, h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions, parts)), '.plugin-readme') : null));
 }

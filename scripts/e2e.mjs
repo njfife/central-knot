@@ -5415,11 +5415,15 @@ async function fewToolsFlow() {
     await wait(300);
     await a.shot(`app-only-plugin-${width}`);
     check(`at ${width}×${height} the app-only plugin box’s route line is not cut off`, await a.run(`(() => { const line = document.querySelector('.plugin-tool-via'); const box = line.getBoundingClientRect(); return box.width > 0 && line.scrollWidth <= line.clientWidth + 1 && box.right <= innerWidth; })()`));
-    check(`at ${width}×${height} the line about Cowork is whole, inside the tools panel`, await a.run(`(() => { const note = document.querySelector('#plugin-cowork-note'); if (!note) return false; const box = note.getBoundingClientRect(), panel = note.closest('.plugin-panel').getBoundingClientRect(); return box.width > 0 && note.scrollWidth <= note.clientWidth + 1 && box.right <= panel.right && box.bottom <= panel.bottom; })()`));
+    await a.click('#plugin-tools-info');
+    check(`at ${width}×${height} the Your tools card with Cowork fits inside the window and clears the boxes`, await a.run(`(() => { const card = document.getElementById('plugin-tools-info-card'); if (!card?.matches(':popover-open')) return false; const r = card.getBoundingClientRect(); const boxes = [...document.querySelectorAll('[id^="pbox-"]')].map(b => b.getBoundingClientRect()); const clear = boxes.every(b => r.bottom <= b.top || r.top >= b.bottom || r.right <= b.left || r.left >= b.right); return r.width > 0 && card.scrollWidth <= card.clientWidth + 1 && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight && clear; })()`));
+    await a.press('Escape');
   }
   await a.send('Emulation.clearDeviceMetricsOverride');
   check('with only Claude desktop, the plugin box names its route, its Code tab', box.includes('Claude CodeNot installedThrough Claude desktop’s Code tab 2.1.317') && !box.includes('Only Claude desktop'), box);
-  check('and says once how to add plugins for Cowork in Claude desktop, with no box for it', box.includes('Cowork: add plugins in Claude desktop, under Customize › Plugins.') && (await a.all('.plugin-tool-name')).every(name => !name.includes('Cowork')), box);
+  same('Your tools card carries the Cowork note with no standing line and no box for Cowork',
+    [await a.exists('#plugin-cowork-note'), await a.text('#plugin-tools-info-card'), (await a.all('.plugin-tool-name')).every(name => !name.includes('Cowork'))],
+    [false, 'Tick to turn the plugin or its items on in that tool. Untick to turn them off. Cowork: add plugins in Claude desktop, under Customize › Plugins.', true]);
   same('no page errors, few tools', a.pageErrors, []);
   await a.quit();
   // In the Practice copy (so it writes on every platform: a real home is preview only on Windows) the install runs through
@@ -15231,7 +15235,7 @@ echo "$*" >> "$HOME/claude-calls.txt"
   same('on superpowers’ page, In each tool has no Hooks or Session text line for Codex, which runs none of its hooks', await a.run(`[...document.querySelectorAll('.plugin-outcome-row')]
     .map(row => [row.querySelector('.plugin-outcome-tools strong').textContent, [...row.querySelectorAll('.plugin-outcome-kind')].map(kind => kind.textContent)])`),
   [['Claude Code', ['Skills', 'Hooks', 'Session text']], ['Copilot CLI', ['Skills', 'Hooks', 'Session text']], ['Codex', ['Skills']]]);
-  // What it holds says the same of its hook: Codex is named as taking no text from it, and nothing is said of trusting it there.
+  // Its hooks group says the same of its hook: Codex is named as taking no text from it, and nothing is said of trusting it there.
   same('on superpowers’ page, the line under its hooks that can add text names Codex as taking text from none, with no wait for trust', await a.run(`[...document.querySelectorAll('.plugin-group')]
     .find(group => group.querySelector('h4')?.textContent.startsWith('Hooks that can add text to sessions'))?.querySelector('.plugin-group-note')?.textContent`),
   'These run when a session starts or you send a prompt; what they add is known only when they run. In Codex, none of them adds text.');
@@ -20345,11 +20349,11 @@ async function skillFileFlow() {
 }
 
 /**
- * A plugin's own page says less and folds the rest: Your tools (?), blank absent kept-out boxes (Pi unticked earlier, OpenCode
- * never installed) whose ticks place items, Codex untick/re-tick preserving installed data with "Off, kept installed", standing
- * words gone with Claude Code's whole-plugin rule on Skills (N) (?), "Instruction files (N), read by no tool (?)", Readme and
- * In each tool folds opening by keyboard and keeping state across redraws (In each tool open at once for limited/failed only),
- * concise Cowork note, and instructions-only advice without a jump.
+ * A plugin's own page says less and folds the rest: Your tools (?) clearing every pbox-* (without Cowork when Claude desktop is
+ * absent), kept-out absent boxes reading Not installed whose ticks place items, standing words gone with Claude Code's whole-plugin
+ * rule on Skills (N) (?), Readme and In each tool folds opening by keyboard, keeping state across redraws, and clearing on any
+ * leave (including a sidebar trip to Overview and back; In each tool open at once for limited/failed only), and instructions-only
+ * advice without a jump. (Instruction files heading/card: practiceFlow; Cowork card: fewToolsFlow; kept-off data: pluginSwitchFlow.)
  */
 async function pluginPageSaysLessFlow() {
   const home = join(scratch, 'home-plugin-says-less'), data = join(scratch, 'plugin-says-less-data'), market = join(scratch, 'market-plugin-says-less');
@@ -20381,24 +20385,20 @@ async function pluginPageSaysLessFlow() {
   put(join(market, 'plugins/agent-kit/README.md'), '# agent-kit\n\nDetailed documentation for agent-kit.\n');
   put(join(market, 'plugins/only-notes/CLAUDE.md'), 'Copy these conventions into your own instructions.\n');
 
-  // Stand-in CLIs in the made-up home; Claude desktop folder triggers Cowork note when running as actual home.
+  // Stand-in CLIs in the made-up home; no Claude desktop here so Your tools (?) shows its plain wording without Cowork.
   for (const [bin, ver] of [['claude', '2.1.322 (Claude Code)'], ['codex', 'codex-cli 0.142.3'], ['pi', 'pi 0.1.0'], ['opencode', 'opencode 1.19.5']]) {
     put(join(home, '.local/bin', bin), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${ver}" && exit 0\nexit 9\n`);
     chmodSync(join(home, '.local/bin', bin), 0o755);
   }
-  mkdirSync(join(home, 'Applications/Claude.app'), { recursive: true });
   for (const dir of ['.claude', '.codex', '.pi/agent', '.config/opencode']) mkdirSync(join(home, dir), { recursive: true });
 
   // plain-kit installed in Claude Code and Codex; Pi unticked earlier and OpenCode never installed (both in except while On).
   put(join(home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'ck-less-market': { source: { source: 'directory', path: market }, installLocation: market } }));
   writeClaudeInstall(home, 'ck-less-market', 'plain-kit', '1.0.0', { 'skills/alpha/SKILL.md': alphaMd, 'skills/beta/SKILL.md': betaMd });
   const codexCache = join(home, '.codex/plugins/cache/ck-less-market/plain-kit/1.0.0');
-  const codexDataPath = join(codexCache, 'data/user-state.json'), codexDataBody = '{"saved":"keep-me"}\n';
   put(join(codexCache, 'skills/alpha/SKILL.md'), alphaMd);
   put(join(codexCache, 'skills/beta/SKILL.md'), betaMd);
-  put(codexDataPath, codexDataBody);
-  const codexConfigPath = join(home, '.codex/config.toml');
-  put(codexConfigPath, `# user comment kept\n[marketplaces.ck-less-market]\nsource = ${JSON.stringify(market)}\n\n[plugins."plain-kit@ck-less-market"]\nenabled = true\n`);
+  put(join(home, '.codex/config.toml'), `[marketplaces.ck-less-market]\nsource = ${JSON.stringify(market)}\n\n[plugins."plain-kit@ck-less-market"]\nenabled = true\n`);
   put(join(home, '.central-knot/plugins.json'), JSON.stringify({
     formatVersion: 1,
     tools: ['claude-cli', 'codex-cli', 'pi-cli', 'opencode-cli'],
@@ -20416,7 +20416,6 @@ async function pluginPageSaysLessFlow() {
     await a.settle();
   };
   const stateUnder = tool => a.run(`document.querySelector('.plugin-tool[data-tool="${tool}"] .plugin-tool-state')?.textContent ?? null`);
-  const boxIs = (plugin, tool) => a.run(`(() => { const b = document.querySelector('#pbox-0-${plugin}-${tool}'); return b ? [b.getAttribute('aria-checked'), b.disabled, b.dataset.state] : null; })()`);
   const openCard = async id => {
     if (!(await a.exists(`#${id}`))) return null;
     await a.click(`#${id}`);
@@ -20434,30 +20433,33 @@ async function pluginPageSaysLessFlow() {
   await a.click('#nav-plugins');
   await openPluginPage('plain-kit');
 
-  // 1. Your tools (?) card
-  same('Your tools has an infoMark whose card explains ticking and unticking',
-    await openCard('plugin-tools-info'),
-    [true, 'Tick to turn the plugin or its items on in that tool. Untick to turn them off.']);
+  // 1 & 3. Your tools (?) card wording (no Cowork when Claude desktop is absent) and opens clear of every pbox-* at 860 and 1316.
+  same('Your tools has an infoMark whose card explains ticking and unticking without Cowork when Claude desktop is absent',
+    [await a.exists('#plugin-cowork-note'), await openCard('plugin-tools-info')],
+    [false, [true, 'Tick to turn the plugin or its items on in that tool. Untick to turn them off.']]);
+  for (const [width, height] of [SMALLEST, [1316, 819]]) {
+    await sizeTo(a, width, height);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    await a.click('#plugin-tools-info');
+    const clear = await a.run(`(() => {
+      const card = document.getElementById('plugin-tools-info-card');
+      if (!card?.matches(':popover-open')) return { open: false };
+      const r = card.getBoundingClientRect();
+      const hits = [...document.querySelectorAll('[id^="pbox-"]')].filter(b => {
+        const br = b.getBoundingClientRect();
+        return !(r.bottom <= br.top || r.top >= br.bottom || r.right <= br.left || r.left >= br.right);
+      }).map(b => b.id);
+      return { open: true, hits };
+    })()`);
+    await sendKey('Escape', 'Escape', 27);
+    same(`at ${width}×${height} the Your tools card overlaps no pbox-*`, clear, { open: true, hits: [] });
+  }
+  await fullSize(a);
 
-  // 2. Absent kept-out boxes (Pi unticked earlier, OpenCode never installed) have nothing under them; Claude Code and Codex are installed.
-  same('Pi (unticked earlier) and OpenCode (never installed) have nothing under their boxes while Claude Code and Codex show Installed',
+  // 2. Absent kept-out boxes (Pi unticked earlier, OpenCode never installed) show Not installed (no Kept out: tick to put it back).
+  same('Pi (unticked earlier) and OpenCode (never installed) read Not installed while Claude Code and Codex show Installed',
     [await stateUnder('claude-cli'), await stateUnder('codex-cli'), await stateUnder('pi-cli'), await stateUnder('opencode-cli')],
-    ['Installed · 1.0.0', 'Installed · 1.0.0', null, null]);
-
-  // Untick Codex → Off, kept installed; installed data & config comment survive; tick Codex again → Installed, data still intact.
-  await a.click('#pbox-0-plain-kit-codex-cli');
-  await done();
-  await until(async () => (await boxIs('plain-kit', 'codex-cli'))?.[2] === 'kept-off');
-  same('unticking Codex leaves it Off, kept installed with its data and config comment intact, and absent kept-out boxes still blank',
-    [await boxIs('plain-kit', 'codex-cli'), await stateUnder('codex-cli'), await stateUnder('pi-cli'), await stateUnder('opencode-cli'),
-      readNow(codexDataPath), readNow(codexConfigPath).includes('# user comment kept') && readNow(codexConfigPath).includes('enabled = false')],
-    [['false', false, 'kept-off'], 'Off, kept installed', null, null, codexDataBody, true]);
-  await a.click('#pbox-0-plain-kit-codex-cli');
-  await done();
-  await until(async () => (await boxIs('plain-kit', 'codex-cli'))?.[2] === 'installed');
-  same('ticking Codex again turns the same copy back on with its installed data intact',
-    [await boxIs('plain-kit', 'codex-cli'), await stateUnder('codex-cli'), readNow(codexDataPath), readNow(codexConfigPath).includes('enabled = true')],
-    [['true', false, 'installed'], 'Installed · 1.0.0', codexDataBody, true]);
+    ['Installed · 1.0.0', 'Installed · 1.0.0', 'Not installed', 'Not installed']);
 
   // 5. Folds on plain-kit (plain outcomes only): Readme closed and In each tool closed at open; keyboard opens/closes both; state survives redraws.
   same('on a plain plugin, both In each tool and Readme start folded closed',
@@ -20511,20 +20513,6 @@ async function pluginPageSaysLessFlow() {
       await openCard('plugin-skills-info')],
     [true, [true, 'Claude Code takes a plugin whole: its skills are on or off together there.']]);
 
-  // 4. Instruction files (1), read by no tool (?) with card and no standing paragraph.
-  same('Instruction files heading says read by no tool with its card and no standing sentence',
-    [await a.run(`[...document.querySelectorAll('.plugin-group h4')].some(h => h.textContent === 'Instruction files (1), read by no tool')`),
-      pageText.includes('No tool reads a plugin’s own instruction file'),
-      await openCard('plugin-instructions-info')],
-    [true, false, [true, 'The model sees one only when something tells it to read the file, such as one of the plugin’s skills.']]);
-
-  // 6a. Cowork note (on writable actual home where Claude.app was found).
-  if (canWriteRealHome) {
-    same('Cowork note reads concisely in the tools panel',
-      await a.text('#plugin-cowork-note'),
-      'Cowork: add plugins in Claude desktop, under Customize › Plugins.');
-  } else console.log('Preview-only actual home on this platform: skipping Cowork note check in pluginPageSaysLessFlow.');
-
   // Leaving and reopening plain-kit resets folds to their initial closed state.
   await openPluginPage('plain-kit');
   same('reopening plain-kit resets both folds to closed',
@@ -20546,9 +20534,20 @@ async function pluginPageSaysLessFlow() {
     await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`),
     false);
 
-  // Failed outcome: In each tool opens at once, Readme closed.
+  // Failed outcome: In each tool opens at once, Readme closed; closing it then leaving via the sidebar and returning reopens it.
   await openPluginPage('failed-kit');
   same('failed-kit opens In each tool at once and keeps Readme closed',
+    await a.run(`[document.getElementById('plugin-outcomes')?.open ?? null, document.getElementById('plugin-readme')?.open ?? null]`),
+    [true, false]);
+  await a.run(`document.getElementById('plugin-outcomes-toggle')?.focus()`);
+  await sendKey('Enter', 'Enter', 13, '\r');
+  same('closing In each tool on failed-kit closes the fold while staying on the page',
+    await a.run(`document.getElementById('plugin-outcomes')?.open ?? null`),
+    false);
+  await a.click('#nav-overview');
+  await a.click('#nav-plugins');
+  await until(() => a.run(`document.querySelector('.crumb-here')?.textContent === 'failed-kit' && !!document.getElementById('plugin-outcomes')`));
+  same('leaving failed-kit for Overview via the sidebar and returning clears fold state so In each tool opens again',
     await a.run(`[document.getElementById('plugin-outcomes')?.open ?? null, document.getElementById('plugin-readme')?.open ?? null]`),
     [true, false]);
 
@@ -20558,14 +20557,13 @@ async function pluginPageSaysLessFlow() {
     await a.run(`[document.getElementById('plugin-outcomes')?.open ?? null, document.getElementById('plugin-readme')?.open ?? null]`),
     [false, false]);
 
-  // 6b. Instructions-only plugin: concise advice with no jump to Instructions; file opens right here.
+  // Instructions-only plugin: concise advice with no jump to Instructions; file opens right here.
   await openPluginPage('only-notes');
   same('instructions-only plugin keeps the plain advice with no link or button to Instructions',
     [await a.text('#plugin-only-instructions'),
       await a.exists('#plugin-only-instructions button, #plugin-only-instructions a'),
-      await a.exists('#plugin-only-instructions-open'),
-      await a.run(`[...document.querySelectorAll('.plugin-group h4')].some(h => h.textContent === 'Instruction files (1), read by no tool')`)],
-    ['No tool reads these files by itself: copy the text into your own instructions.', false, false, true]);
+      await a.exists('#plugin-only-instructions-open')],
+    ['No tool reads these files by itself: copy the text into your own instructions.', false, false]);
   await a.click('#pfile-0-CLAUDE-md');
   check('its instruction file opens right here on the plugin page', (await a.text('.plugin-file') ?? '').includes('Copy these conventions into your own instructions.'), await a.text('.plugin-page'));
 

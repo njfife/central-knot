@@ -53,8 +53,8 @@ export const ACTIVITIES: Record<MarketActivity, { label: string; band: string }>
   listing: { label: 'Listing the marketplace…', band: 'Listing the marketplace in the tool’s own plugin list… Nothing is installed by this.' },
 };
 
-/** `marketName`: the marketplace to open when `source` is spelled as a tool recorded it, not as the page lists it (a plugin item's link); `hookTool`: tool selected for running hooks on the plugin's page; `folds`: open/closed state the person gave `In each tool` or `Readme` while the plugin's page stays open. */
-const startNav = (): { source?: string; tab: MarketTab; plugin?: string; find: string; category?: string; marketName?: string; hookTool?: HarnessId; folds?: Partial<Record<'outcomes' | 'readme', boolean>> } => ({ source: undefined, tab: 'plugins', plugin: undefined, find: '', category: undefined });
+/** `marketName`: the marketplace to open when `source` is spelled as a tool recorded it, not as the page lists it (a plugin item's link); `hookTool`: tool selected for running hooks on the plugin's page. */
+const startNav = (): { source?: string; tab: MarketTab; plugin?: string; find: string; category?: string; marketName?: string; hookTool?: HarnessId } => ({ source: undefined, tab: 'plugins', plugin: undefined, find: '', category: undefined });
 
 export const market = {
   /** Marketplaces and what each tool has installed: read when the page opens or the home changes (pagedata.ts). */
@@ -225,11 +225,9 @@ function settleNav(): void {
   if (!entry) return;
   const { plugin, category, find } = market.nav;
   const categories = categoriesOf(entry);
-  const nextPlugin = plugin && entry.plugins.some(candidate => candidate.name === plugin) ? plugin : undefined;
   market.nav = {
     ...market.nav, source: entry.source, marketName: undefined,
-    plugin: nextPlugin,
-    ...(nextPlugin ? {} : { folds: undefined }),
+    plugin: plugin && entry.plugins.some(candidate => candidate.name === plugin) ? plugin : undefined,
     category: category && categories.length > 1 && categories.includes(category) ? category : undefined,
     find: entry.plugins.length > FIND_FROM ? find : '',
   };
@@ -239,9 +237,8 @@ function settleNav(): void {
 export function browse(patch: Partial<typeof market.nav>): void {
   if ('source' in patch || 'tab' in patch || 'plugin' in patch) noteMove();
   const base = 'source' in patch && patch.source !== current()?.entry.source ? startNav() : market.nav;
-  const moved = 'plugin' in patch && patch.plugin !== market.nav.plugin;
-  const resetTool = moved && !('hookTool' in patch);
-  market.nav = { ...base, ...patch, ...(resetTool ? { hookTool: undefined } : {}), ...(moved ? { folds: undefined } : {}) };
+  const resetTool = 'plugin' in patch && patch.plugin !== market.nav.plugin && !('hookTool' in patch);
+  market.nav = { ...base, ...patch, ...(resetTool ? { hookTool: undefined } : {}) };
   if (app.page !== 'plugins') { showPage('plugins'); return; }
   clearNotice();
   readShown();

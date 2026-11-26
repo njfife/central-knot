@@ -600,16 +600,16 @@ const TICKED: readonly ToolMark[] = ['installed', 'outdated', 'items', 'stays'],
 /**
  * A tool's box on the plugin's page (pluginparts.ts toolBox; what a click records: pluginrecord.ts A TOOL'S BOX), from its mark
  * (toolMark): ticked or not; off where it can't act, with why (`off`): its mark held, a ticked copy that can't be taken out here
- * (cantUninstall: never an untick that couldn't be taken back), or a home that can't change; and its line where that overrides
- * the mark's words (`line`): why it is off, short, or `''` (blank) where the plugin is On and kept out of an absent tool.
+ * (cantUninstall: never an untick that couldn't be taken back), or a home that can't change; and its line where that says more
+ * than the mark (`line`): why it is off, short.
  */
 export function boxOf(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, { mark, words }: { mark: ToolMark; words: string }): { ticked: boolean; held?: true; off?: string; line?: string } {
   const name = names[tool], ticked = TICKED.includes(mark), held = HELD.includes(mark), recorded = entry.switches?.[plugin];
   const kept = !!recorded?.entry?.on && recorded.entry.except.includes(tool);
   const stuck = ticked && takesPlugins(tool) && view.canWrite ? cantUninstall(view, entry, plugin, tool) : undefined;
   const off = held ? words : stuck ? `${stuck}${kept ? ` It is kept out of ${name}: uninstall it in ${name} itself, then tick to put it back.` : ''}` : !view.canWrite ? view.reason ?? PREVIEW_ONLY : view.switchProblem;
-  const line = !held && !stuck ? (mark === 'absent' && kept ? '' : undefined)
+  const line = !held && !stuck ? undefined
     : takesPlugins(tool) && !view.clis[tool] ? `No ${name} command-line tool here` : entry.refusedBy?.[tool] ? `${name} refused this marketplace`
     : stuck ? 'Can’t be taken out here' : mark === 'cannot' ? recorded?.tools[tool]?.held ?? unavailable(view, entry, plugin, tool) : undefined;
-  return { ticked, ...(held ? { held: true as const } : {}), ...(off ? { off } : {}), ...(line !== undefined ? { line } : {}) };
+  return { ticked, ...(held ? { held: true as const } : {}), ...(off ? { off } : {}), ...(line ? { line } : {}) };
 }

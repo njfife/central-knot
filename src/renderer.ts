@@ -20,6 +20,7 @@ import { libraryPage, notRead } from './pages.ts';
 import { overviewPage } from './overview.ts';
 import { harnessesPage, harnessTitle } from './harnesspage.ts';
 import { pluginsPage, pluginsResult } from './pluginspage.ts';
+import { afterPluginPageDrawn } from './pluginpage.ts';
 import { backFromFiles, headerNotices, listResult, noticeKindsShown, resultInHeader, unseenNotices } from './matrix.ts';
 import { historyPage } from './historypage.ts';
 import { mcpSigninPage } from './mcpsigninpage.ts';
@@ -327,8 +328,9 @@ function renderWindow() {
   const { rail } = applyLayout();
   renderHeader(rail);
   drawPage(renderPage);
-  // Select's mode lives only while the Library's list is drawn: a draw without it (the held screen too) ends it.
+  // Select's mode and a plugin page's folds live only while their own page is drawn: a draw without them ends them.
   afterPageDrawn();
+  afterPluginPageDrawn();
   // After the header, which marks the notices it draws seen: the sidebar's dot is for those it didn't.
   renderSidebar();
   recordDraw(visitOffsets);
