@@ -737,6 +737,71 @@ test('Pi reads his own found copy only from the shared skills folder: heldOut an
   } finally { await solo.cleanup(); }
 });
 
+test('itemsView clashes carries structured own, shared and another clashes for none placed and some placed, keeping actual keys and display names while preserving notIn and heldOut', async () => {
+  // None placed: solo own clash preserves notIn.reasons and tickHelps, with notIn.other empty (never claiming the plugin brings nothing).
+  const solo = await notesOnly();
+  try {
+    await put(solo.pi('skills/notes/SKILL.md'), skill('notes', 'mine'));
+    await solo.turn('on');
+    const items = (await solo.view()).items!.kit!;
+    assert.deepEqual(items.clashes, [{ tool: 'pi-cli', kind: 'skill', key: 'notes', name: 'notes', clash: 'own' }]);
+    assert.deepEqual([items.notIn?.['pi-cli']?.reasons, items.notIn?.['pi-cli']?.other, items.notIn?.['pi-cli']?.tickHelps], [[OWN], [], false]);
+  } finally { await solo.cleanup(); }
+
+  // None placed with a mix of own (mixed-case folder), shared, and another plugin's item: clashes keeps actual keys and display names, notIn.other keeps only another.
+  const mixed = await notesOnly();
+  try {
+    await rm(join(mixed.kit, 'skills/notes'), { recursive: true });
+    await put(join(mixed.root, '.claude-plugin/marketplace.json'), JSON.stringify({
+      name: 'team',
+      plugins: [{ name: 'kit', source: './plugins/kit', version: '1.0.0' }, { name: 'rival', source: './plugins/rival', version: '1.0.0' }],
+    }));
+    await put(join(mixed.root, 'plugins/rival/skills/other-one/SKILL.md'), skill('other-one', 'from rival'));
+    await put(join(mixed.kit, 'skills/MyNotes/SKILL.md'), skill('MyNotes', 'from kit'));
+    await put(join(mixed.kit, 'skills/shared-one/SKILL.md'), skill('shared-one', 'from kit'));
+    await put(join(mixed.kit, 'skills/other-one/SKILL.md'), skill('other-one', 'from kit'));
+    await put(mixed.pi('skills/MyNotes/SKILL.md'), skill('MyNotes', 'mine in pi'));
+    await put(join(mixed.home, '.agents/skills/shared-one/SKILL.md'), skill('shared-one', 'mine in shared'));
+    await mixed.markets.turn(mixed.root, 'rival', 'on', undefined, mixed.home);
+    await mixed.turn('on');
+    const items = (await mixed.view()).items!.kit!;
+    assert.deepEqual(items.clashes, [
+      { tool: 'pi-cli', kind: 'skill', key: 'other-one', name: 'other-one', clash: 'another', source: 'plugin:rival@team' },
+      { tool: 'pi-cli', kind: 'skill', key: 'mynotes', name: 'MyNotes', clash: 'own' },
+      { tool: 'pi-cli', kind: 'skill', key: 'shared-one', name: 'shared-one', clash: 'shared' },
+    ]);
+    assert.equal(items.notIn?.['pi-cli']?.reasons.length, 3);
+    assert.deepEqual(items.notIn?.['pi-cli']?.other, ['other-one: another source has a skill by that name here; delete it on its row to take the plugin’s.']);
+    assert.equal(items.notIn?.['pi-cli']?.tickHelps, false);
+  } finally { await mixed.cleanup(); }
+
+  // Some placed across Pi and OpenCode: Pi has own notes + shared review + another tools; OpenCode has shared review + another tools (notes placed there).
+  const some = await kitHome({ tools: ['claude-cli', 'pi-cli', 'opencode-cli'] });
+  try {
+    await mkdir(join(some.home, '.config/opencode'), { recursive: true });
+    await put(join(some.root, '.claude-plugin/marketplace.json'), JSON.stringify({
+      name: 'team',
+      plugins: [{ name: 'kit', source: './plugins/kit', version: '1.0.0' }, { name: 'rival', source: './plugins/rival', version: '1.0.0' }],
+    }));
+    await put(join(some.root, 'plugins/rival/skills/tools/SKILL.md'), skill('tools', 'from rival'));
+    await put(some.pi('skills/notes/SKILL.md'), skill('notes', 'mine in pi'));
+    await put(join(some.home, '.agents/skills/review/SKILL.md'), skill('review', 'mine in shared'));
+    await some.markets.turn(some.root, 'rival', 'on', undefined, some.home);
+    await some.turn('on');
+    const items = (await some.view()).items!.kit!;
+    assert.equal(items.notIn, undefined);
+    assert.equal(items.heldOut?.['pi-cli']?.length, 2);
+    assert.equal(items.heldOut?.['opencode-cli']?.length, 1);
+    assert.deepEqual(items.clashes, [
+      { tool: 'pi-cli', kind: 'skill', key: 'tools', name: 'tools', clash: 'another', source: 'plugin:rival@team' },
+      { tool: 'pi-cli', kind: 'skill', key: 'notes', name: 'notes', clash: 'own' },
+      { tool: 'pi-cli', kind: 'skill', key: 'review', name: 'review', clash: 'shared' },
+      { tool: 'opencode-cli', kind: 'skill', key: 'tools', name: 'tools', clash: 'another', source: 'plugin:rival@team' },
+      { tool: 'opencode-cli', kind: 'skill', key: 'review', name: 'review', clash: 'shared' },
+    ]);
+  } finally { await some.cleanup(); }
+});
+
 test('On while the shared skills folder can’t be read: the skills wait in Pi, which reads that folder, so its report counts the items there now and says why, then why the server local isn’t there', async () => {
   const box = await kitHome();
   try {

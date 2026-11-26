@@ -258,7 +258,10 @@ export function tell(outcome: Outcome | undefined, otherwise = '', options?: { c
   const told = outcome && withProfileEnded(outcome, options);
   state.outcome = told;
   // Said on Plugins in the run's place, it is the newer result: the run's goes, so this one's × uncovers nothing older.
-  if (overRun(told)) closeRun();
+  if (overRun(told)) {
+    closeRun();
+    endListNews();
+  }
   if (!told) announce(otherwise);
   else { announce(spoken(told), !saidInStatusBar(told)); told.said = state.said.seq; }
   fadeLater();
@@ -627,6 +630,7 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   // The plugins' part, once the copies' part went through (a whole-click refusal leaves it unrun).
   const plugged = click.plugins?.ops.length && (did || made.length || !refusal) ? await runSwitches(click.plugins.ops) : undefined;
   if (plugged) setHome(await api().refresh());
+  if (state.page === 'plugins') await loadPlugins(false, state.home?.readId);
   const done = did || made.length > 0 || !!plugged?.done.some(entry => succeeded(entry.report));
   // Said from what happened: a tool whose write failed, copy or plugin switch, is not called on (or off).
   const wrote = [...new Set(ours.filter(entry => entry.outcome === 'written' && entry.harness).map(entry => entry.harness!))];
@@ -669,7 +673,11 @@ async function switchesOnly(click: Click, ops: PluginOp[], page: Page): Promise<
 }
 
 /** A click applied at once, under busy: one tool's control in an opened row, Delete, Make current, Resume, a copy chosen (Turn these off: applyByKind). */
-export const applyClick = (click: Click) => busy(click.undoing ? 'Undoing…' : 'Applying…', async page => sayDone(await carryOut(click, page), click));
+export const applyClick = (click: Click | (() => Promise<Click | Outcome>)) => busy(typeof click === 'function' || !click.undoing ? 'Applying…' : 'Undoing…', async page => {
+  const resolved = typeof click === 'function' ? await click() : click;
+  if ('changes' in resolved) sayDone(await carryOut(resolved, page), resolved);
+  else tell({ ...resolved, page });
+});
 /** What a click applied at once did, said in the header (renderer.ts resultHere) or its band, its rows flashed, the focus on its control. */
 function sayDone(done: Done, click: Click) {
   keepOwn([done.kept]);
@@ -891,6 +899,7 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
     list.push(...result.results.map(entry => ({ key, entry })));
   }
   setHome(await api().refresh());
+  if (state.page === 'plugins') await loadPlugins(false, state.home?.readId);
   // Settled: managed, readable, and matching what the library now wants (not held or owed a write/removal; nothing applied if deleted).
   const settledIn = (kind: PageKind, key: string, tool: HarnessId) => {
     const view = state.home?.[kind], row = view?.items.find(fact => fact.key === key), item = view?.library[key];
@@ -1227,6 +1236,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   await putHistory();
   // A source's band offers its click's Undo (sourcespage.ts whatItDid): its rows say what waits there now.
   if (state.page === 'sources') await loadSources();
+  if (state.page === 'plugins') await loadPlugins(false, state.home?.readId);
   const restored = result.results.filter(entry => entry.outcome === 'written');
   const where = [...new Set(restored.map(entry => entry.harness ?? ''))].filter(Boolean);
   const past = state.history.data?.find(event => event.id === eventId);
@@ -1297,11 +1307,21 @@ function sayEverything(page: Page, past: HistoryEvent, result: ApplyResult, swit
  * outside Central Knot's taken over. What it did is said in the band, with no Undo there: Take over has none (the band and its
  * History entry say so); a cleared switch's Undo is its History entry's action (skills.ts switchBack).
  */
-export const skillAction = (action: 'clear-switch' | 'take-over', key: string, tool: HarnessId, name: string, kind: 'skills' | 'agents' = 'skills') =>
+export const skillAction = (action: 'clear-switch' | 'take-over', key: string, tool: HarnessId, name: string, kind: 'skills' | 'agents' = 'skills', recheck?: () => string | undefined) =>
   busy(action === 'take-over' ? 'Taking it over…' : 'Clearing the switch…', async page => {
+    if (recheck) {
+      setHome(await api().refresh());
+      const stop = recheck();
+      if (stop) {
+        if (state.page === 'plugins') await loadPlugins(false, state.home?.readId);
+        tell({ page, item: name, warn: true, band: true, refused: true, text: stop });
+        return;
+      }
+    }
     const home = state.home!, of = kind === 'agents' ? 'agent' : 'skill';
     const result = received(await (action === 'take-over' ? api().takeOverSkill(key, tool, clickResumes(home), home.home) : api().clearSkillSwitch(key, tool, clickResumes(home), home.home, of)));
     setHome(await api().refresh());
+    if (state.page === 'plugins') await loadPlugins(false, state.home?.readId);
     keepOwn([{ kind, results: result.results, notices: result.notices }]);
     const row = { kind, key };
     if (result.stopped) { tell({ page, item: name, rows: [row], text: result.stopped, warn: true, band: true, refused: true }); return; }
