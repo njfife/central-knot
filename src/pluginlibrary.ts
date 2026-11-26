@@ -8,7 +8,7 @@
 //   with the one-time move of a root skill an earlier build named otherwise (movedFrom, movedTicks: library.ts A PLUGIN, THE MOVE);
 // - what the Plugins page shows of them (itemsView: "Its items", and "has it" in each tool), from one look at the home that every
 //   plugin of a view shares (lookAtKinds), with why none of them is on in such a tool, which the run's report says too
-//   (pluginstatus.ts notInWhy), and each name he has under each tool's box (`clashes`).
+//   (pluginstatus.ts notInWhy), structured clashes (`clashes`: own, shared), and each name he has under each tool's box (`yours`).
 // When a plugin is read: at a click that brings it into Pi, OpenCode or Antigravity (On, Add, a tool's box ticked), at its Update and
 // Update all, and at the automatic updates' check, for a plugin with items (withItemsOf) or a tool new here (marketplaces.ts);
 // Off and a box unticked only click. A plugin whose parts from before the library wait to be moved takes this route
@@ -33,7 +33,7 @@ import type { ShareContext } from './share.ts';
 import { pluginLink } from './sourcelink.ts';
 import { sourceKinds, type SourceKind } from './sources.ts';
 import { recordedIds } from './sourcestore.ts';
-import type { Change, HarnessId, PassResult, PluginItemLine, PluginItemsView, SyncNotice, YourName } from './types.ts';
+import type { Change, HarnessId, PassResult, PluginItemClash, PluginItemLine, PluginItemsView, SyncNotice, YourName } from './types.ts';
 import { harnessIds } from './harnesses.ts';
 import { notInWhy, type ItemOut } from './pluginstatus.ts';
 import { andList, toolNames } from './words.ts';
@@ -267,14 +267,14 @@ function reportIn(tool: HarnessId, ask: ItemsAsk, before: Linked[], after: Linke
  * each item `linked` to it not wanted there (off on its own row, or kept out: `own` when the tool has its own copy, never
  * written over), and each `linked` item wanted there held out by his copy in the shared skills folder (`shared`).
  */
-type Out = { name: string; kind: ItemKind; out: ItemOut };
+type Out = { key: string; name: string; kind: ItemKind; out: ItemOut };
 /** Whether a linked item wanted in `tool` is held out there by his copy in the shared skills folder (librarypass.ts copiesOf). */
 const heldByShared = (looks: KindLooks, tool: HarnessId) => (item: LibraryItem, kind: ItemKind) => { const copy = copiesOf(looks.find(each => each.kind.kind.kind === kind)!.look, item)[tool]; return copy?.is === 'held' && !!copy.throughShared; };
 function outsIn(tool: HarnessId, lines: PluginItemLine[], linked: Linked[], own: (item: LibraryItem, kind: ItemKind) => boolean, shared: (item: LibraryItem, kind: ItemKind) => boolean): Out[] {
-  return [...lines.flatMap(({ name, kind, state, why }): Out[] => (state === 'deleted' ? [{ name, kind, out: 'deleted' }]
-    : state === 'not-brought' ? [{ name, kind, out: why === YOURS ? 'yours' : why === ANOTHER ? 'another' : { cannot: why! } }] : [])),
-  ...linked.filter(({ item }) => !wantedIn(item, tool)).map(({ kind, item }): Out => ({ name: item.name, kind, out: !item.on ? 'off' : own(item, kind) ? 'own' : 'kept' })),
-  ...linked.filter(({ item, kind }) => wantedIn(item, tool) && shared(item, kind)).map(({ kind, item }): Out => ({ name: item.name, kind, out: 'shared' }))];
+  return [...lines.flatMap(({ key, name, kind, state, why }): Out[] => (state === 'deleted' ? [{ key, name, kind, out: 'deleted' }]
+    : state === 'not-brought' ? [{ key, name, kind, out: why === YOURS ? 'yours' : why === ANOTHER ? 'another' : { cannot: why! } }] : [])),
+  ...linked.filter(({ item }) => !wantedIn(item, tool)).map(({ kind, item }): Out => ({ key: item.key, name: item.name, kind, out: !item.on ? 'off' : own(item, kind) ? 'own' : 'kept' })),
+  ...linked.filter(({ item, kind }) => wantedIn(item, tool) && shared(item, kind)).map(({ kind, item }): Out => ({ key: item.key, name: item.name, kind, out: 'shared' }))];
 }
 const wroteIn = (results: Passed[], tool: HarnessId) => results.some(({ result }) => result.results.some(each => each.harness === tool && (each.outcome === 'written' || each.outcome === 'removed')));
 const reloadsIn = (results: Passed[], tool: HarnessId) => results.flatMap(({ result }) => result.reloads.filter(each => each.tool === tool));
@@ -350,17 +350,18 @@ export async function itemsView(tools: readonly HarnessId[], looks: KindLooks, e
   const alike = his.filter(({ line }) => line.state === 'alike').map(({ line, item }) => ({ kind: line.kind, item })), wanted = itemTools(tools).filter(tool => entry.on && !entry.except.includes(tool));
   const on = Object.fromEntries(itemTools(tools).map(tool => [tool, onThere(looks, [...linked, ...(wanted.includes(tool) ? alike : [])], tool)]));
   const ownIn = (tool: HarnessId) => (item: LibraryItem, kind: ItemKind) => !!look(kind).disk.byKey.get(item.key)?.[tool] && item.applied[tool] === undefined;
+  const toolOuts = new Map(wanted.map(tool => [tool, outsIn(tool, lines, linked, ownIn(tool), heldByShared(looks, tool))]));
+  // Structured own/shared clashes worked out before names are grouped by notInWhy (never stored).
+  const clashes: PluginItemClash[] = wanted.flatMap(tool => (toolOuts.get(tool) ?? [])
+    .flatMap(({ key, name, kind, out }): PluginItemClash[] => (out === 'own' || out === 'shared' ? [{ tool, kind, key, name, clash: out }] : [])));
   // A name of his is said apart, under each tool's box (`yours`, below), so not among these.
   const away = reads && !lines.some(line => line.state === 'new') ? wanted.filter(tool => !on[tool]).flatMap(tool => {
-    const why = outsIn(tool, lines, linked, ownIn(tool), heldByShared(looks, tool)).filter(({ out }) => out !== 'yours');
+    const why = (toolOuts.get(tool) ?? []).filter(({ out }) => out !== 'yours');
     const tickHelps = why.some(({ out }) => out === 'kept' || out === 'off' || out === 'deleted');
-    return !why.length && lines.length ? [] : [[tool, { reasons: notInWhy(tool, entry.plugin, why), tickHelps }] as const];
+    const plain = why.filter(({ out }) => out !== 'own' && out !== 'shared');
+    const nonClash = plain.length ? notInWhy(tool, entry.plugin, plain) : [];
+    return !why.length && lines.length ? [] : [[tool, { reasons: notInWhy(tool, entry.plugin, why), tickHelps, ...(plain.length < why.length ? { nonClash } : {}) }] as const];
   }) : [];
-  // Linked items kept out by his own copy there (not a Library item, or only in the shared folder), where `notIn` didn't already say it.
-  const heldOut = Object.fromEntries(wanted.filter(tool => away.every(([each]) => each !== tool)).flatMap(tool => {
-    const held = outsIn(tool, [], linked, ownIn(tool), heldByShared(looks, tool)).filter(({ out }) => out === 'own' || out === 'shared');
-    return held.length ? [[tool, notInWhy(tool, entry.plugin, held)] as const] : [];
-  }));
   // Each name of his of a kind the tool holds (presence.ts holds) under each tool's box the plugin is wanted in, whatever else is
   // so: the same as his, or Use the plugin's but where its take can't land there (librarypass.ts takeHeld: his through the shared folder, say).
   const yours: Partial<Record<HarnessId, YourName[]>> = {};
@@ -373,7 +374,7 @@ export async function itemsView(tools: readonly HarnessId[], looks: KindLooks, e
   }
   const of = Object.fromEntries(itemTools(tools).map(tool => [tool, [...linked, ...his.map(({ line }) => line)].filter(({ kind }) => holds(tool, kind)).length]));
   return { lines, on, of, ...(Object.keys(keptOut).length ? { keptOut } : {}), ...(ready ? { ready: true as const } : {}), ...(due ? { due: true as const } : {}), ...(problem ? { problem } : {}),
-    ...(away.length ? { notIn: Object.fromEntries(away) } : {}), ...(Object.keys(heldOut).length ? { heldOut } : {}), ...(Object.keys(yours).length ? { yours } : {}) };
+    ...(away.length ? { notIn: Object.fromEntries(away) } : {}), ...(clashes.length ? { clashes } : {}), ...(Object.keys(yours).length ? { yours } : {}) };
 }
 
 /** A name not brought in, as its line says why: his own item of that name, another source's, or his of the same content (a run's report). */

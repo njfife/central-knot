@@ -80,7 +80,7 @@ const { repo, repoPage } = await import('../src/repopage.ts');
 const { applyPluginOps, clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, resultOn, runReloads, shownPlugins, turnFromLine, turnPlugin, undoLabel, undoLast, usePlugins } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
-const { backgroundProblems, copyQuestion, headerNotices, libraryTable, openKind, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
+const { backgroundProblems, copyQuestion, headerNotices, libraryTable, listResult, openKind, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
 const { openWalkthrough, setupLead, walkthroughBand } = await import('../src/firstsetup.ts');
 const { pluginsResult } = await import('../src/pluginspage.ts');
 const { versionsList } = await import('../src/editparts.ts');
@@ -3344,5 +3344,149 @@ test('A run of two row-switch clicks on the same plugin undoes whole-plugin turn
     'undo:/market:alpha:claude-cli:plugin-on:except=',
   ]);
   assert.deepEqual(record.except, [], 'Undo of a two-click run leaves no tool stuck in except');
+});
+
+test('Undo of a one-tool switch on a plugin-linked skill checks only that tool, does not blame Claude Code, and names Pi only', async t => {
+  start();
+  showPage('plugins');
+  const events: any[] = [];
+  const item = { ...newItem('tdd', 'tdd'), on: true, except: ['pi-cli' as HarnessId], source: 'plugin-kit-id', hash: 'plugin-h' };
+  const fact: any = {
+    key: 'tdd', name: 'tdd', copies: {}, on: true, except: ['pi-cli'],
+    fromSource: { link: 'plugin:kit-own@team' },
+    cannot: { 'claude-cli': 'Claude Code gets it only with the plugin kit-own, and the plugin is kept out of Claude Code.' },
+    plan: { orderProved: true, keep: [], write: ['opencode-cli'], remove: [], forget: [], current: [], ownCopy: [] },
+  };
+  app.home = {
+    home: '/home', label: 'Practice',
+    sync: { managed: ['claude-cli', 'pi-cli', 'opencode-cli'], caughtUp: [], access: { allowed: true }, gate: { state: 'ready' } },
+    skills: { tools: ['claude-cli', 'pi-cli', 'opencode-cli'], items: [fact], notices: [], problems: [], unread: [], access: { allowed: true }, gate: { state: 'ready' }, library: { tdd: item } },
+    mcp: { tools: ['claude-cli', 'pi-cli', 'opencode-cli'], items: [], notices: [], problems: [], unread: [], access: { allowed: true }, gate: { state: 'ready' }, library: {} },
+    agents: { tools: ['claude-cli', 'pi-cli', 'opencode-cli'], items: [], notices: [], problems: [], unread: [], access: { allowed: true }, gate: { state: 'ready' }, library: {} },
+  } as unknown as HomeView;
+  t.mock.method(api, 'history', async () => ({ events, days: 30 }));
+  t.mock.method(api, 'refresh', async () => app.home);
+  t.mock.method(api, 'restore', async (id: string) => {
+    main.restored.push(id);
+    const past = events.find(e => e.id === id);
+    const made = { id: 'off-pi-tdd', at: '2026-11-18T09:01:00.000Z', key: 'tdd', of: 'skill', item: 'tdd', kind: 'off', cause: 'switch', only: 'pi-cli', gaveBack: ['pi-cli'], losers: [], orderProved: true };
+    if (past) past.undoneBy = made.id;
+    events.push(made);
+    item.except = ['pi-cli'];
+    fact.except = ['pi-cli'];
+    return { results: [{ item: 'tdd', harness: 'pi-cli' as const, outcome: 'written' as const, message: 'Pi has its own copy back, as before.' }], writes: 1, made: [made.id], reloads: [] };
+  });
+  void applyClick({ kind: 'skills', items: ['tdd'], rows: [{ kind: 'skills', key: 'tdd' }], undoSentence: true, changes: [{ key: 'tdd', on: true, except: [], seenOn: true }], said: 'tdd: turned on in Pi.' });
+  await settled();
+  item.except = [];
+  fact.except = [];
+  events.push({ id: 'on-pi-tdd', at: '2026-11-18T09:00:00.000Z', key: 'tdd', of: 'skill', item: 'tdd', kind: 'on', cause: 'switch', only: 'pi-cli', version: 'plugin-h', tookFrom: [{ tool: 'pi-cli', hash: 'mine-h' }], losers: [{ tool: 'pi-cli', hash: 'mine-h' }], orderProved: true });
+  await main.pass({ results: [{ item: 'tdd', harness: 'pi-cli', outcome: 'written', message: 'Added.' }], writes: 1, made: ['on-pi-tdd'], reloads: [] });
+  assert.ok(app.outcome?.act, 'click offers Undo');
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([app.outcome?.warn, app.skillsResult?.results.filter(keptBack)], [false, []]);
+  assert.equal(app.outcome?.text, 'tdd: kept out of Pi: Pi has its own copy back, as before. Central Knot keeps it.');
+});
+
+test('listResult on History does not add extra kept-back problem bands from outcome rows', async t => {
+  homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+  showPage('history');
+  app.skillsResult = { results: [{ item: 'notes', harness: 'claude-cli', outcome: 'held', message: 'Could not write Claude Code’s copy yet.' }], notices: [], writes: 0, reloads: [] };
+  app.outcome = { page: 'history', item: 'notes', rows: [{ kind: 'skills', key: 'notes' }], warn: true, text: 'notes: restored.' };
+  const bands = listResult();
+  assert.equal(bands.some(band => textOf(band).includes('Could not write Claude Code’s copy yet.')), false, 'History gains no kept-back listResult header line');
+});
+
+test('Library row one-tool Undo keeps next wording (“Undone: notes is as before.”)', async t => {
+  start();
+  showPage('library');
+  const events: any[] = [];
+  const item = { ...newItem('notes', 'notes'), on: true, except: [] as HarnessId[], hash: 'h1' };
+  const fact: any = { key: 'notes', name: 'notes', copies: {}, on: true, except: [] as HarnessId[] };
+  app.home = {
+    home: '/home', label: 'Practice',
+    sync: { managed: ['claude-cli', 'pi-cli'], caughtUp: [], access: { allowed: true }, gate: { state: 'ready' } },
+    skills: { tools: ['claude-cli', 'pi-cli'], items: [fact], notices: [], problems: [], unread: [], access: { allowed: true }, gate: { state: 'ready' }, library: { notes: item } },
+    mcp: { tools: ['claude-cli', 'pi-cli'], items: [], notices: [], problems: [], unread: [], access: { allowed: true }, gate: { state: 'ready' }, library: {} },
+    agents: { tools: ['claude-cli', 'pi-cli'], items: [], notices: [], problems: [], unread: [], access: { allowed: true }, gate: { state: 'ready' }, library: {} },
+  } as unknown as HomeView;
+  t.mock.method(api, 'history', async () => ({ events, days: 30 }));
+  t.mock.method(api, 'refresh', async () => app.home);
+  t.mock.method(api, 'restore', async (id: string) => {
+    const past = events.find(e => e.id === id);
+    const made = { id: 'on-pi-notes', at: '2026-11-18T09:01:00.000Z', key: 'notes', of: 'skill', item: 'notes', kind: 'on', cause: 'switch', only: 'pi-cli', losers: [{ tool: 'pi-cli', hash: 'h1' }], orderProved: true };
+    if (past) past.undoneBy = made.id;
+    events.push(made);
+    item.except = [];
+    fact.except = [];
+    return { results: [{ item: 'notes', harness: 'pi-cli' as const, outcome: 'written' as const, message: 'Added.' }], writes: 1, made: [made.id], reloads: [] };
+  });
+  void applyClick({ kind: 'skills', items: ['notes'], rows: [{ kind: 'skills', key: 'notes' }], changes: [{ key: 'notes', on: true, except: ['pi-cli'], seenOn: true }], said: 'notes is off in Pi.' });
+  await settled();
+  item.except = ['pi-cli'];
+  fact.except = ['pi-cli'];
+  events.push({ id: 'off-pi-notes', at: '2026-11-18T09:00:00.000Z', key: 'notes', of: 'skill', item: 'notes', kind: 'off', cause: 'switch', only: 'pi-cli', losers: [{ tool: 'pi-cli', hash: 'h1' }], orderProved: true });
+  await main.pass({ results: [{ item: 'notes', harness: 'pi-cli', outcome: 'removed', message: 'Removed.' }], writes: 1, made: ['off-pi-notes'], reloads: [] });
+  assert.ok(app.outcome?.act, 'Library row one-tool click offers Undo');
+  app.outcome!.act!.run();
+  await settled();
+  assert.equal(app.outcome?.warn, false);
+  assert.equal(app.outcome?.text, 'Undone: notes is as before.');
+});
+
+test('Whole-item Undo still checks every managed tool while settling a plugin-held cannot in Claude Code', async t => {
+  start();
+  showPage('library');
+  const events: any[] = [];
+  const item = { ...newItem('tdd', 'tdd'), on: true, except: [] as HarnessId[], source: 'plugin-kit-id', hash: 'plugin-h' };
+  const fact: any = {
+    key: 'tdd', name: 'tdd', copies: {}, on: true, except: [] as HarnessId[],
+    fromSource: { link: 'plugin:kit-own@team' },
+    cannot: { 'claude-cli': 'Claude Code gets it only with the plugin kit-own, and the plugin is kept out of Claude Code.' },
+    plan: { orderProved: true, keep: [], write: ['opencode-cli'], remove: [], forget: [], current: [], ownCopy: [] },
+  };
+  app.home = {
+    home: '/home', label: 'Practice',
+    sync: { managed: ['claude-cli', 'pi-cli', 'opencode-cli'], caughtUp: [], access: { allowed: true }, gate: { state: 'ready' } },
+    skills: { tools: ['claude-cli', 'pi-cli', 'opencode-cli'], items: [fact], notices: [], problems: [], unread: [], access: { allowed: true }, gate: { state: 'ready' }, library: { tdd: item } },
+    mcp: { tools: ['claude-cli', 'pi-cli', 'opencode-cli'], items: [], notices: [], problems: [], unread: [], access: { allowed: true }, gate: { state: 'ready' }, library: {} },
+    agents: { tools: ['claude-cli', 'pi-cli', 'opencode-cli'], items: [], notices: [], problems: [], unread: [], access: { allowed: true }, gate: { state: 'ready' }, library: {} },
+  } as unknown as HomeView;
+  t.mock.method(api, 'history', async () => ({ events, days: 30 }));
+  t.mock.method(api, 'refresh', async () => app.home);
+  t.mock.method(api, 'restore', async (id: string) => {
+    const past = events.find(e => e.id === id);
+    const made = { id: `on-all-${id}`, at: '2026-11-18T09:01:00.000Z', key: 'tdd', of: 'skill', item: 'tdd', kind: 'on', cause: 'switch', losers: [{ tool: 'pi-cli', hash: 'plugin-h' }], orderProved: true };
+    if (past) past.undoneBy = made.id;
+    events.push(made);
+    item.on = true;
+    fact.on = true;
+    return { results: [{ item: 'tdd', harness: 'pi-cli' as const, outcome: 'written' as const, message: 'Added.' }], writes: 1, made: [made.id], reloads: [] };
+  });
+  // Unsettled OpenCode on a whole-item Undo (no `only`) is still caught and reported.
+  void applyClick({ kind: 'skills', items: ['tdd'], rows: [{ kind: 'skills', key: 'tdd' }], changes: [{ key: 'tdd', on: false, except: [], seenOn: true }], said: 'tdd is off.' });
+  await settled();
+  item.on = false;
+  fact.on = false;
+  events.push({ id: 'off-all-1', at: '2026-11-18T09:00:00.000Z', key: 'tdd', of: 'skill', item: 'tdd', kind: 'off', cause: 'switch', losers: [], orderProved: true });
+  await main.pass({ results: [{ item: 'tdd', harness: 'pi-cli', outcome: 'removed', message: 'Removed.' }], writes: 1, made: ['off-all-1'], reloads: [] });
+  app.outcome!.act!.run();
+  await settled();
+  assert.equal(app.outcome?.warn, true, 'whole-item Undo warns when OpenCode stays unsettled');
+  assert.equal(app.outcome?.text, 'Not all of tdd could be put back.');
+  assert.deepEqual(app.skillsResult?.results.filter(keptBack).map(entry => entry.harness), ['opencode-cli']);
+
+  // Once OpenCode is settled, Claude Code's plugin-held cannot counts as settled: no false warning on a plugin's Library row.
+  fact.plan = { orderProved: true, keep: [], write: [], remove: [], forget: [], current: [], ownCopy: [] };
+  void applyClick({ kind: 'skills', items: ['tdd'], rows: [{ kind: 'skills', key: 'tdd' }], changes: [{ key: 'tdd', on: false, except: [], seenOn: true }], said: 'tdd is off.' });
+  await settled();
+  item.on = false;
+  fact.on = false;
+  events.push({ id: 'off-all-2', at: '2026-11-18T09:02:00.000Z', key: 'tdd', of: 'skill', item: 'tdd', kind: 'off', cause: 'switch', losers: [], orderProved: true });
+  await main.pass({ results: [{ item: 'tdd', harness: 'pi-cli', outcome: 'removed', message: 'Removed.' }], writes: 1, made: ['off-all-2'], reloads: [] });
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([app.outcome?.warn, app.skillsResult?.results.filter(keptBack), app.outcome?.text], [false, [], 'Undone: tdd is as before.']);
 });
 
