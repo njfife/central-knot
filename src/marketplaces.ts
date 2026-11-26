@@ -832,20 +832,12 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const ran = await runPlan(back.filter(op => op.action !== 'items-back'), ownApi, String(home));
     // Undoing a fresh install of Copilot CLI's live folder copy leaves enabledPlugins false, installed and off (plugins.ts
     // uninstall counts that as `gone`; pluginplan.ts reverse marks the op `keptOff`): end as an Off does so the result says
-    // "turned off" (never "removed") and the record keeps Copilot CLI out (`Off, kept installed`).
+    // "turned off" (never "removed"). Any off copy reads `Off, kept installed` without writing a record entry.
     const liveOff = ran.done.find(step => step.action === 'remove' && step.tool === 'copilot-cli' && step.report.outcome === 'uninstalled' && step.report.changed);
     if (liveOff) {
       const state = await engine.installState(await context(), 'copilot-cli', liveOff.marketName, plugin);
       if (state.state === 'installed' && state.live && state.off) {
         liveOff.report = { ...liveOff.report, outcome: 'plugin-off', message: 'Turned off in Copilot CLI.' };
-        if (!before || wantedIn(before, 'copilot-cli')) {
-          const { view: afterView } = await look(false, undefined, source);
-          const afterEntry = afterView.marketplaces.find(candidate => engine.sameSource(candidate.source, source));
-          const has = afterEntry ? afterView.tools.filter(each => each !== 'copilot-cli' && inUseIn(afterEntry, plugin, each)) : [];
-          const fallback = () => current ?? newEntry(source, liveOff.marketName, plugin, false);
-          const kept = turnedEntry(before ?? (has.length ? undefined : current), 'keep-out', 'copilot-cli', fallback, has, afterView.tools);
-          if (kept) await changeRecord(String(home), now => withEntry(now, source, plugin, kept));
-        }
       }
     }
     return { ...ran, done: [...done, ...ran.done] };

@@ -259,10 +259,10 @@ test('a main switch turns an agent off in Copilot CLI with its whole plugin, and
   assert.deepEqual(off.turned.map(entry => alongWords(entry, off.ops)).filter(Boolean), ['Its whole plugin full was turned off in Copilot CLI, with its 2 skills and 2 MCP servers.']);
 });
 
-test('the row turned Off: plugins.json still has the plugin On, and Claude Code has it off in its own settings, which both pages say', () => {
+test('the row turned Off: Claude Code has the plugin off in its own settings, which reads Off, kept installed on Plugins', () => {
   const { after } = mainSwitch([installed('claude-cli'), installed('copilot-cli'), installed('codex-cli')], 'one', false);
   const [claude] = after;
-  assert.equal(pluginsPageSays(claude), 'Claude Code: installed 1.0.0, turned off in Claude Code’s own settings.');
+  assert.equal(pluginsPageSays(claude), 'Off in Claude Code: still installed at 1.0.0, with its data and settings.');
   // On Skills, the library row (Pi, OpenCode) is Off with no tool left on: in Central Knot only.
   assert.deepEqual(after.map(install => item(install, 'skill', 'one')).filter(onNow), []);
   assert.equal(offRowSays('one', []), 'Off · On puts it in every tool.');

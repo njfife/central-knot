@@ -6,7 +6,7 @@ import { mock, test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Change, HarnessId, HomeView, ItemNotice, MarketplaceView, PassResult, PluginTurn, PluginTurnResult, PluginsView, ProfileSwitchResult } from '../src/types.ts';
 import type { PageKind } from '../src/app.ts';
-import { reverse } from '../src/pluginplan.ts';
+import { reverse, type PluginOp } from '../src/pluginplan.ts';
 
 /** Main, as the page sees it: each switch click waits until the test answers it; every other call is counted. */
 const main = {
@@ -38,6 +38,7 @@ const api = {
   repo: async () => { main.followUps.repo++; return null; },
   sources: async () => { main.followUps.sources++; return null; },
   setPluginSkill: async () => ({ reports: [report('skill-off', 'Turned off.')] }),
+  setPluginOn: async () => ({ reports: [report('plugin-off', 'Turned off.')] }),
   selectHome: async (): Promise<HomeView | null> => null,
   undoPluginTurn: async (_source: string, plugin: string) => { main.sent.push(`${plugin} undone`); return { done: [] }; },
   onSyncChanged: (listener: () => void) => { main.syncChanged = listener; },
@@ -99,7 +100,7 @@ const view = {
     switches: {} }],
 } as unknown as PluginsView;
 const entry = view.marketplaces[0]!;
-const report = (outcome: 'installed' | 'skill-off' | 'failed', message: string) => ({ tool: 'claude-cli' as const, outcome, changed: outcome !== 'failed', message, runs: [] });
+const report = (outcome: 'installed' | 'skill-off' | 'plugin-off' | 'failed', message: string) => ({ tool: 'claude-cli' as const, outcome, changed: outcome !== 'failed', message, runs: [] });
 const installed = (name: string): PluginTurnResult => ({ done: [{ source: '/market', marketName: 'team', plugin: name, tool: 'claude-cli', action: 'install', report: report('installed', 'Installed.') }], before: null, back: [] });
 const refused = (name: string): PluginTurnResult => ({ done: [{ source: '/market', marketName: 'team', plugin: name, tool: 'claude-cli', action: 'install', report: report('failed', `Not installed. Plugin "${name}" not found.`) }] });
 const stopped = 'It is no longer listed here, so nothing was changed. Read the page again.';
@@ -312,9 +313,9 @@ test('A box’s hover says only what its click and its Undo do there: a copy alr
     return { ...shown, switches: { alpha: { entry: { on, except: [] }, tools } } };
   };
   const hover = (shown: MarketplaceView, tool: HarnessId) => findById(toolBox(two, shown, plugin('alpha'), tool, 0, undefined), `pbox-0-alpha-${tool}`)?.attrs.title;
-  // On here, and turned off in Claude Code with its own command: its untick keeps it out and runs nothing there, so it promises no Undo.
+  // On here, and turned off in Claude Code with its own command: unticked kept-off box; one tick turns it on, Undo turns it off.
   assert.equal(hover(drawn(true, { 'claude-cli': { state: 'installed', path: '/x', off: true } }), 'claude-cli'),
-    'Claude Code: installed, turned off in Claude Code’s own settings. Click to keep alpha out of Claude Code, where it is off already and stays installed.');
+    'Off in Claude Code: still installed, with its data and settings. Click to turn alpha on in Claude Code. Undo turns it off again.');
   // Off here, and on in Claude Code by its own command: a tick on Copilot CLI's kept copy turns it on there, not there alone.
   assert.equal(hover(drawn(false, { 'claude-cli': { state: 'installed', path: '/x' }, 'copilot-cli': { state: 'installed', path: '/y', off: true } }), 'copilot-cli'),
     'Off in Copilot CLI: still installed, with its data and settings. Click to turn alpha on in Copilot CLI. Undo turns it off again.');
@@ -3248,5 +3249,34 @@ test('Undo hover after a fresh live Copilot CLI install says turns it off, kept 
     'Reverses what changed for alpha, through each tool’s own command or switch: uninstalls it from Copilot CLI.');
   assert.equal(titleFor([install('claude-cli', true)]),
     'Reverses what changed for alpha, through each tool’s own command or switch: uninstalls it from Claude Code.');
+});
+
+test('Whole-plugin Off from a row switch routes through turnPlugin keep-out and its Undo routes through undoPluginTurn', async t => {
+  pluginProfileWorld(t);
+  const calls: string[] = [];
+  const beforeEntry = { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: [] as HarnessId[] };
+  t.mock.method(api, 'turnPlugin', async (source: string, plugin: string, what: PluginTurn, tool?: HarnessId) => {
+    calls.push(`turn:${source}:${plugin}:${what}:${tool}`);
+    return {
+      done: [{ source, marketName: 'team', plugin, tool: tool!, action: 'plugin-off', report: { tool: tool!, outcome: 'plugin-off', changed: true, message: 'Turned off.', runs: [] } }],
+      before: beforeEntry,
+      back: [{ source, marketName: 'team', plugin, tool: tool!, action: 'plugin-on' }],
+    };
+  });
+  t.mock.method(api, 'undoPluginTurn', async (source: string, plugin: string, before: unknown, back: PluginOp[]) => {
+    calls.push(`undo:${source}:${plugin}:${(before as { on?: boolean } | null)?.on}:${back.map(op => op.action).join(',')}`);
+    return { done: [{ source, marketName: 'team', plugin, tool: 'claude-cli', action: 'plugin-on', report: { tool: 'claude-cli', outcome: 'plugin-on', changed: true, message: 'Back on.', runs: [] } }] };
+  });
+  const setWholeMock = t.mock.method(api, 'setPluginOn', async () => { calls.push('setPluginOn'); return { reports: [report('plugin-off', 'Turned off.')] }; });
+  await applyClick({
+    kind: 'skills', items: ['triage'], rows: [{ kind: 'skills', key: 'alpha@team/triage' }], changes: [],
+    said: 'triage is off in Claude Code.', pluginsOnly: true,
+    plugins: { ops: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-off' }] },
+    undone: 'Undone: triage is back on in Claude Code.',
+  });
+  assert.equal(setWholeMock.mock.callCount(), 0, 'listed plugin whole-off never bypasses turnPlugin');
+  assert.deepEqual(calls, ['turn:/market:alpha:keep-out:claude-cli']);
+  await app.outcome!.act!.run();
+  assert.deepEqual(calls, ['turn:/market:alpha:keep-out:claude-cli', 'undo:/market:alpha:true:plugin-on']);
 });
 

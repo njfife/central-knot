@@ -1315,7 +1315,7 @@ test('Copilot CLI’s live copy turned off with Copilot CLI’s own command read
   } finally { await box.cleanup(); }
 });
 
-test('Undo of a fresh install of Copilot CLI’s live copy keeps the record with Copilot CLI out, reads Off, kept installed, says turned off (never removed), and a tick turns it on', async () => {
+test('Undo of a fresh install of Copilot CLI’s live copy restores the record without writing an entry, reads Off, kept installed, says turned off (never removed), and a tick turns it on', async () => {
   const box = await switchHome({
     tools: ['claude-cli', 'copilot-cli'],
     engine: {
@@ -1372,10 +1372,10 @@ test('Undo of a fresh install of Copilot CLI’s live copy keeps the record with
     assert.equal(resultSentence(resultLines(undone.done, true), true), 'Undone: pdf turned off in Copilot CLI.');
     assert.deepEqual(resultParts(resultLines(undone.done, true), true, { short: true, here: { plugin: 'pdf', source: box.root } }), ['Undone: ', 'turned off in Copilot CLI', '.']);
     const saved = (await box.record()).plugins.find(each => each.plugin === 'pdf');
-    assert.deepEqual([saved?.on, saved?.except.includes('copilot-cli')], [false, false], 'record keeps the plugin Off');
+    assert.equal(saved, undefined, 'live Undo restores the missing record without writing an entry');
     const view = await box.markets.view(), entry = view.marketplaces.find(each => each.source === box.root)!;
     const mark = toolMark(view, entry, 'pdf', 'copilot-cli', entry.switches!.pdf!.tools['copilot-cli']);
-    assert.deepEqual([foundIn(view, entry.switches!.pdf), mark.mark, boxOf(view, entry, 'pdf', 'copilot-cli', mark)], [[], 'kept-off', { ticked: false }]);
+    assert.deepEqual([foundIn(view, entry, 'pdf'), mark.mark, boxOf(view, entry, 'pdf', 'copilot-cli', mark)], [[], 'kept-off', { ticked: false }]);
     // A tick afterwards turns the live copy back on through setWhole (one install, never uninstall).
     box.calls.length = 0;
     await box.markets.turn(box.root, 'pdf', 'let-in', 'copilot-cli', box.home);
@@ -1391,9 +1391,9 @@ test('Undo of a fresh install of Copilot CLI’s live copy keeps the record with
     const undoneOn = await box.markets.undoTurn(box.root, 'notes', turnedOn.before!, turnedOn.back!, box.home);
     assert.equal(resultSentence(resultLines(undoneOn.done, true), true), 'Undone: notes removed from Claude Code; turned off in Copilot CLI.');
     const notesSaved = (await box.record()).plugins.find(each => each.plugin === 'notes');
-    assert.deepEqual([notesSaved?.on, notesSaved?.except], [false, []]);
+    assert.equal(notesSaved, undefined, 'live Undo restores the missing record without writing an entry');
     const view2 = await box.markets.view(), entry2 = view2.marketplaces.find(each => each.source === box.root)!;
-    assert.deepEqual([foundIn(view2, entry2.switches!.notes), toolMark(view2, entry2, 'notes', 'copilot-cli', entry2.switches!.notes!.tools['copilot-cli']).mark], [[], 'kept-off']);
+    assert.deepEqual([foundIn(view2, entry2, 'notes'), toolMark(view2, entry2, 'notes', 'copilot-cli', entry2.switches!.notes!.tools['copilot-cli']).mark], [[], 'kept-off']);
 
     // Case 3: installed by hand in Claude Code (no record), tick Copilot CLI's box, then Undo keeps Claude Code On and Copilot CLI kept out.
     await put(join(box.root, 'plugins/extra/skills/extra/SKILL.md'), '---\nname: extra\ndescription: extra\n---\n');
@@ -1409,13 +1409,13 @@ test('Undo of a fresh install of Copilot CLI’s live copy keeps the record with
     const undoneExtra = await box.markets.undoTurn(box.root, 'extra', tickedExtra.before!, tickedExtra.back!, box.home);
     assert.equal(resultSentence(resultLines(undoneExtra.done, true), true), 'Undone: extra turned off in Copilot CLI.');
     const extraSaved = (await box.record()).plugins.find(each => each.plugin === 'extra');
-    assert.deepEqual([extraSaved?.on, extraSaved?.except.includes('claude-cli'), extraSaved?.except.includes('copilot-cli')], [true, false, true]);
+    assert.equal(extraSaved, undefined, 'live Undo restores the missing record without writing an entry');
     const view3 = await box.markets.view(), entry3 = view3.marketplaces.find(each => each.source === box.root)!;
     assert.deepEqual([
-      foundIn(view3, entry3.switches!.extra),
+      foundIn(view3, entry3, 'extra'),
       toolMark(view3, entry3, 'extra', 'claude-cli', entry3.switches!.extra!.tools['claude-cli']).mark,
       toolMark(view3, entry3, 'extra', 'copilot-cli', entry3.switches!.extra!.tools['copilot-cli']).mark,
-    ], [[], 'installed', 'kept-off']);
+    ], [['claude-cli'], 'installed', 'kept-off']);
   } finally { await box.cleanup(); }
 });
 

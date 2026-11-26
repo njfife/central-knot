@@ -33,6 +33,7 @@ import { machineNames, pagePlatform, shownFromHome } from './machine.ts';
 import { closeRun, endListNews, fadeRun, forgetResults, loadPlugins, overRun, resetMarket, retire } from './pluginstate.ts';
 import { pruneHookSources, resetHookSources } from './hooksourceview.ts';
 import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, type LastRun, type PluginDone, type PluginOp } from './pluginplan.ts';
+import type { PluginEntry } from './pluginrecord.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
@@ -544,7 +545,7 @@ export interface Click {
    * plugin's item: carryOut). `said`: what that part brought with it, said when it all worked. `note`: appended from completed
    * steps in switchesOnly even when another tool's step failed (not on Undo).
    */
-  plugins?: { ops: PluginOp[]; said?: string; note?: (done: PluginDone[]) => string };
+  plugins?: { ops: PluginOp[]; turns?: TurnUndo[]; said?: string; note?: (done: PluginDone[]) => string };
   /** A click of its `plugins` part alone, with no change of the person's own (a plugin's own row, a tool's switch for a plugin's
    * item): carryOut runs only those switches (switchesOnly); `undone` is what its Undo says once done ("Undone: triage is back on in Codex."). */
   pluginsOnly?: boolean;
@@ -639,14 +640,14 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   const choose = differs ? ` ${copiesDiffer(click.items)}` : '';
   const along = plugged && !switchProblems(plugged).length ? click.plugins?.said : undefined;
   const text = done || !refusal ? [said, along].filter(Boolean).join(' ') + choose : refusal.message;
-  const back = plugged?.back ?? [];
-  const undo = !click.undoing && done && ((made.length && await allUndoable(made)) || back.length) ? { kind: click.kind, made, back } : undefined;
+  const back = plugged?.back ?? [], turns = plugged?.turns ?? [];
+  const undo = !click.undoing && done && ((made.length && await allUndoable(made)) || back.length || turns.length) ? { kind: click.kind, made, back, ...(turns.length ? { turns } : {}) } : undefined;
   const warned = failed || !!plugged?.failed.length || !!plugged?.stopped;
   const own = click.changes.length ? reloadsFor(result.reloads, new Set(click.changes.map(change => change.key))) : result.reloads;
   const reloads = [...own, ...(plugged ? pluginReloads(plugged.done) : [])];
   return { kept, did: done, reloads, refused: done || !refusal ? undefined : refusal.message, changed, undo, along, focus: click.focus?.(),
     outcome: withReloads({ page, items: click.items, rows: click.rows, warn: warned || !!click.also?.length || !!refusal, band: true, fade: click.undoing && !warned,
-      text, reasons: [...(done && refusal ? [refusal.message] : []), ...switchReasons(plugged, click.also)], plugins: [...new Set(back.map(op => op.plugin))], act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: () => void undoClick({ rows: changed, focus: click.focus, regroups: click.regroups }, [undo]) } }, reloads) };
+      text, reasons: [...(done && refusal ? [refusal.message] : []), ...switchReasons(plugged, click.also)], plugins: [...new Set([...back.map(op => op.plugin), ...turns.map(turn => turn.plugin)])], act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: () => void undoClick({ rows: changed, focus: click.focus, regroups: click.regroups }, [undo]) } }, reloads) };
 }
 
 /**
@@ -655,17 +656,17 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
  * `undone`.
  */
 async function switchesOnly(click: Click, ops: PluginOp[], page: Page): Promise<Done> {
-  const ran = await runSwitches(ops, click.undoing);
+  const ran = await runSwitches(ops, click.undoing, click.plugins?.turns);
   setHome(await api().refresh());
   const worked = !ran.failed.length && !ran.stopped, said = typeof click.said === 'string' ? click.said : click.said([], []);
   const base = worked && said ? [said, click.plugins?.said].filter(Boolean).join(' ') : resultSentence(ran.lines, !!click.undoing);
   const text = [base, !click.undoing && base ? click.plugins?.note?.(ran.done) : ''].filter(Boolean).join(' ') || `${click.items.length ? `${fewNames(click.items)}: n` : 'N'}othing changed.`;
-  const undo = ran.back.length ? { kind: click.kind, made: [], back: ran.back } : undefined;
-  const back = { kind: click.kind, items: click.items, rows: click.rows, changes: [], said: click.undone ?? '', undoing: true, pluginsOnly: true, plugins: { ops: ran.back } };
+  const undo = ran.back.length || ran.turns.length ? { kind: click.kind, made: [], back: ran.back, ...(ran.turns.length ? { turns: ran.turns } : {}) } : undefined;
+  const back = { kind: click.kind, items: click.items, rows: click.rows, changes: [], said: click.undone ?? '', undoing: true, pluginsOnly: true, plugins: { ops: ran.back, ...(ran.turns.length ? { turns: ran.turns } : {}) } };
   const reloads = pluginReloads(ran.done);
   return { did: ran.done.some(entry => succeeded(entry.report)), reloads, along: worked ? click.plugins?.said : undefined, undo,
     outcome: withReloads({ page, items: click.items, rows: click.rows, text, reasons: switchReasons(ran, click.also), warn: !worked || !!click.also?.length, band: true, fade: click.undoing && worked,
-      plugins: [...new Set(ran.back.map(op => op.plugin))], act: undo && { label: 'Undo', id: 'outcome-undo-plugin', title: 'Turn them back as they were', run: () => void applyClick(back) } }, reloads) };
+      plugins: [...new Set([...ran.back.map(op => op.plugin), ...ran.turns.map(turn => turn.plugin)])], act: undo && { label: 'Undo', id: 'outcome-undo-plugin', title: 'Turn them back as they were', run: () => void applyClick(back) } }, reloads) };
 }
 
 /** A click applied at once, under busy: one tool's control in an opened row, Delete, Make current, Resume, a copy chosen (Turn these off: applyByKind). */
@@ -843,8 +844,10 @@ async function allUndoable(made: string[]) {
 
 /** What an Undo puts back: the rows its clicks changed (named in its result and flashed once it is done), where the focus goes, and whether every pinned row is let go. */
 interface UndoOf { rows: NamedRow[]; focus?: () => string; regroups?: boolean }
-/** What one click can take back (Done undo): its kind, the History entries it made, and the plugin switches that turn its plugins' part back. */
-interface Undoable { kind: PageKind; made: string[]; back: PluginOp[] }
+/** What a whole-plugin turn inside runSwitches needs for Undo (marketplaces.ts undoTurn). */
+interface TurnUndo { source: string; plugin: string; before: PluginEntry | null; back: PluginOp[] }
+/** What one click can take back (Done undo): its kind, the History entries it made, and the plugin switches and whole-plugin turns that turn its plugins' part back. */
+interface Undoable { kind: PageKind; made: string[]; back: PluginOp[]; turns?: TurnUndo[] }
 
 /**
  * Undo of one click, or of several as one (a run, Turn these off): their plugin items' switches first, then every History entry
@@ -857,8 +860,8 @@ interface Undoable { kind: PageKind; made: string[]; back: PluginOp[] }
 const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async page => {
   const home = state.home!, several = new Set(parts.map(part => part.kind)).size > 1;
   // The plugin items' switches go back first: other tools than the copies', so the rest is undone whatever they do.
-  const switchedBack = parts.flatMap(part => part.back);
-  const unswitched = switchedBack.length ? await runSwitches(switchedBack, true) : undefined;
+  const switchedBack = parts.flatMap(part => part.back), turnsBack = [...parts].reverse().flatMap(part => part.turns ?? []);
+  const unswitched = switchedBack.length || turnsBack.length ? await runSwitches(switchedBack, true, turnsBack) : undefined;
   const kindOfEntry = new Map(parts.flatMap(part => part.made.map(id => [id, part.kind] as const)));
   // History is stored newest-last (history.ts); reversing first keeps entries written in the same millisecond newest-first.
   const events = (await api().history()).events.filter(event => kindOfEntry.has(event.id)).reverse()
@@ -921,7 +924,7 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   // What did go back, where some of it didn't: the rows of the kinds whose entries all went back as they were, and whose plugin
   // switches, if they had any to turn back, all went back too.
   const short = new Set([...stops.keys(), ...gone.map(([, kind]) => kind)]), names = (rows: NamedRow[]) => [...new Set(rowNames(rows, about.rows))];
-  const switchesShort = new Set(unswitched && switchProblems(unswitched).length ? parts.filter(part => part.back.length).map(part => part.kind) : []);
+  const switchesShort = new Set(unswitched && switchProblems(unswitched).length ? parts.filter(part => part.back.length || part.turns?.length).map(part => part.kind) : []);
   const all = names(about.rows), asBefore = names(about.rows.filter(row => !short.has(row.kind) && !switchesShort.has(row.kind) && !results.get(row.kind)?.some(keptBack)));
   const failed = names(about.rows.filter(row => switchesShort.has(row.kind) || kept.get(row.kind)?.some(each => keptBack(each.entry) && (each.key ? each.key === row.key : each.entry.item.toLowerCase() === row.name.toLowerCase()))));
   const are = (list: string[]) => `${fewNames(list)} ${list.length === 1 ? 'is' : 'are'} as before`;
@@ -943,22 +946,50 @@ export const problemKey = (entry: DestinationResult) => `problem:${entry.of ?? '
  * switched off for it: those written before it are put back. Returns what ran, in lines, the tools where something didn't,
  * and the choices that turn it all back.
  */
-export async function runSwitches(ops: PluginOp[], undo = false) {
+export async function runSwitches(ops: PluginOp[], undo = false, turnsIn: TurnUndo[] = []) {
   // A plugin changes here as it does on its own page: the Plugins list's rows from before are no longer true (pluginstate.ts), and
   // each plugin's earlier results and their Undo go (pluginstate.ts retire).
   endListNews();
-  for (const plugin of new Set(ops.map(op => op.plugin))) retire(plugin);
+  for (const plugin of new Set([...ops.map(op => op.plugin), ...turnsIn.map(turn => turn.plugin)])) retire(plugin);
   const home = state.home!.home;
-  const plan = { install: api().installPlugin, uninstall: api().uninstallPlugin, setSkill: api().setPluginSkill, setPart: api().setPluginPart, setWhole: api().setPluginOn };
-  const result = await runPlan(ops, plan, home);
+  const turns: TurnUndo[] = [], turned = new Set<string>();
+  const setWhole = async (source: string, marketName: string, plugin: string, tool: HarnessId, on: boolean, at: string) => {
+    if (undo || !source) return api().setPluginOn(source, marketName, plugin, tool, on, at);
+    const res = await api().turnPlugin(source, plugin, on ? 'let-in' : 'keep-out', tool, at);
+    if (res.stopped) return { reports: [], stopped: res.stopped };
+    const mine = res.done.filter(step => step.tool === tool), back = res.back ?? [];
+    if (back.length) {
+      turns.push({ source: back[0]!.source || mine[0]?.source || source, plugin, before: res.before ?? null, back });
+      turned.add(`${source}\0${plugin}\0${tool}\0${on ? 'plugin-on' : 'plugin-off'}`);
+    }
+    const reports = mine.length ? mine.map(step => step.report) : [{ tool, outcome: on ? 'plugin-on' as const : 'plugin-off' as const, message: `Already ${on ? 'on' : 'off'} in ${toolName(tool)}.`, runs: [] }];
+    return { reports };
+  };
+  const plan = { install: api().installPlugin, uninstall: api().uninstallPlugin, setSkill: api().setPluginSkill, setPart: api().setPluginPart, setWhole };
+  const undone: PluginDone[] = [];
+  let stopped: string | undefined;
+  if (undo) {
+    for (const turn of turnsIn) {
+      const res = await api().undoPluginTurn(turn.source, turn.plugin, turn.before, turn.back, home)
+        .catch(() => ({ stopped: 'It stopped unexpectedly. Refresh to see where it stands.', done: [] as PluginDone[] }));
+      undone.push(...res.done);
+      if (res.stopped) {
+        stopped = res.stopped;
+        break;
+      }
+    }
+  }
+  const result = !stopped && ops.length ? await runPlan(ops, plan, home) : { done: [] as PluginDone[] };
+  stopped ??= result.stopped;
   const strays = strayHolds(result.done);
   const putBack = strays.length ? (await runPlan(reverse(strays), plan, home)).done : [];
   const restored = strays.filter(stray => putBack.some(back => back.tool === stray.tool && back.plugin === stray.plugin && back.skill === stray.skill && back.part?.kind === stray.part?.kind && back.part?.name === stray.part?.name && succeeded(back.report)));
-  const done = result.done.filter(entry => !restored.includes(entry));
+  const done = [...undone, ...result.done.filter(entry => !restored.includes(entry))];
   const lines = resultLines(done, undo);
   const ran = (op: PluginOp) => done.some(entry => entry.tool === op.tool && entry.plugin === op.plugin && succeeded(entry.report));
   const failedIn = [...new Set([...done.filter(entry => !succeeded(entry.report)).map(entry => entry.tool), ...ops.filter(op => !ran(op)).map(op => op.tool)])];
-  return { done, lines, failed: lines.filter(line => !line.ok), failedIn, back: undo ? [] : reverse(done), stopped: result.stopped };
+  const ownBack = undo ? [] : reverse(done.filter(entry => !turned.has(`${entry.source}\0${entry.plugin}\0${entry.tool}\0${entry.action}`)));
+  return { done, lines, failed: lines.filter(line => !line.ok), failedIn, back: ownBack, turns: undo ? [] : turns, stopped };
 }
 
 /**

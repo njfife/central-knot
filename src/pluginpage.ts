@@ -80,7 +80,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     const stale = copyStale(entry, plugin.name, tool, compareTo, shownDetail(pluginKey(entry.source, plugin.name)));
     const state = stateOf(entry, plugin.name, tool);
     if (state.state === 'installed' && mark !== 'stays' && mark !== 'kept-off') {
-      return installedLine(state.version, compareTo, [state.directory ? 'from the Anthropic Directory' : '', stale ? 'differs from the marketplace’s copy' : '', state.off ? 'off in its own settings' : '',
+      return installedLine(state.version, compareTo, [state.directory ? 'from the Anthropic Directory' : '', stale ? 'differs from the marketplace’s copy' : '',
         state.skillsOff?.length ? `${plural(state.skillsOff.length, 'skill')} off` : '']);
     }
     if (mark === 'waits' && !updatesRun()) return 'Waits for automatic updates';
@@ -185,7 +185,8 @@ const partList = (owner: string, parts: { name: string; text: string; mono?: boo
  * own) shows where it stands with a lock, can't be clicked, and its row or column says why.
  */
 function skillSwitch(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, skill: string, marketIndex: number) {
-  const on = !skillOff(entry, plugin.name, tool, skill);
+  const state = stateOf(entry, plugin.name, tool);
+  const on = !(state.state === 'installed' && state.off) && !skillOff(entry, plugin.name, tool, skill);
   const why = cantSwitchSkill(view, entry, plugin.name, tool, skill);
   const label = `${skill} in ${names[tool]}: ${on ? 'on' : 'off'}. ${why ?? `Click to turn it ${on ? 'off' : 'on'} now; Undo turns it back.`}`;
   const control = switchToggle({ on, label, disabled: acting() || !!why, id: `pskill-${marketIndex}-${plugin.name}-${skill}-${tool}`,
@@ -209,7 +210,9 @@ function skillColumns(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   // A reason every skill in a column shares (a missing CLI, a preview-only home) is said once above the list. A held
   // skill's reason is its own, so held skills don't count against the rest of their column.
   const sharedReason = (tool: HarnessId) => {
-    const reasons = skills.filter(skill => !skillOff(entry, plugin.name, tool, skill)?.held).map(skill => why(tool, skill));
+    const state = stateOf(entry, plugin.name, tool);
+    const wholeOff = state.state === 'installed' && !!state.off;
+    const reasons = skills.filter(skill => wholeOff || !skillOff(entry, plugin.name, tool, skill)?.held).map(skill => why(tool, skill));
     return reasons[0] && reasons.every(reason => reason === reasons[0]) ? reasons[0] : undefined;
   };
   const columnWide = new Set(switchable.map(sharedReason).filter((reason): reason is string => !!reason));
