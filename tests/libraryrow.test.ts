@@ -6,6 +6,7 @@ import { FOLDED_VERSIONS, addLabel, asksWhichCopy, copiesDiffer, waitsForSync, c
 import { readAgainst, wordDiff } from '../src/diff.ts';
 import { newItem, plan, takeInAnswer, type Copies, type FoundKey, type LibraryItem } from '../src/library.ts';
 import { anyOn, kindSource } from '../src/itemrow.ts';
+import { withPluginOnly } from '../src/pluginrows.ts';
 import type { HarnessId, HomeView, LibraryFacts } from '../src/types.ts';
 
 const { harnessLine, noticeWords, placeTag, said } = sentences(libraryWords.agents);
@@ -657,4 +658,42 @@ test('MCP server Off in settings carries a card explaining Central Knot leaves t
   assert.deepEqual(skills.detailLine(row(all, { switchedOff: ['copilot-cli'] }, onItem), onItem, 'copilot-cli', 'Copilot CLI'), [
     { text: 'Off in Copilot CLI’s settings' },
   ]);
+});
+
+test('A plugin’s agent on in Claude Code through the plugin names Codex as unable to take it, never Claude Code; with the plugin off in Claude Code, the line says not in Claude Code or Codex', () => {
+  const five: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
+  const link = 'plugin:release-helper@team-tools';
+  const held = (claudeWhy: string) => ({
+    'claude-cli': claudeWhy,
+    'copilot-cli': 'Copilot CLI gets it only with the plugin release-helper, and it isn’t installed there (its line on the plugin’s page says why).',
+    'codex-cli': 'Codex gets it only with the plugin release-helper, and it isn’t installed there (its line on the plugin’s page says why).',
+  });
+  const agent = {
+    ...newItem('release-reviewer', 'release-reviewer'),
+    on: true,
+    hash: 'b',
+    except: ['pi-cli', 'opencode-cli'] as HarnessId[],
+    applied: {},
+  };
+  const home = {
+    agents: { tools: five, items: [], library: {} },
+    pluginItems: [{ tool: 'claude-cli', plugin: 'release-helper', marketName: 'team-tools', items: [] }],
+  } as unknown as HomeView;
+  const getsWithPlugin = withPluginOnly(home, 'agents', { fromSource: { link }, on: true, except: agent.except });
+  const rowWith = (claudeWhy: string, pluginOn: string[]): LibraryRow => {
+    const cannot = held(claudeWhy);
+    const copies: Copies = Object.fromEntries(five.map(tool => [
+      tool,
+      cannot[tool as keyof typeof cannot] ? { is: 'held' as const, why: cannot[tool as keyof typeof cannot] } : { is: 'absent' as const },
+    ]));
+    return { key: 'release-reviewer', name: 'release-reviewer', fromSource: { link }, hashes: {}, cannot, getsWithPlugin, pluginOn, plan: plan(agent, copies) };
+  };
+  assert.equal(
+    statusLine(rowWith('Claude Code has it with the plugin release-helper, so no separate copy is placed there.', ['claude-cli']), agent, five),
+    'On in Claude Code only · Codex can’t take it (see below) · kept out of Pi and OpenCode',
+  );
+  assert.equal(
+    statusLine(rowWith('Claude Code has it with the plugin release-helper, turned off there, so no separate copy is placed there.', []), agent, five),
+    'On · not in Claude Code or Codex (see below) · kept out of Pi and OpenCode',
+  );
 });
