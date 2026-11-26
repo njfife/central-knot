@@ -14832,10 +14832,10 @@ async function libraryFlow() {
   const skillsBefore = snapDirs(oSkillDirs);
   // Click 1: open Off skill bench-runner.
   await o.click(`#${rowPart('open', 'skills', 'bench-runner')}`);
-  same('Off skill opened row: status line and tool lines match keep-outs with per-tool Off switches',
+  same('Off skill opened row: status line and tool lines match keep-outs with per-tool Off switches and Claude Code warns that OpenCode reads it too',
     [await o.text('.details-status'), await readToolLines(o)],
     ['Off · On puts it back in 4 of 6 tools.', [
-      { tool: 'Claude Code', line: '', word: 'Off', label: 'bench-runner in Claude Code: off. Click to turn it on in Claude Code only.' },
+      { tool: 'Claude Code', line: 'If on, OpenCode reads it too', word: 'Off', label: 'bench-runner in Claude Code: off. Click to turn it on in Claude Code; OpenCode reads it from there too.' },
       { tool: 'Copilot CLI', line: '', word: 'Off', label: 'bench-runner in Copilot CLI: off. Click to turn it on in Copilot CLI only.' },
       { tool: 'Codex', line: 'Kept out', word: 'Off', label: 'bench-runner in Codex: off. Click to turn it on in Codex only.' },
       { tool: 'Pi', line: 'Kept out', word: 'Off', label: 'bench-runner in Pi: off. Click to turn it on in Pi only.' },
@@ -14955,14 +14955,15 @@ async function libraryFlow() {
   const claudePlugLabel = await o.run(`document.querySelector('.details .details-tool')?.querySelector('[role="switch"]')?.getAttribute('aria-label') ?? ''`);
   check('Claude Code whole-plugin line never offers one skill only', !/only\./.test(claudePlugLabel), claudePlugLabel);
 
-  // History entry words + Undo from History + older pre-14a entry still undoes as before.
+  // History entry words (naming OpenCode as reader) + Undo from History + older pre-14a entry still undoes as before.
   await o.click(`#${rowPart('open', 'skills', 'bench-runner')}`);
   await o.click(`#${rowPart('enable', 'skills', 'bench-runner', 'claude-cli')}`);
   await done(o);
   await o.click('#nav-history');
   await until(() => o.exists('.history-row'));
   const latestBench = await o.run(`(() => { const row = [...document.querySelectorAll('.history-row')].find(el => el.querySelector('.history-what strong')?.textContent === 'bench-runner'); return { about: row?.querySelector('.history-about')?.textContent?.trim(), act: row?.querySelector('.history-actions button')?.textContent?.trim(), id: row?.querySelector('.history-actions button')?.id }; })()`);
-  same('History entry says Turned on in Claude Code; kept out of every other tool with Undo', [latestBench.about, latestBench.act], ['Turned on in Claude Code; kept out of every other tool.', 'Undo']);
+  same('History entry says Turned on in Claude Code; OpenCode reads it too; kept out of the rest with Undo',
+    [latestBench.about, latestBench.act], ['Turned on in Claude Code; OpenCode reads it too; kept out of the rest.', 'Undo']);
   await o.click(`#${latestBench.id}`);
   await done(o);
   same('History Undo restores bench-runner Off with earlier keep-outs', [jsonOrNothing(oSkillRec)?.items['bench-runner']?.on, jsonOrNothing(oSkillRec)?.items['bench-runner']?.except], [false, ['codex-cli', 'pi-cli']]);
@@ -14970,6 +14971,25 @@ async function libraryFlow() {
   await o.click('#history-pre-14a-on');
   await done(o);
   same('older pre-14a History entry turns legacy-skill Off keeping its current keep-outs', [jsonOrNothing(oSkillRec)?.items['legacy-skill']?.on, jsonOrNothing(oSkillRec)?.items['legacy-skill']?.except], [false, ['codex-cli']]);
+  // With OpenCode not managed: neither the opened Off row nor History after clicking Claude Code mentions OpenCode.
+  await o.click('#nav-harnesses');
+  await until(() => o.exists('#manage-opencode-cli'));
+  await o.click('#manage-opencode-cli');
+  await until(() => o.run(`document.getElementById('manage-opencode-cli')?.getAttribute('aria-checked') === 'false'`));
+  await openKind(o, 'all');
+  if (await o.run(`document.querySelector('#${rowPart('open', 'skills', 'bench-runner')}')?.getAttribute('aria-expanded')`) !== 'true') await o.click(`#${rowPart('open', 'skills', 'bench-runner')}`);
+  await until(() => o.exists('.details .details-tool'));
+  const claudeUnmanagedOc = (await readToolLines(o)).find(entry => entry.tool === 'Claude Code');
+  same('with OpenCode not managed, Claude Code Off row line and label do not mention OpenCode',
+    claudeUnmanagedOc,
+    { tool: 'Claude Code', line: '', word: 'Off', label: 'bench-runner in Claude Code: off. Click to turn it on in Claude Code only.' });
+  await o.click(`#${rowPart('enable', 'skills', 'bench-runner', 'claude-cli')}`);
+  await done(o);
+  await o.click('#nav-history');
+  await until(() => o.exists('.history-row'));
+  const latestUnmanaged = await o.run(`(() => { const row = [...document.querySelectorAll('.history-row')].find(el => el.querySelector('.history-what strong')?.textContent === 'bench-runner'); return { about: row?.querySelector('.history-about')?.textContent?.trim(), act: row?.querySelector('.history-actions button')?.textContent?.trim() }; })()`);
+  same('with OpenCode not managed, History entry omits OpenCode reads it too',
+    [latestUnmanaged.about, latestUnmanaged.act], ['Turned on in Claude Code; kept out of every other tool.', 'Undo']);
   same('no page errors, 14a Off row one-tool checks', o.pageErrors, []);
   await o.quit();
 }
