@@ -1839,7 +1839,7 @@ app.whenReady().then(async () => {
   });
   handleNow('skills:plugin-file', async (ref, file) => {
     const ask = record(ref);
-    const from = ask?.from === 'marketplace' ? 'marketplace' : isTool(ask?.from) ? ask.from : undefined;
+    const from = ask?.from === 'marketplace' ? ('marketplace' as const) : isTool(ask?.from) ? ask.from : undefined;
     const source = typeof ask?.source === 'string' && ask.source.trim() ? ask.source : undefined;
     if (!current || !from || (from === 'marketplace' && !source)) return null;
     if (typeof ask?.marketName !== 'string' || typeof ask.plugin !== 'string' || typeof ask.part !== 'string' || typeof file !== 'string') return null;

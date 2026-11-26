@@ -3063,11 +3063,12 @@ interface FileCopy { tool: HarnessId; rootLabel?: string; directory?: string; re
 /** Distinct copies of a found or plugin skill in column order (tab's tool first): collapsed by real folder, or by hash (found) / version (plugin). */
 function skillFileCopies(t: Table, target: FileTarget): FileCopy[] {
   if (target.kind !== 'skill' && target.kind !== 'skills') return [];
+  const hashes = target.kind === 'skills' ? target.folderHashes : undefined;
   const raw = (toolsFor(t, 'skills') as HarnessId[]).flatMap<FileCopy>(tool => target.kind === 'skill'
     ? (target.copies[tool]?.path ? [{ tool, part: target.copies[tool]!.path, realDirectory: target.copies[tool]!.realDirectory, version: target.installs[tool]?.version }] : [])
     : (state.home?.snapshots?.find(entry => entry.harness === tool)?.skills ?? [])
       .filter(entry => itemKey(entry.folder) === target.key)
-      .map(entry => ({ tool, rootLabel: entry.rootLabel, directory: entry.directory, realDirectory: entry.realDirectory, hash: target.folderHashes?.[entry.realDirectory] })));
+      .map(entry => ({ tool, rootLabel: entry.rootLabel, directory: entry.directory, realDirectory: entry.realDirectory, hash: hashes?.[entry.realDirectory] })));
   const unique: FileCopy[] = [];
   for (const copy of raw) {
     if (!unique.some(kept => (!!kept.realDirectory && kept.realDirectory === copy.realDirectory)

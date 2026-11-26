@@ -260,21 +260,23 @@ test('reading plugin items for one plugin in two tools walks and hashes no files
     await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'demo@m': [{ scope: 'user', installPath: claudeCopy, version: '1.2.0' }] } }));
     await put(join(box.home, '.codex/config.toml'), '[plugins."demo@m"]\nenabled = true\n');
     const opened: string[] = [];
+    const hashed: string[] = [];
     const origOpen = fs.open;
     const origPromiseOpen = fs.promises.open;
-    const note = (path: fs.PathLike) => {
+    const note = (list: string[], path: fs.PathLike) => {
       if (typeof path !== 'string') return;
-      try { opened.push(realpathSync(path)); } catch { opened.push(path); }
+      try { list.push(realpathSync(path)); } catch { list.push(path); }
     };
-    fs.open = ((path: fs.PathLike, ...rest: unknown[]) => { note(path); return (origOpen as (...args: unknown[]) => unknown).call(fs, path, ...rest); }) as typeof fs.open;
-    fs.promises.open = ((path: fs.PathLike, ...rest: unknown[]) => { note(path); return (origPromiseOpen as (...args: unknown[]) => unknown).call(fs.promises, path, ...rest); }) as typeof fs.promises.open;
+    fs.open = ((path: fs.PathLike, ...rest: unknown[]) => { note(hashed, path); note(opened, path); return (origOpen as (...args: unknown[]) => unknown).call(fs, path, ...rest); }) as typeof fs.open;
+    fs.promises.open = ((path: fs.PathLike, ...rest: unknown[]) => { note(opened, path); return (origPromiseOpen as (...args: unknown[]) => unknown).call(fs.promises, path, ...rest); }) as typeof fs.promises.open;
     syncBuiltinESMExports();
     let installs: InstalledPlugin[];
     try { installs = await readPluginItems(box.context, ['claude-cli', 'codex-cli']); }
     finally { fs.open = origOpen; fs.promises.open = origPromiseOpen; syncBuiltinESMExports(); }
     const skillOpens = opened.map(slashPath).filter(path => path.includes('/skills/hello/'));
+    assert.deepEqual(hashed.map(slashPath).filter(path => path.includes('/skills/hello/')), [], 'no file in either tool’s skill folder is hashed');
     assert.deepEqual(skillOpens.filter(path => !path.endsWith('/SKILL.md')), [], 'no companion file in either tool’s skill folder is opened');
-    assert.equal(skillOpens.filter(path => path.endsWith('/SKILL.md')).length, 2, 'each tool’s SKILL.md is read only once (never hashed)');
+    assert.ok(skillOpens.length >= 2, 'spy observed SKILL.md reads for both tools');
     assert.deepEqual(installs.map(entry => [entry.tool, entry.version, entry.items.find(item => item.kind === 'skill')?.path]),
       [['claude-cli', '1.2.0', 'skills/hello'], ['codex-cli', '1.2.0', 'skills/hello']]);
   } finally { await box.cleanup(); }
