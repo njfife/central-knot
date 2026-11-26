@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DIRECTORY, FROM_DIRECTORY, WAITS_TO_MOVE, pluginsInstalled, blocked, cantUninstall, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, boxOf, itemsOnWords, toolMark, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
+import { DIRECTORY, FROM_DIRECTORY, WAITS_TO_MOVE, pluginsInstalled, pluginsTabNote, blocked, cantUninstall, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, boxOf, itemsOnWords, toolMark, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
 import { clickRuns, owedTo } from '../src/pluginrecord.ts';
 import { readInTurn, readInto, type Read } from '../src/reads.ts';
 import type { HarnessId, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
@@ -206,4 +206,9 @@ test('A plugin’s items in Pi are counted as Pi loads them: one its own setting
   const entry = { items: { maps: { lines: [], on: { 'pi-cli': 2 }, keptOut: { 'pi-cli': 1 }, of: { 'pi-cli': 2 } } } } as unknown as MarketplaceView;
   assert.equal(itemsOnWords(entry, 'maps', 'pi-cli', ' there'), '1 of its 2 items is on there (Pi’s own settings keep 1 out)');
   assert.equal(itemsOnWords({ items: { maps: { lines: [], on: { 'pi-cli': 2 }, of: { 'pi-cli': 2 } } } } as unknown as MarketplaceView, 'maps', 'pi-cli'), '2 of its 2 items are on');
+});
+
+test('A native tool’s Plugins tab note names turning on or off and installing elsewhere when writable, or only seeing which tools have it in Preview only', () => {
+  assert.equal(pluginsTabNote('claude-cli', true), 'Installed in Claude Code from your marketplaces. Open one to turn it on or off here, or to install it in another tool.');
+  assert.equal(pluginsTabNote('claude-cli', false), 'Installed in Claude Code from your marketplaces. Open one to see which tools have it.');
 });
