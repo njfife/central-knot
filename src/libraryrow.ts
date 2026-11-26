@@ -652,11 +652,11 @@ export function sentences(words: RowWords) {
       if (!out) return failed ? `${name} couldn’t be put in ${where}.` : `${name} is on in ${where} again.`;
       return failed ? `${name} couldn’t be taken out of ${where} yet.` : `${name} is kept out of ${where}. Central Knot keeps its ${copy} for when you turn it on there.`;
     },
-    /** An Off row's tool switch: on in one tool, naming every other tool that still has it (another way, own copy, plugin or copy). */
-    onOnly(name: string, tool: string, failed: boolean, row?: LibraryRow, tools: readonly string[] = [], item?: LibraryItem): string {
+    /** An Off row's tool switch: on in one tool, naming every other tool holding it; "only" when every installed tool is managed. */
+    onOnly(name: string, tool: string, failed: boolean, row?: LibraryRow, tools: readonly string[] = [], item?: LibraryItem, leftOut: readonly string[] = []): string {
       const where = toolName(tool);
       if (failed) return `${name} couldn’t be put in ${where}.`;
-      if (!row) return `${name} is on in ${where} only.`;
+      if (!row) return `${name} is on in ${where}.`;
       const left = (taken: readonly string[]) => tools.filter(each => each !== tool && !taken.includes(each));
       const through = onThrough(row, left([]));
       const readers = otherReaders(row, left(through));
@@ -665,7 +665,7 @@ export function sentences(words: RowWords) {
       const say = (list: readonly string[], one: string, many: string) => (list.length ? `${andList(list.map(toolName))} ${list.length === 1 ? one : many}.` : '');
       const extra = [say(readers, 'reads it too', 'read it too'), say(own, 'has its own copy', 'have their own copies'),
         say(through, 'has it on through its plugin', 'have it on through its plugin'), say(still, 'still has a copy', 'still have copies')].filter(Boolean);
-      return extra.length ? [`${name} is on in ${where}.`, ...extra].join(' ') : `${name} is on in ${where} only.`;
+      return extra.length ? [`${name} is on in ${where}.`, ...extra].join(' ') : `${name} is on in ${where}${leftOut.length ? '' : ' only'}.`;
     },
     /** `when`: the version's time (versionClock). `on`: the harnesses it was written to; undefined for an item that is Off. */
     madeCurrent(name: string, version: Version, when: string, on: readonly string[] | undefined, tools: readonly string[]): string {

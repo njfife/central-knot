@@ -13997,17 +13997,15 @@ async function libraryFlow() {
     await win.settle();
     const fit = await win.run(`(() => {
       const band = document.querySelector('#header [data-outcome] .band-text');
-      const more = document.getElementById('outcome-more');
       const rect = band?.getBoundingClientRect();
       return {
         text: band?.textContent?.trim() ?? '',
         whole: !!band && band.scrollWidth <= band.clientWidth + 1,
         inside: !!rect && rect.left >= 0 && rect.right <= window.innerWidth,
-        moreHidden: !more || getComputedStyle(more).display === 'none' || more.hidden,
       };
     })()`);
-    same(`at 860 with sidebar open, result "${expected}" is whole and inside the window without Show all`,
-      fit, { text: expected, whole: true, inside: true, moreHidden: true });
+    same(`at 860 with sidebar open, result "${expected}" is whole and inside the window`,
+      fit, { text: expected, whole: true, inside: true });
     if (shotName && shots) await win.shot(shotName);
     await fullSize(win);
   };

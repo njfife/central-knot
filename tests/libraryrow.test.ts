@@ -484,9 +484,13 @@ test('An Off row offers one tool only: rowClicks.onOnly keeps every other tool o
   };
   assert.equal(statusLine(openReads, onClaudeOnly, six),
     'On in Claude Code · OpenCode has it another way · kept out of Copilot CLI, Codex, Pi and Antigravity');
-  // said.onOnly: failure, clean one-tool-only, OpenCode reading Claude Code's folder, link reader, own copy in another tool, shared folder + pluginOn (never "only" while another has it).
+  // said.onOnly: failure, clean one-tool-only, missing fresh row or unmanaged tool (no "only"), OpenCode reading Claude Code's folder, link reader, own copy in another tool, shared folder + pluginOn.
   assert.equal(skills.said.onOnly('bench-runner', 'claude-cli', true, row({}), six), 'bench-runner couldn’t be put in Claude Code.');
   assert.equal(skills.said.onOnly('bench-runner', 'codex-cli', false, { key: 'bench-runner', hashes: { 'codex-cli': 'b' } }, six), 'bench-runner is on in Codex only.');
+  assert.equal(skills.said.onOnly('bench-runner', 'codex-cli', false, undefined, six), 'bench-runner is on in Codex.');
+  assert.equal(skills.said.onOnly('left-out-test', 'codex-cli', false, { key: 'left-out-test', hashes: { 'codex-cli': 'b' } },
+    ['claude-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'], undefined, ['copilot-cli']),
+    'left-out-test is on in Codex.');
   assert.equal(skills.said.onOnly('bench-runner', 'claude-cli', false, openReads, six, onClaudeOnly),
     'bench-runner is on in Claude Code. OpenCode reads it too.');
   const linkedOther: LibraryRow = {

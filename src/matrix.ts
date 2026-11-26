@@ -2757,7 +2757,7 @@ function libraryHarnessSwitch(t: Table, lib: LibraryPage, skill: ItemRow, tool: 
   if (!item.on) {
     const said = (notIn: HarnessId[]) => {
       const now = rowByKey(skill.kind, skill.key);
-      return lib.say.said.onOnly(name, tool, notIn.includes(tool as HarnessId), now, toolsFor(t, skill.kind), now && itemOf(now));
+      return lib.say.said.onOnly(name, tool, notIn.includes(tool as HarnessId), now, toolsFor(t, skill.kind), now && itemOf(now), leftOutTools());
     };
     const turnHere = () => {
       pinRow(t, skill);
