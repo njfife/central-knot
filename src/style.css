@@ -613,6 +613,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ov-section-label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .ov-section-label strong { font-weight: 600; }
 .ov-section-count { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.ov-section-label > .info-wrap { margin-left: -4px; flex: none; }
 .ov-section-after { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 /* A heading note's room while rows not its own are pinned under it (matrix.ts section). */
 .ov-section-room { visibility: hidden; }
