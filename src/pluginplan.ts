@@ -277,6 +277,8 @@ export const notUndone = (ops: PluginOp[], done: PluginDone[]): PluginOp[] => op
 export interface LastRun { done: PluginDone[]; undo: boolean; home: string; rest?: PluginOp[]; /** Read again since (Refresh): what the tools have now may differ from what this run says it did. */ reread?: boolean;
   /** The plugins a run that stopped never reached (pluginstate.ts applyPluginOps). */
   unreached?: { source: string; plugin: string }[];
+  /** Appended profileLeftUse sentence when the run ended every profile in use (pluginstate.ts, pluginspage.ts). */
+  profileLine?: string;
   /**
    * Set when a plugin's switch made the run (marketplaces.ts turn): the plugin's entry before it (null: none), its Undo as main
    * gave it (`back`), and what that Undo can't put back (pluginstatus.ts undoLimits).
