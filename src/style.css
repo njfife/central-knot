@@ -1925,7 +1925,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .tool-switch { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-soft); }
 /* The app's switch, at its own size (the row's action-button height doesn't apply to it). */
 .details-tool-actions .tool-switch .switch { height: 18px; }
-.delete-armed { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; max-width: 100%; }
+.delete-armed { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
 /* Cancel starts where the actions above it start ("Files and contents"), as a lone action in .details-actions does. */
 .delete-armed > .text-action:first-child { padding-left: 0; }
 /* What a confirming click also does (the links and the shared copy it removes), on its own line under the two buttons. */
