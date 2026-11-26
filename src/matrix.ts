@@ -2170,6 +2170,12 @@ function pluginRowSwitch(t: Table, row: PluginRow) {
 /** A switch's label while a click on its row is unfinished: what it is being turned to. */
 const turningLabel = (name: string, on: boolean) => `${name}: being turned ${on ? 'on' : 'off'}.`;
 
+/** Pins a clicked row (or every found row while Find has text) so turning it on or off doesn't jump it out of view. */
+function pinRow(t: Table, skill: ItemRow) {
+  if (searching(t)) holdFound(t);
+  else pin(pinnedHere(t), idOf(skill), sectionOf(t, skill), rankIn(skill, chosenOrder(t), itemOf, usageIn(t)));
+}
+
 /**
  * The switch's click: off everywhere, or on everywhere (a found item taken in, after a copy choice where its copies differ). It
  * joins the page's list (app.ts queueClick), its row drawn in its new state at once and worked out in its turn, from the view as
@@ -2178,7 +2184,7 @@ const turningLabel = (name: string, on: boolean) => `${name}: being turned ${on 
  */
 function flip(t: Table, skill: ItemRow, on: boolean) {
   const { kind, key } = skill;
-  if (searching(t)) holdFound(t); else pin(pinnedHere(t), idOf(skill), sectionOf(t, skill), rankIn(skill, chosenOrder(t), itemOf, usageIn(t)));
+  pinRow(t, skill);
   if (takeBack(kind, key)) { rerender(); return; }
   if (on && isDiffering(skill)) {
     // The question opens under its row; a second click on the switch closes it.
@@ -2277,7 +2283,8 @@ const libraryMarks: Record<HarnessIs, { look: MarkLook; key: keyof typeof keyWor
 };
 function libraryMark(lib: LibraryPage, skill: ItemRow, tool: Tool): ReturnType<typeof markOf> {
   const item = itemOf(skill), is = harnessIs(skill, item, tool);
-  const words = `${names[tool]}: ${lib.say.harnessLine(skill, item, tool, names[tool]).replace(/^./, first => first.toLowerCase())}`;
+  const line = lib.say.harnessLine(skill, item, tool, names[tool]) || 'No copy while it is off.';
+  const words = `${names[tool]}: ${line.replace(/^./, first => first.toLowerCase())}`;
   // Off, or found: a harness with no copy while Central Knot keeps the item is off there; a found item's own copy is simply on.
   const drawn = is === 'none' && inLibrary(item) ? { look: 'off' as const, key: 'off-in-ck' as const } : is === 'own-copy' && !inLibrary(item) ? { look: 'on' as const, key: 'has' as const } : libraryMarks[is];
   // Loaded there, but that tool's own switch turns it off: a mark of its own, whoever set the switch (libraryrow.ts `switchedOff`).
@@ -2723,7 +2730,7 @@ function rowPluginFacts(skill: ItemRow, tool: Tool) {
  * controls, each applied at once: a plugin's line where it is one (rowPluginFacts); else the item's switch for that harness and what
  * its kind adds there (libraryHarnessSwitch), or nothing where the tool has it through a plugin whose copy isn't read.
  */
-function harnessLine(skill: ItemRow, tool: Tool): { text: string; control: HTMLElement | null; result: HTMLElement | null } {
+function harnessLine(t: Table, skill: ItemRow, tool: Tool): { text: string; control: HTMLElement | null; result: HTMLElement | null } {
   const plugged = rowPluginFacts(skill, tool), through = plugged?.through;
   const reload = state.outcome && outcomeShown(state.outcome, useTableShown())
     ? rowReload(state.outcome.reloads, toItemKind(skill.kind), through ? itemKey(through.name) : skill.key, tool as HarnessId, through ? `${through.install.plugin}@${through.install.marketName}` : undefined, toolWays()) : '';
@@ -2731,22 +2738,37 @@ function harnessLine(skill: ItemRow, tool: Tool): { text: string; control: HTMLE
   if (plugged) return pluginLine(skill, plugged, through ? skill.cannot?.[tool] ?? '' : '', reload);
   const lib = libraryPages[skill.kind], own = skill.ownPart?.[tool];
   return { text: [lib.say.harnessLine(skill, itemOf(skill), tool, names[tool]), own?.length ? lib.words.own(own) : '', reload].filter(Boolean).join(' '),
-    control: throughPluginHere(skill, tool) ? null : libraryHarnessSwitch(lib, skill, tool), result: resultLine(skill, tool) };
+    control: throughPluginHere(skill, tool) ? null : libraryHarnessSwitch(t, lib, skill, tool), result: resultLine(skill, tool) };
 }
 
 /**
- * One harness's own switch for a library item that is On: off keeps the item out of that harness (its copy there goes, and
- * Central Knot keeps it for later), on lets it in again. An item that is Off or only found has one switch: its row's.
+ * One harness's own switch for a library item: on an On row, off keeps it out and on lets it in again; on an Off row (not
+ * plugin-sourced), on turns it on in that tool only. Found items keep their row's Add.
  */
-function libraryHarnessSwitch(lib: LibraryPage, skill: ItemRow, tool: Tool) {
+function libraryHarnessSwitch(t: Table, lib: LibraryPage, skill: ItemRow, tool: Tool) {
   const item = inLibrary(itemOf(skill)), own = lib.tool?.(skill, tool as HarnessId) ?? null;
-  // Off, found, or a harness that can't take it: no switch there, only what the kind offers on its line.
-  if (!item?.on || harnessIs(skill, item, tool) === 'cannot') return own && h('span.details-tool-actions', {}, own);
+  // Found, a plugin-sourced Off row, or a harness that can't take it: no switch there, only what the kind offers on its line.
+  if (!item || (!item.on && pluginOf(skill.fromSource?.link ?? '')) || harnessIs(skill, item, tool) === 'cannot') return own && h('span.details-tool-actions', {}, own);
   const name = nameOf(skill), where = names[tool], out = item.except.includes(tool as HarnessId);
   // A state of the tool's own, said in its own word in place of Central Knot's switch: its own switch has it off (the kind's
   // action there lets it load it again), or it has it another way, where nothing of Central Knot's goes.
-  const ownState = out ? undefined : skill.switchedOff?.includes(tool) ? 'Switched off' : harnessIs(skill, item, tool) === 'another-way' ? 'Another way' : undefined;
+  const ownState = item.on && out ? undefined : skill.switchedOff?.includes(tool) ? 'Switched off' : harnessIs(skill, item, tool) === 'another-way' ? 'Another way' : undefined;
   if (ownState) return h('span.details-tool-actions', {}, own, h('span.tool-switch', {}, h('span.tool-switch-word.tool-switch-word-own', {}, ownState)));
+  if (!item.on) {
+    const said = (notIn: HarnessId[]) => {
+      const now = rowByKey(skill.kind, skill.key);
+      return lib.say.said.onOnly(name, tool, notIn.includes(tool as HarnessId), now, toolsFor(t, skill.kind), now && itemOf(now), leftOutTools());
+    };
+    const turnHere = () => {
+      pinRow(t, skill);
+      click({ kind: skill.kind, items: [name], rows: [rowKey(skill)], changes: [rowClicks.onOnly(skill, item, tool)], said });
+    };
+    return h('span.details-tool-actions', {}, own, h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, 'Off'),
+      toggle({
+        on: false, disabled: writeOff(kindStops(skill.kind)), id: elId('enable', skill, tool),
+        label: `${name} in ${where}: off. Click to turn it on in ${where} only.`, onchange: turnHere,
+      })));
+  }
   const said = (notIn: HarnessId[]) => lib.say.said.inHarness(name, tool, !out, notIn.includes(tool as HarnessId));
   const does = out ? `Click to put it in ${where} again, its ${lib.words.copy} as it was.` : `Click to keep it out of ${where}: its copy there goes, and Central Knot keeps it.`;
   const flipHere = (on: boolean) => click({ kind: skill.kind, items: [name], rows: [rowKey(skill)], changes: [rowClicks.inHarness(skill, item, tool, !on)], said });
@@ -2824,7 +2846,7 @@ function details(t: Table, skill: ItemRow, placement: Placement = 'row'): HTMLEl
   // MCP: each tool's row has its settings file and Show in folder, where a server is changed.
   const settingsFile = (tool: Tool) => (skill.kind === 'mcp' && skill.paths?.[tool] ? [wrappingPath(skill.paths[tool]!), showInFolder(skill.paths[tool]!)] : []);
   const toolRow = (tool: Tool) => {
-    const line = harnessLine(skill, tool);
+    const line = harnessLine(t, skill, tool);
     return h('div.details-tool', {},
       h('div.details-tool-head', {},
         h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
