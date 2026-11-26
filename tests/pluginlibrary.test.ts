@@ -85,7 +85,14 @@ async function kitHome(options: { tools?: HarnessId[]; remote?: true } = {}) {
       return { tool, outcome: 'uninstalled', message: 'Uninstalled.', runs: [], changed: true };
     },
     update: async () => { throw new Error('not in these tests'); }, setSkill: async () => { throw new Error('not in these tests'); },
-    setPart: async () => { throw new Error('not in these tests'); }, setWhole: async () => { throw new Error('not in these tests'); },
+    setPart: async () => { throw new Error('not in these tests'); },
+    // Claude Code's disable and enable write its settings, as its own do.
+    setWhole: async (_context, marketplace, plugin, tool, on) => {
+      calls.push(`whole ${plugin} ${tool} ${on}`);
+      const path = join(home, '.claude/settings.json'), now = JSON.parse(await readFile(path, 'utf8').catch(() => '{}'));
+      await put(path, JSON.stringify({ ...now, enabledPlugins: { ...now.enabledPlugins, [`${plugin}@${marketplace}`]: on } }));
+      return { tool, outcome: on ? 'plugin-on' : 'plugin-off', message: '', runs: [], changed: true };
+    },
   };
   const markets = createMarketplaces(host, use, []);
   const kit = await market(root);
@@ -293,7 +300,7 @@ test('An item turned off by itself comes back On with the plugin’s On: nothing
 
 // ---------- Held in the tools with an installer ----------
 
-test('In Claude Code a linked item is held: with the plugin installed it has it another way; kept out or not installed it can’t be given it, and his own copy there stays as it is whichever way Claude Code’s record reads', async () => {
+test('In Claude Code a linked item is held: with the plugin installed, on or kept off there, it has it another way, and his own copy there stays as it is whichever way Claude Code’s record reads', async () => {
   const box = await kitHome();
   try {
     await put(join(box.home, '.claude/skills/notes/SKILL.md'), skill('notes', 'his own'));
@@ -308,14 +315,14 @@ test('In Claude Code a linked item is held: with the plugin installed it has it 
     await put(record, text);
     await applySkills(box.share, box.tools, []);
     assert.equal(await own(), skill('notes', 'his own'), 'readable again: nothing removed');
-    // Kept out of Claude Code: still nothing written there, and its line says why.
+    // Kept out of Claude Code, the plugin kept there, off: still nothing written there, and its line says why.
     await rm(join(box.home, '.claude/skills'), { recursive: true });
     await box.turn('keep-out', 'claude-cli');
     await applySkills(box.share, box.tools, []);
     assert.equal(await exists(join(box.home, '.claude/skills/review')), false);
     const { skillsView } = await import('../src/skills.ts');
     const line = (await skillsView(box.share, box.tools)).items.find(item => item.key === 'review')!;
-    assert.match(line.cannot['claude-cli'] ?? JSON.stringify(line), /only with the plugin kit, and the plugin is kept out of Claude Code/);
+    assert.equal(line.anotherWay?.['claude-cli'], 'Claude Code has it with the plugin kit, turned off there, so no separate copy is placed there.');
   } finally { await box.cleanup(); }
 });
 

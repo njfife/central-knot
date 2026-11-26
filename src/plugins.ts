@@ -1247,9 +1247,9 @@ async function native(context: PluginContext, tool: PluginTool, args: string[]):
   return { tool, command, ok: result.code === 0, output, changed };
 }
 
-/** Each tool's own install and uninstall of plugin@marketplace (`id`). */
+/** Each tool's own install and uninstall of plugin@marketplace (`id`). Claude Code's uninstall would delete the plugin's data folder without `--keep-data`. */
 const installArgs = (tool: PluginTool, id: string) => ({ 'claude-cli': ['plugin', 'install', id, '--scope', 'user'], 'copilot-cli': ['plugin', 'install', id], 'codex-cli': ['plugin', 'add', id, '--json'] })[tool];
-const uninstallArgs = (tool: PluginTool, id: string) => ({ 'claude-cli': ['plugin', 'uninstall', id, '--scope', 'user'], 'copilot-cli': ['plugin', 'uninstall', id], 'codex-cli': ['plugin', 'remove', id, '--json'] })[tool];
+const uninstallArgs = (tool: PluginTool, id: string) => ({ 'claude-cli': ['plugin', 'uninstall', id, '--scope', 'user', '--keep-data'], 'copilot-cli': ['plugin', 'uninstall', id], 'codex-cli': ['plugin', 'remove', id, '--json'] })[tool];
 
 /**
  * The marketplaces a tool's own add refused while the app runs, by tool and source, with the tool's version then and why in its

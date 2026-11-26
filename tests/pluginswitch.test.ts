@@ -233,6 +233,13 @@ test('a main switch turns a plugin’s skill off in every tool that has it, the 
   assert.deepEqual(everyItem(back), everyItem(installs));
 });
 
+test('a plugin the plugins record keeps off in a tool is not turned on there by an item’s switch: a main switch leaves it, saying why', () => {
+  const kept = item(installed('claude-cli', { off: true, keptOff: true }), 'skill', 'one'), other = item(installed('codex-cli', { off: true }), 'skill', 'one');
+  const said = 'full is off in Claude Code, kept installed: Turn the plugin on, on its line in the opened row, turns it on again.';
+  const on = turnEvery([kept, other], true);
+  assert.deepEqual([cantSwitch(kept), on.turned.map(entry => entry.tool), chosen(on.draft).filter(step => step.startsWith('claude-cli')), on.left, on.leftIn], [said, ['codex-cli'], [], [`Still off in Claude Code: ${said}`], ['claude-cli']]);
+});
+
 test('a main switch’s result says the item first, then what came with it: a plugin turned on for it, with what was left off; one other item by name', () => {
   const codexOff = installed('codex-cli', { off: true }), copilot = installed('copilot-cli', { skillsOff: ['one'] });
   const on = turnEvery([item(codexOff, 'mcp', 'issues'), item(copilot, 'skill', 'one')], true);

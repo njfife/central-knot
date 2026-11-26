@@ -8,7 +8,7 @@ import { markdown } from './markdown.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginKey, resultLines, succeeded, type PluginOp } from './pluginplan.ts';
 import { applyPluginOps, clickOn, market, openLink, pluginBusy, shownDetail, turnPlugin, type PluginClick } from './pluginstate.ts';
-import { PREVIEW_ONLY, addWords, boxOf, cantUninstall, copyStale, foundIn, itemsAllIn, itemsIn, outdated, switchPartial, switchWords, toolMark, updateTools, versionToCompare, type ToolMark } from './pluginstatus.ts';
+import { PREVIEW_ONLY, addWords, boxOf, cantUninstall, copyStale, foundIn, inUseIn, itemsAllIn, itemsIn, outdated, stateOf, switchPartial, switchWords, toolMark, updateTools, versionToCompare, type ToolMark } from './pluginstatus.ts';
 import { pluginUpdates } from './pluginupdateview.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, PluginTurn, PluginView, PluginsView } from './types.ts';
 import { takesPlugins } from './presence.ts';
@@ -44,6 +44,7 @@ const MARK_LOOKS: Record<ToolMark, { look: string; glyph: () => Element }> = {
   installed: { look: 'cell-synced.cell-on', glyph: () => icon('check', 16) },
   outdated: { look: 'cell-differs.cell-on', glyph: () => icon('refresh-cw', 14) },
   items: { look: 'cell-synced.cell-on', glyph: () => icon('check', 16) },
+  'kept-off': { look: 'cell-not-brought', glyph: () => icon('unplug', 14) },
   stays: { look: 'cell-differs.cell-on', glyph: () => icon('circle-alert', 14) },
   waits: { look: 'cell-waiting', glyph: () => icon('clock', 14) },
   'not-brought': { look: 'cell-not-brought', glyph: () => icon('circle-off', 14) },
@@ -98,16 +99,30 @@ export function markCell(view: PluginsView, entry: MarketplaceView, plugin: Plug
 export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, marketIndex: number, offered: string | undefined) {
   const id = `pbox-${marketIndex}-${plugin.name}-${tool}`;
   const { mark, words } = markOf(view, entry, plugin, tool, offered), box = boxOf(view, entry, plugin.name, tool, { mark, words });
-  const what = takesPlugins(tool) ? plugin.name : `${plugin.name}’s items`, where = names[tool];
-  const does = box.ticked ? `Click to take ${what} out of ${where}: it stays out until you tick it again. Undo puts it back.`
-    : entry.switches?.[plugin.name]?.entry?.on ? `Click to put ${what} in ${where}. Undo takes it out again.` : `Click to turn ${plugin.name} on in ${where} alone. Undo turns it off again.`;
-  const label = box.held ? words : `${words} ${box.off ?? does}`;
+  const label = box.held ? words : `${words} ${box.off ?? boxDoes(view, entry, plugin.name, tool, mark, box.ticked)}`;
   // Ticked with its items in full only where each is on there or the same as his (pluginstatus.ts itemsAllIn); else a dash, mixed.
   const some = mark === 'items' && !itemsAllIn(entry, plugin.name, tool), shown = some ? { ...MARK_LOOKS[mark], glyph: () => icon('minus', 16) } : MARK_LOOKS[mark];
   const { look, glyph } = box.ticked || box.held ? shown : { look: 'cell-absent', glyph: () => null };
   return workingCell(entry, plugin, tool, id) ?? waitingCell(entry, plugin, tool, id) ?? h('div.ov-cell', { role: 'cell' }, h(`button.cell-button.cell-box.${look}`, { type: 'button', id, role: 'checkbox', 'aria-checked': some ? 'mixed' : String(box.ticked),
     'aria-label': label, title: label, 'data-state': mark, disabled: !!box.off || pluginBusy(entry.source, plugin.name),
     onclick: () => turnPlugin(entry, plugin.name, box.ticked ? 'keep-out' : 'let-in', tool) }, glyph()));
+}
+
+/** What a click on a tool's box does there, and its Undo, in the state it is drawn in (pluginrecord.ts A TOOL'S BOX and row 9). */
+function boxDoes(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, mark: ToolMark, ticked: boolean): string {
+  const what = takesPlugins(tool) ? plugin : `${plugin}’s items`;
+  const where = names[tool];
+  const sw = entry.switches?.[plugin];
+  const on = !!sw?.entry?.on;
+  const state = stateOf(entry, plugin, tool);
+  // Off there already: the click runs nothing in the tool, so it has no Undo there to promise.
+  if (ticked && state.state === 'installed' && state.off) return `Click to keep ${what} out of ${where}, where it is off already and stays installed.`;
+  if (ticked && sw?.tools[tool]?.keeps) return `Click to turn ${what} off in ${where}, kept installed: it stays off until you tick it again. Undo turns it on again.`;
+  if (ticked) return `Click to take ${what} out of ${where}: it stays out until you tick it again. Undo puts it back.`;
+  if (on && mark !== 'kept-off') return `Click to put ${what} in ${where}. Undo takes it out again.`;
+  // A tick on an Off plugin turns it On where another tool has it in use too (marketplaces.ts turnedEntry): "alone" only where none does.
+  const alone = on || view.tools.some(other => other !== tool && inUseIn(entry, plugin, other)) ? '' : ' alone';
+  return `Click to turn ${plugin} on in ${where}${alone}. Undo ${mark === 'kept-off' ? 'turns it off' : 'takes it out'} again.`;
 }
 
 /**
@@ -146,7 +161,7 @@ export function clickWords(click: PluginClick, onRow = false): { text: string; f
   return { text: `${text.charAt(0).toUpperCase()}${text.slice(1)}`, failed };
 }
 /** Each click's verb on a row, and the word before its tools. */
-const ROW_VERBS: Record<PluginTurn, [string, string]> = { on: ['Installed', 'in'], 'let-in': ['Put', 'in'], add: ['Added', 'in'], off: ['Uninstalled', 'from'], 'keep-out': ['Taken out', 'of'] };
+const ROW_VERBS: Record<PluginTurn, [string, string]> = { on: ['Turned on', 'in'], 'let-in': ['Turned on', 'in'], add: ['Added', 'in'], off: ['Turned off', 'in'], 'keep-out': ['Turned off', 'in'] };
 function rowWords(what: PluginTurn, { done, stopped }: NonNullable<PluginClick['ran']>): string {
   const [verb, to] = ROW_VERBS[what], missed = [...new Set(done.filter(step => !succeeded(step.report)).map(step => step.tool))];
   const went = [...new Set(done.map(step => step.tool))].filter(tool => !missed.includes(tool));

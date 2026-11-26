@@ -9,7 +9,8 @@ import { openCodeSettings } from './harnesses.ts';
 import { readJsonc, readTomlTables } from './textedit.ts';
 import { nameOfFile, record, text } from './values.ts';
 import { installedCopies, installedPlugins, registeredMarketplaces, type PluginContext } from './plugins.ts';
-import { loadsKind, samePart } from './pluginstatus.ts';
+import { keptOff, loadsKind, samePart } from './pluginstatus.ts';
+import { entryOf, readPluginRecord } from './pluginrecord.ts';
 import { takesPlugins } from './presence.ts';
 import type { DeclaredHook, HarnessId, InstalledPlugin, InstructionFile, NamedPart, PartKind, PluginItem } from './types.ts';
 
@@ -24,11 +25,13 @@ export const UNREADABLE = 'Its files couldn’t be read.';
  */
 export async function readPluginItems(context: PluginContext, tools: HarnessId[]): Promise<InstalledPlugin[]> {
   const read = { ...context, reads: context.reads ?? new Map() };
+  const { record } = await readPluginRecord(context.home);
   const perTool = await Promise.all(tools.filter(takesPlugins).map(async tool => {
     const [plugins, markets] = await Promise.all([installedCopies(read, tool).catch(() => []), registeredMarketplaces(read, tool).catch(() => [])]);
     return plugins.map(({ plugin, marketplace, state, off, contents, serversOff, agentsOff, serversHeld }): InstalledPlugin => {
       const source = markets.find(market => market.name === marketplace)?.source;
-      const base: InstalledPlugin = { tool, plugin, marketName: marketplace, ...(off ? { off } : {}), items: [], listed: !!source, ...(source ? { source } : {}) };
+      const kept = keptOff(source ? entryOf(record, source, plugin) : undefined, tool, off);
+      const base: InstalledPlugin = { tool, plugin, marketName: marketplace, ...(off ? { off } : {}), ...(kept ? { keptOff: true as const } : {}), items: [], listed: !!source, ...(source ? { source } : {}) };
       if (state.state !== 'installed') return { ...base, problem: state.state === 'not-known' ? state.reason : UNREADABLE };
       if (!contents) return { ...base, problem: UNREADABLE };
       // `path`: the skill's folder ('.' for the plugin's root) or the agent's file, as each copy has it (catalogdetail.ts skillsIn).

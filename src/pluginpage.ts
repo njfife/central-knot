@@ -58,7 +58,7 @@ function installedLine(version: string | undefined, offered: string | undefined,
 
 /** Each mark's short words on a tool's line (the whole sentence is its tooltip: pluginstatus.ts toolMark). */
 const MARK_WORDS: Record<ToolMark, string> = {
-  installed: 'Installed', outdated: 'Installed', items: 'Its items', stays: 'Still installed', waits: 'Goes in at the next check', 'not-brought': 'Not brought here: off in a tool’s own settings',
+  installed: 'Installed', outdated: 'Installed', items: 'Its items', 'kept-off': 'Off, kept installed', stays: 'Still installed', waits: 'Goes in at the next check', 'not-brought': 'Not brought here: off in a tool’s own settings',
   missing: 'Not in it, though on', 'parts-waiting': 'Waits to be moved', cannot: 'Not available', absent: 'Not installed', unknown: 'Can’t be read now', 'not-known': 'Unknown',
 };
 
@@ -74,7 +74,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const status = (tool: HarnessId, mark: ToolMark) => {
     const stale = copyStale(entry, plugin.name, tool, compareTo, shownDetail(pluginKey(entry.source, plugin.name)));
     const state = stateOf(entry, plugin.name, tool);
-    if (state.state === 'installed' && mark !== 'stays') {
+    if (state.state === 'installed' && mark !== 'stays' && mark !== 'kept-off') {
       return installedLine(state.version, compareTo, [state.directory ? 'from the Anthropic Directory' : '', stale ? 'differs from the marketplace’s copy' : '', state.off ? 'off in its own settings' : '',
         state.skillsOff?.length ? `${plural(state.skillsOff.length, 'skill')} off` : '']);
     }
