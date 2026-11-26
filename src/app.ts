@@ -1,6 +1,6 @@
 // The page's state and most pages' actions (MAP.md, "The app's shell and Settings"): the open home's view and each page's own
-// state (`state`), the page shown (showPage), what is said after a click (tell, announce; withProfileEnded is the one place that appends
-// words.ts profileLeftUse when an act ended every profile in use, called by tell and sayRun, via profilesBefore and profileplan.ts endedProfiles) and when a result goes by itself
+// state (`state`), the page shown (showPage), what is said after a click (tell, announce; profileEndedLine, via profilesBefore and
+// profileplan.ts endedProfiles, gives words.ts profileLeftUse when an act ended every profile in use, called by withProfileEnded and pluginstate.ts) and when a result goes by itself
 // (FADE_MS), the busy line (busy) and whether the page is acting (acting: busy, or a run of clicks: clicklist.ts); a click on an
 // item list sent to its kind's engine (carryOut, through kindPages), at once under busy (applyClick), one per kind as one
 // (applyByKind) or in its turn in the page's list (queueClick), its result kept for the page (lastResult), a run's said once
@@ -227,20 +227,24 @@ export function announce(text: string, quiet = false, link?: { label: string; ru
   paintStatusMessage();
 }
 
-/** Profiles in use before an act began, with its home, so tell can say when the act ended all of them. */
+/** Profiles in use before an act began, with its home, so tell and pluginstate can say when the act ended all of them. */
 export interface ProfilesBefore { home: string; profiles: Profile[] }
 let actBefore: ProfilesBefore | undefined;
-/** Snapshots the open home and the profiles in use in it before an act starts (busy, and queueClick). */
-function profilesBefore(): ProfilesBefore | undefined {
+/** Snapshots the open home and the profiles in use in it before an act starts (busy, queueClick, pluginstate.ts). */
+export function profilesBefore(): ProfilesBefore | undefined {
   return state.home ? { home: state.home.home, profiles: inUseInHome(state.home) } : undefined;
+}
+/** Gives profileLeftUse when every profile in `before` stopped being in use in `after` (same home), else undefined. */
+export function profileEndedLine(before: ProfilesBefore | undefined = actBefore, after: HomeView | undefined = state.home): string | undefined {
+  if (!before || !after || after.home !== before.home) return undefined;
+  const ended = endedProfiles(before.profiles, inUseInHome(after));
+  return ended.length ? profileLeftUse(ended.map(profile => profile.name)) : undefined;
 }
 /** Appends profileLeftUse when an act in the same home ended every profile that was in use before it. */
 function withProfileEnded(outcome: Outcome, { checkProfile = true, before = actBefore }: { checkProfile?: boolean; before?: ProfilesBefore } = {}): Outcome {
-  if (!checkProfile || !before || outcome.refused || outcome.profileLine || !state.home || state.home.home !== before.home) return outcome;
-  const ended = endedProfiles(before.profiles, inUseInHome(state.home));
-  if (!ended.length) return outcome;
-  const profileLine = profileLeftUse(ended.map(profile => profile.name));
-  return { ...outcome, text: [outcome.text, profileLine].filter(Boolean).join(' '), profileLine };
+  if (!checkProfile || outcome.refused || outcome.profileLine) return outcome;
+  const profileLine = profileEndedLine(before);
+  return profileLine ? { ...outcome, text: [outcome.text, profileLine].filter(Boolean).join(' '), profileLine } : outcome;
 }
 
 /**

@@ -20,7 +20,7 @@
 //   that isn't on screen, in the header. It sets no market.lastRun: the Plugins page's own result is its own clicks'. An act on a
 //   plugin from either page retires that plugin's earlier results and Undo on both (retire).
 // Steps that run by themselves (pluginupdates.ts) take their turn with the page's in main's one queue.
-import { noteMove, showPage, announce, busy, focusWhenDone, oweHomeRead, pinnedRows, readHomeOnce, rerender, saidInStatusBar, setHome, state as app, tell, toolWays, withReloads, type Outcome } from './app.ts';
+import { noteMove, showPage, announce, busy, focusWhenDone, oweHomeRead, pinnedRows, profileEndedLine, profilesBefore, readHomeOnce, rerender, saidInStatusBar, setHome, state as app, tell, toolWays, withReloads, type Outcome, type ProfilesBefore } from './app.ts';
 import { pluginReloads, reloadAdvice, settleReloads, type ReloadAdvice, type ReloadChange } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Turn } from './clicklist.ts';
 import { pin, placeIn } from './itemrow.ts';
@@ -270,14 +270,21 @@ export async function loadPlugins(fresh = false, readId?: number): Promise<void>
 }
 
 /** The person had the tools read again (Refresh): the last run's result is only named from now on (its Undo stays), never restated over a page that may differ. */
-const markReread = () => { if (market.lastRun) market.lastRun = { ...market.lastRun, reread: true }; };
+const markReread = () => { if (market.lastRun) market.lastRun = { ...market.lastRun, reread: true, profileLine: undefined }; };
 
-/** Runs an action with the page saying what it is doing. */
-function act(activity: MarketActivity, work: () => Promise<void>) {
+/** Runs an action with the page saying what it is doing; a returned string is a lastRun's announcement, with any ended-profile line attached. */
+function act(activity: MarketActivity, work: () => Promise<string | void>) {
   endListNews();
   return busy(ACTIVITIES[activity].label, async () => {
     market.activity = activity;
-    try { await work(); } finally { market.activity = undefined; }
+    try {
+      const said = await work();
+      if (said === undefined) return;
+      const last = market.lastRun;
+      const profileLine = last?.done.some(step => succeeded(step.report)) ? profileEndedLine() : undefined;
+      if (last && profileLine) last.profileLine = profileLine;
+      announce([said, profileLine].filter(Boolean).join(' '), app.page === 'plugins' && !market.problem && (undoOps().length > 0 || !!profileLine));
+    } finally { market.activity = undefined; }
   });
 }
 
@@ -376,8 +383,7 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
     market.problem = result.stopped && result.done.length && unrun.length ? `Stopped before ${andList(unrun)}: ${result.stopped}` : result.stopped;
     await readAgain();
   }
-  // A result that offers Undo is said in the header, with its Undo; one that only tells (an Undo done) in the status bar.
-  announce(market.problem ?? (resultSentence(resultLines(result.done, undo), undo) || 'Nothing changed.'), !market.problem && undoOps().length > 0);
+  return market.problem ?? (resultSentence(resultLines(result.done, undo), undo) || 'Nothing changed.');
 });
 
 /**
@@ -391,7 +397,7 @@ export const usePlugins = (entry: MarketplaceView, plugin: string, tool: Harness
   market.lastRun = { done: result.done, undo: false, home, ...(result.back ? { turn: { source: entry.source, plugin, before: result.before ?? null, back: result.back, limits: [] } } : {}) };
   market.problem = result.stopped;
   await readAgain();
-  announce(market.problem ?? (resultSentence(resultLines(result.done, false), false) || `Nothing changed for ${plugin}.`), !market.problem && undoOps().length > 0);
+  return market.problem ?? (resultSentence(resultLines(result.done, false), false) || `Nothing changed for ${plugin}.`);
 });
 
 /** What each tool now has changed: the page and the item lists read again, once for the action (app.ts readHomeOnce). */
@@ -450,18 +456,26 @@ function aimWords(what: PluginTurn, tool?: HarnessId): PluginClick['said'] {
 }
 
 /**
- * The run's end (clicklist.ts): a run of several plugin clicks is said as a whole, and the focus goes back to the control clicked
- * last if nothing else took it.
+ * The run's end (clicklist.ts): a run of plugin clicks has its ended-profile line worked out after the home read, said even
+ * after one click when a profile left use (and as a whole for several), and focus returns to the control clicked last.
  */
 function runEnded(): void {
-  const list = market.clicks;
+  const list = market.clicks, last = market.lastRun;
   // A plugin that partly failed is said once, where it went and where not ("beta: installed in Claude Code, not in Codex");
   // one that went nowhere is named as failed.
   const lines = lastLines(), went = new Set(lines.filter(line => line.ok).map(line => line.plugin));
   const notIn = (plugin: string) => [...new Set(list.filter(click => click.plugin === plugin).flatMap(click => click.ran?.done ?? []).filter(step => !succeeded(step.report)).map(step => toolNames[step.tool]))];
   const said = lines.map(line => (line.ok && notIn(line.plugin).length ? { ...line, text: `${line.text}, not in ${andList(notIn(line.plugin))}` } : line));
   const failed = [...new Set(lines.filter(line => !line.ok && !went.has(line.plugin)).map(line => line.plugin))];
-  if (list.length > 1) announce([resultSentence(said, false), failed.length ? `${andList(failed)} failed.` : ''].filter(Boolean).join(' ') || 'Nothing changed.', !lines.some(line => !line.ok) && undoOps().length > 0);
+  const did = list.some(click => click.ran?.done.some(step => succeeded(step.report)));
+  const profileLine = last && did ? profileEndedLine(list.at(-1)?.run.before) : undefined;
+  if (last) last.profileLine = profileLine;
+  if (list.length > 1 || profileLine) {
+    const one = list.length === 1 ? list[0]!.ran : undefined;
+    const base = one ? one.stopped ?? (resultSentence(resultLines(one.done, false), false) || `Nothing changed for ${list[0]!.plugin}.`)
+      : [resultSentence(said, false), failed.length ? `${andList(failed)} failed.` : ''].filter(Boolean).join(' ') || 'Nothing changed.';
+    announce([base, profileLine].filter(Boolean).join(' '), app.page === 'plugins' && !lines.some(line => !line.ok) && (undoOps().length > 0 || !!profileLine));
+  }
   if (document.activeElement === document.body && clickedLast) document.getElementById(clickedLast)?.focus({ preventScroll: true });
 }
 
@@ -473,12 +487,15 @@ function runEnded(): void {
  */
 async function runClick(click: PluginClick, home: string): Promise<void> {
   if (!clickList.turns.includes(click)) return;
+  const before = profilesBefore();
+  click.run.before ??= before;
   retire(click.plugin);
   const view = market.view, entry = view?.marketplaces.find(each => each.source === click.source);
   market.working = { source: click.source, plugin: click.plugin, tools: click.tool ? [click.tool] : view?.tools ?? [] };
   rerender();
   const result = await api().turnPlugin(click.source, click.plugin, click.what, click.tool, home).catch((): PluginTurnResult => ({ stopped: 'That could not finish. Click Refresh to see where things stand.', done: [] }));
   if (!clickList.turns.includes(click)) return;
+  click.run.before ??= before;
   oweHomeRead();
   click.ran = result;
   market.working = undefined;
@@ -528,7 +545,7 @@ const undoTurn = (last: LastRun & { turn: NonNullable<LastRun['turn']> }) => act
   // The focus goes to the plugin it undid, on the list or on its page, as Undo itself may go: its switch, or its Add again.
   const at = market.view?.marketplaces.findIndex(each => each.source === last.turn.source), id = `pswitch-${market.nav.plugin ? 'page-' : ''}${at}-${last.turn.plugin}`;
   focusWhenDone(document.getElementById(id) ? id : id.replace(/^pswitch/, 'padd'));
-  announce(market.problem ?? (resultSentence(resultLines(done, true), true) || 'Nothing changed.'));
+  return market.problem ?? (resultSentence(resultLines(done, true), true) || 'Nothing changed.');
 });
 
 /**
@@ -631,7 +648,7 @@ const LINE_WORDS: Record<LineAim['act'], { waiting: string; running: string; don
  * home changes (resetMarket). Said in the header only when that line isn't on screen as the act ends (`told`); its line shows it
  * once the header no longer does, never both at once.
  */
-export interface LineResult { aim: LineAim; words: string; next: string; failed: boolean; undo?: () => void; told?: Outcome }
+export interface LineResult { aim: LineAim; words: string; next: string; failed: boolean; profileLine?: string; undo?: () => void; told?: Outcome }
 let results: LineResult[] = [];
 /** The result a tool's line on an item shows now, if any (matrix.ts pluginLine, harnessLine). */
 export const resultOn = (tool: HarnessId, item: PartRef) => results.find(each => each.aim.tool === tool && samePart(each.aim.item, item) && !(each.told && app.outcome === each.told));
@@ -679,7 +696,7 @@ export function turnFromLine(aim: LineAim): void {
  * Plugins page says them.
  */
 async function runLine(click: LineClick): Promise<void> {
-  const { aim } = click, view = market.view, entry = view?.marketplaces.find(each => each.source === aim.source), before = app.home?.pluginItems;
+  const { aim } = click, view = market.view, entry = view?.marketplaces.find(each => each.source === aim.source), before = app.home?.pluginItems, atStart = profilesBefore();
   retire(aim.plugin);
   rerender();
   const result = await api().turnPlugin(aim.source, aim.plugin, aim.act === 'remove' ? 'keep-out' : 'let-in', aim.tool, aim.home)
@@ -708,21 +725,25 @@ async function runLine(click: LineClick): Promise<void> {
     : aim.act === 'place' ? `Put ${aim.plugin}’s items in ${where}: ${mine[0]!.report.message}`
     : `${words.done} ${aim.plugin} ${aim.act === 'remove' ? 'from' : 'in'} ${where}${aim.act === 'install' ? installedNow(aim) : ''}.${aim.yours?.length ? ` ${yoursStay(aim.yours)}` : ''}`;
   const back = result.back ?? [], undoes = back.length > 0 || (!ran && recordChanged);
+  const did = mine.some(step => succeeded(step.report)) || (!ran && recordChanged);
   sayResult({ aim, words: [said, ...limits, read ? '' : 'The page couldn’t be read again after it: Refresh shows where things stand.'].filter(Boolean).join(' '),
-    next: reloadAdvice(settleReloads(pluginReloads(mine)), toolWays()).text, failed: !!problem, ...(undoes ? { undo: () => void undoLine(aim, result.before ?? null, back) } : {}) }, pluginReloads(mine));
+    next: reloadAdvice(settleReloads(pluginReloads(mine)), toolWays()).text, failed: !!problem, ...(undoes ? { undo: () => void undoLine(aim, result.before ?? null, back) } : {}) }, pluginReloads(mine), { checkProfile: did, before: atStart });
 }
 
 /**
  * A line's result kept (one per plugin), and said: on its line if that line is on screen now, else in the header, which has its
  * Undo and next step there (as chips, withReloads: one next step either way) and names its plugin for retire.
  */
-function sayResult(result: LineResult, changes: ReloadChange[]): void {
-  results = [...results.filter(each => each.aim.plugin !== result.aim.plugin), result];
+function sayResult(result: LineResult, changes: ReloadChange[], check: { checkProfile?: boolean; before?: ProfilesBefore } = {}): void {
+  const profileLine = check.checkProfile === false ? undefined : profileEndedLine(check.before);
+  const kept: LineResult = profileLine ? { ...result, profileLine } : result;
+  results = [...results.filter(each => each.aim.plugin !== kept.aim.plugin), kept];
   rerender();
-  if (document.querySelector(`[data-result="${CSS.escape(resultKey(result.aim))}"]`)) { announce([result.words, result.next].filter(Boolean).join(' ')); return; }
-  result.told = withReloads({ page: 'library', text: result.words, band: true, warn: result.failed, plugins: [result.aim.plugin],
-    ...(result.undo ? { act: { label: 'Undo', id: 'outcome-undo', title: 'Put back what this did', run: result.undo } } : {}) }, changes);
-  tell(result.told);
+  if (document.querySelector(`[data-result="${CSS.escape(resultKey(kept.aim))}"]`)) { announce([kept.words, kept.next, profileLine].filter(Boolean).join(' ')); return; }
+  kept.told = withReloads({ page: 'library', text: kept.words, band: true, warn: kept.failed, plugins: [kept.aim.plugin],
+    ...(kept.undo ? { act: { label: 'Undo', id: 'outcome-undo', title: 'Put back what this did', run: kept.undo } } : {}) }, changes);
+  tell(kept.told, '', check);
+  kept.told = app.outcome;
 }
 /** The one key of the line a result is on: its tool and item (matrix.ts draws it as the result's data-result). */
 export const resultKey = (aim: Pick<LineAim, 'tool' | 'item'>) => `${aim.tool}:${aim.item.kind}:${aim.item.name.toLowerCase()}`;
@@ -746,5 +767,6 @@ const undoLine = (aim: LineAim, before: PluginEntry | null, back: PluginOp[]) =>
   const words = result.stopped ?? (back.length ? resultSentence(resultLines(result.done, true), true) || 'Nothing changed.'
     : `Undone: Central Knot keeps ${aim.plugin} ${aim.act === 'remove' ? 'in' : 'out of'} ${where} again.`);
   const failures = resultLines(result.done, true).filter(line => !line.ok).map(line => line.text);
-  sayResult({ aim, words: [words, ...failures].join(' '), next: reloadAdvice(settleReloads(pluginReloads(result.done)), toolWays()).text, failed: !worked }, pluginReloads(result.done));
+  const did = result.done.some(step => succeeded(step.report)) || (!result.stopped && !back.length);
+  sayResult({ aim, words: [words, ...failures].join(' '), next: reloadAdvice(settleReloads(pluginReloads(result.done)), toolWays()).text, failed: !worked }, pluginReloads(result.done), { checkProfile: did });
 });

@@ -2335,6 +2335,8 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .details-tool-result { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 12px; color: var(--ink); }
 .details-tool-result > svg { flex: none; align-self: center; }
 .details-tool-result > .text-action { flex: none; }
+.details-tool-results { display: flex; flex-direction: column; gap: 2px; }
+.details-tool-results > .band-profile { padding-left: 18px; }
 .ov-switch-row > .ov-managed { justify-content: flex-start; }
 .ov-name-fit.ov-name-bare { padding: 0; }
 @container table (width < 840px) { .ov-row.ov-switch-row { column-gap: 8px; padding-right: 6px; } }

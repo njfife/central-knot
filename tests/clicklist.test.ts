@@ -72,10 +72,10 @@ Object.assign(globalThis, {
 Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh' } });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
-const { acting, applyByKind, applyClick, askFlash, closeResult, deleteProfileDef, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, saveProfileDef, selectOff, switchToProfile, whyKindReadOnly, whyReadOnly,
+const { acting, applyByKind, applyClick, askFlash, closeResult, deleteProfileDef, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, profileEndedLine, profilesBefore, saveProfileDef, selectOff, switchToProfile, whyKindReadOnly, whyReadOnly,
   loadHome, problemKey, queueClick, readAgain, restoreEvent, setRenderer, showPage, syncNow, state: app } = await import('../src/app.ts');
 const { repo, repoPage } = await import('../src/repopage.ts');
-const { clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, runReloads, shownPlugins, turnPlugin, undoLabel, undoLast } = await import('../src/pluginstate.ts');
+const { applyPluginOps, clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, resultOn, runReloads, shownPlugins, turnFromLine, turnPlugin, undoLabel, undoLast, usePlugins } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
 const { backgroundProblems, copyQuestion, headerNotices, libraryTable, openKind, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
@@ -2839,4 +2839,229 @@ test('Unused band: skipped rows marked, unread managed tool cue, 3-line disclosu
     await settled();
     assert.equal(findById(libraryTable(), 'unused-band'), undefined);
   });
+});
+
+// ---------- Step UX-6D: plugin acts say when a profile stops being in use ----------
+
+test('profileEndedLine gives the line when all profiles before stop being in use, and nothing otherwise', t => {
+  const { viewWith } = pluginProfileWorld(t);
+  const work = app.home!.profiles.profiles[0]!;
+  const before = profilesBefore();
+  assert.deepEqual(before?.profiles.map(profile => profile.name), ['Work']);
+  assert.equal(profileEndedLine(before, viewWith(false)), 'Work stopped being the profile in use.');
+  assert.equal(profileEndedLine(before, viewWith(true)), undefined);
+  assert.equal(profileEndedLine(before, viewWith(false, '/other-home')), undefined);
+  assert.equal(profileEndedLine({ home: '/home', profiles: [] }, viewWith(false)), undefined);
+  assert.equal(profileEndedLine(undefined, viewWith(false)), undefined);
+  assert.equal(profileEndedLine(before, undefined), undefined);
+  const focus = { id: 'p-focus', name: 'Focus', items: ['skill:notes'], switchesPluginItems: true };
+  assert.equal(profileEndedLine({ home: '/home', profiles: [work, focus] }, viewWith(false)), 'Work and Focus stopped being the profiles in use.');
+  const bothHome = viewWith(true);
+  bothHome.profiles.profiles = [work, focus];
+  assert.equal(profileEndedLine({ home: '/home', profiles: [work, focus] }, bothHome), undefined);
+});
+
+function pluginProfileWorld(t: TestContext, { profileName = 'Work', inUseBefore = true }: { profileName?: string; inUseBefore?: boolean } = {}) {
+  start();
+  const base = homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+  void base;
+  const viewWith = (on: boolean, homePath = '/home'): HomeView => {
+    const home = structuredClone(app.home!);
+    home.home = homePath;
+    home.skills.library.notes!.on = on;
+    home.profiles = { profiles: [{ id: 'p-work', name: profileName, items: ['skill:notes'], switchesPluginItems: true }], plugins: [] };
+    return home;
+  };
+  app.home = viewWith(inUseBefore);
+  app.page = 'plugins';
+  return { viewWith };
+}
+
+test('Plugin switch / box (runEnded): 1-click ending Work shows profileLine on #plugins-result and speaks it; 2-click restoring Work says nothing; failed click says nothing', async t => {
+  const { viewWith } = pluginProfileWorld(t);
+  let nextHome = viewWith(false);
+  t.mock.method(api, 'refresh', async () => { main.reads.home++; return nextHome; });
+
+  // Single click ending Work.
+  const turnedOff: PluginTurnResult = {
+    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-off', report: { tool: 'claude-cli', outcome: 'plugin-off', changed: true, message: 'Turned off.', runs: [] } }],
+    before: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: [] },
+    back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-on' }],
+  };
+  turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
+  await settled();
+  await main.answer(turnedOff);
+  await settled();
+  assert.equal((market.lastRun as { profileLine?: string } | undefined)?.profileLine, 'Work stopped being the profile in use.');
+  assert.match(app.said.text, /Work stopped being the profile in use\.$/);
+  const shown = pluginsResult();
+  assert.ok(shown.some(node => findById(node, 'plugins-result')), 'pluginsResult draws #plugins-result');
+  assert.ok(shown.some(node => textOf(node).includes('Work stopped being the profile in use.')), `pluginsResult draws profileLine: ${shown.map(textOf).join(' | ')}`);
+
+  // Second click in the same run brings Work back into use: run's end says no profile sentence.
+  nextHome = viewWith(true);
+  const turnedOn: PluginTurnResult = {
+    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-on', report: { tool: 'claude-cli', outcome: 'plugin-on', changed: true, message: 'Turned on.', runs: [] } }],
+    before: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: ['claude-cli'] },
+    back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-off' }],
+  };
+  turnPlugin(entry, 'alpha', 'let-in', 'claude-cli');
+  await settled();
+  await main.answer(turnedOn);
+  await settled();
+  assert.equal((market.lastRun as { profileLine?: string } | undefined)?.profileLine, undefined);
+  assert.doesNotMatch(app.said.text, /stopped being the profile/);
+
+  // New run: failed single click says no profile sentence even if refreshed home matches no profile.
+  closeRun();
+  app.home = viewWith(true);
+  nextHome = viewWith(false);
+  turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
+  await settled();
+  await main.answer(refused('alpha'));
+  await settled();
+  assert.equal((market.lastRun as { profileLine?: string } | undefined)?.profileLine, undefined);
+  assert.doesNotMatch(app.said.text, /stopped being the profile/);
+});
+
+test('Plugin act (applyPluginOps, usePlugins, undoTurn): plain Undo and Update draw #plugins-result with profileLine and speak it; whole refusal says nothing', async t => {
+  const { viewWith } = pluginProfileWorld(t);
+  let nextHome = viewWith(false);
+  t.mock.method(api, 'refresh', async () => nextHome);
+
+  // Skill switch ending Work (applyPluginOps).
+  await applyPluginOps([{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', skill: 'triage', action: 'skill-off' }]);
+  assert.equal((market.lastRun as { profileLine?: string } | undefined)?.profileLine, 'Work stopped being the profile in use.');
+  assert.match(app.said.text, /Work stopped being the profile in use\.$/);
+
+  // Plain Undo (undoTurn, no Undo button left) ending Work still draws #plugins-result with profileLine.
+  app.home = viewWith(true);
+  nextHome = viewWith(false);
+  market.lastRun = {
+    done: [], undo: false, home: '/home',
+    turn: { source: '/market', plugin: 'alpha', before: null, back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-off' }], limits: [] },
+  };
+  t.mock.method(api, 'undoPluginTurn', async () => ({
+    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-off', report: { tool: 'claude-cli', outcome: 'plugin-off', changed: true, message: 'Off again.', runs: [] } }],
+  }));
+  undoLast();
+  await settled();
+  assert.equal((market.lastRun as { profileLine?: string } | undefined)?.profileLine, 'Work stopped being the profile in use.');
+  assert.match(app.said.text, /Work stopped being the profile in use\.$/);
+  const undoShown = pluginsResult();
+  assert.ok(undoShown.some(node => findById(node, 'plugins-result')), 'plain Undo with profileLine draws #plugins-result');
+  assert.ok(undoShown.some(node => textOf(node).includes('Work stopped being the profile in use.')), `plain Undo draws profileLine: ${undoShown.map(textOf).join(' | ')}`);
+  // Show all puts profileLine inside #plugins-result once (not also on Row 2).
+  app.shownWhole = market.lastRun;
+  const wholeShown = pluginsResult();
+  assert.equal(wholeShown.length, 1);
+  assert.ok(textOf(findById(wholeShown[0], 'plugins-result')).includes('Work stopped being the profile in use.'));
+  app.shownWhole = undefined;
+
+  // Update (no Undo) ending Work draws #plugins-result with profileLine.
+  app.home = viewWith(true);
+  nextHome = viewWith(false);
+  (api as Record<string, unknown>).updatePlugin = async () => ({ reports: [{ tool: 'claude-cli', outcome: 'updated', changed: true, version: '2.0.0', message: 'Updated.', runs: [] }] });
+  t.after(() => { delete (api as Record<string, unknown>).updatePlugin; });
+  await applyPluginOps([{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'update' }]);
+  assert.equal((market.lastRun as { profileLine?: string } | undefined)?.profileLine, 'Work stopped being the profile in use.');
+  assert.match(app.said.text, /Work stopped being the profile in use\.$/);
+  assert.ok(pluginsResult().some(node => findById(node, 'plugins-result')), 'Update ending profile draws #plugins-result');
+
+  // Use the plugin's ending Work sets profileLine; stopped whole sets none.
+  app.home = viewWith(true);
+  nextHome = viewWith(false);
+  (api as Record<string, unknown>).takePluginItem = async () => ({
+    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'pi-cli', action: 'install-items', report: { tool: 'pi-cli', outcome: 'installed', changed: true, message: 'Put in Pi.', runs: [] } }],
+    before: null, back: [],
+  });
+  t.after(() => { delete (api as Record<string, unknown>).takePluginItem; });
+  await usePlugins(entry, 'alpha', 'pi-cli', { kind: 'skill', key: 'notes' });
+  assert.equal((market.lastRun as { profileLine?: string } | undefined)?.profileLine, 'Work stopped being the profile in use.');
+  assert.match(app.said.text, /Work stopped being the profile in use\.$/);
+
+  app.home = viewWith(true);
+  nextHome = viewWith(false);
+  (api as Record<string, unknown>).takePluginItem = async () => ({ stopped: 'Stopped.', done: [] });
+  await usePlugins(entry, 'alpha', 'pi-cli', { kind: 'skill', key: 'notes' });
+  assert.equal((market.lastRun as { profileLine?: string } | undefined)?.profileLine, undefined);
+  assert.doesNotMatch(app.said.text, /stopped being the profile/);
+});
+
+test('Library plugin line (sayResult): carries profileLine on LineResult when line is on screen and passes before to tell when in header', async t => {
+  const { viewWith } = pluginProfileWorld(t);
+  app.page = 'library';
+  const prevCss = (globalThis as Record<string, unknown>).CSS;
+  (globalThis as Record<string, unknown>).CSS = { escape: (value: string) => value };
+  t.after(() => {
+    if (prevCss === undefined) delete (globalThis as Record<string, unknown>).CSS;
+    else (globalThis as Record<string, unknown>).CSS = prevCss;
+  });
+  let nextHome = viewWith(false);
+  t.mock.method(api, 'refresh', async () => nextHome);
+  const removed: PluginTurnResult = {
+    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'copilot-cli', action: 'remove', report: { tool: 'copilot-cli', outcome: 'uninstalled', changed: true, message: 'Uninstalled.', runs: [] } }],
+    before: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: [] },
+    back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'copilot-cli', action: 'install' }],
+  };
+  const aim = { home: '/home', source: '/market', marketName: 'team', plugin: 'alpha', tool: 'copilot-cli' as HarnessId, act: 'remove' as const, item: { kind: 'agent' as const, name: 'lead' } };
+
+  // Line on screen: LineResult carries profileLine and announce speaks it.
+  t.mock.method(document, 'querySelector', () => element());
+  turnFromLine(aim);
+  await settled();
+  await main.answer(removed);
+  await settled();
+  const onLine = resultOn('copilot-cli', { kind: 'agent', name: 'lead' }) as { profileLine?: string } | undefined;
+  assert.equal(onLine?.profileLine, 'Work stopped being the profile in use.');
+  assert.match(app.said.text, /Work stopped being the profile in use\.$/);
+
+  // Line off screen (header path): tell receives before, sets app.outcome.profileLine, and resultOn stays hidden while header shows it.
+  app.home = viewWith(true);
+  nextHome = viewWith(false);
+  t.mock.method(document, 'querySelector', () => null);
+  turnFromLine(aim);
+  await settled();
+  await main.answer(removed);
+  await settled();
+  assert.equal(app.outcome?.profileLine, 'Work stopped being the profile in use.');
+  assert.match(app.outcome?.text ?? '', /Work stopped being the profile in use\.$/);
+  assert.equal(resultOn('copilot-cli', { kind: 'agent', name: 'lead' }), undefined);
+
+  // Turn the plugin on (let-in) and line Undo ending Work also carry profileLine; failed line act carries none.
+  app.home = viewWith(true);
+  nextHome = viewWith(false);
+  t.mock.method(document, 'querySelector', () => element());
+  const letInAim = { ...aim, act: 'let-in' as const, tool: 'codex-cli' as HarnessId, item: { kind: 'skill' as const, name: 'triage' } };
+  const turnedOn: PluginTurnResult = {
+    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'codex-cli', action: 'plugin-on', report: { tool: 'codex-cli', outcome: 'plugin-on', changed: true, message: 'Turned on.', runs: [] } }],
+    before: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: ['codex-cli'] },
+    back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'codex-cli', action: 'plugin-off' }],
+  };
+  turnFromLine(letInAim);
+  await settled();
+  await main.answer(turnedOn);
+  await settled();
+  const letInRes = resultOn('codex-cli', { kind: 'skill', name: 'triage' });
+  assert.equal(letInRes?.profileLine, 'Work stopped being the profile in use.');
+  assert.match(app.said.text, /Work stopped being the profile in use\.$/);
+
+  app.home = viewWith(true);
+  nextHome = viewWith(false);
+  t.mock.method(api, 'undoPluginTurn', async () => ({
+    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'codex-cli', action: 'plugin-off', report: { tool: 'codex-cli', outcome: 'plugin-off', changed: true, message: 'Off again.', runs: [] } }],
+  }));
+  letInRes!.undo!();
+  await settled();
+  assert.equal(resultOn('codex-cli', { kind: 'skill', name: 'triage' })?.profileLine, 'Work stopped being the profile in use.');
+  assert.match(app.said.text, /Work stopped being the profile in use\.$/);
+
+  app.home = viewWith(true);
+  nextHome = viewWith(false);
+  turnFromLine(letInAim);
+  await settled();
+  await main.answer({ stopped: 'Refused.', done: [] });
+  await settled();
+  assert.equal(resultOn('codex-cli', { kind: 'skill', name: 'triage' })?.profileLine, undefined);
+  assert.doesNotMatch(app.said.text, /stopped being the profile/);
 });
