@@ -125,6 +125,8 @@ export interface DesktopApi {
   takeOverSkill(key: string, tool: HarnessId, resume: boolean, home: string): Promise<PassResult>;
   /** One version of a skill: its SKILL.md and the names of its other files (skills.ts skillVersion). */
   skillVersion(key: string, hash: string): Promise<{ skill: string; files: string[] } | null>;
+  /** One regular file of a skill version, with every regular file of its folder (skills.ts skillVersionFile). */
+  skillVersionFile(key: string, hash: string, file: string): Promise<{ files: string[]; text?: string; note?: string } | null>;
   history(): Promise<HistoryList>;
   applyServers(changes: Change[], resume: boolean, home: string): Promise<PassResult>;
   /** One version of an MCP server: its shared part (servers.ts serverVersion). */
