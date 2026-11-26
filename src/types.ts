@@ -129,6 +129,8 @@ export interface DesktopApi {
   skillVersionFile(key: string, hash: string, file: string): Promise<SkillFileRead | null>;
   /** One regular file of a found skill copy in `tool` (narrowed by `rootLabel`), with every regular file of its folder (skills.ts skillFoundFile). */
   skillFoundFile(key: string, tool: HarnessId, rootLabel: string | undefined, file: string): Promise<SkillFileRead | null>;
+  /** One regular file of a plugin skill (installed in a tool or from its marketplace copy), with every regular file of its folder (skills.ts skillPluginFile). */
+  skillPluginFile(ref: PluginSkillRef, file: string): Promise<SkillFileRead | null>;
   history(): Promise<HistoryList>;
   applyServers(changes: Change[], resume: boolean, home: string): Promise<PassResult>;
   /** One version of an MCP server: its shared part (servers.ts serverVersion). */
@@ -342,8 +344,10 @@ export interface PluginTurnResult { stopped?: string; done: PluginDone[]; before
 // ---------- Managing skills across tools ----------
 
 
-/** One regular file of a skill's folder, with every regular file listed by name (skills.ts skillVersionFile, skillFoundFile). */
-export interface SkillFileRead { files: string[]; text?: string; note?: string }
+/** One regular file of a skill's folder, with every regular file listed by name (skills.ts skillVersionFile, skillFoundFile, skillPluginFile). */
+export interface SkillFileRead { files: string[]; text?: string; note?: string; directory?: string }
+/** What names a plugin's skill for main to resolve on disk without the page sending a path (`source` for a Find hit's marketplace; skills.ts skillPluginFile). */
+export interface PluginSkillRef { marketName: string; plugin: string; part: string; from: HarnessId | 'marketplace'; source?: string }
 
 export interface ToolCopy {
   hash: string;
@@ -798,7 +802,9 @@ export interface PluginItem { kind: PartKind; name: string; description: string;
    * without .md (values.ts nameOfFile), as Pi, OpenCode and Antigravity name its placed copy; for the skill of a plugin that is one skill,
    * SKILL.md at its root (catalogdetail.ts skillsIn: its path is "."), the plugin's. An MCP server has none: its name is both.
    */
-  keyName?: string }
+  keyName?: string;
+  /** Skills: the skill's folder relative to its plugin's root ('.' for the root itself) and its real folder. */
+  path?: string; realDirectory?: string }
 /** A plugin installed whole in one tool, read from that tool's own records and its copy of the plugin. */
 export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: string; version?: string;
   /** The whole plugin is turned off in that tool. */ off?: boolean;
@@ -1034,7 +1040,7 @@ export interface UsageReading { at: string; tools: ToolUsage[] }
  * An item of a listed plugin installed in no managed tool (searchdocs.ts catalogDocs): what its row in Find's group "In plugins
  * you don't have" draws, and the plugin's page it opens (`source`: its marketplace, spelled as listed). Never a Library row.
  */
-export interface CatalogItem { kind: PartKind; name: string; description: string; plugin: string; marketName: string; source: string }
+export interface CatalogItem { kind: PartKind; name: string; description: string; plugin: string; marketName: string; source: string; path?: string }
 /**
  * One row a search found: its id (a Library row's, itemrow.ts rowId; or a catalog item's, `catalog:` and more, which alone has a
  * `kind`); and for a row the page draws at once (search.ts drawnAtOnce), where it matched only in its text, a fragment of that

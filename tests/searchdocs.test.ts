@@ -201,7 +201,7 @@ test('an item of a listed plugin installed nowhere is a document of its own: by 
   assert.deepEqual(docs[0], {
     id: 'catalog:["github.com/acme/tools","devkit","skill","skills/changelog-writer"]', names: ['changelog-writer'], plugin: 'devkit', description: 'Drafts release entries from merged work.',
     text: 'Group the merged pull requests by area.',
-    catalog: { kind: 'skill', name: 'changelog-writer', description: 'Drafts release entries from merged work.', plugin: 'devkit', marketName: 'acme-tools', source: 'https://github.com/Acme/Tools.git' },
+    catalog: { kind: 'skill', name: 'changelog-writer', description: 'Drafts release entries from merged work.', plugin: 'devkit', marketName: 'acme-tools', source: 'https://github.com/Acme/Tools.git', path: 'skills/changelog-writer' },
   });
   assert.deepEqual(docs.map(doc => [doc.id, doc.description]), [
     ['catalog:["github.com/acme/tools","devkit","skill","skills/changelog-writer"]', 'Drafts release entries from merged work.'],

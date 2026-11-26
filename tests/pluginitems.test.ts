@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs, { realpathSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { cp, mkdir, mkdtemp, realpath, rm, writeFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -12,6 +14,7 @@ import { pluginItemKey, pluginLive } from '../src/profileplan.ts';
 import type { PluginContext } from '../src/plugins.ts';
 import { kindSource } from '../src/itemrow.ts';
 import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts } from '../src/types.ts';
+import { slashPath } from './wincompat.ts';
 
 const put = async (path: string, text: string) => { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, text); };
 
@@ -126,6 +129,12 @@ test('A plugin’s item has one plan key by both routes, read on real files: ins
     // The name stays the one the tool loads it by, which its own switch takes (Codex: demo:pdf-reader); the key is the folder's.
     assert.deepEqual(installed('claude-cli', 'demo'), [['pdf-reader', 'demo@m/pdf'], ['tracker', 'demo@m/tracker'], ['checker', 'demo@m/checker']]);
     assert.deepEqual(installed('codex-cli', 'demo'), [['pdf-reader', 'demo@m/pdf'], ['tracker', 'demo@m/tracker']], 'Codex’s copy: the same key (and no agents)');
+    // Skills keep their listed path relative to the plugin root ('.' included) and their real folder (no companion hashing).
+    const claudePdf = read.find(found => found.tool === 'claude-cli' && found.plugin === 'demo')!.items.find(item => item.name === 'pdf-reader')!;
+    const codexPdf = read.find(found => found.tool === 'codex-cli' && found.plugin === 'demo')!.items.find(item => item.name === 'pdf-reader')!;
+    const claudeSolo = read.find(found => found.tool === 'claude-cli' && found.plugin === 'solo')!.items[0]!;
+    assert.deepEqual([claudePdf.path, codexPdf.path, claudeSolo.path], ['skills/pdf', 'skills/pdf', '.']);
+    assert.ok(claudePdf.realDirectory && codexPdf.realDirectory && claudePdf.realDirectory !== codexPdf.realDirectory);
     assert.deepEqual((await placed('demo', demo)).map(each => each.key), ['demo@m/checker', 'demo@m/pdf', 'demo@m/tracker'], 'Pi’s: the same keys');
     // A plugin that is one skill, in a folder of another name (bundle): installed and placed, keyed by the plugin's name.
     const [soloPlaced] = await placed('solo', bundle);
@@ -236,4 +245,55 @@ test('a plugin whose marketplace is on no tool any more says where it is handled
   // A plugin from the Anthropic Directory is said to be from there, not from a marketplace that went missing.
   const [directory] = pageRows(homeOf([], [{ ...install('claude-cli', { listed: false }), marketName: 'anthropic-plugin-directory' }]), 'skills').rows;
   assert.equal(handledWhere(directory!), 'Installed in Claude Code from the Anthropic Directory. Claude Code’s own /plugin updates, turns off or removes it.');
+});
+
+test('reading plugin items for one plugin in two tools walks and hashes no files of its skill folders beyond SKILL.md', async () => {
+  const box = await sandbox();
+  try {
+    const claudeCopy = join(box.home, '.claude/plugins/cache/m/demo/1.2.0');
+    const codexCopy = join(box.home, '.codex/plugins/cache/m/demo/1.2.0');
+    for (const folder of [claudeCopy, codexCopy]) {
+      await copy(folder);
+      await put(join(folder, 'skills/hello/extra.md'), 'Companion file.\n');
+      await put(join(folder, 'skills/hello/notes/rubric.md'), 'Nested companion.\n');
+    }
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'demo@m': [{ scope: 'user', installPath: claudeCopy, version: '1.2.0' }] } }));
+    await put(join(box.home, '.codex/config.toml'), '[plugins."demo@m"]\nenabled = true\n');
+    const opened: string[] = [];
+    const hashed: string[] = [];
+    const origOpen = fs.open;
+    const origPromiseOpen = fs.promises.open;
+    const note = (list: string[], path: fs.PathLike) => {
+      if (typeof path !== 'string') return;
+      try {
+        list.push(realpathSync(path));
+      } catch {
+        list.push(path);
+      }
+    };
+    fs.open = ((path: fs.PathLike, ...rest: unknown[]) => {
+      note(hashed, path);
+      note(opened, path);
+      return (origOpen as (...args: unknown[]) => unknown).call(fs, path, ...rest);
+    }) as typeof fs.open;
+    fs.promises.open = ((path: fs.PathLike, ...rest: unknown[]) => {
+      note(opened, path);
+      return (origPromiseOpen as (...args: unknown[]) => unknown).call(fs.promises, path, ...rest);
+    }) as typeof fs.promises.open;
+    syncBuiltinESMExports();
+    let installs: InstalledPlugin[];
+    try {
+      installs = await readPluginItems(box.context, ['claude-cli', 'codex-cli']);
+    } finally {
+      fs.open = origOpen;
+      fs.promises.open = origPromiseOpen;
+      syncBuiltinESMExports();
+    }
+    const skillOpens = opened.map(slashPath).filter(path => path.includes('/skills/hello/'));
+    assert.deepEqual(hashed.map(slashPath).filter(path => path.includes('/skills/hello/')), [], 'no file in either tool’s skill folder is hashed');
+    assert.deepEqual(skillOpens.filter(path => !path.endsWith('/SKILL.md')), [], 'no companion file in either tool’s skill folder is opened');
+    assert.ok(skillOpens.length >= 2, 'spy observed SKILL.md reads for both tools');
+    assert.deepEqual(installs.map(entry => [entry.tool, entry.version, entry.items.find(item => item.kind === 'skill')?.path]),
+      [['claude-cli', '1.2.0', 'skills/hello'], ['codex-cli', '1.2.0', 'skills/hello']]);
+  } finally { await box.cleanup(); }
 });

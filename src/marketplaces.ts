@@ -119,6 +119,8 @@ export const NO_LONGER_OFFERED = 'Stays installed as it is until you uninstall i
 /** A plugin's contents with nothing in them, for a plugin whose files couldn't be read (its `problem` says why). */
 const empty: PluginDetail = { skills: [], commands: [], agents: [], instructions: [], onlyInstructions: false, hooks: [], hooksByTool: {}, mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false, offered: false };
 
+/** A plugin's copy on disk inside a known marketplace, returned by `pluginCopy` without fetching. */
+export type PluginCopy = { folder: string; root: string; entry: Record<string, unknown>; atMarketplaceRoot: boolean; codexOnly?: boolean };
 export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine = realEngine, offers: SuggestedMarketplace[] = suggestedMarketplaces) {
   const listPath = join(host.dataDir, 'marketplaces.json');
   /** How the page shows this marketplace when it is the one this build carries; undefined for any other. */
@@ -170,11 +172,11 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     }
     const known = fetched.get(source);
     if (known && !fresh && (known.catalog || Date.now() - (known.at ?? 0) < RETRY_MS)) return known;
-    const onDisk = fresh ? undefined : await engine.cachedCatalog(ctx, source);
+    const onDisk = fresh ? undefined : await engine.cachedCatalog(ctx, source, { counts });
     // `local`: only the copy on disk; with none, nothing (the Refresh rules decide when a Git marketplace is fetched).
     if (!onDisk && local) return {};
     const result = onDisk ? { catalog: onDisk } : await fetchFresh(ctx, source, fresh);
-    fetched.set(source, result.catalog ? result : { ...result, at: Date.now() });
+    if (counts || !onDisk) fetched.set(source, result.catalog ? result : { ...result, at: Date.now() });
     return result;
   }
   /** Fetches a Git marketplace; on failure, the copy on disk (if any) is kept and marked stale. */
@@ -952,15 +954,16 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { report, view: await view() };
   }
 
-  /** One plugin's marketplace copy on disk among the open home's known marketplaces (no fetch). */
-  async function pluginCopy(marketName: string, plugin: string): Promise<{ folder: string; root: string; entry: Record<string, unknown>; atMarketplaceRoot: boolean } | undefined> {
+  /** One plugin's marketplace copy on disk among the open home's known marketplaces (no fetch; `wantedSource` narrows for skills:plugin-file, omitted by hook:source). */
+  async function pluginCopy(marketName: string, plugin: string, wantedSource?: string): Promise<PluginCopy | undefined> {
     const ctx = await context();
     const { known } = await listedSources(ctx, columns((await host.read()).tools));
-    for (const { source } of known) {
+    const sources = wantedSource ? known.filter(entry => engine.sameSource(entry.source, wantedSource)) : known;
+    for (const { source } of sources) {
       const { catalog } = await catalogFor(ctx, source, { counts: false, local: true });
       const item = catalog?.root && catalog.name === marketName ? catalog.plugins.find(entry => entry.name === plugin) : undefined;
       const where = item ? await locate(ctx, catalog!.root!, item, true) : undefined;
-      if (where && !('problem' in where)) return { ...where, atMarketplaceRoot: !!item!.folder && !!item!.isMarketplaceRoot };
+      if (where && !('problem' in where)) return { ...where, atMarketplaceRoot: !!item!.folder && !!item!.isMarketplaceRoot, ...(catalog!.codexOnly ? { codexOnly: true } : {}) };
     }
     return undefined;
   }

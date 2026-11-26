@@ -88,7 +88,7 @@ export function catalogDocs(view: HomeView, texts: PluginText[], listed: string[
     return text.items.filter(item => !linked[item.kind]!.some(fact => onOwnRow(fact, { ...item, ...named }))).map(item => {
       const description = item.kind === 'mcp' ? item.runs ?? '' : item.description;
       return { id: `catalog:${JSON.stringify([market, text.plugin, item.kind, item.path ?? item.name])}`, names: [item.name], plugin: text.plugin, description, text: item.kind === 'mcp' ? item.start : bodyOf(item.start),
-        catalog: { kind: item.kind, name: item.name, description, ...named, source: text.source } };
+        catalog: { kind: item.kind, name: item.name, description, ...named, source: text.source, ...(item.kind === 'skill' && item.path ? { path: item.path } : {}) } };
     });
   });
 }
