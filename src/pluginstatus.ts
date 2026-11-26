@@ -114,7 +114,7 @@ export function unavailable(view: PluginsView, entry: MarketplaceView, plugin: s
   const state = stateOf(entry, plugin, tool);
   if (state.state === 'held') return state.reason;
   if (state.state === 'installed') return undefined;
-  // A plugin its marketplace dropped can't go anywhere new; where a tool still has it, it shows as installed and can be turned off (kept installed; uninstalled for Copilot CLI's live copy).
+  // A plugin its marketplace dropped can't go anywhere new; where a tool still has it, it shows as installed and can be turned off (kept installed).
   // One listed only because its marketplace can't be read now (no read time) can't either, for that reason.
   if (entry.plugins.find(candidate => candidate.name === plugin)?.gone) return entry.fetchedAt ? 'It is no longer offered in this marketplace.' : MARKET_UNREAD;
   return whyNotCarried(entry, plugin) ?? blocked(view, entry, tool);
@@ -153,7 +153,7 @@ export function toolNow(view: PluginsView, entry: MarketplaceView, plugin: strin
     : { cannot: elsewhere ?? (items ? whyNoneIn(entry, plugin, tool).join(' ') || `${names[tool]} gets none of its items: Its items, below, says why each isn’t brought in.` : notInWhy(tool, plugin, [], components && andList(summaryOf(components).split(' · ').filter(Boolean)))[0]!) };
   // What is installed whole is known from the tool's own record; items only once the record of parts from before is read.
   if (unknown && !(whole && takesPlugins(tool))) return { has: 'unknown', route };
-  const kept = state.state === 'installed' ? { ...(state.off ? { off: true as const } : {}), ...(tool === 'copilot-cli' && state.live ? {} : { keeps: true as const }) } : {};
+  const kept = state.state === 'installed' && state.off ? { off: true as const } : {};
   return { has: whole ? 'whole' : itemsIn(entry, plugin, tool) ? 'items' : 'none', route, ...(whole ? { stuck: cantUninstall(view, entry, plugin, tool), ...kept } : {}) };
 }
 

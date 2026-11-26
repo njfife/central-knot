@@ -17255,50 +17255,42 @@ async function profilePluginsFlow() {
   same('one successful click leaving Work in use says nothing about any profile',
     [(await a.text('#status-profile'))?.trim(), await a.exists('#plugins-result'), await pluginProfile(), /stopped being the profile/.test(await spoken())],
     ['Work', true, '', false]);
-  // Remove on the Library's plugin line ending Work: live Copilot CLI issue-tracker with an agent beside another plugin sharing MCP server "issues".
-  const agentMd = '---\nname: triage-lead\ndescription: Leads triage.\n---\n\nLead triage.\n';
-  const marketAgent = join(plugin, 'agents/triage-lead.md'), claudeAgent = join(home, '.claude/plugins/cache/ck-test-market/issue-tracker/2.0.0/agents/triage-lead.md');
-  for (const dest of [marketAgent, claudeAgent]) { mkdirSync(dirname(dest), { recursive: true }); writeFileSync(dest, agentMd); }
-  const otherCopy = join(home, '.copilot/installed-plugins/ck-test-market/other-tracker');
-  mkdirSync(otherCopy, { recursive: true });
-  writeFileSync(join(otherCopy, '.mcp.json'), servers);
-  writeFileSync(join(home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'other-tracker', marketplace: 'ck-test-market', version: '1.0.0', cache_path: otherCopy, enabled: true }] }));
-  writeFileSync(join(home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'directory', path: market } } }, enabledPlugins: { 'issue-tracker@ck-test-market': true } }));
-  const agentId = 'plugin:agent:issue-tracker@ck-test-market/triage-lead';
-  await a.click('#nav-profiles');
+  // Turn the plugin on (let-in) on the Library’s plugin line ending Work: live Copilot CLI document-tools kept off, so Work is in use until its line turns it on.
+  const pluginsNow = JSON.parse(readNow(join(home, '.central-knot/plugins.json')));
+  pluginsNow.plugins.push({ id: 'docs-kept', source: market, marketName: 'ck-test-market', plugin: 'document-tools', on: false, except: [] });
+  writeFileSync(join(home, '.central-knot/plugins.json'), `${JSON.stringify(pluginsNow, null, 2)}\n`);
+  writeFileSync(join(home, '.copilot/settings.json'), JSON.stringify({
+    extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'directory', path: market } } },
+    enabledPlugins: { 'issue-tracker@ck-test-market': true, 'document-tools@ck-test-market': false },
+  }));
   await a.click('#header-refresh');
-  await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Work')).click()`);
-  await a.settle();
-  await a.click(byId(`pf-${agentId}`));
   await done();
-  same('with live Copilot CLI issue-tracker and triage-lead ticked, Work is in use', (await a.text('#status-profile'))?.trim(), 'Work');
-  const leadKey = 'issue-tracker@ck-test-market/triage-lead';
-  await openKind(a, 'agents');
-  for (let tries = 0; tries < 60 && !(await a.exists(byId(rowPart('open', 'agents', leadKey)))); tries++) await wait(100);
-  await a.click(byId(rowPart('open', 'agents', leadKey)));
-  const removeBtn = byId(rowPart('line', 'agents', leadKey, 'copilot-cli'));
-  await waitEnabled(removeBtn);
-  await a.click(removeBtn);
+  same('with live Copilot CLI document-tools kept off, Work is still in use', (await a.text('#status-profile'))?.trim(), 'Work');
+  const pdfKey = 'document-tools@ck-test-market/pdf-reader';
+  await openKind(a, 'skills');
+  for (let tries = 0; tries < 60 && !(await a.exists(byId(rowPart('open', 'skills', pdfKey)))); tries++) await wait(100);
+  await a.click(byId(rowPart('open', 'skills', pdfKey)));
+  const letInBtn = byId(rowPart('line', 'skills', pdfKey, 'copilot-cli'));
+  await waitEnabled(letInBtn);
+  await a.click(letInBtn);
   await done();
-  for (let tries = 0; tries < 60 && !(await a.exists('[data-result="copilot-cli:agent:triage-lead"]')); tries++) await wait(100);
-  const lineProfile = () => a.run(`document.querySelector('[data-result="copilot-cli:agent:triage-lead"]')?.parentElement?.querySelector('.band-profile')?.textContent ?? ''`);
+  for (let tries = 0; tries < 60 && !(await a.exists('[data-result="copilot-cli:skill:pdf-reader"]')); tries++) await wait(100);
+  const lineProfile = () => a.run(`document.querySelector('[data-result="copilot-cli:skill:pdf-reader"]')?.parentElement?.querySelector('.band-profile')?.textContent ?? ''`);
   const lineStatusCheck = await a.run(`(() => {
     const el = document.querySelector('#announcement');
     const visible = [...el.children].filter(k => !k.classList.contains('visually-hidden')).map(k => k.textContent).join('');
-    return [visible.startsWith('Removed issue-tracker from Copilot CLI.'), /stopped being the profile/.test(visible), /stopped being the profile/.test(el.title), (el.textContent ?? '').includes('Work stopped being the profile in use.')];
+    return [visible.startsWith('Turned on document-tools in Copilot CLI.'), /stopped being the profile/.test(visible), /stopped being the profile/.test(el.title), (el.textContent ?? '').includes('Work stopped being the profile in use.')];
   })()`);
-  same('Remove on the Library’s plugin line ends Work: profile line draws under the line’s result, spoken text carries the whole result, and status bar keeps prior wording',
+  same('Turn the plugin on on the Library’s plugin line ends Work: profile line draws under the line’s result, spoken text carries the whole result, and status bar keeps prior wording',
     [(await a.text('#status-profile'))?.trim(), await lineProfile(), (await spoken()).includes('Work stopped being the profile in use.'), ...lineStatusCheck],
     ['No profile', 'Work stopped being the profile in use.', true, true, false, false, true]);
-  await a.click(byId(rowPart('line-undo', 'agents', leadKey, 'copilot-cli')));
+  await a.click(byId(rowPart('line-undo', 'skills', pdfKey, 'copilot-cli')));
   await done();
   same('its line Undo restores Work with no profile sentence',
     [(await a.text('#status-profile'))?.trim(), await lineProfile(), /stopped being the profile/.test(await spoken())],
     ['Work', '', false]);
-  // Clean up temporary live Copilot CLI + agent files so what follows starts from the exact same home state.
+  // Clean up temporary live Copilot CLI files so what follows starts from the exact same home state.
   rmSync(join(home, '.copilot'), { recursive: true, force: true });
-  rmSync(dirname(marketAgent), { recursive: true, force: true });
-  rmSync(dirname(claudeAgent), { recursive: true, force: true });
   writeFileSync(join(home, '.central-knot/profiles.json'), snapProfiles);
   writeFileSync(join(home, '.central-knot/plugins.json'), snapPlugins);
   writeFileSync(config, codexBefore);
@@ -18719,7 +18711,7 @@ async function pluginRecordHoldsFlow() {
 
 /**
  * The tools' lines on a plugin's item opened in the Library act (pluginline.ts): Install the plugin, Put its items here, Turn the
- * plugin on or off, Remove the plugin; what a line says while its click waits and runs, when it is done and when it fails; its
+ * plugin on or off; what a line says while its click waits and runs, when it is done and when it fails; its
  * Undo; the plugin's strip in place of the links to its page. Stand-in Claude Code and Copilot CLI add the marketplace, install,
  * uninstall and switch a plugin as the real ones record it. A copy of the home takes the same clicks from the Plugins page's
  * boxes first: the plugins record and Copilot CLI's files each route leaves are compared byte for byte.
@@ -19065,40 +19057,50 @@ if (tool === 'claude') {
   if (shots) await fullSize(a);
   await pictures('lines-skill-installed');
 
-  // Example 6: a plugin Copilot CLI loads live from a folder: its agent's line removes it; Undo puts it back.
-    writeFileSync(join(home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'directory', path: market } } }, enabledPlugins: { [id]: true } }));
+  // Example 6: a plugin Copilot CLI loads live from a folder: its agent's line turns the plugin off at once with Undo, and its box on the plugin's page reads Off, kept installed.
+  writeFileSync(join(home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'directory', path: market } } }, enabledPlugins: { [id]: true } }));
   writeFileSync(copilotConfig, JSON.stringify({ installedPlugins: [] }));
   await a.click('#header-refresh');
   await open('agents', 'incident-lead');
   await until(() => a.exists(act('agents', 'incident-lead', 'copilot-cli')));
-  same('Copilot CLI loads it live: Remove the plugin, saying turning it off there is removing it', [await label(act('agents', 'incident-lead', 'copilot-cli')), (await lineOf('Copilot CLI'))?.replace(/^Inside varo-incident-response 1\.10\.0, on here\. /, '')],
-    ['Remove the plugin', 'Copilot CLI loads varo-incident-response live from a folder, so turning it off there is removing it. Uninstalls varo-incident-response from Copilot CLI. Its marketplace folder stays.']);
+  same('Copilot CLI loads it live: Turn the plugin off, as any other copy, with no removing wording', [await label(act('agents', 'incident-lead', 'copilot-cli')), (await lineOf('Copilot CLI'))?.replace(/^Inside varo-incident-response 1\.10\.0, on here\. /, '')],
+    ['Turn the plugin off', 'Turns the whole plugin varo-incident-response off in Copilot CLI, with its 1 skill and 1 MCP server.']);
   const liveOn = () => JSON.parse(readNow(join(home, '.copilot/settings.json'))).enabledPlugins?.[id];
-  // Started, then another page opened while it runs: back on the Library once it is done, its result and Undo are there, and
-  // stay past the time a result without Undo fades.
-  writeFileSync(join(home, 'slow'), '');
-  await press(act('agents', 'incident-lead', 'copilot-cli'));
-  await a.run(`document.getElementById('nav-overview').click()`);
-  await until(() => liveOn() === false, 300);
-  rmSync(join(home, 'slow'));
-  await wait(3000);
-  await openKind(a, 'agents');
-  await wait(FADE_WAIT);
-  check('removed while another page was open: back on the Library its result is on its line, with what its Undo can’t put back and Undo, past the time a result fades', /^Removed varo-incident-response from Copilot CLI\. Undo installs the marketplace’s copy as it is now/.test((await resultOf('Copilot CLI'))?.[0] ?? '') && (await resultOf('Copilot CLI'))?.[1], await saidAnywhere('Copilot CLI'));
-  await undoLast();
-  await until(() => liveOn() === true, 300);
+  const liveCallsBefore = readNow(join(home, 'copilot-calls.txt'));
+  await a.click(act('agents', 'incident-lead', 'copilot-cli'));
   await idle();
-  same('its Undo puts it back', liveOn(), true);
+  same('live copy off from its agent line runs uninstall at once, keeps the line as installed and off, and offers Undo',
+    [liveOn(), readNow(join(home, 'copilot-calls.txt')).slice(liveCallsBefore.length).trim(), await label(act('agents', 'incident-lead', 'copilot-cli')), await a.exists('#outcome-undo-plugin')],
+    [false, `plugin uninstall ${id}`, 'Turn the plugin on', true]);
+  check('the result names the whole plugin turned off in Copilot CLI', /incident-lead is off in Copilot CLI\. Its whole plugin varo-incident-response was turned off there/.test(await a.text('#header') ?? ''), await a.text('#header'));
+  const liveCallsUndo = readNow(join(home, 'copilot-calls.txt'));
+  await a.click('#outcome-undo-plugin');
+  await idle();
+  same('its Undo runs install and turns it back on', [liveOn(), readNow(join(home, 'copilot-calls.txt')).slice(liveCallsUndo.length).trim()], [true, `plugin install ${id}`]);
+  // On the plugin's page: unticking Copilot CLI's box says Turned off in Copilot CLI., shows Off, kept installed, and Undo turns it on.
+  await a.click('#nav-plugins');
+  await until(() => a.exists(`#popen-0-${plugin}`) || a.exists(`#pbox-0-${plugin}-copilot-cli`));
+  if (!(await a.exists(`#pbox-0-${plugin}-copilot-cli`))) await a.click(`#popen-0-${plugin}`);
+  await until(() => a.exists(`#pbox-0-${plugin}-copilot-cli:not([disabled])`));
+  await a.click(`#pbox-0-${plugin}-copilot-cli`);
+  await until(() => a.exists('#plugins-undo'), 300);
+  await idle();
+  same('unticking a live copy’s box on its page says Turned off in Copilot CLI., shows Off, kept installed, and keeps the box unticked',
+    [liveOn(), (await a.text('#plugins-result .toolbar-result-text'))?.trim(), (await a.text('.plugin-tool[data-tool="copilot-cli"] .plugin-tool-state'))?.trim(), await a.run(`document.querySelector('#pbox-0-${plugin}-copilot-cli')?.dataset.state`), await a.run(`document.querySelector('#pbox-0-${plugin}-copilot-cli')?.getAttribute('aria-checked')`)],
+    [false, 'Turned off in Copilot CLI.', 'Off, kept installed', 'kept-off', 'false']);
+  await a.click('#plugins-undo');
+  await idle();
+  same('its page Undo turns the live copy back on', liveOn(), true);
 
   // Example 8: the state changed under the page, its listing still there: nothing runs, and the line says how it stands.
   const settingsNow = JSON.parse(readNow(join(home, '.copilot/settings.json')));
   writeFileSync(join(home, '.copilot/settings.json'), JSON.stringify({ ...settingsNow, enabledPlugins: { [id]: false } }));
-  // Kept out of Copilot CLI in the record, as a home where it was never let in there has it.
+  // Kept out of Copilot CLI in the record, as an unticked live copy kept installed and off has it.
   const recordNow = JSON.parse(readNow(join(home, '.central-knot/plugins.json')));
   writeFileSync(join(home, '.central-knot/plugins.json'), `${JSON.stringify({ ...recordNow, plugins: recordNow.plugins.map(each => (each.plugin === plugin ? { ...each, except: [...new Set([...each.except, 'copilot-cli'])] } : each)) }, null, 2)}\n`);
   await a.click('#header-refresh');
   await open('agents', 'incident-lead');
-  await until(() => a.run(`document.querySelector('${act('agents', 'incident-lead', 'copilot-cli')}')?.textContent === 'Install the plugin'`));
+  await until(() => a.run(`document.querySelector('${act('agents', 'incident-lead', 'copilot-cli')}')?.textContent === 'Turn the plugin on'`));
   writeFileSync(join(home, '.copilot/settings.json'), JSON.stringify({ ...settingsNow, enabledPlugins: { [id]: true } }));
   const callsBefore = readNow(join(home, 'copilot-calls.txt'));
   await a.click(act('agents', 'incident-lead', 'copilot-cli'));

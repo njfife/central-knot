@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { batches, resultLines, strayHolds, type PluginDone, type PluginDraft, type PluginOp } from '../src/pluginplan.ts';
-import { LIVE_PLUGIN, alongWords, cantSwitch, click, clickWords, copilotByName, itemSaid, onNow, standing, switchWords, turnEvery, wholeWords, type PluginItemAt } from '../src/pluginswitch.ts';
+import { alongWords, cantSwitch, click, clickWords, copilotByName, itemSaid, onNow, standing, switchWords, turnEvery, wholeWords, type PluginItemAt } from '../src/pluginswitch.ts';
 import { statusLine } from '../src/libraryrow.ts';
 import { newItem } from '../src/library.ts';
 import { owedTo } from '../src/pluginrecord.ts';
@@ -161,9 +161,9 @@ test('an item says why it can’t be switched: skill rules in a form not edited,
   // Codex's servers written as a value are read and never edited: said before the click, for that server alone.
   const inline = installed('codex-cli', { serversHeld: { issues: 'A form not edited.' } });
   assert.deepEqual([cantSwitch(item(inline, 'mcp', 'issues')), cantSwitch(item(inline, 'mcp', 'wiki'))], ['A form not edited.', undefined]);
-  // Copilot CLI's live folder plugin: off there is uninstalled, so the whole-plugin switch (an agent's box) isn't offered; its own switches are.
+  // Copilot CLI's live folder plugin switches like any other copy: its agent turns the whole plugin off, kept installed.
   const live = installed('copilot-cli', { live: true });
-  assert.deepEqual([cantSwitch(item(live, 'agent', 'helper')), cantSwitch(item(live, 'skill', 'one')), cantSwitch(item(live, 'mcp', 'issues'))], [LIVE_PLUGIN, undefined, undefined]);
+  assert.deepEqual([cantSwitch(item(live, 'agent', 'helper')), cantSwitch(item(live, 'skill', 'one')), cantSwitch(item(live, 'mcp', 'issues'))], [undefined, undefined, undefined]);
 });
 
 test('a plugin that came on for one item says so in one line, with what was left off', () => {
@@ -293,14 +293,16 @@ test('skill one Off, skill two Off, one On: the plugin is on again in Claude Cod
   assert.equal(pluginsPageSays(installs[0]), 'Claude Code: installed 1.0.0.');
 });
 
-test('a main switch never falls back to the whole plugin where the item’s own switch can’t be written, nor where off is uninstalled', () => {
+test('a main switch never falls back to the whole plugin where the item’s own switch can’t be written, and turns Copilot CLI’s live agent off with its whole plugin', () => {
   // Codex's skill rules for this plugin are written in a form not edited here: its own switch can't be used.
   const held = installed('codex-cli', { switchesHeld: 'Codex’s skills.config is written inline.' });
   const off = turnEvery([item(held, 'skill', 'one')], false);
   assert.deepEqual([chosen(off.draft), off.leftIn, off.left], [[], ['codex-cli'], ['Still on in Codex: Codex’s skills.config is written inline.']]);
-  // Copilot CLI loads this plugin live from a folder, where turning it off is uninstalling it: its agent is left, and said.
+  // Copilot CLI's live folder plugin turns off whole like any other copy: its agent switches with the plugin, and wholeWords says so.
   const live = [item(installed('copilot-cli', { live: true }), 'agent', 'helper')];
-  assert.deepEqual([chosen(turnEvery(live, false).draft), turnEvery(live, false).left, wholeWords(live, false)], [[], [`Still on in Copilot CLI: ${LIVE_PLUGIN}`], '']);
-  // Held in both: a reason for each tool, never joined.
-  assert.deepEqual(turnEvery([item(held, 'skill', 'one'), ...live], false).left, ['Still on in Codex: Codex’s skills.config is written inline.', `Still on in Copilot CLI: ${LIVE_PLUGIN}`]);
+  const liveOff = turnEvery(live, false);
+  assert.deepEqual([chosen(liveOff.draft), liveOff.left, wholeWords(live, false)],
+    [['copilot-cli plugin-off'], undefined, 'In Copilot CLI, which has no switch for one agent of a plugin, it turns off everything full brings there.']);
+  // Codex held while Copilot CLI's live copy switches: only Codex is left.
+  assert.deepEqual(turnEvery([item(held, 'skill', 'one'), ...live], false).left, ['Still on in Codex: Codex’s skills.config is written inline.']);
 });

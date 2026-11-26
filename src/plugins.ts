@@ -592,16 +592,16 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
       const cache = text(listing?.cache_path);
       if (cache) return (await hasFiles(cache)) ? installedCopy(cache, entry, { live: false, version: await copyVersion(listing?.version, cache), readAs: { skillsListReplaces: true } }, async skills => copilotSkillsOff(await settingsOf(), plugin, skills)) : { state: 'not-known', reason: 'Copilot CLI lists it, but its files are not where it records them.' };
       // A plugin from a local folder marketplace is loaded live from that folder: nothing is copied. Its only record is
-      // enabledPlugins, true when installed. Copilot CLI's own uninstall of one only sets that to false ("disabled. It is
-      // still on disk", exercised 1.0.108), the same as its disable, so false is not installed: installing again turns it on.
+      // enabledPlugins: true when on, false when off (uninstall sets it to false; its folder, data and switches stay).
       const settings = await settingsOf();
-      const enabled = record(settings?.enabledPlugins)?.[id] === true;
+      const enabled = record(settings?.enabledPlugins)?.[id];
       const source = record(record(record(settings?.extraKnownMarketplaces)?.[marketplace])?.source);
       const folderPath = text(source?.path);
-      if (enabled && source?.source === 'directory' && folderPath) {
+      if (typeof enabled === 'boolean' && source?.source === 'directory' && folderPath) {
         const item = await folderItem(context, folderPath, plugin);
         const folder = item?.folder;
-        return folder && (await hasFiles(folder)) ? installedCopy(folder, item.entry ?? entry, { live: true, version: item.version, readAs: { skillsListReplaces: true } }, async skills => copilotSkillsOff(settings, plugin, skills)) : { state: 'not-known', reason: 'Copilot CLI lists it, but the folder it loads from is gone.' };
+        if (folder && (await hasFiles(folder))) return { ...(await installedCopy(folder, item.entry ?? entry, { live: true, version: item.version, readAs: { skillsListReplaces: true } }, async skills => copilotSkillsOff(settings, plugin, skills))), ...(enabled ? {} : { off: true as const }) };
+        if (enabled) return { state: 'not-known', reason: 'Copilot CLI lists it, but the folder it loads from is gone.' };
       }
       return { state: 'not-installed' };
     }
@@ -694,7 +694,7 @@ function idParts(id: string): { plugin: string; marketplace: string } | undefine
  * the same), read from files only. Claude Code: user-scope entries of installed_plugins.json, off when settings.json
  * enabledPlugins says false; its entry from the marketplace copy known_marketplaces.json names. Copilot CLI: config.json
  * installedPlugins (off: `enabled: false`), and plugins from a folder marketplace, which only settings.json enabledPlugins
- * records, true while installed (capability-data section 7). Codex: [plugins."ID"] tables, off with `enabled = false`.
+ * records (off: false, while its folder exists). Codex: [plugins."ID"] tables, off with `enabled = false`.
  */
 export async function installedPlugins(context: PluginContext, tool: PluginTool): Promise<ToolPlugin[]> {
   const root = configRootOf(context, tool);
@@ -718,16 +718,16 @@ export async function installedPlugins(context: PluginContext, tool: PluginTool)
       const cached = (Array.isArray(listed) ? listed : []).map(record).filter((item): item is Record<string, unknown> => !!item && !!text(item.name) && !!text(item.marketplace));
       const found = await each(cached.map(item => `${text(item.name)}@${text(item.marketplace)}`), async ({ plugin, marketplace }) =>
         ({ plugin, marketplace, state: await installState(context, tool, marketplace, plugin), off: cached.some(item => item.name === plugin && item.marketplace === marketplace && item.enabled === false) }));
-      // A folder marketplace's plugin is loaded live from that folder and recorded only in enabledPlugins: true while it is
-      // installed (false is how Copilot CLI leaves one it uninstalled, see installState).
+      // A folder marketplace's plugin is loaded live from that folder and recorded only in enabledPlugins (true on, false off).
       const own = await settings();
       const turned = record(own?.enabledPlugins) ?? {};
-      const live = Object.keys(turned).filter(id => turned[id] === true && !found.some(entry => `${entry.plugin}@${entry.marketplace}` === id));
+      const live = Object.keys(turned).filter(id => typeof turned[id] === 'boolean' && !found.some(entry => `${entry.plugin}@${entry.marketplace}` === id));
       return [...found, ...await each(live, async ({ plugin, marketplace }, id) => {
         const source = record(record(record(own?.extraKnownMarketplaces)?.[marketplace])?.source);
         if (source?.source !== 'directory' || !text(source.path)) return undefined;
         const item = await folderItem(context, text(source.path), plugin);
-        return { plugin, marketplace, state: await installState(context, tool, marketplace, plugin, item?.entry), off: false, entry: item?.entry, atMarketplaceRoot: item?.isMarketplaceRoot };
+        const state = await installState(context, tool, marketplace, plugin, item?.entry);
+        return turned[id] === false && state.state !== 'installed' ? undefined : { plugin, marketplace, state, off: turned[id] === false, entry: item?.entry, atMarketplaceRoot: item?.isMarketplaceRoot };
       })];
     }
     case 'codex-cli': {
@@ -1120,7 +1120,8 @@ async function wholeOff(context: PluginContext, tool: PluginTool, id: string): P
     case 'claude-cli': return record((await readJson(join(root, 'settings.json')))?.enabledPlugins)?.[id] === false;
     case 'copilot-cli': {
       const listed = (await readJson(join(root, 'config.json')))?.installedPlugins;
-      return (Array.isArray(listed) ? listed : []).map(record).some(item => `${text(item?.name)}@${text(item?.marketplace)}` === id && item?.enabled === false);
+      const cached = (Array.isArray(listed) ? listed : []).map(record).find(item => `${text(item?.name)}@${text(item?.marketplace)}` === id);
+      return cached ? cached.enabled === false : record((await readJson(join(root, 'settings.json')))?.enabledPlugins)?.[id] === false;
     }
     case 'codex-cli': {
       try { return codexPluginTable(await readFile(join(root, 'config.toml'), 'utf8'), id)?.entries.find(entry => entry.key === 'enabled')?.value === false; } catch { return false; }
@@ -1130,10 +1131,11 @@ async function wholeOff(context: PluginContext, tool: PluginTool, id: string): P
 
 /**
  * Turns a whole plugin off (or, `on`, back on) with the tool's own switch: Claude Code's and Copilot CLI's `plugin disable`
- * and `plugin enable`; Codex has no command for it, so its `[plugins."ID"]` table takes `enabled = false` or `true`
- * (capability-data section 8). Undefined where Codex has no such table to switch.
+ * and `plugin enable` (for a live Copilot CLI copy, `plugin uninstall` and `plugin install`); Codex has no command for it,
+ * so its `[plugins."ID"]` table takes `enabled = false` or `true` (capability-data section 8). Undefined where Codex has no such table to switch.
  */
-async function switchWhole(context: PluginContext, tool: PluginTool, id: string, on = false): Promise<NativeRun | undefined> {
+async function switchWhole(context: PluginContext, tool: PluginTool, id: string, on = false, live = false): Promise<NativeRun | undefined> {
+  if (tool === 'copilot-cli' && live) return native(context, tool, on ? installArgs(tool, id) : uninstallArgs(tool, id));
   if (tool !== 'codex-cli') return native(context, tool, ['plugin', on ? 'enable' : 'disable', id, ...(tool === 'claude-cli' ? ['--scope', 'user'] : [])]);
   const path = join(configRootOf(context, tool), 'config.toml');
   const command = `config.toml [plugins."${id}"] enabled = ${on}`;
@@ -1178,10 +1180,11 @@ export async function setWhole(context: PluginContext, marketplace: string, plug
   const outcome = on ? 'plugin-on' : 'plugin-off';
   const held = await heldBy(context, tool, marketplace, source);
   if (held) return { tool, outcome: 'held', message: heldReason(tool, marketplace, held), runs: [] };
-  if ((await installState(context, tool, marketplace, plugin)).state !== 'installed') return { tool, outcome: 'failed', message: `It isn’t installed in ${name} now.`, runs: [] };
+  const state = await installState(context, tool, marketplace, plugin);
+  if (state.state !== 'installed') return { tool, outcome: 'failed', message: `It isn’t installed in ${name} now.`, runs: [] };
   const id = `${plugin}@${marketplace}`;
   if (!(await wholeOff(context, tool, id)) === on) return { tool, outcome, message: `Already ${on ? 'on' : 'off'} in ${name}.`, runs: [] };
-  const run = await switchWhole(context, tool, id, on);
+  const run = await switchWhole(context, tool, id, on, !!state.live);
   if (!run) return { tool, outcome: 'failed', message: `Codex’s config.toml has no entry for ${id} to switch.`, runs: [] };
   if (!(await wholeOff(context, tool, id)) === on) {
     const reloads = await installedReloads(context, tool, marketplace, plugin, on);
@@ -1314,7 +1317,7 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
   const installed = await native(context, tool, installArgs(tool, id));
   runs.push(installed);
   const state = await installState(context, tool, catalog.name, plugin);
-  if (state.state === 'installed') return { tool, outcome: 'installed', changed: true, ...withNext(context, tool, await installedReloads(context, tool, catalog.name, plugin, true), `${installed.ok ? 'Installed' : 'The command reported a problem, but it is installed'}${state.live ? ', loaded live from the marketplace folder' : ''}.`), runs };
+  if (state.state === 'installed' && !state.off) return { tool, outcome: 'installed', changed: true, ...withNext(context, tool, await installedReloads(context, tool, catalog.name, plugin, true), `${installed.ok ? 'Installed' : 'The command reported a problem, but it is installed'}${state.live ? ', loaded live from the marketplace folder' : ''}.`), runs };
   if (state.state === 'not-known') return { tool, outcome: 'not-known', message: state.reason, runs };
   // A marketplace the tool already had is used as the tool last fetched it, which may predate what this page shows.
   // A tool that says it has the same plugin from elsewhere has it: an older copy of this marketplace isn't why.
@@ -1433,11 +1436,12 @@ export async function uninstall(context: PluginContext, marketplace: string, plu
   const held = await heldBy(context, tool, marketplace, source);
   if (held) return { tool, outcome: 'held', message: heldReason(tool, marketplace, held), runs: [] };
   const before = await installState(context, tool, marketplace, plugin);
-  if (before.state === 'not-installed') return { tool, outcome: 'uninstalled', message: `Not installed in ${name}.`, runs: [] };
+  const gone = (at: InstallState) => at.state === 'not-installed' || (tool === 'copilot-cli' && at.state === 'installed' && !!at.live && !!at.off);
+  if (gone(before)) return { tool, outcome: 'uninstalled', message: `Not installed in ${name}.`, runs: [] };
   const id = `${plugin}@${marketplace}`, beforeReloads = await installedReloads(context, tool, marketplace, plugin, false);
   const removed = await native(context, tool, uninstallArgs(tool, id));
   const state = await installState(context, tool, marketplace, plugin);
-  if (state.state === 'not-installed') return { tool, outcome: 'uninstalled', changed: true, message: `Uninstalled from ${name}. The marketplace stays added there.${before.state === 'installed' && before.live ? ' Its folder is the marketplace’s own and stays.' : ''}`, runs: [removed], reloads: beforeReloads };
+  if (gone(state)) return { tool, outcome: 'uninstalled', changed: true, message: `Uninstalled from ${name}. The marketplace stays added there.${before.state === 'installed' && before.live ? ' Its folder is the marketplace’s own and stays.' : ''}`, runs: [removed], reloads: beforeReloads };
   return { tool, outcome: 'failed', message: `Still installed. ${lastLines(removed.output)}`.trim(), runs: [removed] };
 }
 

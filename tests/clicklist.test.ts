@@ -317,6 +317,9 @@ test('A box’s hover says only what its click and its Undo do there: a copy alr
   // Off here, and on in Claude Code by its own command: a tick on Copilot CLI's kept copy turns it on there, not there alone.
   assert.equal(hover(drawn(false, { 'claude-cli': { state: 'installed', path: '/x' }, 'copilot-cli': { state: 'installed', path: '/y', off: true } }), 'copilot-cli'),
     'Off in Copilot CLI: still installed, with its data and settings. Click to turn alpha on in Copilot CLI. Undo turns it off again.');
+  // Ticked on Copilot CLI's live folder copy: says turned off, kept installed, never taken out.
+  assert.equal(hover(drawn(true, { 'copilot-cli': { state: 'installed', path: '/y', live: true } }), 'copilot-cli'),
+    'Copilot CLI: installed, loaded live from the marketplace folder. Click to turn alpha off in Copilot CLI, kept installed: it stays off until you tick it again. Undo turns it on again.');
 });
 
 test('A new run on Plugins clears what an earlier action’s stop said, as before; a click joining a run leaves it', async () => {
@@ -3003,18 +3006,18 @@ test('Library plugin line (sayResult): carries profileLine on LineResult when li
   });
   let nextHome = viewWith(false);
   t.mock.method(api, 'refresh', async () => nextHome);
-  const removed: PluginTurnResult = {
-    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'copilot-cli', action: 'remove', report: { tool: 'copilot-cli', outcome: 'uninstalled', changed: true, message: 'Uninstalled.', runs: [] } }],
-    before: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: [] },
-    back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'copilot-cli', action: 'install' }],
+  const installedAlpha: PluginTurnResult = {
+    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'copilot-cli', action: 'install', report: { tool: 'copilot-cli', outcome: 'installed', changed: true, message: 'Installed.', runs: [] } }],
+    before: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: ['copilot-cli'] },
+    back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'copilot-cli', action: 'remove' }],
   };
-  const aim = { home: '/home', source: '/market', marketName: 'team', plugin: 'alpha', tool: 'copilot-cli' as HarnessId, act: 'remove' as const, item: { kind: 'agent' as const, name: 'lead' } };
+  const aim = { home: '/home', source: '/market', marketName: 'team', plugin: 'alpha', tool: 'copilot-cli' as HarnessId, act: 'install' as const, item: { kind: 'agent' as const, name: 'lead' } };
 
   // Line on screen: LineResult carries profileLine; spoken text has the whole result while the visible status bar keeps the prior wording.
   t.mock.method(document, 'querySelector', () => element());
   turnFromLine(aim);
   await settled();
-  await main.answer(removed);
+  await main.answer(installedAlpha);
   await settled();
   const onLine = resultOn('copilot-cli', { kind: 'agent', name: 'lead' }) as { profileLine?: string } | undefined;
   assert.equal(onLine?.profileLine, 'Work stopped being the profile in use.');
@@ -3023,7 +3026,7 @@ test('Library plugin line (sayResult): carries profileLine on LineResult when li
   const visibleStatus = announcement.children.filter((kid: any) => !String(kid?.className ?? '').includes('visually-hidden')).map(textOf).join('');
   assert.doesNotMatch(visibleStatus, /stopped being the profile/);
   assert.doesNotMatch(String(announcement.title ?? ''), /stopped being the profile/);
-  assert.match(visibleStatus, /^Removed alpha from Copilot CLI\./);
+  assert.match(visibleStatus, /^Installed alpha in Copilot CLI\./);
 
   // Line off screen (header path): tell receives before, sets app.outcome.profileLine, and resultOn stays hidden while header shows it.
   app.home = viewWith(true);
@@ -3031,7 +3034,7 @@ test('Library plugin line (sayResult): carries profileLine on LineResult when li
   t.mock.method(document, 'querySelector', () => null);
   turnFromLine(aim);
   await settled();
-  await main.answer(removed);
+  await main.answer(installedAlpha);
   await settled();
   assert.equal(app.outcome?.profileLine, 'Work stopped being the profile in use.');
   assert.match(app.outcome?.text ?? '', /Work stopped being the profile in use\.$/);
@@ -3122,21 +3125,21 @@ test('Overlapping plugin click and Library line act: only the act that ended Wor
     before: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: [] },
     back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'codex-cli', action: 'plugin-on' }],
   };
-  const removedBeta: PluginTurnResult = {
-    done: [{ source: '/market', marketName: 'team', plugin: 'beta', tool: 'copilot-cli', action: 'remove', report: { tool: 'copilot-cli', outcome: 'uninstalled', changed: true, message: 'Uninstalled.', runs: [] } }],
-    before: { id: 'e2', source: '/market', marketName: 'team', plugin: 'beta', on: true, except: [] },
-    back: [{ source: '/market', marketName: 'team', plugin: 'beta', tool: 'copilot-cli', action: 'install' }],
+  const installedBeta: PluginTurnResult = {
+    done: [{ source: '/market', marketName: 'team', plugin: 'beta', tool: 'copilot-cli', action: 'install', report: { tool: 'copilot-cli', outcome: 'installed', changed: true, message: 'Installed.', runs: [] } }],
+    before: { id: 'e2', source: '/market', marketName: 'team', plugin: 'beta', on: true, except: ['copilot-cli'] },
+    back: [{ source: '/market', marketName: 'team', plugin: 'beta', tool: 'copilot-cli', action: 'remove' }],
   };
-  const betaAim = { home: '/home', source: '/market', marketName: 'team', plugin: 'beta', tool: 'copilot-cli' as HarnessId, act: 'remove' as const, item: { kind: 'agent' as const, name: 'lead' } };
+  const betaAim = { home: '/home', source: '/market', marketName: 'team', plugin: 'beta', tool: 'copilot-cli' as HarnessId, act: 'install' as const, item: { kind: 'agent' as const, name: 'lead' } };
 
-  // (a) Forward: alpha untick ends Work; while it runs, Remove on beta's line queues behind it. Only alpha's run credits Work ending.
+  // (a) Forward: alpha untick ends Work; while it runs, Install on beta's line queues behind it. Only alpha's run credits Work ending.
   turnPlugin(entry, 'alpha', 'keep-out', 'codex-cli');
   await settled();
   turnFromLine(betaAim);
   await settled();
   diskHome = viewWith(false);
   await main.answer(turnedOff);
-  await main.answer(removedBeta);
+  await main.answer(installedBeta);
   await settled();
   assert.equal(market.lastRun?.profileLine, 'Work stopped being the profile in use.');
   assert.equal(resultOn('copilot-cli', { kind: 'agent', name: 'lead' })?.profileLine, undefined);

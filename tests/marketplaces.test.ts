@@ -1278,6 +1278,43 @@ test('A copy whose files can’t be read is left as it is by Off, and the result
   } finally { await box.cleanup(); }
 });
 
+test('Copilot CLI’s live copy turned off with Copilot CLI’s own command reads Off, kept installed: box unticked, automatic updates and profiles leave it off, and a tick turns it on via setWhole', async () => {
+  const box = await switchHome({
+    tools: ['copilot-cli'],
+    engine: {
+      findClis: async () => ({ binaries: { 'copilot-cli': '/bin/true' }, apps: {} }),
+      setWhole: async (_context, marketplace, plugin, tool, on) => {
+        box.calls.push(`whole ${plugin}@${marketplace} ${tool} ${on}`);
+        const now = await box.json('.copilot/settings.json');
+        await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ ...now, enabledPlugins: { ...now.enabledPlugins, [`${plugin}@${marketplace}`]: on } }));
+        return { tool, outcome: on ? 'plugin-on' : 'plugin-off', message: '', runs: [], changed: true };
+      },
+    },
+  });
+  try {
+    await put(join(box.home, '.copilot/settings.json'), JSON.stringify({
+      extraKnownMarketplaces: { team: { source: { source: 'directory', path: box.root } } },
+      enabledPlugins: { 'pdf@team': true },
+    }));
+    await box.markets.view();
+    box.calls.length = 0;
+    await box.markets.turn(box.root, 'pdf', 'off', undefined, box.home);
+    assert.deepEqual(box.calls, ['whole pdf@team copilot-cli false'], 'Off runs setWhole, never uninstall');
+    const view = await box.markets.view(), entry = view.marketplaces.find(each => each.source === box.root)!;
+    const mark = toolMark(view, entry, 'pdf', 'copilot-cli', entry.switches!.pdf!.tools['copilot-cli']);
+    const boxState = boxOf(view, entry, 'pdf', 'copilot-cli', mark);
+    assert.deepEqual([mark.mark, boxState.ticked], ['kept-off', false]);
+    const page = { tools: [], library: {}, items: [] };
+    const home = { pluginItems: await readPluginItems({ home: box.home, dataDir: '', binaries: {} }, ['copilot-cli']), profiles: await readProfiles(box.home), skills: page, mcp: page, agents: page } as unknown as PluginHome;
+    const skill = pluginLive(home).find(item => item.name === 'pdf');
+    assert.deepEqual(skill?.copies.map(copy => [copy.tool, copy.way]), [['copilot-cli', 'plugin-off']]);
+    assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops.filter(op => op.plugin === 'pdf'), []);
+    box.calls.length = 0;
+    await box.markets.turn(box.root, 'pdf', 'let-in', 'copilot-cli', box.home);
+    assert.deepEqual(box.calls, ['whole pdf@team copilot-cli true'], 'a tick turns the kept copy on through setWhole');
+  } finally { await box.cleanup(); }
+});
+
 test('pluginCopy and skillPluginFile open the Find hit’s own marketplace source when two marketplaces share a name, start no fetch, and return undefined when no local copy exists', async () => {
   let remoteFetches = 0;
   const box = await setup({ engine: { readRemotePlugin: async () => { remoteFetches++; return { problem: 'should not fetch' }; } } });

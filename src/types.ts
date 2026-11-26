@@ -814,7 +814,7 @@ export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: 
   /** Why none of its skills can be switched here (Codex's skill rules in a form not edited), if so. */ switchesHeld?: string;
   /** Skills held off by a switch that isn't this plugin's own, each with why it can't be turned on here. */ skillsHeld?: Record<string, string>;
   /** MCP servers whose switch can't be written here, each with why. */ serversHeld?: Record<string, string>;
-  /** Loaded live from a folder marketplace, nothing copied (Copilot CLI): turned off, such a plugin is no longer installed. */ live?: boolean;
+  /** Loaded live from a folder marketplace, nothing copied. */ live?: boolean;
   items: PluginItem[];
   /** Its hooks as that tool's installed copy declares them; absent when it has none or `problem`. */ hooks?: DeclaredHook[];
   /** Each hooks file of that copy that couldn't be read as JSON (PluginContents hooksUnread). */ hooksUnread?: string[];

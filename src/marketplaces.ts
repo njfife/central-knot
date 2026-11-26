@@ -758,7 +758,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
    * A click on a whole plugin (`what`): its switch On or Off, Add for a plugin found in a tool, or one tool's box unticked or
    * ticked. The entry is recorded first; then the table (pluginrecord.ts owedTo) is asked once with it, and what it owes runs by
    * each tool's own route: On, Add and a tick run only installs and turn kept copies on, Off and an untick only turn copies off
-   * (kept installed) or uninstall, a box only in its tool. A tool where nothing can run (held, or its record can't be read) is a
+   * (kept installed), a box only in its tool. A tool where nothing can run (held, or its record can't be read) is a
    * report saying why. `back` is the Undo: what changed, reversed (pluginplan.ts reverse).
    */
   async function turn(source: string, plugin: string, what: PluginTurn, tool: HarnessId | undefined, home: unknown): Promise<PluginTurnResult> {
@@ -783,7 +783,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       if (tool && each !== tool) continue;
       const act = clickRuns(what, owed);
       if (act === 'install-items' || act === 'remove-items') itemsIn.push(each);
-      else if (act) ops.push({ source: entry.source, marketName, plugin, tool: each, action: act === 'uninstall' ? 'remove' : act });
+      else if (act) ops.push({ source: entry.source, marketName, plugin, tool: each, action: act });
       // Said on the result, and nothing run there: a record that can't be read; held in this click's way; and for Off and Keep
       // out, a tool holding another marketplace under this name (read from its state: its plugins are not this one's), or a copy
       // off there already (pluginrecord.ts row 9), whose words are the result's "already off in" (nothing changed there: no Undo).
