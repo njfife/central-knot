@@ -808,6 +808,7 @@ export interface PluginItem { kind: PartKind; name: string; description: string;
 /** A plugin installed whole in one tool, read from that tool's own records and its copy of the plugin. */
 export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: string; version?: string;
   /** The whole plugin is turned off in that tool. */ off?: boolean;
+  /** Worked out as the home is read, never stored: off there and kept so by the plugins record (pluginstatus.ts keptOff). */ keptOff?: true;
   /** Its skills that tool has turned off one by one (Copilot CLI's and Codex's switch). */ skillsOff?: string[];
   /** Its MCP servers and agents that tool has turned off one by one (partswitch.ts). */ serversOff?: string[]; agentsOff?: string[];
   /** Why none of its skills can be switched here (Codex's skill rules in a form not edited), if so. */ switchesHeld?: string;

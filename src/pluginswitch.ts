@@ -60,11 +60,13 @@ export const offRemoves = (item: PluginItemAt) => item.tool === 'copilot-cli' &&
 export const LIVE_PLUGIN = 'Copilot CLI loads this plugin live from a folder, where turning it off is the same as uninstalling it: Remove the plugin, on its line in the opened row, does that.';
 
 /**
- * Why this item can't be switched here, if it can't: its own switch can't be written (switchHeld), or the whole plugin
- * would go, in Copilot CLI, where it is loaded live from a folder. (A plugin whose marketplace the tool no longer lists is switched all the same: the tool
- * still loads it, and has no other marketplace of that name to mistake it for.)
+ * Why this item can't be switched here, if it can't: its plugin is kept off there by the plugins record (InstalledPlugin `keptOff`),
+ * its own switch can't be written (switchHeld), or the whole plugin would go, in Copilot CLI, where it is loaded live from a folder.
+ * (A plugin whose marketplace the tool no longer lists is switched all the same: the tool still loads it, and has no other
+ * marketplace of that name to mistake it for.)
  */
 export function cantSwitch(item: PluginItemAt): string | undefined {
+  if (item.install.keptOff) return `${item.install.plugin} is off in ${names[item.tool]}, kept installed: Turn the plugin on, on its line in the opened row, turns it on again.`;
   if (!ownSwitch(item)) return offRemoves(item) ? LIVE_PLUGIN : undefined;
   return switchHeld(item.install, item);
 }
