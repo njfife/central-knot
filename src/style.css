@@ -1538,7 +1538,8 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .plugin-tool-name { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .plugin-tool-state { display: flex; flex-direction: column; font-size: 11.5px; color: var(--ink-soft); }
 /* A name of his or a clash under a tool's box (pluginpage.ts yourLines, clashLines): its sentence, then its control under it, at its start. */
-.plugin-tool-yours, .plugin-tool-clash { align-items: flex-start; gap: 4px; }
+.plugin-tool-yours, .plugin-tool-clash { align-items: flex-start; gap: 4px; max-width: 100%; }
+.plugin-tool-yours .btn, .plugin-tool-clash .btn { max-width: 100%; height: auto; min-height: 28px; padding: 3px 8px; white-space: normal; overflow-wrap: anywhere; text-align: left; }
 .plugin-section { margin: 22px 0 0; }
 .plugin-section > .plugin-group:first-child { margin-top: 0; }
 .plugin-section .plugin-outcome-list { margin-top: 8px; }
@@ -1925,7 +1926,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .tool-switch { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-soft); }
 /* The app's switch, at its own size (the row's action-button height doesn't apply to it). */
 .details-tool-actions .tool-switch .switch { height: 18px; }
-.delete-armed { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.delete-armed { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; max-width: 100%; }
 /* Cancel starts where the actions above it start ("Files and contents"), as a lone action in .details-actions does. */
 .delete-armed > .text-action:first-child { padding-left: 0; }
 /* What a confirming click also does (the links and the shared copy it removes), on its own line under the two buttons. */
