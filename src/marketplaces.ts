@@ -948,14 +948,14 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   }
 
   /** One plugin's marketplace copy on disk among the open home's known marketplaces (no fetch). */
-  async function pluginCopy(marketName: string, plugin: string): Promise<{ folder: string; root: string; entry: Record<string, unknown>; atMarketplaceRoot: boolean } | undefined> {
+  async function pluginCopy(marketName: string, plugin: string): Promise<{ folder: string; root: string; entry: Record<string, unknown>; atMarketplaceRoot: boolean; codexOnly?: boolean } | undefined> {
     const ctx = await context();
     const { known } = await listedSources(ctx, columns((await host.read()).tools));
     for (const { source } of known) {
       const { catalog } = await catalogFor(ctx, source, { counts: false, local: true });
       const item = catalog?.root && catalog.name === marketName ? catalog.plugins.find(entry => entry.name === plugin) : undefined;
       const where = item ? await locate(ctx, catalog!.root!, item, true) : undefined;
-      if (where && !('problem' in where)) return { ...where, atMarketplaceRoot: !!item!.folder && !!item!.isMarketplaceRoot };
+      if (where && !('problem' in where)) return { ...where, atMarketplaceRoot: !!item!.folder && !!item!.isMarketplaceRoot, ...(catalog!.codexOnly ? { codexOnly: true } : {}) };
     }
     return undefined;
   }

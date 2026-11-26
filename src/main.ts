@@ -26,7 +26,7 @@ import {
 import { everythingEntryAction, setSyncEverything } from './everything.ts';
 import { chooseTools, whatJoiningDoes } from './toolchoice.ts';
 import { pruneHistory, readHistory } from './history.ts';
-import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skillFoundFile, skillVersion, skillVersionFile, skillsView, takeOver } from './skills.ts';
+import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skillFoundFile, skillPluginFile, skillVersion, skillVersionFile, skillsView, takeOver } from './skills.ts';
 import { agentTools, mcpTools, noteTools, pluginTools, presentTools, takesPlugins } from './presence.ts';
 import { forgetRefusals, installedPlugins, pluginRecordFiles, recordReadable } from './plugins.ts';
 import { checkFeed, type FeedCheck } from './bundlefeed.ts';
@@ -1836,6 +1836,14 @@ app.whenReady().then(async () => {
     const shared = context();
     if (!(await managedNow(shared, await readFor(handoff.id))).includes(tool)) return null;
     return (await skillFoundFile(shared, key, tool, rootLabel, file)) ?? null;
+  });
+  handleNow('skills:plugin-file', async (ref, file) => {
+    const ask = record(ref);
+    const from = ask?.from === 'marketplace' ? 'marketplace' : isTool(ask?.from) ? ask.from : undefined;
+    if (!current || !from || typeof ask?.marketName !== 'string' || typeof ask.plugin !== 'string' || typeof ask.part !== 'string' || typeof file !== 'string') return null;
+    const shared = context();
+    if (from !== 'marketplace' && !(await managedNow(shared, await readFor(handoff.id))).includes(from)) return null;
+    return (await skillPluginFile(shared, { marketName: ask.marketName, plugin: ask.plugin, part: ask.part, from }, file, (market, plugin) => markets.pluginCopy(market, plugin))) ?? null;
   });
   // The git repo the Managed set lives in. Reading it, and asking the repo for its latest commit, waits for no sync pass;
   // Connect, Pull, Push and Disconnect take their turn with every other change.

@@ -13,6 +13,7 @@ const api: DesktopApi = {
   skillVersion: (key, hash) => ipcRenderer.invoke('skills:version', key, hash),
   skillVersionFile: (key, hash, file) => ipcRenderer.invoke('skills:version-file', key, hash, file),
   skillFoundFile: (key, tool, rootLabel, file) => ipcRenderer.invoke('skills:found-file', key, tool, rootLabel, file),
+  skillPluginFile: (ref, file) => ipcRenderer.invoke('skills:plugin-file', ref, file),
   history: () => ipcRenderer.invoke('history:list'),
   instructions: readId => ipcRenderer.invoke('instructions:view', readId),
   agentVersion: (key, hash) => ipcRenderer.invoke('agents:version', key, hash),

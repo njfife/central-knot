@@ -126,6 +126,19 @@ test('A plugin’s item has one plan key by both routes, read on real files: ins
     // The name stays the one the tool loads it by, which its own switch takes (Codex: demo:pdf-reader); the key is the folder's.
     assert.deepEqual(installed('claude-cli', 'demo'), [['pdf-reader', 'demo@m/pdf'], ['tracker', 'demo@m/tracker'], ['checker', 'demo@m/checker']]);
     assert.deepEqual(installed('codex-cli', 'demo'), [['pdf-reader', 'demo@m/pdf'], ['tracker', 'demo@m/tracker']], 'Codex’s copy: the same key (and no agents)');
+    // Skills keep their listed path relative to the plugin root ('.' included), their real folder, and matching hashes across identical copies.
+    const claudePdf = read.find(found => found.tool === 'claude-cli' && found.plugin === 'demo')!.items.find(item => item.name === 'pdf-reader')!;
+    const codexPdf = read.find(found => found.tool === 'codex-cli' && found.plugin === 'demo')!.items.find(item => item.name === 'pdf-reader')!;
+    const claudeSolo = read.find(found => found.tool === 'claude-cli' && found.plugin === 'solo')!.items[0]!;
+    assert.deepEqual([claudePdf.path, codexPdf.path, claudeSolo.path], ['skills/pdf', 'skills/pdf', '.']);
+    assert.ok(claudePdf.realDirectory && codexPdf.realDirectory && claudePdf.realDirectory !== codexPdf.realDirectory);
+    assert.ok(claudePdf.hash && claudePdf.hash === codexPdf.hash, 'identical plugin skill copies in two tools share a folder hash');
+    // A differing sibling file with the same SKILL.md gives different folder hashes.
+    await put(join(box.home, '.codex/plugins/cache/m/demo/1.2.0/skills/pdf/extra.md'), 'Codex extra.\n');
+    const diverged = await readPluginItems(box.context, ['claude-cli', 'codex-cli']);
+    const divergedClaude = diverged.find(found => found.tool === 'claude-cli' && found.plugin === 'demo')!.items.find(item => item.name === 'pdf-reader')!;
+    const divergedCodex = diverged.find(found => found.tool === 'codex-cli' && found.plugin === 'demo')!.items.find(item => item.name === 'pdf-reader')!;
+    assert.ok(divergedClaude.hash && divergedCodex.hash && divergedClaude.hash !== divergedCodex.hash, 'differing companion files produce different folder hashes');
     assert.deepEqual((await placed('demo', demo)).map(each => each.key), ['demo@m/checker', 'demo@m/pdf', 'demo@m/tracker'], 'Pi’s: the same keys');
     // A plugin that is one skill, in a folder of another name (bundle): installed and placed, keyed by the plugin's name.
     const [soloPlaced] = await placed('solo', bundle);

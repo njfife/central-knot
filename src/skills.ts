@@ -20,7 +20,8 @@
 // libraryrow.ts with librarypages.ts; History's sentences and actions, historyactions.ts.
 import { randomUUID } from 'node:crypto';
 import { lstat, open, readFile, readdir, realpath, stat, unlink } from 'node:fs/promises';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { codexManifest, inside, pathIn, skillsOf } from './catalogdetail.ts';
 import { appendHistory, readHistory, replaceHistory } from './history.ts';
 import { isClearedSwitch, libraryAction, libraryEntry } from './historyactions.ts';
 import { keepVersion, listed, noteAgainst, pendingEdits, plan, wantedIn } from './library.ts';
@@ -28,7 +29,8 @@ import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, foundCopies, lookFor, restore, runPass, takeInAnswers, unreadIn, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords } from './libraryrow.ts';
 import { comparableText } from './pluginstatus.ts';
-import { pluginHolds, throughPlugins, type GivenByPlugin, type PluginHold } from './plugins.ts';
+import { installedPlugins, pluginHolds, SAFE_NAME, throughPlugins, type GivenByPlugin, type PluginHold } from './plugins.ts';
+import { takesPlugins } from './presence.ts';
 import { destinationReloads } from './reload.ts';
 import { errorCode, itemKey, landingOf, libraryGate, notCopied, plainError, readTree, syncGate, targetFor, writeAccess, type ShareContext, type Tree } from './share.ts';
 import { alsoReads, lockedRoot, placeFolder, readCopy, readShape, readSkillsFolder, recoverFolders, removeFolder,
@@ -43,7 +45,7 @@ import { agentInPi, agentKind, applyAgents } from './agents.ts';
 import { harnesses, isSkillEntry, toolConfigRoot } from './harnesses.ts';
 import { displayPath } from './machine.ts';
 import type {
-  Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, Skill, SkillFileRead, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy,
+  Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, PluginSkillRef, Skill, SkillFileRead, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy,
 } from './types.ts';
 import { andList, notManagedHere, throughPlugin, toolName } from './words.ts';
 
@@ -658,6 +660,29 @@ export async function skillVersionFile(context: ShareContext, key: string, hash:
 export async function skillFoundFile(context: ShareContext, key: string, tool: HarnessId, rootLabel: string | undefined, file: string): Promise<SkillFileRead | undefined> {
   const folder = await foundSkillFolder(context, key, tool, rootLabel);
   return folder ? readSkillFile(folder, file) : undefined;
+}
+export interface PluginSkillCopy { folder: string; root: string; entry: Record<string, unknown>; atMarketplaceRoot: boolean; codexOnly?: boolean }
+/** Resolves a plugin skill's folder (installed copy or marketplace copy) through the plugin's own skill reader; refuses parts leaving the plugin's root. */
+async function pluginSkillFolder(context: Pick<ShareContext, 'home' | 'overrides'>, ref: PluginSkillRef, marketplace?: (marketName: string, plugin: string) => Promise<PluginSkillCopy | undefined>): Promise<{ directory: string; real: string } | undefined> {
+  if (!SAFE_NAME.test(ref.marketName) || !SAFE_NAME.test(ref.plugin) || !ref.part || ref.part.includes('\0') || isAbsolute(ref.part)) return undefined;
+  const installed = ref.from !== 'marketplace' && takesPlugins(ref.from)
+    ? (await installedPlugins({ home: context.home, dataDir: '', binaries: {}, overrides: context.overrides }, ref.from).catch(() => [])).find(entry => entry.plugin === ref.plugin && entry.marketplace === ref.marketName)
+    : undefined;
+  const copy = ref.from === 'marketplace' ? await marketplace?.(ref.marketName, ref.plugin)
+    : installed?.state.state === 'installed' ? { folder: installed.state.path, root: installed.state.path, entry: installed.entry ?? {}, atMarketplaceRoot: !!installed.atMarketplaceRoot } : undefined;
+  if (!copy) return undefined;
+  const listed = await skillsOf(copy.folder, copy.entry, copy.root, { codex: ref.from === 'codex-cli' || copy.codexOnly ? await codexManifest(copy.folder) : undefined, skillsListReplaces: ref.from === 'copilot-cli', atMarketplaceRoot: copy.atMarketplaceRoot });
+  if (!listed.some(skill => skill.path === ref.part)) return undefined;
+  const candidate = resolve(copy.folder, ref.part);
+  if (!pathIn(copy.folder, candidate) || !(await inside(copy.folder, candidate)) || !(await inside(copy.root, candidate))) return undefined;
+  const real = await realpath(candidate).catch(() => undefined);
+  return real && (await lstat(join(real, 'SKILL.md')).catch(() => undefined))?.isFile() ? { directory: candidate, real } : undefined;
+}
+/** One regular file of a plugin skill (installed copy in a tool, or its marketplace copy), through readSkillFile. */
+export async function skillPluginFile(context: Pick<ShareContext, 'home' | 'overrides'>, ref: PluginSkillRef, file: string, marketplace?: (marketName: string, plugin: string) => Promise<PluginSkillCopy | undefined>): Promise<SkillFileRead | undefined> {
+  const found = await pluginSkillFolder(context, ref, marketplace);
+  const read = found && await readSkillFile(found.real, file);
+  return read ? { ...read, directory: found.directory } : undefined;
 }
 
 /**

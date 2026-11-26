@@ -332,7 +332,7 @@ const serverList = (servers: Record<string, unknown>) => Object.entries(servers)
 }).sort((first, second) => first.name.localeCompare(second.name));
 
 /** A plugin's skills, read by each tool's rule (see pluginContents). */
-async function skillsOf(folder: string, entry: Record<string, unknown>, root: string, readAs: ReadAs, unread?: string[]): Promise<NamedPart[]> {
+export async function skillsOf(folder: string, entry: Record<string, unknown>, root: string, readAs: ReadAs, unread?: string[]): Promise<NamedPart[]> {
   const { own, added } = await manifestOf(folder, entry, root, readAs);
   const skillsFolder = join(folder, 'skills');
   const isListed = own.skills !== undefined || added.skills !== undefined;

@@ -10,12 +10,12 @@ import fs, { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { lockPath, lockSkip, withLock } from './fslock.ts';
 import { colonNameSkip, posixModeSkip } from './wincompat.ts';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { readHistory } from '../src/history.ts';
 import { libraryEntry, librarySentence } from '../src/historyactions.ts';
 import { addLabel, canAdd, harnessIs, isPartial, libraryWords, ownCopies, placeOf, rowClicks, sentences, statusLine, switchLabel } from '../src/libraryrow.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
-import { applySkills, clearSwitch, readDisk, skillChange, skillFoundFile, skillsView, skillVersion, skillVersionFile, takeOver } from '../src/skills.ts';
+import { applySkills, clearSwitch, readDisk, skillChange, skillFoundFile, skillPluginFile, skillsView, skillVersion, skillVersionFile, takeOver } from '../src/skills.ts';
 import { serversView } from '../src/servers.ts';
 import { agentsView } from '../src/agents.ts';
 import { homePass } from '../src/homepass.ts';
@@ -1668,5 +1668,121 @@ test('skillFoundFile resolves shared folders, symlinked skill folders and multip
     assert.notEqual(dualFact.folderHashes?.[realpathSync(folderOf(box, 'copilot-cli', 'dual'))], dualFact.folderHashes?.[realpathSync(dualSharedDir)]);
     assert.ok(sharedFact.folderHashes?.[realpathSync(sharedDir)]);
     assert.ok(linkedFact.folderHashes?.[realpathSync(realTarget)]);
+  } finally { await box.cleanup(); }
+});
+
+test('skillPluginFile reads installed (on and off), root-skill, symlinked-root and marketplace plugin skills through readSkillFile, and refuses paths leaving the plugin root', async t => {
+  const box = await sandbox();
+  try {
+    const skillBody = skillText('Plugin skill value: api_key=ck-plugin-raw-99.', 'triage');
+    const nestedBody = '# Rubric\n\n- Check severity.\n';
+    const exactLimit = 'a'.repeat(1024 * 1024);
+    const overLimit = 'b'.repeat(1024 * 1024 + 1);
+    const binary = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02]);
+    const write = async (path: string, content: string | Buffer) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, content); };
+
+    // Installed plugin in Claude Code (off in settings.json: still readable), with nested file, binary, cap and inner symlinks.
+    const claudePlugin = join(box.home, '.claude/plugins/cache/team/issue-tracker/2.0.0');
+    const claudeSkill = join(claudePlugin, 'skills/triage');
+    await write(join(claudeSkill, 'SKILL.md'), skillBody);
+    await write(join(claudeSkill, 'notes/rubric.md'), nestedBody);
+    await write(join(claudeSkill, 'asset.bin'), binary);
+    await write(join(claudeSkill, 'exact.txt'), exactLimit);
+    await write(join(claudeSkill, 'over.txt'), overLimit);
+    const outsideFile = join(box.base, 'outside-secret.txt');
+    const outsideSkill = join(box.base, 'outside-skill');
+    await write(outsideFile, 'outside\n');
+    await write(join(outsideSkill, 'SKILL.md'), skillText('Outside plugin.', 'escaped'));
+    await symlink('SKILL.md', join(claudeSkill, 'alias.md'));
+    await symlink(outsideFile, join(claudeSkill, 'out-link.md'));
+    await symlink(outsideSkill, join(claudeSkill, 'sub-link'));
+    // A skill folder inside the plugin that is a symlink out of the plugin root must be refused.
+    await symlink(outsideSkill, join(claudePlugin, 'skills/escape-link'));
+    // A SKILL.md folder inside the plugin that the plugin does not list must also be refused.
+    await write(join(claudePlugin, 'unlisted/SKILL.md'), skillText('Unlisted inside plugin.', 'unlisted'));
+    // A manifest listing a skill outside the plugin root must be refused.
+    await write(join(claudePlugin, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'issue-tracker', version: '2.0.0', skills: ['../outside-skill'] }));
+    await write(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({
+      version: 2,
+      plugins: {
+        'issue-tracker@team': [{ scope: 'user', installPath: claudePlugin, version: '2.0.0' }],
+        'solo@team': [{ scope: 'user', installPath: join(box.home, '.claude/plugins/cache/team/solo/1.0.0'), version: '1.0.0' }],
+        'linked-root@team': [{ scope: 'user', installPath: join(box.home, '.claude/plugins/cache/team/linked-root/1.0.0'), version: '1.0.0' }],
+      },
+    }));
+    await write(join(box.home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'issue-tracker@team': false } }));
+
+    // Root-skill plugin (SKILL.md at plugin root, part '.').
+    const soloPlugin = join(box.home, '.claude/plugins/cache/team/solo/1.0.0');
+    const soloBody = skillText('Root skill body.', 'solo');
+    await write(join(soloPlugin, 'SKILL.md'), soloBody);
+    await write(join(soloPlugin, 'guide.md'), 'Root guide.\n');
+
+    // Plugin root that is itself a symlink out of the cache: installedContents follows it, so skillPluginFile reads it as the folder it leads to (still refusing inner links and paths leaving that folder).
+    const externalPlugin = join(box.base, 'external-plugin');
+    const extBody = skillText('From symlinked plugin root.', 'ext-skill');
+    await write(join(externalPlugin, 'skills/ext-skill/SKILL.md'), extBody);
+    await write(join(externalPlugin, 'skills/ext-skill/detail.md'), 'External detail.\n');
+    await symlink(outsideFile, join(externalPlugin, 'skills/ext-skill/inner-link.md'));
+    await mkdir(join(box.home, '.claude/plugins/cache/team/linked-root'), { recursive: true });
+    await symlink(externalPlugin, join(box.home, '.claude/plugins/cache/team/linked-root/1.0.0'));
+
+    // Marketplace copy (not installed in any tool), including a plugin whose manifest tries to list a sibling plugin's skill outside its own root.
+    const marketRoot = join(box.base, 'market');
+    const marketPlugin = join(marketRoot, 'plugins/docs');
+    const siblingPlugin = join(marketRoot, 'plugins/other');
+    const marketBody = skillText('From marketplace copy.', 'pdf-reader');
+    await write(join(marketPlugin, 'skills/pdf-reader/SKILL.md'), marketBody);
+    await write(join(marketPlugin, 'skills/pdf-reader/notes/tables.md'), 'Table rules.\n');
+    await write(join(marketPlugin, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'docs', version: '1.0.0', skills: ['../other/skills/sneaky'] }));
+    await write(join(siblingPlugin, 'skills/sneaky/SKILL.md'), skillText('Sibling plugin.', 'sneaky'));
+    const marketLookup = async (marketName: string, plugin: string) => (marketName === 'team' && plugin === 'docs'
+      ? { folder: marketPlugin, root: marketRoot, entry: {}, atMarketplaceRoot: false } : undefined);
+
+    const expectedFiles = ['SKILL.md', 'asset.bin', 'exact.txt', 'notes/rubric.md', 'over.txt'];
+    const readInstalled = (file: string) => skillPluginFile(box.context, { marketName: 'team', plugin: 'issue-tracker', part: 'skills/triage', from: 'claude-cli' }, file);
+    const listed = await countOpens(() => readInstalled('SKILL.md'));
+    assert.deepEqual(listed.result, { files: expectedFiles, text: skillBody, directory: claudeSkill });
+    assert.equal(listed.opens.size, 0, 'listing does not hash files');
+    assert.deepEqual(await readInstalled('notes/rubric.md'), { files: expectedFiles, text: nestedBody, directory: claudeSkill });
+    assert.deepEqual(await readInstalled('asset.bin'), { files: expectedFiles, note: 'Not a text file.', directory: claudeSkill });
+    assert.deepEqual(await readInstalled('exact.txt'), { files: expectedFiles, text: exactLimit, directory: claudeSkill });
+    assert.deepEqual(await readInstalled('over.txt'), { files: expectedFiles, note: 'Over 1 MB, so not shown here.', directory: claudeSkill });
+    for (const bad of ['../outside-secret.txt', '/etc/passwd', './SKILL.md', 'alias.md', 'out-link.md', 'sub-link/SKILL.md', 'missing.md']) {
+      assert.equal(await readInstalled(bad), undefined, `refuses file ${JSON.stringify(bad)}`);
+    }
+    await t.test('refuses a special file (FIFO) inside a plugin skill without hanging', { skip: posixModeSkip }, async () => {
+      const fifo = join(claudeSkill, 'pipe');
+      assert.equal(spawnSync('mkfifo', [fifo]).status, 0);
+      assert.equal(await readInstalled('pipe'), undefined);
+      assert.deepEqual((await readInstalled('SKILL.md'))?.files, expectedFiles);
+    });
+
+    // Root-skill plugin (part '.').
+    assert.deepEqual(await skillPluginFile(box.context, { marketName: 'team', plugin: 'solo', part: '.', from: 'claude-cli' }, 'SKILL.md'),
+      { files: ['SKILL.md', 'guide.md'], text: soloBody, directory: soloPlugin });
+    assert.deepEqual(await skillPluginFile(box.context, { marketName: 'team', plugin: 'solo', part: '.', from: 'claude-cli' }, 'guide.md'),
+      { files: ['SKILL.md', 'guide.md'], text: 'Root guide.\n', directory: soloPlugin });
+
+    // Symlinked installed plugin root: read through its real folder, inner links still refused.
+    const linkedDir = join(box.home, '.claude/plugins/cache/team/linked-root/1.0.0/skills/ext-skill');
+    assert.deepEqual(await skillPluginFile(box.context, { marketName: 'team', plugin: 'linked-root', part: 'skills/ext-skill', from: 'claude-cli' }, 'SKILL.md'),
+      { files: ['SKILL.md', 'detail.md'], text: extBody, directory: linkedDir });
+    assert.equal(await skillPluginFile(box.context, { marketName: 'team', plugin: 'linked-root', part: 'skills/ext-skill', from: 'claude-cli' }, 'inner-link.md'), undefined);
+
+    // Marketplace copy (not installed): reads SKILL.md and nested file, refuses sibling plugin path leaving plugin root.
+    assert.deepEqual(await skillPluginFile(box.context, { marketName: 'team', plugin: 'docs', part: 'skills/pdf-reader', from: 'marketplace' }, 'SKILL.md', marketLookup),
+      { files: ['SKILL.md', 'notes/tables.md'], text: marketBody, directory: join(marketPlugin, 'skills/pdf-reader') });
+    assert.deepEqual(await skillPluginFile(box.context, { marketName: 'team', plugin: 'docs', part: 'skills/pdf-reader', from: 'marketplace' }, 'notes/tables.md', marketLookup),
+      { files: ['SKILL.md', 'notes/tables.md'], text: 'Table rules.\n', directory: join(marketPlugin, 'skills/pdf-reader') });
+    assert.equal(await skillPluginFile(box.context, { marketName: 'team', plugin: 'docs', part: '../other/skills/sneaky', from: 'marketplace' }, 'SKILL.md', marketLookup), undefined);
+
+    // Refused: part paths leaving the plugin root (traversal, absolute, symlinked skill folder escaping root), unlisted folders, unknown plugin/tool, gone root.
+    for (const badPart of ['../outside-skill', '/etc', 'skills/escape-link', 'skills/../../outside-skill', 'unlisted', 'skills/missing', '']) {
+      assert.equal(await skillPluginFile(box.context, { marketName: 'team', plugin: 'issue-tracker', part: badPart, from: 'claude-cli' }, 'SKILL.md'), undefined, `refuses part ${JSON.stringify(badPart)}`);
+    }
+    assert.equal(await skillPluginFile(box.context, { marketName: 'team', plugin: 'issue-tracker', part: 'skills/triage', from: 'pi-cli' }, 'SKILL.md'), undefined);
+    await rm(claudePlugin, { recursive: true, force: true });
+    assert.equal(await readInstalled('SKILL.md'), undefined, 'gone plugin root returns undefined');
   } finally { await box.cleanup(); }
 });

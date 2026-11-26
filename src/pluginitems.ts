@@ -2,10 +2,12 @@
 // process) from the tool's own records and its own copy of the plugin, as that tool reads it. Files only: nothing is run, and a
 // copy that can't be read is said, never a reason the personal items go missing. Also what a tool's own settings add to its
 // sessions besides those plugins (sessionSettings), read with its instruction file. The page's lines from both: sessionhooks.ts.
-import { readFile, readdir } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { readFile, readdir, realpath } from 'node:fs/promises';
+import { basename, join, resolve } from 'node:path';
 import { installedContents, readHooks } from './catalogdetail.ts';
 import { openCodeSettings } from './harnesses.ts';
+import { groupBy } from './model.ts';
+import { readTree } from './share.ts';
 import { readJsonc, readTomlTables } from './textedit.ts';
 import { nameOfFile, record, text } from './values.ts';
 import { installedCopies, installedPlugins, registeredMarketplaces, type PluginContext } from './plugins.ts';
@@ -26,7 +28,7 @@ export async function readPluginItems(context: PluginContext, tools: HarnessId[]
   const read = { ...context, reads: context.reads ?? new Map() };
   const perTool = await Promise.all(tools.filter(takesPlugins).map(async tool => {
     const [plugins, markets] = await Promise.all([installedCopies(read, tool).catch(() => []), registeredMarketplaces(read, tool).catch(() => [])]);
-    return plugins.map(({ plugin, marketplace, state, off, contents, serversOff, agentsOff, serversHeld }): InstalledPlugin => {
+    return Promise.all(plugins.map(async ({ plugin, marketplace, state, off, contents, serversOff, agentsOff, serversHeld }): Promise<InstalledPlugin> => {
       const source = markets.find(market => market.name === marketplace)?.source;
       const base: InstalledPlugin = { tool, plugin, marketName: marketplace, ...(off ? { off } : {}), items: [], listed: !!source, ...(source ? { source } : {}) };
       if (state.state !== 'installed') return { ...base, problem: state.state === 'not-known' ? state.reason : UNREADABLE };
@@ -34,8 +36,12 @@ export async function readPluginItems(context: PluginContext, tools: HarnessId[]
       // `path`: the skill's folder ('.' for the plugin's root) or the agent's file, as each copy has it (catalogdetail.ts skillsIn).
       const file = (kind: 'skill' | 'agent') => (part: NamedPart): PluginItem => ({ kind, name: part.name, description: part.description,
         ...(part.path === '.' ? { keyName: plugin } : { keyName: kind === 'agent' ? nameOfFile(basename(part.path)) : basename(part.path) }) });
+      const skills = await Promise.all(contents.skills.map(async (part): Promise<PluginItem> => {
+        const realDirectory = await realpath(resolve(state.path, part.path)).catch(() => undefined);
+        return { ...file('skill')(part), path: part.path, ...(realDirectory ? { realDirectory } : {}) };
+      }));
       const items: PluginItem[] = [
-        ...contents.skills.map(file('skill')),
+        ...skills,
         ...contents.mcpServers.map(server => ({ kind: 'mcp' as const, name: server.name, description: '', runs: server.runs, ...(server.transport ? { transport: server.transport } : {}) })),
         ...(loadsKind(tool, 'agent') ? contents.agents.map(file('agent')) : []),
       ];
@@ -43,9 +49,17 @@ export async function readPluginItems(context: PluginContext, tools: HarnessId[]
       const skillsHeld = Object.fromEntries((state.skillsOff ?? []).flatMap(entry => (entry.held ? [[entry.skill, entry.held]] : [])));
       return { ...base, version: state.version, items, ...(contents.hooks.length ? { hooks: contents.hooks } : {}), ...(contents.hooksUnread ? { hooksUnread: contents.hooksUnread } : {}), ...(skillsOff.length ? { skillsOff } : {}), ...(serversOff?.length ? { serversOff } : {}), ...(agentsOff?.length ? { agentsOff } : {}),
         ...(state.switchesHeld ? { switchesHeld: state.switchesHeld } : {}), ...(serversHeld ? { serversHeld } : {}), ...(state.live ? { live: true } : {}), ...(Object.keys(skillsHeld).length ? { skillsHeld } : {}) };
-    });
+    }));
   }));
-  return perTool.flat();
+  const installs = perTool.flat();
+  // Hash a plugin skill folder only when two or more tools hold distinct real folders for it, so identical copies collapse without walking single-tool installs.
+  const multi = groupBy(installs.flatMap(install => install.items.filter(item => item.kind === 'skill' && item.realDirectory)
+    .map(item => ({ key: `${install.plugin}@${install.marketName}/${item.name.normalize('NFC').toLowerCase()}`, item }))), entry => entry.key);
+  for (const group of multi.values()) {
+    if (new Set(group.map(entry => entry.item.realDirectory)).size < 2) continue;
+    await Promise.all(group.map(async ({ item }) => { item.hash = (await readTree(item.realDirectory!).catch(() => undefined))?.hash; }));
+  }
+  return installs;
 }
 
 /**
