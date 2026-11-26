@@ -544,8 +544,13 @@ export const foundIn = (view: PluginsView, entry: MarketplaceView, plugin: strin
 /** What a plugin's switch says it is and what a click does, for its label and tooltip. */
 export function switchWords(view: PluginsView, entry: MarketplaceView, plugin: string): string {
   const sw = entry.switches?.[plugin];
-  const off = offHere(view, entry, plugin);
-  if (sw?.entry?.on) return `${plugin}: on${off.length ? `, off in ${andList(off.map(tool => names[tool]))}` : ''}. Click to turn it off in each tool here that Central Knot can turn it off in, kept installed where the tool can keep it; Undo turns it on again.`;
+  if (sw?.entry?.on) {
+    const out = offHere(view, entry, plugin);
+    const off = out.filter(tool => copyOff(entry, plugin, tool));
+    const kept = out.filter(tool => !copyOff(entry, plugin, tool));
+    const parts = [off.length ? `off in ${andList(off.map(tool => names[tool]))}` : '', kept.length ? `kept out of ${andList(kept.map(tool => names[tool]))}` : ''].filter(Boolean);
+    return `${plugin}: on${parts.length ? `, ${parts.join(', ')}` : ''}. Click to turn it off in each tool here that Central Knot can turn it off in, kept installed where the tool can keep it; Undo turns it on again.`;
+  }
   return `${plugin}: off. Click to turn it on: it goes into every tool here that takes it${sw?.entry?.except.length ? ' and that it isn’t kept out of' : ''}, and the result says where it went; Undo takes out what it put in and turns off what it turned on.`;
 }
 

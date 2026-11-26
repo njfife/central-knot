@@ -19920,8 +19920,8 @@ if (tool === 'claude') {
   await a.click('#header-refresh');
   await until(() => a.run(`document.querySelector('#pbox-0-${plugin}-claude-cli')?.dataset.state === 'kept-off'`));
   const partialWords = await a.run(`document.querySelector('#pswitch-page-0-${plugin}')?.getAttribute('aria-label') ?? ''`);
-  check('page switch words name every tool the plugin is off in, even when turned off in its tool’s own file',
-    partialWords.startsWith(`${plugin}: on, off in Claude Code, Codex, Pi, OpenCode and Antigravity.`), partialWords);
+  check('page switch words name off copies and kept-out tools apart, even when turned off in the tool’s own file',
+    partialWords.startsWith(`${plugin}: on, off in Claude Code and Codex, kept out of Pi, OpenCode and Antigravity.`), partialWords);
   await open('agents', 'incident-lead');
   await until(() => a.exists(act('agents', 'incident-lead', 'copilot-cli')));
   await a.click(act('agents', 'incident-lead', 'copilot-cli'));

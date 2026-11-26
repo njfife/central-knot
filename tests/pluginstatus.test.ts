@@ -92,13 +92,21 @@ test('An off copy reads kept-off with an unticked box whether the record is On a
   assert.deepEqual([markNone.mark, boxOf(view, noEntry, 'p', 'claude-cli', markNone)], ['kept-off', { ticked: false }]);
 });
 
-test('A plugin’s switch is partial and its words name every tool it is off in, whether kept out or off in the tool’s own file', () => {
+test('A plugin’s switch is partial and its words distinguish copies that are off from tools kept out', () => {
   const byHand = withStates({ 'claude-cli': offCopy, 'copilot-cli': onCopy }, { on: true, except: [] });
   const byRecord = withStates({ 'claude-cli': offCopy, 'copilot-cli': onCopy }, { on: true, except: ['claude-cli'] });
-  assert.equal(switchPartial(view, byHand, 'p'), true);
-  assert.equal(switchPartial(view, byRecord, 'p'), true);
+  const keptAbsent = withStates({ 'claude-cli': onCopy }, { on: true, except: ['copilot-cli'] });
+  const keptOnByHand = withStates({ 'claude-cli': onCopy, 'copilot-cli': onCopy }, { on: true, except: ['copilot-cli'] });
+  const oneOfEach = withStates({ 'claude-cli': offCopy, 'copilot-cli': onCopy }, { on: true, except: ['codex-cli'] });
+  assert.deepEqual(
+    [byHand, byRecord, keptAbsent, keptOnByHand, oneOfEach].map(state => switchPartial(view, state, 'p')),
+    [true, true, true, true, true],
+  );
   assert.match(switchWords(view, byHand, 'p'), /^p: on, off in Claude Code\. /);
   assert.equal(switchWords(view, byHand, 'p'), switchWords(view, byRecord, 'p'));
+  assert.match(switchWords(view, keptAbsent, 'p'), /^p: on, kept out of Copilot CLI\. /);
+  assert.match(switchWords(view, keptOnByHand, 'p'), /^p: on, kept out of Copilot CLI\. /);
+  assert.match(switchWords(view, oneOfEach, 'p'), /^p: on, off in Claude Code, kept out of Codex\. /);
 });
 
 test('foundIn counts only copies that are on, leaving out off copies', () => {

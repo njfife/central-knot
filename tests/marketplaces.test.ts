@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
 import { resultLines, resultParts, resultSentence, undoTitle } from '../src/pluginplan.ts';
 import * as engine from '../src/plugins.ts';
-import { WAITS_TO_MOVE, boxOf, foundIn, toolMark } from '../src/pluginstatus.ts';
+import { WAITS_TO_MOVE, boxOf, foundIn, recordUnread, toolMark } from '../src/pluginstatus.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { readProfiles } from '../src/profiles.ts';
 import { pluginLive, pluginPlan, wholeTurns, type PluginHome } from '../src/profileplan.ts';
@@ -1518,5 +1518,67 @@ test('Turning off the last copy that is on turns the plugin Off even when other 
     // Undo turns Claude Code back on and restores the record to On with no tool in except.
     await box.markets.undoTurn(box.root, 'pdf', off.before!, off.back!, box.home);
     assert.deepEqual((await box.record()).plugins.map(entry => [entry.on, entry.except]), [[true, []]]);
+  } finally { await box.cleanup(); }
+});
+
+test('A one-tool click writes nothing and returns the refusal when that tool is held or unread, while a record-only keep-out still writes', async () => {
+  let claudeCli = true;
+  const box = await switchHome({
+    codex: true,
+    pi: false,
+    tools: ['claude-cli', 'codex-cli'],
+    engine: { findClis: async () => ({ binaries: { ...(claudeCli ? { 'claude-cli': '/bin/true' } : {}), 'codex-cli': '/bin/true' }, apps: {} }) },
+  });
+  try {
+    const recPath = join(box.home, '.central-knot/plugins.json');
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    // 1. Copy is on in Claude Code, Claude's CLI is unavailable: one-tool keep-out refuses without writing plugins.json.
+    claudeCli = false;
+    const viewOn = await box.markets.view();
+    const entryOn = viewOn.marketplaces.find(entry => entry.source === box.root)!;
+    const boxOn = boxOf(viewOn, entryOn, 'pdf', 'claude-cli', toolMark(viewOn, entryOn, 'pdf', 'claude-cli', entryOn.switches!.pdf!.tools['claude-cli']));
+    const claudeWhy = boxOn.off!;
+    assert.ok(claudeWhy, 'Claude Code’s box is held with its own words');
+    box.calls.length = 0;
+    const recBeforeKeepOut = await readFile(recPath, 'utf8');
+    const heldOut = await box.markets.turn(box.root, 'pdf', 'keep-out', 'claude-cli', box.home);
+    assert.equal(await readFile(recPath, 'utf8'), recBeforeKeepOut, 'held keep-out leaves plugins.json byte for byte');
+    assert.deepEqual([box.calls, heldOut.back, heldOut.done.map(step => [step.tool, step.report.outcome, step.report.message])],
+      [[], [], [['claude-cli', 'held', claudeWhy]]]);
+
+    // 2. Copy is kept off in Claude Code, Claude's CLI is unavailable: one-tool let-in refuses without writing plugins.json.
+    claudeCli = true;
+    await box.markets.turn(box.root, 'pdf', 'keep-out', 'claude-cli', box.home);
+    claudeCli = false;
+    const viewOff = await box.markets.view();
+    const entryOff = viewOff.marketplaces.find(entry => entry.source === box.root)!;
+    const boxOff = boxOf(viewOff, entryOff, 'pdf', 'claude-cli', toolMark(viewOff, entryOff, 'pdf', 'claude-cli', entryOff.switches!.pdf!.tools['claude-cli']));
+    assert.equal(boxOff.off, claudeWhy);
+    box.calls.length = 0;
+    const recBeforeLetIn = await readFile(recPath, 'utf8');
+    const heldIn = await box.markets.turn(box.root, 'pdf', 'let-in', 'claude-cli', box.home);
+    assert.equal(await readFile(recPath, 'utf8'), recBeforeLetIn, 'held let-in leaves plugins.json byte for byte');
+    assert.deepEqual([box.calls, heldIn.back, heldIn.done.map(step => [step.tool, step.report.outcome, step.report.message])],
+      [[], [], [['claude-cli', 'held', claudeWhy]]]);
+
+    // 3. Claude Code's own plugin record is unreadable: one-tool let-in refuses without writing plugins.json.
+    claudeCli = true;
+    const claudeInstalledPath = join(box.home, '.claude/plugins/installed_plugins.json');
+    const savedInstalled = await readFile(claudeInstalledPath, 'utf8');
+    await put(claudeInstalledPath, '{not json');
+    box.calls.length = 0;
+    const recBeforeUnread = await readFile(recPath, 'utf8');
+    const unreadIn = await box.markets.turn(box.root, 'pdf', 'let-in', 'claude-cli', box.home);
+    assert.equal(await readFile(recPath, 'utf8'), recBeforeUnread, 'unreadable record leaves plugins.json byte for byte');
+    assert.deepEqual([box.calls, unreadIn.back, unreadIn.done.map(step => [step.tool, step.report.outcome, step.report.message])],
+      [[], [], [['claude-cli', 'held', recordUnread('claude-cli')]]]);
+
+    // 4. Record-only keep-out (nothing installed in Claude Code, record wants it in): still writes except without running anything.
+    await put(claudeInstalledPath, savedInstalled);
+    await box.markets.turn(box.root, 'pdf', 'let-in', 'claude-cli', box.home);
+    await put(claudeInstalledPath, JSON.stringify({ version: 2, plugins: {} }));
+    box.calls.length = 0;
+    const recordOnly = await box.markets.turn(box.root, 'pdf', 'keep-out', 'claude-cli', box.home);
+    assert.deepEqual([box.calls, (await box.record()).plugins[0]!.except, recordOnly.done], [[], ['claude-cli'], []]);
   } finally { await box.cleanup(); }
 });

@@ -68,6 +68,9 @@ test('Row 9 by the tool’s own switch: every whole copy is turned off there and
   // and nor does Add, which leaves a copy he turned off himself.
   const back = codex(on, { ...now('whole'), off: true });
   assert.deepEqual([back.act, clickRuns('on', back), clickRuns('let-in', back), clickRuns('off', back), clickRuns('add', back)], ['plugin-on', 'plugin-on', 'plugin-on', undefined, undefined]);
+  // A stuck copy that is off cannot be turned back on either: held in its own words.
+  const stuckOff = owedTo(on, 'claude-cli', { ...now('whole', 'whole', 'No Claude CLI.'), off: true }, ['claude-cli']);
+  assert.deepEqual([stuckOff.act, stuckOff.held, clickHeld('let-in', stuckOff)], [undefined, 'No Claude CLI.', 'No Claude CLI.']);
 });
 
 const team = '/markets/team';

@@ -21,7 +21,7 @@ import { harnessIds } from './harnesses.ts';
 import { errorCode, liftFirst, syncGate, writeDurably, type ShareContext } from './share.ts';
 import type { Listed } from './plugintext.ts';
 import { readRecord as readPartsRecord, type PartsRecord, type PluginNow } from './partsmigrate.ts';
-import { MARKET_UNREAD, SKILL_SWITCH_TESTED_FROM, copyDiffers, partWords, firstReadWaits, heldReason, inUseIn, keptOff, keptReason, marketTitle, notCarried, recordUnread, toolNow, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
+import { MARKET_UNREAD, SKILL_SWITCH_TESTED_FROM, blocked, copyDiffers, partWords, firstReadWaits, heldReason, inUseIn, keptOff, keptReason, marketTitle, notCarried, recordUnread, toolNow, unavailable, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
 import { readLink } from './sourcelink.ts';
 import { isFolder, isHttps, onlyAllowed, record, shortBuild } from './values.ts';
 import { leftOutSentence, pageNames, toPluginsLabel, toolName } from './words.ts';
@@ -775,8 +775,6 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const after = turnedEntry(before, what, tool, () => newEntry(entry.source, entry.name || before?.marketName || '', plugin, false), has, shown.tools);
     if (!after) return { stopped: 'That doesn’t apply to this plugin now, so nothing was changed. Read the page again.', done: [] };
     const record = withEntry(known.record, source, plugin, after);
-    // Written onto the record as it is then, so what a check wrote while this click was reading (a tool joining) stays.
-    if (after !== before) await changeRecord(shown.home, now => withEntry(now, source, plugin, after));
     const ops: PluginOp[] = [], held: PluginDone[] = [], itemsIn: HarnessId[] = [];
     const marketName = entry.name || after.marketName;
     for (const [each, owed] of Object.entries(switchOf(shown, entry, listed, known, record).tools) as [HarnessId, Owed][]) {
@@ -793,9 +791,17 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       if (offAlready) held.push({ source: entry.source, marketName, plugin, tool: each, action: 'plugin-off', report: already });
       const otherMarket = clickGoes(what) === 'out' && other?.state === 'held' ? other.reason : undefined;
       const why = owed.has === 'unknown' ? recordUnread(each) : clickHeld(what, owed) ?? otherMarket;
+      // A one-tool click where that tool cannot act writes nothing and returns the refusal; an items tool whose items only clash
+      // still records the tick so its page shows its clashes under its box.
+      const clashOnly = !takesPlugins(each) && !waitsToMove(entry, plugin) && unavailable(shown, entry, plugin, each) === blocked(shown, entry, each) && !!entry.items?.[plugin]?.lines.some(line => line.state === 'not-brought' && holds(each, line.kind));
+      if (tool && (owed.has === 'unknown' || (clickHeld(what, owed) && !clashOnly))) {
+        return { done: [{ source: entry.source, marketName, plugin, tool: each, action: clickGoes(what) === 'out' ? 'plugin-off' : 'install', report: { tool: each, outcome: 'held', message: why!, runs: [] } }], before: before ?? null, back: [] };
+      }
       // A tool's refusal of this marketplace is said once, where its state is (pluginstatus.ts blocked), not on every click.
       if (why && why !== entry.refusedBy?.[each]) held.push({ source: entry.source, marketName, plugin, tool: each, action: clickGoes(what) === 'out' ? 'plugin-off' : 'install', report: { tool: each, outcome: 'held', message: why, runs: [] } });
     }
+    // Written onto the record as it is then, so what a check wrote while this click was reading (a tool joining) stays.
+    if (after !== before) await changeRecord(shown.home, now => withEntry(now, source, plugin, after));
     const ran = ops.length ? await runPlan(ops, ownApi, String(home)) : { done: [] as PluginDone[] };
     const back = reverse(ran.done);
     // Pi, OpenCode and Antigravity: its items (pluginlibrary.ts).
