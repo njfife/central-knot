@@ -34,7 +34,7 @@ import { installedPlugins, pluginHolds, SAFE_NAME, throughPlugins, type GivenByP
 import { takesPlugins } from './presence.ts';
 import { destinationReloads } from './reload.ts';
 import { errorCode, itemKey, landingOf, libraryGate, notCopied, plainError, readTree, syncGate, targetFor, writeAccess, type ShareContext, type Tree } from './share.ts';
-import { alsoReads, lockedRoot, placeFolder, readCopy, readShape, readSkillsFolder, recoverFolders, removeFolder,
+import { alsoReads, folderTime, lockedRoot, placeFolder, readCopy, readShape, readSkillsFolder, recoverFolders, removeFolder,
   rootOf, rootProblem, sharedFolder, swapFolder, type FolderReads, type SkillCopy } from './skillfiles.ts';
 import { openLibrary, readVersion, recordedSkills, saveLibrary, storeVersion, type SkillContent } from './skillstore.ts';
 import { mergeSkill } from './merge.ts';
@@ -73,6 +73,7 @@ interface Way { why: string; path: string; take?: 'link' | 'shared'; linkTo?: st
 
 /** What the managed tools hold of skills now (librarypass.ts Disk), and what the page and the held reasons read besides. */
 export interface SkillDisk extends Disk<SkillCopy> {
+  /** The copy each tool loads outside Central Knot's own folder; for Pi, its own link's copy even where a shared folder is the way (readAlsoRead). */
   outside: Map<string, Partial<Record<HarnessId, SkillCopy>>>;
   /** The ways each tool has a skill outside its own folder, by key: a link in its folder, a folder it reads that isn't Central Knot's. */
   ways: Map<string, Partial<Record<HarnessId, Way>>>;
@@ -526,11 +527,16 @@ export async function takeOver(context: ShareContext, tools: HarnessId[], key: s
   if (held) return stop(held);
   const way = look.disk.ways.get(key)?.[tool], copy = look.disk.outside.get(key)?.[tool];
   if (!way?.take || !copy) return stop(`${toolName(tool)} has no copy of ${item.name} for Central Knot to take over now. Nothing was changed.`);
+  // Hash the folder about to go, not `copy`: when Pi also holds a link in its own folder, `disk.outside` keeps the link's copy while `way.path` is the shared folder.
+  const tree = await readTree(way.path).catch(() => undefined);
+  if (!tree || tree.held) return stop(tree?.held ?? `${toolName(tool)} has no copy of ${item.name} for Central Knot to take over now. Nothing was changed.`);
   const gate = await libraryGate(context, { start: true, resume });
   if ('refused' in gate) return stop(gate.refused);
-  const known = item.versions.some(version => version.hash === copy.hash);
-  const keep: Version | undefined = known ? undefined : { hash: copy.hash, at: iso(copy.at), from: { how: 'was-in', harness: tool, replacedBy: item.hash } };
-  const loser = { tool, hash: copy.hash, path: way.path, ...(way.linkTo ? { linkTo: way.linkTo } : {}) };
+  const treeAt = (await folderTime(way.path).catch(() => undefined))?.at ?? copy.at;
+  const known = item.versions.some(version => version.hash === tree.hash);
+  // Always sent through keepVersion, listed or not: restores missing stored bytes while library.ts keepVersion lists a hash at most once.
+  const keep: Version = { hash: tree.hash, at: iso(treeAt), from: { how: 'was-in', harness: tool, replacedBy: item.hash } };
+  const loser = { tool, hash: tree.hash, path: way.path, ...(way.linkTo ? { linkTo: way.linkTo } : {}) };
   // Each tool that read the copy, and whether its own switch had it off (whoever set it).
   const readers = look.managed.filter(each => look.disk.ways.get(key)?.[each]?.path === way.path);
   const heldOff = readers.flatMap(each => { const target = loadTarget(loadedCopy(look, key, each)); return target && isDisabled(context, look.disk.switches.get(each)!, target) ? [{ tool: each, target }] : []; });
@@ -552,7 +558,7 @@ export async function takeOver(context: ShareContext, tools: HarnessId[], key: s
   const said = way.take === 'link' ? `Replaced the link in ${toolName(tool)}’s skills folder with Central Knot’s copy.`
     : `Removed the copy at ${pathWords(context, way.path)}; other apps that read that folder won’t find it there.`;
   const reloads = done.reloads.filter(entry => !heldOff.some(each => each.tool === entry.tool));
-  return { ...done, results: [{ item: item.name, harness: tool, outcome: 'written', message: [`${said}${keep ? ' It is kept as a version.' : ''}`, ...listSaid].join(' ') }, ...done.results], made: [event.id], reloads };
+  return { ...done, results: [{ item: item.name, harness: tool, outcome: 'written', message: [`${said}${!known ? ' It is kept as a version.' : ''}`, ...listSaid].join(' ') }, ...done.results], made: [event.id], reloads };
 }
 
 /**
@@ -560,7 +566,7 @@ export async function takeOver(context: ShareContext, tools: HarnessId[], key: s
  * go, then only the link or the shared copy goes, with the links in the `managed` tools' folders that lead to it (one left leading
  * nowhere would say the shared folder still held it: sharedListing). Why not, if it couldn't.
  */
-async function runTakeOver(context: ShareContext, managed: HarnessId[], item: LibraryItem, keep: Version | undefined, way: Way): Promise<string | undefined> {
+async function runTakeOver(context: ShareContext, managed: HarnessId[], item: LibraryItem, keep: Version, way: Way): Promise<string | undefined> {
   const { library, problem } = await skillKind.open(context, true);
   const held = library.items[item.key];
   if (problem || !held) return problem ?? 'It changed since the page was read. Nothing was changed; read again.';
@@ -572,7 +578,7 @@ async function runTakeOver(context: ShareContext, managed: HarnessId[], item: Li
   for (const each of Object.values(library.items)) {
     if (each === held || Object.values(each.throughShared ?? {}).some(folder => itemKey(folder) === removed)) delete each.throughShared;
   }
-  if (keep) await keepVersion(shelf, held, keep, { directory: way.path, hash: keep.hash }); else await shelf.save();
+  await keepVersion(shelf, held, keep, { directory: way.path, hash: keep.hash });
   const at = await landingOf(way.path), links: string[] = [];
   for (const root of way.take === 'shared' ? managed.map(tool => rootOf(context, tool)) : []) for (const name of await readdir(root).catch(() => [] as string[])) {
     const path = join(root, name);
@@ -580,7 +586,7 @@ async function runTakeOver(context: ShareContext, managed: HarnessId[], item: Li
   }
   try {
     if (way.take === 'link') await unlink(way.path);
-    else await removeFolder(context, way.path, keep?.hash ?? (await readTree(way.path)).hash);
+    else await removeFolder(context, way.path, keep.hash);
     for (const link of links) await unlink(link);
   } catch (error) { return `Could not take it over: ${plainError(error)}`; }
   return undefined;
