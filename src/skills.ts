@@ -19,8 +19,8 @@
 // are kept and the migration from the earlier record, skillstore.ts and skillmigrate.ts; the row and its words,
 // libraryrow.ts with librarypages.ts; History's sentences and actions, historyactions.ts.
 import { randomUUID } from 'node:crypto';
-import { lstat, readFile, readdir, unlink } from 'node:fs/promises';
-import { basename, dirname, join, resolve } from 'node:path';
+import { lstat, open, readFile, readdir, realpath, stat, unlink } from 'node:fs/promises';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { appendHistory, readHistory, replaceHistory } from './history.ts';
 import { isClearedSwitch, libraryAction, libraryEntry } from './historyactions.ts';
 import { keepVersion, listed, noteAgainst, pendingEdits, plan, wantedIn } from './library.ts';
@@ -30,7 +30,7 @@ import { libraryWords } from './libraryrow.ts';
 import { comparableText } from './pluginstatus.ts';
 import { pluginHolds, throughPlugins, type GivenByPlugin, type PluginHold } from './plugins.ts';
 import { destinationReloads } from './reload.ts';
-import { errorCode, itemKey, landingOf, libraryGate, plainError, readTree, syncGate, targetFor, writeAccess, type ShareContext, type Tree } from './share.ts';
+import { errorCode, itemKey, landingOf, libraryGate, notCopied, plainError, readTree, syncGate, targetFor, writeAccess, type ShareContext, type Tree } from './share.ts';
 import { alsoReads, lockedRoot, placeFolder, readCopy, readShape, readSkillsFolder, recoverFolders, removeFolder,
   rootOf, rootProblem, sharedFolder, swapFolder, type FolderReads, type SkillCopy } from './skillfiles.ts';
 import { openLibrary, readVersion, recordedSkills, saveLibrary, storeVersion, type SkillContent } from './skillstore.ts';
@@ -40,9 +40,11 @@ import { sourceFacts } from './sources.ts';
 import { pluginsRecordHold } from './sourcestore.ts';
 import { followCopy, isDisabled, piListWords, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, type ListEdit, type SwitchFile } from './skillswitch.ts';
 import { agentInPi, agentKind, applyAgents } from './agents.ts';
-import { harnesses } from './harnesses.ts';
+import { harnesses, toolConfigRoot } from './harnesses.ts';
 import { displayPath } from './machine.ts';
-import type { Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, Skill, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy } from './types.ts';
+import type {
+  Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, Skill, SkillFileRead, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy,
+} from './types.ts';
 import { andList, notManagedHere, throughPlugin, toolName } from './words.ts';
 
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -590,23 +592,72 @@ export async function skillVersion(context: ShareContext, key: string, hash: str
   return { skill: await readFile(join(version.directory, 'SKILL.md'), 'utf8').catch(() => ''), files: [...tree.files.keys()].filter(name => name !== 'SKILL.md').sort() };
 }
 const FILE_LIMIT = 1024 * 1024;
-type SkillFileRead = { files: string[]; text?: string; note?: string };
-/** One regular file of a stored skill version, listed by readTree; refuses links, specials, paths outside the folder, binary and >1 MB. */
-export async function skillVersionFile(context: ShareContext, key: string, hash: string, file: string): Promise<SkillFileRead | undefined> {
-  const version = await readVersion(context, key, hash);
-  if (!version) return undefined;
-  const tree = await readTree(version.directory);
-  const regular = [...tree.files].filter(([, entry]) => entry.sha256 !== 'link' && entry.sha256 !== 'special').map(([name]) => name);
-  const files = regular.sort((a, b) => (a === 'SKILL.md' ? -1 : b === 'SKILL.md' ? 1 : a < b ? -1 : a > b ? 1 : 0));
-  if (!files.includes(file)) return undefined;
-  const path = join(version.directory, file);
+/** Regular files under `directory` by name (no hashing; skips .git, editor noise, links and specials), SKILL.md first. */
+async function listSkillFiles(directory: string): Promise<string[] | undefined> {
+  const files: string[] = [];
+  async function visit(current: string) {
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      if (entry.name === '.git' || notCopied(entry.name, entry.isFile())) continue;
+      const path = join(current, entry.name);
+      if (entry.isDirectory()) await visit(path);
+      else if (entry.isFile()) files.push(displayPath(relative(directory, path)));
+    }
+  }
+  try { await visit(directory); } catch { return undefined; }
+  const rest = files.filter(name => name !== 'SKILL.md').sort();
+  return files.includes('SKILL.md') ? ['SKILL.md', ...rest] : rest;
+}
+/** Lists a skill folder's regular files by name and reads at most 1 MB + 1 byte of one; refuses links, specials, unlisted names, binary and >1 MB. */
+async function readSkillFile(directory: string, file: string): Promise<SkillFileRead | undefined> {
+  const files = await listSkillFiles(directory);
+  if (!files || !files.includes(file)) return undefined;
+  const path = join(directory, file);
   const info = await lstat(path).catch(() => undefined);
   if (!info?.isFile()) return undefined;
   if (info.size > FILE_LIMIT) return { files, note: 'Over 1 MB, so not shown here.' };
-  const bytes = await readFile(path).catch(() => undefined);
-  if (!bytes) return undefined;
-  if (bytes.includes(0)) return { files, note: 'Not a text file.' };
-  return { files, text: bytes.toString('utf8') };
+  let handle;
+  try {
+    handle = await open(path, 'r');
+    const buffer = Buffer.allocUnsafe(FILE_LIMIT + 1);
+    let read = 0;
+    while (read < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, read, buffer.length - read, read);
+      if (bytesRead === 0) break;
+      read += bytesRead;
+    }
+    const bytes = buffer.subarray(0, read);
+    if (bytes.length > FILE_LIMIT) return { files, note: 'Over 1 MB, so not shown here.' };
+    if (bytes.includes(0)) return { files, note: 'Not a text file.' };
+    return { files, text: bytes.toString('utf8') };
+  } catch { return undefined; }
+  finally { await handle?.close().catch(() => undefined); }
+}
+/** Resolves a found skill copy's real folder in `tool` (narrowed by `rootLabel` when given), following a top-level link in a skills folder. */
+async function foundSkillFolder(context: ShareContext, key: string, tool: HarnessId, rootLabel?: string): Promise<string | undefined> {
+  const definition = harnesses[tool];
+  const roots = definition.skillRoots(toolConfigRoot(context, tool), context.home);
+  for (const root of rootLabel ? roots.filter(each => each.label === rootLabel) : roots) {
+    const entries = await readdir(root.path, { withFileTypes: true }).catch(() => undefined);
+    if (!entries) continue;
+    const matches = entries.filter(entry => !(entry.name.startsWith('.') && !definition.loadsDotFolders)
+      && !definition.reservedSkills.includes(entry.name) && (entry.isDirectory() || entry.isSymbolicLink()) && itemKey(entry.name) === key);
+    if (matches.length !== 1) continue;
+    const target = join(root.path, matches[0]!.name);
+    if (!await stat(target).then(info => info.isDirectory(), () => false)) continue;
+    const real = await realpath(target).catch(() => undefined);
+    if (real && (await lstat(join(real, 'SKILL.md')).catch(() => undefined))?.isFile()) return real;
+  }
+  return undefined;
+}
+/** One regular file of a stored skill version, through readSkillFile. */
+export async function skillVersionFile(context: ShareContext, key: string, hash: string, file: string): Promise<SkillFileRead | undefined> {
+  const version = await readVersion(context, key, hash);
+  return version ? readSkillFile(version.directory, file) : undefined;
+}
+/** One regular file of a found skill copy in `tool` (narrowed by `rootLabel`), through readSkillFile. */
+export async function skillFoundFile(context: ShareContext, key: string, tool: HarnessId, rootLabel: string | undefined, file: string): Promise<SkillFileRead | undefined> {
+  const folder = await foundSkillFolder(context, key, tool, rootLabel);
+  return folder ? readSkillFile(folder, file) : undefined;
 }
 
 /**
@@ -728,10 +779,11 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
   const description = disk.shapes.get(key)?.description ?? first?.skill.description ?? '';
   const edited = made ? pendingEdits(made) : [];
   const some = <T extends object>(field: string, value: T) => (Object.keys(value).length ? { [field]: value } : {});
+  const folderHashes = Object.fromEntries([...entries, ...Object.values(outside).filter((copy): copy is SkillCopy => !!copy)].map(copy => [copy.skill.realDirectory, copy.hash]));
   return {
     key, name, description, copies, on: !!item?.on, except: item?.except ?? [], cannot: facts.cannot, edited,
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
-      : { takeInAnswers: takeInAnswers(look, key), choiceBlocks: choiceBlocksOf(entries) }),
+      : { takeInAnswers: takeInAnswers(look, key), choiceBlocks: choiceBlocksOf(entries), ...some('folderHashes', folderHashes) }),
     ...some('plugin', facts.plugin), ...some('unseen', facts.unseen), ...some('anotherWay', facts.anotherWay), ...some('takeOver', facts.takeOver),
     ...some('loads', facts.loads), ...some('alsoLoads', facts.alsoLoads), ...some('switchedOff', Object.keys(facts.loads).filter(tool => facts.loads[tool as HarnessId]!.switchedOff)), ...some('switchProblem', switchProblem),
     ...(fromSource ? { fromSource } : {}),
