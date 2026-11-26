@@ -779,6 +779,7 @@ export interface Outcome { component: string; result: 'works' | 'limited' | 'ign
 export interface NativeRun { tool: HarnessId; command: string; ok: boolean; output: string; changed: { path: string; before: string | null; after: string | null }[] }
 
 export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'updated' | 'skill-off' | 'skill-on' | 'part-off' | 'part-on' | 'plugin-off' | 'plugin-on' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[]; /** This action changed what the tool has (Undo reverses only these). */ changed?: boolean;
+  /** An install: loaded live from its marketplace folder (plugins.ts install). */ live?: true;
   /** An update: the version the tool records now. */ version?: string;
   /** An update of a copy that differed at the same version: done by the tool's own update, or by uninstalling and installing again. */ byContent?: 'update' | 'reinstall';
   /** A failed update with nobody watching: the tool's own update kept its copy, and only a reinstall (never made unasked) would change that. */ kept?: true;

@@ -7,7 +7,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { dirname, join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
-import { resultLines, resultParts, resultSentence } from '../src/pluginplan.ts';
+import { resultLines, resultParts, resultSentence, undoTitle } from '../src/pluginplan.ts';
 import * as engine from '../src/plugins.ts';
 import { WAITS_TO_MOVE, boxOf, foundIn, toolMark } from '../src/pluginstatus.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
@@ -1332,7 +1332,7 @@ test('Undo of a fresh install of Copilot CLI’s live copy keeps the record with
         } else {
           await claudeHas(box.home, catalog.name, { [plugin]: { version: '1.0.0' } });
         }
-        return { tool, outcome: 'installed', message: 'Installed.', runs: [], changed: true };
+        return { tool, outcome: 'installed', message: 'Installed.', runs: [], changed: true, ...(tool === 'copilot-cli' ? { live: true as const } : {}) };
       },
       uninstall: async (_context, marketplace, plugin, tool) => {
         box.calls.push(`uninstall ${plugin}@${marketplace} ${tool}`);
@@ -1364,6 +1364,8 @@ test('Undo of a fresh install of Copilot CLI’s live copy keeps the record with
     box.calls.length = 0;
     const ticked = await box.markets.turn(box.root, 'pdf', 'let-in', 'copilot-cli', box.home);
     assert.deepEqual([ticked.before, box.calls], [null, ['install pdf@team copilot-cli']]);
+    assert.equal(undoTitle(ticked.back!, { plugin: 'pdf' }),
+      'Reverses what changed for pdf, through each tool’s own command or switch: turns it off in Copilot CLI, kept installed.');
     box.calls.length = 0;
     const undone = await box.markets.undoTurn(box.root, 'pdf', ticked.before!, ticked.back!, box.home);
     assert.deepEqual(box.calls, ['uninstall pdf@team copilot-cli']);
@@ -1383,6 +1385,8 @@ test('Undo of a fresh install of Copilot CLI’s live copy keeps the record with
     box.calls.length = 0;
     const turnedOn = await box.markets.turn(box.root, 'notes', 'on', undefined, box.home);
     assert.equal(turnedOn.before, null);
+    assert.equal(undoTitle(turnedOn.back!, { plugin: 'notes' }),
+      'Reverses what changed for notes, through each tool’s own command or switch: uninstalls it from Claude Code and turns it off in Copilot CLI, kept installed.');
     box.calls.length = 0;
     const undoneOn = await box.markets.undoTurn(box.root, 'notes', turnedOn.before!, turnedOn.back!, box.home);
     assert.equal(resultSentence(resultLines(undoneOn.done, true), true), 'Undone: notes removed from Claude Code; turned off in Copilot CLI.');

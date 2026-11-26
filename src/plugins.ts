@@ -564,7 +564,7 @@ async function folderItem(context: PluginContext, folderPath: string, plugin: st
 
 /**
  * Installed only with files at the path the tool records; an enabled record with no files is Not known yet (PLG-03), while
- * Copilot CLI's live `false` record with no folder is not installed. Never scans.
+ * Copilot CLI's live `false` record with no files (folder gone or empty) is not installed. Never scans.
  * `entry` (the plugin's marketplace.json entry) says where its skills are, for the skills an installed copy holds.
  */
 export async function installState(context: PluginContext, tool: PluginTool, marketplace: string, plugin: string, entry?: Record<string, unknown>): Promise<InstallState> {
@@ -1321,7 +1321,7 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
   const installed = await native(context, tool, installArgs(tool, id));
   runs.push(installed);
   const state = await installState(context, tool, catalog.name, plugin);
-  if (state.state === 'installed' && !state.off) return { tool, outcome: 'installed', changed: true, ...withNext(context, tool, await installedReloads(context, tool, catalog.name, plugin, true), `${installed.ok ? 'Installed' : 'The command reported a problem, but it is installed'}${state.live ? ', loaded live from the marketplace folder' : ''}.`), runs };
+  if (state.state === 'installed' && !state.off) return { tool, outcome: 'installed', changed: true, ...(state.live ? { live: true as const } : {}), ...withNext(context, tool, await installedReloads(context, tool, catalog.name, plugin, true), `${installed.ok ? 'Installed' : 'The command reported a problem, but it is installed'}${state.live ? ', loaded live from the marketplace folder' : ''}.`), runs };
   if (state.state === 'not-known') return { tool, outcome: 'not-known', message: state.reason, runs };
   // A marketplace the tool already had is used as the tool last fetched it, which may predate what this page shows.
   // A tool that says it has the same plugin from elsewhere has it: an older copy of this marketplace isn't why.
@@ -1440,7 +1440,9 @@ export async function uninstall(context: PluginContext, marketplace: string, plu
   const held = await heldBy(context, tool, marketplace, source);
   if (held) return { tool, outcome: 'held', message: heldReason(tool, marketplace, held), runs: [] };
   const before = await installState(context, tool, marketplace, plugin);
-  // Copilot CLI's uninstall of a live folder copy only sets enabledPlugins to false (its folder stays), which installState reads as installed, live and off; that counts as uninstalled here.
+  // Copilot CLI's uninstall of a live folder copy only sets enabledPlugins to false (its folder stays), which installState reads
+  // as installed, live and off; that counts as uninstalled here (marketplaces.ts undoTurn rewrites the report to plugin-off and
+  // keeps the record off; pluginplan.ts reverse marks the op keptOff for Undo's hover).
   const gone = (at: InstallState) => at.state === 'not-installed' || (tool === 'copilot-cli' && at.state === 'installed' && !!at.live && !!at.off);
   if (gone(before)) return { tool, outcome: 'uninstalled', message: `Not installed in ${name}.`, runs: [] };
   const id = `${plugin}@${marketplace}`, beforeReloads = await installedReloads(context, tool, marketplace, plugin, false);

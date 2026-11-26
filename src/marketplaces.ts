@@ -830,8 +830,9 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const done: PluginDone[] = [];
     for (const op of items) if (id && host.share) done.push(...(await itemsBack(host.share(), tools, id, op.items ?? [], op, itemTools(tools))).done);
     const ran = await runPlan(back.filter(op => op.action !== 'items-back'), ownApi, String(home));
-    // Undoing a fresh install of Copilot CLI's live folder copy leaves enabledPlugins false (installed and off): end as an Off
-    // does so the result says "turned off" (never "removed") and the record keeps Copilot CLI out (`Off, kept installed`).
+    // Undoing a fresh install of Copilot CLI's live folder copy leaves enabledPlugins false, installed and off (plugins.ts
+    // uninstall counts that as `gone`; pluginplan.ts reverse marks the op `keptOff`): end as an Off does so the result says
+    // "turned off" (never "removed") and the record keeps Copilot CLI out (`Off, kept installed`).
     const liveOff = ran.done.find(step => step.action === 'remove' && step.tool === 'copilot-cli' && step.report.outcome === 'uninstalled' && step.report.changed);
     if (liveOff) {
       const state = await engine.installState(await context(), 'copilot-cli', liveOff.marketName, plugin);
@@ -841,7 +842,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
           const { view: afterView } = await look(false, undefined, source);
           const afterEntry = afterView.marketplaces.find(candidate => engine.sameSource(candidate.source, source));
           const has = afterEntry ? afterView.tools.filter(each => each !== 'copilot-cli' && inUseIn(afterEntry, plugin, each)) : [];
-          const fallback = () => ({ ...(current ?? newEntry(source, liveOff.marketName, plugin, false)), on: false, except: [] });
+          const fallback = () => current ?? newEntry(source, liveOff.marketName, plugin, false);
           const kept = turnedEntry(before ?? (has.length ? undefined : current), 'keep-out', 'copilot-cli', fallback, has, afterView.tools);
           if (kept) await changeRecord(String(home), now => withEntry(now, source, plugin, kept));
         }
@@ -1051,6 +1052,7 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
     const step = record(op);
     return !!step && step.source === source && step.plugin === plugin && isName(step.marketName) && harnessIds.includes(step.tool as HarnessId)
       && ['install', 'remove', 'plugin-off', 'plugin-on', 'items-back'].includes(step.action as string)
+      && (step.keptOff === undefined || step.keptOff === true)
       && (step.items === undefined || (step.action === 'items-back' && Array.isArray(step.items) && step.items.length <= 5000 && step.items.every(isItemState)));
   };
   const isEntry = (source: string, plugin: string) => (value: unknown): value is PluginEntry => {

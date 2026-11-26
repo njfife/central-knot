@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { batches, notUndone, resultLines, resultParts, resultSentence, reverse, runPlan, shortOf, unreachedOps, type PlanApi, type PluginDone, type PluginOp, type ResultLine } from '../src/pluginplan.ts';
+import { batches, notUndone, resultLines, resultParts, resultSentence, reverse, runPlan, shortOf, undoTitle, unreachedOps, type PlanApi, type PluginDone, type PluginOp, type ResultLine } from '../src/pluginplan.ts';
 import type { ActionReport, HarnessId } from '../src/types.ts';
 
 const op = (plugin: string, tool: HarnessId, action: PluginOp['action'] = 'install'): PluginOp => ({ source: 'anthropics/skills', marketName: 'anthropic-agent-skills', plugin, tool, action });
@@ -80,6 +80,16 @@ test('An Undo says what came back, and keeps what it did not get to', () => {
     { ...op('docx', 'claude-cli', 'plugin-off'), report: { tool: 'claude-cli', outcome: 'plugin-off', message: '', runs: [], changed: true } },
   ];
   assert.equal(resultSentence(resultLines(liveUndone, true), true), 'Undone: pdf turned off in Copilot CLI; docx off again in Claude Code.');
+  // Undo's hover uses the same rule via reverse(): a live Copilot CLI fresh install says "turns it off in Copilot CLI, kept installed"; Claude Code and cached copies still say "uninstalls".
+  const installed = (tool: HarnessId, live?: true): PluginDone => ({ ...op('pdf', tool), report: { tool, outcome: 'installed', message: '', runs: [], changed: true, ...(live ? { live } : {}) } });
+  assert.equal(undoTitle(reverse([installed('copilot-cli', true)]), { plugin: 'pdf' }),
+    'Reverses what changed for pdf, through each tool’s own command or switch: turns it off in Copilot CLI, kept installed.');
+  assert.equal(undoTitle(reverse([installed('claude-cli'), installed('copilot-cli', true)]), { plugin: 'pdf' }),
+    'Reverses what changed for pdf, through each tool’s own command or switch: uninstalls it from Claude Code and turns it off in Copilot CLI, kept installed.');
+  assert.equal(undoTitle(reverse([installed('copilot-cli')]), { plugin: 'pdf' }),
+    'Reverses what changed for pdf, through each tool’s own command or switch: uninstalls it from Copilot CLI.');
+  assert.equal(undoTitle(reverse([installed('claude-cli', true)]), { plugin: 'pdf' }),
+    'Reverses what changed for pdf, through each tool’s own command or switch: uninstalls it from Claude Code.');
   assert.deepEqual(notUndone(undoOps, done).map(entry => entry.plugin), ['xlsx']);
   // A run where nothing succeeded has no result sentence (its failures show in the problem band).
   const failed: PluginDone[] = [{ ...undoOps[2]!, report: { tool: 'claude-cli', outcome: 'failed', message: 'x', runs: [] } }];

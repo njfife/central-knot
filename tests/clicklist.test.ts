@@ -6,6 +6,7 @@ import { mock, test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Change, HarnessId, HomeView, ItemNotice, MarketplaceView, PassResult, PluginTurn, PluginTurnResult, PluginsView, ProfileSwitchResult } from '../src/types.ts';
 import type { PageKind } from '../src/app.ts';
+import { reverse } from '../src/pluginplan.ts';
 
 /** Main, as the page sees it: each switch click waits until the test answers it; every other call is counted. */
 const main = {
@@ -3226,5 +3227,26 @@ test('Single plugin click that fails or partly fails speaks the failure (never N
   // announce's shown prefix guard: when shown is not a prefix of text, paintStatusMessage emits no sliced hidden tail.
   announce('Completely different full sentence.', false, undefined, undefined, 'Prefix.');
   assert.equal(announcement.children.some((kid: any) => String(kid?.className ?? '').includes('visually-hidden')), false);
+});
+
+test('Undo hover after a fresh live Copilot CLI install says turns it off, kept installed; Claude Code and cached copies still say uninstalls', async t => {
+  pluginProfileWorld(t);
+  const titleFor = (done: PluginTurnResult['done']) => {
+    market.lastRun = { done, undo: false, home: '/home', turn: { source: '/market', plugin: 'alpha', before: null, back: reverse(done) } };
+    const shown = pluginsResult();
+    return findById(shown[0], 'plugins-undo')?.title;
+  };
+  const install = (tool: HarnessId, live?: true): PluginTurnResult['done'][number] => ({
+    source: '/market', marketName: 'team', plugin: 'alpha', tool, action: 'install',
+    report: { tool, outcome: 'installed', changed: true, message: 'Installed.', runs: [], ...(live ? { live } : {}) },
+  });
+  assert.equal(titleFor([install('copilot-cli', true)]),
+    'Reverses what changed for alpha, through each tool’s own command or switch: turns it off in Copilot CLI, kept installed.');
+  assert.equal(titleFor([install('claude-cli'), install('copilot-cli', true)]),
+    'Reverses what changed for alpha, through each tool’s own command or switch: uninstalls it from Claude Code and turns it off in Copilot CLI, kept installed.');
+  assert.equal(titleFor([install('copilot-cli')]),
+    'Reverses what changed for alpha, through each tool’s own command or switch: uninstalls it from Copilot CLI.');
+  assert.equal(titleFor([install('claude-cli', true)]),
+    'Reverses what changed for alpha, through each tool’s own command or switch: uninstalls it from Claude Code.');
 });
 

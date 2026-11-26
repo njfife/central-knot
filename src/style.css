@@ -1467,7 +1467,6 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .cell-button.cell-box:disabled { border-color: var(--cell-line); opacity: .6; }
 .plugin-panel-switch { display: inline-flex; align-items: center; gap: 10px; }
 .plugin-head-label { display: inline-flex; align-items: center; gap: 4px; }
-.toolbar-result-more { color: var(--ink-soft); }
 .plugin-row-name { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; padding: 8px 12px 8px 0; text-align: left; }
 .plugin-row-name > span { max-width: 100%; }
 .plugin-row-open { all: unset; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }

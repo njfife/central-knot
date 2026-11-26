@@ -1350,7 +1350,7 @@ exec ${JSON.stringify(process.execPath)} -e 'const fs=require("fs"),f=process.ar
     // Fresh install of another live plugin, then its Undo (uninstall): flips enabledPlugins to false and succeeds, never "Still installed."
     const catalog = await parseCatalog(market, market, 'folder');
     const fresh = await install(context, catalog, 'full', 'copilot-cli');
-    assert.deepEqual([fresh.outcome, fresh.changed], ['installed', true], fresh.message);
+    assert.deepEqual([fresh.outcome, fresh.changed, fresh.live], ['installed', true, true], fresh.message);
     const undone = await uninstall(context, 'ck-test-market', 'full', 'copilot-cli', market);
     assert.deepEqual([undone.outcome, undone.changed], ['uninstalled', true], undone.message);
     assert.partialDeepStrictEqual(await installState(context, 'copilot-cli', 'ck-test-market', 'full'), { state: 'installed', path: join(market, 'plugins/full'), live: true, off: true, version: '1.0.0' });

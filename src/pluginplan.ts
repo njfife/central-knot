@@ -37,6 +37,8 @@ export interface PluginOp {
    * not by a click on something that takes the whole plugin. Once those items are all off again the choice has no reason left.
    */
   forItems?: true;
+  /** On a `remove` op: undoing a fresh install of Copilot CLI's live copy turns it off, kept installed, rather than uninstalling it (plugins.ts install, marketplaces.ts undoTurn). */
+  keptOff?: true;
   /** For items-back: each item as it was before the switch (pluginlibrary.ts ItemState). */
   items?: ItemState[];
 }
@@ -127,7 +129,8 @@ const OPPOSITE: Partial<Record<PluginAction, PluginAction>> = { install: 'remove
  * no way back (the tools keep no earlier copy to return to), so it is left out; a plugin's items have theirs (items-back).
  */
 export const reverse = (done: PluginDone[]): PluginOp[] => opposites(done
-  .filter(entry => entry.report.changed && entry.action !== 'update' && !isItems(entry.action)).map(({ report: _report, ...op }) => op));
+  .filter(entry => entry.report.changed && entry.action !== 'update' && !isItems(entry.action))
+  .map(({ report, ...op }) => (op.action === 'install' && op.tool === 'copilot-cli' && report.live ? { ...op, keptOff: true as const } : op)));
 /** Steps that changed, each turned the other way, last first: a profile's Undo of the steps History kept (profileplan.ts pluginUndo). */
 export const opposites = (ops: PluginOp[]): PluginOp[] => ops.map(op => ({ ...op, action: OPPOSITE[op.action]! })).reverse();
 
@@ -270,6 +273,32 @@ export const unreachedOps = (ops: PluginOp[], done: PluginDone[]) => ops.filter(
 
 /** resultParts as plain text, for the screen reader and the tooltip. */
 export const resultSentence = (lines: ResultLine[], undo: boolean) => resultParts(lines, undo).map(part => (typeof part === 'string' ? part : part.plugin)).join('');
+
+/**
+ * What each kind of step an Undo runs does, in Undo's hover, matching resultLines: a live Copilot CLI fresh install's `remove`
+ * (`keptOff`) turns it off, kept installed, rather than uninstalling it. Items in Pi, OpenCode and Antigravity (`items-back`)
+ * have no words: Central Knot puts them back itself, through no tool's command.
+ */
+const UNDO_CLAUSES: [(op: PluginOp) => boolean, string, string?][] = [
+  [op => op.action === 'remove' && !op.keptOff, 'uninstalls it from'],
+  [op => op.action === 'remove' && !!op.keptOff, 'turns it off in', ', kept installed'],
+  [op => op.action === 'install', 'reinstalls it in'],
+  [op => isItemSwitch(op.action) || isWhole(op.action), 'turns each switch back as it was in'],
+];
+
+/** Undo's tooltip, from what it will run (`back`): what it reverses where, and that an update in the same run stays. */
+export function undoTitle(back: PluginOp[], { plugin, updated = false }: { plugin?: string; updated?: boolean } = {}): string {
+  const where = (match: (op: PluginOp) => boolean) => andList([...new Set(back.filter(match).map(op => op.tool))].sort(byToolOrder).map(tool => names[tool]));
+  const does = UNDO_CLAUSES.flatMap(([match, verb, after = '']) => {
+    const list = where(match);
+    return list ? [`${verb} ${list}${after}`] : [];
+  });
+  const said = [
+    `Reverses what changed${plugin ? ` for ${plugin}` : ''}${does.length ? `, through each tool’s own command or switch: ${andList(does)}` : ''}.`,
+    updated ? 'The update itself stays: it can’t be undone.' : '',
+  ];
+  return said.filter(Boolean).join(' ');
+}
 
 /**
  * What an Undo did not get to: ops it was given that did not succeed (it stopped before them, or they failed). One that
