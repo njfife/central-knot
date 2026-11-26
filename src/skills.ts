@@ -257,7 +257,8 @@ function anotherWay(disk: SkillDisk, managed: HarnessId[], item: Wanted, tool: H
   if (!source || !managed.includes(source) || depth) return undefined;
   const there = toolName(source);
   const reallyThere = wantedIn(item, source) && !disk.locked.has(source) && !disk.cannotTake(item, source) && !anotherWay(disk, managed, item, source, depth + 1);
-  // Said as it is now: a copy there, or (a found skill, say) the folder it will be in once it is on there (libraryrow.ts detailLine shortens it for found rows via readBy).
+  // Said as it is now: a copy there, or (a found skill, say) the folder it will be in once it is on there;
+  // for found rows, libraryrow.ts detailLine shortens this using readBy (who would read that folder per readers).
   if (reallyThere) return disk.byKey.get(item.key)?.[source]
     ? { readsFrom: source, why: `${nameOf(tool)} reads ${there}’s copy, in ${there}’s skills folder.` }
     : { why: `${nameOf(tool)} reads ${there}’s skills folder, so it gets the skill from there once it is on in ${there}.` };
@@ -268,15 +269,15 @@ function anotherWay(disk: SkillDisk, managed: HarnessId[], item: Wanted, tool: H
 }
 
 /**
- * Managed tools that read `source`'s skills folder and would load `item` from there (no copy or way of their own, not denied
- * in their own settings), when `source` itself is managed, writable and can take a copy of its own.
+ * Managed tools that read `source`'s skills folder and would load `item` from there (can take its shape, no copy or way of
+ * their own, not denied in their own settings), when `source` itself is managed, writable and can take a copy of its own.
  */
 function readers(context: ShareContext, disk: SkillDisk, managed: HarnessId[], item: Wanted, source: HarnessId): HarnessId[] {
   if (!managed.includes(source) || disk.locked.has(source) || disk.cannotTake(item, source) || anotherWay(disk, managed, item, source, 1) || unseenIn(disk, source, item.key)) return [];
   const shape = disk.shapes.get(item.key);
   const target: SwitchTarget = { folder: item.name, name: shape && !shape.opencodeProblem ? shape.name : item.name, skillFile: join(rootOf(context, source), item.name, 'SKILL.md') };
   return managed.filter(tool => disk.readsFrom[tool] === source && !disk.byKey.get(item.key)?.[tool] && !unseenIn(disk, tool, item.key)
-    && !disk.linked(item, tool) && !pluginFor(disk, item.key, tool) && !disk.ways.get(item.key)?.[tool]
+    && !disk.cannotTake(item, tool) && !disk.linked(item, tool) && !pluginFor(disk, item.key, tool) && !disk.ways.get(item.key)?.[tool]
     && !isDisabled(context, disk.switches.get(tool)!, target));
 }
 

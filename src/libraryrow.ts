@@ -24,7 +24,7 @@ import { clockTimesApart, dayAndTime } from './model.ts';
 import { agentsKeptIn } from './presence.ts';
 import { linkLabel, pluginOf } from './sourcelink.ts';
 import type { Change, HarnessId, ItemNotice, LibraryFacts, PluginItemNotice, TakenInNotice } from './types.ts';
-import { andList, deletedIn, harnessIds, kindNouns, orList, pageNames, sentence, toolName, toolsPhrase } from './words.ts';
+import { andList, deletedIn, harnessIds, kindNouns, orList, pageNames, readsIt, sentence, toolName, toolsPhrase } from './words.ts';
 
 // ---------- What a kind supplies ----------
 
@@ -581,7 +581,7 @@ export function sentences(words: RowWords) {
     } else if (is === 'none' && inLib) {
       if (inLib.except.includes(tool as HarnessId)) parts.push({ text: 'Kept out' });
       const also = !inLib.on && !pluginOf(row.fromSource?.link ?? '') ? row.readBy?.[tool as HarnessId] : undefined;
-      if (also?.length) parts.push({ text: `On here, ${andList(also.map(toolName))} ${also.length === 1 ? 'reads' : 'read'} it too` });
+      if (also?.length) parts.push({ text: `If on, ${readsIt(also)} too` });
     } else if (is !== 'current' && is !== 'kept-out') {
       const waits = !inLib && is === 'another-way' ? Object.entries(row.readBy ?? {}).find(([, list]) => list?.includes(tool as HarnessId))?.[0] : undefined;
       parts.push({ text: waits ? `Gets it from ${toolName(waits)}’s skills folder once it is on there.` : hasLine(row, item, tool, where) });

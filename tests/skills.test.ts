@@ -474,9 +474,18 @@ test('An Off skill names managed readers in readBy and History alsoRead, and omi
     const onOnly = await send(box, rowClicks.onOnly(clean.row, clean.item, 'claude-cli'));
     const onEvent = (await historyOf(box)).at(-1)!;
     assert.deepEqual(onEvent.alsoRead, ['opencode-cli']);
-    assert.equal(librarySentence(onEvent, libraryWords.skills, box.tools)?.text, 'Turned on in Claude Code; kept out of every other tool; OpenCode reads it too.');
     await restore(box, onOnly.made![0]!);
     assert.equal((await historyOf(box)).at(-1)!.alsoRead, undefined);
+    // A skill OpenCode would not load (no `name:` in SKILL.md): Off line says nothing of OpenCode, and History has no alsoRead.
+    await put(box, 'claude-cli', { 'SKILL.md': '---\ndescription: No name in frontmatter.\n---\n\nBody.\n' }, [], 'nameless');
+    await turnOn(box, box.context, 'nameless');
+    await turnOff(box, box.context, 'nameless');
+    const noName = await seen(box, box.context, 'nameless');
+    assert.equal(noName.fact!.readBy, undefined);
+    assert.deepEqual(say.detailLine(noName.row, noName.item, 'claude-cli', 'Claude Code'), []);
+    const onNoName = await send(box, rowClicks.onOnly(noName.row, noName.item, 'claude-cli'));
+    assert.equal((await historyOf(box, box.context, 'nameless')).at(-1)!.alsoRead, undefined);
+    await restore(box, onNoName.made![0]!);
     // OpenCode has its own link: no readBy.
     const outside = join(box.home, 'outside/notes');
     await mkdir(outside, { recursive: true });

@@ -557,13 +557,13 @@ test('Opened-row tool lines (detailLine) drop standing filler while closed-row m
   assert.deepEqual(skills.detailLine(plainOff, offTwo, 'codex-cli', 'Codex'), [{ text: 'Kept out' }]);
   assert.deepEqual(skills.detailLine(plainOff, offTwo, 'claude-cli', 'Claude Code'), []);
   const offWithReader = row({}, { readBy: { 'claude-cli': ['opencode-cli'] } }, offTwo);
-  assert.deepEqual(skills.detailLine(offWithReader, offTwo, 'claude-cli', 'Claude Code'), [{ text: 'On here, OpenCode reads it too' }]);
+  assert.deepEqual(skills.detailLine(offWithReader, offTwo, 'claude-cli', 'Claude Code'), [{ text: 'If on, OpenCode reads it too' }]);
   assert.deepEqual(skills.detailLine(offWithReader, offTwo, 'opencode-cli', 'OpenCode'), []);
   const offClaudeOut = item({ on: false, except: ['claude-cli'], applied: {} });
   assert.deepEqual(skills.detailLine(row({}, { readBy: { 'claude-cli': ['opencode-cli'] } }, offClaudeOut), offClaudeOut, 'claude-cli', 'Claude Code'),
-    [{ text: 'Kept out' }, { text: 'On here, OpenCode reads it too' }]);
+    [{ text: 'Kept out' }, { text: 'If on, OpenCode reads it too' }]);
   assert.deepEqual(skills.detailLine(row({}, { readBy: { 'claude-cli': ['opencode-cli', 'pi-cli'] } }, offTwo), offTwo, 'claude-cli', 'Claude Code'),
-    [{ text: 'On here, OpenCode and Pi read it too' }]);
+    [{ text: 'If on, OpenCode and Pi read it too' }]);
   assert.deepEqual(skills.detailLine(row(all, { readBy: { 'claude-cli': ['opencode-cli'] } }, onItem), onItem, 'claude-cli', 'Claude Code'), []);
   const onClaudeOut = item({ except: ['claude-cli'], applied: { 'copilot-cli': 'b', 'codex-cli': 'b' } });
   assert.deepEqual(skills.detailLine(row({ 'copilot-cli': 'b', 'codex-cli': 'b' }, { readBy: { 'claude-cli': ['opencode-cli'] } }, onClaudeOut), onClaudeOut, 'claude-cli', 'Claude Code'), []);
