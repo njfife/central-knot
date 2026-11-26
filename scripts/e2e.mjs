@@ -86,13 +86,21 @@ function keepFresh(path) {
 }
 function tree(directory, options = {}) {
   const out = {};
-  const visit = current => {
-    for (const name of readdirSync(current).sort()) {
+  const visit = (current, names = readdirSync(current)) => {
+    for (const name of names.sort()) {
       if (name === '.git' && !options.git) continue;
-      const path = join(current, name), info = lstatSync(path), key = relative(directory, path);
-      if (info.isSymbolicLink()) out[key] = `link:${readlinkSync(path)}`;
-      else if (info.isDirectory()) { out[key] = 'dir'; visit(path); }
-      else out[key] = `${info.mode & 0o777}:${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
+      const path = join(current, name), key = relative(directory, path);
+      let kids;
+      try {
+        const info = lstatSync(path);
+        if (info.isSymbolicLink()) out[key] = `link:${readlinkSync(path)}`;
+        else if (info.isDirectory()) { kids = readdirSync(path); out[key] = 'dir'; }
+        else out[key] = `${info.mode & 0o777}:${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+        continue;
+      }
+      if (kids) visit(path, kids);
     }
   };
   visit(directory);
@@ -11446,9 +11454,21 @@ async function keepSessionCostsFlow() {
       [topsCollecting, topsAfter], [topsBefore, topsBefore]);
     await sizeTo(a, 860, 560);
     if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
-    same('at 860×560 with sidebar open: Stop keeping fits on the same line as Today | Yesterday | 7 days',
-      await a.run(`(() => { const stop = document.querySelector('#sessions-keep-stop').getBoundingClientRect(), seg = document.querySelector('#sessions-day-week').getBoundingClientRect();
-        return Math.abs(stop.top - seg.top) < 6 && stop.left >= seg.right; })()`), true);
+    await a.settle();
+    // A periodic 1500 ms sweep replaces Stop keeping with Collecting… while it runs; wait for it to end, then measure in one turn.
+    const fit = await a.run(`new Promise(done => {
+      const end = Date.now() + 5000;
+      const measure = () => {
+        const collecting = !!document.querySelector('#sessions-collecting');
+        if (collecting && Date.now() < end) return setTimeout(measure, 25);
+        const stop = document.querySelector('#sessions-keep-stop'), seg = document.querySelector('#sessions-day-week');
+        if (!stop || !seg) return done({ ok: false, collecting, missing: [!stop && '#sessions-keep-stop', !seg && '#sessions-day-week'].filter(Boolean) });
+        const s = stop.getBoundingClientRect(), w = seg.getBoundingClientRect();
+        done({ ok: Math.abs(s.top - w.top) < 6 && s.left >= w.right, stop: { top: s.top, left: s.left }, seg: { top: w.top, right: w.right } });
+      };
+      measure();
+    })`);
+    check('at 860×560 with sidebar open: Stop keeping fits on the same line as Today | Yesterday | 7 days', fit.ok, fit);
     await fullSize(a);
 
     // Fix 2: Refresh started during Collecting… whose reply lands after the sweep ends must not restore Collecting….
