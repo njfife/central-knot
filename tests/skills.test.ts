@@ -1872,3 +1872,60 @@ test('skillPluginFile reads installed (on and off), root-skill, symlinked-root a
     assert.equal(await readInstalled('SKILL.md'), undefined, 'gone plugin root returns undefined');
   } finally { await box.cleanup(); }
 });
+
+test('Pi holds a link to a version the Library already knows while ~/.agents/skills holds a different unversioned skill: Take over keeps the removed shared bytes as a version', async () => {
+  const box = await sandbox(['claude-cli', 'pi-cli']);
+  try {
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Known version.') });
+    await turnOn(box);
+    const elsewhere = join(box.home, 'known-copy/notes');
+    await mkdir(elsewhere, { recursive: true });
+    await writeFile(join(elsewhere, 'SKILL.md'), skillText('Known version.'));
+    await rm(folderOf(box, 'pi-cli'), { recursive: true, force: true });
+    await symlink(elsewhere, folderOf(box, 'pi-cli'));
+    const shared = join(box.home, '.agents/skills/notes');
+    const unversioned = skillText('Unversioned shared bytes.');
+    await mkdir(shared, { recursive: true });
+    await writeFile(join(shared, 'SKILL.md'), unversioned);
+    const done = await takeOver(box.context, ['claude-cli', 'pi-cli'], 'notes', 'pi-cli');
+    assert.equal(done.stopped, undefined);
+    assert.equal(await bytes(shared), undefined, 'the shared folder was removed');
+    const item = (await itemOf(box))!;
+    const texts = await Promise.all(item.versions.map(v => skillVersion(box.context, 'notes', v.hash).then(found => found?.skill)));
+    assert.ok(texts.includes(unversioned), 'the removed shared folder bytes are preserved as a version');
+  } finally { await box.cleanup(); }
+});
+
+test('takeOver with expected shared target refuses on edited/added file or new Claude symlink, and splits readers into gets vs loses', async () => {
+  const box = await sandbox(['claude-cli', 'pi-cli', 'opencode-cli']);
+  try {
+    const shared = join(box.home, '.agents/skills/notes');
+    await mkdir(shared, { recursive: true });
+    await writeFile(join(shared, 'SKILL.md'), skillText('Shared copy.'));
+    await turnOn(box);
+    const armed = (await seen(box)).fact!.sharedTakeOver!;
+    assert.ok(armed);
+    assert.deepEqual([armed.gets, armed.loses], [['pi-cli', 'opencode-cli'], []]);
+    // 2a: editing or adding a file in the shared folder after arming refuses without writing or deleting.
+    await writeFile(join(shared, 'extra.txt'), 'late file\n');
+    const drift = await takeOver(box.context, box.tools, 'notes', 'pi-cli', false, armed);
+    assert.equal(drift.changed, true);
+    assert.ok(drift.stopped);
+    assert.ok(await bytes(shared), 'shared folder stays on disk');
+    await rm(join(shared, 'extra.txt'));
+    // 2b: adding a managed Claude Code symlink to the shared folder refuses without deleting the link or folder.
+    await rm(folderOf(box, 'claude-cli'), { recursive: true, force: true });
+    await symlink('../../.agents/skills/notes', folderOf(box, 'claude-cli'));
+    const linked = await takeOver(box.context, box.tools, 'notes', 'pi-cli', false, armed);
+    assert.equal(linked.changed, true);
+    assert.ok(linked.stopped);
+    assert.equal((await bytes(folderOf(box, 'claude-cli')))?.[''], 'link', 'Claude symlink untouched');
+    assert.ok(await bytes(shared), 'shared folder stays on disk');
+    const updated = (await seen(box)).fact!.sharedTakeOver!;
+    assert.deepEqual([updated.gets, updated.loses], [['claude-cli', 'pi-cli', 'opencode-cli'], []]);
+    // Confirming with the updated target succeeds.
+    const ok = await takeOver(box.context, box.tools, 'notes', 'pi-cli', false, updated);
+    assert.equal(ok.stopped, undefined);
+    assert.equal(await bytes(shared), undefined);
+  } finally { await box.cleanup(); }
+});

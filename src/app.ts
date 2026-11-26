@@ -17,7 +17,7 @@ import { forgetSourcePrompts, loadSources } from './sourcespage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
-import type { Reason, ApplyResult, Profile, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SessionCostsView, SyncNotice, UsageReading } from './types.ts';
+import type { Reason, ApplyResult, Profile, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SessionCostsView, SharedTakeOver, SyncNotice, UsageReading } from './types.ts';
 import { anyOn, kindSource, noPins, pinsOn, rowId, sameRow, type NamedRow, type Pinned, type RowKey } from './itemrow.ts';
 import { itemKey, wantedIn } from './library.ts';
 import { caughtUpNames, groupBy, noticeNames, plural, withSetAside } from './model.ts';
@@ -43,6 +43,8 @@ import { followView, type SigninChecks } from './mcpsignin.ts';
 import { keeperNews, loadSessions, windowBack, type SessionsDay } from './sessionspage.ts';
 import type { DayRows, PeriodRows } from './sessionrow.ts';
 import { DIFFERS_REASON, selecting, stopSelecting } from './selection.ts';
+import { takesPlugins } from './presence.ts';
+import { pluginOf } from './sourcelink.ts';
 import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
@@ -258,10 +260,7 @@ export function tell(outcome: Outcome | undefined, otherwise = '', options?: { c
   const told = outcome && withProfileEnded(outcome, options);
   state.outcome = told;
   // Said on Plugins in the run's place, it is the newer result: the run's goes, so this one's × uncovers nothing older.
-  if (overRun(told)) {
-    closeRun();
-    endListNews();
-  }
+  if (overRun(told)) closeRun();
   if (!told) announce(otherwise);
   else { announce(spoken(told), !saidInStatusBar(told)); told.said = state.said.seq; }
   fadeLater();
@@ -581,6 +580,13 @@ function keepOwn(own: Done['kept'][]) {
  * everything's switch send nothing, and are refused there until Resume.
  */
 export const clickResumes = (home: HomeView) => home.sync.gate.state === 'needs-resume';
+/** Re-reads Plugins when it is on screen; `clearNews` drops stale click-list lines after a library click on Plugins. */
+async function refreshPlugins(clearNews = false): Promise<void> {
+  if (state.page !== 'plugins') return;
+  if (clearNews) endListNews();
+  await loadPlugins(false, state.home?.readId);
+}
+
 /** Sends one kind's changes for the open home. */
 const send = (kind: PageKind, changes: Change[]) => kindPages[kind].send(changes, clickResumes(state.home!), state.home!.home).then(received);
 /** A pass's answer, its notices given their place in the order of arrival as it comes (matrix.ts noticeArrived), before the read after it. */
@@ -630,7 +636,7 @@ async function carryOut(click: Click, page: Page): Promise<Done> {
   // The plugins' part, once the copies' part went through (a whole-click refusal leaves it unrun).
   const plugged = click.plugins?.ops.length && (did || made.length || !refusal) ? await runSwitches(click.plugins.ops) : undefined;
   if (plugged) setHome(await api().refresh());
-  if (state.page === 'plugins') await loadPlugins(false, state.home?.readId);
+  await refreshPlugins(true);
   const done = did || made.length > 0 || !!plugged?.done.some(entry => succeeded(entry.report));
   // Said from what happened: a tool whose write failed, copy or plugin switch, is not called on (or off).
   const wrote = [...new Set(ours.filter(entry => entry.outcome === 'written' && entry.harness).map(entry => entry.harness!))];
@@ -873,7 +879,7 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
     .sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
   const gone = [...kindOfEntry].filter(([id]) => !events.some(event => event.id === id));
   type UndoEntry = { key?: string; entry: DestinationResult; answeredLater?: boolean };
-  const raw = new Map(parts.map(part => [part.kind, [] as UndoEntry[]])), restored = new Map(parts.map(part => [part.kind, new Set<string>()])), stops = new Map<PageKind, string>();
+  const raw = new Map(parts.map(part => [part.kind, [] as UndoEntry[]])), restored = new Map(parts.map(part => [part.kind, new Map<string, Set<HarnessId> | null>()])), stops = new Map<PageKind, string>();
   const reloads: ReloadChange[] = unswitched ? pluginReloads(unswitched.done) : [];
   let anyDid = !!unswitched?.done.some(entry => succeeded(entry.report));
   for (const event of events) {
@@ -888,7 +894,8 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
     // A later restore of the same item in this Undo answers an earlier tool problem: replaced if that tool failed again,
     // or dropped below once settled. restore runs with `only`, so every result in result.results belongs to this item.
     if (key) {
-      restored.get(kind)!.add(key);
+      const scope = restored.get(kind)!, prev = scope.get(key);
+      scope.set(key, !event.only || prev === null ? null : new Set([...(prev ?? []), event.only]));
       const failedNow = new Set(result.results.filter(entry => entry.harness && keptBack(entry)).map(entry => entry.harness!));
       for (let at = list.length - 1; at >= 0; at--) {
         const earlier = list[at]!;
@@ -899,20 +906,22 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
     list.push(...result.results.map(entry => ({ key, entry })));
   }
   setHome(await api().refresh());
-  if (state.page === 'plugins') await loadPlugins(false, state.home?.readId);
+  await refreshPlugins(true);
   // Settled: managed, readable, and matching what the library now wants (not held or owed a write/removal; nothing applied if deleted).
   const settledIn = (kind: PageKind, key: string, tool: HarnessId) => {
     const view = state.home?.[kind], row = view?.items.find(fact => fact.key === key), item = view?.library[key];
     const live = item && !item.deleted;
+    const heldByPlugin = !!row?.fromSource && !!pluginOf(row.fromSource.link) && takesPlugins(tool);
     return !!view?.tools.includes(tool) && !row?.unseen?.[tool]
-      && (live ? !(row?.cannot?.[tool] && !row?.plugin?.[tool]) && !row?.plan?.write.includes(tool) && !row?.plan?.remove.includes(tool) : item?.applied[tool] === undefined);
+      && (live ? !(row?.cannot?.[tool] && !row?.plugin?.[tool] && !heldByPlugin) && !row?.plan?.write.includes(tool) && !row?.plan?.remove.includes(tool) : item?.applied[tool] === undefined);
   };
   // One look at the refreshed view, both ways: drop answered problems now settled, and add any wanted or owed tool still unsettled.
   const kept = new Map([...raw].map(([kind, list]) => {
     const entries = list.filter(each => !(each.answeredLater && each.key && each.entry.harness && settledIn(kind, each.key, each.entry.harness)));
-    if (!stops.has(kind)) for (const key of restored.get(kind)!) {
+    if (!stops.has(kind)) for (const [key, onlyTools] of restored.get(kind)!) {
       const view = state.home?.[kind], row = view?.items.find(fact => fact.key === key), item = view?.library[key];
-      if (view && item) for (const tool of view.tools) {
+      const checkTools = view && (onlyTools ? view.tools.filter(each => onlyTools.has(each)) : view.tools);
+      if (checkTools && item) for (const tool of checkTools) {
         if (!((!item.deleted && wantedIn(item, tool)) || item.applied[tool] !== undefined) || settledIn(kind, key, tool)) continue;
         if (entries.some(each => each.key === key && each.entry.harness === tool && keptBack(each.entry))) continue;
         entries.push({ key, entry: { item: item.name, harness: tool, outcome: 'held', message: row?.cannot?.[tool] ?? row?.unseen?.[tool] ?? `Could not put ${toolName(tool)}’s copy back yet.` } });
@@ -934,8 +943,13 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   const all = names(about.rows), asBefore = names(about.rows.filter(row => !short.has(row.kind) && !switchesShort.has(row.kind) && !results.get(row.kind)?.some(keptBack)));
   const failed = names(about.rows.filter(row => switchesShort.has(row.kind) || kept.get(row.kind)?.some(each => keptBack(each.entry) && (each.key ? each.key === row.key : each.entry.item.toLowerCase() === row.name.toLowerCase()))));
   const are = (list: string[]) => `${fewNames(list)} ${list.length === 1 ? 'is' : 'are'} as before`;
+  const single = undone && !unswitched && events.length === 1 && events[0]!.only ? events[0]! : undefined;
+  const singleKind = single && kindOfEntry.get(single.id);
+  const singleMade = single && state.history.data?.find(each => each.id === state.history.data?.find(past => past.id === single.id)?.undoneBy);
+  const singleView = singleKind ? state.home?.[singleKind] : undefined;
+  const singleSaid = singleMade && singleKind && librarySentence(singleMade, libraryWords[singleKind], singleView?.tools ?? [], singleView?.library[libraryEntry(single!)!.key], true)?.text;
   tellWritten({ page, items: all, rows: about.rows, warn: !undone, band: true, fade: undone, reasons,
-    text: undone ? `Undone: ${are(all)}.` : short.size ? `Not all of it could be undone${several && asBefore.length ? `; ${are(asBefore)}` : ''}.` : `Not all of ${fewNames(failed.length ? failed : all)} could be put back.` }, reloads, anyDid);
+    text: singleSaid ? `${single!.item}: ${singleSaid.replace(/^./, first => first.toLowerCase())}` : undone ? `Undone: ${are(all)}.` : short.size ? `Not all of it could be undone${several && asBefore.length ? `; ${are(asBefore)}` : ''}.` : `Not all of ${fewNames(failed.length ? failed : all)} could be put back.` }, reloads, anyDid);
   for (const row of about.rows) flashRow(row);
   if (about.regroups) unpin();
 });
@@ -1236,7 +1250,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   await putHistory();
   // A source's band offers its click's Undo (sourcespage.ts whatItDid): its rows say what waits there now.
   if (state.page === 'sources') await loadSources();
-  if (state.page === 'plugins') await loadPlugins(false, state.home?.readId);
+  await refreshPlugins(true);
   const restored = result.results.filter(entry => entry.outcome === 'written');
   const where = [...new Set(restored.map(entry => entry.harness ?? ''))].filter(Boolean);
   const past = state.history.data?.find(event => event.id === eventId);
@@ -1307,21 +1321,13 @@ function sayEverything(page: Page, past: HistoryEvent, result: ApplyResult, swit
  * outside Central Knot's taken over. What it did is said in the band, with no Undo there: Take over has none (the band and its
  * History entry say so); a cleared switch's Undo is its History entry's action (skills.ts switchBack).
  */
-export const skillAction = (action: 'clear-switch' | 'take-over', key: string, tool: HarnessId, name: string, kind: 'skills' | 'agents' = 'skills', recheck?: () => string | undefined) =>
+export const skillAction = (action: 'clear-switch' | 'take-over', key: string, tool: HarnessId, name: string, kind: 'skills' | 'agents' = 'skills', expected?: SharedTakeOver, onChanged?: () => void) =>
   busy(action === 'take-over' ? 'Taking it over…' : 'Clearing the switch…', async page => {
-    if (recheck) {
-      setHome(await api().refresh());
-      const stop = recheck();
-      if (stop) {
-        if (state.page === 'plugins') await loadPlugins(false, state.home?.readId);
-        tell({ page, item: name, warn: true, band: true, refused: true, text: stop });
-        return;
-      }
-    }
     const home = state.home!, of = kind === 'agents' ? 'agent' : 'skill';
-    const result = received(await (action === 'take-over' ? api().takeOverSkill(key, tool, clickResumes(home), home.home) : api().clearSkillSwitch(key, tool, clickResumes(home), home.home, of)));
+    const result = received(await (action === 'take-over' ? api().takeOverSkill(key, tool, clickResumes(home), home.home, expected) : api().clearSkillSwitch(key, tool, clickResumes(home), home.home, of)));
     setHome(await api().refresh());
-    if (state.page === 'plugins') await loadPlugins(false, state.home?.readId);
+    await refreshPlugins(!result.stopped);
+    if (result.changed) onChanged?.();
     keepOwn([{ kind, results: result.results, notices: result.notices }]);
     const row = { kind, key };
     if (result.stopped) { tell({ page, item: name, rows: [row], text: result.stopped, warn: true, band: true, refused: true }); return; }

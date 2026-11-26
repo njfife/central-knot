@@ -9,8 +9,9 @@ import { acting, rerender, selectOff, shownPath, skillAction, state, whyKindRead
 import { h, whyOff } from './dom.ts';
 import { partId, rowId, type ItemRow } from './itemrow.ts';
 import type { NeutralServer } from './mcp.ts';
-import type { HarnessId } from './types.ts';
+import type { HarnessId, SharedTakeOver } from './types.ts';
 import { libraryWords, sentences, type RowWords } from './libraryrow.ts';
+import { pluginOf } from './sourcelink.ts';
 import type { VersionText } from './versionlist.ts';
 import { andList, toolName } from './words.ts';
 
@@ -56,32 +57,43 @@ function serverParts(server: NeutralServer): { name: string; text: string; block
   return parts.flatMap(([name, text, block]) => (text ? [{ name, text, ...(block ? { block: true as const } : {}) }] : []));
 }
 
-const sharedReaders = (takeOver: ItemRow['takeOver'], path: string) =>
-  (Object.keys(takeOver ?? {}) as HarnessId[]).filter(each => takeOver?.[each]?.path === path);
-
-/** The Library's shared-folder takeover target for a live skill in Central Knot, when `tool` has one (`kind === 'shared'`). */
-export function sharedTakeOverTarget(key: string, tool: HarnessId) {
-  const home = state.home, item = home?.skills.library[key];
+/** The one shared-folder takeover target for a live skill in Central Knot, read by both the Library row and the Plugins page. */
+export function sharedTakeOverTarget(key: string, tool?: HarnessId) {
+  const home = state.home;
+  const item = home?.skills.library[key];
   if (!home || !item || item.deleted) return undefined;
-  const facts = home.skills.items.find(each => each.key === key), outside = facts?.takeOver?.[tool];
-  if (!outside || outside.kind !== 'shared') return undefined;
-  const readers = sharedReaders(facts.takeOver, outside.path);
-  return { name: facts.name ?? item.name ?? key, path: outside.path, readers, signature: `${outside.path}\u0000${readers.join(',')}\u0000${item.hash}` };
+  const facts = home.skills.items.find(each => each.key === key);
+  const shared = facts?.sharedTakeOver;
+  if (!shared) return undefined;
+  const via = tool && facts.takeOver?.[tool]?.kind === 'shared'
+    ? tool
+    : (Object.keys(facts.takeOver ?? {}) as HarnessId[]).find(each => facts.takeOver?.[each]?.kind === 'shared');
+  if (!via) return undefined;
+  const plugin = facts.fromSource && !facts.fromSource.removed ? pluginOf(facts.fromSource.link) : undefined;
+  const copy = plugin ? `the plugin ${plugin}’s copy` : 'your own copy from Central Knot';
+  return { name: facts.name ?? item.name ?? key, tool: via, shared, copy };
 }
 
-/** The Library's one wording for arming and confirming a shared-folder takeover (the folder, version kept, readers, other apps, no Undo). */
-export function sharedTakeOverWords(path: string, readers: HarnessId[]) {
-  const at = shownPath(path), named = readers.map(toolName);
+/** The one wording for arming and confirming a shared-folder takeover: folder, kept version, tools getting whose copy, readers and other apps losing it, no Undo. */
+export function sharedTakeOverWords(shared: SharedTakeOver, copy: string) {
+  const at = shownPath(shared.path);
+  const gets = shared.gets.map(toolName);
+  const loses = shared.loses.map(toolName);
+  const given = gets.length ? `${andList(gets)} ${gets.length === 1 ? 'gets' : 'get'} ${copy} instead.` : '';
+  const away = loses.length ? `${andList([...loses, 'other apps that read that folder'])} won’t find it there.` : 'Other apps that read that folder won’t find it there.';
   return {
-    armTitle: `Remove the copy at ${at} and give each tool that read it Central Knot’s copy. Other apps that read that folder won’t find it there.`,
-    cancel: 'Cancel', cancelTitle: 'Leave the copy where it is',
-    confirm: 'Take over now', confirmTitle: `Remove the copy at ${at}; it is kept as a version first if Central Knot doesn’t have that content. This has no Undo.`,
-    note: `Take over now removes the copy at ${at}, keeping what it holds as a version; ${andList(named)} ${named.length === 1 ? 'gets' : 'get'} Central Knot’s copy instead. Other apps that read that folder won’t find it there. This has no Undo.`,
+    at,
+    armTitle: [`Remove the copy at ${at}.`, given, away].filter(Boolean).join(' '),
+    cancel: 'Cancel',
+    cancelTitle: 'Leave the copy where it is',
+    confirm: 'Take over now',
+    confirmTitle: `Remove the copy at ${at}; it is kept as a version first if Central Knot doesn’t have that content. This has no Undo.`,
+    note: [`Take over now removes the copy at ${at}, keeping what it holds as a version.`, given, away, 'This has no Undo.'].filter(Boolean).join(' '),
   };
 }
 
-/** A take-over that asks to be confirmed (it removes a copy other apps may read): its skill and tool, until another click. */
-let armed: string | undefined;
+/** A take-over that asks to be confirmed (it removes a copy other apps may read): its skill, tool and armed target, until another click. */
+let armed: { key: string; expected: SharedTakeOver } | undefined;
 /**
  * A skill's own actions on one tool's line, and an agent's in Pi (a skill there): "Let <tool> load it", which clears that tool's
  * own switch where it turns the item off (its line says so; History can undo it); and, for a skill, Take over, for a skill in Central Knot, where the tool has it through a link or
@@ -100,26 +112,35 @@ function skillToolActions(row: ItemRow, tool: HarnessId): HTMLElement | null {
     `Clear ${where}’s own switch for ${name}, so ${where} loads it again. History can undo it.`,
     () => void skillAction('clear-switch', row.key, tool, name, row.kind === 'agents' ? 'agents' : 'skills')) : null;
   // Only a skill in Central Knot takes a copy over: a found one is taken in first, by its switch.
-  const outside = item && !item.deleted ? row.takeOver?.[tool] : undefined, key = `${row.key}:${tool}`;
-  const shared = outside && outside.kind !== 'link' ? sharedTakeOverWords(outside.path, sharedReaders(row.takeOver, outside.path)) : undefined;
+  const outside = item && !item.deleted ? row.takeOver?.[tool] : undefined;
+  const key = `${row.key}:${tool}`;
+  const target = outside?.kind === 'shared' ? sharedTakeOverTarget(row.key, tool) : undefined;
+  const shared = target ? sharedTakeOverWords(target.shared, target.copy) : undefined;
   const take = !outside ? null : outside.kind === 'link'
     ? action('Take over', partId('take-over', rowId(row.kind, row.key), tool), `Replace the link in ${where}’s skills folder with Central Knot’s copy of ${name}. What the link led to is left as it is; if Central Knot doesn’t have that content yet, it is kept as a version first.`,
       () => void skillAction('take-over', row.key, tool, name))
-    : armed !== key ? action('Take over…', partId('take-over', rowId(row.kind, row.key), tool), shared!.armTitle,
-      () => { armed = key; rerender(); })
-      : h('span.delete-armed', {}, action(shared!.cancel, partId('take-over-cancel', rowId(row.kind, row.key), tool), shared!.cancelTitle, () => { armed = undefined; rerender(); }, { keepInSelect: true }),
-        action(shared!.confirm, partId('take-over-confirm', rowId(row.kind, row.key), tool), shared!.confirmTitle,
-          () => { armed = undefined; void skillAction('take-over', row.key, tool, name); }, { danger: true }));
+    : !shared ? null
+      : armed?.key !== key ? action('Take over…', partId('take-over', rowId(row.kind, row.key), tool), shared.armTitle,
+        () => { armed = { key, expected: target!.shared }; rerender(); })
+        : h('span.delete-armed', {}, action(shared.cancel, partId('take-over-cancel', rowId(row.kind, row.key), tool), shared.cancelTitle, () => { armed = undefined; rerender(); }, { keepInSelect: true }),
+          action(shared.confirm, partId('take-over-confirm', rowId(row.kind, row.key), tool), shared.confirmTitle, () => {
+            const expected = armed?.expected;
+            armed = undefined;
+            void skillAction('take-over', row.key, tool, name, 'skills', expected, () => {
+              const fresh = sharedTakeOverTarget(row.key, tool);
+              if (fresh) armed = { key, expected: fresh.shared };
+            });
+          }, { danger: true }));
   return clear || take ? h('span.details-tool-extra', {}, clear, take) : null;
 }
 
 /**
- * The armed Take over…, on its line, as Delete's armed line says it: which folder goes, which tools get Central Knot's copy
- * instead, that other apps reading it won't find it, and that it has no Undo.
+ * The armed Take over…, on its line, as Delete's armed line says it: which folder goes, which tools get whose copy
+ * instead, which readers and other apps won't find it, and that it has no Undo.
  */
 function takeOverNote(row: ItemRow, tool: HarnessId): HTMLElement | null {
-  const outside = row.takeOver?.[tool];
-  if (!outside || armed !== `${row.key}:${tool}`) return null;
+  const target = armed?.key === `${row.key}:${tool}` ? sharedTakeOverTarget(row.key, tool) : undefined;
+  if (!target) return null;
   return h('p.delete-armed-note.details-tool-note', { id: partId('take-over-note', rowId(row.kind, row.key), tool) },
-    sharedTakeOverWords(outside.path, sharedReaders(row.takeOver, outside.path)).note);
+    sharedTakeOverWords(target.shared, target.copy).note);
 }

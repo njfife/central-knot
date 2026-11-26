@@ -9,7 +9,7 @@ const api: DesktopApi = {
   refresh: asked => ipcRenderer.invoke('discovery:refresh', asked === true),
   applySkills: (changes, resume, home) => ipcRenderer.invoke('skills:apply', changes, resume, home),
   clearSkillSwitch: (key, tool, resume, home, of) => ipcRenderer.invoke('skills:clear-switch', key, tool, resume, home, of),
-  takeOverSkill: (key, tool, resume, home) => ipcRenderer.invoke('skills:take-over', key, tool, resume, home),
+  takeOverSkill: (key, tool, resume, home, expected) => ipcRenderer.invoke('skills:take-over', key, tool, resume, home, expected),
   skillVersion: (key, hash) => ipcRenderer.invoke('skills:version', key, hash),
   skillVersionFile: (key, hash, file) => ipcRenderer.invoke('skills:version-file', key, hash, file),
   skillFoundFile: (key, tool, rootLabel, file) => ipcRenderer.invoke('skills:found-file', key, tool, rootLabel, file),

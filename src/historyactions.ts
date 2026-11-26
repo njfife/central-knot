@@ -139,7 +139,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       // the current version over copies there (a tool managed again, a folder writable again).
       if (event.cause === 'in-line' && event.only) return { glyph: 'circle-check', text: `Copied to ${where}.${away}` };
       if (event.cause === 'in-line') return { glyph: 'circle-check', text: `Written over in ${tools} with the current version when sync reached ${event.losers.length === 1 ? 'it' : 'them'}; what was there is one of its versions.` };
-      if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}${named(event.only) ? `: its ${words.copy} there is back` : ''}.${overSaid}${gaveSaid}${away}` };
+      if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}${named(event.only) && !over.length ? `: its ${words.copy} there is back` : ''}.${overSaid}${gaveSaid}${away}` };
       const onlyIn = event.cause === 'switch' && event.nowExcept ? harnessIds.filter(tool => !event.nowExcept!.includes(tool)) : [];
       if (onlyIn.length === 1) return { glyph: 'circle-check', text: `Turned on in ${toolName(onlyIn[0]!)}; kept out of every other tool.${overSaid}${gaveSaid}` };
       // A plugin's read brought it in with the plugin's On (library.ts A PLUGIN).
@@ -314,7 +314,7 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
     const exact = !!(event.wasExcept && event.nowExcept && sameTools(item.except, event.nowExcept));
     const back = givenBack(event, item).giveBack;
     // Earlier keep-outs and copies go back only with an exact Undo; otherwise the plain Turn it off / on.
-    if ((event.wasExcept && !exact) || (back && !asTheClickLeftIt(event, item)) || (!exact && !back)) return action;
+    if ((event.wasExcept && !exact) || (back && !asTheClickLeftIt(event, item, itemNow)) || (!exact && !back)) return action;
     const tools = back ? (Object.keys(back) as HarnessId[]).map(toolName) : [];
     const own = tools.length ? `${andList(tools)} ${tools.length === 1 ? 'has its own copy' : 'have their own copies'} back, as before` : '';
     const kept = exact ? 'with its earlier kept-out tools back' : '';
@@ -405,9 +405,9 @@ const sameTools = (first: readonly HarnessId[], second: readonly HarnessId[]) =>
  * `winner` a take-in took), and no tool it took a copy from kept out since (that tool has no copy to give back). An Undo
  * that gives copies back is offered only then.
  */
-function asTheClickLeftIt(event: HistoryEvent, item: LibraryItem): boolean {
+function asTheClickLeftIt(event: HistoryEvent, item: LibraryItem, itemNow: ItemNow): boolean {
   const left = event.version ?? event.winner?.hash;
-  return !!left && left === item.hash && !(event.tookFrom ?? []).some(copy => item.except.includes(copy.tool));
+  return !!left && left === item.hash && !(event.tookFrom ?? []).some(copy => item.except.includes(copy.tool) || itemNow.pending.includes(copy.tool));
 }
 
 /** The copies an entry's click took over from tools (`tookFrom`), each a version still, for its Undo to give back (types.ts Change giveBack). */

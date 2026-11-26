@@ -1539,6 +1539,11 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 /* A name of his or a clash under a tool's box (pluginpage.ts yourLines, clashLines): its sentence, then its control under it, at its start. */
 .plugin-tool-yours, .plugin-tool-clash { align-items: flex-start; gap: 4px; max-width: 100%; }
 .plugin-tool-yours .btn, .plugin-tool-clash .btn { max-width: 100%; height: auto; min-height: 28px; padding: 3px 8px; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+.plugin-shared-clashes { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.plugin-shared-clash { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 12px; color: var(--ink-soft); }
+.plugin-shared-armed { flex-direction: column; align-items: flex-start; gap: 6px; }
+.plugin-shared-note { margin: 0; font-size: 12px; line-height: 1.45; color: var(--ink); max-width: var(--measure); }
+.plugin-shared-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .plugin-section { margin: 22px 0 0; }
 .plugin-section > .plugin-group:first-child { margin-top: 0; }
 .plugin-section .plugin-outcome-list { margin-top: 8px; }

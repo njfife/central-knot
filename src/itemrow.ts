@@ -65,6 +65,7 @@ export interface ItemRow {
   anotherWay?: Partial<Record<Tool, string>>;
   readsFrom?: LibraryFacts['readsFrom'];
   takeOver?: Partial<Record<Tool, { kind: 'link' | 'shared'; path: string }>>;
+  sharedTakeOver?: LibraryFacts['sharedTakeOver'];
   switchedOff?: Tool[];
   /** `pluginOn`: the tools with no copy of their own that have it on through an installed plugin (pluginrows.ts pluginOnIn; libraryrow.ts LibraryRow says it). */
   pluginOn?: Tool[];

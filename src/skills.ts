@@ -46,7 +46,7 @@ import { agentInPi, agentKind, applyAgents } from './agents.ts';
 import { harnesses, isSkillEntry, toolConfigRoot } from './harnesses.ts';
 import { displayPath } from './machine.ts';
 import type {
-  Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, PluginSkillRef, Skill, SkillFileRead, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy,
+  Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, PluginSkillRef, SharedTakeOver, Skill, SkillFileRead, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy,
 } from './types.ts';
 import { andList, notManagedHere, throughPlugin, toolName } from './words.ts';
 
@@ -69,7 +69,7 @@ const bodyLine = (content: string) => content.replace(/^﻿?---[ \t]*\r?\n[\s\S]
  * A copy a tool has that is no copy of Central Knot's: how it has it (said on its line), and where; `throughShared`, its folder's
  * name in the shared skills folder, where it is the copy there or a link to it (library.ts THE SHARED FOLDER).
  */
-interface Way { why: string; path: string; take?: 'link' | 'shared'; linkTo?: string; throughShared?: string }
+interface Way { why: string; path: string; take?: 'link' | 'shared'; linkTo?: string; throughShared?: string; realPath?: string; hash?: string }
 
 /** What the managed tools hold of skills now (librarypass.ts Disk), and what the page and the held reasons read besides. */
 export interface SkillDisk extends Disk<SkillCopy> {
@@ -182,8 +182,9 @@ async function readOwnFolder(context: ShareContext, disk: SkillDisk, tool: Harne
   for (const copy of read.copies) add(disk.byKey, copy.key, tool, copy);
   for (const link of read.links) {
     const target = resolve(dirname(link.path), link.linkTo), to = pathWords(context, target), throughShared = await sharedName(target, sharedAt);
+    const realPath = link.copy?.skill.realDirectory ?? await landingOf(target);
     const why = `${nameOf(tool)} has it through a link in its skills folder (to ${to}), which is not Central Knot’s copy.`;
-    add(disk.ways, link.key, tool, { why, path: link.path, take: 'link', linkTo: link.linkTo, ...(throughShared ? { throughShared } : {}) });
+    add(disk.ways, link.key, tool, { why, path: link.path, take: 'link', linkTo: link.linkTo, ...(realPath ? { realPath } : {}), ...(link.copy ? { hash: link.copy.hash } : {}), ...(throughShared ? { throughShared } : {}) });
     if (link.copy) add(disk.outside, link.key, tool, link.copy);
   }
   for (const [key, linkTo] of read.broken) disk.dangling.set(`${tool}:${key}`, await sharedName(resolve(root, linkTo), sharedAt));
@@ -230,7 +231,7 @@ async function readAlsoRead(context: ShareContext, disk: SkillDisk, managed: Har
         // the link would be one too many while the tool still reads this one (library.ts), and go again. Pi loads such a skill
         // by the link's path, which it finds first (measured), so for Pi the link's copy stays the one its switch names.
         if (disk.ways.get(copy.key)?.[tool]?.take === 'link') { delete disk.ways.get(copy.key)![tool]; if (tool !== 'pi-cli') delete disk.outside.get(copy.key)![tool]; }
-        add(disk.ways, copy.key, tool, { why, path: copy.directory, take, ...(throughShared ? { throughShared } : {}) });
+        add(disk.ways, copy.key, tool, { why, path: copy.directory, take, realPath: copy.skill.realDirectory, hash: copy.hash, ...(throughShared ? { throughShared } : {}) });
         add(disk.outside, copy.key, tool, copy);
       }
     }
@@ -516,7 +517,37 @@ async function overrideBefore(context: ShareContext, key: string, tool: HarnessI
  * refusals first; then the gate (share.ts libraryGate), entered only to write. `resume`: the click is a Resume, which the gate
  * remembers before the copy goes, so the closing pass is never refused after it.
  */
-export async function takeOver(context: ShareContext, tools: HarnessId[], key: string, tool: HarnessId, resume = false): Promise<PassResult> {
+const sameTools = (first: readonly HarnessId[], second: readonly HarnessId[]) =>
+  first.length === second.length && first.every((tool, at) => tool === second[at]);
+const sameShared = (live: SharedTakeOver, expected: SharedTakeOver) =>
+  live.realPath === expected.realPath && live.hash === expected.hash && sameTools(live.gets, expected.gets) && sameTools(live.loses, expected.loses);
+
+/** What removing a shared-folder skill copy affects: its real folder, content hash, and managed readers (links included) split into those getting Central Knot's copy vs losing it. */
+async function sharedTarget(look: SkillLook, item: LibraryItem, way: Way, fresh = false): Promise<SharedTakeOver | undefined> {
+  if (way.take !== 'shared') return undefined;
+  const realPath = way.realPath ?? await landingOf(way.path);
+  const hash = fresh ? (await readTree(way.path).catch(() => undefined))?.hash : way.hash;
+  if (!realPath || !hash) return undefined;
+  const readers = new Set<HarnessId>();
+  for (const slot of look.disk.ways.values()) {
+    for (const tool of look.managed) if (slot[tool]?.realPath === realPath) readers.add(tool);
+  }
+  for (const tool of look.managed) {
+    if (readers.has(tool)) continue;
+    const root = rootOf(look.context, tool);
+    for (const entry of await readdir(root).catch(() => [] as string[])) {
+      const full = join(root, entry);
+      if ((await lstat(full).catch(() => undefined))?.isSymbolicLink() && await landingOf(full) === realPath) { readers.add(tool); break; }
+    }
+  }
+  const ordered = look.managed.filter(tool => readers.has(tool));
+  const willGet = (tool: HarnessId) => look.disk.ways.get(item.key)?.[tool]?.realPath === realPath
+    && wantedIn(item, tool) && !look.disk.linked(item, tool) && !pluginFor(look.disk, item.key, tool)
+    && !look.disk.cannotTake(item, tool) && !look.disk.locked.has(tool) && !unseenIn(look.disk, tool, item.key);
+  return { path: way.path, realPath, hash, gets: ordered.filter(willGet), loses: ordered.filter(tool => !willGet(tool)) };
+}
+
+export async function takeOver(context: ShareContext, tools: HarnessId[], key: string, tool: HarnessId, resume = false, expected?: SharedTakeOver): Promise<PassResult> {
   const stop = (stopped: string): PassResult => ({ stopped, results: [], writes: 0, reloads: [] });
   if (!tools.includes(tool)) return stop(`${toolName(tool)} isn’t managed here now. Nothing was changed.`);
   const { look, live } = await lookFor(skillKind, context, tools);
@@ -526,15 +557,23 @@ export async function takeOver(context: ShareContext, tools: HarnessId[], key: s
   if (held) return stop(held);
   const way = look.disk.ways.get(key)?.[tool], copy = look.disk.outside.get(key)?.[tool];
   if (!way?.take || !copy) return stop(`${toolName(tool)} has no copy of ${item.name} for Central Knot to take over now. Nothing was changed.`);
+  if (expected && way.take !== 'shared') return stop(`${item.name} changed since the page was read. Nothing was changed.`);
+  const liveShared = way.take === 'shared' ? await sharedTarget(look, item, way, true) : undefined;
+  if (way.take === 'shared' && !liveShared) return stop(`${toolName(tool)} has no copy of ${item.name} for Central Knot to take over now. Nothing was changed.`);
+  if (expected && liveShared && !sameShared(liveShared, expected)) {
+    return { stopped: `${item.name}: what Take over affects changed since you opened it. Review the updated details and confirm again.`, changed: true, results: [], writes: 0, reloads: [] };
+  }
   const gate = await libraryGate(context, { start: true, resume });
   if ('refused' in gate) return stop(gate.refused);
-  const known = item.versions.some(version => version.hash === copy.hash);
-  const keep: Version | undefined = known ? undefined : { hash: copy.hash, at: iso(copy.at), from: { how: 'was-in', harness: tool, replacedBy: item.hash } };
-  const loser = { tool, hash: copy.hash, path: way.path, ...(way.linkTo ? { linkTo: way.linkTo } : {}) };
-  // Each tool that read the copy, and whether its own switch had it off (whoever set it).
-  const readers = look.managed.filter(each => look.disk.ways.get(key)?.[each]?.path === way.path);
+  const removedHash = liveShared ? liveShared.hash : copy.hash;
+  const removedAt = liveShared && removedHash !== copy.hash ? (await stat(way.path)).mtimeMs : copy.at;
+  const known = item.versions.some(version => version.hash === removedHash);
+  const keep: Version | undefined = known ? undefined : { hash: removedHash, at: iso(removedAt), from: { how: 'was-in', harness: tool, replacedBy: item.hash } };
+  const loser = { tool, hash: removedHash, path: way.path, ...(way.linkTo ? { linkTo: way.linkTo } : {}) };
+  // Each tool receiving Central Knot's copy, and whether its own switch had it off (whoever set it).
+  const readers = liveShared ? liveShared.gets : [tool];
   const heldOff = readers.flatMap(each => { const target = loadTarget(loadedCopy(look, key, each)); return target && isDisabled(context, look.disk.switches.get(each)!, target) ? [{ tool: each, target }] : []; });
-  const result = await runTakeOver(context, look.managed, item, keep, way);
+  const result = await runTakeOver(context, look.managed, item, keep, way, removedHash);
   if (result) return stop(result);
   // Told once it happened: a take-over has no Undo, so an entry must never claim one that didn't.
   const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key, of: 'skill', item: item.name, kind: 'took-over', losers: [loser], orderProved: true };
@@ -549,8 +588,9 @@ export async function takeOver(context: ShareContext, tools: HarnessId[], key: s
     if (edit) listSaid.push(piListWords(edit));
   }
   if (listSaid.length) { event.settingsChanged = listSaid; await replaceHistory(context, (await readHistory(context)).map(each => (each.id === event.id ? event : each))); }
+  const away = liveShared?.loses.length ? `${andList([...liveShared.loses.map(toolName), 'other apps that read that folder'])} won’t find it there.` : 'other apps that read that folder won’t find it there.';
   const said = way.take === 'link' ? `Replaced the link in ${toolName(tool)}’s skills folder with Central Knot’s copy.`
-    : `Removed the copy at ${pathWords(context, way.path)}; other apps that read that folder won’t find it there.`;
+    : `Removed the copy at ${pathWords(context, way.path)}; ${away}`;
   const reloads = done.reloads.filter(entry => !heldOff.some(each => each.tool === entry.tool));
   return { ...done, results: [{ item: item.name, harness: tool, outcome: 'written', message: [`${said}${keep ? ' It is kept as a version.' : ''}`, ...listSaid].join(' ') }, ...done.results], made: [event.id], reloads };
 }
@@ -560,7 +600,7 @@ export async function takeOver(context: ShareContext, tools: HarnessId[], key: s
  * go, then only the link or the shared copy goes, with the links in the `managed` tools' folders that lead to it (one left leading
  * nowhere would say the shared folder still held it: sharedListing). Why not, if it couldn't.
  */
-async function runTakeOver(context: ShareContext, managed: HarnessId[], item: LibraryItem, keep: Version | undefined, way: Way): Promise<string | undefined> {
+async function runTakeOver(context: ShareContext, managed: HarnessId[], item: LibraryItem, keep: Version | undefined, way: Way, hash: string): Promise<string | undefined> {
   const { library, problem } = await skillKind.open(context, true);
   const held = library.items[item.key];
   if (problem || !held) return problem ?? 'It changed since the page was read. Nothing was changed; read again.';
@@ -580,7 +620,7 @@ async function runTakeOver(context: ShareContext, managed: HarnessId[], item: Li
   }
   try {
     if (way.take === 'link') await unlink(way.path);
-    else await removeFolder(context, way.path, keep?.hash ?? (await readTree(way.path)).hash);
+    else await removeFolder(context, way.path, hash);
     for (const link of links) await unlink(link);
   } catch (error) { return `Could not take it over: ${plainError(error)}`; }
   return undefined;
@@ -800,6 +840,8 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
   const copiesNow = item ? copiesOf(look, item) : undefined, made = item && copiesNow ? plan(item, copiesNow) : undefined;
   const facts: ToolFacts = { cannot: {}, unseen: {}, plugin: {}, anotherWay: {}, readsFrom: {}, takeOver: {}, loads: {}, alsoLoads: {} };
   for (const tool of look.managed) toolFacts(look, { key, name, item, copiesNow, made, link: fromSource?.link }, tool, facts);
+  const sharedWay = item && !item.deleted ? look.managed.map(tool => disk.ways.get(key)?.[tool]).find(way => way?.take === 'shared') : undefined;
+  const sharedTakeOver = item && sharedWay ? await sharedTarget(look, item, sharedWay) : undefined;
   const switchProblem = Object.fromEntries(Object.keys(facts.loads).flatMap(tool => { const problem = disk.switches.get(tool as HarnessId)?.problem; return problem ? [[tool, problem]] : []; }));
   // Its description is the current version's, else a copy's (readDisk's shapes).
   const description = disk.shapes.get(key)?.description ?? first?.skill.description ?? '';
@@ -811,6 +853,7 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
       : { takeInAnswers: takeInAnswers(look, key), choiceBlocks: choiceBlocksOf(entries), ...some('folderHashes', folderHashes) }),
     ...some('plugin', facts.plugin), ...some('unseen', facts.unseen), ...some('anotherWay', facts.anotherWay), ...some('readsFrom', facts.readsFrom), ...some('takeOver', facts.takeOver),
+    ...(sharedTakeOver ? { sharedTakeOver } : {}),
     ...some('loads', facts.loads), ...some('alsoLoads', facts.alsoLoads), ...some('switchedOff', Object.keys(facts.loads).filter(tool => facts.loads[tool as HarnessId]!.switchedOff)), ...some('switchProblem', switchProblem),
     ...(fromSource ? { fromSource } : {}),
   };

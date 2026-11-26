@@ -552,8 +552,8 @@ const OUT = {
 
 /**
  * Why a plugin's items are not on in a tool with no installer, one plain sentence per reason (`outs`: each item's, from
- * pluginlibrary.ts outsIn; those alike together, a long list of names cut), which the page says under that tool's box (`notIn`
- * or `heldOut`) and the run's report after its lead; or, with no item at all, that the plugin brings nothing such a tool takes (`brings`: what it does).
+ * pluginlibrary.ts outsIn; those alike together, a long list of names cut), which the page says under that tool's box (`notIn`)
+ * and the run's report after its lead; or, with no item at all, that the plugin brings nothing such a tool takes (`brings`: what it does).
  */
 export function notInWhy(tool: HarnessId, plugin: string, outs: { name: string; kind: PartKind; out: ItemOut }[], brings?: string): string[] {
   const where = names[tool];

@@ -61,7 +61,7 @@ import { deleteProfile, readProfiles, saveProfile, switchProfile, undoSwitch, ty
 import { homeItems, inUse, inUseName, pluginLive, switchable, switchPreview, type LiveItem, type PluginHome, type PluginLive } from './profileplan.ts';
 import { atMostEvery, defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil, oneTurn } from './model.ts';
 import { keepEntries, linuxPlaces, placeAutostart, readAutostart, signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
-import type { ActionReport, Appearance, ApplyResult, BuildOutcome, OtherBuild, PartRef, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, LogFolderOpened, LogTail, Snapshot, SyncNotice } from './types.ts';
+import type { ActionReport, Appearance, ApplyResult, BuildOutcome, OtherBuild, PartRef, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, LogFolderOpened, LogTail, SharedTakeOver, Snapshot, SyncNotice } from './types.ts';
 import { machineNames, writesRealHome } from './machine.ts';
 import { HOOK_SOURCE_UNREADABLE, pageNames, toolList } from './words.ts';
 import { buildTag, startUpdater, type PendingUpdate } from './updater.ts';
@@ -1827,8 +1827,14 @@ app.whenReady().then(async () => {
   // A skill's two actions a Change can't carry: a tool's own switch cleared, and a copy outside Central Knot's taken over.
   handle('skills:clear-switch', async (key, tool, resume, home, of) => (home === current?.home && typeof key === 'string' && isTool(tool)
     ? clearSwitch(context(), await toolsNow(), key, tool, resume === true, of === 'agent' ? 'agent' : 'skill') : { stopped: elsewhere, results: [], writes: 0, reloads: [] }));
-  handle('skills:take-over', async (key, tool, resume, home) => (home === current?.home && typeof key === 'string' && isTool(tool)
-    ? takeOver(context(), await toolsNow(), key, tool, resume === true) : { stopped: elsewhere, results: [], writes: 0, reloads: [] }));
+  const sharedExpected = (value: unknown): SharedTakeOver | undefined => {
+    const raw = record(value);
+    if (!raw || typeof raw.path !== 'string' || typeof raw.realPath !== 'string' || typeof raw.hash !== 'string'
+      || !Array.isArray(raw.gets) || !raw.gets.every(isTool) || !Array.isArray(raw.loses) || !raw.loses.every(isTool)) return undefined;
+    return { path: raw.path, realPath: raw.realPath, hash: raw.hash, gets: raw.gets, loses: raw.loses };
+  };
+  handle('skills:take-over', async (key, tool, resume, home, expected) => (home === current?.home && typeof key === 'string' && isTool(tool)
+    ? takeOver(context(), await toolsNow(), key, tool, resume === true, sharedExpected(expected)) : { stopped: elsewhere, results: [], writes: 0, reloads: [] }));
   handleNow('skills:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await skillVersion(context(), key, hash)) ?? null : null));
   handleNow('skills:version-file', async (key, hash, file) => (current && typeof key === 'string' && typeof hash === 'string' && typeof file === 'string' ? (await skillVersionFile(context(), key, hash, file)) ?? null : null));
   handleNow('skills:found-file', async (key, tool, rootLabel, file) => {

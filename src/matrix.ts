@@ -313,7 +313,7 @@ const fromFacts = (kind: PageKind, facts: LibraryFacts): ItemRow => ({
   // An MCP entry has no lines or edit time of its own: the copy question quotes its summary alone.
   versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.lines ? { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), at: copy!.modified, text: copy!.summary || facts.description, ...(copy!.body !== undefined ? { body: copy!.body } : {}) } : { lines: '', changed: '', text: copy!.summary }])),
   ownPart: Object.fromEntries(Object.entries(facts.copies).flatMap(([tool, copy]) => (copy!.ownPart?.length ? [[tool, copy!.ownPart]] : []))),
-  loads: facts.loads, alsoLoads: facts.alsoLoads, anotherWay: facts.anotherWay, readsFrom: facts.readsFrom, takeOver: facts.takeOver, switchedOff: facts.switchedOff,
+  loads: facts.loads, alsoLoads: facts.alsoLoads, anotherWay: facts.anotherWay, readsFrom: facts.readsFrom, takeOver: facts.takeOver, sharedTakeOver: facts.sharedTakeOver, switchedOff: facts.switchedOff,
 });
 
 /** The kind's column header ("Server") and its title ("MCP servers"), from words.ts kindNouns. */
@@ -1171,7 +1171,7 @@ export function listResult(): HTMLElement[] {
   // The last results, the page's: on the Library every kind's, whatever the segment, as a run there is one (app.ts placeNow);
   // on a tool's tab its kind's. A line is led by its kind where the result is of several kinds (its lines', and a run's: app.ts
   // Outcome kinds), so two alike are told apart.
-  const table = useTableShown(), kinds = !table ? [...new Set((state.outcome?.rows ?? []).map(row => row.kind))] : table.tool || !state.home ? table.kinds : heldKinds(state.home);
+  const table = useTableShown(), kinds = !table ? (state.page === 'plugins' ? [...new Set((state.outcome?.rows ?? []).map(row => row.kind))] : []) : table.tool || !state.home ? table.kinds : heldKinds(state.home);
   const kept = kinds.flatMap(kind => (lastResult(kind)?.results ?? []).filter(keptBack).map(problem => ({ kind, problem })));
   const foldProfile = state.outcome !== undefined && state.shownWhole !== state.outcome && !!state.outcome.profileLine;
   const done = outcomeBand(undefined, foldProfile), several = new Set([...kept.map(each => each.kind), ...(done ? state.outcome?.kinds ?? [] : [])]).size > 1;

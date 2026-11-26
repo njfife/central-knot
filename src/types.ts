@@ -121,8 +121,8 @@ export interface DesktopApi {
   applySkills(changes: Change[], resume: boolean, home: string): Promise<PassResult>;
   /** Clears a tool's own switch that turns a skill off there (skills.ts clearSwitch). `resume`: as a click's (app.ts clickResumes). */
   clearSkillSwitch(key: string, tool: HarnessId, resume: boolean, home: string, of?: 'skill' | 'agent'): Promise<PassResult>;
-  /** Makes a copy outside Central Knot's own (a link, a copy in ~/.agents/skills) Central Knot's (skills.ts takeOver). `resume`: as a click's. */
-  takeOverSkill(key: string, tool: HarnessId, resume: boolean, home: string): Promise<PassResult>;
+  /** Makes a copy outside Central Knot's own (a link, a copy in ~/.agents/skills) Central Knot's (skills.ts takeOver). `resume`: as a click's; `expected`: armed shared-folder target checked before writing. */
+  takeOverSkill(key: string, tool: HarnessId, resume: boolean, home: string, expected?: SharedTakeOver): Promise<PassResult>;
   /** One version of a skill: its SKILL.md and the names of its other files (skills.ts skillVersion). */
   skillVersion(key: string, hash: string): Promise<{ skill: string; files: string[] } | null>;
   /** One regular file of a stored skill version, with every regular file of its folder (skills.ts skillVersionFile). */
@@ -887,14 +887,13 @@ export interface PluginItemLine { kind: ItemKind; key: string; name: string; sta
  * there in each tool with no installer, as the page's look reads them, his of the same content counting (`on`); whether Update has
  * something to do (`ready`), and whether the automatic check has (`due`: library.ts TAKEN BACK); and why the plugin can't be read now. `notIn`: for a plugin On, each tool it is wanted in where none is on, why,
  * one sentence per reason but a name of his (pluginstatus.ts notInWhy), whether a tick on that tool's box brings some in
- * (`tickHelps`), and `other`, the non-own/non-shared reasons for the page when `clashes` takes over `own` and `shared`. `heldOut`: for a plugin On, each tool it is wanted in not covered by `notIn`, each reason a linked item is held
- * out by a copy of his own there (not a Library item, or only in the shared skills folder), in `OUT.own` / `OUT.shared`'s words.
- * `clashes`: structured `own`, `shared` and `another` clashes per tool, before names are grouped (never stored).
+ * (`tickHelps`), and `nonClash`, the reasons other than own/shared clashes shown by the page alongside `clashes`.
+ * `clashes`: structured `own` and `shared` clashes per tool, before names are grouped (never stored).
  * `yours`: for a plugin On, each tool with no installer it is wanted in, each name it has that he has his own of,
  * whatever else is so, said under that tool's box (pluginstatus.ts yourSaid).
  */
-export interface PluginItemClash { tool: HarnessId; kind: ItemKind; key: string; name: string; clash: 'own' | 'shared' | 'another'; source?: string }
-export interface PluginItemsView { lines: PluginItemLine[]; on: Partial<Record<HarnessId, number>>; /** Of those on, how many the tool's own settings keep out (it doesn't load them). */ keptOut?: Partial<Record<HarnessId, number>>; /** Its items each tool holds the kind of (presence.ts holds). */ of: Partial<Record<HarnessId, number>>; ready?: true; due?: true; problem?: string; notIn?: Partial<Record<HarnessId, { reasons: string[]; tickHelps: boolean; other?: string[] }>>; heldOut?: Partial<Record<HarnessId, string[]>>; clashes?: PluginItemClash[]; yours?: Partial<Record<HarnessId, YourName[]>> }
+export interface PluginItemClash { tool: HarnessId; kind: ItemKind; key: string; name: string; clash: 'own' | 'shared' }
+export interface PluginItemsView { lines: PluginItemLine[]; on: Partial<Record<HarnessId, number>>; /** Of those on, how many the tool's own settings keep out (it doesn't load them). */ keptOut?: Partial<Record<HarnessId, number>>; /** Its items each tool holds the kind of (presence.ts holds). */ of: Partial<Record<HarnessId, number>>; ready?: true; due?: true; problem?: string; notIn?: Partial<Record<HarnessId, { reasons: string[]; tickHelps: boolean; nonClash?: string[] }>>; clashes?: PluginItemClash[]; yours?: Partial<Record<HarnessId, YourName[]>> }
 /**
  * A name of a plugin's he has his own of, in one tool (PluginItemsView yours): Use the plugin's is offered there, but where it is
  * the same content (`same`) or the take can't land there (`held`: why, librarypass.ts takeHeld; `shared`: his through the shared skills folder).
@@ -1123,6 +1122,8 @@ export interface LibraryFacts {
   choiceBlocks?: Partial<Record<HarnessId, { tool: HarnessId; reason: string }[]>>;
   /** Skills: a copy outside Central Knot's own that Take over can make Central Knot's, by tool: a link in its folder, or a copy in ~/.agents/skills. */
   takeOver?: Partial<Record<HarnessId, { kind: 'link' | 'shared'; path: string }>>;
+  /** Skills: what removing the copy in ~/.agents/skills affects (skills.ts sharedTarget), checked before writing on confirm. */
+  sharedTakeOver?: SharedTakeOver;
   /**
    * Skills: the copy each tool loads (its own, or one it has another way where no plugin's part on there gives it; never a
    * plugin's), as its own switch names it, and whether that switch turns it off there (`switchedOff`): the copy stays, and the
@@ -1156,6 +1157,9 @@ export interface LibraryFacts {
   fromSource?: { link: string; waits?: true; nextWaits?: true; removed?: true };
 }
 
+/** What taking over a skill copy in ~/.agents/skills affects: its real folder, content hash, and managed readers split into those getting Central Knot's copy vs losing it. */
+export interface SharedTakeOver { path: string; realPath: string; hash: string; gets: HarnessId[]; loses: HarnessId[] }
+
 /**
  * What one pass did (librarypass.ts runPass, restore). `made`: the History entries the
  * asked changes made, for their one Undo (ApplyResult.made). `outcome: 'held'` on a result is an action not done this time
@@ -1164,7 +1168,10 @@ export interface LibraryFacts {
 export interface PassResult {
   /** Owed copies skipped at read time in this whole-home pass. Sync once reports the final read. */
   unread?: DestinationResult[];
-  stopped?: string; results: DestinationResult[]; writes: number; reloads: ReloadChange[]; made?: string[]; notices?: SyncNotice[];
+  stopped?: string;
+  /** Target changed since it was armed (skills.ts takeOver): nothing written, page re-arms. */
+  changed?: true;
+  results: DestinationResult[]; writes: number; reloads: ReloadChange[]; made?: string[]; notices?: SyncNotice[];
   /** A deletion is inside its settle window: look again shortly. */
   settling?: boolean;
   /** It left the home as it read it (no result, no setting followed, its record as opened; History may gain an earlier Delete's entry): librarypass.ts runPass. */

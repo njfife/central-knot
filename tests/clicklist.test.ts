@@ -79,7 +79,7 @@ const { repo, repoPage } = await import('../src/repopage.ts');
 const { applyPluginOps, clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, resultOn, runReloads, shownPlugins, turnFromLine, turnPlugin, undoLabel, undoLast, usePlugins } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
-const { backgroundProblems, copyQuestion, headerNotices, libraryTable, openKind, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
+const { backgroundProblems, copyQuestion, headerNotices, libraryTable, listResult, openKind, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
 const { openWalkthrough, setupLead, walkthroughBand } = await import('../src/firstsetup.ts');
 const { pluginsResult } = await import('../src/pluginspage.ts');
 const { versionsList } = await import('../src/editparts.ts');
@@ -3248,5 +3248,55 @@ test('Undo hover after a fresh live Copilot CLI install says turns it off, kept 
     'Reverses what changed for alpha, through each tool’s own command or switch: uninstalls it from Copilot CLI.');
   assert.equal(titleFor([install('claude-cli', true)]),
     'Reverses what changed for alpha, through each tool’s own command or switch: uninstalls it from Claude Code.');
+});
+
+test('Undo of a one-tool switch on a plugin-linked skill does not blame Claude Code and names Pi only', async t => {
+  showPage('plugins');
+  const events: any[] = [];
+  const item = { ...newItem('tdd', 'tdd'), on: true, except: ['pi-cli' as HarnessId], source: 'plugin-kit-id', hash: 'plugin-h' };
+  const fact: any = {
+    key: 'tdd', name: 'tdd', copies: {}, on: true, except: ['pi-cli'],
+    fromSource: { link: 'plugin:kit-own@team' },
+    cannot: { 'claude-cli': 'Claude Code gets it only with the plugin kit-own, and the plugin is kept out of Claude Code.' },
+  };
+  app.home = {
+    home: '/home', label: 'Practice',
+    sync: { managed: ['claude-cli', 'pi-cli', 'opencode-cli'], caughtUp: [], access: { allowed: true }, gate: { state: 'ready' } },
+    skills: { tools: ['claude-cli', 'pi-cli', 'opencode-cli'], items: [fact], notices: [], problems: [], unread: [], access: { allowed: true }, gate: { state: 'ready' }, library: { tdd: item } },
+    mcp: { tools: ['claude-cli', 'pi-cli', 'opencode-cli'], items: [], notices: [], problems: [], unread: [], access: { allowed: true }, gate: { state: 'ready' }, library: {} },
+    agents: { tools: ['claude-cli', 'pi-cli', 'opencode-cli'], items: [], notices: [], problems: [], unread: [], access: { allowed: true }, gate: { state: 'ready' }, library: {} },
+  } as unknown as HomeView;
+  t.mock.method(api, 'history', async () => ({ events, days: 30 }));
+  t.mock.method(api, 'refresh', async () => app.home);
+  t.mock.method(api, 'restore', async (id: string) => {
+    main.restored.push(id);
+    const past = events.find(e => e.id === id);
+    const made = { id: 'off-pi-tdd', at: '2026-11-18T09:01:00.000Z', key: 'tdd', of: 'skill', item: 'tdd', kind: 'off', cause: 'switch', only: 'pi-cli', gaveBack: ['pi-cli'], losers: [], orderProved: true };
+    if (past) past.undoneBy = made.id;
+    events.push(made);
+    item.except = ['pi-cli'];
+    fact.except = ['pi-cli'];
+    return { results: [{ item: 'tdd', harness: 'pi-cli' as const, outcome: 'written' as const, message: 'Pi has its own copy back, as before.' }], writes: 1, made: [made.id], reloads: [] };
+  });
+  void applyClick({ kind: 'skills', items: ['tdd'], rows: [{ kind: 'skills', key: 'tdd' }], changes: [{ key: 'tdd', on: true, except: [], seenOn: true }], said: 'tdd: turned on in Pi.' });
+  await settled();
+  item.except = [];
+  fact.except = [];
+  events.push({ id: 'on-pi-tdd', at: '2026-11-18T09:00:00.000Z', key: 'tdd', of: 'skill', item: 'tdd', kind: 'on', cause: 'switch', only: 'pi-cli', version: 'plugin-h', tookFrom: [{ tool: 'pi-cli', hash: 'mine-h' }], losers: [{ tool: 'pi-cli', hash: 'mine-h' }], orderProved: true });
+  await main.pass({ results: [{ item: 'tdd', harness: 'pi-cli', outcome: 'written', message: 'Added.' }], writes: 1, made: ['on-pi-tdd'], reloads: [] });
+  assert.ok(app.outcome?.act, 'click offers Undo');
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([app.outcome?.warn, app.skillsResult?.results.filter(keptBack)], [false, []]);
+  assert.equal(app.outcome?.text, 'tdd: kept out of Pi: Pi has its own copy back, as before. Central Knot keeps it.');
+});
+
+test('listResult on History does not add extra kept-back problem bands from outcome rows', async t => {
+  homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
+  showPage('history');
+  app.skillsResult = { results: [{ item: 'notes', harness: 'claude-cli', outcome: 'held', message: 'Could not write Claude Code’s copy yet.' }], notices: [] };
+  app.outcome = { page: 'history', item: 'notes', rows: [{ kind: 'skills', key: 'notes' }], warn: true, text: 'notes: restored.' };
+  const bands = listResult();
+  assert.equal(bands.some(band => textOf(band).includes('Could not write Claude Code’s copy yet.')), false, 'History gains no kept-back listResult header line');
 });
 

@@ -8,7 +8,7 @@
 //   with the one-time move of a root skill an earlier build named otherwise (movedFrom, movedTicks: library.ts A PLUGIN, THE MOVE);
 // - what the Plugins page shows of them (itemsView: "Its items", and "has it" in each tool), from one look at the home that every
 //   plugin of a view shares (lookAtKinds), with why none of them is on in such a tool, which the run's report says too
-//   (pluginstatus.ts notInWhy), structured clashes (`clashes`: own, shared, another), and each name he has under each tool's box (`yours`).
+//   (pluginstatus.ts notInWhy), structured clashes (`clashes`: own, shared), and each name he has under each tool's box (`yours`).
 // When a plugin is read: at a click that brings it into Pi, OpenCode or Antigravity (On, Add, a tool's box ticked), at its Update and
 // Update all, and at the automatic updates' check, for a plugin with items (withItemsOf) or a tool new here (marketplaces.ts);
 // Off and a box unticked only click. A plugin whose parts from before the library wait to be moved takes this route
@@ -22,7 +22,7 @@ import { basename } from 'node:path';
 import { pluginItems, wasRead } from './atlink.ts';
 import type { PluginFiles } from './catalogdetail.ts';
 import { keptBack } from './clickplan.ts';
-import { earlierRootName, fromLinkSinceTakeIn, itemKey, linkedSource, sourceAnswers, wantedIn, type ItemKind, type LibraryItem } from './library.ts';
+import { earlierRootName, fromLinkSinceTakeIn, itemKey, sourceAnswers, wantedIn, type ItemKind, type LibraryItem } from './library.ts';
 import { copiesOf, lookFor, restoreAll, takeHeld, type KindLibrary, type SourceRead } from './librarypass.ts';
 import type { PluginDone, PluginOp } from './pluginplan.ts';
 import type { PluginEntry } from './pluginrecord.ts';
@@ -351,29 +351,17 @@ export async function itemsView(tools: readonly HarnessId[], looks: KindLooks, e
   const on = Object.fromEntries(itemTools(tools).map(tool => [tool, onThere(looks, [...linked, ...(wanted.includes(tool) ? alike : [])], tool)]));
   const ownIn = (tool: HarnessId) => (item: LibraryItem, kind: ItemKind) => !!look(kind).disk.byKey.get(item.key)?.[tool] && item.applied[tool] === undefined;
   const toolOuts = new Map(wanted.map(tool => [tool, outsIn(tool, lines, linked, ownIn(tool), heldByShared(looks, tool))]));
-  const otherSource = (kind: ItemKind, key: string) => {
-    const { library, recorded } = look(kind), id = linkedSource(library.items[key], recorded.ids);
-    return (id && recorded.links.get(id)) ?? library.items[key]?.source;
-  };
-  // Structured clashes worked out before names are grouped by notInWhy (never stored).
-  const clashes: PluginItemClash[] = wanted.flatMap(tool => (toolOuts.get(tool) ?? []).flatMap(({ key, name, kind, out }): PluginItemClash[] => {
-    if (out !== 'own' && out !== 'shared' && !(out === 'another' && holds(tool, kind))) return [];
-    const source = out === 'another' ? otherSource(kind, key) : undefined;
-    return [{ tool, kind, key, name, clash: out, ...(source ? { source } : {}) }];
-  }));
+  // Structured own/shared clashes worked out before names are grouped by notInWhy (never stored).
+  const clashes: PluginItemClash[] = wanted.flatMap(tool => (toolOuts.get(tool) ?? [])
+    .flatMap(({ key, name, kind, out }): PluginItemClash[] => (out === 'own' || out === 'shared' ? [{ tool, kind, key, name, clash: out }] : [])));
   // A name of his is said apart, under each tool's box (`yours`, below), so not among these.
   const away = reads && !lines.some(line => line.state === 'new') ? wanted.filter(tool => !on[tool]).flatMap(tool => {
     const why = (toolOuts.get(tool) ?? []).filter(({ out }) => out !== 'yours');
     const tickHelps = why.some(({ out }) => out === 'kept' || out === 'off' || out === 'deleted');
     const plain = why.filter(({ out }) => out !== 'own' && out !== 'shared');
-    const other = plain.length ? notInWhy(tool, entry.plugin, plain) : [];
-    return !why.length && lines.length ? [] : [[tool, { reasons: notInWhy(tool, entry.plugin, why), tickHelps, ...(plain.length < why.length ? { other } : {}) }] as const];
+    const nonClash = plain.length ? notInWhy(tool, entry.plugin, plain) : [];
+    return !why.length && lines.length ? [] : [[tool, { reasons: notInWhy(tool, entry.plugin, why), tickHelps, ...(plain.length < why.length ? { nonClash } : {}) }] as const];
   }) : [];
-  // Linked items kept out by his own copy there (not a Library item, or only in the shared folder), where `notIn` didn't already say it.
-  const heldOut = Object.fromEntries(wanted.filter(tool => away.every(([each]) => each !== tool)).flatMap(tool => {
-    const held = (toolOuts.get(tool) ?? []).filter(({ out }) => out === 'own' || out === 'shared');
-    return held.length ? [[tool, notInWhy(tool, entry.plugin, held)] as const] : [];
-  }));
   // Each name of his of a kind the tool holds (presence.ts holds) under each tool's box the plugin is wanted in, whatever else is
   // so: the same as his, or Use the plugin's but where its take can't land there (librarypass.ts takeHeld: his through the shared folder, say).
   const yours: Partial<Record<HarnessId, YourName[]>> = {};
@@ -386,7 +374,7 @@ export async function itemsView(tools: readonly HarnessId[], looks: KindLooks, e
   }
   const of = Object.fromEntries(itemTools(tools).map(tool => [tool, [...linked, ...his.map(({ line }) => line)].filter(({ kind }) => holds(tool, kind)).length]));
   return { lines, on, of, ...(Object.keys(keptOut).length ? { keptOut } : {}), ...(ready ? { ready: true as const } : {}), ...(due ? { due: true as const } : {}), ...(problem ? { problem } : {}),
-    ...(away.length ? { notIn: Object.fromEntries(away) } : {}), ...(Object.keys(heldOut).length ? { heldOut } : {}), ...(clashes.length ? { clashes } : {}), ...(Object.keys(yours).length ? { yours } : {}) };
+    ...(away.length ? { notIn: Object.fromEntries(away) } : {}), ...(clashes.length ? { clashes } : {}), ...(Object.keys(yours).length ? { yours } : {}) };
 }
 
 /** A name not brought in, as its line says why: his own item of that name, another source's, or his of the same content (a run's report). */
