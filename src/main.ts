@@ -1832,8 +1832,10 @@ app.whenReady().then(async () => {
   handleNow('skills:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await skillVersion(context(), key, hash)) ?? null : null));
   handleNow('skills:version-file', async (key, hash, file) => (current && typeof key === 'string' && typeof hash === 'string' && typeof file === 'string' ? (await skillVersionFile(context(), key, hash, file)) ?? null : null));
   handleNow('skills:found-file', async (key, tool, rootLabel, file) => {
-    const valid = current && typeof key === 'string' && isTool(tool) && (rootLabel === undefined || typeof rootLabel === 'string') && typeof file === 'string';
-    return valid ? (await skillFoundFile(context(), key, tool, rootLabel, file)) ?? null : null;
+    if (!current || typeof key !== 'string' || !isTool(tool) || (rootLabel !== undefined && typeof rootLabel !== 'string') || typeof file !== 'string') return null;
+    const shared = context();
+    if (!(await managedNow(shared, handoff.home === shared.home ? handoff.snapshots : await read())).includes(tool)) return null;
+    return (await skillFoundFile(shared, key, tool, rootLabel, file)) ?? null;
   });
   // The git repo the Managed set lives in. Reading it, and asking the repo for its latest commit, waits for no sync pass;
   // Connect, Pull, Push and Disconnect take their turn with every other change.

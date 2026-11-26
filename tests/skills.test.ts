@@ -1537,6 +1537,7 @@ test('skillVersionFile and skillFoundFile read regular files through one reader 
       'SKILL.md': skillBody,
       'scripts/run.sh': { text: script, mode: 0o755 },
       'checklist.md': checklist,
+      'empty.md': '',
       'exact.txt': exactLimit,
       'over.txt': overLimit,
     };
@@ -1565,7 +1566,7 @@ test('skillVersionFile and skillFoundFile read regular files through one reader 
     }
     await symlink(stored, join(box.home, '.central-knot/items/skills/notes/versions', fakeHex));
 
-    const expectedFiles = ['SKILL.md', 'asset.bin', 'checklist.md', 'exact.txt', 'over.txt', 'scripts/run.sh'];
+    const expectedFiles = ['SKILL.md', 'asset.bin', 'checklist.md', 'empty.md', 'exact.txt', 'over.txt', 'scripts/run.sh'];
     const readers: [string, string, (file: string) => ReturnType<typeof skillVersionFile>][] = [
       ['stored version', stored, file => skillVersionFile(box.context, 'notes', hash, file)],
       ['found copy', foundDir, file => skillFoundFile(box.context, 'draft', 'claude-cli', 'Claude Code skills', file)],
@@ -1576,6 +1577,7 @@ test('skillVersionFile and skillFoundFile read regular files through one reader 
         assert.deepEqual(listed.result, { files: expectedFiles, text: skillBody });
         assert.equal(listed.opens.size, 0, 'listing does not hash files');
         assert.deepEqual(await read('checklist.md'), { files: expectedFiles, text: checklist });
+        assert.deepEqual(await read('empty.md'), { files: expectedFiles, text: '' });
         assert.deepEqual(await read('scripts/run.sh'), { files: expectedFiles, text: script });
         assert.deepEqual(await read('asset.bin'), { files: expectedFiles, note: 'Not a text file.' });
         assert.deepEqual(await read('exact.txt'), { files: expectedFiles, text: exactLimit });

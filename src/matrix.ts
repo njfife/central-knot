@@ -402,7 +402,7 @@ const newView = () => ({
   /** The row whose details are open. */
   comparing: undefined as string | undefined,
   /** The closed skill row whose inline file panel is open: its version/copy token, active file, found-copy holder, tab list, and loaded body. */
-  openFile: undefined as { id: string; hash: string; file: string; copy?: { tool: HarnessId; rootLabel: string }; files?: string[]; loaded?: { text?: string; note?: string } | null } | undefined,
+  openFile: undefined as { id: string; token: string; file: string; copy?: { tool: HarnessId; rootLabel: string }; files?: string[]; loaded?: { text?: string; note?: string } | null } | undefined,
   /** The row whose copy question shows every copy's body side by side (RowWords body). */
   reading: undefined as string | undefined,
   /** The row whose versions list shows every version, not only its newest few. */
@@ -3045,34 +3045,32 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
 }
 // ---------- Inline skill file panel (closed row one-click file reader) ----------
 
-interface FoundCopy { tool: HarnessId; rootLabel: string; directory: string; realDirectory: string; hash?: string; content: string }
-/** Distinct copies of a found skill in the table's tool order (tab's tool first); same real folder or identical content collapse to the first holder. */
+interface FoundCopy { tool: HarnessId; rootLabel: string; directory: string; realDirectory: string; hash?: string }
+/** Distinct copies of a found skill in the table's tool order (tab's tool first); same real folder or known equal folder hash collapse to the first holder. */
 function foundSkillCopies(t: Table, skill: ItemRow): FoundCopy[] {
   const snaps = state.home?.snapshots ?? [];
   const raw = (toolsFor(t, 'skills') as HarnessId[]).flatMap(tool => (snaps.find(entry => entry.harness === tool)?.skills ?? [])
     .filter(entry => itemKey(entry.folder) === skill.key)
-    .map(entry => ({ tool, rootLabel: entry.rootLabel, directory: entry.directory, realDirectory: entry.realDirectory, hash: skill.folderHashes?.[entry.realDirectory], content: entry.content })));
+    .map(entry => ({ tool, rootLabel: entry.rootLabel, directory: entry.directory, realDirectory: entry.realDirectory, hash: skill.folderHashes?.[entry.realDirectory] })));
   const unique: FoundCopy[] = [];
   for (const copy of raw) {
-    const same = (kept: FoundCopy) => kept.realDirectory === copy.realDirectory
-      || (kept.hash && copy.hash ? kept.hash === copy.hash : !kept.hash && !copy.hash && kept.content === copy.content);
-    if (!unique.some(same)) unique.push(copy);
+    if (!unique.some(kept => kept.realDirectory === copy.realDirectory || (!!kept.hash && kept.hash === copy.hash))) unique.push(copy);
   }
   return unique;
 }
-const copyToken = (copy: FoundCopy) => copy.hash ?? copy.content;
+const copyToken = (copy: FoundCopy) => copy.hash ?? `read:${state.home?.readId ?? 0}`;
 const hasSkillFile = (t: Table, skill: ItemRow) => skill.kind === 'skills' && (!!inLibrary(itemOf(skill)) || foundSkillCopies(t, skill).length > 0);
-/** Reloads an open inline file panel when its stored version or found copy's content moves (or its chosen found copy disappears). */
+/** Reloads an open inline file panel when its stored version or found copy's token moves (or its chosen found copy disappears). */
 function syncOpenFile(t: Table, skill: ItemRow, open: NonNullable<View['openFile']>) {
   const kept = inLibrary(itemOf(skill));
   if (kept) {
-    if (open.copy || kept.hash !== open.hash) setSkillFile(t, skill, open.file, false, undefined, false);
+    if (open.copy || kept.hash !== open.token) setSkillFile(t, skill, open.file, false, undefined, false);
     return;
   }
   const copies = foundSkillCopies(t, skill);
   const matched = open.copy && copies.find(copy => copy.tool === open.copy!.tool && copy.rootLabel === open.copy!.rootLabel);
   const target = matched ?? copies[0]!;
-  if (!matched || copyToken(target) !== open.hash) setSkillFile(t, skill, matched ? open.file : 'SKILL.md', false, undefined, false, target);
+  if (!matched || copyToken(target) !== open.token) setSkillFile(t, skill, matched ? open.file : 'SKILL.md', false, undefined, false, target);
 }
 /** Opens a skill's file tab (stored version or found copy, closing details on an open row) or closes the panel, refocusing its mark when asked. */
 function setSkillFile(t: Table, skill?: ItemRow, file = 'SKILL.md', refocus = false, event?: Event, draw = true, copy?: FoundCopy) {
@@ -3083,14 +3081,14 @@ function setSkillFile(t: Table, skill?: ItemRow, file = 'SKILL.md', refocus = fa
   const chosen = !kept && skill ? (copy ?? foundSkillCopies(t, skill)[0]) : undefined;
   const sameHolder = !!prev && prev.id === id && prev.copy?.tool === chosen?.tool && prev.copy?.rootLabel === chosen?.rootLabel;
   const next: View['openFile'] = id && (kept || chosen)
-    ? { id, hash: kept ? kept.hash : copyToken(chosen!), file, ...(chosen ? { copy: { tool: chosen.tool, rootLabel: chosen.rootLabel } } : {}), files: sameHolder ? prev?.files : undefined }
+    ? { id, token: kept ? kept.hash : copyToken(chosen!), file, ...(chosen ? { copy: { tool: chosen.tool, rootLabel: chosen.rootLabel } } : {}), files: sameHolder ? prev?.files : undefined }
     : undefined;
   if (next && t.view.comparing === next.id) t.view.comparing = undefined;
   t.view.openFile = next;
   if (draw) rerender();
   if (!next && refocus && prev) document.getElementById(partId('file', prev.id))?.focus();
   if (!next) return;
-  const load = kept ? window.centralKnot.skillVersionFile(skill!.key, next.hash, file) : window.centralKnot.skillFoundFile(skill!.key, chosen!.tool, chosen!.rootLabel, file);
+  const load = kept ? window.centralKnot.skillVersionFile(skill!.key, next.token, file) : window.centralKnot.skillFoundFile(skill!.key, chosen!.tool, chosen!.rootLabel, file);
   void load.catch(() => null).then(found => {
     if (t.view.openFile !== next) return;
     if (!found && file !== 'SKILL.md') return setSkillFile(t, skill, 'SKILL.md', false, undefined, true, chosen);
@@ -3116,7 +3114,7 @@ function filePanel(t: Table, skill: ItemRow, open: NonNullable<View['openFile']>
   const activeAt = open.copy ? copies.findIndex(copy => copy.tool === open.copy!.tool && copy.rootLabel === open.copy!.rootLabel) : -1;
   const active = stored ? undefined : copies[activeAt >= 0 ? activeAt : 0];
   const tabs = open.files ?? [open.file];
-  const dir = stored ? skill.paths?.[toolsFor(t, skill.kind).find(each => skill.hashes?.[each] === open.hash && skill.paths?.[each]) ?? ''] : active?.directory;
+  const dir = stored ? skill.paths?.[toolsFor(t, skill.kind).find(each => skill.hashes?.[each] === open.token && skill.paths?.[each]) ?? ''] : active?.directory;
   const full = dir && (dir.includes('\\') ? `${dir}\\${open.file.replaceAll('/', '\\')}` : `${dir}/${open.file}`);
   const missing = open.loaded === undefined ? 'Reading…' : 'Its file couldn’t be read.';
   const note = open.loaded ? open.loaded.note : missing;

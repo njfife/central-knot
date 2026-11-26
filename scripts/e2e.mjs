@@ -1747,7 +1747,9 @@ async function practiceFlow() {
   same('a found row’s name starts where an On row’s does: Add is as wide as the switch', await a.run(`document.querySelector('#${rowPart('add', 'skills', 'notes')}').getBoundingClientRect().width`), 32);
   same('no column heads, and the chips are toggles: Copies differ alone, no All chip', [await a.exists('.ov-head'), await a.all('.chip', 'e.dataset.tip')], [false, ['Copies differ']]);
   same('marks say what each tool has', [await cellState(a, 'skills', 'release-notes', 'claude-cli'), await cellState(a, 'skills', 'release-notes', 'copilot-cli'), await cellState(a, 'skills', 'review', 'copilot-cli')], ['own-copy', 'none', 'own-copy']);
-  same('a found row’s only controls are its Add and its chevron: marks and Copies differ are only said', await a.all(`.ov-row[data-key="${rowPart('', 'skills', 'review')}"] button`, 'e.id'), [rowPart('add', 'skills', 'review'), rowPart('open', 'skills', 'review')]);
+  same('a found row’s only controls are its Add, its file mark and its chevron: marks and Copies differ are only said',
+    await a.all(`.ov-row[data-key="${rowPart('', 'skills', 'review')}"] button`, 'e.id'),
+    [rowPart('add', 'skills', 'review'), rowPart('file', 'skills', 'review'), rowPart('open', 'skills', 'review')]);
   check('copies differ is flagged', await a.exists(`#${rowPart('decide', 'skills', 'review')}`));
   await a.shot('practice-overview');
   const practice = await a.run(`document.querySelector('.status-home').title`);
@@ -19070,6 +19072,22 @@ async function skillFileFlow() {
       skill(claudeSkills, 'twin-notes', twinBody);
       skill(copilotSkills, 'twin-notes', twinBody);
 
+      // Same SKILL.md in two tools, differing companion files (hashed): chooser stays.
+      const sameMdBody = text('same-md-notes', 'Identical SKILL.md in both tools; other files differ.');
+      const sameMdClaude = skill(claudeSkills, 'same-md-notes', sameMdBody);
+      writeFileSync(join(sameMdClaude, 'plan.md'), 'Claude plan for same-md-notes.\n');
+      const sameMdCopilot = skill(copilotSkills, 'same-md-notes', sameMdBody);
+      writeFileSync(join(sameMdCopilot, 'plan.md'), 'Copilot plan for same-md-notes.\n');
+
+      // Same SKILL.md in two tools, differing plan.md, plus an inner link in each (unhashed): chooser stays and Refresh reloads edits.
+      const unhashedBody = text('linked-plan', 'Shared SKILL.md across unhashed copies.');
+      const unhashedClaude = skill(claudeSkills, 'linked-plan', unhashedBody);
+      writeFileSync(join(unhashedClaude, 'plan.md'), 'Claude unhashed plan.\n');
+      symlinkSync('SKILL.md', join(unhashedClaude, 'alias.md'));
+      const unhashedCopilot = skill(copilotSkills, 'linked-plan', unhashedBody);
+      writeFileSync(join(unhashedCopilot, 'plan.md'), 'Copilot unhashed plan.\n');
+      symlinkSync('SKILL.md', join(unhashedCopilot, 'alias.md'));
+
       const sharedDir = skill(sharedSkills, 'shared-notes', text('shared-notes', 'In the shared .agents folder.'));
       writeFileSync(join(sharedDir, 'extra.md'), 'Shared companion.\n');
 
@@ -19097,17 +19115,23 @@ async function skillFileFlow() {
       await a.settle();
       const fit40 = await a.run(`(() => {
         const row = document.querySelector('.ov-row[data-key="${rowPart('', 'skills', long40)}"]');
-        const cell = row?.querySelector('.ov-name'), text = row?.querySelector('.ov-name-text'), btn = row?.querySelector('.row-file-btn');
+        const cell = row?.querySelector('.ov-name'), text = row?.querySelector('.ov-name-text'), btn = row?.querySelector('.row-file-btn'), used = row?.querySelector('.ov-used');
         const rr = row?.getBoundingClientRect(), cr = cell?.getBoundingClientRect(), br = btn?.getBoundingClientRect(), nr = text?.getBoundingClientRect();
+        const range = document.createRange();
+        if (used) range.selectNodeContents(used);
+        const usedTextLeft = used ? range.getBoundingClientRect().left : null;
+        const nameWhole = !!(text && text.scrollWidth <= text.clientWidth + 1);
+        const freeBeforeUsed = usedTextLeft !== null && br ? Math.round(usedTextLeft - br.right) : 0;
         return {
           len: text?.textContent?.length ?? 0,
           rightAfterName: !!(btn && text && text.nextElementSibling === btn),
           markVisible: !!(br && cr && nr && br.width >= 20 && br.left >= nr.right - 2 && br.right <= cr.right + 1 && br.bottom <= cr.bottom + 1),
+          nameUsesRoom: nameWhole || freeBeforeUsed <= 16,
           rowHeight: Math.round(rr?.height ?? 0),
         };
       })()`);
-      same('at 860 with sidebar open, 40-letter found skill keeps its Open file mark visible beside its name on a 40px row', fit40, {
-        len: 40, rightAfterName: true, markVisible: true, rowHeight: 40,
+      same('at 860 with sidebar open, 40-letter found skill uses the room before the usage words and keeps its Open file mark visible on a 40px row', fit40, {
+        len: 40, rightAfterName: true, markVisible: true, nameUsesRoom: true, rowHeight: 40,
       });
       same('nothing cut off at 860 with sidebar open and 40-letter found skill', await a.run(CUT_OFF), []);
       if (shots) {
@@ -19209,6 +19233,81 @@ async function skillFileFlow() {
       await capture('found-differs-second');
       await a.press('Escape');
 
+      // Same SKILL.md with different other files (hashed): chooser stays and reads each copy's plan.md.
+      await a.click(`#${rowPart('file', 'skills', 'same-md-notes')}`);
+      await until(() => a.exists('.file-open-box pre.content'));
+      same('same SKILL.md with different other files keeps the chooser', [
+        await a.all('.file-open-box .file-copy-select select option', 'e.textContent'),
+        await a.all('.file-open-box .file-tab', 'e.textContent.trim()'),
+        (await a.text('.file-open-box pre.content') ?? '').includes('Identical SKILL.md in both tools; other files differ.'),
+        (await a.text('.file-open-foot .path-text'))?.trim(),
+      ], [['Claude Code’s copy', 'Copilot CLI’s copy'], ['SKILL.md', 'plan.md'], true, `${prefix}/.claude/skills/same-md-notes/SKILL.md`]);
+      if (shots) {
+        await sizeTo(a, ...SMALLEST);
+        const wasRailSame = await a.run(`document.body.classList.contains('rail')`);
+        if (wasRailSame) await a.click('#sidebar-toggle');
+        await a.settle();
+        await a.run(`(() => {
+          const rowEl = document.querySelector('.ov-row.ov-file-anchored');
+          const under = rowEl?.nextElementSibling, list = rowEl?.closest('.scroll');
+          if (!rowEl || !under || !list) return;
+          const box = list.getBoundingClientRect();
+          const rowTop = rowEl.getBoundingClientRect().top - box.top;
+          if (rowTop < 8) list.scrollTop += rowTop - 8;
+          const past = under.getBoundingClientRect().bottom - box.bottom;
+          const room = rowEl.getBoundingClientRect().top - box.top - parseFloat(getComputedStyle(rowEl).scrollMarginTop);
+          if (past > 0) list.scrollTop += Math.min(past, room);
+          window.dispatchEvent(new Event('resize'));
+        })()`);
+        await a.settle();
+        await a.run(`document.activeElement?.blur(); window.centralKnot.setAppearance('light')`);
+        await wait(80);
+        await a.shot('found-same-skill-diff-other-860-light');
+        await a.run(`window.centralKnot.setAppearance('system')`);
+        await wait(80);
+        if (wasRailSame) await a.click('#sidebar-toggle');
+        await fullSize(a);
+      }
+      await clickTab('plan.md');
+      await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Claude plan for same-md-notes.'));
+      await a.run(`(() => { const s = document.querySelector('.file-open-box .file-copy-select select'); s.value = '1'; s.dispatchEvent(new Event('change')); })()`);
+      await until(async () => (await a.text('.file-open-foot .path-text') ?? '').includes('.copilot/skills/same-md-notes/SKILL.md'));
+      await clickTab('plan.md');
+      await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Copilot plan for same-md-notes.'));
+      same('switching chooser on same-md-notes reads the other copy’s differing file', [
+        (await a.text('.file-open-box pre.content') ?? '').includes('Copilot plan for same-md-notes.'),
+        (await a.text('.file-open-foot .path-text'))?.trim(),
+      ], [true, `${prefix}/.copilot/skills/same-md-notes/plan.md`]);
+      await a.press('Escape');
+
+      // Same SKILL.md with different plan.md and inner symlinks (no folder hash): chooser stays, and editing plan.md + Refresh reloads it.
+      await a.click(`#${rowPart('file', 'skills', 'linked-plan')}`);
+      await until(() => a.exists('.file-open-box pre.content'));
+      same('unhashed copies in different folders with equal SKILL.md stay separate choices in the chooser', [
+        await a.all('.file-open-box .file-copy-select select option', 'e.textContent'),
+        await a.all('.file-open-box .file-tab', 'e.textContent.trim()'),
+      ], [['Claude Code’s copy', 'Copilot CLI’s copy'], ['SKILL.md', 'plan.md']]);
+      await clickTab('plan.md');
+      await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Claude unhashed plan.'));
+      writeFileSync(join(unhashedClaude, 'plan.md'), 'Claude unhashed plan, edited.\n');
+      await a.click('#header-refresh');
+      await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Claude unhashed plan, edited.'), 40);
+      same('editing a file in an unhashed copy reloads on Refresh with matching footer', [
+        (await a.text('.file-open-box pre.content') ?? '').includes('Claude unhashed plan, edited.'),
+        (await a.text('.file-open-foot .path-text'))?.trim(),
+      ], [true, `${prefix}/.claude/skills/linked-plan/plan.md`]);
+      if (await a.exists('.file-open-box .file-copy-select select')) {
+        await a.run(`(() => { const s = document.querySelector('.file-open-box .file-copy-select select'); s.value = '1'; s.dispatchEvent(new Event('change')); })()`);
+        await until(async () => (await a.text('.file-open-foot .path-text') ?? '').includes('.copilot/skills/linked-plan/SKILL.md'));
+        await clickTab('plan.md');
+        await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Copilot unhashed plan.'));
+        same('switching to the second unhashed copy reads its own plan.md', [
+          (await a.text('.file-open-box pre.content') ?? '').includes('Copilot unhashed plan.'),
+          (await a.text('.file-open-foot .path-text'))?.trim(),
+        ], [true, `${prefix}/.copilot/skills/linked-plan/plan.md`]);
+      }
+      await a.press('Escape');
+
       // Same content in two tools: no chooser.
       await a.click(`#${rowPart('file', 'skills', 'twin-notes')}`);
       await until(() => a.exists('.file-open-box pre.content'));
@@ -19280,6 +19379,58 @@ async function skillFileFlow() {
       await until(async () => (await a.text('.file-open-box .file-open-state'))?.trim() === 'Its file couldn’t be read.');
       same('gone found copy shows Its file couldn’t be read.', (await a.text('.file-open-box .file-open-state'))?.trim(), 'Its file couldn’t be read.');
       await a.press('Escape');
+
+      // Removing the selected copy on disk while the panel is open falls back to the first holder on SKILL.md.
+      await openKind(a, 'all');
+      await a.click(splitBtn);
+      await until(() => a.exists('.file-open-box pre.content'));
+      await a.run(`(() => { const s = document.querySelector('.file-open-box .file-copy-select select'); s.value = '1'; s.dispatchEvent(new Event('change')); })()`);
+      await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Copilot copy of split-notes.'));
+      await clickTab('copilot-only.md');
+      await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Only in Copilot CLI.'));
+      rmSync(splitCopilot, { recursive: true, force: true });
+      await a.click('#header-refresh');
+      await until(async () => !(await a.exists('.file-open-box .file-copy-select')) && (await a.text('.file-open-box pre.content') ?? '').includes('Claude copy of split-notes.'), 40);
+      same('when the chosen found copy is removed while the panel is open, Refresh falls back to the first holder on SKILL.md', [
+        await a.exists('.file-open-box .file-copy-select'),
+        await a.run(`document.querySelector('.file-open-box .file-tab[aria-selected="true"]')?.textContent?.trim() ?? null`),
+        await a.all('.file-open-box .file-tab', 'e.textContent.trim()'),
+        (await a.text('.file-open-box pre.content') ?? '').includes('Claude copy of split-notes.'),
+        (await a.text('.file-open-foot .path-text'))?.trim(),
+      ], [false, 'SKILL.md', ['SKILL.md', 'claude-only.md'], true, `${prefix}/.claude/skills/split-notes/SKILL.md`]);
+      await a.press('Escape');
+
+      // Clicking Add while a found skill's file panel is open keeps the panel open and shows the stored version.
+      await a.click(draftBtn);
+      await until(() => a.exists('.file-open-box pre.content'));
+      await clickTab('notes/plan.md');
+      await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Reloaded found copy.'));
+      await a.click(`#${rowPart('add', 'skills', 'local-draft')}`);
+      await until(() => a.exists(`#${rowPart('switch', 'skills', 'local-draft')}[aria-checked="true"]`));
+      await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Reloaded found copy.'), 40);
+      await a.click(`#${rowPart('switch', 'skills', 'local-draft')}`);
+      await until(() => a.exists(`#${rowPart('switch', 'skills', 'local-draft')}[aria-checked="false"]`));
+      await until(async () => (await a.text('.file-open-foot'))?.trim() === 'Stored in Central Knot', 40);
+      same('Add while a found skill’s panel is open keeps it open on the stored version', [
+        await a.run(`document.querySelector('.details-file-only')?.getAttribute('aria-label')`),
+        await a.run(`document.querySelector('.file-open-box .file-tab[aria-selected="true"]')?.textContent?.trim() ?? null`),
+        (await a.text('.file-open-box pre.content') ?? '').includes('Reloaded found copy.'),
+        (await a.text('.file-open-foot'))?.trim(),
+      ], ['File for local-draft', 'notes/plan.md', true, 'Stored in Central Knot']);
+      await a.press('Escape');
+
+      // Main refuses a tool that is not managed in the open home.
+      const beforeUnmanage = await a.run(`window.centralKnot.skillFoundFile('twin-notes', 'copilot-cli', 'Copilot skills', 'SKILL.md')`);
+      await a.click('#nav-harnesses');
+      await a.click('#manage-copilot-cli');
+      await until(() => a.exists('#manage-copilot-cli[aria-checked="false"]'));
+      const afterUnmanage = await a.run(`window.centralKnot.skillFoundFile('twin-notes', 'copilot-cli', 'Copilot skills', 'SKILL.md')`);
+      const absentTool = await a.run(`window.centralKnot.skillFoundFile('twin-notes', 'pi-cli', undefined, 'SKILL.md')`);
+      same('main reads a managed tool’s found skill and refuses an unmanaged or absent tool', [
+        !!beforeUnmanage?.text?.includes('Identical text in two tools.'),
+        afterUnmanage,
+        absentTool,
+      ], [true, null, null]);
     }
   }
 

@@ -40,7 +40,7 @@ import { sourceFacts } from './sources.ts';
 import { pluginsRecordHold } from './sourcestore.ts';
 import { followCopy, isDisabled, piListWords, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, type ListEdit, type SwitchFile } from './skillswitch.ts';
 import { agentInPi, agentKind, applyAgents } from './agents.ts';
-import { harnesses, toolConfigRoot } from './harnesses.ts';
+import { harnesses, isSkillEntry, toolConfigRoot } from './harnesses.ts';
 import { displayPath } from './machine.ts';
 import type {
   Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, Skill, SkillFileRead, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy,
@@ -618,9 +618,10 @@ async function readSkillFile(directory: string, file: string): Promise<SkillFile
   let handle;
   try {
     handle = await open(path, 'r');
-    const buffer = Buffer.allocUnsafe(FILE_LIMIT + 1);
+    let buffer = Buffer.allocUnsafe(Math.min(info.size, FILE_LIMIT) + 1);
     let read = 0;
-    while (read < buffer.length) {
+    while (read <= FILE_LIMIT) {
+      if (read === buffer.length) buffer = Buffer.concat([buffer, Buffer.allocUnsafe(Math.min(buffer.length, FILE_LIMIT + 1 - read))]);
       const { bytesRead } = await handle.read(buffer, read, buffer.length - read, read);
       if (bytesRead === 0) break;
       read += bytesRead;
@@ -639,8 +640,7 @@ async function foundSkillFolder(context: ShareContext, key: string, tool: Harnes
   for (const root of rootLabel ? roots.filter(each => each.label === rootLabel) : roots) {
     const entries = await readdir(root.path, { withFileTypes: true }).catch(() => undefined);
     if (!entries) continue;
-    const matches = entries.filter(entry => !(entry.name.startsWith('.') && !definition.loadsDotFolders)
-      && !definition.reservedSkills.includes(entry.name) && (entry.isDirectory() || entry.isSymbolicLink()) && itemKey(entry.name) === key);
+    const matches = entries.filter(entry => isSkillEntry(definition, entry) && itemKey(entry.name) === key);
     if (matches.length !== 1) continue;
     const target = join(root.path, matches[0]!.name);
     if (!await stat(target).then(info => info.isDirectory(), () => false)) continue;
