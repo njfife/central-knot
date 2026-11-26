@@ -160,7 +160,7 @@ function otherFiles(file: InstructionFile) {
   const heading = `Also read with ${fileName(file.path)}`;
   const group = (title: string, parts: InstructionPart[]) => (parts.length ? h('div.ins-parts-group', {}, h('p.ins-parts-sub', {}, title), parts.map(part => partView(file.tool, part))) : null);
   return h('section.ins-parts', { id: `ins-parts-${file.tool}`, 'aria-label': heading },
-    h('p.ins-parts-head', {}, icon('link', 13, 'tone-muted'), h('span', {}, h('strong', {}, heading), ' · shown as they are, not changed here')),
+    h('p.ins-parts-head', {}, icon('link', 13, 'tone-muted'), h('strong', {}, heading)),
     group('In every session', file.parts.filter(part => !part.only)), group('Only for matching files', file.parts.filter(part => part.only)));
 }
 
@@ -233,9 +233,9 @@ export function instructionCard(file: InstructionFile, { titled = true, goToOthe
 
 /**
  * The strip on a tool's card after the files read with it (sessionhooks.ts sessionStrip): its heading (with T1.23's mark on
- * the first hooks strip of a page), the standing run warning when any row can run, the sentence on what it lists, the tool's
- * note (T2.28 where it applies), then each origin by its mark and name with where it is turned off, what couldn't be read, and
- * each hook beneath it: when it runs, its command, and its Run it / View source controls (hooksourceview.ts).
+ * the first hooks strip of a page), the standing run warning when any row can run, the tool's note (T2.28 where it applies),
+ * then each origin by its mark and name with where it is turned off, what couldn't be read, and each hook beneath it: when
+ * it runs, its command, and its Run it / View source controls (hooksourceview.ts).
  */
 function sessionStripView(file: InstructionFile, hookInfo?: HookStripPage) {
   const strip = sessionStrip(file.tool, state.home?.pluginItems ?? [], file);
@@ -251,10 +251,11 @@ function sessionStripView(file: InstructionFile, hookInfo?: HookStripPage) {
     ? button({ variant: 'link', size: 'micro', label: 'Plugin’s page: turn it off there', id: `session-page-${file.tool}-${at}`, onclick: () => openPlugin({ source: plugin.source, plugin: plugin.plugin, marketplace: plugin.marketName, tool: file.tool }) })
     : settings ? h('span.session-in', {}, 'in ', pathText(shownPath(settings), settings)) : says ? h('span', {}, says) : null);
   const warning = (words: string, path?: string) => h('p.session-warning.tone-warning', {}, icon('triangle-alert', 12), h('span', {}, words, path ? pathText(shownPath(path), path) : null));
+  const warnLine = hasRunnable ? h('p.session-run-warn', {}, HOOK_RUN_WARN) : whyNot ? h('p.session-note', {}, whyNot) : null;
   return h('section.session-strip', { id: `session-${file.tool}`, 'aria-label': `${strip.heading}: ${toolNames[file.tool]}` },
-    h('div.session-title-row', {}, h('h4.session-title', {}, strip.heading), mark),
-    hasRunnable ? h('p.session-run-warn', {}, HOOK_RUN_WARN) : whyNot ? h('p.session-note', {}, whyNot) : null,
-    h('p.session-about', {}, strip.about),
+    h('div.session-strip-head', mark ? { 'data-info-block': true } : {},
+      h('div.session-title-row', {}, h('h4.session-title', {}, strip.heading), mark),
+      warnLine),
     note ? h('p.session-note', {}, ...inlineMarkdown(note, () => undefined)) : null,
     strip.groups.length ? h('ul.session-groups', {}, strip.groups.map((group, at) => h('li.session-group', {},
       h('p.session-head', {}, h(`span.origin-mark.${group.mark}`, { 'aria-hidden': 'true' }), h('strong.session-name', {}, group.settings ? `${group.name},` : group.name), where(group, at)),
@@ -305,7 +306,7 @@ export function instructionsPage() {
     h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
       aboutInstructions(files, !!state.base),
       baseCard(files),
-      h('div.ins-section-head', {}, h('h2.ins-section-title', {}, 'Each tool’s own instructions'), h('p.ins-section-note', {}, 'Only that tool reads these.')),
+      h('div.ins-section-head', {}, h('h2.ins-section-title', {}, 'Each tool’s own instructions')),
       h('div.ins-tool-cards', {}, files.map(file => instructionCard(file, { hookInfo })))));
 }
 

@@ -11,7 +11,7 @@
 // when it runs, never what it adds. Not listed: other kinds of hook (one that calls a URL or an MCP tool, or asks a model), a
 // project's or an organisation's hooks, a skill's or an agent's own hooks, and `additionalContext` printed by other events.
 import { clockTime } from './model.ts';
-import { addsText, ignoresText, sessionTextNote, textEventsWords, whenItRuns } from './pluginoutcomes.ts';
+import { addsText, ignoresText, sessionTextNote, whenItRuns } from './pluginoutcomes.ts';
 import { commandLine, toolNames } from './words.ts';
 import type { DeclaredHook, HarnessId, HookRunResult, HookSourceOwner, HookSourceRef, InstalledPlugin, InstructionFile } from './types.ts';
 
@@ -66,16 +66,16 @@ export interface SessionGroup {
   /** Each hook that can add text: when it runs, its command (hookLine), and what identifies it for View source. */
   hooks: TextHookRow[];
 }
-export interface SessionStrip { heading: string; about: string; note?: string; groups: SessionGroup[] }
+export interface SessionStrip { heading: string; note?: string; groups: SessionGroup[] }
 
 /** Each tool's own word for what it loads into every session from its settings: Pi's packages, OpenCode's plugins. */
 const EXTENSIONS: Partial<Record<HarnessId, string>> = { 'pi-cli': 'packages', 'opencode-cli': 'plugins' };
 
 /**
- * The strip on a tool's card: its heading, one sentence on what it lists and what it doesn't, the tool's note, then the person's
- * own hooks that can add text (a group per settings file), each plugin installed whole in the tool and On there, by name (its
- * hooks, or why they aren't known), and Pi's or OpenCode's extensions. Undefined with nothing to show; a tool whose note says
- * why its hooks have no rows (Copilot CLI's prompt hooks) shows the note alone.
+ * The strip on a tool's card: its heading, the tool's note, then the person's own hooks that can add text (a group per
+ * settings file), each plugin installed whole in the tool and On there, by name (its hooks, or why they aren't known), and
+ * Pi's or OpenCode's extensions. Undefined with nothing to show; a tool whose note says why its hooks have no rows (Copilot
+ * CLI's prompt hooks) shows the note alone.
  */
 export function sessionStrip(tool: HarnessId, items: InstalledPlugin[], file: Pick<InstructionFile, 'ownHooks' | 'ownHooksUnread' | 'extensions'>): SessionStrip | undefined {
   const plugins = items.filter(install => install.tool === tool && !install.off)
@@ -96,9 +96,8 @@ export function sessionStrip(tool: HarnessId, items: InstalledPlugin[], file: Pi
   const note = sessionTextNote(tool), word = EXTENSIONS[tool];
   if (!groups.length && ![...own, ...plugins.flatMap(install => install.hooks ?? [])].some(hook => ignoresText(tool, hook))) return undefined;
   return word
-    ? { heading: `${word[0]!.toUpperCase()}${word.slice(1)} that can add text`, about: `${toolNames[tool]} loads these ${word} into every session, and they can add text to it; what they add is known only when they run.`, groups }
-    : { heading: 'Hooks that can add text', groups, ...(note ? { note } : {}),
-      about: `These hooks run a program ${textEventsWords(tool)}, and what it prints can be added to the session; that is known only when it runs. Other kinds of hook (one that calls a URL or an MCP tool), and a project’s or an organisation’s hooks, aren’t listed.` };
+    ? { heading: `${word[0]!.toUpperCase()}${word.slice(1)} that can add text`, groups }
+    : { heading: 'Hooks that can add text', groups, ...(note ? { note } : {}) };
 }
 
 /** Standing line above the first row of every strip that has a runnable hook. */
