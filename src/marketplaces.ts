@@ -783,8 +783,12 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       if (act === 'install-items' || act === 'remove-items') itemsIn.push(each);
       else if (act) ops.push({ source: entry.source, marketName, plugin, tool: each, action: act === 'uninstall' ? 'remove' : act });
       // Said on the result, and nothing run there: a record that can't be read; held in this click's way; and for Off and Keep
-      // out, a tool holding another marketplace under this name (read from its state: its plugins are not this one's).
+      // out, a tool holding another marketplace under this name (read from its state: its plugins are not this one's), or a copy
+      // off there already (pluginrecord.ts row 9), whose words are the result's "already off in" (nothing changed there: no Undo).
       const other = entry.states[plugin]?.[each];
+      const offAlready = clickGoes(what) === 'out' && !act && !owed.held && other?.state === 'installed' && !!other.off;
+      const already = { tool: each, outcome: 'plugin-off' as const, message: `Already off in ${toolName(each)}.`, runs: [] };
+      if (offAlready) held.push({ source: entry.source, marketName, plugin, tool: each, action: 'plugin-off', report: already });
       const otherMarket = clickGoes(what) === 'out' && other?.state === 'held' ? other.reason : undefined;
       const why = owed.has === 'unknown' ? recordUnread(each) : clickHeld(what, owed) ?? otherMarket;
       // A tool's refusal of this marketplace is said once, where its state is (pluginstatus.ts blocked), not on every click.

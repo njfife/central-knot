@@ -181,7 +181,8 @@ export function pluginPlace(view: PluginsView, entry: MarketplaceView, plugin: s
  */
 export function cantUninstall(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): string | undefined {
   const state = stateOf(entry, plugin, tool);
-  if (state.state === 'held' || state.state === 'not-known') return state.reason;
+  if (state.state === 'held') return state.reason;
+  if (state.state === 'not-known') return `${state.reason.replace(/\.$/, '')}: left as it is.`;
   if (state.state === 'installed' && state.directory) return FROM_DIRECTORY;
   if (!view.canWrite) return PREVIEW_ONLY;
   return view.clis[tool] ? undefined : `${cliMissing(tool)}.`;
@@ -449,7 +450,9 @@ export type ToolMark = 'installed' | 'outdated' | 'items' | 'kept-off' | 'stays'
 export const keptOff = (entry: Pick<PluginEntry, 'on' | 'except'> | undefined, tool: HarnessId, off: boolean | undefined) => !!entry && !!off && !wantedIn(entry, tool);
 /** Whether a tool has the plugin in use, as the view's switch reads it: installed whole or its items there, and not a copy kept off (keptOff). */
 export const inUseIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) => {
-  const sw = entry.switches?.[plugin], has = sw?.tools[tool]?.has, state = stateOf(entry, plugin, tool);
+  const sw = entry.switches?.[plugin];
+  const has = sw?.tools[tool]?.has;
+  const state = stateOf(entry, plugin, tool);
   return (has === 'whole' || has === 'items') && !keptOff(sw?.entry, tool, state.state === 'installed' && state.off);
 };
 
@@ -464,14 +467,16 @@ export function toolMark(view: PluginsView, entry: MarketplaceView, plugin: stri
   if (!owed || owed.has === 'unknown') return { mark: 'unknown', words: recordUnread(tool) };
   if (!takesPlugins(tool) && waitsToMove(entry, plugin)) return { mark: 'parts-waiting', words: waitingWords(view, entry, plugin, [tool]) };
   const kept = entry.switches?.[plugin]?.entry?.except.includes(tool);
-  // Installed though the person doesn't want it there: said with what takes it out, or why nothing can here.
-  const unwanted = recorded && !owed.wanted ? ` ${kept ? `It is kept out of ${name}` : 'The plugin is off'}${owed.held ? `; ${owed.held}` : '.'}` : '';
+  // Installed though the person doesn't want it there: said with what takes it out, or why nothing can here (a copy that can't be
+  // read has said why already).
+  const heldWhy = owed.held && state.state !== 'not-known' ? `; ${owed.held}` : '.';
+  const unwanted = recorded && !owed.wanted ? ` ${kept ? `It is kept out of ${name}` : 'The plugin is off'}${heldWhy}` : '';
   if (state.state === 'not-known') return { mark: 'not-known', words: `${state.reason}${unwanted}` };
   if (state.state === 'installed') {
     const version = state.version ? ` ${state.version}` : '';
     const how = [state.live ? 'loaded live from the marketplace folder' : '', state.directory ? 'from the Anthropic Directory' : '', state.off ? `turned off in ${name}’s own settings` : '', stale ? 'which differs from the marketplace’s copy' : ''].filter(Boolean).join(', ');
     const words = `${name}: installed${version}${how ? `, ${how}` : ''}.`;
-    if (keptOff(entry.switches?.[plugin]?.entry, tool, state.off)) return { mark: 'kept-off', words: `Off in ${name}: still installed${state.version ? ` at ${state.version}` : ''}, with its data and settings.${unwanted}` };
+    if (keptOff(entry.switches?.[plugin]?.entry, tool, state.off)) return { mark: 'kept-off', words: `Off in ${name}: still installed${state.version ? ` at ${state.version}` : ''}, with its data and settings.` };
     if (unwanted) return { mark: 'stays', words: `${words}${unwanted}` };
     return { mark: outdated ? 'outdated' : 'installed', words: outdated ? `${words} An update is offered: Update on its row.` : words };
   }

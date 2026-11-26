@@ -7765,7 +7765,7 @@ esac
     [true, 'plugin disable issue-tracker@ck-test-market --scope user', false, ['pi-cli'], ['false', false, 'kept-off'], 'Off, kept installed']);
   same('Off loses nothing: its data folder, saved options and install record are as they were', kept(), keptBefore);
   const keptLine = '.plugin-tool[data-tool="claude-cli"] .plugin-tool-state';
-  same('the hover on “Off, kept installed” says what is kept', await a.run(`document.querySelector('${keptLine}').title`), 'Off in Claude Code: still installed at 2.0.0, with its data and settings. The plugin is off.');
+  same('the hover on “Off, kept installed” says what is kept', await a.run(`document.querySelector('${keptLine}').title`), 'Off in Claude Code: still installed at 2.0.0, with its data and settings.');
   check('its result says it was turned off, and nothing Undo can’t put back', /^Turned off in Claude Code$/.test(await a.text('.plugin-panel .plugin-click') ?? '') && !/Undo installs/.test(await a.text('#plugins-result') ?? ''),
     [await a.text('.plugin-panel .plugin-click'), await a.text('#plugins-result')]);
   await keptShots('plugin-keep-off');
@@ -8593,7 +8593,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   same('at the top of the list, a failure that goes from the header moves no row, nor does the click after it', [bandBefore, await a.exists('.plugin-problems'), ['plug-06', 'plug-09'].map(name => afterClose.at[name]), ['plug-06', 'plug-09'].map(name => stillAtTop.at[name])],
     [true, false, ['plug-06', 'plug-09'].map(name => atItsTop.at[name]), ['plug-06', 'plug-09'].map(name => atItsTop.at[name])]);
   // Three failing plugins (plug-04, -05, -17) and one that installs (plug-10), in one list (each takes a second): one ×, the first
-  // reason and Show all 3 reasons; shown, each reason whole; × closes it all. (Not plug-08: Claude Code can't read its copy, empty,
+  // reason and Show all 3 reasons; shown, each reason whole; × closes it all. (Not plug-08: Central Knot can't read its copy, empty,
   // so its Off above left that copy where it is, and its On now finds it there: pluginstatus.ts cantUninstall.)
   const failNow = ['plug-04', 'plug-05', 'plug-17'];
   for (const name of failNow) writeFileSync(join(home, `fail-${name}`), '');

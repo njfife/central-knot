@@ -5,6 +5,7 @@ import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile
 import { dirname, join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
+import { resultLines } from '../src/pluginplan.ts';
 import * as engine from '../src/plugins.ts';
 import { WAITS_TO_MOVE, boxOf, toolMark } from '../src/pluginstatus.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
@@ -955,9 +956,13 @@ test('Off, then Undo: a copy already off in a tool’s own settings is left as i
     box.calls.length = 0;
     const off = await box.markets.turn(box.root, 'pdf', 'off', undefined, box.home);
     assert.deepEqual([box.calls, off.back?.map(op => [op.tool, op.action])], [[], [['pi-cli', 'items-back']]], 'Claude Code was off already: nothing ran there');
+    assert.deepEqual(resultLines(off.done.filter(step => step.tool === 'claude-cli')).map(line => line.text), ['already off in Claude Code'], 'and the result says so, with nothing to undo there');
     const undone = await box.markets.undoTurn(box.root, 'pdf', off.before!, off.back!, box.home);
     assert.deepEqual([box.calls, undone.stopped, (await box.record()).plugins.map(entry => [entry.on, entry.except])], [[], undefined, [[true, []]]]);
     assert.equal((await box.json('.claude/settings.json')).enabledPlugins['pdf@team'], false);
+    // On again, still off there: its box unticked runs nothing there either, and says so, with no Undo.
+    const out = await box.markets.turn(box.root, 'pdf', 'keep-out', 'claude-cli', box.home);
+    assert.deepEqual([box.calls, out.back, resultLines(out.done).map(line => line.text)], [[], [], ['already off in Claude Code']]);
   } finally { await box.cleanup(); }
 });
 
@@ -1265,6 +1270,8 @@ test('A copy whose files can’t be read is left as it is by Off, and the result
     box.calls.length = 0;
     const off = await box.markets.turn(box.root, 'pdf', 'off', undefined, box.home);
     assert.deepEqual([box.calls, (await box.kept()).serverSwitch], [['whole pdf@team claude-cli false'], true]);
-    assert.deepEqual(off.done.filter(step => step.tool === 'codex-cli').map(step => [step.report.outcome, step.report.message]), [['held', 'Codex lists it, but its files are not in its plugin cache.']]);
+    assert.deepEqual(off.done.filter(step => step.tool === 'codex-cli').map(step => [step.report.outcome, step.report.message]), [['held', 'Codex lists it, but its files are not in its plugin cache: left as it is.']]);
+    const view = await box.markets.view(), entry = view.marketplaces.find(each => each.source === box.root)!;
+    assert.equal(toolMark(view, entry, 'pdf', 'codex-cli', entry.switches!.pdf!.tools['codex-cli']).words, 'Codex lists it, but its files are not in its plugin cache. The plugin is off.', 'its box says why once');
   } finally { await box.cleanup(); }
 });

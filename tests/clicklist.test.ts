@@ -311,12 +311,12 @@ test('A box’s hover says only what its click and its Undo do there: a copy alr
     return { ...shown, switches: { alpha: { entry: { on, except: [] }, tools } } };
   };
   const hover = (shown: MarketplaceView, tool: HarnessId) => findById(toolBox(two, shown, plugin('alpha'), tool, 0, undefined), `pbox-0-alpha-${tool}`)?.attrs.title;
-  // On here, and turned off in Claude Code with its own command: its untick keeps it out, and its Undo turns nothing on.
+  // On here, and turned off in Claude Code with its own command: its untick keeps it out and runs nothing there, so it promises no Undo.
   assert.equal(hover(drawn(true, { 'claude-cli': { state: 'installed', path: '/x', off: true } }), 'claude-cli'),
-    'Claude Code: installed, turned off in Claude Code’s own settings. Click to keep alpha out of Claude Code, where it is off already and stays installed. Undo lets it in again.');
+    'Claude Code: installed, turned off in Claude Code’s own settings. Click to keep alpha out of Claude Code, where it is off already and stays installed.');
   // Off here, and on in Claude Code by its own command: a tick on Copilot CLI's kept copy turns it on there, not there alone.
   assert.equal(hover(drawn(false, { 'claude-cli': { state: 'installed', path: '/x' }, 'copilot-cli': { state: 'installed', path: '/y', off: true } }), 'copilot-cli'),
-    'Off in Copilot CLI: still installed, with its data and settings. The plugin is off. Click to turn alpha on in Copilot CLI. Undo turns it off again.');
+    'Off in Copilot CLI: still installed, with its data and settings. Click to turn alpha on in Copilot CLI. Undo turns it off again.');
 });
 
 test('A new run on Plugins clears what an earlier action’s stop said, as before; a click joining a run leaves it', async () => {

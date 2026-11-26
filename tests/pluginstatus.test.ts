@@ -60,7 +60,7 @@ test('A tool’s box: ticked where the plugin is; off before the click where its
   const offThere: MarketplaceView = { ...keptOut, states: { p: { 'claude-cli': { state: 'installed', path: '/x', version: '1.0.0', off: true } } } };
   const now = toolNow(view, offThere, 'p', 'claude-cli', undefined, false);
   assert.deepEqual([toolMark(view, offThere, 'p', 'claude-cli', owedTo({ on: true, except: ['claude-cli'] }, 'claude-cli', now, view.tools)), box(offThere, 'claude-cli'), clickRuns('let-in', owedTo({ on: true, except: [] }, 'claude-cli', now, view.tools))],
-    [{ mark: 'kept-off', words: 'Off in Claude Code: still installed at 1.0.0, with its data and settings. It is kept out of Claude Code.' }, { ticked: false }, 'plugin-on']);
+    [{ mark: 'kept-off', words: 'Off in Claude Code: still installed at 1.0.0, with its data and settings.' }, { ticked: false }, 'plugin-on']);
 });
 
 test('Only a known version that names another release is a difference', () => {

@@ -110,8 +110,13 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
 
 /** What a click on a tool's box does there, and its Undo, in the state it is drawn in (pluginrecord.ts A TOOL'S BOX and row 9). */
 function boxDoes(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, mark: ToolMark, ticked: boolean): string {
-  const what = takesPlugins(tool) ? plugin : `${plugin}’s items`, where = names[tool], sw = entry.switches?.[plugin], on = !!sw?.entry?.on, state = stateOf(entry, plugin, tool);
-  if (ticked && state.state === 'installed' && state.off) return `Click to keep ${what} out of ${where}, where it is off already and stays installed. Undo lets it in again.`;
+  const what = takesPlugins(tool) ? plugin : `${plugin}’s items`;
+  const where = names[tool];
+  const sw = entry.switches?.[plugin];
+  const on = !!sw?.entry?.on;
+  const state = stateOf(entry, plugin, tool);
+  // Off there already: the click runs nothing in the tool, so it has no Undo there to promise.
+  if (ticked && state.state === 'installed' && state.off) return `Click to keep ${what} out of ${where}, where it is off already and stays installed.`;
   if (ticked && sw?.tools[tool]?.keeps) return `Click to turn ${what} off in ${where}, kept installed: it stays off until you tick it again. Undo turns it on again.`;
   if (ticked) return `Click to take ${what} out of ${where}: it stays out until you tick it again. Undo puts it back.`;
   if (on && mark !== 'kept-off') return `Click to put ${what} in ${where}. Undo takes it out again.`;
