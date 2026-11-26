@@ -571,7 +571,8 @@ export const takeInAnswers = (look: AnyLook, key: string) => {
  * What was asked of a pass for one item (a click, what Pull brings, or what a source holds), as the History entry it becomes:
  * begun when it is recorded, finished with the harnesses its plan writes or removes (`fill`: which of them it names).
  */
-type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'version' | 'previous' | 'foundIn' | 'tookFrom' | 'link' | 'seen' | 'took'> & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed' };
+type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'wasExcept' | 'nowExcept' | 'version' | 'previous' | 'foundIn' | 'tookFrom' | 'link' | 'seen' | 'took'>
+  & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed' };
 /**
  * What Pull brings for one item (gitrepo.ts): its name and content, and where the repo holds one harness's own part, that
  * part's text (Claude Code's file, for an agent); or its removal.
@@ -1103,13 +1104,19 @@ async function click(pass: Pass, asked: Change) {
   else turn(pass, item, asked);
 }
 
-/** The switches: the item On or Off, or one harness kept out or let in. */
+/** The switches: the item On or Off (recording changed keep-outs for a person's switch), or one harness kept out or let in. */
 function turn(pass: Pass, item: LibraryItem, asked: Change) {
   const was = { on: item.on, except: item.except };
   Object.assign(item, { on: asked.on, except: [...asked.except] } satisfies Partial<LibraryItem>);
-  const out = item.except.find(tool => !was.except.includes(tool)), back = was.except.find(tool => !item.except.includes(tool));
-  if (was.on !== item.on) pass.asked.set(item.key, item.on ? { kind: 'on', cause: 'switch', fill: 'written' } : { kind: 'off', cause: 'switch', fill: 'removed' });
-  else if (out) pass.asked.set(item.key, { kind: 'off', cause: 'switch', only: out, fill: 'removed' });
+  const out = item.except.find(tool => !was.except.includes(tool));
+  const back = was.except.find(tool => !item.except.includes(tool));
+  if (was.on !== item.on) {
+    const entry: Asked = item.on ? { kind: 'on', cause: 'switch', fill: 'written' } : { kind: 'off', cause: 'switch', fill: 'removed' };
+    if (!asked.forPlugin && (out || back)) Object.assign(entry, { wasExcept: [...was.except], nowExcept: [...item.except] });
+    pass.asked.set(item.key, entry);
+    return;
+  }
+  if (out) pass.asked.set(item.key, { kind: 'off', cause: 'switch', only: out, fill: 'removed' });
   else if (back) pass.asked.set(item.key, { kind: 'on', cause: 'switch', only: back, fill: 'written' });
 }
 

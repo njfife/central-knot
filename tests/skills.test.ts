@@ -371,7 +371,7 @@ test('A skill found in OpenCode’s own folder, taken in and turned Off: while O
     const { fact, item, row } = await seen(box);
     assert.equal(harnessIs(row, item, 'opencode-cli'), 'own-copy');
     assert.match(say.harnessLine(row, item, 'opencode-cli', 'OpenCode'), /^Has a copy Central Knot didn’t put there\. It is left alone while the skill is off;/);
-    assert.equal(statusLine(row, item, box.tools), 'Off · in Central Knot and OpenCode. Turn it on to put it in every tool. OpenCode has a copy Central Knot didn’t put there.');
+    assert.equal(statusLine(row, item, box.tools), 'Off · in Central Knot and OpenCode. On puts it in every tool. OpenCode has a copy Central Knot didn’t put there.');
     assert.deepEqual(say.placeTag(fact!, item, box.tools), { text: 'in Central Knot and OpenCode', title: 'Central Knot keeps this skill and its versions. OpenCode has a copy Central Knot didn’t put there, left alone while the skill is off.' });
     assert.equal(switchLabel(row, item, box.tools), 'notes: off, in Central Knot and OpenCode. Click to put it in every tool; OpenCode has a copy of its own, which is kept as versions first.');
     // The Off click's result, from the row it was clicked on (matrix.ts turnOff): the copy OpenCode keeps there too.
