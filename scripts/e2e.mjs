@@ -3565,19 +3565,20 @@ async function practiceFlow() {
   const triageLine = await a.run(`document.querySelector(${JSON.stringify(wholeButton)})?.closest('.details-tool').querySelector('.details-tool-line').textContent ?? ''`);
   check('the opened row’s Claude Code line turns the whole plugin off, saying what goes with it', /Turns the whole plugin issue-tracker off in Claude Code, with its 1 MCP server\.$/.test(triageLine)
     && await a.text(wholeButton) === 'Turn the plugin off', [triageLine, await a.text(wholeButton)]);
-  // A click on it applies at once, with Claude Code's own command (a stand-in here): the result leads with the skill clicked,
-  // and its Undo turns the plugin back on there.
+  // A click on it goes through turnFromLine (keep-out), showing its result and Undo on Claude Code's line, and turns the plugin back on with Undo.
   const settingsAt = pluginSettingsNow() ?? '{}';
   const issueTrackerStub = `#!/bin/sh\ncase "$*" in\n  "plugin disable issue-tracker@ck-test-market --scope user") printf '{"enabledPlugins":{"issue-tracker@ck-test-market":false}}' > "$HOME/.claude/settings.json" ;;\n  "plugin enable issue-tracker@ck-test-market --scope user") printf '%s' '${settingsAt}' > "$HOME/.claude/settings.json" ;;\n  *) exit 9 ;;\nesac\n`;
   writeFileSync(claudeStub, issueTrackerStub);
   const wholeOff = () => JSON.parse(pluginSettingsNow() ?? '{}').enabledPlugins?.['issue-tracker@ck-test-market'] === false;
+  const lineUndo = byId(rowPart('line-undo', 'skills', 'triage', 'claude-cli'));
+  const lineResult = () => a.run(`document.querySelector('[data-result="claude-cli:skill:triage"] .details-tool-result-text')?.textContent?.trim() ?? ''`);
   await a.click(wholeButton);
-  for (let tries = 0; tries < 60 && !(await a.exists('#outcome-undo-plugin')); tries++) await wait(100);
-  check('the opened row’s button applies at once, and its result leads with the skill', wholeOff() && await cellState(a, 'skills', 'triage', 'claude-cli') === 'plugin-off'
-    && /triage is off in Claude Code\. Its whole plugin issue-tracker was turned off there, with its MCP server issues\./.test(await a.text('#header') ?? ''), [pluginSettingsNow(), await a.text('#header')]);
-  await a.click('#outcome-undo-plugin');
-  for (let tries = 0; tries < 60 && (wholeOff() || !/Undone: triage/.test(await a.text('#header') ?? '')); tries++) await wait(100);
-  check('its Undo turns the plugin back on there', !wholeOff() && /Undone: triage is back on in Claude Code\./.test(await a.text('#header') ?? ''), [pluginSettingsNow(), await a.text('#header')]);
+  for (let tries = 0; tries < 60 && !(await a.exists(lineUndo)); tries++) await wait(100);
+  check('the opened row’s button turns the plugin off through turn, with its result and Undo on Claude Code’s line', wholeOff() && await cellState(a, 'skills', 'triage', 'claude-cli') === 'plugin-off'
+    && /^Turned off issue-tracker in Claude Code\./.test(await lineResult()), [pluginSettingsNow(), await lineResult()]);
+  await a.click(lineUndo);
+  for (let tries = 0; tries < 60 && (wholeOff() || !/^Undone: issue-tracker/.test(await lineResult())); tries++) await wait(100);
+  check('its line Undo turns the plugin back on there', !wholeOff() && /^Undone: issue-tracker back on in Claude Code\./.test(await lineResult()), [pluginSettingsNow(), await lineResult()]);
   writeFileSync(claudeStub, stubBefore);
   // Codex has the plugin too, and a switch for one skill of it: the row's switch takes Pi's copy out, turns Codex's skill off
   // and the whole plugin off in Claude Code (a stand-in for its command) in one click, and its one Undo puts all three back.
@@ -19533,7 +19534,8 @@ if (tool === 'claude') {
   const f = p.join(H, '.claude/plugins/installed_plugins.json'), r = read(f, { version: 2, plugins: {} });
   if (verb === 'install') r.plugins[what] = [{ scope: 'user', installPath: copy(p.join(H, '.claude/plugins/cache', m, name, version)), version }];
   if (verb === 'uninstall') delete r.plugins[what];
-  write(f, r);
+  if (verb === 'install' || verb === 'uninstall') write(f, r);
+  if (verb === 'enable' || verb === 'disable') { const sf = p.join(H, '.claude/settings.json'), s = read(sf, {}); write(sf, { ...s, enabledPlugins: { ...s.enabledPlugins, [what]: verb === 'enable' } }); }
 } else {
   const sf = p.join(H, '.copilot/settings.json'), s = read(sf, {});
   if (s.extraKnownMarketplaces?.[m]?.source?.source === 'directory') write(sf, { ...s, enabledPlugins: { ...s.enabledPlugins, [what]: verb === 'install' || verb === 'enable' } });
@@ -19623,7 +19625,7 @@ if (tool === 'claude') {
   const label = selector => a.run(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? null`);
   // A line's click joins the page's list; the page acts until it is done, so this click doesn't wait for the page to settle.
   const press = selector => a.run(`document.querySelector(${JSON.stringify(selector)}).click()`);
-  const idle = async () => { await until(() => a.run(`document.body.dataset.busy !== 'true' && !/(Waiting to|Installing|Putting its items|Removing) /.test(document.querySelector('.details')?.textContent ?? '')`), 300); await a.settle(); };
+  const idle = async () => { await until(() => a.run(`document.body.dataset.busy !== 'true' && !/(Waiting to|Installing|Putting its items|Removing|Turning on|Turning off) /.test(document.querySelector('.details')?.textContent ?? '')`), 300); await a.settle(); };
   await open('agents', lead);
   await until(() => a.exists(act('agents', lead, 'copilot-cli')));
   // Example 1: an agent only through a plugin that is in Claude Code and not in Copilot CLI.
@@ -19697,7 +19699,11 @@ if (tool === 'claude') {
   await until(() => a.exists(`#pbox-0-${plugin}-copilot-cli`));
   same('the Plugins page shows it in Copilot CLI too', await a.run(`document.querySelector('#pbox-0-${plugin}-copilot-cli').getAttribute('aria-checked')`), 'true');
 
-  // Example 5: an agent in Copilot CLI, which has no switch for one: Turn the plugin off, then on, by Copilot CLI's own switch.
+  // Example 5: an agent in Copilot CLI, which has no switch for one: Turn the plugin off goes through turn (keep-out),
+  // putting copilot-cli in except, making the row switch partial and the plugin's page box unticked Off, kept installed
+  // with its skill switch off and locked; one tick turns it on, Undo turns it off, and setting config.json off by hand
+  // shows the same box without writing anything.
+  const entryNow = name => JSON.parse(readNow(join(home, '.central-knot/plugins.json'))).plugins.find(each => each.plugin === name);
   const claudeBefore = toolFiles().slice(0, 2);
   await open('agents', lead);
   await until(() => a.exists(act('agents', lead, 'copilot-cli')));
@@ -19706,13 +19712,57 @@ if (tool === 'claude') {
   await a.click(act('agents', lead, 'copilot-cli'));
   await idle();
   const copilotEnabled = () => JSON.parse(readNow(join(home, '.copilot/config.json')) || '{"installedPlugins":[]}').installedPlugins.find(each => each.name === plugin)?.enabled;
-  same('off: Copilot CLI’s own switch for the plugin is off, and its line offers Turn the plugin on', [copilotEnabled(), await label(act('agents', lead, 'copilot-cli'))], [false, 'Turn the plugin on']);
-  await a.click('#outcome-undo-plugin');
+  const rowSwitchState = (kind, key) => a.run(`(() => { const s = document.getElementById(${JSON.stringify(rowPart('switch', kind, key))}); return s ? [s.getAttribute('aria-checked'), s.classList.contains('switch-partial')] : null; })()`);
+  const pageBoxState = tool => a.run(`(() => { const b = document.querySelector('#pbox-0-${plugin}-${tool}'); const st = document.querySelector('.plugin-tool[data-tool="${tool}"] .plugin-tool-state'); return [b?.getAttribute('aria-checked'), b?.dataset.state, st?.textContent?.trim()]; })()`);
+  const skillSwitchState = (skillName, tool) => a.run(`(() => { const s = document.querySelector('#pskill-0-${plugin}-${skillName}-${tool}'); return s ? [s.getAttribute('aria-checked'), s.disabled, !!s.closest('.skill-switch')?.querySelector('.skill-switch-lock')] : null; })()`);
+  same('off from Library line: Copilot CLI disabled, copilot-cli in record except, row switch partial, line offers Turn the plugin on',
+    [copilotEnabled(), entryNow(plugin)?.except.includes('copilot-cli'), await rowSwitchState('agents', lead), await label(act('agents', lead, 'copilot-cli'))],
+    [false, true, ['true', true], 'Turn the plugin on']);
+  await a.click(byId(rowPart('line-undo', 'agents', lead, 'copilot-cli')));
   await idle();
-  same('its Undo turns it on again; Claude Code’s files never changed', [copilotEnabled(), await label(act('agents', lead, 'copilot-cli')), toolFiles().slice(0, 2)], [true, 'Turn the plugin off', claudeBefore]);
+  same('its line Undo turns it on again and removes copilot-cli from except; Claude Code’s files never changed',
+    [copilotEnabled(), entryNow(plugin)?.except.includes('copilot-cli'), await label(act('agents', lead, 'copilot-cli')), toolFiles().slice(0, 2)],
+    [true, false, 'Turn the plugin off', claudeBefore]);
+  // Turn off again via the Library line, then check the plugin's page, tick on with one command, Undo off, and hand-edit look writes nothing.
+  await a.click(act('agents', lead, 'copilot-cli'));
+  await idle();
+  await a.click('#nav-plugins');
+  await until(() => a.exists(`#pbox-0-${plugin}-copilot-cli`) || a.exists(`#popen-0-${plugin}`));
+  if (!(await a.exists(`#pbox-0-${plugin}-copilot-cli`))) await a.click(`#popen-0-${plugin}`);
+  await until(() => a.exists(`#pskill-0-${plugin}-incident-triage-copilot-cli`));
+  same('plugin page after Library line Off (Copilot CLI cached): box unticked Off, kept installed, skill switch off and locked',
+    [await pageBoxState('copilot-cli'), await skillSwitchState('incident-triage', 'copilot-cli'), (await a.text('.plugin-skills'))?.includes(`The whole plugin ${plugin} is off in Copilot CLI.`)],
+    [['false', 'kept-off', 'Off, kept installed'], ['false', true, true], true]);
+  const copilotTickCallsBefore = readNow(join(home, 'copilot-calls.txt'));
+  await a.click(`#pbox-0-${plugin}-copilot-cli`);
+  await until(() => a.run(`document.querySelector('#pbox-0-${plugin}-copilot-cli')?.getAttribute('aria-checked') === 'true'`));
+  await idle();
+  same('one tick turns cached Copilot CLI copy back on with one command and unlocks its skill switch',
+    [copilotEnabled(), readNow(join(home, 'copilot-calls.txt')).slice(copilotTickCallsBefore.length).trim(), await skillSwitchState('incident-triage', 'copilot-cli')],
+    [true, `plugin enable ${id}`, ['true', false, false]]);
+  await a.click('#plugins-undo');
+  await until(() => a.run(`document.querySelector('#pbox-0-${plugin}-copilot-cli')?.getAttribute('aria-checked') === 'false'`));
+  await idle();
+  same('Undo turns cached Copilot CLI copy off again', [copilotEnabled(), await pageBoxState('copilot-cli')], [false, ['false', 'kept-off', 'Off, kept installed']]);
+  await a.click(`#pbox-0-${plugin}-copilot-cli`);
+  await until(() => a.run(`document.querySelector('#pbox-0-${plugin}-copilot-cli')?.getAttribute('aria-checked') === 'true'`));
+  await idle();
+  // Edit .copilot/config.json off by hand (not in except): look shows the same unticked box and writes nothing.
+  const copilotCfgPath = join(home, '.copilot/config.json'), pluginsRecPath = join(home, '.central-knot/plugins.json');
+  const copilotCfgOn = readNow(copilotCfgPath);
+  const copilotCfgHandOff = JSON.stringify({ ...JSON.parse(copilotCfgOn), installedPlugins: JSON.parse(copilotCfgOn).installedPlugins.map(e => (e.name === plugin ? { ...e, enabled: false } : e)) }, null, 2);
+  writeFileSync(copilotCfgPath, copilotCfgHandOff);
+  const recBeforeCachedLook = readNow(pluginsRecPath);
+  await a.click('#header-refresh');
+  await until(() => a.run(`document.querySelector('#pbox-0-${plugin}-copilot-cli')?.dataset.state === 'kept-off' && !!document.querySelector('#pskill-0-${plugin}-incident-triage-copilot-cli')`));
+  same('Copilot CLI cached set off by hand shows Off, kept installed with locked skill switch and writes nothing on look',
+    [await pageBoxState('copilot-cli'), await skillSwitchState('incident-triage', 'copilot-cli'), readNow(pluginsRecPath) === recBeforeCachedLook, readNow(copilotCfgPath) === copilotCfgHandOff],
+    [['false', 'kept-off', 'Off, kept installed'], ['false', true, true], true, true]);
+  writeFileSync(copilotCfgPath, copilotCfgOn);
+  await a.click('#header-refresh');
+  await until(() => a.run(`document.querySelector('#pbox-0-${plugin}-copilot-cli')?.dataset.state === 'installed'`));
 
   // Example 4, and a row that goes once it is done: Put its items here on Pi from the skill only through the plugin; its Undo.
-  const entryNow = name => JSON.parse(readNow(join(home, '.central-knot/plugins.json'))).plugins.find(each => each.plugin === name);
   await open('skills', triage);
   await until(() => a.exists(act('skills', triage, 'pi-cli')));
   same('Pi’s line puts its items there, saying what kinds and promising no number', [await label(act('skills', triage, 'pi-cli')), await lineOf('Pi')], ['Put its items here', 'Puts varo-incident-response’s skills, agents and MCP servers into Pi, following the plugin.']);
@@ -19830,30 +19880,67 @@ if (tool === 'claude') {
   if (shots) await fullSize(a);
   await pictures('lines-skill-installed');
 
-  // Example 6: a plugin Copilot CLI loads live from a folder: its agent's line turns the plugin off at once with Undo, and its box on the plugin's page reads Off, kept installed.
-  writeFileSync(join(home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'directory', path: market } } }, enabledPlugins: { [id]: true } }));
+  // Example 6: a plugin Copilot CLI loads live from a folder: its agent's line turns the plugin off via turn (keep-out),
+  // putting copilot-cli in except, showing Off, kept installed with locked skill switch on the plugin's page; one tick on, Undo off, and hand edit writes nothing.
+  const copilotSettingsPath = join(home, '.copilot/settings.json');
+  writeFileSync(copilotSettingsPath, JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'directory', path: market } } }, enabledPlugins: { [id]: true } }));
   writeFileSync(copilotConfig, JSON.stringify({ installedPlugins: [] }));
   await a.click('#header-refresh');
   await open('agents', 'incident-lead');
   await until(() => a.exists(act('agents', 'incident-lead', 'copilot-cli')));
   same('Copilot CLI loads it live: Turn the plugin off, as any other copy, with no removing wording', [await label(act('agents', 'incident-lead', 'copilot-cli')), (await lineOf('Copilot CLI'))?.replace(/^Inside varo-incident-response 1\.10\.0, on here\. /, '')],
     ['Turn the plugin off', 'Turns the whole plugin varo-incident-response off in Copilot CLI, with its 1 skill and 1 MCP server.']);
-  const liveOn = () => JSON.parse(readNow(join(home, '.copilot/settings.json'))).enabledPlugins?.[id];
+  const liveOn = () => JSON.parse(readNow(copilotSettingsPath)).enabledPlugins?.[id];
   const liveCallsBefore = readNow(join(home, 'copilot-calls.txt'));
   await a.click(act('agents', 'incident-lead', 'copilot-cli'));
   await idle();
-  same('live copy off from its agent line runs uninstall at once, keeps the line as installed and off, and offers Undo',
-    [liveOn(), readNow(join(home, 'copilot-calls.txt')).slice(liveCallsBefore.length).trim(), await label(act('agents', 'incident-lead', 'copilot-cli')), await a.exists('#outcome-undo-plugin')],
-    [false, `plugin uninstall ${id}`, 'Turn the plugin on', true]);
-  check('the result names the whole plugin turned off in Copilot CLI', /incident-lead is off in Copilot CLI\. Its whole plugin varo-incident-response was turned off there/.test(await a.text('#header') ?? ''), await a.text('#header'));
+  same('live copy off from its agent line runs uninstall via turn (keep-out), puts copilot-cli in except, keeps the line as installed and off, and offers line Undo',
+    [liveOn(), entryNow(plugin)?.except.includes('copilot-cli'), readNow(join(home, 'copilot-calls.txt')).slice(liveCallsBefore.length).trim(), await label(act('agents', 'incident-lead', 'copilot-cli')), (await resultOf('Copilot CLI'))?.[1]],
+    [false, true, `plugin uninstall ${id}`, 'Turn the plugin on', true]);
+  check('the line result names the plugin turned off in Copilot CLI', /^Turned off varo-incident-response in Copilot CLI\./.test((await resultOf('Copilot CLI'))?.[0] ?? ''), await resultOf('Copilot CLI'));
   const liveCallsUndo = readNow(join(home, 'copilot-calls.txt'));
-  await a.click('#outcome-undo-plugin');
+  await a.click(byId(rowPart('line-undo', 'agents', 'incident-lead', 'copilot-cli')));
   await idle();
-  same('its Undo runs install and turns it back on', [liveOn(), readNow(join(home, 'copilot-calls.txt')).slice(liveCallsUndo.length).trim()], [true, `plugin install ${id}`]);
-  // On the plugin's page: unticking Copilot CLI's box says Turned off in Copilot CLI., shows Off, kept installed, and Undo turns it on.
+  same('its line Undo runs install, turns it back on, and removes copilot-cli from except', [liveOn(), entryNow(plugin)?.except.includes('copilot-cli'), readNow(join(home, 'copilot-calls.txt')).slice(liveCallsUndo.length).trim()], [true, false, `plugin install ${id}`]);
+  // Turn off again from the Library line, inspect plugin page (unticked box Off, kept installed + locked skill switch), one tick on, Undo off.
+  await a.click(act('agents', 'incident-lead', 'copilot-cli'));
+  await idle();
   await a.click('#nav-plugins');
   await until(() => a.exists(`#popen-0-${plugin}`) || a.exists(`#pbox-0-${plugin}-copilot-cli`));
   if (!(await a.exists(`#pbox-0-${plugin}-copilot-cli`))) await a.click(`#popen-0-${plugin}`);
+  await until(() => a.exists(`#pskill-0-${plugin}-incident-triage-copilot-cli`));
+  same('plugin page after Library line Off (Copilot CLI live): box unticked Off, kept installed, skill switch off and locked',
+    [await pageBoxState('copilot-cli'), await skillSwitchState('incident-triage', 'copilot-cli')],
+    [['false', 'kept-off', 'Off, kept installed'], ['false', true, true]]);
+  const liveTickBefore = readNow(join(home, 'copilot-calls.txt'));
+  await a.click(`#pbox-0-${plugin}-copilot-cli`);
+  await until(() => a.run(`document.querySelector('#pbox-0-${plugin}-copilot-cli')?.getAttribute('aria-checked') === 'true'`));
+  await idle();
+  same('one tick turns live Copilot CLI copy back on with one command and unlocks its skill switch',
+    [liveOn(), readNow(join(home, 'copilot-calls.txt')).slice(liveTickBefore.length).trim(), await skillSwitchState('incident-triage', 'copilot-cli')],
+    [true, `plugin install ${id}`, ['true', false, false]]);
+  await a.click('#plugins-undo');
+  await until(() => a.run(`document.querySelector('#pbox-0-${plugin}-copilot-cli')?.getAttribute('aria-checked') === 'false'`));
+  await idle();
+  same('Undo turns live Copilot CLI copy off again', [liveOn(), await pageBoxState('copilot-cli')], [false, ['false', 'kept-off', 'Off, kept installed']]);
+  await a.click(`#pbox-0-${plugin}-copilot-cli`);
+  await until(() => a.run(`document.querySelector('#pbox-0-${plugin}-copilot-cli')?.getAttribute('aria-checked') === 'true'`));
+  await idle();
+  // Edit .copilot/settings.json off by hand (not in except): look shows the same unticked box and writes nothing.
+  const liveSettingsOn = readNow(copilotSettingsPath);
+  const liveSettingsHandOff = JSON.stringify({ ...JSON.parse(liveSettingsOn), enabledPlugins: { [id]: false } }, null, 2);
+  writeFileSync(copilotSettingsPath, liveSettingsHandOff);
+  const recBeforeLiveLook = readNow(pluginsRecPath);
+  await a.click('#header-refresh');
+  await until(() => a.run(`document.querySelector('#pbox-0-${plugin}-copilot-cli')?.dataset.state === 'kept-off' && !!document.querySelector('#pskill-0-${plugin}-incident-triage-copilot-cli')`));
+  same('Copilot CLI live set off by hand shows Off, kept installed with locked skill switch and writes nothing on look',
+    [await pageBoxState('copilot-cli'), await skillSwitchState('incident-triage', 'copilot-cli'), readNow(pluginsRecPath) === recBeforeLiveLook, readNow(copilotSettingsPath) === liveSettingsHandOff],
+    [['false', 'kept-off', 'Off, kept installed'], ['false', true, true], true, true]);
+  writeFileSync(copilotSettingsPath, liveSettingsOn);
+  await a.click('#header-refresh');
+  await until(() => a.run(`document.querySelector('#pbox-0-${plugin}-copilot-cli')?.dataset.state === 'installed'`));
+
+  // On the plugin's page: unticking Copilot CLI's box says Turned off in Copilot CLI., shows Off, kept installed, and Undo turns it on.
   await until(() => a.exists(`#pbox-0-${plugin}-copilot-cli:not([disabled])`));
   await a.click(`#pbox-0-${plugin}-copilot-cli`);
   await until(() => a.exists('#plugins-undo'), 300);
@@ -19864,6 +19951,183 @@ if (tool === 'claude') {
   await a.click('#plugins-undo');
   await idle();
   same('its page Undo turns the live copy back on', liveOn(), true);
+
+  // Claude Code & Codex: Library line Off puts claude-cli in except, plugin page shows unticked Off, kept installed,
+  // page switch and row switch partial, one tick on + Undo off; hand-edited settings.json / config.toml show the same box and write nothing.
+  const snapBeforeClaudeCodex = [readNow(pluginsRecPath), readNow(join(home, '.claude/settings.json')), readNow(join(home, '.codex/config.toml')), readNow(copilotSettingsPath)];
+  await open('skills', 'incident-triage');
+  await until(() => a.exists(act('skills', 'incident-triage', 'claude-cli')));
+  const claudeSettingsPath = join(home, '.claude/settings.json'), claudeEnabled = () => JSON.parse(readNow(claudeSettingsPath) || '{}').enabledPlugins?.[id];
+  await a.click(act('skills', 'incident-triage', 'claude-cli'));
+  await idle();
+  same('Claude Code Library line Off puts claude-cli in except, disables it, and marks the Library row switch partial',
+    [claudeEnabled(), entryNow(plugin)?.except.includes('claude-cli'), await rowSwitchState('skills', 'incident-triage'), await label(act('skills', 'incident-triage', 'claude-cli'))],
+    [false, true, ['true', true], 'Turn the plugin on']);
+  await a.click('#nav-plugins');
+  await until(() => a.exists(`#pbox-0-${plugin}-claude-cli`));
+  const pageSwitchPartial = () => a.run(`document.querySelector('#pswitch-page-0-${plugin}')?.classList.contains('switch-partial')`);
+  same('plugin page after Library line Off (Claude Code): box unticked Off, kept installed, page switch partial',
+    [await pageBoxState('claude-cli'), await pageSwitchPartial()], [['false', 'kept-off', 'Off, kept installed'], true]);
+  const claudeTickCallsBefore = readNow(join(home, 'claude-calls.txt'));
+  await a.click(`#pbox-0-${plugin}-claude-cli`);
+  await until(() => a.run(`document.querySelector('#pbox-0-${plugin}-claude-cli')?.getAttribute('aria-checked') === 'true'`));
+  await idle();
+  same('one tick turns Claude Code copy back on with one command',
+    [claudeEnabled(), readNow(join(home, 'claude-calls.txt')).slice(claudeTickCallsBefore.length).trim()],
+    [true, `plugin enable ${id} --scope user`]);
+  await a.click('#plugins-undo');
+  await until(() => a.run(`document.querySelector('#pbox-0-${plugin}-claude-cli')?.getAttribute('aria-checked') === 'false'`));
+  await idle();
+  same('Undo turns Claude Code copy off again', [claudeEnabled(), await pageBoxState('claude-cli')], [false, ['false', 'kept-off', 'Off, kept installed']]);
+  // Claude Code settings.json edited off by hand (claude-cli NOT in except): look shows unticked Off, kept installed, partial page switch, and writes nothing.
+  const recClaudeIn = JSON.stringify({ ...JSON.parse(readNow(pluginsRecPath)), plugins: JSON.parse(readNow(pluginsRecPath)).plugins.map(e => (e.plugin === plugin ? { ...e, on: true, except: e.except.filter(t => t !== 'claude-cli') } : e)) }, null, 2) + '\n';
+  writeFileSync(pluginsRecPath, recClaudeIn);
+  const claudeHandOff = JSON.stringify({ enabledPlugins: { [id]: false } }, null, 2);
+  writeFileSync(claudeSettingsPath, claudeHandOff);
+  await a.click('#header-refresh');
+  await until(() => a.run(`document.querySelector('#pbox-0-${plugin}-claude-cli')?.dataset.state === 'kept-off'`));
+  same('Claude Code set off by hand shows Off, kept installed, partial page switch, and writes nothing on look',
+    [await pageBoxState('claude-cli'), await pageSwitchPartial(), readNow(pluginsRecPath) === recClaudeIn, readNow(claudeSettingsPath) === claudeHandOff],
+    [['false', 'kept-off', 'Off, kept installed'], true, true, true]);
+  writeFileSync(claudeSettingsPath, JSON.stringify({ enabledPlugins: { [id]: true } }, null, 2));
+  // Codex: seed installed copy, set off by hand in config.toml (codex-cli NOT in except), check look writes nothing + locked skill switch + Library line let-in + tick on + Undo off.
+  const codexCacheDir = join(home, '.codex/plugins/cache/ck-test-market', plugin, '1.10.0'), codexTomlPath = join(home, '.codex/config.toml');
+  cpSync(join(market, 'plugins', plugin), codexCacheDir, { recursive: true });
+  const recCodexIn = JSON.stringify({ ...JSON.parse(readNow(pluginsRecPath)), plugins: JSON.parse(readNow(pluginsRecPath)).plugins.map(e => (e.plugin === plugin ? { ...e, on: true, except: e.except.filter(t => t !== 'codex-cli') } : e)) }, null, 2) + '\n';
+  writeFileSync(pluginsRecPath, recCodexIn);
+  const codexHandOff = `[marketplaces.ck-test-market]\nsource = ${JSON.stringify(market)}\n\n[plugins."${id}"]\nenabled = false\n`;
+  writeFileSync(codexTomlPath, codexHandOff);
+  await a.click('#header-refresh');
+  await until(() => a.run(`document.querySelector('#pbox-0-${plugin}-codex-cli')?.dataset.state === 'kept-off' && !!document.querySelector('#pskill-0-${plugin}-incident-triage-codex-cli')`));
+  same('Codex set off by hand shows Off, kept installed, locked skill switch, partial page switch, and writes nothing on look',
+    [await pageBoxState('codex-cli'), await skillSwitchState('incident-triage', 'codex-cli'), (await a.text('.plugin-skills'))?.includes(`The whole plugin ${plugin} is off in Codex.`), await pageSwitchPartial(), readNow(pluginsRecPath) === recCodexIn, readNow(codexTomlPath) === codexHandOff],
+    [['false', 'kept-off', 'Off, kept installed'], ['false', true, true], true, true, true, true]);
+  await open('skills', 'incident-triage');
+  await until(() => a.exists(act('skills', 'incident-triage', 'codex-cli')));
+  same('Library row while Codex copy is off by hand: Codex line offers Turn the plugin on and row switch is partial',
+    [await label(act('skills', 'incident-triage', 'codex-cli')), await rowSwitchState('skills', 'incident-triage')],
+    ['Turn the plugin on', ['true', true]]);
+  await a.click('#nav-plugins');
+  await until(() => a.exists(`#pbox-0-${plugin}-codex-cli:not([disabled])`));
+  await a.click(`#pbox-0-${plugin}-codex-cli`);
+  await until(() => a.run(`document.querySelector('#pbox-0-${plugin}-codex-cli')?.getAttribute('aria-checked') === 'true'`));
+  await idle();
+  same('one tick turns Codex copy back on and unlocks its skill switch',
+    [/enabled = true/.test(readNow(codexTomlPath)), await skillSwitchState('incident-triage', 'codex-cli')],
+    [true, ['true', false, false]]);
+  await a.click('#plugins-undo');
+  await until(() => a.run(`document.querySelector('#pbox-0-${plugin}-codex-cli')?.getAttribute('aria-checked') === 'false'`));
+  await idle();
+  same('Undo turns Codex copy off again', [/enabled = false/.test(readNow(codexTomlPath)), await pageBoxState('codex-cli')], [true, ['false', 'kept-off', 'Off, kept installed']]);
+  // Last copy on turned off from Library while the other two copies are off in their tools' own files: record flips Off, page switch is Off (not partial).
+  writeFileSync(claudeSettingsPath, claudeHandOff);
+  await a.click('#header-refresh');
+  await until(() => a.run(`document.querySelector('#pbox-0-${plugin}-claude-cli')?.dataset.state === 'kept-off'`));
+  const partialWords = await a.run(`document.querySelector('#pswitch-page-0-${plugin}')?.getAttribute('aria-label') ?? ''`);
+  check('page switch words name off copies and kept-out tools apart, even when turned off in the tool’s own file',
+    partialWords.startsWith(`${plugin}: on, off in Claude Code and Codex, kept out of Pi, OpenCode and Antigravity.`), partialWords);
+  await open('agents', 'incident-lead');
+  await until(() => a.exists(act('agents', 'incident-lead', 'copilot-cli')));
+  await a.click(act('agents', 'incident-lead', 'copilot-cli'));
+  await idle();
+  await a.click('#nav-plugins');
+  await until(() => a.exists(`#pswitch-page-0-${plugin}`));
+  same('turning off the last copy that is on turns the plugin Off when the other two copies were off by hand',
+    [liveOn(), entryNow(plugin)?.on, await a.run(`document.querySelector('#pswitch-page-0-${plugin}')?.getAttribute('aria-checked')`), await pageSwitchPartial(),
+      await pageBoxState('claude-cli'), await pageBoxState('copilot-cli'), await pageBoxState('codex-cli')],
+    [false, false, 'false', false, ['false', 'kept-off', 'Off, kept installed'], ['false', 'kept-off', 'Off, kept installed'], ['false', 'kept-off', 'Off, kept installed']]);
+
+  // Row's switch Off then On then Undo for a plugin's skill in Claude Code alone, a plugin's agent in Copilot CLI alone, and a kept-off plugin's skill in Codex.
+  const docId = 'document-tools@ck-test-market', relId = 'release-helper@ck-test-market', relAgent = `${relId}/release-reviewer`, sheet = `${docId}/spreadsheet`;
+  const recNowAll = JSON.parse(readNow(pluginsRecPath));
+  const otherTools = ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
+  const recForRow = {
+    ...recNowAll,
+    plugins: [
+      ...recNowAll.plugins.filter(e => e.plugin !== 'document-tools' && e.plugin !== 'release-helper'),
+      { id: 'seeded-doc', source: market, marketName: 'ck-test-market', plugin: 'document-tools', on: true, except: otherTools },
+      { id: 'seeded-rel', source: market, marketName: 'ck-test-market', plugin: 'release-helper', on: true, except: ['claude-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'] },
+    ],
+  };
+  writeFileSync(pluginsRecPath, `${JSON.stringify(recForRow, null, 2)}\n`);
+  writeFileSync(claudeSettingsPath, JSON.stringify({ enabledPlugins: { [id]: true, [docId]: true } }, null, 2));
+  writeFileSync(copilotSettingsPath, JSON.stringify({ ...JSON.parse(snapBeforeClaudeCodex[3]), enabledPlugins: { [id]: true, [relId]: true } }, null, 2));
+  await a.click('#header-refresh');
+  await idle();
+  // Claude Code alone (document-tools/pdf-reader): row switch Off -> On -> Undo, one command each way, record restored.
+  const docBefore = entryNow('document-tools');
+  await open('skills', pdf);
+  await until(() => a.exists(byId(rowPart('switch', 'skills', pdf))));
+  const claudeRow1 = readNow(join(home, 'claude-calls.txt'));
+  await a.click(byId(rowPart('switch', 'skills', pdf)));
+  await idle();
+  same('Claude Code row switch Off runs one disable command and turns the plugin record Off',
+    [readNow(join(home, 'claude-calls.txt')).slice(claudeRow1.length).trim(), entryNow('document-tools')?.on, await rowSwitchState('skills', pdf)],
+    [`plugin disable ${docId} --scope user`, false, ['false', false]]);
+  const claudeRow2 = readNow(join(home, 'claude-calls.txt'));
+  await a.click(byId(rowPart('switch', 'skills', pdf)));
+  await idle();
+  same('same Claude Code row switch On runs one enable command and restores the plugin record as before',
+    [readNow(join(home, 'claude-calls.txt')).slice(claudeRow2.length).trim(), entryNow('document-tools'), await rowSwitchState('skills', pdf)],
+    [`plugin enable ${docId} --scope user`, docBefore, ['true', false]]);
+  const claudeRow3 = readNow(join(home, 'claude-calls.txt'));
+  await a.click('#outcome-undo-plugin');
+  await idle();
+  same('Claude Code row switch Undo after On runs one disable command and puts the plugin record back Off',
+    [readNow(join(home, 'claude-calls.txt')).slice(claudeRow3.length).trim(), entryNow('document-tools')?.on, await rowSwitchState('skills', pdf)],
+    [`plugin disable ${docId} --scope user`, false, ['false', false]]);
+
+  // Copilot CLI alone (release-helper/release-reviewer): row switch Off -> On -> Undo, one command each way, record restored.
+  const relBefore = entryNow('release-helper');
+  await open('agents', relAgent);
+  await until(() => a.exists(byId(rowPart('switch', 'agents', relAgent))));
+  const copilotRow1 = readNow(join(home, 'copilot-calls.txt'));
+  await a.click(byId(rowPart('switch', 'agents', relAgent)));
+  await idle();
+  same('Copilot CLI row switch Off runs one command and turns the plugin record Off',
+    [readNow(join(home, 'copilot-calls.txt')).slice(copilotRow1.length).trim(), entryNow('release-helper')?.on, await rowSwitchState('agents', relAgent)],
+    [`plugin uninstall ${relId}`, false, ['false', false]]);
+  const copilotRow2 = readNow(join(home, 'copilot-calls.txt'));
+  await a.click(byId(rowPart('switch', 'agents', relAgent)));
+  await idle();
+  same('same Copilot CLI row switch On runs one command and restores the plugin record as before',
+    [readNow(join(home, 'copilot-calls.txt')).slice(copilotRow2.length).trim(), entryNow('release-helper'), await rowSwitchState('agents', relAgent)],
+    [`plugin install ${relId}`, relBefore, ['true', false]]);
+  const copilotRow3 = readNow(join(home, 'copilot-calls.txt'));
+  await a.click('#outcome-undo-plugin');
+  await idle();
+  same('Copilot CLI row switch Undo after On runs one command and puts the plugin record back Off',
+    [readNow(join(home, 'copilot-calls.txt')).slice(copilotRow3.length).trim(), entryNow('release-helper')?.on, await rowSwitchState('agents', relAgent)],
+    [`plugin uninstall ${relId}`, false, ['false', false]]);
+
+  // Codex kept-off copy (document-tools/spreadsheet): row switch On turns the plugin on for spreadsheet alone (pdf-reader held off), Undo puts it back Off.
+  const codexDocDir = join(home, '.codex/plugins/cache/ck-test-market/document-tools/1.2.0');
+  cpSync(join(market, 'plugins/document-tools'), codexDocDir, { recursive: true });
+  writeFileSync(codexTomlPath, `[marketplaces.ck-test-market]\nsource = ${JSON.stringify(market)}\n\n[plugins."${docId}"]\nenabled = false\n`);
+  await a.click('#header-refresh');
+  await open('skills', sheet);
+  await until(() => a.exists(byId(rowPart('switch', 'skills', sheet))));
+  await a.click(byId(rowPart('switch', 'skills', sheet)));
+  await idle();
+  const codexAfterSheetOn = readNow(codexTomlPath);
+  same('Codex row switch On over a kept-off copy turns the plugin on for that skill alone and updates the record',
+    [/\[plugins\."document-tools@ck-test-market"\]\s*\nenabled = true/.test(codexAfterSheetOn), /name = "document-tools:pdf-reader"\s*\nenabled = false/.test(codexAfterSheetOn),
+      entryNow('document-tools')?.on, entryNow('document-tools')?.except.includes('codex-cli'), await rowSwitchState('skills', sheet)],
+    [true, true, true, false, ['true', false]]);
+  await a.click('#outcome-undo-plugin');
+  await idle();
+  same('Codex row switch Undo after On puts the plugin back Off in config.toml and in the record',
+    [/\[plugins\."document-tools@ck-test-market"\]\s*\nenabled = false/.test(readNow(codexTomlPath)), entryNow('document-tools')?.on, await rowSwitchState('skills', sheet)],
+    [true, false, ['false', false]]);
+
+  // Restore pre-Claude/Codex state before Example 8.
+  rmSync(join(home, '.codex/plugins'), { recursive: true, force: true });
+  writeFileSync(pluginsRecPath, snapBeforeClaudeCodex[0]);
+  if (snapBeforeClaudeCodex[1]) writeFileSync(claudeSettingsPath, snapBeforeClaudeCodex[1]); else rmSync(claudeSettingsPath, { force: true });
+  if (snapBeforeClaudeCodex[2]) writeFileSync(codexTomlPath, snapBeforeClaudeCodex[2]); else rmSync(codexTomlPath, { force: true });
+  if (snapBeforeClaudeCodex[3]) writeFileSync(copilotSettingsPath, snapBeforeClaudeCodex[3]); else rmSync(copilotSettingsPath, { force: true });
+  await a.click('#header-refresh');
+  await idle();
 
   // Example 8: the state changed under the page, its listing still there: nothing runs, and the line says how it stands.
   const settingsNow = JSON.parse(readNow(join(home, '.copilot/settings.json')));

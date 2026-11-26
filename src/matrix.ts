@@ -146,19 +146,18 @@ function lineFacts(kind: PartKind, plugin: string, marketName: string, tool: Har
 /**
  * A tool's line on a plugin's item (pluginline.ts lineControl), after `lead` (what the tool has): its sentence and its control, the
  * item's switch or a button that names its act; while its click waits or runs, what it is doing, then its result with its Undo
- * (resultLine: pluginstate.ts LineResult). Install and Put its items here wait their turn (turnFromLine); Turn the plugin on or off is the
- * item's own switch's click (switchPluginItem), but on a copy the plugins record keeps off, its box's tick (`let-in`, turnFromLine).
+ * (resultLine: pluginstate.ts LineResult). Every button (Install the plugin, Put its items here, Turn the plugin on or off) waits its turn
+ * in the page's list (turnFromLine).
  */
 function pluginLine(row: ItemRow | PluginRow, facts: LineFacts & { source?: string }, lead: string, reload: string) {
   const control = lineControl(facts), item = facts.through, busy = lineBusy(facts.plugin, facts.marketName, facts.tool), result = resultLine(row, facts.tool);
   const words = control.control === 'switch' ? (item ? cantSwitch(item) ?? switchWords(item) : '') : control.sentence;
   const text = [lead, busy ?? words, result ? '' : reload].filter(Boolean).join(' ');
   if (control.control !== 'button') return { text, result, control: control.control === 'switch' && item ? pluginItemControls(item, row) : null };
-  const { act } = control, whole = act === 'plugin-on' || act === 'plugin-off';
-  const run = () => (whole ? switchPluginItem(item!, row) : turnFromLine({ home: state.home!.home, source: facts.source!, marketName: facts.marketName, plugin: facts.plugin, tool: facts.tool, act,
-    item: { kind: facts.kind, name: nameOf(row) }, ...(facts.yours?.length ? { yours: facts.yours } : {}) }));
-  // Turn the plugin on or off applies at once, as the switch it stands for; the others wait their turn in the page's list.
-  const off = whole ? cantSwitchHere(item!) ?? writeOff(homeStops()) : !!busy || (selectOff() ?? queueOff(homeStops())) || (!facts.source && 'Not read yet.');
+  const { act } = control;
+  const run = () => turnFromLine({ home: state.home!.home, source: facts.source!, marketName: facts.marketName, plugin: facts.plugin, tool: facts.tool, act,
+    item: { kind: facts.kind, name: nameOf(row) }, ...(facts.yours?.length ? { yours: facts.yours } : {}) });
+  const off = !!busy || (selectOff() ?? queueOff(homeStops())) || (!facts.source && 'Not read yet.');
   return { text, result, control: h('span.details-tool-actions', {},
     button({ variant: 'outline', size: 'micro', label: control.label, id: elId('line', row, facts.tool), disabled: off, attrs: { title: control.sentence }, onclick: (event: MouseEvent) => { event.stopPropagation(); run(); } })) };
 }
@@ -2172,7 +2171,7 @@ function pluginRowSwitch(t: Table, row: PluginRow) {
   const label = [`${row.name}: ${on ? `on in ${toolsPhrase(onTools, tools())}` : 'off'}. Click to turn it ${on ? 'off' : 'on'} in every tool that can switch it.`, wholeWords(items, !on)].filter(Boolean).join(' ');
   const wanted = wantedOn(kind, row.key);
   // Its clicks turn the plugin's switches in each tool, no kind's record: the home's gate.
-  return toggle({ on: wanted ?? on, label: wanted === undefined ? label : turningLabel(row.name, wanted), disabled: queueOff(homeStops()), id: elId('switch', row), onchange: next => {
+  return toggle({ on: wanted ?? on, partial: wanted === undefined && on && onTools.length < items.length, label: wanted === undefined ? label : turningLabel(row.name, wanted), disabled: queueOff(homeStops()), id: elId('switch', row), onchange: next => {
     if (searching(t)) holdFound(t);
     if (takeBack(kind, row.key)) { rerender(); return; }
     // Drawn as a click on it asks, it is clicked from that state, and worked out in its turn; else from what each tool has now.
@@ -2245,9 +2244,10 @@ function itemSwitch(t: Table, skill: ItemRow, prefix = '') {
  */
 function librarySwitch(t: Table, skill: ItemRow, id: string) {
   const item = itemOf(skill), wanted = wantedOn(skill.kind, skill.key), on = wanted ?? libraryPlace(item) === 'on', tools = toolsFor(t, skill.kind);
+  const through = throughItems(t, skill);
   // Where a tool has it through a plugin with no switch for one item there, the click turns the whole plugin: said first.
-  const label = wanted !== undefined ? turningLabel(nameOf(skill), wanted) : [switchLabel(skill, item, tools, leftOutTools()), wholeWords(throughItems(t, skill), !on)].filter(Boolean).join(' ');
-  return toggle({ on, partial: wanted === undefined && isPartial(item, tools, skill), label, onchange: next => flip(t, skill, next), disabled: queueOff(kindStops(skill.kind)), id });
+  const label = wanted !== undefined ? turningLabel(nameOf(skill), wanted) : [switchLabel(skill, item, tools, leftOutTools()), wholeWords(through, !on)].filter(Boolean).join(' ');
+  return toggle({ on, partial: wanted === undefined && (isPartial(item, tools, skill) || (on && through.some(entry => !itemOn(entry)))), label, onchange: next => flip(t, skill, next), disabled: queueOff(kindStops(skill.kind)), id });
 }
 
 /**

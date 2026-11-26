@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
 import { resultLines, resultParts, resultSentence, undoTitle } from '../src/pluginplan.ts';
 import * as engine from '../src/plugins.ts';
-import { WAITS_TO_MOVE, boxOf, foundIn, toolMark } from '../src/pluginstatus.ts';
+import { WAITS_TO_MOVE, boxOf, foundIn, recordUnread, toolMark } from '../src/pluginstatus.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { readProfiles } from '../src/profiles.ts';
 import { pluginLive, pluginPlan, wholeTurns, type PluginHome } from '../src/profileplan.ts';
@@ -1315,7 +1315,7 @@ test('Copilot CLI’s live copy turned off with Copilot CLI’s own command read
   } finally { await box.cleanup(); }
 });
 
-test('Undo of a fresh install of Copilot CLI’s live copy keeps the record with Copilot CLI out, reads Off, kept installed, says turned off (never removed), and a tick turns it on', async () => {
+test('Undo of a fresh install of Copilot CLI’s live copy restores the record without writing an entry, reads Off, kept installed, says turned off (never removed), and a tick turns it on', async () => {
   const box = await switchHome({
     tools: ['claude-cli', 'copilot-cli'],
     engine: {
@@ -1372,10 +1372,10 @@ test('Undo of a fresh install of Copilot CLI’s live copy keeps the record with
     assert.equal(resultSentence(resultLines(undone.done, true), true), 'Undone: pdf turned off in Copilot CLI.');
     assert.deepEqual(resultParts(resultLines(undone.done, true), true, { short: true, here: { plugin: 'pdf', source: box.root } }), ['Undone: ', 'turned off in Copilot CLI', '.']);
     const saved = (await box.record()).plugins.find(each => each.plugin === 'pdf');
-    assert.deepEqual([saved?.on, saved?.except.includes('copilot-cli')], [false, false], 'record keeps the plugin Off');
+    assert.equal(saved, undefined, 'live Undo restores the missing record without writing an entry');
     const view = await box.markets.view(), entry = view.marketplaces.find(each => each.source === box.root)!;
     const mark = toolMark(view, entry, 'pdf', 'copilot-cli', entry.switches!.pdf!.tools['copilot-cli']);
-    assert.deepEqual([foundIn(view, entry.switches!.pdf), mark.mark, boxOf(view, entry, 'pdf', 'copilot-cli', mark)], [[], 'kept-off', { ticked: false }]);
+    assert.deepEqual([foundIn(view, entry, 'pdf'), mark.mark, boxOf(view, entry, 'pdf', 'copilot-cli', mark)], [[], 'kept-off', { ticked: false }]);
     // A tick afterwards turns the live copy back on through setWhole (one install, never uninstall).
     box.calls.length = 0;
     await box.markets.turn(box.root, 'pdf', 'let-in', 'copilot-cli', box.home);
@@ -1391,9 +1391,9 @@ test('Undo of a fresh install of Copilot CLI’s live copy keeps the record with
     const undoneOn = await box.markets.undoTurn(box.root, 'notes', turnedOn.before!, turnedOn.back!, box.home);
     assert.equal(resultSentence(resultLines(undoneOn.done, true), true), 'Undone: notes removed from Claude Code; turned off in Copilot CLI.');
     const notesSaved = (await box.record()).plugins.find(each => each.plugin === 'notes');
-    assert.deepEqual([notesSaved?.on, notesSaved?.except], [false, []]);
+    assert.equal(notesSaved, undefined, 'live Undo restores the missing record without writing an entry');
     const view2 = await box.markets.view(), entry2 = view2.marketplaces.find(each => each.source === box.root)!;
-    assert.deepEqual([foundIn(view2, entry2.switches!.notes), toolMark(view2, entry2, 'notes', 'copilot-cli', entry2.switches!.notes!.tools['copilot-cli']).mark], [[], 'kept-off']);
+    assert.deepEqual([foundIn(view2, entry2, 'notes'), toolMark(view2, entry2, 'notes', 'copilot-cli', entry2.switches!.notes!.tools['copilot-cli']).mark], [[], 'kept-off']);
 
     // Case 3: installed by hand in Claude Code (no record), tick Copilot CLI's box, then Undo keeps Claude Code On and Copilot CLI kept out.
     await put(join(box.root, 'plugins/extra/skills/extra/SKILL.md'), '---\nname: extra\ndescription: extra\n---\n');
@@ -1409,13 +1409,13 @@ test('Undo of a fresh install of Copilot CLI’s live copy keeps the record with
     const undoneExtra = await box.markets.undoTurn(box.root, 'extra', tickedExtra.before!, tickedExtra.back!, box.home);
     assert.equal(resultSentence(resultLines(undoneExtra.done, true), true), 'Undone: extra turned off in Copilot CLI.');
     const extraSaved = (await box.record()).plugins.find(each => each.plugin === 'extra');
-    assert.deepEqual([extraSaved?.on, extraSaved?.except.includes('claude-cli'), extraSaved?.except.includes('copilot-cli')], [true, false, true]);
+    assert.equal(extraSaved, undefined, 'live Undo restores the missing record without writing an entry');
     const view3 = await box.markets.view(), entry3 = view3.marketplaces.find(each => each.source === box.root)!;
     assert.deepEqual([
-      foundIn(view3, entry3.switches!.extra),
+      foundIn(view3, entry3, 'extra'),
       toolMark(view3, entry3, 'extra', 'claude-cli', entry3.switches!.extra!.tools['claude-cli']).mark,
       toolMark(view3, entry3, 'extra', 'copilot-cli', entry3.switches!.extra!.tools['copilot-cli']).mark,
-    ], [[], 'installed', 'kept-off']);
+    ], [['claude-cli'], 'installed', 'kept-off']);
   } finally { await box.cleanup(); }
 });
 
@@ -1497,5 +1497,88 @@ test('a cold-cache Find click on a cached Git marketplace opens no sibling plugi
     const shown = await box.markets.view();
     const market = shown.marketplaces.find(entry => entry.source === gitSource);
     assert.equal(market?.plugins.find(plugin => plugin.name === 'other')?.components?.skills, 2);
+  } finally { await box.cleanup(); }
+});
+
+test('Turning off the last copy that is on turns the plugin Off even when other copies were turned off in their tools’ own files', async () => {
+  const box = await switchHome({ codex: true, tools: ['claude-cli', 'copilot-cli', 'codex-cli'] });
+  try {
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    assert.deepEqual((await box.record()).plugins.map(entry => [entry.on, entry.except]), [[true, []]]);
+    // Two copies turned off in their tools' own files (not in except): Claude Code is the last copy on.
+    const copilotCopy = join(box.home, '.copilot/installed-plugins/team/pdf');
+    await put(join(copilotCopy, 'skills/pdf/SKILL.md'), '---\nname: pdf\ndescription: pdf\n---\n');
+    await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { team: { source: { source: 'git', url: box.root } } } }));
+    await put(join(box.home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'pdf', marketplace: 'team', version: '1.0.0', cache_path: copilotCopy, enabled: false }] }));
+    await put(join(box.home, '.codex/config.toml'), `[marketplaces.team]\nsource = "${box.root}"\n\n[plugins."pdf@team"]\nenabled = false\n`);
+    const before = (await box.markets.view()).marketplaces.find(entry => entry.source === box.root)!.states.pdf!;
+    assert.deepEqual((['claude-cli', 'copilot-cli', 'codex-cli'] as HarnessId[]).map(t => { const st = before[t]; return st?.state === 'installed' && !!st.off; }), [false, true, true]);
+    const off = await box.markets.turn(box.root, 'pdf', 'keep-out', 'claude-cli', box.home);
+    assert.equal((await box.record()).plugins[0]!.on, false, 'no copy left on: record flips Off');
+    // Undo turns Claude Code back on and restores the record to On with no tool in except.
+    await box.markets.undoTurn(box.root, 'pdf', off.before!, off.back!, box.home);
+    assert.deepEqual((await box.record()).plugins.map(entry => [entry.on, entry.except]), [[true, []]]);
+  } finally { await box.cleanup(); }
+});
+
+test('A one-tool click writes nothing and returns the refusal when that tool is held or unread, while a record-only keep-out still writes', async () => {
+  let claudeCli = true;
+  const box = await switchHome({
+    codex: true,
+    pi: false,
+    tools: ['claude-cli', 'codex-cli'],
+    engine: { findClis: async () => ({ binaries: { ...(claudeCli ? { 'claude-cli': '/bin/true' } : {}), 'codex-cli': '/bin/true' }, apps: {} }) },
+  });
+  try {
+    const recPath = join(box.home, '.central-knot/plugins.json');
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    // 1. Copy is on in Claude Code, Claude's CLI is unavailable: one-tool keep-out refuses without writing plugins.json.
+    claudeCli = false;
+    const viewOn = await box.markets.view();
+    const entryOn = viewOn.marketplaces.find(entry => entry.source === box.root)!;
+    const boxOn = boxOf(viewOn, entryOn, 'pdf', 'claude-cli', toolMark(viewOn, entryOn, 'pdf', 'claude-cli', entryOn.switches!.pdf!.tools['claude-cli']));
+    const claudeWhy = boxOn.off!;
+    assert.ok(claudeWhy, 'Claude Code’s box is held with its own words');
+    box.calls.length = 0;
+    const recBeforeKeepOut = await readFile(recPath, 'utf8');
+    const heldOut = await box.markets.turn(box.root, 'pdf', 'keep-out', 'claude-cli', box.home);
+    assert.equal(await readFile(recPath, 'utf8'), recBeforeKeepOut, 'held keep-out leaves plugins.json byte for byte');
+    assert.deepEqual([box.calls, heldOut.back, heldOut.done.map(step => [step.tool, step.report.outcome, step.report.message])],
+      [[], [], [['claude-cli', 'held', claudeWhy]]]);
+
+    // 2. Copy is kept off in Claude Code, Claude's CLI is unavailable: one-tool let-in refuses without writing plugins.json.
+    claudeCli = true;
+    await box.markets.turn(box.root, 'pdf', 'keep-out', 'claude-cli', box.home);
+    claudeCli = false;
+    const viewOff = await box.markets.view();
+    const entryOff = viewOff.marketplaces.find(entry => entry.source === box.root)!;
+    const boxOff = boxOf(viewOff, entryOff, 'pdf', 'claude-cli', toolMark(viewOff, entryOff, 'pdf', 'claude-cli', entryOff.switches!.pdf!.tools['claude-cli']));
+    assert.equal(boxOff.off, claudeWhy);
+    box.calls.length = 0;
+    const recBeforeLetIn = await readFile(recPath, 'utf8');
+    const heldIn = await box.markets.turn(box.root, 'pdf', 'let-in', 'claude-cli', box.home);
+    assert.equal(await readFile(recPath, 'utf8'), recBeforeLetIn, 'held let-in leaves plugins.json byte for byte');
+    assert.deepEqual([box.calls, heldIn.back, heldIn.done.map(step => [step.tool, step.report.outcome, step.report.message])],
+      [[], [], [['claude-cli', 'held', claudeWhy]]]);
+
+    // 3. Claude Code's own plugin record is unreadable: one-tool let-in refuses without writing plugins.json.
+    claudeCli = true;
+    const claudeInstalledPath = join(box.home, '.claude/plugins/installed_plugins.json');
+    const savedInstalled = await readFile(claudeInstalledPath, 'utf8');
+    await put(claudeInstalledPath, '{not json');
+    box.calls.length = 0;
+    const recBeforeUnread = await readFile(recPath, 'utf8');
+    const unreadIn = await box.markets.turn(box.root, 'pdf', 'let-in', 'claude-cli', box.home);
+    assert.equal(await readFile(recPath, 'utf8'), recBeforeUnread, 'unreadable record leaves plugins.json byte for byte');
+    assert.deepEqual([box.calls, unreadIn.back, unreadIn.done.map(step => [step.tool, step.report.outcome, step.report.message])],
+      [[], [], [['claude-cli', 'held', recordUnread('claude-cli')]]]);
+
+    // 4. Record-only keep-out (nothing installed in Claude Code, record wants it in): still writes except without running anything.
+    await put(claudeInstalledPath, savedInstalled);
+    await box.markets.turn(box.root, 'pdf', 'let-in', 'claude-cli', box.home);
+    await put(claudeInstalledPath, JSON.stringify({ version: 2, plugins: {} }));
+    box.calls.length = 0;
+    const recordOnly = await box.markets.turn(box.root, 'pdf', 'keep-out', 'claude-cli', box.home);
+    assert.deepEqual([box.calls, (await box.record()).plugins[0]!.except, recordOnly.done], [[], ['claude-cli'], []]);
   } finally { await box.cleanup(); }
 });

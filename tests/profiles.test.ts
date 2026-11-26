@@ -309,6 +309,10 @@ test('The Undo of a switch that turned a plugin off in Claude Code leaves it off
   // Off there as the switch left it: its Undo turns it on. Turned Off on its page since (kept off): its Undo leaves it.
   const offThere = (more: Partial<InstalledPlugin>) => pluginLive(docsHome([docsIn('claude-cli', { off: true, ...more })]));
   assert.deepEqual([pluginUndo(entry, offThere({})).whole.flatMap(run => run.ops.map(each => each.action)), pluginUndo(entry, offThere({ keptOff: true })).whole], [['plugin-on'], []]);
+  // A profile switch with the plugin's skill included still leaves a kept-off copy off in both Claude Code and Codex.
+  const keptHome = pluginLive(docsHome([docsIn('claude-cli', { off: true, keptOff: true }), docsIn('codex-cli', { off: true, keptOff: true })]));
+  const planned = pluginPlan(profile('Docs', [pdfId]), keptHome).find(item => item.id === pdfId)!;
+  assert.deepEqual([planned.on, planned.held.map(each => each.tool)], [[], ['claude-cli', 'codex-cli']]);
 });
 
 test('His own server not in Copilot CLI now is compared by the exact spelling Copilot CLI will write (kept copilotName, else its item name)', () => {
