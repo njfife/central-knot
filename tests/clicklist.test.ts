@@ -3251,32 +3251,47 @@ test('Undo hover after a fresh live Copilot CLI install says turns it off, kept 
     'Reverses what changed for alpha, through each tool’s own command or switch: uninstalls it from Claude Code.');
 });
 
-test('Whole-plugin Off from a row switch routes through turnPlugin keep-out and its Undo routes through undoPluginTurn', async t => {
+test('Whole-plugin Off from a row switch routes through turnPlugin keep-out and its Undo routes through undoPluginTurn newest-first', async t => {
   pluginProfileWorld(t);
   const calls: string[] = [];
-  const beforeEntry = { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: [] as HarnessId[] };
+  let record: { id: string; source: string; marketName: string; plugin: string; on: boolean; except: HarnessId[] } =
+    { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: [] };
   t.mock.method(api, 'turnPlugin', async (source: string, plugin: string, what: PluginTurn, tool?: HarnessId) => {
     calls.push(`turn:${source}:${plugin}:${what}:${tool}`);
+    const before = { ...record, except: [...record.except] };
+    record = { ...record, except: [...record.except, tool!] };
     return {
       done: [{ source, marketName: 'team', plugin, tool: tool!, action: 'plugin-off', report: { tool: tool!, outcome: 'plugin-off', changed: true, message: 'Turned off.', runs: [] } }],
-      before: beforeEntry,
+      before,
       back: [{ source, marketName: 'team', plugin, tool: tool!, action: 'plugin-on' }],
     };
   });
   t.mock.method(api, 'undoPluginTurn', async (source: string, plugin: string, before: unknown, back: PluginOp[]) => {
-    calls.push(`undo:${source}:${plugin}:${(before as { on?: boolean } | null)?.on}:${back.map(op => op.action).join(',')}`);
-    return { done: [{ source, marketName: 'team', plugin, tool: 'claude-cli', action: 'plugin-on', report: { tool: 'claude-cli', outcome: 'plugin-on', changed: true, message: 'Back on.', runs: [] } }] };
+    const prev = before as typeof record;
+    calls.push(`undo:${source}:${plugin}:${back.map(op => `${op.tool}:${op.action}`).join(',')}:except=${prev.except.join(',')}`);
+    record = { ...prev, except: [...prev.except] };
+    return { done: back.map(op => ({ ...op, report: { tool: op.tool, outcome: 'plugin-on', changed: true, message: 'Back on.', runs: [] } })) };
   });
   const setWholeMock = t.mock.method(api, 'setPluginOn', async () => { calls.push('setPluginOn'); return { reports: [report('plugin-off', 'Turned off.')] }; });
   await applyClick({
-    kind: 'skills', items: ['triage'], rows: [{ kind: 'skills', key: 'alpha@team/triage' }], changes: [],
-    said: 'triage is off in Claude Code.', pluginsOnly: true,
-    plugins: { ops: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-off' }] },
-    undone: 'Undone: triage is back on in Claude Code.',
+    kind: 'agents', items: ['lead'], rows: [{ kind: 'agents', key: 'alpha@team/lead' }], changes: [],
+    said: 'lead is off in Claude Code and Copilot CLI.', pluginsOnly: true,
+    plugins: { ops: [
+      { source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-off' },
+      { source: '/market', marketName: 'team', plugin: 'alpha', tool: 'copilot-cli', action: 'plugin-off' },
+    ] },
+    undone: 'Undone: lead is back on in Claude Code and Copilot CLI.',
   });
   assert.equal(setWholeMock.mock.callCount(), 0, 'listed plugin whole-off never bypasses turnPlugin');
-  assert.deepEqual(calls, ['turn:/market:alpha:keep-out:claude-cli']);
-  await app.outcome!.act!.run();
-  assert.deepEqual(calls, ['turn:/market:alpha:keep-out:claude-cli', 'undo:/market:alpha:true:plugin-on']);
+  assert.deepEqual(calls, ['turn:/market:alpha:keep-out:claude-cli', 'turn:/market:alpha:keep-out:copilot-cli']);
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual(calls, [
+    'turn:/market:alpha:keep-out:claude-cli',
+    'turn:/market:alpha:keep-out:copilot-cli',
+    'undo:/market:alpha:copilot-cli:plugin-on:except=claude-cli',
+    'undo:/market:alpha:claude-cli:plugin-on:except=',
+  ]);
+  assert.deepEqual(record.except, [], 'Undo restores the original record before the first turn');
 });
 

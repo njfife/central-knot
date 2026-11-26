@@ -989,7 +989,7 @@ export async function runSwitches(ops: PluginOp[], undo = false, turnsIn: TurnUn
   const ran = (op: PluginOp) => done.some(entry => entry.tool === op.tool && entry.plugin === op.plugin && succeeded(entry.report));
   const failedIn = [...new Set([...done.filter(entry => !succeeded(entry.report)).map(entry => entry.tool), ...ops.filter(op => !ran(op)).map(op => op.tool)])];
   const ownBack = undo ? [] : reverse(done.filter(entry => !turned.has(`${entry.source}\0${entry.plugin}\0${entry.tool}\0${entry.action}`)));
-  return { done, lines, failed: lines.filter(line => !line.ok), failedIn, back: ownBack, turns: undo ? [] : turns, stopped };
+  return { done, lines, failed: lines.filter(line => !line.ok), failedIn, back: ownBack, turns: undo ? [] : [...turns].reverse(), stopped };
 }
 
 /**
