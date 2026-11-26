@@ -25,7 +25,7 @@ import { button, h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
 import { clickResults, heldWhole, keptBack } from './clickplan.ts';
-import { entriesNow, everythingDone, libraryAction, libraryEntry, librarySentence, restorePlan } from './historyactions.ts';
+import { entriesNow, everythingAction, everythingDone, libraryAction, libraryEntry, librarySentence, restorePlan } from './historyactions.ts';
 import { asksWhichCopy, copiesDiffer, libraryWords, placeOf, stillReadWords } from './libraryrow.ts';
 import { andList, countedAs, fewNames, fileName, kindNames, kindNouns, noToolsSentence, notAllThrough, orList, profileLeftUse, rowNames, rowNouns, saidByKind, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
@@ -1313,7 +1313,7 @@ function sayEverything(page: Page, past: HistoryEvent, result: ApplyResult, swit
   const made = (result.made ?? []).map(id => state.history.data?.find(event => event.id === id));
   const text = everythingDone(past, made, made.filter(event => event?.kind === 'restored').length, switchedOn);
   const notDone = [...new Set(result.results.filter(keptBack).map(entry => entry.message))];
-  tellWritten({ page, item: past.item, warn: notDone.length > 0, history: true, text: [text, ...notDone.slice(0, 3)].filter(Boolean).join(' ') }, result.reloads, did);
+  tellWritten({ page, item: past.item, warn: notDone.length > 0, band: true, text: [text, ...notDone.slice(0, 3)].filter(Boolean).join(' ') }, result.reloads, did);
 }
 
 // ---------- A skill's own two actions ----------
@@ -1807,15 +1807,42 @@ export const setSync = (on: boolean) => busy(on ? 'Turning Sync on…' : 'Turnin
 /**
  * Synchronize everything, the open home's standing rule, on or off from Settings (everything.ts setSyncEverything; first setup's
  * question is firstsetup.ts's). Turned on, main's next pass takes in what is found now: at once with Automatic sync on, at Sync
- * once with it off. Answers why not, if it couldn't be set.
+ * once with it off, and Settings always shows the result band with History's Undo when this click switched it on. Answers why
+ * not, if it couldn't be set.
  */
 export const switchSyncEverything = (on: boolean) => busy(on ? 'Turning on Synchronize everything…' : 'Turning off Synchronize everything…', async () => {
-  const set = await api().setSyncEverything(on, state.home!.home);
+  const home = state.home!.home;
+  const set = await api().setSyncEverything(on, home);
   if (set.view) setHome(set.view);
-  if (set.stopped) { announce(`Synchronize everything was not changed. ${set.stopped}`); return; }
-  const out = on && state.home?.syncOn ? withReloads({ page: 'settings', band: true, text: 'Synchronize everything is on.' }, set.reloads) : undefined;
-  if (out?.reloads?.length) { tell(out); return; }
-  announce(!on ? 'Synchronize everything is off: what turns up in a tool waits for Add.' : state.home?.syncOn ? 'Synchronize everything is on.' : 'Synchronize everything is on. It takes items in at Sync once, or when Automatic sync is on.', true);
+  if (set.stopped) {
+    announce(`Synchronize everything was not changed. ${set.stopped}`);
+    return;
+  }
+  if (!on) {
+    announce('Synchronize everything is off: what turns up in a tool waits for Add.', true);
+    return;
+  }
+  const text = state.home?.syncOn
+    ? 'Synchronize everything is on.'
+    : 'Synchronize everything is on. It takes items in at Sync once, or when Automatic sync is on.';
+  let act: Outcome['act'];
+  if (set.event && state.home?.home === home) {
+    await putHistory().catch(() => undefined);
+    const events = state.history.data;
+    const entry = events?.find(each => each.id === set.event);
+    const offer = entry && events ? everythingAction(entry, events, entriesNow(state.home)) : undefined;
+    if (offer) {
+      act = {
+        label: offer.label,
+        id: 'outcome-undo',
+        title: offer.help,
+        run: () => {
+          if (state.home?.home === home) void restoreEvent(set.event!);
+        },
+      };
+    }
+  }
+  tellWritten({ page: 'settings', band: true, text, act }, state.home?.syncOn ? set.reloads : [], !!set.event);
 });
 
 let menuSyncHome: string | undefined;

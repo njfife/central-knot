@@ -7160,6 +7160,10 @@ async function syncEverythingFlow() {
   const freshSaved = await switchOnWhileSaving(join(skill(claude, 'fresh', text('fresh', 'Just saved.')), 'SKILL.md'));
   const record = JSON.parse(readFileSync(join(home, '.central-knot/sync.json'), 'utf8'));
   same('turned on, it is kept in the home’s sync record, and the row says what still waits for a choice', [await ruleOn(), record.syncEverything, await ruleSays()], ['true', true, '1 found item has copies that differ and waits for your choice of copy.']);
+  for (let tries = 0; tries < 40 && !(await a.exists('[data-outcome] #outcome-undo')); tries++) await wait(100);
+  same('the Settings band says Synchronize everything is on and offers History’s Undo with its help',
+    await a.run(`(() => { const o = document.querySelector('[data-outcome]'), u = o?.querySelector('#outcome-undo'); return [o?.querySelector('.band-text')?.textContent, u?.textContent, u?.title, u?.getAttribute('aria-description')]; })()`),
+    ['Synchronize everything is on.', 'Undo', 'Switch Synchronize everything off and take back the 2 items it took in since, each tool it was found in keeping its own copy', 'Switch Synchronize everything off and take back the 2 items it took in since, each tool it was found in keeping its own copy']);
   same('the pass right after took in what was found: notes is in Codex now, byte for byte', readNow(join(codex, 'notes/SKILL.md')), text('notes', 'Take notes.'));
   same('and Settings says what it took in, a line per kind, each with History', await a.all('.setting-added .setting-message', 'e.textContent'),
     ['Synchronize everything took in 1 skill, found in Claude Code: notes. History can undo it.History', 'Synchronize everything took in 1 MCP server, found in Codex: files. History can undo it.History']);
@@ -7226,6 +7230,86 @@ async function syncEverythingFlow() {
   await takenInSoon('later', text('later', 'Saved just before.'), laterSaved, 'a copy the pass left inside the settle window is taken in a moment later, by itself');
   same('no page errors, Synchronize everything, switched on again', a.pageErrors, []);
   await a.quit();
+
+  // Inline Undo on Settings: two kinds + conflict with Automatic sync on, a later addition edited before Undo, Automatic sync off
+  // (no reloads), and a repeat when already on (two windows: no Undo for an entry not made).
+  const uHome = join(scratch, 'home-everything-undo'), uData = join(scratch, 'everything-undo-data');
+  mkdirSync(join(uHome, '.local/bin'), { recursive: true });
+  for (const [name, output] of [['claude', '2.1.309 (Claude Code)'], ['codex', 'codex-cli 0.142.3']]) {
+    writeFileSync(join(uHome, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`);
+    chmodSync(join(uHome, '.local/bin', name), 0o755);
+  }
+  const [uClaude, uCodex] = ['.claude/skills', '.codex/skills'].map(path => join(uHome, path));
+  const settleOld = paths => { for (const path of paths) utimesSync(path, anHourAgo, anHourAgo); };
+  settleOld([skill(uClaude, 'notes', text('notes', 'Take notes.')), join(uClaude, 'notes/SKILL.md'),
+    skill(uClaude, 'review', text('review', 'Review gently.')), join(uClaude, 'review/SKILL.md'),
+    skill(uCodex, 'review', text('review', 'Review hard.')), join(uCodex, 'review/SKILL.md')]);
+  writeFileSync(join(uHome, '.claude.json'), '{\n  "mcpServers": {}\n}\n');
+  writeFileSync(join(uHome, '.codex/config.toml'), '[mcp_servers.files]\ncommand = "files-mcp"\nargs = []\n');
+  settleOld([join(uHome, '.claude.json'), join(uHome, '.codex/config.toml')]);
+  mkdirSync(uData, { recursive: true });
+  writeFileSync(join(uData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: uHome } }));
+  const b = await launch(uData, [], real);
+  const uRuleOn = () => b.run(`document.querySelector('#sync-everything-on')?.getAttribute('aria-checked')`);
+  const uRecord = () => JSON.parse(readNow(join(uHome, '.central-knot/sync.json')) || '{}');
+  const uBand = () => b.run(`(() => { const o = document.querySelector('[data-outcome]'), u = o?.querySelector('#outcome-undo'); return o ? [o.querySelector('.band-text')?.textContent, u?.textContent ?? null, u?.title ?? null, u?.getAttribute('aria-description') ?? null, !!o.querySelector('.reload-list'), !!o.querySelector('#outcome-history')] : null; })()`);
+  const waitBand = async (rule, prefix) => {
+    for (let tries = 0; tries < 60 && !(await uRuleOn() === rule && (await b.text('[data-outcome] .band-text') ?? '').startsWith(prefix)); tries++) await wait(100);
+  };
+  await b.click('#nav-settings');
+  for (let tries = 0; tries < 30 && !(await b.exists('#sync-everything-on')); tries++) await wait(100);
+  await b.click('#sync-everything-on');
+  await waitBand('true', 'Synchronize everything is on.');
+  const twoHelp = 'Switch Synchronize everything off and take back the 2 items it took in since, each tool it was found in keeping its own copy';
+  same('Settings band after turning on with two kinds and a conflict: sentence, Undo, History help and reloads',
+    [await uBand(), readNow(join(uCodex, 'notes/SKILL.md')), JSON.parse(readNow(join(uHome, '.claude.json'))).mcpServers?.files?.command],
+    [['Synchronize everything is on.', 'Undo', twoHelp, twoHelp, true, false], text('notes', 'Take notes.'), 'files-mcp']);
+  await b.click('#outcome-undo');
+  await waitBand('false', 'Undone:');
+  const twoUndone = 'Undone: switched off, and 2 items it took in are out of Central Knot again, each tool it was found in keeping its own copy.';
+  same('Settings inline Undo turns the rule off, takes back both kinds like History’s Undo, leaves originals and conflict, and reads as History’s',
+    [uRecord().syncEverything, existsSync(join(uCodex, 'notes')), readNow(join(uClaude, 'notes/SKILL.md')), readNow(join(uClaude, 'review/SKILL.md')), readNow(join(uCodex, 'review/SKILL.md')), 'files' in (JSON.parse(readNow(join(uHome, '.claude.json'))).mcpServers ?? {}), /\[mcp_servers\.files\]/.test(readNow(join(uHome, '.codex/config.toml'))), await uBand()],
+    [false, false, text('notes', 'Take notes.'), text('review', 'Review gently.'), text('review', 'Review hard.'), false, true, [twoUndone, null, null, null, false, false]]);
+  await b.click('#nav-history');
+  for (let tries = 0; tries < 30 && !(await b.exists('.history-row[data-kind="everything"]')); tries++) await wait(100);
+  same('History records the same Undo sentence and marks the switch-on Undone',
+    [await b.text('.history-row[data-kind="everything"] .history-about'), await b.all('.history-row[data-kind="everything"] .history-done')],
+    [twoUndone, ['Undone']]);
+  // A later automatic addition edited on disk before pressing Settings' inline Undo: left in and named.
+  await b.click('#nav-settings');
+  for (let tries = 0; tries < 30 && !(await b.exists('#sync-everything-on')); tries++) await wait(100);
+  settleOld([skill(uClaude, 'later', text('later', 'Later skill.')), join(uClaude, 'later/SKILL.md')]);
+  await b.click('#sync-everything-on');
+  await waitBand('true', 'Synchronize everything is on.');
+  settleOld([skill(uClaude, 'edited', text('edited', 'Original.')), join(uClaude, 'edited/SKILL.md')]);
+  for (let tries = 0; tries < 100 && readNow(join(uCodex, 'edited/SKILL.md')) !== text('edited', 'Original.'); tries++) await wait(100);
+  writeFileSync(join(uClaude, 'edited/SKILL.md'), text('edited', 'Edited by hand.'));
+  await b.click('#outcome-undo');
+  await waitBand('false', 'Undone:');
+  same('inline Undo takes back the untouched take-in and names the later edited addition left in',
+    [uRecord().syncEverything, existsSync(join(uCodex, 'later')), readNow(join(uClaude, 'edited/SKILL.md')), await b.text('[data-outcome] .band-text')],
+    [false, false, text('edited', 'Edited by hand.'), 'Undone: switched off, and 1 item it took in is out of Central Knot again, each tool it was found in keeping its own copy. Left in: edited (changed since).']);
+  // Automatic sync off: band shows without reloads, carries the second sentence, and Undo switches the rule off.
+  await b.click('#sync-switch');
+  for (let tries = 0; tries < 40 && await b.run(`document.querySelector('#sync-switch')?.getAttribute('aria-checked')`) !== 'false'; tries++) await wait(100);
+  await b.click('#sync-everything-on');
+  await waitBand('true', 'Synchronize everything is on.');
+  same('with Automatic sync off, the band shows its second sentence and Undo without reloads',
+    await uBand(), ['Synchronize everything is on. It takes items in at Sync once, or when Automatic sync is on.', 'Undo', 'Switch Synchronize everything off', 'Switch Synchronize everything off', false, false]);
+  await b.click('#outcome-undo');
+  await waitBand('false', 'Undone:');
+  same('Undo with Automatic sync off turns the rule off and says nothing was taken back',
+    [uRecord().syncEverything, await b.text('[data-outcome] .band-text')], [false, 'Undone: switched off; nothing it took in was taken back.']);
+  // Turned on when it is on already (second window): no band's Undo for an entry that was not made.
+  const fromOther = await b.run(`window.centralKnot.setSyncEverything(true, ${JSON.stringify(uHome)})`);
+  check('the other window’s switch-on returned its entry id while this window still reads off', typeof fromOther.event === 'string' && await uRuleOn() === 'false', [fromOther.event, await uRuleOn()]);
+  await b.click('#sync-everything-on');
+  await waitBand('true', 'Synchronize everything is on.');
+  same('turning it on again when already on shows no band Undo',
+    [uRecord().syncEverything, await b.text('[data-outcome] .band-text'), await b.exists('#outcome-undo')],
+    [true, 'Synchronize everything is on. It takes items in at Sync once, or when Automatic sync is on.', false]);
+  same('no page errors, Settings inline Undo', b.pageErrors, []);
+  await b.quit();
 }
 
 /**

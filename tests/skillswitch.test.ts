@@ -284,7 +284,7 @@ test('Pi under a pattern: a skill Synchronize everything takes in and puts in Pi
   try {
     await skill(box.home, 'claude-cli', 'found-one');
     await writeFile(switchPath(box.context, 'pi-cli'), '{ "skills": ["!*"] }');
-    assert.deepEqual(await setSyncEverything(box.context, true), {});
+    assert.equal((await setSyncEverything(box.context, true)).stopped, undefined);
     const notice = (await applySkills(box.context, tools, [], { background: true })).notices?.find(each => each.kind === 'taken-in');
     assert.deepEqual(JSON.parse(await readFile(switchPath(box.context, 'pi-cli'), 'utf8')).skills, ['!*', '+skills/found-one/SKILL.md']);
     assert.equal(notice && notice.kind === 'taken-in' ? sentences(libraryWords.skills).takenInWords(notice) : '',
