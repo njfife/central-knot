@@ -1737,8 +1737,10 @@ const catalogHits = (t: Table) => (t.view.filter === 'all' && ['anywhere', 'plug
  * for that alone with no hit; its first `revealed` rows (catalogRow; after "Show 10 more", once main has sent their details);
  * "Show 10 more" while there are more.
  */
+/** The catalog hits revealed and ready with item details (shared by catalogGroup and drawTable). */
+const shownCatalog = (t: Table, hits?: SearchHit[]): CatalogTarget[] => (hits ? hits.slice(0, t.view.revealed).filter(hit => hit.item).map(hit => ({ kind: 'catalog', hit })) : []);
 function catalogGroup(t: Table, hits: SearchHit[]) {
-  const first = hits.slice(0, t.view.revealed), left = hits.length - first.length, rows = first.filter(hit => hit.item), said = coverageLine();
+  const rows = shownCatalog(t, hits), left = Math.max(0, hits.length - t.view.revealed), said = coverageLine();
   const reading = said && said.map(part => sectionNote(true, part));
   const more = () => { t.view.revealed += MORE; rerender(); askAgain(); };
   return h('div', { role: 'rowgroup' },
@@ -1746,7 +1748,7 @@ function catalogGroup(t: Table, hits: SearchHit[]) {
     hits.length || reading ? h('div.ov-section.catalog-head', { role: 'row', 'data-section': 'catalog' }, h('div.ov-section-label', { role: 'cell' },
       h('strong', {}, 'In plugins you don’t have'), h('span.ov-section-count', {}, plural(hits.length, 'match', 'matches')),
       hits.length ? sectionNote(true, 'a name opens its plugin’s page, to install it there') : null, reading)) : null,
-    rows.flatMap(hit => catalogRow(t, hit)),
+    rows.flatMap(target => catalogRow(t, target)),
     left ? h('div.ov-more', { role: 'row' }, h('div', { role: 'cell' }, button({ variant: 'ghost', size: 'small', label: `Show ${Math.min(MORE, left)} more`, id: 'catalog-more', onclick: more }))) : null);
 }
 /**
@@ -1754,15 +1756,17 @@ function catalogGroup(t: Table, hits: SearchHit[]) {
  * it (Back returns to Find's text and the rows revealed, both kept in the view); its plugin and marketplace; its text's excerpt
  * or its description. No switch: it is not here.
  */
-function catalogRow(t: Table, hit: SearchHit) {
-  const item = hit.item!, fileOpen = t.view.openFile?.id === hit.id;
+function catalogRow(t: Table, target: CatalogTarget) {
+  const { hit } = target, item = hit.item!, fileOpen = t.view.openFile?.id === hit.id;
+  const open = () => openPlugin({ source: item.source, plugin: item.plugin, marketplace: item.marketName });
+  const link = h('button.inline-link.ov-name-text', { type: 'button', id: partId('name', hit.id), title: `Open the plugin ${item.plugin} in ${pageNames.plugins}`, onclick: open }, item.name);
   return [
     h(`div.ov-row.ov-catalog-row${fileOpen ? '.ov-file-anchored' : ''}`, { role: 'row', 'data-key': hit.id },
       h('div.ov-name.ov-name-fit.ov-name-bare', { role: 'cell' },
-        h('span.ov-name-main', {}, kindMark(t, pageOfPart[item.kind]), h('button.inline-link.ov-name-text', { type: 'button', id: partId('name', hit.id), title: `Open the plugin ${item.plugin} in ${pageNames.plugins}`, onclick: () => openPlugin({ source: item.source, plugin: item.plugin, marketplace: item.marketName }) }, item.name), fileButton(t, hit)),
+        h('span.ov-name-main', {}, kindMark(t, pageOfPart[item.kind]), link, fileButton(t, target)),
         h('span.row-tag.row-part', { title: `In the plugin ${item.plugin}, in the marketplace ${item.marketName}` }, icon('puzzle', 12, 'tone-faint'), `${item.plugin} · ${item.marketName}`),
         about(hit.excerpt, item.description))),
-    fileOpen ? filePanel(t, hit, t.view.openFile!) : null,
+    fileOpen ? filePanel(t, target, t.view.openFile!) : null,
   ];
 }
 /** What main last said of the plugin text (plugintext.ts view): the reading's words on the group's heading (coverageWords), and whether an empty Library offers Find (pluginsListed). Asked once, then followed. */
@@ -1881,8 +1885,7 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
   const isOpen = (row: ItemRow | PluginRow) => idOf(row) === view.comparing;
   if (view.comparing && view.openedOn !== state.visit && all.some(skill => isOpen(skill) && isDiffering(skill))) view.comparing = undefined;
   if (found && view.comparing && !found.some(isOpen)) view.comparing = undefined;
-  const catalogShown = inPlugins?.slice(0, view.revealed).filter(hit => hit.item) ?? [];
-  const fileTarget = view.openFile && ([...shown, ...plugins, ...catalogShown] as FileTarget[]).find(target => fileTargetId(target) === view.openFile!.id && hasSkillFile(t, target));
+  const fileTarget = view.openFile && ([...shown, ...plugins, ...shownCatalog(t, inPlugins)] as FileTarget[]).find(target => fileTargetId(target) === view.openFile!.id && hasSkillFile(t, target));
   if (view.openFile && !fileTarget) view.openFile = undefined;
   else if (fileTarget) syncOpenFile(t, fileTarget, view.openFile!);
   const open = docked() && view.comparing && !underRow(t, view.comparing) ? all.find(isOpen) : undefined;
@@ -3050,29 +3053,31 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
 }
 // ---------- Inline skill file panel (closed row one-click file reader) ----------
 
-type FileTarget = ItemRow | PluginRow | SearchHit;
-const isCatalogHit = (target: FileTarget): target is SearchHit => 'id' in target;
-const fileTargetId = (target: FileTarget) => (isCatalogHit(target) ? target.id : idOf(target));
-const fileTargetName = (target: FileTarget) => (isCatalogHit(target) ? target.item!.name : isPluginRow(target) ? target.name : target.name ?? target.key);
-const storedSkillOf = (target?: FileTarget) => (target && !isCatalogHit(target) && !isPluginRow(target) && target.kind === 'skills' ? inLibrary(itemOf(target)) : undefined);
-interface FileCopy { tool: HarnessId; rootLabel?: string; directory?: string; realDirectory?: string; hash?: string; part?: string }
-/** Distinct copies of a found or installed plugin skill in tool-column order (tab's tool first); same real folder or known equal hash collapse to the first holder. */
+type CatalogTarget = { kind: 'catalog'; hit: SearchHit };
+type FileTarget = ItemRow | PluginRow | CatalogTarget;
+const isCatalogHit = (target: FileTarget): target is CatalogTarget => target.kind === 'catalog';
+const fileTargetId = (target: FileTarget) => (isCatalogHit(target) ? target.hit.id : idOf(target));
+const fileTargetName = (target: FileTarget) => (isCatalogHit(target) ? target.hit.item!.name : isPluginRow(target) ? target.name : target.name ?? target.key);
+const storedSkillOf = (target?: FileTarget) => (target?.kind === 'skills' ? inLibrary(itemOf(target)) : undefined);
+interface FileCopy { tool: HarnessId; rootLabel?: string; directory?: string; realDirectory?: string; hash?: string; version?: string; part?: string }
+/** Distinct copies of a found or plugin skill in column order (tab's tool first): collapsed by real folder, or by hash (found) / version (plugin). */
 function skillFileCopies(t: Table, target: FileTarget): FileCopy[] {
-  if (isCatalogHit(target) || (isPluginRow(target) ? target.kind !== 'skill' : target.kind !== 'skills')) return [];
-  const raw = (toolsFor(t, 'skills') as HarnessId[]).flatMap<FileCopy>(tool => isPluginRow(target)
-    ? (target.copies[tool]?.path ? [{ tool, part: target.copies[tool]!.path, realDirectory: target.copies[tool]!.realDirectory, hash: target.copies[tool]!.hash }] : [])
+  if (target.kind !== 'skill' && target.kind !== 'skills') return [];
+  const raw = (toolsFor(t, 'skills') as HarnessId[]).flatMap<FileCopy>(tool => target.kind === 'skill'
+    ? (target.copies[tool]?.path ? [{ tool, part: target.copies[tool]!.path, realDirectory: target.copies[tool]!.realDirectory, version: target.installs[tool]?.version }] : [])
     : (state.home?.snapshots?.find(entry => entry.harness === tool)?.skills ?? [])
       .filter(entry => itemKey(entry.folder) === target.key)
       .map(entry => ({ tool, rootLabel: entry.rootLabel, directory: entry.directory, realDirectory: entry.realDirectory, hash: target.folderHashes?.[entry.realDirectory] })));
   const unique: FileCopy[] = [];
   for (const copy of raw) {
-    if (!unique.some(kept => (!!kept.realDirectory && kept.realDirectory === copy.realDirectory) || (!!kept.hash && kept.hash === copy.hash))) unique.push(copy);
+    if (!unique.some(kept => (!!kept.realDirectory && kept.realDirectory === copy.realDirectory)
+      || (target.kind === 'skill' ? !!kept.version && kept.version === copy.version : !!kept.hash && kept.hash === copy.hash))) unique.push(copy);
   }
   return unique;
 }
 /** Change token for a copy: its hash and real folder when hashed, else the home's readId so an unhashed or plugin copy reloads silently on every new view. */
 const copyToken = (copy?: FileCopy) => (copy?.hash ? `${copy.hash}:${copy.realDirectory ?? ''}` : `read:${state.home?.readId ?? 0}`);
-const hasSkillFile = (t: Table, target: FileTarget) => (isCatalogHit(target) ? target.item?.kind === 'skill' && !!target.item.path
+const hasSkillFile = (t: Table, target: FileTarget) => (isCatalogHit(target) ? target.hit.item?.kind === 'skill' && !!target.hit.item.path
   : !!storedSkillOf(target) || skillFileCopies(t, target).length > 0);
 /** Reloads an open inline file panel when its stored version, found copy, plugin copy, or marketplace copy changes (or its chosen copy disappears). */
 function syncOpenFile(t: Table, target: FileTarget, open: NonNullable<View['openFile']>) {
@@ -3092,7 +3097,7 @@ function setSkillFile(t: Table, target?: FileTarget, file = 'SKILL.md', refocus 
   const prev = t.view.openFile;
   const id = target && fileTargetId(target);
   const kept = storedSkillOf(target);
-  const catalog = target && isCatalogHit(target) ? target.item : undefined;
+  const catalog = target && isCatalogHit(target) ? target.hit.item : undefined;
   const chosen = !kept && !catalog && target ? (copy ?? skillFileCopies(t, target)[0]) : undefined;
   const sameHolder = !!prev && prev.id === id && prev.copy?.tool === chosen?.tool && prev.copy?.rootLabel === chosen?.rootLabel;
   const sameFile = sameHolder && prev.file === file;
@@ -3108,7 +3113,7 @@ function setSkillFile(t: Table, target?: FileTarget, file = 'SKILL.md', refocus 
   if (!next && refocus && prev) document.getElementById(partId('file', prev.id))?.focus();
   if (!next) return;
   const load = kept ? window.centralKnot.skillVersionFile((target as ItemRow).key, next.token, file)
-    : isCatalogHit(target!) ? window.centralKnot.skillPluginFile({ marketName: catalog!.marketName, plugin: catalog!.plugin, part: catalog!.path!, from: 'marketplace' }, file)
+    : isCatalogHit(target!) ? window.centralKnot.skillPluginFile({ marketName: catalog!.marketName, plugin: catalog!.plugin, part: catalog!.path!, from: 'marketplace', source: catalog!.source }, file)
     : isPluginRow(target!) ? window.centralKnot.skillPluginFile({ marketName: target.marketName, plugin: target.plugin, part: chosen!.part!, from: chosen!.tool }, file)
     : window.centralKnot.skillFoundFile(target!.key, chosen!.tool, chosen!.rootLabel, file);
   void load.catch(() => null).then(found => {
@@ -3146,7 +3151,8 @@ function filePanel(t: Table, target: FileTarget, open: NonNullable<View['openFil
   const full = dir && (dir.includes('\\') ? `${dir}\\${open.file.replaceAll('/', '\\')}` : `${dir}/${open.file}`);
   const missing = open.loaded === undefined ? 'Reading…' : 'Its file couldn’t be read.';
   const note = open.loaded ? open.loaded.note : missing;
-  const copyLabel = (entry: FileCopy) => (entry.rootLabel && copies.filter(other => other.tool === entry.tool).length > 1 ? `${names[entry.tool]}’s copy (${entry.rootLabel})` : `${names[entry.tool]}’s copy`);
+  const copyLabel = (entry: FileCopy) => (entry.version ? `${names[entry.tool]}’s copy · ${entry.version}`
+    : entry.rootLabel && copies.filter(other => other.tool === entry.tool).length > 1 ? `${names[entry.tool]}’s copy (${entry.rootLabel})` : `${names[entry.tool]}’s copy`);
   const chooseCopy = (event: Event) => {
     const picked = copies[Number((event.target as HTMLSelectElement).value)];
     if (picked) setSkillFile(t, target, 'SKILL.md', false, undefined, true, picked);
@@ -3161,7 +3167,7 @@ function filePanel(t: Table, target: FileTarget, open: NonNullable<View['openFil
     { id: partId('file-close', id), label: `Close file for ${name}`, title: 'Close', look: '.file-open-close' });
   const blockId = partId('file-text', id, ...(active ? [String(Math.max(0, activeAt))] : []), String(Math.max(0, tabs.indexOf(open.file))));
   const body = note ? [h('p.file-open-state', {}, note)]
-    : fileBlocks(blockId, `${name} ${open.file}`, [{ text: open.loaded!.text ?? '' }], () => (active ? copyLabel(active) : isCatalogHit(target) ? `${target.item!.marketName}’s copy` : 'Central Knot’s current version'));
+    : fileBlocks(blockId, `${name} ${open.file}`, [{ text: open.loaded!.text ?? '' }], () => (active ? copyLabel(active) : isCatalogHit(target) ? `${target.hit.item!.marketName}’s copy` : 'Central Knot’s current version'));
   const copy = full && reloadButton({ command: full, title: 'Copy path' }, partId('file-copy', id));
   const foot = full ? [pathText(shownPath(full), full), h('span.file-open-foot-actions', {}, showInFolder(full), copy)]
     : stored ? [h('span.file-open-stored', {}, 'Stored in Central Knot')] : [];

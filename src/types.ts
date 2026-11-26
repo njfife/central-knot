@@ -346,8 +346,8 @@ export interface PluginTurnResult { stopped?: string; done: PluginDone[]; before
 
 /** One regular file of a skill's folder, with every regular file listed by name (skills.ts skillVersionFile, skillFoundFile, skillPluginFile). */
 export interface SkillFileRead { files: string[]; text?: string; note?: string; directory?: string }
-/** What names a plugin's skill for main to resolve on disk without the page sending a path (skills.ts skillPluginFile). */
-export interface PluginSkillRef { marketName: string; plugin: string; part: string; from: HarnessId | 'marketplace' }
+/** What names a plugin's skill for main to resolve on disk without the page sending a path (`source` for a Find hit's marketplace; skills.ts skillPluginFile). */
+export interface PluginSkillRef { marketName: string; plugin: string; part: string; from: HarnessId | 'marketplace'; source?: string }
 
 export interface ToolCopy {
   hash: string;
@@ -803,8 +803,8 @@ export interface PluginItem { kind: PartKind; name: string; description: string;
    * SKILL.md at its root (catalogdetail.ts skillsIn: its path is "."), the plugin's. An MCP server has none: its name is both.
    */
   keyName?: string;
-  /** Skills: the skill's folder relative to its plugin's root ('.' for the root itself), its real folder, and its folder hash when another tool holds another copy. */
-  path?: string; realDirectory?: string; hash?: string }
+  /** Skills: the skill's folder relative to its plugin's root ('.' for the root itself) and its real folder. */
+  path?: string; realDirectory?: string }
 /** A plugin installed whole in one tool, read from that tool's own records and its copy of the plugin. */
 export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: string; version?: string;
   /** The whole plugin is turned off in that tool. */ off?: boolean;

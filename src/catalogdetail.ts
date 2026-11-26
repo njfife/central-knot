@@ -332,7 +332,7 @@ const serverList = (servers: Record<string, unknown>) => Object.entries(servers)
 }).sort((first, second) => first.name.localeCompare(second.name));
 
 /** A plugin's skills, read by each tool's rule (see pluginContents). */
-export async function skillsOf(folder: string, entry: Record<string, unknown>, root: string, readAs: ReadAs, unread?: string[]): Promise<NamedPart[]> {
+async function skillsOf(folder: string, entry: Record<string, unknown>, root: string, readAs: ReadAs, unread?: string[]): Promise<NamedPart[]> {
   const { own, added } = await manifestOf(folder, entry, root, readAs);
   const skillsFolder = join(folder, 'skills');
   const isListed = own.skills !== undefined || added.skills !== undefined;
@@ -446,13 +446,19 @@ async function holdsOnlyInstructions(root: string, folder: string, declared: Rec
   return holdsNothingElse(folder, 0);
 }
 
+/** How one tool's installed copy (or a marketplace copy, when `tool` is undefined) reads its parts. */
+const readAsFor = async (path: string, tool?: HarnessId, atMarketplaceRoot = false, codexOnly = false): Promise<ReadAs> =>
+  ({ codex: tool === 'codex-cli' || codexOnly ? await codexManifest(path) : undefined, skillsListReplaces: tool === 'copilot-cli', atMarketplaceRoot, ...(tool ? { tool } : {}) });
 /**
  * What a tool's installed copy of a plugin holds (in `path`), as that tool reads it: Codex by its own manifest, Copilot CLI
  * with a skills list replacing the skills folder and its own hooks files. `entry`: its marketplace entry, where known.
  */
 export async function installedContents(tool: HarnessId, path: string, entry: Record<string, unknown> = {}, atMarketplaceRoot = false): Promise<PluginContents> {
-  return pluginContents(path, entry, path, { codex: tool === 'codex-cli' ? await codexManifest(path) : undefined, skillsListReplaces: tool === 'copilot-cli', atMarketplaceRoot, tool });
+  return pluginContents(path, entry, path, await readAsFor(path, tool, atMarketplaceRoot));
 }
+/** A plugin copy's skills, read by the same rule as installedContents (or a marketplace copy when `tool` is undefined), bounded to `folder`. */
+export const pluginSkills = async (folder: string, entry: Record<string, unknown>, tool?: HarnessId, atMarketplaceRoot = false, codexOnly = false) =>
+  skillsOf(folder, entry, folder, await readAsFor(folder, tool, atMarketplaceRoot, codexOnly));
 /**
  * Where Copilot CLI finds a plugin's hooks: a plugin's own hooks.json or hooks/hooks.json, an Agent Plugin's
  * com.github.copilot/hooks/hooks.json (https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference).

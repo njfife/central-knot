@@ -7,7 +7,7 @@ import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from
 import * as engine from '../src/plugins.ts';
 import { WAITS_TO_MOVE } from '../src/pluginstatus.ts';
 import { componentsFrom, outcomes } from '../src/pluginoutcomes.ts';
-import { applySkills } from '../src/skills.ts';
+import { applySkills, skillPluginFile } from '../src/skills.ts';
 import type { ActionReport, DesktopApp, HarnessId } from '../src/types.ts';
 
 const put = async (path: string, text: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, text); };
@@ -1111,5 +1111,32 @@ test('A click’s record write keeps what a check wrote while the click was read
     await joined;
     const record = await box.record();
     assert.deepEqual([record.tools, record.plugins.map(entry => [entry.plugin, entry.on])], [['claude-cli', 'pi-cli'], [['pdf', true]]]);
+  } finally { await box.cleanup(); }
+});
+
+test('pluginCopy and skillPluginFile open the Find hit’s own marketplace source when two marketplaces share a name, start no fetch, and return undefined when no local copy exists', async () => {
+  let remoteFetches = 0;
+  const box = await setup({ engine: { readRemotePlugin: async () => { remoteFetches++; return { problem: 'should not fetch' }; } } });
+  try {
+    const orig = join(box.base, 'orig-market'), fork = join(box.base, 'fork-market'), unlisted = join(box.base, 'unlisted-market');
+    for (const [root, body] of [[orig, 'Original copy.'], [fork, 'Fork-only guidance.'], [unlisted, 'Unlisted copy.']] as const) {
+      await put(join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'team', plugins: [{ name: 'docs', source: './plugins/docs' }] }));
+      await put(join(root, 'plugins/docs/skills/pdf-reader/SKILL.md'), `---\nname: pdf-reader\ndescription: Reads PDFs.\n---\n${body}\n`);
+    }
+    const uncloned = 'https://github.com/acme/uncloned.git';
+    await box.markets.add(orig);
+    await box.markets.add(fork);
+    await put(join(box.host.dataDir, 'marketplaces.json'), JSON.stringify([orig, fork, uncloned], null, 2));
+    box.calls.length = 0;
+
+    const ctx = { home: box.home, dataDir: box.host.dataDir, binaries: {} };
+    const lookup = (market: string, plugin: string, source?: string) => box.markets.pluginCopy(market, plugin, source);
+    const fromFork = await skillPluginFile(ctx, { marketName: 'team', plugin: 'docs', part: 'skills/pdf-reader', from: 'marketplace', source: fork }, 'SKILL.md', lookup);
+    assert.equal(fromFork?.directory, join(fork, 'plugins/docs/skills/pdf-reader'));
+    assert.match(fromFork?.text ?? '', /Fork-only guidance\./);
+    // Unlisted source and an added Git marketplace with no local clone return undefined and start zero fetches.
+    const fromUnlisted = await skillPluginFile(ctx, { marketName: 'team', plugin: 'docs', part: 'skills/pdf-reader', from: 'marketplace', source: unlisted }, 'SKILL.md', lookup);
+    const fromUncloned = await skillPluginFile(ctx, { marketName: 'team', plugin: 'docs', part: 'skills/pdf-reader', from: 'marketplace', source: uncloned }, 'SKILL.md', lookup);
+    assert.deepEqual([fromUnlisted, fromUncloned, box.calls, remoteFetches], [undefined, undefined, [], 0]);
   } finally { await box.cleanup(); }
 });

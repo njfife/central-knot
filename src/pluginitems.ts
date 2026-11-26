@@ -6,8 +6,6 @@ import { readFile, readdir, realpath } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { installedContents, readHooks } from './catalogdetail.ts';
 import { openCodeSettings } from './harnesses.ts';
-import { groupBy } from './model.ts';
-import { readTree } from './share.ts';
 import { readJsonc, readTomlTables } from './textedit.ts';
 import { nameOfFile, record, text } from './values.ts';
 import { installedCopies, installedPlugins, registeredMarketplaces, type PluginContext } from './plugins.ts';
@@ -22,7 +20,8 @@ export const UNREADABLE = 'Its files couldn’t be read.';
  * Every plugin installed whole in these tools, with what it brings. Codex leaves a plugin's agents out (it copies them but
  * never loads them, capability-data Appendix D), so its copies list none. Its hooks are kept as its copy declares them
  * (sessionhooks.ts draws those that can add text); commands and the rest stay on the plugin's page.
- * Names and descriptions only: the read runs often, and only an opened item shows its file (readItemTexts).
+ * Names, descriptions, and for skills their listed path and real folder: no companion files are walked or hashed,
+ * and only an opened item reads its files (readItemTexts, skills.ts skillPluginFile).
  */
 export async function readPluginItems(context: PluginContext, tools: HarnessId[]): Promise<InstalledPlugin[]> {
   const read = { ...context, reads: context.reads ?? new Map() };
@@ -51,15 +50,7 @@ export async function readPluginItems(context: PluginContext, tools: HarnessId[]
         ...(state.switchesHeld ? { switchesHeld: state.switchesHeld } : {}), ...(serversHeld ? { serversHeld } : {}), ...(state.live ? { live: true } : {}), ...(Object.keys(skillsHeld).length ? { skillsHeld } : {}) };
     }));
   }));
-  const installs = perTool.flat();
-  // Hash a plugin skill folder only when two or more tools hold distinct real folders for it, so identical copies collapse without walking single-tool installs.
-  const multi = groupBy(installs.flatMap(install => install.items.filter(item => item.kind === 'skill' && item.realDirectory)
-    .map(item => ({ key: `${install.plugin}@${install.marketName}/${item.name.normalize('NFC').toLowerCase()}`, item }))), entry => entry.key);
-  for (const group of multi.values()) {
-    if (new Set(group.map(entry => entry.item.realDirectory)).size < 2) continue;
-    await Promise.all(group.map(async ({ item }) => { item.hash = (await readTree(item.realDirectory!).catch(() => undefined))?.hash; }));
-  }
-  return installs;
+  return perTool.flat();
 }
 
 /**

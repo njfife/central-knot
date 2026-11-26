@@ -7,9 +7,10 @@ import { itemNotice } from './notices.ts';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs, { realpathSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { mkdir, readFile, readdir, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { lockPath, lockSkip, withLock } from './fslock.ts';
-import { colonNameSkip, posixModeSkip } from './wincompat.ts';
+import { colonNameSkip, posixModeSkip, slashPath } from './wincompat.ts';
 import { dirname, join } from 'node:path';
 import { readHistory } from '../src/history.ts';
 import { libraryEntry, librarySentence } from '../src/historyactions.ts';
@@ -1727,7 +1728,8 @@ test('skillPluginFile reads installed (on and off), root-skill, symlinked-root a
     await mkdir(join(box.home, '.claude/plugins/cache/team/linked-root'), { recursive: true });
     await symlink(externalPlugin, join(box.home, '.claude/plugins/cache/team/linked-root/1.0.0'));
 
-    // Marketplace copy (not installed in any tool), including a plugin whose manifest tries to list a sibling plugin's skill outside its own root.
+    // Marketplace copy (not installed in any tool), including a plugin whose manifest tries to list a sibling plugin's skill outside its own root,
+    // an escaped symlinked plugin folder, and a codexOnly marketplace plugin using Codex's ./ skills rule.
     const marketRoot = join(box.base, 'market');
     const marketPlugin = join(marketRoot, 'plugins/docs');
     const siblingPlugin = join(marketRoot, 'plugins/other');
@@ -1736,11 +1738,43 @@ test('skillPluginFile reads installed (on and off), root-skill, symlinked-root a
     await write(join(marketPlugin, 'skills/pdf-reader/notes/tables.md'), 'Table rules.\n');
     await write(join(marketPlugin, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'docs', version: '1.0.0', skills: ['../other/skills/sneaky'] }));
     await write(join(siblingPlugin, 'skills/sneaky/SKILL.md'), skillText('Sibling plugin.', 'sneaky'));
-    const marketLookup = async (marketName: string, plugin: string) => (marketName === 'team' && plugin === 'docs'
-      ? { folder: marketPlugin, root: marketRoot, entry: {}, atMarketplaceRoot: false } : undefined);
+    const escapedMarketPlugin = join(marketRoot, 'plugins/escaped');
+    await symlink(outsideSkill, escapedMarketPlugin);
+    const codexSkillBody = skillText('From Codex plugin rule.', 'nested');
+    const codexMarketPlugin = join(marketRoot, 'plugins/codex-market-plug');
+    await write(join(codexMarketPlugin, '.codex-plugin/plugin.json'), JSON.stringify({ name: 'codex-market-plug', version: '1.0.0', skills: ['./custom', 'no-dot'] }));
+    await write(join(codexMarketPlugin, 'custom/deep/nested/SKILL.md'), codexSkillBody);
+    await write(join(codexMarketPlugin, 'skills/ignored/SKILL.md'), skillText('Default skills/ ignored by Codex list.', 'ignored'));
+    await write(join(codexMarketPlugin, 'no-dot/bad/SKILL.md'), skillText('Non-dot path ignored by Codex.', 'bad'));
+    // Installed Codex plugin using .codex-plugin/plugin.json with ./ skills list replacing skills/ and nested skill walk.
+    const codexPlugin = join(box.home, '.codex/plugins/cache/team/codex-plug/1.0.0');
+    await write(join(codexPlugin, '.codex-plugin/plugin.json'), JSON.stringify({ name: 'codex-plug', version: '1.0.0', skills: ['./custom', 'no-dot'] }));
+    await write(join(codexPlugin, 'custom/deep/nested/SKILL.md'), codexSkillBody);
+    await write(join(codexPlugin, 'custom/deep/nested/guide.md'), 'Nested Codex guide.\n');
+    await write(join(codexPlugin, 'skills/ignored/SKILL.md'), skillText('Default skills/ ignored by Codex list.', 'ignored'));
+    await write(join(codexPlugin, 'no-dot/bad/SKILL.md'), skillText('Non-dot path ignored by Codex.', 'bad'));
+    await write(join(box.home, '.codex/config.toml'), '[plugins."codex-plug@team"]\nenabled = true\n');
+    const marketLookup = async (marketName: string, plugin: string) => (marketName !== 'team' ? undefined
+      : plugin === 'docs' ? { folder: marketPlugin, root: marketRoot, entry: {}, atMarketplaceRoot: false }
+      : plugin === 'escaped' ? { folder: escapedMarketPlugin, root: marketRoot, entry: {}, atMarketplaceRoot: false }
+      : plugin === 'codex-market-plug' ? { folder: codexMarketPlugin, root: marketRoot, entry: {}, atMarketplaceRoot: false, codexOnly: true }
+      : undefined);
+
+    const pluginCtx = { home: box.home, dataDir: '', binaries: {} };
+    const countPromiseOpens = async <T>(run: () => Promise<T>) => {
+      const opened: string[] = [];
+      const orig = fs.promises.open;
+      fs.promises.open = ((path: fs.PathLike, ...rest: unknown[]) => {
+        if (typeof path === 'string') { try { opened.push(realpathSync(path)); } catch { opened.push(path); } }
+        return (orig as (...args: unknown[]) => unknown).call(fs.promises, path, ...rest);
+      }) as typeof fs.promises.open;
+      syncBuiltinESMExports();
+      try { return { result: await run(), opened }; }
+      finally { fs.promises.open = orig; syncBuiltinESMExports(); }
+    };
 
     const expectedFiles = ['SKILL.md', 'asset.bin', 'exact.txt', 'notes/rubric.md', 'over.txt'];
-    const readInstalled = (file: string) => skillPluginFile(box.context, { marketName: 'team', plugin: 'issue-tracker', part: 'skills/triage', from: 'claude-cli' }, file);
+    const readInstalled = (file: string) => skillPluginFile(pluginCtx, { marketName: 'team', plugin: 'issue-tracker', part: 'skills/triage', from: 'claude-cli' }, file);
     const listed = await countOpens(() => readInstalled('SKILL.md'));
     assert.deepEqual(listed.result, { files: expectedFiles, text: skillBody, directory: claudeSkill });
     assert.equal(listed.opens.size, 0, 'listing does not hash files');
@@ -1759,29 +1793,46 @@ test('skillPluginFile reads installed (on and off), root-skill, symlinked-root a
     });
 
     // Root-skill plugin (part '.').
-    assert.deepEqual(await skillPluginFile(box.context, { marketName: 'team', plugin: 'solo', part: '.', from: 'claude-cli' }, 'SKILL.md'),
+    assert.deepEqual(await skillPluginFile(pluginCtx, { marketName: 'team', plugin: 'solo', part: '.', from: 'claude-cli' }, 'SKILL.md'),
       { files: ['SKILL.md', 'guide.md'], text: soloBody, directory: soloPlugin });
-    assert.deepEqual(await skillPluginFile(box.context, { marketName: 'team', plugin: 'solo', part: '.', from: 'claude-cli' }, 'guide.md'),
+    assert.deepEqual(await skillPluginFile(pluginCtx, { marketName: 'team', plugin: 'solo', part: '.', from: 'claude-cli' }, 'guide.md'),
       { files: ['SKILL.md', 'guide.md'], text: 'Root guide.\n', directory: soloPlugin });
 
     // Symlinked installed plugin root: read through its real folder, inner links still refused.
     const linkedDir = join(box.home, '.claude/plugins/cache/team/linked-root/1.0.0/skills/ext-skill');
-    assert.deepEqual(await skillPluginFile(box.context, { marketName: 'team', plugin: 'linked-root', part: 'skills/ext-skill', from: 'claude-cli' }, 'SKILL.md'),
+    assert.deepEqual(await skillPluginFile(pluginCtx, { marketName: 'team', plugin: 'linked-root', part: 'skills/ext-skill', from: 'claude-cli' }, 'SKILL.md'),
       { files: ['SKILL.md', 'detail.md'], text: extBody, directory: linkedDir });
-    assert.equal(await skillPluginFile(box.context, { marketName: 'team', plugin: 'linked-root', part: 'skills/ext-skill', from: 'claude-cli' }, 'inner-link.md'), undefined);
+    assert.equal(await skillPluginFile(pluginCtx, { marketName: 'team', plugin: 'linked-root', part: 'skills/ext-skill', from: 'claude-cli' }, 'inner-link.md'), undefined);
 
-    // Marketplace copy (not installed): reads SKILL.md and nested file, refuses sibling plugin path leaving plugin root.
-    assert.deepEqual(await skillPluginFile(box.context, { marketName: 'team', plugin: 'docs', part: 'skills/pdf-reader', from: 'marketplace' }, 'SKILL.md', marketLookup),
-      { files: ['SKILL.md', 'notes/tables.md'], text: marketBody, directory: join(marketPlugin, 'skills/pdf-reader') });
-    assert.deepEqual(await skillPluginFile(box.context, { marketName: 'team', plugin: 'docs', part: 'skills/pdf-reader', from: 'marketplace' }, 'notes/tables.md', marketLookup),
+    // Marketplace copy (not installed): reads SKILL.md and nested file, never opens a sibling plugin's SKILL.md while listing, and checks inside(root, folder) before listing.
+    const marketRead = await countPromiseOpens(() => skillPluginFile(pluginCtx, { marketName: 'team', plugin: 'docs', part: 'skills/pdf-reader', from: 'marketplace' }, 'SKILL.md', marketLookup));
+    assert.deepEqual(marketRead.result, { files: ['SKILL.md', 'notes/tables.md'], text: marketBody, directory: join(marketPlugin, 'skills/pdf-reader') });
+    assert.deepEqual(marketRead.opened.map(slashPath).filter(path => path.includes('/plugins/other/')), [], 'listing never opens sibling plugin SKILL.md');
+    assert.deepEqual(await skillPluginFile(pluginCtx, { marketName: 'team', plugin: 'docs', part: 'skills/pdf-reader', from: 'marketplace' }, 'notes/tables.md', marketLookup),
       { files: ['SKILL.md', 'notes/tables.md'], text: 'Table rules.\n', directory: join(marketPlugin, 'skills/pdf-reader') });
-    assert.equal(await skillPluginFile(box.context, { marketName: 'team', plugin: 'docs', part: '../other/skills/sneaky', from: 'marketplace' }, 'SKILL.md', marketLookup), undefined);
+    const siblingRead = await countPromiseOpens(() => skillPluginFile(pluginCtx, { marketName: 'team', plugin: 'docs', part: '../other/skills/sneaky', from: 'marketplace' }, 'SKILL.md', marketLookup));
+    assert.equal(siblingRead.result, undefined);
+    assert.deepEqual(siblingRead.opened.map(slashPath).filter(path => path.includes('/plugins/other/')), [], 'refused sibling part never opens sibling SKILL.md');
+    const escapedRead = await countPromiseOpens(() => skillPluginFile(pluginCtx, { marketName: 'team', plugin: 'escaped', part: '.', from: 'marketplace' }, 'SKILL.md', marketLookup));
+    assert.equal(escapedRead.result, undefined, 'marketplace plugin folder escaping marketplace root is refused');
+    assert.deepEqual(escapedRead.opened.map(slashPath).filter(path => path.includes('/outside-skill/')), [], 'escaped marketplace plugin folder is refused before listing');
+
+    // Codex's rule: .codex-plugin/plugin.json with ./ skills list replacing skills/ and nested skill walk, both installed and in a codexOnly marketplace.
+    assert.deepEqual(await skillPluginFile(pluginCtx, { marketName: 'team', plugin: 'codex-plug', part: 'custom/deep/nested', from: 'codex-cli' }, 'SKILL.md'),
+      { files: ['SKILL.md', 'guide.md'], text: codexSkillBody, directory: join(codexPlugin, 'custom/deep/nested') });
+    assert.deepEqual(await skillPluginFile(pluginCtx, { marketName: 'team', plugin: 'codex-plug', part: 'custom/deep/nested', from: 'codex-cli' }, 'guide.md'),
+      { files: ['SKILL.md', 'guide.md'], text: 'Nested Codex guide.\n', directory: join(codexPlugin, 'custom/deep/nested') });
+    assert.equal(await skillPluginFile(pluginCtx, { marketName: 'team', plugin: 'codex-plug', part: 'skills/ignored', from: 'codex-cli' }, 'SKILL.md'), undefined);
+    assert.equal(await skillPluginFile(pluginCtx, { marketName: 'team', plugin: 'codex-plug', part: 'no-dot/bad', from: 'codex-cli' }, 'SKILL.md'), undefined);
+    assert.deepEqual(await skillPluginFile(pluginCtx, { marketName: 'team', plugin: 'codex-market-plug', part: 'custom/deep/nested', from: 'marketplace' }, 'SKILL.md', marketLookup),
+      { files: ['SKILL.md'], text: codexSkillBody, directory: join(codexMarketPlugin, 'custom/deep/nested') });
+    assert.equal(await skillPluginFile(pluginCtx, { marketName: 'team', plugin: 'codex-market-plug', part: 'skills/ignored', from: 'marketplace' }, 'SKILL.md', marketLookup), undefined);
 
     // Refused: part paths leaving the plugin root (traversal, absolute, symlinked skill folder escaping root), unlisted folders, unknown plugin/tool, gone root.
     for (const badPart of ['../outside-skill', '/etc', 'skills/escape-link', 'skills/../../outside-skill', 'unlisted', 'skills/missing', '']) {
-      assert.equal(await skillPluginFile(box.context, { marketName: 'team', plugin: 'issue-tracker', part: badPart, from: 'claude-cli' }, 'SKILL.md'), undefined, `refuses part ${JSON.stringify(badPart)}`);
+      assert.equal(await skillPluginFile(pluginCtx, { marketName: 'team', plugin: 'issue-tracker', part: badPart, from: 'claude-cli' }, 'SKILL.md'), undefined, `refuses part ${JSON.stringify(badPart)}`);
     }
-    assert.equal(await skillPluginFile(box.context, { marketName: 'team', plugin: 'issue-tracker', part: 'skills/triage', from: 'pi-cli' }, 'SKILL.md'), undefined);
+    assert.equal(await skillPluginFile(pluginCtx, { marketName: 'team', plugin: 'issue-tracker', part: 'skills/triage', from: 'pi-cli' }, 'SKILL.md'), undefined);
     await rm(claudePlugin, { recursive: true, force: true });
     assert.equal(await readInstalled('SKILL.md'), undefined, 'gone plugin root returns undefined');
   } finally { await box.cleanup(); }
