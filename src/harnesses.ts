@@ -96,7 +96,7 @@ export const harnesses: Record<HarnessId, HarnessDefinition> = {
   },
 };
 
-export const harnessIds = Object.keys(harnesses) as HarnessId[];
+export { harnessIds } from './words.ts';
 
 export function configRoot(definition: HarnessDefinition, home: string, override?: string): string {
   return override === undefined ? join(home, definition.defaultConfig) : override;

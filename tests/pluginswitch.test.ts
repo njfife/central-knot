@@ -265,7 +265,7 @@ test('the row turned Off: plugins.json still has the plugin On, and Claude Code 
   assert.equal(pluginsPageSays(claude), 'Claude Code: installed 1.0.0, turned off in Claude Code’s own settings.');
   // On Skills, the library row (Pi, OpenCode) is Off with no tool left on: in Central Knot only.
   assert.deepEqual(after.map(install => item(install, 'skill', 'one')).filter(onNow), []);
-  assert.equal(offRowSays('one', []), 'Off · in Central Knot only. Turn it on to put it in every tool.');
+  assert.equal(offRowSays('one', []), 'Off · On puts it in every tool.');
 });
 
 test('the row turned On again turns back on exactly what was on: what a tool’s own switch had off before stays off', () => {
@@ -288,7 +288,7 @@ test('skill one Off, skill two Off, one On: the plugin is on again in Claude Cod
   assert.deepEqual(pluginOn, ['claude-cli']);
   // Its library row is Off, and says where it is still on (pluginrows.ts pluginOnIn); its switch turns it on everywhere else, and
   // says nothing of a whole plugin, which is on already.
-  assert.equal(offRowSays('two', pluginOn), 'Off · on in Claude Code only, through its plugin. Turn it on to put it in every tool.');
+  assert.equal(offRowSays('two', pluginOn), 'Off · on in Claude Code only, through its plugin. On puts it in every tool.');
   assert.equal(wholeWords(installs.map(install => item(install, 'skill', 'two')), true), '');
   assert.equal(pluginsPageSays(installs[0]), 'Claude Code: installed 1.0.0.');
 });

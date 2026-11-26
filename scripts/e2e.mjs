@@ -13938,6 +13938,241 @@ async function libraryFlow() {
     [plugRowEqual, plugRowEqual, false, false, 'plugin']);
   same('no page errors, three-tool Undo and row-choice plugin checks', r3.pageErrors, []);
   await r3.quit();
+
+  // ---------- 14a: one item on in one tool from an Off row (skill, agent, MCP server), Undo byte for byte, History, profile ----------
+  const O = homeWith('library-off-one-tool');
+  for (const folder of ['.copilot', '.codex', '.pi/agent', '.config/opencode', '.gemini/config']) mkdirSync(join(O.home, folder), { recursive: true });
+  skill(O.claude, 'active-skill', text('active-skill', 'Always on.'));
+  skill(O.claude, 'bench-runner', text('bench-runner', 'Runs overnight throughput suites against local fixtures.'));
+  skill(O.claude, 'legacy-skill', text('legacy-skill', 'Legacy skill.'));
+  skill(O.claude, 'own-test', text('own-test', 'Checks an independent copy kept in another tool.'));
+  agent(O.home, 'claude-cli', 'release-scribe', agentText('release-scribe', 'Drafts detailed post-release summaries.'));
+  writeFileSync(join(O.home, '.claude.json'), `${JSON.stringify({ mcpServers: { docs: { type: 'http', url: 'https://docs.example.test/mcp' } } }, null, 2)}\n`);
+  writeClaudeInstall(O.home, 'ck-test-market', 'release-helper', '0.4.1', {
+    'skills/release-notes/SKILL.md': text('release-notes', 'Release notes.'),
+    'skills/changelog-check/SKILL.md': text('changelog-check', 'Changelog check.'),
+  });
+  let o = await launch(O.data, [], O.real);
+  await o.click('#nav-overview');
+  await o.click('#setup-yes');
+  check('14a setup takes skill, agent and MCP server into Central Knot', await until(() =>
+    !!jsonOrNothing(join(O.home, '.central-knot/skills.json'))?.items['bench-runner']
+    && !!jsonOrNothing(join(O.home, '.central-knot/agents.json'))?.items['release-scribe']
+    && !!jsonOrNothing(join(O.home, '.central-knot/mcp.json'))?.items.docs));
+  await o.quit();
+  // Prepare Off states with prior keep-outs, a plugin-sourced Off skill, an Everyday profile in use, and a pre-14a History entry.
+  const oSkillRec = join(O.home, '.central-knot/skills.json');
+  const oAgentRec = join(O.home, '.central-knot/agents.json');
+  const oMcpRec = join(O.home, '.central-knot/mcp.json');
+  const oSkillDirs = ['.claude/skills', '.copilot/skills', '.codex/skills', '.pi/agent/skills', '.config/opencode/skills', '.gemini/config/skills'];
+  const oAgentDirs = ['.claude/agents', '.copilot/agents', '.codex/agents', '.pi/agent/skills', '.config/opencode/agents'];
+  const oMcpFiles = ['.claude.json', '.copilot/mcp-config.json', '.codex/config.toml', '.pi/agent/mcp.json', '.config/opencode/opencode.json', '.gemini/config/mcp_config.json'];
+  const sJson = JSON.parse(readFileSync(oSkillRec, 'utf8'));
+  sJson.items['bench-runner'].on = false;
+  sJson.items['bench-runner'].except = ['codex-cli', 'pi-cli'];
+  sJson.items['bench-runner'].applied = {};
+  sJson.items['own-test'].on = false;
+  sJson.items['own-test'].except = [];
+  sJson.items['own-test'].applied = {};
+  sJson.items['legacy-skill'].except = ['codex-cli'];
+  delete sJson.items['legacy-skill'].applied['codex-cli'];
+  // A plugin-sourced Off skill (linked to a plugin): must keep today's lines and draw no Off-row switch in no-plugin tools.
+  sJson.items['plug-off'] = { ...structuredClone(sJson.items['bench-runner']), key: 'plug-off', name: 'plug-off', source: 'plug-src', seen: sJson.items['bench-runner'].hash, except: ['pi-cli'], applied: {} };
+  cpSync(join(O.home, '.central-knot/items/skills/bench-runner'), join(O.home, '.central-knot/items/skills/plug-off'), { recursive: true });
+  writeFileSync(oSkillRec, `${JSON.stringify(sJson, null, 2)}\n`);
+  writeFileSync(join(O.home, '.central-knot/plugins.json'), `${JSON.stringify({ formatVersion: 1, tools: ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'], knows: ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'], plugins: [{ id: 'plug-src', source: 'https://github.com/team/ck-test-market', marketName: 'ck-test-market', plugin: 'issue-tracker', on: false, except: ['claude-cli', 'copilot-cli', 'codex-cli', 'opencode-cli', 'antigravity-cli'] }] }, null, 2)}\n`);
+  const aJson = JSON.parse(readFileSync(oAgentRec, 'utf8'));
+  aJson.items['release-scribe'].on = false;
+  aJson.items['release-scribe'].except = ['codex-cli'];
+  aJson.items['release-scribe'].applied = {};
+  writeFileSync(oAgentRec, `${JSON.stringify(aJson, null, 2)}\n`);
+  const mJson = JSON.parse(readFileSync(oMcpRec, 'utf8'));
+  mJson.items.docs.on = false;
+  mJson.items.docs.except = ['codex-cli'];
+  mJson.items.docs.applied = {};
+  writeFileSync(oMcpRec, `${JSON.stringify(mJson, null, 2)}\n`);
+  for (const rel of oSkillDirs) rmSync(join(O.home, rel, 'bench-runner'), { recursive: true, force: true });
+  for (const rel of oSkillDirs) rmSync(join(O.home, rel, 'own-test'), { recursive: true, force: true });
+  skill(join(O.home, '.copilot/skills'), 'own-test', text('own-test', 'Copilot CLI own copy.'));
+  rmSync(join(O.home, '.codex/skills/legacy-skill'), { recursive: true, force: true });
+  for (const rel of oAgentDirs) if (existsSync(join(O.home, rel))) for (const file of readdirSync(join(O.home, rel)).filter(f => f.startsWith('release-scribe'))) rmSync(join(O.home, rel, file), { force: true });
+  for (const rel of oMcpFiles) rmSync(join(O.home, rel), { force: true });
+  writeFileSync(join(O.home, '.claude.json'), `${JSON.stringify({ mcpServers: {} }, null, 2)}\n`);
+  writeFileSync(join(O.home, '.central-knot/profiles.json'), `${JSON.stringify({ formatVersion: 2, profiles: [{ id: 'everyday', name: 'Everyday', items: ['skill:active-skill', 'skill:legacy-skill'] }] }, null, 2)}\n`);
+  const hPath = join(O.home, '.central-knot/history.json');
+  const hJson = jsonOrNothing(hPath) ?? { events: [] };
+  hJson.events.push({ id: 'pre-14a-on', at: new Date().toISOString(), key: 'legacy-skill', of: 'skill', item: 'legacy-skill', kind: 'on', cause: 'switch', losers: [{ tool: 'claude-cli', hash: '' }], orderProved: true });
+  writeFileSync(hPath, `${JSON.stringify(hJson, null, 2)}\n`);
+  const snapDirs = dirs => Object.fromEntries(dirs.map(rel => [rel, existsSync(join(O.home, rel)) ? tree(join(O.home, rel)) : null]));
+  const snapFiles = files => Object.fromEntries(files.map(rel => [rel, existsSync(join(O.home, rel)) ? createHash('sha256').update(readFileSync(join(O.home, rel))).digest('hex') : null]));
+  const shots14a = async (win, label) => {
+    if (!shots) return;
+    for (const [w, h] of [[860, 600], [1316, 819]]) {
+      await sizeTo(win, w, h);
+      if (await win.run(`document.getElementById('sidebar-toggle')?.getAttribute('aria-label') === 'Expand the sidebar'`)) await win.click('#sidebar-toggle');
+      await win.run(`document.querySelector('.ov-row[aria-expanded="true"]')?.scrollIntoView({ block: 'start' })`);
+      for (const look of ['light', 'dark']) {
+        await theme(win, look);
+        await win.settle();
+        await win.shot(`ux-14a-${label}-${w}-${look}`);
+      }
+    }
+    await theme(win, 'light');
+    await fullSize(win);
+  };
+  const readToolLines = win => win.run(`[...document.querySelectorAll('.details .details-tool')].map(el => ({
+    tool: el.querySelector('.details-tool-label')?.textContent?.trim() ?? '',
+    line: el.querySelector('.details-tool-line')?.textContent?.trim() ?? '',
+    word: el.querySelector('.tool-switch-word')?.textContent?.trim() ?? '',
+    label: el.querySelector('.tool-switch [role="switch"]')?.getAttribute('aria-label') ?? '',
+  }))`);
+
+  o = await launch(O.data, [], O.real);
+  await openKind(o, 'all');
+  same('Everyday is in use before the 14a click', (await o.text('#status-profile'))?.trim(), 'Everyday');
+  const skillsBefore = snapDirs(oSkillDirs);
+  // Click 1: open Off skill bench-runner.
+  await o.click(`#${rowPart('open', 'skills', 'bench-runner')}`);
+  same('Off skill opened row: status line and tool lines match keep-outs with per-tool Off switches',
+    [await o.text('.details-status'), await readToolLines(o)],
+    ['Off · On puts it back in 4 of 6 tools.', [
+      { tool: 'Claude Code', line: '', word: 'Off', label: 'bench-runner in Claude Code: off. Click to turn it on in Claude Code only.' },
+      { tool: 'Copilot CLI', line: '', word: 'Off', label: 'bench-runner in Copilot CLI: off. Click to turn it on in Copilot CLI only.' },
+      { tool: 'Codex', line: 'Kept out', word: 'Off', label: 'bench-runner in Codex: off. Click to turn it on in Codex only.' },
+      { tool: 'Pi', line: 'Kept out', word: 'Off', label: 'bench-runner in Pi: off. Click to turn it on in Pi only.' },
+      { tool: 'OpenCode', line: '', word: 'Off', label: 'bench-runner in OpenCode: off. Click to turn it on in OpenCode only.' },
+      { tool: 'Antigravity', line: '', word: 'Off', label: 'bench-runner in Antigravity: off. Click to turn it on in Antigravity only.' },
+    ]]);
+  await shots14a(o, '01-off-open');
+  // Click 2: turn bench-runner on in Claude Code only.
+  await o.click(`#${rowPart('enable', 'skills', 'bench-runner', 'claude-cli')}`);
+  await done(o);
+  const skillsAfterClaude = snapDirs(oSkillDirs);
+  const claudeOnlyOthers = oSkillDirs.filter(rel => rel !== '.claude/skills');
+  same('skill on in Claude Code: only Claude Code gained files, bold line names OpenCode, result says OpenCode reads it too, and profile line shows Everyday ended',
+    [existsSync(join(O.home, '.claude/skills/bench-runner/SKILL.md')),
+      claudeOnlyOthers.every(rel => JSON.stringify(skillsAfterClaude[rel]) === JSON.stringify(skillsBefore[rel])),
+      await o.text('.details-status'),
+      await o.text('#header [data-outcome] .band-text'),
+      await o.text('#header .band-profile')],
+    [true, true, 'On in Claude Code · OpenCode has it another way · kept out of Copilot CLI, Codex, Pi and Antigravity',
+      'bench-runner is on in Claude Code. OpenCode reads it too.', 'Everyday stopped being the profile in use.']);
+  const checkFitsAt860 = async (win, expected, shotName) => {
+    await sizeTo(win, 860, 600);
+    if (await win.run(`document.getElementById('sidebar-toggle')?.getAttribute('aria-label') === 'Expand the sidebar'`)) await win.click('#sidebar-toggle');
+    await win.run(`document.querySelector('.ov-row[aria-expanded="true"]')?.scrollIntoView({ block: 'start' })`);
+    await theme(win, 'light');
+    await win.settle();
+    const fit = await win.run(`(() => {
+      const band = document.querySelector('#header [data-outcome] .band-text');
+      const rect = band?.getBoundingClientRect();
+      return {
+        text: band?.textContent?.trim() ?? '',
+        whole: !!band && band.scrollWidth <= band.clientWidth + 1,
+        inside: !!rect && rect.left >= 0 && rect.right <= window.innerWidth,
+      };
+    })()`);
+    same(`at 860 with sidebar open, result "${expected}" is whole and inside the window`,
+      fit, { text: expected, whole: true, inside: true });
+    if (shotName && shots) await win.shot(shotName);
+    await fullSize(win);
+  };
+  await checkFitsAt860(o, 'bench-runner is on in Claude Code. OpenCode reads it too.');
+  await o.run(`document.getElementById('outcome-undo')?.focus()`);
+  await shots14a(o, '02-after-click');
+  // Undo: item Off, earlier keep-outs back, status & lines back, every folder byte for byte as before, Everyday back in use.
+  await o.click('#outcome-undo');
+  await done(o);
+  const afterUndoRec = jsonOrNothing(oSkillRec)?.items['bench-runner'];
+  same('skill Undo: Off with earlier keep-outs back, folders byte for byte as before, status back, Everyday in use',
+    [afterUndoRec?.on, afterUndoRec?.except, snapDirs(oSkillDirs), await o.text('.details-status'), (await o.text('#status-profile'))?.trim()],
+    [false, ['codex-cli', 'pi-cli'], skillsBefore, 'Off · On puts it back in 4 of 6 tools.', 'Everyday']);
+  await shots14a(o, '03-after-undo');
+  // Skill on in Codex (no other tool reads Codex's folder): says "only", and Undo restores byte for byte.
+  await o.click(`#${rowPart('enable', 'skills', 'bench-runner', 'codex-cli')}`);
+  await done(o);
+  same('skill on in Codex: only Codex gained files and result says "only"',
+    [existsSync(join(O.home, '.codex/skills/bench-runner/SKILL.md')),
+      oSkillDirs.filter(rel => rel !== '.codex/skills').every(rel => JSON.stringify(snapDirs(oSkillDirs)[rel]) === JSON.stringify(skillsBefore[rel])),
+      await o.text('#header [data-outcome] .band-text')],
+    [true, true, 'bench-runner is on in Codex only.']);
+  await o.click('#outcome-undo');
+  await done(o);
+  same('Codex skill Undo restores folders byte for byte', snapDirs(oSkillDirs), skillsBefore);
+  // Off skill with Copilot CLI holding its own copy: clicking Codex names Copilot CLI's own copy (never "only"), fits at 860, and Undo restores byte for byte.
+  await o.click(`#${rowPart('open', 'skills', 'own-test')}`);
+  await o.click(`#${rowPart('enable', 'skills', 'own-test', 'codex-cli')}`);
+  await done(o);
+  const skillsAfterOwn = snapDirs(oSkillDirs);
+  same('own-test on in Codex: only Codex gained files, Copilot CLI own copy untouched, and result names Copilot CLI',
+    [existsSync(join(O.home, '.codex/skills/own-test/SKILL.md')),
+      oSkillDirs.filter(rel => rel !== '.codex/skills').every(rel => JSON.stringify(skillsAfterOwn[rel]) === JSON.stringify(skillsBefore[rel])),
+      await o.text('#header [data-outcome] .band-text')],
+    [true, true, 'own-test is on in Codex. Copilot CLI has its own copy.']);
+  await checkFitsAt860(o, 'own-test is on in Codex. Copilot CLI has its own copy.', 'ux-14a-04-own-copy-860-light');
+  await o.click('#outcome-undo');
+  await done(o);
+  same('own-test Undo restores folders byte for byte with Copilot CLI own copy intact', snapDirs(oSkillDirs), skillsBefore);
+
+  // Agent: release-scribe on in Claude Code only, then Undo byte for byte.
+  const agentsBefore = snapDirs(oAgentDirs);
+  await o.click(`#${rowPart('open', 'agents', 'release-scribe')}`);
+  await o.click(`#${rowPart('enable', 'agents', 'release-scribe', 'claude-cli')}`);
+  await done(o);
+  same('agent on in Claude Code only: only Claude Code gained file and result says "only"',
+    [existsSync(join(O.home, '.claude/agents/release-scribe.md')),
+      oAgentDirs.filter(rel => rel !== '.claude/agents').every(rel => JSON.stringify(snapDirs(oAgentDirs)[rel]) === JSON.stringify(agentsBefore[rel])),
+      await o.text('#header [data-outcome] .band-text')],
+    [true, true, 'release-scribe is on in Claude Code only.']);
+  await o.click('#outcome-undo');
+  await done(o);
+  const agentUndoRec = jsonOrNothing(oAgentRec)?.items['release-scribe'];
+  same('agent Undo: Off with earlier keep-out back and folders byte for byte as before',
+    [agentUndoRec?.on, agentUndoRec?.except, snapDirs(oAgentDirs)], [false, ['codex-cli'], agentsBefore]);
+
+  // MCP server: docs on in Claude Code only, then Undo byte for byte.
+  const mcpBefore = snapFiles(oMcpFiles);
+  await o.click(`#${rowPart('open', 'mcp', 'docs')}`);
+  await o.click(`#${rowPart('enable', 'mcp', 'docs', 'claude-cli')}`);
+  await done(o);
+  const mcpAfter = snapFiles(oMcpFiles);
+  same('MCP server on in Claude Code only: only .claude.json changed with docs and result says "only"',
+    [!!jsonOrNothing(join(O.home, '.claude.json'))?.mcpServers?.docs,
+      oMcpFiles.filter(rel => rel !== '.claude.json').every(rel => mcpAfter[rel] === mcpBefore[rel]),
+      await o.text('#header [data-outcome] .band-text')],
+    [true, true, 'docs is on in Claude Code only.']);
+  await o.click('#outcome-undo');
+  await done(o);
+  const mcpUndoRec = jsonOrNothing(oMcpRec)?.items.docs;
+  same('MCP server Undo: Off with earlier keep-out back and config files byte for byte as before',
+    [mcpUndoRec?.on, mcpUndoRec?.except, snapFiles(oMcpFiles)], [false, ['codex-cli'], mcpBefore]);
+
+  // Plugin-sourced Off row keeps today's line and draws no Off-row switch; Claude Code whole-plugin row keeps whole-plugin control.
+  await o.click(`#${rowPart('open', 'skills', 'plug-off')}`);
+  const plugOffPi = (await readToolLines(o)).find(entry => entry.tool === 'Pi');
+  same('plugin-sourced Off row keeps today’s line and draws no tool switch in Pi',
+    [plugOffPi?.line, plugOffPi?.label], ['No copy while it is off.', '']);
+  await o.click(byId(rowPart('open', 'skills', 'release-helper@ck-test-market/release-notes')));
+  const claudePlugLabel = await o.run(`document.querySelector('.details .details-tool')?.querySelector('[role="switch"]')?.getAttribute('aria-label') ?? ''`);
+  check('Claude Code whole-plugin line never offers one skill only', !/only\./.test(claudePlugLabel), claudePlugLabel);
+
+  // History entry words + Undo from History + older pre-14a entry still undoes as before.
+  await o.click(`#${rowPart('open', 'skills', 'bench-runner')}`);
+  await o.click(`#${rowPart('enable', 'skills', 'bench-runner', 'claude-cli')}`);
+  await done(o);
+  await o.click('#nav-history');
+  await until(() => o.exists('.history-row'));
+  const latestBench = await o.run(`(() => { const row = [...document.querySelectorAll('.history-row')].find(el => el.querySelector('.history-what strong')?.textContent === 'bench-runner'); return { about: row?.querySelector('.history-about')?.textContent?.trim(), act: row?.querySelector('.history-actions button')?.textContent?.trim(), id: row?.querySelector('.history-actions button')?.id }; })()`);
+  same('History entry says Turned on in Claude Code; kept out of every other tool with Undo', [latestBench.about, latestBench.act], ['Turned on in Claude Code; kept out of every other tool.', 'Undo']);
+  await o.click(`#${latestBench.id}`);
+  await done(o);
+  same('History Undo restores bench-runner Off with earlier keep-outs', [jsonOrNothing(oSkillRec)?.items['bench-runner']?.on, jsonOrNothing(oSkillRec)?.items['bench-runner']?.except], [false, ['codex-cli', 'pi-cli']]);
+  same('older pre-14a History entry still offers Turn it off', await o.text('#history-pre-14a-on'), 'Turn it off');
+  await o.click('#history-pre-14a-on');
+  await done(o);
+  same('older pre-14a History entry turns legacy-skill Off keeping its current keep-outs', [jsonOrNothing(oSkillRec)?.items['legacy-skill']?.on, jsonOrNothing(oSkillRec)?.items['legacy-skill']?.except], [false, ['codex-cli']]);
+  same('no page errors, 14a Off row one-tool checks', o.pageErrors, []);
+  await o.quit();
 }
 
 /**
