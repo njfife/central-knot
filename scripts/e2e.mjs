@@ -4015,12 +4015,17 @@ async function practiceFlow() {
   const signInCardText = `Opens hidden in ${process.platform === 'darwin' ? 'the menu bar' : 'the system tray'} at sign-in, so sync keeps running.`;
   const logCardText = 'Central Knot’s own log, for reporting a problem. Your tools’ files aren’t in it.';
   const cardOpen = id => a.run(`!!document.querySelector('#${id}-card')?.matches(':popover-open')`);
-  const cardBecomes = async (id, want, ms) => {
-    for (let end = Date.now() + ms; Date.now() < end; ) {
-      if (await cardOpen(id) === want) return true;
+  const cardBecomes = async (id, want, bound, from = Date.now()) => {
+    const limit = bound + 1500;
+    while (true) {
+      const elapsed = Date.now() - from;
+      if (await cardOpen(id) === want) {
+        const ms = Date.now() - from;
+        return { ok: ms <= bound, ms, why: ms <= bound ? 'ok' : 'late' };
+      }
+      if (elapsed >= limit) return { ok: false, ms: Date.now() - from, why: 'never' };
       await wait(25);
     }
-    return ms > 0 && await cardOpen(id) === want;
   };
   const centerOf = selector => a.run(`(() => { const b = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) }; })()`);
   const pressTab = async (shift = false) => { for (const type of ['rawKeyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers: shift ? 8 : 0 }); await wait(60); };
@@ -4078,7 +4083,7 @@ async function practiceFlow() {
   await moveTo(signInAt);
   await wait(120);
   const beforeDelay = await cardOpen('setting-sign-in-info');
-  const afterDelay = await cardBecomes('setting-sign-in-info', true, 1500 - (Date.now() - hoverAt));
+  const afterDelay = await cardBecomes('setting-sign-in-info', true, 600, hoverAt);
   await moveTo(await centerOf('#setting-sign-in-info-card'));
   await wait(260);
   const stayedOnCard = await cardOpen('setting-sign-in-info');
@@ -4087,13 +4092,15 @@ async function practiceFlow() {
   await moveTo(signInAt);
   await wait(260);
   const stayedOnReturn = await cardOpen('setting-sign-in-info');
+  const leaveAt = Date.now();
   await moveTo({ x: 0, y: 0 });
-  const closedAfterLeave = await cardBecomes('setting-sign-in-info', false, 1500);
+  const closedAfterLeave = await cardBecomes('setting-sign-in-info', false, 500, leaveAt);
   await a.run(`document.querySelector('#setting-sign-in-info').dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'touch' }))`);
   await wait(360);
   const touchHover = await cardOpen('setting-sign-in-info');
-  same('mouse hover opens after 300 ms (within 1.5 s), stays on the card and on a quick return, closes 200 ms after leaving (within 1.5 s); touch hover opens nothing',
-    [beforeDelay, afterDelay, stayedOnCard, stayedOnReturn, closedAfterLeave, touchHover], [false, true, true, true, true, false]);
+  const hoverOk = !beforeDelay && afterDelay.ok && stayedOnCard && stayedOnReturn && closedAfterLeave.ok && !touchHover;
+  check('mouse hover opens after 300 ms (within 600 ms), stays on the card and on a quick return, closes 200 ms after leaving (within 500 ms); touch hover opens nothing',
+    hoverOk, { beforeDelay, afterDelay, stayedOnCard, stayedOnReturn, closedAfterLeave, touchHover });
   // Keyboard: Tab from another control opens the card; Escape closes it keeping focus; a redraw does not reopen; a second Escape runs the page's own Escape.
   await a.run(`document.querySelector('#header-refresh').focus()`);
   await pressTab();
@@ -4151,22 +4158,50 @@ async function practiceFlow() {
   await a.run(`window.centralKnot.setAppearance('light')`);
   for (let tries = 0; tries < 20 && !(await a.exists('#appearance-light[aria-checked="true"]')); tries++) await wait(100);
   const afterScrolledRedraw = await a.run(`(() => { const c = document.querySelector('#setting-log-info-card'), r = c.getBoundingClientRect(); return { replaced: c.dataset.before !== '1', open: c.matches(':popover-open'), topDiff: Math.abs(Math.round(r.top) - ${footBox.top}) }; })()`);
-  await a.run(`document.querySelector('#settings-scroll').scrollTop += 16`);
-  const readSmallScroll = () => a.run(`(() => {
-    const c = document.querySelector('#setting-log-info-card');
-    return { open: c.matches(':popover-open'), moved: ${footBox.top} - Math.round(c.getBoundingClientRect().top) };
-  })()`);
-  let afterSmallScroll = await readSmallScroll();
-  for (let end = Date.now() + 1500; Date.now() < end && afterSmallScroll.open && !(afterSmallScroll.moved >= 14 && afterSmallScroll.moved <= 18); ) {
-    await wait(25);
-    afterSmallScroll = await readSmallScroll();
-  }
-  await a.run(`document.querySelector('#settings-scroll').scrollTop = 0`);
-  const closedOnScrollOut = await cardBecomes('setting-log-info', false, 1500);
-  same('at 860×528, Log’s card at the foot flips above inside the window, stays in place across a scrolled redraw, follows a small scroll and closes when scrolled out of view (each within 1.5 s)', [
-    footBox.above, footBox.inside, footBox.scroll > 0, afterScrolledRedraw.replaced, afterScrolledRedraw.open,
-    afterScrolledRedraw.topDiff <= 2, afterSmallScroll.open, afterSmallScroll.moved >= 14 && afterSmallScroll.moved <= 18, closedOnScrollOut,
-  ], [true, true, true, true, true, true, true, true, true]);
+  // Register after dom.ts's capture scroll listener so each entry reflects the card state at that scroll event itself.
+  const afterScroll = (mutate, ms = 1000) => a.run(`new Promise(done => {
+    const s = document.querySelector('#settings-scroll');
+    const m = document.querySelector('#setting-log-info');
+    const beforeCard = document.querySelector('#setting-log-info-card');
+    const before = { scroll: s.scrollTop, cardTop: Math.round(beforeCard.getBoundingClientRect().top), markTop: Math.round(m.getBoundingClientRect().top) };
+    const t0 = performance.now();
+    const finish = (arrived, extra) => {
+      clearTimeout(stop);
+      document.removeEventListener('scroll', onScroll, true);
+      done({ arrived, ms: Math.round(performance.now() - t0), ...extra });
+    };
+    const onScroll = event => {
+      if (event.target !== s) return;
+      const card = document.querySelector('#setting-log-info-card');
+      const mark = document.querySelector('#setting-log-info');
+      const open = !!card?.matches(':popover-open');
+      finish(true, {
+        sameCard: card === beforeCard,
+        open,
+        scrolled: Math.round(s.scrollTop - before.scroll),
+        cardMoved: open ? before.cardTop - Math.round(card.getBoundingClientRect().top) : null,
+        markMoved: mark ? before.markTop - Math.round(mark.getBoundingClientRect().top) : null,
+        markOut: !!mark && mark.getBoundingClientRect().top >= s.getBoundingClientRect().bottom,
+      });
+    };
+    const stop = setTimeout(() => {
+      const card = document.querySelector('#setting-log-info-card');
+      finish(false, { sameCard: card === beforeCard, open: !!card?.matches(':popover-open'), scrolled: Math.round(s.scrollTop - before.scroll) });
+    }, ${ms});
+    document.addEventListener('scroll', onScroll, true);
+    ${mutate};
+  })`);
+  const afterSmallScroll = await afterScroll('s.scrollTop += 16');
+  const afterScrollOut = await afterScroll('s.scrollTop = 0');
+  const smallOk = afterSmallScroll.arrived && afterSmallScroll.sameCard && afterSmallScroll.open
+    && afterSmallScroll.scrolled >= 14 && afterSmallScroll.scrolled <= 18
+    && Math.abs(afterSmallScroll.cardMoved - afterSmallScroll.scrolled) <= 2
+    && Math.abs(afterSmallScroll.cardMoved - afterSmallScroll.markMoved) <= 2;
+  const outOk = afterScrollOut.arrived && afterScrollOut.sameCard && afterScrollOut.markOut && !afterScrollOut.open;
+  const scrollOk = footBox.above && footBox.inside && footBox.scroll > 0
+    && afterScrolledRedraw.replaced && afterScrolledRedraw.open && afterScrolledRedraw.topDiff <= 2 && smallOk && outOk;
+  check('at 860×528, Log’s card at the foot flips above inside the window, stays across a scrolled redraw, and at the scroll event follows a small scroll and closes out of view (each within 1 s)',
+    scrollOk, { footBox, afterScrolledRedraw, afterSmallScroll, afterScrollOut });
   if (shots) {
     await a.click('#sidebar-toggle');
     await putLogAtFoot();
