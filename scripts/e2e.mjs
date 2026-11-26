@@ -1446,6 +1446,31 @@ async function fullSize(a) {
   await a.run(`window.dispatchEvent(new Event('resize'))`);
   await a.settle();
 }
+/** Opens info mark `markId`'s card, checks its words, status-bar clearance and fit, then checks Escape closes it. */
+async function checkCard(a, markId, expected, label) {
+  await a.click(`#${markId}`);
+  const got = await a.run(`(() => {
+    const card = document.getElementById(${JSON.stringify(`${markId}-card`)});
+    if (!card) return { exists: false };
+    const box = card.getBoundingClientRect();
+    const status = document.getElementById('status')?.getBoundingClientRect();
+    const clearStatus = !status || !status.height || box.bottom <= status.top + 1;
+    return { exists: true, open: card.matches(':popover-open'), text: card.textContent, clearStatus };
+  })()`);
+  same(label, got, { exists: true, open: true, text: expected, clearStatus: true });
+  same(`${label}: nothing cut off`, await a.run(CUT_OFF), []);
+  await a.press('Escape');
+  same(`${label}: Escape closes the card`, await a.run(`!!document.getElementById(${JSON.stringify(`${markId}-card`)})?.matches(':popover-open')`), false);
+}
+/** Sizes `a` to width × height with the sidebar open, runs `fn`, and puts the rail back if it was folded. */
+async function withSidebarOpen(a, width, height, fn) {
+  await sizeTo(a, width, height);
+  const rail = await a.run(`document.body.classList.contains('rail')`);
+  if (rail) await a.click('#sidebar-toggle');
+  try { await fn(); } finally {
+    if (rail && !(await a.run(`document.body.classList.contains('rail')`))) await a.click('#sidebar-toggle');
+  }
+}
 /** Chooses `value` in the item list's From menu (matrix.ts fromChoice) as its menu chooses: a press opens a system menu on the Mac. */
 async function chooseFrom(a, value) {
   await a.run(`(select => { select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change')); })(document.querySelector('#item-from'))`);
@@ -4691,16 +4716,66 @@ async function repoBaseFlow() {
   };
 
   const first = await open('first');
+  const REPO_STATE_CARD = 'Pull brings the repo’s changes into your tools; Push sends yours. Only Managed skills, MCP servers, agents and base instructions go to the repo; other files stay as they are.';
+
+  // Not connected: standing intro gone; Connect note kept; paths, sign-in and Managed link folded behind What goes where.
+  await first.click('#nav-repo');
+  await until(() => first.exists('#repo-url'));
+  const startPage = await first.text('.repo-page') ?? '';
+  check('not connected Git repo drops the introduction, keeps the form and Connect note, and starts What goes where folded',
+    !(await first.exists('.empty-body')) && !startPage.includes('can live in any git repo')
+    && (await first.text('.repo-connect-note'))?.trim() === 'Connecting changes nothing in your tools. You choose when to Pull or Push.'
+    && await first.run(`(() => { const d = document.getElementById('repo-what-goes-where'), s = document.getElementById('repo-what-goes-where-toggle'), l = document.querySelector('.repo-layout'); return d?.open === false && l?.checkVisibility() === false && d.getBoundingClientRect().height <= s.getBoundingClientRect().height + 2; })()`), startPage);
+  await first.click('#repo-what-goes-where-toggle');
+  check('opening What goes where shows the 4 paths, git sign-in note and See what’s Managed link',
+    await first.run(`(() => { const d = document.getElementById('repo-what-goes-where'), s = document.getElementById('repo-what-goes-where-toggle'), l = document.querySelector('.repo-layout'); return d?.open === true && l?.checkVisibility() === true && d.getBoundingClientRect().height > s.getBoundingClientRect().height + 2; })()`)
+    && (await first.text('#repo-what-goes-where') ?? '').includes('skills/<folder>/')
+    && (await first.text('#repo-what-goes-where') ?? '').includes('instructions/base.md')
+    && (await first.text('#repo-what-goes-where') ?? '').includes('Central Knot uses this computer’s git')
+    && await first.text('#repo-see-library') === 'See what’s Managed', await first.text('#repo-what-goes-where'));
+  await first.click('#header-refresh');
+  check('an opened What goes where fold stays open through Refresh',
+    await first.run(`(() => { const d = document.getElementById('repo-what-goes-where'), s = document.getElementById('repo-what-goes-where-toggle'), l = document.querySelector('.repo-layout'); return d?.open === true && l?.checkVisibility() === true && d.getBoundingClientRect().height > s.getBoundingClientRect().height + 2; })()`));
+  for (const [w, h] of [[860, 560], [1316, 819]]) {
+    await withSidebarOpen(first, w, h, async () => { same(`not connected Git repo with fold open fits at ${w}×${h}`, await first.run(CUT_OFF), []); });
+  }
+  await fullSize(first);
+
   same('the first home saves a base and pushes it', [await setBase(first, 'Be brief.\n'), await api(first, `return (await api.connectRepo(${JSON.stringify(remote)}, '', home)).stopped ?? 'connected';`), await push(first)], ['saved', 'connected', 'pushed']);
+  await first.click('#nav-overview');
+  await first.click('#nav-repo');
+  await until(() => first.exists('#repo-state'));
+  const connectedPageText = await first.text('.repo-page') ?? '';
+  check('connected in-sync Git repo drops Refresh checks… and the scope aside, keeping the state line',
+    !(await first.exists('p.repo-in-sync')) && !(await first.exists('.repo-aside'))
+    && !connectedPageText.includes('Refresh checks the repo for new commits.')
+    && !connectedPageText.includes('A skill from a source is sent like any other')
+    && (await first.text('#repo-state') ?? '').includes('Up to date with the repo'), connectedPageText);
+  for (const [w, h] of [[860, 560], [1316, 819]]) {
+    await withSidebarOpen(first, w, h, async () => {
+      await checkCard(first, 'repo-state-info', REPO_STATE_CARD, `Git repo state line card at ${w}×${h}`);
+    });
+  }
+  await fullSize(first);
+
   const second = await open('second');
   await setBase(second, 'Be thorough.\n');
   await api(second, `return (await api.connectRepo(${JSON.stringify(remote)}, '', home)).stopped ?? 'connected';`);
-  check('the second home’s Git repo page lists the base as coming in', (await rowSays(second, 'in the repo')).includes('Base instructions'), await second.text('#repo-incoming'));
+  const firstIncoming = await rowSays(second, 'Base instructions');
+  same('the second home’s Git repo page lists the base with a short badge and keeps its conflict note', [
+    await second.text(`${baseRow} .repo-row-change`),
+    firstIncoming.includes('Changed here too. Pull uses the repo’s version; yours stays in History.'),
+  ], ['New', true]);
   await pull(second, 'Be brief.\n');
   same('Pull sets the base, and Claude Code, which gets it, has it', [baseText('second'), claudeText('second').includes('Be brief.')], ['Be brief.\n', true]);
 
-  same('an edit in the first home goes out', [await setBase(first, 'Be briefer.\n'), await push(first)], ['saved', 'pushed']);
-  check('and shows as changed in the repo', (await rowSays(second, 'Changed in the repo')).includes('Changed in the repo'), await second.text('#repo-incoming'));
+  same('an edit in the first home waits to go out with a short badge', await setBase(first, 'Be briefer.\n'), 'saved');
+  await first.click('#nav-overview');
+  await first.click('#nav-repo');
+  await until(() => first.exists(`section[aria-labelledby="repo-outgoing"] ${baseRow}`));
+  same('outgoing row uses the short Changed badge', await first.text(`section[aria-labelledby="repo-outgoing"] ${baseRow} .repo-row-change`), 'Changed');
+  same('an edit in the first home goes out', await push(first), 'pushed');
+  check('and shows with the short Changed badge on the incoming side', (await rowSays(second, 'Changed')).includes('Base instructions') && await second.text(`${baseRow} .repo-row-change`) === 'Changed', await second.text('#repo-incoming'));
   await pull(second, 'Be briefer.\n');
   same('Pull brings the edit in', [baseText('second'), claudeText('second').includes('Be briefer.')], ['Be briefer.\n', true]);
   const undoneSays = (a, words) => a.run(`[...document.querySelectorAll('.history-row.history-undone')].some(row => row.textContent.includes(${JSON.stringify(words)}))`);
@@ -4715,18 +4790,79 @@ async function repoBaseFlow() {
   // Saved again as the repo has it, so nothing waits to go out before the deletion below.
   same('the repo’s text saved again', await setBase(second, 'Be briefer.\n'), 'saved');
 
+  // Two incoming changes (base + a Managed skill): Pull preserves multi-item Undo directions until step 3c.
+  skill(join(homes.first, '.claude/skills'), 'brief-skill', text('brief-skill', 'Be brief.'));
+  await first.click('#nav-library');
+  await first.click('#header-refresh');
+  await until(() => first.exists(`#${rowPart('add', 'skills', 'brief-skill')}`));
+  await first.click(`#${rowPart('add', 'skills', 'brief-skill')}`);
+  await until(() => existsSync(join(homes.first, '.central-knot/skills.json')));
+  same('first home pushes a new skill and an updated base together', [await setBase(first, 'Be concise.\n'), await push(first)], ['saved', 'pushed']);
+  await second.click('#nav-overview');
+  await second.click('#nav-repo');
+  await until(() => second.exists('#repo-pull:not([disabled])'));
+  await second.click('#repo-pull');
+  await until(() => baseText('second') === 'Be concise.\n');
+  check('Pull of two items preserves multi-item Undo directions in History',
+    (await second.text('.band-done') ?? '').includes('Undo any of the 2 in History.'), await second.text('.band-done'));
+
   same('the first home deletes the base and pushes', [await setBase(first, ''), await push(first)], ['saved', 'pushed']);
-  const deleting = await rowSays(second, 'Removed in the repo');
-  check('before Pull, the page says the base is deleted in the repo and what Pull does', deleting.includes('Removed in the repo') && deleting.includes('Pull empties the base instructions'), deleting);
+  const deleting = await rowSays(second, 'Removed');
+  check('before Pull, the page shows the short Removed badge and keeps what Pull does',
+    await second.text(`${baseRow} .repo-row-change`) === 'Removed'
+    && deleting.includes('Pull empties the base instructions and takes them out of the tools that get them. History can undo it.'), deleting);
   await pull(second, '');
-  same('Pull empties the base and takes it out of Claude Code, which keeps its own text', [baseText('second'), claudeText('second').includes('Be briefer.'), claudeText('second').includes('My own notes.')], ['', false, true]);
+  same('Pull empties the base and takes it out of Claude Code, which keeps its own text', [baseText('second'), claudeText('second').includes('Be concise.'), claudeText('second').includes('My own notes.')], ['', false, true]);
   await second.click('#nav-history');
   const event = await api(second, `return (await api.history()).events.find(event => event.key === 'instructions:base' && event.kind === 'deleted')?.id ?? null;`);
   await until(async () => second.exists(`#history-${event}`));
   check('History has the deletion, with an Undo', event && /Pull emptied the base instructions/.test(await second.text('.history-list') ?? ''), await second.text('.history-list'));
   await second.click(`#history-${event}`);
-  same('Undo puts the base back, and Claude Code gets it again', [baseText('second'), claudeText('second').includes('Be briefer.'), await api(second, `return (await api.instructionBase()).tools;`)], ['Be briefer.\n', true, ['claude-cli']]);
+  same('Undo puts the base back, and Claude Code gets it again', [baseText('second'), claudeText('second').includes('Be concise.'), await api(second, `return (await api.instructionBase()).tools;`)], ['Be concise.\n', true, ['claude-cli']]);
   check('and the row reads as undone', await until(() => undoneSays(second, 'Pull emptied the base instructions')), await second.text('.history-list'));
+
+  // Both actionable div.repo-in-sync branches, plus stale (unreachable) and held states.
+  const extraClone = join(scratch, 'repo-extra-clone');
+  git('clone', '--quiet', remote, extraClone);
+  writeFileSync(join(extraClone, 'README.md'), '# Notes\n');
+  git('-C', extraClone, '-c', 'user.name=Tester', '-c', 'user.email=tester@example.com', '-c', 'commit.gpgsign=false', 'add', 'README.md');
+  git('-C', extraClone, '-c', 'user.name=Tester', '-c', 'user.email=tester@example.com', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'docs');
+  git('-C', extraClone, 'push', '--quiet', 'origin', 'main');
+  await first.click('#nav-overview');
+  await first.click('#nav-repo');
+  await until(() => first.exists('div.repo-in-sync #repo-pull'));
+  check('in-sync with a newer commit keeps the actionable div.repo-in-sync branch and Pull button',
+    (await first.text('div.repo-in-sync') ?? '').includes('The repo has a newer commit that changes nothing in your Managed set. Pull to move to it.'), await first.text('.repo-page'));
+  await first.click('#repo-pull');
+  await until(async () => !(await first.exists('div.repo-in-sync')));
+
+  git('--git-dir', remote, 'branch', '-m', 'main', 'archived');
+  git('--git-dir', remote, 'symbolic-ref', 'HEAD', 'refs/heads/archived');
+  await first.click('#nav-overview');
+  await first.click('#nav-repo');
+  await until(() => first.exists('div.repo-in-sync #repo-push'));
+  check('in-sync with a gone branch keeps the actionable div.repo-in-sync branch and Push button',
+    (await first.text('div.repo-in-sync') ?? '').includes('Nothing else differs. Push puts the branch main back in the repo.'), await first.text('.repo-page'));
+  await first.click('#repo-push');
+  await until(async () => !(await first.exists('div.repo-in-sync')));
+
+  renameSync(remote, `${remote}.away`);
+  await first.click('#header-refresh');
+  await until(() => first.exists('#repo-waiting'));
+  check('unreachable repo keeps the stale message and Try again',
+    (await first.text('#repo-state') ?? '').includes('Couldn’t reach the repo')
+    && (await first.text('#repo-waiting') ?? '').includes('These lists are from the last time the repo was reached; Pull and Push wait until it can be.')
+    && await first.exists('#repo-try-again'), await first.text('.repo-page'));
+  renameSync(`${remote}.away`, remote);
+
+  const firstPlugins = join(homes.first, '.central-knot/plugins.json');
+  writeFileSync(firstPlugins, '{bad');
+  await first.click('#header-refresh');
+  await until(async () => (await first.text('#repo-state') ?? '').includes('Pull and Push are held'));
+  check('damaged plugins record keeps the held message on Git repo',
+    (await first.text('#repo-state') ?? '').includes('Pull and Push are held') && await first.exists('.band-danger'), await first.text('.repo-page'));
+  rmSync(firstPlugins, { force: true });
+  same('no page errors on Git repo', [...first.pageErrors, ...second.pageErrors], []);
   await second.quit();
   await first.quit();
 }
@@ -4783,29 +4919,59 @@ async function sourcesFlow() {
   await fullSize(a);
   await a.click('#nav-plugins');
   same('the Plugins page’s title says Plugin marketplaces', await a.text('.page-title'), 'Plugin marketplaces');
+  const LINK_CARD = 'Any link to a repository, branch, folder or file; owner/repo or a git clone address works too. Uses this computer’s git sign-in.';
+  const SYNC_CARD = 'Reads the link now and applies it: changed items update unless changed here; removed ones turn off, with Undo.';
+  const WAIT_CARD = 'Changed here, or a tool’s copy couldn’t be read. Merge takes changes that don’t clash; Replace mine takes the source’s and keeps yours as a version.';
+  const EMPTY_CARD = 'A link that skills, agents and MCP servers are read from. Each arrives Off.';
+  const NOT_COMING_CARD = 'A whole plugin installs only from a marketplace that lists it.';
+
   await a.click('#nav-sources');
-  same('the page’s title says Library sources, and its last line says a marketplace’s link goes to Plugin marketplaces instead', [await a.text('.page-title'), await a.text('.repo-aside')],
-    ['Library sources', 'A marketplace’s link isn’t a library source: Look offers Add to Plugin marketplaces instead, where each of its plugins has its own switch.']);
-  check('the Sources page opens empty, with its field', await a.exists('#source-link') && /No sources yet/.test(await a.text('.page') ?? ''), await a.text('.page'));
+  const emptyPage = await a.text('.page') ?? '';
+  same('the page’s title says Library sources, and the old link paragraph, empty essay and marketplace aside are gone', [
+    await a.text('.page-title'), await a.exists('.repo-aside'), await a.exists('#source-link-below'),
+    emptyPage.includes('A marketplace’s link isn’t a library source'), emptyPage.includes('A source is a GitHub or GitLab link'),
+    await a.run(`document.querySelector('#source-link')?.getAttribute('aria-describedby')`),
+  ], ['Library sources', false, false, false, false, 'source-link-info-card']);
+  check('the Sources page opens empty, with its field and No sources yet', await a.exists('#source-link') && /No sources yet/.test(emptyPage), emptyPage);
+  await checkCard(a, 'source-link-info', LINK_CARD, 'link field info card');
+  await checkCard(a, 'source-empty-info', EMPTY_CARD, 'No sources yet info card');
   await type('https://github.com/stephenturner/skill-deslop/tree/main');
-  await a.click('#source-look');
+  await a.run(`document.querySelector('#source-link').focus()`);
+  await a.press('Enter');
   await until(() => a.exists('#source-preview'));
   const offered = await a.text('.source-name[data-key="deslop"]') ?? '';
-  check('Look offers one skill, deslop, at the root of skill-deslop, coming in Off, with the files beside its SKILL.md', (await a.all('#source-preview .source-name', 'e.dataset.key')).join() === 'deslop' && /deslop\s*skill, at the root of skill-deslop/.test(offered) && /Comes in, Off/.test(offered) && /8 files/.test(offered) && /references\/checklist\.md/.test(offered), offered);
+  check('keyboard Look offers one skill, deslop, at the root of skill-deslop, coming in Off, with its branch/commit unfolded and its files', (await a.all('#source-preview .source-name', 'e.dataset.key')).join() === 'deslop' && /deslop\s*skill, at the root of skill-deslop/.test(offered) && /Comes in, Off/.test(offered) && /8 files/.test(offered) && /references\/checklist\.md/.test(offered) && /Branch main/.test(await a.text('#source-preview .source-where') ?? ''), offered);
   same('a look keeps nothing and writes no tool', [record(), existsSync(join(home, roots['claude-cli'], 'deslop'))], [undefined, false]);
   await a.shot('sources-look');
   await a.click('#source-add');
   await until(() => a.exists('.source-row'));
   check('Add says deslop is in Central Knot, Off, to turn on in the Library', /Added github\.com\/stephenturner\/skill-deslop \(main\)\. deslop is in Central Knot\. It is off\. Turn it on in the Library\./.test(await a.text('.band-done .band-text') ?? ''), await a.text('.band-done'));
   same('in Central Knot, Off, in no tool', [record()?.on, Object.values(roots).some(root => existsSync(join(home, root, 'deslop')))], [false, false]);
-  check('its row says it is in Central Knot, Off, and says beforehand that Check now can change skills and agents in the tools', /In Central Knot, Off/.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '')
-    && /Check now reads the link again, as Central Knot does once a day while Automatic sync is on: a skill, an agent or an MCP server changed there is updated in the tools it is on in, unless you changed it here \(then it waits for you\); one no longer there is turned off and taken out of them\./.test(await a.text('.source-row') ?? ''), await a.text('.source-row'));
   const id = await a.run(`document.querySelector('.source-row').dataset.source`);
+  const rowText = await a.text('.source-row') ?? '';
+  check('its row says In Central Knot, Off, renames Check now to Sync this source, drops the standing paragraph and folds branch/folder/commit behind Details · read',
+    /In Central Knot, Off/.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '')
+    && (await a.text(`#source-check-${id}`))?.trim() === 'Sync this source'
+    && await a.run(`document.getElementById('source-check-${id}')?.getAttribute('aria-describedby')`) === 'source-sync-info-card'
+    && !(await a.exists('.source-does')) && !rowText.includes('Check now reads the link again')
+    && await a.run(`(() => { const d = document.getElementById('source-where-${id}'), s = document.getElementById('source-where-toggle-${id}'), w = d?.querySelector('.source-where'); return d?.open === false && w?.checkVisibility() === false && d.getBoundingClientRect().height <= s.getBoundingClientRect().height + 2; })()`)
+    && /^Details · read /.test((await a.text(`#source-where-toggle-${id}`) ?? '').trim()), rowText);
+  await checkCard(a, 'source-sync-info', SYNC_CARD, 'first Sync this source info card');
+  await a.click(`#source-where-toggle-${id}`);
+  const foldedWhere = await a.text(`#source-where-${id} .source-where`) ?? '';
+  check('opening the source’s fold shows its branch, folder and commit',
+    await a.run(`(() => { const d = document.getElementById('source-where-${id}'), s = document.getElementById('source-where-toggle-${id}'), w = d?.querySelector('.source-where'); return d?.open === true && w?.checkVisibility() === true && d.getBoundingClientRect().height > s.getBoundingClientRect().height + 2; })()`)
+    && /Branch main · its root folder · commit [0-9a-f]{7}/.test(foldedWhere), foldedWhere);
+  await a.click(`#source-check-${id}`);
+  check('Sync this source keeps the opened source fold open through the redraw and says Synced when nothing came in',
+    await a.run(`(() => { const d = document.getElementById('source-where-${id}'), s = document.getElementById('source-where-toggle-${id}'), w = d?.querySelector('.source-where'); return d?.open === true && w?.checkVisibility() === true && d.getBoundingClientRect().height > s.getBoundingClientRect().height + 2; })()`)
+    && /Synced github\.com\/stephenturner\/skill-deslop \(main\): nothing came in from it\./.test(await a.text('.band-done .band-text') ?? ''), await a.text('.band-done'));
+  await a.click(`#source-where-toggle-${id}`);
 
   await openKind(a, 'skills');
   await a.click(`#${rowPart('open', 'skills', 'deslop')}`);
   const opened = await a.text('.details') ?? '';
-  check('its opened row on Skills says which source it is from, and its version says so too', /From github\.com\/stephenturner\/skill-deslop \(main\), a source\. What changes there comes in once a day while Automatic sync is on, and at Check now on Library sources, unless you change it here\./.test(opened) && /from github\.com\/stephenturner\/skill-deslop \(main\)/.test(opened), opened);
+  check('its opened row on Skills says which source it is from, naming Sync this source, and its version says so too', /From github\.com\/stephenturner\/skill-deslop \(main\), a source\. What changes there comes in once a day while Automatic sync is on, and at Sync this source on Library sources, unless you change it here\./.test(opened) && /from github\.com\/stephenturner\/skill-deslop \(main\)/.test(opened), opened);
   await a.click(`#${rowPart('switch', 'skills', 'deslop')}`);
   const asGiven = Object.fromEntries(Object.entries(files).map(([path, text]) => [path, text]));
   const inTool = root => Object.fromEntries(Object.keys(files).map(path => [path, readNow(join(home, root, 'deslop', path))]));
@@ -4827,14 +4993,23 @@ async function sourcesFlow() {
   commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('Remove slop.', 'Remove slop, firmly.') });
   await a.click(`#source-check-${id}`);
   await until(async () => await a.exists(`#source-replace-${id}-skill-deslop`));
-  check('Check now leaves the edit current in every tool, says the source’s version waits, and its line offers Merge, Replace and Keep mine', /deslop changed at the source; yours stays current, since it was changed here or a tool’s copy can’t be read just now: on its row, Merge puts the source’s changes into yours if they don’t clash, Replace takes the source’s, and Keep mine keeps yours\./.test(await a.text('.band-done .band-text') ?? '')
-    && /Changed at the source\. Yours stays current until you merge, replace or keep it, since it was changed here or a tool’s copy can’t be read just now\./.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '') && await a.exists(`#source-merge-${id}-skill-deslop`) && await a.exists(`#source-keep-${id}-skill-deslop`)
+  check('Sync this source leaves the edit current in every tool, says the source’s version waits with Replace mine, and its line shows Update waiting with Merge, Replace mine and Keep mine', /deslop changed at the source; yours stays current, since it was changed here or a tool’s copy can’t be read just now: on its row, Merge puts the source’s changes into yours if they don’t clash, Replace mine takes the source’s, and Keep mine keeps yours\./.test(await a.text('.band-done .band-text') ?? '')
+    && /Update waiting/.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '')
+    && !(await a.text('.source-row .source-name[data-key="deslop"]') ?? '').includes('Changed at the source. Yours stays current')
+    && (await a.text(`#source-replace-${id}-skill-deslop`))?.trim() === 'Replace mine'
+    && await a.exists(`#source-merge-${id}-skill-deslop`) && await a.exists(`#source-keep-${id}-skill-deslop`)
     && Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('my way')), [await a.text('.band-done'), await a.text('.source-row')]);
+  for (const [w, h] of [[860, 560], [1316, 819]]) {
+    await withSidebarOpen(a, w, h, async () => {
+      await checkCard(a, `source-wait-info-${id}-skill-deslop`, WAIT_CARD, `Update waiting info card at ${w}×${h}`);
+    });
+  }
+  await fullSize(a);
   await a.shot('sources-waiting');
   await openKind(a, 'skills');
   const waitingRow = await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'deslop')}"]`) ?? '';
   if (!(await a.exists('.details'))) await a.click(`#${rowPart('open', 'skills', 'deslop')}`);
-  check('its row on Skills says the source has an update, and its opened row says Merge and Replace are on Library sources', /update at its source/.test(waitingRow) && /which has a newer version\. Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now\. On Library sources, Merge puts its changes into yours if they don’t clash, and Replace takes it as it is; either keeps yours as a version\./.test(await a.text('.details') ?? ''), [waitingRow, await a.text('.details')]);
+  check('its row on Skills says the source has an update, and its opened row says Merge and Replace mine are on Library sources', /update at its source/.test(waitingRow) && /which has a newer version\. Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now\. On Library sources, Merge puts its changes into yours if they don’t clash, and Replace mine takes it as it is; either keeps yours as a version\./.test(await a.text('.details') ?? ''), [waitingRow, await a.text('.details')]);
   await a.shot('skills-waiting');
   await a.click('#nav-sources');
   await a.click(`#source-replace-${id}-skill-deslop`);
@@ -4859,7 +5034,7 @@ async function sourcesFlow() {
   await a.shot('sources-merged');
   await openKind(a, 'skills');
   if (!(await a.exists('.details'))) await a.click(`#${rowPart('open', 'skills', 'deslop')}`);
-  check('its opened row on Skills says it is still changed here, so the source’s next change will wait for Merge, Replace or Keep mine', /You changed it here, or a tool’s copy of it can’t be read just now, so the source’s next change will wait for you to Merge, Replace or Keep mine on Library sources\./.test(await a.text('.details') ?? ''), await a.text('.details'));
+  check('its opened row on Skills says it is still changed here, so the source’s next change will wait for Merge, Replace mine or Keep mine', /You changed it here, or a tool’s copy of it can’t be read just now, so the source’s next change will wait for you to Merge, Replace mine or Keep mine on Library sources\./.test(await a.text('.details') ?? ''), await a.text('.details'));
   // A clash: the same line changed in Claude Code and at the source. Merge names the file and changes nothing.
   await a.click('#nav-sources');
   writeFileSync(inClaude, readNow(inClaude).replace('Remove slop, firmly.', 'Remove slop, my way.'));
@@ -4870,7 +5045,7 @@ async function sourcesFlow() {
   await until(async () => await a.exists(`#source-merge-${id}-skill-deslop`));
   const clashBefore = { versions: record()?.versions.length, seen: record()?.seen, tools: Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))) };
   await a.click(`#source-merge-${id}-skill-deslop`);
-  check('a Merge that clashes names SKILL.md, as a warning, says Keep mine is the way past a change made by hand, and changes nothing: every tool as it was, no version, the source’s version still waits', await until(async () => /Merge left deslop as it was: SKILL\.md changed both here and at the source, in ways that can’t be merged\. Replace takes the source’s version and keeps yours as a version; or make the source’s change in yours by hand, then Keep mine\. Until then, yours stays current and the update keeps waiting\./.test(await a.text('.band-done .band-text') ?? ''))
+  check('a Merge that clashes names SKILL.md, as a warning, says Replace mine and Keep mine, and changes nothing: every tool as it was, no version, the source’s version still waits', await until(async () => /Merge left deslop as it was: SKILL\.md changed both here and at the source, in ways that can’t be merged\. Replace mine takes the source’s version and keeps yours as a version; or make the source’s change in yours by hand, then Keep mine\. Until then, yours stays current and the update keeps waiting\./.test(await a.text('.band-done .band-text') ?? ''))
     && await a.exists('.band-done svg.tone-warning') && !(await a.exists('#outcome-undo')) && await a.exists(`#source-merge-${id}-skill-deslop`)
     && JSON.stringify({ versions: record()?.versions.length, seen: record()?.seen, tools: Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))) }) === JSON.stringify(clashBefore), [await a.text('.band-done'), clashBefore]);
   await a.shot('sources-merge-clash');
@@ -4953,6 +5128,19 @@ async function sourcesFlow() {
   await until(async () => (await a.all('.source-row')).length === 2);
   check('Add says notes, reviewer and relay are in Central Knot, Off, to turn on in the Library', /notes, reviewer and relay are in Central Knot\. All 3 are off\. Turn them on in the Library\./.test(await a.text('.band-done .band-text') ?? '') && agentRecord()?.on === false, await a.text('.band-done'));
   const kitId = await a.run(`[...document.querySelectorAll('.source-row')].find(row => row.textContent.includes('team/kit')).dataset.source`);
+  same('with two sources, Sync this source’s info mark appears only on the first source row', await a.run(`(() => {
+    const rows = [...document.querySelectorAll('.source-row')];
+    return [rows.length, rows.map(row => row.querySelector('[id^="source-check-"]')?.textContent?.trim()), rows.map(row => !!row.querySelector('#source-sync-info'))];
+  })()`), [2, ['Sync this source', 'Sync this source'], [true, false]]);
+  await a.click(`#source-remove-${id}`);
+  check('remove confirmation stays visible on the first source and keeps the Sync this source card alive on the second',
+    (await a.text('.source-confirm') ?? '').includes('Remove this source? Its skills, agents and MCP servers stay in Central Knot as they are')
+    && await a.exists(`#source-${kitId} #source-sync-info`), await a.text('.source-rows'));
+  await a.click(`#source-remove-cancel-${id}`);
+  for (const [w, h] of [[860, 560], [1316, 819]]) {
+    await withSidebarOpen(a, w, h, async () => { same(`two sources fit at ${w}×${h} with sidebar open`, await a.run(CUT_OFF), []); });
+  }
+  await fullSize(a);
   await openKind(a, 'agents');
   await until(() => a.exists(`#${rowPart('open', 'agents', 'reviewer')}`));
   await a.click(`#${rowPart('open', 'agents', 'reviewer')}`);
@@ -4973,8 +5161,8 @@ async function sourcesFlow() {
   commit(kit, { 'agents/reviewer.md': reviewerMd.replace('Be brief.', 'Be brief, kind and exact.') });
   await a.click(`#source-check-${kitId}`);
   await until(async () => await a.exists(`#source-merge-${kitId}-agent-reviewer`));
-  check('changed both here and at the source, the agent’s line waits with Merge, Replace and Keep mine', await a.exists(`#source-replace-${kitId}-agent-reviewer`) && await a.exists(`#source-keep-${kitId}-agent-reviewer`)
-    && /Changed at the source\./.test(await a.text(`.source-row[data-source="${kitId}"] .source-name[data-kind="agent"]`) ?? ''), await a.text(`.source-row[data-source="${kitId}"]`));
+  check('changed both here and at the source, the agent’s line waits with Update waiting, Merge, Replace mine and Keep mine', await a.exists(`#source-replace-${kitId}-agent-reviewer`) && await a.exists(`#source-keep-${kitId}-agent-reviewer`)
+    && /Update waiting/.test(await a.text(`.source-row[data-source="${kitId}"] .source-name[data-kind="agent"]`) ?? ''), await a.text(`.source-row[data-source="${kitId}"]`));
   await a.shot('sources-agent-waiting');
   await until(() => a.run(`document.body.dataset.busy !== 'true' && document.querySelector('#source-merge-${kitId}-agent-reviewer')?.disabled === false`));
   await a.click(`#source-merge-${kitId}-agent-reviewer`);
@@ -5019,14 +5207,22 @@ async function sourcesFlow() {
   await a.click('#source-look');
   await until(() => a.exists('#source-preview'));
   const pluginLook = await a.text('#source-preview') ?? '';
-  check('a link to a plugin’s own folder lists its skill, says it holds a plugin and that its 2 commands and its hooks are not brought in, and offers Add', (await a.all('#source-preview .source-name', 'e.dataset.key')).join() === 'pdf'
-    && /The link holds a plugin: its skills, agents and MCP servers come in as this source’s/.test(pluginLook) && /Not brought in: its 2 commands and its hooks\. Central Knot installs plugins only from a marketplace/.test(pluginLook) && (await a.text('#source-add'))?.trim() === 'Add 1 skill', pluginLook);
+  check('a link to a plugin’s own folder lists its skill, says it holds a plugin and that its 2 commands and its hooks are not brought in (with its card, not the old paragraph), and offers Add', (await a.all('#source-preview .source-name', 'e.dataset.key')).join() === 'pdf'
+    && /The link holds a plugin: its skills, agents and MCP servers come in as this source’s/.test(pluginLook)
+    && /Not brought in: its 2 commands and its hooks\./.test(pluginLook)
+    && !pluginLook.includes('Central Knot installs plugins only from a marketplace')
+    && (await a.text('#source-add'))?.trim() === 'Add 1 skill', pluginLook);
+  await checkCard(a, 'source-preview-not-coming-info', NOT_COMING_CARD, 'preview Not brought in info card');
   await fitsAtMinimum(a, 'Sources, with a source and a look open');
   await a.click('#source-add');
   await until(async () => /pdf is in Central Knot, Off/.test(await a.text('.band-done .band-text') ?? ''));
   const pdfRecord = () => JSON.parse(readNow(join(home, '.central-knot/skills.json')) || '{"items":{}}').items.pdf;
-  check('Add brings pdf in, Off, in no tool, and its row says what doesn’t come', pdfRecord()?.on === false && !existsSync(join(home, roots['claude-cli'], 'pdf'))
-    && /Not brought in: its 2 commands and its hooks\./.test(await a.text(`.source-row:has(.source-name[data-key="pdf"])`) ?? ''), [pdfRecord(), await a.text('.page')]);
+  const pdfId = await a.run(`document.querySelector('.source-row:has(.source-name[data-key="pdf"])')?.dataset.source`);
+  const pdfRowText = await a.text(`.source-row[data-source="${pdfId}"]`) ?? '';
+  check('Add brings pdf in, Off, in no tool, and its row says what doesn’t come with its card', pdfRecord()?.on === false && !existsSync(join(home, roots['claude-cli'], 'pdf'))
+    && /Not brought in: its 2 commands and its hooks\./.test(pdfRowText)
+    && !pdfRowText.includes('Central Knot installs plugins only from a marketplace'), [pdfRecord(), pdfRowText]);
+  await checkCard(a, `source-not-coming-info-${pdfId}`, NOT_COMING_CARD, 'saved row Not brought in info card');
   await openKind(a, 'skills');
   await until(() => a.exists(`#${rowPart('switch', 'skills', 'pdf')}`));
   await a.click(`#${rowPart('switch', 'skills', 'pdf')}`);
@@ -5058,6 +5254,12 @@ async function sourcesFlow() {
   await until(() => a.exists('#source-preview'));
   for (const [width, height] of [[1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); same(`nothing cut off on Sources at ${width}×${height}`, await a.run(CUT_OFF), []); }
   await fullSize(a);
+
+  renameSync(deslop, `${deslop}.away`);
+  await a.click(`#source-check-${id}`);
+  check('a fetch failure stays visible on the saved source row', await until(async () => (await a.text(`#source-${id} .source-refused`) ?? '').includes('Couldn’t fetch it at the last check:'))
+    && await a.run(`document.querySelector('#source-${id} .source-refused')?.getBoundingClientRect().height > 0`), await a.text(`#source-${id}`));
+  renameSync(`${deslop}.away`, deslop);
 
   await a.click(`#source-remove-${id}`);
   await a.click(`#source-remove-confirm-${id}`);

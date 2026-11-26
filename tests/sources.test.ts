@@ -334,7 +334,7 @@ test('Merge: a change here and the source’s, in lines apart, become the curren
     assert.deepEqual(await notices(box, 'notes'), ['nothing', false]);
     const from = (await seen(box, box.context, 'notes')).fact!.fromSource!;
     assert.deepEqual(from, { link, nextWaits: true });
-    assert.equal(fromSourceWords(from).before, 'From github.com/team/notes, a source. You changed it here, or a tool’s copy of it can’t be read just now, so the source’s next change will wait for you to Merge, Replace or Keep mine on ');
+    assert.equal(fromSourceWords(from).before, 'From github.com/team/notes, a source. You changed it here, or a tool’s copy of it can’t be read just now, so the source’s next change will wait for you to Merge, Replace mine or Keep mine on ');
   } finally { await box.cleanup(); }
 });
 

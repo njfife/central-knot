@@ -2,8 +2,8 @@
 // the code it stays `sources`; sources.ts, in main, is the engine; the table it follows is library.ts's A SOURCE).
 // One field takes the link; Look reads it and shows, item by item, what Add would do and what it won't bring in and why,
 // before anything is kept; Add brings each item into Central Knot, Off. Each source has a row: its link, what it brought (On
-// or Off), when it was last read, why it couldn't be read if so, Check now and Remove; an item there the library holds deleted
-// has its own Add, and one whose version waits (library.ts changedHere) its own Merge, Replace and Keep mine; Show in the
+// or Off), when it was last read, why it couldn't be read if so, Sync this source and Remove; an item there the library holds deleted
+// has its own Add, and one whose version waits (library.ts changedHere) its own Merge, Replace mine and Keep mine; Show in the
 // Library, on a source with rows there (origins.ts sourcesHere), opens it with From set to that source (matrix.ts openKind,
 // origins.ts sourceFrom), as Add's band does; an item the
 // source removed (library.ts REMOVED AT ITS SOURCE, which its kind's view says: types.ts LibraryFacts fromSource) has a line
@@ -17,7 +17,7 @@
 // addMarketplace), run on that page, which tells its outcome. Its own page rather than the Git repo's: that page is Pull and Push of the whole set, two-way
 // and in Central Knot's layout, while a source is read only, holds a few items, and its rows grow one per link.
 import { acting, announce, applyClick, busy, rerender, setHome, showPage, state, tellWritten, type PageKind } from './app.ts';
-import { button, closeButton, h, icon } from './dom.ts';
+import { button, closeButton, fold, h, icon, infoCardId, infoMark } from './dom.ts';
 import { asItIs } from './libraryrow.ts';
 import { dayAndTime, plural } from './model.ts';
 import { linkLabel } from './sourcelink.ts';
@@ -43,16 +43,19 @@ export const sources = {
   draft: '',
   /** What the last Look found, until Add, Cancel or a new Look. */
   preview: undefined as SourcePreview | undefined,
-  /** What stopped the last Add, Check now, Remove or Add on one name, in plain words, until dismissed. */
+  /** What stopped the last Add, Sync this source, Remove or Add on one name, in plain words, until dismissed. */
   problem: undefined as string | undefined,
   /** The source whose Remove is being asked, in place. */
   confirmRemove: undefined as string | undefined,
+  /** Saved sources whose branch/folder/commit fold is open on this visit. */
+  openWhere: new Set<string>(),
 };
 
-/** Leaving the page or the home: its questions, and (another home) its view and look, belong to it alone. */
+/** Leaving the page or the home: its questions, open folds, and (another home) its view and look, belong to it alone. */
 export function forgetSourcePrompts(homeChanged = false): void {
   sources.problem = undefined;
   sources.confirmRemove = undefined;
+  sources.openWhere.clear();
   if (homeChanged) { sources.view = undefined; sources.preview = undefined; sources.draft = ''; }
 }
 
@@ -105,7 +108,7 @@ async function toPlugins(address: string) {
   if (!market.problem) { sources.preview = undefined; sources.draft = ''; }
 }
 
-const checkNow = (source: SourceView) => busy(`Checking ${linkLabel(source.link)}…`, async () => {
+const checkNow = (source: SourceView) => busy(`Syncing ${linkLabel(source.link)}…`, async () => {
   const result = await api().checkSource(source.id, state.home!.home);
   await settle(result, whatItDid(result, linkLabel(source.link)));
 });
@@ -114,7 +117,7 @@ const checkNow = (source: SourceView) => busy(`Checking ${linkLabel(source.link)
 const running: Record<SourceRowClick, (called: string) => string> = {
   bringBack: called => `Bringing ${called} back…`, replace: called => `Replacing ${called}…`, merge: called => `Merging ${called}…`, keep: called => `Keeping ${called} as it is…`,
 };
-/** A click on one name's line (sources.ts rowClick), in its kind. A Replace's band says that name has the source's version. */
+/** A click on one name's line (sources.ts rowClick), in its kind. A Replace mine's band says that name has the source's version. */
 const onLine = (source: SourceView, name: SourceName, click: SourceRowClick) => busy(running[click](name.name ?? name.key), async () => {
   const result = await api().rowClick(source.id, name.kind, name.key, click, state.home!.home);
   await settle(result, whatItDid(result, linkLabel(source.link), click === 'replace' ? { kind: name.kind, name: name.name ?? name.key } : undefined));
@@ -145,7 +148,7 @@ interface Said { text: string; warns: boolean; note?: string; undo?: { id: strin
  * What a source's click did, from what its passes did (types.ts SourcedItem: each item's kind and answer, the History entry that
  * says it, whether it is On, what a Merge did, and the tools it was written to or taken out of), and the kinds it wasn't read
  * whole for. An item its source dropped leads, with Turn on, and it, a read not whole or a Merge that changed nothing is a
- * warning; else the one update or merge has Undo. Open goes to the page of the first that changed. `replaced`: the item a click on Replace asked for, by kind and name, whose
+ * warning; else the one update or merge has Undo. Open goes to the page of the first that changed. `replaced`: the item a click on Replace mine asked for, by kind and name, whose
  * update says so.
  */
 export function whatItDid(result: Pick<SourceResult, 'sourced' | 'notWhole'>, label: string, replaced?: { kind: ItemKind; name: string }): Said {
@@ -157,7 +160,7 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'notWhole'>, la
   const dropped = of('drop'), updated = of('update'), made = of('make'), linked = of('link'), left = of('differs', 'another', 'deleted'), kept = of('keep');
   const waiting = of('wait').filter(entry => !entry.merge), merges = (result.sourced ?? []).filter(entry => entry.merge), mergedIn = merges.filter(entry => entry.merge === 'merged');
   const unmerged = merges.filter(entry => entry.merge !== 'merged' && entry.merge !== 'had');
-  const choices = 'Merge puts the source’s changes into yours if they don’t clash, Replace takes the source’s, and Keep mine keeps yours';
+  const choices = 'Merge puts the source’s changes into yours if they don’t clash, Replace mine takes the source’s, and Keep mine keeps yours';
   const said = [
     ...dropped.map(entry => `${entry.name} is no longer at ${label}: it was turned off${entry.removed.length ? ` and taken out of ${toolsPhrase(entry.removed, homeTools)}` : ''}; Central Knot keeps it.`),
     ...updated.map(entry => {
@@ -181,7 +184,7 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'notWhole'>, la
   const undo = !turnOn && one?.history ? { id: one.history, label: undoLabel(one) } : undefined;
   const opens = [...dropped, ...changed, ...made, ...linked][0];
   return {
-    text: said.length ? said.join(' ') : `Checked ${label}: nothing came in from it.`, warns: dropped.length > 0 || !!result.notWhole || unmerged.length > 0,
+    text: said.length ? said.join(' ') : `Synced ${label}: nothing came in from it.`, warns: dropped.length > 0 || !!result.notWhole || unmerged.length > 0,
     ...(changed.length + keptAll.length ? { note: `See each change, or undo it, in History.` } : {}), ...(turnOn ?? undo ? { undo: turnOn ?? undo } : {}),
     // Open the page where something changed: not for a read that only says what can't be read, or what waits.
     ...(opens ? { open: pageOfPart[opens.kind] } : {}),
@@ -195,7 +198,7 @@ function mergeWords(kind: ItemKind, name: string, merge: MergeDone, into: Harnes
   if (merge === 'unsettled') return `Merge left ${name} as it was, since a tool’s copy of it can’t be read just now (a save still landing, or a copy that can’t be read as it is). Merge can run once that copy can be read; on ${nouns(kind).title}, its row says which tool and why.`;
   if ('conflicts' in merge) {
     return `Merge left ${name} as it was: ${andList(merge.conflicts)} changed both here and at the source, in ways that can’t be merged.`
-      + ' Replace takes the source’s version and keeps yours as a version; or make the source’s change in yours by hand, then Keep mine.'
+      + ' Replace mine takes the source’s version and keeps yours as a version; or make the source’s change in yours by hand, then Keep mine.'
       + ' Until then, yours stays current and the update keeps waiting.';
   }
   return `Merge couldn’t run, so ${name} is as it was: ${merge.couldNot}`;
@@ -203,22 +206,26 @@ function mergeWords(kind: ItemKind, name: string, merge: MergeDone, into: Harnes
 
 // ---------- Words ----------
 
+const LINK_INFO = 'Any link to a repository, branch, folder or file; owner/repo or a git clone address works too. Uses this computer’s git sign-in.';
+const SYNC_INFO = 'Reads the link now and applies it: changed items update unless changed here; removed ones turn off, with Undo.';
+const WAIT_INFO = 'Changed here, or a tool’s copy couldn’t be read. Merge takes changes that don’t clash; Replace mine takes the source’s and keeps yours as a version.';
+const EMPTY_INFO = 'A link that skills, agents and MCP servers are read from. Each arrives Off.';
+const NOT_COMING_INFO = 'A whole plugin installs only from a marketplace that lists it.';
+
 /**
  * What one item at a source, or one item linked to it, is to the library, as its line says it: the source's table's own answer
- * (types.ts SourceNameState), in a look (`preview`: what Add does) or on a source's row (what the next Check now does).
+ * (types.ts SourceNameState), in a look (`preview`: what Add does) or on a source's row (what the next Sync this source does).
  */
-function stateWords(name: SourceName, preview: boolean): { text: string; warns?: boolean } {
-  const called = name.name ?? name.key, next = preview ? 'Add' : 'the next Check now';
+function stateWords(name: SourceName, preview: boolean): { text: string; warns?: boolean; info?: string } {
+  const called = name.name ?? name.key, next = preview ? 'Add' : 'the next Sync this source';
   switch (name.state) {
     case 'nothing': case 'same': return { text: name.on ? 'In Central Knot, On' : 'In Central Knot, Off' };
-    case 'make': return { text: preview ? 'Comes in, Off: in no tool until you turn it on' : 'Comes in, Off, at the next Check now' };
+    case 'make': return { text: preview ? 'Comes in, Off: in no tool until you turn it on' : 'Comes in, Off, at the next Sync this source' };
     case 'link': return { text: `Already in Central Knot, the same: ${next} links it to this source` };
     case 'update': return { text: preview ? 'Came from this link before and is unchanged: Add links it again, and the source’s version becomes current' : `Changed at the source: ${next} makes that the current version` };
     // The type check needs `merge`, `keep`, `let-go`, `take` and `alike` here: SourceNameState holds every SourceAnswer, and the
     // first two are a click's own and the last three a plugin's (library.ts A PLUGIN), never a Git source's row.
-    case 'wait': case 'merge': case 'keep': case 'let-go': case 'take': case 'alike': return { warns: true, text: 'Changed at the source. Yours stays current until you merge, replace or keep it,'
-      + ' since it was changed here or a tool’s copy can’t be read just now. Merge puts the source’s changes into yours if they don’t clash;'
-      + ' Replace takes the source’s and keeps yours as a version; Keep mine keeps yours current, and the source’s as a version, so it no longer waits.' };
+    case 'wait': case 'merge': case 'keep': case 'let-go': case 'take': case 'alike': return { warns: true, text: 'Update waiting', info: WAIT_INFO };
     case 'drop': return { text: `No longer at the source: ${next} turns it off`, warns: true };
     case 'differs': return { text: `Not brought in: Central Knot already has a different ${called}. To take this one instead, delete yours from Central Knot on ${nouns(name.kind).title} (that also takes it out of every tool it is on in), then ${preview ? 'once the source is added, Add on its row' : 'Add on this row'}.`, warns: true };
     case 'another': return { text: `Not brought in: Central Knot has ${called} from ${name.why ? linkLabel(name.why) : 'another source'}`, warns: true };
@@ -234,11 +241,16 @@ function stateWords(name: SourceName, preview: boolean): { text: string; warns?:
 const whereWords = (found: SourceFound) => [`Branch ${found.ref}`, found.folder ? `folder ${found.folder}` : 'its root folder',
   found.commit ? `commit ${found.commit.slice(0, 7)}${found.commitAt ? ` of ${dayAndTime(found.commitAt)}` : ''}` : ''].filter(Boolean).join(' · ');
 
-/** What of a plugin's own folder doesn't come (types.ts NotComing), as a sentence; none when it has none of those. */
+/** What of a plugin's own folder doesn't come (types.ts NotComing), as a short line; none when it has none of those. */
 function notComingWords(left: NotComing | undefined): string | undefined {
   const parts = !left ? [] : [left.commands ? `its ${plural(left.commands, 'command')}` : '', left.hooks ? 'its hooks' : '',
     left.lspServers ? `its ${plural(left.lspServers, 'LSP server')}` : '', left.bin ? 'its bin folder' : ''].filter(Boolean);
-  return parts.length ? `Not brought in: ${andList(parts)}. Central Knot installs plugins only from a marketplace, on the ${pageNames.plugins} page: to have the whole plugin, add a marketplace that lists it there.` : undefined;
+  return parts.length ? `Not brought in: ${andList(parts)}.` : undefined;
+}
+function notComingLine(left: NotComing | undefined, id: string) {
+  const words = notComingWords(left);
+  return words ? h('p.source-refused', { 'data-info-block': true }, icon('circle-minus', 14, 'tone-muted'),
+    h('span.source-not-coming', {}, words, ' ', infoMark(id, 'Not brought in', NOT_COMING_INFO))) : null;
 }
 
 /** An item's files, the first few by path; every one in the tooltip. */
@@ -255,14 +267,15 @@ const whereAt = ({ folder, folderName }: NonNullable<SourceName['there']>) => (f
 // ---------- Pieces ----------
 
 /** One item at a source: its name, its kind and where it sits there, what it is to the library, its files, and its own Add. */
-function nameRow(name: SourceName, preview: boolean, action?: HTMLElement | null) {
+function nameRow(name: SourceName, preview: boolean, action?: HTMLElement | null, waitInfoId?: string) {
   const said = stateWords(name, preview);
+  const mark = said.info && waitInfoId ? infoMark(waitInfoId, said.text, said.info) : null;
   return h('li.source-name', { 'data-key': name.key, 'data-kind': name.kind, 'data-state': name.state },
     h('span.source-name-icon', {}, icon(said.warns ? 'triangle-alert' : name.state === 'nothing' && name.on ? 'circle-check' : 'wand-sparkles', 14, said.warns ? 'tone-warning' : 'tone-muted')),
     h('span.source-name-main', {},
       h('span.source-name-line', {}, h('strong.source-name-text', {}, name.name ?? name.there?.folderName ?? name.key),
         h('span.source-name-where.tone-muted', {}, `${nouns(name.kind).one}, ${name.there ? whereAt(name.there) : 'not in its last read'}`)),
-      h('span.source-name-state', {}, said.text, action ? [' ', action] : null),
+      h('span.source-name-state', { ...(mark ? { 'data-info-block': true } : {}) }, said.text, mark ? [' ', mark] : null, action ? [' ', action] : null),
       filesLine(name.there?.files ?? [])));
 }
 
@@ -315,7 +328,7 @@ function previewPanel(preview: SourcePreview) {
     h('div.source-preview-head', {}, h('strong.source-link', { title: preview.link }, label), h('span.source-where.tone-muted', {}, whereWords(preview))),
     preview.refused ? sayLine('circle-alert', 'tone-danger', preview.refused) : null,
     preview.holds === 'plugin' ? sayLine('puzzle', 'tone-muted', `The link holds a plugin: its ${broughtNames()} come in as this source’s, each with a switch of its own, and follow the link as any source’s do.`) : null,
-    notComingWords(preview.notComing) ? sayLine('circle-minus', 'tone-muted', notComingWords(preview.notComing)!) : null,
+    notComingLine(preview.notComing, 'source-preview-not-coming-info'),
     preview.names.length ? h('ul.source-names', {}, preview.names.map(name => nameRow(name, true))) : null,
     h('div.source-preview-actions', {},
       preview.refused ? null : button({ variant: 'primary', size: 'small', icon: 'plus', label: addLabel, id: 'source-add', disabled: !allowed || acting(), onclick: () => void add(preview.token, preview.link, label) }),
@@ -329,25 +342,28 @@ function addForm(allowed: boolean) {
   const go = () => { if (ready()) void look(); };
   return h('section.source-add', { 'aria-labelledby': 'source-add-title' },
     h('h2.eyebrow', { id: 'source-add-title' }, 'Add from a GitHub or GitLab link'),
-    h('div.source-field', {},
-      h('label.market-add-label', { for: 'source-link' }, 'GitHub or GitLab link'),
+    h('div.source-field', { 'data-info-block': true },
+      h('div.source-label-row', {},
+        h('label.market-add-label', { for: 'source-link' }, 'GitHub or GitLab link'),
+        infoMark('source-link-info', 'GitHub or GitLab link', LINK_INFO)),
       h('div.source-field-row', {},
         h('input.market-add-input', { id: 'source-link', type: 'text', placeholder: 'github.com/owner/repo, or a link to a folder or a file in it', value: sources.draft, spellcheck: 'false', autocomplete: 'off',
-          disabled: !!acting() || !allowed, 'aria-describedby': 'source-link-below',
+          disabled: !!acting() || !allowed, 'aria-describedby': infoCardId('source-link-info'),
           oninput: (event: Event) => { sources.draft = (event.target as HTMLInputElement).value; const control = document.getElementById('source-look') as HTMLButtonElement | null; if (control) control.disabled = !ready(); },
           onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') go(); } }),
-        button({ variant: 'outline', size: 'small', icon: 'search', label: 'Look', id: 'source-look', disabled: !ready(), onclick: go })),
-      h('span.repo-field-below', { id: 'source-link-below' }, `Any link to a repository, a branch, a folder or a file in one; owner/repo, github.com/owner/repo, or an address you would give git clone, works too. A folder brings the ${broughtNames()} in it, a plugin’s own folder too; a marketplace goes to ${pageNames.plugins}. Central Knot uses this computer’s git and its sign-in.`)),
+        button({ variant: 'outline', size: 'small', icon: 'search', label: 'Look', id: 'source-look', disabled: !ready(), onclick: go }))),
     sources.preview ? previewPanel(sources.preview) : null);
 }
 
-/** One source's row: its link and where it reads, why its last check failed, each item there, Check now and Remove. */
-function sourceRow(source: SourceView) {
+/** One source's row: its link and where it reads, why its last check failed, each item there, Sync this source and Remove. */
+function sourceRow(source: SourceView, firstSync: boolean) {
   const label = linkLabel(source.link), locked = !!acting() || !state.home?.sync.access.allowed;
   const asking = sources.confirmRemove === source.id;
-  const read = source.readAt ? `read ${dayAndTime(source.readAt)}` : '';
+  const detailsLabel = source.readAt ? `Details · read ${dayAndTime(source.readAt)}` : 'Details';
+  const syncButton = button({ variant: 'outline', size: 'small', icon: 'refresh-cw', label: 'Sync this source', id: `source-check-${source.id}`, disabled: locked,
+    attrs: { 'aria-describedby': infoCardId('source-sync-info') }, onclick: () => void checkNow(source) });
   const actions = asking ? null : h('span.source-actions', {},
-    button({ variant: 'outline', size: 'small', icon: 'refresh-cw', label: 'Check now', id: `source-check-${source.id}`, disabled: locked, attrs: { title: `Read ${label} again: what changed there comes into Central Knot, On or Off as each one is, unless you changed it here` }, onclick: () => void checkNow(source) }),
+    firstSync ? h('span.source-sync-wrap', {}, syncButton, infoMark('source-sync-info', 'Sync this source', SYNC_INFO)) : syncButton,
     state.home && sourcesHere(state.home).has(source.link) ? button({ variant: 'ghost', size: 'small', label: 'Show in the Library', id: `source-library-${source.id}`, onclick: () => openKind('all', { from: sourceFrom(source.link) }) }) : null,
     button({ variant: 'ghost', size: 'small', label: 'Remove…', id: `source-remove-${source.id}`, disabled: locked, onclick: () => { sources.confirmRemove = source.id; rerender(); document.getElementById(`source-remove-cancel-${source.id}`)?.focus(); } }));
   const called = (name: SourceName) => name.name ?? name.key;
@@ -357,20 +373,24 @@ function sourceRow(source: SourceView) {
     : name.state === 'wait' ? h('span.source-name-actions', {},
       button({ variant: 'link', size: 'micro', label: 'Merge', id: idOf('merge', name), disabled: locked,
         attrs: { title: `Put this source’s changes to ${called(name)} into yours, in every tool it is on in; if they clash with yours, nothing changes and what clashes is named. Yours is kept as a version, and Undo puts it back` }, onclick: () => void onLine(source, name, 'merge') }),
-      button({ variant: 'link', size: 'micro', label: 'Replace', id: idOf('replace', name), disabled: locked,
+      button({ variant: 'link', size: 'micro', label: 'Replace mine', id: idOf('replace', name), disabled: locked,
         attrs: { title: `Make this source’s version of ${called(name)} current, in every tool it is on in; yours is kept as a version, and Undo puts it back` }, onclick: () => void onLine(source, name, 'replace') }),
       button({ variant: 'link', size: 'micro', label: 'Keep mine', id: idOf('keep', name), disabled: locked,
         attrs: { title: `Keep your ${called(name)} current: this source’s version no longer waits and is kept as a version, and the source’s next change`
           + ' is compared with it. Nothing is written to a tool, and Undo takes it back' }, onclick: () => void onLine(source, name, 'keep') })) : null);
+  const whereFold = fold({
+    id: `source-where-${source.id}`, toggleId: `source-where-toggle-${source.id}`, label: detailsLabel,
+    open: sources.openWhere.has(source.id),
+    onToggle: open => { if (open) sources.openWhere.add(source.id); else sources.openWhere.delete(source.id); },
+  }, h('span.source-where.tone-muted', {}, whereWords(source)));
   // Each item this source removed, as its kind's view says it.
   const removed = (Object.entries(pageOfPart) as [ItemKind, PageKind][]).flatMap(([kind, page]) => (state.home?.[page].items ?? [])
     .filter(fact => fact.fromSource?.removed && fact.fromSource.link === source.link).map(fact => ({ fact, kind })));
   return h('li.source-row', { id: `source-${source.id}`, 'data-source': source.id },
-    h('div.source-row-head', {},
+    h('div.source-row-head', { 'data-info-block': true },
       h('span.source-row-title', {}, icon('link-2', 16, 'tone-muted'), h('strong.source-link', { title: source.link }, label)),
       actions),
-    h('span.source-where.tone-muted', {}, [whereWords(source), read].filter(Boolean).join(' · ')),
-    h('span.source-does.tone-muted', {}, `Check now reads the link again, as Central Knot does once a day while Automatic sync is on: ${orList((sources.view?.kinds ?? []).map(kind => nouns(kind).a))} changed there is updated in the tools it is on in, unless you changed it here (then it waits for you); one no longer there is turned off and taken out of them.`),
+    whereFold,
     asking ? h('div.band.source-confirm', { role: 'alert' }, h('span.band-text', {}, `Remove this source? ${removeWords()}`),
       button({ variant: 'outline', size: 'small', label: 'Remove', id: `source-remove-confirm-${source.id}`, disabled: acting(), onclick: () => void remove(source) }),
       button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `source-remove-cancel-${source.id}`, onclick: () => { sources.confirmRemove = undefined; rerender(); } })) : null,
@@ -378,8 +398,8 @@ function sourceRow(source: SourceView) {
     source.unread ? sayLine('triangle-alert', 'tone-warning', source.holds === 'marketplace' || source.holds === 'listed'
       ? `${source.unread} This source turns nothing off. Remove this source, then look at its link again, above, to see how it can go on ${pageNames.plugins}.`
       : `${source.unread} Until it can be read, this source turns nothing off.`) : null,
-    notComingWords(source.notComing) ? sayLine('circle-minus', 'tone-muted', notComingWords(source.notComing)!) : null,
-    source.names.length || removed.length ? h('ul.source-names', {}, source.names.map(name => nameRow(name, false, nameButton(name))), removed.map(({ fact, kind }) => removedRow(fact, kind, locked))) : null);
+    notComingLine(source.notComing, `source-not-coming-info-${source.id}`),
+    source.names.length || removed.length ? h('ul.source-names', {}, source.names.map(name => nameRow(name, false, nameButton(name), idOf('wait-info', name))), removed.map(({ fact, kind }) => removedRow(fact, kind, locked))) : null);
 }
 
 /** What stopped the last click, until dismissed. */
@@ -390,6 +410,7 @@ export function sourcesPage(): HTMLElement {
   const view = sources.view;
   if (!view) return h('div.page', {}, h('div.scroll', {}, h('p.empty', {}, 'Reading…')));
   const allowed = view.access.allowed;
+  const firstSyncId = view.sources.find(each => sources.confirmRemove !== each.id)?.id;
   return h('div.page.sources-page', {},
     h('div.bands', {}, allowed ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.access.reason)),
       view.problem ? h('div.band.band-danger', { role: 'alert' }, icon('circle-alert', 14), h('span.band-text', {}, view.problem)) : null,
@@ -398,7 +419,6 @@ export function sourcesPage(): HTMLElement {
       addForm(allowed),
       view.sources.length ? h('section.source-list', { 'aria-labelledby': 'source-list-title' },
         h('h2.eyebrow', { id: 'source-list-title' }, `Sources · ${view.sources.length}`),
-        h('ul.source-rows', {}, view.sources.map(sourceRow)))
-        : h('p.source-empty', {}, h('strong', {}, 'No sources yet. '), `A source is a GitHub or GitLab link that ${broughtNames()} are read from: a folder of them, or a plugin’s own folder. Each one there comes into Central Knot Off, and the link is read again once a day and on Check now for what changed there. Central Knot never writes to a source.`),
-      h('p.repo-aside', {}, `A marketplace’s link isn’t a library source: Look offers ${toPluginsLabel} instead, where each of its plugins has its own switch.`)));
+        h('ul.source-rows', {}, view.sources.map(source => sourceRow(source, source.id === firstSyncId))))
+        : h('p.source-empty', { 'data-info-block': true }, h('strong', {}, 'No sources yet'), infoMark('source-empty-info', 'No sources yet', EMPTY_INFO))));
 }

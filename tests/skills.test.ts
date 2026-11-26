@@ -1872,3 +1872,58 @@ test('skillPluginFile reads installed (on and off), root-skill, symlinked-root a
     assert.equal(await readInstalled('SKILL.md'), undefined, 'gone plugin root returns undefined');
   } finally { await box.cleanup(); }
 });
+
+test('Pi holds a link to a version the Library already knows while ~/.agents/skills holds a different unversioned skill: Take over keeps the removed shared bytes as a version', async () => {
+  const box = await sandbox(['claude-cli', 'pi-cli']);
+  try {
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Known version.') });
+    await turnOn(box);
+    const elsewhere = join(box.home, 'known-copy/notes');
+    await mkdir(elsewhere, { recursive: true });
+    await writeFile(join(elsewhere, 'SKILL.md'), skillText('Known version.'));
+    await rm(folderOf(box, 'pi-cli'), { recursive: true, force: true });
+    await symlink(elsewhere, folderOf(box, 'pi-cli'));
+    const shared = join(box.home, '.agents/skills/notes');
+    const unversioned = skillText('Unversioned shared bytes.');
+    await mkdir(shared, { recursive: true });
+    await writeFile(join(shared, 'SKILL.md'), unversioned);
+    const done = await takeOver(box.context, ['claude-cli', 'pi-cli'], 'notes', 'pi-cli');
+    assert.equal(done.stopped, undefined);
+    assert.equal(await bytes(shared), undefined, 'the shared folder was removed');
+    assert.match(done.results[0]?.message ?? '', /It is kept as a version\./);
+    const item = (await itemOf(box))!;
+    const kept = (await Promise.all(item.versions.map(async v => ({ hash: v.hash, skill: (await skillVersion(box.context, 'notes', v.hash))?.skill }))))
+      .find(v => v.skill === unversioned);
+    assert.ok(kept, 'the removed shared folder bytes are preserved as a version');
+    const history = await readHistory(box.context);
+    assert.equal(history.find(e => e.kind === 'took-over')?.losers?.[0]?.hash, kept.hash, 'history loser hash matches the removed shared bytes');
+  } finally { await box.cleanup(); }
+});
+
+test('Library lists an earlier version whose stored bytes are missing while ~/.agents/skills holds its last copy and Pi links elsewhere: Take over restores the missing bytes without listing the version twice', async () => {
+  const box = await sandbox(['claude-cli', 'pi-cli']);
+  try {
+    const versionA = skillText('Earlier version A.');
+    await put(box, 'claude-cli', { 'SKILL.md': versionA });
+    await turnOn(box);
+    const hashA = (await itemOf(box))!.hash;
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Current version B.') });
+    await applySkills(box.context, ['claude-cli', 'pi-cli'], []);
+    await rm(join(box.home, '.central-knot/items/skills/notes/versions', hashA), { recursive: true, force: true });
+    assert.equal(await skillVersion(box.context, 'notes', hashA), undefined, 'version A bytes are missing from the store before takeover');
+    const elsewhere = join(box.home, 'other-copy/notes');
+    await mkdir(elsewhere, { recursive: true });
+    await writeFile(join(elsewhere, 'SKILL.md'), skillText('Current version B.'));
+    await rm(folderOf(box, 'pi-cli'), { recursive: true, force: true });
+    await symlink(elsewhere, folderOf(box, 'pi-cli'));
+    const shared = join(box.home, '.agents/skills/notes');
+    await mkdir(shared, { recursive: true });
+    await writeFile(join(shared, 'SKILL.md'), versionA);
+    const done = await takeOver(box.context, ['claude-cli', 'pi-cli'], 'notes', 'pi-cli');
+    assert.equal(done.stopped, undefined);
+    assert.equal(await bytes(shared), undefined, 'the shared folder was removed');
+    assert.equal((await skillVersion(box.context, 'notes', hashA))?.skill, versionA, 'the store holds version A’s bytes again after takeover');
+    const after = (await itemOf(box))!;
+    assert.equal(after.versions.filter(v => v.hash === hashA).length, 1, 'already-listed version A is not listed twice');
+  } finally { await box.cleanup(); }
+});
