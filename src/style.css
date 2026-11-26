@@ -1102,10 +1102,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
    (120 × 7.5 px of the 12.5 px mono text, its box's 26 px, the card's 34 px, and the 16 px gap: 2 × 960 + 16). */
 .ins-tool-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
 @container cards (width >= 1936px) { .ins-tool-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-/* The heading over the tools' own cards, with what sets them apart from the base above. */
+/* The heading over the tools' own cards. */
 .ins-section-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin-top: 8px; }
 .ins-section-title { font-size: 15px; line-height: 22px; font-weight: 600; }
-.ins-section-note { font-size: 12.5px; color: var(--ink-soft); }
 .tool-head { display: flex; align-items: center; gap: 8px; min-height: 53px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 /* A narrow card leaves its header's folder out rather than cut it to a stub; "Config folder" below says it whole. */
 @container (width < 440px) { .tool-head > .path-text { display: none; } }
@@ -1784,26 +1783,33 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .base-edited { color: var(--ink); }
 .base-choice { display: flex; flex-direction: column; gap: 6px; padding-left: 22px; }
 .base-choice .ins-actions { margin-top: 0; }
+.base-matching summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; padding: 2px 6px; margin-left: -6px; border-radius: 6px; font-size: 12.5px; color: var(--ink-soft); cursor: pointer; }
+.base-matching summary::-webkit-details-marker { display: none; }
+.base-matching summary:hover { color: var(--ink); background: var(--hover); }
+.base-matching summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.base-matching[open] > summary > .base-matching-chevron { transform: rotate(90deg); }
+.base-matching > .base-tool-list { margin-top: 6px; padding-left: 18px; }
 .base-strip { display: flex; flex-direction: column; gap: 6px; padding: 6px 10px; border: 1px dashed color-mix(in oklab, var(--accent) 40%, var(--line)); border-radius: 8px; }
 .base-strip-line { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-soft); }
 .base-strip-line > span { flex: 1; min-width: 0; }
 .base-strip-line strong { color: var(--ink); font-weight: 600; }
 
 /*
- * The strip on a tool's card (instructionspage.ts sessionStripView): its heading, its sentence and the tool's note, then a group
+ * The strip on a tool's card (instructionspage.ts sessionStripView): its heading and the tool's note, then a group
  * per origin: its mark, its name and where it is turned off on one line, what couldn't be read, and each hook beneath, when it
  * runs and then its command, wrapped whole. The marks (sessionhooks.ts originMark): small dots, a plugin's or an extension's
  * colour one of eight by its name, each at least 4.5:1 against the card in both themes; the person's own, fixed, in the text's
  * colour. Hidden from a screen reader: the name says it.
  */
 .session-strip { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.session-strip-head { display: flex; flex-direction: column; gap: 6px; }
 .session-title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .session-title { font-size: 12.5px; font-weight: 600; }
 .plugin-group .session-title { margin: 0; color: var(--ink); }
 .session-strip > .plugin-group-note { margin: 0; }
 .plugin-hook-as { margin-left: auto; }
 .session-run-warn { font-size: 12px; color: var(--ink); font-weight: 500; }
-.session-about, .session-note { font-size: 12px; color: var(--ink-soft); }
+.session-note { font-size: 12px; color: var(--ink-soft); }
 .session-note code { font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
 .session-groups { display: flex; flex-direction: column; gap: 8px; }
 .session-group { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -2091,10 +2097,12 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .harness-card-attention:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .harness-card-path { font-size: 12px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: auto; padding: 0 16px 14px; }
 .harness-card-next { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
-/* A tool's Manage switch on its card (managecard.ts): the switch and its word, then what a click does there. It sits at the
-   foot of the card, above the folder, so the switches of a row of cards line up. A tool left out has its name and switch only. */
+/* A tool's Manage switch on its card (managecard.ts): the switch and its word (with Managed (?) on the first managed card,
+   or an unmanaged tool's rejoin line). It sits at the foot of the card, above the folder, so the switches of a row of cards
+   line up. A tool left out has its name and switch only. */
 .harness-manage { display: flex; flex-direction: column; gap: 6px; margin: auto 16px 10px; padding-top: 10px; border-top: 1px solid var(--line); }
 .harness-manage-head { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; }
+.harness-manage-head > .info-wrap { margin-left: -4px; flex: none; }
 .harness-manage-line { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .harness-manage + .harness-card-path { margin-top: 0; }
 /* A tool left out has nothing to count: its switch follows its name, and its folder stays at the foot. */

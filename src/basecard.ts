@@ -56,6 +56,8 @@ const requestOf = (edit: BaseEdit) => ({ adopt: edit.source?.kind === 'own' ? ed
 const isFirstReader = (file: InstructionFile, files: InstructionFile[]) => !files.slice(0, files.indexOf(file)).some(other => file.sameFile.includes(other.tool));
 const readers = (file: InstructionFile) => readersOfFile(file.tool, file.sameFile);
 const readerNames = (file: InstructionFile) => toolList(readers(file));
+/** Distinct managed tools reading these physical files (a shared symlinked file counts every tool that reads it). */
+const toolCount = (list: InstructionFile[]) => new Set(list.flatMap(readers)).size;
 
 /** What saving the draft does to one destination's file: the new text, and a sentence saying so. Undefined: not involved. */
 function planFor(file: InstructionFile, edit: BaseEdit): { next: string; says: string; /** In a tool's draft: the own text the file keeps, shown under its row. */ keeps?: string } | undefined {
@@ -334,6 +336,10 @@ export function baseCard(files: InstructionFile[]) {
   const locked = !!acting() || !!lockedWhy;
   const lockAttrs = lockAttrsFor(lockedWhy);
   const chosen = files.filter(file => file.base?.chosen && isFirstReader(file, files));
+  const chosenTools = toolCount(chosen);
+  const matching = chosen.filter(file => file.base!.state === 'same');
+  const matchingTools = toolCount(matching);
+  const needing = chosen.filter(file => file.base!.state !== 'same');
   const behind = chosen.filter(file => file.base!.state === 'older' || file.base!.state === 'missing');
   const others = files.filter(file => !file.base?.chosen);
   const edited = chosen.filter(file => file.base!.state === 'edited');
@@ -354,7 +360,7 @@ export function baseCard(files: InstructionFile[]) {
         starts.map(file => button({ variant: 'outline', size: 'small', label: starts.some(other => other !== file && fileName(other.path) === fileName(file.path)) ? `${toolNames[file.tool]}’s ${fileName(file.path)}` : fileName(file.path), id: `base-from-${file.tool}`, disabled: locked, attrs: lockAttrs ?? { title: `${toolNames[file.tool]}’s instructions move into the base, and the tools you choose get them too` },
           onclick: () => startBaseEdit({ text: ownText(file), tools: files.map(entry => entry.tool), source: { kind: 'own', tool: file.tool } }) })),
         lockedWhy ? h('span.ins-locked', {}, lockedWhy) : null),
-      body: [h('p.ins-readers', {}, 'Write instructions once, and Central Knot adds them to the file of every tool you choose, after that tool’s own instructions.')],
+      body: [h('p.ins-readers', {}, 'Written once, added to each tool you choose, below its own text.')],
     } : {
       actions: h('div.ins-actions', {},
         button({ variant: 'outline', size: 'small', label: 'Edit text or tools', id: 'base-edit', disabled: locked, attrs: lockAttrs, onclick: () => startBaseEdit({ text: base.text, tools: base.tools }) }),
@@ -367,7 +373,17 @@ export function baseCard(files: InstructionFile[]) {
         // Wide windows put the tools beside the text; narrow ones stack them.
         h('div.base-columns', {},
           h('div.base-column', {},
-            chosen.length ? h('ul.plain-list.base-tool-list', {}, chosen.map(file => toolRow(file, locked, lockAttrs))) : null,
+            needing.length ? h('ul.plain-list.base-tool-list', {}, needing.map(file => toolRow(file, locked, lockAttrs))) : null,
+            matching.length ? h('details.base-matching', {
+              id: 'base-matching', open: shown.has('matching'),
+              ontoggle: (event: Event) => {
+                if ((event.currentTarget as HTMLDetailsElement).open) shown.add('matching');
+                else shown.delete('matching');
+              },
+            },
+              h('summary', { id: 'base-matching-toggle' }, icon('chevron-right', 12, 'tone-faint base-matching-chevron'), icon('check', 13, 'tone-success'),
+                matchingTools === 1 ? '1 tool matches the base' : `${matchingTools} tools match the base`),
+              h('ul.plain-list.base-tool-list', {}, matching.map(file => toolRow(file, locked, lockAttrs)))) : null,
             others.length && chosen.length ? h('p.ins-empty', {}, `Not added to ${toolList(others.map(file => file.tool))}.`) : null),
           h('div.base-column', {},
             edited.length ? h('p.base-subhead', {}, 'The base instructions') : null,
@@ -380,7 +396,7 @@ export function baseCard(files: InstructionFile[]) {
   const head = h('header.ins-head', { id: 'base-head' },
     h('div.ins-title', {}, icon('layers', 18, 'tone-muted'), h('h2.tool-title', {}, 'Base instructions, for every tool'),
       hasBase || edit ? pathText(shownPath(base.path), base.path) : null,
-      !edit && hasBase ? h(`span.ins-missing${edited.length ? '.base-pill-warn' : ''}`, {}, (chosen.length ? `In ${plural(chosen.length, 'tool')}` : 'In no tool') + (edited.length ? ` · ${plural(edited.length, 'edited copy', 'edited copies')}` : '')) : null),
+      !edit && hasBase ? h(`span.ins-missing${edited.length ? '.base-pill-warn' : ''}`, {}, (chosenTools ? `In ${plural(chosenTools, 'tool')}` : 'In no tool') + (edited.length ? ` · ${plural(edited.length, 'edited copy', 'edited copies')}` : '')) : null),
     pick ? null : stage.actions);
   const versions = edit || pick ? null : versionsList(base.versions, { id: version => `base-load-${version}`, disabled: locked, why: lockedWhy, run: version => void loadBaseVersion(version) });
   // Esc anywhere in the card while its editor is open (the text, a tool box, a button in its head) is Cancel.
@@ -394,7 +410,7 @@ export function baseStrip(file: InstructionFile, lockedWhy?: string) {
   if (!base || base.copy === undefined) return null;
   const key = `strip-${file.tool}`;
   const lines = lineCount(base.copy);
-  const said = !base.chosen ? 'not on the base list; left as it is' : base.state === 'same' ? 'matches the base' : base.state === 'edited' ? 'edited in this file' : 'an older version';
+  const said = !base.chosen ? 'not on the base list; left as it is' : base.state === 'same' ? '' : base.state === 'edited' ? 'edited in this file' : 'an older version';
   // Edited or behind: the choice is on the Base instructions card, on the row of the first tool reading this file; this goes there.
   const row = (state.instructions.data ?? []).find(entry => entry.tool === file.tool || file.sameFile.includes(entry.tool))?.tool ?? file.tool;
   const goTo = base.chosen && base.state !== 'same' ? (base.state === 'edited' ? `base-diff-${row}` : 'base-update') : undefined;
@@ -402,7 +418,7 @@ export function baseStrip(file: InstructionFile, lockedWhy?: string) {
   const goWhy = state.baseEdit ? 'Finish or cancel the base instructions edit first.' : lockedWhy;
   return h('div.base-strip', {},
     // After the tool's own text, or its editor; with neither, the base is all the file holds.
-    h('div.base-strip-line', {}, icon('layers', 13, 'tone-muted'), h('span', {}, h('strong', {}, ownText(file).trim() || draftFile() === file ? 'Then the base instructions' : 'Only the base instructions'), ` · ${plural(lines, 'line')}, ${said}`),
+    h('div.base-strip-line', {}, icon('layers', 13, 'tone-muted'), h('span', {}, h('strong', {}, ownText(file).trim() || draftFile() === file ? 'Then the base instructions' : 'Only the base instructions'), ` · ${plural(lines, 'line')}${said ? `, ${said}` : ''}`),
       goTo ? button({ variant: 'link', size: 'micro', label: base.state === 'edited' ? 'Choose what to do…' : 'Update…', id: `ins-base-go-${file.tool}`, disabled: !!goWhy, attrs: lockAttrsFor(goWhy), onclick: () => {
         // On a harness's Instructions tab the Base instructions card isn't on the page: the choice is made on Instructions.
         if (!document.getElementById(goTo)) showPage('instructions');

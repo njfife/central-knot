@@ -29,8 +29,6 @@ export const isTextEvent = (tool: HarnessId, event: string) => Object.hasOwn(TEX
 export const addsText = (tool: HarnessId, hook: DeclaredHook) => !!hook.launch && isTextEvent(tool, hook.event);
 /** Copilot CLI runs a prompt hook and takes nothing it prints: its note says so where such a hook has no row. */
 export const ignoresText = (tool: HarnessId, hook: DeclaredHook) => tool === 'copilot-cli' && !!hook.launch && COPILOT_PROMPTS.includes(hook.event);
-/** When a tool's hooks that can add text run, in words: "when a session starts or when you send a prompt". */
-export const textEventsWords = (tool: HarnessId) => [...new Set(Object.values(TEXT_EVENTS[tool] ?? {}))].join(' or ');
 /** A start-of-session matcher's values, as Claude Code and Codex match it against how the session started (startup first). */
 const STARTS: Record<string, string> = { startup: START, resume: 'when a session resumes', clear: 'when a session is cleared', compact: 'after the conversation is compacted', fork: 'when a session is forked' };
 
