@@ -18,7 +18,7 @@ import { fileName, lineCount, toolList, toolNames } from './words.ts';
 import { plural } from './model.ts';
 import type { HarnessId, InstructionFile } from './types.ts';
 
-/** Tool rows whose difference or file change is open. */
+/** Tool rows whose difference or file change is open, and `'matching'` while the matching-tools fold is open. */
 const shown = new Set<string>();
 const toggle = (key: string) => { if (shown.has(key)) shown.delete(key); else shown.add(key); rerender(); };
 // In the review, Esc goes back to editing; a review that started there (an edited copy, an earlier version) closes.

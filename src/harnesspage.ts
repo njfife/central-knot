@@ -99,8 +99,9 @@ function countRow(label: string, count: Count | null) {
 
 function kindCount(home: HomeView, { kind, supported, total, plugins, on }: ReturnType<typeof tally>, tool: HarnessId): Count | null {
   if (!supported) return { value: '—', note: kindNotUsed(tool, kind), faint: true };
-  // Known zero is omitted; an unread kind stays visible as unknown.
-  if (!total) return home[kind]?.unread?.includes(tool) ? { value: '?', note: 'couldn’t be read', faint: true } : null;
+  // Unread comes before any total, as on the Overview; known zero is omitted.
+  if (home[kind]?.unread?.includes(tool)) return { value: '?', note: 'couldn’t be read', faint: true };
+  if (!total) return null;
   // A plugin's items are counted and said apart: they are never synced.
   const own = total - plugins;
   const mine = !own ? '' : on === own ? (plugins ? `${own} synced` : '') : !on ? `${own} not synced` : `${on} synced · ${own - on} not synced`;
@@ -227,15 +228,11 @@ function everyHarness(home: HomeView) {
     // A profile switches items in every tool at once, so the one in use is said once here, as Profiles names it.
     ...(home.profiles.profiles.length ? [['Profile in use: ', button({ variant: 'link', size: 'micro', label: inUseName(home.profiles.profiles, homeItems(home), pluginLive(home)), id: 'harnesses-profile', onclick: () => showPage('profiles') }), '.']] : []),
   ];
-  let manageInfoShown = false;
+  const firstManaged = cards.find(snapshot => managed(home, snapshot.harness))?.harness;
   return h('div.page', {}, caught ? h('div.bands', {}, caught) : null,
     h('div.scroll.harness-scroll', { id: 'harnesses-scroll' },
       notes.length ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), h('span', {}, notes.flatMap((part, index) => (index ? [' ', ...part] : part)))) : null,
-      h('div.harness-cards', { 'data-count': String(cards.length) }, cards.map(snapshot => {
-        const firstManaged = managed(home, snapshot.harness) && !manageInfoShown;
-        if (firstManaged) manageInfoShown = true;
-        return summaryCard(snapshot, home, firstManaged);
-      })),
+      h('div.harness-cards', { 'data-count': String(cards.length) }, cards.map(snapshot => summaryCard(snapshot, home, snapshot.harness === firstManaged))),
       otherApps(home)));
 }
 

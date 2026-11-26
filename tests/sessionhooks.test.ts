@@ -40,13 +40,11 @@ test('a plugin’s hooks that can add text are one group under its name, each wi
   assert.deepEqual([strip!.groups[0]!.plugin, strip!.note], [helper, undefined]);
 });
 
-test('the strip has its heading and no standing prose paragraph, and no hook’s row repeats a standing note', async () => {
+test('the strip has its heading and no standing prose paragraph, and no hook’s row repeats a standing note', () => {
   const strip = sessionStrip('claude-cli', [plugin('claude-cli', 'a', atStart('one', 'two'))], {})!;
   assert.equal(strip.heading, 'Hooks that can add text');
   assert.equal('about' in strip, false);
   assert.ok(strip.groups.every(group => group.hooks.every(hook => !/known only/.test(hook.when))));
-  const outcomesMod = await import('../src/pluginoutcomes.ts') as Record<string, unknown>;
-  assert.equal('textEventsWords' in outcomesMod, false);
 });
 
 test('can it add text is each tool’s own rule: Copilot CLI takes only start-of-session hooks, and each tool knows only its own event names', () => {

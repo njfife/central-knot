@@ -378,7 +378,7 @@ const sectionsNow = async (a, kind) => (await a.run(`[...document.querySelectorA
 /** Read one tool's Skills counts on its card, tab and Overview row, and the sections on its tab. */
 async function skillsOf(a, tool, pictureRow) {
   await a.click(await a.exists('#harness-back') ? '#harness-back' : '#nav-harnesses');
-  const card = await a.text(`.harness-card:has(#harness-${tool}) .harness-count-value`); // Skills is the first kind.
+  const card = await a.run(`[...document.querySelectorAll('.harness-card:has(#harness-${tool}) .harness-count')].find(row => row.querySelector('.harness-count-label')?.textContent === 'Skills')?.querySelector('.harness-count-value')?.textContent ?? ''`);
   await a.click(`#harness-${tool}`);
   await a.click('#harness-tab-skills');
   const tab = await a.text('#harness-tab-skills .harness-tab-count');
@@ -1153,12 +1153,12 @@ async function manageFlow() {
       const dangling = [...document.querySelectorAll('[id^="manage-"][role="switch"]')].filter(sw => { const id = sw.getAttribute('aria-describedby'); return id && !document.getElementById(id); }).map(sw => sw.id);
       return [marks, card, lines, dangling];
     })()`),
-    [[['manage-info', 'manage-claude-cli']], 'Off leaves Claude Code as it is; nothing is written there until it is on again.', [], []]);
+    [[['manage-info', 'manage-claude-cli']], 'Turning a tool off keeps its copies. Central Knot stops writing to it until you turn it on again.', [], []]);
   // Turning Claude Code off moves the single Managed (?) to Copilot CLI (first managed card after an unmanaged one).
   await a.click('#manage-claude-cli');
-  same('first managed card after an unmanaged one carries the one Managed (?) naming that tool',
+  same('first managed card after an unmanaged one carries the one Managed (?)',
     await a.run(`[...document.querySelectorAll('.harness-manage .info-mark')].map(el => [el.id, el.closest('.harness-manage')?.querySelector('[role="switch"]')?.id, document.getElementById('manage-info-card')?.textContent ?? ''])`),
-    [['manage-info', 'manage-copilot-cli', 'Off leaves Copilot CLI as it is; nothing is written there until it is on again.']]);
+    [['manage-info', 'manage-copilot-cli', 'Turning a tool off keeps its copies. Central Knot stops writing to it until you turn it on again.']]);
   await a.click('#manage-claude-cli');
   const codex = () => tree(join(practice, '.codex'));
   const before = codex();
@@ -5646,7 +5646,7 @@ async function antigravityFlow() {
       const marks = [...document.querySelectorAll('.harness-manage .info-mark')].map(el => el.id);
       return [named, dangling, marks, document.getElementById('manage-info-card')?.textContent ?? ''];
     })()`),
-    [true, 0, ['manage-info'], 'Off leaves Claude Code as it is; nothing is written there until it is on again.']);
+    [true, 0, ['manage-info'], 'Turning a tool off keeps its copies. Central Knot stops writing to it until you turn it on again.']);
   for (const [w, h] of [SMALLEST, [1316, 819]]) {
     await sizeTo(a, w, h);
     if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');

@@ -25,14 +25,14 @@ export function manageLocked(home: HomeView): string | undefined {
 
 /**
  * The switch and its status for an installed tool's card: Managed (with one `(?)` card on the first managed card) or Not
- * managed (with the rejoin consequences line beneath). Every switch keeps its tool-named accessible label even when locked
- * (manageLocked puts the lock reason on title and aria-description via toggle's whyOff, and omits the card/line).
+ * managed (with the rejoin consequences line beneath). Every switch keeps its tool-named accessible label even when locked;
+ * the lock's reason comes from toggle's whyOff (title and aria-description), with no card or line.
  */
 export function manageRow(home: HomeView, tool: HarnessId, showInfo = false): HTMLElement {
   const on = home.sync.managed.includes(tool), why = manageLocked(home), name = names[tool];
   const label = on ? `Manage ${name}: on. Click to leave ${name} out: Central Knot then writes nothing there until you turn it on again. Its copies stay, and every item stays as it is.`
     : `Manage ${name}: off. Click to have Central Knot manage it.`;
-  const mark = on && !why && showInfo ? infoMark('manage-info', 'Managed', offLine(name)) : null;
+  const mark = on && !why && showInfo ? infoMark('manage-info', 'Managed', MANAGE_INFO) : null;
   const line = !why && !on ? h('span.harness-manage-line', { id: `manage-${tool}-line` }, onLine(home, tool)) : null;
   return h('div.harness-manage', {},
     h('span.harness-manage-head', mark ? { 'data-info-block': true } : {},
@@ -44,7 +44,7 @@ export function manageRow(home: HomeView, tool: HarnessId, showInfo = false): HT
 }
 
 /** Said behind Managed (?) on the first managed card. */
-const offLine = (name: string) => `Off leaves ${name} as it is; nothing is written there until it is on again.`;
+const MANAGE_INFO = 'Turning a tool off keeps its copies. Central Knot stops writing to it until you turn it on again.';
 /** With Automatic sync off, what brings a tool turned on into line (a click's pass is about its own item: librarypass.ts PassOptions only). */
 const SYNC_OFF = 'With Automatic sync off, Sync once brings it into line; a click on an item brings that item.';
 
