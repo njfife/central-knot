@@ -145,10 +145,10 @@ export function fromSourceWords(from: NonNullable<LibraryFacts['fromSource']>): 
       before: `${off}. Should ${label} have it again, it follows the source if unchanged here, and stays as you have it if you changed it. See `, after: '.', page: 'sources' };
   }
   const changed = 'You changed it here, or a tool’s copy of it can’t be read just now';
-  if (from.nextWaits) return { before: `From ${label}, a source. ${changed}, so the source’s next change will wait for you to Merge, Replace or Keep mine on `, after: '.', page: 'sources' };
-  if (!from.waits) return { before: `From ${label}, a source. What changes there comes in once a day while Automatic sync is on, and at Check now on `, after: ', unless you change it here.', page: 'sources' };
+  if (from.nextWaits) return { before: `From ${label}, a source. ${changed}, so the source’s next change will wait for you to Merge, Replace mine or Keep mine on `, after: '.', page: 'sources' };
+  if (!from.waits) return { before: `From ${label}, a source. What changes there comes in once a day while Automatic sync is on, and at Sync this source on `, after: ', unless you change it here.', page: 'sources' };
   const waits = 'Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now';
-  const choose = 'Merge puts its changes into yours if they don’t clash, and Replace takes it as it is; either keeps yours as a version.'
+  const choose = 'Merge puts its changes into yours if they don’t clash, and Replace mine takes it as it is; either keeps yours as a version.'
     + ' Keep mine keeps yours current, and the source’s version as a version, so it no longer waits.';
   return { tag: { text: 'update at its source', title: `${label} has a newer version. ${waits}. On ${pageNames.sources}, ${choose}` },
     before: `From ${label}, a source, which has a newer version. ${waits}. On `, after: `, ${choose}`, page: 'sources' };

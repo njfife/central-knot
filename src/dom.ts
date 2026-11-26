@@ -1,5 +1,5 @@
 // The page's element builder (h) and the small controls every page draws with: buttons, switches (toggle), checkboxes, icons,
-// info marks and their top-layer detail cards (infoMark, infoCardId, cardPlace, closeInfoCard, syncInfoCard), empty states,
+// collapsible folds (fold), info marks and their top-layer detail cards (infoMark, infoCardId, cardPlace, closeInfoCard, syncInfoCard), empty states,
 // section headings, shortened paths and file blocks, the layout steps run after a render (afterLayout); a press and its release
 // (the pointer's, or Space's on a button) counting as one click when a redraw replaced the control between them
 // (keepClicksAcrossRedraws), and whether a press on a text was a click or a drag, which every click on a text asks
@@ -513,4 +513,23 @@ export function infoMark(id: string, label: string, text: string): HTMLElement {
   }, icon('circle-question-mark', 14));
   const card = h('span.info-card', { id: infoCardId(id), role: 'tooltip', popover: 'manual', onpointerenter: enter, onpointerleave: leave }, text);
   return h('span.info-wrap', {}, mark, card);
+}
+
+/**
+ * A collapsible `<details>` fold whose open state lives with its caller across redraws. The summary draws `label` followed by
+ * a right chevron that rotates when open; `ontoggle` ignores the browser's initial sync of the `open` attribute.
+ */
+export function fold(options: { id: string; toggleId: string; label: string; open: boolean; onToggle: (open: boolean) => void; bodyClass?: string }, ...body: (Child | Child[])[]): HTMLElement {
+  let shown = options.open;
+  return h('details.fold', {
+    id: options.id, open: shown,
+    ontoggle: (event: Event) => {
+      const now = (event.currentTarget as HTMLDetailsElement).open;
+      if (now === shown) return;
+      shown = now;
+      options.onToggle(now);
+    },
+  },
+    h('summary.fold-head', { id: options.toggleId }, options.label, icon('chevron-right', 12, 'tone-faint fold-chevron')),
+    h(`div.fold-body${options.bodyClass ? `.${options.bodyClass}` : ''}`, {}, ...body));
 }
