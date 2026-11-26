@@ -3295,3 +3295,54 @@ test('Whole-plugin Off from a row switch routes through turnPlugin keep-out and 
   assert.deepEqual(record.except, [], 'Undo restores the original record before the first turn');
 });
 
+test('A run of two row-switch clicks on the same plugin undoes whole-plugin turns newest-first once', async t => {
+  pluginProfileWorld(t);
+  const calls: string[] = [];
+  let record: { id: string; source: string; marketName: string; plugin: string; on: boolean; except: HarnessId[] } =
+    { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: [] };
+  const pending: (() => void)[] = [];
+  t.mock.method(api, 'turnPlugin', (source: string, plugin: string, what: PluginTurn, tool?: HarnessId) => new Promise<PluginTurnResult>(resolve => {
+    calls.push(`turn:${source}:${plugin}:${what}:${tool}`);
+    pending.push(() => {
+      const before = { ...record, except: [...record.except] };
+      record = { ...record, except: [...record.except, tool!] };
+      resolve({
+        done: [{ source, marketName: 'team', plugin, tool: tool!, action: 'plugin-off', report: { tool: tool!, outcome: 'plugin-off', changed: true, message: 'Turned off.', runs: [] } }],
+        before,
+        back: [{ source, marketName: 'team', plugin, tool: tool!, action: 'plugin-on' }],
+      });
+    });
+  }));
+  t.mock.method(api, 'undoPluginTurn', async (source: string, plugin: string, before: unknown, back: PluginOp[]) => {
+    const prev = before as typeof record;
+    calls.push(`undo:${source}:${plugin}:${back.map(op => `${op.tool}:${op.action}`).join(',')}:except=${prev.except.join(',')}`);
+    record = { ...prev, except: [...prev.except] };
+    return { done: back.map(op => ({ ...op, report: { tool: op.tool, outcome: 'plugin-on', changed: true, message: 'Back on.', runs: [] } })) };
+  });
+  queueClick({ kind: 'skills', key: 'alpha@team/triage', on: false }, 'triage', () => ({
+    kind: 'skills', items: ['triage'], rows: [{ kind: 'skills', key: 'alpha@team/triage' }], changes: [],
+    said: 'triage is off in Claude Code.', pluginsOnly: true,
+    plugins: { ops: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-off' }] },
+  }), () => false);
+  queueClick({ kind: 'agents', key: 'alpha@team/lead', on: false }, 'lead', () => ({
+    kind: 'agents', items: ['lead'], rows: [{ kind: 'agents', key: 'alpha@team/lead' }], changes: [],
+    said: 'lead is off in Copilot CLI.', pluginsOnly: true,
+    plugins: { ops: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'copilot-cli', action: 'plugin-off' }] },
+  }), () => false);
+  await settled();
+  pending.shift()!();
+  await settled();
+  pending.shift()!();
+  await settled();
+  assert.deepEqual(calls, ['turn:/market:alpha:keep-out:claude-cli', 'turn:/market:alpha:keep-out:copilot-cli']);
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual(calls, [
+    'turn:/market:alpha:keep-out:claude-cli',
+    'turn:/market:alpha:keep-out:copilot-cli',
+    'undo:/market:alpha:copilot-cli:plugin-on:except=claude-cli',
+    'undo:/market:alpha:claude-cli:plugin-on:except=',
+  ]);
+  assert.deepEqual(record.except, [], 'Undo of a two-click run leaves no tool stuck in except');
+});
+

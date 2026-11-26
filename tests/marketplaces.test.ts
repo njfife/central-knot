@@ -1499,3 +1499,19 @@ test('a cold-cache Find click on a cached Git marketplace opens no sibling plugi
     assert.equal(market?.plugins.find(plugin => plugin.name === 'other')?.components?.skills, 2);
   } finally { await box.cleanup(); }
 });
+
+test('Turning off the last copy that is on turns the plugin Off even when other copies were turned off in their tools’ own files', async () => {
+  const box = await switchHome({ tools: ['claude-cli', 'copilot-cli', 'codex-cli'] });
+  try {
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    assert.deepEqual((await box.record()).plugins.map(entry => [entry.on, entry.except]), [[true, []]]);
+    // Two copies turned off in their tools' own files (not in except): Copilot CLI is the last copy on.
+    await box.settings(now => { now.enabledPlugins = { 'pdf@team': false }; });
+    await put(join(box.home, '.codex/config.toml'), `[plugins."pdf@team"]\nenabled = false\n`);
+    const off = await box.markets.turn(box.root, 'pdf', 'keep-out', 'copilot-cli', box.home);
+    assert.equal((await box.record()).plugins[0]!.on, false, 'no copy left on: record flips Off');
+    // Undo turns Copilot CLI back on and restores the record to On with no tool in except.
+    await box.markets.undoTurn(box.root, 'pdf', off.before!, off.back!, box.home);
+    assert.deepEqual((await box.record()).plugins.map(entry => [entry.on, entry.except]), [[true, []]]);
+  } finally { await box.cleanup(); }
+});

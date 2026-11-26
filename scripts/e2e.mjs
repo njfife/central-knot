@@ -19662,7 +19662,7 @@ if (tool === 'claude') {
 
   // Claude Code & Codex: Library line Off puts claude-cli in except, plugin page shows unticked Off, kept installed,
   // page switch and row switch partial, one tick on + Undo off; hand-edited settings.json / config.toml show the same box and write nothing.
-  const snapBeforeClaudeCodex = [readNow(pluginsRecPath), readNow(join(home, '.claude/settings.json')), readNow(join(home, '.codex/config.toml'))];
+  const snapBeforeClaudeCodex = [readNow(pluginsRecPath), readNow(join(home, '.claude/settings.json')), readNow(join(home, '.codex/config.toml')), readNow(copilotSettingsPath)];
   await open('skills', 'incident-triage');
   await until(() => a.exists(act('skills', 'incident-triage', 'claude-cli')));
   const claudeSettingsPath = join(home, '.claude/settings.json'), claudeEnabled = () => JSON.parse(readNow(claudeSettingsPath) || '{}').enabledPlugins?.[id];
@@ -19727,11 +19727,113 @@ if (tool === 'claude') {
   await until(() => a.run(`document.querySelector('#pbox-0-${plugin}-codex-cli')?.getAttribute('aria-checked') === 'false'`));
   await idle();
   same('Undo turns Codex copy off again', [/enabled = false/.test(readNow(codexTomlPath)), await pageBoxState('codex-cli')], [true, ['false', 'kept-off', 'Off, kept installed']]);
+  // Last copy on turned off from Library while the other two copies are off in their tools' own files: record flips Off, page switch is Off (not partial).
+  writeFileSync(claudeSettingsPath, claudeHandOff);
+  await a.click('#header-refresh');
+  await until(() => a.run(`document.querySelector('#pbox-0-${plugin}-claude-cli')?.dataset.state === 'kept-off'`));
+  const partialWords = await a.run(`document.querySelector('#pswitch-page-0-${plugin}')?.getAttribute('aria-label') ?? ''`);
+  check('page switch words name every tool the plugin is off in, even when turned off in its tool’s own file',
+    partialWords.startsWith(`${plugin}: on, off in Claude Code, Codex, Pi, OpenCode and Antigravity.`), partialWords);
+  await open('agents', 'incident-lead');
+  await until(() => a.exists(act('agents', 'incident-lead', 'copilot-cli')));
+  await a.click(act('agents', 'incident-lead', 'copilot-cli'));
+  await idle();
+  await a.click('#nav-plugins');
+  await until(() => a.exists(`#pswitch-page-0-${plugin}`));
+  same('turning off the last copy that is on turns the plugin Off when the other two copies were off by hand',
+    [liveOn(), entryNow(plugin)?.on, await a.run(`document.querySelector('#pswitch-page-0-${plugin}')?.getAttribute('aria-checked')`), await pageSwitchPartial(),
+      await pageBoxState('claude-cli'), await pageBoxState('copilot-cli'), await pageBoxState('codex-cli')],
+    [false, false, 'false', false, ['false', 'kept-off', 'Off, kept installed'], ['false', 'kept-off', 'Off, kept installed'], ['false', 'kept-off', 'Off, kept installed']]);
+
+  // Row's switch Off then On then Undo for a plugin's skill in Claude Code alone, a plugin's agent in Copilot CLI alone, and a kept-off plugin's skill in Codex.
+  const docId = 'document-tools@ck-test-market', relId = 'release-helper@ck-test-market', relAgent = `${relId}/release-reviewer`, sheet = `${docId}/spreadsheet`;
+  const recNowAll = JSON.parse(readNow(pluginsRecPath));
+  const otherTools = ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
+  const recForRow = {
+    ...recNowAll,
+    plugins: [
+      ...recNowAll.plugins.filter(e => e.plugin !== 'document-tools' && e.plugin !== 'release-helper'),
+      { id: 'seeded-doc', source: market, marketName: 'ck-test-market', plugin: 'document-tools', on: true, except: otherTools },
+      { id: 'seeded-rel', source: market, marketName: 'ck-test-market', plugin: 'release-helper', on: true, except: ['claude-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'] },
+    ],
+  };
+  writeFileSync(pluginsRecPath, `${JSON.stringify(recForRow, null, 2)}\n`);
+  writeFileSync(claudeSettingsPath, JSON.stringify({ enabledPlugins: { [id]: true, [docId]: true } }, null, 2));
+  writeFileSync(copilotSettingsPath, JSON.stringify({ ...JSON.parse(snapBeforeClaudeCodex[3]), enabledPlugins: { [id]: true, [relId]: true } }, null, 2));
+  await a.click('#header-refresh');
+  await idle();
+  // Claude Code alone (document-tools/pdf-reader): row switch Off -> On -> Undo, one command each way, record restored.
+  const docBefore = entryNow('document-tools');
+  await open('skills', pdf);
+  await until(() => a.exists(byId(rowPart('switch', 'skills', pdf))));
+  const claudeRow1 = readNow(join(home, 'claude-calls.txt'));
+  await a.click(byId(rowPart('switch', 'skills', pdf)));
+  await idle();
+  same('Claude Code row switch Off runs one disable command and turns the plugin record Off',
+    [readNow(join(home, 'claude-calls.txt')).slice(claudeRow1.length).trim(), entryNow('document-tools')?.on, await rowSwitchState('skills', pdf)],
+    [`plugin disable ${docId} --scope user`, false, ['false', false]]);
+  const claudeRow2 = readNow(join(home, 'claude-calls.txt'));
+  await a.click(byId(rowPart('switch', 'skills', pdf)));
+  await idle();
+  same('same Claude Code row switch On runs one enable command and restores the plugin record as before',
+    [readNow(join(home, 'claude-calls.txt')).slice(claudeRow2.length).trim(), entryNow('document-tools'), await rowSwitchState('skills', pdf)],
+    [`plugin enable ${docId} --scope user`, docBefore, ['true', false]]);
+  const claudeRow3 = readNow(join(home, 'claude-calls.txt'));
+  await a.click('#outcome-undo-plugin');
+  await idle();
+  same('Claude Code row switch Undo after On runs one disable command and puts the plugin record back Off',
+    [readNow(join(home, 'claude-calls.txt')).slice(claudeRow3.length).trim(), entryNow('document-tools')?.on, await rowSwitchState('skills', pdf)],
+    [`plugin disable ${docId} --scope user`, false, ['false', false]]);
+
+  // Copilot CLI alone (release-helper/release-reviewer): row switch Off -> On -> Undo, one command each way, record restored.
+  const relBefore = entryNow('release-helper');
+  await open('agents', relAgent);
+  await until(() => a.exists(byId(rowPart('switch', 'agents', relAgent))));
+  const copilotRow1 = readNow(join(home, 'copilot-calls.txt'));
+  await a.click(byId(rowPart('switch', 'agents', relAgent)));
+  await idle();
+  same('Copilot CLI row switch Off runs one command and turns the plugin record Off',
+    [readNow(join(home, 'copilot-calls.txt')).slice(copilotRow1.length).trim(), entryNow('release-helper')?.on, await rowSwitchState('agents', relAgent)],
+    [`plugin uninstall ${relId}`, false, ['false', false]]);
+  const copilotRow2 = readNow(join(home, 'copilot-calls.txt'));
+  await a.click(byId(rowPart('switch', 'agents', relAgent)));
+  await idle();
+  same('same Copilot CLI row switch On runs one command and restores the plugin record as before',
+    [readNow(join(home, 'copilot-calls.txt')).slice(copilotRow2.length).trim(), entryNow('release-helper'), await rowSwitchState('agents', relAgent)],
+    [`plugin install ${relId}`, relBefore, ['true', false]]);
+  const copilotRow3 = readNow(join(home, 'copilot-calls.txt'));
+  await a.click('#outcome-undo-plugin');
+  await idle();
+  same('Copilot CLI row switch Undo after On runs one command and puts the plugin record back Off',
+    [readNow(join(home, 'copilot-calls.txt')).slice(copilotRow3.length).trim(), entryNow('release-helper')?.on, await rowSwitchState('agents', relAgent)],
+    [`plugin uninstall ${relId}`, false, ['false', false]]);
+
+  // Codex kept-off copy (document-tools/spreadsheet): row switch On turns the plugin on for spreadsheet alone (pdf-reader held off), Undo puts it back Off.
+  const codexDocDir = join(home, '.codex/plugins/cache/ck-test-market/document-tools/1.2.0');
+  cpSync(join(market, 'plugins/document-tools'), codexDocDir, { recursive: true });
+  writeFileSync(codexTomlPath, `[marketplaces.ck-test-market]\nsource = ${JSON.stringify(market)}\n\n[plugins."${docId}"]\nenabled = false\n`);
+  await a.click('#header-refresh');
+  await open('skills', sheet);
+  await until(() => a.exists(byId(rowPart('switch', 'skills', sheet))));
+  await a.click(byId(rowPart('switch', 'skills', sheet)));
+  await idle();
+  const codexAfterSheetOn = readNow(codexTomlPath);
+  same('Codex row switch On over a kept-off copy turns the plugin on for that skill alone and updates the record',
+    [/\[plugins\."document-tools@ck-test-market"\]\s*\nenabled = true/.test(codexAfterSheetOn), /pdf-reader\/SKILL\.md"\s*\nenabled = false/.test(codexAfterSheetOn),
+      entryNow('document-tools')?.on, entryNow('document-tools')?.except.includes('codex-cli'), await rowSwitchState('skills', sheet)],
+    [true, true, true, false, ['true', false]]);
+  await a.click('#outcome-undo-plugin');
+  await idle();
+  same('Codex row switch Undo after On puts the plugin back Off in config.toml and in the record',
+    [/\[plugins\."document-tools@ck-test-market"\]\s*\nenabled = false/.test(readNow(codexTomlPath)), entryNow('document-tools')?.on, await rowSwitchState('skills', sheet)],
+    [true, false, ['false', false]]);
+
   // Restore pre-Claude/Codex state before Example 8.
   rmSync(join(home, '.codex/plugins'), { recursive: true, force: true });
   writeFileSync(pluginsRecPath, snapBeforeClaudeCodex[0]);
   if (snapBeforeClaudeCodex[1]) writeFileSync(claudeSettingsPath, snapBeforeClaudeCodex[1]); else rmSync(claudeSettingsPath, { force: true });
   if (snapBeforeClaudeCodex[2]) writeFileSync(codexTomlPath, snapBeforeClaudeCodex[2]); else rmSync(codexTomlPath, { force: true });
+  if (snapBeforeClaudeCodex[3]) writeFileSync(copilotSettingsPath, snapBeforeClaudeCodex[3]); else rmSync(copilotSettingsPath, { force: true });
   await a.click('#header-refresh');
   await idle();
 

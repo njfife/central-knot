@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DIRECTORY, FROM_DIRECTORY, WAITS_TO_MOVE, pluginsInstalled, pluginsTabNote, blocked, cantSwitchSkill, cantUninstall, comparableText, copiesToCompare, copyStale, foundIn, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, boxOf, itemsOnWords, switchPartial, toolMark, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
+import { DIRECTORY, FROM_DIRECTORY, WAITS_TO_MOVE, pluginsInstalled, pluginsTabNote, blocked, cantSwitchSkill, cantUninstall, comparableText, copiesToCompare, copyStale, foundIn, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, boxOf, itemsOnWords, switchPartial, switchWords, toolMark, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
 import { clickRuns, owedTo } from '../src/pluginrecord.ts';
 import { readInTurn, readInto, type Read } from '../src/reads.ts';
 import type { HarnessId, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
@@ -74,31 +74,45 @@ test('A tool’s box: ticked where the plugin is; off before the click where its
     [{ mark: 'kept-off', words: 'Off in Copilot CLI: still installed at 1.0.0, with its data and settings.' }, { ticked: false }, 'plugin-on']);
 });
 
-test('An off copy reads kept-off with an unticked box regardless of the record, locks its skill switches, marks the switch partial, is left out of foundIn, and holds when it cannot change here', () => {
-  const offCopy = { state: 'installed' as const, path: '/x', version: '1.0.0', off: true as const };
-  const onCopy = { state: 'installed' as const, path: '/y', version: '1.0.0' };
-  const withStates = (states: MarketplaceView['states']['p'], swEntry?: { on: boolean; except: HarnessId[] }): MarketplaceView => {
-    const base: MarketplaceView = { ...entry, states: { p: states } };
-    const tools = Object.fromEntries(view.tools.map(tool => [tool, owedTo(swEntry, tool, toolNow(view, base, 'p', tool, undefined, false), view.tools)]));
-    return { ...base, switches: { p: { ...(swEntry ? { entry: swEntry } : {}), tools } } };
-  };
-  // On and not excepted: off copy still reads kept-off and unticked, and marks the switch partial.
+const offCopy = { state: 'installed' as const, path: '/x', version: '1.0.0', off: true as const };
+const onCopy = { state: 'installed' as const, path: '/y', version: '1.0.0' };
+const withStates = (states: MarketplaceView['states']['p'], swEntry?: { on: boolean; except: HarnessId[] }): MarketplaceView => {
+  const base: MarketplaceView = { ...entry, states: { p: states } };
+  const tools = Object.fromEntries(view.tools.map(tool => [tool, owedTo(swEntry, tool, toolNow(view, base, 'p', tool, undefined, false), view.tools)]));
+  return { ...base, switches: { p: { ...(swEntry ? { entry: swEntry } : {}), tools } } };
+};
+
+test('An off copy reads kept-off with an unticked box whether the record is On and not excepted or has no entry', () => {
   const onNotExcepted = withStates({ 'claude-cli': offCopy, 'copilot-cli': onCopy }, { on: true, except: [] });
   const markOn = toolMark(view, onNotExcepted, 'p', 'claude-cli', onNotExcepted.switches!.p!.tools['claude-cli']);
   assert.deepEqual([markOn, boxOf(view, onNotExcepted, 'p', 'claude-cli', markOn)],
     [{ mark: 'kept-off', words: 'Off in Claude Code: still installed at 1.0.0, with its data and settings.' }, { ticked: false }]);
-  assert.equal(switchPartial(view, onNotExcepted, 'p'), true);
-  // No entry: off copy reads kept-off and unticked, and foundIn counts only copies that are on.
-  const noEntryOnlyOff = withStates({ 'claude-cli': offCopy });
-  const markNone = toolMark(view, noEntryOnlyOff, 'p', 'claude-cli', noEntryOnlyOff.switches!.p!.tools['claude-cli']);
-  assert.deepEqual([markNone.mark, boxOf(view, noEntryOnlyOff, 'p', 'claude-cli', markNone), foundIn(view, noEntryOnlyOff, 'p')], ['kept-off', { ticked: false }, []]);
-  const noEntryMixed = withStates({ 'claude-cli': offCopy, 'copilot-cli': onCopy });
-  assert.deepEqual(foundIn(view, noEntryMixed, 'p'), ['copilot-cli']);
-  // Skill switches under an off copy in Codex or Copilot CLI are locked with the whole-plugin-off reason.
-  const codexOff = withStates({ 'codex-cli': offCopy, 'copilot-cli': offCopy }, { on: true, except: [] });
-  assert.equal(cantSwitchSkill(view, codexOff, 'p', 'codex-cli', 'triage'), 'The whole plugin p is off in Codex.');
-  assert.equal(cantSwitchSkill(view, codexOff, 'p', 'copilot-cli', 'triage'), 'The whole plugin p is off in Copilot CLI.');
-  // An off Anthropic Directory copy cannot change here: box is unticked and held with its reason.
+  const noEntry = withStates({ 'claude-cli': offCopy });
+  const markNone = toolMark(view, noEntry, 'p', 'claude-cli', noEntry.switches!.p!.tools['claude-cli']);
+  assert.deepEqual([markNone.mark, boxOf(view, noEntry, 'p', 'claude-cli', markNone)], ['kept-off', { ticked: false }]);
+});
+
+test('A plugin’s switch is partial and its words name every tool it is off in, whether kept out or off in the tool’s own file', () => {
+  const byHand = withStates({ 'claude-cli': offCopy, 'copilot-cli': onCopy }, { on: true, except: [] });
+  const byRecord = withStates({ 'claude-cli': offCopy, 'copilot-cli': onCopy }, { on: true, except: ['claude-cli'] });
+  assert.equal(switchPartial(view, byHand, 'p'), true);
+  assert.equal(switchPartial(view, byRecord, 'p'), true);
+  assert.match(switchWords(view, byHand, 'p'), /^p: on, off in Claude Code\. /);
+  assert.equal(switchWords(view, byHand, 'p'), switchWords(view, byRecord, 'p'));
+});
+
+test('foundIn counts only copies that are on, leaving out off copies', () => {
+  assert.deepEqual(foundIn(view, withStates({ 'claude-cli': offCopy }), 'p'), []);
+  assert.deepEqual(foundIn(view, withStates({ 'claude-cli': offCopy, 'copilot-cli': onCopy }), 'p'), ['copilot-cli']);
+});
+
+test('Skill switches under an off copy in Codex or Copilot CLI are locked with the whole-plugin-off reason', () => {
+  const bothOff = withStates({ 'codex-cli': offCopy, 'copilot-cli': offCopy }, { on: true, except: [] });
+  assert.equal(cantSwitchSkill(view, bothOff, 'p', 'codex-cli', 'triage'), 'The whole plugin p is off in Codex.');
+  assert.equal(cantSwitchSkill(view, bothOff, 'p', 'copilot-cli', 'triage'), 'The whole plugin p is off in Copilot CLI.');
+});
+
+test('An off copy that cannot be changed here gets an unticked held box with its reason', () => {
   const dirOff = withStates({ 'claude-cli': { ...offCopy, directory: 'p@anthropic-plugin-directory' } }, { on: true, except: [] });
   const markDir = toolMark(view, dirOff, 'p', 'claude-cli', dirOff.switches!.p!.tools['claude-cli']);
   assert.deepEqual(boxOf(view, dirOff, 'p', 'claude-cli', markDir), { ticked: false, off: FROM_DIRECTORY, line: 'Off, kept installed · can’t be changed here' });
