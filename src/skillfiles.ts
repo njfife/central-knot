@@ -20,7 +20,7 @@ import { randomUUID } from 'node:crypto';
 import { constants, lstat, mkdir, readFile, readdir, readlink, realpath, rename, rm, stat, unlink } from 'node:fs/promises';
 import { dirname, join, relative, sep } from 'node:path';
 import { loadProblems, parseSkill } from './discovery.ts';
-import { configRoot, harnesses, writeRoot } from './harnesses.ts';
+import { configRoot, harnesses, isSkillEntry, writeRoot } from './harnesses.ts';
 import {
   changedWhileSyncing, clearStaleStages, copyTree, denied, errorCode, finishCopy, folderAccess, itemKey, landingOf, notCopied, placeCopy,
   readTree, removeTree, retryWhileHeld, storeDirectory, vacant, writeDurably, type ShareContext, type Tree,
@@ -175,8 +175,7 @@ export async function readSkillsFolder(tool: HarnessId, folder: string, rootLabe
   }
   const definition = harnesses[tool], seen = new Set<string>();
   for (const entry of entries.sort((first, second) => first.name.localeCompare(second.name))) {
-    if ((entry.name.startsWith('.') && !definition.loadsDotFolders) || definition.reservedSkills.includes(entry.name)) continue;
-    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+    if (!isSkillEntry(definition, entry)) continue;
     const key = itemKey(entry.name), path = join(folder, entry.name);
     if (seen.has(key)) { read.unseen.set(key, `Two folders whose names differ only by case are in ${toolName(tool)}’s skills folder. Rename one so Central Knot can tell them apart.`); continue; }
     seen.add(key);

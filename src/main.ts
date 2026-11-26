@@ -26,7 +26,7 @@ import {
 import { everythingEntryAction, setSyncEverything } from './everything.ts';
 import { chooseTools, whatJoiningDoes } from './toolchoice.ts';
 import { pruneHistory, readHistory } from './history.ts';
-import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skillVersion, skillVersionFile, skillsView, takeOver } from './skills.ts';
+import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skillFoundFile, skillVersion, skillVersionFile, skillsView, takeOver } from './skills.ts';
 import { agentTools, mcpTools, noteTools, pluginTools, presentTools, takesPlugins } from './presence.ts';
 import { forgetRefusals, installedPlugins, pluginRecordFiles, recordReadable } from './plugins.ts';
 import { checkFeed, type FeedCheck } from './bundlefeed.ts';
@@ -1065,7 +1065,7 @@ let touched = false, settingsTouched = false;
 /** How many watcher events have come since launch: a view compares it across its pass (syncAndView). */
 let nudges = 0;
 
-/** The tools Central Knot manages in the open home, read now: the one way the requests below learn them. */
+/** The tools Central Knot manages in the open home, read fresh (read-only calls that follow the latest view use readFor). */
 const toolsNow = async (): Promise<HarnessId[]> => managedNow(context(), await read());
 
 /**
@@ -1831,6 +1831,12 @@ app.whenReady().then(async () => {
     ? takeOver(context(), await toolsNow(), key, tool, resume === true) : { stopped: elsewhere, results: [], writes: 0, reloads: [] }));
   handleNow('skills:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await skillVersion(context(), key, hash)) ?? null : null));
   handleNow('skills:version-file', async (key, hash, file) => (current && typeof key === 'string' && typeof hash === 'string' && typeof file === 'string' ? (await skillVersionFile(context(), key, hash, file)) ?? null : null));
+  handleNow('skills:found-file', async (key, tool, rootLabel, file) => {
+    if (!current || typeof key !== 'string' || !isTool(tool) || (rootLabel !== undefined && typeof rootLabel !== 'string') || typeof file !== 'string') return null;
+    const shared = context();
+    if (!(await managedNow(shared, await readFor(handoff.id))).includes(tool)) return null;
+    return (await skillFoundFile(shared, key, tool, rootLabel, file)) ?? null;
+  });
   // The git repo the Managed set lives in. Reading it, and asking the repo for its latest commit, waits for no sync pass;
   // Connect, Pull, Push and Disconnect take their turn with every other change.
   // Every repo call knows whether Automatic sync is on: while it is off, an MCP server's or agent's deletion waits for it.
