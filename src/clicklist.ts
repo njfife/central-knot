@@ -3,8 +3,8 @@
 // items here or Remove in the Library (pluginstate.ts turnFromLine, a run of its own: its result is the Library header's) join it,
 // each a Turn. While
 // clicks wait or run, the page acts (app.ts acting): the writes it names are off and say why, the page stays live (it scrolls,
-// rows open, switches take clicks), and the background refresh waits: the home is read once when the list is empty and anything
-// owes it a read (app.ts readHomeOnce). A run of clicks, said once with one Undo, is decided here for both routes (runAt): a click
+// rows open, switches take clicks), and the background refresh waits: the home is read once when a run gives way to another run
+// or the list empties and anything owes it a read (app.ts readHomeOnce). A run of clicks, said once with one Undo, is decided here for both routes (runAt): a click
 // joins the run on its place while that run still has a click waiting or running, or within FADE_MS after its last click ended,
 // unless something ended it (endRun: its result's ×, its Undo or any other action, another home; another page or tool's page
 // once the list's clicks are carried out: app.ts leaveResults).
@@ -17,7 +17,7 @@ import type { RowKey } from './itemrow.ts';
 /**
  * A run of clicks: its place (an item list, or a tool's tab of one kind under Harnesses: app.ts placeNow; or Plugins),
  * when its last click ended (0 before one has), and the profiles in use when its first click starts to be carried out
- * (app.ts queueClick). Its clicks are the turns that name it.
+ * (app.ts queueClick, pluginstate.ts runClick). Its clicks are the turns that name it.
  */
 export interface Run { place: string; lastAt: number; before?: ProfilesBefore }
 
@@ -29,7 +29,7 @@ export interface Turn {
   run: Run;
   /** An item list's row (its kind and key) and the state its switch asks for, which the row is drawn in until the click ends. */
   row?: RowKey & { on: boolean };
-  /** Said when the list empties after it ran (Plugins: its run's clicks said as a whole). */
+  /** Called after its run's home read, before a different run starts or when the list empties (Plugins: its run's clicks said once). */
   ended?: () => void;
 }
 
@@ -86,7 +86,8 @@ async function runList(): Promise<void> {
   const ran: Turn[] = [];
   for (;;) {
     const next = clickList.turns.find(turn => turn.state === 'waiting');
-    if (next) {
+    // Before another run writes, finish the earlier run's home read and end callback against the home it left.
+    if (next && (!ran.length || ran.at(-1)!.run === next.run)) {
       // Not drawn: a row looks the same while its click waits and while it runs (Plugins' runClick draws its own row's words).
       next.state = 'running';
       ran.push(next);
@@ -95,8 +96,10 @@ async function runList(): Promise<void> {
       next.run.lastAt = Date.now();
       rerender();
     } else if (homeReadOwed()) await readHomeOnce();
-    // A click made during that read runs too, and the home is read again after it.
-    else break;
+    else if (next) {
+      for (const said of new Set(ran.splice(0).map(turn => turn.ended))) said?.();
+      rerender();
+    } else break;
   }
   clickList.running = false;
   for (const said of new Set(ran.map(turn => turn.ended))) said?.();
