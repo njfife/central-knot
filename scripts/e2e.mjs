@@ -926,7 +926,7 @@ async function harnessFlow() {
   await a.click('#harness-codex-cli .harness-card-head');
   await a.click('#harness-codex-cli .harness-card-main');
   const outStayed = await a.exists('.harness-cards') && !(await a.exists('#harness-back'));
-  await a.click('#manage-codex-cli');
+  await manageAgain(a, 'codex-cli');
   const managedBack = await a.exists('.harness-cards') && !(await a.exists('#harness-back')) && await a.exists('button#harness-codex-cli.harness-card-head');
   same('Manage and an unmanaged card never navigate, and re-enabling restores the heading button', [codexOut, outStayed, managedBack], [true, true, true]);
   // The card's count and the tab it opens agree; another harness starts with the filter off.
@@ -955,8 +955,8 @@ async function harnessFlow() {
   await a.click('button#harness-copilot-cli.harness-card-head');
   await a.click('#harness-tab-skills');
   await a.click('#nav-overview');
-  // While first setup's question is asked it says the copies that differ itself; answered No, a line of their own says them.
-  check('while first setup’s question is asked, it alone says the copies that differ', !(await a.exists('#overview-skills-differ')) && /copies that differ/.test(await a.text('#setup-question') ?? ''), await a.text('#overview-needs'));
+  // The copies that differ are one line under first setup's question while it is asked, and a line a kind after No.
+  same('while first setup’s question is asked, one line under it says the found skill whose copies differ, by the page’s count', [await a.exists('#setup-question'), await a.text('#overview-differ-line')], [true, '1 found skill has copies that differ and stays as it is until you choose. Show them']);
   await a.click('#setup-no');
   same('answered No, one line says the found skill whose copies differ, by the page’s count', await a.text('#overview-skills-differ-line'), '1 found skill has copies that differ. Show them');
   await a.click('#overview-skills-differ');
@@ -1133,12 +1133,45 @@ async function harnessFlow() {
   }
 }
 
+/** Turns a left-out tool's Manage switch on as a person does: the switch, then Manage <tool> in the question it opens on its card. */
+async function manageAgain(page, tool) {
+  await page.click(`#manage-${tool}`);
+  for (let tries = 0; tries < 50 && !(await page.exists(`#manage-${tool}-confirm`)); tries++) await wait(100);
+  await page.click(`#manage-${tool}-confirm`);
+}
+
 /**
  * A tool's Manage switch on its Harnesses card (toolchoice.ts), in the Practice copy: Codex left out, then managed again, with
- * what the line said before each click, the band after it, Codex's files byte for byte, and what the other pages show
- * meanwhile; then every tool left out.
+ * what the question asked at the press said before each click, the band after it, Codex's files byte for byte, and what the
+ * other pages show meanwhile; then every tool left out.
  */
 async function manageFlow() {
+  // Opening the question writes nothing at all. On History (Harnesses reads the plugins view as it opens), in a home with no
+  // plugins record and the automatic updates on (so main reads what plugins follow; the run's checks never start by themselves:
+  // launch): with the question open, and after Cancel, the home's records and the app's own files in its data folder (its
+  // settings, plugin folder and log; Chromium's caches aside) are byte for byte as they were, once the launch's pass has settled.
+  const quietHome = join(scratch, 'manage-quiet-home'), quietData = join(scratch, 'manage-quiet-data');
+  for (const folder of ['.claude/skills', '.codex/skills', '.central-knot']) mkdirSync(join(quietHome, folder), { recursive: true });
+  writeFileSync(join(quietHome, '.central-knot/sync.json'), JSON.stringify({ formatVersion: 3, generation: 'g-quiet', owner: STANDARD_BUILD, leftOut: ['codex-cli'] }));
+  writeFileSync(join(quietHome, '.central-knot/history.json'), JSON.stringify({ events: [
+    { id: 'quiet-out', at: new Date().toISOString(), key: 'tool:codex-cli', item: 'Codex', kind: 'managing', managing: { tool: 'codex-cli', on: false }, losers: [], orderProved: true }] }));
+  mkdirSync(quietData, { recursive: true });
+  writeFileSync(join(quietData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: quietHome }, pluginUpdates: true }));
+  writeFileSync(join(quietData, 'sharing-settings.json'), JSON.stringify({ homes: { [quietHome]: { generation: 'g-quiet' } } }));
+  const wq = await launch(quietData);
+  await wq.click('#nav-history');
+  const appOwn = () => Object.fromEntries(Object.entries(tree(quietData)).filter(([path]) => /^[a-z][a-z0-9.-]*(\/|$)/.test(path) && !path.startsWith('databases')));
+  const quiet = () => JSON.stringify([tree(join(quietHome, '.central-knot')), appOwn()]);
+  let quietBefore = quiet();
+  for (let tries = 0; tries < 10; tries++) { await wait(500); if (quiet() === quietBefore) break; quietBefore = quiet(); }
+  await wq.click('#history-quiet-out');
+  for (let tries = 0; tries < 50 && !(await wq.exists('#history-manage-confirm-quiet-out')); tries++) await wait(100);
+  const asked = [existsSync(join(quietHome, '.central-knot/plugins.json')), quiet() === quietBefore];
+  await wq.click('#history-manage-cancel-quiet-out');
+  same('Manage Codex’s question, open and then closed, writes nothing: no plugins record made, no pass, nothing fetched', [asked, existsSync(join(quietHome, '.central-knot/plugins.json')), quiet() === quietBefore], [[false, true], false, true]);
+  same('no page errors, manage quiet', wq.pageErrors, []);
+  await wq.quit();
+
   const a = await launch(join(scratch, 'manage-data'), ['--practice-copy']);
   const practice = await a.run(`document.querySelector('.status-home').title`);
   const switches = () => a.all('[id^="manage-"][role="switch"]', 'e.id + ":" + e.getAttribute("aria-checked")');
@@ -1147,11 +1180,11 @@ async function manageFlow() {
   await a.click(`#${rowPart('add', 'skills', 'standup')}`);
   await a.click('#nav-harnesses');
   same('every installed tool’s card has its Manage switch, on', await switches(), ['manage-claude-cli:true', 'manage-copilot-cli:true', 'manage-codex-cli:true']);
-  same('only the first managed card carries Managed (?) with its card text, and no managed card keeps a standing line or dangling aria-describedby',
+  same('only the first managed card carries Managed (?) with its card text, and no managed card keeps a question or dangling aria-describedby',
     await a.run(`(() => {
       const marks = [...document.querySelectorAll('.harness-manage .info-mark')].map(el => [el.id, el.closest('.harness-manage')?.querySelector('[role="switch"]')?.id]);
       const card = document.getElementById('manage-info-card')?.textContent ?? '';
-      const lines = [...document.querySelectorAll('.harness-manage-line')].map(el => el.id);
+      const lines = [...document.querySelectorAll('.manage-question')].map(el => el.id);
       const dangling = [...document.querySelectorAll('[id^="manage-"][role="switch"]')].filter(sw => { const id = sw.getAttribute('aria-describedby'); return id && !document.getElementById(id); }).map(sw => sw.id);
       return [marks, card, lines, dangling];
     })()`),
@@ -1161,28 +1194,35 @@ async function manageFlow() {
   same('first managed card after an unmanaged one carries the one Managed (?)',
     await a.run(`[...document.querySelectorAll('.harness-manage .info-mark')].map(el => [el.id, el.closest('.harness-manage')?.querySelector('[role="switch"]')?.id, document.getElementById('manage-info-card')?.textContent ?? ''])`),
     [['manage-info', 'manage-copilot-cli', 'Turning a tool off keeps its copies. Central Knot stops writing to it until you turn it on again.']]);
-  await a.click('#manage-claude-cli');
+  await manageAgain(a, 'claude-cli');
   const codex = () => tree(join(practice, '.codex'));
   const before = codex();
   const waitHistory = (page, match, tries = 40) => (async () => { for (let n = 0; n < tries && !(await match()); n++) await wait(100); return match(); })();
-  const shotAt = async (page, name, [width, height], theme) => {
-    if (!shots) return;
-    await sizeTo(page, width, height);
-    await page.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
-    await wait(80);
-    await page.shot(name);
-    await page.run(`window.centralKnot.setAppearance('system')`);
-    await wait(80);
-    await fullSize(page);
-  };
   await a.click('#manage-codex-cli');
   check('the band says Codex is left out and its copies stay', (await a.text('.band-done .band-text') ?? '').startsWith('Codex is left out: Central Knot writes nothing there now.'), await a.text('.band-done'));
   same('turning it off wrote nothing in Codex', codex(), before);
   const card = await a.text('#harness-codex-cli');
-  check('its card says it is left out, with its switch, opens nothing, and never says Not found or Install', card.includes('Not managed') && card.includes('Left out') && !/Not found|Install/.test(card) && !(await a.exists('button#harness-codex-cli')), card);
-  same('its line says what turning it on would do without the cut Instructions sentence', await a.text('#manage-codex-cli-line'), 'On: changes no item in Codex; shows 2 found items under Found.');
+  check('its card says it is left out and that its switch asks first, opens nothing, and never says Not found or Install',
+    card.includes('Not managed') && card.includes('Left out: Central Knot writes nothing in Codex. Its switch asks before managing it again.') && !/Not found|Install/.test(card) && !(await a.exists('button#harness-codex-cli')), card);
+  same('its card says nothing of what turning it on would do until the switch is pressed', await a.exists('#manage-codex-cli-text'), false);
   await shotAt(a, 'harnesses-left-out-860-light', SMALLEST, 'light');
   await fitsAtMinimum(a, 'Harnesses with a tool left out');
+  // The switch asks first, in the card: what managing Codex does there, read at the press; Cancel writes nothing and gives the
+  // focus back to the switch.
+  const asking = () => waitHistory(a, () => a.run(`!!document.getElementById('manage-codex-cli-confirm') || /couldn’t|no longer/.test(document.getElementById('manage-codex-cli-text')?.textContent ?? '')`));
+  await a.click('#manage-codex-cli');
+  await asking();
+  const nothingYet = 'Changes no item in Codex. 2 items stay Codex’s own: they will show under Found in the Library.';
+  same('pressed, the switch asks in the card, Cancel focused, and turns nothing yet', [
+    await a.text('#manage-codex-cli-text'), await a.all('#harness-codex-cli .manage-question button', 'e.textContent'), await a.run(`document.activeElement?.id`),
+    await a.run(`document.getElementById('manage-codex-cli').getAttribute('aria-checked')`), codex(),
+  ], [nothingYet, ['Cancel', 'Manage Codex'], 'manage-codex-cli-cancel', 'false', before]);
+  await shotAt(a, 'question-860-light', SMALLEST, 'light');
+  await shotAt(a, 'question-1316-dark', [1316, 819], 'dark');
+  await shotAt(a, 'question-1728-light', [1728, 1117], 'light');
+  await fitsAtMinimum(a, 'Harnesses asking before Codex is managed again');
+  await a.click('#manage-codex-cli-cancel');
+  same('Cancel closes the question, writes nothing, and puts focus back on the switch', [await a.exists('.manage-question'), codex(), await a.run(`document.activeElement?.id`)], [false, before, 'manage-codex-cli']);
   await openKind(a, 'skills');
   check('the Library’s skills has no Codex mark', (await a.exists('.tool-mark')) && !(await a.exists('.tool-mark[data-tool="codex-cli"]')));
   await a.click('#nav-overview');
@@ -1195,75 +1235,91 @@ async function manageFlow() {
   await waitHistory(a, () => a.exists('.history-row'));
   const newest = `document.querySelector('.history-row')`;
   const newestManage = `document.querySelector('.history-row[data-kind="managing"]')`;
-  same('History has one entry for the flip, naming the tool, with Manage it again and no redirect sentence', [
+  same('History has one entry for the flip, naming the tool, with Manage Codex and no redirect sentence', [
     await a.run(`${newest}.querySelector('.history-kind').textContent`), await a.run(`${newest}.querySelector('.history-what strong').textContent`),
     await a.run(`${newest}.querySelector('.history-about').textContent`), await a.run(`[...${newest}.querySelectorAll('.history-actions button')].map(b => b.textContent)`)],
-  ['Tool', 'Codex', 'Left out from here on: Central Knot writes nothing in Codex, and its copies there stay as they are.', ['Manage it again']]);
-  await shotAt(a, 'left-out-860-light', SMALLEST, 'light');
-  await shotAt(a, 'left-out-1316-dark', [1316, 819], 'dark');
+  ['Tool', 'Codex', 'Left out from here on: Central Knot writes nothing in Codex, and its copies there stay as they are.', ['Manage Codex']]);
+  await shotAt(a, 'history-left-out-860-light', SMALLEST, 'light');
+  await shotAt(a, 'history-left-out-1316-dark', [1316, 819], 'dark');
   await a.click('#nav-harnesses');
-  // A hand edit in Codex while it is left out reads no page again (nothing was written), so its line still says nothing would
-  // change; the band after the click says what the pass did there.
+  // A hand edit in Codex while its question is open reads no page again (nothing was written), so the question still says
+  // nothing would change; Manage Codex then finds what main counts now differs, turns nothing, and asks again with that.
+  await a.click('#manage-codex-cli');
+  await asking();
   const standup = join(practice, '.codex/skills/standup/SKILL.md');
   writeFileSync(standup, `${readFileSync(standup, 'utf8')}\nEdited in Codex while it was left out.\n`);
+  const editedOnCard = codex();
   await wait(2500);
+  await a.click('#manage-codex-cli-confirm');
+  await asking();
+  const overwrite = (restore) => `Saves Codex’s copy of standup as a version (${restore}), then replaces it in Codex with Central Knot’s version. 2 other items stay Codex’s own: they will show under Found in the Library.`;
+  const counted = overwrite('History can restore it');
+  same('Manage Codex after the hand edit turns nothing and asks again with what managing it does now', [
+    await a.text('#manage-codex-cli-text'), await a.run(`document.getElementById('manage-codex-cli').getAttribute('aria-checked')`), codex(), await a.run(`document.activeElement?.id`),
+  ], [`Changed since this was read; nothing was written. ${counted}`, 'false', editedOnCard, 'manage-codex-cli-cancel']);
+  await shotAt(a, 'changed-860-light', SMALLEST, 'light');
+  await a.click('#manage-codex-cli-cancel');
   await a.click('#manage-codex-cli');
-  same('turned on again, the band says what the pass did there, not what the card said before', await a.text('.band-done .band-text'),
-    'Central Knot manages Codex now: Central Knot’s version written there for 1 item (over its copy there, which a version keeps). Each change there is in History.');
+  await asking();
+  same('pressed again, the switch reads afresh: the hand edit counted, without a Refresh', await a.text('#manage-codex-cli-text'), counted);
+  await shotAt(a, 'question-overwrite-860-light', SMALLEST, 'light');
+  await a.click('#manage-codex-cli-confirm');
+  same('turned on again, the band names what the pass did there, in the question’s words', await a.text('.band-done .band-text'),
+    'Central Knot manages Codex now: Codex’s copy of standup is saved as a version (History can restore it), and Central Knot’s is written over it. Each change there is in History.');
+  await shotAt(a, 'result-860-light', SMALLEST, 'light');
   same('turning it on put Central Knot’s version back over the hand edit: Codex holds what it held before', codex(), before);
   check('and its card heading opens its page again', await a.exists('button#harness-codex-cli.harness-card-head'));
-  // From History: Leave it out again acts at once and keeps Codex's copies; Manage it again asks in the row with the card's own
+  // From History: Leave Codex out again acts at once and keeps Codex's copies; Manage Codex asks in the row with the card's own
   // sentence, lets Cancel and Escape return focus without writing, and confirming puts Central Knot's version back over an edit.
   await a.click('#nav-history');
-  await waitHistory(a, () => a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Leave it out again'`));
-  same('the manages entry offers Leave it out again with its hover, and the older Left out entry offers no button', [
+  await waitHistory(a, () => a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Leave Codex out again'`));
+  same('the manages entry offers Leave Codex out again with its hover, and the older Left out entry offers no button', [
     await a.run(`${newestManage}.querySelector('.history-about').textContent`),
     await a.run(`${newestManage}.querySelector('.history-actions button')?.title`),
     await a.run(`[...document.querySelectorAll('.history-row[data-kind="managing"]')][1]?.querySelectorAll('.history-actions button').length`),
   ], ['Central Knot manages Codex from here on: sync brings it into line, each change with its own entry.', 'Its copies stay. Central Knot stops writing there.', 0]);
-  await shotAt(a, 'manages-860-light', SMALLEST, 'light');
+  await shotAt(a, 'history-manages-860-light', SMALLEST, 'light');
   await a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button').focus()`);
   await a.press(' ', 'Space');
-  await waitHistory(a, () => a.run(`document.body.dataset.busy === 'false' && document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage it again'`));
+  await waitHistory(a, () => a.run(`document.body.dataset.busy === 'false' && document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage Codex'`));
   const rejoinId = await a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.id`);
   const olderCodexButtons = () => a.run(`[...document.querySelectorAll('.history-row[data-kind="managing"]')].filter(r => r.querySelector('.history-what strong').textContent === 'Codex').slice(1).reduce((n, r) => n + r.querySelectorAll('.history-actions button').length, 0)`);
-  same('Leave it out again acts at once by keyboard, keeps copies, focuses the new entry’s button, and leaves older entries without buttons', [
-    await a.exists('.history-confirm'), codex(), (await a.text('.band-done .band-text') ?? '').startsWith('Codex is left out: Central Knot writes nothing there now.'),
+  same('Leave Codex out again acts at once by keyboard, keeps copies, focuses the new entry’s button, and leaves older entries without buttons', [
+    await a.exists('.manage-question'), codex(), (await a.text('.band-done .band-text') ?? '').startsWith('Codex is left out: Central Knot writes nothing there now.'),
     await olderCodexButtons(), await a.run(`document.activeElement?.id`),
   ], [false, before, true, 0, rejoinId]);
-  // Edit Codex by hand and open Manage it again on History without a Refresh: the question reads afresh and counts the edit.
+  // Edit Codex by hand and open Manage Codex on History without a Refresh: the question reads afresh and counts the edit.
   writeFileSync(standup, `${readFileSync(standup, 'utf8')}\nEdited in Codex before History rejoin.\n`);
   const edited = codex(), rowsBefore = (await a.all('.history-row', 'e.dataset.kind')).length;
   await a.click(`#${rejoinId}`);
   await waitHistory(a, () => a.exists('[id^="history-manage-confirm-"]'));
-  same('Manage it again reads afresh without a Refresh, counts the edited skill, focuses Cancel, and writes nothing', [
-    await a.text('.history-confirm .band-text'), await a.all('.history-confirm button', 'e.textContent'),
+  same('Manage Codex on History reads afresh without a Refresh, says the card’s words after the tool’s name, focuses Cancel, and writes nothing', [
+    await a.text('.manage-question .band-text'), await a.all('.manage-question button', 'e.textContent'),
     await a.run(`document.activeElement?.textContent`), codex(), (await a.all('.history-row', 'e.dataset.kind')).length,
-  ], ['Managing Codex again: keeps 1 copy there that differs as a version and writes Central Knot’s version of 1 item there; shows 2 found items under Found.',
-    ['Cancel', 'Manage Codex'], 'Cancel', edited, rowsBefore]);
-  await shotAt(a, 'confirm-860-light', SMALLEST, 'light');
-  await a.click('.history-confirm button');
-  same('Cancel closes the question, writes nothing, and puts focus back on Manage it again', [
-    await a.exists('.history-confirm'), codex(), (await a.all('.history-row', 'e.dataset.kind')).length, await a.run(`document.activeElement?.id`),
+  ], [`Managing Codex: ${overwrite('it can be restored here')}`, ['Cancel', 'Manage Codex'], 'Cancel', edited, rowsBefore]);
+  await shotAt(a, 'history-question-860-light', SMALLEST, 'light');
+  await a.click('.manage-question button');
+  same('Cancel closes the question, writes nothing, and puts focus back on Manage Codex', [
+    await a.exists('.manage-question'), codex(), (await a.all('.history-row', 'e.dataset.kind')).length, await a.run(`document.activeElement?.id`),
   ], [false, edited, rowsBefore, rejoinId]);
   await a.click(`#${rejoinId}`);
   await waitHistory(a, () => a.exists('[id^="history-manage-confirm-"]'));
   await a.press('Escape');
-  same('Escape cancels too, writes nothing, and puts focus back on Manage it again', [
-    await a.exists('.history-confirm'), codex(), (await a.all('.history-row', 'e.dataset.kind')).length, await a.run(`document.activeElement?.id`),
+  same('Escape cancels too, writes nothing, and puts focus back on Manage Codex', [
+    await a.exists('.manage-question'), codex(), (await a.all('.history-row', 'e.dataset.kind')).length, await a.run(`document.activeElement?.id`),
   ], [false, edited, rowsBefore, rejoinId]);
   await a.press(' ', 'Space');
   await waitHistory(a, () => a.exists('[id^="history-manage-confirm-"]'));
   await a.run(`document.querySelector('[id^="history-manage-confirm-"]').focus()`);
   await a.press(' ', 'Space');
-  await waitHistory(a, () => a.run(`document.body.dataset.busy === 'false' && document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Leave it out again'`));
+  await waitHistory(a, () => a.run(`document.body.dataset.busy === 'false' && document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Leave Codex out again'`));
   const leaveAgainId = await a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.id`);
   same('confirming by keyboard manages Codex again, omits the History self-note, clears older buttons, and focuses the new entry’s button', [
     codex(), await a.text('.band-done .band-text'), await a.exists(`#${rejoinId}`), await olderCodexButtons(),
     await a.run(`${newestManage}.querySelector('.history-about').textContent`), await a.run(`document.activeElement?.id`),
-  ], [before, 'Central Knot manages Codex now: Central Knot’s version written there for 1 item (over its copy there, which a version keeps).',
+  ], [before, 'Central Knot manages Codex now: Codex’s copy of standup is saved as a version (History can restore it), and Central Knot’s is written over it.',
     false, 0, 'Central Knot manages Codex from here on: sync brings it into line, each change with its own entry.', leaveAgainId]);
-  await shotAt(a, 'result-860-light', SMALLEST, 'light');
+  await shotAt(a, 'history-result-860-light', SMALLEST, 'light');
   if (a.main) {
     // Sync once on History uses the status line, not a band (as on next).
     await a.click('#nav-harnesses');
@@ -1294,24 +1350,27 @@ async function manageFlow() {
     ];
     await held.release();
     same('a switch clicked while a pass runs waits for it, the other switches, headings and card links wait too, and it lands after', [during, leftOut()], [['true', true, true, [true, '0.5'], []], ['codex-cli']]);
-    await a.click('#manage-codex-cli');
+    await manageAgain(a, 'codex-cli');
     main.close();
   }
-  // With Automatic sync off, a tool's line says when it is brought into line, and the band after the click says it again.
+  // With Automatic sync off, the question says when it is brought into line, and the band after the click says it again.
   await a.click('#sync-switch');
   await a.click('#manage-codex-cli');
-  const syncOffLine = 'On: changes no item in Codex; shows 2 found items under Found. With Automatic sync off, Sync once brings it into line; a click on an item brings that item.';
-  same('with Automatic sync off, the line before turning it on keeps Sync once and drops the cut Instructions sentence',
-    await a.text('#manage-codex-cli-line'), syncOffLine);
+  await a.click('#manage-codex-cli');
+  await asking();
+  const syncOffLine = `${nothingYet} With Automatic sync off, Sync once brings it into line; a click on an item brings that item.`;
+  same('with Automatic sync off, the question before turning it on keeps Sync once and drops the cut Instructions sentence',
+    await a.text('#manage-codex-cli-text'), syncOffLine);
+  await a.press('Escape');
   await a.click('#nav-history');
-  await waitHistory(a, () => a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage it again'`));
+  await waitHistory(a, () => a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage Codex'`));
   await a.click('.history-row[data-kind="managing"] .history-actions button');
   await waitHistory(a, () => a.exists('[id^="history-manage-confirm-"]'));
-  same('with Automatic sync off, History’s question says the card’s SYNC_OFF sentence with History’s lead',
-    await a.text('.history-confirm .band-text'), syncOffLine.replace(/^On: /, 'Managing Codex again: '));
+  same('with Automatic sync off, History asks the card’s question, word for word after the tool’s name',
+    await a.text('.manage-question .band-text'), `Managing Codex: ${syncOffLine}`);
   await a.press('Escape');
   await a.click('#nav-harnesses');
-  await a.click('#manage-codex-cli');
+  await manageAgain(a, 'codex-cli');
   check('and so does the band after it', (await a.text('.band-done .band-text') ?? '') === 'Central Knot manages Codex now. With Automatic sync off, Sync once brings it into line; a click on an item brings that item.', await a.text('.band-done'));
   await a.click('#sync-switch');
   // Every tool left out: the pages say so and point to Harnesses, not that no tool was found.
@@ -1322,7 +1381,7 @@ async function manageFlow() {
   await waitHistory(a, () => a.exists('[id^="history-manage-confirm-"]'));
   await a.click('.history-row[data-kind="managing"] .history-actions button');
   await waitHistory(a, () => a.exists('[id^="history-manage-confirm-"]'));
-  same('only one Manage-again question stays open at a time on History', (await a.all('.history-confirm')).length, 1);
+  same('only one Manage-again question stays open at a time on History', (await a.all('.manage-question')).length, 1);
   await a.click('#nav-harnesses');
   check('with every tool left out, Harnesses omits the unmanaged introduction and has no Managed (?)',
     !(await a.text('#harnesses-scroll') ?? '').includes('Central Knot manages none of your tools here.') && !(await a.exists('#manage-info')), await a.text('#harnesses-scroll'));
@@ -1333,7 +1392,25 @@ async function manageFlow() {
   same('and the status bar’s switch has nothing to sync', await a.text('#sync-switch .sync-state'), 'Nothing to sync');
   await fitsAtMinimum(a, 'a home with every tool left out');
   await a.click('#overview-open-harnesses');
-  for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#manage-${tool}`);
+  // The longest name's question in a card at the smallest size, and in the narrowest card the page draws (240 px): Cancel and
+  // Manage Claude Code each on one line and inside the question's box (a button that doesn't fit beside the other wraps whole).
+  await sizeTo(a, ...SMALLEST);
+  await a.click('#manage-claude-cli');
+  await waitHistory(a, () => a.exists('#manage-claude-cli-confirm'));
+  const fits = () => a.run(`(() => {
+    const box = document.querySelector('#harness-claude-cli .manage-question'), style = getComputedStyle(box), outer = box.getBoundingClientRect();
+    const left = outer.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft), right = outer.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight);
+    return ['cancel', 'confirm'].map(part => { const b = document.getElementById('manage-claude-cli-' + part), r = b.getBoundingClientRect(); return [b.scrollWidth <= b.clientWidth, r.height <= 30, r.left >= left - 0.5, r.right <= right + 0.5]; });
+  })()`);
+  const inside = [[true, true, true, true], [true, true, true, true]];
+  same('Cancel and Manage Claude Code each fit inside the question’s box at 860, each on one line', await fits(), inside);
+  await a.run(`document.querySelector('.harness-cards').style.gridTemplateColumns = 'repeat(3, 240px)'`);
+  same('and inside it in the narrowest card the page draws', await fits(), inside);
+  await a.run(`document.querySelector('.harness-cards').style.gridTemplateColumns = ''`);
+  await shotAt(a, 'question-claude-860-light', SMALLEST, 'light');
+  await a.click('#manage-claude-cli-confirm');
+  await fullSize(a);
+  for (const tool of ['copilot-cli', 'codex-cli']) await manageAgain(a, tool);
   same('every tool managed again', await switches(), ['manage-claude-cli:true', 'manage-copilot-cli:true', 'manage-codex-cli:true']);
   same('no page errors, manage', a.pageErrors, []);
   await a.quit();
@@ -1347,14 +1424,14 @@ async function manageFlow() {
   await w1.click('#nav-harnesses');
   await w1.click('#manage-codex-cli');
   await w1.click('#nav-history');
-  await waitHistory(w1, () => w1.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage it again'`));
+  await waitHistory(w1, () => w1.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage Codex'`));
   await w1.click('.history-row[data-kind="managing"] .history-actions button');
   await waitHistory(w1, () => w1.exists('[id^="history-manage-confirm-"]'));
   mkdirSync(d2, { recursive: true });
   cpSync(join(d1, 'app-settings.json'), join(d2, 'app-settings.json'));
   const w2 = await launch(d2);
   await w2.click('#nav-harnesses');
-  await w2.click('#manage-codex-cli');
+  await manageAgain(w2, 'codex-cli');
   await w2.quit();
   const staleSnap = [tree(join(staleHome, '.codex')), readNow(join(staleHome, '.central-knot/sync.json')), readNow(join(staleHome, '.central-knot/history.json'))];
   await w1.click('[id^="history-manage-confirm-"]');
@@ -1362,10 +1439,20 @@ async function manageFlow() {
   same('a stale Manage click after a second window managed the tool writes nothing and says nothing was changed', [
     await w1.text('.band-done .band-text'), [tree(join(staleHome, '.codex')), readNow(join(staleHome, '.central-knot/sync.json')), readNow(join(staleHome, '.central-knot/history.json'))],
   ], ['Codex is already managed. Nothing was changed.', staleSnap]);
+  // A read that can't be made says why in the question, with Cancel alone: Codex's folder taken away just before the press.
+  await w1.click('#nav-harnesses');
+  await w1.click('#manage-codex-cli');
+  rmSync(join(staleHome, '.codex'), { recursive: true, force: true });
+  await w1.run(`document.querySelector('#manage-codex-cli').click()`);
+  await waitHistory(w1, () => w1.run(`/no longer/.test(document.getElementById('manage-codex-cli-text')?.textContent ?? '')`));
+  same('a read that fails says why in the question, offers Close and Try again, and writes nothing', [
+    await w1.text('#manage-codex-cli-text'), await w1.all('#harness-codex-cli .manage-question button', 'e.textContent'), existsSync(join(staleHome, '.codex')),
+  ], ['Codex is no longer present here. Nothing was changed.', ['Close', 'Try again'], false]);
+  await shotAt(w1, 'failed-860-light', SMALLEST, 'light');
   same('no page errors, manage stale', w1.pageErrors, []);
   await w1.quit();
 
-  // After Leave it out again, History's reopened Manage question refreshes marketplaces for the tools then managed, matching Harnesses.
+  // After Leave Claude Code out again, History's reopened Manage question reads marketplaces for the tools then managed, as the card's does.
   const plugHome = join(scratch, 'manage-plug-home'), plugData = join(scratch, 'manage-plug-data'), plugMarket = join(scratch, 'manage-plug-market');
   for (const folder of ['.claude/skills', '.claude/plugins', '.copilot/skills', '.codex/skills', '.central-knot']) mkdirSync(join(plugHome, folder), { recursive: true });
   mkdirSync(join(plugMarket, '.claude-plugin'), { recursive: true });
@@ -1385,22 +1472,27 @@ async function manageFlow() {
   writeFileSync(join(plugData, 'sharing-settings.json'), JSON.stringify({ homes: { [plugHome]: { generation: 'g-plug' } } }));
   const wp = await launch(plugData);
   await wp.click('#nav-harnesses');
-  await waitHistory(wp, () => wp.run(`(document.querySelector('#manage-codex-cli-line')?.textContent ?? '').includes('It also gets each plugin')`));
-  check('with Claude Code managed, Codex’s card promises the plugin from Claude Code’s marketplace', (await wp.text('#manage-codex-cli-line') ?? '').includes('It also gets each plugin that is on and not kept out of it.'));
+  const cardQuestion = async () => {
+    await wp.click('#manage-codex-cli');
+    await waitHistory(wp, () => wp.exists('#manage-codex-cli-confirm'));
+    const said = await wp.text('#manage-codex-cli-text');
+    await wp.press('Escape');
+    return said;
+  };
+  check('with Claude Code managed, Codex’s question promises the plugin from Claude Code’s marketplace', (await cardQuestion() ?? '').includes('Codex also gets each plugin that is on and not kept out of it.'));
   await wp.click('#nav-history');
   await waitHistory(wp, () => wp.exists('#history-plug-claude-on'));
   await wp.click('#history-plug-claude-on');
-  await waitHistory(wp, () => wp.run(`document.querySelector('.history-row[data-kind="managing"] .history-what strong')?.textContent === 'Claude Code' && document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage it again'`));
+  await waitHistory(wp, () => wp.run(`document.querySelector('.history-row[data-kind="managing"] .history-what strong')?.textContent === 'Claude Code' && document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage Claude Code'`));
   await wp.click('#history-plug-codex-off');
   await waitHistory(wp, () => wp.exists('#history-manage-confirm-plug-codex-off'));
-  const historyAfterLeave = await wp.text('.history-confirm .band-text');
+  const historyAfterLeave = await wp.text('.manage-question .band-text');
   await wp.press('Escape');
   await wp.click('#nav-harnesses');
-  await waitHistory(wp, () => wp.run(`!(document.querySelector('#manage-codex-cli-line')?.textContent ?? '').includes('It also gets each plugin')`));
-  const cardAfterLeave = await wp.text('#manage-codex-cli-line');
-  same('after leaving Claude Code out, History’s Manage question drops its stale plugin promise and matches Harnesses', [
-    cardAfterLeave.includes('It also gets each plugin'), historyAfterLeave.replace(/^Managing Codex again: /, 'On: '),
-  ], [false, cardAfterLeave]);
+  const cardAfterLeave = await cardQuestion();
+  same('after leaving Claude Code out, History’s Manage question drops its stale plugin promise and asks the card’s question, word for word', [
+    cardAfterLeave.includes('also gets each plugin'), historyAfterLeave,
+  ], [false, `Managing Codex: ${cardAfterLeave}`]);
   same('no page errors, manage plugin refresh', wp.pageErrors, []);
   await wp.quit();
 
@@ -1418,7 +1510,7 @@ async function manageFlow() {
   await ws.click('#nav-history');
   await waitHistory(ws, () => ws.exists('.history-row[data-kind="managing"]'));
   await wait(300);
-  same('opening History in a stopped home writes no plugins.json and disables Manage it again with the stop reason', [
+  same('opening History in a stopped home writes no plugins.json and disables Manage Codex with the stop reason', [
     existsSync(join(stoppedHome, '.central-knot/plugins.json')),
     await ws.run(`(() => { const b = document.querySelector('.history-row[data-kind="managing"] .history-actions button'); return b ? [b.disabled, /not the one this app last used/.test(b.title), b.title === b.getAttribute('aria-description')] : null; })()`),
   ], [false, [true, true, true]]);
@@ -1441,7 +1533,7 @@ async function manageFlow() {
   await waitHistory(wl, () => wl.exists('.history-row[data-kind="managing"]'));
   const historyLock = await wl.run(`(() => { const b = document.querySelector('.history-row[data-kind="managing"] .history-actions button'); return b ? [b.disabled, b.title, b.getAttribute('aria-description')] : null; })()`);
   same('on a locked home, History’s button is disabled with the card’s exact lock reason as hover and description', historyLock, cardLock);
-  await shotAt(wl, 'locked-860-light', SMALLEST, 'light');
+  await shotAt(wl, 'history-locked-860-light', SMALLEST, 'light');
   same('no page errors, manage locked', wl.pageErrors, []);
   await wl.quit();
 }
@@ -1526,7 +1618,7 @@ async function arrivalFlow() {
   // Manage turned off and on by hand: its own result, no arrival line.
   await a.click('#nav-harnesses');
   await a.click('#manage-opencode-cli');
-  await a.click('#manage-opencode-cli');
+  await manageAgain(a, 'opencode-cli');
   same('Manage turned off and on by hand says no arrival', await lines(a), []);
 
   // With Automatic sync off: said, nothing copied, no entry; Automatic sync on again: the catch-up's entry.
@@ -1678,6 +1770,17 @@ async function fullSize(a) {
   await a.send('Emulation.clearDeviceMetricsOverride');
   await a.run(`window.dispatchEvent(new Event('resize'))`);
   await a.settle();
+}
+/** With --shots, a picture of the page at width × height in `theme` ('light' or 'dark'); the window's size and appearance are put back after. */
+async function shotAt(page, name, [width, height], theme) {
+  if (!shots) return;
+  await sizeTo(page, width, height);
+  await page.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+  await wait(80);
+  await page.shot(name);
+  await page.run(`window.centralKnot.setAppearance('system')`);
+  await wait(80);
+  await fullSize(page);
 }
 /** Opens info mark `markId`'s card, checks its words, status-bar clearance and fit, then checks Escape closes it. */
 async function checkCard(a, markId, expected, label) {
@@ -6772,8 +6875,8 @@ async function dockedListFlow() {
   const a = await launch(join(scratch, 'docked-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' });
   await a.click('#nav-overview');
   await a.click('#setup-yes');
-  for (let tries = 0; tries < 100 && !(await a.exists('#walk-skip')); tries++) await wait(100);
-  await a.click('#walk-skip');
+  for (let tries = 0; tries < 100 && !(await a.exists('#setup-choosing')); tries++) await wait(100);
+  if (!(await a.exists('#setup-choosing'))) throw new Error('Yes did not finish: the Overview has no line into the copies that differ.');
   const sidebarOpen = async open => { if (await a.run(`document.body.classList.contains('rail')`) === open) await a.click('#sidebar-toggle'); };
   // The docked list's content width, its toolbar's lines (its parts' middles a line apart), how many of the names it shows and
   // which of them are cut, and how many of the kind switch's words show whole.
@@ -7664,7 +7767,7 @@ async function syncEverythingFlow() {
   for (let tries = 0; tries < 40 && !(await a.exists('[data-outcome] #outcome-undo')); tries++) await wait(100);
   same('the Settings band says Synchronize everything is on and offers History’s Undo with its help',
     await a.run(`(() => { const o = document.querySelector('[data-outcome]'), u = o?.querySelector('#outcome-undo'); return [o?.querySelector('.band-text')?.textContent, u?.textContent, u?.title, u?.getAttribute('aria-description')]; })()`),
-    ['Synchronize everything is on.', 'Undo', 'Switch Synchronize everything off and take back the 2 items it took in since, each tool it was found in keeping its own copy', null]);
+    ['Synchronize everything is on: it added 2 items.', 'Undo', 'Switches Synchronize everything off. It takes back the items it added, but for any changed since.', null]);
   same('the pass right after took in what was found: notes is in Codex now, byte for byte', readNow(join(codex, 'notes/SKILL.md')), text('notes', 'Take notes.'));
   same('and Settings says what it took in, a line per kind, each with History', await a.all('.setting-added .setting-message', 'e.textContent'),
     ['Synchronize everything took in 1 skill, found in Claude Code: notes. History can undo it.History', 'Synchronize everything took in 1 MCP server, found in Codex: files. History can undo it.History']);
@@ -7760,11 +7863,11 @@ async function syncEverythingFlow() {
   await b.click('#nav-settings');
   for (let tries = 0; tries < 30 && !(await b.exists('#sync-everything-on')); tries++) await wait(100);
   await b.click('#sync-everything-on');
-  await waitBand('true', 'Synchronize everything is on.');
-  const twoHelp = 'Switch Synchronize everything off and take back the 2 items it took in since, each tool it was found in keeping its own copy';
+  await waitBand('true', 'Synchronize everything is on');
+  const twoHelp = 'Switches Synchronize everything off. It takes back the items it added, but for any changed since.';
   same('Settings band after turning on with two kinds and a conflict: sentence, Undo, History help and reloads',
     [await uBand(), readNow(join(uCodex, 'notes/SKILL.md')), JSON.parse(readNow(join(uHome, '.claude.json'))).mcpServers?.files?.command],
-    [['Synchronize everything is on.', 'Undo', twoHelp, true, false], text('notes', 'Take notes.'), 'files-mcp']);
+    [['Synchronize everything is on: it added 2 items.', 'Undo', twoHelp, true, false], text('notes', 'Take notes.'), 'files-mcp']);
   await b.click('#outcome-undo');
   await waitBand('false', 'Undone:');
   const twoUndone = 'Undone: switched off, and 2 items it took in are out of Central Knot again, each tool it was found in keeping its own copy.';
@@ -7783,7 +7886,7 @@ async function syncEverythingFlow() {
   for (let tries = 0; tries < 30 && !(await b.exists('#sync-everything-on')); tries++) await wait(100);
   settleOld([skill(uClaude, 'later', text('later', 'Later skill.')), join(uClaude, 'later/SKILL.md')]);
   await b.click('#sync-everything-on');
-  await waitBand('true', 'Synchronize everything is on.');
+  await waitBand('true', 'Synchronize everything is on');
   settleOld([skill(uClaude, 'edited', text('edited', 'Original.')), join(uClaude, 'edited/SKILL.md')]);
   for (let tries = 0; tries < 100 && (readNow(join(uCodex, 'edited/SKILL.md')) !== text('edited', 'Original.') || (await b.all('.setting-added .setting-message')).length < 2); tries++) await wait(100);
   writeFileSync(join(uClaude, 'edited/SKILL.md'), text('edited', 'Edited by hand.'));
@@ -7796,9 +7899,9 @@ async function syncEverythingFlow() {
   await b.click('#sync-switch');
   for (let tries = 0; tries < 40 && await b.run(`document.querySelector('#sync-switch')?.getAttribute('aria-checked')`) !== 'false'; tries++) await wait(100);
   await b.click('#sync-everything-on');
-  await waitBand('true', 'Synchronize everything is on.');
+  await waitBand('true', 'Synchronize everything is on');
   same('with Automatic sync off, the band shows its second sentence and Undo without reloads',
-    await uBand(), ['Synchronize everything is on. It takes items in at Sync once, or when Automatic sync is on.', 'Undo', 'Switch Synchronize everything off', false, false]);
+    await uBand(), ['Synchronize everything is on. Nothing added yet: Automatic sync is off.', 'Undo', twoHelp, false, false]);
   await b.click('#outcome-undo');
   await waitBand('false', 'Undone:');
   same('Undo with Automatic sync off turns the rule off and says nothing was taken back',
@@ -7807,10 +7910,10 @@ async function syncEverythingFlow() {
   const fromOther = await b.run(`window.centralKnot.setSyncEverything(true, ${JSON.stringify(uHome)})`);
   check('the other window’s switch-on returned its entry id while this window still reads off', typeof fromOther.event === 'string' && await uRuleOn() === 'false', [fromOther.event, await uRuleOn()]);
   await b.click('#sync-everything-on');
-  await waitBand('true', 'Synchronize everything is on.');
+  await waitBand('true', 'Synchronize everything is on');
   same('turning it on again when already on shows no band Undo',
     [uRecord().syncEverything, await b.text('[data-outcome] .band-text'), await b.exists('#outcome-undo')],
-    [true, 'Synchronize everything is on. It takes items in at Sync once, or when Automatic sync is on.', false]);
+    [true, 'Synchronize everything is on. Nothing added yet: Automatic sync is off.', false]);
   if (b.inspect) {
     for (const name of ['s1', 's2', 's3', 's4']) settleOld([skill(uCodex, name, text(name, `Skill ${name}.`)), join(uCodex, `${name}/SKILL.md`)]);
     const menu = await mainHelpers(b.inspect);
@@ -7826,9 +7929,12 @@ async function syncEverythingFlow() {
 }
 
 /**
- * First setup on the page (firstsetup.ts): a folder home never asked shows the question on the Overview; Yes opens the walkthrough of
- * the copies that differ, at the latest copy; Go on, no dates to go by, leaving half way and the Overview's way back in; the
- * switch-on's one Undo in History and its Restore. Then a second home: Resume first, and No.
+ * First setup on the page (firstsetup.ts): a folder home never asked shows the question on the Overview, one line counted as the
+ * cards count, with its (?) (which stays clear of the scroll bar at 860) and You can undo this.; the copies that differ one line
+ * under it; Yes stays there, its band with what it added and the switch-on's Undo, and Choose copies opens the walkthrough of the
+ * copies that differ, at the latest copy; Go on, no dates to go by, leaving half way and the Overview's way back in; the
+ * switch-on's one Undo in History and its Restore. Then a second home: Resume first, No, the band's Turn on (Yes's switch), a third
+ * item added meanwhile, and the Undo taking back all three. With --shots, the pictures the step's report names (01- to 06-).
  */
 async function firstSetupFlow() {
   const homeFor = name => {
@@ -7862,21 +7968,42 @@ async function firstSetupFlow() {
   const record = () => JSON.parse(readNow(join(home, '.central-knot/sync.json')) || '{}');
   const a = await launch(data, [], real);
   await a.click('#nav-overview');
-  const question = await a.text('#setup-question .setup-text') ?? '';
-  check('a home never asked shows the question, counted as the pass counts: 2 items it takes in now and the tools that get them, then 2 more that wait with nothing chosen, and what the one Undo covers',
-    /^Yes takes in now the 2 items found in your tools .* \(Claude Code and Codex\);/.test(question) && /2 more items have copies that differ and wait for you: nothing is chosen for you\. You’re asked about each, one at a time, with the latest copy marked where one can be told/.test(question)
-      && /wait for you: nothing is chosen for you\. .* One Undo in History takes back what it takes in; a copy you choose has its own Undo\.$/.test(question) && !/Write to Claude/.test(question), question);
-  same('and says what No leaves', await a.text('#setup-no-says'), 'No changes nothing: what is already on stays on and keeps syncing, and each found item waits on its page for Add.');
-  check('the lead no longer says to open a card and turn something on where the question stands', !/Open one below/.test(await a.text('.overview-lead') ?? ''), await a.text('.overview-lead'));
+  same('a home never asked: the question is one line, saying it adds 2 of the 4 items the cards count (2 wait for a choice), with You can undo this. beside its buttons; its (?) says where they go and what the Undo covers; no lead above it',
+    [await a.text('#setup-question-title'), await a.text('#setup-undo-note'), await a.text('#setup-question-info-card'), await a.all('#setup-question .setup-text'), await a.exists('.overview-lead')],
+    ['Add 2 of the 4 items found in your tools to every tool that can take them, and new ones as they turn up?', 'You can undo this.',
+      'Each item goes to the tools that lack it and can take it. Undo takes back the items it added, but for any changed since; a copy you choose has its own Undo.', [], false]);
+  same('under it, one line for every kind says the found items whose copies differ stay as they are until he chooses, with Show them',
+    [await a.text('#overview-differ-line'), await a.exists('#overview-skills-differ-line'), await a.exists('#overview-mcp-differ-line')],
+    ['2 found items have copies that differ and stay as they are until you choose. Show them', false, false]);
+  await a.click('#overview-differ');
+  same('its Show them opens the Library on All, narrowed to the copies that differ', [await a.run(`document.querySelector('#library-kind-all')?.getAttribute('aria-pressed')`), (await a.text('.chip-on') ?? '').startsWith('Copies differ')], ['true', true]);
+  await a.click('#nav-overview');
   same('Synchronize everything is the main button', await a.run(`document.querySelector('#setup-yes')?.className.includes('primary')`), true);
   await fitsAtMinimum(a, 'the Overview with first setup’s question');
+  // The (?) opened at the smallest window: its card stays a margin clear of the page's scroll bar, as of the window's other edges.
+  await sizeTo(a, ...SMALLEST);
+  await a.click('#setup-question-info');
+  same('at 860, the open (?) card stays 8 px or more clear of the scroll bar, and covers neither the buttons nor You can undo this.', await a.run(`(() => { const scroll = document.querySelector('#overview-scroll'), card = document.querySelector('#setup-question-info-card').getBoundingClientRect();
+    const covers = selector => { const box = document.querySelector(selector).getBoundingClientRect(); return card.left < box.right && box.left < card.right && card.top < box.bottom && box.top < card.bottom; };
+    return [scroll.offsetWidth > scroll.clientWidth && card.right + 8 <= scroll.getBoundingClientRect().left + scroll.clientWidth, covers('.setup-actions'), covers('#setup-undo-note')]; })()`), [true, false, false]);
+  await a.click('#setup-question-info');
+  await fullSize(a);
   await a.shot('setup-question');
+  await shotAt(a, '01-card-860-light', SMALLEST, 'light');
+  await shotAt(a, '02-card-1316-dark', [1316, 819], 'dark');
   await a.click('#setup-yes');
+  for (let tries = 0; tries < 40 && !(await a.exists('#setup-choosing')); tries++) await wait(100);
+  same('Yes stores the rule on, adds what it may (notes is in Codex now) and stays on the Overview: its band says what it added, with the switch-on’s own Undo, and the line under it leads into the 2 that wait',
+    [record().syncEverything, readNow(join(codex, 'notes/SKILL.md')), await a.text('.page-title'), await a.exists('#walkthrough'), await a.text('[data-outcome] .band-text'), await a.all('[data-outcome] .band-actions button'), await a.text('#setup-choosing')],
+    [true, text('notes', 'Take notes.'), 'Overview', false, 'Synchronize everything is on: it added 2 items.', ['Undo'], '2 found items have copies that differ and wait for your choice. Choose copies']);
+  same('its Undo’s hover says what it does, with no count a later pass would make untrue', await a.run(`document.querySelector('#outcome-undo').title`), 'Switches Synchronize everything off. It takes back the items it added, but for any changed since.');
+  await fitsAtMinimum(a, 'the Overview after Yes');
+  await shotAt(a, '03-after-yes-860-light', SMALLEST, 'light');
+  await a.click('#setup-choose');
   for (let tries = 0; tries < 40 && !(await a.exists('#walkthrough')); tries++) await wait(100);
-  same('Yes stores the rule on, takes in what it may (notes is in Codex now), and opens the walkthrough on the Library at 1 of 2, review, its latest copy (Codex’s) the main button',
-    [record().syncEverything, readNow(join(codex, 'notes/SKILL.md')), await a.text('#walkthrough .walk-place'), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'codex-cli')} .version-cta-main`), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'claude-cli')}`), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'claude-cli')} .version-cta-main`)],
-    [true, text('notes', 'Take notes.'), ' · 1 of 2', true, true, false]);
-  check('the band after Yes says what it took in and what the one Undo covers', /^Synchronize everything is on: it took in 2 items, and 2 items with copies that differ wait for your choice\. One Undo in History takes back what it takes in; a copy you choose has its own Undo\./.test(await a.text('[data-outcome] .band-text') ?? ''), await a.text('[data-outcome] .band-text'));
+  same('its Choose copies opens the walkthrough on the Library at 1 of 2, review, its latest copy (Codex’s) the main button',
+    [await a.text('#walkthrough .walk-place'), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'codex-cli')} .version-cta-main`), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'claude-cli')}`), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'claude-cli')} .version-cta-main`)],
+    [' · 1 of 2', true, true, false]);
   same('review’s folders tie, so each copy says when its files were edited, only Codex’s, edited 2 h ago, is marked Newer, and Use the latest for the rest can be used',
     [await a.text(`#${rowPart('walk-use', 'skills', 'review', 'codex-cli')} .version-meta`), await a.text(`#${rowPart('walk-use', 'skills', 'review', 'claude-cli')} .version-meta`), await a.all('#walkthrough .version-latest'), await a.run(`document.querySelector('#walk-use-latest').disabled`)],
     ['edited 2 h ago · Newer', 'edited 2 days ago', ['edited 2 h ago · Newer'], false]);
@@ -7903,7 +8030,7 @@ async function firstSetupFlow() {
   for (let tries = 0; tries < 30 && !(await a.exists('.history-row[data-kind="everything"]')); tries++) await wait(100);
   const ruleRow = '.history-row[data-kind="everything"]';
   same('History has the switch-on’s one entry, with its Undo', [await a.text(`${ruleRow} .history-about`), await a.text(`${ruleRow} .history-actions button`)],
-    ['Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. Its Undo takes back what it takes in; a copy you choose has its own Undo.', 'Undo']);
+    ['Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. Its Undo takes back the items it added, but for any changed since; a copy you choose has its own Undo.', 'Undo']);
   await a.click(`${ruleRow} .history-actions button`);
   for (let tries = 0; tries < 40 && existsSync(join(codex, 'notes')); tries++) await wait(100);
   same('its Undo takes notes back out of Codex, leaves review (chosen, with its own Undo) as it is, and stores the rule off',
@@ -7932,7 +8059,7 @@ async function firstSetupFlow() {
   opened(other.home, first);
   const b = await launch(first, [], real);
   await b.click('#nav-harnesses');
-  await b.click('#manage-codex-cli'); await b.click('#manage-codex-cli');
+  await b.click('#manage-codex-cli'); await manageAgain(b, 'codex-cli');
   same('a Manage switch makes the record and leaves the question unanswered', ['syncEverything' in JSON.parse(readNow(join(other.home, '.central-knot/sync.json'))), await (async () => { await b.click('#nav-overview'); return b.exists('#setup-question'); })()], [false, true]);
   await b.quit();
   const second = join(scratch, 'setup-data-three');
@@ -7952,7 +8079,24 @@ async function firstSetupFlow() {
   await c.click('#setup-no');
   same('No stores the rule off, changes no file in the tools, and the question goes for good', [JSON.parse(readNow(sync)).syncEverything, Object.fromEntries(Object.entries(tree(other.home)).filter(([path]) => !path.startsWith('.central-knot'))), await c.exists('#setup-question')],
     [false, Object.fromEntries(Object.entries(before).filter(([path]) => !path.startsWith('.central-knot'))), false]);
-  check('and says so: nothing changed, what is on stays on, found items wait for Add, Settings is the way to change it', /^Left off, and nothing changed: what is already on stays on and keeps syncing, and what Central Knot finds in your tools waits on its page for Add\./.test(await c.text('[data-outcome] .band-text') ?? ''), await c.text('[data-outcome] .band-text'));
+  same('its band names the setting, with the way to turn it on in place', [await c.text('[data-outcome] .band-text'), await c.all('[data-outcome] .band-actions button')], ['Synchronize everything is off.', ['Turn on']]);
+  await shotAt(c, '04-after-no-860-light', SMALLEST, 'light');
+  await c.click('#setup-turn-on');
+  for (let tries = 0; tries < 40 && !readNow(join(other.codex, 'tidy/SKILL.md')); tries++) await wait(100);
+  same('Turn on is the switch Yes is: tidy and plan go to the tool that lacks each, the question stays gone, and its band on the Overview is Yes’s, with its Undo',
+    [JSON.parse(readNow(sync)).syncEverything, readNow(join(other.codex, 'tidy/SKILL.md')), readNow(join(other.claude, 'plan/SKILL.md')), await c.text('.page-title'), await c.exists('#setup-question'), await c.text('[data-outcome] .band-text'), await c.all('[data-outcome] .band-actions button')],
+    [true, text('tidy', 'Tidy up.'), text('plan', 'Plan ahead.'), 'Overview', false, 'Synchronize everything is on: it added 2 items.', ['Undo']]);
+  // While the band stands, a third skill turns up in Claude Code and a pass adds it: the Undo's hover still says what the Undo does.
+  saved(skill(other.claude, 'third', text('third', 'Third one.')), 5);
+  const thirdFound = Object.fromEntries(Object.entries(tree(other.home)).filter(([path]) => path.startsWith('.claude/skills/third')));
+  for (let tries = 0; tries < 200 && !readNow(join(other.codex, 'third/SKILL.md')); tries++) await wait(100);
+  same('a third skill added by a pass while the band stands: the hover still says what the Undo does', [readNow(join(other.codex, 'third/SKILL.md')), await c.run(`document.querySelector('#outcome-undo')?.title`)],
+    [text('third', 'Third one.'), 'Switches Synchronize everything off. It takes back the items it added, but for any changed since.']);
+  await c.click('#outcome-undo');
+  for (let tries = 0; tries < 40 && existsSync(join(other.codex, 'third')); tries++) await wait(100);
+  same('its Undo switches the rule off and takes back all three: every tool’s files are as before the click, with third only where it was found, byte for byte',
+    [JSON.parse(readNow(sync)).syncEverything, Object.fromEntries(Object.entries(tree(other.home)).filter(([path]) => !path.startsWith('.central-knot')))],
+    [false, Object.fromEntries(Object.entries({ ...before, ...thirdFound }).filter(([path]) => !path.startsWith('.central-knot')).sort(([x], [y]) => (x < y ? -1 : 1)))]);
   same('no page errors, first setup in a second home', c.pageErrors, []);
   await c.quit();
 
@@ -7966,15 +8110,18 @@ async function firstSetupFlow() {
   const d = await launch(thirdData, [], real);
   await d.click('#nav-overview');
   await d.click('#sync-switch');
-  check('with Automatic sync off the question says nothing is added until Sync once', /Automatic sync is off, so nothing is added until you click Sync once\.$/.test(await d.text('#setup-question .setup-text') ?? ''), await d.text('#setup-question .setup-text'));
+  same('with Automatic sync off it is said once, by the Overview’s line with Sync once, not by the question', [await d.all('#setup-question .setup-text'), await d.exists('#overview-sync-now')], [[], true]);
+  if (shots) { await d.click('#setup-question-info'); await shotAt(d, '05-card-open-nothing-on-860-light', SMALLEST, 'light'); await d.click('#setup-question-info'); }
   await d.click('#setup-yes');
-  same('Yes with Automatic sync off: the band says nothing is added until Sync once and offers it; nothing is written yet',
-    [await d.text('[data-outcome] .band-text'), await d.text('#setup-sync-once'), existsSync(join(third.codex, 'notes'))], ['Synchronize everything is on. Automatic sync is off, so nothing is added until you click Sync once.', 'Sync once', false]);
+  same('Yes with Automatic sync off: the band says when items are added and offers Sync once, the switch-on’s Undo beside it; nothing is written yet',
+    [await d.text('[data-outcome] .band-text'), await d.all('[data-outcome] .band-actions button', 'e.id + " " + e.textContent'), existsSync(join(third.codex, 'notes'))],
+    ['Synchronize everything is on. Nothing added yet: Automatic sync is off.', ['outcome-sync-once Sync once', 'outcome-undo Undo'], false]);
+  await shotAt(d, '06-after-yes-sync-off-860-light', SMALLEST, 'light');
   // The Overview's result is a band above its cards, which stays until acted on or closed: past the header's 8 seconds.
   await wait(10000);
-  same('ten seconds on, the Overview’s band and its Sync once are still there', [await d.exists('.page > .bands [data-outcome]'), await d.exists('#setup-sync-once')], [true, true]);
+  same('ten seconds on, the Overview’s band and its Sync once are still there', [await d.exists('.page > .bands [data-outcome]'), await d.exists('#outcome-sync-once')], [true, true]);
   if (shots) { await sizeTo(d, 860, 600); await d.shot('result-overview-setup-offer-860'); await fullSize(d); }
-  await d.click('#setup-sync-once');
+  await d.click('#outcome-sync-once');
   for (let tries = 0; tries < 40 && !readNow(join(third.codex, 'notes/SKILL.md')); tries++) await wait(100);
   same('and its Sync once takes notes in', readNow(join(third.codex, 'notes/SKILL.md')), text('notes', 'Take notes.'));
   const copies = [third.claude, third.codex, join(third.home, '.copilot/skills')].map(folder => join(folder, 'notes'));
@@ -8115,9 +8262,9 @@ async function firstSetupFlow() {
       await sizeTo(page, 1280, 800);
       if (scenario === 'damaged') {
         const words = await page.text('#setup-question');
-        check('setup says found skills wait for their problem and promises no copy from the damaged kind',
-          /Found skills wait/.test(words) && !/agents wait|Yes takes in what turns up later|takes in now the 1 item/.test(words)
-          && /damaged[\s\S]*Synchronize everything\?/.test(await page.text('#overview-needs')), words);
+        check('setup, under the problem, says nothing found is ready, that found skills wait for their record, and promises no copy from the damaged kind',
+          /^None of the items found is ready to add\./.test(await page.text('#setup-question-title')) && /Found skills wait/.test(words) && !/agents wait|Add the/.test(words)
+          && /damaged[\s\S]*None of the items found is ready to add/.test(await page.text('#overview-needs')), words);
       } else {
         check('a read-only store explains the stop before setup and offers no Yes',
           !(await page.exists('#setup-yes')) && /read-only|Permission was denied/i.test(await page.text('#overview-stopped'))
@@ -11385,8 +11532,8 @@ async function overviewFlow() {
   const pluginOpen = await panelHolds('name: one');
   same('there, the most used plugin’s skill opens its SKILL.md in Claude Code’s copy of kit', [pluginOpen.under, pluginOpen.label, pluginOpen.item, pluginOpen.path?.endsWith('/SKILL.md')], ['overview-skills', 'File for one', 'one', true]);
   await a.press('Escape');
-  same('another home whose only item is a plugin’s skill: the card counts it, and the lead never says nothing was found',
-    [(await a.text('.kind-card:has(#overview-skills) .kind-card-summary'))?.trim(), await a.exists('.overview-lead'), /Nothing found/.test(await a.text('.overview-lead') ?? '')], ['1 skill · none on · 1 from plugins', true, false]);
+  same('another home whose only item is a plugin’s skill: the card counts it, and first setup’s question, which asks there in the lead’s place, says it is found and none is ready to add',
+    [(await a.text('.kind-card:has(#overview-skills) .kind-card-summary'))?.trim(), await a.exists('.overview-lead'), /^None of the items found is ready to add\. /.test(await a.text('#setup-question-title') ?? '')], ['1 skill · none on · 1 from plugins', false, true]);
   same('there, after Skills was drawn in the first home, a most used plugin’s skill opens its row on the first click', await openTop('skills', 'one'), ['kit@solo/one']);
   same('no page errors, the most used links', a.pageErrors, []);
   await a.quit();
@@ -14384,7 +14531,9 @@ async function libraryFlow() {
   await find(b, 'gently');
   await b.click('#nav-overview');
   await b.click('#setup-yes');
-  check('Yes opens the walkthrough', await until(() => b.exists('#walkthrough')));
+  check('Yes stays on the Overview, whose Choose copies leads in', await until(() => b.exists('#setup-choose')));
+  await b.click('#setup-choose');
+  check('Choose copies opens the walkthrough', await until(() => b.exists('#walkthrough')));
   same('the walkthrough opens the skill review’s row on the Library, Find kept since it finds the row by its text, and its details, which ask of its copies, show that text',
     [await b.text('.page-title'), await b.run(`document.querySelector('#find').value`), await b.text('#walkthrough .walk-place'), await opened(b), /gently/.test(await b.text(`${row('skills', 'review')} + .details .details-excerpt`) ?? '')],
     ['Library', 'gently', ' · 1 of 2', [rowPart('', 'skills', 'review')], true]);
@@ -15986,8 +16135,8 @@ async function selectFlow() {
   const a = await launch(join(scratch, 'select-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex' });
   await a.click('#nav-overview');
   await a.click('#setup-yes');
-  for (let tries = 0; tries < 100 && !(await a.exists('#walk-skip')); tries++) await wait(100);
-  await a.click('#walk-skip');
+  for (let tries = 0; tries < 100 && !(await a.exists('#setup-choosing')); tries++) await wait(100);
+  if (!(await a.exists('#setup-choosing'))) throw new Error('Yes did not finish: the Overview has no line into the copies that differ.');
   // The agents' record damaged: its kind stops writes, and scout can't be deleted.
   writeFileSync(join(home, '.central-knot/agents.json'), '{');
   await a.click('#header-refresh');

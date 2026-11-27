@@ -195,6 +195,8 @@ test('A take-in is taken back only while every place it was found in still holds
   assert.deepEqual(why(item({ on: false })), [{ item: 'reviewer', why: 'off' }, { item: 'picked', why: 'off' }], 'a chosen copy is named by why its own Undo is gone');
   assert.deepEqual(why(item()), [{ item: 'picked', why: 'chosen' }], 'one chosen with its own Undo');
   assert.deepEqual(why(item({ hash: 'a' }))[0], { item: 'reviewer', why: 'changed' });
+  // What a band says it added counts every take-in, one left in too; a copy chosen is no take-in.
+  assert.equal(everythingPlan(on, [on, ruleTook('took'), chosen], about(item({ hash: 'a' }))).added, 1);
   assert.deepEqual(why(item(), { ...settled, pending: ['codex-cli'] })[0], { item: 'reviewer', why: 'changed' }, 'a copy holds an edit not taken in yet');
   assert.deepEqual(why(item(), { ...settled, managed: ['copilot-cli', 'codex-cli'] })[0], { item: 'reviewer', why: 'left-out' }, 'the tool it was found in is left out');
   assert.deepEqual(why(item({ except: ['claude-cli'] }))[0], { item: 'reviewer', why: 'kept-out' });
@@ -204,13 +206,13 @@ test('A take-in is taken back only while every place it was found in still holds
   assert.deepEqual(everythingPlan(on, [on, shared], about(item({ applied: { 'copilot-cli': 'b' } }))).left, [{ item: 'reviewer', why: 'taken-over' }]);
   assert.equal(libraryAction(shared, item({ applied: { 'copilot-cli': 'b' } }), settled)?.change.deleted, undefined, 'its own Undo (out of Central Knot again) is not offered either');
   assert.equal(libraryAction(shared, item(), settled)?.change.deleted, true);
-  assert.deepEqual(everythingPlan(on, [on, ruleTook('took', { undoneBy: 'x' })], about()), { takeBack: [], left: [], switchOff: true, keptIn: [] });
+  assert.deepEqual(everythingPlan(on, [on, ruleTook('took', { undoneBy: 'x' })], about()), { added: 0, takeBack: [], left: [], switchOff: true, keptIn: [] });
   // A tool a take-in wrote that isn't managed now keeps Central Knot's copy until it is.
   assert.deepEqual(everythingPlan(on, [on, ruleTook('took')], about(item(), { ...settled, managed: ['claude-cli'] })).keptIn, ['codex-cli']);
 });
 
 test('A switch-on, a switch-off and an Undo say what they did; the Undo’s entry offers Restore while it can put an item back, passing over one touched since', () => {
-  assert.equal(everythingSentence(rule('on', true)).text, 'Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. Its Undo takes back what it takes in; a copy you choose has its own Undo.');
+  assert.equal(everythingSentence(rule('on', true)).text, 'Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. Its Undo takes back the items it added, but for any changed since; a copy you choose has its own Undo.');
   assert.equal(everythingSentence(rule('off', false)).text, 'Switched off: what turns up in a tool waits on its page for Add.');
   const deleted = entry({ id: 'gone', kind: 'deleted', gaveBack: ['claude-cli'], losers: [{ tool: 'codex-cli', hash: 'b' }] });
   // An Undo an earlier build recorded, which left in a server found in Claude Code (LeftIn `claude-code`), still says so.
