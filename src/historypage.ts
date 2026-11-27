@@ -16,9 +16,9 @@ import { historyWindowControl } from './settingspage.ts';
 import type { HistoryEvent } from './types.ts';
 
 const who = (tool?: string) => (tool ? toolName(tool) : 'Central Knot');
-/** Folded tool lists open on History rows (`${event.id}-${index}` across redraws); reset on page leave or home switch. */
+/** Folded tool lists open on History rows (`${event.id}-${index}` across redraws); cleared on page leave or home switch (app.ts). */
 const openToolFolds = new Set<string>();
-let openFoldScope = '';
+export function forgetHistoryFolds() { openToolFolds.clear(); }
 type ToolFormat = (touched: string[], inHome: string[]) => string;
 
 /** The skill, MCP server or agent an entry is about, as Central Knot's library holds it now (deleted or not). */
@@ -81,26 +81,28 @@ function describe(event: HistoryEvent, formatTools: ToolFormat): { glyph: IconNa
 
 /** Describes a History row and builds its sentence element, folding 3+ non-all tool lists into in-place folds under the sentence. */
 function rowAbout(event: HistoryEvent): { glyph: IconName; action?: string; node: HTMLElement } {
-  const groups: { count: number; names: string }[] = [];
+  const groups: { label: string; names: string }[] = [];
+  // formatTools splices `\0<group index>\0` markers into the plain sentence so rowAbout can swap each slot for a fold below.
   const formatTools: ToolFormat = (touched, inHome) => {
-    const { tools, all, names } = touchedTools(touched, inHome);
+    const { tools, all, names, fold: label } = touchedTools(touched, inHome);
     if (all) return `all ${tools.length} tools`;
-    return tools.length > 2 ? `\0${groups.push({ count: tools.length, names }) - 1}\0` : names;
+    return label ? `\0${groups.push({ label, names }) - 1}\0` : names;
   };
   const described = describe(event, formatTools);
   // What it also changed in a tool's own settings (Pi's skills list: HistoryEvent settingsChanged) follows its words.
   const text = event.settingsChanged ? `${described.text} ${event.settingsChanged.join(' ')}` : described.text;
-  if (!groups.length) return { glyph: described.glyph, action: described.action, node: h('div.history-about', {}, text) };
+  if (!text.includes('\0')) return { glyph: described.glyph, action: described.action, node: h('div.history-about', {}, text) };
   const opened: HTMLElement[] = [];
+  // Odd slots are `\0<group index>\0` markers from formatTools; even slots are literal text (drop a sentence-ending "." right after a fold).
   const inline: Child[] = text.split('\0').map((part, slot) => {
-    if (slot % 2 === 0) return part;
+    if (slot % 2 === 0) return slot > 0 ? part.replace(/^\.(?=$|\s)/, '') : part;
     const group = groups[Number(part)]!;
-    const key = `${event.id}-${part}`;
+    const key = `${event.id}-${(slot - 1) / 2}`;
     const open = openToolFolds.has(key);
     const namesId = `history-tools-names-${key}`;
     if (open) opened.push(h('div.fold-body.history-tools-names', { id: namesId }, group.names));
     return fold({
-      id: `history-tools-${key}`, toggleId: `history-tools-toggle-${key}`, label: `${group.count} tools`, open,
+      id: `history-tools-${key}`, toggleId: `history-tools-toggle-${key}`, label: group.label, open,
       controls: open ? namesId : undefined,
       onToggle: now => {
         if (now) openToolFolds.add(key);
@@ -200,11 +202,6 @@ function actions(event: HistoryEvent, action?: string) {
 }
 
 export function historyPage() {
-  const scope = `${state.home?.home ?? ''}:${state.visit}`;
-  if (openFoldScope !== scope) {
-    openToolFolds.clear();
-    openFoldScope = scope;
-  }
   // From History's own read (pagedata.ts): what it found, else that it is reading or could not read.
   const events = state.history.data;
   if (!events) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.history.state === 'failed' ? 'History could not be read.' : 'Reading History…')));

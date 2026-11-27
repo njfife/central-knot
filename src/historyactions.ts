@@ -123,10 +123,9 @@ export interface SentenceOptions { tools?: (touched: string[], inHome: string[])
 export function librarySentence(
   event: HistoryEvent, words: RowWords, homeTools: string[], item?: LibraryItem, undid = false, options?: SentenceOptions,
 ): { glyph: IconName; text: string } | undefined {
-  let formattedTools: string | undefined;
-  const tools = () => (formattedTools ??= (options?.tools ?? toolsPhrase)(event.losers.map(loser => loser.tool), homeTools));
+  const tools = (options?.tools ?? toolsPhrase)(event.losers.map(loser => loser.tool), homeTools);
   /** " and removed from Codex", or nothing when no harness was touched. */
-  const also = (words: string) => (event.losers.length ? `${words} ${tools()}` : '');
+  const also = (words: string) => (tools ? `${words} ${tools}` : '');
   const where = event.only ? toolName(event.only) : '', from = event.winner ? toolName(event.winner.tool) : '';
   const away = event.only && !homeTools.includes(event.only) ? ` ${where} isn’t managed now.` : '';
   // What made it happen is the entry's `cause` alone (types.ts HistoryEvent); none is the person's own switch or click.
@@ -145,7 +144,7 @@ export function librarySentence(
       // A pass no click asked put a copy in one tool that had none (`only`: a tool that came under management, say), or wrote
       // the current version over copies there (a tool managed again, a folder writable again).
       if (event.cause === 'in-line' && event.only) return { glyph: 'circle-check', text: `Copied to ${where}.${away}` };
-      if (event.cause === 'in-line') return { glyph: 'circle-check', text: `Written over in ${tools()} with the current version when sync reached ${event.losers.length === 1 ? 'it' : 'them'}; what was there is one of its versions.` };
+      if (event.cause === 'in-line') return { glyph: 'circle-check', text: `Written over in ${tools} with the current version when sync reached ${event.losers.length === 1 ? 'it' : 'them'}; what was there is one of its versions.` };
       if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}${named(event.only) && !over.length ? `: its ${words.copy} there is back` : ''}.${overSaid}${gaveSaid}${away}` };
       const reads = event.alsoRead?.length ? `${readsIt(event.alsoRead)} too` : '';
       const onlyIn = event.cause === 'switch' && event.nowExcept ? harnessIds.filter(tool => !event.nowExcept!.includes(tool)) : [];
@@ -175,7 +174,7 @@ export function librarySentence(
       if (event.cause === 'source-dropped' && plugin) return { glyph: 'link-2-off', text: `The plugin ${plugin} no longer has it, so it is off${also(' and removed from')}, and no longer follows it.${keeps}` };
       if (event.cause === 'source-dropped') return { glyph: 'link-2-off', text: `${source} no longer has it, so it is off${also(' and removed from')}, and no longer from that source.${keeps}` };
       // A pass no click asked took its copies out where it is off (or kept out): a tool managed again, a folder writable again.
-      if (event.cause === 'in-line') return { glyph: 'circle-off', text: `Off in ${tools()}, so its ${words.copy} there was removed when sync reached ${event.losers.length === 1 ? 'it' : 'them'}.${keeps}` };
+      if (event.cause === 'in-line') return { glyph: 'circle-off', text: `Off in ${tools}, so its ${words.copy} there was removed when sync reached ${event.losers.length === 1 ? 'it' : 'them'}.${keeps}` };
       return { glyph: 'circle-off', text: `Turned off${also(': removed from')}.${gaveSaid}${keeps}` };
     case 'current': {
       // The version as it was first kept says where the content came from; the entry that made it current again doesn't.
@@ -192,7 +191,7 @@ export function librarySentence(
       // One with a `winner` is from before the library (a deletion sync spread from a tool): the general sentence says it.
       if (event.winner) return undefined;
       // Its copies a pass no click asked removed afterwards, where they were left (a tool managed again).
-      if (event.cause === 'in-line') return { glyph: 'trash-2', text: `Deleted from Central Knot, so its ${words.copy} in ${tools()} was removed when sync reached ${event.losers.length === 1 ? 'it' : 'them'}. History can restore it.` };
+      if (event.cause === 'in-line') return { glyph: 'trash-2', text: `Deleted from Central Knot, so its ${words.copy} in ${tools} was removed when sync reached ${event.losers.length === 1 ? 'it' : 'them'}. History can restore it.` };
       // The Undo of taking a found item in: out of Central Knot again, each tool it was found in keeping its own copy.
       if (gave.length) return { glyph: 'undo-2', text: `Undone: taken out of Central Knot again${also(' and removed from')}; ${andList(gave)} ${gave.length === 1 ? 'keeps its own copy' : 'keep their own copies'}, as before. History keeps it.` };
       const how = pulled ? 'Removed in the Git repo, so Pull deleted it' : 'Deleted';
@@ -208,19 +207,19 @@ export function librarySentence(
     case 'edit':
       // Pull's own entry names no harness. With no version before it, only Claude Code's own settings came, for later.
       if (pulled && !event.previous) return { glyph: 'git-branch', text: 'Pulled from the Git repo: Claude Code’s own settings for it, which Claude Code gets when it has the agent.' };
-      if (pulled) return { glyph: 'git-branch', text: `Pulled from the Git repo; that became the current version${also(', in')}.` };
+      if (pulled) return { glyph: 'git-branch', text: `Pulled from the Git repo; that became the current version${tools ? `, in ${tools}` : ''}.` };
       // A Replace (`seen`): the person took the source's version over the one changed here.
-      if (event.cause === 'source' && event.seen !== undefined) return { glyph: 'link-2', text: `Replaced with ${source}’s version; that became the current version${also(', in')}. The version it replaced is kept.` };
-      if (event.cause === 'source') return { glyph: 'link-2', text: `Updated from ${source}; that became the current version${also(', in')}.` };
-      if (event.cause === 'source-merged') return { glyph: 'link-2', text: `Merged ${source}’s version into yours; that became the current version${also(', in')}. The version it had and the source’s are kept.` };
+      if (event.cause === 'source' && event.seen !== undefined) return { glyph: 'link-2', text: `Replaced with ${source}’s version; that became the current version${tools ? `, in ${tools}` : ''}. The version it replaced is kept.` };
+      if (event.cause === 'source') return { glyph: 'link-2', text: `Updated from ${source}; that became the current version${tools ? `, in ${tools}` : ''}.` };
+      if (event.cause === 'source-merged') return { glyph: 'link-2', text: `Merged ${source}’s version into yours; that became the current version${tools ? `, in ${tools}` : ''}. The version it had and the source’s are kept.` };
       // Keep mine, or a Merge whose result was exactly yours: no tool was written.
       if (event.cause === 'source-kept') {
         return { glyph: 'link-2', text: `Yours stays current over ${source}’s version, which no longer waits: it is kept as a version, and the source’s next change is compared with it.` };
       }
-      if (event.cause === 'plugin-taken') return { glyph: 'link-2', text: `Use the plugin’s: the plugin ${plugin}’s version became current${also(', in')};`
+      if (event.cause === 'plugin-taken') return { glyph: 'link-2', text: `Use the plugin’s: the plugin ${plugin}’s version became current${tools ? `, in ${tools}` : ''};`
         + ' yours is kept as a version, and each other tool with your copy keeps it as its own.' };
       if (event.cause === 'own-now') return { glyph: 'link-2-off', text: `Yours now: it was changed here, so it no longer follows ${source}, which never writes over it. It stays in the tools that had it, and its row lets it into the others. Its versions stay.` };
-      return { glyph: 'pencil-line', text: `Edited in ${from}; that became the current version${event.losers.length ? `, in ${tools()} too` : ''}.` };
+      return { glyph: 'pencil-line', text: `Edited in ${from}; that became the current version${tools ? `, in ${tools} too` : ''}.` };
     case 'switched': {
       // Clear the switch's Undo turns the tool's switch off again (`cause` 'switch'); any other that turned a switch off is
       // from before the library (Disable): the general sentence says it.

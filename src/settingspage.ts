@@ -76,7 +76,7 @@ function showNewest(settings: AppPreferences | null | undefined, rank: number) {
   if (JSON.stringify(settings) === JSON.stringify(current)) return;
   current = settings;
   for (const [row, message] of messages) if (settled(row, message)) messages.delete(row);
-  if (daysChanged && !updatingHistory && state.page === 'history') void loadHistory();
+  if (daysChanged && state.page === 'history') void loadHistory();
   rerender();
 }
 
@@ -251,9 +251,8 @@ async function saveHistoryDays(days: HistoryDays) {
   rerender();
   announce('Updating History…', true);
   try {
-    const worked = await save('history', () => window.centralKnot.setHistoryDays(days), kept,
+    await save('history', () => window.centralKnot.setHistoryDays(days), kept,
       ({ settings, pruned }) => pruned && { ...pruneNotes[pruned](before), about: shownIn('history', settings) });
-    if (worked && state.page === 'history') await loadHistory();
   } finally {
     updatingHistory = false;
     rerender();

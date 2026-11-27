@@ -517,7 +517,8 @@ export function infoMark(id: string, label: string, text: string): HTMLElement {
 
 /**
  * A collapsible `<details>` fold whose open state lives with its caller across redraws. The summary draws `label` followed by
- * a right chevron that rotates when open; `ontoggle` ignores the browser's initial sync of the `open` attribute.
+ * a right chevron that rotates when open; `ontoggle` ignores the browser's initial sync of the `open` attribute. Pass `body`
+ * for an inner `.fold-body`, or omit it and pass `controls` when the caller draws the opened body outside `<details>`.
  */
 export function fold(
   options: { id: string; toggleId: string; label: string; open: boolean; onToggle: (open: boolean) => void; bodyClass?: string; controls?: string },

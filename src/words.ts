@@ -70,11 +70,12 @@ export const readsIt = (tools: readonly string[]) => `${andList(tools.map(toolNa
 /** "a", "a or b", "a, b or c": for choices, such as where something can be added. */
 export const orList = (items: string[]) => joined(items, 'or');
 
-/** Deduplicated touched tool ids, whether they match all 3+ home tools (by id, not count), and their and-list names. */
-export function touchedTools(touched: string[], inHome: string[]): { tools: string[]; all: boolean; names: string } {
+/** Touched tools for History rows and toolsPhrase: all 3+ home tools (by id), names, and fold label ("5 of 6 tools", or "5 tools" when a tool left). */
+export function touchedTools(touched: string[], inHome: string[]): { tools: string[]; all: boolean; names: string; fold?: string } {
   const tools = [...new Set(touched)];
   const all = tools.length > 2 && tools.length === inHome.length && inHome.every(tool => tools.includes(tool));
-  return { tools, all, names: andList(tools.map(toolName)) };
+  const fold = !all && tools.length > 2 ? (tools.every(tool => inHome.includes(tool)) ? `${tools.length} of ${inHome.length} tools` : `${tools.length} tools`) : undefined;
+  return { tools, all, names: andList(tools.map(toolName)), fold };
 }
 
 /** Touched tools in a sentence: "all 3 tools" when they match all 3+ home tools, else their names ("Claude Code and Codex"). */

@@ -4133,6 +4133,15 @@ async function practiceFlow() {
   // the settings (still 30 days) before main saves. The re-read main asks for once it has saved can land either side of the
   // save's answer; it is muted here, so the save's answer must stand on its own: it is still the newer one, and the row reports it.
   await keepFor(a, 7);
+  // Choosing another home from Settings leaves an open History warning and outcome line in place (only History resets its own control on home switch).
+  const switchHome = async id => {
+    await a.click(id);
+    for (let tries = 0; tries < 30 && await a.run(`document.querySelector(${JSON.stringify(id)})?.getAttribute('aria-current') !== 'true'`); tries++) await wait(100);
+  };
+  await switchHome('#home-actual');
+  const warnAfterHome = [await a.run(`document.querySelector('#home-actual')?.getAttribute('aria-current')`), await a.exists('#history-shorten')];
+  await switchHome('#home-fixture');
+  if (!(await a.exists('#history-shorten'))) await keepFor(a, 7);
   const shortenMain = a.main && await a.main();
   const shortenHeld = shortenMain && await holdQueue(shortenMain, a);
   await a.click('#history-shorten');
@@ -4146,6 +4155,10 @@ async function practiceFlow() {
   for (let tries = 0; tries < 30 && !(await a.exists('#setting-history-message')); tries++) await wait(100);
   const removedNote = await a.text('#setting-history-message') ?? '';
   if (shortenHeld) { await shortenMain.run('ckUnmute()'); shortenMain.close(); }
+  await switchHome('#home-actual');
+  const noteAfterHome = [await a.run(`document.querySelector('#home-actual')?.getAttribute('aria-current')`), /^Saved\. History before .+ was removed\.$/.test(await a.text('#setting-history-message') ?? '')];
+  await switchHome('#home-fixture');
+  same('choosing another home from Settings leaves an open History warning and outcome line in place', [warnAfterHome, noteAfterHome], [['true', true], ['true', true]]);
   // Another row acting clears the note: the page says one finished thing at a time.
   await a.click('#appearance-light');
   const noteAfterOtherRow = await a.exists('#setting-history-message');
@@ -15034,15 +15047,15 @@ async function libraryFlow() {
   await o.click('#header-refresh');
   check('folded five-of-six tool row renders its fold toggle', await until(() => o.exists('#history-tools-toggle-fold-five-0')));
   const rowAbout = name => o.run(`(() => { const row = [...document.querySelectorAll('.history-row')].find(el => el.querySelector('.history-what strong')?.textContent === ${JSON.stringify(name)}); return { text: row?.querySelector('.history-about')?.textContent?.trim() ?? '', folds: row?.querySelectorAll('details.fold').length ?? 0 }; })()`);
-  same('History folds 5 of 6 tools, keeps all 6, 2 and 1 unfolded, folds each group of two-group and legacy entries, and omits both fillers',
+  same('History folds 5 of 6 tools without a trailing full stop, keeps all 6, 2 and 1 unfolded, folds each group of two-group and legacy entries, and omits both fillers',
     [await rowAbout('draft-rfc'), await rowAbout('all-six'), await rowAbout('two-tools'), await rowAbout('one-tool'), await rowAbout('release-prose'), await rowAbout('legacy'), await rowAbout('old')],
     [
-      { text: 'Turned off: removed from 5 tools.', folds: 1 },
+      { text: 'Turned off: removed from 5 of 6 tools', folds: 1 },
       { text: 'Turned off: removed from all 6 tools.', folds: 0 },
       { text: 'Turned on: put in Claude Code and Codex.', folds: 0 },
       { text: 'Turned on: put in Codex.', folds: 0 },
       { text: 'Brought in from github.com/team-samples/writing-skills (main): in Central Knot, Off.', folds: 0 },
-      { text: 'Turned off in 3 tools; turned on in 3 tools, using each tool’s own switch.', folds: 2 },
+      { text: 'Turned off in 3 of 6 tools; turned on in 3 of 6 tools, using each tool’s own switch.', folds: 2 },
       { text: 'Edited in Claude Code; that became the current version, in 3 tools too.', folds: 1 },
     ]);
   // Keyboard open and close on 5 tools, then pointer click open.

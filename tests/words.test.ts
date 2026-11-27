@@ -20,14 +20,11 @@ test('"all N tools" means exactly the home’s tools, compared by which tools th
   assert.equal(toolsPhrase(['codex-cli', 'claude-cli'], ['claude-cli', 'codex-cli']), 'Codex and Claude Code');
 });
 
-test('touchedTools classifies all, foldable subsets, one or two, legacy mismatches and duplicates', () => {
+test('touchedTools folds 3+ non-all tools as "N of M tools" when all are in the home, else "N tools"', () => {
   const six = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
-  assert.deepEqual(touchedTools(six, six), { tools: six, all: true, names: 'Claude Code, Copilot CLI, Codex, Pi, OpenCode and Antigravity' });
-  const five = ['claude-cli', 'copilot-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
-  assert.deepEqual(touchedTools(five, six), { tools: five, all: false, names: 'Claude Code, Copilot CLI, Pi, OpenCode and Antigravity' });
-  assert.deepEqual(touchedTools(['claude-cli', 'claude-cli', 'codex-cli'], six), { tools: ['claude-cli', 'codex-cli'], all: false, names: 'Claude Code and Codex' });
-  assert.deepEqual(touchedTools(['claude-cli', 'copilot-cli', 'old-cli'], ['claude-cli', 'copilot-cli', 'codex-cli']),
-    { tools: ['claude-cli', 'copilot-cli', 'old-cli'], all: false, names: 'Claude Code, Copilot CLI and old-cli' });
+  assert.equal(touchedTools(six.slice(0, 5), six).fold, '5 of 6 tools');
+  assert.equal(touchedTools(['claude-cli', 'copilot-cli', 'old-cli'], six).fold, '3 tools');
+  assert.deepEqual([touchedTools(six, six).fold, touchedTools(six.slice(0, 2), six).fold], [undefined, undefined]);
 });
 
 test('the same phrase can start a label: "All 3 tools", or the names as they are', () => {

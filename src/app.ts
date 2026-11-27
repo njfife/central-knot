@@ -14,6 +14,7 @@
 // into matrix.ts, which imports this module: resultInHeader, and holdOrder, which holds the list on screen as a reading lands.
 import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { forgetSourcePrompts, loadSources } from './sourcespage.ts';
+import { forgetHistoryFolds } from './historypage.ts';
 import { loadSettings, openHistoryWindow, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
@@ -447,7 +448,8 @@ function accept(view: HomeView): HomeView {
   state.draftPick = undefined;
   resetPageData(state.instructions);
   resetPageData(state.history);
-  openHistoryWindow();
+  forgetHistoryFolds();
+  if (state.page === 'history') openHistoryWindow();
   resetPageData(state.usage);
   resetPageData(state.sessions);
   state.keepProblem = undefined;
@@ -1213,7 +1215,7 @@ export function showPage(page: Page, { repair = false } = {}) {
   const leavingHarness = page === 'harnesses' && !state.busy && !!state.harness;
   // A new page starts clean: the last action's message and results belong to the page they happened on.
   if (page !== state.page || leavingHarness) leaveResults(page);
-  if (page !== state.page) { state.libraryView = 'list'; state.visit += 1; forgetRepoPrompts(); forgetSourcePrompts(); }
+  if (page !== state.page) { state.libraryView = 'list'; state.visit += 1; forgetRepoPrompts(); forgetSourcePrompts(); forgetHistoryFolds(); }
   if (leavingHarness) state.harness = undefined;
   // Settings opens fresh (what its rows said last visit belongs to that visit); every other page reads its own data.
   state.page = page;
