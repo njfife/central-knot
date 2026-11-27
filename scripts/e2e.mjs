@@ -1798,6 +1798,20 @@ const caretLineShows = a => a.run(`(() => {
  * in a real window on macOS 26, comes off its height. Every check at the smallest size sizes the page to this.
  */
 const SMALLEST = [860, 560 - 32];
+/**
+ * A file panel's text (`pre`, its selector) scrolled to its foot: its last line's words, whether the text scrolls, and whether that
+ * line is whole: inside the text's box, the page's scroll area around it and above the status bar (the Library, the Overview).
+ */
+const lastLineWhole = (a, pre) => a.run(`(() => {
+  const pre = document.querySelector(${JSON.stringify(pre)}), view = pre.closest('.scroll').getBoundingClientRect(), status = document.querySelector('#status').getBoundingClientRect();
+  pre.scrollTop = pre.scrollHeight;
+  const node = pre.firstChild, text = node.data.replace(/\\n$/, ''), range = document.createRange();
+  range.setStart(node, text.lastIndexOf('\\n') + 1);
+  range.setEnd(node, text.length);
+  const line = range.getBoundingClientRect(), box = pre.getBoundingClientRect();
+  return { words: range.toString(), scrolls: pre.scrollHeight > pre.clientHeight,
+    whole: line.top >= Math.max(box.top, view.top) && line.bottom <= Math.min(box.bottom, view.bottom, status.top) + 0.5 };
+})()`);
 /** Longer than a result without Undo stays in the header (app.ts FADE_MS). */
 const FADE_WAIT = 9000;
 
@@ -21326,6 +21340,8 @@ async function skillFileFlow() {
     same('at 860 with sidebar open, panel sits inside window, footer stays inside box, and tabs wrap cleanly', fit860, {
       boxInsideWindow: true, footInsideBox: true, tabsWrapped: true, noHorizontalOverflow: true,
     });
+    same('at 860, scrolled to its foot, SKILL.md’s last line is whole in its box and in the list', await lastLineWhole(a, '.file-open-box pre.content'),
+      { words: 'Values stay as written: token=demo-raw-001.', scrolls: true, whole: true });
     await a.click('#sidebar-toggle');
     await fullSize(a);
 
@@ -21439,6 +21455,13 @@ async function skillFileFlow() {
     same('Escape in Find clears Find first while leaving the file panel open', [await a.run(`document.querySelector('#find')?.value`), await a.exists('.file-open-box')], ['', true]);
     await a.press('Escape');
     same('a second Escape closes the file panel', await a.exists('.file-open-box'), false);
+    // A second mark pressed before the first file is read: the second's file is the one shown, its mark alone pressed.
+    await a.run(`document.querySelector('${craftBtn}').click(); document.querySelector('${storedBtn}').click();`);
+    await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Kept only in Central Knot'));
+    same('commit-craft’s mark then stored-only’s at once: stored-only’s file alone is shown, its mark alone pressed',
+      await a.run(`[document.querySelectorAll('.file-open-box').length, document.querySelector('.details-file-only')?.getAttribute('aria-label'), [...document.querySelectorAll('.row-file-btn[aria-pressed="true"]')].map(mark => mark.id)]`),
+      [1, 'File for stored-only', [rowPart('file', 'skills', 'stored-only')]]);
+    await a.press('Escape');
 
     // Row click still opens details with Files and contents and Versions Read current untouched.
     await a.click(`.ov-row[data-key="${rowPart('', 'skills', 'code-review')}"]`);

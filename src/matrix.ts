@@ -28,10 +28,8 @@
 // under the toolbar, and Turn on, Turn off and Delete of many (selectControl, selectBar, turnTicked, deleteTicked), decided by
 // cantTurn, alreadyAs and cantDelete; writing controls on an opened row (and Resume, Turn these off) dim via app.ts writeOff. It goes
 // by the rows drawn, in their order on screen (drawTable: Table selectable), which holds a pinned row the chip dropped too.
-// A library, found or plugin skill's row, an ordinary agent's and an ordinary MCP server's also open its file (fileButton,
-// filePanel, setFile → skillVersionFile, skillFoundFile, skillPluginFile, agentFile, serverEntry; an agent no tool has: its
-// definition, agentVersion; a server in Central Knot: its definition too, serverStored): alone under a closed row, or,
-// the row open, in its details' place (openedPart) under "‹ Back to details".
+// A library, found or plugin skill's row, an ordinary agent's and an ordinary MCP server's also open its file (filepanel.ts, a
+// table its place: fileHooks): alone under a closed row, or, the row open, in its details' place (openedPart) under "‹ Back to details".
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, noticeNames, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
@@ -48,13 +46,14 @@ import { byName, byUsage, inOrder, kindSource, lastUpdated, noPins, partId, pin,
 import { readFlag, writeFlag } from './flags.ts';
 import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, pluginToolsCard, rowClicks, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
-import { versionList, type VersionPart, type VersionText } from './versionlist.ts';
+import { versionList, type VersionText } from './versionlist.ts';
 import { itemKey, listed, type Version } from './library.ts';
+import { fileButton, filePanel, fileTargetId, hasFile, setFile, syncOpenFile, type CatalogTarget, type FilePlace, type FileTarget, type OpenFile } from './filepanel.ts';
 import { keptBack } from './clickplan.ts';
-import type { Change, DestinationResult, FileRead, HomeView, ItemNotice, LibraryFacts, PluginItemNotice, PluginTextView, SearchHit, SyncGate, SyncNotice } from './types.ts';
+import type { Change, DestinationResult, HomeView, ItemNotice, LibraryFacts, PluginItemNotice, PluginTextView, SearchHit, SyncGate, SyncNotice } from './types.ts';
 import type { HarnessId, InstalledPlugin, PartKind, TakenInNotice, UsageReading } from './types.ts';
 import { pluginMarketOf, pluginOf } from './sourcelink.ts';
-import { entryShownIn, heldKinds, takesPlugins } from './presence.ts';
+import { heldKinds, takesPlugins } from './presence.ts';
 import { closeLineResult, lineBox, lineBusy, listingOf, market, resultKey, resultOn, turnFromLine, wantView } from './pluginstate.ts';
 import { lineControl, type LineFacts } from './pluginline.ts';
 import { succeeded, type PluginDone, type PluginDraft } from './pluginplan.ts';
@@ -177,11 +176,11 @@ function resultLine(row: ItemRow | PluginRow, tool: Tool) {
 }
 
 /** A plugin's row: an item of a plugin installed whole, not the person's own (pluginrows.ts PluginRow). */
-const isPluginRow = (row: ItemRow | PluginRow): row is PluginRow => 'marketName' in row;
+export const isPluginRow = (row: ItemRow | PluginRow): row is PluginRow => 'marketName' in row;
 /** The one way a drawn row's kind is learned: its own (ItemRow kind), or a plugin's row's page (pluginstatus.ts pageOfPart). */
 const kindOf = (row: ItemRow | PluginRow): PageKind => (isPluginRow(row) ? pageOfPart[row.kind] : row.kind);
 /** A drawn row's identity, from its kind and key (itemrow.ts rowId): its `data-key`. */
-const idOf = (row: ItemRow | PluginRow) => rowId(kindOf(row), row.key);
+export const idOf = (row: ItemRow | PluginRow) => rowId(kindOf(row), row.key);
 /** A drawn row by its kind and key, as a click and its result name the rows they are about (app.ts Click rows). */
 const rowKey = (row: ItemRow | PluginRow): RowKey => ({ kind: kindOf(row), key: row.key });
 /** The id of a drawn row's element (itemrow.ts partId): its part, the row's id, and what within it, a tool or a place. */
@@ -331,7 +330,7 @@ export const rowByKey = (kind: PageKind, key: string) => rowsOf(kind).find(row =
  * their order on screen (`selectable`: each row and heading then draws its tick), each worked out once per draw. A
  * row's drawing and its clicks read the row and its table.
  */
-interface Table { kinds: PageKind[]; tool?: Tool; view: View; used?: boolean; shared?: Set<string>; selectable?: string[]; unusedTurn?: boolean }
+interface Table extends FilePlace { kinds: PageKind[]; view: View; used?: boolean; shared?: Set<string>; selectable?: string[]; unusedTurn?: boolean }
 /** Every row the table lists, of each of its kinds, as the kinds' views have them (rowsOf). */
 const rowsIn = (t: Table) => t.kinds.flatMap(rowsOf);
 /**
@@ -354,7 +353,7 @@ function kindParts(t: Table) {
 }
 let partsWorked: { of: string; home: HomeView; read?: UsageReading; parts: { kind: PageKind; stop?: string; problems: string[]; usage?: KindUsage }[] } | undefined;
 /** The tools `kind` can be in (itemrow.ts kindSource), the table's tool first: a row's marks and lines are its kind's. */
-const toolsFor = (t: Table, kind: PageKind): Tool[] => {
+export const toolsFor = (t: { tool?: Tool }, kind: PageKind): Tool[] => {
   const list: Tool[] = state.home ? kindSource(state.home, kind).tools : [];
   return t.tool && list.includes(t.tool) ? [t.tool, ...list.filter(tool => tool !== t.tool)] : list;
 };
@@ -366,7 +365,7 @@ const columns = (t: Table): Tool[] => {
 /** Whether the table's tool has the item (pluginrows.ts inTool); on the Library, every item counts. */
 const inTableTool = (t: Table, skill: ItemRow) => !t.tool || inTool(skill, t.tool as HarnessId);
 /** An item as Central Knot's library holds it (library.ts), deleted or not; none for an item only found in a harness. */
-const itemOf = (skill: ItemRow) => (state.home ? kindSource(state.home, skill.kind).library[skill.key] : undefined);
+export const itemOf = (skill: ItemRow) => (state.home ? kindSource(state.home, skill.kind).library[skill.key] : undefined);
 /** Where a row stands: 0 on, 1 found (in a tool, not in Central Knot), 2 off: its item's place (libraryrow.ts). */
 const standingOf = (skill: ItemRow): 0 | 1 | 2 => ({ on: 0, found: 1, off: 2 } as const)[libraryPlace(itemOf(skill))];
 /** The headings, by place. */
@@ -401,8 +400,8 @@ const newView = () => ({
   // A row's fields name it by its row id (itemrow.ts rowId).
   /** The row whose details are open. */
   comparing: undefined as string | undefined,
-  /** The skill or agent row whose file is open (alone, or in its details' place where it is `comparing` too: fileInDetails): its version/copy token, active file, copy holder, resolved folder, tab list, and loaded body. */
-  openFile: undefined as { id: string; token: string; file: string; copy?: { tool: HarnessId; rootLabel?: string }; directory?: string; files?: string[]; loaded?: { text?: string; note?: string; parts?: VersionPart[]; holder?: string } | null } | undefined,
+  /** The row whose file is open (filepanel.ts OpenFile): alone, or in its details' place where it is `comparing` too (fileInDetails). */
+  openFile: undefined as OpenFile | undefined,
   /** The row whose copy question shows every copy's body side by side (RowWords body). */
   reading: undefined as string | undefined,
   /** The row whose versions list shows every version, not only its newest few. */
@@ -714,7 +713,7 @@ function pathLine(tool: Tool, path: string) {
 }
 
 /** Show in folder: reveals a file in the file manager; nothing is opened or changed. `withPath`: puts the whole path on hover and aria-description (MCP lines). */
-const showInFolder = (path: string, withPath = false) => {
+export const showInFolder = (path: string, withPath = false) => {
   const tip = `${withPath ? `${path} — ` : ''}Show this file in the file manager; nothing is opened or changed`;
   return h('button.inline-link.details-path-show', { type: 'button', title: tip, ...(withPath ? { 'aria-description': tip } : {}),
     onclick: (event: Event) => { event.stopPropagation(); showFile(path); } }, 'Show in folder');
@@ -943,6 +942,14 @@ function revealUnderRow(id: string) {
     if (past > 0) list.scrollTop += Math.min(past, room);
   });
 }
+/**
+ * A table as a file panel's place (filepanel.ts FilePlace): a file opening for a row whose copy question is open closes the
+ * question, the file opening alone; once read, a file under its row is brought into view (in the dock nothing is under the row).
+ */
+const fileHooks = (t: Table): Pick<FilePlace, 'opening' | 'reveal'> => ({
+  opening: id => { if (t.view.comparing === id && asksCopy(t, id)) t.view.comparing = undefined; },
+  reveal: id => { if (t.view.comparing !== id || underRow(t, id)) revealUnderRow(id); },
+});
 /** Opening a row's details brings them into view, so a choice below the fold is not missed. */
 function openRow(t: Table, row: ItemRow | PluginRow) {
   const id = idOf(row), view = t.view;
@@ -1047,7 +1054,7 @@ export const resultInHeader = () => state.page === 'library' || state.page === '
   || (state.page === 'harnesses' && !(state.harness && state.harnessTab === 'instructions'));
 
 /** A Copy button (icon and title carry "Copy"; optional chip label); flashes check and announces on click. */
-function reloadButton(item: { chip?: string; command: string; title: string }, id: string): HTMLElement {
+export function reloadButton(item: { chip?: string; command: string; title: string }, id: string): HTMLElement {
   const control = button({ variant: 'outline', size: 'micro', icon: 'copy', label: item.chip, name: item.chip ? `${item.chip}. ${item.title}` : item.title, id,
     attrs: { title: item.title, 'data-copy': item.command }, onclick: (event: Event) => {
       event.stopPropagation();
@@ -1605,6 +1612,7 @@ function tableOf(name: keyof typeof views, kinds: PageKind[], harness?: Tool, fi
   // An armed Delete belongs to the visit it was clicked on: another page disarms it.
   if (state.visit !== tablesVisit) { for (const each of Object.values(views)) each.confirmDelete = undefined; tablesVisit = state.visit; }
   const t: Table = { kinds, tool: harness, view: views[name] };
+  Object.assign(t, fileHooks(t));
   forgetOtherHomes(t, name);
   if (t.view.shownFor !== harness) startFresh(t.view, harness);
   if (files) return t;
@@ -3147,204 +3155,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
         layout.head ? h('div.files-details', {}, layout.head) : null,
         layout.tail.length ? h('div.files-tail', {}, layout.tail) : null))));
 }
-// ---------- A skill's, an agent's or a server's file, one click from its row: alone under a closed row, or in an open row's details' place ----------
-
-type CatalogTarget = { kind: 'catalog'; hit: SearchHit };
-type FileTarget = ItemRow | PluginRow | CatalogTarget;
-const isCatalogHit = (target: FileTarget): target is CatalogTarget => target.kind === 'catalog';
-/** An ordinary agent's row (in Central Knot or found). A plugin's agent is a PluginRow (kind 'agent') and a Find hit a CatalogTarget: neither has a file mark yet. */
-const isAgentRow = (target?: FileTarget): target is ItemRow & { kind: 'agents' } => target?.kind === 'agents';
-/** An ordinary MCP server's row (in Central Knot or found). A plugin's server is a PluginRow of kind 'mcp' too: no file mark yet. */
-const isServerRow = (target?: FileTarget): target is ItemRow & { kind: 'mcp' } => target?.kind === 'mcp' && !('marketName' in target);
-/** The tools whose settings file has a server's entry: one taken in (its copy's path) or not (LibraryFacts namedIn). */
-const entryTools = (row: ItemRow) => [...Object.keys(row.paths ?? {}) as HarnessId[], ...row.namedIn ?? []];
-const fileTargetId = (target: FileTarget) => (isCatalogHit(target) ? target.hit.id : idOf(target));
-const fileTargetName = (target: FileTarget) => (isCatalogHit(target) ? target.hit.item!.name : isPluginRow(target) ? target.name : target.name ?? target.key);
-/** An agent's or a server's current version as Central Knot holds it (storedOf): an agent's parts Read shows (readDefinition), a server's stored file. */
-const DEFINITION = 'Central Knot’s definition';
-/**
- * The item in Central Knot whose stored text a target's panel offers, by kind: a library skill's current version (it offers no
- * copy: fileCopies; with the path of a tool's copy that holds it, where one does: filePanel); an ordinary agent's definition,
- * where no tool has a copy; an ordinary server's definition, after each tool's entry, unless its only entry is in a tool whose
- * entries aren't read (no mark yet). The stored text is shown where it is asked for or no copy is offered (setFile).
- */
-const storedOf = (t: Table, target?: FileTarget) => (target?.kind === 'skills' || (isAgentRow(target) && !fileCopies(t, target).length)
-  || (isServerRow(target) && (fileCopies(t, target).length > 0 || !entryTools(target).length)) ? inLibrary(itemOf(target as ItemRow)) : undefined);
-interface FileCopy { tool: HarnessId; rootLabel?: string; directory?: string; realDirectory?: string; hash?: string; version?: string; part?: string }
-/**
- * The copies a target's panel offers, in column order (tab's tool first): an agent's in each tool with a file for it, a server's
- * in each tool with its entry where entries are read (presence.ts entryShownIn), each read by itself (one shared hash doesn't
- * make two files the same bytes); a found or plugin skill's, collapsed by real folder, or by hash (found) / version (plugin); none
- * of a library skill's (its stored version instead: storedOf).
- */
-function fileCopies(t: Table, target: FileTarget): FileCopy[] {
-  if (isAgentRow(target)) return (toolsFor(t, 'agents') as HarnessId[]).filter(tool => target.paths?.[tool]).map(tool => ({ tool }));
-  if (isServerRow(target)) return (toolsFor(t, 'mcp') as HarnessId[]).filter(tool => entryShownIn(tool) && entryTools(target).includes(tool)).map(tool => ({ tool }));
-  if ((target.kind !== 'skill' && target.kind !== 'skills') || (target.kind === 'skills' && inLibrary(itemOf(target)))) return [];
-  const hashes = target.kind === 'skills' ? target.folderHashes : undefined;
-  const raw = (toolsFor(t, 'skills') as HarnessId[]).flatMap<FileCopy>(tool => target.kind === 'skill'
-    ? (target.copies[tool]?.path ? [{ tool, part: target.copies[tool]!.path, realDirectory: target.copies[tool]!.realDirectory, version: target.installs[tool]?.version }] : [])
-    : (state.home?.snapshots?.find(entry => entry.harness === tool)?.skills ?? [])
-      .filter(entry => itemKey(entry.folder) === target.key)
-      .map(entry => ({ tool, rootLabel: entry.rootLabel, directory: entry.directory, realDirectory: entry.realDirectory, hash: hashes?.[entry.realDirectory] })));
-  const unique: FileCopy[] = [];
-  for (const copy of raw) {
-    if (!unique.some(kept => (!!kept.realDirectory && kept.realDirectory === copy.realDirectory)
-      || (target.kind === 'skill' ? !!kept.version && kept.version === copy.version : !!kept.hash && kept.hash === copy.hash))) unique.push(copy);
-  }
-  return unique;
-}
-/** Change token for a copy: its hash and real folder when hashed, else the home's readId so an unhashed or plugin copy reloads silently on every new view. */
-const copyToken = (copy?: FileCopy) => (copy?.hash ? `${copy.hash}:${copy.realDirectory ?? ''}` : `read:${state.home?.readId ?? 0}`);
-/**
- * Whether a row has the file mark (fileButton; the reconcile in drawTable asks it too): a skill with a stored version or a copy,
- * a marketplace skill hit with its path, every ordinary agent, an ordinary server but one whose only entry is Codex's.
- */
-const hasFile = (t: Table, target: FileTarget) => (isCatalogHit(target) ? target.hit.item?.kind === 'skill' && !!target.hit.item.path
-  : !!storedOf(t, target) || fileCopies(t, target).length > 0);
-/** Reloads an open inline file panel when its stored version, found copy, agent's or server's copy, plugin copy, or marketplace copy changes (or its chosen copy disappears). */
-function syncOpenFile(t: Table, target: FileTarget, open: NonNullable<View['openFile']>) {
-  const offered = storedOf(t, target), copies = fileCopies(t, target);
-  // Its stored text shown (no copy chosen, or none left to show), or a marketplace hit's copy.
-  if ((offered && !(open.copy && copies.length)) || isCatalogHit(target)) {
-    if (open.copy || (offered ? offered.hash : copyToken()) !== open.token) setFile(t, target, open.file, false, undefined, false);
-    return;
-  }
-  const matched = open.copy && copies.find(copy => copy.tool === open.copy!.tool && copy.rootLabel === open.copy!.rootLabel);
-  const nextCopy = matched ?? copies[0]!;
-  if (!matched || copyToken(nextCopy) !== open.token) setFile(t, target, matched ? open.file : undefined, false, undefined, false, nextCopy);
-}
-/** A tool's copy, as a file panel names it (its chooser; a server's one label). */
-const copyName = (tool: HarnessId) => `${names[tool]}’s copy`;
-/** The last part of a path: an agent's file name in a tool. */
-const fileName = (path: string) => path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1);
-/** What a file panel's read brings: a file's text (types.ts FileRead), or an agent's definition as the parts Read shows. */
-type PanelRead = FileRead & { parts?: VersionPart[] };
-/** An agent's current version as its panel shows it: each part Read shows (librarypages.ts version), under its word. */
-const readDefinition = (key: string, hash: string): Promise<PanelRead | null> => libraryPages.agents.version(key, hash)
-  .then(parts => (Array.isArray(parts) ? { files: [DEFINITION], parts: parts.filter(part => part.text) } : null));
-/**
- * Opens a file (`asked`; a skill's SKILL.md when none) of a stored, found, installed plugin or marketplace skill, an agent's file
- * in the chosen tool (or its definition), or a server's entry in the chosen tool (its definition where `asked` is DEFINITION, or
- * no tool has an entry), or closes the file, refocusing its mark when asked. An agent has one file, its holder's (or its
- * definition), so `asked` is not read for it.
- * An open row keeps its details: the file takes their place (openedPart) and closing it brings them back; a copy question is
- * closed instead, the file opening alone.
- */
-function setFile(t: Table, target?: FileTarget, asked?: string, refocus = false, event?: Event, draw = true, copy?: FileCopy) {
-  event?.stopPropagation();
-  const prev = t.view.openFile;
-  const id = target && fileTargetId(target);
-  const offered = storedOf(t, target);
-  const catalog = target && isCatalogHit(target) ? target.hit.item : undefined;
-  // A copy is shown (the one chosen, else the first offered) unless the stored text is asked for (a server's chooser) or none is offered.
-  const chosen = target && !catalog && !(offered && asked === DEFINITION) ? (copy ?? fileCopies(t, target)[0]) : undefined;
-  const stored = chosen ? undefined : offered;
-  // An agent has one file, named as the chosen tool has it; a server, its copy in the chosen tool; a skill opens SKILL.md first.
-  const first = isAgentRow(target) ? (chosen ? fileName(target.paths![chosen.tool]!) : DEFINITION)
-    : isServerRow(target) ? (chosen ? copyName(chosen.tool) : DEFINITION) : 'SKILL.md';
-  const file = isAgentRow(target) || isServerRow(target) ? first : asked ?? first;
-  const sameHolder = !!prev && prev.id === id && prev.copy?.tool === chosen?.tool && prev.copy?.rootLabel === chosen?.rootLabel;
-  const sameFile = sameHolder && prev.file === file;
-  const next: View['openFile'] = id && (stored || catalog || chosen)
-    ? { id, token: stored ? stored.hash : copyToken(chosen), file,
-      ...(chosen ? { copy: { tool: chosen.tool, ...(chosen.rootLabel !== undefined ? { rootLabel: chosen.rootLabel } : {}) } } : {}),
-      directory: sameHolder ? prev.directory : undefined,
-      files: sameHolder ? prev.files : undefined, loaded: sameFile ? prev.loaded : undefined }
-    : undefined;
-  if (next && t.view.comparing === next.id && asksCopy(t, next.id)) t.view.comparing = undefined;
-  t.view.openFile = next;
-  if (draw) rerender();
-  if (!next && refocus && prev) document.getElementById(partId('file', prev.id))?.focus();
-  if (!next) return;
-  const load: Promise<PanelRead | null> = stored ? (isAgentRow(target) ? readDefinition(target.key, stored.hash)
-    : isServerRow(target) ? window.centralKnot.serverStored(target.key, stored.hash) : window.centralKnot.skillVersionFile((target as ItemRow).key, next.token, file))
-    : isCatalogHit(target!) ? window.centralKnot.skillPluginFile({ marketName: catalog!.marketName, plugin: catalog!.plugin, part: catalog!.path!, from: 'marketplace', source: catalog!.source }, file)
-    : isPluginRow(target!) ? window.centralKnot.skillPluginFile({ marketName: target.marketName, plugin: target.plugin, part: chosen!.part!, from: chosen!.tool }, file)
-    : isAgentRow(target) ? window.centralKnot.agentFile(state.home!.home, target.key, chosen!.tool)
-    : isServerRow(target) ? window.centralKnot.serverEntry(state.home!.home, target.key, chosen!.tool)
-    : window.centralKnot.skillFoundFile(target!.key, chosen!.tool, chosen!.rootLabel, file);
-  void load.catch(() => null).then(found => {
-    if (t.view.openFile !== next) return;
-    if (!found && file !== first) return setFile(t, target, first, false, undefined, true, chosen);
-    const loaded = found ? { text: found.text, note: found.note, parts: found.parts, holder: found.holder } : null;
-    const unchanged = sameFile && JSON.stringify(next.loaded) === JSON.stringify(loaded)
-      && (!found || (JSON.stringify(next.files) === JSON.stringify(found.files) && next.directory === found.directory));
-    next.loaded = loaded;
-    next.directory = found?.directory;
-    if (found) next.files = found.files;
-    // An agent's footer names the file this read found: the row may still hold its last spelling (a rename in capitals).
-    if (isAgentRow(target) && found?.directory) next.file = found.files[0]!;
-    // In the dock (a row open on a wide window) nothing is under the row to bring into view.
-    if (draw && prev?.id !== next.id && (t.view.comparing !== next.id || underRow(t, next.id))) revealUnderRow(next.id);
-    if (!unchanged) rerender();
-  });
-}
-/** Open file mark right after a library, found or plugin skill's name, an ordinary agent's and an ordinary server's (Library list, Find hits, a tool's tabs). */
-function fileButton(t: Table, target: FileTarget) {
-  if (!hasFile(t, target)) return null;
-  const id = fileTargetId(target);
-  const open = t.view.openFile?.id === id;
-  const onclick = (event: Event) => setFile(t, open ? undefined : target, undefined, false, event);
-  return h('button.row-file-btn', { type: 'button', id: partId('file', id), title: 'Open file',
-    'aria-label': `Open file: ${fileTargetName(target)}`, 'aria-pressed': String(open), onclick }, icon('file-text', 14));
-}
-/**
- * A skill's, an agent's or a server's open file: wrapping tabs (an agent's and a server's one: a label), copy chooser where copies
- * differ (an agent: each tool with a copy; a server: each tool with an entry, then its definition), close mark, fileBlocks
- * body and path footer (a server's entry: its settings file). Under its closed row alone; `back` is the "‹ Back to details" over
- * it in its open row's details' place, under the row or in the dock (openedPart).
- */
-function filePanel(t: Table, target: FileTarget, open: NonNullable<View['openFile']>, placement: 'row' | 'dock' = 'row', back?: HTMLElement) {
-  const id = fileTargetId(target);
-  const name = fileTargetName(target);
-  const offered = storedOf(t, target), stored = !!offered && !open.copy;
-  const copies = fileCopies(t, target);
-  const activeAt = open.copy ? copies.findIndex(copy => copy.tool === open.copy!.tool && copy.rootLabel === open.copy!.rootLabel) : -1;
-  const active = stored ? undefined : copies[activeAt >= 0 ? activeAt : 0];
-  const tabs = open.files ?? [open.file];
-  // A stored skill's version shows the path of a tool's copy that holds it; an agent's or a server's definition has none; an
-  // agent's file and a server's settings file are the ones its read found (setFile).
-  const storedPath = (row: ItemRow) => row.paths?.[toolsFor(t, 'skills').find(each => row.hashes?.[each] === open.token && row.paths?.[each]) ?? ''];
-  const dir = !stored ? active?.directory ?? open.directory : target.kind === 'skills' ? storedPath(target as ItemRow) : undefined;
-  const leaf = isServerRow(target) ? open.files?.[0] ?? '' : open.file;
-  const full = dir && (dir.includes('\\') ? `${dir}\\${leaf.replaceAll('/', '\\')}` : `${dir}/${leaf}`);
-  const missing = open.loaded === undefined ? 'Reading…' : 'Its file couldn’t be read.';
-  const note = open.loaded ? open.loaded.note : missing;
-  const copyLabel = (entry: FileCopy) => (entry.version ? `${copyName(entry.tool)} · ${entry.version}`
-    : entry.rootLabel && copies.filter(other => other.tool === entry.tool).length > 1 ? `${copyName(entry.tool)} (${entry.rootLabel})` : copyName(entry.tool));
-  // The stored text is the last choice where copies are offered too (a server's definition, after each tool's entry).
-  const choices = [...copies.map(copyLabel), ...(offered && copies.length ? [DEFINITION] : [])], shownAt = stored ? copies.length : copies.indexOf(active!);
-  const chooseCopy = (event: Event) => {
-    const picked = copies[Number((event.target as HTMLSelectElement).value)];
-    setFile(t, target, picked ? undefined : DEFINITION, false, undefined, true, picked);
-  };
-  const chooser = choices.length > 1 ? h('span.select.file-copy-select', {},
-    h('select', { id: partId('file-holder', id), 'aria-label': isServerRow(target) ? 'Entry to show' : 'Copy to show', title: choices[shownAt], onchange: chooseCopy },
-      choices.map((label, index) => h('option', { value: String(index), selected: index === shownAt }, label))),
-    icon('chevrons-up-down', 14)) : null;
-  const tab = (file: string) => h(`button.file-tab${file === open.file ? '.is-active' : ''}`, { type: 'button', role: 'tab',
-    'aria-selected': String(file === open.file), onclick: () => { if (file !== open.file) setFile(t, target, file, false, undefined, true, active); } }, file);
-  // In its details' place the file has no × of its own: Back to details, its icon and Escape close it, the dock's × the dock.
-  const close = back ? null : closeButton(() => setFile(t, undefined, undefined, true),
-    { id: partId('file-close', id), label: `Close file for ${name}`, title: 'Close', look: '.file-open-close' });
-  const blockId = partId('file-text', id, ...(active ? [String(Math.max(0, activeAt))] : []), String(Math.max(0, tabs.indexOf(open.file))));
-  const body = note ? [h('p.file-open-state', {}, note)]
-    : open.loaded?.parts ? fileBlocks(blockId, `${name} ${open.file}`, open.loaded.parts, holders => andList(holders.map(part => part.name)), { named: true })
-    : fileBlocks(blockId, `${name} ${open.file}`, [{ text: open.loaded!.text ?? '' }], () => (active ? copyLabel(active) : isCatalogHit(target) ? `${target.hit.item!.marketName}’s copy` : 'Central Knot’s current version'));
-  // A server's path is copied by a button in words: beside its JSON a bare copy icon would read as copying the entry.
-  const copy = full && reloadButton(isServerRow(target) ? { chip: 'Copy path', command: full, title: full } : { command: full, title: 'Copy path' }, partId('file-copy', id));
-  const foot = full ? [pathText(shownPath(full), full), h('span.file-open-foot-actions', {}, showInFolder(full), copy)]
-    : stored ? [h('span.file-open-stored', {}, 'Stored in Central Knot')] : [];
-  // An agent's or a server's panel shows one file, or its definition: its name is a label, with nothing to press. A server's
-  // entry says where in the file it is, left of its chooser or label (its chooser names it where there is one).
-  const label = h(`span.file-open-name${stored ? '.file-open-definition' : ''}`, {}, open.file);
-  const lead = isServerRow(target) && h('span.file-open-lead', {}, open.loaded?.holder ? h('span.file-open-where', {}, `In ${open.loaded.holder}`) : null, chooser ? null : label);
-  return h(`div.details.details-file-only${placement === 'dock' ? '.details-bare' : ''}`, { role: 'region', 'aria-label': `File for ${name}` }, back ?? null, h('div.file-open-box', {},
-    h('div.file-open-head', {}, isAgentRow(target) ? label : lead || h('span.file-open-tabs', { role: 'tablist', 'aria-label': `Files in ${name}` }, tabs.map(tab)),
-    h('span.file-open-controls', {}, chooser, close)),
-    ...body, h('div.file-open-foot', {}, ...foot)));
-}
+// ---------- An open row's file in its details' place (the file panel: filepanel.ts), and Escape ----------
 /**
  * What an open row shows, under it or in the dock: its details; or, its file open too (fileInDetails), the file in their place
  * under "‹ Back to details", which closes the file and puts the focus on the details' first control.
@@ -3360,23 +3171,6 @@ function openedPart(t: Table, row: ItemRow | PluginRow, placement: 'row' | 'dock
   return filePanel(t, row, t.view.openFile!, placement, h('button.inline-link.file-to-details', { type: 'button', id: partId('file-details', id),
     title: 'Closes the file', onclick: back }, icon('chevron-left', 12), 'Back to details'));
 }
-/**
- * Sizes the open file's box to what its scroll container (the list, or the dock) leaves under it, at most what is left once what
- * it opened from (its row; in the dock, the dock's top) is at the container's top, never under eight lines of its last block's text
- * (an agent's definition: its prompt; openRow's and setFile's revealUnderRow bring it into view).
- */
-function settleFileBox(): void {
-  const box = document.querySelector<HTMLElement>('.file-open-box'), scroller = box?.closest<HTMLElement>('.scroll');
-  if (!box || !scroller) return;
-  const sides = scroller.getBoundingClientRect(), top = box.getBoundingClientRect().top, row = box.parentElement?.previousElementSibling;
-  const from = row?.matches('.ov-row') ? row.getBoundingClientRect().top : sides.top - scroller.scrollTop;
-  const end = Math.max(8, parseFloat(getComputedStyle(scroller).paddingBottom));
-  const room = Math.floor(sides.height - (top - from) - end), under = Math.floor(sides.bottom - top - end);
-  const pre = [...box.querySelectorAll<HTMLElement>('pre.content')].at(-1), text = pre && getComputedStyle(pre);
-  const least = !pre || !text ? 0 : box.offsetHeight - pre.offsetHeight + 8 * parseFloat(text.lineHeight) + parseFloat(text.paddingTop) + parseFloat(text.paddingBottom);
-  box.style.maxHeight = `${Math.ceil(Math.max(least, under >= least ? Math.min(under, room) : room))}px`;
-}
-afterLayout(settleFileBox);
 // Escape in a find box with text clears it; on the unused band's disclosure button it closes the disclosure; else it closes an
 // open skill's, agent's or server's file (an open row's details come back in its place). Elsewhere on the Library's list in
 // Select's mode, it closes a Delete of many's question, or else ends the mode. A card open (an info card, the header's) is closed first, and this doesn't hear it (renderer.ts).
