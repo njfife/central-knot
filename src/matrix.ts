@@ -18,6 +18,7 @@
 // plugin's row: kindOf), and only a row's own kind says which it is: its words, its tools and its clicks.
 // A row's switch or Add joins the page's list of clicks (flip, pluginRowSwitch → app.ts queueClick) and is worked out in its turn,
 // perhaps while another table is drawn: its closures hold the row and the table it was clicked on, so it is worked out there.
+// Before a click that would end the profile in use, its control says so, from the changes the click sends, built once for both (endsOf).
 // The Library's Find is answered by word search in main (search.ts, asked by askFind): while it has text the list is one list,
 // best first, under one heading (foundRows), and after it the items of listed plugins installed in no managed tool, which are
 // no rows of the Library's (catalogGroup). A tool's tabs match their Find here (holdsFindText); the Files view, itself.
@@ -28,17 +29,15 @@
 // under the toolbar, and Turn on, Turn off and Delete of many (selectControl, selectBar, turnTicked, deleteTicked), decided by
 // cantTurn, alreadyAs and cantDelete; writing controls on an opened row (and Resume, Turn these off) dim via app.ts writeOff. It goes
 // by the rows drawn, in their order on screen (drawTable: Table selectable), which holds a pinned row the chip dropped too.
-// A library, found or plugin skill's row, an ordinary agent's and an ordinary MCP server's also open its file (fileButton,
-// filePanel, setFile → skillVersionFile, skillFoundFile, skillPluginFile, agentFile, serverEntry; an agent no tool has: its
-// definition, agentVersion; a server in Central Knot: its definition too, serverStored): alone under a closed row, or,
-// the row open, in its details' place (openedPart) under "‹ Back to details".
+// A library, found or plugin skill's row, an ordinary agent's and an ordinary MCP server's also open its file (filepanel.ts, a
+// table its place: fileHooks): alone under a closed row, or, the row open, in its details' place (openedPart) under "‹ Back to details".
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, noticeNames, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
-import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, orList, pageNames, readsIt, rowNames, rowNouns,
+import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, orList, pageNames, profileBack, profileStops, readsIt, rowNames, rowNouns,
   saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind } from './words.ts';
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type RowFigure, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
-import { copilotSharesYours } from './profileplan.ts';
+import { copilotSharesYours, endedByChanges } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
 import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, writeOff, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
@@ -48,10 +47,11 @@ import { byName, byUsage, inOrder, kindSource, lastUpdated, noPins, partId, pin,
 import { readFlag, writeFlag } from './flags.ts';
 import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, pluginToolsCard, rowClicks, showsPlaceTag, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
-import { versionList, type VersionPart, type VersionText } from './versionlist.ts';
+import { versionList, type VersionText } from './versionlist.ts';
 import { itemKey, listed, type Version } from './library.ts';
+import { fileButton, filePanel, keepOpenFile, setFile, type CatalogTarget, type FilePlace, type OpenFile } from './filepanel.ts';
 import { keptBack } from './clickplan.ts';
-import type { Change, DestinationResult, FileRead, HomeView, ItemNotice, LibraryFacts, PluginItemNotice, PluginTextView, SearchHit, SyncGate, SyncNotice } from './types.ts';
+import type { Change, DestinationResult, HomeView, ItemNotice, LibraryFacts, PluginItemNotice, PluginTextView, SearchHit, SyncGate, SyncNotice } from './types.ts';
 import type { HarnessId, InstalledPlugin, PartKind, TakenInNotice, UsageReading } from './types.ts';
 import { pluginMarketOf, pluginOf } from './sourcelink.ts';
 import { heldKinds, takesPlugins } from './presence.ts';
@@ -178,11 +178,11 @@ function resultLine(row: ItemRow | PluginRow, tool: Tool) {
 }
 
 /** A plugin's row: an item of a plugin installed whole, not the person's own (pluginrows.ts PluginRow). */
-const isPluginRow = (row: ItemRow | PluginRow): row is PluginRow => 'marketName' in row;
+export const isPluginRow = (row: ItemRow | PluginRow): row is PluginRow => 'marketName' in row;
 /** The one way a drawn row's kind is learned: its own (ItemRow kind), or a plugin's row's page (pluginstatus.ts pageOfPart). */
 const kindOf = (row: ItemRow | PluginRow): PageKind => (isPluginRow(row) ? pageOfPart[row.kind] : row.kind);
 /** A drawn row's identity, from its kind and key (itemrow.ts rowId): its `data-key`. */
-const idOf = (row: ItemRow | PluginRow) => rowId(kindOf(row), row.key);
+export const idOf = (row: ItemRow | PluginRow) => rowId(kindOf(row), row.key);
 /** A drawn row by its kind and key, as a click and its result name the rows they are about (app.ts Click rows). */
 const rowKey = (row: ItemRow | PluginRow): RowKey => ({ kind: kindOf(row), key: row.key });
 /** The id of a drawn row's element (itemrow.ts partId): its part, the row's id, and what within it, a tool or a place. */
@@ -326,6 +326,8 @@ function rowsOf(kind: PageKind): ItemRow[] {
 }
 /** A kind's row by its key, as the home on screen has it now: what a result reads of each row it changed (app.ts runOutcome, stillRead). */
 export const rowByKey = (kind: PageKind, key: string) => rowsOf(kind).find(row => row.key === key);
+/** A kind's row by its key, a plugin's own row too (pluginrows.ts PluginRow key), as the Library lists it: showRow's, and the Overview's most used (overview.ts). */
+export const rowOf = (kind: PageKind, key: string): ItemRow | PluginRow | undefined => rowByKey(kind, key) ?? (state.home ? pageRows(state.home, kind).rows.find(row => row.key === key) : undefined);
 /**
  * A table (useLibrary, useTab): the kinds it lists (the Library's segment's; a tab's one) and the harness whose page it is on
  * (`tool`, none on the Library: its column comes first, and the rows it has before the others), as its caller names them; its
@@ -334,7 +336,7 @@ export const rowByKey = (kind: PageKind, key: string) => rowsOf(kind).find(row =
  * their order on screen (`selectable`: each row and heading then draws its tick), each worked out once per draw. A
  * row's drawing and its clicks read the row and its table.
  */
-interface Table { kinds: PageKind[]; tool?: Tool; view: View; used?: boolean; shared?: Set<string>; selectable?: string[]; unusedTurn?: boolean }
+interface Table extends FilePlace { kinds: PageKind[]; view: View; used?: boolean; shared?: Set<string>; selectable?: string[]; unusedTurn?: boolean }
 /** Every row the table lists, of each of its kinds, as the kinds' views have them (rowsOf). */
 const rowsIn = (t: Table) => t.kinds.flatMap(rowsOf);
 /**
@@ -357,7 +359,7 @@ function kindParts(t: Table) {
 }
 let partsWorked: { of: string; home: HomeView; read?: UsageReading; parts: { kind: PageKind; stop?: string; problems: string[]; usage?: KindUsage }[] } | undefined;
 /** The tools `kind` can be in (itemrow.ts kindSource), the table's tool first: a row's marks and lines are its kind's. */
-const toolsFor = (t: Table, kind: PageKind): Tool[] => {
+export const toolsFor = (t: { tool?: Tool }, kind: PageKind): Tool[] => {
   const list: Tool[] = state.home ? kindSource(state.home, kind).tools : [];
   return t.tool && list.includes(t.tool) ? [t.tool, ...list.filter(tool => tool !== t.tool)] : list;
 };
@@ -369,7 +371,7 @@ const columns = (t: Table): Tool[] => {
 /** Whether the table's tool has the item (pluginrows.ts inTool); on the Library, every item counts. */
 const inTableTool = (t: Table, skill: ItemRow) => !t.tool || inTool(skill, t.tool as HarnessId);
 /** An item as Central Knot's library holds it (library.ts), deleted or not; none for an item only found in a harness. */
-const itemOf = (skill: ItemRow) => (state.home ? kindSource(state.home, skill.kind).library[skill.key] : undefined);
+export const itemOf = (skill: ItemRow) => (state.home ? kindSource(state.home, skill.kind).library[skill.key] : undefined);
 /** Where a row stands: 0 on, 1 found (in a tool, not in Central Knot), 2 off: its item's place (libraryrow.ts). */
 const standingOf = (skill: ItemRow): 0 | 1 | 2 => ({ on: 0, found: 1, off: 2 } as const)[libraryPlace(itemOf(skill))];
 /** The headings, by place. */
@@ -404,8 +406,8 @@ const newView = () => ({
   // A row's fields name it by its row id (itemrow.ts rowId).
   /** The row whose details are open. */
   comparing: undefined as string | undefined,
-  /** The skill or agent row whose file is open (alone, or in its details' place where it is `comparing` too: fileInDetails): its version/copy token, active file, copy holder, resolved folder, tab list, and loaded body. */
-  openFile: undefined as { id: string; token: string; file: string; copy?: { tool: HarnessId; rootLabel?: string }; directory?: string; files?: string[]; loaded?: { text?: string; blocks?: string[]; note?: string; parts?: VersionPart[]; holder?: string } | null } | undefined,
+  /** The row whose file is open (filepanel.ts OpenFile): alone, or in its details' place where it is `comparing` too (fileInDetails). */
+  openFile: undefined as OpenFile | undefined,
   /** The row whose copy question shows every copy's body side by side (RowWords body). */
   reading: undefined as string | undefined,
   /** The row whose versions list shows every version, not only its newest few. */
@@ -426,6 +428,8 @@ const newView = () => ({
   whereOpen: undefined as boolean | undefined,
   /** Whether the unused band's "What’s counted" disclosure is open. */
   unusedCounted: false,
+  /** The order a way in asked for (openKind `order`: the Overview's Most used), shown on the visit it is first drawn on (`visit`); Sort's kept choice stays as it was. */
+  askedOrder: undefined as { order: RowOrder; visit?: number } | undefined,
 });
 /** What one table keeps between draws. */
 type View = ReturnType<typeof newView>;
@@ -445,17 +449,18 @@ function startFresh(table: View, harness: Tool | undefined) {
  * The one way into the Library from elsewhere (the Overview's cards and lines, a plugin's page and its row on Plugins, History,
  * the Git repo, Sources): the Library with `which` chosen (a kind, or All: app.ts state.libraryKind), drawn afresh (startFresh:
  * no Find, no chip, From at Anywhere, no open row), narrowed by `filter` ("Copies differ", "No use seen in 30 days") or, on All,
- * by `from` (a plugin's or a source's items: origins.ts pluginFrom, sourceFrom); or with the row `key` open and scrolled into
+ * by `from` (a plugin's or a source's items: origins.ts pluginFrom, sourceFrom), in `order` on that visit (View askedOrder); or with the row `key` open and scrolled into
  * view (a plugin's own row too; a key needs its kind, so All takes none), Find, the chip and From let go only where they hide it
  * (showRow). The row is opened once the page is drawn, as its own click opens it (markOpen): so the
  * first draw in another home, which drops that home's open row, can't drop it, and a row whose copies differ keeps its question.
  */
 export function openKind(which: 'all', options?: { filter?: Filter; from?: From }): void;
-export function openKind(which: PageKind, options?: { filter?: Filter; key?: string }): void;
-export function openKind(which: PageKind | 'all', { filter, key, from }: { filter?: Filter; key?: string; from?: From } = {}) {
+export function openKind(which: PageKind, options?: { filter?: Filter; key?: string; order?: RowOrder }): void;
+export function openKind(which: PageKind | 'all', { filter, key, from, order }: { filter?: Filter; key?: string; from?: From; order?: RowOrder } = {}) {
   state.libraryKind = which;
   if (key && which !== 'all') { showRow(which, key); return; }
   startFresh(views.library, undefined);
+  if (order) views.library.askedOrder = { order };
   if (filter) views.library.filter = filter;
   if (from) views.library.from = from;
   showPage('library');
@@ -469,8 +474,8 @@ export function showRow(which: PageKind, key: string) {
   if (segment() !== 'all' && segment() !== which) state.libraryKind = 'all';
   if (state.page !== 'library') showPage('library');
   if (state.libraryView === 'files') leaveFiles();
-  const t = useLibrary(), id = rowId(which, key), row = [...rowsIn(t), ...plugged(t).rows].find(each => idOf(each) === id);
-  if (row) reveal(t, row); else openFromAway(t.view, id);
+  const t = useLibrary(), row = rowOf(which, key);
+  if (row) reveal(t, row); else openFromAway(t.view, rowId(which, key));
 }
 /** A link to a row where the person is (a notice's name, the walkthrough): Find let go only if it hides the row, the chip only if it does, From too. */
 function reveal(t: Table, row: ItemRow | PluginRow) {
@@ -717,7 +722,7 @@ function pathLine(tool: Tool, path: string) {
 }
 
 /** Show in folder: reveals a file in the file manager; nothing is opened or changed. `withPath`: puts the whole path on hover and aria-description (MCP lines). */
-const showInFolder = (path: string, withPath = false) => {
+export const showInFolder = (path: string, withPath = false) => {
   const tip = `${withPath ? `${path} — ` : ''}Show this file in the file manager; nothing is opened or changed`;
   return h('button.inline-link.details-path-show', { type: 'button', title: tip, ...(withPath ? { 'aria-description': tip } : {}),
     onclick: (event: Event) => { event.stopPropagation(); showFile(path); } }, 'Show in folder');
@@ -946,6 +951,14 @@ function revealUnderRow(id: string) {
     if (past > 0) list.scrollTop += Math.min(past, room);
   });
 }
+/**
+ * A table as a file panel's place (filepanel.ts FilePlace): a file opening for a row whose copy question is open closes the
+ * question, the file opening alone; once read, a file under its row is brought into view (in the dock nothing is under the row).
+ */
+const fileHooks = (t: Table): Pick<FilePlace, 'opening' | 'reveal'> => ({
+  opening: id => { if (t.view.comparing === id && asksCopy(t, id)) t.view.comparing = undefined; },
+  reveal: id => { if (t.view.comparing !== id || underRow(t, id)) revealUnderRow(id); },
+});
 /** Opening a row's details brings them into view, so a choice below the fold is not missed. */
 function openRow(t: Table, row: ItemRow | PluginRow) {
   const id = idOf(row), view = t.view;
@@ -1051,7 +1064,7 @@ export const resultInHeader = () => state.page === 'library' || state.page === '
   || (state.page === 'harnesses' && !(state.harness && state.harnessTab === 'instructions'));
 
 /** A Copy button (icon and title carry "Copy"; optional chip label); flashes check and announces on click. */
-function reloadButton(item: { chip?: string; command: string; title: string }, id: string): HTMLElement {
+export function reloadButton(item: { chip?: string; command: string; title: string }, id: string): HTMLElement {
   const control = button({ variant: 'outline', size: 'micro', icon: 'copy', label: item.chip, name: item.chip ? `${item.chip}. ${item.title}` : item.title, id,
     attrs: { title: item.title, 'data-copy': item.command }, onclick: (event: Event) => {
       event.stopPropagation();
@@ -1608,7 +1621,10 @@ function takenInNotice(t: Table, notice: TakenInNotice & Pick<Told, 'of' | 'once
 function tableOf(name: keyof typeof views, kinds: PageKind[], harness?: Tool, files = false): Table {
   // An armed Delete belongs to the visit it was clicked on: another page disarms it.
   if (state.visit !== tablesVisit) { for (const each of Object.values(views)) each.confirmDelete = undefined; tablesVisit = state.visit; }
+  const asked = views[name].askedOrder;
+  if (asked && (asked.visit ??= state.visit) !== state.visit) views[name].askedOrder = undefined;
   const t: Table = { kinds, tool: harness, view: views[name] };
+  Object.assign(t, fileHooks(t));
   forgetOtherHomes(t, name);
   if (t.view.shownFor !== harness) startFresh(t.view, harness);
   if (files) return t;
@@ -1919,9 +1935,7 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
   if (found && view.comparing && !found.some(isOpen)) view.comparing = undefined;
   // An open row whose file is in its details' place goes, both together, when the list no longer holds it (Find on a tool's tab).
   if (fileInDetails(view, view.comparing) && ![...shown, ...plugins].some(isOpen)) view.comparing = undefined;
-  const fileTarget = view.openFile && ([...shown, ...plugins, ...shownCatalog(t, inPlugins)] as FileTarget[]).find(target => fileTargetId(target) === view.openFile!.id && hasFile(t, target));
-  if (view.openFile && !fileTarget) view.openFile = undefined;
-  else if (fileTarget) syncOpenFile(t, fileTarget, view.openFile!);
+  keepOpenFile(t, [...shown, ...plugins, ...shownCatalog(t, inPlugins)]);
   const open = docked() && view.comparing && !underRow(t, view.comparing) ? all.find(isOpen) : undefined;
   const openRow = docked() && !open ? plugins.find(isOpen) : undefined;
   // Off goes last, under its own heading. Of the rest, the rows a harness's page is about (it has a copy) split into On and
@@ -2022,6 +2036,11 @@ function selectBar(t: Table, rows: (ItemRow | PluginRow)[]) {
   const toOff = turnOf(false);
   const days = state.historyDays ?? defaultHistoryDays;
   const takenOf = (list: Listed[]) => rows.filter((row): row is ItemRow => !isPluginRow(row) && list.some(each => each.id === selectId(row)));
+  // Turn on's, Turn off's and Delete's clicks, built once: each button sends its own, and what they would end is said beside it.
+  const clicksOf = (list: Listed[], make: Parameters<typeof changeBy>[0]) => clicksByKind(takenOf(list), changeBy(make));
+  const onClicks = clicksOf(toOn.takes, rowClicks.on), offClicks = clicksOf(toOff.takes, rowClicks.off), deleteClicks = clicksOf(takes, rowClicks.remove);
+  const endsOn = endsOf(onClicks), endsOff = endsOf(offClicks);
+  const mark = endsMark(endsOn ?? endsOff, `If ${[endsOn && 'on', endsOff && 'off'].filter(Boolean).join(' or ')}`, 'select-profile', endsOn && endsOff ? 'either' : 'mark');
   const offDelete = acting() ?? !takes.length;
   const idIf = (shown: boolean, id: string) => (shown ? id : undefined);
   const why = (shown: boolean, count: number) => (count ? h('button.inline-link', { type: 'button', id: idIf(shown, 'select-why'), 'aria-expanded': String(whyShown()),
@@ -2032,16 +2051,18 @@ function selectBar(t: Table, rows: (ItemRow | PluginRow)[]) {
     rerender();
     document.getElementById('select-cancel')?.focus();
   };
-  const turnBtn = (on: boolean, group: ReturnType<typeof turnOf>) => button({
+  const turnBtn = (on: boolean, group: ReturnType<typeof turnOf>, clicks: Click[]) => button({
     variant: 'outline', size: 'small', label: turnLabel(on, group.takes.length, ticked.length), id: on ? 'select-turn-on' : 'select-turn-off',
-    disabled: acting() ?? !group.takes.length, onclick: () => turnTicked(on, takenOf(group.takes), group.already.length, group.leaves),
+    disabled: acting() ?? !group.takes.length, onclick: () => turnTicked(on, clicks, group.already.length, group.leaves),
   });
   const counting = () => h('span.select-line', {}, h('span.select-text.select-count', {}, selectedWords(ticked.length)),
-    turnBtn(true, toOn), turnBtn(false, toOff), button({ variant: 'outline', size: 'small', label: 'Delete…', id: 'select-delete', disabled: offDelete, onclick: askNow }), why(true, leaves.length));
+    turnBtn(true, toOn, onClicks), endsOff ? null : mark, turnBtn(false, toOff, offClicks), endsOff ? mark : null,
+    button({ variant: 'outline', size: 'small', label: 'Delete…', id: 'select-delete', disabled: offDelete, onclick: askNow }), why(true, leaves.length));
   const question = (shown: boolean, deletes: number, cant: number) => {
-    const now = button({ variant: 'outline', size: 'small', label: `Delete ${deletes}`, id: idIf(shown, 'select-delete-now'), disabled: offDelete, onclick: () => deleteTicked(takenOf(takes), leaves.length) });
+    const now = button({ variant: 'outline', size: 'small', label: `Delete ${deletes}`, id: idIf(shown, 'select-delete-now'), disabled: offDelete, onclick: () => deleteTicked(deleteClicks, leaves.length) });
     now.classList.add('delete-now');
     return h('span.select-line', {}, h('span.select-text', {}, questionWords(deletes, days), cant ? [' ', why(shown, cant)] : null),
+      shown ? endsMark(endsOf(deleteClicks), 'If deleted', 'select-profile-delete') : null,
       button({ variant: 'ghost', size: 'small', label: 'Cancel', id: idIf(shown, 'select-cancel'), onclick: () => { cancelAsk(); rerender(); } }), now);
   };
   const room = question(false, listed.filter(row => !row.cant).length, listed.filter(row => row.cant).length);
@@ -2050,24 +2071,23 @@ function selectBar(t: Table, rows: (ItemRow | PluginRow)[]) {
     whyShown() && leaves.length ? h('div.select-why', { id: 'select-why-list' }, whyLines(leaves).map(line => h('p', {}, line))) : null);
 }
 /**
- * Delete N in the question: the rows it counted, each deleted as its own Delete would (rowClicks.remove), one click per kind with
+ * Delete N in the question: the clicks of the rows it counted (selectBar), each deleted as its own Delete would (rowClicks.remove), one click per kind with
  * one Undo (app.ts applyByKind), its result saying "deleted" and staying until closed. `left`: the ticked rows it leaves. The mode ends.
  */
-function deleteTicked(rows: ItemRow[], left: number) {
+function deleteTicked(clicks: Click[], left: number) {
   stopSelecting();
-  void applyByKind(clicksByKind(rows, row => rowClicks.remove(row, itemOf(row))), deleted => deletedWords(rowNames(deleted), rowNouns(deleted.map(row => row.kind)), left),
+  void applyByKind(clicks, deleted => deletedWords(rowNames(deleted), rowNouns(deleted.map(row => row.kind)), left),
     { now: 'deleted', withoutUndo: restoreWords, stays: true });
 }
 /**
- * Turn on or Turn off in Select's bar: the rows it takes, each as its own switch would (rowClicks.on / rowClicks.off), one
+ * Turn on or Turn off in Select's bar: the clicks of the rows it takes (selectBar), each as its own switch would (rowClicks.on / rowClicks.off), one
  * click per kind with one Undo (app.ts applyByKind), its result naming rows not taken in `reasons` and staying until closed.
  * The mode ends.
  */
-function turnTicked(on: boolean, rows: ItemRow[], already: number, leaves: Listed[]) {
+function turnTicked(on: boolean, clicks: Click[], already: number, leaves: Listed[]) {
   stopSelecting();
-  const change = on ? rowClicks.on : rowClicks.off;
   const tools = state.home?.sync.managed ?? [];
-  void applyByKind(clicksByKind(rows, row => change(row, itemOf(row))),
+  void applyByKind(clicks,
     (changed, stayed) => turnedWords(on, rowNames(changed), rowNouns(changed.map(row => row.kind)), on ? [] : stayed),
     { now: on ? 'on' : 'off', stays: true, reasons: whyLines(leaves), tail: turnTail(on, already, leaves.length),
       failedRow: (name, failed) => `${name}: ${on ? 'not' : 'still'} in ${toolsPhrase(failed, tools)}` });
@@ -2265,7 +2285,8 @@ function librarySwitch(t: Table, skill: ItemRow, id: string) {
   const through = throughItems(t, skill);
   // Where a tool has it through a plugin with no switch for one item there, the click turns the whole plugin: said first.
   const label = wanted !== undefined ? turningLabel(nameOf(skill), wanted) : [switchLabel(skill, item, tools, leftOutTools()), wholeWords(through, !on)].filter(Boolean).join(' ');
-  return toggle({ on, partial: wanted === undefined && (isPartial(item, tools, skill) || (on && through.some(entry => !itemOn(entry)))), label, onchange: next => flip(t, skill, next), disabled: queueOff(kindStops(skill.kind)), id });
+  return toggle({ on, partial: wanted === undefined && (isPartial(item, tools, skill) || (on && through.some(entry => !itemOn(entry)))), label, onchange: next => flip(t, skill, next), disabled: queueOff(kindStops(skill.kind)), id,
+    attrs: wanted === undefined ? endsOnHover(label, () => switchClicks(skill)) : {} });
 }
 
 /**
@@ -2276,7 +2297,7 @@ function librarySwitch(t: Table, skill: ItemRow, id: string) {
 function addButton(t: Table, skill: ItemRow, id: string) {
   const question = isDiffering(skill) ? (t.view.comparing === idOf(skill) ? 'open' : 'closed') : undefined;
   const label = addLabel(skill, itemOf(skill), toolsFor(t, skill.kind), question);
-  return h('button.btn.outline.small.add-item', { type: 'button', id, title: label, 'aria-label': label, disabled: queueOff(kindStops(skill.kind)) || !canAdd(skill),
+  return h('button.btn.outline.small.add-item', { type: 'button', id, title: label, 'aria-label': label, disabled: queueOff(kindStops(skill.kind)) || !canAdd(skill), ...(question || !canAdd(skill) ? {} : endsOnHover(label, () => switchClicks(skill))),
     onclick: (event: Event) => { event.stopPropagation(); flip(t, skill, true); } }, 'Add');
 }
 
@@ -2524,7 +2545,7 @@ export function unusedCount(kinds: readonly PageKind[]): number {
 }
 
 /**
- * The chip's band: one line with the count, any skipped plugin count (with own-row wording when every row is a plugin's),
+ * The chip's band: one line with the count (with own-row wording when every row is a plugin's; a plugin's row it skips says so on the row),
  * any managed tool whose history was not read at all, a keyboard-accessible "What’s counted" disclosure (three lines:
  * history read, what is not seen from here, and excluded new/found items) and "Turn N off everywhere". When the current
  * kind runs out while other kinds still have unused items, names the rest with a segment button ("Show Agents" or
@@ -2554,7 +2575,6 @@ function unusedBand(t: Table, shown: ItemRow[]) {
   const counted = (rows: { kind: PageKind }[]) => { const { one, many } = rowNouns(rows.map(row => row.kind)); return plural(rows.length, one, many); };
   const left = (pick: (sum: KindUsage) => unknown[]) => sums.flatMap(({ kind, sum }) => pick(sum).map(() => ({ kind })));
   const off = toTurnOff(shown);
-  const kept = shown.filter(row => !off.includes(row));
   const fresh = left(sum => sum.tooNew), found = left(sum => sum.foundNoneSeen);
   const unread = toolHistories(read, home).filter(each => home.sync.managed.includes(each.tool) && each.goes === 'unread').map(each => each.tool);
   // The page's tools that record a kind only sometimes ('seen'), or never (no entry), merged per tool.
@@ -2575,7 +2595,6 @@ function unusedBand(t: Table, shown: ItemRow[]) {
   const lead = [
     off.length ? `${shown.length} with no use seen in ${USAGE_DAYS} days.`
       : `${shown.length} with no use seen in ${USAGE_DAYS} days, ${ofPlugin}from a plugin: turn ${shown.length === 1 ? 'it' : 'each'} off on its own row.`,
-    off.length && kept.length ? `${kept.length} from a plugin skipped.` : '',
     unread.length ? `Use in ${toolsInWords(unread)} not counted.` : '',
   ].filter(Boolean).join(' ');
   const open = t.view.unusedCounted;
@@ -2591,10 +2610,11 @@ function unusedBand(t: Table, shown: ItemRow[]) {
     `Not seen from here: ${['uses on another computer or in tools not read', ...caveats].join('; ')}.`,
     excluded.length ? `Not counted: ${excluded.join('; ')}.` : '',
   ].filter(Boolean);
-  const turn = off.length ? button({ variant: 'outline', size: 'micro', label: `Turn ${off.length} off everywhere`, id: 'turn-unused-off',
-    // The home's gate: a kind whose own record stops its writes is skipped and named by the click (app.ts applyByKind).
-    disabled: writeOff(homeStops()) || state.usage.state === 'reading', onclick: () => turnTheseOff(off) }) : null;
-  return shell(lead, turn, toggleCounted, open ? h('div.usage-more', { id: 'unused-counted' }, more.map(line => h('p', {}, line))) : null);
+  const clicks = theseOff(off), turn = off.length ? button({ variant: 'outline', size: 'micro', label: `Turn ${off.length} off everywhere`, id: 'turn-unused-off',
+    // The home's gate: a kind whose own record stops its writes is skipped and named by the click (app.ts applyByKind), and not forecast.
+    disabled: writeOff(homeStops()) || state.usage.state === 'reading', onclick: () => turnTheseOff(clicks) }) : null;
+  const ends = turn && endsMark(endsOf(clicks.filter(click => !kindStops(click.kind))), 'If off', 'unused-profile');
+  return shell(lead, ends ? h('span.band-act', {}, turn, ends) : turn, toggleCounted, open ? h('div.usage-more', { id: 'unused-counted' }, more.map(line => h('p', {}, line))) : null);
 }
 
 /** The rows Turn these off takes of those the chip shows: all but a plugin's items and items linked to a plugin, each left to its own row (usagerow.ts leftToItsRow). */
@@ -2606,14 +2626,45 @@ export const toTurnOff = (shown: ItemRow[]) => shown.filter(row => !skippedByTur
  */
 const clicksByKind = (rows: ItemRow[], change: (row: ItemRow) => Change): Click[] => KINDS.map(kind => rows.filter(row => row.kind === kind)).filter(list => list.length)
   .map(list => ({ kind: list[0]!.kind, items: list.map(nameOf), rows: list.map(rowKey), regroups: true, changes: list.map(change), said: '' }));
+/** A row's change as one of its clicks makes it (libraryrow.ts rowClicks), from its item now. */
+const changeBy = (make: (row: ItemRow, item: ReturnType<typeof itemOf>) => Change) => (row: ItemRow) => make(row, itemOf(row));
+/** Turn these off's clicks over `rows`, each row's own Off: built once, for the click (turnTheseOff) and what it would end. */
+export const theseOff = (rows: ItemRow[]) => clicksByKind(rows, changeBy(rowClicks.off));
+/** A row's switch's click now, or its Add's: Off while it is On, else On (its own click is built in its turn, by the same maker: turnOn, turnOff). */
+const switchClicks = (skill: ItemRow) => [{ kind: skill.kind, changes: [changeBy(libraryPlace(itemOf(skill)) === 'on' ? rowClicks.off : rowClicks.on)(skill)] }];
 /**
- * Turn these off, over rows of any kinds: each kind's rows one click with each row's own Off (libraryrow.ts rowClicks.off), the
+ * The names of the profiles in use `clicks` would end, from the very changes they send (profileplan.ts endedByChanges; none projected
+ * for no change), and `may` while other clicks still wait or run, whose writes the view doesn't hold yet; undefined for none.
+ */
+function endsOf(clicks: Pick<Click, 'kind' | 'changes'>[]) {
+  const changes = clicks.flatMap(click => click.changes.map(change => ({ kind: partOfPage[click.kind], change })));
+  const ended = state.home && changes.length ? endedByChanges(state.home, changes) : [];
+  return ended.length ? { names: ended.map(profile => profile.name), may: !!acting() } : undefined;
+}
+/** What `clicks` would end, as a control's hover (after `label`) and its description, worked out as the pointer or the focus comes to it, not as the page draws. */
+const endsOnHover = (label: string, clicks: () => Pick<Click, 'kind' | 'changes'>[]) => {
+  const say = ({ currentTarget: node }: Event) => {
+    const ending = endsOf(clicks()), more = ending ? `${profileStops(ending.names, ending.may)}.` : '';
+    (node as HTMLElement).setAttribute('title', more ? `${label} ${more}` : label);
+    (node as HTMLElement).setAttribute('aria-description', more);
+  };
+  return { onmouseenter: say, onfocus: say };
+};
+/** After a control, what its click would end (endsOf): "Would leave Everyday" ("Either would …" after two), its sentence and what brings it back on hover; `line`, a row's head. */
+function endsMark(ending: ReturnType<typeof endsOf>, act: string, id: string, shown: 'mark' | 'either' | 'line' = 'mark') {
+  if (!ending) return null;
+  const said = `${act}, ${shown === 'line' ? 'only this item changes: ' : ''}${profileStops(ending.names, ending.may)}.`, back = profileBack(ending.names);
+  const short = profileStops(ending.names, ending.may, true), text = shown === 'line' ? said : shown === 'either' ? `Either ${short}` : sentence(short);
+  return h('span.profile-stop', { id, title: shown === 'line' ? back : `${said} ${back}` }, icon('sliders-horizontal', 12), h('span', {}, text));
+}
+/**
+ * Turn these off, over rows of any kinds (its clicks: theseOff): each kind's rows one click with each row's own Off (libraryrow.ts rowClicks.off), the
  * kinds in turn (app.ts applyByKind: a kind that refuses is skipped and named), with one Undo that puts them all back. Its words
  * name the rows that went through (what didn't is said first: app.ts applyByKind; a row's kind named where another kind shares its
  * name: words.ts rowNames), then any tools still reading them another way (from applyByKind's stillRead), then that Central Knot keeps them.
  */
-export function turnTheseOff(rows: ItemRow[]) {
-  void applyByKind(clicksByKind(rows, row => rowClicks.off(row, itemOf(row))), (off, stayed) => {
+export function turnTheseOff(clicks: Click[]) {
+  void applyByKind(clicks, (off, stayed) => {
     const { one, many } = rowNouns(off.map(row => row.kind));
     return [`Turned off ${plural(off.length, one, many)} with no use seen in the last ${USAGE_DAYS} days: ${fewNames(rowNames(off))}.`,
       ...stayed, `Central Knot keeps ${off.length === 1 ? 'it, and turning it on puts it' : 'them, and turning one on puts it'} back as it was.`].join(' ');
@@ -2672,8 +2723,8 @@ const usageElsewhere = (t: Table, skill: ItemRow) => usageOf(t, skill).filter(ea
 /** The flags (flags.ts) that remember a non-default Sort on the Library: one choice, kept.
  * Where more than one of the three flags is set, the first in `orderFlags` wins. */
 const orderFlags: Record<Exclude<RowOrder, 'name'>, string> = { 'most-used': 'ck-items-by-most-used', used: 'ck-items-by-last-used', updated: 'ck-items-by-last-updated' };
-/** The order of the rows under each heading (itemrow.ts inOrder): the one chosen, on the Library; by name on a harness's tab. */
-const chosenOrder = (t: Table): RowOrder => (t.tool ? 'name' : (Object.entries(orderFlags) as [RowOrder, string][]).find(([, flag]) => readFlag(flag))?.[0] ?? 'name');
+/** The order of the rows under each heading (itemrow.ts inOrder): on the Library, the one a way in asked for this visit (View askedOrder), else the one chosen; by name on a harness's tab. */
+const chosenOrder = (t: Table): RowOrder => (t.tool ? 'name' : t.view.askedOrder?.order ?? (Object.entries(orderFlags) as [RowOrder, string][]).find(([, flag]) => readFlag(flag))?.[0] ?? 'name');
 /** A row's usage on a table, for Last used and Most used (itemrow.ts inOrder): newest use at any time, and the sessions its Used cell shows. */
 const usageIn = (t: Table) => (skill: ItemRow): RowUsage => {
   const figure = figureOf(t, skill);
@@ -2701,7 +2752,12 @@ const dated = (t: Table) => chosenOrder(t) === 'updated' && !searching(t);
 /** The choice of order, after the filters on the Library. */
 function orderChoice(t: Table) {
   if (t.tool) return null;
-  const choose = (event: Event) => { const value = (event.target as HTMLSelectElement).value; for (const [key, flag] of Object.entries(orderFlags)) writeFlag(flag, value === key); rerender(); };
+  const choose = (event: Event) => {
+    const value = (event.target as HTMLSelectElement).value;
+    for (const [key, flag] of Object.entries(orderFlags)) writeFlag(flag, value === key);
+    t.view.askedOrder = undefined;
+    rerender();
+  };
   const order = chosenOrder(t), option = (value: RowOrder, label: string) => h('option', { value, selected: order === value }, label);
   // While the Library's Find has text: Best match, greyed, its tooltip saying why.
   const best = searching(t), options = best ? [h('option', { value: 'best', selected: true }, 'Best match')]
@@ -2799,6 +2855,13 @@ function offNote(t: Table, list: ItemRow[]): string {
   return '';
 }
 
+/** An opened row's head line of what its switch or Add would end ("If on, Everyday stops being …"); none while its own click is out (clicklist.ts wantedOn). */
+function switchEnds(skill: ItemRow) {
+  const item = inLibrary(itemOf(skill));
+  if ((!item && !canAdd(skill)) || wantedOn(skill.kind, skill.key) !== undefined) return null;
+  return endsMark(endsOf(switchClicks(skill)), !item ? 'If added' : item.on ? 'If off' : 'If on', elId('profile-ends', skill), 'line');
+}
+
 /** A found or Off item's status line (libraryrow.ts statusLine; empty on On rows, whose tool lines show every On state, including in the Files view's pane). */
 const switchStatus = (t: Table, skill: ItemRow) => statusLine(skill, itemOf(skill), toolsFor(t, skill.kind), !!state.home?.sync.syncEverything, leftOutTools());
 
@@ -2860,27 +2923,30 @@ function libraryHarnessSwitch(t: Table, lib: LibraryPage, skill: ItemRow, tool: 
       const now = rowByKey(skill.kind, skill.key);
       return lib.say.said.onOnly(name, tool, notIn.includes(tool as HarnessId), now, toolsFor(t, skill.kind), now && itemOf(now), leftOutTools());
     };
+    const onHere: Click = { kind: skill.kind, items: [name], rows: [rowKey(skill)], changes: [rowClicks.onOnly(skill, item, tool)], said };
     const turnHere = () => {
       pinRow(t, skill);
-      click({ kind: skill.kind, items: [name], rows: [rowKey(skill)], changes: [rowClicks.onOnly(skill, item, tool)], said });
+      click(onHere);
     };
     const also = skill.readBy?.[tool as HarnessId];
     const whereOn = also?.length ? `${where}; ${readsIt(also)} from there too` : `${where} only`;
+    const label = `${name} in ${where}: off. Click to turn it on in ${whereOn}.`;
     return h('span.details-tool-actions', {}, own, h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, 'Off'),
       toggle({
         on: false, disabled: writeOff(kindStops(skill.kind)), id: elId('enable', skill, tool),
-        label: `${name} in ${where}: off. Click to turn it on in ${whereOn}.`, onchange: turnHere,
+        label, onchange: turnHere, attrs: endsOnHover(label, () => [onHere]),
       })));
   }
   const said = (notIn: HarnessId[]) => lib.say.said.inHarness(name, tool, !out, notIn.includes(tool as HarnessId));
   const does = out ? `Click to put it in ${where} again, its ${lib.words.copy} as it was.` : `Click to keep it out of ${where}: its copy there goes, and Central Knot keeps it.`;
-  const flipHere = (on: boolean) => click({ kind: skill.kind, items: [name], rows: [rowKey(skill)], changes: [rowClicks.inHarness(skill, item, tool, !on)], said });
+  const flipHere: Click = { kind: skill.kind, items: [name], rows: [rowKey(skill)], changes: [rowClicks.inHarness(skill, item, tool, !out)], said };
   // Kept out, yet loading a copy Central Knot doesn't write there (a take leaves his so: library.ts TAKE), its own or another tool's:
   // said beside the switch, never as Off.
   const loads = loadingIn(skill, item, [tool]), runs = loads.own.length ? 'its own copy' : loads.another.length ? 'another way' : undefined;
   const now = out ? `kept out${runs ? `, running ${runs}` : ''}` : 'on', word = runs ? `${runs.charAt(0).toUpperCase()}${runs.slice(1)}` : out ? 'Off' : 'On';
+  const label = `${name} in ${where}: ${now}. ${does}`;
   return h('span.details-tool-actions', {}, own, h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, word),
-    toggle({ on: !out, disabled: writeOff(kindStops(skill.kind)), id: elId('enable', skill, tool), label: `${name} in ${where}: ${now}. ${does}`, onchange: flipHere })));
+    toggle({ on: !out, disabled: writeOff(kindStops(skill.kind)), id: elId('enable', skill, tool), label, onchange: () => click(flipHere), attrs: endsOnHover(label, () => [flipHere]) })));
 }
 
 /**
@@ -2898,12 +2964,13 @@ function libraryDelete(t: Table, lib: LibraryPage, skill: ItemRow) {
     return arm;
   }
   const said = (notIn: HarnessId[]) => lib.say.said.deleted(name, item.on, stillIn(skill, item, notIn, tools), tools);
-  const run = () => { view.confirmDelete = undefined; click({ kind: skill.kind, items: [name], rows: [rowKey(skill)], changes: [rowClicks.remove(skill, item)], said }); };
+  const removal: Click = { kind: skill.kind, items: [name], rows: [rowKey(skill)], changes: [rowClicks.remove(skill, item)], said };
+  const run = () => { view.confirmDelete = undefined; click(removal); };
   // Armed, it is still a button (outlined in red); Cancel beside it is a link.
   const now = button({ variant: 'outline', size: 'micro', label: 'Delete it now', id: elId('delete-confirm', skill), disabled: writeOff(cant), onclick: run });
   now.classList.add('delete-now');
   now.title = selectOff() ?? `Delete ${name} from Central Knot now. History can restore it.`;
-  return h('span.delete-armed', {}, smallAction('Cancel', elId('delete-cancel', skill), disarm), now,
+  return h('span.delete-armed', {}, smallAction('Cancel', elId('delete-cancel', skill), disarm), endsMark(endsOf([removal]), 'If deleted', elId('delete-profile', skill)), now,
     h('span.delete-armed-note', { id: elId('delete-note', skill) }, lib.say.said.deleteArmed(state.historyDays ?? defaultHistoryDays)));
 }
 
@@ -2977,6 +3044,7 @@ function details(t: Table, skill: ItemRow, placement: Placement = 'row'): HTMLEl
     h('div.details-head', {},
       // The Files view's pane says it under the skill's name; an On row's tool lines already say where it is.
       status ? h('p.details-status', {}, status) : null,
+      switchEnds(skill),
       // Its description whole: the closed row cuts it.
       skill.description ? h('p.details-description.details-description-whole', {}, skill.description) : null,
       excerptLine(t, skill),
@@ -3155,210 +3223,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
         layout.head ? h('div.files-details', {}, layout.head) : null,
         layout.tail.length ? h('div.files-tail', {}, layout.tail) : null))));
 }
-// ---------- A skill's, an agent's or a server's file, one click from its row: alone under a closed row, or in an open row's details' place ----------
-
-type CatalogTarget = { kind: 'catalog'; hit: SearchHit };
-type FileTarget = ItemRow | PluginRow | CatalogTarget;
-const isCatalogHit = (target: FileTarget): target is CatalogTarget => target.kind === 'catalog';
-/** An ordinary agent's row (in Central Knot or found). A plugin's agent is a PluginRow (kind 'agent') and a Find hit a CatalogTarget: neither has a file mark yet. */
-const isAgentRow = (target?: FileTarget): target is ItemRow & { kind: 'agents' } => target?.kind === 'agents';
-/** An ordinary MCP server's row (in Central Knot or found). A plugin's server is a PluginRow of kind 'mcp' too: no file mark yet. */
-const isServerRow = (target?: FileTarget): target is ItemRow & { kind: 'mcp' } => target?.kind === 'mcp' && !('marketName' in target);
-/** The tools whose settings file has a server's entry: one taken in (its copy's path) or not (LibraryFacts namedIn). */
-const entryTools = (row: ItemRow) => [...Object.keys(row.paths ?? {}) as HarnessId[], ...row.namedIn ?? []];
-const fileTargetId = (target: FileTarget) => (isCatalogHit(target) ? target.hit.id : idOf(target));
-const fileTargetName = (target: FileTarget) => (isCatalogHit(target) ? target.hit.item!.name : isPluginRow(target) ? target.name : target.name ?? target.key);
-/** An agent's or a server's current version as Central Knot holds it (storedOf): an agent's parts Read shows (readDefinition), a server's stored file. */
-const DEFINITION = 'Central Knot’s definition';
-/**
- * The item in Central Knot whose stored text a target's panel offers, by kind: a library skill's current version (it offers no
- * copy: fileCopies; with the path of a tool's copy that holds it, where one does: filePanel); an ordinary agent's definition,
- * where no tool has a copy; an ordinary server's definition, after each tool's entry. The stored text is shown where it is asked
- * for or no copy is offered (setFile).
- */
-const storedOf = (t: Table, target?: FileTarget) => (target?.kind === 'skills' || (isAgentRow(target) && !fileCopies(t, target).length)
-  || isServerRow(target) ? inLibrary(itemOf(target as ItemRow)) : undefined);
-interface FileCopy { tool: HarnessId; rootLabel?: string; directory?: string; realDirectory?: string; hash?: string; version?: string; part?: string }
-/**
- * The copies a target's panel offers, in column order (tab's tool first): an agent's in each tool with a file for it, a server's
- * in each tool with its entry, each read by itself (one shared hash doesn't
- * make two files the same bytes); a found or plugin skill's, collapsed by real folder, or by hash (found) / version (plugin); none
- * of a library skill's (its stored version instead: storedOf).
- */
-function fileCopies(t: Table, target: FileTarget): FileCopy[] {
-  if (isAgentRow(target)) return (toolsFor(t, 'agents') as HarnessId[]).filter(tool => target.paths?.[tool]).map(tool => ({ tool }));
-  if (isServerRow(target)) return (toolsFor(t, 'mcp') as HarnessId[]).filter(tool => entryTools(target).includes(tool)).map(tool => ({ tool }));
-  if ((target.kind !== 'skill' && target.kind !== 'skills') || (target.kind === 'skills' && inLibrary(itemOf(target)))) return [];
-  const hashes = target.kind === 'skills' ? target.folderHashes : undefined;
-  const raw = (toolsFor(t, 'skills') as HarnessId[]).flatMap<FileCopy>(tool => target.kind === 'skill'
-    ? (target.copies[tool]?.path ? [{ tool, part: target.copies[tool]!.path, realDirectory: target.copies[tool]!.realDirectory, version: target.installs[tool]?.version }] : [])
-    : (state.home?.snapshots?.find(entry => entry.harness === tool)?.skills ?? [])
-      .filter(entry => itemKey(entry.folder) === target.key)
-      .map(entry => ({ tool, rootLabel: entry.rootLabel, directory: entry.directory, realDirectory: entry.realDirectory, hash: hashes?.[entry.realDirectory] })));
-  const unique: FileCopy[] = [];
-  for (const copy of raw) {
-    if (!unique.some(kept => (!!kept.realDirectory && kept.realDirectory === copy.realDirectory)
-      || (target.kind === 'skill' ? !!kept.version && kept.version === copy.version : !!kept.hash && kept.hash === copy.hash))) unique.push(copy);
-  }
-  return unique;
-}
-/** Change token for a copy: its hash and real folder when hashed, else the home's readId so an unhashed or plugin copy reloads silently on every new view. */
-const copyToken = (copy?: FileCopy) => (copy?.hash ? `${copy.hash}:${copy.realDirectory ?? ''}` : `read:${state.home?.readId ?? 0}`);
-/**
- * Whether a row has the file mark (fileButton; the reconcile in drawTable asks it too): a skill with a stored version or a copy,
- * a marketplace skill hit with its path, every ordinary agent, an ordinary server with an entry in a tool or in Central Knot.
- */
-const hasFile = (t: Table, target: FileTarget) => (isCatalogHit(target) ? target.hit.item?.kind === 'skill' && !!target.hit.item.path
-  : !!storedOf(t, target) || fileCopies(t, target).length > 0);
-/** Reloads an open inline file panel when its stored version, found copy, agent's or server's copy, plugin copy, or marketplace copy changes (or its chosen copy disappears). */
-function syncOpenFile(t: Table, target: FileTarget, open: NonNullable<View['openFile']>) {
-  const offered = storedOf(t, target), copies = fileCopies(t, target);
-  // Its stored text shown (no copy chosen, or none left to show), or a marketplace hit's copy.
-  if ((offered && !(open.copy && copies.length)) || isCatalogHit(target)) {
-    if (open.copy || (offered ? offered.hash : copyToken()) !== open.token) setFile(t, target, open.file, false, undefined, false);
-    return;
-  }
-  const matched = open.copy && copies.find(copy => copy.tool === open.copy!.tool && copy.rootLabel === open.copy!.rootLabel);
-  const nextCopy = matched ?? copies[0]!;
-  if (!matched || copyToken(nextCopy) !== open.token) setFile(t, target, matched ? open.file : undefined, false, undefined, false, nextCopy);
-}
-/** A tool's copy, as a file panel names it (its chooser; a server's one label). */
-const copyName = (tool: HarnessId) => `${names[tool]}’s copy`;
-/** The last part of a path: an agent's file name in a tool. */
-const fileName = (path: string) => path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1);
-/** What a file panel's read brings: a file's text (types.ts FileRead), or an agent's definition as the parts Read shows. */
-type PanelRead = FileRead & { parts?: VersionPart[] };
-/** An agent's current version as its panel shows it: each part Read shows (librarypages.ts version), under its word. */
-const readDefinition = (key: string, hash: string): Promise<PanelRead | null> => libraryPages.agents.version(key, hash)
-  .then(parts => (Array.isArray(parts) ? { files: [DEFINITION], parts: parts.filter(part => part.text) } : null));
-/**
- * Opens a file (`asked`; a skill's SKILL.md when none) of a stored, found, installed plugin or marketplace skill, an agent's file
- * in the chosen tool (or its definition), or a server's entry in the chosen tool (its definition where `asked` is DEFINITION, or
- * no tool has an entry), or closes the file, refocusing its mark when asked. An agent has one file, its holder's (or its
- * definition), so `asked` is not read for it.
- * An open row keeps its details: the file takes their place (openedPart) and closing it brings them back; a copy question is
- * closed instead, the file opening alone.
- */
-function setFile(t: Table, target?: FileTarget, asked?: string, refocus = false, event?: Event, draw = true, copy?: FileCopy) {
-  event?.stopPropagation();
-  const prev = t.view.openFile;
-  const id = target && fileTargetId(target);
-  const offered = storedOf(t, target);
-  const catalog = target && isCatalogHit(target) ? target.hit.item : undefined;
-  // A copy is shown (the one chosen, else the first offered) unless the stored text is asked for (a server's chooser) or none is offered.
-  const chosen = target && !catalog && !(offered && asked === DEFINITION) ? (copy ?? fileCopies(t, target)[0]) : undefined;
-  const stored = chosen ? undefined : offered;
-  // An agent has one file, named as the chosen tool has it; a server, its copy in the chosen tool; a skill opens SKILL.md first.
-  const first = isAgentRow(target) ? (chosen ? fileName(target.paths![chosen.tool]!) : DEFINITION)
-    : isServerRow(target) ? (chosen ? copyName(chosen.tool) : DEFINITION) : 'SKILL.md';
-  const file = isAgentRow(target) || isServerRow(target) ? first : asked ?? first;
-  const sameHolder = !!prev && prev.id === id && prev.copy?.tool === chosen?.tool && prev.copy?.rootLabel === chosen?.rootLabel;
-  const sameFile = sameHolder && prev.file === file;
-  const next: View['openFile'] = id && (stored || catalog || chosen)
-    ? { id, token: stored ? stored.hash : copyToken(chosen), file,
-      ...(chosen ? { copy: { tool: chosen.tool, ...(chosen.rootLabel !== undefined ? { rootLabel: chosen.rootLabel } : {}) } } : {}),
-      directory: sameHolder ? prev.directory : undefined,
-      files: sameHolder ? prev.files : undefined, loaded: sameFile ? prev.loaded : undefined }
-    : undefined;
-  if (next && t.view.comparing === next.id && asksCopy(t, next.id)) t.view.comparing = undefined;
-  t.view.openFile = next;
-  if (draw) rerender();
-  if (!next && refocus && prev) document.getElementById(partId('file', prev.id))?.focus();
-  if (!next) return;
-  const load: Promise<PanelRead | null> = stored ? (isAgentRow(target) ? readDefinition(target.key, stored.hash)
-    : isServerRow(target) ? window.centralKnot.serverStored(target.key, stored.hash) : window.centralKnot.skillVersionFile((target as ItemRow).key, next.token, file))
-    : isCatalogHit(target!) ? window.centralKnot.skillPluginFile({ marketName: catalog!.marketName, plugin: catalog!.plugin, part: catalog!.path!, from: 'marketplace', source: catalog!.source }, file)
-    : isPluginRow(target!) ? window.centralKnot.skillPluginFile({ marketName: target.marketName, plugin: target.plugin, part: chosen!.part!, from: chosen!.tool }, file)
-    : isAgentRow(target) ? window.centralKnot.agentFile(state.home!.home, target.key, chosen!.tool)
-    : isServerRow(target) ? window.centralKnot.serverEntry(state.home!.home, target.key, chosen!.tool)
-    : window.centralKnot.skillFoundFile(target!.key, chosen!.tool, chosen!.rootLabel, file);
-  void load.catch(() => null).then(found => {
-    if (t.view.openFile !== next) return;
-    if (!found && file !== first) return setFile(t, target, first, false, undefined, true, chosen);
-    const loaded = found ? { text: found.text, blocks: found.blocks, note: found.note, parts: found.parts, holder: found.holder } : null;
-    const unchanged = sameFile && JSON.stringify(next.loaded) === JSON.stringify(loaded)
-      && (!found || (JSON.stringify(next.files) === JSON.stringify(found.files) && next.directory === found.directory));
-    next.loaded = loaded;
-    next.directory = found?.directory;
-    if (found) next.files = found.files;
-    // An agent's footer names the file this read found: the row may still hold its last spelling (a rename in capitals).
-    if (isAgentRow(target) && found?.directory) next.file = found.files[0]!;
-    // In the dock (a row open on a wide window) nothing is under the row to bring into view.
-    if (draw && prev?.id !== next.id && (t.view.comparing !== next.id || underRow(t, next.id))) revealUnderRow(next.id);
-    if (!unchanged) rerender();
-  });
-}
-/** Open file mark right after a library, found or plugin skill's name, an ordinary agent's and an ordinary server's (Library list, Find hits, a tool's tabs). */
-function fileButton(t: Table, target: FileTarget) {
-  if (!hasFile(t, target)) return null;
-  const id = fileTargetId(target);
-  const open = t.view.openFile?.id === id;
-  const onclick = (event: Event) => setFile(t, open ? undefined : target, undefined, false, event);
-  return h('button.row-file-btn', { type: 'button', id: partId('file', id), title: 'Open file',
-    'aria-label': `Open file: ${fileTargetName(target)}`, 'aria-pressed': String(open), onclick }, icon('file-text', 14));
-}
-/**
- * A skill's, an agent's or a server's open file: wrapping tabs (an agent's and a server's one: a label), copy chooser where copies
- * differ (an agent: each tool with a copy; a server: each tool with an entry, then its definition), close mark, fileBlocks
- * body and path footer (a server's entry: its settings file). Under its closed row alone; `back` is the "‹ Back to details" over
- * it in its open row's details' place, under the row or in the dock (openedPart).
- */
-function filePanel(t: Table, target: FileTarget, open: NonNullable<View['openFile']>, placement: 'row' | 'dock' = 'row', back?: HTMLElement) {
-  const id = fileTargetId(target);
-  const name = fileTargetName(target);
-  const offered = storedOf(t, target), stored = !!offered && !open.copy;
-  const copies = fileCopies(t, target);
-  const activeAt = open.copy ? copies.findIndex(copy => copy.tool === open.copy!.tool && copy.rootLabel === open.copy!.rootLabel) : -1;
-  const active = stored ? undefined : copies[activeAt >= 0 ? activeAt : 0];
-  const tabs = open.files ?? [open.file];
-  // A stored skill's version shows the path of a tool's copy that holds it; an agent's or a server's definition has none; an
-  // agent's file and a server's settings file are the ones its read found (setFile).
-  const storedPath = (row: ItemRow) => row.paths?.[toolsFor(t, 'skills').find(each => row.hashes?.[each] === open.token && row.paths?.[each]) ?? ''];
-  const dir = !stored ? active?.directory ?? open.directory : target.kind === 'skills' ? storedPath(target as ItemRow) : undefined;
-  const leaf = isServerRow(target) ? open.files?.[0] ?? '' : open.file;
-  const full = dir && (dir.includes('\\') ? `${dir}\\${leaf.replaceAll('/', '\\')}` : `${dir}/${leaf}`);
-  const missing = open.loaded === undefined ? 'Reading…' : 'Its file couldn’t be read.';
-  const note = open.loaded ? open.loaded.note : missing;
-  const copyLabel = (entry: FileCopy) => (entry.version ? `${copyName(entry.tool)} · ${entry.version}`
-    : entry.rootLabel && copies.filter(other => other.tool === entry.tool).length > 1 ? `${copyName(entry.tool)} (${entry.rootLabel})` : copyName(entry.tool));
-  // The stored text is the last choice where copies are offered too (a server's definition, after each tool's entry).
-  const choices = [...copies.map(copyLabel), ...(offered && copies.length ? [DEFINITION] : [])], shownAt = stored ? copies.length : copies.indexOf(active!);
-  const chooseCopy = (event: Event) => {
-    const picked = copies[Number((event.target as HTMLSelectElement).value)];
-    setFile(t, target, picked ? undefined : DEFINITION, false, undefined, true, picked);
-  };
-  const chooser = choices.length > 1 ? h('span.select.file-copy-select', {},
-    h('select', { id: partId('file-holder', id), 'aria-label': isServerRow(target) ? 'Entry to show' : 'Copy to show', title: choices[shownAt], onchange: chooseCopy },
-      choices.map((label, index) => h('option', { value: String(index), selected: index === shownAt }, label))),
-    icon('chevrons-up-down', 14)) : null;
-  const tab = (file: string) => h(`button.file-tab${file === open.file ? '.is-active' : ''}`, { type: 'button', role: 'tab',
-    'aria-selected': String(file === open.file), onclick: () => { if (file !== open.file) setFile(t, target, file, false, undefined, true, active); } }, file);
-  // In its details' place the file has no × of its own: Back to details, its icon and Escape close it, the dock's × the dock.
-  const close = back ? null : closeButton(() => setFile(t, undefined, undefined, true),
-    { id: partId('file-close', id), label: `Close file for ${name}`, title: 'Close', look: '.file-open-close' });
-  const blockId = partId('file-text', id, ...(active ? [String(Math.max(0, activeAt))] : []), String(Math.max(0, tabs.indexOf(open.file))));
-  const owner = () => (active ? copyLabel(active) : isCatalogHit(target) ? `${target.hit.item!.marketName}’s copy` : 'Central Knot’s current version');
-  // A Codex entry's blocks, each apart: between two, a separator named for the lines between them, its words drawn by CSS from
-  // that name, so no selection or copy of the blocks holds them.
-  const body = note ? [h('p.file-open-state', {}, note)]
-    : open.loaded?.parts ? fileBlocks(blockId, `${name} ${open.file}`, open.loaded.parts, holders => andList(holders.map(part => part.name)), { named: true })
-    : open.loaded?.blocks ? open.loaded.blocks.flatMap((text, index) => [index ? h('div.file-open-gap', { role: 'separator', 'aria-label': 'Other lines in the file' }) : null,
-      ...fileBlocks(`${blockId}-${index}`, `${name} ${open.file}`, [{ text }], owner)])
-    : fileBlocks(blockId, `${name} ${open.file}`, [{ text: open.loaded!.text ?? '' }], owner);
-  // A server's path is copied by a button in words: beside its JSON a bare copy icon would read as copying the entry.
-  const copy = full && reloadButton(isServerRow(target) ? { chip: 'Copy path', command: full, title: full } : { command: full, title: 'Copy path' }, partId('file-copy', id));
-  const foot = full ? [pathText(shownPath(full), full), h('span.file-open-foot-actions', {}, showInFolder(full), copy)]
-    : stored ? [h('span.file-open-stored', {}, 'Stored in Central Knot')] : [];
-  // An agent's or a server's panel shows one file, or its definition: its name is a label, with nothing to press. A server's
-  // entry says where in the file it is, left of its chooser, or of its label after a dot (its chooser names it where there is one).
-  const label = h(`span.file-open-name${stored ? '.file-open-definition' : ''}`, {}, open.file);
-  const where = open.loaded?.holder ? h('span.file-open-where', {}, `In ${open.loaded.holder}`) : null;
-  const lead = isServerRow(target) && h('span.file-open-lead', {}, where, where && !chooser ? h('span.meta-dot', { 'aria-hidden': 'true' }, '·') : null, chooser ? null : label);
-  return h(`div.details.details-file-only${placement === 'dock' ? '.details-bare' : ''}`, { role: 'region', 'aria-label': `File for ${name}` }, back ?? null, h('div.file-open-box', {},
-    h('div.file-open-head', {}, isAgentRow(target) ? label : lead || h('span.file-open-tabs', { role: 'tablist', 'aria-label': `Files in ${name}` }, tabs.map(tab)),
-    h('span.file-open-controls', {}, chooser, close)),
-    ...body, h('div.file-open-foot', {}, ...foot)));
-}
+// ---------- An open row's file in its details' place (the file panel: filepanel.ts), and Escape ----------
 /**
  * What an open row shows, under it or in the dock: its details; or, its file open too (fileInDetails), the file in their place
  * under "‹ Back to details", which closes the file and puts the focus on the details' first control.
@@ -3371,26 +3236,9 @@ function openedPart(t: Table, row: ItemRow | PluginRow, placement: 'row' | 'dock
     const shown = document.querySelector(`.ov-row[data-key="${CSS.escape(id)}"] + .details, #dock-scroll > .details`);
     shown?.querySelector<HTMLElement>('button:not(:disabled), select:not(:disabled), input:not(:disabled), summary, a[href]')?.focus();
   };
-  return filePanel(t, row, t.view.openFile!, placement, h('button.inline-link.file-to-details', { type: 'button', id: partId('file-details', id),
+  return filePanel(t, row, t.view.openFile!, placement === 'dock', h('button.inline-link.file-to-details', { type: 'button', id: partId('file-details', id),
     title: 'Closes the file', onclick: back }, icon('chevron-left', 12), 'Back to details'));
 }
-/**
- * Sizes the open file's box to what its scroll container (the list, or the dock) leaves under it, at most what is left once what
- * it opened from (its row; in the dock, the dock's top) is at the container's top, never under eight lines of its last block's text
- * (an agent's definition: its prompt; openRow's and setFile's revealUnderRow bring it into view).
- */
-function settleFileBox(): void {
-  const box = document.querySelector<HTMLElement>('.file-open-box'), scroller = box?.closest<HTMLElement>('.scroll');
-  if (!box || !scroller) return;
-  const sides = scroller.getBoundingClientRect(), top = box.getBoundingClientRect().top, row = box.parentElement?.previousElementSibling;
-  const from = row?.matches('.ov-row') ? row.getBoundingClientRect().top : sides.top - scroller.scrollTop;
-  const end = Math.max(8, parseFloat(getComputedStyle(scroller).paddingBottom));
-  const room = Math.floor(sides.height - (top - from) - end), under = Math.floor(sides.bottom - top - end);
-  const pre = [...box.querySelectorAll<HTMLElement>('pre.content')].at(-1), text = pre && getComputedStyle(pre);
-  const least = !pre || !text ? 0 : box.offsetHeight - pre.offsetHeight + 8 * parseFloat(text.lineHeight) + parseFloat(text.paddingTop) + parseFloat(text.paddingBottom);
-  box.style.maxHeight = `${Math.ceil(Math.max(least, under >= least ? Math.min(under, room) : room))}px`;
-}
-afterLayout(settleFileBox);
 // Escape in a find box with text clears it; on the unused band's disclosure button it closes the disclosure; else it closes an
 // open skill's, agent's or server's file (an open row's details come back in its place). Elsewhere on the Library's list in
 // Select's mode, it closes a Delete of many's question, or else ends the mode. A card open (an info card, the header's) is closed first, and this doesn't hear it (renderer.ts).
