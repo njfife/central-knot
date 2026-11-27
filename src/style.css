@@ -2021,7 +2021,9 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 /* Profiles page: the list of profiles beside the open one, and the open one's header (rename, Delete, its setup step) */
 .profiles-split { min-height: 0; }
 .toolbar-title { font-size: 12px; line-height: 16px; font-weight: 600; }
-.profile-row-name { min-width: 0; overflow-wrap: anywhere; line-height: 16px; }
+.profile-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.profile-row-name { min-width: 0; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.profile-row-text .list-fraction { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .profile-row { height: auto; min-height: 37px; padding-block: 8px; }
 .profile-in-use { flex: none; height: 20px; display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border-radius: 4px; font-size: 11px; line-height: 14px; font-weight: 500; white-space: nowrap; background: var(--picked); color: var(--accent-ink); }
 /* Their pane header and toolbars span the pane (the Skills files view caps its own) */
@@ -2045,6 +2047,12 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .profiles-page .band:has(#profile-from-now, #profile-choose-plugins) { flex-wrap: wrap; align-items: flex-start; row-gap: 6px; }
 .profiles-page .band:has(#profile-from-now, #profile-choose-plugins) > svg { margin-top: 1px; }
 .profiles-page .band:has(#profile-from-now, #profile-choose-plugins) > .band-text { max-width: calc(100% - 20px); }
+/* A profile's Tools strip: one tick box a managed tool, wrapping onto a second line in a narrow window */
+.pf-tools { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; padding: 8px 16px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.pf-tools-label { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--ink-soft); }
+.pf-tools .tick { display: inline-flex; align-items: center; gap: 6px; border-radius: 6px; cursor: pointer; }
+.pf-tools .tick:has(.hidden-input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.pf-tools .tick-label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 /* The result of a switch spans the pane, like the table under it */
 .page.profiles-page > .bands > .band { padding-right: 16px; }
 /* Narrow-window profile picker bar (shown under 880 px in place of the stacked list; Profiles-only, leaving shared .split unchanged) */

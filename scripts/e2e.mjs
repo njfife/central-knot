@@ -2865,6 +2865,28 @@ async function practiceFlow() {
   await a.run(`document.querySelector('.history-row[data-kind="profile"] .history-actions button').click()`); await a.settle();
   check('its Undo from History says what it did with reload advice and Copy', /^Undone: 2 items turned on\..*In Copilot CLI, type \/skills reload\..*Codex picks it up/.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-copy-copilot-cli'), await a.text('.bands'));
   same('…and every skill is on again', skillsOn.map(key => folders(key).every(Boolean)), [true, true, true, true]);
+  // Tools: Copilot CLI unticked in Incident (last, since from then on Incident holds its own keep-outs). The header's clause and
+  // a Changes tools row say notes goes out of Copilot CLI; the switch takes notes out of Copilot CLI alone, Claude Code's and Codex's
+  // folders as they were; Undo switch puts it back.
+  await a.click('#nav-profiles');
+  const toolsBefore = allFolders();
+  same('Incident’s strip, Applies in, ticks each managed tool', [await a.run(`document.querySelector('.pf-tools-label')?.firstChild?.textContent`), await a.all('.pf-tools input', 'e.checked')], ['Applies in', [true, true, true]]);
+  await checkCard(a, 'profile-tools-info', 'Ticks save at once: nothing in your tools changes until Switch. Switching keeps your items out of each unticked tool.', 'the strip says, before a click, when a tick takes effect');
+  await a.click('#pf-tool-copilot-cli');
+  same('unticking Copilot CLI saves at once and changes no tool; the header’s clause counts the change of tools, a row says where, the list says 2 tools',
+    [await a.all('.pf-tools input', 'e.checked'), allFolders(), await a.text('.profile-header p'), await stateShown('notes'), await a.text('.profile-row.selected .list-fraction')],
+    [[true, false, true], toolsBefore, 'Switching turns 3 off · 1 out of Copilot CLI', 'Out of Copilot CLI', '1 item · 2 tools']);
+  await a.click('#profile-changes');
+  same('Changes puts notes under Changes tools, saying where', [await a.all('.pf-section strong', 'e.textContent'), await a.all('.pf-row[data-item] .pf-state', 'e.textContent'), await a.text('#profile-changes')],
+    [['Turns off', 'Changes tools'], ['', '', '', 'Out of Copilot CLI'], 'Changes 4']);
+  await a.click('#profile-changes');
+  await a.click('#profile-switch');
+  same('the switch takes notes out of Copilot CLI alone, and the three others out of every tool', [folders('notes'), folders('standup')], [[toolsBefore.notes[0], null, toolsBefore.notes[2]], gone]);
+  check('the result names the tool it left', /^Switched to Incident: 3 items turned off\. 1 item now out of Copilot CLI\./.test(await a.text('.band-done') ?? ''), await a.text('.bands'));
+  await a.click('#outcome-undo');
+  same('Undo switch puts every folder back, notes in Copilot CLI too', allFolders(), toolsBefore);
+  await a.click('#pf-tool-copilot-cli');
+  same('ticking Copilot CLI again puts it back in Incident', [await a.all('.pf-tools input', 'e.checked'), await a.text('.profile-header p')], [[true, true, true], 'Switching turns 3 off']);
   await openKind(a, 'skills');
   // An armed Delete from Central Knot stays on the visit it was clicked on.
   const standupOpen = () => openRow('standup', `#${rowPart('delete', 'skills', 'standup')}, #${rowPart('delete-confirm', 'skills', 'standup')}`);
@@ -19776,7 +19798,8 @@ async function profilePluginsFlow() {
   same('worked example 5: with an off-switch standing in Copilot CLI, the row tooltip does not say issues is on now',
     [await b.text('.profile-header p'), await b.text('#profile-preview-info-card'), await b.run(`document.querySelector('.pf-row[data-item="mcp:issues"] .pf-state')?.dataset.state`),
       await b.run(`document.querySelector('.pf-row[data-item="mcp:issues"] .pf-tick')?.title`)],
-    ['Switching turns 1 on', 'Switching turns 1 item on. Plugin items stay as they are.', 'Turns on',
+    // The row says where it won't be: the Library keeps issues out of Claude Code and Codex.
+    ['Switching turns 1 on', 'Switching turns 1 item on. Plugin items stay as they are.', 'Turns on, not in Claude Code and Codex',
       'In Old work: switching to it turns issues on. Click to leave it out. issues is off in Copilot CLI now.']);
   await b.click('#profile-switch'); await bDone();
   same('worked example 1 (page): switch clears the off-switch, header keeps the sentence with no Undo switch, row state is blank, and tooltip says on now',
