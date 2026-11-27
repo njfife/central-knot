@@ -29,7 +29,7 @@
 // cantTurn, alreadyAs and cantDelete; writing controls on an opened row (and Resume, Turn these off) dim via app.ts writeOff. It goes
 // by the rows drawn, in their order on screen (drawTable: Table selectable), which holds a pinned row the chip dropped too.
 // A library, found or plugin skill's row also opens its file (fileButton, filePanel, setSkillFile → skillVersionFile, skillFoundFile,
-// skillPluginFile): alone under a closed row, or, the row open, in its details' place (openedPart) under "In each tool ›".
+// skillPluginFile): alone under a closed row, or, the row open, in its details' place (openedPart) under "‹ Back to details".
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, noticeNames, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
@@ -898,10 +898,9 @@ const asksCopy = (t: Table, id: string) => rowsIn(t).some(skill => idOf(skill) =
 const underRow = (t: Table, id: string) => !docked() || asksCopy(t, id);
 /** Whether row `id` is open and its file open too: the file is drawn in its details' place (openedPart), and goes when they close. */
 const fileInDetails = (view: View, id: string | undefined) => !!id && view.comparing === id && view.openFile?.id === id;
-/** The dock's ×: closes the open row's details, and its file where it is in their place. */
+/** The dock's ×: closes the open row's details, and its file where it is in their place (markOpen). */
 function closeOpened(t: Table) {
-  if (fileInDetails(t.view, t.view.comparing)) t.view.openFile = undefined;
-  t.view.comparing = undefined;
+  markOpen(t.view, undefined);
   rerender();
 }
 
@@ -927,8 +926,15 @@ function pluginDock(t: Table, row: PluginRow) {
     h('div.scroll.dock-scroll', { id: 'dock-scroll' }, openedPart(t, row, 'dock')));
 }
 
-/** A row opened (or, `id` none, closed) on this visit: a copy question it asks stays until the page is left (itemsTable). */
-const markOpen = (view: View, id: string | undefined) => Object.assign(view, { comparing: id, openedOn: state.visit, openedAt: state.said.seq });
+/**
+ * A row opened (or, `id` none, closed) on this visit: a copy question it asks stays until the page is left (itemsTable). Every way
+ * of opening or closing a row comes here (openRow, openFromAway, closeOpened): a file in the open row's details' place goes with
+ * them, and so does `id`'s own file, which would otherwise be drawn in its details' place.
+ */
+function markOpen(view: View, id: string | undefined) {
+  if (view.openFile && (view.openFile.id === id || fileInDetails(view, view.comparing))) view.openFile = undefined;
+  Object.assign(view, { comparing: id, openedOn: state.visit, openedAt: state.said.seq });
+}
 /** Moves the table the least needed to show the box under `id`, never past the row's top (less its scroll margin), at once. */
 function revealUnderRow(id: string) {
   requestAnimationFrame(() => {
@@ -940,10 +946,9 @@ function revealUnderRow(id: string) {
     if (past > 0) list.scrollTop += Math.min(past, room);
   });
 }
-/** Opening a row's details brings them into view, so a choice below the fold is not missed. Its own file closes, and one in the open row's details' place. */
+/** Opening a row's details brings them into view, so a choice below the fold is not missed. */
 function openRow(t: Table, row: ItemRow | PluginRow) {
   const id = idOf(row), view = t.view;
-  if (view.openFile?.id === id || fileInDetails(view, view.comparing)) view.openFile = undefined;
   markOpen(view, view.comparing === id ? undefined : id);
   rerender();
   if (view.comparing && underRow(t, id)) revealUnderRow(id);
@@ -1910,6 +1915,8 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
   const isOpen = (row: ItemRow | PluginRow) => idOf(row) === view.comparing;
   if (view.comparing && view.openedOn !== state.visit && all.some(skill => isOpen(skill) && isDiffering(skill))) view.comparing = undefined;
   if (found && view.comparing && !found.some(isOpen)) view.comparing = undefined;
+  // An open row whose file is in its details' place goes, both together, when the list no longer holds it (Find on a tool's tab).
+  if (fileInDetails(view, view.comparing) && ![...shown, ...plugins].some(isOpen)) view.comparing = undefined;
   const fileTarget = view.openFile && ([...shown, ...plugins, ...shownCatalog(t, inPlugins)] as FileTarget[]).find(target => fileTargetId(target) === view.openFile!.id && hasSkillFile(t, target));
   if (view.openFile && !fileTarget) view.openFile = undefined;
   else if (fileTarget) syncOpenFile(t, fileTarget, view.openFile!);
@@ -3205,7 +3212,7 @@ function fileButton(t: Table, target: FileTarget) {
 }
 /**
  * A skill's open file: wrapping tabs, copy chooser where copies differ, close mark, fileBlocks body and path footer. Under its
- * closed row alone; `back` is the "In each tool ›" over it in its open row's details' place, under the row or in the dock (openedPart).
+ * closed row alone; `back` is the "‹ Back to details" over it in its open row's details' place, under the row or in the dock (openedPart).
  */
 function filePanel(t: Table, target: FileTarget, open: NonNullable<View['openFile']>, placement: 'row' | 'dock' = 'row', back?: HTMLElement) {
   const id = fileTargetId(target);
@@ -3231,7 +3238,8 @@ function filePanel(t: Table, target: FileTarget, open: NonNullable<View['openFil
     icon('chevrons-up-down', 14)) : null;
   const tab = (file: string) => h(`button.file-tab${file === open.file ? '.is-active' : ''}`, { type: 'button', role: 'tab',
     'aria-selected': String(file === open.file), onclick: () => { if (file !== open.file) setSkillFile(t, target, file, false, undefined, true, active); } }, file);
-  const close = closeButton(() => setSkillFile(t, undefined, 'SKILL.md', true),
+  // In its details' place the file has no × of its own: Back to details, its icon and Escape close it, the dock's × the dock.
+  const close = back ? null : closeButton(() => setSkillFile(t, undefined, 'SKILL.md', true),
     { id: partId('file-close', id), label: `Close file for ${name}`, title: 'Close', look: '.file-open-close' });
   const blockId = partId('file-text', id, ...(active ? [String(Math.max(0, activeAt))] : []), String(Math.max(0, tabs.indexOf(open.file))));
   const body = note ? [h('p.file-open-state', {}, note)]
@@ -3245,7 +3253,7 @@ function filePanel(t: Table, target: FileTarget, open: NonNullable<View['openFil
 }
 /**
  * What an open row shows, under it or in the dock: its details; or, its file open too (fileInDetails), the file in their place
- * under "In each tool ›", which closes the file and puts the focus on the details' first control.
+ * under "‹ Back to details", which closes the file and puts the focus on the details' first control.
  */
 function openedPart(t: Table, row: ItemRow | PluginRow, placement: 'row' | 'dock') {
   const id = idOf(row);
@@ -3256,7 +3264,7 @@ function openedPart(t: Table, row: ItemRow | PluginRow, placement: 'row' | 'dock
     shown?.querySelector<HTMLElement>('button:not(:disabled), select:not(:disabled), input:not(:disabled), summary, a[href]')?.focus();
   };
   return filePanel(t, row, t.view.openFile!, placement, h('button.inline-link.file-to-details', { type: 'button', id: partId('file-details', id),
-    title: 'Close the file and show its details', onclick: back }, 'In each tool', icon('chevron-right', 12)));
+    title: 'Closes the file', onclick: back }, icon('chevron-left', 12), 'Back to details'));
 }
 /**
  * Sizes the open file's box to what its scroll container (the list, or the dock) leaves under it, at most what is left once what

@@ -780,8 +780,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* A skill's own actions, together under its heading. */
 .details-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 6px; }
 .details-actions > .text-action { padding-left: 0; padding-right: 0; }
-/* A skill's file, under its closed row or in its open row's details' place, there under "In each tool ›" (matrix.ts filePanel, openedPart). */
-.file-to-details { align-self: flex-start; display: inline-flex; align-items: center; gap: 2px; font-size: 12.5px; font-weight: 500; line-height: 18px; }
+/* A skill's file, under its closed row or in its open row's details' place, there under "‹ Back to details", coloured as the details'
+   own links on the picked row (.text-action) so it reads as well in the dark theme (matrix.ts filePanel, openedPart). */
+.file-to-details { align-self: flex-start; display: inline-flex; align-items: center; gap: 2px; font-size: 12.5px; font-weight: 500; line-height: 18px; color: var(--accent-ink); }
 .file-open-box { display: flex; flex-direction: column; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); overflow: hidden; }
 .file-open-head, .file-open-foot { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 12px; background: var(--chrome); font-size: 12px; color: var(--ink); }
 .file-open-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; line-height: 22px; border-bottom: 1px solid var(--line); }
