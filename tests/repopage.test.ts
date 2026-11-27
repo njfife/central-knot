@@ -20,7 +20,7 @@ const PULL_FIRST = 'The repo has changes this computer doesn’t have yet. Pull 
 const commit = (id: string, subject = 'Update') => ({ id, subject, at: '2026-11-27T10:00:00.000Z' });
 const connected = (more: Partial<ConnectedRepoView> = {}): ConnectedRepoView => ({
   connected: true,
-  access: { allowed: true },
+  access: { allowed: true, reason: '' },
   url: '/tmp/example.git',
   branch: 'main',
   base: commit('1111111111111'),
@@ -48,7 +48,7 @@ const settled = async () => { for (let round = 0; round < 10; round++) await new
 
 test('not-connected page places the sign-in sentence under Repo address and replaces See what’s Managed with plain words', () => {
   forgetRepoPrompts(true);
-  repo.view = { connected: false, access: { allowed: true } };
+  repo.view = { connected: false, access: { allowed: true, reason: '' } };
   repo.layoutOpen = true;
   const page = renderRepo();
 

@@ -5326,12 +5326,13 @@ async function repoBaseFlow() {
       same(`connected up-to-date Git repo fits at ${w}×${h}`, await first.run(CUT_OFF), []);
     });
   }
-  await first.run(`document.getElementById('announcement').textContent = ''`);
+  await first.run(`(() => { const a = document.getElementById('announcement'); a.textContent = ''; a.dataset.text = ''; })()`);
   await first.click('#repo-check');
   await until(async () => (await first.text('#announcement') ?? '').includes('Checked the repo: up to date.'));
   check('Check again runs the repo check and announces up to date',
     (await first.text('#announcement') ?? '').includes('Checked the repo: up to date.') && await first.exists('#repo-check:not([disabled])'), await first.text('#announcement'));
   if (shots) {
+    await first.run(`document.activeElement?.blur?.()`);
     await sizeTo(first, 1316, 819);
     await theme(first, 'dark');
     await first.shot('repo-up-to-date-1316-dark');
@@ -5341,9 +5342,11 @@ async function repoBaseFlow() {
     await first.click('#repo-state-info');
     await first.shot('repo-state-card-860-light');
     await first.press('Escape');
-    await first.run(`document.getElementById('announcement').textContent = ''`);
+    await first.run(`document.activeElement?.blur?.()`);
+    await first.run(`(() => { const a = document.getElementById('announcement'); a.textContent = ''; a.dataset.text = ''; })()`);
     await first.click('#repo-check');
     await until(async () => (await first.text('#announcement') ?? '').includes('Checked the repo: up to date.'));
+    await first.run(`document.activeElement?.blur?.()`);
     await first.shot('repo-check-result-860-light');
     await theme(first, 'dark');
   }
@@ -5431,6 +5434,14 @@ async function repoBaseFlow() {
     (await first.text('div.repo-in-sync') ?? '').includes('The repo has a newer commit that changes nothing in your Managed set. Pull to move to it.')
     && !(await first.exists('#repo-check'))
     && (await first.text('#announcement') ?? '').includes('Checked the repo: a newer commit to pull.'), await first.text('.repo-page'));
+  if (shots) {
+    await first.run(`document.activeElement?.blur?.()`);
+    await sizeTo(first, 860, 560);
+    await theme(first, 'light');
+    await first.shot('repo-check-found-860-light');
+    await theme(first, 'dark');
+    await fullSize(first);
+  }
   await first.click('#repo-pull');
   await until(() => first.exists('div.repo-in-sync #repo-check:not([disabled])'));
   check('Pulling the newer commit restores Check again and removes Pull', !(await first.exists('#repo-pull')) && await first.exists('#repo-check'));

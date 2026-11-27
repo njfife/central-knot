@@ -2318,10 +2318,11 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .band.repo-confirm { justify-content: flex-end; }
 .band.repo-confirm .band-text { flex: 0 1 auto; text-align: right; }
 /* The start page begins at the top, as the connected page does, not floating mid-window. */
-.repo-page > .scroll > .empty { justify-content: flex-start; padding-top: 40px; }
+.repo-page > .scroll > .empty { justify-content: flex-start; padding-top: 16px; padding-bottom: 16px; }
+.repo-page > .scroll > .empty > .empty-tile { margin-bottom: 0; }
 .repo-page > .scroll { container-type: inline-size; }
 .repo-start { width: 100%; display: flex; flex-direction: column; gap: 12px; margin-top: 8px; text-align: left; }
-.repo-fold-body { container-type: inline-size; display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.repo-fold-body { container-type: inline-size; display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .repo-connect { container-type: inline-size; display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--lift); }
 .repo-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 /* The form's fields take their column's width (the Plugins page sizes its own add field at short heights). */
