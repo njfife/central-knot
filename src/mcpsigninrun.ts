@@ -1,7 +1,6 @@
 // One MCP sign-in check, in main (MAP.md, "MCP sign-in"): a tool's own list command (mcpsignin.ts listCommand), run once on a
 // click for the home on screen, and its answer read of the servers asked about (mcpsignin.ts readAnswer); and one sign-in, the
-// tool's own (mcpsignin.ts signInArgs), started on a click for one server of this computer's home once main has found that very
-// copy there (signinRefusal), one at a time, stopped at its limit, on Stop and at Quit (TERM, then KILL: STOP_GRACE_MS). The binary is this
+// tool's own, started on a click (startSignin, which says its whole course). The binary is this
 // computer's own command line, never a desktop app's copy (discovery.ts findCli). It runs from an empty folder made for the run and
 // removed after it (one that can't be removed is left and said in the app's log: launch.ts clearRunFolder), in a process group of
 // its own (on Windows, its tree: launch.ts stopTree), stopped whole at the limit or when Central Knot quits (stopChecks, from
@@ -86,7 +85,7 @@ async function runIn(where: CheckWhere, binary: string, args: string[], options:
 
 // ---------- One sign-in ----------
 
-/** How long a stopped sign-in has to end once asked (TERM) before what is left of it is killed; how long its output may stay open after it ends. */
+/** A stopped sign-in's time to end once asked before it is killed; how long its output may stay open after it ends (startSignin). */
 const STOP_GRACE_MS = 3000, DRAIN_MS = 1000;
 /** What the page asks a sign-in for: the home it was drawn for, the tool, the server's row and the copy the cell showed (mcpsignin.ts cellKey). */
 export interface SigninAsk { home: string; tool: HarnessId; row: string; copy: string }
@@ -111,13 +110,14 @@ let signing: AbortController | undefined;
 export const stopSignin = () => signing?.abort();
 
 /**
- * One server's sign-in in its tool, started on a click: refused at once while another is under way, before anything is looked
- * up; then `now()` is read and the ask refused (signinRefusal), the command line found, and `now()` read and the ask refused
- * again just before the tool starts. It runs the tool's own `mcp login -- <name>` (mcpsignin.ts signInArgs) as checkSignin runs
- * a check, its input closed and the browser it opens apart (browserApart), its end said as the tool ended: exit 0 is Signed in,
- * anything else what it printed last (unfinished). It is under way, and Quit
- * (stopChecks) stops it, from its first step; Stop (stopSignin) and its limit stop it the same way. `limitMs`: a shorter limit
- * than SIGNIN_LIMIT_MS (an end-to-end run's).
+ * One server's sign-in in its tool, started on a click: the whole course of a run, said here alone. One at a time: a second is
+ * refused at once, before anything is looked up. Then `now()` is read and the ask refused (signinRefusal), the command line
+ * found, and `now()` read and the ask refused again just before the tool starts. It runs the tool's own command (mcpsignin.ts
+ * signInArgs) as checkSignin runs a check, its input closed and the browser it opens apart (browserApart), and ends as the tool
+ * ends: exit 0 is Signed in, anything else the last line it printed, by arrival (SigninEnd unfinished). Its limit, Stop
+ * (stopSignin), Quit (stopChecks: none starts after) and another home opening (main.ts selectHome) stop it alike: its process
+ * group asked to end, then killed after STOP_GRACE_MS, what its leader left killed DRAIN_MS after it ends (plugins.ts run
+ * graceMs, drainMs). `limitMs`: a shorter limit than SIGNIN_LIMIT_MS (an end-to-end run's).
  */
 export async function startSignin(ask: SigninAsk, now: () => Promise<SigninNow>, limitMs = SIGNIN_LIMIT_MS, log?: (line: string) => void): Promise<SigninEnd> {
   if (signing) return { notStarted: 'Another sign-in is running' };

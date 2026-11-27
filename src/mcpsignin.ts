@@ -6,7 +6,7 @@
 // computer (checkLine, for the tools whose check can run here: cannotRun), a session-only tool's head (IN_SESSION), the marks'
 // cards (connectedCard, SESSION_CARD, LOCAL_CARD), each tool's own sign-in command, run and copied (signInArgs, signInCommand),
 // the tools whose sign-in Central Knot offers to start on a click (offersSignin), and a cell as the page shows it, a sign-in started
-// there included (cellNow, of SigninChecks signins: let go only at a view, followView). Pure, for the page and main alike. Elsewhere: the runs, in main (mcpsigninrun.ts
+// there included (cellNow; what the page keeps of a sign-in: SigninRun). Pure, for the page and main alike. Elsewhere: the runs, in main (mcpsigninrun.ts
 // checkSignin, startSignin); the page, its clicks and the order it holds its rows in (mcpsigninpage.ts); its state (app.ts
 // state.mcpSignin); the shapes (types.ts SigninAnswer, SigninSaid, SigninEnd).
 // Only what a tool's command prints is read, and what can't be read is said so, never made a status: Central Knot reads, keeps and
@@ -161,20 +161,20 @@ export function grouped(rows: SigninRow[], checks: SigninChecks): SigninRow[] {
 
 // ---------- Which cells a check holds for ----------
 
-/**
- * A column's last check: when it ended, what its tool answered, and the cells it holds for: those asked about, unchanged at every
- * view since; `began`, when it was asked (a sign-in there that ended before then shows no more: cellNow).
- */
+/** A column's last check: when it was asked and when it ended, what its tool answered, and the cells it holds for: those asked about, unchanged at every view since. */
 export interface ColumnCheck { at: string; answer: SigninAnswer; asked: string[]; began?: string }
 /**
- * A sign-in started from a cell (mcpsigninpage.ts signIn): its tool, its row, its cell's copy (cellKey), once it ended when and
- * how, and `gone` once a view since it started didn't hold that copy on (another copy, Off or gone: followView).
+ * What the page keeps of a sign-in started from a cell (mcpsigninpage.ts signIn), said here alone: its tool, its row, its cell's
+ * copy (cellKey), and once it ended, when and how. One under way is its row's cell's, whatever became of the copy, so its Stop
+ * stays. One ended is shown only in a cell of that very copy, and only while no view since it started was without that copy on
+ * (`gone`: another copy, Off or gone) and no Check of its column was asked after it ended (ColumnCheck began): cellNow. An
+ * ended one that is gone is forgotten at a view (followView), the one place; a new home's checks start with none.
  */
 export interface SigninRun { tool: HarnessId; row: string; copy: string; at?: string; end?: SigninEnd; gone?: true }
 /**
  * The page's checks in one home (app.ts state.mcpSignin, made again when a home opens): each column's last, the one under way,
  * why one couldn't be run, when the last whole Check all ended (`all`: each column it ran answered or said why it couldn't
- * run; mcpsigninpage.ts checkColumns), and the sign-ins started there, one under way at most. Never stored.
+ * run; mcpsigninpage.ts checkColumns), and the sign-ins started there (SigninRun). Never stored.
  */
 export interface SigninChecks { home: string; columns: Partial<Record<HarnessId, ColumnCheck>>; checking?: { tool: HarnessId; asked: string[] };
   failed?: Partial<Record<HarnessId, string>>; all?: string; signins?: SigninRun[] }
@@ -187,8 +187,7 @@ export function followView(checks: SigninChecks, home: HomeView) {
   const still = (tool: HarnessId, asked: string[]) => { const now = new Set(askedNow(home, tool)); return asked.filter(key => now.has(key)); };
   for (const [tool, column] of Object.entries(checks.columns) as [HarnessId, ColumnCheck][]) column.asked = still(tool, column.asked);
   if (checks.checking) checks.checking.asked = still(checks.checking.tool, checks.checking.asked);
-  // A sign-in whose copy this view doesn't hold on is that copy's no more: its end is never shown (cellNow), and one ended is let
-  // go here, the one place a sign-in is forgotten (a new home's checks start with none).
+  // A sign-in whose copy this view doesn't hold on is gone, and one gone that has ended is forgotten (SigninRun).
   for (const run of checks.signins ?? []) if (!still(run.tool, [run.copy]).length) run.gone = true;
   checks.signins = checks.signins?.filter(run => !(run.end && run.gone));
   // A check that found no command line is older than this view's probe that finds one: the newer word decides, so that answer goes.
@@ -210,9 +209,9 @@ export function ownTime(checks: SigninChecks, tool: HarnessId): string | undefin
 // ---------- Words ----------
 
 /**
- * What a cell says, its tone, the line under it (an answer that couldn't be read, what a tool said as its sign-in failed), the
- * tool's own sign-in command to copy, `heed` where it needs him (a sign-in, or what went wrong: grouped puts its row first), and
- * a mark's whole meaning (`title`, its hover).
+ * What a cell says, its tone, the line under it (an answer that couldn't be read), the tool's own sign-in command to copy, `heed`
+ * where it needs him (a sign-in, or what went wrong: grouped puts its row first), and its hover (`title`: a mark's whole meaning,
+ * or what a tool said last as its sign-in didn't finish).
  */
 export interface CellSays { words: string; tone?: 'muted' | 'warning'; line?: string; command?: string; heed?: true; title?: string;
   /** A sign-in's button (cellNow): Sign in or Try again, which runs `runs`, or Stop while one waits. */
@@ -322,10 +321,9 @@ function endWords(tool: HarnessId, end: Exclude<SigninEnd, { signedIn: true }>):
   return { timeout: `Not finished in ${SIGNIN_LIMIT_MS / 60_000} minutes`, stopped: 'Stopped', missing: `No ${toolNames[tool]} command line here` }[end.failed];
 }
 /**
- * A cell as the page shows it, and whether it needs him: a sign-in under way there, its row's whatever became of its copy (Stop);
- * else the newest that ended for this very copy, while no view since it started was without that copy on and no Check of its
- * column was begun after it ended (Signed in and its time; else what happened, its tool's last line the hover, Try again and the
- * command to copy); else its column's answer (cellSays), whose need of a sign-in offers Sign in in place of Copy where `offers`.
+ * A cell as the page shows it, and whether it needs him: a sign-in under way there (Stop); else the newest that ended and still
+ * shows there (SigninRun says which: Signed in and its time; else what happened, Try again and the command to copy); else its
+ * column's answer (cellSays), whose need of a sign-in offers Sign in in place of Copy where `offers`.
  */
 export function cellNow(checks: SigninChecks, tool: HarnessId, row: SigninRow, offers: boolean): CellSays {
   const said = cellSays(tool, row, answerFor(checks, tool, row)), cell = row.cells[tool]!, began = checks.columns[tool]?.began;

@@ -2,10 +2,9 @@
 // that tool's own command said of the server at its column's last Check. Nothing runs when the page opens: Check runs one tool's
 // command (main.ts mcp-signin:check → mcpsigninrun.ts checkSignin), Check all runs the columns one after another, one check at a
 // time, beside it the line saying what a check does on this computer; a cell that needs a sign-in offers that tool's own command
-// to copy, or, where its cell offers that tool's sign-in (mcpsignin.ts offersSignin), Sign in, which starts it (main.ts
-// mcp-signin:start → mcpsigninrun.ts startSignin; signIn), one at a time, with Stop while it waits; nothing else is started. What
-// each check and sign-in said lives in app.ts state.mcpSignin for the home it was made in, until Central Knot quits; nothing is
-// stored. The rows keep the places they had when he came to the page (inPlace). The rows, which cells a check holds for, the
+// to copy, or, where its cell offers that tool's sign-in (mcpsignin.ts offersSignin), Sign in (signIn), with Stop while it waits;
+// nothing else is started. What each check and sign-in said lives in app.ts state.mcpSignin for the home it was made in, until
+// Central Knot quits; nothing is stored. The rows keep the places they had when he came to the page (inPlace). The rows, which cells a check holds for, the
 // cells' words, a session-only head, the line, the cards and the commands are mcpsignin.ts's; the controls', `MCP server`,
 // Local, `In the plugin …`, the marks' labels, a check's refusal and the empty state are this file's.
 import { pinnedRows, rerender, state } from './app.ts';
@@ -47,13 +46,12 @@ async function checkColumns(tools: HarnessId[], whole = false) {
   }
 }
 
-/** Why every Sign in waits: one is under way (one at a time; mcpsigninrun.ts startSignin refuses a second too). */
+/** Why every Sign in waits: one is under way (one at a time: mcpsigninrun.ts startSignin). */
 const signingIn = () => (state.mcpSignin.signins?.some(run => !run.end) ? 'A sign-in is under way' : false);
 /**
- * Starts `tool`'s own sign-in for `row`'s server (main.ts mcp-signin:start, given the row and the copy the cell shows, never a
- * name, command or path), its cell said from then by mcpsignin.ts cellNow: one under way, then how it ended and when. Kept in the
- * checks of the home it was started in, so one that ends after another home was opened is shown nowhere. A second press while
- * one is under way does nothing.
+ * Starts `tool`'s own sign-in for `row`'s server (main.ts mcp-signin:start → mcpsigninrun.ts startSignin, given the row and the
+ * copy the cell shows, never a name, command or path) and keeps it, with how it ended and when, in the checks of the home it was
+ * started in (mcpsignin.ts SigninRun). A second press while one is under way does nothing.
  */
 async function signIn(tool: HarnessId, row: SigninRow) {
   const checks = state.mcpSignin, copy = cellKey(row, row.cells[tool]!);

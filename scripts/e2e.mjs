@@ -11610,8 +11610,8 @@ ${listen(`const [command, ...words] = (process.env.BROWSER || 'xdg-open').split(
   await a.click('#header-refresh');
   same('on Refresh a row whose sign-in waits stands with the rows that need him', await beforePlain(team), true);
   // Its server given another address while it waits: the cell keeps its Stop. Stop: Codex is asked to end, then what it left is
-  // ended; nothing of its is left running or listening, the browser it opened lives on, and no list is run after. Its end is
-  // that copy's: shown once it is back.
+  // ended; nothing of its is left running or listening, the browser it opened lives on, and no list is run after. Its end was
+  // another copy's: never shown, not even once the address is put back.
   const [[loginPort, loginPid], [helperPort, helperPid]] = listened();
   write('.codex/config.toml', withTeam(47216));
   await a.click('#header-refresh');
@@ -11620,21 +11620,32 @@ ${listen(`const [command, ...words] = (process.env.BROWSER || 'xdg-open').split(
   await until(async () => (await codexCell(team))[0] !== 'Finish in your browser…', 'the stopped sign-in to end');
   same('Stop ends Codex’s sign-in and its helper and frees their ports, not the browser it opened; no list is run after',
     [alive(loginPid), alive(helperPid), await portFree(loginPort), await portFree(helperPort), alive(browserPids()[0]), started().length - loginsFrom], [false, false, true, true, true, 1]);
-  same('… its end is the copy’s it was started for: the server as it is now says Not checked', (await codexCell(team))[0], 'Not checked');
+  same('… its end was another copy’s: the server as it is now says Not checked', (await codexCell(team))[0], 'Not checked');
   write('.codex/config.toml', withTeam(47214));
   await a.click('#header-refresh');
+  same('… and still once the address is put back', (await codexCell(team))[0], 'Not checked');
+  await a.click('#signin-check-codex-cli');
+  await checked('codex-cli');
+  // Stopped while it waits, the server as it was: it says so in amber, with Try again and Copy command, nothing under it.
+  writeFileSync(join(said, 'codex.login'), 'wait');
+  const stoppedFrom = listened().length;
+  await a.click(await act(team));
+  await until(async () => listened().length === stoppedFrom + 1, 'the sign-in to stop');
+  await a.click(await act(team));
+  await until(async () => (await codexCell(team))[0] === 'Stopped', 'the stopped sign-in');
   same('stopped: it says so in amber, with Try again and the command to copy, and nothing under it', [await codexCell(team), (await codexLook(team))[1]], [['Stopped', 'Try again', 'Copy command', null], true]);
   await picture('stopped', SMALLEST, 'light');
-  // Try again, and Codex signs in: Signed in with the time, nothing to press, the browser it opened still open; the same after
-  // another page and back.
+  // Try again, and Codex signs in: Signed in with the time, nothing to press, the browser it opened still open, no list run
+  // after; the same after another page and back.
   writeFileSync(join(said, 'codex.login'), 'accept');
+  const signedFrom = started().length;
   await a.click(await act(team));
   await until(async () => (await codexCell(team))[0].startsWith('Signed in'), 'the sign-in to end');
   const signedIn = await codexCell(team);
   same('signed in: the time, no button, nothing to copy', [/^Signed in \d{1,2}:\d{2}/.test(signedIn[0]), ...signedIn.slice(1)], [true, null, null, null]);
   await wait(1500);
-  same('… and the browser it opened lives on', browserPids().map(alive), [true, true]);
-  same('no list is run after a sign-in', started().slice(loginsFrom).map(([, , , , args]) => args), [`mcp login -- ${team}`, `mcp login -- ${team}`]);
+  same('… and every browser its sign-ins opened lives on', browserPids().map(alive), browserPids().map(() => true));
+  same('no list is run after a sign-in', started().slice(signedFrom).map(([, , , , args]) => args), [`mcp login -- ${team}`]);
   await picture('signed-in', SMALLEST, 'light');
   await a.click('#nav-library');
   await a.click('#nav-mcpsignin');
@@ -11913,6 +11924,20 @@ ${listen(`const [command, ...words] = (process.env.BROWSER || 'xdg-open').split(
   same(`${a.inspect ? 'two Quits wait' : 'Quit waits'} for the check stopped: the app gone, its tool stopped, its folder removed`, [a.child.exitCode !== null || a.child.signalCode !== null, alive(quitPid), existsSync(quitCwd)], [true, false, false]);
   same('… and the sign-in that waited: Codex’s processes gone, their ports free, the browser it opened kept',
     [...quitLogins.map(([, pid]) => alive(pid)), ...await Promise.all(quitLogins.map(([port]) => portFree(port))), alive(quitBrowser)], [false, false, true, true, true]);
+  // A home Central Knot may only preview (here Pi's folder variable is not an absolute path: share.ts writeAccess): Codex's cell
+  // keeps its Copy, and main refuses a sign-in sent all the same, running nothing.
+  const preview = await launch(join(scratch, 'signin-data-preview'), [], home, { CK_TEST_HOME_ONLY: Object.keys(versions).join(','), PI_CODING_AGENT_DIR: 'relative/pi' });
+  await preview.click('#home-actual');
+  await preview.click('#nav-mcpsignin');
+  await preview.click('#signin-check-codex-cli');
+  await until(async () => !(await preview.run(`document.querySelector('.signin-head[data-tool="codex-cli"]')?.innerText ?? 'Checking…'`)).includes('Checking…'), 'Codex’s check in the preview-only home');
+  const previewRow = await preview.run(`[...document.querySelectorAll('.signin-table tbody tr')].find(row => row.querySelector('.signin-server').textContent === 'oauth' && !row.querySelector('.signin-plugin'))?.dataset.row`);
+  const previewFrom = started().length;
+  same('a home it may only preview: Codex’s cell keeps its Copy, and main refuses a sign-in sent all the same, running nothing',
+    [await preview.exists(byId(`signin-act-codex-cli-${previewRow}`)), await preview.text(byId(`signin-copy-codex-cli-${previewRow}`)),
+      await preview.run(`window.centralKnot.startSignin('codex-cli', ${JSON.stringify(home)}, ${JSON.stringify(previewRow)}, 'x')`), started().length - previewFrom],
+    [false, 'Copy', { notStarted: 'Central Knot doesn’t start Codex’s sign-in here' }, 0]);
+  await preview.quit();
   // The stand-in browsers are this check's own: ended here (each ends by itself after two minutes besides).
   for (const pid of browserPids()) try { process.kill(pid, 'SIGKILL'); } catch { /* already ended */ }
 }

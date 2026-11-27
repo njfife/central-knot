@@ -558,13 +558,15 @@ const TEAM = 'team\'s docs';
 async function signinStandIn(sandbox: Awaited<ReturnType<typeof standIns>>, mode: 'accept' | 'refuse' | 'wait' | 'deaf') {
   const [args, port, signals, browsers] = ['args', 'port', 'signals', 'browsers'].map(file => join(sandbox.base, file));
   const helper = `process.on("SIGTERM", () => {}); const s = require("net").createServer().listen(0, "127.0.0.1", () => require("fs").writeFileSync(${JSON.stringify(port)}, s.address().port + " " + process.pid));`;
+  // How it takes TERM, from its start; then what it does once the browser is up.
+  const trap = { accept: '', refuse: '', wait: `trap 'echo TERM >> ${signals}; exit 143' TERM`, deaf: `trap '' TERM` }[mode];
   const body = { accept: 'echo "Successfully logged in"', refuse: 'echo "Waiting for consent" >&2\nsleep 0.1\necho "Error: the server refused the sign-in"\nexit 1',
-    wait: `trap 'echo TERM >> ${signals}; exit 143' TERM\n"${process.execPath}" -e '${helper}' &\nwait`, deaf: `trap '' TERM\n"${process.execPath}" -e '${helper}' &\nwait` }[mode];
+    wait: `"${process.execPath}" -e '${helper}' &\nwait`, deaf: `"${process.execPath}" -e '${helper}' &\nwait` }[mode];
   const options = 'for given in "$@"; do [ "$given" = "--" ] && break; case "$given" in -*) echo "Usage: codex mcp login [OPTIONS] <NAME>"; exit 0;; esac; done';
   const browse = 'if [ -n "$BROWSER" ]; then $BROWSER http://127.0.0.1:1/cb </dev/null >/dev/null 2>&1 & else xdg-open http://127.0.0.1:1/cb </dev/null >/dev/null 2>&1 & fi';
   // It goes on once the browser is up, as Codex does when the person has signed in there.
   const browserUp = `while [ ! -s ${browsers} ]; do sleep 0.05; done`;
-  await sandbox.put('codex', `printf '%s\\n' "$@" > ${args}\n${options}\n${browse}\n${browserUp}\n${body}`, '');
+  await sandbox.put('codex', `printf '%s\\n' "$@" > ${args}\n${trap}\n${options}\n${browse}\n${browserUp}\n${body}`, '');
   await standIn(join(sandbox.tools, '.local/bin/xdg-open'), `#!/bin/sh\n"${process.execPath}" -e 'require("fs").appendFileSync(${JSON.stringify(browsers)}, process.pid + "\\n"); setInterval(() => {}, 1000);' </dev/null >/dev/null 2>&1 &`, '');
   const listening = async () => { await until(async () => !!(await readFile(port, 'utf8').catch(() => ''))); return (await readFile(port, 'utf8')).split(' ').map(Number); };
   /** The "browsers" the stand-in xdg-open started, once one has. */
@@ -654,8 +656,7 @@ test('No ending reaches the browser Codex opened: it lives on after Signed in, a
       const fake = await signinStandIn(sandbox, mode), oauth = server('oauth');
       const run = startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), limit);
       const [browser] = await fake.opened();
-      if (mode !== 'accept') await fake.listening();
-      if (mode === 'wait') stopSignin();
+      if (mode === 'wait') { await fake.listening(); stopSignin(); }
       const ending = await run;
       await new Promise(done => setTimeout(done, 300));
       lives.push([ending, isRunning(browser)]);

@@ -1211,7 +1211,7 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
   // A switch that fails changes nothing: the home on screen stays the home open here, with its hand-off and watchers.
   const previous = { current, handoff, lastPresent, lastSeen };
   current = next;
-  // A sign-in started in the home before is stopped: its page is gone with that home.
+  // A sign-in started in the home before is stopped (mcpsigninrun.ts startSignin).
   stopSignin();
   forgetMissing();
   try {
@@ -1694,10 +1694,8 @@ app.whenReady().then(async () => {
   // as the Plugins page's are. CK_SIGNIN_LIMIT_MS: an end-to-end run's shorter limit (mcpsigninrun.ts checkLimit: never longer).
   handleNow('mcp-signin:check', async (tool, home, names) => (current && home === current.home && isTool(tool)
     ? (await checkSignin({ home: current.home, actual: current.mode === 'actual', toolsHome: homedir(), searchPath: await searchPath() }, tool, strings(names) ?? [], Number(process.env.CK_SIGNIN_LIMIT_MS), log)) ?? null : null));
-  // MCP sign-in started on a click: one server's, in its tool (mcpsigninrun.ts startSignin), outside the queue, as it waits for the
-  // browser up to 3 minutes. The page names the home, the tool, the server's row and the copy it showed; main finds that copy in
-  // the home as it is now (the Library's own reading, no pass) and refuses where it isn't there or isn't the home open. Its
-  // name, command and path are never the page's. CK_SIGNIN_START_LIMIT_MS: an end-to-end run's shorter limit.
+  // MCP sign-in started on a click (mcpsigninrun.ts startSignin), outside the queue, as it waits on the browser. What main has of
+  // the home now (signinNow) is the Library's own reading, no pass. CK_SIGNIN_START_LIMIT_MS: an end-to-end run's shorter limit.
   const signinNow = async () => {
     const shared = context(), managed = await managedNow(shared, await readFor(handoff.id));
     return { where: { home: current!.home, actual: current!.mode === 'actual', toolsHome: homedir(), searchPath: await searchPath() }, writable: (await writeAccess(shared)).allowed,
