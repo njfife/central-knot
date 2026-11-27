@@ -39,6 +39,7 @@ const api = {
   sources: async () => { main.followUps.sources++; return null; },
   setPluginSkill: async () => ({ reports: [report('skill-off', 'Turned off.')] }),
   setPluginOn: async () => ({ reports: [report('plugin-off', 'Turned off.')] }),
+  addMarketplace: async (_source: string): Promise<{ problem?: string; view?: PluginsView }> => ({}),
   selectHome: async (): Promise<HomeView | null> => null,
   undoPluginTurn: async (_source: string, plugin: string) => { main.sent.push(`${plugin} undone`); return { done: [] }; },
   onSyncChanged: (listener: () => void) => { main.syncChanged = listener; },

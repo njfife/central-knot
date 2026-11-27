@@ -204,14 +204,15 @@ test('Plugins tab matches boxOf disabled rule, shows box.line on locked rows, an
       readAt: '2026-11-26T00:00:00.000Z',
       plugins: [{ name: 'alpha', description: 'Alpha plugin.' }],
       states: { alpha: { 'claude-cli': { state: 'installed', version: '1.0.0', path: '/p' } } },
-      switches: { alpha: { entry: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: [] }, tools: {} } },
+      switches: { alpha: { entry: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: [] }, tools: { 'claude-cli': { wanted: true, has: 'whole', takes: true } } } },
     }],
     ...patch,
   } as unknown as PluginsView);
 
-  // Home sync access stopped while plugin view can write: Plugins tab switch follows boxOf (enabled, no second rule).
+  // Home whose record is stopped while plugin view can write: Plugins tab switch follows boxOf (enabled, no second rule).
   resetMarket();
-  app.home = makeHome({ managed: ['claude-cli'], allowed: false });
+  app.home = makeHome({ managed: ['claude-cli'] });
+  app.home.sync.gate = { state: 'stopped', reason: 'Sync record stopped.' };
   Object.assign(app, { page: 'harnesses', harness: 'claude-cli', harnessTab: 'plugins', busy: undefined, instructions: { state: 'ready', data: [], gen: 0 } });
   putPageData(market.read, makeView({ canWrite: true }));
   rendered = harnessesPage() as unknown as FakeNode;
