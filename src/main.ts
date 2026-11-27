@@ -50,7 +50,8 @@ import { readUsage } from './usage.ts';
 import { readKeptPeriod, readSessionPeriod } from './sessionday.ts';
 import { canonicalHome, createSessionKeeper } from './sessionkeep.ts';
 import { dayByDay, sessionRows } from './sessionrow.ts';
-import { checkSignin, stopChecks } from './mcpsigninrun.ts';
+import { checkSignin, startSignin, stopChecks, stopSignin } from './mcpsigninrun.ts';
+import { signinRows } from './mcpsignin.ts';
 import { linkLabel } from './sourcelink.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { parseHookRef, readHookSource } from './hooksource.ts';
@@ -1212,6 +1213,8 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
   // A switch that fails changes nothing: the home on screen stays the home open here, with its hand-off and watchers.
   const previous = { current, handoff, lastPresent, lastSeen };
   current = next;
+  // A sign-in started in the home before is stopped (mcpsigninrun.ts startSignin).
+  stopSignin();
   forgetMissing();
   try {
     const { view: shown, passes } = await syncAndView();
@@ -1693,6 +1696,16 @@ app.whenReady().then(async () => {
   // as the Plugins page's are. CK_SIGNIN_LIMIT_MS: an end-to-end run's shorter limit (mcpsigninrun.ts checkLimit: never longer).
   handleNow('mcp-signin:check', async (tool, home, names) => (current && home === current.home && isTool(tool)
     ? (await checkSignin({ home: current.home, actual: current.mode === 'actual', toolsHome: homedir(), searchPath: await searchPath() }, tool, strings(names) ?? [], Number(process.env.CK_SIGNIN_LIMIT_MS), log)) ?? null : null));
+  // MCP sign-in started on a click (mcpsigninrun.ts startSignin), outside the queue, as it waits on the browser. What main has of
+  // the home now (signinNow) is the Library's own reading, no pass. CK_SIGNIN_START_LIMIT_MS: an end-to-end run's shorter limit.
+  const signinNow = async () => {
+    const shared = context(), managed = await managedNow(shared, await readFor(handoff.id));
+    return { where: { home: current!.home, actual: current!.mode === 'actual', toolsHome: homedir(), searchPath: await searchPath() }, writable: (await writeAccess(shared)).allowed,
+      managed, rows: signinRows(await profileHome(managed)) };
+  };
+  handleNow('mcp-signin:start', async (tool, home, row, copy) => (current && isTool(tool) && typeof home === 'string' && typeof row === 'string' && typeof copy === 'string'
+    ? startSignin({ tool, home, row, copy }, signinNow, Number(process.env.CK_SIGNIN_START_LIMIT_MS), log) : { notStarted: 'Changed since the page showed it' }));
+  handleNow('mcp-signin:stop', async home => { if (home === current?.home) stopSignin(); });
   // Word search: answered at once from the index last published (search.ts), which reads no file and waits for no pass.
   handleNow('search:ask', async (typed, shown) => search.ask(typeof typed === 'string' ? typed : '', Number.isInteger(shown) ? Number(shown) : 0));
   handleNow('agents:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await agentVersion(context(), key, hash)) ?? null : null));
