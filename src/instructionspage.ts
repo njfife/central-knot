@@ -3,10 +3,11 @@
 // puts the Base instructions card (basecard.ts) first, then the tools' cards under a heading (one a row, two on a wide page:
 // style.css .ins-tool-cards), and keeps what explains the files (who reads each, the tools' own notes) in one info box at the
 // top. On each tool's card, after those files, the hooks and extensions that can add text to its sessions
-// (sessionStripView, from sessionhooks.ts). A tool's card has its actions in its head at every stage, so a long text never hides them (the base card's,
-// too, except while its Draft panel is open: basecard.ts). There is no turn-off switch: instruction files are edited, never
-// disabled or emptied by Central Knot (the one deletion is an Undo of a base save removing a file that save created, while
-// unchanged).
+// (sessionStripView, from sessionhooks.ts), and under them a plugin run made from them while they show its plugin, else above
+// the cards (runStrip; the run's own place: pluginstate.ts pluginsResultPlace). A tool's card has its actions in its head at
+// every stage, so a long text never hides them (the base card's, too, except while its Draft panel is open: basecard.ts).
+// There is no turn-off switch: instruction files are edited, never disabled or emptied by Central Knot (the one deletion is
+// an Undo of a base save removing a file that save created, while unchanged).
 import { acting, announce, baseDraftTyped, draftFile, draftUnsaved, harnessTabShown, savingOff, loadInstructionVersion, ownText, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { baseCard, baseStrip } from './basecard.ts';
 import { changeCounts, diffView, discardConfirm, escapeTo, infoBox, keys, legend, previewBlock, versionsList, type Stage } from './editparts.ts';
@@ -18,7 +19,9 @@ import { inlineMarkdown } from './markdown.ts';
 import { plural } from './model.ts';
 import { canRun, hookCantRunReason, hookRow } from './hooksourceview.ts';
 import { HOOK_RUN_WARN, hookStripHelp, hookStripNote, sessionStrip, type SessionGroup, type SessionStrip } from './sessionhooks.ts';
-import type { HarnessId, InstructionFile, InstructionPart } from './types.ts';
+import { listingOf, runTouches } from './pluginstate.ts';
+import { runBand } from './pluginspage.ts';
+import type { HarnessId, InstalledPlugin, InstructionFile, InstructionPart } from './types.ts';
 import { lineDiff } from './diff.ts';
 import { keepLineBreaks } from './drafts.ts';
 export { lineDiff } from './diff.ts';
@@ -261,7 +264,23 @@ function sessionStripView(file: InstructionFile, hookInfo?: HookStripPage) {
       h('p.session-head', {}, h(`span.origin-mark.${group.mark}`, { 'aria-hidden': 'true' }), h('strong.session-name', {}, group.settings ? `${group.name},` : group.name), where(group, at)),
       group.problem ? warning(group.problem) : null,
       ...group.unread.map(path => (path === group.settings ? warning('Its hooks couldn’t be read.') : warning('Its hooks couldn’t be read: ', path))),
-      group.hooks.length ? h('ul.session-hooks', {}, group.hooks.map((hook, row) => hookRow(hook, `hook-source-${state.page}-${file.tool}-${at}-${row}`))) : null))) : null);
+      group.hooks.length ? h('ul.session-hooks', {}, group.hooks.map((hook, row) => hookRow(hook, `hook-source-${state.page}-${file.tool}-${at}-${row}`))) : null))) : null,
+    runStrip() === file.tool ? runBand() : null);
+}
+
+/**
+ * Which tool's strip says the last plugin run made on this page or tab (pluginspage.ts runBand): the one tool its clicks and steps
+ * were in, while that tool's card is shown here and its strip still shows the group of the plugin its first click or step acted on.
+ * Else the band is above the cards (instructionBands): once that group is gone (an Off takes it away); for a run in more than one
+ * tool, which neither strip speaks for; and until the Plugins page's view is read, since the group is matched as listed there
+ * (pluginstate.ts listingOf).
+ */
+function runStrip(): HarnessId | undefined {
+  const touched = runTouches(), [first] = touched, tools = new Set(touched.map(each => each.tool));
+  const file = first && tools.size === 1 ? state.instructions.data?.find(each => each.tool === first.tool && (state.page === 'instructions' || each.tool === state.harness)) : undefined;
+  if (!first || !file) return undefined;
+  const ours = (install?: InstalledPlugin) => install?.plugin === first.plugin && listingOf(install.plugin, install.marketName, install.source)?.source === first.source;
+  return sessionStrip(file.tool, state.home?.pluginItems ?? [], file)?.groups.some(group => ours(group.plugin)) ? file.tool : undefined;
 }
 
 /**
@@ -313,12 +332,16 @@ export function instructionsPage() {
 /** Shown while the files are not here yet: their read is under way, or it failed (Refresh reads again). */
 export const instructionsNotRead = (): HTMLElement => h('p.empty', {}, state.instructions.state === 'failed' ? 'Instruction files could not be read.' : 'Reading instruction files…');
 
-/** The bands above instruction cards: a re-read under way, an orphaned draft, the last result (a save's own result sits on its card instead) and, where saving is off, why. */
+/**
+ * The bands above instruction cards: a re-read under way, an orphaned draft, the last result (a save's own result sits on its card
+ * instead), the last plugin run when its strip no longer shows it (runStrip) and, where saving is off, why.
+ */
 export function instructionBands(): HTMLElement | null {
   const done = state.outcome?.kind === 'saved' ? null : outcomeBand();
+  const run = runStrip() ? null : runBand();
   const access = state.home?.sync.access;
   const preview = access && !access.allowed ? h('div.band', { role: 'status' }, icon('lock', 14, 'tone-warning'), h('span.band-text', {}, 'Preview only: you can read these files here, but saving is off in this home.')) : null;
   const orphan = orphanDraft();
   const reread = rereadBand(state.instructions);
-  return done || preview || orphan || reread ? h('div.bands', {}, reread, orphan, done, preview) : null;
+  return done || run || preview || orphan || reread ? h('div.bands', {}, reread, orphan, done, run, preview) : null;
 }

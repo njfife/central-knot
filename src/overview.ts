@@ -1,24 +1,27 @@
 // The Overview, the page the app opens on (app.ts state.page starts on it; nothing remembers another page across a launch).
 // Top to bottom: what the last action did (matrix.ts outcomeBand) and the Practice copy's note; the lead, only while nothing is
-// on; what needs you (needsYou: one function, one order, nothing when nothing does; a tool that came under management by itself
-// last, until closed: arrivalLines, the one thing here kept for a home, by main.ts); a card per kind (kindCard: its counts and
-// whether it is in sync, then what the usage reading says of it); the usage strip (usageStrip, with one link to everything
-// unused); a row per managed tool (toolsTable: its version, what it has of each kind and of plugins, its sessions in the last
-// 30 days); and where every change is kept. Nothing is stored, and opening it reads nothing more than the home's view. The
-// figures come from that view, the usage reading on show and its sum (matrix.ts usageOnShow, usageSums, unusedCount:
-// usagerow.ts usageSummary), Harnesses' counts (harnesspage.ts tally, pluginstatus.ts pluginsInstalled) and the update state
+// on and first setup's question isn't asking; what needs you (needsYou: one function, one order, nothing when nothing does; a
+// tool that came under management by itself last, until closed: arrivalLines, the one thing here kept for a home, by main.ts);
+// a card per kind (kindCard: its counts and whether it is in sync, then what the usage reading says of it, its most used each
+// with its file opening under the card: kindCards, cardFiles, a place of filepanel.ts's); the usage strip (usageStrip, with one
+// link to everything unused); a row per managed tool (toolsTable: its version, what it has of each kind and of plugins, its
+// sessions in the last 30 days); and where every change is kept. Nothing is written, and opening it reads nothing more than the
+// home's view; what it keeps between draws is the file open under a card (cardFiles), for its home and visit. The figures come
+// from that view, the usage reading on show and its sum (matrix.ts usageOnShow, usageSums, unusedCount: usagerow.ts
+// usageSummary), Harnesses' counts (harnesspage.ts tally, pluginstatus.ts pluginsInstalled) and the update state
 // (updateview.ts updateLine). While a home's first reading runs (matrix.ts firstReadingRuns) every place a reading fills is
 // drawn at its final size, so nothing moves when it lands. The Library opens through matrix.ts openKind. Not here: the empty
 // states every page shares (pages.ts noToolsLead, notRead, previewReason) and first setup's question (firstsetup.ts setupLead).
 import { absentKinds, collectUsage, homeTools, loadHome, noToolManaged, practiceNoteOpen, realHomeName, rerender, setPracticeNote } from './app.ts';
 import { acting, showPage, state, syncNow, whyReadOnly, type PageKind } from './app.ts';
 import { brandMark } from './brand.ts';
-import { button, h, icon, middle } from './dom.ts';
+import { button, h, icon } from './dom.ts';
+import { fileButton, filePanel, keepOpenFile, setFile, type FilePlace } from './filepanel.ts';
 import { setupLead } from './firstsetup.ts';
 import { goHarness, tally } from './harnesspage.ts';
 import { anyOn, kindSource } from './itemrow.ts';
 import { asksWhichCopy, waitsForSync } from './libraryrow.ts';
-import { firstReadingRuns, kindGlyph, openKind, outcomeBand, problemsBesideStop, unusedCount, usageOnShow, usageSums } from './matrix.ts';
+import { firstReadingRuns, kindGlyph, openKind, outcomeBand, problemsBesideStop, rowOf, unusedCount, usageOnShow, usageSums } from './matrix.ts';
 import { dayAndTime, dayWords, plural } from './model.ts';
 import { noToolsLead, notRead, previewReason } from './pages.ts';
 import { rowCount } from './pluginrows.ts';
@@ -57,16 +60,16 @@ function leadSentence(home: HomeView): string {
 }
 
 /**
- * The lead's next step, only where it can be taken: with two tools or more, turn something on (where first setup's question
- * isn't asking: `asking`); with one tool there is nothing to keep in step, so it says how a second one joins. Nothing is found
- * only where no card counts anything (a plugin's items are rows too: pluginrows.ts rowCount).
+ * The lead's next step, only where it can be taken: with two tools or more, turn something on; with one tool there is nothing to
+ * keep in step, so it says how a second one joins. Nothing is found only where no card counts anything (a plugin's items are rows
+ * too: pluginrows.ts rowCount).
  */
-function nextStep(home: HomeView, asking: boolean): string {
+function nextStep(home: HomeView): string {
   if (!heldKinds(home).some(kind => rowCount(home, kind))) return ' Nothing found in this home yet.';
   // A tool left out is named under the tools table, with where its switch is.
   if (homeTools().length === 1) return home.sync.present.length > 1 ? ''
     : ' When a second tool is installed, or its folder appears here, Central Knot finds it on its own; then manage what you want the same in both.';
-  return !whyReadOnly(home) && !asking ? ' Open one below and turn on what you want the same in every tool.' : '';
+  return !whyReadOnly(home) ? ' Open one below and turn on what you want the same in every tool.' : '';
 }
 
 /** The practice copy explains itself the first times it opens: what it is, that it is safe, and how to move to the real thing. */
@@ -85,11 +88,28 @@ function practiceBanner() {
 // ---------- What needs you ----------
 
 /**
- * Whether first setup speaks of found items whose copies differ: its question asks about them, and with Synchronize everything
- * on its line leads into choosing them (where the home can be written). Otherwise each kind's line says them (needsYou), so they
- * are said once.
+ * Whether first setup speaks of found items whose copies differ: with Synchronize everything on, its line leads into choosing them
+ * (where the home can be written: firstsetup.ts setupLead). Otherwise differLines says them, so they are said once.
  */
-const setupSpeaksOfCopies = (home: HomeView) => asksNow(home) === 'question' || (home.sync.syncEverything === true && !whyReadOnly(home));
+const setupSpeaksOfCopies = (home: HomeView) => home.sync.syncEverything === true && !whyReadOnly(home);
+
+/**
+ * The found items whose copies differ, each kind by its page's "Copies differ" count, where first setup doesn't speak of them:
+ * while its question asks, one line for every kind (what Yes leaves as it is), its Show them opening that kind, or All; else a
+ * line per kind.
+ */
+function differLines(home: HomeView, kinds: PageKind[]): HTMLElement[] {
+  if (setupSpeaksOfCopies(home)) return [];
+  const differing = kinds.map(kind => ({ kind, count: kindSource(home, kind).facts.filter(asksWhichCopy).length })).filter(({ count }) => count);
+  const found = (kind: PageKind, count: number) => plural(count, `found ${kindNouns[kind].one}`, `found ${kindNouns[kind].many}`);
+  if (asksNow(home) !== 'question') return differing.map(({ kind, count }) => line(`overview-${kind}-differ-line`, 'diff', 'tone-warning',
+    `${found(kind, count)} ${count === 1 ? 'has' : 'have'} copies that differ. `, link('Show them', `overview-${kind}-differ`, () => openKind(kind, { filter: 'attention' }))));
+  if (!differing.length) return [];
+  const total = differing.reduce((sum, { count }) => sum + count, 0), only = differing.length === 1 ? differing[0].kind : undefined;
+  const words = `${only ? found(only, total) : plural(total, 'found item')} ${total === 1 ? 'has copies that differ and stays as it is' : 'have copies that differ and stay as they are'} until you choose. `;
+  const show = () => (only ? openKind(only, { filter: 'attention' }) : openKind('all', { filter: 'attention' }));
+  return [line('overview-differ-line', 'diff', 'tone-warning', words, link('Show them', 'overview-differ', show))];
+}
 
 /** Why the home can't be written (app.ts whyReadOnly): preview only, or a record that stops every write; with no tool managed too. */
 function readOnlyLine(home: HomeView): HTMLElement | null {
@@ -120,8 +140,8 @@ const arrivalLines = (home: HomeView) => home.sync.arrived.map(arrival => {
  * What needs the person, before any figure, in this order: that Central Knot's settings file couldn't be read at launch, with the
  * way to Settings, which says where the old file is (settingspage.ts settingsReset); first setup (after the problems when a kind is stopped; its question, Resume, or the way into choosing copies:
  * firstsetup.ts setupLead); an update to install (updateview.ts updateLine); why the home can't be written (readOnlyLine); each
- * kind's problems, each said once (but the stop said above: matrix.ts problemsBesideStop); found items whose copies differ, a line
- * per kind with the page's "Copies differ" count, where first setup doesn't speak of them; Automatic sync off; then each tool
+ * kind's problems, each said once (but the stop said above: matrix.ts problemsBesideStop); found items whose copies differ
+ * (differLines); Automatic sync off; then each tool
  * that came under management by itself, until it is closed (arrivalLines).
  */
 function needsYou(home: HomeView): HTMLElement | null {
@@ -130,11 +150,7 @@ function needsYou(home: HomeView): HTMLElement | null {
     .filter(problem => !said.has(problem) && said.add(problem))
     .map((problem, at) => line(`overview-${kind}-problem-${at}`, 'triangle-alert', 'tone-warning', `${problem} `,
       link(`Open ${kindNouns[kind].title}`, `overview-${kind}-problem-${at}-open`, () => openKind(kind)))));
-  const differ = empty || setupSpeaksOfCopies(home) ? [] : kinds.map(kind => {
-    const count = kindSource(home, kind).facts.filter(asksWhichCopy).length, { one, many } = kindNouns[kind];
-    const words = `${plural(count, `found ${one}`, `found ${many}`)} ${count === 1 ? 'has' : 'have'} copies that differ. `;
-    return !count ? null : line(`overview-${kind}-differ-line`, 'diff', 'tone-warning', words, link('Show them', `overview-${kind}-differ`, () => openKind(kind, { filter: 'attention' })));
-  });
+  const differ = empty ? [] : differLines(home, kinds);
   const syncOff = empty || whyReadOnly(home) || home.syncOn ? null : line('overview-sync-off', 'circle-minus', 'tone-warning', 'Automatic sync is off: edits wait until you turn it on or ',
     link('Sync once', 'overview-sync-now', () => void syncNow(), acting()), '.');
   const setup = empty ? null : setupLead(home);
@@ -154,19 +170,34 @@ function usedWords(total: number, sum: KindUsage | undefined): string {
 }
 
 /**
- * What the usage reading says of a kind: how many were used (usedWords), followed by either why no tool can tell or the three
- * most used, each a link to its row with its name shortened in the middle. Its four lines' room is held by style.css
- * (.kind-card-usage), so the card is as high before a reading lands as after.
+ * The three most used a kind's card names, none where no row of it has a figure (KindUsage figured), each with its row as the
+ * Library finds it (matrix.ts rowOf): worked out once a draw (kindCards), for the card's names and marks and for its file.
  */
-function cardUsage(kind: PageKind, total: number, sum: KindUsage | undefined) {
+const topRows = (home: HomeView, kind: PageKind) => {
+  const sum = usageSums()?.kinds[kind], shown = rowCount(home, kind) && sum?.figured ? sum.mostUsed : [];
+  return shown.map(each => ({ ...each, row: rowOf(kind, each.key) }));
+};
+type TopRow = ReturnType<typeof topRows>[number];
+
+/**
+ * What the usage reading says of a kind: how many were used (usedWords), with Most used at that line's end where there are any,
+ * a link to the Library in that order (its kept Sort left as it was); then either why no tool can tell or the three most used
+ * (`top`), each a link to its row, its name cut at its end only where the count leaves no room, its hover saying where it goes,
+ * then its file mark (filepanel.ts fileButton: its file opens under the card, cardFiles). Its four lines' room is held by
+ * style.css (.kind-card-usage), so the card is as high before a reading lands as after.
+ */
+function cardUsage(kind: PageKind, total: number, sum: KindUsage | undefined, top: TopRow[]) {
   const used = usedWords(total, sum);
-  const tell = !!total && !!sum?.figured;
-  const cant = total && sum && !tell ? 'No tool that has them on can tell.' : null;
+  const cant = total && sum && !sum.figured ? 'No tool that has them on can tell.' : null;
+  const sorted = top.length ? h('button.kind-card-link.kind-card-sorted', { type: 'button', id: `overview-${kind}-most-used`, title: 'Opens the Library sorted by most used',
+    onclick: () => openKind(kind, { order: 'most-used' }) }, 'Most used', icon('arrow-right', 12)) : null;
   return h('div.kind-card-usage', { id: `overview-${kind}-usage` },
-    used ? h('p.kind-card-line', {}, used) : null,
+    used ? h('p.kind-card-line', {}, used, sorted) : null,
     cant ? h('p.kind-card-line', {}, cant) : null,
-    (tell ? sum!.mostUsed : []).map((each, at) => h('p.kind-card-top-row', {}, h('span', {}, at ? '' : 'Most used'),
-      h('button.kind-card-link.kind-card-top-name', { type: 'button', id: `overview-${kind}-top-${at}`, onclick: () => openKind(kind, { key: each.key }) }, middle(each.name, 8)),
+    top.map((each, at) => h('p.kind-card-top-row', {},
+      h('span.kind-card-top-item', {}, h('button.kind-card-link.kind-card-top-name', { type: 'button', id: `overview-${kind}-top-${at}`,
+        title: `${each.name}: open its row in the Library`, onclick: () => openKind(kind, { key: each.key }) }, each.name),
+      each.row ? fileButton(cardFiles, each.row) : null),
       h('span', {}, plural(each.sessions, 'session')))));
 }
 
@@ -187,9 +218,9 @@ function syncState(kind: PageKind, home: HomeView): HTMLElement | null {
 /**
  * One kind: its page (the card's one button, over the whole card); how many there are, how many are On (the page's word: some may
  * still wait to sync), and how many came from some plugin (origins.ts fromAnyPlugin, as the Library's From says); whether it is in step
- * (syncState); its usage (cardUsage).
+ * (syncState); its usage (cardUsage), its three most used given (`top`: kindCards).
  */
-function kindCard(kind: PageKind, home: HomeView) {
+function kindCard(kind: PageKind, home: HomeView, top: TopRow[]) {
   const { title, short: noun } = kindNouns[kind], facts = kindSource(home, kind).facts;
   const total = rowCount(home, kind), on = facts.filter(fact => fact.on).length, fromPlugins = fromAnyPlugin(home, kind);
   const counts = total ? `${plural(total, noun[0], noun[1])} · ${on ? `${on} on` : 'none on'}${fromPlugins ? ` · ${fromPlugins} from plugins` : ''}` : `No ${noun[1]}`;
@@ -198,7 +229,35 @@ function kindCard(kind: PageKind, home: HomeView) {
       h('button.kind-card-main', { type: 'button', id: `overview-${kind}`, onclick: () => openKind(kind) },
         h('span.kind-card-head', {}, icon(kindGlyph[kind], 16), h('strong', {}, title), icon('arrow-right', 14, 'tone-faint'))),
       h('div.kind-card-summary', {}, h('span', {}, counts), syncState(kind, home))),
-    cardUsage(kind, total, usageSums()?.kinds[kind]));
+    cardUsage(kind, total, usageSums()?.kinds[kind], top));
+}
+
+// ---------- A most used item's file, under its card ----------
+
+/**
+ * The Overview as a file panel's place (filepanel.ts FilePlace): one most used item's file open at a time, drawn under its kind's
+ * card (kindCards) and brought into view once read; kept for the home and the visit it was opened on (`on`), so another home or
+ * another page closes it.
+ */
+const cardFiles: FilePlace & { on?: string } = {
+  view: {}, named: true, reveal: () => requestAnimationFrame(() => document.querySelector('.kind-cards > .details-file-only')?.scrollIntoView({ block: 'nearest' })),
+};
+// Escape closes the file open under a card, the focus back on its mark; an info card open is closed first (renderer.ts).
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && state.page === 'overview' && cardFiles.view.openFile) setFile(cardFiles, undefined, undefined, true); });
+
+/**
+ * The cards, each followed by its file panel where the file open here is one of the items it names (topRows), kept or let go
+ * as every place's is (filepanel.ts keepOpenFile). A panel spans the cards' row (style.css .kind-cards): under its card in one
+ * column, under all three in three.
+ */
+function kindCards(home: HomeView, kinds: PageKind[]) {
+  const on = `${home.home} ${state.visit}`;
+  if (cardFiles.on !== on) Object.assign(cardFiles, { on, view: {} });
+  const tops = kinds.map(kind => ({ kind, top: topRows(home, kind) }));
+  const target = keepOpenFile(cardFiles, tops.flatMap(({ top }) => top.flatMap(each => (each.row ? [each.row] : []))));
+  const filed = target && tops.find(({ top }) => top.some(each => each.row === target))?.kind;
+  const panel = target ? filePanel(cardFiles, target, cardFiles.view.openFile!, true) : null;
+  return h('div.kind-cards', { 'data-count': String(kinds.length) }, tops.flatMap(({ kind, top }) => [kindCard(kind, home, top), kind === filed ? panel : null]));
 }
 
 // ---------- Usage: the strip that says it and collects it again ----------
@@ -289,10 +348,11 @@ export function overviewPage() {
     band ? h('div.bands', {}, band) : null,
     h('div.scroll.overview-scroll', { id: 'overview-scroll' },
       practiceBanner(),
-      // Until something is on, the lead says what Central Knot does; after, the cards and the tools say it in figures.
-      empty ? noToolsLead('overview') : !anyOn(home) ? h('p.overview-lead', {}, leadSentence(home), nextStep(home, asksNow(home) === 'question')) : null,
+      // Until something is on, the lead says what Central Knot does (first setup's question, while it asks); after, the cards and
+      // the tools say it in figures.
+      empty ? noToolsLead('overview') : !anyOn(home) && asksNow(home) !== 'question' ? h('p.overview-lead', {}, leadSentence(home), nextStep(home)) : null,
       needsYou(home),
-      empty ? null : h('div.kind-cards', { 'data-count': String(kinds.length) }, kinds.map(kind => kindCard(kind, home))),
+      empty ? null : kindCards(home, kinds),
       empty ? null : usageStrip(kinds),
       empty ? null : toolsTable(home),
       h('div.overview-more', {},
