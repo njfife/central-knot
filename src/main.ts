@@ -507,7 +507,7 @@ function profileMenu(): Electron.MenuItemConstructorOptions {
     // One not offered (nothing in it: profileplan.ts switchable) is shown disabled, as on the Profiles page.
     ...lastProfiles.profiles.map(profile => {
       const empty = !switchable(profile, lastItems, lastPlugins);
-      return { label: empty ? `${profile.name} (empty)` : `${profile.name} · ${switchPreview(profile, lastItems, lastPlugins)}`, type: 'checkbox' as const, checked: inUseNow.includes(profile), enabled: usable && !empty, click: () => switchFromMenu(profile.id) };
+      return { label: empty ? `${profile.name} (empty)` : `${profile.name} · ${switchPreview(profile, lastItems, lastPlugins).card}`, type: 'checkbox' as const, checked: inUseNow.includes(profile), enabled: usable && !empty, click: () => switchFromMenu(profile.id) };
     }),
     { type: 'separator' },
     { label: 'Edit profiles…', click: () => showPage('profiles') },

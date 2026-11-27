@@ -427,7 +427,7 @@ const putShared = (box: Box, name: string, body = `The ${name} skill.`) => putFi
 /** What a switch to `name` would do, as the page's header and both menus say it, read from the home now. */
 const preview = async (box: Box, name: string) => {
   const view = await homeNow(box), profile = view.profiles.profiles.find(each => each.name === name)!;
-  return switchPreview(profile, homeItems(view), pluginLive(view));
+  return switchPreview(profile, homeItems(view), pluginLive(view)).card;
 };
 
 test('His case: six of his skills in a tool’s folder and four only in the shared folder, all On; a profile with none of them says it turns ten off and that four still load, in the tools that read the shared folder; with none of those, the words as before', async () => {
@@ -823,7 +823,7 @@ async function wholeHome({ enabled = true, parts = false, skills = ['a', 'b', 'c
   if (notes) { await put(box, 'claude-cli', { 'SKILL.md': skillText('My notes.', 'notes') }, [], 'notes'); await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [] }]); }
   const made = async (name: string, items: string[]) => (await saveProfile(box.context, { name, items })).id!;
   /** What the page's header and both menus say of a switch to `id`, from the home as it is now. */
-  const preview = async (id: string) => { const now = await sideNow(box); return switchPreview((await readProfiles(box.home)).profiles.find(each => each.id === id)!, now.live, now.plugins); };
+  const preview = async (id: string) => { const now = await sideNow(box); return switchPreview((await readProfiles(box.home)).profiles.find(each => each.id === id)!, now.live, now.plugins).card; };
   /** A switch to `id`, and what its result adds of the plugin, read from the home after it (app.ts switchOutcome). */
   const switched = async (id: string) => { const done = await switchProfile(box.context, box.tools, id, (await sideNow(box)).side); return { ...done, said: done.profile ? wholeSaid(done.profile, (await sideNow(box)).view) : '' }; };
   const settings = async () => JSON.parse((await text(box, '.claude/settings.json'))!);
@@ -972,9 +972,9 @@ test('Each plugin a switch turns on or off whole in Claude Code is counted, one 
   const kit = (plugin: string, items: InstalledPlugin['items'], off = false): InstalledPlugin => ({ tool: 'claude-cli', plugin, marketName: 'team-tools', listed: true, items, ...(off ? { off } : {}) });
   const server = { kind: 'mcp' as const, name: 's', description: '' }, three = ['brainstorm', 'outline', 'write'].map(skill);
   const on = docsHome([kit('writing-kit', three), kit('solo', [skill('single')]), kit('tracker', [server])], [], [['skill', 'notes', true]]);
-  assert.equal(switchPreview(profile('Mine', ['skill:notes']), homeItems(on), pluginLive(on)), 'Switching turns 5 items off. Turns 3 plugins off in Claude Code');
+  assert.equal(switchPreview(profile('Mine', ['skill:notes']), homeItems(on), pluginLive(on)).card, 'Switching turns 5 items off. Turns 3 plugins off in Claude Code');
   const off = docsHome([kit('writing-kit', three, true), kit('solo', [skill('single')]), kit('tracker', [server], true)], [], [['skill', 'notes', true]]);
-  assert.equal(switchPreview(profile('Write', ['skill:notes', 'plugin:skill:writing-kit@team-tools/write']), homeItems(off), pluginLive(off)), 'Switching turns 1 item on and 1 off. Turns 1 plugin on in Claude Code. Turns 1 plugin off in Claude Code');
+  assert.equal(switchPreview(profile('Write', ['skill:notes', 'plugin:skill:writing-kit@team-tools/write']), homeItems(off), pluginLive(off)).card, 'Switching turns 1 item on and 1 off. Turns 1 plugin on in Claude Code. Turns 1 plugin off in Claude Code');
 });
 
 test('The result names the copy of a plugin from the marketplace each step was for, where two marketplaces bring one of that name', () => {
@@ -998,7 +998,7 @@ test('A skill that comes on in Claude Code with its plugin is said to be on ther
 
 test('In use, the skills on in Claude Code with a ticked one are counted apart, and a skill on there only so reads "Off · on in Claude Code" where another tool has it off', () => {
   const claudeOnly = docsHome([docsIn('claude-cli')]), pdf = profile('Pdf', [pdfId]);
-  assert.equal(switchPreview(pdf, homeItems(claudeOnly), pluginLive(claudeOnly)), 'In use · 1 item on, 1 more on in Claude Code with its plugin');
+  assert.equal(switchPreview(pdf, homeItems(claudeOnly), pluginLive(claudeOnly)).card, 'In use · 1 item on, 1 more on in Claude Code with its plugin');
   const both = docsHome([docsIn('claude-cli'), docsIn('codex-cli', { skillsOff: ['spreadsheet'] })]);
   assert.deepEqual([inUse([pdf], homeItems(both), pluginLive(both)), pluginRowState(pdf, pluginLive(both).find(item => item.id === sheetId)!)], [[pdf], 'Off · on in Claude Code']);
 });
@@ -1203,7 +1203,7 @@ async function kitHome({ claude = true, codex = false, enabled = true, triage = 
   }
   const made = async (name: string, items: string[]) => (await saveProfile(box.context, { name, items })).id!;
   /** What a switch to `name` would do (the page's header and both menus), and what its result says once switched (app.ts): its count, then stillLoadAfter. */
-  const preview = async (name: string) => { const now = await sideNow(box); return switchPreview((await readProfiles(box.home)).profiles.find(each => each.name === name)!, now.live, now.plugins); };
+  const preview = async (name: string) => { const now = await sideNow(box); return switchPreview((await readProfiles(box.home)).profiles.find(each => each.name === name)!, now.live, now.plugins).card; };
   const result = async (id: string) => {
     const switched = await switchProfile(box.context, box.tools, id, (await sideNow(box)).side);
     return `${turnsWords(entryTurns(switched.profile!), 'did')}${stillLoadAfter(switched.profile!, (await sideNow(box)).view)}`;
@@ -1894,19 +1894,19 @@ test('switchPreview gives the same line for the page header and both menus: mana
   const legacy = profile('Legacy', ['skill:notes'], false);
   const legacyWithPluginId = profile('Legacy', [pdfId], false);
   assert.deepEqual([namedCount(legacyWithPluginId, liveList, plugs), switchable(legacyWithPluginId, liveList, plugs)], [0, false], 'non-managing profile ignores plugin ids');
-  assert.equal(switchPreview(legacy, liveList, plugs), 'Switching turns 1 item on and 1 off. Plugin items stay as they are.');
-  assert.equal(switchPreview(profile('EmptyOld', [], false), liveList, plugs), '0 items. Plugin items stay as they are.');
-  assert.equal(switchPreview(profile('EmptyNew', [], true), liveList, plugs), '0 items');
+  assert.equal(switchPreview(legacy, liveList, plugs).card, 'Switching turns 1 item on and 1 off. Plugin items stay as they are.');
+  assert.equal(switchPreview(profile('EmptyOld', [], false), liveList, plugs).card, '0 items. Plugin items stay as they are.');
+  assert.equal(switchPreview(profile('EmptyNew', [], true), liveList, plugs).card, '0 items');
   // pdf and sheet turn off in Codex, and in Claude Code, which has no switch for one skill of a plugin, with the whole plugin.
-  assert.equal(switchPreview(profile('Modern', ['skill:notes'], true), liveList, plugs), 'Switching turns 1 item on and 3 off. Turns 1 plugin off in Claude Code');
+  assert.equal(switchPreview(profile('Modern', ['skill:notes'], true), liveList, plugs).card, 'Switching turns 1 item on and 3 off. Turns 1 plugin off in Claude Code');
   // notes on, pager off: Legacy is in use (other personal item off, plugin items left alone); Modern is not (plugin items still on).
   const notesOn = docsHome([docsIn('claude-cli'), docsIn('codex-cli')], [], [['skill', 'notes', true], ['skill', 'pager', false]]);
-  assert.equal(switchPreview(legacy, homeItems(notesOn), pluginLive(notesOn)), 'In use · 1 item on, the other 1 of yours off. Plugin items stay as they are.');
+  assert.equal(switchPreview(legacy, homeItems(notesOn), pluginLive(notesOn)).card, 'In use · 1 item on, the other 1 of yours off. Plugin items stay as they are.');
   const onlyNotes = docsHome([docsIn('claude-cli'), docsIn('codex-cli')], [], [['skill', 'notes', true]]);
-  assert.equal(switchPreview(legacy, homeItems(onlyNotes), pluginLive(onlyNotes)), 'In use · 1 item on. Plugin items stay as they are.');
+  assert.equal(switchPreview(legacy, homeItems(onlyNotes), pluginLive(onlyNotes)).card, 'In use · 1 item on. Plugin items stay as they are.');
   // Managing profile with plugin off in Codex: held line from heldWords, no "Plugin items stay as they are."
   const offInCodex = docsHome([docsIn('codex-cli', { off: true })], [], [['skill', 'notes', true]]);
-  assert.equal(switchPreview(profile('Docs', ['skill:notes', pdfId, sheetId], true), homeItems(offInCodex), pluginLive(offInCodex)),
+  assert.equal(switchPreview(profile('Docs', ['skill:notes', pdfId, sheetId], true), homeItems(offInCodex), pluginLive(offInCodex)).card,
     'Not in use · document-tools is off in Codex, so 2 of its items can’t be switched from here');
 });
 
@@ -1939,7 +1939,7 @@ test('Copilot shared name example 1: both configured, a managing profile with hi
     const now = await sideNow(box);
     assert.deepEqual(await now.inUse(), ['Mine']);
     const mineProfile = (await readProfiles(box.home)).profiles.find(each => each.id === mine)!;
-    assert.match(switchPreview(mineProfile, await live(box), now.plugins), /^In use · /);
+    assert.match(switchPreview(mineProfile, await live(box), now.plugins).card, /^In use · /);
   } finally { await box.cleanup(); }
 });
 
@@ -1957,7 +1957,7 @@ test('Copilot shared name examples 2, 3 and 4: Quiet turns both off in one switc
 
     // Example 2: Quiet previews two off, turns both off in one switch, is in use, and Undo puts every file back byte for byte.
     const beforeQuiet = await sideNow(box);
-    assert.equal(switchPreview(await profileById(quiet), await live(box), beforeQuiet.plugins), 'Switching turns 2 items off');
+    assert.equal(switchPreview(await profileById(quiet), await live(box), beforeQuiet.plugins).card, 'Switching turns 2 items off');
     const toQuiet = await switchProfile(box.context, box.tools, quiet, beforeQuiet.side);
     assert.deepEqual([toQuiet.stopped, toQuiet.on, toQuiet.off, toQuiet.results], [undefined, [], ['issues', 'issues'], []]);
     const atQuiet = await copilotFiles(box);
@@ -1971,7 +1971,7 @@ test('Copilot shared name examples 2, 3 and 4: Quiet turns both off in one switc
 
     // Example 3: PluginOnly clears the rule, keeps his entry out, and preview, result and History agree on 1 item on.
     const beforePlugin = await sideNow(box);
-    assert.equal(switchPreview(await profileById(pluginOnly), await live(box), beforePlugin.plugins), 'Switching turns 1 item on');
+    assert.equal(switchPreview(await profileById(pluginOnly), await live(box), beforePlugin.plugins).card, 'Switching turns 1 item on');
     const toPlugin = await switchProfile(box.context, box.tools, pluginOnly, beforePlugin.side);
     assert.deepEqual([toPlugin.stopped, toPlugin.on, toPlugin.off, toPlugin.results, toPlugin.settingsChanged], [undefined, ['issues'], [], [], undefined]);
     assert.deepEqual([JSON.parse((await copilotFiles(box)).mcp!).mcpServers.issues, JSON.parse((await copilotFiles(box)).settings!).disabledMcpServers], [undefined, undefined]);
@@ -1984,7 +1984,7 @@ test('Copilot shared name examples 2, 3 and 4: Quiet turns both off in one switc
 
     // Example 4: Mine puts his entry back, clears the rule (plugin's on there too, said in the result), preview == result == History, in use, and Undo restores the prior rule.
     const beforeMine = await sideNow(box);
-    assert.equal(switchPreview(await profileById(mine), await live(box), beforeMine.plugins), 'Switching turns 2 items on');
+    assert.equal(switchPreview(await profileById(mine), await live(box), beforeMine.plugins).card, 'Switching turns 2 items on');
     const toMine = await switchProfile(box.context, box.tools, mine, beforeMine.side);
     assert.deepEqual([toMine.stopped, toMine.on, toMine.off, toMine.results, toMine.settingsChanged], [undefined, ['issues', 'issues'], [], [],
       ['Copilot CLI’s off-switch for “issues” was cleared; there the plugin’s “issues” runs, not yours (same name).']]);
@@ -2013,13 +2013,13 @@ test('Copilot shared name example 5: a non-managing profile naming his server cl
 
     // A non-managing profile that does not touch his issues keeps the rule untouched and shows no exception.
     const beforeNotes = await sideNow(box);
-    assert.equal(switchPreview(notesOnly, await live(box), beforeNotes.plugins), 'Switching turns 1 item on. Plugin items stay as they are.');
+    assert.equal(switchPreview(notesOnly, await live(box), beforeNotes.plugins).card, 'Switching turns 1 item on. Plugin items stay as they are.');
     const toNotes = await switchProfile(box.context, box.tools, notesOnly.id, beforeNotes.side);
     assert.deepEqual([toNotes.stopped, toNotes.settingsChanged, await copilotFiles(box)], [undefined, undefined, atQuiet]);
 
     // Legacy (non-managing, names mcp:issues): preview carries the exception, switch clears the rule, Claude & Codex untouched, in use, Undo restores.
     const beforeLegacy = await sideNow(box);
-    assert.equal(switchPreview(legacy, beforeLegacy.live, beforeLegacy.plugins),
+    assert.equal(switchPreview(legacy, beforeLegacy.live, beforeLegacy.plugins).card,
       'Switching turns 2 items on and 1 off. Plugin items stay as they are, except the plugin’s “issues” turns on in Copilot CLI (same name as yours).');
     const toLegacy = await switchProfile(box.context, box.tools, legacy.id, beforeLegacy.side);
     assert.deepEqual([toLegacy.stopped, toLegacy.on, toLegacy.off, toLegacy.results, toLegacy.settingsChanged], [undefined, ['issues', 'issues'], ['notes'], [],
@@ -2033,7 +2033,7 @@ test('Copilot shared name example 5: a non-managing profile naming his server cl
     await writeFile(join(box.home, '.copilot/settings.json'), atQuiet.settings!);
     const standing = await sideNow(box);
     assert.deepEqual(await standing.inUse(), [], 'rule standing blocks In use even though his item is On');
-    assert.equal(switchPreview(legacy, standing.live, standing.plugins),
+    assert.equal(switchPreview(legacy, standing.live, standing.plugins).card,
       'Switching turns 1 item on. Plugin items stay as they are, except the plugin’s “issues” turns on in Copilot CLI (same name as yours).');
     const cleared = await switchProfile(box.context, box.tools, legacy.id, standing.side);
     assert.deepEqual([cleared.on, cleared.off, cleared.settingsChanged], [['issues'], [],
@@ -2103,7 +2103,7 @@ test('Copilot shared name sequences: (a) box-written rule flips on in Copilot CL
       const mineProfile = (await readProfiles(box.home)).profiles.find(each => each.id === mine)!;
       // The plugin's issues turns off in Claude Code and Codex and on in Copilot CLI, where it then runs: the header says so, as the
       // result does, in words true before the click and after it ("is on", not "stays on": it was off there).
-      assert.equal(switchPreview(mineProfile, planNow.live, planNow.plugins), 'Switching turns 1 item on and 1 off; 1 is on in Copilot CLI, through its plugin');
+      assert.equal(switchPreview(mineProfile, planNow.live, planNow.plugins).card, 'Switching turns 1 item on and 1 off; 1 is on in Copilot CLI, through its plugin');
       const switched = await switchProfile(box.context, box.tools, mine, planNow.side);
       assert.equal(stillLoadAfter(switched.profile!, (await sideNow(box)).view), '; 1 is on in Copilot CLI, through its plugin');
       assert.deepEqual([switched.on, switched.off, switched.results, switched.settingsChanged], [['issues'], ['issues'], [],
@@ -2178,7 +2178,7 @@ test('Copilot shared name sequences: (a) box-written rule flips on in Copilot CL
       // Neither wants neither: preview says 2 off, one switch writes disabledMcpServers: ['issues'], result & History count 2 off, Undo restores both.
       const beforeNeither = await sideNow(box);
       const neitherProfile = (await readProfiles(box.home)).profiles.find(each => each.id === neither)!;
-      assert.equal(switchPreview(neitherProfile, await live(box), beforeNeither.plugins), 'Switching turns 2 items off');
+      assert.equal(switchPreview(neitherProfile, await live(box), beforeNeither.plugins).card, 'Switching turns 2 items off');
       const toNeither = await switchProfile(box.context, box.tools, neither, beforeNeither.side);
       assert.deepEqual([toNeither.off.length, JSON.parse((await text(box, '.copilot/settings.json'))!).disabledMcpServers], [2, ['issues']]);
       assert.equal(turnsWords(entryTurns((await history(box)).at(-1)!.profile!), 'did'), '2 items turned off');
@@ -2186,7 +2186,7 @@ test('Copilot shared name sequences: (a) box-written rule flips on in Copilot CL
       // Switching to DocsOnly clears the shared rule and counts 2 on (matching preview).
       const beforeDocs = await sideNow(box);
       const docsProfile = (await readProfiles(box.home)).profiles.find(each => each.id === docsOnly)!;
-      assert.equal(switchPreview(docsProfile, await live(box), beforeDocs.plugins), 'Switching turns 2 items on');
+      assert.equal(switchPreview(docsProfile, await live(box), beforeDocs.plugins).card, 'Switching turns 2 items on');
       const toDocs = await switchProfile(box.context, box.tools, docsOnly, beforeDocs.side);
       assert.deepEqual([toDocs.on.length, JSON.parse((await text(box, '.copilot/settings.json'))!).disabledMcpServers, toDocs.settingsChanged], [2, undefined, undefined]);
       assert.deepEqual(await (await sideNow(box)).inUse(), ['DocsOnly']);
@@ -2212,7 +2212,7 @@ test('Copilot shared name fix 1: a disabledMcpServers rule outliving the plugin 
       else if (mode === 'uninstalled') { cfg.installedPlugins = []; await writeFile(cfgPath, JSON.stringify(cfg)); }
       else { await writeFile(join(cfg.installedPlugins[0].cache_path, '.mcp.json'), JSON.stringify({ mcpServers: { other: { command: 'npx', args: ['other'] } } })); }
       const beforeOld = await sideNow(box);
-      assert.equal(switchPreview(oldMine, beforeOld.live, beforeOld.plugins), 'Switching turns 1 item on. Plugin items stay as they are.');
+      assert.equal(switchPreview(oldMine, beforeOld.live, beforeOld.plugins).card, 'Switching turns 1 item on. Plugin items stay as they are.');
       const toOld = await switchProfile(box.context, box.tools, oldMine.id, beforeOld.side);
       assert.deepEqual([toOld.on, toOld.off, toOld.left, toOld.results, toOld.settingsChanged],
         [['issues'], [], [], [], ['Copilot CLI’s off-switch for “issues” was cleared, so yours is on there.']], mode);
@@ -2251,7 +2251,7 @@ test('Copilot shared name fix 1: a disabledMcpServers rule outliving the plugin 
       const mineProfile = (await readProfiles(box.home)).profiles.find(each => each.id === mine)!;
       const before = await sideNow(box);
       assert.deepEqual(await before.inUse(), [], 'orphan rule blocks In use');
-      assert.equal(switchPreview(mineProfile, before.live, before.plugins), 'Switching turns 1 item on');
+      assert.equal(switchPreview(mineProfile, before.live, before.plugins).card, 'Switching turns 1 item on');
       // Unwritable .copilot: fails cleanly, not in use, no false settingsChanged.
       await t.test('unwritable .copilot fails cleanly without false settingsChanged', async () => {
         const failed = await withLock(join(box.home, '.copilot'), 'dir-readonly', () => switchProfile(box.context, box.tools, mine, before.side));
@@ -2324,7 +2324,7 @@ test('Copilot shared name fix 3: exact words say the plugin’s server runs inst
     await saveProfile(box.context, { name: 'Legacy', items: ['mcp:issues'], switchesPluginItems: false });
     const legacy = (await readProfiles(box.home)).profiles.find(each => each.name === 'Legacy')!;
     const before = await sideNow(box);
-    assert.equal(switchPreview(legacy, before.live, before.plugins),
+    assert.equal(switchPreview(legacy, before.live, before.plugins).card,
       'Switching turns 2 items on. Plugin items stay as they are, except the plugin’s “issues” turns on in Copilot CLI (same name as yours).');
     const switched = await switchProfile(box.context, box.tools, legacy.id, before.side);
     assert.deepEqual(switched.settingsChanged, ['Copilot CLI’s off-switch for “issues” was cleared; there the plugin’s “issues” runs, not yours (same name).']);
@@ -2359,7 +2359,7 @@ test('Copilot shared name short 1: the menus’ live items (homeItems, as main.t
     const { plugins, live: menuItems } = await sideNow(box);
     assert.equal(menuItems.find(item => item.id === 'mcp:issues')?.copilotOff, 'issues');
     assert.deepEqual(inUse([mineProfile], menuItems, plugins), [], 'menu must not say In use while off-switch stands');
-    assert.equal(switchPreview(mineProfile, menuItems, plugins), 'Switching turns 1 item on');
+    assert.equal(switchPreview(mineProfile, menuItems, plugins).card, 'Switching turns 1 item on');
   } finally { await box.cleanup(); }
 });
 
@@ -2537,4 +2537,37 @@ test('copilotSharesYours: true only when his own On server or a found server in 
   // Found-only server of his in Copilot CLI: true; different case: false (Copilot CLI matches exact bare name).
   assert.equal(copilotSharesYours(home({}, [fact('issues', 'issues')]), at), true);
   assert.equal(copilotSharesYours(home({}, [fact('issues', 'Issues')]), at), false);
+});
+
+test('switchPreview returns a short header line beside the full card sentence that the menus keep unchanged', () => {
+  const words = (text: string) => text.trim().split(/\s+/).filter(token => /[\p{L}\p{N}]/u.test(token)).length;
+  const checkBoth = (got: unknown, line: string, card: string) => {
+    assert.deepEqual(got, { line, card });
+    assert.ok(words(line) <= 10, `expected <=10 words, got ${words(line)}: ${line}`);
+  };
+  const home = docsHome([docsIn('claude-cli'), docsIn('codex-cli')], [], [['skill', 'notes', false], ['skill', 'pager', true]]);
+  const liveList = homeItems(home), plugs = pluginLive(home);
+  checkBoth(switchPreview(profile('Legacy', ['skill:notes'], false), liveList, plugs),
+    'Switching · 1 on, 1 off', 'Switching turns 1 item on and 1 off. Plugin items stay as they are.');
+  checkBoth(switchPreview(profile('Modern', ['skill:notes'], true), liveList, plugs),
+    'Switching · 1 on, 3 off', 'Switching turns 1 item on and 3 off. Turns 1 plugin off in Claude Code');
+  checkBoth(switchPreview(profile('EmptyOld', [], false), liveList, plugs), '0 items', '0 items. Plugin items stay as they are.');
+  checkBoth(switchPreview(profile('EmptyNew', [], true), liveList, plugs), '0 items', '0 items');
+  const notesOn = docsHome([docsIn('claude-cli'), docsIn('codex-cli')], [], [['skill', 'notes', true], ['skill', 'pager', false]]);
+  checkBoth(switchPreview(profile('Legacy', ['skill:notes'], false), homeItems(notesOn), pluginLive(notesOn)),
+    'In use · 1 on, 1 off', 'In use · 1 item on, the other 1 of yours off. Plugin items stay as they are.');
+  const claudeOnly = docsHome([docsIn('claude-cli')]);
+  checkBoth(switchPreview(profile('Pdf', [pdfId]), homeItems(claudeOnly), pluginLive(claudeOnly)),
+    'In use · 1 on, 1 with plugin', 'In use · 1 item on, 1 more on in Claude Code with its plugin');
+  const kit = (name: string, items: InstalledPlugin['items'], off = false): InstalledPlugin => ({ tool: 'claude-cli', plugin: name, marketName: 'team-tools', listed: true, items, ...(off ? { off } : {}) });
+  const twoBrought = docsHome([kit('kit-a', [skill('a1'), skill('a2')]), kit('kit-b', [skill('b1'), skill('b2')])], [], [['skill', 'notes', false]]);
+  checkBoth(switchPreview(profile('Two', ['plugin:skill:kit-a@team-tools/a1', 'plugin:skill:kit-b@team-tools/b1']), homeItems(twoBrought), pluginLive(twoBrought)),
+    'In use · 2 on, 2 with plugins, 1 off', 'In use · 2 items on, 2 more on in Claude Code with their plugins, the other 1 off wherever they can be switched');
+  const offInCodex = docsHome([docsIn('codex-cli', { off: true })], [], [['skill', 'notes', true]]);
+  const held = 'Not in use · document-tools is off in Codex, so 2 of its items can’t be switched from here';
+  assert.deepEqual(switchPreview(profile('Docs', ['skill:notes', pdfId, sheetId], true), homeItems(offInCodex), pluginLive(offInCodex)), { line: held, card: held });
+  const onlyWhole = docsHome([kit('tracker', [{ kind: 'mcp', name: 's', description: '' }])], [], [['skill', 'notes', true]]);
+  onlyWhole.pluginItems![0]!.serversOff = ['s'];
+  checkBoth(switchPreview(profile('Mine', ['skill:notes']), homeItems(onlyWhole), pluginLive(onlyWhole)),
+    'Switching · 1 plugin off', 'Switching turns 1 plugin off in Claude Code');
 });
