@@ -1249,7 +1249,7 @@ span.ins-confirm { margin-top: 0; }
   .history-list { display: block; }
   .history-row { grid-template-columns: minmax(80px, max-content) minmax(0, 1fr) auto; column-gap: 16px; row-gap: 2px; }
   .history-about { grid-column: 2 / -1; grid-row: 2; margin-left: 22px; }
-  .history-row > .change-panel, .history-row > .history-confirm { margin-top: 10px; }
+  .history-row > .change-panel, .history-row > .manage-question { margin-top: 10px; }
   /* The name takes the line it is on. */
   .history-row .history-what > strong { max-width: none; }
 }
@@ -1265,10 +1265,13 @@ span.ins-confirm { margin-top: 0; }
 .history-undone .history-what strong { color: var(--ink-soft); }
 .history-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 2px 12px; text-align: right; }
 .history-actions .btn.link { flex: 0 1 auto; min-width: 0; height: auto; padding: 0; white-space: normal; text-align: right; }
-/* Inline Manage-again question inside a History row (historypage.ts managingRow). */
-.history-row > .history-confirm { grid-column: 1 / -1; border: 1px solid var(--line); border-radius: 8px; flex-wrap: wrap; justify-content: space-between; gap: 8px 12px; padding: 8px 12px; }
-.history-confirm > .band-text { flex: 1 1 320px; color: var(--ink); }
-.history-confirm-actions { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+/* The question before a tool left out is managed again, in its History row and in its Harnesses card (managecard.ts manageQuestion). */
+.history-row > .manage-question { grid-column: 1 / -1; }
+.history-row > .manage-question, .harness-manage > .manage-question { border: 1px solid var(--line); border-radius: 8px; flex-wrap: wrap; justify-content: space-between; gap: 8px 12px; padding: 8px 12px; }
+.manage-question > .band-text { flex: 1 1 320px; color: var(--ink); }
+.manage-question-changed { display: block; }
+/* The buttons keep to the box: one that doesn't fit beside the other goes whole to the next line. */
+.manage-question-actions { flex: 0 1 auto; min-width: 0; display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; margin-left: auto; }
 
 /* ---------- MCP sign-in (mcpsigninpage.ts): a row per server, a column per tool (14% each, six beside the name's 16%); every word
    wraps in its cell but the last before a (?), kept with it, its column widening for the pair; none is cut; the head row stays at
@@ -2156,12 +2159,11 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .harness-card-path { font-size: 12px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: auto; padding: 0 16px 14px; }
 .harness-card-next { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 /* A tool's Manage switch on its card (managecard.ts): the switch and its word (with Managed (?) on the first managed card,
-   or an unmanaged tool's rejoin line). It sits at the foot of the card, above the folder, so the switches of a row of cards
+   or, once an unmanaged tool's switch is pressed, its question). It sits at the foot of the card, above the folder, so the switches of a row of cards
    line up. A tool left out has its name and switch only. */
 .harness-manage { display: flex; flex-direction: column; gap: 6px; margin: auto 16px 10px; padding-top: 10px; border-top: 1px solid var(--line); }
 .harness-manage-head { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; }
 .harness-manage-head > .info-wrap { margin-left: -4px; flex: none; }
-.harness-manage-line { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .harness-manage + .harness-card-path { margin-top: 0; }
 /* A tool left out has nothing to count: its switch follows its name, and its folder stays at the foot. */
 .harness-card-out .harness-manage { margin-top: 0; }

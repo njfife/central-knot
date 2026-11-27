@@ -316,33 +316,41 @@ export async function lookFor<C, E extends Seen, D extends Disk<E>>(kind: Kind<C
 }
 
 /**
- * What managing one more harness (`joining`) would do there now, as its Harnesses card says before its Manage switch is turned
+ * What managing one more harness (`joining`) would do there now, as its question says before its Manage switch is turned
  * on: the look a pass makes with `tools` (the managed harnesses with `joining` among them, in their order; the guards included,
  * so cameBack's copies that give way are counted; nothing is saved), and each item's plan there, deleted items' too. `rule`: the home's Synchronize
  * everything is on, so a found item it can take is counted as taken in. The one place this is counted; tests/managetool.test.ts
- * holds it equal to what the pass then does.
+ * holds it equal to what the pass then does. A kind whose record can't be opened, or whose whole file or folder there can't be
+ * seen (unreadIn), is `unread`: what joining does to it is not known, never "nothing".
  */
 export async function joinCounts<C, E extends Seen, D extends Disk<E>>(
   kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[], joining: HarnessId, rule: boolean,
 ): Promise<JoinCounts> {
-  const counts: JoinCounts = { written: 0, kept: 0, removed: 0, found: 0, takenIn: 0 };
+  const counts: JoinCounts = { written: 0, kept: 0, removed: 0, found: 0, takenIn: 0, changing: [], unread: [] };
+  if (!kind.harnesses([joining]).length) return counts;
   const { library, problem } = await kind.open(context);
-  if (problem || !kind.harnesses([joining]).length) return counts;
+  if (problem) return { ...counts, unread: [kind.kind] };
   const look = await lookAt(kind, context, kind.harnesses(tools), library);
   const items = Object.values(library.items);
   await guardFolders(look, items);
+  if (unreadIn(look.disk, [joining]).length) return { ...counts, unread: [kind.kind] };
   const leaving = new Set<string>();
   for (const item of items) {
     const made = plan(item, copiesOf(look, item));
-    counts.kept += [...made.keep, ...(look.givingWay.get(item.key) ?? [])].filter(kept => kept.harness === joining).length;
-    if (made.write.includes(joining)) counts.written++;
-    if (made.remove.includes(joining)) { counts.removed++; leaving.add(item.key); }
+    const kept = [...made.keep, ...(look.givingWay.get(item.key) ?? [])].filter(copy => copy.harness === joining).length;
+    counts.kept += kept;
+    const does = made.write.includes(joining) ? 'write' : made.remove.includes(joining) ? 'remove' : kept ? 'keep' : undefined;
+    if (does === 'write') counts.written++;
+    if (does === 'remove') { counts.removed++; leaving.add(item.key); }
+    if (does) counts.changing.push({ kind: kind.kind, key: item.key, name: item.name, does, saves: kept });
   }
   // Found there: each key it has a copy of that can be taken in (its own, or one it has another way: foundCopies) with no live
   // item for it, but a deleted item's copy the pass removes there.
   for (const key of new Set([...look.disk.byKey.keys(), ...(look.disk.outside?.keys() ?? [])])) {
     if ((library.items[key] && !library.items[key].deleted) || leaving.has(key) || !foundCopies(look, key, []).some(copy => copy.tool === joining)) continue;
-    counts[rule && 'take' in takeInAnswer('rule', foundKey(look, key)) ? 'takenIn' : 'found']++;
+    const taken = rule && 'take' in takeInAnswer('rule', foundKey(look, key));
+    counts[taken ? 'takenIn' : 'found']++;
+    if (taken) counts.changing.push({ kind: kind.kind, key, name: key, does: 'take', saves: 0 });
   }
   return counts;
 }
