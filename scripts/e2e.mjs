@@ -23101,6 +23101,12 @@ async function pluginItemSwitchesFlow() {
     for (const dir of ['.pi', '.config/opencode', '.gemini', '.agents', '.claude']) if (existsSync(join(home, dir))) walk(join(home, dir));
     return { files, history: await entryIds() };
   };
+  // What changed since `before` (homeNow): the paths whose bytes differ, and History's new entries, each its kind and cause.
+  const changedSince = async before => {
+    const now = await homeNow(), events = await a.run('window.centralKnot.history().then(history => history.events.map(event => [event.id, event.kind, event.cause ?? ""]))');
+    const paths = [...new Set([...Object.keys(before.files), ...Object.keys(now.files)])].filter(path => before.files[path] !== now.files[path]);
+    return { files: paths.map(path => path.slice(home.length + 1)), history: events.filter(([id]) => !before.history.includes(id)).map(([, kind, cause]) => `${kind} ${cause}`.trim()) };
+  };
   const clicksSince = async before => (await a.run('window.centralKnot.history().then(history => history.events.map(event => [event.id, event.cause ?? ""]))'))
     .filter(([id, cause]) => !before.includes(id) && (!cause || cause === 'switch'));
   // A picture with `place` in view (Its items: at 860 it is below the panel), the header's result above it, the pointer over `hover`.
@@ -23177,7 +23183,7 @@ async function pluginItemSwitchesFlow() {
   await a.click(libSwitch('pi-cli'));
   await done();
   same('on the Library’s row too, its Pi switch drawn before his shared copy came is refused, and every tool’s files and History are as before it',
-    [await header(), await homeNow()], ['polish changed since the page was read. Nothing was changed.', beforeLibrary]);
+    [await header(), await changedSince(beforeLibrary)], ['polish changed since the page was read. Nothing was changed.', { files: [], history: [] }]);
   await a.click('#nav-plugins');
   await openPage('trio');
   // An Off line and a deleted one have no switch.
@@ -23211,15 +23217,6 @@ async function pluginItemSwitchesFlow() {
   if (railed) await a.click('#sidebar-toggle');
   await fullSize(a);
   await shot('item-switches-cannot-light-860', SMALLEST, 'light');
-  // The long skill kept out of Pi and let into OpenCode, then his copy of it comes in the shared skills folder, which both read, behind
-  // the page: the Pi switch drawn before is refused, and as the click looks at the home and runs no pass, nothing anywhere changes.
-  for (const tool of ['pi-cli', 'opencode-cli']) { await a.click(sw('pair', tool, 'skill', long)); await done(); }
-  put(join(home, `.agents/skills/${long}/SKILL.md`), md(long, 'My own, in the shared skills folder.'));
-  const beforeShared = await homeNow();
-  await a.click(sw('pair', 'pi-cli', 'skill', long));
-  await done();
-  same('his copy in the shared skills folder behind the page: the Pi switch drawn before is refused, and every tool’s files and History are as before it',
-    [await header(), await homeNow()], [`${long} changed since the page was read. Nothing was changed.`, beforeShared]);
   // His own mine with Pi's box unticked (OpenCode keeps the plugin on): still no Pi switch over it, and his copy as it was.
   await a.click('#pbox-0-pair-opencode-cli');
   await done();
@@ -23257,6 +23254,18 @@ async function pluginItemSwitchesFlow() {
       [true, 'Its copy was deleted in OpenCode. When sync runs, the agent turns off; Central Knot keeps it.']);
     await shot('item-switches-copy-gone-light-860', SMALLEST, 'light');
   }
+  // The long skill is kept out of Pi and on in OpenCode now (Pi's box unticked, OpenCode's ticked); once the pass the moved copy set
+  // off has run, his copy of it comes in the shared skills folder, which both read, behind the page: the Pi switch drawn before is
+  // refused, and as the click looks at the home and runs no pass, nothing anywhere changes.
+  await until(async () => (await a.run('window.centralKnot.history().then(history => history.events.map(event => event.cause ?? ""))')).includes('deleted-by-hand'));
+  await a.click('#header-refresh');
+  await done();
+  put(join(home, `.agents/skills/${long}/SKILL.md`), md(long, 'My own, in the shared skills folder.'));
+  const beforeShared = await homeNow();
+  await a.click(sw('pair', 'pi-cli', 'skill', long));
+  await done();
+  same('his copy in the shared skills folder behind the page: the Pi switch drawn before is refused, and every tool’s files and History are as before it',
+    [await header(), await changedSince(beforeShared)], [`${long} changed since the page was read. Nothing was changed.`, { files: [], history: [] }]);
   same('no page errors, item switches', a.pageErrors, []);
   await a.quit();
 }

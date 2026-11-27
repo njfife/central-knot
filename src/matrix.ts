@@ -2891,11 +2891,11 @@ export function flipInHarness(kind: PageKind, key: string, name: string, tool: s
   more: { still?: () => Promise<boolean>; said?: Click['said'] } = {}) {
   void applyClick(async () => {
     setHome(await window.centralKnot.look());
-    // `still` runs whatever else is found, so the page it reads again is drawn as it now is.
     const row = rowByKey(kind, key), item = row && inLibrary(itemOf(row)), now = row && switchDrawn(row, item, tool), out = !drawn.out;
-    const still = await (more.still?.() ?? true), refusal = `${name} changed since the page was read. Nothing was changed.`;
-    const stands = still && !!item?.on && !!state.home?.[kind].tools.includes(tool as HarnessId) && now?.at === drawn.at && now.is === drawn.is && now.out === drawn.out;
-    if (!row || !item || !stands) return { page: state.page, item: name, warn: true, band: true, refused: true, text: refusal };
+    // The home first, so a refusal is said at once; `still` (a plugin's page reads its plugins again) only where it stands there as drawn.
+    const stands = !!item?.on && !!state.home?.[kind].tools.includes(tool as HarnessId) && now?.at === drawn.at && now.is === drawn.is && now.out === drawn.out
+      && (await (more.still?.() ?? true));
+    if (!row || !item || !stands) return { page: state.page, item: name, warn: true, band: true, refused: true, text: `${name} changed since the page was read. Nothing was changed.` };
     return { kind, items: [name], rows: [{ kind, key }], changes: [rowClicks.inHarness(row, item, tool, out)], ...(more.said ? { undoSentence: true } : {}),
       said: more.said ?? ((notIn: HarnessId[]) => libraryPages[kind].say.said.inHarness(name, tool, out, notIn.includes(tool as HarnessId))) };
   });
