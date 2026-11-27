@@ -362,9 +362,9 @@ test('A switch’s count takes each plugin’s item once however many tools turn
   assert.deepEqual(plan.map(each => [each.id, each.on, each.off]), [[pdfId, [], ['codex-cli', 'pi-cli']], [sheetId, ['codex-cli'], []]]);
   assert.equal(turnsWords(allTurns(switchPlan(sheets, homeItems(home)), plan), 'will'), 'turns 1 item on and 1 off');
   const off = docsHome([docsIn('codex-cli', { off: true })]);
-  assert.deepEqual(allTurns(switchPlan(profile('Docs', [pdfId]), homeItems(off)), pluginPlan(profile('Docs', [pdfId]), pluginLive(off))), { on: [], off: [], tools: [] });
+  assert.deepEqual(allTurns(switchPlan(profile('Docs', [pdfId]), homeItems(off)), pluginPlan(profile('Docs', [pdfId]), pluginLive(off))), { on: [], off: [], retooled: [] });
   const held = docsHome([docsIn('codex-cli', { switchesHeld: 'Codex’s config.toml writes skills.config as a value.' })]), none = profile('None', ['skill:gone']);
-  assert.deepEqual(allTurns(switchPlan(none, homeItems(held)), pluginPlan(none, pluginLive(held))), { on: [], off: [], tools: [] }, 'held on, a profile that leaves them out turns none off');
+  assert.deepEqual(allTurns(switchPlan(none, homeItems(held)), pluginPlan(none, pluginLive(held))), { on: [], off: [], retooled: [] }, 'held on, a profile that leaves them out turns none off');
 });
 
 test('The Undo of a switch turns back each plugin copy still as the switch left it and still the plugin’s; one changed since, or let go, is left', () => {
@@ -374,7 +374,7 @@ test('The Undo of a switch turns back each plugin copy still as the switch left 
   const home = docsHome([docsIn('claude-cli'), docsIn('codex-cli')], [{ key: 'pdf-reader', on: false }, { key: 'spreadsheet', on: false, source: undefined }]);
   const { back, left } = pluginUndo(entry, pluginLive(home));
   assert.deepEqual([back.map(turn => [turn.item.id, turn.copy.tool, turn.on]), left.map(({ copy, why }) => [copy.name, copy.tool, why])], [[[pdfId, 'pi-cli', true]], [['pdf-reader', 'codex-cli', 'changed since the switch'], ['spreadsheet', 'pi-cli', 'changed since the switch']]]);
-  assert.deepEqual(undoTurns(entry, homeItems(home), pluginLive(home)), { on: [{ id: pdfId, on: true }], off: [], tools: [] });
+  assert.deepEqual(undoTurns(entry, homeItems(home), pluginLive(home)), { on: [{ id: pdfId, on: true }], off: [], retooled: [] });
   assert.equal(turnsWords(entryTurns(entry.profile), 'did'), '2 items turned off', 'History says what the switch did, each item once');
   // The whole plugin turned off in Codex since: off there, as the switch left it, but no switch of that one item can put it back
   // (its click would turn the plugin on), so it is left.
@@ -2643,7 +2643,7 @@ test('Copilot shared name short 3: History undoTurns uses the same found-entry g
     const now = await sideNow(box);
     const mcp = await serversView(box.context, box.tools);
     const planned = undoTurns(event, now.live, now.plugins, mcp);
-    assert.deepEqual(planned, { on: [], off: [], tools: [] }, 'History must not offer an Undo that can only leave the off-switch off');
+    assert.deepEqual(planned, { on: [], off: [], retooled: [] }, 'History must not offer an Undo that can only leave the off-switch off');
     const refused = await undoSwitch(box.context, box.tools, event.id, now.side);
     assert.equal(refused.stopped, 'Copilot CLI’s off-switch for “issues” was left off: a server of yours has that name there now.');
   } finally { await box.cleanup(); }
@@ -2705,7 +2705,7 @@ test('A profile switch returns the settled History profile payload, and undoOffe
     const afterCleared = await homeNow();
     assert.equal(undoOffered(cleared, afterCleared), false);
     assert.equal(undoOffered(entry, afterCleared), false);
-    assert.deepEqual(undoInHome(cleared, afterCleared), { on: [], off: [], tools: [] });
+    assert.deepEqual(undoInHome(cleared, afterCleared), { on: [], off: [], retooled: [] });
     // Failed orphan Copilot CLI clear: settleEntry drops copilotCleared from History and returns that exact payload (no drift).
     await t.test('failed orphan Copilot CLI clear drops copilotCleared from History and result', async () => {
       await writeFile(settingsPath, `${JSON.stringify({ ...JSON.parse((await text(box, '.copilot/settings.json'))!), disabledMcpServers: ['issues'] }, null, 2)}\n`);
