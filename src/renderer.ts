@@ -193,8 +193,8 @@ function writeFact(sync: SyncView): { glyph: IconName; text: string; short?: str
  * sync starts once something is.
  */
 function syncSwitch(home: HomeView) {
-  // A narrow status bar calls it "Sync" (style.css): the switch and its state keep their words, and the tooltip names it whole.
-  const label = h('span.sync-label', {}, h('span.fact-long', {}, 'Automatic sync'), h('span.fact-short', {}, 'Sync'));
+  // Keeps its full name at every width so it matches Settings' wording.
+  const label = h('span.sync-label', {}, 'Automatic sync');
   // With no tool managed there is nothing to sync: the switch is shown, not offered.
   if (!home.sync.managed.length) {
     return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: `${noToolManagedSentence(home)} So there is nothing to sync.` },

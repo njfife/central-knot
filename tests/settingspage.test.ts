@@ -2,7 +2,7 @@
 // download-estimate hint and unread-count tails, plugin-update card truth, and Synchronize everything copy and History link.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { AppPreferences, HomeView, PluginTextView } from '../src/types.ts';
+import type { AppPreferences, HistoryEvent, HomeView, PluginTextView } from '../src/types.ts';
 import { findById, installDom, textOf, type FakeNode } from './domstub.ts';
 
 let onPluginText: ((view: PluginTextView) => void) | undefined;
@@ -74,15 +74,16 @@ test('plugin text hint comes and goes once per transition and keeps aria-describ
   assert.equal(textOf(findById(rendered, 'setting-plugin-text-hint')), 'The 2 outside their marketplace are downloaded once (under 1 MB).');
   assert.equal(findById(rendered, 'plugin-text-on')?.attrs['aria-describedby'], 'setting-plugin-text-info-card setting-plugin-text-hint setting-plugin-text-notice');
   assert.equal(textOf(findById(rendered, 'setting-plugin-text-info-card')),
-    'Keeps plugin items’ names, descriptions and first lines, so Find can search them. Plugins outside their marketplace fetch only changes after the first download (or daily on a branch); any that can’t be read are tried again later.');
+    'Keeps plugin items’ names, descriptions and first lines, so Find can search them. After the first download, only changes are fetched (daily on a branch). Any plugin that can’t be read is tried again later.');
 
-  // Unread count drops the standing retry tail, which now lives in the card.
-  onPluginText!({ read: 4, of: 5, elsewhere: 1, reading: false, on: true });
+  // Changing count while hint stays visible updates in place with no redraw.
+  onPluginText!({ read: 4, of: 5, elsewhere: 1, reading: true, on: true });
+  assert.equal(redraws, drawsBefore + 1);
   assert.equal(textOf(findById(rendered, 'setting-plugin-text-hint')), 'The one plugin outside its marketplace is downloaded once (under 1 MB).');
-  assert.equal(textOf(findById(rendered, 'setting-plugin-text-notice')), 'Read 4 of 5 plugins. 1 couldn’t be read.');
 
   // Hint disappears again when elsewhere drops back to 0.
   onPluginText!({ read: 4, of: 5, elsewhere: 0, reading: true, on: true });
+  assert.equal(redraws, drawsBefore + 2);
   assert.equal(findById(rendered, 'setting-plugin-text-hint'), undefined);
   assert.equal(findById(rendered, 'plugin-text-on')?.attrs['aria-describedby'], 'setting-plugin-text-info-card setting-plugin-text-notice');
 });
@@ -93,12 +94,17 @@ test('plugin text reading state transitions redraw once on each change and stay 
   const drawsBefore = redraws;
   assert.equal(findById(rendered, 'setting-plugin-text-notice')?.classList.contains('setting-progress'), true);
 
-  // Reading finishes: redraws once to clear progress tone and role.
+  // Reading finishes: redraws once to clear progress tone and role; unread count drops the standing retry tail.
+  onPluginText!({ read: 4, of: 5, elsewhere: 0, reading: false, on: true });
+  assert.equal(redraws, drawsBefore + 1);
+  assert.equal(textOf(findById(rendered, 'setting-plugin-text-notice')), 'Read 4 of 5 plugins. 1 couldn’t be read.');
+  assert.equal(findById(rendered, 'setting-plugin-text-notice')?.classList.contains('setting-progress'), false);
+  assert.equal(findById(rendered, 'setting-plugin-text-notice')?.attrs.role, undefined);
+
+  // In-place update once all plugins read stays at one redraw.
   onPluginText!({ read: 5, of: 5, elsewhere: 0, reading: false, on: true });
   assert.equal(redraws, drawsBefore + 1);
   assert.equal(textOf(findById(rendered, 'setting-plugin-text-notice')), 'Read 5 of 5 plugins.');
-  assert.equal(findById(rendered, 'setting-plugin-text-notice')?.classList.contains('setting-progress'), false);
-  assert.equal(findById(rendered, 'setting-plugin-text-notice')?.attrs.role, undefined);
 
   // Reading resumes for a new plugin: redraws once to restore progress tone and role.
   onPluginText!({ read: 5, of: 6, elsewhere: 0, reading: true, on: true });
@@ -130,25 +136,27 @@ test('Update plugins automatically card says its schedule only while true and ch
 
   pluginUpdates.view = { on: true, paused: false, checking: false, updated: [], failed: [], first: true };
   assert.equal(await setPrefs({ pluginUpdates: true, tray: true }),
-    'Checks soon after opening and every four hours, window closed too. A plugin you turned off stays off.');
+    'Checks every four hours (soon after opening when one is due), window closed too. A plugin you turned off stays off.');
   assert.equal(textOf(findById(rendered, 'setting-plugin-updates-notice')), 'Not checked yet in this home.');
 
   // Without a system tray, closing the window quits, so "window closed too" is untrue.
   assert.equal(await setPrefs({ pluginUpdates: true, tray: false }),
-    'Checks soon after opening and every four hours while this window stays open. A plugin you turned off stays off.');
+    'Checks every four hours (soon after opening when one is due) while this window stays open. A plugin you turned off stays off.');
 
   // Switch off: qualifies the schedule with "When on" and still respects tray absence.
   assert.equal(await setPrefs({ pluginUpdates: false, tray: true }),
-    'When on, checks soon after opening and every four hours, window closed too. A plugin you turned off stays off.');
+    'When on, checks every four hours (soon after opening when one is due), window closed too. A plugin you turned off stays off.');
   assert.equal(await setPrefs({ pluginUpdates: false, tray: false }),
-    'When on, checks soon after opening and every four hours while this window stays open. A plugin you turned off stays off.');
+    'When on, checks every four hours (soon after opening when one is due) while this window stays open. A plugin you turned off stays off.');
 
-  // Automatic sync off: paused, so "every four hours" is not claimed (both from view.paused and from home.syncOn before view arrives).
+  // Automatic sync off: when on, paused; when off, explains what turning it on would do and that it waits while Automatic sync is off.
   pluginUpdates.view = { on: true, paused: true, checking: false, updated: [], failed: [], first: true };
   assert.equal(await setPrefs({ pluginUpdates: true, tray: true }),
     'Paused while Automatic sync is off. A plugin you turned off stays off.');
   assert.equal(await setPrefs({ pluginUpdates: false, tray: true }),
-    'Paused while Automatic sync is off. A plugin you turned off stays off.');
+    'When on, checks every four hours (soon after opening when one is due), window closed too. It waits while Automatic sync is off. A plugin you turned off stays off.');
+  assert.equal(await setPrefs({ pluginUpdates: false, tray: false }),
+    'When on, checks every four hours (soon after opening when one is due) while this window stays open. It waits while Automatic sync is off. A plugin you turned off stays off.');
   pluginUpdates.view = undefined;
   state.home = makeHome({ syncOn: false });
   assert.equal(await setPrefs({ pluginUpdates: true, tray: true }),
@@ -159,65 +167,122 @@ test('Update plugins automatically card says its schedule only while true and ch
   await loadSettings();
 });
 
-test('Synchronize everything card tells it apart from Automatic sync, puts waiting last, names the Library, and hides History during band Undo', () => {
-  const deletedFact = (key: string) => ({
-    key, name: key, description: '', copies: {}, except: [], cannot: {}, edited: [],
-    takeInAnswers: { click: { take: 'h1' }, rule: { leave: 'deleted' } },
-  });
-  const waitingFact = (key: string) => ({
-    key, name: key, description: '', copies: {}, except: [], cannot: {}, edited: [],
-    takeInAnswers: { click: { wait: true }, rule: { wait: true } },
-  });
-  const notice = { kind: 'taken-in', items: ['notes'], from: ['claude-cli'], history: 'take-notes' };
+const takeFact = (key: string) => ({
+  key, name: key, description: '', copies: {}, except: [], cannot: {}, edited: [],
+  takeInAnswers: { click: { take: 'claude-cli' }, rule: { take: 'claude-cli' } },
+});
+const deletedFact = (key: string) => ({
+  key, name: key, description: '', copies: {}, except: [], cannot: {}, edited: [],
+  takeInAnswers: { click: { take: 'h1' }, rule: { leave: 'deleted' } },
+});
+const waitingFact = (key: string) => ({
+  key, name: key, description: '', copies: {}, except: [], cannot: {}, edited: [],
+  takeInAnswers: { click: { wait: true }, rule: { wait: true } },
+});
 
-  // Off, 1 taken out + 1 waiting: drops "earlier", names "its row in the Library", waiting last beside Choose copies.
+test('Synchronize everything shows the switch difference on the page', () => {
   state.outcome = undefined;
+  state.history.data = undefined;
   state.dismissed.clear();
   state.home = makeHome({
-    skills: { ...emptyKind(), items: [deletedFact('old-one'), waitingFact('review')] },
+    skills: { ...emptyKind(), items: [takeFact('new-one'), deletedFact('old-one'), waitingFact('review')] },
   });
   draw();
+  assert.equal(textOf(findById(rendered, 'setting-sync-everything-hint')),
+    'Also adds what turns up in a tool; Automatic sync in the status bar keeps what’s already in Central Knot in step.');
+  assert.equal(findById(rendered, 'sync-everything-on')?.attrs['aria-describedby'],
+    'setting-sync-everything-info-card setting-sync-everything-hint setting-sync-everything-notice');
   assert.equal(textOf(findById(rendered, 'setting-sync-everything-info-card')),
     'What turns up in a tool is turned on in every tool Central Knot manages; items whose copies differ wait for your choice. Automatic sync in the status bar keeps items already in Central Knot in step.');
-  assert.equal(textOf(findById(rendered, 'setting-sync-everything-notice')),
-    'Nothing found in your tools now would be added. 1 found item was taken out of Central Knot and isn’t added by itself again: Add on its row in the Library, or Restore in History, brings it back. 1 found item has copies that differ and waits for your choice of copy.Choose copies');
+});
 
-  // Plural taken out: drops "earlier" and uses "its row in the Library".
+test('Synchronize everything agrees on managed tools and singular/plural taken-out wording', () => {
+  state.outcome = undefined;
+  state.history.data = undefined;
+  state.dismissed.clear();
+  state.home = makeHome({
+    skills: { ...emptyKind(), items: [takeFact('new-one'), deletedFact('old-one'), waitingFact('review')] },
+  });
+  draw();
+  assert.equal(textOf(findById(rendered, 'setting-sync-everything-notice')),
+    'Turning it on puts the 1 item found in your tools into every tool Central Knot manages now. 1 found item was taken out of Central Knot and isn’t added by itself again: Add on its row in the Library, or Restore in History, brings it back. 1 found item has copies that differ and waits for your choice of copy.Choose copies');
+
+  // Plural taken out agrees on "their rows" and "brings them back".
   state.home = makeHome({
     skills: { ...emptyKind(), items: [deletedFact('old-one'), deletedFact('old-two'), waitingFact('review')] },
   });
   draw();
   assert.equal(textOf(findById(rendered, 'setting-sync-everything-notice')),
-    'Nothing found in your tools now would be added. 2 found items were taken out of Central Knot and aren’t added by themselves again: Add on its row in the Library, or Restore in History, brings one back. 1 found item has copies that differ and waits for your choice of copy.Choose copies');
+    'Nothing found in your tools now would be added. 2 found items were taken out of Central Knot and aren’t added by themselves again: Add on their rows in the Library, or Restore in History, brings them back. 1 found item has copies that differ and waits for your choice of copy.Choose copies');
+});
 
-  // On with Automatic sync off + waiting: "later" comes before "waiting", so waiting stays last beside Choose copies.
+test('Synchronize everything puts what was taken in before what waits with Choose copies last', () => {
+  const notice = { kind: 'taken-in', items: ['notes'], from: ['claude-cli'], history: 'take-notes', histories: ['take-notes'] };
+  state.outcome = undefined;
+  state.history.data = undefined;
+  state.dismissed.clear();
   state.home = makeHome({
     syncOn: false,
     sync: { managed: ['claude-cli', 'codex-cli'], present: ['claude-cli', 'codex-cli'], leftOut: [], access: { allowed: true }, gate: { state: 'ready' }, syncEverything: true, caughtUp: [] },
     skills: { ...emptyKind(), items: [waitingFact('review')], notices: [notice] },
   });
   draw();
+  const rowKids = (findById(rendered, 'setting-sync-everything')?.children ?? [])
+    .filter((child): child is FakeNode => !!child && typeof child === 'object' && 'tag' in child);
+  const addedIndex = rowKids.findIndex(child => child.className.split(/\s+/).includes('setting-added'));
+  const noticeIndex = rowKids.findIndex(child => child.attrs.id === 'setting-sync-everything-notice');
+  assert.ok(addedIndex >= 0 && noticeIndex > addedIndex, `expected .setting-added (${addedIndex}) before #setting-sync-everything-notice (${noticeIndex})`);
   assert.equal(textOf(findById(rendered, 'setting-sync-everything-notice')),
     'Automatic sync is off, so it takes items in at Sync once. 1 found item has copies that differ and waits for your choice of copy.Choose copies');
+});
 
-  // While state.outcome holds this switch's Undo, the take-in line drops "History can undo it." and its History button.
-  state.outcome = { page: 'settings', band: true, settingsBand: true, text: 'Synchronize everything is on.', act: { label: 'Undo', id: 'outcome-undo', run() {} } };
+test('Synchronize everything drops History only on take-in lines covered by the band’s Undo', () => {
+  const oldNotice = { kind: 'taken-in', items: ['early'], from: ['claude-cli'], history: 'take-early', histories: ['take-early'] };
+  const newNotice = { kind: 'taken-in', items: ['notes'], from: ['claude-cli'], history: 'take-notes', histories: ['take-notes'] };
+  const bgNotice = { kind: 'taken-in', items: ['fresh'], from: ['claude-cli'], history: 'take-fresh', histories: ['take-fresh'] };
+  state.dismissed.clear();
+  state.home = makeHome({
+    sync: { managed: ['claude-cli', 'codex-cli'], present: ['claude-cli', 'codex-cli'], leftOut: [], access: { allowed: true }, gate: { state: 'ready' }, syncEverything: true, caughtUp: [] },
+    skills: { ...emptyKind(), notices: [oldNotice, newNotice] },
+    mcp: { ...emptyKind(), notices: [bgNotice] },
+  });
+
+  // Turn on -> take-early -> close band -> turn off -> turn on again (sw2) -> take-notes (+ later background take-fresh):
+  // the new band's Undo covers take-notes and take-fresh, NOT take-early, so take-early keeps its History link.
+  const ev = (id: string, kind: HistoryEvent['kind'], extra: Partial<HistoryEvent> = {}) =>
+    ({ id, at: '2026-11-27T19:00:00Z', kind, item: id, key: id, ...extra }) as HistoryEvent;
+  state.history.data = [
+    ev('sw1', 'everything', { everything: { ruleOn: true } }),
+    ev('take-early', 'on', { cause: 'sync-everything' }),
+    ev('sw-off', 'everything', { everything: { ruleOn: false } }),
+    ev('sw2', 'everything', { everything: { ruleOn: true } }),
+    ev('take-notes', 'on', { cause: 'sync-everything' }),
+  ];
+  state.outcome = { page: 'settings', band: true, settingsBand: true, everythingUndo: 'sw2', text: 'Synchronize everything is on.', act: { label: 'Undo', id: 'outcome-undo', run() {} } };
   draw();
-  assert.equal(textOf(findById(rendered, 'setting-sync-everything-added-skills')),
-    'Synchronize everything took in 1 skill, found in Claude Code: notes.');
-  assert.equal(findById(rendered, 'setting-sync-everything-added-skills-action'), undefined);
+  const addedMessages = (findById(rendered, 'setting-sync-everything')?.querySelector('.setting-added')?.children ?? [])
+    .filter((child): child is FakeNode => !!child && typeof child === 'object' && 'tag' in child);
+  assert.deepEqual(addedMessages.map(textOf), [
+    'Synchronize everything took in 1 skill, found in Claude Code: early. History can undo it.History',
+    'Synchronize everything took in 1 skill, found in Claude Code: notes.',
+    'Synchronize everything took in 1 MCP server, found in Claude Code: fresh.',
+  ]);
+  assert.ok(addedMessages[0].querySelector('.text-action'), 'older take-in keeps History link');
+  assert.equal(addedMessages[1].querySelector('.text-action'), null, 'covered take-in drops History link');
+  assert.equal(addedMessages[2].querySelector('.text-action'), null, 'later background take-in drops History link');
 
-  // Dismissed band, Undo's own result (no act), or a non-switch outcome on Settings (no settingsBand): History returns.
+  // Dismissed band, Undo's own result, or another Settings band with id 'outcome-undo' but no everythingUndo: every line keeps History.
   for (const outcome of [
     undefined,
     { page: 'settings' as const, band: true, settingsBand: true, text: 'Undone: switched off.' },
-    { page: 'settings' as const, band: true, text: 'Switched to Everyday.', act: { label: 'Undo switch', id: 'outcome-undo', run() {} } },
+    { page: 'settings' as const, band: true, settingsBand: true, text: 'Other Undo.', act: { label: 'Undo', id: 'outcome-undo', run() {} } },
   ]) {
     state.outcome = outcome;
     draw();
-    assert.equal(textOf(findById(rendered, 'setting-sync-everything-added-skills')),
-      'Synchronize everything took in 1 skill, found in Claude Code: notes. History can undo it.History');
-    assert.ok(findById(rendered, 'setting-sync-everything-added-skills-action'));
+    const lines = (findById(rendered, 'setting-sync-everything')?.querySelector('.setting-added')?.children ?? [])
+      .filter((child): child is FakeNode => !!child && typeof child === 'object' && 'tag' in child);
+    assert.ok(lines.every(line => /History can undo it\.History$/.test(textOf(line))), `expected History on all lines: ${lines.map(textOf).join(' | ')}`);
   }
   state.outcome = undefined;
+  state.history.data = undefined;
 });

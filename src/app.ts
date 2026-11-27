@@ -1421,6 +1421,8 @@ export interface Outcome {
   band?: boolean;
   /** Shown as a band on Settings even without reload advice: Synchronize everything's switch-on and its band's Undo (settingspage.ts). */
   settingsBand?: boolean;
+  /** Switch-on History entry id whose Undo this Settings band holds, so only covered take-in lines drop History (settingspage.ts). */
+  everythingUndo?: string;
   /** Shown as a band on History even without warn, reloads or profileLine: a tool's Manage click (managecard.ts, historypage.ts). */
   historyBand?: boolean;
   /** Appended profileLeftUse sentence when an act ended every profile in use; keeps the result in a band (saidInStatusBar) and whole on Row 2 (matrix.ts listResult). */
@@ -1880,13 +1882,14 @@ export const switchSyncEverything = (on: boolean) => busy(on ? 'Turning on Synch
   const text = state.home?.syncOn
     ? 'Synchronize everything is on.'
     : 'Synchronize everything is on. It takes items in at Sync once, or when Automatic sync is on.';
-  let act: Outcome['act'];
+  let act: Outcome['act'], everythingUndo: string | undefined;
   if (set.event && state.home?.home === home) {
     await putHistory().catch(() => undefined);
     const events = state.history.data;
     const entry = events?.find(each => each.id === set.event);
     const offer = entry && events ? everythingAction(entry, events, entriesNow(state.home)) : undefined;
     if (offer) {
+      everythingUndo = set.event;
       act = {
         label: offer.label,
         id: 'outcome-undo',
@@ -1897,7 +1900,7 @@ export const switchSyncEverything = (on: boolean) => busy(on ? 'Turning on Synch
       };
     }
   }
-  tellWritten({ page: 'settings', band: true, settingsBand: true, text, act }, state.home?.syncOn ? set.reloads : [], !!set.event);
+  tellWritten({ page: 'settings', band: true, settingsBand: true, ...(everythingUndo ? { everythingUndo } : {}), text, act }, state.home?.syncOn ? set.reloads : [], !!set.event);
 });
 
 let menuSyncHome: string | undefined;

@@ -8,13 +8,13 @@
 // launch is said in a note at the top (keptNote) until it is closed, and first on the Overview (overview.ts needsYou).
 import { acting, announce, keepingBusy, loadHistory, machine, rerender, switchSessionCosts, switchSyncEverything, showPage, state, whyReadOnly } from './app.ts';
 import { outcomeBand } from './matrix.ts';
-import { button, h, icon, infoCardId, infoMark, toggle } from './dom.ts';
+import { button, h, icon, infoCardId, infoMark, toggle, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { DAY_MS, defaultHistoryDays, historyDayChoices } from './model.ts';
 import { openWalkthrough } from './firstsetup.ts';
 import { whatYesDoes, takenOutEarlier } from './setupcounts.ts';
 import { plural } from './model.ts';
-import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, HistoryWindowSaved, LogTail, PluginTextView, SignInPlace } from './types.ts';
+import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, HistoryWindowSaved, LogTail, PluginTextView, SignInPlace, TakenInNotice } from './types.ts';
 import { libraryWords, sentences } from './libraryrow.ts';
 import { buildWords, releasesPage, tagWords, updateStatus } from './updates.ts';
 import { checkNow, settingUpdateButton, unsavedWork, updates } from './updateview.ts';
@@ -396,7 +396,7 @@ function messageLine({ text, detail, tone, action }: RowMessage, { id, announce 
  * last action said, `notice`, what needs the person about its current state, and `below`, what else the row shows under them:
  * a question it asks before it acts, or what its setting just did.
  */
-function settingRow(id: string, title: string, hint: string | undefined, control: HTMLElement, notice?: RowMessage, below?: HTMLElement, info?: string): HTMLElement {
+function settingRow(id: string, title: string, hint: string | undefined, control: HTMLElement, notice?: RowMessage, below?: Child | Child[], info?: string): HTMLElement {
   const message = messages.get(id);
   return h('div.setting-row', { id: `setting-${id}` },
     h('div.setting-text', { 'data-info-block': true },
@@ -439,12 +439,13 @@ async function choosePluginUpdates(on: boolean): Promise<void> {
   if (await save('plugin-updates', () => window.centralKnot.setPluginUpdates(on), kept)) announce(on ? 'Plugins are updated automatically from now on.' : 'Plugins are updated only when you choose Update.', true);
 }
 
-/** What the plugin-updates card says: only claims the four-hour schedule while Automatic sync is on, and "window closed too" only with a tray. */
+/** What the plugin-updates card says: only claims the four-hour schedule while true, and "window closed too" only with a tray. */
 function pluginUpdatesCard(on: boolean, paused: boolean, hasTray: boolean): string {
   const staysOff = 'A plugin you turned off stays off.';
-  if (paused) return `Paused while Automatic sync is off. ${staysOff}`;
-  const schedule = hasTray ? 'soon after opening and every four hours, window closed too' : 'soon after opening and every four hours while this window stays open';
-  return `${on ? 'Checks' : 'When on, checks'} ${schedule}. ${staysOff}`;
+  if (on && paused) return `Paused while Automatic sync is off. ${staysOff}`;
+  const when = hasTray ? ', window closed too' : ' while this window stays open';
+  const schedule = `every four hours (soon after opening when one is due)${when}.`;
+  return `${on ? 'Checks' : 'When on, checks'} ${schedule}${paused ? ' It waits while Automatic sync is off.' : ''} ${staysOff}`;
 }
 
 /**
@@ -516,13 +517,26 @@ function pluginTextRow(): HTMLElement {
     toggle({ on: !!current?.pluginText, label: 'Read what plugins hold', onchange: chosen => void choosePluginText(chosen), disabled: !current, id: 'plugin-text-on',
       attrs: { 'aria-describedby': described, title: null } }),
     notice, undefined, 'Keeps plugin items’ names, descriptions and first lines, so Find can search them. '
-      + 'Plugins outside their marketplace fetch only changes after the first download (or daily on a branch); any that can’t be read are tried again later.');
+      + 'After the first download, only changes are fetched (daily on a branch). Any plugin that can’t be read is tried again later.');
 }
 
 /** A custom build's own lines about itself (what it is, and that it doesn't update itself), where the standard app has Updates. */
 function buildRow(): HTMLElement | null {
   const lines = current?.build;
   return lines?.length ? settingRow('build', 'This build', lines.join(' '), h('span')) : null;
+}
+
+/** Whether the Settings band's switch-on Undo covers every item on `told` (historyactions.ts everythingPlan). */
+function bandCoversNotice(told: TakenInNotice, switchOnId: string | undefined): boolean {
+  const events = switchOnId ? state.history.data : undefined;
+  if (!events) return false;
+  const at = events.findIndex(entry => entry.id === switchOnId);
+  if (at < 0) return false;
+  const ids = told.histories?.length ? told.histories : [told.history];
+  const after = events.slice(at + 1), end = after.findIndex(entry => entry.kind === 'everything' && !entry.everything?.undo);
+  if (end >= 0) { const covered = new Set(after.slice(0, end).map(entry => entry.id)); return ids.every(id => covered.has(id)); }
+  const before = new Set(events.slice(0, at + 1).map(entry => entry.id));
+  return ids.every(id => !before.has(id));
 }
 
 /**
@@ -536,23 +550,27 @@ function syncEverythingRow(): HTMLElement | null {
   const on = !!home.sync.syncEverything, cannot = whyReadOnly(home) ?? (home.sync.gate.state === 'needs-resume' ? home.sync.gate.reason : undefined);
   const { takes, choosing } = whatYesDoes(home);
   const waiting = choosing ? `${plural(choosing, 'found item')} ${choosing === 1 ? 'has' : 'have'} copies that differ and ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy.` : '';
-  const adds = !on ? (takes ? `Turning it on puts the ${plural(takes, 'item')} found in your tools into every tool now.` : 'Nothing found in your tools now would be added.') : '';
+  const adds = !on ? (takes ? `Turning it on puts the ${plural(takes, 'item')} found in your tools into every tool Central Knot manages now.` : 'Nothing found in your tools now would be added.') : '';
   const later = on && !home.syncOn ? 'Automatic sync is off, so it takes items in at Sync once.' : '';
   // What it leaves for good, said beside what it would add: found items taken out of Central Knot.
   const out = takenOutEarlier(home);
   const takenOut = out === 1 ? '1 found item was taken out of Central Knot and isn’t added by itself again: Add on its row in the Library, or Restore in History, brings it back.'
-    : out ? `${out} found items were taken out of Central Knot and aren’t added by themselves again: Add on its row in the Library, or Restore in History, brings one back.` : '';
+    : out ? `${out} found items were taken out of Central Knot and aren’t added by themselves again: Add on their rows in the Library, or Restore in History, brings them back.` : '';
   const text = [adds, takenOut, later, waiting].filter(Boolean).join(' ');
   const notice: RowMessage | undefined = text ? { text, tone: 'info', action: choosing && !cannot ? { label: 'Choose copies', run: openWalkthrough } : undefined } : undefined;
-  const bandUndo = state.outcome?.page === 'settings' && !!state.outcome.settingsBand && state.outcome.act?.id === 'outcome-undo';
-  // What it took in, as each page's notice says it (until shown there); History stays off while the band holds this switch's Undo.
-  const added = (['skills', 'mcp', 'agents'] as const).flatMap(kind => home[kind].notices.flatMap(told => (told.kind === 'taken-in' && !state.dismissed.has(told.history)
-    ? [messageLine({ text: sentences(libraryWords[kind]).takenInWords(told, !bandUndo), tone: 'done', action: bandUndo ? undefined : { label: 'History', run: () => showPage('history') } }, { id: `setting-sync-everything-added-${kind}` })] : [])));
-  const described = [cannot ? 'setting-sync-everything-hint' : infoCardId('setting-sync-everything-info'), notice && 'setting-sync-everything-notice'].filter(Boolean).join(' ');
-  return settingRow('sync-everything', 'Synchronize everything', cannot,
+  const undoEvent = state.outcome?.page === 'settings' ? state.outcome.everythingUndo : undefined;
+  // What it took in comes first; History stays off only on lines the standing band's Undo covers.
+  const added = (['skills', 'mcp', 'agents'] as const).flatMap(kind => home[kind].notices.flatMap(told => {
+    if (told.kind !== 'taken-in' || state.dismissed.has(told.history)) return [];
+    const covered = bandCoversNotice(told, undoEvent);
+    return [messageLine({ text: sentences(libraryWords[kind]).takenInWords(told, !covered), tone: 'done', action: covered ? undefined : { label: 'History', run: () => showPage('history') } }, { id: `setting-sync-everything-added-${kind}` })];
+  }));
+  const hint = cannot ?? 'Also adds what turns up in a tool; Automatic sync in the status bar keeps what’s already in Central Knot in step.';
+  const described = [cannot ? null : infoCardId('setting-sync-everything-info'), 'setting-sync-everything-hint', notice && 'setting-sync-everything-notice'].filter(Boolean).join(' ');
+  return settingRow('sync-everything', 'Synchronize everything', hint,
     toggle({ on, label: 'Synchronize everything', onchange: chosen => void switchSyncEverything(chosen), disabled: cannot || acting(), id: 'sync-everything-on',
       attrs: { 'aria-describedby': described, title: null } }),
-    notice, added.length ? h('div.setting-added', {}, added) : undefined,
+    undefined, [added.length ? h('div.setting-added', {}, added) : null, notice ? messageLine(notice, { id: 'setting-sync-everything-notice', announce: false }) : null],
     'What turns up in a tool is turned on in every tool Central Knot manages; items whose copies differ wait for your choice. '
       + 'Automatic sync in the status bar keeps items already in Central Knot in step.');
 }
