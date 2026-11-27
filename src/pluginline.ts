@@ -1,16 +1,17 @@
-// A tool's line on a plugin's item opened in the Library, without the DOM: THE RULE for its control, in one place (lineControl).
-// A switch where a click changes only this item in that tool (pluginswitch.ts click, as before); a button that names the act
-// where a click does more (Install the plugin, Put its items here, Turn the plugin on or off), with a sentence
-// that names the plugin and the tool; a sentence alone where nothing can be done. Where the tool has the item, what a click turns
-// is pluginswitch.ts's answer (wholeTurn); where the tool lacks the plugin, whether it may go in is the plugin's box on its own
-// page (pluginstatus.ts boxOf), asked of the Plugins page's view (pluginstate.ts lineBox): no second set of rules here.
+// A tool's line on a plugin's item opened in the Library, without the DOM: THE RULE for its control and visible line words, in
+// one place (lineControl), for both a plugin-only row and a library row a plugin also supplies. A switch where a click changes
+// only this item in that tool (pluginswitch.ts click, as before); a button that names the act where a click does more (Install
+// <plugin>, Put its <kinds> here, Turn the plugin on or off), with only what the button and tool name don't already say; a
+// sentence alone where nothing can be done. Where the tool has the item, what a click turns is pluginswitch.ts's answer
+// (wholeTurn); where the tool lacks the plugin, whether it may go in is the plugin's box on its own page (pluginstatus.ts boxOf),
+// asked of the Plugins page's view (pluginstate.ts lineBox): no second set of rules here.
 // Elsewhere: the buttons' clicks (pluginstate.ts turnFromLine, a plugin's turn in main), and their result on the line that acted
 // (pluginstate.ts LineResult); the line drawn (matrix.ts pluginLine); Profiles' Turn on <plugin> in <Tool>, this rule's let-in asked
 // for a held profile's plugin off in a tool (profilespage.ts wayPast); which of a library row's lines are a plugin's (matrix.ts
-// rowPluginFacts: in a tool that takes plugins and lacks it, and in Pi, OpenCode and Antigravity while the item is Off, where Put its
-// items here puts them there again after its Undo); and the others, the library's own (libraryrow.ts hasLine).
+// rowPluginFacts: in a tool that takes plugins and lacks it, and in Pi, OpenCode and Antigravity while the item is Off, where
+// Put its <kinds> here puts them there again after its Undo); and the others, the library's own (libraryrow.ts detailLine).
 import { DIRECTORY, FROM_DIRECTORY, loadsKind, partWords, samePart } from './pluginstatus.ts';
-import { cantSwitch, wholeTurn, type PluginItemAt } from './pluginswitch.ts';
+import { cantSwitch, wholeAlso, wholeTurn, type PluginItemAt } from './pluginswitch.ts';
 import { holds, takesPlugins } from './presence.ts';
 import { andList, toolNames as names } from './words.ts';
 import type { Components, HarnessId, InstalledPlugin, PartKind, PartRef } from './types.ts';
@@ -20,7 +21,7 @@ import type { Components, HarnessId, InstalledPlugin, PartKind, PartRef } from '
  * there as its box on the plugin's page does (`keep-out`, `let-in`).
  */
 export type LineAct = 'install' | 'place' | 'keep-out' | 'let-in';
-export type LineControl = { control: 'switch' } | { control: 'button'; act: LineAct; label: string; sentence: string } | { control: 'none'; sentence: string };
+export type LineControl = { control: 'switch'; sentence: string } | { control: 'button'; act: LineAct; label: string; sentence: string; title: string } | { control: 'none'; sentence: string };
 /** A tool's box on the plugin's page, as pluginstatus.ts boxOf answers it: ticked, and off with why, and why in short where it has it (`line`). */
 export type LineBox = { ticked: boolean; off?: string; line?: string };
 
@@ -45,9 +46,7 @@ export interface LineFacts {
   parts?: Components;
 }
 
-const LABELS: Record<LineAct, string> = { install: 'Install the plugin', place: 'Put its items here', 'keep-out': 'Turn the plugin off', 'let-in': 'Turn the plugin on' };
-const SWITCH: LineControl = { control: 'switch' };
-const button = (act: LineAct, sentence: string): LineControl => ({ control: 'button', act, label: LABELS[act], sentence });
+const button = (act: LineAct, label: string, sentence: string, title: string): LineControl => ({ control: 'button', act, label, sentence, title });
 const none = (sentence: string): LineControl => ({ control: 'none', sentence });
 
 /** A tool's line: its control, and what its sentence says. */
@@ -77,16 +76,19 @@ function hasIt(item: PluginItemAt, { box, marketName }: LineFacts): LineControl 
     if (box === 'ambiguous') return none(`Off in ${tool}. ${twoNamed(marketName, plugin)}, so which one to turn on can’t be told here.`);
     if (box?.off) return none(box.off);
     if (!box) return none(`Off in ${tool}.`);
-    return button('let-in', `Turns ${plugin} on in ${tool}, as ticking its box on its page does.`);
+    return button('let-in', 'Turn the plugin on', 'Off, kept installed', `Turns ${plugin} on in ${tool}.`);
   }
   // The switch: a click that turns this item alone, one that can't be written (said beside it), and a plugin that is this item alone.
-  const whole = wholeTurn(item);
-  if (!whole || cantSwitch(item) || !bringsMore(item)) return SWITCH;
+  const held = cantSwitch(item), whole = wholeTurn(item);
+  if (held) return { control: 'switch', sentence: held };
+  if (!whole) return { control: 'switch', sentence: '' };
+  if (!bringsMore(item)) return { control: 'switch', sentence: 'Whole plugin' };
   if (box === 'unlisted') return none(marketName === DIRECTORY ? FROM_DIRECTORY : `${capital(unlisted(marketName))}, so it can’t be turned off from here.`);
   if (box === 'ambiguous') return none(`${twoNamed(marketName, plugin)}, so which one to turn off can’t be told here.`);
   if (box?.off) return none(box.off);
   if (!box) return none('');
-  return button('keep-out', `Turns ${whole}.`);
+  const also = wholeAlso(item).words;
+  return button('keep-out', 'Turn the plugin off', also ? `With ${also}` : 'Whole plugin', `Turns ${whole}.`);
 }
 
 function install({ tool, kind, plugin, marketName, box, parts, yours = [] }: LineFacts): LineControl {
@@ -100,7 +102,9 @@ function install({ tool, kind, plugin, marketName, box, parts, yours = [] }: Lin
   // Claude Code loads each part its marketplace entry lists, as the catalog counts them. Copilot CLI reads a skills folder the
   // entry names in place of the plugin's own, and Codex its own manifest, neither of which the count follows: not counted.
   const counts = parts && tool === 'claude-cli' ? countOf(parts) : '';
-  return button('install', `Installs ${plugin} in ${where}${counts ? `, with its ${counts} on` : ''}.${yours.length ? ` ${yoursStay(yours)}` : ''}`);
+  const sentence = counts ? `With ${counts}${yours.length ? `. ${yoursStay(yours)}` : ''}` : yours.length ? yoursStay(yours) : '';
+  const title = `Installs ${plugin} in ${where}${counts ? `, with its ${counts} on` : ''}.${yours.length ? ` ${yoursStay(yours)}` : ''}`;
+  return button('install', `Install ${plugin}`, sentence, title);
 }
 
 function place({ tool, plugin, marketName, box, parts, yours = [] }: LineFacts): LineControl {
@@ -116,8 +120,12 @@ function place({ tool, plugin, marketName, box, parts, yours = [] }: LineFacts):
   const kinds = (['skill', 'agent', 'mcp'] as const).filter(kind => holds(tool, kind) && (!parts || listed(parts, kind) > 0));
   if (parts && yours.length && kinds.every(kind => yours.filter(part => part.kind === kind).length >= listed(parts, kind))) return none(yoursStay(yours, `, so none of ${plugin}’s items can go into ${where}.`));
   const cannot = [parts?.hooks ? 'hooks' : '', parts?.commands ? 'commands' : ''].filter(Boolean);
-  return button('place', [`Puts ${plugin}’s ${andList(kinds.map(kind => partWords[kind][1]))} into ${where}, following the plugin.`, yours.length ? yoursStay(yours) : '',
-    cannot.length ? `${capital(andList(cannot))} can’t.` : ''].filter(Boolean).join(' '));
+  const kindsList = andList(kinds.map(kind => partWords[kind][1]));
+  const label = kinds.length ? `Put its ${kindsList} here` : 'Put its items here';
+  const title = [`Puts ${plugin}’s ${kindsList} into ${where}, following the plugin.`, yours.length ? yoursStay(yours) : '',
+    cannot.length ? `${capital(andList(cannot))} can’t.` : ''].filter(Boolean).join(' ');
+  const sentence = yours.length ? `Will follow ${plugin}. ${yoursStay(yours)}` : `Will follow ${plugin}`;
+  return button('place', label, sentence, title);
 }
 
 /** That his own of the plugin's names stay his: "Your own triage stays as it is." A line's sentence before its act says it. */

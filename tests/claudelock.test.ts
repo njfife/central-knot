@@ -151,7 +151,7 @@ test('a lock Claude Code keeps through a pass holds a write and a removal there,
     // a is Off, and still in Claude Code until sync runs: its row says so, not "in Central Knot only".
     const view = await serversView(box.context, claude), row = view.items.find(item => item.key === 'a')!;
     const hashes = Object.fromEntries(Object.entries(row.copies).map(([tool, copy]) => [tool, copy!.hash]));
-    assert.equal(statusLine({ ...row, hashes }, view.library.a, claude), 'Off · still in Claude Code until sync runs. On puts it in every tool.');
+    assert.equal(statusLine({ ...row, hashes }, view.library.a, claude), 'Still in Claude Code until sync runs. On puts it in every tool.');
     assert.equal(sentences(libraryWords.mcp).placeTag({ ...row, hashes }, view.library.a, claude)?.text, 'still in Claude Code until sync runs');
     await rmdir(box.lock);
     await applyServers(box.context, claude, []);
