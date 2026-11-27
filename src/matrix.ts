@@ -40,7 +40,7 @@ import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, orList, pag
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type RowFigure, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
 import { copilotSharesYours } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
-import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, writeOff, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
+import { noteMove, acting, applyByKind, askFlash, closeResult, homeReadOwed, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, readHomeOnce, unpin, whyKindReadOnly, whyReadOnly, writeOff, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, infoMark, middle, pathText, toggle, whyOff, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -402,8 +402,6 @@ const newView = () => ({
   // A row's fields name it by its row id (itemrow.ts rowId).
   /** The row whose details are open. */
   comparing: undefined as string | undefined,
-  /** A row a link asked to open before this read held it (showRow's else): spared until the next home read arrives or the user acts. */
-  waitingOpen: undefined as { id: string; home: HomeView | undefined } | undefined,
   /** The skill or agent row whose file is open (alone, or in its details' place where it is `comparing` too: fileInDetails): its version/copy token, active file, copy holder, resolved folder, tab list, and loaded body. */
   openFile: undefined as { id: string; token: string; file: string; copy?: { tool: HarnessId; rootLabel?: string }; directory?: string; files?: string[]; loaded?: { text?: string; note?: string; parts?: VersionPart[]; holder?: string } | null } | undefined,
   /** The row whose copy question shows every copy's body side by side (RowWords body). */
@@ -438,7 +436,7 @@ const views: Record<PageKind | 'library', View> = { library: newView(), skills: 
 export const showFiltered = (which: PageKind, filter: Filter, harness: Tool) => { startFresh(views[which], harness); views[which].filter = filter; };
 /** A view drawn for another place (a tool's tab, or the Library) starts with no filter, From, Find text, open row or menu from the last one. */
 function startFresh(table: View, harness: Tool | undefined) {
-  Object.assign(table, { filter: 'all', from: 'anywhere', comparing: undefined, waitingOpen: undefined, openFile: undefined, shownFor: harness, unusedCounted: false });
+  Object.assign(table, { filter: 'all', from: 'anywhere', comparing: undefined, openFile: undefined, shownFor: harness, unusedCounted: false });
   newFind(table, '');
 }
 /**
@@ -465,12 +463,21 @@ export function openKind(which: PageKind | 'all', { filter, key, from }: { filte
  * Files view, with that item's row open and in view. The segment stays where it lists the item's kind, else goes to All; Find,
  * the chip and From are let go only where they hide the row.
  */
+const rowById = (t: Table, id: string) => [...rowsIn(t), ...plugged(t).rows].find(each => idOf(each) === id);
 export function showRow(which: PageKind, key: string) {
   if (segment() !== 'all' && segment() !== which) state.libraryKind = 'all';
   if (state.page !== 'library') showPage('library');
   if (state.libraryView === 'files') leaveFiles();
-  const t = useLibrary(), id = rowId(which, key), row = [...rowsIn(t), ...plugged(t).rows].find(each => idOf(each) === id);
-  if (row) reveal(t, row); else openFromAway(t.view, id, true);
+  const t = useLibrary(), id = rowId(which, key), row = rowById(t, id);
+  if (row) { reveal(t, row); return; }
+  // A link from a plugin's page may arrive before its owed home read lands (pluginstate.ts oweHomeRead): await it, then reveal.
+  if (!homeReadOwed()) return;
+  const visit = state.visit, home = state.home?.home, opened = t.view.comparing;
+  void readHomeOnce().then(() => {
+    if (state.page !== 'library' || state.libraryView === 'files' || state.visit !== visit || state.home?.home !== home || (views.library.comparing && views.library.comparing !== opened)) return;
+    const now = useLibrary(), found = rowById(now, id);
+    if (found) reveal(now, found);
+  });
 }
 /** A link to a row where the person is (a notice's name, the walkthrough): Find let go only if it hides the row, the chip only if it does, From too. */
 function reveal(t: Table, row: ItemRow | PluginRow) {
@@ -480,9 +487,8 @@ function reveal(t: Table, row: ItemRow | PluginRow) {
   openFromAway(t.view, idOf(row));
 }
 /** Opens a row once the page is drawn, as its own click opens it (markOpen), and brings it to the list's top: every link to a row ends here. */
-function openFromAway(view: View, id: string, waiting = false) {
+function openFromAway(view: View, id: string) {
   markOpen(view, id);
-  if (waiting) view.waitingOpen = { id, home: state.home };
   rerender();
   requestAnimationFrame(() => document.querySelector(`.ov-row[data-key="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'start' }));
 }
@@ -537,7 +543,7 @@ const fromOffered = (from: From) => fromMenu().flat().some(entry => entry.value 
  * Delete or open file it no longer holds.
  */
 function relist(t: Table, choice: Partial<Pick<View, 'from' | 'filter'>>) {
-  Object.assign(t.view, choice, { waitingOpen: undefined });
+  Object.assign(t.view, choice);
   listFromTop(t);
   rerender();
 }
@@ -933,7 +939,7 @@ function pluginDock(t: Table, row: PluginRow) {
  */
 function markOpen(view: View, id: string | undefined) {
   if (view.openFile && (view.openFile.id === id || fileInDetails(view, view.comparing))) view.openFile = undefined;
-  Object.assign(view, { comparing: id, waitingOpen: undefined, openedOn: state.visit, openedAt: state.said.seq });
+  Object.assign(view, { comparing: id, openedOn: state.visit, openedAt: state.said.seq });
 }
 /** Moves the table the least needed to show the box under `id`, never past the row's top (less its scroll margin), at once. */
 function revealUnderRow(id: string) {
@@ -1285,7 +1291,7 @@ function forgetOtherHomes(t: Table, name: keyof typeof views) {
   if (now === was) return;
   tableHomes[name] = now;
   // A view's first table has no other home's to forget (a link may have opened its row before it was drawn).
-  if (was !== undefined) Object.assign(t.view, { comparing: undefined, waitingOpen: undefined, openFile: undefined, confirmDelete: undefined, from: 'anywhere', unusedCounted: false });
+  if (was !== undefined) Object.assign(t.view, { comparing: undefined, openFile: undefined, confirmDelete: undefined, from: 'anywhere', unusedCounted: false });
 }
 
 // ---------- See change: what an edit did, before Undo ----------
@@ -1621,16 +1627,18 @@ function tableOf(name: keyof typeof views, kinds: PageKind[], harness?: Tool, fi
     if (t.view.filter === 'unused' && (!reading(over) || !unusedCount(over.kinds))) t.view.filter = 'all';
     if (t.view.filter !== 'unused') t.view.unusedCounted = false;
   }
-  // While no home is read yet, keep what is open until the read lands. Once read: a copy question doesn't outlive the visit,
-  // and an open row, an armed Delete (open or closed), or an open file (with catalog hits) closes once the list drawn no longer
-  // holds it (Find on the Library or a tool's tab, a chip, From, the kind switch, or an item gone), sparing only a link to a row
-  // not yet in this read (showRow's else: waitingOpen). Covers emptyList too, and runs before the header reads comparing.
-  if (!state.home) return t;
-  const { view } = t, { shown, plugins } = drawnRows(t, pins), drawn = [...shown, ...plugins];
+  // While nothing is open, armed or viewing a file, skip the reconcile (and drawnRows). While no home is read yet, or the
+  // Library's Find answer is still out (matchesFind would only check name and description), wait for the read or answer.
+  // Otherwise: a copy question doesn't outlive the visit, and an open row, an armed Delete (open or closed), or an open file
+  // (with catalog hits) closes once the list drawn no longer holds it (Find on the Library or a tool's tab, a chip, From,
+  // the kind switch, or an item gone). Covers emptyList too, and runs before the header reads comparing.
+  const { view } = t;
+  if (!state.home || (!view.comparing && !view.confirmDelete && !view.openFile)) return t;
+  if (searching(t) && !answerFor(t) && findAnswer.state === 'reading') return t;
+  const { shown, plugins } = drawnRows(t, pins), drawn = [...shown, ...plugins];
   const holds = (id: string) => drawn.some(row => idOf(row) === id);
-  if (view.waitingOpen && (view.waitingOpen.home !== state.home || view.waitingOpen.id !== view.comparing)) view.waitingOpen = undefined;
   if (view.comparing && view.openedOn !== state.visit && rowsIn(t).some(skill => idOf(skill) === view.comparing && isDiffering(skill))) view.comparing = undefined;
-  if (view.comparing && !view.waitingOpen && !holds(view.comparing)) view.comparing = undefined;
+  if (view.comparing && !holds(view.comparing)) view.comparing = undefined;
   if (view.confirmDelete && !holds(view.confirmDelete)) view.confirmDelete = undefined;
   const inPlugins = searching(t) ? catalogHits(t) : undefined;
   if (view.openFile && !openFileTarget(t, drawn, inPlugins)) view.openFile = undefined;
@@ -1646,7 +1654,7 @@ let drawnSegment: PageKind | 'all' | undefined;
 function useLibrary(): Table {
   const view = views.library, shown = segment(), moved = drawnSegment !== undefined && drawnSegment !== shown;
   drawnSegment = shown;
-  if (moved) Object.assign(view, { confirmDelete: undefined, waitingOpen: undefined });
+  if (moved) view.confirmDelete = undefined;
   return tableOf('library', segmentKinds());
 }
 /** A tool's tab of one kind under Harnesses: that kind alone, with that tool first, in the kind's own view. */
@@ -1722,7 +1730,7 @@ export function findInHome(home: string) {
   askAgain();
 }
 /** Find given new text (typed, Escape, Clear Find, a link that lets it go, a view started afresh): an armed Delete disarms, the group's first rows only are drawn, and on the Library the rows held are let go. */
-const newFind = (view: View, text: string) => { Object.assign(view, { find: text, confirmDelete: undefined, waitingOpen: undefined, revealed: MORE }); if (view === views.library) unpin(); };
+const newFind = (view: View, text: string) => { Object.assign(view, { find: text, confirmDelete: undefined, revealed: MORE }); if (view === views.library) unpin(); };
 /**
  * Find typed, or emptied (Escape in it, Clear Find under "Nothing matches"): the new list shows from its top (listFromTop) as it is
  * drawn. A tool's tab is drawn at once; the Library's list once main has answered (askFind), at once with Find empty. Until
