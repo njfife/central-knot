@@ -2347,7 +2347,7 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .ov-row.ov-switch-row.ov-usage { grid-template-columns: auto minmax(0, 1fr) auto auto auto; }
 .ov-row.ov-switch-row.ov-dated.ov-usage { grid-template-columns: auto minmax(0, 1fr) minmax(6.5em, auto) auto auto auto; }
 .ov-used { max-width: 16em; font-size: 12px; color: var(--ink-soft); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ov-usage:not(.ov-dated) .ov-used:not(:empty) { margin-left: 16px; }
+.ov-usage:not(.ov-dated):has(> .ov-used:not(:empty)) .ov-name-about { padding-right: 16px; }
 .ov-dated .ov-used, .ov-used-pending { width: 16em; }
 .ov-used-faint { color: var(--ink-faint); }
 .ov-used-skip { color: var(--ink); font-weight: 500; }

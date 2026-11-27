@@ -11793,8 +11793,8 @@ async function usageFlow() {
   same('the longest figure, "no use seen since Nov 29, 2025", is whole in a figure’s cell', await a.run(`(() => { const cell = document.querySelector('.ov-used'), was = [...cell.childNodes];
     cell.replaceChildren('no use seen since Nov 29, 2025');
     const whole = cell.scrollWidth <= cell.clientWidth + 1; cell.replaceChildren(...was); return whole; })()`), true);
-  same('at 860×600 every figure is whole and sits at least 24 px past the description cell',
-    await a.run(`[...document.querySelectorAll('.ov-row[data-key]')].flatMap(row => { const cell = row.querySelector('.ov-used'), name = row.querySelector('.ov-name'); return !cell || !cell.textContent ? [] : cell.scrollWidth > cell.clientWidth + 1 ? [cell.textContent] : cell.getBoundingClientRect().left - name.getBoundingClientRect().right < 24 ? [Math.round(cell.getBoundingClientRect().left - name.getBoundingClientRect().right)] : []; })`), []);
+  same('at 860×600 every figure is whole and sits at least 24 px past the description',
+    await a.run(`(() => { const rows = [...document.querySelectorAll('.ov-row[data-key]')], shown = rows.filter(row => row.querySelector('.ov-name-about')?.offsetWidth); return !shown.length ? ['no descriptions'] : rows.flatMap(row => { const cell = row.querySelector('.ov-used'), about = row.querySelector('.ov-name-about'); if (!cell || !cell.textContent) return []; if (cell.scrollWidth > cell.clientWidth + 1) return [cell.textContent]; const gap = about?.offsetWidth ? cell.getBoundingClientRect().left - (about.getBoundingClientRect().right - parseFloat(getComputedStyle(about).paddingRight)) : 24; return gap < 24 ? [Math.round(gap)] : []; }); })()`), []);
   await fullSize(a);
   await fitsAtMinimum(a, 'Skills with usage collected and its figures');
   await a.shot('usage-read');
