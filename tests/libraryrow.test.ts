@@ -724,3 +724,15 @@ test('A library row from a Git source names Sync this source and Replace mine in
   assert.deepEqual([fromPlugin.tag?.text, fromPlugin.before, fromPlugin.after], ['from the plugin issue-tracker', '', '']);
   assert.match(fromPlugin.tag?.title ?? '', /In Pi, OpenCode and Antigravity it follows the plugin; a change you make to it here makes it your own/);
 });
+
+test('takenInWords keeps History by default and drops the History sentence when asked', () => {
+  const { takenInWords } = sentences(libraryWords.skills);
+  const one = { items: ['notes'], from: ['claude-cli' as HarnessId] };
+  const two = { items: ['notes', 'lint'], from: ['claude-cli' as HarnessId, 'codex-cli' as HarnessId] };
+  assert.equal(takenInWords(one), 'Synchronize everything took in 1 skill, found in Claude Code: notes. History can undo it.');
+  assert.equal(takenInWords(two), 'Synchronize everything took in 2 skills, found in Claude Code and Codex: notes and lint. History can undo each.');
+  assert.equal(takenInWords(one, false),
+    'Synchronize everything took in 1 skill, found in Claude Code: notes.');
+  assert.equal(takenInWords(two, false),
+    'Synchronize everything took in 2 skills, found in Claude Code and Codex: notes and lint.');
+});

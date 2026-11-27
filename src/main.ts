@@ -317,7 +317,7 @@ async function changeHistoryWindow(days: HistoryDays): Promise<HistoryWindowSave
 /** Whether plugins are updated automatically: as chosen in Settings, else the default. */
 const pluginUpdatesOn = () => (typeof appSettings.pluginUpdates === 'boolean' ? appSettings.pluginUpdates : PLUGIN_UPDATES_DEFAULT);
 const pluginTextOn = () => appSettings.pluginText !== false;
-const preferences = (): AppPreferences => ({ appearance: appearance(), signIn: signIn(), historyDays: historyDays(), pluginUpdates: pluginUpdatesOn(), pluginText: pluginTextOn(),
+const preferences = (): AppPreferences => ({ appearance: appearance(), signIn: signIn(), historyDays: historyDays(), pluginUpdates: pluginUpdatesOn(), pluginText: pluginTextOn(), tray: !!tray,
   ...(custom ? { build: aboutBuild(custom, app.getVersion(), bundle && { name: custom.marketplace?.displayName ?? bundle.release.marketplace, date: releaseDate(bundle.release) }) } : {}) });
 /**
  * Opens the folder of Central Knot's own log in Finder or Explorer, the log selected; before anything was logged, just the

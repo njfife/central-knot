@@ -744,11 +744,12 @@ export function sentences(words: RowWords) {
 
   /**
    * What Synchronize everything's notice says (types.ts TakenInNotice), on its page and in Settings: how many it took in and
-   * where it found them, their names, and that History can undo each.
+   * where it found them, their names, and (unless `withHistory` is false, as on Settings while the band holds Undo) that History can undo each.
    */
-  function takenInWords(notice: Pick<TakenInNotice, 'items' | 'from' | 'settingsChanged'>): string {
+  function takenInWords(notice: Pick<TakenInNotice, 'items' | 'from' | 'settingsChanged'>, withHistory = true): string {
     const count = notice.items.length, many = count === 1 ? noun : words.many;
-    return `Synchronize everything took in ${count} ${many}, found in ${andList(notice.from.map(toolName))}: ${andList(notice.items)}.${notice.settingsChanged ? ` ${notice.settingsChanged.join(' ')}` : ''} History can undo ${count === 1 ? 'it' : 'each'}.`;
+    const history = withHistory ? ` History can undo ${count === 1 ? 'it' : 'each'}.` : '';
+    return `Synchronize everything took in ${count} ${many}, found in ${andList(notice.from.map(toolName))}: ${andList(notice.items)}.${notice.settingsChanged ? ` ${notice.settingsChanged.join(' ')}` : ''}${history}`;
   }
 
   return { harnessLine, detailLine, placeTag, said, noticeWords, takenInWords };

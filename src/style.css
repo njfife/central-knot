@@ -1745,13 +1745,14 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .setting-row:hover, .setting-row:focus-within { background: var(--hover); }
 .setting-title { display: flex; align-items: center; gap: 4px; font-weight: 500; }
 .setting-hint, .setting-message { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
-/* Only the prose keeps the reading measure: a message's action sits right after its text, on the same line where there's room. */
-.setting-hint, .setting-message-text { max-width: 72ch; }
+/* Only the prose keeps the reading measure: a message's action sits inline right after its last sentence. */
+.setting-hint, .setting-message-body { max-width: 72ch; }
 .setting-message { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 6px; margin: -8px 0 0; }
 /* What Synchronize everything just took in, a line per kind: spaced as the row's own lines are (each takes back 8px of 12). */
 .setting-added { grid-column: 1 / -1; display: grid; row-gap: 12px; }
 .setting-message .icon { flex: none; margin-top: 1px; }
-.setting-message-body { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 4px; min-width: 0; }
+.setting-message-body { min-width: 0; }
+.setting-message-text:not(:last-child) { margin-right: 8px; }
 .setting-failure { color: var(--danger); }
 /* What follows a line's news (what happens next, where to look) reads as a hint, so the news itself stands out. */
 .setting-message-detail { color: var(--ink-soft); }
@@ -1771,7 +1772,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 /* The system ignored the person's change: it reads apart from the hints and needs them, without alarm. */
 .setting-attention { color: var(--ink); }
 .setting-attention .icon { color: var(--warning); }
-.setting-message .text-action { flex: none; margin: -2px 0; padding: 2px 4px; line-height: 16px; }
+.setting-message .text-action { margin: -2px -4px; padding: 2px 4px; line-height: 16px; }
 .setting-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 /* The log under its row (Show log): as tall as its lines, so the page scrolls, never the block; a long line wraps; its text can
    be selected and copied (the body's is not). */

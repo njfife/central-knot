@@ -439,6 +439,14 @@ async function choosePluginUpdates(on: boolean): Promise<void> {
   if (await save('plugin-updates', () => window.centralKnot.setPluginUpdates(on), kept)) announce(on ? 'Plugins are updated automatically from now on.' : 'Plugins are updated only when you choose Update.', true);
 }
 
+/** What the plugin-updates card says: only claims the four-hour schedule while Automatic sync is on, and "window closed too" only with a tray. */
+function pluginUpdatesCard(on: boolean, paused: boolean, hasTray: boolean): string {
+  const staysOff = 'A plugin you turned off stays off.';
+  if (paused) return `Paused while Automatic sync is off. ${staysOff}`;
+  const schedule = hasTray ? 'soon after opening and every four hours, window closed too' : 'soon after opening and every four hours while this window stays open';
+  return `${on ? 'Checks' : 'When on, checks'} ${schedule}. ${staysOff}`;
+}
+
 /**
  * Plugins: whether they are updated automatically, that updates can't be undone, Check now, and what the last check came to
  * (the note on the Plugins page says which plugins).
@@ -446,6 +454,7 @@ async function choosePluginUpdates(on: boolean): Promise<void> {
 function pluginUpdatesRow(): HTMLElement {
   const on = !!current?.pluginUpdates;
   const view = pluginUpdates.view;
+  const paused = view ? view.paused : state.home ? !state.home.syncOn : false;
   const checked = on ? checkedWords(pluginUpdates.asked && view ? { ...view, checking: true } : view) : undefined;
   const notice: RowMessage | undefined = checked && { text: checked.text, tone: checked.tone, action: checked.note ? { label: `See ${pageNames.plugins}`, run: () => showPage('plugins') } : undefined };
   const described = [infoCardId('setting-plugin-updates-info'), 'setting-plugin-updates-hint', notice && 'setting-plugin-updates-notice'].filter(Boolean).join(' ');
@@ -455,7 +464,7 @@ function pluginUpdatesRow(): HTMLElement {
       // Unchangeable until main has said, so a click never acts on a guess.
       toggle({ on, label: 'Update plugins automatically', onchange: chosen => void choosePluginUpdates(chosen), disabled: !current, id: 'plugin-updates-on',
         attrs: { 'aria-describedby': described, title: null } })),
-    notice, undefined, 'Every four hours, window closed too. A plugin you turned off stays off.');
+    notice, undefined, pluginUpdatesCard(on, paused, current?.tray !== false));
 }
 
 /** How much of what plugins hold is read (plugintext.ts), as main last said; undefined until asked. */
@@ -487,14 +496,14 @@ async function choosePluginText(on: boolean): Promise<void> {
 /** The first download, estimated: about 0.1 MB a plugin kept outside its marketplace (measured 2026-11-19: 26 to 29 MB on the wire for 277). */
 const firstSize = (plugins: number) => { const mb = plugins * 0.1; return mb < 1 ? 'under 1 MB' : `about ${mb < 10 ? Math.round(mb) : Math.round(mb / 5) * 5} MB`; };
 const textHint = (view: PluginTextView | undefined) => (view?.elsewhere
-  ? `${view.elsewhere === 1 ? 'The one plugin outside its marketplace is' : `The ${view.elsewhere} outside their marketplace are`} downloaded once (${firstSize(view.elsewhere)}), then only changes, or daily if on a branch.`
+  ? `${view.elsewhere === 1 ? 'The one plugin outside its marketplace is' : `The ${view.elsewhere} outside their marketplace are`} downloaded once (${firstSize(view.elsewhere)}).`
   : undefined);
 /** The count: while it reads, when it is done (and how many couldn't be read), and while it is off. */
 const textCoverage = (view: PluginTextView, on: boolean) => {
   const counted = `${view.read} of ${plural(view.of, 'plugin')}`, left = view.of - view.read;
   if (!on) return `Off. What was read from ${counted} is kept.`;
   if (view.reading && left) return `Reading: ${counted}.`;
-  return `Read ${counted}.${left ? ` ${left} couldn’t be read; Central Knot tries again later.` : ''}`;
+  return `Read ${counted}.${left ? ` ${left} couldn’t be read.` : ''}`;
 };
 
 /** Plugins: whether what they hold is read, what that downloads when plugins sit elsewhere, and how much is read. */
@@ -506,7 +515,8 @@ function pluginTextRow(): HTMLElement {
   return settingRow('plugin-text', 'Read what plugins hold', hint,
     toggle({ on: !!current?.pluginText, label: 'Read what plugins hold', onchange: chosen => void choosePluginText(chosen), disabled: !current, id: 'plugin-text-on',
       attrs: { 'aria-describedby': described, title: null } }),
-    notice, undefined, 'Keeps plugin items’ names, descriptions and first lines, so Find can search them.');
+    notice, undefined, 'Keeps plugin items’ names, descriptions and first lines, so Find can search them. '
+      + 'Plugins outside their marketplace fetch only changes after the first download (or daily on a branch); any that can’t be read are tried again later.');
 }
 
 /** A custom build's own lines about itself (what it is, and that it doesn't update itself), where the standard app has Updates. */
@@ -528,20 +538,23 @@ function syncEverythingRow(): HTMLElement | null {
   const waiting = choosing ? `${plural(choosing, 'found item')} ${choosing === 1 ? 'has' : 'have'} copies that differ and ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy.` : '';
   const adds = !on ? (takes ? `Turning it on puts the ${plural(takes, 'item')} found in your tools into every tool now.` : 'Nothing found in your tools now would be added.') : '';
   const later = on && !home.syncOn ? 'Automatic sync is off, so it takes items in at Sync once.' : '';
-  // What it leaves for good, said beside what it would add: found items taken out of Central Knot earlier.
+  // What it leaves for good, said beside what it would add: found items taken out of Central Knot.
   const out = takenOutEarlier(home);
-  const takenOut = out === 1 ? '1 found item was taken out of Central Knot earlier and isn’t added by itself again: Add on its row, or Restore in History, brings it back.'
-    : out ? `${out} found items were taken out of Central Knot earlier and aren’t added by themselves again: Add on a row, or Restore in History, brings one back.` : '';
-  const text = [adds, takenOut, waiting, later].filter(Boolean).join(' ');
+  const takenOut = out === 1 ? '1 found item was taken out of Central Knot and isn’t added by itself again: Add on its row in the Library, or Restore in History, brings it back.'
+    : out ? `${out} found items were taken out of Central Knot and aren’t added by themselves again: Add on its row in the Library, or Restore in History, brings one back.` : '';
+  const text = [adds, takenOut, later, waiting].filter(Boolean).join(' ');
   const notice: RowMessage | undefined = text ? { text, tone: 'info', action: choosing && !cannot ? { label: 'Choose copies', run: openWalkthrough } : undefined } : undefined;
-  // What it took in, as each page's notice says it (until shown there), with History: Settings says what the switch did.
+  const bandUndo = state.outcome?.page === 'settings' && !!state.outcome.settingsBand && state.outcome.act?.id === 'outcome-undo';
+  // What it took in, as each page's notice says it (until shown there); History stays off while the band holds this switch's Undo.
   const added = (['skills', 'mcp', 'agents'] as const).flatMap(kind => home[kind].notices.flatMap(told => (told.kind === 'taken-in' && !state.dismissed.has(told.history)
-    ? [messageLine({ text: sentences(libraryWords[kind]).takenInWords(told), tone: 'done', action: { label: 'History', run: () => showPage('history') } }, { id: `setting-sync-everything-added-${kind}` })] : [])));
+    ? [messageLine({ text: sentences(libraryWords[kind]).takenInWords(told, !bandUndo), tone: 'done', action: bandUndo ? undefined : { label: 'History', run: () => showPage('history') } }, { id: `setting-sync-everything-added-${kind}` })] : [])));
   const described = [cannot ? 'setting-sync-everything-hint' : infoCardId('setting-sync-everything-info'), notice && 'setting-sync-everything-notice'].filter(Boolean).join(' ');
   return settingRow('sync-everything', 'Synchronize everything', cannot,
     toggle({ on, label: 'Synchronize everything', onchange: chosen => void switchSyncEverything(chosen), disabled: cannot || acting(), id: 'sync-everything-on',
       attrs: { 'aria-describedby': described, title: null } }),
-    notice, added.length ? h('div.setting-added', {}, added) : undefined, 'What turns up in a tool is turned on in every tool. Items whose copies differ wait for your choice.');
+    notice, added.length ? h('div.setting-added', {}, added) : undefined,
+    'What turns up in a tool is turned on in every tool Central Knot manages; items whose copies differ wait for your choice. '
+      + 'Automatic sync in the status bar keeps items already in Central Knot in step.');
 }
 
 /** Shared end of the disclosure sentence that each keep-costs info card (Sessions and Settings) begins. */

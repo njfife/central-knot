@@ -4726,9 +4726,9 @@ async function practiceFlow() {
   // Info marks and their top-layer detail cards (dom.ts infoMark) on Settings: Start at sign-in, Synchronize everything,
   // Update plugins automatically, Read what plugins hold and Log.
   const signInCardText = `Opens hidden in ${process.platform === 'darwin' ? 'the menu bar' : 'the system tray'} at sign-in, so sync keeps running.`;
-  const syncCardText = 'What turns up in a tool is turned on in every tool. Items whose copies differ wait for your choice.';
-  const pluginUpdatesCardText = 'Every four hours, window closed too. A plugin you turned off stays off.';
-  const pluginTextCardText = 'Keeps plugin items’ names, descriptions and first lines, so Find can search them.';
+  const syncCardText = 'What turns up in a tool is turned on in every tool Central Knot manages; items whose copies differ wait for your choice. Automatic sync in the status bar keeps items already in Central Knot in step.';
+  const pluginUpdatesCardText = 'Checks soon after opening and every four hours, window closed too. A plugin you turned off stays off.';
+  const pluginTextCardText = 'Keeps plugin items’ names, descriptions and first lines, so Find can search them. Plugins outside their marketplace fetch only changes after the first download (or daily on a branch); any that can’t be read are tried again later.';
   const logCardText = 'Central Knot’s own log, for reporting a problem. Your tools’ files aren’t in it.';
   const cardOpen = id => a.run(`!!document.querySelector('#${id}-card')?.matches(':popover-open')`);
   const cardBecomes = async (id, want, bound, from = Date.now()) => {
@@ -4769,6 +4769,9 @@ async function practiceFlow() {
     await a.run(`document.getElementById(${JSON.stringify(id)}).scrollIntoView({ block: 'center' })`);
     await checkCard(a, id, text, label);
   }
+  same('the status bar’s Automatic sync switch has a sized target and tells itself apart from Synchronize everything for hover and keyboard',
+    await a.run(`(() => { const s = document.getElementById('sync-switch'), r = s?.getBoundingClientRect(); return [r ? r.width > 0 && r.height > 0 : false, s?.title === s?.getAttribute('aria-description'), /Synchronize everything decides whether new items found in tools are added\\./.test(s?.title ?? '')]; })()`),
+    [true, true, true]);
   for (const [width, height] of [[860, 560], [1316, 819]]) {
     await withSidebarOpen(a, width, height, async () => {
       await a.run(`document.getElementById('setting-plugin-updates-info').scrollIntoView({ block: 'center' })`);
@@ -5135,6 +5138,11 @@ async function practiceFlow() {
   // At sign-in the panel may still be starting: such a start asks again, about once a second up to ten times (platform.ts trayWithin).
   same('on a Linux desktop with no system tray, a start at sign-in (--hidden) asks ten times, then shows the window',
     [asked('never'), await b.run('location.search'), await bMain?.run('electron.BrowserWindow.getAllWindows()[0].isVisible()') ?? true], [10, '', true]);
+  await b.click('#nav-settings');
+  for (let tries = 0; tries < 40 && await b.run(`document.getElementById('plugin-updates-on')?.disabled !== false`); tries++) await wait(100);
+  same('on a Linux desktop with no system tray, the plugin-updates card drops “window closed too”',
+    await b.text('#setting-plugin-updates-info-card'),
+    'Checks soon after opening and every four hours while this window stays open. A plugin you turned off stays off.');
   // Closed through the window's own close, as a person's click is (main's debugger). A packaged app has no debugger: there the
   // page closes itself, which skips the window's close handler and quits from window-all-closed.
   if (bMain) {
@@ -7638,7 +7646,7 @@ async function syncEverythingFlow() {
   same('Settings › This home: Synchronize everything is off, moves its paragraph behind its mark with live aria-describedby, and says what it would add now and what waits',
     [await ruleOn(), await ruleSays(), await a.exists('#setting-sync-everything-hint'), await a.run(`document.getElementById('setting-sync-everything-info')?.getAttribute('aria-label')`), await a.run(`document.getElementById('sync-everything-on')?.getAttribute('aria-describedby')`)],
     ['false', 'Turning it on puts the 2 items found in your tools into every tool now. 1 found item has copies that differ and waits for your choice of copy.', false, 'About Synchronize everything', 'setting-sync-everything-info-card setting-sync-everything-notice']);
-  await checkCard(a, 'setting-sync-everything-info', 'What turns up in a tool is turned on in every tool. Items whose copies differ wait for your choice.', 'Synchronize everything card');
+  await checkCard(a, 'setting-sync-everything-info', 'What turns up in a tool is turned on in every tool Central Knot manages; items whose copies differ wait for your choice. Automatic sync in the status bar keeps items already in Central Knot in step.', 'Synchronize everything card');
   await fitsAtMinimum(a, 'Settings with Synchronize everything off');
   await a.shot('everything-off');
   await openAgainOnSettings('before switching on');
@@ -7652,14 +7660,17 @@ async function syncEverythingFlow() {
     await a.run(`(() => { const o = document.querySelector('[data-outcome]'), u = o?.querySelector('#outcome-undo'); return [o?.querySelector('.band-text')?.textContent, u?.textContent, u?.title, u?.getAttribute('aria-description')]; })()`),
     ['Synchronize everything is on.', 'Undo', 'Switch Synchronize everything off and take back the 2 items it took in since, each tool it was found in keeping its own copy', null]);
   same('the pass right after took in what was found: notes is in Codex now, byte for byte', readNow(join(codex, 'notes/SKILL.md')), text('notes', 'Take notes.'));
-  same('and Settings says what it took in, a line per kind, each with History', await a.all('.setting-added .setting-message', 'e.textContent'),
-    ['Synchronize everything took in 1 skill, found in Claude Code: notes. History can undo it.History', 'Synchronize everything took in 1 MCP server, found in Codex: files. History can undo it.History']);
+  same('and Settings says what it took in, a line per kind, omitting History while the band holds Undo', await a.all('.setting-added .setting-message', 'e.textContent'),
+    ['Synchronize everything took in 1 skill, found in Claude Code: notes.', 'Synchronize everything took in 1 MCP server, found in Codex: files.']);
   await takenInSoon('fresh', text('fresh', 'Just saved.'), freshSaved, 'a skill saved just before is taken in soon after, with no click, once it has settled');
   // The read after that pass reaches the page: the sidebar's dot names both skills' notices, neither shown yet.
   const unseenOnLibrary = () => a.run(`document.querySelector('#nav-library .nav-unseen')?.title ?? ''`);
   for (let tries = 0; tries < 300 && !/fresh/.test(await unseenOnLibrary()); tries++) await wait(100);
   same('a notice no page has shown stays until shown: the sidebar’s Library names both passes’ notices, of every kind', await unseenOnLibrary(), '3 automatic changes: notes, fresh, files');
   await a.shot('everything-on');
+  await a.click('#outcome-dismiss');
+  same('closing the band brings back History on the take-in lines', await a.all('.setting-added .setting-message', 'e.textContent'),
+    ['Synchronize everything took in 1 skill, found in Claude Code: notes. History can undo it.History', 'Synchronize everything took in 1 skill, found in Claude Code: fresh. History can undo it.History', 'Synchronize everything took in 1 MCP server, found in Codex: files. History can undo it.History']);
   await a.click('#nav-overview');
   same('the Overview’s foot is one sentence, where every change is kept: Automatic sync is the status bar’s to say', (await a.text('#overview-kept'))?.trim(), 'Every change Central Knot makes in your tools is kept in History, with Undo where it can be undone.');
   await openKind(a, 'skills');
@@ -7708,7 +7719,7 @@ async function syncEverythingFlow() {
   await a.click('#nav-settings');
   await a.click('#sync-everything-on');
   for (let tries = 0; tries < 40 && await ruleOn() !== 'false'; tries++) await wait(100);
-  same('turned off, it says what it would add now: nothing, since what was undone stays out', [await ruleOn(), await ruleSays()], ['false', 'Nothing found in your tools now would be added. 1 found item was taken out of Central Knot earlier and isn’t added by itself again: Add on its row, or Restore in History, brings it back. 2 found items have copies that differ and wait for your choice of copy.']);
+  same('turned off, it says what it would add now: nothing, since what was undone stays out', [await ruleOn(), await ruleSays()], ['false', 'Nothing found in your tools now would be added. 1 found item was taken out of Central Knot and isn’t added by itself again: Add on its row in the Library, or Restore in History, brings it back. 2 found items have copies that differ and wait for your choice of copy.']);
   await openAgainOnSettings('switched on and off');
   // Saved just before the rule is switched on again, with nothing else for that pass to write, and still being saved as it
   // runs: that pass leaves it, and a pass soon after takes it in (takenInSoon).
@@ -7758,7 +7769,8 @@ async function syncEverythingFlow() {
     [uRecord().syncEverything, existsSync(join(uCodex, 'notes')), readNow(join(uClaude, 'notes/SKILL.md')), readNow(join(uClaude, 'review/SKILL.md')), readNow(join(uCodex, 'review/SKILL.md')), 'files' in (JSON.parse(readNow(join(uHome, '.claude.json'))).mcpServers ?? {}), /\[mcp_servers\.files\]/.test(readNow(join(uHome, '.codex/config.toml'))), await uBand(),
       await b.all('.setting-added .setting-message', 'e.textContent'), await b.exists('#nav-library .nav-unseen'), await b.text('#setting-sync-everything-notice .setting-message-text')],
     [false, false, text('notes', 'Take notes.'), text('review', 'Review gently.'), text('review', 'Review hard.'), false, true, [twoUndone, null, null, false, false],
-      [], false, 'Nothing found in your tools now would be added. 2 found items were taken out of Central Knot earlier and aren’t added by themselves again: Add on a row, or Restore in History, brings one back. 1 found item has copies that differ and waits for your choice of copy.']);
+      [], false, 'Nothing found in your tools now would be added. 2 found items were taken out of Central Knot and aren’t added by themselves again: Add on its row in the Library, or Restore in History, brings one back. 1 found item has copies that differ and waits for your choice of copy.']);
+  check('Choose copies sits beside the last sentence (waiting), not up on the first line', await b.run(`(() => { const t = document.querySelector('#setting-sync-everything-notice .setting-message-text')?.getBoundingClientRect(), a = document.querySelector('#setting-sync-everything-notice-action')?.getBoundingClientRect(); return !!t && !!a && a.bottom >= t.bottom - 4; })()`));
   await b.click('#nav-history');
   for (let tries = 0; tries < 30 && !(await b.exists('.history-row[data-kind="everything"]')); tries++) await wait(100);
   same('History records the same Undo sentence and marks the switch-on Undone',
@@ -7783,8 +7795,10 @@ async function syncEverythingFlow() {
   for (let tries = 0; tries < 40 && await b.run(`document.querySelector('#sync-switch')?.getAttribute('aria-checked')`) !== 'false'; tries++) await wait(100);
   await b.click('#sync-everything-on');
   await waitBand('true', 'Synchronize everything is on.');
-  same('with Automatic sync off, the band shows its second sentence and Undo without reloads',
-    await uBand(), ['Synchronize everything is on. It takes items in at Sync once, or when Automatic sync is on.', 'Undo', 'Switch Synchronize everything off', false, false]);
+  same('with Automatic sync off, the band shows its second sentence and Undo without reloads, and waiting stays last beside Choose copies',
+    [await uBand(), await b.text('#setting-sync-everything-notice .setting-message-text'), /Synchronize everything decides whether new items found in tools are added\./.test(await b.run(`document.getElementById('sync-switch')?.title ?? ''`))],
+    [['Synchronize everything is on. It takes items in at Sync once, or when Automatic sync is on.', 'Undo', 'Switch Synchronize everything off', false, false],
+      'Automatic sync is off, so it takes items in at Sync once. 1 found item has copies that differ and waits for your choice of copy.', true]);
   await b.click('#outcome-undo');
   await waitBand('false', 'Undone:');
   same('Undo with Automatic sync off turns the rule off and says nothing was taken back',
@@ -10249,7 +10263,7 @@ esac
     && await a.run(`document.getElementById('check-plugin-updates')?.getAttribute('aria-label')`) === 'Check now for plugin updates'
     && await a.run(`['check-plugin-updates', 'plugin-updates-on'].every(id => (document.getElementById(id)?.getAttribute('aria-describedby') ?? '').split(/\\s+/).filter(Boolean).every(ref => !!document.getElementById(ref)))`)
     && /Last checked today at .*\. Nothing needed updating\./.test(await a.text('#setting-plugin-updates-notice') ?? '') && await a.exists('#check-plugin-updates'), await a.text('#setting-plugin-updates'));
-  await checkCard(a, 'setting-plugin-updates-info', 'Every four hours, window closed too. A plugin you turned off stays off.', 'Update plugins automatically card');
+  await checkCard(a, 'setting-plugin-updates-info', 'Checks soon after opening and every four hours, window closed too. A plugin you turned off stays off.', 'Update plugins automatically card');
   // A page-made close destroys the window outright (see the practice flow): from here on this launch has no window at all.
   await a.run(`setTimeout(() => window.close(), 50), true`);
   await wait(800);
@@ -10314,6 +10328,7 @@ esac
     JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).pluginUpdates === false
     && !(await a.exists('#check-plugin-updates')) && !(await a.exists('#setting-plugin-updates-notice'))
     && await a.text('#setting-plugin-updates-hint') === 'Updates can’t be undone.'
+    && await a.text('#setting-plugin-updates-info-card') === 'When on, checks soon after opening and every four hours, window closed too. A plugin you turned off stays off.'
     && await a.run(`document.getElementById('plugin-updates-on')?.getAttribute('aria-describedby')`) === 'setting-plugin-updates-info-card setting-plugin-updates-hint', await a.text('#setting-plugin-updates'));
   same('no page errors, plugin updates', a.pageErrors, []);
   await a.quit();
@@ -10327,7 +10342,7 @@ esac
   await a.click('#nav-settings');
   await a.click('#plugin-updates-on');
   await wait(6000);
-  check('turned on with Automatic sync off, it is paused and says so; nothing runs', calls().length === whileOff && versions()['issue-tracker'] === '2.0.0' && /Paused while Automatic sync is off: nothing is updated by itself\. Check now still updates what is behind\./.test(await a.text('#setting-plugin-updates-notice') ?? ''), [calls(), await a.text('#setting-plugin-updates')]);
+  check('turned on with Automatic sync off, it is paused and says so; nothing runs and its card drops the four-hour schedule', calls().length === whileOff && versions()['issue-tracker'] === '2.0.0' && /Paused while Automatic sync is off: nothing is updated by itself\. Check now still updates what is behind\./.test(await a.text('#setting-plugin-updates-notice') ?? '') && await a.text('#setting-plugin-updates-info-card') === 'Paused while Automatic sync is off. A plugin you turned off stays off.', [calls(), await a.text('#setting-plugin-updates'), await a.text('#setting-plugin-updates-info-card')]);
   await a.run(`window.centralKnot.setSync(true).then(() => true)`);
   check('with Automatic sync on again, the update that failed goes through by itself, and its note goes', await until(() => versions()['issue-tracker'] === '3.0.0' && noted().failures?.length === 0) && noted().updated.some(line => line.plugin === 'issue-tracker' && /updated to 3\.0\.0 in Claude Code/.test(line.text)), JSON.stringify([versions(), noted()]));
   await a.run(`(document.querySelector('#nav-plugins').click(), true)`);
@@ -10390,12 +10405,12 @@ async function pluginTextFlow() {
     await a.click('#nav-settings');
   };
   await toSettings();
-  check('Settings has the switch, on, how much is read and that the fifth is tried again, only the download estimate in the hint, and live aria-describedby', await switched() === 'true'
-    && await saying(/^Read 4 of 5 plugins\. 1 couldn’t be read; Central Knot tries again later\.$/)
-    && (await said())[1] === 'The one plugin outside its marketplace is downloaded once (under 1 MB), then only changes, or daily if on a branch.'
+  check('Settings has the switch, on, how much is read without standing retry/refresh tails, only the download estimate in the hint, and live aria-describedby', await switched() === 'true'
+    && await saying(/^Read 4 of 5 plugins\. 1 couldn’t be read\.$/)
+    && (await said())[1] === 'The one plugin outside its marketplace is downloaded once (under 1 MB).'
     && await a.run(`document.getElementById('setting-plugin-text-info')?.getAttribute('aria-label')`) === 'About Read what plugins hold'
     && await a.run(`document.getElementById('plugin-text-on')?.getAttribute('aria-describedby')`) === 'setting-plugin-text-info-card setting-plugin-text-hint setting-plugin-text-notice', await said());
-  await checkCard(a, 'setting-plugin-text-info', 'Keeps plugin items’ names, descriptions and first lines, so Find can search them.', 'Read what plugins hold card');
+  await checkCard(a, 'setting-plugin-text-info', 'Keeps plugin items’ names, descriptions and first lines, so Find can search them. Plugins outside their marketplace fetch only changes after the first download (or daily on a branch); any that can’t be read are tried again later.', 'Read what plugins hold card');
   same('the four kept in the marketplace are kept as text; nothing of the one Git could not reach', kept().map(entry => entry.plugin).sort(), ['document-tools', 'issue-tracker', 'release-helper', 'starter-skills']);
   check('a skill is kept by its name and description', kept().find(entry => entry.plugin === 'document-tools')?.items.some(item => item.kind === 'skill' && item.name === 'pdf-reader' && item.description), kept().find(entry => entry.plugin === 'document-tools'));
   await pictures('failed', [[860, 600]], ['dark']);

@@ -205,10 +205,11 @@ function syncSwitch(home: HomeView) {
       label, h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, 'Paused'));
   }
   const idle = home.syncOn && !anythingOn();
-  const title = idle ? `Automatic sync is on: it starts once ${home.sync.syncEverything ? 'something turns up in one of your tools (Synchronize everything takes it in)' : 'you turn something on'}. Click to turn it off.`
-    : home.syncOn ? 'Automatic sync is on: an edit to a managed item spreads to the other tools on its own, even with this window closed. Click to turn it off.'
-    : 'Automatic sync is off: edits wait until you turn it on or use Sync once. Click to turn it on.';
-  return h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(home.syncOn), 'aria-label': 'Automatic sync', disabled: !!acting(), title, onclick: () => void setSync(!home.syncOn) },
+  const diff = 'Synchronize everything decides whether new items found in tools are added.';
+  const title = idle ? `Automatic sync is on: starts once ${home.sync.syncEverything ? 'something turns up in a tool' : 'you turn something on'}, keeping items in Central Knot in step across tools. ${diff} Click to turn it off.`
+    : home.syncOn ? `Automatic sync is on: keeps items already in Central Knot in step across tools on its own. ${diff} Click to turn it off.`
+    : `Automatic sync is off: edits to items in Central Knot wait until you turn it on or use Sync once. ${diff} Click to turn it on.`;
+  return h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(home.syncOn), 'aria-label': 'Automatic sync', 'aria-description': title, disabled: !!acting(), title, onclick: () => void setSync(!home.syncOn) },
     label, h(`span.sync-track${home.syncOn ? '.on' : ''}${idle ? '.idle' : ''}`, { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, !home.syncOn ? 'Off' : idle ? 'On · nothing synced' : 'On'));
 }
 
