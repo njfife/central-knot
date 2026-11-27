@@ -643,17 +643,21 @@ test('A catalog that arrives while the listing is being read is not missed; a co
     await mkdir(join(w.dataDir, 'catalogs'), { recursive: true });
     const copy = (await readdir(join(aside, 'catalogs')))[0]!;
     await rename(join(aside, 'catalogs', copy), join(w.dataDir, 'catalogs', copy));
+    const arrived = ends;
     job.listed(listed, false);
-    await until(() => ends > 0 && !job.view().reading, 'the run');
+    await until(() => ends > arrived && last?.of === 404 && !job.view().reading, 'the arrived catalog’s 404 plugins');
     assert.equal(last!.of, 404, 'the four of the marketplace whose copy arrived are counted with the 400');
     // A copy that will not read: each telling of the same listing is not a new read.
     await writeFile(join(w.dataDir, 'catalogs', copy, '.claude-plugin/marketplace.json'), '{ broken');
-    await new Promise(done => { job.listed(listed, true); setTimeout(done, 1500); });
+    const broken = ends;
+    job.listed(listed, true);
+    await until(() => ends > broken && !job.view().reading, 'the broken copy’s run to end');
+    assert.equal(last!.of, 400, 'the broken copy is unread');
     const runs = ends;
     job.listed(listed, false);
-    await new Promise(done => setTimeout(done, 1500));
-    assert.equal(ends, runs, 'no new read for a copy that was there, unread, last time');
+    // stop() pushes one final view itself; a run started by listed() would push its own end first, making runs + 2.
     await job.stop();
+    assert.equal(ends, runs + 1, 'no new read for a copy that was there, unread, last time');
   } finally { await w.close(); }
 });
 
