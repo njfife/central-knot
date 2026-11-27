@@ -23101,11 +23101,14 @@ async function pluginItemSwitchesFlow() {
     for (const dir of ['.pi', '.config/opencode', '.gemini', '.agents', '.claude']) if (existsSync(join(home, dir))) walk(join(home, dir));
     return { files, history: await entryIds() };
   };
-  // What changed since `before` (homeNow): the paths whose bytes differ, and History's new entries, each its kind and cause.
+  // What a click changed (`before`: homeNow before it): the paths whose bytes differ as soon as its result is told, and History's new
+  // entries made by then (each its kind and cause). Sync's own pass on what changed outside (a debounce after it) comes later.
   const changedSince = async before => {
-    const now = await homeNow(), events = await a.run('window.centralKnot.history().then(history => history.events.map(event => [event.id, event.kind, event.cause ?? ""]))');
+    const told = Date.now(), now = await homeNow();
+    const events = await a.run('window.centralKnot.history().then(history => history.events.map(event => [event.id, event.kind, event.cause ?? "", event.at]))');
     const paths = [...new Set([...Object.keys(before.files), ...Object.keys(now.files)])].filter(path => before.files[path] !== now.files[path]);
-    return { files: paths.map(path => path.slice(home.length + 1)), history: events.filter(([id]) => !before.history.includes(id)).map(([, kind, cause]) => `${kind} ${cause}`.trim()) };
+    const made = events.filter(([id, , , at]) => !before.history.includes(id) && Date.parse(at) <= told);
+    return { files: paths.map(path => path.slice(home.length + 1)), history: made.map(([, kind, cause]) => `${kind} ${cause}`.trim()) };
   };
   const clicksSince = async before => (await a.run('window.centralKnot.history().then(history => history.events.map(event => [event.id, event.cause ?? ""]))'))
     .filter(([id, cause]) => !before.includes(id) && (!cause || cause === 'switch'));
@@ -23183,7 +23186,7 @@ async function pluginItemSwitchesFlow() {
   const beforeLibrary = await homeNow();
   await a.click(libSwitch('pi-cli'));
   await done();
-  same('on the Library’s row too, its Pi switch drawn before his shared copy came is refused, and every tool’s files and History are as before it',
+  same('on the Library’s row too, its Pi switch drawn before his shared copy came is refused; when it is told, every tool’s files and History are as before it',
     [await header(), await changedSince(beforeLibrary)], ['polish changed since the page was read. Nothing was changed.', { files: [], history: [] }]);
   await a.click('#nav-plugins');
   await openPage('trio');
@@ -23265,7 +23268,7 @@ async function pluginItemSwitchesFlow() {
   const beforeShared = await homeNow();
   await a.click(sw('pair', 'pi-cli', 'skill', long));
   await done();
-  same('his copy in the shared skills folder behind the page: the Pi switch drawn before is refused, and every tool’s files and History are as before it',
+  same('his copy in the shared skills folder behind the page: the Pi switch drawn before is refused; when it is told, every tool’s files and History are as before it',
     [await header(), await changedSince(beforeShared)], [`${long} changed since the page was read. Nothing was changed.`, { files: [], history: [] }]);
   same('no page errors, item switches', a.pageErrors, []);
   await a.quit();
