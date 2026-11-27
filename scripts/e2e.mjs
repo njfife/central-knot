@@ -4325,12 +4325,15 @@ async function practiceFlow() {
   await a.run(`document.querySelector('#setting-sign-in-info').closest('.info-wrap').remove()`);
   await wait(360);
   const vanishedLeftOpen = await cardOpen('setting-log-info');
+  // Move the pointer off the removed mark before Refresh redraws it there and starts a hover timer early.
+  await moveTo({ x: 0, y: 0 });
   await a.click('#header-refresh');
   await fullSize(a);
   same('focus or click on another mark cancels a pending hover, and a timer whose mark vanished leaves the open card alone',
     [focusBeatHover, clickBeatHover, vanishedLeftOpen], [[true, false, 'setting-log-info'], [true, false], true]);
   // Hover: opens after 300 ms (mouse only), stays when moving onto the card or returning before 200 ms, closes 200 ms after leaving; touch never hover-opens.
   await moveTo({ x: 0, y: 0 });
+  await cardBecomes('setting-sign-in-info', false, 500);
   await a.run(`document.querySelector('#setting-sign-in-info').scrollIntoView({ block: 'center' })`);
   const signInAt = await centerOf('#setting-sign-in-info');
   const hoverAt = Date.now();
@@ -8524,7 +8527,14 @@ esac
   await a.click('#plugins-undo');
   await done();
   same('Undo turns the same copy on again where it was, and the record is On, kept out of Pi; the focus is on its switch as Undo goes', [installed(), calls().at(-1), entry()?.on, entry()?.except, await switchIs('#pswitch-page-0-issue-tracker'), await a.run(`document.activeElement?.id`)], [true, 'plugin enable issue-tracker@ck-test-market --scope user', true, ['pi-cli'], 'true partial', 'pswitch-page-0-issue-tracker']);
-  const focusRing = await a.run(`(() => { const el = document.activeElement, style = el && getComputedStyle(el); return el && style ? { id: el.id, visible: el.matches(':focus-visible'), outline: style.outlineStyle, offset: parseFloat(style.outlineOffset) } : null; })()`);
+  // Another group's window can hold the system focus on a grouped run, which suppresses :focus-visible; emulate focus around this read only.
+  await a.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+  let focusRing;
+  try {
+    focusRing = await a.run(`(() => { const el = document.activeElement, style = el && getComputedStyle(el); return el && style ? { id: el.id, visible: el.matches(':focus-visible'), outline: style.outlineStyle, offset: parseFloat(style.outlineOffset) } : null; })()`);
+  } finally {
+    await a.send('Emulation.setFocusEmulationEnabled', { enabled: false });
+  }
   check('after Undo, the focused switch draws its focus ring outside its track', focusRing?.id === 'pswitch-page-0-issue-tracker' && focusRing.visible && focusRing.outline !== 'none' && focusRing.offset > 0, focusRing);
   same('after the Undo too, nothing is lost', kept(), keptBefore);
   await a.click('#plugin-back');
@@ -9433,16 +9443,34 @@ fs.writeFileSync(record, JSON.stringify(now));
   const failNow = ['plug-04', 'plug-05', 'plug-17'];
   for (const name of failNow) writeFileSync(join(home, `fail-${name}`), '');
   await putAt(list, '[data-plugin="plug-04"]', 20);
-  const fourPoints = []; for (const name of ['plug-04', 'plug-05', 'plug-17', 'plug-10']) fourPoints.push(await middleOf(`#pswitch-0-${name}`));
-  for (const point of fourPoints) { await clickAt(point); await wait(150); }
+  const four = ['plug-04', 'plug-05', 'plug-17', 'plug-10'];
+  const fourPoints = [];
+  for (const name of four) fourPoints.push([name, await middleOf(`#pswitch-0-${name}`)]);
+  // Another group's window can take the focus mid-press, ending a press with nothing clicked; confirm each row's note in order so the sentence keeps the expected order.
+  for (const [name, point] of fourPoints) {
+    for (let tries = 0; tries < 5; tries++) {
+      await clickAt(tries ? await middleOf(`#pswitch-0-${name}`) : point);
+      await wait(150);
+      if (await a.exists(`[data-plugin="${name}"] .plugin-click`)) break;
+    }
+  }
   for (let tries = 0; tries < 150 && await a.exists('.plugin-click:not([data-click="ended"])'); tries++) await wait(100);
   await done();
   for (const name of failNow) rmSync(join(home, `fail-${name}`));
   const plugReasons = () => a.run(`[...document.querySelectorAll('#header .problem-text')].map(text => [text, ...text.children].some(part => part.scrollWidth > part.clientWidth) ? 'cut' : 'whole')`);
   // (The run holds plug-06's click before them too, within its time: 3 of 5.)
-  same('three failing plugins and one installed: the sentence says first what didn’t go through, then one ×, the first reason and Show all 3 reasons',
-    [/^3 of \d didn’t go through in every tool: plug-04, plug-05 and plug-17\./.test(await a.text('#plugins-result .toolbar-result-text') ?? ''), await a.run(`document.querySelectorAll('#header .band-dismiss').length`), (await plugReasons()).length, await a.text('#problems-show-all')],
-    [true, 1, 1, 'Show all 3 reasons']);
+  const missing = await a.run(`${JSON.stringify(four)}.filter(name => !document.querySelector(\`[data-plugin="\${name}"] .plugin-click\`))`);
+  const plugSentence = await a.text('#plugins-result .toolbar-result-text');
+  const plugActual = [
+    /^3 of \d didn’t go through in every tool: plug-04, plug-05 and plug-17\./.test(plugSentence ?? ''),
+    await a.run(`document.querySelectorAll('#header .band-dismiss').length`),
+    (await plugReasons()).length,
+    await a.text('#problems-show-all'),
+  ];
+  const plugExpected = [true, 1, 1, 'Show all 3 reasons'];
+  check('three failing plugins and one installed: the sentence says first what didn’t go through, then one ×, the first reason and Show all 3 reasons',
+    !missing.length && JSON.stringify(plugActual) === JSON.stringify(plugExpected),
+    { actual: plugActual, expected: plugExpected, missing, sentence: plugSentence });
   // Folded, only the name gives way, and no more than its own width: what failed begins right after it.
   same('folded, what failed begins right after the plugin’s name, with no gap', await a.run(`(text => { const name = text.querySelector('.item-name'), range = document.createRange(); range.selectNodeContents(name); const next = name.nextElementSibling; if (!next) return null; const end = range.getBoundingClientRect().right; range.selectNodeContents(next); return Math.round(range.getBoundingClientRect().left - end); })(document.querySelector('#header .problem-text'))`), 0);
   /** Pictures of the run's result (with --shots): light at 1280×800, dark at 860×600 and 1728×1080, then back light at 1280. */
