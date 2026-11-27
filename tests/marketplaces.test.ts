@@ -6,7 +6,7 @@ import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile
 import { syncBuiltinESMExports } from 'node:module';
 import { dirname, join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
+import { createMarketplaces, registerMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
 import { resultLines, resultParts, resultSentence, undoTitle } from '../src/pluginplan.ts';
 import * as engine from '../src/plugins.ts';
 import { FROM_DIRECTORY, WAITS_TO_MOVE, boxOf, foundIn, recordUnread, toolMark } from '../src/pluginstatus.ts';
@@ -1718,5 +1718,38 @@ test('A one-tool click writes nothing and returns the refusal when that tool is 
     box.calls.length = 0;
     const recordOnly = await box.markets.turn(box.root, 'pdf', 'keep-out', 'claude-cli', box.home);
     assert.deepEqual([box.calls, (await box.record()).plugins[0]!.except, recordOnly.done], [[], ['claude-cli'], []]);
+  } finally { await box.cleanup(); }
+});
+
+test('Unreadable Claude Code settings.json reports ownSettings unknown in detail, carries deleted unknown through undoTurn and IPC validation', async () => {
+  const box = await keptHome();
+  try {
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    const settingsPath = join(box.home, '.claude/settings.json');
+    await put(settingsPath, '{broken');
+    const det = await box.markets.detail(box.root, 'pdf');
+    assert.equal(det?.installed?.['claude-cli']?.ownSettings, 'unknown');
+
+    await rm(settingsPath, { force: true });
+    const before = (await box.record()).plugins.find(each => each.plugin === 'pdf')!;
+    const undone = await box.markets.undoTurn(box.root, 'pdf', before, [{ source: box.root, marketName: 'team', plugin: 'pdf', tool: 'claude-cli', action: 'install', deleted: 'unknown' }], box.home);
+    assert.equal(undone.done[0]?.deleted, 'unknown');
+
+    // IPC sanitizer accepts deleted: 'unknown' on plugins:undo-turn.
+    const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+    registerMarketplaces((channel, fn) => { handlers.set(channel, fn); }, {
+      home: () => ({ home: box.home, actual: true }),
+      read: async () => ({ tools: ['claude-cli'], snapshots: [] }),
+      writeAccess: async () => ({ allowed: true }),
+      dataDir: join(box.base, 'ipc-data'),
+      pickFolder: async () => undefined,
+      openExternal: async () => {},
+    }, {
+      findClis: async () => ({ binaries: { 'claude-cli': '/bin/true' }, apps: {} }),
+      install: async (_ctx, _cat, _plugin, tool) => ({ tool, outcome: 'installed', message: 'Installed.', runs: [], changed: true }),
+    });
+    const ipcOut = await handlers.get('plugins:undo-turn')!(box.root, 'pdf', before, [{ source: box.root, marketName: 'team', plugin: 'pdf', tool: 'claude-cli', action: 'install', deleted: 'unknown' }], box.home) as { stopped?: string; done: { deleted?: unknown }[] };
+    assert.equal(ipcOut.stopped, undefined);
+    assert.equal(ipcOut.done[0]?.deleted, 'unknown');
   } finally { await box.cleanup(); }
 });

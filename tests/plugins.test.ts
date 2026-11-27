@@ -7,6 +7,7 @@ import { join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { standIn } from './standin.ts';
+import { lockSkip, withLock } from './fslock.ts';
 import { slashPath } from './wincompat.ts';
 import { tomlValue } from '../src/textedit.ts';
 import { compareVersions } from '../src/values.ts';
@@ -1357,5 +1358,33 @@ exec ${JSON.stringify(process.execPath)} -e 'const fs=require("fs"),f=process.ar
     // Once its folder is gone, false is no longer installed in either read (while marker, still true and present, stays).
     await rm(join(market, 'plugins/full'), { recursive: true });
     assert.deepEqual([await installState(context, 'copilot-cli', 'ck-test-market', 'full'), (await installedPlugins(context, 'copilot-cli')).map(each => each.plugin)], [{ state: 'not-installed' }, ['marker']]);
+  } finally { await box.cleanup(); }
+});
+
+test('Claude Code installState marks ownSettings as unknown when settings.json cannot be read, and leaves it absent when missing', async () => {
+  const box = await sandbox();
+  try {
+    const copy = join(box.home, '.claude/plugins/cache/ck-test-market/marker/0.3.0');
+    await put(join(copy, 'skills/one/SKILL.md'), '---\nname: one\n---\n');
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({
+      version: 2,
+      plugins: { 'marker@ck-test-market': [{ scope: 'user', installPath: copy, version: '0.3.0' }] },
+    }));
+    const missing = await installState(box.context, 'claude-cli', 'ck-test-market', 'marker');
+    assert.equal(missing.state, 'installed');
+    assert.equal(missing.ownSettings, undefined);
+
+    const settings = join(box.home, '.claude/settings.json');
+    await put(settings, '{not valid json');
+    const broken = await installState({ ...box.context, reads: new Map() }, 'claude-cli', 'ck-test-market', 'marker');
+    assert.equal(broken.state, 'installed');
+    assert.equal(broken.ownSettings, 'unknown');
+
+    if (!lockSkip) {
+      await put(settings, JSON.stringify({ pluginConfigs: { 'marker@ck-test-market': { options: { region: 'west' } } } }));
+      const locked = await withLock(settings, 'file-unreadable', () => installState({ ...box.context, reads: new Map() }, 'claude-cli', 'ck-test-market', 'marker'));
+      assert.equal(locked.state, 'installed');
+      assert.equal(locked.ownSettings, 'unknown');
+    }
   } finally { await box.cleanup(); }
 });

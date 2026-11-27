@@ -3681,4 +3681,73 @@ test('a click on a tool’s Plugins tab keeps Plugin marketplaces’ result, Und
   assert.ok(pluginsResult().some(node => textOf(node).includes('Marketplace folder not found.')));
 });
 
+test('Consequential uninstall/Undo shows irreversible completion without Undo quietly, defers reload chips behind Show all, and keeps Uninstall Undo hover on Undo the rest', async t => {
+  const { viewWith } = pluginProfileWorld(t);
+  t.mock.method(api, 'refresh', async () => { main.reads.home++; return viewWith(true); });
+  app.page = 'harnesses';
+  app.harness = 'claude-cli';
+  app.harnessTab = 'plugins';
+
+  // 1. Irreversible uninstall (no Undo, no reload advice, no profileLine) still shows #plugins-result in the header quietly.
+  turnPlugin(entry, 'alpha', 'uninstall', 'claude-cli');
+  await settled();
+  await main.answer({
+    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'remove', report: { tool: 'claude-cli', outcome: 'uninstalled', changed: true, message: 'Uninstalled.', runs: [] } }],
+    before: null,
+    back: [],
+  });
+  await settled();
+  const goneResult = pluginsResult();
+  assert.ok(findById(goneResult[0], 'plugins-result'), 'irreversible uninstall without Undo draws #plugins-result');
+  assert.equal(findById(goneResult[0], 'plugins-undo'), undefined, 'no Undo button when back is empty');
+  assert.equal(app.said.quiet, true, 'status bar does not duplicate irreversible header result');
+
+  // 2. Uninstall's Undo with reload advice omits Row 2 reload chips so the sentence can wrap, puts reload lines under Show all, and stays quiet.
+  market.lastRun = {
+    done: [], undo: false, home: '/home', place: 'claude-cli',
+    turn: { source: '/market', plugin: 'alpha', before: null, back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'install', deleted: true }] },
+  };
+  t.mock.method(api, 'undoPluginTurn', async () => ({
+    done: [{
+      source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'install', deleted: true,
+      report: { tool: 'claude-cli', outcome: 'installed', changed: true, message: 'Installed.', runs: [], reloads: [{ tool: 'claude-cli', kind: 'plugin', on: true }] },
+    }],
+  }));
+  undoLast();
+  await settled();
+  const foldedUndo = pluginsResult();
+  assert.equal(foldedUndo.length, 1, 'consequential Undo defers reload chips off Row 2 so Row 1 can wrap');
+  assert.match(textOf(findById(foldedUndo[0], 'plugins-result')), /without its saved options/);
+  assert.equal(app.said.quiet, true, 'status bar does not duplicate consequential Undo shown in header');
+  app.shownWhole = market.lastRun;
+  const wholeUndo = pluginsResult();
+  assert.equal(wholeUndo.length, 2, 'Show all reveals reload lines on Row 2');
+  assert.match(textOf(wholeUndo[1]), /\/reload-plugins/);
+  app.shownWhole = undefined;
+
+  // 3. Ordinary install with reload advice still shows reload chips on Row 2.
+  market.lastRun = {
+    done: [{
+      source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'install',
+      report: { tool: 'claude-cli', outcome: 'installed', changed: true, message: 'Installed.', runs: [], reloads: [{ tool: 'claude-cli', kind: 'plugin', on: true }] },
+    }],
+    undo: false, home: '/home', place: 'claude-cli',
+    turn: { source: '/market', plugin: 'alpha', before: null, back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'remove' }] },
+  };
+  const ordinary = pluginsResult();
+  assert.equal(ordinary.length, 2, 'ordinary install keeps reload chips on Row 2');
+  assert.match(textOf(ordinary[1]), /\/reload-plugins/);
+
+  // 4. Failed reinstall on Uninstall's Undo keeps plugin name and deleted settings in Undo the rest's hover.
+  market.lastRun = {
+    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'install', report: { tool: 'claude-cli', outcome: 'failed', message: 'Failed.', runs: [] } }],
+    undo: true, home: '/home', place: 'claude-cli',
+    rest: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'install', deleted: true }],
+    turn: { source: '/market', plugin: 'alpha', before: null, back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'install', deleted: true }] },
+  };
+  const failedUndo = findById(pluginsResult()[0], 'plugins-undo')!;
+  assert.equal(textOf(failedUndo), 'Undo the rest');
+  assert.equal(failedUndo.title, 'Installs alpha again in Claude Code, from the marketplace, without its saved options.');
+});
+
 

@@ -11,6 +11,7 @@ installDom({}, { userAgent: 'Macintosh', byId: id => findById(rendered, id) ?? n
 const { setRenderer, state: app } = await import('../src/app.ts');
 const { goHarness, harnessesPage } = await import('../src/harnesspage.ts');
 const { putPageData } = await import('../src/pagedata.ts');
+const { clickList, drop } = await import('../src/clicklist.ts');
 const { market, resetMarket } = await import('../src/pluginstate.ts');
 
 const findAll = (node: unknown, match: (el: FakeNode) => boolean, out: FakeNode[] = []): FakeNode[] => {
@@ -245,5 +246,114 @@ test('Plugins tab matches boxOf disabled rule, shows box.line on locked rows, an
   putPageData(market.read, makeView({ canWrite: true, switchProblem: problem }));
   rendered = harnessesPage() as unknown as FakeNode;
   assert.equal(textOf(findById(rendered, 'harness-plugins-stopped')), problem);
+  resetMarket();
+});
+
+test('Plugins tab switch carries its consequence, live waiting/running state, stays/unknown marks, inline marketplace on ambiguous titles only, real-identity unlisted dedupe, and quiet stable Its page', () => {
+  resetMarket();
+  drop(() => true);
+  app.home = makeHome({
+    managed: ['claude-cli'],
+    pluginItems: [
+      { tool: 'claude-cli', plugin: 'incident.io', marketName: 'anthropic-plugin-directory', listed: false, items: [] },
+      { tool: 'claude-cli', plugin: 'shared-tool', marketName: 'private-market', listed: false, items: [] },
+      { tool: 'claude-cli', plugin: 'lone-dir', marketName: 'anthropic-plugin-directory', listed: false, items: [] },
+    ],
+  });
+  Object.assign(app, { page: 'harnesses', harness: 'claude-cli', harnessTab: 'plugins', busy: undefined, instructions: { state: 'ready', data: [], gen: 0 } });
+  const entry = (source: string, name: string, plugins: { name: string; description: string; displayName?: string }[], states: Record<string, unknown>, switches: Record<string, unknown>) => ({
+    source, name, kind: 'folder', sourceLabel: source, origins: ['central-knot'], readAt: '2026-11-26T00:00:00.000Z', plugins, states, switches,
+  });
+  putPageData(market.read, {
+    home: '/home',
+    canWrite: true,
+    tools: ['claude-cli'],
+    clis: { 'claude-cli': true },
+    marketplaces: [
+      entry('/m1', 'team-one', [
+        { name: 'shared-tool', description: 'One.' },
+        { name: 'kept-off-tool', description: 'Off.' },
+        { name: 'stays-tool', description: 'Stays.' },
+        { name: 'unread-tool', description: 'Unread.' },
+      ], {
+        'shared-tool': { 'claude-cli': { state: 'installed', version: '1.0.0', path: '/p1' } },
+        'kept-off-tool': { 'claude-cli': { state: 'installed', version: '1.1.0', path: '/p2', off: true } },
+        'stays-tool': { 'claude-cli': { state: 'installed', version: '1.2.0', path: '/p3' } },
+        'unread-tool': { 'claude-cli': { state: 'installed', version: '1.3.0', path: '/p4' } },
+      }, {
+        'shared-tool': { entry: { id: 'e1', source: '/m1', marketName: 'team-one', plugin: 'shared-tool', on: true, except: [] }, tools: { 'claude-cli': { wanted: true, has: 'whole', takes: true } } },
+        'kept-off-tool': { entry: { id: 'e2', source: '/m1', marketName: 'team-one', plugin: 'kept-off-tool', on: false, except: [] }, tools: { 'claude-cli': { wanted: false, has: 'whole', takes: true } } },
+        'stays-tool': { entry: { id: 'e3', source: '/m1', marketName: 'team-one', plugin: 'stays-tool', on: false, except: [] }, tools: { 'claude-cli': { wanted: false, has: 'whole', takes: true } } },
+        'unread-tool': { entry: { id: 'e4', source: '/m1', marketName: 'team-one', plugin: 'unread-tool', on: true, except: [] }, tools: { 'claude-cli': { wanted: true, has: 'unknown', takes: true } } },
+      }),
+      entry('/m2', 'team-two', [
+        { name: 'shared-tool', description: 'Two.' },
+        { name: 'incident-io', description: 'From dir.' },
+      ], {
+        'shared-tool': { 'claude-cli': { state: 'installed', version: '2.0.0', path: '/p5' } },
+        'incident-io': { 'claude-cli': { state: 'installed', version: '3.0.0', path: '/p6', directory: 'incident.io@anthropic-plugin-directory' } },
+      }, {
+        'shared-tool': { entry: { id: 'e5', source: '/m2', marketName: 'team-two', plugin: 'shared-tool', on: true, except: [] }, tools: { 'claude-cli': { wanted: true, has: 'whole', takes: true } } },
+        'incident-io': { entry: { id: 'e6', source: '/m2', marketName: 'team-two', plugin: 'incident-io', on: true, except: [] }, tools: { 'claude-cli': { wanted: true, has: 'whole', takes: true } } },
+      }),
+    ],
+  } as unknown as PluginsView);
+
+  rendered = harnessesPage() as unknown as FakeNode;
+  const rows = findAll(rendered, el => el.className.split(/\s+/).includes('harness-plugin'));
+  const rowOf = (id: string) => rows.find(row => !!findById(row, id))!;
+
+  // Switch consequence on hover and aria-description (on and kept-off), while aria-label keeps the concise name.
+  const onSw = findById(rendered, 'harness-plugin-switch-team-one-shared-tool')!;
+  assert.equal(onSw.attrs['aria-label'], 'shared-tool in Claude Code');
+  assert.equal(onSw.attrs.title, 'Click to turn shared-tool off in Claude Code, kept installed: it stays off until you turn it on again. Undo turns it on again.');
+  assert.equal(onSw.attrs['aria-description'], onSw.attrs.title);
+  const offSw = findById(rendered, 'harness-plugin-switch-team-one-kept-off-tool')!;
+  assert.equal(offSw.attrs.title, 'Click to turn kept-off-tool on in Claude Code alone. Undo turns it off again.');
+  assert.equal(offSw.attrs['aria-description'], offSw.attrs.title);
+
+  // Stays and held/unknown states show their mark words (with full toolMark hover).
+  const staysState = findNode(rowOf('harness-plugin-team-one-stays-tool'), el => el.className.split(/\s+/).includes('harness-plugin-state'))!;
+  assert.equal(textOf(staysState), 'Still installed');
+  assert.match(staysState.attrs.title ?? '', /The plugin is off/);
+  const unreadState = findNode(rowOf('harness-plugin-team-one-unread-tool'), el => el.className.split(/\s+/).includes('harness-plugin-state'))!;
+  assert.equal(textOf(unreadState), 'Can’t be read now');
+  assert.match(unreadState.attrs.title ?? '', /record of its plugins can’t be read now/);
+
+  // Ambiguous titles show marketplace name inline; unique titles do not.
+  assert.equal(textOf(findNode(rowOf('harness-plugin-team-one-shared-tool'), el => el.className.split(/\s+/).includes('harness-plugin-market'))), ' · team-one');
+  assert.equal(textOf(findNode(rowOf('harness-plugin-team-two-shared-tool'), el => el.className.split(/\s+/).includes('harness-plugin-market'))), ' · team-two');
+  assert.equal(findNode(rowOf('harness-plugin-team-one-kept-off-tool'), el => el.className.split(/\s+/).includes('harness-plugin-market')), undefined);
+
+  // Unlisted notice uses real installed identity: matched directory install is excluded, distinct same-name and unmatched directory survive.
+  const unlistedText = textOf(findById(rendered, 'harness-plugins-unlisted'));
+  assert.doesNotMatch(unlistedText, /incident\.io/);
+  assert.match(unlistedText, /shared-tool \(private-market\)/);
+  assert.match(unlistedText, /lone-dir \(anthropic-plugin-directory\)/);
+
+  // Its page is quiet (ghost) and sits between Uninstall… and the switch so opening Uninstall… never moves it.
+  const sharedRow = rowOf('harness-plugin-team-one-shared-tool');
+  const pageBtn = findById(sharedRow, 'harness-plugin-team-one-shared-tool')!;
+  const uninstallBtn = findById(sharedRow, 'harness-plugin-uninstall-team-one-shared-tool')!;
+  assert.ok(pageBtn.className.split(/\s+/).includes('ghost'), `Its page should use ghost variant, got: ${pageBtn.className}`);
+  assert.equal(pageBtn.className.split(/\s+/).includes('link'), false);
+  const direct = sharedRow.children as FakeNode[];
+  assert.ok(direct.indexOf(uninstallBtn) < direct.indexOf(pageBtn) && direct.indexOf(pageBtn) < direct.indexOf(onSw), 'order must be uninstall, Its page, switch');
+
+  // Live waiting and running clicks show on the row and describe the disabled switch.
+  clickList.turns.push(
+    { state: 'running', run: { place: 'plugins:claude-cli', lastAt: 0 }, place: 'claude-cli', work: async () => {}, source: '/m1', plugin: 'shared-tool', what: 'keep-out', tool: 'claude-cli', said: { waiting: 'Waiting to turn off in Claude Code', running: 'Turning off in Claude Code…' } } as never,
+    { state: 'waiting', run: { place: 'plugins:claude-cli', lastAt: 0 }, place: 'claude-cli', work: async () => {}, source: '/m1', plugin: 'kept-off-tool', what: 'let-in', tool: 'claude-cli', said: { waiting: 'Waiting to turn on in Claude Code', running: 'Turning on in Claude Code…' } } as never,
+  );
+  rendered = harnessesPage() as unknown as FakeNode;
+  const liveRows = findAll(rendered, el => el.className.split(/\s+/).includes('harness-plugin'));
+  const runningClick = findNode(liveRows.find(row => !!findById(row, 'harness-plugin-team-one-shared-tool'))!, el => el.attrs['data-click'] === 'running')!;
+  const waitingClick = findNode(liveRows.find(row => !!findById(row, 'harness-plugin-team-one-kept-off-tool'))!, el => el.attrs['data-click'] === 'waiting')!;
+  assert.equal(textOf(runningClick), 'Turning off in Claude Code…');
+  assert.equal(textOf(waitingClick), 'Waiting to turn on in Claude Code');
+  assert.equal(findById(rendered, 'harness-plugin-switch-team-one-shared-tool')!.attrs.title, 'Turning off in Claude Code…');
+  assert.equal(findById(rendered, 'harness-plugin-switch-team-one-kept-off-tool')!.attrs.title, 'Waiting to turn on in Claude Code');
+
+  drop(() => true);
   resetMarket();
 });
