@@ -15069,16 +15069,18 @@ async function libraryFlow() {
     { id: 'fold-one', at: foldAt(4), key: 'one-tool', of: 'skill', item: 'one-tool', kind: 'on', cause: 'switch', losers: [{ tool: 'codex-cli', hash: '' }], orderProved: true },
     { id: 'fold-two', at: foldAt(3), key: 'two-tools', of: 'skill', item: 'two-tools', kind: 'on', cause: 'switch', losers: [{ tool: 'claude-cli', hash: '' }, { tool: 'codex-cli', hash: '' }], orderProved: true },
     { id: 'fold-all', at: foldAt(2), key: 'all-six', of: 'skill', item: 'all-six', kind: 'off', cause: 'switch', losers: sixIds.map(tool => ({ tool, hash: 'b' })), orderProved: true },
+    { id: 'fold-then', at: foldAt(1.5), key: 'draft-over', of: 'skill', item: 'draft-over', kind: 'on', cause: 'switch', losers: fiveIds.map(tool => ({ tool, hash: '' })), tookFrom: [{ tool: 'claude-cli', hash: 'old' }], orderProved: true },
     { id: 'fold-five', at: foldAt(1), key: 'draft-rfc', of: 'skill', item: 'draft-rfc', kind: 'off', cause: 'switch', losers: fiveIds.map(tool => ({ tool, hash: 'b' })), orderProved: true },
   );
   writeFileSync(hPath, `${JSON.stringify(hFold, null, 2)}\n`);
   await o.click('#header-refresh');
   check('folded five-of-six tool row renders its fold toggle', await until(() => o.exists('#history-tools-toggle-fold-five-0')));
   const rowAbout = name => o.run(`(() => { const row = [...document.querySelectorAll('.history-row')].find(el => el.querySelector('.history-what strong')?.textContent === ${JSON.stringify(name)}); return { text: row?.querySelector('.history-about')?.textContent?.trim() ?? '', folds: row?.querySelectorAll('details.fold').length ?? 0 }; })()`);
-  same('History folds 5 of 6 tools without a trailing full stop, keeps all 6, 2 and 1 unfolded, folds each group of two-group and legacy entries, and omits both fillers',
-    [await rowAbout('draft-rfc'), await rowAbout('all-six'), await rowAbout('two-tools'), await rowAbout('one-tool'), await rowAbout('release-prose'), await rowAbout('legacy'), await rowAbout('old')],
+  same('History folds 5 of 6 tools (dropping a lone trailing full stop, keeping one before a following sentence), keeps all 6, 2 and 1 unfolded, folds each group of two-group and legacy entries, and omits both fillers',
+    [await rowAbout('draft-rfc'), await rowAbout('draft-over'), await rowAbout('all-six'), await rowAbout('two-tools'), await rowAbout('one-tool'), await rowAbout('release-prose'), await rowAbout('legacy'), await rowAbout('old')],
     [
       { text: 'Turned off: removed from 5 of 6 tools', folds: 1 },
+      { text: 'Turned on: put in 5 of 6 tools. Claude Code’s own copy was written over and kept as a version.', folds: 1 },
       { text: 'Turned off: removed from all 6 tools.', folds: 0 },
       { text: 'Turned on: put in Claude Code and Codex.', folds: 0 },
       { text: 'Turned on: put in Codex.', folds: 0 },

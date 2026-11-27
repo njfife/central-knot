@@ -70,7 +70,10 @@ export const readsIt = (tools: readonly string[]) => `${andList(tools.map(toolNa
 /** "a", "a or b", "a, b or c": for choices, such as where something can be added. */
 export const orList = (items: string[]) => joined(items, 'or');
 
-/** Touched tools for History rows and toolsPhrase: all 3+ home tools (by id), names, and fold label ("5 of 6 tools", or "5 tools" when a tool left). */
+/**
+ * Touched tools for History rows and toolsPhrase: all 3+ home tools, names, and fold label ("5 of 6 tools", or "5 tools" when a tool left).
+ * Takes ids, so it compares which tools, not how many: an event from before a tool was added or removed is not "all" or "of M".
+ */
 export function touchedTools(touched: string[], inHome: string[]): { tools: string[]; all: boolean; names: string; fold?: string } {
   const tools = [...new Set(touched)];
   const all = tools.length > 2 && tools.length === inHome.length && inHome.every(tool => tools.includes(tool));

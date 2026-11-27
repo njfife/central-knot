@@ -93,9 +93,9 @@ function rowAbout(event: HistoryEvent): { glyph: IconName; action?: string; node
   const text = event.settingsChanged ? `${described.text} ${event.settingsChanged.join(' ')}` : described.text;
   if (!text.includes('\0')) return { glyph: described.glyph, action: described.action, node: h('div.history-about', {}, text) };
   const opened: HTMLElement[] = [];
-  // Odd slots are `\0<group index>\0` markers from formatTools; even slots are literal text (drop a sentence-ending "." right after a fold).
-  const inline: Child[] = text.split('\0').map((part, slot) => {
-    if (slot % 2 === 0) return slot > 0 ? part.replace(/^\.(?=$|\s)/, '') : part;
+  // Odd slots are `\0<group index>\0` markers from formatTools; even slots are literal text (drop a trailing "." only when a fold ends the row).
+  const inline: Child[] = text.split('\0').map((part, slot, parts) => {
+    if (slot % 2 === 0) return slot === parts.length - 1 ? part.replace(/^\.$/, '') : part;
     const group = groups[Number(part)]!;
     const key = `${event.id}-${(slot - 1) / 2}`;
     const open = openToolFolds.has(key);
