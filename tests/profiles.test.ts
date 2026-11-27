@@ -13,7 +13,7 @@ import { readTool, writeEntry } from '../src/mcp.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { hashesOf, libraryWords, sentences } from '../src/libraryrow.ts';
 import { migrateProfiles } from '../src/profilemigrate.ts';
-import { allTurns, copilotKeptOnBy, copilotServerName, copilotSharesYours, entryTurns, homeItems, itemRowState, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, stillLoadAfter, switchable, switchPlan, switchPreview, takenWhole, turnsWords, undoInHome, undoOffered, undoPlan, undoTurns, wholeSaid, wholeTurns, withCopilotOff, type Libraries, type PluginHome } from '../src/profileplan.ts';
+import { allTurns, copilotKeptOnBy, copilotServerName, copilotSharesYours, entryTurns, homeItems, itemRowState, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, listedChanges, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, stillLoadAfter, switchable, switchPlan, switchPreview, takenWhole, turnsWords, undoInHome, undoOffered, undoPlan, undoTurns, wholeSaid, wholeTurns, withCopilotOff, type Libraries, type PluginHome } from '../src/profileplan.ts';
 import { NO_PLUGINS, deleteProfile, readLibraries, readProfiles, saveProfile, saveProfiles, switchProfile, undoSwitch, type PluginSide } from '../src/profiles.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { pluginOnIn } from '../src/pluginrows.ts';
@@ -97,10 +97,14 @@ test('The Profiles page says what the Library lists that no profile can tick, it
   assert.deepEqual(pluginLive(home).map(item => item.id).sort(), ['plugin:skill:document-tools@team-tools/forms', 'plugin:skill:document-tools@team-tools/notes',
     'plugin:skill:document-tools@team-tools/pdf', 'plugin:skill:pi-pack@team-tools/papa'], 'the plugins’ items, each listed as its plugin’s');
   assert.deepEqual(leftOut(home), { skill: 1, mcp: 1, agent: 0 });
-  assert.equal(leftOutWords(leftOut(home)), 'Not listed here: 1 skill and 1 MCP server found in your tools that aren’t in Central Knot yet '
-    + '(under Found in the Library, with Add on each that can be taken in).');
-  assert.equal(leftOutWords({ skill: 1, mcp: 0, agent: 0 }),
-    'Not listed here: 1 skill found in your tools that isn’t in Central Knot yet (under Found in the Library, with Add if it can be taken in).');
+  assert.deepEqual(leftOutWords(leftOut(home)), {
+    line: '1 skill and 1 MCP server in your tools aren’t in Central Knot',
+    card: 'Under Found in the Library, with Add on each that can be taken in.',
+  });
+  assert.deepEqual(leftOutWords({ skill: 1, mcp: 0, agent: 0 }), {
+    line: '1 skill in your tools isn’t in Central Knot',
+    card: 'Under Found in the Library, with Add if it can be taken in.',
+  });
 
   // Everything in Central Knot; gone, deleted, still linked to pi-pack (no row anywhere); and a plugin's item only on a row of the
   // person's own: nothing left out.
@@ -110,7 +114,7 @@ test('The Profiles page says what the Library lists that no profile can tick, it
     rows: { skill: [row('notes', throughDocs)], mcp: [], agent: [row('writer')] },
     installed: [{ tool: 'claude-cli', plugin: 'document-tools', marketName: 'team-tools', listed: true, items: [{ kind: 'skill', name: 'notes', description: '' }] }] });
   assert.deepEqual(ids(homeItems(all)), ['skill:notes', 'agent:writer']);
-  assert.equal(leftOutWords(leftOut(all)), '', 'no line');
+  assert.equal(leftOutWords(leftOut(all)), undefined, 'no line');
 });
 
 // ---------- A plugin's items: what a switch will change, tool by tool ----------
@@ -2337,9 +2341,13 @@ test('Copilot shared name fix 4: pluginRowState lives in profileplan.ts and retu
   const home = docsHome([docsIn('copilot-cli', { items: [issues] }), docsIn('codex-cli', { items: [issues], serversOff: ['issues'] }), docsIn('claude-cli', { items: [issues], serversOff: ['issues'] })], [], [['mcp', 'issues', true]], [mine]);
   const item = pluginLive(home).find(each => each.id === issuesId)!;
   assert.equal(pluginRowState(profile('Mine', ['mcp:issues']), item), 'Off · on in Copilot CLI');
-  assert.equal(pluginRowState(profile('Both', ['mcp:issues', issuesId]), item), 'On');
+  assert.equal(pluginLiveState(profile('Mine', ['mcp:issues']), item), 'off · on in Copilot CLI');
+  assert.equal(pluginRowState(profile('Both', ['mcp:issues', issuesId]), item), '');
+  assert.equal(pluginLiveState(profile('Both', ['mcp:issues', issuesId]), item), 'on');
   const allOff = docsHome([docsIn('copilot-cli', { items: [issues], serversOff: ['issues'] }), docsIn('codex-cli', { items: [issues], serversOff: ['issues'] })], [], [], []);
-  assert.equal(pluginRowState(profile('Quiet', []), pluginLive(allOff).find(each => each.id === issuesId)!), 'Off');
+  const offItem = pluginLive(allOff).find(each => each.id === issuesId)!;
+  assert.equal(pluginRowState(profile('Quiet', []), offItem), '');
+  assert.equal(pluginLiveState(profile('Quiet', []), offItem), 'off');
   // Two plugins + his own server: when one plugin AND his own server are both named, the other plugin is kept on by the named plugin (not `own`), so clearedForHis stays silent.
   const tracker: InstalledPlugin = { tool: 'copilot-cli', plugin: 'tracker', marketName: 'team-tools', listed: true, items: [issues] };
   const bothHome = docsHome([docsIn('copilot-cli', { items: [issues] }), tracker], [], [['mcp', 'issues', true]], [mine]);
@@ -2539,35 +2547,72 @@ test('copilotSharesYours: true only when his own On server or a found server in 
   assert.equal(copilotSharesYours(home({}, [fact('issues', 'Issues')]), at), false);
 });
 
-test('switchPreview returns a short header line beside the full card sentence that the menus keep unchanged', () => {
+test('switchPreview returns a short header line, menu card, and tip only when the card adds a clause; listed row counts match across all three edge cases', () => {
   const words = (text: string) => text.trim().split(/\s+/).filter(token => /[\p{L}\p{N}]/u.test(token)).length;
-  const checkBoth = (got: unknown, line: string, card: string) => {
-    assert.deepEqual(got, { line, card });
+  const checkBoth = (got: { line: string; card: string; tip?: string }, line: string, card: string, hasTip: boolean) => {
+    assert.deepEqual(got, hasTip ? { line, card, tip: card } : { line, card });
     assert.ok(words(line) <= 10, `expected <=10 words, got ${words(line)}: ${line}`);
   };
   const home = docsHome([docsIn('claude-cli'), docsIn('codex-cli')], [], [['skill', 'notes', false], ['skill', 'pager', true]]);
   const liveList = homeItems(home), plugs = pluginLive(home);
   checkBoth(switchPreview(profile('Legacy', ['skill:notes'], false), liveList, plugs),
-    'Switching · 1 on, 1 off', 'Switching turns 1 item on and 1 off. Plugin items stay as they are.');
+    'Switching turns 1 on, 1 off', 'Switching turns 1 item on and 1 off. Plugin items stay as they are.', true);
   checkBoth(switchPreview(profile('Modern', ['skill:notes'], true), liveList, plugs),
-    'Switching · 1 on, 3 off', 'Switching turns 1 item on and 3 off. Turns 1 plugin off in Claude Code');
-  checkBoth(switchPreview(profile('EmptyOld', [], false), liveList, plugs), '0 items', '0 items. Plugin items stay as they are.');
-  checkBoth(switchPreview(profile('EmptyNew', [], true), liveList, plugs), '0 items', '0 items');
+    'Switching turns 1 on, 3 off', 'Switching turns 1 item on and 3 off. Turns 1 plugin off in Claude Code', true);
+  // Plain preview with no caveats has no tip.
+  const plainHome = docsHome([], [], [['skill', 'notes', false], ['skill', 'pager', true]]);
+  checkBoth(switchPreview(profile('Plain', ['skill:notes'], true), homeItems(plainHome), []),
+    'Switching turns 1 on, 1 off', 'Switching turns 1 item on and 1 off', false);
+  checkBoth(switchPreview(profile('EmptyOld', [], false), liveList, plugs), '0 items', '0 items. Plugin items stay as they are.', true);
+  checkBoth(switchPreview(profile('EmptyNew', [], true), liveList, plugs), '0 items', '0 items', false);
   const notesOn = docsHome([docsIn('claude-cli'), docsIn('codex-cli')], [], [['skill', 'notes', true], ['skill', 'pager', false]]);
   checkBoth(switchPreview(profile('Legacy', ['skill:notes'], false), homeItems(notesOn), pluginLive(notesOn)),
-    'In use · 1 on, 1 off', 'In use · 1 item on, the other 1 of yours off. Plugin items stay as they are.');
+    'In use · 1 on, 1 off', 'In use · 1 item on, the other 1 of yours off. Plugin items stay as they are.', true);
+  const allOnHome = docsHome([], [], [['skill', 'notes', true], ['skill', 'pager', true]]);
+  checkBoth(switchPreview(profile('AllOn', ['skill:notes', 'skill:pager'], true), homeItems(allOnHome), []),
+    'In use · 2 on', 'In use · 2 items on', false);
   const claudeOnly = docsHome([docsIn('claude-cli')]);
   checkBoth(switchPreview(profile('Pdf', [pdfId]), homeItems(claudeOnly), pluginLive(claudeOnly)),
-    'In use · 1 on, 1 with plugin', 'In use · 1 item on, 1 more on in Claude Code with its plugin');
+    'In use · 1 on, 1 with plugin', 'In use · 1 item on, 1 more on in Claude Code with its plugin', true);
   const kit = (name: string, items: InstalledPlugin['items'], off = false): InstalledPlugin => ({ tool: 'claude-cli', plugin: name, marketName: 'team-tools', listed: true, items, ...(off ? { off } : {}) });
   const twoBrought = docsHome([kit('kit-a', [skill('a1'), skill('a2')]), kit('kit-b', [skill('b1'), skill('b2')])], [], [['skill', 'notes', false]]);
   checkBoth(switchPreview(profile('Two', ['plugin:skill:kit-a@team-tools/a1', 'plugin:skill:kit-b@team-tools/b1']), homeItems(twoBrought), pluginLive(twoBrought)),
-    'In use · 2 on, 2 with plugins, 1 off', 'In use · 2 items on, 2 more on in Claude Code with their plugins, the other 1 off wherever they can be switched');
+    'In use · 2 on, 2 with plugins, 1 off', 'In use · 2 items on, 2 more on in Claude Code with their plugins, the other 1 off wherever they can be switched', true);
+  // Held profile: short "Not in use" line with full reason in card and tip.
   const offInCodex = docsHome([docsIn('codex-cli', { off: true })], [], [['skill', 'notes', true]]);
   const held = 'Not in use · document-tools is off in Codex, so 2 of its items can’t be switched from here';
-  assert.deepEqual(switchPreview(profile('Docs', ['skill:notes', pdfId, sheetId], true), homeItems(offInCodex), pluginLive(offInCodex)), { line: held, card: held });
+  checkBoth(switchPreview(profile('Docs', ['skill:notes', pdfId, sheetId], true), homeItems(offInCodex), pluginLive(offInCodex)),
+    'Not in use', held, true);
+  // Whole plugin only (0 listed rows change).
   const onlyWhole = docsHome([kit('tracker', [{ kind: 'mcp', name: 's', description: '' }])], [], [['skill', 'notes', true]]);
   onlyWhole.pluginItems![0]!.serversOff = ['s'];
   checkBoth(switchPreview(profile('Mine', ['skill:notes']), homeItems(onlyWhole), pluginLive(onlyWhole)),
-    'Switching · 1 plugin off', 'Switching turns 1 plugin off in Claude Code');
+    'Switching turns 1 plugin off', 'Switching turns 1 plugin off in Claude Code', true);
+  // Edge case 1: Claude Code whole plugin bringing 2 sibling skills along (3 listed rows turn on; card keeps 1 item on + 1 plugin on).
+  const writingKit = docsHome([kit('writing-kit', [skill('write'), skill('brainstorm'), skill('outline')], true)]);
+  const writingProfile = profile('Writing', ['plugin:skill:writing-kit@team-tools/write']);
+  const writingListed = listedChanges(writingProfile, homeItems(writingKit), pluginLive(writingKit));
+  assert.deepEqual([writingListed.on.map(c => c.id), writingListed.off.map(c => c.id)],
+    [['plugin:skill:writing-kit@team-tools/write', 'plugin:skill:writing-kit@team-tools/brainstorm', 'plugin:skill:writing-kit@team-tools/outline'], []]);
+  checkBoth(switchPreview(writingProfile, homeItems(writingKit), pluginLive(writingKit)),
+    'Switching turns 3 on', 'Switching turns 1 item on. Turns 1 plugin on in Claude Code', true);
+  // Edge case 2: older non-managing profile with Copilot CLI same-name server (1 listed row turns on; card keeps 2 items on + exception).
+  const issuesPart = { kind: 'mcp' as const, name: 'issues', description: '' };
+  const copilotMine = { ...row('issues'), copies: { 'copilot-cli': { folder: 'issues' } } } as unknown as LibraryFacts;
+  const legacyHome = docsHome([docsIn('copilot-cli', { items: [issuesPart], serversOff: ['issues'] })], [], [['mcp', 'issues', false]], [copilotMine]);
+  const legacyProfile = profile('Legacy', ['mcp:issues'], false);
+  const legacyListed = listedChanges(legacyProfile, homeItems(legacyHome), pluginLive(legacyHome));
+  assert.deepEqual([legacyListed.on.map(c => c.id), legacyListed.off.map(c => c.id)], [['mcp:issues'], []]);
+  checkBoth(switchPreview(legacyProfile, homeItems(legacyHome), pluginLive(legacyHome)),
+    'Switching turns 1 on', 'Switching turns 2 items on. Plugin items stay as they are, except the plugin’s “issues” turns on in Copilot CLI (same name as yours).', true);
+  const standingLegacy = docsHome([docsIn('copilot-cli', { items: [issuesPart], serversOff: ['issues'] })], [], [['mcp', 'issues', true]], [copilotMine]);
+  checkBoth(switchPreview(legacyProfile, homeItems(standingLegacy), pluginLive(standingLegacy)),
+    'Switching turns 1 plugin item on', 'Switching turns 1 item on. Plugin items stay as they are, except the plugin’s “issues” turns on in Copilot CLI (same name as yours).', true);
+  // Edge case 3: one plugin row turning on in one tool and off in another counts once under Turns on.
+  const bothWays = docsHome([docsIn('copilot-cli', { items: [issuesPart], serversOff: ['issues'] }), docsIn('codex-cli', { items: [issuesPart] })], [], [['mcp', 'issues', true]], [copilotMine]);
+  const bothProfile = profile('Mine', ['mcp:issues'], true);
+  const bothListed = listedChanges(bothProfile, homeItems(bothWays), pluginLive(bothWays));
+  assert.deepEqual([bothListed.on, bothListed.off], [[{ id: 'plugin:mcp:document-tools@team-tools/issues', way: 'on', said: 'Turns on in Copilot CLI; turns off in Codex' }], []]);
+  checkBoth(switchPreview(bothProfile, homeItems(bothWays), pluginLive(bothWays)),
+    'Switching turns 1 on', 'Switching turns 1 item on and 1 off; 1 is on in Copilot CLI, through its plugin', true);
 });

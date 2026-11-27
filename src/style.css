@@ -1993,10 +1993,8 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 /* Their pane header and toolbars span the pane (the Skills files view caps its own) */
 .profiles-split .detail-column .pane-header, .profiles-split .detail-column > .bands { max-width: none; }
 .profiles-split .toolbar-end { border-left: 0; padding-left: 0; gap: 8px; }
-.profile-name-row, .profile-subtitle { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.profile-subtitle { flex-wrap: wrap; }
-.profile-name-row > h2 { min-width: 0; }
-.profile-name-row > .info-wrap, .profile-subtitle > .info-wrap { flex: none; }
+.profile-subtitle { display: flex; align-items: center; gap: 4px; min-width: 0; flex-wrap: wrap; }
+.profile-subtitle > .info-wrap { flex: none; }
 .profile-header .pane-title h2, .profile-header .pane-title p { overflow-wrap: anywhere; }
 /* What a switch will do is said whole: it wraps rather than being cut */
 .profile-header .pane-title p { white-space: normal; }
@@ -2036,7 +2034,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .pf-row:not(.pf-head):hover { background: var(--hover); }
 .pf-row:not(.pf-head):focus-within { background: var(--hover); }
 .pf-head { position: sticky; top: 0; z-index: 2; background: var(--surface); min-height: 40px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink-soft); }
-.pf-head .pf-name { padding-left: 16px; }
+.pf-head .pf-name { padding-left: 16px; gap: 4px; }
 .pf-name { position: relative; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px; }
 .pf-name-text { flex: 0 1 auto; min-width: 48px; font-weight: 500; overflow-wrap: anywhere; }
 /* A long name wraps instead of being cut: rows grow, keeping their minimum height */

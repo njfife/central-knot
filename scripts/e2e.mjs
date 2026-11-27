@@ -2325,9 +2325,11 @@ async function practiceFlow() {
     (await a.text('.empty-body'))?.includes(`from the status bar or from the ${trayIcon},`), await a.text('.empty-body'));
   await newProfile(a, 'Incident');
   same('an empty profile offers no switch: it would turn everything off', [await a.exists('#profile-switch'), await a.exists('#profile-from-now')], [false, true]);
-  same('the profile lists the four skills, and under Find says what the Library lists beside them: the servers and agents only found',
-    [(await a.all('.pf-row[data-item]', 'e.dataset.item')).sort(), await a.text('#profile-left-out .band-text')], [['skill:notes', 'skill:release-notes', 'skill:review', 'skill:standup'],
-      'Not listed here: 2 MCP servers and 2 agents found in your tools that aren’t in Central Knot yet (under Found in the Library, with Add on each that can be taken in).']);
+  same('the profile lists the four skills, and under Find says in one short line what the Library lists beside them, with the rest in its (?) card',
+    [(await a.all('.pf-row[data-item]', 'e.dataset.item')).sort(), await a.text('#profile-left-out .band-text')],
+    [['skill:notes', 'skill:release-notes', 'skill:review', 'skill:standup'], '2 MCP servers and 2 agents in your tools aren’t in Central Knot']);
+  if (await a.exists('#profile-left-out-info')) await checkCard(a, 'profile-left-out-info', 'Under Found in the Library, with Add on each that can be taken in.', 'left-out (?) card holds the rest of the sentence');
+  else check('left-out (?) mark exists', false);
   await a.click('#pf-skill\\:notes');
   same('ticking only edits the profile', allFolders(), allOn);
   await sizeTo(a, ...SMALLEST);
@@ -2336,15 +2338,16 @@ async function practiceFlow() {
   const stateShown = key => a.text(`.pf-row[data-item="skill:${key}"] .pf-state`);
   const wordCount = text => (text ?? '').trim().split(/\s+/).filter(token => /[\p{L}\p{N}]/u.test(token)).length;
   const previewLine = await a.text('.profile-header p');
-  same('before the click the page shows a short header line, blank unchanged rows, Turns off, description on hover, and no standing save note',
-    [await stateShown('notes'), await stateShown('standup'), previewLine, wordCount(previewLine) <= 10, await a.exists('.pf-save-note'), await a.exists('.pf-desc'),
+  same('before the click the page shows a short header line with no redundant (?) or title, blank unchanged rows, Turns off, description on hover, and save (?) beside In profile',
+    [await stateShown('notes'), await stateShown('standup'), previewLine, wordCount(previewLine) <= 10,
+      await a.exists('#profile-preview-info'), await a.run(`document.querySelector('#profile-preview')?.getAttribute('title')`),
+      await a.exists('.pf-save-note'), await a.exists('.pf-desc'),
+      await a.run(`!!document.querySelector('.pf-head .pf-name #profile-save-info')`),
       await a.run(`document.querySelector('.pf-row[data-item="skill:notes"] .pf-name-text')?.title`),
       await a.run(`document.querySelector('.pf-row[data-item="skill:notes"] .pf-tick')?.title?.includes('notes is on now.')`)],
-    ['', 'Turns off', 'Switching · 3 off', true, false, false, 'Turn rough notes into a short, useful handoff.', true]);
-  if (await a.exists('#profile-preview-info')) await checkCard(a, 'profile-preview-info', 'Switching turns 3 items off', 'preview header (?) card holds the long sentence');
-  else check('preview header (?) mark exists', false);
-  if (await a.exists('#profile-save-info')) await checkCard(a, 'profile-save-info', 'Ticks save to the profile at once. Nothing in your tools changes until Switch.', 'profile name (?) card holds the save note');
-  else check('profile name (?) mark exists', false);
+    ['', 'Turns off', 'Switching turns 3 off', true, false, null, false, false, true, 'Turn rough notes into a short, useful handoff.', true]);
+  if (await a.exists('#profile-save-info')) await checkCard(a, 'profile-save-info', 'Ticks save to the profile at once. Nothing in your tools changes until Switch.', 'In profile (?) card holds the save note');
+  else check('In profile (?) mark exists', false);
   await a.click('#profile-switch');
   same('the switch takes what Incident leaves out out of every tool, and leaves notes', [folders('standup'), folders('release-notes'), folders('review'), folders('notes')], [gone, gone, gone, allOn.notes]);
   const inUseLine = await a.text('.profile-header p');
@@ -2357,31 +2360,33 @@ async function practiceFlow() {
   check('the result says what it turned off, with Undo switch', /^Switched to Incident: 3 items turned off\./.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-undo'), await a.text('.bands'));
   await a.click('#outcome-undo');
   same('Undo switch puts every folder back, byte for byte, and no profile is in use', [allFolders(), (await a.text('#status-profile'))?.trim()], [allOn, 'No profile']);
-  // Short-page checks: Changes N (both Turns on and Turns off, Find inside it, tick moves no row, clears on profile change and Switch) and the <880 picker bar at 860×528.
+  // Short-page checks: Changes N (both Turns on and Turns off, Find inside it, tick moves no row and keeps pinned chip count, clears on profile change and Switch) and the <880 picker bar at 860×528.
   await a.click('#profile-switch');
   await newProfile(a, 'Focus');
   await a.click('#pf-skill\\:review');
   await a.click('#pf-skill\\:standup');
-  same('Changes N counts the 3 changing rows (2 on, 1 off) beside Find',
-    [await a.text('.profile-header p'), await stateShown('release-notes'), await stateShown('standup'), await stateShown('notes'), await a.text('#profile-changes')],
-    ['Switching · 2 on, 1 off', '', 'Turns on', 'Turns off', 'Changes 3']);
+  same('Changes N counts the 3 changing rows (2 on, 1 off) beside Find, with no redundant header (?)',
+    [await a.text('.profile-header p'), await a.exists('#profile-preview-info'), await stateShown('release-notes'), await stateShown('standup'), await stateShown('notes'), await a.text('#profile-changes')],
+    ['Switching turns 2 on, 1 off', false, '', 'Turns on', 'Turns off', 'Changes 3']);
   if (await a.exists('#profile-changes')) {
     await a.click('#profile-changes');
-    same('pressing Changes shows only the changing rows under Turns on then Turns off',
+    same('pressing Changes shows only the changing rows under Turns on then Turns off without repeating headings in cells, with kind titles',
       [await a.run(`document.querySelector('#profile-changes')?.getAttribute('aria-pressed')`),
-        await a.all('.pf-section strong', 'e.textContent'), await a.all('.pf-row[data-item]', 'e.dataset.item')],
-      ['true', ['Turns on', 'Turns off'], ['skill:standup', 'skill:review', 'skill:notes']]);
+        await a.all('.pf-section strong', 'e.textContent'), await a.all('.pf-row[data-item]', 'e.dataset.item'),
+        await a.all('.pf-row[data-item] .pf-state', 'e.textContent'),
+        await a.all('.pf-row[data-item] .kind-mark', 'e.title')],
+      ['true', ['Turns on', 'Turns off'], ['skill:standup', 'skill:review', 'skill:notes'], ['', '', ''], ['skill', 'skill', 'skill']]);
     await a.run(`(() => { const input = document.querySelector('#profile-find'); input.value = 'stand'; input.dispatchEvent(new Event('input', { bubbles: true })); })()`); await a.settle();
     same('Find works inside Changes', await a.all('.pf-row[data-item]', 'e.dataset.item'), ['skill:standup']);
     await a.click('#profile-find-clear'); await a.settle();
     await a.click('#pf-skill\\:notes');
-    same('ticking a row while Changes is open moves no row and clears its state',
-      [await a.all('.pf-row[data-item]', 'e.dataset.item'), await stateShown('notes'), await a.text('#profile-changes')],
-      [['skill:standup', 'skill:review', 'skill:notes'], '', 'Changes 2']);
-    await a.click('#pf-skill\\:notes');
+    same('ticking a row while Changes is open moves no row and keeps chip and headings counting the pinned rows',
+      [await a.all('.pf-row[data-item]', 'e.dataset.item'), await stateShown('notes'), await a.text('#profile-changes'), await a.all('.pf-section-count', 'e.textContent')],
+      [['skill:standup', 'skill:review', 'skill:notes'], '', 'Changes 3', ['2', '1']]);
     await a.click('#profile-changes');
-    same('pressing Changes again shows every row under its kind',
-      [await a.run(`document.querySelector('#profile-changes')?.getAttribute('aria-pressed')`), (await a.all('.pf-row[data-item]', 'e.dataset.item')).length], ['false', 4]);
+    same('closing Changes returns to live count and shows every row under its kind',
+      [await a.run(`document.querySelector('#profile-changes')?.getAttribute('aria-pressed')`), await a.text('#profile-changes'), (await a.all('.pf-row[data-item]', 'e.dataset.item')).length], ['false', 'Changes 2', 4]);
+    await a.click('#pf-skill\\:notes');
     await a.click('#profile-changes');
     await a.click('#profile-switch');
     same('switching clears Changes', await a.exists('#profile-changes'), false);
@@ -2402,8 +2407,8 @@ async function practiceFlow() {
       return { visible: !!sel && sel.getBoundingClientRect().height > 0, listHidden: !!list && getComputedStyle(list).display === 'none',
         options: sel ? [...sel.options].map(opt => opt.textContent) : [], fullyVisibleRows: rows.length };
     })()`);
-    same('at 860×528 the picker shows, marks Incident in use with ✓, hides the stacked list, and leaves at least two rows fully visible',
-      [picker.visible, picker.listHidden, picker.options.includes('✓ Incident'), picker.options.includes('Focus'), picker.fullyVisibleRows >= 2],
+    same('at 860×528 the picker shows, marks Incident in words ("· in use"), hides the stacked list, and leaves at least two rows fully visible',
+      [picker.visible, picker.listHidden, picker.options.includes('Incident · in use'), picker.options.includes('Focus'), picker.fullyVisibleRows >= 2],
       [true, true, true, true, true]);
     if (picker.visible) {
       await a.run(`(sel => { sel.value = [...sel.options].find(o => o.textContent.includes('Incident')).value; sel.dispatchEvent(new Event('change')); })(document.getElementById('profile-picker'))`);
@@ -18511,13 +18516,13 @@ async function profilePluginsFlow() {
     [await a.exists('#pf-note-skill'), await a.all(`${row(triageId)} .pf-note`, 'e.textContent'), await a.text(`${row(triageId)} .pf-state`), await a.exists('#pf-note-mcp')],
     [false, [], '', false]);
   check('no line says a profile doesn’t switch a plugin’s items yet', !(await a.exists('#profile-left-out')), await a.text('#profile-left-out'));
-  same('with everything on, Work is in use', [(await a.text('#status-profile'))?.trim(), await a.text('.profile-header p'), await a.text('#profile-preview-info-card')], ['Work', 'In use · 2 on', 'In use · 2 items on']);
+  same('with everything on, Work is in use with no redundant (?)', [(await a.text('#status-profile'))?.trim(), await a.text('.profile-header p'), await a.exists('#profile-preview-info')], ['Work', 'In use · 2 on', false]);
   await newProfile(a, 'Quiet');
   await a.click(byId(`pf-${issuesId}`)); await done();
   const keptOnNote = 'Comes on in Claude Code too, with issues.';
   same('before the click: Quiet turns triage off where it can, and its row says, under its name and not in a tooltip, that it is on in Claude Code with issues, and why; issues stays blank; the header’s (?) card counts triage as still loading there',
-    [await a.text(`${row(triageId)} .pf-state`), await a.run(`document.querySelector('${row(triageId)} .pf-state').title`), await a.all(`${row(triageId)} .pf-note`, 'e.textContent'), await a.text(`${row(issuesId)} .pf-state`), await a.text('.profile-header p'), await a.text('#profile-preview-info-card')],
-    ['Turns off in Codex and Pi', '', [keptOnNote], '', 'Switching · 1 off', 'Switching turns 1 item off; 1 stays on in Claude Code, through its plugin']);
+    [await a.text(`${row(triageId)} .pf-state`), await a.run(`document.querySelector('${row(triageId)} .pf-state').title`), await a.all(`${row(triageId)} .pf-note`, 'e.textContent'), await a.text(`${row(issuesId)} .pf-state`), await a.text('.profile-header p'), await a.text('#profile-preview-info-card'), await a.run(`document.querySelector('${row(triageId)} .pf-tick')?.title?.includes('triage is on now.')`)],
+    ['Turns off in Codex and Pi', '', [keptOnNote], '', 'Switching turns 1 off', 'Switching turns 1 item off; 1 stays on in Claude Code, through its plugin', true]);
   await pictures('profile-plugin-rows');
 
   // The switch: Codex's own rule for triage alone, Pi's copy out, Claude Code untouched; one History entry, with Undo.
@@ -18735,9 +18740,11 @@ async function profilePluginsFlow() {
   await a.click('#header-refresh');
   await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Work')).click()`); await a.settle();
   const cause = 'issue-tracker is off in Codex, so 2 of its items can’t be switched from here';
-  same('with the plugin off in Codex, the rows say so, and the header says why Work is not in use, with the way to the plugin instead of Switch',
-    [await a.all(`${row(triageId)} .pf-note`, 'e.textContent'), await a.text('.profile-header p'), await a.exists('#profile-switch'), await a.exists('#profile-open-plugin'), await a.exists(byId(`pf-plugin-${triageId}-codex-cli`)), (await a.text('#status-profile'))?.trim()],
-    [['Off in Codex: its plugin is off there. Open its plugin'], `Not in use · ${cause}`, false, true, true, 'No profile']);
+  same('with the plugin off in Codex, the rows say so, and the header says Not in use with the full reason in its (?) card, with the way to the plugin instead of Switch',
+    [await a.all(`${row(triageId)} .pf-note`, 'e.textContent'), await a.text('.profile-header p'), await a.text('#profile-preview-info-card'), await a.exists('#profile-switch'), await a.exists('#profile-open-plugin'), await a.exists(byId(`pf-plugin-${triageId}-codex-cli`)), (await a.text('#status-profile'))?.trim()],
+    [['Off in Codex: its plugin is off there. Open its plugin'], 'Not in use', `Not in use · ${cause}`, false, true, true, 'No profile']);
+  if (await a.exists('#profile-preview-info')) await checkCard(a, 'profile-preview-info', `Not in use · ${cause}`, 'held header (?) card holds the full reason');
+  else check('held header (?) mark exists', false);
   await pictures('profile-plugin-off');
   // Chosen from the status bar's menu, it is refused in the same words.
   await a.click('#status-profile');
@@ -18762,8 +18769,8 @@ async function profilePluginsFlow() {
   await a.click('#header-refresh');
   await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Work')).click()`); await a.settle();
   for (const id of ['skill:notes', `plugin:skill:issue-tracker@ck-test-market/${long}`]) { await a.click(byId(`pf-${id}`)); await done(); }
-  same('his own notes and the plugin’s skills are rows of Skills together, and Work, with them ticked, is in use', [await a.all('.pf-row[data-item^="skill:"], .pf-row[data-item^="plugin:skill:"]', 'e.dataset.item'), (await a.text('.profile-header p'))?.startsWith('In use · 4 on'), (await a.text('#profile-preview-info-card'))?.startsWith('In use · 4 items on')],
-    [['skill:notes', `plugin:skill:issue-tracker@ck-test-market/${long}`, triageId], true, true]);
+  same('his own notes and the plugin’s skills are rows of Skills together, and Work, with them ticked, is in use', [await a.all('.pf-row[data-item^="skill:"], .pf-row[data-item^="plugin:skill:"]', 'e.dataset.item'), (await a.text('.profile-header p'))?.startsWith('In use · 4 on'), await a.exists('#profile-preview-info')],
+    [['skill:notes', `plugin:skill:issue-tracker@ck-test-market/${long}`, triageId], true, false]);
   const picture = async (name, width, height) => { if (!shots) return; await sizeTo(a, width, height); await a.shot(name); await fullSize(a); };
   await picture('profile-plugin-in-use', 1316, 819);
   await picture('profile-plugin-long-name', ...SMALLEST);
@@ -18847,7 +18854,7 @@ async function profilePluginsFlow() {
   same('a format 2 profile says Plugin items stay as they are in its (?) card, hides plugin rows behind Choose with exact note and tooltip, and lists only personal items',
     [await b.text('.profile-header p'), await b.text('#profile-preview-info-card'), await b.text('#profile-plugins-note .band-text'), await b.text('#profile-choose-plugins'),
       await b.run(`document.querySelector('#profile-choose-plugins')?.title`), await b.all('.pf-row[data-item]', 'e.dataset.item')],
-    ['Switching · 1 on', legacyPreview, chooseNote, 'Choose plugin items for this profile', chooseTitle, ['skill:notes']]);
+    ['Switching turns 1 on', legacyPreview, chooseNote, 'Choose plugin items for this profile', chooseTitle, ['skill:notes']]);
   await sizeTo(b, 1316, 819);
   if (await b.run(`document.body.classList.contains('rail')`)) await b.click('#sidebar-toggle');
   await b.click('#status-profile');
@@ -18955,7 +18962,7 @@ async function profilePluginsFlow() {
     [!(readNow(oldCodexCfg) ?? '').includes('name = "issue-tracker:triage"'), !(JSON.parse(readNow(oldCopilotSettings)).disabledSkills ?? []).includes('issue-tracker:triage'),
       (readNow(oldCodexCfg) ?? '').includes('[plugins."issue-tracker@ck-test-market".mcp_servers.issues]\nenabled = false')], [true, true, true]);
   await b.click(byId(`pf-${triageId}`)); await bDone();
-  same('unticking triage (keeping notes ticked) counts 1 item turning off before Switch: issue-tracker, nothing of it ticked now, goes off whole in Claude Code', [await b.text('.profile-header p'), await b.text('#profile-preview-info-card')], ['Switching · 1 off', 'Switching turns 1 item off. Turns 1 plugin off in Claude Code']);
+  same('unticking triage (keeping notes ticked) counts 1 item turning off before Switch: issue-tracker, nothing of it ticked now, goes off whole in Claude Code', [await b.text('.profile-header p'), await b.text('#profile-preview-info-card')], ['Switching turns 1 off', 'Switching turns 1 item off. Turns 1 plugin off in Claude Code']);
   await b.click('#profile-switch'); await bDone();
   same('switching with triage unticked turns triage off in both Codex and Copilot CLI, and issue-tracker off in Claude Code, and format 3 keeps the flag',
     [(readNow(oldCodexCfg) ?? '').includes('name = "issue-tracker:triage"\nenabled = false'), (JSON.parse(readNow(oldCopilotSettings)).disabledSkills ?? []).includes('issue-tracker:triage'),
@@ -19024,7 +19031,7 @@ async function profilePluginsFlow() {
   await b.run(`[...document.querySelectorAll('.profile-row')].find(r => r.textContent.includes('Mine')).click()`); await b.settle();
   const sharedRowNote = 'Stays on in Copilot CLI, which runs the plugin’s “issues” instead of yours (same name).';
   const sharedRowTitle = 'To use yours there, rename one of the two or turn the plugin off in Copilot CLI.';
-  const sharedBoxTitle = 'Not in Mine: switching to it turns issues off in each tool that can switch it, except Copilot CLI (same name as yours). Click to put it in.';
+  const sharedBoxTitle = 'Not in Mine: switching to it turns issues off in each tool that can switch it, except Copilot CLI (same name as yours). Click to put it in. issues is on now.';
   same('Mine’s plugin server row shows the exact Copilot CLI shared-name sentence, hover title and unticked box tooltip',
     [await b.all(`${row(issuesId)} .pf-note`, 'e.textContent'), await b.run(`document.querySelector('${row(issuesId)} .pf-note')?.title`),
       await b.run(`document.querySelector('${row(issuesId)} .pf-tick')?.title`)],
@@ -19033,9 +19040,17 @@ async function profilePluginsFlow() {
   const copilotBeforeEx1 = { settings: readNow(oldCopilotSettings), mcp: readNow(oldCopilotMcp) };
   writeFileSync(oldCopilotSettings, `${JSON.stringify({ ...JSON.parse(copilotBeforeEx1.settings), disabledMcpServers: ['issues'] }, null, 2)}\n`);
   await b.click('#header-refresh');
-  same('standing rule on Mine shows Turns on note beside per-tool Switching column',
-    [await b.all(`${row(issuesId)} .pf-note`, 'e.textContent'), await b.run(`document.querySelector('${row(issuesId)} .pf-state')?.dataset.state`)],
-    [['Turns on in Copilot CLI, which runs the plugin’s “issues” instead of yours (same name).'], 'Turns on in Copilot CLI; turns off in Claude Code and Codex']);
+  same('standing rule on Mine shows Turns on note beside per-tool Switching column, and header/Changes agree when one row turns both ways',
+    [await b.all(`${row(issuesId)} .pf-note`, 'e.textContent'), await b.run(`document.querySelector('${row(issuesId)} .pf-state')?.dataset.state`),
+      await b.text('.profile-header p'), await b.text('#profile-changes')],
+    [['Turns on in Copilot CLI, which runs the plugin’s “issues” instead of yours (same name).'], 'Turns on in Copilot CLI; turns off in Claude Code and Codex',
+      'Switching turns 1 on', 'Changes 1']);
+  await b.click('#profile-changes');
+  same('Changes lists the both-ways row once under Turns on, keeping its per-tool cell words',
+    [await b.all('.pf-section strong', 'e.textContent'), await b.all('.pf-section-count', 'e.textContent'),
+      await b.all('.pf-row[data-item]', 'e.dataset.item'), await b.all('.pf-row[data-item] .pf-state', 'e.textContent')],
+    [['Turns on'], ['1'], [issuesId], ['Turns on in Copilot CLI; turns off in Claude Code and Codex']]);
+  await b.click('#profile-changes');
   check('the header (?) card says the plugin’s issues is on in Copilot CLI, as the row says it turns on there: not that it stays on', /; 1 is on in Copilot CLI, through its plugin/.test(await b.text('#profile-preview-info-card') ?? ''), await b.text('#profile-preview-info-card'));
   if (shots) {
     await b.run(`window.centralKnot.setAppearance('light')`);
@@ -19100,7 +19115,13 @@ async function profilePluginsFlow() {
     [await b.text('.profile-header p'), await b.text('#profile-preview-info-card')], ['In use · 1 on, 1 off', 'In use · 1 item on, the other 1 of yours off. Plugin items stay as they are.']);
   await b.click(byId('pf-mcp:issues')); await bDone();
   const ex5Preview = 'Switching turns 2 items on. Plugin items stay as they are, except the plugin’s “issues” turns on in Copilot CLI (same name as yours).';
-  same('example 5: ticking mcp:issues on the non-managing profile adds the Copilot CLI exception to the header (?) card', [await b.text('.profile-header p'), await b.text('#profile-preview-info-card')], ['Switching · 2 on', ex5Preview]);
+  same('example 5: ticking mcp:issues on the non-managing profile shows 1 listed row in header/Changes while (?) card keeps the full exception',
+    [await b.text('.profile-header p'), await b.text('#profile-changes'), await b.text('#profile-preview-info-card')], ['Switching turns 1 on', 'Changes 1', ex5Preview]);
+  await b.click('#profile-changes');
+  same('example 5: Changes lists only the 1 listed row under Turns on',
+    [await b.all('.pf-section strong', 'e.textContent'), await b.all('.pf-section-count', 'e.textContent'), await b.all('.pf-row[data-item]', 'e.dataset.item')],
+    [['Turns on'], ['1'], ['mcp:issues']]);
+  await b.click('#profile-changes');
   if (shots) {
     await b.run(`window.centralKnot.setAppearance('light')`);
     await sizeTo(b, 1316, 819);
@@ -19166,7 +19187,7 @@ async function profilePluginsFlow() {
   same('worked example 5: with an off-switch standing in Copilot CLI, the row tooltip does not say issues is on now',
     [await b.text('.profile-header p'), await b.text('#profile-preview-info-card'), await b.run(`document.querySelector('.pf-row[data-item="mcp:issues"] .pf-state')?.dataset.state`),
       await b.run(`document.querySelector('.pf-row[data-item="mcp:issues"] .pf-tick')?.title`)],
-    ['Switching · 1 on', 'Switching turns 1 item on. Plugin items stay as they are.', 'Turns on',
+    ['Switching turns 1 on', 'Switching turns 1 item on. Plugin items stay as they are.', 'Turns on',
       'In Old work: switching to it turns issues on. Click to leave it out. issues is off in Copilot CLI now.']);
   await b.click('#profile-switch'); await bDone();
   same('worked example 1 (page): switch clears the off-switch, header keeps the sentence with no Undo switch, row state is blank, and tooltip says on now',
@@ -19380,7 +19401,7 @@ async function claudeWholeFlow() {
   same('before Mine (his own items alone), the page says the rule once and names each plugin turning off in Claude Code, the one-skill and the skill-less ones too, with what goes with each; the header and its (?) card count them',
     [ruleShown.startsWith(rule), [...offLines].sort(), await a.text('.profile-header p'), await a.text('#profile-preview-info-card')],
     [true, ['solo off, with its 1 skill and everything else it brings there', 'tracker-kit off, with its 1 MCP server and everything else it brings there', 'writing-kit off, with its 3 skills and everything else it brings there'],
-      'Switching · 5 off', 'Switching turns 5 items off. Turns 3 plugins off in Claude Code']);
+      'Switching turns 5 off', 'Switching turns 5 items off. Turns 3 plugins off in Claude Code']);
   await a.click('#status-profile');
   same('the status bar’s menu counts them in one sentence', (await a.all('.pf-menu-preview', 'e.textContent')).includes('Switching turns 5 items off. Turns 3 plugins off in Claude Code'), true);
   await a.click('#status-profile');
@@ -19395,13 +19416,18 @@ async function claudeWholeFlow() {
   await newProfile(a, 'Writing');
   for (const box of ['pf-skill:notes', `pf-${id('write')}`]) { await a.click(byId(box)); await done(); }
   const comes = 'Comes on in Claude Code too, with write.';
-  same('before Writing: the page names writing-kit coming on with brainstorm and outline; write names them, each set in beneath it saying what it comes on with, its box its own; the header and its (?) card count one plugin',
-    [await band(), await a.text('.profile-header p'), await a.text('#profile-preview-info-card'), await a.all('.pf-row[data-item^="plugin:skill:writing-kit"]', 'e.dataset.item'), await a.all('.pf-row.pf-beneath', 'e.dataset.item'),
+  same('before Writing: the page names writing-kit coming on with brainstorm and outline; write names them, each set in beneath it saying what it comes on with, its box its own; header, Changes and card agree',
+    [await band(), await a.text('.profile-header p'), await a.text('#profile-changes'), await a.text('#profile-preview-info-card'), await a.all('.pf-row[data-item^="plugin:skill:writing-kit"]', 'e.dataset.item'), await a.all('.pf-row.pf-beneath', 'e.dataset.item'),
       await notes('write'), await notes('brainstorm'), await notes('outline'), await a.text(`${row('outline')} .pf-state`), await a.run(`document.querySelector('${row('outline')} input').checked`)],
-    [[rule + 'Switching turns, in Claude Code:writing-kit on, with brainstorm and outline too', ['writing-kit on, with brainstorm and outline too']], 'Switching · 1 on', 'Switching turns 1 item on. Turns 1 plugin on in Claude Code',
+    [[rule + 'Switching turns, in Claude Code:writing-kit on, with brainstorm and outline too', ['writing-kit on, with brainstorm and outline too']], 'Switching turns 3 on', 'Changes 3', 'Switching turns 1 item on. Turns 1 plugin on in Claude Code',
       [id('write'), id('brainstorm'), id('outline')], [id('brainstorm'), id('outline')], ['Brings brainstorm and outline on in Claude Code.'], [comes], [comes], 'Turns on', false]);
-  same('a brought row’s box says what a switch does to it in Claude Code, and off elsewhere', await a.run(`document.querySelector('${row('brainstorm')} label').title`),
-    'Not in Writing: switching to it turns brainstorm off in each tool that can switch it, except Claude Code, where it comes on with its plugin. Click to put it in.');
+  await a.click('#profile-changes');
+  same('Writing Changes view lists all 3 turning-on rows under Turns on 3',
+    [await a.all('.pf-section strong', 'e.textContent'), await a.all('.pf-section-count', 'e.textContent'), await a.all('.pf-row[data-item]', 'e.dataset.item')],
+    [['Turns on'], ['3'], [id('brainstorm'), id('outline'), id('write')]]);
+  await a.click('#profile-changes');
+  same('a brought row’s box says what a switch does to it in Claude Code, off elsewhere, and its live state now', await a.run(`document.querySelector('${row('brainstorm')} label').title`),
+    'Not in Writing: switching to it turns brainstorm off in each tool that can switch it, except Claude Code, where it comes on with its plugin. Click to put it in. brainstorm is off now.');
   // Find showing write alone: its own row still names what it brings.
   await a.run(`(() => { const input = document.querySelector('#profile-find'); input.value = 'write'; input.dispatchEvent(new Event('input', { bubbles: true })); })()`); await a.settle();
   same('with Find on write alone, its row still names brainstorm and outline', [await a.all('.pf-row[data-item^="plugin:"]', 'e.dataset.item'), await notes('write')], [[id('write')], ['Brings brainstorm and outline on in Claude Code.']]);
@@ -19424,7 +19450,7 @@ async function claudeWholeFlow() {
   await a.click('#header-refresh');
   await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Mine')).click()`); await a.settle();
   same('a switch that turns only a plugin off: the header and its (?) card count it, and Switch is offered, its title saying the same', [await a.text('.profile-header p'), await a.text('#profile-preview-info-card'), await a.run(`document.querySelector('#profile-switch')?.title`)],
-    ['Switching · 1 plugin off', 'Switching turns 1 plugin off in Claude Code', 'Use Mine: turns 1 plugin off in Claude Code. One step in History, with Undo.']);
+    ['Switching turns 1 plugin off', 'Switching turns 1 plugin off in Claude Code', 'Use Mine: turns 1 plugin off in Claude Code. One step in History, with Undo.']);
   await a.click('#profile-switch'); await done();
   check('its result says the plugin it turned off, not "nothing changed"', enabled()[2] === false && (await a.text('.band-done .band-text') ?? '').startsWith('Switched to Mine: 1 plugin turned off in Claude Code.'), [enabled(), await a.text('.band-done .band-text')]);
   await openHistory(a, '#nav-history', () => a.exists('li.history-row[data-kind="profile"]'));
@@ -19493,7 +19519,7 @@ async function stillLoadsFlow() {
   const notes = async () => Object.fromEntries((await a.all('.pf-row[data-item^="skill:"]', `[e.dataset.item, e.querySelector('.pf-note')?.textContent ?? '']`)).sort());
   const sharedNote = 'Copilot CLI, Codex, Pi and OpenCode still load it from the shared skills folder.';
   same('the header (?) card counts the ten it turns off and, apart, the four that still load from the shared folder; each of those four rows names the tools, the six others nothing',
-    [await a.text('.profile-header p'), await a.text('#profile-preview-info-card'), await notes()], ['Switching · 10 off', header, Object.fromEntries(ours.map(name => [`skill:${name}`, shared.includes(name) ? sharedNote : '']).sort())]);
+    [await a.text('.profile-header p'), await a.text('#profile-preview-info-card'), await notes()], ['Switching turns 10 off', header, Object.fromEntries(ours.map(name => [`skill:${name}`, shared.includes(name) ? sharedNote : '']).sort())]);
   await a.click('#status-profile');
   const barPreview = await a.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes('Writing'))?.querySelector('.pf-menu-preview')?.textContent`);
   await a.click('#status-profile');
@@ -19625,7 +19651,7 @@ async function stillLoadsFlow() {
   for (const box of ['pf-skill:keep', 'pf-plugin:skill:issue-tracker@ck-test-market/triage']) { await b.click(byId(box)); await bDone(); }
   const kitHeader = 'Switching turns 1 item off; 1 still loads through a plugin, in Claude Code';
   same('the header (?) card counts triage as still loading through a plugin, in Claude Code, and its row says so under its name',
-    [await b.text('.profile-header p'), await b.text('#profile-preview-info-card'), await b.text('.pf-row[data-item="skill:triage"] .pf-note')], ['Switching · 1 off', kitHeader, 'Claude Code still loads it through a plugin.']);
+    [await b.text('.profile-header p'), await b.text('#profile-preview-info-card'), await b.text('.pf-row[data-item="skill:triage"] .pf-note')], ['Switching turns 1 off', kitHeader, 'Claude Code still loads it through a plugin.']);
   await kitShot('plugin-still-loads-preview');
   const kitBefore = plugin();
   await b.click('#profile-switch');
@@ -19636,7 +19662,7 @@ async function stillLoadsFlow() {
   await kitShot('plugin-still-loads-result');
   await b.click('#outcome-undo');
   await bDone();
-  same('its Undo puts Codex’s folder back, and the header and its (?) card say what they said before the switch', [codexTriage(), await b.text('.profile-header p'), await b.text('#profile-preview-info-card')], [true, 'Switching · 1 off', kitHeader]);
+  same('its Undo puts Codex’s folder back, and the header and its (?) card say what they said before the switch', [codexTriage(), await b.text('.profile-header p'), await b.text('#profile-preview-info-card')], [true, 'Switching turns 1 off', kitHeader]);
   // Switched again, his row in the Library says where it still is (libraryrow.ts offWhere): on through the plugin, in Claude Code alone.
   await b.click('#profile-switch');
   await bDone();
