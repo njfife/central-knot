@@ -22869,7 +22869,9 @@ async function pluginItemSwitchesFlow() {
   const piBox = plugin => a.run(`(() => { const b = document.querySelector('#pbox-0-${plugin}-pi-cli'); return [b?.getAttribute('aria-checked'), b?.title ?? ''] })()`);
   const piSays = () => a.text('.plugin-tool[data-tool="pi-cli"] .plugin-tool-state');
   const header = () => a.text('#header [data-outcome] .band-text');
-  const shot = async (name, [width, height], theme) => { if (!shots) return; await a.run(`window.centralKnot.setAppearance('${theme}')`); await sizeTo(a, width, height); await a.shot(name); };
+  // A picture with Its items in view (at 860 it is below the panel), the header's result above it.
+  const shot = async (name, [width, height], theme) => { if (!shots) return; await a.run(`window.centralKnot.setAppearance('${theme}')`); await sizeTo(a, width, height);
+    await a.run(`document.querySelector('.plugin-items-section')?.scrollIntoView({ block: 'end' })`); await a.settle(); await a.shot(name); };
   const openPage = async plugin => { if (await a.exists('#plugin-back')) await a.click('#plugin-back'); await until(() => a.exists(`#popen-0-${plugin}`)); await a.click(`#popen-0-${plugin}`); await until(() => a.exists(`#pbox-0-${plugin}-pi-cli`)); };
 
   await a.click('#nav-plugins');
