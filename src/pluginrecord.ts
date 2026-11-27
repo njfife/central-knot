@@ -44,6 +44,9 @@
 //   Off or no entry, ticked   → On, `except` by the first read's rule (firstEntry), the ticked tool counted as having it.
 //   No entry, unticked        → the first read's rule, then as On, unticked.
 //   Off, unticked             → the entry as it is (`except` changes only while On): that tool's copy is turned off (row 9 or 10).
+// Uninstall… in one tool (`uninstall`) changes the entry as its box unticked does, then runs that tool's own uninstall where an
+// untick would turn its copy off, and where it is off there already (clickRuns); nothing else is stored, so the tool reads as kept
+// out with nothing installed (row 7), and a tick installs it again.
 // In Pi, OpenCode and Antigravity a tick turns On only what it brings into that tool: an item that comes On is kept out of every other tool
 // it wasn't in (pluginlibrary.ts clickOn). A copy that can't be taken out here has its box off (pluginstatus.ts boxOf).
 // Who reads what: marketplaces.ts gathers what the tools have (pluginstatus.ts toolNow) and carries out a click (turn, undoTurn); the
@@ -138,8 +141,10 @@ export const clickGoes = (what: PluginTurn): 'in' | 'out' => (what === 'on' || w
 /**
  * What a click runs in one tool: what the table owes there, only where it goes the click's way (On never turns off,
  * Off never turns on or installs). A copy off there is turned on by On and a tick only: Add leaves what he turned off himself.
+ * Uninstall runs the tool's own uninstall (`remove`) of a copy it has whole that can be taken out, on there or off.
  */
-export function clickRuns(what: PluginTurn, owed: Owed): Owed['act'] {
+export function clickRuns(what: PluginTurn, owed: Owed): Owed['act'] | 'remove' {
+  if (what === 'uninstall') return owed.has === 'whole' && !owed.held ? 'remove' : undefined;
   const inward = owed.act === 'install' || owed.act === 'install-items' || (owed.act === 'plugin-on' && what !== 'add');
   return owed.act && inward === (clickGoes(what) === 'in') ? owed.act : undefined;
 }

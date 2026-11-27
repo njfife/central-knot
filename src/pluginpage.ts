@@ -14,7 +14,7 @@ import { libraryPages } from './librarypages.ts';
 import { harnessIs, libraryWords, rowClicks } from './libraryrow.ts';
 import { groupBy } from './model.ts';
 import { addsText, componentsFrom, outcomes, sessionHooksAbout, whenItRuns } from './pluginoutcomes.ts';
-import { clickNote, componentsOf, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, toolBox, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
+import { clickNote, componentsOf, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, toolBox, uninstallControl, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { pluginKey } from './pluginplan.ts';
 import { DIRECTORY, MARK_WORDS, boxOf, cantSwitchSkill, comparableText, copyOff, itemsIn, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, notInWhy, offeredVersion, otherVersionsLine, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionDiffers, versionToCompare, waitingWords, waitsToMove, whyNotCarried, yourSaid, type ToolMark } from './pluginstatus.ts';
@@ -69,7 +69,7 @@ function installedLine(version: string | undefined, offered: string | undefined,
 /**
  * Your tools: the plugin's switch at the heading, Update at its right where a copy or its items are behind, and a line per
  * tool: its box (pluginparts.ts toolBox: ticked while the plugin is there; a click turns it off, kept installed where the tool can, or puts it in) and what it
- * has (always there; a tool on another version than the marketplace offers adds "Marketplace has …"). `compareTo`: the
+ * has (always there; a tool on another version than the marketplace offers adds "Marketplace has …"), then Uninstall… where offered (pluginparts.ts uninstallControl). `compareTo`: the
  * version an installed copy is compared with (see versionToCompare).
  */
 function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, compareTo: string | undefined, components?: Components) {
@@ -124,7 +124,8 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
         h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]),
           state, clashLines(view, entry, plugin, tool, clashes, marketIndex), yourLines(view, entry, plugin, tool, yours, marketIndex),
           // With no CLI, its plugin commands run through the copy its desktop app carries: said so, never as the CLI.
-          view.via?.[tool] ? h('span.plugin-tool-state.plugin-tool-via', { title: `${names[tool]}’s command-line tool wasn’t found, so its plugin commands run through ${view.via[tool]}.` }, `Through ${view.via[tool]}`) : null));
+          view.via?.[tool] ? h('span.plugin-tool-state.plugin-tool-via', { title: `${names[tool]}’s command-line tool wasn’t found, so its plugin commands run through ${view.via[tool]}.` }, `Through ${view.via[tool]}`) : null,
+          uninstallControl(entry, plugin, tool, `puninstall-${marketIndex}-${plugin.name}-${tool}`, { mark, box })));
     })), view.tools.length));
 }
 

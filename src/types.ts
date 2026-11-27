@@ -337,8 +337,12 @@ export interface DesktopApi {
 }
 
 export interface PluginActionResult { stopped?: string; reports: ActionReport[] }
-/** What a click on a whole plugin asks (DesktopApi.turnPlugin): its switch On or Off, Add, or one tool's box on its page unticked (`keep-out`: turned off there, kept installed where the tool can, and kept out) or ticked (`let-in`: let in, and turned on or installed there). */
-export type PluginTurn = 'on' | 'off' | 'add' | 'keep-out' | 'let-in';
+/**
+ * What a click on a whole plugin asks (DesktopApi.turnPlugin): its switch On or Off, Add, one tool's box on its page unticked
+ * (`keep-out`: turned off there, kept installed where the tool can, and kept out) or ticked (`let-in`: let in, and turned on or
+ * installed there), or Uninstall… in one tool (`uninstall`: kept out as by `keep-out`, and uninstalled by the tool's own command).
+ */
+export type PluginTurn = 'on' | 'off' | 'add' | 'keep-out' | 'let-in' | 'uninstall';
 /** What a turn did: each tool's report (`done`), the plugin's entry before it (`before`, null: none), and its Undo (`back`). */
 export interface PluginTurnResult { stopped?: string; done: PluginDone[]; before?: PluginEntry | null; back?: PluginOp[] }
 
@@ -819,6 +823,7 @@ export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: 
   /** Worked out as the home is read, never stored: off there and kept so by the plugins record (pluginstatus.ts keptOff). */ keptOff?: true;
   /** Its skills that tool has turned off one by one (Copilot CLI's and Codex's switch). */ skillsOff?: string[];
   /** Its MCP servers and agents that tool has turned off one by one (partswitch.ts). */ serversOff?: string[]; agentsOff?: string[];
+  /** Its copy declares options for the person to set (PluginContents options), which Claude Code keeps in its settings and its uninstall deletes. */ options?: true;
   /** Why none of its skills can be switched here (Codex's skill rules in a form not edited), if so. */ switchesHeld?: string;
   /** Skills held off by a switch that isn't this plugin's own, each with why it can't be turned on here. */ skillsHeld?: Record<string, string>;
   /** MCP servers whose switch can't be written here, each with why. */ serversHeld?: Record<string, string>;
@@ -978,6 +983,8 @@ export interface PluginContents {
   bin: boolean;
   /** Its version: its plugin.json's, else its marketplace entry's, as Claude Code reads them. */
   version?: string;
+  /** Its manifest declares options for the person to set (`userConfig`, as hookrun.ts claudePluginOptions reads it). */
+  options?: true;
 }
 /** A plugin's contents and README, read when its page opens; for a plugin kept elsewhere, from its own repository. */
 export interface PluginDetail extends PluginContents {

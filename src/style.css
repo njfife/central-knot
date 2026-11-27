@@ -2157,6 +2157,13 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .harness-plugin-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .harness-plugin-version { font-weight: 400; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 .harness-plugin-state { font-size: 12px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Uninstall…'s question (pluginparts.ts uninstallControl): in the row, a line of its own; under a tool's box, beneath its lines. */
+.harness-plugin:has(> .uninstall-ask) { flex-wrap: wrap; }
+.harness-plugin > .uninstall-ask { flex-basis: 100%; }
+.plugin-tool-text > .btn { align-self: flex-start; }
+.uninstall-ask { flex-wrap: wrap; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+.uninstall-ask .band-text { flex: 1 1 220px; min-width: 0; }
+.uninstall-ask .btn { flex: none; height: 24px; padding: 0 10px; }
 /* Its two groups sit side by side from about 860px of pane, each growing to 640px and then staying beside the other; the card
    is as wide as its groups, so no empty frame runs on past them. */
 .harness-about { padding: 16px; display: flex; flex-wrap: wrap; gap: 16px 48px; width: fit-content; max-width: 100%; }

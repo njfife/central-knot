@@ -21,7 +21,7 @@ import { harnessIds } from './harnesses.ts';
 import { errorCode, liftFirst, syncGate, writeDurably, type ShareContext } from './share.ts';
 import type { Listed } from './plugintext.ts';
 import { readRecord as readPartsRecord, type PartsRecord, type PluginNow } from './partsmigrate.ts';
-import { MARKET_UNREAD, SKILL_SWITCH_TESTED_FROM, blocked, copyDiffers, partWords, firstReadWaits, heldReason, inUseIn, keptOff, keptReason, marketTitle, notCarried, recordUnread, toolNow, unavailable, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
+import { MARKET_UNREAD, SKILL_SWITCH_TESTED_FROM, blocked, copyDiffers, copyOff, partWords, firstReadWaits, heldReason, inUseIn, keptOff, keptReason, marketTitle, notCarried, recordUnread, toolNow, unavailable, uninstallsWhole, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
 import { readLink } from './sourcelink.ts';
 import { isFolder, isHttps, onlyAllowed, record, shortBuild } from './values.ts';
 import { leftOutSentence, pageNames, toPluginsLabel, toolName } from './words.ts';
@@ -755,11 +755,12 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   }
 
   /**
-   * A click on a whole plugin (`what`): its switch On or Off, Add for a plugin found in a tool, or one tool's box unticked or
-   * ticked. The entry is recorded first; then the table (pluginrecord.ts owedTo) is asked once with it, and what it owes runs by
-   * each tool's own route: On, Add and a tick run only installs and turn kept copies on, Off and an untick only turn copies off
-   * (kept installed), a box only in its tool. A tool where nothing can run (held, or its record can't be read) is a
-   * report saying why. `back` is the Undo: what changed, reversed (pluginplan.ts reverse).
+   * A click on a whole plugin (`what`): its switch On or Off, Add for a plugin found in a tool, one tool's box unticked or
+   * ticked, or Uninstall… in one tool. The entry is recorded first; then the table (pluginrecord.ts owedTo) is asked once with
+   * it, and what it owes runs by each tool's own route: On, Add and a tick run only installs and turn kept copies on, Off and an
+   * untick only turn copies off (kept installed), Uninstall runs the tool's own uninstall in their place (clickRuns), a box only
+   * in its tool. A tool where nothing can run (held, or its record can't be read) is a report saying why. `back` is the Undo:
+   * what changed, reversed (pluginplan.ts reverse).
    */
   async function turn(source: string, plugin: string, what: PluginTurn, tool: HarnessId | undefined, home: unknown): Promise<PluginTurnResult> {
     const stopped = await guard(home);
@@ -769,10 +770,12 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const listed = entry?.plugins.find(candidate => candidate.name === plugin);
     if (shown.switchProblem || !known.record) return { stopped: shown.switchProblem ?? 'The plugins record isn’t there. Nothing was changed.', done: [] };
     if (!entry || !listed || (tool && !shown.tools.includes(tool))) return { stopped: 'It is no longer listed here, so nothing was changed. Read the page again.', done: [] };
+    if (what === 'uninstall' && !(tool && uninstallsWhole(entry, plugin, tool))) return { stopped: 'It can’t be uninstalled there, so nothing was changed. Read the page again.', done: [] };
     const before = entryOf(known.record, source, plugin);
     // A copy that is off is not counted as having it: a tick elsewhere doesn't let it in, and unticking the last copy on turns the plugin Off.
     const has = shown.tools.filter(each => inUseIn(entry, plugin, each));
-    const after = turnedEntry(before, what, tool, () => newEntry(entry.source, entry.name || before?.marketName || '', plugin, false), has, shown.tools);
+    // Uninstall records what an untick does.
+    const after = turnedEntry(before, what === 'uninstall' ? 'keep-out' : what, tool, () => newEntry(entry.source, entry.name || before?.marketName || '', plugin, false), has, shown.tools);
     if (!after) return { stopped: 'That doesn’t apply to this plugin now, so nothing was changed. Read the page again.', done: [] };
     const record = withEntry(known.record, source, plugin, after);
     const ops: PluginOp[] = [], held: PluginDone[] = [], itemsIn: HarnessId[] = [];
@@ -803,7 +806,11 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     // Written onto the record as it is then, so what a check wrote while this click was reading (a tool joining) stays.
     if (after !== before) await changeRecord(shown.home, now => withEntry(now, source, plugin, after));
     const ran = ops.length ? await runPlan(ops, ownApi, String(home)) : { done: [] as PluginDone[] };
-    const back = reverse(ran.done);
+    // Uninstall's Undo puts it back as it was: the marketplace's copy installed, then turned off again where it was off; none
+    // where nothing is offered to install (PluginView gone).
+    const reversed = reverse(ran.done);
+    const offAgain = what === 'uninstall' && copyOff(entry, plugin, tool!) ? reversed.map(op => ({ ...op, action: 'plugin-off' as const })) : [];
+    const back = what === 'uninstall' && listed.gone ? [] : [...reversed, ...offAgain];
     // Pi, OpenCode and Antigravity: its items (pluginlibrary.ts).
     // An untick that leaves the plugin Off takes its items there as Off does: each item's `except` stays for its next On.
     const items = itemsIn.length && !ran.stopped ? await turnItems(entry.source, marketName, after, what === 'keep-out' && !after.on ? 'off' : what, itemsIn) : undefined;
@@ -1043,7 +1050,7 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
   });
   // A whole plugin's switch and its Undo (turn, undoTurn). An Undo's steps come back from the page as the turn gave them: each is
   // checked to be one a turn makes, for this plugin, before any runs.
-  const TURNS: PluginTurn[] = ['on', 'off', 'add', 'keep-out', 'let-in'];
+  const TURNS: PluginTurn[] = ['on', 'off', 'add', 'keep-out', 'let-in', 'uninstall'];
   handle('plugins:turn', async (source, plugin, what, tool, home) => (open() && isText(source) && isName(plugin) && TURNS.includes(what as PluginTurn) && (tool == null || harnessIds.includes(tool as HarnessId))
     ? markets.turn(source, plugin, what as PluginTurn, (tool ?? undefined) as HarnessId | undefined, home) : { stopped: 'That request was malformed, so nothing ran.', done: [] }));
   const isBack = (source: string, plugin: string) => (op: unknown): op is PluginOp => {

@@ -392,6 +392,8 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
     lspServers: Object.keys(lsp).sort(),
     bin: (await listInside(root, folder)).includes('bin'),
     version: text(declared.version) || undefined,
+    // Options are its own manifest's alone, as hookrun.ts claudePluginOptions reads them.
+    ...(Object.keys(record(own.userConfig) ?? {}).length ? { options: true as const } : {}),
   };
   return { ...read, onlyInstructions: await holdsOnlyInstructions(root, folder, declared, read) };
 }

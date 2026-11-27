@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
 import { resultLines, resultParts, resultSentence, undoTitle } from '../src/pluginplan.ts';
 import * as engine from '../src/plugins.ts';
-import { WAITS_TO_MOVE, boxOf, foundIn, recordUnread, toolMark } from '../src/pluginstatus.ts';
+import { FROM_DIRECTORY, WAITS_TO_MOVE, boxOf, foundIn, recordUnread, toolMark } from '../src/pluginstatus.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { readProfiles } from '../src/profiles.ts';
 import { pluginLive, pluginPlan, wholeTurns, type PluginHome } from '../src/profileplan.ts';
@@ -1212,6 +1212,89 @@ test('Off, and a tool’s box unticked, turn the plugin off by each tool’s own
       assert.deepEqual(box.calls, off.map(each => `whole pdf@team ${each} true`).reverse(), `${said}, Undo: the same copy turned on again, last first`);
       assert.deepEqual([await box.kept(), await box.boxes()], [before, { 'claude-cli': true, 'codex-cli': true }], `${said}, Undo: as before the click`);
     }
+  } finally { await box.cleanup(); }
+});
+
+// Uninstall… (a tool's own uninstall, recorded as its box unticked: pluginrecord.ts A TOOL'S BOX).
+test('Uninstall from Codex, the plugin on in Claude Code too: Codex is kept out and only its own uninstall runs; Undo is the install; Off then On, the automatic updates and a profile leave Codex out', async () => {
+  const box = await keptHome();
+  try {
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    box.calls.length = 0;
+    const out = await box.markets.turn(box.root, 'pdf', 'uninstall', 'codex-cli', box.home);
+    assert.deepEqual([box.calls, (await box.record()).plugins.map(entry => [entry.on, entry.except]), out.back?.map(op => [op.tool, op.action])],
+      [['uninstall pdf codex-cli'], [[true, ['codex-cli']]], [['codex-cli', 'install']]]);
+    await box.markets.turn(box.root, 'pdf', 'off', undefined, box.home);
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    const codex = (await box.switchOf('pdf')).tools['codex-cli']!;
+    assert.deepEqual([box.calls.filter(call => call.includes('codex-cli')), codex.has, codex.act], [['uninstall pdf codex-cli'], 'none', undefined]);
+    assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops.filter(op => op.tool === 'codex-cli'), [], 'nothing waits for the automatic updates there');
+    const skill = pluginLive(await box.pluginHome()).find(item => item.name === 'pdf')!;
+    assert.deepEqual(pluginPlan({ items: [skill.id], switchesPluginItems: true }, [skill]).map(turn => [...turn.on, ...turn.held.map(held => held.tool)]), [], 'a profile ticking its skill reaches no Codex copy');
+  } finally { await box.cleanup(); }
+});
+
+test('Uninstall from the last tool that has it turns the plugin Off, its except as it was, as the last untick does', async () => {
+  const box = await keptHome();
+  try {
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    await box.markets.turn(box.root, 'pdf', 'uninstall', 'codex-cli', box.home);
+    box.calls.length = 0;
+    await box.markets.turn(box.root, 'pdf', 'uninstall', 'claude-cli', box.home);
+    assert.deepEqual([box.calls, (await box.record()).plugins.map(entry => [entry.on, entry.except])], [['uninstall pdf claude-cli'], [[false, ['codex-cli']]]]);
+  } finally { await box.cleanup(); }
+});
+
+test('Uninstall of a plugin its marketplace no longer offers runs and gives no Undo: it can’t be installed again', async () => {
+  const box = await keptHome();
+  try {
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    await put(join(box.root, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'team', plugins: [{ name: 'notes', source: './plugins/notes' }] }));
+    box.calls.length = 0;
+    const out = await box.markets.turn(box.root, 'pdf', 'uninstall', 'claude-cli', box.home);
+    assert.deepEqual([box.calls, out.back], [['uninstall pdf claude-cli'], []]);
+  } finally { await box.cleanup(); }
+});
+
+test('Uninstall of a copy off by Claude Code’s own switch: its Undo installs it and turns it off again, the record as it was', async () => {
+  const box = await keptHome();
+  try {
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    await box.settings(now => { now.enabledPlugins = { 'pdf@team': false }; });
+    const before = await box.record();
+    box.calls.length = 0;
+    const out = await box.markets.turn(box.root, 'pdf', 'uninstall', 'claude-cli', box.home);
+    assert.deepEqual([box.calls, out.back?.map(op => [op.tool, op.action])], [['uninstall pdf claude-cli'], [['claude-cli', 'install'], ['claude-cli', 'plugin-off']]]);
+    box.calls.length = 0;
+    await box.markets.undoTurn(box.root, 'pdf', out.before!, out.back!, box.home);
+    assert.deepEqual([box.calls, await box.record()], [['install pdf claude-cli', 'whole pdf@team claude-cli false'], before]);
+  } finally { await box.cleanup(); }
+});
+
+test('Uninstall is refused, the record as it was, for Claude Code’s copy from the Anthropic Directory, Copilot CLI’s live copy and a tool with no command-line tool', async () => {
+  let clis: HarnessId[] = ['claude-cli', 'copilot-cli'];
+  const box = await setup({ tools: ['claude-cli', 'copilot-cli'], engine: { findClis: async () => ({ binaries: Object.fromEntries(clis.map(tool => [tool, '/bin/true'])), apps: {} }) } });
+  try {
+    const official = join(box.base, 'official'), team = join(box.base, 'team');
+    await put(join(official, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'official', plugins: [{ name: 'incident-io', source: { source: 'git-subdir', url: 'https://github.com/incident-io/skills.git', path: 'plugins/incident-io' } }] }));
+    await marketplace(team, 'team', ['pdf']);
+    for (const root of [official, team]) await box.markets.add(root);
+    const copy = join(box.home, '.claude/plugins/cache/anthropic-plugin-directory/incident-io/1.0.0');
+    await put(join(copy, 'skills/incidents/SKILL.md'), '---\nname: incidents\ndescription: Incidents.\n---\n');
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'incident.io@anthropic-plugin-directory': [{ scope: 'user', installPath: copy, version: '1.0.0', directoryRepositoryKey: 'github.com/incident-io/skills#plugins/incident-io' }] } }));
+    await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { team: { source: { source: 'directory', path: team } } }, enabledPlugins: { 'pdf@team': true } }));
+    const recorded = () => readFile(join(box.home, '.central-knot/plugins.json'), 'utf8');
+    const refused = async (source: string, plugin: string, tool: HarnessId) => {
+      const before = await recorded(), out = await box.markets.turn(source, plugin, 'uninstall', tool, box.home);
+      return [out.stopped ?? out.done.map(step => step.report.message).join(' '), out.back ?? [], (await recorded()) === before];
+    };
+    assert.deepEqual(await refused(official, 'incident-io', 'claude-cli'), [FROM_DIRECTORY, [], true]);
+    assert.deepEqual(await refused(team, 'pdf', 'copilot-cli'), ['It can’t be uninstalled there, so nothing was changed. Read the page again.', [], true]);
+    await claudeHas(box.home, 'team', { pdf: { version: '1.0.0' } });
+    await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'git', url: team } } }));
+    clis = ['copilot-cli'];
+    assert.deepEqual(await refused(team, 'pdf', 'claude-cli'), ['Claude Code’s command-line tool wasn’t found.', [], true]);
+    assert.deepEqual(box.calls.filter(call => call.startsWith('uninstall')), []);
   } finally { await box.cleanup(); }
 });
 

@@ -72,7 +72,7 @@ test('An Undo says what came back, and keeps what it did not get to', () => {
     // Already gone when the Undo reached it: nothing left to do, so "Undo the rest" doesn't offer it again.
     { ...undoOps[3]!, report: { tool: 'codex-cli', outcome: 'uninstalled', message: 'Not installed in Codex.', runs: [] } },
   ];
-  assert.equal(resultSentence(resultLines(done.slice(0, 2), true), true), 'Undone: pdf removed from Claude Code; docx put back in Codex.');
+  assert.equal(resultSentence(resultLines(done.slice(0, 2), true), true), 'Undone: pdf removed from Claude Code; docx reinstalled in Codex.');
   assert.deepEqual(resultParts(resultLines(done.slice(0, 1), true), true), ['Undone: ', { plugin: 'pdf', source: 'anthropics/skills' }, ' removed from Claude Code', '.']);
   // Undo of a fresh live Copilot CLI install leaves it off rather than removed: "turned off in", distinct from an Off-then-On's "off again in".
   const liveUndone: PluginDone[] = [

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DIRECTORY, FROM_DIRECTORY, WAITS_TO_MOVE, pluginsInstalled, blocked, cantSwitchSkill, cantUninstall, comparableText, copiesToCompare, copyStale, foundIn, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, boxOf, itemsOnWords, switchPartial, switchWords, toolMark, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
+import { DIRECTORY, FROM_DIRECTORY, WAITS_TO_MOVE, pluginsInstalled, blocked, cantSwitchSkill, cantUninstall, comparableText, copiesToCompare, copyStale, foundIn, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, boxOf, itemsOnWords, switchPartial, switchWords, toolMark, toolNow, unavailable, uninstallAsk, updateTools } from '../src/pluginstatus.ts';
 import { clickRuns, owedTo } from '../src/pluginrecord.ts';
 import { readInTurn, readInto, type Read } from '../src/reads.ts';
 import type { HarnessId, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
@@ -288,4 +288,19 @@ test('installsIn carries each tool’s own recorded version rather than the mark
     installs.installed.map(({ plugin, version }) => [plugin.name, version]),
     [['release-helper', '0.4.1'], ['unversioned', undefined]],
   );
+});
+
+test('Uninstall…’s question names only what that tool loses for good, then whether the marketplace can give this copy back', () => {
+  const ask = (tool: HarnessId, copy: Parameters<typeof uninstallAsk>[2] = {}, offer: Parameters<typeof uninstallAsk>[3] = {}) => uninstallAsk('issue-tracker', tool, copy, offer);
+  const cases: [string, string][] = [
+    [ask('claude-cli', { options: true }), 'Uninstall issue-tracker from Claude Code? Its saved options there are deleted for good.'],
+    [ask('claude-cli'), 'Uninstall issue-tracker from Claude Code? Nothing else is lost.'],
+    [ask('copilot-cli', { serversOff: ['issues'] }), 'Uninstall issue-tracker from Copilot CLI? Nothing else is lost.'],
+    [ask('codex-cli', { serversOff: ['issues'], options: true }), 'Uninstall issue-tracker from Codex? Its servers’ switches there are reset for good.'],
+    [ask('codex-cli', { serversOff: [] }), 'Uninstall issue-tracker from Codex? Nothing else is lost.'],
+    [ask('claude-cli', { version: '1.9.0' }, { version: '2.0.0' }), 'Uninstall issue-tracker from Claude Code? Nothing else is lost. The marketplace now offers 2.0.0; 1.9.0 can’t be installed again from here.'],
+    [ask('claude-cli', { version: 'v2.0.0' }, { version: '2.0.0', stale: true }), 'Uninstall issue-tracker from Claude Code? Nothing else is lost. Its copy differs from the marketplace’s and can’t be installed again from here.'],
+    [ask('codex-cli', { version: '1.9.0' }, { version: '2.0.0', gone: true }), 'Uninstall issue-tracker from Codex? Nothing else is lost. It is no longer offered, so it can’t be installed again from here.'],
+  ];
+  for (const [said, wanted] of cases) assert.equal(said, wanted);
 });

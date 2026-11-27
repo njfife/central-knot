@@ -50,6 +50,7 @@ export async function readPluginItems(context: PluginContext, tools: HarnessId[]
       const skillsOff = (state.skillsOff ?? []).map(entry => entry.skill);
       const skillsHeld = Object.fromEntries((state.skillsOff ?? []).flatMap(entry => (entry.held ? [[entry.skill, entry.held]] : [])));
       return { ...base, version: state.version, items, ...(contents.hooks.length ? { hooks: contents.hooks } : {}), ...(contents.hooksUnread ? { hooksUnread: contents.hooksUnread } : {}), ...(skillsOff.length ? { skillsOff } : {}), ...(serversOff?.length ? { serversOff } : {}), ...(agentsOff?.length ? { agentsOff } : {}),
+        ...(contents.options ? { options: true as const } : {}),
         ...(state.switchesHeld ? { switchesHeld: state.switchesHeld } : {}), ...(serversHeld ? { serversHeld } : {}), ...(state.live ? { live: true } : {}), ...(Object.keys(skillsHeld).length ? { skillsHeld } : {}) };
     }));
   }));

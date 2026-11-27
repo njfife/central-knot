@@ -2,7 +2,7 @@
 // it, whether it is installed there, how many plugins a tool has installed (pluginsInstalled; for one that takes none, takesItemsOnly)
 // and how many of a marketplace's are installed (installedFrom), whether it is installed in none (installedNowhere, for Find), and
 // a short summary of what it holds.
-import type { Components, HarnessId, HomeView, InstallState, InstalledCopy, MarketplaceView, Outcome, PartKind, PartRef, PluginContents, PluginDetail, PluginView, PluginsView, YourName } from './types.ts';
+import type { Components, HarnessId, HomeView, InstallState, InstalledCopy, InstalledPlugin, MarketplaceView, Outcome, PartKind, PartRef, PluginContents, PluginDetail, PluginView, PluginsView, YourName } from './types.ts';
 import { groupBy, plural } from './model.ts';
 import { SAFE_NAME, compareVersions, isCommitHash } from './values.ts';
 import { andList, orList, toolNames as names } from './words.ts';
@@ -627,4 +627,34 @@ export function boxOf(view: PluginsView, entry: MarketplaceView, plugin: string,
     : takesPlugins(tool) && !view.clis[tool] ? `No ${name} command-line tool here` : entry.refusedBy?.[tool] ? `${name} refused this marketplace`
     : stuck ? (ticked ? 'Can’t be taken out here' : `${MARK_WORDS['kept-off']} · can’t be changed here`) : mark === 'cannot' ? recorded?.tools[tool]?.held ?? unavailable(view, entry, plugin, tool) : undefined;
   return { ticked, ...(held ? { held: true as const } : {}), ...(off ? { off } : {}), ...(line ? { line } : {}) };
+}
+
+/**
+ * A copy Uninstall… can take out of a tool, and the only one marketplaces.ts turn's `uninstall` takes out: installed whole in a
+ * tool that takes plugins, other than Copilot CLI's copy loaded live from a folder, whose Off is already its uninstall.
+ */
+export const uninstallsWhole = (entry: MarketplaceView, plugin: string, tool: HarnessId) => {
+  const state = stateOf(entry, plugin, tool);
+  return takesPlugins(tool) && state.state === 'installed' && !(tool === 'copilot-cli' && state.live);
+};
+/** The marks of a copy installed in a tool, on or off, beside whose box Uninstall… can be. */
+const UNINSTALLS: readonly ToolMark[] = ['installed', 'outdated', 'stays', 'kept-off'];
+/** Whether a tool's box offers Uninstall… (pluginparts.ts uninstallControl): such a copy, where the box can act (boxOf `off`: stuck, held, or a home that can't change). */
+export const offersUninstall = (entry: MarketplaceView, plugin: string, tool: HarnessId, mark: ToolMark, box: { off?: string }) =>
+  UNINSTALLS.includes(mark) && !box.off && uninstallsWhole(entry, plugin, tool);
+
+/**
+ * Uninstall…'s question in one tool, naming only what is lost there for good, as the tools' own uninstalls were measured to lose
+ * it: in Claude Code the options saved for a copy that declares some (its data folder is kept: plugins.ts uninstallArgs), in Codex
+ * its servers' switches; then where the marketplace can't give this copy back: another version, a copy that differs, or nothing
+ * (`gone`: no longer offered or its marketplace unread, where marketplaces.ts turn gives no Undo).
+ */
+export function uninstallAsk(title: string, tool: HarnessId, copy: Pick<InstalledPlugin, 'version' | 'options' | 'serversOff'> = {},
+  offer: { version?: string; stale?: boolean; gone?: boolean } = {}): string {
+  const lost = tool === 'claude-cli' && copy.options ? 'Its saved options there are deleted for good.'
+    : tool === 'codex-cli' && copy.serversOff?.length ? 'Its servers’ switches there are reset for good.' : 'Nothing else is lost.';
+  const back = offer.gone ? 'It is no longer offered, so it can’t be installed again from here.'
+    : versionDiffers(copy.version, offer.version) ? `The marketplace now offers ${offer.version}; ${copy.version} can’t be installed again from here.`
+      : offer.stale ? 'Its copy differs from the marketplace’s and can’t be installed again from here.' : '';
+  return [`Uninstall ${title} from ${names[tool]}?`, lost, back].filter(Boolean).join(' ');
 }
