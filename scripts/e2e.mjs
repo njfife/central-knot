@@ -3639,9 +3639,9 @@ async function practiceFlow() {
       (await a.text('#plugins-result .toolbar-result-text'))?.trim() ?? '', (await a.text('#plugins-undo'))?.trim() ?? '',
       await a.exists('#harness-tab-plugins[aria-selected="true"]'), (await a.text('.title-harness'))?.trim() ?? ''],
     ['plugin disable issue-tracker@ck-test-market --scope user', true, 'Off, kept installed', 'issue-tracker: turned off in Claude Code.', 'Undo', true, 'Claude Code']);
-  // The Claude Code tab's result and Undo stay off Plugin marketplaces and Codex's Plugins tab, and reappear on return.
+  // The Claude Code tab's result and Undo stay off Plugin marketplaces (where document-tools's earlier failure still stands) and Codex's Plugins tab, and reappear on return.
   await a.click('#nav-plugins');
-  const offOnPlugins = [await a.exists('#plugins-result'), await a.exists('#plugins-undo'), await a.exists('#header .plugin-problems')];
+  const offOnPlugins = [(await a.text('#plugins-result .toolbar-result-text'))?.includes('issue-tracker') ?? false, await a.exists('#plugins-undo'), await a.exists('#header .plugin-problems')];
   await a.click('#nav-harnesses');
   await a.click('#harness-codex-cli');
   await a.click('#harness-tab-plugins');
@@ -3649,7 +3649,7 @@ async function practiceFlow() {
   await a.click('#harness-switch-claude-cli');
   const backOnClaude = [await a.exists('#plugins-result'), await a.exists('#plugins-undo')];
   same('Claude Code Plugins tab result and Undo stay off Plugin marketplaces and Codex’s Plugins tab, and reappear on return',
-    [offOnPlugins, offOnCodex, backOnClaude], [[false, false, false], [false, false, false], [true, true]]);
+    [offOnPlugins, offOnCodex, backOnClaude], [[false, false, true], [false, false, false], [true, true]]);
   writeFileSync(tabCalls, '');
   await a.run(`document.querySelector('#plugins-undo')?.focus()`);
   for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r' } : {}) });
@@ -3678,6 +3678,34 @@ async function practiceFlow() {
     [problemOnPlugins, problemOnCodex, problemBack], [true, false, true]);
   if (await a.exists('#report-dismiss')) await a.click('#report-dismiss');
   if (await a.exists('#close-add-marketplace')) await a.click('#close-add-marketplace');
+  if (await a.exists('#plugin-back')) await a.click('#plugin-back');
+  // Turning another plugin on from Plugin marketplaces with a tool failure keeps its problem line and Undo across a click on Claude Code's Plugins tab.
+  const starterSwitch = '#pswitch-0-starter-skills';
+  for (let tries = 0; tries < 50 && !(await a.exists(starterSwitch)); tries++) await wait(100);
+  await a.click(starterSwitch);
+  for (let tries = 0; tries < 80 && (!(await a.exists('#plugins-undo')) || !(await a.exists('#header .plugin-problems')) || (await a.run(`document.body.dataset.busy`)) === 'true'); tries++) await wait(100);
+  const pluginsRunBefore = [await a.exists('#plugins-undo'), await a.exists('#header .plugin-problems')];
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-plugins');
+  for (let tries = 0; tries < 50 && !(await a.exists(tabSwitch)); tries++) await wait(100);
+  await a.click(tabSwitch);
+  for (let tries = 0; tries < 60 && ((await a.run(`document.querySelector(${JSON.stringify(tabSwitch)})?.getAttribute('aria-checked')`)) !== 'false' || !(await a.exists('#plugins-undo')) || (await a.run(`document.body.dataset.busy`)) === 'true'); tries++) await wait(100);
+  await a.click('#nav-plugins');
+  const pluginsRunAfter = [await a.exists('#plugins-undo'), await a.exists('#header .plugin-problems'), (await a.text('#plugins-result .toolbar-result-text'))?.includes('starter-skills') ?? false];
+  await a.click('#plugins-undo');
+  for (let tries = 0; tries < 80 && ((await a.exists('#plugins-undo')) || (await a.run(`document.body.dataset.busy`)) === 'true'); tries++) await wait(100);
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-plugins');
+  for (let tries = 0; tries < 50 && !(await a.exists(tabSwitch)); tries++) await wait(100);
+  const claudeUndoKept = await a.exists('#plugins-undo');
+  same('a click on Claude Code’s Plugins tab keeps Plugin marketplaces’ result, Undo and problem line for another plugin, and vice versa',
+    [pluginsRunBefore, pluginsRunAfter, claudeUndoKept], [[true, true], [true, true, true], true]);
+  if (await a.exists('#plugins-undo')) {
+    await a.click('#plugins-undo');
+    for (let tries = 0; tries < 60 && ((await a.run(`document.querySelector(${JSON.stringify(tabSwitch)})?.getAttribute('aria-checked')`)) !== 'true' || (await a.run(`document.body.dataset.busy`)) === 'true'); tries++) await wait(100);
+  }
   rmSync(tabCalls, { force: true });
   await openKind(a, 'skills');
   writeFileSync(claudeStub, stubBefore);

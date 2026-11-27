@@ -1213,7 +1213,7 @@ export function showPage(page: Page, { repair = false } = {}) {
   // The sidebar's Harnesses opens the list of every harness, except while an action runs: its result belongs to the harness it
   // started on. Leaving a harness's page this way drops that page's result, as its own back arrow does.
   const leavingHarness = page === 'harnesses' && !state.busy && !!state.harness;
-  // A new page drops the last item-list result (plugin runs stay tied to their own place: pluginstate.ts pluginsResultPlace).
+  // A new page drops the last page’s result (plugin runs stay tied to their own place: pluginstate.ts pluginsResultPlace).
   if (page !== state.page || leavingHarness) leaveResults(page);
   if (page !== state.page) { state.libraryView = 'list'; state.visit += 1; forgetRepoPrompts(); forgetSourcePrompts(); forgetHistoryFolds(); }
   if (leavingHarness) state.harness = undefined;
