@@ -115,7 +115,8 @@ export function unavailable(view: PluginsView, entry: MarketplaceView, plugin: s
   if (state.state === 'installed') return undefined;
   // A plugin its marketplace dropped can't go anywhere new; where a tool still has it, it shows as installed and can be turned off (kept installed).
   // One listed only because its marketplace can't be read now (no read time) can't either, for that reason.
-  if (entry.plugins.find(candidate => candidate.name === plugin)?.gone) return entry.fetchedAt ? 'It is no longer offered in this marketplace.' : MARKET_UNREAD;
+  const cannot = cantInstallAgain(entry, plugin);
+  if (cannot === 'gone' || cannot === 'unread') return cannot === 'gone' ? 'It is no longer offered in this marketplace.' : MARKET_UNREAD;
   return whyNotCarried(entry, plugin) ?? blocked(view, entry, tool);
 }
 /** Why nothing can go in from a marketplace whose catalog can't be read now. */
@@ -641,37 +642,50 @@ export const uninstallsWhole = (entry: MarketplaceView, plugin: string, tool: Ha
 export const offersUninstall = (entry: MarketplaceView, plugin: string, tool: HarnessId, box: { off?: string }) => !box.off && uninstallsWhole(entry, plugin, tool);
 
 /**
- * Why a plugin can't be installed again from here, if it can't: it is no longer offered (noLongerOffered), or it is listed only
- * from the tools' records while its marketplace can't be read. Uninstall…'s question says it, and its turn gives no Undo.
+ * Why nothing of this plugin can be installed from its marketplace now, in any tool, as marketplaces.ts install refuses it: its
+ * catalog no longer lists it (`gone`), it is listed only from the tools' records while its marketplace can't be read (`unread`),
+ * or the bundled build keeps it only for the tools that have it (`kept`) or carries no files for it (`not-carried`), the two
+ * whyNotCarried says. unavailable says it of a tool that lacks it; Uninstall…'s question of one that has it, whose turn then
+ * gives no Undo.
  */
-export const cantInstallAgain = (entry: MarketplaceView, plugin: PluginView) => (noLongerOffered(entry, plugin) ? 'gone' as const : plugin.gone ? 'unread' as const : undefined);
+export function cantInstallAgain(entry: MarketplaceView, plugin: string) {
+  if (entry.plugins.find(candidate => candidate.name === plugin)?.gone) return entry.fetchedAt ? 'gone' as const : 'unread' as const;
+  if (entry.bundled?.kept?.includes(plugin)) return 'kept' as const;
+  return entry.bundled?.unpackaged.some(item => item.name === plugin) ? 'not-carried' as const : undefined;
+}
 
 /**
- * What Uninstall…'s question says of one tool's copy (uninstallAsk), from the view and the plugin's contents as its page reads them
- * (`detail`; undefined while being read): why it can't come back (`cannot`), its version and the marketplace's (`offered`); its copy
- * against the marketplace's (`copy`: the same, edited (copyDiffers), not known, or still being read; the same where nothing is
- * compared: it can't come back, or it is loaded from the marketplace's own folder); the settings the tool keeps for it, which the
- * uninstall deletes (`ownSettings`).
+ * What Uninstall…'s question says of one tool's copy (uninstallAsk), from the view and the plugin's contents read as it opens
+ * (`detail`; undefined while being read): why it can't come back (`cannot`, with the bundled build's name, `app`), its version and
+ * the marketplace's (`offered`); its copy against the marketplace's (`copy`: the same, edited (copyDiffers), not known, or still
+ * being read; not known too where a skill, command or agent of the tool's copy has none read on the marketplace's side to be
+ * compared with; the same where nothing needs comparing: it can't come back, it is the marketplace's own folder, or it is another
+ * version); and the settings the tool keeps for it, which the uninstall deletes (`ownSettings`, as that read found them).
  */
 export function uninstallFacts(entry: MarketplaceView, plugin: PluginView, tool: HarnessId, detail: PluginDetail | null | undefined) {
-  const state = stateOf(entry, plugin.name, tool), mine = state.state === 'installed' ? state : undefined, theirs = detail?.installed?.[tool], cannot = cantInstallAgain(entry, plugin);
-  const copy: 'same' | 'differs' | 'unknown' | 'comparing' = cannot || mine?.live ? 'same' : detail === undefined ? 'comparing'
-    : !detail?.offered || detail.problem || !theirs ? 'unknown' : copyDiffers(detail, theirs) ? 'differs' : 'same';
-  return { cannot, version: mine?.version, offered: versionToCompare(plugin, detail), copy, ownSettings: !!mine?.ownSettings };
+  const state = stateOf(entry, plugin.name, tool), mine = state.state === 'installed' ? state : undefined, theirs = detail?.installed?.[tool];
+  const cannot = cantInstallAgain(entry, plugin.name), offered = versionToCompare(plugin, detail);
+  const unmatched = !!theirs && (['skills', 'commands', 'agents'] as const).some(kind => theirs[kind].some(part => !detail![kind].some(other => other.path === part.path)));
+  const copy: 'same' | 'differs' | 'unknown' | 'comparing' = cannot || mine?.live || versionDiffers(mine?.version, offered) ? 'same' : detail === undefined ? 'comparing'
+    : !detail?.offered || detail.problem || !theirs || unmatched ? 'unknown' : copyDiffers(detail, theirs) ? 'differs' : 'same';
+  return { cannot, app: entry.bundled?.app, version: mine?.version, offered, copy, ownSettings: !!(theirs ?? mine)?.ownSettings };
 }
+/** What a tool's uninstall deletes for good of the settings it keeps for a plugin (InstallState ownSettings), as Uninstall…'s question and Undo say it. */
+export const ownSettingsWords = (tool: HarnessId) => (tool === 'codex-cli' ? 'its MCP servers’ settings' : 'its saved options');
 
 /**
- * Uninstall…'s question in one tool: first what can come back (by Undo, from the marketplace), then what the tool's own uninstall
- * deletes for good, as measured: in Claude Code its saved options (its data folder is kept: plugins.ts uninstallArgs), in Codex its
- * table's settings. While the copy is still being compared, only that.
+ * Uninstall…'s question in one tool: one sentence on whether it can come back, then one on what the tool's own uninstall deletes
+ * for good, as measured: in Claude Code its saved options (its data folder is kept: plugins.ts uninstallArgs), in Codex its MCP
+ * servers' settings. While the copy is still being compared, only that.
  */
-export function uninstallAsk(title: string, tool: HarnessId, { cannot, version, offered, copy, ownSettings }: ReturnType<typeof uninstallFacts>): string {
+export function uninstallAsk(title: string, tool: HarnessId, { cannot, app, version, offered, copy, ownSettings }: ReturnType<typeof uninstallFacts>): string {
   if (copy === 'comparing') return `Comparing ${names[tool]}’s copy…`;
-  const back = cannot ? NOT_AGAIN[cannot]
-    : versionDiffers(version, offered) ? `Undo installs the marketplace’s ${offered}; ${version} can’t be installed again from here.`
-      : copy === 'differs' ? 'Undo installs the marketplace’s copy; this one differs and can’t be installed again from here.'
-        : copy === 'unknown' ? 'Its copy couldn’t be compared with the marketplace’s: if it was changed there, the change is lost.' : '';
-  const lost = !ownSettings ? 'Nothing else is lost.' : tool === 'codex-cli' ? 'Its servers’ settings there are deleted for good.' : 'Its saved options there are deleted for good.';
-  return [`Uninstall ${title} from ${names[tool]}?`, back, lost].filter(Boolean).join(' ');
+  const ask = `Uninstall ${title} from ${names[tool]}?`, lost = ownSettings ? `${ownSettingsWords(tool)} there are deleted for good` : '';
+  const back = cannot ? (cannot === 'unread' ? 'Its marketplace can’t be read now, so there is no Undo.'
+    : `${cannot === 'not-carried' ? `${app} doesn’t include its files` : 'It is no longer offered'}, so it can’t be installed again: there is no Undo.`)
+    : versionDiffers(version, offered) ? `Installing it again gives ${offered}; this ${version} can’t be brought back.`
+      : copy === 'differs' ? 'Installing it again gives the marketplace’s copy; the edits to this one are lost.'
+        : copy === 'unknown' ? 'Installing it again gives the marketplace’s copy; if this one was edited, the edits are lost.' : '';
+  if (!back) return `${ask} It can be installed again; ${lost || 'nothing is lost'}.`;
+  return [ask, back, lost && `${lost.charAt(0).toUpperCase()}${lost.slice(1)}.`].filter(Boolean).join(' ');
 }
-const NOT_AGAIN = { gone: 'It is no longer offered, so it can’t be installed again from here.', unread: 'Its marketplace can’t be read now, so it can’t be installed again from here.' };

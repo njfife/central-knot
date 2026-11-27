@@ -114,22 +114,25 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
  * its two buttons together under its words. Cancel has the focus; it and Escape close the question, the focus back on Uninstall…;
  * its confirm is the tool's own uninstall (turnPlugin `uninstall`).
  */
-export function uninstallControl(entry: MarketplaceView, plugin: PluginView, tool: HarnessId, id: string, box: { off?: string }) {
-  const none: [HTMLElement | null, HTMLElement | null] = [null, null];
-  if (!offersUninstall(entry, plugin.name, tool, box)) return none;
+export function uninstallControl(entry: MarketplaceView, plugin: PluginView, tool: HarnessId, id: string, box: { off?: string }): [HTMLElement | null, HTMLElement | null] {
+  if (!offersUninstall(entry, plugin.name, tool, box)) return [null, null];
   const key = pluginKey(entry.source, plugin.name), asks = `${key}\u0000${tool}`, busy = pluginBusy(entry.source, plugin.name);
-  // Opened, the question compares the tool's copy as read now (pluginstate.ts readAgainNow); its confirm waits for that.
+  // Opened, the question reads the plugin as it is now (pluginstate.ts readAgainNow): the copy compared, what the tool keeps for
+  // it; its confirm (in the danger look, as Delete it now's) waits for that read.
   const ask = (open: boolean) => {
     if (open) readAgainNow(entry.source, plugin.name);
     market.asking = open ? asks : undefined; rerender(); document.getElementById(open ? `${id}-cancel` : id)?.focus();
   };
   if (market.asking !== asks) return [button({ variant: 'ghost', size: 'small', label: 'Uninstall…', id, disabled: busy, onclick: () => ask(true) }), null];
-  const read = market.details.get(key), facts = uninstallFacts(entry, plugin, tool, read && !read.reading ? read.value : undefined);
-  const confirm = () => { market.asking = undefined; turnPlugin(entry, plugin.name, 'uninstall', tool); };
+  // A new view drops a read in flight (pluginstate.ts markDetailsStale): the open question asks again, and acts on its answer alone.
+  if (!market.details.has(key)) readAgainNow(entry.source, plugin.name);
+  const read = market.details.get(key), detail = read && !read.reading ? read.value : undefined, facts = uninstallFacts(entry, plugin, tool, detail);
+  const confirm = button({ variant: 'outline', size: 'small', label: `Uninstall from ${names[tool]}`, id: `${id}-confirm`, disabled: busy || detail === undefined,
+    onclick: () => { market.asking = undefined; turnPlugin(entry, plugin.name, 'uninstall', tool); } });
+  confirm.classList.add('delete-now');
   return [null, h('div.band.uninstall-ask', { role: 'alert', onkeydown: (event: KeyboardEvent) => { if (event.key === 'Escape') ask(false); } },
     h('span.band-text', {}, uninstallAsk(pluginTitle(plugin), tool, facts)),
-    h('span.uninstall-ask-actions', {}, button({ variant: 'outline', size: 'small', label: 'Cancel', id: `${id}-cancel`, onclick: () => ask(false) }),
-      button({ variant: 'outline', size: 'small', label: `Uninstall from ${names[tool]}`, id: `${id}-confirm`, disabled: busy || facts.copy === 'comparing', onclick: confirm })))];
+    h('span.uninstall-ask-actions', {}, button({ variant: 'outline', size: 'small', label: 'Cancel', id: `${id}-cancel`, onclick: () => ask(false) }), confirm))];
 }
 
 /** What a click on a tool's box does there, and its Undo, in the state it is drawn in (pluginrecord.ts A TOOL'S BOX and row 9). */

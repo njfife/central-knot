@@ -995,8 +995,8 @@ export interface PluginDetail extends PluginContents {
   /** Each tool's installed copy, read from where that tool keeps it: its version and its parts with their files. */
   installed?: Partial<Record<HarnessId, InstalledCopy>>;
 }
-/** What one tool has installed of a plugin, read from that tool's own copy. */
-export type InstalledCopy = Pick<PluginContents, 'skills' | 'commands' | 'agents' | 'instructions' | 'version'>;
+/** What one tool has installed of a plugin, read from that tool's own copy, and the settings the tool keeps for it (InstallState ownSettings). */
+export type InstalledCopy = Pick<PluginContents, 'skills' | 'commands' | 'agents' | 'instructions' | 'version'> & { ownSettings?: true };
 
 export interface PluginsView {
   home: string;

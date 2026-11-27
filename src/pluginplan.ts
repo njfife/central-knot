@@ -2,7 +2,7 @@
 // (pluginstate.ts applyPluginOps), a plugin's one switch (marketplaces.ts turn), the item lists' switches (app.ts) and the
 // automatic updates (pluginupdates.ts). What a switch owes each tool is pluginrecord.ts's. Also the item lists' scratch for one
 // click (PluginDraft). Pure functions over plain data, so a run can be read, tested and changed without the page or the engine.
-import { partWords, toolSaid } from './pluginstatus.ts';
+import { ownSettingsWords, partWords, toolSaid } from './pluginstatus.ts';
 import type { ItemState } from './pluginlibrary.ts';
 import type { PluginEntry } from './pluginrecord.ts';
 import type { ActionReport, HarnessId, PartRef, PluginActionResult } from './types.ts';
@@ -191,10 +191,12 @@ export function resultLines(ran: PluginDone[], undo = false, { after = false } =
     const turnedOff = mine.filter(entry => entry.action === 'remove' && entry.report.outcome === 'plugin-off' && !!entry.report.changed)
       .sort((first, second) => byToolOrder(first.tool, second.tool)).map(entry => names[entry.tool]);
     const offAgain = tools('plugin-off', true).filter(tool => !turnedOff.includes(tool));
+    // An uninstall's Undo brings back the copy, never what the uninstall deleted with it (PluginOp `deleted`).
+    const without = undo ? mine.find(entry => entry.deleted && entry.report.changed) : undefined;
     const groups: Group[] = item
       ? [[tools(off, true), undo ? `${item} off again in` : `${item} turned off in`], [tools(on, true), undo ? `${item} back on in` : `${item} turned on in`],
         [tools(off, false), `${item} already off in`], [tools(on, false), `${item} already on in`]]
-      : [[tools('installed', true), undo ? 'reinstalled in' : 'installed in'], ...updatedGroups(mine, !after), [tools('updated', false), 'already up to date in'], [tools('uninstalled', true), undo ? 'removed from' : 'uninstalled from'],
+      : [[tools('installed', true), undo ? 'reinstalled in' : 'installed in', without && `, without ${ownSettingsWords(without.tool)}`], ...updatedGroups(mine, !after), [tools('updated', false), 'already up to date in'], [tools('uninstalled', true), undo ? 'removed from' : 'uninstalled from'],
         [tools('installed', false), 'already in'], [tools('uninstalled', false), 'wasn’t installed in'],
         [offAgain, undo ? 'off again in' : 'turned off in'], [turnedOff, 'turned off in'], [tools('plugin-on', true).filter(tool => !onWith.some(entry => names[entry.tool] === tool)), undo ? 'back on in' : 'turned on in'],
         // Past three, the items left off are counted, not named.
@@ -202,9 +204,7 @@ export function resultLines(ran: PluginDone[], undo = false, { after = false } =
         [tools('plugin-off', false), 'already off in'], [tools('plugin-on', false), 'already on in'], ...itemGroups];
     // An item's switch only ever reaches the few tools that have one, so its tools are always named.
     const said = (counted: boolean) => groups.filter(([list]) => list.length).map(([list, verb, after = '']) => `${verb} ${counted && !item && list.length > 2 ? `${list.length} tools` : andList(list)}${after}`).join('; ');
-    // An uninstall's Undo brings back the copy, never what the uninstall deleted with it (PluginOp `deleted`).
-    const notBack = undo && mine.some(entry => entry.deleted && entry.report.changed) ? '. What the uninstall deleted was not brought back' : '';
-    if (said(false)) lines.push({ source, plugin, ...named, ok: true, text: `${said(false)}${notBack}`, short: `${said(true)}${notBack}` });
+    if (said(false)) lines.push({ source, plugin, ...named, ok: true, text: said(false), short: said(true) });
     for (const entry of mine.filter(candidate => !succeeded(candidate.report))) {
       const text = item ? `${names[entry.tool]}, ${item}: ${entry.report.message}` : toolSaid(entry.tool, entry.report.message);
       lines.push({ source, plugin, ...named, ok: false, text, short: text });
@@ -293,13 +293,12 @@ const UNDO_CLAUSES: [(op: PluginOp) => boolean, string, string?][] = [
 
 /**
  * Undo's tooltip, from what it will run (`back`): what it reverses where, and that an update in the same run stays; for an
- * uninstall's (its installs: marketplaces.ts turn), that it installs the marketplace's copy, and what stays deleted.
+ * uninstall's (its installs: marketplaces.ts turn), that it installs the marketplace's copy, and without what the uninstall deleted.
  */
 export function undoTitle(back: PluginOp[], { plugin, updated = false }: { plugin?: string; updated?: boolean } = {}): string {
   const where = (match: (op: PluginOp) => boolean) => andList([...new Set(back.filter(match).map(op => op.tool))].sort(byToolOrder).map(tool => names[tool]));
-  const installs = where(op => op.action === 'install'), off = back.some(op => op.action === 'plugin-off') ? ', off as it was' : '';
-  const stays = back.some(op => op.deleted) ? ' What the uninstall deleted stays deleted.' : '';
-  if (plugin && installs) return `Installs ${plugin} again in ${installs}, from the marketplace${off}.${stays}`;
+  const installs = where(op => op.action === 'install'), off = back.some(op => op.action === 'plugin-off') ? ', off as it was' : '', deleted = back.find(op => op.deleted);
+  if (plugin && installs) return `Installs ${plugin} again in ${installs}, from the marketplace${deleted ? `, without ${ownSettingsWords(deleted.tool)}` : ''}${off}.`;
   const does = UNDO_CLAUSES.flatMap(([match, verb, after = '']) => {
     const list = where(match);
     return list ? [`${verb} ${list}${after}`] : [];

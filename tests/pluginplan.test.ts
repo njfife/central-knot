@@ -64,12 +64,12 @@ test('A run goes on past a step that throws, and a refusal stops it there: the r
   assert.equal(result.stopped, 'Writing isn’t allowed here.');
 });
 
-test('An uninstall’s Undo says it installs the marketplace’s copy again, and where the uninstall deleted settings, that they stay deleted', () => {
+test('An uninstall’s Undo says it installs the marketplace’s copy again, and where the uninstall deleted settings, that it comes back without them', () => {
   const back: PluginOp[] = [{ ...op('pdf', 'claude-cli'), deleted: true }, op('pdf', 'claude-cli', 'plugin-off')];
-  assert.equal(undoTitle(back, { plugin: 'pdf' }), 'Installs pdf again in Claude Code, from the marketplace, off as it was. What the uninstall deleted stays deleted.');
+  assert.equal(undoTitle(back, { plugin: 'pdf' }), 'Installs pdf again in Claude Code, from the marketplace, without its saved options, off as it was.');
   assert.equal(undoTitle([op('pdf', 'codex-cli')], { plugin: 'pdf' }), 'Installs pdf again in Codex, from the marketplace.');
   const done: PluginDone[] = [{ ...back[0]!, report: { tool: 'claude-cli', outcome: 'installed', message: '', runs: [], changed: true } }];
-  assert.equal(resultSentence(resultLines(done, true), true), 'Undone: pdf reinstalled in Claude Code. What the uninstall deleted was not brought back.');
+  assert.equal(resultSentence(resultLines(done, true), true), 'Undone: pdf reinstalled in Claude Code, without its saved options.');
 });
 
 test('An Undo says what came back, and keeps what it did not get to', () => {

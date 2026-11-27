@@ -1256,16 +1256,18 @@ test('Uninstall of a plugin its marketplace no longer offers runs and gives no U
   } finally { await box.cleanup(); }
 });
 
-test('Uninstall of a plugin the build’s marketplace keeps only for the tools that have it gives no Undo: it can’t be installed again', async () => {
-  const box = await setup({ tools: ['claude-cli'], bundled: { folder: 'carried', kept: ['pdf'] } });
-  try {
-    const carried = join(box.base, 'carried');
-    await marketplace(carried, 'team', ['pdf']);
-    await claudeHas(box.home, 'team', { pdf: { version: '1.0.0' } });
-    await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'git', url: carried } } }));
-    const out = await box.markets.turn(carried, 'pdf', 'uninstall', 'claude-cli', box.home);
-    assert.deepEqual([box.calls.filter(call => call.startsWith('uninstall')).length, out.back], [1, []]);
-  } finally { await box.cleanup(); }
+test('Uninstall of a plugin the build’s marketplace keeps only for the tools that have it, or carries no files for, gives no Undo: it can’t be installed again', async () => {
+  for (const bundled of [{ kept: ['pdf'] }, { unpackaged: ['pdf'] }]) {
+    const box = await setup({ tools: ['claude-cli'], bundled: { folder: 'carried', ...bundled } });
+    try {
+      const carried = join(box.base, 'carried');
+      await marketplace(carried, 'team', ['pdf']);
+      await claudeHas(box.home, 'team', { pdf: { version: '1.0.0' } });
+      await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'git', url: carried } } }));
+      const out = await box.markets.turn(carried, 'pdf', 'uninstall', 'claude-cli', box.home);
+      assert.deepEqual([box.calls.filter(call => call.startsWith('uninstall')).length, out.back], [1, []], JSON.stringify(bundled));
+    } finally { await box.cleanup(); }
+  }
 });
 
 test('An uninstall’s Undo whose install fails leaves the record as the uninstall left it, and runs nothing more for a plugin that isn’t there', async () => {
@@ -1304,7 +1306,8 @@ test('Claude Code’s saved options for a plugin are what its uninstall deletes:
     // An option an earlier version declared, still saved; this copy declares none.
     await put(manifest, JSON.stringify({ name: 'pdf', version: '1.0.0' }));
     await box.settings(now => { now.pluginConfigs = { 'pdf@team': { options: { region: 'west' } } }; });
-    assert.deepEqual([declared, await claude()], [false, true]);
+    // The plugin's contents read when Uninstall…'s question opens carry it too, read then (pluginstate.ts readAgainNow).
+    assert.deepEqual([declared, await claude(), (await box.markets.detail(box.root, 'pdf'))?.installed?.['claude-cli']?.ownSettings], [false, true, true]);
   } finally { await box.cleanup(); }
 });
 

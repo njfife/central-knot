@@ -258,7 +258,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const copies = await Promise.all(Object.entries(states).map(async ([tool, state]) => {
       if (state?.state !== 'installed') return undefined;
       const { skills, commands, agents, instructions } = await installedContents(tool as HarnessId, state.path, item.entry, !!item.isMarketplaceRoot);
-      return [tool, { skills, commands, agents, instructions, version: state.version }] as const;
+      return [tool, { skills, commands, agents, instructions, version: state.version, ...(state.ownSettings ? { ownSettings: true as const } : {}) }] as const;
     }));
     return Object.fromEntries(copies.filter(copy => !!copy));
   }
@@ -811,7 +811,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const reversed = reverse(ran.done), copy = tool ? stateOf(entry, plugin, tool) : undefined, was = copy?.state === 'installed' ? copy : undefined;
     const reinstall = reversed.map(op => (was?.ownSettings ? { ...op, deleted: true as const } : op));
     const offAgain = was?.off ? reversed.map(op => ({ ...op, action: 'plugin-off' as const })) : [];
-    const back = what !== 'uninstall' ? reversed : cantInstallAgain(entry, listed) ? [] : [...reinstall, ...offAgain];
+    const back = what !== 'uninstall' ? reversed : cantInstallAgain(entry, plugin) ? [] : [...reinstall, ...offAgain];
     // Pi, OpenCode and Antigravity: its items (pluginlibrary.ts).
     // An untick that leaves the plugin Off takes its items there as Off does: each item's `except` stays for its next On.
     const items = itemsIn.length && !ran.stopped ? await turnItems(entry.source, marketName, after, what === 'keep-out' && !after.on ? 'off' : what, itemsIn) : undefined;
