@@ -4,7 +4,7 @@
 // on the same code, a background notice taken during a click or a home read, and when the rows a click pins are let go (app.ts pinnedRows, drawPage).
 import { mock, test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import type { Change, HarnessId, HomeView, ItemNotice, MarketplaceView, PassResult, PluginTurn, PluginTurnResult, PluginsView, ProfileSwitchResult } from '../src/types.ts';
+import type { Change, HarnessId, HomeView, InstalledPlugin, InstructionFile, ItemNotice, MarketplaceView, PassResult, PluginTurn, PluginTurnResult, PluginsView, ProfileSwitchResult } from '../src/types.ts';
 import type { PageKind } from '../src/app.ts';
 import { reverse, type PluginOp } from '../src/pluginplan.ts';
 
@@ -78,12 +78,13 @@ const { settingsPage } = await import('../src/settingspage.ts');
 const { acting, announce, applyByKind, applyClick, askFlash, busy, closeResult, deleteProfileDef, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, profileEndedLine, profilesBefore, saveProfileDef, selectOff, switchToProfile, whyKindReadOnly, whyReadOnly,
   loadHome, problemKey, queueClick, readAgain, restoreEvent, setRenderer, showPage, syncNow, state: app } = await import('../src/app.ts');
 const { repo, repoPage } = await import('../src/repopage.ts');
-const { addMarketplace, applyPluginOps, clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, resultOn, runReloads, shownPlugins, turnFromLine, turnPlugin, undoLabel, undoLast, usePlugins } = await import('../src/pluginstate.ts');
+const { addMarketplace, applyPluginOps, clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, resultOn, runReloads, shownPlugins, turnFromLine, turnPlugin, undoLabel, undoLast, undoOps, usePlugins } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
 const { backgroundProblems, copyQuestion, headerNotices, libraryTable, listResult, openKind, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
 const { openWalkthrough, setupLead, walkthroughBand } = await import('../src/firstsetup.ts');
 const { pluginsResult } = await import('../src/pluginspage.ts');
+const { instructionBands, instructionCard } = await import('../src/instructionspage.ts');
 const { versionsList } = await import('../src/editparts.ts');
 const { timesApart } = await import('../src/model.ts');
 const { newItem } = await import('../src/library.ts');
@@ -1205,6 +1206,103 @@ test('× on the run’s result closes its problem lines too', async () => {
   assert.equal(lastLines().filter(line => !line.ok).length, 1);
   closeRun();
   assert.deepEqual([lastLines(), market.problem], [[], undefined]);
+});
+
+// A plugin's switch clicked on Instructions or on a tool's Instructions tab (I2b's Turn off, a click as a tool's Plugins tab makes it):
+// each is a place of its own (pluginstate.ts pluginsResultPlace), said on that page (pluginspage.ts runBand), never in the header.
+const onPage = (page: 'plugins' | 'instructions') => Object.assign(app, { page, harness: undefined });
+const onTab = (harnessTab: 'plugins' | 'instructions', harness: HarnessId = 'claude-cli') => {
+  app.home!.sync.managed = ['claude-cli', 'codex-cli'];
+  Object.assign(app, { page: 'harnesses', harness, harnessTab });
+};
+/** The run of the place open now, read afresh each time (a narrowing assert can't pin it). */
+const runHere = () => market.lastRun;
+const turnedOff = (tool: HarnessId = 'claude-cli', outcome: 'plugin-off' | 'failed' = 'plugin-off'): PluginTurnResult => ({
+  done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool, action: 'plugin-off', report: { tool, outcome, changed: outcome !== 'failed', message: outcome === 'failed' ? 'Still on in Claude Code. It stopped with exit code 9.' : 'Turned off.', runs: [] } }],
+  before: null, back: outcome === 'failed' ? [] : [{ source: '/market', marketName: 'team', plugin: 'alpha', tool, action: 'plugin-on' }] });
+
+test('A switch clicked on Instructions keeps its result and Undo there through two visits; Plugins and Claude Code’s two tabs have none of it', async () => {
+  start();
+  onPage('instructions');
+  turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
+  await settled();
+  await main.answer(turnedOff());
+  const here = () => [market.lastRun?.turn?.plugin, undoOps().length];
+  assert.deepEqual(here(), ['alpha', 1]);
+  for (const elsewhere of [() => onPage('plugins'), () => onTab('plugins'), () => onTab('instructions'), () => onPage('plugins')]) {
+    elsewhere();
+    assert.deepEqual(here(), [undefined, 0]);
+  }
+  onPage('instructions');
+  assert.deepEqual(here(), ['alpha', 1]);
+});
+
+test('A switch clicked on Codex’s Instructions tab is that tab’s alone, not Codex’s Plugins tab’s nor the Instructions page’s, and its Undo is said there', async () => {
+  start();
+  onTab('instructions', 'codex-cli');
+  turnPlugin(entry, 'alpha', 'keep-out', 'codex-cli');
+  await settled();
+  await main.answer(turnedOff('codex-cli'));
+  onTab('plugins', 'codex-cli');
+  assert.equal(runHere(), undefined);
+  onPage('instructions');
+  assert.equal(runHere(), undefined);
+  onTab('instructions', 'codex-cli');
+  undoLast();
+  await settled();
+  assert.deepEqual([main.sent.at(-1), runHere()?.undo], ['alpha undone', true]);
+  onTab('plugins', 'codex-cli');
+  assert.equal(runHere(), undefined);
+});
+
+test('A result on Instructions stays past 8 seconds, as a band’s does; one on Plugins goes by itself, and takes nothing of Instructions’ with it', async () => {
+  mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  try {
+    start();
+    onPage('instructions');
+    turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
+    await settled();
+    await main.answer(turnedOff());
+    mock.timers.tick(60_000);
+    assert.equal(runHere()?.turn?.plugin, 'alpha');
+    onPage('plugins');
+    turnPlugin(entry, 'beta', 'on');
+    await settled();
+    await main.answer(installed('beta'));
+    mock.timers.tick(8000);
+    assert.equal(runHere(), undefined);
+    onPage('instructions');
+    assert.equal(runHere()?.turn?.plugin, 'alpha');
+  } finally { mock.timers.reset(); }
+});
+
+test('On Instructions a switch’s result is said under the strip it was clicked in while that strip shows its plugin, else above the cards; × closes it there', async () => {
+  start();
+  onPage('instructions');
+  const hook = { declaredIn: '/home/.claude/plugins/cache/team/alpha/1.0.0/hooks/hooks.json', event: 'SessionStart', at: 0, launch: { shell: 'echo alpha' } };
+  const alpha = { tool: 'claude-cli', plugin: 'alpha', marketName: 'team', items: [], listed: true, source: '/market', hooks: [hook] } as unknown as InstalledPlugin;
+  // beta keeps Claude Code's strip on the card after alpha leaves it.
+  const beta = { ...alpha, plugin: 'beta', hooks: [{ ...hook, declaredIn: '/home/.claude/plugins/cache/team/beta/1.0.0/hooks/hooks.json' }] } as InstalledPlugin;
+  const file = { tool: 'claude-cli', path: '/home/.claude/CLAUDE.md', exists: true, text: '', hash: 'h', readers: 'Claude Code', notes: [], versions: [] } as unknown as InstructionFile;
+  Object.assign(app.home!, { pluginItems: [alpha, beta], mode: 'custom', snapshots: [] });
+  Object.assign(app.home!.sync, { access: { allowed: true } });
+  app.instructions.data = [file];
+  const drawnIn = () => [!!findById(instructionCard(file), 'plugins-result'), !!findById(instructionBands(), 'plugins-result')];
+  // Claude Code refuses: its group is still in the strip, so the failure is said under it.
+  turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
+  await settled();
+  await main.answer(turnedOff('claude-cli', 'failed'));
+  assert.deepEqual(drawnIn(), [true, false]);
+  assert.match(textOf(findById(instructionCard(file), 'plugins-result')), /alpha: Claude Code: Still on in Claude Code\. It stopped with exit code 9\./);
+  // Turned off: its group leaves the strip (sessionhooks.ts sessionStrip), beta's stays, and the result and its Undo are said above the cards.
+  turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
+  await settled();
+  Object.assign(app.home!, { pluginItems: [{ ...alpha, off: true }, beta] });
+  await main.answer(turnedOff());
+  assert.deepEqual(drawnIn(), [false, true]);
+  assert.deepEqual([!!findById(instructionBands(), 'plugins-undo'), !!findById(instructionBands(), 'report-dismiss')], [true, true]);
+  closeRun();
+  assert.deepEqual(drawnIn(), [false, false]);
 });
 
 test('A background problem closed with its × is remembered by its kind too: a skill’s and an agent’s of one name and reason are two', () => {

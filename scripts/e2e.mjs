@@ -9109,6 +9109,15 @@ esac
     await a.run(`document.querySelector('#pbox-0-document-tools-claude-cli')?.disabled`), existsSync(join(home, '.pi/agent/skills/pdf-reader/SKILL.md'))], [true, 'missing', false, true]);
   await pictures('plugin-switch-failed');
   await fitsAtMinimum(a, 'a plugin’s page with an install that failed');
+  // Its failure is Plugin marketplaces' (pluginstate.ts pluginsResultPlace): Instructions, visited twice, says none of it; back here it stands.
+  for (const visit of [1, 2]) {
+    await a.click('#nav-instructions');
+    for (let tries = 0; tries < 50 && !(await a.exists('#instructions-scroll')); tries++) await wait(100);
+    same(`on Instructions (visit ${visit}) none of Plugin marketplaces’ failure is drawn`, [await a.exists('#plugins-result'), await a.exists('.plugin-problems'), await a.exists('.plugin-run')], [false, false, false]);
+    await a.click('#nav-plugins');
+    for (let tries = 0; tries < 50 && !(await a.exists('.plugin-problems')); tries++) await wait(100);
+    check(`back on Plugin marketplaces (visit ${visit}) the refused install is still said`, /Could not add the marketplace|Not installed/.test(await a.text('.plugin-problems') ?? ''), await a.text('#header'));
+  }
   // Two plugins clicked in a row without waiting: release-helper's Add, then starter-skills (Claude Code's stand-in takes 3 s over
   // it). The second waits its turn while the first runs, the first is read back as soon as it ends, and Skills stays usable.
   await a.click('#plugin-back');
@@ -16645,12 +16654,15 @@ echo "$*" >> "$HOME/claude-calls.txt"
   await back();
   for (let tries = 0; tries < 100 && (await names('claude-cli')).includes('release-helper'); tries++) await wait(100);
   same('turned off in Claude Code, its group leaves Claude Code’s strip, and Codex’s stays', [(await names('claude-cli')).includes('release-helper'), (await names('claude-cli')).length, await names('codex-cli')], [false, 14, ['release-helper']]);
+  // The box's result is Plugin marketplaces' own (pluginstate.ts pluginsResultPlace): Instructions draws none of it, above its cards or under a strip.
+  same('the box’s result and its Undo stay off Instructions', [await a.exists('#plugins-result'), await a.exists('.plugin-run')], [false, false]);
   // A tool's own Instructions tab under Harnesses has the same strip.
   await a.click(byId('nav-harnesses'));
   await a.click(byId('harness-codex-cli'));
   await a.click(byId('harness-tab-instructions'));
   for (let tries = 0; tries < 100 && !(await a.exists('#session-codex-cli')); tries++) await wait(100);
   same('Codex’s Instructions tab has its strip without standing prose', [(await groups('codex-cli'))[0]?.[1].length, await a.exists('#session-codex-cli .session-about')], [2, false]);
+  same('nor does Codex’s Instructions tab, a place of its own', [await a.exists('#plugins-result'), await a.exists('.plugin-run')], [false, false]);
   const codexTabBtn = await hookBtnIn('session-codex-cli', 'release-helper', 'remind.mjs');
   const codexTabSource = codexTabBtn && await openSource(codexTabBtn, '#session-codex-cli .hook-source');
   check('a tool’s own Instructions tab opens View source from that tool’s installed copy', /Declared in .*hooks\/hooks\.json/.test(codexTabSource ?? '') && /installed in Codex/.test(codexTabSource ?? '') && !/marketplace’s copy/.test(codexTabSource ?? ''), codexTabSource);
