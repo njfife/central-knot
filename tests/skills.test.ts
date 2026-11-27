@@ -1605,7 +1605,7 @@ test('An Add while Synchronize everything takes in a skill found elsewhere: the 
   const { box, untouchedFiles } = await addHome();
   try {
     await put(box, 'codex-cli', { 'SKILL.md': skillText('A spare.', 'spare') }, [], 'spare');
-    assert.deepEqual(await setSyncEverything(box.context, true), {});
+    assert.equal((await setSyncEverything(box.context, true)).stopped, undefined);
     const { row, item } = await seen(box, box.context, 'draft');
     const counted = await countOpens(() => clickThenView(box, rowClicks.on(row, item)));
     const { passed, skills } = counted.result;

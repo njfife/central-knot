@@ -74,7 +74,7 @@ Object.assign(globalThis, {
 });
 Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh' } });
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
-await import('../src/settingspage.ts');
+const { settingsPage } = await import('../src/settingspage.ts');
 const { acting, announce, applyByKind, applyClick, askFlash, busy, closeResult, deleteProfileDef, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, profileEndedLine, profilesBefore, saveProfileDef, selectOff, switchToProfile, whyKindReadOnly, whyReadOnly,
   loadHome, problemKey, queueClick, readAgain, restoreEvent, setRenderer, showPage, syncNow, state: app } = await import('../src/app.ts');
 const { repo, repoPage } = await import('../src/repopage.ts');
@@ -2016,29 +2016,60 @@ test('History Undo refused whole (heldWhole, no made) adds no profile sentence e
   assert.equal(app.outcome?.refused, true);
 });
 
-test('Synchronize everything Undo ending Everyday appends the profile sentence and sets profileLine', async t => {
+test('Synchronize everything Undo ending Everyday appends the profile sentence, keeps history on History, and dismisses only undone take-ins', async t => {
   const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
   const events = [
     { id: 'ev-on', kind: 'everything', item: 'Synchronize everything', key: 'home:everything', at: '2026-11-25T10:00:00.000Z', losers: [], orderProved: true, everything: { ruleOn: true } },
+    { id: 'take-undone', kind: 'on', cause: 'sync-everything', of: 'skill', item: 'notes', key: 'notes', at: '2026-11-25T10:00:10.000Z', losers: [], orderProved: true, undoneBy: 'u-1' },
+    { id: 'take-left', kind: 'on', cause: 'sync-everything', of: 'skill', item: 'standup', key: 'standup', at: '2026-11-25T10:00:20.000Z', losers: [], orderProved: true },
     { id: 'ev-undo', kind: 'everything', item: 'Synchronize everything', key: 'home:everything', at: '2026-11-25T10:01:00.000Z', losers: [], orderProved: true,
-      everything: { ruleOn: false, undo: { switchedOff: true, itemUndos: ['u-1'], left: [], keptIn: [] } } },
+      everything: { ruleOn: false, undo: { switchedOff: true, itemUndos: ['u-1'], left: [{ item: 'standup', why: 'changed' }], keptIn: [] } } },
   ];
   historyRestoreWorld(t, events, { beforeOn: { notes: true, standup: false }, afterOn: { notes: false, standup: false }, profiles: [everyday], reply: { results: [], harnessWrites: 1, made: ['ev-undo'], reloads: [] } });
   await restoreEvent('ev-on');
   assert.match(app.outcome?.text ?? '', /Everyday stopped being the profile in use\.$/);
-  assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
+  assert.deepEqual([app.outcome?.profileLine, app.outcome?.history, app.dismissed.has('take-undone'), app.dismissed.has('take-left')],
+    ['Everyday stopped being the profile in use.', true, true, false]);
 });
 
-test('Synchronize everything Restore ending Everyday appends the profile sentence and sets profileLine', async t => {
+test('Synchronize everything Restore ending Everyday appends the profile sentence, keeps history on History, and keeps dismissed take-ins dismissed', async t => {
   const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
   const events = [
     { id: 'ev-undo', kind: 'everything', item: 'Synchronize everything', key: 'home:everything', at: '2026-11-25T10:01:00.000Z', losers: [], orderProved: true,
       everything: { ruleOn: false, undo: { switchedOff: true, itemUndos: ['u-1'], left: [], keptIn: [] } } },
   ];
   historyRestoreWorld(t, events, { beforeOn: { notes: true, standup: false }, afterOn: { notes: true, standup: true }, profiles: [everyday], reply: { results: [], harnessWrites: 1, made: ['r-1'], reloads: [] } });
+  app.dismissed.add('take-undone');
   await restoreEvent('ev-undo');
   assert.match(app.outcome?.text ?? '', /Everyday stopped being the profile in use\.$/);
-  assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
+  assert.deepEqual([app.outcome?.profileLine, app.outcome?.history, app.dismissed.has('take-undone')],
+    ['Everyday stopped being the profile in use.', true, true]);
+});
+
+test('Multi-item taken-in notice stays when either item is left in (both orders) and goes once every item it names is undone', async t => {
+  const twoNotice = () => ({ kind: 'taken-in', items: ['alpha', 'beta'], from: ['claude-cli'], history: 'take-alpha', histories: ['take-alpha', 'take-beta'] });
+  const runCase = async (alphaUndone: boolean, betaUndone: boolean, extra?: () => Promise<void>) => {
+    const itemUndos = [...(alphaUndone ? ['u-a'] : []), ...(betaUndone ? ['u-b'] : [])];
+    const events: Record<string, unknown>[] = [
+      { id: 'ev-on', kind: 'everything', item: 'Synchronize everything', key: 'home:everything', at: '2026-11-25T10:00:00.000Z', losers: [], orderProved: true, everything: { ruleOn: true } },
+      { id: 'take-alpha', kind: 'on', cause: 'sync-everything', of: 'skill', item: 'alpha', key: 'alpha', at: '2026-11-25T10:00:10.000Z', losers: [], orderProved: true, ...(alphaUndone ? { undoneBy: 'u-a' } : {}) },
+      { id: 'take-beta', kind: 'on', cause: 'sync-everything', of: 'skill', item: 'beta', key: 'beta', at: '2026-11-25T10:00:11.000Z', losers: [], orderProved: true, ...(betaUndone ? { undoneBy: 'u-b' } : {}) },
+      { id: 'ev-undo', kind: 'everything', item: 'Synchronize everything', key: 'home:everything', at: '2026-11-25T10:01:00.000Z', losers: [], orderProved: true, everything: { ruleOn: false, undo: { switchedOff: true, itemUndos, left: [], keptIn: [] } } },
+    ];
+    historyRestoreWorld(t, events, { beforeOn: { notes: true, standup: false }, afterOn: { notes: false, standup: false }, profiles: [], reply: { results: [], harnessWrites: 1, made: ['ev-undo'], reloads: [] } });
+    app.dismissed.clear();
+    app.page = 'settings';
+    app.home!.skills.notices = [twoNotice() as never];
+    await restoreEvent('ev-on');
+    if (extra) { events[2].undoneBy = 'u-b'; await extra(); }
+    return [app.dismissed.has('take-alpha'), !!findById(settingsPage(), 'setting-sync-everything-added-skills')];
+  };
+  // Order B: alpha (first) taken back, beta left in -> line stays; then undoing beta alone clears it.
+  assert.deepEqual(await runCase(true, false), [false, true], 'alpha undone, beta left in: stays');
+  assert.deepEqual(await runCase(true, false, () => restoreEvent('take-beta')), [true, false], 'beta undone later: goes');
+  // Order A: beta (second) taken back, alpha left in -> line stays; both taken back -> line goes.
+  assert.deepEqual(await runCase(false, true), [false, true], 'beta undone, alpha left in: stays');
+  assert.deepEqual(await runCase(true, true), [true, false], 'both undone: goes');
 });
 
 test('Synchronize everything Restore that puts nothing back (made empty, 0 writes) adds no profile sentence', async t => {

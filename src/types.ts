@@ -144,8 +144,9 @@ export interface DesktopApi {
   /**
    * Turns the open home's standing rule, Synchronize everything, on or off (everything.ts setSyncEverything), then reads and syncs
    * the home. `answering`: first setup's question answers it, which is refused once the home has an answer (another window's).
+   * `event`: the switch-on's History entry id, only when the rule moved from off (or unanswered) to on.
    */
-  setSyncEverything(on: boolean, home: string, answering?: boolean): Promise<{ stopped?: string; view: HomeView | null; reloads: ReloadChange[] }>;
+  setSyncEverything(on: boolean, home: string, answering?: boolean): Promise<{ stopped?: string; event?: string; view: HomeView | null; reloads: ReloadChange[] }>;
   /**
    * A tool's Manage switch (toolchoice.ts chooseTools): Central Knot's care of it turned on or off, then the home read and synced.
    * `resume`: the page showed a home that waits for Resume, which the switch resumes as a click does. `did`: what that pass did in
@@ -522,7 +523,11 @@ export interface ItemNotice {
  * What Synchronize everything took into Central Knot in one pass of one kind (librarypass.ts takeInByRule): the items, by name,
  * and the tools they were found in. Each has its own History entry, with an Add's Undo; `history` is the first, which keys the notice.
  */
-export interface TakenInNotice { kind: 'taken-in'; items: string[]; from: HarnessId[]; history: string; /** As its items' History entries' (HistoryEvent settingsChanged). */ settingsChanged?: string[] }
+export interface TakenInNotice {
+  kind: 'taken-in'; items: string[]; from: HarnessId[]; history: string;
+  /** Each taken-in item's own History entry id, matching `items` (`history` is the first, keying the notice). */ histories?: string[];
+  /** As its items' History entries' (HistoryEvent settingsChanged). */ settingsChanged?: string[];
+}
 
 /**
  * A skill's take-over from before the library (Replace with managed copies), as its History entry recorded it: links replaced

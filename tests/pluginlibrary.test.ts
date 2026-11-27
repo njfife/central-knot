@@ -888,7 +888,7 @@ test('Synchronize everything after Use the plugin’s: his copies in Claude Code
     await box.turn('let-in', 'pi-cli');
     await box.take('mcp', 'maps');
     const before = [await box.toolFiles(), await box.maps()];
-    assert.deepEqual(await setSyncEverything(box.share, true), {});
+    assert.equal((await setSyncEverything(box.share, true)).stopped, undefined);
     await applyServers(box.share, box.tools, [], { background: true });
     assert.deepEqual([await box.toolFiles(), await box.maps()], before);
   } finally { await box.cleanup(); }

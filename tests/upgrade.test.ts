@@ -309,7 +309,7 @@ async function placeParts(rule: boolean, leftOut: HarnessId[] = ['codex-cli']): 
   await rm(join(box.home, 'gone-market'), { recursive: true });
   const sync = JSON.parse(await readFile(join(box.store, 'sync.json'), 'utf8'));
   await writeFile(join(box.store, 'sync.json'), `${JSON.stringify({ ...sync, leftOut }, null, 2)}\n`);
-  assert.deepEqual(await setSyncEverything(appContext(box.home, box.appData), rule, true), {});
+  assert.equal((await setSyncEverything(appContext(box.home, box.appData), rule, true)).stopped, undefined);
   // Every tool file as old as alpha 1 left it, not as new as the copy: a found item is past the settle window at the first pass,
   // so Synchronize everything takes it in then (helper, found in Copilot CLI), whatever the machine's speed.
   const old = new Date('2026-11-13T00:00:00Z');
@@ -722,7 +722,7 @@ describe('Upgrading alpha-1-parts with no sync record: docs waits in Pi and Open
     clicked = await docsWhileWaiting(box);
     waited = await filesIn(box.home);
     waitedEntries = await partEntries(box, names.mcp);
-    assert.deepEqual(await setSyncEverything(appContext(box.home, box.appData), true, true), {});
+    assert.equal((await setSyncEverything(appContext(box.home, box.appData), true, true)).stopped, undefined);
     moved = start(box, 'on', 2);
   });
   after(() => rm(box.base, { recursive: true, force: true }));

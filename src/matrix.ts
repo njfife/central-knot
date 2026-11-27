@@ -1370,6 +1370,8 @@ const markSeen = (id: string) => { if (document.hasFocus() && !state.seenNotices
 export const unseenNotices = (kind: PageKind) => (state.home?.[kind].notices ?? []).filter(notice => noticeUnseen(notice.history));
 /** Whether the header keeps a notice for the open home, not dismissed or undone (app.ts readFound: no "Nothing changed" beside it). */
 export const noticesKept = () => tableHomes.notices === state.home?.home && [...keptNotices.values()].some(kept => [...kept.keys()].some(key => !state.dismissed.has(key)));
+/** Notices kept in the header cache across kinds, for restoreEvent to see multi-item taken-in notices already cached on Library. */
+export const keptNoticeList = (): SyncNotice[] => (tableHomes.notices === state.home?.home ? [...keptNotices.values()].flatMap(kept => [...kept.values()]) : []);
 /** The card open on a list (app.ts state.shownWhole): the list it was opened on (cardOf) and how many notices had arrived by then (`upTo`). */
 type NoticesCard = { noticesOf: string; upTo: number };
 /** The notices a table shows: each of its kinds', those dismissed aside, in the card's order (cardOrder). */
