@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { batches, resultLines, strayHolds, type PluginDone, type PluginDraft, type PluginOp } from '../src/pluginplan.ts';
-import { alongWords, cantSwitch, click, clickWords, copilotByName, itemSaid, onNow, standing, switchWords, turnEvery, wholeWords, type PluginItemAt } from '../src/pluginswitch.ts';
+import { alongWords, cantSwitch, click, clickWords, copilotByName, itemSaid, onNow, standing, turnEvery, wholeWords, type PluginItemAt } from '../src/pluginswitch.ts';
 import { statusLine } from '../src/libraryrow.ts';
 import { newItem } from '../src/library.ts';
 import { owedTo } from '../src/pluginrecord.ts';
@@ -96,9 +96,9 @@ test('turning on one item of a plugin that is off as a whole turns the plugin on
   // And a second click on a kept-off server puts just that server back.
   click(whole, item(claude, 'mcp', 'wiki'));
   assert.deepEqual(chosen(whole), ['claude-cli part-off mcp issues', 'claude-cli part-off agent helper', 'claude-cli plugin-on']);
-  assert.equal(clickWords(item(claude, 'skill', 'one')), 'Click to turn the whole plugin full on in Claude Code, with its 1 skill, 2 MCP servers and 1 agent.');
+  assert.equal(clickWords(item(claude, 'skill', 'one')), 'Click to turn the whole plugin full on in Claude Code, with its 1 other skill, 2 MCP servers and 1 agent.');
   // An item its own switch keeps off doesn't come on with the plugin, so it isn't counted.
-  assert.equal(clickWords(item(installed('claude-cli', { off: true, serversOff: ['wiki'], agentsOff: ['helper'] }), 'skill', 'one')), 'Click to turn the whole plugin full on in Claude Code, with its 1 skill and 1 MCP server.');
+  assert.equal(clickWords(item(installed('claude-cli', { off: true, serversOff: ['wiki'], agentsOff: ['helper'] }), 'skill', 'one')), 'Click to turn the whole plugin full on in Claude Code, with its 1 other skill and 1 MCP server.');
   // An item whose own switch can't be written is never held off (its switch would fail, and it would come on unsaid): it
   // is said as coming on with the plugin instead.
   const inlineSkills = installed('codex-cli', { off: true, switchesHeld: 'Inline.' });
@@ -117,15 +117,15 @@ test('an item with no switch of its own flips the whole plugin, and its words na
   const draft: PluginDraft = new Map();
   const claude = installed('claude-cli');
   const skill = item(claude, 'skill', 'one');
-  assert.equal(clickWords(skill), 'Claude Code has no switch for one skill of a plugin. Click to turn the whole plugin full off in Claude Code, with its 1 skill, 2 MCP servers and 1 agent.');
-  // The line beside its switch in the opened row says the same before any click; an item with its own switch says nothing.
-  assert.equal(switchWords(skill), 'Claude Code has no switch for one skill of a plugin, so this switch turns the whole plugin off there.');
-  assert.equal(switchWords(item(claude, 'mcp', 'issues')), '');
+  assert.equal(clickWords(skill), 'Claude Code has no switch for one skill of a plugin. Click to turn the whole plugin full off in Claude Code, with its 1 other skill, 2 MCP servers and 1 agent.');
   click(draft, skill);
   assert.deepEqual(chosen(draft), ['claude-cli plugin-off']);
-  // What its own switch already keeps off doesn't go off with the plugin, so it isn't counted.
+  // What its own switch already keeps off doesn't go off with the plugin, so it isn't counted; hooks are counted in hover and result alike.
   const partly = item(installed('claude-cli', { serversOff: ['issues', 'wiki'] }), 'skill', 'one');
-  assert.equal(clickWords(partly), 'Claude Code has no switch for one skill of a plugin. Click to turn the whole plugin full off in Claude Code, with its 1 skill and 1 agent.');
+  assert.equal(clickWords(partly), 'Claude Code has no switch for one skill of a plugin. Click to turn the whole plugin full off in Claude Code, with its 1 other skill and 1 agent.');
+  const withHooks = item(installed('claude-cli', { serversOff: ['issues', 'wiki'], hooks: [{ declaredIn: 'hooks/hooks.json', event: 'SessionStart', at: 1 }, { declaredIn: 'hooks/hooks.json', event: 'Stop', at: 2 }] }), 'skill', 'one');
+  assert.equal(clickWords(withHooks), 'Claude Code has no switch for one skill of a plugin. Click to turn the whole plugin full off in Claude Code, with its 1 other skill, 1 agent and 2 hooks.');
+  assert.equal(alongWords(withHooks, turnEvery([withHooks], false).ops), 'Its whole plugin full was turned off in Claude Code, with its 1 other skill, 1 agent and 2 hooks.');
   const going: PluginDraft = new Map();
   click(going, partly);
   // Every item of the plugin there shows the same change.
@@ -272,7 +272,7 @@ test('the row turned Off: Claude Code has the plugin off in its own settings, wh
   assert.equal(pluginsPageSays(claude), 'Off in Claude Code: still installed at 1.0.0, with its data and settings.');
   // On Skills, the library row (Pi, OpenCode) is Off with no tool left on: in Central Knot only.
   assert.deepEqual(after.map(install => item(install, 'skill', 'one')).filter(onNow), []);
-  assert.equal(offRowSays('one', []), 'Off · On puts it in every tool.');
+  assert.equal(offRowSays('one', []), 'On puts it in every tool.');
 });
 
 test('the row turned On again turns back on exactly what was on: what a tool’s own switch had off before stays off', () => {
@@ -295,7 +295,7 @@ test('skill one Off, skill two Off, one On: the plugin is on again in Claude Cod
   assert.deepEqual(pluginOn, ['claude-cli']);
   // Its library row is Off, and says where it is still on (pluginrows.ts pluginOnIn); its switch turns it on everywhere else, and
   // says nothing of a whole plugin, which is on already.
-  assert.equal(offRowSays('two', pluginOn), 'Off · on in Claude Code only, through its plugin. On puts it in every tool.');
+  assert.equal(offRowSays('two', pluginOn), 'On in Claude Code only, through its plugin. On puts it in every tool.');
   assert.equal(wholeWords(installs.map(install => item(install, 'skill', 'two')), true), '');
   assert.equal(pluginsPageSays(installs[0]), 'Claude Code: installed 1.0.0.');
 });

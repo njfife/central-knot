@@ -16,7 +16,7 @@
 // `seen`), never this record's, and whom an item is linked to is library.ts linkedTo's alone. While plugins.json has a problem
 // (pluginrecord.ts readPluginRecord), `pluginsRecordHold` is the one rule deciding which items are held by their active
 // `source` id and stored provenance (asked by librarypass.ts copyRead/click/fromSourceStep and skills.ts takeOver, and shown
-// by libraryrow.ts statusLine; gitrepo.ts refuses Pull and Push whole). This module reads and writes what it is given.
+// on tool lines by libraryrow.ts detailLine and harnessLine; gitrepo.ts refuses Pull and Push whole). This module reads and writes what it is given.
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { LibraryItem } from './library.ts';

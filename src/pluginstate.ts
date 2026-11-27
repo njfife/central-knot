@@ -28,7 +28,7 @@ import { pageData, putPageData, readPageData, resetPageData } from './pagedata.t
 import { plural } from './model.ts';
 import { notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, succeeded, unreachedOps, type LastRun, type PluginDone, type PluginOp, type ResultLine, type RunPlace } from './pluginplan.ts';
 import { FIND_FROM, boxOf, categoriesOf, copiesToCompare, installedFrom, marketTitle, matches, pluginPlace, samePart, toolMark } from './pluginstatus.ts';
-import { counted } from './pluginswitch.ts';
+import { counted, wholeAlso } from './pluginswitch.ts';
 import { yoursStay } from './pluginline.ts';
 import type { PluginEntry } from './pluginrecord.ts';
 import { readInTurn, readInto, type Read } from './reads.ts';
@@ -756,6 +756,8 @@ export function turnFromLine(aim: LineAim): void {
  */
 async function runLine(click: LineClick): Promise<void> {
   const { aim } = click, atStart = profilesBefore();
+  const before = aim.act === 'keep-out' ? app.home?.pluginItems?.find(each => each.tool === aim.tool && each.plugin === aim.plugin && each.marketName === aim.marketName) : undefined;
+  const also = before ? wholeAlso({ ...aim.item, tool: aim.tool, install: before }).words : '';
   retire(aim.plugin);
   rerender();
   const result = await api().turnPlugin(aim.source, aim.plugin, aim.act === 'keep-out' ? 'keep-out' : 'let-in', aim.tool, aim.home)
@@ -780,22 +782,24 @@ async function runLine(click: LineClick): Promise<void> {
   // A placement says what it put there and what it left, as its own report counts and names them (pluginlibrary.ts reportIn).
   const said = already
     ? (aim.act === 'keep-out'
-      ? `Nothing was run in ${where}: ${aim.plugin} is already off there.${recordChanged ? ` Central Knot now keeps it out of ${where}.` : ''}`
-      : `Nothing was run in ${where}: it has ${aim.plugin} already.${recordChanged ? ` Central Knot now keeps it in ${where}.` : ''}`)
-    : problem ? `${words.not} ${where}: ${theirs}. ${lineBox(aim.plugin, aim.marketName, aim.source, aim.tool).words ?? ''}`.trim()
-    : aim.act === 'place' ? `Put ${aim.plugin}’s items in ${where}: ${mine[0]!.report.message}`
-    : `${words.done} ${aim.plugin} in ${where}${aim.act === 'install' ? installedNow(aim) : ''}.${aim.yours?.length ? ` ${yoursStay(aim.yours)}` : ''}`;
+      ? `${aim.plugin} was already off in ${where}${recordChanged ? '; Central Knot now keeps it out' : ''}.`
+      : `${aim.plugin} was already in ${where}${recordChanged ? '; Central Knot now keeps it there' : ''}.`)
+    : problem ? `${words.not} ${where}: ${theirs}.`
+    : aim.act === 'place' ? `Placed ${aim.plugin}: ${mine[0]!.report.message}`
+    : `${words.done} ${aim.plugin} in ${where}${aim.act === 'install' ? installedNow(aim) : also ? `, with its ${also}` : ''}.${aim.yours?.length ? ` ${yoursStay(aim.yours)}` : ''}`;
   const back = result.back ?? [], undoes = back.length > 0 || (already && recordChanged);
   const did = mine.some(step => succeeded(step.report)) || (already && recordChanged);
+  const headerNote = problem ? lineBox(aim.plugin, aim.marketName, aim.source, aim.tool).words : undefined;
   sayResult({ aim, words: [said, read ? '' : 'The page couldn’t be read again after it: Refresh shows where things stand.'].filter(Boolean).join(' '),
-    next: reloadAdvice(settleReloads(pluginReloads(mine)), toolWays()).text, failed: !!problem, ...(undoes ? { undo: () => void undoLine(aim, result.before ?? null, back) } : {}) }, pluginReloads(mine), { checkProfile: did, before: atStart });
+    next: reloadAdvice(settleReloads(pluginReloads(mine)), toolWays()).text, failed: !!problem, ...(undoes ? { undo: () => void undoLine(aim, result.before ?? null, back) } : {}) },
+    pluginReloads(mine), { checkProfile: did, before: atStart }, headerNote);
 }
 
 /**
  * A line's result kept (one per plugin), and said: on its line if that line is on screen now, else in the header, which has its
  * Undo and next step there (as chips, withReloads: one next step either way) and names its plugin for retire.
  */
-function sayResult(result: LineResult, changes: ReloadChange[], check: { checkProfile?: boolean; before?: ProfilesBefore } = {}): void {
+function sayResult(result: LineResult, changes: ReloadChange[], check: { checkProfile?: boolean; before?: ProfilesBefore } = {}, headerNote?: string): void {
   const profileLine = check.checkProfile === false ? undefined : profileEndedLine(check.before);
   if (profileLine) result.profileLine = profileLine;
   results = [...results.filter(each => each.aim.plugin !== result.aim.plugin), result];
@@ -805,7 +809,7 @@ function sayResult(result: LineResult, changes: ReloadChange[], check: { checkPr
     announce([shown, profileLine].filter(Boolean).join(' '), false, undefined, undefined, profileLine ? shown : undefined);
     return;
   }
-  result.told = withReloads({ page: 'library', text: result.words, band: true, warn: result.failed, plugins: [result.aim.plugin],
+  result.told = withReloads({ page: 'library', text: [result.words, headerNote].filter(Boolean).join(' '), band: true, warn: result.failed, plugins: [result.aim.plugin],
     ...(result.undo ? { act: { label: 'Undo', id: 'outcome-undo', title: 'Put back what this did', run: result.undo } } : {}) }, changes);
   tell(result.told, '', check);
   result.told = app.outcome;
@@ -813,10 +817,10 @@ function sayResult(result: LineResult, changes: ReloadChange[], check: { checkPr
 /** The one key of the line a result is on: its tool and item (matrix.ts draws it as the result's data-result). */
 export const resultKey = (aim: Pick<LineAim, 'tool' | 'item'>) => `${aim.tool}:${aim.item.kind}:${aim.item.name.toLowerCase()}`;
 
-/** What the tool has of the plugin installed now, as read again after the click: ", with its 3 skills and 1 MCP server", or ''. */
+/** What the tool has of the plugin installed now, as read again after the click: ": 3 skills and 1 MCP server", or ''. */
 function installedNow(aim: LineAim): string {
   const install = app.home?.pluginItems?.find(each => each.tool === aim.tool && each.plugin === aim.plugin && each.marketName === aim.marketName);
-  return install?.items.length ? `, with its ${counted(install.items)}` : '';
+  return install?.items.length ? `: ${counted(install.items)}` : '';
 }
 /**
  * A line's Undo: the Plugins page's own (marketplaces.ts undoTurn), its record put back, then its steps, in the home its act ran in;
