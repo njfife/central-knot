@@ -31,7 +31,7 @@ import { asksWhichCopy, copiesDiffer, libraryWords, placeOf, stillReadWords } fr
 import { andList, countedAs, fewNames, fileName, kindNames, kindNouns, noToolsSentence, notAllThrough, orList, profileLeftUse, rowNames, rowNouns, saidByKind, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform, shownFromHome } from './machine.ts';
-import { closeRun, endListNews, fadeRun, forgetResults, loadPlugins, overRun, resetMarket, retire } from './pluginstate.ts';
+import { closeRun, endListNews, fadeRun, forgetResults, loadPlugins, overRun, resetMarket, retire, stillOnFromProfiles } from './pluginstate.ts';
 import { pruneHookSources, resetHookSources } from './hooksourceview.ts';
 import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, type LastRun, type PluginDone, type PluginOp } from './pluginplan.ts';
 import type { PluginEntry } from './pluginrecord.ts';
@@ -1310,7 +1310,8 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   if (past?.kind === 'profile') {
     // Each item it turned back has its own History entry, with its own action: the band offers no Undo of the Undo.
     if (result.stopped) tell({ page, text: `Undo switch to ${past.profile?.toName ?? past.item}: nothing was undone. ${result.stopped.replace(/ Nothing was undone\.$/, '')}`, warn: true, band: true, history: page !== 'history', refused: true });
-    else if (result.switched) turnedOutcome(page, 'Undone', result.switched, result.results, result.reloads, { fade: true });
+    // A plugin a press on Profiles turned on stays on: its Undo is the press's own (pluginstate.ts stillOnFromProfiles).
+    else if (result.switched) turnedOutcome(page, 'Undone', result.switched, result.results, result.reloads, { fade: true, kept: stillOnFromProfiles() });
     return;
   }
   const everywhere = touchedToolsPhrase(where);
@@ -1428,7 +1429,7 @@ export interface Outcome {
   fade?: boolean;
   /** It stays in the header until closed or replaced, problems or none: a Delete of many's, whose Undo is many History Restores (fadeNow). */
   stays?: boolean;
-  /** The plugins whose acts its Undo turns back: an act on one of them, from either page, retires it (pluginstate.ts retire). */
+  /** The plugins whose acts its Undo turns back: an act on one of them, from any page, retires it (pluginstate.ts retire). */
   plugins?: string[];
   undo?: { id: string; label: string };
   act?: {
@@ -2093,13 +2094,13 @@ export const profileState = {
  * wholeSaid), and what could not change.
  */
 function turnedOutcome(page: Page, lead: string, turned: NonNullable<ApplyResult['switched']> & Pick<ProfileSwitchResult, 'settingsChanged'>, results: DestinationResult[], reloads: readonly ReloadChange[],
-  { act, fade, still = '', whole = '' }: { act?: Outcome['act']; fade?: boolean; still?: string; whole?: string } = {}) {
+  { act, fade, still = '', whole = '', kept = '' }: { act?: Outcome['act']; fade?: boolean; still?: string; whole?: string; kept?: string } = {}) {
   const leftSaid = `${turned.left.length ? ` ${andList(turned.left)} ${turned.left.length === 1 ? 'is' : 'are'} not as it asked: History says why.` : ''}${(turned.settingsChanged ?? []).map(said => ` ${said}`).join('')}`;
   // An Undo's plugin copies changed since the switch (profiles.ts undoSwitch), left as they are.
   const sinceSaid = turned.since?.length ? ` Left as ${turned.since.length === 1 ? 'it is' : 'they are'}: ${turned.since.join('; ')}.` : '';
   const notDone = results.length ? ` ${results.slice(0, 2).map(entry => entry.message).join(' ')}${results.length > 2 ? ' …' : ''}` : '';
   const warn = results.length > 0 || turned.left.length > 0 || !!turned.since?.length;
-  tellWritten({ page, band: true, fade: !!fade && !warn && !act, text: `${lead}: ${changeWords(turned, turned.plugins ?? { on: 0, off: 0 }, 'did', still) || 'nothing changed'}.${whole}${leftSaid}${sinceSaid}${notDone}`, warn, act }, reloads, false);
+  tellWritten({ page, band: true, fade: !!fade && !warn && !act, text: `${lead}: ${changeWords(turned, turned.plugins ?? { on: 0, off: 0 }, 'did', still) || 'nothing changed'}.${whole}${kept}${leftSaid}${sinceSaid}${notDone}`, warn, act }, reloads, false);
 }
 
 /**
