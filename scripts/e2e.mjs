@@ -22551,12 +22551,13 @@ async function skillFileFlow() {
 
     // An ordinary MCP server's entry, one click from its row, as each tool's settings file has it: Claude Code's (strict JSON, so
     // no comment can be in it; its escapes as written), OpenCode's (managed from here: another holder key and spelling, a comment
-    // in it), Central Knot's definition, and no mark for a server only Codex has (its TOML is a later step).
+    // in it), Codex's (its TOML table, and a server's tables apart in the file as two blocks), Central Knot's definition.
     const serverBtn = key => `#${rowPart('file', 'mcp', key)}`, serverRow = key => `.ov-row[data-key="${rowPart('', 'mcp', key)}"]`, longServer = 'a-forty-letter-server-name-for-the-layout';
     const entryClaude = '    "entry-mcp": {\n      "command": "say",\n      "args": ["\\"hi\\"\\n", "caf\\u00e9"],\n      "timeout": 30\n    }';
     const demoClaude = '    "demo-mcp": { "command": "node", "args": ["-e", "0"] }';
     writeFileSync(join(home, '.claude.json'), `{\n  "mcpServers": {\n${demoClaude},\n${entryClaude},\n    "sibling-mcp": { "command": "sibling" },\n    "parked-mcp": { "command": "parked" },\n    "${longServer}": { "command": "long" }\n  }\n}\n`);
-    writeFileSync(join(home, '.codex/config.toml'), `${readFileSync(join(home, '.codex/config.toml'), 'utf8')}\n[mcp_servers.codex-mcp]\ncommand = "codex-only"\n`);
+    const codexOnly = '[mcp_servers.codex-mcp]\ncommand = "codex-only"', splitCodex = ['[mcp_servers.split-mcp]\ncommand = "split"', '[mcp_servers.split-mcp.env]\nREGION = "west"'];
+    writeFileSync(join(home, '.codex/config.toml'), `${readFileSync(join(home, '.codex/config.toml'), 'utf8')}\n${splitCodex[0]}\n\n${codexOnly}\n\n${splitCodex[1]}\n`);
     const entryOc = '      "Entry-MCP": {\n        // Run through npx.\n        "type": "local",\n        "command": ["npx", "-y", "entry"],\n      }';
     mkdirSync(join(home, '.config/opencode'), { recursive: true });
     const demoOc = '      "demo-mcp": { "type": "local", "command": ["node", "-e", "0"] }';
@@ -22593,18 +22594,33 @@ async function skillFileFlow() {
     same('an Off server opens Central Knot’s definition, exactly as the store holds its file, as a label, stored in Central Knot, with no path',
       [parked.tab, parked.options, await a.exists('.file-open-head .file-tab'), parked.text, parked.path, parked.stored], [stored, null, false, versionOf('parked-mcp'), null, 'Stored in Central Knot']);
     await a.press('Escape');
-    same('a server only Codex has has its row and no Open file mark yet', [await a.exists(serverRow('codex-mcp')), await a.exists(serverBtn('codex-mcp'))], [true, false]);
+    // An entry's blocks, and what a drag from the first block's start to the last one's end selects, line by line.
+    const blocks = () => a.run(`[...document.querySelectorAll('.file-open-box pre.content')].map(pre => pre.textContent)`);
+    const selectedLines = () => a.run(`(() => { const pres = document.querySelectorAll('.file-open-box pre.content'), range = document.createRange();
+      range.setStartBefore(pres[0]); range.setEndAfter(pres[pres.length - 1]); getSelection().removeAllRanges(); getSelection().addRange(range);
+      const text = getSelection().toString(); getSelection().removeAllRanges(); return text.split('\\n').filter(Boolean); })()`);
+    const codexPath = `${prefix}/.codex/config.toml`, inCodex = await opens(serverBtn('codex-mcp'), codexOnly);
+    const codexHead = await a.run(`[...document.querySelector('.file-open-lead')?.children ?? []].map(part => part.textContent)`);
+    await a.press('Escape');
+    await opens(serverBtn('split-mcp'), splitCodex[0]);
+    const tomlNow = readFileSync(join(home, '.codex/config.toml'), 'utf8'), split = await blocks(), strays = (await selectedLines()).filter(line => !tomlNow.split('\n').includes(line));
+    await a.press('Escape');
+    same('a server only Codex has opens its table as config.toml has it, as Codex’s copy, its head In mcp_servers · Codex’s copy, with its path; one whose env table is apart in the file shows each block exactly as a piece of the file, the server between them in neither, and a selection across them holds only the file’s lines',
+      [inCodex.tab, inCodex.options, inCodex.text, codexHead, inCodex.path, split, split.every(block => tomlNow.includes(block)), strays],
+      ['Codex’s copy', null, codexOnly, ['In mcp_servers', '·', 'Codex’s copy'], codexPath, splitCodex, true, []]);
     await a.click(`#${rowPart('open', 'mcp', 'demo-mcp')}`);
     const demo = await opens(serverBtn('demo-mcp'), demoClaude);
     const inPlace = [await a.exists('.file-to-details'), await a.exists('.file-open-close'), await a.run(`document.querySelectorAll('.details-tool').length`)];
     await pick(1);
-    const demoInOc = await shows(demoOc);
+    const demoCodex = '[mcp_servers.demo-mcp]\ncommand = "node"\nargs = ["-e", "0"]', demoInCodex = await shows(demoCodex);
     await pick(2);
+    const demoInOc = await shows(demoOc);
+    await pick(3);
     const demoStored = await shows(versionOf('demo-mcp'));
     await a.click('.file-to-details').catch(() => {});
-    same('from a server’s open details its entry takes their place under ‹ Back to details; it offers each tool’s entry (OpenCode’s, chosen, kept through the redraws) and then Central Knot’s definition, never Codex’s; Back brings the tool lines back, the focus in them',
-      [demo.options, ...inPlace, demoInOc.selected, demoStored.path, demoStored.stored, await a.exists('.file-open-box'), await a.run(`document.querySelectorAll('.details .details-tool').length > 0`), await a.run(`!!document.activeElement?.closest('.details')`)],
-      [[...holders, stored], true, false, 0, holders[1], null, 'Stored in Central Knot', false, true, true]);
+    same('from a server’s open details its entry takes their place under ‹ Back to details; it offers each tool’s entry in column order (Codex’s, its table in config.toml; OpenCode’s, chosen, kept through the redraws) and then Central Knot’s definition; Back brings the tool lines back, the focus in them',
+      [demo.options, ...inPlace, [demoInCodex.selected, demoInCodex.path], demoInOc.selected, demoStored.path, demoStored.stored, await a.exists('.file-open-box'), await a.run(`document.querySelectorAll('.details .details-tool').length > 0`), await a.run(`!!document.activeElement?.closest('.details')`)],
+      [[holders[0], 'Codex’s copy', holders[1], stored], true, false, 0, ['Codex’s copy', codexPath], holders[1], null, 'Stored in Central Knot', false, true, true]);
     await a.click(`#${rowPart('open', 'mcp', 'demo-mcp')}`);
     // The design check's second sequence: A opened, its holder switched and B opened before any of A's reads lands: only B, on its first holder, gets text.
     await a.run(`(() => { document.querySelector('${serverBtn('entry-mcp')}')?.click(); const select = document.querySelector('.file-copy-select select');
@@ -22630,10 +22646,13 @@ async function skillFileFlow() {
     for (const selector of ['#nav-harnesses', 'button#harness-opencode-cli.harness-card-head', '#harness-tab-mcp']) await a.click(selector);
     same('on OpenCode’s MCP servers tab a server’s entry opens on OpenCode’s copy first', await opens(serverBtn('entry-mcp'), entryOc).then(seen => seen.selected), holders[1]);
     await a.press('Escape');
-    // Its pictures (--shots, CK_SHOT_ONLY by tag): the servers' rows at 860 light and 1316 dark; an entry alone, its OpenCode copy and an Off server's definition at 860; the details' place docked at 1728.
+    // Its pictures (--shots, CK_SHOT_ONLY by tag): the servers' rows at 860 light and 1316 dark; an entry alone, its OpenCode copy and an Off server's definition at 860; the details' place docked at 1728;
+    // Codex's: the rows with a Codex-only server's mark, its table, a server's tables apart in two blocks at 860 light and 1316 dark, and the chooser on Codex's copy docked at 1728.
     await openKind(a, 'mcp');
     await filePictures([['server-rows', SMALLEST, 'light', []], ['server-rows', [1316, 819], 'dark', []], ['server-entry', SMALLEST, 'light', [serverBtn('entry-mcp')]], ['server-opencode', SMALLEST, 'light', [serverBtn('entry-mcp'), 1]],
-      ['server-stored', SMALLEST, 'light', [serverBtn('parked-mcp')]], ['server-entry-dock', [1728, 1117], 'light', [`#${rowPart('open', 'mcp', 'demo-mcp')}`, serverBtn('demo-mcp')]]], pictureStep);
+      ['server-stored', SMALLEST, 'light', [serverBtn('parked-mcp')]], ['server-entry-dock', [1728, 1117], 'light', [`#${rowPart('open', 'mcp', 'demo-mcp')}`, serverBtn('demo-mcp')]],
+      ['codex-rows', SMALLEST, 'light', []], ['codex-entry', SMALLEST, 'light', [serverBtn('codex-mcp')]], ['codex-split', SMALLEST, 'light', [serverBtn('split-mcp')]], ['codex-split', [1316, 819], 'dark', [serverBtn('split-mcp')]],
+      ['codex-dock', [1728, 1117], 'light', [`#${rowPart('open', 'mcp', 'demo-mcp')}`, serverBtn('demo-mcp'), 1]]], pictureStep);
   }
 
   same('no page errors', a.pageErrors, []);
