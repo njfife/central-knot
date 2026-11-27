@@ -9,7 +9,7 @@
 // state and actions are app.ts's; each page is drawn by its own module (pages.ts and the *page.ts modules, matrix.ts for the item tables).
 import { settingsPage } from './settingspage.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { absentKinds, acting, drawPage, harnessTabShown, keepingFocus, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, state, type Page } from './app.ts';
+import { absentKinds, acting, drawPage, keepingFocus, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, state, type Page } from './app.ts';
 import { afterLayout, button, closeInfoCard, fitBars, h, icon, keepClicksAcrossRedraws, keepSelection, runAfterLayout, syncInfoCard, whyOff } from './dom.ts';
 import { afterPageDrawn } from './selection.ts';
 import type { IconName } from './icons.ts';
@@ -20,6 +20,7 @@ import { libraryPage, notRead } from './pages.ts';
 import { overviewPage } from './overview.ts';
 import { harnessesPage, harnessTitle } from './harnesspage.ts';
 import { pluginsPage, pluginsResult } from './pluginspage.ts';
+import { pluginsResultPlace } from './pluginstate.ts';
 import { afterPluginPageDrawn } from './pluginpage.ts';
 import { backFromFiles, headerNotices, listResult, noticeKindsShown, resultInHeader, unseenNotices } from './matrix.ts';
 import { historyPage } from './historypage.ts';
@@ -245,9 +246,10 @@ function renderStatus() {
 function resultHere() {
   let parts: HTMLElement[] = [];
   if (state.home && !heldBy(state.home) && resultInHeader()) {
-    const pluginTab = harnessTabShown() === 'plugins';
-    parts = state.page === 'plugins' || pluginTab ? pluginsResult() : listResult();
-    if (!parts.length && pluginTab) parts = listResult();
+    const place = pluginsResultPlace();
+    parts = place ? pluginsResult() : listResult();
+    // On a tool's Plugins tab, fall back to listResult() when no plugin result belongs here (e.g. a carried home-switch outcome).
+    if (!parts.length && place && place !== 'plugins') parts = listResult();
   }
   const whole = parts.some(part => part.querySelector('#problems-show-all[aria-expanded="true"]'));
   const notices = state.home && !heldBy(state.home) ? headerNotices(parts.length > 0) : undefined;

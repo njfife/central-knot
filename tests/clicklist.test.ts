@@ -77,7 +77,7 @@ await import('../src/settingspage.ts');
 const { acting, announce, applyByKind, applyClick, askFlash, busy, closeResult, deleteProfileDef, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, profileEndedLine, profilesBefore, saveProfileDef, selectOff, switchToProfile, whyKindReadOnly, whyReadOnly,
   loadHome, problemKey, queueClick, readAgain, restoreEvent, setRenderer, showPage, syncNow, state: app } = await import('../src/app.ts');
 const { repo, repoPage } = await import('../src/repopage.ts');
-const { applyPluginOps, clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, resultOn, runReloads, shownPlugins, turnFromLine, turnPlugin, undoLabel, undoLast, usePlugins } = await import('../src/pluginstate.ts');
+const { addMarketplace, applyPluginOps, clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, resultOn, runReloads, shownPlugins, turnFromLine, turnPlugin, undoLabel, undoLast, usePlugins } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
 const { backgroundProblems, copyQuestion, headerNotices, libraryTable, listResult, openKind, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
@@ -3490,7 +3490,7 @@ test('Whole-item Undo still checks every managed tool while settling a plugin-he
   assert.deepEqual([app.outcome?.warn, app.skillsResult?.results.filter(keptBack), app.outcome?.text], [false, [], 'Undone: tdd is as before.']);
 });
 
-test('Harnesses Plugins tab shows pluginsResult cleanly even when market.nav.plugin names another plugin, and quiets its announcement only on that tab', async t => {
+test('Harnesses Plugins tab scopes pluginsResult and problems to the place made, avoids stale market.nav.plugin, and restores Undo focus to that tab’s switch', async t => {
   const { viewWith } = pluginProfileWorld(t);
   t.mock.method(api, 'refresh', async () => {
     main.reads.home++;
@@ -3512,17 +3512,63 @@ test('Harnesses Plugins tab shows pluginsResult cleanly even when market.nav.plu
   const shown = pluginsResult();
   const resultText = textOf(findById(shown[0], 'plugins-result')).trim();
   assert.match(resultText, /^alpha: turned off in Claude Code\./);
-  assert.ok(findById(shown[0], 'plugins-undo'), 'Undo button shows on Harnesses Plugins tab');
-  assert.equal(app.said.quiet, true, 'announcement stays quiet while Harnesses Plugins tab shows #plugins-result');
+  assert.ok(findById(shown[0], 'plugins-undo'), 'Undo button shows on Claude Code Plugins tab');
+  assert.equal(app.said.quiet, true, 'announcement stays quiet while Claude Code Plugins tab shows #plugins-result');
 
-  // On another Harnesses tab (Skills), a finishing plugin click is not quiet (its header shows listResult).
+  // Moving to Plugin marketplaces or Codex's Plugins tab hides Claude Code's result and Undo; returning shows them again.
+  app.page = 'plugins';
+  assert.deepEqual(pluginsResult(), [], 'Claude Code tab result must not show on Plugin marketplaces');
+  app.page = 'harnesses';
+  app.harness = 'codex-cli';
+  app.harnessTab = 'plugins';
+  assert.deepEqual(pluginsResult(), [], 'Claude Code tab result must not show on Codex Plugins tab');
+  app.harness = 'claude-cli';
+  assert.ok(findById(pluginsResult()[0], 'plugins-undo'), 'Claude Code tab result returns when back on Claude Code Plugins tab');
+
+  // Undo from Claude Code's Plugins tab targets its switch id for focus restoration (not #pswitch-…).
+  let focusedId = '';
+  const fakeSwitch = { focus: () => { focusedId = 'harness-plugin-switch-team-alpha'; } };
+  const prevGet = document.getElementById;
+  document.getElementById = ((id: string) => (id === 'harness-plugin-switch-team-alpha' ? fakeSwitch : prevGet(id))) as typeof document.getElementById;
+  t.mock.method(api, 'undoPluginTurn', async () => ({
+    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-on', report: { tool: 'claude-cli', outcome: 'plugin-on', changed: true, message: 'Turned on.', runs: [] } }],
+  }));
+  try {
+    undoLast();
+    await settled();
+  } finally {
+    document.getElementById = prevGet;
+  }
+  assert.equal(focusedId, 'harness-plugin-switch-team-alpha');
+
+  // A click started on Claude Code's Plugins tab whose work ends after moving to Codex's Plugins tab draws nothing on Codex and appears on return.
   closeRun();
-  app.harnessTab = 'skills';
+  app.page = 'harnesses';
+  app.harness = 'claude-cli';
+  app.harnessTab = 'plugins';
   turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
   await settled();
+  app.harness = 'codex-cli';
   await main.answer(turnedOff);
   await settled();
+  assert.deepEqual(pluginsResult(), []);
   assert.equal(app.said.quiet, false);
+  app.harness = 'claude-cli';
+  assert.ok(findById(pluginsResult()[0], 'plugins-undo'));
+
+  // A problem recorded on Plugin marketplaces stays off Codex's Plugins tab and shows on Plugin marketplaces.
+  closeRun();
+  app.page = 'plugins';
+  t.mock.method(api, 'addMarketplace', async () => ({ problem: 'Marketplace folder not found.', view: market.view }));
+  await addMarketplace('/missing');
+  assert.ok(pluginsResult().some(node => textOf(node).includes('Marketplace folder not found.')));
+  app.page = 'harnesses';
+  app.harness = 'codex-cli';
+  app.harnessTab = 'plugins';
+  assert.deepEqual(pluginsResult(), []);
+  app.page = 'plugins';
+  assert.ok(pluginsResult().some(node => textOf(node).includes('Marketplace folder not found.')));
+  closeRun();
 });
 
 

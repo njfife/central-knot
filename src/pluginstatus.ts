@@ -609,6 +609,10 @@ export const toolSaid = (tool: HarnessId, words: string) => (words.startsWith(na
 
 /** The marks a tool's box on the plugin's page shows ticked (the plugin is in that tool), and those it can't act on. */
 const TICKED: readonly ToolMark[] = ['installed', 'outdated', 'items', 'stays'], HELD: readonly ToolMark[] = ['cannot', 'unknown', 'not-known', 'parts-waiting'];
+/** Why no plugin switch in this view can write (preview-only home, or a problem with the plugins record). */
+export const viewStopped = (view: Pick<PluginsView, 'canWrite' | 'reason' | 'switchProblem'>) =>
+  !view.canWrite ? view.reason ?? PREVIEW_ONLY : view.switchProblem;
+
 /**
  * A tool's box on the plugin's page (pluginparts.ts toolBox; what a click records: pluginrecord.ts A TOOL'S BOX), from its mark
  * (toolMark): ticked or not; off where it can't act, with why (`off`): its mark held, a copy that can't be changed here
@@ -618,7 +622,7 @@ export function boxOf(view: PluginsView, entry: MarketplaceView, plugin: string,
   const name = names[tool], ticked = TICKED.includes(mark), held = HELD.includes(mark), recorded = entry.switches?.[plugin];
   const kept = !!recorded?.entry?.on && recorded.entry.except.includes(tool);
   const stuck = (ticked || mark === 'kept-off') && takesPlugins(tool) && view.canWrite ? cantUninstall(view, entry, plugin, tool) : undefined;
-  const off = held ? words : stuck ? `${stuck}${ticked && kept ? ` It is kept out of ${name}: uninstall it in ${name} itself, then tick to put it back.` : ''}` : !view.canWrite ? view.reason ?? PREVIEW_ONLY : view.switchProblem;
+  const off = held ? words : stuck ? `${stuck}${ticked && kept ? ` It is kept out of ${name}: uninstall it in ${name} itself, then tick to put it back.` : ''}` : viewStopped(view);
   const line = !held && !stuck ? undefined
     : takesPlugins(tool) && !view.clis[tool] ? `No ${name} command-line tool here` : entry.refusedBy?.[tool] ? `${name} refused this marketplace`
     : stuck ? (ticked ? 'Can’t be taken out here' : `${MARK_WORDS['kept-off']} · can’t be changed here`) : mark === 'cannot' ? recorded?.tools[tool]?.held ?? unavailable(view, entry, plugin, tool) : undefined;

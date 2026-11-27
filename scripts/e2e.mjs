@@ -3452,9 +3452,9 @@ async function practiceFlow() {
   const sparkSwitch = '#harness-plugin-switch-ck-test-market-spark';
   for (let tries = 0; tries < 50 && !(await a.exists(sparkSwitch)); tries++) await wait(100);
   const dirReason = 'Claude Code has its copy from the Anthropic Directory: update or uninstall it in Claude Code (/plugin).';
-  same('a plugin whose box is disabled shows a disabled switch described and hovered by the box’s reason',
-    await a.run(`(() => { const sw = document.querySelector(${JSON.stringify(sparkSwitch)}); return [sw?.disabled ?? null, sw?.getAttribute('aria-checked') ?? null, sw?.getAttribute('aria-label') ?? null, sw?.getAttribute('aria-description') ?? null, sw?.title ?? null]; })()`),
-    [true, 'true', 'spark in Claude Code', dirReason, dirReason]);
+  same('a plugin whose box is disabled shows its short box line on the row and a disabled switch described and hovered by the box’s reason',
+    await a.run(`(() => { const row = document.querySelector('.harness-plugin:has(${sparkSwitch})'); const sw = row?.querySelector(${JSON.stringify(sparkSwitch)}); return [row?.querySelector('.harness-plugin-state')?.textContent?.trim() ?? '', sw?.disabled ?? null, sw?.getAttribute('aria-checked') ?? null, sw?.getAttribute('aria-label') ?? null, sw?.getAttribute('aria-description') ?? null, sw?.title ?? null]; })()`),
+    ['Can’t be taken out here', true, 'true', 'spark in Claude Code', dirReason, dirReason]);
   writeFileSync(dirRecord, dirBefore);
   rmSync(join(practice, '.claude/plugins/cache/anthropic-plugin-directory'), { recursive: true, force: true });
   await a.click('#header-refresh');
@@ -3639,15 +3639,45 @@ async function practiceFlow() {
       (await a.text('#plugins-result .toolbar-result-text'))?.trim() ?? '', (await a.text('#plugins-undo'))?.trim() ?? '',
       await a.exists('#harness-tab-plugins[aria-selected="true"]'), (await a.text('.title-harness'))?.trim() ?? ''],
     ['plugin disable issue-tracker@ck-test-market --scope user', true, 'Off, kept installed', 'issue-tracker: turned off in Claude Code.', 'Undo', true, 'Claude Code']);
+  // The Claude Code tab's result and Undo stay off Plugin marketplaces and Codex's Plugins tab, and reappear on return.
+  await a.click('#nav-plugins');
+  const offOnPlugins = [await a.exists('#plugins-result'), await a.exists('#plugins-undo'), await a.exists('#header .plugin-problems')];
+  await a.click('#nav-harnesses');
+  await a.click('#harness-codex-cli');
+  await a.click('#harness-tab-plugins');
+  const offOnCodex = [await a.exists('#plugins-result'), await a.exists('#plugins-undo'), await a.exists('#header .plugin-problems')];
+  await a.click('#harness-switch-claude-cli');
+  const backOnClaude = [await a.exists('#plugins-result'), await a.exists('#plugins-undo')];
+  same('Claude Code Plugins tab result and Undo stay off Plugin marketplaces and Codex’s Plugins tab, and reappear on return',
+    [offOnPlugins, offOnCodex, backOnClaude], [[false, false, false], [false, false, false], [true, true]]);
   writeFileSync(tabCalls, '');
-  await a.click('#plugins-undo');
+  await a.run(`document.querySelector('#plugins-undo')?.focus()`);
+  for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r' } : {}) });
   for (let tries = 0; tries < 60 && ((await a.run(`document.querySelector(${JSON.stringify(tabSwitch)})?.getAttribute('aria-checked')`)) !== 'true' || (await a.exists('#plugins-undo')) || (await a.run(`document.body.dataset.busy`)) === 'true'); tries++) await wait(100);
-  same('Undo on Claude Code’s Plugins tab turns the plugin back on, restores the record, shows the reload line in the header, and stays on the tab',
+  const focusAfterUndo = await a.run(`document.activeElement?.id ?? ''`);
+  same('keyboard Undo on Claude Code’s Plugins tab turns the plugin back on, restores the record and focus to its switch, shows the reload line, and stays on the tab',
     [readNow(tabCalls).trim(), await a.run(`document.querySelector(${JSON.stringify(tabSwitch)})?.getAttribute('aria-checked')`),
       await a.exists(`.harness-plugin:has(${tabSwitch}) .harness-plugin-state`), readNow(pluginsJson) === pluginsRecBefore,
       (await a.text('#plugins-result .toolbar-result-text'))?.trim() ?? '', await a.exists('#header .result-reloads'),
-      await a.exists('#harness-tab-plugins[aria-selected="true"]')],
-    ['plugin enable issue-tracker@ck-test-market --scope user', 'true', false, true, 'Undone: issue-tracker back on in Claude Code.', true, true]);
+      await a.exists('#harness-tab-plugins[aria-selected="true"]'), focusAfterUndo],
+    ['plugin enable issue-tracker@ck-test-market --scope user', 'true', false, true, 'Undone: issue-tracker back on in Claude Code.', true, true, 'harness-plugin-switch-ck-test-market-issue-tracker']);
+  // A problem made on Plugin marketplaces stays off Codex's Plugins tab and reappears on Plugin marketplaces.
+  await a.click('#nav-plugins');
+  if (!(await a.exists('#marketplace-source'))) await a.click('#open-add-marketplace');
+  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(join(scratch, 'no-such-market'))}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#add-marketplace');
+  for (let tries = 0; tries < 50 && !(await a.exists('#header .plugin-problems')); tries++) await wait(100);
+  const problemOnPlugins = await a.exists('#header .plugin-problems');
+  await a.click('#nav-harnesses');
+  await a.click('#harness-codex-cli');
+  await a.click('#harness-tab-plugins');
+  const problemOnCodex = await a.exists('#header .plugin-problems');
+  await a.click('#nav-plugins');
+  const problemBack = await a.exists('#header .plugin-problems');
+  same('a problem made on Plugin marketplaces stays off Codex’s Plugins tab and reappears on Plugin marketplaces',
+    [problemOnPlugins, problemOnCodex, problemBack], [true, false, true]);
+  if (await a.exists('#report-dismiss')) await a.click('#report-dismiss');
+  if (await a.exists('#close-add-marketplace')) await a.click('#close-add-marketplace');
   rmSync(tabCalls, { force: true });
   await openKind(a, 'skills');
   writeFileSync(claudeStub, stubBefore);

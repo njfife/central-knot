@@ -3,9 +3,9 @@
 // tool first, plus its instruction file and its plugins. A tool left out has its card and switch here, and no other page shows
 // it as a tool (History's entries, and the Overview's line under its tools table, still name it). Nothing here has its own
 // engine: every change goes through the pages it mirrors, or the switch's toolchoice.ts.
-import { noteMove, KINDS, acting, harnessManaged as managed, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, whyReadOnly, type HarnessTab, type PageKind } from './app.ts';
+import { noteMove, KINDS, acting, harnessManaged as managed, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type PageKind } from './app.ts';
 import { manageLocked, manageRow } from './managecard.ts';
-import { MARK_WORDS, installsIn, pluginsInstalled, takenItems, takesItemsOnly, type InstalledMarketPlugin } from './pluginstatus.ts';
+import { MARK_WORDS, installsIn, pluginsInstalled, takenItems, takesItemsOnly, viewStopped, type InstalledMarketPlugin } from './pluginstatus.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { pluginTitle } from './pluginparts.ts';
 import { button, emptyState, h, icon, pathText, section, toggle, type Child } from './dom.ts';
@@ -295,20 +295,20 @@ function instructionsTab(tool: HarnessId) {
   return h('div.page', {}, instructionBands(), h('div.scroll.harness-scroll', { id: 'harness-body' }, body));
 }
 
-/** One installed plugin: its name, the tool's recorded version (if any), its off state when kept off, Its page, and that tool's switch (pluginstate.ts lineBox). */
+/** One installed plugin: its name, the tool's recorded version (if any), its box line or off state, Its page, and that tool's switch (pluginstate.ts lineBox). */
 function pluginRow({ entry, plugin, version }: InstalledMarketPlugin, tool: HarnessId) {
   const note = [entry.name, plugin.description].filter(Boolean).join(' · ');
   const { box, mark } = lineBox(plugin.name, entry.name, entry.source, tool);
   const own = typeof box === 'object' ? box : undefined;
-  const off = own ? own.off ?? (state.home ? whyReadOnly(state.home) : undefined) : undefined;
+  const stateText = own ? own.line ?? (mark === 'kept-off' ? MARK_WORDS['kept-off'] : undefined) : undefined;
   const pageLink = button({ variant: 'link', size: 'small', label: 'Its page', name: `Open ${pluginTitle(plugin)} in ${pageNames.plugins}`, id: `harness-plugin-${entry.name}-${plugin.name}`,
     onclick: () => { showPage('plugins'); browse({ source: entry.source, plugin: plugin.name, tab: 'plugins', find: '', category: undefined, hookTool: tool }); } });
-  const control = own ? toggle({ on: own.ticked, label: `${pluginTitle(plugin)} in ${names[tool]}`, disabled: off || pluginBusy(entry.source, plugin.name),
+  const control = own ? toggle({ on: own.ticked, label: `${pluginTitle(plugin)} in ${names[tool]}`, disabled: own.off || pluginBusy(entry.source, plugin.name),
     id: `harness-plugin-switch-${entry.name}-${plugin.name}`, onchange: () => turnPlugin(entry, plugin.name, own.ticked ? 'keep-out' : 'let-in', tool) }) : null;
   return h('div.harness-plugin', { role: 'listitem', title: note || undefined },
     h('div.harness-plugin-text', {},
       h('strong', {}, pluginTitle(plugin), version ? h('span.harness-plugin-version', {}, ` ${version}`) : null),
-      own && mark === 'kept-off' ? h('span.harness-plugin-state', {}, MARK_WORDS['kept-off']) : null),
+      stateText ? h('span.harness-plugin-state', {}, stateText) : null),
     pageLink, control);
 }
 
@@ -335,7 +335,9 @@ function pluginsTab(tool: HarnessId) {
   if (unread && !plugins.installed.length && !unlisted.length) return page(unread, unsureNote);
   if (!plugins.installed.length && !unlisted.length) return page(unsureNote, emptyState('puzzle', `No plugins in ${names[tool]}`, `None of the plugins in your marketplaces is installed in ${names[tool]}.`,
     button({ variant: 'outline', label: 'Browse plugins', id: 'harness-browse-plugins', onclick: () => showPage('plugins') })));
-  return page(unread, unsureNote, unlistedNote,
+  const stopped = plugins.installed.length && market.view ? viewStopped(market.view) : undefined;
+  const stoppedNote = stopped ? h('p.tools-note', { id: 'harness-plugins-stopped' }, icon(market.view?.canWrite ? 'circle-alert' : 'eye', 14, market.view?.canWrite ? 'tone-warning' : 'tone-muted'), stopped) : null;
+  return page(unread, unsureNote, unlistedNote, stoppedNote,
     plugins.installed.length ? h('div.harness-plugins', { role: 'list' }, plugins.installed.map(item => pluginRow(item, tool))) : null);
 }
 

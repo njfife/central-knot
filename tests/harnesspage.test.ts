@@ -2,7 +2,7 @@
 // button with the tool's accessible label, keyboard Back focuses it, and mouse Back leaves focus alone.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { HarnessId, HomeView } from '../src/types.ts';
+import type { HarnessId, HomeView, PluginsView } from '../src/types.ts';
 import { findById, findNode, installDom, textOf, type FakeNode } from './domstub.ts';
 
 let rendered: FakeNode | undefined;
@@ -10,6 +10,8 @@ installDom({}, { userAgent: 'Macintosh', byId: id => findById(rendered, id) ?? n
 
 const { setRenderer, state: app } = await import('../src/app.ts');
 const { goHarness, harnessesPage } = await import('../src/harnesspage.ts');
+const { putPageData } = await import('../src/pagedata.ts');
+const { market, resetMarket } = await import('../src/pluginstate.ts');
 
 const findAll = (node: unknown, match: (el: FakeNode) => boolean, out: FakeNode[] = []): FakeNode[] => {
   if (!node || typeof node !== 'object') return out;
@@ -185,4 +187,62 @@ test('an unread kind shows ? even when a plugin supplies an item of that kind (m
   const codexCard = findNode(rendered, el => el.className.split(/\s+/).includes('harness-card') && !!findById(el, 'harness-codex-cli'))!;
   const mcpRow = findAll(codexCard, el => el.className.split(/\s+/).includes('harness-count')).find(row => textOf(row).startsWith('MCP servers'));
   assert.equal(textOf(mcpRow), 'MCP servers?couldn’t be read');
+});
+
+test('Plugins tab matches boxOf disabled rule, shows box.line on locked rows, and says whole-view stop reasons once above the list', () => {
+  const makeView = (patch: Partial<PluginsView> = {}): PluginsView => ({
+    home: '/home',
+    canWrite: true,
+    tools: ['claude-cli'],
+    clis: { 'claude-cli': true },
+    marketplaces: [{
+      source: '/market',
+      name: 'team',
+      kind: 'folder',
+      sourceLabel: '/market',
+      origins: ['central-knot'],
+      readAt: '2026-11-26T00:00:00.000Z',
+      plugins: [{ name: 'alpha', description: 'Alpha plugin.' }],
+      states: { alpha: { 'claude-cli': { state: 'installed', version: '1.0.0', path: '/p' } } },
+      switches: { alpha: { entry: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: [] }, tools: {} } },
+    }],
+    ...patch,
+  } as unknown as PluginsView);
+
+  // Home sync access stopped while plugin view can write: Plugins tab switch follows boxOf (enabled, no second rule).
+  resetMarket();
+  app.home = makeHome({ managed: ['claude-cli'], allowed: false });
+  Object.assign(app, { page: 'harnesses', harness: 'claude-cli', harnessTab: 'plugins', busy: undefined, instructions: { state: 'ready', data: [], gen: 0 } });
+  putPageData(market.read, makeView({ canWrite: true }));
+  rendered = harnessesPage() as unknown as FakeNode;
+  const enabledSw = findById(rendered, 'harness-plugin-switch-team-alpha')!;
+  assert.equal('disabled' in enabledSw.attrs, false, 'switch is enabled whenever boxOf leaves box.off undefined');
+  assert.equal(findById(rendered, 'harness-plugins-stopped'), undefined);
+
+  // Missing CLI: box.line shows on the row and full box.off stays on hover/aria-description.
+  putPageData(market.read, makeView({ canWrite: true, clis: { 'claude-cli': false } }));
+  rendered = harnessesPage() as unknown as FakeNode;
+  const lockedSw = findById(rendered, 'harness-plugin-switch-team-alpha')!;
+  const lockedState = findNode(rendered, el => el.className.split(/\s+/).includes('harness-plugin-state'))!;
+  assert.equal('disabled' in lockedSw.attrs, true);
+  assert.equal(textOf(lockedState), 'No Claude Code command-line tool here');
+  assert.match(lockedSw.attrs['aria-description'] ?? '', /command-line tool/);
+
+  // Preview-only home: reason appears once above the list, not repeated on each row, and switches stay disabled with that reason.
+  const preview = 'Preview only: changes are off here.';
+  putPageData(market.read, makeView({ canWrite: false, reason: preview }));
+  rendered = harnessesPage() as unknown as FakeNode;
+  const previewNote = findById(rendered, 'harness-plugins-stopped')!;
+  const previewSw = findById(rendered, 'harness-plugin-switch-team-alpha')!;
+  assert.equal(textOf(previewNote), preview);
+  assert.equal(findNode(rendered, el => el.className.split(/\s+/).includes('harness-plugin-state')), undefined);
+  assert.equal('disabled' in previewSw.attrs, true);
+  assert.equal(previewSw.attrs.title, preview);
+
+  // Whole-view switchProblem: said once above the list.
+  const problem = 'Plugins record could not be read.';
+  putPageData(market.read, makeView({ canWrite: true, switchProblem: problem }));
+  rendered = harnessesPage() as unknown as FakeNode;
+  assert.equal(textOf(findById(rendered, 'harness-plugins-stopped')), problem);
+  resetMarket();
 });
