@@ -2932,15 +2932,14 @@ function libraryHarnessSwitch(t: Table, lib: LibraryPage, skill: ItemRow, tool: 
       })));
   }
   const does = inHarnessDoes(where, out, lib.words.copy);
-  // What its click sends once flipInHarness finds it as drawn: the hover's forecast of a profile it would end reads it (endsOnHover).
-  const flipHere = { kind: skill.kind, changes: [rowClicks.inHarness(skill, item, tool, !out)] };
   // Kept out, yet loading a copy Central Knot doesn't write there (a take leaves his so: library.ts TAKE), its own or another tool's:
   // said beside the switch, never as Off.
   const loads = loadingIn(skill, item, [tool]), runs = loads.own.length ? 'its own copy' : loads.another.length ? 'another way' : undefined;
   const now = out ? `kept out${runs ? `, running ${runs}` : ''}` : 'on', word = runs ? `${runs.charAt(0).toUpperCase()}${runs.slice(1)}` : out ? 'Off' : 'On';
   const label = `${name} in ${where}: ${now}. ${does}`;
   return h('span.details-tool-actions', {}, own, h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, word),
-    toggle({ on: !out, disabled: writeOff(kindStops(skill.kind)), id: elId('enable', skill, tool), label, onchange: () => flipInHarness(skill.kind, skill.key, name, tool, switchDrawn(skill, item, tool)), attrs: endsOnHover(label, () => [flipHere]) })));
+    toggle({ on: !out, disabled: writeOff(kindStops(skill.kind)), id: elId('enable', skill, tool), label, onchange: () => flipInHarness(skill.kind, skill.key, name, tool, switchDrawn(skill, item, tool)),
+      attrs: endsOnHover(label, () => [{ kind: skill.kind, changes: [rowClicks.inHarness(skill, item, tool, !out)] }]) })));
 }
 
 /**
