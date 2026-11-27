@@ -1,7 +1,6 @@
 // The page's state and most pages' actions (MAP.md, "The app's shell and Settings"): the open home's view and each page's own
 // state (`state`), the page shown (showPage), what is said after a click (tell, announce; profileEndedLine, via profilesBefore and
-// profileplan.ts endedProfiles, gives words.ts profileLeftUse when an act ended every profile in use, called by withProfileEnded and pluginstate.ts;
-// before a Library click, profilesEnding, the same rule over the click's changes: profileplan.ts endedByChanges) and when a result goes by itself
+// profileplan.ts endedProfiles, gives words.ts profileLeftUse when an act ended every profile in use, called by withProfileEnded and pluginstate.ts) and when a result goes by itself
 // (FADE_MS), the busy line (busy) and whether the page is acting (acting: busy, or a run of clicks: clicklist.ts); a click on an
 // item list sent to its kind's engine (carryOut, through kindPages), at once under busy (applyClick), one per kind as one
 // (applyByKind) or in its turn in the page's list (queueClick), its result kept for the page (lastResult), a run's said once
@@ -39,7 +38,7 @@ import type { PluginEntry } from './pluginrecord.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
-import { changeWords, endedByChanges, endedProfiles, inUseInHome, inUseNow, stillLoadAfter, undoOffered, wholeCounts, wholeSaid, type InUseNow, type ItemChange } from './profileplan.ts';
+import { changeWords, endedProfiles, inUseInHome, stillLoadAfter, undoOffered, wholeCounts, wholeSaid } from './profileplan.ts';
 import { hasReloadAdvice, pluginReloads, reloadAdvice, reloadsFor, settleReloads, waysFrom, type ReloadChange } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
 import { followView, type SigninChecks } from './mcpsignin.ts';
@@ -246,20 +245,6 @@ export function profileEndedLine(before: ProfilesBefore | undefined = actBefore,
   if (!before || !after || after.home !== before.home) return undefined;
   const ended = endedProfiles(before.profiles, inUseInHome(after));
   return ended.length ? profileLeftUse(ended.map(profile => profile.name)) : undefined;
-}
-/** The open home's live items and profiles in use (profileplan.ts inUseNow), read once for every forecast drawn from one view. */
-let inUseRead: { home: HomeView; now: InUseNow } | undefined;
-/**
- * Before a Library click (matrix.ts: a switch, Add, Delete, Turn these off, Select's bar): the names of the profiles in use its
- * changes would end (profileplan.ts endedByChanges, the rule profileEndedLine reads after it), and `may` while other clicks still
- * wait or run, whose writes the view doesn't hold yet; undefined when it ends none.
- */
-export function profilesEnding(changes: readonly ItemChange[]): { names: string[]; may: boolean } | undefined {
-  const home = state.home;
-  if (!home?.profiles?.profiles?.length) return undefined;
-  if (inUseRead?.home !== home) inUseRead = { home, now: inUseNow(home) };
-  const ended = endedByChanges(home, changes, inUseRead.now);
-  return ended.length ? { names: ended.map(profile => profile.name), may: !!acting() } : undefined;
 }
 /** Appends profileLeftUse when an act in the same home ended every profile that was in use before it. */
 function withProfileEnded(outcome: Outcome, { checkProfile = true, before = actBefore }: { checkProfile?: boolean; before?: ProfilesBefore } = {}): Outcome {

@@ -2435,12 +2435,11 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .select-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .select-count { flex: none; white-space: nowrap; }
 .select-line > .inline-link { min-width: 0; }
-/* The profiles in use a click would end, beside its control (matrix.ts endsMark): one line, shortened with "…", whole on hover;
-   in an opened row, under its status, the whole sentence. */
-.profile-stop { display: inline-flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; color: var(--warning); white-space: nowrap; }
+/* What a click would end of the profiles in use (matrix.ts endsMark): one line beside its control, "…" where it is cut; an opened row's whole sentence. */
+.profile-stop { display: inline-flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
 .profile-stop > span { overflow: hidden; text-overflow: ellipsis; }
 .details-head > .profile-stop { white-space: normal; max-width: var(--measure); }
-.profile-stop > .icon { flex: none; }
+.select-line > .profile-stop { padding-right: 10px; border-right: 1px solid var(--line); }
 .band-act { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .select-why { position: absolute; top: 100%; left: 0; right: 0; z-index: 5; padding: 6px 16px; background: var(--surface); border-bottom: 1px solid var(--line); box-shadow: 0 8px 20px rgb(0 0 0 / 18%); font-size: 12px; line-height: 18px; color: var(--ink-soft); }
 .select-why > p { margin: 0; }

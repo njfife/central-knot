@@ -13,7 +13,7 @@ import { readTool, writeEntry } from '../src/mcp.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { hashesOf, libraryWords, sentences } from '../src/libraryrow.ts';
 import { migrateProfiles } from '../src/profilemigrate.ts';
-import { allTurns, copilotKeptOnBy, copilotServerName, copilotSharesYours, endedByChanges, entryTurns, homeItems, inUseNow, itemRowState, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, listedChanges, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, stillLoadAfter, switchable, switchPlan, switchPreview, takenWhole, turnsWords, undoInHome, undoOffered, undoPlan, undoTurns, wholeSaid, wholeTurns, withCopilotOff, type Libraries, type PluginHome } from '../src/profileplan.ts';
+import { allTurns, copilotKeptOnBy, copilotServerName, copilotSharesYours, endedByChanges, endedProfiles, entryTurns, homeItems, inUseInHome, itemRowState, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, listedChanges, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, stillLoadAfter, switchable, switchPlan, switchPreview, takenWhole, turnsWords, undoInHome, undoOffered, undoPlan, undoTurns, wholeSaid, wholeTurns, withCopilotOff, type Libraries, type PluginHome } from '../src/profileplan.ts';
 import { NO_PLUGINS, deleteProfile, readLibraries, readProfiles, saveProfile, saveProfiles, switchProfile, undoSwitch, type PluginSide } from '../src/profiles.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { pluginOnIn } from '../src/pluginrows.ts';
@@ -73,8 +73,8 @@ test('Before a Library click, the profiles in use it would end are worked out fr
   const papa = 'plugin:skill:pi-pack@team-tools/papa';
   const everyday = profile('Everyday', ['skill:dev', 'skill:pager', papa]), also = profile('Also', ['skill:dev', 'skill:pager', 'skill:gone', papa]);
   home.profiles!.profiles = [everyday, also, profile('Focus', ['skill:dev', papa])];
-  const ending = (...changes: [string, Partial<Change>][]) => endedByChanges(home, changes.map(([key, change]) => ({ kind: 'skill', change: { key, on: !!library.skill[key]?.on, ...change } }))).map(each => each.name);
-  assert.deepEqual(inUseNow(home).inUse.map(each => each.name), ['Everyday', 'Also']);
+  const ending = (...changes: [string, Partial<Change>][]) => endedByChanges(home, changes.map(([key, change]) => ({ kind: 'skill', change: { key, on: !!library.skill[key]?.on, except: [], ...change } }))).map(each => each.name);
+  assert.deepEqual(inUseInHome(home).map(each => each.name), ['Everyday', 'Also']);
   assert.deepEqual(ending(['pager', { on: false }]), ['Everyday', 'Also'], 'Off of an item they name ends both: two that match end together');
   assert.deepEqual(ending(['notes', { on: true }]), ['Everyday', 'Also'], 'On of one they leave out, in every tool');
   assert.deepEqual(ending(['notes', { on: true, except: ['copilot-cli', 'codex-cli'] }]), ['Everyday', 'Also'], 'or in one tool only (libraryrow.ts rowClicks.onOnly)');
@@ -82,12 +82,24 @@ test('Before a Library click, the profiles in use it would end are worked out fr
   assert.deepEqual(ending(['gone', { on: true }]), [], 'an item deleted before, added again, comes in On: Also names it and stays in use, so none is ended');
   assert.deepEqual(ending(['pager', { deleted: true }]), [], 'Delete of an item they name leaves both matching what is left');
   assert.deepEqual(ending(['dev', {}], ['notes', { on: false }], ['pager', { except: ['codex-cli'] }]), [], 'changes that leave each On or Off as it is (a no-op, a tool kept out) end none');
-  assert.deepEqual([ending(['papa', { on: false }]), ending(['papa', { on: true }])], [[], []], 'an item placed by a plugin is that plugin’s: left out here, never taken for a found one');
+  assert.deepEqual(ending(['papa', { on: false }]), ['Everyday', 'Also'], 'Off of the item papa is placed from turns the plugin’s copy off, which they name');
+  assert.deepEqual(ending(['papa', { on: true }]), [], 'and On of it, on already, changes nothing: it is never taken for a found one of his');
   assert.deepEqual(ending(['pager', { on: false }], ['pager', { on: true }]), [], 'later changes of one click apply over earlier ones');
   home.profiles!.profiles = [everyday];
   assert.deepEqual(ending(['gone', { on: true }]), ['Everyday'], 'with Everyday alone in use, the deleted item added again ends it');
   home.profiles!.profiles = [profile('Focus', ['skill:dev', papa])];
   assert.deepEqual(ending(['pager', { on: false }]), [], 'with no profile in use before, none is ended, whichever comes into use');
+});
+
+test('Deleting his server ends a profile that names only it, where a plugin’s server of its name in Copilot CLI was on only by it: said after the click, and forecast before', () => {
+  const kit: InstalledPlugin = { tool: 'copilot-cli', plugin: 'kit', marketName: 'team', listed: true, items: [{ kind: 'mcp', name: 'issues', description: '' }] };
+  const home = (deleted: boolean) => viewOf({ library: libraryOf([['mcp', 'issues', true, deleted]]), rows: { skill: [], mcp: [row('issues')], agent: [] }, installed: [kit], tools: ['copilot-cli'] });
+  const before = home(false), after = home(true), mine = profile('Mine', ['mcp:issues']);
+  before.profiles!.profiles = after.profiles!.profiles = [mine];
+  assert.deepEqual(inUseInHome(before), [mine], 'kit’s issues is on by his issues’s name (copilotKeptOnBy own)');
+  assert.deepEqual(endedProfiles(inUseInHome(before), inUseInHome(after)), [mine], 'the result after the Delete: kit’s issues is on for no one Mine names');
+  const ending = (change: Partial<Change>) => endedByChanges(before, [{ kind: 'mcp', change: { key: 'issues', on: true, except: [], ...change } }]);
+  assert.deepEqual([ending({ deleted: true }), ending({ except: ['copilot-cli'] }), ending({ except: ['claude-cli'] })], [[mine], [mine], []], 'forecast for the Delete, and for keeping it out of Copilot CLI; not of another tool');
 });
 
 test('The Undo of a switch turns back each item still as the switch left it, decided from each item now', () => {
