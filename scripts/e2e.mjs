@@ -49,7 +49,7 @@ let flowRunning = 'seedHome';
 function check(name, ok, detail) {
   if (ok) { passes++; return; }
   failures.push(`[${flowRunning}] ${name}`);
-  console.error(`FAIL [${flowRunning}] ${name}${detail === undefined ? '' : `: ${JSON.stringify(detail)?.slice(0, 500)}`}`);
+  console.error(`FAIL [${flowRunning}] ${name}${detail === undefined ? '' : `: ${JSON.stringify(detail)?.slice(0, 2000)}`}`);
 }
 const same = (name, actual, expected) => check(name, JSON.stringify(actual) === JSON.stringify(expected), { actual, expected });
 // A file a poll reads; empty for the moment the app's checked write has it moved aside.
@@ -9495,16 +9495,51 @@ fs.writeFileSync(record, JSON.stringify(now));
   // so its Off above left that copy where it is, and its On now finds it there: pluginstatus.ts cantUninstall.)
   const failNow = ['plug-04', 'plug-05', 'plug-17'];
   for (const name of failNow) writeFileSync(join(home, `fail-${name}`), '');
-  await putAt(list, '[data-plugin="plug-04"]', 20);
+  // 80 px clears sticky .ov-head (min-height 48 px) while keeping plug-17 in view; wait for the four switches to rest, enabled and uncovered.
+  await putAt(list, '[data-plugin="plug-04"]', 80);
   const four = ['plug-04', 'plug-05', 'plug-17', 'plug-10'];
+  await a.run(`(async () => {
+    let prev = '';
+    for (let end = performance.now() + 1000; performance.now() < end; await new Promise(r => requestAnimationFrame(r))) {
+      const boxes = ${JSON.stringify(four)}.map(name => {
+        const sw = document.querySelector(\`#pswitch-0-\${name}\`), b = sw?.getBoundingClientRect();
+        const at = b && document.elementFromPoint(Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2));
+        return sw && !sw.disabled && sw.getAttribute('aria-disabled') !== 'true' && at && sw.contains(at) ? [b.left, b.top, b.width, b.height].map(Math.round) : null;
+      });
+      const now = boxes.every(Boolean) ? JSON.stringify(boxes) : '';
+      if (now && now === prev) return true;
+      prev = now;
+    }
+    return false;
+  })()`);
+  const pressSeen = (name, [x, y]) => a.run(`(() => {
+    const sw = document.querySelector('#pswitch-0-${name}'), sc = document.getElementById('${list}'), row = document.querySelector('[data-plugin="${name}"]');
+    const at = document.elementFromPoint(${x}, ${y}), stack = document.elementsFromPoint(${x}, ${y});
+    const above = sw && stack.includes(sw) ? stack.slice(0, stack.indexOf(sw)) : stack;
+    const over = sel => above.some(el => !!el.closest(sel));
+    const sb = sw?.getBoundingClientRect(), lb = sc?.getBoundingClientRect(), rb = row?.getBoundingClientRect();
+    return {
+      point: [${x}, ${y}],
+      at: at ? { tag: at.tagName.toLowerCase(), id: at.id, classes: at.getAttribute('class') ?? '', inSwitch: !!sw && sw.contains(at) } : null,
+      switch: sb ? { box: [sb.left, sb.top, sb.width, sb.height].map(Math.round), disabled: sw.disabled, ariaDisabled: sw.getAttribute('aria-disabled') } : null,
+      scrollTop: sc ? Math.round(sc.scrollTop) : null,
+      rowTop: rb && lb ? Math.round(rb.top - lb.top) : null,
+      over: { head: over('.ov-head'), band: over('.band, .header-result, .plugin-problems'),
+        card: over('.result-whole, .notices-card, .info-card, :popover-open'), tooltip: over('[role="tooltip"], .tooltip') },
+      hasFocus: document.hasFocus(),
+    };
+  })()`);
   const fourPoints = [];
   for (const name of four) fourPoints.push([name, await middleOf(`#pswitch-0-${name}`)]);
   // Another group's window can take the focus mid-press, ending a press with nothing clicked; confirm each row's note in order so the sentence keeps the expected order.
+  const seen = {};
   for (const [name, point] of fourPoints) {
     for (let tries = 0; tries < 5; tries++) {
-      await clickAt(tries ? await middleOf(`#pswitch-0-${name}`) : point);
+      const at = tries ? await middleOf(`#pswitch-0-${name}`) : point;
+      await clickAt(at);
       await wait(150);
       if (await a.exists(`[data-plugin="${name}"] .plugin-click`)) break;
+      if (tries === 4) seen[name] = await pressSeen(name, at);
     }
   }
   for (let tries = 0; tries < 150 && await a.exists('.plugin-click:not([data-click="ended"])'); tries++) await wait(100);
@@ -9523,7 +9558,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   const plugExpected = [true, 1, 1, 'Show all 3 reasons'];
   check('three failing plugins and one installed: the sentence says first what didn’t go through, then one ×, the first reason and Show all 3 reasons',
     !missing.length && JSON.stringify(plugActual) === JSON.stringify(plugExpected),
-    { actual: plugActual, expected: plugExpected, missing, sentence: plugSentence });
+    { actual: plugActual, expected: plugExpected, missing, ...(Object.keys(seen).length ? { seen } : {}), sentence: plugSentence });
   // Folded, only the name gives way, and no more than its own width: what failed begins right after it.
   same('folded, what failed begins right after the plugin’s name, with no gap', await a.run(`(text => { const name = text.querySelector('.item-name'), range = document.createRange(); range.selectNodeContents(name); const next = name.nextElementSibling; if (!next) return null; const end = range.getBoundingClientRect().right; range.selectNodeContents(next); return Math.round(range.getBoundingClientRect().left - end); })(document.querySelector('#header .problem-text'))`), 0);
   /** Pictures of the run's result (with --shots): light at 1280×800, dark at 860×600 and 1728×1080, then back light at 1280. */
