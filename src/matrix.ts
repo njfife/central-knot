@@ -7,7 +7,7 @@
 // placed by renderer.ts resultHere. First setup's walkthrough (firstsetup.ts) is a band among a table's bands, given copyQuestion
 // to hold the question of the item it is at.
 // Usage, collected when a home opens and on Update usage statistics (app.ts collectUsage): when it was collected and the button
-// at the toolbar's end, a band an Update opens (closed by its button), a figure on each row and a line per tool in
+// at the toolbar's end, a band an Update opens (closed by its button), the Sort's usage figure on each row (both on hover) and a line per tool in
 // an opened row, the Last used and Most used orders (which a reading that lands never redraws: holdOrder), and the "No use seen in 30 days"
 // chip with its band and one Turn N off everywhere (built from each row's own Off: rowClicks.off); what the reading says of a row, and
 // the chip's rule, are usagerow.ts's.
@@ -34,7 +34,7 @@ import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, gro
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
 import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, orList, pageNames, readsIt, rowNames, rowNouns,
   saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind } from './words.ts';
-import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
+import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type RowFigure, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
 import { copilotSharesYours } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
 import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, writeOff, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
@@ -2441,25 +2441,33 @@ const skippedByTurnOff = (row: ItemRow) => {
 };
 
 /**
- * A row's figure (usagerow.ts figureFor): used how long ago and, fainter, in how many sessions; no use seen in USAGE_DAYS days
- * (or since when the tools that have it on start); a faint "can't say" when none of them can tell; empty while a home's first
- * reading runs.
+ * A row's figure (usagerow.ts figureFor) and its Used cell words: under Most used, sessions alone; under Last used, recency
+ * alone; under Name, Last updated or Best match, nothing for a used row; no use seen and faint "can't say" under every Sort;
+ * empty while a home's first reading runs. The hover always keeps both figures.
  */
 const figureOf = (t: Table, row: ItemRow | PluginRow) => {
   const read = reading(t), facts = usageFactsOf(row), kind = kindOf(row);
   return read && facts ? figureFor(read, partOfPage[kind], facts, toolsFor(t, kind) as HarnessId[]) : undefined;
 };
+export function usedCellWords(figure: RowFigure, order: RowOrder): { text: string; hover: string } {
+  if (!figure) return { text: 'can’t say', hover: 'No tool that has it on can tell whether it was used.' };
+  if ('noneSeen' in figure) {
+    const none = figure.since ? `no use seen since ${dayWords(figure.since)}` : `no use seen in ${USAGE_DAYS} days`;
+    return { text: none, hover: `${sentence(none)}.` };
+  }
+  const when = sinceThen(Date.parse(figure.used));
+  const sessions = plural(figure.sessions, 'session');
+  const text = order === 'most-used' ? sessions : order === 'used' ? when : '';
+  return { text, hover: `${sentence(`used ${when} · ${sessions}`)}.` };
+}
 function usedCell(t: Table, row: ItemRow | PluginRow) {
-  if (!reading(t)) return h('div.ov-used', { role: 'cell' });
+  if (!reading(t)) return h('div.ov-used.ov-used-pending', { role: 'cell' });
   const figure = figureOf(t, row);
-  const words = !figure ? 'can’t say' : 'used' in figure ? `used ${sinceThen(Date.parse(figure.used))}`
-    : figure.since ? `no use seen since ${dayWords(figure.since)}` : `no use seen in ${USAGE_DAYS} days`;
-  const count = figure && 'used' in figure ? ` · ${plural(figure.sessions, 'session')}` : '';
+  const { text, hover } = usedCellWords(figure, searching(t) ? 'name' : chosenOrder(t));
   const skipped = t.view.filter === 'unused' && !t.selectable && !isPluginRow(row) && inUnusedChip(t, row) && skippedByTurnOff(row);
-  const title = !figure ? 'No tool that has it on can tell whether it was used. Open the row for why.'
-    : `${sentence(words + count)}.${skipped ? ' Skipped by Turn off (from a plugin).' : ''} Open the row for each tool’s figure.`;
+  const title = `${hover}${skipped ? ' Skipped by Turn off (from a plugin).' : ''} Open the row for ${figure ? 'each tool’s figure' : 'why'}.`;
   if (skipped) return h('div.ov-used.ov-used-skip', { role: 'cell', title }, t.unusedTurn ? 'from a plugin · skipped' : 'from a plugin');
-  return h(`div.ov-used${figure ? '' : '.ov-used-faint'}`, { role: 'cell', title }, words, count ? h('span.ov-used-count', {}, count) : null);
+  return h(`div.ov-used${figure ? '' : '.ov-used-faint'}`, { role: 'cell', title }, text || null);
 }
 
 /**
