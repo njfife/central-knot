@@ -2,9 +2,10 @@
 // a member of an object at a path (setJsonMember), or read-only spans (jsonStart, skipSpace, members, memberAt, jsonElements) for
 // cutting one entry verbatim (hooksource.ts, mcp.ts entryText). TOML: a table and its subtables (setTomlTable: an MCP server's
 // [mcp_servers.<name>]), its own-line end (ownEnd), or the tables of an array (arrayBlocks, editTomlArray, setTomlArrayKey:
-// Codex's [[skills.config]]); read-only, the tables with each line's span (readTomlTables) and an inline table's members with
-// theirs (inlineMembers), for mcp.ts entryText. Text only: which entry changes is its caller's (mcp.ts, mcpswitch.ts, skillswitch.ts, partswitch.ts,
-// plugins.ts, agentfiles.ts), and writing the file, checked, is share.ts writeFileChecked.
+// Codex's [[skills.config]]). Every TOML read and edit goes through readTomlTables (each table, each line's span) and, in an
+// inline table, inlineMembers (each member's span); mcp.ts entryText cuts an entry by those spans. Text only: which entry
+// changes is its caller's (mcp.ts, mcpswitch.ts, skillswitch.ts, partswitch.ts, plugins.ts, agentfiles.ts), and writing the
+// file, checked, is share.ts writeFileChecked.
 
 // ---------- JSON ----------
 
@@ -409,7 +410,8 @@ function appendToml(text: string, body: string, eol = '\n'): string {
 
 /**
  * Where a table's own lines end. Its text runs to the next header, but comment lines at its end sit just above that
- * header and belong to what follows: they stay.
+ * header and belong to what follows: they stay. It never ends before its last entry does: a multi-line value's closing
+ * line may begin with `#`.
  */
 export function ownEnd(text: string, table: TomlTable): number {
   const lines = text.slice(table.start, table.end).split(/(?<=\n)/);
@@ -420,7 +422,7 @@ export function ownEnd(text: string, table: TomlTable): number {
     if (line === '') continue;
     break;
   }
-  return table.start + lines.slice(0, cut).join('').length;
+  return Math.max(table.start + lines.slice(0, cut).join('').length, table.entries.at(-1)?.end ?? table.start);
 }
 
 /**

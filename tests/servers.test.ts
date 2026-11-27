@@ -919,35 +919,38 @@ test('A server’s entry is read on a click as each JSON tool’s settings file 
   assert.deepEqual(await read('docs', 'antigravity-cli'), { ...from('antigravity-cli'), note: 'Over 1 MB, so not shown here.' });
 }));
 
-test('Codex’s entry is read on a click as its config.toml has it, in mcp_servers: the server’s own tables cut from the file’s bytes in the file’s order, comments inside them kept; tables apart in the file each a block of their own, a line … between, never another server’s lines; an inline or dotted entry by its own span, without its siblings; a reason where it can’t be shown', () => inBox(async box => {
-  const read = async (key: string) => { const found = await serverEntry(box.context, all, box.home, key, 'codex-cli'); return found && ('note' in found ? found.note : [found.text, found.holder]); };
+test('Codex’s entry is read on a click as its config.toml has it, in mcp_servers: the server’s own tables cut from the file’s bytes in the file’s order, comments inside them kept, each run of them a block of its own, each block exactly a piece of the file, never another server’s lines; an inline or dotted entry by its own span, without its siblings; a reason where it can’t be shown', () => inBox(async box => {
+  const read = async (key: string) => { const found = await serverEntry(box.context, all, box.home, key, 'codex-cli'); return found && ('note' in found ? found.note : [found.blocks, found.holder]); };
   const codex = (text: string) => writeFile(box.path('codex-cli'), text);
   assert.deepEqual(await serverEntry(box.context, all, box.home, 'docs', 'codex-cli'), undefined, 'no config.toml: nothing read');
   // A plain table: the comment above its header and the one above the next header are not its own; the ones inside are.
   await codex('model = "o3"\n\n# about docs\n[mcp_servers.docs]\ncommand = "npx" # its own\n# inside\nargs = ["-y", "docs"]\n\n# about other\n[mcp_servers.other]\ncommand = "o"\n');
   assert.deepEqual(await serverEntry(box.context, all, box.home, 'docs', 'codex-cli'),
-    { files: ['config.toml'], directory: dirname(box.path('codex-cli')), text: '[mcp_servers.docs]\ncommand = "npx" # its own\n# inside\nargs = ["-y", "docs"]', holder: 'mcp_servers' });
+    { files: ['config.toml'], directory: dirname(box.path('codex-cli')), blocks: ['[mcp_servers.docs]\ncommand = "npx" # its own\n# inside\nargs = ["-y", "docs"]'], holder: 'mcp_servers' });
+  // Its last value a multi-line string whose closing line starts with #: all of it, to that line's end.
+  await codex('[mcp_servers.docs]\ncommand = "npx"\nargs = ["""first\n# last line"""]\n\n# about other\n[mcp_servers.other]\ncommand = "o"\n');
+  assert.deepEqual(await read('docs'), [['[mcp_servers.docs]\ncommand = "npx"\nargs = ["""first\n# last line"""]'], 'mcp_servers']);
   // Its env table right after it: one block. Apart from it, another server or an empty table between: a block each, nothing of what is between.
   await codex('[mcp_servers.docs]\ncommand = "npx"\n\n[mcp_servers.docs.env]\nTOKEN = "abc"\n');
-  assert.deepEqual(await read('docs'), ['[mcp_servers.docs]\ncommand = "npx"\n\n[mcp_servers.docs.env]\nTOKEN = "abc"', 'mcp_servers']);
+  assert.deepEqual(await read('docs'), [['[mcp_servers.docs]\ncommand = "npx"\n\n[mcp_servers.docs.env]\nTOKEN = "abc"'], 'mcp_servers']);
   await codex('[mcp_servers.docs]\ncommand = "npx"\n\n[mcp_servers.other]\ncommand = "o"\n\n# its token\n[mcp_servers.docs.env]\nTOKEN = "abc"\n\n[features]\n\n[mcp_servers.docs.tools.search]\napproval_mode = "approve"\n');
-  assert.deepEqual(await read('docs'), ['[mcp_servers.docs]\ncommand = "npx"\n…\n[mcp_servers.docs.env]\nTOKEN = "abc"\n…\n[mcp_servers.docs.tools.search]\napproval_mode = "approve"', 'mcp_servers']);
+  assert.deepEqual(await read('docs'), [['[mcp_servers.docs]\ncommand = "npx"', '[mcp_servers.docs.env]\nTOKEN = "abc"', '[mcp_servers.docs.tools.search]\napproval_mode = "approve"'], 'mcp_servers']);
   // A quoted name with a dot in it is one name, not a server and its subtable.
   await codex('[mcp_servers."a.b"]\nurl = "https://a.test/mcp"\n\n[mcp_servers.a]\ncommand = "a"\n');
-  assert.deepEqual([await read('a.b'), await read('a')], [['[mcp_servers."a.b"]\nurl = "https://a.test/mcp"', 'mcp_servers'], ['[mcp_servers.a]\ncommand = "a"', 'mcp_servers']]);
+  assert.deepEqual([await read('a.b'), await read('a')], [[['[mcp_servers."a.b"]\nurl = "https://a.test/mcp"'], 'mcp_servers'], [['[mcp_servers.a]\ncommand = "a"'], 'mcp_servers']]);
   // Inline under [mcp_servers], among its siblings: its own line. In a root map of servers: its own member, without the others.
   await codex('[mcp_servers]\nfirst = { command = "f" }\ndocs = { command = "npx", env = { A = "1" } }\nlast = { command = "l" }\n');
-  assert.deepEqual(await read('docs'), ['docs = { command = "npx", env = { A = "1" } }', 'mcp_servers']);
+  assert.deepEqual(await read('docs'), [['docs = { command = "npx", env = { A = "1" } }'], 'mcp_servers']);
   await codex('mcp_servers = { first = { command = "f" }, docs = { command = "npx" }, last.command = "l" }\n');
-  assert.deepEqual([await read('docs'), await read('last')], [['docs = { command = "npx" }', 'mcp_servers'], ['last.command = "l"', 'mcp_servers']]);
+  assert.deepEqual([await read('docs'), await read('last')], [[['docs = { command = "npx" }'], 'mcp_servers'], [['last.command = "l"'], 'mcp_servers']]);
   // Dotted keys: its own lines, a comment among them kept; a sibling's line between makes two blocks.
   await codex('mcp_servers.docs.command = "npx"\n# its arguments\nmcp_servers.docs.args = ["-y"]\nmcp_servers.other.command = "o"\nmcp_servers.docs.cwd = "/srv"\n');
-  assert.deepEqual(await read('docs'), ['mcp_servers.docs.command = "npx"\n# its arguments\nmcp_servers.docs.args = ["-y"]\n…\nmcp_servers.docs.cwd = "/srv"', 'mcp_servers']);
+  assert.deepEqual(await read('docs'), [['mcp_servers.docs.command = "npx"\n# its arguments\nmcp_servers.docs.args = ["-y"]', 'mcp_servers.docs.cwd = "/srv"'], 'mcp_servers']);
   // Windows line endings kept inside; the file's last table with no newline at its end.
   await codex('[mcp_servers.docs]\r\ncommand = "npx"\r\nargs = []\r\n\r\n[mcp_servers.other]\r\ncommand = "o"\r\n');
-  assert.deepEqual(await read('docs'), ['[mcp_servers.docs]\r\ncommand = "npx"\r\nargs = []', 'mcp_servers']);
+  assert.deepEqual(await read('docs'), [['[mcp_servers.docs]\r\ncommand = "npx"\r\nargs = []'], 'mcp_servers']);
   await codex('[mcp_servers.other]\ncommand = "o"\n\n[mcp_servers.docs]\ncommand = "npx"');
-  assert.deepEqual(await read('docs'), ['[mcp_servers.docs]\ncommand = "npx"', 'mcp_servers']);
+  assert.deepEqual(await read('docs'), [['[mcp_servers.docs]\ncommand = "npx"'], 'mcp_servers']);
   // Not TOML, no such server, two a case apart: each says so, and quotes nothing.
   await codex('[mcp_servers.docs\ncommand = "npx"\n');
   assert.equal(await read('docs'), 'This settings file can’t be read as TOML, so its entry isn’t shown.');
@@ -964,7 +967,7 @@ test('A server named in a tool’s settings but never taken in (not a server, wr
   const view = await box.view(), named = (key: string) => view.items.find(item => item.key === key)?.namedIn;
   assert.deepEqual([named('held'), named('twice'), named('inline'), named('docs')], [['copilot-cli'], ['copilot-cli'], ['codex-cli'], undefined]);
   assert.deepEqual(await serverEntry(box.context, all, box.home, 'inline', 'codex-cli'),
-    { files: ['config.toml'], directory: dirname(box.path('codex-cli')), text: 'inline = { command = "i" }', holder: 'mcp_servers' });
+    { files: ['config.toml'], directory: dirname(box.path('codex-cli')), blocks: ['inline = { command = "i" }'], holder: 'mcp_servers' });
   const from = { files: ['mcp-config.json'], directory: dirname(box.path('copilot-cli')) };
   assert.deepEqual(await serverEntry(box.context, all, box.home, 'held', 'copilot-cli'), { ...from, text: '"held":null', holder: 'mcpServers' });
   assert.deepEqual(await serverEntry(box.context, all, box.home, 'twice', 'copilot-cli'), { ...from, note: 'Two entries here have its name, so neither is shown.' });

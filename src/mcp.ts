@@ -204,6 +204,7 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
       const entries: McpEntry[] = [];
       // Servers written inline (`[mcp_servers]` then `docs = { … }`) or as dotted keys (`mcp_servers.docs.command = …`): Central Knot
       // only edits `[mcp_servers.<name>]` tables, so these are held, and never get a second definition that Codex would refuse.
+      // The file panel finds the same forms (codexPieces): a new form of entry goes in both.
       const inline = new Set<string>();
       for (const table of tables) {
         for (const entry of table.entries) {
@@ -296,8 +297,10 @@ export async function entryText(context: ShareContext, tool: HarnessId, key: str
  * Codex's config.toml in pieces, in the file's order, each with the server it defines, where it defines one: a server's own table
  * or subtable (`[mcp_servers.docs]`, `[mcp_servers.docs.env]`: its own lines, textedit.ts ownEnd), an entry naming one in the root
  * or in `[mcp_servers]` (`docs = { … }`, `docs.command = …`, `mcp_servers.docs.url = …`), or one member of a root
- * `mcp_servers = { … }` (textedit.ts inlineMembers). Every other header and entry is a piece of none: two pieces of a server with
- * another piece between them are apart in the file. Throws when the text isn't TOML.
+ * `mcp_servers = { … }` (textedit.ts inlineMembers). A `[[mcp_servers.<name>.…]]` block counts too, as it is under the server's
+ * name, though readTool and textedit.ts setTomlTable leave such blocks out. These are the forms readTool's scan holds: a new form
+ * goes in both. Every other header and entry is a piece of none: two pieces of a server with another piece between them are
+ * apart in the file. Throws when the text isn't TOML.
  */
 function codexPieces(text: string): { name?: string; start: number; end: number }[] {
   const pieces: { name?: string; start: number; end: number }[] = [];
@@ -317,10 +320,10 @@ function codexPieces(text: string): { name?: string; start: number; end: number 
 
 /**
  * A server's entry in Codex's config.toml (`text`), for entryText: its pieces (codexPieces) as written, those next to each other
- * cut as one run of the file's bytes, comments inside it kept, each run's trailing white space dropped; runs apart in the file have
- * a line `…` between them. A note where the file isn't TOML, two servers have its name (a case apart) or none does.
+ * cut as one block of the file's bytes, comments inside it kept, its trailing white space dropped, in the file's order (the panel
+ * shows each block apart). A note where the file isn't TOML, two servers have its name (a case apart) or none does.
  */
-function codexEntry(text: string, key: string): { text: string; holder: string } | { note: string } {
+function codexEntry(text: string, key: string): { blocks: string[]; holder: string } | { note: string } {
   let pieces: ReturnType<typeof codexPieces>;
   try { pieces = codexPieces(text); } catch { return { note: notParsed('TOML') }; }
   const names = new Set(pieces.flatMap(piece => (piece.name !== undefined && itemKey(piece.name) === key ? [piece.name] : [])));
@@ -331,7 +334,7 @@ function codexEntry(text: string, key: string): { text: string; holder: string }
     if (pieces[index - 1]?.name === name) runs.at(-1)!.end = piece.end;
     else runs.push({ start: piece.start, end: piece.end });
   });
-  return { text: runs.map(run => text.slice(run.start, run.end).trimEnd()).join('\n…\n'), holder: 'mcp_servers' };
+  return { blocks: runs.map(run => text.slice(run.start, run.end).trimEnd()), holder: 'mcp_servers' };
 }
 
 /**

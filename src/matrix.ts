@@ -403,7 +403,7 @@ const newView = () => ({
   /** The row whose details are open. */
   comparing: undefined as string | undefined,
   /** The skill or agent row whose file is open (alone, or in its details' place where it is `comparing` too: fileInDetails): its version/copy token, active file, copy holder, resolved folder, tab list, and loaded body. */
-  openFile: undefined as { id: string; token: string; file: string; copy?: { tool: HarnessId; rootLabel?: string }; directory?: string; files?: string[]; loaded?: { text?: string; note?: string; parts?: VersionPart[]; holder?: string } | null } | undefined,
+  openFile: undefined as { id: string; token: string; file: string; copy?: { tool: HarnessId; rootLabel?: string }; directory?: string; files?: string[]; loaded?: { text?: string; blocks?: string[]; note?: string; parts?: VersionPart[]; holder?: string } | null } | undefined,
   /** The row whose copy question shows every copy's body side by side (RowWords body). */
   reading: undefined as string | undefined,
   /** The row whose versions list shows every version, not only its newest few. */
@@ -3268,7 +3268,7 @@ function setFile(t: Table, target?: FileTarget, asked?: string, refocus = false,
   void load.catch(() => null).then(found => {
     if (t.view.openFile !== next) return;
     if (!found && file !== first) return setFile(t, target, first, false, undefined, true, chosen);
-    const loaded = found ? { text: found.text, note: found.note, parts: found.parts, holder: found.holder } : null;
+    const loaded = found ? { text: found.text, blocks: found.blocks, note: found.note, parts: found.parts, holder: found.holder } : null;
     const unchanged = sameFile && JSON.stringify(next.loaded) === JSON.stringify(loaded)
       && (!found || (JSON.stringify(next.files) === JSON.stringify(found.files) && next.directory === found.directory));
     next.loaded = loaded;
@@ -3330,17 +3330,22 @@ function filePanel(t: Table, target: FileTarget, open: NonNullable<View['openFil
   const close = back ? null : closeButton(() => setFile(t, undefined, undefined, true),
     { id: partId('file-close', id), label: `Close file for ${name}`, title: 'Close', look: '.file-open-close' });
   const blockId = partId('file-text', id, ...(active ? [String(Math.max(0, activeAt))] : []), String(Math.max(0, tabs.indexOf(open.file))));
+  const owner = () => (active ? copyLabel(active) : isCatalogHit(target) ? `${target.hit.item!.marketName}’s copy` : 'Central Knot’s current version');
+  // A Codex entry's blocks, each apart: between two, a mark whose words CSS draws, so no selection or copy of them holds it.
   const body = note ? [h('p.file-open-state', {}, note)]
     : open.loaded?.parts ? fileBlocks(blockId, `${name} ${open.file}`, open.loaded.parts, holders => andList(holders.map(part => part.name)), { named: true })
-    : fileBlocks(blockId, `${name} ${open.file}`, [{ text: open.loaded!.text ?? '' }], () => (active ? copyLabel(active) : isCatalogHit(target) ? `${target.hit.item!.marketName}’s copy` : 'Central Knot’s current version'));
+    : open.loaded?.blocks ? open.loaded.blocks.flatMap((text, index) => [index ? h('p.file-open-gap', { 'data-words': 'Other lines in the file' }) : null,
+      ...fileBlocks(`${blockId}-${index}`, `${name} ${open.file}`, [{ text }], owner)])
+    : fileBlocks(blockId, `${name} ${open.file}`, [{ text: open.loaded!.text ?? '' }], owner);
   // A server's path is copied by a button in words: beside its JSON a bare copy icon would read as copying the entry.
   const copy = full && reloadButton(isServerRow(target) ? { chip: 'Copy path', command: full, title: full } : { command: full, title: 'Copy path' }, partId('file-copy', id));
   const foot = full ? [pathText(shownPath(full), full), h('span.file-open-foot-actions', {}, showInFolder(full), copy)]
     : stored ? [h('span.file-open-stored', {}, 'Stored in Central Knot')] : [];
   // An agent's or a server's panel shows one file, or its definition: its name is a label, with nothing to press. A server's
-  // entry says where in the file it is, left of its chooser or label (its chooser names it where there is one).
+  // entry says where in the file it is, left of its chooser, or of its label after a dot (its chooser names it where there is one).
   const label = h(`span.file-open-name${stored ? '.file-open-definition' : ''}`, {}, open.file);
-  const lead = isServerRow(target) && h('span.file-open-lead', {}, open.loaded?.holder ? h('span.file-open-where', {}, `In ${open.loaded.holder}`) : null, chooser ? null : label);
+  const where = open.loaded?.holder ? h('span.file-open-where', {}, `In ${open.loaded.holder}`) : null;
+  const lead = isServerRow(target) && h('span.file-open-lead', {}, where, where && !chooser ? h('span.meta-dot', { 'aria-hidden': 'true' }, '·') : null, chooser ? null : label);
   return h(`div.details.details-file-only${placement === 'dock' ? '.details-bare' : ''}`, { role: 'region', 'aria-label': `File for ${name}` }, back ?? null, h('div.file-open-box', {},
     h('div.file-open-head', {}, isAgentRow(target) ? label : lead || h('span.file-open-tabs', { role: 'tablist', 'aria-label': `Files in ${name}` }, tabs.map(tab)),
     h('span.file-open-controls', {}, chooser, close)),

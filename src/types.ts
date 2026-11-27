@@ -358,10 +358,11 @@ export interface PluginTurnResult { stopped?: string; done: PluginDone[]; before
 /**
  * A file panel's read: one regular file of a skill's folder, with every regular file listed by name (skills.ts skillVersionFile,
  * skillFoundFile, skillPluginFile), an agent's one file in a tool, with its folder (agentfiles.ts agentFile), an MCP server's
- * entry, with its settings file and the keys of the object holding it (`holder`: mcp.ts entryText; in Codex, the runs of its
- * tables apart in the file, a line `…` between them), or a server's stored definition, with no file (serverstore.ts storedEntry).
+ * entry, with its settings file and the keys of the object holding it (`holder`: mcp.ts entryText; in Codex, in place of `text`,
+ * `blocks`: each run of its tables and lines as the file has them, in the file's order, shown apart), or a server's stored
+ * definition, with no file (serverstore.ts storedEntry).
  */
-export interface FileRead { files: string[]; text?: string; note?: string; directory?: string; holder?: string }
+export interface FileRead { files: string[]; text?: string; blocks?: string[]; note?: string; directory?: string; holder?: string }
 /** What names a plugin's skill for main to resolve on disk without the page sending a path (`source` for a Find hit's marketplace; skills.ts skillPluginFile). */
 export interface PluginSkillRef { marketName: string; plugin: string; part: string; from: HarnessId | 'marketplace'; source?: string }
 
