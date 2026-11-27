@@ -518,7 +518,8 @@ function buildRow(): HTMLElement | null {
 /**
  * Synchronize everything, for the open home: what it does (in its card), and, while it is off, how many found items it would
  * add now; either way, how many found items wait for a choice of copy, with the way into first setup's walkthrough of them
- * (firstsetup.ts, which counts both as its question does). Unchangeable where a pass may not write.
+ * (firstsetup.ts). Both are counted by setupcounts.ts whatYesDoes; the question says the first too. Unchangeable where a pass
+ * may not write.
  */
 function syncEverythingRow(): HTMLElement | null {
   const home = state.home;

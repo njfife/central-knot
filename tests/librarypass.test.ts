@@ -247,6 +247,22 @@ test('turn records wasExcept and nowExcept (no single only) when a person’s sw
     await runPass(kind, context, three, [click(true, ['codex-cli'])]);
     const plainOn = (await readHistory(context)).at(-1)!;
     assert.deepEqual([plainOn.kind, plainOn.only, plainOn.wasExcept, plainOn.nowExcept, plainOn.alsoRead], ['on', undefined, undefined, undefined, undefined]);
+    // On before and after, kept out of two tools at once: one entry names both (exceptOnly, with the keep-outs before and after);
+    // one tool out and another back in, the same; its Undo puts both back.
+    await t.test('records every tool a keep-out change names while the item stays On, and its Undo puts them all back', async () => {
+      await runPass(kind, context, three, [click(true, [])]);
+      await runPass(kind, context, three, [click(true, ['copilot-cli', 'codex-cli'])]);
+      const twoOut = (await readHistory(context)).at(-1)!;
+      assert.deepEqual([twoOut.kind, twoOut.only, twoOut.exceptOnly, twoOut.wasExcept, twoOut.nowExcept, await files()],
+        ['off', undefined, true, [], ['copilot-cli', 'codex-cli'], ['Plan.\n', undefined, undefined]]);
+      await runPass(kind, context, three, [click(true, ['codex-cli'])]);
+      assert.deepEqual((await readHistory(context)).at(-1)!.only, 'copilot-cli', 'one tool: as before');
+      await runPass(kind, context, three, [click(true, ['copilot-cli'])]);
+      const mixed = (await readHistory(context)).at(-1)!;
+      assert.deepEqual([mixed.kind, mixed.only, mixed.exceptOnly, mixed.wasExcept, mixed.nowExcept], ['off', undefined, true, ['codex-cli'], ['copilot-cli']]);
+      await restore(kind, context, three, mixed.id);
+      assert.deepEqual([(await lookFor(kind, context, three)).live[0].except, await files()], [['codex-cli'], ['Plan.\n', 'Plan.\n', undefined]]);
+    });
     // A plugin's tick on an Off item (forPlugin set, changing on and except) behaves as on next: no wasExcept/nowExcept/alsoRead.
     await runPass(kind, context, three, [click(false, ['codex-cli'])]);
     const { library } = await kind.open(context, true);
