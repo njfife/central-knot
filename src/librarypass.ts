@@ -1217,7 +1217,7 @@ async function takeIn(pass: Pass, key: string, answer: { take: FoundCopy; chosen
 function takenInNotice(taken: Pass['takenIn']): TakenInNotice {
   const from = [...new Set(taken.flatMap(entry => entry.foundIn))].sort(byToolOrder);
   const settingsChanged = taken.flatMap(entry => entry.settingsChanged ?? []);
-  return { kind: 'taken-in', items: taken.map(entry => entry.name), from, history: taken[0].history, ...(settingsChanged.length ? { settingsChanged } : {}) };
+  return { kind: 'taken-in', items: taken.map(entry => entry.name), from, history: taken[0].history, histories: taken.map(entry => entry.history), ...(settingsChanged.length ? { settingsChanged } : {}) };
 }
 
 /**

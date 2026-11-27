@@ -39,18 +39,19 @@ const entry = (context: ShareContext, everything: NonNullable<HistoryEvent['ever
 
 /**
  * Turns the rule on or off. A switch from off (or never answered) to on, and from on to off, is told to History first, then the
- * record is saved; a first answer of off (first setup's No) is stored with no entry, since nothing was on. Nothing is taken in
+ * record is saved; a first answer of off (first setup's No) is stored with no entry, since nothing was on. Returns the new
+ * switch-on History entry's id (`event`) only when the rule actually moved from off (or unanswered) to on. Nothing is taken in
  * here: the next pass of the whole home (the background pass, or Sync once) takes in what it finds then. A home with no sync record
  * gets one, as the first click makes it (share.ts libraryGate). `answering`: first setup's question, refused once the home has an
  * answer (given in another window, say). Refused, in plain words, where a click may not write: a home waiting for Resume too.
  */
-export async function setSyncEverything(context: ShareContext, on: boolean, answering = false): Promise<{ stopped?: string }> {
+export async function setSyncEverything(context: ShareContext, on: boolean, answering = false): Promise<{ stopped?: string; event?: string }> {
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return { stopped: gate.refused };
   const { record } = gate;
   if (answering && record.syncEverything !== undefined) return { stopped: `This home was asked already: Synchronize everything is ${record.syncEverything ? 'on' : 'off'}. Settings › This home can change it.` };
-  await saveRule(context, record, on);
-  return {};
+  const said = await saveRule(context, record, on);
+  return on && said ? { event: said.id } : {};
 }
 
 /**
