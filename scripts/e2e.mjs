@@ -11222,6 +11222,8 @@ async function overviewFlow() {
   await a.quit();
   // A most used name opens its row on the very first click, before its kind's page was ever drawn in this launch: an own skill, one
   // whose copies differ (its question open), an own MCP server; then, in another home opened meanwhile, a plugin's skill.
+  // Claude Code's clash is sixty lines long, so its file scrolls in its box.
+  skill(claude, 'clash', text('clash', Array.from({ length: 60 }, (_, at) => `Line ${at + 1} of Claude Code’s way.`).join('\n')));
   skill(codex, 'clash', text('clash', 'Codex’s way.'));
   const used = (folder, names) => { mkdirSync(join(folder, '.claude/projects/-work'), { recursive: true });
     writeFileSync(join(folder, '.claude/projects/-work/used.jsonl'), JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(),
@@ -11244,6 +11246,64 @@ async function overviewFlow() {
   same('launched, nothing visited: a most used own skill opens its row on the first click', await openTop('skills', 'notes'), ['notes']);
   same('one whose copies differ opens too, with its copy question', await openTop('skills', 'clash'), ['clash']);
   same('a most used MCP server, its page never drawn either, opens its row', await openTop('mcp', 'docs'), ['docs']);
+  // Beside each most used name, its file mark: the file opens under the card, the Overview staying, as the Library's mark opens
+  // it (the copy in each tool, or the version Central Knot holds; a server's entry), with its copy choice and its close.
+  const fileMark = (kind, key) => `[id="${rowPart('file', kind, key)}"]`, cardPanel = '.kind-cards > .details-file-only';
+  const panelSays = () => a.run(`(() => {
+    const panel = document.querySelector('${cardPanel}'), box = panel?.querySelector('.file-open-box');
+    return { under: panel?.previousElementSibling?.querySelector('.kind-card-main')?.id ?? null, label: panel?.getAttribute('aria-label') ?? null,
+      text: box?.querySelector('pre.content')?.textContent ?? box?.querySelector('.file-open-state')?.textContent ?? null,
+      copies: [...(box?.querySelectorAll('.file-copy-select option') ?? [])].map(option => option.textContent), path: box?.querySelector('.file-open-foot .path-text')?.textContent ?? null,
+      pressed: [...document.querySelectorAll('.kind-cards .row-file-btn[aria-pressed="true"]')].map(mark => mark.id), panels: document.querySelectorAll('.file-open-box').length,
+      page: document.querySelector('.page-title')?.textContent ?? null };
+  })()`);
+  const panelHolds = async words => { for (let tries = 0; tries < 80 && !(await panelSays()).text?.includes(words); tries++) await wait(100); return panelSays(); };
+  same('each most used name has the Library’s file mark right after it: clash and notes on Skills, docs on MCP servers',
+    await a.run(`[...document.querySelectorAll('.kind-card .row-file-btn')].map(mark => [mark.id, mark.getAttribute('aria-label'), !!mark.previousElementSibling?.matches('.kind-card-top-name')])`),
+    [[rowPart('file', 'skills', 'clash'), 'Open file: clash', true], [rowPart('file', 'skills', 'notes'), 'Open file: notes', true], [rowPart('file', 'mcp', 'docs'), 'Open file: docs', true]]);
+  await a.click(fileMark('skills', 'clash'));
+  const clashOpen = await panelHolds('Line 60 of Claude Code’s way.');
+  same('clash’s mark opens its SKILL.md under the Skills card, the page still the Overview: Claude Code’s copy first, Codex’s offered, its path below',
+    [clashOpen.page, clashOpen.under, clashOpen.label, clashOpen.copies, clashOpen.text.startsWith('---\nname: clash'), clashOpen.path?.endsWith('/.claude/skills/clash/SKILL.md'), clashOpen.pressed, clashOpen.panels],
+    ['Overview', 'overview-skills', 'File for clash', ['Claude Code’s copy', 'Codex’s copy'], true, true, [rowPart('file', 'skills', 'clash')], 1]);
+  const chooseCopy = at => a.run(`(select => { select.value = '${at}'; select.dispatchEvent(new Event('change')); })(document.querySelector('${cardPanel} .file-copy-select select'))`);
+  await chooseCopy(1);
+  same('choosing Codex’s copy shows Codex’s text', (await panelHolds('Codex’s way.')).text.includes('Codex’s way.'), true);
+  await chooseCopy(0);
+  await panelHolds('Line 60 of Claude Code’s way.');
+  // At 860 with the sidebar open, the box fits the window and its text scrolls in it: at its foot, the last line is whole.
+  await sizeTo(a, ...SMALLEST);
+  const railed = await a.run(`document.body.classList.contains('rail')`);
+  if (railed) await a.click('#sidebar-toggle');
+  await a.settle();
+  if (shots) { await a.run(`window.centralKnot.setAppearance('light')`); await wait(80); await a.shot('overview-file-open-860-light'); await a.run(`window.centralKnot.setAppearance('system')`); }
+  same('at 860, scrolled to its foot, the file’s last line is whole in its box and in the page', await lastLineWhole(a, `${cardPanel} pre.content`),
+    { words: 'Line 60 of Claude Code’s way.', scrolls: true, whole: true });
+  await fitsAtMinimum(a, 'the Overview with a most used skill’s file open');
+  if (railed) await a.click('#sidebar-toggle');
+  await fullSize(a);
+  // A second mark pressed before the first file is read: the second's file is the one shown, under its own card.
+  await a.run(`document.querySelector('${fileMark('skills', 'notes')}').click(); document.querySelector('${fileMark('mcp', 'docs')}').click();`);
+  const docsOpen = await panelHolds('"command": "docs"');
+  same('notes’ mark then docs’ at once: docs’ entry is shown, under MCP servers, its mark alone pressed', [docsOpen.under, docsOpen.label, docsOpen.pressed, docsOpen.panels],
+    ['overview-mcp', 'File for docs', [rowPart('file', 'mcp', 'docs')], 1]);
+  await a.press('Escape');
+  same('Escape closes it, the focus back on its mark', [(await panelSays()).panels, await a.run('document.activeElement?.id')], [0, rowPart('file', 'mcp', 'docs')]);
+  await a.click(fileMark('skills', 'notes'));
+  const notesOpen = await panelHolds('name: notes');
+  same('notes, in Central Knot, shows the version Central Knot holds: no copy to choose', [notesOpen.under, notesOpen.copies], ['overview-skills', []]);
+  await a.click(`#${rowPart('file-close', 'skills', 'notes')}`);
+  same('its × closes it, the focus back on its mark', [(await panelSays()).panels, await a.run('document.activeElement?.id')], [0, rowPart('file', 'skills', 'notes')]);
+  await a.click(fileMark('skills', 'notes'));
+  await panelHolds('name: notes');
+  await a.click('#nav-library');
+  await a.click('#nav-overview');
+  same('leaving the Overview closes the file: back on it, none is open', (await panelSays()).panels, 0);
+  // A copy gone before it is read: the panel says so.
+  rmSync(join(claude, 'clash'), { recursive: true, force: true });
+  await a.click(fileMark('skills', 'clash'));
+  same('Claude Code’s copy of clash gone before it is read: the panel says its file couldn’t be read', (await panelHolds('couldn’t be read')).text, 'Its file couldn’t be read.');
+  await a.press('Escape');
   const session = join(home, '.claude/projects/-work/used.jsonl');
   const sessionsCell = '.tools-table tr[data-tool="claude-cli"] .tools-sessions';
   const update = byId('overview-collect-usage');
@@ -11280,8 +11340,15 @@ async function overviewFlow() {
   unlinkSync(second);
   chmodSync(session, 0o600);
   same('restoring access restores the complete sessions cell', await updateSessions(), readable);
+  await a.click(fileMark('skills', 'notes'));
+  await panelHolds('name: notes');
   await a.click('#home-actual');
   for (let tries = 0; tries < 100 && !(await a.exists('#overview-skills-usage .middle[title="one"]')); tries++) await wait(100);
+  same('another home closes the file open in the first', (await panelSays()).panels, 0);
+  await a.click(fileMark('skills', 'kit@solo/one'));
+  const pluginOpen = await panelHolds('name: one');
+  same('there, the most used plugin’s skill opens its SKILL.md in Claude Code’s copy of kit', [pluginOpen.under, pluginOpen.label, pluginOpen.path?.endsWith('/SKILL.md')], ['overview-skills', 'File for one', true]);
+  await a.press('Escape');
   same('another home whose only item is a plugin’s skill: the card counts it, and the lead never says nothing was found',
     [(await a.text('.kind-card:has(#overview-skills) .kind-card-summary'))?.trim(), await a.exists('.overview-lead'), /Nothing found/.test(await a.text('.overview-lead') ?? '')], ['1 skill · none on · 1 from plugins', true, false]);
   same('there, after Skills was drawn in the first home, a most used plugin’s skill opens its row on the first click', await openTop('skills', 'one'), ['kit@solo/one']);
@@ -12252,6 +12319,22 @@ async function usageFlow() {
   await a.click('#nav-overview');
   await a.click('#overview-skills-top-1');
   same('a most used name opens its row on Skills, under All', [await a.run(`document.querySelector('.chip-on')?.dataset.tip ?? 'All'`), await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'echo')}"]')?.getAttribute('aria-expanded')`)], ['All', 'true']);
+  await a.click('#nav-overview');
+  await a.click('#overview-skills-most-used');
+  same('Most used, on the Skills card, opens the Library on Skills sorted by Most used: alpha, echo and charlie lead, as on the card',
+    [await a.text('.page-title'), await a.run(`document.querySelector('#library-kind-skills')?.getAttribute('aria-pressed')`), await a.run(`document.querySelector('#item-order')?.value`),
+      (await a.all('.ov-row[data-key]', 'e.dataset.key')).slice(0, 3)], ['Library', 'true', 'most-used', ['alpha', 'echo', 'charlie'].map(key => rowPart('', 'skills', key))]);
+  if (shots) {
+    await sizeTo(a, ...SMALLEST);
+    const railed = await a.run(`document.body.classList.contains('rail')`);
+    if (railed) await a.click('#sidebar-toggle');
+    await a.run(`window.centralKnot.setAppearance('light')`);
+    await wait(80);
+    await a.shot('most-used-library-860-light');
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    if (railed) await a.click('#sidebar-toggle');
+    await fullSize(a);
+  }
   await a.click('#nav-overview');
   await fullSize(a);
   await fitsAtMinimum(a, 'the Overview with usage collected');

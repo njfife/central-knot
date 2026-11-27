@@ -322,6 +322,8 @@ function rowsOf(kind: PageKind): ItemRow[] {
 }
 /** A kind's row by its key, as the home on screen has it now: what a result reads of each row it changed (app.ts runOutcome, stillRead). */
 export const rowByKey = (kind: PageKind, key: string) => rowsOf(kind).find(row => row.key === key);
+/** A kind's row by its key, a plugin's own row too (pluginrows.ts PluginRow key), as the Library lists it: showRow's, and the Overview's most used (overview.ts). */
+export const rowOf = (kind: PageKind, key: string): ItemRow | PluginRow | undefined => rowByKey(kind, key) ?? (state.home ? pageRows(state.home, kind).rows.find(row => row.key === key) : undefined);
 /**
  * A table (useLibrary, useTab): the kinds it lists (the Library's segment's; a tab's one) and the harness whose page it is on
  * (`tool`, none on the Library: its column comes first, and the rows it has before the others), as its caller names them; its
@@ -441,15 +443,16 @@ function startFresh(table: View, harness: Tool | undefined) {
  * The one way into the Library from elsewhere (the Overview's cards and lines, a plugin's page and its row on Plugins, History,
  * the Git repo, Sources): the Library with `which` chosen (a kind, or All: app.ts state.libraryKind), drawn afresh (startFresh:
  * no Find, no chip, From at Anywhere, no open row), narrowed by `filter` ("Copies differ", "No use seen in 30 days") or, on All,
- * by `from` (a plugin's or a source's items: origins.ts pluginFrom, sourceFrom); or with the row `key` open and scrolled into
+ * by `from` (a plugin's or a source's items: origins.ts pluginFrom, sourceFrom), sorted by `order` (Sort keeps it: chooseOrder); or with the row `key` open and scrolled into
  * view (a plugin's own row too; a key needs its kind, so All takes none), Find, the chip and From let go only where they hide it
  * (showRow). The row is opened once the page is drawn, as its own click opens it (markOpen): so the
  * first draw in another home, which drops that home's open row, can't drop it, and a row whose copies differ keeps its question.
  */
 export function openKind(which: 'all', options?: { filter?: Filter; from?: From }): void;
-export function openKind(which: PageKind, options?: { filter?: Filter; key?: string }): void;
-export function openKind(which: PageKind | 'all', { filter, key, from }: { filter?: Filter; key?: string; from?: From } = {}) {
+export function openKind(which: PageKind, options?: { filter?: Filter; key?: string; order?: RowOrder }): void;
+export function openKind(which: PageKind | 'all', { filter, key, from, order }: { filter?: Filter; key?: string; from?: From; order?: RowOrder } = {}) {
   state.libraryKind = which;
+  if (order) chooseOrder(order);
   if (key && which !== 'all') { showRow(which, key); return; }
   startFresh(views.library, undefined);
   if (filter) views.library.filter = filter;
@@ -465,8 +468,8 @@ export function showRow(which: PageKind, key: string) {
   if (segment() !== 'all' && segment() !== which) state.libraryKind = 'all';
   if (state.page !== 'library') showPage('library');
   if (state.libraryView === 'files') leaveFiles();
-  const t = useLibrary(), id = rowId(which, key), row = [...rowsIn(t), ...plugged(t).rows].find(each => idOf(each) === id);
-  if (row) reveal(t, row); else openFromAway(t.view, id);
+  const t = useLibrary(), row = rowOf(which, key);
+  if (row) reveal(t, row); else openFromAway(t.view, rowId(which, key));
 }
 /** A link to a row where the person is (a notice's name, the walkthrough): Find let go only if it hides the row, the chip only if it does, From too. */
 function reveal(t: Table, row: ItemRow | PluginRow) {
@@ -2676,6 +2679,8 @@ const usageElsewhere = (t: Table, skill: ItemRow) => usageOf(t, skill).filter(ea
 /** The flags (flags.ts) that remember a non-default Sort on the Library: one choice, kept.
  * Where more than one of the three flags is set, the first in `orderFlags` wins. */
 const orderFlags: Record<Exclude<RowOrder, 'name'>, string> = { 'most-used': 'ck-items-by-most-used', used: 'ck-items-by-last-used', updated: 'ck-items-by-last-updated' };
+/** Sorts the Library's rows by `order` from now on: Sort's choice (orderChoice), and the way in from the Overview's Most used (openKind). */
+const chooseOrder = (order: RowOrder) => { for (const [key, flag] of Object.entries(orderFlags)) writeFlag(flag, order === key); };
 /** The order of the rows under each heading (itemrow.ts inOrder): the one chosen, on the Library; by name on a harness's tab. */
 const chosenOrder = (t: Table): RowOrder => (t.tool ? 'name' : (Object.entries(orderFlags) as [RowOrder, string][]).find(([, flag]) => readFlag(flag))?.[0] ?? 'name');
 /** A row's usage on a table, for Last used and Most used (itemrow.ts inOrder): newest use at any time, and the sessions its Used cell shows. */
@@ -2705,7 +2710,7 @@ const dated = (t: Table) => chosenOrder(t) === 'updated' && !searching(t);
 /** The choice of order, after the filters on the Library. */
 function orderChoice(t: Table) {
   if (t.tool) return null;
-  const choose = (event: Event) => { const value = (event.target as HTMLSelectElement).value; for (const [key, flag] of Object.entries(orderFlags)) writeFlag(flag, value === key); rerender(); };
+  const choose = (event: Event) => { chooseOrder((event.target as HTMLSelectElement).value as RowOrder); rerender(); };
   const order = chosenOrder(t), option = (value: RowOrder, label: string) => h('option', { value, selected: order === value }, label);
   // While the Library's Find has text: Best match, greyed, its tooltip saying why.
   const best = searching(t), options = best ? [h('option', { value: 'best', selected: true }, 'Best match')]
