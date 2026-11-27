@@ -20,8 +20,8 @@ test('usedCellWords shows the Sort’s figure (recency in the unused filter), ke
     assert.deepEqual(usedCellWords({ used: usedAt, sessions: 28 }, order), { text: pluralText, hover: pluralText ? 'Used 2 days ago · 28 sessions.' : '' });
     assert.deepEqual(usedCellWords({ used: usedAt, sessions: 1 }, order), { text: singleText, hover: singleText ? 'Used 2 days ago · 1 session.' : '' });
     assert.deepEqual(usedCellWords({ used: usedAt, sessions: 28 }, order, true), { text: '2 days ago', hover: 'Used 2 days ago · 28 sessions.' });
-    assert.deepEqual(usedCellWords({ noneSeen: true }, order), { text: 'no use seen in 30 days', hover: 'No use seen in 30 days.' });
-    assert.deepEqual(usedCellWords({ noneSeen: true, since: sinceAt }, order), { text: `no use seen since ${since}`, hover: `No use seen since ${since}.` });
+    assert.deepEqual(usedCellWords({ noneSeen: true }, order), { text: 'no use seen', hover: 'No use seen in 30 days.' });
+    assert.deepEqual(usedCellWords({ noneSeen: true, since: sinceAt }, order), { text: 'no use seen', hover: `No use seen · records from ${since}.` });
     assert.deepEqual(usedCellWords(undefined, order), { text: 'use unknown', hover: 'No tool that has it on can tell whether it was used.' });
   }
 });
