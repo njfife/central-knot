@@ -7798,7 +7798,7 @@ async function syncEverythingFlow() {
   same('with Automatic sync off, the band shows its second sentence and Undo without reloads, and waiting stays last beside Choose copies',
     [await uBand(), await b.text('#setting-sync-everything-notice .setting-message-text'), /Synchronize everything decides whether new items found in tools are added\./.test(await b.run(`document.getElementById('sync-switch')?.title ?? ''`))],
     [['Synchronize everything is on. It takes items in at Sync once, or when Automatic sync is on.', 'Undo', 'Switch Synchronize everything off', false, false],
-      'Automatic sync is off, so it takes items in at Sync once. 1 found item has copies that differ and waits for your choice of copy.', true]);
+      '3 found items were taken out of Central Knot and aren’t added by themselves again: Add on its row in the Library, or Restore in History, brings one back. Automatic sync is off, so it takes items in at Sync once. 1 found item has copies that differ and waits for your choice of copy.', true]);
   await b.click('#outcome-undo');
   await waitBand('false', 'Undone:');
   same('Undo with Automatic sync off turns the rule off and says nothing was taken back',
