@@ -4253,8 +4253,13 @@ async function practiceFlow() {
   await a.press('Escape');
   // A redraw landing between the press and the release (as a background pass or a usage reading may) replaces the text under the
   // button, and the browser then sends no click: the release opens the editor of the text now there, the caret where it was aimed.
+  // Dispatched via window focus (renderer.ts) so the redraw keeps the page's width instead of toggling the sidebar across the 1,000 px grid threshold.
   let underPress;
-  await clickText(a, baseText, 'every tool.', async () => { underPress = await redrawUnder(a, baseText); });
+  await clickText(a, baseText, 'every tool.', async () => {
+    await a.run(`document.querySelector(${JSON.stringify(baseText)}).dataset.before = 'the redraw'`);
+    await a.run(`window.dispatchEvent(new Event('focus'))`);
+    underPress = await a.run(`(() => { const now = document.querySelector(${JSON.stringify(baseText)}); return [now.dataset.before !== 'the redraw', now.matches('.ins-editable')]; })()`);
+  });
   same('a click on the base’s text with a redraw between its press and its release: the text was replaced, and its editor opens with the caret where it was aimed',
     [...underPress, ...await caretAt(a)], [true, true, 'base-text', '- Shared by '.length]);
   await a.press('Escape');
@@ -17259,11 +17264,11 @@ async function hookRunFlow() {
 
   // Off-screen row does not jump the scroll container when its result arrives (item 4).
   const lateIds = await rowOf('session-claude-cli', 'slow-stop.sh');
-  await sizeTo(a, 1316, 820);
+  await sizeTo(a, 860, 560);
   await a.run(`document.getElementById(${JSON.stringify(lateIds.runId)})?.scrollIntoView({ block: 'center' })`);
   await a.click(byId(lateIds.runId));
   await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'Running…'`);
-  await a.run(`document.querySelector('#session-codex-cli')?.scrollIntoView({ block: 'end' })`);
+  await a.run(`document.querySelector('#session-codex-cli')?.scrollIntoView({ block: 'center' })`);
   await a.settle();
   const awayTop = await a.run(`document.querySelector('#session-codex-cli')?.getBoundingClientRect().top ?? 0`);
   await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(lateIds.runId)}); return b && b.textContent === 'Run it' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`, 8000);

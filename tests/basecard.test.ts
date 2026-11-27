@@ -3,10 +3,22 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { HarnessId, InstructionFile } from '../src/types.ts';
-import { findById, findNode, installDom, textOf, type FakeNode } from './domstub.ts';
+import { findById, findNode, installDom, makeElement, textOf, type FakeNode } from './domstub.ts';
 
 let rendered: FakeNode | undefined;
 installDom({}, { userAgent: 'Macintosh', byId: id => findById(rendered, id) ?? null });
+const rawCreate = (globalThis.document as unknown as { createElement: (tag: string) => FakeNode }).createElement;
+(globalThis.document as unknown as { createElement: (tag: string) => FakeNode }).createElement = (tag: string) => {
+  const node = rawCreate(tag);
+  if (tag !== 'template') return node;
+  return Object.defineProperty(node, 'innerHTML', {
+    set(html: string) {
+      const svg = makeElement('svg');
+      svg.className = /class="([^"]*)"/.exec(html)?.[1] ?? '';
+      node.content.firstElementChild = svg;
+    },
+  });
+};
 
 const { state: app } = await import('../src/app.ts');
 const { baseCard } = await import('../src/basecard.ts');

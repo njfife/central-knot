@@ -1292,7 +1292,7 @@ test('hookRunWords labels executed tool and version only when known, and hookSou
   const viewMod = await import('../src/hooksourceview.ts');
   viewMod.resetHookSources();
   state.home = {
-    home: '/tmp/h', mode: 'actual', label: 'Home',
+    home: '/home/u', mode: 'actual', label: 'Home',
     pluginItems: [
       { tool: 'claude-cli', plugin: 'helper', marketName: 'team', version: '0.4.1', items: [], listed: true },
       { tool: 'codex-cli', plugin: 'no-ver', marketName: 'team', items: [], listed: true },
