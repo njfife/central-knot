@@ -10,7 +10,7 @@
 // rowPluginFacts: in a tool that takes plugins and lacks it, and in Pi, OpenCode and Antigravity while the item is Off, where
 // Put its <kinds> here puts them there again after its Undo); and the others, the library's own (libraryrow.ts detailLine).
 import { DIRECTORY, FROM_DIRECTORY, loadsKind, partWords, samePart } from './pluginstatus.ts';
-import { cantSwitch, counted, hasOwnSwitch, itemOffNow, wholeTurn, type PluginItemAt } from './pluginswitch.ts';
+import { cantSwitch, wholeAlso, wholeTurn, type PluginItemAt } from './pluginswitch.ts';
 import { holds, takesPlugins } from './presence.ts';
 import { andList, toolNames as names } from './words.ts';
 import type { Components, HarnessId, InstalledPlugin, PartKind, PartRef } from './types.ts';
@@ -67,13 +67,6 @@ const unlisted = (marketName: string) => `its marketplace “${marketName}” is
 /** Whether the plugin brings anything in its tool besides this item: another item, or hooks. */
 const bringsMore = (item: PluginItemAt) => item.install.items.some(entry => !samePart(entry, item)) || !!item.install.hooks?.length;
 
-/** What else of this installed copy turns off with the whole plugin, from the installed copy's own items and hooks alone. */
-function wholeScope(item: PluginItemAt): string {
-  const rest = item.install.items.filter(entry => !samePart(entry, item) && !(hasOwnSwitch(item.tool, entry.kind) && itemOffNow(item.install, entry)));
-  const also = counted(rest, item.kind, item.install.hooks?.length ?? 0);
-  return also ? `Whole plugin · with ${also}` : 'Whole plugin';
-}
-
 function hasIt(item: PluginItemAt, { box, marketName }: LineFacts): LineControl {
   const tool = names[item.tool], plugin = item.install.plugin;
   // Installed whole and off: shown one way, whoever turned it off; one click ticks its box (marketplaces.ts turn let-in).
@@ -93,7 +86,8 @@ function hasIt(item: PluginItemAt, { box, marketName }: LineFacts): LineControl 
   if (box === 'ambiguous') return none(`${twoNamed(marketName, plugin)}, so which one to turn off can’t be told here.`);
   if (box?.off) return none(box.off);
   if (!box) return none('');
-  return button('keep-out', 'Turn the plugin off', wholeScope(item), `Turns ${whole}.`);
+  const also = wholeAlso(item).words;
+  return button('keep-out', 'Turn the plugin off', also ? `With ${also}` : 'Whole plugin', `Turns ${whole}.`);
 }
 
 function install({ tool, kind, plugin, marketName, box, parts, yours = [] }: LineFacts): LineControl {
@@ -129,7 +123,8 @@ function place({ tool, plugin, marketName, box, parts, yours = [] }: LineFacts):
   const label = kinds.length ? `Put its ${kindsList} here` : 'Put its items here';
   const title = [`Puts ${plugin}’s ${kindsList} into ${where}, following the plugin.`, yours.length ? yoursStay(yours) : '',
     cannot.length ? `${capital(andList(cannot))} can’t.` : ''].filter(Boolean).join(' ');
-  return button('place', label, yours.length ? yoursStay(yours) : '', title);
+  const sentence = yours.length ? `Follows ${plugin}. ${yoursStay(yours)}` : `Follows ${plugin}`;
+  return button('place', label, sentence, title);
 }
 
 /** That his own of the plugin's names stay his: "Your own triage stays as it is." A line's sentence before its act says it. */

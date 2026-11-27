@@ -647,6 +647,11 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
    description away (matrix.ts settleDescriptions, which takes the cut off again once every description is left out). */
 .ov-name-fit.name-cut > .ov-name-main { max-width: 50%; }
 .ov-name-fit > .row-tag, .ov-name-fit > .ov-name-about { line-height: 40px; }
+/* An opened row lets its name cell wrap so a plugin origin tag is never clipped out of view at 860. */
+.ov-row.open:not(.ov-file-anchored) { height: auto; min-height: 40px; }
+.ov-row.open:not(.ov-file-anchored) .ov-name-fit { height: auto; min-height: 40px; padding: 6px 0; row-gap: 2px; }
+.ov-row.open:not(.ov-file-anchored) .ov-name-fit > .ov-name-main { height: 28px; }
+.ov-row.open:not(.ov-file-anchored) .ov-name-fit > .row-tag { line-height: 18px; white-space: normal; }
 .row-open { display: grid; place-items: center; width: 18px; height: 18px; margin-left: -6px; flex: none; border: 0; background: none; border-radius: 4px; cursor: pointer; color: inherit; }
 .row-open:hover, .row-file-btn:hover, .file-tab:hover { background: var(--press); color: var(--ink); }
 /* Open file mark right after a skill's name (matrix.ts fileButton). */
@@ -764,14 +769,13 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* A file per line: its tool, its path (cut by the space it has), and Show in folder in one aligned column. */
 .details-path-line { display: grid; grid-template-columns: 12px 92px minmax(0, 1fr) auto; align-items: center; gap: 8px; margin: 4px 0 0 16px; }
 .details-path-tool { color: var(--ink-soft); }
-.details-path-line > .path-text, .details-mcp .details-tool-head > .path-text { color: var(--ink); }
+.details-path-line > .path-text { color: var(--ink); }
 .details-path-show { font-size: 12px; white-space: nowrap; }
 /*
- * MCP: each tool's row names the tool (a column as wide as its longest name) with Show in folder at the right, then its
- * settings file whole on a line of its own, wrapping after a "/", then its status.
+ * MCP: each tool's row names the tool (a column as wide as its longest name) with its switch and Show in folder at the right
+ * (the settings file path is on Show in folder's hover), then any status line below.
  */
 .details-mcp .details-tool-head { grid-template-columns: max-content minmax(0, 1fr) auto; row-gap: 2px; }
-.details-mcp .details-tool-head > .wrap-path { grid-column: 1 / -1; grid-row: 2; }
 .details-mcp .details-tool-head > .details-path-show { grid-column: 3; grid-row: 1; }
 .details-mcp .details-tool-head > .details-tool-line { grid-column: 1 / -1; }
 /* The tool's Enabled switch sits in its name's line, before Show in folder. */
@@ -2372,7 +2376,8 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .bar-short #usage-when { display: none; }
 /* The waiting count folds to its mark and number with the chips (matrix.ts toolbarState). */
 .bar-icons .apply-words { display: none; }
-.details-usage { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 12px; color: var(--ink-soft); }
+.details-usage { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12px; color: var(--ink-soft); }
+.details-usage > .info-wrap { margin-left: -2px; flex: none; }
 .details-usage > svg { flex: none; align-self: center; }
 /* A line's result (matrix.ts pluginLine), in the usage line's place while it shows: its mark, its words, its Undo after them. */
 .details-tool-result { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 12px; color: var(--ink); }

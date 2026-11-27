@@ -201,8 +201,9 @@ function toggleFile(row: PluginRow) {
   rerender();
 }
 
-/** The card behind In each tool (?) on a plugin-only item's opened row: whole-plugin switches and what item-taking tools get. */
-const PLUGIN_TOOLS_CARD = 'Tools that take plugins get the whole plugin; switches here belong to the plugin. Pi, OpenCode and Antigravity get its items, which follow it; hooks and commands can’t.';
+/** The card behind In each tool (?) when a plugin supplies the row: plugin-only (`shared` omitted) or plugin-linked (`shared` first). */
+const pluginToolsCard = (shared?: string) =>
+  `${shared ?? 'Tools that take plugins get the whole plugin; switches here belong to the plugin.'} In Pi, OpenCode and Antigravity ${shared ? 'it follows the plugin (changing it here makes it your own)' : 'its items follow the plugin'}; hooks and commands can’t.`;
 
 /** A plugin item's details: what it is, where it comes from and is handled, each tool's copy, and its file as each tool's copy has it. */
 function pluginDetails(t: Table, row: PluginRow, placement: 'row' | 'dock' = 'row') {
@@ -221,7 +222,7 @@ function pluginDetails(t: Table, row: PluginRow, placement: 'row' | 'dock' = 'ro
         : row.description ? h('p.details-description.details-description-whole', {}, row.description) : null,
       excerptLine(t, row),
       pluginStrip(row.plugin, row.marketName, Object.values(row.installs).filter(install => !!install), elId('open-whole', row), handledWhere(row))),
-    tools.length ? h('p.details-tools-head', { 'data-info-block': true }, 'In each tool', infoMark(elId('shared', row), 'In each tool', PLUGIN_TOOLS_CARD)) : null,
+    tools.length ? h('p.details-tools-head', { 'data-info-block': true }, 'In each tool', infoMark(elId('shared', row), 'In each tool', pluginToolsCard())) : null,
     h('div.details-tools', {}, tools.map(tool => {
       const at = tool as HarnessId, install = row.installs[at], copy = row.copies[at] ? install : undefined;
       const item: PluginItemAt | undefined = copy && { kind: row.kind, name: row.name, tool: at, install: copy };
@@ -713,8 +714,10 @@ function pathLine(tool: Tool, path: string) {
   return h('p.details-path-line', {}, brandMark(tool, 12), h('span.details-path-tool', {}, names[tool]), pathText(shownPath(path), path), showInFolder(path));
 }
 
-/** Show in folder: reveals a file in the file manager; nothing is opened or changed. */
-const showInFolder = (path: string) => h('button.inline-link.details-path-show', { type: 'button', title: 'Show this file in the file manager; nothing is opened or changed', onclick: (event: Event) => { event.stopPropagation(); showFile(path); } }, 'Show in folder');
+/** Show in folder: reveals a file in the file manager; nothing is opened or changed. `withPath`: puts the path on hover (MCP lines). */
+const showInFolder = (path: string, withPath = false) => h('button.inline-link.details-path-show', { type: 'button',
+  title: withPath ? `${shownPath(path)} — Show this file in the file manager; nothing is opened or changed` : 'Show this file in the file manager; nothing is opened or changed',
+  onclick: (event: Event) => { event.stopPropagation(); showFile(path); } }, 'Show in folder');
 
 
 /**
@@ -980,16 +983,16 @@ function rowPlugins(skill: ItemRow) {
  * are its only ones, so Copies differ is said here, not clicked.
  */
 function nameCell(t: Table, skill: ItemRow, attention: boolean) {
-  const name = skill.name ?? skill.key;
+  const name = skill.name ?? skill.key, open = t.view.comparing === idOf(skill) && !fileInDetails(t.view, idOf(skill));
   return h('div.ov-name.ov-name-fit.ov-name-bare', { role: 'cell', title: skill.description ? `${name}: ${skill.description}` : name },
     h('span.ov-name-main', {}, kindMark(t, skill.kind),
       h('span.ov-name-text', {}, name), fileButton(t, skill), kindWord(t, skill.kind, name),
       attention ? h('span.row-tag.row-tag-differs', { id: elId('decide', skill) }, 'Copies differ') : null),
-    libraryTag(t, skill),
+    open && libraryPlace(itemOf(skill)) === 'on' ? null : libraryTag(t, skill),
     sourceTag(skill),
     // While the row is open, its details show the description whole, except for differing copies (which show the chooser alone)
     // and while its file is in their place.
-    t.view.comparing === idOf(skill) && !fileInDetails(t.view, idOf(skill)) && !attention ? null : aboutLine(t, skill));
+    open && !attention ? null : aboutLine(t, skill));
 }
 /**
  * The line after a row's name: its description; or where Find found the row only in its file's text, that text's excerpt,
@@ -2612,31 +2615,32 @@ export function turnTheseOff(rows: ItemRow[]) {
   });
 }
 
-/** Why a tool can't say an item wasn't used, in an opened row: for sessions that couldn't all be read, how many files were skipped. */
+/** Why a tool can't say an item wasn't used, in an opened row: standing reasons go in Use unknown's (?) card; unread counts stay inline. */
 const cantSayWords: Record<CantSay, (nouns: { one: string }, says: ToolSays) => string> = {
-  'no-record': ({ one }) => `can’t say: its sessions don’t record which ${one} was used`,
-  'not-sure': ({ one }) => `can’t say: it doesn’t always record which ${one} was used`,
-  'no-sessions': (_, says) => `can’t say: ${names[says.tool]} keeps no sessions here`,
-  'unread': (_, says) => (says.skipped ? `can’t say: ${plural(says.skipped, 'session file')} couldn’t be read` : 'can’t say: its sessions couldn’t be read'),
+  'no-record': ({ one }) => `Its sessions don’t record which ${one} was used.`,
+  'not-sure': ({ one }) => `It doesn’t always record which ${one} was used.`,
+  'no-sessions': (_, says) => `${names[says.tool]} keeps no sessions here.`,
+  'unread': (_, says) => (says.skipped ? `${plural(says.skipped, 'session file')} couldn’t be read` : 'its sessions couldn’t be read'),
 };
 /**
- * One tool's short usage words for an opened row: both figures (`used 2 days ago · 28 sessions`), `no use seen since <date>`,
- * or `Can’t say` with its standing reason behind hover (`hover`); unread-session counts and past use always stay visible.
- * An absent plugin line with nothing observed returns undefined (blank).
+ * One tool's short usage words for an opened row: both figures (`used 2 days ago · 28 sessions`), `no use seen · history from <date>`,
+ * or `Use unknown` with its standing reason behind `(?)` (`card`); unread-session counts and past use always stay visible.
+ * An absent plugin line with nothing observed (and readable history) returns undefined (blank).
  */
-export function usageLineWords(says: ToolSays, kind: PageKind, absentPlugin = false): { text: string; hover?: string } | undefined {
-  if (absentPlugin && !says.sessions && !says.last && !says.skipped) return undefined;
+function usageLineWords(says: ToolSays | undefined, tool: Tool, kind: PageKind, absentPlugin = false): { text: string; card?: string } | undefined {
+  if (!says) return absentPlugin ? undefined : { text: 'Use unknown', card: `${names[tool]}’s session history isn’t read yet.` };
+  if (absentPlugin && !says.sessions && !says.last && !says.skipped && says.cantSay !== 'unread') return undefined;
   const last = says.last ? `last used ${sinceThen(Date.parse(says.last))}` : '';
   if (says.sessions) {
     const skipped = says.skipped ? ` · ${plural(says.skipped, 'session file')} couldn’t be read` : '';
     return { text: `used ${sinceThen(Date.parse(says.last!))} · ${plural(says.sessions, 'session')}${skipped}` };
   }
   if (says.cantSay) {
-    const reason = `${sentence(cantSayWords[says.cantSay](kindNouns[kind], says))}.`;
-    const head = says.cantSay === 'unread' ? reason.replace(/\.$/, '') : 'Can’t say';
-    return { text: [head, last].filter(Boolean).join(' · '), ...(says.cantSay === 'unread' ? {} : { hover: reason }) };
+    const reason = cantSayWords[says.cantSay](kindNouns[kind], says);
+    if (says.cantSay === 'unread') return { text: [`Use unknown: ${reason}`, last].filter(Boolean).join(' · ') };
+    return { text: ['Use unknown', last].filter(Boolean).join(' · '), card: reason };
   }
-  const none = says.since ? `no use seen since ${dayWords(says.since)}` : `no use seen in ${USAGE_DAYS} days`;
+  const none = says.since ? `no use seen · history from ${dayWords(says.since)}` : `no use seen in ${USAGE_DAYS} days`;
   return { text: [none, last].filter(Boolean).join(' · ') };
 }
 /**
@@ -2646,11 +2650,12 @@ export function usageLineWords(says: ToolSays, kind: PageKind, absentPlugin = fa
 function usageLine(t: Table, row: ItemRow | PluginRow, tool: Tool, absentPlugin = false) {
   const kind = kindOf(row), id = elId('usage', row, tool);
   if (firstReading(t)) return h('p.details-usage', { id }, icon('history', 12, 'tone-muted'), 'Collecting usage statistics…');
+  if (!reading(t) || !usageFactsOf(row)) return null;
   const says = usageOf(t, row).find(each => each.tool === tool);
-  const shown = says && usageLineWords(says, kind, absentPlugin);
+  const shown = usageLineWords(says, tool, kind, absentPlugin);
   if (!shown) return null;
-  return h('p.details-usage', { id }, icon('history', 12, 'tone-muted'),
-    shown.hover ? h('span.details-usage-text', { title: shown.hover, 'aria-description': shown.hover }, shown.text) : shown.text);
+  return h('p.details-usage', { id, ...(shown.card ? { 'data-info-block': true } : {}) }, icon('history', 12, 'tone-muted'),
+    shown.text, shown.card ? infoMark(elId('usage-info', row, tool), 'Use unknown', shown.card) : null);
 }
 /** In an opened row, a use seen in a tool this page doesn't show (not managed here), which counts in the row's figure too. */
 const usageElsewhere = (t: Table, skill: ItemRow) => usageOf(t, skill).filter(each => !toolsFor(t, skill.kind).includes(each.tool) && each.sessions).map(each =>
@@ -2931,8 +2936,8 @@ function libraryVersions(t: Table, lib: LibraryPage, skill: ItemRow) {
 function details(t: Table, skill: ItemRow, placement: Placement = 'row'): HTMLElement {
   const inFiles = placement === 'files', lib = libraryPages[skill.kind], tools = toolsFor(t, skill.kind);
   const differs = isDiffering(skill);
-  // MCP: each tool's row has its settings file and Show in folder, where a server is changed.
-  const settingsFile = (tool: Tool) => (skill.kind === 'mcp' && skill.paths?.[tool] ? [wrappingPath(skill.paths[tool]!), showInFolder(skill.paths[tool]!)] : []);
+  // MCP: each tool's row has Show in folder, with its settings file path on hover.
+  const settingsFile = (tool: Tool) => (skill.kind === 'mcp' && skill.paths?.[tool] ? [showInFolder(skill.paths[tool]!, true)] : []);
   const toolLine = (tool: Tool, parts: DetailPart[]) => h('span.details-tool-line', { 'data-info-block': true },
     parts.flatMap((part, index) => [
       index ? (/[.!?]$/.test(parts[index - 1]!.text) ? ' ' : ' · ') : null,
@@ -2958,10 +2963,11 @@ function details(t: Table, skill: ItemRow, placement: Placement = 'row'): HTMLEl
   // A found row none of whose copies can be read has no files to show.
   const files = lib.files && !inFiles && (inLibrary(itemOf(skill)) || canAdd(skill)) ? smallAction('Files and contents', elId('files', skill), () => openFiles(skill.key)) : null;
   const remove = !inFiles ? libraryDelete(t, lib, skill) : null;
+  const status = inFiles ? '' : switchStatus(t, skill);
   return box(
     h('div.details-head', {},
-      // The Files view's pane says it under the skill's name; the row already shows the description.
-      inFiles ? null : h('p.details-status', {}, switchStatus(t, skill)),
+      // The Files view's pane says it under the skill's name; an On row's tool lines already say where it is.
+      status ? h('p.details-status', {}, status) : null,
       // Its description whole: the closed row cuts it.
       skill.description ? h('p.details-description.details-description-whole', {}, skill.description) : null,
       excerptLine(t, skill),
@@ -2971,7 +2977,7 @@ function details(t: Table, skill: ItemRow, placement: Placement = 'row'): HTMLEl
     // found one that can be taken in (a plugin-linked item also states its following/detaching rule here).
     (tools.length > 1 || !!pluginOf(skill.fromSource?.link ?? '')) && (inLibrary(itemOf(skill)) || canAdd(skill))
       ? h('p.details-tools-head', { 'data-info-block': true }, 'In each tool', infoMark(elId('shared', skill), 'In each tool',
-        pluginOf(skill.fromSource?.link ?? '') ? `${lib.words.shared} It follows the plugin in tools that take no plugins (hooks and commands can’t); changing it here makes it your own.` : lib.words.shared)) : null,
+        pluginOf(skill.fromSource?.link ?? '') ? pluginToolsCard(lib.words.shared) : lib.words.shared)) : null,
     h('div.details-tools', {}, tools.map(tool => toolRow(tool)), usageElsewhere(t, skill)),
     libraryVersions(t, lib, skill),
     inFiles || skill.kind === 'mcp' ? null : wherePaths(t, skill),
@@ -3131,7 +3137,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
       // The skill's own switch comes first, before its name, as on its row.
       h('div.pane-header.pane-header-switched', {},
         h('div.detail-switch', {}, itemSwitch(t, skill, 'detail-')),
-        h('div.pane-title', {}, h('h2', {}, middle(skill.name ?? skill.key)), h('p', { title: paneStatus }, paneStatus))),
+        h('div.pane-title', {}, h('h2', {}, middle(skill.name ?? skill.key)), paneStatus ? h('p', { title: paneStatus }, paneStatus) : null)),
       // A wide pane puts the skill's details beside its files, as a plugin's page puts its README beside what it holds.
       h('div.scroll.detail-scroll', { id: 'detail-scroll' },
         h('div.detail-files', {}, ...contents),
