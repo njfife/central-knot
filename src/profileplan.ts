@@ -770,18 +770,16 @@ export const filledWords = (names: string[]) => `Saved. Nothing in your tools ch
 /** A keep-out change one item has, before and after (types.ts ExceptSwitched, or a plan's ExceptTurn). */
 export interface Retool { wasExcept: HarnessId[]; nowExcept: HarnessId[] }
 /**
- * How many items' tools alone a switch changes, in words: where each leaves the same one or two tools and none comes back, those
- * tools ("4 items leave Codex", after: "4 items now out of Codex"; back alone, after: "4 items now back in Pi"), else counted
- * ("4 items change tools"); '' for none. `line`: the header's short form, without "items".
+ * How many items' tools alone a switch changes, in words: where each only leaves the same one or two tools, those tools ("4 items
+ * leave Codex", after: "4 items now out of Codex"), else counted ("4 items change tools"); '' for none. `line`: the header's short
+ * form, without "items".
  */
 export function retoolWords(list: readonly Retool[], tense: 'will' | 'did' | 'line'): string {
   if (!list.length) return '';
-  const out = (each: Retool) => each.nowExcept.filter(tool => !each.wasExcept.includes(tool)), back = (each: Retool) => each.wasExcept.filter(tool => !each.nowExcept.includes(tool));
-  const [first] = list, same = list.every(each => sameTools(out(each), out(first!)) && sameTools(back(each), back(first!)));
-  const count = tense === 'line' ? String(list.length) : plural(list.length, 'item'), named = (tools: HarnessId[]) => andList(tools.sort(byToolOrder).map(tool => toolNames[tool]));
-  const [gone, came] = [out(first!), back(first!)], one = same && gone.length + came.length <= 2 && !(gone.length && came.length);
-  if (one && tense === 'did') return `${count} now ${gone.length ? `out of ${named(gone)}` : `back in ${named(came)}`}`;
-  if (one && gone.length) return `${count} ${list.length === 1 ? 'leaves' : 'leave'} ${named(gone)}`;
+  const gone = (each: Retool) => each.nowExcept.filter(tool => !each.wasExcept.includes(tool)), [first] = list;
+  const only = list.every(each => sameTools(gone(each), gone(first!)) && each.wasExcept.every(tool => each.nowExcept.includes(tool))) && gone(first!).length <= 2;
+  const count = tense === 'line' ? String(list.length) : plural(list.length, 'item'), where = andList(gone(first!).sort(byToolOrder).map(tool => toolNames[tool]));
+  if (only && where) return tense === 'did' ? `${count} now out of ${where}` : `${count} ${list.length === 1 ? 'leaves' : 'leave'} ${where}`;
   return `${count} ${tense === 'did' ? 'changed' : list.length === 1 ? 'changes' : 'change'} tools`;
 }
 

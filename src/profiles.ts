@@ -185,15 +185,14 @@ export async function deleteProfile(context: ShareContext, id: string): Promise<
 
 // ---------- The library, as a switch reads and clicks it ----------
 
-/** Each kind's record (its Kind's `open`), the managed tools it is applied in, and its pass, as a switch uses them. */
-const KINDS: { kind: ItemKind; open: (context: ShareContext) => Promise<{ library: KindLibrary; problem?: string }>; harnesses: (tools: HarnessId[]) => HarnessId[]; pass: (context: ShareContext, tools: HarnessId[], changes: Change[], options: { only: Set<string>; told?: boolean }) => Promise<PassResult> }[] = [
-  { kind: 'skill', open: context => skillKind.open(context), harnesses: tools => skillKind.harnesses(tools), pass: applySkills },
-  { kind: 'mcp', open: context => serverKind.open(context), harnesses: tools => serverKind.harnesses(tools), pass: applyServers },
-  { kind: 'agent', open: context => agentKind.open(context), harnesses: tools => agentKind.harnesses(tools), pass: applyAgents },
+/** Each kind's record (its Kind's `open`) and its pass, as a switch uses them. */
+const KINDS: { kind: ItemKind; open: (context: ShareContext) => Promise<{ library: KindLibrary; problem?: string }>; pass: (context: ShareContext, tools: HarnessId[], changes: Change[], options: { only: Set<string>; told?: boolean }) => Promise<PassResult> }[] = [
+  { kind: 'skill', open: context => skillKind.open(context), pass: applySkills },
+  { kind: 'mcp', open: context => serverKind.open(context), pass: applyServers },
+  { kind: 'agent', open: context => agentKind.open(context), pass: applyAgents },
 ];
-/** The live items as a switch plans them: each with the tools its kind is managed in among `tools` (profileplan.ts effectiveOut). */
-const managedItems = (read: { libraries: Libraries; plugins: Set<string> }, tools: HarnessId[]) =>
-  liveItems(read.libraries, read.plugins, Object.fromEntries(KINDS.map(({ kind, harnesses }) => [kind, harnesses(tools)])) as Record<ItemKind, HarnessId[]>);
+/** The live items as a switch plans them: the managed tools (`tools`) are the profile's to decide (profileplan.ts effectiveOut). */
+const managedItems = (read: { libraries: Libraries; plugins: Set<string> }, tools: HarnessId[]) => liveItems(read.libraries, read.plugins, { skill: tools, mcp: tools, agent: tools });
 
 /** Each kind's items as its record holds them now, and the plugins the home records (liveItems); or why a record can't be read, and `then` (what was therefore not done). */
 export async function readLibraries(context: ShareContext, then = 'Nothing was switched.'): Promise<{ libraries: Libraries; plugins: Set<string> } | { stop: string }> {
