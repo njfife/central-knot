@@ -545,7 +545,7 @@ function syncEverythingRow(): HTMLElement | null {
 }
 
 /** Shared end of the disclosure sentence that each keep-costs info card (Sessions and Settings) begins. */
-export const SESSION_COSTS_KEPT = 'each session’s project, request times, models, token counts and estimated prices in this home’s Central Knot folder. No message text is kept; turning it off leaves what was kept.';
+export const SESSION_COSTS_KEPT = 'each session’s project, request times, models, token counts and estimated prices in this home’s Central Knot folder. No message text is kept; stopping collection retains saved figures in that folder and hides the 7-day view.';
 
 /** Turns keeping session costs on or off for the open home (sessionkeep.ts). */
 async function chooseSessionCosts(on: boolean): Promise<void> {
