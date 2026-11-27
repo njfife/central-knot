@@ -94,7 +94,7 @@ test('A new home is asked: Yes switches the rule on with one History entry, and 
   try {
     await putSkill(box, skillRoot['claude-cli'], 'notes');
     assert.equal(asksNow(await homeView(box)), 'question');
-    assert.deepEqual(await setSyncEverything(box.context, true, true), {});
+    assert.equal((await setSyncEverything(box.context, true, true)).stopped, undefined);
     assert.deepEqual([(await recordOf(box))?.syncEverything, asksNow(await homeView(box)), (await switchesOn(box)).length], [true, undefined, 1]);
     // Asked again from a page read before the answer (a second window): refused, and nothing changes.
     assert.match((await setSyncEverything(box.context, false, true)).stopped ?? '', /was asked already: Synchronize everything is on/);
@@ -123,7 +123,7 @@ test('No stores the rule off with no History entry and changes no file; the home
     await background(box);
     assert.deepEqual([await filesIn(box), (await recordOf(box))?.syncEverything, await history(box), asksNow(await homeView(box))], [before, false, [], undefined]);
     // The Settings row's switch is the way back: switching it on then is a switch-on entry, with its one Undo.
-    assert.deepEqual(await setSyncEverything(box.context, true), {});
+    assert.equal((await setSyncEverything(box.context, true)).stopped, undefined);
     assert.equal((await switchesOn(box)).length, 1);
   } finally { await box.cleanup(); }
 });

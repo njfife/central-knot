@@ -72,7 +72,7 @@ const add = (view: LibraryView, key: string): Change => rowClicks.on(pageRow(row
 const entriesOf = async (box: Box, key: string) => (await readHistory(box.context)).filter(event => event.key === key);
 /** Nothing waits in the tools: no copy holds an edit not taken in, and the three tools are managed (historyactions.ts ItemNow). */
 const settled = { managed: tools, pending: [] as HarnessId[] };
-const turnOn = async (box: Box) => assert.deepEqual(await setSyncEverything(box.context, true), {});
+const turnOn = async (box: Box) => assert.equal((await setSyncEverything(box.context, true)).stopped, undefined);
 
 // ---------- Off, and switched on ----------
 
@@ -133,6 +133,7 @@ test('Switched on in a home with found items: each it may take is taken in and O
     const mcpNotice = done.mcp.notices!.find(notice => notice.kind === 'taken-in')!;
     assert.equal(mcpNotice.kind === 'taken-in' && sentences(libraryWords.mcp).takenInWords(mcpNotice),
       'Synchronize everything took in 2 MCP servers, found in Claude Code and Codex: docs and files. History can undo each.');
+    assert.deepEqual(mcpNotice.kind === 'taken-in' ? mcpNotice.histories : undefined, [docs.id, files.id]);
     // One notice per pass of a kind: how many, by name, and where they were found. None for a key it left.
     assert.deepEqual(noticesOf(done).map(notice => notice.kind === 'taken-in' ? [notice.items, notice.from] : notice.kind), [[['notes', 'tidy'], ['claude-cli']], [['docs', 'files'], ['claude-cli', 'codex-cli']], [['helper'], ['copilot-cli']]], 'each tool named once');
     // A click's Undo never undoes what the rule took in: none of it is a click's.

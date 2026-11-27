@@ -1766,7 +1766,8 @@ app.whenReady().then(async () => {
   });
   handle('sync:set', async on => { await saveSyncSetting(on === true); return current ? syncThenView() : null; });
   // Synchronize everything, the open home's standing rule (everything.ts setSyncEverything): turned on, the pass right after takes
-  // in what is found now, with Automatic sync on (with it off, at Sync once). `answering`: first setup's question (firstsetup.ts).
+  // in what is found now, with Automatic sync on (with it off, at Sync once), and `event` carries the new switch-on History entry
+  // id when the rule moved from off to on. `answering`: first setup's question (firstsetup.ts).
   handle('sync:everything', async (on, home, answering) => {
     if (home !== current?.home) return { stopped: elsewhere, view: null, reloads: [] };
     const set = await setSyncEverything(context(), on === true, answering === true);
