@@ -2083,6 +2083,8 @@ export const profileState = {
   renaming: undefined as string | undefined,
   /** The name as typed while renaming, kept across redraws. */
   draft: undefined as string | undefined,
+  /** Pinned row ids while the Profiles page's Changes view is open, so ticking moves no row. */
+  changes: undefined as { home: string; profileId: string; on: string[]; off: string[] } | undefined,
 };
 
 /**
@@ -2115,6 +2117,7 @@ export const switchToProfile = (id: string) => busy('Switching profile…', asyn
   const result = await api().switchProfile(id, state.home!.home);
   if (result.view) setHome(result.view);
   if (result.stopped) { announce(result.stopped); return; }
+  profileState.changes = undefined;
   switchOutcome(result, page);
   if (state.page === 'history') await putHistory();
 });
@@ -2125,6 +2128,7 @@ async function applyMenuSwitch(result: ProfileSwitchResult) {
   refreshing = true;
   try {
     if (result.view) setHome(result.view, { background: true, sayNews: false });
+    profileState.changes = undefined;
     switchOutcome(result, state.page);
     sayBackgroundNews();
     // History lists the new switch at once when it is the page open (it reads History only when opened).
