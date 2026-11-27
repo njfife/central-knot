@@ -2767,7 +2767,7 @@ async function practiceFlow() {
   // folders as they were; Undo switch puts it back.
   await a.click('#nav-profiles');
   const toolsBefore = allFolders();
-  same('Incident’s strip, Applies in, ticks each managed tool', [await a.text('.pf-tools-label'), await a.all('.pf-tools input', 'e.checked')], ['Applies in', [true, true, true]]);
+  same('Incident’s strip, Applies in, ticks each managed tool', [await a.run(`document.querySelector('.pf-tools-label')?.firstChild?.textContent`), await a.all('.pf-tools input', 'e.checked')], ['Applies in', [true, true, true]]);
   await checkCard(a, 'profile-tools-info', 'Ticks save at once: nothing in your tools changes until Switch. Switching keeps your items out of each unticked tool.', 'the strip says, before a click, when a tick takes effect');
   await a.click('#pf-tool-copilot-cli');
   same('unticking Copilot CLI saves at once and changes no tool; the header’s clause counts the change of tools, a row says where, the list says 2 tools',
