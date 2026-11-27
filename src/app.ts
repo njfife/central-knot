@@ -261,7 +261,8 @@ function withProfileEnded(outcome: Outcome, { checkProfile = true, before = actB
 export function tell(outcome: Outcome | undefined, otherwise = '', options?: { checkProfile?: boolean; before?: ProfilesBefore }): void {
   const told = outcome && withProfileEnded(outcome, options);
   state.outcome = told;
-  // Said on Plugins in the run's place, it is the newer result: the run's goes, so this one's × uncovers nothing older.
+  // Said in a plugin run's place (Plugins, Instructions, or a tool's tab of either), the newer result: the run's goes, so this one's ×
+  // uncovers nothing older (pluginstate.ts overRun).
   if (overRun(told)) closeRun();
   if (!told) announce(otherwise);
   else { announce(spoken(told), !saidInStatusBar(told)); told.said = state.said.seq; }
@@ -296,7 +297,7 @@ function fadeNow(): void {
   const outcome = state.outcome;
   if (outcome?.fade || (outcome && resultInHeader() && !outcome.warn && !outcome.reasons?.length && !outcome.stays)) state.outcome = undefined;
   // Drawn only when a result went: a redraw that changes nothing would replace a text field he is typing in, and its Undo.
-  if (fadeRun() || state.outcome !== outcome) rerender();
+  if ((resultInHeader() && fadeRun()) || state.outcome !== outcome) rerender();
 }
 
 /** Paints the status bar's message from state.said (`shown` when given, else `text`, with that visible string as its tooltip and any spoken suffix visually hidden). */
