@@ -643,10 +643,16 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ov-name-fit { flex-wrap: wrap; align-content: flex-start; height: 40px; padding-left: 36px; position: relative; }
 .ov-name-fit .row-open { position: absolute; left: 10px; margin: 0; top: 11px; }
 .ov-name-main { flex: 0 1 auto; min-width: 0; height: 40px; display: flex; align-items: center; gap: 8px; }
-/* While descriptions show, a name longer than half its name cell is cut there, so one long name doesn't take every
-   description away (matrix.ts settleDescriptions, which takes the cut off again once every description is left out). */
-.ov-name-fit.name-cut > .ov-name-main { max-width: 50%; }
+/* While descriptions show, a name longer than half its name cell (and 280px, so a 30-letter name stays whole beside a dock)
+   is cut there, so one very long name doesn't take every description away (matrix.ts settleDescriptions, which takes the cut
+   off again once every description is left out). */
+.ov-name-fit.name-cut > .ov-name-main { max-width: max(50%, 280px); }
 .ov-name-fit > .row-tag, .ov-name-fit > .ov-name-about { line-height: 40px; }
+/* An opened row lets its name cell wrap so a plugin origin tag is never clipped out of view at 860. */
+.ov-row.open:not(.ov-file-anchored) { height: auto; min-height: 40px; }
+.ov-row.open:not(.ov-file-anchored) .ov-name-fit { height: auto; min-height: 40px; padding-block: 6px; row-gap: 2px; }
+.ov-row.open:not(.ov-file-anchored) .ov-name-fit > .ov-name-main { height: 28px; }
+.ov-row.open:not(.ov-file-anchored) .ov-name-fit > .row-tag { flex: 0 1 auto; line-height: 18px; white-space: normal; }
 .row-open { display: grid; place-items: center; width: 18px; height: 18px; margin-left: -6px; flex: none; border: 0; background: none; border-radius: 4px; cursor: pointer; color: inherit; }
 .row-open:hover, .row-file-btn:hover, .file-tab:hover { background: var(--press); color: var(--ink); }
 /* Open file mark right after a skill's name (matrix.ts fileButton). */
@@ -764,18 +770,17 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* A file per line: its tool, its path (cut by the space it has), and Show in folder in one aligned column. */
 .details-path-line { display: grid; grid-template-columns: 12px 92px minmax(0, 1fr) auto; align-items: center; gap: 8px; margin: 4px 0 0 16px; }
 .details-path-tool { color: var(--ink-soft); }
-.details-path-line > .path-text, .details-mcp .details-tool-head > .path-text { color: var(--ink); }
+.details-path-line > .path-text { color: var(--ink); }
 .details-path-show { font-size: 12px; white-space: nowrap; }
 /*
- * MCP: each tool's row names the tool (a column as wide as its longest name) with Show in folder at the right, then its
- * settings file whole on a line of its own, wrapping after a "/", then its status.
+ * MCP: each tool's row matches skills and agents (124px tool, middle status line, right controls), with Show in folder
+ * at the right end (the settings file path is on its hover).
  */
-.details-mcp .details-tool-head { grid-template-columns: max-content minmax(0, 1fr) auto; row-gap: 2px; }
-.details-mcp .details-tool-head > .wrap-path { grid-column: 1 / -1; grid-row: 2; }
-.details-mcp .details-tool-head > .details-path-show { grid-column: 3; grid-row: 1; }
-.details-mcp .details-tool-head > .details-tool-line { grid-column: 1 / -1; }
+.details-mcp .details-tool-head { grid-template-columns: 124px minmax(0, 1fr) auto auto; column-gap: 12px; row-gap: 2px; align-items: center; }
+.details-mcp .details-tool-head > .details-path-show { grid-column: 4; grid-row: 1; }
+.details-mcp .details-tool-head > .details-tool-line { grid-column: 2; grid-row: 1; }
 /* The tool's Enabled switch sits in its name's line, before Show in folder. */
-.details-mcp .details-tool-head > .details-tool-actions { grid-column: 2; grid-row: 1; justify-self: end; margin-left: 0; }
+.details-mcp .details-tool-head > .details-tool-actions { grid-column: 3; grid-row: 1; justify-self: end; margin-left: 0; }
 .details-mcp .details-tool-head > .details-tool-line:empty { display: none; }
 /* A skill's own actions, together under its heading. */
 .details-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 6px; }
@@ -1953,15 +1958,17 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .ins-preview, .ins-diff, .ins-text { font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
 
 /* Skills, agents and a plugin's items: every tool's row has the same three columns (tool, what it has, its own controls), so the controls line up. */
-.details.details-grid .details-tool-head { grid-template-columns: 196px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; }
+.details.details-grid .details-tool-head { grid-template-columns: 124px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; }
 .details-tool-head > .details-tool-actions { display: inline-flex; align-items: center; gap: 12px; justify-self: end; }
 .details-tools { container-type: inline-size; }
 /* In a narrow pane (the dock, the Files view's details) the tool and its controls share the first line; the sentence, if any, goes under. */
 @container (max-width: 560px) {
   .details.details-grid .details-tool-head { grid-template-columns: minmax(0, 1fr) auto; }
-  .details.details-grid .details-tool-head > .details-tool-label { grid-row: 1; grid-column: 1; }
-  .details.details-grid .details-tool-head > .details-tool-actions { grid-row: 1; grid-column: 2; justify-self: end; }
-  .details.details-grid .details-tool-head > .details-tool-line { grid-row: 2; grid-column: 1 / -1; }
+  .details.details-mcp .details-tool-head { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .details.details-grid .details-tool-head > .details-tool-label, .details.details-mcp .details-tool-head > .details-tool-label { grid-row: 1; grid-column: 1; }
+  .details.details-grid .details-tool-head > .details-tool-actions, .details.details-mcp .details-tool-head > .details-tool-actions { grid-row: 1; grid-column: 2; justify-self: end; }
+  .details.details-mcp .details-tool-head > .details-path-show { grid-row: 1; grid-column: 3; }
+  .details.details-grid .details-tool-head > .details-tool-line, .details.details-mcp .details-tool-head > .details-tool-line { grid-row: 2; grid-column: 1 / -1; }
   .details.details-grid .details-tool-head > .details-tool-line:empty { display: none; }
 }
 .tool-switch { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-soft); }
@@ -2391,7 +2398,8 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .bar-short #usage-when { display: none; }
 /* The waiting count folds to its mark and number with the chips (matrix.ts toolbarState). */
 .bar-icons .apply-words { display: none; }
-.details-usage { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 12px; color: var(--ink-soft); }
+.details-usage { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12px; color: var(--ink-soft); }
+.details-usage > .info-wrap { margin-left: -2px; flex: none; }
 .details-usage > svg { flex: none; align-self: center; }
 /* A line's result (matrix.ts pluginLine), in the usage line's place while it shows: its mark, its words, its Undo after them. */
 .details-tool-result { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 12px; color: var(--ink); }

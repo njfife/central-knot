@@ -373,7 +373,7 @@ test('A skill found in OpenCode’s own folder, taken in and turned Off: while O
     const { fact, item, row } = await seen(box);
     assert.equal(harnessIs(row, item, 'opencode-cli'), 'own-copy');
     assert.match(say.harnessLine(row, item, 'opencode-cli', 'OpenCode'), /^Has a copy Central Knot didn’t put there\. It is left alone while the skill is off;/);
-    assert.equal(statusLine(row, item, box.tools), 'Off · in Central Knot and OpenCode. On puts it in every tool. OpenCode has a copy Central Knot didn’t put there.');
+    assert.equal(statusLine(row, item, box.tools), 'In Central Knot and OpenCode. On puts it in every tool. OpenCode has a copy Central Knot didn’t put there.');
     assert.deepEqual(say.placeTag(fact!, item, box.tools), { text: 'in Central Knot and OpenCode', title: 'Central Knot keeps this skill and its versions. OpenCode has a copy Central Knot didn’t put there, left alone while the skill is off.' });
     assert.equal(switchLabel(row, item, box.tools), 'notes: off, in Central Knot and OpenCode. Click to put it in every tool; OpenCode has a copy of its own, which is kept as versions first.');
     // The Off click's result, from the row it was clicked on (matrix.ts turnOff): the copy OpenCode keeps there too.
@@ -540,7 +540,7 @@ test('A copy in ~/.agents/skills is not Central Knot’s: the tools that read it
     assert.equal(await readFile(join(shared, 'SKILL.md'), 'utf8'), skillText('In the shared folder.'), 'the shared folder is never written');
     const { fact, item, row } = await seen(box);
     assert.deepEqual(fact!.takeOver?.['codex-cli'], { kind: 'shared', path: shared });
-    assert.equal(statusLine(row, item, tools), 'On in Claude Code · Copilot CLI and Codex have it another way');
+    assert.equal(statusLine(row, item, tools), '');
     // Off: Claude Code's copy goes; the shared one stays, and the row says the tools that read it still have it.
     await turnOff(box);
     const off = await seen(box);
@@ -1123,7 +1123,7 @@ test('A switch set in a tool is left exactly as it is: the folder stays and the 
     assert.match(say.harnessLine({ ...row, switchedOff }, item, 'codex-cli', 'Codex'), /It is switched off in Codex’s own settings: Codex doesn’t load it/);
     assert.deepEqual(say.placeTag({ ...row, switchedOff }, item, tools), { text: 'switched off in Codex', title: 'Switched off in Codex’s own settings: each tool’s own switch, which Central Knot leaves as it is. The opened row can clear it.' });
     // Never on and off at once: Codex is not counted as on, and the switch is drawn partial with what it says.
-    assert.equal(statusLine({ ...row, switchedOff }, item, tools), 'On in Claude Code and Copilot CLI · switched off in Codex');
+    assert.equal(statusLine({ ...row, switchedOff }, item, tools), '');
     assert.equal(isPartial(item, tools, { ...row, switchedOff }), true);
     assert.match(switchLabel({ ...row, switchedOff }, item, tools), /^notes: on in 2 of 3 tools\./);
     // Switched off in every tool: never plain on.
