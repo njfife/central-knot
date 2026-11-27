@@ -69,6 +69,7 @@ const shownNow = () => JSON.stringify([repo.view, repo.problem, repo.checking]);
  * says why (`lastReadFailure`).
  */
 export async function loadRepo(check = false): Promise<void> {
+  clearTimeout(soon);
   const turn = ++loads;
   wantCheck ||= check;
   // A check already in flight is joined, never started again: once it ends, this load reads the page as it then is.
@@ -89,6 +90,8 @@ export async function loadRepo(check = false): Promise<void> {
   if (!inFlight) repo.checking = false;
   // Drawn only when the read changed what is shown: a redraw that changes nothing would replace a text field he is typing in, and its Undo.
   if (shownNow() !== shown) rerender();
+  // An overtaken check dropped its own status-bar line; the load that joined it announces what the check found.
+  if (joined && !failed && view?.connected && state.page === 'repo') announce(checkedText(view));
   if (!check || !view?.connected || !view.access.allowed || view.held) return;
   repo.checking = true;
   rerender();

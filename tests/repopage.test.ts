@@ -10,7 +10,7 @@ const api: { repo: (check?: boolean) => Promise<RepoView | null> } = { repo: asy
 const { announcement } = installDom(api as unknown as Record<string, unknown>, { byId: id => findById(rendered, id) ?? null });
 
 const { setRenderer, state: app } = await import('../src/app.ts');
-const { forgetRepoPrompts, repo, repoPage } = await import('../src/repopage.ts');
+const { forgetRepoPrompts, loadRepo, repo, repoPage } = await import('../src/repopage.ts');
 
 const UP_TO_DATE_CARD = 'Nothing to pull or push. Pull and Push show here when the repo or this computer changes.';
 const SIGN_IN_NOTE = 'Central Knot uses this computer’s git and the sign-in it already has (HTTPS or SSH). It never asks for or keeps a password or token.';
@@ -157,4 +157,22 @@ test('Check again appears only when up to date, is disabled while checking or re
   assert.equal(findById(rendered, 'repo-check'), undefined, 'Check again disappears once changes are found');
   assert.equal(announcement.textContent, 'Checked the repo: 1 to pull.');
   assert.equal(findById(rendered, 'repo-state')?.focused, 1, 'keyboard Check again moves focus to #repo-state when #repo-check goes away');
+
+  // An overlapping loadRepo(false) joining an in-flight Check again still announces what the check found.
+  let currentView: ConnectedRepoView = connected();
+  api.repo = async check => {
+    if (!check) return currentView;
+    return await new Promise<RepoView>(resolve => { finishFetch = resolve; });
+  };
+  forgetRepoPrompts(true);
+  repo.view = currentView;
+  renderRepo();
+  findById(rendered, 'repo-check')!.onclick!({ detail: 1 });
+  await settled();
+  const overlapping = loadRepo(false);
+  currentView = connected({ branchGone: true });
+  finishFetch!(currentView);
+  await overlapping;
+  await settled();
+  assert.equal(announcement.textContent, 'Checked the repo: its branch is gone.');
 });

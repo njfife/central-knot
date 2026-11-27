@@ -5272,7 +5272,7 @@ async function repoBaseFlow() {
   const PUSH_ONLY_CARD = 'Push commits this computer’s Managed set to the repo; other files stay as they are. Nothing moves until you click Push.';
   const SIGN_IN_NOTE = 'Central Knot uses this computer’s git and the sign-in it already has (HTTPS or SSH). It never asks for or keeps a password or token.';
   const MANAGED_NOTE = 'Only your Managed set goes to the repo: skills, MCP servers and agents in Central Knot (On or Off, not from plugins) and base instructions.';
-  const theme = (a, value) => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+  const theme = async (a, value) => { await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] }); await a.settle(); };
 
   // Not connected: standing intro gone; Connect note kept; sign-in note under Repo address; paths and Managed set words folded behind What goes where without linking out.
   await first.click('#nav-repo');
@@ -5310,8 +5310,8 @@ async function repoBaseFlow() {
   same('the first home saves a base and pushes it', [await setBase(first, 'Be brief.\n'), await api(first, `return (await api.connectRepo(${JSON.stringify(remote)}, '', home)).stopped ?? 'connected';`), await push(first)], ['saved', 'connected', 'pushed']);
   await first.click('#nav-overview');
   await first.click('#nav-repo');
-  // Wait for the pushed state to land: the first draw can still hold the pre-push view, then "Checking the repo…" while the fetch runs.
-  await until(async () => (await first.text('#repo-state') ?? '').includes('Up to date with the repo'));
+  // Wait for the pushed state and its check to finish: the first draw can still hold the pre-push view, then "Checking the repo…" while the fetch runs.
+  await until(async () => (await first.text('#announcement') ?? '').includes('Checked the repo: up to date.') && await first.exists('#repo-check:not([disabled])'));
   const connectedPageText = await first.text('.repo-page') ?? '';
   check('connected in-sync Git repo drops Refresh checks… and the scope aside, keeps the state line, and offers Check again',
     !(await first.exists('p.repo-in-sync')) && !(await first.exists('.repo-aside'))
@@ -5326,11 +5326,6 @@ async function repoBaseFlow() {
       same(`connected up-to-date Git repo fits at ${w}×${h}`, await first.run(CUT_OFF), []);
     });
   }
-  await first.run(`(() => { const a = document.getElementById('announcement'); a.textContent = ''; a.dataset.text = ''; })()`);
-  await first.click('#repo-check');
-  await until(async () => (await first.text('#announcement') ?? '').includes('Checked the repo: up to date.'));
-  check('Check again runs the repo check and announces up to date',
-    (await first.text('#announcement') ?? '').includes('Checked the repo: up to date.') && await first.exists('#repo-check:not([disabled])'), await first.text('#announcement'));
   if (shots) {
     await first.run(`document.activeElement?.blur?.()`);
     await sizeTo(first, 1316, 819);
@@ -5342,12 +5337,6 @@ async function repoBaseFlow() {
     await first.click('#repo-state-info');
     await first.shot('repo-state-card-860-light');
     await first.press('Escape');
-    await first.run(`document.activeElement?.blur?.()`);
-    await first.run(`(() => { const a = document.getElementById('announcement'); a.textContent = ''; a.dataset.text = ''; })()`);
-    await first.click('#repo-check');
-    await until(async () => (await first.text('#announcement') ?? '').includes('Checked the repo: up to date.'));
-    await first.run(`document.activeElement?.blur?.()`);
-    await first.shot('repo-check-result-860-light');
     await theme(first, 'dark');
   }
   await fullSize(first);
@@ -5421,13 +5410,15 @@ async function repoBaseFlow() {
   // Both actionable div.repo-in-sync branches via Check again, plus stale (unreachable) and held states.
   await first.click('#nav-overview');
   await first.click('#nav-repo');
-  await until(() => first.exists('div.repo-in-sync #repo-check:not([disabled])'));
+  // Wait for #nav-repo's own fetch to finish before pushing a new commit, so #repo-check is enabled when clicked.
+  await until(async () => (await first.text('#announcement') ?? '').includes('Checked the repo: up to date.') && await first.exists('div.repo-in-sync #repo-check:not([disabled])'));
   const extraClone = join(scratch, 'repo-extra-clone');
   git('clone', '--quiet', remote, extraClone);
   writeFileSync(join(extraClone, 'README.md'), '# Notes\n');
   git('-C', extraClone, '-c', 'user.name=Tester', '-c', 'user.email=tester@example.com', '-c', 'commit.gpgsign=false', 'add', 'README.md');
   git('-C', extraClone, '-c', 'user.name=Tester', '-c', 'user.email=tester@example.com', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'docs');
   git('-C', extraClone, 'push', '--quiet', 'origin', 'main');
+  await until(() => first.exists('#repo-check:not([disabled])'));
   await first.click('#repo-check');
   await until(() => first.exists('div.repo-in-sync #repo-pull'));
   check('Check again finds a newer commit, offers Pull in div.repo-in-sync, and announces it',
@@ -5445,6 +5436,20 @@ async function repoBaseFlow() {
   await first.click('#repo-pull');
   await until(() => first.exists('div.repo-in-sync #repo-check:not([disabled])'));
   check('Pulling the newer commit restores Check again and removes Pull', !(await first.exists('#repo-pull')) && await first.exists('#repo-check'));
+  if (await first.exists('#outcome-dismiss')) await first.click('#outcome-dismiss');
+  await first.click('#repo-check');
+  await until(async () => (await first.text('#announcement') ?? '').includes('Checked the repo: up to date.') && await first.exists('#repo-check:not([disabled])'));
+  check('Check again while up to date runs the repo check and announces up to date',
+    (await first.text('#announcement') ?? '').includes('Checked the repo: up to date.') && await first.exists('#repo-check:not([disabled])'), await first.text('#announcement'));
+  if (shots) {
+    await first.settle();
+    await first.run(`document.activeElement?.blur?.()`);
+    await sizeTo(first, 860, 560);
+    await theme(first, 'light');
+    await first.shot('repo-check-result-860-light');
+    await theme(first, 'dark');
+    await fullSize(first);
+  }
 
   git('--git-dir', remote, 'branch', '-m', 'main', 'archived');
   git('--git-dir', remote, 'symbolic-ref', 'HEAD', 'refs/heads/archived');
