@@ -22965,7 +22965,7 @@ async function pluginPageSaysLessFlow() {
  * let into OpenCode, whose box is unticked, counted there; and where no switch stands, why: Pi's own settings, his own copy (also
  * when it arrives behind the page, here and on the Library's own row, in the shared skills folder, and with Pi's box unticked),
  * a copy gone by hand, a kind Antigravity holds none of, an Off line, a deleted one and one the plugin no longer has; and after a
- * profile switched from the status bar, each switch drawn from the home its click acts on.
+ * background refresh under the open page (as after a profile switched from the menu bar), each switch drawn from the home its click acts on.
  */
 async function pluginItemSwitchesFlow() {
   const home = join(scratch, 'home-item-switches'), data = join(scratch, 'item-switches-data'), market = join(scratch, 'market-item-switches');
@@ -22983,9 +22983,6 @@ async function pluginItemSwitchesFlow() {
   put(join(market, `plugins/pair/skills/${long}/SKILL.md`), md(long, 'Long.'));
   put(join(market, 'plugins/pair/agents/checker.md'), '---\nname: checker\ndescription: Checks.\n---\nCheck.\n');
   put(join(home, '.pi/agent/skills/mine/SKILL.md'), mineInPi);
-  // pair is installed in Claude Code (its records alone; no tool runs), which keeps it on there whatever a profile says.
-  put(join(home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'ck-switch-market': { source: { source: 'directory', path: market }, installLocation: market } }));
-  writeClaudeInstall(home, 'ck-switch-market', 'pair', '1.0.0', { 'skills/mine/SKILL.md': md('mine', 'Plugin mine.'), [`skills/${long}/SKILL.md`]: md(long, 'Long.'), 'agents/checker.md': '---\nname: checker\ndescription: Checks.\n---\nCheck.\n' });
   for (const [bin, ver] of [['claude', '2.1.322 (Claude Code)'], ['pi', 'pi 0.1.0'], ['opencode', 'opencode 1.19.5'], ['agy', '1.5.14']]) {
     put(join(home, '.local/bin', bin), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${ver}" && exit 0\nexit 9\n`);
     chmodSync(join(home, '.local/bin', bin), 0o755);
@@ -23131,24 +23128,22 @@ async function pluginItemSwitchesFlow() {
   await done();
   same('Pi unticked with OpenCode ticked: mine has no Pi switch, its own copy said, his copy byte for byte', [await a.exists(sw('pair', 'pi-cli', 'skill', 'mine')), (await cell('skill', 'mine', 'Pi'))?.[0], readNow(join(home, '.pi/agent/skills/mine/SKILL.md'))],
     [false, 'Its own copy', mineInPi]);
-  // A profile switched from the status bar changes the home under the open page, whose plugins aren't read again: each switch is drawn
-  // from the home its click acts on. Quiet leaves checker out; Claude Code keeps it on with its plugin, so Quiet keeps it out of OpenCode.
-  await a.click('#nav-profiles');
-  await newProfile(a, 'Quiet');
-  await a.click(byId(`pf-plugin:skill:pair@ck-switch-market/${long}`));
-  await done();
-  await a.click('#nav-plugins');
-  await openPage('pair');
+  // The home read again under the open page by the app itself (a background refresh, which a profile switched from the menu bar makes
+  // too), the plugins view not: checker kept out of OpenCode behind the page; its switch is drawn from the home its click acts on.
   const ocChecker = sw('pair', 'opencode-cli', 'agent', 'checker');
   const drawnNow = () => a.run(`(() => { const s = document.querySelector('${ocChecker}'); return s ? [s.getAttribute('aria-checked'), s.title.split('.')[0]] : null; })()`);
-  same('before the switch, checker is on in OpenCode', await drawnNow(), ['true', 'checker in OpenCode: on']);
-  await a.click('#status-profile');
-  await a.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes('Quiet')).click()`);
-  await done();
-  same('Quiet, switched from the status bar, keeps checker out of OpenCode under the open page: its switch says so, drawn from the home its click acts on', await drawnNow(), ['false', 'checker in OpenCode: kept out']);
-  await a.click(ocChecker);
-  await done();
-  same('its click does what it said: checker is on in OpenCode again', await drawnNow(), ['true', 'checker in OpenCode: on']);
+  same('before, checker is on in OpenCode', await drawnNow(), ['true', 'checker in OpenCode: on']);
+  if (a.inspect) {
+    await a.run(`(async () => { const view = await window.centralKnot.refresh(), now = view.agents.library.checker;
+      await window.centralKnot.applyAgents([{ key: 'checker', on: true, except: [...now.except, 'opencode-cli'], seenOn: true }], false, view.home); })()`);
+    const menu = await mainHelpers(a.inspect);
+    try { await menu.tellPage('sync:changed'); } finally { menu.close(); }
+    await until(async () => (await drawnNow())?.[0] === 'false');
+    same('after a background refresh under the open page, checker’s switch says what the home it acts on has: kept out of OpenCode', await drawnNow(), ['false', 'checker in OpenCode: kept out']);
+    await a.click(ocChecker);
+    await done();
+    same('its click does what it said: checker is on in OpenCode again', await drawnNow(), ['true', 'checker in OpenCode: on']);
+  } else console.log('No main-process inspector: skipping the background refresh under an open plugin page.');
   // checker's copy in OpenCode moved away by hand behind the page: the switch drawn before is refused, nothing is written, no click recorded.
   const ocAgent = ['agents', 'agent'].map(dir => join(home, '.config/opencode', dir, 'checker.md')).find(path => existsSync(path)), aside = join(scratch, 'item-switches-checker-aside.md');
   check('checker has its copy in OpenCode', !!ocAgent, readdirSync(join(home, '.config/opencode')));
