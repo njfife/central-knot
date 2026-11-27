@@ -1,9 +1,10 @@
-// A tool's Manage switch, on its card on the Harnesses list: the switch (with one Managed (?) card on the first managed tool),
-// an unmanaged tool's line saying what turning it on would do there before a click, and the band after a click. The engine is
-// toolchoice.ts: chooseTools turns it, and what turning a left-out tool on would do there is counted by its whatJoiningDoes,
-// which reaches the page in the view (types.ts SyncView joining). The band says what the pass after the click did there, from
-// its results (main.ts `tools:manage`, `did`). The cards themselves, the left-out one included, are harnesspage.ts's.
-import { acting, busy, clickResumes, setHome, state, tell } from './app.ts';
+// A tool's Manage switch, on its card on the Harnesses list, and the shared Manage click/summary used by History's Manage
+// entries (historypage.ts): the switch (with one Managed (?) card on the first managed tool), an unmanaged tool's line saying
+// what turning it on would do there before a click (onLine), the click (manageTool), and the band after a click (doneWords).
+// The engine is toolchoice.ts: chooseTools turns it, and what turning a left-out tool on would do there is counted by its
+// whatJoiningDoes, which reaches the page in the view (types.ts SyncView joining). The band says what the pass after the click
+// did there, from its results (main.ts `tools:manage`, `did`). The cards themselves, the left-out one included, are harnesspage.ts's.
+import { acting, busy, clickResumes, focusWhenDone, putHistory, setHome, state, tell } from './app.ts';
 import { h, infoMark, toggle } from './dom.ts';
 import { plural } from './model.ts';
 import { market } from './pluginstate.ts';
@@ -36,7 +37,7 @@ export function manageRow(home: HomeView, tool: HarnessId, showInfo = false): HT
   const line = !why && !on ? h('span.harness-manage-line', { id: `manage-${tool}-line` }, onLine(home, tool)) : null;
   return h('div.harness-manage', {},
     h('span.harness-manage-head', mark ? { 'data-info-block': true } : {},
-      toggle({ on, label, id: `manage-${tool}`, disabled: why ?? acting(), onchange: next => void manageTool(tool, next),
+      toggle({ on, label, id: `manage-${tool}`, disabled: why ?? acting(), onchange: next => void manageTool(tool, next, home.home),
         attrs: line ? { 'aria-describedby': `manage-${tool}-line` } : {} }),
       h('span.harness-manage-label', {}, on ? 'Managed' : 'Not managed'),
       mark),
@@ -49,18 +50,18 @@ const MANAGE_INFO = 'Turning a tool off keeps its copies. Central Knot stops wri
 const SYNC_OFF = 'With Automatic sync off, Sync once brings it into line; a click on an item brings that item.';
 
 /**
- * Said beside the switch of a tool left out, before a click turns it on: what the pass then does there, counted from the same
- * look (types.ts JoinCounts). What would change in the tool comes first, said as Central Knot's version replacing the tool's.
+ * Said beside the switch of a tool left out, and in History's Manage-again question, before a click turns it on: what the pass
+ * then does there, counted from the same look (types.ts JoinCounts). What is kept comes before what is written.
  */
-function onLine(home: HomeView, tool: HarnessId): string {
+export function onLine(home: HomeView, tool: HarnessId, lead = 'On: '): string {
   const { written, kept, removed, found, takenIn } = home.sync.joining[tool] ?? { written: 0, kept: 0, removed: 0, found: 0, takenIn: 0 };
   const changes = [
-    written ? `Central Knot’s version written there for ${plural(written, 'item')}` : '',
-    kept ? `${plural(kept, 'copy there that differs', 'copies there that differ')} kept as ${kept === 1 ? 'a version' : 'versions'} first` : '',
-    removed ? (removed === 1 ? '1 copy of an item that is off removed' : `${removed} copies of items that are off removed`) : '',
+    kept ? `keeps ${plural(kept, 'copy there that differs', 'copies there that differ')} as ${kept === 1 ? 'a version' : 'versions'}` : '',
+    written ? `writes Central Knot’s version of ${plural(written, 'item')} there` : '',
+    removed ? (removed === 1 ? 'removes 1 copy of an item that is off' : `removes ${removed} copies of items that are off`) : '',
   ].filter(Boolean);
-  const besides = [takenIn ? `${plural(takenIn, 'found item')} taken in by Synchronize everything` : '', found ? `${plural(found, 'found item')} shown under Found` : ''].filter(Boolean);
-  const then = `On: ${changes.length ? listed(changes) : `no item in ${names[tool]} would change`}${besides.length ? `; ${listed(besides)}` : ''}.`;
+  const besides = [takenIn ? `takes in ${plural(takenIn, 'found item')} by Synchronize everything` : '', found ? `shows ${plural(found, 'found item')} under Found` : ''].filter(Boolean);
+  const then = `${lead}${changes.length ? listed(changes) : `changes no item in ${names[tool]}`}${besides.length ? `; ${listed(besides)}` : ''}.`;
   // A tool managed again gets each plugin that is on and not kept out of it, while the automatic updates run by themselves
   // (pluginrecord.ts, pluginupdates.ts): said only where such a plugin is listed, as the marketplaces were last read.
   const bring = !!market.view?.marketplaces.some(entry => Object.values(entry.switches ?? {}).some(sw => !!sw.entry && wantedIn(sw.entry, tool)));
@@ -70,13 +71,19 @@ function onLine(home: HomeView, tool: HarnessId): string {
 }
 const listed = (clauses: string[]) => (clauses.length < 2 ? clauses.join('') : `${clauses.slice(0, -1).join(', ')} and ${clauses.at(-1)}`);
 
-/** The switch's click: chooseTools in main's queue, then the home as read after it; the band says what that pass did there. */
-const manageTool = (tool: HarnessId, on: boolean) => busy(on ? `Managing ${names[tool]}…` : `Leaving ${names[tool]} out…`, async () => {
+/** The Manage click, shared by Harnesses and History: chooseTools in main's queue, then the home (and History, when open) read again, with the result shown on the page clicked. */
+export const manageTool = (tool: HarnessId, on: boolean, expectedHome: string) => busy(on ? `Managing ${names[tool]}…` : `Leaving ${names[tool]} out…`, async page => {
   const home = state.home!;
-  const done = await window.centralKnot.manageTool(tool, on, clickResumes(home), home.home);
-  if (done.view) setHome(done.view);
-  if (done.stopped) { tell({ page: 'harnesses', band: true, warn: true, text: `Nothing changed: ${done.stopped}` }); return; }
-  tell({ page: 'harnesses', band: true, ...doneWords(tool, on, home.syncOn, done.did) });
+  const done = await window.centralKnot.manageTool(tool, on, clickResumes(home), expectedHome);
+  if (done.view) setHome(done.view, { reload: state.page !== 'history' });
+  if (done.view && state.page === 'history') {
+    await putHistory();
+    const latest = [...(state.history.data ?? [])].reverse().find(event => event.kind === 'managing' && event.managing?.tool === tool);
+    if (latest) focusWhenDone(done.view.sync.present.includes(tool) && done.view.sync.managed.includes(tool) === latest.managing?.on ? `history-${latest.id}` : `history-row-${latest.id}`);
+  }
+  if (done.stopped) return tell({ page, band: true, historyBand: true, warn: true, text: done.full ? done.stopped : `Nothing changed: ${done.stopped}` });
+  const said = doneWords(tool, on, done.view?.syncOn ?? home.syncOn, done.did);
+  tell({ page, band: true, historyBand: true, ...said, note: page === 'history' ? undefined : said.note });
 });
 
 /** The band after a click: for On, what the pass did in the tool, from its results (`did`), not what the line counted before. */
