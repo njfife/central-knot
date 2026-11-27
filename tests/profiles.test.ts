@@ -743,6 +743,8 @@ test('Each writer leaves a format 3 file format 3 (a rename, a delete and its Un
     const filled = (await one(other))!;
     await deleteProfile(box.context, other);
     assert.deepEqual([(await profilesFile(box)).formatVersion, await one(dev)], [4, { ...owned, name: 'Dev' }]);
+    // Since the delete, dev kept out of Codex by hand: the profile comes back with its own `out`, not one filled in again.
+    await applySkills(box.context, box.tools, [{ key: 'dev', on: true, except: ['codex-cli'], seenOn: true }]);
     await saveProfile(box.context, { ...filled, restore: true });
     assert.deepEqual(await one(other), filled, 'Undo of Delete brings its `out` back');
     assert.deepEqual(await profilesNaming(box.context, ['skill:pager'], 'skill:pager-root'), ['Dev']);
