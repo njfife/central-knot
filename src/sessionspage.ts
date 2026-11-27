@@ -168,24 +168,26 @@ function modelLines(models: ModelCost[], prefix: string) {
   })];
 }
 
-/** Notes whether a `<details>` was opened or closed, by its key, and gives it back. */
-const noteToggle = (key: string, event: Event) => {
+/** Notes whether a `<details>` was opened or closed, by its key, building/clearing a lazy body and updating wrapped separators. */
+function noteToggle(key: string, event: Event, later?: () => Node) {
   const box = event.currentTarget as HTMLDetailsElement;
-  if (box.open) opened.add(key);
-  else opened.delete(key);
-  return box;
-};
+  if (box.open) {
+    opened.add(key);
+    if (later && box.childElementCount === 1) box.append(later());
+    markWrapped(box);
+  } else {
+    opened.delete(key);
+    if (later && box.childElementCount > 1) box.lastElementChild!.remove();
+  }
+}
 /** A `<details>` kept open across redraws by `key`. */
 const kept = (key: string, ...children: (Node | null)[]) => h('details', { open: opened.has(key), ontoggle: (event: Event) => noteToggle(key, event) }, ...children);
 /**
  * A `<details>` kept open as `kept` is, whose body `later` is there only while it is open: built on a draw then and on its
  * opening, taken out on its closing.
  */
-const keptLater = (key: string, summary: Node, later: () => Node) => h('details', { open: opened.has(key), ontoggle: (event: Event) => {
-  const box = noteToggle(key, event);
-  if (box.open && box.childElementCount === 1) box.append(later());
-  if (!box.open && box.childElementCount > 1) box.lastElementChild!.remove();
-} }, summary, opened.has(key) ? later() : null);
+const keptLater = (key: string, summary: Node, later: () => Node) => h('details', { open: opened.has(key), ontoggle: (event: Event) => noteToggle(key, event, later) },
+  summary, opened.has(key) ? later() : null);
 
 /** Total nested agent sessions under `row`, derived recursively from `row.children`. */
 const agentCount = (row: SessionRow): number => row.children.reduce((sum, child) => sum + 1 + agentCount(child), 0);
@@ -286,8 +288,9 @@ function readingView(rows: DayRows | PeriodRows, home: HomeView) {
 }
 
 /** Marks the last item before a wrapped flex line on Sessions so wrapped rows neither lead with nor dangle a separator dot. */
-afterLayout(() => {
-  for (const box of document.querySelectorAll<HTMLElement>('.sessions-sep, .sessions-cost')) {
+function markWrapped(root: ParentNode = document) {
+  for (const box of root.querySelectorAll?.<HTMLElement>('.sessions-sep, .sessions-cost') ?? []) {
+    if (!box.getClientRects().length) continue;
     const kids = [...box.children] as HTMLElement[];
     for (const kid of kids) kid.removeAttribute('data-line-end');
     for (let i = 0; i < kids.length - 1; i++) {
@@ -297,7 +300,8 @@ afterLayout(() => {
       if (!wrapped()) kids[i]!.setAttribute('data-line-end', 'hide');
     }
   }
-});
+}
+afterLayout(() => markWrapped());
 
 /** Turns keeping session costs on or off for the home on screen; ignores repeat clicks while saving and shows any refusal verbatim inline. */
 async function changeKeeping(on: boolean): Promise<void> {
