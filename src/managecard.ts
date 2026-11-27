@@ -137,7 +137,8 @@ function joiningWords(home: HomeView, tool: HarnessId, { counts, plugins }: Fore
   return [
     changes.length || unread.length ? '' : `Changes no item in ${n}.`, ...changes,
     takenIn ? `Takes ${takenIn} of ${n}’s items into the Library (Synchronize everything is on).` : '',
-    found ? `${found} other ${found === 1 ? 'item stays' : 'items stay'} ${n}’s own: ${found === 1 ? 'it' : 'they'} will show under Found in the Library.` : '',
+    // "Other" only after an item named or counted before it.
+    found ? `${found}${changes.length || takenIn ? ' other' : ''} ${found === 1 ? 'item stays' : 'items stay'} ${n}’s own: ${found === 1 ? 'it' : 'they'} will show under Found in the Library.` : '',
     unread.length ? `${n}’s ${andList(unread.map(kind => kindNames[pageOfPart[kind]]))} couldn’t be read, so what it does to them isn’t known.` : '',
     plugins ? `${n} also gets each plugin that is on and not kept out of it.` : '', home.syncOn ? '' : SYNC_OFF,
   ].filter(Boolean).join(' ') + resumeWords(home);

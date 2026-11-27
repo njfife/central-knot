@@ -1222,7 +1222,7 @@ async function manageFlow() {
   const asking = () => waitHistory(a, () => a.run(`!!document.getElementById('manage-codex-cli-confirm') || /couldn’t|no longer/.test(document.getElementById('manage-codex-cli-text')?.textContent ?? '')`));
   await a.click('#manage-codex-cli');
   await asking();
-  const nothingYet = 'Changes no item in Codex. 2 other items stay Codex’s own: they will show under Found in the Library.';
+  const nothingYet = 'Changes no item in Codex. 2 items stay Codex’s own: they will show under Found in the Library.';
   same('pressed, the switch asks in the card, Cancel focused, and turns nothing yet', [
     await a.text('#manage-codex-cli-text'), await a.all('#harness-codex-cli .manage-question button', 'e.textContent'), await a.run(`document.activeElement?.id`),
     await a.run(`document.getElementById('manage-codex-cli').getAttribute('aria-checked')`), codex(),
@@ -1402,14 +1402,21 @@ async function manageFlow() {
   same('and the status bar’s switch has nothing to sync', await a.text('#sync-switch .sync-state'), 'Nothing to sync');
   await fitsAtMinimum(a, 'a home with every tool left out');
   await a.click('#overview-open-harnesses');
-  // The longest name's question in a card at the smallest size: Cancel and Manage Claude Code each on one line, in the card.
+  // The longest name's question in a card at the smallest size, and in the narrowest card the page draws (240 px): Cancel and
+  // Manage Claude Code each on one line and inside the question's box (a button that doesn't fit beside the other wraps whole).
   await sizeTo(a, ...SMALLEST);
   await a.click('#manage-claude-cli');
   await waitHistory(a, () => a.exists('#manage-claude-cli-confirm'));
-  same('Cancel and Manage Claude Code fit a card at 860, each on one line', await a.run(`(() => {
-    const card = document.getElementById('harness-claude-cli').getBoundingClientRect();
-    return ['cancel', 'confirm'].map(part => { const b = document.getElementById('manage-claude-cli-' + part), r = b.getBoundingClientRect(); return [b.scrollWidth <= b.clientWidth, r.height <= 30, r.left >= card.left, r.right <= card.right]; });
-  })()`), [[true, true, true, true], [true, true, true, true]]);
+  const fits = () => a.run(`(() => {
+    const box = document.querySelector('#harness-claude-cli .manage-question'), style = getComputedStyle(box), outer = box.getBoundingClientRect();
+    const left = outer.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft), right = outer.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight);
+    return ['cancel', 'confirm'].map(part => { const b = document.getElementById('manage-claude-cli-' + part), r = b.getBoundingClientRect(); return [b.scrollWidth <= b.clientWidth, r.height <= 30, r.left >= left - 0.5, r.right <= right + 0.5]; });
+  })()`);
+  const inside = [[true, true, true, true], [true, true, true, true]];
+  same('Cancel and Manage Claude Code each fit inside the question’s box at 860, each on one line', await fits(), inside);
+  await a.run(`document.querySelector('.harness-cards').style.gridTemplateColumns = 'repeat(3, 240px)'`);
+  same('and inside it in the narrowest card the page draws', await fits(), inside);
+  await a.run(`document.querySelector('.harness-cards').style.gridTemplateColumns = ''`);
   await shotAt(a, 'question-claude-860-light', SMALLEST, 'light');
   await a.click('#manage-claude-cli-confirm');
   await fullSize(a);

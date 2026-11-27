@@ -63,7 +63,7 @@ test('What managing it does changed before Manage Codex: main turns nothing, and
   open({ syncOn: false });
   answers.read = { counts: counts({ found: 1 }), plugins: false };
   await press('manage-codex-cli');
-  assert.equal(question(), 'Changes no item in Codex. 1 other item stays Codex’s own: it will show under Found in the Library. With Automatic sync off, Sync once brings it into line; a click on an item brings that item.');
+  assert.equal(question(), 'Changes no item in Codex. 1 item stays Codex’s own: it will show under Found in the Library. With Automatic sync off, Sync once brings it into line; a click on an item brings that item.');
   const now = counts({ kept: 1, written: 1, found: 1, changing: [item('standup', 'write', 1)] });
   answers.manage = { changed: now, view: null, did: [] };
   await press('manage-codex-cli-confirm');
