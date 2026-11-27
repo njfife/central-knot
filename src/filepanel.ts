@@ -24,10 +24,11 @@ import { andList, toolNames } from './words.ts';
 export interface OpenFile { id: string; token: string; file: string; copy?: { tool: HarnessId; rootLabel?: string }; directory?: string; files?: string[]; loaded?: { text?: string; note?: string; parts?: VersionPart[]; holder?: string } | null }
 /**
  * Where a file panel is drawn: the file open there (`view.openFile`), the tool whose copy it offers first (`tool`: a tool's tab's),
- * what the place does as a file opens for an item (`opening`) and once one newly opened is read (`reveal`). A table's say what a
- * table does (matrix.ts fileHooks).
+ * whether its panels begin with the item's name (`named`: where nothing beside them names it, the Overview's), what the place
+ * does as a file opens for an item (`opening`) and once one newly opened is read (`reveal`). A table's say what a table does
+ * (matrix.ts fileHooks).
  */
-export interface FilePlace { tool?: Tool; view: { openFile?: OpenFile }; opening?: (id: string) => void; reveal?: (id: string) => void }
+export interface FilePlace { tool?: Tool; view: { openFile?: OpenFile }; named?: boolean; opening?: (id: string) => void; reveal?: (id: string) => void }
 
 
 export type CatalogTarget = { kind: 'catalog'; hit: SearchHit };
@@ -39,7 +40,7 @@ const isAgentRow = (target?: FileTarget): target is ItemRow & { kind: 'agents' }
 const isServerRow = (target?: FileTarget): target is ItemRow & { kind: 'mcp' } => target?.kind === 'mcp' && !('marketName' in target);
 /** The tools whose settings file has a server's entry: one taken in (its copy's path) or not (LibraryFacts namedIn). */
 const entryTools = (row: ItemRow) => [...Object.keys(row.paths ?? {}) as HarnessId[], ...row.namedIn ?? []];
-export const fileTargetId = (target: FileTarget) => (isCatalogHit(target) ? target.hit.id : idOf(target));
+const fileTargetId = (target: FileTarget) => (isCatalogHit(target) ? target.hit.id : idOf(target));
 const fileTargetName = (target: FileTarget) => (isCatalogHit(target) ? target.hit.item!.name : isPluginRow(target) ? target.name : target.name ?? target.key);
 /** An agent's or a server's current version as Central Knot holds it (storedOf): an agent's parts Read shows (readDefinition), a server's stored file. */
 const DEFINITION = 'Central Knot’s definition';
@@ -81,10 +82,20 @@ const copyToken = (copy?: FileCopy) => (copy?.hash ? `${copy.hash}:${copy.realDi
  * Whether a row has the file mark (fileButton; the reconcile in drawTable asks it too): a skill with a stored version or a copy,
  * a marketplace skill hit with its path, every ordinary agent, an ordinary server but one whose only entry is Codex's.
  */
-export const hasFile = (t: FilePlace, target: FileTarget) => (isCatalogHit(target) ? target.hit.item?.kind === 'skill' && !!target.hit.item.path
+const hasFile = (t: FilePlace, target: FileTarget) => (isCatalogHit(target) ? target.hit.item?.kind === 'skill' && !!target.hit.item.path
   : !!storedOf(t, target) || fileCopies(t, target).length > 0);
+/**
+ * A place's open file against the targets it shows now (`shown`), at each draw: its target, read again where its copy changed
+ * (syncOpenFile); none, the file let go, where no target shown is it or it has no file any more.
+ */
+export function keepOpenFile(t: FilePlace, shown: readonly FileTarget[]): FileTarget | undefined {
+  const open = t.view.openFile, target = open && shown.find(each => fileTargetId(each) === open.id && hasFile(t, each));
+  if (target) syncOpenFile(t, target, open!);
+  else t.view.openFile = undefined;
+  return target;
+}
 /** Reloads an open inline file panel when its stored version, found copy, agent's or server's copy, plugin copy, or marketplace copy changes (or its chosen copy disappears). */
-export function syncOpenFile(t: FilePlace, target: FileTarget, open: OpenFile) {
+function syncOpenFile(t: FilePlace, target: FileTarget, open: OpenFile) {
   const offered = storedOf(t, target), copies = fileCopies(t, target);
   // Its stored text shown (no copy chosen, or none left to show), or a marketplace hit's copy.
   if ((offered && !(open.copy && copies.length)) || isCatalogHit(target)) {
@@ -109,8 +120,8 @@ const readDefinition = (key: string, hash: string): Promise<PanelRead | null> =>
  * in the chosen tool (or its definition), or a server's entry in the chosen tool (its definition where `asked` is DEFINITION, or
  * no tool has an entry), or closes the file, refocusing its mark when asked. An agent has one file, its holder's (or its
  * definition), so `asked` is not read for it.
- * An open row keeps its details: the file takes their place (openedPart) and closing it brings them back; a copy question is
- * closed instead, the file opening alone.
+ * The place is told as a file opens (FilePlace opening: a table closes the row's copy question, the file opening alone) and
+ * once one newly opened is read (FilePlace reveal).
  */
 export function setFile(t: FilePlace, target?: FileTarget, asked?: string, refocus = false, event?: Event, draw = true, copy?: FileCopy) {
   event?.stopPropagation();
@@ -172,10 +183,11 @@ export function fileButton(t: FilePlace, target: FileTarget) {
 /**
  * A skill's, an agent's or a server's open file: wrapping tabs (an agent's and a server's one: a label), copy chooser where copies
  * differ (an agent: each tool with a copy; a server: each tool with an entry, then its definition), close mark, fileBlocks
- * body and path footer (a server's entry: its settings file). Under its closed row alone; `back` is the "‹ Back to details" over
- * it in its open row's details' place, under the row or in the dock (openedPart).
+ * body and path footer (a server's entry: its settings file), the item's name first where the place asks (FilePlace named).
+ * Under its closed row alone; `back` is the "‹ Back to details" over it in its open row's details' place, under the row or in
+ * the dock (openedPart). `bare`: no band of its own (the dock's, the Overview's).
  */
-export function filePanel(t: FilePlace, target: FileTarget, open: OpenFile, placement: 'row' | 'dock' = 'row', back?: HTMLElement) {
+export function filePanel(t: FilePlace, target: FileTarget, open: OpenFile, bare = false, back?: HTMLElement) {
   const id = fileTargetId(target);
   const name = fileTargetName(target);
   const offered = storedOf(t, target), stored = !!offered && !open.copy;
@@ -220,15 +232,16 @@ export function filePanel(t: FilePlace, target: FileTarget, open: OpenFile, plac
   // entry says where in the file it is, left of its chooser or label (its chooser names it where there is one).
   const label = h(`span.file-open-name${stored ? '.file-open-definition' : ''}`, {}, open.file);
   const lead = isServerRow(target) && h('span.file-open-lead', {}, open.loaded?.holder ? h('span.file-open-where', {}, `In ${open.loaded.holder}`) : null, chooser ? null : label);
-  return h(`div.details.details-file-only${placement === 'dock' ? '.details-bare' : ''}`, { role: 'region', 'aria-label': `File for ${name}` }, back ?? null, h('div.file-open-box', {},
-    h('div.file-open-head', {}, isAgentRow(target) ? label : lead || h('span.file-open-tabs', { role: 'tablist', 'aria-label': `Files in ${name}` }, tabs.map(tab)),
-    h('span.file-open-controls', {}, chooser, close)),
+  const shows = isAgentRow(target) ? label : lead || h('span.file-open-tabs', { role: 'tablist', 'aria-label': `Files in ${name}` }, tabs.map(tab));
+  return h(`div.details.details-file-only${bare ? '.details-bare' : ''}`, { role: 'region', 'aria-label': `File for ${name}` }, back ?? null, h('div.file-open-box', {},
+    h('div.file-open-head', {}, t.named ? h('span.file-open-named', {}, h('strong.file-open-item', {}, name), shows) : shows,
+      h('span.file-open-controls', {}, chooser, close)),
     ...body, h('div.file-open-foot', {}, ...foot)));
 }
 /**
- * Sizes the open file's box to what its scroll container (the list, the dock, the Overview's page) leaves under it, at most what is left once what
- * it opened from (its row; in the dock, the dock's top) is at the container's top, never under eight lines of its last block's text
- * (an agent's definition: its prompt; openRow's and setFile's revealUnderRow bring it into view).
+ * Sizes the open file's box to what its scroll container (the list, the dock, the Overview's page) leaves under it, at most what
+ * is left once its row (elsewhere, the top of what scrolls) is at the container's top, never under eight lines of its last
+ * block's text (an agent's definition: its prompt). A place's reveal (FilePlace) brings it into view.
  */
 function settleFileBox(): void {
   const box = document.querySelector<HTMLElement>('.file-open-box'), scroller = box?.closest<HTMLElement>('.scroll');

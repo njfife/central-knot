@@ -799,6 +799,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .select.file-copy-select .icon { right: 6px; }
 .file-open-close { color: var(--ink-soft); }
 .file-open-foot { border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-soft); }
+/* The item's name first, where nothing beside the panel names it (filepanel.ts FilePlace named: the Overview's). */
+.file-open-named { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.file-open-item { font-weight: 600; overflow-wrap: anywhere; }
+.file-open-item::after { content: "·"; margin-left: 8px; font-weight: 400; color: var(--ink-faint); }
 .file-open-tabs { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
 .file-tab { appearance: none; max-width: 100%; overflow-wrap: anywhere; border: 1px solid transparent; border-radius: 6px; padding: 2px 8px; background: transparent; color: var(--ink-soft); font: 500 11.5px/16px var(--mono); cursor: pointer; }
 .file-tab.is-active { background: var(--surface); border-color: var(--control-line); color: var(--ink); box-shadow: var(--lift); }
@@ -1053,7 +1057,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
  */
 /* A card's file panel (overview.ts kindCards) spans the row after its card: dense, the cards after it fill the row it left. */
 .kind-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-flow: row dense; gap: 12px; }
-.kind-cards > .details-file-only { grid-column: 1 / -1; margin: 0; padding: 0; border: 0; background: none; box-shadow: none; }
+.kind-cards > .details-file-only { grid-column: 1 / -1; }
 .kind-cards[data-count="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .kind-cards[data-count="1"] { grid-template-columns: minmax(0, 1fr); }
 .kind-card { position: relative; display: flex; flex-direction: column; align-items: stretch; padding-bottom: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); text-align: left; }
@@ -1074,16 +1078,19 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .kind-card-state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 /*
  * What the usage reading says of the kind (overview.ts cardUsage): room for four lines whatever it holds, so the card is as high
- * before a reading lands as after. The three most used share columns: the label, the name (shortened in the middle), the
- * sessions; a line across them (.kind-card-line) sizes none of them.
+ * before a reading lands as after, 4 px apart so the file marks one above another never touch. The three most used share
+ * columns: the label, the name (shortened in the middle) and its mark, the sessions; a line across them (.kind-card-line) sizes
+ * none of them.
  */
-.kind-card-usage { display: grid; grid-template-columns: max-content minmax(0, max-content) 1fr; grid-template-rows: repeat(4, 20px); column-gap: 8px; align-content: start;
+.kind-card-usage { display: grid; grid-template-columns: max-content minmax(0, max-content) 1fr; grid-template-rows: repeat(4, 20px); gap: 4px 8px; align-content: start;
   padding: 10px 16px 0; font-size: 12.5px; line-height: 20px; color: var(--ink-soft); }
 .kind-card-line { grid-column: 1 / -1; margin: 0; white-space: nowrap; }
 .kind-card-top-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; margin: 0; white-space: nowrap; }
 .kind-card-link { position: relative; z-index: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--accent-ink); font: inherit; cursor: pointer; text-align: left; }
 .kind-card-link:hover { text-decoration: underline; }
 .kind-card-top-name { display: flex; }
+/* Most used, a link into the Library: its arrow follows its words. */
+.kind-card-sorted { display: inline-flex; align-items: center; gap: 2px; }
 /* A most used name, then its file mark (filepanel.ts fileButton), over the card's own button and as high as the line. */
 .kind-card-top-item { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .kind-card-top-item > .row-file-btn { position: relative; z-index: 1; width: 20px; height: 20px; margin-left: 0; }

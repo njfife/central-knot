@@ -5,8 +5,9 @@
 // whether it is in sync, then what the usage reading says of it, its most used each with its file opening under the card:
 // kindCards, cardFiles, a place of filepanel.ts's); the usage strip (usageStrip, with one link to everything unused); a row per
 // managed tool (toolsTable: its version, what it has of each kind and of plugins, its sessions in the last 30 days); and where
-// every change is kept. Nothing is stored, and opening it reads nothing more than the home's view. The figures come from that view, the usage reading on show and its sum (matrix.ts usageOnShow, usageSums, unusedCount:
-// usagerow.ts usageSummary), Harnesses' counts (harnesspage.ts tally, pluginstatus.ts pluginsInstalled) and the update state
+// every change is kept. Nothing is written, and opening it reads nothing more than the home's view; what it keeps between draws
+// is the file open under a card (cardFiles), for its home and visit. The figures come from that view, the usage reading on show
+// and its sum (matrix.ts usageOnShow, usageSums, unusedCount: usagerow.ts usageSummary), Harnesses' counts (harnesspage.ts tally, pluginstatus.ts pluginsInstalled) and the update state
 // (updateview.ts updateLine). While a home's first reading runs (matrix.ts firstReadingRuns) every place a reading fills is
 // drawn at its final size, so nothing moves when it lands. The Library opens through matrix.ts openKind. Not here: the empty
 // states every page shares (pages.ts noToolsLead, notRead, previewReason) and first setup's question (firstsetup.ts setupLead).
@@ -14,7 +15,7 @@ import { absentKinds, collectUsage, homeTools, loadHome, noToolManaged, practice
 import { acting, showPage, state, syncNow, whyReadOnly, type PageKind } from './app.ts';
 import { brandMark } from './brand.ts';
 import { button, h, icon, middle } from './dom.ts';
-import { fileButton, filePanel, fileTargetId, hasFile, setFile, syncOpenFile, type FilePlace } from './filepanel.ts';
+import { fileButton, filePanel, keepOpenFile, setFile, type FilePlace } from './filepanel.ts';
 import { setupLead } from './firstsetup.ts';
 import { goHarness, tally } from './harnesspage.ts';
 import { anyOn, kindSource } from './itemrow.ts';
@@ -155,29 +156,35 @@ function usedWords(total: number, sum: KindUsage | undefined): string {
 }
 
 /** The three most used a card names: none where no row of the kind has a figure (KindUsage figured). */
-const topNamed = (total: number, sum: KindUsage | undefined) => (total && sum?.figured ? sum.mostUsed : []);
+/**
+ * The three most used a kind's card names, none where no row of it has a figure (KindUsage figured), each with its row as the
+ * Library finds it (matrix.ts rowOf): worked out once a draw (kindCards), for the card's names and marks and for its file.
+ */
+const topRows = (home: HomeView, kind: PageKind) => {
+  const sum = usageSums()?.kinds[kind], shown = rowCount(home, kind) && sum?.figured ? sum.mostUsed : [];
+  return shown.map(each => ({ ...each, row: rowOf(kind, each.key) }));
+};
+type TopRow = ReturnType<typeof topRows>[number];
 
 /**
  * What the usage reading says of a kind: how many were used (usedWords), followed by either why no tool can tell or the three
- * most used under Most used, a link to the Library sorted by most used; each a link to its row with its name shortened in the
- * middle, then its file mark (filepanel.ts fileButton: its file opens under the card, cardFiles). Its four lines' room is held
- * by style.css (.kind-card-usage), so the card is as high before a reading lands as after.
+ * most used (`top`) under Most used, a link to the Library in that order (its kept Sort left as it was); each a link to its row,
+ * its name shortened in the middle, its hover saying so, then its file mark (filepanel.ts fileButton: its file opens under the
+ * card, cardFiles). Its four lines' room is held by style.css (.kind-card-usage), so the card is as high before a reading lands as after.
  */
-function cardUsage(kind: PageKind, total: number, sum: KindUsage | undefined) {
-  const used = usedWords(total, sum), top = topNamed(total, sum);
+function cardUsage(kind: PageKind, total: number, sum: KindUsage | undefined, top: TopRow[]) {
+  const used = usedWords(total, sum);
   const cant = total && sum && !sum.figured ? 'No tool that has them on can tell.' : null;
-  const sorted = h('button.kind-card-link', { type: 'button', id: `overview-${kind}-most-used`, title: 'Opens the Library sorted by most used',
-    onclick: () => openKind(kind, { order: 'most-used' }) }, 'Most used');
+  const sorted = h('button.kind-card-link.kind-card-sorted', { type: 'button', id: `overview-${kind}-most-used`, title: 'Opens the Library sorted by most used',
+    onclick: () => openKind(kind, { order: 'most-used' }) }, 'Most used', icon('arrow-right', 12));
   return h('div.kind-card-usage', { id: `overview-${kind}-usage` },
     used ? h('p.kind-card-line', {}, used) : null,
     cant ? h('p.kind-card-line', {}, cant) : null,
-    top.map((each, at) => {
-      const row = rowOf(kind, each.key);
-      return h('p.kind-card-top-row', {}, at ? h('span', {}) : sorted,
-        h('span.kind-card-top-item', {}, h('button.kind-card-link.kind-card-top-name', { type: 'button', id: `overview-${kind}-top-${at}`,
-          onclick: () => openKind(kind, { key: each.key }) }, middle(each.name, 8)), row ? fileButton(cardFiles, row) : null),
-        h('span', {}, plural(each.sessions, 'session')));
-    }));
+    top.map((each, at) => h('p.kind-card-top-row', {}, at ? h('span', {}) : sorted,
+      h('span.kind-card-top-item', {}, h('button.kind-card-link.kind-card-top-name', { type: 'button', id: `overview-${kind}-top-${at}`,
+        onclick: () => openKind(kind, { key: each.key }) }, Object.assign(middle(each.name, 8), { title: `${each.name}: open its row in the Library` })),
+      each.row ? fileButton(cardFiles, each.row) : null),
+      h('span', {}, plural(each.sessions, 'session')))));
 }
 
 /**
@@ -197,9 +204,9 @@ function syncState(kind: PageKind, home: HomeView): HTMLElement | null {
 /**
  * One kind: its page (the card's one button, over the whole card); how many there are, how many are On (the page's word: some may
  * still wait to sync), and how many came from some plugin (origins.ts fromAnyPlugin, as the Library's From says); whether it is in step
- * (syncState); its usage (cardUsage).
+ * (syncState); its usage (cardUsage), its three most used given (`top`: kindCards).
  */
-function kindCard(kind: PageKind, home: HomeView) {
+function kindCard(kind: PageKind, home: HomeView, top: TopRow[]) {
   const { title, short: noun } = kindNouns[kind], facts = kindSource(home, kind).facts;
   const total = rowCount(home, kind), on = facts.filter(fact => fact.on).length, fromPlugins = fromAnyPlugin(home, kind);
   const counts = total ? `${plural(total, noun[0], noun[1])} · ${on ? `${on} on` : 'none on'}${fromPlugins ? ` · ${fromPlugins} from plugins` : ''}` : `No ${noun[1]}`;
@@ -208,7 +215,7 @@ function kindCard(kind: PageKind, home: HomeView) {
       h('button.kind-card-main', { type: 'button', id: `overview-${kind}`, onclick: () => openKind(kind) },
         h('span.kind-card-head', {}, icon(kindGlyph[kind], 16), h('strong', {}, title), icon('arrow-right', 14, 'tone-faint'))),
       h('div.kind-card-summary', {}, h('span', {}, counts), syncState(kind, home))),
-    cardUsage(kind, total, usageSums()?.kinds[kind]));
+    cardUsage(kind, total, usageSums()?.kinds[kind], top));
 }
 
 // ---------- A most used item's file, under its card ----------
@@ -219,26 +226,24 @@ function kindCard(kind: PageKind, home: HomeView) {
  * another page closes it.
  */
 const cardFiles: FilePlace & { on?: string } = {
-  view: {}, reveal: () => requestAnimationFrame(() => document.querySelector('.kind-cards > .details-file-only')?.scrollIntoView({ block: 'nearest' })),
+  view: {}, named: true, reveal: () => requestAnimationFrame(() => document.querySelector('.kind-cards > .details-file-only')?.scrollIntoView({ block: 'nearest' })),
 };
 // Escape closes the file open under a card, the focus back on its mark; an info card open is closed first (renderer.ts).
 document.addEventListener('keydown', event => { if (event.key === 'Escape' && state.page === 'overview' && cardFiles.view.openFile) setFile(cardFiles, undefined, undefined, true); });
 
 /**
- * The cards, each followed by its file panel where the file open here is one of the items it names (topNamed), found as the
- * Library finds its row (matrix.ts rowOf) and read again where it changed (filepanel.ts syncOpenFile); a file no card names any
- * more is let go. A panel spans the cards' row (style.css .kind-cards): under its card in one column, under all three in three.
+ * The cards, each followed by its file panel where the file open here is one of the items it names (topRows), kept or let go
+ * as every place's is (filepanel.ts keepOpenFile). A panel spans the cards' row (style.css .kind-cards): under its card in one
+ * column, under all three in three.
  */
 function kindCards(home: HomeView, kinds: PageKind[]) {
   const on = `${home.home} ${state.visit}`;
   if (cardFiles.on !== on) Object.assign(cardFiles, { on, view: {} });
-  const open = cardFiles.view.openFile;
-  const named = kinds.flatMap(kind => topNamed(rowCount(home, kind), usageSums()?.kinds[kind]).map(each => ({ kind, row: rowOf(kind, each.key) })));
-  const filed = open && named.find(({ row }) => row && fileTargetId(row) === open.id && hasFile(cardFiles, row));
-  if (filed) syncOpenFile(cardFiles, filed.row!, open!);
-  else cardFiles.view.openFile = undefined;
-  const panel = filed && cardFiles.view.openFile ? filePanel(cardFiles, filed.row!, cardFiles.view.openFile) : null;
-  return h('div.kind-cards', { 'data-count': String(kinds.length) }, kinds.flatMap(kind => [kindCard(kind, home), filed?.kind === kind ? panel : null]));
+  const tops = kinds.map(kind => ({ kind, top: topRows(home, kind) }));
+  const target = keepOpenFile(cardFiles, tops.flatMap(({ top }) => top.flatMap(each => (each.row ? [each.row] : []))));
+  const filed = target && tops.find(({ top }) => top.some(each => each.row === target))?.kind;
+  const panel = target ? filePanel(cardFiles, target, cardFiles.view.openFile!, true) : null;
+  return h('div.kind-cards', { 'data-count': String(kinds.length) }, tops.flatMap(({ kind, top }) => [kindCard(kind, home, top), kind === filed ? panel : null]));
 }
 
 // ---------- Usage: the strip that says it and collects it again ----------

@@ -48,7 +48,7 @@ import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSource
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { itemKey, listed, type Version } from './library.ts';
-import { fileButton, filePanel, fileTargetId, hasFile, setFile, syncOpenFile, type CatalogTarget, type FilePlace, type FileTarget, type OpenFile } from './filepanel.ts';
+import { fileButton, filePanel, keepOpenFile, setFile, type CatalogTarget, type FilePlace, type OpenFile } from './filepanel.ts';
 import { keptBack } from './clickplan.ts';
 import type { Change, DestinationResult, HomeView, ItemNotice, LibraryFacts, PluginItemNotice, PluginTextView, SearchHit, SyncGate, SyncNotice } from './types.ts';
 import type { HarnessId, InstalledPlugin, PartKind, TakenInNotice, UsageReading } from './types.ts';
@@ -425,6 +425,8 @@ const newView = () => ({
   whereOpen: undefined as boolean | undefined,
   /** Whether the unused band's "What’s counted" disclosure is open. */
   unusedCounted: false,
+  /** The order a way in asked for (openKind `order`: the Overview's Most used), shown on the visit it is first drawn on (`visit`); Sort's kept choice stays as it was. */
+  askedOrder: undefined as { order: RowOrder; visit?: number } | undefined,
 });
 /** What one table keeps between draws. */
 type View = ReturnType<typeof newView>;
@@ -444,7 +446,7 @@ function startFresh(table: View, harness: Tool | undefined) {
  * The one way into the Library from elsewhere (the Overview's cards and lines, a plugin's page and its row on Plugins, History,
  * the Git repo, Sources): the Library with `which` chosen (a kind, or All: app.ts state.libraryKind), drawn afresh (startFresh:
  * no Find, no chip, From at Anywhere, no open row), narrowed by `filter` ("Copies differ", "No use seen in 30 days") or, on All,
- * by `from` (a plugin's or a source's items: origins.ts pluginFrom, sourceFrom), sorted by `order` (Sort keeps it: chooseOrder); or with the row `key` open and scrolled into
+ * by `from` (a plugin's or a source's items: origins.ts pluginFrom, sourceFrom), in `order` on that visit (View askedOrder); or with the row `key` open and scrolled into
  * view (a plugin's own row too; a key needs its kind, so All takes none), Find, the chip and From let go only where they hide it
  * (showRow). The row is opened once the page is drawn, as its own click opens it (markOpen): so the
  * first draw in another home, which drops that home's open row, can't drop it, and a row whose copies differ keeps its question.
@@ -453,9 +455,9 @@ export function openKind(which: 'all', options?: { filter?: Filter; from?: From 
 export function openKind(which: PageKind, options?: { filter?: Filter; key?: string; order?: RowOrder }): void;
 export function openKind(which: PageKind | 'all', { filter, key, from, order }: { filter?: Filter; key?: string; from?: From; order?: RowOrder } = {}) {
   state.libraryKind = which;
-  if (order) chooseOrder(order);
   if (key && which !== 'all') { showRow(which, key); return; }
   startFresh(views.library, undefined);
+  if (order) views.library.askedOrder = { order };
   if (filter) views.library.filter = filter;
   if (from) views.library.from = from;
   showPage('library');
@@ -1615,6 +1617,8 @@ function takenInNotice(t: Table, notice: TakenInNotice & Pick<Told, 'of' | 'once
 function tableOf(name: keyof typeof views, kinds: PageKind[], harness?: Tool, files = false): Table {
   // An armed Delete belongs to the visit it was clicked on: another page disarms it.
   if (state.visit !== tablesVisit) { for (const each of Object.values(views)) each.confirmDelete = undefined; tablesVisit = state.visit; }
+  const asked = views[name].askedOrder;
+  if (asked && (asked.visit ??= state.visit) !== state.visit) views[name].askedOrder = undefined;
   const t: Table = { kinds, tool: harness, view: views[name] };
   Object.assign(t, fileHooks(t));
   forgetOtherHomes(t, name);
@@ -1927,9 +1931,7 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
   if (found && view.comparing && !found.some(isOpen)) view.comparing = undefined;
   // An open row whose file is in its details' place goes, both together, when the list no longer holds it (Find on a tool's tab).
   if (fileInDetails(view, view.comparing) && ![...shown, ...plugins].some(isOpen)) view.comparing = undefined;
-  const fileTarget = view.openFile && ([...shown, ...plugins, ...shownCatalog(t, inPlugins)] as FileTarget[]).find(target => fileTargetId(target) === view.openFile!.id && hasFile(t, target));
-  if (view.openFile && !fileTarget) view.openFile = undefined;
-  else if (fileTarget) syncOpenFile(t, fileTarget, view.openFile!);
+  keepOpenFile(t, [...shown, ...plugins, ...shownCatalog(t, inPlugins)]);
   const open = docked() && view.comparing && !underRow(t, view.comparing) ? all.find(isOpen) : undefined;
   const openRow = docked() && !open ? plugins.find(isOpen) : undefined;
   // Off goes last, under its own heading. Of the rest, the rows a harness's page is about (it has a copy) split into On and
@@ -2680,10 +2682,8 @@ const usageElsewhere = (t: Table, skill: ItemRow) => usageOf(t, skill).filter(ea
 /** The flags (flags.ts) that remember a non-default Sort on the Library: one choice, kept.
  * Where more than one of the three flags is set, the first in `orderFlags` wins. */
 const orderFlags: Record<Exclude<RowOrder, 'name'>, string> = { 'most-used': 'ck-items-by-most-used', used: 'ck-items-by-last-used', updated: 'ck-items-by-last-updated' };
-/** Sorts the Library's rows by `order` from now on: Sort's choice (orderChoice), and the way in from the Overview's Most used (openKind). */
-const chooseOrder = (order: RowOrder) => { for (const [key, flag] of Object.entries(orderFlags)) writeFlag(flag, order === key); };
-/** The order of the rows under each heading (itemrow.ts inOrder): the one chosen, on the Library; by name on a harness's tab. */
-const chosenOrder = (t: Table): RowOrder => (t.tool ? 'name' : (Object.entries(orderFlags) as [RowOrder, string][]).find(([, flag]) => readFlag(flag))?.[0] ?? 'name');
+/** The order of the rows under each heading (itemrow.ts inOrder): on the Library, the one a way in asked for this visit (View askedOrder), else the one chosen; by name on a harness's tab. */
+const chosenOrder = (t: Table): RowOrder => (t.tool ? 'name' : t.view.askedOrder?.order ?? (Object.entries(orderFlags) as [RowOrder, string][]).find(([, flag]) => readFlag(flag))?.[0] ?? 'name');
 /** A row's usage on a table, for Last used and Most used (itemrow.ts inOrder): newest use at any time, and the sessions its Used cell shows. */
 const usageIn = (t: Table) => (skill: ItemRow): RowUsage => {
   const figure = figureOf(t, skill);
@@ -2711,7 +2711,12 @@ const dated = (t: Table) => chosenOrder(t) === 'updated' && !searching(t);
 /** The choice of order, after the filters on the Library. */
 function orderChoice(t: Table) {
   if (t.tool) return null;
-  const choose = (event: Event) => { chooseOrder((event.target as HTMLSelectElement).value as RowOrder); rerender(); };
+  const choose = (event: Event) => {
+    const value = (event.target as HTMLSelectElement).value;
+    for (const [key, flag] of Object.entries(orderFlags)) writeFlag(flag, value === key);
+    t.view.askedOrder = undefined;
+    rerender();
+  };
   const order = chosenOrder(t), option = (value: RowOrder, label: string) => h('option', { value, selected: order === value }, label);
   // While the Library's Find has text: Best match, greyed, its tooltip saying why.
   const best = searching(t), options = best ? [h('option', { value: 'best', selected: true }, 'Best match')]
@@ -3174,7 +3179,7 @@ function openedPart(t: Table, row: ItemRow | PluginRow, placement: 'row' | 'dock
     const shown = document.querySelector(`.ov-row[data-key="${CSS.escape(id)}"] + .details, #dock-scroll > .details`);
     shown?.querySelector<HTMLElement>('button:not(:disabled), select:not(:disabled), input:not(:disabled), summary, a[href]')?.focus();
   };
-  return filePanel(t, row, t.view.openFile!, placement, h('button.inline-link.file-to-details', { type: 'button', id: partId('file-details', id),
+  return filePanel(t, row, t.view.openFile!, placement === 'dock', h('button.inline-link.file-to-details', { type: 'button', id: partId('file-details', id),
     title: 'Closes the file', onclick: back }, icon('chevron-left', 12), 'Back to details'));
 }
 // Escape in a find box with text clears it; on the unused band's disclosure button it closes the disclosure; else it closes an
