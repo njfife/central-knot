@@ -60,7 +60,6 @@ test('managed card has a div body and heading button; keyboard Back focuses it a
       present: ['claude-cli'],
       managed: ['claude-cli'],
       leftOut: [],
-      joining: {},
       writes: {},
       caughtUp: [],
       arrived: [],
@@ -138,7 +137,7 @@ function makeHome({
       harness, root: `/home/.${harness}`, discovery: 'found', detection: 'Installed', probe: { version: '1.0.0', detail: '' }, skills: [], issues: [],
     })),
     sync: {
-      present, managed, leftOut, joining: {}, writes: {}, caughtUp: [], arrived: [],
+      present, managed, leftOut, writes: {}, caughtUp: [], arrived: [],
       access: allowed ? { allowed: true } : { allowed: false, reason: 'Preview only' },
       gate: { state: 'ready' },
     },
@@ -152,7 +151,7 @@ function makeHome({
   } as unknown as HomeView;
 }
 
-test('locked home keeps every Manage switch named for its tool with lock reason and no card, line or dangling description', () => {
+test('locked home keeps every Manage switch named for its tool with lock reason and no card, question or dangling description', () => {
   app.home = makeHome({ managed: ALL_SIX.slice(1), leftOut: ['claude-cli'], allowed: false });
   Object.assign(app, { page: 'harnesses', harness: undefined, busy: undefined, instructions: { state: 'ready', data: [], gen: 0 } });
   rendered = harnessesPage() as unknown as FakeNode;
@@ -164,7 +163,7 @@ test('locked home keeps every Manage switch named for its tool with lock reason 
     assert.match(sw.attrs.title ?? '', /Preview only/);
     assert.match(sw.attrs['aria-description'] ?? '', /Preview only/);
     assert.equal(sw.attrs['aria-describedby'], undefined, `locked ${tool} switch has no dangling aria-describedby`);
-    assert.equal(findById(rendered, `manage-${tool}-line`), undefined);
+    assert.equal(findById(rendered, `manage-${tool}-text`), undefined);
   }
   assert.match(textOf(findNode(rendered, el => el.className.split(/\s+/).includes('tools-note'))), /^Preview only:/);
 });

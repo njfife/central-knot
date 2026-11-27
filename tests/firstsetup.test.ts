@@ -61,7 +61,7 @@ async function background(box: Box, managed = tools) {
 /** The home as main.ts's view gives it to the page (types.ts HomeView), in the parts first setup reads. */
 async function homeView(box: Box, managed = tools): Promise<HomeView> {
   const { record } = await readRecord(box.home);
-  return { sync: { managed, present: tools, joining: {}, writes: {}, access: await writeAccess(box.context), gate: await syncGate(box.context), caughtUp: [], syncEverything: record?.syncEverything },
+  return { sync: { managed, present: tools, writes: {}, access: await writeAccess(box.context), gate: await syncGate(box.context), caughtUp: [], syncEverything: record?.syncEverything },
     skills: await skillsView(box.context, managed), mcp: await serversView(box.context, managed), agents: await agentsView(box.context, managed) } as unknown as HomeView;
 }
 /** Every file in the home but Central Knot's own store, with its bytes: what "byte for byte" compares. */
