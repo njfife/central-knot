@@ -22839,13 +22839,15 @@ async function pluginPageSaysLessFlow() {
  * A plugin's items, switched one tool at a time on its own page (pluginpage.ts itemCells, itemSwitch, switchItemIn): placed in Pi
  * by its box, two kept out of Pi by their switches (the box counts 1 of its 3, a dash), the header's Library sentence and Undo; one
  * let into OpenCode, whose box is unticked, counted there; and where no switch stands, why: Pi's own settings, his own copy (also
- * when it arrives behind the page, and with Pi's box unticked), a kind Antigravity holds none of, an Off line and a deleted one.
+ * when it arrives behind the page, here and on the Library's own row, and with Pi's box unticked), a kind Antigravity holds none
+ * of, an Off line and a deleted one.
  */
 async function pluginItemSwitchesFlow() {
   const home = join(scratch, 'home-item-switches'), data = join(scratch, 'item-switches-data'), market = join(scratch, 'market-item-switches');
   const put = (path, content) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content); };
   const md = (name, body) => `---\nname: ${name}\ndescription: ${name}.\n---\n\n${body}\n`;
-  const long = 'a-skill-whose-name-runs-to-forty-letters';
+  // As long as a skill's name may be (64), so at 860 with the sidebar open it can't fit whole beside its switches.
+  const long = 'a-skill-whose-name-runs-on-to-sixty-four-letters-the-longest-one';
   put(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'ck-switch-market', plugins: [
     { name: 'trio', source: './plugins/trio', version: '1.0.0' }, { name: 'pair', source: './plugins/pair', version: '1.0.0' }] }));
   const polishMd = md('polish', 'Plugin polish.'), mineInPi = md('mine', 'My own mine in Pi.'), draftInPi = md('draft', 'My own draft, made later in Pi.');
@@ -22913,8 +22915,8 @@ async function pluginItemSwitchesFlow() {
   // relay let into OpenCode, whose box stays unticked: its line counts it, as a ticked box's does.
   await a.click(sw('trio', 'opencode-cli', 'mcp', 'relay'));
   await done();
-  same('relay in OpenCode with its box unticked: the line under the box counts it', [await toolSays('opencode-cli'), (readNow(join(home, '.config/opencode/opencode.json')) || readNow(join(home, '.config/opencode/opencode.jsonc'))).includes('relay')],
-    ['1 of its 3 items is on in OpenCode.', true]);
+  same('relay in OpenCode with its box unticked: the line under the box counts it, and the box is a dash, never a full tick', [await toolSays('opencode-cli'), await a.run(`document.querySelector('#pbox-0-trio-opencode-cli').getAttribute('aria-checked')`),
+    (readNow(join(home, '.config/opencode/opencode.json')) || readNow(join(home, '.config/opencode/opencode.jsonc'))).includes('relay')], ['1 of its 3 items is on in OpenCode.', 'mixed', true]);
   await shot('item-switches-one-in-light-860', SMALLEST, 'light', '.plugin-panel');
   await a.click('#outcome-undo');
   await done();
@@ -22934,6 +22936,20 @@ async function pluginItemSwitchesFlow() {
   same('a switch over a copy of his that came behind the page is refused; his copy byte for byte; then Pi has its own copy, said in its place and on the line',
     [await header(), readNow(join(home, '.pi/agent/skills/draft/SKILL.md')), await a.exists(sw('trio', 'pi-cli', 'skill', 'draft')), (await cell('skill', 'draft', 'Pi'))?.[0], await words('skill', 'draft')],
     ['draft changed since the page was read. Nothing was changed.', draftInPi, false, 'Its own copy', 'Pi has its own copy']);
+  // The Library's own row, by the same rule: polish kept out of Pi there, then a copy of his named polish comes behind the page.
+  await openKind(a, 'skills');
+  const libSwitch = `#${rowPart('enable', 'skills', 'polish', 'pi-cli')}`, polishInPi = md('polish', 'My own polish, made later in Pi.');
+  if (await a.run(`document.querySelector('#${rowPart('open', 'skills', 'polish')}')?.getAttribute('aria-expanded')`) !== 'true') await a.click(`#${rowPart('open', 'skills', 'polish')}`);
+  await until(() => a.exists(libSwitch));
+  await a.click(libSwitch);
+  await done();
+  put(join(home, '.pi/agent/skills/polish/SKILL.md'), polishInPi);
+  await a.click(libSwitch);
+  await done();
+  same('on the Library’s row too, its Pi switch drawn before his copy came is refused, and his copy stays byte for byte', [await header(), readNow(join(home, '.pi/agent/skills/polish/SKILL.md'))],
+    ['polish changed since the page was read. Nothing was changed.', polishInPi]);
+  await a.click('#nav-plugins');
+  await openPage('trio');
   // An Off line and a deleted one have no switch.
   await a.run(`(async () => { const { home } = await window.centralKnot.refresh(); await window.centralKnot.applySkills([{ key: 'polish', on: false, except: [], seenOn: true }, { key: 'draft', on: false, except: [], deleted: true }], false, home); })()`);
   await refresh();
@@ -22950,7 +22966,7 @@ async function pluginItemSwitchesFlow() {
   await sizeTo(a, ...SMALLEST);
   const railed = await a.run(`document.body.classList.contains('rail')`);
   if (railed) await a.click('#sidebar-toggle');
-  same('at 860 with the sidebar open, the forty-letter name is cut with an ellipsis and its switches stay in its line', await a.run(`(() => {
+  same('at 860 with the sidebar open, the 64-letter name is cut with an ellipsis and its switches stay in its line', await a.run(`(() => {
     const row = document.querySelector('.plugin-items-list [data-key="skill:${long}"]'), name = row.querySelector('.plugin-part-link'), last = [...row.querySelectorAll('.skill-switch')].at(-1);
     return [name.scrollWidth > name.clientWidth, getComputedStyle(name).textOverflow, last.getBoundingClientRect().right <= row.getBoundingClientRect().right]; })()`), [true, 'ellipsis', true]);
   if (railed) await a.click('#sidebar-toggle');

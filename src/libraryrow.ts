@@ -281,7 +281,8 @@ export const rowClicks = {
 
 /**
  * THE TOOL SWITCH: what stands in one tool's place for an item's own switch there, one rule for the Library's opened row (matrix.ts
- * libraryHarnessSwitch) and a plugin's page's item switches (pluginpage.ts itemCell, read again by switchItemIn before it acts).
+ * libraryHarnessSwitch) and a plugin's page's item switches (pluginpage.ts itemCells), and found again by their one click (matrix.ts
+ * flipInHarness, by switchDrawn) before it acts.
  * `none`: not in the library, or Off and from a plugin. `cannot`: the tool can't take it (`row.cannot` says why). Where it isn't
  * kept out there, the tool's own state in its word: `switched-off` (its own settings keep it off) or `another-way`. `own-copy`:
  * kept out, and the tool loads a copy of his that Central Knot didn't write (its own folder, or one it reads such as the shared
@@ -297,6 +298,10 @@ export function toolSwitch(row: LibraryRow, item: LibraryItem | undefined, tool:
   if (!lib.on || !lib.except.includes(tool as HarnessId)) return row.switchedOff?.includes(tool) ? 'switched-off' : is === 'another-way' ? 'another-way' : 'switch';
   return is === 'own-copy' || loadsFrom(row, lib, tool) === 'elsewhere' ? 'own-copy' : 'switch';
 }
+/** A tool's switch as a page drew it: the rule's answer, the tool's mark and whether it was kept out, which its click finds again before it acts (matrix.ts flipInHarness). */
+export const switchDrawn = (row: LibraryRow, item: LibraryItem | undefined, tool: string) =>
+  ({ at: toolSwitch(row, item, tool), is: harnessIs(row, item, tool), out: !!inLibrary(item)?.except.includes(tool as HarnessId) });
+export type SwitchDrawn = ReturnType<typeof switchDrawn>;
 /** A tool's own state in its word, where it stands in place of the switch (toolSwitch). */
 export const TOOL_STATE_WORDS = { 'switched-off': 'Switched off', 'another-way': 'Another way', 'own-copy': 'Its own copy' } as const;
 

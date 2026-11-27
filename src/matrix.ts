@@ -40,13 +40,13 @@ import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, orList, pag
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type RowFigure, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
 import { copilotSharesYours } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
-import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, writeOff, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
+import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, writeOff, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, setHome, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, infoMark, middle, pathText, toggle, whyOff, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { byName, byUsage, inOrder, kindSource, lastUpdated, noPins, partId, pin, placeIn, rankIn, rowId, type ItemRow, type KindSource, type Pinned, type RowKey, type RowOrder, type RowUsage, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
-import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inHarnessDoes, TOOL_STATE_WORDS, toolSwitch, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, pluginToolsCard, rowClicks, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
+import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inHarnessDoes, switchDrawn, TOOL_STATE_WORDS, toolSwitch, type SwitchDrawn, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, pluginToolsCard, rowClicks, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionPart, type VersionText } from './versionlist.ts';
 import { itemKey, listed, type Version } from './library.ts';
@@ -2836,6 +2836,24 @@ function detailToolLine(t: Table, skill: ItemRow, tool: Tool): { text?: string; 
 }
 
 /**
+ * A tool's own switch for an On item, clicked (THE TOOL SWITCH, libraryrow.ts toolSwitch): kept out there, or let in. The home is
+ * read again first, and the click refused unless the tool is still here and its switch stands as `drawn` (libraryrow.ts
+ * switchDrawn) and `still` holds; else the row's own click (rowClicks.inHarness) and sentence, or `said`'s (and on its Undo,
+ * History's). Sent by the Library's opened row, and by a plugin's page (pluginpage.ts itemSwitch, clashLines), whose `still`
+ * reads its plugin again.
+ */
+export function flipInHarness(kind: PageKind, key: string, name: string, tool: string, drawn: SwitchDrawn, more: { still?: () => Promise<boolean>; said?: Click['said'] } = {}) {
+  void applyClick(async () => {
+    setHome(await window.centralKnot.refresh());
+    const row = rowByKey(kind, key), item = row && inLibrary(itemOf(row)), now = row && switchDrawn(row, item, tool), out = !drawn.out;
+    const stands = !!item?.on && !!state.home?.[kind].tools.includes(tool as HarnessId) && now?.at === drawn.at && now.is === drawn.is && now.out === drawn.out && (await (more.still?.() ?? true));
+    if (!row || !item || !stands) return { page: state.page, item: name, warn: true, band: true, refused: true, text: `${name} changed since the page was read. Nothing was changed.` };
+    return { kind, items: [name], rows: [{ kind, key }], changes: [rowClicks.inHarness(row, item, tool, out)], ...(more.said ? { undoSentence: true } : {}),
+      said: more.said ?? ((notIn: HarnessId[]) => libraryPages[kind].say.said.inHarness(name, tool, out, notIn.includes(tool as HarnessId))) };
+  });
+}
+
+/**
  * One harness's own switch for a library item: on an On row, off keeps it out and on lets it in again; on an Off row (not
  * plugin-sourced), on turns it on in that tool only. Found items keep their row's Add.
  */
@@ -2865,9 +2883,8 @@ function libraryHarnessSwitch(t: Table, lib: LibraryPage, skill: ItemRow, tool: 
         label: `${name} in ${where}: off. Click to turn it on in ${whereOn}.`, onchange: turnHere,
       })));
   }
-  const said = (notIn: HarnessId[]) => lib.say.said.inHarness(name, tool, !out, notIn.includes(tool as HarnessId));
   const does = inHarnessDoes(where, out, lib.words.copy);
-  const flipHere = (on: boolean) => click({ kind: skill.kind, items: [name], rows: [rowKey(skill)], changes: [rowClicks.inHarness(skill, item, tool, !on)], said });
+  const flipHere = () => flipInHarness(skill.kind, skill.key, name, tool, switchDrawn(skill, item, tool));
   // Kept out, yet loading a copy Central Knot doesn't write there (a take leaves his so: library.ts TAKE), its own or another tool's:
   // said beside the switch, never as Off.
   const loads = loadingIn(skill, item, [tool]), runs = loads.own.length ? 'its own copy' : loads.another.length ? 'another way' : undefined;
