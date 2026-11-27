@@ -15,7 +15,7 @@ import { sessionSettings } from './pluginitems.ts';
 import { installedPlugins, type PluginContext } from './plugins.ts';
 import { takesPlugins } from './presence.ts';
 import { hookFingerprint, hookLine } from './sessionhooks.ts';
-import { jsonElements, members, ownEnd, readTomlTables, skipSpace } from './textedit.ts';
+import { jsonElements, jsonStart, members, ownEnd, readTomlTables } from './textedit.ts';
 import type { DeclaredHook, HarnessId, HomeMode, HookSource, HookSourceRef } from './types.ts';
 import { record, text as asText } from './values.ts';
 import { HOOK_SOURCE_UNREADABLE, fileName } from './words.ts';
@@ -108,7 +108,7 @@ function dedent(raw: string, span: { start: number; end: number }): string {
 /** Cuts the `at`-th hook object (groups flattened, matching catalogdetail.ts readHooks) from a JSON/JSONC file and moves it left. */
 function jsonHookEntry(raw: string, event: string, at: number, allowTopLevel: boolean): string | undefined {
   try {
-    const root = skipSpace(raw, raw.charCodeAt(0) === 0xfeff ? 1 : 0);
+    const root = jsonStart(raw);
     if (raw[root] !== '{') return undefined;
     const hooksKey = members(raw, root).members.findLast(member => member.key === 'hooks');
     const section = hooksKey && raw[hooksKey.value.start] === '{' ? hooksKey.value.start : allowTopLevel ? root : -1;

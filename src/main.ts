@@ -32,7 +32,7 @@ import { forgetRefusals, installedPlugins, pluginRecordFiles, recordReadable } f
 import { checkFeed, type FeedCheck } from './bundlefeed.ts';
 import { mcpFile } from './mcp.ts';
 import { switchPath } from './skillswitch.ts';
-import { applyServers, restoreServer, serversView, serverVersion } from './servers.ts';
+import { applyServers, restoreServer, serverEntry, serversView, serverVersion, storedEntry } from './servers.ts';
 import { agentToolFile, agentVersion, agentsView, applyAgents, restoreAgent } from './agents.ts';
 import { agentsFolder } from './agentfiles.ts';
 import { isClearedSwitch, libraryEntry } from './historyactions.ts';
@@ -1832,6 +1832,13 @@ app.whenReady().then(async () => {
     ? applyAgents(context(), await toolsNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0, reloads: [] }));
   handleNow('servers:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await serverVersion(context(), key, hash)) ?? null : null));
+  handleNow('servers:stored', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await storedEntry(context(), key, hash)) ?? null : null));
+  // One server's entry in a managed tool, read on a click for the home on screen (servers.ts serverEntry): main finds the file and the entry; no path comes from the page.
+  handleNow('servers:entry', async (home, key, tool) => {
+    if (!current || typeof key !== 'string' || !isTool(tool)) return null;
+    const shared = context();
+    return (await serverEntry(shared, await managedNow(shared, await readFor(handoff.id)), home, key, tool)) ?? null;
+  });
   handle('skills:apply', async (list, resume, home) => (home === current?.home
     ? applySkills(context(), await toolsNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
     : { stopped: elsewhere, results: [], writes: 0, reloads: [] }));

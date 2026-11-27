@@ -76,6 +76,10 @@ export async function readVersion(context: ShareContext, key: string, hash: stri
   try { return JSON.parse(await readFile(path, 'utf8')) as NeutralServer; } catch { return notStoredYet.get(path); }
 }
 
+/** A version's file, exactly as stored, for the file panel (servers.ts storedEntry): none before it is (readVersion reads a migration's from memory). */
+export const versionText = (context: ShareContext, key: string, hash: string) =>
+  readFile(versionPath(context, key, hash), 'utf8').catch(() => undefined);
+
 const storeOwn = (context: ShareContext, key: string, text: string) => storeOnce(ownPath(context, key, sha256(text)), text);
 
 /** Keeps a tool's own part of the server's entry as that tool's own part of the item (kindstore.ts keepOwnPart). */

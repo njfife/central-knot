@@ -1,14 +1,14 @@
 // Preserving edits (FIL-02): change one entry in a config file's text and leave every other byte as it was. JSON (and JSONC):
-// a member of an object at a path (setJsonMember), or read-only spans (skipSpace, members, jsonElements) for cutting one
-// entry verbatim (hooksource.ts). TOML: a table and its subtables (setTomlTable: an MCP server's [mcp_servers.<name>]), its
-// own-line end (ownEnd), or the tables of an array (arrayBlocks, editTomlArray, setTomlArrayKey: Codex's
-// [[skills.config]]). Text only: which entry changes is its caller's (mcp.ts, mcpswitch.ts, skillswitch.ts, partswitch.ts,
+// a member of an object at a path (setJsonMember), or read-only spans (jsonStart, skipSpace, members, jsonElements) for cutting
+// one entry verbatim (hooksource.ts, mcp.ts entryText). TOML: a table and its subtables (setTomlTable: an MCP server's
+// [mcp_servers.<name>]), its own-line end (ownEnd), or the tables of an array (arrayBlocks, editTomlArray, setTomlArrayKey:
+// Codex's [[skills.config]]). Text only: which entry changes is its caller's (mcp.ts, mcpswitch.ts, skillswitch.ts, partswitch.ts,
 // plugins.ts, agentfiles.ts), and writing the file, checked, is share.ts writeFileChecked.
 
 // ---------- JSON ----------
 
 interface Span { start: number; end: number }
-interface Member { key: string; keySpan: Span; value: Span; whole: Span }
+export interface Member { key: string; keySpan: Span; value: Span; whole: Span }
 
 const isSpace = (char: string) => char === ' ' || char === '\t' || char === '\n' || char === '\r';
 
@@ -21,6 +21,9 @@ export function skipSpace(text: string, at: number): number {
     return at;
   }
 }
+
+/** Where a JSON(C) file's top value starts: after a byte-order mark, white space and comments. */
+export const jsonStart = (text: string) => skipSpace(text, text.charCodeAt(0) === 0xfeff ? 1 : 0);
 
 function scanString(text: string, at: number): number {
   if (text[at] !== '"') throw new Error('Expected a string.');

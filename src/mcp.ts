@@ -19,9 +19,9 @@ import { lstat, mkdir, readFile, readlink, realpath, rmdir, stat } from 'node:fs
 import { dirname, isAbsolute, join } from 'node:path';
 import { entryTransport, PLUGIN_ONLY } from './catalogdetail.ts';
 import { configRoot, harnesses, openCodeSettings } from './harnesses.ts';
-import { errorCode, exists, plainError, recoverParked, sha256, writeFileChecked, type ShareContext } from './share.ts';
-import { readJsonc, readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
-import type { HarnessId } from './types.ts';
+import { errorCode, exists, itemKey, plainError, recoverParked, sha256, shownText, writeFileChecked, type ShareContext } from './share.ts';
+import { jsonStart, members, readJsonc, readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type Member, type TomlValue } from './textedit.ts';
+import type { FileRead, HarnessId } from './types.ts';
 
 // ---------- Shapes ----------
 
@@ -253,6 +253,47 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
   } catch {
     return { entries: [], exists: true, problem: `${file} could not be read as ${tool === 'codex-cli' ? 'TOML' : 'JSON'}, so its servers are not offered and it is never written.` };
   }
+}
+
+/**
+ * One server's entry as `tool`'s settings file has it now, read on a click for the file panel (servers.ts serverEntry): the
+ * member cut from the file's own bytes (from its line's start where only its indent is before it), comments, escapes and the
+ * tool's own fields in it as written. Found as readTool finds it (serverMembers), by its key, so in the tool's own spelling;
+ * read once, at most 1 MB (share.ts shownText). JSON tools only: Codex's TOML is not read here yet. A note where it isn't
+ * there, where two entries have its key, or where the file can't be read as JSON as far as it; none where the file can't be read.
+ */
+export async function entryText(context: ShareContext, tool: HarnessId, key: string): Promise<FileRead | undefined> {
+  if (tool === 'codex-cli') return undefined;
+  const file = mcpFile(context, tool), info = await stat(file).catch(() => undefined);
+  const shown = info?.isFile() ? await shownText(file, info.size) : undefined;
+  if (!shown || 'note' in shown) return shown && { files: [], note: shown.note };
+  const text = shown.text;
+  let found: Member[];
+  try { found = serverMembers(text, tool).filter(member => itemKey(member.key) === key); }
+  catch { return { files: [], note: 'This settings file can’t be read as JSON as far as its entry.' }; }
+  if (found.length > 1) return { files: [], note: 'Two entries here have its name, so neither is shown.' };
+  if (!found.length) return { files: [], note: 'Its entry isn’t in this settings file now.' };
+  const { start, end } = found[0].whole, line = text.lastIndexOf('\n', start - 1) + 1;
+  return { files: [], text: text.slice(/^[ \t]*$/.test(text.slice(line, start)) ? line : start, end) };
+}
+
+/**
+ * Each server member in a JSON tool's settings text, by readTool's rule: in the last `mcpServers`; in OpenCode's last `mcp`, and
+ * in its `servers` unless that is a server itself (it has a `type`: openCodeServers). Throws where the text can't be read as far as
+ * them (an empty file too), or a holder there is not an object.
+ */
+function serverMembers(text: string, tool: HarnessId): Member[] {
+  const inside = (member: Member | undefined) => {
+    if (member && text[member.value.start] !== '{') throw new Error('Not an object.');
+    return member ? members(text, member.value.start).members : [];
+  };
+  const top = jsonStart(text), holder = tool === 'opencode-cli' ? 'mcp' : 'mcpServers';
+  if (text[top] !== '{') throw new Error('Not an object.');
+  const listed = inside(members(text, top).members.findLast(member => member.key === holder));
+  const servers = tool === 'opencode-cli' ? listed.findLast(member => member.key === 'servers') : undefined;
+  const value = servers && text.slice(servers.value.start, servers.value.end);
+  const holds = !!value?.startsWith('{') && typeof record(readJsonc(value))?.type !== 'string';
+  return holds ? [...listed.filter(member => member.key !== 'servers'), ...inside(servers)] : listed;
 }
 
 /**
