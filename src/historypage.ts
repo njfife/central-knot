@@ -1,28 +1,30 @@
 // History: what Central Knot did, by itself (sync) or on a click (a switch, a profile switch, a Pull, …), newest first, with
-// Undo or Restore where the kept content allows it (CON-02, DEL-03). Skills', MCP servers' and agents' entries, and Synchronize
-// everything's (everything.ts), are worded, and their actions decided, by historyactions.ts; here are profiles', the base
-// instructions' and tools' Manage switches' entries, and the sentences of entries from before an item was on the library (which
-// offer only what historyactions.ts finds left to do).
+// Undo or Restore where kept content allows (CON-02, DEL-03), and History's Keep control (settingspage.ts historyWindowControl).
+// Skills', MCP servers', agents' and Synchronize everything's entries are worded and decided by historyactions.ts; here are
+// profiles', base instructions', Manage switches' and pre-library entries, plus in-place folds for 3+ non-all tool lists.
 import { DAY_MS, plural, timesApart } from './model.ts';
-import { acting, noToolManaged, restoreEvent, showPage, shownPath, state, touchedToolsPhrase } from './app.ts';
+import { acting, homeTools, noToolManaged, rerender, restoreEvent, shownPath, state, touchedToolsPhrase } from './app.ts';
 import { noToolsState } from './pages.ts';
-import { andList, toolName } from './words.ts';
+import { andList, toolName, touchedTools } from './words.ts';
 import { changeWords, entryTurns, NO_PROFILE, undoOffered, undoWords, wholeCounts } from './profileplan.ts';
-import { changePanel, openKind, outcomeBand, seeChangeLink } from './matrix.ts';
+import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
 import { doneWords, entriesNow, entryKind, everythingAction, everythingSentence, keptOver, libraryAction, libraryEntry, librarySentence, versionChoices } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
-import { button, emptyState, h, icon, rereadBand } from './dom.ts';
+import { button, emptyState, fold, h, icon, rereadBand, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
+import { historyWindowControl } from './settingspage.ts';
 import type { HistoryEvent } from './types.ts';
 
 const who = (tool?: string) => (tool ? toolName(tool) : 'Central Knot');
+/** Folded tool lists open on History rows (`${event.id}-${index}` across redraws); cleared on page leave or home switch (app.ts). */
+const openToolFolds = new Set<string>();
+export function forgetHistoryFolds() { openToolFolds.clear(); }
+type ToolFormat = (touched: string[], inHome: string[]) => string;
 
 /** The skill, MCP server or agent an entry is about, as Central Knot's library holds it now (deleted or not). */
 const itemOf = (event: HistoryEvent) => { const entry = libraryEntry(event); return entry && state.home?.[entry.kind].library?.[entry.key]; };
 /** A take-over's entry names the copy's path as the page shows paths (from ~, or "…" inside another home). */
 const pathsShown = (event: HistoryEvent): HistoryEvent => (event.kind === 'took-over' ? { ...event, losers: event.losers.map(copy => (copy.path ? { ...copy, path: shownPath(copy.path) } : copy)) } : event);
-/** A library item's entry in its kind's words (historyactions.ts librarySentence). */
-const said = (event: HistoryEvent) => { const entry = libraryEntry(event); return entry && librarySentence(pathsShown(event), libraryWords[entry.kind], state.home?.[entry.kind].tools ?? [], itemOf(event), undid(event)); };
 /** Whether the entry is another's Undo: that one's `undoneBy` names it. */
 const undid = (event: HistoryEvent) => !!state.history.data?.some(other => other.undoneBy === event.id);
 
@@ -31,23 +33,25 @@ const undid = (event: HistoryEvent) => !!state.history.data?.some(other => other
  * on the library that the library has no words for keeps a general sentence below. `action`: the button profiles' and the base
  * instructions' entries offer (a library item's are libraryButtons).
  */
-function describe(event: HistoryEvent): { glyph: IconName; text: string; action?: string } {
-  const library = said(event);
+function describe(event: HistoryEvent, formatTools: ToolFormat): { glyph: IconName; text: string; action?: string } {
+  const entry = libraryEntry(event);
+  const library = entry && librarySentence(pathsShown(event), libraryWords[entry.kind], state.home?.[entry.kind].tools ?? [], itemOf(event), undid(event), { row: true, tools: formatTools });
   if (library) return library;
+  const phrase = (touched: string[]) => formatTools(touched, homeTools());
   const order = event.orderProved ? '' : ' Order not proved; the fixed tool order decided.';
   // A Pull's edit or deletion of the base instructions: said as the pull, undone or not.
-  if (event.base) return pulledBase(event, event.base.list.tools.length ? touchedToolsPhrase(event.base.list.tools) : '');
+  if (event.base) return pulledBase(event, event.base.list.tools.length ? phrase(event.base.list.tools) : '');
   if (event.kind === 'profile') return profileSwitch(event);
   if (event.kind === 'managing' && event.managing) return managingWords(event.managing);
   if (event.kind === 'everything') return { ...everythingSentence(event), action: everythingOffer(event)?.label };
   // Pull from the git repo, before the library: said as a pull, whichever way sync carried it.
   if (event.via === 'repo' && !event.undoneBy) {
     if (event.kind === 'deleted') return { glyph: 'git-branch', text: 'Removed in the git repo, so Pull deleted it from the tools it synced to.' };
-    if (event.kind === 'chosen') return { glyph: 'git-branch', text: `Pulled from the git repo; it replaced the copy in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}.` };
-    if (event.kind === 'edit') return { glyph: 'git-branch', text: `Pulled from the git repo into ${who(event.winner?.tool)}${event.losers.length ? `, then copied to ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}` : ''}.` };
-    if (event.kind === 'added') return { glyph: 'git-branch', text: `Pulled from the git repo and added to ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}.` };
+    if (event.kind === 'chosen') return { glyph: 'git-branch', text: `Pulled from the git repo; it replaced the copy in ${phrase(event.losers.map(loser => loser.tool))}.` };
+    if (event.kind === 'edit') return { glyph: 'git-branch', text: `Pulled from the git repo into ${who(event.winner?.tool)}${event.losers.length ? `, then copied to ${phrase(event.losers.map(loser => loser.tool))}` : ''}.` };
+    if (event.kind === 'added') return { glyph: 'git-branch', text: `Pulled from the git repo and added to ${phrase(event.losers.map(loser => loser.tool))}.` };
   }
-  const tools = (list: { tool: string }[]) => touchedToolsPhrase(list.map(entry => entry.tool));
+  const tools = (list: { tool: string }[]) => phrase(list.map(entry => entry.tool));
   switch (event.kind) {
     case 'edit': return { glyph: 'pencil-line', text: `Edited in ${who(event.winner?.tool)}, then copied to ${tools(event.losers) || 'the others'}.` };
     case 'conflict': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit won over ${andList(event.losers.filter(loser => loser.hash !== event.previous).map(loser => who(loser.tool)))}’s.${order}` };
@@ -55,7 +59,7 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
     case 'kept-edit': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit was kept over a deletion in ${tools(event.losers)}.${order}` };
     case 'chosen': return { glyph: 'check', text: `You chose ${who(event.winner?.tool)}’s copy; it replaced ${andList(event.losers.map(loser => who(loser.tool)))}’s.` };
     case 'switched': {
-      const turned = (disabled: boolean) => touchedToolsPhrase((event.switched ?? []).filter(entry => entry.disabled === disabled).map(entry => entry.tool));
+      const turned = (disabled: boolean) => phrase((event.switched ?? []).filter(entry => entry.disabled === disabled).map(entry => entry.tool));
       const switched = event.switched ?? [];
       const text = [switched.some(entry => entry.disabled) && `turned off in ${turned(true)}`, switched.some(entry => !entry.disabled) && `turned on in ${turned(false)}`].filter(Boolean).join('; ');
       const one = switched.length === 1 ? who(switched[0].tool) : undefined;
@@ -73,6 +77,41 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
     // Every library item's entry of these kinds has the library's words (historyactions.ts).
     default: return { glyph: 'circle-check', text: 'Changed.' };
   }
+}
+
+/** Describes a History row and builds its sentence element, folding 3+ non-all tool lists into in-place folds under the sentence. */
+function rowAbout(event: HistoryEvent): { glyph: IconName; action?: string; node: HTMLElement } {
+  const groups: { label: string; names: string }[] = [];
+  // formatTools splices `\0<group index>\0` markers into the plain sentence so rowAbout can swap each slot for a fold below.
+  const formatTools: ToolFormat = (touched, inHome) => {
+    const { tools, all, names, fold: label } = touchedTools(touched, inHome);
+    if (all) return `all ${tools.length} tools`;
+    return label ? `\0${groups.push({ label, names }) - 1}\0` : names;
+  };
+  const described = describe(event, formatTools);
+  // What it also changed in a tool's own settings (Pi's skills list: HistoryEvent settingsChanged) follows its words.
+  const text = event.settingsChanged ? `${described.text} ${event.settingsChanged.join(' ')}` : described.text;
+  if (!text.includes('\0')) return { glyph: described.glyph, action: described.action, node: h('div.history-about', {}, text) };
+  const opened: HTMLElement[] = [];
+  // Odd slots are `\0<group index>\0` markers from formatTools; even slots are literal text (drop a trailing "." only when a fold ends the row).
+  const inline: Child[] = text.split('\0').map((part, slot, parts) => {
+    if (slot % 2 === 0) return slot === parts.length - 1 ? part.replace(/^\.$/, '') : part;
+    const group = groups[Number(part)]!;
+    const key = `${event.id}-${(slot - 1) / 2}`;
+    const open = openToolFolds.has(key);
+    const namesId = `history-tools-names-${key}`;
+    if (open) opened.push(h('div.fold-body.history-tools-names', { id: namesId }, group.names));
+    return fold({
+      id: `history-tools-${key}`, toggleId: `history-tools-toggle-${key}`, label: group.label, open,
+      controls: open ? namesId : undefined,
+      onToggle: now => {
+        if (now) openToolFolds.add(key);
+        else openToolFolds.delete(key);
+        rerender();
+      },
+    });
+  });
+  return { glyph: described.glyph, action: described.action, node: h('div.history-about', {}, ...inline, ...opened) };
 }
 
 /** The base instructions as a Pull changed them: set for the first time, edited, or deleted; `tools` names the tools that get them. */
@@ -162,24 +201,19 @@ function actions(event: HistoryEvent, action?: string) {
   return control;
 }
 
-/** How long History keeps things, with the way to change it. */
-const keptFor = () => state.historyDays
-  ? [` Kept for ${state.historyDays} days. `, h('span.keep-together', {}, 'Change in ', h('button.inline-link', { type: 'button', id: 'history-intro-settings', onclick: () => showPage('settings') }, 'Settings'), '.')]
-  : [];
-
 export function historyPage() {
   // From History's own read (pagedata.ts): what it found, else that it is reading or could not read.
   const events = state.history.data;
   if (!events) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.history.state === 'failed' ? 'History could not be read.' : 'Reading History…')));
   if (!events.length && noToolManaged()) return h('div.page', {}, noToolsState('history'));
-  if (!events.length) return h('div.page', {}, state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null, emptyState('history', 'No changes yet', 'When sync copies an edit, or turning something on adds or replaces a copy, it shows up here with Undo. Turn a skill on to begin.', button({ variant: 'outline', label: 'Open the Library', id: 'history-open-library', onclick: () => openKind('all') })));
+  if (!events.length) return h('div.page', {}, state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null,
+    h('div.scroll.history-empty-scroll', { id: 'history-scroll' }, historyWindowControl(), emptyState('history', 'No changes yet', 'Sync edits, switches and deletes appear here with Undo.')));
   const ordered = [...events].reverse(), times = timesApart(ordered.map(event => event.at));
   const reread = rereadBand(state.history);
   // A refused Undo, a Restore with reload advice, or an Undo that ended the profile in use shows in a band; other results here are in the status bar.
   const shown = state.outcome?.page === 'history' && (state.outcome.warn || !!state.outcome.reloads?.length || !!state.outcome.profileLine) ? outcomeBand() : null;
-  return h('div.page', {}, reread || shown ? h('div.bands', {}, reread, shown) : null, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, `What sync, your switches, Pull, sources and profile switches changed, newest first. Undo puts the earlier version back; Restore brings back what was deleted or removed.`, ...keptFor()), h('ul.history-list', {}, ordered.flatMap((event, index) => {
-    // What it also changed in a tool's own settings (Pi's skills list: HistoryEvent settingsChanged) follows its words.
-    const about = (said => (event.settingsChanged ? { ...said, text: `${said.text} ${event.settingsChanged.join(' ')}` } : said))(describe(event));
+  return h('div.page', {}, reread || shown ? h('div.bands', {}, reread, shown) : null, h('div.scroll', { id: 'history-scroll' }, historyWindowControl(), h('ul.history-list', {}, ordered.flatMap((event, index) => {
+    const about = rowAbout(event);
     const heading = index === 0 || day(ordered[index - 1].at) !== day(event.at) ? h('li.history-day', { role: 'presentation' }, day(event.at)) : null;
     // The newest row, made by a click just now, gets the same brief highlight the tables use.
     const fresh = index === 0 && Date.now() - Date.parse(event.at) < 8000;
@@ -188,7 +222,7 @@ export function historyPage() {
       // What changed, then what happened in the flexible column (its text capped at the reading measure); the actions keep a
       // steady column at the right, the same on every row. Narrow, what happened takes a line of its own beneath (style.css).
       h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event)), h('strong', { title: event.item }, event.item)),
-      h('span.history-about', {}, about.text),
+      about.node,
       event.undoneBy ? h('span.history-actions', {}, h('span.history-done', {}, libraryEntry(event) ? doneWords(event) : event.kind === 'removed' || event.everything?.undo ? 'Restored' : 'Undone'))
         : h('span.history-actions', {},
           !event.base && (event.kind === 'edit' || event.kind === 'conflict') ? seeChangeLink(event.id, libraryEntry(event)?.kind, true) : null,
