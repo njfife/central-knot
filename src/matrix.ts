@@ -54,7 +54,7 @@ import { keptBack } from './clickplan.ts';
 import type { Change, DestinationResult, FileRead, HomeView, ItemNotice, LibraryFacts, PluginItemNotice, PluginTextView, SearchHit, SyncGate, SyncNotice } from './types.ts';
 import type { HarnessId, InstalledPlugin, PartKind, TakenInNotice, UsageReading } from './types.ts';
 import { pluginMarketOf, pluginOf } from './sourcelink.ts';
-import { entryShownIn, heldKinds, takesPlugins } from './presence.ts';
+import { heldKinds, takesPlugins } from './presence.ts';
 import { closeLineResult, lineBox, lineBusy, listingOf, market, resultKey, resultOn, turnFromLine, wantView } from './pluginstate.ts';
 import { lineControl, type LineFacts } from './pluginline.ts';
 import { succeeded, type PluginDone, type PluginDraft } from './pluginplan.ts';
@@ -3148,21 +3148,21 @@ const DEFINITION = 'Central Knot’s definition';
 /**
  * The item in Central Knot whose stored text a target's panel offers, by kind: a library skill's current version (it offers no
  * copy: fileCopies; with the path of a tool's copy that holds it, where one does: filePanel); an ordinary agent's definition,
- * where no tool has a copy; an ordinary server's definition, after each tool's entry, unless its only entry is in a tool whose
- * entries aren't read (no mark yet). The stored text is shown where it is asked for or no copy is offered (setFile).
+ * where no tool has a copy; an ordinary server's definition, after each tool's entry. The stored text is shown where it is asked
+ * for or no copy is offered (setFile).
  */
 const storedOf = (t: Table, target?: FileTarget) => (target?.kind === 'skills' || (isAgentRow(target) && !fileCopies(t, target).length)
-  || (isServerRow(target) && (fileCopies(t, target).length > 0 || !entryTools(target).length)) ? inLibrary(itemOf(target as ItemRow)) : undefined);
+  || isServerRow(target) ? inLibrary(itemOf(target as ItemRow)) : undefined);
 interface FileCopy { tool: HarnessId; rootLabel?: string; directory?: string; realDirectory?: string; hash?: string; version?: string; part?: string }
 /**
  * The copies a target's panel offers, in column order (tab's tool first): an agent's in each tool with a file for it, a server's
- * in each tool with its entry where entries are read (presence.ts entryShownIn), each read by itself (one shared hash doesn't
+ * in each tool with its entry, each read by itself (one shared hash doesn't
  * make two files the same bytes); a found or plugin skill's, collapsed by real folder, or by hash (found) / version (plugin); none
  * of a library skill's (its stored version instead: storedOf).
  */
 function fileCopies(t: Table, target: FileTarget): FileCopy[] {
   if (isAgentRow(target)) return (toolsFor(t, 'agents') as HarnessId[]).filter(tool => target.paths?.[tool]).map(tool => ({ tool }));
-  if (isServerRow(target)) return (toolsFor(t, 'mcp') as HarnessId[]).filter(tool => entryShownIn(tool) && entryTools(target).includes(tool)).map(tool => ({ tool }));
+  if (isServerRow(target)) return (toolsFor(t, 'mcp') as HarnessId[]).filter(tool => entryTools(target).includes(tool)).map(tool => ({ tool }));
   if ((target.kind !== 'skill' && target.kind !== 'skills') || (target.kind === 'skills' && inLibrary(itemOf(target)))) return [];
   const hashes = target.kind === 'skills' ? target.folderHashes : undefined;
   const raw = (toolsFor(t, 'skills') as HarnessId[]).flatMap<FileCopy>(tool => target.kind === 'skill'
@@ -3181,7 +3181,7 @@ function fileCopies(t: Table, target: FileTarget): FileCopy[] {
 const copyToken = (copy?: FileCopy) => (copy?.hash ? `${copy.hash}:${copy.realDirectory ?? ''}` : `read:${state.home?.readId ?? 0}`);
 /**
  * Whether a row has the file mark (fileButton; the reconcile in drawTable asks it too): a skill with a stored version or a copy,
- * a marketplace skill hit with its path, every ordinary agent, an ordinary server but one whose only entry is Codex's.
+ * a marketplace skill hit with its path, every ordinary agent, an ordinary server with an entry in a tool or in Central Knot.
  */
 const hasFile = (t: Table, target: FileTarget) => (isCatalogHit(target) ? target.hit.item?.kind === 'skill' && !!target.hit.item.path
   : !!storedOf(t, target) || fileCopies(t, target).length > 0);

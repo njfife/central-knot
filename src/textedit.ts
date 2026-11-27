@@ -2,7 +2,8 @@
 // a member of an object at a path (setJsonMember), or read-only spans (jsonStart, skipSpace, members, memberAt, jsonElements) for
 // cutting one entry verbatim (hooksource.ts, mcp.ts entryText). TOML: a table and its subtables (setTomlTable: an MCP server's
 // [mcp_servers.<name>]), its own-line end (ownEnd), or the tables of an array (arrayBlocks, editTomlArray, setTomlArrayKey:
-// Codex's [[skills.config]]). Text only: which entry changes is its caller's (mcp.ts, mcpswitch.ts, skillswitch.ts, partswitch.ts,
+// Codex's [[skills.config]]); read-only, the tables with each line's span (readTomlTables) and an inline table's members with
+// theirs (inlineMembers), for mcp.ts entryText. Text only: which entry changes is its caller's (mcp.ts, mcpswitch.ts, skillswitch.ts, partswitch.ts,
 // plugins.ts, agentfiles.ts), and writing the file, checked, is share.ts writeFileChecked.
 
 // ---------- JSON ----------
@@ -311,28 +312,41 @@ function parseTomlValue(text: string, at: number): { value: TomlValue; next: num
     }
   }
   if (char === '{') {
+    const { members: list, next } = inlineMembers(text, at);
     const table: Record<string, TomlValue> = {};
-    let index = at + 1;
-    for (;;) {
-      index = skipTomlSpace(text, index, false);
-      if (text[index] === '}') return { value: table, next: index + 1 };
-      const { keys, next } = parseDotted(text, index);
-      index = skipTomlSpace(text, next, false);
-      if (text[index] !== '=') throw new Error('Expected "=".');
-      const item = parseTomlValue(text, index + 1);
+    for (const { keys, value } of list) {
       let target = table;
       for (const key of keys.slice(0, -1)) target = (target[key] ??= {}) as Record<string, TomlValue>;
-      target[keys[keys.length - 1]] = item.value;
-      index = skipTomlSpace(text, item.next, false);
-      if (text[index] === ',') { index++; continue; }
-      if (text[index] === '}') return { value: table, next: index + 1 };
-      throw new Error('Expected "," or "}".');
+      target[keys[keys.length - 1]] = value;
     }
+    return { value: table, next };
   }
   const match = /^(?:true|false|[+-]?(?:\d[\d_]*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/.exec(text.slice(at));
   if (!match) throw new Error('Unsupported TOML value.');
   const word = match[0];
   return { value: word === 'true' ? true : word === 'false' ? false : Number(word.replace(/_/g, '')), next: at + word.length };
+}
+
+/**
+ * The members of the inline table starting at `at` (the "{"), in order: each one's keys as decoded, its value, and its span from
+ * its key to its value's end (`docs = { … }` in `{ first = 1, docs = { … } }`); `next` is just past the closing "}".
+ */
+export function inlineMembers(text: string, at: number): { members: { keys: string[]; value: TomlValue; start: number; end: number }[]; next: number } {
+  const list: { keys: string[]; value: TomlValue; start: number; end: number }[] = [];
+  let index = at + 1;
+  for (;;) {
+    index = skipTomlSpace(text, index, false);
+    if (text[index] === '}') return { members: list, next: index + 1 };
+    const start = index, { keys, next } = parseDotted(text, index);
+    index = skipTomlSpace(text, next, false);
+    if (text[index] !== '=') throw new Error('Expected "=".');
+    const item = parseTomlValue(text, index + 1);
+    list.push({ keys, value: item.value, start, end: item.next });
+    index = skipTomlSpace(text, item.next, false);
+    if (text[index] === ',') { index++; continue; }
+    if (text[index] === '}') return { members: list, next: index + 1 };
+    throw new Error('Expected "," or "}".');
+  }
 }
 
 /**
