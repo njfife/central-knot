@@ -1699,8 +1699,9 @@ app.whenReady().then(async () => {
   // the home as it is now (the Library's own reading, no pass) and refuses where it isn't there or isn't the home open. Its
   // name, command and path are never the page's. CK_SIGNIN_START_LIMIT_MS: an end-to-end run's shorter limit.
   const signinNow = async () => {
-    const managed = await managedNow(context(), await readFor(handoff.id));
-    return { where: { home: current!.home, actual: current!.mode === 'actual', toolsHome: homedir(), searchPath: await searchPath() }, managed, rows: signinRows(await profileHome(managed)) };
+    const shared = context(), managed = await managedNow(shared, await readFor(handoff.id));
+    return { where: { home: current!.home, actual: current!.mode === 'actual', toolsHome: homedir(), searchPath: await searchPath() }, writable: (await writeAccess(shared)).allowed,
+      managed, rows: signinRows(await profileHome(managed)) };
   };
   handleNow('mcp-signin:start', async (tool, home, row, copy) => (current && isTool(tool) && typeof home === 'string' && typeof row === 'string' && typeof copy === 'string'
     ? startSignin({ tool, home, row, copy }, signinNow, Number(process.env.CK_SIGNIN_START_LIMIT_MS), log) : { notStarted: 'Changed since the page showed it' }));

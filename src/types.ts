@@ -1062,11 +1062,11 @@ export type SigninSaid = { is: 'no-sign-in' | 'signed-in' | 'connected' | 'needs
 /** One tool's MCP sign-in check: what it said of each server, by its own name for it; or that it couldn't be run or didn't end in time; or the first line of an answer in a shape not known. */
 export type SigninAnswer = { servers: Record<string, SigninSaid> } | { failed: 'missing' | 'timeout' } | { unreadable: string };
 /**
- * How a sign-in started from the page ended (mcpsigninrun.ts startSignin): its tool ended with exit code 0; it ended otherwise,
- * with the last line it printed; it was stopped at its limit or by Stop, Quit or another home, or no command line was found;
- * or main started nothing, and why.
+ * How a sign-in started from the page ended (mcpsigninrun.ts startSignin): its tool ended with exit code 0; its tool ended
+ * otherwise (`unfinished`: the last line it printed); it was stopped at its limit or by Stop, Quit or another home, or no command
+ * line was found; or main started nothing (`notStarted`: why, main's refusal).
  */
-export type SigninEnd = { signedIn: true } | { refused: string } | { failed: 'timeout' | 'stopped' | 'missing' } | { notStarted: string };
+export type SigninEnd = { signedIn: true } | { unfinished: string } | { failed: 'timeout' | 'stopped' | 'missing' } | { notStarted: string };
 /** One reading of a home's session history, made when the page collects usage (app.ts collectUsage): when, and every tool's. */
 export interface UsageReading { at: string; tools: ToolUsage[] }
 

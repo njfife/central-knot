@@ -94,9 +94,10 @@ export const gitEnv = () => ({ ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INT
  * caps how long to wait after exit for inherited pipes to close and kills any lingering process group when the run ends;
  * `catchStart`, when true (hookrun.ts), turns a synchronous start throw into `reason: 'error'` instead of rejecting; `graceMs`,
  * when positive (a run in a `group`, off Windows: mcpsigninrun.ts startSignin), a stop asks the group to end (TERM) and kills
- * it that long after if the run hasn't ended by then (what its leader left as it ended, `drainMs` kills).
+ * it that long after if the run hasn't ended by then (what its leader left as it ended, `drainMs` kills); `inOrder`, when true,
+ * also keeps both streams as they arrived (RunResult inOrder).
  */
-export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; maxBytes?: number; env?: NodeJS.ProcessEnv; drainMs?: number; catchStart?: boolean; graceMs?: number }
+export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; maxBytes?: number; env?: NodeJS.ProcessEnv; drainMs?: number; catchStart?: boolean; graceMs?: number; inOrder?: boolean }
 /**
  * A command's outcome: `output` is both streams as trimmed text (what failures are worded from); `stdout` and `stderr` each
  * stream byte for byte. A run stopped by its `signal` still reports `code: 'timeout'` for existing callers, while `reason`
@@ -107,6 +108,8 @@ export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; max
 export type RunResult = {
   code: number | 'timeout' | 'missing'; output: string; stdout: Buffer; stderr: Buffer;
   reason?: 'timeout' | 'aborted' | 'overflow' | 'missing' | 'error'; spawnError?: string; signal?: NodeJS.Signals; leftRunning?: boolean;
+  /** Both streams as they arrived, chunk by chunk: only where RunOptions inOrder asked for it. */
+  inOrder?: string;
 };
 
 /**
@@ -121,7 +124,7 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
   const drainMs = options.drainMs && options.drainMs > 0 ? options.drainMs : 0;
   const graceMs = group && options.graceMs && options.graceMs > 0 ? options.graceMs : 0;
   return new Promise(done => {
-    const out: Buffer[] = [], err: Buffer[] = [];
+    const out: Buffer[] = [], err: Buffer[] = [], arrived: Buffer[] = [];
     let stopped: 'timeout' | 'aborted' | undefined;
     let cut = false;
     let ended = false;
@@ -180,16 +183,17 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
       const stdout = Buffer.concat(out);
       const stderr = Buffer.concat(err);
       const output = `${stdout.toString('utf8')}${stderr.toString('utf8')}`.replace(/\r/g, '').trim();
-      const left = leftRunning ? { leftRunning } : {};
+      const also = { ...(leftRunning ? { leftRunning } : {}), ...(options.inOrder ? { inOrder: Buffer.concat(arrived).toString('utf8') } : {}) };
       const sig = termSignal && !stopped && !cut ? { signal: termSignal } : {};
-      if (cut) done({ code: 1, output: `${output.slice(-2000)}\n(output cut: more than ${maxBytes / 1024 / 1024} MB)`, stdout, stderr, reason: 'overflow', ...left });
-      else if (errMsg !== undefined && (options.catchStart || !stopped)) done({ code, output, stdout, stderr, reason: code === 'missing' ? 'missing' : 'error', spawnError: errMsg, ...left });
-      else if (stopped && (code !== 0 || drainMs)) done({ code: 'timeout', output, stdout, stderr, reason: stopped, ...left });
-      else done({ code, output, stdout, stderr, ...left, ...sig });
+      if (cut) done({ code: 1, output: `${output.slice(-2000)}\n(output cut: more than ${maxBytes / 1024 / 1024} MB)`, stdout, stderr, reason: 'overflow', ...also });
+      else if (errMsg !== undefined && (options.catchStart || !stopped)) done({ code, output, stdout, stderr, reason: code === 'missing' ? 'missing' : 'error', spawnError: errMsg, ...also });
+      else if (stopped && (code !== 0 || drainMs)) done({ code: 'timeout', output, stdout, stderr, reason: stopped, ...also });
+      else done({ code, output, stdout, stderr, ...also, ...sig });
     };
     const settle = windows?.settle ?? end;
-    child.stdout.on('data', take(out));
-    child.stderr.on('data', take(err));
+    const keep = (stream: (chunk: Buffer) => void) => (chunk: Buffer) => { if (options.inOrder) arrived.push(chunk); stream(chunk); };
+    child.stdout.on('data', keep(take(out)));
+    child.stderr.on('data', keep(take(err)));
     child.on('error', error => {
       errMsg = error.message;
       settle(errorCode(error) === 'ENOENT' ? 'missing' : 1);

@@ -1295,6 +1295,8 @@ span.ins-confirm { margin-top: 0; }
 .signin-keep { white-space: nowrap; }
 .signin-cell .signin-words { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; }
 .signin-words .btn { flex: none; }
+/* A sign-in's button and its Copy, side by side under the words, each starting at the cell's edge when they wrap. */
+.signin-acts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .signin-command { display: block; margin-top: 2px; font-family: var(--mono); font-size: 11px; line-height: 16px; color: var(--ink); }
 
 /* ---------- The Sessions page (sessionspage.ts) ----------
