@@ -1,9 +1,9 @@
 // The Overview, the page the app opens on (app.ts state.page starts on it; nothing remembers another page across a launch).
 // Top to bottom: what the last action did (matrix.ts outcomeBand) and the Practice copy's note; the lead, only while nothing is
-// on; what needs you (needsYou: one function, one order, nothing when nothing does; a tool that came under management by itself
-// last, until closed: arrivalLines, the one thing here kept for a home, by main.ts); a card per kind (kindCard: its counts and
-// whether it is in sync, then what the usage reading says of it); the usage strip (usageStrip, with one link to everything
-// unused); a row per managed tool (toolsTable: its version, what it has of each kind and of plugins, its sessions in the last
+// on and first setup's question isn't asking; what needs you (needsYou: one function, one order, nothing when nothing does; a
+// tool that came under management by itself last, until closed: arrivalLines, the one thing here kept for a home, by main.ts);
+// a card per kind (kindCard: its counts and whether it is in sync, then what the usage reading says of it); the usage strip
+// (usageStrip, with one link to everything unused); a row per managed tool (toolsTable: its version, what it has of each kind and of plugins, its sessions in the last
 // 30 days); and where every change is kept. Nothing is stored, and opening it reads nothing more than the home's view. The
 // figures come from that view, the usage reading on show and its sum (matrix.ts usageOnShow, usageSums, unusedCount:
 // usagerow.ts usageSummary), Harnesses' counts (harnesspage.ts tally, pluginstatus.ts pluginsInstalled) and the update state
@@ -57,16 +57,16 @@ function leadSentence(home: HomeView): string {
 }
 
 /**
- * The lead's next step, only where it can be taken: with two tools or more, turn something on (where first setup's question
- * isn't asking: `asking`); with one tool there is nothing to keep in step, so it says how a second one joins. Nothing is found
- * only where no card counts anything (a plugin's items are rows too: pluginrows.ts rowCount).
+ * The lead's next step, only where it can be taken: with two tools or more, turn something on; with one tool there is nothing to
+ * keep in step, so it says how a second one joins. Nothing is found only where no card counts anything (a plugin's items are rows
+ * too: pluginrows.ts rowCount).
  */
-function nextStep(home: HomeView, asking: boolean): string {
+function nextStep(home: HomeView): string {
   if (!heldKinds(home).some(kind => rowCount(home, kind))) return ' Nothing found in this home yet.';
   // A tool left out is named under the tools table, with where its switch is.
   if (homeTools().length === 1) return home.sync.present.length > 1 ? ''
     : ' When a second tool is installed, or its folder appears here, Central Knot finds it on its own; then manage what you want the same in both.';
-  return !whyReadOnly(home) && !asking ? ' Open one below and turn on what you want the same in every tool.' : '';
+  return !whyReadOnly(home) ? ' Open one below and turn on what you want the same in every tool.' : '';
 }
 
 /** The practice copy explains itself the first times it opens: what it is, that it is safe, and how to move to the real thing. */
@@ -85,11 +85,11 @@ function practiceBanner() {
 // ---------- What needs you ----------
 
 /**
- * Whether first setup speaks of found items whose copies differ: its question asks about them, and with Synchronize everything
- * on its line leads into choosing them (where the home can be written). Otherwise each kind's line says them (needsYou), so they
- * are said once.
+ * Whether first setup speaks of found items whose copies differ: with Synchronize everything on, its line leads into choosing them
+ * (where the home can be written: firstsetup.ts setupLead). Otherwise each kind's line says them (needsYou), under the question
+ * while it asks, so they are said once.
  */
-const setupSpeaksOfCopies = (home: HomeView) => asksNow(home) === 'question' || (home.sync.syncEverything === true && !whyReadOnly(home));
+const setupSpeaksOfCopies = (home: HomeView) => home.sync.syncEverything === true && !whyReadOnly(home);
 
 /** Why the home can't be written (app.ts whyReadOnly): preview only, or a record that stops every write; with no tool managed too. */
 function readOnlyLine(home: HomeView): HTMLElement | null {
@@ -289,8 +289,9 @@ export function overviewPage() {
     band ? h('div.bands', {}, band) : null,
     h('div.scroll.overview-scroll', { id: 'overview-scroll' },
       practiceBanner(),
-      // Until something is on, the lead says what Central Knot does; after, the cards and the tools say it in figures.
-      empty ? noToolsLead('overview') : !anyOn(home) ? h('p.overview-lead', {}, leadSentence(home), nextStep(home, asksNow(home) === 'question')) : null,
+      // Until something is on, the lead says what Central Knot does (first setup's question, while it asks); after, the cards and
+      // the tools say it in figures.
+      empty ? noToolsLead('overview') : !anyOn(home) && asksNow(home) !== 'question' ? h('p.overview-lead', {}, leadSentence(home), nextStep(home)) : null,
       needsYou(home),
       empty ? null : h('div.kind-cards', { 'data-count': String(kinds.length) }, kinds.map(kind => kindCard(kind, home))),
       empty ? null : usageStrip(kinds),

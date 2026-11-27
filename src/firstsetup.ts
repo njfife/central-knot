@@ -6,12 +6,15 @@
 // the Overview (setupLead, first of what needs you: overview.ts needsYou). The walkthrough is one band at the top of the Library
 // (walkthroughBand, drawn by matrix.ts listBands), bound to the item it is at by kind and key, holding that item's copy question
 // as its row shows it (matrix.ts copyQuestion, which listBands hands it), the latest copy preselected (library.ts latestCopy, in
-// the take-in answer); each step shows that item's row (matrix.ts showRow). Settings' Synchronize everything row
-// counts as the question does and leads in too (settingspage.ts). What Yes does in the engine, and its one Undo in History, are
-// everything.ts's.
-import { acting, applyClick, busy, clickResumes, noToolManaged, rerender, runSwitches, setHome, showPage, state, switchReasons, syncNow, tell, tellWritten, whyReadOnly, type PageKind } from './app.ts';
+// the take-in answer); each step shows that item's row (matrix.ts showRow). Both answers' results stay on the Overview: Yes's
+// with the switch-on's Undo (app.ts everythingUndo, as Settings' switch offers it), No's with the way to switch it on there
+// (app.ts switchSyncEverything). The found items whose copies differ are each kind's line under the question while it asks
+// (overview.ts needsYou). Settings' Synchronize everything row counts as the question does and leads in too (settingspage.ts).
+// What Yes does in the engine, and its one Undo, are everything.ts's.
+import { acting, applyClick, busy, clickResumes, everythingUndo, noToolManaged, rerender, runSwitches, setHome, state, switchReasons, switchSyncEverything, syncNow, tell, tellWritten, whyReadOnly, type PageKind } from './app.ts';
 import { pluginReloads, reloadsFor } from './reload.ts';
-import { button, closeButton, h, icon } from './dom.ts';
+import { button, closeButton, h, icon, infoMark } from './dom.ts';
+import { anyOn } from './itemrow.ts';
 import { rowClicks } from './libraryrow.ts';
 import { plural, tookInCount } from './model.ts';
 import { oneUndoCovers } from './historyactions.ts';
@@ -19,7 +22,7 @@ import { asksNow, KINDS, setupKinds, latestDone, waitingForChoice, walkId, walkP
 import { turnEvery } from './pluginswitch.ts';
 import type { Change, HomeView, PassResult } from './types.ts';
 import { showRow, throughItemsFor } from './matrix.ts';
-import { andList, kindNouns, rowNames, toolName } from './words.ts';
+import { andList, kindNouns, rowNames } from './words.ts';
 
 
 // ---------- The question ----------
@@ -42,26 +45,31 @@ export function setupLead(home: HomeView): HTMLElement | null {
       : button({ variant: 'link', size: 'micro', label: 'Choose copies', id: 'setup-choose', onclick: openWalkthrough }));
 }
 
+/** What the question's (?) says: where Yes puts each item, and what its one Undo covers (historyactions.ts oneUndoCovers). */
+const YES_INFO = `Each item goes to the tools that lack it and can take it; ones whose copies differ wait for your choice. ${oneUndoCovers}`;
+
+/**
+ * The question, one line counted as the pass counts (setupcounts.ts whatYesDoes), and under it only what is true of this home: the
+ * found kinds whose record stops them, and Automatic sync off. No's words are its hover; what is on is said to stay on only where
+ * something is. The found items whose copies differ are said under it by each kind's line (overview.ts needsYou).
+ */
 function question(home: HomeView) {
-  const yes = whatYesDoes(home), ready = setupKinds(home);
-  const stopped = KINDS.filter(kind => !ready.includes(kind) && home[kind].items.some(item => item.takeInAnswers)).map(kind => kindNouns[kind].many);
-  const future = ready.length === KINDS.length ? 'what turns up later is taken in too' : 'new items are taken in when their kind’s record allows it';
+  const { takes } = whatYesDoes(home), ready = setupKinds(home), { managed, present } = home.sync;
+  const foundIn = KINDS.filter(kind => home[kind].items.some(item => item.takeInAnswers));
+  const stopped = foundIn.filter(kind => !ready.includes(kind)).map(kind => kindNouns[kind].many);
+  const tools = managed.length < present.length ? `the ${plural(managed.length, 'tool')} Central Knot manages` : 'every tool';
+  const ask = takes ? `Add the ${plural(takes, 'item')} found in your tools to ${tools}, and new ones as they turn up?`
+    : `${foundIn.length ? 'Nothing found is ready to add' : 'Nothing new in your tools now'}. Add new items to ${tools} as they turn up?`;
   const waits = stopped.length ? `Found ${andList(stopped)} wait until their record can be used.` : '';
-  // What Yes adds at once, then what waits for a choice (nothing is chosen for anyone), then what Yes leaves to a later step.
-  const now = yes.takes ? `Yes takes in now the ${plural(yes.takes, 'item')} found in your tools that Central Knot doesn’t keep yet, and puts each in the tools that lack it${yes.to.length ? ` (${andList(yes.to.map(toolName))})` : ''}; ${future}.`
-    : ready.length !== KINDS.length ? 'Yes takes in new items when their kind’s record allows it.'
-    : 'Nothing found in your tools now is new to Central Knot; Yes takes in what turns up later.';
-  const choosing = yes.choosing ? ` ${plural(yes.choosing, 'more item')} ${yes.choosing === 1 ? 'has' : 'have'} copies that differ and ${yes.choosing === 1 ? 'waits' : 'wait'} for you: nothing is chosen for you. You’re asked about each, one at a time, with the latest copy marked where one can be told, or you skip it and its copies stay as they are.` : '';
-  const later = home.syncOn ? '' : ' Automatic sync is off, so nothing is added until you click Sync once.';
-  const no = 'No changes nothing: what is already on stays on and keeps syncing, and each found item waits on its page for Add.';
+  const later = home.syncOn ? '' : 'Automatic sync is off: nothing is added until Sync once.';
+  const no = `Leaves it off: ${anyOn(home) ? 'what is on stays on, and ' : ''}each found item waits in the Library for Add.`;
   return h('section.setup-question', { id: 'setup-question', 'aria-labelledby': 'setup-question-title' },
-    h('h2.setup-title', { id: 'setup-question-title' }, 'Synchronize everything?'),
-    // One fact to a line, so the question reads at a glance: what Yes adds, what waits, the way back, Automatic sync.
-    h('div.setup-text', {}, ...[now, waits, choosing, oneUndoCovers, later].map(line => line.trim()).filter(Boolean).map((line, at, lines) => h('p.setup-line', {}, at < lines.length - 1 ? `${line} ` : line))),
-    h('p.setup-text', { id: 'setup-no-says' }, no),
+    h('h2.setup-title', {}, h('span', { id: 'setup-question-title' }, ask), ' ', infoMark('setup-question-info', 'Synchronize everything', YES_INFO)),
+    ...[waits, later].filter(Boolean).map(line => h('p.setup-text', {}, line)),
     h('div.setup-actions', {},
       button({ variant: 'primary', label: 'Synchronize everything', id: 'setup-yes', disabled: acting(), onclick: () => void answer(true) }),
-      button({ variant: 'outline', label: 'No, I’ll add items myself', id: 'setup-no', disabled: acting(), attrs: { title: no, 'aria-describedby': 'setup-no-says' }, onclick: () => void answer(false) })));
+      button({ variant: 'outline', label: 'No, I’ll add items myself', id: 'setup-no', disabled: acting(), attrs: { title: no, 'aria-description': no },
+        onclick: () => void answer(false) })));
 }
 
 /** A home that waits for Resume: Resume comes first (any click resumes, as on the item lists), and the question after it. */
@@ -69,24 +77,29 @@ const resumeFirst = (reason: string) => h('p.overview-line', { id: 'setup-resume
   button({ variant: 'link', size: 'micro', label: 'Resume', id: 'setup-resume-button', disabled: acting(), onclick: () => void applyClick({ kind: 'skills', changes: [], items: [], rows: [], said: 'Resumed: sync carries on from the record as it is.' }) }),
   ' Then Central Knot asks whether to synchronize everything.');
 
-/** The answer, refused where the home was answered meanwhile (another window). Yes opens the walkthrough where an item waits. */
+/**
+ * The answer, refused where the home was answered meanwhile (another window). Its result stays on the Overview, where the line
+ * under the question leads into any copies that wait (setupLead): Yes's with the switch-on's Undo (beside Sync once while Automatic
+ * sync is off), No's with the way to switch the rule on there.
+ */
 const answer = (on: boolean) => busy(on ? 'Turning on Synchronize everything…' : 'Leaving it off…', async () => {
   const set = await window.centralKnot.setSyncEverything(on, state.home!.home, true);
   if (set.view) setHome(set.view);
   const home = state.home!;
   if (set.stopped) { tell({ page: 'overview', band: true, warn: true, text: `Nothing changed. ${set.stopped}` }); return; }
-  if (!on) { tell({ page: 'overview', band: true, text: 'Left off, and nothing changed: what is already on stays on and keeps syncing, and what Central Knot finds in your tools waits on its page for Add. Settings › This home can switch on Synchronize everything later.' }); return; }
+  if (!on) {
+    tell({ page: 'overview', band: true, text: 'Left off.', act: { label: 'Turn on Synchronize everything', id: 'setup-turn-on', title: YES_INFO, run: () => void switchSyncEverything(true) } });
+    return;
+  }
+  const undo = await everythingUndo(set.event, home.home);
   if (!home.syncOn) {
-    tell({ page: 'overview', band: true, text: 'Synchronize everything is on. Automatic sync is off, so nothing is added until you click Sync once.',
-      act: { label: 'Sync once', id: 'setup-sync-once', title: 'Take in what is found now; Automatic sync stays off', run: () => void syncNow().then(walkIfWaiting) } });
+    tell({ page: 'overview', band: true, text: 'Synchronize everything is on. Automatic sync is off: nothing is added until Sync once.', next: undo,
+      act: { label: 'Sync once', id: 'setup-sync-once', title: 'Take in what is found now; Automatic sync stays off', run: () => void syncNow() } });
     return;
   }
   const taken = KINDS.flatMap(kind => home[kind].notices.flatMap(told => (told.kind === 'taken-in' ? told.items : [])));
-  const waiting = waitingForChoice(home).length;
-  tellWritten({ page: 'overview', band: true, carry: true, history: true, text: `Synchronize everything is on: it ${tookInCount(taken.length)}${waiting ? `, and ${plural(waiting, 'item')} with copies that differ ${waiting === 1 ? 'waits' : 'wait'} for your choice` : ''}. ${oneUndoCovers}` }, set.reloads);
-  walkIfWaiting();
+  tellWritten({ page: 'overview', band: true, text: `Synchronize everything is on: it ${tookInCount(taken.length)}.`, act: undo }, set.reloads);
 });
-const walkIfWaiting = () => { if (state.home && waitingForChoice(state.home).length) openWalkthrough(); };
 
 // ---------- The walkthrough ----------
 
@@ -99,7 +112,7 @@ const place = (home: HomeView) => walkPlace(waitingForChoice(home), walk.passed)
 /** The item the walkthrough asks about now, if it is open: its row doesn't ask again (matrix.ts details). */
 export const walkingAt = () => (state.home && walking() ? place(state.home).at : undefined);
 
-/** Opens the walkthrough at its first item, its row shown in the Library (Yes, Settings' count, the Overview's line). */
+/** Opens the walkthrough at its first item, its row shown in the Library (the Overview's line, Settings' count). */
 export function openWalkthrough() {
   const home = state.home;
   if (!home) return;

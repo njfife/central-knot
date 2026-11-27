@@ -1859,12 +1859,25 @@ export const setSync = (on: boolean) => busy(on ? 'Turning Sync on…' : 'Turnin
 });
 
 /**
- * Synchronize everything, the open home's standing rule, on or off from Settings (everything.ts setSyncEverything; first setup's
- * question is firstsetup.ts's). Turned on, main's next pass takes in what is found now: at once with Automatic sync on, at Sync
- * once with it off, and Settings always shows the result band with History's Undo when this click switched it on. Answers why
- * not, if it couldn't be set.
+ * The Undo a band offers right after Synchronize everything was switched on (Settings' switch, first setup's Yes): History's own
+ * action on the switch-on entry `event` (everything.ts setSyncEverything's id), its words worked out now (historyactions.ts
+ * everythingAction). None where the open home is no longer `home`, or History offers nothing for it.
  */
-export const switchSyncEverything = (on: boolean) => busy(on ? 'Turning on Synchronize everything…' : 'Turning off Synchronize everything…', async () => {
+export async function everythingUndo(event: string | undefined, home: string): Promise<Outcome['act']> {
+  if (!event || state.home?.home !== home) return undefined;
+  await putHistory().catch(() => undefined);
+  const events = state.history.data, entry = events?.find(each => each.id === event);
+  const offer = entry && events && state.home ? everythingAction(entry, events, entriesNow(state.home)) : undefined;
+  return offer && { label: offer.label, id: 'outcome-undo', title: offer.help, run: () => { if (state.home?.home === home) void restoreEvent(event); } };
+}
+
+/**
+ * Synchronize everything, the open home's standing rule, on or off from Settings, or on from the band after first setup's No
+ * (everything.ts setSyncEverything; first setup's question is firstsetup.ts's). Turned on, main's next pass takes in what is found
+ * now: at once with Automatic sync on, at Sync once with it off; the result band, with the switch-on's Undo (everythingUndo), is on
+ * the page clicked on. Answers why not, if it couldn't be set.
+ */
+export const switchSyncEverything = (on: boolean) => busy(on ? 'Turning on Synchronize everything…' : 'Turning off Synchronize everything…', async page => {
   const home = state.home!.home;
   const set = await api().setSyncEverything(on, home);
   if (set.view) setHome(set.view);
@@ -1879,24 +1892,8 @@ export const switchSyncEverything = (on: boolean) => busy(on ? 'Turning on Synch
   const text = state.home?.syncOn
     ? 'Synchronize everything is on.'
     : 'Synchronize everything is on. It takes items in at Sync once, or when Automatic sync is on.';
-  let act: Outcome['act'];
-  if (set.event && state.home?.home === home) {
-    await putHistory().catch(() => undefined);
-    const events = state.history.data;
-    const entry = events?.find(each => each.id === set.event);
-    const offer = entry && events ? everythingAction(entry, events, entriesNow(state.home)) : undefined;
-    if (offer) {
-      act = {
-        label: offer.label,
-        id: 'outcome-undo',
-        title: offer.help,
-        run: () => {
-          if (state.home?.home === home) void restoreEvent(set.event!);
-        },
-      };
-    }
-  }
-  tellWritten({ page: 'settings', band: true, settingsBand: true, text, act }, state.home?.syncOn ? set.reloads : [], !!set.event);
+  const act = await everythingUndo(set.event, home);
+  tellWritten({ page, band: true, settingsBand: true, text, act }, state.home?.syncOn ? set.reloads : [], !!set.event);
 });
 
 let menuSyncHome: string | undefined;

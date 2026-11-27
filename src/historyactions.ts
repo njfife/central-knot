@@ -469,8 +469,8 @@ export function versionChoices(event: HistoryEvent, item: LibraryItem | undefine
  */
 export type LeftIn = { item: string; why: TakeInHeld | 'chosen' | 'claude-code' };
 
-/** What the one Undo of a switch-on covers, as every place that promises it says it (the question, Yes's band, History). */
-export const oneUndoCovers = 'One Undo in History takes back what it takes in; a copy you choose has its own Undo.';
+/** What the one Undo of a switch-on covers, as each place that promises it says it (first setup's (?): firstsetup.ts, History's entry). */
+export const oneUndoCovers = 'One Undo takes back what it takes in; a copy you choose has its own Undo.';
 
 /**
  * What a switch-on entry's one Undo would do now, read from History (`history`, oldest first): the rule's take-ins after it (cause
@@ -532,7 +532,7 @@ const keptSaid = (tools: HarnessId[]) => (tools.length === 1 ? `${toolName(tools
 /** What a Synchronize everything entry says: switched on, switched off, or a switch-on's Undo and what it did. */
 export function everythingSentence(event: HistoryEvent): { glyph: IconName; text: string } {
   const { ruleOn, undo } = event.everything ?? { ruleOn: false };
-  if (!undo) return ruleOn ? { glyph: 'refresh-cw', text: `Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. ${oneUndoCovers.replace(/^One Undo in History/, 'Its Undo')}` }
+  if (!undo) return ruleOn ? { glyph: 'refresh-cw', text: `Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. ${oneUndoCovers.replace(/^One Undo/, 'Its Undo')}` }
     : { glyph: 'circle-minus', text: 'Switched off: what turns up in a tool waits on its page for Add.' };
   const count = undo.itemUndos.length;
   const out = count ? `${itemsSaid(count)} it took in ${count === 1 ? 'is' : 'are'} out of Central Knot again, each tool it was found in keeping its own copy` : 'nothing it took in was taken back';

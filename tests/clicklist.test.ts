@@ -2596,7 +2596,10 @@ test('Two runs queued side by side on two tabs: only the first run says the prof
   assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
 });
 
-test('First setup Yes opening the walkthrough carries its result without appending the profile sentence a second time', async t => {
+/** Synchronize everything switched on, as History lists it (everything.ts setSyncEverything): what a switch-on's band offers to undo. */
+const switchedOn = { id: 'on-1', at: '2026-11-27T09:00:00.000Z', key: 'home:everything', item: 'Synchronize everything', kind: 'everything', everything: { ruleOn: true }, losers: [], orderProved: true };
+
+test('First setup’s Yes stays on the Overview: its result there once, the profile sentence once, with the switch-on’s own Undo, History’s', async t => {
   const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
   const { viewWith } = profileActWorld(t, { beforeOn: { notes: true, standup: false }, profiles: [everyday] });
   const clash = {
@@ -2612,16 +2615,58 @@ test('First setup Yes opening the walkthrough carries its result without appendi
   after.sync.syncEverything = true;
   after.skills.items.push(clash as never);
   after.skills.notices = [{ kind: 'taken-in', items: ['standup'] } as never];
+  before.sync.present = before.sync.managed;
   app.home = before;
   app.page = 'overview';
-  t.mock.method(api, 'setSyncEverything', async () => ({ view: after, reloads: [] }));
+  t.mock.method(api, 'setSyncEverything', async () => ({ view: after, reloads: [], event: switchedOn.id }));
+  t.mock.method(api, 'history', async () => ({ events: [switchedOn], days: 30 }));
 
   findById(setupLead(app.home!)!, 'setup-yes').onclick();
   await settled();
-  assert.equal(app.page, 'library');
-  const matches = (app.outcome?.text ?? '').match(/Everyday stopped being the profile in use\./g) ?? [];
-  assert.equal(matches.length, 1, `expected sentence once, got: ${app.outcome?.text}`);
+  // clash waits for a choice of copy: the Overview's line leads into it (setupLead), so Yes opens nothing.
+  assert.deepEqual([app.page, app.outcome?.page], ['overview', 'overview']);
+  assert.equal(app.outcome?.text, 'Synchronize everything is on: it took in 1 item. Everyday stopped being the profile in use.');
   assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
+  assert.deepEqual([app.outcome?.act?.label, app.outcome?.act?.title], ['Undo', 'Switch Synchronize everything off']);
+  // Its click is History's restore of that entry (app.ts restoreEvent).
+  const restore = t.mock.method(api, 'restore', async () => ({ results: [], reloads: [] }));
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual(restore.mock.calls.map(call => call.arguments[0]), [switchedOn.id]);
+});
+
+test('First setup’s No: its hover says what is on stays on only where something is; its band offers Turn on Synchronize everything, Settings’ switch, its result on the Overview', async t => {
+  const { viewWith } = profileActWorld(t, { beforeOn: { notes: false, standup: false }, profiles: [] });
+  const asked = (on: Record<string, boolean>) => {
+    const view = viewWith(on);
+    // What is on, as each row says it (itemrow.ts anyOn reads the rows).
+    for (const item of view.skills.items) item.on = on[item.key] ?? false;
+    Object.assign(view.sync, { syncEverything: undefined, present: view.sync.managed });
+    view.syncOn = true;
+    return view;
+  };
+  const noSays = (home: HomeView) => findById(setupLead(home)!, 'setup-no').attrs;
+  assert.deepEqual([noSays(asked({ notes: false, standup: false })).title, noSays(asked({ notes: true, standup: false })).title],
+    ['Leaves it off: each found item waits in the Library for Add.', 'Leaves it off: what is on stays on, and each found item waits in the Library for Add.']);
+  // Said to the keyboard too: the button's description.
+  assert.equal(noSays(asked({ notes: false, standup: false }))['aria-description'], 'Leaves it off: each found item waits in the Library for Add.');
+  app.home = asked({ notes: false, standup: false });
+  app.page = 'overview';
+  const left = structuredClone(app.home), on = structuredClone(app.home);
+  left.sync.syncEverything = false;
+  on.sync.syncEverything = true;
+  const sent: unknown[][] = [];
+  t.mock.method(api, 'setSyncEverything', async (...args: unknown[]) => { sent.push(args); return args[0] ? { view: on, reloads: [], event: switchedOn.id } : { view: left, reloads: [] }; });
+  t.mock.method(api, 'history', async () => ({ events: [switchedOn], days: 30 }));
+
+  findById(setupLead(app.home!)!, 'setup-no').onclick();
+  await settled();
+  assert.deepEqual([app.outcome?.page, app.outcome?.text, app.outcome?.act?.label], ['overview', 'Left off.', 'Turn on Synchronize everything']);
+  app.outcome!.act!.run();
+  await settled();
+  // The question was answered, so this is Settings' switch (no `answering`, which main refuses once answered), said where it was clicked.
+  assert.deepEqual(sent, [[false, '/home', true], [true, '/home']]);
+  assert.deepEqual([app.page, app.outcome?.page, app.outcome?.text, app.outcome?.act?.label], ['overview', 'overview', 'Synchronize everything is on.', 'Undo']);
 });
 
 test('Unused band: skipped rows marked, unread managed tool cue, 3-line disclosure, all-plugin own-row wording, emptied kind and misses', async t => {
