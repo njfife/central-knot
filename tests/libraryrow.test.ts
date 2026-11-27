@@ -141,23 +141,25 @@ test('Each control sends the agent as it is with one thing changed', () => {
   assert.deepEqual(rowClicks.on(row({ 'claude-cli': 'a', 'codex-cli': 'x' }), undefined, 'codex-cli'), { key: 'reviewer', on: true, except: [], seenOn: false, use: 'codex-cli', useHash: 'x' });
 });
 
-test('While an edit waits in one tool, the others have the current version and get that edit; the status says so', () => {
+test('While an edit waits in one tool, the others have the current version and get that edit; an On row drops the bold summary line', () => {
   const waiting = { 'claude-cli': 'b', 'copilot-cli': 'c', 'codex-cli': 'b' };
-  assert.equal(statusLine(...withItem(waiting, item()), tools), 'On in all 3 tools · Copilot CLI’s edit becomes the current version when sync runs');
+  assert.equal(statusLine(...withItem(waiting, item()), tools), '');
   assert.equal(lineIn(waiting, item(), 'claude-cli', 'Claude Code'), 'Has the current version. It gets Copilot CLI’s edit when sync runs.');
   // A copy the library doesn't have yet is kept as a version before it is written over.
   assert.match(lineIn({ 'claude-cli': 'b', 'codex-cli': 'x' }, item({ applied: { 'claude-cli': 'b' } }), 'codex-cli', 'Codex'), /^Has another copy\. It gets the current version when sync runs; before it is written over, a copy Central Knot doesn’t have yet is kept as a version\.$/);
 });
 
-test('While a copy deleted by hand waits for sync, the status says the agent is about to turn off, not that a tool keeps it out', () => {
-  assert.equal(statusLine(...withItem({ 'copilot-cli': 'b', 'codex-cli': 'b' }, item()), tools),
-    'On · its copy was deleted in Claude Code, so it turns off when sync runs. Central Knot keeps it.');
+test('While a copy deleted by hand waits for sync, the deleted tool’s line says it turns off once; On statusLine stays empty', () => {
+  const deleted = { 'copilot-cli': 'b', 'codex-cli': 'b' };
+  assert.equal(statusLine(...withItem(deleted, item()), tools), '');
+  assert.equal(lineIn(deleted, item(), 'claude-cli', 'Claude Code'),
+    'Its copy was deleted in Claude Code. When sync runs, the agent turns off; Central Knot keeps it.');
 });
 
-test('A tool that can’t take the agent is said in the status: on in the others only', () => {
+test('A tool that can’t take the agent is said on its line; the On status line stays empty', () => {
   const why = { cannot: { 'copilot-cli': 'Copilot CLI can’t store this name (é). Rename it in Claude Code to use it there.', 'codex-cli': 'Codex can’t store this name (é). Rename it in Claude Code to use it there.' } };
   const agent = item({ applied: { 'claude-cli': 'b' } });
-  assert.equal(statusLine(row({ 'claude-cli': 'b' }, why, agent), agent, tools), 'On in Claude Code only · Copilot CLI and Codex can’t take it (see below)');
+  assert.equal(statusLine(row({ 'claude-cli': 'b' }, why, agent), agent, tools), '');
 });
 
 test('Reading a version against the current one compares word by word and keeps its line breaks', () => {
@@ -185,12 +187,12 @@ test('A version’s note says what it changed, or what a copy that gave way diff
   assert.equal(versionOrigin(item, item.versions[1]), 'edited in Codex');
 });
 
-test('The status line says where the agent stands, and in which harnesses', () => {
+test('The status line drops the bold On summary, keeps Off without an Off · prefix, and keeps Found', () => {
   const all = { 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'b' };
-  assert.equal(statusLine(row(all, {}, item()), item(), tools), 'On in all 3 tools');
-  assert.equal(statusLine(...withItem({ 'claude-cli': 'b', 'copilot-cli': 'b' }, item({ except: ['codex-cli'], applied: { 'claude-cli': 'b', 'copilot-cli': 'b' } })), tools), 'On in Claude Code and Copilot CLI · kept out of Codex');
-  assert.equal(statusLine(...withItem({ 'claude-cli': 'b' }, item({ applied: { 'claude-cli': 'b' } })), tools), 'On in Claude Code · Copilot CLI and Codex get it when sync runs');
-  assert.equal(statusLine(...withItem({ 'codex-cli': 'x' }, item({ on: false, applied: {} })), tools), 'Off · in Central Knot and Codex. On puts it in every tool. Codex has a copy Central Knot didn’t put there.');
+  assert.equal(statusLine(row(all, {}, item()), item(), tools), '');
+  assert.equal(statusLine(...withItem({ 'claude-cli': 'b', 'copilot-cli': 'b' }, item({ except: ['codex-cli'], applied: { 'claude-cli': 'b', 'copilot-cli': 'b' } })), tools), '');
+  assert.equal(statusLine(...withItem({ 'claude-cli': 'b' }, item({ applied: { 'claude-cli': 'b' } })), tools), '');
+  assert.equal(statusLine(...withItem({ 'codex-cli': 'x' }, item({ on: false, applied: {} })), tools), 'In Central Knot and Codex. On puts it in every tool. Codex has a copy Central Knot didn’t put there.');
   const differing = row({ 'claude-cli': 'a', 'codex-cli': 'x' }, { takeInAnswers: { click: { wait: 'choice' }, rule: { wait: 'choice' } } });
   assert.equal(statusLine(differing, undefined, tools), 'Not in Central Knot · in Claude Code and Codex, with different copies. Add it to keep it in Central Knot and put it in every tool.');
   // With Synchronize everything on, a found row says what the rule does with it.
@@ -226,7 +228,7 @@ test('An Off agent on through its plugin in two tools names them in its page’s
   const through = row({}, { pluginOn: ['claude-cli', 'codex-cli'] }), off = item({ on: false, applied: {} }), onCodexPage = ['codex-cli', 'claude-cli', 'copilot-cli'];
   assert.deepEqual([placeTag(through, off, tools)?.text, placeTag(through, off, onCodexPage)?.text, statusLine(through, off, onCodexPage, false, [])],
     ['on in Claude Code and Codex only, through its plugin', 'on in Codex and Claude Code only, through its plugin',
-      'Off · on in Codex and Claude Code only, through its plugin. On puts it in every tool.']);
+      'On in Codex and Claude Code only, through its plugin. On puts it in every tool.']);
   assert.equal(placeTag(through, off, onCodexPage)?.title, 'Central Knot keeps this agent and its versions. Codex and Claude Code have it on through its plugin: its switch there, in the opened row, turns that off.');
 });
 
@@ -338,7 +340,7 @@ test('The switch of an Off item says where it is as its row does: a removal stil
     ['still in Claude Code', 'reviewer: off, still in Claude Code. Click to put it in every tool.']);
   // The opened row's status line says the same place.
   assert.deepEqual([statusLine(owed, off, tools), statusLine(unseen, item({ on: false, applied: { 'claude-cli': 'b' } }), tools)].map(line => line.split('. ')[0]),
-    ['Off · still in Codex until sync runs', 'Off · still in Claude Code']);
+    ['Still in Codex until sync runs', 'Still in Claude Code']);
 });
 
 test('A click’s result says what happened, and never claims a harness where it didn’t', () => {
@@ -426,20 +428,18 @@ test('What waits for the next pass (waitsForSync: the Overview card’s changes 
   assert.deepEqual([row({}, {}, onlyInCodex).plan?.turnedOffBy, row({}, {}, onlyInCodex).plan?.remove], ['codex-cli', []]);
 });
 
-test('An On item unseen in every tool says so instead of an empty "On in "; one held out of every managed tool agrees with the lines below', () => {
+test('An On item unseen or held in every tool states why on its tool lines; the bold On summary stays empty', () => {
   const why = 'The plugins record is damaged. Nothing was written or deleted. Put the record back, then try again. Its plugins’ items are held as they are until then. The next sync takes them up again once the record is back.';
   const unseen = Object.fromEntries(tools.map(tool => [tool, why]));
-  assert.equal(statusLine(row({}, { unseen }, item()), item(), tools), 'On · left as it is (see below)');
+  assert.equal(statusLine(row({}, { unseen }, item()), item(), tools), '');
   assert.equal(lineIn({}, item(), 'claude-cli', 'Claude Code', { unseen }), why);
   const pluginOnly = Object.fromEntries(tools.map(tool => [tool, `${tool} gets it only with the plugin partial, and the plugin is kept out.`]));
-  assert.equal(statusLine(row({}, { cannot: pluginOnly }, item({ applied: {} })), item({ applied: {} }), tools), 'On · not in Claude Code, Copilot CLI or Codex (see below)');
-  assert.equal(statusLine(row({}, { cannot: { 'claude-cli': pluginOnly['claude-cli'] } }, item({ applied: {} })), item({ applied: {} }), ['claude-cli']), 'On · not in Claude Code (see below)');
-  // A tool that still holds an older copy it refused to replace has the item: it is never counted as "not in".
+  assert.equal(statusLine(row({}, { cannot: pluginOnly }, item({ applied: {} })), item({ applied: {} }), tools), '');
+  assert.equal(statusLine(row({}, { cannot: { 'claude-cli': pluginOnly['claude-cli'] } }, item({ applied: {} })), item({ applied: {} }), ['claude-cli']), '');
   const keptOld = 'Codex will not load a skill with no YAML frontmatter.';
-  assert.equal(statusLine(row({ 'codex-cli': 'a' }, { cannot: { 'codex-cli': keptOld } }, item({ applied: { 'codex-cli': 'a' } })), item({ applied: { 'codex-cli': 'a' } }), ['codex-cli']),
-    'On · Codex can’t take it (see below)');
+  assert.equal(statusLine(row({ 'codex-cli': 'a' }, { cannot: { 'codex-cli': keptOld } }, item({ applied: { 'codex-cli': 'a' } })), item({ applied: { 'codex-cli': 'a' } }), ['codex-cli']), '');
   assert.equal(statusLine(row({ 'codex-cli': 'a' }, { cannot: { 'claude-cli': pluginOnly['claude-cli'], 'codex-cli': keptOld } }, item({ applied: { 'codex-cli': 'a' } })),
-    item({ applied: { 'codex-cli': 'a' } }), ['claude-cli', 'codex-cli']), 'On · not in Claude Code · Codex can’t take it (see below)');
+    item({ applied: { 'codex-cli': 'a' } }), ['claude-cli', 'codex-cli']), '');
 });
 
 test('An Off row offers one tool only: rowClicks.onOnly keeps every other tool out, Off lines mark kept-out tools, status and switch label tell where On puts it back, and said.onOnly names any other tool that still has it', () => {
@@ -461,10 +461,10 @@ test('An Off row offers one tool only: rowClicks.onOnly keeps every other tool o
   const offOne = item({ on: false, except: ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'], applied: {} });
   const offNone = item({ on: false, except: [...six], applied: {} });
   assert.deepEqual([statusLine(row({}), offAll, six), statusLine(row({}), offTwo, six), statusLine(row({}), offOne, six), statusLine(row({}), offNone, six)], [
-    'Off · On puts it in every tool.',
-    'Off · On puts it back in 4 of 6 tools.',
-    'Off · On puts it back in Claude Code only.',
-    'Off · Kept out of every tool; turn on in a tool below.',
+    'On puts it in every tool.',
+    'On puts it back in 4 of 6 tools.',
+    'On puts it back in Claude Code only.',
+    'Kept out of every tool; turn on in a tool below.',
   ]);
   assert.deepEqual([switchLabel(row({}), offAll, six), switchLabel(row({}), offTwo, six), switchLabel(row({}), offOne, six), switchLabel(row({}), offNone, six)], [
     'reviewer: off, in Central Knot only. Click to put it in every tool.',
@@ -472,10 +472,10 @@ test('An Off row offers one tool only: rowClicks.onOnly keeps every other tool o
     'reviewer: off, in Central Knot only. Click to put it back in Claude Code.',
     'reviewer: off, in Central Knot only. Click to turn it on (kept out of every tool).',
   ]);
-  // A removal still owed keeps offPlace's "still in … until sync runs" before the On sentence.
+  // A removal still owed keeps offPlace's "Still in … until sync runs." before the On sentence.
   const owed = item({ on: false, except: ['codex-cli'], applied: { 'codex-cli': 'b' } });
-  assert.equal(statusLine(row({ 'codex-cli': 'b' }, {}, owed), owed, tools), 'Off · still in Codex until sync runs. On puts it back in 2 of 3 tools.');
-  // On status line still names a tool that has it another way even when that tool is in except (as after an Off-row tool switch).
+  assert.equal(statusLine(row({ 'codex-cli': 'b' }, {}, owed), owed, tools), 'Still in Codex until sync runs. On puts it back in 2 of 3 tools.');
+  // An On row drops its bold status line; OpenCode's own line says it reads Claude Code's copy.
   const onClaudeOnly = item({ on: true, except: ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'], applied: { 'claude-cli': 'b' } });
   const openReads: LibraryRow = {
     key: 'bench-runner', hashes: { 'claude-cli': 'b' },
@@ -483,8 +483,7 @@ test('An Off row offers one tool only: rowClicks.onOnly keeps every other tool o
     anotherWay: { 'opencode-cli': 'OpenCode reads Claude Code’s copy, in Claude Code’s skills folder.' },
     loads: { 'opencode-cli': { folder: 'bench-runner', name: 'bench-runner', skillFile: '~/.claude/skills/bench-runner/SKILL.md', switchedOff: false, in: 'claude-cli' } },
   };
-  assert.equal(statusLine(openReads, onClaudeOnly, six),
-    'On in Claude Code · OpenCode has it another way · kept out of Copilot CLI, Codex, Pi and Antigravity');
+  assert.equal(statusLine(openReads, onClaudeOnly, six), '');
   // said.onOnly: failure, clean one-tool-only, missing fresh row or unmanaged tool (no "only"), OpenCode reading Claude Code's folder, link reader, own copy in another tool, shared folder + pluginOn.
   assert.equal(skills.said.onOnly('bench-runner', 'claude-cli', true, row({}), six), 'bench-runner couldn’t be put in Claude Code.');
   assert.equal(skills.said.onOnly('bench-runner', 'codex-cli', false, { key: 'bench-runner', hashes: { 'codex-cli': 'b' } }, six), 'bench-runner is on in Codex only.');
@@ -703,11 +702,11 @@ test('A plugin’s agent on in Claude Code through the plugin names Codex as una
   };
   assert.equal(
     statusLine(rowWith('Claude Code has it with the plugin release-helper, so no separate copy is placed there.', ['claude-cli']), agent, five),
-    'On in Claude Code only · Codex can’t take it (see below) · kept out of Pi and OpenCode',
+    '',
   );
   assert.equal(
     statusLine(rowWith('Claude Code has it with the plugin release-helper, turned off there, so no separate copy is placed there.', []), agent, five),
-    'On · not in Claude Code or Codex (see below) · kept out of Pi and OpenCode',
+    '',
   );
 });
 
@@ -720,6 +719,10 @@ test('A library row from a Git source names Sync this source and Replace mine in
   const waiting = fromSourceWords({ link, waits: true });
   assert.match(waiting.after, /and Replace mine takes it as it is; either keeps yours as a version\./);
   assert.match(waiting.tag?.title ?? '', /and Replace mine takes it as it is; either keeps yours as a version\./);
+  // A plugin link keeps its hover tag and drops the standing paragraph at the bottom of details.
+  const fromPlugin = fromSourceWords({ link: 'plugin:issue-tracker@team-tools' });
+  assert.deepEqual([fromPlugin.tag?.text, fromPlugin.before, fromPlugin.after], ['from the plugin issue-tracker', '', '']);
+  assert.match(fromPlugin.tag?.title ?? '', /In Pi, OpenCode and Antigravity it follows the plugin; a change you make to it here makes it your own/);
 });
 
 test('showsPlaceTag hides routine Found and Off tags under their own headings, keeps non-routine rows and every tag under other headings', () => {

@@ -24,7 +24,7 @@ import { clockTimesApart, dayAndTime } from './model.ts';
 import { agentsKeptIn } from './presence.ts';
 import { linkLabel, pluginOf } from './sourcelink.ts';
 import type { Change, HarnessId, ItemNotice, LibraryFacts, PluginItemNotice, TakenInNotice } from './types.ts';
-import { andList, deletedIn, harnessIds, kindNouns, orList, pageNames, readsIt, sentence, toolName, toolsPhrase } from './words.ts';
+import { andList, deletedIn, harnessIds, kindNouns, pageNames, readsIt, sentence, toolName, toolsPhrase } from './words.ts';
 
 // ---------- What a kind supplies ----------
 
@@ -127,6 +127,14 @@ export interface LibraryRow {
   getsWithPlugin?: readonly string[];
 }
 
+const FOLLOWS_IN = 'In Pi, OpenCode and Antigravity';
+/** How a plugin's item follows its plugin in tools that take no plugins: one home for its row tag (fromSourceWords) and In each tool (?) (pluginToolsCard). */
+export const PLUGIN_FOLLOWS = `${FOLLOWS_IN} it follows the plugin; a change you make to it here makes it your own, no longer the plugin’s.`;
+/** The card behind In each tool (?) when a plugin supplies the row: plugin-only (`shared` omitted) or plugin-linked (`shared` first). */
+export const pluginToolsCard = (shared?: string) => (shared
+  ? `${shared} ${PLUGIN_FOLLOWS} Hooks and commands can’t.`
+  : `Tools that take plugins get the whole plugin; switches here belong to the plugin. ${FOLLOWS_IN} its items follow the plugin; hooks and commands can’t.`);
+
 /**
  * What an item's row says of the source it is from (types.ts LibraryFacts fromSource): while a version waits there (the item
  * changed here, or a tool's copy unreadable: library.ts changedHere), or once the source removed it (`removed`: library.ts
@@ -136,11 +144,8 @@ export interface LibraryRow {
  */
 export function fromSourceWords(from: NonNullable<LibraryFacts['fromSource']>): { tag?: { text: string; title: string }; before: string; after: string; page?: 'sources' } {
   const label = linkLabel(from.link);
-  // An item a plugin brought (library.ts A PLUGIN): it never waits, and a change made here lets it go.
-  if (pluginOf(from.link)) {
-    const follows = `It follows the plugin in the tools that take no plugins; a change you make to it here makes it your own, no longer the plugin’s`;
-    return { tag: { text: `from ${label}`, title: `${follows}.` }, before: `From ${label}. ${follows}.`, after: '' };
-  }
+  // An item a plugin brought (library.ts A PLUGIN): its tag and In each tool (?) card share PLUGIN_FOLLOWS / pluginToolsCard (no standing paragraph).
+  if (pluginOf(from.link)) return { tag: { text: `from ${label}`, title: PLUGIN_FOLLOWS }, before: '', after: '' };
   if (from.removed) {
     const off = `${label} no longer has it: it is Off, and no longer from that source. Turn it on to use it again`;
     return { tag: { text: 'removed at its source', title: `${off}.` },
@@ -429,12 +434,13 @@ function offOnWords(item: LibraryItem | undefined, tools: readonly string[], for
 }
 
 /**
- * An item's status in one line: on and where, in Central Knot only, or found in a harness and not in Central Knot yet (and,
- * with Synchronize everything on: `everything`, what it does with it). `leftOut`: the installed tools left out (offPlace).
+ * An opened row's status line: where a found item is and what Add does (and with Synchronize everything on, what the rule does);
+ * and where turning an Off item On puts it back (with any still-present or shared copies). Empty on every On row: each tool's line
+ * (detailLine, harnessLine) and marks show every On state, including a pending hand deletion.
  */
 export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], everything = false, leftOut: readonly string[] = []): string {
   const where = (...states: HarnessIs[]) => harnessesWhere(row, item, tools, ...states);
-  const own = where('own-copy'), place = placeOf(item);
+  const place = placeOf(item);
   if (place === 'found') {
     const differ = asksWhichCopy(row) ? ', with different copies' : '';
     if (!canAdd(row)) return 'Not in Central Knot · it can’t be taken in now (see below).';
@@ -442,40 +448,13 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
     const rule = everything && row.takeInAnswers ? ` ${ruleSays(row.takeInAnswers.rule)}` : '';
     return `Not in Central Knot · ${foundWhere(row, item, tools)}${differ}. Add it to keep it in Central Knot${whereAdded(row, item, tools)}${below}.${rule}`;
   }
-  const ownSaid = own.length ? ` ${sentence(named(own, tools))} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there.` : '';
   if (place === 'off') {
-    const at = offPlace(row, item, tools, leftOut);
-    const placePart = at === 'in Central Knot only' ? '' : `${at}.`;
-    return ['Off ·', placePart, ...otherReadLines(row, tools), `${offOnWords(item, tools, false)}${ownSaid}`].filter(Boolean).join(' ');
+    const own = where('own-copy'), at = offPlace(row, item, tools, leftOut);
+    const placePart = at === 'in Central Knot only' ? '' : `${sentence(at)}.`;
+    const ownSaid = own.length ? ` ${sentence(named(own, tools))} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there.` : '';
+    return [placePart, ...otherReadLines(row, tools), `${offOnWords(item, tools, false)}${ownSaid}`].filter(Boolean).join(' ');
   }
-  // A copy deleted by hand turns the item Off at the next pass: that is what it is about to be.
-  const deletedBy = row.plan?.turnedOffBy;
-  if (deletedBy) return `On · its copy was deleted in ${deletedIn(deletedBy, row.plan?.sharedWay)}, so it turns off when sync runs. Central Knot keeps it.`;
-  // A harness holding the current version that only waits for an edit made elsewhere has it on.
-  const waitsForEdit = (tool: string) => row.hashes?.[tool] === item!.hash;
-  // A tool that gets it only with its plugin (pluginline.ts), or has it on through its plugin, is not said here as one that can't take it.
-  const gets = where('gets-it').filter(tool => !waitsForEdit(tool));
-  const out = where('kept-out', 'leaving');
-  const cannot = where('cannot').filter(tool => !row.getsWithPlugin?.includes(tool) && !row.pluginOn?.includes(tool));
-  const unseen = where('unseen');
-  const switched = tools.filter(tool => row.switchedOff?.includes(tool) && !out.includes(tool));
-  const another = where('another-way').filter(tool => !row.pluginOn?.includes(tool));
-  // A tool whose own switch has it off doesn't load it: it is no tool it is on in (the parts below say it). One that has it on
-  // through its plugin is (pluginrows.ts pluginOnIn), as its line's switch says.
-  const onIn = tools.filter(tool => row.pluginOn?.includes(tool) || (!row.switchedOff?.includes(tool) && (['current', 'edited'].includes(harnessIs(row, item, tool)) || (harnessIs(row, item, tool) === 'gets-it' && waitsForEdit(tool)))));
-  const edit = row.plan?.takeIn;
-  const absent = (onIn.length ? [] : cannotHave(row, item, tools)).filter(tool => cannot.includes(tool)), cantTake = cannot.filter(tool => !absent.includes(tool));
-  const cant = [absent.length ? `not in ${orList(absent.map(toolName))}` : '', cantTake.length ? `${andList(cantTake.map(toolName))} can’t take it` : ''].filter(Boolean).join(' · ');
-  const parts = [onIn.length ? `On in ${named(onIn, tools)}${cannot.length ? ' only' : ''}` : 'On',
-    edit ? `${toolName(edit)}’s edit becomes the current version when sync runs` : '',
-    gets.length ? `${named(gets, tools)} ${gets.length === 1 ? 'gets' : 'get'} it when sync runs` : '',
-    cant ? `${cant} (see below)` : '',
-    another.length ? `${andList(another.map(toolName))} ${another.length === 1 ? 'has' : 'have'} it another way` : '',
-    out.length ? `kept out of ${named(out, tools)}` : '',
-    unseen.length && !onIn.length && !gets.length && !cannot.length && !another.length && !out.length ? 'left as it is (see below)' : '',
-    // A harness's own switch that turns it off there: it has the item and doesn't load it, as the tag says.
-    switched.length ? `switched off in ${andList(switched.map(toolName))}` : ''];
-  return `${parts.filter(Boolean).join(' · ')}${ownSaid ? `.${ownSaid}` : ''}`;
+  return '';
 }
 
 /**
