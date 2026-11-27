@@ -1078,12 +1078,12 @@ if (wanted('first-setup')) {
   await refresh();
   await a.click('#nav-overview');
   if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
-  await atEverySize('question-new-home', 'A new home (the Practice copy, never asked): the Overview’s question is one line, Add the 6 items found in your tools to every tool, and new ones as they turn up?, with its (?), and no lead above it; under it, a line for each kind whose found items’ copies differ, with Show them. Synchronize everything is the main button, No, I’ll add items myself beside it, what No leaves in its hover', true, '#setup-question');
+  await atEverySize('question-new-home', 'A new home (the Practice copy, never asked): the Overview’s question is one line, Add 6 of the items found in your tools to every tool, and new ones as they turn up?, with its (?), and no lead above it; under it, one line for the 4 found items whose copies differ, which stay as they are until you choose, with Show them. Synchronize everything is the main button, No, I’ll add items myself beside it, what No leaves in its hover, and You can undo this.', true, '#setup-question');
   await a.size(860, 560); await show('#setup-question'); await focusOn('#setup-yes');
   await shot(a, 'question-focus-860', 'Tabbed to Synchronize everything at 860×560: its focus ring');
   await a.run(`document.activeElement?.blur()`); await a.size(1280, 800);
   await a.click('#setup-no');
-  await atEverySize('after-no', 'Clicked No, I’ll add items myself: the band says Left off., with Turn on Synchronize everything; the question is gone, and the lead says to open a card and turn on what you want', true);
+  await atEverySize('after-no', 'Clicked No, I’ll add items myself: the band says Synchronize everything is off., with Turn on; the question is gone, and the lead says to open a card and turn on what you want', true);
   // A home from before this step, with an item already On, whose rule was never answered: the record without its answer.
   await openKind(a, 'skills');
   await turnOnRow('skills', 'notes'); await switchOn('skills', 'notes');
@@ -1093,7 +1093,7 @@ if (wanted('first-setup')) {
   await atEverySize('question-items-on', 'A home from before this step, with notes already On and the rule never answered: asked as a new home is, 5 items to add now; the skills card counts 1 synced; No’s hover now says what is on stays on', false, '#setup-question');
   await a.click('#setup-yes');
   await waitFor(a, `!!document.querySelector('#setup-choosing')`, 15000);
-  await atEverySize('after-yes', 'Clicked Synchronize everything: still on the Overview; the band says what it took in, with the switch-on’s own Undo; the line under it counts the 4 found items whose copies differ, with Choose copies', true);
+  await atEverySize('after-yes', 'Clicked Synchronize everything: still on the Overview; the band says what it added, with the switch-on’s own Undo; the line under it counts the 4 found items whose copies differ, with Choose copies', true);
   await a.click('#setup-choose');
   await waitFor(a, `!!document.querySelector('#walkthrough')`, 15000);
   await atEverySize('after-yes-walkthrough-first', 'Clicked Choose copies: the walkthrough opened on Skills at its first item, 1 of 4, deploy, with its copy question as its row asks it, Codex’s copy (the latest) the main button, and beside Skip the line Skip changes no copy', true, '#walkthrough', 'start');

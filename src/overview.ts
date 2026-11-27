@@ -86,10 +86,27 @@ function practiceBanner() {
 
 /**
  * Whether first setup speaks of found items whose copies differ: with Synchronize everything on, its line leads into choosing them
- * (where the home can be written: firstsetup.ts setupLead). Otherwise each kind's line says them (needsYou), under the question
- * while it asks, so they are said once.
+ * (where the home can be written: firstsetup.ts setupLead). Otherwise differLines says them, so they are said once.
  */
 const setupSpeaksOfCopies = (home: HomeView) => home.sync.syncEverything === true && !whyReadOnly(home);
+
+/**
+ * The found items whose copies differ, each kind by its page's "Copies differ" count, where first setup doesn't speak of them:
+ * while its question asks, one line for every kind (what Yes leaves as it is), its Show them opening that kind, or All; else a
+ * line per kind.
+ */
+function differLines(home: HomeView, kinds: PageKind[]): HTMLElement[] {
+  if (setupSpeaksOfCopies(home)) return [];
+  const differing = kinds.map(kind => ({ kind, count: kindSource(home, kind).facts.filter(asksWhichCopy).length })).filter(({ count }) => count);
+  const found = (kind: PageKind, count: number) => plural(count, `found ${kindNouns[kind].one}`, `found ${kindNouns[kind].many}`);
+  if (asksNow(home) !== 'question') return differing.map(({ kind, count }) => line(`overview-${kind}-differ-line`, 'diff', 'tone-warning',
+    `${found(kind, count)} ${count === 1 ? 'has' : 'have'} copies that differ. `, link('Show them', `overview-${kind}-differ`, () => openKind(kind, { filter: 'attention' }))));
+  if (!differing.length) return [];
+  const total = differing.reduce((sum, { count }) => sum + count, 0), only = differing.length === 1 ? differing[0].kind : undefined;
+  const words = `${only ? found(only, total) : plural(total, 'found item')} ${total === 1 ? 'has copies that differ and stays as it is' : 'have copies that differ and stay as they are'} until you choose. `;
+  const show = () => (only ? openKind(only, { filter: 'attention' }) : openKind('all', { filter: 'attention' }));
+  return [line('overview-differ-line', 'diff', 'tone-warning', words, link('Show them', 'overview-differ', show))];
+}
 
 /** Why the home can't be written (app.ts whyReadOnly): preview only, or a record that stops every write; with no tool managed too. */
 function readOnlyLine(home: HomeView): HTMLElement | null {
@@ -120,8 +137,8 @@ const arrivalLines = (home: HomeView) => home.sync.arrived.map(arrival => {
  * What needs the person, before any figure, in this order: that Central Knot's settings file couldn't be read at launch, with the
  * way to Settings, which says where the old file is (settingspage.ts settingsReset); first setup (after the problems when a kind is stopped; its question, Resume, or the way into choosing copies:
  * firstsetup.ts setupLead); an update to install (updateview.ts updateLine); why the home can't be written (readOnlyLine); each
- * kind's problems, each said once (but the stop said above: matrix.ts problemsBesideStop); found items whose copies differ, a line
- * per kind with the page's "Copies differ" count, where first setup doesn't speak of them; Automatic sync off; then each tool
+ * kind's problems, each said once (but the stop said above: matrix.ts problemsBesideStop); found items whose copies differ
+ * (differLines); Automatic sync off; then each tool
  * that came under management by itself, until it is closed (arrivalLines).
  */
 function needsYou(home: HomeView): HTMLElement | null {
@@ -130,11 +147,7 @@ function needsYou(home: HomeView): HTMLElement | null {
     .filter(problem => !said.has(problem) && said.add(problem))
     .map((problem, at) => line(`overview-${kind}-problem-${at}`, 'triangle-alert', 'tone-warning', `${problem} `,
       link(`Open ${kindNouns[kind].title}`, `overview-${kind}-problem-${at}-open`, () => openKind(kind)))));
-  const differ = empty || setupSpeaksOfCopies(home) ? [] : kinds.map(kind => {
-    const count = kindSource(home, kind).facts.filter(asksWhichCopy).length, { one, many } = kindNouns[kind];
-    const words = `${plural(count, `found ${one}`, `found ${many}`)} ${count === 1 ? 'has' : 'have'} copies that differ. `;
-    return !count ? null : line(`overview-${kind}-differ-line`, 'diff', 'tone-warning', words, link('Show them', `overview-${kind}-differ`, () => openKind(kind, { filter: 'attention' })));
-  });
+  const differ = empty ? [] : differLines(home, kinds);
   const syncOff = empty || whyReadOnly(home) || home.syncOn ? null : line('overview-sync-off', 'circle-minus', 'tone-warning', 'Automatic sync is off: edits wait until you turn it on or ',
     link('Sync once', 'overview-sync-now', () => void syncNow(), acting()), '.');
   const setup = empty ? null : setupLead(home);
