@@ -55,6 +55,35 @@ export function whenItRuns(tool: HarnessId, hook: DeclaredHook): string {
   return each.every(Boolean) ? each.join(' or ') : `${START} (matcher “${hook.matcher}”)`;
 }
 
+/** Other hook events across Claude Code, Codex and Copilot CLI, each in plain words that keep its platform's meaning. */
+const OTHER_EVENTS: Record<string, string> = {
+  SessionEnd: 'when a session ends',
+  sessionEnd: 'when a session ends',
+  PreToolUse: 'before a tool runs',
+  preToolUse: 'before a tool runs',
+  PostToolUse: 'after a tool runs',
+  postToolUse: 'after a tool runs',
+  PostToolUseFailure: 'when a tool fails',
+  PermissionRequest: 'when permission is asked',
+  Notification: 'on a notification',
+  Stop: 'when the agent stops',
+  agentStop: 'when the agent stops',
+  SubagentStart: 'when a subagent starts',
+  SubagentStop: 'when a subagent stops',
+  subagentStop: 'when a subagent stops',
+  PreCompact: 'before compaction',
+  errorOccurred: 'when an error occurs',
+};
+
+/** One plain event label for any hook event across Instructions and a plugin's page; unknown identifiers stay verbatim. */
+export function hookEventLabel(hook: DeclaredHook, tool?: HarnessId): string {
+  const fromTool = tool ? whenItRuns(tool, hook) : '';
+  if (fromTool) return fromTool;
+  if (hook.event === 'SessionStart' || hook.event === 'sessionStart') return whenItRuns(tool ?? 'claude-cli', { ...hook, event: 'SessionStart' });
+  if (hook.event === 'UserPromptSubmit' || hook.event === 'userPromptSubmitted') return PROMPT;
+  return OTHER_EVENTS[hook.event] ?? hook.event;
+}
+
 /**
  * What a tool takes of such a hook, where it differs from Claude Code (which runs each and takes what it prints): one sentence,
  * starting with the tool's name, so it reads both after the outcome table's colon (below) and on its own on the tool's card
@@ -68,7 +97,7 @@ export function sessionTextNote(tool: HarnessId): string | undefined {
 }
 
 /**
- * The line under a plugin page's "Hooks that can add text to sessions" (pluginpage.ts), for `tools`, the tools its "In each tool"
+ * The line under a plugin page's "Hooks that can add text" (pluginpage.ts), for `tools`, the tools its "In each tool"
  * describes: when such hooks run, Codex's wait for trust only where Codex takes text from one of them, then each tool that takes
  * text from none, as its "In each tool" row has no Session text. `sessionTextHooks`: the copy's Components.sessionTextHooks.
  */

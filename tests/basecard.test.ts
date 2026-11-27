@@ -10,6 +10,7 @@ installDom({}, { userAgent: 'Macintosh', byId: id => findById(rendered, id) ?? n
 
 const { state: app } = await import('../src/app.ts');
 const { baseCard } = await import('../src/basecard.ts');
+const { instructionsPage } = await import('../src/instructionspage.ts');
 
 const FILE_NAMES: Record<HarnessId, string> = {
   'claude-cli': '/home/.claude/CLAUDE.md',
@@ -106,4 +107,75 @@ test('a matching fold opened by the user stays open through a redraw', () => {
   reopened.ontoggle({ currentTarget: { open: false } });
   rendered = baseCard(files) as unknown as FakeNode;
   assert.equal('open' in findById(rendered, 'base-matching')!.attrs, false);
+});
+
+test('Instructions leads with tool cards, keeps Base instructions reachable at top, and keeps a dirty base editor in place', () => {
+  const files = [
+    makeFile('claude-cli', 'same', {
+      parts: [{ path: '/home/.claude/notes/style.md', from: 'imported by CLAUDE.md, line 1', text: 'Be brief.\n' }],
+      ownHooks: [{ declaredIn: '/home/.claude/settings.json', event: 'SessionStart', at: 0, launch: { shell: 'echo hi' } }],
+      versions: [{ id: 'v1', at: '2026-11-26T10:00:00.000Z', firstLine: '# Old', lines: 3, differs: 1 }],
+    }),
+    makeFile('codex-cli', 'same'),
+  ];
+  setupBase(files);
+  rendered = instructionsPage() as unknown as FakeNode;
+  const scroll = findById(rendered, 'instructions-scroll')!;
+  const children = scroll.children as FakeNode[];
+  const aboutIdx = children.findIndex(el => el.className.includes('ins-about-line'));
+  const toolsIdx = children.findIndex(el => el.className.includes('ins-tool-cards'));
+  const baseIdx = children.findIndex(el => el.attrs?.id === 'base-card');
+  assert.ok(aboutIdx >= 0 && toolsIdx > aboutIdx && baseIdx > toolsIdx, `expected about (${aboutIdx}) < tools (${toolsIdx}) < base (${baseIdx})`);
+  assert.ok(findById(children[aboutIdx], 'ins-about'), 'How these files are read stays in the top line');
+  const goBase = findById(children[aboutIdx], 'ins-go-base');
+  assert.ok(goBase, 'Base instructions jump control stays reachable at top');
+  assert.equal(textOf(goBase), 'Base instructions');
+  // Inside a tool card, order stays: own text (.ins-body) -> added files (.ins-parts) -> hooks (.session-strip) -> versions (.ins-versions).
+  const claudeCard = findAll(rendered, el => el.attrs?.['aria-label'] === 'Claude Code instructions')[0]!;
+  const inside = claudeCard.children as FakeNode[];
+  const bodyIdx = inside.findIndex(el => el.className.includes('ins-body'));
+  const partsIdx = inside.findIndex(el => el.className.includes('ins-parts'));
+  const stripIdx = inside.findIndex(el => el.className.includes('session-strip'));
+  const versionsIdx = inside.findIndex(el => el.className.includes('ins-versions'));
+  assert.ok(bodyIdx >= 0 && partsIdx > bodyIdx && stripIdx > partsIdx && versionsIdx > stripIdx, 'order inside tool card preserved');
+
+  // Dirty base editor stays mounted in place in #base-card.
+  app.baseEdit = { text: '- Shared edited draft.\n', hash: 'base-h', tools: ['claude-cli', 'codex-cli'], stage: 'edit' };
+  rendered = instructionsPage() as unknown as FakeNode;
+  const dirtyScroll = findById(rendered, 'instructions-scroll')!;
+  const dirtyChildren = dirtyScroll.children as FakeNode[];
+  const dirtyBaseIdx = dirtyChildren.findIndex(el => el.attrs?.id === 'base-card');
+  assert.ok(dirtyBaseIdx > dirtyChildren.findIndex(el => el.className.includes('ins-tool-cards')), 'dirty base card stays in place after tools');
+  assert.ok(findById(dirtyChildren[dirtyBaseIdx], 'base-text'), 'dirty base textarea stays mounted');
+  app.baseEdit = undefined;
+});
+
+test('Base matching fold puts its chevron after the label without tone-faint, and edited-copy combines explanation into one paragraph with both choices', () => {
+  const files = [
+    makeFile('claude-cli', 'same'),
+    makeFile('codex-cli', 'edited', { base: { chosen: true, state: 'edited', own: 'Own.\n', copy: '- Edited.\n', leftPlain: false } }),
+    makeFile('pi-cli', 'edited', { base: { chosen: true, state: 'edited', own: 'Own.\n', copy: '   \n', leftPlain: false } }),
+  ];
+  setupBase(files);
+  rendered = baseCard(files) as unknown as FakeNode;
+
+  const summary = findById(rendered, 'base-matching-toggle')!;
+  const last = summary.children[summary.children.length - 1] as FakeNode;
+  assert.ok(last?.className?.includes('base-matching-chevron'), `chevron should come last in summary, got ${last?.className}`);
+  assert.equal(last.className.includes('tone-faint'), false, 'matching fold chevron must not use tone-faint');
+
+  const choices = findAll(rendered, el => el.className.split(/\s+/).includes('base-choice'));
+  assert.equal(choices.length, 2);
+  const codexExplains = findAll(choices[0], el => el.className.split(/\s+/).includes('base-explain'));
+  assert.equal(codexExplains.length, 1, 'edited-copy explanation should be combined into one paragraph');
+  assert.match(textOf(codexExplains[0]), /Changed outside Central Knot, so AGENTS\.md was left as it is; either choice shows the change first, keeps the replaced text under Earlier versions, and can be undone\./);
+  assert.ok(findById(choices[0], 'base-diff-codex-cli'));
+  assert.ok(findById(choices[0], 'base-usecopy-codex-cli'));
+  assert.ok(findById(choices[0], 'base-restore-codex-cli'));
+
+  const piExplains = findAll(choices[1], el => el.className.split(/\s+/).includes('base-explain'));
+  assert.equal(piExplains.length, 1);
+  assert.match(textOf(piExplains[0]), /putting the base back shows the change first/);
+  assert.equal(findById(choices[1], 'base-usecopy-pi-cli'), undefined);
+  assert.ok(findById(choices[1], 'base-restore-pi-cli'));
 });

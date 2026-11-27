@@ -1636,7 +1636,10 @@ function askAboutBaseDraft(): boolean {
   const base = state.baseEdit;
   if (!base || !baseDraftTyped()) return false;
   base.confirmDiscard = true;
-  rerender(); document.getElementById(base.stage === 'review' ? 'base-review-keep' : 'base-keep')?.focus(); return true;
+  rerender();
+  document.getElementById('base-head')?.scrollIntoView({ block: 'nearest' });
+  document.getElementById(base.stage === 'review' ? 'base-review-keep' : 'base-keep')?.focus();
+  return true;
 }
 
 /** This home only shows its files: saving is off (writeAccess refuses it: preview only, or held by another build). */
@@ -1723,8 +1726,8 @@ export const applyBaseChange = (request: Omit<BaseApply, 'expected'>, done: (wri
     return;
   }
   state.baseEdit = undefined;
-  // Back to the card's rows, which now show each file's state; focus goes to the result's Undo.
-  document.getElementById('instructions-scroll')?.scrollTo({ top: 0 });
+  // Back to the base card's rows, which now show each file's state; focus goes to the result's Undo.
+  document.getElementById('base-card')?.scrollIntoView({ block: 'start' });
   const written = result.written.map(entry => entry.tool);
   const sessions = written.length ? ` Start a new ${written.length === 1 ? `${toolList(written)} session` : 'session in each'} for this to take effect.` : '';
   const created = result.written.filter(entry => entry.before === null).map(entry => entry.tool);

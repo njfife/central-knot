@@ -11,7 +11,7 @@
 // when it runs, never what it adds. Not listed: other kinds of hook (one that calls a URL or an MCP tool, or asks a model), a
 // project's or an organisation's hooks, a skill's or an agent's own hooks, and `additionalContext` printed by other events.
 import { clockTime } from './model.ts';
-import { addsText, ignoresText, sessionTextNote, whenItRuns } from './pluginoutcomes.ts';
+import { addsText, hookEventLabel, ignoresText, sessionTextNote } from './pluginoutcomes.ts';
 import { commandLine, toolNames } from './words.ts';
 import type { DeclaredHook, HarnessId, HookRunResult, HookSourceOwner, HookSourceRef, InstalledPlugin, InstructionFile } from './types.ts';
 
@@ -45,7 +45,7 @@ export interface TextHookRow { when: string; command: string; source: HookSource
 export function textHookRows(tool: HarnessId, hooks: DeclaredHook[] | undefined, owner: HookSourceOwner): TextHookRow[] {
   return (hooks ?? []).filter(hook => addsText(tool, hook)).map(hook => {
     const command = hookLine(hook);
-    return { when: whenItRuns(tool, hook), command, source: { ...owner, declaredIn: hook.declaredIn, event: hook.event, at: hook.at, command, fingerprint: hookFingerprint(hook) } };
+    return { when: hookEventLabel(hook, tool), command, source: { ...owner, declaredIn: hook.declaredIn, event: hook.event, at: hook.at, command, fingerprint: hookFingerprint(hook) } };
   });
 }
 
@@ -101,7 +101,7 @@ export function sessionStrip(tool: HarnessId, items: InstalledPlugin[], file: Pi
 }
 
 /** Standing line above the first row of every strip that has a runnable hook. */
-export const HOOK_RUN_WARN = 'Run it runs the command for real. It may change your files.';
+export const HOOK_RUN_WARN = 'Runs this command. It may change your files.';
 
 /** Information-mark card text on the first hooks strip of a page (30 words at most). */
 export function hookStripHelp(tool: HarnessId, runnable: boolean): string {
@@ -131,13 +131,15 @@ export interface HookRunView {
   errDirect?: string;
 }
 
-/** Maps one HookRunResult to its exact sentence, quiet trailing place/time, notes, and stdout/stderr display slots. */
-export function hookRunWords(tool: HarnessId, result: HookRunResult, shownCwd: string, time = clockTime(result.at)): HookRunView {
+/** Maps one HookRunResult to its exact sentence, quiet trailing run tool/version/place/time (only when known), notes, and stdout/stderr display slots. */
+export function hookRunWords(tool: HarnessId, result: HookRunResult, shownCwd: string, time = clockTime(result.at), runAs?: { tool?: HarnessId; version?: string }): HookRunView {
   if (result.outcome === 'refused') return { sentence: result.problem ? `Not run: ${lowerLead(result.problem)}` : 'Couldn’t run it.', notes: [] };
   const place = shownCwd || '~';
   const promptPart = result.emptyPrompt ? ' with an empty prompt' : '';
   const started = result.outcome !== 'missing' && result.detail !== 'spawn-error';
-  const meta = started ? `run in ${place}${promptPart}, ${time}` : `tried at ${time}`;
+  const version = runAs?.version?.trim();
+  const who = runAs?.tool ? `as ${toolNames[runAs.tool]}${version ? ` ${version}` : ''}, ` : '';
+  const meta = `${who}${started ? `run in ${place}${promptPart}, ${time}` : `tried at ${time}`}`;
   const baseNotes = started && result.missingOptions ? ['Ran without some of the plugin’s options.'] : [];
   const err = result.stderr || undefined;
   const out = result.allPrinted || undefined;

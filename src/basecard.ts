@@ -308,8 +308,7 @@ function toolRow(file: InstructionFile, locked: boolean, lockAttrs: Record<strin
   return h('li.base-tool', {},
     h('div.base-tool-line', {}, readers(file).map(tool => brandMark(tool, 14)), h('strong', {}, readerNames(file)), h('span.base-file', {}, name), status),
     base.state !== 'edited' ? null : h('div.base-choice', {},
-      h('p.base-explain', {}, `Its copy of the base was changed outside Central Knot, so ${name} was left as it is.`),
-      h('p.base-explain', {}, `Either choice below shows the change first, keeps the replaced text under Earlier versions, and can be undone.`),
+      h('p.base-explain', {}, `Changed outside Central Knot, so ${name} was left as it is; ${base.copy?.trim() ? 'either choice' : 'putting the base back'} shows the change first, keeps the replaced text under Earlier versions, and can be undone.`),
       shown.has(key) ? [legend('the base', `${name}’s copy`),
         diffView(`base-copy-changes-${file.tool}`, lineDiff(state.base!.text, base.copy ?? ''), true, () => {}, `${name}’s copy compared with the base`)] : null,
       h('div.ins-actions', {},
@@ -321,7 +320,7 @@ function toolRow(file: InstructionFile, locked: boolean, lockAttrs: Record<strin
           onclick: () => startBaseEdit({ text: state.base!.text, tools: state.base!.tools, stage: 'review', source: { kind: 'putBack', tool: file.tool } }) }))));
 }
 
-/** The card above the tools: write the base once; each chosen tool's file gets it after its own instructions. */
+/** The card below the tools: write the base once; each chosen tool's file gets it after its own instructions. */
 export function baseCard(files: InstructionFile[]) {
   const base = state.base;
   if (!base) return null;
@@ -381,8 +380,9 @@ export function baseCard(files: InstructionFile[]) {
                 else shown.delete('matching');
               },
             },
-              h('summary', { id: 'base-matching-toggle' }, icon('chevron-right', 12, 'tone-faint base-matching-chevron'), icon('check', 13, 'tone-success'),
-                matchingTools === 1 ? '1 tool matches the base' : `${matchingTools} tools match the base`),
+              h('summary', { id: 'base-matching-toggle' }, icon('check', 13, 'tone-success'),
+                matchingTools === 1 ? '1 tool matches the base' : `${matchingTools} tools match the base`,
+                icon('chevron-right', 12, 'base-matching-chevron')),
               h('ul.plain-list.base-tool-list', {}, matching.map(file => toolRow(file, locked, lockAttrs)))) : null,
             others.length && chosen.length ? h('p.ins-empty', {}, `Not added to ${toolList(others.map(file => file.tool))}.`) : null),
           h('div.base-column', {},

@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ORIGIN_COLOURS, originMark, sessionStrip } from '../src/sessionhooks.ts';
 import { sessionSettings } from '../src/pluginitems.ts';
-import { outcomes, sessionTextNote } from '../src/pluginoutcomes.ts';
+import { hookEventLabel, outcomes, sessionTextNote } from '../src/pluginoutcomes.ts';
 import type { DeclaredHook, HarnessId, InstalledPlugin } from '../src/types.ts';
 
 const plugin = (tool: HarnessId, name: string, hooks: DeclaredHook[], extra: Partial<InstalledPlugin> = {}): InstalledPlugin =>
@@ -189,4 +189,21 @@ test('a plugin’s mark comes from its name and marketplace, the same in every t
   const [inClaude] = sessionStrip('claude-cli', [plugin('claude-cli', 'tavily', atStart('x'))], {})!.groups;
   const [inCodex] = sessionStrip('codex-cli', [plugin('codex-cli', 'tavily', atStart('x'))], {})!.groups;
   assert.deepEqual([inClaude!.mark, inCodex!.mark], [originMark('tavily@team'), originMark('tavily@team')]);
+});
+
+test('hookEventLabel gives one plain label for the same event across platforms while preserving unknown identifiers verbatim', () => {
+  assert.equal(hookEventLabel(declared('SessionStart', 'x')), 'when a session starts');
+  assert.equal(hookEventLabel(declared('sessionStart', 'x')), 'when a session starts');
+  assert.equal(hookEventLabel(declared('SessionStart', 'x', 0, { matcher: 'compact' })), 'after the conversation is compacted');
+  assert.equal(hookEventLabel(declared('UserPromptSubmit', 'x')), 'when you send a prompt');
+  assert.equal(hookEventLabel(declared('userPromptSubmitted', 'x')), 'when you send a prompt');
+  assert.equal(hookEventLabel(declared('PreToolUse', 'x')), 'before a tool runs');
+  assert.equal(hookEventLabel(declared('preToolUse', 'x')), 'before a tool runs');
+  assert.equal(hookEventLabel(declared('PostToolUse', 'x')), 'after a tool runs');
+  assert.equal(hookEventLabel(declared('postToolUse', 'x')), 'after a tool runs');
+  assert.equal(hookEventLabel(declared('Stop', 'x')), 'when the agent stops');
+  assert.equal(hookEventLabel(declared('agentStop', 'x')), 'when the agent stops');
+  assert.equal(hookEventLabel(declared('SessionEnd', 'x')), 'when a session ends');
+  assert.equal(hookEventLabel(declared('sessionEnd', 'x')), 'when a session ends');
+  assert.equal(hookEventLabel(declared('CustomFutureHook', 'x')), 'CustomFutureHook');
 });
