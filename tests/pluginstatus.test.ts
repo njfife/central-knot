@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DIRECTORY, FROM_DIRECTORY, WAITS_TO_MOVE, pluginsInstalled, blocked, cantSwitchSkill, cantUninstall, comparableText, copiesToCompare, copyStale, foundIn, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, boxOf, itemsOnWords, switchPartial, switchWords, toolMark, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
+import { DIRECTORY, FROM_DIRECTORY, WAITS_TO_MOVE, pluginsInstalled, blocked, cantSwitchSkill, cantUninstall, comparableText, copiesToCompare, copyStale, foundIn, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, boxOf, itemsOnWords, switchPartial, switchWords, toolMark, toolNow, unavailable, uninstallAsk, uninstallFacts, updateTools } from '../src/pluginstatus.ts';
 import { clickRuns, owedTo } from '../src/pluginrecord.ts';
 import { readInTurn, readInto, type Read } from '../src/reads.ts';
 import type { HarnessId, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
@@ -288,4 +288,37 @@ test('installsIn carries each tool’s own recorded version rather than the mark
     installs.installed.map(({ plugin, version }) => [plugin.name, version]),
     [['release-helper', '0.4.1'], ['unversioned', undefined]],
   );
+});
+
+test('Uninstall…’s question compares the tool’s copy with the marketplace’s as just read: comparing until it lands, then the same, different, or not known', () => {
+  const copyIn = (text: string) => ({ skills: [{ name: 'a', description: '', path: 'skills/a', text }], commands: [], agents: [], instructions: [], version: '2.0.0' });
+  const read = (codex: string, offered = true) => ({ ...copyIn('A'), offered, installed: { 'codex-cli': copyIn(codex) } }) as unknown as PluginDetail;
+  // The marketplace's side read with its skill left out (its folder couldn't be read): the tool's skill has nothing to be compared with.
+  const halfRead = { ...read('A'), skills: [] } as unknown as PluginDetail;
+  const at: MarketplaceView = { ...entry, states: { p: { 'codex-cli': { state: 'installed', path: '/c', version: '2.0.0' }, 'claude-cli': { state: 'installed', path: '/m/p', live: true } } } };
+  const copy = (detail: PluginDetail | null | undefined, tool: HarnessId = 'codex-cli') => uninstallFacts(at, { name: 'p', description: '', version: '2.0.0', folder: '/m/p' }, tool, detail).copy;
+  assert.deepEqual([copy(undefined), copy(read('A')), copy(read('A edited by hand')), copy(null), copy(read('A', false)), copy(halfRead), copy(undefined, 'claude-cli')],
+    ['comparing', 'same', 'differs', 'unknown', 'unknown', 'unknown', 'same']);
+  // A plugin its bundled build carries no files for can't be installed again, as the install refuses it.
+  const carried: MarketplaceView = { ...at, bundled: { app: 'Acme Knot', displayName: 'Acme plugins', release: 'r', unpackaged: [{ name: 'p', reason: 'It is an npm package.' }] } };
+  assert.equal(uninstallFacts(carried, { name: 'p', description: '', version: '2.0.0', folder: '/m/p' }, 'codex-cli', undefined).cannot, 'not-carried');
+});
+
+test('Uninstall…’s question: one sentence on whether it can come back, then at most one on what is deleted, in every case', () => {
+  const none: Parameters<typeof uninstallAsk>[2] = { cannot: undefined, app: undefined, version: undefined, offered: undefined, copy: 'same', ownSettings: false };
+  const ask = (tool: HarnessId, facts: Partial<typeof none> = {}) => uninstallAsk('issue-tracker', tool, { ...none, ...facts });
+  const cases: [string, string][] = [
+    [ask('claude-cli', { copy: 'comparing' }), 'Comparing Claude Code’s copy…'],
+    [ask('claude-cli'), 'Uninstall issue-tracker from Claude Code? It can be installed again; nothing is lost.'],
+    [ask('claude-cli', { ownSettings: true }), 'Uninstall issue-tracker from Claude Code? It can be installed again; its saved options there are deleted for good.'],
+    [ask('codex-cli', { ownSettings: true }), 'Uninstall issue-tracker from Codex? It can be installed again; its MCP servers’ settings there are deleted for good.'],
+    [ask('claude-cli', { version: '1.1.0', offered: '1.2.0' }), 'Uninstall issue-tracker from Claude Code? Installing it again gives 1.2.0; this 1.1.0 can’t be brought back.'],
+    [ask('codex-cli', { copy: 'differs', ownSettings: true }), 'Uninstall issue-tracker from Codex? Installing it again gives the marketplace’s copy; the edits to this one are lost. Its MCP servers’ settings there are deleted for good.'],
+    [ask('copilot-cli', { copy: 'unknown' }), 'Uninstall issue-tracker from Copilot CLI? Installing it again gives the marketplace’s copy; if this one was edited, the edits are lost.'],
+    [ask('claude-cli', { cannot: 'gone' }), 'Uninstall issue-tracker from Claude Code? It is no longer offered, so it can’t be installed again: there is no Undo.'],
+    [ask('claude-cli', { cannot: 'kept', ownSettings: true }), 'Uninstall issue-tracker from Claude Code? It is no longer offered, so it can’t be installed again: there is no Undo. Its saved options there are deleted for good.'],
+    [ask('claude-cli', { cannot: 'unread' }), 'Uninstall issue-tracker from Claude Code? Its marketplace can’t be read now, so there is no Undo.'],
+    [ask('claude-cli', { cannot: 'not-carried', app: 'Acme Knot' }), 'Uninstall issue-tracker from Claude Code? Acme Knot doesn’t include its files, so it can’t be installed again: there is no Undo.'],
+  ];
+  for (const [said, wanted] of cases) assert.equal(said, wanted);
 });

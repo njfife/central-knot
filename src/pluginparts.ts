@@ -1,14 +1,14 @@
 // Pieces the marketplace and plugin pages draw: a plugin's switch and its click's line (clickNote), a tool's mark on the list
-// and its box on the plugin's page, Update, the link to its items in the Library (libraryLink), a README, and "a · b · c"
-// lines. The switch's and a box's click wait their turn (pluginstate.ts turnPlugin); Update acts at once (applyPluginOps).
-// What they say comes from pluginstatus.ts.
-import { acting, state as app } from './app.ts';
+// and its box on the plugin's page, Uninstall… beside a tool's copy (uninstallControl, a tool's Plugins tab too), Update, the link
+// to its items in the Library (libraryLink), a README, and "a · b · c" lines. The switch's, a box's and Uninstall's click wait their
+// turn (pluginstate.ts turnPlugin); Update acts at once (applyPluginOps). What they say comes from pluginstatus.ts.
+import { acting, rerender, state as app } from './app.ts';
 import { button, h, icon, toggle } from './dom.ts';
 import { markdown } from './markdown.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginKey, resultLines, succeeded, type PluginOp } from './pluginplan.ts';
-import { applyPluginOps, clickOn, market, openLink, pluginBusy, shownDetail, turnPlugin, type PluginClick } from './pluginstate.ts';
-import { addWords, boxOf, cantUninstall, copyStale, foundIn, inUseIn, itemsAllIn, itemsIn, outdated, switchPartial, switchWords, toolMark, updateTools, versionToCompare, viewStopped, type ToolMark } from './pluginstatus.ts';
+import { applyPluginOps, clickOn, market, openLink, pluginBusy, readAgainNow, shownDetail, turnPlugin, type PluginClick } from './pluginstate.ts';
+import { addWords, boxOf, cantUninstall, copyStale, foundIn, inUseIn, itemsAllIn, itemsIn, offersUninstall, outdated, switchPartial, switchWords, toolMark, uninstallAsk, uninstallFacts, updateTools, versionToCompare, viewStopped, type ToolMark } from './pluginstatus.ts';
 import { pluginUpdates } from './pluginupdateview.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, PluginTurn, PluginView, PluginsView } from './types.ts';
 import { takesPlugins } from './presence.ts';
@@ -108,6 +108,33 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
     onclick: () => turnPlugin(entry, plugin.name, box.ticked ? 'keep-out' : 'let-in', tool) }, glyph()));
 }
 
+/**
+ * Uninstall… beside a tool's copy where its box offers it (pluginstatus.ts offersUninstall), outside the box's state line: the
+ * button, and in its place while open the question (uninstallAsk), one open at a time (market.asking), on a line of its own with
+ * its two buttons together under its words. Cancel has the focus; it and Escape close the question, the focus back on Uninstall…;
+ * its confirm is the tool's own uninstall (turnPlugin `uninstall`).
+ */
+export function uninstallControl(entry: MarketplaceView, plugin: PluginView, tool: HarnessId, id: string, box: { off?: string }): [HTMLElement | null, HTMLElement | null] {
+  if (!offersUninstall(entry, plugin.name, tool, box)) return [null, null];
+  const key = pluginKey(entry.source, plugin.name), asks = `${key}\u0000${tool}`, busy = pluginBusy(entry.source, plugin.name);
+  // Opened, the question reads the plugin as it is now (pluginstate.ts readAgainNow): the copy compared, what the tool keeps for
+  // it; its confirm (in the danger look, as Delete it now's) waits for that read.
+  const ask = (open: boolean) => {
+    if (open) readAgainNow(entry.source, plugin.name);
+    market.asking = open ? asks : undefined; rerender(); document.getElementById(open ? `${id}-cancel` : id)?.focus();
+  };
+  if (market.asking !== asks) return [button({ variant: 'ghost', size: 'small', label: 'Uninstall…', id, disabled: busy, onclick: () => ask(true) }), null];
+  // A new view drops a read in flight (pluginstate.ts markDetailsStale): the open question asks again, and acts on its answer alone.
+  if (!market.details.has(key)) readAgainNow(entry.source, plugin.name);
+  const read = market.details.get(key), detail = read && !read.reading ? read.value : undefined, facts = uninstallFacts(entry, plugin, tool, detail);
+  const confirm = button({ variant: 'outline', size: 'small', label: `Uninstall from ${names[tool]}`, id: `${id}-confirm`, disabled: busy || detail === undefined,
+    onclick: () => { market.asking = undefined; turnPlugin(entry, plugin.name, 'uninstall', tool); } });
+  confirm.classList.add('delete-now');
+  return [null, h('div.band.uninstall-ask', { role: 'alert', onkeydown: (event: KeyboardEvent) => { if (event.key === 'Escape') ask(false); } },
+    h('span.band-text', {}, uninstallAsk(pluginTitle(plugin), tool, facts)),
+    h('span.uninstall-ask-actions', {}, button({ variant: 'outline', size: 'small', label: 'Cancel', id: `${id}-cancel`, onclick: () => ask(false) }), confirm))];
+}
+
 /** What a click on a tool's box does there, and its Undo, in the state it is drawn in (pluginrecord.ts A TOOL'S BOX and row 9). */
 function boxDoes(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, mark: ToolMark, ticked: boolean): string {
   const what = takesPlugins(tool) ? plugin : `${plugin}’s items`;
@@ -158,7 +185,8 @@ export function clickWords(click: PluginClick, onRow = false): { text: string; f
   return { text: `${text.charAt(0).toUpperCase()}${text.slice(1)}`, failed };
 }
 /** Each click's verb on a row, and the word before its tools. */
-const ROW_VERBS: Record<PluginTurn, [string, string]> = { on: ['Turned on', 'in'], 'let-in': ['Turned on', 'in'], add: ['Added', 'in'], off: ['Turned off', 'in'], 'keep-out': ['Turned off', 'in'] };
+const ROW_VERBS: Record<PluginTurn, [string, string]> = { on: ['Turned on', 'in'], 'let-in': ['Turned on', 'in'], add: ['Added', 'in'], off: ['Turned off', 'in'], 'keep-out': ['Turned off', 'in'],
+  uninstall: ['Uninstalled', 'from'] };
 function rowWords(what: PluginTurn, { done, stopped }: NonNullable<PluginClick['ran']>): string {
   const [verb, to] = ROW_VERBS[what], missed = [...new Set(done.filter(step => !succeeded(step.report)).map(step => step.tool))];
   const went = [...new Set(done.map(step => step.tool))].filter(tool => !missed.includes(tool));

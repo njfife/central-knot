@@ -337,8 +337,12 @@ export interface DesktopApi {
 }
 
 export interface PluginActionResult { stopped?: string; reports: ActionReport[] }
-/** What a click on a whole plugin asks (DesktopApi.turnPlugin): its switch On or Off, Add, or one tool's box on its page unticked (`keep-out`: turned off there, kept installed where the tool can, and kept out) or ticked (`let-in`: let in, and turned on or installed there). */
-export type PluginTurn = 'on' | 'off' | 'add' | 'keep-out' | 'let-in';
+/**
+ * What a click on a whole plugin asks (DesktopApi.turnPlugin): its switch On or Off, Add, one tool's box on its page unticked
+ * (`keep-out`: turned off there, kept installed where the tool can, and kept out) or ticked (`let-in`: let in, and turned on or
+ * installed there), or Uninstall… in one tool (`uninstall`: kept out as by `keep-out`, and uninstalled by the tool's own command).
+ */
+export type PluginTurn = 'on' | 'off' | 'add' | 'keep-out' | 'let-in' | 'uninstall';
 /** What a turn did: each tool's report (`done`), the plugin's entry before it (`before`, null: none), and its Undo (`back`). */
 export interface PluginTurnResult { stopped?: string; done: PluginDone[]; before?: PluginEntry | null; back?: PluginOp[] }
 
@@ -776,7 +780,9 @@ export type InstallState = { state: 'installed'; path: string; live?: boolean;
   /** Why none of its skills can be switched here, whatever the skill: the tool's config is written in a form Central Knot doesn't edit. */
   switchesHeld?: string;
   /** The tool's own switch has the whole plugin turned off there (a mark: the plugin is still installed). */
-  off?: true } | { state: 'not-installed' } | { state: 'not-known'; reason: string }
+  off?: true;
+  /** The tool keeps settings of its own for it, which its uninstall deletes and an install doesn't bring back (plugins.ts ownSettings). */
+  ownSettings?: true } | { state: 'not-installed' } | { state: 'not-known'; reason: string }
   /** The tool has a different marketplace under the same name: Central Knot neither reads nor changes its plugins. */
   | { state: 'held'; reason: string };
 
@@ -989,8 +995,8 @@ export interface PluginDetail extends PluginContents {
   /** Each tool's installed copy, read from where that tool keeps it: its version and its parts with their files. */
   installed?: Partial<Record<HarnessId, InstalledCopy>>;
 }
-/** What one tool has installed of a plugin, read from that tool's own copy. */
-export type InstalledCopy = Pick<PluginContents, 'skills' | 'commands' | 'agents' | 'instructions' | 'version'>;
+/** What one tool has installed of a plugin, read from that tool's own copy, and the settings the tool keeps for it (InstallState ownSettings). */
+export type InstalledCopy = Pick<PluginContents, 'skills' | 'commands' | 'agents' | 'instructions' | 'version'> & { ownSettings?: true };
 
 export interface PluginsView {
   home: string;
