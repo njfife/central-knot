@@ -279,6 +279,27 @@ export const rowClicks = {
   remove: (row: LibraryRow, item: LibraryItem | undefined): Change => ({ ...rowAsItIs(row, item), deleted: true }),
 };
 
+/**
+ * THE TOOL SWITCH: what stands in one tool's place for an item's own switch there, one rule for the Library's opened row (matrix.ts
+ * libraryHarnessSwitch) and a plugin's page's item switches (pluginpage.ts itemCell, read again by switchItemIn before it acts).
+ * `none`: not in the library, or Off and from a plugin. `cannot`: the tool can't take it (`row.cannot` says why). Where it isn't
+ * kept out there, the tool's own state in its word: `switched-off` (its own settings keep it off) or `another-way`. `own-copy`:
+ * kept out, and the tool loads a copy of his that Central Knot didn't write (its own folder, or one it reads such as the shared
+ * skills folder): the Library's switch lets it in over his copy, kept as a version; a plugin's page leaves that to Use the
+ * plugin's. `switch`: its switch.
+ */
+export type ToolSwitch = 'none' | 'cannot' | 'switched-off' | 'another-way' | 'own-copy' | 'switch';
+export function toolSwitch(row: LibraryRow, item: LibraryItem | undefined, tool: string): ToolSwitch {
+  const lib = inLibrary(item);
+  if (!lib || (!lib.on && pluginOf(row.fromSource?.link ?? ''))) return 'none';
+  const is = harnessIs(row, lib, tool);
+  if (is === 'cannot') return 'cannot';
+  if (!lib.on || !lib.except.includes(tool as HarnessId)) return row.switchedOff?.includes(tool) ? 'switched-off' : is === 'another-way' ? 'another-way' : 'switch';
+  return is === 'own-copy' || loadsFrom(row, lib, tool) === 'elsewhere' ? 'own-copy' : 'switch';
+}
+/** A tool's own state in its word, where it stands in place of the switch (toolSwitch). */
+export const TOOL_STATE_WORDS = { 'switched-off': 'Switched off', 'another-way': 'Another way', 'own-copy': 'Its own copy' } as const;
+
 /** What a tool's own switch for an On item does (`out`: kept out there now), as its tooltip says: in the opened row (matrix.ts) and on a plugin's page under Its items (pluginpage.ts itemSwitch). */
 export const inHarnessDoes = (where: string, out: boolean, copy: string) =>
   (out ? `Click to put it in ${where} again, its ${copy} as it was.` : `Click to keep it out of ${where}: its copy there goes, and Central Knot keeps it.`);

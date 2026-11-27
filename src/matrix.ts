@@ -46,7 +46,7 @@ import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h,
 import type { IconName } from './icons.ts';
 import { byName, byUsage, inOrder, kindSource, lastUpdated, noPins, partId, pin, placeIn, rankIn, rowId, type ItemRow, type KindSource, type Pinned, type RowKey, type RowOrder, type RowUsage, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
-import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inHarnessDoes, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, pluginToolsCard, rowClicks, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
+import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inHarnessDoes, TOOL_STATE_WORDS, toolSwitch, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, pluginToolsCard, rowClicks, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionPart, type VersionText } from './versionlist.ts';
 import { itemKey, listed, type Version } from './library.ts';
@@ -2840,13 +2840,13 @@ function detailToolLine(t: Table, skill: ItemRow, tool: Tool): { text?: string; 
  * plugin-sourced), on turns it on in that tool only. Found items keep their row's Add.
  */
 function libraryHarnessSwitch(t: Table, lib: LibraryPage, skill: ItemRow, tool: Tool) {
-  const item = inLibrary(itemOf(skill)), own = lib.tool?.(skill, tool as HarnessId) ?? null;
-  // Found, a plugin-sourced Off row, or a harness that can't take it: no switch there, only what the kind offers on its line.
-  if (!item || (!item.on && pluginOf(skill.fromSource?.link ?? '')) || harnessIs(skill, item, tool) === 'cannot') return own && h('span.details-tool-actions', {}, own);
+  const item = inLibrary(itemOf(skill)), own = lib.tool?.(skill, tool as HarnessId) ?? null, at = toolSwitch(skill, item, tool);
+  // Found, a plugin-sourced Off row, or a harness that can't take it (libraryrow.ts toolSwitch): no switch there, only what the kind offers on its line.
+  if (!item || at === 'none' || at === 'cannot') return own && h('span.details-tool-actions', {}, own);
   const name = nameOf(skill), where = names[tool], out = item.except.includes(tool as HarnessId);
   // A state of the tool's own, said in its own word in place of Central Knot's switch: its own switch has it off (the kind's
   // action there lets it load it again), or it has it another way, where nothing of Central Knot's goes.
-  const ownState = item.on && out ? undefined : skill.switchedOff?.includes(tool) ? 'Switched off' : harnessIs(skill, item, tool) === 'another-way' ? 'Another way' : undefined;
+  const ownState = at === 'switched-off' || at === 'another-way' ? TOOL_STATE_WORDS[at] : undefined;
   if (ownState) return h('span.details-tool-actions', {}, own, h('span.tool-switch', {}, h('span.tool-switch-word.tool-switch-word-own', {}, ownState)));
   if (!item.on) {
     const said = (notIn: HarnessId[]) => {
