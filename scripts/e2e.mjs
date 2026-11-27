@@ -13499,9 +13499,10 @@ async function sessionsFlow() {
       });
       const toolsBox = document.querySelector('#sessions-by-tool');
       const wrapMixed = tool => {
-        const est = toolsBox.querySelector('.sessions-tool-total[data-tool="' + tool + '"] .sessions-estimate');
-        const unp = toolsBox.querySelector('.sessions-tool-total[data-tool="' + tool + '"] .sessions-unpriced');
-        toolsBox.style.maxWidth = Math.ceil(est.getBoundingClientRect().right - toolsBox.getBoundingClientRect().left) + 8 + 'px';
+        const row = toolsBox.querySelector('.sessions-tool-total[data-tool="' + tool + '"]');
+        const est = row.querySelector('.sessions-estimate'), unp = row.querySelector('.sessions-unpriced');
+        const mid = Math.floor((est.getBoundingClientRect().right + unp.getBoundingClientRect().right) / 2 - row.getBoundingClientRect().left);
+        toolsBox.style.maxWidth = mid + 'px';
         const wrapped = unp.getBoundingClientRect().top >= est.getBoundingClientRect().bottom - 2
           && Math.abs(unp.getBoundingClientRect().left - toolsBox.getBoundingClientRect().left) < 1;
         toolsBox.style.maxWidth = '';
