@@ -3331,10 +3331,11 @@ function filePanel(t: Table, target: FileTarget, open: NonNullable<View['openFil
     { id: partId('file-close', id), label: `Close file for ${name}`, title: 'Close', look: '.file-open-close' });
   const blockId = partId('file-text', id, ...(active ? [String(Math.max(0, activeAt))] : []), String(Math.max(0, tabs.indexOf(open.file))));
   const owner = () => (active ? copyLabel(active) : isCatalogHit(target) ? `${target.hit.item!.marketName}’s copy` : 'Central Knot’s current version');
-  // A Codex entry's blocks, each apart: between two, a mark whose words CSS draws, so no selection or copy of them holds it.
+  // A Codex entry's blocks, each apart: between two, a separator named for the lines between them, its words drawn by CSS from
+  // that name, so no selection or copy of the blocks holds them.
   const body = note ? [h('p.file-open-state', {}, note)]
     : open.loaded?.parts ? fileBlocks(blockId, `${name} ${open.file}`, open.loaded.parts, holders => andList(holders.map(part => part.name)), { named: true })
-    : open.loaded?.blocks ? open.loaded.blocks.flatMap((text, index) => [index ? h('p.file-open-gap', { 'data-words': 'Other lines in the file' }) : null,
+    : open.loaded?.blocks ? open.loaded.blocks.flatMap((text, index) => [index ? h('div.file-open-gap', { role: 'separator', 'aria-label': 'Other lines in the file' }) : null,
       ...fileBlocks(`${blockId}-${index}`, `${name} ${open.file}`, [{ text }], owner)])
     : fileBlocks(blockId, `${name} ${open.file}`, [{ text: open.loaded!.text ?? '' }], owner);
   // A server's path is copied by a button in words: beside its JSON a bare copy icon would read as copying the entry.

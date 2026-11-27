@@ -298,9 +298,9 @@ export async function entryText(context: ShareContext, tool: HarnessId, key: str
  * or subtable (`[mcp_servers.docs]`, `[mcp_servers.docs.env]`: its own lines, textedit.ts ownEnd), an entry naming one in the root
  * or in `[mcp_servers]` (`docs = { … }`, `docs.command = …`, `mcp_servers.docs.url = …`), or one member of a root
  * `mcp_servers = { … }` (textedit.ts inlineMembers). A `[[mcp_servers.<name>.…]]` block counts too, as it is under the server's
- * name, though readTool and textedit.ts setTomlTable leave such blocks out. These are the forms readTool's scan holds: a new form
- * goes in both. Every other header and entry is a piece of none: two pieces of a server with another piece between them are
- * apart in the file. Throws when the text isn't TOML.
+ * name, though readTool and textedit.ts setTomlTable leave such blocks out. readTool's scan looks for the same inline and dotted
+ * entries: a new form of entry goes in both. Every other header and entry is a piece of none: two pieces of a server with another
+ * piece between them are apart in the file. Throws when the text isn't TOML.
  */
 function codexPieces(text: string): { name?: string; start: number; end: number }[] {
   const pieces: { name?: string; start: number; end: number }[] = [];
