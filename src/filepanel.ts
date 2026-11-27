@@ -3,10 +3,10 @@
 // the text Central Knot holds: storedOf), its mark (fileButton), the read with its guard against a later one (setFile →
 // skillVersionFile, skillFoundFile, skillPluginFile, agentFile, serverEntry; an agent no tool has: its definition,
 // agentVersion; a server in Central Knot: its definition too, serverStored), the panel (filePanel: tabs or a label, the copy
-// choice, its close, the text, the path) and its box's height (settleFileBox). Where a panel is drawn is its caller's, a
-// FilePlace: a table (matrix.ts Table: under a closed row, or in an open row's details' place, matrix.ts openedPart), and the
-// Overview's cards (overview.ts cardFiles). Not here: when a place lets an open file go (matrix.ts drawTable, overview.ts
-// kindCards), and Escape (matrix.ts on a table, overview.ts on the Overview).
+// choice, its close, the text, the path), its box's height (settleFileBox) and whether a place's open file stays at a draw
+// (keepOpenFile, asked by matrix.ts drawTable and overview.ts kindCards). Where a panel is drawn is its caller's, a FilePlace: a
+// table (matrix.ts Table: under a closed row, or in an open row's details' place, matrix.ts openedPart), and the Overview's
+// cards (overview.ts cardFiles). Not here: Escape (matrix.ts on a table, overview.ts on the Overview).
 import { rerender, shownPath, state } from './app.ts';
 import { afterLayout, closeButton, fileBlocks, h, icon, pathText } from './dom.ts';
 import { partId, type ItemRow, type Tool } from './itemrow.ts';

@@ -1083,17 +1083,17 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .kind-card-state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 /*
  * What the usage reading says of the kind (overview.ts cardUsage): room for four lines whatever it holds, so the card is as high
- * before a reading lands as after, 4 px apart so the file marks one above another never touch. The three most used share
- * columns: the label, the name (shortened in the middle) and its mark, the sessions; a line across them (.kind-card-line) sizes
- * none of them.
+ * before a reading lands as after, 4 px apart so the file marks one above another never touch. A line across them
+ * (.kind-card-line) sizes none of them, its link (Most used) at its end. The three most used share columns: the name (cut at its
+ * end where the count leaves no room) and its mark, the sessions.
  */
-.kind-card-usage { display: grid; grid-template-columns: max-content minmax(0, max-content) 1fr; grid-template-rows: repeat(4, 20px); gap: 4px 8px; align-content: start;
+.kind-card-usage { display: grid; grid-template-columns: minmax(0, max-content) 1fr; grid-template-rows: repeat(4, 20px); gap: 4px 8px; align-content: start;
   padding: 10px 16px 0; font-size: 12.5px; line-height: 20px; color: var(--ink-soft); }
-.kind-card-line { grid-column: 1 / -1; margin: 0; white-space: nowrap; }
+.kind-card-line { display: flex; justify-content: space-between; gap: 8px; grid-column: 1 / -1; margin: 0; white-space: nowrap; }
 .kind-card-top-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; margin: 0; white-space: nowrap; }
 .kind-card-link { position: relative; z-index: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--accent-ink); font: inherit; cursor: pointer; text-align: left; }
 .kind-card-link:hover { text-decoration: underline; }
-.kind-card-top-name { display: flex; }
+.kind-card-top-name { overflow: hidden; text-overflow: ellipsis; }
 /* Most used, a link into the Library: its arrow follows its words. */
 .kind-card-sorted { display: inline-flex; align-items: center; gap: 2px; }
 /* A most used name, then its file mark (filepanel.ts fileButton), over the card's own button and as high as the line. */

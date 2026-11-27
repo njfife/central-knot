@@ -11442,6 +11442,27 @@ async function overviewFlow() {
     await a.run(`[...document.querySelectorAll('.kind-card .row-file-btn')].map(mark => [mark.id, mark.getAttribute('aria-label'), !!mark.previousElementSibling?.matches('.kind-card-top-name')])`),
     [[rowPart('file', 'skills', 'clash'), 'Open file: clash', true], [rowPart('file', 'skills', longName), `Open file: ${longName}`, true],
       [rowPart('file', 'skills', 'notes'), 'Open file: notes', true], [rowPart('file', 'mcp', 'docs'), 'Open file: docs', true]]);
+  // A long name is one name: one line, one run of text with no gap inside it, cut at its end only where the count leaves it no
+  // more room, its mark whole beside it.
+  const longBox = () => a.run(`(() => {
+    const name = ${topName('skills', longName)}, mark = document.querySelector('${fileMark('skills', longName)}'), count = name.closest('p').lastElementChild.getBoundingClientRect();
+    const box = name.getBoundingClientRect(), at = mark.getBoundingClientRect(), card = name.closest('.kind-card').getBoundingClientRect();
+    return { oneLine: box.height <= 21, oneRun: name.children.length === 0, cutOnlyWithoutRoom: name.scrollWidth <= name.clientWidth || Math.round(count.left - at.right) <= 8,
+      markWhole: at.left >= box.right && at.right <= count.left && at.right <= card.right };
+  })()`);
+  const longAt = {};
+  for (const [width, height] of [[1316, 819], SMALLEST]) {
+    await sizeTo(a, width, height);
+    const rail = await a.run(`document.body.classList.contains('rail')`);
+    if (rail) await a.click('#sidebar-toggle');
+    await a.settle();
+    longAt[width] = await longBox();
+    if (rail) await a.click('#sidebar-toggle');
+  }
+  await fullSize(a);
+  const whole = { oneLine: true, oneRun: true, cutOnlyWithoutRoom: true, markWhole: true };
+  same('at 1316 and 860, with the sidebar open, the long name reads as one: one line, no gap inside it, cut only where the count leaves no room, its mark whole',
+    [longAt[1316], longAt[860]], [whole, whole]);
   if (shots) {
     await sizeTo(a, ...SMALLEST);
     const rail = await a.run(`document.body.classList.contains('rail')`);
@@ -12515,13 +12536,16 @@ async function usageFlow() {
   const unusedHasArrow = await a.run(`(() => { const b = document.querySelector('#overview-usage #overview-unused'); const svg = b?.lastElementChild; return svg?.tagName.toLowerCase() === 'svg' && /m12 5 7 7-7 7/.test(svg.innerHTML); })()`);
   same('the Skills card says 3 used and the three most used with no per-kind unused link, and the usage strip holds one combined link for all 8 unused items with an arrow',
     [await cardLines(), cardUnusedLinks, unusedLinks, unusedHasArrow, /^Usage collected today at [^.]+\. Update usage statistics · No use seen in 30 days: 8$/.test(await usageSaid() ?? '')],
-    [['Used in the last 30 days: 3', 'Most usedalpha2 sessions', 'echo2 sessions', 'charlie1 session'], [], ['No use seen in 30 days: 8'], true, true]);
+    [['Used in the last 30 days: 3Most used', 'alpha2 sessions', 'echo2 sessions', 'charlie1 session'], [], ['No use seen in 30 days: 8'], true, true]);
   check('every tool’s sessions cell has its figure, or why there is none', (await sessionsSaid()).every(said => said && said !== '…'), await sessionsSaid());
   // Each name and its mark: apart, the marks one above another apart too; the name's hover says where it goes, the mark's the file.
   const marksApart = () => a.run(`(() => {
     const marks = [...document.querySelectorAll('#overview-skills-usage .row-file-btn')].map(mark => mark.getBoundingClientRect());
     const names = [...document.querySelectorAll('#overview-skills-usage .kind-card-top-name')].map(name => name.getBoundingClientRect());
-    return { marks: marks.length, gapsBelow: marks.slice(1).map((box, at) => Math.round(box.top - marks[at].bottom)), nameToMark: names.map((box, at) => Math.round(marks[at].left - box.right)) };
+    const usage = document.querySelector('#overview-skills-usage'), link = document.querySelector('#overview-skills-most-used'), line = link?.closest('p');
+    const end = usage.getBoundingClientRect().right - parseFloat(getComputedStyle(usage).paddingRight);
+    return { marks: marks.length, gapsBelow: marks.slice(1).map((box, at) => Math.round(box.top - marks[at].bottom)), nameToMark: names.map((box, at) => Math.round(marks[at].left - box.right)),
+      sorted: [/^Used in the last 30 days/.test(line?.textContent ?? ''), Math.abs(end - (link?.getBoundingClientRect().right ?? 0)) <= 1, !line?.querySelector('.kind-card-top-name')] };
   })()`);
   const apart = {};
   for (const [width, height] of [[1316, 819], SMALLEST]) { await sizeTo(a, width, height); apart[width] = await marksApart(); }
@@ -12529,8 +12553,9 @@ async function usageFlow() {
   same('at 1316 and 860 the three marks are 4 px or more apart one above another, each 4 px after its name',
     [apart[1316].marks, apart[1316].gapsBelow.every(gap => gap >= 4), apart[1316].nameToMark, apart[860].gapsBelow.every(gap => gap >= 4), apart[860].nameToMark],
     [3, true, [4, 4, 4], true, [4, 4, 4]]);
+  same('at 1316 and 860 Most used → ends the “Used in the last 30 days” line, at its right end, on no name’s line', [apart[1316].sorted, apart[860].sorted], [[true, true, true], [true, true, true]]);
   same('a most used name’s hover says it opens its row in the Library; its mark’s, its file',
-    [await a.all('#overview-skills-usage .kind-card-top-name .middle', 'e.title'), await a.all('#overview-skills-usage .row-file-btn', 'e.title')],
+    [await a.all('#overview-skills-usage .kind-card-top-name', 'e.title'), await a.all('#overview-skills-usage .row-file-btn', 'e.title')],
     [['alpha', 'echo', 'charlie'].map(name => `${name}: open its row in the Library`), ['Open file', 'Open file', 'Open file']]);
   await a.click('#overview-unused');
   const allRows = await a.all('.ov-row[data-key]', 'e.dataset.key');

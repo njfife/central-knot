@@ -15,7 +15,7 @@
 import { absentKinds, collectUsage, homeTools, loadHome, noToolManaged, practiceNoteOpen, realHomeName, rerender, setPracticeNote } from './app.ts';
 import { acting, showPage, state, syncNow, whyReadOnly, type PageKind } from './app.ts';
 import { brandMark } from './brand.ts';
-import { button, h, icon, middle } from './dom.ts';
+import { button, h, icon } from './dom.ts';
 import { fileButton, filePanel, keepOpenFile, setFile, type FilePlace } from './filepanel.ts';
 import { setupLead } from './firstsetup.ts';
 import { goHarness, tally } from './harnesspage.ts';
@@ -169,7 +169,6 @@ function usedWords(total: number, sum: KindUsage | undefined): string {
   return `Used in the last ${USAGE_DAYS} days: ${!sum ? '…' : sum.figured ? sum.used.length : 'can’t say'}`;
 }
 
-/** The three most used a card names: none where no row of the kind has a figure (KindUsage figured). */
 /**
  * The three most used a kind's card names, none where no row of it has a figure (KindUsage figured), each with its row as the
  * Library finds it (matrix.ts rowOf): worked out once a draw (kindCards), for the card's names and marks and for its file.
@@ -181,22 +180,23 @@ const topRows = (home: HomeView, kind: PageKind) => {
 type TopRow = ReturnType<typeof topRows>[number];
 
 /**
- * What the usage reading says of a kind: how many were used (usedWords), followed by either why no tool can tell or the three
- * most used (`top`) under Most used, a link to the Library in that order (its kept Sort left as it was); each a link to its row,
- * its name shortened in the middle, its hover saying so, then its file mark (filepanel.ts fileButton: its file opens under the
- * card, cardFiles). Its four lines' room is held by style.css (.kind-card-usage), so the card is as high before a reading lands as after.
+ * What the usage reading says of a kind: how many were used (usedWords), with Most used at that line's end where there are any,
+ * a link to the Library in that order (its kept Sort left as it was); then either why no tool can tell or the three most used
+ * (`top`), each a link to its row, its name cut at its end only where the count leaves no room, its hover saying where it goes,
+ * then its file mark (filepanel.ts fileButton: its file opens under the card, cardFiles). Its four lines' room is held by
+ * style.css (.kind-card-usage), so the card is as high before a reading lands as after.
  */
 function cardUsage(kind: PageKind, total: number, sum: KindUsage | undefined, top: TopRow[]) {
   const used = usedWords(total, sum);
   const cant = total && sum && !sum.figured ? 'No tool that has them on can tell.' : null;
-  const sorted = h('button.kind-card-link.kind-card-sorted', { type: 'button', id: `overview-${kind}-most-used`, title: 'Opens the Library sorted by most used',
-    onclick: () => openKind(kind, { order: 'most-used' }) }, 'Most used', icon('arrow-right', 12));
+  const sorted = top.length ? h('button.kind-card-link.kind-card-sorted', { type: 'button', id: `overview-${kind}-most-used`, title: 'Opens the Library sorted by most used',
+    onclick: () => openKind(kind, { order: 'most-used' }) }, 'Most used', icon('arrow-right', 12)) : null;
   return h('div.kind-card-usage', { id: `overview-${kind}-usage` },
-    used ? h('p.kind-card-line', {}, used) : null,
+    used ? h('p.kind-card-line', {}, used, sorted) : null,
     cant ? h('p.kind-card-line', {}, cant) : null,
-    top.map((each, at) => h('p.kind-card-top-row', {}, at ? h('span', {}) : sorted,
+    top.map((each, at) => h('p.kind-card-top-row', {},
       h('span.kind-card-top-item', {}, h('button.kind-card-link.kind-card-top-name', { type: 'button', id: `overview-${kind}-top-${at}`,
-        onclick: () => openKind(kind, { key: each.key }) }, Object.assign(middle(each.name, 8), { title: `${each.name}: open its row in the Library` })),
+        title: `${each.name}: open its row in the Library`, onclick: () => openKind(kind, { key: each.key }) }, each.name),
       each.row ? fileButton(cardFiles, each.row) : null),
       h('span', {}, plural(each.sessions, 'session')))));
 }
