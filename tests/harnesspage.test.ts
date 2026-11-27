@@ -247,3 +247,45 @@ test('Plugins tab matches boxOf disabled rule, shows box.line on locked rows, an
   assert.equal(textOf(findById(rendered, 'harness-plugins-stopped')), problem);
   resetMarket();
 });
+
+test('tool page switcher names every tool accessibly and fitHarnessBar shortens to marks before stacking the switcher onto its own row', async () => {
+  const { runAfterLayout } = await import('../src/dom.ts');
+  app.home = makeHome({ managed: ALL_SIX });
+  Object.assign(app, { page: 'harnesses', harness: 'claude-cli', harnessTab: 'skills', busy: undefined, instructions: { state: 'ready', data: [], gen: 0 } });
+  rendered = harnessesPage() as unknown as FakeNode;
+
+  const tabLabels = findAll(rendered, el => el.className.split(/\s+/).includes('harness-tab')).map(el => textOf(el));
+  assert.deepEqual(tabLabels, ['Skills', 'MCP servers', 'Agents', 'Instructions', 'Plugins', 'About']);
+  for (const tool of ALL_SIX) {
+    const sw: FakeNode = findById(rendered, `harness-switch-${tool}`)!;
+    assert.equal(sw.attrs['aria-label'], SIX_NAMES[tool]);
+    assert.equal(sw.attrs.title, SIX_NAMES[tool]);
+  }
+
+  const runFit = (barWidth: number, tabsScroll: number, swFull: number, swMarks: number) => {
+    const set = new Set<string>();
+    const classList = {
+      add: (...names: string[]) => names.forEach(name => set.add(name)),
+      remove: (...names: string[]) => names.forEach(name => set.delete(name)),
+      contains: (name: string) => set.has(name),
+    };
+    const swWidth = () => (set.has('harness-bar-marks') ? swMarks : swFull);
+    const tabsClient = () => (set.has('harness-bar-stacked') ? barWidth - 32 : Math.max(0, barWidth - 28 - swWidth()));
+    const sw = { get offsetWidth() { return swWidth(); }, get scrollWidth() { return swWidth(); } };
+    const tabList = { get clientWidth() { return tabsClient(); }, get scrollWidth() { return tabsScroll; } };
+    const bar = {
+      classList,
+      get clientWidth() { return barWidth; },
+      get scrollWidth() { return set.has('harness-bar-stacked') ? Math.max(barWidth, tabsScroll + 32) : Math.max(barWidth, tabsScroll + 28 + swWidth()); },
+      querySelector: (sel: string) => (sel === '.harness-tabs' ? tabList : sel === '.harness-switch' ? sw : null),
+    };
+    const prev = document.querySelector;
+    (document as unknown as { querySelector: (sel: string) => unknown }).querySelector = (sel: string) => (sel === '.harness-bar' ? bar : null);
+    try { runAfterLayout(); } finally { (document as unknown as { querySelector: typeof prev }).querySelector = prev; }
+    return [...set].sort();
+  };
+  assert.deepEqual(runFit(1260, 530, 500, 194), []);
+  assert.deepEqual(runFit(804, 530, 500, 194), ['harness-bar-marks']);
+  assert.deepEqual(runFit(652, 530, 500, 194), ['harness-bar-stacked']);
+  assert.deepEqual(runFit(480, 440, 500, 194), ['harness-bar-marks', 'harness-bar-stacked']);
+});

@@ -1131,6 +1131,187 @@ async function harnessFlow() {
     chmodSync(hCodex, 0o755);
     await h.quit();
   }
+
+  // Tool page navigation fit (5 and 6 tools, 860/1316/1728, sidebar open and rail), single tool mark + Mark key disclosure,
+  // clear global switch label, and local section jump on long lists (hidden on short lists).
+  const tHome = join(scratch, 'toolpage-t1-home'), tData = join(scratch, 'toolpage-t1-data'), tReal = join(scratch, 'toolpage-t1-real');
+  mkdirSync(tReal, { recursive: true });
+  mkdirSync(tData, { recursive: true });
+  toolClis(tHome);
+  for (const dir of ['.codex/skills', '.pi/agent/skills', '.config/opencode/skills']) mkdirSync(join(tHome, dir), { recursive: true });
+  for (const cli of ['pi', 'opencode']) {
+    writeFileSync(join(tHome, '.local/bin', cli), '#!/bin/sh\n[ "$1" = "--version" ] && echo "1.0.0" && exit 0\nexit 9\n');
+    chmodSync(join(tHome, '.local/bin', cli), 0o755);
+  }
+  const tClaude = join(tHome, '.claude/skills'), tCopilot = join(tHome, '.copilot/skills');
+  for (let i = 1; i <= 22; i++) skill(tClaude, `skill-${String(i).padStart(2, '0')}`, text(`skill-${String(i).padStart(2, '0')}`, `Description for skill ${i}.`));
+  skill(tClaude, 'found-local', text('found-local', 'Found in Claude Code.'));
+  skill(tClaude, 'found-extra', text('found-extra', 'Another found skill.'));
+  skill(tClaude, 'off-one', text('off-one', 'Will be turned off.'));
+  skill(tClaude, 'off-two', text('off-two', 'Also turned off.'));
+  skill(tCopilot, 'copilot-only', text('copilot-only', 'Only in Copilot CLI.'));
+  writeFileSync(join(tHome, '.claude.json'), `${JSON.stringify({ mcpServers: { 'mcp-a': { command: 'node', args: ['-e', '0'] }, 'mcp-b': { command: 'node', args: ['-e', '1'] }, 'mcp-off': { command: 'node', args: ['-e', '2'] } } }, null, 2)}\n`);
+  writeClaudeInstall(tHome, 't1-market', 't1-kit', '1.0.0', { 'skills/plug-triage/SKILL.md': text('plug-triage', 'Plugin skill.') });
+  writeFileSync(join(tData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: tHome } }));
+  const t = await launch(tData, [], tReal, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' });
+  try {
+    await openKind(t, 'all');
+    for (let i = 1; i <= 22; i++) await t.click(`#${rowPart('add', 'skills', `skill-${String(i).padStart(2, '0')}`)}`);
+    for (const key of ['off-one', 'off-two']) { await t.click(`#${rowPart('add', 'skills', key)}`); await t.click(`#${rowPart('switch', 'skills', key)}`); }
+    for (const key of ['mcp-a', 'mcp-b', 'mcp-off']) await t.click(`#${rowPart('add', 'mcp', key)}`);
+    await t.click(`#${rowPart('switch', 'mcp', 'mcp-off')}`);
+    await t.click('#nav-harnesses');
+    await t.click('button#harness-claude-cli.harness-card-head');
+    await t.click('#harness-tab-skills');
+
+    const sidebarAs = async open => { if (await t.run(`document.body.classList.contains('rail')`) === open) await t.click('#sidebar-toggle'); };
+    const checkNav = async (toolCount, label) => {
+      for (const [width, height] of [SMALLEST, [1316, 819], [1728, 1117]]) {
+        for (const open of [false, true]) {
+          await sizeTo(t, width, height);
+          await sidebarAs(open);
+          const bar = await t.run(`(() => {
+            const b = document.querySelector('.harness-bar');
+            const tabs = [...document.querySelectorAll('.harness-tab')];
+            const sw = [...document.querySelectorAll('.harness-switch-item')];
+            const tabLines = new Set(tabs.map(el => Math.round(el.getBoundingClientRect().top))).size;
+            const swLines = new Set(sw.map(el => Math.round(el.getBoundingClientRect().top))).size;
+            const fullTabs = tabs.every(el => el.scrollWidth <= el.clientWidth + 1);
+            const swLabels = sw.every(el => (el.getAttribute('aria-label') || '').length > 0 && el.getAttribute('aria-label') === el.title);
+            const tabsBottom = Math.max(...tabs.map(el => el.getBoundingClientRect().bottom));
+            const swTop = Math.min(...sw.map(el => el.getBoundingClientRect().top));
+            const stacked = b.classList.contains('harness-bar-stacked');
+            const marksOnly = b.classList.contains('harness-bar-marks');
+            return { count: sw.length, tabLines, swLines, fullTabs, swLabels, stacked, marksOnly, swBelowTabs: swTop >= tabsBottom - 1 };
+          })()`);
+          const wantStacked = width === 860 && open;
+          same(`${label} (${toolCount} tools) at ${width}×${height} ${open ? 'sidebar open' : 'rail'}: all tabs on one line with full text, switcher accessible and stacked cleanly only when required`,
+            [bar.count, bar.tabLines, bar.swLines, bar.fullTabs, bar.swLabels, bar.stacked, !bar.stacked || bar.swBelowTabs],
+            [toolCount, 1, 1, true, true, wantStacked, true]);
+          same(`${label} (${toolCount} tools) at ${width}×${height} ${open ? 'sidebar open' : 'rail'}: nothing cut off`, await t.run(CUT_OFF), []);
+        }
+      }
+      await fullSize(t);
+    };
+    await checkNav(5, 'tool page nav');
+
+    // Add 6th tool (Antigravity) and check every width/sidebar combination again.
+    writeFileSync(join(tHome, '.local/bin/agy'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "1.0.0" && exit 0\nexit 9\n');
+    chmodSync(join(tHome, '.local/bin/agy'), 0o755);
+    mkdirSync(join(tHome, '.gemini/config/skills'), { recursive: true });
+    await t.click('#header-refresh');
+    for (let tries = 0; tries < 40 && (await t.run(`document.querySelectorAll('.harness-switch-item').length`)) !== 6; tries++) await wait(100);
+    await checkNav(6, 'tool page nav');
+
+    // Tool tab marks: 1 mark per row (ordinary and plugin), global switch labels intact, opened details still show all 6 tools.
+    const tabMarks = await t.run(`(() => {
+      const ord = document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'skill-01')}"]');
+      const plug = document.querySelector('.ov-plugin-row');
+      const sw = ord?.querySelector('.switch');
+      const pSw = plug?.querySelector('.switch');
+      const fileBtn = ord?.querySelector('.row-file-btn')?.getBoundingClientRect();
+      return {
+        ordTools: [...(ord?.querySelectorAll('.tool-mark') ?? [])].map(el => el.dataset.tool),
+        plugTools: [...(plug?.querySelectorAll('.tool-mark') ?? [])].map(el => el.dataset.tool),
+        swLabel: sw?.getAttribute('aria-label') ?? null,
+        pSwGlobal: /every tool that can switch it/.test(pSw?.getAttribute('aria-label') ?? ''),
+        fileHit: !!(fileBtn && fileBtn.width >= 26 && fileBtn.height >= 26),
+      };
+    })()`);
+    same('Claude Code’s Skills tab shows only Claude Code’s mark on ordinary and plugin rows, keeps global switch labels, and sizes the file icon',
+      tabMarks,
+      { ordTools: ['claude-cli'], plugTools: ['claude-cli'], swLabel: 'skill-01: on. Click to take it out of every tool; Central Knot keeps it.', pSwGlobal: true, fileHit: true });
+
+    await t.click(`#${rowPart('open', 'skills', 'skill-01')}`);
+    same('opening a row on Claude Code’s tab still lists all 6 tools in its details (Claude Code first)',
+      await t.all('.details-tool-label', 'e.textContent.trim()'), ['Claude Code', 'Copilot CLI', 'Codex', 'Pi', 'OpenCode', 'Antigravity']);
+    await t.click(`#${rowPart('open', 'skills', 'skill-01')}`);
+
+    // Mark key disclosure: closed by default, sized toggle in closed and open states, opens legend items, closes cleanly.
+    const legendClosed = await t.run(`(() => {
+      const d = document.getElementById('mark-legend'), s = document.getElementById('mark-legend-toggle');
+      const r = s?.getBoundingClientRect();
+      return { exists: !!d, open: !!d?.open, label: s?.textContent?.trim() ?? null, sized: !!(r && r.width >= 40 && r.height >= 18) };
+    })()`);
+    same('tool tab places Mark key behind a closed disclosure with a sized toggle target', legendClosed, { exists: true, open: false, label: 'Mark key', sized: true });
+    await t.click('#mark-legend-toggle');
+    const legendOpen = await t.run(`(() => {
+      const d = document.getElementById('mark-legend'), s = document.getElementById('mark-legend-toggle');
+      const r = s?.getBoundingClientRect();
+      return { open: !!d?.open, items: d?.querySelectorAll('.legend-item').length ?? 0, sized: !!(r && r.width >= 40 && r.height >= 18) };
+    })()`);
+    same('opening Mark key shows its legend items and keeps a sized toggle target', [legendOpen.open, legendOpen.items >= 4, legendOpen.sized], [true, true, true]);
+
+    // Section jump on a long tool list at 860×528: visible, counts derived from drawn sections, jumps scroll to Off and back to On; hidden on short MCP list.
+    await sizeTo(t, ...SMALLEST);
+    await sidebarAs(false);
+    const jumpState = await t.run(`(() => {
+      const nav = document.querySelector('.harness-page .section-jump');
+      const btns = [...(nav?.querySelectorAll('.section-jump-btn') ?? [])].map(el => el.textContent.trim());
+      const drawn = [...document.querySelectorAll('.ov-section')].map(el => (el.querySelector('strong')?.textContent ?? '') + (el.querySelector('.ov-section-count')?.textContent ?? ''));
+      return { shown: !!nav && !nav.hidden, btns, drawn };
+    })()`);
+    same('long tool list shows section jump matching drawn headings and counts', jumpState, {
+      shown: true,
+      btns: ['On22', 'Found2', 'Only through a plugin1', 'Not in Claude Code1', 'Off2'],
+      drawn: ['On22', 'Found2', 'Only through a plugin1', 'Not in Claude Code1', 'Off2'],
+    });
+    await t.click('#jump-off');
+    const offInView = await t.run(`(() => {
+      const list = document.querySelector('.scroll.matrix').getBoundingClientRect();
+      const off = document.querySelector('.ov-section[data-section="off"]').getBoundingClientRect();
+      return off.top >= list.top - 2 && off.bottom <= list.bottom + 2;
+    })()`);
+    await t.click('#jump-on');
+    const backTop = await t.run(`document.querySelector('.scroll.matrix').scrollTop <= 2`);
+    same('clicking Off and On in section jump scrolls to the target heading and back to top', [offInView, backTop], [true, true]);
+    await t.click('#harness-tab-mcp');
+    same('short MCP tab hides the section jump', await t.run(`(() => { const n = document.querySelector('.harness-page .section-jump'); return !n || n.hidden; })()`), true);
+    await t.click('#harness-tab-skills');
+
+    // Optional picture capture for TOOLPAGE-T1 (--shots with CK_SHOT_ONLY=toolpage-t1 or unrestricted).
+    const tp1ShotOnly = process.env.CK_SHOT_ONLY ? new Set(process.env.CK_SHOT_ONLY.split(',')) : null;
+    if (shots && (!tp1ShotOnly || tp1ShotOnly.has('toolpage-t1'))) {
+      const take = async (name, [w, h], open, theme) => {
+        await sizeTo(t, w, h);
+        await sidebarAs(open);
+        await t.run(`document.activeElement?.blur(); window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+        await wait(120);
+        await t.shot(name);
+      };
+      await t.run(`const d = document.getElementById('mark-legend'); if (d?.open) document.getElementById('mark-legend-toggle')?.click();`);
+      await t.settle();
+      await take('tp1-skills-860-rail-light', [860, 560], false, 'light');
+      await take('tp1-skills-860-open-light', [860, 560], true, 'light');
+      await take('tp1-skills-1316-dark', [1316, 819], true, 'dark');
+      await sizeTo(t, 860, 560);
+      await sidebarAs(false);
+      await t.click('#mark-legend-toggle');
+      await t.run(`document.getElementById('mark-legend')?.scrollIntoView({ block: 'end' })`);
+      await take('tp1-legend-open-860-light', [860, 560], false, 'light');
+      await t.click('#mark-legend-toggle');
+      // Add a long-named skill for the wide docked screenshot.
+      const longDocked = 'quarterly-platform-engineering-changelog-summary-report-writer';
+      skill(tClaude, longDocked, text(longDocked, 'Summarises quarterly platform engineering changes and release milestones across repositories.'));
+      await t.click('#header-refresh');
+      for (let tries = 0; tries < 40 && !(await t.exists(`#${rowPart('open', 'skills', longDocked)}`)); tries++) await wait(100);
+      await t.click(`#${rowPart('open', 'skills', longDocked)}`);
+      await take('tp1-docked-long-wide-light', [1728, 1117], true, 'light');
+      await t.run(`window.centralKnot.setAppearance('system')`);
+      await wait(80);
+    }
+
+    // Library still shows all 6 tool marks and open key with no Mark key disclosure.
+    await openKind(t, 'skills');
+    same('Library still shows all 6 tool marks per row and an open legend', [
+      await t.run(`document.querySelectorAll('.ov-row[data-key="${rowPart('', 'skills', 'skill-01')}"] .tool-mark').length`),
+      await t.exists('#mark-legend'),
+      await t.exists('.legend .legend-item'),
+    ], [6, false, true]);
+    same('no page errors, tool page T1', t.pageErrors, []);
+  } finally {
+    await t.quit();
+  }
 }
 
 /**
@@ -6796,6 +6977,27 @@ async function dockedListFlow() {
   const under = await place();
   await sidebarOpen(false);
   same('across the dock’s breakpoint and back, the opened row stays open, where it was in its table', [under, await place()], [['under its row', top, offset], ['docked', top, offset]]);
+  // Long filename + hittable file icon win over description when docked on both the tool tab and Library.
+  const longDocked = 'quarterly-platform-engineering-changelog-summary-doc';
+  skill(claude, longDocked, text(longDocked, 'Summarises quarterly platform engineering changes and release milestones.'));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 40 && !(await a.exists(`.ov-row[data-key="${rowPart('', 'skills', longDocked)}"]`)); tries++) await wait(100);
+  const checkDockedLong = async (where, minBtn) => {
+    await sizeTo(a, 1316, 787); await sidebarOpen(false);
+    const got = await a.run(`(() => {
+      const row = document.querySelector('.dock-main .ov-row[data-key="${rowPart('', 'skills', longDocked)}"]');
+      const cell = row?.querySelector('.ov-name'), text = row?.querySelector('.ov-name-text'), btn = row?.querySelector('.row-file-btn');
+      const cr = cell?.getBoundingClientRect(), br = btn?.getBoundingClientRect();
+      return { nameWhole: !!(text && text.scrollWidth <= text.clientWidth + 1), nameCut: !!cell?.classList.contains('name-cut'),
+        btnHit: !!(br && cr && br.width >= ${minBtn} && br.height >= ${minBtn} && br.right <= cr.right + 1 && br.bottom <= cr.bottom + 1) };
+    })()`);
+    same(`${where} docked at 1260 px prioritizes the 52-letter filename and hittable file icon over description`, got, { nameWhole: true, nameCut: false, btnHit: true });
+  };
+  await checkDockedLong('Claude Code’s Skills tab', 26);
+  for (const selector of ['#nav-library', '#library-kind-all', `#${rowPart('open', 'skills', 'research')}`]) await a.click(selector);
+  await a.run(`(() => { const sort = document.querySelector('#item-order'); sort.value = 'name'; sort.dispatchEvent(new Event('change')); })()`);
+  await a.settle();
+  await checkDockedLong('Library by Name', 20);
   same('no page errors, the docked list', a.pageErrors, []);
   await a.quit();
 }
@@ -21492,6 +21694,12 @@ async function skillFileFlow() {
     await a.click('#nav-harnesses');
     await a.click('button#harness-claude-cli.harness-card-head');
     await a.click('#harness-tab-skills');
+    const tabFileHit = await a.run(`(() => {
+      const row = document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'code-review')}"]');
+      const br = row?.querySelector('.row-file-btn')?.getBoundingClientRect(), rr = row?.getBoundingClientRect();
+      return { hit: !!(br && br.width >= 26 && br.height >= 26), rowHeight: Math.round(rr?.height ?? 0) };
+    })()`);
+    same('on Claude Code’s Skills tab, Open file icon has a hittable target on its 40px row', tabFileHit, { hit: true, rowHeight: 40 });
     await a.click(reviewBtn);
     await until(() => a.exists('.file-open-box pre.content'));
     same('on Claude Code’s Skills tab, Open file opens in 1 click with Claude Code’s path and details closed', [
