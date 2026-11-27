@@ -18743,27 +18743,85 @@ async function profilePluginsFlow() {
   writeFileSync(join(home, '.central-knot/plugins.json'), snapPlugins);
   writeFileSync(config, codexBefore);
 
-  // The whole plugin off in Codex: a switch can't turn its items on there, so the rows say so, with the way to its page.
-  writeFileSync(config, readNow(config).replace('enabled = true', 'enabled = false'));
+  // The whole plugin off in Codex, triage's own rule off there too: a switch can't turn their copies on there, so the rows and the
+  // header say why, each one held with the press that turns the plugin on there, as the Library's line does (let-in).
+  const ruleOff = `${codexBefore}\n[[skills.config]]\nname = "issue-tracker:triage"\nenabled = false\n`, heldConfig = ruleOff.replace('enabled = true', 'enabled = false');
+  writeFileSync(config, heldConfig);
   await a.click('#nav-profiles');
   await a.click('#header-refresh');
-  await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Work')).click()`); await a.settle();
-  const cause = 'issue-tracker is off in Codex, so 2 of its items can’t be switched from here';
-  same('with the plugin off in Codex, the rows and header say why Work can’t switch with Open issue-tracker, full reason in (?), and no Switching head over blank cells',
+  const openWork = async () => { await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Work')).click()`); await a.settle(); };
+  await openWork();
+  await waitEnabled('#profile-turn-on');
+  const cause = 'issue-tracker is off in Codex, so 2 of its items can’t be switched from here', press = 'Turn on issue-tracker in Codex';
+  same('with the plugin off in Codex, the rows and header say why Work can’t switch, each with the press, full reason in (?), and no Switching head over blank cells',
     [await a.all(`${row(triageId)} .pf-note`, 'e.textContent'), await a.text('.profile-header p'), await a.text('#profile-preview-info-card'), await a.exists('#profile-switch'),
-      await a.text('#profile-open-plugin'), await a.text(byId(`pf-plugin-${triageId}-codex-cli`)), await a.text('.pf-head .pf-state'), (await a.text('#status-profile'))?.trim()],
-    [['Off in Codex: its plugin is off there. Open issue-tracker'], 'Can’t switch · issue-tracker is off in Codex', `Not in use · ${cause}`, false, 'Open issue-tracker', 'Open issue-tracker', '', 'No profile']);
+      await a.text('#profile-turn-on'), await a.text(byId(`pf-turn-on-${triageId}-codex-cli`)), await a.text('.pf-head .pf-state'), (await a.text('#status-profile'))?.trim()],
+    [[`Off in Codex: its plugin is off there. ${press}`], 'Can’t switch · issue-tracker is off in Codex', `Not in use · ${cause}`, false, press, press, '', 'No profile']);
+  same('the press’s hover says what else it does in Codex', await a.run(`document.querySelector('#profile-turn-on').title`),
+    'Turns issue-tracker on in Codex, as its own switch there does. Its items come on with it there, except those their own switch keeps off; Switch then turns off the ones this profile leaves out, wherever they can be switched.');
   if (await a.exists('#profile-preview-info')) await checkCard(a, 'profile-preview-info', `Not in use · ${cause}`, 'held header (?) card holds the full reason');
   else check('held header (?) mark exists', false);
   await pictures('profile-plugin-off');
+  const heldShot = async (name, [width, height], theme = 'light') => {
+    if (!shots) return;
+    await a.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`); await sizeTo(a, width, height); await a.shot(name);
+    await a.run(`window.centralKnot.setAppearance('system')`); await fullSize(a);
+  };
+  await heldShot('held-button-860-light', SMALLEST); await heldShot('held-button-1316-dark', [1316, 819], 'dark');
   // Chosen from the status bar's menu, it is refused in the same words.
   await a.click('#status-profile');
   await a.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes('Work')).click()`);
   await done();
   same('chosen from the status bar, Work is refused, and the status bar says why', await a.run(`document.querySelector('#announcement').dataset.text`), `${cause}. Nothing was switched.`);
-  await a.click('#profile-open-plugin');
+  // Pressed, from the header, then from a row: one plugin step, in Codex alone (a native run there, none elsewhere); its result and
+  // Undo in this page's band, the header worked out from the same read; its Undo puts Codex back and the press with it.
+  const runsDir = join(data, 'plugins/native'), runs = () => (existsSync(runsDir) ? readdirSync(runsDir) : []), heldFiles = files();
+  const pressAndUndo = async (control, shot) => {
+    const ran = runs();
+    await a.click(control); await done();
+    same(`${control}: one step, in Codex; its result and Undo in Profiles’ band; the header offers Switch`, [files(), runs().filter(run => !ran.includes(run)).map(run => run.split('-').slice(-3, -1).join('-')),
+      (await a.text('.profiles-page .band-done .band-text'))?.split('.')[0], await a.exists('.profiles-page .band-done #outcome-undo'), await a.text('.profile-header p'), await a.exists('#profile-switch:not([disabled])')],
+    [{ ...heldFiles, codex: ruleOff }, ['codex-cli'], 'Turned on issue-tracker in Codex', true, 'Switching turns 1 on', true]);
+    if (shot) await heldShot(shot, SMALLEST);
+    await a.click('.profiles-page #outcome-undo'); await done();
+    same(`${control}: its Undo puts Codex back, byte for byte, and the header and press back`, [files(), await a.text('.profile-header p'), await a.text('#profile-turn-on')], [heldFiles, 'Can’t switch · issue-tracker is off in Codex', press]);
+  };
+  await pressAndUndo('#profile-turn-on', 'held-pressed-860-light');
+  await a.run(`document.getElementById(${JSON.stringify(`pf-turn-on-${triageId}-codex-cli`)}).focus()`);
+  await heldShot('held-row-button-860-light', SMALLEST);
+  await pressAndUndo(byId(`pf-turn-on-${triageId}-codex-cli`));
+  await a.click('#nav-plugins'); await a.settle();
+  check('the Plugins page shows no result of these presses', !(await a.exists('#plugins-result')), await a.text('#plugins-result'));
+  // Press, Switch, Undo switch: two acts, two Undos. The switch's band takes the press's place; its Undo leaves the plugin on in Codex,
+  // and the press's Undo is then on triage's Codex line in the Library.
+  await a.click('#nav-profiles'); await openWork();
+  for (const control of ['#profile-turn-on', '#profile-switch', '#outcome-undo']) { await waitEnabled(control); await a.click(control); await done(); }
+  same('after press, Switch and Undo switch, triage’s rule is back, the plugin stays on in Codex, and the header offers Switch', [files().codex, await a.text('.profile-header p')], [ruleOff, 'Switching turns 1 on']);
+  await openKind(a, 'skills');
+  await a.click(`#${rowPart('open', 'skills', 'triage')}`);
+  same('the press’s Undo is on triage’s Codex line in the Library', (await a.text('[data-result="codex-cli:skill:triage"] .details-tool-result-text'))?.split('.')[0], 'Turned on issue-tracker in Codex');
+  await a.click(byId(rowPart('line-undo', 'skills', 'triage', 'codex-cli'))); await done();
+  same('which puts the plugin off in Codex again', files().codex, heldConfig);
+  // One press can't clear it where no marketplace here lists the plugin (off Central Knot's list and each tool's for a moment): Open
+  // issue-tracker stays, its hover saying why.
+  const known = join(home, '.claude/plugins/known_marketplaces.json'), knownBefore = readNow(known);
+  await a.run(`window.centralKnot.forgetMarketplace(${JSON.stringify(market)})`);
+  writeFileSync(known, '{}'); writeFileSync(config, heldConfig.replace(`[marketplaces.ck-test-market]\nsource = "${market}"\n\n`, ''));
+  await a.click('#nav-profiles'); await a.click('#header-refresh'); await done(); await openWork();
+  for (let tries = 0; tries < 50 && !(await a.exists('#profile-open-plugin')); tries++) await wait(100);
+  same('unlisted, Open issue-tracker stays in Switch’s place and on the row, titled with why, and no press', [await a.text('#profile-open-plugin'), await a.text(byId(`pf-plugin-${triageId}-codex-cli`)),
+    await a.run(`document.querySelector('#profile-open-plugin').title`), await a.exists('#profile-turn-on')],
+  ['Open issue-tracker', 'Open issue-tracker', 'Off in Codex. Its marketplace “ck-test-market” isn’t added in Central Knot or in any tool here, so it can’t be turned on from here.', false]);
+  await heldShot('held-open-plugin-860-light', SMALLEST);
+  writeFileSync(known, knownBefore); writeFileSync(config, heldConfig);
+  same('listed again', await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)}).then(result => result.problem ?? 'added')`), 'added');
+  await a.click('#header-refresh'); await done();
+  // A row the profile leaves out (triage in Quiet) keeps the way to the plugin's page: the press is only where the plugin holds the switch.
+  await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Quiet')).click()`); await a.settle();
+  await a.click(byId(`pf-plugin-${triageId}-codex-cli`));
   for (let tries = 0; tries < 50 && !(await a.exists('#plugin-back')); tries++) await wait(100);
   check('Open issue-tracker opens issue-tracker’s page on Plugins', await a.exists('#plugin-back') && /issue-tracker/.test(await a.text('.plugin-page') ?? ''), await a.text('.page-title'));
+  writeFileSync(config, codexBefore.replace('enabled = true', 'enabled = false'));
 
   // His own skill beside the plugin's rows, a plugin's skill with a long name, In use; then a plugin's server Copilot CLI can't
   // switch (a server of his own has its name) and a plugin whose copy Copilot CLI can't read: four pictures at his window, and the

@@ -3045,7 +3045,7 @@ test('Library plugin line (sayResult): carries profileLine on LineResult when li
     before: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: ['copilot-cli'] },
     back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'copilot-cli', action: 'remove' }],
   };
-  const aim = { home: '/home', source: '/market', marketName: 'team', plugin: 'alpha', tool: 'copilot-cli' as HarnessId, act: 'install' as const, item: { kind: 'agent' as const, name: 'lead' } };
+  const aim = { home: '/home', source: '/market', marketName: 'team', plugin: 'alpha', tool: 'copilot-cli' as HarnessId, act: 'install' as const, item: { kind: 'agent' as const, name: 'lead' }, page: 'library' as const };
 
   // Line on screen: LineResult carries profileLine; spoken text has the whole result while the visible status bar keeps the prior wording.
   t.mock.method(document, 'querySelector', () => element());
@@ -3077,7 +3077,8 @@ test('Library plugin line (sayResult): carries profileLine on LineResult when li
   // Turn the plugin on (let-in) and line Undo ending Work also carry profileLine; failed line act carries none.
   app.home = viewWith(true);
   nextHome = viewWith(false);
-  t.mock.method(document, 'querySelector', () => element());
+  // Kept so the last case can take the line off screen: a second mock of it would be restored first, leaving this one in place.
+  const lineOnScreen = t.mock.method(document, 'querySelector', () => element());
   const letInAim = { ...aim, act: 'let-in' as const, tool: 'codex-cli' as HarnessId, item: { kind: 'skill' as const, name: 'triage' } };
   const turnedOn: PluginTurnResult = {
     done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'codex-cli', action: 'plugin-on', report: { tool: 'codex-cli', outcome: 'plugin-on', changed: true, message: 'Turned on.', runs: [] } }],
@@ -3110,6 +3111,17 @@ test('Library plugin line (sayResult): carries profileLine on LineResult when li
   await settled();
   assert.equal(resultOn('codex-cli', { kind: 'skill', name: 'triage' })?.profileLine, undefined);
   assert.doesNotMatch(app.said.text, /stopped being the profile/);
+
+  // Pressed on Profiles (profilespage.ts turnOnControl), where no line is drawn: its result and Undo are told there, and so is the Undo's.
+  lineOnScreen.mock.mockImplementation(() => null);
+  turnFromLine({ ...letInAim, page: 'profiles' });
+  await settled();
+  await main.answer(turnedOn);
+  await settled();
+  assert.deepEqual([app.outcome?.page, app.outcome?.act?.label, app.outcome?.plugins], ['profiles', 'Undo', ['alpha']]);
+  app.outcome!.act!.run();
+  await settled();
+  assert.equal(app.outcome?.page, 'profiles');
 });
 
 test('One plugin click announces once, with its result and profile sentence together; a successful click leaving Work in use says nothing', async t => {
@@ -3164,7 +3176,7 @@ test('Overlapping plugin click and Library line act: only the act that ended Wor
     before: { id: 'e2', source: '/market', marketName: 'team', plugin: 'beta', on: true, except: ['copilot-cli'] },
     back: [{ source: '/market', marketName: 'team', plugin: 'beta', tool: 'copilot-cli', action: 'remove' }],
   };
-  const betaAim = { home: '/home', source: '/market', marketName: 'team', plugin: 'beta', tool: 'copilot-cli' as HarnessId, act: 'install' as const, item: { kind: 'agent' as const, name: 'lead' } };
+  const betaAim = { home: '/home', source: '/market', marketName: 'team', plugin: 'beta', tool: 'copilot-cli' as HarnessId, act: 'install' as const, item: { kind: 'agent' as const, name: 'lead' }, page: 'library' as const };
 
   // (a) Forward: alpha untick ends Work; while it runs, Install on beta's line queues behind it. Only alpha's run credits Work ending.
   turnPlugin(entry, 'alpha', 'keep-out', 'codex-cli');

@@ -17,8 +17,9 @@
 // - A tool's line on a plugin's item in the Library (pluginline.ts) makes a tool's box's own turn (Install the plugin, Put its
 //   items here, Turn the plugin on or off): turnFromLine joins the page's one list as a run of its own; its line says it waits and runs
 //   (lineBusy), and its result, with the turn's Undo (undoLine), is a LineResult (its one lifetime is there), on its line or, when
-//   that isn't on screen, in the header. It sets no market.lastRun: the Plugins page's own result is its own clicks'. An act on a
-//   plugin from either page retires that plugin's earlier results and Undo on both (retire).
+//   that isn't on screen, on the page it was pressed on (LineAim page): the Library's header, or Profiles' band, whose Turn on
+//   <plugin> in <Tool> is the line's Turn the plugin on (profilespage.ts turnOnControl). It sets no market.lastRun: the Plugins
+//   page's own result is its own clicks'. An act on a plugin from any page retires that plugin's earlier results and Undo (retire).
 // Steps that run by themselves (pluginupdates.ts) take their turn with the page's in main's one queue.
 import { harnessTabShown, noteMove, showPage, announce, busy, focusWhenDone, oweHomeRead, pinnedRows, profileEndedLine, profilesBefore, readHomeOnce, rerender, saidInStatusBar, setHome, state as app, tell, toolWays, withReloads, type Outcome, type ProfilesBefore } from './app.ts';
 import { pluginReloads, reloadAdvice, settleReloads, type ReloadAdvice, type ReloadChange } from './reload.ts';
@@ -686,9 +687,13 @@ export function wantView(readId: number | undefined): void {
 /**
  * A line's click: the home it is made in, the plugin as listed (`source`, the listing's own spelling), the tool, and the item whose line
  * it is (`item`), with the names his own there it said stay his (`yours`). Install, Put its items here and Turn the plugin on are
- * its box ticked (`let-in`); Turn the plugin off is its box unticked (`keep-out`).
+ * its box ticked (`let-in`); Turn the plugin off is its box unticked (`keep-out`). `page`: where it was pressed, the Library (a line)
+ * or Profiles (a held profile's Turn on <plugin> in <Tool>), where its result is told while no line of its item is on screen.
  */
-export interface LineAim { home: string; source: string; marketName: string; plugin: string; tool: HarnessId; act: 'install' | 'place' | 'keep-out' | 'let-in'; item: PartRef; yours?: PartRef[] }
+export interface LineAim {
+  home: string; source: string; marketName: string; plugin: string; tool: HarnessId; act: 'install' | 'place' | 'keep-out' | 'let-in'; item: PartRef; yours?: PartRef[];
+  page: 'library' | 'profiles';
+}
 /** A line's click in the page's list (clicklist.ts), a run of its own: its line says it waits and runs (lineBusy). */
 interface LineClick extends Turn { aim: LineAim }
 const isLineClick = (turn: Turn): turn is LineClick => 'aim' in turn;
@@ -702,9 +707,9 @@ const LINE_WORDS: Record<LineAim['act'], { waiting: string; running: string; don
 /**
  * A line's result: what its act did, with the one next step the tool needs (reload.ts reloadAdvice, as the header's chips say it),
  * and its Undo. ONE LIFETIME: one per plugin, for the home its act ran in, on its item's line in its tool whatever row shows that
- * item, until he closes it, an act on that plugin starts from either page (retire), he presses Refresh (forgetResults) or the
- * home changes (resetMarket). Said in the header only when that line isn't on screen as the act ends (`told`); its line shows it
- * once the header no longer does, never both at once.
+ * item, until he closes it, an act on that plugin starts from any page (retire), he presses Refresh (forgetResults) or the
+ * home changes (resetMarket). Told on the page it was pressed on (LineAim page: the Library's header, Profiles' band) only when
+ * that line isn't on screen as the act ends (`told`); its line shows it once that page no longer does, never both at once.
  */
 export interface LineResult { aim: LineAim; words: string; next: string; failed: boolean; profileLine?: string; undo?: () => void; told?: Outcome }
 let results: LineResult[] = [];
@@ -741,8 +746,8 @@ export function lineBusy(plugin: string, marketName: string, tool: HarnessId): s
 }
 
 /**
- * A line's click (pluginline.ts: Install the plugin, Put its items here, Turn the plugin on or off): it joins the page's list as a run of its
- * own, run in its turn by main as the plugin's box on its page is (marketplaces.ts turn).
+ * A line's click (pluginline.ts: Install the plugin, Put its items here, Turn the plugin on or off; from Profiles, its Turn the plugin on):
+ * it joins the page's list as a run of its own, run in its turn by main as the plugin's box on its page is (marketplaces.ts turn).
  */
 export function turnFromLine(aim: LineAim): void {
   const click: LineClick = { state: 'waiting', run: { place: 'line', lastAt: 0 }, aim, work: () => runLine(click) };
@@ -792,8 +797,8 @@ async function runLine(click: LineClick): Promise<void> {
 }
 
 /**
- * A line's result kept (one per plugin), and said: on its line if that line is on screen now, else in the header, which has its
- * Undo and next step there (as chips, withReloads: one next step either way) and names its plugin for retire.
+ * A line's result kept (one per plugin), and said: on its line if that line is on screen now, else told on the page it was pressed on
+ * (LineAim page), with its Undo and next step there (withReloads: one next step either way), naming its plugin for retire.
  */
 function sayResult(result: LineResult, changes: ReloadChange[], check: { checkProfile?: boolean; before?: ProfilesBefore } = {}): void {
   const profileLine = check.checkProfile === false ? undefined : profileEndedLine(check.before);
@@ -805,7 +810,7 @@ function sayResult(result: LineResult, changes: ReloadChange[], check: { checkPr
     announce([shown, profileLine].filter(Boolean).join(' '), false, undefined, undefined, profileLine ? shown : undefined);
     return;
   }
-  result.told = withReloads({ page: 'library', text: result.words, band: true, warn: result.failed, plugins: [result.aim.plugin],
+  result.told = withReloads({ page: result.aim.page, text: result.words, band: true, warn: result.failed, plugins: [result.aim.plugin],
     ...(result.undo ? { act: { label: 'Undo', id: 'outcome-undo', title: 'Put back what this did', run: result.undo } } : {}) }, changes);
   tell(result.told, '', check);
   result.told = app.outcome;

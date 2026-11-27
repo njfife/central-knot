@@ -135,9 +135,10 @@ function pluginStrip(plugin: string, marketName: string, installs: InstalledPlug
 
 /**
  * The facts a tool's line on a plugin's item is drawn from (pluginline.ts LineFacts): the home's view, and the Plugins page's,
- * read for it while such a row is open (pluginstate.ts wantView, lineBox), with the listing's source a turn names.
+ * read for it while such a row is open (pluginstate.ts wantView, lineBox), with the listing's source a turn names. Profiles asks
+ * them too, for a held profile's plugin off in a tool (profilespage.ts turnOnControl).
  */
-function lineFacts(kind: PartKind, plugin: string, marketName: string, tool: HarnessId, through?: PluginItemAt, installed?: InstalledPlugin): LineFacts & { source?: string } {
+export function lineFacts(kind: PartKind, plugin: string, marketName: string, tool: HarnessId, through?: PluginItemAt, installed?: InstalledPlugin): LineFacts & { source?: string } {
   wantView(state.home?.readId);
   // Its source as a tool that has it registered spells it, so the listing is this one's where two of one name list the plugin.
   const known = through?.install.source ?? installed?.source ?? state.home?.pluginItems?.find(install => install.plugin === plugin && install.marketName === marketName && install.source)?.source;
@@ -158,7 +159,7 @@ function pluginLine(row: ItemRow | PluginRow, facts: LineFacts & { source?: stri
   if (control.control !== 'button') return { text, result, control: control.control === 'switch' && item ? pluginItemControls(item, row) : null };
   const { act } = control;
   const run = () => turnFromLine({ home: state.home!.home, source: facts.source!, marketName: facts.marketName, plugin: facts.plugin, tool: facts.tool, act,
-    item: { kind: facts.kind, name: nameOf(row) }, ...(facts.yours?.length ? { yours: facts.yours } : {}) });
+    item: { kind: facts.kind, name: nameOf(row) }, ...(facts.yours?.length ? { yours: facts.yours } : {}), page: 'library' });
   const off = !!busy || (selectOff() ?? queueOff(homeStops())) || (!facts.source && 'Not read yet.');
   return { text, result, control: h('span.details-tool-actions', {},
     button({ variant: 'outline', size: 'micro', label: control.label, id: elId('line', row, facts.tool), disabled: off, attrs: { title: control.sentence }, onclick: (event: MouseEvent) => { event.stopPropagation(); run(); } })) };

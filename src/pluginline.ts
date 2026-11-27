@@ -5,7 +5,8 @@
 // is pluginswitch.ts's answer (wholeTurn); where the tool lacks the plugin, whether it may go in is the plugin's box on its own
 // page (pluginstatus.ts boxOf), asked of the Plugins page's view (pluginstate.ts lineBox): no second set of rules here.
 // Elsewhere: the buttons' clicks (pluginstate.ts turnFromLine, a plugin's turn in main), and their result on the line that acted
-// (pluginstate.ts LineResult); the line drawn (matrix.ts pluginLine); which of a library row's lines are a plugin's (matrix.ts
+// (pluginstate.ts LineResult); the line drawn (matrix.ts pluginLine); Profiles' Turn on <plugin> in <Tool>, this rule's let-in asked
+// for a held profile's plugin off in a tool (profilespage.ts turnOnControl); which of a library row's lines are a plugin's (matrix.ts
 // rowPluginFacts: in a tool that takes plugins and lacks it, and in Pi, OpenCode and Antigravity while the item is Off, where Put its
 // items here puts them there again after its Undo); and the others, the library's own (libraryrow.ts hasLine).
 import { DIRECTORY, FROM_DIRECTORY, loadsKind, partWords, samePart } from './pluginstatus.ts';
