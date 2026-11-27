@@ -17,7 +17,7 @@ import { forgetSourcePrompts, loadSources } from './sourcespage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
-import type { Reason, ApplyResult, Profile, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SessionCostsView, SyncNotice, UsageReading } from './types.ts';
+import type { Reason, ApplyResult, Profile, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SessionCostsView, SyncNotice, TakenInNotice, UsageReading } from './types.ts';
 import { anyOn, kindSource, noPins, pinsOn, rowId, sameRow, type NamedRow, type Pinned, type RowKey } from './itemrow.ts';
 import { itemKey, wantedIn } from './library.ts';
 import { caughtUpNames, groupBy, noticeNames, plural, withSetAside } from './model.ts';
@@ -46,7 +46,7 @@ import type { DayRows, PeriodRows } from './sessionrow.ts';
 import { DIFFERS_REASON, selecting, stopSelecting } from './selection.ts';
 import { takesPlugins } from './presence.ts';
 import { pluginOf } from './sourcelink.ts';
-import { findInHome, holdOrder, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
+import { findInHome, holdOrder, keptNoticeList, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -1277,14 +1277,19 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const clicked = state.history.data?.find(event => event.id === eventId);
   const switchesOn = !!clicked?.everything?.undo && !!state.history.data && restorePlan(clicked, state.history.data, entriesNow(home)).switchOn;
   const result = received(await api().restore(eventId, home.home, choice));
-  // The notice for an undone event has done its job; its result band says what happened.
-  if (!result.stopped) state.dismissed.add(eventId);
   const view = await api().refresh();
   await putHistory();
-  // Synchronize everything's Undo took back its take-ins: dismiss their notices here too, before setHome carries unseen ones on.
-  const undos = new Set(state.history.data?.find(event => event.id === result.made?.[0])?.everything?.undo?.itemUndos ?? []);
-  if (!result.stopped && undos.size) {
-    for (const event of state.history.data ?? []) if (event.undoneBy && undos.has(event.undoneBy)) state.dismissed.add(event.id);
+  // Dismiss the notices of what this Undo took back before setHome carries unseen ones on; a multi-item taken-in notice goes only once every item it names is undone.
+  if (!result.stopped) {
+    const events = state.history.data ?? [];
+    const undos = new Set(events.find(event => event.id === result.made?.[0])?.everything?.undo?.itemUndos ?? []);
+    const taken = new Set([eventId, ...(undos.size ? events.filter(event => event.undoneBy && undos.has(event.undoneBy)).map(event => event.id) : [])]);
+    const allUndone = new Set([...taken, ...events.filter(event => event.undoneBy).map(event => event.id)]);
+    const takenIn = [...(state.home ? KINDS.flatMap(kind => state.home![kind].notices) : []), ...keptNoticeList(), ...backgroundNews.map(entry => entry.notice)]
+      .filter((notice): notice is TakenInNotice => notice.kind === 'taken-in' && !!notice.histories?.length);
+    const stillKept = new Set(takenIn.filter(notice => notice.histories!.some(id => !allUndone.has(id))).map(notice => notice.history));
+    for (const id of taken) if (!stillKept.has(id)) state.dismissed.add(id);
+    for (const notice of takenIn) if (notice.histories!.some(id => taken.has(id)) && !stillKept.has(notice.history)) state.dismissed.add(notice.history);
   }
   setHome(view);
   // A source's band offers its click's Undo (sourcespage.ts whatItDid): its rows say what waits there now.
@@ -1346,12 +1351,12 @@ function sayLibraryAction(page: Page, past: HistoryEvent, result: ApplyResult, d
  * (restoreEvent, from restorePlan before the click); a switch made in Settings since is not its doing.
  */
 function sayEverything(page: Page, past: HistoryEvent, result: ApplyResult, switchedOn: boolean, did = true) {
-  const onSettings = page === 'settings' ? { settingsBand: true } : {};
-  if (result.stopped) { tell({ page, item: past.item, text: result.stopped, warn: true, history: true, refused: true, ...onSettings }); return; }
+  const onSettings = page === 'settings';
+  if (result.stopped) { tell({ page, item: past.item, text: result.stopped, warn: true, history: true, refused: true, ...(onSettings ? { settingsBand: true } : {}) }); return; }
   const made = (result.made ?? []).map(id => state.history.data?.find(event => event.id === id));
   const text = everythingDone(past, made, made.filter(event => event?.kind === 'restored').length, switchedOn);
   const notDone = [...new Set(result.results.filter(keptBack).map(entry => entry.message))];
-  tellWritten({ page, item: past.item, warn: notDone.length > 0, ...(page === 'settings' ? { band: true, ...onSettings } : { history: true }), text: [text, ...notDone.slice(0, 3)].filter(Boolean).join(' ') }, result.reloads, did);
+  tellWritten({ page, item: past.item, warn: notDone.length > 0, ...(onSettings ? { band: true, settingsBand: true } : { history: true }), text: [text, ...notDone.slice(0, 3)].filter(Boolean).join(' ') }, result.reloads, did);
 }
 
 // ---------- A skill's own two actions ----------
@@ -1405,7 +1410,7 @@ export interface Outcome {
   history?: boolean;
   /** Nothing was done, its reason the text: History is offered as itself, not as where its Undo is (matrix.ts outcomeBand). */
   refused?: boolean;
-  /** Shown as a band even with nothing to offer: a click's result, which belongs where the click's Undo would be. */
+  /** Shown as a band even with nothing to offer: a click's result, which belongs where the click's Undo would be; Settings draws a band only for reload advice or `settingsBand` (settingspage.ts). */
   band?: boolean;
   /** Shown as a band on Settings even without reload advice: Synchronize everything's switch-on and its band's Undo (settingspage.ts). */
   settingsBand?: boolean;
