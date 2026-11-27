@@ -22966,9 +22966,14 @@ async function pluginItemSwitchesFlow() {
   await sizeTo(a, ...SMALLEST);
   const railed = await a.run(`document.body.classList.contains('rail')`);
   if (railed) await a.click('#sidebar-toggle');
-  same('at 860 with the sidebar open, the 64-letter name is cut with an ellipsis and its switches stay in its line', await a.run(`(() => {
-    const row = document.querySelector('.plugin-items-list [data-key="skill:${long}"]'), name = row.querySelector('.plugin-part-link'), last = [...row.querySelectorAll('.skill-switch')].at(-1);
-    return [name.scrollWidth > name.clientWidth, getComputedStyle(name).textOverflow, last.getBoundingClientRect().right <= row.getBoundingClientRect().right]; })()`), [true, 'ellipsis', true]);
+  // It fits whole at 860; the list held narrower than any window makes it, the name is cut, never a switch pushed out.
+  same('at 860 with the sidebar open the 64-letter name and its switches fit in its line; held to 520px, the name is cut with an ellipsis and its switches stay in', await a.run(`(() => {
+    const list = document.querySelector('.plugin-items-list'), row = list.querySelector('[data-key="skill:${long}"]'), name = row.querySelector('.plugin-part-link');
+    const fits = () => [...row.querySelectorAll('.skill-switch')].at(-1).getBoundingClientRect().right <= row.getBoundingClientRect().right, wide = fits();
+    list.style.width = '520px';
+    const narrow = [name.scrollWidth > name.clientWidth, getComputedStyle(name).textOverflow, fits()];
+    list.style.width = '';
+    return [wide, ...narrow]; })()`), [true, true, 'ellipsis', true]);
   if (railed) await a.click('#sidebar-toggle');
   await fullSize(a);
   await shot('item-switches-cannot-light-860', SMALLEST, 'light');
