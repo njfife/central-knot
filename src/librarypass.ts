@@ -316,33 +316,41 @@ export async function lookFor<C, E extends Seen, D extends Disk<E>>(kind: Kind<C
 }
 
 /**
- * What managing one more harness (`joining`) would do there now, as its Harnesses card says before its Manage switch is turned
+ * What managing one more harness (`joining`) would do there now, as its question says before its Manage switch is turned
  * on: the look a pass makes with `tools` (the managed harnesses with `joining` among them, in their order; the guards included,
  * so cameBack's copies that give way are counted; nothing is saved), and each item's plan there, deleted items' too. `rule`: the home's Synchronize
  * everything is on, so a found item it can take is counted as taken in. The one place this is counted; tests/managetool.test.ts
- * holds it equal to what the pass then does.
+ * holds it equal to what the pass then does. A kind whose record can't be opened, or whose whole file or folder there can't be
+ * seen (unreadIn), is `unread`: what joining does to it is not known, never "nothing".
  */
 export async function joinCounts<C, E extends Seen, D extends Disk<E>>(
   kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[], joining: HarnessId, rule: boolean,
 ): Promise<JoinCounts> {
-  const counts: JoinCounts = { written: 0, kept: 0, removed: 0, found: 0, takenIn: 0 };
+  const counts: JoinCounts = { written: 0, kept: 0, removed: 0, found: 0, takenIn: 0, changing: [], unread: [] };
+  if (!kind.harnesses([joining]).length) return counts;
   const { library, problem } = await kind.open(context);
-  if (problem || !kind.harnesses([joining]).length) return counts;
+  if (problem) return { ...counts, unread: [kind.kind] };
   const look = await lookAt(kind, context, kind.harnesses(tools), library);
   const items = Object.values(library.items);
   await guardFolders(look, items);
+  if (unreadIn(look.disk, [joining]).length) return { ...counts, unread: [kind.kind] };
   const leaving = new Set<string>();
   for (const item of items) {
     const made = plan(item, copiesOf(look, item));
-    counts.kept += [...made.keep, ...(look.givingWay.get(item.key) ?? [])].filter(kept => kept.harness === joining).length;
-    if (made.write.includes(joining)) counts.written++;
-    if (made.remove.includes(joining)) { counts.removed++; leaving.add(item.key); }
+    const kept = [...made.keep, ...(look.givingWay.get(item.key) ?? [])].filter(copy => copy.harness === joining).length;
+    counts.kept += kept;
+    const does = made.write.includes(joining) ? 'write' : made.remove.includes(joining) ? 'remove' : kept ? 'keep' : undefined;
+    if (does === 'write') counts.written++;
+    if (does === 'remove') { counts.removed++; leaving.add(item.key); }
+    if (does) counts.changing.push({ kind: kind.kind, key: item.key, name: item.name, does, saves: kept });
   }
   // Found there: each key it has a copy of that can be taken in (its own, or one it has another way: foundCopies) with no live
   // item for it, but a deleted item's copy the pass removes there.
   for (const key of new Set([...look.disk.byKey.keys(), ...(look.disk.outside?.keys() ?? [])])) {
     if ((library.items[key] && !library.items[key].deleted) || leaving.has(key) || !foundCopies(look, key, []).some(copy => copy.tool === joining)) continue;
-    counts[rule && 'take' in takeInAnswer('rule', foundKey(look, key)) ? 'takenIn' : 'found']++;
+    const taken = rule && 'take' in takeInAnswer('rule', foundKey(look, key));
+    counts[taken ? 'takenIn' : 'found']++;
+    if (taken) counts.changing.push({ kind: kind.kind, key, name: key, does: 'take', saves: 0 });
   }
   return counts;
 }
@@ -573,7 +581,7 @@ export const takeInAnswers = (look: AnyLook, key: string) => {
  * What was asked of a pass for one item (a click, what Pull brings, or what a source holds), as the History entry it becomes:
  * begun when it is recorded, finished with the harnesses its plan writes or removes (`fill`: which of them it names).
  */
-type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'wasExcept' | 'nowExcept' | 'alsoRead' | 'version' | 'previous' | 'foundIn' | 'tookFrom' | 'link' | 'seen' | 'took'>
+type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'wasExcept' | 'nowExcept' | 'exceptOnly' | 'alsoRead' | 'version' | 'previous' | 'foundIn' | 'tookFrom' | 'link' | 'seen' | 'took'>
   & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed' };
 /**
  * What Pull brings for one item (gitrepo.ts): its name and content, and where the repo holds one harness's own part, that
@@ -1110,17 +1118,19 @@ async function click(pass: Pass, asked: Change) {
 }
 
 /**
- * The switches: the item On or Off (recording changed keep-outs for a person's switch), or one harness kept out or let in.
+ * The switches: the item On or Off (recording changed keep-outs for a person's switch), or harnesses kept out or let in: one
+ * (`only`), or several managed ones at once (`exceptOnly`, with the keep-outs before and after: a profile switch's Undo).
  * Records `alsoRead` when a person's switch turns the item on in one managed harness alone and `disk.readers` names readers for it.
  */
 function turn(pass: Pass, item: LibraryItem, asked: Change) {
   const was = { on: item.on, except: item.except };
   Object.assign(item, { on: asked.on, except: [...asked.except] } satisfies Partial<LibraryItem>);
-  const out = item.except.find(tool => !was.except.includes(tool));
-  const back = was.except.find(tool => !item.except.includes(tool));
+  const out = item.except.filter(tool => !was.except.includes(tool));
+  const back = was.except.filter(tool => !item.except.includes(tool));
+  const keptOuts = { wasExcept: [...was.except], nowExcept: [...item.except] };
   if (was.on !== item.on) {
     const entry: Asked = item.on ? { kind: 'on', cause: 'switch', fill: 'written' } : { kind: 'off', cause: 'switch', fill: 'removed' };
-    if (!asked.forPlugin && (out || back)) Object.assign(entry, { wasExcept: [...was.except], nowExcept: [...item.except] });
+    if (!asked.forPlugin && (out.length || back.length)) Object.assign(entry, keptOuts);
     if (item.on && !asked.forPlugin) {
       const onlyIn = pass.managed.filter(tool => !item.except.includes(tool));
       const alsoRead = onlyIn.length === 1 ? pass.disk.readers?.(item, onlyIn[0]!) : undefined;
@@ -1129,8 +1139,11 @@ function turn(pass: Pass, item: LibraryItem, asked: Change) {
     pass.asked.set(item.key, entry);
     return;
   }
-  if (out) pass.asked.set(item.key, { kind: 'off', cause: 'switch', only: out, fill: 'removed' });
-  else if (back) pass.asked.set(item.key, { kind: 'on', cause: 'switch', only: back, fill: 'written' });
+  // Several managed harnesses at once: one entry with the keep-outs before and after; else the one changed, a managed one first.
+  const moved = [...out, ...back].filter(tool => pass.managed.includes(tool)), only = moved[0] ?? out[0] ?? back[0];
+  if (moved.length > 1) pass.asked.set(item.key, { kind: out.length ? 'off' : 'on', cause: 'switch', exceptOnly: true, ...keptOuts, fill: out.length ? 'removed' : 'written' });
+  else if (only && out.includes(only)) pass.asked.set(item.key, { kind: 'off', cause: 'switch', only, fill: 'removed' });
+  else if (only) pass.asked.set(item.key, { kind: 'on', cause: 'switch', only, fill: 'written' });
 }
 
 /** What a click's refusal says, by why the take-in table leaves the key found; a click meets only these (library.ts takeInAnswer). */

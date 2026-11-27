@@ -3,7 +3,7 @@
 // Skills', MCP servers', agents' and Synchronize everything's entries are worded and decided by historyactions.ts; here are
 // profiles', base instructions', Manage switches' and pre-library entries, plus in-place folds for 3+ non-all tool lists.
 import { DAY_MS, plural, timesApart } from './model.ts';
-import { acting, homeTools, noToolManaged, rerender, restoreEvent, setHome, shownPath, state, touchedToolsPhrase } from './app.ts';
+import { acting, homeTools, noToolManaged, rerender, restoreEvent, shownPath, state, touchedToolsPhrase } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { andList, toolName, touchedTools } from './words.ts';
 import { changeWords, entryTurns, NO_PROFILE, undoOffered, undoWords, wholeCounts } from './profileplan.ts';
@@ -12,55 +12,15 @@ import { doneWords, entriesNow, entryKind, everythingAction, everythingSentence,
 import { libraryWords } from './libraryrow.ts';
 import { button, emptyState, fold, h, icon, rereadBand, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
-import { manageLocked, manageTool, onLine } from './managecard.ts';
-import { loadPlugins } from './pluginstate.ts';
+import { askManage, manageLocked, manageQuestion, manageTool, resumeWords } from './managecard.ts';
 import { historyWindowControl } from './settingspage.ts';
 import type { HarnessId, HistoryEvent } from './types.ts';
 
 const who = (tool?: string) => (tool ? toolName(tool) : 'Central Knot');
 /** Folded tool lists open on History rows (`${event.id}-${index}` across redraws); cleared on page leave or home switch (app.ts). */
 const openToolFolds = new Set<string>();
-/** The Manage entry whose in-row rejoin question is open on History (one at a time, `ready` once home and marketplaces are read); cleared on page leave or home switch. */
-let confirmManage: { id: string; ready: boolean } | undefined;
 export function forgetHistoryFolds() {
   openToolFolds.clear();
-  confirmManage = undefined;
-}
-async function openManageConfirm(id: string, tool: HarnessId) {
-  const home = state.home;
-  if (!home || manageLocked(home)) return;
-  const open = { id, ready: false };
-  confirmManage = open;
-  rerender();
-  document.getElementById(`history-manage-cancel-${id}`)?.focus();
-  const view = await window.centralKnot.refresh().catch(() => null);
-  if (confirmManage !== open || state.page !== 'history') return;
-  if (!view || view.home !== home.home) return closeManageConfirm();
-  setHome(view, { reload: false });
-  if (manageLocked(view) || !view.sync.present.includes(tool) || view.sync.managed.includes(tool)) return closeManageConfirm();
-  await loadPlugins(false, view.readId);
-  if (confirmManage !== open || state.page !== 'history') return;
-  open.ready = true;
-  rerender();
-  document.getElementById(`history-manage-cancel-${id}`)?.focus();
-}
-function closeManageConfirm() {
-  const id = confirmManage?.id;
-  if (!id) return;
-  confirmManage = undefined;
-  rerender();
-  document.getElementById(`history-${id}`)?.focus();
-}
-function runManage(tool: HarnessId, on: boolean, home: string) {
-  confirmManage = undefined;
-  void manageTool(tool, on, home);
-}
-if (typeof document !== 'undefined') {
-  document.addEventListener('keydown', event => {
-    if (event.key !== 'Escape' || event.defaultPrevented || state.page !== 'history' || !confirmManage) return;
-    event.preventDefault();
-    closeManageConfirm();
-  });
 }
 type ToolFormat = (touched: string[], inHome: string[]) => string;
 
@@ -191,28 +151,23 @@ const managingWords = ({ tool, on }: NonNullable<HistoryEvent['managing']>): { g
   ? { glyph: 'boxes', text: `Central Knot manages ${toolName(tool)} from here on: sync brings it into line, each change with its own entry.` }
   : { glyph: 'boxes', text: `Left out from here on: Central Knot writes nothing in ${toolName(tool)}, and its copies there stay as they are.` });
 
-/** A Manage entry's reverse button (Manage it again, asking in the row first, or Leave it out again, acting at once) and panel. */
+/**
+ * A Manage entry's reverse button and panel: Leave <tool> out again, acting at once; or Manage <tool>, which asks the card's own
+ * question in the row first (managecard.ts askManage, manageQuestion), whose button is Manage <tool> too.
+ */
 function managingRow(event: HistoryEvent): [HTMLElement | null, HTMLElement | null] {
   const home = state.home, entry = event.managing;
   if (!home || !entry || !home.sync.present.includes(entry.tool) || home.sync.managed.includes(entry.tool) !== entry.on) return [null, null];
-  const locked = manageLocked(home), disabled = locked ?? acting(), name = toolName(entry.tool);
-  const resume = home.sync.gate.state === 'needs-resume' ? ` ${home.sync.gate.reason} This click resumes sync.` : '';
+  const disabled = manageLocked(home) ?? acting(), name = toolName(entry.tool);
   if (entry.on) {
-    const help = `Its copies stay. Central Knot stops writing there.${resume}`;
-    return [button({ variant: 'link', size: 'small', label: 'Leave it out again', name: `Leave ${name} out again: ${help}`,
-      id: `history-${event.id}`, disabled, attrs: { title: help }, onclick: () => runManage(entry.tool, false, home.home) }), null];
+    const help = `Its copies stay. Central Knot stops writing there.${resumeWords(home)}`;
+    return [button({ variant: 'link', size: 'small', label: `Leave ${name} out again`, name: `Leave ${name} out again: ${help}`,
+      id: `history-${event.id}`, disabled, attrs: { title: help }, onclick: () => void manageTool(entry.tool, false, home.home) }), null];
   }
-  if (!locked && confirmManage?.id === event.id) {
-    const text = confirmManage.ready ? `${onLine(home, entry.tool, `Managing ${name} again: `)}${resume}` : `Reading ${name}…`;
-    return [null, h('div.band.history-confirm', { role: 'group', 'aria-labelledby': `history-manage-text-${event.id}` },
-      h('span.band-text', { id: `history-manage-text-${event.id}` }, text),
-      h('span.history-confirm-actions', {},
-        button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `history-manage-cancel-${event.id}`, onclick: closeManageConfirm }),
-        confirmManage.ready ? button({ variant: 'primary', size: 'small', label: `Manage ${name}`,
-          id: `history-manage-confirm-${event.id}`, disabled: acting(), onclick: () => runManage(entry.tool, true, home.home) }) : null))];
-  }
-  return [button({ variant: 'link', size: 'small', label: 'Manage it again', name: `Manage ${name} again`,
-    id: `history-${event.id}`, disabled, onclick: () => void openManageConfirm(event.id, entry.tool) }), null];
+  const asking = manageQuestion(home, entry.tool, event.id);
+  if (asking) return [null, asking];
+  return [button({ variant: 'link', size: 'small', label: `Manage ${name}`, name: `Manage ${name}: asks what that does there first`,
+    id: `history-${event.id}`, disabled, onclick: () => void askManage(entry.tool, event.id) }), null];
 }
 
 /** What a Synchronize everything entry offers now (historyactions.ts everythingAction), from History and the libraries as the page read them. */
