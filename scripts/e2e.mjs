@@ -11908,6 +11908,8 @@ async function usageFlow() {
   if (shots) { for (const [width, height] of [[1316, 819], SMALLEST]) { await sizeTo(a, width, height); await a.shot(`usage-band-${width}`); } await fullSize(a); }
   const filesOf = names => Object.fromEntries(names.flatMap(name => [claude, codex, shared].map(root => [join(root, name), readNow(join(root, name, 'SKILL.md'))])));
   const before = filesOf(['standup', 'spare']);
+  same('before Turn these off, beside it, the profile in use it would end, its sentence on hover',
+    [await a.text('#unused-profile'), await a.run(`document.getElementById('unused-profile')?.title`)], ['Ends Everyday', 'If off, Everyday stops being the profile in use.']);
   await a.click('#turn-unused-off');
   for (let tries = 0; tries < 50 && !(await a.exists('#outcome-undo')); tries++) await wait(100);
   for (const [width, height] of [SMALLEST, [1316, 819]]) {
@@ -12422,7 +12424,8 @@ async function usageFlow() {
     await a.click('#header-refresh');
     await uxUntil(async () => !(await a.run(`(document.querySelector('.bands')?.textContent ?? '').includes('damaged')`)));
 
-    // Turn 6 off everywhere: 6 skills off, 2 plugin agents stay on, result alone names BOTH ended profiles.
+    // Turn 6 off everywhere: 6 skills off, 2 plugin agents stay on, result alone names BOTH ended profiles, as its mark did before.
+    same('ux1a: beside Turn 6 off everywhere, both profiles it would end', await a.text('#unused-profile'), 'Ends Everyday and Focus');
     await a.click('#turn-unused-off');
     await uxDone(a);
     check('ux1a: Undo appears after Turn 6 off everywhere', await uxUntil(() => a.exists('#outcome-undo')));
@@ -15517,16 +15520,25 @@ async function libraryFlow() {
   const skillsBefore = snapDirs(oSkillDirs);
   // Click 1: open Off skill bench-runner.
   await o.click(`#${rowPart('open', 'skills', 'bench-runner')}`);
-  same('Off skill opened row: status line and tool lines match keep-outs with per-tool Off switches and Claude Code warns that OpenCode reads it too',
-    [await o.text('.details-status'), await readToolLines(o)],
-    ['Off · On puts it back in 4 of 6 tools.', [
-      { tool: 'Claude Code', line: 'If on, OpenCode reads it too', word: 'Off', label: 'bench-runner in Claude Code: off. Click to turn it on in Claude Code; OpenCode reads it from there too.' },
-      { tool: 'Copilot CLI', line: '', word: 'Off', label: 'bench-runner in Copilot CLI: off. Click to turn it on in Copilot CLI only.' },
-      { tool: 'Codex', line: 'Kept out', word: 'Off', label: 'bench-runner in Codex: off. Click to turn it on in Codex only.' },
-      { tool: 'Pi', line: 'Kept out', word: 'Off', label: 'bench-runner in Pi: off. Click to turn it on in Pi only.' },
-      { tool: 'OpenCode', line: '', word: 'Off', label: 'bench-runner in OpenCode: off. Click to turn it on in OpenCode only.' },
-      { tool: 'Antigravity', line: '', word: 'Off', label: 'bench-runner in Antigravity: off. Click to turn it on in Antigravity only.' },
+  // Before the press, the profile it would end: under the status, and on every tool's switch, each of which turns it on.
+  const benchEnds = `#${rowPart('profile-ends', 'skills', 'bench-runner')}`, ends = ' Everyday stops being the profile in use.';
+  same('Off skill opened row: status line, the profile any On would end, and tool lines match keep-outs with per-tool Off switches and Claude Code warns that OpenCode reads it too',
+    [await o.text('.details-status'), await o.text(benchEnds), await readToolLines(o)],
+    ['Off · On puts it back in 4 of 6 tools.', 'If on, Everyday stops being the profile in use.', [
+      { tool: 'Claude Code', line: 'If on, OpenCode reads it too', word: 'Off', label: `bench-runner in Claude Code: off. Click to turn it on in Claude Code; OpenCode reads it from there too.${ends}` },
+      { tool: 'Copilot CLI', line: '', word: 'Off', label: `bench-runner in Copilot CLI: off. Click to turn it on in Copilot CLI only.${ends}` },
+      { tool: 'Codex', line: 'Kept out', word: 'Off', label: `bench-runner in Codex: off. Click to turn it on in Codex only.${ends}` },
+      { tool: 'Pi', line: 'Kept out', word: 'Off', label: `bench-runner in Pi: off. Click to turn it on in Pi only.${ends}` },
+      { tool: 'OpenCode', line: '', word: 'Off', label: `bench-runner in OpenCode: off. Click to turn it on in OpenCode only.${ends}` },
+      { tool: 'Antigravity', line: '', word: 'Off', label: `bench-runner in Antigravity: off. Click to turn it on in Antigravity only.${ends}` },
     ]]);
+  // legacy-skill, On and in Everyday: its Off would end Everyday; keeping it out of one tool would not, so that switch says nothing.
+  await o.click(`#${rowPart('open', 'skills', 'legacy-skill')}`);
+  same('an On row Everyday names: "If off" under its status; its tool switches, which only keep it out, add nothing',
+    [await o.text(`#${rowPart('profile-ends', 'skills', 'legacy-skill')}`), (await readToolLines(o)).filter(entry => entry.label.includes('profile in use')),
+      (await o.run(`document.getElementById(${JSON.stringify(rowPart('switch', 'skills', 'legacy-skill'))}).title`)).endsWith(ends)],
+    ['If off, Everyday stops being the profile in use.', [], true]);
+  await o.click(`#${rowPart('open', 'skills', 'bench-runner')}`);
   await shots14a(o, '01-off-open');
   // Click 2: turn bench-runner on in Claude Code only.
   await o.click(`#${rowPart('enable', 'skills', 'bench-runner', 'claude-cli')}`);
@@ -15538,9 +15550,10 @@ async function libraryFlow() {
       claudeOnlyOthers.every(rel => JSON.stringify(skillsAfterClaude[rel]) === JSON.stringify(skillsBefore[rel])),
       await o.text('.details-status'),
       await o.text('#header [data-outcome] .band-text'),
-      await o.text('#header .band-profile')],
+      await o.text('#header .band-profile'),
+      await o.exists(benchEnds)],
     [true, true, 'On in Claude Code · OpenCode has it another way · kept out of Copilot CLI, Codex, Pi and Antigravity',
-      'bench-runner is on in Claude Code. OpenCode reads it too.', 'Everyday stopped being the profile in use.']);
+      'bench-runner is on in Claude Code. OpenCode reads it too.', 'Everyday stopped being the profile in use.', false]);
   const checkFitsAt860 = async (win, expected, shotName) => {
     await sizeTo(win, 860, 600);
     if (await win.run(`document.getElementById('sidebar-toggle')?.getAttribute('aria-label') === 'Expand the sidebar'`)) await win.click('#sidebar-toggle');
@@ -15740,7 +15753,7 @@ async function libraryFlow() {
   const claudeUnmanagedOc = (await readToolLines(o)).find(entry => entry.tool === 'Claude Code');
   same('with OpenCode not managed, Claude Code Off row line and label do not mention OpenCode',
     claudeUnmanagedOc,
-    { tool: 'Claude Code', line: '', word: 'Off', label: 'bench-runner in Claude Code: off. Click to turn it on in Claude Code only.' });
+    { tool: 'Claude Code', line: '', word: 'Off', label: 'bench-runner in Claude Code: off. Click to turn it on in Claude Code only. Everyday stops being the profile in use.' });
   await o.click(`#${rowPart('enable', 'skills', 'bench-runner', 'claude-cli')}`);
   await done(o);
   await o.click('#nav-history');
@@ -15989,9 +16002,16 @@ async function selectFlow() {
   const histCount0 = historyBefore();
   await a.click('#library-select');
   for (const name of ['alpha', 'bravo', 'charlie', 'delta', 'echo']) await a.click(tick(name));
-  same('five ticked (three on, two off): buttons show their own counts', await bar(), ['5 selected', 'Turn on 2', 'Turn off 3', 'Delete…']);
+  same('five ticked (three on, two off): buttons show their own counts, and beside them the profile in use either would end',
+    [await bar(), await a.run(`document.getElementById('select-profile')?.title`)],
+    [['5 selected', 'Turn on 2', 'Turn off 3', 'Ends Everyday', 'Delete…'], 'If on or off, Everyday stops being the profile in use.']);
   same('Turn off button exists in the select bar', await a.exists('#select-turn-off'), true);
   await bulkShots('turn-bar');
+  // Deleting the three Everyday names (and two it leaves out, Off) leaves it in use with what is left: its question says nothing of it.
+  await a.click('#select-delete');
+  same('the question to delete them names no profile', [await a.exists('#select-profile-delete'), (await bar()).filter(part => /Everyday/.test(part))], [false, []]);
+  await bulkShots('delete-ask');
+  await a.click('#select-cancel');
   await a.click('#select-turn-off');
   await done();
   same('Turn off takes the three on rows, leaves delta and echo untouched, says 2 were already off and Everyday stopped being in use, ends the mode',

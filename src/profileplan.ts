@@ -16,7 +16,9 @@
 //   when a switchable Copilot CLI plugin copy covers a name, `pluginPlan` / `pluginUndo` owns it and `plugins.ts setPart` writes it;
 //   otherwise a standing rule rides on `LiveItem.copilotOff` (`switchPlan`, `inUse`, `switchPreview`, `copilotUndo`) and
 //   `profiles.ts runCopilotRules` writes it.
-// - `inUse` holds while a switch changes and holds nothing (never stored); `listedPlugins` is the one rule for which plugin rows
+// - `inUse` holds while a switch changes and holds nothing (never stored); `endedByChanges` says before a Library click which in use
+//   it would end (its changes projected over the live items: liveAfter), by the rule its result says after it (`endedProfiles`);
+//   `listedPlugins` is the one rule for which plugin rows
 //   a profile lists and `listedChanges` gives each listed changing row once with its cell words (read by the header's short line,
 //   `Changes N`, its headings and every row's cell); `switchPreview` (`PLUGIN_ITEMS_STAY`, `pluginStayNote`) gives
 //   `{ line, card, tip? }` (short header line, full menu sentence, and `(?)` card only when `card` says more than its plain form),
@@ -37,7 +39,7 @@ import { cantSwitch, hasOwnSwitch, itemOffNow, itemSaid, onNow, ownSwitch, type 
 import { takesPlugins } from './presence.ts';
 import { groupBy } from './model.ts';
 import { andList, byToolOrder, kindNouns, orList, toolNames } from './words.ts';
-import type { HarnessId, HistoryEvent, HomeView, InstalledPlugin, LibraryFacts, PluginItem, PluginSwitched, Profile } from './types.ts';
+import type { Change, HarnessId, HistoryEvent, HomeView, InstalledPlugin, LibraryFacts, PluginItem, PluginSwitched, Profile } from './types.ts';
 
 /** What every screen calls the state where no profile is in use. */
 export const NO_PROFILE = 'No profile';
@@ -508,9 +510,40 @@ export function inUseName(profiles: Profile[], live: LiveItem[], plugins: Plugin
 
 /** The profiles in use in `home`, worked out from its live and plugin items as the status bar does. */
 export function inUseInHome(home: PluginHome | undefined): Profile[] {
-  if (!home?.profiles?.profiles?.length) return [];
-  const plugins = pluginLive(home);
-  return inUse(home.profiles.profiles, homeItems(home, plugins), plugins);
+  return home?.profiles?.profiles?.length ? inUseNow(home).inUse : [];
+}
+
+/** A home's live items, its plugins' items, and the profiles in use over them: read once, for each forecast made from that read (endedByChanges). */
+export interface InUseNow { live: LiveItem[]; plugins: PluginLive[]; inUse: Profile[] }
+export function inUseNow(home: PluginHome): InUseNow {
+  const plugins = pluginLive(home), live = homeItems(home, plugins);
+  return { live, plugins, inUse: inUse(home.profiles?.profiles ?? [], live, plugins) };
+}
+
+/** One item's change in a Library click, as libraryrow.ts rowClicks makes it (types.ts Change), with the item's kind. */
+export interface ItemChange { kind: ItemKind; change: Pick<Change, 'key' | 'on' | 'deleted'> }
+/**
+ * The live items as a click's changes would leave them, in order (nothing is written): a deleted item goes; a live one takes its
+ * change's `on`; one the library doesn't hold, or holds deleted, comes in On when its change turns it on (Add). An item linked to
+ * a plugin is the plugin's (pluginLive), and is left as it is.
+ */
+function liveAfter(home: PluginHome, live: readonly LiveItem[], changes: readonly ItemChange[]): LiveItem[] {
+  let after = [...live];
+  for (const { kind, change: { key, on, deleted } } of changes) {
+    const id = itemId(kind, key), held = home[pageOfPart[kind]].library[key];
+    if (deleted) after = after.filter(item => item.id !== id);
+    else if (after.some(item => item.id === id)) after = after.map(item => (item.id === id ? { ...item, on } : item));
+    else if (on && (!held || held.deleted)) after.push({ id, kind, key, name: key, on, except: [] });
+  }
+  return after;
+}
+/**
+ * The profiles in use that a Library click would end, said before it (app.ts profilesEnding): by the rule its result says after it
+ * (endedProfiles, from app.ts profileEndedLine), between those in use now (`now`) and those in use over liveAfter.
+ */
+export function endedByChanges(home: PluginHome, changes: readonly ItemChange[], now = inUseNow(home)): Profile[] {
+  if (!now.inUse.length) return [];
+  return endedProfiles(now.inUse, inUse(home.profiles?.profiles ?? [], liveAfter(home, now.live, changes), now.plugins));
 }
 
 /** Every profile in `before` when none of its ids still matches in `after` (even if another now matches), else empty. */

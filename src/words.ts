@@ -157,6 +157,17 @@ export const throughPlugin = (tool: HarnessId, given: { plugin: string; version?
 export const HOOK_SOURCE_UNREADABLE = 'This file couldn’t be read.';
 
 /**
+ * Says before an act that it would end the profiles in use (app.ts profilesEnding; after it: profileLeftUse), "Everyday stops being
+ * the profile in use", or, while another click still waits or runs (`may`), "Everyday may stop being the profile in use". `short`:
+ * the same beside a button, "Ends Everyday" or "May end Everyday".
+ */
+export function profileStops(names: readonly string[], may: boolean, short = false): string {
+  const many = names.length > 1;
+  if (short) return `${may ? 'May end' : 'Ends'} ${andList([...names])}`;
+  return `${andList([...names])} ${may ? 'may stop' : many ? 'stop' : 'stops'} being the ${many ? 'profiles' : 'profile'} in use`;
+}
+
+/**
  * Says that profiles stopped being in use (after an act: app.ts profileEndedLine):
  * "Everyday stopped being the profile in use.", or for several "Everyday and Focus stopped being the profiles in use.".
  */

@@ -18,6 +18,7 @@
 // plugin's row: kindOf), and only a row's own kind says which it is: its words, its tools and its clicks.
 // A row's switch or Add joins the page's list of clicks (flip, pluginRowSwitch → app.ts queueClick) and is worked out in its turn,
 // perhaps while another table is drawn: its closures hold the row and the table it was clicked on, so it is worked out there.
+// Before a click that would end the profile in use, its control says so, from the very changes the click sends (changeBy, endsOf, endsSaid, endsMark).
 // The Library's Find is answered by word search in main (search.ts, asked by askFind): while it has text the list is one list,
 // best first, under one heading (foundRows), and after it the items of listed plugins installed in no managed tool, which are
 // no rows of the Library's (catalogGroup). A tool's tabs match their Find here (holdsFindText); the Files view, itself.
@@ -35,12 +36,12 @@
 import { brandMark } from './brand.ts';
 import { caughtUpNames, clockTime, dayAndTime, dayWords, defaultHistoryDays, groupBy, holdingBuild, noticeNames, plural } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
-import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, orList, pageNames, readsIt, rowNames, rowNouns,
+import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, orList, pageNames, profileStops, readsIt, rowNames, rowNouns,
   saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind } from './words.ts';
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type RowFigure, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
 import { copilotSharesYours } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
-import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, writeOff, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
+import { noteMove, acting, applyByKind, profilesEnding, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, writeOff, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, infoMark, middle, pathText, toggle, whyOff, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -2023,6 +2024,8 @@ function selectBar(t: Table, rows: (ItemRow | PluginRow)[]) {
   const toOff = turnOf(false);
   const days = state.historyDays ?? defaultHistoryDays;
   const takenOf = (list: Listed[]) => rows.filter((row): row is ItemRow => !isPluginRow(row) && list.some(each => each.id === selectId(row)));
+  // What Turn on and Turn off would end of the profiles in use, said once beside them.
+  const endsOn = endsOf(takenOf(toOn.takes), changeBy(rowClicks.on)), endsOff = endsOf(takenOf(toOff.takes), changeBy(rowClicks.off));
   const offDelete = acting() ?? !takes.length;
   const idIf = (shown: boolean, id: string) => (shown ? id : undefined);
   const why = (shown: boolean, count: number) => (count ? h('button.inline-link', { type: 'button', id: idIf(shown, 'select-why'), 'aria-expanded': String(whyShown()),
@@ -2038,11 +2041,13 @@ function selectBar(t: Table, rows: (ItemRow | PluginRow)[]) {
     disabled: acting() ?? !group.takes.length, onclick: () => turnTicked(on, takenOf(group.takes), group.already.length, group.leaves),
   });
   const counting = () => h('span.select-line', {}, h('span.select-text.select-count', {}, selectedWords(ticked.length)),
-    turnBtn(true, toOn), turnBtn(false, toOff), button({ variant: 'outline', size: 'small', label: 'Delete…', id: 'select-delete', disabled: offDelete, onclick: askNow }), why(true, leaves.length));
+    turnBtn(true, toOn), turnBtn(false, toOff), endsMark(endsOn ?? endsOff, `If ${[endsOn && 'on', endsOff && 'off'].filter(Boolean).join(' or ')}`, 'select-profile'),
+    button({ variant: 'outline', size: 'small', label: 'Delete…', id: 'select-delete', disabled: offDelete, onclick: askNow }), why(true, leaves.length));
   const question = (shown: boolean, deletes: number, cant: number) => {
     const now = button({ variant: 'outline', size: 'small', label: `Delete ${deletes}`, id: idIf(shown, 'select-delete-now'), disabled: offDelete, onclick: () => deleteTicked(takenOf(takes), leaves.length) });
     now.classList.add('delete-now');
     return h('span.select-line', {}, h('span.select-text', {}, questionWords(deletes, days), cant ? [' ', why(shown, cant)] : null),
+      shown ? endsMark(endsOf(takenOf(takes), changeBy(rowClicks.remove)), 'If deleted', 'select-profile-delete') : null,
       button({ variant: 'ghost', size: 'small', label: 'Cancel', id: idIf(shown, 'select-cancel'), onclick: () => { cancelAsk(); rerender(); } }), now);
   };
   const room = question(false, listed.filter(row => !row.cant).length, listed.filter(row => row.cant).length);
@@ -2056,7 +2061,7 @@ function selectBar(t: Table, rows: (ItemRow | PluginRow)[]) {
  */
 function deleteTicked(rows: ItemRow[], left: number) {
   stopSelecting();
-  void applyByKind(clicksByKind(rows, row => rowClicks.remove(row, itemOf(row))), deleted => deletedWords(rowNames(deleted), rowNouns(deleted.map(row => row.kind)), left),
+  void applyByKind(clicksByKind(rows, changeBy(rowClicks.remove)), deleted => deletedWords(rowNames(deleted), rowNouns(deleted.map(row => row.kind)), left),
     { now: 'deleted', withoutUndo: restoreWords, stays: true });
 }
 /**
@@ -2066,9 +2071,8 @@ function deleteTicked(rows: ItemRow[], left: number) {
  */
 function turnTicked(on: boolean, rows: ItemRow[], already: number, leaves: Listed[]) {
   stopSelecting();
-  const change = on ? rowClicks.on : rowClicks.off;
   const tools = state.home?.sync.managed ?? [];
-  void applyByKind(clicksByKind(rows, row => change(row, itemOf(row))),
+  void applyByKind(clicksByKind(rows, changeBy(on ? rowClicks.on : rowClicks.off)),
     (changed, stayed) => turnedWords(on, rowNames(changed), rowNouns(changed.map(row => row.kind)), on ? [] : stayed),
     { now: on ? 'on' : 'off', stays: true, reasons: whyLines(leaves), tail: turnTail(on, already, leaves.length),
       failedRow: (name, failed) => `${name}: ${on ? 'not' : 'still'} in ${toolsPhrase(failed, tools)}` });
@@ -2265,7 +2269,8 @@ function librarySwitch(t: Table, skill: ItemRow, id: string) {
   const item = itemOf(skill), wanted = wantedOn(skill.kind, skill.key), on = wanted ?? libraryPlace(item) === 'on', tools = toolsFor(t, skill.kind);
   const through = throughItems(t, skill);
   // Where a tool has it through a plugin with no switch for one item there, the click turns the whole plugin: said first.
-  const label = wanted !== undefined ? turningLabel(nameOf(skill), wanted) : [switchLabel(skill, item, tools, leftOutTools()), wholeWords(through, !on)].filter(Boolean).join(' ');
+  const label = wanted !== undefined ? turningLabel(nameOf(skill), wanted)
+    : [switchLabel(skill, item, tools, leftOutTools()), wholeWords(through, !on)].filter(Boolean).join(' ') + endsSaid([skill], changeBy(on ? rowClicks.off : rowClicks.on));
   return toggle({ on, partial: wanted === undefined && (isPartial(item, tools, skill) || (on && through.some(entry => !itemOn(entry)))), label, onchange: next => flip(t, skill, next), disabled: queueOff(kindStops(skill.kind)), id });
 }
 
@@ -2276,7 +2281,7 @@ function librarySwitch(t: Table, skill: ItemRow, id: string) {
  */
 function addButton(t: Table, skill: ItemRow, id: string) {
   const question = isDiffering(skill) ? (t.view.comparing === idOf(skill) ? 'open' : 'closed') : undefined;
-  const label = addLabel(skill, itemOf(skill), toolsFor(t, skill.kind), question);
+  const label = addLabel(skill, itemOf(skill), toolsFor(t, skill.kind), question) + (question || !canAdd(skill) ? '' : endsSaid([skill], changeBy(rowClicks.on)));
   return h('button.btn.outline.small.add-item', { type: 'button', id, title: label, 'aria-label': label, disabled: queueOff(kindStops(skill.kind)) || !canAdd(skill),
     onclick: (event: Event) => { event.stopPropagation(); flip(t, skill, true); } }, 'Add');
 }
@@ -2595,7 +2600,8 @@ function unusedBand(t: Table, shown: ItemRow[]) {
   const turn = off.length ? button({ variant: 'outline', size: 'micro', label: `Turn ${off.length} off everywhere`, id: 'turn-unused-off',
     // The home's gate: a kind whose own record stops its writes is skipped and named by the click (app.ts applyByKind).
     disabled: writeOff(homeStops()) || state.usage.state === 'reading', onclick: () => turnTheseOff(off) }) : null;
-  return shell(lead, turn, toggleCounted, open ? h('div.usage-more', { id: 'unused-counted' }, more.map(line => h('p', {}, line))) : null);
+  const ends = turn && endsMark(endsOf(off, changeBy(rowClicks.off)), 'If off', 'unused-profile');
+  return shell(lead, ends ? h('span.band-act', {}, ends, turn) : turn, toggleCounted, open ? h('div.usage-more', { id: 'unused-counted' }, more.map(line => h('p', {}, line))) : null);
 }
 
 /** The rows Turn these off takes of those the chip shows: all but a plugin's items and items linked to a plugin, each left to its own row (usagerow.ts leftToItsRow). */
@@ -2607,6 +2613,21 @@ export const toTurnOff = (shown: ItemRow[]) => shown.filter(row => !skippedByTur
  */
 const clicksByKind = (rows: ItemRow[], change: (row: ItemRow) => Change): Click[] => KINDS.map(kind => rows.filter(row => row.kind === kind)).filter(list => list.length)
   .map(list => ({ kind: list[0]!.kind, items: list.map(nameOf), rows: list.map(rowKey), regroups: true, changes: list.map(change), said: '' }));
+/** A row's change as one of its clicks makes it (libraryrow.ts rowClicks), from its item now: what the click sends, and what its forecast (endsOf) projects. */
+const changeBy = (make: (row: ItemRow, item: ReturnType<typeof itemOf>) => Change) => (row: ItemRow) => make(row, itemOf(row));
+/** The profiles in use a click on `rows` would end (app.ts profilesEnding), each row's change made by `change` as the click makes it. */
+const endsOf = (rows: ItemRow[], change: (row: ItemRow) => Change) => profilesEnding(rows.map(row => ({ kind: partOfPage[row.kind], change: change(row) })));
+/** After a control's own label, the profiles in use its click would end: " Everyday stops being the profile in use.", or ''. */
+const endsSaid = (rows: ItemRow[], change: (row: ItemRow) => Change) => { const ending = endsOf(rows, change); return ending ? ` ${profileStops(ending.names, ending.may)}.` : ''; };
+/**
+ * Beside a control, the profiles in use its click would end (`ending`: endsOf): "Ends Everyday", its sentence on hover after `act`
+ * ("If off, Everyday stops being the profile in use."); `whole`, that sentence itself (an opened row's line). Nothing for none.
+ */
+function endsMark(ending: ReturnType<typeof endsOf>, act: string, id: string, whole = false) {
+  if (!ending) return null;
+  const sentence = `${act}, ${profileStops(ending.names, ending.may)}.`;
+  return h('span.profile-stop', { id, title: whole ? undefined : sentence }, icon('sliders-horizontal', 12), h('span', {}, whole ? sentence : profileStops(ending.names, ending.may, true)));
+}
 /**
  * Turn these off, over rows of any kinds: each kind's rows one click with each row's own Off (libraryrow.ts rowClicks.off), the
  * kinds in turn (app.ts applyByKind: a kind that refuses is skipped and named), with one Undo that puts them all back. Its words
@@ -2614,7 +2635,7 @@ const clicksByKind = (rows: ItemRow[], change: (row: ItemRow) => Change): Click[
  * name: words.ts rowNames), then any tools still reading them another way (from applyByKind's stillRead), then that Central Knot keeps them.
  */
 export function turnTheseOff(rows: ItemRow[]) {
-  void applyByKind(clicksByKind(rows, row => rowClicks.off(row, itemOf(row))), (off, stayed) => {
+  void applyByKind(clicksByKind(rows, changeBy(rowClicks.off)), (off, stayed) => {
     const { one, many } = rowNouns(off.map(row => row.kind));
     return [`Turned off ${plural(off.length, one, many)} with no use seen in the last ${USAGE_DAYS} days: ${fewNames(rowNames(off))}.`,
       ...stayed, `Central Knot keeps ${off.length === 1 ? 'it, and turning it on puts it' : 'them, and turning one on puts it'} back as it was.`].join(' ');
@@ -2777,6 +2798,13 @@ function offNote(t: Table, list: ItemRow[]): string {
   return '';
 }
 
+/** An opened row's line, under its status, of the profiles in use its switch or Add would end: "If on, Everyday stops being the profile in use." */
+function switchEnds(skill: ItemRow) {
+  const item = inLibrary(itemOf(skill));
+  if (!item && !canAdd(skill)) return null;
+  return endsMark(endsOf([skill], changeBy(item?.on ? rowClicks.off : rowClicks.on)), !item ? 'If added' : item.on ? 'If off' : 'If on', elId('profile-ends', skill), true);
+}
+
 /** What the item is now, in one line (libraryrow.ts statusLine), and for a found one, what Synchronize everything does with it while it is on. */
 const switchStatus = (t: Table, skill: ItemRow) => statusLine(skill, itemOf(skill), toolsFor(t, skill.kind), !!state.home?.sync.syncEverything, leftOutTools());
 
@@ -2848,7 +2876,7 @@ function libraryHarnessSwitch(t: Table, lib: LibraryPage, skill: ItemRow, tool: 
     return h('span.details-tool-actions', {}, own, h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, 'Off'),
       toggle({
         on: false, disabled: writeOff(kindStops(skill.kind)), id: elId('enable', skill, tool),
-        label: `${name} in ${where}: off. Click to turn it on in ${whereOn}.`, onchange: turnHere,
+        label: `${name} in ${where}: off. Click to turn it on in ${whereOn}.${endsSaid([skill], row => rowClicks.onOnly(row, item, tool))}`, onchange: turnHere,
       })));
   }
   const said = (notIn: HarnessId[]) => lib.say.said.inHarness(name, tool, !out, notIn.includes(tool as HarnessId));
@@ -2882,7 +2910,7 @@ function libraryDelete(t: Table, lib: LibraryPage, skill: ItemRow) {
   const now = button({ variant: 'outline', size: 'micro', label: 'Delete it now', id: elId('delete-confirm', skill), disabled: writeOff(cant), onclick: run });
   now.classList.add('delete-now');
   now.title = selectOff() ?? `Delete ${name} from Central Knot now. History can restore it.`;
-  return h('span.delete-armed', {}, smallAction('Cancel', elId('delete-cancel', skill), disarm), now,
+  return h('span.delete-armed', {}, smallAction('Cancel', elId('delete-cancel', skill), disarm), endsMark(endsOf([skill], changeBy(rowClicks.remove)), 'If deleted', elId('delete-profile', skill)), now,
     h('span.delete-armed-note', { id: elId('delete-note', skill) }, lib.say.said.deleteArmed(state.historyDays ?? defaultHistoryDays)));
 }
 
@@ -2955,6 +2983,7 @@ function details(t: Table, skill: ItemRow, placement: Placement = 'row'): HTMLEl
     h('div.details-head', {},
       // The Files view's pane says it under the skill's name; the row already shows the description.
       inFiles ? null : h('p.details-status', {}, switchStatus(t, skill)),
+      switchEnds(skill),
       // Its description whole: the closed row cuts it.
       skill.description ? h('p.details-description.details-description-whole', {}, skill.description) : null,
       excerptLine(t, skill),

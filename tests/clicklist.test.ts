@@ -2380,6 +2380,23 @@ test('Row switch ending Everyday appends profileLeftUse; on then off in one run 
   assert.equal(app.outcome?.profileLine, undefined);
 });
 
+test('Before a click, a row’s switch says the profile in use it would end; while another click waits it says “may”; once read again, as the view is', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
+  const { viewWith } = profileActWorld(t, { beforeOn: { notes: true, standup: false }, profiles: [everyday] });
+  // Drawn, the page asks which tools are installed too (app.ts leftOutTools).
+  const drawable = (on: Record<string, boolean>) => { const view = viewWith(on); view.sync.present = view.sync.managed; return view; };
+  app.home = drawable({ notes: true, standup: false });
+  t.mock.method(api, 'refresh', async () => drawable({ notes: false, standup: false }));
+  const hover = (key: string) => findById(libraryTable(), `switch-skills-${key}`)?.attrs.title as string;
+  assert.match(hover('notes'), /keeps it\. Everyday stops being the profile in use\.$/, 'its Off ends Everyday');
+  assert.match(hover('standup'), / Everyday stops being the profile in use\.$/, 'its On ends Everyday');
+  flip('notes', false);
+  await settled();
+  assert.match(hover('standup'), / Everyday may stop being the profile in use\.$/, 'notes’s click, waiting, may already end it');
+  await main.pass(did('notes', false));
+  assert.doesNotMatch(hover('standup'), /profile in use/, 'Everyday is no longer in use: nothing to end');
+});
+
 test('Leaving the Library mid-run still announces the ended profile in the status bar', async t => {
   const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
   const { viewWith } = profileActWorld(t, { beforeOn: { notes: true, standup: false }, profiles: [everyday] });
