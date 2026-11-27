@@ -8,7 +8,7 @@ import { manageLocked, manageRow } from './managecard.ts';
 import { MARK_WORDS, installsIn, pluginsInstalled, takenItems, takesItemsOnly, viewStopped, type InstalledMarketPlugin } from './pluginstatus.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { pluginTitle, uninstallControl } from './pluginparts.ts';
-import { button, emptyState, h, icon, pathText, section, toggle, type Child } from './dom.ts';
+import { button, emptyState, h, icon, infoMark, pathText, section, toggle, type Child } from './dom.ts';
 import { fullToolName, plural } from './model.ts';
 import { andList, coworkWords, fileName, kindNouns, pageNames, sentence, toolNames as names } from './words.ts';
 import { agentsKeptIn, hasCowork, takesPlugins, type AgentTool } from './presence.ts';
@@ -89,23 +89,31 @@ const appLine = (app: DesktopApp) => `${app.name}${app.version ? ` ${app.version
 
 // ---------- Every harness ----------
 
-type Count = { value: string; note?: string; faint?: boolean };
-/** One line of a card's counts: what, how many, and a short note. `faint` for a count that is not there or not known. */
-function countRow(label: string, count: Count | null) {
+type Count = { value: string; note?: string; faint?: boolean; reason?: { id: string; text: string }; describe?: string };
+/**
+ * One line of a card's counts: what, how many, and a short note. An empty `value` (a filename) lets the note span both value
+ * and note tracks; a capability `reason` turns the dash into a keyboard-accessible detail button; a bare count carries `describe`.
+ */
+function countRow(label: string, count: Count | null, tool: HarnessId) {
   if (!count) return null;
-  const { value, note, faint = false } = count;
-  return h('div.harness-count', {}, h('span.harness-count-label', {}, label), h(`span.harness-count-value${faint ? '.tone-faint' : ''}`, {}, value), h('span.harness-count-note', {}, note ?? ''));
+  const { value, note, faint = false, reason, describe } = count;
+  if (!value) return h('div.harness-count', {}, h('span.harness-count-label', {}, label), h('span.harness-count-note.harness-count-span', {}, note ?? ''));
+  const shown = reason
+    ? h('span.harness-count-value.tone-faint', {}, infoMark(reason.id, `${names[tool]} ${label}`, reason.text, { face: value, look: 'harness-count-dash' }))
+    : h(`span.harness-count-value${faint ? '.tone-faint' : ''}`, { 'aria-description': describe }, value);
+  return h('div.harness-count', {}, h('span.harness-count-label', {}, label), shown, h('span.harness-count-note', {}, note ?? ''));
 }
 
 function kindCount(home: HomeView, { kind, supported, total, plugins, on }: ReturnType<typeof tally>, tool: HarnessId): Count | null {
-  if (!supported) return { value: '—', note: kindNotUsed(tool, kind), faint: true };
+  if (!supported) return { value: '—', reason: { id: `harness-${tool}-${kind}-reason`, text: kindNotUsed(tool, kind) }, faint: true };
   // Unread comes before any total, as on the Overview; known zero is omitted.
   if (home[kind]?.unread?.includes(tool)) return { value: '?', note: 'couldn’t be read', faint: true };
   if (!total) return null;
   // A plugin's items are counted and said apart: they are never synced.
   const own = total - plugins;
   const mine = !own ? '' : on === own ? (plugins ? `${own} synced` : '') : !on ? `${own} not synced` : `${on} synced · ${own - on} not synced`;
-  return { value: String(total), note: [mine, plugins ? `${plugins} from plugins` : ''].filter(Boolean).join(' · ') };
+  const note = [mine, plugins ? `${plugins} from plugins` : ''].filter(Boolean).join(' · ');
+  return { value: String(total), note, describe: note ? undefined : plural(total, `synced ${kindNouns[kind].one}`, `synced ${kindNouns[kind].many}`) };
 }
 
 function instructionCount(tool: HarnessId): Count {
@@ -115,16 +123,16 @@ function instructionCount(tool: HarnessId): Count {
   const file = instructionOf(tool);
   if (!file) return { value: '—', faint: true };
   if (!file.exists) return { value: '', note: 'no file yet' };
-  // Its name alone, so the note keeps to one line on a narrow card; an empty file says so.
+  // Its name alone spans the value and note tracks; an empty file says so.
   return { value: '', note: file.text.trim() ? fileName(file.path) : `${fileName(file.path)} (empty)` };
 }
 
 /** A tool's plugins on its card (pluginstatus.ts pluginsInstalled, the Overview's count too). */
 function pluginCount(tool: HarnessId): Count | null {
   const plugins = pluginsInstalled(state.home, tool);
-  if (plugins.state === 'unsupported') return { value: '—', note: takesItemsOnly(names[tool]), faint: true };
+  if (plugins.state === 'unsupported') return { value: '—', reason: { id: `harness-${tool}-plugins-reason`, text: takesItemsOnly(names[tool]) }, faint: true };
   if (plugins.state === 'unknown') return { value: '?', note: 'its record couldn’t be read', faint: true };
-  return plugins.count ? { value: String(plugins.count), note: 'installed' } : null;
+  return plugins.count ? { value: String(plugins.count), describe: plural(plugins.count, 'installed plugin') } : null;
 }
 
 /** What needs a look on a card, each a link: differing copies (to that kind's tab, showing only those) and read problems (to About). */
@@ -158,23 +166,24 @@ function summaryCard(snapshot: Snapshot, home: HomeView, showManageInfo = false)
   // On this computer each card says how its tool was found; a sample or chosen folder is said once, in the note above.
   const status = home.mode === 'actual' ? h(`span.harness-card-status${installed ? '' : '.tone-faint'}`, {}, detectionLine(snapshot, home)) : null;
   const path = h('span.harness-card-path', { title: snapshot.root }, h('span.mono', {}, shownPath(snapshot.root)));
-  if (installed && !here) return h('div.card.harness-card.harness-card-out', { id: `harness-${tool}`, 'aria-label': `${names[tool]}: not managed` },
-    h('div.harness-card-main', {}, head, status, h('span.harness-card-next', {}, `Left out: Central Knot writes nothing in ${names[tool]}, and shows it on no other page but History.`)), manageRow(home, tool), path);
-  if (!here) return h('div.card.harness-card.harness-card-missing', { id: `harness-${tool}`, 'aria-label': `${names[tool]}: not found` },
+  const foot = (manage: HTMLElement) => h('div.harness-card-foot', {}, manage, path);
+  if (installed && !here) return h('div.card.harness-card.harness-card-out', { id: `harness-card-${tool}`, 'aria-label': `${names[tool]}: not managed` },
+    h('div.harness-card-main', {}, head, status, h('span.harness-card-next', {}, `Left out: Central Knot writes nothing in ${names[tool]}, and shows it on no other page but History.`)), foot(manageRow(home, tool)));
+  if (!here) return h('div.card.harness-card.harness-card-missing', { id: `harness-card-${tool}`, 'aria-label': `${names[tool]}: not found` },
     // When no tool at all was found, the note above already says to install one; each card need not repeat it.
     h('div.harness-card-main', {}, head, status, home.sync.present.length ? h('span.harness-card-next', {}, `Install ${names[tool]}, then Refresh.`) : null), path);
   const kinds = KINDS.map(kind => tally(home, kind, tool));
-  const kindRows = kinds.map(entry => countRow(tabLabel(entry.kind), kindCount(home, entry, tool))).filter((row): row is HTMLElement => !!row);
-  const extraRows = [countRow(tabLabel('instructions'), instructionCount(tool)), countRow(tabLabel('plugins'), pluginCount(tool)),
+  const kindRows = kinds.map(entry => countRow(tabLabel(entry.kind), kindCount(home, entry, tool), tool)).filter((row): row is HTMLElement => !!row);
+  const extraRows = [countRow(tabLabel('instructions'), instructionCount(tool), tool), countRow(tabLabel('plugins'), pluginCount(tool), tool),
     // Cowork comes with Claude desktop and is no tool here: it uses the Claude account's plugins, said once on Claude Code's card.
-    tool === 'claude-cli' && hasCowork(home.snapshots) ? countRow('Cowork', { value: '—', note: coworkWords.card, faint: true }) : null]
+    tool === 'claude-cli' && hasCowork(home.snapshots) ? countRow('Cowork', { value: '—', note: coworkWords.card, faint: true }, tool) : null]
     .filter((row): row is HTMLElement => !!row);
   const groups = [kindRows, extraRows].filter(rows => rows.length);
   // Two groups (the three kinds, then its file and plugins), which sit side by side on a wide card.
   const body = [head, status, groups.length ? h('span.harness-counts', {}, groups.map(rows => h('span.harness-count-group', {}, rows))) : null];
-  return h('div.card.harness-card', {},
+  return h('div.card.harness-card', { id: `harness-card-${tool}` },
     h('div.harness-card-main', {}, body),
-    attentionLinks(snapshot, kinds), manageRow(home, tool, showManageInfo), path);
+    attentionLinks(snapshot, kinds), foot(manageRow(home, tool, showManageInfo)));
 }
 
 /**

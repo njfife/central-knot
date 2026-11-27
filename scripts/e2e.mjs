@@ -922,9 +922,9 @@ async function harnessFlow() {
     [openedByKey, returnedFocus], ['Claude Code', { id: 'harness-claude-cli', tag: 'BUTTON', head: true, visible: true }]);
   // Manage switch never navigates, and an unmanaged card's heading and body never navigate.
   await a.click('#manage-codex-cli');
-  const codexOut = await a.exists('.harness-cards') && !(await a.exists('#harness-back')) && !(await a.exists('button#harness-codex-cli'));
-  await a.click('#harness-codex-cli .harness-card-head');
-  await a.click('#harness-codex-cli .harness-card-main');
+  const codexOut = await a.exists('.harness-cards') && !(await a.exists('#harness-back')) && !(await a.exists('#harness-codex-cli')) && await a.exists('#harness-card-codex-cli.harness-card-out');
+  await a.click('#harness-card-codex-cli .harness-card-head');
+  await a.click('#harness-card-codex-cli .harness-card-main');
   const outStayed = await a.exists('.harness-cards') && !(await a.exists('#harness-back'));
   await a.click('#manage-codex-cli');
   const managedBack = await a.exists('.harness-cards') && !(await a.exists('#harness-back')) && await a.exists('button#harness-codex-cli.harness-card-head');
@@ -984,16 +984,134 @@ async function harnessFlow() {
   // Another home: the instruction file shown is that home's, not the practice copy's.
   await a.click('#home-actual');
   await a.click('#nav-harnesses');
-  // A missing tool's card has no heading button and clicking its heading or body never navigates.
-  const piMissing = await a.exists('#harness-pi-cli.harness-card-missing') && !(await a.exists('button#harness-pi-cli'));
-  await a.click('#harness-pi-cli .harness-card-head');
-  await a.click('#harness-pi-cli .harness-card-main');
+  // A missing tool's card has a distinct wrapper id, no heading button, and clicking its heading or body never navigates.
+  const piMissing = await a.exists('#harness-card-pi-cli.harness-card-missing') && !(await a.exists('#harness-pi-cli'));
+  await a.click('#harness-card-pi-cli .harness-card-head');
+  await a.click('#harness-card-pi-cli .harness-card-main');
   same('a missing tool’s card has no heading button and clicking it never navigates', [piMissing, await a.exists('.harness-cards') && !(await a.exists('#harness-back'))], [true, true]);
   await a.click('button#harness-claude-cli.harness-card-head');
   await a.click('#harness-tab-instructions');
   check('after a home switch, instructions are that home’s', (await a.text('#harness-body') ?? '').includes('~/.claude/CLAUDE.md'), await a.text('#harness-body'));
   same('no page errors, harnesses', a.pageErrors, []);
   await a.quit();
+
+  // Six-tool Harnesses cards: compact footer brings all six Manage switches above the fold at 1316×822, capability dashes
+  // hold reasons behind keyboard-accessible cards, filenames span value+note, bare counts describe what they count, unread
+  // stays distinct from — and zero, and clicking outside the heading never navigates.
+  const sHome = join(scratch, 'harness-six-home'), sData = join(scratch, 'harness-six-data');
+  const sCli = (name, version) => { const p = join(sHome, '.local/bin', name); mkdirSync(join(p, '..'), { recursive: true }); writeFileSync(p, `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(p, 0o755); };
+  for (const [name, version] of [['claude', '2.1.330 (Claude Code)'], ['copilot', '1.0.114'], ['codex', 'codex-cli 0.171.0'], ['pi', 'pi 1.6.0'], ['opencode', '1.19.6'], ['agy', '1.5.14']]) sCli(name, version);
+  for (const dir of ['.claude/skills', '.copilot/skills', '.codex/skills', '.pi/agent/skills', '.config/opencode/skills', '.gemini/config/skills']) {
+    skill(join(sHome, dir), 'notes', text('notes', 'Notes.'));
+    skill(join(sHome, dir), 'review', text('review', 'Review.'));
+  }
+  for (const dir of ['.claude/skills', '.copilot/skills', '.codex/skills']) skill(join(sHome, dir), 'local-draft', text('local-draft', 'Draft.'));
+  skill(join(sHome, '.claude/skills'), 'clash', text('clash', 'Claude copy.'));
+  skill(join(sHome, '.copilot/skills'), 'clash', text('clash', 'Copilot copy.'));
+  skill(join(sHome, '.config/opencode/skills'), 'clash', text('clash', 'OpenCode copy.'));
+  const sMcp = `${JSON.stringify({ mcpServers: { docs: { command: 'npx', args: ['-y', 'docs'] } } }, null, 2)}\n`;
+  writeFileSync(join(sHome, '.claude.json'), sMcp);
+  writeFileSync(join(sHome, '.copilot/mcp-config.json'), sMcp);
+  writeFileSync(join(sHome, '.codex/config.toml'), '[mcp_servers.docs]\ncommand = "npx"\nargs = ["-y", "docs"]\n');
+  writeFileSync(join(sHome, '.pi/agent/mcp.json'), sMcp);
+  writeFileSync(join(sHome, '.config/opencode/opencode.json'), `${JSON.stringify({ mcp: { docs: { type: 'local', command: ['npx', '-y', 'docs'] } } }, null, 2)}\n`);
+  writeFileSync(join(sHome, '.gemini/config/mcp_config.json'), sMcp);
+  const sAgent = name => `---\nname: ${name}\ndescription: The ${name} agent.\n---\n\nPrompt.\n`;
+  for (const [dir, ext] of [['.claude/agents', '.md'], ['.copilot/agents', '.agent.md'], ['.codex/agents', '.md'], ['.config/opencode/agents', '.md']]) {
+    mkdirSync(join(sHome, dir), { recursive: true });
+    writeFileSync(join(sHome, dir, `helper${ext}`), sAgent('helper'));
+  }
+  writeFileSync(join(sHome, '.claude/CLAUDE.md'), '# Claude\n');
+  writeFileSync(join(sHome, '.copilot/copilot-instructions.md'), '# Copilot\n');
+  for (const rel of ['.codex/AGENTS.md', '.pi/agent/AGENTS.md', '.config/opencode/AGENTS.md', '.gemini/config/AGENTS.md']) writeFileSync(join(sHome, rel), '# Agents\n');
+  writeClaudeInstall(sHome, 'team', 'kit-one', '1.0.0', { 'skills/p-one/SKILL.md': text('p-one', 'One.'), '.mcp.json': JSON.stringify({ mcpServers: { 'p-mcp': { command: 'node', args: ['-e', '0'] } } }) });
+  const kitTwo = join(sHome, '.claude/plugins/cache/team/kit-two/1.0.0');
+  mkdirSync(join(kitTwo, 'skills/p-two'), { recursive: true });
+  writeFileSync(join(kitTwo, 'skills/p-two/SKILL.md'), text('p-two', 'Two.'));
+  const claudeInst = JSON.parse(readFileSync(join(sHome, '.claude/plugins/installed_plugins.json'), 'utf8'));
+  claudeInst.plugins['kit-two@team'] = [{ scope: 'user', installPath: kitTwo, version: '1.0.0' }];
+  writeFileSync(join(sHome, '.claude/plugins/installed_plugins.json'), JSON.stringify(claudeInst));
+  const copOne = join(sHome, '.copilot/installed-plugins/team/kit-one'), copTwo = join(sHome, '.copilot/installed-plugins/team/kit-two');
+  mkdirSync(join(copOne, 'skills/p-one'), { recursive: true });
+  mkdirSync(join(copTwo, 'skills/p-two'), { recursive: true });
+  writeFileSync(join(copOne, 'skills/p-one/SKILL.md'), text('p-one', 'One.'));
+  writeFileSync(join(copTwo, 'skills/p-two/SKILL.md'), text('p-two', 'Two.'));
+  writeFileSync(join(sHome, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'kit-one', marketplace: 'team', version: '1.0.0', cache_path: copOne, enabled: true }, { name: 'kit-two', marketplace: 'team', version: '1.0.0', cache_path: copTwo, enabled: true }] }));
+  mkdirSync(sData, { recursive: true });
+  const s = await launch(sData, flag('--electron') ? ['--as-released'] : [], sHome, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' });
+  try {
+    await s.run(`window.centralKnot.applySkills([{ key: 'notes', on: true, except: [] }, { key: 'review', on: true, except: [] }], false, ${JSON.stringify(sHome)})`);
+    await s.run(`window.centralKnot.applyServers([{ key: 'docs', on: true, except: [] }], false, ${JSON.stringify(sHome)})`);
+    await s.run(`window.centralKnot.applyAgents([{ key: 'helper', on: true, except: [] }], false, ${JSON.stringify(sHome)})`);
+    await s.click('#header-refresh');
+    await s.click('#nav-harnesses');
+    // Clicking blank space beside the heading button inside .harness-card-main does not navigate; keyboard Enter + Back returns focus cleanly clear of the version line.
+    const besideHead = await s.run(`(() => { const main = document.querySelector('#harness-card-claude-cli .harness-card-main').getBoundingClientRect(), head = document.getElementById('harness-claude-cli').getBoundingClientRect(); return { x: Math.round(main.right - 12), y: Math.round(head.top + head.height / 2), wider: main.right - head.right > 20 }; })()`);
+    check('the heading button hugs its title rather than spanning the full card', besideHead.wider, besideHead);
+    for (const type of ['mousePressed', 'mouseReleased']) await s.send('Input.dispatchMouseEvent', { type, x: besideHead.x, y: besideHead.y, button: 'left', clickCount: 1 });
+    await s.settle();
+    check('clicking empty space beside the heading does not navigate', await s.exists('.harness-cards') && !(await s.exists('#harness-back')));
+    const pressKeySix = async (key, code, keyCode, extra = {}) => {
+      for (const type of ['keyDown', 'keyUp']) await s.send('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode: keyCode, ...(type === 'keyDown' ? extra : {}) });
+      await s.settle();
+    };
+    await s.run(`document.getElementById('harness-claude-cli')?.focus()`);
+    await pressKeySix('Enter', 'Enter', 13, { text: '\r' });
+    await s.run(`document.getElementById('harness-back')?.focus()`);
+    await pressKeySix('Enter', 'Enter', 13, { text: '\r' });
+    const ringClear = await s.run(`(() => { const head = document.getElementById('harness-claude-cli'), st = document.querySelector('#harness-card-claude-cli .harness-card-status'); return { focused: document.activeElement?.id, visible: !!head?.matches(':focus-visible'), gap: Math.round(st.getBoundingClientRect().top - head.getBoundingClientRect().bottom) }; })()`);
+    check('keyboard return focuses the heading with room clear of the version line', ringClear.focused === 'harness-claude-cli' && ringClear.visible && ringClear.gap >= 6, ringClear);
+    // Compact footer, bare counts' accessible descriptions, no "installed" next to plugin count, and capability dashes.
+    const countsCheck = await s.run(`(() => {
+      const row = (tool, label) => [...document.querySelectorAll('#harness-card-' + tool + ' .harness-count')].find(r => r.querySelector('.harness-count-label')?.textContent === label);
+      const claudeP = row('claude-cli', 'Plugins'), piS = row('pi-cli', 'Skills'), piM = row('pi-cli', 'MCP servers');
+      const agA = row('antigravity-cli', 'Agents'), piP = row('pi-cli', 'Plugins');
+      const agBtn = document.getElementById('harness-antigravity-cli-agents-reason'), piBtn = document.getElementById('harness-pi-cli-plugins-reason');
+      return {
+        claudePlugins: [claudeP?.querySelector('.harness-count-value')?.textContent, claudeP?.querySelector('.harness-count-note')?.textContent, claudeP?.querySelector('.harness-count-value')?.getAttribute('aria-description')],
+        piSkills: [piS?.querySelector('.harness-count-value')?.textContent, piS?.querySelector('.harness-count-value')?.getAttribute('aria-description')],
+        piMcp: [piM?.querySelector('.harness-count-value')?.textContent, piM?.querySelector('.harness-count-value')?.getAttribute('aria-description')],
+        inlineNotes: [agA?.querySelector('.harness-count-note')?.textContent, piP?.querySelector('.harness-count-note')?.textContent],
+        dashBoxes: [agBtn?.getBoundingClientRect(), piBtn?.getBoundingClientRect()].map(r => r ? [Math.round(r.width) >= 20, Math.round(r.height) >= 20] : null),
+      };
+    })()`);
+    same('plugin count hides installed, bare counts identify what they count, and capability dashes have measurable targets with no inline prose', countsCheck, {
+      claudePlugins: ['2', '', '2 installed plugins'],
+      piSkills: ['2', '2 synced skills'],
+      piMcp: ['1', '1 synced MCP server'],
+      inlineNotes: ['', ''],
+      dashBoxes: [[true, true], [true, true]],
+    });
+    // Check 860×528, 1316×822 (all six Manage switches above fold), and wide window (1728×1117), plus copilot-instructions.md on one line and keyboard-accessible dash cards.
+    for (const [w, h] of [SMALLEST, [1316, 822], [1728, 1117]]) {
+      await sizeTo(s, w, h);
+      same(`six-tool Harnesses has nothing cut off at ${w}×${h}`, await s.run(CUT_OFF), []);
+      const copLines = await s.run(`(() => { const note = [...document.querySelectorAll('#harness-card-copilot-cli .harness-count-note')].find(n => n.textContent === 'copilot-instructions.md'); if (!note || !note.classList.contains('harness-count-span')) return -1; const r = document.createRange(); r.selectNodeContents(note); return new Set([...r.getClientRects()].map(box => Math.round(box.top))).size; })()`);
+      same(`copilot-instructions.md spans value+note on one line at ${w}×${h}`, copLines, 1);
+      if (w === 1316) {
+        const fold = await s.run(`(() => { const top = document.getElementById('status').getBoundingClientRect().top; const sw = [...document.querySelectorAll('[id^="manage-"][role="switch"]')]; return { count: sw.length, allAboveFold: sw.every(el => el.getBoundingClientRect().bottom <= top + 1), inFoot: sw.every(el => !!el.closest('.harness-card-foot')) }; })()`);
+        same('at 1316×822 all six Manage switches sit in compact footers above the fold', fold, { count: 6, allAboveFold: true, inFoot: true });
+      }
+    }
+    await sizeTo(s, ...SMALLEST);
+    await s.run(`document.getElementById('harness-antigravity-cli-agents-reason').scrollIntoView({ block: 'center' })`);
+    await checkCard(s, 'harness-antigravity-cli-agents-reason', 'Agents aren’t handled for Antigravity', 'Antigravity Agents capability dash card at 860×528');
+    await checkCard(s, 'harness-pi-cli-plugins-reason', 'Pi takes a plugin’s items, not the plugin', 'Pi Plugins capability dash card at 860×528');
+    check('clicking capability dashes never navigated away from Harnesses', await s.exists('.harness-cards') && !(await s.exists('#harness-back')));
+    // Keyboard Enter opens the dash card and Escape closes it, keeping focus on the dash.
+    await s.run(`document.getElementById('harness-antigravity-cli-agents-reason').focus()`);
+    await pressKeySix('Enter', 'Enter', 13, { text: '\r' });
+    const dashKeyOpen = await s.run(`!!document.getElementById('harness-antigravity-cli-agents-reason-card')?.matches(':popover-open')`);
+    await pressKeySix('Escape', 'Escape', 27);
+    const dashKeyClose = await s.run(`[!document.getElementById('harness-antigravity-cli-agents-reason-card')?.matches(':popover-open'), document.activeElement?.id]`);
+    same('keyboard Enter opens the capability dash card and Escape closes it keeping focus', [dashKeyOpen, dashKeyClose], [true, [true, 'harness-antigravity-cli-agents-reason']]);
+    // Unread kind stays ? with its note, distinct from — and omitted zero.
+    writeFileSync(join(sHome, '.copilot/mcp-config.json'), '{ broken json');
+    await s.click('#header-refresh');
+    const unreadRow = await s.run(`(() => { const r = [...document.querySelectorAll('#harness-card-copilot-cli .harness-count')].find(el => el.querySelector('.harness-count-label')?.textContent === 'MCP servers'); return [r?.querySelector('.harness-count-value')?.textContent, r?.querySelector('.harness-count-note')?.textContent]; })()`);
+    same('an unread kind keeps ? and its reason distinct from — and zero', unreadRow, ['?', 'couldn’t be read']);
+    same('no page errors, six-tool harnesses', s.pageErrors, []);
+  } finally { await s.quit(); }
 
   // Heading info marks, cards, live lines, keyboard access, pinned rows and stable heading heights on Library and each tool tab.
   const hHome = join(scratch, 'heading-notes-home'), hData = join(scratch, 'heading-notes-data'), hReal = join(scratch, 'heading-notes-real');
@@ -1147,6 +1265,15 @@ async function manageFlow() {
   await a.click(`#${rowPart('add', 'skills', 'standup')}`);
   await a.click('#nav-harnesses');
   same('every installed tool’s card has its Manage switch, on', await switches(), ['manage-claude-cli:true', 'manage-copilot-cli:true', 'manage-codex-cli:true']);
+  await sizeTo(a, 1316, 822);
+  const footLayout = await a.run(`(() => {
+    const cards = [...document.querySelectorAll('.harness-card')];
+    const feet = cards.map(c => c.querySelector('.harness-card-foot'));
+    const tops = feet.map(f => Math.round(f?.querySelector('[role="switch"]')?.getBoundingClientRect().top ?? -1));
+    return { allFoot: feet.every(f => f && f.querySelector('.harness-manage') && f.querySelector('.harness-card-path')), aligned: new Set(tops).size === 1 };
+  })()`);
+  same('Manage switches sit in compact footers aligned across the row at 1316×822', footLayout, { allFoot: true, aligned: true });
+  await fullSize(a);
   same('only the first managed card carries Managed (?) with its card text, and no managed card keeps a standing line or dangling aria-describedby',
     await a.run(`(() => {
       const marks = [...document.querySelectorAll('.harness-manage .info-mark')].map(el => [el.id, el.closest('.harness-manage')?.querySelector('[role="switch"]')?.id]);
@@ -1178,9 +1305,12 @@ async function manageFlow() {
   await a.click('#manage-codex-cli');
   check('the band says Codex is left out and its copies stay', (await a.text('.band-done .band-text') ?? '').startsWith('Codex is left out: Central Knot writes nothing there now.'), await a.text('.band-done'));
   same('turning it off wrote nothing in Codex', codex(), before);
-  const card = await a.text('#harness-codex-cli');
-  check('its card says it is left out, with its switch, opens nothing, and never says Not found or Install', card.includes('Not managed') && card.includes('Left out') && !/Not found|Install/.test(card) && !(await a.exists('button#harness-codex-cli')), card);
+  const card = await a.text('#harness-card-codex-cli');
+  check('its card says it is left out, with its switch, opens nothing, and never says Not found or Install', card.includes('Not managed') && card.includes('Left out') && !/Not found|Install/.test(card) && !(await a.exists('#harness-codex-cli')), card);
   same('its line says what turning it on would do without the cut Instructions sentence', await a.text('#manage-codex-cli-line'), 'On: changes no item in Codex; shows 2 found items under Found.');
+  await sizeTo(a, 1316, 822);
+  same('left-out card’s rejoin line sits full width above its path with nothing cut off at 1316×822', [await a.run(CUT_OFF), await a.run(`(() => { const line = document.getElementById('manage-codex-cli-line').getBoundingClientRect(), path = document.querySelector('#harness-card-codex-cli .harness-card-path').getBoundingClientRect(); return line.bottom <= path.top + 1; })()`)], [[], true]);
+  await fullSize(a);
   await shotAt(a, 'harnesses-left-out-860-light', SMALLEST, 'light');
   await fitsAtMinimum(a, 'Harnesses with a tool left out');
   await openKind(a, 'skills');
@@ -6272,8 +6402,8 @@ async function fewToolsFlow() {
   await openKind(a, 'skills');
   check('the tool with only a folder has no mark', await a.exists('.tool-mark[data-tool="pi-cli"]') && !(await a.exists('[data-tool="codex-cli"], #tool-codex-cli')));
   await a.click('#nav-harnesses');
-  const folderOnly = await a.text('#harness-codex-cli');
-  check('Harnesses says its folder is all that is here, and its card opens nothing', folderOnly.includes('Not found · only its folder is here') && folderOnly.includes('Install Codex, then Refresh.') && !(await a.exists('button#harness-codex-cli')), folderOnly);
+  const folderOnly = await a.text('#harness-card-codex-cli');
+  check('Harnesses says its folder is all that is here, and its card opens nothing', folderOnly.includes('Not found · only its folder is here') && folderOnly.includes('Install Codex, then Refresh.') && !(await a.exists('#harness-codex-cli')), folderOnly);
   await fitsAtMinimum(a, 'Harnesses with a tool that left only its folder');
   await a.shot('folder-only-harness');
   rmSync(join(home, '.codex'), { recursive: true, force: true });
@@ -6881,7 +7011,10 @@ async function otherAppsFlow() {
   check('T3 Code and VS Code are named under the cards, each with its version (a nightly build’s shortened) and what it means here', /T3 Code 0\.1\.9-nightlyRuns your tools for you\./.test(also) && /VS Code 1\.99\.0Its built-in Copilot lists skills/.test(also), also);
   const pi = await a.text('.harness-card:has(#harness-pi-cli)') ?? '';
   check('pi-gui alone makes Pi a tool here, named as the third-party app it is, with no CLI', pi.includes('pi-gui (third-party) 0.4.0 · no CLI found') && await a.exists('button#harness-pi-cli'), pi);
+  await checkCard(a, 'harness-pi-cli-plugins-reason', 'Pi takes a plugin’s items, not the plugin', 'desktop-only Pi keeps its Plugins capability dash');
+  same('missing cards on the same page use distinct wrapper ids with no heading button id', [await a.exists('#harness-card-codex-cli.harness-card-missing'), await a.exists('#harness-codex-cli')], [true, false]);
   await fitsAtMinimum(a, 'Harnesses with other apps named');
+  for (const [w, h] of [[1316, 822], [1728, 1117]]) { await sizeTo(a, w, h); same(`Harnesses with other apps has nothing cut off at ${w}×${h}`, await a.run(CUT_OFF), []); }
   if (shots) for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); await a.shot(`other-apps-${width}`); }
   await fullSize(a);
   same('no page errors, other apps', a.pageErrors, []);
