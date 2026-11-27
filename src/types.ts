@@ -253,6 +253,10 @@ export interface DesktopApi {
   onSessionCostsChanged(callback: (view: SessionCostsView) => void): void;
   /** Runs one tool's own MCP list command for the open home and reads its answer of the servers `names` (mcpsigninrun.ts checkSignin); null for another home, or a tool with no such command. */
   checkSignin(tool: HarnessId, home: string, names: string[]): Promise<SigninAnswer | null>;
+  /** Starts `tool`'s own sign-in for row `row`'s server, the copy the cell showed (`copy`: mcpsignin.ts cellKey), and answers how it ended (mcpsigninrun.ts startSignin). */
+  startSignin(tool: HarnessId, home: string, row: string, copy: string): Promise<SigninEnd>;
+  /** Stops the sign-in under way, if the open home is `home` (mcpsigninrun.ts stopSignin). */
+  stopSignin(home: string): Promise<void>;
   /**
    * Word search over what the Library holds and the items of listed plugins installed in no managed tool (search.ts), answered
    * beside main's queue from the index last published; `shown`: how many of those plugins' items the page draws (search.ts drawnAtOnce).
@@ -1076,6 +1080,11 @@ export interface ToolUsage {
 export type SigninSaid = { is: 'no-sign-in' | 'signed-in' | 'connected' | 'needs-sign-in' | 'not-known' } | { is: 'unreachable'; why: string } | { is: 'unread'; line: string };
 /** One tool's MCP sign-in check: what it said of each server, by its own name for it; or that it couldn't be run or didn't end in time; or the first line of an answer in a shape not known. */
 export type SigninAnswer = { servers: Record<string, SigninSaid> } | { failed: 'missing' | 'timeout' } | { unreadable: string };
+/**
+ * How a sign-in ended (mcpsigninrun.ts startSignin): its tool ended with exit code 0; its tool ended otherwise (`unfinished`: the
+ * last line it printed); it was stopped, or no command line was found (`failed`); or main started nothing (`notStarted`: why).
+ */
+export type SigninEnd = { signedIn: true } | { unfinished: string } | { failed: 'timeout' | 'stopped' | 'missing' } | { notStarted: string };
 /** One reading of a home's session history, made when the page collects usage (app.ts collectUsage): when, and every tool's. */
 export interface UsageReading { at: string; tools: ToolUsage[] }
 

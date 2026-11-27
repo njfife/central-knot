@@ -12,10 +12,13 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } f
 import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { answerFor, askedNow, cannotRun, cellSays, checkLine, connectedCard, followView, grouped, ownTime, readAnswer, signInCommand, signinRows, type SigninCell, type SigninChecks, type SigninRow } from '../src/mcpsignin.ts';
+import { createServer } from 'node:net';
+import { answerFor, askedNow, cannotRun, cellKey, cellNow, cellSays, checkLine, connectedCard, followView, grouped, lastSaid, ownTime, readAnswer, signInArgs, signInCommand, signinKey, signinRows, signinStarted,
+  offersSignin, type SigninCell, type SigninChecks, type SigninRow, type SigninRun } from '../src/mcpsignin.ts';
 import { harnessIds } from '../src/harnesses.ts';
-import { checkLimit, checkSignin, stopChecks } from '../src/mcpsigninrun.ts';
-import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, SigninAnswer } from '../src/types.ts';
+import { clockTime } from '../src/model.ts';
+import { checkLimit, checkSignin, signinRefusal, startSignin, stopChecks, stopSignin, type SigninAsk, type SigninNow } from '../src/mcpsigninrun.ts';
+import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, SigninAnswer, SigninEnd } from '../src/types.ts';
 import { standIn } from './standin.ts';
 
 const captured = (file: string) => readFileSync(join(import.meta.dirname, 'mcpsignin', file), 'utf8');
@@ -182,7 +185,7 @@ const posixShellSkip = windows && 'POSIX /bin/sh quoting check; covered on macOS
 
 test('The tool’s own sign-in command, with the server as one literal argument a shell accepts', async t => {
   assert.equal(signInCommand('claude-cli', 'plugin:tracker:issues'), 'claude mcp login plugin:tracker:issues');
-  assert.equal(signInCommand('codex-cli', 'oauth'), 'codex mcp login oauth');
+  assert.equal(signInCommand('codex-cli', 'oauth'), 'codex mcp login -- oauth');
   assert.equal(signInCommand('pi-cli', 'team.docs_v2@corp/one-two'), 'pi mcp login team.docs_v2@corp/one-two');
   assert.equal(signInCommand('opencode-cli', 'my server'), 'opencode mcp auth \'my server\'');
   await t.test('POSIX /bin/sh round-trips every quoted server name', { skip: posixShellSkip }, () => {
@@ -191,6 +194,114 @@ test('The tool’s own sign-in command, with the server as one literal argument 
       assert.equal(said.stdout, `4|${name}`, name);
     }
   });
+});
+
+// ---------- A sign-in started on a click: its cell ----------
+
+/** Sign-ins as the page keeps them, each in its cell's place (mcpsignin.ts SigninRun). */
+const kept = (...runs: SigninRun[]) => Object.fromEntries(runs.map(run => [signinKey(run.tool, run.row), run]));
+/** The checks of '/h' with Codex's answer that `names` need a sign-in, holding for `rows`, and the sign-ins started there. */
+const needing = (rows: SigninRow[], signins: SigninRun[] = []): SigninChecks => ({ home: '/h', signins: kept(...signins), columns: { 'codex-cli': {
+  at: '2026-11-27T10:00:00Z', answer: { servers: Object.fromEntries(rows.map(each => [each.name, { is: 'needs-sign-in' }])) }, asked: rows.map(each => cellKey(each, each.cells['codex-cli']!)) } } });
+
+test('The command a Sign in runs and the one its Copy gives are one table’s: the arguments as given, the command with the name one shell word', () => {
+  assert.deepEqual(signInArgs('codex-cli', 'team\'s docs'), ['mcp', 'login', '--', 'team\'s docs']);
+  assert.equal(signInCommand('codex-cli', 'team\'s docs'), 'codex mcp login -- \'team\'\\\'\'s docs\'');
+  assert.equal(signInArgs('copilot-cli', 'github'), undefined);
+});
+
+test('Where Codex says a sign-in is needed its cell offers Sign in, on this computer’s home and not on Windows; elsewhere, and in every other tool, Copy', () => {
+  assert.deepEqual([offersSignin('codex-cli', true, 'linux'), offersSignin('codex-cli', true, 'darwin'), offersSignin('codex-cli', true, 'win32'), offersSignin('codex-cli', false, 'linux'),
+    offersSignin('pi-cli', true, 'linux'), offersSignin('claude-cli', true, 'linux')], [true, true, false, false, false, false]);
+  const oauth = server('oauth'), checks = needing([oauth]);
+  assert.deepEqual(cellNow(checks, 'codex-cli', oauth, true), { words: 'Needs sign-in', tone: 'warning', act: { label: 'Sign in', runs: 'codex mcp login -- oauth' }, heed: true });
+  assert.deepEqual(cellNow(checks, 'codex-cli', oauth, false), { words: 'Needs sign-in', tone: 'warning', command: 'codex mcp login -- oauth', heed: true });
+  // Only a cell that needs a sign-in has one: an answer that needs nothing offers nothing.
+  assert.deepEqual(cellNow({ ...checks, columns: {} }, 'codex-cli', oauth, true), { words: 'Not checked', tone: 'muted' });
+});
+
+test('A sign-in’s cell: Stop while it waits, Signed in with its time, and on any other end what happened, in amber, Try again and the command to copy', () => {
+  const oauth = server('oauth'), copy = cellKey(oauth, oauth.cells['codex-cli']!), at = '2026-11-27T10:05:00Z';
+  const says = (end?: SigninEnd) => cellNow(needing([oauth], [{ tool: 'codex-cli', row: 'oauth', copy, ...(end ? { at, end } : {}) }]), 'codex-cli', oauth, true);
+  const again = { tone: 'warning', command: 'codex mcp login -- oauth', act: { label: 'Try again', runs: 'codex mcp login -- oauth' }, heed: true };
+  assert.deepEqual(says(), { words: 'Finish in your browser…', act: { label: 'Stop' }, heed: true });
+  assert.deepEqual(says({ signedIn: true }), { words: `Signed in ${clockTime(at)}` });
+  // What Codex said last is behind a (?) after the words, not a line under it.
+  assert.deepEqual(says({ unfinished: 'Error: the server refused the sign-in' }), { words: 'Sign-in didn’t finish', why: 'Error: the server refused the sign-in', ...again });
+  assert.deepEqual(says({ failed: 'timeout' }), { words: 'Not finished in 3 minutes', ...again });
+  assert.deepEqual(says({ failed: 'stopped' }), { words: 'Stopped', ...again });
+  assert.deepEqual(says({ failed: 'missing' }), { words: 'No Codex command line here', ...again });
+  assert.deepEqual(says({ notStarted: 'Another sign-in is running' }), { words: 'Another sign-in is running', ...again });
+  // An end kept for another copy of the server isn't this cell's: it says the column's answer. One under way is the row's, with
+  // its Stop, whatever became of the copy meanwhile.
+  const moved = { ...oauth, cells: { 'codex-cli': { name: 'oauth', copy: 'other#2', off: false } } };
+  assert.equal(cellNow(needing([moved], [{ tool: 'codex-cli', row: 'oauth', copy, at, end: { signedIn: true } }]), 'codex-cli', moved, true).words, 'Needs sign-in');
+  assert.deepEqual(cellNow(needing([moved], [{ tool: 'codex-cli', row: 'oauth', copy }]), 'codex-cli', moved, true), { words: 'Finish in your browser…', act: { label: 'Stop' }, heed: true });
+  // Codex's copy gone from a row another tool still has, while its sign-in waits: the row's Codex cell keeps its Stop.
+  const elsewhere = { ...oauth, cells: { 'claude-cli': { name: 'oauth', off: false } } };
+  assert.deepEqual(cellNow(needing([oauth], [{ tool: 'codex-cli', row: 'oauth', copy }]), 'codex-cli', elsewhere, true), { words: 'Finish in your browser…', act: { label: 'Stop' }, heed: true });
+  // A Check of the column begun after it ended says what Codex answers then; one begun before it ended doesn't.
+  const checked = (began: string) => ({ ...needing([oauth], [{ tool: 'codex-cli', row: 'oauth', copy, at, end: { signedIn: true } }]), columns: { 'codex-cli': { ...needing([oauth]).columns['codex-cli']!, began } } });
+  assert.deepEqual([cellNow(checked('2026-11-27T10:06:00Z'), 'codex-cli', oauth, true).words, cellNow(checked('2026-11-27T10:04:00Z'), 'codex-cli', oauth, true).words], ['Needs sign-in', `Signed in ${clockTime(at)}`]);
+  // Signed in needs nothing more of him: its row isn't put first; one that didn't finish is.
+  const plain = server('plain');
+  assert.deepEqual(grouped([plain, oauth], needing([plain, oauth], [{ tool: 'codex-cli', row: 'oauth', copy, at, end: { signedIn: true } }])).map(each => each.name), ['plain', 'oauth']);
+  assert.deepEqual(grouped([plain, oauth], { ...needing([oauth], [{ tool: 'codex-cli', row: 'oauth', copy, at, end: { failed: 'stopped' } }]) }).map(each => each.name), ['oauth', 'plain']);
+  // One that waits stands with the rows that need him too, as one that offers Sign in does.
+  assert.deepEqual(grouped([plain, oauth], { home: '/h', columns: {}, signins: kept({ tool: 'codex-cli', row: 'oauth', copy }) }).map(each => each.name), ['oauth', 'plain']);
+  assert.deepEqual(grouped([plain, oauth], needing([oauth])).map(each => each.name), ['oauth', 'plain']);
+});
+
+test('What Codex said last is text: its colours and every other control character left out, cut past 200 characters', () => {
+  assert.equal(lastSaid('Opening the browser\n\x1b[31mError:\x1b[0m the server\x07 refused\x00 it\n\n'), 'Error: the server refused it');
+  assert.equal(lastSaid(`Error: ${'word '.repeat(60)}`).length <= 201, true);
+});
+
+test('What a sign-in ended with is kept for its copy alone: dropped at a view where that copy is changed, gone or Off; one under way is kept', () => {
+  const home = (hash: string, off = false) => view(['codex-cli'], [fact('oauth', { 'codex-cli': 'oauth' }, { copies: { 'codex-cli': { folder: 'oauth', hash } } as LibraryFacts['copies'], ...(off ? { switchedOff: ['codex-cli'] as HarnessId[] } : {}) })]);
+  const [before] = signinRows(home('oauth#1')), copy = cellKey(before, before.cells['codex-cli']!);
+  const ended = (): SigninRun => ({ tool: 'codex-cli', row: 'oauth', copy, at: '2026-11-27T10:05:00Z', end: { signedIn: true } });
+  for (const [what, now, stays] of [['unchanged', home('oauth#1'), true], ['another copy', home('oauth#2'), false], ['Off', home('oauth#1', true), false], ['gone', view(['codex-cli'], []), false]] as const) {
+    const checks: SigninChecks = { home: '/h', columns: {}, signins: kept(ended()) }, waiting: SigninChecks = { home: '/h', columns: {}, signins: kept({ tool: 'codex-cli', row: 'oauth', copy }) };
+    followView(checks, now);
+    followView(waiting, now);
+    assert.deepEqual([Object.keys(checks.signins!).length, Object.keys(waiting.signins!).length], [stays ? 1 : 0, 1], what);
+  }
+  // A sign-in started again in a cell takes the place of the one before there (Try again): the page keeps one a cell.
+  const started: SigninChecks = { home: '/h', columns: {} };
+  const first = signinStarted(started, 'codex-cli', before);
+  Object.assign(first, ended());
+  const second = signinStarted(started, 'codex-cli', before);
+  assert.deepEqual(Object.values(started.signins!), [second]);
+  // One under way at a view without its copy on (Off; gone, then back), that then ends: its end is never shown.
+  for (const [what, between] of [['Off', [home('oauth#1', true)]], ['gone and back', [view(['codex-cli'], []), home('oauth#1')]]] as const) {
+    const run: SigninRun = { tool: 'codex-cli', row: 'oauth', copy }, checks: SigninChecks = { home: '/h', columns: {}, signins: kept(run) };
+    for (const each of between) followView(checks, each);
+    Object.assign(run, { at: '2026-11-27T10:05:00Z', end: { signedIn: true } });
+    const [now] = signinRows(between.at(-1)!);
+    assert.equal(cellNow(checks, 'codex-cli', now, true).words, what === 'Off' ? 'Off in Codex' : 'Not checked', what);
+  }
+});
+
+test('Main starts a sign-in only for the home open, a managed tool it starts sign-ins for, and the very copy the page showed', () => {
+  const oauth = server('oauth'), copy = cellKey(oauth, oauth.cells['codex-cli']!);
+  const ask: SigninAsk = { home: '/h', tool: 'codex-cli', row: 'oauth', copy };
+  const now: SigninNow = { where: { home: '/h', actual: true, toolsHome: '/h', searchPath: '' }, writable: true, managed: ['codex-cli', 'pi-cli'], rows: [oauth] };
+  const where = (more: Partial<SigninNow['where']>) => ({ where: { ...now.where, ...more } });
+  const cases: [string, Partial<SigninAsk>, Partial<SigninNow>, string, string | undefined][] = [
+    ['the server as the page showed it', {}, {}, 'linux', undefined],
+    ['another home open', { home: '/other' }, {}, 'linux', 'Another home is open'],
+    ['the Practice copy or another folder', {}, where({ actual: false }), 'linux', 'Central Knot doesn’t start Codex’s sign-in here'],
+    ['Windows', {}, {}, 'win32', 'Central Knot doesn’t start Codex’s sign-in here'],
+    ['a tool whose sign-in it doesn’t start', { tool: 'pi-cli', copy: cellKey(oauth, oauth.cells['pi-cli']!) }, {}, 'linux', 'Central Knot doesn’t start Pi’s sign-in here'],
+    ['a tool not managed', {}, { managed: ['pi-cli'] }, 'linux', 'Codex isn’t managed here'],
+    ['a home Central Knot may only preview', {}, { writable: false }, 'linux', 'Central Knot doesn’t start Codex’s sign-in here'],
+    ['the server gone', {}, { rows: [] }, 'linux', 'Changed since the page showed it'],
+    ['the server switched off there', {}, { rows: [server('oauth', true)] }, 'linux', 'Changed since the page showed it'],
+    ['another copy of it now', {}, { rows: [{ ...oauth, cells: { 'codex-cli': { name: 'oauth', copy: 'oauth#2', off: false } } }] }, 'linux', 'Changed since the page showed it'],
+    ['a copy the tool’s list doesn’t name', {}, { rows: [{ ...oauth, cells: { 'codex-cli': { off: false } } }] }, 'linux', 'Changed since the page showed it'],
+  ];
+  for (const [what, asked, has, platform, refused] of cases) assert.equal(signinRefusal({ ...ask, ...asked }, { ...now, ...has }, platform), refused, what);
 });
 
 // ---------- The rows, from the view the Library has ----------
@@ -321,9 +432,11 @@ async function standIns() {
     `const fs = require("fs"); fs.appendFileSync(${JSON.stringify(calls)}, [fs.realpathSync.native(process.cwd()), fs.readdirSync(".").length, process.env.HOME, process.env.CLAUDE_CONFIG_DIR ?? "none", process.argv.slice(1).join(" ")].join("|") + "\\n");\n${js}`);
   const calledWith = async () => (await readFile(calls, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => line.split('|'));
   const where = (actual = true, searchPath = '') => ({ home, actual, toolsHome: tools, searchPath });
-  const before = process.env.CK_TEST_HOME_ONLY;
-  process.env.CK_TEST_HOME_ONLY = BINARIES;
-  return { base, home, tools, put, calledWith, where, done: async () => { process.env.CK_TEST_HOME_ONLY = before; await rm(base, { recursive: true, force: true }); } };
+  // The tools looked for here alone, and the browser a sign-in opens a stand-in's (signinStandIn), whatever the one running the tests set.
+  const before = { CK_TEST_HOME_ONLY: process.env.CK_TEST_HOME_ONLY, BROWSER: process.env.BROWSER };
+  Object.assign(process.env, { CK_TEST_HOME_ONLY: BINARIES, BROWSER: 'ck-browser' });
+  const done = async () => { for (const [name, value] of Object.entries(before)) if (value === undefined) delete process.env[name]; else process.env[name] = value; await rm(base, { recursive: true, force: true }); };
+  return { base, home, tools, put, calledWith, where, done };
 }
 /**
  * The Windows stand-ins' words for `cat <file>`, and for `sleep 300 & echo $! > <pidFile>; wait`: a child left waiting, its number
@@ -443,16 +556,169 @@ test('Only a command line outside an app bundle is run: a link into one is passe
   } finally { await sandbox.done(); }
 });
 
-// Last in this file: Quit closes the door to new checks for the rest of the process, as it does for the app.
-test('Quit stops every check, the one just clicked too, each second Quit waits for the clean-up, and no new check starts', { timeout: 15_000 }, async () => {
+// ---------- One sign-in, run for this computer's home ----------
+
+const noSignInHere = windows && 'Central Knot starts no sign-in on Windows (mcpsignin.ts offersSignin): the cell keeps its Copy there.';
+/** Only on Linux does the app start the browser apart (mcpsigninrun.ts browserApart); elsewhere a stand-in in Codex's group says nothing of the system's own opener. */
+const browserApartHere = process.platform === 'linux';
+const noBrowserApart = noSignInHere || (!browserApartHere && 'The browser is set apart on Linux only; macOS hands the address to the system (open), which a stand-in in Codex’s group says nothing of: not measured here.');
+const TEAM = 'team\'s docs';
+/**
+ * A stand-in Codex whose `mcp login` writes its arguments one a line; takes an argument that begins with a dash before `--` as
+ * an option, as Codex's parser does (any: it prints its usage and ends with exit 0); opens the browser as Codex does from its
+ * BROWSER (webbrowser 1.2.4: the first of its commands found, its words then the address, spawned as its child with nothing on
+ * its input or output; none found, none opened); then by `mode`: says it signed in (exit 0); says why it didn't (exit 1); or
+ * waits for the browser with a helper that ignores TERM and listens on a port (its port and process written down), noting a TERM
+ * and ending on it, or (`deaf`) ignoring that too. Beside it, `browsers` stand-in openers (ck-browser, the one standIns sets) each
+ * start a long-lived "browser" in their own process group, as xdg-open does (no new session), write its process down and end.
+ */
+async function signinStandIn(sandbox: Awaited<ReturnType<typeof standIns>>, mode: 'accept' | 'refuse' | 'wait' | 'deaf', openers = ['ck-browser']) {
+  const [args, port, signals, browsers] = ['args', 'port', 'signals', 'browsers'].map(file => join(sandbox.base, file));
+  const helper = `process.on("SIGTERM", () => {}); const s = require("net").createServer().listen(0, "127.0.0.1", () => require("fs").writeFileSync(${JSON.stringify(port)}, s.address().port + " " + process.pid));`;
+  // How it takes TERM, from its start; then what it does once the browser is up.
+  const trap = { accept: '', refuse: '', wait: `trap 'echo TERM >> ${signals}; exit 143' TERM`, deaf: `trap '' TERM` }[mode];
+  const body = { accept: 'echo "Successfully logged in"', refuse: 'echo "Waiting for consent" >&2\nsleep 0.1\necho "Error: the server refused the sign-in"\nexit 1',
+    wait: `"${process.execPath}" -e '${helper}' &\nwait`, deaf: `"${process.execPath}" -e '${helper}' &\nwait` }[mode];
+  const options = 'for given in "$@"; do [ "$given" = "--" ] && break; case "$given" in -*) echo "Usage: codex mcp login [OPTIONS] <NAME>"; exit 0;; esac; done';
+  const browse = 'browse() { IFS=:; for entry in $BROWSER; do IFS=" "; set -- $entry; if command -v "$1" >/dev/null; then "$@" http://127.0.0.1:1/cb </dev/null >/dev/null 2>&1 & return; fi; done; }; browse; unset IFS';
+  // It goes on once the browser is up, as Codex does when the person has signed in there.
+  const browserUp = `while [ ! -s ${browsers} ]; do sleep 0.05; done`;
+  const browserGiven = `printf '%s' "$BROWSER" > ${join(sandbox.base, 'browser-given')}`;
+  await sandbox.put('codex', `printf '%s\\n' "$@" > ${args}\n${browserGiven}\n${trap}\n${options}\n${browse}\n${browserUp}\n${body}`, '');
+  for (const opener of openers) await standIn(join(sandbox.tools, '.local/bin', opener), `#!/bin/sh\n"${process.execPath}" -e 'require("fs").appendFileSync(${JSON.stringify(browsers)}, process.pid + "\\n"); setInterval(() => {}, 1000);' </dev/null >/dev/null 2>&1 &`, '');
+  const listening = async () => { await until(async () => !!(await readFile(port, 'utf8').catch(() => ''))); return (await readFile(port, 'utf8')).split(' ').map(Number); };
+  /** The "browsers" the stand-in openers started, once one has. */
+  const opened = async () => { await until(async () => !!(await readFile(browsers, 'utf8').catch(() => ''))); return (await readFile(browsers, 'utf8')).split('\n').filter(Boolean).map(Number); };
+  return { args: async () => (await readFile(args, 'utf8')).split('\n').slice(0, -1), listening, opened, signals: () => readFile(signals, 'utf8').catch(() => ''),
+    browserGiven: () => readFile(join(sandbox.base, 'browser-given'), 'utf8') };
+}
+/** Ends every stand-in "browser" the stand-in openers in `sandbox` started. */
+const closeBrowsers = async (sandbox: Awaited<ReturnType<typeof standIns>>) => {
+  for (const pid of (await readFile(join(sandbox.base, 'browsers'), 'utf8').catch(() => '')).split('\n').filter(Boolean)) try { process.kill(Number(pid), 'SIGKILL'); } catch { /* already ended */ }
+};
+/** What main has now for `rows` (the home open, Codex managed) in the sandbox's home. */
+const nowIn = (sandbox: Awaited<ReturnType<typeof standIns>>, rows: SigninRow[]) => async (): Promise<SigninNow> => ({ where: sandbox.where(), writable: true, managed: ['codex-cli'], rows });
+const askFor = (sandbox: Awaited<ReturnType<typeof standIns>>, row: SigninRow): SigninAsk => ({ home: sandbox.home, tool: 'codex-cli', row: row.id, copy: cellKey(row, row.cells['codex-cli']!) });
+/** Whether something listens on `port` (on 127.0.0.1) still: a new listener there can't be opened. */
+const portTaken = (port: number) => new Promise<boolean>(done => { const probe = createServer().once('error', () => done(true)).listen(port, '127.0.0.1', () => probe.close(() => done(false))); });
+/** Whether `pid` still runs and `port` is still held, once each has had its moment to go (a killed process ends a moment after its kill). */
+const left = async (pid: number, port: number) => { await until(async () => !isRunning(pid) && !(await portTaken(port))); return [isRunning(pid), await portTaken(port)]; };
+
+test('Sign in runs the tool’s own `mcp login`, the server’s name one literal argument after `--`, from an empty folder, and nothing else; exit 0 is Signed in', { skip: noSignInHere, timeout: 15_000 }, async () => {
+  const sandbox = await standIns();
+  try {
+    const fake = await signinStandIn(sandbox, 'accept'), team = server(TEAM);
+    assert.deepEqual(await startSignin(askFor(sandbox, team), nowIn(sandbox, [team])), { signedIn: true });
+    assert.deepEqual(await fake.args(), ['mcp', 'login', '--', TEAM]);
+    const calls = await sandbox.calledWith();
+    assert.equal(calls.length, 1, 'no list is run after it');
+    assert.deepEqual([calls[0][1], calls[0][2]], ['0', sandbox.home]);
+    await assert.rejects(readdir(calls[0][0]), { code: 'ENOENT' });
+    // What it said last, by when it came (here its output after its errors), is the cell's when it ends otherwise.
+    await signinStandIn(sandbox, 'refuse');
+    assert.deepEqual(await startSignin(askFor(sandbox, team), nowIn(sandbox, [team])), { unfinished: 'Error: the server refused the sign-in' });
+  } finally { await closeBrowsers(sandbox); await sandbox.done(); }
+});
+
+test('A server’s name is never an option: one that begins with a dash comes after `--`, so Codex never takes `--help` and ends with exit 0', { skip: noSignInHere, timeout: 15_000 }, async () => {
+  const sandbox = await standIns();
+  try {
+    const fake = await signinStandIn(sandbox, 'accept'), help = server('--help');
+    await startSignin(askFor(sandbox, help), nowIn(sandbox, [help]));
+    assert.deepEqual([await fake.args(), signInCommand('codex-cli', '--help')], [['mcp', 'login', '--', '--help'], 'codex mcp login -- --help']);
+  } finally { await closeBrowsers(sandbox); await sandbox.done(); }
+});
+
+test('Its input is closed: a tool that reads its input to the end goes on to sign in', { skip: noSignInHere, timeout: 15_000 }, async () => {
+  const sandbox = await standIns();
+  try {
+    await sandbox.put('codex', `cat > ${join(sandbox.base, 'input')}\necho "Successfully logged in"`, '');
+    const oauth = server('oauth');
+    assert.deepEqual(await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), 2000), { signedIn: true });
+  } finally { await sandbox.done(); }
+});
+
+test('A sign-in main refuses runs nothing: a server changed since the page showed it, and a second while one runs, refused at once', { skip: noSignInHere, timeout: 15_000 }, async () => {
+  const sandbox = await standIns();
+  try {
+    const fake = await signinStandIn(sandbox, 'wait'), oauth = server('oauth');
+    const changed = { ...oauth, cells: { 'codex-cli': { name: 'oauth', copy: 'oauth#2', off: false } } };
+    assert.deepEqual(await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [changed])), { notStarted: 'Changed since the page showed it' });
+    assert.deepEqual(await sandbox.calledWith(), []);
+    const first = startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]));
+    assert.deepEqual(await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth])), { notStarted: 'Another sign-in is running' });
+    await fake.listening();
+    stopSignin();
+    assert.deepEqual(await first, { failed: 'stopped' });
+    assert.equal((await sandbox.calledWith()).length, 1);
+  } finally { await closeBrowsers(sandbox); await sandbox.done(); }
+});
+
+test('His own BROWSER keeps its order: a first command not found here is left out, so the next opens; none found, it is left as it was', { skip: noSignInHere, timeout: 15_000 }, async () => {
+  const sandbox = await standIns();
+  try {
+    process.env.BROWSER = 'ck-missing-browser:ck-firefox';
+    const fake = await signinStandIn(sandbox, 'accept', ['ck-firefox']), oauth = server('oauth');
+    assert.deepEqual([await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), 2000), (await fake.opened()).length], [{ signedIn: true }, 1]);
+    process.env.BROWSER = 'ck-missing-browser';
+    await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), 500);
+    assert.equal(await fake.browserGiven(), 'ck-missing-browser');
+  } finally { await closeBrowsers(sandbox); await sandbox.done(); }
+});
+
+test('The last line Codex said is a whole line: one written in two parts with a line of its errors between them stays one', { skip: noSignInHere, timeout: 15_000 }, async () => {
+  const sandbox = await standIns();
+  try {
+    await sandbox.put('codex', `printf 'Error: consent '\nsleep 0.2\necho 'Browser closed' >&2\nsleep 0.2\necho 'declined'\nexit 1`, '');
+    const oauth = server('oauth');
+    assert.deepEqual(await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), 5000), { unfinished: 'Error: consent declined' });
+  } finally { await sandbox.done(); }
+});
+
+test('Stop asks the tool to end, then ends what it left: its helper that ignores TERM is gone and its port free', { skip: noSignInHere, timeout: 15_000 }, async () => {
+  const sandbox = await standIns();
+  try {
+    const fake = await signinStandIn(sandbox, 'wait'), oauth = server('oauth');
+    const run = startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]));
+    const [port, helper] = await fake.listening();
+    assert.equal(await portTaken(port), true);
+    stopSignin();
+    assert.deepEqual(await run, { failed: 'stopped' });
+    assert.deepEqual([await fake.signals(), ...await left(helper, port)], ['TERM\n', false, false]);
+  } finally { await closeBrowsers(sandbox); await sandbox.done(); }
+});
+
+test('No ending reaches the browser Codex opened: it lives on after Signed in, after Stop, and at the limit, where Codex ignored TERM and was ended after the grace', { skip: noBrowserApart, timeout: 20_000 }, async () => {
+  const lives: [SigninEnd, boolean][] = [];
+  for (const [mode, limit] of [['accept', undefined], ['wait', undefined], ['deaf', 300]] as const) {
+    const sandbox = await standIns();
+    try {
+      const fake = await signinStandIn(sandbox, mode), oauth = server('oauth');
+      const run = startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), limit);
+      const [browser] = await fake.opened();
+      if (mode === 'wait') { await fake.listening(); stopSignin(); }
+      const ending = await run;
+      await new Promise(done => setTimeout(done, 300));
+      lives.push([ending, isRunning(browser)]);
+    } finally { await closeBrowsers(sandbox); await sandbox.done(); }
+  }
+  assert.deepEqual(lives, [[{ signedIn: true }, true], [{ failed: 'stopped' }, true], [{ failed: 'timeout' }, true]]);
+});
+
+// Last in this file: Quit closes the door to new checks and sign-ins for the rest of the process, as it does for the app.
+test('Quit stops every check and sign-in, the check just clicked too, each second Quit waits for the clean-up, and none starts after', { timeout: 15_000 }, async () => {
   const sandbox = await standIns();
   try {
     const pidFile = join(sandbox.base, 'child.pid');
     await sandbox.put('claude', `sleep 300 &\necho $! > ${pidFile}\nwait`, leaveChild(pidFile));
-    await sandbox.put('codex', `cat ${join(import.meta.dirname, 'mcpsignin/codex-list.stdout')}`, printOut('codex-list.stdout'));
     const running = checkSignin(sandbox.where(), 'claude-cli', []);
     await until(async () => !!(await readFile(pidFile, 'utf8').catch(() => '')));
     const [[folder]] = await sandbox.calledWith();
+    // A sign-in waiting on the browser it opened, its helper ignoring TERM (none is started on Windows: mcpsignin.ts offersSignin).
+    const fake = windows ? undefined : await signinStandIn(sandbox, 'wait'), oauth = server('oauth');
+    const signing = fake && startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]));
+    const [port, helper] = (await fake?.listening()) ?? [];
+    const [browser] = (await fake?.opened()) ?? [];
     // Clicked a moment before Quit: still looking for its command line when Quit comes.
     const clicked = checkSignin(sandbox.where(), 'codex-cli', []);
     const from = Date.now(), first = stopChecks(), second = stopChecks();
@@ -464,9 +730,13 @@ test('Quit stops every check, the one just clicked too, each second Quit waits f
     await until(async () => !isRunning(child));
     assert.equal(isRunning(child), false, 'the command’s own child was stopped');
     assert.equal(await clicked, undefined);
-    // Once Quit has begun no check starts: only the first ever ran its command.
+    if (fake) {
+      assert.deepEqual([await signing, ...await left(helper!, port!), ...(browserApartHere ? [isRunning(browser!)] : [])], [{ failed: 'stopped' }, false, false, ...(browserApartHere ? [true] : [])]);
+      assert.deepEqual(await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth])), { failed: 'stopped' });
+    }
+    // Once Quit has begun no check starts: only the first ever ran its command, and the sign-in before Quit its own.
     assert.equal(await checkSignin(sandbox.where(), 'codex-cli', []), undefined);
-    assert.deepEqual((await sandbox.calledWith()).map(call => call[4]), ['mcp list']);
+    assert.deepEqual((await sandbox.calledWith()).map(call => call[4]), ['mcp list', ...(fake ? ['mcp login -- oauth'] : [])]);
     await running;
-  } finally { await sandbox.done(); }
+  } finally { await closeBrowsers(sandbox); await sandbox.done(); }
 });
