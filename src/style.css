@@ -809,11 +809,15 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* An agent's one file, or its definition, named by a plain label (filepanel.ts filePanel): nothing there to press. */
 .file-open-name { min-width: 0; padding: 3px 0; color: var(--ink); font: 500 11.5px/16px var(--mono); overflow-wrap: anywhere; }
 .file-open-name.file-open-definition { font-family: inherit; font-size: 12px; }
-/* A server's entry: where in its settings file it is ("In mcpServers"), then its label (filepanel.ts filePanel). */
-.file-open-lead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; min-width: 0; }
+/* A server's entry: where in its settings file it is ("In mcpServers"), then a dot and its label (filepanel.ts filePanel). */
+.file-open-lead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; }
+.file-open-lead > .meta-dot { margin: 0; }
 .file-open-where { padding: 3px 0; color: var(--ink-soft); font: 500 11.5px/16px var(--mono); overflow-wrap: anywhere; }
-/* An agent's definition: each part under its word, the prompt (the last block) taking the room left. */
-.file-open-box > .content-block:has(+ .content-block) { flex: none; }
+/* An agent's definition: each part under its word, the prompt (the last block) taking the room left; a Codex entry's blocks so too. */
+.file-open-box > .content-block:has(+ .content-block, + .file-open-gap) { flex: none; }
+/* Between two blocks of a Codex entry, other lines of its file (filepanel.ts filePanel): a break, its separator's name drawn here, never selected or copied. */
+.file-open-gap { flex: none; padding: 3px 12px; border-block: 1px dashed var(--cell-line); background: var(--hover); color: var(--ink-soft); font-size: 11.5px; line-height: 16px; text-align: center; }
+.file-open-gap::before { content: attr(aria-label); }
 .file-open-box .content-owner { margin: 0; padding: 8px 12px 0; }
 .file-open-box .content-owner + .content { padding-top: 4px; }
 .file-open-box > .content-block { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }

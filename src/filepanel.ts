@@ -15,13 +15,12 @@ import { inLibrary } from './libraryrow.ts';
 import { libraryPages } from './librarypages.ts';
 import { idOf, isPluginRow, itemOf, reloadButton, showInFolder, toolsFor } from './matrix.ts';
 import type { PluginRow } from './pluginrows.ts';
-import { entryShownIn } from './presence.ts';
 import type { FileRead, HarnessId, SearchHit } from './types.ts';
 import type { VersionPart } from './versionlist.ts';
 import { andList, toolNames } from './words.ts';
 
 /** The file open in a place, kept between draws: the target's id, its version or copy's token, the file shown, the copy's holder, the folder its read found, the tab list, and the text read (null: it couldn't be). */
-export interface OpenFile { id: string; token: string; file: string; copy?: { tool: HarnessId; rootLabel?: string }; directory?: string; files?: string[]; loaded?: { text?: string; note?: string; parts?: VersionPart[]; holder?: string } | null }
+export interface OpenFile { id: string; token: string; file: string; copy?: { tool: HarnessId; rootLabel?: string }; directory?: string; files?: string[]; loaded?: { text?: string; blocks?: string[]; note?: string; parts?: VersionPart[]; holder?: string } | null }
 /**
  * Where a file panel is drawn: the file open there (`view.openFile`), the tool whose copy it offers first (`tool`: a tool's tab's),
  * whether its panels begin with the item's name (`named`: where nothing beside them names it, the Overview's), what the place
@@ -47,21 +46,21 @@ const DEFINITION = 'Central Knot’s definition';
 /**
  * The item in Central Knot whose stored text a target's panel offers, by kind: a library skill's current version (it offers no
  * copy: fileCopies; with the path of a tool's copy that holds it, where one does: filePanel); an ordinary agent's definition,
- * where no tool has a copy; an ordinary server's definition, after each tool's entry, unless its only entry is in a tool whose
- * entries aren't read (no mark yet). The stored text is shown where it is asked for or no copy is offered (setFile).
+ * where no tool has a copy; an ordinary server's definition, after each tool's entry. The stored text is shown where it is asked
+ * for or no copy is offered (setFile).
  */
 const storedOf = (t: FilePlace, target?: FileTarget) => (target?.kind === 'skills' || (isAgentRow(target) && !fileCopies(t, target).length)
-  || (isServerRow(target) && (fileCopies(t, target).length > 0 || !entryTools(target).length)) ? inLibrary(itemOf(target as ItemRow)) : undefined);
+  || isServerRow(target) ? inLibrary(itemOf(target as ItemRow)) : undefined);
 interface FileCopy { tool: HarnessId; rootLabel?: string; directory?: string; realDirectory?: string; hash?: string; version?: string; part?: string }
 /**
  * The copies a target's panel offers, in column order (tab's tool first): an agent's in each tool with a file for it, a server's
- * in each tool with its entry where entries are read (presence.ts entryShownIn), each read by itself (one shared hash doesn't
+ * in each tool with its entry, each read by itself (one shared hash doesn't
  * make two files the same bytes); a found or plugin skill's, collapsed by real folder, or by hash (found) / version (plugin); none
  * of a library skill's (its stored version instead: storedOf).
  */
 function fileCopies(t: FilePlace, target: FileTarget): FileCopy[] {
   if (isAgentRow(target)) return (toolsFor(t, 'agents') as HarnessId[]).filter(tool => target.paths?.[tool]).map(tool => ({ tool }));
-  if (isServerRow(target)) return (toolsFor(t, 'mcp') as HarnessId[]).filter(tool => entryShownIn(tool) && entryTools(target).includes(tool)).map(tool => ({ tool }));
+  if (isServerRow(target)) return (toolsFor(t, 'mcp') as HarnessId[]).filter(tool => entryTools(target).includes(tool)).map(tool => ({ tool }));
   if ((target.kind !== 'skill' && target.kind !== 'skills') || (target.kind === 'skills' && inLibrary(itemOf(target)))) return [];
   const hashes = target.kind === 'skills' ? target.folderHashes : undefined;
   const raw = (toolsFor(t, 'skills') as HarnessId[]).flatMap<FileCopy>(tool => target.kind === 'skill'
@@ -80,7 +79,7 @@ function fileCopies(t: FilePlace, target: FileTarget): FileCopy[] {
 const copyToken = (copy?: FileCopy) => (copy?.hash ? `${copy.hash}:${copy.realDirectory ?? ''}` : `read:${state.home?.readId ?? 0}`);
 /**
  * Whether a row has the file mark (fileButton; the reconcile in drawTable asks it too): a skill with a stored version or a copy,
- * a marketplace skill hit with its path, every ordinary agent, an ordinary server but one whose only entry is Codex's.
+ * a marketplace skill hit with its path, every ordinary agent, an ordinary server with an entry in a tool or in Central Knot.
  */
 const hasFile = (t: FilePlace, target: FileTarget) => (isCatalogHit(target) ? target.hit.item?.kind === 'skill' && !!target.hit.item.path
   : !!storedOf(t, target) || fileCopies(t, target).length > 0);
@@ -159,7 +158,7 @@ export function setFile(t: FilePlace, target?: FileTarget, asked?: string, refoc
   void load.catch(() => null).then(found => {
     if (t.view.openFile !== next) return;
     if (!found && file !== first) return setFile(t, target, first, false, undefined, true, chosen);
-    const loaded = found ? { text: found.text, note: found.note, parts: found.parts, holder: found.holder } : null;
+    const loaded = found ? { text: found.text, blocks: found.blocks, note: found.note, parts: found.parts, holder: found.holder } : null;
     const unchanged = sameFile && JSON.stringify(next.loaded) === JSON.stringify(loaded)
       && (!found || (JSON.stringify(next.files) === JSON.stringify(found.files) && next.directory === found.directory));
     next.loaded = loaded;
@@ -221,17 +220,23 @@ export function filePanel(t: FilePlace, target: FileTarget, open: OpenFile, bare
   const close = back ? null : closeButton(() => setFile(t, undefined, undefined, true),
     { id: partId('file-close', id), label: `Close file for ${name}`, title: 'Close', look: '.file-open-close' });
   const blockId = partId('file-text', id, ...(active ? [String(Math.max(0, activeAt))] : []), String(Math.max(0, tabs.indexOf(open.file))));
+  const owner = () => (active ? copyLabel(active) : isCatalogHit(target) ? `${target.hit.item!.marketName}’s copy` : 'Central Knot’s current version');
+  // A Codex entry's blocks, each apart: between two, a separator named for the lines between them, its words drawn by CSS from
+  // that name, so no selection or copy of the blocks holds them.
   const body = note ? [h('p.file-open-state', {}, note)]
     : open.loaded?.parts ? fileBlocks(blockId, `${name} ${open.file}`, open.loaded.parts, holders => andList(holders.map(part => part.name)), { named: true })
-    : fileBlocks(blockId, `${name} ${open.file}`, [{ text: open.loaded!.text ?? '' }], () => (active ? copyLabel(active) : isCatalogHit(target) ? `${target.hit.item!.marketName}’s copy` : 'Central Knot’s current version'));
+    : open.loaded?.blocks ? open.loaded.blocks.flatMap((text, index) => [index ? h('div.file-open-gap', { role: 'separator', 'aria-label': 'Other lines in the file' }) : null,
+      ...fileBlocks(`${blockId}-${index}`, `${name} ${open.file}`, [{ text }], owner)])
+    : fileBlocks(blockId, `${name} ${open.file}`, [{ text: open.loaded!.text ?? '' }], owner);
   // A server's path is copied by a button in words: beside its JSON a bare copy icon would read as copying the entry.
   const copy = full && reloadButton(isServerRow(target) ? { chip: 'Copy path', command: full, title: full } : { command: full, title: 'Copy path' }, partId('file-copy', id));
   const foot = full ? [pathText(shownPath(full), full), h('span.file-open-foot-actions', {}, showInFolder(full), copy)]
     : stored ? [h('span.file-open-stored', {}, 'Stored in Central Knot')] : [];
   // An agent's or a server's panel shows one file, or its definition: its name is a label, with nothing to press. A server's
-  // entry says where in the file it is, left of its chooser or label (its chooser names it where there is one).
+  // entry says where in the file it is, left of its chooser, or of its label after a dot (its chooser names it where there is one).
   const label = h(`span.file-open-name${stored ? '.file-open-definition' : ''}`, {}, open.file);
-  const lead = isServerRow(target) && h('span.file-open-lead', {}, open.loaded?.holder ? h('span.file-open-where', {}, `In ${open.loaded.holder}`) : null, chooser ? null : label);
+  const where = open.loaded?.holder ? h('span.file-open-where', {}, `In ${open.loaded.holder}`) : null;
+  const lead = isServerRow(target) && h('span.file-open-lead', {}, where, where && !chooser ? h('span.meta-dot', { 'aria-hidden': 'true' }, '·') : null, chooser ? null : label);
   const shows = isAgentRow(target) ? label : lead || h('span.file-open-tabs', { role: 'tablist', 'aria-label': `Files in ${name}` }, tabs.map(tab));
   return h(`div.details.details-file-only${bare ? '.details-bare' : ''}`, { role: 'region', 'aria-label': `File for ${name}` }, back ?? null, h('div.file-open-box', {},
     h('div.file-open-head', {}, t.named ? h('span.file-open-named', {}, h('strong.file-open-item', {}, name), shows) : shows,

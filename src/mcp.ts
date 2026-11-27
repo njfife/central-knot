@@ -19,9 +19,8 @@ import { lstat, mkdir, readFile, readlink, realpath, rmdir, stat } from 'node:fs
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { entryTransport, PLUGIN_ONLY } from './catalogdetail.ts';
 import { configRoot, harnesses, openCodeSettings } from './harnesses.ts';
-import { entryShownIn } from './presence.ts';
 import { errorCode, exists, itemKey, plainError, recoverParked, sha256, shownText, writeFileChecked, type ShareContext } from './share.ts';
-import { memberAt, readJsonc, readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
+import { inlineMembers, memberAt, ownEnd, readJsonc, readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import type { FileRead, HarnessId } from './types.ts';
 
 // ---------- Shapes ----------
@@ -205,6 +204,7 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
       const entries: McpEntry[] = [];
       // Servers written inline (`[mcp_servers]` then `docs = { … }`) or as dotted keys (`mcp_servers.docs.command = …`): Central Knot
       // only edits `[mcp_servers.<name>]` tables, so these are held, and never get a second definition that Codex would refuse.
+      // The file panel finds the same forms (codexPieces): a new form of entry goes in both.
       const inline = new Set<string>();
       for (const table of tables) {
         for (const entry of table.entries) {
@@ -266,27 +266,75 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
   }
 }
 
+/** Why a server's file panel shows no entry from a settings file it read (entryText, codexEntry). */
+const notParsed = (format: 'JSON' | 'TOML') => `This settings file can’t be read as ${format}, so its entry isn’t shown.`;
+const TWO_ENTRIES = 'Two entries here have its name, so neither is shown.', NOT_THERE = 'Its entry isn’t in this settings file now.';
+
 /**
  * One server's entry as `tool`'s settings file has it now, for the file panel (servers.ts serverEntry), with the file read and the
- * keys holding it (`holder`): the file read once, at most 1 MB (share.ts shownText), parsed whole as the tool reads it (jsonServers),
- * the server found by its key, and its member cut from the file's bytes (from its line's start where only its indent is before it).
- * A note where the file isn't JSON, two entries have its name or none does; nothing where it can't be read or isn't read (entryShownIn).
+ * keys holding it (`holder`): the file read once, at most 1 MB (share.ts shownText), parsed whole as the tool reads it (jsonServers;
+ * Codex's TOML: codexEntry), the server found by its key, and its member cut from the file's bytes (from its line's start where only
+ * its indent is before it). A note where the file doesn't parse, two entries have its name or none does; nothing where it can't be read.
  */
 export async function entryText(context: ShareContext, tool: HarnessId, key: string): Promise<FileRead | undefined> {
-  if (!entryShownIn(tool)) return undefined;
   const file = mcpFile(context, tool), info = await stat(file).catch(() => undefined);
   const shown = info?.isFile() ? await shownText(file, info.size) : undefined;
   const read = { files: [basename(file)], directory: dirname(file) };
   if (!shown || 'note' in shown) return shown && { ...read, note: shown.note };
+  if (tool === 'codex-cli') return { ...read, ...codexEntry(shown.text, key) };
   let places: string[][];
   try { places = jsonServers(shown.text, tool).filter(server => itemKey(server.name) === key).map(server => server.place); }
-  catch { return { ...read, note: 'This settings file can’t be read as JSON, so its entry isn’t shown.' }; }
-  if (places.length > 1) return { ...read, note: 'Two entries here have its name, so neither is shown.' };
+  catch { return { ...read, note: notParsed('JSON') }; }
+  if (places.length > 1) return { ...read, note: TWO_ENTRIES };
   const member = places[0] && memberAt(shown.text, places[0]);
-  if (!member) return { ...read, note: 'Its entry isn’t in this settings file now.' };
+  if (!member) return { ...read, note: NOT_THERE };
   const { start, end } = member.whole, line = shown.text.lastIndexOf('\n', start - 1) + 1;
   const from = /^[ \t]*$/.test(shown.text.slice(line, start)) ? line : start;
   return { ...read, text: shown.text.slice(from, end), holder: places[0].slice(0, -1).join('.') };
+}
+
+/**
+ * Codex's config.toml in pieces, in the file's order, each with the server it defines, where it defines one: a server's own table
+ * or subtable (`[mcp_servers.docs]`, `[mcp_servers.docs.env]`: its own lines, textedit.ts ownEnd), an entry naming one in the root
+ * or in `[mcp_servers]` (`docs = { … }`, `docs.command = …`, `mcp_servers.docs.url = …`), or one member of a root
+ * `mcp_servers = { … }` (textedit.ts inlineMembers). A `[[mcp_servers.<name>.…]]` block counts too, as it is under the server's
+ * name, though readTool and textedit.ts setTomlTable leave such blocks out. readTool's scan looks for the same inline and dotted
+ * entries: a new form of entry goes in both. Every other header and entry is a piece of none: two pieces of a server with another
+ * piece between them are apart in the file. Throws when the text isn't TOML.
+ */
+function codexPieces(text: string): { name?: string; start: number; end: number }[] {
+  const pieces: { name?: string; start: number; end: number }[] = [];
+  for (const table of readTomlTables(text)) {
+    const [holder, name] = table.path;
+    if (holder === 'mcp_servers' && name !== undefined) { pieces.push({ name, start: table.start, end: ownEnd(text, table) }); continue; }
+    if (table.path.length) pieces.push({ start: table.start, end: table.start });
+    for (const entry of table.entries) {
+      const path = [...table.path, ...entry.keys];
+      const inline = path.length === 1 && path[0] === 'mcp_servers' && !!entry.value && typeof entry.value === 'object' && !Array.isArray(entry.value);
+      if (inline) pieces.push(...inlineMembers(text, entry.valueStart).members.map(member => ({ name: member.keys[0], start: member.start, end: member.end })));
+      else pieces.push({ ...(path[0] === 'mcp_servers' && path.length > 1 ? { name: path[1] } : {}), start: entry.start, end: entry.end });
+    }
+  }
+  return pieces;
+}
+
+/**
+ * A server's entry in Codex's config.toml (`text`), for entryText: its pieces (codexPieces) as written, those next to each other
+ * cut as one block of the file's bytes, comments inside it kept, its trailing white space dropped, in the file's order (the panel
+ * shows each block apart). A note where the file isn't TOML, two servers have its name (a case apart) or none does.
+ */
+function codexEntry(text: string, key: string): { blocks: string[]; holder: string } | { note: string } {
+  let pieces: ReturnType<typeof codexPieces>;
+  try { pieces = codexPieces(text); } catch { return { note: notParsed('TOML') }; }
+  const names = new Set(pieces.flatMap(piece => (piece.name !== undefined && itemKey(piece.name) === key ? [piece.name] : [])));
+  if (names.size !== 1) return { note: names.size ? TWO_ENTRIES : NOT_THERE };
+  const [name] = names, runs: { start: number; end: number }[] = [];
+  pieces.forEach((piece, index) => {
+    if (piece.name !== name) return;
+    if (pieces[index - 1]?.name === name) runs.at(-1)!.end = piece.end;
+    else runs.push({ start: piece.start, end: piece.end });
+  });
+  return { blocks: runs.map(run => text.slice(run.start, run.end).trimEnd()), holder: 'mcp_servers' };
 }
 
 /**
