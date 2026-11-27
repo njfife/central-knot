@@ -11,6 +11,7 @@ import { appendHistory, readHistory } from '../src/history.ts';
 import { libraryAction, libraryEntry } from '../src/historyactions.ts';
 import { readTool, serverHash, type NeutralServer } from '../src/mcp.ts';
 import { applyServers, restoreServer, serversView } from '../src/servers.ts';
+import { storedEntry } from '../src/serverstore.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId, HistoryEvent } from '../src/types.ts';
 
@@ -105,6 +106,17 @@ test('Every state the old MCP record holds becomes its item: after one pass ever
     const second = await applyServers(box.context, managed, []);
     assert.equal(second.writes, 0, JSON.stringify(second.results));
     assert.deepEqual(await box.files(), after);
+  } finally { await box.cleanup(); }
+});
+
+test('A version the migration made is shown in the file panel before any pass stores it, as its file will be written, and then from that file', async () => {
+  const box = await fixture();
+  try {
+    await serversView(box.context, managed);
+    const before = await storedEntry(box.context, 'synced', H('S'));
+    await applyServers(box.context, managed, []);
+    const stored = await readFile(join(box.home, '.central-knot/items/mcp/synced/versions', `${H('S')}.json`), 'utf8');
+    assert.deepEqual([before, await storedEntry(box.context, 'synced', H('S'))], [{ files: [], text: stored }, { files: [], text: stored }]);
   } finally { await box.cleanup(); }
 });
 

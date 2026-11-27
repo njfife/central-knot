@@ -12,7 +12,7 @@ import fs, { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/p
 import { lockSkip, withLock } from './fslock.ts';
 import { spawnSync } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setSyncEverything } from '../src/everything.ts';
 import { readHistory } from '../src/history.ts';
@@ -22,7 +22,8 @@ import { readTool, writeEntry } from '../src/mcp.ts';
 import { discover } from '../src/discovery.ts';
 import { homePass, passTells, syncOnceReport } from '../src/homepass.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
-import { applyServers, restoreServer, serversView } from '../src/servers.ts';
+import { applyServers, restoreServer, serverEntry, serversView } from '../src/servers.ts';
+import { storedEntry } from '../src/serverstore.ts';
 import type { ShareContext } from '../src/share.ts';
 import { readTomlTables } from '../src/textedit.ts';
 import type { Change, HarnessId, HomeView, LibraryFacts } from '../src/types.ts';
@@ -871,4 +872,65 @@ test('A comment before the next table stays with that table when the server is w
   assert.match(text, /command = "B"/);
   assert.match(text, /# Work profile/, `the comment belonging to the next table is kept:\n${text}`);
   readTomlTables(text);
+}));
+
+// ---------- One entry as its settings file has it, for the file panel ----------
+
+test('A server’s entry is read on a click as each JSON tool’s settings file has it, with the file read and the object holding it: its member cut from the file’s bytes in the tool’s own spelling, comments, escapes and own fields in it, nothing around it; a reason where it can’t be shown; nothing for another home, an unmanaged tool or Codex', () => inBox(async box => {
+  const managed: HarnessId[] = [...all, 'antigravity-cli'];
+  const read = (key: string, tool: HarnessId, home: unknown = box.home, tools = managed) => serverEntry(box.context, tools, home, key, tool);
+  const from = (tool: HarnessId) => ({ files: [basename(box.path(tool))], directory: dirname(box.path(tool)) });
+  await mkdir(join(box.home, '.gemini/config'), { recursive: true });
+  // Claude Code: after a byte-order mark, spelt "Docs" there, its escapes as written; its first line keeps its indent.
+  const claude = '    "Docs": {\n      "command": "say",\n      "args": ["\\"hi\\"\\n", "caf\\u00e9"],\n      "timeout": 30\n    }';
+  await writeFile(box.path('claude-cli'), `﻿{\n  "numStartups": 7,\n  "mcpServers": {\n${claude},\n    "other": { "command": "other" }\n  }\n}\n`);
+  assert.deepEqual(await read('docs', 'claude-cli'), { ...from('claude-cli'), text: claude, holder: 'mcpServers' });
+  // Copilot CLI on one line: from its key; an entry that is no server, as written.
+  await writeFile(box.path('copilot-cli'), '{"mcpServers":{"docs":{"type":"local","command":"npx","tools":["*"]},"held":null}}');
+  assert.deepEqual(await read('docs', 'copilot-cli'), { ...from('copilot-cli'), text: '"docs":{"type":"local","command":"npx","tools":["*"]}', holder: 'mcpServers' });
+  assert.deepEqual(await read('held', 'copilot-cli'), { ...from('copilot-cli'), text: '"held":null', holder: 'mcpServers' });
+  // Pi: mcpServers twice and docs twice in the last, read as the tool reads them (JSON.parse): the last of each.
+  await writeFile(box.path('pi-cli'), '{"mcpServers":{"docs":{"command":"old"}},"mcpServers":{"docs":{"command":"older"},"docs":{"command":"new"}}}');
+  assert.deepEqual(await read('docs', 'pi-cli'), { ...from('pi-cli'), text: '"docs":{"command":"new"}', holder: 'mcpServers' });
+  // Antigravity: a name that needs escaping.
+  await writeFile(box.path('antigravity-cli'), '{\n  "mcpServers": {\n    "docs \\"beta\\"": { "serverUrl": "https://example.test/mcp" }\n  }\n}\n');
+  assert.deepEqual(await read('docs "beta"', 'antigravity-cli'), { ...from('antigravity-cli'), text: '    "docs \\"beta\\"": { "serverUrl": "https://example.test/mcp" }', holder: 'mcpServers' });
+  // OpenCode: under its mcp.servers holder, comments before, inside and after, trailing commas; another server straight under mcp.
+  const openCode = '      "DOCS": {\n        // Run through npx.\n        "type": "local",\n        "command": ["npx", "-y", "docs"], /* its own */\n      }';
+  await writeFile(box.path('opencode-cli'), `{\n  // mine\n  "mcp": {\n    "servers": {\n      /* before */\n${openCode}, // after\n    },\n    "plain": { "type": "remote", "url": "https://plain.test" },\n  },\n}\n`);
+  assert.deepEqual(await read('docs', 'opencode-cli'), { ...from('opencode-cli'), text: openCode, holder: 'mcp.servers' });
+  assert.deepEqual(await read('plain', 'opencode-cli'), { ...from('opencode-cli'), text: '    "plain": { "type": "remote", "url": "https://plain.test" }', holder: 'mcp' });
+  // OpenCode's `servers` that is itself a server (it has a type) holds no servers: read as one.
+  await writeFile(box.path('opencode-cli'), '{"mcp":{"servers":{"type":"local","command":["s"]}}}');
+  assert.deepEqual(await read('servers', 'opencode-cli'), { ...from('opencode-cli'), text: '"servers":{"type":"local","command":["s"]}', holder: 'mcp' });
+  // Another home, a tool not managed there, Codex's TOML (not read here yet): nothing read.
+  assert.equal(await read('docs', 'claude-cli', join(box.home, 'elsewhere')), undefined);
+  assert.equal(await read('docs', 'claude-cli', box.home, ['copilot-cli']), undefined);
+  await writeFile(box.path('codex-cli'), '[mcp_servers.docs]\ncommand = "npx"\n');
+  assert.equal(await read('docs', 'codex-cli'), undefined);
+  // No such member, two a case apart, a file that isn't JSON (a bad escape inside the member, a file cut off), one over 1 MB: each says so, and quotes nothing.
+  const notJson = 'This settings file can’t be read as JSON, so its entry isn’t shown.';
+  assert.deepEqual(await read('nobody', 'claude-cli'), { ...from('claude-cli'), note: 'Its entry isn’t in this settings file now.' });
+  await writeFile(box.path('pi-cli'), '{"mcpServers":{"docs":{"command":"a"},"Docs":{"command":"b"}}}');
+  assert.deepEqual(await read('docs', 'pi-cli'), { ...from('pi-cli'), note: 'Two entries here have its name, so neither is shown.' });
+  await writeFile(box.path('copilot-cli'), '{"mcpServers":{"docs":{"command":"claude-\\qdocs"}}}');
+  assert.deepEqual(await read('docs', 'copilot-cli'), { ...from('copilot-cli'), note: notJson });
+  await writeFile(box.path('copilot-cli'), '{"mcpServers":{"docs":{"command": ');
+  assert.deepEqual(await read('docs', 'copilot-cli'), { ...from('copilot-cli'), note: notJson });
+  await writeFile(box.path('antigravity-cli'), `{"mcpServers":{"docs":{"command":"${'x'.repeat(1024 * 1024)}"}}}`);
+  assert.deepEqual(await read('docs', 'antigravity-cli'), { ...from('antigravity-cli'), note: 'Over 1 MB, so not shown here.' });
+}));
+
+test('A server named in a tool’s settings but never taken in (not a server, two names a case apart) offers that tool to the panel, which reads the entry there or says why it can’t; a version is read as Central Knot stores its file', () => inBox(async box => {
+  await writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { held: null, Twice: { command: 'a' }, twice: { command: 'b' } } }));
+  await writeFile(box.path('claude-cli'), JSON.stringify({ mcpServers: { docs: { command: 'npx', args: ['-y', 'docs'] } } }));
+  const view = await box.view(), named = (key: string) => view.items.find(item => item.key === key)?.namedIn;
+  assert.deepEqual([named('held'), named('twice'), named('docs')], [['copilot-cli'], ['copilot-cli'], undefined]);
+  const from = { files: ['mcp-config.json'], directory: dirname(box.path('copilot-cli')) };
+  assert.deepEqual(await serverEntry(box.context, all, box.home, 'held', 'copilot-cli'), { ...from, text: '"held":null', holder: 'mcpServers' });
+  assert.deepEqual(await serverEntry(box.context, all, box.home, 'twice', 'copilot-cli'), { ...from, note: 'Two entries here have its name, so neither is shown.' });
+  await box.send(on('docs'));
+  const hash = (await box.view()).library.docs.hash;
+  assert.deepEqual(await storedEntry(box.context, 'docs', hash), { files: [], text: await readFile(join(box.home, '.central-knot/items/mcp/docs/versions', `${hash}.json`), 'utf8') });
+  assert.equal(await storedEntry(box.context, 'docs', 'no-such-version'), undefined);
 }));
