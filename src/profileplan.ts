@@ -38,10 +38,10 @@ import { itemThrough, pluginOnIn } from './pluginrows.ts';
 import { isWhole, opposites, type PluginOp } from './pluginplan.ts';
 import { loadsKind, pageOfPart, pluginOff, samePart } from './pluginstatus.ts';
 import { cantSwitch, hasOwnSwitch, itemOffNow, itemSaid, onNow, ownSwitch, type PluginItemAt } from './pluginswitch.ts';
-import { takesPlugins } from './presence.ts';
+import { holds, takesPlugins } from './presence.ts';
 import { groupBy } from './model.ts';
 import { andList, byToolOrder, harnessIds, keptOutWords, kindNouns, orList, sameTools, toolNames } from './words.ts';
-import type { HarnessId, HistoryEvent, HomeView, InstalledPlugin, LibraryFacts, PluginItem, PluginSwitched, Profile } from './types.ts';
+import type { ExceptSwitched, HarnessId, HistoryEvent, HomeView, InstalledPlugin, LibraryFacts, PluginItem, PluginSwitched, Profile } from './types.ts';
 
 /** What every screen calls the state where no profile is in use. */
 export const NO_PROFILE = 'No profile';
@@ -87,12 +87,12 @@ const linkedToPlugin = (item: LibraryItem, plugins: ReadonlySet<string>) => !!it
 
 /**
  * Every live library item of the person's own that profiles act on, skills first, then MCP servers, then agents: all but those
- * linked to a plugin (`plugins`: the ids of the plugins the home records), which are that plugin's items (pluginLive); with the
- * tools each kind is managed in (`managed`), where given.
+ * linked to a plugin (`plugins`: the ids of the plugins the home records), which are that plugin's items (pluginLive); where the
+ * managed tools are given, each with those that hold its kind (presence.ts holds): the page and the switch decide the same.
  */
-export function liveItems(libraries: Libraries, plugins: ReadonlySet<string>, managed?: Record<ItemKind, HarnessId[]>): LiveItem[] {
+export function liveItems(libraries: Libraries, plugins: ReadonlySet<string>, managed?: readonly HarnessId[]): LiveItem[] {
   return KINDS.flatMap(kind => Object.values(libraries[kind]).filter(item => !item.deleted && !linkedToPlugin(item, plugins))
-    .map(({ key, name, on, except }) => ({ id: itemId(kind, key), kind, key, name, on, except, ...(managed ? { managed: managed[kind] } : {}) })));
+    .map(({ key, name, on, except }) => ({ id: itemId(kind, key), kind, key, name, on, except, ...(managed ? { managed: managed.filter(tool => holds(tool, kind)) } : {}) })));
 }
 
 /** Exact Copilot CLI server name for a library server (`row`: its LibraryFacts, if read). Shared with servers.ts rowFacts. */
@@ -100,8 +100,9 @@ export const copilotServerName = (row: Pick<LibraryFacts, 'copies' | 'plugin' | 
 /** Whether `row` holds an unmanaged found entry of exact name `server` in Copilot CLI (not On or applied there). */
 const isFoundCopilot = (row: LibraryFacts, server: string, lib: LibraryItem | undefined, managed: boolean) =>
   row.copies['copilot-cli']?.folder === server && !(managed && (lib?.on || !!lib?.applied?.['copilot-cli']));
+// Skills are held by every managed tool, so their page's tools are the managed ones.
 const ownHomeItems = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents' | 'profiles'>) => liveItems({ skill: home.skills.library, mcp: home.mcp.library, agent: home.agents.library },
-  recordedPlugins(home), { skill: home.skills.tools, mcp: home.mcp.tools, agent: home.agents.tools });
+  recordedPlugins(home), home.skills.tools);
 /** Attaches uncovered Copilot CLI `disabledMcpServers` blocks (`copilotOff`) to live MCP items, excluding names a switchable Copilot CLI plugin copy covers (`plugins`: pluginLive). */
 export function withCopilotOff(items: LiveItem[], rows: readonly LibraryFacts[], plugins: readonly PluginLive[]): LiveItem[] {
   const covered = new Set(plugins.flatMap(item => (item.kind === 'mcp' && item.copies.some(copy => copy.tool === 'copilot-cli' && copy.way === 'switch') ? [item.name] : [])));
@@ -513,6 +514,8 @@ export interface ExceptTurn { item: LiveItem; to: HarnessId[] }
 export interface Turns { on: LiveItem[]; off: LiveItem[]; except: ExceptTurn[] }
 /** Of a plan's `except`, the items On before and after: those whose tools alone change, which the counts and rows take in. */
 export const toolsChanged = (turns: Turns) => turns.except.filter(turn => !turns.on.includes(turn.item) && !turns.off.includes(turn.item));
+/** Whether switching to `profile` clears the Copilot CLI off-switch blocking `item` (LiveItem `copilotOff`): where it leaves the item in Copilot CLI. */
+export const clearsCopilotOff = (profile: Pick<Profile, 'tools' | 'out'>, item: LiveItem) => !!item.copilotOff && !effectiveOut(profile, item)?.includes('copilot-cli');
 /** Whether a plan changes nothing: no item turned On or Off, and no keep-out set. */
 export const unchanged = (turns: Turns) => !changes(turns) && !turns.except.length;
 
@@ -523,8 +526,7 @@ export const unchanged = (turns: Turns) => !changes(turns) && !turns.except.leng
  */
 export function switchPlan(profile: Pick<Profile, 'items' | 'tools' | 'out'>, live: LiveItem[]): Turns {
   const named = new Set(profile.items), outOf = (item: LiveItem) => (named.has(item.id) ? effectiveOut(profile, item) : undefined);
-  const blocked = (item: LiveItem) => !!item.copilotOff && !outOf(item)?.includes('copilot-cli');
-  return { on: live.filter(item => named.has(item.id) && (!item.on || blocked(item))), off: live.filter(item => !named.has(item.id) && item.on),
+  return { on: live.filter(item => named.has(item.id) && (!item.on || clearsCopilotOff(profile, item))), off: live.filter(item => !named.has(item.id) && item.on),
     except: live.flatMap(item => { const to = outOf(item); return to && !sameTools(to, item.except) ? [{ item, to }] : []; }) };
 }
 
@@ -577,8 +579,8 @@ export function endedProfiles(before: readonly Profile[], after: readonly Profil
  */
 export const allTurns = (turns: Turns, plugins: PluginTurn[]) => ({ on: [...turns.on, ...plugins.filter(item => item.on.length)],
   off: [...turns.off, ...plugins.filter(item => item.off.length)], retooled: retools(toolsChanged(turns)) });
-/** Plan turns as keep-out changes: each item's keep-outs now and as set. */
-const retools = (list: ExceptTurn[]): Retool[] => list.map(({ item, to }) => ({ wasExcept: item.except, nowExcept: to }));
+/** Keep-outs a plan sets (Turns `except`), as History and a result keep them: each item's before and after. */
+export const retools = (list: ExceptTurn[]): ExceptSwitched[] => list.map(({ item, to }) => ({ id: item.id, name: item.name, wasExcept: [...item.except], nowExcept: [...to] }));
 
 /** How many items a plan turns On and Off together. */
 export const changes = (turns: { on: unknown[]; off: unknown[] }) => turns.on.length + turns.off.length;
@@ -628,16 +630,16 @@ const entryPlugs = (entry: NonNullable<HistoryEvent['profile']>) => [...new Set(
 
 /**
  * What the Undo of a switch's History entry turns back, decided from each item now: each item it turned On that is still On
- * goes Off, each it turned Off that is still Off goes On, and each whose keep-outs it changed (`except`) that is still On and
- * kept out exactly so gets its keep-outs before back, Off or On. An item whose On or Off, or keep-outs, differ now, or one no
+ * goes Off, each it turned Off that is still Off goes On, and each whose keep-outs it changed (`except`) that is still kept out
+ * exactly so gets its keep-outs before back, On or Off as it is now. An item whose On or Off, or keep-outs, differ now, or one no
  * longer in the library, is left (one turned back and forth since, and now as the switch left it, is turned back like any other).
  */
 export function undoPlan(event: Pick<HistoryEvent, 'profile'>, live: LiveItem[]): Turns {
-  const kept = event.profile?.except ?? [], asLeft = (item: LiveItem) => kept.every(each => each.id !== item.id || sameTools(item.except, each.nowExcept));
-  const still = (named: { id: string }[] | undefined, on: boolean) => live.filter(item => item.on === on && !!named?.some(entry => entry.id === item.id) && asLeft(item));
+  const kept = event.profile?.except ?? [], toolsAsLeft = (item: LiveItem) => kept.every(each => each.id !== item.id || sameTools(item.except, each.nowExcept));
+  const still = (named: { id: string }[] | undefined, on: boolean) => live.filter(item => item.on === on && !!named?.some(entry => entry.id === item.id) && toolsAsLeft(item));
   const except = kept.flatMap(({ id, wasExcept }) => {
     const item = live.find(each => each.id === id);
-    return item?.on && asLeft(item) ? [{ item, to: [...wasExcept] }] : [];
+    return item && toolsAsLeft(item) ? [{ item, to: [...wasExcept] }] : [];
   });
   return { on: still(event.profile?.off, false), off: still(event.profile?.on, true), except };
 }
@@ -768,21 +770,21 @@ export const wholeCounts = ({ installs = [], steps = [] }: { installs?: Installe
   off: installs.filter(install => !install.off).length + steps.filter(op => op.action === 'plugin-off').length });
 
 /** What the save that moves profiles to holding their keep-outs says of the others it filled in (profiles.ts saveProfile `filled`). */
-export const filledWords = (names: string[]) => `Saved. Nothing in your tools changed. ${andList(names)} ${names.length === 1 ? 'keeps' : 'keep'} each item’s tools as they are now.`;
+export const filledWords = (names: string[]) => `Saved. Nothing in your tools changed. Switching back to ${names.length > 2 ? 'your other profiles' : orList(names)} still puts each item where it is now.`;
 
-/** A keep-out change one item has, before and after (types.ts ExceptSwitched, or a plan's ExceptTurn). */
-export interface Retool { wasExcept: HarnessId[]; nowExcept: HarnessId[] }
+/** A keep-out change, before and after (an ExceptSwitched's, as retools makes it). */
+type Retool = Pick<ExceptSwitched, 'wasExcept' | 'nowExcept'>;
 /**
- * How many items' tools alone a switch changes, in words: where each only leaves the same one or two tools, those tools ("4 items
- * leave Codex", after: "4 items now out of Codex"), else counted ("4 items change tools"); '' for none. `line`: the header's short
- * form, without "items".
+ * How many items' tools alone a switch changes, in words: where each only leaves the same one or two tools, those tools in the
+ * rows' words ("4 items out of Codex", after: "4 items now out of Codex"), else counted ("4 items change tools"); '' for none.
+ * `line`: the header's short form, without "items".
  */
 export function retoolWords(list: readonly Retool[], tense: 'will' | 'did' | 'line'): string {
   if (!list.length) return '';
   const gone = (each: Retool) => each.nowExcept.filter(tool => !each.wasExcept.includes(tool)), [first] = list;
   const only = list.every(each => sameTools(gone(each), gone(first!)) && each.wasExcept.every(tool => each.nowExcept.includes(tool))) && gone(first!).length <= 2;
   const count = tense === 'line' ? String(list.length) : plural(list.length, 'item'), where = andList(gone(first!).sort(byToolOrder).map(tool => toolNames[tool]));
-  if (only && where) return tense === 'did' ? `${count} now out of ${where}` : `${count} ${list.length === 1 ? 'leaves' : 'leave'} ${where}`;
+  if (only && where) return `${count} ${tense === 'did' ? 'now ' : ''}out of ${where}`;
   return `${count} ${tense === 'did' ? 'changed' : list.length === 1 ? 'changes' : 'change'} tools`;
 }
 

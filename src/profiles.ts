@@ -32,7 +32,7 @@ import type { KindLibrary } from './librarypass.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from './mcpswitch.ts';
 import { reverse, succeeded, type PluginDone, type PluginDraft, type PluginOp } from './pluginplan.ts';
 import { click } from './pluginswitch.ts';
-import { changes, copilotKeptOnBy, copilotUndo, heldWords, wholeCounts, liveItems, onAfterUndo, outNow, pluginPlan, pluginUndo, switchPlan, toolsChanged, unchanged, undoPlan, wholeRuns, withCopilotOff, type CopilotRule, type CopyTurn, type ExceptTurn, type Libraries, type LiveItem, type PluginLive, type PluginTurn, type Turns, type WholeRun } from './profileplan.ts';
+import { changes, clearsCopilotOff, copilotKeptOnBy, copilotUndo, heldWords, wholeCounts, liveItems, onAfterUndo, outNow, pluginPlan, pluginUndo, retools, switchPlan, toolsChanged, unchanged, undoPlan, wholeRuns, withCopilotOff, type CopilotRule, type CopyTurn, type ExceptTurn, type Libraries, type LiveItem, type PluginLive, type PluginTurn, type Turns, type WholeRun } from './profileplan.ts';
 import type { ReloadChange } from './reload.ts';
 import { applyServers, serverKind, serversView } from './servers.ts';
 import { errorCode, libraryGate, plainError, storeDirectory, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
@@ -41,7 +41,7 @@ import { recordedIds } from './sourcestore.ts';
 import { groupBy } from './model.ts';
 import { record, strings } from './values.ts';
 import { andList, harnessIds, sameTools, toolNames } from './words.ts';
-import type { ApplyResult, Change, DestinationResult, ExceptSwitched, HarnessId, HistoryEvent, LibraryFacts, PassResult, PluginSwitched, Profile, ProfileEdit, ProfileSwitchResult, ProfilesView } from './types.ts';
+import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, PassResult, PluginSwitched, Profile, ProfileEdit, ProfileSwitchResult, ProfilesView } from './types.ts';
 
 // ---------- The profiles file ----------
 
@@ -191,8 +191,6 @@ const KINDS: { kind: ItemKind; open: (context: ShareContext) => Promise<{ librar
   { kind: 'mcp', open: context => serverKind.open(context), pass: applyServers },
   { kind: 'agent', open: context => agentKind.open(context), pass: applyAgents },
 ];
-/** The live items as a switch plans them: the managed tools (`tools`) are the profile's to decide (profileplan.ts effectiveOut). */
-const managedItems = (read: { libraries: Libraries; plugins: Set<string> }, tools: HarnessId[]) => liveItems(read.libraries, read.plugins, { skill: tools, mcp: tools, agent: tools });
 
 /** Each kind's items as its record holds them now, and the plugins the home records (liveItems); or why a record can't be read, and `then` (what was therefore not done). */
 export async function readLibraries(context: ShareContext, then = 'Nothing was switched.'): Promise<{ libraries: Libraries; plugins: Set<string> } | { stop: string }> {
@@ -263,9 +261,8 @@ async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Tu
   const keptTo = new Map(turns.except.map(turn => [turn.item, turn.to]));
   for (const { kind, pass } of KINDS) {
     const asked = [...turns.on.filter(item => item.kind === kind).map(item => [item, true] as const), ...turns.off.filter(item => item.kind === kind).map(item => [item, false] as const),
-      ...toolsChanged(turns).filter(turn => turn.item.kind === kind).map(turn => [turn.item, true] as const)];
-    // An item On before and after was seen On; one it turns On, Off.
-    const clicks = asked.map(([item, on]): Change => ({ key: item.key, on, except: [...keptTo.get(item) ?? item.except], seenOn: !turns.on.includes(item) }));
+      ...toolsChanged(turns).filter(turn => turn.item.kind === kind).map(turn => [turn.item, turn.item.on] as const)];
+    const clicks = asked.map(([item, on]): Change => ({ key: item.key, on, except: [...keptTo.get(item) ?? item.except], seenOn: item.on }));
     for (const [list, mine, toldHere] of [[clicks, false, told], [placedClicks(kind, copies, libraries), true, true]] as const) {
       if (!list.length) continue;
       const done = await pass(context, tools, list, { only: new Set(list.map(each => each.key)), told: toldHere });
@@ -305,7 +302,7 @@ async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Tu
   }
   const after = await readLibraries(context), records = 'stop' in after ? undefined : after.libraries;
   const now = (item: LiveItem) => records && !records[item.kind][item.key]?.deleted ? records[item.kind][item.key]?.on : undefined;
-  const keptAsAsked = ({ item, to }: ExceptTurn) => now(item) === !turns.off.includes(item) && sameTools(records![item.kind][item.key]!.except, to);
+  const keptAsAsked = ({ item, to }: ExceptTurn) => now(item) === (turns.on.includes(item) || (item.on && !turns.off.includes(item))) && sameTools(records![item.kind][item.key]!.except, to);
   const recordOf = ({ item, copy }: CopyTurn) => ('libraryKey' in copy.target ? records?.[item.kind][copy.target.libraryKey] : undefined);
   const letGo = copies.filter(turn => placedKey(turn) && recordOf(turn)?.source !== libraries[turn.item.kind][(turn.copy.target as { libraryKey: string }).libraryKey]?.source);
   const placedDone = (turn: CopyTurn) => {
@@ -352,13 +349,11 @@ function outcome(turns: Turns, done: Turns, results: DestinationResult[], copies
   const itemNames = (list: CopyTurn[]) => [...new Map(list.filter(turn => !turn.along).map(turn => [turn.item.id, turn.item.name])).values()];
   const notDone = (item: LiveItem) => (turns.on.includes(item) && !done.on.includes(item)) || (turns.off.includes(item) && !done.off.includes(item))
     || turns.except.some(turn => turn.item === item && !done.except.includes(turn));
-  const left = [...new Set([...turns.on, ...turns.off, ...turns.except.map(turn => turn.item)])].filter(notDone), retooled = exceptSwitched(toolsChanged(done));
+  const left = [...new Set([...turns.on, ...turns.off, ...turns.except.map(turn => turn.item)])].filter(notDone), retooled = retools(toolsChanged(done));
   return { on: [...names(done.on), ...itemNames(confirmed.filter(turn => turn.on))], off: [...names(done.off), ...itemNames(confirmed.filter(turn => !turn.on))],
     ...(retooled.length ? { retooled } : {}), left: [...names(left), ...itemNames(copies.filter(turn => !confirmed.includes(turn)))],
     results: results.filter(result => result.outcome === 'failed' || result.outcome === 'held') };
 }
-/** Keep-outs a plan sets (Turns `except`), as History keeps them: each item's before and after. */
-const exceptSwitched = (list: ExceptTurn[]): ExceptSwitched[] => list.map(({ item, to }) => ({ id: item.id, name: item.name, wasExcept: [...item.except], nowExcept: [...to] }));
 
 const orphanClearedNote = (rule: CopilotRule) => `Copilot CLI’s off-switch for “${rule.server}” was cleared, so yours is on there.`;
 
@@ -396,7 +391,7 @@ async function settleEntry(context: ShareContext, eventId: string, turned: Turns
   if (!entry?.profile) return undefined;
   entry.profile.on = named(turned.on);
   entry.profile.off = named(turned.off);
-  if (entry.profile.except) { const kept = exceptSwitched(turned.except); if (kept.length) entry.profile.except = kept; else delete entry.profile.except; }
+  if (entry.profile.except) { const kept = retools(turned.except); if (kept.length) entry.profile.except = kept; else delete entry.profile.except; }
   if (entry.profile.plugins) entry.profile.plugins = confirmed.map(switched);
   if (entry.profile.wholeSteps) { if (steps.length) entry.profile.wholeSteps = steps; else delete entry.profile.wholeSteps; }
   if (copilotCleared) { if (copilotCleared.length) entry.profile.copilotCleared = copilotCleared; else delete entry.profile.copilotCleared; }
@@ -424,14 +419,14 @@ export async function switchProfile(context: ShareContext, tools: HarnessId[], i
   if (!profile) return stopped('That profile is gone. Nothing was switched.');
   const read = await readLibraries(context);
   if ('stop' in read) return stopped(read.stop);
-  const live = await plugins.live(), { items } = await withCopilot(context, tools, managedItems(read, tools), live);
+  const live = await plugins.live(), { items } = await withCopilot(context, tools, liveItems(read.libraries, read.plugins, tools), live);
   const planned = switchPlan(profile, items), turns: Turns = { on: planned.on.filter(item => !item.on), off: planned.off, except: planned.except };
-  const clears: CopilotRule[] = planned.on.filter(item => item.copilotOff).map(item => ({ id: item.id, name: item.name, server: item.copilotOff! }));
+  const clears: CopilotRule[] = planned.on.filter(item => clearsCopilotOff(profile, item)).map(item => ({ id: item.id, name: item.name, server: item.copilotOff! }));
   const plan = pluginPlan(profile, live), copies = copiesTurned(plan, live), runs = wholeRuns(profile, copies, live), held = heldResults(plan, live);
   if (unchanged(planned) && !copies.length && !runs.length) return held.length ? stopped(`${heldWords(plan, live).text}. Nothing was switched.`) : { name: profile.name, on: [], off: [], left: [], results: [], reloads: [] };
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return stopped(`${gate.refused} Nothing was switched.`);
-  const steps = runs.flatMap(run => run.ops), kept = exceptSwitched(turns.except);
+  const steps = runs.flatMap(run => run.ops), kept = retools(turns.except);
   const event = profileEvent(context, profile.name, { toName: profile.name, on: named(turns.on), off: named(turns.off), ...(kept.length ? { except: kept } : {}),
     ...(copies.length ? { plugins: copies.map(switched) } : {}), ...(steps.length ? { wholeSteps: steps } : {}), ...(clears.length ? { copilotCleared: clears } : {}) });
   await appendHistory(context, [event]);
@@ -454,7 +449,7 @@ export async function undoSwitch(context: ShareContext, tools: HarnessId[], even
   if (!past?.profile?.on || past.profile.undoOf || past.undoneBy) return stop('That switch has nothing to undo.');
   const read = await readLibraries(context);
   if ('stop' in read) return stop(read.stop);
-  const livePlugins = await plugins.live(), { items, rows } = await withCopilot(context, tools, managedItems(read, tools), livePlugins);
+  const livePlugins = await plugins.live(), { items, rows } = await withCopilot(context, tools, liveItems(read.libraries, read.plugins, tools), livePlugins);
   const turns = undoPlan(past, items), afterOn = onAfterUndo(items, turns), { back, whole, left, keptOff: pluginKept } = pluginUndo(past, livePlugins, afterOn);
   const { back: copilotBack, keptOff: ruleKept } = copilotUndo(past, rows, read.libraries.mcp, afterOn);
   const copilotClear: CopilotRule[] = turns.on.filter(item => item.copilotOff).map(item => ({ id: item.id, name: item.name, server: item.copilotOff! }));
@@ -462,7 +457,7 @@ export async function undoSwitch(context: ShareContext, tools: HarnessId[], even
   if (unchanged(turns) && !back.length && !whole.length && !copilotBack.length) return stop(keptNotes.join(' ') || 'Nothing to undo: each item that switch changed was changed again since.');
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return stop(`${gate.refused} Nothing was undone.`);
-  const kept = exceptSwitched(turns.except);
+  const kept = retools(turns.except);
   const undo = back.length || whole.length || copilotBack.length || copilotClear.length ? profileEvent(context, past.item, { toName: past.profile.toName, undoOf: past.id, on: named(turns.on), off: named(turns.off), ...(kept.length ? { except: kept } : {}),
     ...(back.length ? { plugins: back.map(switched) } : {}), ...(whole.length ? { wholeSteps: whole.flatMap(run => run.ops) } : {}), ...(copilotBack.length ? { copilotCleared: copilotBack } : {}) }) : undefined;
   if (undo) await appendHistory(context, [undo]);

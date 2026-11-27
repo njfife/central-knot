@@ -2865,7 +2865,7 @@ async function practiceFlow() {
   check('its Undo from History says what it did with reload advice and Copy', /^Undone: 2 items turned on\..*In Copilot CLI, type \/skills reload\..*Codex picks it up/.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-copy-copilot-cli'), await a.text('.bands'));
   same('…and every skill is on again', skillsOn.map(key => folders(key).every(Boolean)), [true, true, true, true]);
   // Tools: Copilot CLI unticked in Incident (last, since from then on Incident holds its own keep-outs). The header's clause and
-  // a Changes tools row say notes leaves Copilot CLI; the switch takes notes out of Copilot CLI alone, Claude Code's and Codex's
+  // a Changes tools row say notes goes out of Copilot CLI; the switch takes notes out of Copilot CLI alone, Claude Code's and Codex's
   // folders as they were; Undo switch puts it back.
   await a.click('#nav-profiles');
   const toolsBefore = allFolders();
@@ -2874,7 +2874,7 @@ async function practiceFlow() {
   await a.click('#pf-tool-copilot-cli');
   same('unticking Copilot CLI saves at once and changes no tool; the header’s clause counts the change of tools, a row says where, the list says 2 tools',
     [await a.all('.pf-tools input', 'e.checked'), allFolders(), await a.text('.profile-header p'), await stateShown('notes'), await a.text('.profile-row.selected .list-fraction')],
-    [[true, false, true], toolsBefore, 'Switching turns 3 off · 1 leaves Copilot CLI', 'Out of Copilot CLI', '1 item · 2 tools']);
+    [[true, false, true], toolsBefore, 'Switching turns 3 off · 1 out of Copilot CLI', 'Out of Copilot CLI', '1 item · 2 tools']);
   await a.click('#profile-changes');
   same('Changes puts notes under Changes tools, saying where', [await a.all('.pf-section strong', 'e.textContent'), await a.all('.pf-row[data-item] .pf-state', 'e.textContent'), await a.text('#profile-changes')],
     [['Turns off', 'Changes tools'], ['', '', '', 'Out of Copilot CLI'], 'Changes 4']);

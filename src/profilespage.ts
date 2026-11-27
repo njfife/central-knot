@@ -74,8 +74,9 @@ function listRow(profile: Profile, { count, isInUse, selected }: { count: number
   return h(`button.list-row.profile-row${selected ? '.selected' : ''}`, { type: 'button', id: `profile-row-${profile.id}`, 'aria-current': selected ? 'true' : undefined,
     onclick: () => openProfileById(profile.id) },
     icon('sliders-horizontal', 14, 'tone-muted'),
-    h('span.list-name.profile-row-name', { title: profile.name }, profile.name),
-    h('span.list-fraction', {}, plural(count, 'item'), tools.length < managed().length ? ` · ${plural(tools.length, 'tool')}` : ''),
+    // The name keeps its line (cut with … where it must, whole on hover); the counts go under it.
+    h('span.profile-row-text', {}, h('span.list-name.profile-row-name', { title: profile.name }, profile.name),
+      h('span.list-fraction', {}, plural(count, 'item'), tools.length < managed().length ? ` · ${plural(tools.length, 'tool')}` : '')),
     isInUse ? h('span.profile-in-use', { title: profile.switchesPluginItems
       ? `${profile.name} is in use: what it has is on, and every other item is off wherever it can be switched`
       : `${profile.name} is in use: what it has is on, and every other item of yours is off. ${PLUGIN_ITEMS_STAY}` }, icon('check', 12), 'In use') : null);
