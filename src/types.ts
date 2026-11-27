@@ -151,8 +151,16 @@ export interface DesktopApi {
    * A tool's Manage switch (toolchoice.ts chooseTools): Central Knot's care of it turned on or off, then the home read and synced.
    * `resume`: the page showed a home that waits for Resume, which the switch resumes as a click does. `did`: what that pass did in
    * the tool (its results there), which the band after the click says. `full`: `stopped` is already a complete sentence.
+   * `expected`: for On, what its question said it would do there (whatJoiningDoes); where main counts otherwise now, nothing is
+   * turned and `changed` is what it counts.
    */
-  manageTool(tool: HarnessId, on: boolean, resume: boolean, home: string): Promise<{ stopped?: string; full?: true; view: HomeView | null; did: DestinationResult[] }>;
+  manageTool(tool: HarnessId, on: boolean, resume: boolean, home: string, expected?: JoinCounts): Promise<{ stopped?: string; full?: true; view: HomeView | null; did: DestinationResult[]; changed?: JoinCounts }>;
+  /**
+   * What turning a left-out tool's Manage switch on would do there now (toolchoice.ts whatJoiningDoes), read for its question
+   * with nothing saved or fetched; `plugins`: it would get a plugin by itself (main.ts pluginsFollow); or why it can't be read
+   * or turned.
+   */
+  whatJoiningDoes(tool: HarnessId, home: string): Promise<{ counts: JoinCounts; plugins: boolean } | { failed: string }>;
   /** The Overview's line that `tool` came under management in `home` (arrivals.ts), closed for good. */
   dismissArrival(tool: HarnessId, home: string): Promise<void>;
   /** Replace: the build the held screen names, its bundle at `path`, quit and moved to the Trash (main.ts builds:replace, otherbuilds.ts removeBuild). */
@@ -418,8 +426,6 @@ export interface SyncView {
   managed: HarnessId[];
   /** The tools installed here, managed or not (presence.ts presentTools): Harnesses has a card with a Manage switch for each. */
   present: HarnessId[];
-  /** For each installed tool left out, what turning its Manage switch on would do there now (toolchoice.ts whatJoiningDoes). */
-  joining: Partial<Record<HarnessId, JoinCounts>>;
   /** Where each tool's skills folder is, which other apps read it too, and why Central Knot does not write there, if it does not. */
   writes: Partial<Record<HarnessId, { to: string; alsoReadBy: string[]; blocked?: string }>>;
   access: WriteAccess;
@@ -449,9 +455,16 @@ export interface Arrival { tool: HarnessId; since: string; copied?: number }
  * What managing one more tool would do there now, each kind's added up (librarypass.ts joinCounts, from the same look and plans
  * the pass then uses, with the tool added): items written there; copies there that differ, kept as versions first; copies of
  * items that are Off there, removed; and items there Central Knot doesn't hold, found, or taken in by Synchronize everything
- * where it is on.
+ * where it is on. `changing`: each item those are about, from its own plan, in plan order. `unread`: the kinds whose file or
+ * folder there, or whose own record in Central Knot, can't be read, so what it does to them is not known (their counts say nothing).
  */
-export interface JoinCounts { written: number; kept: number; removed: number; found: number; takenIn: number }
+export interface JoinCounts { written: number; kept: number; removed: number; found: number; takenIn: number; changing: JoinItem[]; unread: ItemKind[] }
+/**
+ * One item managing a tool again changes, from its own plan (librarypass.ts joinCounts): its kind, key and name; what the pass
+ * does there (writes Central Knot's version, removes a copy of an item that is off, only saves its copy, or takes a found item
+ * in by Synchronize everything); and how many copies there it saves as versions first.
+ */
+export interface JoinItem { kind: ItemKind; key: string; name: string; does: 'write' | 'remove' | 'keep' | 'take'; saves: number }
 
 /**
  * One click on an item, as the page and History send it to any kind's engine, and as the library's pass takes it. `on` and
