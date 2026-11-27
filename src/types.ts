@@ -151,8 +151,16 @@ export interface DesktopApi {
    * A tool's Manage switch (toolchoice.ts chooseTools): Central Knot's care of it turned on or off, then the home read and synced.
    * `resume`: the page showed a home that waits for Resume, which the switch resumes as a click does. `did`: what that pass did in
    * the tool (its results there), which the band after the click says. `full`: `stopped` is already a complete sentence.
+   * `expected`: for On, what its question said it would do there (whatJoiningDoes); where main counts otherwise now, nothing is
+   * turned and `changed` is what it counts.
    */
-  manageTool(tool: HarnessId, on: boolean, resume: boolean, home: string): Promise<{ stopped?: string; full?: true; view: HomeView | null; did: DestinationResult[] }>;
+  manageTool(tool: HarnessId, on: boolean, resume: boolean, home: string, expected?: JoinCounts): Promise<{ stopped?: string; full?: true; view: HomeView | null; did: DestinationResult[]; changed?: JoinCounts }>;
+  /**
+   * What turning a left-out tool's Manage switch on would do there now (toolchoice.ts whatJoiningDoes), read for its question
+   * with nothing saved or fetched; `plugins`: it would get a plugin by itself (main.ts pluginsFollow); or why it can't be read
+   * or turned.
+   */
+  whatJoiningDoes(tool: HarnessId, home: string): Promise<{ counts: JoinCounts; plugins: boolean } | { failed: string }>;
   /** The Overview's line that `tool` came under management in `home` (arrivals.ts), closed for good. */
   dismissArrival(tool: HarnessId, home: string): Promise<void>;
   /** Replace: the build the held screen names, its bundle at `path`, quit and moved to the Trash (main.ts builds:replace, otherbuilds.ts removeBuild). */
@@ -245,6 +253,10 @@ export interface DesktopApi {
   onSessionCostsChanged(callback: (view: SessionCostsView) => void): void;
   /** Runs one tool's own MCP list command for the open home and reads its answer of the servers `names` (mcpsigninrun.ts checkSignin); null for another home, or a tool with no such command. */
   checkSignin(tool: HarnessId, home: string, names: string[]): Promise<SigninAnswer | null>;
+  /** Starts `tool`'s own sign-in for row `row`'s server, the copy the cell showed (`copy`: mcpsignin.ts cellKey), and answers how it ended (mcpsigninrun.ts startSignin). */
+  startSignin(tool: HarnessId, home: string, row: string, copy: string): Promise<SigninEnd>;
+  /** Stops the sign-in under way, if the open home is `home` (mcpsigninrun.ts stopSignin). */
+  stopSignin(home: string): Promise<void>;
   /**
    * Word search over what the Library holds and the items of listed plugins installed in no managed tool (search.ts), answered
    * beside main's queue from the index last published; `shown`: how many of those plugins' items the page draws (search.ts drawnAtOnce).
@@ -318,7 +330,7 @@ export interface DesktopApi {
   /** Forgets a source: its items stay as they are, On or Off, with their versions (sources.ts removeSource). */
   removeSource(id: string, home: string): Promise<SourceResult>;
   /** Adds or changes a profile's name and items (Central Knot's own file; no tool is written). */
-  saveProfile(profile: ProfileEdit, home: string): Promise<{ problem?: string; id?: string; profiles?: ProfilesView }>;
+  saveProfile(profile: ProfileEdit, home: string): Promise<{ problem?: string; id?: string; filled?: string[]; profiles?: ProfilesView }>;
   deleteProfile(id: string, home: string): Promise<{ problem?: string; profiles?: ProfilesView }>;
   /** Switches to a profile: what it names On, every other library item Off. One History entry, with Undo. */
   switchProfile(id: string, home: string): Promise<ProfileSwitchResult>;
@@ -418,8 +430,6 @@ export interface SyncView {
   managed: HarnessId[];
   /** The tools installed here, managed or not (presence.ts presentTools): Harnesses has a card with a Manage switch for each. */
   present: HarnessId[];
-  /** For each installed tool left out, what turning its Manage switch on would do there now (toolchoice.ts whatJoiningDoes). */
-  joining: Partial<Record<HarnessId, JoinCounts>>;
   /** Where each tool's skills folder is, which other apps read it too, and why Central Knot does not write there, if it does not. */
   writes: Partial<Record<HarnessId, { to: string; alsoReadBy: string[]; blocked?: string }>>;
   access: WriteAccess;
@@ -449,9 +459,16 @@ export interface Arrival { tool: HarnessId; since: string; copied?: number }
  * What managing one more tool would do there now, each kind's added up (librarypass.ts joinCounts, from the same look and plans
  * the pass then uses, with the tool added): items written there; copies there that differ, kept as versions first; copies of
  * items that are Off there, removed; and items there Central Knot doesn't hold, found, or taken in by Synchronize everything
- * where it is on.
+ * where it is on. `changing`: each item those are about, from its own plan, in plan order. `unread`: the kinds whose file or
+ * folder there, or whose own record in Central Knot, can't be read, so what it does to them is not known (their counts say nothing).
  */
-export interface JoinCounts { written: number; kept: number; removed: number; found: number; takenIn: number }
+export interface JoinCounts { written: number; kept: number; removed: number; found: number; takenIn: number; changing: JoinItem[]; unread: ItemKind[] }
+/**
+ * One item managing a tool again changes, from its own plan (librarypass.ts joinCounts): its kind, key and name; what the pass
+ * does there (writes Central Knot's version, removes a copy of an item that is off, only saves its copy, or takes a found item
+ * in by Synchronize everything); and how many copies there it saves as versions first.
+ */
+export interface JoinItem { kind: ItemKind; key: string; name: string; does: 'write' | 'remove' | 'keep' | 'take'; saves: number }
 
 /**
  * One click on an item, as the page and History send it to any kind's engine, and as the library's pass takes it. `on` and
@@ -498,7 +515,7 @@ export interface Change {
   untake?: Partial<Record<HarnessId, string>>;
 }
 
-export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, what is not as it asked, any settings notes, and each plugin item's copy it left (`since`). */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left' | 'settingsChanged'> & { since?: string[]; /** The plugins it turned back whole in Claude Code, by direction (profileplan.ts wholeCounts). */ plugins?: { on: number; off: number } }; /** Confirmed changes for reload advice (reload.ts). */ reloads: ReloadChange[]; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
+export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, what is not as it asked, any settings notes, and each plugin item's copy it left (`since`). */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'retooled' | 'left' | 'settingsChanged'> & { since?: string[]; /** The plugins it turned back whole in Claude Code, by direction (profileplan.ts wholeCounts). */ plugins?: { on: number; off: number } }; /** Confirmed changes for reload advice (reload.ts). */ reloads: ReloadChange[]; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
 
 /**
  * What sync did on its own, told once in the Library: to one item (ItemNotice), the found items Synchronize everything
@@ -610,9 +627,13 @@ export interface HistoryEvent {
   managing?: { tool: HarnessId; on: boolean };
   /** 'on' / 'off': the one harness it was turned on or off in, or (`cause` 'in-line') put in. */
   only?: HarnessId;
-  /** 'on' / 'off' (`cause` 'switch'): keep-outs before and after when a person's switch changed `on` together with `except`. */
+  /**
+   * 'on' / 'off' (`cause` 'switch'): keep-outs before and after when a person's switch changed `on` together with `except`, or
+   * (`exceptOnly`) when it changed only `except`, in more than one harness at once (kind 'off' when it kept any out, else 'on').
+   */
   wasExcept?: HarnessId[];
   nowExcept?: HarnessId[];
+  exceptOnly?: true;
   /** 'on' (`cause` 'switch', one tool): managed tools that also read that tool's skills folder at the click (skills.ts readers). */
   alsoRead?: HarnessId[];
   /**
@@ -663,10 +684,11 @@ export interface HistoryEvent {
    * in an entry of the Undo's own (`undoOf`: the switch's entry; `plugins`: what it turned them back to; `on` and `off`: his items
    * it turned back too, which have entries of their own as well), which has no Undo. A switch's `wholeSteps`: the steps it ran on
    * the plugins Claude Code takes whole (profileplan.ts wholeRuns: written as planned, then those that changed), each plugin's
-   * reversed by its Undo while the plugin is as they left it (profileplan.ts pluginUndo). An
-   * entry from before profiles were sets of items has neither `on` nor `off`: it is past.
+   * reversed by its Undo while the plugin is as they left it (profileplan.ts pluginUndo). `except`: the library items whose
+   * keep-outs it changed, turned On or On before and after (a profile that holds them: profileplan.ts effectiveOut), each put
+   * back by its Undo while as it left them. An entry from before profiles were sets of items has neither `on` nor `off`: it is past.
    */
-  profile?: { toName?: string; on?: SwitchedItem[]; off?: SwitchedItem[]; plugins?: PluginSwitched[]; wholeSteps?: PluginOp[]; copilotCleared?: { id: string; name: string; server: string }[]; migrated?: true; undoOf?: string };
+  profile?: { toName?: string; on?: SwitchedItem[]; off?: SwitchedItem[]; except?: ExceptSwitched[]; plugins?: PluginSwitched[]; wholeSteps?: PluginOp[]; copilotCleared?: { id: string; name: string; server: string }[]; migrated?: true; undoOf?: string };
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false); `before`, a Claude Code override it replaced ("name-only"), for Undo. */
   switched?: SwitchRecord[];
   /** What the pass changed in a tool's own settings with the copies, in words (librarypass.ts Kind.follow): Pi's skills list. */
@@ -1058,6 +1080,11 @@ export interface ToolUsage {
 export type SigninSaid = { is: 'no-sign-in' | 'signed-in' | 'connected' | 'needs-sign-in' | 'not-known' } | { is: 'unreachable'; why: string } | { is: 'unread'; line: string };
 /** One tool's MCP sign-in check: what it said of each server, by its own name for it; or that it couldn't be run or didn't end in time; or the first line of an answer in a shape not known. */
 export type SigninAnswer = { servers: Record<string, SigninSaid> } | { failed: 'missing' | 'timeout' } | { unreadable: string };
+/**
+ * How a sign-in ended (mcpsigninrun.ts startSignin): its tool ended with exit code 0; its tool ended otherwise (`unfinished`: the
+ * last line it printed); it was stopped, or no command line was found (`failed`); or main started nothing (`notStarted`: why).
+ */
+export type SigninEnd = { signedIn: true } | { unfinished: string } | { failed: 'timeout' | 'stopped' | 'missing' } | { notStarted: string };
 /** One reading of a home's session history, made when the page collects usage (app.ts collectUsage): when, and every tool's. */
 export interface UsageReading { at: string; tools: ToolUsage[] }
 
@@ -1540,9 +1567,12 @@ export interface RepoResult { view: RepoView; stopped?: string; /** Connect: the
  * `switchesPluginItems` is true, plugins' items as `plugin:<kind>:<key>` (profileplan.ts pluginItemId). Switching to it turns
  * those library items On and every other Off; when `switchesPluginItems` is true it also turns each plugin's item on or off in
  * each tool that can switch that one item, and when false it leaves every plugin copy as it stands except clearing a Copilot CLI
- * off-switch blocking a server of yours that it names. Which profile is in use is worked out.
+ * off-switch blocking a server of yours that it names. Which profile is in use is worked out. `tools` (the tools it applies
+ * to: its items are kept out of every other) and `out` (per library item id, the tools it keeps that item out of besides)
+ * are stored only in a format 4 file; a profile with neither leaves each item's keep-outs as the Library has them
+ * (profileplan.ts effectiveOut, the one rule).
  */
-export interface Profile { id: string; name: string; items: string[]; switchesPluginItems: boolean }
+export interface Profile { id: string; name: string; items: string[]; switchesPluginItems: boolean; tools?: HarnessId[]; out?: Record<string, HarnessId[]> }
 
 export interface ProfilesView {
   profiles: Profile[];
@@ -1560,10 +1590,12 @@ export interface ProfilesView {
  * makes a deleted profile again with its own `id` (Undo of Delete). `switchesPluginItems` defaults to true on a new profile,
  * stays as stored on edits, and once true stays true.
  */
-export interface ProfileEdit { id?: string; name?: string; items?: string[]; switchesPluginItems?: boolean; restore?: boolean }
+export interface ProfileEdit { id?: string; name?: string; items?: string[]; switchesPluginItems?: boolean; tools?: HarnessId[]; out?: Record<string, HarnessId[]>; restore?: boolean }
 
 /** A library item a profile switch named, as History keeps it: its id (profileplan.ts itemId) and its name then. */
 export interface SwitchedItem { id: string; name: string }
+/** A library item whose keep-outs a profile switch changed, as History keeps it: its keep-outs before and after. */
+export interface ExceptSwitched extends SwitchedItem { wasExcept: HarnessId[]; nowExcept: HarnessId[] }
 
 /**
  * One copy of a plugin's item a profile switch turned, as History keeps it: the item's id (profileplan.ts pluginItemId) and its
@@ -1578,4 +1610,4 @@ export interface PluginSwitched { id: string; name: string; tool: HarnessId; on:
  * was turned in; and what could not be done in a tool (`results`: a plugin item's copy held or failed there too). `event`: its
  * History entry; none when nothing changed.
  */
-export interface ProfileSwitchResult { stopped?: string; name?: string; on: string[]; off: string[]; left: string[]; results: DestinationResult[]; event?: string; /** The settled profile entry written to History, so the header asks profileplan.ts undoOffered without rereading History. */ profile?: HistoryEvent['profile']; view?: HomeView; /** As its History entry's (HistoryEvent settingsChanged). */ settingsChanged?: string[]; /** Confirmed changes for reload advice (reload.ts). */ reloads: ReloadChange[] }
+export interface ProfileSwitchResult { stopped?: string; name?: string; on: string[]; off: string[]; /** The items it left On whose tools alone it changed, with their keep-outs before and after (HistoryEvent profile `except`); absent when none. */ retooled?: ExceptSwitched[]; left: string[]; results: DestinationResult[]; event?: string; /** The settled profile entry written to History, so the header asks profileplan.ts undoOffered without rereading History. */ profile?: HistoryEvent['profile']; view?: HomeView; /** As its History entry's (HistoryEvent settingsChanged). */ settingsChanged?: string[]; /** Confirmed changes for reload advice (reload.ts). */ reloads: ReloadChange[] }
