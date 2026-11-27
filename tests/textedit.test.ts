@@ -97,6 +97,12 @@ test('TOML: replacing, adding and removing a server table leaves every other byt
   assert.equal(readTomlTables(added).find(table => table.path[1] === 'my server')!.entries[0].value, 'x');
 });
 
+test('TOML: a table whose last value is a multi-line string with a closing line starting with # owns that line, so a rewrite takes the value whole and leaves every other byte', () => {
+  const before = 'model = "o3"\n\n', after = '\n# about work\n[profiles.work]\nmodel = "o3"\n';
+  const text = `${before}[mcp_servers.docs]\ncommand = "npx"\nargs = ["""first\n# last line"""]\n${after}`;
+  assert.equal(setTomlTable(text, ['mcp_servers'], 'docs', '[mcp_servers.docs]\ncommand = "new"\n'), `${before}[mcp_servers.docs]\ncommand = "new"\n${after}`);
+});
+
 test('TOML: each [[array]] block is read as its own table, and blocks are dropped or added with every other byte kept', () => {
   const text = `${codexToml}\n[[skills.config]]\nname = "a:one"\nenabled = false\n# about the next one\n[[ skills.config ]]\npath = "/p/SKILL.md"\nenabled = false\n`;
   const blocks = readTomlTables(text).filter(table => table.array);

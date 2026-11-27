@@ -168,7 +168,7 @@ function summaryCard(snapshot: Snapshot, home: HomeView, showManageInfo = false)
   const path = h('span.harness-card-path', { title: snapshot.root }, h('span.mono', {}, shownPath(snapshot.root)));
   const foot = (manage: HTMLElement) => h('div.harness-card-foot', {}, manage, path);
   if (installed && !here) return h('div.card.harness-card.harness-card-out', { id: `harness-card-${tool}`, 'aria-label': `${names[tool]}: not managed` },
-    h('div.harness-card-main', {}, head, status, h('span.harness-card-next', {}, `Left out: Central Knot writes nothing in ${names[tool]}, and shows it on no other page but History.`)), foot(manageRow(home, tool)));
+    h('div.harness-card-main', {}, head, status, h('span.harness-card-next', {}, `Left out: Central Knot writes nothing in ${names[tool]}. Its switch asks before managing it again.`)), foot(manageRow(home, tool)));
   if (!here) return h('div.card.harness-card.harness-card-missing', { id: `harness-card-${tool}`, 'aria-label': `${names[tool]}: not found` },
     // When no tool at all was found, the note above already says to install one; each card need not repeat it.
     h('div.harness-card-main', {}, head, status, home.sync.present.length ? h('span.harness-card-next', {}, `Install ${names[tool]}, then Refresh.`) : null), path);
