@@ -316,11 +316,17 @@ export function undoTitle(back: PluginOp[], { plugin, updated = false }: { plugi
  */
 export const notUndone = (ops: PluginOp[], done: PluginDone[]): PluginOp[] => ops.filter(op => !done.some(entry => succeeded(entry.report) && opKey(entry) === opKey(op)));
 
-/** Where a plugin run or problem belongs: Plugins (`'plugins'`), or one tool's Plugins tab under Harnesses. */
-export type RunPlace = 'plugins' | HarnessId;
+/**
+ * Where a plugin run or problem belongs: Plugins (`'plugins'`); a bare tool id, that tool's Plugins tab under Harnesses;
+ * Instructions (`'instructions'`); `'instructions:<tool>'`, that tool's Instructions tab. The first two say it in the window's
+ * header, the Instructions ones in a band on the page (pluginspage.ts runBand).
+ */
+export type RunPlace = 'plugins' | HarnessId | 'instructions' | `instructions:${HarnessId}`;
 
 /** The Plugins page's last run (a click, a plugin's switch or an Undo): each tool's report, whether it was an Undo, in which home, and for an Undo the reversals that didn't succeed. */
 export interface LastRun { done: PluginDone[]; undo: boolean; home: string; /** Where the run was made (default `'plugins'`). */ place?: RunPlace; rest?: PluginOp[]; /** Read again since (Refresh): what the tools have now may differ from what this run says it did. */ reread?: boolean;
+  /** The stop main gave the click that made the run, as its plugin's line: said once the list's clicks are gone (pluginstate.ts lastLines). */
+  stop?: ResultLine;
   /** The plugins a run that stopped never reached (pluginstate.ts applyPluginOps). */
   unreached?: { source: string; plugin: string }[];
   /** Appended profileLeftUse sentence when the run ended every profile in use (pluginstate.ts, pluginspage.ts). */
