@@ -15,7 +15,8 @@
 // - the one answer to "can this folder be written?" (folderAccess: on Windows the folder opened for writing, once a pass), and
 //   whether a refusal is a denial of permission (denied, which discovery.ts and skillfiles.ts read a refusal by);
 // - a skill's folder read as one content (readTree), copied byte for byte (copyTree), staged beside its target and put in
-//   place (stagingFolder, placeCopy).
+//   place (stagingFolder, placeCopy);
+// - one file's text for a file panel, at most 1 MB of it (shownText).
 // Not here: a kind's record (kindstore.ts and each kind's store), History (history.ts), a tool's folders and files
 // (skillfiles.ts, mcp.ts, agentfiles.ts), and which tools are managed (presence.ts managedTools).
 //
@@ -286,6 +287,36 @@ export function targetFor(harness: HarnessId, directory: string, source: Skill):
     case 'claude-cli':
       return { harness, directory, limits: [], note: source.metadataKeys.length ? `${source.metadataKeys.join(', ')}: effect not tested in Claude Code.` : undefined };
   }
+}
+
+// ---------- A file shown on the page ----------
+
+const SHOWN_LIMIT = 1024 * 1024;
+const OVER_LIMIT = 'Over 1 MB, so not shown here.';
+/**
+ * One file's text for a file panel (skills.ts readSkillFile, agentfiles.ts agentFile), read once its caller has found it to be a
+ * regular file `size` bytes long: at most 1 MB + 1 byte is read, so a file that grows meanwhile is still refused. A note in its
+ * place when it is over 1 MB or holds a zero byte; none when it can't be read.
+ */
+export async function shownText(path: string, size: number): Promise<{ text: string } | { note: string } | undefined> {
+  if (size > SHOWN_LIMIT) return { note: OVER_LIMIT };
+  let handle;
+  try {
+    handle = await open(path, 'r');
+    let buffer = Buffer.allocUnsafe(size + 1);
+    let read = 0;
+    while (read <= SHOWN_LIMIT) {
+      if (read === buffer.length) buffer = Buffer.concat([buffer, Buffer.allocUnsafe(Math.min(buffer.length, SHOWN_LIMIT + 1 - read))]);
+      const { bytesRead } = await handle.read(buffer, read, buffer.length - read, read);
+      if (bytesRead === 0) break;
+      read += bytesRead;
+    }
+    const bytes = buffer.subarray(0, read);
+    if (bytes.length > SHOWN_LIMIT) return { note: OVER_LIMIT };
+    if (bytes.includes(0)) return { note: 'Not a text file.' };
+    return { text: bytes.toString('utf8') };
+  } catch { return undefined; }
+  finally { await handle?.close().catch(() => undefined); }
 }
 
 // ---------- State ----------

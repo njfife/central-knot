@@ -126,11 +126,11 @@ export interface DesktopApi {
   /** One version of a skill: its SKILL.md and the names of its other files (skills.ts skillVersion). */
   skillVersion(key: string, hash: string): Promise<{ skill: string; files: string[] } | null>;
   /** One regular file of a stored skill version, with every regular file of its folder (skills.ts skillVersionFile). */
-  skillVersionFile(key: string, hash: string, file: string): Promise<SkillFileRead | null>;
+  skillVersionFile(key: string, hash: string, file: string): Promise<FileRead | null>;
   /** One regular file of a found skill copy in `tool` (narrowed by `rootLabel`), with every regular file of its folder (skills.ts skillFoundFile). */
-  skillFoundFile(key: string, tool: HarnessId, rootLabel: string | undefined, file: string): Promise<SkillFileRead | null>;
+  skillFoundFile(key: string, tool: HarnessId, rootLabel: string | undefined, file: string): Promise<FileRead | null>;
   /** One regular file of a plugin skill (installed in a tool or from its marketplace copy), with every regular file of its folder (skills.ts skillPluginFile). */
-  skillPluginFile(ref: PluginSkillRef, file: string): Promise<SkillFileRead | null>;
+  skillPluginFile(ref: PluginSkillRef, file: string): Promise<FileRead | null>;
   history(): Promise<HistoryList>;
   applyServers(changes: Change[], resume: boolean, home: string): Promise<PassResult>;
   /** One version of an MCP server: its shared part (servers.ts serverVersion). */
@@ -218,6 +218,8 @@ export interface DesktopApi {
   instructions(readId?: number): Promise<InstructionFile[] | null>;
   /** One version of an agent as Central Knot's library holds it: its name, description and prompt; null when it is no longer kept. */
   agentVersion(key: string, hash: string): Promise<{ name: string; description: string; prompt: string } | null>;
+  /** One agent's file in a managed tool of the home open, as that tool has it, with its folder (agents.ts agentToolFile). */
+  agentFile(home: string, key: string, tool: HarnessId): Promise<FileRead | null>;
   /** Reads which skills, agents and MCP servers the tools' session history shows were used (usage.ts readUsage), when the page collects usage (app.ts collectUsage); null for another home than the open one. */
   readUsage(home: string): Promise<UsageReading | null>;
   /**
@@ -349,8 +351,11 @@ export interface PluginTurnResult { stopped?: string; done: PluginDone[]; before
 // ---------- Managing skills across tools ----------
 
 
-/** One regular file of a skill's folder, with every regular file listed by name (skills.ts skillVersionFile, skillFoundFile, skillPluginFile). */
-export interface SkillFileRead { files: string[]; text?: string; note?: string; directory?: string }
+/**
+ * A file panel's read: one regular file of a skill's folder, with every regular file listed by name (skills.ts skillVersionFile,
+ * skillFoundFile, skillPluginFile), or an agent's one file in a tool, with its folder (agentfiles.ts agentFile).
+ */
+export interface FileRead { files: string[]; text?: string; note?: string; directory?: string }
 /** What names a plugin's skill for main to resolve on disk without the page sending a path (`source` for a Find hit's marketplace; skills.ts skillPluginFile). */
 export interface PluginSkillRef { marketName: string; plugin: string; part: string; from: HarnessId | 'marketplace'; source?: string }
 

@@ -19,7 +19,7 @@
 // are kept and the migration from the earlier record, skillstore.ts and skillmigrate.ts; the row and its words,
 // libraryrow.ts with librarypages.ts; History's sentences and actions, historyactions.ts.
 import { randomUUID } from 'node:crypto';
-import { lstat, open, readFile, readdir, realpath, stat, unlink } from 'node:fs/promises';
+import { lstat, readFile, readdir, realpath, stat, unlink } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { inside, pathIn, pluginSkills } from './catalogdetail.ts';
 import { appendHistory, readHistory, replaceHistory } from './history.ts';
@@ -33,7 +33,7 @@ import { comparableText } from './pluginstatus.ts';
 import { installedPlugins, pluginHolds, SAFE_NAME, throughPlugins, type GivenByPlugin, type PluginContext, type PluginHold } from './plugins.ts';
 import { takesPlugins } from './presence.ts';
 import { destinationReloads } from './reload.ts';
-import { errorCode, itemKey, landingOf, libraryGate, notCopied, plainError, readTree, syncGate, targetFor, writeAccess, type ShareContext, type Tree } from './share.ts';
+import { errorCode, itemKey, landingOf, libraryGate, notCopied, plainError, readTree, shownText, syncGate, targetFor, writeAccess, type ShareContext, type Tree } from './share.ts';
 import { alsoReads, folderTime, lockedRoot, placeFolder, readCopy, readShape, readSkillsFolder, recoverFolders, removeFolder,
   rootOf, rootProblem, sharedFolder, swapFolder, type FolderReads, type SkillCopy } from './skillfiles.ts';
 import { openLibrary, readVersion, recordedSkills, saveLibrary, storeVersion, type SkillContent } from './skillstore.ts';
@@ -46,7 +46,7 @@ import { agentInPi, agentKind, applyAgents } from './agents.ts';
 import { harnesses, isSkillEntry, toolConfigRoot } from './harnesses.ts';
 import { displayPath } from './machine.ts';
 import type {
-  Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, PluginSkillRef, Skill, SkillFileRead, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy,
+  Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, PluginSkillRef, Skill, FileRead, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy,
 } from './types.ts';
 import { andList, notManagedHere, throughPlugin, toolName } from './words.ts';
 
@@ -616,7 +616,6 @@ export async function skillVersion(context: ShareContext, key: string, hash: str
   const tree = await readTree(version.directory);
   return { skill: await readFile(join(version.directory, 'SKILL.md'), 'utf8').catch(() => ''), files: [...tree.files.keys()].filter(name => name !== 'SKILL.md').sort() };
 }
-const FILE_LIMIT = 1024 * 1024;
 /** Regular files under `directory` by name (no hashing; skips .git, editor noise, links and specials), SKILL.md first. */
 async function listSkillFiles(directory: string): Promise<string[] | undefined> {
   const files: string[] = [];
@@ -632,31 +631,15 @@ async function listSkillFiles(directory: string): Promise<string[] | undefined> 
   const rest = files.filter(name => name !== 'SKILL.md').sort();
   return files.includes('SKILL.md') ? ['SKILL.md', ...rest] : rest;
 }
-/** Lists a skill folder's regular files by name and reads at most 1 MB + 1 byte of one; refuses links, specials, unlisted names, binary and >1 MB. */
-async function readSkillFile(directory: string, file: string): Promise<SkillFileRead | undefined> {
+/** Lists a skill folder's regular files by name and reads one through share.ts shownText; refuses links, specials and unlisted names. */
+async function readSkillFile(directory: string, file: string): Promise<FileRead | undefined> {
   const files = await listSkillFiles(directory);
   if (!files || !files.includes(file)) return undefined;
   const path = join(directory, file);
   const info = await lstat(path).catch(() => undefined);
   if (!info?.isFile()) return undefined;
-  if (info.size > FILE_LIMIT) return { files, note: 'Over 1 MB, so not shown here.' };
-  let handle;
-  try {
-    handle = await open(path, 'r');
-    let buffer = Buffer.allocUnsafe(info.size + 1);
-    let read = 0;
-    while (read <= FILE_LIMIT) {
-      if (read === buffer.length) buffer = Buffer.concat([buffer, Buffer.allocUnsafe(Math.min(buffer.length, FILE_LIMIT + 1 - read))]);
-      const { bytesRead } = await handle.read(buffer, read, buffer.length - read, read);
-      if (bytesRead === 0) break;
-      read += bytesRead;
-    }
-    const bytes = buffer.subarray(0, read);
-    if (bytes.length > FILE_LIMIT) return { files, note: 'Over 1 MB, so not shown here.' };
-    if (bytes.includes(0)) return { files, note: 'Not a text file.' };
-    return { files, text: bytes.toString('utf8') };
-  } catch { return undefined; }
-  finally { await handle?.close().catch(() => undefined); }
+  const shown = await shownText(path, info.size);
+  return shown && { files, ...shown };
 }
 /** Resolves a found skill copy's real folder in `tool` (narrowed by `rootLabel` when given), following a top-level link in a skills folder. */
 async function foundSkillFolder(context: ShareContext, key: string, tool: HarnessId, rootLabel?: string): Promise<string | undefined> {
@@ -675,12 +658,12 @@ async function foundSkillFolder(context: ShareContext, key: string, tool: Harnes
   return undefined;
 }
 /** One regular file of a stored skill version, through readSkillFile. */
-export async function skillVersionFile(context: ShareContext, key: string, hash: string, file: string): Promise<SkillFileRead | undefined> {
+export async function skillVersionFile(context: ShareContext, key: string, hash: string, file: string): Promise<FileRead | undefined> {
   const version = await readVersion(context, key, hash);
   return version ? readSkillFile(version.directory, file) : undefined;
 }
 /** One regular file of a found skill copy in `tool` (narrowed by `rootLabel`), through readSkillFile. */
-export async function skillFoundFile(context: ShareContext, key: string, tool: HarnessId, rootLabel: string | undefined, file: string): Promise<SkillFileRead | undefined> {
+export async function skillFoundFile(context: ShareContext, key: string, tool: HarnessId, rootLabel: string | undefined, file: string): Promise<FileRead | undefined> {
   const folder = await foundSkillFolder(context, key, tool, rootLabel);
   return folder ? readSkillFile(folder, file) : undefined;
 }
@@ -701,7 +684,7 @@ async function pluginSkillFolder(context: PluginContext, ref: PluginSkillRef, ma
   return real && (await lstat(join(real, 'SKILL.md')).catch(() => undefined))?.isFile() ? { directory: candidate, real } : undefined;
 }
 /** One regular file of a plugin skill (installed copy in a tool, or its marketplace copy), through readSkillFile. */
-export async function skillPluginFile(context: PluginContext, ref: PluginSkillRef, file: string, marketplace?: MarketplaceLookup): Promise<SkillFileRead | undefined> {
+export async function skillPluginFile(context: PluginContext, ref: PluginSkillRef, file: string, marketplace?: MarketplaceLookup): Promise<FileRead | undefined> {
   const found = await pluginSkillFolder(context, ref, marketplace);
   const read = found && await readSkillFile(found.real, file);
   return read ? { ...read, directory: found.directory } : undefined;

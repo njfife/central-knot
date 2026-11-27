@@ -9,7 +9,8 @@
 //
 // Around the pass: applyAgents and restoreAgent run it for agents (the page's clicks);
 // agentsView is the Library's reading of agents (types.ts LibraryView: lookFor, copiesOf, plan), so a mark says what a pass will
-// do; agentsForRepo is what the Git repo's Push sends. Elsewhere: where each thing is kept on disk, agentstore.ts; the
+// do; agentsForRepo is what the Git repo's Push sends; agentVersion and agentToolFile are what an agent's row reads on a
+// click. Elsewhere: where each thing is kept on disk, agentstore.ts; the
 // harnesses' file formats, agentfiles.ts; an agent's row, the clicks its controls send and its words, libraryrow.ts (the
 // same row for every kind on the library) with librarypages.ts; History's sentences and actions for agents,
 // historyactions.ts; the Git repo's Push and Pull, gitrepo.ts (agentsForRepo,
@@ -17,7 +18,7 @@
 import { constants } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { agentHash, agentText, agentsFolder, changedFields, fileFor, isAgentTool, nameProblem, oneFileName, parseAgent, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
+import { agentFile, agentHash, agentText, agentsFolder, changedFields, fileFor, isAgentTool, nameProblem, oneFileName, parseAgent, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
 import { fileTextFor, keepOwn, openLibrary, readVersion, saveLibrary, storeVersion } from './agentstore.ts';
 import { harnesses, toolConfigRoot } from './harnesses.ts';
 import { libraryAction } from './historyactions.ts';
@@ -237,6 +238,15 @@ export async function agentInPi(context: ShareContext, tools: HarnessId[], key: 
 
 /** One version's content, for the Library to show: undefined when the store no longer has it. */
 export const agentVersion = (context: ShareContext, key: string, hash: string) => readVersion(context, key, hash);
+/**
+ * One agent's file in a tool as that tool has it now, read on a click for the file panel (agentfiles.ts agentFile): only for the
+ * home open (`home`, as the page names it) and a tool managed there (`managed`) that holds agents. The record says which loose
+ * files in Pi's skills folder are agents. Nothing is written.
+ */
+export async function agentToolFile(context: ShareContext, managed: HarnessId[], home: unknown, key: string, tool: HarnessId) {
+  if (home !== context.home || !managed.includes(tool) || !isAgentTool(tool)) return undefined;
+  return agentFile(context, tool, key, (await openLibrary(context)).library.items);
+}
 
 /**
  * What the Git repo holds for each agent in the library, On or Off (gitrepo.ts Push): its current version, or the edit a tool
