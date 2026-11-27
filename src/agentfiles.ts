@@ -162,14 +162,15 @@ export async function readAgents(context: ShareContext, tool: AgentTool, record:
 
 /**
  * One agent's file in a tool, found by its key as readAgents finds it (fileIs), and its text as it is, for the file panel
- * (share.ts shownText): following a link as readAgents does. None when no file is there for the key, or two whose names differ
- * only by case are (readAgents can't tell them apart either).
+ * (share.ts shownText): following a link as readAgents does. None when no file is there for the key. Where two whose names
+ * differ only by case are (readAgents can't tell them apart either), a note saying so, with no folder: neither is shown.
  */
 export async function agentFile(context: ShareContext, tool: AgentTool, key: string, record: Record<string, LibraryItem>): Promise<FileRead | undefined> {
   const directory = agentsFolder(context, tool);
   const isIt = (file: string) => { const is = fileIs(tool, file, record); return !!is && 'agent' in is && itemKey(is.agent) === key; };
   const named = (await readdir(directory).catch(() => [] as string[])).filter(isIt);
-  if (named.length !== 1) return undefined;
+  if (named.length > 1) return { files: named, note: 'Two agent files here differ only in capitals, so neither is shown.' };
+  if (!named.length) return undefined;
   const info = await stat(join(directory, named[0])).catch(() => undefined);
   const shown = info?.isFile() ? await shownText(join(directory, named[0]), info.size) : undefined;
   return shown && { files: named, directory, ...shown };

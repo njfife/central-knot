@@ -1041,17 +1041,18 @@ inBox('Clicking Add, On, or a harness’s switch with a locked agents folder nam
 
 // ---------- An agent's file, read on a click ----------
 
-inPiBox('An agent’s file is read on a click as each tool spells it, found by its key; another home, an unmanaged tool, a name with no file, Pi’s own skill and two names a case apart read nothing', async box => {
+inPiBox('An agent’s file is read on a click as each tool spells it, found by its key; another home, an unmanaged tool, a name with no file, and Pi’s own skill read nothing; two names a case apart read a note saying so', async box => {
   await on(box);
   await writeFile(join(piSkills(box), 'notes.md'), '---\nname: notes\ndescription: The person’s own skill.\n---\n\nNotes.\n');
   const read = (key: string, tool: HarnessId, home = box.home, managed = box.tools) => agentToolFile(box.context, managed, home, key, tool);
   for (const tool of box.tools as Tool[]) assert.deepEqual(await read('reviewer', tool), { files: [basename(files[tool])], directory: dirname(fileOf(box, tool)), text: await readOf(box, tool) }, tool);
   assert.deepEqual([await read('reviewer', 'claude-cli', join(box.base, 'elsewhere')), await read('reviewer', 'codex-cli', box.home, ['claude-cli']), await read('nobody', 'claude-cli'), await read('notes', 'pi-cli')],
     [undefined, undefined, undefined, undefined]);
-  // A case-sensitive disk holds both names, and which is the agent's can't be told; on another the second write is the same file.
+  // A case-sensitive disk holds both names, and which is the agent's can't be told: the read says so, with no folder to show.
+  // On another disk the second write is the same file.
   await writeFile(join(box.home, '.claude/agents/Reviewer.md'), claudeAgent('Twin.\n'));
-  const twins = (await readdir(join(box.home, '.claude/agents'))).length === 2;
-  assert.equal((await read('reviewer', 'claude-cli'))?.text, twins ? undefined : claudeAgent('Twin.\n'));
+  const twins = (await readdir(join(box.home, '.claude/agents'))).length === 2, got = await read('reviewer', 'claude-cli');
+  assert.deepEqual(twins ? [got?.note, got?.text, got?.directory] : [got?.text], twins ? ['Two agent files here differ only in capitals, so neither is shown.', undefined, undefined] : [claudeAgent('Twin.\n')]);
 });
 
 // ---------- Found agents ----------

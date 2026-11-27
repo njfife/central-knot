@@ -20941,6 +20941,25 @@ async function skillFileFlow() {
     if (wasRail) await a.click('#sidebar-toggle');
     await fullSize(a);
   };
+  // Pictures of open files (--shots, CK_SHOT_ONLY by tag), each [tag, size, theme, steps], the sidebar open: `act` runs each step,
+  // then the picture is taken and the file and an open row are closed.
+  const filePictures = async (pictures, act) => {
+    for (const [tag, [width, height], theme, steps] of shots ? pictures : []) {
+      if (shotOnly && !shotOnly.has(tag)) continue;
+      await sizeTo(a, width, height);
+      const rail = await a.run(`document.body.classList.contains('rail')`);
+      if (rail) await a.click('#sidebar-toggle');
+      for (const step of steps) await act(step);
+      await a.run(`document.activeElement?.blur(); window.centralKnot.setAppearance('${theme}')`);
+      await wait(150);
+      await a.shot(`${tag}-${width}-${theme}`);
+      await a.run(`window.centralKnot.setAppearance('system')`);
+      await a.press('Escape');
+      await a.click('.ov-row.open .row-open').catch(() => {});
+      if (rail) await a.click('#sidebar-toggle');
+    }
+    await fullSize(a);
+  };
 
   // Mark placement: library skills (On and Off), found skills, plugin skills and an agent; none on an MCP server.
   const reviewBtn = `#${rowPart('file', 'skills', 'code-review')}`;
@@ -21339,21 +21358,7 @@ async function skillFileFlow() {
     const pictures = [['file-in-place', SMALLEST, 'light', [reviewChevron, reviewBtn]], ['file-in-place', [1316, 820], 'dark', [reviewChevron, reviewBtn]],
       ['file-in-dock', [1728, 1117], 'light', [reviewChevron, reviewBtn]], ['in-each-tool', SMALLEST, 'light', [reviewChevron, reviewBtn, toDetails]],
       ['file-alone', SMALLEST, 'light', [reviewBtn]], ['plugin-file-in-place', [1316, 820], 'dark', [triageChevron, triageBtn]]];
-    for (const [tag, [width, height], theme, clicks] of shots ? pictures : []) {
-      if (shotOnly && !shotOnly.has(tag)) continue;
-      await sizeTo(a, width, height);
-      const rail = await a.run(`document.body.classList.contains('rail')`);
-      if (rail) await a.click('#sidebar-toggle');
-      for (const selector of clicks) await openFile(selector);
-      await a.run(`document.activeElement?.blur(); window.centralKnot.setAppearance('${theme}')`);
-      await wait(150);
-      await a.shot(`${tag}-${width}-${theme}`);
-      await a.run(`window.centralKnot.setAppearance('system')`);
-      await a.press('Escape');
-      await a.click('.ov-row.open .row-open').catch(() => {});
-      if (rail) await a.click('#sidebar-toggle');
-    }
-    await fullSize(a);
+    await filePictures(pictures, openFile);
 
     // Task 7: Sort by Most used, then open the top skill's file in 1 click from the closed row.
     await until(() => a.run(`/^Collected /.test(document.querySelector('#usage-when')?.textContent ?? '')`), 150);
@@ -22121,7 +22126,7 @@ async function skillFileFlow() {
     await a.click(`#${rowPart('switch', 'agents', 'parked-agent')}`);
     await until(() => !existsSync(join(agentsDir, 'parked-agent.md')));
     const panel = () => a.run(`(() => { const box = document.querySelector('.file-open-box'), select = box?.querySelector('.file-copy-select select'), pre = box?.querySelector('pre.content');
-      return { tab: box?.querySelector('.file-tab.is-active')?.textContent ?? null, options: select ? [...select.options].map(option => option.textContent) : null,
+      return { tab: box?.querySelector('.file-open-name')?.textContent ?? null, options: select ? [...select.options].map(option => option.textContent) : null,
         selected: select?.selectedOptions[0]?.textContent ?? null, text: pre?.textContent ?? null, top: pre?.scrollTop ?? null,
         path: box?.querySelector('.file-open-foot .path-text')?.textContent.trim() ?? null, stored: box?.querySelector('.file-open-stored')?.textContent ?? null }; })()`);
     const pick = index => a.run(`(() => { const select = document.querySelector('.file-copy-select select'); if (select) { select.value = '${index}'; select.dispatchEvent(new Event('change')); } })()`);
@@ -22136,9 +22141,10 @@ async function skillFileFlow() {
     same('choosing Codex’s copy reads Codex’s own file, its TOML, with its own path', [helperToml.includes('developer_instructions = '), await shows(helperToml)],
       [true, { tab: 'helper-agent.toml', options: both, selected: both[1], text: helperToml, top: 0, path: `${prefix}/.codex/agents/helper-agent.toml`, stored: null }]);
     await a.press('Escape');
-    const definition = 'description:\nAbout parked-agent.\n\nprompt:\nWait for the word.\n';
-    same('an Off agent opens Central Knot’s definition, stored in Central Knot, with no path', await opens(btn('parked-agent'), definition),
-      { tab: 'Central Knot’s definition', options: null, selected: null, text: definition, top: 0, path: null, stored: 'Stored in Central Knot' });
+    const definition = await opens(btn('parked-agent'), 'About parked-agent.');
+    same('an Off agent opens Central Knot’s definition as a label, not a tab, its description and prompt each under its word, stored in Central Knot, with no path',
+      [definition.tab, await a.exists('.file-open-head .file-tab'), await a.run(`[...document.querySelectorAll('.file-open-box .content-block')].map(block => [block.querySelector('.content-owner')?.textContent, block.querySelector('pre')?.textContent])`), definition.path, definition.stored],
+      ['Central Knot’s definition', false, [['description', 'About parked-agent.'], ['prompt', 'Wait for the word.\n']], null, 'Stored in Central Knot']);
     await a.press('Escape');
     await a.click(chevron('helper-agent'));
     await opens(btn('helper-agent'), helperMd);
@@ -22173,24 +22179,26 @@ async function skillFileFlow() {
     await a.press('Escape');
     // Its pictures (--shots, CK_SHOT_ONLY by tag): the agents' rows at 860 light and 1316 dark; a file alone, its Codex copy and an Off agent's definition at 860; the details' place docked at 1728.
     await openKind(a, 'agents');
-    const pictures = [['agent-rows', SMALLEST, 'light', []], ['agent-rows', [1316, 819], 'dark', []], ['agent-file', SMALLEST, 'light', [btn('helper-agent')]], ['agent-toml', SMALLEST, 'light', [btn('helper-agent'), 1]],
-      ['agent-definition', SMALLEST, 'light', [btn('parked-agent')]], ['agent-file-dock', [1728, 1117], 'light', [chevron('helper-agent'), btn('helper-agent')]]];
-    for (const [tag, [width, height], theme, steps] of shots ? pictures : []) {
-      if (shotOnly && !shotOnly.has(tag)) continue;
-      await sizeTo(a, width, height);
-      const railed = await a.run(`document.body.classList.contains('rail')`);
-      if (railed) await a.click('#sidebar-toggle');
-      for (const step of steps) await (typeof step === 'number' ? pick(step) : a.click(step));
-      await wait(400);
-      await a.run(`document.activeElement?.blur(); window.centralKnot.setAppearance('${theme}')`);
-      await wait(150);
-      await a.shot(`${tag}-${width}-${theme}`);
-      await a.run(`window.centralKnot.setAppearance('system')`);
+    const pictures = [['agent-rows', SMALLEST, 'light', []], ['agent-rows', [1316, 819], 'dark', []], ['agent-file', SMALLEST, 'light', [btn('helper-agent')]], ['agent-file', [1316, 819], 'dark', [btn('helper-agent')]],
+      ['agent-toml', SMALLEST, 'light', [btn('helper-agent'), 1]], ['agent-definition', SMALLEST, 'light', [btn('parked-agent')]], ['agent-file-dock', [1728, 1117], 'light', [chevron('helper-agent'), btn('helper-agent')]]];
+    // Each step waits for what it opened to be read (no Reading… left).
+    await filePictures(pictures, async step => { await (typeof step === 'number' ? pick(step) : a.click(step)); await until(async () => !(await a.exists('.file-open-box .file-open-state'))); });
+    // The footer names the file the read found: a case-only rename before any Refresh; then two names a case apart, where this disk tells them apart.
+    writeFileSync(join(agentsDir, 'case-agent.md'), agentMd('case-agent', 'Case.'));
+    await a.click('#header-refresh');
+    await until(() => a.exists(btn('case-agent')));
+    renameSync(join(agentsDir, 'case-agent.md'), join(agentsDir, 'Case-Agent.md'));
+    same('an agent file renamed in capitals only, opened before any Refresh, shows the read file’s own name and path', await opens(btn('case-agent'), agentMd('case-agent', 'Case.')).then(seen => [seen.tab, seen.path]),
+      ['Case-Agent.md', `${prefix}/.claude/agents/Case-Agent.md`]);
+    await a.press('Escape');
+    writeFileSync(join(agentsDir, 'case-agent.md'), agentMd('case-agent', 'Twin.'));
+    const twins = 'Two agent files here differ only in capitals, so neither is shown.', state = () => a.text('.file-open-box .file-open-state');
+    if (readdirSync(agentsDir).filter(file => file.toLowerCase() === 'case-agent.md').length === 2) {
+      await a.click(btn('case-agent')).catch(() => {});
+      await until(async () => (await state()) === twins);
+      same('two agent files whose names differ only in capitals: the panel says so, with no path', [await state(), (await panel()).path], [twins, null]);
       await a.press('Escape');
-      await a.click('.ov-row.open .row-open').catch(() => {});
-      if (railed) await a.click('#sidebar-toggle');
-    }
-    await fullSize(a);
+    } else console.log('skipped: two agent files a case apart (this disk does not tell them apart)');
   }
 
   same('no page errors', a.pageErrors, []);

@@ -47,7 +47,7 @@ import { byName, byUsage, inOrder, kindSource, lastUpdated, noPins, partId, pin,
 import { readFlag, writeFlag } from './flags.ts';
 import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, rowClicks, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
-import { versionList, type VersionText } from './versionlist.ts';
+import { versionList, type VersionPart, type VersionText } from './versionlist.ts';
 import { itemKey, listed, type Version } from './library.ts';
 import { keptBack } from './clickplan.ts';
 import type { Change, DestinationResult, FileRead, HomeView, ItemNotice, LibraryFacts, PluginItemNotice, PluginTextView, SearchHit, SyncGate, SyncNotice } from './types.ts';
@@ -410,7 +410,7 @@ const newView = () => ({
   /** The row whose details are open. */
   comparing: undefined as string | undefined,
   /** The skill or agent row whose file is open (alone, or in its details' place where it is `comparing` too: fileInDetails): its version/copy token, active file, copy holder, resolved folder, tab list, and loaded body. */
-  openFile: undefined as { id: string; token: string; file: string; copy?: { tool: HarnessId; rootLabel?: string }; directory?: string; files?: string[]; loaded?: { text?: string; note?: string } | null } | undefined,
+  openFile: undefined as { id: string; token: string; file: string; copy?: { tool: HarnessId; rootLabel?: string }; directory?: string; files?: string[]; loaded?: { text?: string; note?: string; parts?: VersionPart[] } | null } | undefined,
   /** The row whose copy question shows every copy's body side by side (RowWords body). */
   reading: undefined as string | undefined,
   /** The row whose versions list shows every version, not only its newest few. */
@@ -3140,8 +3140,9 @@ const fileTargetName = (target: FileTarget) => (isCatalogHit(target) ? target.hi
 /** What an agent's panel shows where no tool has a copy (storedOf): its current version, the parts Read shows (readDefinition). */
 const DEFINITION = 'Central Knot’s definition';
 /**
- * The item in Central Knot whose stored text a target's panel shows, with no tool's path: a library skill's current version,
- * ahead of every copy; an agent's current version only where no tool has a copy (fileCopies).
+ * The item in Central Knot whose stored text a target's panel shows, by kind: a library skill, ahead of every copy (its current
+ * version, with the path of a tool's copy that holds it, where one does: filePanel); an ordinary agent, only where no tool has a
+ * copy (fileCopies; its definition, with no path). No other target.
  */
 const storedOf = (t: Table, target?: FileTarget) => (target?.kind === 'skills' || (isAgentRow(target) && !fileCopies(t, target).length)
   ? inLibrary(itemOf(target as ItemRow)) : undefined);
@@ -3188,12 +3189,15 @@ function syncOpenFile(t: Table, target: FileTarget, open: NonNullable<View['open
 }
 /** The last part of a path: an agent's file name in a tool. */
 const fileName = (path: string) => path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1);
+/** What a file panel's read brings: a file's text (types.ts FileRead), or an agent's definition as the parts Read shows. */
+type PanelRead = FileRead & { parts?: VersionPart[] };
 /** An agent's current version as its panel shows it: each part Read shows (librarypages.ts version), under its word. */
-const readDefinition = (key: string, hash: string): Promise<FileRead | null> => libraryPages.agents.version(key, hash)
-  .then(parts => (Array.isArray(parts) ? { files: [DEFINITION], text: parts.filter(part => part.text).map(part => `${part.name}:\n${part.text}`).join('\n\n') } : null));
+const readDefinition = (key: string, hash: string): Promise<PanelRead | null> => libraryPages.agents.version(key, hash)
+  .then(parts => (Array.isArray(parts) ? { files: [DEFINITION], parts: parts.filter(part => part.text) } : null));
 /**
  * Opens a file (`asked`; a skill's SKILL.md when none) of a stored, found, installed plugin or marketplace skill, or an agent's file
- * in the chosen tool (or its definition), or closes the file, refocusing its mark when asked.
+ * in the chosen tool (or its definition), or closes the file, refocusing its mark when asked. An agent has one file, its holder's
+ * (or its definition), so `asked` is not read for it.
  * An open row keeps its details: the file takes their place (openedPart) and closing it brings them back; a copy question is
  * closed instead, the file opening alone.
  */
@@ -3220,7 +3224,7 @@ function setFile(t: Table, target?: FileTarget, asked?: string, refocus = false,
   if (draw) rerender();
   if (!next && refocus && prev) document.getElementById(partId('file', prev.id))?.focus();
   if (!next) return;
-  const load = kept ? (isAgentRow(target) ? readDefinition(target.key, kept.hash) : window.centralKnot.skillVersionFile((target as ItemRow).key, next.token, file))
+  const load: Promise<PanelRead | null> = kept ? (isAgentRow(target) ? readDefinition(target.key, kept.hash) : window.centralKnot.skillVersionFile((target as ItemRow).key, next.token, file))
     : isCatalogHit(target!) ? window.centralKnot.skillPluginFile({ marketName: catalog!.marketName, plugin: catalog!.plugin, part: catalog!.path!, from: 'marketplace', source: catalog!.source }, file)
     : isPluginRow(target!) ? window.centralKnot.skillPluginFile({ marketName: target.marketName, plugin: target.plugin, part: chosen!.part!, from: chosen!.tool }, file)
     : isAgentRow(target) ? window.centralKnot.agentFile(state.home!.home, target.key, chosen!.tool)
@@ -3228,12 +3232,14 @@ function setFile(t: Table, target?: FileTarget, asked?: string, refocus = false,
   void load.catch(() => null).then(found => {
     if (t.view.openFile !== next) return;
     if (!found && file !== first) return setFile(t, target, first, false, undefined, true, chosen);
-    const loaded = found ? { text: found.text, note: found.note } : null;
-    const unchanged = sameFile && (next.loaded === loaded || (!!next.loaded && !!loaded && next.loaded.text === loaded.text && next.loaded.note === loaded.note))
+    const loaded = found ? { text: found.text, note: found.note, parts: found.parts } : null;
+    const unchanged = sameFile && JSON.stringify(next.loaded) === JSON.stringify(loaded)
       && (!found || (JSON.stringify(next.files) === JSON.stringify(found.files) && next.directory === found.directory));
     next.loaded = loaded;
     next.directory = found?.directory;
     if (found) next.files = found.files;
+    // An agent's footer names the file this read found: the row may still hold its last spelling (a rename in capitals).
+    if (isAgentRow(target) && found?.directory) next.file = found.files[0]!;
     // In the dock (a row open on a wide window) nothing is under the row to bring into view.
     if (draw && prev?.id !== next.id && (t.view.comparing !== next.id || underRow(t, next.id))) revealUnderRow(next.id);
     if (!unchanged) rerender();
@@ -3261,7 +3267,9 @@ function filePanel(t: Table, target: FileTarget, open: NonNullable<View['openFil
   const activeAt = open.copy ? copies.findIndex(copy => copy.tool === open.copy!.tool && copy.rootLabel === open.copy!.rootLabel) : -1;
   const active = stored ? undefined : copies[activeAt >= 0 ? activeAt : 0];
   const tabs = open.files ?? [open.file];
-  const dir = stored ? (target as ItemRow).paths?.[toolsFor(t, 'skills').find(each => (target as ItemRow).hashes?.[each] === open.token && (target as ItemRow).paths?.[each]) ?? ''] : active?.directory ?? open.directory;
+  // A stored skill's version shows the path of a tool's copy that holds it; an agent's definition has none.
+  const storedPath = (row: ItemRow) => row.paths?.[toolsFor(t, 'skills').find(each => row.hashes?.[each] === open.token && row.paths?.[each]) ?? ''];
+  const dir = !stored ? active?.directory ?? open.directory : isAgentRow(target) ? undefined : storedPath(target as ItemRow);
   const full = dir && (dir.includes('\\') ? `${dir}\\${open.file.replaceAll('/', '\\')}` : `${dir}/${open.file}`);
   const missing = open.loaded === undefined ? 'Reading…' : 'Its file couldn’t be read.';
   const note = open.loaded ? open.loaded.note : missing;
@@ -3282,12 +3290,15 @@ function filePanel(t: Table, target: FileTarget, open: NonNullable<View['openFil
     { id: partId('file-close', id), label: `Close file for ${name}`, title: 'Close', look: '.file-open-close' });
   const blockId = partId('file-text', id, ...(active ? [String(Math.max(0, activeAt))] : []), String(Math.max(0, tabs.indexOf(open.file))));
   const body = note ? [h('p.file-open-state', {}, note)]
+    : open.loaded?.parts ? fileBlocks(blockId, `${name} ${open.file}`, open.loaded.parts, holders => andList(holders.map(part => part.name)), { named: true })
     : fileBlocks(blockId, `${name} ${open.file}`, [{ text: open.loaded!.text ?? '' }], () => (active ? copyLabel(active) : isCatalogHit(target) ? `${target.hit.item!.marketName}’s copy` : 'Central Knot’s current version'));
   const copy = full && reloadButton({ command: full, title: 'Copy path' }, partId('file-copy', id));
   const foot = full ? [pathText(shownPath(full), full), h('span.file-open-foot-actions', {}, showInFolder(full), copy)]
     : stored ? [h('span.file-open-stored', {}, 'Stored in Central Knot')] : [];
   return h(`div.details.details-file-only${placement === 'dock' ? '.details-bare' : ''}`, { role: 'region', 'aria-label': `File for ${name}` }, back ?? null, h('div.file-open-box', {},
-    h('div.file-open-head', {}, h('span.file-open-tabs', { role: 'tablist', 'aria-label': `Files in ${name}` }, tabs.map(tab)), h('span.file-open-controls', {}, chooser, close)),
+    // An agent's panel shows one file, or its definition: its name is a label, with nothing to press.
+    h('div.file-open-head', {}, isAgentRow(target) ? h(`span.file-open-name${stored ? '.file-open-definition' : ''}`, {}, open.file)
+      : h('span.file-open-tabs', { role: 'tablist', 'aria-label': `Files in ${name}` }, tabs.map(tab)), h('span.file-open-controls', {}, chooser, close)),
     ...body, h('div.file-open-foot', {}, ...foot)));
 }
 /**
@@ -3307,8 +3318,8 @@ function openedPart(t: Table, row: ItemRow | PluginRow, placement: 'row' | 'dock
 }
 /**
  * Sizes the open file's box to what its scroll container (the list, or the dock) leaves under it, at most what is left once what
- * it opened from (its row; in the dock, the dock's top) is at the container's top, never under eight lines of its text (openRow's
- * and setFile's revealUnderRow bring it into view).
+ * it opened from (its row; in the dock, the dock's top) is at the container's top, never under eight lines of its last block's text
+ * (an agent's definition: its prompt; openRow's and setFile's revealUnderRow bring it into view).
  */
 function settleFileBox(): void {
   const box = document.querySelector<HTMLElement>('.file-open-box'), scroller = box?.closest<HTMLElement>('.scroll');
@@ -3317,7 +3328,7 @@ function settleFileBox(): void {
   const from = row?.matches('.ov-row') ? row.getBoundingClientRect().top : sides.top - scroller.scrollTop;
   const end = Math.max(8, parseFloat(getComputedStyle(scroller).paddingBottom));
   const room = Math.floor(sides.height - (top - from) - end), under = Math.floor(sides.bottom - top - end);
-  const pre = box.querySelector<HTMLElement>('pre.content'), text = pre && getComputedStyle(pre);
+  const pre = [...box.querySelectorAll<HTMLElement>('pre.content')].at(-1), text = pre && getComputedStyle(pre);
   const least = !pre || !text ? 0 : box.offsetHeight - pre.offsetHeight + 8 * parseFloat(text.lineHeight) + parseFloat(text.paddingTop) + parseFloat(text.paddingBottom);
   box.style.maxHeight = `${Math.ceil(Math.max(least, under >= least ? Math.min(under, room) : room))}px`;
 }

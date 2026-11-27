@@ -17,8 +17,9 @@
 // - a skill's folder read as one content (readTree), copied byte for byte (copyTree), staged beside its target and put in
 //   place (stagingFolder, placeCopy);
 // - one file's text for a file panel, at most 1 MB of it (shownText).
-// Not here: a kind's record (kindstore.ts and each kind's store), History (history.ts), a tool's folders and files
-// (skillfiles.ts, mcp.ts, agentfiles.ts), and which tools are managed (presence.ts managedTools).
+// Not here: a kind's record (kindstore.ts and each kind's store), History (history.ts), where a tool's folders and files are and
+// how they are read (skillfiles.ts, mcp.ts, agentfiles.ts: shownText reads only the one file they found, for a file panel), and
+// which tools are managed (presence.ts managedTools).
 //
 // Who enters the gate for library writes. A click that writes the library, the home's sync record or a tool's own switch for a
 // library item by its own hand (a profile switch and its Undo, a Manage switch, Synchronize everything's switch, a skill's Take
