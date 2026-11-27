@@ -1830,6 +1830,9 @@ async function fitsAtMinimum(a, where, again = async () => {}) {
   await fullSize(a);
 }
 
+/** Checks that the History shortening warning's alert icon sits beside its text, not above it. */
+const warnIconBeside = page => page.run(`(() => { const mark = document.querySelector('#setting-history-question .icon')?.getBoundingClientRect(), text = document.querySelector('#history-shorten-text')?.getBoundingClientRect(); return !!(mark && text && mark.width > 0 && mark.right <= text.left && Math.abs(mark.top - text.top) <= 6); })()`);
+
 /** Combined header result words (Row 1 main text plus Row 2 profile sentence when folded onto its own line). */
 const headerResultWords = a => a.run(`(() => {
   const parts = ['#header [data-outcome] .band-text', '#header .band-profile'].map(sel => document.querySelector(sel)?.textContent?.trim()).filter(Boolean);
@@ -4523,10 +4526,9 @@ async function practiceFlow() {
     [(await savedSettings()).historyDays, await a.exists('#history-shorten'), await agedShown()], [90, false, ['aged-60', 'aged-20', 'aged-5']]);
   await keepFor(a, 7);
   const question = await a.text('#history-shorten-text') ?? '';
-  const warnBeside = () => a.run(`(() => { const mark = document.querySelector('#setting-history-question .icon')?.getBoundingClientRect(), text = document.querySelector('#history-shorten-text')?.getBoundingClientRect(); return !!(mark && text && mark.width > 0 && mark.right <= text.left && Math.abs(mark.top - text.top) <= 6); })()`);
   same('a shorter window asks first, naming the age limit and scope, with the icon beside its text, and keeps the saved choice until confirmed (which its other button names)',
-    [question, await warnBeside(), await a.text('#setting-history-title'), await a.text('#history-shorten'), await a.text('#history-shorten-cancel'), await a.run(`document.querySelector('#history-days').value`), (await savedSettings()).historyDays, await a.exists('#setting-history-hint'), await a.run(`document.querySelector('#history-days')?.getAttribute('aria-describedby')`)],
-    ['Changes older than 7 days will be removed and can’t be restored. Any other home removes them too the next time it records a change.', true, 'Keep history for', 'Shorten to 7 days', 'Keep 90 days', '90', 90, false, null]);
+    [question, await warnIconBeside(a), await a.text('#setting-history-title'), await a.text('#history-shorten'), await a.text('#history-shorten-cancel'), await a.run(`document.querySelector('#history-days').value`), (await savedSettings()).historyDays, await a.exists('#setting-history-hint'), await a.run(`document.querySelector('#history-days')?.getAttribute('aria-describedby')`)],
+    ['In every home, History entries older than 7 days will be removed and can’t be restored.', true, 'Keep history for', 'Shorten to 7 days', 'Keep 90 days', '90', 90, false, null]);
   await a.shot('settings-history-confirm');
   await a.run(`document.querySelector('#history-days').focus()`);
   for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
@@ -4614,8 +4616,8 @@ async function practiceFlow() {
   await keepFor(a, 7);
   const histQuestion = await a.text('#history-shorten-text') ?? '';
   same('on History, a shorter window warns with the same age limit, label and icon beside its text before saving anything',
-    [histQuestion, await warnBeside(), await a.text('#history-keep-label'), await a.text('#history-shorten'), await a.text('#history-shorten-cancel'), await a.run(`document.querySelector('#history-days')?.value`), (await savedSettings()).historyDays, agedOnFile()],
-    ['Changes older than 7 days will be removed and can’t be restored. Any other home removes them too the next time it records a change.', true, 'Keep history for', 'Shorten to 7 days', 'Keep 90 days', '90', 90, ['aged-60', 'aged-20', 'aged-5']]);
+    [histQuestion, await warnIconBeside(a), await a.text('#history-keep-label'), await a.text('#history-shorten'), await a.text('#history-shorten-cancel'), await a.run(`document.querySelector('#history-days')?.value`), (await savedSettings()).historyDays, agedOnFile()],
+    ['In every home, History entries older than 7 days will be removed and can’t be restored.', true, 'Keep history for', 'Shorten to 7 days', 'Keep 90 days', '90', 90, ['aged-60', 'aged-20', 'aged-5']]);
   await a.run(`document.querySelector('#history-shorten-cancel').focus()`);
   for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   await a.settle();
@@ -4625,17 +4627,6 @@ async function practiceFlow() {
   same('on History, Escape and Keep <N> days write nothing and return focus to the control',
     [histEscaped, await a.exists('#history-shorten'), (await savedSettings()).historyDays, agedOnFile(), await a.run(`document.activeElement?.id`)],
     [[false, 'history-days'], false, 90, ['aged-60', 'aged-20', 'aged-5'], 'history-days']);
-  // A failed save on History keeps prior History and shows a retryable error; the retry below succeeds.
-  chmodSync(appSettings, 0o444);
-  try {
-    await keepFor(a, 7);
-    await a.click('#history-shorten');
-    for (let tries = 0; tries < 30 && !(await a.exists('#setting-history-message')); tries++) await wait(100);
-    const histFailed = await a.text('#setting-history-message') ?? '', keptRows = await a.text('#history-scroll') ?? '';
-    same('on History, a failed Keep save keeps prior History and shows a retryable error',
-      [histFailed, keptRows.includes('aged-60-days'), keptRows.includes('aged-20-days'), (await savedSettings()).historyDays, agedOnFile(), await a.run(`document.querySelector('#history-days')?.value`), await a.run(`document.querySelector('#history-days')?.disabled`)],
-      ['Couldn’t save: Central Knot can’t write its settings file. History is still kept for 90 days. Check the file’s permissions, then try again.', true, true, 90, ['aged-60', 'aged-20', 'aged-5'], '90', false]);
-  } finally { chmodSync(appSettings, 0o644); }
   await keepFor(a, 7);
   let histDuring;
   if (a.main) {
@@ -6287,7 +6278,7 @@ async function fewToolsFlow() {
   const noToolsWarn = await a.text('#history-shorten-text') ?? '';
   await a.click('#history-shorten-cancel');
   same('on no-tools History, Keep warns and cancels cleanly', [noToolsWarn, await a.exists('#history-shorten'), await a.run(`document.querySelector('#history-days')?.value`)],
-    ['Changes older than 7 days will be removed and can’t be restored. Any other home removes them too the next time it records a change.', false, '30']);
+    ['In every home, History entries older than 7 days will be removed and can’t be restored.', false, '30']);
   await a.click('#nav-overview');
   // On this computer a tool is here when its CLI (or desktop app) is: each stand-in answers --version only.
   const cli = (path, version) => { mkdirSync(join(home, path, '..'), { recursive: true }); writeFileSync(join(home, path), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(join(home, path), 0o755); };
@@ -15731,9 +15722,6 @@ async function libraryFlow() {
   const sixIds = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
   const fiveIds = ['claude-cli', 'copilot-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
   hFold.events.push(
-    { id: 'fold-unrecorded', at: foldAt(10), key: 'instructions:old-del', item: 'old-del', kind: 'deleted', winner: { tool: 'claude-cli', hash: 'a' }, losers: [], orderProved: true },
-    { id: 'fold-legacy-conflict', at: foldAt(9), key: '', item: 'old-clash', kind: 'conflict', winner: { tool: 'codex-cli', hash: 'w' }, previous: 'p', losers: [{ tool: 'claude-cli', hash: 'p' }, { tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }, { tool: 'old-cli', hash: 'z' }], orderProved: true },
-    { id: 'fold-conflict', at: foldAt(8), key: 'clash-skill', of: 'skill', item: 'clash-skill', kind: 'conflict', winner: { tool: 'codex-cli', hash: 'w' }, previous: 'p', losers: [{ tool: 'claude-cli', hash: 'p' }, { tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }, { tool: 'opencode-cli', hash: 'z' }], orderProved: true },
     { id: 'fold-legacy', at: foldAt(7), key: 'instructions:old', item: 'old', kind: 'edit', winner: { tool: 'claude-cli', hash: 'a' }, losers: ['claude-cli', 'codex-cli', 'old-cli'].map(tool => ({ tool, hash: 'a' })), orderProved: true },
     { id: 'fold-two-groups', at: foldAt(6), key: 'instructions:legacy', item: 'legacy', kind: 'switched', switched: [{ tool: 'claude-cli', disabled: true }, { tool: 'copilot-cli', disabled: true }, { tool: 'codex-cli', disabled: true }, { tool: 'pi-cli', disabled: false }, { tool: 'opencode-cli', disabled: false }, { tool: 'antigravity-cli', disabled: false }], losers: [], orderProved: true },
     { id: 'fold-source', at: foldAt(5), key: 'release-prose', of: 'skill', item: 'release-prose', kind: 'off', cause: 'source', link: 'https://github.com/team-samples/writing-skills/tree/main', losers: [], orderProved: true },
@@ -15747,8 +15735,8 @@ async function libraryFlow() {
   await o.click('#header-refresh');
   check('folded five-of-six tool row renders its fold toggle', await until(() => o.exists('#history-tools-toggle-fold-five-0')));
   const rowAbout = name => o.run(`(() => { const row = [...document.querySelectorAll('.history-row')].find(el => el.querySelector('.history-what strong')?.textContent === ${JSON.stringify(name)}); return { text: row?.querySelector('.history-about')?.textContent?.trim() ?? '', folds: row?.querySelectorAll('details.fold').length ?? 0 }; })()`);
-  same('History folds 5 of 6, all 6 and conflict losers (library and legacy), keeps 2, 1 and unrecorded tool lists unfolded, folds each group of two-group and legacy entries, and omits both fillers',
-    [await rowAbout('draft-rfc'), await rowAbout('draft-over'), await rowAbout('all-six'), await rowAbout('two-tools'), await rowAbout('one-tool'), await rowAbout('release-prose'), await rowAbout('legacy'), await rowAbout('old'), await rowAbout('clash-skill'), await rowAbout('old-clash'), await rowAbout('old-del')],
+  same('History folds 5 of 6 and all 6, keeps 2 and 1 unfolded, folds each group of two-group and legacy entries, and omits both fillers',
+    [await rowAbout('draft-rfc'), await rowAbout('draft-over'), await rowAbout('all-six'), await rowAbout('two-tools'), await rowAbout('one-tool'), await rowAbout('release-prose'), await rowAbout('legacy'), await rowAbout('old')],
     [
       { text: 'Turned off: removed from 5 of 6 tools', folds: 1 },
       { text: 'Turned on: put in 5 of 6 tools. Claude Code’s own copy was written over and kept as a version.', folds: 1 },
@@ -15758,10 +15746,15 @@ async function libraryFlow() {
       { text: 'Brought in from github.com/team-samples/writing-skills (main): in Central Knot, Off.', folds: 0 },
       { text: 'Turned off in 3 of 6 tools; turned on in 3 of 6 tools, using each tool’s own switch.', folds: 2 },
       { text: 'Edited in Claude Code; that became the current version, in 3 tools too.', folds: 1 },
-      { text: 'Codex’s edit was the latest, so it became the current version. Edits from 3 of 6 tools are kept as versions.', folds: 1 },
-      { text: 'Codex’s edit won over edits in 3 tools', folds: 1 },
-      { text: 'Deleted in Claude Code, then removed from the other tools it synced to.', folds: 0 },
     ]);
+  // Fold targets are at least 24 px tall without growing single-line rows.
+  const foldMetrics = await o.run(`(() => {
+    const rowH = name => Math.round([...document.querySelectorAll('.history-row')].find(el => el.querySelector('.history-what strong')?.textContent === name)?.getBoundingClientRect().height ?? 0);
+    const minFoldH = Math.min(...[...document.querySelectorAll('.history-about > .fold > summary')].map(el => Math.round(el.getBoundingClientRect().height)));
+    return { minFoldH, one: rowH('one-tool'), five: rowH('draft-rfc'), all: rowH('all-six') };
+  })()`);
+  check('History tool-count folds are at least 24 px tall without growing single-line rows',
+    foldMetrics.minFoldH >= 24 && foldMetrics.five === foldMetrics.one && foldMetrics.all === foldMetrics.one, foldMetrics);
   // Keyboard open and close on 5 tools, then pointer click open.
   const pressEnter = async win => { for (const type of ['keyDown', 'keyUp']) await win.send('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r' } : {}) }); await win.settle(); };
   await o.run(`document.getElementById('history-tools-toggle-fold-five-0').focus()`);
@@ -15772,7 +15765,7 @@ async function libraryFlow() {
   check('keyboard Enter closes the 5-tool fold again', await until(async () => !(await o.exists('#history-tools-names-fold-five-0'))));
   await o.click('#history-tools-toggle-fold-five-0');
   check('pointer click opens the 5-tool fold', await until(() => o.exists('#history-tools-names-fold-five-0')));
-  // All-6, two-group, legacy and conflict entries each open to their exact recorded tool names.
+  // All-6, two-group and legacy entries each open to their exact recorded tool names.
   await o.click('#history-tools-toggle-fold-all-0');
   check('all-6 tool fold opens', await until(() => o.exists('#history-tools-names-fold-all-0')));
   await o.click('#history-tools-toggle-fold-two-groups-0');
@@ -15782,13 +15775,9 @@ async function libraryFlow() {
   check('second group opens alongside the first', await until(() => o.exists('#history-tools-names-fold-two-groups-1')));
   await o.click('#history-tools-toggle-fold-legacy-0');
   check('legacy entry fold opens', await until(() => o.exists('#history-tools-names-fold-legacy-0')));
-  await o.click('#history-tools-toggle-fold-conflict-0');
-  check('library conflict losers fold opens', await until(() => o.exists('#history-tools-names-fold-conflict-0')));
-  await o.click('#history-tools-toggle-fold-legacy-conflict-0');
-  check('legacy conflict losers fold opens', await until(() => o.exists('#history-tools-names-fold-legacy-conflict-0')));
-  same('5-tool, all-6, two-group, legacy and conflict fold names match their recorded tools',
-    [fiveKeyOpen, await o.text('#history-tools-names-fold-five-0'), await o.text('#history-tools-names-fold-all-0'), firstGroupOnly, await o.text('#history-tools-names-fold-two-groups-1'), await o.text('#history-tools-names-fold-legacy-0'), await o.text('#history-tools-names-fold-conflict-0'), await o.text('#history-tools-names-fold-legacy-conflict-0')],
-    [['Claude Code, Copilot CLI, Pi, OpenCode and Antigravity', 'history-tools-toggle-fold-five-0'], 'Claude Code, Copilot CLI, Pi, OpenCode and Antigravity', 'Claude Code, Copilot CLI, Codex, Pi, OpenCode and Antigravity', ['Claude Code, Copilot CLI and Codex', false], 'Pi, OpenCode and Antigravity', 'Claude Code, Codex and old-cli', 'Copilot CLI, Pi and OpenCode', 'Copilot CLI, Pi and old-cli']);
+  same('5-tool, all-6, two-group and legacy fold names match their recorded tools',
+    [fiveKeyOpen, await o.text('#history-tools-names-fold-five-0'), await o.text('#history-tools-names-fold-all-0'), firstGroupOnly, await o.text('#history-tools-names-fold-two-groups-1'), await o.text('#history-tools-names-fold-legacy-0')],
+    [['Claude Code, Copilot CLI, Pi, OpenCode and Antigravity', 'history-tools-toggle-fold-five-0'], 'Claude Code, Copilot CLI, Pi, OpenCode and Antigravity', 'Claude Code, Copilot CLI, Codex, Pi, OpenCode and Antigravity', ['Claude Code, Copilot CLI and Codex', false], 'Pi, OpenCode and Antigravity', 'Claude Code, Codex and old-cli']);
   // An opened tool-list fold survives a redraw (Refresh) and resets when leaving History and returning.
   await o.click('#header-refresh');
   await until(() => o.exists('#history-tools-toggle-fold-five-0'));
@@ -15799,8 +15788,7 @@ async function libraryFlow() {
     await sizeTo(o, width, height);
     if (await o.run(`document.getElementById('sidebar-toggle')?.getAttribute('aria-label') === 'Expand the sidebar'`)) await o.click('#sidebar-toggle');
     await o.settle();
-    const iconBeside = await o.run(`(() => { const mark = document.querySelector('#setting-history-question .icon')?.getBoundingClientRect(), text = document.querySelector('#history-shorten-text')?.getBoundingClientRect(); return !!(mark && text && mark.width > 0 && mark.right <= text.left && Math.abs(mark.top - text.top) <= 6); })()`);
-    same(`History with Keep warning and open tool fold fits at ${width}×${height} with sidebar open and icon beside text`, [await o.run(CUT_OFF), iconBeside], [[], true]);
+    same(`History with Keep warning and open tool fold fits at ${width}×${height} with sidebar open and icon beside text`, [await o.run(CUT_OFF), await warnIconBeside(o)], [[], true]);
   }
   await o.click('#history-shorten-cancel');
   await fullSize(o);

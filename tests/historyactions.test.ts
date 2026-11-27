@@ -122,6 +122,17 @@ test('A conflict with three or more losing tools formats them through options.to
     'Codex’s edit was the latest, so it became the current version. Edits from Copilot CLI, Pi and OpenCode are kept as versions.');
 });
 
+test('A library conflict with no losing tools recorded reads its prefix alone without calling options.tools', () => {
+  const noLosers = entry({ kind: 'conflict', winner: { tool: 'codex-cli', hash: 'b' }, previous: 'a', losers: [{ tool: 'claude-cli', hash: 'a' }] });
+  const calls: string[][] = [];
+  const opts = { row: true, tools: (touched: string[]) => { calls.push(touched); return 'UNEXPECTED'; } };
+  assert.equal(librarySentence(noLosers, libraryWords.agents, tools, undefined, false, opts)?.text,
+    'Codex’s edit was the latest, so it became the current version.');
+  assert.equal(librarySentence({ ...noLosers, losers: [], orderProved: false }, libraryWords.agents, tools, undefined, false, opts)?.text,
+    'Codex’s edit became the current version, though the times can’t tell which edit came last.');
+  assert.deepEqual(calls, []);
+});
+
 test('A deletion offers Restore while the agent is deleted; every other entry of a deleted agent offers nothing', () => {
   const deleted = entry({ kind: 'deleted', losers: tools.map(tool => ({ tool: tool as 'claude-cli', hash: 'b' })) });
   const gone = item({ deleted: { at } });

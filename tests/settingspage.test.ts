@@ -112,7 +112,7 @@ test('plugin text reading state transitions redraw once on each change and stay 
   assert.equal(redraws, drawsBefore + 3);
 });
 
-test('History and Settings share one Keep label and warning layout/text leading with Changes older than N days', () => {
+test('History and Settings share one Keep label and one-sentence shortening warning with icon beside text', () => {
   draw();
   const settingsLabel = textOf(findById(rendered, 'setting-history-title'));
   const control = historyWindowControl() as unknown as FakeNode;
@@ -130,7 +130,7 @@ test('History and Settings share one Keep label and warning layout/text leading 
   assert.ok(body, 'icon and text share a non-wrapping body');
   assert.equal(
     textOf(findById(body, 'history-shorten-text')),
-    'Changes older than 7 days will be removed and can’t be restored. Any other home removes them too the next time it records a change.',
+    'In every home, History entries older than 7 days will be removed and can’t be restored.',
   );
   findById(withWarn, 'history-shorten-cancel')?.click();
 });

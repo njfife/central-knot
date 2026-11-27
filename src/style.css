@@ -1215,7 +1215,7 @@ span.ins-confirm { margin-top: 0; }
 
 /* ---------- History ---------- */
 /* History's own Keep control (settingspage.ts historyWindowControl): sits above the list, empty state or no-managed state, sharing Settings' warning and outcomes. */
-.history-keep { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px var(--pad-end) 4px 16px; }
+.history-keep { flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px var(--pad-end) 4px 16px; }
 .history-keep-row { display: inline-flex; align-items: center; gap: 8px; }
 .history-keep-label { font-size: 12.5px; font-weight: 500; color: var(--ink-soft); }
 .history-keep > .setting-message, .history-keep > .setting-confirm { margin-top: 0; }
@@ -1236,7 +1236,7 @@ span.ins-confirm { margin-top: 0; }
 /* Inline tool-list fold inside a History row sentence (historypage.ts rowAbout): names open below the sentence. */
 .history-about > .fold { display: inline; }
 .history-about > .fold::details-content { display: none; }
-.history-about > .fold > summary { margin: -1px -4px; padding: 1px 4px; gap: 1px; font-size: inherit; line-height: inherit; vertical-align: baseline; }
+.history-about > .fold > summary { margin: -2px -4px; padding: 2px 4px; gap: 1px; font-size: inherit; line-height: inherit; vertical-align: baseline; }
 .history-about > .fold > summary > .fold-chevron { margin-inline: -2px -2px; }
 .history-tools-names { font-size: 12px; color: var(--ink-soft); }
 .history-undone .history-tools-names { color: var(--ink-faint); }

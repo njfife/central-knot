@@ -4,7 +4,7 @@
 // profiles', base instructions', Manage switches' and pre-library entries, plus in-place folds for 3+ recorded tool lists (including all tools).
 import { DAY_MS, plural, timesApart } from './model.ts';
 import { acting, homeTools, noToolManaged, rerender, restoreEvent, setHome, shownPath, state, touchedToolsPhrase } from './app.ts';
-import { noToolsLead } from './pages.ts';
+import { noToolsState } from './pages.ts';
 import { andList, toolName, touchedTools } from './words.ts';
 import { changeWords, entryTurns, NO_PROFILE, undoOffered, undoWords, wholeCounts } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
@@ -279,10 +279,10 @@ export function historyPage() {
   const reread = rereadBand(state.history);
   if (!events.length) {
     const shown = state.outcome?.page === 'history' ? outcomeBand() : null;
-    const empty = noToolManaged() ? h('div.overview-scroll.no-tools', { id: 'history-no-tools-scroll' }, noToolsLead('history'))
-      : emptyState('history', 'No changes yet', 'Changes by sync and by you appear here, with Undo.');
-    return h('div.page', {}, reread || shown ? h('div.bands', {}, reread, shown) : null,
-      h('div.scroll.history-empty-scroll', { id: 'history-scroll' }, historyWindowControl(), empty));
+    const bands = reread || shown ? h('div.bands', {}, reread, shown) : null;
+    if (noToolManaged()) return h('div.page', {}, bands, historyWindowControl(), noToolsState('history'));
+    return h('div.page', {}, bands, h('div.scroll.history-empty-scroll', { id: 'history-scroll' }, historyWindowControl(),
+      emptyState('history', 'No changes yet', 'Changes by sync and by you appear here, with Undo.')));
   }
   const ordered = [...events].reverse(), times = timesApart(ordered.map(event => event.at));
   // A refused Undo, a Manage click, a Restore with reload advice, or an Undo that ended the profile in use shows in a band; other results here are in the status bar.

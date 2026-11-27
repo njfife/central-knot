@@ -124,6 +124,7 @@ export function librarySentence(
   event: HistoryEvent, words: RowWords, homeTools: string[], item?: LibraryItem, undid = false, options?: SentenceOptions,
 ): { glyph: IconName; text: string } | undefined {
   const formatTools = options?.tools ?? toolsPhrase;
+  // Lazy: rowAbout's fold formatter registers a fold per call, so branches using a filtered list (conflict) must not invoke it on raw losers.
   let losersText: string | undefined;
   const tools = () => losersText ??= formatTools(event.losers.map(loser => loser.tool), homeTools);
   /** " and removed from Codex", or nothing when no harness was touched. */
@@ -250,7 +251,7 @@ export function librarySentence(
     }
     case 'conflict': {
       const gaveWay = [...new Set(event.losers.filter(loser => loser.hash !== event.previous && loser.hash !== event.winner?.hash).map(loser => loser.tool))];
-      const others = formatTools(gaveWay, homeTools);
+      const others = gaveWay.length ? formatTools(gaveWay, homeTools) : '';
       // "The latest" only where times proved it (types.ts HistoryEvent orderProved); an entry stored before the library may say so too.
       const chosen = event.orderProved ? `${from}’s edit was the latest, so it became the current version` : `${from}’s edit became the current version, though ${noTimeTells}`;
       const lost = !gaveWay.length ? '' : gaveWay.length > 2 ? ` Edits from ${others} are kept as versions.` : ` ${others}’s is kept as a version.`;

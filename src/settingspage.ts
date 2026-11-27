@@ -220,7 +220,7 @@ function chooseHistoryDays(days: HistoryDays) {
 /** Where a window of `days` starts, as of now, in the person's own date and time format (for post-save notes). */
 const removedBefore = (days: HistoryDays) => new Date(Date.now() - days * DAY_MS).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 const shortenQuestion = (days: HistoryDays) =>
-  `Changes older than ${days} days will be removed and can’t be restored. Any other home removes them too the next time it records a change.`;
+  `In every home, History entries older than ${days} days will be removed and can’t be restored.`;
 
 /**
  * What a shorter window did to older History, as main reports it. Only 'done' says anything was removed (with a check); the
