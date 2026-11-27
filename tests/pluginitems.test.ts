@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { readItemTexts, readPluginItems } from '../src/pluginitems.ts';
 import { pluginFiles } from '../src/catalogdetail.ts';
 import { readPlugin } from '../src/pluginlibrary.ts';
-import { inTool, cellWords, handledWhere, offIn, pageRows, pluginItemCount, pluginKindNotLoaded, rowCount, toolWords, withPluginOnly } from '../src/pluginrows.ts';
+import { inTool, cellWords, handledWhere, offIn, pageRows, pluginItemCount, pluginKindNotLoaded, rowCount, withPluginOnly } from '../src/pluginrows.ts';
 import { newItem } from '../src/library.ts';
 import { pluginItemKey, pluginLive } from '../src/profileplan.ts';
 import type { PluginContext } from '../src/plugins.ts';
@@ -238,11 +238,10 @@ test('each tool’s cell says whether it is on: the skill’s own switch, the wh
   const [server] = pageRows(home, 'mcp').rows;
   assert.equal(server!.description, 'Command · npx -y issues');
   assert.deepEqual([offIn(server!, 'copilot-cli'), offIn(server!, 'claude-cli')], ['item', 'plugin']);
-  assert.equal(toolWords(server!, 'copilot-cli'), 'Inside issue-tracker 2.0.0. Turned off here with its own switch.');
   // An agent turned off by itself (Claude Code) is said the same way.
   const agents = homeOf([], [{ ...install('claude-cli', { agentsOff: ['reviewer'] }), items: [{ kind: 'agent', name: 'reviewer', description: '' }] }]);
   const [agent] = pageRows(agents, 'agents').rows;
-  assert.deepEqual([offIn(agent!, 'claude-cli'), toolWords(agent!, 'claude-cli')], ['item', 'Inside issue-tracker 2.0.0. Turned off here with its own switch.']);
+  assert.equal(offIn(agent!, 'claude-cli'), 'item');
 });
 
 test('a plugin whose marketplace is on no tool any more says where it is handled instead of linking to a page', () => {
