@@ -581,7 +581,7 @@ export const takeInAnswers = (look: AnyLook, key: string) => {
  * What was asked of a pass for one item (a click, what Pull brings, or what a source holds), as the History entry it becomes:
  * begun when it is recorded, finished with the harnesses its plan writes or removes (`fill`: which of them it names).
  */
-type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'wasExcept' | 'nowExcept' | 'alsoRead' | 'version' | 'previous' | 'foundIn' | 'tookFrom' | 'link' | 'seen' | 'took'>
+type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'wasExcept' | 'nowExcept' | 'exceptOnly' | 'alsoRead' | 'version' | 'previous' | 'foundIn' | 'tookFrom' | 'link' | 'seen' | 'took'>
   & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed' };
 /**
  * What Pull brings for one item (gitrepo.ts): its name and content, and where the repo holds one harness's own part, that
@@ -1118,17 +1118,19 @@ async function click(pass: Pass, asked: Change) {
 }
 
 /**
- * The switches: the item On or Off (recording changed keep-outs for a person's switch), or one harness kept out or let in.
+ * The switches: the item On or Off (recording changed keep-outs for a person's switch), or harnesses kept out or let in: one
+ * (`only`), or several managed ones at once (`exceptOnly`, with the keep-outs before and after: a profile switch's Undo).
  * Records `alsoRead` when a person's switch turns the item on in one managed harness alone and `disk.readers` names readers for it.
  */
 function turn(pass: Pass, item: LibraryItem, asked: Change) {
   const was = { on: item.on, except: item.except };
   Object.assign(item, { on: asked.on, except: [...asked.except] } satisfies Partial<LibraryItem>);
-  const out = item.except.find(tool => !was.except.includes(tool));
-  const back = was.except.find(tool => !item.except.includes(tool));
+  const out = item.except.filter(tool => !was.except.includes(tool));
+  const back = was.except.filter(tool => !item.except.includes(tool));
+  const keptOuts = { wasExcept: [...was.except], nowExcept: [...item.except] };
   if (was.on !== item.on) {
     const entry: Asked = item.on ? { kind: 'on', cause: 'switch', fill: 'written' } : { kind: 'off', cause: 'switch', fill: 'removed' };
-    if (!asked.forPlugin && (out || back)) Object.assign(entry, { wasExcept: [...was.except], nowExcept: [...item.except] });
+    if (!asked.forPlugin && (out.length || back.length)) Object.assign(entry, keptOuts);
     if (item.on && !asked.forPlugin) {
       const onlyIn = pass.managed.filter(tool => !item.except.includes(tool));
       const alsoRead = onlyIn.length === 1 ? pass.disk.readers?.(item, onlyIn[0]!) : undefined;
@@ -1137,8 +1139,11 @@ function turn(pass: Pass, item: LibraryItem, asked: Change) {
     pass.asked.set(item.key, entry);
     return;
   }
-  if (out) pass.asked.set(item.key, { kind: 'off', cause: 'switch', only: out, fill: 'removed' });
-  else if (back) pass.asked.set(item.key, { kind: 'on', cause: 'switch', only: back, fill: 'written' });
+  // Several managed harnesses at once: one entry with the keep-outs before and after; else the one changed, a managed one first.
+  const moved = [...out, ...back].filter(tool => pass.managed.includes(tool)), only = moved[0] ?? out[0] ?? back[0];
+  if (moved.length > 1) pass.asked.set(item.key, { kind: out.length ? 'off' : 'on', cause: 'switch', exceptOnly: true, ...keptOuts, fill: out.length ? 'removed' : 'written' });
+  else if (only && out.includes(only)) pass.asked.set(item.key, { kind: 'off', cause: 'switch', only, fill: 'removed' });
+  else if (only) pass.asked.set(item.key, { kind: 'on', cause: 'switch', only, fill: 'written' });
 }
 
 /** What a click's refusal says, by why the take-in table leaves the key found; a click meets only these (library.ts takeInAnswer). */
