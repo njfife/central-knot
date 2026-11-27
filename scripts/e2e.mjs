@@ -3015,16 +3015,6 @@ async function practiceFlow() {
   // Copilot CLI and Codex do read the shared folder, so its skill is theirs; it goes again before the checks that count skills.
   rmSync(join(practice, '.agents'), { recursive: true, force: true });
   await a.click('#header-refresh');
-  // Watching: an edit on disk spreads with no click (an event prompts a read; polling is the fallback).
-  await openKind(a, 'skills');
-  writeFileSync(standupPath('copilot'), standupBefore.replace(/\n*$/, '\nEdited in Copilot, watched.\n'));
-  let watched = false;
-  for (let tries = 0; tries < 40 && !watched; tries++) { await wait(250); watched = readNow(standupPath('claude')).includes('watched'); }
-  check('a change on disk spreads on its own', watched);
-  // The page hears of it once the pass that spread it has told it, and it has read again.
-  const heard = async () => (await noticeInLines(a) ?? '').includes('standup was edited in Copilot CLI');
-  for (let tries = 0; tries < 50 && !(await heard()); tries++) await wait(100);
-  check('and the page hears about it without a click', await heard(), await a.text('#header'));
   // Only a missing event should use the deadline. Check each assertion once, after its prerequisite is observable.
   const waitFor = async (what, observed) => {
     const deadline = performance.now() + 60000;
@@ -3033,6 +3023,14 @@ async function practiceFlow() {
       await wait(50);
     }
   };
+  // Watching: an edit on disk spreads with no click (an event prompts a read; polling is the fallback).
+  await openKind(a, 'skills');
+  writeFileSync(standupPath('copilot'), standupBefore.replace(/\n*$/, '\nEdited in Copilot, watched.\n'));
+  await waitFor('the watched edit to spread to Claude Code', () => readNow(standupPath('claude')).includes('watched'));
+  check('a change on disk spreads on its own', true);
+  // The page hears of it once the pass that spread it has told it, and it has read again.
+  await waitFor('the header notice for the watched Copilot edit', async () => (await noticeInLines(a) ?? '').includes('standup was edited in Copilot CLI'));
+  check('and the page hears about it without a click', true);
   // Deliver the same notification as main and wait until the renderer has received it, even while a read is held.
   if (main) await a.run(`window.ckSyncSignals = 0; centralKnot.onSyncChanged(() => { window.ckSyncSignals++; })`);
   const tellOfChange = async () => {
@@ -18813,7 +18811,10 @@ async function profilePluginsFlow() {
   // Plugin acts ending Work say "Work stopped being the profile in use." on Row 2 of #plugins-result (or under a Library plugin line) and in the spoken announcement.
   const spoken = () => a.run(`document.querySelector('#announcement')?.dataset.text ?? ''`);
   const pluginProfile = () => a.run(`document.querySelector('#header .band-profile')?.textContent ?? ''`);
-  const waitEnabled = async sel => { for (let tries = 0; tries < 80 && !(await a.exists(`${sel}:not([disabled])`)); tries++) await wait(100); };
+  const waitEnabled = async sel => {
+    for (let tries = 0; tries < 80 && !(await a.exists(`${sel}:not([disabled])`)); tries++) await wait(100);
+    if (!(await a.exists(`${sel}:not([disabled])`))) throw new Error(`Never became enabled: ${sel}`);
+  };
   await a.click('#nav-plugins');
   for (let tries = 0; tries < 50 && !(await a.exists('#pbox-0-issue-tracker-codex-cli') || await a.exists('#popen-0-issue-tracker')); tries++) await wait(100);
   if (!(await a.exists('#pbox-0-issue-tracker-codex-cli'))) await a.click('#popen-0-issue-tracker');
@@ -18980,6 +18981,8 @@ async function profilePluginsFlow() {
   const recordPath = join(home, '.central-knot/plugins.json'), held = () => ({ ...files(), record: JSON.parse(readNow(recordPath)).plugins.find(each => each.plugin === 'issue-tracker') });
   const heldFiles = held(), bandSaid = async () => (await a.text('.profiles-page .band-done .band-text'))?.split('.')[0];
   let ran = runs();
+  // Refusing Work still returned a fresh HomeView (new readId), so Profiles re-reads the plugins view before restoring the press.
+  await waitEnabled('#profile-turn-on');
   await a.click('#profile-turn-on'); await done();
   same('pressed: one step, in Codex; its result and Undo in Profiles’ band; the header offers Switch', [held(), newRuns(ran), await bandSaid(), await a.exists('.profiles-page .band-done #outcome-undo'),
     await a.text('.profile-header p'), await a.exists('#profile-switch:not([disabled])')], [{ ...heldFiles, codex: ruleOff }, ['codex-cli'], 'Turned on issue-tracker in Codex', true, 'Switching turns 1 on', true]);
@@ -22141,7 +22144,11 @@ async function skillFileFlow() {
       await clickTab('plan.md');
       await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Claude plan for same-md-notes.'));
       await a.run(`(() => { const s = document.querySelector('.file-open-box .file-copy-select select'); s.value = '1'; s.dispatchEvent(new Event('change')); })()`);
-      await until(async () => (await a.text('.file-open-foot .path-text') ?? '').includes('.copilot/skills/same-md-notes/SKILL.md'));
+      // The footer names the copy at once; its tabs come with its read.
+      if (!(await until(async () => (await a.text('.file-open-foot .path-text') ?? '').includes('.copilot/skills/same-md-notes/SKILL.md')
+        && (await a.all('.file-open-box .file-tab', 'e.textContent.trim()')).includes('plan.md')))) {
+        throw new Error('Copilot CLI’s copy of same-md-notes did not load its plan.md tab');
+      }
       await clickTab('plan.md');
       await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Copilot plan for same-md-notes.'));
       same('switching chooser on same-md-notes reads the other copy’s differing file', [
