@@ -11360,8 +11360,8 @@ async function mcpSigninFlow() {
 fs.appendFileSync(${JSON.stringify(logins)}, JSON.stringify(process.argv.slice(2)) + '\\n');
 const mode = fs.readFileSync(${JSON.stringify(join(said, 'codex.login'))}, 'utf8').trim();
 const opened = () => (fs.existsSync(${JSON.stringify(browsers)}) ? fs.readFileSync(${JSON.stringify(browsers)}, 'utf8').split('\\n').filter(Boolean).length : 0);
-${listen(`const [command, ...words] = (process.env.BROWSER || 'xdg-open').split(':')[0].trim().split(/\\s+/), before = opened();
-  spawn(command, [...words, 'http://127.0.0.1:' + listening.address().port + '/callback'], { stdio: 'ignore' });
+${listen(`const [opener, ...words] = (process.env.BROWSER || 'xdg-open').split(':')[0].trim().split(/\\s+/), before = opened();
+  spawn(opener, [...words, 'http://127.0.0.1:' + listening.address().port + '/callback'], { stdio: 'ignore' });
   if (mode === 'helper') spawn(process.execPath, [${JSON.stringify(helperScript)}], { stdio: ['ignore', 'inherit', 'inherit'] });
   const up = setInterval(() => {
     if (opened() <= before) return;
