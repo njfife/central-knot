@@ -1,6 +1,6 @@
 // Preserving edits (FIL-02): change one entry in a config file's text and leave every other byte as it was. JSON (and JSONC):
-// a member of an object at a path (setJsonMember), or read-only spans (jsonStart, skipSpace, members, jsonElements) for cutting
-// one entry verbatim (hooksource.ts, mcp.ts entryText). TOML: a table and its subtables (setTomlTable: an MCP server's
+// a member of an object at a path (setJsonMember), or read-only spans (jsonStart, skipSpace, members, memberAt, jsonElements) for
+// cutting one entry verbatim (hooksource.ts, mcp.ts entryText). TOML: a table and its subtables (setTomlTable: an MCP server's
 // [mcp_servers.<name>]), its own-line end (ownEnd), or the tables of an array (arrayBlocks, editTomlArray, setTomlArrayKey:
 // Codex's [[skills.config]]). Text only: which entry changes is its caller's (mcp.ts, mcpswitch.ts, skillswitch.ts, partswitch.ts,
 // plugins.ts, agentfiles.ts), and writing the file, checked, is share.ts writeFileChecked.
@@ -92,6 +92,17 @@ export function members(text: string, at: number): { members: Member[]; close: n
     if (text[index] === '}') return { members: list, close: index };
     throw new Error('Expected "," or "}".');
   }
+}
+
+/** The member at a path of keys from a JSON(C) file's top object, each the last of its name, as JSON.parse keeps it; none where one isn't there. */
+export function memberAt(text: string, path: string[]): Member | undefined {
+  let member: Member | undefined, at = jsonStart(text);
+  for (const key of path) {
+    member = text[at] === '{' ? members(text, at).members.findLast(each => each.key === key) : undefined;
+    if (!member) return undefined;
+    at = member.value.start;
+  }
+  return member;
 }
 
 /** Each element's span in the JSON array starting at `at` ("["). */

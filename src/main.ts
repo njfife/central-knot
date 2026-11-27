@@ -32,7 +32,8 @@ import { forgetRefusals, installedPlugins, pluginRecordFiles, recordReadable } f
 import { checkFeed, type FeedCheck } from './bundlefeed.ts';
 import { mcpFile } from './mcp.ts';
 import { switchPath } from './skillswitch.ts';
-import { applyServers, restoreServer, serverEntry, serversView, serverVersion, storedEntry } from './servers.ts';
+import { applyServers, restoreServer, serverEntry, serversView, serverVersion } from './servers.ts';
+import { storedEntry } from './serverstore.ts';
 import { agentToolFile, agentVersion, agentsView, applyAgents, restoreAgent } from './agents.ts';
 import { agentsFolder } from './agentfiles.ts';
 import { isClearedSwitch, libraryEntry } from './historyactions.ts';

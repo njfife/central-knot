@@ -22316,7 +22316,7 @@ async function skillFileFlow() {
 
     // An ordinary MCP server's entry, one click from its row, as each tool's settings file has it: Claude Code's (strict JSON, so
     // no comment can be in it; its escapes as written), OpenCode's (managed from here: another holder key and spelling, a comment
-    // in it), Central Knot's stored definition, and no mark for a server only Codex has (its TOML is a later step).
+    // in it), Central Knot's definition, and no mark for a server only Codex has (its TOML is a later step).
     const serverBtn = key => `#${rowPart('file', 'mcp', key)}`, serverRow = key => `.ov-row[data-key="${rowPart('', 'mcp', key)}"]`, longServer = 'a-forty-letter-server-name-for-the-layout';
     const entryClaude = '    "entry-mcp": {\n      "command": "say",\n      "args": ["\\"hi\\"\\n", "caf\\u00e9"],\n      "timeout": 30\n    }';
     const demoClaude = '    "demo-mcp": { "command": "node", "args": ["-e", "0"] }';
@@ -22333,17 +22333,29 @@ async function skillFileFlow() {
     await a.click(`#${rowPart('add', 'mcp', 'parked-mcp')}`).catch(() => {});
     await a.click(`#${rowPart('switch', 'mcp', 'parked-mcp')}`).catch(() => {});
     await until(() => !readFileSync(join(home, '.claude.json'), 'utf8').includes('parked-mcp'));
-    const claudePath = `${prefix}/.claude.json`, holders = ['Claude Code’s copy', 'OpenCode’s copy'], stored = 'Central Knot’s stored definition';
-    same('a server’s Open file mark opens Claude Code’s entry as its file has it, its escapes and its own field, no sibling, the chooser offering each tool with an entry',
-      await opens(serverBtn('entry-mcp'), entryClaude), { tab: null, options: holders, selected: holders[0], text: entryClaude, top: 0, path: claudePath, stored: null });
+    const claudePath = `${prefix}/.claude.json`, holders = ['Claude Code’s copy', 'OpenCode’s copy'], stored = 'Central Knot’s definition';
+    const where = async () => [await a.text('.file-open-where'), await a.run(`document.querySelector('.file-copy-select select')?.getAttribute('aria-label')`), (await a.text('.file-open-foot [data-copy]'))?.trim()];
+    same('a server’s Open file mark opens Claude Code’s entry as its file has it, its escapes and its own field, no sibling, the chooser offering each tool with an entry; the head says where in the file it is, the footer copies its path in words',
+      [await opens(serverBtn('entry-mcp'), entryClaude), ...await where()],
+      [{ tab: null, options: holders, selected: holders[0], text: entryClaude, top: 0, path: claudePath, stored: null }, 'In mcpServers', 'Entry to show', 'Copy path']);
     await pick(1);
     same('choosing OpenCode’s copy reads OpenCode’s own entry, under its mcp.servers holder, in its spelling, its comment in it, with its own path',
-      await shows(entryOc), { tab: null, options: holders, selected: holders[1], text: entryOc, top: 0, path: `${prefix}/.config/opencode/opencode.json`, stored: null });
+      [await shows(entryOc), await a.text('.file-open-where')], [{ tab: null, options: holders, selected: holders[1], text: entryOc, top: 0, path: `${prefix}/.config/opencode/opencode.json`, stored: null }, 'In mcp.servers']);
     await a.press('Escape');
     same('Escape closes a server’s entry and puts the focus back on its mark', [await a.exists('.file-open-box'), await a.run(`document.activeElement?.id`)], [false, rowPart('file', 'mcp', 'entry-mcp')]);
+    // A newer opencode.jsonc, which OpenCode reads first, opened before any Refresh: what the footer names is the file read.
+    const ocJsonc = join(home, '.config/opencode/opencode.jsonc'), entryJsonc = entryOc.replace('"entry"]', '"entry-jsonc"]');
+    writeFileSync(ocJsonc, readFileSync(join(home, '.config/opencode/opencode.json'), 'utf8').replace(entryOc, entryJsonc));
+    await opens(serverBtn('entry-mcp'), entryClaude);
+    await pick(1);
+    same('a newer opencode.jsonc opened before any Refresh: the entry and the path its footer names are that file’s', await shows(entryJsonc).then(seen => [seen.text, seen.path]),
+      [entryJsonc, `${prefix}/.config/opencode/opencode.jsonc`]);
+    await a.press('Escape');
+    rmSync(ocJsonc);
+    await a.click('#header-refresh');
     const versionOf = key => { const folder = join(home, '.central-knot/items/mcp', key, 'versions'); const [file] = existsSync(folder) ? readdirSync(folder) : []; return file ? readFileSync(join(folder, file), 'utf8') : 'none'; };
     const parked = await opens(serverBtn('parked-mcp'), versionOf('parked-mcp'));
-    same('an Off server opens Central Knot’s stored definition, exactly as the store holds it, as a label, stored in Central Knot, with no path',
+    same('an Off server opens Central Knot’s definition, exactly as the store holds its file, as a label, stored in Central Knot, with no path',
       [parked.tab, parked.options, await a.exists('.file-open-head .file-tab'), parked.text, parked.path, parked.stored], [stored, null, false, versionOf('parked-mcp'), null, 'Stored in Central Knot']);
     await a.press('Escape');
     same('a server only Codex has has its row and no Open file mark yet', [await a.exists(serverRow('codex-mcp')), await a.exists(serverBtn('codex-mcp'))], [true, false]);
@@ -22355,7 +22367,7 @@ async function skillFileFlow() {
     await pick(2);
     const demoStored = await shows(versionOf('demo-mcp'));
     await a.click('.file-to-details').catch(() => {});
-    same('from a server’s open details its entry takes their place under ‹ Back to details; it offers each tool’s entry (OpenCode’s, chosen, kept through the redraws) and then the stored definition, never Codex’s; Back brings the tool lines back, the focus in them',
+    same('from a server’s open details its entry takes their place under ‹ Back to details; it offers each tool’s entry (OpenCode’s, chosen, kept through the redraws) and then Central Knot’s definition, never Codex’s; Back brings the tool lines back, the focus in them',
       [demo.options, ...inPlace, demoInOc.selected, demoStored.path, demoStored.stored, await a.exists('.file-open-box'), await a.run(`document.querySelectorAll('.details .details-tool').length > 0`), await a.run(`!!document.activeElement?.closest('.details')`)],
       [[...holders, stored], true, false, 0, holders[1], null, 'Stored in Central Knot', false, true, true]);
     await a.click(`#${rowPart('open', 'mcp', 'demo-mcp')}`);
@@ -22383,7 +22395,7 @@ async function skillFileFlow() {
     for (const selector of ['#nav-harnesses', 'button#harness-opencode-cli.harness-card-head', '#harness-tab-mcp']) await a.click(selector);
     same('on OpenCode’s MCP servers tab a server’s entry opens on OpenCode’s copy first', await opens(serverBtn('entry-mcp'), entryOc).then(seen => seen.selected), holders[1]);
     await a.press('Escape');
-    // Its pictures (--shots, CK_SHOT_ONLY by tag): the servers' rows at 860 light and 1316 dark; an entry alone, its OpenCode copy and an Off server's stored definition at 860; the details' place docked at 1728.
+    // Its pictures (--shots, CK_SHOT_ONLY by tag): the servers' rows at 860 light and 1316 dark; an entry alone, its OpenCode copy and an Off server's definition at 860; the details' place docked at 1728.
     await openKind(a, 'mcp');
     await filePictures([['server-rows', SMALLEST, 'light', []], ['server-rows', [1316, 819], 'dark', []], ['server-entry', SMALLEST, 'light', [serverBtn('entry-mcp')]], ['server-opencode', SMALLEST, 'light', [serverBtn('entry-mcp'), 1]],
       ['server-stored', SMALLEST, 'light', [serverBtn('parked-mcp')]], ['server-entry-dock', [1728, 1117], 'light', [`#${rowPart('open', 'mcp', 'demo-mcp')}`, serverBtn('demo-mcp')]]], pictureStep);

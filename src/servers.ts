@@ -22,8 +22,8 @@
 //   there (releaseKeptDenies).
 // Around the pass: applyServers and restoreServer run it (the page's clicks);
 // serversView is the Library's reading of MCP servers (types.ts LibraryView), with each row's source (sources.ts sourceFacts);
-// serversForRepo is what the Git repo's Push sends; serverVersion, serverEntry and storedEntry are what a server's row reads on
-// a click (Read in its versions; its file panel: each tool's entry as written, or the stored definition). Elsewhere: the
+// serversForRepo is what the Git repo's Push sends; serverVersion and serverEntry are what a server's row reads on a click (Read
+// in its versions; its file panel: each tool's entry as written; its definition is serverstore.ts storedEntry). Elsewhere: the
 // formats, mcp.ts; where things are kept and the migration from the earlier record, serverstore.ts and servermigrate.ts; the
 // row and its words, libraryrow.ts with librarypages.ts; History's sentences and actions, historyactions.ts.
 import { readFile } from 'node:fs/promises';
@@ -38,11 +38,11 @@ import { mcpDisabled, mcpSwitchPath, readMcpSwitches, withMcpSwitch } from './mc
 import { partsHolding, pluginHolds, type ThroughWhichPlugin } from './plugins.ts';
 import { copilotServerName } from './profileplan.ts';
 import { mcpTools } from './presence.ts';
-import { keepDenies, keepOwn, keptDenies, keptOwn, openLibrary, readVersion, recordedServers, saveLibrary, storeVersion, versionText } from './serverstore.ts';
+import { keepDenies, keepOwn, keptDenies, keptOwn, openLibrary, readVersion, recordedServers, saveLibrary, storeVersion } from './serverstore.ts';
 import { errorCode, itemKey, sha256, syncGate, writeAccess, writeFileChecked, type ShareContext } from './share.ts';
 import type { SwitchFile } from './skillswitch.ts';
 import { sourceFacts } from './sources.ts';
-import type { Change, FileRead, HarnessId, LibraryFacts, LibraryView, PassResult, SyncNotice, ToolCopy } from './types.ts';
+import type { Change, HarnessId, LibraryFacts, LibraryView, PassResult, SyncNotice, ToolCopy } from './types.ts';
 import { throughPlugin, toolName } from './words.ts';
 import { record } from './values.ts';
 
@@ -58,8 +58,8 @@ interface ServerDisk extends Disk<McpEntry> {
   shapes: Map<string, NeutralServer>;
   /** The names of servers seen only in a form never taken in (Disk.unseen says why), by key: each a row. */
   unseenNames: Map<string, string>;
-  /** By key, the settings file of each tool where such a name was seen: the file panel reads the entry there (LibraryFacts namedIn). */
-  namedIn: Map<string, Partial<Record<HarnessId, string>>>;
+  /** By key, each tool whose settings hold such a name: the file panel reads the entry there (LibraryFacts namedIn). */
+  namedIn: Map<string, Set<HarnessId>>;
   /** The plugin a tool has a server through, if it has one (librarypass.ts Disk.viaPlugin; only the same server: serversThroughPlugins). */
   viaPlugin: ThroughWhichPlugin;
   /** Each tool's own switch file for servers, read once (mcpswitch.ts). */
@@ -92,7 +92,7 @@ async function readDisk(context: ShareContext, managed: HarnessId[], library: Ki
     if (read.problem) { disk.unseen.set(`${tool}:*`, read.problem); disk.problems.push(read.problem); continue; }
     const notTaken = (name: string, why: string) => {
       disk.unseen.set(`${tool}:${itemKey(name)}`, why); disk.unseenNames.set(itemKey(name), name);
-      disk.namedIn.set(itemKey(name), { ...disk.namedIn.get(itemKey(name)), [tool]: file });
+      disk.namedIn.set(itemKey(name), (disk.namedIn.get(itemKey(name)) ?? new Set<HarnessId>()).add(tool));
     };
     for (const name of read.invalid ?? []) {
       notTaken(name, `${toolName(tool)}’s entry for it is not written in a form Central Knot edits, so it is left alone.`);
@@ -237,9 +237,6 @@ export const serverVersion = (context: ShareContext, key: string, hash: string) 
  */
 export const serverEntry = async (context: ShareContext, managed: HarnessId[], home: unknown, key: string, tool: HarnessId) =>
   (home === context.home && managed.includes(tool) ? entryText(context, tool, key) : undefined);
-/** Central Knot's stored definition of one version, its file's text as the store holds it, for the file panel (serverstore.ts versionText). */
-export const storedEntry = (context: ShareContext, key: string, hash: string): Promise<FileRead | undefined> =>
-  versionText(context, key, hash).then(text => (text === undefined ? undefined : { files: [], text }));
 
 /**
  * What the Git repo holds for each server in the library, On or Off (gitrepo.ts Push): its current version, or the edit a
@@ -335,6 +332,6 @@ async function rowFacts(look: ServerLook, key: string, item: LibraryItem | undef
       : { takeInAnswers: takeInAnswers(look, key) }),
     ...some('plugin', plugin), ...some('unseen', unseen), ...some('switchedOff', switchedOff), ...some('switchProblem', switchProblem),
     ...(copilotName ? { copilotName } : {}), ...(copilotOff ? { copilotOff } : {}), ...(shape ? { transport: shape.transport } : {}),
-    ...(fromSource ? { fromSource } : {}), ...some('namedIn', disk.namedIn.get(key) ?? {}),
+    ...(fromSource ? { fromSource } : {}), ...(disk.namedIn.has(key) ? { namedIn: [...disk.namedIn.get(key)!] } : {}),
   };
 }

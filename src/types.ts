@@ -222,7 +222,7 @@ export interface DesktopApi {
   agentFile(home: string, key: string, tool: HarnessId): Promise<FileRead | null>;
   /** One MCP server's entry in a managed tool of the home open, as its settings file has it (servers.ts serverEntry). */
   serverEntry(home: string, key: string, tool: HarnessId): Promise<FileRead | null>;
-  /** One version of an MCP server as Central Knot's store holds its file (servers.ts storedEntry); null when it isn't stored. */
+  /** One version of an MCP server as Central Knot's store holds its file (serverstore.ts storedEntry); null where it has none. */
   serverStored(key: string, hash: string): Promise<FileRead | null>;
   /** Reads which skills, agents and MCP servers the tools' session history shows were used (usage.ts readUsage), when the page collects usage (app.ts collectUsage); null for another home than the open one. */
   readUsage(home: string): Promise<UsageReading | null>;
@@ -357,10 +357,11 @@ export interface PluginTurnResult { stopped?: string; done: PluginDone[]; before
 
 /**
  * A file panel's read: one regular file of a skill's folder, with every regular file listed by name (skills.ts skillVersionFile,
- * skillFoundFile, skillPluginFile), an agent's one file in a tool, with its folder (agentfiles.ts agentFile), or an MCP server's
- * entry or stored definition, with no file named (mcp.ts entryText, servers.ts storedEntry: the page has the settings path).
+ * skillFoundFile, skillPluginFile), an agent's one file in a tool, with its folder (agentfiles.ts agentFile), an MCP server's
+ * entry, with its settings file and the keys of the object holding it (`holder`: mcp.ts entryText), or a server's stored
+ * definition, with no file (serverstore.ts storedEntry).
  */
-export interface FileRead { files: string[]; text?: string; note?: string; directory?: string }
+export interface FileRead { files: string[]; text?: string; note?: string; directory?: string; holder?: string }
 /** What names a plugin's skill for main to resolve on disk without the page sending a path (`source` for a Find hit's marketplace; skills.ts skillPluginFile). */
 export interface PluginSkillRef { marketName: string; plugin: string; part: string; from: HarnessId | 'marketplace'; source?: string }
 
@@ -1169,8 +1170,8 @@ export interface LibraryFacts {
   copilotName?: string;
   /** MCP servers: the server's exact Copilot CLI name while `disabledMcpServers` in Copilot CLI's settings.json holds it off (managed and not kept out). */
   copilotOff?: string;
-  /** MCP servers: the settings file of each tool naming it in an entry never taken in, so no copy (servers.ts readDisk notTaken): the file panel reads it. */
-  namedIn?: Partial<Record<HarnessId, string>>;
+  /** MCP servers: the tools whose settings name it in an entry never taken in, so no copy (servers.ts readDisk notTaken): the file panel reads it. */
+  namedIn?: HarnessId[];
   /** Skills, found: each read copy's folder content hash by its real directory (own and outside copies), for deduplication and reload detection. */
   folderHashes?: Record<string, string>;
   /**

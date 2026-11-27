@@ -67,7 +67,7 @@ export interface ItemRow {
   readBy?: LibraryFacts['readBy'];
   takeOver?: Partial<Record<Tool, { kind: 'link' | 'shared'; path: string }>>;
   switchedOff?: Tool[];
-  /** An MCP server: the settings file of each tool naming it in an entry never taken in (types.ts LibraryFacts namedIn). */
+  /** An MCP server: the tools whose settings name it in an entry never taken in (types.ts LibraryFacts namedIn). */
   namedIn?: LibraryFacts['namedIn'];
   /** `pluginOn`: the tools with no copy of their own that have it on through an installed plugin (pluginrows.ts pluginOnIn; libraryrow.ts LibraryRow says it). */
   pluginOn?: Tool[];

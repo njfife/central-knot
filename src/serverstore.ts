@@ -20,7 +20,7 @@ import type { KindLibrary } from './librarypass.ts';
 import { serverHash, type NeutralServer, type OwnPart } from './mcp.ts';
 import { isOldRecord, migrateServers } from './servermigrate.ts';
 import { sha256, storeDirectory, writeDurably, type ShareContext } from './share.ts';
-import type { HarnessId } from './types.ts';
+import type { FileRead, HarnessId } from './types.ts';
 
 /** mcp.json. Format 2 is the library's; format 1 (servermigrate.ts) is migrated. */
 const RECORD: RecordFile = { file: 'mcp.json', format: 2, said: 'The MCP record' };
@@ -66,7 +66,9 @@ const versionPath = (context: ShareContext, key: string, hash: string) => join(i
 const ownPath = (context: ShareContext, key: string, hash: string) => join(itemFolder(context, key), 'own', `${hash}.json`);
 /** Stores one version's content (the server's shared part) under the server, once. */
 export const storeVersion = (context: ShareContext, key: string, server: NeutralServer) =>
-  storeOnce(versionPath(context, key, serverHash(server)), `${JSON.stringify(server, null, 2)}\n`);
+  storeOnce(versionPath(context, key, serverHash(server)), versionFile(server));
+/** A version's file as it is stored. */
+const versionFile = (server: NeutralServer) => `${JSON.stringify(server, null, 2)}\n`;
 
 /** Versions a migration made that no writer has stored yet (openLibrary), by where they will be stored. */
 const notStoredYet = new Map<string, NeutralServer>();
@@ -76,9 +78,12 @@ export async function readVersion(context: ShareContext, key: string, hash: stri
   try { return JSON.parse(await readFile(path, 'utf8')) as NeutralServer; } catch { return notStoredYet.get(path); }
 }
 
-/** A version's file, exactly as stored, for the file panel (servers.ts storedEntry): none before it is (readVersion reads a migration's from memory). */
-export const versionText = (context: ShareContext, key: string, hash: string) =>
-  readFile(versionPath(context, key, hash), 'utf8').catch(() => undefined);
+/** A version's file exactly as stored, for the file panel; one a migration made that no writer has stored yet (openLibrary), as it will be. */
+export async function storedEntry(context: ShareContext, key: string, hash: string): Promise<FileRead | undefined> {
+  const path = versionPath(context, key, hash), waiting = notStoredYet.get(path);
+  const text = await readFile(path, 'utf8').catch(() => (waiting ? versionFile(waiting) : undefined));
+  return text === undefined ? undefined : { files: [], text };
+}
 
 const storeOwn = (context: ShareContext, key: string, text: string) => storeOnce(ownPath(context, key, sha256(text)), text);
 
