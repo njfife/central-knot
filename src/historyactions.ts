@@ -29,6 +29,8 @@
 //     there (`in-line`)
 //   on or off in one harness (`only`) while  none: its switch there would change nothing now (the entry says that
 //     that harness is not managed            harness isn't managed now)
+//   kept out of or back in several harnesses Undo: the keep-outs    the item is On and kept out of exactly those
+//     at once while On (`exceptOnly`)        before it back         it left (sameTools)
 //   on or off whose click took tools' own    Undo: that action,     still as the click left it (copies: asTheClickLeftIt;
 //     copies over (`tookFrom`) or changed    earlier keep-outs      keep-outs: sameTools); after that, the plain action
 //     keep-outs with `on` (`wasExcept`)      and copies back        above, which leaves keep-outs and copies as they are
@@ -79,7 +81,7 @@ import { itemKey, pendingChanges, theVersion, type LibraryItem } from './library
 import { linkLabel, pluginOf } from './sourcelink.ts';
 import { asItIs, noTimeTells, versionClock, type RowWords } from './libraryrow.ts';
 import type { Change, HarnessId, HistoryEvent, HomeView, LibraryFacts, PartKind } from './types.ts';
-import { andList, deletedIn, harnessIds, readsIt, sentence, toolName, toolsPhrase, turnIt } from './words.ts';
+import { andList, deletedIn, harnessIds, keptOutWords, readsIt, sameTools, sentence, toolName, toolsPhrase, turnIt } from './words.ts';
 
 /**
  * Whose a History entry is among the library's kinds, by the page's name for the kind (app.ts PageKind), with the item's key.
@@ -139,6 +141,10 @@ export function librarySentence(
   // A click that wrote over a copy a tool had of its own (tookFrom, and written: in `losers`), which is kept as a version.
   const over = (event.tookFrom ?? []).filter(copy => named(copy.tool)).map(copy => toolName(copy.tool));
   const overSaid = over.length ? ` ${andList(over)}’s own ${over.length === 1 ? 'copy was' : 'copies were'} written over and kept as a version.` : '';
+  // Several harnesses' keep-outs changed at once while it stayed On (a profile switch's Undo): each named.
+  if (event.exceptOnly && event.wasExcept && event.nowExcept) {
+    return { glyph: event.kind === 'off' ? 'circle-off' : 'circle-check', text: `${keptOutWords(event.wasExcept, event.nowExcept, 'Kept out of')}.` };
+  }
   switch (event.kind) {
     case 'on': {
       // A pass no click asked put a copy in one tool that had none (`only`: a tool that came under management, say), or wrote
@@ -318,6 +324,10 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
     if (!held) return { label: 'Undo', help: `Take ${name} out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own`, change: { ...now, deleted: true, ...givenBack(event, item) } };
     return event.kind === 'on' ? switchAction(false, undefined, item) : undefined;
   }
+  if (event.exceptOnly && event.wasExcept && event.nowExcept) {
+    const asLeft = item.on && sameTools(item.except, event.nowExcept);
+    return asLeft ? { label: 'Undo', help: `Put ${name} back in the tools it was in before this, and out of the others`, change: { ...now, except: [...event.wasExcept] } } : undefined;
+  }
   if (event.kind === 'off' || event.kind === 'on') {
     const action = switchAction(event.kind === 'off', event.only, item);
     if (!action) return undefined;
@@ -406,9 +416,7 @@ export function takeInHeld(event: HistoryEvent, item: LibraryItem | undefined, n
 /** The tools a take-in found the item in (types.ts HistoryEvent foundIn); an entry from before it was recorded: where it was taken from, and its own copies. */
 const foundIn = (event: HistoryEvent): HarnessId[] => event.foundIn ?? [...new Set([...(event.winner ? [event.winner.tool] : []), ...(event.tookFrom ?? []).map(copy => copy.tool)])];
 
-/** Whether two harness lists hold the same set of tools, regardless of order. */
-const sameTools = (first: readonly HarnessId[], second: readonly HarnessId[]) =>
-  new Set(first).size === new Set(second).size && first.every(tool => second.includes(tool));
+
 
 /**
  * Whether the item is still as the entry's click left it: at the version it left (types.ts HistoryEvent version, or the
