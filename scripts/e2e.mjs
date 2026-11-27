@@ -1001,7 +1001,12 @@ async function harnessFlow() {
   mkdirSync(hData, { recursive: true });
   toolClis(hHome);
   const hClaude = join(hHome, '.claude/skills'), hCopilot = join(hHome, '.copilot/skills'), hCodex = join(hHome, '.codex/skills');
-  for (const name of ['on-skill', 'off-a', 'off-b', 'off-c', 'found-only']) skill(hClaude, name);
+  for (const name of ['on-skill', 'off-a', 'off-b', 'off-c', 'off-switched', 'found-only', 'bad-found']) skill(hClaude, name);
+  symlinkSync('SKILL.md', join(hClaude, 'bad-found', 'alias'));
+  skill(join(hHome, 'outside-skills'), 'off-switched');
+  mkdirSync(hCodex, { recursive: true });
+  symlinkSync(join(hHome, 'outside-skills', 'off-switched'), join(hCodex, 'off-switched'));
+  writeFileSync(join(hHome, '.codex/config.toml'), '[[skills.config]]\nname = "off-switched"\nenabled = false\n');
   skill(hClaude, 'clash', text('clash', 'Version A.'));
   skill(hCodex, 'clash', text('clash', 'Version B.'));
   skill(hCopilot, 'other-only', text('other-only', 'Only in Copilot.'));
@@ -1018,6 +1023,7 @@ async function harnessFlow() {
     'agents/plug-agent.md': agentMd('plug-agent'),
     '.mcp.json': JSON.stringify({ mcpServers: { 'plug-mcp': { command: 'node', args: ['-e', '4'] } } }),
   });
+  writeClaudeInstall(hHome, 'hn-market', 'issue-tracker', '1.0.0', {});
   writeFileSync(join(hData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: hHome } }));
   const h = await launch(hData, [], hReal);
   try {
@@ -1041,30 +1047,73 @@ async function harnessFlow() {
     };
     const heightOf = sel => h.run(`Math.round(document.querySelector(${JSON.stringify(sel)})?.getBoundingClientRect().height ?? 0)`);
     await openKind(h, 'all');
-    for (const [kind, key] of [['skills', 'on-skill'], ['skills', 'off-a'], ['skills', 'off-b'], ['skills', 'off-c'], ['mcp', 'on-mcp'], ['mcp', 'off-mcp'], ['agents', 'on-agent'], ['agents', 'off-agent']]) {
+    for (const [kind, key] of [['skills', 'on-skill'], ['skills', 'off-a'], ['skills', 'off-b'], ['skills', 'off-c'], ['skills', 'off-switched'], ['mcp', 'on-mcp'], ['mcp', 'off-mcp'], ['agents', 'on-agent'], ['agents', 'off-agent']]) {
       await h.click(`#${rowPart('add', kind, key)}`);
     }
-    for (const [kind, key] of [['skills', 'off-a'], ['skills', 'off-b'], ['mcp', 'off-mcp'], ['agents', 'off-agent']]) {
+    for (const [kind, key] of [['skills', 'off-a'], ['skills', 'off-b'], ['skills', 'off-switched'], ['mcp', 'off-mcp'], ['agents', 'off-agent']]) {
       await h.click(`#${rowPart('switch', kind, key)}`);
     }
+    await openKind(h, 'skills');
+
+    const FOUND_OFF_CARD = 'In a tool, not yet in Central Knot. Add keeps an item in Central Knot and turns it on in managed tools.';
+    const FOUND_ON_CARD = 'In a tool, not yet in Central Knot. Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.';
+    const PLUGIN_CARD = 'Installed with their plugin, not copied. Open a row for the controls each tool has.';
+    const OFF_CARD = 'Kept in Central Knot with its versions, switched off. Where a tool still has it, its row says so.';
+    const rowTags = (kind, key) => h.all(`.ov-row[data-key="${rowPart('', kind, key)}"] .row-tag`);
+
+    // Routine tags hidden under Found and Off; non-routine tags kept; Find restores routine tags under Results; unread warning is one line at 860 with its reason behind its mark.
+    same('Found and Off drop routine tags while keeping can’t be taken in, Copies differ, and switched off in a tool',
+      [await rowTags('skills', 'found-only'), await rowTags('skills', 'bad-found'), await rowTags('skills', 'clash'),
+        await rowTags('skills', 'off-a'), await rowTags('skills', 'off-switched')],
+      [[], ['can’t be taken in'], ['Copies differ'], [], ['in Central Knot · switched off in Codex']]);
+    const waitForEl = async sel => { for (let tries = 0; tries < 40 && !(await h.exists(sel)); tries++) await wait(100); };
+    const findText = async typed => { await h.run(`(() => { const i = document.querySelector('#find'); i.value = ${JSON.stringify(typed)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`); await h.settle(); };
+    for (const [query, key, wantTag] of [['found-only', 'found-only', 'not in Central Knot'], ['off-a', 'off-a', 'in Central Knot only']]) {
+      await findText(query);
+      await waitForEl('.ov-section[data-section="results"]');
+      same(`with Find typed (${query}), plain row carries its tag under Results`, await rowTags('skills', key), [wantTag]);
+    }
+    await findText('');
+    await waitForEl('.ov-section[data-section="found"]');
+    await sizeTo(h, ...SMALLEST);
+    if (await h.run(`document.body.classList.contains('rail')`)) await h.click('#sidebar-toggle');
+    await h.settle();
+    const unreadCheck = await h.run(`(() => {
+      const mark = document.getElementById('unread-plugins-info');
+      const band = mark?.closest('.band'), text = band?.querySelector('.band-text');
+      const tb = text?.getBoundingClientRect(), mb = mark?.getBoundingClientRect();
+      const lh = text ? parseFloat(getComputedStyle(text).lineHeight) : 0;
+      return { text: text?.textContent ?? null, oneLine: !!tb && tb.height <= lh + 2, markSized: !!mb && mb.width >= 18 && mb.height >= 18 };
+    })()`);
+    same('at 860 with sidebar open, unread plugin warning is one line with a sized (?) mark whose card holds the reason',
+      [unreadCheck, await keyboardCard('unread-plugins-info')],
+      [{ text: 'What issue-tracker brings in Claude Code isn’t listed', oneLine: true, markSized: true },
+        { focused: 'unread-plugins-info', opened: true, cardText: 'Claude Code lists it, but its files are not where it records them.', closed: true, keptFocus: 'unread-plugins-info' }]);
+    await fullSize(h);
+    await h.click('#nav-harnesses');
+    await h.click('button#harness-claude-cli.harness-card-head');
+    await h.click('#harness-tab-skills');
+    same('Claude Code’s Skills tab drops routine Found/Off tags and keeps not in Central Knot under Not in Claude Code',
+      [await rowTags('skills', 'found-only'), await rowTags('skills', 'off-a'), await rowTags('skills', 'other-only')],
+      [[], [], ['not in Central Knot']]);
+
+    await openKind(h, 'skills');
     chmodSync(hCodex, 0o555);
     await h.click(`#${rowPart('switch', 'skills', 'off-c')}`);
     await h.click('#header-refresh');
     await openKind(h, 'skills');
+    same('with Codex read-only, pending removal keeps its tag and found-only keeps its tag for where it would be added',
+      [await rowTags('skills', 'off-c'), await rowTags('skills', 'found-only')],
+      [['still in Codex until sync runs'], ['not in Central Knot']]);
 
-    const FOUND_OFF_CARD = 'In a tool, not yet in Central Knot. Add turns an item on in managed tools.';
-    const FOUND_ON_CARD = 'Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.';
-    const PLUGIN_CARD = 'Installed with their plugin, not copied. Open a row for the controls each tool has.';
-    const OFF_CARD = 'Kept in Central Knot, switched off. Where a tool still has it, its row says so.';
-
-    // Library Skills: 3 Off rows with 1 pending Codex removal, card closed; keyboard-focusable marks on Found, Only through a plugin and Off; stable heading heights.
-    same('Library Skills: no heading says Synchronize everything in Settings, On has no mark, and Off 3 shows 1 still in Codex until sync runs with card closed',
+    // Library Skills: 4 Off rows with 1 pending Codex removal, card closed; keyboard-focusable marks on Found, Only through a plugin and Off; stable heading heights.
+    same('Library Skills: no heading says Synchronize everything in Settings, On has no mark, and Off 4 shows 1 still in Codex until sync runs with card closed',
       [(await h.all('.ov-section', 'e.textContent')).some(text => /Synchronize everything, in Settings/.test(text)),
         await h.exists('.ov-section[data-section="on"] .info-mark'),
         await h.run(`!document.getElementById('section-off-info-card')?.matches(':popover-open')`),
         await headingSays(h, 'found'),
         await headingSays(h, 'off')],
-      [false, false, true, 'Found3', 'Off3·1 still in Codex until sync runs']);
+      [false, false, true, 'Found4', 'Off4·1 still in Codex until sync runs']);
     const onH = await heightOf('.ov-section[data-section="on"]');
     const foundNoLiveH = await heightOf('.ov-section[data-section="found"]');
     const pluginH = await heightOf('.ov-section-plugins');
@@ -1075,16 +1124,16 @@ async function harnessFlow() {
       same(`Library: ${id} opens its card by keyboard and closes on Escape`, await keyboardCard(id),
         { focused: id, opened: true, cardText: wantText, closed: true, keptFocus: id });
     }
-    // Pin a changed Off row: count drops to 2, misleading live note hides while height stays unchanged.
+    // Pin a changed Off row: count drops to 3, misleading live note hides while height stays unchanged.
     await h.click(`#${rowPart('switch', 'skills', 'off-a')}`);
-    same('Library: pinning a row turned On under Off drops the count to 2, hides the live line, and keeps heading height',
+    same('Library: pinning a row turned On under Off drops the count to 3, hides the live line, and keeps heading height',
       [await headingSays(h, 'off'), await heightOf('.ov-section[data-section="off"]'), await h.text('#section-off-info-card')],
-      ['Off2', offWithLiveH, OFF_CARD]);
+      ['Off3', offWithLiveH, OFF_CARD]);
     await h.click(`#${rowPart('switch', 'skills', 'off-a')}`);
     await h.click('#header-refresh');
 
     // Tool tabs (Skills, MCP servers, Agents) while Synchronize everything is Off: keyboard marks on all three headings,
-    // Not in <tool> has no note or mark, Off 3 live line on Skills, and pinned Found 0 on Agents.
+    // Not in <tool> has no note or mark, Off 4 live line on Skills, and pinned Found 0 on Agents.
     await h.click('#nav-harnesses');
     await h.click('button#harness-claude-cli.harness-card-head');
     for (const tab of ['skills', 'mcp', 'agents']) {
@@ -1098,9 +1147,9 @@ async function harnessFlow() {
           { focused: id, opened: true, cardText: wantText, closed: true, keptFocus: id });
       }
       if (tab === 'skills') {
-        same('Claude Code’s Skills tab: Off 3 shows 1 still in Codex until sync runs with card closed',
+        same('Claude Code’s Skills tab: Off 4 shows 1 still in Codex until sync runs with card closed',
           [await headingSays(h, 'off'), await h.run(`!document.getElementById('section-off-info-card')?.matches(':popover-open')`)],
-          ['Off3·1 still in Codex until sync runs', true]);
+          ['Off4·1 still in Codex until sync runs', true]);
       }
       if (tab === 'agents') {
         const beforeH = await heightOf('.ov-section[data-section="found"]');
@@ -1119,7 +1168,7 @@ async function harnessFlow() {
     await openKind(h, 'skills');
     same('Library with Synchronize everything on: Found shows 1 waits for your choice of copy at the same height and updates its card',
       [await headingSays(h, 'found'), await heightOf('.ov-section[data-section="found"]'), await keyboardCard('section-found-info')],
-      ['Found1·1 waits for your choice of copy', foundNoLiveH, { focused: 'section-found-info', opened: true, cardText: FOUND_ON_CARD, closed: true, keptFocus: 'section-found-info' }]);
+      ['Found2·1 waits for your choice of copy', foundNoLiveH, { focused: 'section-found-info', opened: true, cardText: FOUND_ON_CARD, closed: true, keptFocus: 'section-found-info' }]);
     await h.click('#nav-harnesses');
     await h.click('button#harness-claude-cli.harness-card-head');
     await h.click('#harness-tab-skills');
@@ -2849,7 +2898,7 @@ async function practiceFlow() {
   const deletedSays = await openNotices(a);
   check('with a notice that Central Knot keeps it, its card offering Turn it on', deletedSays.includes('release-notes was deleted in Copilot CLI, so it is off and was taken out of Claude Code and Codex. Central Knot keeps it') && await a.exists('#notices-card [id^="notice-restore-"]'), deletedSays);
   await closeNotices(a);
-  check('and the table keeps it under Off, in Central Knot only', ((await sectionsNow(a, 'skills')).find(([role]) => role === 'off')?.[1] ?? []).includes('release-notes') && /in Central Knot only/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'release-notes')}"]`) ?? '') && !(await switchOn(a, 'skills', 'release-notes')), await sectionsNow(a, 'skills'));
+  check('and the table keeps it under Off, with no routine tag', ((await sectionsNow(a, 'skills')).find(([role]) => role === 'off')?.[1] ?? []).includes('release-notes') && !(await a.exists(`.ov-row[data-key="${rowPart('', 'skills', 'release-notes')}"] .row-tag`)) && !(await switchOn(a, 'skills', 'release-notes')), await sectionsNow(a, 'skills'));
   await a.click('#nav-history');
   check('History lists it', (await a.text('#history-scroll') ?? '').includes('release-notes'), await a.text('#history-scroll'));
   await a.shot('practice-history');
@@ -2858,7 +2907,7 @@ async function practiceFlow() {
   same('turning it on puts every folder back as it was', [folders('release-notes'), await switchOn(a, 'skills', 'release-notes')], [releaseNotesOn, true]);
   check('with Undo', await a.exists('#outcome-undo'), await a.text('.bands'));
   await a.click('#outcome-undo');
-  same('whose Undo takes it out of every tool again: off, in Central Knot only', [releaseNotesIn(), /in Central Knot only/.test(await a.text(`.ov-row[data-key="${rowPart('', 'skills', 'release-notes')}"]`) ?? ''), await switchOn(a, 'skills', 'release-notes')], [[false, false, false], true, false]);
+  same('whose Undo takes it out of every tool again: off under Off, with no routine tag', [releaseNotesIn(), await a.exists(`.ov-row[data-key="${rowPart('', 'skills', 'release-notes')}"] .row-tag`), await switchOn(a, 'skills', 'release-notes')], [[false, false, false], false, false]);
   await a.click(`#${rowPart('switch', 'skills', 'release-notes')}`);
   same('and on again puts it back once more', releaseNotesIn(), [true, true, true]);
 
@@ -3252,9 +3301,9 @@ async function practiceFlow() {
   same('agents from every tool', (await rowKeys(a, 'agents')).sort(), ['code-reviewer', 'release-notes']);
   const switchState = key => a.run(`document.querySelector('#${rowPart('switch', 'agents', key)}').getAttribute('aria-checked')`);
   const agentRow = key => a.text(`.ov-row[data-key="${rowPart('', 'agents', key)}"]`);
-  same('an agent only a harness has is found: under Found, with Add, said not to be in Central Knot, and the Found card says what Add does',
-    [await a.text(`#${rowPart('add', 'agents', 'code-reviewer')}`), await headingSays(a, 'found'), /not in Central Knot/.test(await agentRow('code-reviewer') ?? ''),
-      await a.text('#section-found-info-card')], ['Add', 'Found2', true, 'In a tool, not yet in Central Knot. Add turns an item on in managed tools.']);
+  same('an agent only a harness has is found: under Found, with Add, no routine tag, and the Found card says what Add does',
+    [await a.text(`#${rowPart('add', 'agents', 'code-reviewer')}`), await headingSays(a, 'found'), await a.exists(`.ov-row[data-key="${rowPart('', 'agents', 'code-reviewer')}"] .row-tag`),
+      await a.text('#section-found-info-card')], ['Add', 'Found2', false, 'In a tool, not yet in Central Knot. Add keeps an item in Central Knot and turns it on in managed tools.']);
   await a.click(`#${rowPart('add', 'agents', 'code-reviewer')}`);
   // release-notes is added from the keyboard: the rows are shared with Skills and MCP servers, so it stays where it was too.
   await a.run(`document.querySelector('#${rowPart('add', 'agents', 'release-notes')}').focus()`);
@@ -7615,9 +7664,9 @@ async function syncEverythingFlow() {
     check(`no Add all on ${page}: switching Synchronize everything on is the one way to add everything`, !(await a.exists('#apply, #manage-all')) && !(await a.all('button', 'e.textContent.trim()')).some(label => /^Add all/i.test(label)));
   };
   await openKind(a, 'skills');
-  same('off where it was never chosen: Found has no live line, its card says Add turns an item on in managed tools, and no Settings redirect shows',
+  same('off where it was never chosen: Found has no live line, its card says Add keeps an item in Central Knot and turns it on in managed tools, and no Settings redirect shows',
     [await foundNote(), await a.text('#section-found-info-card'), /Synchronize everything, in Settings/.test(await a.text('.ov-section[data-section="found"]') ?? '')],
-    [null, 'In a tool, not yet in Central Knot. Add turns an item on in managed tools.', false]);
+    [null, 'In a tool, not yet in Central Knot. Add keeps an item in Central Knot and turns it on in managed tools.', false]);
   await a.click('#nav-settings');
   for (let tries = 0; tries < 30 && !(await a.exists('#setting-sync-everything')); tries++) await wait(100);
   same('Settings › This home: Synchronize everything is off, moves its paragraph behind its mark with live aria-describedby, and says what it would add now and what waits',
@@ -7651,7 +7700,7 @@ async function syncEverythingFlow() {
   same('on the Library’s skills notes and fresh are On and review stays found', await sectionsNow(a, 'skills'), [['on', ['fresh', 'notes']], ['found', ['review']]]);
   same('the Found heading’s card says what Synchronize everything skips, and its live line counts what waits for a choice',
     [await a.text('#section-found-info-card'), (await foundNote())?.replace(/^·\s*/, '')],
-    ['Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.', '1 waits for your choice of copy']);
+    ['In a tool, not yet in Central Knot. Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.', '1 waits for your choice of copy']);
   const notice = '.sync-notice[data-kind="taken-in"] .notice-text';
   await openNotices(a);
   same('one notice per pass says how many it took in, where they were found, and their names, in the notices’ card', await a.all(`#notices-card ${notice}`, 'e.textContent.replace(/ · .*$/, "")'),
@@ -15209,7 +15258,7 @@ async function libraryFlow() {
     [await headerState(), await r.exists(`#${rowPart('add', 'skills', 'race-add')}`), await r.exists(`#${rowPart('decide', 'skills', 'race-add')}`),
       await r.all(`${row('skills', 'race-add')} .row-tag`), !!readSkillsRecord()['race-add'], readHistory().some(entry => entry.key === 'race-add'), pairFiles('race-add')],
     [{ text: 'race-add has differing copies. Choose which copy every tool uses.', warn: false, undo: false, problems: [] },
-      true, true, ['Copies differ', 'not in Central Knot'], false, false, [equalAdd, changedAdd]]);
+      true, true, ['Copies differ'], false, false, [equalAdd, changedAdd]]);
   // Choosing a copy then adds it, writes both tools, records History, and says so.
   await r.click(`#${rowPart('add', 'skills', 'race-add')}`);
   check('Add on the differing row opens its copy question', await r.exists(`#${rowPart('use', 'skills', 'race-add', 'copilot-cli')}`), await r.text('#page'));

@@ -46,7 +46,7 @@ import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h,
 import type { IconName } from './icons.ts';
 import { byName, byUsage, inOrder, kindSource, lastUpdated, noPins, partId, pin, placeIn, rankIn, rowId, type ItemRow, type KindSource, type Pinned, type RowKey, type RowOrder, type RowUsage, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
-import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, rowClicks, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
+import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, rowClicks, showsPlaceTag, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionPart, type VersionText } from './versionlist.ts';
 import { itemKey, listed, type Version } from './library.ts';
@@ -288,15 +288,17 @@ function foundSection(t: Table, rows: (ItemRow | PluginRow)[]) {
   if (!rows.length) return null;
   return h('div', { role: 'rowgroup' },
     h('div.ov-section', { role: 'row', 'data-section': 'results' }, h('div.ov-section-label', { role: 'cell' }, headingTick(t, 'results', 'Results', rows), h('strong', {}, 'Results'), h('span.ov-section-count', {}, String(listedRows(t).length)))),
-    rows.flatMap(each => (isPluginRow(each) ? pluginRowEl(t, each) : row(t, each))));
+    rows.flatMap(each => (isPluginRow(each) ? pluginRowEl(t, each) : row(t, each, 'results'))));
 }
 
-/** Installed plugins whose copy couldn't be read in the tools this table is about: what they bring is missing, and why. */
+/** Installed plugins whose copy couldn't be read in the tools this table is about: what they bring is missing, with the reason behind its mark. */
 function unreadBand(t: Table) {
   const list = plugged(t).unread.filter(install => !t.tool || install.tool === t.tool);
   if (!list.length) return null;
-  return h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
-    h('span.band-text', {}, list.slice(0, 3).map(install => `What ${install.plugin} brings in ${names[install.tool]} isn’t listed: ${install.problem}`).join(' · ') + (list.length > 3 ? ` · and ${list.length - 3} more` : '')));
+  const shown = list.slice(0, 3).map(install => `What ${install.plugin} brings in ${names[install.tool]} isn’t listed`).join(' · ') + (list.length > 3 ? ` · and ${list.length - 3} more` : '');
+  const why = list.length === 1 ? list[0]!.problem! : list.map(install => `${install.plugin} (${names[install.tool]}): ${install.problem}`).join('\n');
+  return h('div.band', { role: 'status', 'data-info-block': true }, icon('triangle-alert', 14, 'tone-warning'),
+    h('span.band-text', {}, shown), infoMark('unread-plugins-info', 'Unlisted plugin items', why));
 }
 /** How long ago a time was ("2 min ago", "3 h ago", "yesterday", "5 days ago"), or '' when it isn't known. */
 const sinceThen = (at: number) => {
@@ -957,9 +959,10 @@ function openRow(t: Table, row: ItemRow | PluginRow) {
   if (view.comparing && underRow(t, id)) revealUnderRow(id);
 }
 
-/** A library item's tag after its name, when it isn't plainly on everywhere (libraryrow.ts placeTag). */
-function libraryTag(t: Table, skill: ItemRow) {
-  const tag = libraryPages[skill.kind].say.placeTag(skill, itemOf(skill), toolsFor(t, skill.kind), leftOutTools());
+/** A library item's tag after its name, when it isn't plainly on everywhere and its heading doesn't already say it (libraryrow.ts showsPlaceTag, placeTag). */
+function libraryTag(t: Table, skill: ItemRow, heading: Role) {
+  const item = itemOf(skill), tools = toolsFor(t, skill.kind);
+  const tag = showsPlaceTag(heading, skill, item, tools) ? libraryPages[skill.kind].say.placeTag(skill, item, tools, leftOutTools()) : undefined;
   return tag ? h('span.row-tag', { title: tag.title }, tag.text) : null;
 }
 /** The tag after an item's name while a version waits at the source it is linked to, or once its source removed it (libraryrow.ts fromSourceWords). */
@@ -988,13 +991,13 @@ function rowPlugins(skill: ItemRow) {
  * the name wraps out of sight, and only then does the name shorten (style.css .ov-name-fit). Its full text is always in the tooltip. Nothing in it is a control: the row's switch and chevron
  * are its only ones, so Copies differ is said here, not clicked.
  */
-function nameCell(t: Table, skill: ItemRow, attention: boolean) {
+function nameCell(t: Table, skill: ItemRow, attention: boolean, heading: Role) {
   const name = skill.name ?? skill.key;
   return h('div.ov-name.ov-name-fit.ov-name-bare', { role: 'cell', title: skill.description ? `${name}: ${skill.description}` : name },
     h('span.ov-name-main', {}, kindMark(t, skill.kind),
       h('span.ov-name-text', {}, name), fileButton(t, skill), kindWord(t, skill.kind, name),
       attention ? h('span.row-tag.row-tag-differs', { id: elId('decide', skill) }, 'Copies differ') : null),
-    libraryTag(t, skill),
+    libraryTag(t, skill, heading),
     sourceTag(skill),
     // While the row is open, its details show the description whole, except for differing copies (which show the chooser alone)
     // and while its file is in their place.
@@ -2376,12 +2379,12 @@ function markLegend(t: Table, list: ItemRow[], plugins: PluginRow[]) {
 }
 
 /** One row: its switch (in Select's mode, its tick), its name, a mark per tool, and the chevron that opens its details. */
-function row(t: Table, skill: ItemRow) {
+function row(t: Table, skill: ItemRow, heading: Role) {
   const id = idOf(skill), open = t.view.comparing === id, fileOpen = t.view.openFile?.id === id, when = dated(t);
   return [
     h(`div.ov-row.ov-switch-row${takeFlash(id) ? '.row-flash' : ''}${skill.on ? '' : '.unmanaged'}${open ? '.open' : ''}${fileOpen ? '.ov-file-anchored' : ''}${when ? '.ov-dated' : ''}${t.used ? '.ov-usage' : ''}${tickedLook(t, skill)}`, { role: 'row', 'data-key': id, 'aria-expanded': String(open), onclick: rowClick(t, skill) },
       h('div.ov-managed', { role: 'cell' }, t.selectable ? tickOf(t, skill) : itemSwitch(t, skill)),
-      nameCell(t, skill, differs(skill)),
+      nameCell(t, skill, differs(skill), heading),
       when ? whenCell(skill) : null,
       t.used ? usedCell(t, skill) : null,
       h('div.ov-marks', { role: 'cell' }, rowMarks(t, skill)),
@@ -2712,7 +2715,11 @@ function whenCell(skill: ItemRow) {
 }
 
 const PLUGIN_HEADING_CARD = 'Installed with their plugin, not copied. Open a row for the controls each tool has.';
-const OFF_HEADING_CARD = 'Kept in Central Knot, switched off. Where a tool still has it, its row says so.';
+function offCard(): string {
+  const out = leftOutTools();
+  const left = out.length ? `; ${andList(out.map(tool => names[tool]))}, left out, ${out.length === 1 ? 'keeps whatever it has' : 'keep whatever they have'}` : '';
+  return `Kept in Central Knot with its versions, switched off. Where a tool still has it, its row says so${left}.`;
+}
 
 /**
  * Rows under one heading: On, Found, Off, or (on a harness's page) the ones only other tools have. `rows`: the rows drawn under
@@ -2727,7 +2734,7 @@ function section(t: Table, role: Role, rows: ItemRow[], truly: ItemRow[]) {
   const matching = truly.filter(row => picked(t, row));
   const own = rows.every(skill => matching.includes(skill));
   const about = own ? matching : rows;
-  const card = role === 'found' ? foundCard() : role === 'off' ? OFF_HEADING_CARD : '';
+  const card = role === 'found' ? foundCard() : role === 'off' ? offCard() : '';
   const mark = card ? infoMark(`section-${role}-info`, label, card) : null;
   const note = role === 'found' ? foundNote(about) : role === 'off' ? offNote(t, about) : '';
   return h('div', { role: 'rowgroup' },
@@ -2740,15 +2747,15 @@ function section(t: Table, role: Role, rows: ItemRow[], truly: ItemRow[]) {
         h('span.ov-section-count', {}, String(matching.length)),
         mark,
         note ? sectionNote(own, note) : null)),
-    rows.flatMap(skill => row(t, skill)));
+    rows.flatMap(skill => row(t, skill, role)));
 }
 
 /** The card behind the Found heading's mark: what Add does, or what Synchronize everything skips. */
 function foundCard(): string {
   if (state.home?.sync.syncEverything) {
-    return 'Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.';
+    return 'In a tool, not yet in Central Knot. Synchronize everything skips items whose copies differ, can’t be read, were removed earlier, or are switched off in every tool that has them.';
   }
-  return 'In a tool, not yet in Central Knot. Add turns an item on in managed tools.';
+  return 'In a tool, not yet in Central Knot. Add keeps an item in Central Knot and turns it on in managed tools.';
 }
 
 /** The Found heading's live line while Synchronize everything is on: how many rows wait for a choice of copy, or empty. */
@@ -3032,8 +3039,8 @@ const ABOUT_MIN = 90;
  * A table's descriptions are all shown or all left out, so rows never differ: when the narrowest one has room for fewer
  * than about twelve characters, every row leaves its description out (.no-about); its name's tooltip still has it.
  * A description pushed onto the cell's hidden second line, after a tag or pill that took the room, has none. A name that
- * takes more than half its name cell is cut first (.name-cut), so one long name doesn't take every description away; once
- * every description is left out, the cut is taken off again and the name has its whole cell.
+ * takes more than half its name cell is cut first (.name-cut) on an undocked table, so one long name doesn't take every
+ * description away; once every description is left out (or on a docked list, where names stay whole), the cut does not apply.
  * Run after layout (dom.ts afterLayout).
  */
 function settleDescriptions(): void {
@@ -3042,7 +3049,7 @@ function settleDescriptions(): void {
     table.classList.remove('no-about');
     for (const cut of table.querySelectorAll('.name-cut')) cut.classList.remove('name-cut');
     const abouts = [...table.querySelectorAll<HTMLElement>('.ov-name-about')];
-    for (const cell of abouts.filter(short).map(about => about.parentElement!)) {
+    for (const cell of table.closest('.dock-main') ? [] : abouts.filter(short).map(about => about.parentElement!)) {
       if (cell.querySelector<HTMLElement>('.ov-name-main')!.offsetWidth > cell.clientWidth / 2) cell.classList.add('name-cut');
     }
     table.classList.toggle('no-about', abouts.some(short));

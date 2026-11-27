@@ -2,7 +2,7 @@
 // stands, what each harness's mark says, when its switch asks which copy, and the click each control sends.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FOLDED_VERSIONS, addLabel, asksWhichCopy, copiesDiffer, waitsForSync, canAdd, fromSourceWords, rowClicks, foldVersions, harnessIs, loadsFrom, madeFrom, placeOf, libraryWords, ruleSays, sentences, statusLine, stillIn, stillReadWords, switchLabel, switchedOffWords, versionChange, versionOrigin, type LibraryRow } from '../src/libraryrow.ts';
+import { FOLDED_VERSIONS, addLabel, asksWhichCopy, copiesDiffer, waitsForSync, canAdd, fromSourceWords, rowClicks, foldVersions, harnessIs, loadsFrom, madeFrom, placeOf, libraryWords, ruleSays, sentences, showsPlaceTag, statusLine, stillIn, stillReadWords, switchLabel, switchedOffWords, versionChange, versionOrigin, type LibraryRow } from '../src/libraryrow.ts';
 import { readAgainst, wordDiff } from '../src/diff.ts';
 import { newItem, plan, takeInAnswer, type Copies, type FoundKey, type LibraryItem } from '../src/library.ts';
 import { anyOn, kindSource } from '../src/itemrow.ts';
@@ -720,4 +720,48 @@ test('A library row from a Git source names Sync this source and Replace mine in
   const waiting = fromSourceWords({ link, waits: true });
   assert.match(waiting.after, /and Replace mine takes it as it is; either keeps yours as a version\./);
   assert.match(waiting.tag?.title ?? '', /and Replace mine takes it as it is; either keeps yours as a version\./);
+});
+
+test('showsPlaceTag hides routine Found and Off tags under their own headings, keeps non-routine rows and every tag under other headings', () => {
+  const plainFound = row({ 'claude-cli': 'a' });
+  const cantAdd = row({}, { unseen: { 'claude-cli': 'Cannot read.' } });
+  const cannotFound = row({ 'claude-cli': 'a' }, { cannot: { 'codex-cli': 'Codex can’t take it.' } });
+  const sharedFound = row({ 'claude-cli': 'a' }, { anotherWay: { 'codex-cli': 'Codex reads ~/.agents/skills.' } });
+  const readerTools = ['claude-cli', 'codex-cli', 'opencode-cli'];
+  const readerFound = row({ 'claude-cli': 'a' }, {
+    anotherWay: { 'opencode-cli': 'OpenCode reads Claude Code’s copy.' },
+    readsFrom: { 'opencode-cli': 'claude-cli' },
+    readBy: { 'claude-cli': ['opencode-cli'] },
+  });
+  const off = item({ on: false, applied: {} });
+  const plainOff = row({}, {}, off);
+  const offOwn = row({ 'codex-cli': 'x' }, {}, off);
+  const offPlugin = row({}, { pluginOn: ['claude-cli'] }, off);
+  const offSwitched = row({}, {
+    anotherWay: { 'codex-cli': 'Codex has a link.' },
+    loads: { 'codex-cli': { folder: 'reviewer', name: 'reviewer', skillFile: '~/.codex/skills/reviewer/SKILL.md', switchedOff: true } },
+  }, off);
+  const offOwedItem = item({ on: false, applied: { 'codex-cli': 'b' } });
+  const offOwed = row({ 'codex-cli': 'b' }, {}, offOwedItem);
+  // Under Found: routine plain found (including OpenCode reading Claude Code) hides; !canAdd, cannot, non-reader anotherWay, and pinned Off stay.
+  assert.deepEqual([
+    showsPlaceTag('found', plainFound, undefined, tools),
+    showsPlaceTag('found', readerFound, undefined, readerTools),
+    showsPlaceTag('found', cantAdd, undefined, tools),
+    showsPlaceTag('found', cannotFound, undefined, tools),
+    showsPlaceTag('found', sharedFound, undefined, tools),
+    showsPlaceTag('found', plainOff, off, tools),
+  ], [false, false, true, true, true, true]);
+  // Under Off: routine Off hides; own copy, pluginOn, switchedOff, and pending removal stay.
+  assert.deepEqual([
+    showsPlaceTag('off', plainOff, off, tools),
+    showsPlaceTag('off', offOwn, off, tools),
+    showsPlaceTag('off', offPlugin, off, tools),
+    showsPlaceTag('off', offSwitched, off, tools),
+    showsPlaceTag('off', offOwed, offOwedItem, tools),
+  ], [false, true, true, true, true]);
+  // Under Results, Not in <tool> (away), and On: routine tags stay.
+  for (const heading of ['results', 'away', 'on'] as const) {
+    assert.deepEqual([showsPlaceTag(heading, plainFound, undefined, tools), showsPlaceTag(heading, plainOff, off, tools)], [true, true]);
+  }
 });

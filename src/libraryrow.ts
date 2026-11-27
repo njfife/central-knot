@@ -355,27 +355,37 @@ export const copiesDiffer = (names: readonly string[]) =>
   `${andList([...names])} ${names.length === 1 ? 'has' : 'have'} differing copies. Choose which copy every tool uses${names.length === 1 ? '' : ' for each'}.`;
 
 /**
- * Where an item that is Off is: in Central Knot only; on in the tools that have it through a plugin still on there (`pluginOn`),
- * where no other tool loads it; in Central Knot and the tools with a copy of their own, left alone while it is off (ownNamed), or
- * that still read it another way (otherReaders), with those that have it on through a plugin; in Central Knot, and switched off in
- * the tools that have it another way but don't load it; or, while some installed tool is left out (`leftOut`: its Manage switch
- * off; it keeps whatever it had), in no tool Central Knot manages.
+ * Where an item that is Off still sits in a managed tool (undefined for a routine Off item held only in Central Knot): on in the
+ * tools that have it through a plugin still on there (`pluginOn`), where no other tool loads it; in Central Knot and the tools
+ * with a copy of their own, left alone while it is off (ownNamed), or that still read it another way (otherReaders), with those
+ * that have it on through a plugin; or in Central Knot, switched off in the tools that have it another way but don't load it.
  */
-function offWhere(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[]) {
+function offWhere(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]) {
   const through = onThrough(row, tools), own = ownNamed(row, item, tools, through);
   const readers = otherReaders(row, tools), held = outsideCopyIn(row, tools, true);
   if (readers.length || (through.length && own.length)) return `in ${andList(['Central Knot', ...tools.filter(tool => readers.includes(tool) || own.includes(tool) || through.includes(tool)).map(toolName)])}`;
   return through.length ? `on in ${andList(through.map(toolName))} only, through its plugin`
-    : own.length ? `in ${andList(['Central Knot', ...own.map(toolName)])}` : held.length ? `in Central Knot · switched off in ${andList(held.map(toolName))}`
-    : leftOut.length ? 'in no tool Central Knot manages' : 'in Central Knot only';
+    : own.length ? `in ${andList(['Central Knot', ...own.map(toolName)])}`
+    : held.length ? `in Central Knot · switched off in ${andList(held.map(toolName))}` : undefined;
 }
 /**
  * Where an item that is Off is, as its tag, its switch and its status line say it: still in the tools whose copy can't be seen for
- * sure (stillIn), else in those whose removal the plan still owes ("until sync runs"), else offWhere.
+ * sure (stillIn), else in those whose removal the plan still owes ("until sync runs"), else offWhere, else routine (`leftOut`:
+ * installed tools with Manage off).
  */
 function offPlace(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[]) {
   const unseen = stillIn(row, item, [], tools), owed = removalOwed(row, tools);
-  return unseen.length ? `still in ${andList(unseen.map(toolName))}` : owed.length ? `still in ${andList(owed.map(toolName))} until sync runs` : offWhere(row, item, tools, leftOut);
+  return unseen.length ? `still in ${andList(unseen.map(toolName))}` : owed.length ? `still in ${andList(owed.map(toolName))} until sync runs`
+    : offWhere(row, item, tools) ?? (leftOut.length ? 'in no tool Central Knot manages' : 'in Central Knot only');
+}
+/** Whether a row's placeTag is drawn under `heading` (matrix.ts Role): false when Found or Off already says a routine row's place. */
+export function showsPlaceTag(heading: 'on' | 'found' | 'off' | 'away' | 'results', row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]): boolean {
+  const place = placeOf(item);
+  if (heading === 'off' && place === 'off') return !!(stillIn(row, item, [], tools).length || removalOwed(row, tools).length || offWhere(row, item, tools));
+  if (heading !== 'found' || place !== 'found' || !canAdd(row)) return true;
+  const readers = new Set(Object.values(row.readBy ?? {}).flat());
+  return harnessesWhere(row, item, tools, 'cannot').length > 0
+    || harnessesWhere(row, item, tools, 'another-way').some(tool => !row.readsFrom?.[tool as HarnessId] && !readers.has(tool as HarnessId));
 }
 /** The tools that have an Off item on through its plugin (`pluginOn`), in the page's order of `tools` (its own tool first on a tool's page). */
 const onThrough = (row: LibraryRow, tools: readonly string[]) => tools.filter(tool => row.pluginOn?.includes(tool));
@@ -420,7 +430,7 @@ function offOnWords(item: LibraryItem | undefined, tools: readonly string[], for
 
 /**
  * An item's status in one line: on and where, in Central Knot only, or found in a harness and not in Central Knot yet (and,
- * with Synchronize everything on: `everything`, what it does with it). `leftOut`: the installed tools left out (offWhere).
+ * with Synchronize everything on: `everything`, what it does with it). `leftOut`: the installed tools left out (offPlace).
  */
 export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], everything = false, leftOut: readonly string[] = []): string {
   const where = (...states: HarnessIs[]) => harnessesWhere(row, item, tools, ...states);
@@ -469,7 +479,7 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
 }
 
 /**
- * What the switch of an item in Central Knot says: where it stands, as its row's tag says it (offPlace; `leftOut` as offWhere's),
+ * What the switch of an item in Central Knot says: where it stands, as its row's tag says it (offPlace; `leftOut` as offPlace's),
  * and what a click does. (A found item has Add instead: addLabel.)
  */
 export function switchLabel(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[] = []): string {
@@ -650,7 +660,7 @@ export function sentences(words: RowWords) {
 
   /**
    * The tag after an item's name when it isn't plainly on everywhere: where it stands, or the tools it is kept out of, and
-   * (its tooltip) what that means. `tools`: the home's harnesses; `leftOut`: the installed tools left out (offWhere).
+   * (its tooltip) what that means. `tools`: the home's harnesses; `leftOut`: the installed tools left out (offPlace).
    */
   function placeTag(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[] = []): { text: string; title: string } | undefined {
     const place = placeOf(item);

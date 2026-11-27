@@ -249,3 +249,83 @@ test('Found live line handles zero and plural differing rows with real takeInAns
   assert.equal(mixed.liveLine, undefined);
   assert.equal(mixed.roomHidden, true);
 });
+
+test('Routine row tags hide under Found and Off, stay for special rows and under Not in <tool>, heading cards carry dropped hover facts, and unreadBand hides reasons behind infoMark', async () => {
+  const { itemsTable } = await import('../src/matrix.ts');
+  const tools: HarnessId[] = ['claude-cli', 'codex-cli', 'opencode-cli'];
+  const tagsOf = (tree: unknown, key: string) => {
+    const rowEl = findAll(tree, el => el.attrs?.['data-key'] === rowId('skills', key))[0];
+    assert.ok(rowEl, `expected row ${key}`);
+    return findAll(rowEl, el => el.className.split(' ').includes('row-tag')).map(el => textOf(el));
+  };
+  const cardText = (tree: unknown, id: string) => textOf(findAll(tree, el => el.attrs?.id === `${id}-card`)[0]);
+  const plainFound = makeFact('plain-found', {
+    copies: { 'claude-cli': makeCopy('plain-found') },
+    anotherWay: { 'opencode-cli': 'OpenCode reads Claude Code’s copy, in Claude Code’s skills folder.' },
+    readsFrom: { 'opencode-cli': 'claude-cli' },
+    readBy: { 'claude-cli': ['opencode-cli'] },
+    takeInAnswers: answersFor({ deleted: false, copies: [{ harness: 'claude-cli', hash: 'h-plain-found', at: Date.parse(OLD_AT) }] }),
+  });
+  const blockedFound = makeFact('blocked-found', {
+    copies: { 'claude-cli': makeCopy('blocked-found') },
+    cannot: { 'codex-cli': 'Codex will not load it.' },
+    takeInAnswers: answersFor({ deleted: false, copies: [{ harness: 'claude-cli', hash: 'h-blocked-found', at: Date.parse(OLD_AT) }] }),
+  });
+  const cantAdd = makeFact('cant-add', {
+    unseen: { 'claude-cli': 'Folder holds a link.' },
+    takeInAnswers: answersFor({ deleted: false, copies: [] }),
+  });
+  const differing = makeFact('diff-found', {
+    copies: { 'claude-cli': makeCopy('diff-found', 'a'), 'codex-cli': makeCopy('diff-found', 'b') },
+    takeInAnswers: answersFor({ deleted: false, copies: [{ harness: 'claude-cli', hash: 'a', at: Date.parse(OLD_AT) }, { harness: 'codex-cli', hash: 'b', at: Date.parse(OLD_AT) }] }),
+  });
+  const otherFound = makeFact('codex-only', {
+    copies: { 'codex-cli': makeCopy('codex-only') },
+    takeInAnswers: answersFor({ deleted: false, copies: [{ harness: 'codex-cli', hash: 'h-codex-only', at: Date.parse(OLD_AT) }] }),
+  });
+  const plainOff = makeFact('plain-off');
+  const switchedOff = makeFact('off-sw', {
+    anotherWay: { 'codex-cli': 'Codex has a link.' },
+    loads: { 'codex-cli': { folder: 'off-sw', name: 'off-sw', skillFile: '/home/.codex/skills/off-sw/SKILL.md', switchedOff: true } },
+  });
+  const skills = [plainFound, blockedFound, cantAdd, differing, otherFound, plainOff, switchedOff];
+  const library = { 'plain-off': makeItem('plain-off', false), 'off-sw': makeItem('off-sw', false) };
+  const unreadOne: HomeView['pluginItems'] = [
+    { tool: 'claude-cli', plugin: 'issue-tracker', source: '/m', marketName: 'm', listed: true, problem: 'Claude Code lists it, but its files are not where it records them.', items: [] },
+  ];
+  app.home = makeHome({ homePath: '/list-words-unit', tools, skills, library, pluginItems: unreadOne });
+  openKind('skills');
+  unpin();
+  const tree = libraryTable();
+  assert.deepEqual(tagsOf(tree, 'plain-found'), []);
+  assert.deepEqual(tagsOf(tree, 'blocked-found'), ['not in Central Knot']);
+  assert.deepEqual(tagsOf(tree, 'cant-add'), ['can’t be taken in']);
+  assert.deepEqual(tagsOf(tree, 'diff-found'), ['Copies differ']);
+  assert.deepEqual(tagsOf(tree, 'plain-off'), []);
+  assert.deepEqual(tagsOf(tree, 'off-sw'), ['in Central Knot · switched off in Codex']);
+  assert.equal(cardText(tree, 'section-found-info'), 'In a tool, not yet in Central Knot. Add keeps an item in Central Knot and turns it on in managed tools.');
+  assert.equal(cardText(tree, 'section-off-info'), 'Kept in Central Knot with its versions, switched off. Where a tool still has it, its row says so.');
+  const band = findAll(tree, el => el.className.split(' ').includes('band') && !!findAll(el, c => c.attrs?.id === 'unread-plugins-info').length)[0];
+  assert.ok(band, 'expected unread plugins band with infoMark');
+  assert.equal(textOf(findAll(band, el => el.className.split(' ').includes('band-text'))[0]), 'What issue-tracker brings in Claude Code isn’t listed');
+  assert.equal(cardText(tree, 'unread-plugins-info'), 'Claude Code lists it, but its files are not where it records them.');
+
+  // Tool tab: plain rows under Found/Off have no tag; codex-only under Not in Claude Code keeps not in Central Knot.
+  const tabTree = itemsTable('skills', 'claude-cli');
+  assert.deepEqual([tagsOf(tabTree, 'plain-found'), tagsOf(tabTree, 'plain-off'), tagsOf(tabTree, 'codex-only')], [[], [], ['not in Central Knot']]);
+
+  // Left-out tools and 4 unread plugins (first 3 + and 1 more; each reason on its own line in card).
+  const unreadFour: HomeView['pluginItems'] = ['p1', 'p2', 'p3', 'p4'].map(name => (
+    { tool: 'claude-cli', plugin: name, source: '/m', marketName: 'm', listed: true, problem: `${name} missing.`, items: [] }
+  ));
+  app.home = makeHome({ homePath: '/list-words-leftout', tools: ['claude-cli', 'codex-cli'], leftOut: ['pi-cli'], skills: [plainOff], library, pluginItems: unreadFour });
+  openKind('skills');
+  const leftTree = libraryTable();
+  assert.deepEqual(tagsOf(leftTree, 'plain-off'), []);
+  assert.equal(cardText(leftTree, 'section-off-info'), 'Kept in Central Knot with its versions, switched off. Where a tool still has it, its row says so; Pi, left out, keeps whatever it has.');
+  const leftBand = findAll(leftTree, el => el.className.split(' ').includes('band') && !!findAll(el, c => c.attrs?.id === 'unread-plugins-info').length)[0];
+  assert.equal(textOf(findAll(leftBand, el => el.className.split(' ').includes('band-text'))[0]),
+    'What p1 brings in Claude Code isn’t listed · What p2 brings in Claude Code isn’t listed · What p3 brings in Claude Code isn’t listed · and 1 more');
+  assert.equal(cardText(leftTree, 'unread-plugins-info'),
+    'p1 (Claude Code): p1 missing.\np2 (Claude Code): p2 missing.\np3 (Claude Code): p3 missing.\np4 (Claude Code): p4 missing.');
+});
