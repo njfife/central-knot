@@ -167,7 +167,7 @@ test('Worked example 1: spoiling plugins.json (invalid JSON or unknown tool id i
         const row = { ...fact, hashes: hashesOf(fact.copies) };
         const expected = Object.fromEntries(ALL_FIVE.map(tool => [tool, DAMAGED_REASON]));
         assert.deepEqual(row.unseen, expected, `${label}: ${kind} row has the same hold reason on every tool`);
-        assert.equal(statusLine(row, item, ALL_FIVE), 'On · left as it is (see below)', `${label}: ${kind} statusLine says left as it is`);
+        assert.equal(statusLine(row, item, ALL_FIVE), '', `${label}: ${kind} On statusLine stays empty`);
         assert.equal(sentences(words).harnessLine(row, item, 'claude-cli', 'Claude Code'), DAMAGED_REASON, `${label}: ${kind} tool line says why`);
       }
 
@@ -657,7 +657,7 @@ test('A tool holding an older copy it refused to replace is not called "not in" 
     const row = { ...fact, hashes: hashesOf(fact.copies) };
     assert.ok(row.hashes['codex-cli'], 'row records Codex’s older copy');
     assert.match(row.cannot['codex-cli'] ?? '', /YAML frontmatter/);
-    assert.equal(statusLine(row, view.library.demo, ['codex-cli']), 'On · Codex can’t take it (see below)');
+    assert.equal(statusLine(row, view.library.demo, ['codex-cli']), '');
   } finally { await rm(base, { recursive: true, force: true }); }
 });
 
@@ -676,6 +676,6 @@ test('Fix item 6: in a sound home with Pi and OpenCode left out in Manage, triag
       'Copilot CLI gets it only with the plugin partial, and the plugin is kept out of Copilot CLI.',
       'Codex gets it only with the plugin partial, and the plugin is kept out of Codex.',
     ]);
-    assert.equal(statusLine(row, view.library.triage, view.tools), 'On · not in Claude Code, Copilot CLI or Codex (see below)');
+    assert.equal(statusLine(row, view.library.triage, view.tools), '');
   } finally { await box.cleanup(); }
 });

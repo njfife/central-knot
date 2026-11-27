@@ -151,14 +151,6 @@ export function cellWords(row: PluginRow, tool: HarnessId): string {
   return `${name}: in the plugin ${row.plugin}${version}${off === 'plugin' ? `; the whole plugin is turned off in ${name}` : off === 'item' ? `; turned off in ${name}` : ''}`;
 }
 
-/** What a tool that has the item says of it in its line in the item's details: its copy in the plugin and whether it is on (one that has none: pluginline.ts). */
-export function toolWords(row: PluginRow, tool: HarnessId): string {
-  const version = row.installs[tool]?.version;
-  const off = offIn(row, tool);
-  const inside = `Inside ${row.plugin}${version ? ` ${version}` : ''}`;
-  return off === 'plugin' ? `${inside}. The whole plugin is turned off here.` : off === 'item' ? `${inside}. Turned off here with its own switch.` : `${inside}, on here.`;
-}
-
 /** Whether the plugin's marketplace is on the Plugins page (it is added in some tool that has it), so it has a page there. */
 const listedHere = (row: PluginRow) => Object.values(row.installs).some(install => install?.listed);
 /**
@@ -180,9 +172,8 @@ const pluginHandles = (row: PluginRowRef, tool: string) =>
 /**
  * The tools a library item from a plugin (library.ts A PLUGIN) gets only by installing that plugin: those that take plugins,
  * load its kind (pluginstatus.ts loadsKind) and don't have it installed, but one the item is On and kept out of, where its own
- * switch lets it in. There its row's line offers Install the plugin (pluginline.ts), and its mark and its status line say it
- * gets it with the plugin (matrix.ts markOf, libraryrow.ts statusLine); its switch's result doesn't count it among the tools it
- * is on in (matrix.ts canHave).
+ * switch lets it in. There its row's line offers Install <plugin> (pluginline.ts), and its mark says it gets it with the
+ * plugin (matrix.ts markOf); its switch's result doesn't count it among the tools it is on in (matrix.ts canHave).
  */
 export function withPluginOnly(home: Pick<HomeView, 'pluginItems' | Page> | undefined, page: Page, row: PluginRowRef): HarnessId[] {
   const link = row.fromSource?.link ?? '', plugin = pluginOf(link), marketName = pluginMarketOf(link);

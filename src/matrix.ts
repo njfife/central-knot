@@ -46,7 +46,7 @@ import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h,
 import type { IconName } from './icons.ts';
 import { byName, byUsage, inOrder, kindSource, lastUpdated, noPins, partId, pin, placeIn, rankIn, rowId, type ItemRow, type KindSource, type Pinned, type RowKey, type RowOrder, type RowUsage, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
-import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, rowClicks, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
+import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, pluginToolsCard, rowClicks, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionPart, type VersionText } from './versionlist.ts';
 import { itemKey, listed, type Version } from './library.ts';
@@ -58,9 +58,9 @@ import { entryShownIn, heldKinds, takesPlugins } from './presence.ts';
 import { closeLineResult, lineBox, lineBusy, listingOf, market, resultKey, resultOn, turnFromLine, wantView } from './pluginstate.ts';
 import { lineControl, type LineFacts } from './pluginline.ts';
 import { succeeded, type PluginDone, type PluginDraft } from './pluginplan.ts';
-import { alongWords, cantSwitch, click as clickPluginItem, clickWords, copilotByName, itemSaid, onNow as itemOn, switchWords, turnEvery, wholeWords, type PluginItemAt } from './pluginswitch.ts';
+import { alongWords, cantSwitch, click as clickPluginItem, clickWords, copilotByName, itemSaid, onNow as itemOn, turnEvery, wholeWords, type PluginItemAt } from './pluginswitch.ts';
 import { pageOfPart, partOfPage } from './pluginstatus.ts';
-import { cellWords, handledWhere, inTool, insideTitle, itemThrough, offIn, pageRows, pluginKindNotLoaded, pluginOnIn, rowCount, pluginTools, throughPluginHere, toolWords, withPluginOnly, yoursIn, type PluginRow } from './pluginrows.ts';
+import { cellWords, handledWhere, inTool, insideTitle, itemThrough, offIn, pageRows, pluginKindNotLoaded, pluginOnIn, rowCount, pluginTools, throughPluginHere, withPluginOnly, yoursIn, type PluginRow } from './pluginrows.ts';
 import { fromChoices, fromShows, originOf, type From, type FromEntry } from './origins.ts';
 import { sources } from './sourcespage.ts';
 import { folded, lineDiff } from './diff.ts';
@@ -147,22 +147,20 @@ function lineFacts(kind: PartKind, plugin: string, marketName: string, tool: Har
 }
 
 /**
- * A tool's line on a plugin's item (pluginline.ts lineControl), after `lead` (what the tool has): its sentence and its control, the
- * item's switch or a button that names its act; while its click waits or runs, what it is doing, then its result with its Undo
- * (resultLine: pluginstate.ts LineResult). Every button (Install the plugin, Put its items here, Turn the plugin on or off) waits its turn
- * in the page's list (turnFromLine).
+ * A tool's line on a plugin's item (pluginline.ts lineControl): its words and its control, the item's switch or a button that
+ * names its act; while its click waits or runs, what it is doing, then its result with its Undo (resultLine: pluginstate.ts
+ * LineResult). Every button waits its turn in the page's list (turnFromLine).
  */
-function pluginLine(row: ItemRow | PluginRow, facts: LineFacts & { source?: string }, lead: string, reload: string) {
+function pluginLine(row: ItemRow | PluginRow, facts: LineFacts & { source?: string }, reload: string) {
   const control = lineControl(facts), item = facts.through, busy = lineBusy(facts.plugin, facts.marketName, facts.tool), result = resultLine(row, facts.tool);
-  const words = control.control === 'switch' ? (item ? cantSwitch(item) ?? switchWords(item) : '') : control.sentence;
-  const text = [lead, busy ?? words, result ? '' : reload].filter(Boolean).join(' ');
+  const text = [busy ?? control.sentence, result ? '' : reload].filter(Boolean).join(' ');
   if (control.control !== 'button') return { text, result, control: control.control === 'switch' && item ? pluginItemControls(item, row) : null };
   const { act } = control;
   const run = () => turnFromLine({ home: state.home!.home, source: facts.source!, marketName: facts.marketName, plugin: facts.plugin, tool: facts.tool, act,
     item: { kind: facts.kind, name: nameOf(row) }, ...(facts.yours?.length ? { yours: facts.yours } : {}) });
   const off = !!busy || (selectOff() ?? queueOff(homeStops())) || (!facts.source && 'Not read yet.');
   return { text, result, control: h('span.details-tool-actions', {},
-    button({ variant: 'outline', size: 'micro', label: control.label, id: elId('line', row, facts.tool), disabled: off, attrs: { title: control.sentence }, onclick: (event: MouseEvent) => { event.stopPropagation(); run(); } })) };
+    button({ variant: 'outline', size: 'micro', label: control.label, id: elId('line', row, facts.tool), disabled: off, attrs: { title: control.title }, onclick: (event: MouseEvent) => { event.stopPropagation(); run(); } })) };
 }
 
 /**
@@ -207,7 +205,7 @@ function toggleFile(row: PluginRow) {
 
 /** A plugin item's details: what it is, where it comes from and is handled, each tool's copy, and its file as each tool's copy has it. */
 function pluginDetails(t: Table, row: PluginRow, placement: 'row' | 'dock' = 'row') {
-  const [type, ...rest] = row.description.split(' · ');
+  const [type, ...rest] = row.description.split(' · '), tools = toolsFor(t, kindOf(row));
   // Shown, and its plugin's version changed in some tool since it was read (versionsOf): read again from the copies installed now.
   // A plugin whose version doesn't change with its content (one with none, one Copilot CLI loads live) keeps the text read first.
   if (filesShown.has(idOf(row)) && filesShown.get(idOf(row))!.from !== versionsOf(row)) readFile(row);
@@ -218,30 +216,22 @@ function pluginDetails(t: Table, row: PluginRow, placement: 'row' | 'dock' = 'ro
     : h('div.plugin-file', { id: elId('pfile', row, 'shown') }, fileBlocks(elId('pfile', row, 'text'), file, copies, holders => `${file} · ${andList(holders.map(holder => names[holder.tool]))}`, { named: copies.length > 1 }));
   return h(`div.compare.details.details-plugin.details-grid${placement === 'row' ? '' : '.details-bare'}`, { role: 'region', 'aria-label': `Details for ${row.name}` },
     h('div.details-head', {},
-      h('p.details-status', {}, pluginStatus(t, row)),
       row.kind === 'mcp' && row.description ? h('dl.details-definition', {}, h('dt', {}, 'Type'), h('dd', {}, type === 'Command' ? 'Command (stdio)' : type), h('dt', {}, type === 'Command' ? 'Command' : 'URL'), h('dd.mono', {}, rest.join(' · ')))
-        : row.description ? h('p.details-description', {}, row.description) : null,
+        : row.description ? h('p.details-description.details-description-whole', {}, row.description) : null,
       excerptLine(t, row),
       pluginStrip(row.plugin, row.marketName, Object.values(row.installs).filter(install => !!install), elId('open-whole', row), handledWhere(row))),
-    h('div.details-tools', {}, toolsFor(t, kindOf(row)).map(tool => {
+    tools.length ? h('p.details-tools-head', { 'data-info-block': true }, 'In each tool', infoMark(elId('shared', row), 'In each tool', pluginToolsCard())) : null,
+    h('div.details-tools', {}, tools.map(tool => {
       const at = tool as HarnessId, install = row.installs[at], copy = row.copies[at] ? install : undefined;
       const item: PluginItemAt | undefined = copy && { kind: row.kind, name: row.name, tool: at, install: copy };
       const reload = state.outcome && outcomeShown(state.outcome, t)
         ? rowReload(state.outcome.reloads, row.kind, itemKey(row.name), at, `${row.plugin}@${row.marketName}`, toolWays()) : '';
-      const line = pluginLine(row, lineFacts(row.kind, row.plugin, row.marketName, at, item, copy ? undefined : install), item ? toolWords(row, at) : '', reload);
+      const line = pluginLine(row, lineFacts(row.kind, row.plugin, row.marketName, at, item, copy ? undefined : install), reload);
       return h('div.details-tool', {}, h('div.details-tool-head', {},
         h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
-        h('span.details-tool-line', {}, line.text), line.control), line.result ?? usageLine(t, row, tool));
+        h('span.details-tool-line', {}, line.text || null), line.control), line.result ?? usageLine(t, row, tool, !copy));
     })),
     row.kind === 'mcp' ? null : h('div.details-file', {}, h('div.details-actions', {}, smallAction(shown ? `Hide its ${file}` : `Show its ${file}`, elId('pfile', row), () => toggleFile(row))), fileShown));
-}
-
-/** A plugin's item's state in one line, as an ordinary item's opens: "On in Claude Code · off in Copilot CLI · from the plugin document-tools". */
-function pluginStatus(t: Table, row: PluginRow): string {
-  const items = rowItems(row), tools = toolsFor(t, kindOf(row));
-  const on = items.filter(itemOn).map(item => item.tool);
-  const off = items.filter(item => !itemOn(item)).map(item => item.tool);
-  return [on.length ? `On in ${toolsPhrase(on, tools)}` : `Off in ${toolsPhrase(off, tools)}`, on.length && off.length ? `off in ${toolsPhrase(off, tools)}` : '', `from the plugin ${row.plugin}`].filter(Boolean).join(' · ');
 }
 
 /** A plugin item's row: its switch (each tool's switch for one item), its name with the plugin's mark, and a mark per tool. */
@@ -261,7 +251,7 @@ function pluginRowEl(t: Table, row: PluginRow) {
       h('div.ov-name.ov-name-fit.ov-name-bare', { role: 'cell', title: row.description ? `${row.name}: ${row.description}` : row.name },
         h('span.ov-name-main', {}, kindMark(t, kindOf(row)), h('span.ov-name-text', {}, row.name), fileButton(t, row), kindWord(t, kindOf(row), row.name)),
         pluginTag(row.plugin, insideTitle(row)),
-        aboutLine(t, row)),
+        open && !fileOpen ? null : aboutLine(t, row)),
       t.used ? usedCell(t, row) : null,
       h('div.ov-marks', { role: 'cell' }, h('span.tool-marks', { role: 'img', 'aria-label': tools.map(tool => cellWords(row, tool as HarnessId)).join('. ') }, inColumns(t, tools, mark))),
       h('div.ov-open', { role: 'cell' }, openButton(t, row))),
@@ -722,8 +712,12 @@ function pathLine(tool: Tool, path: string) {
   return h('p.details-path-line', {}, brandMark(tool, 12), h('span.details-path-tool', {}, names[tool]), pathText(shownPath(path), path), showInFolder(path));
 }
 
-/** Show in folder: reveals a file in the file manager; nothing is opened or changed. */
-const showInFolder = (path: string) => h('button.inline-link.details-path-show', { type: 'button', title: 'Show this file in the file manager; nothing is opened or changed', onclick: (event: Event) => { event.stopPropagation(); showFile(path); } }, 'Show in folder');
+/** Show in folder: reveals a file in the file manager; nothing is opened or changed. `withPath`: puts the whole path on hover and aria-description (MCP lines). */
+const showInFolder = (path: string, withPath = false) => {
+  const tip = `${withPath ? `${path} — ` : ''}Show this file in the file manager; nothing is opened or changed`;
+  return h('button.inline-link.details-path-show', { type: 'button', title: tip, ...(withPath ? { 'aria-description': tip } : {}),
+    onclick: (event: Event) => { event.stopPropagation(); showFile(path); } }, 'Show in folder');
+};
 
 
 /**
@@ -966,9 +960,10 @@ function sourceTag(skill: ItemRow) {
   const tag = skill.fromSource && fromSourceWords(skill.fromSource).tag, plugin = skill.fromSource && pluginOf(skill.fromSource.link);
   return tag ? h(`span.row-tag.row-tag-source${plugin ? '.row-tag-plugin' : ''}`, { title: tag.title }, icon('link-2', 12, plugin ? 'tone-muted' : 'tone-warning'), tag.text) : null;
 }
-/** The opened row's line saying which source an item is from, and whether a version waits there or it removed the item, with its link to that source's page (a plugin's: its strip, pluginStrip). */
+/** The opened row's line saying which Git source an item is from, and whether a version waits there or it removed the item (a plugin's: its strip and In each tool card). */
 function fromSourceLine(skill: ItemRow, from: NonNullable<ItemRow['fromSource']>) {
   const said = fromSourceWords(from), page = said.page;
+  if (!said.before) return null;
   return h('p.details-limits.details-note', {}, icon('link-2', 12, from.waits || from.removed ? 'tone-warning' : 'tone-muted'), h('span', {}, said.before,
     page ? h('button.inline-link', { type: 'button', id: elId('from-source', skill), title: from.link, onclick: () => showPage(page) }, pageNames[page]) : null, said.after));
 }
@@ -988,7 +983,7 @@ function rowPlugins(skill: ItemRow) {
  * are its only ones, so Copies differ is said here, not clicked.
  */
 function nameCell(t: Table, skill: ItemRow, attention: boolean) {
-  const name = skill.name ?? skill.key;
+  const name = skill.name ?? skill.key, open = t.view.comparing === idOf(skill) && !fileInDetails(t.view, idOf(skill));
   return h('div.ov-name.ov-name-fit.ov-name-bare', { role: 'cell', title: skill.description ? `${name}: ${skill.description}` : name },
     h('span.ov-name-main', {}, kindMark(t, skill.kind),
       h('span.ov-name-text', {}, name), fileButton(t, skill), kindWord(t, skill.kind, name),
@@ -997,7 +992,7 @@ function nameCell(t: Table, skill: ItemRow, attention: boolean) {
     sourceTag(skill),
     // While the row is open, its details show the description whole, except for differing copies (which show the chooser alone)
     // and while its file is in their place.
-    t.view.comparing === idOf(skill) && !fileInDetails(t.view, idOf(skill)) && !attention ? null : aboutLine(t, skill));
+    open && !attention ? null : aboutLine(t, skill));
 }
 /**
  * The line after a row's name: its description; or where Find found the row only in its file's text, that text's excerpt,
@@ -2471,14 +2466,14 @@ const figureOf = (t: Table, row: ItemRow | PluginRow) => {
 /**
  * A row's Used cell words and hover sentence (empty when the cell has no words): under Most used, sessions alone; under Last
  * used — or with the "No use seen in 30 days" filter on (`inUnused`), under every Sort — recency alone; under Name (also
- * passed for Find's Best match) or Last updated, nothing for a used row. Unused rows keep "no use seen…" and unknown rows
- * keep faint "use unknown" under every Sort.
+ * passed for Find's Best match) or Last updated, nothing for a used row. Unused rows keep "no use seen" (with the window or
+ * date whole on hover) and unknown rows keep faint "use unknown" under every Sort.
  */
 export function usedCellWords(figure: RowFigure, order: RowOrder, inUnused = false): { text: string; hover: string } {
   if (!figure) return { text: 'use unknown', hover: 'No tool that has it on can tell whether it was used.' };
   if ('noneSeen' in figure) {
-    const none = figure.since ? `no use seen since ${dayWords(figure.since)}` : `no use seen in ${USAGE_DAYS} days`;
-    return { text: none, hover: `${sentence(none)}.` };
+    const hover = figure.since ? `No use seen · records from ${dayWords(figure.since)}.` : `No use seen in ${USAGE_DAYS} days.`;
+    return { text: 'no use seen', hover };
   }
   const when = sinceThen(Date.parse(figure.used));
   const sessions = plural(figure.sessions, 'session');
@@ -2621,33 +2616,52 @@ export function turnTheseOff(rows: ItemRow[]) {
   });
 }
 
-/** Why a tool can't say an item wasn't used, in an opened row: for sessions that couldn't all be read, how many files were skipped. */
+/** Why a tool can't say an item wasn't used, in an opened row: standing reasons go in use unknown's (?) card; unread counts stay inline. */
 const cantSayWords: Record<CantSay, (nouns: { one: string }, says: ToolSays) => string> = {
-  'no-record': ({ one }) => `can’t say: its sessions don’t record which ${one} was used`,
-  'not-sure': ({ one }) => `can’t say: it doesn’t always record which ${one} was used`,
-  'no-sessions': (_, says) => `can’t say: ${names[says.tool]} keeps no sessions here`,
-  'unread': (_, says) => (says.skipped ? `can’t say: ${plural(says.skipped, 'session file')} couldn’t be read` : 'can’t say: its sessions couldn’t be read'),
+  'no-record': ({ one }) => `Its sessions don’t record which ${one} was used.`,
+  'not-sure': ({ one }) => `It doesn’t always record which ${one} was used.`,
+  'no-sessions': (_, says) => `${names[says.tool]} keeps no sessions here.`,
+  'unread': (_, says) => (says.skipped ? `${plural(says.skipped, 'session file')} couldn’t be read` : 'its sessions couldn’t be read'),
 };
 /**
- * One tool's figure for a row in its opened details: its sessions and last use (and how many of its session files couldn't be
- * read, where some couldn't), or no use seen (since when its history starts), or why it can't say. While a home's first
- * reading runs, the line holds its place, saying so, so the row is as high before the reading lands as after.
+ * One tool's short usage words for an opened row: both figures (`used 2 days ago · 28 sessions`), `no use seen · records from <date>`,
+ * or `use unknown` with its standing reason behind `(?)` (`card`); unread-session counts and past use always stay visible.
+ * An absent plugin line with nothing observed (and readable history) returns undefined (blank).
  */
-function usageLine(t: Table, row: ItemRow | PluginRow, tool: Tool) {
+function usageLineWords(says: ToolSays | undefined, tool: Tool, kind: PageKind, absentPlugin = false): { text: string; card?: string } | undefined {
+  if (!says) return absentPlugin ? undefined : { text: 'use unknown', card: `${names[tool]}’s session history isn’t read yet.` };
+  if (absentPlugin && !says.sessions && !says.last && !says.skipped && says.cantSay !== 'unread') return undefined;
+  const last = says.last ? `last used ${sinceThen(Date.parse(says.last))}` : '';
+  if (says.sessions) {
+    const skipped = says.skipped ? ` · ${plural(says.skipped, 'session file')} couldn’t be read` : '';
+    return { text: `used ${sinceThen(Date.parse(says.last!))} · ${plural(says.sessions, 'session')}${skipped}` };
+  }
+  if (says.cantSay) {
+    const reason = cantSayWords[says.cantSay](kindNouns[kind], says);
+    if (says.cantSay === 'unread') return { text: [`use unknown: ${reason}`, last].filter(Boolean).join(' · ') };
+    return { text: ['use unknown', last].filter(Boolean).join(' · '), card: reason };
+  }
+  const none = says.since ? `no use seen · records from ${dayWords(says.since)}` : `no use seen in ${USAGE_DAYS} days`;
+  return { text: [none, last].filter(Boolean).join(' · ') };
+}
+/**
+ * One tool's figure for a row in its opened details (usageLineWords). While a home's first reading runs, the line holds its
+ * place, saying so, so the row is as high before the reading lands as after.
+ */
+function usageLine(t: Table, row: ItemRow | PluginRow, tool: Tool, absentPlugin = false) {
   const kind = kindOf(row), id = elId('usage', row, tool);
   if (firstReading(t)) return h('p.details-usage', { id }, icon('history', 12, 'tone-muted'), 'Collecting usage statistics…');
+  if (!reading(t) || !usageFactsOf(row)) return null;
   const says = usageOf(t, row).find(each => each.tool === tool);
-  if (!says) return null;
-  const last = says.last ? `last used ${sinceThen(Date.parse(says.last))}` : '';
-  const skipped = says.skipped ? `; ${plural(says.skipped, 'session file')} couldn’t be read` : '';
-  const words = says.sessions ? `Used in ${plural(says.sessions, 'session')} in the last ${USAGE_DAYS} days, ${last}${skipped}`
-    : [says.cantSay ? sentence(cantSayWords[says.cantSay](kindNouns[kind], says)) : `No use seen ${says.since ? `since ${dayWords(says.since)}, where its history starts` : `in the last ${USAGE_DAYS} days`}`, last].filter(Boolean).join('; ');
-  return h('p.details-usage', { id }, icon('history', 12, 'tone-muted'), `${words}.`);
+  const shown = usageLineWords(says, tool, kind, absentPlugin);
+  if (!shown) return null;
+  return h('p.details-usage', { id, ...(shown.card ? { 'data-info-block': true } : {}) }, icon('history', 12, 'tone-muted'),
+    shown.text, shown.card ? infoMark(elId('usage-info', row, tool), 'use unknown', shown.card) : null);
 }
 /** In an opened row, a use seen in a tool this page doesn't show (not managed here), which counts in the row's figure too. */
 const usageElsewhere = (t: Table, skill: ItemRow) => usageOf(t, skill).filter(each => !toolsFor(t, skill.kind).includes(each.tool) && each.sessions).map(each =>
   h('p.details-usage', { id: elId('usage', skill, each.tool) }, icon('history', 12, 'tone-muted'),
-    `${names[each.tool]}, not managed here: used in ${plural(each.sessions, 'session')} in the last ${USAGE_DAYS} days, last used ${sinceThen(Date.parse(each.last!))}.`));
+    `${names[each.tool]}, not managed here: used ${sinceThen(Date.parse(each.last!))} · ${plural(each.sessions, 'session')}`));
 
 // ---------- The order of the rows under each heading ----------
 
@@ -2777,7 +2791,7 @@ function offNote(t: Table, list: ItemRow[]): string {
   return '';
 }
 
-/** What the item is now, in one line (libraryrow.ts statusLine), and for a found one, what Synchronize everything does with it while it is on. */
+/** A found or Off item's status line (libraryrow.ts statusLine; empty on On rows, whose tool lines show every On state, including in the Files view's pane). */
 const switchStatus = (t: Table, skill: ItemRow) => statusLine(skill, itemOf(skill), toolsFor(t, skill.kind), !!state.home?.sync.syncEverything, leftOutTools());
 
 /**
@@ -2809,12 +2823,11 @@ function rowPluginFacts(skill: ItemRow, tool: Tool) {
  * switch for that harness and what its kind adds there (libraryHarnessSwitch), or nothing where the tool has it through a plugin
  * whose copy isn't read.
  */
-function detailToolLine(t: Table, skill: ItemRow, tool: Tool): { text?: string; parts?: DetailPart[]; control: HTMLElement | null; result: HTMLElement | null } {
+function detailToolLine(t: Table, skill: ItemRow, tool: Tool): { text?: string; parts?: DetailPart[]; control: HTMLElement | null; result: HTMLElement | null; absentPlugin?: boolean } {
   const plugged = rowPluginFacts(skill, tool), through = plugged?.through;
   const reload = state.outcome && outcomeShown(state.outcome, useTableShown())
     ? rowReload(state.outcome.reloads, toItemKind(skill.kind), through ? itemKey(through.name) : skill.key, tool as HarnessId, through ? `${through.install.plugin}@${through.install.marketName}` : undefined, toolWays()) : '';
-  // Through a plugin: where it comes from first.
-  if (plugged) return pluginLine(skill, plugged, through ? skill.cannot?.[tool] ?? '' : '', reload);
+  if (plugged) return { ...pluginLine(skill, plugged, reload), absentPlugin: !through };
   const lib = libraryPages[skill.kind], own = skill.ownPart?.[tool];
   const parts = lib.say.detailLine(skill, itemOf(skill), tool, names[tool], own);
   if (reload) parts.push({ text: reload });
@@ -2924,8 +2937,8 @@ function libraryVersions(t: Table, lib: LibraryPage, skill: ItemRow) {
 function details(t: Table, skill: ItemRow, placement: Placement = 'row'): HTMLElement {
   const inFiles = placement === 'files', lib = libraryPages[skill.kind], tools = toolsFor(t, skill.kind);
   const differs = isDiffering(skill);
-  // MCP: each tool's row has its settings file and Show in folder, where a server is changed.
-  const settingsFile = (tool: Tool) => (skill.kind === 'mcp' && skill.paths?.[tool] ? [wrappingPath(skill.paths[tool]!), showInFolder(skill.paths[tool]!)] : []);
+  // MCP: each tool's row has Show in folder, with its settings file path on hover.
+  const settingsFile = (tool: Tool) => (skill.kind === 'mcp' && skill.paths?.[tool] ? [showInFolder(skill.paths[tool]!, true)] : []);
   const toolLine = (tool: Tool, parts: DetailPart[]) => h('span.details-tool-line', { 'data-info-block': true },
     parts.flatMap((part, index) => [
       index ? (/[.!?]$/.test(parts[index - 1]!.text) ? ' ' : ' · ') : null,
@@ -2941,7 +2954,7 @@ function details(t: Table, skill: ItemRow, placement: Placement = 'row'): HTMLEl
         toolLine(tool, line.parts ?? (line.text ? [{ text: line.text }] : [])),
         line.control),
       lib.toolNote?.(skill, tool as HarnessId),
-      line.result ?? usageLine(t, skill, tool));
+      line.result ?? usageLine(t, skill, tool, line.absentPlugin));
   };
   const close = placement === 'row' ? h('button.details-close', { type: 'button', id: elId('close', skill), 'aria-label': `Close details for ${skill.key}`, title: 'Close', onclick: () => { t.view.comparing = undefined; rerender(); } }, icon('x', 14)) : null;
   const box = (...children: (Child | Child[])[]) => h(`div.compare.details${placement === 'row' ? '' : '.details-bare'}${differs ? '.details-differs' : ''}${skill.kind === 'mcp' ? '.details-mcp' : '.details-grid'}`, { role: 'region', 'aria-label': `Details for ${skill.key}` }, ...children);
@@ -2951,19 +2964,21 @@ function details(t: Table, skill: ItemRow, placement: Placement = 'row'): HTMLEl
   // A found row none of whose copies can be read has no files to show.
   const files = lib.files && !inFiles && (inLibrary(itemOf(skill)) || canAdd(skill)) ? smallAction('Files and contents', elId('files', skill), () => openFiles(skill.key)) : null;
   const remove = !inFiles ? libraryDelete(t, lib, skill) : null;
+  const status = inFiles ? '' : switchStatus(t, skill);
   return box(
     h('div.details-head', {},
-      // The Files view's pane says it under the skill's name; the row already shows the description.
-      inFiles ? null : h('p.details-status', {}, switchStatus(t, skill)),
+      // The Files view's pane says it under the skill's name; an On row's tool lines already say where it is.
+      status ? h('p.details-status', {}, status) : null,
       // Its description whole: the closed row cuts it.
       skill.description ? h('p.details-description.details-description-whole', {}, skill.description) : null,
       excerptLine(t, skill),
       rowPlugins(skill).map(({ plugin, marketName, installs }) => pluginStrip(plugin, marketName, installs, elId('strip', skill, plugin))),
       files ? h('div.details-actions', {}, files) : null),
     // What every tool shares of it, and what stays each harness's own, said where it is true: an item in Central Knot, or a
-    // found one that can be taken in.
-    tools.length > 1 && (inLibrary(itemOf(skill)) || canAdd(skill))
-      ? h('p.details-tools-head', { 'data-info-block': true }, 'In each tool', infoMark(elId('shared', skill), 'In each tool', lib.words.shared)) : null,
+    // found one that can be taken in (a plugin-linked item also states its following/detaching rule here).
+    (tools.length > 1 || !!pluginOf(skill.fromSource?.link ?? '')) && (inLibrary(itemOf(skill)) || canAdd(skill))
+      ? h('p.details-tools-head', { 'data-info-block': true }, 'In each tool', infoMark(elId('shared', skill), 'In each tool',
+        pluginOf(skill.fromSource?.link ?? '') ? pluginToolsCard(lib.words.shared) : lib.words.shared)) : null,
     h('div.details-tools', {}, tools.map(tool => toolRow(tool)), usageElsewhere(t, skill)),
     libraryVersions(t, lib, skill),
     inFiles || skill.kind === 'mcp' ? null : wherePaths(t, skill),
@@ -3027,13 +3042,15 @@ const listWatcher = new ResizeObserver(entries => {
 
 /** The least room a description gets beside its name before every row leaves it out: about twelve characters. */
 const ABOUT_MIN = 90;
+/** A name isn't cut for descriptions below this floor (a 30-letter name with its marks: style.css .name-cut). */
+const NAME_CUT_MIN = 280;
 
 /**
  * A table's descriptions are all shown or all left out, so rows never differ: when the narrowest one has room for fewer
  * than about twelve characters, every row leaves its description out (.no-about); its name's tooltip still has it.
  * A description pushed onto the cell's hidden second line, after a tag or pill that took the room, has none. A name that
- * takes more than half its name cell is cut first (.name-cut), so one long name doesn't take every description away; once
- * every description is left out, the cut is taken off again and the name has its whole cell.
+ * takes more than half its name cell (and NAME_CUT_MIN) is cut first (.name-cut), so one very long name doesn't take every
+ * description away; once every description is left out, the cut is taken off again and the name has its whole cell.
  * Run after layout (dom.ts afterLayout).
  */
 function settleDescriptions(): void {
@@ -3043,7 +3060,7 @@ function settleDescriptions(): void {
     for (const cut of table.querySelectorAll('.name-cut')) cut.classList.remove('name-cut');
     const abouts = [...table.querySelectorAll<HTMLElement>('.ov-name-about')];
     for (const cell of abouts.filter(short).map(about => about.parentElement!)) {
-      if (cell.querySelector<HTMLElement>('.ov-name-main')!.offsetWidth > cell.clientWidth / 2) cell.classList.add('name-cut');
+      if (cell.querySelector<HTMLElement>('.ov-name-main')!.offsetWidth > Math.max(cell.clientWidth / 2, NAME_CUT_MIN)) cell.classList.add('name-cut');
     }
     table.classList.toggle('no-about', abouts.some(short));
     if (table.classList.contains('no-about')) for (const cut of table.querySelectorAll('.name-cut')) cut.classList.remove('name-cut');
@@ -3123,7 +3140,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
       // The skill's own switch comes first, before its name, as on its row.
       h('div.pane-header.pane-header-switched', {},
         h('div.detail-switch', {}, itemSwitch(t, skill, 'detail-')),
-        h('div.pane-title', {}, h('h2', {}, middle(skill.name ?? skill.key)), h('p', { title: paneStatus }, paneStatus))),
+        h('div.pane-title', {}, h('h2', {}, middle(skill.name ?? skill.key)), paneStatus ? h('p', { title: paneStatus }, paneStatus) : null)),
       // A wide pane puts the skill's details beside its files, as a plugin's page puts its README beside what it holds.
       h('div.scroll.detail-scroll', { id: 'detail-scroll' },
         h('div.detail-files', {}, ...contents),
