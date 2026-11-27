@@ -914,10 +914,11 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* ---------- First setup (firstsetup.ts) ---------- */
 /* The question at the top of the Overview: its title, its words at the reading measure, and its two answers under them. */
 .setup-question { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; max-width: var(--measure); padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
-.setup-title { font-size: 15px; line-height: 20px; font-weight: 600; }
+/* Balanced, so a question that wraps never leaves its (?) alone on the last line. */
+.setup-title { font-size: 15px; line-height: 20px; font-weight: 600; text-wrap: balance; }
 .setup-text { font-size: 13px; line-height: 1.5; color: var(--ink-soft); text-wrap: pretty; }
-.setup-text .setup-line + .setup-line { margin-top: 4px; }
-.setup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.setup-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.setup-undo { font-size: 13px; color: var(--ink-soft); }
 /* The walkthrough's band, marked as a copy question is: where it is and its actions on one line; while it asks, the item's copy
    question under them, as wide as the band, which is the box its three layouts go by (The copy question, above). */
 .band-walk { box-shadow: inset 3px 0 0 var(--warning), inset 0 -1px 0 var(--line); }
@@ -2445,6 +2446,12 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .select-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .select-count { flex: none; white-space: nowrap; }
 .select-line > .inline-link { min-width: 0; }
+/* What a click would end of the profiles in use (matrix.ts endsMark): one line beside its control, "…" where it is cut; an opened row's whole sentence. */
+.profile-stop { display: inline-flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+.profile-stop > span { overflow: hidden; text-overflow: ellipsis; }
+.details-head > .profile-stop { white-space: normal; max-width: var(--measure); }
+.select-line > .profile-stop { padding-right: 10px; border-right: 1px solid var(--line); }
+.band-act { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .select-why { position: absolute; top: 100%; left: 0; right: 0; z-index: 5; padding: 6px 16px; background: var(--surface); border-bottom: 1px solid var(--line); box-shadow: 0 8px 20px rgb(0 0 0 / 18%); font-size: 12px; line-height: 18px; color: var(--ink-soft); }
 .select-why > p { margin: 0; }
 /* A found item's Add, in the switch's place and as wide, so its name starts where an On row's does (matrix.ts addButton). */

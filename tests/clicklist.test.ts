@@ -85,7 +85,7 @@ const { repo, repoPage } = await import('../src/repopage.ts');
 const { addMarketplace, applyPluginOps, clickOn, closeRun, forgetMarketplace, lastLines, market, pluginBusy, resetMarket, resultOn, runReloads, shownPlugins, turnFromLine, turnPlugin, undoLabel, undoLast, undoOps, usePlugins } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
-const { backgroundProblems, copyQuestion, headerNotices, libraryTable, listResult, openKind, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
+const { backgroundProblems, copyQuestion, headerNotices, libraryTable, listResult, openKind, theseOff, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
 const { openWalkthrough, setupLead, walkthroughBand } = await import('../src/firstsetup.ts');
 const { pluginsResult } = await import('../src/pluginspage.ts');
 const { instructionBands, instructionCard } = await import('../src/instructionspage.ts');
@@ -839,7 +839,7 @@ const itemRow = (kind: PageKind, name: string, copies: Record<string, string> = 
 test('Turn these off clicked on the Library, then History opened before it is done: its result and its Undo stay the Library’s', async t => {
   onLibrary();
   homeWith(t, [{ kind: 'skills', key: 'notes' }], { on: true });
-  turnTheseOff([itemRow('skills', 'notes')]);
+  turnTheseOff(theseOff([itemRow('skills', 'notes')]));
   await settled();
   showPage('history');
   app.home!.skills.library.notes!.on = false;
@@ -851,7 +851,7 @@ test('Turn these off clicked on the Library, then History opened before it is do
 test('Turn these off where one skill’s Off is refused as stale: the result says that one first, counts, names and flashes the one it turned off, and its Undo is about that one alone', async t => {
   onLibrary();
   homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'skills', key: 'spare' }], { on: true });
-  turnTheseOff([itemRow('skills', 'notes'), itemRow('skills', 'spare')]);
+  turnTheseOff(theseOff([itemRow('skills', 'notes'), itemRow('skills', 'spare')]));
   await settled();
   app.home!.skills.library.notes!.on = false;
   await main.pass({ results: [...did('notes').results, ...refusedAsStale('spare').results], writes: 1, reloads: [], made: ['off-skills-notes'] });
@@ -899,7 +899,7 @@ test('An Undo started on the Library, then History opened before it is done: its
 test('Turn these off where every kind refuses: nothing is turned off; the result says first what didn’t go through, and each kind’s reason is a line led by its name', async t => {
   onLibrary();
   homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'mcp', key: 'github' }], { on: true });
-  turnTheseOff([itemRow('skills', 'notes'), itemRow('mcp', 'github')]);
+  turnTheseOff(theseOff([itemRow('skills', 'notes'), itemRow('mcp', 'github')]));
   await settled();
   await main.pass({ stopped: 'The skills record is damaged.', results: [], writes: 0, reloads: [] });
   await main.pass({ stopped: 'The MCP record is damaged.', results: [], writes: 0, reloads: [] });
@@ -962,7 +962,7 @@ test('Turn these off across kinds, from the No use seen chip: a skill only some 
   assert.deepEqual(off.map(row => row.key), ['planner', 'github', 'notes']);
   // A row's controls ask their own kind's gate: the server's record stops servers only.
   assert.deepEqual([whyKindReadOnly(app.home!, 'mcp'), whyKindReadOnly(app.home!, 'skills'), whyReadOnly(app.home!)], ['The MCP record is damaged. Nothing was written or deleted.', undefined, undefined]);
-  turnTheseOff(off);
+  turnTheseOff(theseOff(off));
   await settled();
   // Main turns each off; the home as it reads then has it Off, which its Undo is decided on.
   app.home!.skills.library.notes!.on = app.home!.agents.library.planner!.on = false;
@@ -983,7 +983,7 @@ test('Turn these off across kinds, from the No use seen chip: a skill only some 
 test('Turn these off with a skill and an agent of one name, the skill kept back by a tool: the lead names it by its kind, and the sentence after it names only what went through', async t => {
   onLibrary();
   homeWith(t, [{ kind: 'skills', key: 'review' }, { kind: 'agents', key: 'review' }], { on: true });
-  turnTheseOff([itemRow('skills', 'review'), itemRow('agents', 'review')]);
+  turnTheseOff(theseOff([itemRow('skills', 'review'), itemRow('agents', 'review')]));
   await settled();
   app.home!.skills.library.review!.on = app.home!.agents.library.review!.on = false;
   await main.pass({ ...partly('review'), made: ['off-skills-review'] });
@@ -994,7 +994,7 @@ test('Turn these off with a skill and an agent of one name, the skill kept back 
 test('Turn these off where every row it turned off is kept back by a tool: the lead names them, the sentence after it counts them', async t => {
   onLibrary();
   homeWith(t, [{ kind: 'skills', key: 'notes' }, { kind: 'skills', key: 'spare' }], { on: true });
-  turnTheseOff([itemRow('skills', 'notes'), itemRow('skills', 'spare')]);
+  turnTheseOff(theseOff([itemRow('skills', 'notes'), itemRow('skills', 'spare')]));
   await settled();
   app.home!.skills.library.notes!.on = app.home!.skills.library.spare!.on = false;
   await main.pass({ results: [...partly('notes').results, ...partly('spare').results], writes: 2, reloads: [], made: ['off-skills-notes', 'off-skills-spare'] });
@@ -1016,7 +1016,7 @@ test('Turn these off where one refreshed skill still loads in Codex from another
       library: { spare: { ...newItem('spare', 'spare'), on: false }, standup: { ...newItem('standup', 'standup'), on: false } },
     },
   }));
-  turnTheseOff([itemRow('skills', 'spare'), itemRow('skills', 'standup')]);
+  turnTheseOff(theseOff([itemRow('skills', 'spare'), itemRow('skills', 'standup')]));
   await settled();
   await main.pass({ results: [...did('spare').results, ...did('standup').results], writes: 2, reloads: [], made: ['off-skills-spare', 'off-skills-standup'] });
   assert.deepEqual([app.outcome?.text, app.outcome?.warn, app.outcome?.reasons, app.outcome?.act?.label],
@@ -1031,7 +1031,7 @@ test('Turn these off where a kind with a shared skill is refused and an MCP serv
     anotherWay: { 'codex-cli': 'Codex reads a copy in ~/.agents/skills, which is not Central Knot’s.' },
     loads: { 'codex-cli': { folder: 'spare', name: 'spare', skillFile: '/home/.agents/skills/spare/SKILL.md', switchedOff: false } },
   }] as unknown as HomeView['skills']['items'];
-  turnTheseOff([itemRow('skills', 'spare'), itemRow('mcp', 'github')]);
+  turnTheseOff(theseOff([itemRow('skills', 'spare'), itemRow('mcp', 'github')]));
   await settled();
   await main.pass({ stopped: 'The skills record is damaged. Nothing was written or deleted.', results: [], writes: 0, reloads: [] });
   app.home!.mcp.library.github!.on = false;
@@ -1041,7 +1041,7 @@ test('Turn these off where a kind with a shared skill is refused and an MCP serv
       ['Skills: The skills record is damaged. Nothing was written or deleted.'], true, 'Undo']);
   // Even if a kind went through, a row that is On again in the refreshed view does not get the still-read sentence.
   app.home!.skills.gate = { state: 'ready' };
-  turnTheseOff([itemRow('skills', 'spare'), itemRow('mcp', 'github')]);
+  turnTheseOff(theseOff([itemRow('skills', 'spare'), itemRow('mcp', 'github')]));
   await settled();
   await main.pass(offMade('skills', 'spare'));
   app.home!.mcp.library.github!.on = false;
@@ -2554,6 +2554,63 @@ test('Row switch ending Everyday appends profileLeftUse; on then off in one run 
   assert.equal(app.outcome?.profileLine, undefined);
 });
 
+test('Before a click, a row’s switch says on hover the profile in use it would end; while another click waits, “may”; its opened row says it at its head, but not while its own click is out', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
+  const { viewWith } = profileActWorld(t, { beforeOn: { notes: true, standup: false }, profiles: [everyday] });
+  // Drawn, the page asks which tools are installed too (app.ts leftOutTools).
+  const drawable = (on: Record<string, boolean>) => { const view = viewWith(on); view.sync.present = view.sync.managed; return view; };
+  app.home = drawable({ notes: true, standup: false });
+  t.mock.method(api, 'refresh', async () => drawable({ notes: false, standup: false }));
+  const drawn = (key: string) => findById(libraryTable(), `switch-skills-${key}`);
+  const hover = (key: string) => { const node = drawn(key); node.onmouseenter({ currentTarget: node }); return node.attrs.title as string; };
+  assert.doesNotMatch(drawn('notes').attrs.title, /profile in use/, 'drawn, its hover is its own words: the rest is worked out as the pointer comes');
+  assert.match(hover('notes'), /keeps it\. Everyday stays saved but stops being the profile in use\.$/, 'its Off ends Everyday');
+  const notes = drawn('notes');
+  notes.onfocus({ currentTarget: notes });
+  assert.deepEqual([notes.attrs['aria-label'], notes.attrs['aria-description']], [notes.attrs.title.replace(/ Everyday stays.*$/, ''), 'Everyday stays saved but stops being the profile in use.'], 'focused, its name stays; what it ends is its description');
+  assert.match(hover('standup'), / Everyday stays saved but stops being the profile in use\.$/, 'its On ends Everyday');
+  findById(libraryTable(), 'open-skills-notes').onclick({ stopPropagation() {} });
+  assert.equal(textOf(findById(libraryTable(), 'profile-ends-skills-notes')), 'If off, only this item changes: Everyday stays saved but stops being the profile in use.');
+  flip('notes', false);
+  await settled();
+  assert.equal(findById(libraryTable(), 'profile-ends-skills-notes'), undefined, 'its own click out, its head says nothing');
+  assert.match(hover('standup'), / Everyday stays saved but may stop being the profile in use\.$/, 'notes’s click, waiting, may already end it');
+  await main.pass(did('notes', false));
+  assert.doesNotMatch(hover('standup'), /profile in use/, 'Everyday is no longer in use: nothing to end');
+});
+
+test('In Select’s bar, what a Turn would end of the profile in use sits right after that Turn, apart from Delete…', async t => {
+  const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
+  const { viewWith } = profileActWorld(t, { beforeOn: { notes: true, standup: false }, profiles: [everyday] });
+  app.home = viewWith({ notes: true, standup: false });
+  app.home.sync.present = app.home.sync.managed;
+  const { startSelecting, stopSelecting, tickRow } = await import('../src/selection.ts');
+  t.after(stopSelecting);
+  startSelecting();
+  const order = ['skills-standup', 'skills-notes'], bar = () => findById(libraryTable(), 'select-bar').children[0].children.map((part: any) => part.attrs?.id ?? textOf(part));
+  tickRow('skills-standup', order, false);
+  assert.deepEqual(bar(), ['1 selected', 'select-turn-on', 'select-profile', 'select-turn-off', 'select-delete'], 'standup Off: only Turn on would end Everyday');
+  assert.equal(textOf(findById(libraryTable(), 'select-profile')), 'Would leave Everyday');
+  tickRow('skills-notes', order, false);
+  assert.deepEqual(bar(), ['2 selected', 'select-turn-on', 'select-turn-off', 'select-profile', 'select-delete'], 'notes On too: Turn off would as well');
+  assert.deepEqual([textOf(findById(libraryTable(), 'select-profile')), findById(libraryTable(), 'select-profile').attrs.title],
+    ['Either would leave Everyday', 'If on or off, Everyday stays saved but stops being the profile in use. Undo, or switching to it again, puts it back in use.']);
+});
+
+test('Keeping his server out of Copilot CLI ends Mine where a plugin’s server of its name there is on only by his: that switch says so before the press', async t => {
+  onLibrary();
+  Object.assign(app, { libraryView: 'list', libraryKind: 'all' });
+  homeWith(t, [{ kind: 'mcp', key: 'issues' }], { on: true });
+  const tools: HarnessId[] = ['claude-cli', 'copilot-cli'];
+  Object.assign(app.home!.sync, { managed: tools, present: tools });
+  for (const kind of ['skills', 'mcp', 'agents'] as const) app.home![kind].tools = tools;
+  Object.assign(app.home!, { pluginItems: [{ tool: 'copilot-cli', plugin: 'kit', marketName: 'team', listed: true, items: [{ kind: 'mcp', name: 'issues', description: '' }] }],
+    profiles: { profiles: [{ id: 'mine', name: 'Mine', items: ['mcp:issues'], switchesPluginItems: true }], plugins: [] } });
+  findById(libraryTable(), 'open-mcp-issues').onclick({ stopPropagation() {} });
+  const said = (tool: string) => { const node = findById(libraryTable(), `enable-mcp-issues-${tool}`); node.onfocus({ currentTarget: node }); return node.attrs['aria-description']; };
+  assert.deepEqual([said('copilot-cli'), said('claude-cli')], ['Mine stays saved but stops being the profile in use.', ''], 'out of Copilot CLI, kit’s issues is on by no name Mine has; out of Claude Code, it still is');
+});
+
 test('Leaving the Library mid-run still announces the ended profile in the status bar', async t => {
   const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
   const { viewWith } = profileActWorld(t, { beforeOn: { notes: true, standup: false }, profiles: [everyday] });
@@ -2596,7 +2653,7 @@ test('applyByKind (Turn these off) and Library Undo append profileLeftUse only w
   t.mock.method(api, 'refresh', async () => nextView);
 
   // Turn these off ends Everyday.
-  turnTheseOff([itemRow('skills', 'notes')]);
+  turnTheseOff(theseOff([itemRow('skills', 'notes')]));
   await settled();
   await main.pass(offMade('skills', 'notes'));
   assert.match(app.outcome?.text ?? '', /Everyday stopped being the profile in use\.$/);
@@ -2624,7 +2681,7 @@ test('applyByKind (Turn these off) and Library Undo append profileLeftUse only w
   // applyByKind refused whole adds no sentence.
   app.home = viewWith({ notes: true, standup: false });
   nextView = viewWith({ notes: false, standup: false });
-  turnTheseOff([itemRow('skills', 'notes')]);
+  turnTheseOff(theseOff([itemRow('skills', 'notes')]));
   await settled();
   await main.pass({ stopped: 'The skills record is damaged.', results: [], writes: 0, reloads: [] });
   assert.doesNotMatch(app.outcome?.text ?? '', /stopped being the profile/);
@@ -2770,7 +2827,14 @@ test('Two runs queued side by side on two tabs: only the first run says the prof
   assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
 });
 
-test('First setup Yes opening the walkthrough carries its result without appending the profile sentence a second time', async t => {
+/** Synchronize everything switched on, and the pass right after adding standup by the rule, as History lists them (everything.ts, librarypass.ts). */
+const switchedOn = { id: 'on-1', at: '2026-11-27T09:00:00.000Z', key: 'home:everything', item: 'Synchronize everything', kind: 'everything', everything: { ruleOn: true }, losers: [], orderProved: true };
+const ruleAdded = { id: 'took-standup', at: '2026-11-27T09:00:01.000Z', key: 'standup', item: 'standup', kind: 'on', cause: 'sync-everything',
+  winner: { tool: 'claude-cli', hash: 'b' }, losers: [{ tool: 'codex-cli', hash: '' }], tookFrom: [{ tool: 'claude-cli', hash: 'b' }], orderProved: true };
+/** The band's Undo after a switch-on: what it does, with no count that later passes would make untrue. */
+const undoSays = 'Switches Synchronize everything off. It takes back the items it added, but for any changed since.';
+
+test('First setup’s Yes is Settings’ switch, answering: on the Overview, what it added counted from History, the profile sentence once, and the switch-on’s own Undo', async t => {
   const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
   const { viewWith } = profileActWorld(t, { beforeOn: { notes: true, standup: false }, profiles: [everyday] });
   const clash = {
@@ -2785,17 +2849,74 @@ test('First setup Yes opening the walkthrough carries its result without appendi
   after.syncOn = true;
   after.sync.syncEverything = true;
   after.skills.items.push(clash as never);
-  after.skills.notices = [{ kind: 'taken-in', items: ['standup'] } as never];
+  before.sync.present = before.sync.managed;
   app.home = before;
   app.page = 'overview';
-  t.mock.method(api, 'setSyncEverything', async () => ({ view: after, reloads: [] }));
+  const set = t.mock.method(api, 'setSyncEverything', async () => ({ view: after, reloads: [], event: switchedOn.id }));
+  t.mock.method(api, 'history', async () => ({ events: [switchedOn, ruleAdded], days: 30 }));
 
   findById(setupLead(app.home!)!, 'setup-yes').onclick();
   await settled();
-  assert.equal(app.page, 'library');
-  const matches = (app.outcome?.text ?? '').match(/Everyday stopped being the profile in use\./g) ?? [];
-  assert.equal(matches.length, 1, `expected sentence once, got: ${app.outcome?.text}`);
+  assert.deepEqual(set.mock.calls.map(call => call.arguments), [[true, '/home', true]]);
+  // clash waits for a choice of copy: the Overview's line leads into it (setupLead), so Yes opens nothing.
+  assert.deepEqual([app.page, app.outcome?.page], ['overview', 'overview']);
+  assert.equal(app.outcome?.text, 'Synchronize everything is on: it added 1 item. Everyday stopped being the profile in use.');
   assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
+  assert.deepEqual([app.outcome?.act?.label, app.outcome?.act?.title], ['Undo', undoSays]);
+  // Its click is History's restore of that entry (app.ts restoreEvent).
+  const restore = t.mock.method(api, 'restore', async () => ({ results: [], reloads: [] }));
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual(restore.mock.calls.map(call => call.arguments[0]), [switchedOn.id]);
+});
+
+test('First setup’s question counts as found only what is found in his tools: 2 ready to add, beside 2 in Central Knot, Off and in no tool, is "the 2 items"', async t => {
+  const { viewWith } = profileActWorld(t, { beforeOn: { notes: false, standup: false }, profiles: [] });
+  const home = viewWith({ notes: false, standup: false });
+  Object.assign(home.sync, { syncEverything: undefined, present: home.sync.managed });
+  // Found in Claude Code only, new to Central Knot: Yes adds each (the take-in table's answer, library.ts takeInAnswer).
+  const ready = (key: string) => ({ key, name: key, description: '', on: false, copies: { 'claude-cli': { hash: key } }, except: [], cannot: {}, edited: [],
+    takeInAnswers: { click: { take: { harness: 'claude-cli', hash: key } }, rule: { take: { harness: 'claude-cli', hash: key } } } });
+  home.skills.items.push(ready('alpha') as never, ready('beta') as never);
+  assert.equal(textOf(findById(setupLead(home)!, 'setup-question-title')), 'Add the 2 items found in your tools to every tool that can take them, and new ones as they turn up?');
+  // One item: the tools that can take it.
+  home.skills.items.pop();
+  assert.equal(textOf(findById(setupLead(home)!, 'setup-question-title')), 'Add the 1 item found in your tools to every tool that can take it, and new ones as they turn up?');
+});
+
+test('First setup’s No: its hover says what is on stays on only where something is; its band names the setting, and its Turn on is the same switch as Yes, with the same result', async t => {
+  const { viewWith } = profileActWorld(t, { beforeOn: { notes: false, standup: false }, profiles: [] });
+  const asked = (on: Record<string, boolean>) => {
+    const view = viewWith(on);
+    // What is on, as each row says it (itemrow.ts anyOn reads the rows).
+    for (const item of view.skills.items) item.on = on[item.key] ?? false;
+    Object.assign(view.sync, { syncEverything: undefined, present: view.sync.managed });
+    view.syncOn = true;
+    return view;
+  };
+  const noSays = (home: HomeView) => findById(setupLead(home)!, 'setup-no').attrs;
+  const nothingOn = noSays(asked({ notes: false, standup: false }));
+  assert.deepEqual([nothingOn.title, noSays(asked({ notes: true, standup: false })).title],
+    ['Leaves it off: each found item waits in the Library for Add.', 'Leaves it off: what is on stays on, and each found item waits in the Library for Add.']);
+  // Said to the keyboard too: the button's description is its hover.
+  assert.equal(nothingOn['aria-description'], nothingOn.title);
+  app.home = asked({ notes: false, standup: false });
+  app.page = 'overview';
+  const left = structuredClone(app.home), on = structuredClone(app.home);
+  left.sync.syncEverything = false;
+  on.sync.syncEverything = true;
+  const set = t.mock.method(api, 'setSyncEverything', async (switchOn: boolean) => (switchOn ? { view: on, reloads: [], event: switchedOn.id } : { view: left, reloads: [] }));
+  t.mock.method(api, 'history', async () => ({ events: [switchedOn, ruleAdded], days: 30 }));
+
+  findById(setupLead(app.home!)!, 'setup-no').onclick();
+  await settled();
+  assert.deepEqual([app.outcome?.page, app.outcome?.text, app.outcome?.act?.label], ['overview', 'Synchronize everything is off.', 'Turn on']);
+  app.outcome!.act!.run();
+  await settled();
+  // The question was answered, so Turn on doesn't answer it (main refuses that once answered); its result is said where it was clicked.
+  assert.deepEqual(set.mock.calls.map(call => call.arguments), [[false, '/home', true], [true, '/home', false]]);
+  assert.deepEqual([app.page, app.outcome?.page, app.outcome?.text, app.outcome?.act?.label, app.outcome?.act?.title],
+    ['overview', 'overview', 'Synchronize everything is on: it added 1 item.', 'Undo', undoSays]);
 });
 
 test('Unused band: skipped rows marked, unread managed tool cue, 3-line disclosure, all-plugin own-row wording, emptied kind and misses', async t => {
@@ -2871,9 +2992,13 @@ test('Unused band: skipped rows marked, unread managed tool cue, 3-line disclosu
     const band = findById(tree, 'unused-band');
     assert.ok(band, 'unused-band should render');
     const bandText = textOf(band);
-    assert.ok(bandText.includes('8 with no use seen in 30 days. 2 from a plugin skipped.'), bandText);
+    assert.ok(bandText.includes('8 with no use seen in 30 days.') && !bandText.includes('skipped'), `${bandText}: the two plugin rows it skips say so on their rows`);
     assert.equal(bandText.includes('Undo'), false, 'Undo explanation must be gone');
-    assert.equal(bandText.includes('Everyday'), false, 'profile sentence must be gone from band');
+    assert.equal(textOf(findById(band, 'unused-profile')), 'Would leave Everyday and Focus', 'after Turn 6 off everywhere, the two profiles it would end');
+    assert.equal(bandText.replace('Would leave Everyday and Focus', '').includes('Everyday'), false, 'and no sentence of them anywhere else in the band');
+    // Its click skips a kind whose own record stops its writes (app.ts applyByKind): what it would skip ends nothing.
+    app.home!.skills.gate = { state: 'stopped', reason: 'The skills record is damaged.' };
+    assert.equal(findById(libraryTable(), 'unused-profile'), undefined, 'with the skills record damaged, Turn 6 off ends nothing: no mark');
     assert.equal(bandText.includes('another computer'), false, 'limits must start closed');
     assert.equal(bandText.includes('not counted'), false, 'no unread cue when every managed tool was read');
     const toggle = findById(band, 'unused-counted-toggle');
