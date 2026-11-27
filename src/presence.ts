@@ -68,8 +68,6 @@ export const agentsKeptIn = {
 export type AgentTool = keyof typeof agentsKeptIn;
 export const agentTools = Object.keys(agentsKeptIn) as AgentTool[];
 export const mcpTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
-/** The tools whose settings a server's file panel reads its entry in (mcp.ts entryText, matrix.ts fileCopies): all but Codex, whose TOML is not read yet. */
-export const entryShownIn = (tool: HarnessId) => tool !== 'codex-cli';
 /**
  * The tools whose session history Central Knot reads for the Sessions page (sessionday.ts, each by its reader in
  * sessionrequests.ts); a present tool not here is "not counted" on that page. Here so the page and main read one list.
