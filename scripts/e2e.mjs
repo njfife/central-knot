@@ -2325,10 +2325,10 @@ async function practiceFlow() {
     (await a.text('.empty-body'))?.includes(`from the status bar or from the ${trayIcon},`), await a.text('.empty-body'));
   await newProfile(a, 'Incident');
   same('an empty profile offers no switch: it would turn everything off', [await a.exists('#profile-switch'), await a.exists('#profile-from-now')], [false, true]);
-  same('the profile lists the four skills, and under Find says in one short line what the Library lists beside them, with the rest in its (?) card',
-    [(await a.all('.pf-row[data-item]', 'e.dataset.item')).sort(), await a.text('#profile-left-out .band-text')],
-    [['skill:notes', 'skill:release-notes', 'skill:review', 'skill:standup'], '2 MCP servers and 2 agents in your tools aren’t in Central Knot']);
-  if (await a.exists('#profile-left-out-info')) await checkCard(a, 'profile-left-out-info', 'Under Found in the Library, with Add on each that can be taken in.', 'left-out (?) card holds the rest of the sentence');
+  same('the profile lists the four skills, and under Find says in one short line (no leading info icon) what the Library lists beside them, with a sentence in its (?) card',
+    [(await a.all('.pf-row[data-item]', 'e.dataset.item')).sort(), await a.text('#profile-left-out .band-text'), await a.run(`!!document.querySelector('#profile-left-out > svg')`)],
+    [['skill:notes', 'skill:release-notes', 'skill:review', 'skill:standup'], '2 MCP servers and 2 agents in your tools aren’t in Central Knot', false]);
+  if (await a.exists('#profile-left-out-info')) await checkCard(a, 'profile-left-out-info', 'They are under Found in the Library, with Add on each that can be taken in.', 'left-out (?) card holds a full sentence');
   else check('left-out (?) mark exists', false);
   await a.click('#pf-skill\\:notes');
   same('ticking only edits the profile', allFolders(), allOn);
@@ -2351,12 +2351,10 @@ async function practiceFlow() {
   await a.click('#profile-switch');
   same('the switch takes what Incident leaves out out of every tool, and leaves notes', [folders('standup'), folders('release-notes'), folders('review'), folders('notes')], [gone, gone, gone, allOn.notes]);
   const inUseLine = await a.text('.profile-header p');
-  same('the status bar, the list and the short header say Incident is in use, with blank state cells and no Now column head',
+  same('the status bar, the list and the short header say Incident is in use, with blank state cells, no Now column head, and no redundant (?)',
     [(await a.text('#status-profile'))?.trim(), await a.text('.profile-row.selected .profile-in-use'), inUseLine, wordCount(inUseLine) <= 10,
-      await a.exists('#profile-switch'), await stateShown('notes'), await stateShown('standup'), await a.text('.pf-head .pf-state'), await a.exists('#profile-changes')],
-    ['Incident', 'In use', 'In use · 1 on, 3 off', true, false, '', '', '', false]);
-  if (await a.exists('#profile-preview-info')) await checkCard(a, 'profile-preview-info', 'In use · 1 item on, the other 3 off wherever they can be switched', 'in-use header (?) card holds the long sentence');
-  else check('in-use header (?) mark exists', false);
+      await a.exists('#profile-switch'), await a.exists('#profile-preview-info'), await stateShown('notes'), await stateShown('standup'), await a.text('.pf-head .pf-state'), await a.exists('#profile-changes')],
+    ['Incident', 'In use', 'In use · 1 on, 3 off', true, false, false, '', '', '', false]);
   check('the result says what it turned off, with Undo switch', /^Switched to Incident: 3 items turned off\./.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-undo'), await a.text('.bands'));
   await a.click('#outcome-undo');
   same('Undo switch puts every folder back, byte for byte, and no profile is in use', [allFolders(), (await a.text('#status-profile'))?.trim()], [allOn, 'No profile']);
@@ -2370,12 +2368,12 @@ async function practiceFlow() {
     ['Switching turns 2 on, 1 off', false, '', 'Turns on', 'Turns off', 'Changes 3']);
   if (await a.exists('#profile-changes')) {
     await a.click('#profile-changes');
-    same('pressing Changes shows only the changing rows under Turns on then Turns off without repeating headings in cells, with kind titles',
+    same('pressing Changes shows only the changing rows under Turns on then Turns off without repeating headings or Switching head over blank cells, with kind titles',
       [await a.run(`document.querySelector('#profile-changes')?.getAttribute('aria-pressed')`),
         await a.all('.pf-section strong', 'e.textContent'), await a.all('.pf-row[data-item]', 'e.dataset.item'),
-        await a.all('.pf-row[data-item] .pf-state', 'e.textContent'),
+        await a.all('.pf-row[data-item] .pf-state', 'e.textContent'), await a.text('.pf-head .pf-state'),
         await a.all('.pf-row[data-item] .kind-mark', 'e.title')],
-      ['true', ['Turns on', 'Turns off'], ['skill:standup', 'skill:review', 'skill:notes'], ['', '', ''], ['skill', 'skill', 'skill']]);
+      ['true', ['Turns on', 'Turns off'], ['skill:standup', 'skill:review', 'skill:notes'], ['', '', ''], '', ['skill', 'skill', 'skill']]);
     await a.run(`(() => { const input = document.querySelector('#profile-find'); input.value = 'stand'; input.dispatchEvent(new Event('input', { bubbles: true })); })()`); await a.settle();
     same('Find works inside Changes', await a.all('.pf-row[data-item]', 'e.dataset.item'), ['skill:standup']);
     await a.click('#profile-find-clear'); await a.settle();
@@ -18751,9 +18749,10 @@ async function profilePluginsFlow() {
   await a.click('#header-refresh');
   await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Work')).click()`); await a.settle();
   const cause = 'issue-tracker is off in Codex, so 2 of its items can’t be switched from here';
-  same('with the plugin off in Codex, the rows say so, and the header says Not in use with the full reason in its (?) card, with the way to the plugin instead of Switch',
-    [await a.all(`${row(triageId)} .pf-note`, 'e.textContent'), await a.text('.profile-header p'), await a.text('#profile-preview-info-card'), await a.exists('#profile-switch'), await a.exists('#profile-open-plugin'), await a.exists(byId(`pf-plugin-${triageId}-codex-cli`)), (await a.text('#status-profile'))?.trim()],
-    [['Off in Codex: its plugin is off there. Open its plugin'], 'Not in use', `Not in use · ${cause}`, false, true, true, 'No profile']);
+  same('with the plugin off in Codex, the rows and header say why Work can’t switch with Open issue-tracker, full reason in (?), and no Switching head over blank cells',
+    [await a.all(`${row(triageId)} .pf-note`, 'e.textContent'), await a.text('.profile-header p'), await a.text('#profile-preview-info-card'), await a.exists('#profile-switch'),
+      await a.text('#profile-open-plugin'), await a.text(byId(`pf-plugin-${triageId}-codex-cli`)), await a.text('.pf-head .pf-state'), (await a.text('#status-profile'))?.trim()],
+    [['Off in Codex: its plugin is off there. Open issue-tracker'], 'Can’t switch · issue-tracker is off in Codex', `Not in use · ${cause}`, false, 'Open issue-tracker', 'Open issue-tracker', '', 'No profile']);
   if (await a.exists('#profile-preview-info')) await checkCard(a, 'profile-preview-info', `Not in use · ${cause}`, 'held header (?) card holds the full reason');
   else check('held header (?) mark exists', false);
   await pictures('profile-plugin-off');
@@ -18764,7 +18763,7 @@ async function profilePluginsFlow() {
   same('chosen from the status bar, Work is refused, and the status bar says why', await a.run(`document.querySelector('#announcement').dataset.text`), `${cause}. Nothing was switched.`);
   await a.click('#profile-open-plugin');
   for (let tries = 0; tries < 50 && !(await a.exists('#plugin-back')); tries++) await wait(100);
-  check('Open its plugin opens issue-tracker’s page on Plugins', await a.exists('#plugin-back') && /issue-tracker/.test(await a.text('.plugin-page') ?? ''), await a.text('.page-title'));
+  check('Open issue-tracker opens issue-tracker’s page on Plugins', await a.exists('#plugin-back') && /issue-tracker/.test(await a.text('.plugin-page') ?? ''), await a.text('.page-title'));
 
   // His own skill beside the plugin's rows, a plugin's skill with a long name, In use; then a plugin's server Copilot CLI can't
   // switch (a server of his own has its name) and a plugin whose copy Copilot CLI can't read: four pictures at his window, and the
@@ -18986,9 +18985,9 @@ async function profilePluginsFlow() {
   b = await launch(oldData, [], tools);
   await b.click('#nav-profiles');
   await b.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Legacy')).click()`); await b.settle();
-  same('after reopening, Legacy still manages plugin items, shows plugin rows, and is in use',
-    [await b.exists('#profile-choose-plugins'), (await b.all('.pf-row[data-item]', 'e.dataset.item')).sort(), (await b.text('.profile-header p'))?.startsWith('In use · 1 on'), (await b.text('#profile-preview-info-card'))?.startsWith('In use · 1 item on')],
-    [false, [issuesId, triageId, 'skill:notes'], true, true]);
+  same('after reopening, Legacy still manages plugin items, shows plugin rows, and is in use with no redundant (?)',
+    [await b.exists('#profile-choose-plugins'), (await b.all('.pf-row[data-item]', 'e.dataset.item')).sort(), (await b.text('.profile-header p'))?.startsWith('In use · 1 on'), await b.exists('#profile-preview-info')],
+    [false, [issuesId, triageId, 'skill:notes'], true, false]);
   // Empty old profile: Start from what's on now ticks personal items only, and Delete -> Undo preserves switchesPluginItems: false through IPC.
   await b.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Empty old')).click()`); await b.settle();
   await b.click('#profile-from-now'); await bDone();
@@ -19057,10 +19056,10 @@ async function profilePluginsFlow() {
     [['Turns on in Copilot CLI, which runs the plugin’s “issues” instead of yours (same name).'], 'Turns on in Copilot CLI; turns off in Claude Code and Codex',
       'Switching turns 1 on', 'Changes 1']);
   await b.click('#profile-changes');
-  same('Changes lists the both-ways row once under Turns on, keeping its per-tool cell words',
-    [await b.all('.pf-section strong', 'e.textContent'), await b.all('.pf-section-count', 'e.textContent'),
+  same('Changes lists the both-ways row once under Turns on, keeping its per-tool cell words and Switching head',
+    [await b.all('.pf-section strong', 'e.textContent'), await b.all('.pf-section-count', 'e.textContent'), await b.text('.pf-head .pf-state'),
       await b.all('.pf-row[data-item]', 'e.dataset.item'), await b.all('.pf-row[data-item] .pf-state', 'e.textContent')],
-    [['Turns on'], ['1'], [issuesId], ['Turns on in Copilot CLI; turns off in Claude Code and Codex']]);
+    [['Turns on'], ['1'], 'Switching', [issuesId], ['Turns on in Copilot CLI; turns off in Claude Code and Codex']]);
   await b.click('#profile-changes');
   check('the header (?) card says the plugin’s issues is on in Copilot CLI, as the row says it turns on there: not that it stays on', /; 1 is on in Copilot CLI, through its plugin/.test(await b.text('#profile-preview-info-card') ?? ''), await b.text('#profile-preview-info-card'));
   if (shots) {
@@ -19762,6 +19761,11 @@ async function sameNamePluginFlow() {
   const skillOnly = files();
   await newProfile(a, 'Server only');
   await a.click(byId(`pf-plugin:mcp:${key}`)); await done();
+  await a.click('#profile-changes');
+  same('Changes names the kind after rows sharing a name (and hides Switching over blank cells)',
+    [await a.all('.pf-row[data-item] .pf-name-text', 'e.textContent'), await a.text('.pf-head .pf-state')],
+    [['issues · MCP server', 'issues · skill'], '']);
+  await a.click('#profile-changes');
   await a.click('#profile-switch'); await done();
   same('switching to Server only turns the plugin’s skill issues off in Codex and Copilot CLI, and its server issues back on', offIn(), skillOff);
   await a.click('#outcome-undo'); await done();

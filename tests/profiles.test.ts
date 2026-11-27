@@ -99,11 +99,11 @@ test('The Profiles page says what the Library lists that no profile can tick, it
   assert.deepEqual(leftOut(home), { skill: 1, mcp: 1, agent: 0 });
   assert.deepEqual(leftOutWords(leftOut(home)), {
     line: '1 skill and 1 MCP server in your tools aren’t in Central Knot',
-    card: 'Under Found in the Library, with Add on each that can be taken in.',
+    card: 'They are under Found in the Library, with Add on each that can be taken in.',
   });
   assert.deepEqual(leftOutWords({ skill: 1, mcp: 0, agent: 0 }), {
     line: '1 skill in your tools isn’t in Central Knot',
-    card: 'Under Found in the Library, with Add if it can be taken in.',
+    card: 'It is under Found in the Library, with Add if it can be taken in.',
   });
 
   // Everything in Central Knot; gone, deleted, still linked to pi-pack (no row anywhere); and a plugin's item only on a row of the
@@ -2341,13 +2341,18 @@ test('Copilot shared name fix 4: pluginRowState lives in profileplan.ts and retu
   const home = docsHome([docsIn('copilot-cli', { items: [issues] }), docsIn('codex-cli', { items: [issues], serversOff: ['issues'] }), docsIn('claude-cli', { items: [issues], serversOff: ['issues'] })], [], [['mcp', 'issues', true]], [mine]);
   const item = pluginLive(home).find(each => each.id === issuesId)!;
   assert.equal(pluginRowState(profile('Mine', ['mcp:issues']), item), 'Off · on in Copilot CLI');
-  assert.equal(pluginLiveState(profile('Mine', ['mcp:issues']), item), 'off · on in Copilot CLI');
+  assert.equal(pluginLiveState(item), 'on in Copilot CLI');
   assert.equal(pluginRowState(profile('Both', ['mcp:issues', issuesId]), item), '');
-  assert.equal(pluginLiveState(profile('Both', ['mcp:issues', issuesId]), item), 'on');
+  assert.equal(pluginLiveState(item), 'on in Copilot CLI');
   const allOff = docsHome([docsIn('copilot-cli', { items: [issues], serversOff: ['issues'] }), docsIn('codex-cli', { items: [issues], serversOff: ['issues'] })], [], [], []);
   const offItem = pluginLive(allOff).find(each => each.id === issuesId)!;
   assert.equal(pluginRowState(profile('Quiet', []), offItem), '');
-  assert.equal(pluginLiveState(profile('Quiet', []), offItem), 'off');
+  assert.equal(pluginLiveState(offItem), 'off');
+  // Unswitchable copy on (Copilot CLI plugin agent `stays`) while switchable Claude Code copy is off: hover never says `off`.
+  const reviewer = { kind: 'agent' as const, name: 'reviewer', description: '' };
+  const staysHome = docsHome([docsIn('claude-cli', { items: [reviewer], agentsOff: ['reviewer'] }), docsIn('copilot-cli', { items: [reviewer] })], [], [], []);
+  const staysItem = pluginLive(staysHome).find(each => each.id === 'plugin:agent:document-tools@team-tools/reviewer')!;
+  assert.equal(pluginLiveState(staysItem), 'on in Copilot CLI');
   // Two plugins + his own server: when one plugin AND his own server are both named, the other plugin is kept on by the named plugin (not `own`), so clearedForHis stays silent.
   const tracker: InstalledPlugin = { tool: 'copilot-cli', plugin: 'tracker', marketName: 'team-tools', listed: true, items: [issues] };
   const bothHome = docsHome([docsIn('copilot-cli', { items: [issues] }), tracker], [], [['mcp', 'issues', true]], [mine]);
@@ -2568,6 +2573,10 @@ test('switchPreview returns a short header line, menu card, and tip only when th
   const notesOn = docsHome([docsIn('claude-cli'), docsIn('codex-cli')], [], [['skill', 'notes', true], ['skill', 'pager', false]]);
   checkBoth(switchPreview(profile('Legacy', ['skill:notes'], false), homeItems(notesOn), pluginLive(notesOn)),
     'In use · 1 on, 1 off', 'In use · 1 item on, the other 1 of yours off. Plugin items stay as they are.', true);
+  // Plain managing in-use profile with off items has no (?) tip (card only adds "wherever they can be switched").
+  const plainInUse = docsHome([], [], [['skill', 'notes', true], ['skill', 'pager', false]]);
+  checkBoth(switchPreview(profile('PlainInUse', ['skill:notes'], true), homeItems(plainInUse), []),
+    'In use · 1 on, 1 off', 'In use · 1 item on, the other 1 off wherever they can be switched', false);
   const allOnHome = docsHome([], [], [['skill', 'notes', true], ['skill', 'pager', true]]);
   checkBoth(switchPreview(profile('AllOn', ['skill:notes', 'skill:pager'], true), homeItems(allOnHome), []),
     'In use · 2 on', 'In use · 2 items on', false);
@@ -2578,11 +2587,16 @@ test('switchPreview returns a short header line, menu card, and tip only when th
   const twoBrought = docsHome([kit('kit-a', [skill('a1'), skill('a2')]), kit('kit-b', [skill('b1'), skill('b2')])], [], [['skill', 'notes', false]]);
   checkBoth(switchPreview(profile('Two', ['plugin:skill:kit-a@team-tools/a1', 'plugin:skill:kit-b@team-tools/b1']), homeItems(twoBrought), pluginLive(twoBrought)),
     'In use · 2 on, 2 with plugins, 1 off', 'In use · 2 items on, 2 more on in Claude Code with their plugins, the other 1 off wherever they can be switched', true);
-  // Held profile: short "Not in use" line with full reason in card and tip.
+  // Held profile: says why in view ("Can’t switch · <plugin> is off in <Tool>"), full sentence in card and tip; multiple plugins add "and 1 more".
   const offInCodex = docsHome([docsIn('codex-cli', { off: true })], [], [['skill', 'notes', true]]);
   const held = 'Not in use · document-tools is off in Codex, so 2 of its items can’t be switched from here';
   checkBoth(switchPreview(profile('Docs', ['skill:notes', pdfId, sheetId], true), homeItems(offInCodex), pluginLive(offInCodex)),
-    'Not in use', held, true);
+    'Can’t switch · document-tools is off in Codex', held, true);
+  const secondOff: InstalledPlugin = { tool: 'codex-cli', plugin: 'ops-kit', marketName: 'team-tools', listed: true, off: true, items: [skill('deploy')] };
+  const twoOff = docsHome([docsIn('codex-cli', { off: true }), secondOff], [], [['skill', 'notes', true]]);
+  const heldTwo = `${held}; ops-kit is off in Codex, so 1 of its items can’t be switched from here`;
+  checkBoth(switchPreview(profile('TwoHeld', ['skill:notes', pdfId, sheetId, 'plugin:skill:ops-kit@team-tools/deploy'], true), homeItems(twoOff), pluginLive(twoOff)),
+    'Can’t switch · document-tools is off in Codex and 1 more', heldTwo, true);
   // Whole plugin only (0 listed rows change).
   const onlyWhole = docsHome([kit('tracker', [{ kind: 'mcp', name: 's', description: '' }])], [], [['skill', 'notes', true]]);
   onlyWhole.pluginItems![0]!.serversOff = ['s'];
@@ -2593,7 +2607,7 @@ test('switchPreview returns a short header line, menu card, and tip only when th
   const writingProfile = profile('Writing', ['plugin:skill:writing-kit@team-tools/write']);
   const writingListed = listedChanges(writingProfile, homeItems(writingKit), pluginLive(writingKit));
   assert.deepEqual([writingListed.on.map(c => c.id), writingListed.off.map(c => c.id)],
-    [['plugin:skill:writing-kit@team-tools/write', 'plugin:skill:writing-kit@team-tools/brainstorm', 'plugin:skill:writing-kit@team-tools/outline'], []]);
+    [['plugin:skill:writing-kit@team-tools/brainstorm', 'plugin:skill:writing-kit@team-tools/outline', 'plugin:skill:writing-kit@team-tools/write'], []]);
   checkBoth(switchPreview(writingProfile, homeItems(writingKit), pluginLive(writingKit)),
     'Switching turns 3 on', 'Switching turns 1 item on. Turns 1 plugin on in Claude Code', true);
   // Edge case 2: older non-managing profile with Copilot CLI same-name server (1 listed row turns on; card keeps 2 items on + exception).
@@ -2612,7 +2626,7 @@ test('switchPreview returns a short header line, menu card, and tip only when th
   const bothWays = docsHome([docsIn('copilot-cli', { items: [issuesPart], serversOff: ['issues'] }), docsIn('codex-cli', { items: [issuesPart] })], [], [['mcp', 'issues', true]], [copilotMine]);
   const bothProfile = profile('Mine', ['mcp:issues'], true);
   const bothListed = listedChanges(bothProfile, homeItems(bothWays), pluginLive(bothWays));
-  assert.deepEqual([bothListed.on, bothListed.off], [[{ id: 'plugin:mcp:document-tools@team-tools/issues', way: 'on', said: 'Turns on in Copilot CLI; turns off in Codex' }], []]);
+  assert.deepEqual([bothListed.on, bothListed.off], [[{ id: 'plugin:mcp:document-tools@team-tools/issues', said: 'Turns on in Copilot CLI; turns off in Codex' }], []]);
   checkBoth(switchPreview(bothProfile, homeItems(bothWays), pluginLive(bothWays)),
     'Switching turns 1 on', 'Switching turns 1 item on and 1 off; 1 is on in Copilot CLI, through its plugin', true);
 });

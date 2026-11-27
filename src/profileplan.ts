@@ -16,10 +16,11 @@
 //   when a switchable Copilot CLI plugin copy covers a name, `pluginPlan` / `pluginUndo` owns it and `plugins.ts setPart` writes it;
 //   otherwise a standing rule rides on `LiveItem.copilotOff` (`switchPlan`, `inUse`, `switchPreview`, `copilotUndo`) and
 //   `profiles.ts runCopilotRules` writes it.
-// - `inUse` holds while a switch changes and holds nothing (never stored); `listedChanges` gives each listed changing row once
-//   with its one direction and cell words (read by the header's short line, `Changes N`, its headings and every row's cell);
-//   `switchPreview` (`PLUGIN_ITEMS_STAY`, `pluginStayNote`) gives `{ line, card, tip? }` (short header line, full menu sentence,
-//   and `(?)` card only when `card` adds a clause), counting apart the items it turns off that still load from a copy Central Knot doesn't
+// - `inUse` holds while a switch changes and holds nothing (never stored); `listedPlugins` is the one rule for which plugin rows
+//   a profile lists and `listedChanges` gives each listed changing row once with its cell words (read by the header's short line,
+//   `Changes N`, its headings and every row's cell); `switchPreview` (`PLUGIN_ITEMS_STAY`, `pluginStayNote`) gives
+//   `{ line, card, tip? }` (short header line, full menu sentence, and `(?)` card only when `card` says more than its plain form),
+//   counting apart the items it turns off that still load from a copy Central Knot doesn't
 //   write (a plugin's among them, while the switch turns that plugin's item nowhere), and how (`keptOn`, `stillLoadWords`,
 //   `loadWords`; a switch's result asks the view after it: `stillLoadAfter`); `undoPlan`, `pluginUndo` and `copilotUndo` revert items still as left, never re-disabling a
 //   Copilot CLI name a server of his uses now (`onAfterUndo`, `copilotHasYours`), and `undoOffered` (`undoInHome`) is the one rule
@@ -139,7 +140,8 @@ export function leftOutWords(counts: Record<ItemKind, number>): { line: string; 
   const counted = andList(KINDS.filter(kind => counts[kind]).map(kind => plural(counts[kind], kindNouns[pageOfPart[kind]].one, kindNouns[pageOfPart[kind]].many)));
   if (!counted) return undefined;
   const one = KINDS.reduce((sum, kind) => sum + counts[kind], 0) === 1;
-  return { line: `${counted} in your tools ${one ? 'isn’t' : 'aren’t'} in Central Knot`, card: `Under Found in the Library, with Add ${one ? 'if it' : 'on each that'} can be taken in.` };
+  return { line: `${counted} in your tools ${one ? 'isn’t' : 'aren’t'} in Central Knot`,
+    card: `${one ? 'It is' : 'They are'} under Found in the Library, with Add ${one ? 'if it' : 'on each that'} can be taken in.` };
 }
 
 // ---------- A plugin's items ----------
@@ -438,10 +440,10 @@ export function pluginRowState(profile: Pick<Profile, 'items' | 'switchesPluginI
   return elsewhere ? `Off · on in ${toolNames[elsewhere.tool]}` : '';
 }
 
-/** What a plugin item's row tooltip says for its live state now (`profilespage.ts`): `on`, `off`, or `off · on in <Tool>`. */
-export function pluginLiveState(profile: Pick<Profile, 'items' | 'switchesPluginItems'>, item: PluginLive): string {
-  const tag = pluginRowState(profile, item);
-  return tag ? `${tag.charAt(0).toLowerCase()}${tag.slice(1)}` : pluginItemOn(item) ? 'on' : 'off';
+/** What a plugin item's row tooltip says for its live state now (`profilespage.ts`): `on`, `off`, or `on in <Tools>` where any copy is on. */
+export function pluginLiveState(item: PluginLive): string {
+  const on = item.copies.filter(copy => copy.on);
+  return !on.length ? 'off' : on.length === item.copies.length ? 'on' : `on in ${andList(on.map(copy => copy.tool).sort(byToolOrder).map(tool => toolNames[tool]))}`;
 }
 
 /** What a library item's row tooltip says for its live state now (`profilespage.ts`). */
@@ -449,20 +451,21 @@ export const itemRowState = (item: Pick<LiveItem, 'on' | 'copilotOff'>): 'on' | 
   (!item.on ? 'off' : item.copilotOff ? 'off in Copilot CLI' : 'on');
 
 /**
- * Why a switch to a profile can't turn what it holds (pluginPlan `held`), in the words the page's header and a menu's refusal
- * share, without a full stop: each plugin off in a tool, with how many of its items that stops ("docs is off in Codex, so 3 of its
- * items can’t be switched from here"), then how many items are held otherwise; '' when nothing is held. `off`: the first plugin
- * off in a tool, for the way to its page.
+ * Why a switch to a profile can't turn what it holds (pluginPlan `held`), in the words the page's header (`short`) and card /
+ * menus (`text`) share, without a full stop: each plugin off in a tool, with how many of its items that stops, then how many
+ * items are held otherwise; '' when nothing is held. `off`: the first plugin off in a tool, for the way to its page.
  */
-export function heldWords(plan: PluginTurn[], items: PluginLive[]): { text: string; off?: { item: PluginLive; copy: PluginCopy } } {
+export function heldWords(plan: PluginTurn[], items: PluginLive[]): { text: string; short: string; off?: { item: PluginLive; copy: PluginCopy } } {
   const off = new Map<string, { item: PluginLive; copy: PluginCopy; ids: Set<string> }>(), other = new Set<string>();
   for (const { id, held } of plan) for (const { tool } of held) {
     const item = items.find(each => each.id === id)!, copy = item.copies.find(each => each.tool === tool)!, key = `${item.plugin}@${item.marketName}\u0000${tool}`;
     if (copy.way !== 'plugin-off') other.add(id); else (off.get(key) ?? off.set(key, { item, copy, ids: new Set() }).get(key)!).ids.add(id);
   }
-  const parts = [...[...off.values()].map(({ item, copy, ids }) => `${item.plugin} is off in ${toolNames[copy.tool]}, so ${ids.size} of its items can’t be switched from here`),
+  const offList = [...off.values()];
+  const parts = [...offList.map(({ item, copy, ids }) => `${item.plugin} is off in ${toolNames[copy.tool]}, so ${ids.size} of its items can’t be switched from here`),
     ...(other.size ? [`${plural(other.size, 'item')} can’t be switched in a tool, as ${other.size === 1 ? 'its row says' : 'their rows say'}`] : [])];
-  return { text: parts.join('; '), off: [...off.values()][0] };
+  const shortParts = [...offList.map(({ item, copy }) => `${item.plugin} is off in ${toolNames[copy.tool]}`), ...(other.size ? [`${plural(other.size, 'item')} can’t be switched`] : [])];
+  return { text: parts.join('; '), short: shortParts.length > 1 ? `${shortParts[0]} and ${shortParts.length - 1} more` : shortParts[0] ?? '', off: offList[0] };
 }
 
 /** Plugin items' copies counted as items, one per item, toward `on`: a copy turned in two tools is one item; one that came on only with its whole plugin (`along`) is none. */
@@ -627,42 +630,46 @@ export function pluginStayNote(plugs: PluginTurn[], plugins: PluginLive[]): stri
   return `Plugin items stay as they are, except the ${names.length === 1 ? `plugin’s “${names[0]}” turns` : `plugins’ ${andList(names.map(name => `“${name}”`))} turn`} on in Copilot CLI (same name as yours).`;
 }
 
-/** One listed row's change on switch: its id, its one direction (`on` before `off`), and its state-cell words. */
-export interface RowChange { id: string; way: 'on' | 'off'; said: string }
+/** The plugins' items a profile lists on the page, in display order: none while `switchesPluginItems` is false. */
+export const listedPlugins = (profile: Pick<Profile, 'switchesPluginItems'>, plugins: PluginLive[]): PluginLive[] =>
+  (profile.switchesPluginItems ? [...plugins].sort((first, second) => first.name.localeCompare(second.name) || first.plugin.localeCompare(second.plugin)) : []);
+
+/** One listed row's change on switch: its id and its state-cell words. */
+export interface RowChange { id: string; said: string }
 
 /**
- * Each listed row a switch changes, once, with its one direction (`on` before `off`; skills coming on with a plugin in Claude
- * Code turn on; plugin rows are included only when `profile.switchesPluginItems` lists them) and its cell words (`said`). The
- * one rule read by `switchPreview`'s short line, `Changes N`, its headings and every row's state cell.
+ * Each listed row a switch changes, once, in `on` then `off` (`on` before `off`; skills coming on with a plugin in Claude Code
+ * turn on; plugin rows follow `listedPlugins`) with its cell words (`said`). The one rule read by `switchPreview`'s short line,
+ * `Changes N`, its headings and every row's state cell.
  */
-export function listedChanges(profile: Pick<Profile, 'items' | 'switchesPluginItems'>, live: LiveItem[], plugins: PluginLive[], turns = switchPlan(profile, live), plugs = pluginPlan(profile, plugins)) {
-  const on: RowChange[] = turns.on.map(item => ({ id: item.id, way: 'on', said: 'Turns on' }));
-  const off: RowChange[] = turns.off.map(item => ({ id: item.id, way: 'off', said: 'Turns off' }));
-  for (const item of profile.switchesPluginItems ? plugins : []) {
+export function listedChanges(profile: Pick<Profile, 'items' | 'switchesPluginItems'>, live: LiveItem[], plugins: PluginLive[],
+  turns = switchPlan(profile, live), plugs = pluginPlan(profile, plugins)) {
+  const on: RowChange[] = turns.on.map(item => ({ id: item.id, said: 'Turns on' }));
+  const off: RowChange[] = turns.off.map(item => ({ id: item.id, said: 'Turns off' }));
+  for (const item of listedPlugins(profile, plugins)) {
     const turn = plugs.find(each => each.id === item.id);
     const up = [...turn?.on ?? [], ...turn?.along ?? []], down = turn?.off ?? [];
     if (!up.length && !down.length) continue;
     const part = (dir: 'on' | 'off', list: HarnessId[]) => `turns ${dir}${list.length < item.copies.length ? ` in ${andList(list.map(tool => toolNames[tool]))}` : ''}`;
     const text = [up.length && part('on', up), down.length && part('off', down)].filter(Boolean).join('; ');
-    const change: RowChange = { id: item.id, way: up.length ? 'on' : 'off', said: `${text.charAt(0).toUpperCase()}${text.slice(1)}` };
-    (change.way === 'on' ? on : off).push(change);
+    (up.length ? on : off).push({ id: item.id, said: `${text.charAt(0).toUpperCase()}${text.slice(1)}` });
   }
   return { on, off, byId: new Map([...on, ...off].map(change => [change.id, change])) };
 }
 
-/** What the Profiles page's header (`line`, with `tip` in its `(?)` only when `card` adds a clause) and both profile menus (`card`) say for `profile`. */
+/** What the Profiles page's header (`line`, with `tip` in its `(?)` only when `card` says more than its plain form) and both profile menus (`card`) say for `profile`. */
 export interface PreviewWords { line: string; card: string; tip?: string }
 
 /**
- * What the Profiles page's header (`line`, with `tip` in its `(?)` when `card` says more) and both profile menus (`card`,
- * unchanged for native menus) say for `profile`, from the same rules (`listedChanges`, `switchPlan`, `pluginPlan`, `inUse`):
- * whether it is in use, empty, what switching turns on and off, or why it is held.
+ * What the Profiles page's header (`line`, with `tip` in its `(?)` when `card` says more than its plain form) and both profile
+ * menus (`card`, unchanged for native menus) say for `profile`, from the same rules (`listedChanges`, `switchPlan`, `pluginPlan`,
+ * `inUse`): whether it is in use, empty, what switching turns on and off, or why it can't switch.
  */
 export function switchPreview(profile: Profile, live: LiveItem[], plugins: PluginLive[]): PreviewWords {
   const turns = switchPlan(profile, live), plugs = pluginPlan(profile, plugins), counted = allTurns(turns, plugs), whole = wholeTurns(profile, plugins);
   const keep = profile.switchesPluginItems ? '' : `. ${pluginStayNote(plugs, plugins)}`;
   const count = namedCount(profile, live, plugins);
-  const pack = (line: string, card: string, hasMore: boolean): PreviewWords => (hasMore ? { line, card, tip: card } : { line, card });
+  const pack = (line: string, card: string, plain = line): PreviewWords => (card !== plain ? { line, card, tip: card } : { line, card });
   if (!changes(turns) && !plugs.length && !whole.length) {
     // In Claude Code a skill left out is on while its plugin is (comesWith): counted apart, not among those off.
     const brought = plugins.filter(item => comesWith(profile, item)), others = live.length + (profile.switchesPluginItems ? plugins.length : 0) - count - brought.length;
@@ -670,20 +677,19 @@ export function switchPreview(profile: Profile, live: LiveItem[], plugins: Plugi
     const more = brought.length ? `, ${brought.length} more on in Claude Code with ${brought.length === 1 ? 'its' : 'their'} plugin${one ? '' : 's'}` : '';
     const rest = !others ? '' : profile.switchesPluginItems ? `, the other ${others} off wherever they can be switched` : `, the other ${others} of yours off`;
     const parts = [`${count} on`, brought.length ? `${brought.length} with ${one ? 'plugin' : 'plugins'}` : '', others ? `${others} off` : ''].filter(Boolean);
-    return pack(`In use · ${parts.join(', ')}`, `In use · ${plural(count, 'item')} on${more}${rest}${keep}`, Boolean(brought.length || others || keep));
+    return pack(`In use · ${parts.join(', ')}`, `In use · ${plural(count, 'item')} on${more}${rest}${keep}`, `In use · ${plural(count, 'item')} on${rest}`);
   }
-  if (!count) return pack('0 items', `0 items${keep}`, Boolean(keep));
+  if (!count) return pack('0 items', `0 items${keep}`);
   const kept = stillLoadWords(turns.off.map(item => keptOn(item, plugs)), plugs.filter(turn => turn.off.length).map(turn => keptOn(plugins.find(item => item.id === turn.id)!, plugs)));
   const wholeCount = wholeCounts({ installs: whole });
   const said = changeWords(counted, wholeCount, 'will', kept);
-  if (!said) return pack('Not in use', `Not in use · ${heldWords(plugs, plugins).text}`, true);
+  if (!said) { const held = heldWords(plugs, plugins); return pack(`Can’t switch · ${held.short}`, `Not in use · ${held.text}`); }
   const listed = listedChanges(profile, live, plugins, turns, plugs);
   const listedParts = [listed.on.length && `${listed.on.length} on`, listed.off.length && `${listed.off.length} off`].filter(Boolean);
   const onlyWhole = [wholeCount.on && `${plural(wholeCount.on, 'plugin')} on`, wholeCount.off && `${plural(wholeCount.off, 'plugin')} off`].filter(Boolean);
   const unlisted = [counted.on.length && `${plural(counted.on.length, 'plugin item')} on`, counted.off.length && `${plural(counted.off.length, 'plugin item')} off`].filter(Boolean);
   const line = `Switching turns ${(listedParts.length ? listedParts : onlyWhole.length ? onlyWhole : unlisted).join(', ')}`;
-  const hasMore = Boolean(kept || keep || wholeCount.on || wholeCount.off || counted.on.length !== listed.on.length || counted.off.length !== listed.off.length);
-  return pack(line, `Switching ${said}${keep}`, hasMore);
+  return pack(line, `Switching ${said}${keep}`, `Switching ${turnsWords(listed, 'will')}`);
 }
 
 /** How many plugins a switch turns on and off whole in Claude Code: before it, those wholeTurns finds (`installs`); after it, its entry's `wholeSteps` (`steps`). */

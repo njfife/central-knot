@@ -12,13 +12,13 @@
 import { acting, deleteProfileDef, machine, profileState, rerender, saveProfileDef, showPage, state, switchToProfile, whyReadOnly } from './app.ts';
 import { kindGlyph, openPlugin, outcomeBand, pluginTag, problemsBand } from './matrix.ts';
 import { button, checkbox, emptyState, findInput, h, icon, infoMark } from './dom.ts';
-import { allTurns, changeWords, claudeInstall, comesWith, copilotKeptOnBy, heldWords, homeItems, inUse, inUseName, itemRowState, keptOn, leftOut, listedChanges, loadWords, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, switchable, switchPlan, switchPreview, takenWhole, wholeCounts, wholeTurns, type LiveItem, type PluginCopy, type PluginLive, type PluginTurn, type Turns } from './profileplan.ts';
+import { allTurns, changeWords, claudeInstall, comesWith, copilotKeptOnBy, heldWords, homeItems, inUse, inUseName, itemRowState, keptOn, leftOut, listedChanges, listedPlugins, loadWords, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, switchable, switchPlan, switchPreview, takenWhole, wholeCounts, wholeTurns, type LiveItem, type PluginCopy, type PluginLive, type PluginTurn } from './profileplan.ts';
 import { noSingleSwitch, pageOfPart } from './pluginstatus.ts';
 import { counted } from './pluginswitch.ts';
 import { andList, toolList, toolNames } from './words.ts';
 import type { ItemKind } from './library.ts';
 import { plural } from './model.ts';
-import type { HarnessId, InstalledPlugin, PluginItem, Profile } from './types.ts';
+import type { InstalledPlugin, PluginItem, Profile } from './types.ts';
 
 let find = '';
 /** Whether the status bar's profile menu is open. */
@@ -110,7 +110,7 @@ const kindMark = (kind: ItemKind) => h('span.kind-mark', { role: 'img', 'aria-la
  * out, under its name, the tools that still load it from a copy Central Knot doesn't write, given what the switch turns of the
  * plugins' items (profileplan.ts keptOn).
  */
-function itemRow(profile: Profile, item: LiveItem, plan: Plan, inChanges = false) {
+function itemRow(profile: Profile, item: LiveItem, plan: Plan, inChanges = false, showKindWord = false) {
   const included = profile.items.includes(item.id), description = descriptionOf(item);
   const said = cellWords(plan.changes.byId.get(item.id)?.said ?? '', inChanges);
   const kept = included ? { tools: [] } : keptOn(item, plan.plugs), many = kept.tools.length > 1;
@@ -120,7 +120,7 @@ function itemRow(profile: Profile, item: LiveItem, plan: Plan, inChanges = false
       tick(profile, { id: `pf-${item.id}`, checked: included, label: `${item.name} (${kindWords[item.kind].one}) in ${profile.name}`, help,
         itemsAfterClick: included ? profile.items.filter(entry => entry !== item.id) : [...profile.items, item.id] }),
       inChanges ? kindMark(item.kind) : null,
-      h('span.pf-name-text', { title: description || item.name }, item.name),
+      h('span.pf-name-text', { title: description || item.name }, item.name, showKindWord ? h('span.tone-muted', {}, ` · ${kindWords[item.kind].one}`) : null),
       kept.tools.length ? h('span.pf-notes', {}, h('span.pf-note', {}, `${toolList(kept.tools)} still ${many ? 'load' : 'loads'} it ${loadWords([kept])}.`)) : null),
     h(`span.pf-state${said ? '.pf-state-moves' : ''}`, { role: 'cell', 'data-state': said }, said));
 }
@@ -154,7 +154,7 @@ function copyNote(profile: Profile, item: PluginLive, copy: PluginCopy): HTMLEle
   if (copy.way === 'unread') return h('span.pf-note', { 'data-tool': copy.tool, title: copy.why }, `Not known in ${tool}: its copy couldn’t be read.`);
   if (copy.way === 'held') return note(`Stays ${copy.on ? 'on' : 'off'} in ${tool}: ${copy.why}`);
   const source = 'install' in copy.target ? copy.target.install.source : undefined;
-  return note(`Off in ${tool}: its plugin is off there. `, button({ variant: 'link', size: 'micro', label: 'Open its plugin', id: `pf-plugin-${item.id}-${copy.tool}`,
+  return note(`Off in ${tool}: its plugin is off there. `, button({ variant: 'link', size: 'micro', label: `Open ${item.plugin}`, id: `pf-plugin-${item.id}-${copy.tool}`,
     attrs: { title: `Open ${item.plugin} on Plugins, where it is turned on or off in each tool` }, onclick: () => openPlugin({ source, plugin: item.plugin, marketplace: item.marketName, tool: copy.tool }) }));
 }
 
@@ -182,7 +182,7 @@ function withBrought(profile: Profile, rows: PluginLive[]): { item: PluginLive; 
 }
 
 /** A plugin's item's row: its box (with live state on hover), its name and plugin (matrix.ts pluginTag), what a switch does to it (`profileplan.ts listedChanges`, or `pluginRowState` while in use), and under its name what comes on with it in Claude Code (wholeNote) and each tool whose copy it can't turn or keeps on by shared name (copyNote); set in beneath the row it comes on with (`beneath`: withBrought). */
-function pluginRow(profile: Profile, item: PluginLive, plan: Plan, beneath = false, inChanges = false) {
+function pluginRow(profile: Profile, item: PluginLive, plan: Plan, beneath = false, inChanges = false, showKindWord = false) {
   const included = profile.items.includes(item.id), change = plan.changes.byId.get(item.id);
   const said = change ? cellWords(change.said, inChanges) : plan.isInUse ? pluginRowState(profile, item) : '';
   const moves = !!change && !!said;
@@ -190,27 +190,27 @@ function pluginRow(profile: Profile, item: PluginLive, plan: Plan, beneath = fal
   const kept = !included ? item.copies.map(copy => (copy.way === 'switch' ? copilotKeptOnBy(profile, item, copy) : undefined)).find(Boolean) : undefined;
   const except = kept ? `, except Copilot CLI (same name as ${kept.by === 'plugin' ? `${kept.plugin}’s` : 'yours'})`
     : comesWith(profile, item) ? ', except Claude Code, where it comes on with its plugin' : '';
-  const help = `${included ? `In ${profile.name}: switching to it turns ${item.name} on` : `Not in ${profile.name}: switching to it turns ${item.name} off`} in each tool that can switch it${except}. Click to ${included ? 'leave it out' : 'put it in'}. ${item.name} is ${pluginLiveState(profile, item)} now.`;
+  const help = `${included ? `In ${profile.name}: switching to it turns ${item.name} on` : `Not in ${profile.name}: switching to it turns ${item.name} off`} in each tool that can switch it${except}. Click to ${included ? 'leave it out' : 'put it in'}. ${item.name} is ${pluginLiveState(item)} now.`;
   return h(`div.pf-row${included ? '.pf-included' : ''}${beneath ? '.pf-beneath' : ''}`, { role: 'row', 'data-item': item.id },
     h('span.pf-name', { role: 'cell' },
       tick(profile, { id: `pf-${item.id}`, checked: included, label: `${item.name} (${kindWords[item.kind].one} from ${item.plugin}) in ${profile.name}`, help,
         itemsAfterClick: included ? profile.items.filter(entry => entry !== item.id) : [...profile.items, item.id] }),
       inChanges ? kindMark(item.kind) : null,
-      h('span.pf-name-text', { title: item.name }, item.name),
+      h('span.pf-name-text', { title: item.name }, item.name, showKindWord ? h('span.tone-muted', {}, ` · ${kindWords[item.kind].one}`) : null),
       pluginTag(item.plugin, `From the plugin ${item.plugin}, in the marketplace ${item.marketName}`),
       notes.length ? h('span.pf-notes', {}, notes) : null),
     h(`span.pf-state${moves ? '.pf-state-moves' : ''}`, { role: 'cell', 'data-state': said }, said));
 }
 
 /**
- * What a switch to the open profile would do, as the page shows it: to the library items (switchPlan), to the plugins' items
- * (pluginPlan), each listed changing row once (`changes`: listedChanges), the plugins it turns whole in Claude Code (`whole`:
- * wholeTurns), all of it in words (`said`: changeWords, '' when it changes nothing), and whether it is in use (inUse).
+ * What a switch to the open profile would do, as the page shows it: the plugins' items (`plugs`: pluginPlan), each listed
+ * changing row once (`changes`: listedChanges), the plugins it turns whole in Claude Code (`whole`: wholeTurns), all of it in
+ * words (`said`: changeWords, '' when it changes nothing), and whether it is in use (inUse).
  */
-interface Plan { turns: Turns; plugs: PluginTurn[]; changes: ReturnType<typeof listedChanges>; whole: InstalledPlugin[]; said: string; isInUse: boolean }
-const planOf = (profile: Profile, all: LiveItem[], plugged: PluginLive[], visiblePlugins: PluginLive[]): Plan => {
+interface Plan { plugs: PluginTurn[]; changes: ReturnType<typeof listedChanges>; whole: InstalledPlugin[]; said: string; isInUse: boolean }
+const planOf = (profile: Profile, all: LiveItem[], plugged: PluginLive[]): Plan => {
   const turns = switchPlan(profile, all), plugs = pluginPlan(profile, plugged), whole = wholeTurns(profile, plugged);
-  return { turns, plugs, changes: listedChanges(profile, all, visiblePlugins, turns, plugs), whole,
+  return { plugs, changes: listedChanges(profile, all, plugged, turns, plugs), whole,
     said: changeWords(allTurns(turns, plugs), wholeCounts({ installs: whole }), 'will'), isInUse: inUse([profile], all, plugged).length > 0 };
 };
 
@@ -228,19 +228,21 @@ function tableSection(profile: Profile, kind: ItemKind, list: LiveItem[], plugge
 
 /** The items under their kinds, or under Turns on / Turns off while Changes is open, each with what a switch does to it. */
 function table(profile: Profile, list: LiveItem[], plugged: PluginLive[], plan: Plan, pinned?: { on: string[]; off: string[] }) {
+  const byId = new Map<string, LiveItem | PluginLive>([...list, ...plugged].map(item => [item.id, item]));
+  const visible = pinned ? [...pinned.on, ...pinned.off].flatMap(id => (byId.has(id) ? [byId.get(id)!] : [])) : [...list, ...plugged];
+  const hasState = !plan.isInUse && visible.some(item => !!cellWords(plan.changes.byId.get(item.id)?.said ?? '', !!pinned));
   const head = h('div.pf-row.pf-head', { role: 'row' },
     h('span.pf-name', { role: 'columnheader', 'data-info-block': true }, 'In profile', infoMark('profile-save-info', 'Saving ticks', SAVE_NOTE_CARD)),
-    h('span.pf-state', { role: 'columnheader' }, plan.isInUse ? '' : 'Switching'));
+    h('span.pf-state', { role: 'columnheader' }, hasState ? 'Switching' : ''));
   if (!pinned) {
     return h('div.pf-table', { role: 'table', 'aria-label': `What ${profile.name} has on` }, head,
       (['skill', 'mcp', 'agent'] as const).flatMap(kind => tableSection(profile, kind, list.filter(item => item.kind === kind), plugged.filter(item => item.kind === kind), plan) ?? []));
   }
-  const rowById = new Map<string, () => HTMLElement>([
-    ...list.map((item): [string, () => HTMLElement] => [item.id, () => itemRow(profile, item, plan, true)]),
-    ...plugged.map((item): [string, () => HTMLElement] => [item.id, () => pluginRow(profile, item, plan, false, true)]),
-  ]);
+  const dupNames = new Set(visible.map(item => item.name).filter((name, at, names) => names.indexOf(name) !== at));
+  const render = (item: LiveItem | PluginLive, dup = dupNames.has(item.name)) =>
+    ('copies' in item ? pluginRow(profile, item, plan, false, true, dup) : itemRow(profile, item, plan, true, dup));
   const group = (label: string, ids: string[]) => {
-    const rows = ids.flatMap(id => (rowById.has(id) ? [rowById.get(id)!()] : []));
+    const rows = ids.flatMap(id => (byId.has(id) ? [render(byId.get(id)!)] : []));
     if (!rows.length) return [];
     const heading = h('div.pf-section', { role: 'row' },
       h('span.pf-section-label', { role: 'cell' }, h('strong', {}, label), h('span.pf-section-count', {}, String(rows.length))));
@@ -280,7 +282,7 @@ function claudeBand(profile: Profile, plugged: PluginLive[], turns: InstalledPlu
 function leftOutBand() {
   const said = leftOutWords(leftOut(state.home!));
   return said ? h('div.band.band-help', { role: 'note', id: 'profile-left-out', 'data-info-block': true },
-    icon('info', 14, 'tone-muted'), h('span.band-text', {}, said.line), infoMark('profile-left-out-info', 'Items not listed here', said.card)) : null;
+    h('span.band-text', {}, said.line), infoMark('profile-left-out-info', 'Items not listed here', said.card)) : null;
 }
 
 const matches = (text: string) => !find || text.toLowerCase().includes(find.toLowerCase());
@@ -349,7 +351,7 @@ function deleteActions(profile: Profile) {
 function switchButton(profile: Profile, plan: Plan, all: LiveItem[], plugged: PluginLive[]): HTMLElement | null {
   if (profileState.renaming === profile.id) return null;
   const off = plan.said ? undefined : heldWords(plan.plugs, plugged).off;
-  if (off) return button({ variant: 'outline', size: 'small', label: 'Open its plugin', id: 'profile-open-plugin', attrs: { title: `Open ${off.item.plugin} on Plugins, where it is turned on or off in each tool` },
+  if (off) return button({ variant: 'outline', size: 'small', label: `Open ${off.item.plugin}`, id: 'profile-open-plugin', attrs: { title: `Open ${off.item.plugin} on Plugins, where it is turned on or off in each tool` },
     onclick: () => openPlugin({ source: 'install' in off.copy.target ? off.copy.target.install.source : undefined, plugin: off.item.plugin, marketplace: off.item.marketName, tool: off.copy.tool }) });
   if (!plan.said || !switchable(profile, all, plugged)) return null;
   const label = profile.name.length > 18 ? 'Switch to this profile' : `Switch to ${profile.name}`;
@@ -370,9 +372,7 @@ const SAVE_NOTE_CARD = 'Ticks save to the profile at once. Nothing in your tools
 
 /** The open profile: its header (short line with `(?)` when the card adds a clause, Rename, Delete), setup step when empty, Find with `Changes N`, and the items. */
 function profileDetail(profile: Profile) {
-  const all = items(), plugged = plugins();
-  const visiblePlugins = profile.switchesPluginItems ? [...plugged].sort((first, second) => first.name.localeCompare(second.name) || first.plugin.localeCompare(second.plugin)) : [];
-  const plan = planOf(profile, all, plugged, visiblePlugins);
+  const all = items(), plugged = plugins(), visiblePlugins = listedPlugins(profile, plugged), plan = planOf(profile, all, plugged);
   if (profileState.changes && (profileState.changes.profileId !== profile.id || profileState.changes.home !== state.home!.home)) profileState.changes = undefined;
   const primary = switchButton(profile, plan, all, plugged), shown = all.filter(item => matches(`${item.name} ${descriptionOf(item)}`));
   const pluggedShown = visiblePlugins.filter(item => matches(`${item.name} ${item.plugin}`));
