@@ -480,10 +480,12 @@ async function backFlow() {
   await a.click(byId('nav-harnesses'));
   await a.click(byId('harness-claude-cli'));
   await a.click(byId('harness-tab-plugins'));
-  const pluginsNote = (await a.text('#harness-body .tools-note'))?.trim() ?? '';
-  check('Claude Code’s Plugins tab says opening a plugin turns it on or off, not uninstalls it',
-    pluginsNote === 'Installed in Claude Code from your marketplaces. Open one to turn it on or off here, or to install it in another tool.' && !/uninstall/i.test(pluginsNote), pluginsNote);
+  for (let tries = 0; tries < 50 && !(await a.exists(byId('harness-plugin-back-market-issue-tracker'))); tries++) await wait(100);
+  const tabBeforeOpen = [await a.exists('#harness-body .tools-note'), (await a.text(byId('harness-plugin-back-market-issue-tracker')))?.trim() ?? ''];
   await a.click(byId('harness-plugin-back-market-issue-tracker'));
+  for (let tries = 0; tries < 50 && !(await a.exists('.crumb-here')); tries++) await wait(100);
+  same('Its page replaces Open on Claude Code’s Plugins tab with the standing note gone and opens the plugin’s page',
+    [...tabBeforeOpen, ...(await exactPlugin())], [false, 'Its page', 'back-market', 'issue-tracker']);
   await thumb();
   check('one Back from the plugin returns to the tool’s Plugins tab', await a.exists(byId('harness-tab-plugins') + '[aria-selected=true]'));
   await thumb();
@@ -3630,6 +3632,36 @@ async function practiceFlow() {
   for (let tries = 0; tries < 50 && !(await a.exists('#harness-plugin-ck-test-market-issue-tracker')); tries++) await wait(100);
   same('Claude Code’s Plugins tab shows the version Claude Code has, not the marketplace catalog’s',
     (await a.text('.harness-plugin:has(#harness-plugin-ck-test-market-issue-tracker) strong'))?.trim() ?? '', 'issue-tracker 1.9.0');
+  const tabSwitch = '#harness-plugin-switch-ck-test-market-issue-tracker';
+  same('Claude Code’s Plugins tab drops the standing note, moves the marketplace and description to row hover, shows Its page, and gives each row its tool switch',
+    await a.run(`(() => {
+      const row = document.querySelector('.harness-plugin:has(#harness-plugin-ck-test-market-issue-tracker)');
+      const sw = document.querySelector(${JSON.stringify(tabSwitch)});
+      const standing = [...document.querySelectorAll('#harness-body .tools-note')].some(note => !note.id && !note.getAttribute('role'));
+      return [standing, !!row?.querySelector('.harness-plugin-note'), row?.title ?? '',
+        document.querySelector('#harness-plugin-ck-test-market-issue-tracker')?.textContent?.trim() ?? '',
+        sw?.getAttribute('role') ?? null, sw?.getAttribute('aria-checked') ?? null, sw?.getAttribute('aria-label') ?? null, sw?.disabled ?? null];
+    })()`),
+    [false, false, 'ck-test-market · Look up and triage issues through an MCP server.', 'Its page', 'switch', 'true', 'issue-tracker in Claude Code', false]);
+  // A plugin whose box is disabled (here, a copy from the Anthropic Directory) has a disabled switch described by the box's reason.
+  const dirRecord = join(practice, '.claude/plugins/installed_plugins.json'), dirBefore = readFileSync(dirRecord, 'utf8');
+  const sparkDir = join(practice, '.claude/plugins/cache/anthropic-plugin-directory/spark/1.0.0');
+  mkdirSync(join(sparkDir, 'skills/spark'), { recursive: true });
+  writeFileSync(join(sparkDir, 'skills/spark/SKILL.md'), '---\nname: spark\ndescription: Spark.\n---\n\nSpark.\n');
+  const dirJson = JSON.parse(dirBefore);
+  dirJson.plugins['spark@anthropic-plugin-directory'] = [{ scope: 'user', installPath: sparkDir, version: '1.0.0', directoryRepositoryKey: 'github.com/github/copilot-plugins#plugins/spark' }];
+  writeFileSync(dirRecord, JSON.stringify(dirJson, null, 2));
+  await a.click('#header-refresh');
+  const sparkSwitch = '#harness-plugin-switch-ck-test-market-spark';
+  for (let tries = 0; tries < 50 && !(await a.exists(sparkSwitch)); tries++) await wait(100);
+  const dirReason = 'Claude Code has its copy from the Anthropic Directory: update or uninstall it in Claude Code (/plugin).';
+  same('a plugin whose box is disabled shows its short box line on the row and a disabled switch described and hovered by the box’s reason',
+    await a.run(`(() => { const row = document.querySelector('.harness-plugin:has(${sparkSwitch})'); const sw = row?.querySelector(${JSON.stringify(sparkSwitch)}); return [row?.querySelector('.harness-plugin-state')?.textContent?.trim() ?? '', sw?.disabled ?? null, sw?.getAttribute('aria-checked') ?? null, sw?.getAttribute('aria-label') ?? null, sw?.getAttribute('aria-description') ?? null, sw?.title ?? null]; })()`),
+    ['Can’t be taken out here', true, 'true', 'spark in Claude Code', dirReason, dirReason]);
+  writeFileSync(dirRecord, dirBefore);
+  rmSync(join(practice, '.claude/plugins/cache/anthropic-plugin-directory'), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && await a.exists(sparkSwitch); tries++) await wait(100);
   await a.click('#harness-plugin-ck-test-market-issue-tracker');
   for (let tries = 0; tries < 30 && !(await a.exists('#pfile-0-skills-triage')); tries++) await wait(100);
   check('the plugin page says which version Claude Code has', /Installed · 1\.9\.0\s*Marketplace has 2\.0\.0/.test(await a.text('.plugin-panel')), await a.text('.plugin-panel'));
@@ -3779,9 +3811,106 @@ async function practiceFlow() {
   for (let tries = 0; tries < 60 && !(await a.exists(lineUndo)); tries++) await wait(100);
   check('the opened row’s button turns the plugin off through turn, with its result and Undo on Claude Code’s line', wholeOff() && await cellState(a, 'skills', 'triage', 'claude-cli') === 'plugin-off'
     && /^Turned off issue-tracker in Claude Code\./.test(await lineResult()), [pluginSettingsNow(), await lineResult()]);
+  // The same off copy reads off with "Off, kept installed" on Claude Code's Plugins tab.
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-plugins');
+  for (let tries = 0; tries < 50 && !(await a.exists(tabSwitch)); tries++) await wait(100);
+  same('a copy turned off from an opened Library row reads off and “Off, kept installed” on Claude Code’s Plugins tab',
+    await a.run(`(() => { const row = document.querySelector('.harness-plugin:has(${tabSwitch})'); return [row?.querySelector('${tabSwitch}')?.getAttribute('aria-checked') ?? null, row?.querySelector('.harness-plugin-state')?.textContent?.trim() ?? '']; })()`),
+    ['false', 'Off, kept installed']);
+  await openKind(a, 'skills');
+  if (!(await a.exists(lineUndo))) await a.click(`#${rowPart('open', 'skills', 'triage')}`);
   await a.click(lineUndo);
   for (let tries = 0; tries < 60 && (wholeOff() || !/^Undone: issue-tracker/.test(await lineResult())); tries++) await wait(100);
   check('its line Undo turns the plugin back on there', !wholeOff() && /^Undone: issue-tracker back on in Claude Code\./.test(await lineResult()), [pluginSettingsNow(), await lineResult()]);
+  // Turn the plugin off in place on Claude Code's Plugins tab: one disable command, record keeps Claude Code out, row reads Off, kept installed, header shows result with Undo on the same tab; Undo restores both.
+  const tabCalls = join(scratch, 'tab-claude-calls.txt'), pluginsJson = join(practice, '.central-knot/plugins.json');
+  writeFileSync(claudeStub, `#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.309 (Claude Code)" && exit 0\necho "$*" >> '${tabCalls}'\ncase "$*" in\n  "plugin disable issue-tracker@ck-test-market --scope user") printf '{"enabledPlugins":{"issue-tracker@ck-test-market":false}}' > "$HOME/.claude/settings.json" ;;\n  "plugin enable issue-tracker@ck-test-market --scope user") printf '%s' '${settingsAt}' > "$HOME/.claude/settings.json" ;;\n  *) exit 9 ;;\nesac\n`);
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-plugins');
+  for (let tries = 0; tries < 50 && (await a.run(`document.querySelector(${JSON.stringify(tabSwitch)})?.getAttribute('aria-checked')`)) !== 'true'; tries++) await wait(100);
+  const pluginsRecBefore = readNow(pluginsJson);
+  writeFileSync(tabCalls, '');
+  await a.click(tabSwitch);
+  for (let tries = 0; tries < 60 && ((await a.run(`document.querySelector(${JSON.stringify(tabSwitch)})?.getAttribute('aria-checked')`)) !== 'false' || !(await a.exists('#plugins-undo')) || (await a.run(`document.body.dataset.busy`)) === 'true'); tries++) await wait(100);
+  const tabEntryAfterOff = jsonOrNothing(pluginsJson)?.plugins?.find(e => e.plugin === 'issue-tracker');
+  same('turning a plugin off on Claude Code’s Plugins tab runs one disable command, updates the record, reads Off, kept installed, shows the header result with Undo, and stays on the tab',
+    [readNow(tabCalls).trim(), !!tabEntryAfterOff?.except?.includes('claude-cli'),
+      await a.run(`document.querySelector('.harness-plugin:has(${tabSwitch}) .harness-plugin-state')?.textContent?.trim() ?? ''`),
+      (await a.text('#plugins-result .toolbar-result-text'))?.trim() ?? '', (await a.text('#plugins-undo'))?.trim() ?? '',
+      await a.exists('#harness-tab-plugins[aria-selected="true"]'), (await a.text('.title-harness'))?.trim() ?? ''],
+    ['plugin disable issue-tracker@ck-test-market --scope user', true, 'Off, kept installed', 'issue-tracker: turned off in Claude Code.', 'Undo', true, 'Claude Code']);
+  // The Claude Code tab's result and Undo stay off Plugin marketplaces (where document-tools's earlier failure still stands) and Codex's Plugins tab, and reappear on return.
+  await a.click('#nav-plugins');
+  const offOnPlugins = [(await a.text('#plugins-result .toolbar-result-text'))?.includes('issue-tracker') ?? false, await a.exists('#plugins-undo'), await a.exists('#header .plugin-problems')];
+  await a.click('#nav-harnesses');
+  await a.click('#harness-codex-cli');
+  await a.click('#harness-tab-plugins');
+  const offOnCodex = [await a.exists('#plugins-result'), await a.exists('#plugins-undo'), await a.exists('#header .plugin-problems')];
+  await a.click('#harness-switch-claude-cli');
+  const backOnClaude = [await a.exists('#plugins-result'), await a.exists('#plugins-undo')];
+  same('Claude Code Plugins tab result and Undo stay off Plugin marketplaces and Codex’s Plugins tab, and reappear on return',
+    [offOnPlugins, offOnCodex, backOnClaude], [[false, false, true], [false, false, false], [true, true]]);
+  writeFileSync(tabCalls, '');
+  await a.run(`document.querySelector('#plugins-undo')?.focus()`);
+  for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r' } : {}) });
+  for (let tries = 0; tries < 60 && ((await a.run(`document.querySelector(${JSON.stringify(tabSwitch)})?.getAttribute('aria-checked')`)) !== 'true' || (await a.exists('#plugins-undo')) || (await a.run(`document.body.dataset.busy`)) === 'true'); tries++) await wait(100);
+  const focusAfterUndo = await a.run(`document.activeElement?.id ?? ''`);
+  same('keyboard Undo on Claude Code’s Plugins tab turns the plugin back on, restores the record and focus to its switch, shows the reload line, and stays on the tab',
+    [readNow(tabCalls).trim(), await a.run(`document.querySelector(${JSON.stringify(tabSwitch)})?.getAttribute('aria-checked')`),
+      await a.exists(`.harness-plugin:has(${tabSwitch}) .harness-plugin-state`), readNow(pluginsJson) === pluginsRecBefore,
+      (await a.text('#plugins-result .toolbar-result-text'))?.trim() ?? '', await a.exists('#header .result-reloads'),
+      await a.exists('#harness-tab-plugins[aria-selected="true"]'), focusAfterUndo],
+    ['plugin enable issue-tracker@ck-test-market --scope user', 'true', false, true, 'Undone: issue-tracker back on in Claude Code.', true, true, 'harness-plugin-switch-ck-test-market-issue-tracker']);
+  // A problem made on Plugin marketplaces stays off Codex's Plugins tab and reappears on Plugin marketplaces.
+  await a.click('#nav-plugins');
+  if (!(await a.exists('#marketplace-source'))) await a.click('#open-add-marketplace');
+  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(join(scratch, 'no-such-market'))}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#add-marketplace');
+  for (let tries = 0; tries < 50 && !(await a.exists('#header .plugin-problems')); tries++) await wait(100);
+  const problemOnPlugins = await a.exists('#header .plugin-problems');
+  await a.click('#nav-harnesses');
+  await a.click('#harness-codex-cli');
+  await a.click('#harness-tab-plugins');
+  const problemOnCodex = await a.exists('#header .plugin-problems');
+  await a.click('#nav-plugins');
+  const problemBack = await a.exists('#header .plugin-problems');
+  same('a problem made on Plugin marketplaces stays off Codex’s Plugins tab and reappears on Plugin marketplaces',
+    [problemOnPlugins, problemOnCodex, problemBack], [true, false, true]);
+  if (await a.exists('#report-dismiss')) await a.click('#report-dismiss');
+  if (await a.exists('#close-add-marketplace')) await a.click('#close-add-marketplace');
+  if (await a.exists('#plugin-back')) await a.click('#plugin-back');
+  // Turning another plugin on from Plugin marketplaces with a tool failure keeps its problem line and Undo across a click on Claude Code's Plugins tab.
+  const starterSwitch = '#pswitch-0-starter-skills';
+  for (let tries = 0; tries < 50 && !(await a.exists(starterSwitch)); tries++) await wait(100);
+  await a.click(starterSwitch);
+  for (let tries = 0; tries < 80 && (!(await a.exists('#plugins-undo')) || !(await a.exists('#header .plugin-problems')) || (await a.run(`document.body.dataset.busy`)) === 'true'); tries++) await wait(100);
+  const pluginsRunBefore = [await a.exists('#plugins-undo'), await a.exists('#header .plugin-problems')];
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-plugins');
+  for (let tries = 0; tries < 50 && !(await a.exists(tabSwitch)); tries++) await wait(100);
+  await a.click(tabSwitch);
+  for (let tries = 0; tries < 60 && ((await a.run(`document.querySelector(${JSON.stringify(tabSwitch)})?.getAttribute('aria-checked')`)) !== 'false' || !(await a.exists('#plugins-undo')) || (await a.run(`document.body.dataset.busy`)) === 'true'); tries++) await wait(100);
+  await a.click('#nav-plugins');
+  const pluginsRunAfter = [await a.exists('#plugins-undo'), await a.exists('#header .plugin-problems'), (await a.text('#plugins-result .toolbar-result-text'))?.includes('starter-skills') ?? false];
+  await a.click('#plugins-undo');
+  for (let tries = 0; tries < 80 && ((await a.exists('#plugins-undo')) || (await a.run(`document.body.dataset.busy`)) === 'true'); tries++) await wait(100);
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-plugins');
+  for (let tries = 0; tries < 50 && !(await a.exists(tabSwitch)); tries++) await wait(100);
+  const claudeUndoKept = await a.exists('#plugins-undo');
+  same('a click on Claude Code’s Plugins tab keeps Plugin marketplaces’ result, Undo and problem line for another plugin, and vice versa',
+    [pluginsRunBefore, pluginsRunAfter, claudeUndoKept], [[true, true], [true, true, true], true]);
+  if (await a.exists('#plugins-undo')) {
+    await a.click('#plugins-undo');
+    for (let tries = 0; tries < 60 && ((await a.run(`document.querySelector(${JSON.stringify(tabSwitch)})?.getAttribute('aria-checked')`)) !== 'true' || (await a.run(`document.body.dataset.busy`)) === 'true'); tries++) await wait(100);
+  }
+  rmSync(tabCalls, { force: true });
+  await openKind(a, 'skills');
   writeFileSync(claudeStub, stubBefore);
   // Codex has the plugin too, and a switch for one skill of it: the row's switch takes Pi's copy out, turns Codex's skill off
   // and the whole plugin off in Claude Code (a stand-in for its command) in one click, and its one Undo puts all three back.

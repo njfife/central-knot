@@ -306,8 +306,11 @@ export function undoTitle(back: PluginOp[], { plugin, updated = false }: { plugi
  */
 export const notUndone = (ops: PluginOp[], done: PluginDone[]): PluginOp[] => ops.filter(op => !done.some(entry => succeeded(entry.report) && opKey(entry) === opKey(op)));
 
+/** Where a plugin run or problem belongs: Plugins (`'plugins'`), or one tool's Plugins tab under Harnesses. */
+export type RunPlace = 'plugins' | HarnessId;
+
 /** The Plugins page's last run (a click, a plugin's switch or an Undo): each tool's report, whether it was an Undo, in which home, and for an Undo the reversals that didn't succeed. */
-export interface LastRun { done: PluginDone[]; undo: boolean; home: string; rest?: PluginOp[]; /** Read again since (Refresh): what the tools have now may differ from what this run says it did. */ reread?: boolean;
+export interface LastRun { done: PluginDone[]; undo: boolean; home: string; /** Where the run was made (default `'plugins'`). */ place?: RunPlace; rest?: PluginOp[]; /** Read again since (Refresh): what the tools have now may differ from what this run says it did. */ reread?: boolean;
   /** The plugins a run that stopped never reached (pluginstate.ts applyPluginOps). */
   unreached?: { source: string; plugin: string }[];
   /** Appended profileLeftUse sentence when the run ended every profile in use (pluginstate.ts, pluginspage.ts). */

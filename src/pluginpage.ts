@@ -17,7 +17,7 @@ import { addsText, componentsFrom, outcomes, sessionHooksAbout, whenItRuns } fro
 import { clickNote, componentsOf, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, toolBox, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { pluginKey } from './pluginplan.ts';
-import { DIRECTORY, boxOf, cantSwitchSkill, comparableText, copyOff, itemsIn, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, notInWhy, offeredVersion, otherVersionsLine, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionDiffers, versionToCompare, waitingWords, waitsToMove, whyNotCarried, yourSaid, type ToolMark } from './pluginstatus.ts';
+import { DIRECTORY, MARK_WORDS, boxOf, cantSwitchSkill, comparableText, copyOff, itemsIn, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, notInWhy, offeredVersion, otherVersionsLine, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionDiffers, versionToCompare, waitingWords, waitsToMove, whyNotCarried, yourSaid, type ToolMark } from './pluginstatus.ts';
 import { hasCowork, pluginTools, takesPlugins } from './presence.ts';
 import { applyPluginOps, loadPlugins, market, openLink, shownDetail, toggleOpened, usePlugins } from './pluginstate.ts';
 import { pluginLink } from './sourcelink.ts';
@@ -65,12 +65,6 @@ function installedLine(version: string | undefined, offered: string | undefined,
   const other = marketplaceVersionNote(version, offered);
   return other ? [line, versionNote(other)] : line;
 }
-
-/** Each mark's short words on a tool's line (the whole sentence is its tooltip: pluginstatus.ts toolMark). */
-const MARK_WORDS: Record<ToolMark, string> = {
-  installed: 'Installed', outdated: 'Installed', items: 'Its items', 'kept-off': 'Off, kept installed', stays: 'Still installed', waits: 'Goes in at the next check', 'not-brought': 'Not brought here: off in a tool’s own settings',
-  missing: 'Not in it, though on', 'parts-waiting': 'Waits to be moved', cannot: 'Not available', absent: 'Not installed', unknown: 'Can’t be read now', 'not-known': 'Unknown',
-};
 
 /**
  * Your tools: the plugin's switch at the heading, Update at its right where a copy or its items are behind, and a line per

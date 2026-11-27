@@ -2156,11 +2156,11 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .harness-tab-count { font-size: 12px; font-weight: 500; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
 .harness-page .harness-tab-body { flex: 1; min-height: 0; }
 .harness-plugins { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
-.harness-plugin { display: flex; align-items: center; gap: 12px; padding: 8px 12px 8px 16px; border-bottom: 1px solid var(--line); min-height: 52px; }
+.harness-plugin { display: flex; align-items: center; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--line); min-height: 52px; }
 .harness-plugin:last-child { border-bottom: 0; }
 .harness-plugin-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .harness-plugin-version { font-weight: 400; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
-.harness-plugin-note { font-size: 12px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.harness-plugin-state { font-size: 12px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Its two groups sit side by side from about 860px of pane, each growing to 640px and then staying beside the other; the card
    is as wide as its groups, so no empty frame runs on past them. */
 .harness-about { padding: 16px; display: flex; flex-wrap: wrap; gap: 16px 48px; width: fit-content; max-width: 100%; }
