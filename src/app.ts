@@ -15,6 +15,7 @@
 import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { forgetSourcePrompts, loadSources } from './sourcespage.ts';
 import { forgetHistoryFolds } from './historypage.ts';
+import { forgetManageQuestion } from './managecard.ts';
 import { loadSettings, openHistoryWindow, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
@@ -449,6 +450,7 @@ function accept(view: HomeView): HomeView {
   resetPageData(state.instructions);
   resetPageData(state.history);
   forgetHistoryFolds();
+  forgetManageQuestion();
   if (state.page === 'history') openHistoryWindow();
   resetPageData(state.usage);
   resetPageData(state.sessions);
@@ -1215,7 +1217,7 @@ export function showPage(page: Page, { repair = false } = {}) {
   const leavingHarness = page === 'harnesses' && !state.busy && !!state.harness;
   // A new page drops the last page’s result (plugin runs stay tied to their own place: pluginstate.ts pluginsResultPlace).
   if (page !== state.page || leavingHarness) leaveResults(page);
-  if (page !== state.page) { state.libraryView = 'list'; state.visit += 1; forgetRepoPrompts(); forgetSourcePrompts(); forgetHistoryFolds(); }
+  if (page !== state.page) { state.libraryView = 'list'; state.visit += 1; forgetRepoPrompts(); forgetSourcePrompts(); forgetHistoryFolds(); forgetManageQuestion(); }
   if (leavingHarness) state.harness = undefined;
   // Settings opens fresh (what its rows said last visit belongs to that visit); every other page reads its own data.
   state.page = page;

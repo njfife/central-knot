@@ -1,7 +1,7 @@
 // A tool's Manage switch (Harnesses and History): the one place the tools Central Knot manages in a home change (chooseTools),
 // main's pre-check for a click that would change nothing (manageRefused), and what turning one on would do there (whatJoiningDoes),
-// which its card and History's rejoin question say before the click. The choice is kept as the tools
-// left out (share.ts SyncRecord leftOut) and read by presence.ts managedTools. What a tool that leaves or comes back means for
+// which the question before that click says (managecard.ts askManage, on its card and on History alike). The choice is kept as
+// the tools left out (share.ts SyncRecord leftOut) and read by presence.ts managedTools. What a tool that leaves or comes back means for
 // each item is the model's (library.ts, "A HARNESS THAT LEAVES" and "A HARNESS MANAGED AGAIN"); main.ts runs the switch in its
 // queue and reads the home again after it, which is the pass that brings a tool turned on into line. The card, its switch and
 // shared click are managecard.ts's; the switch's History entry and its in-row button are historypage.ts's.
@@ -64,11 +64,16 @@ const managingEntry = (context: ShareContext, tool: HarnessId, on: boolean): His
 
 /**
  * What turning `tool`'s Manage switch on would do there now, every kind's counts added up (librarypass.ts joinCounts: the
- * look and plans the pass then makes, with the tool added to `managed`). `rule`: the home's Synchronize everything is on.
+ * look and plans the pass then makes, with the tool added to `managed`), and the kinds it can't tell (`unread`). A look only:
+ * nothing is written. `rule`: the home's Synchronize everything is on. Read when its question is asked, and again by the
+ * click that answers it, which turns nothing where the two differ (main.ts `tools:joining`, `tools:manage`; sameJoin).
  */
 export async function whatJoiningDoes(context: ShareContext, managed: readonly HarnessId[], tool: HarnessId, rule: boolean): Promise<JoinCounts> {
   const tools = harnessIds.filter(other => other === tool || managed.includes(other));
   const each = [await joinCounts(skillKind, context, tools, tool, rule), await joinCounts(serverKind, context, tools, tool, rule), await joinCounts(agentKind, context, tools, tool, rule)];
-  return { written: sum(each, 'written'), kept: sum(each, 'kept'), removed: sum(each, 'removed'), found: sum(each, 'found'), takenIn: sum(each, 'takenIn') };
+  return { written: sum(each, 'written'), kept: sum(each, 'kept'), removed: sum(each, 'removed'), found: sum(each, 'found'), takenIn: sum(each, 'takenIn'),
+    changing: each.flatMap(counts => counts.changing), unread: each.flatMap(counts => counts.unread) };
 }
-const sum = (each: JoinCounts[], field: keyof JoinCounts) => each.reduce((total, counts) => total + counts[field], 0);
+const sum = (each: JoinCounts[], field: 'written' | 'kept' | 'removed' | 'found' | 'takenIn') => each.reduce((total, counts) => total + counts[field], 0);
+/** Whether what a question showed (`shown`, as the page sent it back) is what whatJoiningDoes counts now. */
+export const sameJoin = (now: JoinCounts, shown: unknown) => JSON.stringify(now) === JSON.stringify(shown);

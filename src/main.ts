@@ -20,11 +20,11 @@ import { envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { appCandidates, executableCandidates, macPlaces, searchPath, TRAY_ASKS, trayWithin } from './platform.ts';
 import { intoFolder, lookForBuilds, quitBuild, removeBuild, runsOutside, type BuildsContext } from './otherbuilds.ts';
 import {
-  errorCode, forgetStale, keepUnreadable, leftOutNow, managedNow, readRecord, remember, syncGate, takeOverSync, withoutFolderAnswers,
+  errorCode, forgetStale, keepUnreadable, leftOutNow, managedNow, plainError, readRecord, remember, syncGate, takeOverSync, withoutFolderAnswers,
   writeAccess, writeDurably, type ShareContext,
 } from './share.ts';
 import { everythingEntryAction, setSyncEverything } from './everything.ts';
-import { chooseTools, manageRefused, whatJoiningDoes } from './toolchoice.ts';
+import { chooseTools, manageRefused, sameJoin, whatJoiningDoes } from './toolchoice.ts';
 import { pruneHistory, readHistory } from './history.ts';
 import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skillFoundFile, skillPluginFile, skillVersion, skillVersionFile, skillsView, takeOver } from './skills.ts';
 import { agentTools, mcpTools, noteTools, pluginTools, presentTools, takesPlugins } from './presence.ts';
@@ -64,7 +64,7 @@ import { atMostEvery, defaultHistoryDays, historyDayChoices, holdingBuild, holds
 import { keepEntries, linuxPlaces, placeAutostart, readAutostart, signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, BuildOutcome, OtherBuild, PartRef, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, LogFolderOpened, LogTail, Snapshot, SyncNotice } from './types.ts';
 import { machineNames, writesRealHome } from './machine.ts';
-import { HOOK_SOURCE_UNREADABLE, pageNames, toolList } from './words.ts';
+import { HOOK_SOURCE_UNREADABLE, pageNames, toolList, toolName } from './words.ts';
 import { buildTag, startUpdater, type PendingUpdate } from './updater.ts';
 import { lineApp, releaseLine } from './updates.ts';
 import { autoUpdates, CHECK_EVERY_MS, PLUGIN_UPDATES_DEFAULT, type UpdatesRecord } from './pluginupdates.ts';
@@ -745,7 +745,7 @@ async function syncAndView(explicit = false, runPass = true): Promise<{ view: Ho
     mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), readId, profiles, ...(tookOver ? { tookOver } : {}), ...(settingsUnread ? { settingsUnread } : {}),
     // Apps that run the tools or read their files are looked for only on this computer, like the tools' own apps.
     ...(current!.mode === 'actual' ? { otherApps: await findOtherApps(current!.home) } : {}),
-    sync: { managed, present, joining: await joiningCounts(shared, managed, present, syncEverything === true), writes: await skillFolders(shared, managed), access: await writeAccess(shared), gate: await syncGate(shared),
+    sync: { managed, present, writes: await skillFolders(shared, managed), access: await writeAccess(shared), gate: await syncGate(shared),
       caughtUp, syncEverything, arrived: seenIn(toolsSeen()[current!.home])?.arrived ?? [] },
     skills: await skillsView(shared, managed, notices),
     mcp: await serversView(shared, managed, pendingServerNotices.splice(0)),
@@ -777,10 +777,10 @@ async function syncAndView(explicit = false, runPass = true): Promise<{ view: Ho
   return { view: made, passes };
 }
 
-/** For each installed tool left out, what turning its Manage switch on would do there now (toolchoice.ts whatJoiningDoes): its card says it. */
-async function joiningCounts(shared: ShareContext, managed: HarnessId[], present: HarnessId[], rule: boolean) {
-  const out = present.filter(tool => !managed.includes(tool));
-  return Object.fromEntries(await Promise.all(out.map(async tool => [tool, await whatJoiningDoes(shared, managed, tool, rule)] as const)));
+/** What turning `tool`'s Manage switch on would do there now (toolchoice.ts whatJoiningDoes): a look at the home as it is, no pass. */
+async function joiningNow(tool: HarnessId) {
+  const shared = context(), rule = (await readRecord(current!.home)).record?.syncEverything === true;
+  return whatJoiningDoes(shared, await managedNow(shared, await read()), tool, rule);
 }
 
 /**
@@ -1804,10 +1804,13 @@ app.whenReady().then(async () => {
   // turned on into line, and what it did there (`did`) is what the page's band says, so it is no arrival (arrivals.ts byHand). A
   // tool turned on is new to the plugins record (marketplaces.ts toolManaged), and gets each On plugin not kept out of it at a
   // check made now.
-  handle('tools:manage', async (tool, on, resume, home) => {
+  handle('tools:manage', async (tool, on, resume, home, expected) => {
     if (home !== current?.home || !isTool(tool) || typeof on !== 'boolean') return { stopped: elsewhere, full: true as const, view: null, did: [] };
     const refused = await manageRefused(context(), await read(), tool, on);
     if (refused) return { stopped: refused, full: true as const, view: (await syncAndView(false, false)).view, did: [] };
+    // What its question said it would do there, counted again here: where that changed, nothing is turned and it asks again.
+    const now = on ? await joiningNow(tool) : undefined;
+    if (now && !sameJoin(now, expected)) return { changed: now, view: null, did: [] };
     const chosen = await chooseTools(context(), tool, on, resume === true);
     if (!chosen.stopped) {
       log(`sync: ${tool} ${on ? 'managed' : 'left out'} in ${home}`);
@@ -1818,6 +1821,13 @@ app.whenReady().then(async () => {
     }
     const { view, passes } = await syncAndView(false, !chosen.stopped);
     return { ...chosen, view, did: chosen.stopped ? [] : passes.flatMap(pass => pass.done ?? []).filter(result => result.harness === tool) };
+  });
+  // The question before a tool left out is turned on (managecard.ts askManage): what that would do there, read in the queue
+  // between passes and never by one (a Refresh's pass could write in the managed tools), or why the click would be refused now.
+  handle('tools:joining', async (tool, home) => {
+    if (home !== current?.home || !isTool(tool)) return { failed: elsewhere };
+    const refused = await manageRefused(context(), await read(), tool, true);
+    return refused ? { failed: refused } : joiningNow(tool).then(counts => ({ counts }), error => ({ failed: `${toolName(tool)} couldn’t be read: ${plainError(error)}` }));
   });
   // The Overview's line that a tool came under management, closed for good in that home (arrivals.ts), in the queue, so no pass
   // between its read and its save of the tools seen puts it back.

@@ -69,27 +69,29 @@ async function box({ opencode = false } = {}) {
 type Box = Awaited<ReturnType<typeof box>>;
 
 /**
- * What a pass did in one tool, counted as the card's line counts it (types.ts JoinCounts): writes, removals and writes that wait
- * from its results; copies kept from that tool from the versions it added; items taken in from the items it made live; and the
- * found items there from the pages' own rows (a copy of its own, or one it has another way) after it.
+ * What a pass did in one tool, counted as the question before the click counts it (types.ts JoinCounts): writes, removals and
+ * writes that wait from its results; copies kept from that tool from the versions it added; the items those are about, by name;
+ * items taken in from the items it made live; and the found items there from the pages' own rows (a copy of its own, or one it
+ * has another way) after it.
  */
 async function didIn(b: Box, tool: HarnessId, done: { skills?: PassResult; servers?: PassResult; agents?: PassResult }, before: Items): Promise<JoinCounts> {
   const after = await b.items(), managed = await b.managed();
   const results = [done.skills, done.servers, done.agents].flatMap(result => result?.results ?? []).filter(result => result.harness === tool);
   const kept = Object.entries(after).flatMap(([kind, list]) => Object.values(list).flatMap(item => item.versions
-    .filter(version => version.from.harness === tool && version.from.how === 'was-in' && !before[kind]?.[item.key]?.versions.some(old => old.hash === version.hash))));
+    .filter(version => version.from.harness === tool && version.from.how === 'was-in' && !before[kind]?.[item.key]?.versions.some(old => old.hash === version.hash)).map(() => item.name)));
+  const changed = results.filter(result => result.outcome === 'written' || result.outcome === 'removed').map(result => result.item);
   const live = (list: Record<string, LibraryItem> | undefined, key: string) => !!list?.[key] && !list[key].deleted;
   const takenIn = Object.entries(after).flatMap(([kind, list]) => Object.keys(list).filter(key => live(list, key) && !live(before[kind], key)));
   const views = [await skillsView(b.context, managed), await serversView(b.context, managed), await agentsView(b.context, managed)];
   const found = views.flatMap(view => view.items.filter(fact => !live(view.library, fact.key) && (fact.copies[tool] || fact.anotherWay?.[tool])));
   return { written: results.filter(result => result.outcome === 'written').length, kept: kept.length, removed: results.filter(result => result.outcome === 'removed').length,
-    found: found.length, takenIn: takenIn.length };
+    found: found.length, takenIn: takenIn.length, changing: [...new Set([...changed, ...kept])].sort(), unread: [] };
 }
-const counts = (some: Partial<JoinCounts>): JoinCounts => ({ written: 0, kept: 0, removed: 0, found: 0, takenIn: 0, ...some });
+const counts = (some: Partial<JoinCounts>): JoinCounts => ({ written: 0, kept: 0, removed: 0, found: 0, takenIn: 0, changing: [], unread: [], ...some });
 
-/** A tool turned on, with what its card said before the click, and what the pass then did there. */
+/** A tool turned on, with what its question said before the click (the items it names in any order), and what the pass then did there. */
 async function turnOnTool(b: Box, tool: HarnessId = 'codex-cli', rule = false) {
-  const said = await whatJoiningDoes(b.context, await b.managed(), tool, rule);
+  const asked = await whatJoiningDoes(b.context, await b.managed(), tool, rule), said = { ...asked, changing: [...asked.changing].sort() };
   const before = await b.items();
   assert.deepEqual(await chooseTools(b.context, tool, true), {});
   const did = await didIn(b, tool, await b.pass(), before);
@@ -108,7 +110,7 @@ test('Off then On with nothing changed writes no file, in the tools or in the re
     assert.deepEqual([await b.toolFiles(), await b.items()], [files, items], 'turned off');
     const { said, did } = await turnCodexOn(b);
     assert.deepEqual([await b.toolFiles(), await b.items()], [files, items], 'turned on again');
-    assert.deepEqual([said, did], [counts({}), counts({})], 'its card said nothing would change, and nothing did');
+    assert.deepEqual([said, did], [counts({}), counts({})], 'its question said nothing would change, and nothing did');
     const added = (await b.history()).slice(told);
     assert.deepEqual(added.map(event => [event.kind, event.key, event.item, event.managing]), [
       ['managing', 'tool:codex-cli', 'Codex', { tool: 'codex-cli', on: false }], ['managing', 'tool:codex-cli', 'Codex', { tool: 'codex-cli', on: true }]]);
@@ -130,7 +132,7 @@ test('As the first act in a home with no record, turning a tool off makes the re
   } finally { await b.cleanup(); }
 });
 
-test('A tool never managed before, with differing copies of items that are On: each copy is kept as a version, then written over, as its card said', async () => {
+test('A tool never managed before, with differing copies of items that are On: each copy is kept as a version, then written over, as its question said', async () => {
   const b = await box();
   try {
     await chooseTools(b.context, 'codex-cli', false);
@@ -141,7 +143,7 @@ test('A tool never managed before, with differing copies of items that are On: e
     await b.turnOn();
     const codexBefore = { skill: await b.read(CODEX.skill), agent: await b.read(CODEX.agent) };
     const { said, did } = await turnCodexOn(b);
-    assert.deepEqual([said, did], [counts({ written: 3, kept: 3 }), counts({ written: 3, kept: 3 })]);
+    assert.deepEqual([said, did], [counts({ written: 3, kept: 3, changing: ['docs', 'notes', 'reviewer'] }), counts({ written: 3, kept: 3, changing: ['docs', 'notes', 'reviewer'] })]);
     assert.equal(await b.read(CODEX.skill), skillText());
     assert.match((await b.read(CODEX.config))!, /"--port", "7"/);
     // Every content that was in Codex is a version now, from Codex, and History says each copy that was written over.
@@ -164,7 +166,7 @@ test('Off, a hand edit in the tool, On: the edit is kept as a version (History c
     await b.pass();
     assert.equal(await b.read('.claude/skills/notes/SKILL.md'), skillText(), 'an edit in a tool left out does not spread');
     const { said, did } = await turnCodexOn(b);
-    assert.deepEqual([said, did], [counts({ written: 1, kept: 1 }), counts({ written: 1, kept: 1 })]);
+    assert.deepEqual([said, did], [counts({ written: 1, kept: 1, changing: ['notes'] }), counts({ written: 1, kept: 1, changing: ['notes'] })], 'one item, named: its copy saved, then written over');
     assert.equal(await b.read(CODEX.skill), skillText());
     const kept = (await b.history()).find(event => event.kind === 'kept-edit' && event.cause === 'tool-back');
     assert.deepEqual(kept?.losers.map(loser => loser.tool), ['codex-cli'], 'History says the copy that gave way');
@@ -216,7 +218,7 @@ test('Off, the item turned Off meanwhile, On: its copy in the tool goes then, an
     assert.deepEqual([statusLine({ ...row, hashes }, off.library.notes, tools, false, ['codex-cli']), say.placeTag({ ...row, hashes }, off.library.notes, tools, ['codex-cli'])?.text, say.said.off('notes', [], tools, ['codex-cli'])],
       ['Off · in no tool Central Knot manages. On puts it in every tool.', 'in no tool Central Knot manages', 'notes is off: no tool Central Knot manages has it. Central Knot keeps it, and turning it on puts each folder back as it was.']);
     const { said, did } = await turnCodexOn(b);
-    assert.deepEqual([said, did], [counts({ removed: 1 }), counts({ removed: 1 })]);
+    assert.deepEqual([said, did], [counts({ removed: 1, changing: ['notes'] }), counts({ removed: 1, changing: ['notes'] })]);
     assert.equal(await b.read(CODEX.skill), undefined);
     const item = (await b.items()).skills.notes;
     assert.ok(item.versions.some(version => version.hash === view.library.notes.hash), 'the content removed is the current version');
@@ -232,7 +234,7 @@ test('Off, the copy deleted by hand in the tool, On: it is written again, and no
     await rm(join(b.home, '.codex/skills/notes'), { recursive: true });
     await b.pass();
     const { said, did } = await turnCodexOn(b);
-    assert.deepEqual([said, did], [counts({ written: 1 }), counts({ written: 1 })]);
+    assert.deepEqual([said, did], [counts({ written: 1, changing: ['notes'] }), counts({ written: 1, changing: ['notes'] })]);
     assert.equal(await b.read(CODEX.skill), skillText());
     assert.equal((await b.items()).skills.notes.on, true);
   } finally { await b.cleanup(); }
@@ -245,7 +247,7 @@ test('An item deleted from Central Knot while a tool was left out: its copy ther
     await chooseTools(b.context, 'codex-cli', false);
     await applySkills(b.context, await b.managed(), [{ key: 'notes', on: true, except: [], deleted: true }]);
     const { said, did } = await turnCodexOn(b);
-    assert.deepEqual([said, did], [counts({ removed: 1 }), counts({ removed: 1 })]);
+    assert.deepEqual([said, did], [counts({ removed: 1, changing: ['notes'] }), counts({ removed: 1, changing: ['notes'] })]);
   } finally { await b.cleanup(); }
 });
 
@@ -276,7 +278,7 @@ test('OpenCode turned on while Claude Code is left out: a skill in Claude Code�
     await mkdir(join(b.home, '.claude/skills/later'), { recursive: true });
     await writeFile(join(b.home, '.claude/skills/later/SKILL.md'), '---\nname: later\ndescription: Later.\n---\n\nLater.\n');
     const { said, did } = await turnOnTool(b, 'opencode-cli', true);
-    assert.deepEqual([said, did], [counts({ written: 1, takenIn: 2 }), counts({ written: 1, takenIn: 2 })], 'docs written there; notes and later taken in');
+    assert.deepEqual([said, did], [counts({ written: 1, takenIn: 2, changing: ['docs'] }), counts({ written: 1, takenIn: 2, changing: ['docs'] })], 'docs written there; notes and later taken in');
   } finally { await b.cleanup(); }
 });
 
@@ -294,6 +296,21 @@ test('A tool turned on counts a skill only it has as found, and with Synchronize
     await b.pass();
     assert.equal((await b.items()).skills.later?.on, true, 'taken in by the rule');
     assert.equal(await b.read('.claude/skills/later/SKILL.md'), '---\nname: later\ndescription: Later.\n---\n\nLater.\n');
+  } finally { await b.cleanup(); }
+});
+
+test('A kind that can’t be read, in the tool turned on or in Central Knot’s own record of it, is not known: never counted as no change', async () => {
+  const b = await box();
+  try {
+    await b.turnOn();
+    await b.pass();
+    await chooseTools(b.context, 'codex-cli', false);
+    const said = () => whatJoiningDoes(b.context, ['claude-cli', 'copilot-cli'], 'codex-cli', false);
+    assert.deepEqual((await said()).unread, [], 'every kind read');
+    await writeFile(join(b.home, CODEX.config), '[mcp_servers.docs\ncommand = "docs-server"\n');
+    assert.deepEqual((await said()).unread, ['mcp'], 'Codex’s settings file, which holds its MCP servers, isn’t TOML');
+    await writeFile(join(b.home, '.central-knot/agents.json'), '{ not json');
+    assert.deepEqual((await said()).unread, ['mcp', 'agent'], 'and Central Knot’s record of agents is damaged');
   } finally { await b.cleanup(); }
 });
 
