@@ -780,7 +780,9 @@ export type InstallState = { state: 'installed'; path: string; live?: boolean;
   /** Why none of its skills can be switched here, whatever the skill: the tool's config is written in a form Central Knot doesn't edit. */
   switchesHeld?: string;
   /** The tool's own switch has the whole plugin turned off there (a mark: the plugin is still installed). */
-  off?: true } | { state: 'not-installed' } | { state: 'not-known'; reason: string }
+  off?: true;
+  /** The tool keeps settings of its own for it, which its uninstall deletes and an install doesn't bring back (plugins.ts ownSettings). */
+  ownSettings?: true } | { state: 'not-installed' } | { state: 'not-known'; reason: string }
   /** The tool has a different marketplace under the same name: Central Knot neither reads nor changes its plugins. */
   | { state: 'held'; reason: string };
 
@@ -823,7 +825,6 @@ export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: 
   /** Worked out as the home is read, never stored: off there and kept so by the plugins record (pluginstatus.ts keptOff). */ keptOff?: true;
   /** Its skills that tool has turned off one by one (Copilot CLI's and Codex's switch). */ skillsOff?: string[];
   /** Its MCP servers and agents that tool has turned off one by one (partswitch.ts). */ serversOff?: string[]; agentsOff?: string[];
-  /** Its copy declares options for the person to set (PluginContents options), which Claude Code keeps in its settings and its uninstall deletes. */ options?: true;
   /** Why none of its skills can be switched here (Codex's skill rules in a form not edited), if so. */ switchesHeld?: string;
   /** Skills held off by a switch that isn't this plugin's own, each with why it can't be turned on here. */ skillsHeld?: Record<string, string>;
   /** MCP servers whose switch can't be written here, each with why. */ serversHeld?: Record<string, string>;
@@ -983,8 +984,6 @@ export interface PluginContents {
   bin: boolean;
   /** Its version: its plugin.json's, else its marketplace entry's, as Claude Code reads them. */
   version?: string;
-  /** Its manifest declares options for the person to set (`userConfig`, as hookrun.ts claudePluginOptions reads it). */
-  options?: true;
 }
 /** A plugin's contents and README, read when its page opens; for a plugin kept elsewhere, from its own repository. */
 export interface PluginDetail extends PluginContents {

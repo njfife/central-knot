@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DIRECTORY, FROM_DIRECTORY, WAITS_TO_MOVE, pluginsInstalled, blocked, cantSwitchSkill, cantUninstall, comparableText, copiesToCompare, copyStale, foundIn, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, boxOf, itemsOnWords, switchPartial, switchWords, toolMark, toolNow, unavailable, uninstallAsk, updateTools } from '../src/pluginstatus.ts';
+import { DIRECTORY, FROM_DIRECTORY, WAITS_TO_MOVE, pluginsInstalled, blocked, cantSwitchSkill, cantUninstall, comparableText, copiesToCompare, copyStale, foundIn, installsIn, limitNote, offeredVersion, pluginPlace, otherVersions, otherVersionsLine, boxOf, itemsOnWords, switchPartial, switchWords, toolMark, toolNow, unavailable, uninstallAsk, uninstallFacts, updateTools } from '../src/pluginstatus.ts';
 import { clickRuns, owedTo } from '../src/pluginrecord.ts';
 import { readInTurn, readInto, type Read } from '../src/reads.ts';
 import type { HarnessId, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
@@ -290,17 +290,28 @@ test('installsIn carries each tool’s own recorded version rather than the mark
   );
 });
 
-test('Uninstall…’s question names only what that tool loses for good, then whether the marketplace can give this copy back', () => {
-  const ask = (tool: HarnessId, copy: Parameters<typeof uninstallAsk>[2] = {}, offer: Parameters<typeof uninstallAsk>[3] = {}) => uninstallAsk('issue-tracker', tool, copy, offer);
+test('Uninstall…’s question compares the tool’s copy with the marketplace’s as just read: comparing until it lands, then the same, different, or not known', () => {
+  const copyIn = (text: string) => ({ skills: [{ name: 'a', description: '', path: 'skills/a', text }], commands: [], agents: [], instructions: [], version: '2.0.0' });
+  const read = (codex: string, offered = true) => ({ ...copyIn('A'), offered, installed: { 'codex-cli': copyIn(codex) } }) as unknown as PluginDetail;
+  const at: MarketplaceView = { ...entry, states: { p: { 'codex-cli': { state: 'installed', path: '/c', version: '2.0.0' }, 'claude-cli': { state: 'installed', path: '/m/p', live: true } } } };
+  const copy = (detail: PluginDetail | null | undefined, tool: HarnessId = 'codex-cli') => uninstallFacts(at, { name: 'p', description: '', version: '2.0.0', folder: '/m/p' }, tool, detail).copy;
+  assert.deepEqual([copy(undefined), copy(read('A')), copy(read('A edited by hand')), copy(null), copy(read('A', false)), copy(undefined, 'claude-cli')],
+    ['comparing', 'same', 'differs', 'unknown', 'unknown', 'same']);
+});
+
+test('Uninstall…’s question: first what can come back, then what is deleted, in every case', () => {
+  const none: Parameters<typeof uninstallAsk>[2] = { cannot: undefined, version: undefined, offered: undefined, copy: 'same', ownSettings: false };
+  const ask = (tool: HarnessId, facts: Partial<typeof none> = {}) => uninstallAsk('issue-tracker', tool, { ...none, ...facts });
   const cases: [string, string][] = [
-    [ask('claude-cli', { options: true }), 'Uninstall issue-tracker from Claude Code? Its saved options there are deleted for good.'],
+    [ask('claude-cli', { copy: 'comparing' }), 'Comparing Claude Code’s copy…'],
     [ask('claude-cli'), 'Uninstall issue-tracker from Claude Code? Nothing else is lost.'],
-    [ask('copilot-cli', { serversOff: ['issues'] }), 'Uninstall issue-tracker from Copilot CLI? Nothing else is lost.'],
-    [ask('codex-cli', { serversOff: ['issues'], options: true }), 'Uninstall issue-tracker from Codex? Its servers’ switches there are reset for good.'],
-    [ask('codex-cli', { serversOff: [] }), 'Uninstall issue-tracker from Codex? Nothing else is lost.'],
-    [ask('claude-cli', { version: '1.9.0' }, { version: '2.0.0' }), 'Uninstall issue-tracker from Claude Code? Nothing else is lost. The marketplace now offers 2.0.0; 1.9.0 can’t be installed again from here.'],
-    [ask('claude-cli', { version: 'v2.0.0' }, { version: '2.0.0', stale: true }), 'Uninstall issue-tracker from Claude Code? Nothing else is lost. Its copy differs from the marketplace’s and can’t be installed again from here.'],
-    [ask('codex-cli', { version: '1.9.0' }, { version: '2.0.0', gone: true }), 'Uninstall issue-tracker from Codex? Nothing else is lost. It is no longer offered, so it can’t be installed again from here.'],
+    [ask('claude-cli', { ownSettings: true }), 'Uninstall issue-tracker from Claude Code? Its saved options there are deleted for good.'],
+    [ask('codex-cli', { ownSettings: true }), 'Uninstall issue-tracker from Codex? Its servers’ settings there are deleted for good.'],
+    [ask('copilot-cli', { copy: 'unknown' }), 'Uninstall issue-tracker from Copilot CLI? Its copy couldn’t be compared with the marketplace’s: if it was changed there, the change is lost. Nothing else is lost.'],
+    [ask('claude-cli', { version: '1.1.0', offered: '1.2.0', copy: 'unknown' }), 'Uninstall issue-tracker from Claude Code? Undo installs the marketplace’s 1.2.0; 1.1.0 can’t be installed again from here. Nothing else is lost.'],
+    [ask('codex-cli', { version: 'v2.0.0', offered: '2.0.0', copy: 'differs', ownSettings: true }), 'Uninstall issue-tracker from Codex? Undo installs the marketplace’s copy; this one differs and can’t be installed again from here. Its servers’ settings there are deleted for good.'],
+    [ask('claude-cli', { cannot: 'gone', version: '1.9.0', offered: '2.0.0' }), 'Uninstall issue-tracker from Claude Code? It is no longer offered, so it can’t be installed again from here. Nothing else is lost.'],
+    [ask('claude-cli', { cannot: 'unread', ownSettings: true }), 'Uninstall issue-tracker from Claude Code? Its marketplace can’t be read now, so it can’t be installed again from here. Its saved options there are deleted for good.'],
   ];
   for (const [said, wanted] of cases) assert.equal(said, wanted);
 });

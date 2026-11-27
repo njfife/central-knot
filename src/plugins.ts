@@ -473,20 +473,29 @@ const jsonFile = (context: PluginContext, path: string) => once(context, `json:$
   catch (error) { return { value: undefined, unread: errorCode(error) !== 'ENOENT' }; }
 });
 const recordJson = async (context: PluginContext, path: string) => (await jsonFile(context, path)).value;
-type CodexTables = Record<'marketplaces' | 'plugins', Record<string, Record<string, TomlValue>>> & { skills: CodexSkillSwitch[]; skillsInline: boolean; /** config.toml is there and couldn't be read. */ unread: boolean };
+type CodexTables = Record<'marketplaces' | 'plugins', Record<string, Record<string, TomlValue>>> & { skills: CodexSkillSwitch[]; skillsInline: boolean; /** config.toml is there and couldn't be read. */ unread: boolean;
+  /** The plugins with tables under their own (`[plugins."ID".mcp_servers.NAME]`, its `.env`). */ nested: Set<string> };
 /** Codex's `[marketplaces.NAME]` and `[plugins."ID"]` tables from its config.toml, by name, and its skill switches. Empty when it can't be read. */
 const codexTables = (context: PluginContext, root: string) => once(context, `codex:${root}`, async (): Promise<CodexTables> => {
-  const found: CodexTables = { marketplaces: Object.create(null), plugins: Object.create(null), skills: [], skillsInline: false, unread: false };
+  const found: CodexTables = { marketplaces: Object.create(null), plugins: Object.create(null), skills: [], skillsInline: false, unread: false, nested: new Set() };
   try {
     const tables = readTomlTables(await readFile(join(root, 'config.toml'), 'utf8'));
     for (const table of tables) {
       const [kind, name, ...deeper] = table.path;
       if ((kind === 'marketplaces' || kind === 'plugins') && name && !deeper.length && !table.array) found[kind][name] = Object.fromEntries(table.entries.map(entry => [entry.key, entry.value]));
+      if (kind === 'plugins' && name && deeper.length) found.nested.add(name);
     }
     ({ switches: found.skills, inline: found.skillsInline } = codexSkillSwitches(tables));
   } catch (error) { found.unread = errorCode(error) !== 'ENOENT'; /* missing, or not TOML this reader can follow: nothing registered */ }
   return found;
 });
+
+/**
+ * InstallState `ownSettings`: settings a tool keeps of its own for an installed plugin, which its uninstall deletes and an install
+ * doesn't bring back (measured on Claude Code 2.1.332 and Codex 0.169.1): Claude Code's saved options, Codex's plugin table.
+ * Copilot CLI's switches for a plugin outlive its uninstall.
+ */
+const ownSettings = (kept: boolean) => (kept ? { ownSettings: true as const } : {});
 
 /**
  * The marketplaces a tool already has, as added there: no setup needed to browse them. Claude Code records the ones its
@@ -580,11 +589,14 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
       if (!path) return { state: 'not-installed' };
       // A plugin kept in a local folder marketplace is loaded from that folder at each start, whatever its record says
       // (Claude Code 2.1.321 records a cache copy and its version then, but reads the folder): the catalog's version counts.
-      const lists = [await recordJson(context, join(root, 'plugins/known_marketplaces.json')), record((await recordJson(context, join(root, 'settings.json')))?.extraKnownMarketplaces)];
+      const settings = await recordJson(context, join(root, 'settings.json'));
+      const lists = [await recordJson(context, join(root, 'plugins/known_marketplaces.json')), record(settings?.extraKnownMarketplaces)];
       const source = lists.map(list => record(record(list?.[marketplace])?.source)).find(Boolean);
       const live = source?.source === 'directory' && text(source.path) ? await folderItem(context, text(source.path), plugin) : undefined;
-      if (live?.folder && (await hasFiles(live.folder))) return { state: 'installed', path: live.folder, live: true, ...(live.version ? { version: live.version } : {}) };
-      return (await hasFiles(path)) ? { state: 'installed', path, version: await copyVersion(user?.version, path) } : { state: 'not-known', reason: 'Claude Code lists it, but its files are not where it records them.' };
+      // Options saved for it (as hookrun.ts claudePluginOptions reads them), declared by this copy or an earlier one.
+      const own = ownSettings(Object.keys(record(record(record(settings?.pluginConfigs)?.[id])?.options) ?? {}).length > 0);
+      if (live?.folder && (await hasFiles(live.folder))) return { state: 'installed', path: live.folder, live: true, ...(live.version ? { version: live.version } : {}), ...own };
+      return (await hasFiles(path)) ? { state: 'installed', path, version: await copyVersion(user?.version, path), ...own } : { state: 'not-known', reason: 'Claude Code lists it, but its files are not where it records them.' };
     }
     case 'copilot-cli': {
       const settingsOf = () => recordJson(context, join(root, 'settings.json'));
@@ -619,7 +631,9 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
         // Codex names each copy's folder for its version; "local" (no version) and a commit prefix (its curated plugins)
         // name none, so the copy's manifest gives it (see copyVersion).
         const copy = await installedCopy(folder, entry, { live: false, version: await copyVersion(version === 'local' ? undefined : version, folder, true), readAs: { codex: await codexManifest(folder) } }, skills => codexSkillsOff(tables.skills, plugin, folder, skills));
-        return tables.skillsInline ? { ...copy, switchesHeld: INLINE_SKILLS_CONFIG } : copy;
+        // Its table holding more than the switch an install writes (`enabled`), or tables under it: a server's switch or own settings.
+        const own = ownSettings(Object.keys(tables.plugins[id]!).some(key => key !== 'enabled') || tables.nested.has(id));
+        return { ...copy, ...own, ...(tables.skillsInline ? { switchesHeld: INLINE_SKILLS_CONFIG } : {}) };
       }
       return { state: 'not-known', reason: 'Codex lists it, but its files are not in its plugin cache.' };
     }

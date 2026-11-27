@@ -40,6 +40,8 @@ export interface PluginOp {
   forItems?: true;
   /** On a `remove` op: undoing a fresh install of Copilot CLI's live copy turns it off, kept installed, rather than uninstalling it (plugins.ts install, marketplaces.ts undoTurn). */
   keptOff?: true;
+  /** On an `install` that undoes an uninstall: the uninstall deleted settings the tool kept for it (InstallState ownSettings), which stay deleted. */
+  deleted?: true;
   /** For items-back: each item as it was before the switch (pluginlibrary.ts ItemState). */
   items?: ItemState[];
 }
@@ -200,7 +202,9 @@ export function resultLines(ran: PluginDone[], undo = false, { after = false } =
         [tools('plugin-off', false), 'already off in'], [tools('plugin-on', false), 'already on in'], ...itemGroups];
     // An item's switch only ever reaches the few tools that have one, so its tools are always named.
     const said = (counted: boolean) => groups.filter(([list]) => list.length).map(([list, verb, after = '']) => `${verb} ${counted && !item && list.length > 2 ? `${list.length} tools` : andList(list)}${after}`).join('; ');
-    if (said(false)) lines.push({ source, plugin, ...named, ok: true, text: said(false), short: said(true) });
+    // An uninstall's Undo brings back the copy, never what the uninstall deleted with it (PluginOp `deleted`).
+    const notBack = undo && mine.some(entry => entry.deleted && entry.report.changed) ? '. What the uninstall deleted was not brought back' : '';
+    if (said(false)) lines.push({ source, plugin, ...named, ok: true, text: `${said(false)}${notBack}`, short: `${said(true)}${notBack}` });
     for (const entry of mine.filter(candidate => !succeeded(candidate.report))) {
       const text = item ? `${names[entry.tool]}, ${item}: ${entry.report.message}` : toolSaid(entry.tool, entry.report.message);
       lines.push({ source, plugin, ...named, ok: false, text, short: text });
@@ -287,9 +291,15 @@ const UNDO_CLAUSES: [(op: PluginOp) => boolean, string, string?][] = [
   [op => isItemSwitch(op.action) || isWhole(op.action), 'turns each switch back as it was in'],
 ];
 
-/** Undo's tooltip, from what it will run (`back`): what it reverses where, and that an update in the same run stays. */
+/**
+ * Undo's tooltip, from what it will run (`back`): what it reverses where, and that an update in the same run stays; for an
+ * uninstall's (its installs: marketplaces.ts turn), that it installs the marketplace's copy, and what stays deleted.
+ */
 export function undoTitle(back: PluginOp[], { plugin, updated = false }: { plugin?: string; updated?: boolean } = {}): string {
   const where = (match: (op: PluginOp) => boolean) => andList([...new Set(back.filter(match).map(op => op.tool))].sort(byToolOrder).map(tool => names[tool]));
+  const installs = where(op => op.action === 'install'), off = back.some(op => op.action === 'plugin-off') ? ', off as it was' : '';
+  const stays = back.some(op => op.deleted) ? ' What the uninstall deleted stays deleted.' : '';
+  if (plugin && installs) return `Installs ${plugin} again in ${installs}, from the marketplace${off}.${stays}`;
   const does = UNDO_CLAUSES.flatMap(([match, verb, after = '']) => {
     const list = where(match);
     return list ? [`${verb} ${list}${after}`] : [];

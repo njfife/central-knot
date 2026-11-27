@@ -8745,33 +8745,41 @@ esac
   await a.click('#plugins-undo');
   await done();
   same('its Undo turns the same copy on again, ticked, nothing lost', [calls().at(-1), await boxIs('claude-cli'), kept()], ['plugin enable issue-tracker@ck-test-market --scope user', ['true', false, 'installed'], untickBefore]);
-  // Uninstall… on Claude Code's Plugins tab, its copy declaring options: Escape runs nothing; confirmed, Claude Code's own uninstall
-  // keeps its data folder (--keep-data) and the record keeps Claude Code out (the last tool that had it: the plugin Off, its except as
-  // it was); the row goes and the focus is on the result's Undo; Undo installs it again, the focus on the row's switch.
+  // Uninstall… on Claude Code's Plugins tab, opened straight there: an option saved for the plugin (its copy declares none) and its
+  // copy's skill edited by hand at the same version. The question compares the copy as it opens and names both losses; Escape runs
+  // nothing; confirmed, Claude Code's own uninstall keeps its data folder (--keep-data) and the record keeps Claude Code out (the
+  // last tool that had it: the plugin Off, its except as it was); the row goes and the focus is on the result's Undo, which says
+  // what it brings back; Undo installs it again, the focus on the row's switch.
   check('Uninstall… is under Claude Code’s box on the plugin’s page, apart from its state line', await a.exists('.plugin-tool[data-tool="claude-cli"] #puninstall-0-issue-tracker-claude-cli')
     && !(await a.exists('.plugin-tool-state #puninstall-0-issue-tracker-claude-cli')), await a.text('.plugin-tool[data-tool="claude-cli"]'));
-  mkdirSync(join(copy, '.claude-plugin'), { recursive: true });
-  writeFileSync(join(copy, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'issue-tracker', version: '2.0.0', userConfig: { endpoint: { type: 'string', description: 'Where issues are.' } } }));
+  writeFileSync(settingsPath, JSON.stringify({ ...jsonOrNothing(settingsPath), pluginConfigs: { [id]: { options: { endpoint: 'https://issues.example.test' } } } }));
+  writeFileSync(join(copy, 'skills/triage/SKILL.md'), `${readFileSync(join(copy, 'skills/triage/SKILL.md'), 'utf8')}\nEdited here.\n`);
   const uninstallFrom = 'harness-plugin-uninstall-ck-test-market-issue-tracker', tabSwitch = 'harness-plugin-switch-ck-test-market-issue-tracker', dataBefore = treeOf(join(home, '.claude/plugins/data'));
+  /** The question, once its comparison of the copy has landed (it says "Comparing Claude Code’s copy…" until then). */
+  const asked = async () => { for (let tries = 0; tries < 100 && /^Comparing/.test(await a.text('.uninstall-ask .band-text') ?? 'Comparing'); tries++) await wait(100); return a.text('.uninstall-ask .band-text'); };
+  // The plugin's page closed first, so nothing has read its copy since the edit: the question's own comparison does.
+  await a.click('#plugin-back');
   await a.click('#nav-harnesses'); await a.click('#harness-claude-cli'); await a.click('#harness-tab-plugins');
-  // The home read again, so the copy's options are known (types.ts InstalledPlugin options).
+  // The home read again, so the saved option is known (types.ts InstallState ownSettings).
   await a.click('#header-refresh'); await done();
   await a.click(`#${uninstallFrom}`);
-  same('Uninstall… asks in its row first, naming what Claude Code loses, the focus on Cancel', await a.run(`[document.querySelector('.uninstall-ask .band-text')?.textContent, document.activeElement?.id]`),
-    ['Uninstall issue-tracker from Claude Code? Its saved options there are deleted for good.', `${uninstallFrom}-cancel`]);
+  same('Uninstall… asks in its row first, naming the edited copy and the saved options Claude Code loses, the focus on Cancel', [await asked(), await a.run(`document.activeElement?.id`)],
+    ['Uninstall issue-tracker from Claude Code? Undo installs the marketplace’s copy; this one differs and can’t be installed again from here. Its saved options there are deleted for good.', `${uninstallFrom}-cancel`]);
   const callsAsked = calls().length;
   await a.press('Escape');
   same('Escape closes the question, runs nothing, and gives the focus back to Uninstall…', [await a.exists('.uninstall-ask'), calls().length, await a.run(`document.activeElement?.id`)], [false, callsAsked, uninstallFrom]);
   await a.click(`#${uninstallFrom}`);
+  await asked();
   await a.click(`#${uninstallFrom}-confirm`);
   await done();
-  same('confirmed: Claude Code’s own uninstall with --keep-data, its data folder as it was, Claude Code kept out, the row gone, the focus on Undo',
-    [calls().at(-1), treeOf(join(home, '.claude/plugins/data')), entry()?.on, entry()?.except, await a.exists(`#${tabSwitch}`), await a.run(`document.activeElement?.id`), await a.text('#plugins-result .toolbar-result-text')],
-    ['plugin uninstall issue-tracker@ck-test-market --scope user --keep-data', dataBefore, false, ['pi-cli'], false, 'plugins-undo', 'issue-tracker: uninstalled from Claude Code.']);
+  same('confirmed: Claude Code’s own uninstall with --keep-data, its data folder as it was, Claude Code kept out, the row gone, the focus on Undo, which says what it brings back',
+    [calls().at(-1), treeOf(join(home, '.claude/plugins/data')), entry()?.on, entry()?.except, await a.exists(`#${tabSwitch}`), await a.run(`document.activeElement?.id`), await a.text('#plugins-result .toolbar-result-text'), await a.run(`document.querySelector('#plugins-undo')?.title`)],
+    ['plugin uninstall issue-tracker@ck-test-market --scope user --keep-data', dataBefore, false, ['pi-cli'], false, 'plugins-undo', 'issue-tracker: uninstalled from Claude Code.',
+      'Installs issue-tracker again in Claude Code, from the marketplace. What the uninstall deleted stays deleted.']);
   await a.click('#plugins-undo');
   await done();
-  same('Undo installs it in Claude Code again, the record as before, the focus on the row’s switch', [calls().at(-1), installed(), entry()?.on, entry()?.except, await a.run(`document.activeElement?.id`)],
-    ['plugin install issue-tracker@ck-test-market --scope user', true, true, ['pi-cli'], tabSwitch]);
+  same('Undo installs it in Claude Code again, the record as before, the focus on the row’s switch, and says what was not brought back', [calls().at(-1), installed(), entry()?.on, entry()?.except, await a.run(`document.activeElement?.id`), await a.text('#plugins-result .toolbar-result-text')],
+    ['plugin install issue-tracker@ck-test-market --scope user', true, true, ['pi-cli'], tabSwitch, 'Undone: issue-tracker reinstalled in Claude Code. What the uninstall deleted was not brought back.']);
   await a.click('#nav-plugins');
   if (!(await a.exists(box('claude-cli')))) await a.click('#popen-0-issue-tracker');
   for (let tries = 0; tries < 50 && (await boxIs('claude-cli'))?.[2] !== 'installed'; tries++) await wait(100);

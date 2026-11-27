@@ -1256,6 +1256,58 @@ test('Uninstall of a plugin its marketplace no longer offers runs and gives no U
   } finally { await box.cleanup(); }
 });
 
+test('Uninstall of a plugin the build’s marketplace keeps only for the tools that have it gives no Undo: it can’t be installed again', async () => {
+  const box = await setup({ tools: ['claude-cli'], bundled: { folder: 'carried', kept: ['pdf'] } });
+  try {
+    const carried = join(box.base, 'carried');
+    await marketplace(carried, 'team', ['pdf']);
+    await claudeHas(box.home, 'team', { pdf: { version: '1.0.0' } });
+    await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'git', url: carried } } }));
+    const out = await box.markets.turn(carried, 'pdf', 'uninstall', 'claude-cli', box.home);
+    assert.deepEqual([box.calls.filter(call => call.startsWith('uninstall')).length, out.back], [1, []]);
+  } finally { await box.cleanup(); }
+});
+
+test('An uninstall’s Undo whose install fails leaves the record as the uninstall left it, and runs nothing more for a plugin that isn’t there', async () => {
+  const box = await switchHome({ tools: ['claude-cli'], engine: { install: async (_context, _catalog, _plugin, tool) => ({ tool, outcome: 'failed', message: 'The marketplace is gone.', runs: [] }) } });
+  try {
+    await claudeHas(box.home, 'team', { pdf: { version: '1.0.0' } });
+    await box.settings(now => { now.enabledPlugins = { 'pdf@team': false }; });
+    const out = await box.markets.turn(box.root, 'pdf', 'uninstall', 'claude-cli', box.home);
+    const left = await box.record();
+    box.calls.length = 0;
+    const undone = await box.markets.undoTurn(box.root, 'pdf', out.before!, out.back!, box.home);
+    assert.deepEqual([out.back?.map(op => op.action), box.calls, await box.record(), undone.done.map(step => [step.action, step.report.outcome, step.report.message])],
+      [['install', 'plugin-off'], [], left, [['install', 'failed', 'The marketplace is gone.']]]);
+  } finally { await box.cleanup(); }
+});
+
+test('Codex keeps settings of its own for a plugin in its table, a server’s own environment among them, which its uninstall deletes; a table of the switch alone holds none', async () => {
+  const box = await keptHome();
+  try {
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    const codex = async () => { const state = (await box.markets.view()).marketplaces.find(each => each.source === box.root)!.states.pdf!['codex-cli']!; return state.state === 'installed' && !!state.ownSettings; };
+    const plain = await codex();
+    await put(join(box.home, '.codex/config.toml'), `${await readFile(join(box.home, '.codex/config.toml'), 'utf8')}\n[plugins."pdf@team".mcp_servers.issues.env]\nREGION = "west"\n`);
+    assert.deepEqual([plain, await codex()], [false, true]);
+  } finally { await box.cleanup(); }
+});
+
+test('Claude Code’s saved options for a plugin are what its uninstall deletes: there where saved, declared now or not, and not where only declared', async () => {
+  const box = await keptHome();
+  try {
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    const claude = async () => { const state = (await box.markets.view()).marketplaces.find(each => each.source === box.root)!.states.pdf!['claude-cli']!; return state.state === 'installed' && !!state.ownSettings; };
+    const manifest = join(box.home, '.claude/plugins/cache/team/pdf/1.0.0/.claude-plugin/plugin.json');
+    await put(manifest, JSON.stringify({ name: 'pdf', version: '1.0.0', userConfig: { region: { type: 'string' } } }));
+    const declared = await claude();
+    // An option an earlier version declared, still saved; this copy declares none.
+    await put(manifest, JSON.stringify({ name: 'pdf', version: '1.0.0' }));
+    await box.settings(now => { now.pluginConfigs = { 'pdf@team': { options: { region: 'west' } } }; });
+    assert.deepEqual([declared, await claude()], [false, true]);
+  } finally { await box.cleanup(); }
+});
+
 test('Uninstall of a copy off by Claude Code’s own switch: its Undo installs it and turns it off again, the record as it was', async () => {
   const box = await keptHome();
   try {

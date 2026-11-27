@@ -234,6 +234,17 @@ function forgetDetails(): void {
   market.previous.clear();
 }
 
+/**
+ * A plugin's contents read again now, as its page reads them (the marketplace's copy and each tool's), for Uninstall…'s question to
+ * compare the tool's copy with (pluginparts.ts uninstallControl); meanwhile its page shows the last read.
+ */
+export function readAgainNow(source: string, plugin: string): void {
+  const key = pluginKey(source, plugin), last = market.details.get(key);
+  if (last && !last.reading && last.value) market.previous.set(key, last.value);
+  market.details.delete(key);
+  readInto(market.details, key, () => api().pluginDetail(source, plugin).catch(() => null), rerender);
+}
+
 /** A plugin's contents to show: the latest read, or while it is read again, the one before (undefined when never read). */
 export function shownDetail(key: string): PluginDetail | null | undefined {
   const read = market.details.get(key);

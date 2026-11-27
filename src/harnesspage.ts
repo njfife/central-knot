@@ -305,7 +305,7 @@ function pluginRow({ entry, plugin, version }: InstalledMarketPlugin, tool: Harn
     onclick: () => { showPage('plugins'); browse({ source: entry.source, plugin: plugin.name, tab: 'plugins', find: '', category: undefined, hookTool: tool }); } });
   const control = own ? toggle({ on: own.ticked, label: `${pluginTitle(plugin)} in ${names[tool]}`, disabled: own.off || pluginBusy(entry.source, plugin.name),
     id: `harness-plugin-switch-${entry.name}-${plugin.name}`, onchange: () => turnPlugin(entry, plugin.name, own.ticked ? 'keep-out' : 'let-in', tool) }) : null;
-  const [uninstall, question] = own && mark ? uninstallControl(entry, plugin, tool, `harness-plugin-uninstall-${entry.name}-${plugin.name}`, { mark, box: own }) : [null, null];
+  const [uninstall, question] = own ? uninstallControl(entry, plugin, tool, `harness-plugin-uninstall-${entry.name}-${plugin.name}`, own) : [null, null];
   return h('div.harness-plugin', { role: 'listitem', title: note || undefined },
     h('div.harness-plugin-text', {},
       h('strong', {}, pluginTitle(plugin), version ? h('span.harness-plugin-version', {}, ` ${version}`) : null),

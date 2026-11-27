@@ -7,8 +7,8 @@ import { button, h, icon, toggle } from './dom.ts';
 import { markdown } from './markdown.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginKey, resultLines, succeeded, type PluginOp } from './pluginplan.ts';
-import { applyPluginOps, clickOn, market, openLink, pluginBusy, shownDetail, turnPlugin, type PluginClick } from './pluginstate.ts';
-import { addWords, boxOf, cantUninstall, copyStale, foundIn, installedVersion, inUseIn, itemsAllIn, itemsIn, offersUninstall, outdated, switchPartial, switchWords, toolMark, uninstallAsk, updateTools, versionToCompare, viewStopped, type ToolMark } from './pluginstatus.ts';
+import { applyPluginOps, clickOn, market, openLink, pluginBusy, readAgainNow, shownDetail, turnPlugin, type PluginClick } from './pluginstate.ts';
+import { addWords, boxOf, cantUninstall, copyStale, foundIn, inUseIn, itemsAllIn, itemsIn, offersUninstall, outdated, switchPartial, switchWords, toolMark, uninstallAsk, uninstallFacts, updateTools, versionToCompare, viewStopped, type ToolMark } from './pluginstatus.ts';
 import { pluginUpdates } from './pluginupdateview.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, PluginTurn, PluginView, PluginsView } from './types.ts';
 import { takesPlugins } from './presence.ts';
@@ -110,23 +110,26 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
 
 /**
  * Uninstall… beside a tool's copy where its box offers it (pluginstatus.ts offersUninstall), outside the box's state line: the
- * button, and in its place while open the question (uninstallAsk), one open at a time (market.asking). Cancel has the focus; it
- * and Escape close the question, the focus back on Uninstall…; its confirm is the tool's own uninstall (turnPlugin `uninstall`).
+ * button, and in its place while open the question (uninstallAsk), one open at a time (market.asking), on a line of its own with
+ * its two buttons together under its words. Cancel has the focus; it and Escape close the question, the focus back on Uninstall…;
+ * its confirm is the tool's own uninstall (turnPlugin `uninstall`).
  */
-export function uninstallControl(entry: MarketplaceView, plugin: PluginView, tool: HarnessId, id: string, { mark, box }: { mark: ToolMark; box: { off?: string } }) {
+export function uninstallControl(entry: MarketplaceView, plugin: PluginView, tool: HarnessId, id: string, box: { off?: string }) {
   const none: [HTMLElement | null, HTMLElement | null] = [null, null];
-  if (!offersUninstall(entry, plugin.name, tool, mark, box)) return none;
-  const key = `${pluginKey(entry.source, plugin.name)}\u0000${tool}`, busy = pluginBusy(entry.source, plugin.name);
-  const ask = (open: boolean) => { market.asking = open ? key : undefined; rerender(); document.getElementById(open ? `${id}-cancel` : id)?.focus(); };
-  if (market.asking !== key) return [button({ variant: 'ghost', size: 'small', label: 'Uninstall…', id, disabled: busy, onclick: () => ask(true) }), null];
-  const detail = shownDetail(pluginKey(entry.source, plugin.name)), offered = versionToCompare(plugin, detail);
-  const installed = app.home?.pluginItems?.find(item => item.tool === tool && item.plugin === plugin.name && item.marketName === entry.name);
-  const offer = { version: offered, stale: copyStale(entry, plugin.name, tool, offered, detail), gone: plugin.gone };
+  if (!offersUninstall(entry, plugin.name, tool, box)) return none;
+  const key = pluginKey(entry.source, plugin.name), asks = `${key}\u0000${tool}`, busy = pluginBusy(entry.source, plugin.name);
+  // Opened, the question compares the tool's copy as read now (pluginstate.ts readAgainNow); its confirm waits for that.
+  const ask = (open: boolean) => {
+    if (open) readAgainNow(entry.source, plugin.name);
+    market.asking = open ? asks : undefined; rerender(); document.getElementById(open ? `${id}-cancel` : id)?.focus();
+  };
+  if (market.asking !== asks) return [button({ variant: 'ghost', size: 'small', label: 'Uninstall…', id, disabled: busy, onclick: () => ask(true) }), null];
+  const read = market.details.get(key), facts = uninstallFacts(entry, plugin, tool, read && !read.reading ? read.value : undefined);
   const confirm = () => { market.asking = undefined; turnPlugin(entry, plugin.name, 'uninstall', tool); };
   return [null, h('div.band.uninstall-ask', { role: 'alert', onkeydown: (event: KeyboardEvent) => { if (event.key === 'Escape') ask(false); } },
-    h('span.band-text', {}, uninstallAsk(pluginTitle(plugin), tool, { ...installed, version: installedVersion(entry, plugin.name, tool) }, offer)),
-    button({ variant: 'outline', size: 'small', label: 'Cancel', id: `${id}-cancel`, onclick: () => ask(false) }),
-    button({ variant: 'outline', size: 'small', label: `Uninstall from ${names[tool]}`, id: `${id}-confirm`, disabled: busy, onclick: confirm }))];
+    h('span.band-text', {}, uninstallAsk(pluginTitle(plugin), tool, facts)),
+    h('span.uninstall-ask-actions', {}, button({ variant: 'outline', size: 'small', label: 'Cancel', id: `${id}-cancel`, onclick: () => ask(false) }),
+      button({ variant: 'outline', size: 'small', label: `Uninstall from ${names[tool]}`, id: `${id}-confirm`, disabled: busy || facts.copy === 'comparing', onclick: confirm })))];
 }
 
 /** What a click on a tool's box does there, and its Undo, in the state it is drawn in (pluginrecord.ts A TOOL'S BOX and row 9). */

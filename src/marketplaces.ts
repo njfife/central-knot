@@ -21,7 +21,7 @@ import { harnessIds } from './harnesses.ts';
 import { errorCode, liftFirst, syncGate, writeDurably, type ShareContext } from './share.ts';
 import type { Listed } from './plugintext.ts';
 import { readRecord as readPartsRecord, type PartsRecord, type PluginNow } from './partsmigrate.ts';
-import { MARKET_UNREAD, SKILL_SWITCH_TESTED_FROM, blocked, copyDiffers, copyOff, partWords, firstReadWaits, heldReason, inUseIn, keptOff, keptReason, marketTitle, notCarried, recordUnread, toolNow, unavailable, uninstallsWhole, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
+import { MARKET_UNREAD, SKILL_SWITCH_TESTED_FROM, blocked, cantInstallAgain, copyDiffers, partWords, firstReadWaits, heldReason, inUseIn, keptOff, keptReason, marketTitle, notCarried, recordUnread, stateOf, toolNow, unavailable, uninstallsWhole, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
 import { readLink } from './sourcelink.ts';
 import { isFolder, isHttps, onlyAllowed, record, shortBuild } from './values.ts';
 import { leftOutSentence, pageNames, toPluginsLabel, toolName } from './words.ts';
@@ -806,11 +806,12 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     // Written onto the record as it is then, so what a check wrote while this click was reading (a tool joining) stays.
     if (after !== before) await changeRecord(shown.home, now => withEntry(now, source, plugin, after));
     const ran = ops.length ? await runPlan(ops, ownApi, String(home)) : { done: [] as PluginDone[] };
-    // Uninstall's Undo puts it back as it was: the marketplace's copy installed, then turned off again where it was off; none
-    // where nothing is offered to install (PluginView gone).
-    const reversed = reverse(ran.done);
-    const offAgain = what === 'uninstall' && copyOff(entry, plugin, tool!) ? reversed.map(op => ({ ...op, action: 'plugin-off' as const })) : [];
-    const back = what === 'uninstall' && listed.gone ? [] : [...reversed, ...offAgain];
+    // Uninstall's Undo puts it back as it was: the marketplace's copy installed (what the uninstall deleted with it staying deleted:
+    // `deleted`), then turned off again where it was off; none where it can't be installed again (cantInstallAgain).
+    const reversed = reverse(ran.done), copy = tool ? stateOf(entry, plugin, tool) : undefined, was = copy?.state === 'installed' ? copy : undefined;
+    const reinstall = reversed.map(op => (was?.ownSettings ? { ...op, deleted: true as const } : op));
+    const offAgain = was?.off ? reversed.map(op => ({ ...op, action: 'plugin-off' as const })) : [];
+    const back = what !== 'uninstall' ? reversed : cantInstallAgain(entry, listed) ? [] : [...reinstall, ...offAgain];
     // Pi, OpenCode and Antigravity: its items (pluginlibrary.ts).
     // An untick that leaves the plugin Off takes its items there as Off does: each item's `except` stays for its next On.
     const items = itemsIn.length && !ran.stopped ? await turnItems(entry.source, marketName, after, what === 'keep-out' && !after.on ? 'off' : what, itemsIn) : undefined;
@@ -830,7 +831,10 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return ran;
   }
 
-  /** The Undo of a turn: the plugin's entry put back as it was (`before`; null: none), then `back` run as a turn runs. */
+  /**
+   * The Undo of a turn: the plugin's entry put back as it was (`before`; null: none), then `back` run as a turn runs. An uninstall's
+   * Undo installs first: where that fails, the entry goes back as the uninstall left it, and nothing more runs for a plugin not there.
+   */
   async function undoTurn(source: string, plugin: string, before: PluginEntry | null, back: PluginOp[], home: unknown): Promise<{ stopped?: string; done: PluginDone[] }> {
     const stopped = await guard(home);
     if (stopped) return { stopped, done: [] };
@@ -842,7 +846,14 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const items = back.filter(op => op.action === 'items-back'), tools = (await host.read()).tools;
     const done: PluginDone[] = [];
     for (const op of items) if (id && host.share) done.push(...(await itemsBack(host.share(), tools, id, op.items ?? [], op, itemTools(tools))).done);
-    const ran = await runPlan(back.filter(op => op.action !== 'items-back'), ownApi, String(home));
+    const installs = await runPlan(back.filter(op => op.action === 'install'), ownApi, String(home));
+    for (const step of installs.done) if (back.some(op => op.action === 'install' && op.tool === step.tool && op.deleted)) step.deleted = true;
+    if (installs.stopped || !installs.done.every(step => succeeded(step.report))) {
+      await changeRecord(String(home), now => withEntry(now, source, plugin, current));
+      return { ...installs, done: [...done, ...installs.done] };
+    }
+    const rest = await runPlan(back.filter(op => op.action !== 'items-back' && op.action !== 'install'), ownApi, String(home));
+    const ran = { ...rest, done: [...installs.done, ...rest.done] };
     // Undoing a fresh install of Copilot CLI's live folder copy leaves enabledPlugins false, installed and off (plugins.ts
     // uninstall counts that as `gone`; pluginplan.ts reverse marks the op `keptOff`): end as an Off does so the result says
     // "turned off" (never "removed"). Any off copy reads `Off, kept installed` without writing a record entry.
@@ -1057,7 +1068,7 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
     const step = record(op);
     return !!step && step.source === source && step.plugin === plugin && isName(step.marketName) && harnessIds.includes(step.tool as HarnessId)
       && ['install', 'remove', 'plugin-off', 'plugin-on', 'items-back'].includes(step.action as string)
-      && (step.keptOff === undefined || step.keptOff === true)
+      && (step.keptOff === undefined || step.keptOff === true) && (step.deleted === undefined || step.deleted === true)
       && (step.items === undefined || (step.action === 'items-back' && Array.isArray(step.items) && step.items.length <= 5000 && step.items.every(isItemState)));
   };
   const isEntry = (source: string, plugin: string) => (value: unknown): value is PluginEntry => {
