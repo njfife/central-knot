@@ -805,6 +805,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* An agent's one file, or its definition, named by a plain label (matrix.ts filePanel): nothing there to press. */
 .file-open-name { min-width: 0; padding: 3px 0; color: var(--ink); font: 500 11.5px/16px var(--mono); overflow-wrap: anywhere; }
 .file-open-name.file-open-definition { font-family: inherit; font-size: 12px; }
+/* A server's entry: where in its settings file it is ("In mcpServers"), then its label (matrix.ts filePanel). */
+.file-open-lead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; min-width: 0; }
+.file-open-where { padding: 3px 0; color: var(--ink-soft); font: 500 11.5px/16px var(--mono); overflow-wrap: anywhere; }
 /* An agent's definition: each part under its word, the prompt (the last block) taking the room left. */
 .file-open-box > .content-block:has(+ .content-block) { flex: none; }
 .file-open-box .content-owner { margin: 0; padding: 8px 12px 0; }

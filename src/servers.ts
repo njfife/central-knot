@@ -22,9 +22,10 @@
 //   there (releaseKeptDenies).
 // Around the pass: applyServers and restoreServer run it (the page's clicks);
 // serversView is the Library's reading of MCP servers (types.ts LibraryView), with each row's source (sources.ts sourceFacts);
-// serversForRepo is what the Git repo's Push sends. Elsewhere: the formats, mcp.ts; where things are kept and
-// the migration from the earlier record, serverstore.ts and servermigrate.ts; the row and its words, libraryrow.ts with
-// librarypages.ts; History's sentences and actions, historyactions.ts.
+// serversForRepo is what the Git repo's Push sends; serverVersion and serverEntry are what a server's row reads on a click (Read
+// in its versions; its file panel: each tool's entry as written; its definition is serverstore.ts storedEntry). Elsewhere: the
+// formats, mcp.ts; where things are kept and the migration from the earlier record, serverstore.ts and servermigrate.ts; the
+// row and its words, libraryrow.ts with librarypages.ts; History's sentences and actions, historyactions.ts.
 import { readFile } from 'node:fs/promises';
 import { libraryAction } from './historyactions.ts';
 import { listed, noteAgainst, pendingEdits, plan, wantedIn } from './library.ts';
@@ -32,7 +33,7 @@ import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, lookFor, restore, runPass, sharedFileAt, takeInAnswers, unreadIn, type Disk, type Kind, type KindLibrary, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords } from './libraryrow.ts';
 import { mergeServer } from './merge.ts';
-import { cannotHold, editEntry, fromJson, mcpFile, ownPartOf, readTool, recoverSettings, SERVER_PARTS, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
+import { cannotHold, editEntry, entryText, fromJson, mcpFile, ownPartOf, readTool, recoverSettings, SERVER_PARTS, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, readMcpSwitches, withMcpSwitch } from './mcpswitch.ts';
 import { partsHolding, pluginHolds, type ThroughWhichPlugin } from './plugins.ts';
 import { copilotServerName } from './profileplan.ts';
@@ -57,6 +58,8 @@ interface ServerDisk extends Disk<McpEntry> {
   shapes: Map<string, NeutralServer>;
   /** The names of servers seen only in a form never taken in (Disk.unseen says why), by key: each a row. */
   unseenNames: Map<string, string>;
+  /** By key, each tool whose settings hold such a name: the file panel reads the entry there (LibraryFacts namedIn). */
+  namedIn: Map<string, Set<HarnessId>>;
   /** The plugin a tool has a server through, if it has one (librarypass.ts Disk.viaPlugin; only the same server: serversThroughPlugins). */
   viaPlugin: ThroughWhichPlugin;
   /** Each tool's own switch file for servers, read once (mcpswitch.ts). */
@@ -70,7 +73,7 @@ type ServerLook = Look<NeutralServer, McpEntry, ServerDisk>;
 /** Reads each managed tool's settings file; `library`: the pass's record, which says what a plugin's server is linked to. */
 async function readDisk(context: ShareContext, managed: HarnessId[], library: KindLibrary): Promise<ServerDisk> {
   const disk: ServerDisk = {
-    byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], shapes: new Map(), unseenNames: new Map(), switchedOff: new Map(),
+    byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], shapes: new Map(), unseenNames: new Map(), namedIn: new Map(), switchedOff: new Map(),
     viaPlugin: await serversThroughPlugins(context, managed, library.items), switches: await readMcpSwitches(context, managed), linked: await pluginHolds(context, managed),
     held: (item, tool) => {
       const linked = disk.linked(item, tool);
@@ -87,7 +90,10 @@ async function readDisk(context: ShareContext, managed: HarnessId[], library: Ki
   for (const tool of managed) {
     const read = await readTool(context, tool), file = mcpFile(context, tool);
     if (read.problem) { disk.unseen.set(`${tool}:*`, read.problem); disk.problems.push(read.problem); continue; }
-    const notTaken = (name: string, why: string) => { disk.unseen.set(`${tool}:${itemKey(name)}`, why); disk.unseenNames.set(itemKey(name), name); };
+    const notTaken = (name: string, why: string) => {
+      disk.unseen.set(`${tool}:${itemKey(name)}`, why); disk.unseenNames.set(itemKey(name), name);
+      disk.namedIn.set(itemKey(name), (disk.namedIn.get(itemKey(name)) ?? new Set<HarnessId>()).add(tool));
+    };
     for (const name of read.invalid ?? []) {
       notTaken(name, `${toolName(tool)}’s entry for it is not written in a form Central Knot edits, so it is left alone.`);
       disk.problems.push(`${file}: “${name}” is not written as a server entry Central Knot can edit, so it is left alone.`);
@@ -225,6 +231,12 @@ export const restoreServer = async (context: ShareContext, tools: HarnessId[], e
 
 /** One version's content, for the Library to show: undefined when the store no longer has it. */
 export const serverVersion = (context: ShareContext, key: string, hash: string) => readVersion(context, key, hash);
+/**
+ * One server's entry in a tool as its settings file has it now, read on a click for the file panel (mcp.ts entryText): only for
+ * the home open (`home`, as the page names it) and a tool managed there (`managed`). Nothing is written.
+ */
+export const serverEntry = async (context: ShareContext, managed: HarnessId[], home: unknown, key: string, tool: HarnessId) =>
+  (home === context.home && managed.includes(tool) ? entryText(context, tool, key) : undefined);
 
 /**
  * What the Git repo holds for each server in the library, On or Off (gitrepo.ts Push): its current version, or the edit a
@@ -320,6 +332,6 @@ async function rowFacts(look: ServerLook, key: string, item: LibraryItem | undef
       : { takeInAnswers: takeInAnswers(look, key) }),
     ...some('plugin', plugin), ...some('unseen', unseen), ...some('switchedOff', switchedOff), ...some('switchProblem', switchProblem),
     ...(copilotName ? { copilotName } : {}), ...(copilotOff ? { copilotOff } : {}), ...(shape ? { transport: shape.transport } : {}),
-    ...(fromSource ? { fromSource } : {}),
+    ...(fromSource ? { fromSource } : {}), ...(disk.namedIn.has(key) ? { namedIn: [...disk.namedIn.get(key)!] } : {}),
   };
 }

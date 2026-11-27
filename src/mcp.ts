@@ -16,12 +16,13 @@
 // 13,243). The kit that measures it again: /home/picoder/work/ck-next/claude-write-kit (race-ck.sh).
 import { record, withoutBom } from './values.ts';
 import { lstat, mkdir, readFile, readlink, realpath, rmdir, stat } from 'node:fs/promises';
-import { dirname, isAbsolute, join } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { entryTransport, PLUGIN_ONLY } from './catalogdetail.ts';
 import { configRoot, harnesses, openCodeSettings } from './harnesses.ts';
-import { errorCode, exists, plainError, recoverParked, sha256, writeFileChecked, type ShareContext } from './share.ts';
-import { readJsonc, readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
-import type { HarnessId } from './types.ts';
+import { entryShownIn } from './presence.ts';
+import { errorCode, exists, itemKey, plainError, recoverParked, sha256, shownText, writeFileChecked, type ShareContext } from './share.ts';
+import { memberAt, readJsonc, readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
+import type { FileRead, HarnessId } from './types.ts';
 
 // ---------- Shapes ----------
 
@@ -175,6 +176,21 @@ function antigravityEntry(server: NeutralServer, extras: Record<string, unknown>
 }
 
 /**
+ * A JSON tool's servers as its settings hold them, each with its place there (a path of keys) and its entry as written: OpenCode's
+ * as openCodeServers finds them, every other tool's in `mcpServers`. Throws when the text isn't JSON (JSONC in OpenCode) or what
+ * holds the servers isn't an object.
+ */
+function jsonServers(text: string, tool: HarnessId): { name: string; place: string[]; raw: unknown }[] {
+  if (tool === 'opencode-cli') return openCodeServers(text);
+  // An empty file is Antigravity's no servers (its CLI lists none, measured on 1.5.14); another tool's is unreadable.
+  const parsed = JSON.parse(tool === 'antigravity-cli' && !text.trim() ? '{}' : withoutBom(text)) as { mcpServers?: unknown };
+  // A servers member that is there but is not an object (null, a list) makes the file unreadable: never read as no servers.
+  const servers = parsed && typeof parsed === 'object' && 'mcpServers' in parsed ? parsed.mcpServers : {};
+  if (!servers || typeof servers !== 'object' || Array.isArray(servers)) throw new Error('mcpServers is not an object');
+  return Object.entries(servers).map(([name, raw]) => ({ name, place: ['mcpServers', name], raw }));
+}
+
+/**
  * Reads one tool's servers. A file that cannot be read gives a problem, never a guess. `text` is the file as read, so a write can
  * check nothing changed since.
  */
@@ -235,24 +251,42 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
       return { entries, exists: true, text, invalid: [...inline] };
     }
     const valid = (raw: unknown): raw is Record<string, unknown> => !!raw && typeof raw === 'object' && !Array.isArray(raw);
+    const servers = jsonServers(text, tool);
     if (tool === 'opencode-cli') {
-      const servers = openCodeServers(text);
       // A name in both places is held: which one OpenCode uses was not measured.
       const held = (server: { name: string; raw: unknown }) => !valid(server.raw) || servers.filter(other => other.name === server.name).length > 1;
       return { entries: servers.filter(server => !held(server)).map(server => fromOpenCode(server.name, file, server.raw as Record<string, unknown>, server.place)),
         invalid: [...new Set(servers.filter(held).map(server => server.name))], exists: true, text };
     }
-    // An empty file is Antigravity's no servers (its CLI lists none, measured on 1.5.14); another tool's is unreadable.
-    const parsed = JSON.parse(tool === 'antigravity-cli' && !text.trim() ? '{}' : withoutBom(text)) as { mcpServers?: unknown };
-    // A servers member that is there but is not an object (null, a list) makes the file unreadable: never read as no servers.
-    const servers = parsed && typeof parsed === 'object' && 'mcpServers' in parsed ? parsed.mcpServers : {};
-    if (!servers || typeof servers !== 'object' || Array.isArray(servers)) throw new Error('mcpServers is not an object');
-    const all = Object.entries(servers as Record<string, unknown>);
-    const read = (name: string, raw: Record<string, unknown>) => (tool === 'antigravity-cli' ? fromAntigravity(name, file, raw) : fromJson(name, tool, file, raw));
-    return { entries: all.filter(([, raw]) => valid(raw)).map(([name, raw]) => read(name, raw as Record<string, unknown>)), invalid: all.filter(([, raw]) => !valid(raw)).map(([name]) => name), exists: true, text };
+    const read = ({ name, raw }: { name: string; raw: unknown }) =>
+      (tool === 'antigravity-cli' ? fromAntigravity(name, file, raw as Record<string, unknown>) : fromJson(name, tool, file, raw as Record<string, unknown>));
+    return { entries: servers.filter(server => valid(server.raw)).map(read), invalid: servers.filter(server => !valid(server.raw)).map(server => server.name), exists: true, text };
   } catch {
     return { entries: [], exists: true, problem: `${file} could not be read as ${tool === 'codex-cli' ? 'TOML' : 'JSON'}, so its servers are not offered and it is never written.` };
   }
+}
+
+/**
+ * One server's entry as `tool`'s settings file has it now, for the file panel (servers.ts serverEntry), with the file read and the
+ * keys holding it (`holder`): the file read once, at most 1 MB (share.ts shownText), parsed whole as the tool reads it (jsonServers),
+ * the server found by its key, and its member cut from the file's bytes (from its line's start where only its indent is before it).
+ * A note where the file isn't JSON, two entries have its name or none does; nothing where it can't be read or isn't read (entryShownIn).
+ */
+export async function entryText(context: ShareContext, tool: HarnessId, key: string): Promise<FileRead | undefined> {
+  if (!entryShownIn(tool)) return undefined;
+  const file = mcpFile(context, tool), info = await stat(file).catch(() => undefined);
+  const shown = info?.isFile() ? await shownText(file, info.size) : undefined;
+  const read = { files: [basename(file)], directory: dirname(file) };
+  if (!shown || 'note' in shown) return shown && { ...read, note: shown.note };
+  let places: string[][];
+  try { places = jsonServers(shown.text, tool).filter(server => itemKey(server.name) === key).map(server => server.place); }
+  catch { return { ...read, note: 'This settings file can’t be read as JSON, so its entry isn’t shown.' }; }
+  if (places.length > 1) return { ...read, note: 'Two entries here have its name, so neither is shown.' };
+  const member = places[0] && memberAt(shown.text, places[0]);
+  if (!member) return { ...read, note: 'Its entry isn’t in this settings file now.' };
+  const { start, end } = member.whole, line = shown.text.lastIndexOf('\n', start - 1) + 1;
+  const from = /^[ \t]*$/.test(shown.text.slice(line, start)) ? line : start;
+  return { ...read, text: shown.text.slice(from, end), holder: places[0].slice(0, -1).join('.') };
 }
 
 /**
