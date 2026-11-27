@@ -2605,7 +2605,7 @@ const switchedOn = { id: 'on-1', at: '2026-11-27T09:00:00.000Z', key: 'home:ever
 const ruleAdded = { id: 'took-standup', at: '2026-11-27T09:00:01.000Z', key: 'standup', item: 'standup', kind: 'on', cause: 'sync-everything',
   winner: { tool: 'claude-cli', hash: 'b' }, losers: [{ tool: 'codex-cli', hash: '' }], tookFrom: [{ tool: 'claude-cli', hash: 'b' }], orderProved: true };
 /** The band's Undo after a switch-on: what it does, with no count that later passes would make untrue. */
-const undoSays = 'Switches Synchronize everything off. It takes back the items it added.';
+const undoSays = 'Switches Synchronize everything off. It takes back the items it added, but for any changed since.';
 
 test('First setup’s Yes is Settings’ switch, answering: on the Overview, what it added counted from History, the profile sentence once, and the switch-on’s own Undo', async t => {
   const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
@@ -2641,6 +2641,17 @@ test('First setup’s Yes is Settings’ switch, answering: on the Overview, wha
   app.outcome!.act!.run();
   await settled();
   assert.deepEqual(restore.mock.calls.map(call => call.arguments[0]), [switchedOn.id]);
+});
+
+test('First setup’s question counts as found only what is found in his tools: 2 ready to add, beside 2 in Central Knot, Off and in no tool, is "the 2 items"', async t => {
+  const { viewWith } = profileActWorld(t, { beforeOn: { notes: false, standup: false }, profiles: [] });
+  const home = viewWith({ notes: false, standup: false });
+  Object.assign(home.sync, { syncEverything: undefined, present: home.sync.managed });
+  // Found in Claude Code only, new to Central Knot: Yes adds each (the take-in table's answer, library.ts takeInAnswer).
+  const ready = (key: string) => ({ key, name: key, description: '', on: false, copies: { 'claude-cli': { hash: key } }, except: [], cannot: {}, edited: [],
+    takeInAnswers: { click: { take: { harness: 'claude-cli', hash: key } }, rule: { take: { harness: 'claude-cli', hash: key } } } });
+  home.skills.items.push(ready('alpha') as never, ready('beta') as never);
+  assert.equal(textOf(findById(setupLead(home)!, 'setup-question-title')), 'Add the 2 items found in your tools to every tool that can take them, and new ones as they turn up?');
 });
 
 test('First setup’s No: its hover says what is on stays on only where something is; its band names the setting, and its Turn on is the same switch as Yes, with the same result', async t => {

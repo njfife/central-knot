@@ -1881,7 +1881,7 @@ export async function everythingSwitchedOn(event: string | undefined, home: stri
  * Synchronize everything, the open home's standing rule, on or off: Settings' switch, first setup's Yes (`answering`: refused once
  * the home has an answer, everything.ts setSyncEverything) and the band after its No. Turned on, main's next pass adds what is
  * found now: at once with Automatic sync on, at Sync once (or once it is turned on) with it off. One band says it, on the page
- * clicked on: what it added, or when it will add (with Sync once), and the switch-on's Undo (everythingSwitchedOn). Answers why
+ * clicked on: what it added, or that nothing is added yet (with Sync once), and the switch-on's Undo (everythingSwitchedOn). Answers why
  * not, if it couldn't be set.
  */
 export const switchSyncEverything = (on: boolean, answering = false) => busy(on ? 'Turning on Synchronize everything…' : 'Turning off Synchronize everything…', async page => {
@@ -1897,7 +1897,7 @@ export const switchSyncEverything = (on: boolean, answering = false) => busy(on 
     return;
   }
   const { added, undo } = await everythingSwitchedOn(set.event, home), syncOn = !!state.home?.syncOn;
-  const text = !syncOn ? 'Synchronize everything is on. Automatic sync is off: items are added at Sync once, or once it is turned on.'
+  const text = !syncOn ? 'Synchronize everything is on. Nothing added yet: Automatic sync is off.'
     : `Synchronize everything is on${added ? `: it added ${plural(added, 'item')}` : ''}.`;
   const once = { label: 'Sync once', id: 'outcome-sync-once', title: 'Add what is found now; Automatic sync stays off', run: () => void syncNow() };
   tellWritten({ page, band: true, settingsBand: true, text, ...(syncOn ? { act: undo } : { act: once, next: undo }) }, syncOn ? set.reloads : [], !!set.event);

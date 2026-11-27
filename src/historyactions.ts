@@ -470,11 +470,12 @@ export function versionChoices(event: HistoryEvent, item: LibraryItem | undefine
 export type LeftIn = { item: string; why: TakeInHeld | 'chosen' | 'claude-code' };
 
 /**
- * What a switch-on's one Undo covers (everythingPlan): the items it added; and, where a copy may be chosen (`chosen`), that a chosen
- * copy has its own Undo. Said, each with its own subject, by first setup's (?) (firstsetup.ts), the band's Undo after a switch-on
- * (app.ts everythingSwitchedOn) and History's entry.
+ * What a switch-on's one Undo covers (everythingPlan): the items it added, but those changed since (takeInHeld: edited, off,
+ * deleted, kept or left out, taken over); and, where a copy may be chosen (`chosen`), that a chosen copy has its own Undo. Said,
+ * each with its own subject, by first setup's (?) (firstsetup.ts), the band's Undo after a switch-on (app.ts
+ * everythingSwitchedOn) and History's entry.
  */
-export const oneUndoCovers = (subject: string, chosen = true) => `${subject} takes back the items it added${chosen ? '; a copy you choose has its own Undo' : ''}.`;
+export const oneUndoCovers = (subject: string, chosen = true) => `${subject} takes back the items it added, but for any changed since${chosen ? '; a copy you choose has its own Undo' : ''}.`;
 
 /**
  * What a switch-on entry's one Undo would do now, read from History (`history`, oldest first): the rule's take-ins after it (cause

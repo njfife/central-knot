@@ -14,11 +14,11 @@
 import { acting, applyClick, busy, clickResumes, noToolManaged, rerender, runSwitches, setHome, state, switchReasons, switchSyncEverything, tell, tellWritten, whyReadOnly, type PageKind } from './app.ts';
 import { pluginReloads, reloadsFor } from './reload.ts';
 import { button, closeButton, h, icon, infoMark } from './dom.ts';
-import { anyOn } from './itemrow.ts';
+import { anyOn, kindSource } from './itemrow.ts';
 import { rowClicks } from './libraryrow.ts';
 import { plural } from './model.ts';
 import { oneUndoCovers } from './historyactions.ts';
-import { rowCount } from './pluginrows.ts';
+import { pluginItemCount } from './pluginrows.ts';
 import { heldKinds } from './presence.ts';
 import { asksNow, KINDS, setupKinds, latestDone, waitingForChoice, walkId, walkPlace, wayBackIn, whatYesDoes, type Waiting } from './setupcounts.ts';
 import { turnEvery } from './pluginswitch.ts';
@@ -51,23 +51,24 @@ export function setupLead(home: HomeView): HTMLElement | null {
 const yesInfo = (choosing: boolean) => `Each item goes to the tools that lack it and can take it. ${oneUndoCovers('Undo', choosing)}`;
 
 /**
- * The question, one line: what Yes adds now (setupcounts.ts whatYesDoes) of the items the cards count (pluginrows.ts rowCount: a
- * plugin's part is one too), so it never says fewer are found than they show; under it, the found kinds whose record stops them.
- * Beside its buttons, that Yes can be undone. No's words are its hover; what is on is said to stay on only where something is.
- * Not here: the found items whose copies differ (overview.ts needsYou's line under it) and Automatic sync off (needsYou's, with
- * Sync once).
+ * The question, one line: what Yes adds now (setupcounts.ts whatYesDoes) of the items found in his tools, each row new to Central
+ * Knot (it has the take-in table's answers) and each plugin's part (pluginrows.ts pluginItemCount), never one Central Knot holds
+ * already; to the tools that can take them. Under it, the found kinds whose record stops them. Beside its buttons, that Yes can be
+ * undone. No's words are its hover; what is on is said to stay on only where something is. Its (?) card opens below it all
+ * (`data-info-block`: dom.ts syncInfoCard), clear of the buttons. Not here: the found items whose copies differ (overview.ts
+ * needsYou's line under it) and Automatic sync off (needsYou's, with Sync once).
  */
 function question(home: HomeView) {
   const { takes, choosing } = whatYesDoes(home), ready = setupKinds(home), { managed, present } = home.sync;
-  const found = heldKinds(home).reduce((count, kind) => count + rowCount(home, kind), 0);
+  const found = heldKinds(home).reduce((count, kind) => count + kindSource(home, kind).facts.filter(fact => fact.takeInAnswers).length + pluginItemCount(home, kind), 0);
   const stopped = KINDS.filter(kind => !ready.includes(kind) && home[kind].items.some(item => item.takeInAnswers)).map(kind => kindNouns[kind].many);
-  const tools = managed.length < present.length ? `the ${plural(managed.length, 'tool')} Central Knot manages` : 'every tool';
+  const tools = `${managed.length < present.length ? `the ${plural(managed.length, 'tool')} Central Knot manages` : 'every tool'} that can take them`;
   const some = takes < found ? `${takes} of the ${plural(found, 'item')}` : `the ${plural(takes, 'item')}`;
   const ask = takes ? `Add ${some} found in your tools to ${tools}, and new ones as they turn up?`
-    : `${found ? 'None of the items found is ready to add' : 'Nothing found in your tools yet'}. Add new items to ${tools} as they turn up?`;
+    : `${found ? 'None of the items found is ready to add' : 'Nothing new in your tools now'}. Add new items to ${tools} as they turn up?`;
   const waits = stopped.length ? `Found ${andList(stopped)} wait until their record can be used.` : '';
   const no = `Leaves it off: ${anyOn(home) ? 'what is on stays on, and ' : ''}each found item waits in the Library for Add.`;
-  return h('section.setup-question', { id: 'setup-question', 'aria-labelledby': 'setup-question-title' },
+  return h('section.setup-question', { id: 'setup-question', 'aria-labelledby': 'setup-question-title', 'data-info-block': true },
     h('h2.setup-title', {}, h('span', { id: 'setup-question-title' }, ask), ' ', infoMark('setup-question-info', 'Synchronize everything', yesInfo(choosing > 0))),
     waits ? h('p.setup-text', {}, waits) : null,
     h('div.setup-actions', {},
