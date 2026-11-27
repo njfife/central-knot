@@ -269,12 +269,15 @@ function sessionStripView(file: InstructionFile, hookInfo?: HookStripPage) {
 }
 
 /**
- * Which tool's strip says the last plugin run made on this page or tab (pluginspage.ts runBand): the tool of its first click or step,
- * while that strip still shows the plugin's group there (named as listed: pluginstate.ts listingOf); none once the group is gone (an
- * Off takes it away), and the band is above the cards (instructionBands).
+ * Which tool's strip says the last plugin run made on this page or tab (pluginspage.ts runBand): the one tool its clicks and steps
+ * were in, while that tool's card is shown here and its strip still shows the group of the plugin its first click or step acted on.
+ * Else the band is above the cards (instructionBands): once that group is gone (an Off takes it away); for a run in more than one
+ * tool, which neither strip speaks for; and until the Plugins page's view is read, since the group is matched as listed there
+ * (pluginstate.ts listingOf).
  */
 function runStrip(): HarnessId | undefined {
-  const first = runTouches()[0], file = first && state.instructions.data?.find(each => each.tool === first.tool);
+  const touched = runTouches(), [first] = touched, tools = new Set(touched.map(each => each.tool));
+  const file = first && tools.size === 1 ? state.instructions.data?.find(each => each.tool === first.tool && (state.page === 'instructions' || each.tool === state.harness)) : undefined;
   if (!first || !file) return undefined;
   const ours = (install?: InstalledPlugin) => install?.plugin === first.plugin && listingOf(install.plugin, install.marketName, install.source)?.source === first.source;
   return sessionStrip(file.tool, state.home?.pluginItems ?? [], file)?.groups.some(group => ours(group.plugin)) ? file.tool : undefined;

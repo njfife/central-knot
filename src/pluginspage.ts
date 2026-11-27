@@ -15,7 +15,7 @@ import { pluginKey, resultParts, resultSentence, shortOf, undoTitle, type LastRu
 import { FIND_FROM, blocked, categoriesOf, copyStale, installedFrom, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
 import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, forgetMarketplace, lastLines, market, openLink, overRun, pickMarketplaceFolder, pluginsResultPlace, runReloads, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
-import { listResult, problemLines, profileSpan, reloadChips, reloadLines, wholeToggle } from './matrix.ts';
+import { listResult, problemLines, profileSpan, reloadChips, reloadLines, resultInHeader, wholeToggle } from './matrix.ts';
 import type { ReloadAdvice } from './reload.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginUpdateNotes } from './pluginupdateview.ts';
@@ -362,7 +362,7 @@ export function pluginsResult(): HTMLElement[] {
   if (!here) return [];
   // A result of the app's said in the run's place (pluginstate.ts overRun; a new run clears it: turnPlugin), as a list page's
   // result is, with its own reasons (matrix.ts listResult).
-  if (overRun(app.outcome)) return listResult();
+  if (overRun(app.outcome, resultInHeader())) return listResult();
   const last = market.lastRun;
   const problem = market.problem;
   const lines = last ? lastLines() : [];

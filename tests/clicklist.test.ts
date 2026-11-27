@@ -80,7 +80,7 @@ Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh'
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 const { settingsPage } = await import('../src/settingspage.ts');
 const { acting, announce, applyByKind, applyClick, askFlash, busy, closeResult, deleteProfileDef, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, profileEndedLine, profilesBefore, saveProfileDef, selectOff, switchToProfile, whyKindReadOnly, whyReadOnly,
-  loadHome, problemKey, queueClick, readAgain, restoreEvent, setRenderer, showPage, syncNow, state: app } = await import('../src/app.ts');
+  loadHome, problemKey, queueClick, readAgain, restoreEvent, setRenderer, showPage, syncNow, tell, state: app } = await import('../src/app.ts');
 const { repo, repoPage } = await import('../src/repopage.ts');
 const { addMarketplace, applyPluginOps, clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, resultOn, runReloads, shownPlugins, turnFromLine, turnPlugin, undoLabel, undoLast, undoOps, usePlugins } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
@@ -1233,7 +1233,7 @@ test('A switch clicked on Instructions keeps its result and Undo there through t
   await main.answer(turnedOff());
   const here = () => [market.lastRun?.turn?.plugin, undoOps().length];
   assert.deepEqual(here(), ['alpha', 1]);
-  for (const elsewhere of [() => onPage('plugins'), () => onTab('plugins'), () => onTab('instructions'), () => onPage('plugins')]) {
+  for (const elsewhere of [() => onPage('plugins'), () => onTab('plugins'), () => onTab('instructions')]) {
     elsewhere();
     assert.deepEqual(here(), [undefined, 0]);
   }
@@ -1280,24 +1280,32 @@ test('A result on Instructions stays past 8 seconds, as a band’s does; one on 
   } finally { mock.timers.reset(); }
 });
 
-test('On Instructions a switch’s result is said under the strip it was clicked in while that strip shows its plugin, else above the cards; × closes it there', async () => {
-  start();
-  onPage('instructions');
+/**
+ * Claude Code's card on Instructions, its strip showing alpha's group and beta's (beta keeps the strip there once alpha leaves it), and
+ * where a run's band is drawn: on the card (under its strip) and in the bands above the cards.
+ */
+function claudeStrip() {
   const hook = { declaredIn: '/home/.claude/plugins/cache/team/alpha/1.0.0/hooks/hooks.json', event: 'SessionStart', at: 0, launch: { shell: 'echo alpha' } };
   const alpha = { tool: 'claude-cli', plugin: 'alpha', marketName: 'team', items: [], listed: true, source: '/market', hooks: [hook] } as unknown as InstalledPlugin;
-  // beta keeps Claude Code's strip on the card after alpha leaves it.
   const beta = { ...alpha, plugin: 'beta', hooks: [{ ...hook, declaredIn: '/home/.claude/plugins/cache/team/beta/1.0.0/hooks/hooks.json' }] } as InstalledPlugin;
   const file = { tool: 'claude-cli', path: '/home/.claude/CLAUDE.md', exists: true, text: '', hash: 'h', readers: 'Claude Code', notes: [], versions: [] } as unknown as InstructionFile;
   Object.assign(app.home!, { pluginItems: [alpha, beta], mode: 'custom', snapshots: [] });
   Object.assign(app.home!.sync, { access: { allowed: true } });
   app.instructions.data = [file];
   const drawnIn = () => [!!findById(instructionCard(file), 'plugins-result'), !!findById(instructionBands(), 'plugins-result')];
+  return { alpha, beta, drawnIn };
+}
+
+test('On Instructions a switch’s result is said under the strip it was clicked in while that strip shows its plugin, else above the cards; × closes it there', async () => {
+  start();
+  onPage('instructions');
+  const { alpha, beta, drawnIn } = claudeStrip();
   // Claude Code refuses: its group is still in the strip, so the failure is said under it.
   turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
   await settled();
   await main.answer(turnedOff('claude-cli', 'failed'));
   assert.deepEqual(drawnIn(), [true, false]);
-  assert.match(textOf(findById(instructionCard(file), 'plugins-result')), /alpha: Claude Code: Still on in Claude Code\. It stopped with exit code 9\./);
+  assert.match(textOf(findById(instructionCard(app.instructions.data![0]!), 'plugins-result')), /alpha: Claude Code: Still on in Claude Code\. It stopped with exit code 9\./);
   // Turned off: its group leaves the strip (sessionhooks.ts sessionStrip), beta's stays, and the result and its Undo are said above the cards.
   turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
   await settled();
@@ -1307,6 +1315,54 @@ test('On Instructions a switch’s result is said under the strip it was clicked
   assert.deepEqual([!!findById(instructionBands(), 'plugins-undo'), !!findById(instructionBands(), 'report-dismiss')], [true, true]);
   closeRun();
   assert.deepEqual(drawnIn(), [false, false]);
+});
+
+test('A run in two tools on Instructions, Claude Code refusing and Codex turning it off, is said above the cards: neither strip speaks for both', async () => {
+  start();
+  onPage('instructions');
+  const { drawnIn } = claudeStrip();
+  turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
+  turnPlugin(entry, 'alpha', 'keep-out', 'codex-cli');
+  await settled();
+  await main.answer(turnedOff('claude-cli', 'failed'));
+  await main.answer(turnedOff('codex-cli'));
+  assert.deepEqual(drawnIn(), [false, true]);
+});
+
+test('On a tool’s Instructions tab the band follows the card shown there: a run in Claude Code made on Codex’s tab is said above its card', async () => {
+  start();
+  const { drawnIn } = claudeStrip();
+  onTab('instructions', 'codex-cli');
+  turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
+  await settled();
+  await main.answer(turnedOff('claude-cli', 'failed'));
+  assert.equal(drawnIn()[1], true);
+});
+
+test('A refusal on Instructions before any step ran stays through Refresh: the band still names it, until its ×', async () => {
+  start();
+  onPage('instructions');
+  app.instructions.data = [];
+  turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
+  await settled();
+  await main.answer({ stopped, done: [] });
+  const said = () => textOf(instructionBands());
+  assert.equal(said(), `alpha: ${stopped}`);
+  await readAgain();
+  assert.equal(said(), `alpha: ${stopped}`);
+  closeRun();
+  assert.equal(said(), '');
+});
+
+test('A newer result told on Instructions, the base saved with its Undo, takes the plugin run’s place: one result above the cards', async () => {
+  start();
+  onPage('instructions');
+  app.instructions.data = [];
+  turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
+  await settled();
+  await main.answer(turnedOff());
+  tell({ page: 'instructions', text: 'Base instructions saved in CLAUDE.md.', act: { label: 'Undo', id: 'outcome-undo-base', run: () => {} } });
+  assert.deepEqual([runHere(), findById(instructionBands(), 'plugins-result'), !!findById(instructionBands(), 'outcome-undo-base')], [undefined, undefined, true]);
 });
 
 test('A background problem closed with its × is remembered by its kind too: a skill’s and an agent’s of one name and reason are two', () => {

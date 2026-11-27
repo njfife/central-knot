@@ -131,8 +131,6 @@ export function pluginsResultPlace(): RunPlace | undefined {
   if (app.page === 'plugins' || app.page === 'instructions') return app.page;
   return tab === 'plugins' ? app.harness : tab === 'instructions' ? `instructions:${app.harness!}` : undefined;
 }
-/** Whether a place's result is said in the window's header (Plugins and a tool's Plugins tab), not in a band on its page. */
-const inHeader = (place: RunPlace) => !place.startsWith('instructions');
 const placeNow = (): RunPlace => pluginsResultPlace() ?? 'plugins';
 const showsPluginsResult = (place?: RunPlace) => {
   const here = pluginsResultPlace();
@@ -561,7 +559,9 @@ async function runClick(click: PluginClick, home: string): Promise<void> {
   oweHomeRead();
   click.ran = result;
   market.working = undefined;
-  setRun({ done: result.done, undo: false, home, place: click.place, ...(result.back ? { turn: { source: click.source, plugin: click.plugin, before: result.before ?? null, back: result.back } } : {}) }, click.place);
+  const stop = result.stopped ? { stop: { source: click.source, plugin: click.plugin, ok: false, text: result.stopped, short: result.stopped } } : {};
+  const turn = result.back ? { turn: { source: click.source, plugin: click.plugin, before: result.before ?? null, back: result.back } } : {};
+  setRun({ done: result.done, undo: false, home, place: click.place, ...stop, ...turn }, click.place);
   if (clickList.turns.some(turn => turn.run === click.run && turn.state === 'waiting'))
     announce(result.stopped ?? (resultSentence(resultLines(result.done, false), false) || `Nothing changed for ${click.plugin}.`), showsPluginsResult(click.place) && !result.stopped && undoOps(click.place).length > 0);
   rerender();
@@ -572,11 +572,12 @@ const ranFor = (last: LastRun) => market.clicks.filter(click => click.ran && cli
 
 /**
  * What the toolbar and the problems band say of the last run: while the latest list's rows are there, every click of it together
- * (a click main stopped is its plugin's line); else the last run's own. The one Undo stays the last run's (undoOps).
+ * (a click main stopped is its plugin's line); else the last run's own, with its click's stop (LastRun stop). The one Undo stays
+ * the last run's (undoOps).
  */
 export function lastLines(place: RunPlace = placeNow()): ResultLine[] {
   const last = runs.get(place), ran = last ? ranFor(last) : [];
-  if (!last || !ran.length) return last ? resultLines(last.done, last.undo) : [];
+  if (!last || !ran.length) return last ? [...resultLines(last.done, last.undo), ...(last.stop ? [last.stop] : [])] : [];
   // One clause a tool: a later click on the plugin in that tool is what the run says of it (a tick then an untick: turned off).
   const there = (step: PluginDone) => (each: PluginDone) => each.source === step.source && each.plugin === step.plugin && each.tool === step.tool;
   const later = (at: number, step: PluginDone) => ran.slice(at + 1).some(click => click.ran!.done.some(there(step)));
@@ -642,19 +643,22 @@ export function undoLast(): void {
 /** × on the run's result in the header: it goes, and its problem lines with it, and the run of clicks ends (clicklist.ts endRun). */
 export function closeRun(): void { endRun(); clearRun(); }
 /**
- * Whether the app's result `outcome` is said in the header in the run's place (pluginspage.ts pluginsResult): one made on Plugins
- * or a tool's Plugins tab, not in the status bar, either with no action of the page's own (Sync once) or a library-item click result (`rows`).
+ * Whether the app's result `outcome`, said on the page of the run's place and not in the status bar, is the newer result there: the
+ * run's then goes (app.ts tell) and is not drawn (pluginspage.ts pluginsResult). `inHeader` is matrix.ts resultInHeader, asked by the
+ * caller: in the header (Plugins, a tool's Plugins tab) only one with no action of the page's own (Sync once) or a library-item click
+ * result (`rows`) is; in a band (Instructions, a tool's Instructions tab) any is, so one result stands there at a time.
  */
-export const overRun = (outcome: Outcome | undefined): boolean =>
-  !!outcome && !!pluginsResultPlace() && outcome.page === app.page && (!outcome.act || !!outcome.rows?.length) && !saidInStatusBar(outcome);
+export const overRun = (outcome: Outcome | undefined, inHeader: boolean): boolean =>
+  !!outcome && !!pluginsResultPlace() && outcome.page === app.page && (!inHeader || !outcome.act || !!outcome.rows?.length) && !saidInStatusBar(outcome);
 const clearRun = (place: RunPlace = placeNow()) => { runs.delete(place); problems.delete(place); };
 /**
  * The run's result with no problem line goes by itself, as a list page's result in the header does (app.ts FADE_MS); its Undo with
- * it. One on Instructions stays, as a band's does. Answers whether it went.
+ * it. Asked only where the result is in the header (app.ts fadeNow, by matrix.ts resultInHeader): one in a band stays. Answers
+ * whether it went.
  */
 export function fadeRun(): boolean {
   const here = pluginsResultPlace();
-  const goes = !!here && inHeader(here) && !!runs.get(here) && !problems.get(here) && lastLines(here).every(line => line.ok);
+  const goes = !!here && !!runs.get(here) && !problems.get(here) && lastLines(here).every(line => line.ok);
   if (goes) clearRun(here);
   return goes;
 }
