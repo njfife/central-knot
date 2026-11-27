@@ -559,7 +559,7 @@ export function settingsPage(): HTMLElement {
   const cannot = signIn?.available ? undefined : signIn?.reason?.text;
   const signInDescribed = cannot ? 'setting-sign-in-hint' : infoCardId('setting-sign-in-info');
   const systemSays: RowMessage | undefined = signIn?.reason && signIn.place ? { text: signIn.reason.text, tone: 'system', action: openSignInPlace(signIn.place) } : undefined;
-  const done = outcomeBand();
+  const done = state.outcome?.page === 'settings' && (!!state.outcome.reloads?.length || !!state.outcome.settingsBand) ? outcomeBand() : null;
   return h('div.page', {}, done ? h('div.bands', {}, done) : null, h('div.scroll.settings-scroll', { id: 'settings-scroll' },
     state.home?.settingsUnread ? keptNote(state.home.settingsUnread) : null,
     settingsSection('general', 'General',

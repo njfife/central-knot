@@ -1093,13 +1093,7 @@ export function outcomeBand(cardResult?: Outcome, omitProfile = false): HTMLElem
     // The space before the note sits outside it, so a note kept whole on its line never carries the last word with it.
     outcome.note ? [' ', h('span.tone-faint', {}, outcome.note.replace(/ History\.$/, ' '), h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History'), '.')] : null, reasons),
     outcome === state.outcome && h('span.band-actions', {},
-      outcome.act
-        ? button({
-          variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id,
-          disabled: outcome.act.whyOff?.() ?? acting(),
-          attrs: outcome.act.title ? { title: outcome.act.title, 'aria-description': outcome.act.title } : undefined,
-          onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); },
-        })
+      outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, disabled: outcome.act.whyOff?.() ?? acting(), attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
         : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), undefined, !!acting())
         : outcome.history ? smallAction(outcome.refused ? 'History' : 'Undo in History', 'outcome-history', () => showPage('history')) : null,
       outcome.next ? button({ variant: 'outline', size: 'small', label: outcome.next.label, id: outcome.next.id, attrs: outcome.next.title ? { title: outcome.next.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.next!.run(); } }) : null),

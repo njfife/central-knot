@@ -2015,29 +2015,34 @@ test('History Undo refused whole (heldWhole, no made) adds no profile sentence e
   assert.equal(app.outcome?.refused, true);
 });
 
-test('Synchronize everything Undo ending Everyday appends the profile sentence and sets profileLine', async t => {
+test('Synchronize everything Undo ending Everyday appends the profile sentence, keeps history on History, and dismisses only undone take-ins', async t => {
   const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
   const events = [
     { id: 'ev-on', kind: 'everything', item: 'Synchronize everything', key: 'home:everything', at: '2026-11-25T10:00:00.000Z', losers: [], orderProved: true, everything: { ruleOn: true } },
+    { id: 'take-undone', kind: 'on', cause: 'sync-everything', of: 'skill', item: 'notes', key: 'notes', at: '2026-11-25T10:00:10.000Z', losers: [], orderProved: true, undoneBy: 'u-1' },
+    { id: 'take-left', kind: 'on', cause: 'sync-everything', of: 'skill', item: 'standup', key: 'standup', at: '2026-11-25T10:00:20.000Z', losers: [], orderProved: true },
     { id: 'ev-undo', kind: 'everything', item: 'Synchronize everything', key: 'home:everything', at: '2026-11-25T10:01:00.000Z', losers: [], orderProved: true,
-      everything: { ruleOn: false, undo: { switchedOff: true, itemUndos: ['u-1'], left: [], keptIn: [] } } },
+      everything: { ruleOn: false, undo: { switchedOff: true, itemUndos: ['u-1'], left: [{ item: 'standup', why: 'changed' }], keptIn: [] } } },
   ];
   historyRestoreWorld(t, events, { beforeOn: { notes: true, standup: false }, afterOn: { notes: false, standup: false }, profiles: [everyday], reply: { results: [], harnessWrites: 1, made: ['ev-undo'], reloads: [] } });
   await restoreEvent('ev-on');
   assert.match(app.outcome?.text ?? '', /Everyday stopped being the profile in use\.$/);
-  assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
+  assert.deepEqual([app.outcome?.profileLine, app.outcome?.history, app.dismissed.has('take-undone'), app.dismissed.has('take-left')],
+    ['Everyday stopped being the profile in use.', true, true, false]);
 });
 
-test('Synchronize everything Restore ending Everyday appends the profile sentence and sets profileLine', async t => {
+test('Synchronize everything Restore ending Everyday appends the profile sentence, keeps history on History, and keeps dismissed take-ins dismissed', async t => {
   const everyday = { id: 'p-1', name: 'Everyday', items: ['skill:notes'] };
   const events = [
     { id: 'ev-undo', kind: 'everything', item: 'Synchronize everything', key: 'home:everything', at: '2026-11-25T10:01:00.000Z', losers: [], orderProved: true,
       everything: { ruleOn: false, undo: { switchedOff: true, itemUndos: ['u-1'], left: [], keptIn: [] } } },
   ];
   historyRestoreWorld(t, events, { beforeOn: { notes: true, standup: false }, afterOn: { notes: true, standup: true }, profiles: [everyday], reply: { results: [], harnessWrites: 1, made: ['r-1'], reloads: [] } });
+  app.dismissed.add('take-undone');
   await restoreEvent('ev-undo');
   assert.match(app.outcome?.text ?? '', /Everyday stopped being the profile in use\.$/);
-  assert.equal(app.outcome?.profileLine, 'Everyday stopped being the profile in use.');
+  assert.deepEqual([app.outcome?.profileLine, app.outcome?.history, app.dismissed.has('take-undone')],
+    ['Everyday stopped being the profile in use.', true, true]);
 });
 
 test('Synchronize everything Restore that puts nothing back (made empty, 0 writes) adds no profile sentence', async t => {

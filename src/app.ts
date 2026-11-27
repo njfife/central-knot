@@ -1280,8 +1280,13 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   // The notice for an undone event has done its job; its result band says what happened.
   if (!result.stopped) state.dismissed.add(eventId);
   const view = await api().refresh();
-  setHome(view);
   await putHistory();
+  // Synchronize everything's Undo took back its take-ins: dismiss their notices here too, before setHome carries unseen ones on.
+  const undos = new Set(state.history.data?.find(event => event.id === result.made?.[0])?.everything?.undo?.itemUndos ?? []);
+  if (!result.stopped && undos.size) {
+    for (const event of state.history.data ?? []) if (event.undoneBy && undos.has(event.undoneBy)) state.dismissed.add(event.id);
+  }
+  setHome(view);
   // A source's band offers its click's Undo (sourcespage.ts whatItDid): its rows say what waits there now.
   if (state.page === 'sources') await loadSources();
   await refreshPlugins();
@@ -1341,11 +1346,12 @@ function sayLibraryAction(page: Page, past: HistoryEvent, result: ApplyResult, d
  * (restoreEvent, from restorePlan before the click); a switch made in Settings since is not its doing.
  */
 function sayEverything(page: Page, past: HistoryEvent, result: ApplyResult, switchedOn: boolean, did = true) {
-  if (result.stopped) { tell({ page, item: past.item, text: result.stopped, warn: true, history: true, refused: true }); return; }
+  const onSettings = page === 'settings' ? { settingsBand: true } : {};
+  if (result.stopped) { tell({ page, item: past.item, text: result.stopped, warn: true, history: true, refused: true, ...onSettings }); return; }
   const made = (result.made ?? []).map(id => state.history.data?.find(event => event.id === id));
   const text = everythingDone(past, made, made.filter(event => event?.kind === 'restored').length, switchedOn);
   const notDone = [...new Set(result.results.filter(keptBack).map(entry => entry.message))];
-  tellWritten({ page, item: past.item, warn: notDone.length > 0, band: true, text: [text, ...notDone.slice(0, 3)].filter(Boolean).join(' ') }, result.reloads, did);
+  tellWritten({ page, item: past.item, warn: notDone.length > 0, ...(page === 'settings' ? { band: true, ...onSettings } : { history: true }), text: [text, ...notDone.slice(0, 3)].filter(Boolean).join(' ') }, result.reloads, did);
 }
 
 // ---------- A skill's own two actions ----------
@@ -1395,11 +1401,14 @@ export interface Outcome {
   /** A saved instruction goes on its card (instructionspage.ts). */
   kind?: 'saved';
   tool?: HarnessId;
+  /** Offers a History link in the band ("History" when `refused`, else "Undo in History") and keeps the result out of the status bar (matrix.ts outcomeBand). */
   history?: boolean;
   /** Nothing was done, its reason the text: History is offered as itself, not as where its Undo is (matrix.ts outcomeBand). */
   refused?: boolean;
   /** Shown as a band even with nothing to offer: a click's result, which belongs where the click's Undo would be. */
   band?: boolean;
+  /** Shown as a band on Settings even without reload advice: Synchronize everything's switch-on and its band's Undo (settingspage.ts). */
+  settingsBand?: boolean;
   /** Appended profileLeftUse sentence when an act ended every profile in use; keeps the result in a band (saidInStatusBar) and whole on Row 2 (matrix.ts listResult). */
   profileLine?: string;
   /** The band goes after a few seconds: an Undo's confirmation. */
@@ -1874,7 +1883,7 @@ export const switchSyncEverything = (on: boolean) => busy(on ? 'Turning on Synch
       };
     }
   }
-  tellWritten({ page: 'settings', band: true, text, act }, state.home?.syncOn ? set.reloads : [], !!set.event);
+  tellWritten({ page: 'settings', band: true, settingsBand: true, text, act }, state.home?.syncOn ? set.reloads : [], !!set.event);
 });
 
 let menuSyncHome: string | undefined;
