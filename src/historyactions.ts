@@ -81,7 +81,7 @@ import { itemKey, pendingChanges, theVersion, type LibraryItem } from './library
 import { linkLabel, pluginOf } from './sourcelink.ts';
 import { asItIs, noTimeTells, versionClock, type RowWords } from './libraryrow.ts';
 import type { Change, HarnessId, HistoryEvent, HomeView, LibraryFacts, PartKind } from './types.ts';
-import { andList, deletedIn, harnessIds, keptOutWords, readsIt, sentence, toolName, toolsPhrase, turnIt } from './words.ts';
+import { andList, deletedIn, harnessIds, keptOutWords, readsIt, sameTools, sentence, toolName, toolsPhrase, turnIt } from './words.ts';
 
 /**
  * Whose a History entry is among the library's kinds, by the page's name for the kind (app.ts PageKind), with the item's key.
@@ -416,9 +416,6 @@ export function takeInHeld(event: HistoryEvent, item: LibraryItem | undefined, n
 /** The tools a take-in found the item in (types.ts HistoryEvent foundIn); an entry from before it was recorded: where it was taken from, and its own copies. */
 const foundIn = (event: HistoryEvent): HarnessId[] => event.foundIn ?? [...new Set([...(event.winner ? [event.winner.tool] : []), ...(event.tookFrom ?? []).map(copy => copy.tool)])];
 
-/** Whether two harness lists hold the same set of tools, regardless of order. */
-export const sameTools = (first: readonly HarnessId[], second: readonly HarnessId[]) =>
-  new Set(first).size === new Set(second).size && first.every(tool => second.includes(tool));
 
 
 /**

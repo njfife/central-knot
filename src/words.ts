@@ -18,6 +18,9 @@ export const coworkWords = {
 /** Every tool id in the order the app lists tools everywhere (columns, notes, results). */
 export const harnessIds = Object.keys(toolNames) as HarnessId[];
 export const byToolOrder = (first: HarnessId, second: HarnessId) => harnessIds.indexOf(first) - harnessIds.indexOf(second);
+/** Whether two lists hold the same set of tools, regardless of order. */
+export const sameTools = (first: readonly HarnessId[], second: readonly HarnessId[]) =>
+  new Set(first).size === new Set(second).size && first.every(tool => second.includes(tool));
 
 /** A tool's display name from an id that may come from a file or a report (an unknown id is shown as it is). */
 export const toolName = (tool: string) => (toolNames as Record<string, string>)[tool] ?? tool;

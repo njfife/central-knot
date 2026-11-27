@@ -497,7 +497,7 @@ export interface Change {
   untake?: Partial<Record<HarnessId, string>>;
 }
 
-export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, what is not as it asked, any settings notes, and each plugin item's copy it left (`since`). */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'tools' | 'left' | 'settingsChanged'> & { since?: string[]; /** The plugins it turned back whole in Claude Code, by direction (profileplan.ts wholeCounts). */ plugins?: { on: number; off: number } }; /** Confirmed changes for reload advice (reload.ts). */ reloads: ReloadChange[]; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
+export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, what is not as it asked, any settings notes, and each plugin item's copy it left (`since`). */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'retooled' | 'left' | 'settingsChanged'> & { since?: string[]; /** The plugins it turned back whole in Claude Code, by direction (profileplan.ts wholeCounts). */ plugins?: { on: number; off: number } }; /** Confirmed changes for reload advice (reload.ts). */ reloads: ReloadChange[]; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
 
 /**
  * What sync did on its own, told once in the Library: to one item (ItemNotice), the found items Synchronize everything
@@ -666,9 +666,9 @@ export interface HistoryEvent {
    * in an entry of the Undo's own (`undoOf`: the switch's entry; `plugins`: what it turned them back to; `on` and `off`: his items
    * it turned back too, which have entries of their own as well), which has no Undo. A switch's `wholeSteps`: the steps it ran on
    * the plugins Claude Code takes whole (profileplan.ts wholeRuns: written as planned, then those that changed), each plugin's
-   * reversed by its Undo while the plugin is as they left it (profileplan.ts pluginUndo). `except`: the library items it left On
-   * whose keep-outs it changed (a profile that holds them: profileplan.ts effectiveOut), each put back by its Undo while as it
-   * left them. An entry from before profiles were sets of items has neither `on` nor `off`: it is past.
+   * reversed by its Undo while the plugin is as they left it (profileplan.ts pluginUndo). `except`: the library items whose
+   * keep-outs it changed, turned On or On before and after (a profile that holds them: profileplan.ts effectiveOut), each put
+   * back by its Undo while as it left them. An entry from before profiles were sets of items has neither `on` nor `off`: it is past.
    */
   profile?: { toName?: string; on?: SwitchedItem[]; off?: SwitchedItem[]; except?: ExceptSwitched[]; plugins?: PluginSwitched[]; wholeSteps?: PluginOp[]; copilotCleared?: { id: string; name: string; server: string }[]; migrated?: true; undoOf?: string };
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false); `before`, a Claude Code override it replaced ("name-only"), for Undo. */
@@ -1570,7 +1570,7 @@ export interface ProfileEdit { id?: string; name?: string; items?: string[]; swi
 
 /** A library item a profile switch named, as History keeps it: its id (profileplan.ts itemId) and its name then. */
 export interface SwitchedItem { id: string; name: string }
-/** A library item a profile switch left On and kept out of other tools, as History keeps it: its keep-outs before and after. */
+/** A library item whose keep-outs a profile switch changed, as History keeps it: its keep-outs before and after. */
 export interface ExceptSwitched extends SwitchedItem { wasExcept: HarnessId[]; nowExcept: HarnessId[] }
 
 /**
@@ -1586,4 +1586,4 @@ export interface PluginSwitched { id: string; name: string; tool: HarnessId; on:
  * was turned in; and what could not be done in a tool (`results`: a plugin item's copy held or failed there too). `event`: its
  * History entry; none when nothing changed.
  */
-export interface ProfileSwitchResult { stopped?: string; name?: string; on: string[]; off: string[]; /** The items it left On whose tools it changed (HistoryEvent profile `except`), by name; absent when none. */ tools?: string[]; left: string[]; results: DestinationResult[]; event?: string; /** The settled profile entry written to History, so the header asks profileplan.ts undoOffered without rereading History. */ profile?: HistoryEvent['profile']; view?: HomeView; /** As its History entry's (HistoryEvent settingsChanged). */ settingsChanged?: string[]; /** Confirmed changes for reload advice (reload.ts). */ reloads: ReloadChange[] }
+export interface ProfileSwitchResult { stopped?: string; name?: string; on: string[]; off: string[]; /** The items it left On whose tools alone it changed, with their keep-outs before and after (HistoryEvent profile `except`); absent when none. */ retooled?: ExceptSwitched[]; left: string[]; results: DestinationResult[]; event?: string; /** The settled profile entry written to History, so the header asks profileplan.ts undoOffered without rereading History. */ profile?: HistoryEvent['profile']; view?: HomeView; /** As its History entry's (HistoryEvent settingsChanged). */ settingsChanged?: string[]; /** Confirmed changes for reload advice (reload.ts). */ reloads: ReloadChange[] }

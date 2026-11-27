@@ -3,9 +3,10 @@
 // - A profile names library items (`skill:<key>`, `agent:<key>`, `mcp:<key>`) and, when `switchesPluginItems` is true, plugins'
 //   items (`plugin:<kind>:<key>`, pluginItemId). Switching turns named items On and others Off (switchPlan), and when
 //   `switchesPluginItems` is true each plugin copy wherever its tool has a switch for one item (pluginPlan).
-// - Where it keeps each of its library items out is effectiveOut's alone: the tools outside its `tools` and its `out` for the
-//   item; a profile with neither leaves the Library's keep-outs as they are. switchPlan's `except` sets them, inUse compares
-//   them, listedChanges says them (`Changes tools`), undoPlan puts them back; toolsOf is the tools its strip ticks.
+// - Where it keeps each of its library items out is effectiveOut's alone: of the tools the item's kind is managed in, those
+//   outside its `tools` and its `out` for the item; a profile with neither, and any tool not managed, keep the Library's
+//   keep-outs. switchPlan's `except` sets them, inUse compares them, listedChanges says them (`Changes tools`), undoPlan puts
+//   them back; toolsOf is the tools its strip ticks, withTool a tick there; outNow fills `out` from the Library.
 // - Claude Code has no switch for one skill of a plugin, so there a profile that chooses plugin items has a plugin on while it
 //   ticks any item the plugin brings there and off while it ticks none (takenWhole, the one rule; a skill it leaves out comes on
 //   with a ticked one: comesWith, PluginTurn `along`; the plugins a switch turns on or off there: wholeTurns). One run per plugin
@@ -39,8 +40,7 @@ import { loadsKind, pageOfPart, pluginOff, samePart } from './pluginstatus.ts';
 import { cantSwitch, hasOwnSwitch, itemOffNow, itemSaid, onNow, ownSwitch, type PluginItemAt } from './pluginswitch.ts';
 import { takesPlugins } from './presence.ts';
 import { groupBy } from './model.ts';
-import { sameTools } from './historyactions.ts';
-import { andList, byToolOrder, harnessIds, keptOutWords, kindNouns, orList, toolNames } from './words.ts';
+import { andList, byToolOrder, harnessIds, keptOutWords, kindNouns, orList, sameTools, toolNames } from './words.ts';
 import type { HarnessId, HistoryEvent, HomeView, InstalledPlugin, LibraryFacts, PluginItem, PluginSwitched, Profile } from './types.ts';
 
 /** What every screen calls the state where no profile is in use. */
@@ -68,7 +68,8 @@ export const pluginItemId = (kind: ItemKind, key: string) => `plugin:${itemId(ki
  * disabled in settings.json; `loadsElsewhere`: each tool that still loads it once an Off removes what Central Knot wrote, and how
  * (libraryrow.ts keptByOff, from the view: homeItems).
  */
-export interface LiveItem { id: string; kind: ItemKind; key: string; name: string; on: boolean; except: LibraryItem['except']; copilotOff?: string; loadsElsewhere?: LoadsThere[] }
+export interface LiveItem { id: string; kind: ItemKind; key: string; name: string; on: boolean; except: LibraryItem['except']; copilotOff?: string; loadsElsewhere?: LoadsThere[];
+  /** The tools its kind is managed in here, where the caller knows them: only those are a profile's to decide (effectiveOut). */ managed?: HarnessId[] }
 /** One tool that still loads an item of his once Off, and how; `through`, for a plugin's copy (way `plugin`), that plugin's item (its pluginItemId), which keptOn asks the switch about. */
 export interface LoadsThere { tool: HarnessId; way?: LoadWay; through?: string }
 /**
@@ -86,11 +87,12 @@ const linkedToPlugin = (item: LibraryItem, plugins: ReadonlySet<string>) => !!it
 
 /**
  * Every live library item of the person's own that profiles act on, skills first, then MCP servers, then agents: all but those
- * linked to a plugin (`plugins`: the ids of the plugins the home records), which are that plugin's items (pluginLive).
+ * linked to a plugin (`plugins`: the ids of the plugins the home records), which are that plugin's items (pluginLive); with the
+ * tools each kind is managed in (`managed`), where given.
  */
-export function liveItems(libraries: Libraries, plugins: ReadonlySet<string>): LiveItem[] {
+export function liveItems(libraries: Libraries, plugins: ReadonlySet<string>, managed?: Record<ItemKind, HarnessId[]>): LiveItem[] {
   return KINDS.flatMap(kind => Object.values(libraries[kind]).filter(item => !item.deleted && !linkedToPlugin(item, plugins))
-    .map(({ key, name, on, except }) => ({ id: itemId(kind, key), kind, key, name, on, except })));
+    .map(({ key, name, on, except }) => ({ id: itemId(kind, key), kind, key, name, on, except, ...(managed ? { managed: managed[kind] } : {}) })));
 }
 
 /** Exact Copilot CLI server name for a library server (`row`: its LibraryFacts, if read). Shared with servers.ts rowFacts. */
@@ -98,7 +100,8 @@ export const copilotServerName = (row: Pick<LibraryFacts, 'copies' | 'plugin' | 
 /** Whether `row` holds an unmanaged found entry of exact name `server` in Copilot CLI (not On or applied there). */
 const isFoundCopilot = (row: LibraryFacts, server: string, lib: LibraryItem | undefined, managed: boolean) =>
   row.copies['copilot-cli']?.folder === server && !(managed && (lib?.on || !!lib?.applied?.['copilot-cli']));
-const ownHomeItems = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents' | 'profiles'>) => liveItems({ skill: home.skills.library, mcp: home.mcp.library, agent: home.agents.library }, recordedPlugins(home));
+const ownHomeItems = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents' | 'profiles'>) => liveItems({ skill: home.skills.library, mcp: home.mcp.library, agent: home.agents.library },
+  recordedPlugins(home), { skill: home.skills.tools, mcp: home.mcp.tools, agent: home.agents.tools });
 /** Attaches uncovered Copilot CLI `disabledMcpServers` blocks (`copilotOff`) to live MCP items, excluding names a switchable Copilot CLI plugin copy covers (`plugins`: pluginLive). */
 export function withCopilotOff(items: LiveItem[], rows: readonly LibraryFacts[], plugins: readonly PluginLive[]): LiveItem[] {
   const covered = new Set(plugins.flatMap(item => (item.kind === 'mcp' && item.copies.some(copy => copy.tool === 'copilot-cli' && copy.way === 'switch') ? [item.name] : [])));
@@ -148,15 +151,21 @@ export function leftOutWords(counts: Record<ItemKind, number>): { line: string; 
     card: `${one ? 'It is' : 'They are'} under Found in the Library, with Add ${one ? 'if it' : 'on each that'} can be taken in.` };
 }
 
+/** The tools `profile` itself keeps item `id` out of, any tool: outside its `tools`, and its `out` for it; undefined with neither. */
+const keptOutBy = (profile: Pick<Profile, 'tools' | 'out'>, id: string) => (!profile.tools && !profile.out ? undefined
+  : new Set([...profile.out?.[id] ?? [], ...harnessIds.filter(tool => profile.tools && !profile.tools.includes(tool))]));
 /**
- * Where switching to `profile` keeps `item` out, in tool order: the tools outside its `tools`, and its `out` for the item; for a
- * profile with neither (all saved before they were stored), undefined: the item's keep-outs stay as the Library has them.
+ * Where switching to `profile` keeps `item` out, in tool order: in each tool its kind is managed in (LiveItem `managed`; every
+ * one where not given), as the profile keeps it out (keptOutBy); in the others, as the Library does. Undefined for a profile
+ * with neither field (all saved before they were stored): the item's keep-outs stay as the Library has them.
  */
-export function effectiveOut(profile: Pick<Profile, 'tools' | 'out'>, item: { id: string }): HarnessId[] | undefined {
-  if (!profile.tools && !profile.out) return undefined;
-  const out = new Set([...profile.out?.[item.id] ?? [], ...harnessIds.filter(tool => profile.tools && !profile.tools.includes(tool))]);
-  return harnessIds.filter(tool => out.has(tool));
+export function effectiveOut(profile: Pick<Profile, 'tools' | 'out'>, item: Pick<LiveItem, 'id' | 'except' | 'managed'>): HarnessId[] | undefined {
+  const own = keptOutBy(profile, item.id);
+  return own && harnessIds.filter(tool => (!item.managed || item.managed.includes(tool) ? own.has(tool) : item.except.includes(tool)));
 }
+/** A profile's `tools` once `tool` is ticked (`on`) or unticked on its strip: an untick leaves out that one, every other tool still in. */
+export const withTool = (profile: Pick<Profile, 'tools'>, tool: HarnessId, on: boolean) =>
+  (on ? [...profile.tools ?? [], tool] : (profile.tools ?? harnessIds).filter(other => other !== tool));
 /** The managed tools a profile applies to (its `tools`, or every one): what its Tools strip ticks and the list counts. */
 export const toolsOf = (profile: Pick<Profile, 'tools'>, managed: readonly HarnessId[]) => managed.filter(tool => !profile.tools || profile.tools.includes(tool));
 /** A profile's `out` as the Library has its ticked items now (`live`): each one's keep-outs, where it has any (profiles.ts saveProfile fills one in so). */
@@ -180,12 +189,12 @@ export const outNow = (profile: Pick<Profile, 'items'>, live: LiveItem[]) =>
  *   known (`on` is false): it agrees with no profile, and nothing is written there.
  * `target`: what a switch turns, the copy installed whole as pluginswitch.ts click takes it, or the placed copy's library item.
  * `sharesWith`, a server in Copilot CLI: the other members sharing its exact bare name there — `own` (profile ids of his own
- * live servers in Central Knot Copilot CLI has or will have under that exact name, not kept out), `plugins` (other enabled
+ * live servers in Central Knot Copilot CLI has or will have under that exact name; `out`, those kept out of it now), `plugins` (other enabled
  * plugins' servers of that exact name there), and `found` (an unmanaged entry of his in Copilot CLI's file that no profile
  * switches).
  * `gone`, a placed copy: its item is On and was applied there, and the tool has no copy now: deleted by hand since.
  */
-export type PluginCopy = { tool: HarnessId; on: boolean; target: PluginItemAt | { libraryKey: string }; sharesWith?: { own: string[]; plugins: { id: string; plugin: string }[]; found?: true }; gone?: true }
+export type PluginCopy = { tool: HarnessId; on: boolean; target: PluginItemAt | { libraryKey: string }; sharesWith?: { own: string[]; out?: string[]; plugins: { id: string; plugin: string }[]; found?: true }; gone?: true }
   & ({ way: 'switch' | 'whole' | 'stays' } | { way: 'plugin-off' | 'held' | 'unread'; why: string });
 
 /** A plugin's item some tool has now: its id in a profile (pluginItemId), the plugin's name and marketplace, and each tool's copy. */
@@ -198,18 +207,19 @@ export type PluginHome = Pick<HomeView, 'pluginItems' | 'profiles' | 'skills' | 
 function copilotShares(home: PluginHome, at: PluginItemAt): PluginCopy['sharesWith'] {
   if (at.tool !== 'copilot-cli' || at.kind !== 'mcp') return undefined;
   const rows = new Map(home.mcp.items.map(row => [row.key, row]));
-  const managed = ownHomeItems(home).filter(item => item.kind === 'mcp' && !item.except.includes(at.tool));
+  const servers = ownHomeItems(home).filter(item => item.kind === 'mcp'), managed = servers.filter(item => !item.except.includes(at.tool));
   const managedKeys = new Set(managed.map(item => item.key));
-  const own = managed.filter(item => copilotServerName(rows.get(item.key), item.name) === at.name).map(item => item.id);
+  const named = servers.filter(item => copilotServerName(rows.get(item.key), item.name) === at.name), own = named.map(item => item.id);
+  const out = named.filter(item => item.except.includes(at.tool)).map(item => item.id);
   const plugins = (home.pluginItems ?? []).flatMap(install => install !== at.install && install.tool === at.tool && !install.off
     ? install.items.filter(part => part.kind === 'mcp' && part.name === at.name).map(part => ({ id: pluginItemId('mcp', pluginItemKey(install, part)), plugin: install.plugin })) : []);
   const found = home.mcp.items.some(row => isFoundCopilot(row, at.name, home.mcp.library[row.key], managedKeys.has(row.key)));
-  return own.length || plugins.length || found ? { own, plugins, ...(found ? { found: true as const } : {}) } : undefined;
+  return own.length || plugins.length || found ? { own, plugins, out, ...(found ? { found: true as const } : {}) } : undefined;
 }
 /** Whether a plugin's MCP server in Copilot CLI shares its exact bare name with a live server of his own or a found one there. */
 export const copilotSharesYours = (home: PluginHome, at: PluginItemAt): boolean => {
   const shared = copilotShares(home, at);
-  return !!shared && (!!shared.found || ownHomeItems(home).some(item => item.on && shared.own.includes(item.id)));
+  return !!shared && (!!shared.found || ownHomeItems(home).some(item => item.on && shared.own.includes(item.id) && !shared.out?.includes(item.id)));
 };
 /**
  * How a switch meets a copy installed whole: in Claude Code, by its whole plugin wherever its own switch alone can't turn it on;
@@ -284,15 +294,16 @@ export type CopilotKeptOn = { by: 'own' } | { by: 'plugin'; plugin: string } | {
 
 /**
  * Whether `copy` (a Copilot CLI MCP server) is kept on by another member sharing its exact bare name even though `profile`
- * leaves `item` out: his own server in Central Knot (`own`), another enabled plugin's server (`plugin`), or an unmanaged
+ * leaves `item` out: his own server in Central Knot the switch leaves there (`own`), another enabled plugin's server (`plugin`), or an unmanaged
  * personal entry already on there (`found`). Undefined when `profile` names `item` itself or nothing else keeps it on.
  */
-export function copilotKeptOnBy(profile: Pick<Profile, 'items' | 'switchesPluginItems'>, item: Pick<PluginLive, 'id'>, copy: PluginCopy): CopilotKeptOn | undefined {
+export function copilotKeptOnBy(profile: Pick<Profile, 'items' | 'switchesPluginItems' | 'tools' | 'out'>, item: Pick<PluginLive, 'id'>, copy: PluginCopy): CopilotKeptOn | undefined {
   const shared = copy.sharesWith;
   if (!shared || (profile.switchesPluginItems && profile.items.includes(item.id))) return undefined;
   const other = profile.switchesPluginItems ? shared.plugins.find(entry => profile.items.includes(entry.id)) : undefined;
   if (other) return { by: 'plugin', plugin: other.plugin };
-  if (shared.own.some(id => profile.items.includes(id))) return { by: 'own' };
+  // His own counts where the switch leaves it in Copilot CLI: as the profile keeps it out, else as it is kept out now.
+  if (shared.own.some(id => profile.items.includes(id) && !(keptOutBy(profile, id)?.has(copy.tool) ?? shared.out?.includes(id)))) return { by: 'own' };
   if (profile.switchesPluginItems && shared.found && copy.on) return { by: 'found' };
   return undefined;
 }
@@ -490,23 +501,28 @@ export function heldWords(plan: PluginTurn[], items: PluginLive[]): { text: stri
 /** Plugin items' copies counted as items, one per item, toward `on`: a copy turned in two tools is one item; one that came on only with its whole plugin (`along`) is none. */
 const itemsToward = <Copy extends { id: string; on: boolean; along?: true }>(copies: Copy[], on: boolean) => [...new Map(copies.filter(copy => copy.on === on && !copy.along).map(copy => [copy.id, copy])).values()];
 
-/** An item a switch, or its Undo, leaves On with keep-outs other than its own now: those it sets (`to`). */
+/** An item a switch, or its Undo, sets other keep-outs on than it has now: those it sets (`to`). */
 export interface ExceptTurn { item: LiveItem; to: HarnessId[] }
 /**
- * What a switch, or its Undo, changes: the items it turns On, those it turns Off, and those it leaves On kept out elsewhere
- * (`except`: a switch's, each item it turns On or leaves On whose effectiveOut differs from now; an Undo's, the keep-outs it puts back).
+ * What a switch, or its Undo, changes: the items it turns On, those it turns Off, and the keep-outs it sets (`except`: a
+ * switch's, on each item it turns On or leaves On whose effectiveOut differs from now; an Undo's, those it puts back, on an
+ * item it turns Off too).
  */
 export interface Turns { on: LiveItem[]; off: LiveItem[]; except: ExceptTurn[] }
-/** Of a plan's `except`, the items On before and after: those whose tools alone change, which History keeps and the counts take in. */
-export const toolsChanged = (turns: Turns) => turns.except.filter(turn => !turns.on.includes(turn.item));
+/** Of a plan's `except`, the items On before and after: those whose tools alone change, which the counts and rows take in. */
+export const toolsChanged = (turns: Turns) => turns.except.filter(turn => !turns.on.includes(turn.item) && !turns.off.includes(turn.item));
+/** Whether a plan changes nothing: no item turned On or Off, and no keep-out set. */
+export const unchanged = (turns: Turns) => !changes(turns) && !turns.except.length;
 
 /**
- * What switching to `profile` changes: each item it names that is Off (or blocked by an orphan Copilot CLI off-switch) turns On,
- * every other On item turns Off, and each item it names is kept out where effectiveOut says, where that differs from now.
+ * What switching to `profile` changes: each item it names that is Off (or blocked by an orphan Copilot CLI off-switch, unless the
+ * profile keeps it out of Copilot CLI) turns On, every other On item turns Off, and each item it names is kept out where
+ * effectiveOut says, where that differs from now.
  */
 export function switchPlan(profile: Pick<Profile, 'items' | 'tools' | 'out'>, live: LiveItem[]): Turns {
   const named = new Set(profile.items), outOf = (item: LiveItem) => (named.has(item.id) ? effectiveOut(profile, item) : undefined);
-  return { on: live.filter(item => named.has(item.id) && (!item.on || !!item.copilotOff)), off: live.filter(item => !named.has(item.id) && item.on),
+  const blocked = (item: LiveItem) => !!item.copilotOff && !outOf(item)?.includes('copilot-cli');
+  return { on: live.filter(item => named.has(item.id) && (!item.on || blocked(item))), off: live.filter(item => !named.has(item.id) && item.on),
     except: live.flatMap(item => { const to = outOf(item); return to && !sameTools(to, item.except) ? [{ item, to }] : []; }) };
 }
 
@@ -529,10 +545,8 @@ export const switchable = (profile: Pick<Profile, 'items' | 'switchesPluginItems
  * use again once it is back on; two that tick different skills of it are both in use while it is on, as long as neither leaves out
  * an MCP server or agent of it that is on there by its own switch.
  */
-export const inUse = (profiles: Profile[], live: LiveItem[], plugins: PluginLive[]) => profiles.filter(profile => {
-  const plan = switchPlan(profile, live);
-  return !changes(plan) && !plan.except.length && pluginItemsAgree(profile, plugins);
-});
+export const inUse = (profiles: Profile[], live: LiveItem[], plugins: PluginLive[]) =>
+  profiles.filter(profile => unchanged(switchPlan(profile, live)) && pluginItemsAgree(profile, plugins));
 
 /** The names of the profiles in use, as the menus and the status bar say them ("Development and Incident"), or No profile. */
 export function inUseName(profiles: Profile[], live: LiveItem[], plugins: PluginLive[]): string {
@@ -556,11 +570,13 @@ export function endedProfiles(before: readonly Profile[], after: readonly Profil
 
 /**
  * A switch's items in three lists, each item once per direction: the library items it turns On and Off (switchPlan) and the
- * plugins' items some tool turns on or off (pluginPlan `on` and `off`), and the library items whose tools alone change
- * (toolsChanged). What the page's Switch offers and changeWords counts.
+ * plugins' items some tool turns on or off (pluginPlan `on` and `off`), and the library items whose tools alone change, each
+ * with its keep-outs before and after (`retooled`: toolsChanged). What the page's Switch offers and changeWords counts.
  */
-export const allTurns = (turns: Turns, plugins: PluginTurn[]) =>
-  ({ on: [...turns.on, ...plugins.filter(item => item.on.length)], off: [...turns.off, ...plugins.filter(item => item.off.length)], tools: toolsChanged(turns) });
+export const allTurns = (turns: Turns, plugins: PluginTurn[]) => ({ on: [...turns.on, ...plugins.filter(item => item.on.length)],
+  off: [...turns.off, ...plugins.filter(item => item.off.length)], retooled: retools(toolsChanged(turns)) });
+/** Plan turns as keep-out changes: each item's keep-outs now and as set. */
+const retools = (list: ExceptTurn[]): Retool[] => list.map(({ item, to }) => ({ wasExcept: item.except, nowExcept: to }));
 
 /** How many items a plan turns On and Off together. */
 export const changes = (turns: { on: unknown[]; off: unknown[] }) => turns.on.length + turns.off.length;
@@ -610,9 +626,9 @@ const entryPlugs = (entry: NonNullable<HistoryEvent['profile']>) => [...new Set(
 
 /**
  * What the Undo of a switch's History entry turns back, decided from each item now: each item it turned On that is still On
- * goes Off, each it turned Off that is still Off goes On, and each it left On kept out elsewhere (`except`) that is still On and
- * kept out exactly so gets its keep-outs before back. An item whose On or Off, or keep-outs, differ now, or one no longer in the
- * library, is left (one turned back and forth since, and now as the switch left it, is turned back like any other).
+ * goes Off, each it turned Off that is still Off goes On, and each whose keep-outs it changed (`except`) that is still On and
+ * kept out exactly so gets its keep-outs before back, Off or On. An item whose On or Off, or keep-outs, differ now, or one no
+ * longer in the library, is left (one turned back and forth since, and now as the switch left it, is turned back like any other).
  */
 export function undoPlan(event: Pick<HistoryEvent, 'profile'>, live: LiveItem[]): Turns {
   const still = (named: { id: string }[] | undefined, on: boolean) => live.filter(item => item.on === on && !!named?.some(entry => entry.id === item.id));
@@ -626,15 +642,16 @@ export function undoPlan(event: Pick<HistoryEvent, 'profile'>, live: LiveItem[])
 /** What a switch's entry says it did, each item once: its library items, its orphan Copilot CLI clears, and its plugins' items; and the items whose tools alone it changed. */
 export function entryTurns(was: NonNullable<HistoryEvent['profile']>) {
   const add = (base: { id: string }[] | undefined, extra: { id: string }[]) => [...(base ?? []), ...extra.filter(item => !base?.some(other => other.id === item.id))];
+  const turned = (each: { id: string }) => [...was.on ?? [], ...was.off ?? []].some(item => item.id === each.id);
   return { on: [...add(was.on, was.undoOf ? [] : was.copilotCleared ?? []), ...itemsToward(was.plugins ?? [], true)],
-    off: [...add(was.off, was.undoOf ? was.copilotCleared ?? [] : []), ...itemsToward(was.plugins ?? [], false)], tools: was.except ?? [] };
+    off: [...add(was.off, was.undoOf ? was.copilotCleared ?? [] : []), ...itemsToward(was.plugins ?? [], false)], retooled: (was.except ?? []).filter(each => !turned(each)) };
 }
 
-/** What the Undo of a switch's entry will turn back, each item once: its library items (undoPlan, their keep-outs as `tools`), uncovered Copilot CLI rules (`copilotUndo`) and plugins' items (pluginUndo). */
+/** What the Undo of a switch's entry will turn back, each item once: its library items (undoPlan, those whose keep-outs alone go back as `retooled`), uncovered Copilot CLI rules (`copilotUndo`) and plugins' items (pluginUndo). */
 export function undoTurns(event: Pick<HistoryEvent, 'profile'>, live: LiveItem[], plugins: PluginLive[], mcp: Pick<HomeView['mcp'], 'items' | 'library'> = { items: [], library: {} }) {
   const library = undoPlan(event, live), afterOn = onAfterUndo(live, library), back = pluginUndo(event, plugins, afterOn).back.map(turn => ({ id: turn.item.id, on: turn.on, ...(turn.along ? { along: turn.along } : {}) }));
   const rules = copilotUndo(event, mcp.items, mcp.library, afterOn).back.filter(rule => !library.off.some(item => item.id === rule.id));
-  return { on: [...library.on, ...itemsToward(back, true)], off: [...library.off, ...rules, ...itemsToward(back, false)], tools: library.except };
+  return { on: [...library.on, ...itemsToward(back, true)], off: [...library.off, ...rules, ...itemsToward(back, false)], retooled: retools(toolsChanged(library)) };
 }
 
 /** What undoing a profile entry turns back in `home` as the page read it: its live items, plugins' items and MCP servers from that one read. */
@@ -678,18 +695,23 @@ export const listedPlugins = (profile: Pick<Profile, 'switchesPluginItems'>, plu
 export interface RowChange { id: string; said: string; full?: string }
 
 /**
- * Each listed row a switch changes, once, in `on` then `off` then `tools` (`on` before `off`; skills coming on with a plugin in
- * Claude Code turn on; plugin rows follow `listedPlugins`; `tools`, his items it leaves On kept out elsewhere: toolsChanged) with
- * its cell words (`said`). The one rule read by `switchPreview`'s short line, `Changes N`, its headings and every row's state cell.
+ * Each listed row a switch changes, once, in `on` then `off` then `retooled` (`on` before `off`; skills coming on with a plugin
+ * in Claude Code turn on; plugin rows follow `listedPlugins`; `retooled`, his items it leaves On kept out elsewhere:
+ * toolsChanged) with its cell words (`said`; one of his turning On kept out of a managed tool says where it won't be). The one rule
+ * read by `switchPreview`'s short line, `Changes N`, its headings and every row's state cell.
  */
-export function listedChanges(profile: Pick<Profile, 'items' | 'switchesPluginItems'>, live: LiveItem[], plugins: PluginLive[],
+export function listedChanges(profile: Pick<Profile, 'items' | 'switchesPluginItems' | 'tools' | 'out'>, live: LiveItem[], plugins: PluginLive[],
   turns = switchPlan(profile, live), plugs = pluginPlan(profile, plugins)) {
-  const on: RowChange[] = turns.on.map(item => ({ id: item.id, said: 'Turns on' }));
-  const off: RowChange[] = turns.off.map(item => ({ id: item.id, said: 'Turns off' }));
-  const tools: RowChange[] = toolsChanged(turns).map(({ item, to }) => {
-    const said = keptOutWords(item.except, to, 'Out of', true), full = keptOutWords(item.except, to, 'Out of');
-    return { id: item.id, said, ...(full !== said ? { full } : {}) };
+  const words = (lead: string, was: HarnessId[], now: HarnessId[]) => {
+    const said = keptOutWords(was, now, lead, true), full = keptOutWords(was, now, lead);
+    return { said, ...(full !== said ? { full } : {}) };
+  };
+  const on: RowChange[] = turns.on.map(item => {
+    const notIn = (effectiveOut(profile, item) ?? []).filter(tool => !item.managed || item.managed.includes(tool));
+    return { id: item.id, ...(notIn.length ? words('Turns on, not in', [], notIn) : { said: 'Turns on' }) };
   });
+  const off: RowChange[] = turns.off.map(item => ({ id: item.id, said: 'Turns off' }));
+  const retooled: RowChange[] = toolsChanged(turns).map(({ item, to }) => ({ id: item.id, ...words('Out of', item.except, to) }));
   for (const item of listedPlugins(profile, plugins)) {
     const turn = plugs.find(each => each.id === item.id);
     const up = [...turn?.on ?? [], ...turn?.along ?? []], down = turn?.off ?? [];
@@ -698,7 +720,7 @@ export function listedChanges(profile: Pick<Profile, 'items' | 'switchesPluginIt
     const text = [up.length && part('on', up), down.length && part('off', down)].filter(Boolean).join('; ');
     (up.length ? on : off).push({ id: item.id, said: `${text.charAt(0).toUpperCase()}${text.slice(1)}` });
   }
-  return { on, off, tools, byId: new Map([...on, ...off, ...tools].map(change => [change.id, change])) };
+  return { on, off, retooled, byId: new Map([...on, ...off, ...retooled].map(change => [change.id, change])) };
 }
 
 /** What the Profiles page's header (`line`, with `tip` in its `(?)` only when `card` says more than its plain form) and both profile menus (`card`) say for `profile`. */
@@ -714,7 +736,7 @@ export function switchPreview(profile: Profile, live: LiveItem[], plugins: Plugi
   const keep = profile.switchesPluginItems ? '' : `. ${pluginStayNote(plugs, plugins)}`;
   const count = namedCount(profile, live, plugins);
   const pack = (line: string, card: string, plain = line): PreviewWords => (card !== plain ? { line, card, tip: card } : { line, card });
-  if (!changes(turns) && !turns.except.length && !plugs.length && !whole.length) {
+  if (unchanged(turns) && !plugs.length && !whole.length) {
     // In Claude Code a skill left out is on while its plugin is (comesWith): counted apart, not among those off.
     const brought = plugins.filter(item => comesWith(profile, item)), others = live.length + (profile.switchesPluginItems ? plugins.length : 0) - count - brought.length;
     const one = new Set(brought.map(item => `${item.plugin}@${item.marketName}`)).size === 1;
@@ -733,9 +755,8 @@ export function switchPreview(profile: Profile, live: LiveItem[], plugins: Plugi
   const onlyWhole = [wholeCount.on && `${plural(wholeCount.on, 'plugin')} on`, wholeCount.off && `${plural(wholeCount.off, 'plugin')} off`].filter(Boolean);
   const unlisted = [counted.on.length && `${plural(counted.on.length, 'plugin item')} on`, counted.off.length && `${plural(counted.off.length, 'plugin item')} off`].filter(Boolean);
   const turned = listedParts.length ? listedParts : onlyWhole.length ? onlyWhole : unlisted;
-  const moved = listed.tools.length ? `${listed.tools.length} ${changeTools(listed.tools.length)}` : '';
-  const line = [turned.length ? `Switching turns ${turned.join(', ')}` : 'Switching', moved].filter(Boolean).join(' · ');
-  return pack(line, `Switching ${said}${keep}`, `Switching ${changeWords(listed, { on: 0, off: 0 }, 'will')}`);
+  const line = [turned.length ? `Switching turns ${turned.join(', ')}` : 'Switching', retoolWords(counted.retooled, 'line')].filter(Boolean).join(' · ');
+  return pack(line, `Switching ${said}${keep}`, `Switching ${changeWords({ ...listed, retooled: counted.retooled }, { on: 0, off: 0 }, 'will')}`);
 }
 
 /** How many plugins a switch turns on and off whole in Claude Code: before it, those wholeTurns finds (`installs`); after it, its entry's `wholeSteps` (`steps`). */
@@ -743,21 +764,38 @@ export const wholeCounts = ({ installs = [], steps = [] }: { installs?: Installe
   on: installs.filter(install => install.off).length + steps.filter(op => op.action === 'plugin-on').length,
   off: installs.filter(install => !install.off).length + steps.filter(op => op.action === 'plugin-off').length });
 
-/** After a count of items whose tools alone a switch changes: "changes tools", or "change tools" for several. */
-const changeTools = (count: number) => `${count === 1 ? 'changes' : 'change'} tools`;
+/** What the save that moves profiles to holding their keep-outs says of the others it filled in (profiles.ts saveProfile `filled`). */
+export const filledWords = (names: string[]) => `Saved. Nothing in your tools changed. ${andList(names)} ${names.length === 1 ? 'keeps' : 'keep'} each item’s tools as they are now.`;
+
+/** A keep-out change one item has, before and after (types.ts ExceptSwitched, or a plan's ExceptTurn). */
+export interface Retool { wasExcept: HarnessId[]; nowExcept: HarnessId[] }
+/**
+ * How many items' tools alone a switch changes, in words: where each leaves the same one or two tools and none comes back, those
+ * tools ("4 items leave Codex", after: "4 items now out of Codex"; back alone, after: "4 items now back in Pi"), else counted
+ * ("4 items change tools"); '' for none. `line`: the header's short form, without "items".
+ */
+export function retoolWords(list: readonly Retool[], tense: 'will' | 'did' | 'line'): string {
+  if (!list.length) return '';
+  const out = (each: Retool) => each.nowExcept.filter(tool => !each.wasExcept.includes(tool)), back = (each: Retool) => each.wasExcept.filter(tool => !each.nowExcept.includes(tool));
+  const [first] = list, same = list.every(each => sameTools(out(each), out(first!)) && sameTools(back(each), back(first!)));
+  const count = tense === 'line' ? String(list.length) : plural(list.length, 'item'), named = (tools: HarnessId[]) => andList(tools.sort(byToolOrder).map(tool => toolNames[tool]));
+  const [gone, came] = [out(first!), back(first!)], one = same && gone.length + came.length <= 2 && !(gone.length && came.length);
+  if (one && tense === 'did') return `${count} now ${gone.length ? `out of ${named(gone)}` : `back in ${named(came)}`}`;
+  if (one && gone.length) return `${count} ${list.length === 1 ? 'leaves' : 'leave'} ${named(gone)}`;
+  return `${count} ${tense === 'did' ? 'changed' : list.length === 1 ? 'changes' : 'change'} tools`;
+}
 
 /**
  * What a switch or its Undo does or did, in words: its items' counts (turnsWords, then `kept`: how many of them still load), then
- * how many items' tools alone change ("2 items change tools", "2 items changed tools"), then a sentence for each direction it turns
+ * how many items' tools alone change, and where (retoolWords), then a sentence for each direction it turns
  * plugins whole in Claude Code ("Turns 1 plugin off in Claude Code", "1 plugin turned off in Claude Code"); '' for nothing. The one
  * answer to "does it change anything?" that the preview, the Switch button and its title, the result, History's line and its
  * Undo's all ask.
  */
-export function changeWords(items: { on: unknown[]; off: unknown[]; tools?: unknown[] }, plugins: { on: number; off: number }, tense: 'will' | 'did', kept = ''): string {
+export function changeWords(items: { on: unknown[]; off: unknown[]; retooled?: readonly Retool[] }, plugins: { on: number; off: number }, tense: 'will' | 'did', kept = ''): string {
   const whole = (['on', 'off'] as const).filter(way => plugins[way])
     .map(way => `${tense === 'will' ? `turns ${plural(plugins[way], 'plugin')} ${way}` : `${plural(plugins[way], 'plugin')} turned ${way}`} in Claude Code`);
-  const moved = items.tools?.length ?? 0, tools = moved ? `${plural(moved, 'item')} ${tense === 'will' ? changeTools(moved) : 'changed tools'}` : '';
-  const said = [changes(items) ? `${turnsWords(items, tense)}${kept}` : '', tools, ...whole].filter(Boolean);
+  const said = [changes(items) ? `${turnsWords(items, tense)}${kept}` : '', retoolWords(items.retooled ?? [], tense), ...whole].filter(Boolean);
   return said.map((sentence, at) => (at ? sentence.charAt(0).toUpperCase() + sentence.slice(1) : sentence)).join('. ');
 }
 

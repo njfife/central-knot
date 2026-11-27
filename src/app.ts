@@ -38,7 +38,7 @@ import type { PluginEntry } from './pluginrecord.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
-import { changeWords, endedProfiles, inUseInHome, stillLoadAfter, undoOffered, wholeCounts, wholeSaid } from './profileplan.ts';
+import { changeWords, endedProfiles, filledWords, inUseInHome, stillLoadAfter, undoOffered, wholeCounts, wholeSaid } from './profileplan.ts';
 import { hasReloadAdvice, pluginReloads, reloadAdvice, reloadsFor, settleReloads, waysFrom, type ReloadChange } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
 import { followView, type SigninChecks } from './mcpsignin.ts';
@@ -2085,7 +2085,7 @@ export const profileState = {
   /** The name as typed while renaming, kept across redraws. */
   draft: undefined as string | undefined,
   /** Pinned row ids while the Profiles page's Changes view is open, so ticking moves no row. */
-  changes: undefined as { home: string; profileId: string; on: string[]; off: string[]; tools: string[] } | undefined,
+  changes: undefined as { home: string; profileId: string; on: string[]; off: string[]; retooled: string[] } | undefined,
 };
 
 /**
@@ -2151,7 +2151,7 @@ export const saveProfileDef = (profile: ProfileEdit, said?: string, band = false
   if (result.id && (!profile.id || profile.restore)) profileState.open = result.id;
   if (result.id && !profile.id) profileState.renaming = result.id;
   // The save that moved the file to profiles that hold their tools (profiles.ts saveProfile): which others it filled in, once.
-  if (result.filled) tell({ page, band: true, text: `Saved. Filled in ${andList(result.filled)} with each item’s tools as they are now.` }, '', { checkProfile: false });
+  if (result.filled) tell({ page, band: true, text: filledWords(result.filled) }, '', { checkProfile: false });
   else if (band && said) tell({ page, band: true, text: said }, '', { checkProfile: false });
   else announce(said ?? 'Profile saved.', true);
 });
