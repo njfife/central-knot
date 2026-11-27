@@ -150,9 +150,9 @@ export interface DesktopApi {
   /**
    * A tool's Manage switch (toolchoice.ts chooseTools): Central Knot's care of it turned on or off, then the home read and synced.
    * `resume`: the page showed a home that waits for Resume, which the switch resumes as a click does. `did`: what that pass did in
-   * the tool (its results there), which the band after the click says.
+   * the tool (its results there), which the band after the click says. `full`: `stopped` is already a complete sentence.
    */
-  manageTool(tool: HarnessId, on: boolean, resume: boolean, home: string): Promise<{ stopped?: string; view: HomeView | null; did: DestinationResult[] }>;
+  manageTool(tool: HarnessId, on: boolean, resume: boolean, home: string): Promise<{ stopped?: string; full?: true; view: HomeView | null; did: DestinationResult[] }>;
   /** The Overview's line that `tool` came under management in `home` (arrivals.ts), closed for good. */
   dismissArrival(tool: HarnessId, home: string): Promise<void>;
   /** Replace: the build the held screen names, its bundle at `path`, quit and moved to the Trash (main.ts builds:replace, otherbuilds.ts removeBuild). */

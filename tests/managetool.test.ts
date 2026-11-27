@@ -21,7 +21,7 @@ import { applyServers, serversView } from '../src/servers.ts';
 import { setSyncEverything } from '../src/everything.ts';
 import { managedNow, readRecord, syncGate, type ShareContext } from '../src/share.ts';
 import { applySkills, clearSwitch, restoreSkill, skillsView, takeOver } from '../src/skills.ts';
-import { chooseTools, whatJoiningDoes } from '../src/toolchoice.ts';
+import { chooseTools, manageRefused, whatJoiningDoes } from '../src/toolchoice.ts';
 import type { Change, HarnessId, JoinCounts, PassResult } from '../src/types.ts';
 import { connectRepo, pullRepo, pushRepo } from '../src/gitrepo.ts';
 import { applySkillsIn, seedServerAndAgent, skill, skillText as repoSkill, world } from './gitrepo-world.ts';
@@ -569,6 +569,25 @@ test('A tool left out stays left out when it is uninstalled and installed again;
     assert.deepEqual(await b.managed(), ['claude-cli', 'copilot-cli'], 'installed again, still left out');
     await mkdir(join(b.home, '.config/opencode'), { recursive: true });
     assert.deepEqual(await b.managed(), ['claude-cli', 'copilot-cli', 'opencode-cli'], 'a tool installed later is managed');
+  } finally { await b.cleanup(); }
+});
+
+test('manageRefused refuses a Manage click that would change nothing (already so, or tool gone) and leaves a damaged record’s stop reason intact', async () => {
+  const b = await box();
+  try {
+    const snaps = () => b.context.read();
+    assert.equal(await manageRefused(b.context, await snaps(), 'codex-cli', true), 'Codex is already managed. Nothing was changed.');
+    assert.equal(await manageRefused(b.context, await snaps(), 'codex-cli', false), undefined);
+    assert.equal((await syncGate(b.context)).state, 'first-setup', 'refusing a no-op creates no record');
+    assert.deepEqual(await chooseTools(b.context, 'codex-cli', false), {});
+    assert.equal(await manageRefused(b.context, await snaps(), 'codex-cli', false), 'Codex is already left out. Nothing was changed.');
+    assert.equal(await manageRefused(b.context, await snaps(), 'codex-cli', true), undefined);
+    await rm(join(b.home, '.codex'), { recursive: true });
+    assert.equal(await manageRefused(b.context, await snaps(), 'codex-cli', true), 'Codex is no longer present here. Nothing was changed.');
+    assert.equal(await manageRefused(b.context, await snaps(), 'codex-cli', false), 'Codex is no longer present here. Nothing was changed.');
+    await mkdir(join(b.home, '.codex'), { recursive: true });
+    await writeFile(join(b.home, '.central-knot/sync.json'), '{broken');
+    assert.match((await manageRefused(b.context, await snaps(), 'codex-cli', true)) ?? '', /Nothing was written or deleted/);
   } finally { await b.cleanup(); }
 });
 

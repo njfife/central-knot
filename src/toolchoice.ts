@@ -1,19 +1,32 @@
-// A tool's Manage switch (Harnesses): the one place the tools Central Knot manages in a home change (chooseTools), and what
-// turning one on would do there (whatJoiningDoes), which its card says before the click. The choice is kept as the tools
+// A tool's Manage switch (Harnesses and History): the one place the tools Central Knot manages in a home change (chooseTools),
+// main's pre-check for a click that would change nothing (manageRefused), and what turning one on would do there (whatJoiningDoes),
+// which its card and History's rejoin question say before the click. The choice is kept as the tools
 // left out (share.ts SyncRecord leftOut) and read by presence.ts managedTools. What a tool that leaves or comes back means for
 // each item is the model's (library.ts, "A HARNESS THAT LEAVES" and "A HARNESS MANAGED AGAIN"); main.ts runs the switch in its
 // queue and reads the home again after it, which is the pass that brings a tool turned on into line. The card, its switch and
-// its words are managecard.ts's; the switch's History entry is worded by historypage.ts.
+// shared click are managecard.ts's; the switch's History entry and its in-row button are historypage.ts's.
 import { randomUUID } from 'node:crypto';
 import { agentKind } from './agents.ts';
 import { harnessIds } from './harnesses.ts';
 import { appendHistory } from './history.ts';
 import { forgetFolders, joinCounts } from './librarypass.ts';
+import { presentTools } from './presence.ts';
 import { serverKind } from './servers.ts';
-import { leftOutNow, libraryGate, saveRecord, type ShareContext } from './share.ts';
+import { leftOutNow, libraryGate, saveRecord, syncGate, writeAccess, type ShareContext } from './share.ts';
 import { skillKind } from './skills.ts';
-import type { HarnessId, HistoryEvent, JoinCounts } from './types.ts';
+import type { HarnessId, HistoryEvent, JoinCounts, Snapshot } from './types.ts';
 import { toolName } from './words.ts';
+
+/** Why a Manage click would change nothing now (tool gone, writes stopped, or already in that state); checked in main's queue before chooseTools. */
+export async function manageRefused(context: ShareContext, snapshots: Snapshot[], tool: HarnessId, on: boolean): Promise<string | undefined> {
+  if (!presentTools(snapshots).includes(tool)) return `${toolName(tool)} is no longer present here. Nothing was changed.`;
+  const access = await writeAccess(context);
+  if (!access.allowed) return access.reason;
+  const gate = await syncGate(context);
+  if (gate.state === 'stopped') return gate.reason;
+  if ((await leftOutNow(context)).includes(tool) !== on) return `${toolName(tool)} is already ${on ? 'managed' : 'left out'}. Nothing was changed.`;
+  return undefined;
+}
 
 /**
  * Turns Central Knot's care of one tool on or off. Off: every kind lets go of that tool's folder (an MCP server's: its settings
@@ -22,7 +35,7 @@ import { toolName } from './words.ts';
  * into line. Refused, as a click is, where nothing may be written (preview only, a damaged record); in a
  * home that waits for Resume it resumes, as a click does, only when asked (`resume`: the page showed that state). The first act
  * in a home with no record makes the record (Synchronize everything is left unanswered); a switch that is so already makes no record and resumes nothing. One History entry says it; it has no
- * Undo, since the switch is the way back. Run between passes, like any other write to the records.
+ * Undo, since turning the tool back on Harnesses or on its History entry is the way back. Run between passes, like any other write to the records.
  */
 export async function chooseTools(context: ShareContext, tool: HarnessId, on: boolean, resume = false): Promise<{ stopped?: string }> {
   // A switch that is so already changes nothing, so it enters no gate: no record made, no home resumed.
