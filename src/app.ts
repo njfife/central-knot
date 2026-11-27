@@ -263,7 +263,7 @@ export function tell(outcome: Outcome | undefined, otherwise = '', options?: { c
   state.outcome = told;
   // Said in a plugin run's place (Plugins, Instructions, or a tool's tab of either), the newer result: the run's goes, so this one's ×
   // uncovers nothing older (pluginstate.ts overRun).
-  if (overRun(told, resultInHeader())) closeRun();
+  if (overRun(told)) closeRun();
   if (!told) announce(otherwise);
   else { announce(spoken(told), !saidInStatusBar(told)); told.said = state.said.seq; }
   fadeLater();

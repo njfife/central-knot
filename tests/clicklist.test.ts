@@ -82,7 +82,7 @@ const { settingsPage } = await import('../src/settingspage.ts');
 const { acting, announce, applyByKind, applyClick, askFlash, busy, closeResult, deleteProfileDef, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, profileEndedLine, profilesBefore, saveProfileDef, selectOff, switchToProfile, whyKindReadOnly, whyReadOnly,
   loadHome, problemKey, queueClick, readAgain, restoreEvent, setRenderer, showPage, syncNow, tell, state: app } = await import('../src/app.ts');
 const { repo, repoPage } = await import('../src/repopage.ts');
-const { addMarketplace, applyPluginOps, clickOn, closeRun, lastLines, market, pluginBusy, resetMarket, resultOn, runReloads, shownPlugins, turnFromLine, turnPlugin, undoLabel, undoLast, undoOps, usePlugins } = await import('../src/pluginstate.ts');
+const { addMarketplace, applyPluginOps, clickOn, closeRun, forgetMarketplace, lastLines, market, pluginBusy, resetMarket, resultOn, runReloads, shownPlugins, turnFromLine, turnPlugin, undoLabel, undoLast, undoOps, usePlugins } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
 const { backgroundProblems, copyQuestion, headerNotices, libraryTable, listResult, openKind, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
@@ -689,6 +689,22 @@ test('Sync once from the menu on Plugin marketplaces, an older run’s result th
   assert.match(drawn, /Not everything was synced\./);
   assert.match(drawn, /notes \(Codex\): Could not remove Codex’s copy yet\./);
   assert.doesNotMatch(drawn, /alpha/);
+});
+
+test('A newer result with an action of its own takes an older refusal’s place on Plugin marketplaces: Remove from this list says itself with Add back, a Refresh between or not', async () => {
+  // Each order: whether a Refresh came between, whether Add back is drawn, whether the old refusal still is.
+  const seen: [boolean, boolean, boolean][] = [];
+  for (const refresh of [false, true]) {
+    start();
+    turnPlugin(entry, 'alpha', 'on');
+    await settled();
+    await main.answer({ stopped, done: [] });
+    if (refresh) await readAgain();
+    await forgetMarketplace('/market');
+    const drawn = pluginsResult();
+    seen.push([refresh, drawn.some(node => !!findById(node, 'outcome-add-back')), drawn.map(textOf).join(' | ').includes(stopped)]);
+  }
+  assert.deepEqual(seen, [[false, true, false], [true, true, false]]);
 });
 
 test('A new run lets go every kind’s earlier click reasons: after two refusals stood past their 8 seconds, an agent switched with no problem has no reason and no problem line, and the skills’ notices stay', async t => {

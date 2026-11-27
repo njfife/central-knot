@@ -643,13 +643,12 @@ export function undoLast(): void {
 /** × on the run's result in the header: it goes, and its problem lines with it, and the run of clicks ends (clicklist.ts endRun). */
 export function closeRun(): void { endRun(); clearRun(); }
 /**
- * Whether the app's result `outcome`, said on the page of the run's place and not in the status bar, is the newer result there: the
- * run's then goes (app.ts tell) and is not drawn (pluginspage.ts pluginsResult). `inHeader` is matrix.ts resultInHeader, asked by the
- * caller: in the header (Plugins, a tool's Plugins tab) only one with no action of the page's own (Sync once) or a library-item click
- * result (`rows`) is; in a band (Instructions, a tool's Instructions tab) any is, so one result stands there at a time.
+ * Whether the app's result `outcome`, said on the page of the run's place and not in the status bar, is the newer result there: any
+ * such result, with an action of its own (Add back) or none, in the header or in a band, so the run's goes (app.ts tell) and one
+ * result stands in a place at a time. How the header draws it is pluginspage.ts pluginsResult's.
  */
-export const overRun = (outcome: Outcome | undefined, inHeader: boolean): boolean =>
-  !!outcome && !!pluginsResultPlace() && outcome.page === app.page && (!inHeader || !outcome.act || !!outcome.rows?.length) && !saidInStatusBar(outcome);
+export const overRun = (outcome: Outcome | undefined): boolean =>
+  !!outcome && !!pluginsResultPlace() && outcome.page === app.page && !saidInStatusBar(outcome);
 const clearRun = (place: RunPlace = placeNow()) => { runs.delete(place); problems.delete(place); };
 /**
  * The run's result with no problem line goes by itself, as a list page's result in the header does (app.ts FADE_MS); its Undo with
