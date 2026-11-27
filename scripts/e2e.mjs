@@ -1901,6 +1901,20 @@ const caretLineShows = a => a.run(`(() => {
  * in a real window on macOS 26, comes off its height. Every check at the smallest size sizes the page to this.
  */
 const SMALLEST = [860, 560 - 32];
+/**
+ * A file panel's text (`pre`, its selector) scrolled to its foot: its last line's words, whether the text scrolls, and whether that
+ * line is whole: inside the text's box, the page's scroll area around it and above the status bar (the Library, the Overview).
+ */
+const lastLineWhole = (a, pre) => a.run(`(() => {
+  const pre = document.querySelector(${JSON.stringify(pre)}), view = pre.closest('.scroll').getBoundingClientRect(), status = document.querySelector('#status').getBoundingClientRect();
+  pre.scrollTop = pre.scrollHeight;
+  const node = pre.firstChild, text = node.data.replace(/\\n$/, ''), range = document.createRange();
+  range.setStart(node, text.lastIndexOf('\\n') + 1);
+  range.setEnd(node, text.length);
+  const line = range.getBoundingClientRect(), box = pre.getBoundingClientRect();
+  return { words: range.toString(), scrolls: pre.scrollHeight > pre.clientHeight,
+    whole: line.top >= Math.max(box.top, view.top) && line.bottom <= Math.min(box.bottom, view.bottom, status.top) + 0.5 };
+})()`);
 /** Longer than a result without Undo stays in the header (app.ts FADE_MS). */
 const FADE_WAIT = 9000;
 
@@ -11377,21 +11391,27 @@ async function overviewFlow() {
   await a.quit();
   // A most used name opens its row on the very first click, before its kind's page was ever drawn in this launch: an own skill, one
   // whose copies differ (its question open), an own MCP server; then, in another home opened meanwhile, a plugin's skill.
+  // Claude Code's clash is sixty lines long, so its file scrolls in its box.
+  skill(claude, 'clash', text('clash', Array.from({ length: 60 }, (_, at) => `Line ${at + 1} of Claude Code’s way.`).join('\n')));
   skill(codex, 'clash', text('clash', 'Codex’s way.'));
+  // A found skill with a long name, used once too: its name is shortened beside its mark.
+  const longName = 'incident-postmortem-timeline-writer';
+  skill(claude, longName);
   const used = (folder, names) => { mkdirSync(join(folder, '.claude/projects/-work'), { recursive: true });
     writeFileSync(join(folder, '.claude/projects/-work/used.jsonl'), JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(),
       message: { content: names.map(name => (name.startsWith('mcp__') ? { type: 'tool_use', name, input: {} } : { type: 'tool_use', name: 'Skill', input: { skill: name } })) } }) + '\n'); };
-  used(home, ['notes', 'clash', 'mcp__docs__start']);
+  used(home, ['notes', 'clash', longName, 'mcp__docs__start']);
   // This computer's home, opened second: its only item is a plugin's skill, used once.
   standIns(real);
   mkdirSync(join(real, '.claude/skills'), { recursive: true });
   writeClaudeInstall(real, 'solo', 'kit', '1.0.0', { 'skills/one/SKILL.md': text('one') });
   used(real, ['kit:one']);
   a = await launch(data, [], real);
+  /** A most used name's button on its kind's card, found by the name it shows. */
+  const topName = (kind, name) => `[...document.querySelectorAll('#overview-${kind}-usage .kind-card-top-name')].find(e => e.textContent === ${JSON.stringify(name)})`;
   const openTop = async (kind, name) => {
-    const link = `#overview-${kind}-usage .middle[title=${JSON.stringify(name)}]`;
-    for (let tries = 0; tries < 100 && !(await a.exists(link)); tries++) await wait(100);
-    await a.click(`#${await a.run(`document.querySelector(${JSON.stringify(link)})?.closest('button')?.id`)}`);
+    for (let tries = 0; tries < 100 && !(await a.run(`!!${topName(kind, name)}`)); tries++) await wait(100);
+    await a.click(`#${await a.run(`${topName(kind, name)}?.id`)}`);
     const open = keysOf(kind, await a.all('.ov-row[aria-expanded="true"]', 'e.dataset.key'));
     await a.click('#nav-overview');
     return open;
@@ -11399,6 +11419,117 @@ async function overviewFlow() {
   same('launched, nothing visited: a most used own skill opens its row on the first click', await openTop('skills', 'notes'), ['notes']);
   same('one whose copies differ opens too, with its copy question', await openTop('skills', 'clash'), ['clash']);
   same('a most used MCP server, its page never drawn either, opens its row', await openTop('mcp', 'docs'), ['docs']);
+  // Beside each most used name, its file mark: the file opens under the card, the Overview staying, as the Library's mark opens
+  // it (the copy in each tool, or the version Central Knot holds; a server's entry), its header naming the item.
+  const fileMark = (kind, key) => `[id="${rowPart('file', kind, key)}"]`, cardPanel = '.kind-cards > .details-file-only';
+  const panelSays = () => a.run(`(() => {
+    const panel = document.querySelector('${cardPanel}'), box = panel?.querySelector('.file-open-box');
+    return { under: panel?.previousElementSibling?.querySelector('.kind-card-main')?.id ?? null, label: panel?.getAttribute('aria-label') ?? null,
+      item: box?.querySelector('.file-open-head .file-open-item')?.textContent ?? null,
+      text: box?.querySelector('pre.content')?.textContent ?? box?.querySelector('.file-open-state')?.textContent ?? null,
+      copies: [...(box?.querySelectorAll('.file-copy-select option') ?? [])].map(option => option.textContent), path: box?.querySelector('.file-open-foot .path-text')?.textContent ?? null,
+      pressed: [...document.querySelectorAll('.kind-cards .row-file-btn[aria-pressed="true"]')].map(mark => mark.id), panels: document.querySelectorAll('.file-open-box').length,
+      page: document.querySelector('.page-title')?.textContent ?? null };
+  })()`);
+  /** What the panel says once its text holds `words`; it fails if the text never comes. */
+  const panelHolds = async words => {
+    for (let tries = 0; tries < 80 && !(await panelSays()).text?.includes(words); tries++) await wait(100);
+    const said = await panelSays();
+    if (!said.text?.includes(words)) throw new Error(`the Overview's file panel never held ${JSON.stringify(words)}: ${JSON.stringify(said)}`);
+    return said;
+  };
+  same('each most used name has the Library’s file mark right after it: clash, the long-named one and notes on Skills, docs on MCP servers',
+    await a.run(`[...document.querySelectorAll('.kind-card .row-file-btn')].map(mark => [mark.id, mark.getAttribute('aria-label'), !!mark.previousElementSibling?.matches('.kind-card-top-name')])`),
+    [[rowPart('file', 'skills', 'clash'), 'Open file: clash', true], [rowPart('file', 'skills', longName), `Open file: ${longName}`, true],
+      [rowPart('file', 'skills', 'notes'), 'Open file: notes', true], [rowPart('file', 'mcp', 'docs'), 'Open file: docs', true]]);
+  // A long name is one name: one line, one run of text with no gap inside it, cut at its end only where the count leaves it no
+  // more room, its mark whole beside it.
+  const longBox = () => a.run(`(() => {
+    const name = ${topName('skills', longName)}, mark = document.querySelector('${fileMark('skills', longName)}'), count = name.closest('p').lastElementChild.getBoundingClientRect();
+    const box = name.getBoundingClientRect(), at = mark.getBoundingClientRect(), card = name.closest('.kind-card').getBoundingClientRect();
+    return { oneLine: box.height <= 21, oneRun: name.children.length === 0, cutOnlyWithoutRoom: name.scrollWidth <= name.clientWidth || Math.round(count.left - at.right) <= 8,
+      markWhole: at.left >= box.right && at.right <= count.left && at.right <= card.right };
+  })()`);
+  const longAt = {};
+  for (const [width, height] of [[1316, 819], SMALLEST]) {
+    await sizeTo(a, width, height);
+    const rail = await a.run(`document.body.classList.contains('rail')`);
+    if (rail) await a.click('#sidebar-toggle');
+    await a.settle();
+    longAt[width] = await longBox();
+    if (rail) await a.click('#sidebar-toggle');
+  }
+  await fullSize(a);
+  const whole = { oneLine: true, oneRun: true, cutOnlyWithoutRoom: true, markWhole: true };
+  same('at 1316 and 860, with the sidebar open, the long name reads as one: one line, no gap inside it, cut only where the count leaves no room, its mark whole',
+    [longAt[1316], longAt[860]], [whole, whole]);
+  if (shots) {
+    await sizeTo(a, ...SMALLEST);
+    const rail = await a.run(`document.body.classList.contains('rail')`);
+    if (rail) await a.click('#sidebar-toggle');
+    await a.run(`window.centralKnot.setAppearance('light')`);
+    await wait(80);
+    await a.shot('overview-long-name-860-light');
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    if (rail) await a.click('#sidebar-toggle');
+    await fullSize(a);
+  }
+  await a.click(fileMark('skills', 'clash'));
+  const clashOpen = await panelHolds('Line 60 of Claude Code’s way.');
+  same('clash’s mark opens its SKILL.md under the Skills card, the page still the Overview, its header naming clash: Claude Code’s copy first, Codex’s offered, its path below',
+    [clashOpen.page, clashOpen.under, clashOpen.label, clashOpen.item, clashOpen.copies, clashOpen.text.startsWith('---\nname: clash'), clashOpen.path?.endsWith('/.claude/skills/clash/SKILL.md'), clashOpen.pressed, clashOpen.panels],
+    ['Overview', 'overview-skills', 'File for clash', 'clash', ['Claude Code’s copy', 'Codex’s copy'], true, true, [rowPart('file', 'skills', 'clash')], 1]);
+  if (shots) {
+    await sizeTo(a, 1316, 819);
+    const rail = await a.run(`document.body.classList.contains('rail')`);
+    if (rail) await a.click('#sidebar-toggle');
+    for (const theme of ['light', 'dark']) { await a.run(`window.centralKnot.setAppearance('${theme}')`); await wait(80); await a.shot(`overview-file-open-1316-${theme}`); }
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    if (rail) await a.click('#sidebar-toggle');
+    await fullSize(a);
+  }
+  // At 860 with the sidebar open, the box fits the window and its text scrolls in it: at its foot, the last line is whole.
+  await sizeTo(a, ...SMALLEST);
+  const railed = await a.run(`document.body.classList.contains('rail')`);
+  if (railed) await a.click('#sidebar-toggle');
+  await a.settle();
+  if (shots) { await a.run(`window.centralKnot.setAppearance('light')`); await wait(80); await a.shot('overview-file-open-860-light'); await a.run(`window.centralKnot.setAppearance('system')`); }
+  same('at 860, scrolled to its foot, the file’s last line is whole in its box and in the page', await lastLineWhole(a, `${cardPanel} pre.content`),
+    { words: 'Line 60 of Claude Code’s way.', scrolls: true, whole: true });
+  await fitsAtMinimum(a, 'the Overview with a most used skill’s file open');
+  // From a lower card at 860 (fitsAtMinimum ends at full size): docs' entry opens under MCP servers, brought into view.
+  await sizeTo(a, ...SMALLEST);
+  await a.settle();
+  await a.run(`document.querySelector('#overview-scroll').scrollTop = 0`);
+  await a.click(fileMark('mcp', 'docs'));
+  await panelHolds('"command":"docs"');
+  await a.settle();
+  const lowerInView = await a.run(`(() => { const box = document.querySelector('${cardPanel} .file-open-box').getBoundingClientRect(), view = document.querySelector('#overview-scroll').getBoundingClientRect();
+    return box.top >= view.top && box.bottom <= view.bottom + 0.5; })()`);
+  if (shots) { await a.run(`window.centralKnot.setAppearance('light')`); await wait(80); await a.shot('overview-file-lower-card-860-light'); await a.run(`window.centralKnot.setAppearance('system')`); }
+  same('at 860, docs’ entry under the second card is brought into view whole', lowerInView, true);
+  await a.press('Escape');
+  if (railed) await a.click('#sidebar-toggle');
+  await fullSize(a);
+  // Two marks pressed at once, before the first file is read: the last press wins.
+  await a.run(`document.querySelector('${fileMark('skills', 'notes')}').click(); document.querySelector('${fileMark('mcp', 'docs')}').click();`);
+  const docsOpen = await panelHolds('"command":"docs"');
+  same('notes’ mark then docs’ at once, the last press wins: docs’ entry, named, under MCP servers, its mark alone pressed', [docsOpen.under, docsOpen.label, docsOpen.item, docsOpen.pressed, docsOpen.panels],
+    ['overview-mcp', 'File for docs', 'docs', [rowPart('file', 'mcp', 'docs')], 1]);
+  await a.press('Escape');
+  same('Escape closes it, the focus back on its mark', [(await panelSays()).panels, await a.run('document.activeElement?.id')], [0, rowPart('file', 'mcp', 'docs')]);
+  await a.click(fileMark('skills', 'notes'));
+  await panelHolds('name: notes');
+  await a.click('#nav-library');
+  await a.click('#nav-overview');
+  same('leaving the Overview closes the file: back on it, none is open', (await panelSays()).panels, 0);
+  // A mark pressed and the page left before its file is read: the read that answers late draws nothing where he went, and
+  // nothing is open when he is back.
+  await a.run(`document.querySelector('${fileMark('skills', 'clash')}').click(); document.querySelector('#nav-library').click();`);
+  await wait(600);
+  const lateOnLibrary = await a.run(`[document.querySelector('.page-title')?.textContent, document.querySelectorAll('.file-open-box').length]`);
+  await a.click('#nav-overview');
+  same('a file asked for and the Overview left before it is read: nothing of it on the Library, nothing open back on the Overview', [lateOnLibrary, (await panelSays()).panels], [['Library', 0], 0]);
   const session = join(home, '.claude/projects/-work/used.jsonl');
   const sessionsCell = '.tools-table tr[data-tool="claude-cli"] .tools-sessions';
   const update = byId('overview-collect-usage');
@@ -11435,8 +11566,15 @@ async function overviewFlow() {
   unlinkSync(second);
   chmodSync(session, 0o600);
   same('restoring access restores the complete sessions cell', await updateSessions(), readable);
+  await a.click(fileMark('skills', 'notes'));
+  await panelHolds('name: notes');
   await a.click('#home-actual');
-  for (let tries = 0; tries < 100 && !(await a.exists('#overview-skills-usage .middle[title="one"]')); tries++) await wait(100);
+  for (let tries = 0; tries < 100 && !(await a.run(`!!${topName('skills', 'one')}`)); tries++) await wait(100);
+  same('another home closes the file open in the first', (await panelSays()).panels, 0);
+  await a.click(fileMark('skills', 'kit@solo/one'));
+  const pluginOpen = await panelHolds('name: one');
+  same('there, the most used plugin’s skill opens its SKILL.md in Claude Code’s copy of kit', [pluginOpen.under, pluginOpen.label, pluginOpen.item, pluginOpen.path?.endsWith('/SKILL.md')], ['overview-skills', 'File for one', 'one', true]);
+  await a.press('Escape');
   same('another home whose only item is a plugin’s skill: the card counts it, and first setup’s question, which asks there in the lead’s place, says it is found and none is ready to add',
     [(await a.text('.kind-card:has(#overview-skills) .kind-card-summary'))?.trim(), await a.exists('.overview-lead'), /^None of the items found is ready to add\. /.test(await a.text('#setup-question-title') ?? '')], ['1 skill · none on · 1 from plugins', false, true]);
   same('there, after Skills was drawn in the first home, a most used plugin’s skill opens its row on the first click', await openTop('skills', 'one'), ['kit@solo/one']);
@@ -12650,8 +12788,27 @@ async function usageFlow() {
   const unusedHasArrow = await a.run(`(() => { const b = document.querySelector('#overview-usage #overview-unused'); const svg = b?.lastElementChild; return svg?.tagName.toLowerCase() === 'svg' && /m12 5 7 7-7 7/.test(svg.innerHTML); })()`);
   same('the Skills card says 3 used and the three most used with no per-kind unused link, and the usage strip holds one combined link for all 8 unused items with an arrow',
     [await cardLines(), cardUnusedLinks, unusedLinks, unusedHasArrow, /^Usage collected today at [^.]+\. Update usage statistics · No use seen in 30 days: 8$/.test(await usageSaid() ?? '')],
-    [['Used in the last 30 days: 3', 'Most usedalpha2 sessions', 'echo2 sessions', 'charlie1 session'], [], ['No use seen in 30 days: 8'], true, true]);
+    [['Used in the last 30 days: 3Most used', 'alpha2 sessions', 'echo2 sessions', 'charlie1 session'], [], ['No use seen in 30 days: 8'], true, true]);
   check('every tool’s sessions cell has its figure, or why there is none', (await sessionsSaid()).every(said => said && said !== '…'), await sessionsSaid());
+  // Each name and its mark: apart, the marks one above another apart too; the name's hover says where it goes, the mark's the file.
+  const marksApart = () => a.run(`(() => {
+    const marks = [...document.querySelectorAll('#overview-skills-usage .row-file-btn')].map(mark => mark.getBoundingClientRect());
+    const names = [...document.querySelectorAll('#overview-skills-usage .kind-card-top-name')].map(name => name.getBoundingClientRect());
+    const usage = document.querySelector('#overview-skills-usage'), link = document.querySelector('#overview-skills-most-used'), line = link?.closest('p');
+    const end = usage.getBoundingClientRect().right - parseFloat(getComputedStyle(usage).paddingRight);
+    return { marks: marks.length, gapsBelow: marks.slice(1).map((box, at) => Math.round(box.top - marks[at].bottom)), nameToMark: names.map((box, at) => Math.round(marks[at].left - box.right)),
+      sorted: [/^Used in the last 30 days/.test(line?.textContent ?? ''), Math.abs(end - (link?.getBoundingClientRect().right ?? 0)) <= 1, !line?.querySelector('.kind-card-top-name')] };
+  })()`);
+  const apart = {};
+  for (const [width, height] of [[1316, 819], SMALLEST]) { await sizeTo(a, width, height); apart[width] = await marksApart(); }
+  await fullSize(a);
+  same('at 1316 and 860 the three marks are 4 px or more apart one above another, each 4 px after its name',
+    [apart[1316].marks, apart[1316].gapsBelow.every(gap => gap >= 4), apart[1316].nameToMark, apart[860].gapsBelow.every(gap => gap >= 4), apart[860].nameToMark],
+    [3, true, [4, 4, 4], true, [4, 4, 4]]);
+  same('at 1316 and 860 Most used → ends the “Used in the last 30 days” line, at its right end, on no name’s line', [apart[1316].sorted, apart[860].sorted], [[true, true, true], [true, true, true]]);
+  same('a most used name’s hover says it opens its row in the Library; its mark’s, its file',
+    [await a.all('#overview-skills-usage .kind-card-top-name', 'e.title'), await a.all('#overview-skills-usage .row-file-btn', 'e.title')],
+    [['alpha', 'echo', 'charlie'].map(name => `${name}: open its row in the Library`), ['Open file', 'Open file', 'Open file']]);
   await a.click('#overview-unused');
   const allRows = await a.all('.ov-row[data-key]', 'e.dataset.key');
   const expectedUnused = [...['delta', ...extraUnusedSkills].map(key => rowPart('', 'skills', key)), ...extraUnusedAgents.map(key => rowPart('', 'agents', key))].sort();
@@ -12661,6 +12818,31 @@ async function usageFlow() {
   await a.click('#nav-overview');
   await a.click('#overview-skills-top-1');
   same('a most used name opens its row on Skills, under All', [await a.run(`document.querySelector('.chip-on')?.dataset.tip ?? 'All'`), await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'echo')}"]')?.getAttribute('aria-expanded')`)], ['All', 'true']);
+  // His kept Sort: Last updated. Most used, a link with its arrow, shows the list by most used and leaves that choice as it was.
+  await a.click('#nav-library');
+  await a.run(`(select => { select.value = 'updated'; select.dispatchEvent(new Event('change')); })(document.querySelector('#item-order'))`);
+  await a.click('#nav-overview');
+  check('Most used on the Skills card carries the arrow the Overview’s other links do', await a.run(`!!document.querySelector('#overview-skills-most-used svg.icon')`));
+  await a.click('#overview-skills-most-used');
+  same('Most used, on the Skills card, opens the Library on Skills sorted by Most used: alpha, echo and charlie lead, as on the card',
+    [await a.text('.page-title'), await a.run(`document.querySelector('#library-kind-skills')?.getAttribute('aria-pressed')`), await a.run(`document.querySelector('#item-order')?.value`),
+      (await a.all('.ov-row[data-key]', 'e.dataset.key')).slice(0, 3)], ['Library', 'true', 'most-used', ['alpha', 'echo', 'charlie'].map(key => rowPart('', 'skills', key))]);
+  await a.click('#nav-overview');
+  await a.click('#nav-library');
+  same('the Library opened again from the sidebar is in his kept Sort, Last updated: the link changed nothing he saved', await a.run(`document.querySelector('#item-order')?.value`), 'updated');
+  if (shots) {
+    await a.click('#nav-overview');
+    await a.click('#overview-skills-most-used');
+    await sizeTo(a, ...SMALLEST);
+    const railed = await a.run(`document.body.classList.contains('rail')`);
+    if (railed) await a.click('#sidebar-toggle');
+    await a.run(`window.centralKnot.setAppearance('light')`);
+    await wait(80);
+    await a.shot('most-used-library-860-light');
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    if (railed) await a.click('#sidebar-toggle');
+    await fullSize(a);
+  }
   await a.click('#nav-overview');
   await fullSize(a);
   await fitsAtMinimum(a, 'the Overview with usage collected');
@@ -21785,7 +21967,7 @@ async function skillFileFlow() {
         rowExpanded: row?.getAttribute('aria-expanded'),
         hasDetailsTools: !!document.querySelector('.details-tools'),
         pressed: document.querySelector('${reviewBtn}')?.getAttribute('aria-pressed'),
-        hasRepeatedName: !!box?.querySelector('.file-open-name'),
+        hasRepeatedName: !!box?.querySelector('.file-open-name, .file-open-item'),
         tabs,
         startsWithLine1: (pre?.textContent ?? '').includes('Line 1: review check item 1.') && pre?.scrollTop === 0,
         hasLine60: (pre?.textContent ?? '').includes('Line 60: review check item 60.'),
@@ -21879,6 +22061,8 @@ async function skillFileFlow() {
     same('at 860 with sidebar open, panel sits inside window, footer stays inside box, and tabs wrap cleanly', fit860, {
       boxInsideWindow: true, footInsideBox: true, tabsWrapped: true, noHorizontalOverflow: true,
     });
+    same('at 860, scrolled to its foot, SKILL.md’s last line is whole in its box and in the list', await lastLineWhole(a, '.file-open-box pre.content'),
+      { words: 'Values stay as written: token=demo-raw-001.', scrolls: true, whole: true });
     await a.click('#sidebar-toggle');
     await fullSize(a);
 
@@ -21992,6 +22176,13 @@ async function skillFileFlow() {
     same('Escape in Find clears Find first while leaving the file panel open', [await a.run(`document.querySelector('#find')?.value`), await a.exists('.file-open-box')], ['', true]);
     await a.press('Escape');
     same('a second Escape closes the file panel', await a.exists('.file-open-box'), false);
+    // A second mark pressed before the first file is read: the second's file is the one shown, its mark alone pressed.
+    await a.run(`document.querySelector('${craftBtn}').click(); document.querySelector('${storedBtn}').click();`);
+    await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Kept only in Central Knot'));
+    same('commit-craft’s mark then stored-only’s at once, the last press wins: stored-only’s file alone is shown, its mark alone pressed',
+      await a.run(`[document.querySelectorAll('.file-open-box').length, document.querySelector('.details-file-only')?.getAttribute('aria-label'), [...document.querySelectorAll('.row-file-btn[aria-pressed="true"]')].map(mark => mark.id)]`),
+      [1, 'File for stored-only', [rowPart('file', 'skills', 'stored-only')]]);
+    await a.press('Escape');
 
     // Row click still opens details with Files and contents and Versions Read current untouched.
     await a.click(`.ov-row[data-key="${rowPart('', 'skills', 'code-review')}"]`);
@@ -22507,7 +22698,9 @@ async function skillFileFlow() {
         (await a.text('.file-open-foot .path-text'))?.trim(),
       ], [true, `${prefix}/.claude/skills/linked-plan/plan.md`]);
       await a.run(`(() => { const s = document.querySelector('.file-open-box .file-copy-select select'); s.value = '1'; s.dispatchEvent(new Event('change')); })()`);
-      await until(async () => (await a.text('.file-open-foot .path-text') ?? '').includes('.copilot/skills/linked-plan/SKILL.md'));
+      // The footer names the copy at once; its tabs come with its read.
+      await until(async () => (await a.text('.file-open-foot .path-text') ?? '').includes('.copilot/skills/linked-plan/SKILL.md')
+        && (await a.all('.file-open-box .file-tab', 'e.textContent.trim()')).includes('plan.md'));
       await clickTab('plan.md');
       await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Copilot unhashed plan.'));
       same('switching to the second unhashed copy reads its own plan.md', [
