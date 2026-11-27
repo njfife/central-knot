@@ -1132,7 +1132,7 @@ export const writeOff = (stops: boolean): string | boolean => acting() ?? select
  * each marketplace anew.
  */
 function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; readId?: number } = {}): Promise<void> {
-  if (page === 'history') return Promise.all([loadHistory(), loadSettings(), leftOutTools().length ? loadPlugins(false, readId) : undefined]).then(() => undefined);
+  if (page === 'history') return Promise.all([loadHistory(), loadSettings()]).then(() => undefined);
   if (page === 'settings') return loadSettings().then(() => undefined);
   if (page === 'instructions') return loadInstructions(readId);
   if (page === 'sessions') return loadSessions(readId);
@@ -1173,7 +1173,7 @@ export const noToolManagedSentence = (view: HomeView): string => (view.sync.pres
   ? `Central Knot manages none of the tools here: ${toolList(view.sync.present)} ${view.sync.present.length === 1 ? 'is' : 'are'} left out.` : noToolsSentence);
 
 /** The tools installed in the open home whose Manage switch is off: pages that say where an item is say "no tool Central Knot manages" while there are any. */
-export const leftOutTools = (): HarnessId[] => (state.home?.sync.present ? state.home.sync.present.filter(tool => !state.home!.sync.managed.includes(tool)) : []);
+export const leftOutTools = (): HarnessId[] => (state.home ? state.home.sync.present.filter(tool => !state.home!.sync.managed.includes(tool)) : []);
 
 /** The open home's tools by name, for sentences: "Claude Code and Codex". */
 export const homeToolNames = (): string[] => homeTools().map(toolName);
@@ -1420,6 +1420,8 @@ export interface Outcome {
   band?: boolean;
   /** Shown as a band on Settings even without reload advice: Synchronize everything's switch-on and its band's Undo (settingspage.ts). */
   settingsBand?: boolean;
+  /** Shown as a band on History even without warn, reloads or profileLine: a tool's Manage click (managecard.ts, historypage.ts). */
+  historyBand?: boolean;
   /** Appended profileLeftUse sentence when an act ended every profile in use; keeps the result in a band (saidInStatusBar) and whole on Row 2 (matrix.ts listResult). */
   profileLine?: string;
   /** The band goes after a few seconds: an Undo's confirmation. */

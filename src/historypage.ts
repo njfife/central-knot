@@ -3,7 +3,7 @@
 // Skills', MCP servers', agents' and Synchronize everything's entries are worded and decided by historyactions.ts; here are
 // profiles', base instructions', Manage switches' and pre-library entries, plus in-place folds for 3+ non-all tool lists.
 import { DAY_MS, plural, timesApart } from './model.ts';
-import { acting, homeTools, noToolManaged, rerender, restoreEvent, shownPath, state, touchedToolsPhrase } from './app.ts';
+import { acting, homeTools, noToolManaged, rerender, restoreEvent, setHome, shownPath, state, touchedToolsPhrase } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { andList, toolName, touchedTools } from './words.ts';
 import { changeWords, entryTurns, NO_PROFILE, undoOffered, undoWords, wholeCounts } from './profileplan.ts';
@@ -13,25 +13,39 @@ import { libraryWords } from './libraryrow.ts';
 import { button, emptyState, fold, h, icon, rereadBand, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { manageLocked, manageTool, onLine } from './managecard.ts';
+import { loadPlugins } from './pluginstate.ts';
 import { historyWindowControl } from './settingspage.ts';
 import type { HarnessId, HistoryEvent } from './types.ts';
 
 const who = (tool?: string) => (tool ? toolName(tool) : 'Central Knot');
 /** Folded tool lists open on History rows (`${event.id}-${index}` across redraws); cleared on page leave or home switch (app.ts). */
 const openToolFolds = new Set<string>();
-/** The Manage entry whose in-row rejoin question is open on History (one at a time); cleared on page leave or home switch. */
-let confirmManage: string | undefined;
+/** The Manage entry whose in-row rejoin question is open on History (one at a time, `ready` once home and marketplaces are read); cleared on page leave or home switch. */
+let confirmManage: { id: string; ready: boolean } | undefined;
 export function forgetHistoryFolds() {
   openToolFolds.clear();
   confirmManage = undefined;
 }
-function openManageConfirm(id: string) {
-  confirmManage = id;
+async function openManageConfirm(id: string, tool: HarnessId) {
+  const home = state.home;
+  if (!home || manageLocked(home)) return;
+  const open = { id, ready: false };
+  confirmManage = open;
+  rerender();
+  document.getElementById(`history-manage-cancel-${id}`)?.focus();
+  const view = await window.centralKnot.refresh().catch(() => null);
+  if (confirmManage !== open || state.page !== 'history') return;
+  if (!view || view.home !== home.home) return closeManageConfirm();
+  setHome(view, { reload: false });
+  if (manageLocked(view) || !view.sync.present.includes(tool) || view.sync.managed.includes(tool)) return closeManageConfirm();
+  await loadPlugins(false, view.readId);
+  if (confirmManage !== open || state.page !== 'history') return;
+  open.ready = true;
   rerender();
   document.getElementById(`history-manage-cancel-${id}`)?.focus();
 }
 function closeManageConfirm() {
-  const id = confirmManage;
+  const id = confirmManage?.id;
   if (!id) return;
   confirmManage = undefined;
   rerender();
@@ -179,28 +193,26 @@ const managingWords = ({ tool, on }: NonNullable<HistoryEvent['managing']>): { g
 
 /** A Manage entry's reverse button (Manage it again, asking in the row first, or Leave it out again, acting at once) and panel. */
 function managingRow(event: HistoryEvent): [HTMLElement | null, HTMLElement | null] {
-  const home = state.home;
-  const entry = event.managing;
+  const home = state.home, entry = event.managing;
   if (!home || !entry || !home.sync.present.includes(entry.tool) || home.sync.managed.includes(entry.tool) !== entry.on) return [null, null];
-  const locked = manageLocked(home);
-  const disabled = locked ?? acting();
-  const name = toolName(entry.tool);
+  const locked = manageLocked(home), disabled = locked ?? acting(), name = toolName(entry.tool);
   const resume = home.sync.gate.state === 'needs-resume' ? ` ${home.sync.gate.reason} This click resumes sync.` : '';
   if (entry.on) {
     const help = `Its copies stay. Central Knot stops writing there.${resume}`;
     return [button({ variant: 'link', size: 'small', label: 'Leave it out again', name: `Leave ${name} out again: ${help}`,
       id: `history-${event.id}`, disabled, attrs: { title: help }, onclick: () => runManage(entry.tool, false, home.home) }), null];
   }
-  if (!locked && confirmManage === event.id) {
+  if (!locked && confirmManage?.id === event.id) {
+    const text = confirmManage.ready ? `${onLine(home, entry.tool, `Managing ${name} again: `)}${resume}` : `Reading ${name}…`;
     return [null, h('div.band.history-confirm', { role: 'group', 'aria-labelledby': `history-manage-text-${event.id}` },
-      h('span.band-text', { id: `history-manage-text-${event.id}` }, `${onLine(home, entry.tool)}${resume}`),
+      h('span.band-text', { id: `history-manage-text-${event.id}` }, text),
       h('span.history-confirm-actions', {},
         button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `history-manage-cancel-${event.id}`, onclick: closeManageConfirm }),
-        button({ variant: 'primary', size: 'small', label: `Manage ${name}`, id: `history-manage-confirm-${event.id}`,
-          disabled: acting(), onclick: () => runManage(entry.tool, true, home.home) })))];
+        confirmManage.ready ? button({ variant: 'primary', size: 'small', label: `Manage ${name}`,
+          id: `history-manage-confirm-${event.id}`, disabled: acting(), onclick: () => runManage(entry.tool, true, home.home) }) : null))];
   }
   return [button({ variant: 'link', size: 'small', label: 'Manage it again', name: `Manage ${name} again`,
-    id: `history-${event.id}`, disabled, onclick: () => openManageConfirm(event.id) }), null];
+    id: `history-${event.id}`, disabled, onclick: () => void openManageConfirm(event.id, entry.tool) }), null];
 }
 
 /** What a Synchronize everything entry offers now (historyactions.ts everythingAction), from History and the libraries as the page read them. */
@@ -266,14 +278,16 @@ export function historyPage() {
   const ordered = [...events].reverse(), times = timesApart(ordered.map(event => event.at));
   const reread = rereadBand(state.history);
   // A refused Undo, a Manage click, a Restore with reload advice, or an Undo that ended the profile in use shows in a band; other results here are in the status bar.
-  const shown = state.outcome?.page === 'history' && (state.outcome.warn || state.outcome.band || !!state.outcome.reloads?.length || !!state.outcome.profileLine) ? outcomeBand() : null;
+  const shown = state.outcome?.page === 'history' && (state.outcome.warn || state.outcome.historyBand || !!state.outcome.reloads?.length || !!state.outcome.profileLine) ? outcomeBand() : null;
+  const latestManage = (tool: HarnessId) => ordered.find(other => other.kind === 'managing' && other.managing?.tool === tool)?.id;
   return h('div.page', {}, reread || shown ? h('div.bands', {}, reread, shown) : null, h('div.scroll', { id: 'history-scroll' }, historyWindowControl(), h('ul.history-list', {}, ordered.flatMap((event, index) => {
     const about = rowAbout(event);
     const heading = index === 0 || day(ordered[index - 1].at) !== day(event.at) ? h('li.history-day', { role: 'presentation' }, day(event.at)) : null;
     // The newest row, made by a click just now, gets the same brief highlight the tables use.
     const fresh = index === 0 && Date.now() - Date.parse(event.at) < 8000;
-    const managed = event.kind === 'managing' ? managingRow(event) : undefined;
-    return [heading, h(`li.history-row${event.undoneBy ? '.history-undone' : ''}${fresh ? '.row-flash' : ''}`, { 'data-kind': event.kind },
+    const managed = event.kind === 'managing' && event.managing && latestManage(event.managing.tool) === event.id ? managingRow(event) : undefined;
+    return [heading, h(`li.history-row${event.undoneBy ? '.history-undone' : ''}${fresh ? '.row-flash' : ''}`,
+      { 'data-kind': event.kind, id: `history-row-${event.id}`, ...(event.kind === 'managing' ? { tabIndex: -1 } : {}) },
       h('span.history-when', { title: new Date(event.at).toLocaleString() }, times[index]),
       // What changed, then what happened in the flexible column (its text capped at the reading measure); the actions keep a
       // steady column at the right, the same on every row. Narrow, what happened takes a line of its own beneath (style.css).

@@ -1732,7 +1732,7 @@ app.whenReady().then(async () => {
     ? await (async () => {
       const past = (await readHistory(context())).find(entry => entry.id === eventId);
       if (past?.kind === 'profile') { const tools = await toolsNow(); return undoSwitch(context(), tools, eventId, pluginSide(tools)); }
-      // A tool's Manage switch has no Undo (History offers none): the switch on its card is the way back.
+      // A tool's Manage switch has no Undo (History's row offers the reverse Manage act instead, not history:restore).
       if (past?.kind === 'managing') return { stopped: 'Turning a tool’s Manage switch has no Undo: turn it back on the tool’s Harnesses card.', results: [], harnessWrites: 0, reloads: [] };
       // Synchronize everything switched on: its one Undo; that Undo's entry: its Restore (everything.ts).
       if (past?.kind === 'everything') return everythingEntryAction(context(), await toolsNow(), eventId);
@@ -1798,9 +1798,9 @@ app.whenReady().then(async () => {
   // tool turned on is new to the plugins record (marketplaces.ts toolManaged), and gets each On plugin not kept out of it at a
   // check made now.
   handle('tools:manage', async (tool, on, resume, home) => {
-    if (home !== current?.home || !isTool(tool) || typeof on !== 'boolean') return { stopped: elsewhere, view: null, did: [] };
+    if (home !== current?.home || !isTool(tool) || typeof on !== 'boolean') return { stopped: elsewhere, full: true as const, view: null, did: [] };
     const refused = await manageRefused(context(), await read(), tool, on);
-    if (refused) return { stopped: refused, view: (await syncAndView(false, false)).view, did: [] };
+    if (refused) return { stopped: refused, full: true as const, view: (await syncAndView(false, false)).view, did: [] };
     const chosen = await chooseTools(context(), tool, on, resume === true);
     if (!chosen.stopped) {
       log(`sync: ${tool} ${on ? 'managed' : 'left out'} in ${home}`);

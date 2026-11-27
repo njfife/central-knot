@@ -35,7 +35,7 @@ export async function manageRefused(context: ShareContext, snapshots: Snapshot[]
  * into line. Refused, as a click is, where nothing may be written (preview only, a damaged record); in a
  * home that waits for Resume it resumes, as a click does, only when asked (`resume`: the page showed that state). The first act
  * in a home with no record makes the record (Synchronize everything is left unanswered); a switch that is so already makes no record and resumes nothing. One History entry says it; it has no
- * Undo, since the switch is the way back. Run between passes, like any other write to the records.
+ * Undo, since turning the tool back on Harnesses or on its History entry is the way back. Run between passes, like any other write to the records.
  */
 export async function chooseTools(context: ShareContext, tool: HarnessId, on: boolean, resume = false): Promise<{ stopped?: string }> {
   // A switch that is so already changes nothing, so it enters no gate: no record made, no home resumed.
