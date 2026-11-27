@@ -11673,13 +11673,15 @@ async function usageFlow() {
   await openKind(a, 'skills');
   for (let tries = 0; tries < 50 && (await sectionsNow(a, 'skills'))[0]?.[1]?.length !== 5; tries++) { await wait(100); await a.settle(); }
   same('the five skills are On, taken in by Synchronize everything', await sectionsNow(a, 'skills'), [['on', ['fresh', 'idle', 'notes', 'spare', 'standup']]]);
-  // Each skill's figure, by its key (its row's data-key, the kind's prefix taken off).
+  // Each skill's figure and hover, by its key (its row's data-key, the kind's prefix taken off).
   const figures = () => a.run(`Object.fromEntries([...document.querySelectorAll('.ov-row[data-key]')].map(row => [row.dataset.key.slice(${rowPart('', 'skills', '').length}), row.querySelector('.ov-used')?.textContent]))`);
+  const titles = () => a.run(`Object.fromEntries([...document.querySelectorAll('.ov-row[data-key]')].map(row => [row.dataset.key.slice(${rowPart('', 'skills', '').length}), row.querySelector('.ov-used')?.getAttribute('title') ?? null]))`);
   const collected = () => a.run(`/^Collected /.test(document.querySelector('#usage-when')?.textContent ?? '')`);
   for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
   // Collected when the home opened, while the page took the clicks above: no click on the button, and no band.
-  same('the home’s first opening collects usage by itself: the time beside Update usage statistics, a figure on each row, no band',
-    [await collected(), (await a.text('#collect-usage'))?.trim(), await a.exists('#usage-line'), (await figures()).notes], [true, 'Update usage statistics', false, 'used 2 days ago · 14 sessions']);
+  same('the home’s first opening collects usage by itself: the time beside Update usage statistics, empty cell with no hover under Name, no band',
+    [await collected(), (await a.text('#collect-usage'))?.trim(), await a.exists('#usage-line'), (await figures()).notes, (await titles()).notes],
+    [true, 'Update usage statistics', false, '', null]);
   // Copilot CLI left out with its Manage switch: its sessions are still read, and a use there still counts.
   await a.click('#nav-harnesses');
   await a.click('#manage-copilot-cli');
@@ -11691,8 +11693,8 @@ async function usageFlow() {
   for (let tries = 0; tries < 100 && !/^Usage statistics collected/.test(await bandText()); tries++) await wait(100);
   same('Update usage statistics opens the band: what was collected, from where, and that nothing left the computer (the time is beside the button)',
     await bandText(), 'Usage statistics collected from the tools’ own session history on this computer. Nothing left it.');
-  same('each row says its figure: used, and in how many sessions (in Copilot CLI too, not managed here), or no use seen in 30 days (a listing is no use, nor a use 40 days ago)', await figures(),
-    { fresh: 'no use seen in 30 days', idle: 'used 3 days ago · 1 session', notes: 'used 2 days ago · 14 sessions', spare: 'no use seen in 30 days', standup: 'no use seen in 30 days' });
+  same('under Name, used rows are blank with no hover and unused rows still say no use seen in 30 days', [await figures(), (await titles()).idle, (await titles()).notes],
+    [{ fresh: 'no use seen in 30 days', idle: '', notes: '', spare: 'no use seen in 30 days', standup: 'no use seen in 30 days' }, null, null]);
   await a.click(`#${rowPart('open', 'skills', 'notes')}`);
   same('a skill used in two tools: its opened row says each tool’s count, 13 and 1, which the row adds up to 14',
     await a.all('.details-usage', 'e.textContent.trim()'), ['Used in 13 sessions in the last 30 days, last used 2 days ago.', 'Used in 1 session in the last 30 days, last used 5 days ago.']);
@@ -11714,12 +11716,14 @@ async function usageFlow() {
   const chooseOrder = async value => { await a.run(`(() => { const select = document.querySelector('#item-order'); select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change')); })()`); await a.settle(); };
   await chooseOrder('used');
   same('Sort by Last used: the newest use first, then the one used 40 days ago, then those never seen, by name', (await sectionsNow(a, 'skills'))[0][1], ['notes', 'idle', 'standup', 'fresh', 'spare']);
+  same('under Last used, used rows show recency alone and hover keeps both figures', [await figures(), (await titles()).notes],
+    [{ notes: '2 days ago', idle: '3 days ago', standup: 'no use seen in 30 days', fresh: 'no use seen in 30 days', spare: 'no use seen in 30 days' }, 'Used 2 days ago · 14 sessions. Open the row for each tool’s figure.']);
   // spare used just now: the reading that lands moves no row (its cell fills where it is); the next Sort draws the new order.
   lines(join(home, '.claude/projects/-work/s4.jsonl'), [skillCall('spare', 0)]);
   await a.click('#collect-usage');
-  for (let tries = 0; tries < 100 && (await figures()).spare !== 'used just now · 1 session'; tries++) await wait(100);
+  for (let tries = 0; tries < 100 && (await figures()).spare !== 'just now'; tries++) await wait(100);
   same('a reading that lands moves no row: spare, used just now, says so where it was; the band opened again by Update',
-    [(await sectionsNow(a, 'skills'))[0][1], (await figures()).spare, await a.exists('#usage-line')], [['notes', 'idle', 'standup', 'fresh', 'spare'], 'used just now · 1 session', true]);
+    [(await sectionsNow(a, 'skills'))[0][1], (await figures()).spare, await a.exists('#usage-line')], [['notes', 'idle', 'standup', 'fresh', 'spare'], 'just now', true]);
   await chooseOrder('name'); await chooseOrder('used');
   same('the next draw that may reorder (Sort chosen again) puts it first', (await sectionsNow(a, 'skills'))[0][1], ['spare', 'notes', 'idle', 'standup', 'fresh']);
   rmSync(join(home, '.claude/projects/-work/s4.jsonl'));
@@ -11735,6 +11739,8 @@ async function usageFlow() {
   await chooseOrder('most-used');
   same('Sort by Most used: 14 sessions, then 1 session, then those with no use seen in 30 days by name (standup, used 40 days ago, with them)',
     (await sectionsNow(a, 'skills'))[0][1], ['notes', 'idle', 'fresh', 'spare', 'standup']);
+  same('under Most used, used rows show sessions alone and hover keeps both figures', [await figures(), (await titles()).notes],
+    [{ notes: '14 sessions', idle: '1 session', fresh: 'no use seen in 30 days', spare: 'no use seen in 30 days', standup: 'no use seen in 30 days' }, 'Used 2 days ago · 14 sessions. Open the row for each tool’s figure.']);
   await openKind(a, 'agents');
   const mostOnAgents = await a.run(`document.querySelector('#item-order')?.value`);
   await openKind(a, 'skills');
@@ -11745,10 +11751,10 @@ async function usageFlow() {
   lines(mostTemp[1], [skillCall('spare', 6)]);
   lines(mostTemp[2], [skillCall('fresh', 1.1)]);
   await a.click('#collect-usage');
-  for (let tries = 0; tries < 100 && ((await figures()).spare !== 'used 5 days ago · 2 sessions' || (await figures()).fresh !== 'used yesterday · 1 session'); tries++) await wait(100);
+  for (let tries = 0; tries < 100 && ((await figures()).spare !== '2 sessions' || (await figures()).fresh !== '1 session'); tries++) await wait(100);
   same('under Most used, a reading that lands moves no row, updates each figure in place, and offers Put in order',
     [(await sectionsNow(a, 'skills'))[0][1], (await figures()).spare, (await figures()).fresh, await a.exists('#put-in-order')],
-    [['notes', 'idle', 'fresh', 'spare', 'standup'], 'used 5 days ago · 2 sessions', 'used yesterday · 1 session', true]);
+    [['notes', 'idle', 'fresh', 'spare', 'standup'], '2 sessions', '1 session', true]);
   await a.click('#put-in-order');
   same('Put in order puts rows in Most used order (14, 2, 1 yesterday, 1 three days ago, none) and the link goes',
     [(await sectionsNow(a, 'skills'))[0][1], await a.exists('#put-in-order')], [['notes', 'spare', 'fresh', 'idle', 'standup'], false]);
@@ -11760,11 +11766,12 @@ async function usageFlow() {
   await a.run(`(() => { const input = document.querySelector('#find'); input.value = 'notes'; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   for (let tries = 0; tries < 50 && (await a.run(`document.querySelector('#item-order')?.value`)) !== 'best'; tries++) await wait(100);
   const whileFind = await a.run(`(select => [select.value, select.options[select.selectedIndex].textContent, select.disabled])(document.querySelector('#item-order'))`);
+  const whileFindCell = [(await figures()).notes, (await titles()).notes];
   await a.run(`(() => { const input = document.querySelector('#find'); input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   for (let tries = 0; tries < 50 && (await a.run(`document.querySelector('#item-order')?.value`)) !== 'most-used'; tries++) await wait(100);
-  same('while Find has text, Sort shows Best match and returns to Most used when Find is cleared',
-    [whileFind, await a.run(`(select => [select.value, select.disabled])(document.querySelector('#item-order'))`)],
-    [['best', 'Best match', true], ['most-used', false]]);
+  same('while Find has text, Sort shows Best match (used cell blank with no hover) and returns to Most used when Find is cleared',
+    [whileFind, whileFindCell, await a.run(`(select => [select.value, select.disabled])(document.querySelector('#item-order'))`)],
+    [['best', 'Best match', true], ['', null], ['most-used', false]]);
   // On a harness's tab: by name, and no Sort ("Most used" not offered); returning to the Library keeps Most used.
   await a.click('#nav-harnesses');
   await a.click('#harness-claude-cli');
@@ -11783,10 +11790,11 @@ async function usageFlow() {
   for (let tries = 0; tries < 50 && (await sectionsNow(a, 'skills'))[0]?.[1]?.[0] !== 'notes'; tries++) { await wait(100); await a.settle(); }
   await sizeTo(a, 860, 600);
   same('at 860×600 the button keeps its word, and its icon is not the chip’s', [(await a.run(`document.querySelector('#collect-usage').innerText.trim()`)).split(' ')[0], await a.exists('#collect-usage svg')], ['Update', false]);
-  same('the longest figure, "used 13 days ago · 999 sessions", is whole in a figure’s cell', await a.run(`(() => { const cell = document.querySelector('.ov-used'), was = [...cell.childNodes];
-    cell.replaceChildren('used 13 days ago', Object.assign(document.createElement('span'), { className: 'ov-used-count', textContent: ' · 999 sessions' }));
+  same('the longest figure, "no use seen since Nov 29, 2025", is whole in a figure’s cell', await a.run(`(() => { const cell = document.querySelector('.ov-used'), was = [...cell.childNodes];
+    cell.replaceChildren('no use seen since Nov 29, 2025');
     const whole = cell.scrollWidth <= cell.clientWidth + 1; cell.replaceChildren(...was); return whole; })()`), true);
-  same('at 860×600 every figure is whole, "used 2 days ago · 14 sessions" too', await a.run(`[...document.querySelectorAll('.ov-used')].filter(cell => cell.scrollWidth > cell.clientWidth + 1).map(cell => cell.textContent)`), []);
+  same('at 860×600 every figure is whole and sits at least 24 px past the description',
+    await a.run(`(() => { const rows = [...document.querySelectorAll('.ov-row[data-key]')], shown = rows.filter(row => row.querySelector('.ov-name-about')?.offsetWidth); return !shown.length ? ['no descriptions'] : rows.flatMap(row => { const cell = row.querySelector('.ov-used'), about = row.querySelector('.ov-name-about'); if (!cell || !cell.textContent) return []; if (cell.scrollWidth > cell.clientWidth + 1) return [cell.textContent]; const gap = about?.offsetWidth ? cell.getBoundingClientRect().left - (about.getBoundingClientRect().right - parseFloat(getComputedStyle(about).paddingRight)) : 24; return gap < 24 ? [Math.round(gap)] : []; }); })()`), []);
   await fullSize(a);
   await fitsAtMinimum(a, 'Skills with usage collected and its figures');
   await a.shot('usage-read');
@@ -11893,10 +11901,12 @@ async function usageFlow() {
   await a.click('#header-refresh');
   for (let tries = 0; tries < 50 && !(await a.exists(`.ov-row[data-key="${rowPart('', 'skills', kit)}"]`)); tries++) await wait(100);
   await a.click('#collect-usage');
-  for (let tries = 0; tries < 50 && !(await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', kit)}"] .ov-used')?.textContent`)); tries++) await wait(100);
+  for (let tries = 0; tries < 50 && (await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', kit)}"] .ov-used')?.textContent`)) !== '4 days ago'; tries++) await wait(100);
   await a.click(byId(rowPart('open', 'skills', kit)));
-  same('a plugin’s own row says its figure, and its opened row Claude Code’s, by the same match', [await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', kit)}"] .ov-used')?.textContent`), (await a.text(`${byId(rowPart('usage', 'skills', kit, 'claude-cli'))}`))?.trim()],
-    ['used 4 days ago · 1 session', 'Used in 1 session in the last 30 days, last used 4 days ago.']);
+  same('a plugin’s own row says its Sort’s figure with both figures on hover, and its opened row keeps Claude Code’s full line',
+    [await a.run(`(cell => [cell?.textContent, cell?.getAttribute('title')])(document.querySelector('.ov-row[data-key="${rowPart('', 'skills', kit)}"] .ov-used'))`),
+      (await a.text(`${byId(rowPart('usage', 'skills', kit, 'claude-cli'))}`))?.trim()],
+    [['4 days ago', 'Used 4 days ago · 1 session. Open the row for each tool’s figure.'], 'Used in 1 session in the last 30 days, last used 4 days ago.']);
   await a.shot('usage-plugin-row');
   // Sort by Last used, kept from this launch to the next: the reading that comes by itself as the home opens moves no row.
   await chooseOrder('used');
@@ -11961,8 +11971,9 @@ async function usageFlow() {
     await a.click('#home-actual');
     for (let tries = 0; tries < 100 && !(await a.exists(`#${rowPart('open', 'skills', 'alpha')}`)); tries++) await wait(50);
     for (let tries = 0; tries < 100 && !reading(); tries++) await wait(25);
-    same('while the first reading of a home runs, the Used column holds its room, its cells empty', [await lead(), await a.run(`[...document.querySelectorAll('.ov-row[data-key]')].map(row => row.querySelector('.ov-used')?.textContent ?? 'no cell')`)],
-      ['Collecting…', ['', '', '', '', '']]);
+    same('while the first reading of a home runs, the Used column holds its room, its cells empty',
+      [await lead(), await a.run(`[...document.querySelectorAll('.ov-row[data-key]')].map(row => { const cell = row.querySelector('.ov-used'); return cell ? [cell.textContent, cell.getBoundingClientRect().width >= 160] : 'no cell'; })`)],
+      ['Collecting…', [['', true], ['', true], ['', true], ['', true], ['', true]]]);
     await a.click(`#${rowPart('open', 'skills', 'alpha')}`);
     const collectingLines = await a.all('.details-usage', 'e.textContent.trim()'), openTops = await tops();
     await letGo();
@@ -12000,9 +12011,9 @@ async function usageFlow() {
     await letGo();
     for (let tries = 0; tries < 100 && !(await collected()); tries++) await wait(100);
     await a.settle();
-    same('Sort by name, the chip on: charlie, used just now, stays where it was when the reading lands, no row moves, the chip counts what Turn these off would turn off, and Put in order is offered',
-      [(await sectionsNow(a, 'skills'))[0][1], await tops(), (await figures()).charlie, await a.all('.chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]'), await a.exists('#put-in-order')],
-      [['bravo', 'charlie', 'delta'], chipTops, 'used just now · 1 session', [['No use seen in 30 days', '2']], true]);
+    same('Sort by name, the chip on: charlie, used just now, says its recency where it was when the reading lands, no row moves, the chip counts what Turn these off would turn off, and Put in order is offered',
+      [(await sectionsNow(a, 'skills'))[0][1], await tops(), (await figures()).charlie, (await titles()).charlie, await a.all('.chip', '[e.dataset.tip, e.querySelector(".chip-count")?.textContent]'), await a.exists('#put-in-order')],
+      [['bravo', 'charlie', 'delta'], chipTops, 'just now', 'Used just now · 1 session. Open the row for each tool’s figure.', [['No use seen in 30 days', '2']], true]);
     await a.click('#put-in-order');
     same('Put in order lets the held rows go: charlie leaves the chip’s list, and the link goes', [(await sectionsNow(a, 'skills'))[0][1], await a.exists('#put-in-order')], [['bravo', 'delta'], false]);
     await a.click('#usage-line-close');
@@ -13837,7 +13848,7 @@ async function libraryFlow() {
   // counts it.
   writeFileSync(join(A.home, '.claude/projects/-work/s2.jsonl'), `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'spare' } }] }, timestamp: ago(1).toISOString() })}\n`);
   await a.click('#collect-usage');
-  check('the new reading says spare was used', await until(async () => /^used/.test(await a.text(`${row('skills', 'spare')} .ov-used`) ?? '')), await a.text(row('skills', 'spare')));
+  check('the new reading says spare was used', await until(() => a.run(`(cell => cell?.textContent === 'yesterday' && /^Used /.test(cell.title))(document.querySelector('${row('skills', 'spare')} .ov-used'))`)), await a.text(row('skills', 'spare')));
   same('spare stays listed by its pin, and the switch and the On heading both count five', [await a.exists(row('skills', 'spare')), (await counts(a)).all, await a.text('.ov-section[data-section="on"] .ov-section-count')], [true, '5', '5']);
   const letGo = async chip => { if (await a.exists(`#chip-${chip}[aria-pressed="true"]`)) await a.click(`#chip-${chip}`); };
   await letGo('unused');
@@ -13981,7 +13992,7 @@ async function libraryFlow() {
   // A reading that says tidy was used lands: tidy, out of the chip now, stays where it was, as Find lists it.
   writeFileSync(join(A.home, '.claude/projects/-work/s3.jsonl'), `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'tidy' } }] }, timestamp: ago(1).toISOString() })}\n`);
   await a.click('#collect-usage');
-  check('the new reading says tidy was used', await until(async () => /^used/.test(await a.text(`${row('skills', 'tidy')} .ov-used`) ?? '')), await a.text(row('skills', 'tidy')));
+  check('the new reading says tidy was used', await until(() => a.run(`(cell => cell?.textContent === 'yesterday' && /^Used /.test(cell.title))(document.querySelector('${row('skills', 'tidy')} .ov-used'))`)), await a.text(row('skills', 'tidy')));
   same('a reading that lands with Find holding text moves no row: tidy stays listed by its pin, and nothing counts it', [await a.all('.ov-row[data-key]', 'e.dataset.key'), (await counts(a)).all], [[rowPart('', 'skills', 'tidy')], '0']);
   await letGo('unused');
   await press(`#${rowPart('switch', 'skills', 'idle')}`);
@@ -13991,7 +14002,7 @@ async function libraryFlow() {
   for (const session of ['s4', 's5']) writeFileSync(join(A.home, `.claude/projects/-work/${session}.jsonl`), zuluUse);
   await find(a, '');
   await a.click('#collect-usage');
-  check('the new reading says zulu was used', await until(async () => /^used/.test(await a.text(`${row('skills', 'kit@local-market/zulu')} .ov-used`) ?? '')), await a.text(row('skills', 'kit@local-market/zulu')));
+  check('the new reading says zulu was used', await until(() => a.run(`(cell => cell?.textContent === '' && !cell.hasAttribute('title'))(document.querySelector('${row('skills', 'kit@local-market/zulu')} .ov-used'))`)), await a.text(row('skills', 'kit@local-market/zulu')));
   await find(a, 'body');
   await a.click('#nav-overview');
   const zuluLink = `[...document.querySelectorAll('[id^="overview-skills-top-"]')].find(e => e.textContent.includes('zulu'))`;
