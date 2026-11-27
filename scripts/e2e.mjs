@@ -22881,6 +22881,9 @@ async function pluginItemSwitchesFlow() {
   put(join(market, `plugins/pair/skills/${long}/SKILL.md`), md(long, 'Long.'));
   put(join(market, 'plugins/pair/agents/checker.md'), '---\nname: checker\ndescription: Checks.\n---\nCheck.\n');
   put(join(home, '.pi/agent/skills/mine/SKILL.md'), mineInPi);
+  // pair is installed in Claude Code (its records alone; no tool runs), which keeps it on there whatever a profile says.
+  put(join(home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'ck-switch-market': { source: { source: 'directory', path: market }, installLocation: market } }));
+  writeClaudeInstall(home, 'ck-switch-market', 'pair', '1.0.0', { 'skills/mine/SKILL.md': md('mine', 'Plugin mine.'), [`skills/${long}/SKILL.md`]: md(long, 'Long.'), 'agents/checker.md': '---\nname: checker\ndescription: Checks.\n---\nCheck.\n' });
   for (const [bin, ver] of [['claude', '2.1.322 (Claude Code)'], ['pi', 'pi 0.1.0'], ['opencode', 'opencode 1.19.5'], ['agy', '1.5.14']]) {
     put(join(home, '.local/bin', bin), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${ver}" && exit 0\nexit 9\n`);
     chmodSync(join(home, '.local/bin', bin), 0o755);
@@ -23026,7 +23029,8 @@ async function pluginItemSwitchesFlow() {
   await done();
   same('Pi unticked with OpenCode ticked: mine has no Pi switch, its own copy said, his copy byte for byte', [await a.exists(sw('pair', 'pi-cli', 'skill', 'mine')), (await cell('skill', 'mine', 'Pi'))?.[0], readNow(join(home, '.pi/agent/skills/mine/SKILL.md'))],
     [false, 'Its own copy', mineInPi]);
-  // A profile switched from the status bar changes the home under the open page, whose plugins aren't read again: each switch is drawn from the home its click acts on.
+  // A profile switched from the status bar changes the home under the open page, whose plugins aren't read again: each switch is drawn
+  // from the home its click acts on. Quiet leaves checker out; Claude Code keeps it on with its plugin, so Quiet keeps it out of OpenCode.
   await a.click('#nav-profiles');
   await newProfile(a, 'Quiet');
   await a.click(byId(`pf-plugin:skill:pair@ck-switch-market/${long}`));
