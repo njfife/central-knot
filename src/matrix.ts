@@ -137,13 +137,14 @@ function pluginStrip(plugin: string, marketName: string, installs: InstalledPlug
 
 /**
  * The facts a tool's line on a plugin's item is drawn from (pluginline.ts LineFacts): the home's view, and the Plugins page's,
- * read for it while such a row is open (pluginstate.ts wantView, lineBox), with the listing's source a turn names.
+ * read for it while such a row is open (pluginstate.ts wantView, lineBox), with the listing's source a turn names, and his own names
+ * there (`withYours`). Profiles asks them too, without his names, for a held profile's plugin off in a tool (profilespage.ts wayPast).
  */
-function lineFacts(kind: PartKind, plugin: string, marketName: string, tool: HarnessId, through?: PluginItemAt, installed?: InstalledPlugin): LineFacts & { source?: string } {
+export function lineFacts(kind: PartKind, plugin: string, marketName: string, tool: HarnessId, through?: PluginItemAt, installed?: InstalledPlugin, withYours = true): LineFacts & { source?: string } {
   wantView(state.home?.readId);
   // Its source as a tool that has it registered spells it, so the listing is this one's where two of one name list the plugin.
   const known = through?.install.source ?? installed?.source ?? state.home?.pluginItems?.find(install => install.plugin === plugin && install.marketName === marketName && install.source)?.source;
-  const box = lineBox(plugin, marketName, known, tool), yours = state.home ? yoursIn(state.home, plugin, marketName, tool) : undefined;
+  const box = lineBox(plugin, marketName, known, tool), yours = withYours && state.home ? yoursIn(state.home, plugin, marketName, tool) : undefined;
   return { tool, kind, plugin, marketName, through, installed, box: box.box, parts: box.parts, source: box.source, ...(yours?.length ? { yours } : {}) };
 }
 
@@ -158,7 +159,7 @@ function pluginLine(row: ItemRow | PluginRow, facts: LineFacts & { source?: stri
   if (control.control !== 'button') return { text, result, control: control.control === 'switch' && item ? pluginItemControls(item, row) : null };
   const { act } = control;
   const run = () => turnFromLine({ home: state.home!.home, source: facts.source!, marketName: facts.marketName, plugin: facts.plugin, tool: facts.tool, act,
-    item: { kind: facts.kind, name: nameOf(row) }, ...(facts.yours?.length ? { yours: facts.yours } : {}) });
+    item: { kind: facts.kind, name: nameOf(row) }, ...(facts.yours?.length ? { yours: facts.yours } : {}), page: 'library' });
   const off = !!busy || (selectOff() ?? queueOff(homeStops())) || (!facts.source && 'Not read yet.');
   return { text, result, control: h('span.details-tool-actions', {},
     button({ variant: 'outline', size: 'micro', label: control.label, id: elId('line', row, facts.tool), disabled: off, attrs: { title: control.title }, onclick: (event: MouseEvent) => { event.stopPropagation(); run(); } })) };

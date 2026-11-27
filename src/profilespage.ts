@@ -7,13 +7,17 @@
 // its kind), and in Claude Code what comes on with a ticked item (wholeNote, withBrought; claudeBand under Find); an older
 // profile with `switchesPluginItems` false hides plugin rows behind "Choose plugin items for this profile". Unchanged rows leave
 // their state cell blank (hover keeps live state; `Off · on in …` stays on a plugin row in use; rows left out name tools that
-// keep them on: keptOn). Every rule and preview is profileplan.ts's (listedChanges, switchPlan, pluginPlan, inUse, switchPreview,
-// keptOn, leftOutWords), as profiles.ts carries it out.
+// keep them on: keptOn). A profile held by a plugin off in a tool offers in Switch's place, and on each row held in another plugin
+// or tool, the Library line's own press to turn it on there, its result and Undo in this page's band, else the link to its page, the
+// header saying why (wayPast, turnOnControl). Every rule and preview is profileplan.ts's (listedChanges, switchPlan, pluginPlan,
+// inUse, switchPreview, keptOn, leftOutWords), as profiles.ts carries it out.
 import { acting, deleteProfileDef, machine, profileState, rerender, saveProfileDef, showPage, state, switchToProfile, whyReadOnly } from './app.ts';
-import { kindGlyph, openPlugin, outcomeBand, pluginTag, problemsBand } from './matrix.ts';
+import { kindGlyph, lineFacts, openPlugin, outcomeBand, pluginTag, problemsBand } from './matrix.ts';
+import { lineControl } from './pluginline.ts';
+import { lineBusy, market, turnFromLine, viewCurrent, type LineAim } from './pluginstate.ts';
 import { button, checkbox, emptyState, findInput, h, icon, infoMark } from './dom.ts';
 import { allTurns, changeWords, claudeInstall, comesWith, copilotKeptOnBy, heldWords, homeItems, inUse, inUseName, itemRowState, keptOn, leftOut, listedChanges, listedPlugins, loadWords, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, switchable, switchPlan, switchPreview, takenWhole, wholeCounts, wholeTurns, type LiveItem, type PluginCopy, type PluginLive, type PluginTurn } from './profileplan.ts';
-import { noSingleSwitch, pageOfPart } from './pluginstatus.ts';
+import { DIRECTORY, noSingleSwitch, pageOfPart } from './pluginstatus.ts';
 import { counted } from './pluginswitch.ts';
 import { andList, toolList, toolNames } from './words.ts';
 import type { ItemKind } from './library.ts';
@@ -134,11 +138,12 @@ function kindNote(kind: ItemKind, plugged: PluginLive[]) {
 /**
  * Under a plugin item's name, one tool's copy that a switch can't turn, or a Copilot CLI MCP server kept on by another member
  * sharing its exact name (profileplan.ts copilotKeptOnBy): on a row the profile leaves out, a copy that stays on in a tool with no
- * switch for one item (the head of the kind says it once for every row: kindNote); its whole plugin off there, with the way to
- * the plugin's page; its own switch held (pluginswitch.ts cantSwitch); its copy unreadable. Nothing for a copy that switches for
- * this item alone, or with its whole plugin in Claude Code (wholeNote says that once for the item).
+ * switch for one item (the head of the kind says it once for every row: kindNote); its whole plugin off there, with its own press
+ * where it holds the switch (`way`: turnOnControl), nothing more where the header's is for that plugin and tool, else the link; its
+ * own switch held (pluginswitch.ts cantSwitch); its copy unreadable. Nothing for a copy that switches for this item alone, or with
+ * its whole plugin in Claude Code (wholeNote says that once for the item).
  */
-function copyNote(profile: Profile, item: PluginLive, copy: PluginCopy): HTMLElement | null {
+function copyNote(profile: Profile, item: PluginLive, copy: PluginCopy, way: 'press' | 'header' | 'link'): HTMLElement | null {
   const tool = toolNames[copy.tool], note = (text: string, ...more: (Node | null)[]) => h('span.pf-note', { 'data-tool': copy.tool }, text, ...more);
   if (copy.way === 'switch') {
     const kept = copilotKeptOnBy(profile, item, copy);
@@ -153,9 +158,40 @@ function copyNote(profile: Profile, item: PluginLive, copy: PluginCopy): HTMLEle
   if (copy.way === 'stays') return profile.items.includes(item.id) ? null : note(`Stays on in ${tool}.`);
   if (copy.way === 'unread') return h('span.pf-note', { 'data-tool': copy.tool, title: copy.why }, `Not known in ${tool}: its copy couldn’t be read.`);
   if (copy.way === 'held') return note(`Stays ${copy.on ? 'on' : 'off'} in ${tool}: ${copy.why}`);
-  const source = 'install' in copy.target ? copy.target.install.source : undefined;
-  return note(`Off in ${tool}: its plugin is off there. `, button({ variant: 'link', size: 'micro', label: `Open ${item.plugin}`, id: `pf-plugin-${item.id}-${copy.tool}`,
-    attrs: { title: `Open ${item.plugin} on Plugins, where it is turned on or off in each tool` }, onclick: () => openPlugin({ source, plugin: item.plugin, marketplace: item.marketName, tool: copy.tool }) }));
+  const control = way === 'header' ? null : turnOnControl(item, copy, 'row', wayPast(item, copy, way === 'press'));
+  return note(`Its plugin is off in ${tool}.${control ? ' ' : ''}`, control);
+}
+
+/**
+ * The way past a plugin off in a tool (a `plugin-off` copy), decided once for Switch's place, the header's line and `(?)`, and each
+ * row. Where this copy holds the switch (`holds`: profileplan.ts pluginPlan) and one press turns it on there by the Plugins page's
+ * view read for the home on screen (pluginstate.ts viewCurrent; pluginline.ts lineControl's let-in, the Library line's own act),
+ * that press (`aim`) and what it does (`title`); else why not, short for the header (`why`, from its box: matrix.ts lineFacts), and
+ * the line's whole sentence (`sentence`).
+ */
+function wayPast(item: PluginLive, copy: PluginCopy, holds = true): { aim?: LineAim; title?: string; why?: string; sentence?: string } {
+  const at = 'install' in copy.target ? copy.target : undefined, tool = toolNames[copy.tool], current = viewCurrent();
+  const facts = holds && at ? lineFacts(item.kind, item.plugin, item.marketName, copy.tool, at, undefined, false) : undefined;
+  const control = facts ? lineControl(facts) : undefined, box = current ? facts?.box : undefined;
+  const codex = copy.tool !== 'codex-cli' ? '' : ' Its items come on with it there, except those their own switch keeps off;'
+    + ' Switch then turns off the ones this profile leaves out, wherever they can be switched.';
+  if (current && facts?.source && control?.control === 'button' && control.act === 'let-in') {
+    return { aim: { home: state.home!.home, source: facts.source, marketName: item.marketName, plugin: item.plugin, tool: copy.tool, act: 'let-in', item: { kind: item.kind, name: item.name }, page: 'profiles' },
+      title: `Turns ${item.plugin} on in ${tool}, as its own switch there does.${codex}` };
+  }
+  const off = typeof box === 'object' && box.off ? box.line ?? (market.view?.canWrite === false ? 'this home can only be previewed' : undefined) : undefined;
+  return { why: box === 'unlisted' ? (item.marketName === DIRECTORY ? `${item.plugin} is from the Anthropic Directory` : `${item.plugin}’s marketplace isn’t added here`)
+    : box === 'ambiguous' ? `two marketplaces here list ${item.plugin}` : off, sentence: control?.control === 'none' ? control.sentence : undefined };
+}
+
+/** The way past as a control, in Switch's place (`header`) or on a row (`row`): the press, off while the page acts or can't write, saying why; else the link. */
+function turnOnControl(item: PluginLive, copy: PluginCopy, place: 'header' | 'row', way: ReturnType<typeof wayPast>): HTMLElement {
+  const row = place === 'row', look = row ? { variant: 'link' as const, size: 'micro' as const } : { variant: 'outline' as const, size: 'small' as const }, aim = way.aim;
+  if (aim) return button({ ...look, label: lineBusy(item.plugin, item.marketName, copy.tool) ?? `Turn on ${item.plugin} in ${toolNames[copy.tool]}`, id: row ? `pf-turn-on-${item.id}-${copy.tool}` : 'profile-turn-on',
+    disabled: acting() ?? whyReadOnly(state.home!), attrs: { title: way.title }, onclick: () => turnFromLine(aim) });
+  return button({ ...look, label: `Open ${item.plugin}`, id: row ? `pf-plugin-${item.id}-${copy.tool}` : 'profile-open-plugin',
+    attrs: { title: way.sentence || `Open ${item.plugin} on Plugins, where it is turned on or off in each tool` },
+    onclick: () => openPlugin({ source: 'install' in copy.target ? copy.target.install.source : undefined, plugin: item.plugin, marketplace: item.marketName, tool: copy.tool }) });
 }
 
 /**
@@ -186,7 +222,9 @@ function pluginRow(profile: Profile, item: PluginLive, plan: Plan, beneath = fal
   const included = profile.items.includes(item.id), change = plan.changes.byId.get(item.id);
   const said = change ? cellWords(change.said, inChanges) : plan.isInUse ? pluginRowState(profile, item) : '';
   const moves = !!change && !!said;
-  const notes = [wholeNote(profile, item), ...item.copies.map(copy => copyNote(profile, item, copy))].flatMap(note => note ?? []);
+  const holds = new Set(plan.plugs.find(turn => turn.id === item.id)?.held.map(each => each.tool)), off = plan.off;
+  const inHeader = (copy: PluginCopy) => !!off && off.copy.tool === copy.tool && off.item.plugin === item.plugin && off.item.marketName === item.marketName;
+  const notes = [wholeNote(profile, item), ...item.copies.map(copy => copyNote(profile, item, copy, !holds.has(copy.tool) ? 'link' : inHeader(copy) ? 'header' : 'press'))].flatMap(note => note ?? []);
   const kept = !included ? item.copies.map(copy => (copy.way === 'switch' ? copilotKeptOnBy(profile, item, copy) : undefined)).find(Boolean) : undefined;
   const except = kept ? `, except Copilot CLI (same name as ${kept.by === 'plugin' ? `${kept.plugin}’s` : 'yours'})`
     : comesWith(profile, item) ? ', except Claude Code, where it comes on with its plugin' : '';
@@ -205,13 +243,14 @@ function pluginRow(profile: Profile, item: PluginLive, plan: Plan, beneath = fal
 /**
  * What a switch to the open profile would do, as the page shows it: the plugins' items (`plugs`: pluginPlan), each listed
  * changing row once (`changes`: listedChanges), the plugins it turns whole in Claude Code (`whole`: wholeTurns), all of it in
- * words (`said`: changeWords, '' when it changes nothing), and whether it is in use (inUse).
+ * words (`said`: changeWords, '' when it changes nothing), the first plugin and tool holding it when it can change nothing
+ * (`off`: heldWords), and whether it is in use (inUse).
  */
-interface Plan { plugs: PluginTurn[]; changes: ReturnType<typeof listedChanges>; whole: InstalledPlugin[]; said: string; isInUse: boolean }
+interface Plan { plugs: PluginTurn[]; changes: ReturnType<typeof listedChanges>; whole: InstalledPlugin[]; said: string; off?: ReturnType<typeof heldWords>['off']; isInUse: boolean }
 const planOf = (profile: Profile, all: LiveItem[], plugged: PluginLive[]): Plan => {
   const turns = switchPlan(profile, all), plugs = pluginPlan(profile, plugged), whole = wholeTurns(profile, plugged);
-  return { plugs, changes: listedChanges(profile, all, plugged, turns, plugs), whole,
-    said: changeWords(allTurns(turns, plugs), wholeCounts({ installs: whole }), 'will'), isInUse: inUse([profile], all, plugged).length > 0 };
+  const said = changeWords(allTurns(turns, plugs), wholeCounts({ installs: whole }), 'will');
+  return { plugs, changes: listedChanges(profile, all, plugged, turns, plugs), whole, said, off: said ? undefined : heldWords(plugs, plugged).off, isInUse: inUse([profile], all, plugged).length > 0 };
 };
 
 /** A kind's rows under a heading with a tick box for all of them: the library's items, then the plugins' (with Find in use, `list` and `plugged` are the rows shown). */
@@ -346,13 +385,11 @@ function deleteActions(profile: Profile) {
 /**
  * The header's main button, Switch to the profile: none while it is in use (a switch would change nothing), while it is not
  * offered (profileplan.ts switchable: nothing in it), or while the name is edited; where a switch could turn nothing because a
- * plugin is off in a tool, the way to that plugin's page instead.
+ * plugin is off in a tool, the way past the first such plugin and tool its line names (Plan `off`, decided as `way`) instead.
  */
-function switchButton(profile: Profile, plan: Plan, all: LiveItem[], plugged: PluginLive[]): HTMLElement | null {
+function switchButton(profile: Profile, plan: Plan, all: LiveItem[], plugged: PluginLive[], way?: ReturnType<typeof wayPast>): HTMLElement | null {
   if (profileState.renaming === profile.id) return null;
-  const off = plan.said ? undefined : heldWords(plan.plugs, plugged).off;
-  if (off) return button({ variant: 'outline', size: 'small', label: `Open ${off.item.plugin}`, id: 'profile-open-plugin', attrs: { title: `Open ${off.item.plugin} on Plugins, where it is turned on or off in each tool` },
-    onclick: () => openPlugin({ source: 'install' in off.copy.target ? off.copy.target.install.source : undefined, plugin: off.item.plugin, marketplace: off.item.marketName, tool: off.copy.tool }) });
+  if (plan.off && way) return turnOnControl(plan.off.item, plan.off.copy, 'header', way);
   if (!plan.said || !switchable(profile, all, plugged)) return null;
   const label = profile.name.length > 18 ? 'Switch to this profile' : `Switch to ${profile.name}`;
   const title = whyReadOnly(state.home!) ?? `Use ${profile.name}: ${plan.said}.${profile.switchesPluginItems ? '' : ` ${pluginStayNote(plan.plugs, plugged)}`} One step in History, with Undo.`;
@@ -374,14 +411,14 @@ const SAVE_NOTE_CARD = 'Ticks save to the profile at once. Nothing in your tools
 function profileDetail(profile: Profile) {
   const all = items(), plugged = plugins(), visiblePlugins = listedPlugins(profile, plugged), plan = planOf(profile, all, plugged);
   if (profileState.changes && (profileState.changes.profileId !== profile.id || profileState.changes.home !== state.home!.home)) profileState.changes = undefined;
-  const primary = switchButton(profile, plan, all, plugged), shown = all.filter(item => matches(`${item.name} ${descriptionOf(item)}`));
+  const way = plan.off && wayPast(plan.off.item, plan.off.copy), primary = switchButton(profile, plan, all, plugged, way), shown = all.filter(item => matches(`${item.name} ${descriptionOf(item)}`));
   const pluggedShown = visiblePlugins.filter(item => matches(`${item.name} ${item.plugin}`));
   const changeCount = plan.changes.on.length + plan.changes.off.length, pinned = profileState.changes;
   const pinnedIds = pinned ? new Set([...pinned.on, ...pinned.off]) : undefined;
   const inView = (list: { id: string }[]) => (pinnedIds ? list.filter(item => pinnedIds.has(item.id)).length : list.length);
   const shownCount = inView(shown) + inView(pluggedShown), totalCount = inView(all) + inView(visiblePlugins);
   const title = profileState.renaming === profile.id ? renameField(profile) : h('h2', { title: profile.name }, profile.name);
-  const preview = switchPreview(profile, all, plugged);
+  const preview = switchPreview(profile, all, plugged), tip = way?.title ?? preview.tip;
   const toggleChanges = () => {
     profileState.changes = pinned ? undefined : { home: state.home!.home, profileId: profile.id, on: plan.changes.on.map(change => change.id), off: plan.changes.off.map(change => change.id) };
     rerender();
@@ -389,8 +426,8 @@ function profileDetail(profile: Profile) {
   return h('div.detail-column', {},
     h('div.pane-header.profile-header', {}, icon('sliders-horizontal', 16, 'tone-muted'),
       h('div.pane-title', {}, title,
-        h('div.profile-subtitle', { 'data-info-block': true }, h('p', { id: 'profile-preview' }, preview.line),
-          preview.tip ? infoMark('profile-preview-info', 'Switch preview', preview.tip) : null)),
+        h('div.profile-subtitle', { 'data-info-block': true }, h('p', { id: 'profile-preview' }, way?.why ? `Can’t switch · ${way.why}` : preview.line),
+          tip ? infoMark('profile-preview-info', 'Switch preview', tip) : null)),
       h('div.detail-actions.profile-actions', {}, ...headerActions(profile, primary))),
     !switchable(profile, all, plugged) ? h('div.band.band-help', { role: 'note' }, icon('info', 14, 'tone-muted'), h('span.band-text', {}, `Nothing is in ${profile.name} yet. Tick at least one item to switch to it, or start from what is on now.`),
       button({ variant: 'primary', size: 'small', label: 'Start from what’s on now', id: 'profile-from-now', disabled: !canEditProfiles(),
