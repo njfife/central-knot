@@ -377,7 +377,7 @@ export function pluginsResult(): HTMLElement[] {
   // With no problem line, Show all follows the sentence, for one the header cuts or whose reload sentences live under Show all.
   if (run && !problems) run.querySelector('.toolbar-result-text')!.after(wholeToggle(of, 0, hasAdvice));
   const row2 = run && whole && hasAdvice ? reloadLines(advice) : problems ? null : profile ? h('div.result-row2.result-profile-row', {}, profile, chips) : chips;
-  return [run, row2, problems].filter((part): part is HTMLElement => !!part);
+  return [run, problems, row2].filter((part): part is HTMLElement => !!part);
 }
 
 /** What just happened (each plugin named a link to its page, with Undo), or else the last notice ("… added"). */

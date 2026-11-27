@@ -42,7 +42,7 @@ import { copilotSharesYours } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
 import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, writeOff, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
-import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, infoMark, middle, pathText, toggle, whyOff, withToolCount, type Child } from './dom.ts';
+import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, fold, h, icon, infoMark, middle, pathText, toggle, whyOff, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { byName, byUsage, inOrder, kindSource, lastUpdated, noPins, partId, pin, placeIn, rankIn, rowId, type ItemRow, type KindSource, type Pinned, type RowKey, type RowOrder, type RowUsage, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
@@ -64,7 +64,7 @@ import { cellWords, handledWhere, inTool, insideTitle, itemThrough, offIn, pageR
 import { fromChoices, fromShows, originOf, type From, type FromEntry } from './origins.ts';
 import { sources } from './sourcespage.ts';
 import { folded, lineDiff } from './diff.ts';
-import { reloadAdvice, rowReload, toItemKind, type ReloadAdvice } from './reload.ts';
+import { reloadAdvice, rowReload, toItemKind, type ReloadAdvice, type ReloadItem } from './reload.ts';
 import { pageData, readPageData, resetPageData } from './pagedata.ts';
 import { ask, askedNow, cancelAsk, cantWords, deletedWords, DIFFERS_REASON, headingState, isTicked, ofListed, questionWords, selectedWords, selecting, listDrawn, startSelecting, stopSelecting, restoreWords, tickHeading, tickRow, toggleWhy, turnedWords, turnLabel, turnTail, whyLines, whyShown, type Listed } from './selection.ts';
 
@@ -1070,18 +1070,42 @@ export function reloadChips(advice: ReloadAdvice, of: typeof state.shownWhole): 
     ...(item.chip ? [{ chip: item.chip, command: item.command, title: item.title!, id: `outcome-copy-${item.tool}` }] : []),
     ...(item.more ?? []).map((extra, at) => ({ ...extra, id: `outcome-copy-${item.tool}-${at + 1}` })),
   ]);
+  const extra = advice.items.filter(item => !item.chip && !item.more?.length).length;
   const view = (chip: { chip: string; command?: string; title: string; id: string }) =>
     (chip.command ? reloadButton({ chip: chip.chip, command: chip.command, title: chip.title }, chip.id) : h('span.reload-chip', { title: chip.title }, chip.chip));
   return chips.length ? h('div.result-reloads', {},
     h('span.result-copies', {}, chips.map(view)),
-    h('button.inline-link.reload-more', { type: 'button', id: 'outcome-reload-more', hidden: true, onclick: (event: Event) => { event.stopPropagation(); state.shownWhole = of; rerender(); } }, '')) : null;
+    h('button.inline-link.reload-more', { type: 'button', id: 'outcome-reload-more', hidden: true, 'data-extra-reloads': extra ? String(extra) : undefined, onclick: (event: Event) => { event.stopPropagation(); state.shownWhole = of; rerender(); } }, '')) : null;
 }
 
-/** Per-tool reload lines for Show all and off-header bands: the table's sentence, then its Copy buttons if it has any. */
-export const reloadLines = (advice: ReloadAdvice): HTMLElement | null => (advice.items.length
-  ? h('div.reload-list.result-copies', {}, advice.items.map(item => h('div.reload-row', {}, h('span.reload-row-text', {}, item.text),
-    item.command ? reloadButton({ chip: item.chip!, command: item.command, title: item.title! }, `outcome-copy-${item.tool}`) : null,
-    ...(item.more ?? []).flatMap((extra, at) => (extra.command ? [reloadButton({ ...extra, command: extra.command }, `outcome-copy-${item.tool}-${at + 1}`)] : []))))) : null);
+const RELOAD_FOLD_FROM = 3;
+let reloadFoldOpen: Outcome | undefined;
+/** One reload step's row: each distinct command once as a labelled Copy control plus any non-command caveat, or plain text when there is no command. */
+function reloadRow(item: ReloadItem): HTMLElement {
+  const copies = [
+    ...(item.command ? [reloadButton({ chip: item.chip!, command: item.command, title: item.title! }, `outcome-copy-${item.tool}`)] : []),
+    ...(item.more ?? []).flatMap((extra, at) => (extra.command ? [reloadButton({ ...extra, command: extra.command }, `outcome-copy-${item.tool}-${at + 1}`)] : [])),
+  ];
+  const text = copies.length ? item.note : item.text;
+  return h('div.reload-row', {}, ...copies, text ? h('span.reload-row-text', {}, text) : null);
+}
+
+/**
+ * Per-tool reload steps for Show all and off-header bands: each command said once on its Copy button, caveats and no-command
+ * steps in plain text. For a long group (3+ shown steps) on a band (`foldFor`), folded behind an explicit "Reload steps (N)" disclosure.
+ */
+export function reloadLines(advice: ReloadAdvice, foldFor?: Outcome): HTMLElement | null {
+  if (!advice.items.length) return null;
+  const list = h('div.reload-list.result-copies', {}, advice.items.map(reloadRow));
+  if (!foldFor || advice.items.length < RELOAD_FOLD_FROM) return list;
+  const disclosure = fold({
+    id: 'outcome-reloads-fold', toggleId: 'outcome-reloads-toggle',
+    label: `Reload steps (${advice.items.length})`, open: reloadFoldOpen === foldFor,
+    onToggle: open => { reloadFoldOpen = open ? foldFor : undefined; }, bodyClass: 'reload-fold-body',
+  }, list);
+  disclosure.className = 'fold reload-fold';
+  return disclosure;
+}
 
 /**
  * The last action's result as a band, when it offers something to do; a result that only tells is in the status bar. While a
@@ -1118,7 +1142,7 @@ export function outcomeBand(cardResult?: Outcome, omitProfile = false): HTMLElem
         : outcome.history ? smallAction(outcome.refused ? 'History' : 'Undo in History', 'outcome-history', () => showPage('history')) : null,
       outcome.next ? button({ variant: 'outline', size: 'small', label: outcome.next.label, id: outcome.next.id, attrs: outcome.next.title ? { title: outcome.next.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.next!.run(); } }) : null),
     cardResult ? null : closeButton(closeResult, { id: 'outcome-dismiss' }),
-    outcome === state.outcome && !resultInHeader() && outcome.reloads ? reloadLines(reloadAdvice(outcome.reloads, toolWays())) : null);
+    outcome === state.outcome && !resultInHeader() && outcome.reloads ? reloadLines(reloadAdvice(outcome.reloads, toolWays()), outcome) : null);
 }
 
 /**
@@ -1215,7 +1239,7 @@ export function listResult(): HTMLElement[] {
   const profile = profileSpan(done && !whole ? state.outcome?.profileLine : undefined);
   const problem = lines.length ? h(`div.band${chips || profile ? '.result-row2' : ''}`, { role: 'status' }, profile, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, of, hasAdvice), chips, done ? null : closeButton(close, { id: 'problems-dismiss' })) : null;
   const row2 = whole && advice ? reloadLines(advice) : problem ? null : profile ? h('div.result-row2.result-profile-row', {}, profile, chips) : chips;
-  return [done, row2, problem].filter((band): band is HTMLElement => !!band);
+  return [done, problem, row2].filter((band): band is HTMLElement => !!band);
 }
 
 /** The profile-left-use sentence for a result's second line: long names give way while the rest stays whole (style.css .band-profile). */

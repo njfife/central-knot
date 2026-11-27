@@ -229,13 +229,15 @@ test('What a running Antigravity needs: a skill, nothing but /skills reload for 
   const skillOn = [{ tool: 'antigravity-cli' as const, kind: 'skill' as const, key: 'notes', on: true }];
   const serverOn = [{ tool: 'antigravity-cli' as const, kind: 'mcp' as const, key: 'docs', on: true }];
   assert.deepEqual(reloadAdvice(skillOn).items, [{ tool: 'antigravity-cli', text: 'Antigravity reads it at the next turn; for the CLI’s slash menu, type /skills reload.',
-    command: '/skills reload', chip: 'Antigravity: /skills reload', title: 'Type this in your Antigravity CLI session: its slash menu then lists the skill.' }]);
+    command: '/skills reload', chip: 'Antigravity: /skills reload', title: 'Type this in your Antigravity CLI session: its slash menu then lists the skill.',
+    note: 'Reads it at the next turn; for the CLI’s slash menu.' }]);
   assert.deepEqual(reloadAdvice(skillOn, { 'antigravity-cli': 'app' }).items, []);
   assert.equal(reloadAdvice(serverOn).text, 'In Antigravity, type /mcp.');
   assert.equal(reloadAdvice(serverOn, { 'antigravity-cli': 'app' }).text, 'In the Antigravity app, choose Restart on the server’s menu.');
   assert.deepEqual(reloadAdvice(serverOn, { 'antigravity-cli': 'both' }).items, [{ tool: 'antigravity-cli',
     text: 'In Antigravity, type /mcp and reload, or choose Restart on the server’s menu in the Antigravity app.', command: '/mcp', chip: 'Antigravity: /mcp',
-    title: 'Type this in your Antigravity session, then reload the servers there.', more: [{ chip: 'Antigravity app: restart the server', title: 'In the Antigravity app, choose Restart on the server’s menu.' }] }]);
+    title: 'Type this in your Antigravity session, then reload the servers there.', note: 'Then reload, or choose Restart on the server’s menu in the Antigravity app.',
+    more: [{ chip: 'Antigravity app: restart the server', title: 'In the Antigravity app, choose Restart on the server’s menu.' }] }]);
 });
 
 test('Its instruction file is AGENTS.md in ~/.gemini/config, never GEMINI.md, and its history is not read yet: no use and no “none seen” is said of it', async () => {

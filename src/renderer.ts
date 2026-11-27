@@ -299,9 +299,10 @@ function fitReloadChips(header: HTMLElement): boolean {
   for (const chip of chips) chip.hidden = false;
   if (more) more.hidden = true;
   if (strip.scrollWidth <= strip.clientWidth + 1) return false;
+  const extra = Number(more?.dataset.extraReloads || 0);
   for (let hidden = 1; hidden <= chips.length; hidden++) {
     chips[chips.length - hidden]!.hidden = true;
-    if (more) { more.textContent = `+${hidden} more`; more.hidden = false; }
+    if (more) { more.textContent = `+${hidden + extra} more`; more.hidden = false; }
     if (strip.scrollWidth <= strip.clientWidth + 1) return true;
   }
   return chips.length > 0;

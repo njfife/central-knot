@@ -276,13 +276,16 @@ ul { list-style: none; }
 .header-result:not(.result-whole) .result-row2:has(.band-profile) > .band-lines { flex: 4 1 0; min-width: 48px; }
 .header-result:not(.result-whole) .result-row2:has(.band-profile) > .result-reloads { flex: 1 0 58px; min-width: 0; }
 .reload-list { display: flex; flex-direction: column; gap: 4px; padding: 2px 0 4px 20px; font-size: 12px; line-height: 18px; }
+.reload-fold { padding: 2px 0 2px 20px; }
+.reload-fold > summary { font-size: 12px; line-height: 16px; }
+.reload-fold .reload-list { padding: 4px 0 2px 0; }
 .reload-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--ink-soft); }
-.band-done:has(> .reload-list) { flex-wrap: wrap; row-gap: 4px; }
-/* Single-action result bands with reload lines (every page off the header, excluding .band-two): grid keeps icon, wrapped text,
-   Undo and × on row 1 so long text never drops below its icon or orphans × above .reload-list at 860px. */
-.band-done:not(.band-two):has(> .reload-list) { display: grid; grid-template-columns: auto minmax(0, max-content) auto minmax(auto, 1fr); align-items: center; }
-.band-done:not(.band-two):has(> .reload-list) > .band-dismiss { grid-column: 4; }
-.band-done > .reload-list { order: 2; flex-basis: 100%; grid-column: 1 / -1; }
+.band-done:has(> :is(.reload-list, .reload-fold)) { flex-wrap: wrap; row-gap: 4px; }
+/* Single-action result bands with reload lines or disclosure (every page off the header, excluding .band-two): grid keeps icon,
+   wrapped text, Undo and × on row 1 so long text never drops below its icon or orphans × above reloads at 860px. */
+.band-done:not(.band-two):has(> :is(.reload-list, .reload-fold)) { display: grid; grid-template-columns: auto minmax(0, max-content) auto minmax(auto, 1fr); align-items: center; }
+.band-done:not(.band-two):has(> :is(.reload-list, .reload-fold)) > .band-dismiss { grid-column: 4; }
+.band-done > :is(.reload-list, .reload-fold) { order: 2; flex-basis: 100%; grid-column: 1 / -1; }
 .result-whole { --card: color-mix(in oklab, var(--surface) 88%, white); align-self: flex-start; max-height: calc(100vh - 120px); overflow-y: auto; margin: 0 -12px;
   padding: 0 12px 12px; background: var(--card); border: 1px solid var(--control-line); border-top: 0; border-radius: 0 0 8px 8px;
   box-shadow: 0 14px 28px -10px rgb(0 0 0 / 0.5); }
