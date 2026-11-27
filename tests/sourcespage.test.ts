@@ -20,7 +20,10 @@ const makeItem = (key: string, name: string, on: boolean): LibraryItem => ({
 
 const emptyKind = (items: LibraryItem[] = []) => ({
   tools: ['claude-cli', 'copilot-cli', 'codex-cli'],
-  items: items.map(item => ({ key: item.key, name: item.name, on: item.on, copies: {}, hashes: {}, plan: { write: [], remove: [] } })),
+  items: items.map(item => ({
+    key: item.key, name: item.name, on: item.on, copies: {}, hashes: {},
+    plan: { orderProved: true, keep: [], write: [], remove: [], forget: [], current: [], ownCopy: [] },
+  })),
   library: Object.fromEntries(items.map(item => [item.key, item])),
   access: { allowed: true },
   gate: { state: 'ready' },
@@ -171,7 +174,9 @@ function reset(items: { skills?: LibraryItem[]; agents?: LibraryItem[]; mcp?: Li
   draw();
 }
 
-const flush = () => new Promise(resolve => setTimeout(resolve, 20));
+const flush = async () => {
+  for (let i = 0; i < 40 && (i < 2 || state.busy); i++) await new Promise(resolve => setTimeout(resolve, 5));
+};
 
 test('waiting Sync band names the items and directs to their rows without repeating the button explanations', () => {
   reset({ skills: [makeItem('deslop', 'deslop', true)] }, []);
