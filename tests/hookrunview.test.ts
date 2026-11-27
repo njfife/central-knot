@@ -239,7 +239,7 @@ test('Check 2: hookRunWords matches every outcome, quiet trailing run place/time
 // ---------- Pure unit tests: T1.23 & T2.28 strip lines (Check 3) ----------
 
 test('Check 3: standing line, T1.23 help card (with plugin sentence <= 30 words), and T2.28 strip notes replace strip.note', () => {
-  assert.equal(HOOK_RUN_WARN, 'Run it runs the command for real. It may change your files.');
+  assert.equal(HOOK_RUN_WARN, 'Running a hook runs its command for real and may change your files.');
 
   const claudeRun = hookStripHelp('claude-cli', true);
   assert.equal(claudeRun, 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.');
@@ -1168,7 +1168,7 @@ test('Plugin page runs installed hooks, keeps marketplace-only text hooks View s
   const codexPage = pluginPage(view, entry, 0, entry.plugins[0]);
   const codexText = dom.textOf(codexPage);
   const codexWarn = dom.textOf(dom.findAll(codexPage, n => n.className === 'session-run-warn')[0]);
-  assert.equal(codexWarn, 'Run it runs the command for real. It may change your files.');
+  assert.equal(codexWarn, 'Running a hook runs its command for real and may change your files.');
   assert.match(codexText, /Codex: Run it runs a hook even if it isn’t trusted in \/hooks\./);
   assert.match(codexText, /echo codex-installed/);
   assert.match(codexText, /echo market-only/, 'marketplace-only text hook stays listed with View source');
@@ -1269,7 +1269,40 @@ test('Plugin page runs installed hooks, keeps marketplace-only text hooks View s
     ownHooks: [{ declaredIn: '/tmp/h/.claude/settings.json', event: 'SessionStart', at: 0, launch: { shell: 'echo mine' } }],
   } as any);
   const warnText = dom.textOf(dom.findAll(withPluginCard, n => n.className === 'session-run-warn')[0]);
-  assert.equal(warnText, 'Run it runs the command for real. It may change your files.');
+  assert.equal(warnText, 'Running a hook runs its command for real and may change your files.');
   const cardHelp = dom.findAll(withPluginCard, n => n.attrs?.role === 'tooltip')[0];
   assert.match(dom.textOf(cardHelp), /Plugin hooks can change their installed files and data\./);
+
+  // Plugin page: text-hook line reads catalog componentsOf over detail; MCP server opens pretty-printed entry verbatim; In each tool opens shut naming limited tools (installed ones too).
+  const mcpEntry = JSON.stringify({ url: 'https://tracker.example.test/mcp', headers: { Authorization: 'Bearer keep-verbatim-123' } });
+  const richDetail: any = {
+    ...singleHookDetail,
+    hooksByTool: { 'claude-cli': [marketSameAsClaude], 'copilot-cli': [marketSameAsClaude], 'codex-cli': [marketSameAsClaude] },
+    mcpServers: [{ name: 'tracker-api', runs: 'https://tracker.example.test/mcp', transport: 'http', entry: mcpEntry }],
+  };
+  market.details.set('/markets/team\u0000catalog-sync', { reading: false, value: richDetail });
+  const catalogEntry: any = {
+    source: '/markets/team', origins: ['central-knot'], name: 'team', kind: 'folder', sourceLabel: 'Folder: team',
+    plugins: [{
+      name: 'catalog-sync', version: '0.5.0', description: 'Catalog test', folder: 'plugins/catalog-sync',
+      components: { skills: 0, commands: 0, agents: 0, hooks: true, mcp: 1, mcpRootVariable: false, bin: false, hooksIn: ['claude-cli', 'copilot-cli'], startHooksIn: ['claude-cli', 'copilot-cli'], promptHooksIn: [], sessionTextHooks: ['claude-cli', 'copilot-cli'] },
+    }],
+    states: { 'catalog-sync': { 'copilot-cli': { state: 'installed', version: '0.5.0', path: '/tmp/c' } } },
+  };
+  state.home!.mode = 'custom';
+  const syncPage = pluginPage(view, catalogEntry, 0, catalogEntry.plugins[0]);
+  const hookNote = dom.textOf(dom.findAll(syncPage, n => n.className === 'plugin-group-note')[0]);
+  assert.equal(hookNote, 'These run when a session starts; what they add is known only when they run. In Codex, none of them adds text.');
+  const outcomesFold = dom.findAll(syncPage, n => n.id === 'plugin-outcomes')[0];
+  assert.equal(outcomesFold.attrs.open, undefined);
+  assert.equal(dom.textOf(dom.findAll(syncPage, n => n.id === 'plugin-outcomes-toggle')[0]), 'In each tool · limits in Copilot CLI and Codex');
+  const mcpToggle = dom.findAll(syncPage, n => n.id === 'pfile-0-mcp-tracker-api')[0];
+  assert.ok(mcpToggle, 'MCP server row opens as a fileGroup button');
+  assert.equal(mcpToggle.attrs['aria-expanded'], 'false');
+  mcpToggle.onclick();
+  const openedPage = pluginPage(view, catalogEntry, 0, catalogEntry.plugins[0]);
+  const mcpBlock = dom.findAll(openedPage, n => n.id === 'pfile-0-mcp-tracker-api-text-0')[0];
+  assert.equal(dom.textOf(dom.findAll(openedPage, n => n.className === 'content-owner')[0]), 'Entry · Marketplace (0.5.0)');
+  assert.equal(dom.textOf(mcpBlock), JSON.stringify(JSON.parse(mcpEntry), null, 2));
+  state.home!.mode = 'actual';
 });

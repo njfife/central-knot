@@ -1,19 +1,20 @@
 // One plugin's page: what it is, its one switch and each tool's line (its box, ticked while the plugin is in that tool, and
-// what that tool has: pluginrecord.ts), its parts (each skill, command, agent and instruction file as written, the hooks
-// that can add text to sessions and its other hooks, each with what it runs, and its servers), and its In each tool and
-// Readme folds. The switch and each tool's box wait their turn in the page's list (pluginstate.ts turnPlugin), and
-// the panel says how its click stands (pluginparts.ts clickNote); Update and the skill switches under Skills act at
+// what that tool has: pluginrecord.ts), its parts (each skill, command, agent, instruction file and MCP server entry as
+// written, the hooks that can add text to sessions and its other hooks, each with what it runs, and its language servers
+// and programs), and its In each tool and Readme folds (both shut at open). The switch and each tool's box wait their turn
+// in the page's list (pluginstate.ts turnPlugin), and the panel says how its click stands while waiting or running
+// (pluginparts.ts clickNote), with the ended result once in the header; Update and the skill switches under Skills act at
 // once (pluginstate.ts applyPluginOps).
 // Fold state lives here while that plugin's page is drawn (shownFolds, drawnPlugin; cleared by afterPluginPageDrawn).
 import { acting, applyClick, rerender, setHome, state as app, whyKindReadOnly } from './app.ts';
-import { afterLayout, button, fileBlocks, h, icon, infoMark, toggle as switchToggle, withToolCount } from './dom.ts';
+import { afterLayout, button, fileBlocks, h, icon, infoMark, toggle as switchToggle } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { libraryEntry, librarySentence } from './historyactions.ts';
 import { kindSource } from './itemrow.ts';
 import { libraryPages } from './librarypages.ts';
 import { harnessIs, libraryWords, rowClicks } from './libraryrow.ts';
 import { groupBy } from './model.ts';
-import { addsText, componentsFrom, outcomes, sessionHooksAbout, whenItRuns } from './pluginoutcomes.ts';
+import { addsText, componentsFrom, limitsIn, outcomes, sessionHooksAbout, whenItRuns } from './pluginoutcomes.ts';
 import { clickNote, componentsOf, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, toolBox, uninstallControl, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { pluginKey } from './pluginplan.ts';
@@ -31,10 +32,6 @@ import { openKind, rowByKey } from './matrix.ts';
 /** Tools that can take the plugin itself here (or have it): what "In each tool" describes. A tool that can't is left out. */
 const nativeTools = (view: PluginsView, entry: MarketplaceView, plugin: string) =>
   view.tools.filter(tool => takesPlugins(tool) && !unavailable(view, entry, plugin, tool));
-
-/** Whether any tool in "In each tool" has a limited or failed outcome, so its fold opens when the page opens. */
-const hasLimitedOutcome = (tools: HarnessId[], components: Components) =>
-  tools.some(tool => outcomes(tool, components).some(outcome => outcome.result === 'limited' || outcome.result === 'fails'));
 
 const tone: Record<Outcome['result'], string> = { works: 'tone-muted', limited: 'tone-warning', ignored: 'tone-faint', fails: 'tone-danger', unknown: 'tone-faint' };
 const glyph: Record<Outcome['result'], Parameters<typeof icon>[0]> = { works: 'check', limited: 'circle-minus', ignored: 'circle-off', fails: 'circle-x', unknown: 'circle-question-mark' };
@@ -74,8 +71,6 @@ function installedLine(version: string | undefined, offered: string | undefined,
  * version an installed copy is compared with (see versionToCompare).
  */
 function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, compareTo: string | undefined, components?: Components) {
-  // A tool where some part won't fully work names it under its mark; "In each tool" has the detail.
-  const limits = (tool: HarnessId) => (components ? outcomes(tool, components).filter(outcome => outcome.result !== 'works') : []);
   const status = (tool: HarnessId, mark: ToolMark) => {
     const stale = copyStale(entry, plugin.name, tool, compareTo, shownDetail(pluginKey(entry.source, plugin.name)));
     const state = stateOf(entry, plugin.name, tool);
@@ -85,7 +80,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     }
     if (mark === 'waits' && !updatesRun()) return 'Waits for automatic updates';
     if (mark === 'items') return `${itemsOnWords(entry, plugin.name, tool, ` in ${names[tool]}`)}.`;
-    return [MARK_WORDS[mark], mark === 'absent' || mark === 'missing' ? limitNote(limits(tool)) : ''].filter(Boolean).join(' · ');
+    return [MARK_WORDS[mark], mark === 'absent' || mark === 'missing' ? limitNote(components ? limitsIn(tool, components) : []) : ''].filter(Boolean).join(' · ');
   };
   const updates = view.canWrite ? updateOps(view, entry, plugin) : [];
   const notIncluded = whyNotCarried(entry, plugin.name);
@@ -109,7 +104,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     // box would install files no tool reads.
     shownDetail(pluginKey(entry.source, plugin.name))?.onlyInstructions
       ? h('p.plugin-panel-hint', { id: 'plugin-only-instructions' }, 'No tool reads these files by itself: copy the text into your own instructions.') : null,
-    withToolCount(h('div.plugin-tool-rows', {}, view.tools.flatMap(tool => {
+    h('div.plugin-tool-rows', {}, view.tools.flatMap(tool => {
       const { mark, words } = markOf(view, entry, plugin, tool, compareTo);
       const box = boxOf(view, entry, plugin.name, tool, { mark, words });
       // Under the box: what it has, or what the box says more (why it is off); in Pi, OpenCode and Antigravity, where none
@@ -129,7 +124,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
           // With no CLI, its plugin commands run through the copy its desktop app carries: said so, never as the CLI.
           view.via?.[tool] ? h('span.plugin-tool-state.plugin-tool-via', { title: `${names[tool]}’s command-line tool wasn’t found, so its plugin commands run through ${view.via[tool]}.` }, `Through ${view.via[tool]}`) : null,
           uninstall)), question];
-    })), view.tools.length));
+    })));
 }
 
 /** Lets one tool into a plugin-linked Library item via the Library row's own `rowClicks.inHarness(..., false)` act, re-reading first. */
@@ -299,12 +294,16 @@ interface FileCopy { who: string; version?: string; text: string; marketplace: b
  * parts that share a name stay apart), its name, what it says it does, and its file in each copy that has it.
  */
 interface FilePart { key: string; name: string; description: string; copies: FileCopy[] }
-type FileKind = 'skills' | 'commands' | 'agents' | 'instructions';
-/** Each kind of part with a file: its group heading, optional heading suffix and info card, and what its file is called above its text. */
-const fileKinds: Record<FileKind, { title: string; file: string; suffix?: string; info?: string }> = {
+type NamedFileKind = 'skills' | 'commands' | 'agents' | 'instructions';
+type FileKind = NamedFileKind | 'mcp';
+/** Each kind of part with a file or entry: its group heading, optional heading suffix, info card and mono description, and what its block is called above its text. */
+const fileKinds: Record<FileKind, { title: string; file: string; suffix?: string; info?: string; mono?: true }> = {
   skills: { title: 'Skills', file: 'SKILL.md' }, commands: { title: 'Commands', file: 'Command file' }, agents: { title: 'Agents', file: 'Agent file' },
   instructions: { title: 'Instruction files', file: 'Instruction file', suffix: ', read by no tool', info: 'The model sees one only when something tells it to read the file, such as one of the plugin’s skills.' },
+  mcp: { title: 'MCP servers', file: 'Entry', mono: true },
 };
+/** Pretty-prints an MCP server's JSON entry verbatim (fallback to raw text if unparseable). */
+const prettyJson = (raw: string) => { try { return JSON.stringify(JSON.parse(raw), null, 2); } catch { return raw; } };
 /** A hook of the marketplace's copy that can add text in one of the tools that take plugins (pluginoutcomes.ts addsText). */
 const addsTextSomewhere = (hook: DeclaredHook) => pluginTools.some(tool => addsText(tool, hook));
 
@@ -347,7 +346,7 @@ function sessionHookStrip(view: PluginsView, entry: MarketplaceView, plugin: Plu
   const unknown = view.tools.some(tool => stateOf(entry, plugin.name, tool).state === 'not-known' || (installed(entry, plugin.name, tool) && !installs.some(item => item.tool === tool)));
   const inAnyTool = installs.length > 0 || view.tools.some(tool => itemsIn(entry, plugin.name, tool));
   if (!eligible.length) return hookGroup(`${owner}\u0000session`, 'hook-source-session', entry.name, plugin.name, 'Hooks that can add text to sessions',
-    marketText, (unknown ? undefined : hookCantRunReason({ inAnyTool, installs, fingerprints: marketText.map(hookFingerprint) })) ?? sessionHooksAbout(componentsFrom(detail).sessionTextHooks, nativeTools(view, entry, plugin.name)));
+    marketText, (unknown ? undefined : hookCantRunReason({ inAnyTool, installs, fingerprints: marketText.map(hookFingerprint) })) ?? sessionHooksAbout(componentsOf(entry, plugin) ?? componentsFrom(detail), nativeTools(view, entry, plugin.name)));
   const selected = eligible.find(each => each.install.tool === market.nav.hookTool) ?? eligible[0]!;
   const tool = selected.install.tool;
   const picker = eligible.length > 1 ? h('span.select.select-bar.plugin-hook-as', {},
@@ -375,26 +374,12 @@ function sessionHookStrip(view: PluginsView, entry: MarketplaceView, plugin: Plu
       marketRows.map((hook, row) => hookRow(hook, `hook-source-session-${row}`))));
 }
 
-/**
- * Lays out "Your tools" by the box's width, decided here once (data-layout, which style.css keys off): with room for a
- * column per tool, each tool gets one from the left; otherwise they wrap in a row. Run after layout (dom.ts afterLayout),
- * before the page is painted.
- */
-function settlePluginTools(): void {
-  const rows = document.querySelector<HTMLElement>('.plugin-tool-rows');
-  if (!rows?.firstElementChild) return;
-  const tools = Number(rows.dataset.tools ?? 1), style = getComputedStyle(rows), px = (name: string) => parseFloat(style.getPropertyValue(name));
-  rows.dataset.layout = rows.clientWidth >= tools * (px('--tool-min') + px('--tool-gap')) ? 'columns' : 'wrap';
-}
-
-// What depends on width, once the page is drawn and whenever the content changes width: which descriptions are cut, and
-// how "Your tools" sits.
+// What depends on width, once the page is drawn and whenever the content changes width: which descriptions are cut.
 afterLayout(markClamped);
-afterLayout(settlePluginTools);
 
 
 /** One kind of part across the marketplace's copy and each tool's installed copy, matched by place in the plugin, each copy with its version. */
-function filePartsOf(kind: FileKind, detail: PluginDetail, offered: string | undefined): FilePart[] {
+function filePartsOf(kind: NamedFileKind, detail: PluginDetail, offered: string | undefined): FilePart[] {
   const sources = [{ who: 'Marketplace', version: offered, marketplace: true, parts: detail[kind] },
     ...Object.entries(detail.installed ?? {}).map(([tool, copy]) => ({ who: names[tool as HarnessId], version: copy.version, marketplace: false, parts: copy[kind] }))];
   const byKey = new Map<string, FilePart>();
@@ -452,8 +437,8 @@ function partIds(prefix: string) {
 }
 
 /**
- * One group of skills, commands, agents or instruction files, with its heading suffix and info card where it has them (fileKinds, or extras.info for skills). A row
- * opens its file as written, in the view the Library's Files view gives a standalone SKILL.md, each text named by who holds it, and
+ * One group of skills, commands, agents, instruction files or MCP servers, with its heading suffix and info card where it has them (fileKinds, or extras.info for skills). A row
+ * opens its file or entry as written, in the view the Library's Files view gives a standalone SKILL.md, each text named by who holds it, and
  * a text that differs from the marketplace's in the warning tone. A closed row says which tools' copies differ. A description stays at two lines, since the file holds it whole.
  * `owner` (the plugin's key) keeps what is opened its own; `idFor` gives each part its element id; `offeredRead` says the
  * marketplace's own copy was read (see differsNote); `extras` adds the skills' switches (see skillColumns).
@@ -476,7 +461,7 @@ function fileGroup(owner: string, idFor: (key: string) => string, kind: FileKind
     return h(`li${open ? '.open' : ''}${end ? '.with-end' : ''}`, {},
       h('button.plugin-file-toggle', { type: 'button', id, 'aria-expanded': String(open), title: `${open ? 'Hide' : 'Show'} ${label}`, onclick: () => toggleOpened(opened) },
         h('span.plugin-file-name', {}, icon(open ? 'chevron-down' : 'chevron-right', 13), h('code.plugin-name', {}, part.name)),
-        h('span.plugin-part-body', {}, part.description ? h('span.plugin-part-what', { title: part.description }, part.description) : null, differsNote(part, differs, offeredRead))),
+        h('span.plugin-part-body', {}, part.description ? h(`span.plugin-part-what${fileKinds[kind].mono ? '.mono' : ''}`, { title: part.description }, part.description) : null, differsNote(part, differs, offeredRead))),
       end ?? null,
       note ? h('span.plugin-part-note', {}, ...inlineMarkdown(note, openLink)) : null,
       open ? h('div.plugin-file', {}, fileBlocks(`${id}-text`, label, part.copies, (holders, distinct) => fileCaption(kind, holders, distinct), { named: true, warn: isOdd, same: comparableText })) : null);
@@ -484,7 +469,7 @@ function fileGroup(owner: string, idFor: (key: string) => string, kind: FileKind
 }
 
 /**
- * The plugin's parts by name, with what each says it does; skills, commands, agents and instruction files open their files.
+ * The plugin's parts by name, with what each says it does; skills, commands, agents, instruction files and MCP servers open their files or entries.
  * The hooks that can add text come first (`sessionHookStrip`: runnable installed-copy rows with any marketplace-only text
  * hooks below, or marketplace `hookGroup` with `hookCantRunReason` / `sessionHooksAbout`); `Other hooks` stays `hookGroup`.
  * What is opened is kept per plugin; element ids start with the marketplace's place in the list (`marketIndex`).
@@ -507,8 +492,8 @@ function contentsBlock(view: PluginsView, entry: MarketplaceView, marketIndex: n
     ...files.map(({ kind, parts }) => fileGroup(owner, idFor, kind, parts, detail.offered, kind === 'skills' ? skillColumns(view, entry, plugin, marketIndex, parts.map(part => part.name)) : undefined)),
     sessionHooks,
     hookGroup(`${owner}\u0000hooks`, 'hook-source-other', entry.name, plugin.name, 'Other hooks', detail.hooks.filter(hook => !addsTextSomewhere(hook))),
-    detail.mcpServers.length ? h('div.plugin-group', {}, h('h4', {}, `MCP servers (${detail.mcpServers.length})`),
-      partList(`${owner}\u0000mcp`, detail.mcpServers.map(server => ({ name: server.name, text: server.runs, mono: true })))) : null,
+    fileGroup(owner, idFor, 'mcp', detail.mcpServers.map(server => ({ key: `mcp/${server.name}`, name: server.name, description: server.runs,
+      copies: [{ who: 'Marketplace', version: offered, marketplace: true, text: prettyJson(server.entry) }] })), detail.offered),
     detail.lspServers.length ? h('div.plugin-group', {}, h('h4', {}, `Language servers (${detail.lspServers.length})`), partList(`${owner}\u0000lsp`, detail.lspServers.map(name => ({ name, text: '' })))) : null,
     detail.bin ? h('div.plugin-group', {}, h('h4', {}, 'Programs'), partList(`${owner}\u0000bin`, [{ name: 'bin/', text: 'A folder of programs the plugin puts on the tool’s path.' }])) : null);
 }
@@ -523,9 +508,9 @@ export function afterPluginPageDrawn(): void {
   drawnPlugin = undefined;
 }
 
-/** A fold (`In each tool`, `Readme`): keyboard-toggleable, keeping the state he gave it only while this plugin's page is shown. */
-function fold(key: string, kind: 'outcomes' | 'readme', title: string, defaultOpen: boolean, body: HTMLElement, extraClass = '') {
-  let shown = shownFolds?.key === key ? shownFolds.folds[kind] ?? defaultOpen : defaultOpen;
+/** A fold (`In each tool`, `Readme`): shut at open, keyboard-toggleable, keeping the state he gave it only while this plugin's page is shown. */
+function fold(key: string, kind: 'outcomes' | 'readme', title: string, body: HTMLElement, extraClass = '', note?: string) {
+  let shown = shownFolds?.key === key ? shownFolds.folds[kind] ?? false : false;
   return h(`section.plugin-section${extraClass}`, {},
     h('details.plugin-fold', {
       id: `plugin-${kind}`, open: shown,
@@ -536,7 +521,8 @@ function fold(key: string, kind: 'outcomes' | 'readme', title: string, defaultOp
         if (shownFolds?.key === key) shownFolds.folds[kind] = now;
       },
     },
-    h('summary.plugin-fold-head', { id: `plugin-${kind}-toggle` }, icon('chevron-right', 14, 'tone-faint plugin-fold-chevron'), h('h3', {}, title)),
+    h('summary.plugin-fold-head', { id: `plugin-${kind}-toggle` }, icon('chevron-right', 14, 'tone-faint plugin-fold-chevron'),
+      h('h3', {}, title, note ? h('span.plugin-fold-note', {}, ` · ${note}`) : null)),
     body));
 }
 
@@ -560,6 +546,7 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
   // "In each tool" only where some tool does something with some part: not for a plugin holding only an instruction file, say.
   const native = nativeTools(view, entry, plugin.name);
   const inEachTool = components && native.some(tool => outcomes(tool, components).length) ? components : undefined;
+  const limited = inEachTool ? native.filter(tool => limitsIn(tool, inEachTool).length) : [];
   const library = libraryLink(entry, plugin, 'plugin-library', 'page');
   return h('article.plugin-page', { 'aria-label': title },
     h('header.plugin-head', {},
@@ -574,6 +561,6 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
     h('div.plugin-columns', {},
       h('div.plugin-column', {},
         contentsBlock(view, entry, marketIndex, plugin, detail, reading, offered),
-        inEachTool ? fold(pageKey, 'outcomes', 'In each tool', hasLimitedOutcome(native, inEachTool), outcomesBlock(view, entry, plugin, inEachTool)) : null),
-      detail?.readme ? fold(pageKey, 'readme', 'Readme', false, h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions, parts)), '.plugin-readme') : null));
+        inEachTool ? fold(pageKey, 'outcomes', 'In each tool', outcomesBlock(view, entry, plugin, inEachTool), '', limited.length ? `limits in ${andList(limited.map(tool => names[tool]))}` : undefined) : null),
+      detail?.readme ? fold(pageKey, 'readme', 'Readme', h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions, parts)), '.plugin-readme') : null));
 }

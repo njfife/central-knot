@@ -627,7 +627,7 @@ async function notesOnly() {
 }
 /** The run's report leads with this; the page says the reasons alone, under Pi's box. */
 const LEAD = 'Nothing of kit is on in Pi.';
-const OWN = 'notes: Pi has a skill of its own by that name, never written over; turn it on in Pi on its row to put the plugin’s there, keeping Pi’s as a version.';
+const OWN = 'notes: Pi has a skill of its own by that name, never written over; turning the plugin’s on there keeps Pi’s as a version.';
 const KEPT = 'notes is kept out of Pi: tick to let it in, unless Pi has its own by that name.';
 /** His own notes in the Library, the plugin's of other content: kept, said as a state (pluginstatus.ts notInWhy `yours`, yourSaid). */
 const KEEPS_NOTES = 'notes: you keep your own skill by that name, not the plugin’s.';
@@ -823,7 +823,7 @@ test('Each reason said once for the names it holds, a long list cut, the reasons
   assert.deepEqual(notInWhy('opencode-cli', 'kit', [...names('another', 'skill', 'notes'), ...names({ cannot: 'OpenCode can’t hold an SSE server.' }, 'mcp', 'relay'), ...names('own', 'skill', 'a', 'b', 'c', 'd', 'e'), ...names('deleted', 'skill', 'charts', 'sheets')]), [
     'notes: another source has a skill by that name here; delete it on its row to take the plugin’s.',
     'relay: OpenCode can’t hold an SSE server.',
-    'a, b, c and 2 more: OpenCode has skills of its own by that name, never written over; turn each on in OpenCode on its row to put the plugin’s there, keeping OpenCode’s as a version.',
+    'a, b, c and 2 more: OpenCode has skills of its own by that name, never written over; turning the plugin’s on there keeps OpenCode’s as a version.',
     'charts and sheets were deleted here: tick to bring them back.']);
   assert.deepEqual(notInWhy('pi-cli', 'kit', names({ cannot: 'Its SKILL.md isn’t valid.' }, 'skill', 'broken')), ['broken: Its SKILL.md isn’t valid.']);
 });

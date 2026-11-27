@@ -568,7 +568,7 @@ export type ItemOut = keyof typeof OUT | { cannot: string };
 const kindWords = (kind: PartKind, several: boolean) => (several ? partWords[kind][1] : `${kind === 'skill' ? 'a' : 'an'} ${partWords[kind][0]}`);
 /** What each reason says of `list` (its names; `several`), one plain sentence with the way to have the plugin's there instead. */
 const OUT = {
-  own: (list: string, several: boolean, kind: PartKind, tool: string) => `${list}: ${tool} has ${kindWords(kind, several)} of its own by that name, never written over; turn ${several ? 'each' : 'it'} on in ${tool} on its row to put the plugin’s there, keeping ${tool}’s as a version.`,
+  own: (list: string, several: boolean, kind: PartKind, tool: string) => `${list}: ${tool} has ${kindWords(kind, several)} of its own by that name, never written over; turning the plugin’s on there keeps ${tool}’s as a version.`,
   shared: (list: string, several: boolean, _kind: PartKind, tool: string) => `${list}: ${tool} reads yours from the shared skills folder, which Central Knot never writes. Take ${several ? 'each' : 'it'} over on ${several ? 'their Library rows' : 'its Library row'} to use the plugin’s.`,
   kept: (list: string, several: boolean, _kind: PartKind, tool: string) => `${list} ${several ? 'are' : 'is'} kept out of ${tool}: tick to let ${several ? 'them' : 'it'} in, unless ${tool} has its own by that name.`,
   off: (list: string, several: boolean) => `${list} ${several ? 'were' : 'was'} turned off on ${several ? 'their rows' : 'its row'}: tick to turn ${several ? 'them' : 'it'} on.`,
@@ -626,7 +626,7 @@ export function boxOf(view: PluginsView, entry: MarketplaceView, plugin: string,
   const off = held ? words : stuck ? `${stuck}${ticked && kept ? ` It is kept out of ${name}: uninstall it in ${name} itself, then tick to put it back.` : ''}` : viewStopped(view);
   const line = !held && !stuck ? undefined
     : takesPlugins(tool) && !view.clis[tool] ? `No ${name} command-line tool here` : entry.refusedBy?.[tool] ? `${name} refused this marketplace`
-    : stuck ? (ticked ? 'Can’t be taken out here' : `${MARK_WORDS['kept-off']} · can’t be changed here`) : mark === 'cannot' ? recorded?.tools[tool]?.held ?? unavailable(view, entry, plugin, tool) : undefined;
+    : stuck ? (ticked ? 'Can’t be turned off here' : `${MARK_WORDS['kept-off']} · can’t be changed here`) : mark === 'cannot' ? recorded?.tools[tool]?.held ?? unavailable(view, entry, plugin, tool) : undefined;
   return { ticked, ...(held ? { held: true as const } : {}), ...(off ? { off } : {}), ...(line ? { line } : {}) };
 }
 

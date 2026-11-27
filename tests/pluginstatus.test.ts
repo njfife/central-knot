@@ -46,7 +46,7 @@ test('A tool’s box: ticked where the plugin is; off before the click where its
   assert.deepEqual(box(on(), 'claude-cli'), { ticked: true });
   // The Anthropic Directory's copy, or no command-line tool: the box is off before any click, never a kept-out it can't undo.
   const directory: MarketplaceView = { ...on(), states: { p: { 'claude-cli': { state: 'installed', path: '/x', directory: 'x' } } } };
-  assert.deepEqual(box(directory, 'claude-cli'), { ticked: true, off: FROM_DIRECTORY, line: 'Can’t be taken out here' });
+  assert.deepEqual(box(directory, 'claude-cli'), { ticked: true, off: FROM_DIRECTORY, line: 'Can’t be turned off here' });
   assert.deepEqual(box(on(), 'claude-cli', { ...view, clis: {} }), { ticked: true, off: 'Claude Code’s command-line tool wasn’t found.', line: 'No Claude Code command-line tool here' });
   // Already kept out of a tool holding such a copy: the box says the way out, in words.
   assert.equal(box({ ...directory, switches: { p: { entry: { on: true, except: ['claude-cli'] }, tools: {} } } }, 'claude-cli').off, `${FROM_DIRECTORY} It is kept out of Claude Code: uninstall it in Claude Code itself, then tick to put it back.`);

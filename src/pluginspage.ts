@@ -468,6 +468,7 @@ export function pluginsPage() {
       toSources(),
       suggestions(view, true),
       h('p.empty-aside', {}, `Marketplaces you added in ${orList(view.tools.filter(takesPlugins).map(tool => names[tool]))} show up here by themselves.`)));
+  const open = shown && openPlugin(shown.entry);
   return h('div.page.plugins-page', {},
     h('div.bands', {},
       view.canWrite ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.reason ?? 'Preview only here.')),
@@ -477,7 +478,7 @@ export function pluginsPage() {
     // The note of what was updated by itself scrolls with the page, so however long it is, the list is never squeezed. It
     // heads a marketplace's list, not a plugin's own page.
     shown
-      ? h('div.market-layout', {}, marketList(view, shown.entry),
-        h('div.market-pane', {}, toolbar(shown), h('div.scroll.market-main', { id: 'plugins-scroll' }, openPlugin(shown.entry) ? null : pluginUpdateNotes(), marketPage(view, shown.entry, shown.index))))
+      ? h(`div.market-layout${open ? '.market-plugin-open' : ''}`, {}, marketList(view, shown.entry),
+        h('div.market-pane', {}, toolbar(shown), h('div.scroll.market-main', { id: 'plugins-scroll' }, open ? null : pluginUpdateNotes(), marketPage(view, shown.entry, shown.index))))
       : h('div.scroll.market-main', { id: 'plugins-scroll' }, pluginUpdateNotes(), empty));
 }

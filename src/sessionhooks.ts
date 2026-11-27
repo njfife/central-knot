@@ -101,7 +101,7 @@ export function sessionStrip(tool: HarnessId, items: InstalledPlugin[], file: Pi
 }
 
 /** Standing line above the first row of every strip that has a runnable hook. */
-export const HOOK_RUN_WARN = 'Run it runs the command for real. It may change your files.';
+export const HOOK_RUN_WARN = 'Running a hook runs its command for real and may change your files.';
 
 /** Information-mark card text on the first hooks strip of a page (30 words at most). */
 export function hookStripHelp(tool: HarnessId, runnable: boolean): string {

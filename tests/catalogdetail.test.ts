@@ -4,8 +4,8 @@ import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promis
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { inside, installedContents, marketplacePage, pluginContents, pluginFiles, readHooks, readmeIn, remoteOf, sourceOf } from '../src/catalogdetail.ts';
-import { componentsFrom, outcomes, sessionHooksAbout, sessionTextNote } from '../src/pluginoutcomes.ts';
-import { summaryOf } from '../src/pluginstatus.ts';
+import { componentsFrom, limitsIn, outcomes, sessionHooksAbout, sessionTextNote } from '../src/pluginoutcomes.ts';
+import { limitNote, summaryOf } from '../src/pluginstatus.ts';
 import { hookLine } from '../src/sessionhooks.ts';
 import type { Components, HarnessId } from '../src/types.ts';
 
@@ -299,47 +299,60 @@ test('“In each tool” says which of a plugin’s hooks Copilot CLI and Codex 
       await put(join(root, 'hooks/hooks.json'), JSON.stringify({ hooks: kinds[kind] }));
       const components = componentsFrom(await pluginContents(root, {}, root)), tools: HarnessId[] = ['copilot-cli', 'codex-cli'];
       return { ...Object.fromEntries(tools.map(tool => [tool, outcomes(tool, components).filter(outcome => ['Hooks', 'Session text'].includes(outcome.component)).map(outcome => `${outcome.component} ${outcome.text}`)])),
-        about: components.sessionTextHooks.length ? sessionHooksAbout(components.sessionTextHooks, tools) : null };
+        about: components.sessionTextHooks.length ? sessionHooksAbout(components, tools) : null };
     };
     const copilotText = `Session text is limited: ${sessionTextNote('copilot-cli')}`, codexText = `Session text waits for trust: ${sessionTextNote('codex-cli')}`;
-    const about = (none: string) => `These run when a session starts or you send a prompt (in Codex, once you trust them); what they add is known only when they run.${none}`;
+    const about = (when: string, none: string) => `These run ${when} (in Codex, once you trust them); what they add is known only when they run.${none}`;
     assert.deepEqual(await said('start'), { 'copilot-cli': ['Hooks start-of-session hooks run; others may not', copilotText],
-      'codex-cli': ['Hooks start-of-session hooks run after you trust them in Codex; others may not', codexText], about: about('') });
+      'codex-cli': ['Hooks start-of-session hooks run after you trust them in Codex; others may not', codexText], about: about('when a session starts', '') });
     assert.deepEqual(await said('prompt'), { 'copilot-cli': ['Hooks prompt hooks run, but what a prompt hook prints is not used; others may not'],
-      'codex-cli': ['Hooks prompt hooks run after you trust them in Codex; others may not', codexText], about: about(' In Copilot CLI, none of them adds text.') });
+      'codex-cli': ['Hooks prompt hooks run after you trust them in Codex; others may not', codexText], about: about('when you send a prompt', ' In Copilot CLI, none of them adds text.') });
     assert.deepEqual(await said('both'), { 'copilot-cli': ['Hooks start-of-session and prompt hooks run, but what a prompt hook prints is not used; others may not', copilotText],
-      'codex-cli': ['Hooks start-of-session and prompt hooks run after you trust them in Codex; others may not', codexText], about: about('') });
+      'codex-cli': ['Hooks start-of-session and prompt hooks run after you trust them in Codex; others may not', codexText], about: about('when a session starts or you send a prompt', '') });
     assert.deepEqual(await said('stop'), { 'copilot-cli': ['Hooks may not run: not confirmed in Copilot CLI'], 'codex-cli': ['Hooks may not run: not confirmed in Codex'], about: null });
   } finally { await cleanup(); }
 });
 
-test('The line under a plugin page’s hooks that can add text names each tool that takes text from none of them, and says Codex waits for trust only where Codex takes some', async () => {
+test('The line under a plugin page’s hooks that can add text names each tool that takes text from none of them, says Codex waits for trust only where Codex takes some, and names prompt hooks only where one is listed', async () => {
   const { root, cleanup } = await box();
   try {
     // The superpowers shape again, its one hook's event changed below, read for every tool as a plugin's page reads it.
     const command = { type: 'command', command: '"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd" session-start' };
-    const hooks = (event: string) => put(join(root, 'hooks/hooks.json'), JSON.stringify({ hooks: { [event]: [{ hooks: [command] }] } }));
+    const hooks = (events: Record<string, unknown>) => put(join(root, 'hooks/hooks.json'), JSON.stringify({ hooks: events }));
     await put(join(root, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'superpowers', version: '7.0.2' }));
     const codexManifest = (hooks?: unknown) => put(join(root, '.codex-plugin/plugin.json'), JSON.stringify({ name: 'superpowers', version: '7.0.2', skills: './skills/', hooks }));
     // `tools`: the tools its "In each tool" describes, all three unless said.
-    const line = async (tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli']) => sessionHooksAbout(componentsFrom(await pluginContents(root, {}, root)).sessionTextHooks, tools);
-    const runs = 'These run when a session starts or you send a prompt', known = 'what they add is known only when they run.';
+    const line = async (tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli']) => sessionHooksAbout(componentsFrom(await pluginContents(root, {}, root)), tools);
+    const starts = 'These run when a session starts', prompts = 'These run when you send a prompt', known = 'what they add is known only when they run.';
     // Its Codex manifest's `"hooks": {}`: Codex takes text from none of them, so nothing is said of trusting them there.
-    await hooks('SessionStart');
+    await hooks({ SessionStart: [{ hooks: [command] }] });
     await codexManifest({});
-    assert.equal(await line(), `${runs}; ${known} In Codex, none of them adds text.`);
+    assert.equal(await line(), `${starts}; ${known} In Codex, none of them adds text.`);
     // No `hooks` there: every tool takes text from it, Codex once you trust it.
     await codexManifest(undefined);
-    assert.equal(await line(), `${runs} (in Codex, once you trust them); ${known}`);
+    assert.equal(await line(), `${starts} (in Codex, once you trust them); ${known}`);
     // Codex not here: neither its trust nor its name.
-    assert.equal(await line(['claude-cli', 'copilot-cli']), `${runs}; ${known}`);
+    assert.equal(await line(['claude-cli', 'copilot-cli']), `${starts}; ${known}`);
     // Copilot CLI's own spelling of the event: only Copilot CLI takes text from it.
-    await hooks('sessionStart');
-    assert.equal(await line(), `${runs}; ${known} In Claude Code and Codex, none of them adds text.`);
-    // A prompt hook: Claude Code and Codex take its text, Codex once trusted; Copilot CLI ignores what a prompt hook prints.
-    await hooks('UserPromptSubmit');
-    assert.equal(await line(), `${runs} (in Codex, once you trust them); ${known} In Copilot CLI, none of them adds text.`);
+    await hooks({ sessionStart: [{ hooks: [command] }] });
+    assert.equal(await line(), `${starts}; ${known} In Claude Code and Codex, none of them adds text.`);
+    // A Copilot-only prompt hook adds text in no tool and is not listed under text hooks, so start-only wording stays.
+    await hooks({ SessionStart: [{ hooks: [command] }], userPromptSubmitted: [{ hooks: [command] }] });
+    assert.equal(await line(), `${starts} (in Codex, once you trust them); ${known}`);
+    // A prompt hook alone: Claude Code and Codex take its text, Codex once trusted; Copilot CLI ignores what a prompt hook prints.
+    await hooks({ UserPromptSubmit: [{ hooks: [command] }] });
+    assert.equal(await line(), `${prompts} (in Codex, once you trust them); ${known} In Copilot CLI, none of them adds text.`);
   } finally { await cleanup(); }
+});
+
+test('limitsIn returns every non-working outcome for one tool, shared by box limit notes and In each tool’s summary', () => {
+  const base: Components = { skills: 1, commands: 0, agents: 0, hooks: false, mcp: 0, mcpRootVariable: false, bin: false, hooksIn: [], startHooksIn: [], promptHooksIn: [], sessionTextHooks: [] };
+  assert.deepEqual((['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'] as const).map(tool => limitsIn(tool, base)), [[], [], [], []]);
+  const withAgent: Components = { ...base, agents: 1 };
+  assert.deepEqual([limitsIn('claude-cli', withAgent).length, limitsIn('copilot-cli', withAgent).length, limitNote(limitsIn('codex-cli', withAgent))], [0, 0, 'Agents are ignored']);
+  const mixed: Components = { ...base, commands: 1, mcp: 1, mcpRootVariable: true, hooks: true, hooksIn: ['claude-cli', 'copilot-cli', 'codex-cli'], startHooksIn: ['claude-cli', 'copilot-cli', 'codex-cli'], sessionTextHooks: ['claude-cli', 'copilot-cli', 'codex-cli'] };
+  assert.deepEqual([limitsIn('claude-cli', mixed).length, limitsIn('copilot-cli', mixed).map(o => o.result), limitsIn('codex-cli', mixed).map(o => o.result)],
+    [0, ['limited', 'limited', 'limited'], ['limited', 'limited', 'limited', 'fails']]);
 });
 
 test('A hooks file that is there but can’t be read as JSON is named, so its hooks read as unknown, never as none', async () => {

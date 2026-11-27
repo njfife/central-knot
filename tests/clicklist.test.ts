@@ -88,7 +88,7 @@ const { versionsList } = await import('../src/editparts.ts');
 const { timesApart } = await import('../src/model.ts');
 const { newItem } = await import('../src/library.ts');
 const { keptBack } = await import('../src/clickplan.ts');
-const { clickWords, toolBox } = await import('../src/pluginparts.ts');
+const { clickNote, clickWords, toolBox } = await import('../src/pluginparts.ts');
 const { owedTo } = await import('../src/pluginrecord.ts');
 const { toolNow } = await import('../src/pluginstatus.ts');
 
@@ -159,21 +159,34 @@ test('A click that ended is read back at once: its switch is free while the next
   assert.deepEqual(main.reads, { plugins: 2, home: 1 });
 });
 
-test('A row says its click’s aim while it waits and runs, then what main returned, a failure once, starting with its tool', async () => {
+test('A row says its click’s aim while it waits and runs, then its short row line; the plugin panel shows only while waiting or running', async () => {
   start();
   turnPlugin(entry, 'alpha', 'on');
   turnPlugin(entry, 'beta', 'keep-out', 'claude-cli');
   turnPlugin(entry, 'gamma', 'let-in', 'claude-cli');
   await settled();
   assert.deepEqual([words('alpha'), words('beta'), words('gamma')], ['Turning on…', 'Waiting to turn off in Claude Code', 'Waiting to turn on in Claude Code']);
+  assert.deepEqual(['alpha', 'beta', 'gamma'].map(name => !!clickNote(entry, name)), [true, true, true]);
   await main.answer(installed('alpha'));
-  assert.deepEqual([words('alpha'), words('beta')], ['Installed in Claude Code', 'Turning off in Claude Code…']);
+  assert.deepEqual([words('alpha'), words('beta')], ['Turned on in Claude Code', 'Turning off in Claude Code…']);
+  assert.deepEqual([clickNote(entry, 'alpha'), !!clickNote(entry, 'alpha', true), !!clickNote(entry, 'beta')], [null, true, true]);
   await main.answer({ stopped, done: [] });
   await main.answer(refused('gamma'));
-  assert.deepEqual([words('beta'), words('gamma')], [stopped, 'Claude Code: Not installed. Plugin "gamma" not found.']);
   assert.deepEqual(['alpha', 'beta', 'gamma'].map(name => clickWords(clickOn('/market', name)!).failed), [false, true, true]);
-  // On the list's row, in one short line: what it did and where; the reasons are in the band above and on the plugin's page.
-  assert.deepEqual(['alpha', 'beta', 'gamma'].map(name => clickWords(clickOn('/market', name)!, true).text), ['Turned on in Claude Code', 'Not done', 'Not turned on in Claude Code']);
+  assert.deepEqual(['alpha', 'beta', 'gamma'].map(name => clickWords(clickOn('/market', name)!).text), ['Turned on in Claude Code', 'Not done', 'Not turned on in Claude Code']);
+  assert.deepEqual(['alpha', 'beta', 'gamma'].map(name => clickNote(entry, name)), [null, null, null]);
+  assert.deepEqual(['alpha', 'beta', 'gamma'].map(name => !!clickNote(entry, name, true)), [true, true, true]);
+});
+
+test('A click that ends with nothing to do leaves the panel note and header empty and says it once in the status bar', async () => {
+  start();
+  market.nav = { ...market.nav, source: '/market', plugin: 'alpha' };
+  turnPlugin(entry, 'alpha', 'on');
+  await settled();
+  assert.ok(clickNote(entry, 'alpha'), 'panel note shows while running');
+  await main.answer({ done: [], before: null, back: [] });
+  await settled();
+  assert.deepEqual([clickNote(entry, 'alpha'), pluginsResult(), app.said.text], [null, [], 'Nothing changed for alpha.']);
 });
 
 test('A click that fails in the middle says why on its row, the clicks after it still run, and the list’s end is said as a whole', async () => {

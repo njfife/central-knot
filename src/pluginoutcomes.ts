@@ -1,6 +1,7 @@
-// What each kind of plugin component does in each tool (capability data, Appendix D, tested versions), which hook events can
-// add text to sessions and what each tool takes of them (and the line a plugin's page puts over them: sessionHooksAbout), and
-// the counts a plugin's contents give. Pure, so both the main process and the pages can use it.
+// What each kind of plugin component does in each tool (capability data, Appendix D, tested versions), its non-working
+// outcomes (`limitsIn`), which hook events can add text to sessions and what each tool takes of them (and the line a
+// plugin's page puts over them: sessionHooksAbout), and the counts a plugin's contents give. Pure, so both the main process
+// and the pages can use it.
 // An outcome's text may set code in backticks (the page draws it in monospace); what a tool's line shows of it, up to its
 // colon (pluginstatus.ts limitNote), holds none.
 // A plugin's instruction files have no row: no tool reads them (the plugin's page says so once).
@@ -69,13 +70,16 @@ export function sessionTextNote(tool: HarnessId): string | undefined {
 
 /**
  * The line under a plugin page's "Hooks that can add text to sessions" (pluginpage.ts), for `tools`, the tools its "In each tool"
- * describes: when such hooks run, Codex's wait for trust only where Codex takes text from one of them, then each tool that takes
- * text from none, as its "In each tool" row has no Session text. `sessionTextHooks`: the copy's Components.sessionTextHooks.
+ * describes: when such hooks run (naming prompt hooks only where one is listed), Codex's wait for trust only where Codex takes
+ * text from one of them, then each tool that takes text from none, as its "In each tool" row has no Session text.
  */
-export function sessionHooksAbout(sessionTextHooks: HarnessId[], tools: HarnessId[]): string {
-  const none = tools.filter(tool => !sessionTextHooks.includes(tool));
+export function sessionHooksAbout(components: Pick<Components, 'sessionTextHooks' | 'startHooksIn' | 'promptHooksIn'>, tools: HarnessId[]): string {
+  const none = tools.filter(tool => !components.sessionTextHooks.includes(tool));
   const trust = tools.includes('codex-cli') && !none.includes('codex-cli') ? ' (in Codex, once you trust them)' : '';
-  return `These run when a session starts or you send a prompt${trust}; what they add is known only when they run.${none.length ? ` In ${toolList(none)}, none of them adds text.` : ''}`;
+  const start = components.startHooksIn.length > 0;
+  const prompt = components.promptHooksIn.some(tool => tool !== 'copilot-cli' && components.sessionTextHooks.includes(tool));
+  const when = start && prompt ? 'when a session starts or you send a prompt' : prompt ? 'when you send a prompt' : 'when a session starts';
+  return `These run ${when}${trust}; what they add is known only when they run.${none.length ? ` In ${toolList(none)}, none of them adds text.` : ''}`;
 }
 
 /**
@@ -127,3 +131,7 @@ export function outcomes(tool: HarnessId, components: Components): Outcome[] {
   if (components.bin) list.push({ component: 'Top-level bin/', result: tool === 'claude-cli' ? 'works' : 'unknown', text: tool === 'claude-cli' ? 'is added to the path' : 'may not be on the path: not confirmed here' });
   return list;
 }
+
+/** Outcomes in `tool` that don't fully work (`result !== 'works'`): one rule for a tool's box (`pluginstatus.ts limitNote`) and the "In each tool" fold summary. */
+export const limitsIn = (tool: HarnessId, components: Components): Outcome[] =>
+  outcomes(tool, components).filter(outcome => outcome.result !== 'works');
