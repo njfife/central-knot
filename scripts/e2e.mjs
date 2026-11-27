@@ -22855,7 +22855,7 @@ async function pluginPageSaysLessFlow() {
 }
 
 /**
- * A plugin's items, switched one tool at a time on its own page (pluginpage.ts itemCells, itemSwitch, switchItemIn): placed in Pi
+ * A plugin's items, switched one tool at a time on its own page (pluginpage.ts itemCells, itemSwitch; matrix.ts flipInHarness): placed in Pi
  * by its box, two kept out of Pi by their switches (the box counts 1 of its 3, a dash), the header's Library sentence and Undo; one
  * let into OpenCode, whose box is unticked, counted there; and where no switch stands, why: Pi's own settings, his own copy (also
  * when it arrives behind the page, here and on the Library's own row, and with Pi's box unticked), a kind Antigravity holds none
