@@ -22954,6 +22954,10 @@ async function pluginItemSwitchesFlow() {
   await a.run(`(async () => { const { home } = await window.centralKnot.refresh(); await window.centralKnot.applySkills([{ key: 'polish', on: false, except: [], seenOn: true }, { key: 'draft', on: false, except: [], deleted: true }], false, home); })()`);
   await refresh();
   same('an Off line and a deleted one: their words, no switch', [await words('skill', 'polish'), await words('skill', 'draft'), (await switches('trio')).filter(each => !each.includes('relay'))], ['Off', 'Deleted here: tick to bring it back', []]);
+  // relay gone from the plugin: its line turns to going, still On, and has no switch.
+  rmSync(join(market, 'plugins/trio/.mcp.json'));
+  await refresh();
+  same('a line the plugin no longer has: its words, no switch', [await words('mcp', 'relay'), await switches('trio')], ['No longer in the plugin: Update turns it off', []]);
   // pair: Pi's own mine is kept, so mine has no Pi switch (Use the plugin's under Pi's box is its act there); an agent has none in Antigravity.
   await openPage('pair');
   await a.click('#pbox-0-pair-pi-cli');
@@ -22968,7 +22972,7 @@ async function pluginItemSwitchesFlow() {
   if (railed) await a.click('#sidebar-toggle');
   // It fits whole at 860; the list held narrower than any window makes it, the name is cut, never a switch pushed out.
   same('at 860 with the sidebar open the 64-letter name and its switches fit in its line; held to 520px, the name is cut with an ellipsis and its switches stay in', await a.run(`(() => {
-    const list = document.querySelector('.plugin-items-list'), row = list.querySelector('[data-key="skill:${long}"]'), name = row.querySelector('.plugin-part-link');
+    const list = document.querySelector('.plugin-items-list'), row = list.querySelector('[data-key="skill:${long}"]'), name = row.querySelector('.plugin-name');
     const fits = () => [...row.querySelectorAll('.skill-switch')].at(-1).getBoundingClientRect().right <= row.getBoundingClientRect().right, wide = fits();
     list.style.width = '520px';
     const narrow = [name.scrollWidth > name.clientWidth, getComputedStyle(name).textOverflow, fits()];
