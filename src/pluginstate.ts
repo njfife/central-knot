@@ -20,7 +20,7 @@
 //   that isn't on screen, in the header. It sets no market.lastRun: the Plugins page's own result is its own clicks'. An act on a
 //   plugin from either page retires that plugin's earlier results and Undo on both (retire).
 // Steps that run by themselves (pluginupdates.ts) take their turn with the page's in main's one queue.
-import { noteMove, showPage, announce, busy, focusWhenDone, oweHomeRead, pinnedRows, profileEndedLine, profilesBefore, readHomeOnce, rerender, saidInStatusBar, setHome, state as app, tell, toolWays, withReloads, type Outcome, type ProfilesBefore } from './app.ts';
+import { harnessTabShown, noteMove, showPage, announce, busy, focusWhenDone, oweHomeRead, pinnedRows, profileEndedLine, profilesBefore, readHomeOnce, rerender, saidInStatusBar, setHome, state as app, tell, toolWays, withReloads, type Outcome, type ProfilesBefore } from './app.ts';
 import { pluginReloads, reloadAdvice, settleReloads, type ReloadAdvice, type ReloadChange } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Turn } from './clicklist.ts';
 import { pin, placeIn } from './itemrow.ts';
@@ -113,8 +113,14 @@ export function current(): { entry: MarketplaceView; index: number } | undefined
   return entry && { entry, index: list.indexOf(entry) };
 }
 
+/** Whether the open page shows pluginsResult() in the header (Plugins, or a tool's Plugins tab under Harnesses). */
+const onPluginsTab = () => harnessTabShown() === 'plugins';
+const showsPluginsResult = () => app.page === 'plugins' || onPluginsTab();
+
 /** The toolbar's notice ("… added", "… refreshed") has done its job once the person moves on. */
-export function clearNotice(): void { if (app.outcome?.page === 'plugins') app.outcome = undefined; }
+export function clearNotice(): void {
+  if (app.outcome?.page === 'plugins' || (app.outcome?.page === 'harnesses' && onPluginsTab())) app.outcome = undefined;
+}
 
 /** How many of a marketplace's plugins kept elsewhere are read ahead (each is a small Git copy), so a large catalog stays cheap. */
 const REMOTE_READ_AHEAD = 8;
@@ -283,7 +289,7 @@ function act(activity: MarketActivity, work: () => Promise<string | void>) {
       const last = market.lastRun;
       const profileLine = last?.done.some(step => succeeded(step.report)) ? profileEndedLine() : undefined;
       if (last && profileLine) last.profileLine = profileLine;
-      announce([said, profileLine].filter(Boolean).join(' '), app.page === 'plugins' && !market.problem && (undoOps().length > 0 || !!profileLine));
+      announce([said, profileLine].filter(Boolean).join(' '), showsPluginsResult() && !market.problem && (undoOps().length > 0 || !!profileLine));
     } finally { market.activity = undefined; }
   });
 }
@@ -477,7 +483,7 @@ function runEnded(): void {
   const oneFailed = oneLines.filter(line => !line.ok).map(line => `${line.plugin}: ${line.text}`).join(' ');
   const multi = [resultSentence(withNotIn(lines), false), failed.length ? `${andList(failed)} failed.` : ''].filter(Boolean).join(' ') || 'Nothing changed.';
   const base = one ? (one.stopped ?? (resultSentence(withNotIn(oneLines), false) || oneFailed || `Nothing changed for ${ran[0]!.plugin}.`)) : multi;
-  announce([base, profileLine].filter(Boolean).join(' '), app.page === 'plugins' && (one ? !!one.stopped || !!oneFailed || undoOps().length > 0 || !!profileLine : !lines.some(line => !line.ok) && (undoOps().length > 0 || !!profileLine)));
+  announce([base, profileLine].filter(Boolean).join(' '), showsPluginsResult() && (one ? !!one.stopped || !!oneFailed || undoOps().length > 0 || !!profileLine : !lines.some(line => !line.ok) && (undoOps().length > 0 || !!profileLine)));
   if (document.activeElement === document.body && clickedLast) document.getElementById(clickedLast)?.focus({ preventScroll: true });
 }
 
@@ -573,7 +579,8 @@ export function closeRun(): void { endRun(); clearRun(); }
  * Whether the app's result `outcome` is said in the header in the run's place (pluginspage.ts pluginsResult): one made on Plugins,
  * not in the status bar, either with no action of the page's own (Sync once from the menu) or a library-item click result (`rows`). It is newer, so app.ts tell lets the run go.
  */
-export const overRun = (outcome: Outcome | undefined): boolean => outcome?.page === 'plugins' && (!outcome.act || !!outcome.rows?.length) && !saidInStatusBar(outcome);
+export const overRun = (outcome: Outcome | undefined): boolean =>
+  (outcome?.page === 'plugins' || (outcome?.page === 'harnesses' && onPluginsTab())) && (!outcome.act || !!outcome.rows?.length) && !saidInStatusBar(outcome);
 const clearRun = () => { market.lastRun = undefined; market.problem = undefined; };
 /** The run's result with no problem line goes by itself, as a list page's result does (app.ts FADE_MS); its Undo with it. Answers whether it went. */
 export function fadeRun(): boolean {
@@ -603,8 +610,9 @@ export function listingOf(plugin: string, marketName: string | undefined, source
 
 /**
  * One tool's box for a plugin on its page (pluginstatus.ts boxOf, as pluginparts.ts toolBox asks it), for that tool's line in the
- * Library (pluginline.ts LineFacts box): with the listing's source and what it lists in the plugin, and the tool's mark's words
- * (what the plugin's page says of that tool). No box while this page's view is read (wantView); `unlisted` where no listing has it.
+ * Library (pluginline.ts LineFacts box) and for a tool's Plugins tab under Harnesses (harnesspage.ts pluginRow): with the tool's
+ * mark and words, the listing's source and what it lists in the plugin. No box while this page's view is read (wantView);
+ * `unlisted` where no listing has it.
  */
 export function lineBox(plugin: string, marketName: string, source: string | undefined, tool: HarnessId) {
   const view = market.view, entry = listingOf(plugin, marketName, source);
@@ -614,7 +622,7 @@ export function lineBox(plugin: string, marketName: string, source: string | und
   const named = view.marketplaces.filter(each => each.name === marketName && each.plugins.some(item => item.name === plugin));
   if (entry.source !== source && named.length > 1) return { box: 'ambiguous' as const };
   const marked = toolMark(view, entry, plugin, tool, entry.switches?.[plugin]?.tools[tool]);
-  return { box: boxOf(view, entry, plugin, tool, marked), words: marked.words, source: entry.source, parts: entry.plugins.find(item => item.name === plugin)?.components };
+  return { box: boxOf(view, entry, plugin, tool, marked), mark: marked.mark, words: marked.words, source: entry.source, parts: entry.plugins.find(item => item.name === plugin)?.components };
 }
 
 /** The read of the home this page's view was last asked for by the Library (wantView); another home starts over (resetMarket). */

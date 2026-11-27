@@ -3,12 +3,12 @@
 // tool first, plus its instruction file and its plugins. A tool left out has its card and switch here, and no other page shows
 // it as a tool (History's entries, and the Overview's line under its tools table, still name it). Nothing here has its own
 // engine: every change goes through the pages it mirrors, or the switch's toolchoice.ts.
-import { noteMove, KINDS, acting, harnessManaged as managed, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type PageKind } from './app.ts';
+import { noteMove, KINDS, acting, harnessManaged as managed, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, whyReadOnly, type HarnessTab, type PageKind } from './app.ts';
 import { manageLocked, manageRow } from './managecard.ts';
-import { installsIn, pluginsInstalled, pluginsTabNote, takenItems, takesItemsOnly, type InstalledMarketPlugin } from './pluginstatus.ts';
+import { MARK_WORDS, installsIn, pluginsInstalled, takenItems, takesItemsOnly, type InstalledMarketPlugin } from './pluginstatus.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { pluginTitle } from './pluginparts.ts';
-import { button, emptyState, h, icon, pathText, section, type Child } from './dom.ts';
+import { button, emptyState, h, icon, pathText, section, toggle, type Child } from './dom.ts';
 import { fullToolName, plural } from './model.ts';
 import { andList, coworkWords, fileName, kindNouns, pageNames, sentence, toolNames as names } from './words.ts';
 import { agentsKeptIn, hasCowork, takesPlugins, type AgentTool } from './presence.ts';
@@ -18,7 +18,7 @@ import type { DesktopApp, HarnessId, HomeView, InstructionFile, Snapshot } from 
 import { caughtUpBand, resetTablesForHarness, itemsTable, differingIn, emptyList, showFiltered } from './matrix.ts';
 import { kindSource } from './itemrow.ts';
 import { aboutInstructions, instructionBands, instructionCard, instructionsNotRead } from './instructionspage.ts';
-import { browse, loadPlugins, market } from './pluginstate.ts';
+import { browse, lineBox, loadPlugins, market, pluginBusy, turnPlugin } from './pluginstate.ts';
 import { homeItems, inUseName, pluginLive } from './profileplan.ts';
 import { copyButton, fact, kindEmpty, noToolsState, notRead } from './pages.ts';
 
@@ -295,15 +295,21 @@ function instructionsTab(tool: HarnessId) {
   return h('div.page', {}, instructionBands(), h('div.scroll.harness-scroll', { id: 'harness-body' }, body));
 }
 
-/** One installed plugin: its name, the tool's recorded version (if any), its marketplace, and Open, which shows it on the plugins' page. */
+/** One installed plugin: its name, the tool's recorded version (if any), its off state when kept off, Its page, and that tool's switch (pluginstate.ts lineBox). */
 function pluginRow({ entry, plugin, version }: InstalledMarketPlugin, tool: HarnessId) {
   const note = [entry.name, plugin.description].filter(Boolean).join(' · ');
-  return h('div.harness-plugin', { role: 'listitem' },
+  const { box, mark } = lineBox(plugin.name, entry.name, entry.source, tool);
+  const own = typeof box === 'object' ? box : undefined;
+  const off = own ? own.off ?? (state.home ? whyReadOnly(state.home) : undefined) : undefined;
+  const pageLink = button({ variant: 'link', size: 'small', label: 'Its page', name: `Open ${pluginTitle(plugin)} in ${pageNames.plugins}`, id: `harness-plugin-${entry.name}-${plugin.name}`,
+    onclick: () => { showPage('plugins'); browse({ source: entry.source, plugin: plugin.name, tab: 'plugins', find: '', category: undefined, hookTool: tool }); } });
+  const control = own ? toggle({ on: own.ticked, label: `${pluginTitle(plugin)} in ${names[tool]}`, disabled: off || pluginBusy(entry.source, plugin.name),
+    id: `harness-plugin-switch-${entry.name}-${plugin.name}`, onchange: () => turnPlugin(entry, plugin.name, own.ticked ? 'keep-out' : 'let-in', tool) }) : null;
+  return h('div.harness-plugin', { role: 'listitem', title: note || undefined },
     h('div.harness-plugin-text', {},
       h('strong', {}, pluginTitle(plugin), version ? h('span.harness-plugin-version', {}, ` ${version}`) : null),
-      h('span.harness-plugin-note', { title: note }, note)),
-    button({ variant: 'ghost', size: 'small', label: 'Open', name: `Open ${pluginTitle(plugin)} in ${pageNames.plugins}`, id: `harness-plugin-${entry.name}-${plugin.name}`,
-      onclick: () => { showPage('plugins'); browse({ source: entry.source, plugin: plugin.name, tab: 'plugins', find: '', category: undefined, hookTool: tool }); } }));
+      own && mark === 'kept-off' ? h('span.harness-plugin-state', {}, MARK_WORDS['kept-off']) : null),
+    pageLink, control);
 }
 
 function pluginsTab(tool: HarnessId) {
@@ -329,8 +335,8 @@ function pluginsTab(tool: HarnessId) {
   if (unread && !plugins.installed.length && !unlisted.length) return page(unread, unsureNote);
   if (!plugins.installed.length && !unlisted.length) return page(unsureNote, emptyState('puzzle', `No plugins in ${names[tool]}`, `None of the plugins in your marketplaces is installed in ${names[tool]}.`,
     button({ variant: 'outline', label: 'Browse plugins', id: 'harness-browse-plugins', onclick: () => showPage('plugins') })));
-  return page(unread, plugins.installed.length ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), pluginsTabNote(tool, !!market.view?.canWrite)) : null,
-    unsureNote, unlistedNote, plugins.installed.length ? h('div.harness-plugins', { role: 'list' }, plugins.installed.map(item => pluginRow(item, tool))) : null);
+  return page(unread, unsureNote, unlistedNote,
+    plugins.installed.length ? h('div.harness-plugins', { role: 'list' }, plugins.installed.map(item => pluginRow(item, tool))) : null);
 }
 
 /** Where the tool's files are, how it was found, and which other products read them. */

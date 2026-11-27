@@ -9,7 +9,7 @@
 // state and actions are app.ts's; each page is drawn by its own module (pages.ts and the *page.ts modules, matrix.ts for the item tables).
 import { settingsPage } from './settingspage.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { absentKinds, acting, drawPage, keepingFocus, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, state, type Page } from './app.ts';
+import { absentKinds, acting, drawPage, harnessTabShown, keepingFocus, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, state, type Page } from './app.ts';
 import { afterLayout, button, closeInfoCard, fitBars, h, icon, keepClicksAcrossRedraws, keepSelection, runAfterLayout, syncInfoCard, whyOff } from './dom.ts';
 import { afterPageDrawn } from './selection.ts';
 import type { IconName } from './icons.ts';
@@ -243,7 +243,12 @@ function renderStatus() {
  * or notices are no longer drawn, or whose place is left, goes, so none opens again by itself.
  */
 function resultHere() {
-  const parts = state.home && !heldBy(state.home) && resultInHeader() ? (state.page === 'plugins' ? pluginsResult() : listResult()) : [];
+  let parts: HTMLElement[] = [];
+  if (state.home && !heldBy(state.home) && resultInHeader()) {
+    const pluginTab = harnessTabShown() === 'plugins';
+    parts = state.page === 'plugins' || pluginTab ? pluginsResult() : listResult();
+    if (!parts.length && pluginTab) parts = listResult();
+  }
   const whole = parts.some(part => part.querySelector('#problems-show-all[aria-expanded="true"]'));
   const notices = state.home && !heldBy(state.home) ? headerNotices(parts.length > 0) : undefined;
   if (!whole && !notices?.card) state.shownWhole = undefined;

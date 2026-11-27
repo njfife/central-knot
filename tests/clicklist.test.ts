@@ -3490,3 +3490,39 @@ test('Whole-item Undo still checks every managed tool while settling a plugin-he
   assert.deepEqual([app.outcome?.warn, app.skillsResult?.results.filter(keptBack), app.outcome?.text], [false, [], 'Undone: tdd is as before.']);
 });
 
+test('Harnesses Plugins tab shows pluginsResult cleanly even when market.nav.plugin names another plugin, and quiets its announcement only on that tab', async t => {
+  const { viewWith } = pluginProfileWorld(t);
+  t.mock.method(api, 'refresh', async () => {
+    main.reads.home++;
+    return viewWith(true);
+  });
+  app.page = 'harnesses';
+  app.harness = 'claude-cli';
+  app.harnessTab = 'plugins';
+  market.nav.plugin = 'beta';
+  const turnedOff: PluginTurnResult = {
+    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-off', report: { tool: 'claude-cli', outcome: 'plugin-off', changed: true, message: 'Turned off.', runs: [] } }],
+    before: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: [] },
+    back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'plugin-on' }],
+  };
+  turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
+  await settled();
+  await main.answer(turnedOff);
+  await settled();
+  const shown = pluginsResult();
+  const resultText = textOf(findById(shown[0], 'plugins-result')).trim();
+  assert.match(resultText, /^alpha: turned off in Claude Code\./);
+  assert.ok(findById(shown[0], 'plugins-undo'), 'Undo button shows on Harnesses Plugins tab');
+  assert.equal(app.said.quiet, true, 'announcement stays quiet while Harnesses Plugins tab shows #plugins-result');
+
+  // On another Harnesses tab (Skills), a finishing plugin click is not quiet (its header shows listResult).
+  closeRun();
+  app.harnessTab = 'skills';
+  turnPlugin(entry, 'alpha', 'keep-out', 'claude-cli');
+  await settled();
+  await main.answer(turnedOff);
+  await settled();
+  assert.equal(app.said.quiet, false);
+});
+
+

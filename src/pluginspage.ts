@@ -353,15 +353,17 @@ function undoButton(): HTMLElement | null {
 const dismiss = (onclick: () => void, id?: string) => closeButton(() => { onclick(); rerender(); }, { id });
 
 /**
- * The page's last result, for the window's header (renderer.ts resultHere), where nothing on the page moves for it: what just
- * happened, with Undo and its × (runLine), then what went wrong (problemBand), with the one × when it stands alone.
+ * The page's last result, for the window's header (renderer.ts resultHere, on Plugins and a tool's Plugins tab
+ * under Harnesses), where nothing on the page moves for it: what just happened, with Undo and its × (runLine), then what went
+ * wrong (problemBand), with the one × when it stands alone.
  */
 export function pluginsResult(): HTMLElement[] {
   // A result of the app's said in the run's place (pluginstate.ts overRun; a new run clears it: turnPlugin), as a list page's
   // result is, with its own reasons (matrix.ts listResult).
   if (overRun(app.outcome)) return listResult();
   const lines = lastLines(), last = market.lastRun;
-  const elsewhere = !!last && (last.reread || (!!market.nav.plugin && !lines.some(line => line.plugin === market.nav.plugin)));
+  const openName = app.page === 'plugins' ? market.nav.plugin : undefined;
+  const elsewhere = !!last && (last.reread || (!!openName && !lines.some(line => line.plugin === openName)));
   const advice = elsewhere ? { text: '', items: [] } : runReloads();
   const of = market.lastRun ?? app.outcome, whole = of !== undefined && app.shownWhole === of, hasAdvice = advice.items.length > 0;
   const run = runLine(lines, advice, elsewhere, whole);
@@ -381,7 +383,8 @@ function runLine(lines: ResultLine[], advice: ReloadAdvice, elsewhere: boolean, 
   const last = market.lastRun;
   const back = undoButton();
   const open = current()?.entry;
-  const parts = last ? resultParts(lines, last.undo, { short: true, here: open && market.nav.plugin ? { plugin: market.nav.plugin, source: open.source } : undefined }) : [];
+  const here = app.page === 'plugins' && open && market.nav.plugin ? { plugin: market.nav.plugin, source: open.source } : undefined;
+  const parts = last ? resultParts(lines, last.undo, { short: true, here }) : [];
   // A run that left something undone counts it first, Undo or not (its reasons are the problem lines under it), so the cut never hides it.
   const short = last ? shortOf(lines, last.unreached) : { names: [], of: 0 }, failed = short.names;
   if (last && (parts.length || failed.length) && (back || failed.length || advice.items.length > 0 || !!last.profileLine)) {
