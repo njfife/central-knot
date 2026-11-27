@@ -2716,7 +2716,8 @@ test('Unused band: skipped rows marked, unread managed tool cue, 3-line disclosu
     const bandText = textOf(band);
     assert.ok(bandText.includes('8 with no use seen in 30 days. 2 from a plugin skipped.'), bandText);
     assert.equal(bandText.includes('Undo'), false, 'Undo explanation must be gone');
-    assert.equal(bandText.includes('Everyday'), false, 'profile sentence must be gone from band');
+    assert.equal(textOf(findById(band, 'unused-profile')), 'Ends Everyday and Focus', 'beside Turn 6 off everywhere, the two profiles it would end');
+    assert.equal(bandText.replace('Ends Everyday and Focus', '').includes('Everyday'), false, 'and no sentence of them anywhere else in the band');
     assert.equal(bandText.includes('another computer'), false, 'limits must start closed');
     assert.equal(bandText.includes('not counted'), false, 'no unread cue when every managed tool was read');
     const toggle = findById(band, 'unused-counted-toggle');

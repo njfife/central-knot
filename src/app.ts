@@ -256,7 +256,7 @@ let inUseRead: { home: HomeView; now: InUseNow } | undefined;
  */
 export function profilesEnding(changes: readonly ItemChange[]): { names: string[]; may: boolean } | undefined {
   const home = state.home;
-  if (!home) return undefined;
+  if (!home?.profiles?.profiles?.length) return undefined;
   if (inUseRead?.home !== home) inUseRead = { home, now: inUseNow(home) };
   const ended = endedByChanges(home, changes, inUseRead.now);
   return ended.length ? { names: ended.map(profile => profile.name), may: !!acting() } : undefined;

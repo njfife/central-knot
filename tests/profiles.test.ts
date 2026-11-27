@@ -82,8 +82,10 @@ test('Before a Library click, the profiles in use it would end are worked out fr
   assert.deepEqual(ending(['gone', { on: true }]), [], 'an item deleted before, added again, comes in On: Also names it and stays in use, so none is ended');
   assert.deepEqual(ending(['pager', { deleted: true }]), [], 'Delete of an item they name leaves both matching what is left');
   assert.deepEqual(ending(['dev', {}], ['notes', { on: false }], ['pager', { except: ['codex-cli'] }]), [], 'changes that leave each On or Off as it is (a no-op, a tool kept out) end none');
-  assert.deepEqual(ending(['papa', { on: false }]), [], 'an item placed by a plugin is that plugin’s, left out here');
+  assert.deepEqual([ending(['papa', { on: false }]), ending(['papa', { on: true }])], [[], []], 'an item placed by a plugin is that plugin’s: left out here, never taken for a found one');
   assert.deepEqual(ending(['pager', { on: false }], ['pager', { on: true }]), [], 'later changes of one click apply over earlier ones');
+  home.profiles!.profiles = [everyday];
+  assert.deepEqual(ending(['gone', { on: true }]), ['Everyday'], 'with Everyday alone in use, the deleted item added again ends it');
   home.profiles!.profiles = [profile('Focus', ['skill:dev', papa])];
   assert.deepEqual(ending(['pager', { on: false }]), [], 'with no profile in use before, none is ended, whichever comes into use');
 });

@@ -11926,7 +11926,7 @@ async function usageFlow() {
   const filesOf = names => Object.fromEntries(names.flatMap(name => [claude, codex, shared].map(root => [join(root, name), readNow(join(root, name, 'SKILL.md'))])));
   const before = filesOf(['standup', 'spare']);
   same('before Turn these off, beside it, the profile in use it would end, its sentence on hover',
-    [await a.text('#unused-profile'), await a.run(`document.getElementById('unused-profile')?.title`)], ['Ends Everyday', 'If off, Everyday stops being the profile in use.']);
+    [(await a.text('#unused-profile'))?.trim(), await a.run(`document.getElementById('unused-profile')?.title`)], ['Ends Everyday', 'If off, Everyday stops being the profile in use.']);
   await a.click('#turn-unused-off');
   for (let tries = 0; tries < 50 && !(await a.exists('#outcome-undo')); tries++) await wait(100);
   for (const [width, height] of [SMALLEST, [1316, 819]]) {
@@ -12337,7 +12337,7 @@ async function usageFlow() {
       const wrapFlush = !tRect || !bTextRect || !lastLead
         || (Math.abs(tRect.top - lastLead.top) < 10 ? Math.abs(lastLead.left - bTextRect.left) < 1 : Math.abs(tRect.left - bTextRect.left) < 1)
         && getComputedStyle(toggle).marginLeft === '0px';
-      return { text, words: text.split(/\\s+/).filter(Boolean).length, height: Math.round(bRect.height), oneLine, wrapFlush };
+      return { text, words: text.split(/\\s+/).filter(Boolean).length, height: Math.round(bRect.height), oneLine, wrapFlush, leadLines: lead ? lead.getClientRects().length : 0 };
     })()`);
     const skippedRowsState = () => a.run(`(() => Object.fromEntries([...document.querySelectorAll('.ov-row[data-key]')].map(row => {
       const cell = row.querySelector('.ov-used');
@@ -12386,11 +12386,12 @@ async function usageFlow() {
       await fullSize(a);
       return metrics;
     };
-    same('ux1a: band is one line for 8 shown, 2 from a plugin skipped, 6 turned off, with no Undo or profile prose',
+    same('ux1a: band is one line for 8 shown, 2 from a plugin skipped, 6 turned off, with no Undo, the profiles it would end only beside its button',
       [await a.text('#unused-band .usage-lead'), (await a.text('#unused-counted-toggle'))?.trim(), await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-counted'), (await a.text('#turn-unused-off'))?.trim()],
       ['8 with no use seen in 30 days. 2 from a plugin skipped.', 'What’s counted', 'false', false, 'Turn 6 off everywhere']);
     const collapsedCounts = await captureUx1a('band');
-    same('ux1a: collapsed band is visually one line high at 860 and 1316 with sidebar open', [collapsedCounts[860]?.oneLine, collapsedCounts[1316]?.oneLine], [true, true]);
+    // At 860 the profiles Turn 6 off would end, beside it, take the room of the lead's end: a second line, no more.
+    same('ux1a: collapsed band is one line high at 1316 with sidebar open, and at 860 its lead takes two lines at most', [collapsedCounts[860]?.leadLines <= 2, collapsedCounts[1316]?.oneLine], [true, true]);
     console.log(`usageFlow ux1a collapsed band: 860=${JSON.stringify(collapsedCounts[860])} 1316=${JSON.stringify(collapsedCounts[1316])}`);
     // Skipped plugin rows are visibly marked at 860 with sidebar open without cutting their names or usage cells, and unmarked while selecting.
     await sizeTo(a, 860, 560);
@@ -12473,7 +12474,7 @@ async function usageFlow() {
     await uxUntil(async () => !(await a.run(`(document.querySelector('.bands')?.textContent ?? '').includes('damaged')`)));
 
     // Turn 6 off everywhere: 6 skills off, 2 plugin agents stay on, result alone names BOTH ended profiles, as its mark did before.
-    same('ux1a: beside Turn 6 off everywhere, both profiles it would end', await a.text('#unused-profile'), 'Ends Everyday and Focus');
+    same('ux1a: beside Turn 6 off everywhere, both profiles it would end', (await a.text('#unused-profile'))?.trim(), 'Ends Everyday and Focus');
     await a.click('#turn-unused-off');
     await uxDone(a);
     check('ux1a: Undo appears after Turn 6 off everywhere', await uxUntil(() => a.exists('#outcome-undo')));
@@ -12579,7 +12580,7 @@ async function usageFlow() {
       [await a.text('#unused-band .usage-lead'), (await a.text('#turn-unused-off'))?.trim()],
       ['128 with no use seen in 30 days. 2 from a plugin skipped.', 'Turn 126 off everywhere']);
     const threeDigitMetrics = await capture860Light('band-three-digits');
-    same('ux1a: three-digit band stays one line high at 860 with sidebar open', threeDigitMetrics?.oneLine, true);
+    same('ux1a: three-digit band’s lead takes two lines at most at 860 with sidebar open, beside Turn 126 off and the profiles it would end', threeDigitMetrics?.leadLines <= 2, true);
     console.log(`usageFlow ux1a three-digit band 860=${JSON.stringify(threeDigitMetrics)}`);
     same('no page errors, ux1a unused band', a.pageErrors, []);
     await a.quit();
@@ -15571,7 +15572,7 @@ async function libraryFlow() {
   // Before the press, the profile it would end: under the status, and on every tool's switch, each of which turns it on.
   const benchEnds = `#${rowPart('profile-ends', 'skills', 'bench-runner')}`, ends = ' Everyday stops being the profile in use.';
   same('Off skill opened row: status line, the profile any On would end, and tool lines match keep-outs with per-tool Off switches and Claude Code warns that OpenCode reads it too',
-    [await o.text('.details-status'), await o.text(benchEnds), await readToolLines(o)],
+    [await o.text('.details-status'), (await o.text(benchEnds))?.trim(), await readToolLines(o)],
     ['On puts it back in 4 of 6 tools.', 'If on, Everyday stops being the profile in use.', [
       { tool: 'Claude Code', line: 'If on, OpenCode reads it too', word: 'Off', label: `bench-runner in Claude Code: off. Click to turn it on in Claude Code; OpenCode reads it from there too.${ends}` },
       { tool: 'Copilot CLI', line: '', word: 'Off', label: `bench-runner in Copilot CLI: off. Click to turn it on in Copilot CLI only.${ends}` },
@@ -15583,7 +15584,7 @@ async function libraryFlow() {
   // legacy-skill, On and in Everyday: its Off would end Everyday; keeping it out of one tool would not, so that switch says nothing.
   await o.click(`#${rowPart('open', 'skills', 'legacy-skill')}`);
   same('an On row Everyday names: "If off" at its head; its tool switches, which only keep it out, add nothing',
-    [await o.text(`#${rowPart('profile-ends', 'skills', 'legacy-skill')}`), (await readToolLines(o)).filter(entry => entry.label.includes('profile in use')),
+    [(await o.text(`#${rowPart('profile-ends', 'skills', 'legacy-skill')}`))?.trim(), (await readToolLines(o)).filter(entry => entry.label.includes('profile in use')),
       (await o.run(`document.getElementById(${JSON.stringify(rowPart('switch', 'skills', 'legacy-skill'))}).title`)).endsWith(ends)],
     ['If off, Everyday stops being the profile in use.', [], true]);
   await o.click(`#${rowPart('open', 'skills', 'bench-runner')}`);
@@ -15802,7 +15803,7 @@ async function libraryFlow() {
   const claudeUnmanagedOc = (await readToolLines(o)).find(entry => entry.tool === 'Claude Code');
   same('with OpenCode not managed, Claude Code Off row line and label do not mention OpenCode',
     claudeUnmanagedOc,
-    { tool: 'Claude Code', line: '', word: 'Off', label: 'bench-runner in Claude Code: off. Click to turn it on in Claude Code only. Everyday stops being the profile in use.' });
+    { tool: 'Claude Code', line: '', word: 'Off', label: 'bench-runner in Claude Code: off. Click to turn it on in Claude Code only.' });
   await o.click(`#${rowPart('enable', 'skills', 'bench-runner', 'claude-cli')}`);
   await done(o);
   await o.click('#nav-history');
