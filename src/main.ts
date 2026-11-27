@@ -1546,6 +1546,8 @@ app.whenReady().then(async () => {
   });
   handle('discovery:start', async () => startHome());
   handle('discovery:refresh', async asked => { if (asked === true) { forgetVersions(); forgetRefusals(); } return current ? syncThenView() : null; });
+  // The home looked at again with no pass run, in the queue: a click's check that it still stands as drawn (matrix.ts flipInHarness).
+  handle('discovery:look', async () => (current ? (await syncAndView(false, false)).view : null));
   // Writes act only on the home the window says it is showing.
   const changes = (value: unknown): Change[] => (Array.isArray(value) ? value : []).filter((change): change is Change =>
     typeof change?.key === 'string' && typeof change.on === 'boolean' && Array.isArray(change.except)

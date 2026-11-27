@@ -2882,18 +2882,20 @@ function detailToolLine(t: Table, skill: ItemRow, tool: Tool): { text?: string; 
 
 /**
  * A tool's own switch for an On item, clicked (THE TOOL SWITCH, libraryrow.ts toolSwitch): kept out there, or let in. The home is
- * read again first, and the click refused unless the tool is still here and its switch stands as `drawn` (libraryrow.ts
- * switchDrawn) and `still` holds; else the row's own click (rowClicks.inHarness) and sentence, or `said`'s (and on its Undo,
- * History's). Sent by the Library's opened row, and by a plugin's page (pluginpage.ts itemSwitch, clashLines), whose `still`
- * reads its plugin again.
+ * looked at again first with no pass run (the look), so a refused click changes nothing; the click is refused unless the tool is
+ * still here and its switch stands as `drawn` (libraryrow.ts switchDrawn) and `still` holds; else the row's own click
+ * (rowClicks.inHarness) and sentence, or `said`'s (and on its Undo, History's). Sent by the Library's opened row, and by a plugin's
+ * page (pluginpage.ts itemSwitch, useOverOwnCopy), whose `still` reads its plugin again.
  */
-export function flipInHarness(kind: PageKind, key: string, name: string, tool: string, drawn: SwitchDrawn, more: { still?: () => Promise<boolean>; said?: Click['said'] } = {}) {
+export function flipInHarness(kind: PageKind, key: string, name: string, tool: string, drawn: SwitchDrawn,
+  more: { still?: () => Promise<boolean>; said?: Click['said'] } = {}) {
   void applyClick(async () => {
-    setHome(await window.centralKnot.refresh());
+    setHome(await window.centralKnot.look());
     // `still` runs whatever else is found, so the page it reads again is drawn as it now is.
-    const row = rowByKey(kind, key), item = row && inLibrary(itemOf(row)), now = row && switchDrawn(row, item, tool), out = !drawn.out, still = await (more.still?.() ?? true);
+    const row = rowByKey(kind, key), item = row && inLibrary(itemOf(row)), now = row && switchDrawn(row, item, tool), out = !drawn.out;
+    const still = await (more.still?.() ?? true), refusal = `${name} changed since the page was read. Nothing was changed.`;
     const stands = still && !!item?.on && !!state.home?.[kind].tools.includes(tool as HarnessId) && now?.at === drawn.at && now.is === drawn.is && now.out === drawn.out;
-    if (!row || !item || !stands) return { page: state.page, item: name, warn: true, band: true, refused: true, text: `${name} changed since the page was read. Nothing was changed.` };
+    if (!row || !item || !stands) return { page: state.page, item: name, warn: true, band: true, refused: true, text: refusal };
     return { kind, items: [name], rows: [{ kind, key }], changes: [rowClicks.inHarness(row, item, tool, out)], ...(more.said ? { undoSentence: true } : {}),
       said: more.said ?? ((notIn: HarnessId[]) => libraryPages[kind].say.said.inHarness(name, tool, out, notIn.includes(tool as HarnessId))) };
   });
@@ -2932,14 +2934,16 @@ function libraryHarnessSwitch(t: Table, lib: LibraryPage, skill: ItemRow, tool: 
       })));
   }
   const does = inHarnessDoes(where, out, lib.words.copy);
+  // What its click sends once flipInHarness finds it as drawn: the hover's forecast of a profile it would end reads it (endsOnHover).
+  const flipHere = { kind: skill.kind, changes: [rowClicks.inHarness(skill, item, tool, !out)] };
   // Kept out, yet loading a copy Central Knot doesn't write there (a take leaves his so: library.ts TAKE), its own or another tool's:
   // said beside the switch, never as Off.
   const loads = loadingIn(skill, item, [tool]), runs = loads.own.length ? 'its own copy' : loads.another.length ? 'another way' : undefined;
   const now = out ? `kept out${runs ? `, running ${runs}` : ''}` : 'on', word = runs ? `${runs.charAt(0).toUpperCase()}${runs.slice(1)}` : out ? 'Off' : 'On';
   const label = `${name} in ${where}: ${now}. ${does}`;
   return h('span.details-tool-actions', {}, own, h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, word),
-    toggle({ on: !out, disabled: writeOff(kindStops(skill.kind)), id: elId('enable', skill, tool), label, onchange: () => flipInHarness(skill.kind, skill.key, name, tool, switchDrawn(skill, item, tool)),
-      attrs: endsOnHover(label, () => [{ kind: skill.kind, changes: [rowClicks.inHarness(skill, item, tool, !out)] }]) })));
+    toggle({ on: !out, disabled: writeOff(kindStops(skill.kind)), id: elId('enable', skill, tool), label, attrs: endsOnHover(label, () => [flipHere]),
+      onchange: () => flipInHarness(skill.kind, skill.key, name, tool, switchDrawn(skill, item, tool)) })));
 }
 
 /**

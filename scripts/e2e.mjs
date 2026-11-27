@@ -23094,6 +23094,13 @@ async function pluginItemSwitchesFlow() {
   const refresh = async () => { await a.click('#header-refresh'); await done(); };
   // History entries a click made since `before` (their ids): no cause, or the person's switch; a sync pass's own say why.
   const entryIds = () => a.run('window.centralKnot.history().then(history => history.events.map(event => event.id))');
+  // Every file under the tools' folders and the shared skills folder, by its path, with its bytes; and History's entries.
+  const homeNow = async () => {
+    const files = {};
+    const walk = dir => { for (const each of readdirSync(dir, { withFileTypes: true })) { const path = join(dir, each.name); if (each.isDirectory()) walk(path); else files[path] = readFileSync(path, 'utf8'); } };
+    for (const dir of ['.pi', '.config/opencode', '.gemini', '.agents', '.claude']) if (existsSync(join(home, dir))) walk(join(home, dir));
+    return { files, history: await entryIds() };
+  };
   const clicksSince = async before => (await a.run('window.centralKnot.history().then(history => history.events.map(event => [event.id, event.cause ?? ""]))'))
     .filter(([id, cause]) => !before.includes(id) && (!cause || cause === 'switch'));
   // A picture with `place` in view (Its items: at 860 it is below the panel), the header's result above it, the pointer over `hover`.
@@ -23158,18 +23165,19 @@ async function pluginItemSwitchesFlow() {
   same('a switch over a copy of his that came behind the page is refused; his copy byte for byte; then his copy is said once, in its place, as Use the plugin’s',
     [await header(), readNow(join(home, '.pi/agent/skills/draft/SKILL.md')), await a.exists(sw('trio', 'pi-cli', 'skill', 'draft')), (await cell('skill', 'draft', 'Pi'))?.[0], await words('skill', 'draft')],
     ['draft changed since the page was read. Nothing was changed.', draftInPi, false, 'Use the plugin’s', '']);
-  // The Library's own row, by the same rule: polish kept out of Pi there, then a copy of his named polish comes behind the page.
+  // The Library's own row, by the same rule: polish kept out of Pi there and let into OpenCode, then a copy of his named polish comes
+  // in the shared skills folder behind the page. The refused click looks at the home and runs no pass: nothing anywhere changes.
   await openKind(a, 'skills');
-  const libSwitch = `#${rowPart('enable', 'skills', 'polish', 'pi-cli')}`, polishInPi = md('polish', 'My own polish, made later in Pi.');
+  const libSwitch = tool => `#${rowPart('enable', 'skills', 'polish', tool)}`, polishShared = md('polish', 'My own polish, in the shared skills folder.');
   if (await a.run(`document.querySelector('#${rowPart('open', 'skills', 'polish')}')?.getAttribute('aria-expanded')`) !== 'true') await a.click(`#${rowPart('open', 'skills', 'polish')}`);
-  await until(() => a.exists(libSwitch));
-  await a.click(libSwitch);
+  await until(() => a.exists(libSwitch('pi-cli')));
+  for (const tool of ['pi-cli', 'opencode-cli']) { await a.click(libSwitch(tool)); await done(); }
+  put(join(home, '.agents/skills/polish/SKILL.md'), polishShared);
+  const beforeLibrary = await homeNow();
+  await a.click(libSwitch('pi-cli'));
   await done();
-  put(join(home, '.pi/agent/skills/polish/SKILL.md'), polishInPi);
-  await a.click(libSwitch);
-  await done();
-  same('on the Library’s row too, its Pi switch drawn before his copy came is refused, and his copy stays byte for byte', [await header(), readNow(join(home, '.pi/agent/skills/polish/SKILL.md'))],
-    ['polish changed since the page was read. Nothing was changed.', polishInPi]);
+  same('on the Library’s row too, its Pi switch drawn before his shared copy came is refused, and every tool’s files and History are as before it',
+    [await header(), await homeNow()], ['polish changed since the page was read. Nothing was changed.', beforeLibrary]);
   await a.click('#nav-plugins');
   await openPage('trio');
   // An Off line and a deleted one have no switch.
@@ -23203,15 +23211,15 @@ async function pluginItemSwitchesFlow() {
   if (railed) await a.click('#sidebar-toggle');
   await fullSize(a);
   await shot('item-switches-cannot-light-860', SMALLEST, 'light');
-  // His copy of the long skill comes in the shared skills folder, which Pi reads, behind the page: the switch drawn before is refused.
+  // The long skill kept out of Pi and let into OpenCode, then his copy of it comes in the shared skills folder, which both read, behind
+  // the page: the Pi switch drawn before is refused, and as the click looks at the home and runs no pass, nothing anywhere changes.
+  for (const tool of ['pi-cli', 'opencode-cli']) { await a.click(sw('pair', tool, 'skill', long)); await done(); }
+  put(join(home, `.agents/skills/${long}/SKILL.md`), md(long, 'My own, in the shared skills folder.'));
+  const beforeShared = await homeNow();
   await a.click(sw('pair', 'pi-cli', 'skill', long));
   await done();
-  const sharedLong = md(long, 'My own, in the shared skills folder.'), beforeShared = await entryIds();
-  put(join(home, `.agents/skills/${long}/SKILL.md`), sharedLong);
-  await a.click(sw('pair', 'pi-cli', 'skill', long));
-  await done();
-  same('his copy in the shared skills folder behind the page: the switch drawn before is refused, his copy byte for byte, no click recorded',
-    [await header(), readNow(join(home, `.agents/skills/${long}/SKILL.md`)), await clicksSince(beforeShared)], [`${long} changed since the page was read. Nothing was changed.`, sharedLong, []]);
+  same('his copy in the shared skills folder behind the page: the Pi switch drawn before is refused, and every tool’s files and History are as before it',
+    [await header(), await homeNow()], [`${long} changed since the page was read. Nothing was changed.`, beforeShared]);
   // His own mine with Pi's box unticked (OpenCode keeps the plugin on): still no Pi switch over it, and his copy as it was.
   await a.click('#pbox-0-pair-opencode-cli');
   await done();
@@ -23245,6 +23253,9 @@ async function pluginItemSwitchesFlow() {
     await done();
     same('a copy gone by hand behind the page: the switch drawn before is refused, nothing written in OpenCode, his moved copy as it was, no click recorded',
       [await header(), existsSync(ocAgent), readNow(aside), await clicksSince(beforeGone)], ['checker changed since the page was read. Nothing was changed.', false, checkerText, []]);
+    same('then its place says what the Library’s row says: its copy was deleted there, and what sync does', [await a.exists(`.plugin-items-list [data-key="agent:checker"] .skill-switch-lock`), (await cell('agent', 'checker', 'OpenCode'))?.[1]],
+      [true, 'Its copy was deleted in OpenCode. When sync runs, the agent turns off; Central Knot keeps it.']);
+    await shot('item-switches-copy-gone-light-860', SMALLEST, 'light');
   }
   same('no page errors, item switches', a.pageErrors, []);
   await a.quit();

@@ -228,13 +228,17 @@ function itemsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
         : cellWhy(line, tool, cells[at]!, cells[at] === 'another-way' ? linkedOn(entry, plugin.name, line)?.row.anotherWay?.[tool] : undefined)))) : null))));
 }
 
-/** One item's switch in one tool that takes items one by one: on unless kept out there; a click is the Library row's (matrix.ts flipInHarness). */
+/** An item's switch in a tool that takes items one by one, on unless kept out as the home its click (matrix.ts flipInHarness) reads has it; where its copy isn't
+ * as the switch says (waits for sync, deleted by hand, unseen), a mark beside it and its label give the Library row's line (libraryrow.ts harnessLine). */
 function itemSwitch(view: PluginsView, entry: MarketplaceView, plugin: string, line: PluginItemLine, tool: HarnessId, marketIndex: number) {
-  // On or off as the home it acts on has it (switchDrawn), which a profile switched from the menu bar changes without this view.
-  const where = names[tool], kind = pageOfPart[line.kind], now = linkedOn(entry, plugin, line), drawn = now && switchDrawn(now.row, now.item, tool), on = drawn ? !drawn.out : !line.except?.includes(tool);
-  const label = `${line.name} in ${where}: ${on ? 'on' : 'kept out'}. ${inHarnessDoes(where, !on, libraryPages[kind].words.copy)}`;
-  return h('span.skill-switch', { 'data-state': on ? 'on' : 'off' }, switchToggle({ on, label, disabled: cantChange(view, kind) || !drawn, id: `pitem-${marketIndex}-${plugin}-${tool}-${line.kind}-${line.key}`,
-    onchange: () => drawn && flipInHarness(kind, line.key, line.name, tool, drawn, { still: () => stillLinked(entry, plugin, line, tool) }) }));
+  const where = names[tool], kind = pageOfPart[line.kind], now = linkedOn(entry, plugin, line), drawn = now && switchDrawn(now.row, now.item, tool);
+  const on = drawn ? !drawn.out : !line.except?.includes(tool);
+  const more = now && drawn && !['current', 'kept-out', 'none'].includes(drawn.is) ? libraryPages[kind].say.harnessLine(now.row, now.item, tool, where) : '';
+  const label = `${line.name} in ${where}: ${on ? 'on' : 'kept out'}. ${more ? `${more} ` : ''}${inHarnessDoes(where, !on, libraryPages[kind].words.copy)}`;
+  const id = `pitem-${marketIndex}-${plugin}-${tool}-${line.kind}-${line.key}`;
+  return h('span.skill-switch', { 'data-state': on ? 'on' : 'off', title: more || undefined },
+    switchToggle({ on, label, disabled: cantChange(view, kind) || !drawn, id, onchange: () => drawn && flipInHarness(kind, line.key, line.name, tool, drawn, { still: () => stillLinked(entry, plugin, line, tool) }) }),
+    more ? icon('circle-alert', 13, 'skill-switch-lock') : null);
 }
 
 /** Where an item's line has no switch in a tool (itemCells): the tool's own state, or a dash; why on hover (`way`: how it has it another way). */
@@ -250,7 +254,8 @@ function useOverOwnCopy(view: PluginsView, entry: MarketplaceView, plugin: strin
   const kind = pageOfPart[line.kind], where = names[tool], now = linkedOn(entry, plugin, line), drawn = now && switchDrawn(now.row, now.item, tool);
   const title = `${where} has its own copy of ${line.name}. Puts the plugin’s in its place there; ${where}’s copy is kept as a version, and Undo puts it back.`;
   return h('span.skill-switch', {}, button({ variant: 'link', size: 'micro', label: 'Use the plugin’s', id: `pclash-${marketIndex}-${plugin}-${tool}-${line.kind}-${line.key}`, disabled: cantChange(view, kind) || !drawn,
-    attrs: { title, 'aria-label': `Use the plugin’s ${line.name} in ${where}` }, onclick: () => drawn && flipInHarness(kind, line.key, line.name, tool, drawn, { still: () => stillLinked(entry, plugin, line, tool, true), said: historySaid(kind, line.key, line.name, tool) }) }));
+    attrs: { title, 'aria-label': `Use the plugin’s ${line.name} in ${where}` },
+    onclick: () => drawn && flipInHarness(kind, line.key, line.name, tool, drawn, { still: () => stillLinked(entry, plugin, line, tool, true), said: historySaid(kind, line.key, line.name, tool) }) }));
 }
 
 /** The tools' marks over a list's columns of switches: a plugin's skills (skillColumns) and its items (itemsSection). */
