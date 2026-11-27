@@ -80,13 +80,13 @@ export function itemThrough(home: Pick<HomeView, 'pluginItems'> | undefined, pag
 export const pluginOnIn = (home: Pick<HomeView, 'pluginItems' | Page> | undefined, page: Page, row: OwnRow): string[] => (home ? kindSource(home, page).tools : [])
   .filter(tool => { const given = throughPluginHere(row, tool), item = itemThrough(home, page, row, tool); return item ? onNow(item) : !!given && !given.off; });
 
-const memo = new WeakMap<HomeView, Partial<Record<Page, PageRows>>>();
+const memo = new WeakMap<Pick<HomeView, 'pluginItems' | Page>, Partial<Record<Page, PageRows>>>();
 
 /**
  * The page's plugin rows for a home, worked out once per read: one per item of a plugin, across the tools that have it
  * installed, left out where a row of the person's own already shows that item as there through the plugin.
  */
-export function pageRows(home: HomeView, page: Page): PageRows {
+export function pageRows(home: Pick<HomeView, 'pluginItems' | Page>, page: Page): PageRows {
   const known = memo.get(home) ?? {};
   if (known[page]) return known[page]!;
   const kind = partOfPage[page];

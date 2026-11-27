@@ -4,18 +4,21 @@
 // (signinRows), those that need him first (grouped), which cells a check holds for as views come (askedNow, followView,
 // answerFor), a cell's words (cellSays), the time a column shows of its own (ownTime), the line saying what a check does on this
 // computer (checkLine, for the tools whose check can run here: cannotRun), a session-only tool's head (IN_SESSION), the marks'
-// cards (connectedCard, SESSION_CARD, LOCAL_CARD), and each tool's own sign-in command (signInCommand). Pure, for the page and
-// main alike. Elsewhere: the run, in main (mcpsigninrun.ts checkSignin); the page, its clicks and the order it holds its rows in
-// (mcpsigninpage.ts); its state (app.ts state.mcpSignin); the shapes (types.ts SigninAnswer, SigninSaid).
+// cards (connectedCard, SESSION_CARD, LOCAL_CARD), each tool's own sign-in command, run and copied (signInArgs, signInCommand),
+// the tools whose sign-in Central Knot starts on a click (startsSignin), and a cell as the page shows it, a sign-in started there
+// included (cellNow, of SigninChecks signins). Pure, for the page and main alike. Elsewhere: the runs, in main (mcpsigninrun.ts
+// checkSignin, startSignin); the page, its clicks and the order it holds its rows in (mcpsigninpage.ts); its state (app.ts
+// state.mcpSignin); the shapes (types.ts SigninAnswer, SigninSaid, SigninEnd).
 // Only what a tool's command prints is read, and what can't be read is said so, never made a status: Central Knot reads, keeps and
-// shows no token, credential file, cache or keychain entry, and starts no sign-in. The words each tool prints were measured on
+// shows no token, credential file, cache or keychain entry; a sign-in it starts is the tool's own. The words each tool prints were measured on
 // 2026-11-21 against stand-in servers in throwaway homes (tests/mcpsignin/: Claude Code 2.1.330, Codex 0.169.1 and 0.171.0, Pi
 // 1.6.0, OpenCode 1.19.6).
 import { claudeServerName } from './pluginstatus.ts';
 import { offIn, pageRows, pluginTools } from './pluginrows.ts';
 import { record } from './values.ts';
+import { clockTime } from './model.ts';
 import { andList, toolNames } from './words.ts';
-import type { HarnessId, HomeView, LibraryFacts, SigninAnswer, SigninSaid } from './types.ts';
+import type { HarnessId, HomeView, LibraryFacts, SigninAnswer, SigninEnd, SigninSaid } from './types.ts';
 
 /** The command each tool reports its MCP servers' state with; Copilot CLI's list and get give its configuration only. */
 export const listCommand: Partial<Record<HarnessId, string[]>> = {
@@ -94,13 +97,20 @@ function fromOpenCode(stdout: string, names: string[]): Servers | undefined {
 }
 
 const readers: Partial<Record<HarnessId, (stdout: string, names: string[]) => Servers | undefined>> = { 'claude-cli': fromClaude, 'codex-cli': fromCodex, 'pi-cli': fromPi, 'opencode-cli': fromOpenCode };
-/** The first line a tool printed that says something (its colours, frame and heading left out), cut at a word past 200 characters. */
+/** A line a tool printed, cut at a word past 200 characters. */
+function cut(line: string): string {
+  if (line.length <= 200) return line;
+  const at = line.lastIndexOf(' ', 200);
+  return `${line.slice(0, at > 100 ? at : 200)}…`;
+}
+/** The first line a tool printed that says something (its colours, frame and heading left out), cut. */
 function firstLine(text: string): string | undefined {
   const line = lines(text.replace(COLOUR, '')).map(each => each.replace(/^[┌│└●\s]+/, '').trim()).find(each => each && !/^(Checking MCP server health|MCP Servers$)/.test(each));
-  if (!line || line.length <= 200) return line;
-  const cut = line.lastIndexOf(' ', 200);
-  return `${line.slice(0, cut > 100 ? cut : 200)}…`;
+  return line && cut(line);
 }
+/** What a tool printed last as its sign-in failed (`output`: both streams), its colours and any address left out, cut. */
+export const lastSaid = (output: string) =>
+  cut(lines(output.replace(COLOUR, '')).map(each => each.trim()).filter(each => each && !/^https?:\/\//.test(each)).at(-1) ?? '');
 
 /**
  * What a tool's command said of the servers asked about (`names`, as it names them), read from what it printed on its standard
@@ -133,7 +143,7 @@ function ownCell(fact: LibraryFacts, tool: HarnessId): SigninCell | undefined {
 }
 
 /** The MCP servers some managed tool has, as the Library lists them (its own rows and plugins'), sorted by name. A plugin's runs as its first copy that says. */
-export function signinRows(home: HomeView): SigninRow[] {
+export function signinRows(home: Pick<HomeView, 'pluginItems' | 'skills' | 'mcp' | 'agents'>): SigninRow[] {
   const tools = home.mcp.tools, cells = (made: (tool: HarnessId) => SigninCell | undefined) => Object.fromEntries(tools.flatMap(tool => { const cell = made(tool); return cell ? [[tool, cell]] : []; }));
   const own = home.mcp.items.map(fact => ({ id: fact.key, name: fact.name, transport: fact.transport, cells: cells(tool => ownCell(fact, tool)) }));
   const plugins = pageRows(home, 'mcp').rows.map(row => ({ id: row.key, name: row.name, plugin: row.plugin,
@@ -144,7 +154,7 @@ export function signinRows(home: HomeView): SigninRow[] {
 
 /** The rows that need him first (a cell that needs a sign-in or says what went wrong: CellSays heed), each group in the order given. */
 export function grouped(rows: SigninRow[], checks: SigninChecks): SigninRow[] {
-  const needed = rows.filter(row => (Object.keys(row.cells) as HarnessId[]).some(tool => cellSays(tool, row, answerFor(checks, tool, row)).heed));
+  const needed = rows.filter(row => (Object.keys(row.cells) as HarnessId[]).some(tool => cellNow(checks, tool, row, false).heed));
   return [...needed, ...rows.filter(row => !needed.includes(row))];
 }
 
@@ -152,15 +162,17 @@ export function grouped(rows: SigninRow[], checks: SigninChecks): SigninRow[] {
 
 /** A column's last check: when it ended, what its tool answered, and the cells it holds for: those asked about, unchanged at every view since. */
 export interface ColumnCheck { at: string; answer: SigninAnswer; asked: string[] }
+/** A sign-in started from a cell (mcpsigninpage.ts signIn): its tool, its cell's copy (cellKey), and once it ended, when and how. */
+export interface SigninRun { tool: HarnessId; copy: string; at?: string; end?: SigninEnd }
 /**
  * The page's checks in one home (app.ts state.mcpSignin, made again when a home opens): each column's last, the one under way,
- * why one couldn't be run, and when the last whole Check all ended (`all`: each column it ran answered or said why it couldn't
- * run; mcpsigninpage.ts checkColumns). Never stored.
+ * why one couldn't be run, when the last whole Check all ended (`all`: each column it ran answered or said why it couldn't
+ * run; mcpsigninpage.ts checkColumns), and the sign-ins started there, one under way at most. Never stored.
  */
 export interface SigninChecks { home: string; columns: Partial<Record<HarnessId, ColumnCheck>>; checking?: { tool: HarnessId; asked: string[] };
-  failed?: Partial<Record<HarnessId, string>>; all?: string }
-/** A cell as one copy: its row, the tool's name for the server, and what the copy is. */
-const cellKey = (row: SigninRow, cell: SigninCell) => JSON.stringify([row.id, cell.name ?? null, cell.copy ?? null]);
+  failed?: Partial<Record<HarnessId, string>>; all?: string; signins?: SigninRun[] }
+/** A cell as one copy: its row, the tool's name for the server, and what the copy is. Main checks a sign-in's against it (mcpsigninrun.ts signinRefusal). */
+export const cellKey = (row: SigninRow, cell: SigninCell) => JSON.stringify([row.id, cell.name ?? null, cell.copy ?? null]);
 /** The cells a check of `tool` asks about now: each one not switched off. */
 export const askedNow = (home: HomeView, tool: HarnessId) => signinRows(home).flatMap(row => (row.cells[tool] && !row.cells[tool]!.off ? [cellKey(row, row.cells[tool]!)] : []));
 /** At each view taken (app.ts setHome): a cell gone, switched off or another copy now is held for no more, by a check done or under way. */
@@ -168,6 +180,8 @@ export function followView(checks: SigninChecks, home: HomeView) {
   const still = (tool: HarnessId, asked: string[]) => { const now = new Set(askedNow(home, tool)); return asked.filter(key => now.has(key)); };
   for (const [tool, column] of Object.entries(checks.columns) as [HarnessId, ColumnCheck][]) column.asked = still(tool, column.asked);
   if (checks.checking) checks.checking.asked = still(checks.checking.tool, checks.checking.asked);
+  // What a sign-in ended with is its copy's alone; one under way is kept until it ends.
+  checks.signins = checks.signins?.filter(run => !run.end || still(run.tool, [run.copy]).length);
   // A check that found no command line is older than this view's probe that finds one: the newer word decides, so that answer goes.
   const found = (tool: HarnessId) => home.snapshots.some(each => each.harness === tool && each.probe.state === 'ok');
   for (const tool of Object.keys(checks.columns) as HarnessId[]) if (cannotRun(checks, home, tool) && found(tool)) delete checks.columns[tool];
@@ -187,11 +201,13 @@ export function ownTime(checks: SigninChecks, tool: HarnessId): string | undefin
 // ---------- Words ----------
 
 /**
- * What a cell says, its tone, the line under it where its answer couldn't be read, for one that needs a sign-in the tool's own
- * command, `heed` where it needs him (a sign-in, or what went wrong: grouped puts its row first), and a mark's whole meaning
- * (`title`, its hover).
+ * What a cell says, its tone, the line under it (an answer that couldn't be read, what a tool said as its sign-in failed), the
+ * tool's own sign-in command to copy, `heed` where it needs him (a sign-in, or what went wrong: grouped puts its row first), and
+ * a mark's whole meaning (`title`, its hover).
  */
-export interface CellSays { words: string; tone?: 'muted' | 'warning'; line?: string; command?: string; heed?: true; title?: string }
+export interface CellSays { words: string; tone?: 'muted' | 'warning'; line?: string; command?: string; heed?: true; title?: string;
+  /** A sign-in's button (cellNow): Sign in or Try again, which runs `runs`, or Stop while one waits. */
+  act?: { label: 'Sign in' | 'Try again' | 'Stop'; runs?: string } }
 export const SAID = { 'no-sign-in': 'No sign-in needed', 'signed-in': 'Signed in', connected: 'Connected' };
 /** Where each session-only tool's sign-in shows: its head, in place of a Check, and its mark's hover in a server's cell (Antigravity has no command known for it). */
 export const IN_SESSION: Partial<Record<HarnessId, { head: string; hover: (server: string) => string }>> = {
@@ -272,4 +288,36 @@ export function cannotRun(checks: SigninChecks, home: HomeView, tool: HarnessId)
 const shellWord = (text: string) => (/^[A-Za-z0-9._:/@-]+$/.test(text) ? text : `'${text.replaceAll("'", "'\\''")}'`);
 /** Each tool's own command that signs in to one server (Copilot CLI's is typed inside a session: IN_SESSION). */
 const SIGN_IN: Partial<Record<HarnessId, string[]>> = { 'claude-cli': ['claude', 'mcp', 'login'], 'codex-cli': ['codex', 'mcp', 'login'], 'pi-cli': ['pi', 'mcp', 'login'], 'opencode-cli': ['opencode', 'mcp', 'auth'] };
+/** The command to copy or name, as a shell takes it, the server one shell word. */
 export const signInCommand = (tool: HarnessId, server: string) => (SIGN_IN[tool] ? [...SIGN_IN[tool]!, shellWord(server)].join(' ') : undefined);
+/** The same command's arguments after its binary, as a sign-in runs them (mcpsigninrun.ts startSignin): the server one argument whatever it holds. */
+export const signInArgs = (tool: HarnessId, server: string) => (SIGN_IN[tool] ? [...SIGN_IN[tool]!.slice(1), server] : undefined);
+
+/** How long a sign-in started here waits for its tool to end, the browser's part in it included, before it is stopped. */
+export const SIGNIN_LIMIT_MS = 180_000;
+/**
+ * Whether Central Knot starts `tool`'s sign-in on a click, for this computer's own home (`actual`) on `platform`: Codex's, which
+ * opens the browser itself and needs no terminal (measured on Linux, Codex 0.172.0), off Windows, where none has been measured
+ * and the cell keeps its Copy. The page offers Sign in by it, and main refuses by it (mcpsigninrun.ts signinRefusal).
+ */
+export const startsSignin = (tool: HarnessId, actual: boolean, platform: string) => tool === 'codex-cli' && actual && platform !== 'win32';
+/** A sign-in's end in a cell's words, after its tool ended or was stopped, or main started nothing. */
+function endWords(tool: HarnessId, end: Exclude<SigninEnd, { signedIn: true }>): string {
+  if ('notStarted' in end) return end.notStarted;
+  if ('refused' in end) return 'Sign-in didn’t finish';
+  return { timeout: `No answer after ${SIGNIN_LIMIT_MS / 60_000} minutes`, stopped: 'Stopped', missing: `No ${toolNames[tool]} command line here` }[end.failed];
+}
+/**
+ * A cell as the page shows it, and whether it needs him: a sign-in started there for this very copy, while it waits (Stop) and
+ * as it ended (Signed in and its time; else what happened, Try again and its command to copy); else its column's answer
+ * (cellSays), whose need of a sign-in offers Sign in in place of Copy where `starts` (startsSignin).
+ */
+export function cellNow(checks: SigninChecks, tool: HarnessId, row: SigninRow, starts: boolean): CellSays {
+  const said = cellSays(tool, row, answerFor(checks, tool, row)), cell = row.cells[tool]!;
+  const run = checks.signins?.find(each => each.tool === tool && each.copy === cellKey(row, cell));
+  if (!run) return said.command && starts ? { words: said.words, tone: said.tone, act: { label: 'Sign in', runs: said.command }, heed: true } : said;
+  if (!run.end) return { words: 'Finish sign-in in your browser…', act: { label: 'Stop' } };
+  if ('signedIn' in run.end) return { words: `Signed in ${clockTime(run.at!)}` };
+  const command = signInCommand(tool, cell.name!)!;
+  return { words: endWords(tool, run.end), ...('refused' in run.end && run.end.refused ? { line: run.end.refused } : {}), command, act: { label: 'Try again', runs: command }, heed: true };
+}

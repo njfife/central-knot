@@ -1,22 +1,24 @@
 // One MCP sign-in check, in main (MAP.md, "MCP sign-in"): a tool's own list command (mcpsignin.ts listCommand), run once on a
-// click for the home on screen, and its answer read of the servers asked about (mcpsignin.ts readAnswer). The binary is this
+// click for the home on screen, and its answer read of the servers asked about (mcpsignin.ts readAnswer); and one sign-in, the
+// tool's own (mcpsignin.ts signInArgs), started on a click for one server of this computer's home once main has found that very
+// copy there (signinRefusal), one at a time, stopped at its limit, on Stop and at Quit (TERM, then KILL: STOP_GRACE_MS). The binary is this
 // computer's own command line, never a desktop app's copy (discovery.ts findCli). It runs from an empty folder made for the run and
 // removed after it (one that can't be removed is left and said in the app's log: launch.ts clearRunFolder), in a process group of
 // its own (on Windows, its tree: launch.ts stopTree), stopped whole at the limit or when Central Knot quits (stopChecks, from
 // main.ts's before-quit), and none starts once Quit has begun. This computer's own home is checked with the app's environment,
 // its tools' overrides included (as main.ts overrideFor reads them); any other home with an environment made for it (ownEnv), so
 // none of the tools' own variables reaches it. Central Knot writes nothing and keeps nothing; the tools' own commands write their
-// own logs and caches in their own folders.
+// own logs, caches and, for a sign-in, what they keep of it, in their own folders or stores.
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { findCli } from './discovery.ts';
-import { CHECK_LIMIT_MS, listCommand, readAnswer } from './mcpsignin.ts';
+import { cellKey, CHECK_LIMIT_MS, lastSaid, listCommand, readAnswer, signInArgs, SIGNIN_LIMIT_MS, startsSignin, type SigninRow } from './mcpsignin.ts';
 import { pathBeside } from './platform.ts';
 import { clearRunFolder, homeVariables } from './launch.ts';
 import { run } from './plugins.ts';
 import { toolNames } from './words.ts';
-import type { HarnessId, SigninAnswer } from './types.ts';
+import type { HarnessId, SigninAnswer, SigninEnd } from './types.ts';
 
 /** Where a check runs: the home on screen, whether it is this computer's own, and where this computer's tools are looked for. */
 export interface CheckWhere { home: string; actual: boolean; toolsHome: string; searchPath: string }
@@ -37,8 +39,10 @@ const underWay = new Map<AbortController, Promise<unknown>>();
 let quitting = false;
 /** Quit: no check starts from now on, each under way is stopped, and this answers once each has ended and its folder is gone (a second Quit waits as the first does); undefined when none is under way. */
 export const stopChecks = () => { quitting = true; return underWay.size ? Promise.all([...underWay].map(([stop, ended]) => (stop.abort(), ended))) : undefined; };
-/** A check's limit: a shorter one asked for (an end-to-end run's), else CHECK_LIMIT_MS; never longer, and never none. */
-export const checkLimit = (asked: number) => (asked > 0 && asked < CHECK_LIMIT_MS ? asked : CHECK_LIMIT_MS);
+/** A limit: a shorter one asked for (an end-to-end run's), else `most`; never longer, and never none. */
+const shortened = (asked: number, most: number) => (asked > 0 && asked < most ? asked : most);
+/** A check's limit: a shorter one asked for, else CHECK_LIMIT_MS. */
+export const checkLimit = (asked: number) => shortened(asked, CHECK_LIMIT_MS);
 
 /**
  * One tool's check of the servers named `names` (as that tool names them): its answer; undefined for a tool with no command that
@@ -57,14 +61,80 @@ async function runCheck(where: CheckWhere, tool: HarnessId, args: string[], name
   const binary = await findCli(tool, where.toolsHome, where.searchPath);
   if (signal.aborted) return undefined;
   if (!binary) return { failed: 'missing' };
+  const result = await runIn(where, binary, args, { timeoutMs: limitMs, signal }, `sign-in check in ${toolNames[tool]}`, log);
+  if (!result) return undefined;
+  return result.code === 'timeout' || result.code === 'missing' ? { failed: result.code } : readAnswer(tool, result.stdout.toString('utf8'), result.output, names);
+}
+
+/**
+ * `binary` run with `args` for `where`'s home, from an empty folder made for it and removed after, in a process group of its own;
+ * undefined where it was stopped while the folder was made, and so never started. `what` names it in the app's log.
+ */
+async function runIn(where: CheckWhere, binary: string, args: string[], options: { timeoutMs: number; signal: AbortSignal; graceMs?: number; drainMs?: number }, what: string, log?: (line: string) => void) {
   const folder = await mkdtemp(join(tmpdir(), 'ck-mcp-signin-'));
   const env = where.actual ? { ...process.env, HOME: where.home, PATH: pathBeside(binary) } : ownEnv(where.home, binary);
   let leftRunning: boolean | undefined;
   try {
     // Quit came while the folder was made: the tool is not started.
-    if (signal.aborted) return undefined;
-    const result = await run(binary, args, { cwd: folder, env, timeoutMs: limitMs, group: true, signal });
+    if (options.signal.aborted) return undefined;
+    const result = await run(binary, args, { cwd: folder, env, group: true, ...options });
     leftRunning = result.leftRunning;
-    return result.code === 'timeout' || result.code === 'missing' ? { failed: result.code } : readAnswer(tool, result.stdout.toString('utf8'), result.output, names);
-  } finally { await clearRunFolder(folder, `sign-in check in ${toolNames[tool]}`, leftRunning, log); }
+    return result;
+  } finally { await clearRunFolder(folder, what, leftRunning, log); }
+}
+
+// ---------- One sign-in ----------
+
+/** How long a stopped sign-in has to end once asked (TERM) before what is left of it is killed; how long its output may stay open after it ends. */
+const STOP_GRACE_MS = 3000, DRAIN_MS = 1000;
+/** What the page asks a sign-in for: the home it was drawn for, the tool, the server's row and the copy the cell showed (mcpsignin.ts cellKey). */
+export interface SigninAsk { home: string; tool: HarnessId; row: string; copy: string }
+/** What main has when it starts one: where it would run (the home open), the tools managed there, and its rows as read now (mcpsignin.ts signinRows). */
+export interface SigninNow { where: CheckWhere; managed: HarnessId[]; rows: SigninRow[] }
+/**
+ * Why main starts nothing for `ask`, in the cell's words; none where it may start: the home open is the one asked for; it is this
+ * computer's own and Central Knot starts that tool's sign-in on `platform` (mcpsignin.ts startsSignin); the tool is managed; and
+ * the row's cell there is the very copy the page showed, on, and named by the tool.
+ */
+export function signinRefusal(ask: SigninAsk, now: SigninNow, platform: string = process.platform): string | undefined {
+  if (ask.home !== now.where.home) return 'Another home is open';
+  if (!startsSignin(ask.tool, now.where.actual, platform)) return `Central Knot doesn’t start ${toolNames[ask.tool]}’s sign-in here`;
+  if (!now.managed.includes(ask.tool)) return `${toolNames[ask.tool]} isn’t managed here`;
+  const row = now.rows.find(each => each.id === ask.row), cell = row?.cells[ask.tool];
+  return !row || !cell || cell.off || cell.name === undefined || cellKey(row, cell) !== ask.copy ? 'Changed since the page showed it' : undefined;
+}
+
+/** The sign-in under way: one at a time, across tools. */
+let signing: AbortController | undefined;
+/** Stop: the sign-in under way, if one is, is asked to end; its start answers Stopped. */
+export const stopSignin = () => signing?.abort();
+
+/**
+ * One server's sign-in in its tool, started on a click: refused at once while another is under way, before anything is looked
+ * up; then `now()` is read and the ask refused (signinRefusal), the command line found, and `now()` read and the ask refused
+ * again just before the tool starts. It runs the tool's own `mcp login <name>` (mcpsignin.ts signInArgs) as checkSignin runs a
+ * check, its end said as the tool ended: exit 0 is Signed in, anything else what it printed last. It is under way, and Quit
+ * (stopChecks) stops it, from its first step; Stop (stopSignin) and its limit stop it the same way. `limitMs`: a shorter limit
+ * than SIGNIN_LIMIT_MS (an end-to-end run's).
+ */
+export async function startSignin(ask: SigninAsk, now: () => Promise<SigninNow>, limitMs = SIGNIN_LIMIT_MS, log?: (line: string) => void): Promise<SigninEnd> {
+  if (signing) return { notStarted: 'Another sign-in is running' };
+  if (quitting) return { failed: 'stopped' };
+  const stop = signing = new AbortController(), ended = signIn(ask, now, shortened(limitMs, SIGNIN_LIMIT_MS), stop.signal, log);
+  underWay.set(stop, ended.catch(() => undefined));
+  try { return await ended; } finally { underWay.delete(stop); signing = undefined; }
+}
+
+async function signIn(ask: SigninAsk, now: () => Promise<SigninNow>, limitMs: number, signal: AbortSignal, log?: (line: string) => void): Promise<SigninEnd> {
+  const first = await now(), refused = signinRefusal(ask, first);
+  if (refused) return { notStarted: refused };
+  const binary = await findCli(ask.tool, first.where.toolsHome, first.where.searchPath);
+  if (!binary) return { failed: 'missing' };
+  const last = await now(), changed = signinRefusal(ask, last);
+  if (changed) return { notStarted: changed };
+  const name = last.rows.find(row => row.id === ask.row)!.cells[ask.tool]!.name!;
+  const result = signal.aborted ? undefined : await runIn(last.where, binary, signInArgs(ask.tool, name)!, { timeoutMs: limitMs, signal, graceMs: STOP_GRACE_MS, drainMs: DRAIN_MS }, `sign-in in ${toolNames[ask.tool]}`, log);
+  if (!result || result.reason === 'aborted') return { failed: 'stopped' };
+  if (result.reason === 'timeout' || result.code === 'missing') return { failed: result.reason === 'timeout' ? 'timeout' : 'missing' };
+  return result.code === 0 ? { signedIn: true } : { refused: lastSaid(result.output) };
 }

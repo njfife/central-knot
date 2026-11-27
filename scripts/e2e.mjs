@@ -11325,6 +11325,24 @@ async function mcpSigninFlow() {
     opencode: fixture('opencode-list.stdout').replace('└  4', `●  ✓ search \u001b[90mconnected\n│      \u001b[90mhttp://127.0.0.1:47205/mcp\n│\n●  ⚠ ${longName} \u001b[90mneeds authentication\n│      \u001b[90mhttp://127.0.0.1:47206/mcp\n│\n└  6`),
   };
   mkdirSync(said, { recursive: true });
+  // Codex's sign-in (`codex mcp login <name>`), a stand-in that never reaches an account or a browser: it writes its arguments
+  // down, listens on a port for the browser's answer, hands the stand-in opener the address, then as codex.login says: signs in
+  // (exit 0), refuses (exit 1 with a line), waits for ever, or waits with a helper of its own that ignores TERM and listens too.
+  const loginScript = join(scratch, 'signin-login.cjs'), helperScript = join(scratch, 'signin-helper.cjs'), opener = join(scratch, 'signin-open');
+  const logins = join(scratch, 'signin-logins.log'), browserAsked = join(scratch, 'signin-opened.log'), ports = join(said, 'codex.ports');
+  writeFileSync(opener, `#!/bin/sh\necho "$1" >> ${browserAsked}\n`);
+  chmodSync(opener, 0o755);
+  // Each process that listens writes its port and its number down, a line each.
+  const listen = then => `const listening = require('net').createServer().listen(0, '127.0.0.1', () => { require('fs').appendFileSync(${JSON.stringify(ports)}, listening.address().port + ' ' + process.pid + '\\n'); ${then} });`;
+  writeFileSync(helperScript, `process.on('SIGTERM', () => {});\n${listen('')}\n`);
+  writeFileSync(loginScript, `const fs = require('fs'), { spawn, spawnSync } = require('child_process');
+fs.appendFileSync(${JSON.stringify(logins)}, JSON.stringify(process.argv.slice(2)) + '\\n');
+const mode = fs.readFileSync(${JSON.stringify(join(said, 'codex.login'))}, 'utf8').trim();
+${listen(`spawnSync(${JSON.stringify(opener)}, ['http://127.0.0.1:' + listening.address().port + '/callback']);
+  if (mode === 'helper') spawn(process.execPath, [${JSON.stringify(helperScript)}], { stdio: ['ignore', 'inherit', 'inherit'] });
+  if (mode === 'accept') { console.log('Successfully logged in'); process.exit(0); }
+  if (mode === 'refuse') { console.error('Error: the server refused the sign-in'); process.exit(1); }`)}
+`);
   const versions = { claude: '2.1.330 (Claude Code)', codex: 'codex-cli 0.171.0', copilot: 'GitHub Copilot CLI 1.0.114.', pi: '1.6.0', opencode: '1.19.6', agy: '1.5.14' };
   for (const [binary, version] of Object.entries(versions)) {
     if (outputs[binary]) writeFileSync(join(said, binary), outputs[binary]);
@@ -11333,6 +11351,7 @@ async function mcpSigninFlow() {
     // Every call but --version is recorded as it starts and as it ends: the tool, the folder it ran in, how many entries that held, its arguments, its process.
     writeFileSync(join(home, '.local/bin', binary), [`#!/bin/sh`, `[ "$1" = "--version" ] && cat ${said}/${binary}.version && exit 0`,
       `echo "start|${binary}|$(pwd)|$(ls -A | wc -l | tr -d ' ')|$*|$$" >> ${calls}`,
+      ...(binary === 'codex' ? [`[ "$1 $2" = "mcp login" ] && exec "${process.execPath}" ${loginScript} "$@"`] : []),
       // <binary>.linger: a helper in a session of its own holds the tool's output open that many seconds after the tool is stopped.
       `[ -f ${said}/${binary}.linger ] && "${process.execPath}" -e ${JSON.stringify(`require('node:child_process').spawn('sleep', [process.argv[1]], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] }).unref()`)} "$(cat ${said}/${binary}.linger)"`,
       `[ -f ${said}/${binary}.wait ] && sleep "$(cat ${said}/${binary}.wait)"`,
@@ -11341,8 +11360,9 @@ async function mcpSigninFlow() {
   }
   const called = () => readNow(calls).split('\n').filter(Boolean).map(line => line.split('|'));
   const started = () => called().filter(([what]) => what === 'start');
-  // A check's limit of 4 s here (main.ts CK_SIGNIN_LIMIT_MS), so "Didn’t answer" comes without waiting 70 s.
-  const a = await launch(join(scratch, 'signin-data'), [], home, { CK_TEST_HOME_ONLY: Object.keys(versions).join(','), CK_SIGNIN_LIMIT_MS: '4000' });
+  // A check's limit of 4 s here (main.ts CK_SIGNIN_LIMIT_MS), so "Didn’t answer" comes without waiting 70 s; a sign-in's of 6 s
+  // (CK_SIGNIN_START_LIMIT_MS), so "No answer after 3 minutes" comes without waiting three minutes.
+  const a = await launch(join(scratch, 'signin-data'), [], home, { CK_TEST_HOME_ONLY: Object.keys(versions).join(','), CK_SIGNIN_LIMIT_MS: '4000', CK_SIGNIN_START_LIMIT_MS: '6000' });
   await a.click('#home-actual');
   /** The page as drawn: the tools' columns, and each row's name, plugin and cells' words (a mark and a Copy's label aside). */
   const page = async () => {
@@ -11472,7 +11492,9 @@ async function mcpSigninFlow() {
   // Each Copy is its own row's: its id and its cell's name the row it is drawn in, and the command it copies names that row's server.
   const copiesOwn = () => a.run(`[...document.querySelectorAll('[id^="signin-copy-"]')].map(copy => { const row = copy.closest('tr'), cell = copy.closest('td');
     return copy.id === 'signin-copy-' + cell.id.slice('signin-cell-'.length) && cell.id.endsWith('-' + row.dataset.row) && cell.querySelector('.signin-command').textContent.endsWith(row.querySelector('.signin-server').textContent); })`);
-  same('the Copy on oauth’s row is that row’s', await copiesOwn(), [true]);
+  // Each Sign in is its own row's too: its id and its cell's name the row it is drawn in.
+  const actsOwn = () => a.run(`[...document.querySelectorAll('[id^="signin-act-"]')].map(act => act.id === 'signin-act-' + act.closest('td').id.slice('signin-cell-'.length) && act.closest('td').id.endsWith('-' + act.closest('tr').dataset.row))`);
+  same('the Sign in on oauth’s row is that row’s, and Codex’s cell has nothing to copy', [await actsOwn(), await copiesOwn()], [[true], []]);
 
   // Copy on a cell that needs a sign-in: the tool's own command, with its name for the server, under a button that says Copy. The
   // clipboard is read through the main process, which only a development run opens to the checks (as practiceFlow's menus are).
@@ -11495,7 +11517,115 @@ async function mcpSigninFlow() {
       await a.send('Emulation.setFocusEmulationEnabled', { enabled: false });
     }
   };
-  same('Copy gives Codex’s own sign-in command, the one the cell shows', await copyOn('codex-cli', 'oauth'), ['Copy', 'codex mcp login oauth', 'Copied: run it in a terminal', ...(main ? ['codex mcp login oauth'] : [])]);
+
+  // Sign in, where Codex says a server needs one (mcpsignin.ts startsSignin: Codex, on this computer's home): it runs Codex's own
+  // `codex mcp login <name>`, the name one literal argument, and nothing else; the cell says it waits on the browser, with Stop;
+  // after, Signed in with its time, or what happened with Try again and the command to copy back. One at a time; no list is run
+  // after; Stop, the limit and Quit (below) leave no process of Codex's and no port it listened on; another page and back, the same.
+  // A Codex server whose name holds a space and a quote, needing a sign-in there alone.
+  const team = "team's docs", codexConfig = readNow(join(home, '.codex/config.toml')), codexSaid = readNow(join(said, 'codex'));
+  write('.codex/config.toml', `${codexConfig}\n[mcp_servers."${team}"]\nurl = "${P(47214)}"\n`);
+  writeFileSync(join(said, 'codex'), JSON.stringify([...JSON.parse(codexSaid), { ...codex[0], name: team, auth_status: 'not_logged_in' }], null, 2));
+  await a.click('#header-refresh');
+  await a.click('#signin-check-codex-cli');
+  await checked('codex-cli');
+  /** A Codex cell as drawn, by its row's name: its words, its sign-in button's label, its Copy's, and the line under it. */
+  const codexCell = async name => a.run(`(cell => [[...cell.querySelector('.signin-words').childNodes].filter(node => node.nodeType === 3).map(node => node.textContent).join(''),
+    ...['[id^="signin-act-"]', '[id^="signin-copy-"]', '.signin-command'].map(part => cell.querySelector(part)?.textContent ?? null)])(document.getElementById(${JSON.stringify(await cellId('codex-cli', name))}))`);
+  const act = async name => byId(`signin-act-codex-cli-${await rowIdOf(name)}`);
+  /** The last process of Codex's sign-in that listened, as it wrote itself down: its port and its number. */
+  const listened = () => readNow(ports).split('\n').filter(Boolean).map(line => line.split(' ').map(Number));
+  const alive = pid => { try { process.kill(Number(pid), 0); return true; } catch { return false; } };
+  const portFree = port => new Promise(done => { const probe = tcpServer().once('error', () => done(false)).listen(port, '127.0.0.1', () => probe.close(() => done(true))); });
+  /** One picture with `row`'s Codex cell in view, at `size`, in `theme`. */
+  const picture = async (name, [width, height], theme, row = team) => {
+    if (!shots) return;
+    await sizeTo(a, width, height); await shape(false);
+    await a.run(`document.getElementById(${JSON.stringify(await cellId('codex-cli', row))}).scrollIntoView({ block: 'center' })`);
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] }); await wait(300);
+    await a.shot(`mcp-signin-start-${name}-${width}-${theme}`);
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }); await fullSize(a);
+  };
+  same('where Codex says a sign-in is needed its cell offers Sign in and nothing to copy (another tool’s Copy: after Check all, below)',
+    [await codexCell(team), await codexCell('oauth')], [['Needs sign-in', 'Sign in', null, null], ['Needs sign-in', 'Sign in', null, null]]);
+  same('its hover says what it runs', await a.run(`document.querySelector(${JSON.stringify(await act(team))}).title`), `Runs codex mcp login 'team'\\''s docs'; the sign-in opens in your browser`);
+  await picture('sign-in', SMALLEST, 'light');
+  await picture('sign-in', [1316, 819], 'dark');
+  // Pressed twice at once (a helper of Codex's, which ignores TERM, waits too): one sign-in, and its cell says it waits on the
+  // browser, with Stop; meanwhile every other Sign in waits, and Check doesn't.
+  writeFileSync(join(said, 'codex.login'), 'helper');
+  const loginsFrom = started().length;
+  await a.run(`(button => { button.click(); button.click(); })(document.querySelector(${JSON.stringify(await act(team))}))`);
+  await until(async () => listened().length === 2, 'Codex’s sign-in and its helper to listen');
+  same('the cell says it waits on the browser, with Stop; another Sign in waits, Check doesn’t',
+    [await codexCell(team), await a.run(`document.querySelector(${JSON.stringify(await act('oauth'))}).disabled`), await a.run(`document.querySelector('#signin-check-codex-cli').disabled`)],
+    [['Finish sign-in in your browser…', 'Stop', null, null], true, false]);
+  same('a double press runs Codex’s own sign-in once, its server’s name one argument as written, and Codex opens the browser itself',
+    [readNow(logins).split('\n').filter(Boolean).map(line => JSON.parse(line)), started().slice(loginsFrom).map(([, tool, , entries, args]) => [tool, entries, args]), readNow(browserAsked).split('\n').filter(Boolean).length],
+    [[['mcp', 'login', team]], [['codex', '0', `mcp login ${team}`]], 1]);
+  await picture('waiting', SMALLEST, 'light');
+  same('main refuses a second sign-in while one waits, running nothing', [await a.run(`window.centralKnot.startSignin('codex-cli', ${JSON.stringify(home)}, ${JSON.stringify(await rowIdOf('oauth'))}, 'x')`), started().length - loginsFrom],
+    [{ notStarted: 'Another sign-in is running' }, 1]);
+  await a.click('#nav-library');
+  await a.click('#nav-mcpsignin');
+  same('another page and back: it still waits, with Stop', await codexCell(team), ['Finish sign-in in your browser…', 'Stop', null, null]);
+  // Stop: Codex is asked to end, then what it left is ended; nothing of its is left running or listening. No list is run after.
+  const [[loginPort, loginPid], [helperPort, helperPid]] = listened();
+  await a.click(await act(team));
+  await until(async () => (await codexCell(team))[0] === 'Stopped', 'the stopped sign-in to end');
+  same('Stop ends Codex’s sign-in and its helper and frees their ports; no list is run after', [alive(loginPid), alive(helperPid), await portFree(loginPort), await portFree(helperPort), started().length - loginsFrom], [false, false, true, true, 1]);
+  same('stopped: it says so, with Try again and the command to copy', await codexCell(team), ['Stopped', 'Try again', 'Copy', 'codex mcp login \'team\'\\\'\'s docs\'']);
+  // Try again, and Codex signs in: Signed in with the time, nothing to press; the same after another page and back.
+  writeFileSync(join(said, 'codex.login'), 'accept');
+  await a.click(await act(team));
+  await until(async () => (await codexCell(team))[0].startsWith('Signed in'), 'the sign-in to end');
+  const signedIn = await codexCell(team);
+  same('signed in: the time, no button, nothing to copy', [/^Signed in \d{1,2}:\d{2}/.test(signedIn[0]), ...signedIn.slice(1)], [true, null, null, null]);
+  same('no list is run after a sign-in', started().slice(loginsFrom).map(([, , , , args]) => args), [`mcp login ${team}`, `mcp login ${team}`]);
+  await picture('signed-in', SMALLEST, 'light');
+  await a.click('#nav-library');
+  await a.click('#nav-mcpsignin');
+  same('another page and back: still signed in, at the same time', await codexCell(team), signedIn);
+  // Codex refuses (oauth): what it said, Try again, and Copy back with its words.
+  writeFileSync(join(said, 'codex.login'), 'refuse');
+  await a.click(await act('oauth'));
+  await until(async () => (await codexCell('oauth'))[0] === 'Sign-in didn’t finish', 'the refused sign-in');
+  same('refused: what Codex said, Try again and Copy', await codexCell('oauth'), ['Sign-in didn’t finish', 'Try again', 'Copy', 'Error: the server refused the sign-in']);
+  same('Copy back gives Codex’s own sign-in command, with its words', (await copyOn('codex-cli', 'oauth')).slice(2), ['Copied: run it in a terminal', ...(main ? ['codex mcp login oauth'] : [])]);
+  await picture('refused', SMALLEST, 'light', 'oauth');
+  // No answer in the time it is given (here 6 s; the app's own is 3 minutes): stopped as Stop stops it, and said so.
+  writeFileSync(join(said, 'codex.login'), 'wait');
+  await a.click(await act('oauth'));
+  await until(async () => listened().length === 3, 'the sign-in that won’t end to listen');
+  const [waitPort, waitPid] = listened()[2];
+  await until(async () => (await codexCell('oauth'))[0] === 'No answer after 3 minutes', 'the sign-in’s limit');
+  same('no answer in its time: said so, with Try again and Copy; nothing of Codex’s left running or listening',
+    [await codexCell('oauth'), alive(waitPid), await portFree(waitPort)], [['No answer after 3 minutes', 'Try again', 'Copy', 'codex mcp login oauth'], false, true]);
+  await picture('no-answer', SMALLEST, 'light', 'oauth');
+  // Main refuses, running nothing: another home; a tool whose sign-in it doesn't start; and a copy changed since the page showed it
+  // (the page's own ask recorded in main as it came, then sent again after the change: a development run, which opens main).
+  const refusedFrom = started().length;
+  const ask = (tool, onHome, row, copy) => a.run(`window.centralKnot.startSignin(${JSON.stringify(tool)}, ${JSON.stringify(onHome)}, ${JSON.stringify(row)}, ${JSON.stringify(copy)})`);
+  same('another home, and a tool whose sign-in it doesn’t start, are refused', [await ask('codex-cli', join(scratch, 'another-home'), await rowIdOf(team), 'x'), await ask('pi-cli', home, await rowIdOf('oauth'), 'x')],
+    [{ notStarted: 'Another home is open' }, { notStarted: 'Central Knot doesn’t start Pi’s sign-in here' }]);
+  if (main) {
+    await main.run(`(() => { const handlers = electron.ipcMain._invokeHandlers, real = handlers.get('mcp-signin:start'); globalThis.ckAside = real; globalThis.ckAsks = [];
+      handlers.set('mcp-signin:start', (event, ...args) => { globalThis.ckAsks.push(args); return real(event, ...args); }); return true; })()`);
+    await a.click(await act('oauth'));
+    await until(async () => (await codexCell('oauth'))[0] === 'Sign-in didn’t finish', 'the sign-in whose ask is kept');
+    const [kept] = await main.run('globalThis.ckAsks');
+    await main.run(`(electron.ipcMain._invokeHandlers.set('mcp-signin:start', globalThis.ckAside), true)`);
+    const startedBefore = started().length;
+    write('.codex/config.toml', `${codexConfig.replace(P(47202), P(47215))}\n[mcp_servers."${team}"]\nurl = "${P(47214)}"\n`);
+    await a.click('#header-refresh');
+    same('the page’s ask sent again after its server changed: refused, nothing run', [await ask(...kept), started().length - startedBefore], [{ notStarted: 'Changed since the page showed it' }, 0]);
+    same('… and the page dropped what that copy’s sign-in ended with', (await codexCell('oauth'))[0], 'Not checked');
+  } else console.log('(mcpSigninFlow: the packaged app opens no main process to the checks: a copy changed since the page showed it is refused in the unit checks only)');
+  same('nothing was run by the asks main refused', started().slice(refusedFrom).filter(([, , , , args]) => args.startsWith('mcp login')).length, main ? 1 : 0);
+  write('.codex/config.toml', codexConfig);
+  writeFileSync(join(said, 'codex'), codexSaid);
+  rmSync(ports);
+  await a.click('#header-refresh');
 
   // A slow check: the column says Checking…, every Check waits, the page stays usable, and Check all meanwhile does nothing.
   writeFileSync(join(said, 'pi.wait'), '2');
@@ -11686,7 +11816,15 @@ async function mcpSigninFlow() {
   // Quits at once through main's debugger, the second waiting too; the packaged app gets one, as the system sends it (SIGTERM: a
   // second signal would not be a second Quit, as Electron takes the first itself).
   write('.claude.json', claudeFile());
+  // A sign-in waits on the browser meanwhile (Codex's, with its helper that ignores TERM): Quit stops it as Stop does.
+  write('.codex/config.toml', codexConfig);
   await a.click('#header-refresh');
+  await a.click('#signin-check-codex-cli');
+  await checked('codex-cli');
+  writeFileSync(join(said, 'codex.login'), 'helper');
+  await a.click(await act('oauth'));
+  await until(async () => listened().length === 2, 'the sign-in Quit stops to listen');
+  const quitLogins = listened();
   writeFileSync(join(said, 'claude.wait'), '30');
   writeFileSync(join(said, 'claude.linger'), '3');
   const quitFrom = called().length;
@@ -11703,8 +11841,8 @@ async function mcpSigninFlow() {
     quitter.close();
   } else a.child.kill('SIGTERM');
   await Promise.race([gone, wait(20000)]);
-  const alive = pid => { try { process.kill(Number(pid), 0); return true; } catch { return false; } };
   same(`${a.inspect ? 'two Quits wait' : 'Quit waits'} for the check stopped: the app gone, its tool stopped, its folder removed`, [a.child.exitCode !== null || a.child.signalCode !== null, alive(quitPid), existsSync(quitCwd)], [true, false, false]);
+  same('… and the sign-in that waited: Codex’s processes gone, their ports free', [...quitLogins.map(([, pid]) => alive(pid)), ...await Promise.all(quitLogins.map(([port]) => portFree(port)))], [false, false, true, true]);
 }
 
 /**

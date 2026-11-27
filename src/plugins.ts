@@ -92,9 +92,11 @@ export const gitEnv = () => ({ ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INT
  * What a run may also be given: `signal` stops it, as its timeout does; `input` is written to its input and closed; `maxBytes`
  * is the most output kept per stream (4 MB unless said); `env`, variables added to its environment; `drainMs`, when positive,
  * caps how long to wait after exit for inherited pipes to close and kills any lingering process group when the run ends;
- * `catchStart`, when true (hookrun.ts), turns a synchronous start throw into `reason: 'error'` instead of rejecting.
+ * `catchStart`, when true (hookrun.ts), turns a synchronous start throw into `reason: 'error'` instead of rejecting; `graceMs`,
+ * when positive (a run in a `group`, off Windows: mcpsigninrun.ts startSignin), a stop asks the group to end (TERM) and kills
+ * it that long after if the run hasn't ended by then (what its leader left as it ended, `drainMs` kills).
  */
-export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; maxBytes?: number; env?: NodeJS.ProcessEnv; drainMs?: number; catchStart?: boolean }
+export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; maxBytes?: number; env?: NodeJS.ProcessEnv; drainMs?: number; catchStart?: boolean; graceMs?: number }
 /**
  * A command's outcome: `output` is both streams as trimmed text (what failures are worded from); `stdout` and `stderr` each
  * stream byte for byte. A run stopped by its `signal` still reports `code: 'timeout'` for existing callers, while `reason`
@@ -117,6 +119,7 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
   const maxBytes = options.maxBytes ?? 4 * 1024 * 1024;
   const group = !!options.group && process.platform !== 'win32';
   const drainMs = options.drainMs && options.drainMs > 0 ? options.drainMs : 0;
+  const graceMs = group && options.graceMs && options.graceMs > 0 ? options.graceMs : 0;
   return new Promise(done => {
     const out: Buffer[] = [], err: Buffer[] = [];
     let stopped: 'timeout' | 'aborted' | undefined;
@@ -126,6 +129,7 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
     let errMsg: string | undefined;
     let termSignal: NodeJS.Signals | undefined;
     let drain: NodeJS.Timeout | undefined;
+    let grace: NodeJS.Timeout | undefined;
     let child;
     try {
       child = start(file, args, { env: options.env, cwd: options.cwd, windowsHide: true, detached: group });
@@ -138,9 +142,11 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
     const windows = process.platform === 'win32' ? stopRun<RunResult['code']>(child, (code, whole) => { leftRunning = !whole; end(code); }) : undefined;
     const kill = windows?.stop ?? (() => { try { if (group && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); } catch { /* already ended */ } });
     const stop = (why: 'timeout' | 'aborted') => {
-      if (ended) return;
+      if (ended || grace) return;
       stopped ??= why;
-      kill();
+      if (!graceMs) return kill();
+      try { process.kill(-child.pid!, 'SIGTERM'); } catch { /* already ended */ }
+      grace = setTimeout(kill, graceMs);
     };
     const onAbort = () => stop('aborted');
     // Past maxBytes on either stream it ran, it just said too much: it is stopped, and what it said up to maxBytes is kept.
@@ -164,6 +170,7 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
       ended = true;
       clearTimeout(timer);
       clearTimeout(drain);
+      clearTimeout(grace);
       options.signal?.removeEventListener('abort', onAbort);
       if (drainMs) {
         if (group && child.pid) kill();
