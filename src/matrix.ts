@@ -539,12 +539,11 @@ const fromMenu = (): FromEntry[][] => {
 /** Whether a choice of From is in the menu now: a plugin's while it has rows here, a source's while the home records it. */
 const fromOffered = (from: From) => fromMenu().flat().some(entry => entry.value === from);
 /**
- * From or a chip chosen (`choice`): an opened row the new list no longer holds is closed, its armed Delete with it, as Find's in
- * drawTable; and the new list shows from its top (listFromTop).
+ * From or a chip chosen (`choice`): the new list shows from its top (listFromTop), and drawTable closes an opened row it no
+ * longer holds (with its armed Delete and any file in its details' place).
  */
 function relist(t: Table, choice: Partial<Pick<View, 'from' | 'filter'>>) {
   Object.assign(t.view, choice);
-  if (!listedRows(t).some(row => idOf(row) === t.view.comparing)) Object.assign(t.view, { comparing: undefined, confirmDelete: undefined });
   listFromTop(t);
   rerender();
 }
@@ -1627,8 +1626,8 @@ function tableOf(name: keyof typeof views, kinds: PageKind[], harness?: Tool, fi
 let drawnSegment: PageKind | 'all' | undefined;
 /**
  * The Library's table: its segment's kinds. Another segment than the one drawn last starts its list afresh: at its top (its
- * table's id names the segment: tableId), its pins let go (its list's name names its kinds: listNow), its armed Delete
- * disarmed, and an opened row it no longer lists closed. Find, the chip and From stay (a chip is offered over every kind: overEveryKind).
+ * table's id names the segment: tableId), its pins let go (its list's name names its kinds: listNow), and its armed Delete
+ * disarmed (drawTable closes an opened row it no longer lists). Find, the chip and From stay (a chip is offered over every kind: overEveryKind).
  */
 function useLibrary(): Table {
   const view = views.library, shown = segment(), moved = drawnSegment !== undefined && drawnSegment !== shown;
@@ -1636,7 +1635,6 @@ function useLibrary(): Table {
   const t = tableOf('library', segmentKinds());
   if (!moved) return t;
   view.confirmDelete = undefined;
-  if (view.comparing && ![...rowsIn(t), ...plugged(t).rows].some(row => idOf(row) === view.comparing)) view.comparing = undefined;
   return t;
 }
 /** A tool's tab of one kind under Harnesses: that kind alone, with that tool first, in the kind's own view. */
@@ -1889,7 +1887,9 @@ export function backFromFiles() {
  * problems, Resume, results), the Library's over every kind it holds, whatever the segment.
  */
 export function emptyList(empty: HTMLElement, tab?: { kind: PageKind; tool: Tool }) {
-  return h('div.page', {}, bands(tab ? useTab(tab.kind, tab.tool) : overEveryKind(useLibrary())), empty);
+  const t = tab ? useTab(tab.kind, tab.tool) : overEveryKind(useLibrary());
+  Object.assign(t.view, { comparing: undefined, openFile: undefined, confirmDelete: undefined });
+  return h('div.page', {}, bands(t), empty);
 }
 
 /**
@@ -1914,16 +1914,16 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
   // After the Library's own, while Find has text: the items of plugins installed nowhere, unless the chip hides them (catalogHits).
   const inPlugins = found && catalogHits(t);
   const find = findInput({ id: 'find', label: 'Find', value: view.find, onInput: text => findTyped(t, text) });
-  // A copy question doesn't outlive the visit: back on the page, its row is closed. Nor does a row Find no longer lists stay open.
+  // A copy question doesn't outlive the visit: back on the page, its row is closed. Nor does an open row stay open once the list
+  // drawn no longer holds it (Find on the Library or a tool's tab, a chip, From, the kind switch, or an item gone), with its armed Delete and any file in its details' place.
   const isOpen = (row: ItemRow | PluginRow) => idOf(row) === view.comparing;
   if (view.comparing && view.openedOn !== state.visit && all.some(skill => isOpen(skill) && isDiffering(skill))) view.comparing = undefined;
-  if (found && view.comparing && !found.some(isOpen)) view.comparing = undefined;
-  // An open row whose file is in its details' place goes, both together, when the list no longer holds it (Find on a tool's tab).
-  if (fileInDetails(view, view.comparing) && ![...shown, ...plugins].some(isOpen)) view.comparing = undefined;
-  const fileTarget = view.openFile && ([...shown, ...plugins, ...shownCatalog(t, inPlugins)] as FileTarget[]).find(target => fileTargetId(target) === view.openFile!.id && hasFile(t, target));
+  const drawn = [...shown, ...plugins];
+  if (view.comparing && !drawn.some(isOpen)) Object.assign(view, { comparing: undefined, confirmDelete: undefined });
+  const fileTarget = view.openFile && ([...drawn, ...shownCatalog(t, inPlugins)] as FileTarget[]).find(target => fileTargetId(target) === view.openFile!.id && hasFile(t, target));
   if (view.openFile && !fileTarget) view.openFile = undefined;
   else if (fileTarget) syncOpenFile(t, fileTarget, view.openFile!);
-  const open = docked() && view.comparing && !underRow(t, view.comparing) ? all.find(isOpen) : undefined;
+  const open = docked() && view.comparing && !underRow(t, view.comparing) ? shown.find(isOpen) : undefined;
   const openRow = docked() && !open ? plugins.find(isOpen) : undefined;
   // Off goes last, under its own heading. Of the rest, the rows a harness's page is about (it has a copy) split into On and
   // Found; the others, only other tools have. A row whose own switch was clicked here stays under the heading it was under.

@@ -21393,6 +21393,22 @@ async function skillFileFlow() {
     await findOnPage('');
     same('on a tool’s tab, Find hiding an open row with its file in the details’ place closes both: no side panel or file while hidden, closed once Find is cleared',
       [...hidden, await expanded(reviewRow), await a.exists('.file-open-box')], [false, false, false, 'false', false]);
+    // On a tool's tab, Find that hides an open row (details alone, no file) closes it too; Find that still lists it keeps it open.
+    await a.click(reviewChevron);
+    await findOnPage('code');
+    const kept = [await a.exists(reviewRow), await expanded(reviewRow), await a.exists('.dock')];
+    await findOnPage('commit');
+    const hiddenDetails = [await a.exists(reviewRow), await a.exists('.dock')];
+    if (shots && (!shotOnly || shotOnly.has('tab-find-hides-open'))) {
+      await a.run(`document.activeElement?.blur(); window.centralKnot.setAppearance('light')`);
+      await wait(80);
+      await a.shot('tab-find-hides-open-1728-light');
+      await a.run(`window.centralKnot.setAppearance('system')`);
+      await wait(80);
+    }
+    await findOnPage('');
+    same('on a tool’s tab, Find keeping an open row leaves its side panel open; Find hiding it closes its side panel and leaves it closed once cleared',
+      [...kept, ...hiddenDetails, await expanded(reviewRow), await a.exists('.dock')], [true, 'true', true, false, false, 'false', false]);
     await openKind(a, 'all');
     await sizeTo(a, 1316, 820);
     if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
@@ -22122,6 +22138,7 @@ async function skillFileFlow() {
         await clickTab('copilot-only.md');
         await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Copilot plugin companion file.'));
         writeFileSync(join(home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [] }, null, 2));
+        const copilotWrittenAt = Date.now();
         await a.click('#header-refresh');
         await until(async () => !(await a.exists('.file-open-box .file-copy-select')) && (await a.text('.file-open-box pre.content') ?? '').includes('Follow the updated v2.1.0 steps.'), 40);
         same('when the chosen plugin copy is removed while open, Refresh falls back to the remaining tool on SKILL.md', [
@@ -22191,11 +22208,20 @@ async function skillFileFlow() {
         await until(() => a.exists(triageBtn));
 
         // Gone plugin root before Refresh: panel says Its file couldn't be read.
+        // Drain the 1.5 s watcher debounce from .copilot/config.json above, pause Automatic sync so main's queued setSync(false)
+        // finishes any background pass and the 20 s poll won't run pageSees and drop triage, then wait on a queued call + settle
+        // so any owed backgroundRefresh finishes before deleting the folder.
+        const debounceLeft = 2000 - (Date.now() - copilotWrittenAt);
+        if (debounceLeft > 0) await wait(debounceLeft);
+        await a.click('#sync-switch');
+        await a.run('window.centralKnot.history()');
+        await a.settle();
         rmSync(join(home, '.claude/plugins/cache/skill-file-market/issue-tracker/2.1.0'), { recursive: true, force: true });
         await a.click(triageBtn);
         await until(async () => (await a.text('.file-open-box .file-open-state'))?.trim() === 'Its file couldn’t be read.');
         same('gone plugin root shows Its file couldn’t be read.', (await a.text('.file-open-box .file-open-state'))?.trim(), 'Its file couldn’t be read.');
         await a.press('Escape');
+        await a.click('#sync-switch');
 
         // Reinstall Copilot CLI's copy briefly so we can verify main refuses an unmanaged tool for skillPluginFile below.
         writeCopilotPlugin('1.0.0', { 'skills/triage/SKILL.md': copilotSkill });
