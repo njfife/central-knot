@@ -11836,6 +11836,14 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
     const cell = document.getElementById(${JSON.stringify(await cellId('codex-cli', 'oauth'))}).getBoundingClientRect();
     const [first, second] = [...document.getElementById(${JSON.stringify(await cellId('codex-cli', 'oauth'))}).querySelectorAll('.signin-acts .btn')].map(button => button.getBoundingClientRect());
     return [Math.abs(${NAME_WIDTH} - ${JSON.stringify(nameWidth)}) <= 0.5, Math.abs(first.left - second.left) <= 1 && second.top > first.top, Math.max(first.right, second.right) <= cell.right + 0.5]; })()`), [true, true, true]);
+  // Bounded: its words at most three lines, each of its two buttons at most two (a button may wrap); said beside its neighbour's.
+  const [wordsLines, buttonLines, heights] = await a.run(`(() => {
+    const cell = document.getElementById(${JSON.stringify(await cellId('codex-cli', 'oauth'))}), words = cell.querySelector('.signin-words');
+    const lines = element => Math.round(element.getBoundingClientRect().height / parseFloat(getComputedStyle(element).lineHeight));
+    const row = name => [...document.querySelectorAll('.signin-table tbody tr')].find(each => each.querySelector('.signin-server').textContent === name && !each.querySelector('.signin-plugin'));
+    return [lines(words), Math.max(...[...cell.querySelectorAll('.signin-acts .btn .btn-label')].map(lines)), [row('oauth'), row('plain')].map(each => Math.round(each.getBoundingClientRect().height))]; })()`);
+  console.log(`(mcpSigninFlow: at 860 the refused row is ${heights[0]} px high, its neighbour plain ${heights[1]} px)`);
+  same('at 860 the refused cell is bounded: its words at most three lines, each of its two buttons at most two', [wordsLines <= 3, buttonLines <= 2], [true, true]);
   await fullSize(a);
   await picture('refused', SMALLEST, 'light', 'oauth');
   // Not finished in the time it is given (here 6 s; the app's own is 3 minutes): stopped as Stop stops it, the browser kept.
