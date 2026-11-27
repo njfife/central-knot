@@ -2731,7 +2731,7 @@ test('Unused band: skipped rows marked, unread managed tool cue, 3-line disclosu
     reset();
     const cells = usedCells(libraryTable());
     for (const key of ['old-1', 'old-2', 'old-3', 'old-4', 'old-5', 'old-6']) {
-      assert.deepEqual(cells[rowId('skills', key)], { text: 'no use seen in 30 days', skip: false });
+      assert.deepEqual(cells[rowId('skills', key)], { text: 'no use seen', skip: false });
     }
     for (const key of ['plug-1', 'plug-2']) {
       assert.deepEqual(cells[rowId('agents', key)], { text: 'from a plugin · skipped', skip: true });
@@ -2739,13 +2739,13 @@ test('Unused band: skipped rows marked, unread managed tool cue, 3-line disclosu
     findById(libraryTable(), 'library-select').onclick();
     const selectCells = usedCells(libraryTable());
     for (const key of ['plug-1', 'plug-2']) {
-      assert.deepEqual(selectCells[rowId('agents', key)], { text: 'no use seen in 30 days', skip: false });
+      assert.deepEqual(selectCells[rowId('agents', key)], { text: 'no use seen', skip: false });
     }
     findById(libraryTable(), 'library-select').onclick();
     openKind('all');
     const allCells = usedCells(libraryTable());
     for (const key of ['plug-1', 'plug-2']) {
-      assert.deepEqual(allCells[rowId('agents', key)], { text: 'no use seen in 30 days', skip: false });
+      assert.deepEqual(allCells[rowId('agents', key)], { text: 'no use seen', skip: false });
     }
   });
 
