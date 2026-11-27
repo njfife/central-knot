@@ -655,7 +655,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ov-row.open:not(.ov-file-anchored) .ov-name-fit > .row-tag { flex: 0 1 auto; line-height: 18px; white-space: normal; }
 .row-open { display: grid; place-items: center; width: 18px; height: 18px; margin-left: -6px; flex: none; border: 0; background: none; border-radius: 4px; cursor: pointer; color: inherit; }
 .row-open:hover, .row-file-btn:hover, .file-tab:hover { background: var(--press); color: var(--ink); }
-/* Open file mark right after a skill's name (matrix.ts fileButton). */
+/* Open file mark right after a skill's name (filepanel.ts fileButton). */
 .row-file-btn { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; margin-left: -4px; padding: 0; border: 1px solid var(--cell-line); border-radius: 5px; background: var(--surface); box-shadow: var(--lift); color: var(--ink-soft); cursor: pointer; }
 .row-file-btn[aria-pressed="true"] { background: color-mix(in oklab, var(--accent) 14%, var(--surface)); border-color: color-mix(in oklab, var(--accent) 42%, transparent); color: var(--accent-ink); }
 .row-tag { flex: none; font-size: 11.5px; color: var(--ink-soft); white-space: nowrap; }
@@ -786,7 +786,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .details-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 6px; }
 .details-actions > .text-action { padding-left: 0; padding-right: 0; }
 /* A skill's file, under its closed row or in its open row's details' place, there under "‹ Back to details", coloured as the details'
-   own links on the picked row (.text-action) so it reads as well in the dark theme (matrix.ts filePanel, openedPart). */
+   own links on the picked row (.text-action) so it reads as well in the dark theme (filepanel.ts filePanel, matrix.ts openedPart). */
 .file-to-details { align-self: flex-start; display: inline-flex; align-items: center; gap: 2px; font-size: 12.5px; font-weight: 500; line-height: 18px; color: var(--accent-ink); }
 .file-open-box { display: flex; flex-direction: column; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); overflow: hidden; }
 .file-open-head, .file-open-foot { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 12px; background: var(--chrome); font-size: 12px; color: var(--ink); }
@@ -799,17 +799,25 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .select.file-copy-select .icon { right: 6px; }
 .file-open-close { color: var(--ink-soft); }
 .file-open-foot { border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-soft); }
+/* The item's name first, where nothing beside the panel names it (filepanel.ts FilePlace named: the Overview's). */
+.file-open-named { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.file-open-item { font-weight: 600; overflow-wrap: anywhere; }
+.file-open-item::after { content: "·"; margin-left: 8px; font-weight: 400; color: var(--ink-faint); }
 .file-open-tabs { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
 .file-tab { appearance: none; max-width: 100%; overflow-wrap: anywhere; border: 1px solid transparent; border-radius: 6px; padding: 2px 8px; background: transparent; color: var(--ink-soft); font: 500 11.5px/16px var(--mono); cursor: pointer; }
 .file-tab.is-active { background: var(--surface); border-color: var(--control-line); color: var(--ink); box-shadow: var(--lift); }
-/* An agent's one file, or its definition, named by a plain label (matrix.ts filePanel): nothing there to press. */
+/* An agent's one file, or its definition, named by a plain label (filepanel.ts filePanel): nothing there to press. */
 .file-open-name { min-width: 0; padding: 3px 0; color: var(--ink); font: 500 11.5px/16px var(--mono); overflow-wrap: anywhere; }
 .file-open-name.file-open-definition { font-family: inherit; font-size: 12px; }
-/* A server's entry: where in its settings file it is ("In mcpServers"), then its label (matrix.ts filePanel). */
-.file-open-lead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; min-width: 0; }
+/* A server's entry: where in its settings file it is ("In mcpServers"), then a dot and its label (filepanel.ts filePanel). */
+.file-open-lead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; }
+.file-open-lead > .meta-dot { margin: 0; }
 .file-open-where { padding: 3px 0; color: var(--ink-soft); font: 500 11.5px/16px var(--mono); overflow-wrap: anywhere; }
-/* An agent's definition: each part under its word, the prompt (the last block) taking the room left. */
-.file-open-box > .content-block:has(+ .content-block) { flex: none; }
+/* An agent's definition: each part under its word, the prompt (the last block) taking the room left; a Codex entry's blocks so too. */
+.file-open-box > .content-block:has(+ .content-block, + .file-open-gap) { flex: none; }
+/* Between two blocks of a Codex entry, other lines of its file (filepanel.ts filePanel): a break, its separator's name drawn here, never selected or copied. */
+.file-open-gap { flex: none; padding: 3px 12px; border-block: 1px dashed var(--cell-line); background: var(--hover); color: var(--ink-soft); font-size: 11.5px; line-height: 16px; text-align: center; }
+.file-open-gap::before { content: attr(aria-label); }
 .file-open-box .content-owner { margin: 0; padding: 8px 12px 0; }
 .file-open-box .content-owner + .content { padding-top: 4px; }
 .file-open-box > .content-block { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
@@ -910,10 +918,11 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* ---------- First setup (firstsetup.ts) ---------- */
 /* The question at the top of the Overview: its title, its words at the reading measure, and its two answers under them. */
 .setup-question { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; max-width: var(--measure); padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
-.setup-title { font-size: 15px; line-height: 20px; font-weight: 600; }
+/* Balanced, so a question that wraps never leaves its (?) alone on the last line. */
+.setup-title { font-size: 15px; line-height: 20px; font-weight: 600; text-wrap: balance; }
 .setup-text { font-size: 13px; line-height: 1.5; color: var(--ink-soft); text-wrap: pretty; }
-.setup-text .setup-line + .setup-line { margin-top: 4px; }
-.setup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.setup-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.setup-undo { font-size: 13px; color: var(--ink-soft); }
 /* The walkthrough's band, marked as a copy question is: where it is and its actions on one line; while it asks, the item's copy
    question under them, as wide as the band, which is the box its three layouts go by (The copy question, above). */
 .band-walk { box-shadow: inset 3px 0 0 var(--warning), inset 0 -1px 0 var(--line); }
@@ -1051,7 +1060,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
  * The kind cards share the content width in equal columns, one per card (two or three, data-count), once each has room for
  * its usage lines whole; in narrower content they stack in one column, each card with its usage beside its counts.
  */
-.kind-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+/* A card's file panel (overview.ts kindCards) spans the row after its card: dense, the cards after it fill the row it left. */
+.kind-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-flow: row dense; gap: 12px; }
+.kind-cards > .details-file-only { grid-column: 1 / -1; }
 .kind-cards[data-count="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .kind-cards[data-count="1"] { grid-template-columns: minmax(0, 1fr); }
 .kind-card { position: relative; display: flex; flex-direction: column; align-items: stretch; padding-bottom: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); text-align: left; }
@@ -1072,16 +1083,22 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .kind-card-state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 /*
  * What the usage reading says of the kind (overview.ts cardUsage): room for four lines whatever it holds, so the card is as high
- * before a reading lands as after. The three most used share columns: the label, the name (shortened in the middle), the
- * sessions; a line across them (.kind-card-line) sizes none of them.
+ * before a reading lands as after, 4 px apart so the file marks one above another never touch. A line across them
+ * (.kind-card-line) sizes none of them, its link (Most used) at its end. The three most used share columns: the name (cut at its
+ * end where the count leaves no room) and its mark, the sessions.
  */
-.kind-card-usage { display: grid; grid-template-columns: max-content minmax(0, max-content) 1fr; grid-template-rows: repeat(4, 20px); column-gap: 8px; align-content: start;
+.kind-card-usage { display: grid; grid-template-columns: minmax(0, max-content) 1fr; grid-template-rows: repeat(4, 20px); gap: 4px 8px; align-content: start;
   padding: 10px 16px 0; font-size: 12.5px; line-height: 20px; color: var(--ink-soft); }
-.kind-card-line { grid-column: 1 / -1; margin: 0; white-space: nowrap; }
+.kind-card-line { display: flex; justify-content: space-between; gap: 8px; grid-column: 1 / -1; margin: 0; white-space: nowrap; }
 .kind-card-top-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; margin: 0; white-space: nowrap; }
 .kind-card-link { position: relative; z-index: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--accent-ink); font: inherit; cursor: pointer; text-align: left; }
 .kind-card-link:hover { text-decoration: underline; }
-.kind-card-top-name { display: flex; }
+.kind-card-top-name { overflow: hidden; text-overflow: ellipsis; }
+/* Most used, a link into the Library: its arrow follows its words. */
+.kind-card-sorted { display: inline-flex; align-items: center; gap: 2px; }
+/* A most used name, then its file mark (filepanel.ts fileButton), over the card's own button and as high as the line. */
+.kind-card-top-item { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.kind-card-top-item > .row-file-btn { position: relative; z-index: 1; width: 20px; height: 20px; margin-left: 0; }
 /* The usage strip: its three sentences in one place (.band-stack), as high in each; boxed only when it failed, from the cards' left edge. */
 .overview-usage { padding: 6px 11px; border: 1px solid transparent; border-radius: 10px; }
 .overview-usage-failed { border-color: var(--line); background: var(--surface); }
@@ -1244,7 +1261,7 @@ span.ins-confirm { margin-top: 0; }
   .history-list { display: block; }
   .history-row { grid-template-columns: minmax(80px, max-content) minmax(0, 1fr) auto; column-gap: 16px; row-gap: 2px; }
   .history-about { grid-column: 2 / -1; grid-row: 2; margin-left: 22px; }
-  .history-row > .change-panel, .history-row > .history-confirm { margin-top: 10px; }
+  .history-row > .change-panel, .history-row > .manage-question { margin-top: 10px; }
   /* The name takes the line it is on. */
   .history-row .history-what > strong { max-width: none; }
 }
@@ -1260,10 +1277,13 @@ span.ins-confirm { margin-top: 0; }
 .history-undone .history-what strong { color: var(--ink-soft); }
 .history-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 2px 12px; text-align: right; }
 .history-actions .btn.link { flex: 0 1 auto; min-width: 0; height: auto; padding: 0; white-space: normal; text-align: right; }
-/* Inline Manage-again question inside a History row (historypage.ts managingRow). */
-.history-row > .history-confirm { grid-column: 1 / -1; border: 1px solid var(--line); border-radius: 8px; flex-wrap: wrap; justify-content: space-between; gap: 8px 12px; padding: 8px 12px; }
-.history-confirm > .band-text { flex: 1 1 320px; color: var(--ink); }
-.history-confirm-actions { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+/* The question before a tool left out is managed again, in its History row and in its Harnesses card (managecard.ts manageQuestion). */
+.history-row > .manage-question { grid-column: 1 / -1; }
+.history-row > .manage-question, .harness-manage > .manage-question { border: 1px solid var(--line); border-radius: 8px; flex-wrap: wrap; justify-content: space-between; gap: 8px 12px; padding: 8px 12px; }
+.manage-question > .band-text { flex: 1 1 320px; color: var(--ink); }
+.manage-question-changed { display: block; }
+/* The buttons keep to the box: one that doesn't fit beside the other goes whole to the next line. */
+.manage-question-actions { flex: 0 1 auto; min-width: 0; display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; margin-left: auto; }
 
 /* ---------- MCP sign-in (mcpsigninpage.ts): a row per server, a column per tool (14% each, six beside the name's 16%); every word
    wraps in its cell but the last before a (?), kept with it, its column widening for the pair; none is cut; the head row stays at
@@ -1276,7 +1296,8 @@ span.ins-confirm { margin-top: 0; }
 .signin-table { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 12.5px; line-height: 1.45; }
 .signin-table th, .signin-table td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; font-weight: 400; vertical-align: top; overflow-wrap: anywhere; }
 .signin-table tbody tr:last-child > * { border-bottom: 0; }
-.signin-table th.signin-name { width: 16%; }
+/* A server's name breaks at a hyphen or a space, never inside a word while it can (its column no narrower than its longest word). */
+.signin-table th.signin-name { width: 16%; overflow-wrap: break-word; }
 .signin-table th.signin-head { width: 14%; }
 /* Sticky within the scroll area's top padding, which Chromium keeps: at its very top edge, so no row shows above the head. */
 .signin-table thead th { position: sticky; top: calc(-1 * var(--signin-pad-top)); z-index: 1; background: var(--surface); }
@@ -1295,6 +1316,10 @@ span.ins-confirm { margin-top: 0; }
 .signin-keep { white-space: nowrap; }
 .signin-cell .signin-words { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; }
 .signin-words .btn { flex: none; }
+/* A sign-in's button and its Copy, stacked on one edge under the words; each wraps within the column (a word too, where one is wider), its icon left out, so a failed cell never widens its column. */
+.signin-acts { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 4px; }
+.signin-acts .btn { height: auto; max-width: 100%; padding: 2px 4px; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+.signin-acts .btn svg { display: none; }
 .signin-command { display: block; margin-top: 2px; font-family: var(--mono); font-size: 11px; line-height: 16px; color: var(--ink); }
 
 /* ---------- The Sessions page (sessionspage.ts) ----------
@@ -1850,6 +1875,8 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .session-title { font-size: 12.5px; font-weight: 600; }
 .plugin-group .session-title { margin: 0; color: var(--ink); }
 .session-strip > .plugin-group-note { margin: 0; }
+/* A plugin run made from this strip, said under it (pluginspage.ts runBand): the band's look without its own frame inside the strip's. */
+.session-strip > .plugin-run { padding: 6px 0 0; border: 0; border-top: 1px solid var(--line); background: none; }
 .plugin-hook-as { margin-left: auto; }
 .session-run-warn { font-size: 12px; color: var(--ink); font-weight: 500; }
 .session-note { font-size: 12px; color: var(--ink-soft); }
@@ -2007,7 +2034,9 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 /* Profiles page: the list of profiles beside the open one, and the open one's header (rename, Delete, its setup step) */
 .profiles-split { min-height: 0; }
 .toolbar-title { font-size: 12px; line-height: 16px; font-weight: 600; }
-.profile-row-name { min-width: 0; overflow-wrap: anywhere; line-height: 16px; }
+.profile-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.profile-row-name { min-width: 0; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.profile-row-text .list-fraction { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .profile-row { height: auto; min-height: 37px; padding-block: 8px; }
 .profile-in-use { flex: none; height: 20px; display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border-radius: 4px; font-size: 11px; line-height: 14px; font-weight: 500; white-space: nowrap; background: var(--picked); color: var(--accent-ink); }
 /* Their pane header and toolbars span the pane (the Skills files view caps its own) */
@@ -2031,6 +2060,12 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .profiles-page .band:has(#profile-from-now, #profile-choose-plugins) { flex-wrap: wrap; align-items: flex-start; row-gap: 6px; }
 .profiles-page .band:has(#profile-from-now, #profile-choose-plugins) > svg { margin-top: 1px; }
 .profiles-page .band:has(#profile-from-now, #profile-choose-plugins) > .band-text { max-width: calc(100% - 20px); }
+/* A profile's Tools strip: one tick box a managed tool, wrapping onto a second line in a narrow window */
+.pf-tools { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; padding: 8px 16px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.pf-tools-label { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--ink-soft); }
+.pf-tools .tick { display: inline-flex; align-items: center; gap: 6px; border-radius: 6px; cursor: pointer; }
+.pf-tools .tick:has(.hidden-input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.pf-tools .tick-label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 /* The result of a switch spans the pane, like the table under it */
 .page.profiles-page > .bands > .band { padding-right: 16px; }
 /* Narrow-window profile picker bar (shown under 880 px in place of the stacked list; Profiles-only, leaving shared .split unchanged) */
@@ -2150,12 +2185,11 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .harness-card-path { font-size: 12px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: auto; padding: 0 16px 14px; }
 .harness-card-next { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 /* A tool's Manage switch on its card (managecard.ts): the switch and its word (with Managed (?) on the first managed card,
-   or an unmanaged tool's rejoin line). It sits at the foot of the card, above the folder, so the switches of a row of cards
+   or, once an unmanaged tool's switch is pressed, its question). It sits at the foot of the card, above the folder, so the switches of a row of cards
    line up. A tool left out has its name and switch only. */
 .harness-manage { display: flex; flex-direction: column; gap: 6px; margin: auto 16px 10px; padding-top: 10px; border-top: 1px solid var(--line); }
 .harness-manage-head { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; }
 .harness-manage-head > .info-wrap { margin-left: -4px; flex: none; }
-.harness-manage-line { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .harness-manage + .harness-card-path { margin-top: 0; }
 /* A tool left out has nothing to count: its switch follows its name, and its folder stays at the foot. */
 .harness-card-out .harness-manage { margin-top: 0; }
@@ -2436,6 +2470,12 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .select-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .select-count { flex: none; white-space: nowrap; }
 .select-line > .inline-link { min-width: 0; }
+/* What a click would end of the profiles in use (matrix.ts endsMark): one line beside its control, "…" where it is cut; an opened row's whole sentence. */
+.profile-stop { display: inline-flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+.profile-stop > span { overflow: hidden; text-overflow: ellipsis; }
+.details-head > .profile-stop { white-space: normal; max-width: var(--measure); }
+.select-line > .profile-stop { padding-right: 10px; border-right: 1px solid var(--line); }
+.band-act { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .select-why { position: absolute; top: 100%; left: 0; right: 0; z-index: 5; padding: 6px 16px; background: var(--surface); border-bottom: 1px solid var(--line); box-shadow: 0 8px 20px rgb(0 0 0 / 18%); font-size: 12px; line-height: 18px; color: var(--ink-soft); }
 .select-why > p { margin: 0; }
 /* A found item's Add, in the switch's place and as wide, so its name starts where an On row's does (matrix.ts addButton). */

@@ -20,7 +20,7 @@ const triage = 'plugin:skill:alpha@team/triage';
 /** A home where each tool has alpha installed, with its one skill triage, as `installs` says, and the profile Work ticks triage. */
 function homeWith(installs: [HarnessId, Partial<InstalledPlugin>][]): HomeView {
   const kind = { tools: installs.map(([tool]) => tool), items: [], library: {}, gate: { state: 'ready' } };
-  return { home: '/home', sync: { access: { allowed: true }, gate: { state: 'ready' }, caughtUp: [] }, skills: kind, mcp: kind, agents: kind,
+  return { home: '/home', sync: { access: { allowed: true }, gate: { state: 'ready' }, caughtUp: [], managed: installs.map(([tool]) => tool) }, skills: kind, mcp: kind, agents: kind,
     pluginItems: installs.map(([tool, install]) => ({ tool, plugin: 'alpha', marketName: 'team', source: '/market', listed: true, items: [{ kind: 'skill', name: 'triage', description: '' }], ...install })),
     profiles: { profiles: [{ id: 'work', name: 'Work', items: [triage], switchesPluginItems: true }], plugins: [] } } as unknown as HomeView;
 }
