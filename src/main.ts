@@ -1733,7 +1733,7 @@ app.whenReady().then(async () => {
       const past = (await readHistory(context())).find(entry => entry.id === eventId);
       if (past?.kind === 'profile') { const tools = await toolsNow(); return undoSwitch(context(), tools, eventId, pluginSide(tools)); }
       // A tool's Manage switch has no Undo (History's row offers the reverse Manage act instead, not history:restore).
-      if (past?.kind === 'managing') return { stopped: 'Turning a tool’s Manage switch has no Undo: turn it back on the tool’s Harnesses card.', results: [], harnessWrites: 0, reloads: [] };
+      if (past?.kind === 'managing') return { stopped: 'Turning a tool’s Manage switch has no Undo: use the entry’s button or the switch on its Harnesses card.', results: [], harnessWrites: 0, reloads: [] };
       // Synchronize everything switched on: its one Undo; that Undo's entry: its Restore (everything.ts).
       if (past?.kind === 'everything') return everythingEntryAction(context(), await toolsNow(), eventId);
       // A pull that changed only an agent's Claude Code settings has its own Undo (its earlier file, kept whole).
