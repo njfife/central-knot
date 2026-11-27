@@ -75,5 +75,8 @@ export async function whatJoiningDoes(context: ShareContext, managed: readonly H
     changing: each.flatMap(counts => counts.changing), unread: each.flatMap(counts => counts.unread) };
 }
 const sum = (each: JoinCounts[], field: 'written' | 'kept' | 'removed' | 'found' | 'takenIn') => each.reduce((total, counts) => total + counts[field], 0);
-/** Whether what a question showed (`shown`, as the page sent it back) is what whatJoiningDoes counts now. */
+/**
+ * Whether what a question showed (`shown`, as the page sent it back) is what whatJoiningDoes counts now: the counts, the kinds
+ * not read, and each planned item's kind, key, what it does there and the copies it saves, in plan order. Nothing shown is a change.
+ */
 export const sameJoin = (now: JoinCounts, shown: unknown) => JSON.stringify(now) === JSON.stringify(shown);

@@ -8,11 +8,8 @@
 import { acting, busy, clickResumes, focusWhenDone, putHistory, rerender, setHome, state, tell } from './app.ts';
 import { button, h, infoMark, toggle } from './dom.ts';
 import { plural } from './model.ts';
-import { loadPlugins, market } from './pluginstate.ts';
 import { pageOfPart } from './pluginstatus.ts';
-import { wantedIn } from './library.ts';
-import { pluginUpdates } from './pluginupdateview.ts';
-import type { DestinationResult, HarnessId, HomeView, JoinCounts } from './types.ts';
+import type { DestinationResult, HarnessId, HomeView, JoinCounts, JoinItem } from './types.ts';
 import { andList, kindNames, toolNames as names } from './words.ts';
 
 /**
@@ -53,7 +50,9 @@ export const resumeWords = (home: HomeView) => (home.sync.gate.state === 'needs-
 
 /** Where a question is asked: a tool's Harnesses card; anything else is the id of the History entry it was asked on. */
 const CARD = 'card';
-type Question = { tool: HarnessId; home: string; at: string; read?: { counts: JoinCounts } | { failed: string }; changed?: true };
+/** What main read for a question (DesktopApi whatJoiningDoes): what managing the tool does there and whether plugins follow. */
+type Forecast = { counts: JoinCounts; plugins: boolean };
+type Question = { tool: HarnessId; home: string; at: string; read?: Forecast | { failed: string }; changed?: true };
 /**
  * The one Manage question open: for `tool` in `home`, asked `at` its card or a History entry, with what main read (`read`,
  * absent while it reads), `changed` once a click found that differed. Page-local: cleared on leaving the page or the home
@@ -62,15 +61,15 @@ type Question = { tool: HarnessId; home: string; at: string; read?: { counts: Jo
 let question: Question | undefined;
 export const forgetManageQuestion = () => { question = undefined; };
 /** A part of a question by id (on a card `manage-<tool>-<part>`, on History `history-manage-<part>-<entry>`), and what opened it. */
-const partId = (open: Question, part: 'text' | 'cancel' | 'confirm') => (open.at === CARD ? `manage-${open.tool}-${part}` : `history-manage-${part}-${open.at}`);
+const partId = (open: Question, part: 'text' | 'cancel' | 'confirm' | 'close' | 'retry') => (open.at === CARD ? `manage-${open.tool}-${part}` : `history-manage-${part}-${open.at}`);
 const openerId = (open: Question) => (open.at === CARD ? `manage-${open.tool}` : `history-${open.at}`);
 /** Draws `open` as the question, its Cancel focused. */
 const show = (open: Question) => { question = open; rerender(); document.getElementById(partId(open, 'cancel'))?.focus(); };
 
 /**
  * Asks before `tool` is managed again, `at` its card or a History entry: the question opens at once, saying it reads, then says
- * what managing it does there as main reads it now, with the marketplaces read for the plugins it would get. No answer is no
- * forecast: it says so, and offers no Manage.
+ * what managing it does there as main reads it now, nothing saved or fetched for it. No answer is no forecast: it says so, and
+ * offers no Manage.
  */
 export async function askManage(tool: HarnessId, at: string) {
   const home = state.home;
@@ -78,12 +77,11 @@ export async function askManage(tool: HarnessId, at: string) {
   const open: Question = { tool, home: home.home, at };
   show(open);
   const read = await window.centralKnot.whatJoiningDoes(tool, home.home).catch(() => null);
-  await loadPlugins(false, home.readId);
   if (question !== open) return;
   show({ ...open, read: read ?? { failed: `Couldn’t read what managing ${names[tool]} would do. Nothing was changed.` } });
 }
 
-/** Cancel, or Escape while one is open: the question closes, and the focus goes back to what opened it. */
+/** Cancel or Close, or Escape while one is open: the question closes, and the focus goes back to what opened it. */
 function closeQuestion() {
   const open = question;
   if (!open) return;
@@ -99,62 +97,66 @@ if (typeof document !== 'undefined') {
   });
 }
 
-/** The open question's band where it was asked (`at`), while `tool` is still left out in `home` and its switch can turn; else nothing. */
+/**
+ * The open question's band where it was asked (`at`), while `tool` is still left out in `home` and its switch can turn; else
+ * nothing. On History it names the tool first (a card is the tool's own); a read that failed offers Close and Try again.
+ */
 export function manageQuestion(home: HomeView, tool: HarnessId, at: string): HTMLElement | null {
-  const open = question, read = open?.read;
+  const open = question, read = open?.read, name = names[tool];
   if (!open || open.tool !== tool || open.at !== at || open.home !== home.home || manageLocked(home) || home.sync.managed.includes(tool)) return null;
-  const text = !read ? `Reading ${names[tool]}…` : 'failed' in read ? read.failed : joiningWords(home, tool, read.counts);
+  const failed = read && 'failed' in read ? read.failed : undefined;
+  const text = !read ? `Reading ${name}…` : 'failed' in read ? read.failed : joiningWords(home, tool, read);
+  const lead = [open.changed ? 'Changed since this was read; nothing was written.' : '', at === CARD || !read || failed ? '' : `Managing ${name}:`].filter(Boolean);
+  const act = (part: 'cancel' | 'close' | 'retry' | 'confirm', label: string, onclick: () => void) =>
+    button({ variant: part === 'confirm' ? 'primary' : 'ghost', size: 'small', label, id: partId(open, part), disabled: part === 'confirm' && acting(), onclick });
   return h('div.band.manage-question', { role: 'group', 'aria-labelledby': partId(open, 'text') },
-    h('span.band-text', { id: partId(open, 'text') }, open.changed ? h('strong', {}, 'Changed since it was read. ') : null, text),
-    h('span.manage-question-actions', {},
-      button({ variant: 'ghost', size: 'small', label: 'Cancel', id: partId(open, 'cancel'), onclick: closeQuestion }),
-      read && 'counts' in read ? button({ variant: 'primary', size: 'small', label: `Manage ${names[tool]}`, id: partId(open, 'confirm'),
-        disabled: acting(), onclick: () => void manageTool(tool, true, open.home, { counts: read.counts, at }) }) : null));
+    h('span.band-text', { id: partId(open, 'text') }, ...lead.map(words => h('strong', {}, `${words} `)), text),
+    h('span.manage-question-actions', {}, failed ? [act('close', 'Close', closeQuestion), act('retry', 'Try again', () => void askManage(tool, at))]
+      : [act('cancel', 'Cancel', closeQuestion), read && 'counts' in read ? act('confirm', `Manage ${name}`, () => void manageTool(tool, true, open.home, { read, at })) : null]));
 }
 
 /**
- * What managing `tool` again does there, as its question says (types.ts JoinCounts, read when asked): the one item it changes
- * by name, or what is kept before what is written; a kind it can't tell is unknown, never no change; then the plugins it gets,
- * Sync once with Automatic sync off, and the Resume the click makes.
+ * What managing `tool` again does there, as its question says (types.ts JoinCounts, read when asked), in the order it happens:
+ * the one item it changes by name, or each kind of change counted (copies saved, then written, then removed); what it takes in
+ * and finds; a kind it can't tell, as unknown, never as no change; the plugins it gets; Sync once with Automatic sync off; and
+ * the Resume the click makes.
  */
-function joiningWords(home: HomeView, tool: HarnessId, counts: JoinCounts): string {
-  const { written, kept, removed, found, takenIn, changing, unread } = counts;
-  const changes = changing.length === 1 && kept <= 1 ? [oneChange(changing[0]!, counts)] : [
-    kept ? `saves ${plural(kept, 'copy there that differs', 'copies there that differ')} as ${kept === 1 ? 'a version' : 'versions'}` : '',
-    written ? `writes Central Knot’s version of ${plural(written, 'item')} there` : '',
-    removed ? (removed === 1 ? 'removes 1 copy of an item that is off' : `removes ${removed} copies of items that are off`) : '',
+function joiningWords(home: HomeView, tool: HarnessId, { counts, plugins }: Forecast): string {
+  const n = names[tool], { written, kept, removed, found, takenIn, unread } = counts;
+  const acts = counts.changing.filter(item => item.does !== 'take');
+  const changes = acts.length === 1 && acts[0]!.saves <= 1 ? [oneChange(n, acts[0]!)] : [
+    kept ? `Saves ${kept} of ${n}’s copies as ${kept === 1 ? 'a version (History can restore it)' : 'versions (History can restore them)'}.` : '',
+    written ? `Writes Central Knot’s version of ${plural(written, 'item')} in ${n}.` : '',
+    removed ? `Removes ${n}’s ${removed === 1 ? 'copy of 1 item that is off' : `copies of ${removed} items that are off`}.` : '',
   ].filter(Boolean);
-  const besides = [takenIn ? `takes in ${takenIn} of its items by Synchronize everything` : '', found ? `shows ${found} of its items under Found in the Library` : ''].filter(Boolean);
-  const unknown = unread.length ? `its ${andList(unread.map(kind => kindNames[pageOfPart[kind]]))} couldn’t be read, so what it does to them isn’t known` : '';
-  const said = [changes.length || unknown ? listed(changes) : 'changes no item there', listed(besides), unknown].filter(Boolean).join('; ');
-  // A tool managed again gets each plugin that is on and not kept out of it, while the automatic updates run by themselves
-  // (pluginrecord.ts, pluginupdates.ts): said only where such a plugin is listed, as the marketplaces were read for the question.
-  const bring = !!market.view?.marketplaces.some(entry => Object.values(entry.switches ?? {}).some(sw => !!sw.entry && wantedIn(sw.entry, tool)));
-  const auto = pluginUpdates.view?.on && !pluginUpdates.view.paused;
-  const also = bring && auto ? ' It also gets each plugin that is on and not kept out of it.' : '';
-  return `Managing ${names[tool]}: ${said}.${also}${home.syncOn ? '' : ` ${SYNC_OFF}`}${resumeWords(home)}`;
+  return [
+    changes.length || unread.length ? '' : `Changes no item in ${n}.`, ...changes,
+    takenIn ? `Takes ${takenIn} of ${n}’s items into the Library (Synchronize everything is on).` : '',
+    found ? `${found} of ${n}’s items ${found === 1 ? 'shows' : 'show'} under Found in the Library.` : '',
+    unread.length ? `${n}’s ${andList(unread.map(kind => kindNames[pageOfPart[kind]]))} couldn’t be read, so what it does to them isn’t known.` : '',
+    plugins ? `${n} also gets each plugin that is on and not kept out of it.` : '', home.syncOn ? '' : SYNC_OFF,
+  ].filter(Boolean).join(' ') + resumeWords(home);
 }
-const listed = (clauses: string[]) => (clauses.length < 2 ? clauses.join('') : `${clauses.slice(0, -1).join(', ')} and ${clauses.at(-1)}`);
-/** What it does to the one item it changes there, by the name its plan gave (JoinCounts changing), with one copy saved at most. */
-function oneChange(name: string, { written, kept, removed }: JoinCounts) {
-  const saving = kept ? `, saving the copy${written ? ' there' : ''} as a version first` : '';
-  if (written) return `writes Central Knot’s version of ${name} there${saving}`;
-  if (removed) return `removes ${name} there, which is off${saving}`;
-  return `saves the copy of ${name} there as a version`;
+/** What it does to the one item it changes in tool `n`, by the name its plan gave (JoinCounts changing), one copy saved at most. */
+function oneChange(n: string, { name, does, saves }: JoinItem) {
+  const save = `Saves ${n}’s copy of ${name} as a version (History can restore it)`;
+  if (does === 'write') return saves ? `${save}, then writes Central Knot’s over it.` : `Writes Central Knot’s ${name} in ${n}.`;
+  if (does === 'remove') return saves ? `${save}, then removes it: ${name} is off.` : `Removes ${name} from ${n}: it is off.`;
+  return `${save}.`;
 }
 
 /**
  * The Manage click, shared by Harnesses and History: chooseTools in main's queue, then the home (and History, when open) read
- * again, with the result shown on the page clicked. `asked`: for On, what its question showed and where; where main counts
- * otherwise now, nothing is turned and the question asks again there with main's counts.
+ * again, with the result shown on the page clicked. `asked`: for On, what its question showed and where. Where main counts
+ * otherwise now (or no question was asked), nothing is turned and the question asks there (its card if none) with main's counts.
  */
-export const manageTool = (tool: HarnessId, on: boolean, expectedHome: string, asked?: { counts: JoinCounts; at: string }) =>
+export const manageTool = (tool: HarnessId, on: boolean, expectedHome: string, asked?: { read: Forecast; at: string }) =>
   busy(on ? `Managing ${names[tool]}…` : `Leaving ${names[tool]} out…`, async page => {
   const home = state.home!;
   question = undefined;
-  const done = await window.centralKnot.manageTool(tool, on, clickResumes(home), expectedHome, asked?.counts);
-  if (done.changed && asked) {
-    question = { tool, home: expectedHome, at: asked.at, read: { counts: done.changed }, changed: true };
+  const done = await window.centralKnot.manageTool(tool, on, clickResumes(home), expectedHome, asked?.read.counts);
+  if (done.changed) {
+    question = { tool, home: expectedHome, at: asked?.at ?? CARD, read: { counts: done.changed, plugins: asked?.read.plugins ?? false }, changed: true };
     return focusWhenDone(partId(question, 'cancel'));
   }
   if (done.view) setHome(done.view, { reload: state.page !== 'history' });
@@ -168,7 +170,11 @@ export const manageTool = (tool: HarnessId, on: boolean, expectedHome: string, a
   tell({ page, band: true, historyBand: true, ...said, note: page === 'history' ? undefined : said.note });
 });
 
-/** The band after a click: for On, what the pass did in the tool, from its results (`did`), not what its question counted before. */
+const listed = (clauses: string[]) => (clauses.length < 2 ? clauses.join('') : `${clauses.slice(0, -1).join(', ')} and ${clauses.at(-1)}`);
+/**
+ * The band after a click: for On, what the pass did in the tool, from its results (`did`), not what its question counted before;
+ * the one item it changed there by name, in its question's words.
+ */
 export function doneWords(tool: HarnessId, on: boolean, syncOn: boolean, did: readonly DestinationResult[]): { text: string; note?: string; warn?: boolean } {
   const name = names[tool];
   if (!on) return { text: `${name} is left out: Central Knot writes nothing there now. Its copies stay as they are, and every item stays as it is.` };
@@ -176,8 +182,11 @@ export function doneWords(tool: HarnessId, on: boolean, syncOn: boolean, did: re
   const count = (outcome: DestinationResult['outcome']) => did.filter(result => result.outcome === outcome).length;
   const written = count('written'), over = did.filter(result => result.outcome === 'written' && result.replaced).length;
   const removed = count('removed'), left = count('held') + count('failed');
+  const one = written + removed === 1 && !left ? did.find(result => result.outcome === 'written' || result.outcome === 'removed') : undefined;
+  if (one) return { text: `Central Knot manages ${name} now: ${one.outcome === 'removed' ? `${one.item}, which is off, is removed there.`
+    : one.replaced ? `${name}’s copy of ${one.item} is saved as a version (History can restore it), and Central Knot’s is written over it.` : `Central Knot’s ${one.item} is written there.`}`, note: 'Each change there is in History.' };
   const clauses = [
-    written ? `Central Knot’s version written there for ${plural(written, 'item')}${over ? ` (${over === written ? (over === 1 ? 'over its copy' : 'over their copies') : `${over} over a copy`} there, which a version keeps)` : ''}` : '',
+    written ? `Central Knot’s version written there for ${plural(written, 'item')}${over ? ` (${over} over ${name}’s ${over === 1 ? 'copy, saved as a version: History can restore it' : 'copies, saved as versions: History can restore them'})` : ''}` : '',
     removed ? (removed === 1 ? '1 copy of an item that is off removed' : `${removed} copies of items that are off removed`) : '',
     left ? `${plural(left, 'item')} not changed there this time (its row says why)` : '',
   ].filter(Boolean);

@@ -155,8 +155,12 @@ export interface DesktopApi {
    * turned and `changed` is what it counts.
    */
   manageTool(tool: HarnessId, on: boolean, resume: boolean, home: string, expected?: JoinCounts): Promise<{ stopped?: string; full?: true; view: HomeView | null; did: DestinationResult[]; changed?: JoinCounts }>;
-  /** What turning a left-out tool's Manage switch on would do there now (toolchoice.ts whatJoiningDoes), read for its question; or why it can't be read or turned. */
-  whatJoiningDoes(tool: HarnessId, home: string): Promise<{ counts: JoinCounts } | { failed: string }>;
+  /**
+   * What turning a left-out tool's Manage switch on would do there now (toolchoice.ts whatJoiningDoes), read for its question
+   * with nothing saved or fetched; `plugins`: it would get a plugin by itself (main.ts pluginsFollow); or why it can't be read
+   * or turned.
+   */
+  whatJoiningDoes(tool: HarnessId, home: string): Promise<{ counts: JoinCounts; plugins: boolean } | { failed: string }>;
   /** The Overview's line that `tool` came under management in `home` (arrivals.ts), closed for good. */
   dismissArrival(tool: HarnessId, home: string): Promise<void>;
   /** Replace: the build the held screen names, its bundle at `path`, quit and moved to the Trash (main.ts builds:replace, otherbuilds.ts removeBuild). */
@@ -450,11 +454,16 @@ export interface Arrival { tool: HarnessId; since: string; copied?: number }
  * What managing one more tool would do there now, each kind's added up (librarypass.ts joinCounts, from the same look and plans
  * the pass then uses, with the tool added): items written there; copies there that differ, kept as versions first; copies of
  * items that are Off there, removed; and items there Central Knot doesn't hold, found, or taken in by Synchronize everything
- * where it is on. `changing`: the name of each item those first three are about, once per kind, from its own plan. `unread`:
- * the kinds whose file or folder there, or whose own record in Central Knot, can't be read, so what it does to them is not
- * known (their counts say nothing).
+ * where it is on. `changing`: each item those are about, from its own plan, in plan order. `unread`: the kinds whose file or
+ * folder there, or whose own record in Central Knot, can't be read, so what it does to them is not known (their counts say nothing).
  */
-export interface JoinCounts { written: number; kept: number; removed: number; found: number; takenIn: number; changing: string[]; unread: ItemKind[] }
+export interface JoinCounts { written: number; kept: number; removed: number; found: number; takenIn: number; changing: JoinItem[]; unread: ItemKind[] }
+/**
+ * One item managing a tool again changes, from its own plan (librarypass.ts joinCounts): its kind, key and name; what the pass
+ * does there (writes Central Knot's version, removes a copy of an item that is off, only saves its copy, or takes a found item
+ * in by Synchronize everything); and how many copies there it saves as versions first.
+ */
+export interface JoinItem { kind: ItemKind; key: string; name: string; does: 'write' | 'remove' | 'keep' | 'take'; saves: number }
 
 /**
  * One click on an item, as the page and History send it to any kind's engine, and as the library's pass takes it. `on` and

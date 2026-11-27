@@ -21,7 +21,7 @@ import { applyServers, serversView } from '../src/servers.ts';
 import { setSyncEverything } from '../src/everything.ts';
 import { managedNow, readRecord, syncGate, type ShareContext } from '../src/share.ts';
 import { applySkills, clearSwitch, restoreSkill, skillsView, takeOver } from '../src/skills.ts';
-import { chooseTools, manageRefused, whatJoiningDoes } from '../src/toolchoice.ts';
+import { chooseTools, manageRefused, sameJoin, whatJoiningDoes } from '../src/toolchoice.ts';
 import type { Change, HarnessId, JoinCounts, PassResult } from '../src/types.ts';
 import { connectRepo, pullRepo, pushRepo } from '../src/gitrepo.ts';
 import { applySkillsIn, seedServerAndAgent, skill, skillText as repoSkill, world } from './gitrepo-world.ts';
@@ -74,7 +74,7 @@ type Box = Awaited<ReturnType<typeof box>>;
  * items taken in from the items it made live; and the found items there from the pages' own rows (a copy of its own, or one it
  * has another way) after it.
  */
-async function didIn(b: Box, tool: HarnessId, done: { skills?: PassResult; servers?: PassResult; agents?: PassResult }, before: Items): Promise<JoinCounts> {
+async function didIn(b: Box, tool: HarnessId, done: { skills?: PassResult; servers?: PassResult; agents?: PassResult }, before: Items): Promise<Said> {
   const after = await b.items(), managed = await b.managed();
   const results = [done.skills, done.servers, done.agents].flatMap(result => result?.results ?? []).filter(result => result.harness === tool);
   const kept = Object.entries(after).flatMap(([kind, list]) => Object.values(list).flatMap(item => item.versions
@@ -87,11 +87,14 @@ async function didIn(b: Box, tool: HarnessId, done: { skills?: PassResult; serve
   return { written: results.filter(result => result.outcome === 'written').length, kept: kept.length, removed: results.filter(result => result.outcome === 'removed').length,
     found: found.length, takenIn: takenIn.length, changing: [...new Set([...changed, ...kept])].sort(), unread: [] };
 }
-const counts = (some: Partial<JoinCounts>): JoinCounts => ({ written: 0, kept: 0, removed: 0, found: 0, takenIn: 0, changing: [], unread: [], ...some });
+/** What a question said or a pass did (types.ts JoinCounts), the items written, removed or with a copy saved there by name, sorted. */
+type Said = Omit<JoinCounts, 'changing'> & { changing: string[] };
+const counts = (some: Partial<Said>): Said => ({ written: 0, kept: 0, removed: 0, found: 0, takenIn: 0, changing: [], unread: [], ...some });
 
-/** A tool turned on, with what its question said before the click (the items it names in any order), and what the pass then did there. */
+/** A tool turned on, with what its question said before the click, and what the pass then did there. */
 async function turnOnTool(b: Box, tool: HarnessId = 'codex-cli', rule = false) {
-  const asked = await whatJoiningDoes(b.context, await b.managed(), tool, rule), said = { ...asked, changing: [...asked.changing].sort() };
+  const asked = await whatJoiningDoes(b.context, await b.managed(), tool, rule);
+  const said: Said = { ...asked, changing: asked.changing.filter(item => item.does !== 'take').map(item => item.name).sort() };
   const before = await b.items();
   assert.deepEqual(await chooseTools(b.context, tool, true), {});
   const did = await didIn(b, tool, await b.pass(), before);
@@ -296,6 +299,27 @@ test('A tool turned on counts a skill only it has as found, and with Synchronize
     await b.pass();
     assert.equal((await b.items()).skills.later?.on, true, 'taken in by the rule');
     assert.equal(await b.read('.claude/skills/later/SKILL.md'), '---\nname: later\ndescription: Later.\n---\n\nLater.\n');
+  } finally { await b.cleanup(); }
+});
+
+test('The same counts about another item are another forecast: a skill notes to write again, or an MCP server notes', async () => {
+  const b = await box();
+  try {
+    await b.turnOn();
+    await writeFile(join(b.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { ...docs().mcpServers, notes: { type: 'local', command: 'notes-server', tools: ['*'] } } }));
+    await applyServers(b.context, await b.managed(), [{ key: 'notes', on: true, except: [] }]);
+    await b.pass();
+    await chooseTools(b.context, 'codex-cli', false);
+    const config = (await b.read(CODEX.config))!, said = () => whatJoiningDoes(b.context, ['claude-cli', 'copilot-cli'], 'codex-cli', false);
+    await rm(join(b.home, '.codex/skills/notes'), { recursive: true });
+    const skillGone = await said();
+    await mkdir(join(b.home, '.codex/skills/notes'), { recursive: true });
+    await writeFile(join(b.home, CODEX.skill), skillText());
+    await writeFile(join(b.home, CODEX.config), config.split(/(?=^\[)/m).filter(section => !section.startsWith('[mcp_servers.notes')).join(''));
+    const serverGone = await said();
+    assert.deepEqual([skillGone.written, skillGone.kept, serverGone.written, serverGone.kept], [1, 0, 1, 0], 'the same counts, each about notes');
+    assert.equal(sameJoin(serverGone, skillGone), false, 'Manage on what was shown for the skill writes the server: asked again');
+    assert.equal(sameJoin(serverGone, await said()), true, 'read again with nothing changed: the same');
   } finally { await b.cleanup(); }
 });
 

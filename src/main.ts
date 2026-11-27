@@ -28,7 +28,9 @@ import { chooseTools, manageRefused, sameJoin, whatJoiningDoes } from './toolcho
 import { pruneHistory, readHistory } from './history.ts';
 import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skillFoundFile, skillPluginFile, skillVersion, skillVersionFile, skillsView, takeOver } from './skills.ts';
 import { agentTools, mcpTools, noteTools, pluginTools, presentTools, takesPlugins } from './presence.ts';
-import { forgetRefusals, installedPlugins, pluginRecordFiles, recordReadable } from './plugins.ts';
+import { forgetRefusals, installedPlugins, pluginRecordFiles, recordReadable, sameSource } from './plugins.ts';
+import { readPluginRecord } from './pluginrecord.ts';
+import { wantedIn } from './library.ts';
 import { checkFeed, type FeedCheck } from './bundlefeed.ts';
 import { mcpFile } from './mcp.ts';
 import { switchPath } from './skillswitch.ts';
@@ -1827,8 +1829,18 @@ app.whenReady().then(async () => {
   handle('tools:joining', async (tool, home) => {
     if (home !== current?.home || !isTool(tool)) return { failed: elsewhere };
     const refused = await manageRefused(context(), await read(), tool, true);
-    return refused ? { failed: refused } : joiningNow(tool).then(counts => ({ counts }), error => ({ failed: `${toolName(tool)} couldn’t be read: ${plainError(error)}` }));
+    if (refused) return { failed: refused };
+    return Promise.all([joiningNow(tool), pluginsFollow(tool)])
+      .then(([counts, plugins]) => ({ counts, plugins }), error => ({ failed: `${toolName(tool)} couldn’t be read: ${plainError(error)}` }));
   });
+  // Whether a tool managed again gets a plugin by itself (pluginupdates.ts toolJoined): the automatic updates run, and the plugins
+  // record has one On and not kept out of it, from a marketplace listed now; the record read and the marketplaces listed, nothing
+  // saved or fetched.
+  const pluginsFollow = async (tool: HarnessId) => {
+    if (!pluginUpdatesOn() || !syncOn) return false;
+    const listed = (await markets.listings())?.sources ?? [];
+    return !!(await readPluginRecord(current!.home)).record?.plugins.some(entry => wantedIn(entry, tool) && listed.some(source => sameSource(source, entry.source)));
+  };
   // The Overview's line that a tool came under management, closed for good in that home (arrivals.ts), in the queue, so no pass
   // between its read and its save of the tools seen puts it back.
   handle('tools:dismiss-arrival', async (tool, home) => {

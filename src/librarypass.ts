@@ -339,15 +339,18 @@ export async function joinCounts<C, E extends Seen, D extends Disk<E>>(
     const made = plan(item, copiesOf(look, item));
     const kept = [...made.keep, ...(look.givingWay.get(item.key) ?? [])].filter(copy => copy.harness === joining).length;
     counts.kept += kept;
-    if (made.write.includes(joining)) counts.written++;
-    if (made.remove.includes(joining)) { counts.removed++; leaving.add(item.key); }
-    if (kept || made.write.includes(joining) || made.remove.includes(joining)) counts.changing.push(item.name);
+    const does = made.write.includes(joining) ? 'write' : made.remove.includes(joining) ? 'remove' : kept ? 'keep' : undefined;
+    if (does === 'write') counts.written++;
+    if (does === 'remove') { counts.removed++; leaving.add(item.key); }
+    if (does) counts.changing.push({ kind: kind.kind, key: item.key, name: item.name, does, saves: kept });
   }
   // Found there: each key it has a copy of that can be taken in (its own, or one it has another way: foundCopies) with no live
   // item for it, but a deleted item's copy the pass removes there.
   for (const key of new Set([...look.disk.byKey.keys(), ...(look.disk.outside?.keys() ?? [])])) {
     if ((library.items[key] && !library.items[key].deleted) || leaving.has(key) || !foundCopies(look, key, []).some(copy => copy.tool === joining)) continue;
-    counts[rule && 'take' in takeInAnswer('rule', foundKey(look, key)) ? 'takenIn' : 'found']++;
+    const taken = rule && 'take' in takeInAnswer('rule', foundKey(look, key));
+    counts[taken ? 'takenIn' : 'found']++;
+    if (taken) counts.changing.push({ kind: kind.kind, key, name: key, does: 'take', saves: 0 });
   }
   return counts;
 }

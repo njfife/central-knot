@@ -152,8 +152,8 @@ const managingWords = ({ tool, on }: NonNullable<HistoryEvent['managing']>): { g
   : { glyph: 'boxes', text: `Left out from here on: Central Knot writes nothing in ${toolName(tool)}, and its copies there stay as they are.` });
 
 /**
- * A Manage entry's reverse button and panel: Leave it out again, acting at once; or Manage it again, which asks the card's own
- * question in the row first (managecard.ts askManage, manageQuestion).
+ * A Manage entry's reverse button and panel: Leave it out again, acting at once; or Manage <tool>, which asks the card's own
+ * question in the row first (managecard.ts askManage, manageQuestion), whose button is Manage <tool> too.
  */
 function managingRow(event: HistoryEvent): [HTMLElement | null, HTMLElement | null] {
   const home = state.home, entry = event.managing;
@@ -166,7 +166,7 @@ function managingRow(event: HistoryEvent): [HTMLElement | null, HTMLElement | nu
   }
   const asking = manageQuestion(home, entry.tool, event.id);
   if (asking) return [null, asking];
-  return [button({ variant: 'link', size: 'small', label: 'Manage it again', name: `Manage ${name} again`,
+  return [button({ variant: 'link', size: 'small', label: `Manage ${name}`, name: `Manage ${name}: asks what that does there first`,
     id: `history-${event.id}`, disabled, onclick: () => void askManage(entry.tool, event.id) }), null];
 }
 
