@@ -21336,6 +21336,134 @@ async function skillFileFlow() {
     });
     await a.click(`.ov-row[data-key="${rowPart('', 'skills', 'code-review')}"]`);
 
+    // A file opened from an open row takes its details' place, under "‹ Back to details"; each way of closing it brings them back.
+    // openFile clicks a file icon, then waits until its box no longer says Reading… (its text, or why not, shows).
+    const reviewRow = `.ov-row[data-key="${rowPart('', 'skills', 'code-review')}"]`, craftRow = `.ov-row[data-key="${rowPart('', 'skills', 'commit-craft')}"]`;
+    const toDetails = `#${rowPart('file-details', 'skills', 'code-review')}`;
+    const reviewChevron = `#${rowPart('open', 'skills', 'code-review')}`, craftChevron = `#${rowPart('open', 'skills', 'commit-craft')}`;
+    const triageChevron = `[id="${rowPart('open', 'skills', 'issue-tracker@skill-file-market/triage')}"]`;
+    const openFile = async (icon = reviewBtn) => {
+      await a.click(icon);
+      await until(async () => !(await a.exists('.file-open-box .file-open-state')));
+    };
+    const expanded = row => a.run(`document.querySelector('${row}')?.getAttribute('aria-expanded') ?? null`);
+    const findOnPage = async text => {
+      await a.run(`(f => { f.focus(); f.value = ${JSON.stringify(text)}; f.dispatchEvent(new Event('input', { bubbles: true })); })(document.querySelector('#find'))`);
+      await a.settle();
+    };
+    const shown = () => a.run(`(() => {
+      const box = document.querySelector('.file-open-box'), pre = box?.querySelector('pre.content'), style = pre && getComputedStyle(pre);
+      const focus = document.activeElement, room = pre ? pre.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom) : 0;
+      return { open: document.querySelector('${reviewRow}')?.getAttribute('aria-expanded'), tools: document.querySelectorAll('.details-tool').length,
+        back: document.querySelector('${toDetails}')?.textContent ?? null, about: !!document.querySelector('${reviewRow} .ov-name-about'), close: !!box?.querySelector('.file-open-close'),
+        inDock: !!box?.closest('.dock'), line1: !!pre && pre.scrollTop === 0 && pre.textContent.includes('Line 1: review check item 1.'),
+        lines: pre ? Math.floor(room / parseFloat(style.lineHeight)) : 0,
+        foot: box ? Math.round(box.closest('.scroll').getBoundingClientRect().bottom - box.getBoundingClientRect().bottom) : null,
+        focus: focus?.id === '${reviewBtn.slice(1)}' ? 'file icon' : focus?.closest('.details:not(.details-file-only)') ? 'details' : focus?.id ?? null };
+    })()`);
+    // On a tool's tab, Find that hides an open row with its file in the details' place closes both: nothing of it stays in the side panel.
+    await sizeTo(a, 1728, 1117);
+    for (const selector of ['#nav-harnesses', 'button#harness-claude-cli.harness-card-head', '#harness-tab-skills', reviewChevron]) await a.click(selector);
+    await openFile();
+    await findOnPage('commit');
+    const hidden = [await a.exists(reviewRow), await a.exists('.dock'), await a.exists('.file-open-box')];
+    await findOnPage('');
+    same('on a tool’s tab, Find hiding an open row with its file in the details’ place closes both: no side panel or file while hidden, closed once Find is cleared',
+      [...hidden, await expanded(reviewRow), await a.exists('.file-open-box')], [false, false, false, 'false', false]);
+    await openKind(a, 'all');
+    await sizeTo(a, 1316, 820);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    await openFile();
+    const alone = await shown();
+    await a.press('Escape');
+    same('a file opened from a closed row is alone (its ×, no Back to details), and Escape leaves the row closed',
+      [alone.open, alone.close, alone.back, (await shown()).open, await a.exists('.details')], ['false', true, null, 'false', false]);
+    await a.click(reviewChevron);
+    const toolLines = (await shown()).tools;
+    await openFile();
+    const placed = await shown();
+    same('at 1316×820 the file icon on an open row puts its file in the details’ place: the row open with its description, no tool line, '
+      + '‹ Back to details and no × of its own, line 1 first, the box ending where it ends opened alone, 8 lines or more',
+      [placed.open, placed.about, placed.tools, placed.back, placed.close, placed.line1, Math.abs(placed.foot - alone.foot) <= 3, placed.lines >= 8],
+      ['true', true, 0, 'Back to details', false, true, true, true]);
+    await a.click(toDetails);
+    const back = await shown();
+    same('Back to details closes the file and brings back every tool line, the focus in the details',
+      [back.open, back.tools, back.focus, await a.exists('.file-open-box')], ['true', toolLines, 'details', false]);
+    for (const [how, close, focus] of [['its file icon', () => a.click(reviewBtn), undefined], ['Escape', () => a.press('Escape'), 'file icon']]) {
+      await openFile();
+      await close();
+      const after = await shown();
+      same(`closing the file in its details’ place by ${how} brings back every tool line${focus ? ', the focus on the file icon' : ''}`,
+        [after.open, after.tools, focus && after.focus], ['true', toolLines, focus]);
+    }
+    await openFile();
+    await a.click(craftChevron);
+    same('with a file in one row’s details’ place, another row’s chevron opens that row’s details and closes the file, never the first row’s details',
+      [await expanded(craftRow), (await shown()).open, await a.exists('.file-open-box')], ['true', 'false', false]);
+    await sizeTo(a, 1728, 1117);
+    await a.click(reviewChevron);
+    await openFile();
+    const docked = await shown();
+    await a.click(reviewBtn);
+    same('docked at 1728, the file from the open row is in the side panel with no × of its own, 8 lines or more with its foot in view; its icon brings the panel’s tool lines back',
+      [docked.inDock, docked.tools, docked.back, docked.close, docked.lines >= 8, docked.foot >= 0, await a.exists('.dock .details-tool')], [true, 0, 'Back to details', false, true, true, true]);
+    await openFile();
+    await a.click('#dock-close');
+    same('the side panel’s × closes the panel and the file in it', [await a.exists('.dock'), await a.exists('.file-open-box'), (await shown()).open], [false, false, 'false']);
+    await a.click(triageChevron);
+    await openFile(triageBtn);
+    same('a plugin’s skill docked with its file in its details’ place takes the wide side panel, as an item’s does',
+      await a.exists('.ov-page.docked.dock-wide .dock .file-open-box'), true);
+    await a.click('#dock-close');
+    await a.click(reviewChevron);
+    await openFile();
+    const smallLines = [];
+    await fitsAtMinimum(a, 'a file in its open row’s details’ place', async () => { smallLines.push((await shown()).lines); });
+    same('at 860×560 the file in the details’ place shows 8 lines or more, with the rail and with the sidebar open', smallLines.map(lines => lines >= 8), [true, true]);
+    await a.press('Escape');
+    await a.click(reviewChevron);
+    // A notice's link opens its row as the chevron does: a file in another row's details' place closes, and the row's own file gives way to its details.
+    const craftFile = join(claudeSkills, 'commit-craft/SKILL.md');
+    writeFileSync(craftFile, text('commit-craft', 'Writes concise commit messages, edited by hand.'));
+    utimesSync(craftFile, ago(0.0002), ago(0.0002));
+    check('the pass tells the page of commit-craft’s edit', await until(() => noticesName(a, 'commit-craft'), 300), await a.text('#header'));
+    const noticeLink = async () => {
+      await openNotices(a);
+      await a.run(`[...document.querySelectorAll('#notices-card [id^="notice-open-"]')].find(link => link.textContent === 'commit-craft')?.click()`);
+      await a.settle();
+    };
+    await a.click(reviewChevron);
+    await openFile();
+    await noticeLink();
+    same('with a file in one row’s details’ place, a notice’s link to another row opens that row and closes the file',
+      [await expanded(craftRow), await expanded(reviewRow), await a.exists('.file-open-box')], ['true', 'false', false]);
+    await a.click(craftChevron);
+    await openFile(craftBtn);
+    await noticeLink();
+    same('with a row’s file open alone, a notice’s link to that row opens its details, not its file',
+      [await expanded(craftRow), (await shown()).tools > 0, await a.exists('.file-open-box')], ['true', true, false]);
+    await a.click(craftChevron);
+    // Its pictures (--shots, CK_SHOT_ONLY by tag): in the details' place at 860, 1316 and docked at 1728; after Back to details; alone; a plugin's skill.
+    const pictures = [['file-in-place', SMALLEST, 'light', [reviewChevron, reviewBtn]], ['file-in-place', [1316, 820], 'dark', [reviewChevron, reviewBtn]],
+      ['file-in-dock', [1728, 1117], 'light', [reviewChevron, reviewBtn]], ['in-each-tool', SMALLEST, 'light', [reviewChevron, reviewBtn, toDetails]],
+      ['file-alone', SMALLEST, 'light', [reviewBtn]], ['plugin-file-in-place', [1316, 820], 'dark', [triageChevron, triageBtn]]];
+    for (const [tag, [width, height], theme, clicks] of shots ? pictures : []) {
+      if (shotOnly && !shotOnly.has(tag)) continue;
+      await sizeTo(a, width, height);
+      const rail = await a.run(`document.body.classList.contains('rail')`);
+      if (rail) await a.click('#sidebar-toggle');
+      for (const selector of clicks) await openFile(selector);
+      await a.run(`document.activeElement?.blur(); window.centralKnot.setAppearance('${theme}')`);
+      await wait(150);
+      await a.shot(`${tag}-${width}-${theme}`);
+      await a.run(`window.centralKnot.setAppearance('system')`);
+      await a.press('Escape');
+      await a.click('.ov-row.open .row-open').catch(() => {});
+      if (rail) await a.click('#sidebar-toggle');
+    }
+    await fullSize(a);
+
     // Task 7: Sort by Most used, then open the top skill's file in 1 click from the closed row.
     await until(() => a.run(`/^Collected /.test(document.querySelector('#usage-when')?.textContent ?? '')`), 150);
     await a.run(`(() => { const s = document.querySelector('#item-order'); s.value = 'most-used'; s.dispatchEvent(new Event('change')); })()`);
@@ -21523,8 +21651,12 @@ async function skillFileFlow() {
 
       // Divergent copies in two tools: first shown at once, chooser has both, choosing other switches and resets tab to SKILL.md.
       const splitBtn = `#${rowPart('file', 'skills', 'split-notes')}`;
+      await a.click(`#${rowPart('open', 'skills', 'split-notes')}`);
+      const asked = await a.exists('.compare-block');
       await a.click(splitBtn);
       await until(() => a.exists('.file-open-box pre.content'));
+      same('on a row whose copy question is open, the file icon closes the question and opens the file alone, as before', [asked, await a.exists('.compare-block'), await a.exists('.file-to-details'),
+        await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'split-notes')}"]')?.getAttribute('aria-expanded')`)], [true, false, false, 'false']);
       const splitFirst = await a.run(`(() => {
         const box = document.querySelector('.file-open-box');
         const sel = box?.querySelector('.file-copy-select select');
