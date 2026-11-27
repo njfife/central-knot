@@ -127,6 +127,14 @@ export interface LibraryRow {
   getsWithPlugin?: readonly string[];
 }
 
+const FOLLOWS_IN = 'In Pi, OpenCode and Antigravity';
+/** How a plugin's item follows its plugin in tools that take no plugins: one home for its row tag (fromSourceWords) and In each tool (?) (pluginToolsCard). */
+export const PLUGIN_FOLLOWS = `${FOLLOWS_IN} it follows the plugin; a change you make to it here makes it your own, no longer the plugin’s.`;
+/** The card behind In each tool (?) when a plugin supplies the row: plugin-only (`shared` omitted) or plugin-linked (`shared` first). */
+export const pluginToolsCard = (shared?: string) => (shared
+  ? `${shared} ${PLUGIN_FOLLOWS} Hooks and commands can’t.`
+  : `Tools that take plugins get the whole plugin; switches here belong to the plugin. ${FOLLOWS_IN} its items follow the plugin; hooks and commands can’t.`);
+
 /**
  * What an item's row says of the source it is from (types.ts LibraryFacts fromSource): while a version waits there (the item
  * changed here, or a tool's copy unreadable: library.ts changedHere), or once the source removed it (`removed`: library.ts
@@ -136,11 +144,8 @@ export interface LibraryRow {
  */
 export function fromSourceWords(from: NonNullable<LibraryFacts['fromSource']>): { tag?: { text: string; title: string }; before: string; after: string; page?: 'sources' } {
   const label = linkLabel(from.link);
-  // An item a plugin brought (library.ts A PLUGIN): its tag keeps the explanation on hover, and matrix.ts pluginToolsCard says it behind In each tool (?) (no standing paragraph).
-  if (pluginOf(from.link)) {
-    const follows = `It follows the plugin in the tools that take no plugins; a change you make to it here makes it your own, no longer the plugin’s`;
-    return { tag: { text: `from ${label}`, title: `${follows}.` }, before: '', after: '' };
-  }
+  // An item a plugin brought (library.ts A PLUGIN): its tag and In each tool (?) card share PLUGIN_FOLLOWS / pluginToolsCard (no standing paragraph).
+  if (pluginOf(from.link)) return { tag: { text: `from ${label}`, title: PLUGIN_FOLLOWS }, before: '', after: '' };
   if (from.removed) {
     const off = `${label} no longer has it: it is Off, and no longer from that source. Turn it on to use it again`;
     return { tag: { text: 'removed at its source', title: `${off}.` },
@@ -420,8 +425,8 @@ function offOnWords(item: LibraryItem | undefined, tools: readonly string[], for
 
 /**
  * An opened row's status line: where a found item is and what Add does (and with Synchronize everything on, what the rule does);
- * where turning an Off item On puts it back (with any still-present or shared copies); and for an On row, only a pending hand
- * deletion that turns the whole item off when sync runs (the tool lines show every other On state).
+ * and where turning an Off item On puts it back (with any still-present or shared copies). Empty on every On row: each tool's line
+ * (detailLine, harnessLine) and marks show every On state, including a pending hand deletion.
  */
 export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], everything = false, leftOut: readonly string[] = []): string {
   const where = (...states: HarnessIs[]) => harnessesWhere(row, item, tools, ...states);
@@ -439,9 +444,7 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
     const ownSaid = own.length ? ` ${sentence(named(own, tools))} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there.` : '';
     return [placePart, ...otherReadLines(row, tools), `${offOnWords(item, tools, false)}${ownSaid}`].filter(Boolean).join(' ');
   }
-  // A copy deleted by hand turns the item Off everywhere at the next pass: the one On exception the tool lines don't state globally.
-  const deletedBy = row.plan?.turnedOffBy;
-  return deletedBy ? `Its copy was deleted in ${deletedIn(deletedBy, row.plan?.sharedWay)}, so it turns off when sync runs. Central Knot keeps it.` : '';
+  return '';
 }
 
 /**

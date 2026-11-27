@@ -123,7 +123,7 @@ function place({ tool, plugin, marketName, box, parts, yours = [] }: LineFacts):
   const label = kinds.length ? `Put its ${kindsList} here` : 'Put its items here';
   const title = [`Puts ${plugin}’s ${kindsList} into ${where}, following the plugin.`, yours.length ? yoursStay(yours) : '',
     cannot.length ? `${capital(andList(cannot))} can’t.` : ''].filter(Boolean).join(' ');
-  const sentence = yours.length ? `Follows ${plugin}. ${yoursStay(yours)}` : `Follows ${plugin}`;
+  const sentence = yours.length ? `Will follow ${plugin}. ${yoursStay(yours)}` : `Will follow ${plugin}`;
   return button('place', label, sentence, title);
 }
 

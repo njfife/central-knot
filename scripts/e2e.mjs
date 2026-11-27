@@ -3909,8 +3909,9 @@ async function practiceFlow() {
   const lineResult = () => a.run(`document.querySelector('[data-result="claude-cli:skill:triage"] .details-tool-result-text')?.textContent?.trim() ?? ''`);
   await a.click(wholeButton);
   for (let tries = 0; tries < 60 && !(await a.exists(lineUndo)); tries++) await wait(100);
-  check('the opened row’s button turns the plugin off through turn, with its result and Undo on Claude Code’s line', wholeOff() && await cellState(a, 'skills', 'triage', 'claude-cli') === 'plugin-off'
-    && /^Turned off issue-tracker in Claude Code\./.test(await lineResult()), [pluginSettingsNow(), await lineResult()]);
+  check('the opened row’s button turns the plugin off through turn, with its result naming the same parts as the line before the click and Undo on Claude Code’s line',
+    wholeOff() && await cellState(a, 'skills', 'triage', 'claude-cli') === 'plugin-off'
+    && (await lineResult()).startsWith(`Turned off issue-tracker in Claude Code, with its ${triageLine.replace(/^With /, '')}.`), [pluginSettingsNow(), triageLine, await lineResult()]);
   // The same off copy reads off with "Off, kept installed" on Claude Code's Plugins tab.
   await a.click('#nav-harnesses');
   await a.click('#harness-claude-cli');
@@ -9734,8 +9735,8 @@ fs.writeFileSync(record, JSON.stringify(now));
   const low = await opened('srv-30', fits.list - fits.tall + 60);
   same('a row opened whose details run 60 px past the list’s bottom: the list moves by exactly those 60 px, and a redraw in the next frame leaves it there',
     [low.before + low.tall - low.list, low.before - low.after], [60, 60]);
-  // 860×440: a list shorter than the row with its details.
-  await sizeTo(a, 860, 440);
+  // 860×380: a list shorter than the opened MCP row with its details (without bold On summary or standalone path lines).
+  await sizeTo(a, 860, 380);
   const deep = await opened('srv-17', 100);
   same('a row opened whose details and row are taller than the list: the row goes to the list’s top, its name in view', [deep.tall > deep.list, deep.after], [true, 8]);
   await sizeTo(a, 1280, 800);
@@ -11245,7 +11246,7 @@ async function overviewFlow() {
   await a.click(byId('overview-skills'));
   await a.click(byId(rowPart('open', 'skills', 'notes')));
   const rowUsage = byId(rowPart('usage', 'skills', 'notes', 'claude-cli'));
-  check('the skill’s row says why Claude Code can’t tell', /can’t say: 1 session file couldn’t be read/i.test(await a.text(rowUsage)));
+  check('the skill’s row says why Claude Code can’t tell', /use unknown: 1 session file couldn’t be read/.test(await a.text(rowUsage) ?? ''), await a.text(rowUsage));
   check('the toolbar makes no claim of no sessions', !(await a.text(byId('usage-when')))?.includes('no sessions'));
   if (shots) {
     await sizeTo(a, 1280, 800);
@@ -11793,17 +11794,17 @@ async function usageFlow() {
   for (let tries = 0; tries < 100 && !/^Usage statistics collected/.test(await bandText()); tries++) await wait(100);
   same('Update usage statistics opens the band: what was collected, from where, and that nothing left the computer (the time is beside the button)',
     await bandText(), 'Usage statistics collected from the tools’ own session history on this computer. Nothing left it.');
-  same('under Name, used rows are blank with no hover and unused rows still say no use seen in 30 days', [await figures(), (await titles()).idle, (await titles()).notes],
-    [{ fresh: 'no use seen in 30 days', idle: '', notes: '', spare: 'no use seen in 30 days', standup: 'no use seen in 30 days' }, null, null]);
+  same('under Name, used rows are blank with no hover and unused rows say no use seen with their window on hover', [await figures(), (await titles()).idle, (await titles()).notes, (await titles()).fresh],
+    [{ fresh: 'no use seen', idle: '', notes: '', spare: 'no use seen', standup: 'no use seen' }, null, null, 'No use seen in 30 days. Open the row for each tool’s figure.']);
   await a.click(`#${rowPart('open', 'skills', 'notes')}`);
   same('a skill used in two tools: its opened row says each tool’s count, 13 and 1, which the row adds up to 14',
     await a.all('.details-usage', 'e.textContent.trim()'), ['used 2 days ago · 13 sessions', 'used 5 days ago · 1 session']);
   await a.click(`#${rowPart('open', 'skills', 'notes')}`);
   await a.click(`#${rowPart('open', 'skills', 'standup')}`);
-  same('an opened row says each tool’s figure: its last use beyond the 30 days, and Use unknown with Codex’s reason behind a sized (?) card',
+  same('an opened row says each tool’s figure: its last use beyond the 30 days, and use unknown with Codex’s reason behind a sized (?) card',
     [await a.all('.details-usage', 'e.innerText.trim()'),
       await a.run(`(() => { const m = document.querySelector('.details-usage .info-mark'); const r = m?.getBoundingClientRect(); const c = m?.nextElementSibling; return m ? [c?.textContent?.trim(), r.width > 0 && r.height > 0] : null; })()`)],
-    [['no use seen in 30 days · last used 5 weeks ago', 'Use unknown'], ['It doesn’t always record which skill was used.', true]]);
+    [['no use seen in 30 days · last used 5 weeks ago', 'use unknown'], ['It doesn’t always record which skill was used.', true]]);
   await a.click(`#${rowPart('open', 'skills', 'standup')}`);
   await a.click(`#${rowPart('open', 'skills', 'idle')}`);
   same('and a use in a tool not managed here has its own line', (await a.text(`#${rowPart('usage', 'skills', 'idle', 'copilot-cli')}`))?.trim(), 'Copilot CLI, not managed here: used 3 days ago · 1 session');
@@ -11819,7 +11820,7 @@ async function usageFlow() {
   await chooseOrder('used');
   same('Sort by Last used: the newest use first, then the one used 40 days ago, then those never seen, by name', (await sectionsNow(a, 'skills'))[0][1], ['notes', 'idle', 'standup', 'fresh', 'spare']);
   same('under Last used, used rows show recency alone and hover keeps both figures', [await figures(), (await titles()).notes],
-    [{ notes: '2 days ago', idle: '3 days ago', standup: 'no use seen in 30 days', fresh: 'no use seen in 30 days', spare: 'no use seen in 30 days' }, 'Used 2 days ago · 14 sessions. Open the row for each tool’s figure.']);
+    [{ notes: '2 days ago', idle: '3 days ago', standup: 'no use seen', fresh: 'no use seen', spare: 'no use seen' }, 'Used 2 days ago · 14 sessions. Open the row for each tool’s figure.']);
   // spare used just now: the reading that lands moves no row (its cell fills where it is); the next Sort draws the new order.
   lines(join(home, '.claude/projects/-work/s4.jsonl'), [skillCall('spare', 0)]);
   await a.click('#collect-usage');
@@ -11830,7 +11831,7 @@ async function usageFlow() {
   same('the next draw that may reorder (Sort chosen again) puts it first', (await sectionsNow(a, 'skills'))[0][1], ['spare', 'notes', 'idle', 'standup', 'fresh']);
   rmSync(join(home, '.claude/projects/-work/s4.jsonl'));
   await a.click('#collect-usage');
-  for (let tries = 0; tries < 100 && (await figures()).spare !== 'no use seen in 30 days'; tries++) await wait(100);
+  for (let tries = 0; tries < 100 && (await figures()).spare !== 'no use seen'; tries++) await wait(100);
   await a.click('#usage-line-close');
   await a.click('#header-refresh');
   for (let tries = 0; tries < 50 && (await sectionsNow(a, 'skills'))[0]?.[1]?.[0] !== 'notes'; tries++) { await wait(100); await a.settle(); }
@@ -11842,7 +11843,7 @@ async function usageFlow() {
   same('Sort by Most used: 14 sessions, then 1 session, then those with no use seen in 30 days by name (standup, used 40 days ago, with them)',
     (await sectionsNow(a, 'skills'))[0][1], ['notes', 'idle', 'fresh', 'spare', 'standup']);
   same('under Most used, used rows show sessions alone and hover keeps both figures', [await figures(), (await titles()).notes],
-    [{ notes: '14 sessions', idle: '1 session', fresh: 'no use seen in 30 days', spare: 'no use seen in 30 days', standup: 'no use seen in 30 days' }, 'Used 2 days ago · 14 sessions. Open the row for each tool’s figure.']);
+    [{ notes: '14 sessions', idle: '1 session', fresh: 'no use seen', spare: 'no use seen', standup: 'no use seen' }, 'Used 2 days ago · 14 sessions. Open the row for each tool’s figure.']);
   await openKind(a, 'agents');
   const mostOnAgents = await a.run(`document.querySelector('#item-order')?.value`);
   await openKind(a, 'skills');
@@ -11885,7 +11886,7 @@ async function usageFlow() {
   // Restore the five skills' original usage and Last used order for the existing checks that follow.
   for (const file of mostTemp) rmSync(file);
   await a.click('#collect-usage');
-  for (let tries = 0; tries < 100 && ((await figures()).spare !== 'no use seen in 30 days' || (await figures()).fresh !== 'no use seen in 30 days'); tries++) await wait(100);
+  for (let tries = 0; tries < 100 && ((await figures()).spare !== 'no use seen' || (await figures()).fresh !== 'no use seen'); tries++) await wait(100);
   await a.click('#usage-line-close');
   await chooseOrder('used');
   await a.click('#header-refresh');
@@ -12021,16 +12022,17 @@ async function usageFlow() {
     await a.click('#collect-usage');
     for (let tries = 0; tries < 80 && !/couldn’t be read/.test(await a.text(`${byId(rowPart('usage', 'skills', kit, 'codex-cli'))}`) ?? ''); tries++) await wait(100);
     same('absent plugin copy with wholly unread history stays visible instead of blank',
-      (await a.text(`${byId(rowPart('usage', 'skills', kit, 'codex-cli'))}`))?.trim(), 'Use unknown: its sessions couldn’t be read');
+      (await a.text(`${byId(rowPart('usage', 'skills', kit, 'codex-cli'))}`))?.trim(), 'use unknown: its sessions couldn’t be read');
     await a.click(byId(rowPart('open', 'skills', 'standup')));
     const agyId = rowPart('usage', 'skills', 'standup', 'antigravity-cli');
     const piId = rowPart('usage', 'skills', 'standup', 'pi-cli');
-    same('a tool whose history isn’t read yet (Antigravity) shows Use unknown with a sized (?) card',
+    same('a tool whose history isn’t read yet (Antigravity) shows use unknown with a sized (?) card',
       await a.run(`(() => { const p = document.getElementById(${JSON.stringify(agyId)}); const m = p?.querySelector('.info-mark'); const r = m?.getBoundingClientRect(); return p ? [p.innerText.trim(), m?.nextElementSibling?.textContent?.trim(), !!(r && r.width > 0 && r.height > 0)] : null; })()`),
-      ['Use unknown', 'Antigravity’s session history isn’t read yet.', true]);
-    check('a tool whose history starts within 30 days reads no use seen · history from <date>',
-      /^no use seen · history from [A-Z][a-z]{2} \d+/.test((await a.text(byId(piId)))?.trim() ?? ''),
-      await a.text(byId(piId)));
+      ['use unknown', 'Antigravity’s session history isn’t read yet.', true]);
+    check('a tool whose records start within 30 days reads no use seen · records from <date>, and the cell says no use seen with that date on hover',
+      /^no use seen · records from [A-Z][a-z]{2} \d+/.test((await a.text(byId(piId)))?.trim() ?? '')
+      && (await figures()).standup === 'no use seen' && /^No use seen · records from [A-Z][a-z]{2} \d+\./.test((await titles()).standup ?? ''),
+      [await a.text(byId(piId)), (await figures()).standup, (await titles()).standup]);
     await a.click(byId(rowPart('open', 'skills', 'standup')));
   } finally {
     chmodSync(codexSessions, 0o755);
@@ -12395,14 +12397,14 @@ async function usageFlow() {
     same('ux1a: at 860 with sidebar open, both skipped plugin rows say from a plugin · skipped whole without cutting names, and the 6 skills stay normal',
       [...uxSkills.map(k => [markedAt860[rowPart('', 'skills', k)]?.text, markedAt860[rowPart('', 'skills', k)]?.skip]),
         ...['plug-audit', 'plug-triage'].map(k => markedAt860[rowPart('', 'agents', k)])],
-      [...uxSkills.map(() => ['no use seen in 30 days', false]),
+      [...uxSkills.map(() => ['no use seen', false]),
         { text: 'from a plugin · skipped', skip: true, cellWhole: true, nameWhole: true },
         { text: 'from a plugin · skipped', skip: true, cellWhole: true, nameWhole: true }]);
     await a.click('#library-select');
     const selectingAt860 = await skippedRowsState();
     same('ux1a: while Select is on, plugin rows show no skipped mark',
       ['plug-audit', 'plug-triage'].map(k => [selectingAt860[rowPart('', 'agents', k)]?.text, selectingAt860[rowPart('', 'agents', k)]?.skip]),
-      [['no use seen in 30 days', false], ['no use seen in 30 days', false]]);
+      [['no use seen', false], ['no use seen', false]]);
     await capture860Light('band-select');
     await a.click('#library-select');
     await fullSize(a);
@@ -20461,17 +20463,19 @@ if (tool === 'claude') {
   const claudeBefore = toolFiles().slice(0, 2);
   await open('agents', lead);
   await until(() => a.exists(act('agents', lead, 'copilot-cli')));
+  const copilotLineBefore = await lineOf('Copilot CLI');
   same('installed there, the agent’s Copilot CLI line turns the whole plugin off, saying what goes with it',
-    [await label(act('agents', lead, 'copilot-cli')), await lineOf('Copilot CLI')], ['Turn the plugin off', 'With 1 skill and 1 MCP server']);
+    [await label(act('agents', lead, 'copilot-cli')), copilotLineBefore], ['Turn the plugin off', 'With 1 skill and 1 MCP server']);
   await a.click(act('agents', lead, 'copilot-cli'));
   await idle();
   const copilotEnabled = () => JSON.parse(readNow(join(home, '.copilot/config.json')) || '{"installedPlugins":[]}').installedPlugins.find(each => each.name === plugin)?.enabled;
   const rowSwitchState = (kind, key) => a.run(`(() => { const s = document.getElementById(${JSON.stringify(rowPart('switch', kind, key))}); return s ? [s.getAttribute('aria-checked'), s.classList.contains('switch-partial')] : null; })()`);
   const pageBoxState = tool => a.run(`(() => { const b = document.querySelector('#pbox-0-${plugin}-${tool}'); const st = document.querySelector('.plugin-tool[data-tool="${tool}"] .plugin-tool-state'); return [b?.getAttribute('aria-checked'), b?.dataset.state, st?.textContent?.trim()]; })()`);
   const skillSwitchState = (skillName, tool) => a.run(`(() => { const s = document.querySelector('#pskill-0-${plugin}-${skillName}-${tool}'); return s ? [s.getAttribute('aria-checked'), s.disabled, !!s.closest('.skill-switch')?.querySelector('.skill-switch-lock')] : null; })()`);
-  same('off from Library line: Copilot CLI disabled, copilot-cli in record except, row switch partial, line offers Turn the plugin on',
-    [copilotEnabled(), entryNow(plugin)?.except.includes('copilot-cli'), await rowSwitchState('agents', lead), await label(act('agents', lead, 'copilot-cli'))],
-    [false, true, ['true', true], 'Turn the plugin on']);
+  same('off from Library line: Copilot CLI disabled, copilot-cli in record except, row switch partial, line offers Turn the plugin on, result names the same parts as the line',
+    [copilotEnabled(), entryNow(plugin)?.except.includes('copilot-cli'), await rowSwitchState('agents', lead), await label(act('agents', lead, 'copilot-cli')),
+      ((await resultOf('Copilot CLI'))?.[0] ?? '').startsWith(`Turned off ${plugin} in Copilot CLI, with its ${copilotLineBefore.replace(/^With /, '')}.`)],
+    [false, true, ['true', true], 'Turn the plugin on', true]);
   await a.click(byId(rowPart('line-undo', 'agents', lead, 'copilot-cli')));
   await idle();
   same('its line Undo turns it on again and removes copilot-cli from except; Claude Code’s files never changed',
@@ -20519,9 +20523,9 @@ if (tool === 'claude') {
   // Example 4, and a row that goes once it is done: Put its items here on Pi from the skill only through the plugin; its Undo.
   await open('skills', triage);
   await until(() => a.exists(act('skills', triage, 'pi-cli')));
-  same('Pi’s line names the kinds on its button, states Follows <plugin>, and keeps the full sentence on hover',
+  same('Pi’s line names the kinds on its button, states Will follow <plugin>, and keeps the full sentence on hover',
     [await label(act('skills', triage, 'pi-cli')), await lineOf('Pi'), await a.run(`document.querySelector(${JSON.stringify(act('skills', triage, 'pi-cli'))})?.title`)],
-    ['Put its skills, agents and MCP servers here', 'Follows varo-incident-response', 'Puts varo-incident-response’s skills, agents and MCP servers into Pi, following the plugin.']);
+    ['Put its skills, agents and MCP servers here', 'Will follow varo-incident-response', 'Puts varo-incident-response’s skills, agents and MCP servers into Pi, following the plugin.']);
   const triageOpened = await openedRowStats(a, row('skills', triage));
   check('opened plugin skill stays within word cap', triageOpened.words <= 90, triageOpened);
   const placedBefore = entryNow(plugin);
@@ -20581,8 +20585,8 @@ if (tool === 'claude') {
   await a.click('#header-refresh');
   await open('agents', 'incident-lead');
   await until(() => a.exists(act('agents', 'incident-lead', 'opencode-cli')));
-  same('OpenCode’s line names Follows <plugin> and his own that stays, and promises no number', [await label(act('agents', 'incident-lead', 'opencode-cli')), await lineOf('OpenCode')],
-    ['Put its skills, agents and MCP servers here', 'Follows varo-incident-response. Your own incident-triage stays as it is.']);
+  same('OpenCode’s line names Will follow <plugin> and his own that stays, and promises no number', [await label(act('agents', 'incident-lead', 'opencode-cli')), await lineOf('OpenCode')],
+    ['Put its skills, agents and MCP servers here', 'Will follow varo-incident-response. Your own incident-triage stays as it is.']);
   await a.click(act('agents', 'incident-lead', 'opencode-cli'));
   await until(async () => /in OpenCode\./.test(await saidAnywhere('OpenCode')), 300);
   check('the result counts what the placement put there, and names his own it left, from its own report', /Placed varo-incident-response: 2 of its 3 items are on in OpenCode\. incident-triage\b/.test(await saidAnywhere('OpenCode'))
@@ -20669,7 +20673,8 @@ if (tool === 'claude') {
   await a.click('#header-refresh');
   await open('agents', 'incident-lead');
   await until(() => a.exists(act('agents', 'incident-lead', 'copilot-cli')));
-  same('Copilot CLI loads it live: Turn the plugin off, as any other copy, with no removing wording', [await label(act('agents', 'incident-lead', 'copilot-cli')), await lineOf('Copilot CLI')],
+  const liveLineBefore = await lineOf('Copilot CLI');
+  same('Copilot CLI loads it live: Turn the plugin off, as any other copy, with no removing wording', [await label(act('agents', 'incident-lead', 'copilot-cli')), liveLineBefore],
     ['Turn the plugin off', 'With 1 skill and 1 MCP server']);
   const liveOn = () => JSON.parse(readNow(copilotSettingsPath)).enabledPlugins?.[id];
   const liveCallsBefore = readNow(join(home, 'copilot-calls.txt'));
@@ -20678,7 +20683,8 @@ if (tool === 'claude') {
   same('live copy off from its agent line runs uninstall via turn (keep-out), puts copilot-cli in except, keeps the line as installed and off, and offers line Undo',
     [liveOn(), entryNow(plugin)?.except.includes('copilot-cli'), readNow(join(home, 'copilot-calls.txt')).slice(liveCallsBefore.length).trim(), await label(act('agents', 'incident-lead', 'copilot-cli')), (await resultOf('Copilot CLI'))?.[1]],
     [false, true, `plugin uninstall ${id}`, 'Turn the plugin on', true]);
-  check('the line result names the plugin turned off in Copilot CLI', /^Turned off varo-incident-response in Copilot CLI\./.test((await resultOf('Copilot CLI'))?.[0] ?? ''), await resultOf('Copilot CLI'));
+  check('the line result names the plugin turned off in Copilot CLI and the same parts as the line before the click',
+    ((await resultOf('Copilot CLI'))?.[0] ?? '').startsWith(`Turned off varo-incident-response in Copilot CLI, with its ${liveLineBefore.replace(/^With /, '')}.`), await resultOf('Copilot CLI'));
   const liveCallsUndo = readNow(join(home, 'copilot-calls.txt'));
   await a.click(byId(rowPart('line-undo', 'agents', 'incident-lead', 'copilot-cli')));
   await idle();
@@ -21539,8 +21545,10 @@ async function skillFileFlow() {
       const got = await openedRowStats(a, rowPart('', kind, key));
       check(`opened ${kind} row stays within word cap (${cap})`, got.words <= cap, got);
       if (kind === 'mcp') {
-        const mcpHover = await a.run(`[!document.querySelector('.details-mcp .wrap-path'), document.querySelector('.details-mcp .details-path-show')?.title ?? '']`);
-        check('opened MCP row puts settings path on Show in folder hover instead of its own line', mcpHover[0] && /\.claude\.json/.test(mcpHover[1]), mcpHover);
+        const mcpHover = await a.run(`(() => { const btn = document.querySelector('.details-mcp .details-path-show'); return [!document.querySelector('.details-mcp .wrap-path'), btn?.title ?? '', btn?.getAttribute('aria-description') ?? '']; })()`);
+        const fullClaude = join(home, '.claude.json');
+        check('opened MCP row puts whole settings path on Show in folder hover and aria-description instead of its own line',
+          mcpHover[0] && mcpHover[1].startsWith(`${fullClaude} — `) && mcpHover[2].startsWith(`${fullClaude} — `), [fullClaude, mcpHover]);
       }
       await a.click(byId(rowPart('open', kind, key)));
     }

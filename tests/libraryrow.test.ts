@@ -149,9 +149,11 @@ test('While an edit waits in one tool, the others have the current version and g
   assert.match(lineIn({ 'claude-cli': 'b', 'codex-cli': 'x' }, item({ applied: { 'claude-cli': 'b' } }), 'codex-cli', 'Codex'), /^Has another copy\. It gets the current version when sync runs; before it is written over, a copy Central Knot doesn’t have yet is kept as a version\.$/);
 });
 
-test('While a copy deleted by hand waits for sync, the status says the agent is about to turn off, not that a tool keeps it out', () => {
-  assert.equal(statusLine(...withItem({ 'copilot-cli': 'b', 'codex-cli': 'b' }, item()), tools),
-    'Its copy was deleted in Claude Code, so it turns off when sync runs. Central Knot keeps it.');
+test('While a copy deleted by hand waits for sync, the deleted tool’s line says it turns off once; On statusLine stays empty', () => {
+  const deleted = { 'copilot-cli': 'b', 'codex-cli': 'b' };
+  assert.equal(statusLine(...withItem(deleted, item()), tools), '');
+  assert.equal(lineIn(deleted, item(), 'claude-cli', 'Claude Code'),
+    'Its copy was deleted in Claude Code. When sync runs, the agent turns off; Central Knot keeps it.');
 });
 
 test('A tool that can’t take the agent is said on its line; the On status line stays empty', () => {
@@ -720,5 +722,5 @@ test('A library row from a Git source names Sync this source and Replace mine in
   // A plugin link keeps its hover tag and drops the standing paragraph at the bottom of details.
   const fromPlugin = fromSourceWords({ link: 'plugin:issue-tracker@team-tools' });
   assert.deepEqual([fromPlugin.tag?.text, fromPlugin.before, fromPlugin.after], ['from the plugin issue-tracker', '', '']);
-  assert.match(fromPlugin.tag?.title ?? '', /follows the plugin in the tools that take no plugins; a change you make to it here makes it your own/);
+  assert.match(fromPlugin.tag?.title ?? '', /In Pi, OpenCode and Antigravity it follows the plugin; a change you make to it here makes it your own/);
 });

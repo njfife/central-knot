@@ -94,15 +94,15 @@ const cases: [string, LineFacts, ReturnType<typeof lineControl>][] = [
     { control: 'none', sentence: 'Not installed in Copilot CLI. It comes from the Anthropic Directory, which only Claude Code installs from.' }],
 
   // Pi, OpenCode or Antigravity, which take no plugins, lack it (an item only through a plugin).
-  ['its box can be ticked: Put its <kinds> here, Follows <plugin>, full explanation on hover', lacks('pi-cli', 'skill', { ticked: false }),
-    { control: 'button', act: 'place', label: 'Put its skills, agents and MCP servers here', sentence: 'Follows varo-risk', title: 'Puts varo-risk’s skills, agents and MCP servers into Pi, following the plugin. Hooks and commands can’t.' }],
-  ['a name Pi has of his own stays his: named after Follows <plugin>', lacks('pi-cli', 'skill', { ticked: false }, { yours: [{ kind: 'skill', name: 'handoff' }] }),
-    { control: 'button', act: 'place', label: 'Put its skills, agents and MCP servers here', sentence: 'Follows varo-risk. Your own handoff stays as it is.', title: 'Puts varo-risk’s skills, agents and MCP servers into Pi, following the plugin. Your own handoff stays as it is. Hooks and commands can’t.' }],
+  ['its box can be ticked: Put its <kinds> here, Will follow <plugin>, full explanation on hover', lacks('pi-cli', 'skill', { ticked: false }),
+    { control: 'button', act: 'place', label: 'Put its skills, agents and MCP servers here', sentence: 'Will follow varo-risk', title: 'Puts varo-risk’s skills, agents and MCP servers into Pi, following the plugin. Hooks and commands can’t.' }],
+  ['a name Pi has of his own stays his: named after Will follow <plugin>', lacks('pi-cli', 'skill', { ticked: false }, { yours: [{ kind: 'skill', name: 'handoff' }] }),
+    { control: 'button', act: 'place', label: 'Put its skills, agents and MCP servers here', sentence: 'Will follow varo-risk. Your own handoff stays as it is.', title: 'Puts varo-risk’s skills, agents and MCP servers into Pi, following the plugin. Your own handoff stays as it is. Hooks and commands can’t.' }],
   ['every name his own, as many as its marketplace lists of each kind: nothing could go in, so no button', lacks('pi-cli', 'skill', { ticked: false }, { yours: [
     { kind: 'skill', name: 'handoff' }, { kind: 'skill', name: 'review' }, { kind: 'skill', name: 'notes' }, { kind: 'agent', name: 'lead' }, { kind: 'mcp', name: 'jira' }] }),
     { control: 'none', sentence: 'Your own handoff, review, notes, lead and jira stay as they are, so none of varo-risk’s items can go into Pi.' }],
   ['a tool that holds no agents: none named on button', lacks('antigravity-cli', 'skill', { ticked: false }, { parts: { ...parts, hooks: false, commands: 0 } }),
-    { control: 'button', act: 'place', label: 'Put its skills and MCP servers here', sentence: 'Follows varo-risk', title: 'Puts varo-risk’s skills and MCP servers into Antigravity, following the plugin.' }],
+    { control: 'button', act: 'place', label: 'Put its skills and MCP servers here', sentence: 'Will follow varo-risk', title: 'Puts varo-risk’s skills and MCP servers into Antigravity, following the plugin.' }],
   ['its other items are there and this one isn’t (placement can’t mend it): said, and no button', lacks('pi-cli', 'skill', { ticked: true }),
     { control: 'none', sentence: 'varo-risk’s other items are in Pi, following the plugin; this one isn’t.' }],
   ['its box is off with why (its parts wait to be moved, nothing it can take, names of his own, its marketplace unread): why, and no button',

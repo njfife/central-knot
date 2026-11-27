@@ -45,7 +45,7 @@ import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h,
 import type { IconName } from './icons.ts';
 import { byName, byUsage, inOrder, kindSource, lastUpdated, noPins, partId, pin, placeIn, rankIn, rowId, type ItemRow, type KindSource, type Pinned, type RowKey, type RowOrder, type RowUsage, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
-import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, rowClicks, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
+import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, pluginToolsCard, rowClicks, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionPart, type VersionText } from './versionlist.ts';
 import { itemKey, listed, type Version } from './library.ts';
@@ -201,10 +201,6 @@ function toggleFile(row: PluginRow) {
   if (!filesShown.delete(idOf(row))) readFile(row);
   rerender();
 }
-
-/** The card behind In each tool (?) when a plugin supplies the row: plugin-only (`shared` omitted) or plugin-linked (`shared` first). */
-const pluginToolsCard = (shared?: string) =>
-  `${shared ?? 'Tools that take plugins get the whole plugin; switches here belong to the plugin.'} In Pi, OpenCode and Antigravity ${shared ? 'it follows the plugin (changing it here makes it your own)' : 'its items follow the plugin'}; hooks and commands can’t.`;
 
 /** A plugin item's details: what it is, where it comes from and is handled, each tool's copy, and its file as each tool's copy has it. */
 function pluginDetails(t: Table, row: PluginRow, placement: 'row' | 'dock' = 'row') {
@@ -715,10 +711,12 @@ function pathLine(tool: Tool, path: string) {
   return h('p.details-path-line', {}, brandMark(tool, 12), h('span.details-path-tool', {}, names[tool]), pathText(shownPath(path), path), showInFolder(path));
 }
 
-/** Show in folder: reveals a file in the file manager; nothing is opened or changed. `withPath`: puts the path on hover (MCP lines). */
-const showInFolder = (path: string, withPath = false) => h('button.inline-link.details-path-show', { type: 'button',
-  title: withPath ? `${shownPath(path)} — Show this file in the file manager; nothing is opened or changed` : 'Show this file in the file manager; nothing is opened or changed',
-  onclick: (event: Event) => { event.stopPropagation(); showFile(path); } }, 'Show in folder');
+/** Show in folder: reveals a file in the file manager; nothing is opened or changed. `withPath`: puts the whole path on hover and aria-description (MCP lines). */
+const showInFolder = (path: string, withPath = false) => {
+  const tip = `${withPath ? `${path} — ` : ''}Show this file in the file manager; nothing is opened or changed`;
+  return h('button.inline-link.details-path-show', { type: 'button', title: tip, ...(withPath ? { 'aria-description': tip } : {}),
+    onclick: (event: Event) => { event.stopPropagation(); showFile(path); } }, 'Show in folder');
+};
 
 
 /**
@@ -2466,14 +2464,14 @@ const figureOf = (t: Table, row: ItemRow | PluginRow) => {
 /**
  * A row's Used cell words and hover sentence (empty when the cell has no words): under Most used, sessions alone; under Last
  * used — or with the "No use seen in 30 days" filter on (`inUnused`), under every Sort — recency alone; under Name (also
- * passed for Find's Best match) or Last updated, nothing for a used row. Unused rows keep "no use seen…" and unknown rows
- * keep faint "use unknown" under every Sort.
+ * passed for Find's Best match) or Last updated, nothing for a used row. Unused rows keep "no use seen" (with the window or
+ * date whole on hover) and unknown rows keep faint "use unknown" under every Sort.
  */
 export function usedCellWords(figure: RowFigure, order: RowOrder, inUnused = false): { text: string; hover: string } {
   if (!figure) return { text: 'use unknown', hover: 'No tool that has it on can tell whether it was used.' };
   if ('noneSeen' in figure) {
-    const none = figure.since ? `no use seen since ${dayWords(figure.since)}` : `no use seen in ${USAGE_DAYS} days`;
-    return { text: none, hover: `${sentence(none)}.` };
+    const hover = figure.since ? `No use seen · records from ${dayWords(figure.since)}.` : `No use seen in ${USAGE_DAYS} days.`;
+    return { text: 'no use seen', hover };
   }
   const when = sinceThen(Date.parse(figure.used));
   const sessions = plural(figure.sessions, 'session');
@@ -2616,7 +2614,7 @@ export function turnTheseOff(rows: ItemRow[]) {
   });
 }
 
-/** Why a tool can't say an item wasn't used, in an opened row: standing reasons go in Use unknown's (?) card; unread counts stay inline. */
+/** Why a tool can't say an item wasn't used, in an opened row: standing reasons go in use unknown's (?) card; unread counts stay inline. */
 const cantSayWords: Record<CantSay, (nouns: { one: string }, says: ToolSays) => string> = {
   'no-record': ({ one }) => `Its sessions don’t record which ${one} was used.`,
   'not-sure': ({ one }) => `It doesn’t always record which ${one} was used.`,
@@ -2624,12 +2622,12 @@ const cantSayWords: Record<CantSay, (nouns: { one: string }, says: ToolSays) => 
   'unread': (_, says) => (says.skipped ? `${plural(says.skipped, 'session file')} couldn’t be read` : 'its sessions couldn’t be read'),
 };
 /**
- * One tool's short usage words for an opened row: both figures (`used 2 days ago · 28 sessions`), `no use seen · history from <date>`,
- * or `Use unknown` with its standing reason behind `(?)` (`card`); unread-session counts and past use always stay visible.
+ * One tool's short usage words for an opened row: both figures (`used 2 days ago · 28 sessions`), `no use seen · records from <date>`,
+ * or `use unknown` with its standing reason behind `(?)` (`card`); unread-session counts and past use always stay visible.
  * An absent plugin line with nothing observed (and readable history) returns undefined (blank).
  */
 function usageLineWords(says: ToolSays | undefined, tool: Tool, kind: PageKind, absentPlugin = false): { text: string; card?: string } | undefined {
-  if (!says) return absentPlugin ? undefined : { text: 'Use unknown', card: `${names[tool]}’s session history isn’t read yet.` };
+  if (!says) return absentPlugin ? undefined : { text: 'use unknown', card: `${names[tool]}’s session history isn’t read yet.` };
   if (absentPlugin && !says.sessions && !says.last && !says.skipped && says.cantSay !== 'unread') return undefined;
   const last = says.last ? `last used ${sinceThen(Date.parse(says.last))}` : '';
   if (says.sessions) {
@@ -2638,10 +2636,10 @@ function usageLineWords(says: ToolSays | undefined, tool: Tool, kind: PageKind, 
   }
   if (says.cantSay) {
     const reason = cantSayWords[says.cantSay](kindNouns[kind], says);
-    if (says.cantSay === 'unread') return { text: [`Use unknown: ${reason}`, last].filter(Boolean).join(' · ') };
-    return { text: ['Use unknown', last].filter(Boolean).join(' · '), card: reason };
+    if (says.cantSay === 'unread') return { text: [`use unknown: ${reason}`, last].filter(Boolean).join(' · ') };
+    return { text: ['use unknown', last].filter(Boolean).join(' · '), card: reason };
   }
-  const none = says.since ? `no use seen · history from ${dayWords(says.since)}` : `no use seen in ${USAGE_DAYS} days`;
+  const none = says.since ? `no use seen · records from ${dayWords(says.since)}` : `no use seen in ${USAGE_DAYS} days`;
   return { text: [none, last].filter(Boolean).join(' · ') };
 }
 /**
@@ -2656,7 +2654,7 @@ function usageLine(t: Table, row: ItemRow | PluginRow, tool: Tool, absentPlugin 
   const shown = usageLineWords(says, tool, kind, absentPlugin);
   if (!shown) return null;
   return h('p.details-usage', { id, ...(shown.card ? { 'data-info-block': true } : {}) }, icon('history', 12, 'tone-muted'),
-    shown.text, shown.card ? infoMark(elId('usage-info', row, tool), 'Use unknown', shown.card) : null);
+    shown.text, shown.card ? infoMark(elId('usage-info', row, tool), 'use unknown', shown.card) : null);
 }
 /** In an opened row, a use seen in a tool this page doesn't show (not managed here), which counts in the row's figure too. */
 const usageElsewhere = (t: Table, skill: ItemRow) => usageOf(t, skill).filter(each => !toolsFor(t, skill.kind).includes(each.tool) && each.sessions).map(each =>
@@ -2791,7 +2789,7 @@ function offNote(t: Table, list: ItemRow[]): string {
   return '';
 }
 
-/** What the item is now, in one line (libraryrow.ts statusLine), and for a found one, what Synchronize everything does with it while it is on. */
+/** A found or Off item's status line (libraryrow.ts statusLine; empty on On rows, whose tool lines show every On state, including in the Files view's pane). */
 const switchStatus = (t: Table, skill: ItemRow) => statusLine(skill, itemOf(skill), toolsFor(t, skill.kind), !!state.home?.sync.syncEverything, leftOutTools());
 
 /**
@@ -3042,13 +3040,15 @@ const listWatcher = new ResizeObserver(entries => {
 
 /** The least room a description gets beside its name before every row leaves it out: about twelve characters. */
 const ABOUT_MIN = 90;
+/** A name isn't cut for descriptions below this floor (a 30-letter name with its marks: style.css .name-cut). */
+const NAME_CUT_MIN = 280;
 
 /**
  * A table's descriptions are all shown or all left out, so rows never differ: when the narrowest one has room for fewer
  * than about twelve characters, every row leaves its description out (.no-about); its name's tooltip still has it.
  * A description pushed onto the cell's hidden second line, after a tag or pill that took the room, has none. A name that
- * takes more than half its name cell is cut first (.name-cut), so one long name doesn't take every description away; once
- * every description is left out, the cut is taken off again and the name has its whole cell.
+ * takes more than half its name cell (and NAME_CUT_MIN) is cut first (.name-cut), so one very long name doesn't take every
+ * description away; once every description is left out, the cut is taken off again and the name has its whole cell.
  * Run after layout (dom.ts afterLayout).
  */
 function settleDescriptions(): void {
@@ -3058,7 +3058,7 @@ function settleDescriptions(): void {
     for (const cut of table.querySelectorAll('.name-cut')) cut.classList.remove('name-cut');
     const abouts = [...table.querySelectorAll<HTMLElement>('.ov-name-about')];
     for (const cell of abouts.filter(short).map(about => about.parentElement!)) {
-      if (cell.querySelector<HTMLElement>('.ov-name-main')!.offsetWidth > cell.clientWidth / 2) cell.classList.add('name-cut');
+      if (cell.querySelector<HTMLElement>('.ov-name-main')!.offsetWidth > Math.max(cell.clientWidth / 2, NAME_CUT_MIN)) cell.classList.add('name-cut');
     }
     table.classList.toggle('no-about', abouts.some(short));
     if (table.classList.contains('no-about')) for (const cut of table.querySelectorAll('.name-cut')) cut.classList.remove('name-cut');

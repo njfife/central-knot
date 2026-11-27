@@ -28,7 +28,7 @@ import { pageData, putPageData, readPageData, resetPageData } from './pagedata.t
 import { plural } from './model.ts';
 import { notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, succeeded, unreachedOps, type LastRun, type PluginDone, type PluginOp, type ResultLine, type RunPlace } from './pluginplan.ts';
 import { FIND_FROM, boxOf, categoriesOf, copiesToCompare, installedFrom, marketTitle, matches, pluginPlace, samePart, toolMark } from './pluginstatus.ts';
-import { counted } from './pluginswitch.ts';
+import { counted, wholeAlso } from './pluginswitch.ts';
 import { yoursStay } from './pluginline.ts';
 import type { PluginEntry } from './pluginrecord.ts';
 import { readInTurn, readInto, type Read } from './reads.ts';
@@ -756,6 +756,8 @@ export function turnFromLine(aim: LineAim): void {
  */
 async function runLine(click: LineClick): Promise<void> {
   const { aim } = click, atStart = profilesBefore();
+  const before = aim.act === 'keep-out' ? app.home?.pluginItems?.find(each => each.tool === aim.tool && each.plugin === aim.plugin && each.marketName === aim.marketName) : undefined;
+  const also = before ? wholeAlso({ ...aim.item, tool: aim.tool, install: before }).words : '';
   retire(aim.plugin);
   rerender();
   const result = await api().turnPlugin(aim.source, aim.plugin, aim.act === 'keep-out' ? 'keep-out' : 'let-in', aim.tool, aim.home)
@@ -784,7 +786,7 @@ async function runLine(click: LineClick): Promise<void> {
       : `${aim.plugin} was already in ${where}${recordChanged ? '; Central Knot now keeps it there' : ''}.`)
     : problem ? `${words.not} ${where}: ${theirs}.`
     : aim.act === 'place' ? `Placed ${aim.plugin}: ${mine[0]!.report.message}`
-    : `${words.done} ${aim.plugin} in ${where}${aim.act === 'install' ? installedNow(aim) : ''}.${aim.yours?.length ? ` ${yoursStay(aim.yours)}` : ''}`;
+    : `${words.done} ${aim.plugin} in ${where}${aim.act === 'install' ? installedNow(aim) : also ? `, with its ${also}` : ''}.${aim.yours?.length ? ` ${yoursStay(aim.yours)}` : ''}`;
   const back = result.back ?? [], undoes = back.length > 0 || (already && recordChanged);
   const did = mine.some(step => succeeded(step.report)) || (already && recordChanged);
   const headerNote = problem ? lineBox(aim.plugin, aim.marketName, aim.source, aim.tool).words : undefined;

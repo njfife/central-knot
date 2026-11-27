@@ -172,9 +172,8 @@ const pluginHandles = (row: PluginRowRef, tool: string) =>
 /**
  * The tools a library item from a plugin (library.ts A PLUGIN) gets only by installing that plugin: those that take plugins,
  * load its kind (pluginstatus.ts loadsKind) and don't have it installed, but one the item is On and kept out of, where its own
- * switch lets it in. There its row's line offers Install the plugin (pluginline.ts), and its mark and its status line say it
- * gets it with the plugin (matrix.ts markOf, libraryrow.ts statusLine); its switch's result doesn't count it among the tools it
- * is on in (matrix.ts canHave).
+ * switch lets it in. There its row's line offers Install <plugin> (pluginline.ts), and its mark says it gets it with the
+ * plugin (matrix.ts markOf); its switch's result doesn't count it among the tools it is on in (matrix.ts canHave).
  */
 export function withPluginOnly(home: Pick<HomeView, 'pluginItems' | Page> | undefined, page: Page, row: PluginRowRef): HarnessId[] {
   const link = row.fromSource?.link ?? '', plugin = pluginOf(link), marketName = pluginMarketOf(link);
