@@ -1178,12 +1178,26 @@ async function manageFlow() {
     await a.run(`window.centralKnot.instructions().then(files => files.map(file => file.tool))`),
     await a.run(`window.centralKnot.plugins(false).then(view => view?.tools ?? [])`)], [['claude-cli', 'copilot-cli'], ['claude-cli', 'copilot-cli']]);
   await a.click('#nav-history');
-  for (let tries = 0; tries < 30 && !(await a.exists('.history-row')); tries++) await wait(100);
+  const waitHistory = (page, match, tries = 40) => (async () => { for (let n = 0; n < tries && !(await match()); n++) await wait(100); return match(); })();
+  const shotAt = async (page, name, [width, height], theme) => {
+    if (!shots) return;
+    await sizeTo(page, width, height);
+    await page.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+    await wait(80);
+    await page.shot(name);
+    await page.run(`window.centralKnot.setAppearance('system')`);
+    await wait(80);
+    await fullSize(page);
+  };
+  await waitHistory(a, () => a.exists('.history-row'));
   const newest = `document.querySelector('.history-row')`;
-  same('History has one entry for the flip, naming the tool, with no Undo', [
+  const newestManage = `document.querySelector('.history-row[data-kind="managing"]')`;
+  same('History has one entry for the flip, naming the tool, with Manage it again and no redirect sentence', [
     await a.run(`${newest}.querySelector('.history-kind').textContent`), await a.run(`${newest}.querySelector('.history-what strong').textContent`),
-    await a.run(`${newest}.querySelector('.history-about').textContent`), await a.run(`${newest}.querySelectorAll('.history-actions button').length`)],
-  ['Tool', 'Codex', 'Left out from here on: Central Knot writes nothing in Codex, and its copies there stay as they are. No Undo: its switch on Harnesses is the way back.', 0]);
+    await a.run(`${newest}.querySelector('.history-about').textContent`), await a.run(`[...${newest}.querySelectorAll('.history-actions button')].map(b => b.textContent)`)],
+  ['Tool', 'Codex', 'Left out from here on: Central Knot writes nothing in Codex, and its copies there stay as they are.', ['Manage it again']]);
+  await shotAt(a, 'left-out-860-light', SMALLEST, 'light');
+  await shotAt(a, 'left-out-1316-dark', [1316, 819], 'dark');
   await a.click('#nav-harnesses');
   // A hand edit in Codex while it is left out reads no page again (nothing was written), so its line still says nothing would
   // change; the band after the click says what the pass did there.
@@ -1195,6 +1209,55 @@ async function manageFlow() {
     'Central Knot manages Codex now: Central Knot’s version written there for 1 item (over its copy there, which a version keeps). Each change there is in History.');
   same('turning it on put Central Knot’s version back over the hand edit: Codex holds what it held before', codex(), before);
   check('and its card heading opens its page again', await a.exists('button#harness-codex-cli.harness-card-head'));
+  // From History: Leave it out again acts at once and keeps Codex's copies; Manage it again asks in the row with the card's own
+  // sentence, lets Cancel and Escape return focus without writing, and confirming puts Central Knot's version back over an edit.
+  await a.click('#nav-history');
+  await waitHistory(a, () => a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Leave it out again'`));
+  same('the manages entry offers Leave it out again with its hover, and the older Left out entry offers no button', [
+    await a.run(`${newestManage}.querySelector('.history-about').textContent`),
+    await a.run(`${newestManage}.querySelector('.history-actions button')?.title`),
+    await a.run(`[...document.querySelectorAll('.history-row[data-kind="managing"]')][1]?.querySelectorAll('.history-actions button').length`),
+  ], ['Central Knot manages Codex from here on: sync brings it into line, each change with its own entry.', 'Its copies stay. Central Knot stops writing there.', 0]);
+  await shotAt(a, 'manages-860-light', SMALLEST, 'light');
+  await a.click('.history-row[data-kind="managing"] .history-actions button');
+  await waitHistory(a, () => a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage it again'`));
+  same('Leave it out again acts at once, keeps Codex’s copies byte for byte, and shows the Harnesses result on History', [
+    await a.exists('.history-confirm'), codex(), (await a.text('.band-done .band-text') ?? '').startsWith('Codex is left out: Central Knot writes nothing there now.'),
+    await a.run(`[...document.querySelectorAll('.history-row[data-kind="managing"]')][1]?.querySelectorAll('.history-actions button').length`),
+  ], [false, before, true, 0]);
+  writeFileSync(standup, `${readFileSync(standup, 'utf8')}\nEdited in Codex before History rejoin.\n`);
+  await a.click('#nav-harnesses');
+  await a.click('#header-refresh');
+  const cardLine = await a.text('#manage-codex-cli-line');
+  await a.click('#nav-history');
+  await waitHistory(a, () => a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage it again'`));
+  const edited = codex(), rowsBefore = (await a.all('.history-row', 'e.dataset.kind')).length;
+  const rejoinId = await a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.id`);
+  await a.click(`#${rejoinId}`);
+  same('Manage it again opens the card’s own sentence in the row, focuses Cancel, and writes nothing', [
+    await a.text('.history-confirm .band-text'), await a.all('.history-confirm button', 'e.textContent'),
+    await a.run(`document.activeElement?.textContent`), codex(), (await a.all('.history-row', 'e.dataset.kind')).length,
+  ], [cardLine, ['Cancel', 'Manage Codex'], 'Cancel', edited, rowsBefore]);
+  await shotAt(a, 'confirm-860-light', SMALLEST, 'light');
+  await a.click('.history-confirm button');
+  same('Cancel closes the question, writes nothing, and puts focus back on Manage it again', [
+    await a.exists('.history-confirm'), codex(), (await a.all('.history-row', 'e.dataset.kind')).length, await a.run(`document.activeElement?.id`),
+  ], [false, edited, rowsBefore, rejoinId]);
+  await a.click(`#${rejoinId}`);
+  await a.press('Escape');
+  same('Escape cancels too, writes nothing, and puts focus back on Manage it again', [
+    await a.exists('.history-confirm'), codex(), (await a.all('.history-row', 'e.dataset.kind')).length, await a.run(`document.activeElement?.id`),
+  ], [false, edited, rowsBefore, rejoinId]);
+  await a.click(`#${rejoinId}`);
+  await a.click('[id^="history-manage-confirm-"]');
+  await waitHistory(a, () => a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Leave it out again'`));
+  same('confirming manages Codex again, puts the new entry on top with the Harnesses result, and clears the older entry’s button', [
+    codex(), await a.text('.band-done .band-text'), await a.exists(`#${rejoinId}`),
+    await a.run(`${newestManage}.querySelector('.history-about').textContent`),
+  ], [before, 'Central Knot manages Codex now: Central Knot’s version written there for 1 item (over its copy there, which a version keeps). Each change there is in History.',
+    false, 'Central Knot manages Codex from here on: sync brings it into line, each change with its own entry.']);
+  await shotAt(a, 'result-860-light', SMALLEST, 'light');
+  await a.click('#nav-harnesses');
   // Clicked while main is busy (a held queue standing in for a long pass): the flip waits its turn behind it, the page says it
   // is busy and takes no other switch meanwhile, and the flip lands once the pass is done.
   if (a.main) {
@@ -1219,13 +1282,26 @@ async function manageFlow() {
   // With Automatic sync off, a tool's line says when it is brought into line, and the band after the click says it again.
   await a.click('#sync-switch');
   await a.click('#manage-codex-cli');
+  const syncOffLine = 'On: no item in Codex would change; 2 found items shown under Found. With Automatic sync off, Sync once brings it into line; a click on an item brings that item.';
   same('with Automatic sync off, the line before turning it on keeps Sync once and drops the cut Instructions sentence',
-    await a.text('#manage-codex-cli-line'), 'On: no item in Codex would change; 2 found items shown under Found. With Automatic sync off, Sync once brings it into line; a click on an item brings that item.');
+    await a.text('#manage-codex-cli-line'), syncOffLine);
+  await a.click('#nav-history');
+  await waitHistory(a, () => a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage it again'`));
+  await a.click('.history-row[data-kind="managing"] .history-actions button');
+  same('with Automatic sync off, History’s question says the card’s SYNC_OFF sentence verbatim', await a.text('.history-confirm .band-text'), syncOffLine);
+  await a.press('Escape');
+  await a.click('#nav-harnesses');
   await a.click('#manage-codex-cli');
   check('and so does the band after it', (await a.text('.band-done .band-text') ?? '') === 'Central Knot manages Codex now. With Automatic sync off, Sync once brings it into line; a click on an item brings that item.', await a.text('.band-done'));
   await a.click('#sync-switch');
   // Every tool left out: the pages say so and point to Harnesses, not that no tool was found.
   for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#manage-${tool}`);
+  await a.click('#nav-history');
+  await waitHistory(a, () => a.run(`document.querySelectorAll('.history-row[data-kind="managing"] .history-actions button').length >= 2`));
+  await a.click('.history-row[data-kind="managing"] .history-actions button');
+  await a.click('.history-row[data-kind="managing"] .history-actions button');
+  same('only one Manage-again question stays open at a time on History', (await a.all('.history-confirm')).length, 1);
+  await a.click('#nav-harnesses');
   check('with every tool left out, Harnesses omits the unmanaged introduction and has no Managed (?)',
     !(await a.text('#harnesses-scroll') ?? '').includes('Central Knot manages none of your tools here.') && !(await a.exists('#manage-info')), await a.text('#harnesses-scroll'));
   same('with every tool left out, the sidebar holds only the pages that need no tool', await a.all('#nav [id^="nav-"]', 'e.id.slice(4)'), ['overview', 'harnesses', 'sources', 'history', 'sessions', 'repo', 'settings']);
@@ -1239,6 +1315,52 @@ async function manageFlow() {
   same('every tool managed again', await switches(), ['manage-claude-cli:true', 'manage-copilot-cli:true', 'manage-codex-cli:true']);
   same('no page errors, manage', a.pageErrors, []);
   await a.quit();
+
+  // Stale click (Codex managed again from Harnesses in a second window, then History's button pressed here) and a locked home.
+  const staleHome = join(scratch, 'manage-stale-home'), d1 = join(scratch, 'manage-stale-1'), d2 = join(scratch, 'manage-stale-2');
+  for (const folder of ['.claude/skills', '.codex/skills']) mkdirSync(join(staleHome, folder), { recursive: true });
+  mkdirSync(d1, { recursive: true });
+  writeFileSync(join(d1, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: staleHome } }));
+  const w1 = await launch(d1);
+  await w1.click('#nav-harnesses');
+  await w1.click('#manage-codex-cli');
+  await w1.click('#nav-history');
+  await waitHistory(w1, () => w1.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage it again'`));
+  mkdirSync(d2, { recursive: true });
+  cpSync(join(d1, 'app-settings.json'), join(d2, 'app-settings.json'));
+  const w2 = await launch(d2);
+  await w2.click('#nav-harnesses');
+  await w2.click('#manage-codex-cli');
+  await w2.quit();
+  const staleSnap = [tree(join(staleHome, '.codex')), readNow(join(staleHome, '.central-knot/sync.json')), readNow(join(staleHome, '.central-knot/history.json'))];
+  await w1.click('.history-row[data-kind="managing"] .history-actions button');
+  await w1.click('[id^="history-manage-confirm-"]');
+  await waitHistory(w1, () => w1.exists('.band-done'));
+  same('a stale Manage click after a second window managed the tool writes nothing and says nothing was changed', [
+    await w1.text('.band-done .band-text'), [tree(join(staleHome, '.codex')), readNow(join(staleHome, '.central-knot/sync.json')), readNow(join(staleHome, '.central-knot/history.json'))],
+  ], ['Codex is already managed. Nothing was changed.', staleSnap]);
+  same('no page errors, manage stale', w1.pageErrors, []);
+  await w1.quit();
+
+  // Locked (preview-only) home: History's Manage button is disabled with the Harnesses switch's exact reason.
+  const lockedHome = join(scratch, 'manage-locked-home'), dLocked = join(scratch, 'manage-locked-data');
+  mkdirSync(join(lockedHome, '.codex/skills'), { recursive: true });
+  mkdirSync(join(lockedHome, '.central-knot'), { recursive: true });
+  symlinkSync(join(HOME, '.claude'), join(lockedHome, '.claude'));
+  writeFileSync(join(lockedHome, '.central-knot/sync.json'), JSON.stringify({ formatVersion: 3, generation: 'g-locked', owner: STANDARD_BUILD, leftOut: ['codex-cli'] }));
+  writeFileSync(join(lockedHome, '.central-knot/history.json'), JSON.stringify({ events: [{ id: 'locked-out', at: new Date().toISOString(), key: 'tool:codex-cli', item: 'Codex', kind: 'managing', managing: { tool: 'codex-cli', on: false }, losers: [], orderProved: true }] }));
+  mkdirSync(dLocked, { recursive: true });
+  writeFileSync(join(dLocked, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: lockedHome } }));
+  const wl = await launch(dLocked);
+  await wl.click('#nav-harnesses');
+  const cardLock = await wl.run(`(() => { const s = document.querySelector('#manage-codex-cli'); return [s.disabled, s.title, s.getAttribute('aria-description')]; })()`);
+  await wl.click('#nav-history');
+  await waitHistory(wl, () => wl.exists('.history-row[data-kind="managing"]'));
+  const historyLock = await wl.run(`(() => { const b = document.querySelector('.history-row[data-kind="managing"] .history-actions button'); return b ? [b.disabled, b.title, b.getAttribute('aria-description')] : null; })()`);
+  same('on a locked home, History’s button is disabled with the card’s exact lock reason as hover and description', historyLock, cardLock);
+  await shotAt(wl, 'locked-860-light', SMALLEST, 'light');
+  same('no page errors, manage locked', wl.pageErrors, []);
+  await wl.quit();
 }
 
 /**

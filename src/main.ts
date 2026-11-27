@@ -24,7 +24,7 @@ import {
   writeAccess, writeDurably, type ShareContext,
 } from './share.ts';
 import { everythingEntryAction, setSyncEverything } from './everything.ts';
-import { chooseTools, whatJoiningDoes } from './toolchoice.ts';
+import { chooseTools, manageRefused, whatJoiningDoes } from './toolchoice.ts';
 import { pruneHistory, readHistory } from './history.ts';
 import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skillFoundFile, skillPluginFile, skillVersion, skillVersionFile, skillsView, takeOver } from './skills.ts';
 import { agentTools, mcpTools, noteTools, pluginTools, presentTools, takesPlugins } from './presence.ts';
@@ -714,18 +714,20 @@ async function syncThenView(): Promise<HomeView> {
 }
 
 /** The look for other builds, sync, then the view built from the home as sync left it, with the passes that built it in order. */
-async function syncAndView(explicit = false): Promise<{ view: HomeView; passes: BackgroundPass[] }> {
+async function syncAndView(explicit = false, runPass = true): Promise<{ view: HomeView; passes: BackgroundPass[] }> {
   // First, so the held screen is shown before any pass could write: held, the pass below meets writeAccess's refusal. A record
   // taken over on the way is said with the view (a click on the held screen says it itself: carryOn).
   const tookOver = await lookForOthers();
   const nudgedBefore = nudges, before = await read();
-  const passes = explicit ? await explicitPass(before) : [await pass(before, false, true)];
-  const passed = passes[passes.length - 1], { skills } = passed;
+  const passes = !runPass ? [] : explicit ? await explicitPass(before) : [await pass(before, false, true)];
+  const passed = passes[passes.length - 1], skills = passed?.skills;
   passes.forEach(keepPass);
-  lookAgainSoon(passed);
-  // The page is given this view, and what it sees is this view's own pass's value, silently: the next pass tells it nothing it
-  // already has. Not known (Sync off, a refusal, no record), the next value a pass makes tells it.
-  lastSeen = passed.seen;
+  if (passed) {
+    lookAgainSoon(passed);
+    // The page is given this view, and what it sees is this view's own pass's value, silently: the next pass tells it nothing it
+    // already has. Not known (Sync off, a refusal, no record), the next value a pass makes tells it.
+    lastSeen = passed.seen;
+  }
   const caughtUp = pendingResults.splice(0), notices = pendingNotices.splice(0);
   const profiles = await readProfiles(current!.home);
   // The home is read again after a pass that may have written (Sync on, or Sync once): a pass that stopped part-way reports
@@ -733,7 +735,7 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passes: 
   // left the home as it read it gives the view its reads (each kind's taken by its view's look: librarypass.ts lookFor), unless
   // the watcher has seen any change since that read began: then the view reads afresh.
   const snapshots = skills && (syncOn || explicit) ? await read() : before;
-  const shared: ShareContext = { ...context(), reads: new Map(), ...(nudges === nudgedBefore ? passed.kept : {}) };
+  const shared: ShareContext = { ...context(), reads: new Map(), ...(nudges === nudgedBefore ? passed?.kept : {}) };
   const writable = (await writeAccess(shared)).allowed;
   const managed = await managedNow(shared, snapshots), present = presentTools(snapshots);
   const syncEverything = (await readRecord(current!.home)).record?.syncEverything;
@@ -1797,6 +1799,8 @@ app.whenReady().then(async () => {
   // check made now.
   handle('tools:manage', async (tool, on, resume, home) => {
     if (home !== current?.home || !isTool(tool) || typeof on !== 'boolean') return { stopped: elsewhere, view: null, did: [] };
+    const refused = await manageRefused(context(), await read(), tool, on);
+    if (refused) return { stopped: refused, view: (await syncAndView(false, false)).view, did: [] };
     const chosen = await chooseTools(context(), tool, on, resume === true);
     if (!chosen.stopped) {
       log(`sync: ${tool} ${on ? 'managed' : 'left out'} in ${home}`);
@@ -1805,8 +1809,8 @@ app.whenReady().then(async () => {
       if (on) await markets.toolManaged(tool, home).catch(error => logFailure('plugins record', error));
       if (on && pluginChecksRun) void pluginUpdates?.toolJoined().catch(error => logFailure('plugin updates', error));
     }
-    const { view, passes } = await syncAndView();
-    return { ...chosen, view, did: passes.flatMap(pass => pass.done ?? []).filter(result => result.harness === tool) };
+    const { view, passes } = await syncAndView(false, !chosen.stopped);
+    return { ...chosen, view, did: chosen.stopped ? [] : passes.flatMap(pass => pass.done ?? []).filter(result => result.harness === tool) };
   });
   // The Overview's line that a tool came under management, closed for good in that home (arrivals.ts), in the queue, so no pass
   // between its read and its save of the tools seen puts it back.

@@ -12,13 +12,42 @@ import { doneWords, entriesNow, entryKind, everythingAction, everythingSentence,
 import { libraryWords } from './libraryrow.ts';
 import { button, emptyState, fold, h, icon, rereadBand, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
+import { manageLocked, manageTool, onLine } from './managecard.ts';
 import { historyWindowControl } from './settingspage.ts';
-import type { HistoryEvent } from './types.ts';
+import type { HarnessId, HistoryEvent } from './types.ts';
 
 const who = (tool?: string) => (tool ? toolName(tool) : 'Central Knot');
 /** Folded tool lists open on History rows (`${event.id}-${index}` across redraws); cleared on page leave or home switch (app.ts). */
 const openToolFolds = new Set<string>();
-export function forgetHistoryFolds() { openToolFolds.clear(); }
+/** The Manage entry whose in-row rejoin question is open on History (one at a time); cleared on page leave or home switch. */
+let confirmManage: string | undefined;
+export function forgetHistoryFolds() {
+  openToolFolds.clear();
+  confirmManage = undefined;
+}
+function openManageConfirm(id: string) {
+  confirmManage = id;
+  rerender();
+  document.getElementById(`history-manage-cancel-${id}`)?.focus();
+}
+function closeManageConfirm() {
+  const id = confirmManage;
+  if (!id) return;
+  confirmManage = undefined;
+  rerender();
+  document.getElementById(`history-${id}`)?.focus();
+}
+function runManage(tool: HarnessId, on: boolean, home: string) {
+  confirmManage = undefined;
+  void manageTool(tool, on, home);
+}
+if (typeof document !== 'undefined') {
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || event.defaultPrevented || state.page !== 'history' || !confirmManage) return;
+    event.preventDefault();
+    closeManageConfirm();
+  });
+}
 type ToolFormat = (touched: string[], inHome: string[]) => string;
 
 /** The skill, MCP server or agent an entry is about, as Central Knot's library holds it now (deleted or not). */
@@ -141,12 +170,38 @@ function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; ac
 }
 
 /**
- * A tool's Manage switch turned (toolchoice.ts), said as what holds from then on. It offers nothing: the switch on the tool's
- * Harnesses card is the way back, and each change a sync made there has its own entry.
+ * A tool's Manage switch turned (toolchoice.ts), said as what holds from then on. While the tool is still present in that state,
+ * the row offers the reverse act (managingRow, through managecard.ts manageTool); each change sync made keeps its own entry.
  */
 const managingWords = ({ tool, on }: NonNullable<HistoryEvent['managing']>): { glyph: IconName; text: string } => (on
-  ? { glyph: 'boxes', text: `Central Knot manages ${toolName(tool)} from here on: sync brings it into line, each change with its own entry. No Undo: its switch on Harnesses is the way back.` }
-  : { glyph: 'boxes', text: `Left out from here on: Central Knot writes nothing in ${toolName(tool)}, and its copies there stay as they are. No Undo: its switch on Harnesses is the way back.` });
+  ? { glyph: 'boxes', text: `Central Knot manages ${toolName(tool)} from here on: sync brings it into line, each change with its own entry.` }
+  : { glyph: 'boxes', text: `Left out from here on: Central Knot writes nothing in ${toolName(tool)}, and its copies there stay as they are.` });
+
+/** A Manage entry's reverse button (Manage it again, asking in the row first, or Leave it out again, acting at once) and panel. */
+function managingRow(event: HistoryEvent): [HTMLElement | null, HTMLElement | null] {
+  const home = state.home;
+  const entry = event.managing;
+  if (!home || !entry || !home.sync.present.includes(entry.tool) || home.sync.managed.includes(entry.tool) !== entry.on) return [null, null];
+  const locked = manageLocked(home);
+  const disabled = locked ?? acting();
+  const name = toolName(entry.tool);
+  const resume = home.sync.gate.state === 'needs-resume' ? ` ${home.sync.gate.reason} This click resumes sync.` : '';
+  if (entry.on) {
+    const help = `Its copies stay. Central Knot stops writing there.${resume}`;
+    return [button({ variant: 'link', size: 'small', label: 'Leave it out again', name: `Leave ${name} out again: ${help}`,
+      id: `history-${event.id}`, disabled, attrs: { title: help }, onclick: () => runManage(entry.tool, false, home.home) }), null];
+  }
+  if (!locked && confirmManage === event.id) {
+    return [null, h('div.band.history-confirm', { role: 'group', 'aria-labelledby': `history-manage-text-${event.id}` },
+      h('span.band-text', { id: `history-manage-text-${event.id}` }, `${onLine(home, entry.tool)}${resume}`),
+      h('span.history-confirm-actions', {},
+        button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `history-manage-cancel-${event.id}`, onclick: closeManageConfirm }),
+        button({ variant: 'primary', size: 'small', label: `Manage ${name}`, id: `history-manage-confirm-${event.id}`,
+          disabled: acting(), onclick: () => runManage(entry.tool, true, home.home) })))];
+  }
+  return [button({ variant: 'link', size: 'small', label: 'Manage it again', name: `Manage ${name} again`,
+    id: `history-${event.id}`, disabled, onclick: () => openManageConfirm(event.id) }), null];
+}
 
 /** What a Synchronize everything entry offers now (historyactions.ts everythingAction), from History and the libraries as the page read them. */
 const everythingOffer = (event: HistoryEvent) => (state.home && state.history.data ? everythingAction(event, state.history.data, entriesNow(state.home)) : undefined);
@@ -210,13 +265,14 @@ export function historyPage() {
     h('div.scroll.history-empty-scroll', { id: 'history-scroll' }, historyWindowControl(), emptyState('history', 'No changes yet', 'Sync edits, switches and deletes appear here with Undo.')));
   const ordered = [...events].reverse(), times = timesApart(ordered.map(event => event.at));
   const reread = rereadBand(state.history);
-  // A refused Undo, a Restore with reload advice, or an Undo that ended the profile in use shows in a band; other results here are in the status bar.
-  const shown = state.outcome?.page === 'history' && (state.outcome.warn || !!state.outcome.reloads?.length || !!state.outcome.profileLine) ? outcomeBand() : null;
+  // A refused Undo, a Manage click, a Restore with reload advice, or an Undo that ended the profile in use shows in a band; other results here are in the status bar.
+  const shown = state.outcome?.page === 'history' && (state.outcome.warn || state.outcome.band || !!state.outcome.reloads?.length || !!state.outcome.profileLine) ? outcomeBand() : null;
   return h('div.page', {}, reread || shown ? h('div.bands', {}, reread, shown) : null, h('div.scroll', { id: 'history-scroll' }, historyWindowControl(), h('ul.history-list', {}, ordered.flatMap((event, index) => {
     const about = rowAbout(event);
     const heading = index === 0 || day(ordered[index - 1].at) !== day(event.at) ? h('li.history-day', { role: 'presentation' }, day(event.at)) : null;
     // The newest row, made by a click just now, gets the same brief highlight the tables use.
     const fresh = index === 0 && Date.now() - Date.parse(event.at) < 8000;
+    const managed = event.kind === 'managing' ? managingRow(event) : undefined;
     return [heading, h(`li.history-row${event.undoneBy ? '.history-undone' : ''}${fresh ? '.row-flash' : ''}`, { 'data-kind': event.kind },
       h('span.history-when', { title: new Date(event.at).toLocaleString() }, times[index]),
       // What changed, then what happened in the flexible column (its text capped at the reading measure); the actions keep a
@@ -226,7 +282,8 @@ export function historyPage() {
       event.undoneBy ? h('span.history-actions', {}, h('span.history-done', {}, libraryEntry(event) ? doneWords(event) : event.kind === 'removed' || event.everything?.undo ? 'Restored' : 'Undone'))
         : h('span.history-actions', {},
           !event.base && (event.kind === 'edit' || event.kind === 'conflict') ? seeChangeLink(event.id, libraryEntry(event)?.kind, true) : null,
-          libraryEntry(event) ? libraryButtons(event) : actions(event, about.action)),
-      changePanel(event.id))];
+          libraryEntry(event) ? libraryButtons(event) : managed ? managed[0] : actions(event, about.action)),
+      changePanel(event.id),
+      managed?.[1] ?? null)];
   }))));
 }

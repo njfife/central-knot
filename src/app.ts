@@ -1132,7 +1132,7 @@ export const writeOff = (stops: boolean): string | boolean => acting() ?? select
  * each marketplace anew.
  */
 function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; readId?: number } = {}): Promise<void> {
-  if (page === 'history') return Promise.all([loadHistory(), loadSettings()]).then(() => undefined);
+  if (page === 'history') return Promise.all([loadHistory(), loadSettings(), leftOutTools().length ? loadPlugins(false, readId) : undefined]).then(() => undefined);
   if (page === 'settings') return loadSettings().then(() => undefined);
   if (page === 'instructions') return loadInstructions(readId);
   if (page === 'sessions') return loadSessions(readId);
@@ -1173,7 +1173,7 @@ export const noToolManagedSentence = (view: HomeView): string => (view.sync.pres
   ? `Central Knot manages none of the tools here: ${toolList(view.sync.present)} ${view.sync.present.length === 1 ? 'is' : 'are'} left out.` : noToolsSentence);
 
 /** The tools installed in the open home whose Manage switch is off: pages that say where an item is say "no tool Central Knot manages" while there are any. */
-export const leftOutTools = (): HarnessId[] => (state.home ? state.home.sync.present.filter(tool => !state.home!.sync.managed.includes(tool)) : []);
+export const leftOutTools = (): HarnessId[] => (state.home?.sync.present ? state.home.sync.present.filter(tool => !state.home!.sync.managed.includes(tool)) : []);
 
 /** The open home's tools by name, for sentences: "Claude Code and Codex". */
 export const homeToolNames = (): string[] => homeTools().map(toolName);
@@ -1269,7 +1269,7 @@ export const loadHistory = async (): Promise<void> => {
 };
 
 /** History as an action read it, after what it changed: its events and window, the newest. */
-async function putHistory() {
+export async function putHistory() {
   const { events, days } = await api().history();
   putPageData(state.history, events);
   state.historyDays = days;
