@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { capitalToolsPhrase, fewNames, pageNames, profileLeftUse, toolsPhrase } from '../src/words.ts';
+import { capitalToolsPhrase, fewNames, pageNames, profileLeftUse, toolsPhrase, touchedTools } from '../src/words.ts';
 
 test('A page named otherwise on screen is spelled once, in words.ts pageNames: every other sentence, link and button reads it from there', () => {
   const src = new URL('../src/', import.meta.url);
@@ -18,6 +18,13 @@ test('"all N tools" means exactly the home’s tools, compared by which tools th
   assert.equal(toolsPhrase(event, ['claude-cli', 'codex-cli', 'pi-cli']), 'Claude Code, Copilot CLI and Codex');
   // Two tools are always named, even when they are the whole home.
   assert.equal(toolsPhrase(['codex-cli', 'claude-cli'], ['claude-cli', 'codex-cli']), 'Codex and Claude Code');
+});
+
+test('touchedTools folds 3+ non-all tools as "N of M tools" when all are in the home, else "N tools"', () => {
+  const six = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
+  assert.equal(touchedTools(six.slice(0, 5), six).fold, '5 of 6 tools');
+  assert.equal(touchedTools(['claude-cli', 'copilot-cli', 'old-cli'], six).fold, '3 tools');
+  assert.deepEqual([touchedTools(six, six).fold, touchedTools(six.slice(0, 2), six).fold], [undefined, undefined]);
 });
 
 test('the same phrase can start a label: "All 3 tools", or the names as they are', () => {

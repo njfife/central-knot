@@ -71,14 +71,20 @@ export const readsIt = (tools: readonly string[]) => `${andList(tools.map(toolNa
 export const orList = (items: string[]) => joined(items, 'or');
 
 /**
- * The tools an action touched, as a sentence names them: "all 3 tools" when they are exactly the home's tools and there
- * are more than two, else their names ("Claude Code and Codex"). Takes ids, so it compares which tools, not how many:
- * an event from before a tool was added or removed is named tool by tool.
+ * Touched tools for History rows and toolsPhrase: all 3+ home tools, names, and fold label ("5 of 6 tools", or "5 tools" when a tool left).
+ * Takes ids, so it compares which tools, not how many: an event from before a tool was added or removed is not "all" or "of M".
  */
-export function toolsPhrase(touched: string[], inHome: string[]): string {
+export function touchedTools(touched: string[], inHome: string[]): { tools: string[]; all: boolean; names: string; fold?: string } {
   const tools = [...new Set(touched)];
-  const everyOne = tools.length > 2 && tools.length === inHome.length && inHome.every(tool => tools.includes(tool));
-  return everyOne ? `all ${tools.length} tools` : andList(tools.map(toolName));
+  const all = tools.length > 2 && tools.length === inHome.length && inHome.every(tool => tools.includes(tool));
+  const fold = !all && tools.length > 2 ? (tools.every(tool => inHome.includes(tool)) ? `${tools.length} of ${inHome.length} tools` : `${tools.length} tools`) : undefined;
+  return { tools, all, names: andList(tools.map(toolName)), fold };
+}
+
+/** Touched tools in a sentence: "all 3 tools" when they match all 3+ home tools, else their names ("Claude Code and Codex"). */
+export function toolsPhrase(touched: string[], inHome: string[]): string {
+  const { tools, all, names } = touchedTools(touched, inHome);
+  return all ? `all ${tools.length} tools` : names;
 }
 
 /** The same, starting a label or a sentence: "All 3 tools", "Claude Code and Codex". */
