@@ -23168,9 +23168,10 @@ async function pluginItemSwitchesFlow() {
   put(join(home, '.pi/agent/skills/draft/SKILL.md'), draftInPi);
   await a.click(sw('trio', 'pi-cli', 'skill', 'draft'));
   await done();
-  same('a switch over a copy of his that came behind the page is refused; his copy byte for byte; then his copy is said once, in its place, as Use the plugin’s',
+  // The refusal is said from the home alone: its place says his copy is there; Use the plugin's comes with the page's next read of its plugins.
+  same('a switch over a copy of his that came behind the page is refused; his copy byte for byte; then his copy is said once, in its place',
     [await header(), readNow(join(home, '.pi/agent/skills/draft/SKILL.md')), await a.exists(sw('trio', 'pi-cli', 'skill', 'draft')), (await cell('skill', 'draft', 'Pi'))?.[0], await words('skill', 'draft')],
-    ['draft changed since the page was read. Nothing was changed.', draftInPi, false, 'Use the plugin’s', '']);
+    ['draft changed since the page was read. Nothing was changed.', draftInPi, false, 'Its own copy', '']);
   // The Library's own row, by the same rule: polish kept out of Pi there and let into OpenCode, then a copy of his named polish comes
   // in the shared skills folder behind the page. The refused click looks at the home and runs no pass: nothing anywhere changes.
   await openKind(a, 'skills');
