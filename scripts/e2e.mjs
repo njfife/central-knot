@@ -12065,13 +12065,15 @@ async function usageFlow() {
       'Not counted: 1 skill under 30 days old.',
     ]]);
   if (await a.exists('#unused-counted-toggle')) await a.click('#unused-counted-toggle');
-  same('Turn these off sits at the band’s end, at 1280 and 2560 alike', await (async () => { const ends = []; for (const [width, height] of [[1280, 800], [2560, 1440]]) { await sizeTo(a, width, height);
+  same('Turn these off, with what it would end after it, sits at the band’s end, at 1280 and 2560 alike', await (async () => { const ends = []; for (const [width, height] of [[1280, 800], [2560, 1440]]) { await sizeTo(a, width, height);
     ends.push(await a.run(`Math.round(document.querySelector('#unused-band').getBoundingClientRect().right - document.querySelector('#turn-unused-off').getBoundingClientRect().right)`)); } await fullSize(a); return ends[0] === ends[1]; })(), true);
   await fitsAtMinimum(a, 'Skills with the No use seen chip on and its band');
   await a.shot('usage-chip');
   if (shots) { for (const [width, height] of [[1316, 819], SMALLEST]) { await sizeTo(a, width, height); await a.shot(`usage-band-${width}`); } await fullSize(a); }
   const filesOf = names => Object.fromEntries(names.flatMap(name => [claude, codex, shared].map(root => [join(root, name), readNow(join(root, name, 'SKILL.md'))])));
   const before = filesOf(['standup', 'spare']);
+  same('before Turn these off, beside it, the profile in use it would end, its sentence on hover',
+    [(await a.text('#unused-profile'))?.trim(), await a.run(`document.getElementById('unused-profile')?.title`)], ['Would leave Everyday', 'If off, Everyday stays saved but stops being the profile in use. Undo, or switching to it again, puts it back in use.']);
   await a.click('#turn-unused-off');
   for (let tries = 0; tries < 50 && !(await a.exists('#outcome-undo')); tries++) await wait(100);
   for (const [width, height] of [SMALLEST, [1316, 819]]) {
@@ -12531,11 +12533,13 @@ async function usageFlow() {
       await fullSize(a);
       return metrics;
     };
-    same('ux1a: band is one line for 8 shown, 2 from a plugin skipped, 6 turned off, with no Undo or profile prose',
+    same('ux1a: band is one line for 8 shown, 6 turned off (2 from a plugin, said on their rows), with no Undo, the profiles it would end only beside its button',
       [await a.text('#unused-band .usage-lead'), (await a.text('#unused-counted-toggle'))?.trim(), await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-counted'), (await a.text('#turn-unused-off'))?.trim()],
-      ['8 with no use seen in 30 days. 2 from a plugin skipped.', 'What’s counted', 'false', false, 'Turn 6 off everywhere']);
+      ['8 with no use seen in 30 days.', 'What’s counted', 'false', false, 'Turn 6 off everywhere']);
     const collapsedCounts = await captureUx1a('band');
-    same('ux1a: collapsed band is visually one line high at 860 and 1316 with sidebar open', [collapsedCounts[860]?.oneLine, collapsedCounts[1316]?.oneLine], [true, true]);
+    // At 860 the profiles Turn 6 off would end, beside it, take the room of the lead's end: a second line (16 px), no more.
+    const twoLines = collapsedCounts[1316]?.height + 16;
+    same('ux1a: collapsed band is one line high at 1316 with sidebar open, and two lines at most at 860', [collapsedCounts[860]?.height <= twoLines, collapsedCounts[1316]?.oneLine], [true, true]);
     console.log(`usageFlow ux1a collapsed band: 860=${JSON.stringify(collapsedCounts[860])} 1316=${JSON.stringify(collapsedCounts[1316])}`);
     // Skipped plugin rows are visibly marked at 860 with sidebar open without cutting their names or usage cells, and unmarked while selecting.
     await sizeTo(a, 860, 560);
@@ -12596,15 +12600,16 @@ async function usageFlow() {
       if (await a.exists('#usage-line-close')) await a.click('#usage-line-close');
       same('ux1a: unreadable managed Codex history is cued on the band line',
         await a.text('#unused-band .usage-lead'),
-        '8 with no use seen in 30 days. 2 from a plugin skipped. Use in Codex not counted.');
+        '8 with no use seen in 30 days. Use in Codex not counted.');
       const unreadMetrics = await capture860Light('band-unread');
       same('ux1a: unread band toggle starts flush left when wrapped at 860', unreadMetrics?.wrapFlush, true);
+      same('ux1a: unread band is two lines high at most at 860 with sidebar open, with the profiles Turn 6 off would end', unreadMetrics?.height <= twoLines, true);
       console.log(`usageFlow ux1a unread band 860=${JSON.stringify(unreadMetrics)}`);
     } finally {
       chmodSync(codexSessions, 0o755);
     }
     await a.click('#collect-usage');
-    check('ux1a: cue clears once Codex history is readable again', await uxUntil(async () => (await a.text('#unused-band .usage-lead')) === '8 with no use seen in 30 days. 2 from a plugin skipped.', 5000));
+    check('ux1a: cue clears once Codex history is readable again', await uxUntil(async () => (await a.text('#unused-band .usage-lead')) === '8 with no use seen in 30 days.', 5000));
     if (await a.exists('#usage-line-close')) await a.click('#usage-line-close');
 
     // Refused click names no profile and keeps both Everyday and Focus in use.
@@ -12617,7 +12622,8 @@ async function usageFlow() {
     await a.click('#header-refresh');
     await uxUntil(async () => !(await a.run(`(document.querySelector('.bands')?.textContent ?? '').includes('damaged')`)));
 
-    // Turn 6 off everywhere: 6 skills off, 2 plugin agents stay on, result alone names BOTH ended profiles.
+    // Turn 6 off everywhere: 6 skills off, 2 plugin agents stay on, result alone names BOTH ended profiles, as its mark did before.
+    same('ux1a: after Turn 6 off everywhere, both profiles it would end', (await a.text('#unused-profile'))?.trim(), 'Would leave Everyday and Focus');
     await a.click('#turn-unused-off');
     await uxDone(a);
     check('ux1a: Undo appears after Turn 6 off everywhere', await uxUntil(() => a.exists('#outcome-undo')));
@@ -12694,7 +12700,7 @@ async function usageFlow() {
         [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('mcp'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')]],
       ['true', 'true', [rowPart('', 'agents', 'plug-audit'), rowPart('', 'agents', 'plug-triage'), rowPart('', 'mcp', 'quiet-srv')].sort(), beforeAll]);
 
-    // Three-digit count (128 with no use seen, 2 from a plugin skipped, Turn 126 off everywhere) at 860 with sidebar open.
+    // Three-digit count (128 with no use seen, 2 from a plugin, Turn 126 off everywhere) at 860 with sidebar open.
     const skillsRec = JSON.parse(readFileSync(uxRecord('skills'), 'utf8'));
     const templateItem = skillsRec.items['legacy-a'];
     for (const key of uxSkills) {
@@ -12721,9 +12727,9 @@ async function usageFlow() {
     check('ux1a: three-digit count reaches 128 on All', await uxUntil(async () => (await a.text('#chip-unused .chip-count'))?.trim() === '128', 8000));
     same('ux1a: three-digit band text and button',
       [await a.text('#unused-band .usage-lead'), (await a.text('#turn-unused-off'))?.trim()],
-      ['128 with no use seen in 30 days. 2 from a plugin skipped.', 'Turn 126 off everywhere']);
+      ['128 with no use seen in 30 days.', 'Turn 126 off everywhere']);
     const threeDigitMetrics = await capture860Light('band-three-digits');
-    same('ux1a: three-digit band stays one line high at 860 with sidebar open', threeDigitMetrics?.oneLine, true);
+    same('ux1a: three-digit band is two lines high at most at 860 with sidebar open, beside Turn 126 off and the profiles it would end', threeDigitMetrics?.height <= twoLines, true);
     console.log(`usageFlow ux1a three-digit band 860=${JSON.stringify(threeDigitMetrics)}`);
     same('no page errors, ux1a unused band', a.pageErrors, []);
     await a.quit();
@@ -14195,7 +14201,7 @@ async function libraryFlow() {
   await done(a);
   // 9b: Turn these off across kinds, the MCP record damaged just before the click.
   await a.click('#chip-unused');
-  check('its band counts the five in one line (spare is used now)', (await a.text('#unused-band .usage-lead') ?? '') === '5 with no use seen in 30 days. 1 from a plugin skipped.', await a.text('#unused-band'));
+  check('its band counts the five in one line (spare is used now)', (await a.text('#unused-band .usage-lead') ?? '') === '5 with no use seen in 30 days.', await a.text('#unused-band'));
   await pictures(a, 'unused-across-kinds');
   // Copilot CLI refuses to let go of either tidy (its folders can't be written), and the MCP record is damaged.
   const mcpRecord = readFileSync(record('mcp'), 'utf8'), copilotFolders = [A.copilot, join(A.home, '.copilot/agents')];
@@ -15705,7 +15711,8 @@ async function libraryFlow() {
     tool: el.querySelector('.details-tool-label')?.textContent?.trim() ?? '',
     line: el.querySelector('.details-tool-line')?.textContent?.trim() ?? '',
     word: el.querySelector('.tool-switch-word')?.textContent?.trim() ?? '',
-    label: el.querySelector('.tool-switch [role="switch"]')?.getAttribute('aria-label') ?? '',
+    // Its hover's words, worked out as the pointer comes to it (what its click would end is its description too).
+    label: (sw => { sw?.dispatchEvent(new MouseEvent('mouseenter')); return sw?.getAttribute('title') ?? ''; })(el.querySelector('.tool-switch [role="switch"]')),
   }))`);
 
   o = await launch(O.data, [], O.real);
@@ -15714,16 +15721,25 @@ async function libraryFlow() {
   const skillsBefore = snapDirs(oSkillDirs);
   // Click 1: open Off skill bench-runner.
   await o.click(`#${rowPart('open', 'skills', 'bench-runner')}`);
-  same('Off skill opened row: status line and tool lines match keep-outs with per-tool Off switches and Claude Code warns that OpenCode reads it too',
-    [await o.text('.details-status'), await readToolLines(o)],
-    ['On puts it back in 4 of 6 tools.', [
-      { tool: 'Claude Code', line: 'If on, OpenCode reads it too', word: 'Off', label: 'bench-runner in Claude Code: off. Click to turn it on in Claude Code; OpenCode reads it from there too.' },
-      { tool: 'Copilot CLI', line: '', word: 'Off', label: 'bench-runner in Copilot CLI: off. Click to turn it on in Copilot CLI only.' },
-      { tool: 'Codex', line: 'Kept out', word: 'Off', label: 'bench-runner in Codex: off. Click to turn it on in Codex only.' },
-      { tool: 'Pi', line: 'Kept out', word: 'Off', label: 'bench-runner in Pi: off. Click to turn it on in Pi only.' },
-      { tool: 'OpenCode', line: '', word: 'Off', label: 'bench-runner in OpenCode: off. Click to turn it on in OpenCode only.' },
-      { tool: 'Antigravity', line: '', word: 'Off', label: 'bench-runner in Antigravity: off. Click to turn it on in Antigravity only.' },
+  // Before the press, the profile it would end: under the status, and on every tool's switch, each of which turns it on.
+  const benchEnds = `#${rowPart('profile-ends', 'skills', 'bench-runner')}`, ends = ' Everyday stays saved but stops being the profile in use.';
+  same('Off skill opened row: status line, the profile any On would end, and tool lines match keep-outs with per-tool Off switches and Claude Code warns that OpenCode reads it too',
+    [await o.text('.details-status'), (await o.text(benchEnds))?.trim(), await readToolLines(o)],
+    ['On puts it back in 4 of 6 tools.', 'If on, only this item changes: Everyday stays saved but stops being the profile in use.', [
+      { tool: 'Claude Code', line: 'If on, OpenCode reads it too', word: 'Off', label: `bench-runner in Claude Code: off. Click to turn it on in Claude Code; OpenCode reads it from there too.${ends}` },
+      { tool: 'Copilot CLI', line: '', word: 'Off', label: `bench-runner in Copilot CLI: off. Click to turn it on in Copilot CLI only.${ends}` },
+      { tool: 'Codex', line: 'Kept out', word: 'Off', label: `bench-runner in Codex: off. Click to turn it on in Codex only.${ends}` },
+      { tool: 'Pi', line: 'Kept out', word: 'Off', label: `bench-runner in Pi: off. Click to turn it on in Pi only.${ends}` },
+      { tool: 'OpenCode', line: '', word: 'Off', label: `bench-runner in OpenCode: off. Click to turn it on in OpenCode only.${ends}` },
+      { tool: 'Antigravity', line: '', word: 'Off', label: `bench-runner in Antigravity: off. Click to turn it on in Antigravity only.${ends}` },
     ]]);
+  // legacy-skill, On and in Everyday: its Off would end Everyday; keeping it out of one tool would not, so that switch says nothing.
+  await o.click(`#${rowPart('open', 'skills', 'legacy-skill')}`);
+  same('an On row Everyday names: "If off" at its head; its tool switches, which only keep it out, add nothing',
+    [(await o.text(`#${rowPart('profile-ends', 'skills', 'legacy-skill')}`))?.trim(), (await readToolLines(o)).filter(entry => entry.label.includes('profile in use')),
+      (await o.run(`(sw => { sw.dispatchEvent(new MouseEvent('mouseenter')); return sw.title; })(document.getElementById(${JSON.stringify(rowPart('switch', 'skills', 'legacy-skill'))}))`)).endsWith(ends)],
+    ['If off, only this item changes: Everyday stays saved but stops being the profile in use.', [], true]);
+  await o.click(`#${rowPart('open', 'skills', 'bench-runner')}`);
   await shots14a(o, '01-off-open');
   // Click 2: turn bench-runner on in Claude Code only.
   await o.click(`#${rowPart('enable', 'skills', 'bench-runner', 'claude-cli')}`);
@@ -15736,9 +15752,10 @@ async function libraryFlow() {
       await o.text('.details-status'),
       (await readToolLines(o)).find(entry => entry.tool === 'OpenCode')?.line,
       await o.text('#header [data-outcome] .band-text'),
-      await o.text('#header .band-profile')],
+      await o.text('#header .band-profile'),
+      await o.exists(benchEnds)],
     [true, true, null, 'Kept out of this tool, but it still has it another way. OpenCode reads Claude Code’s copy, in Claude Code’s skills folder. Keeping it out stops only a folder of Central Knot’s here.',
-      'bench-runner is on in Claude Code. OpenCode reads it too.', 'Everyday stopped being the profile in use.']);
+      'bench-runner is on in Claude Code. OpenCode reads it too.', 'Everyday stopped being the profile in use.', false]);
   const checkFitsAt860 = async (win, expected, shotName) => {
     await sizeTo(win, 860, 600);
     if (await win.run(`document.getElementById('sidebar-toggle')?.getAttribute('aria-label') === 'Expand the sidebar'`)) await win.click('#sidebar-toggle');
@@ -16186,10 +16203,21 @@ async function selectFlow() {
   const historyBefore = () => jsonOrNothing(join(home, '.central-knot/history.json'))?.events?.length ?? 0;
   const histCount0 = historyBefore();
   await a.click('#library-select');
-  for (const name of ['alpha', 'bravo', 'charlie', 'delta', 'echo']) await a.click(tick(name));
-  same('five ticked (three on, two off): buttons show their own counts', await bar(), ['5 selected', 'Turn on 2', 'Turn off 3', 'Delete…']);
+  // delta and echo, Off, first: only Turn on would leave Everyday, and says so right after it.
+  for (const name of ['delta', 'echo']) await a.click(tick(name));
+  same('two Off rows ticked: what Turn on would end follows Turn on', [await a.run(`document.getElementById('select-profile')?.previousElementSibling?.id`), (await a.text('#select-profile'))?.trim()], ['select-turn-on', 'Would leave Everyday']);
+  await bulkShots('turn-on-bar');
+  for (const name of ['alpha', 'bravo', 'charlie']) await a.click(tick(name));
+  same('five ticked (three on, two off): buttons show their own counts, and beside them the profile in use either would end',
+    [await bar(), await a.run(`document.getElementById('select-profile')?.title`)],
+    [['5 selected', 'Turn on 2', 'Turn off 3', 'Either would leave Everyday', 'Delete…'], 'If on or off, Everyday stays saved but stops being the profile in use. Undo, or switching to it again, puts it back in use.']);
   same('Turn off button exists in the select bar', await a.exists('#select-turn-off'), true);
   await bulkShots('turn-bar');
+  // Deleting the three Everyday names (and two it leaves out, Off) leaves it in use with what is left: its question says nothing of it.
+  await a.click('#select-delete');
+  same('the question to delete them names no profile', [await a.exists('#select-profile-delete'), (await bar()).filter(part => /Everyday/.test(part))], [false, []]);
+  await bulkShots('delete-ask');
+  await a.click('#select-cancel');
   await a.click('#select-turn-off');
   await done();
   same('Turn off takes the three on rows, leaves delta and echo untouched, says 2 were already off and Everyday stopped being in use, ends the mode',
@@ -16203,6 +16231,22 @@ async function selectFlow() {
   same('Undo puts the three back in the same tools as before (alpha still out of Codex)',
     [allFolders(), inAllTools('alpha'), inAllTools('bravo').length, ['alpha', 'bravo', 'charlie', 'delta', 'echo'].map(name => JSON.parse(record()).items[name]?.on)],
     [beforeTurn, ['.claude/skills', '.copilot/skills'], 3, [true, true, true, false, false]]);
+  if (shots) {
+    // A long profile name: cut with "…" after the Turn that would leave it (whole on hover), whole in an opened row's head.
+    const profilesFile = join(home, '.central-knot/profiles.json'), saved = readFileSync(profilesFile, 'utf8');
+    writeFileSync(profilesFile, saved.replace(/"name": ?"Everyday"/, '"name":"Everyday work on every machine at home and on the road"'));
+    await a.click('#header-refresh');
+    await done();
+    await a.click('#library-select');
+    await a.click(tick('alpha'));
+    await a.click(`#${rowPart('open', 'skills', 'alpha')}`);
+    await bulkShots('long-name');
+    await a.click(`#${rowPart('open', 'skills', 'alpha')}`);
+    await a.click('#library-select');
+    writeFileSync(profilesFile, saved);
+    await a.click('#header-refresh');
+    await done();
+  }
 
   // 15. Turn on of many (Example 2 + partly on + Found heading tick): turn Synchronize everything off, turn alpha off
   // (keeping its except: codex-cli), keep bravo out of Codex (partly on), write addable found skill lima after setup.
