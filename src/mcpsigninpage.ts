@@ -11,8 +11,8 @@ import { pinnedRows, rerender, state } from './app.ts';
 import { brandMark } from './brand.ts';
 import { button, emptyState, h, infoMark } from './dom.ts';
 import { pin } from './itemrow.ts';
-import { askedNow, cannotRun, cellKey, cellNow, checkLine, connectedCard, grouped, IN_SESSION, listCommand, LOCAL_CARD, offersSignin, ownTime, SAID,
-  SESSION_CARD, signinRows, type CellSays, type SigninRow, type SigninRun } from './mcpsignin.ts';
+import { askedNow, cannotRun, cellNow, checkLine, connectedCard, grouped, IN_SESSION, listCommand, LOCAL_CARD, offersSignin, ownTime, SAID,
+  SESSION_CARD, signinRows, signinStarted, signinWaits, type CellSays, type SigninRow } from './mcpsignin.ts';
 import { pagePlatform } from './machine.ts';
 import { clockTime } from './model.ts';
 import { copyButton, noToolsState, notRead } from './pages.ts';
@@ -47,19 +47,18 @@ async function checkColumns(tools: HarnessId[], whole = false) {
 }
 
 /** Why every Sign in waits: one is under way (one at a time: mcpsigninrun.ts startSignin). */
-const signingIn = () => (state.mcpSignin.signins?.some(run => !run.end) ? 'A sign-in is under way' : false);
+const signingIn = () => (Object.values(state.mcpSignin.signins ?? {}).some(run => !run.end) ? 'Another sign-in is under way: finish or stop it first' : false);
 /**
  * Starts `tool`'s own sign-in for `row`'s server (main.ts mcp-signin:start → mcpsigninrun.ts startSignin, given the row and the
  * copy the cell shows, never a name, command or path) and keeps it, with how it ended and when, in the checks of the home it was
  * started in (mcpsignin.ts SigninRun). A second press while one is under way does nothing.
  */
 async function signIn(tool: HarnessId, row: SigninRow) {
-  const checks = state.mcpSignin, copy = cellKey(row, row.cells[tool]!);
+  const checks = state.mcpSignin;
   if (signingIn()) return;
-  const run: SigninRun = { tool, row: row.id, copy };
-  checks.signins = [...(checks.signins ?? []), run];
+  const run = signinStarted(checks, tool, row);
   rerender();
-  run.end = await window.centralKnot.startSignin(tool, checks.home, row.id, copy).catch((error: unknown) => ({ notStarted: String(error instanceof Error ? error.message : error) }));
+  run.end = await window.centralKnot.startSignin(tool, checks.home, row.id, run.copy).catch((error: unknown) => ({ notStarted: String(error instanceof Error ? error.message : error) }));
   run.at = new Date().toISOString();
   rerender();
 }
@@ -119,7 +118,7 @@ function actButton(tool: HarnessId, row: SigninRow, act: NonNullable<CellSays['a
 
 /** A cell, its id and its buttons' by its row's id, so none follows a place in the list. */
 function cellView(tool: HarnessId, row: SigninRow, mark: Mark, offers: boolean) {
-  if (!row.cells[tool]) return h('td.signin-cell', {});
+  if (!row.cells[tool] && !signinWaits(state.mcpSignin, tool, row)) return h('td.signin-cell', {});
   const says = cellNow(state.mcpSignin, tool, row, offers);
   // Under the words, with the cell's whole width: an unread line, or the command to copy where no sign-in's button holds it.
   const shown = says.line ?? (says.act ? undefined : says.command);
@@ -127,7 +126,8 @@ function cellView(tool: HarnessId, row: SigninRow, mark: Mark, offers: boolean) 
   const copy = says.command ? copyButton(says.command, says.command, `signin-copy-${id}`, says.act ? 'Copy command' : 'Copy', 'Copied: run it in a terminal') : null;
   // A sign-in's button, with Copy where it has one, on a line of their own under the words; else Copy beside the words.
   return h(`td.signin-cell${says.tone ? `.tone-${says.tone}` : ''}`, { id: `signin-cell-${id}`, title: says.title },
-    h('span.signin-words', {}, says.words === SAID.connected ? keep(says.words, mark('connected')) : says.words, says.act ? null : copy),
+    h('span.signin-words', {}, says.words === SAID.connected ? keep(says.words, mark('connected'))
+      : says.why ? keep(says.words, infoMark(`signin-why-${id}`, 'why it didn’t finish', says.why)) : says.words, says.act ? null : copy),
     says.act ? h('span.signin-acts', {}, actButton(tool, row, says.act, `signin-act-${id}`), copy) : null,
     shown ? h('code.signin-command', {}, shown) : null);
 }

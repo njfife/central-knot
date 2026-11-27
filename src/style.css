@@ -1281,11 +1281,11 @@ span.ins-confirm { margin-top: 0; }
 .signin-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
 .signin-top > .btn { flex: none; }
 .signin-line { font-size: 12.5px; line-height: 1.55; color: var(--ink-soft); }
-.signin-table { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 12.5px; line-height: 1.45; }
+.signin-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 12.5px; line-height: 1.45; }
 .signin-table th, .signin-table td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; font-weight: 400; vertical-align: top; overflow-wrap: anywhere; }
 .signin-table tbody tr:last-child > * { border-bottom: 0; }
+/* The name column keeps its share whatever a cell holds (the table's layout is fixed); the tools' columns share the rest. */
 .signin-table th.signin-name { width: 16%; }
-.signin-table th.signin-head { width: 14%; }
 /* Sticky within the scroll area's top padding, which Chromium keeps: at its very top edge, so no row shows above the head. */
 .signin-table thead th { position: sticky; top: calc(-1 * var(--signin-pad-top)); z-index: 1; background: var(--surface); }
 .signin-table thead th:first-child { border-top-left-radius: 10px; }
@@ -1303,8 +1303,10 @@ span.ins-confirm { margin-top: 0; }
 .signin-keep { white-space: nowrap; }
 .signin-cell .signin-words { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; }
 .signin-words .btn { flex: none; }
-/* A sign-in's button and its Copy, side by side under the words, each starting at the cell's edge when they wrap. */
-.signin-acts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+/* A sign-in's button and its Copy, stacked on one edge under the words; each wraps within the column (a word too, where one is wider), its icon left out. */
+.signin-acts { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 4px; }
+.signin-acts .btn { height: auto; max-width: 100%; padding: 2px 8px; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+.signin-acts .btn svg { display: none; }
 .signin-command { display: block; margin-top: 2px; font-family: var(--mono); font-size: 11px; line-height: 16px; color: var(--ink); }
 
 /* ---------- The Sessions page (sessionspage.ts) ----------

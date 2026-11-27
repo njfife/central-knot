@@ -11488,16 +11488,22 @@ async function mcpSigninFlow() {
   };
   mkdirSync(said, { recursive: true });
   // Codex's sign-in (`codex mcp login -- <name>`), a stand-in that never reaches an account or a browser: it writes its arguments
-  // down, listens on a port for the browser's answer, opens the browser as Codex does (webbrowser 1.2.4: the first command of
-  // $BROWSER, else xdg-open, the address last, as its own child), goes on once that browser is up, then as codex.login says: signs
-  // in (exit 0), refuses (exit 1 with a line), waits for ever, or waits with a helper of its own that ignores TERM and listens too.
-  // The stand-in xdg-open, first on the path it is given, starts a long-lived "browser" in its own process group, as xdg-open
-  // does (no new session), which writes itself down and ends by itself after two minutes.
+  // down, listens on a port for the browser's answer, opens the browser as Codex does from its BROWSER (webbrowser 1.2.4: the first
+  // of its commands found on its path, the address last, as its own child; none found, none opened), goes on once that browser is
+  // up, then as codex.login says: signs in (exit 0), refuses (exit 1 with a line), waits for ever, or waits with a helper of its
+  // own that ignores TERM and listens too. The app is given BROWSER=ck-browser (launch below), whatever the one running the checks
+  // set; the stand-in ck-browser starts a long-lived "browser" in its own process group, as xdg-open does (no new session), which
+  // writes itself down and ends by itself after two minutes.
   const loginScript = join(scratch, 'signin-login.cjs'), helperScript = join(scratch, 'signin-helper.cjs'), browserScript = join(scratch, 'signin-browser.cjs');
   const logins = join(scratch, 'signin-logins.log'), browserAsked = join(scratch, 'signin-opened.log'), browsers = join(scratch, 'signin-browsers.log'), ports = join(said, 'codex.ports');
   writeFileSync(browserScript, `require('fs').appendFileSync(${JSON.stringify(browsers)}, process.pid + '\\n'); setTimeout(() => process.exit(0), 120000);\n`);
-  writeFileSync(join(home, '.local/bin/xdg-open'), `#!/bin/sh\necho "$1" >> ${browserAsked}\n"${process.execPath}" ${browserScript} </dev/null >/dev/null 2>&1 &\n`);
-  chmodSync(join(home, '.local/bin/xdg-open'), 0o755);
+  writeFileSync(join(home, '.local/bin/ck-browser'), `#!/bin/sh\necho "$1" >> ${browserAsked}\n"${process.execPath}" ${browserScript} </dev/null >/dev/null 2>&1 &\n`);
+  chmodSync(join(home, '.local/bin/ck-browser'), 0o755);
+  /** Only on Linux does the app start the browser apart (mcpsigninrun.ts browserApart): elsewhere a stand-in in Codex's group says nothing of the system's opener. */
+  const apart = process.platform === 'linux';
+  if (!apart) console.log('(mcpSigninFlow: the browser is set apart on Linux only; macOS hands the address to the system (open): whether the browser lives is not checked here)');
+  /** Whether a stand-in browser lives on, where the app sets it apart (above); elsewhere not checked. */
+  const lives = pid => !apart || (() => { try { process.kill(Number(pid), 0); return true; } catch { return false; } })();
   /** The stand-in browsers started, each by its process. */
   const browserPids = () => readNow(browsers).split('\n').filter(Boolean).map(Number);
   // Each process that listens writes its port and its number down, a line each.
@@ -11507,8 +11513,9 @@ async function mcpSigninFlow() {
 fs.appendFileSync(${JSON.stringify(logins)}, JSON.stringify(process.argv.slice(2)) + '\\n');
 const mode = fs.readFileSync(${JSON.stringify(join(said, 'codex.login'))}, 'utf8').trim();
 const opened = () => (fs.existsSync(${JSON.stringify(browsers)}) ? fs.readFileSync(${JSON.stringify(browsers)}, 'utf8').split('\\n').filter(Boolean).length : 0);
-${listen(`const [opener, ...words] = (process.env.BROWSER || 'xdg-open').split(':')[0].trim().split(/\\s+/), before = opened();
-  spawn(opener, [...words, 'http://127.0.0.1:' + listening.address().port + '/callback'], { stdio: 'ignore' });
+const found = name => name.includes('/') ? fs.existsSync(name) : process.env.PATH.split(':').some(folder => fs.existsSync(folder + '/' + name));
+${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(entry => entry.trim().split(/\\s+/)).find(([name]) => name && found(name)) ?? [], before = opened();
+  if (opener) spawn(opener, [...words, 'http://127.0.0.1:' + listening.address().port + '/callback'], { stdio: 'ignore' });
   if (mode === 'helper') spawn(process.execPath, [${JSON.stringify(helperScript)}], { stdio: ['ignore', 'inherit', 'inherit'] });
   const up = setInterval(() => {
     if (opened() <= before) return;
@@ -11536,7 +11543,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || 'xdg-open').split('
   const started = () => called().filter(([what]) => what === 'start');
   // A check's limit of 4 s here (main.ts CK_SIGNIN_LIMIT_MS), so "Didn’t answer" comes without waiting 70 s; a sign-in's of 6 s
   // (CK_SIGNIN_START_LIMIT_MS), so "Not finished in 3 minutes" comes without waiting three minutes.
-  const a = await launch(join(scratch, 'signin-data'), [], home, { CK_TEST_HOME_ONLY: Object.keys(versions).join(','), CK_SIGNIN_LIMIT_MS: '4000', CK_SIGNIN_START_LIMIT_MS: '6000' });
+  const a = await launch(join(scratch, 'signin-data'), [], home, { CK_TEST_HOME_ONLY: Object.keys(versions).join(','), CK_SIGNIN_LIMIT_MS: '4000', BROWSER: 'ck-browser', CK_SIGNIN_START_LIMIT_MS: '6000' });
   await a.click('#home-actual');
   /** The page as drawn: the tools' columns, and each row's name, plugin and cells' words (a mark and a Copy's label aside). */
   const page = async () => {
@@ -11707,7 +11714,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || 'xdg-open').split('
   await a.click('#signin-check-codex-cli');
   await checked('codex-cli');
   /** A Codex cell as drawn, by its row's name: its words, its sign-in button's label, its Copy's, and the line under it. */
-  const codexCell = async name => a.run(`(cell => [[...cell.querySelector('.signin-words').childNodes].filter(node => node.nodeType === 3).map(node => node.textContent).join(''),
+  const codexCell = async name => a.run(`(cell => [[...cell.querySelector('.signin-words').childNodes].map(node => (node.nodeType === 3 ? node.textContent : node.matches('.signin-keep') ? node.firstChild.textContent : '')).join(''),
     ...['[id^="signin-act-"]', '[id^="signin-copy-"]', '.signin-command'].map(part => cell.querySelector(part)?.textContent ?? null)])(document.getElementById(${JSON.stringify(await cellId('codex-cli', name))}))`);
   /** A Codex cell's hover, and whether it is in amber. */
   const codexLook = async name => a.run(`(cell => [cell.title, cell.classList.contains('tone-warning')])(document.getElementById(${JSON.stringify(await cellId('codex-cli', name))}))`);
@@ -11741,8 +11748,8 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || 'xdg-open').split('
   await a.run(`(button => { button.click(); button.click(); })(document.querySelector(${JSON.stringify(await act(team))}))`);
   await until(async () => listened().length === 2 && browserPids().length === 1, 'Codex’s sign-in, its helper and its browser');
   same('the cell says it waits on the browser, with Stop; another Sign in waits, Check doesn’t',
-    [await codexCell(team), await a.run(`document.querySelector(${JSON.stringify(await act('oauth'))}).disabled`), await a.run(`document.querySelector('#signin-check-codex-cli').disabled`)],
-    [['Finish in your browser…', 'Stop', null, null], true, false]);
+    [await codexCell(team), await a.run(`(button => [button.disabled, button.title])(document.querySelector(${JSON.stringify(await act('oauth'))}))`), await a.run(`document.querySelector('#signin-check-codex-cli').disabled`)],
+    [['Finish in your browser…', 'Stop', null, null], [true, 'Another sign-in is under way: finish or stop it first'], false]);
   same('Stop’s hover says what it does and when to press it', await a.run(`document.querySelector(${JSON.stringify(await act(team))}).title`), 'Ends the sign-in. Closed the browser’s tab before finishing? Stop, then Try again.');
   same('a double press runs Codex’s own sign-in once, its server’s name one argument after `--`, and Codex opens the browser itself',
     [readNow(logins).split('\n').filter(Boolean).map(line => JSON.parse(line)), started().slice(loginsFrom).map(([, tool, , entries, args]) => [tool, entries, args]), readNow(browserAsked).split('\n').filter(Boolean).length],
@@ -11766,7 +11773,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || 'xdg-open').split('
   await a.click(await act(team));
   await until(async () => (await codexCell(team))[0] !== 'Finish in your browser…', 'the stopped sign-in to end');
   same('Stop ends Codex’s sign-in and its helper and frees their ports, not the browser it opened; no list is run after',
-    [alive(loginPid), alive(helperPid), await portFree(loginPort), await portFree(helperPort), alive(browserPids()[0]), started().length - loginsFrom], [false, false, true, true, true, 1]);
+    [alive(loginPid), alive(helperPid), await portFree(loginPort), await portFree(helperPort), lives(browserPids()[0]), started().length - loginsFrom], [false, false, true, true, true, 1]);
   same('… its end was another copy’s: the server as it is now says Not checked', (await codexCell(team))[0], 'Not checked');
   write('.codex/config.toml', withTeam(47214));
   await a.click('#header-refresh');
@@ -11791,27 +11798,44 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || 'xdg-open').split('
   const signedIn = await codexCell(team);
   same('signed in: the time, no button, nothing to copy', [/^Signed in \d{1,2}:\d{2}/.test(signedIn[0]), ...signedIn.slice(1)], [true, null, null, null]);
   await wait(1500);
-  same('… and every browser its sign-ins opened lives on', browserPids().map(alive), browserPids().map(() => true));
+  same('… and every browser its sign-ins opened lives on', browserPids().map(lives), browserPids().map(() => true));
   same('no list is run after a sign-in', started().slice(signedFrom).map(([, , , , args]) => args), [`mcp login -- ${team}`]);
   await picture('signed-in', SMALLEST, 'light');
   await a.click('#nav-library');
   await a.click('#nav-mcpsignin');
   same('another page and back: still signed in, at the same time', await codexCell(team), signedIn);
-  // Codex refuses (oauth): the words in amber, what Codex said as their hover, Try again, and Copy command, which says Copied
-  // where he pressed. At 860 the cell is at most about twice a neighbour's height, its two buttons on one edge.
+  // Codex refuses (oauth): the words in amber, what Codex said behind a (?) after them, Try again, and Copy command, which says
+  // Copied where he pressed. At 860 the name column keeps its width (the table's layout is fixed), the two buttons stacked on one
+  // edge inside the cell.
   writeFileSync(join(said, 'codex.login'), 'refuse');
+  await sizeTo(a, ...SMALLEST); await shape(false);
+  const NAME_WIDTH = `document.querySelector('.signin-table thead th.signin-name').getBoundingClientRect().width`;
+  const nameWidth = await a.run(NAME_WIDTH);
+  await fullSize(a);
   await a.click(await act('oauth'));
   await until(async () => (await codexCell('oauth'))[0] === 'Sign-in didn’t finish', 'the refused sign-in');
-  same('refused: in amber, what Codex said as the hover, Try again and Copy command, nothing under it',
-    [await codexCell('oauth'), await codexLook('oauth')], [['Sign-in didn’t finish', 'Try again', 'Copy command', null], ['Error: the server refused the sign-in', true]]);
+  const why = `signin-why-codex-cli-${await rowIdOf('oauth')}`;
+  same('refused: in amber, Try again and Copy command, nothing under it; what Codex said behind a (?) after the words, a button',
+    [await codexCell('oauth'), (await codexLook('oauth'))[1], await a.run(`document.getElementById(${JSON.stringify(why)})?.tagName ?? null`)], [['Sign-in didn’t finish', 'Try again', 'Copy command', null], true, 'BUTTON']);
+  await a.click(byId(why));
+  same('… its card, on a click, holds what Codex said last', await a.text(byId(`${why}-card`)), 'Error: the server refused the sign-in');
+  if (shots) {
+    await sizeTo(a, ...SMALLEST); await shape(false);
+    await a.run(`document.getElementById(${JSON.stringify(why)}).scrollIntoView({ block: 'center' })`);
+    if (!(await a.run(`!!document.getElementById(${JSON.stringify(`${why}-card`)})?.matches(':popover-open')`))) await a.click(byId(why));
+    await wait(300);
+    await a.shot('mcp-signin-start-why-860-light');
+    await fullSize(a);
+  }
+  if (await a.run(`!!document.getElementById(${JSON.stringify(`${why}-card`)})?.matches(':popover-open')`)) await a.click(byId(why));
   const copied = await copyOn('codex-cli', 'oauth');
   same('Copy command gives Codex’s own sign-in command, and says Copied there and in the status bar',
     [copied[2], await a.text(byId(`signin-copy-codex-cli-${await rowIdOf('oauth')}`)), ...copied.slice(3)], ['Copied: run it in a terminal', 'Copied', ...(main ? ['codex mcp login -- oauth'] : [])]);
   await sizeTo(a, ...SMALLEST); await shape(false);
-  same('at 860 the refused cell is at most about twice its neighbour row’s height, its two buttons on one edge or one line', await a.run(`(() => {
-    const height = name => [...document.querySelectorAll('.signin-table tbody tr')].find(row => row.querySelector('.signin-server').textContent === name && !row.querySelector('.signin-plugin')).getBoundingClientRect().height;
+  same('at 860 with a failed cell the name column keeps its width, the cell’s two buttons stacked on one edge inside it', await a.run(`(() => {
+    const cell = document.getElementById(${JSON.stringify(await cellId('codex-cli', 'oauth'))}).getBoundingClientRect();
     const [first, second] = [...document.getElementById(${JSON.stringify(await cellId('codex-cli', 'oauth'))}).querySelectorAll('.signin-acts .btn')].map(button => button.getBoundingClientRect());
-    return [height('oauth') <= 2 * height('plain') + 4, Math.abs(first.left - second.left) <= 1 || Math.abs(first.top - second.top) <= 1]; })()`), [true, true]);
+    return [Math.abs(${NAME_WIDTH} - ${JSON.stringify(nameWidth)}) <= 0.5, Math.abs(first.left - second.left) <= 1 && second.top > first.top, Math.max(first.right, second.right) <= cell.right + 0.5]; })()`), [true, true, true]);
   await fullSize(a);
   await picture('refused', SMALLEST, 'light', 'oauth');
   // Not finished in the time it is given (here 6 s; the app's own is 3 minutes): stopped as Stop stops it, the browser kept.
@@ -11822,7 +11846,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || 'xdg-open').split('
   const [waitPort, waitPid] = listened().at(-1);
   await until(async () => (await codexCell('oauth'))[0] === 'Not finished in 3 minutes', 'the sign-in’s limit');
   same('not finished in its time: said so in amber, with Try again and Copy command; nothing of Codex’s left running or listening, its browser kept',
-    [await codexCell('oauth'), (await codexLook('oauth'))[1], alive(waitPid), await portFree(waitPort), alive(browserPids().at(-1))], [['Not finished in 3 minutes', 'Try again', 'Copy command', null], true, false, true, true]);
+    [await codexCell('oauth'), (await codexLook('oauth'))[1], alive(waitPid), await portFree(waitPort), lives(browserPids().at(-1))], [['Not finished in 3 minutes', 'Try again', 'Copy command', null], true, false, true, true]);
   await picture('no-answer', SMALLEST, 'light', 'oauth');
   // Main refuses, running nothing: another home; a tool whose sign-in it doesn't start; and a copy changed since the page showed it
   // (the page's own ask recorded in main as it came, then sent again after the change: a development run, which opens main).
@@ -12070,10 +12094,10 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || 'xdg-open').split('
   await Promise.race([gone, wait(20000)]);
   same(`${a.inspect ? 'two Quits wait' : 'Quit waits'} for the check stopped: the app gone, its tool stopped, its folder removed`, [a.child.exitCode !== null || a.child.signalCode !== null, alive(quitPid), existsSync(quitCwd)], [true, false, false]);
   same('… and the sign-in that waited: Codex’s processes gone, their ports free, the browser it opened kept',
-    [...quitLogins.map(([, pid]) => alive(pid)), ...await Promise.all(quitLogins.map(([port]) => portFree(port))), alive(quitBrowser)], [false, false, true, true, true]);
+    [...quitLogins.map(([, pid]) => alive(pid)), ...await Promise.all(quitLogins.map(([port]) => portFree(port))), lives(quitBrowser)], [false, false, true, true, true]);
   // A home Central Knot may only preview (here Pi's folder variable is not an absolute path: share.ts writeAccess): Codex's cell
   // keeps its Copy, and main refuses a sign-in sent all the same, running nothing.
-  const preview = await launch(join(scratch, 'signin-data-preview'), [], home, { CK_TEST_HOME_ONLY: Object.keys(versions).join(','), PI_CODING_AGENT_DIR: 'relative/pi' });
+  const preview = await launch(join(scratch, 'signin-data-preview'), [], home, { CK_TEST_HOME_ONLY: Object.keys(versions).join(','), BROWSER: 'ck-browser', PI_CODING_AGENT_DIR: 'relative/pi' });
   await preview.click('#home-actual');
   await preview.click('#nav-mcpsignin');
   await preview.click('#signin-check-codex-cli');

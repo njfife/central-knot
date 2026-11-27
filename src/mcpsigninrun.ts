@@ -10,7 +10,8 @@
 // own logs, caches and, for a sign-in, what they keep of it, in their own folders or stores.
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { accessSync, constants } from 'node:fs';
+import { delimiter, join } from 'node:path';
 import { findCli } from './discovery.ts';
 import { cellKey, CHECK_LIMIT_MS, lastSaid, listCommand, offersSignin, readAnswer, signInArgs, SIGNIN_LIMIT_MS, type SigninRow } from './mcpsignin.ts';
 import { pathBeside } from './platform.ts';
@@ -104,7 +105,7 @@ export function signinRefusal(ask: SigninAsk, now: SigninNow, platform: string =
   return !row || !cell || cell.off || cell.name === undefined || cellKey(row, cell) !== ask.copy ? 'Changed since the page showed it' : undefined;
 }
 
-/** The sign-in under way: one at a time, across tools. */
+/** The sign-in under way (startSignin). */
 let signing: AbortController | undefined;
 /** Stop: the sign-in under way, if one is, is asked to end; its start answers Stopped. */
 export const stopSignin = () => signing?.abort();
@@ -127,15 +128,21 @@ export async function startSignin(ask: SigninAsk, now: () => Promise<SigninNow>,
   try { return await ended; } finally { underWay.delete(stop); signing = undefined; }
 }
 
+/** Whether `command` (a path, or a name looked for in `path`) is a program that can be run. */
+const runnable = (command: string, path: string) => (command.includes('/') ? [command] : path.split(delimiter).map(folder => join(folder, command)))
+  .some(file => { try { accessSync(file, constants.X_OK); return true; } catch { return false; } });
 /**
- * Codex opens the browser itself (webbrowser 1.2.4: each command of $BROWSER first, else the default browser's own command or
- * xdg-open), spawned as its own child in the process group every ending signals: a browser it started so was ended at every
- * ending (measured with stand-ins). On Linux each command of his BROWSER, or else xdg-open, goes behind util-linux `setsid`, so
- * the browser starts in a session of its own and outlives every ending. macOS hands the address to the system (`open`): left as
- * it is, not measured here.
+ * Codex opens the browser itself (webbrowser 1.2.4: the first command of $BROWSER found on its path, else the default browser's
+ * own command or xdg-open), spawned as its own child in the process group every ending signals: a browser it started so was
+ * ended at every ending (measured with stand-ins). On Linux each command of his BROWSER, or else xdg-open, that is found on
+ * Codex's `path` goes behind util-linux `setsid`, in his order, so the browser starts in a session of its own and outlives every
+ * ending; one not found is left out, so the next is tried; with none found (or no setsid), BROWSER is left as it was and Codex
+ * opens its own way. macOS hands the address to the system (`open`): left as it is, not measured here.
  */
-const browserApart = (): NodeJS.ProcessEnv => (process.platform !== 'linux' ? {}
-  : { BROWSER: (process.env.BROWSER || 'xdg-open').split(':').map(entry => entry.trim() && `setsid ${entry.trim()}`).join(':') });
+function browserApart(path: string): NodeJS.ProcessEnv {
+  const found = (process.env.BROWSER || 'xdg-open').split(':').map(entry => entry.trim()).filter(entry => entry && runnable(entry.split(/\s+/)[0]!, path));
+  return process.platform === 'linux' && found.length && runnable('setsid', path) ? { BROWSER: found.map(entry => `setsid ${entry}`).join(':') } : {};
+}
 
 async function runSignin(ask: SigninAsk, now: () => Promise<SigninNow>, limitMs: number, signal: AbortSignal, log?: (line: string) => void): Promise<SigninEnd> {
   const first = await now(), refused = signinRefusal(ask, first);
@@ -145,7 +152,7 @@ async function runSignin(ask: SigninAsk, now: () => Promise<SigninNow>, limitMs:
   const last = await now(), changed = signinRefusal(ask, last);
   if (changed) return { notStarted: changed };
   const name = last.rows.find(row => row.id === ask.row)!.cells[ask.tool]!.name!;
-  const result = signal.aborted ? undefined : await runIn(last.where, binary, signInArgs(ask.tool, name)!, { timeoutMs: limitMs, signal, graceMs: STOP_GRACE_MS, drainMs: DRAIN_MS, input: '', inOrder: true, env: browserApart() }, `sign-in in ${toolNames[ask.tool]}`, log);
+  const result = signal.aborted ? undefined : await runIn(last.where, binary, signInArgs(ask.tool, name)!, { timeoutMs: limitMs, signal, graceMs: STOP_GRACE_MS, drainMs: DRAIN_MS, input: '', inOrder: true, env: browserApart(pathBeside(binary)) }, `sign-in in ${toolNames[ask.tool]}`, log);
   if (!result || result.reason === 'aborted') return { failed: 'stopped' };
   if (result.reason === 'timeout' || result.code === 'missing') return { failed: result.reason === 'timeout' ? 'timeout' : 'missing' };
   return result.code === 0 ? { signedIn: true } : { unfinished: lastSaid(result.inOrder ?? result.output) };

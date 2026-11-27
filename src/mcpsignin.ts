@@ -164,20 +164,31 @@ export function grouped(rows: SigninRow[], checks: SigninChecks): SigninRow[] {
 /** A column's last check: when it was asked and when it ended, what its tool answered, and the cells it holds for: those asked about, unchanged at every view since. */
 export interface ColumnCheck { at: string; answer: SigninAnswer; asked: string[]; began?: string }
 /**
- * What the page keeps of a sign-in started from a cell (mcpsigninpage.ts signIn), said here alone: its tool, its row, its cell's
- * copy (cellKey), and once it ended, when and how. One under way is its row's cell's, whatever became of the copy, so its Stop
- * stays. One ended is shown only in a cell of that very copy, and only while no view since it started was without that copy on
- * (`gone`: another copy, Off or gone) and no Check of its column was asked after it ended (ColumnCheck began): cellNow. An
- * ended one that is gone is forgotten at a view (followView), the one place; a new home's checks start with none.
+ * What the page keeps of a sign-in started from a cell (signinStarted), said here alone: one a cell, by its tool and row
+ * (SigninChecks signins, signinKey), so one started there takes the place of the one before; its cell's copy (cellKey), and once
+ * it ended, when and how. One under way is its row's, whatever became of the copy or of that tool's cell, so its Stop stays
+ * (signinWaits). One ended is shown only in a cell of that very copy, and only while no view since it started was without that
+ * copy on (`gone`: another copy, Off or gone) and no Check of its column was asked after it ended (ColumnCheck began): cellNow.
+ * An ended one that is gone is forgotten at a view (followView); a new home's checks start with none.
  */
 export interface SigninRun { tool: HarnessId; row: string; copy: string; at?: string; end?: SigninEnd; gone?: true }
+/** A cell's place among the sign-ins kept: its tool and its row (SigninRun). */
+export const signinKey = (tool: HarnessId, row: string) => `${tool} ${row}`;
+/** A sign-in started from `row`'s cell in `tool`, kept in `checks` in the place of any before it there (SigninRun). */
+export function signinStarted(checks: SigninChecks, tool: HarnessId, row: SigninRow): SigninRun {
+  const run: SigninRun = { tool, row: row.id, copy: cellKey(row, row.cells[tool]!) };
+  (checks.signins ??= {})[signinKey(tool, row.id)] = run;
+  return run;
+}
+/** Whether a sign-in started from `row`'s cell in `tool` is under way (SigninRun). */
+export const signinWaits = (checks: SigninChecks, tool: HarnessId, row: SigninRow) => { const run = checks.signins?.[signinKey(tool, row.id)]; return !!run && !run.end; };
 /**
  * The page's checks in one home (app.ts state.mcpSignin, made again when a home opens): each column's last, the one under way,
  * why one couldn't be run, when the last whole Check all ended (`all`: each column it ran answered or said why it couldn't
  * run; mcpsigninpage.ts checkColumns), and the sign-ins started there (SigninRun). Never stored.
  */
 export interface SigninChecks { home: string; columns: Partial<Record<HarnessId, ColumnCheck>>; checking?: { tool: HarnessId; asked: string[] };
-  failed?: Partial<Record<HarnessId, string>>; all?: string; signins?: SigninRun[] }
+  failed?: Partial<Record<HarnessId, string>>; all?: string; signins?: Record<string, SigninRun> }
 /** A cell as one copy: its row, the tool's name for the server, and what the copy is. Main checks a sign-in's against it (mcpsigninrun.ts signinRefusal). */
 export const cellKey = (row: SigninRow, cell: SigninCell) => JSON.stringify([row.id, cell.name ?? null, cell.copy ?? null]);
 /** The cells a check of `tool` asks about now: each one not switched off. */
@@ -187,9 +198,11 @@ export function followView(checks: SigninChecks, home: HomeView) {
   const still = (tool: HarnessId, asked: string[]) => { const now = new Set(askedNow(home, tool)); return asked.filter(key => now.has(key)); };
   for (const [tool, column] of Object.entries(checks.columns) as [HarnessId, ColumnCheck][]) column.asked = still(tool, column.asked);
   if (checks.checking) checks.checking.asked = still(checks.checking.tool, checks.checking.asked);
-  // A sign-in whose copy this view doesn't hold on is gone, and one gone that has ended is forgotten (SigninRun).
-  for (const run of checks.signins ?? []) if (!still(run.tool, [run.copy]).length) run.gone = true;
-  checks.signins = checks.signins?.filter(run => !(run.end && run.gone));
+  // Sign-ins too, as SigninRun says.
+  for (const [key, run] of Object.entries(checks.signins ?? {})) {
+    if (!still(run.tool, [run.copy]).length) run.gone = true;
+    if (run.end && run.gone) delete checks.signins![key];
+  }
   // A check that found no command line is older than this view's probe that finds one: the newer word decides, so that answer goes.
   const found = (tool: HarnessId) => home.snapshots.some(each => each.harness === tool && each.probe.state === 'ok');
   for (const tool of Object.keys(checks.columns) as HarnessId[]) if (cannotRun(checks, home, tool) && found(tool)) delete checks.columns[tool];
@@ -210,10 +223,10 @@ export function ownTime(checks: SigninChecks, tool: HarnessId): string | undefin
 
 /**
  * What a cell says, its tone, the line under it (an answer that couldn't be read), the tool's own sign-in command to copy, `heed`
- * where it needs him (a sign-in, or what went wrong: grouped puts its row first), and its hover (`title`: a mark's whole meaning,
- * or what a tool said last as its sign-in didn't finish).
+ * where it needs him (a sign-in, or what went wrong: grouped puts its row first), a mark's whole meaning (`title`, its hover),
+ * and why a sign-in didn't finish (`why`: what its tool said last, behind a (?) after the words).
  */
-export interface CellSays { words: string; tone?: 'muted' | 'warning'; line?: string; command?: string; heed?: true; title?: string;
+export interface CellSays { words: string; tone?: 'muted' | 'warning'; line?: string; command?: string; heed?: true; title?: string; why?: string;
   /** A sign-in's button (cellNow): Sign in or Try again, which runs `runs`, or Stop while one waits. */
   act?: { label: 'Sign in' | 'Try again' | 'Stop'; runs?: string } }
 export const SAID = { 'no-sign-in': 'No sign-in needed', 'signed-in': 'Signed in', connected: 'Connected' };
@@ -326,13 +339,14 @@ function endWords(tool: HarnessId, end: Exclude<SigninEnd, { signedIn: true }>):
  * column's answer (cellSays), whose need of a sign-in offers Sign in in place of Copy where `offers`.
  */
 export function cellNow(checks: SigninChecks, tool: HarnessId, row: SigninRow, offers: boolean): CellSays {
+  if (signinWaits(checks, tool, row)) return { words: 'Finish in your browser…', act: { label: 'Stop' }, heed: true };
   const said = cellSays(tool, row, answerFor(checks, tool, row)), cell = row.cells[tool]!, began = checks.columns[tool]?.began;
-  const runs = checks.signins?.filter(each => each.tool === tool) ?? [];
-  if (runs.some(each => !each.end && each.row === row.id)) return { words: 'Finish in your browser…', act: { label: 'Stop' }, heed: true };
-  const run = runs.findLast(each => each.end && !each.gone && each.copy === cellKey(row, cell) && !(began && began > each.at!));
-  if (!run?.end) return said.command && offers ? { words: said.words, tone: said.tone, act: { label: 'Sign in', runs: said.command }, heed: true } : said;
+  const run = checks.signins?.[signinKey(tool, row.id)];
+  if (!run?.end || run.gone || run.copy !== cellKey(row, cell) || (began && began > run.at!)) {
+    return said.command && offers ? { words: said.words, tone: said.tone, act: { label: 'Sign in', runs: said.command }, heed: true } : said;
+  }
   if ('signedIn' in run.end) return { words: `Signed in ${clockTime(run.at!)}` };
   const command = signInCommand(tool, cell.name!)!;
-  return { words: endWords(tool, run.end), tone: 'warning', ...('unfinished' in run.end && run.end.unfinished ? { title: run.end.unfinished } : {}), command,
+  return { words: endWords(tool, run.end), tone: 'warning', ...('unfinished' in run.end && run.end.unfinished ? { why: run.end.unfinished } : {}), command,
     act: { label: 'Try again', runs: command }, heed: true };
 }

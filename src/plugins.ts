@@ -1,6 +1,7 @@
 // Marketplaces and plugins for the CLIs: read a catalog without running anything from it, show what each tool would get,
 // and install or uninstall through each tool's own commands, confirmed by reading the record that tool keeps (PLG-03).
 import { createHash, randomUUID } from 'node:crypto';
+import { StringDecoder } from 'node:string_decoder';
 import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
@@ -95,7 +96,7 @@ export const gitEnv = () => ({ ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INT
  * `catchStart`, when true (hookrun.ts), turns a synchronous start throw into `reason: 'error'` instead of rejecting; `graceMs`,
  * when positive (a run in a `group`, off Windows: mcpsigninrun.ts startSignin), a stop asks the group to end (TERM) and kills
  * it that long after if the run hasn't ended by then (what its leader left as it ended, `drainMs` kills); `inOrder`, when true,
- * also keeps both streams as they arrived (RunResult inOrder).
+ * also keeps both streams' lines in the order they ended (RunResult inOrder).
  */
 export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; maxBytes?: number; env?: NodeJS.ProcessEnv; drainMs?: number; catchStart?: boolean; graceMs?: number; inOrder?: boolean }
 /**
@@ -108,7 +109,7 @@ export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; max
 export type RunResult = {
   code: number | 'timeout' | 'missing'; output: string; stdout: Buffer; stderr: Buffer;
   reason?: 'timeout' | 'aborted' | 'overflow' | 'missing' | 'error'; spawnError?: string; signal?: NodeJS.Signals; leftRunning?: boolean;
-  /** Both streams as they arrived, chunk by chunk: only where RunOptions inOrder asked for it. */
+  /** Both streams' lines in the order each ended (a line's parts kept together): only where RunOptions inOrder asked for it. */
   inOrder?: string;
 };
 
@@ -124,7 +125,7 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
   const drainMs = options.drainMs && options.drainMs > 0 ? options.drainMs : 0;
   const graceMs = group && options.graceMs && options.graceMs > 0 ? options.graceMs : 0;
   return new Promise(done => {
-    const out: Buffer[] = [], err: Buffer[] = [], arrived: Buffer[] = [];
+    const out: Buffer[] = [], err: Buffer[] = [], arrived: string[] = [];
     let stopped: 'timeout' | 'aborted' | undefined;
     let cut = false;
     let ended = false;
@@ -183,7 +184,7 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
       const stdout = Buffer.concat(out);
       const stderr = Buffer.concat(err);
       const output = `${stdout.toString('utf8')}${stderr.toString('utf8')}`.replace(/\r/g, '').trim();
-      const also = { ...(leftRunning ? { leftRunning } : {}), ...(options.inOrder ? { inOrder: Buffer.concat(arrived).toString('utf8') } : {}) };
+      const also = { ...(leftRunning ? { leftRunning } : {}), ...(options.inOrder ? { inOrder: [...arrived, ...unended.map(stream => stream.text + stream.decoder.end())].join('') } : {}) };
       const sig = termSignal && !stopped && !cut ? { signal: termSignal } : {};
       if (cut) done({ code: 1, output: `${output.slice(-2000)}\n(output cut: more than ${maxBytes / 1024 / 1024} MB)`, stdout, stderr, reason: 'overflow', ...also });
       else if (errMsg !== undefined && (options.catchStart || !stopped)) done({ code, output, stdout, stderr, reason: code === 'missing' ? 'missing' : 'error', spawnError: errMsg, ...also });
@@ -191,9 +192,15 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
       else done({ code, output, stdout, stderr, ...also, ...sig });
     };
     const settle = windows?.settle ?? end;
-    const keep = (stream: (chunk: Buffer) => void) => (chunk: Buffer) => { if (options.inOrder) arrived.push(chunk); stream(chunk); };
-    child.stdout.on('data', keep(take(out)));
-    child.stderr.on('data', keep(take(err)));
+    // inOrder: each stream's text held until a line of it ends, its whole lines then taken in the order they ended.
+    const unended = [0, 1].map(() => ({ decoder: new StringDecoder('utf8'), text: '' }));
+    const keep = (at: number, stream: (chunk: Buffer) => void) => (chunk: Buffer) => {
+      const held = unended[at]!, text = options.inOrder ? held.text + held.decoder.write(chunk) : '', end = text.lastIndexOf('\n') + 1;
+      if (end) { arrived.push(text.slice(0, end)); held.text = text.slice(end); } else held.text = text;
+      stream(chunk);
+    };
+    child.stdout.on('data', keep(0, take(out)));
+    child.stderr.on('data', keep(1, take(err)));
     child.on('error', error => {
       errMsg = error.message;
       settle(errorCode(error) === 'ENOENT' ? 'missing' : 1);
