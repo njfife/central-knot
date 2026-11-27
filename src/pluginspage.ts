@@ -363,8 +363,8 @@ export function pluginsResult(): HTMLElement[] {
   // A result of the app's said in the run's place (pluginstate.ts overRun; a new run clears it: turnPlugin), as a list page's
   // result is, with its own reasons (matrix.ts listResult).
   if (overRun(app.outcome)) return listResult();
-  const last = market.lastRun && (market.lastRun.place ?? 'plugins') === here ? market.lastRun : undefined;
-  const problem = market.problem && (market.problemPlace ?? 'plugins') === here ? market.problem : undefined;
+  const last = market.lastRun;
+  const problem = market.problem;
   const lines = last ? lastLines() : [];
   const openName = here === 'plugins' ? market.nav.plugin : undefined;
   const elsewhere = !!last && (last.reread || (!!openName && !lines.some(line => line.plugin === openName)));
