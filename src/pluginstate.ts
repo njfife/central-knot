@@ -88,6 +88,8 @@ export const market = {
   draftSource: '',
   /** The add box is open: always with no marketplaces yet, otherwise after "Add marketplace" is clicked. */
   addOpen: false,
+  /** The one Uninstall… question open, by plugin key and tool (pluginparts.ts uninstallControl), until its Cancel, Escape or confirm. */
+  asking: undefined as string | undefined,
 };
 
 /** Opens or closes one remembered part ("Show more", or a part's file) and redraws. */
@@ -102,7 +104,7 @@ export function resetMarket(): void {
   drop(turn => isPluginClick(turn) || isLineClick(turn));
   viewFor = undefined;
   results = [];
-  resetPageData(market.read); runs.clear(); problems.clear(); market.working = undefined; market.addOpen = false;
+  resetPageData(market.read); runs.clear(); problems.clear(); market.working = undefined; market.addOpen = false; market.asking = undefined;
   market.readmes.clear(); forgetDetails(); market.opened.clear(); market.nav = startNav();
 }
 
@@ -230,6 +232,17 @@ function forgetDetails(): void {
   comparing.set([]);
   market.details.clear();
   market.previous.clear();
+}
+
+/**
+ * A plugin's contents read again now, as its page reads them (the marketplace's copy and each tool's), for Uninstall…'s question to
+ * compare the tool's copy with (pluginparts.ts uninstallControl); meanwhile its page shows the last read.
+ */
+export function readAgainNow(source: string, plugin: string): void {
+  const key = pluginKey(source, plugin), last = market.details.get(key);
+  if (last && !last.reading && last.value) market.previous.set(key, last.value);
+  market.details.delete(key);
+  readInto(market.details, key, () => api().pluginDetail(source, plugin).catch(() => null), rerender);
 }
 
 /** A plugin's contents to show: the latest read, or while it is read again, the one before (undefined when never read). */
@@ -470,8 +483,8 @@ export function turnPlugin(entry: MarketplaceView, plugin: string, what: PluginT
   // Its row is pinned where it is on the list (itemrow.ts Pinned), until another list or none is drawn, or Refresh (app.ts pinnedRows).
   if (market.view) pin(pinnedPlugins(entry), plugin, pluginPlace(market.view, entry, plugin));
   // The control clicked waits until it is read back; Add gives way to the switch then. The focus goes back to it at the
-  // list's end if nothing else took it.
-  clickedLast = document.activeElement?.id.replace(/^padd/, 'pswitch');
+  // list's end if nothing else took it; after Uninstall…, whose control goes with the copy, to the result's Undo (pluginspage.ts undoButton).
+  clickedLast = what === 'uninstall' ? 'plugins-undo' : document.activeElement?.id.replace(/^padd/, 'pswitch');
   join(click);
   rerender();
 }
@@ -480,7 +493,8 @@ let clickedLast: string | undefined;
 /** What a row says of its click while it waits and while it runs: a tool's box names its tool ("Waiting to install in Codex"). */
 function aimWords(what: PluginTurn, tool?: HarnessId): PluginClick['said'] {
   const name = tool ? ` ${toolNames[tool]}` : '';
-  const [to, doing] = { on: ['turn on', 'Turning on'], off: ['turn off', 'Turning off'], add: ['add', 'Adding'], 'keep-out': ['turn off in', 'Turning off in'], 'let-in': ['turn on in', 'Turning on in'] }[what];
+  const [to, doing] = { on: ['turn on', 'Turning on'], off: ['turn off', 'Turning off'], add: ['add', 'Adding'], 'keep-out': ['turn off in', 'Turning off in'], 'let-in': ['turn on in', 'Turning on in'],
+    uninstall: ['uninstall from', 'Uninstalling from'] }[what];
   return { waiting: `Waiting to ${to}${name}`, running: `${doing}${name}…` };
 }
 
@@ -509,7 +523,11 @@ function runEnded(): void {
   const base = one ? (one.stopped ?? (resultSentence(withNotIn(oneLines), false) || oneFailed || `Nothing changed for ${ran[0]!.plugin}.`)) : multi;
   const here = showsPluginsResult(place);
   announce([base, profileLine].filter(Boolean).join(' '), here && (one ? !!one.stopped || !!oneFailed || undoOps(place).length > 0 || !!profileLine : !lines.some(line => !line.ok) && (undoOps(place).length > 0 || !!profileLine)));
-  if (here && document.activeElement === document.body && clickedLast) document.getElementById(clickedLast)?.focus({ preventScroll: true });
+  if (here && document.activeElement === document.body && clickedLast) {
+    // Undo was drawn off while the list ran, and the list's last draw comes after this: drawn usable first, so it takes the focus.
+    if (clickedLast === 'plugins-undo') rerender();
+    document.getElementById(clickedLast)?.focus({ preventScroll: true });
+  }
 }
 
 /**

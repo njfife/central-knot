@@ -64,6 +64,14 @@ test('A run goes on past a step that throws, and a refusal stops it there: the r
   assert.equal(result.stopped, 'Writing isn’t allowed here.');
 });
 
+test('An uninstall’s Undo says it installs the marketplace’s copy again, and where the uninstall deleted settings, that it comes back without them', () => {
+  const back: PluginOp[] = [{ ...op('pdf', 'claude-cli'), deleted: true }, op('pdf', 'claude-cli', 'plugin-off')];
+  assert.equal(undoTitle(back, { plugin: 'pdf' }), 'Installs pdf again in Claude Code, from the marketplace, without its saved options, off as it was.');
+  assert.equal(undoTitle([op('pdf', 'codex-cli')], { plugin: 'pdf' }), 'Installs pdf again in Codex, from the marketplace.');
+  const done: PluginDone[] = [{ ...back[0]!, report: { tool: 'claude-cli', outcome: 'installed', message: '', runs: [], changed: true } }];
+  assert.equal(resultSentence(resultLines(done, true), true), 'Undone: pdf reinstalled in Claude Code, without its saved options.');
+});
+
 test('An Undo says what came back, and keeps what it did not get to', () => {
   const undoOps = [op('pdf', 'claude-cli', 'remove'), op('docx', 'codex-cli', 'install'), op('xlsx', 'claude-cli', 'remove'), op('pptx', 'codex-cli', 'remove')];
   const done: PluginDone[] = [
@@ -72,7 +80,7 @@ test('An Undo says what came back, and keeps what it did not get to', () => {
     // Already gone when the Undo reached it: nothing left to do, so "Undo the rest" doesn't offer it again.
     { ...undoOps[3]!, report: { tool: 'codex-cli', outcome: 'uninstalled', message: 'Not installed in Codex.', runs: [] } },
   ];
-  assert.equal(resultSentence(resultLines(done.slice(0, 2), true), true), 'Undone: pdf removed from Claude Code; docx put back in Codex.');
+  assert.equal(resultSentence(resultLines(done.slice(0, 2), true), true), 'Undone: pdf removed from Claude Code; docx reinstalled in Codex.');
   assert.deepEqual(resultParts(resultLines(done.slice(0, 1), true), true), ['Undone: ', { plugin: 'pdf', source: 'anthropics/skills' }, ' removed from Claude Code', '.']);
   // Undo of a fresh live Copilot CLI install leaves it off rather than removed: "turned off in", distinct from an Off-then-On's "off again in".
   const liveUndone: PluginDone[] = [
