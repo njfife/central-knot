@@ -16708,12 +16708,15 @@ echo "$*" >> "$HOME/claude-calls.txt"
   await back();
   for (let tries = 0; tries < 100 && (await names('claude-cli')).includes('release-helper'); tries++) await wait(100);
   same('turned off in Claude Code, its group leaves Claude Code’s strip, and Codex’s stays', [(await names('claude-cli')).includes('release-helper'), (await names('claude-cli')).length, await names('codex-cli')], [false, 14, ['release-helper']]);
+  // The box's result is Plugin marketplaces' own (pluginstate.ts pluginsResultPlace): Instructions draws none of it, above its cards or under a strip.
+  same('the box’s result and its Undo stay off Instructions', [await a.exists('#plugins-result'), await a.exists('.plugin-run')], [false, false]);
   // A tool's own Instructions tab under Harnesses has the same strip.
   await a.click(byId('nav-harnesses'));
   await a.click(byId('harness-codex-cli'));
   await a.click(byId('harness-tab-instructions'));
   for (let tries = 0; tries < 100 && !(await a.exists('#session-codex-cli')); tries++) await wait(100);
   same('Codex’s Instructions tab has its strip without standing prose', [(await groups('codex-cli'))[0]?.[1].length, await a.exists('#session-codex-cli .session-about')], [2, false]);
+  same('nor does Codex’s Instructions tab, a place of its own', [await a.exists('#plugins-result'), await a.exists('.plugin-run')], [false, false]);
   const codexTabBtn = await hookBtnIn('session-codex-cli', 'release-helper', 'remind.mjs');
   const codexTabSource = codexTabBtn && await openSource(codexTabBtn, '#session-codex-cli .hook-source');
   check('a tool’s own Instructions tab opens View source from that tool’s installed copy', /Declared in .*hooks\/hooks\.json/.test(codexTabSource ?? '') && /installed in Codex/.test(codexTabSource ?? '') && !/marketplace’s copy/.test(codexTabSource ?? ''), codexTabSource);
