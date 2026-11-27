@@ -2024,7 +2024,7 @@ function selectBar(t: Table, rows: (ItemRow | PluginRow)[]) {
   const clicksOf = (list: Listed[], make: Parameters<typeof changeBy>[0]) => clicksByKind(takenOf(list), changeBy(make));
   const onClicks = clicksOf(toOn.takes, rowClicks.on), offClicks = clicksOf(toOff.takes, rowClicks.off), deleteClicks = clicksOf(takes, rowClicks.remove);
   const endsOn = endsOf(onClicks), endsOff = endsOf(offClicks);
-  const mark = endsMark(endsOn ?? endsOff, `If ${[endsOn && 'on', endsOff && 'off'].filter(Boolean).join(' or ')}`, 'select-profile');
+  const mark = endsMark(endsOn ?? endsOff, `If ${[endsOn && 'on', endsOff && 'off'].filter(Boolean).join(' or ')}`, 'select-profile', endsOn && endsOff ? 'either' : 'mark');
   const offDelete = acting() ?? !takes.length;
   const idIf = (shown: boolean, id: string) => (shown ? id : undefined);
   const why = (shown: boolean, count: number) => (count ? h('button.inline-link', { type: 'button', id: idIf(shown, 'select-why'), 'aria-expanded': String(whyShown()),
@@ -2598,7 +2598,7 @@ function unusedBand(t: Table, shown: ItemRow[]) {
     // The home's gate: a kind whose own record stops its writes is skipped and named by the click (app.ts applyByKind), and not forecast.
     disabled: writeOff(homeStops()) || state.usage.state === 'reading', onclick: () => turnTheseOff(clicks) }) : null;
   const ends = turn && endsMark(endsOf(clicks.filter(click => !kindStops(click.kind))), 'If off', 'unused-profile');
-  return shell(lead, ends ? h('span.band-act', {}, ends, turn) : turn, toggleCounted, open ? h('div.usage-more', { id: 'unused-counted' }, more.map(line => h('p', {}, line))) : null);
+  return shell(lead, ends ? h('span.band-act', {}, turn, ends) : turn, toggleCounted, open ? h('div.usage-more', { id: 'unused-counted' }, more.map(line => h('p', {}, line))) : null);
 }
 
 /** The rows Turn these off takes of those the chip shows: all but a plugin's items and items linked to a plugin, each left to its own row (usagerow.ts leftToItsRow). */
@@ -2617,26 +2617,29 @@ export const theseOff = (rows: ItemRow[]) => clicksByKind(rows, changeBy(rowClic
 /** A row's switch's click now, or its Add's: Off while it is On, else On (its own click is built in its turn, by the same maker: turnOn, turnOff). */
 const switchClicks = (skill: ItemRow) => [{ kind: skill.kind, changes: [changeBy(libraryPlace(itemOf(skill)) === 'on' ? rowClicks.off : rowClicks.on)(skill)] }];
 /**
- * The names of the profiles in use `clicks` would end, from the very changes they send (profileplan.ts endedByChanges), and `may`
- * while other clicks still wait or run, whose writes the view doesn't hold yet; undefined for none.
+ * The names of the profiles in use `clicks` would end, from the very changes they send (profileplan.ts endedByChanges; none projected
+ * for no change), and `may` while other clicks still wait or run, whose writes the view doesn't hold yet; undefined for none.
  */
 function endsOf(clicks: Pick<Click, 'kind' | 'changes'>[]) {
-  const ended = state.home ? endedByChanges(state.home, clicks.flatMap(click => click.changes.map(change => ({ kind: partOfPage[click.kind], change })))) : [];
+  const changes = clicks.flatMap(click => click.changes.map(change => ({ kind: partOfPage[click.kind], change })));
+  const ended = state.home && changes.length ? endedByChanges(state.home, changes) : [];
   return ended.length ? { names: ended.map(profile => profile.name), may: !!acting() } : undefined;
 }
-/** A control's hover and name, worked out as the pointer or the focus comes to it, not as the page draws: `label`, then what `clicks` would end. */
+/** What `clicks` would end, as a control's hover (after `label`) and its description, worked out as the pointer or the focus comes to it, not as the page draws. */
 const endsOnHover = (label: string, clicks: () => Pick<Click, 'kind' | 'changes'>[]) => {
   const say = ({ currentTarget: node }: Event) => {
-    const ending = endsOf(clicks()), text = ending ? `${label} ${profileStops(ending.names, ending.may)}.` : label;
-    for (const name of ['title', 'aria-label']) (node as HTMLElement).setAttribute(name, text);
+    const ending = endsOf(clicks()), more = ending ? `${profileStops(ending.names, ending.may)}.` : '';
+    (node as HTMLElement).setAttribute('title', more ? `${label} ${more}` : label);
+    (node as HTMLElement).setAttribute('aria-description', more);
   };
   return { onmouseenter: say, onfocus: say };
 };
-/** Beside a control, what its click would end (endsOf): "No longer Everyday", its sentence after `act` and what brings it back on hover; `whole`, the sentence (an opened row's). */
-function endsMark(ending: ReturnType<typeof endsOf>, act: string, id: string, whole = false) {
+/** After a control, what its click would end (endsOf): "Would leave Everyday" ("Either would …" after two), its sentence and what brings it back on hover; `line`, a row's head. */
+function endsMark(ending: ReturnType<typeof endsOf>, act: string, id: string, shown: 'mark' | 'either' | 'line' = 'mark') {
   if (!ending) return null;
-  const sentence = `${act}, ${profileStops(ending.names, ending.may)}.`, back = profileBack(ending.names);
-  return h('span.profile-stop', { id, title: whole ? back : `${sentence} ${back}` }, icon('sliders-horizontal', 12), h('span', {}, whole ? sentence : profileStops(ending.names, ending.may, true)));
+  const said = `${act}, ${shown === 'line' ? 'only this item changes: ' : ''}${profileStops(ending.names, ending.may)}.`, back = profileBack(ending.names);
+  const short = profileStops(ending.names, ending.may, true), text = shown === 'line' ? said : shown === 'either' ? `Either ${short}` : sentence(short);
+  return h('span.profile-stop', { id, title: shown === 'line' ? back : `${said} ${back}` }, icon('sliders-horizontal', 12), h('span', {}, text));
 }
 /**
  * Turn these off, over rows of any kinds (its clicks: theseOff): each kind's rows one click with each row's own Off (libraryrow.ts rowClicks.off), the
@@ -2831,7 +2834,7 @@ function offNote(t: Table, list: ItemRow[]): string {
 function switchEnds(skill: ItemRow) {
   const item = inLibrary(itemOf(skill));
   if ((!item && !canAdd(skill)) || wantedOn(skill.kind, skill.key) !== undefined) return null;
-  return endsMark(endsOf(switchClicks(skill)), !item ? 'If added' : item.on ? 'If off' : 'If on', elId('profile-ends', skill), true);
+  return endsMark(endsOf(switchClicks(skill)), !item ? 'If added' : item.on ? 'If off' : 'If on', elId('profile-ends', skill), 'line');
 }
 
 /** A found or Off item's status line (libraryrow.ts statusLine; empty on On rows, whose tool lines show every On state, including in the Files view's pane). */
@@ -2911,13 +2914,14 @@ function libraryHarnessSwitch(t: Table, lib: LibraryPage, skill: ItemRow, tool: 
   }
   const said = (notIn: HarnessId[]) => lib.say.said.inHarness(name, tool, !out, notIn.includes(tool as HarnessId));
   const does = out ? `Click to put it in ${where} again, its ${lib.words.copy} as it was.` : `Click to keep it out of ${where}: its copy there goes, and Central Knot keeps it.`;
-  const flipHere = (on: boolean) => click({ kind: skill.kind, items: [name], rows: [rowKey(skill)], changes: [rowClicks.inHarness(skill, item, tool, !on)], said });
+  const flipHere: Click = { kind: skill.kind, items: [name], rows: [rowKey(skill)], changes: [rowClicks.inHarness(skill, item, tool, !out)], said };
   // Kept out, yet loading a copy Central Knot doesn't write there (a take leaves his so: library.ts TAKE), its own or another tool's:
   // said beside the switch, never as Off.
   const loads = loadingIn(skill, item, [tool]), runs = loads.own.length ? 'its own copy' : loads.another.length ? 'another way' : undefined;
   const now = out ? `kept out${runs ? `, running ${runs}` : ''}` : 'on', word = runs ? `${runs.charAt(0).toUpperCase()}${runs.slice(1)}` : out ? 'Off' : 'On';
+  const label = `${name} in ${where}: ${now}. ${does}`;
   return h('span.details-tool-actions', {}, own, h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, word),
-    toggle({ on: !out, disabled: writeOff(kindStops(skill.kind)), id: elId('enable', skill, tool), label: `${name} in ${where}: ${now}. ${does}`, onchange: flipHere })));
+    toggle({ on: !out, disabled: writeOff(kindStops(skill.kind)), id: elId('enable', skill, tool), label, onchange: () => click(flipHere), attrs: endsOnHover(label, () => [flipHere]) })));
 }
 
 /**

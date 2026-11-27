@@ -2564,14 +2564,17 @@ test('Before a click, a row’s switch says on hover the profile in use it would
   const drawn = (key: string) => findById(libraryTable(), `switch-skills-${key}`);
   const hover = (key: string) => { const node = drawn(key); node.onmouseenter({ currentTarget: node }); return node.attrs.title as string; };
   assert.doesNotMatch(drawn('notes').attrs.title, /profile in use/, 'drawn, its hover is its own words: the rest is worked out as the pointer comes');
-  assert.match(hover('notes'), /keeps it\. Everyday stops being the profile in use, and stays saved\.$/, 'its Off ends Everyday');
-  assert.match(hover('standup'), / Everyday stops being the profile in use, and stays saved\.$/, 'its On ends Everyday');
+  assert.match(hover('notes'), /keeps it\. Everyday stays saved but stops being the profile in use\.$/, 'its Off ends Everyday');
+  const notes = drawn('notes');
+  notes.onfocus({ currentTarget: notes });
+  assert.deepEqual([notes.attrs['aria-label'], notes.attrs['aria-description']], [notes.attrs.title.replace(/ Everyday stays.*$/, ''), 'Everyday stays saved but stops being the profile in use.'], 'focused, its name stays; what it ends is its description');
+  assert.match(hover('standup'), / Everyday stays saved but stops being the profile in use\.$/, 'its On ends Everyday');
   findById(libraryTable(), 'open-skills-notes').onclick({ stopPropagation() {} });
-  assert.equal(textOf(findById(libraryTable(), 'profile-ends-skills-notes')), 'If off, Everyday stops being the profile in use, and stays saved.');
+  assert.equal(textOf(findById(libraryTable(), 'profile-ends-skills-notes')), 'If off, only this item changes: Everyday stays saved but stops being the profile in use.');
   flip('notes', false);
   await settled();
   assert.equal(findById(libraryTable(), 'profile-ends-skills-notes'), undefined, 'its own click out, its head says nothing');
-  assert.match(hover('standup'), / Everyday may stop being the profile in use, and stays saved\.$/, 'notes’s click, waiting, may already end it');
+  assert.match(hover('standup'), / Everyday stays saved but may stop being the profile in use\.$/, 'notes’s click, waiting, may already end it');
   await main.pass(did('notes', false));
   assert.doesNotMatch(hover('standup'), /profile in use/, 'Everyday is no longer in use: nothing to end');
 });
@@ -2587,9 +2590,25 @@ test('In Select’s bar, what a Turn would end of the profile in use sits right 
   const order = ['skills-standup', 'skills-notes'], bar = () => findById(libraryTable(), 'select-bar').children[0].children.map((part: any) => part.attrs?.id ?? textOf(part));
   tickRow('skills-standup', order, false);
   assert.deepEqual(bar(), ['1 selected', 'select-turn-on', 'select-profile', 'select-turn-off', 'select-delete'], 'standup Off: only Turn on would end Everyday');
+  assert.equal(textOf(findById(libraryTable(), 'select-profile')), 'Would leave Everyday');
   tickRow('skills-notes', order, false);
   assert.deepEqual(bar(), ['2 selected', 'select-turn-on', 'select-turn-off', 'select-profile', 'select-delete'], 'notes On too: Turn off would as well');
-  assert.equal(findById(libraryTable(), 'select-profile').attrs.title, 'If on or off, Everyday stops being the profile in use, and stays saved. Undo, or switching to it again, puts it back in use.');
+  assert.deepEqual([textOf(findById(libraryTable(), 'select-profile')), findById(libraryTable(), 'select-profile').attrs.title],
+    ['Either would leave Everyday', 'If on or off, Everyday stays saved but stops being the profile in use. Undo, or switching to it again, puts it back in use.']);
+});
+
+test('Keeping his server out of Copilot CLI ends Mine where a plugin’s server of its name there is on only by his: that switch says so before the press', async t => {
+  onLibrary();
+  Object.assign(app, { libraryView: 'list', libraryKind: 'all' });
+  homeWith(t, [{ kind: 'mcp', key: 'issues' }], { on: true });
+  const tools: HarnessId[] = ['claude-cli', 'copilot-cli'];
+  Object.assign(app.home!.sync, { managed: tools, present: tools });
+  for (const kind of ['skills', 'mcp', 'agents'] as const) app.home![kind].tools = tools;
+  Object.assign(app.home!, { pluginItems: [{ tool: 'copilot-cli', plugin: 'kit', marketName: 'team', listed: true, items: [{ kind: 'mcp', name: 'issues', description: '' }] }],
+    profiles: { profiles: [{ id: 'mine', name: 'Mine', items: ['mcp:issues'], switchesPluginItems: true }], plugins: [] } });
+  findById(libraryTable(), 'open-mcp-issues').onclick({ stopPropagation() {} });
+  const said = (tool: string) => { const node = findById(libraryTable(), `enable-mcp-issues-${tool}`); node.onfocus({ currentTarget: node }); return node.attrs['aria-description']; };
+  assert.deepEqual([said('copilot-cli'), said('claude-cli')], ['Mine stays saved but stops being the profile in use.', ''], 'out of Copilot CLI, kit’s issues is on by no name Mine has; out of Claude Code, it still is');
 });
 
 test('Leaving the Library mid-run still announces the ended profile in the status bar', async t => {
@@ -2911,8 +2930,8 @@ test('Unused band: skipped rows marked, unread managed tool cue, 3-line disclosu
     const bandText = textOf(band);
     assert.ok(bandText.includes('8 with no use seen in 30 days.') && !bandText.includes('skipped'), `${bandText}: the two plugin rows it skips say so on their rows`);
     assert.equal(bandText.includes('Undo'), false, 'Undo explanation must be gone');
-    assert.equal(textOf(findById(band, 'unused-profile')), 'No longer Everyday and Focus', 'beside Turn 6 off everywhere, the two profiles it would end');
-    assert.equal(bandText.replace('No longer Everyday and Focus', '').includes('Everyday'), false, 'and no sentence of them anywhere else in the band');
+    assert.equal(textOf(findById(band, 'unused-profile')), 'Would leave Everyday and Focus', 'after Turn 6 off everywhere, the two profiles it would end');
+    assert.equal(bandText.replace('Would leave Everyday and Focus', '').includes('Everyday'), false, 'and no sentence of them anywhere else in the band');
     // Its click skips a kind whose own record stops its writes (app.ts applyByKind): what it would skip ends nothing.
     app.home!.skills.gate = { state: 'stopped', reason: 'The skills record is damaged.' };
     assert.equal(findById(libraryTable(), 'unused-profile'), undefined, 'with the skills record damaged, Turn 6 off ends nothing: no mark');

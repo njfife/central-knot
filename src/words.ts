@@ -157,13 +157,13 @@ export const throughPlugin = (tool: HarnessId, given: { plugin: string; version?
 export const HOOK_SOURCE_UNREADABLE = 'This file couldn’t be read.';
 
 /**
- * Before an act that would end the profiles in use (matrix.ts endsOf; after it, in the same verb: profileLeftUse): "Everyday stops being
- * the profile in use, and stays saved", `may`: "Everyday may stop …"; `short`: "No longer Everyday". profileBack: what puts it back.
+ * Before an act that would end the profiles in use (matrix.ts endsOf; after it, in the same verb: profileLeftUse): "Everyday stays
+ * saved but stops being the profile in use", `may`: "… but may stop …"; `short`: "would leave Everyday" ("might …"). profileBack: what puts it back.
  */
 export function profileStops(names: readonly string[], may: boolean, short = false): string {
   const many = names.length > 1, who = andList([...names]);
-  if (short) return `${may ? 'Maybe no' : 'No'} longer ${who}`;
-  return `${who} ${may ? 'may stop' : many ? 'stop' : 'stops'} being the ${many ? 'profiles' : 'profile'} in use, and ${many ? 'stay' : 'stays'} saved`;
+  if (short) return `${may ? 'might' : 'would'} leave ${who}`;
+  return `${who} ${many ? 'stay' : 'stays'} saved but ${may ? 'may stop' : many ? 'stop' : 'stops'} being the ${many ? 'profiles' : 'profile'} in use`;
 }
 export const profileBack = (names: readonly string[]) => `Undo, or switching to ${names.length > 1 ? 'one of them' : 'it'} again, puts it back in use.`;
 
