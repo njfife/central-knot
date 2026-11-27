@@ -46,7 +46,7 @@ import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h,
 import type { IconName } from './icons.ts';
 import { byName, byUsage, inOrder, kindSource, lastUpdated, noPins, partId, pin, placeIn, rankIn, rowId, type ItemRow, type KindSource, type Pinned, type RowKey, type RowOrder, type RowUsage, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
-import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, pluginToolsCard, rowClicks, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
+import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inHarnessDoes, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, pluginToolsCard, rowClicks, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionPart, type VersionText } from './versionlist.ts';
 import { itemKey, listed, type Version } from './library.ts';
@@ -2865,7 +2865,7 @@ function libraryHarnessSwitch(t: Table, lib: LibraryPage, skill: ItemRow, tool: 
       })));
   }
   const said = (notIn: HarnessId[]) => lib.say.said.inHarness(name, tool, !out, notIn.includes(tool as HarnessId));
-  const does = out ? `Click to put it in ${where} again, its ${lib.words.copy} as it was.` : `Click to keep it out of ${where}: its copy there goes, and Central Knot keeps it.`;
+  const does = inHarnessDoes(where, out, lib.words.copy);
   const flipHere = (on: boolean) => click({ kind: skill.kind, items: [name], rows: [rowKey(skill)], changes: [rowClicks.inHarness(skill, item, tool, !on)], said });
   // Kept out, yet loading a copy Central Knot doesn't write there (a take leaves his so: library.ts TAKE), its own or another tool's:
   // said beside the switch, never as Off.

@@ -8937,12 +8937,13 @@ esac
   const box = tool => `#pbox-0-issue-tracker-${tool}`;
   const boxIs = tool => a.run(`(() => { const b = document.querySelector('${box(tool)}'); return b ? [b.getAttribute('aria-checked'), b.disabled, b.dataset.state] : null; })()`);
   for (let tries = 0; tries < 50 && !(await a.exists(box('pi-cli'))); tries++) await wait(100);
-  same('each tool’s box is ticked where it is, and says what a click does', [await boxIs('claude-cli'), await boxIs('pi-cli'), /Click to take issue-tracker’s items out of Pi: it stays out until you tick it again\./.test(await a.run(`document.querySelector('${box('pi-cli')}').title`) ?? '')],
+  same('each tool’s box is ticked where it is, and says what a click does', [await boxIs('claude-cli'), await boxIs('pi-cli'), /Click to take all of issue-tracker’s items out of Pi: it stays out until you tick it again\./.test(await a.run(`document.querySelector('${box('pi-cli')}').title`) ?? '')],
     [['true', false, 'installed'], ['mixed', false, 'items'], true]);
   await a.click(box('pi-cli'));
   await done();
   same('unticked, its items leave Pi alone (not triage, his own now), it is recorded, the row says so, and the switch shows partial', [inPi(), installed(), entry()?.except, await boxIs('pi-cli'), await a.text('.plugin-panel .plugin-click'), await switchIs('#pswitch-page-0-issue-tracker')],
     [[true, false], true, ['pi-cli'], ['false', false, 'absent'], 'Its items taken out of Pi', 'true partial']);
+  check('the empty box says a tick puts all of its items in', /Click to put all of issue-tracker’s items in Pi\. Undo takes it out again\./.test(await a.run(`document.querySelector('${box('pi-cli')}').title`) ?? ''), await a.run(`document.querySelector('${box('pi-cli')}').title`));
   // Its items are put back by Central Knot, through no tool's command: the tooltip ends its sentence where nothing follows.
   const undoTitle = await a.run(`document.querySelector('#plugins-undo')?.title ?? ''`);
   check('the Undo of a click in Pi alone says a whole sentence, nothing empty after a colon', /^Reverses what changed for issue-tracker\.( |$)/.test(undoTitle) && !/: \./.test(undoTitle), undoTitle);
@@ -22753,10 +22754,99 @@ async function pluginPageSaysLessFlow() {
   await a.quit();
 }
 
+/**
+ * A plugin's items, switched one tool at a time on its own page (pluginpage.ts itemSwitch, switchItemIn): placed in Pi by its box,
+ * two kept out of Pi by their switches (the box counts 1 of its 3, a dash), the header's Undo, one refused when it changed behind
+ * the page; and an item that meets Pi's own copy has no Pi switch (Use the plugin's under the box is its act there).
+ */
+async function pluginItemSwitchesFlow() {
+  const home = join(scratch, 'home-item-switches'), data = join(scratch, 'item-switches-data'), market = join(scratch, 'market-item-switches');
+  const put = (path, content) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content); };
+  const md = (name, body) => `---\nname: ${name}\ndescription: ${name}.\n---\n\n${body}\n`;
+  put(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'ck-switch-market', plugins: [
+    { name: 'trio', source: './plugins/trio', version: '1.0.0' }, { name: 'pair', source: './plugins/pair', version: '1.0.0' }] }));
+  const draftMd = md('draft', 'Plugin draft.'), polishMd = md('polish', 'Plugin polish.'), mineInPi = md('mine', 'My own mine in Pi.');
+  put(join(market, 'plugins/trio/skills/draft/SKILL.md'), draftMd);
+  put(join(market, 'plugins/trio/skills/polish/SKILL.md'), polishMd);
+  put(join(market, 'plugins/trio/.mcp.json'), JSON.stringify({ mcpServers: { relay: { command: 'npx', args: ['relay'] } } }));
+  put(join(market, 'plugins/pair/skills/mine/SKILL.md'), md('mine', 'Plugin mine.'));
+  put(join(market, 'plugins/pair/agents/checker.md'), '---\nname: checker\ndescription: Checks.\n---\nCheck.\n');
+  put(join(home, '.pi/agent/skills/mine/SKILL.md'), mineInPi);
+  for (const [bin, ver] of [['claude', '2.1.322 (Claude Code)'], ['pi', 'pi 0.1.0'], ['opencode', 'opencode 1.19.5'], ['agy', '1.5.14']]) {
+    put(join(home, '.local/bin', bin), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${ver}" && exit 0\nexit 9\n`);
+    chmodSync(join(home, '.local/bin', bin), 0o755);
+  }
+  for (const dir of ['.claude', '.config/opencode', '.gemini/config']) mkdirSync(join(home, dir), { recursive: true });
+  put(join(data, 'marketplaces.json'), JSON.stringify([market]));
+  put(join(data, 'app-settings.json'), JSON.stringify({ home: canWriteRealHome ? { mode: 'actual' } : { mode: 'custom', path: home }, closeExplained: true }));
+  const a = await launch(data, [], home, { CK_TEST_HOME_ONLY: 'claude,pi,opencode,agy' });
+  const done = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  const until = async fn => { for (let tries = 0; tries < 100 && !(await fn()); tries++) await wait(100); };
+  const sw = (plugin, tool, kind, key) => `#pitem-0-${plugin}-${tool}-${kind}-${key}`;
+  const switches = plugin => a.run(`[...document.querySelectorAll('.plugin-items-list [id^="pitem-0-${plugin}-"]')].map(e => e.id.replace('pitem-0-${plugin}-', '') + ' ' + e.getAttribute('aria-checked'))`);
+  const piBox = plugin => a.run(`(() => { const b = document.querySelector('#pbox-0-${plugin}-pi-cli'); return [b?.getAttribute('aria-checked'), b?.title ?? ''] })()`);
+  const piSays = () => a.text('.plugin-tool[data-tool="pi-cli"] .plugin-tool-state');
+  const header = () => a.text('#header [data-outcome] .band-text');
+  const shot = async (name, [width, height], theme) => { if (!shots) return; await a.run(`window.centralKnot.setAppearance('${theme}')`); await sizeTo(a, width, height); await a.shot(name); };
+  const openPage = async plugin => { if (await a.exists('#plugin-back')) await a.click('#plugin-back'); await until(() => a.exists(`#popen-0-${plugin}`)); await a.click(`#popen-0-${plugin}`); await until(() => a.exists(`#pbox-0-${plugin}-pi-cli`)); };
+
+  await a.click('#nav-plugins');
+  await openPage('trio');
+  same('before Pi’s box is ticked, no item has a switch', await switches('trio'), []);
+  await a.click('#pbox-0-trio-pi-cli');
+  await done();
+  await until(() => a.exists(sw('trio', 'pi-cli', 'skill', 'draft')));
+  same('Pi’s box ticked: each item has a switch per tool under the tools’ marks, on in Pi, kept out of OpenCode and Antigravity, with no words for it',
+    [await a.all('.plugin-items-section .skill-switch-head', 'e.title'), await switches('trio'), await a.all('.plugin-items-list .plugin-outcome-what', 'e.textContent')],
+    [['Pi', 'OpenCode', 'Antigravity'], ['pi-cli-skill-draft true', 'opencode-cli-skill-draft false', 'antigravity-cli-skill-draft false', 'pi-cli-skill-polish true', 'opencode-cli-skill-polish false',
+      'antigravity-cli-skill-polish false', 'pi-cli-mcp-relay true', 'opencode-cli-mcp-relay false', 'antigravity-cli-mcp-relay false'], ['', '', '']]);
+  same('a switch says what its click does, in the Library row’s words; the box, that its click takes all of them out', [await a.run(`document.querySelector('${sw('trio', 'pi-cli', 'skill', 'draft')}').title`), (await piBox('trio'))[1].endsWith('Click to take all of trio’s items out of Pi: it stays out until you tick it again. Undo puts it back.')],
+    ['draft in Pi: on. Click to keep it out of Pi: its copy there goes, and Central Knot keeps it.', true]);
+  await shot('item-switches-light-860', SMALLEST, 'light');
+  await shot('item-switches-dark-1316', [1316, 819], 'dark');
+  await fullSize(a);
+  await a.run(`window.centralKnot.setAppearance('system')`);
+  await fitsAtMinimum(a, 'a plugin’s page with its items’ switches');
+  // Two siblings kept out of Pi on the page: each the Library row's act, its result in the header with Undo; the box counts what is left.
+  await a.click(sw('trio', 'pi-cli', 'skill', 'draft'));
+  await done();
+  same('draft kept out of Pi: its copy goes, the header says so with Undo, its switch is off, the box a dash at 2 of its 3',
+    [existsSync(join(home, '.pi/agent/skills/draft')), await header(), await a.exists('#outcome-undo'), await a.run(`document.querySelector('${sw('trio', 'pi-cli', 'skill', 'draft')}').getAttribute('aria-checked')`), (await piBox('trio'))[0], await piSays()],
+    [false, 'draft: kept out of Pi: its copy there was removed. Central Knot keeps it.', true, 'false', 'mixed', '2 of its 3 items are on in Pi.']);
+  await shot('item-switches-result-light-860', SMALLEST, 'light');
+  await fullSize(a);
+  await a.run(`window.centralKnot.setAppearance('system')`);
+  await a.click(sw('trio', 'pi-cli', 'skill', 'polish'));
+  await done();
+  same('polish kept out too: the box says 1 of its 3, and relay alone is in Pi', [existsSync(join(home, '.pi/agent/skills/polish')), await piSays(), Object.keys(JSON.parse(readNow(join(home, '.pi/agent/mcp.json')) || '{}').mcpServers ?? {})],
+    [false, '1 of its 3 items is on in Pi.', ['relay']]);
+  await a.click('#outcome-undo');
+  await done();
+  same('the header’s Undo puts polish back in Pi byte for byte, draft still out', [readNow(join(home, '.pi/agent/skills/polish/SKILL.md')), existsSync(join(home, '.pi/agent/skills/draft')), await piSays()], [polishMd, false, '2 of its 3 items are on in Pi.']);
+  // Let back in behind the page: the click on its switch, drawn off, is refused, and nothing changes.
+  await a.run(`(async () => { const { home } = await window.centralKnot.refresh(); await window.centralKnot.applySkills([{ key: 'draft', on: true, except: ['opencode-cli', 'antigravity-cli'] }], false, home); })()`);
+  await a.click(sw('trio', 'pi-cli', 'skill', 'draft'));
+  await done();
+  same('a switch drawn before a change behind the page is refused, and draft stays as that change left it', [await header(), readNow(join(home, '.pi/agent/skills/draft/SKILL.md'))], ['draft changed since the page was read. Nothing was changed.', draftMd]);
+  // pair: Pi's own mine is kept, so mine has no Pi switch (Use the plugin's under Pi's box is its act there); checker has none in Antigravity, which takes no agents.
+  await openPage('pair');
+  await a.click('#pbox-0-pair-pi-cli');
+  await done();
+  await until(() => a.exists(sw('pair', 'pi-cli', 'agent', 'checker')));
+  same('an item meeting Pi’s own copy: no Pi switch, kept out in words, its act under the box; an agent: no Antigravity switch, and no words for it',
+    [await switches('pair'), await a.text('.plugin-items-list [data-key="skill:mine"] .plugin-outcome-what'), await a.text('.plugin-items-list [data-key="agent:checker"] .plugin-outcome-what'), await a.exists('#pclash-0-pair-pi-cli-skill-mine'), readNow(join(home, '.pi/agent/skills/mine/SKILL.md'))],
+    [['opencode-cli-skill-mine false', 'antigravity-cli-skill-mine false', 'pi-cli-agent-checker true', 'opencode-cli-agent-checker false'], 'Kept out of Pi', '', true, mineInPi]);
+  await shot('item-switches-cannot-light-860', SMALLEST, 'light');
+  await fullSize(a);
+  await a.run(`window.centralKnot.setAppearance('system')`);
+  same('no page errors, item switches', a.pageErrors, []);
+  await a.quit();
+}
+
 const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, selectFlow, sessionStripFlow, hookRunFlow, fromFlow, claudeWholeFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow, sessionsFlow, keepSessionCostsFlow, sessionsWeekFlow],
-  [fewToolsFlow, openCodeFlow, antigravityFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, pluginPageSaysLessFlow, pluginRecordHoldsFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow, clickReadsFlow],
+  [fewToolsFlow, openCodeFlow, antigravityFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, pluginPageSaysLessFlow, pluginItemSwitchesFlow, pluginRecordHoldsFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow, clickReadsFlow],
   [backFlow, backPlaceFlow, libraryLinesFlow, harnessFlow, manageFlow, arrivalFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, mcpSigninFlow, firstSetupFlow, skillFileFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.

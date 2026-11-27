@@ -1629,6 +1629,9 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .plugin-skills .plugin-parts li.with-end:hover { background: var(--hover); }
 .plugin-parts li.with-end { grid-template-columns: minmax(120px, max-content) minmax(0, 1fr) auto; min-height: 28px; align-items: start; }
 .skill-switches { display: inline-flex; align-self: start; }
+/* Its items with switches: each line's switches at its end, under the marks above the list (its border and padding: 13px). */
+.plugin-items-list .plugin-outcome-row.with-end { grid-template-columns: minmax(200px, auto) minmax(0, 1fr) auto; }
+.plugin-items-section .skill-switch-cols { padding-right: 13px; }
 .skill-switch, .skill-switch-head { width: 96px; display: inline-flex; justify-content: center; align-items: center; }
 .skill-switch-head { flex-direction: column; font-size: 11.5px; color: var(--ink); white-space: nowrap; }
 .skill-switch-tool { display: inline-flex; align-items: center; gap: 5px; }

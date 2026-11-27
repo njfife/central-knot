@@ -561,6 +561,7 @@ test('An edit in Pi lets notes go, kept where it is: nothing of it reaches Claud
 
 // ---------- Found by the confirming read ----------
 
+// What a box does today, recorded: a tick lets every item into its tool again, as nothing stored says which were switched off one by one.
 test('Two items kept out of Pi one by one, as a plugin page’s item switch does: Update keeps them out; Pi’s box unticked and ticked again lets Pi into every item, so they come back on there, with Claude Code holding the plugin and without', async () => {
   for (const tools of [['claude-cli', 'pi-cli'], ['pi-cli']] as HarnessId[][]) {
     const box = await kitHome({ tools });

@@ -279,6 +279,10 @@ export const rowClicks = {
   remove: (row: LibraryRow, item: LibraryItem | undefined): Change => ({ ...rowAsItIs(row, item), deleted: true }),
 };
 
+/** What a tool's own switch for an On item does (`out`: kept out there now), as its tooltip says: in the opened row (matrix.ts) and on a plugin's page under Its items (pluginpage.ts itemSwitch). */
+export const inHarnessDoes = (where: string, out: boolean, copy: string) =>
+  (out ? `Click to put it in ${where} again, its ${copy} as it was.` : `Click to keep it out of ${where}: its copy there goes, and Central Knot keeps it.`);
+
 // ---------- Versions ----------
 
 /** A version's note: what it changed ("prompt changed"), what a copy that gave way differs in ("prompt differs"), or "first version". */

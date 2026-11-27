@@ -137,7 +137,8 @@ export function uninstallControl(entry: MarketplaceView, plugin: PluginView, too
 
 /** What a click on a tool's box does there, and its Undo, in the state it is drawn in (pluginrecord.ts A TOOL'S BOX and row 9). */
 function boxDoes(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, mark: ToolMark, ticked: boolean): string {
-  const what = takesPlugins(tool) ? plugin : `${plugin}’s items`;
+  // In a tool that takes items one by one a tick lets every item in, one kept out there by its own switch too (pluginlibrary.ts clickOn).
+  const what = takesPlugins(tool) ? plugin : `all of ${plugin}’s items`;
   const where = names[tool];
   const sw = entry.switches?.[plugin];
   const on = !!sw?.entry?.on;
