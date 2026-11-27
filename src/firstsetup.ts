@@ -62,10 +62,10 @@ function question(home: HomeView) {
   const { takes, choosing } = whatYesDoes(home), ready = setupKinds(home), { managed, present } = home.sync;
   const found = heldKinds(home).reduce((count, kind) => count + kindSource(home, kind).facts.filter(fact => fact.takeInAnswers).length + pluginItemCount(home, kind), 0);
   const stopped = KINDS.filter(kind => !ready.includes(kind) && home[kind].items.some(item => item.takeInAnswers)).map(kind => kindNouns[kind].many);
-  const tools = `${managed.length < present.length ? `the ${plural(managed.length, 'tool')} Central Knot manages` : 'every tool'} that can take them`;
+  const tools = (them: string) => `${managed.length < present.length ? `the ${plural(managed.length, 'tool')} Central Knot manages` : 'every tool'} that can take ${them}`;
   const some = takes < found ? `${takes} of the ${plural(found, 'item')}` : `the ${plural(takes, 'item')}`;
-  const ask = takes ? `Add ${some} found in your tools to ${tools}, and new ones as they turn up?`
-    : `${found ? 'None of the items found is ready to add' : 'Nothing new in your tools now'}. Add new items to ${tools} as they turn up?`;
+  const ask = takes ? `Add ${some} found in your tools to ${tools(takes === 1 ? 'it' : 'them')}, and new ones as they turn up?`
+    : `${found ? 'None of the items found is ready to add' : 'Nothing new in your tools now'}. Add new items to ${tools('them')} as they turn up?`;
   const waits = stopped.length ? `Found ${andList(stopped)} wait until their record can be used.` : '';
   const no = `Leaves it off: ${anyOn(home) ? 'what is on stays on, and ' : ''}each found item waits in the Library for Add.`;
   return h('section.setup-question', { id: 'setup-question', 'aria-labelledby': 'setup-question-title', 'data-info-block': true },

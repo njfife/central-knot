@@ -2652,6 +2652,9 @@ test('First setup’s question counts as found only what is found in his tools: 
     takeInAnswers: { click: { take: { harness: 'claude-cli', hash: key } }, rule: { take: { harness: 'claude-cli', hash: key } } } });
   home.skills.items.push(ready('alpha') as never, ready('beta') as never);
   assert.equal(textOf(findById(setupLead(home)!, 'setup-question-title')), 'Add the 2 items found in your tools to every tool that can take them, and new ones as they turn up?');
+  // One item: the tools that can take it.
+  home.skills.items.pop();
+  assert.equal(textOf(findById(setupLead(home)!, 'setup-question-title')), 'Add the 1 item found in your tools to every tool that can take it, and new ones as they turn up?');
 });
 
 test('First setup’s No: its hover says what is on stays on only where something is; its band names the setting, and its Turn on is the same switch as Yes, with the same result', async t => {
