@@ -168,8 +168,11 @@ export function copyButton(text: string, what: string, id: string, label?: strin
     variant: 'ghost', size: 'micro', icon: 'copy', name: `Copy ${what}`, id, label,
     onclick: () => void navigator.clipboard.writeText(text).then(() => {
       glyphButton.firstElementChild!.replaceWith(icon('copy-check', 14));
+      // A label says Copied where he pressed, as the status bar does (the MCP sign-in page's Copy; others have none).
+      const shown = glyphButton.querySelector('.btn-label');
+      if (shown) shown.textContent = 'Copied';
       announce(said);
-      setTimeout(() => glyphButton.firstElementChild?.replaceWith(icon('copy', 14)), 1500);
+      setTimeout(() => { glyphButton.firstElementChild?.replaceWith(icon('copy', 14)); if (shown) shown.textContent = label!; }, 1500);
     }, () => announce('Could not copy. Select the text instead.')),
   });
   return glyphButton;

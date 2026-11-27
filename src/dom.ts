@@ -379,8 +379,8 @@ const clamp = (value: number, min: number, max: number) => Math.max(min, Math.mi
 export const infoCardId = (id: string) => `${id}-card`;
 /**
  * Places an info card 4 px below `block` (defaults to `mark`), or 4 px above when there is no room below within 8 px of
- * the window's foot; when neither side fits cleanly, clamps on whichever side of `block` has more room. Slides sideways
- * from `mark.left` to stay 8 px inside the window's sides.
+ * the view's foot; when neither side fits cleanly, clamps on whichever side of `block` has more room. Slides sideways
+ * from `mark.left` to stay 8 px inside the view's sides (syncInfoCard: the window, short of the status bar and a scroll bar).
  */
 export function cardPlace(mark: { left: number; top: number; bottom: number }, card: { width: number; height: number },
   view: { width: number; height: number }, block: { top: number; bottom: number } = mark): { left: number; top: number } {
@@ -442,8 +442,11 @@ export function syncInfoCard(checkView = false): void {
   // No card covers the status bar: the height cards are placed in ends at #status's top when shown.
   const status = document.getElementById('status')?.getBoundingClientRect();
   const height = status && status.height > 0 && status.top > 0 ? Math.min(window.innerHeight, status.top) : window.innerHeight;
+  // Nor a scroll bar: the width they are placed in ends where the page's scrolling area's own scroll bar begins.
+  const scroller = mark.closest('.scroll');
+  const width = scroller ? Math.min(window.innerWidth, scroller.getBoundingClientRect().left + scroller.clientWidth) : window.innerWidth;
   const { left, top } = cardPlace(
-    mark.getBoundingClientRect(), card.getBoundingClientRect(), { width: window.innerWidth, height }, block,
+    mark.getBoundingClientRect(), card.getBoundingClientRect(), { width, height }, block,
   );
   Object.assign(card.style, { left: `${left}px`, top: `${top}px` });
 }

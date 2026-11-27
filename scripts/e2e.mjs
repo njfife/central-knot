@@ -926,7 +926,7 @@ async function harnessFlow() {
   await a.click('#harness-codex-cli .harness-card-head');
   await a.click('#harness-codex-cli .harness-card-main');
   const outStayed = await a.exists('.harness-cards') && !(await a.exists('#harness-back'));
-  await a.click('#manage-codex-cli');
+  await manageAgain(a, 'codex-cli');
   const managedBack = await a.exists('.harness-cards') && !(await a.exists('#harness-back')) && await a.exists('button#harness-codex-cli.harness-card-head');
   same('Manage and an unmanaged card never navigate, and re-enabling restores the heading button', [codexOut, outStayed, managedBack], [true, true, true]);
   // The card's count and the tab it opens agree; another harness starts with the filter off.
@@ -955,8 +955,8 @@ async function harnessFlow() {
   await a.click('button#harness-copilot-cli.harness-card-head');
   await a.click('#harness-tab-skills');
   await a.click('#nav-overview');
-  // While first setup's question is asked it says the copies that differ itself; answered No, a line of their own says them.
-  check('while first setup’s question is asked, it alone says the copies that differ', !(await a.exists('#overview-skills-differ')) && /copies that differ/.test(await a.text('#setup-question') ?? ''), await a.text('#overview-needs'));
+  // The copies that differ are one line under first setup's question while it is asked, and a line a kind after No.
+  same('while first setup’s question is asked, one line under it says the found skill whose copies differ, by the page’s count', [await a.exists('#setup-question'), await a.text('#overview-differ-line')], [true, '1 found skill has copies that differ and stays as it is until you choose. Show them']);
   await a.click('#setup-no');
   same('answered No, one line says the found skill whose copies differ, by the page’s count', await a.text('#overview-skills-differ-line'), '1 found skill has copies that differ. Show them');
   await a.click('#overview-skills-differ');
@@ -1133,12 +1133,45 @@ async function harnessFlow() {
   }
 }
 
+/** Turns a left-out tool's Manage switch on as a person does: the switch, then Manage <tool> in the question it opens on its card. */
+async function manageAgain(page, tool) {
+  await page.click(`#manage-${tool}`);
+  for (let tries = 0; tries < 50 && !(await page.exists(`#manage-${tool}-confirm`)); tries++) await wait(100);
+  await page.click(`#manage-${tool}-confirm`);
+}
+
 /**
  * A tool's Manage switch on its Harnesses card (toolchoice.ts), in the Practice copy: Codex left out, then managed again, with
- * what the line said before each click, the band after it, Codex's files byte for byte, and what the other pages show
- * meanwhile; then every tool left out.
+ * what the question asked at the press said before each click, the band after it, Codex's files byte for byte, and what the
+ * other pages show meanwhile; then every tool left out.
  */
 async function manageFlow() {
+  // Opening the question writes nothing at all. On History (Harnesses reads the plugins view as it opens), in a home with no
+  // plugins record and the automatic updates on (so main reads what plugins follow; the run's checks never start by themselves:
+  // launch): with the question open, and after Cancel, the home's records and the app's own files in its data folder (its
+  // settings, plugin folder and log; Chromium's caches aside) are byte for byte as they were, once the launch's pass has settled.
+  const quietHome = join(scratch, 'manage-quiet-home'), quietData = join(scratch, 'manage-quiet-data');
+  for (const folder of ['.claude/skills', '.codex/skills', '.central-knot']) mkdirSync(join(quietHome, folder), { recursive: true });
+  writeFileSync(join(quietHome, '.central-knot/sync.json'), JSON.stringify({ formatVersion: 3, generation: 'g-quiet', owner: STANDARD_BUILD, leftOut: ['codex-cli'] }));
+  writeFileSync(join(quietHome, '.central-knot/history.json'), JSON.stringify({ events: [
+    { id: 'quiet-out', at: new Date().toISOString(), key: 'tool:codex-cli', item: 'Codex', kind: 'managing', managing: { tool: 'codex-cli', on: false }, losers: [], orderProved: true }] }));
+  mkdirSync(quietData, { recursive: true });
+  writeFileSync(join(quietData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: quietHome }, pluginUpdates: true }));
+  writeFileSync(join(quietData, 'sharing-settings.json'), JSON.stringify({ homes: { [quietHome]: { generation: 'g-quiet' } } }));
+  const wq = await launch(quietData);
+  await wq.click('#nav-history');
+  const appOwn = () => Object.fromEntries(Object.entries(tree(quietData)).filter(([path]) => /^[a-z][a-z0-9.-]*(\/|$)/.test(path) && !path.startsWith('databases')));
+  const quiet = () => JSON.stringify([tree(join(quietHome, '.central-knot')), appOwn()]);
+  let quietBefore = quiet();
+  for (let tries = 0; tries < 10; tries++) { await wait(500); if (quiet() === quietBefore) break; quietBefore = quiet(); }
+  await wq.click('#history-quiet-out');
+  for (let tries = 0; tries < 50 && !(await wq.exists('#history-manage-confirm-quiet-out')); tries++) await wait(100);
+  const asked = [existsSync(join(quietHome, '.central-knot/plugins.json')), quiet() === quietBefore];
+  await wq.click('#history-manage-cancel-quiet-out');
+  same('Manage Codex’s question, open and then closed, writes nothing: no plugins record made, no pass, nothing fetched', [asked, existsSync(join(quietHome, '.central-knot/plugins.json')), quiet() === quietBefore], [[false, true], false, true]);
+  same('no page errors, manage quiet', wq.pageErrors, []);
+  await wq.quit();
+
   const a = await launch(join(scratch, 'manage-data'), ['--practice-copy']);
   const practice = await a.run(`document.querySelector('.status-home').title`);
   const switches = () => a.all('[id^="manage-"][role="switch"]', 'e.id + ":" + e.getAttribute("aria-checked")');
@@ -1147,11 +1180,11 @@ async function manageFlow() {
   await a.click(`#${rowPart('add', 'skills', 'standup')}`);
   await a.click('#nav-harnesses');
   same('every installed tool’s card has its Manage switch, on', await switches(), ['manage-claude-cli:true', 'manage-copilot-cli:true', 'manage-codex-cli:true']);
-  same('only the first managed card carries Managed (?) with its card text, and no managed card keeps a standing line or dangling aria-describedby',
+  same('only the first managed card carries Managed (?) with its card text, and no managed card keeps a question or dangling aria-describedby',
     await a.run(`(() => {
       const marks = [...document.querySelectorAll('.harness-manage .info-mark')].map(el => [el.id, el.closest('.harness-manage')?.querySelector('[role="switch"]')?.id]);
       const card = document.getElementById('manage-info-card')?.textContent ?? '';
-      const lines = [...document.querySelectorAll('.harness-manage-line')].map(el => el.id);
+      const lines = [...document.querySelectorAll('.manage-question')].map(el => el.id);
       const dangling = [...document.querySelectorAll('[id^="manage-"][role="switch"]')].filter(sw => { const id = sw.getAttribute('aria-describedby'); return id && !document.getElementById(id); }).map(sw => sw.id);
       return [marks, card, lines, dangling];
     })()`),
@@ -1161,28 +1194,35 @@ async function manageFlow() {
   same('first managed card after an unmanaged one carries the one Managed (?)',
     await a.run(`[...document.querySelectorAll('.harness-manage .info-mark')].map(el => [el.id, el.closest('.harness-manage')?.querySelector('[role="switch"]')?.id, document.getElementById('manage-info-card')?.textContent ?? ''])`),
     [['manage-info', 'manage-copilot-cli', 'Turning a tool off keeps its copies. Central Knot stops writing to it until you turn it on again.']]);
-  await a.click('#manage-claude-cli');
+  await manageAgain(a, 'claude-cli');
   const codex = () => tree(join(practice, '.codex'));
   const before = codex();
   const waitHistory = (page, match, tries = 40) => (async () => { for (let n = 0; n < tries && !(await match()); n++) await wait(100); return match(); })();
-  const shotAt = async (page, name, [width, height], theme) => {
-    if (!shots) return;
-    await sizeTo(page, width, height);
-    await page.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
-    await wait(80);
-    await page.shot(name);
-    await page.run(`window.centralKnot.setAppearance('system')`);
-    await wait(80);
-    await fullSize(page);
-  };
   await a.click('#manage-codex-cli');
   check('the band says Codex is left out and its copies stay', (await a.text('.band-done .band-text') ?? '').startsWith('Codex is left out: Central Knot writes nothing there now.'), await a.text('.band-done'));
   same('turning it off wrote nothing in Codex', codex(), before);
   const card = await a.text('#harness-codex-cli');
-  check('its card says it is left out, with its switch, opens nothing, and never says Not found or Install', card.includes('Not managed') && card.includes('Left out') && !/Not found|Install/.test(card) && !(await a.exists('button#harness-codex-cli')), card);
-  same('its line says what turning it on would do without the cut Instructions sentence', await a.text('#manage-codex-cli-line'), 'On: changes no item in Codex; shows 2 found items under Found.');
+  check('its card says it is left out and that its switch asks first, opens nothing, and never says Not found or Install',
+    card.includes('Not managed') && card.includes('Left out: Central Knot writes nothing in Codex. Its switch asks before managing it again.') && !/Not found|Install/.test(card) && !(await a.exists('button#harness-codex-cli')), card);
+  same('its card says nothing of what turning it on would do until the switch is pressed', await a.exists('#manage-codex-cli-text'), false);
   await shotAt(a, 'harnesses-left-out-860-light', SMALLEST, 'light');
   await fitsAtMinimum(a, 'Harnesses with a tool left out');
+  // The switch asks first, in the card: what managing Codex does there, read at the press; Cancel writes nothing and gives the
+  // focus back to the switch.
+  const asking = () => waitHistory(a, () => a.run(`!!document.getElementById('manage-codex-cli-confirm') || /couldn’t|no longer/.test(document.getElementById('manage-codex-cli-text')?.textContent ?? '')`));
+  await a.click('#manage-codex-cli');
+  await asking();
+  const nothingYet = 'Changes no item in Codex. 2 items stay Codex’s own: they will show under Found in the Library.';
+  same('pressed, the switch asks in the card, Cancel focused, and turns nothing yet', [
+    await a.text('#manage-codex-cli-text'), await a.all('#harness-codex-cli .manage-question button', 'e.textContent'), await a.run(`document.activeElement?.id`),
+    await a.run(`document.getElementById('manage-codex-cli').getAttribute('aria-checked')`), codex(),
+  ], [nothingYet, ['Cancel', 'Manage Codex'], 'manage-codex-cli-cancel', 'false', before]);
+  await shotAt(a, 'question-860-light', SMALLEST, 'light');
+  await shotAt(a, 'question-1316-dark', [1316, 819], 'dark');
+  await shotAt(a, 'question-1728-light', [1728, 1117], 'light');
+  await fitsAtMinimum(a, 'Harnesses asking before Codex is managed again');
+  await a.click('#manage-codex-cli-cancel');
+  same('Cancel closes the question, writes nothing, and puts focus back on the switch', [await a.exists('.manage-question'), codex(), await a.run(`document.activeElement?.id`)], [false, before, 'manage-codex-cli']);
   await openKind(a, 'skills');
   check('the Library’s skills has no Codex mark', (await a.exists('.tool-mark')) && !(await a.exists('.tool-mark[data-tool="codex-cli"]')));
   await a.click('#nav-overview');
@@ -1195,75 +1235,91 @@ async function manageFlow() {
   await waitHistory(a, () => a.exists('.history-row'));
   const newest = `document.querySelector('.history-row')`;
   const newestManage = `document.querySelector('.history-row[data-kind="managing"]')`;
-  same('History has one entry for the flip, naming the tool, with Manage it again and no redirect sentence', [
+  same('History has one entry for the flip, naming the tool, with Manage Codex and no redirect sentence', [
     await a.run(`${newest}.querySelector('.history-kind').textContent`), await a.run(`${newest}.querySelector('.history-what strong').textContent`),
     await a.run(`${newest}.querySelector('.history-about').textContent`), await a.run(`[...${newest}.querySelectorAll('.history-actions button')].map(b => b.textContent)`)],
-  ['Tool', 'Codex', 'Left out from here on: Central Knot writes nothing in Codex, and its copies there stay as they are.', ['Manage it again']]);
-  await shotAt(a, 'left-out-860-light', SMALLEST, 'light');
-  await shotAt(a, 'left-out-1316-dark', [1316, 819], 'dark');
+  ['Tool', 'Codex', 'Left out from here on: Central Knot writes nothing in Codex, and its copies there stay as they are.', ['Manage Codex']]);
+  await shotAt(a, 'history-left-out-860-light', SMALLEST, 'light');
+  await shotAt(a, 'history-left-out-1316-dark', [1316, 819], 'dark');
   await a.click('#nav-harnesses');
-  // A hand edit in Codex while it is left out reads no page again (nothing was written), so its line still says nothing would
-  // change; the band after the click says what the pass did there.
+  // A hand edit in Codex while its question is open reads no page again (nothing was written), so the question still says
+  // nothing would change; Manage Codex then finds what main counts now differs, turns nothing, and asks again with that.
+  await a.click('#manage-codex-cli');
+  await asking();
   const standup = join(practice, '.codex/skills/standup/SKILL.md');
   writeFileSync(standup, `${readFileSync(standup, 'utf8')}\nEdited in Codex while it was left out.\n`);
+  const editedOnCard = codex();
   await wait(2500);
+  await a.click('#manage-codex-cli-confirm');
+  await asking();
+  const overwrite = (restore) => `Saves Codex’s copy of standup as a version (${restore}), then replaces it in Codex with Central Knot’s version. 2 other items stay Codex’s own: they will show under Found in the Library.`;
+  const counted = overwrite('History can restore it');
+  same('Manage Codex after the hand edit turns nothing and asks again with what managing it does now', [
+    await a.text('#manage-codex-cli-text'), await a.run(`document.getElementById('manage-codex-cli').getAttribute('aria-checked')`), codex(), await a.run(`document.activeElement?.id`),
+  ], [`Changed since this was read; nothing was written. ${counted}`, 'false', editedOnCard, 'manage-codex-cli-cancel']);
+  await shotAt(a, 'changed-860-light', SMALLEST, 'light');
+  await a.click('#manage-codex-cli-cancel');
   await a.click('#manage-codex-cli');
-  same('turned on again, the band says what the pass did there, not what the card said before', await a.text('.band-done .band-text'),
-    'Central Knot manages Codex now: Central Knot’s version written there for 1 item (over its copy there, which a version keeps). Each change there is in History.');
+  await asking();
+  same('pressed again, the switch reads afresh: the hand edit counted, without a Refresh', await a.text('#manage-codex-cli-text'), counted);
+  await shotAt(a, 'question-overwrite-860-light', SMALLEST, 'light');
+  await a.click('#manage-codex-cli-confirm');
+  same('turned on again, the band names what the pass did there, in the question’s words', await a.text('.band-done .band-text'),
+    'Central Knot manages Codex now: Codex’s copy of standup is saved as a version (History can restore it), and Central Knot’s is written over it. Each change there is in History.');
+  await shotAt(a, 'result-860-light', SMALLEST, 'light');
   same('turning it on put Central Knot’s version back over the hand edit: Codex holds what it held before', codex(), before);
   check('and its card heading opens its page again', await a.exists('button#harness-codex-cli.harness-card-head'));
-  // From History: Leave it out again acts at once and keeps Codex's copies; Manage it again asks in the row with the card's own
+  // From History: Leave Codex out again acts at once and keeps Codex's copies; Manage Codex asks in the row with the card's own
   // sentence, lets Cancel and Escape return focus without writing, and confirming puts Central Knot's version back over an edit.
   await a.click('#nav-history');
-  await waitHistory(a, () => a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Leave it out again'`));
-  same('the manages entry offers Leave it out again with its hover, and the older Left out entry offers no button', [
+  await waitHistory(a, () => a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Leave Codex out again'`));
+  same('the manages entry offers Leave Codex out again with its hover, and the older Left out entry offers no button', [
     await a.run(`${newestManage}.querySelector('.history-about').textContent`),
     await a.run(`${newestManage}.querySelector('.history-actions button')?.title`),
     await a.run(`[...document.querySelectorAll('.history-row[data-kind="managing"]')][1]?.querySelectorAll('.history-actions button').length`),
   ], ['Central Knot manages Codex from here on: sync brings it into line, each change with its own entry.', 'Its copies stay. Central Knot stops writing there.', 0]);
-  await shotAt(a, 'manages-860-light', SMALLEST, 'light');
+  await shotAt(a, 'history-manages-860-light', SMALLEST, 'light');
   await a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button').focus()`);
   await a.press(' ', 'Space');
-  await waitHistory(a, () => a.run(`document.body.dataset.busy === 'false' && document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage it again'`));
+  await waitHistory(a, () => a.run(`document.body.dataset.busy === 'false' && document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage Codex'`));
   const rejoinId = await a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.id`);
   const olderCodexButtons = () => a.run(`[...document.querySelectorAll('.history-row[data-kind="managing"]')].filter(r => r.querySelector('.history-what strong').textContent === 'Codex').slice(1).reduce((n, r) => n + r.querySelectorAll('.history-actions button').length, 0)`);
-  same('Leave it out again acts at once by keyboard, keeps copies, focuses the new entry’s button, and leaves older entries without buttons', [
-    await a.exists('.history-confirm'), codex(), (await a.text('.band-done .band-text') ?? '').startsWith('Codex is left out: Central Knot writes nothing there now.'),
+  same('Leave Codex out again acts at once by keyboard, keeps copies, focuses the new entry’s button, and leaves older entries without buttons', [
+    await a.exists('.manage-question'), codex(), (await a.text('.band-done .band-text') ?? '').startsWith('Codex is left out: Central Knot writes nothing there now.'),
     await olderCodexButtons(), await a.run(`document.activeElement?.id`),
   ], [false, before, true, 0, rejoinId]);
-  // Edit Codex by hand and open Manage it again on History without a Refresh: the question reads afresh and counts the edit.
+  // Edit Codex by hand and open Manage Codex on History without a Refresh: the question reads afresh and counts the edit.
   writeFileSync(standup, `${readFileSync(standup, 'utf8')}\nEdited in Codex before History rejoin.\n`);
   const edited = codex(), rowsBefore = (await a.all('.history-row', 'e.dataset.kind')).length;
   await a.click(`#${rejoinId}`);
   await waitHistory(a, () => a.exists('[id^="history-manage-confirm-"]'));
-  same('Manage it again reads afresh without a Refresh, counts the edited skill, focuses Cancel, and writes nothing', [
-    await a.text('.history-confirm .band-text'), await a.all('.history-confirm button', 'e.textContent'),
+  same('Manage Codex on History reads afresh without a Refresh, says the card’s words after the tool’s name, focuses Cancel, and writes nothing', [
+    await a.text('.manage-question .band-text'), await a.all('.manage-question button', 'e.textContent'),
     await a.run(`document.activeElement?.textContent`), codex(), (await a.all('.history-row', 'e.dataset.kind')).length,
-  ], ['Managing Codex again: keeps 1 copy there that differs as a version and writes Central Knot’s version of 1 item there; shows 2 found items under Found.',
-    ['Cancel', 'Manage Codex'], 'Cancel', edited, rowsBefore]);
-  await shotAt(a, 'confirm-860-light', SMALLEST, 'light');
-  await a.click('.history-confirm button');
-  same('Cancel closes the question, writes nothing, and puts focus back on Manage it again', [
-    await a.exists('.history-confirm'), codex(), (await a.all('.history-row', 'e.dataset.kind')).length, await a.run(`document.activeElement?.id`),
+  ], [`Managing Codex: ${overwrite('it can be restored here')}`, ['Cancel', 'Manage Codex'], 'Cancel', edited, rowsBefore]);
+  await shotAt(a, 'history-question-860-light', SMALLEST, 'light');
+  await a.click('.manage-question button');
+  same('Cancel closes the question, writes nothing, and puts focus back on Manage Codex', [
+    await a.exists('.manage-question'), codex(), (await a.all('.history-row', 'e.dataset.kind')).length, await a.run(`document.activeElement?.id`),
   ], [false, edited, rowsBefore, rejoinId]);
   await a.click(`#${rejoinId}`);
   await waitHistory(a, () => a.exists('[id^="history-manage-confirm-"]'));
   await a.press('Escape');
-  same('Escape cancels too, writes nothing, and puts focus back on Manage it again', [
-    await a.exists('.history-confirm'), codex(), (await a.all('.history-row', 'e.dataset.kind')).length, await a.run(`document.activeElement?.id`),
+  same('Escape cancels too, writes nothing, and puts focus back on Manage Codex', [
+    await a.exists('.manage-question'), codex(), (await a.all('.history-row', 'e.dataset.kind')).length, await a.run(`document.activeElement?.id`),
   ], [false, edited, rowsBefore, rejoinId]);
   await a.press(' ', 'Space');
   await waitHistory(a, () => a.exists('[id^="history-manage-confirm-"]'));
   await a.run(`document.querySelector('[id^="history-manage-confirm-"]').focus()`);
   await a.press(' ', 'Space');
-  await waitHistory(a, () => a.run(`document.body.dataset.busy === 'false' && document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Leave it out again'`));
+  await waitHistory(a, () => a.run(`document.body.dataset.busy === 'false' && document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Leave Codex out again'`));
   const leaveAgainId = await a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.id`);
   same('confirming by keyboard manages Codex again, omits the History self-note, clears older buttons, and focuses the new entry’s button', [
     codex(), await a.text('.band-done .band-text'), await a.exists(`#${rejoinId}`), await olderCodexButtons(),
     await a.run(`${newestManage}.querySelector('.history-about').textContent`), await a.run(`document.activeElement?.id`),
-  ], [before, 'Central Knot manages Codex now: Central Knot’s version written there for 1 item (over its copy there, which a version keeps).',
+  ], [before, 'Central Knot manages Codex now: Codex’s copy of standup is saved as a version (History can restore it), and Central Knot’s is written over it.',
     false, 0, 'Central Knot manages Codex from here on: sync brings it into line, each change with its own entry.', leaveAgainId]);
-  await shotAt(a, 'result-860-light', SMALLEST, 'light');
+  await shotAt(a, 'history-result-860-light', SMALLEST, 'light');
   if (a.main) {
     // Sync once on History uses the status line, not a band (as on next).
     await a.click('#nav-harnesses');
@@ -1294,24 +1350,27 @@ async function manageFlow() {
     ];
     await held.release();
     same('a switch clicked while a pass runs waits for it, the other switches, headings and card links wait too, and it lands after', [during, leftOut()], [['true', true, true, [true, '0.5'], []], ['codex-cli']]);
-    await a.click('#manage-codex-cli');
+    await manageAgain(a, 'codex-cli');
     main.close();
   }
-  // With Automatic sync off, a tool's line says when it is brought into line, and the band after the click says it again.
+  // With Automatic sync off, the question says when it is brought into line, and the band after the click says it again.
   await a.click('#sync-switch');
   await a.click('#manage-codex-cli');
-  const syncOffLine = 'On: changes no item in Codex; shows 2 found items under Found. With Automatic sync off, Sync once brings it into line; a click on an item brings that item.';
-  same('with Automatic sync off, the line before turning it on keeps Sync once and drops the cut Instructions sentence',
-    await a.text('#manage-codex-cli-line'), syncOffLine);
+  await a.click('#manage-codex-cli');
+  await asking();
+  const syncOffLine = `${nothingYet} With Automatic sync off, Sync once brings it into line; a click on an item brings that item.`;
+  same('with Automatic sync off, the question before turning it on keeps Sync once and drops the cut Instructions sentence',
+    await a.text('#manage-codex-cli-text'), syncOffLine);
+  await a.press('Escape');
   await a.click('#nav-history');
-  await waitHistory(a, () => a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage it again'`));
+  await waitHistory(a, () => a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage Codex'`));
   await a.click('.history-row[data-kind="managing"] .history-actions button');
   await waitHistory(a, () => a.exists('[id^="history-manage-confirm-"]'));
-  same('with Automatic sync off, History’s question says the card’s SYNC_OFF sentence with History’s lead',
-    await a.text('.history-confirm .band-text'), syncOffLine.replace(/^On: /, 'Managing Codex again: '));
+  same('with Automatic sync off, History asks the card’s question, word for word after the tool’s name',
+    await a.text('.manage-question .band-text'), `Managing Codex: ${syncOffLine}`);
   await a.press('Escape');
   await a.click('#nav-harnesses');
-  await a.click('#manage-codex-cli');
+  await manageAgain(a, 'codex-cli');
   check('and so does the band after it', (await a.text('.band-done .band-text') ?? '') === 'Central Knot manages Codex now. With Automatic sync off, Sync once brings it into line; a click on an item brings that item.', await a.text('.band-done'));
   await a.click('#sync-switch');
   // Every tool left out: the pages say so and point to Harnesses, not that no tool was found.
@@ -1322,7 +1381,7 @@ async function manageFlow() {
   await waitHistory(a, () => a.exists('[id^="history-manage-confirm-"]'));
   await a.click('.history-row[data-kind="managing"] .history-actions button');
   await waitHistory(a, () => a.exists('[id^="history-manage-confirm-"]'));
-  same('only one Manage-again question stays open at a time on History', (await a.all('.history-confirm')).length, 1);
+  same('only one Manage-again question stays open at a time on History', (await a.all('.manage-question')).length, 1);
   await a.click('#nav-harnesses');
   check('with every tool left out, Harnesses omits the unmanaged introduction and has no Managed (?)',
     !(await a.text('#harnesses-scroll') ?? '').includes('Central Knot manages none of your tools here.') && !(await a.exists('#manage-info')), await a.text('#harnesses-scroll'));
@@ -1333,7 +1392,25 @@ async function manageFlow() {
   same('and the status bar’s switch has nothing to sync', await a.text('#sync-switch .sync-state'), 'Nothing to sync');
   await fitsAtMinimum(a, 'a home with every tool left out');
   await a.click('#overview-open-harnesses');
-  for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#manage-${tool}`);
+  // The longest name's question in a card at the smallest size, and in the narrowest card the page draws (240 px): Cancel and
+  // Manage Claude Code each on one line and inside the question's box (a button that doesn't fit beside the other wraps whole).
+  await sizeTo(a, ...SMALLEST);
+  await a.click('#manage-claude-cli');
+  await waitHistory(a, () => a.exists('#manage-claude-cli-confirm'));
+  const fits = () => a.run(`(() => {
+    const box = document.querySelector('#harness-claude-cli .manage-question'), style = getComputedStyle(box), outer = box.getBoundingClientRect();
+    const left = outer.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft), right = outer.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight);
+    return ['cancel', 'confirm'].map(part => { const b = document.getElementById('manage-claude-cli-' + part), r = b.getBoundingClientRect(); return [b.scrollWidth <= b.clientWidth, r.height <= 30, r.left >= left - 0.5, r.right <= right + 0.5]; });
+  })()`);
+  const inside = [[true, true, true, true], [true, true, true, true]];
+  same('Cancel and Manage Claude Code each fit inside the question’s box at 860, each on one line', await fits(), inside);
+  await a.run(`document.querySelector('.harness-cards').style.gridTemplateColumns = 'repeat(3, 240px)'`);
+  same('and inside it in the narrowest card the page draws', await fits(), inside);
+  await a.run(`document.querySelector('.harness-cards').style.gridTemplateColumns = ''`);
+  await shotAt(a, 'question-claude-860-light', SMALLEST, 'light');
+  await a.click('#manage-claude-cli-confirm');
+  await fullSize(a);
+  for (const tool of ['copilot-cli', 'codex-cli']) await manageAgain(a, tool);
   same('every tool managed again', await switches(), ['manage-claude-cli:true', 'manage-copilot-cli:true', 'manage-codex-cli:true']);
   same('no page errors, manage', a.pageErrors, []);
   await a.quit();
@@ -1347,14 +1424,14 @@ async function manageFlow() {
   await w1.click('#nav-harnesses');
   await w1.click('#manage-codex-cli');
   await w1.click('#nav-history');
-  await waitHistory(w1, () => w1.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage it again'`));
+  await waitHistory(w1, () => w1.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage Codex'`));
   await w1.click('.history-row[data-kind="managing"] .history-actions button');
   await waitHistory(w1, () => w1.exists('[id^="history-manage-confirm-"]'));
   mkdirSync(d2, { recursive: true });
   cpSync(join(d1, 'app-settings.json'), join(d2, 'app-settings.json'));
   const w2 = await launch(d2);
   await w2.click('#nav-harnesses');
-  await w2.click('#manage-codex-cli');
+  await manageAgain(w2, 'codex-cli');
   await w2.quit();
   const staleSnap = [tree(join(staleHome, '.codex')), readNow(join(staleHome, '.central-knot/sync.json')), readNow(join(staleHome, '.central-knot/history.json'))];
   await w1.click('[id^="history-manage-confirm-"]');
@@ -1362,10 +1439,20 @@ async function manageFlow() {
   same('a stale Manage click after a second window managed the tool writes nothing and says nothing was changed', [
     await w1.text('.band-done .band-text'), [tree(join(staleHome, '.codex')), readNow(join(staleHome, '.central-knot/sync.json')), readNow(join(staleHome, '.central-knot/history.json'))],
   ], ['Codex is already managed. Nothing was changed.', staleSnap]);
+  // A read that can't be made says why in the question, with Cancel alone: Codex's folder taken away just before the press.
+  await w1.click('#nav-harnesses');
+  await w1.click('#manage-codex-cli');
+  rmSync(join(staleHome, '.codex'), { recursive: true, force: true });
+  await w1.run(`document.querySelector('#manage-codex-cli').click()`);
+  await waitHistory(w1, () => w1.run(`/no longer/.test(document.getElementById('manage-codex-cli-text')?.textContent ?? '')`));
+  same('a read that fails says why in the question, offers Close and Try again, and writes nothing', [
+    await w1.text('#manage-codex-cli-text'), await w1.all('#harness-codex-cli .manage-question button', 'e.textContent'), existsSync(join(staleHome, '.codex')),
+  ], ['Codex is no longer present here. Nothing was changed.', ['Close', 'Try again'], false]);
+  await shotAt(w1, 'failed-860-light', SMALLEST, 'light');
   same('no page errors, manage stale', w1.pageErrors, []);
   await w1.quit();
 
-  // After Leave it out again, History's reopened Manage question refreshes marketplaces for the tools then managed, matching Harnesses.
+  // After Leave Claude Code out again, History's reopened Manage question reads marketplaces for the tools then managed, as the card's does.
   const plugHome = join(scratch, 'manage-plug-home'), plugData = join(scratch, 'manage-plug-data'), plugMarket = join(scratch, 'manage-plug-market');
   for (const folder of ['.claude/skills', '.claude/plugins', '.copilot/skills', '.codex/skills', '.central-knot']) mkdirSync(join(plugHome, folder), { recursive: true });
   mkdirSync(join(plugMarket, '.claude-plugin'), { recursive: true });
@@ -1385,22 +1472,27 @@ async function manageFlow() {
   writeFileSync(join(plugData, 'sharing-settings.json'), JSON.stringify({ homes: { [plugHome]: { generation: 'g-plug' } } }));
   const wp = await launch(plugData);
   await wp.click('#nav-harnesses');
-  await waitHistory(wp, () => wp.run(`(document.querySelector('#manage-codex-cli-line')?.textContent ?? '').includes('It also gets each plugin')`));
-  check('with Claude Code managed, Codex’s card promises the plugin from Claude Code’s marketplace', (await wp.text('#manage-codex-cli-line') ?? '').includes('It also gets each plugin that is on and not kept out of it.'));
+  const cardQuestion = async () => {
+    await wp.click('#manage-codex-cli');
+    await waitHistory(wp, () => wp.exists('#manage-codex-cli-confirm'));
+    const said = await wp.text('#manage-codex-cli-text');
+    await wp.press('Escape');
+    return said;
+  };
+  check('with Claude Code managed, Codex’s question promises the plugin from Claude Code’s marketplace', (await cardQuestion() ?? '').includes('Codex also gets each plugin that is on and not kept out of it.'));
   await wp.click('#nav-history');
   await waitHistory(wp, () => wp.exists('#history-plug-claude-on'));
   await wp.click('#history-plug-claude-on');
-  await waitHistory(wp, () => wp.run(`document.querySelector('.history-row[data-kind="managing"] .history-what strong')?.textContent === 'Claude Code' && document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage it again'`));
+  await waitHistory(wp, () => wp.run(`document.querySelector('.history-row[data-kind="managing"] .history-what strong')?.textContent === 'Claude Code' && document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage Claude Code'`));
   await wp.click('#history-plug-codex-off');
   await waitHistory(wp, () => wp.exists('#history-manage-confirm-plug-codex-off'));
-  const historyAfterLeave = await wp.text('.history-confirm .band-text');
+  const historyAfterLeave = await wp.text('.manage-question .band-text');
   await wp.press('Escape');
   await wp.click('#nav-harnesses');
-  await waitHistory(wp, () => wp.run(`!(document.querySelector('#manage-codex-cli-line')?.textContent ?? '').includes('It also gets each plugin')`));
-  const cardAfterLeave = await wp.text('#manage-codex-cli-line');
-  same('after leaving Claude Code out, History’s Manage question drops its stale plugin promise and matches Harnesses', [
-    cardAfterLeave.includes('It also gets each plugin'), historyAfterLeave.replace(/^Managing Codex again: /, 'On: '),
-  ], [false, cardAfterLeave]);
+  const cardAfterLeave = await cardQuestion();
+  same('after leaving Claude Code out, History’s Manage question drops its stale plugin promise and asks the card’s question, word for word', [
+    cardAfterLeave.includes('also gets each plugin'), historyAfterLeave,
+  ], [false, `Managing Codex: ${cardAfterLeave}`]);
   same('no page errors, manage plugin refresh', wp.pageErrors, []);
   await wp.quit();
 
@@ -1418,7 +1510,7 @@ async function manageFlow() {
   await ws.click('#nav-history');
   await waitHistory(ws, () => ws.exists('.history-row[data-kind="managing"]'));
   await wait(300);
-  same('opening History in a stopped home writes no plugins.json and disables Manage it again with the stop reason', [
+  same('opening History in a stopped home writes no plugins.json and disables Manage Codex with the stop reason', [
     existsSync(join(stoppedHome, '.central-knot/plugins.json')),
     await ws.run(`(() => { const b = document.querySelector('.history-row[data-kind="managing"] .history-actions button'); return b ? [b.disabled, /not the one this app last used/.test(b.title), b.title === b.getAttribute('aria-description')] : null; })()`),
   ], [false, [true, true, true]]);
@@ -1441,7 +1533,7 @@ async function manageFlow() {
   await waitHistory(wl, () => wl.exists('.history-row[data-kind="managing"]'));
   const historyLock = await wl.run(`(() => { const b = document.querySelector('.history-row[data-kind="managing"] .history-actions button'); return b ? [b.disabled, b.title, b.getAttribute('aria-description')] : null; })()`);
   same('on a locked home, History’s button is disabled with the card’s exact lock reason as hover and description', historyLock, cardLock);
-  await shotAt(wl, 'locked-860-light', SMALLEST, 'light');
+  await shotAt(wl, 'history-locked-860-light', SMALLEST, 'light');
   same('no page errors, manage locked', wl.pageErrors, []);
   await wl.quit();
 }
@@ -1526,7 +1618,7 @@ async function arrivalFlow() {
   // Manage turned off and on by hand: its own result, no arrival line.
   await a.click('#nav-harnesses');
   await a.click('#manage-opencode-cli');
-  await a.click('#manage-opencode-cli');
+  await manageAgain(a, 'opencode-cli');
   same('Manage turned off and on by hand says no arrival', await lines(a), []);
 
   // With Automatic sync off: said, nothing copied, no entry; Automatic sync on again: the catch-up's entry.
@@ -1679,6 +1771,17 @@ async function fullSize(a) {
   await a.run(`window.dispatchEvent(new Event('resize'))`);
   await a.settle();
 }
+/** With --shots, a picture of the page at width × height in `theme` ('light' or 'dark'); the window's size and appearance are put back after. */
+async function shotAt(page, name, [width, height], theme) {
+  if (!shots) return;
+  await sizeTo(page, width, height);
+  await page.run(`window.centralKnot.setAppearance(${JSON.stringify(theme)})`);
+  await wait(80);
+  await page.shot(name);
+  await page.run(`window.centralKnot.setAppearance('system')`);
+  await wait(80);
+  await fullSize(page);
+}
 /** Opens info mark `markId`'s card, checks its words, status-bar clearance and fit, then checks Escape closes it. */
 async function checkCard(a, markId, expected, label) {
   await a.click(`#${markId}`);
@@ -1798,6 +1901,20 @@ const caretLineShows = a => a.run(`(() => {
  * in a real window on macOS 26, comes off its height. Every check at the smallest size sizes the page to this.
  */
 const SMALLEST = [860, 560 - 32];
+/**
+ * A file panel's text (`pre`, its selector) scrolled to its foot: its last line's words, whether the text scrolls, and whether that
+ * line is whole: inside the text's box, the page's scroll area around it and above the status bar (the Library, the Overview).
+ */
+const lastLineWhole = (a, pre) => a.run(`(() => {
+  const pre = document.querySelector(${JSON.stringify(pre)}), view = pre.closest('.scroll').getBoundingClientRect(), status = document.querySelector('#status').getBoundingClientRect();
+  pre.scrollTop = pre.scrollHeight;
+  const node = pre.firstChild, text = node.data.replace(/\\n$/, ''), range = document.createRange();
+  range.setStart(node, text.lastIndexOf('\\n') + 1);
+  range.setEnd(node, text.length);
+  const line = range.getBoundingClientRect(), box = pre.getBoundingClientRect();
+  return { words: range.toString(), scrolls: pre.scrollHeight > pre.clientHeight,
+    whole: line.top >= Math.max(box.top, view.top) && line.bottom <= Math.min(box.bottom, view.bottom, status.top) + 0.5 };
+})()`);
 /** Longer than a result without Undo stays in the header (app.ts FADE_MS). */
 const FADE_WAIT = 9000;
 
@@ -2762,6 +2879,28 @@ async function practiceFlow() {
   await a.run(`document.querySelector('.history-row[data-kind="profile"] .history-actions button').click()`); await a.settle();
   check('its Undo from History says what it did with reload advice and Copy', /^Undone: 2 items turned on\..*In Copilot CLI, type \/skills reload\..*Codex picks it up/.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-copy-copilot-cli'), await a.text('.bands'));
   same('…and every skill is on again', skillsOn.map(key => folders(key).every(Boolean)), [true, true, true, true]);
+  // Tools: Copilot CLI unticked in Incident (last, since from then on Incident holds its own keep-outs). The header's clause and
+  // a Changes tools row say notes goes out of Copilot CLI; the switch takes notes out of Copilot CLI alone, Claude Code's and Codex's
+  // folders as they were; Undo switch puts it back.
+  await a.click('#nav-profiles');
+  const toolsBefore = allFolders();
+  same('Incident’s strip, Applies in, ticks each managed tool', [await a.run(`document.querySelector('.pf-tools-label')?.firstChild?.textContent`), await a.all('.pf-tools input', 'e.checked')], ['Applies in', [true, true, true]]);
+  await checkCard(a, 'profile-tools-info', 'Ticks save at once: nothing in your tools changes until Switch. Switching keeps your items out of each unticked tool.', 'the strip says, before a click, when a tick takes effect');
+  await a.click('#pf-tool-copilot-cli');
+  same('unticking Copilot CLI saves at once and changes no tool; the header’s clause counts the change of tools, a row says where, the list says 2 tools',
+    [await a.all('.pf-tools input', 'e.checked'), allFolders(), await a.text('.profile-header p'), await stateShown('notes'), await a.text('.profile-row.selected .list-fraction')],
+    [[true, false, true], toolsBefore, 'Switching turns 3 off · 1 out of Copilot CLI', 'Out of Copilot CLI', '1 item · 2 tools']);
+  await a.click('#profile-changes');
+  same('Changes puts notes under Changes tools, saying where', [await a.all('.pf-section strong', 'e.textContent'), await a.all('.pf-row[data-item] .pf-state', 'e.textContent'), await a.text('#profile-changes')],
+    [['Turns off', 'Changes tools'], ['', '', '', 'Out of Copilot CLI'], 'Changes 4']);
+  await a.click('#profile-changes');
+  await a.click('#profile-switch');
+  same('the switch takes notes out of Copilot CLI alone, and the three others out of every tool', [folders('notes'), folders('standup')], [[toolsBefore.notes[0], null, toolsBefore.notes[2]], gone]);
+  check('the result names the tool it left', /^Switched to Incident: 3 items turned off\. 1 item now out of Copilot CLI\./.test(await a.text('.band-done') ?? ''), await a.text('.bands'));
+  await a.click('#outcome-undo');
+  same('Undo switch puts every folder back, notes in Copilot CLI too', allFolders(), toolsBefore);
+  await a.click('#pf-tool-copilot-cli');
+  same('ticking Copilot CLI again puts it back in Incident', [await a.all('.pf-tools input', 'e.checked'), await a.text('.profile-header p')], [[true, true, true], 'Switching turns 3 off']);
   await openKind(a, 'skills');
   // An armed Delete from Central Knot stays on the visit it was clicked on.
   const standupOpen = () => openRow('standup', `#${rowPart('delete', 'skills', 'standup')}, #${rowPart('delete-confirm', 'skills', 'standup')}`);
@@ -6823,8 +6962,8 @@ async function dockedListFlow() {
   const a = await launch(join(scratch, 'docked-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' });
   await a.click('#nav-overview');
   await a.click('#setup-yes');
-  for (let tries = 0; tries < 100 && !(await a.exists('#walk-skip')); tries++) await wait(100);
-  await a.click('#walk-skip');
+  for (let tries = 0; tries < 100 && !(await a.exists('#setup-choosing')); tries++) await wait(100);
+  if (!(await a.exists('#setup-choosing'))) throw new Error('Yes did not finish: the Overview has no line into the copies that differ.');
   const sidebarOpen = async open => { if (await a.run(`document.body.classList.contains('rail')`) === open) await a.click('#sidebar-toggle'); };
   // The docked list's content width, its toolbar's lines (its parts' middles a line apart), how many of the names it shows and
   // which of them are cut, and how many of the kind switch's words show whole.
@@ -7715,7 +7854,7 @@ async function syncEverythingFlow() {
   for (let tries = 0; tries < 40 && !(await a.exists('[data-outcome] #outcome-undo')); tries++) await wait(100);
   same('the Settings band says Synchronize everything is on and offers History’s Undo with its help',
     await a.run(`(() => { const o = document.querySelector('[data-outcome]'), u = o?.querySelector('#outcome-undo'); return [o?.querySelector('.band-text')?.textContent, u?.textContent, u?.title, u?.getAttribute('aria-description')]; })()`),
-    ['Synchronize everything is on.', 'Undo', 'Switch Synchronize everything off and take back the 2 items it took in since, each tool it was found in keeping its own copy', null]);
+    ['Synchronize everything is on: it added 2 items.', 'Undo', 'Switches Synchronize everything off. It takes back the items it added, but for any changed since.', null]);
   same('the pass right after took in what was found: notes is in Codex now, byte for byte', readNow(join(codex, 'notes/SKILL.md')), text('notes', 'Take notes.'));
   same('and Settings says what it took in, a line per kind, each with History', await a.all('.setting-added .setting-message', 'e.textContent'),
     ['Synchronize everything took in 1 skill, found in Claude Code: notes. History can undo it.History', 'Synchronize everything took in 1 MCP server, found in Codex: files. History can undo it.History']);
@@ -7811,11 +7950,11 @@ async function syncEverythingFlow() {
   await b.click('#nav-settings');
   for (let tries = 0; tries < 30 && !(await b.exists('#sync-everything-on')); tries++) await wait(100);
   await b.click('#sync-everything-on');
-  await waitBand('true', 'Synchronize everything is on.');
-  const twoHelp = 'Switch Synchronize everything off and take back the 2 items it took in since, each tool it was found in keeping its own copy';
+  await waitBand('true', 'Synchronize everything is on');
+  const twoHelp = 'Switches Synchronize everything off. It takes back the items it added, but for any changed since.';
   same('Settings band after turning on with two kinds and a conflict: sentence, Undo, History help and reloads',
     [await uBand(), readNow(join(uCodex, 'notes/SKILL.md')), JSON.parse(readNow(join(uHome, '.claude.json'))).mcpServers?.files?.command],
-    [['Synchronize everything is on.', 'Undo', twoHelp, true, false], text('notes', 'Take notes.'), 'files-mcp']);
+    [['Synchronize everything is on: it added 2 items.', 'Undo', twoHelp, true, false], text('notes', 'Take notes.'), 'files-mcp']);
   await b.click('#outcome-undo');
   await waitBand('false', 'Undone:');
   const twoUndone = 'Undone: switched off, and 2 items it took in are out of Central Knot again, each tool it was found in keeping its own copy.';
@@ -7834,7 +7973,7 @@ async function syncEverythingFlow() {
   for (let tries = 0; tries < 30 && !(await b.exists('#sync-everything-on')); tries++) await wait(100);
   settleOld([skill(uClaude, 'later', text('later', 'Later skill.')), join(uClaude, 'later/SKILL.md')]);
   await b.click('#sync-everything-on');
-  await waitBand('true', 'Synchronize everything is on.');
+  await waitBand('true', 'Synchronize everything is on');
   settleOld([skill(uClaude, 'edited', text('edited', 'Original.')), join(uClaude, 'edited/SKILL.md')]);
   for (let tries = 0; tries < 100 && (readNow(join(uCodex, 'edited/SKILL.md')) !== text('edited', 'Original.') || (await b.all('.setting-added .setting-message')).length < 2); tries++) await wait(100);
   writeFileSync(join(uClaude, 'edited/SKILL.md'), text('edited', 'Edited by hand.'));
@@ -7847,9 +7986,9 @@ async function syncEverythingFlow() {
   await b.click('#sync-switch');
   for (let tries = 0; tries < 40 && await b.run(`document.querySelector('#sync-switch')?.getAttribute('aria-checked')`) !== 'false'; tries++) await wait(100);
   await b.click('#sync-everything-on');
-  await waitBand('true', 'Synchronize everything is on.');
+  await waitBand('true', 'Synchronize everything is on');
   same('with Automatic sync off, the band shows its second sentence and Undo without reloads',
-    await uBand(), ['Synchronize everything is on. It takes items in at Sync once, or when Automatic sync is on.', 'Undo', 'Switch Synchronize everything off', false, false]);
+    await uBand(), ['Synchronize everything is on. Nothing added yet: Automatic sync is off.', 'Undo', twoHelp, false, false]);
   await b.click('#outcome-undo');
   await waitBand('false', 'Undone:');
   same('Undo with Automatic sync off turns the rule off and says nothing was taken back',
@@ -7858,10 +7997,10 @@ async function syncEverythingFlow() {
   const fromOther = await b.run(`window.centralKnot.setSyncEverything(true, ${JSON.stringify(uHome)})`);
   check('the other window’s switch-on returned its entry id while this window still reads off', typeof fromOther.event === 'string' && await uRuleOn() === 'false', [fromOther.event, await uRuleOn()]);
   await b.click('#sync-everything-on');
-  await waitBand('true', 'Synchronize everything is on.');
+  await waitBand('true', 'Synchronize everything is on');
   same('turning it on again when already on shows no band Undo',
     [uRecord().syncEverything, await b.text('[data-outcome] .band-text'), await b.exists('#outcome-undo')],
-    [true, 'Synchronize everything is on. It takes items in at Sync once, or when Automatic sync is on.', false]);
+    [true, 'Synchronize everything is on. Nothing added yet: Automatic sync is off.', false]);
   if (b.inspect) {
     for (const name of ['s1', 's2', 's3', 's4']) settleOld([skill(uCodex, name, text(name, `Skill ${name}.`)), join(uCodex, `${name}/SKILL.md`)]);
     const menu = await mainHelpers(b.inspect);
@@ -7877,9 +8016,12 @@ async function syncEverythingFlow() {
 }
 
 /**
- * First setup on the page (firstsetup.ts): a folder home never asked shows the question on the Overview; Yes opens the walkthrough of
- * the copies that differ, at the latest copy; Go on, no dates to go by, leaving half way and the Overview's way back in; the
- * switch-on's one Undo in History and its Restore. Then a second home: Resume first, and No.
+ * First setup on the page (firstsetup.ts): a folder home never asked shows the question on the Overview, one line counted as the
+ * cards count, with its (?) (which stays clear of the scroll bar at 860) and You can undo this.; the copies that differ one line
+ * under it; Yes stays there, its band with what it added and the switch-on's Undo, and Choose copies opens the walkthrough of the
+ * copies that differ, at the latest copy; Go on, no dates to go by, leaving half way and the Overview's way back in; the
+ * switch-on's one Undo in History and its Restore. Then a second home: Resume first, No, the band's Turn on (Yes's switch), a third
+ * item added meanwhile, and the Undo taking back all three. With --shots, the pictures the step's report names (01- to 06-).
  */
 async function firstSetupFlow() {
   const homeFor = name => {
@@ -7913,21 +8055,42 @@ async function firstSetupFlow() {
   const record = () => JSON.parse(readNow(join(home, '.central-knot/sync.json')) || '{}');
   const a = await launch(data, [], real);
   await a.click('#nav-overview');
-  const question = await a.text('#setup-question .setup-text') ?? '';
-  check('a home never asked shows the question, counted as the pass counts: 2 items it takes in now and the tools that get them, then 2 more that wait with nothing chosen, and what the one Undo covers',
-    /^Yes takes in now the 2 items found in your tools .* \(Claude Code and Codex\);/.test(question) && /2 more items have copies that differ and wait for you: nothing is chosen for you\. You’re asked about each, one at a time, with the latest copy marked where one can be told/.test(question)
-      && /wait for you: nothing is chosen for you\. .* One Undo in History takes back what it takes in; a copy you choose has its own Undo\.$/.test(question) && !/Write to Claude/.test(question), question);
-  same('and says what No leaves', await a.text('#setup-no-says'), 'No changes nothing: what is already on stays on and keeps syncing, and each found item waits on its page for Add.');
-  check('the lead no longer says to open a card and turn something on where the question stands', !/Open one below/.test(await a.text('.overview-lead') ?? ''), await a.text('.overview-lead'));
+  same('a home never asked: the question is one line, saying it adds 2 of the 4 items the cards count (2 wait for a choice), with You can undo this. beside its buttons; its (?) says where they go and what the Undo covers; no lead above it',
+    [await a.text('#setup-question-title'), await a.text('#setup-undo-note'), await a.text('#setup-question-info-card'), await a.all('#setup-question .setup-text'), await a.exists('.overview-lead')],
+    ['Add 2 of the 4 items found in your tools to every tool that can take them, and new ones as they turn up?', 'You can undo this.',
+      'Each item goes to the tools that lack it and can take it. Undo takes back the items it added, but for any changed since; a copy you choose has its own Undo.', [], false]);
+  same('under it, one line for every kind says the found items whose copies differ stay as they are until he chooses, with Show them',
+    [await a.text('#overview-differ-line'), await a.exists('#overview-skills-differ-line'), await a.exists('#overview-mcp-differ-line')],
+    ['2 found items have copies that differ and stay as they are until you choose. Show them', false, false]);
+  await a.click('#overview-differ');
+  same('its Show them opens the Library on All, narrowed to the copies that differ', [await a.run(`document.querySelector('#library-kind-all')?.getAttribute('aria-pressed')`), (await a.text('.chip-on') ?? '').startsWith('Copies differ')], ['true', true]);
+  await a.click('#nav-overview');
   same('Synchronize everything is the main button', await a.run(`document.querySelector('#setup-yes')?.className.includes('primary')`), true);
   await fitsAtMinimum(a, 'the Overview with first setup’s question');
+  // The (?) opened at the smallest window: its card stays a margin clear of the page's scroll bar, as of the window's other edges.
+  await sizeTo(a, ...SMALLEST);
+  await a.click('#setup-question-info');
+  same('at 860, the open (?) card stays 8 px or more clear of the scroll bar, and covers neither the buttons nor You can undo this.', await a.run(`(() => { const scroll = document.querySelector('#overview-scroll'), card = document.querySelector('#setup-question-info-card').getBoundingClientRect();
+    const covers = selector => { const box = document.querySelector(selector).getBoundingClientRect(); return card.left < box.right && box.left < card.right && card.top < box.bottom && box.top < card.bottom; };
+    return [scroll.offsetWidth > scroll.clientWidth && card.right + 8 <= scroll.getBoundingClientRect().left + scroll.clientWidth, covers('.setup-actions'), covers('#setup-undo-note')]; })()`), [true, false, false]);
+  await a.click('#setup-question-info');
+  await fullSize(a);
   await a.shot('setup-question');
+  await shotAt(a, '01-card-860-light', SMALLEST, 'light');
+  await shotAt(a, '02-card-1316-dark', [1316, 819], 'dark');
   await a.click('#setup-yes');
+  for (let tries = 0; tries < 40 && !(await a.exists('#setup-choosing')); tries++) await wait(100);
+  same('Yes stores the rule on, adds what it may (notes is in Codex now) and stays on the Overview: its band says what it added, with the switch-on’s own Undo, and the line under it leads into the 2 that wait',
+    [record().syncEverything, readNow(join(codex, 'notes/SKILL.md')), await a.text('.page-title'), await a.exists('#walkthrough'), await a.text('[data-outcome] .band-text'), await a.all('[data-outcome] .band-actions button'), await a.text('#setup-choosing')],
+    [true, text('notes', 'Take notes.'), 'Overview', false, 'Synchronize everything is on: it added 2 items.', ['Undo'], '2 found items have copies that differ and wait for your choice. Choose copies']);
+  same('its Undo’s hover says what it does, with no count a later pass would make untrue', await a.run(`document.querySelector('#outcome-undo').title`), 'Switches Synchronize everything off. It takes back the items it added, but for any changed since.');
+  await fitsAtMinimum(a, 'the Overview after Yes');
+  await shotAt(a, '03-after-yes-860-light', SMALLEST, 'light');
+  await a.click('#setup-choose');
   for (let tries = 0; tries < 40 && !(await a.exists('#walkthrough')); tries++) await wait(100);
-  same('Yes stores the rule on, takes in what it may (notes is in Codex now), and opens the walkthrough on the Library at 1 of 2, review, its latest copy (Codex’s) the main button',
-    [record().syncEverything, readNow(join(codex, 'notes/SKILL.md')), await a.text('#walkthrough .walk-place'), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'codex-cli')} .version-cta-main`), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'claude-cli')}`), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'claude-cli')} .version-cta-main`)],
-    [true, text('notes', 'Take notes.'), ' · 1 of 2', true, true, false]);
-  check('the band after Yes says what it took in and what the one Undo covers', /^Synchronize everything is on: it took in 2 items, and 2 items with copies that differ wait for your choice\. One Undo in History takes back what it takes in; a copy you choose has its own Undo\./.test(await a.text('[data-outcome] .band-text') ?? ''), await a.text('[data-outcome] .band-text'));
+  same('its Choose copies opens the walkthrough on the Library at 1 of 2, review, its latest copy (Codex’s) the main button',
+    [await a.text('#walkthrough .walk-place'), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'codex-cli')} .version-cta-main`), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'claude-cli')}`), await a.exists(`#${rowPart('walk-use', 'skills', 'review', 'claude-cli')} .version-cta-main`)],
+    [' · 1 of 2', true, true, false]);
   same('review’s folders tie, so each copy says when its files were edited, only Codex’s, edited 2 h ago, is marked Newer, and Use the latest for the rest can be used',
     [await a.text(`#${rowPart('walk-use', 'skills', 'review', 'codex-cli')} .version-meta`), await a.text(`#${rowPart('walk-use', 'skills', 'review', 'claude-cli')} .version-meta`), await a.all('#walkthrough .version-latest'), await a.run(`document.querySelector('#walk-use-latest').disabled`)],
     ['edited 2 h ago · Newer', 'edited 2 days ago', ['edited 2 h ago · Newer'], false]);
@@ -7954,7 +8117,7 @@ async function firstSetupFlow() {
   for (let tries = 0; tries < 30 && !(await a.exists('.history-row[data-kind="everything"]')); tries++) await wait(100);
   const ruleRow = '.history-row[data-kind="everything"]';
   same('History has the switch-on’s one entry, with its Undo', [await a.text(`${ruleRow} .history-about`), await a.text(`${ruleRow} .history-actions button`)],
-    ['Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. Its Undo takes back what it takes in; a copy you choose has its own Undo.', 'Undo']);
+    ['Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. Its Undo takes back the items it added, but for any changed since; a copy you choose has its own Undo.', 'Undo']);
   await a.click(`${ruleRow} .history-actions button`);
   for (let tries = 0; tries < 40 && existsSync(join(codex, 'notes')); tries++) await wait(100);
   same('its Undo takes notes back out of Codex, leaves review (chosen, with its own Undo) as it is, and stores the rule off',
@@ -7983,7 +8146,7 @@ async function firstSetupFlow() {
   opened(other.home, first);
   const b = await launch(first, [], real);
   await b.click('#nav-harnesses');
-  await b.click('#manage-codex-cli'); await b.click('#manage-codex-cli');
+  await b.click('#manage-codex-cli'); await manageAgain(b, 'codex-cli');
   same('a Manage switch makes the record and leaves the question unanswered', ['syncEverything' in JSON.parse(readNow(join(other.home, '.central-knot/sync.json'))), await (async () => { await b.click('#nav-overview'); return b.exists('#setup-question'); })()], [false, true]);
   await b.quit();
   const second = join(scratch, 'setup-data-three');
@@ -8003,7 +8166,24 @@ async function firstSetupFlow() {
   await c.click('#setup-no');
   same('No stores the rule off, changes no file in the tools, and the question goes for good', [JSON.parse(readNow(sync)).syncEverything, Object.fromEntries(Object.entries(tree(other.home)).filter(([path]) => !path.startsWith('.central-knot'))), await c.exists('#setup-question')],
     [false, Object.fromEntries(Object.entries(before).filter(([path]) => !path.startsWith('.central-knot'))), false]);
-  check('and says so: nothing changed, what is on stays on, found items wait for Add, Settings is the way to change it', /^Left off, and nothing changed: what is already on stays on and keeps syncing, and what Central Knot finds in your tools waits on its page for Add\./.test(await c.text('[data-outcome] .band-text') ?? ''), await c.text('[data-outcome] .band-text'));
+  same('its band names the setting, with the way to turn it on in place', [await c.text('[data-outcome] .band-text'), await c.all('[data-outcome] .band-actions button')], ['Synchronize everything is off.', ['Turn on']]);
+  await shotAt(c, '04-after-no-860-light', SMALLEST, 'light');
+  await c.click('#setup-turn-on');
+  for (let tries = 0; tries < 40 && !readNow(join(other.codex, 'tidy/SKILL.md')); tries++) await wait(100);
+  same('Turn on is the switch Yes is: tidy and plan go to the tool that lacks each, the question stays gone, and its band on the Overview is Yes’s, with its Undo',
+    [JSON.parse(readNow(sync)).syncEverything, readNow(join(other.codex, 'tidy/SKILL.md')), readNow(join(other.claude, 'plan/SKILL.md')), await c.text('.page-title'), await c.exists('#setup-question'), await c.text('[data-outcome] .band-text'), await c.all('[data-outcome] .band-actions button')],
+    [true, text('tidy', 'Tidy up.'), text('plan', 'Plan ahead.'), 'Overview', false, 'Synchronize everything is on: it added 2 items.', ['Undo']]);
+  // While the band stands, a third skill turns up in Claude Code and a pass adds it: the Undo's hover still says what the Undo does.
+  saved(skill(other.claude, 'third', text('third', 'Third one.')), 5);
+  const thirdFound = Object.fromEntries(Object.entries(tree(other.home)).filter(([path]) => path.startsWith('.claude/skills/third')));
+  for (let tries = 0; tries < 200 && !readNow(join(other.codex, 'third/SKILL.md')); tries++) await wait(100);
+  same('a third skill added by a pass while the band stands: the hover still says what the Undo does', [readNow(join(other.codex, 'third/SKILL.md')), await c.run(`document.querySelector('#outcome-undo')?.title`)],
+    [text('third', 'Third one.'), 'Switches Synchronize everything off. It takes back the items it added, but for any changed since.']);
+  await c.click('#outcome-undo');
+  for (let tries = 0; tries < 40 && existsSync(join(other.codex, 'third')); tries++) await wait(100);
+  same('its Undo switches the rule off and takes back all three: every tool’s files are as before the click, with third only where it was found, byte for byte',
+    [JSON.parse(readNow(sync)).syncEverything, Object.fromEntries(Object.entries(tree(other.home)).filter(([path]) => !path.startsWith('.central-knot')))],
+    [false, Object.fromEntries(Object.entries({ ...before, ...thirdFound }).filter(([path]) => !path.startsWith('.central-knot')).sort(([x], [y]) => (x < y ? -1 : 1)))]);
   same('no page errors, first setup in a second home', c.pageErrors, []);
   await c.quit();
 
@@ -8017,15 +8197,18 @@ async function firstSetupFlow() {
   const d = await launch(thirdData, [], real);
   await d.click('#nav-overview');
   await d.click('#sync-switch');
-  check('with Automatic sync off the question says nothing is added until Sync once', /Automatic sync is off, so nothing is added until you click Sync once\.$/.test(await d.text('#setup-question .setup-text') ?? ''), await d.text('#setup-question .setup-text'));
+  same('with Automatic sync off it is said once, by the Overview’s line with Sync once, not by the question', [await d.all('#setup-question .setup-text'), await d.exists('#overview-sync-now')], [[], true]);
+  if (shots) { await d.click('#setup-question-info'); await shotAt(d, '05-card-open-nothing-on-860-light', SMALLEST, 'light'); await d.click('#setup-question-info'); }
   await d.click('#setup-yes');
-  same('Yes with Automatic sync off: the band says nothing is added until Sync once and offers it; nothing is written yet',
-    [await d.text('[data-outcome] .band-text'), await d.text('#setup-sync-once'), existsSync(join(third.codex, 'notes'))], ['Synchronize everything is on. Automatic sync is off, so nothing is added until you click Sync once.', 'Sync once', false]);
+  same('Yes with Automatic sync off: the band says when items are added and offers Sync once, the switch-on’s Undo beside it; nothing is written yet',
+    [await d.text('[data-outcome] .band-text'), await d.all('[data-outcome] .band-actions button', 'e.id + " " + e.textContent'), existsSync(join(third.codex, 'notes'))],
+    ['Synchronize everything is on. Nothing added yet: Automatic sync is off.', ['outcome-sync-once Sync once', 'outcome-undo Undo'], false]);
+  await shotAt(d, '06-after-yes-sync-off-860-light', SMALLEST, 'light');
   // The Overview's result is a band above its cards, which stays until acted on or closed: past the header's 8 seconds.
   await wait(10000);
-  same('ten seconds on, the Overview’s band and its Sync once are still there', [await d.exists('.page > .bands [data-outcome]'), await d.exists('#setup-sync-once')], [true, true]);
+  same('ten seconds on, the Overview’s band and its Sync once are still there', [await d.exists('.page > .bands [data-outcome]'), await d.exists('#outcome-sync-once')], [true, true]);
   if (shots) { await sizeTo(d, 860, 600); await d.shot('result-overview-setup-offer-860'); await fullSize(d); }
-  await d.click('#setup-sync-once');
+  await d.click('#outcome-sync-once');
   for (let tries = 0; tries < 40 && !readNow(join(third.codex, 'notes/SKILL.md')); tries++) await wait(100);
   same('and its Sync once takes notes in', readNow(join(third.codex, 'notes/SKILL.md')), text('notes', 'Take notes.'));
   const copies = [third.claude, third.codex, join(third.home, '.copilot/skills')].map(folder => join(folder, 'notes'));
@@ -8166,9 +8349,9 @@ async function firstSetupFlow() {
       await sizeTo(page, 1280, 800);
       if (scenario === 'damaged') {
         const words = await page.text('#setup-question');
-        check('setup says found skills wait for their problem and promises no copy from the damaged kind',
-          /Found skills wait/.test(words) && !/agents wait|Yes takes in what turns up later|takes in now the 1 item/.test(words)
-          && /damaged[\s\S]*Synchronize everything\?/.test(await page.text('#overview-needs')), words);
+        check('setup, under the problem, says nothing found is ready, that found skills wait for their record, and promises no copy from the damaged kind',
+          /^None of the items found is ready to add\./.test(await page.text('#setup-question-title')) && /Found skills wait/.test(words) && !/agents wait|Add the/.test(words)
+          && /damaged[\s\S]*None of the items found is ready to add/.test(await page.text('#overview-needs')), words);
       } else {
         check('a read-only store explains the stop before setup and offers no Yes',
           !(await page.exists('#setup-yes')) && /read-only|Permission was denied/i.test(await page.text('#overview-stopped'))
@@ -11273,21 +11456,27 @@ async function overviewFlow() {
   await a.quit();
   // A most used name opens its row on the very first click, before its kind's page was ever drawn in this launch: an own skill, one
   // whose copies differ (its question open), an own MCP server; then, in another home opened meanwhile, a plugin's skill.
+  // Claude Code's clash is sixty lines long, so its file scrolls in its box.
+  skill(claude, 'clash', text('clash', Array.from({ length: 60 }, (_, at) => `Line ${at + 1} of Claude Code’s way.`).join('\n')));
   skill(codex, 'clash', text('clash', 'Codex’s way.'));
+  // A found skill with a long name, used once too: its name is shortened beside its mark.
+  const longName = 'incident-postmortem-timeline-writer';
+  skill(claude, longName);
   const used = (folder, names) => { mkdirSync(join(folder, '.claude/projects/-work'), { recursive: true });
     writeFileSync(join(folder, '.claude/projects/-work/used.jsonl'), JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(),
       message: { content: names.map(name => (name.startsWith('mcp__') ? { type: 'tool_use', name, input: {} } : { type: 'tool_use', name: 'Skill', input: { skill: name } })) } }) + '\n'); };
-  used(home, ['notes', 'clash', 'mcp__docs__start']);
+  used(home, ['notes', 'clash', longName, 'mcp__docs__start']);
   // This computer's home, opened second: its only item is a plugin's skill, used once.
   standIns(real);
   mkdirSync(join(real, '.claude/skills'), { recursive: true });
   writeClaudeInstall(real, 'solo', 'kit', '1.0.0', { 'skills/one/SKILL.md': text('one') });
   used(real, ['kit:one']);
   a = await launch(data, [], real);
+  /** A most used name's button on its kind's card, found by the name it shows. */
+  const topName = (kind, name) => `[...document.querySelectorAll('#overview-${kind}-usage .kind-card-top-name')].find(e => e.textContent === ${JSON.stringify(name)})`;
   const openTop = async (kind, name) => {
-    const link = `#overview-${kind}-usage .middle[title=${JSON.stringify(name)}]`;
-    for (let tries = 0; tries < 100 && !(await a.exists(link)); tries++) await wait(100);
-    await a.click(`#${await a.run(`document.querySelector(${JSON.stringify(link)})?.closest('button')?.id`)}`);
+    for (let tries = 0; tries < 100 && !(await a.run(`!!${topName(kind, name)}`)); tries++) await wait(100);
+    await a.click(`#${await a.run(`${topName(kind, name)}?.id`)}`);
     const open = keysOf(kind, await a.all('.ov-row[aria-expanded="true"]', 'e.dataset.key'));
     await a.click('#nav-overview');
     return open;
@@ -11295,6 +11484,117 @@ async function overviewFlow() {
   same('launched, nothing visited: a most used own skill opens its row on the first click', await openTop('skills', 'notes'), ['notes']);
   same('one whose copies differ opens too, with its copy question', await openTop('skills', 'clash'), ['clash']);
   same('a most used MCP server, its page never drawn either, opens its row', await openTop('mcp', 'docs'), ['docs']);
+  // Beside each most used name, its file mark: the file opens under the card, the Overview staying, as the Library's mark opens
+  // it (the copy in each tool, or the version Central Knot holds; a server's entry), its header naming the item.
+  const fileMark = (kind, key) => `[id="${rowPart('file', kind, key)}"]`, cardPanel = '.kind-cards > .details-file-only';
+  const panelSays = () => a.run(`(() => {
+    const panel = document.querySelector('${cardPanel}'), box = panel?.querySelector('.file-open-box');
+    return { under: panel?.previousElementSibling?.querySelector('.kind-card-main')?.id ?? null, label: panel?.getAttribute('aria-label') ?? null,
+      item: box?.querySelector('.file-open-head .file-open-item')?.textContent ?? null,
+      text: box?.querySelector('pre.content')?.textContent ?? box?.querySelector('.file-open-state')?.textContent ?? null,
+      copies: [...(box?.querySelectorAll('.file-copy-select option') ?? [])].map(option => option.textContent), path: box?.querySelector('.file-open-foot .path-text')?.textContent ?? null,
+      pressed: [...document.querySelectorAll('.kind-cards .row-file-btn[aria-pressed="true"]')].map(mark => mark.id), panels: document.querySelectorAll('.file-open-box').length,
+      page: document.querySelector('.page-title')?.textContent ?? null };
+  })()`);
+  /** What the panel says once its text holds `words`; it fails if the text never comes. */
+  const panelHolds = async words => {
+    for (let tries = 0; tries < 80 && !(await panelSays()).text?.includes(words); tries++) await wait(100);
+    const said = await panelSays();
+    if (!said.text?.includes(words)) throw new Error(`the Overview's file panel never held ${JSON.stringify(words)}: ${JSON.stringify(said)}`);
+    return said;
+  };
+  same('each most used name has the Library’s file mark right after it: clash, the long-named one and notes on Skills, docs on MCP servers',
+    await a.run(`[...document.querySelectorAll('.kind-card .row-file-btn')].map(mark => [mark.id, mark.getAttribute('aria-label'), !!mark.previousElementSibling?.matches('.kind-card-top-name')])`),
+    [[rowPart('file', 'skills', 'clash'), 'Open file: clash', true], [rowPart('file', 'skills', longName), `Open file: ${longName}`, true],
+      [rowPart('file', 'skills', 'notes'), 'Open file: notes', true], [rowPart('file', 'mcp', 'docs'), 'Open file: docs', true]]);
+  // A long name is one name: one line, one run of text with no gap inside it, cut at its end only where the count leaves it no
+  // more room, its mark whole beside it.
+  const longBox = () => a.run(`(() => {
+    const name = ${topName('skills', longName)}, mark = document.querySelector('${fileMark('skills', longName)}'), count = name.closest('p').lastElementChild.getBoundingClientRect();
+    const box = name.getBoundingClientRect(), at = mark.getBoundingClientRect(), card = name.closest('.kind-card').getBoundingClientRect();
+    return { oneLine: box.height <= 21, oneRun: name.children.length === 0, cutOnlyWithoutRoom: name.scrollWidth <= name.clientWidth || Math.round(count.left - at.right) <= 8,
+      markWhole: at.left >= box.right && at.right <= count.left && at.right <= card.right };
+  })()`);
+  const longAt = {};
+  for (const [width, height] of [[1316, 819], SMALLEST]) {
+    await sizeTo(a, width, height);
+    const rail = await a.run(`document.body.classList.contains('rail')`);
+    if (rail) await a.click('#sidebar-toggle');
+    await a.settle();
+    longAt[width] = await longBox();
+    if (rail) await a.click('#sidebar-toggle');
+  }
+  await fullSize(a);
+  const whole = { oneLine: true, oneRun: true, cutOnlyWithoutRoom: true, markWhole: true };
+  same('at 1316 and 860, with the sidebar open, the long name reads as one: one line, no gap inside it, cut only where the count leaves no room, its mark whole',
+    [longAt[1316], longAt[860]], [whole, whole]);
+  if (shots) {
+    await sizeTo(a, ...SMALLEST);
+    const rail = await a.run(`document.body.classList.contains('rail')`);
+    if (rail) await a.click('#sidebar-toggle');
+    await a.run(`window.centralKnot.setAppearance('light')`);
+    await wait(80);
+    await a.shot('overview-long-name-860-light');
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    if (rail) await a.click('#sidebar-toggle');
+    await fullSize(a);
+  }
+  await a.click(fileMark('skills', 'clash'));
+  const clashOpen = await panelHolds('Line 60 of Claude Code’s way.');
+  same('clash’s mark opens its SKILL.md under the Skills card, the page still the Overview, its header naming clash: Claude Code’s copy first, Codex’s offered, its path below',
+    [clashOpen.page, clashOpen.under, clashOpen.label, clashOpen.item, clashOpen.copies, clashOpen.text.startsWith('---\nname: clash'), clashOpen.path?.endsWith('/.claude/skills/clash/SKILL.md'), clashOpen.pressed, clashOpen.panels],
+    ['Overview', 'overview-skills', 'File for clash', 'clash', ['Claude Code’s copy', 'Codex’s copy'], true, true, [rowPart('file', 'skills', 'clash')], 1]);
+  if (shots) {
+    await sizeTo(a, 1316, 819);
+    const rail = await a.run(`document.body.classList.contains('rail')`);
+    if (rail) await a.click('#sidebar-toggle');
+    for (const theme of ['light', 'dark']) { await a.run(`window.centralKnot.setAppearance('${theme}')`); await wait(80); await a.shot(`overview-file-open-1316-${theme}`); }
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    if (rail) await a.click('#sidebar-toggle');
+    await fullSize(a);
+  }
+  // At 860 with the sidebar open, the box fits the window and its text scrolls in it: at its foot, the last line is whole.
+  await sizeTo(a, ...SMALLEST);
+  const railed = await a.run(`document.body.classList.contains('rail')`);
+  if (railed) await a.click('#sidebar-toggle');
+  await a.settle();
+  if (shots) { await a.run(`window.centralKnot.setAppearance('light')`); await wait(80); await a.shot('overview-file-open-860-light'); await a.run(`window.centralKnot.setAppearance('system')`); }
+  same('at 860, scrolled to its foot, the file’s last line is whole in its box and in the page', await lastLineWhole(a, `${cardPanel} pre.content`),
+    { words: 'Line 60 of Claude Code’s way.', scrolls: true, whole: true });
+  await fitsAtMinimum(a, 'the Overview with a most used skill’s file open');
+  // From a lower card at 860 (fitsAtMinimum ends at full size): docs' entry opens under MCP servers, brought into view.
+  await sizeTo(a, ...SMALLEST);
+  await a.settle();
+  await a.run(`document.querySelector('#overview-scroll').scrollTop = 0`);
+  await a.click(fileMark('mcp', 'docs'));
+  await panelHolds('"command":"docs"');
+  await a.settle();
+  const lowerInView = await a.run(`(() => { const box = document.querySelector('${cardPanel} .file-open-box').getBoundingClientRect(), view = document.querySelector('#overview-scroll').getBoundingClientRect();
+    return box.top >= view.top && box.bottom <= view.bottom + 0.5; })()`);
+  if (shots) { await a.run(`window.centralKnot.setAppearance('light')`); await wait(80); await a.shot('overview-file-lower-card-860-light'); await a.run(`window.centralKnot.setAppearance('system')`); }
+  same('at 860, docs’ entry under the second card is brought into view whole', lowerInView, true);
+  await a.press('Escape');
+  if (railed) await a.click('#sidebar-toggle');
+  await fullSize(a);
+  // Two marks pressed at once, before the first file is read: the last press wins.
+  await a.run(`document.querySelector('${fileMark('skills', 'notes')}').click(); document.querySelector('${fileMark('mcp', 'docs')}').click();`);
+  const docsOpen = await panelHolds('"command":"docs"');
+  same('notes’ mark then docs’ at once, the last press wins: docs’ entry, named, under MCP servers, its mark alone pressed', [docsOpen.under, docsOpen.label, docsOpen.item, docsOpen.pressed, docsOpen.panels],
+    ['overview-mcp', 'File for docs', 'docs', [rowPart('file', 'mcp', 'docs')], 1]);
+  await a.press('Escape');
+  same('Escape closes it, the focus back on its mark', [(await panelSays()).panels, await a.run('document.activeElement?.id')], [0, rowPart('file', 'mcp', 'docs')]);
+  await a.click(fileMark('skills', 'notes'));
+  await panelHolds('name: notes');
+  await a.click('#nav-library');
+  await a.click('#nav-overview');
+  same('leaving the Overview closes the file: back on it, none is open', (await panelSays()).panels, 0);
+  // A mark pressed and the page left before its file is read: the read that answers late draws nothing where he went, and
+  // nothing is open when he is back.
+  await a.run(`document.querySelector('${fileMark('skills', 'clash')}').click(); document.querySelector('#nav-library').click();`);
+  await wait(600);
+  const lateOnLibrary = await a.run(`[document.querySelector('.page-title')?.textContent, document.querySelectorAll('.file-open-box').length]`);
+  await a.click('#nav-overview');
+  same('a file asked for and the Overview left before it is read: nothing of it on the Library, nothing open back on the Overview', [lateOnLibrary, (await panelSays()).panels], [['Library', 0], 0]);
   const session = join(home, '.claude/projects/-work/used.jsonl');
   const sessionsCell = '.tools-table tr[data-tool="claude-cli"] .tools-sessions';
   const update = byId('overview-collect-usage');
@@ -11331,10 +11631,17 @@ async function overviewFlow() {
   unlinkSync(second);
   chmodSync(session, 0o600);
   same('restoring access restores the complete sessions cell', await updateSessions(), readable);
+  await a.click(fileMark('skills', 'notes'));
+  await panelHolds('name: notes');
   await a.click('#home-actual');
-  for (let tries = 0; tries < 100 && !(await a.exists('#overview-skills-usage .middle[title="one"]')); tries++) await wait(100);
-  same('another home whose only item is a plugin’s skill: the card counts it, and the lead never says nothing was found',
-    [(await a.text('.kind-card:has(#overview-skills) .kind-card-summary'))?.trim(), await a.exists('.overview-lead'), /Nothing found/.test(await a.text('.overview-lead') ?? '')], ['1 skill · none on · 1 from plugins', true, false]);
+  for (let tries = 0; tries < 100 && !(await a.run(`!!${topName('skills', 'one')}`)); tries++) await wait(100);
+  same('another home closes the file open in the first', (await panelSays()).panels, 0);
+  await a.click(fileMark('skills', 'kit@solo/one'));
+  const pluginOpen = await panelHolds('name: one');
+  same('there, the most used plugin’s skill opens its SKILL.md in Claude Code’s copy of kit', [pluginOpen.under, pluginOpen.label, pluginOpen.item, pluginOpen.path?.endsWith('/SKILL.md')], ['overview-skills', 'File for one', 'one', true]);
+  await a.press('Escape');
+  same('another home whose only item is a plugin’s skill: the card counts it, and first setup’s question, which asks there in the lead’s place, says it is found and none is ready to add',
+    [(await a.text('.kind-card:has(#overview-skills) .kind-card-summary'))?.trim(), await a.exists('.overview-lead'), /^None of the items found is ready to add\. /.test(await a.text('#setup-question-title') ?? '')], ['1 skill · none on · 1 from plugins', false, true]);
   same('there, after Skills was drawn in the first home, a most used plugin’s skill opens its row on the first click', await openTop('skills', 'one'), ['kit@solo/one']);
   same('no page errors, the most used links', a.pageErrors, []);
   await a.quit();
@@ -11405,6 +11712,43 @@ async function mcpSigninFlow() {
     opencode: fixture('opencode-list.stdout').replace('└  4', `●  ✓ search \u001b[90mconnected\n│      \u001b[90mhttp://127.0.0.1:47205/mcp\n│\n●  ⚠ ${longName} \u001b[90mneeds authentication\n│      \u001b[90mhttp://127.0.0.1:47206/mcp\n│\n└  6`),
   };
   mkdirSync(said, { recursive: true });
+  // Codex's sign-in (`codex mcp login -- <name>`), a stand-in that never reaches an account or a browser: it writes its arguments
+  // down, listens on a port for the browser's answer, opens the browser as Codex does from its BROWSER (webbrowser 1.2.4: the first
+  // of its commands found on its path, the address last, as its own child; none found, none opened), goes on once that browser is
+  // up, then as codex.login says: signs in (exit 0), refuses (exit 1 with a line), waits for ever, or waits with a helper of its
+  // own that ignores TERM and listens too. The app is given BROWSER=ck-browser (launch below), whatever the one running the checks
+  // set; the stand-in ck-browser starts a long-lived "browser" in its own process group, as xdg-open does (no new session), which
+  // writes itself down and ends by itself after two minutes.
+  const loginScript = join(scratch, 'signin-login.cjs'), helperScript = join(scratch, 'signin-helper.cjs'), browserScript = join(scratch, 'signin-browser.cjs');
+  const logins = join(scratch, 'signin-logins.log'), browserAsked = join(scratch, 'signin-opened.log'), browsers = join(scratch, 'signin-browsers.log'), ports = join(said, 'codex.ports');
+  writeFileSync(browserScript, `require('fs').appendFileSync(${JSON.stringify(browsers)}, process.pid + '\\n'); setTimeout(() => process.exit(0), 120000);\n`);
+  writeFileSync(join(home, '.local/bin/ck-browser'), `#!/bin/sh\necho "$1" >> ${browserAsked}\n"${process.execPath}" ${browserScript} </dev/null >/dev/null 2>&1 &\n`);
+  chmodSync(join(home, '.local/bin/ck-browser'), 0o755);
+  /** Only on Linux does the app start the browser apart (mcpsigninrun.ts browserApart): elsewhere a stand-in in Codex's group says nothing of the system's opener. */
+  const apart = process.platform === 'linux';
+  if (!apart) console.log('(mcpSigninFlow: the browser is set apart on Linux only; macOS hands the address to the system (open): whether the browser lives is not checked here)');
+  /** Whether a stand-in browser lives on, where the app sets it apart (above); elsewhere not checked. */
+  const lives = pid => !apart || (() => { try { process.kill(Number(pid), 0); return true; } catch { return false; } })();
+  /** The stand-in browsers started, each by its process. */
+  const browserPids = () => readNow(browsers).split('\n').filter(Boolean).map(Number);
+  // Each process that listens writes its port and its number down, a line each.
+  const listen = then => `const listening = require('net').createServer().listen(0, '127.0.0.1', () => { require('fs').appendFileSync(${JSON.stringify(ports)}, listening.address().port + ' ' + process.pid + '\\n'); ${then} });`;
+  writeFileSync(helperScript, `process.on('SIGTERM', () => {});\n${listen('')}\n`);
+  writeFileSync(loginScript, `const fs = require('fs'), { spawn } = require('child_process');
+fs.appendFileSync(${JSON.stringify(logins)}, JSON.stringify(process.argv.slice(2)) + '\\n');
+const mode = fs.readFileSync(${JSON.stringify(join(said, 'codex.login'))}, 'utf8').trim();
+const opened = () => (fs.existsSync(${JSON.stringify(browsers)}) ? fs.readFileSync(${JSON.stringify(browsers)}, 'utf8').split('\\n').filter(Boolean).length : 0);
+const found = name => name.includes('/') ? fs.existsSync(name) : process.env.PATH.split(':').some(folder => fs.existsSync(folder + '/' + name));
+${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(entry => entry.trim().split(/\\s+/)).find(([name]) => name && found(name)) ?? [], before = opened();
+  if (opener) spawn(opener, [...words, 'http://127.0.0.1:' + listening.address().port + '/callback'], { stdio: 'ignore' });
+  if (mode === 'helper') spawn(process.execPath, [${JSON.stringify(helperScript)}], { stdio: ['ignore', 'inherit', 'inherit'] });
+  const up = setInterval(() => {
+    if (opened() <= before) return;
+    clearInterval(up);
+    if (mode === 'accept') { console.log('Successfully logged in'); process.exit(0); }
+    if (mode === 'refuse') { console.error('Error: the server refused the sign-in'); process.exit(1); }
+  }, 50);`)}
+`);
   const versions = { claude: '2.1.330 (Claude Code)', codex: 'codex-cli 0.171.0', copilot: 'GitHub Copilot CLI 1.0.114.', pi: '1.6.0', opencode: '1.19.6', agy: '1.5.14' };
   for (const [binary, version] of Object.entries(versions)) {
     if (outputs[binary]) writeFileSync(join(said, binary), outputs[binary]);
@@ -11413,6 +11757,7 @@ async function mcpSigninFlow() {
     // Every call but --version is recorded as it starts and as it ends: the tool, the folder it ran in, how many entries that held, its arguments, its process.
     writeFileSync(join(home, '.local/bin', binary), [`#!/bin/sh`, `[ "$1" = "--version" ] && cat ${said}/${binary}.version && exit 0`,
       `echo "start|${binary}|$(pwd)|$(ls -A | wc -l | tr -d ' ')|$*|$$" >> ${calls}`,
+      ...(binary === 'codex' ? [`[ "$1 $2" = "mcp login" ] && exec "${process.execPath}" ${loginScript} "$@"`] : []),
       // <binary>.linger: a helper in a session of its own holds the tool's output open that many seconds after the tool is stopped.
       `[ -f ${said}/${binary}.linger ] && "${process.execPath}" -e ${JSON.stringify(`require('node:child_process').spawn('sleep', [process.argv[1]], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] }).unref()`)} "$(cat ${said}/${binary}.linger)"`,
       `[ -f ${said}/${binary}.wait ] && sleep "$(cat ${said}/${binary}.wait)"`,
@@ -11421,8 +11766,9 @@ async function mcpSigninFlow() {
   }
   const called = () => readNow(calls).split('\n').filter(Boolean).map(line => line.split('|'));
   const started = () => called().filter(([what]) => what === 'start');
-  // A check's limit of 4 s here (main.ts CK_SIGNIN_LIMIT_MS), so "Didn’t answer" comes without waiting 70 s.
-  const a = await launch(join(scratch, 'signin-data'), [], home, { CK_TEST_HOME_ONLY: Object.keys(versions).join(','), CK_SIGNIN_LIMIT_MS: '4000' });
+  // A check's limit of 4 s here (main.ts CK_SIGNIN_LIMIT_MS), so "Didn’t answer" comes without waiting 70 s; a sign-in's of 6 s
+  // (CK_SIGNIN_START_LIMIT_MS), so "Not finished in 3 minutes" comes without waiting three minutes.
+  const a = await launch(join(scratch, 'signin-data'), [], home, { CK_TEST_HOME_ONLY: Object.keys(versions).join(','), CK_SIGNIN_LIMIT_MS: '4000', BROWSER: 'ck-browser', CK_SIGNIN_START_LIMIT_MS: '6000' });
   await a.click('#home-actual');
   /** The page as drawn: the tools' columns, and each row's name, plugin and cells' words (a mark and a Copy's label aside). */
   const page = async () => {
@@ -11552,7 +11898,9 @@ async function mcpSigninFlow() {
   // Each Copy is its own row's: its id and its cell's name the row it is drawn in, and the command it copies names that row's server.
   const copiesOwn = () => a.run(`[...document.querySelectorAll('[id^="signin-copy-"]')].map(copy => { const row = copy.closest('tr'), cell = copy.closest('td');
     return copy.id === 'signin-copy-' + cell.id.slice('signin-cell-'.length) && cell.id.endsWith('-' + row.dataset.row) && cell.querySelector('.signin-command').textContent.endsWith(row.querySelector('.signin-server').textContent); })`);
-  same('the Copy on oauth’s row is that row’s', await copiesOwn(), [true]);
+  // Each Sign in is its own row's too: its id and its cell's name the row it is drawn in.
+  const actsOwn = () => a.run(`[...document.querySelectorAll('[id^="signin-act-"]')].map(act => act.id === 'signin-act-' + act.closest('td').id.slice('signin-cell-'.length) && act.closest('td').id.endsWith('-' + act.closest('tr').dataset.row))`);
+  same('the Sign in on oauth’s row is that row’s, and Codex’s cell has nothing to copy', [await actsOwn(), await copiesOwn()], [[true], []]);
 
   // Copy on a cell that needs a sign-in: the tool's own command, with its name for the server, under a button that says Copy. The
   // clipboard is read through the main process, which only a development run opens to the checks (as practiceFlow's menus are).
@@ -11575,7 +11923,189 @@ async function mcpSigninFlow() {
       await a.send('Emulation.setFocusEmulationEnabled', { enabled: false });
     }
   };
-  same('Copy gives Codex’s own sign-in command, the one the cell shows', await copyOn('codex-cli', 'oauth'), ['Copy', 'codex mcp login oauth', 'Copied: run it in a terminal', ...(main ? ['codex mcp login oauth'] : [])]);
+
+  // Sign in, where Codex says a server needs one (mcpsignin.ts offersSignin: Codex, on this computer's home): it runs Codex's own
+  // `codex mcp login -- <name>`, the name one literal argument after the end of its options, and nothing else; the cell says it
+  // waits on the browser, with Stop; after, Signed in with its time, or what happened, in amber, with Try again and the command
+  // to copy. One at a time; no list is run after; Stop, the limit and Quit (below) leave no process of Codex's and no port it
+  // listened on, and never the browser it opened; another page and back, the same. A Codex server whose name holds a space and a
+  // quote, needing a sign-in there alone.
+  const team = "team's docs", codexConfig = readNow(join(home, '.codex/config.toml')), codexSaid = readNow(join(said, 'codex'));
+  /** Codex's servers with team's docs at `port`'s address. */
+  const withTeam = port => `${codexConfig}\n[mcp_servers."${team}"]\nurl = "${P(port)}"\n`;
+  write('.codex/config.toml', withTeam(47214));
+  writeFileSync(join(said, 'codex'), JSON.stringify([...JSON.parse(codexSaid), { ...codex[0], name: team, auth_status: 'not_logged_in' }], null, 2));
+  await a.click('#header-refresh');
+  await a.click('#signin-check-codex-cli');
+  await checked('codex-cli');
+  /** A Codex cell as drawn, by its row's name: its words, its sign-in button's label, its Copy's, and the line under it. */
+  const codexCell = async name => a.run(`(cell => [[...cell.querySelector('.signin-words').childNodes].map(node => (node.nodeType === 3 ? node.textContent : node.matches('.signin-keep') ? node.firstChild.textContent : '')).join(''),
+    ...['[id^="signin-act-"]', '[id^="signin-copy-"]', '.signin-command'].map(part => cell.querySelector(part)?.textContent ?? null)])(document.getElementById(${JSON.stringify(await cellId('codex-cli', name))}))`);
+  /** A Codex cell's hover, and whether it is in amber. */
+  const codexLook = async name => a.run(`(cell => [cell.title, cell.classList.contains('tone-warning')])(document.getElementById(${JSON.stringify(await cellId('codex-cli', name))}))`);
+  const act = async name => byId(`signin-act-codex-cli-${await rowIdOf(name)}`);
+  /** Each process of Codex's sign-ins that listened, in order, as it wrote itself down: its port and its number. */
+  const listened = () => readNow(ports).split('\n').filter(Boolean).map(line => line.split(' ').map(Number));
+  const alive = pid => { try { process.kill(Number(pid), 0); return true; } catch { return false; } };
+  const portFree = port => new Promise(done => { const probe = tcpServer().once('error', () => done(false)).listen(port, '127.0.0.1', () => probe.close(() => done(true))); });
+  /** Whether a row (by its name) comes before plain, which needs nothing of him, once Refresh has put the rows in order. */
+  const beforePlain = async name => { const now = await order(); return now.indexOf(name) < now.indexOf('plain'); };
+  /** One picture with `row`'s Codex cell in view, at `size`, in `theme`. */
+  const picture = async (name, [width, height], theme, row = team) => {
+    if (!shots) return;
+    await sizeTo(a, width, height); await shape(false);
+    await a.run(`document.getElementById(${JSON.stringify(await cellId('codex-cli', row))}).scrollIntoView({ block: 'center' })`);
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] }); await wait(300);
+    await a.shot(`mcp-signin-start-${name}-${width}-${theme}`);
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }); await fullSize(a);
+  };
+  same('where Codex says a sign-in is needed its cell offers Sign in and nothing to copy (another tool’s Copy: after Check all, below)',
+    [await codexCell(team), await codexCell('oauth')], [['Needs sign-in', 'Sign in', null, null], ['Needs sign-in', 'Sign in', null, null]]);
+  same('its hover says what it runs', await a.run(`document.querySelector(${JSON.stringify(await act(team))}).title`), `Runs codex mcp login -- 'team'\\''s docs'; the sign-in opens in your browser`);
+  await a.click('#header-refresh');
+  same('on Refresh a row that offers Sign in stands with the rows that need him', await beforePlain(team), true);
+  await picture('sign-in', SMALLEST, 'light');
+  await picture('sign-in', [1316, 819], 'dark');
+  // Pressed twice at once (a helper of Codex's, which ignores TERM, waits too): one sign-in, and its cell says it waits on the
+  // browser, with Stop; meanwhile every other Sign in waits, and Check doesn't.
+  writeFileSync(join(said, 'codex.login'), 'helper');
+  const loginsFrom = started().length;
+  await a.run(`(button => { button.click(); button.click(); })(document.querySelector(${JSON.stringify(await act(team))}))`);
+  await until(async () => listened().length === 2 && browserPids().length === 1, 'Codex’s sign-in, its helper and its browser');
+  same('the cell says it waits on the browser, with Stop; another Sign in waits, Check doesn’t',
+    [await codexCell(team), await a.run(`(button => [button.disabled, button.title])(document.querySelector(${JSON.stringify(await act('oauth'))}))`), await a.run(`document.querySelector('#signin-check-codex-cli').disabled`)],
+    [['Finish in your browser…', 'Stop', null, null], [true, 'Another sign-in is under way: finish or stop it first'], false]);
+  same('Stop’s hover says what it does and when to press it', await a.run(`document.querySelector(${JSON.stringify(await act(team))}).title`), 'Ends the sign-in. Closed the browser’s tab before finishing? Stop, then Try again.');
+  same('a double press runs Codex’s own sign-in once, its server’s name one argument after `--`, and Codex opens the browser itself',
+    [readNow(logins).split('\n').filter(Boolean).map(line => JSON.parse(line)), started().slice(loginsFrom).map(([, tool, , entries, args]) => [tool, entries, args]), readNow(browserAsked).split('\n').filter(Boolean).length],
+    [[['mcp', 'login', '--', team]], [['codex', '0', `mcp login -- ${team}`]], 1]);
+  await picture('waiting', SMALLEST, 'light');
+  await picture('waiting', [1316, 819], 'light');
+  same('main refuses a second sign-in while one waits, running nothing', [await a.run(`window.centralKnot.startSignin('codex-cli', ${JSON.stringify(home)}, ${JSON.stringify(await rowIdOf('oauth'))}, 'x')`), started().length - loginsFrom],
+    [{ notStarted: 'Another sign-in is running' }, 1]);
+  await a.click('#nav-library');
+  await a.click('#nav-mcpsignin');
+  same('another page and back: it still waits, with Stop', await codexCell(team), ['Finish in your browser…', 'Stop', null, null]);
+  await a.click('#header-refresh');
+  same('on Refresh a row whose sign-in waits stands with the rows that need him', await beforePlain(team), true);
+  // Its server given another address while it waits: the cell keeps its Stop. Stop: Codex is asked to end, then what it left is
+  // ended; nothing of its is left running or listening, the browser it opened lives on, and no list is run after. Its end was
+  // another copy's: never shown, not even once the address is put back.
+  const [[loginPort, loginPid], [helperPort, helperPid]] = listened();
+  write('.codex/config.toml', withTeam(47216));
+  await a.click('#header-refresh');
+  same('its server changed while it waits: it still waits, with Stop', await codexCell(team), ['Finish in your browser…', 'Stop', null, null]);
+  await a.click(await act(team));
+  await until(async () => (await codexCell(team))[0] !== 'Finish in your browser…', 'the stopped sign-in to end');
+  same('Stop ends Codex’s sign-in and its helper and frees their ports, not the browser it opened; no list is run after',
+    [alive(loginPid), alive(helperPid), await portFree(loginPort), await portFree(helperPort), lives(browserPids()[0]), started().length - loginsFrom], [false, false, true, true, true, 1]);
+  same('… its end was another copy’s: the server as it is now says Not checked', (await codexCell(team))[0], 'Not checked');
+  write('.codex/config.toml', withTeam(47214));
+  await a.click('#header-refresh');
+  same('… and still once the address is put back', (await codexCell(team))[0], 'Not checked');
+  await a.click('#signin-check-codex-cli');
+  await checked('codex-cli');
+  // Stopped while it waits, the server as it was: it says so in amber, with Try again and Copy command, nothing under it.
+  writeFileSync(join(said, 'codex.login'), 'wait');
+  const stoppedFrom = listened().length;
+  await a.click(await act(team));
+  await until(async () => listened().length === stoppedFrom + 1, 'the sign-in to stop');
+  await a.click(await act(team));
+  await until(async () => (await codexCell(team))[0] === 'Stopped', 'the stopped sign-in');
+  same('stopped: it says so in amber, with Try again and the command to copy, and nothing under it', [await codexCell(team), (await codexLook(team))[1]], [['Stopped', 'Try again', 'Copy command', null], true]);
+  await picture('stopped', SMALLEST, 'light');
+  // Try again, and Codex signs in: Signed in with the time, nothing to press, the browser it opened still open, no list run
+  // after; the same after another page and back.
+  writeFileSync(join(said, 'codex.login'), 'accept');
+  const signedFrom = started().length;
+  await a.click(await act(team));
+  await until(async () => (await codexCell(team))[0].startsWith('Signed in'), 'the sign-in to end');
+  const signedIn = await codexCell(team);
+  same('signed in: the time, no button, nothing to copy', [/^Signed in \d{1,2}:\d{2}/.test(signedIn[0]), ...signedIn.slice(1)], [true, null, null, null]);
+  await wait(1500);
+  same('… and every browser its sign-ins opened lives on', browserPids().map(lives), browserPids().map(() => true));
+  same('no list is run after a sign-in', started().slice(signedFrom).map(([, , , , args]) => args), [`mcp login -- ${team}`]);
+  await picture('signed-in', SMALLEST, 'light');
+  await a.click('#nav-library');
+  await a.click('#nav-mcpsignin');
+  same('another page and back: still signed in, at the same time', await codexCell(team), signedIn);
+  // Codex refuses (oauth): the words in amber, what Codex said behind a (?) after them, Try again, and Copy command, which says
+  // Copied where he pressed. At 860 the name column keeps its width (the table's layout is fixed), the two buttons stacked on one
+  // edge inside the cell.
+  writeFileSync(join(said, 'codex.login'), 'refuse');
+  await sizeTo(a, ...SMALLEST); await shape(false);
+  const NAME_WIDTH = `document.querySelector('.signin-table thead th.signin-name').getBoundingClientRect().width`;
+  const nameWidth = await a.run(NAME_WIDTH);
+  await fullSize(a);
+  await a.click(await act('oauth'));
+  await until(async () => (await codexCell('oauth'))[0] === 'Sign-in didn’t finish', 'the refused sign-in');
+  const why = `signin-why-codex-cli-${await rowIdOf('oauth')}`;
+  same('refused: in amber, Try again and Copy command, nothing under it; what Codex said behind a (?) after the words, a button',
+    [await codexCell('oauth'), (await codexLook('oauth'))[1], await a.run(`document.getElementById(${JSON.stringify(why)})?.tagName ?? null`)], [['Sign-in didn’t finish', 'Try again', 'Copy command', null], true, 'BUTTON']);
+  await a.click(byId(why));
+  same('… its card, on a click, holds what Codex said last', await a.text(byId(`${why}-card`)), 'Error: the server refused the sign-in');
+  if (shots) {
+    await sizeTo(a, ...SMALLEST); await shape(false);
+    await a.run(`document.getElementById(${JSON.stringify(why)}).scrollIntoView({ block: 'center' })`);
+    if (!(await a.run(`!!document.getElementById(${JSON.stringify(`${why}-card`)})?.matches(':popover-open')`))) await a.click(byId(why));
+    await wait(300);
+    await a.shot('mcp-signin-start-why-860-light');
+    await fullSize(a);
+  }
+  if (await a.run(`!!document.getElementById(${JSON.stringify(`${why}-card`)})?.matches(':popover-open')`)) await a.click(byId(why));
+  const copied = await copyOn('codex-cli', 'oauth');
+  same('Copy command gives Codex’s own sign-in command, and says Copied there and in the status bar',
+    [copied[2], await a.text(byId(`signin-copy-codex-cli-${await rowIdOf('oauth')}`)), ...copied.slice(3)], ['Copied: run it in a terminal', 'Copied', ...(main ? ['codex mcp login -- oauth'] : [])]);
+  await sizeTo(a, ...SMALLEST); await shape(false);
+  same('at 860 with a failed cell the name column keeps its width, the cell’s two buttons stacked on one edge inside it', await a.run(`(() => {
+    const cell = document.getElementById(${JSON.stringify(await cellId('codex-cli', 'oauth'))}).getBoundingClientRect();
+    const [first, second] = [...document.getElementById(${JSON.stringify(await cellId('codex-cli', 'oauth'))}).querySelectorAll('.signin-acts .btn')].map(button => button.getBoundingClientRect());
+    return [Math.abs(${NAME_WIDTH} - ${JSON.stringify(nameWidth)}) <= 0.5, Math.abs(first.left - second.left) <= 1 && second.top > first.top, Math.max(first.right, second.right) <= cell.right + 0.5]; })()`), [true, true, true]);
+  // Bounded: its words at most three lines, each of its two buttons at most two (a button may wrap); said beside its neighbour's.
+  const [wordsLines, buttonLines, heights] = await a.run(`(() => {
+    const cell = document.getElementById(${JSON.stringify(await cellId('codex-cli', 'oauth'))}), words = cell.querySelector('.signin-words');
+    const lines = element => Math.round(element.getBoundingClientRect().height / parseFloat(getComputedStyle(element).lineHeight));
+    const row = name => [...document.querySelectorAll('.signin-table tbody tr')].find(each => each.querySelector('.signin-server').textContent === name && !each.querySelector('.signin-plugin'));
+    return [lines(words), Math.max(...[...cell.querySelectorAll('.signin-acts .btn .btn-label')].map(lines)), [row('oauth'), row('plain')].map(each => Math.round(each.getBoundingClientRect().height))]; })()`);
+  console.log(`(mcpSigninFlow: at 860 the refused row is ${heights[0]} px high, its neighbour plain ${heights[1]} px)`);
+  same('at 860 the refused cell is bounded: its words at most three lines, each of its two buttons at most two', [wordsLines <= 3, buttonLines <= 2], [true, true]);
+  await fullSize(a);
+  await picture('refused', SMALLEST, 'light', 'oauth');
+  // Not finished in the time it is given (here 6 s; the app's own is 3 minutes): stopped as Stop stops it, the browser kept.
+  writeFileSync(join(said, 'codex.login'), 'wait');
+  const listenedBefore = listened().length, browsersBefore = browserPids().length;
+  await a.click(await act('oauth'));
+  await until(async () => listened().length === listenedBefore + 1 && browserPids().length === browsersBefore + 1, 'the sign-in that won’t end to listen');
+  const [waitPort, waitPid] = listened().at(-1);
+  await until(async () => (await codexCell('oauth'))[0] === 'Not finished in 3 minutes', 'the sign-in’s limit');
+  same('not finished in its time: said so in amber, with Try again and Copy command; nothing of Codex’s left running or listening, its browser kept',
+    [await codexCell('oauth'), (await codexLook('oauth'))[1], alive(waitPid), await portFree(waitPort), lives(browserPids().at(-1))], [['Not finished in 3 minutes', 'Try again', 'Copy command', null], true, false, true, true]);
+  await picture('no-answer', SMALLEST, 'light', 'oauth');
+  // Main refuses, running nothing: another home; a tool whose sign-in it doesn't start; and a copy changed since the page showed it
+  // (the page's own ask recorded in main as it came, then sent again after the change: a development run, which opens main).
+  const refusedFrom = started().length;
+  const ask = (tool, onHome, row, copy) => a.run(`window.centralKnot.startSignin(${JSON.stringify(tool)}, ${JSON.stringify(onHome)}, ${JSON.stringify(row)}, ${JSON.stringify(copy)})`);
+  same('another home, and a tool whose sign-in it doesn’t start, are refused', [await ask('codex-cli', join(scratch, 'another-home'), await rowIdOf(team), 'x'), await ask('pi-cli', home, await rowIdOf('oauth'), 'x')],
+    [{ notStarted: 'Another home is open' }, { notStarted: 'Central Knot doesn’t start Pi’s sign-in here' }]);
+  if (main) {
+    await main.run(`(() => { const handlers = electron.ipcMain._invokeHandlers, real = handlers.get('mcp-signin:start'); globalThis.ckAside = real; globalThis.ckAsks = [];
+      handlers.set('mcp-signin:start', (event, ...args) => { globalThis.ckAsks.push(args); return real(event, ...args); }); return true; })()`);
+    writeFileSync(join(said, 'codex.login'), 'refuse');
+    await a.click(await act('oauth'));
+    await until(async () => (await codexCell('oauth'))[0] === 'Sign-in didn’t finish', 'the sign-in whose ask is kept');
+    const [kept] = await main.run('globalThis.ckAsks');
+    await main.run(`(electron.ipcMain._invokeHandlers.set('mcp-signin:start', globalThis.ckAside), true)`);
+    const startedBefore = started().length;
+    write('.codex/config.toml', withTeam(47214).replace(P(47202), P(47215)));
+    await a.click('#header-refresh');
+    same('the page’s ask sent again after its server changed: refused, nothing run', [await ask(...kept), started().length - startedBefore], [{ notStarted: 'Changed since the page showed it' }, 0]);
+    same('… and the page dropped what that copy’s sign-in ended with', (await codexCell('oauth'))[0], 'Not checked');
+  } else console.log('(mcpSigninFlow: the packaged app opens no main process to the checks: a copy changed since the page showed it is refused in the unit checks only)');
+  same('nothing was run by the asks main refused', started().slice(refusedFrom).filter(([, , , , args]) => args.startsWith('mcp login')).length, main ? 1 : 0);
+  write('.codex/config.toml', codexConfig);
+  writeFileSync(join(said, 'codex'), codexSaid);
+  rmSync(ports);
+  await a.click('#header-refresh');
 
   // A slow check: the column says Checking…, every Check waits, the page stays usable, and Check all meanwhile does nothing.
   writeFileSync(join(said, 'pi.wait'), '2');
@@ -11606,6 +12136,9 @@ async function mcpSigninFlow() {
   const allTime = await a.text('#signin-checked');
   same('after Check all, one time beside it, and none under a column', [/^Checked \d{1,2}:\d{2}/.test(allTime ?? ''), (await a.all('.signin-head', '[e.dataset.tool, e.innerText]')).filter(([, words]) => words.includes('Checked'))], [true, []]);
   same('the Copy on each row that needs a sign-in is that row’s', (await copiesOwn()).filter(own => !own), []);
+  same('a row where Codex’s Sign in stands beside another tool’s Copy', [(await codexCell('oauth')).slice(0, 3), await a.text(byId(`signin-copy-claude-cli-${await rowIdOf('oauth')}`))],
+    [['Needs sign-in', 'Sign in', null], 'Copy']);
+  await picture('beside-copy', SMALLEST, 'light', 'oauth');
   const claudeWords = await column('claude-cli'), openCodeWords = await column('opencode-cli');
   same('Claude Code’s answers, a failure with its reason, the plugin’s server its own, one it doesn’t list', ['plain', 'oauth', 'down', 'silent', 'issues', 'issues (tracker)', 'notes'].map(name => claudeWords[name]),
     ['Connected', 'Needs sign-in', 'Couldn’t reach: ECONNREFUSED: Unable to connect. Is the computer able to access the url?', 'Couldn’t reach: MCP server "silent" connection timed out after 30000ms', 'Connected', 'Needs sign-in', 'Not reported by Claude Code']);
@@ -11766,7 +12299,16 @@ async function mcpSigninFlow() {
   // Quits at once through main's debugger, the second waiting too; the packaged app gets one, as the system sends it (SIGTERM: a
   // second signal would not be a second Quit, as Electron takes the first itself).
   write('.claude.json', claudeFile());
+  // A sign-in waits on the browser meanwhile (Codex's, with its helper that ignores TERM): Quit stops it as Stop does.
+  write('.codex/config.toml', codexConfig);
   await a.click('#header-refresh');
+  await a.click('#signin-check-codex-cli');
+  await checked('codex-cli');
+  writeFileSync(join(said, 'codex.login'), 'helper');
+  const browsersAtQuit = browserPids().length;
+  await a.click(await act('oauth'));
+  await until(async () => listened().length === 2 && browserPids().length === browsersAtQuit + 1, 'the sign-in Quit stops to listen, and its browser');
+  const quitLogins = listened(), quitBrowser = browserPids().at(-1);
   writeFileSync(join(said, 'claude.wait'), '30');
   writeFileSync(join(said, 'claude.linger'), '3');
   const quitFrom = called().length;
@@ -11783,8 +12325,25 @@ async function mcpSigninFlow() {
     quitter.close();
   } else a.child.kill('SIGTERM');
   await Promise.race([gone, wait(20000)]);
-  const alive = pid => { try { process.kill(Number(pid), 0); return true; } catch { return false; } };
   same(`${a.inspect ? 'two Quits wait' : 'Quit waits'} for the check stopped: the app gone, its tool stopped, its folder removed`, [a.child.exitCode !== null || a.child.signalCode !== null, alive(quitPid), existsSync(quitCwd)], [true, false, false]);
+  same('… and the sign-in that waited: Codex’s processes gone, their ports free, the browser it opened kept',
+    [...quitLogins.map(([, pid]) => alive(pid)), ...await Promise.all(quitLogins.map(([port]) => portFree(port))), lives(quitBrowser)], [false, false, true, true, true]);
+  // A home Central Knot may only preview (here Pi's folder variable is not an absolute path: share.ts writeAccess): Codex's cell
+  // keeps its Copy, and main refuses a sign-in sent all the same, running nothing.
+  const preview = await launch(join(scratch, 'signin-data-preview'), [], home, { CK_TEST_HOME_ONLY: Object.keys(versions).join(','), BROWSER: 'ck-browser', PI_CODING_AGENT_DIR: 'relative/pi' });
+  await preview.click('#home-actual');
+  await preview.click('#nav-mcpsignin');
+  await preview.click('#signin-check-codex-cli');
+  await until(async () => !(await preview.run(`document.querySelector('.signin-head[data-tool="codex-cli"]')?.innerText ?? 'Checking…'`)).includes('Checking…'), 'Codex’s check in the preview-only home');
+  const previewRow = await preview.run(`[...document.querySelectorAll('.signin-table tbody tr')].find(row => row.querySelector('.signin-server').textContent === 'oauth' && !row.querySelector('.signin-plugin'))?.dataset.row`);
+  const previewFrom = started().length;
+  same('a home it may only preview: Codex’s cell keeps its Copy, and main refuses a sign-in sent all the same, running nothing',
+    [await preview.exists(byId(`signin-act-codex-cli-${previewRow}`)), await preview.text(byId(`signin-copy-codex-cli-${previewRow}`)),
+      await preview.run(`window.centralKnot.startSignin('codex-cli', ${JSON.stringify(home)}, ${JSON.stringify(previewRow)}, 'x')`), started().length - previewFrom],
+    [false, 'Copy', { notStarted: 'Central Knot doesn’t start Codex’s sign-in here' }, 0]);
+  await preview.quit();
+  // The stand-in browsers are this check's own: ended here (each ends by itself after two minutes besides).
+  for (const pid of browserPids()) try { process.kill(pid, 'SIGKILL'); } catch { /* already ended */ }
 }
 
 /**
@@ -11983,13 +12542,15 @@ async function usageFlow() {
       'Not counted: 1 skill under 30 days old.',
     ]]);
   if (await a.exists('#unused-counted-toggle')) await a.click('#unused-counted-toggle');
-  same('Turn these off sits at the band’s end, at 1280 and 2560 alike', await (async () => { const ends = []; for (const [width, height] of [[1280, 800], [2560, 1440]]) { await sizeTo(a, width, height);
+  same('Turn these off, with what it would end after it, sits at the band’s end, at 1280 and 2560 alike', await (async () => { const ends = []; for (const [width, height] of [[1280, 800], [2560, 1440]]) { await sizeTo(a, width, height);
     ends.push(await a.run(`Math.round(document.querySelector('#unused-band').getBoundingClientRect().right - document.querySelector('#turn-unused-off').getBoundingClientRect().right)`)); } await fullSize(a); return ends[0] === ends[1]; })(), true);
   await fitsAtMinimum(a, 'Skills with the No use seen chip on and its band');
   await a.shot('usage-chip');
   if (shots) { for (const [width, height] of [[1316, 819], SMALLEST]) { await sizeTo(a, width, height); await a.shot(`usage-band-${width}`); } await fullSize(a); }
   const filesOf = names => Object.fromEntries(names.flatMap(name => [claude, codex, shared].map(root => [join(root, name), readNow(join(root, name, 'SKILL.md'))])));
   const before = filesOf(['standup', 'spare']);
+  same('before Turn these off, beside it, the profile in use it would end, its sentence on hover',
+    [(await a.text('#unused-profile'))?.trim(), await a.run(`document.getElementById('unused-profile')?.title`)], ['Would leave Everyday', 'If off, Everyday stays saved but stops being the profile in use. Undo, or switching to it again, puts it back in use.']);
   await a.click('#turn-unused-off');
   for (let tries = 0; tries < 50 && !(await a.exists('#outcome-undo')); tries++) await wait(100);
   for (const [width, height] of [SMALLEST, [1316, 819]]) {
@@ -12292,8 +12853,27 @@ async function usageFlow() {
   const unusedHasArrow = await a.run(`(() => { const b = document.querySelector('#overview-usage #overview-unused'); const svg = b?.lastElementChild; return svg?.tagName.toLowerCase() === 'svg' && /m12 5 7 7-7 7/.test(svg.innerHTML); })()`);
   same('the Skills card says 3 used and the three most used with no per-kind unused link, and the usage strip holds one combined link for all 8 unused items with an arrow',
     [await cardLines(), cardUnusedLinks, unusedLinks, unusedHasArrow, /^Usage collected today at [^.]+\. Update usage statistics · No use seen in 30 days: 8$/.test(await usageSaid() ?? '')],
-    [['Used in the last 30 days: 3', 'Most usedalpha2 sessions', 'echo2 sessions', 'charlie1 session'], [], ['No use seen in 30 days: 8'], true, true]);
+    [['Used in the last 30 days: 3Most used', 'alpha2 sessions', 'echo2 sessions', 'charlie1 session'], [], ['No use seen in 30 days: 8'], true, true]);
   check('every tool’s sessions cell has its figure, or why there is none', (await sessionsSaid()).every(said => said && said !== '…'), await sessionsSaid());
+  // Each name and its mark: apart, the marks one above another apart too; the name's hover says where it goes, the mark's the file.
+  const marksApart = () => a.run(`(() => {
+    const marks = [...document.querySelectorAll('#overview-skills-usage .row-file-btn')].map(mark => mark.getBoundingClientRect());
+    const names = [...document.querySelectorAll('#overview-skills-usage .kind-card-top-name')].map(name => name.getBoundingClientRect());
+    const usage = document.querySelector('#overview-skills-usage'), link = document.querySelector('#overview-skills-most-used'), line = link?.closest('p');
+    const end = usage.getBoundingClientRect().right - parseFloat(getComputedStyle(usage).paddingRight);
+    return { marks: marks.length, gapsBelow: marks.slice(1).map((box, at) => Math.round(box.top - marks[at].bottom)), nameToMark: names.map((box, at) => Math.round(marks[at].left - box.right)),
+      sorted: [/^Used in the last 30 days/.test(line?.textContent ?? ''), Math.abs(end - (link?.getBoundingClientRect().right ?? 0)) <= 1, !line?.querySelector('.kind-card-top-name')] };
+  })()`);
+  const apart = {};
+  for (const [width, height] of [[1316, 819], SMALLEST]) { await sizeTo(a, width, height); apart[width] = await marksApart(); }
+  await fullSize(a);
+  same('at 1316 and 860 the three marks are 4 px or more apart one above another, each 4 px after its name',
+    [apart[1316].marks, apart[1316].gapsBelow.every(gap => gap >= 4), apart[1316].nameToMark, apart[860].gapsBelow.every(gap => gap >= 4), apart[860].nameToMark],
+    [3, true, [4, 4, 4], true, [4, 4, 4]]);
+  same('at 1316 and 860 Most used → ends the “Used in the last 30 days” line, at its right end, on no name’s line', [apart[1316].sorted, apart[860].sorted], [[true, true, true], [true, true, true]]);
+  same('a most used name’s hover says it opens its row in the Library; its mark’s, its file',
+    [await a.all('#overview-skills-usage .kind-card-top-name', 'e.title'), await a.all('#overview-skills-usage .row-file-btn', 'e.title')],
+    [['alpha', 'echo', 'charlie'].map(name => `${name}: open its row in the Library`), ['Open file', 'Open file', 'Open file']]);
   await a.click('#overview-unused');
   const allRows = await a.all('.ov-row[data-key]', 'e.dataset.key');
   const expectedUnused = [...['delta', ...extraUnusedSkills].map(key => rowPart('', 'skills', key)), ...extraUnusedAgents.map(key => rowPart('', 'agents', key))].sort();
@@ -12303,6 +12883,31 @@ async function usageFlow() {
   await a.click('#nav-overview');
   await a.click('#overview-skills-top-1');
   same('a most used name opens its row on Skills, under All', [await a.run(`document.querySelector('.chip-on')?.dataset.tip ?? 'All'`), await a.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', 'echo')}"]')?.getAttribute('aria-expanded')`)], ['All', 'true']);
+  // His kept Sort: Last updated. Most used, a link with its arrow, shows the list by most used and leaves that choice as it was.
+  await a.click('#nav-library');
+  await a.run(`(select => { select.value = 'updated'; select.dispatchEvent(new Event('change')); })(document.querySelector('#item-order'))`);
+  await a.click('#nav-overview');
+  check('Most used on the Skills card carries the arrow the Overview’s other links do', await a.run(`!!document.querySelector('#overview-skills-most-used svg.icon')`));
+  await a.click('#overview-skills-most-used');
+  same('Most used, on the Skills card, opens the Library on Skills sorted by Most used: alpha, echo and charlie lead, as on the card',
+    [await a.text('.page-title'), await a.run(`document.querySelector('#library-kind-skills')?.getAttribute('aria-pressed')`), await a.run(`document.querySelector('#item-order')?.value`),
+      (await a.all('.ov-row[data-key]', 'e.dataset.key')).slice(0, 3)], ['Library', 'true', 'most-used', ['alpha', 'echo', 'charlie'].map(key => rowPart('', 'skills', key))]);
+  await a.click('#nav-overview');
+  await a.click('#nav-library');
+  same('the Library opened again from the sidebar is in his kept Sort, Last updated: the link changed nothing he saved', await a.run(`document.querySelector('#item-order')?.value`), 'updated');
+  if (shots) {
+    await a.click('#nav-overview');
+    await a.click('#overview-skills-most-used');
+    await sizeTo(a, ...SMALLEST);
+    const railed = await a.run(`document.body.classList.contains('rail')`);
+    if (railed) await a.click('#sidebar-toggle');
+    await a.run(`window.centralKnot.setAppearance('light')`);
+    await wait(80);
+    await a.shot('most-used-library-860-light');
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    if (railed) await a.click('#sidebar-toggle');
+    await fullSize(a);
+  }
   await a.click('#nav-overview');
   await fullSize(a);
   await fitsAtMinimum(a, 'the Overview with usage collected');
@@ -12449,11 +13054,13 @@ async function usageFlow() {
       await fullSize(a);
       return metrics;
     };
-    same('ux1a: band is one line for 8 shown, 2 from a plugin skipped, 6 turned off, with no Undo or profile prose',
+    same('ux1a: band is one line for 8 shown, 6 turned off (2 from a plugin, said on their rows), with no Undo, the profiles it would end only beside its button',
       [await a.text('#unused-band .usage-lead'), (await a.text('#unused-counted-toggle'))?.trim(), await a.run(`document.querySelector('#unused-counted-toggle')?.getAttribute('aria-expanded')`), await a.exists('#unused-counted'), (await a.text('#turn-unused-off'))?.trim()],
-      ['8 with no use seen in 30 days. 2 from a plugin skipped.', 'What’s counted', 'false', false, 'Turn 6 off everywhere']);
+      ['8 with no use seen in 30 days.', 'What’s counted', 'false', false, 'Turn 6 off everywhere']);
     const collapsedCounts = await captureUx1a('band');
-    same('ux1a: collapsed band is visually one line high at 860 and 1316 with sidebar open', [collapsedCounts[860]?.oneLine, collapsedCounts[1316]?.oneLine], [true, true]);
+    // At 860 the profiles Turn 6 off would end, beside it, take the room of the lead's end: a second line (16 px), no more.
+    const twoLines = collapsedCounts[1316]?.height + 16;
+    same('ux1a: collapsed band is one line high at 1316 with sidebar open, and two lines at most at 860', [collapsedCounts[860]?.height <= twoLines, collapsedCounts[1316]?.oneLine], [true, true]);
     console.log(`usageFlow ux1a collapsed band: 860=${JSON.stringify(collapsedCounts[860])} 1316=${JSON.stringify(collapsedCounts[1316])}`);
     // Skipped plugin rows are visibly marked at 860 with sidebar open without cutting their names or usage cells, and unmarked while selecting.
     await sizeTo(a, 860, 560);
@@ -12514,15 +13121,16 @@ async function usageFlow() {
       if (await a.exists('#usage-line-close')) await a.click('#usage-line-close');
       same('ux1a: unreadable managed Codex history is cued on the band line',
         await a.text('#unused-band .usage-lead'),
-        '8 with no use seen in 30 days. 2 from a plugin skipped. Use in Codex not counted.');
+        '8 with no use seen in 30 days. Use in Codex not counted.');
       const unreadMetrics = await capture860Light('band-unread');
       same('ux1a: unread band toggle starts flush left when wrapped at 860', unreadMetrics?.wrapFlush, true);
+      same('ux1a: unread band is two lines high at most at 860 with sidebar open, with the profiles Turn 6 off would end', unreadMetrics?.height <= twoLines, true);
       console.log(`usageFlow ux1a unread band 860=${JSON.stringify(unreadMetrics)}`);
     } finally {
       chmodSync(codexSessions, 0o755);
     }
     await a.click('#collect-usage');
-    check('ux1a: cue clears once Codex history is readable again', await uxUntil(async () => (await a.text('#unused-band .usage-lead')) === '8 with no use seen in 30 days. 2 from a plugin skipped.', 5000));
+    check('ux1a: cue clears once Codex history is readable again', await uxUntil(async () => (await a.text('#unused-band .usage-lead')) === '8 with no use seen in 30 days.', 5000));
     if (await a.exists('#usage-line-close')) await a.click('#usage-line-close');
 
     // Refused click names no profile and keeps both Everyday and Focus in use.
@@ -12535,7 +13143,8 @@ async function usageFlow() {
     await a.click('#header-refresh');
     await uxUntil(async () => !(await a.run(`(document.querySelector('.bands')?.textContent ?? '').includes('damaged')`)));
 
-    // Turn 6 off everywhere: 6 skills off, 2 plugin agents stay on, result alone names BOTH ended profiles.
+    // Turn 6 off everywhere: 6 skills off, 2 plugin agents stay on, result alone names BOTH ended profiles, as its mark did before.
+    same('ux1a: after Turn 6 off everywhere, both profiles it would end', (await a.text('#unused-profile'))?.trim(), 'Would leave Everyday and Focus');
     await a.click('#turn-unused-off');
     await uxDone(a);
     check('ux1a: Undo appears after Turn 6 off everywhere', await uxUntil(() => a.exists('#outcome-undo')));
@@ -12612,7 +13221,7 @@ async function usageFlow() {
         [readFileSync(uxRecord('skills'), 'utf8'), readFileSync(uxRecord('mcp'), 'utf8'), readFileSync(uxRecord('agents'), 'utf8')]],
       ['true', 'true', [rowPart('', 'agents', 'plug-audit'), rowPart('', 'agents', 'plug-triage'), rowPart('', 'mcp', 'quiet-srv')].sort(), beforeAll]);
 
-    // Three-digit count (128 with no use seen, 2 from a plugin skipped, Turn 126 off everywhere) at 860 with sidebar open.
+    // Three-digit count (128 with no use seen, 2 from a plugin, Turn 126 off everywhere) at 860 with sidebar open.
     const skillsRec = JSON.parse(readFileSync(uxRecord('skills'), 'utf8'));
     const templateItem = skillsRec.items['legacy-a'];
     for (const key of uxSkills) {
@@ -12639,9 +13248,9 @@ async function usageFlow() {
     check('ux1a: three-digit count reaches 128 on All', await uxUntil(async () => (await a.text('#chip-unused .chip-count'))?.trim() === '128', 8000));
     same('ux1a: three-digit band text and button',
       [await a.text('#unused-band .usage-lead'), (await a.text('#turn-unused-off'))?.trim()],
-      ['128 with no use seen in 30 days. 2 from a plugin skipped.', 'Turn 126 off everywhere']);
+      ['128 with no use seen in 30 days.', 'Turn 126 off everywhere']);
     const threeDigitMetrics = await capture860Light('band-three-digits');
-    same('ux1a: three-digit band stays one line high at 860 with sidebar open', threeDigitMetrics?.oneLine, true);
+    same('ux1a: three-digit band is two lines high at most at 860 with sidebar open, beside Turn 126 off and the profiles it would end', threeDigitMetrics?.height <= twoLines, true);
     console.log(`usageFlow ux1a three-digit band 860=${JSON.stringify(threeDigitMetrics)}`);
     same('no page errors, ux1a unused band', a.pageErrors, []);
     await a.quit();
@@ -14113,7 +14722,7 @@ async function libraryFlow() {
   await done(a);
   // 9b: Turn these off across kinds, the MCP record damaged just before the click.
   await a.click('#chip-unused');
-  check('its band counts the five in one line (spare is used now)', (await a.text('#unused-band .usage-lead') ?? '') === '5 with no use seen in 30 days. 1 from a plugin skipped.', await a.text('#unused-band'));
+  check('its band counts the five in one line (spare is used now)', (await a.text('#unused-band .usage-lead') ?? '') === '5 with no use seen in 30 days.', await a.text('#unused-band'));
   await pictures(a, 'unused-across-kinds');
   // Copilot CLI refuses to let go of either tidy (its folders can't be written), and the MCP record is damaged.
   const mcpRecord = readFileSync(record('mcp'), 'utf8'), copilotFolders = [A.copilot, join(A.home, '.copilot/agents')];
@@ -14292,7 +14901,9 @@ async function libraryFlow() {
   await find(b, 'gently');
   await b.click('#nav-overview');
   await b.click('#setup-yes');
-  check('Yes opens the walkthrough', await until(() => b.exists('#walkthrough')));
+  check('Yes stays on the Overview, whose Choose copies leads in', await until(() => b.exists('#setup-choose')));
+  await b.click('#setup-choose');
+  check('Choose copies opens the walkthrough', await until(() => b.exists('#walkthrough')));
   same('the walkthrough opens the skill review’s row on the Library, Find kept since it finds the row by its text, and its details, which ask of its copies, show that text',
     [await b.text('.page-title'), await b.run(`document.querySelector('#find').value`), await b.text('#walkthrough .walk-place'), await opened(b), /gently/.test(await b.text(`${row('skills', 'review')} + .details .details-excerpt`) ?? '')],
     ['Library', 'gently', ' · 1 of 2', [rowPart('', 'skills', 'review')], true]);
@@ -15621,7 +16232,8 @@ async function libraryFlow() {
     tool: el.querySelector('.details-tool-label')?.textContent?.trim() ?? '',
     line: el.querySelector('.details-tool-line')?.textContent?.trim() ?? '',
     word: el.querySelector('.tool-switch-word')?.textContent?.trim() ?? '',
-    label: el.querySelector('.tool-switch [role="switch"]')?.getAttribute('aria-label') ?? '',
+    // Its hover's words, worked out as the pointer comes to it (what its click would end is its description too).
+    label: (sw => { sw?.dispatchEvent(new MouseEvent('mouseenter')); return sw?.getAttribute('title') ?? ''; })(el.querySelector('.tool-switch [role="switch"]')),
   }))`);
 
   o = await launch(O.data, [], O.real);
@@ -15630,16 +16242,25 @@ async function libraryFlow() {
   const skillsBefore = snapDirs(oSkillDirs);
   // Click 1: open Off skill bench-runner.
   await o.click(`#${rowPart('open', 'skills', 'bench-runner')}`);
-  same('Off skill opened row: status line and tool lines match keep-outs with per-tool Off switches and Claude Code warns that OpenCode reads it too',
-    [await o.text('.details-status'), await readToolLines(o)],
-    ['On puts it back in 4 of 6 tools.', [
-      { tool: 'Claude Code', line: 'If on, OpenCode reads it too', word: 'Off', label: 'bench-runner in Claude Code: off. Click to turn it on in Claude Code; OpenCode reads it from there too.' },
-      { tool: 'Copilot CLI', line: '', word: 'Off', label: 'bench-runner in Copilot CLI: off. Click to turn it on in Copilot CLI only.' },
-      { tool: 'Codex', line: 'Kept out', word: 'Off', label: 'bench-runner in Codex: off. Click to turn it on in Codex only.' },
-      { tool: 'Pi', line: 'Kept out', word: 'Off', label: 'bench-runner in Pi: off. Click to turn it on in Pi only.' },
-      { tool: 'OpenCode', line: '', word: 'Off', label: 'bench-runner in OpenCode: off. Click to turn it on in OpenCode only.' },
-      { tool: 'Antigravity', line: '', word: 'Off', label: 'bench-runner in Antigravity: off. Click to turn it on in Antigravity only.' },
+  // Before the press, the profile it would end: under the status, and on every tool's switch, each of which turns it on.
+  const benchEnds = `#${rowPart('profile-ends', 'skills', 'bench-runner')}`, ends = ' Everyday stays saved but stops being the profile in use.';
+  same('Off skill opened row: status line, the profile any On would end, and tool lines match keep-outs with per-tool Off switches and Claude Code warns that OpenCode reads it too',
+    [await o.text('.details-status'), (await o.text(benchEnds))?.trim(), await readToolLines(o)],
+    ['On puts it back in 4 of 6 tools.', 'If on, only this item changes: Everyday stays saved but stops being the profile in use.', [
+      { tool: 'Claude Code', line: 'If on, OpenCode reads it too', word: 'Off', label: `bench-runner in Claude Code: off. Click to turn it on in Claude Code; OpenCode reads it from there too.${ends}` },
+      { tool: 'Copilot CLI', line: '', word: 'Off', label: `bench-runner in Copilot CLI: off. Click to turn it on in Copilot CLI only.${ends}` },
+      { tool: 'Codex', line: 'Kept out', word: 'Off', label: `bench-runner in Codex: off. Click to turn it on in Codex only.${ends}` },
+      { tool: 'Pi', line: 'Kept out', word: 'Off', label: `bench-runner in Pi: off. Click to turn it on in Pi only.${ends}` },
+      { tool: 'OpenCode', line: '', word: 'Off', label: `bench-runner in OpenCode: off. Click to turn it on in OpenCode only.${ends}` },
+      { tool: 'Antigravity', line: '', word: 'Off', label: `bench-runner in Antigravity: off. Click to turn it on in Antigravity only.${ends}` },
     ]]);
+  // legacy-skill, On and in Everyday: its Off would end Everyday; keeping it out of one tool would not, so that switch says nothing.
+  await o.click(`#${rowPart('open', 'skills', 'legacy-skill')}`);
+  same('an On row Everyday names: "If off" at its head; its tool switches, which only keep it out, add nothing',
+    [(await o.text(`#${rowPart('profile-ends', 'skills', 'legacy-skill')}`))?.trim(), (await readToolLines(o)).filter(entry => entry.label.includes('profile in use')),
+      (await o.run(`(sw => { sw.dispatchEvent(new MouseEvent('mouseenter')); return sw.title; })(document.getElementById(${JSON.stringify(rowPart('switch', 'skills', 'legacy-skill'))}))`)).endsWith(ends)],
+    ['If off, only this item changes: Everyday stays saved but stops being the profile in use.', [], true]);
+  await o.click(`#${rowPart('open', 'skills', 'bench-runner')}`);
   await shots14a(o, '01-off-open');
   // Click 2: turn bench-runner on in Claude Code only.
   await o.click(`#${rowPart('enable', 'skills', 'bench-runner', 'claude-cli')}`);
@@ -15652,9 +16273,10 @@ async function libraryFlow() {
       await o.text('.details-status'),
       (await readToolLines(o)).find(entry => entry.tool === 'OpenCode')?.line,
       await o.text('#header [data-outcome] .band-text'),
-      await o.text('#header .band-profile')],
+      await o.text('#header .band-profile'),
+      await o.exists(benchEnds)],
     [true, true, null, 'Kept out of this tool, but it still has it another way. OpenCode reads Claude Code’s copy, in Claude Code’s skills folder. Keeping it out stops only a folder of Central Knot’s here.',
-      'bench-runner is on in Claude Code. OpenCode reads it too.', 'Everyday stopped being the profile in use.']);
+      'bench-runner is on in Claude Code. OpenCode reads it too.', 'Everyday stopped being the profile in use.', false]);
   const checkFitsAt860 = async (win, expected, shotName) => {
     await sizeTo(win, 860, 600);
     if (await win.run(`document.getElementById('sidebar-toggle')?.getAttribute('aria-label') === 'Expand the sidebar'`)) await win.click('#sidebar-toggle');
@@ -15894,8 +16516,8 @@ async function selectFlow() {
   const a = await launch(join(scratch, 'select-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex' });
   await a.click('#nav-overview');
   await a.click('#setup-yes');
-  for (let tries = 0; tries < 100 && !(await a.exists('#walk-skip')); tries++) await wait(100);
-  await a.click('#walk-skip');
+  for (let tries = 0; tries < 100 && !(await a.exists('#setup-choosing')); tries++) await wait(100);
+  if (!(await a.exists('#setup-choosing'))) throw new Error('Yes did not finish: the Overview has no line into the copies that differ.');
   // The agents' record damaged: its kind stops writes, and scout can't be deleted.
   writeFileSync(join(home, '.central-knot/agents.json'), '{');
   await a.click('#header-refresh');
@@ -16102,10 +16724,21 @@ async function selectFlow() {
   const historyBefore = () => jsonOrNothing(join(home, '.central-knot/history.json'))?.events?.length ?? 0;
   const histCount0 = historyBefore();
   await a.click('#library-select');
-  for (const name of ['alpha', 'bravo', 'charlie', 'delta', 'echo']) await a.click(tick(name));
-  same('five ticked (three on, two off): buttons show their own counts', await bar(), ['5 selected', 'Turn on 2', 'Turn off 3', 'Delete…']);
+  // delta and echo, Off, first: only Turn on would leave Everyday, and says so right after it.
+  for (const name of ['delta', 'echo']) await a.click(tick(name));
+  same('two Off rows ticked: what Turn on would end follows Turn on', [await a.run(`document.getElementById('select-profile')?.previousElementSibling?.id`), (await a.text('#select-profile'))?.trim()], ['select-turn-on', 'Would leave Everyday']);
+  await bulkShots('turn-on-bar');
+  for (const name of ['alpha', 'bravo', 'charlie']) await a.click(tick(name));
+  same('five ticked (three on, two off): buttons show their own counts, and beside them the profile in use either would end',
+    [await bar(), await a.run(`document.getElementById('select-profile')?.title`)],
+    [['5 selected', 'Turn on 2', 'Turn off 3', 'Either would leave Everyday', 'Delete…'], 'If on or off, Everyday stays saved but stops being the profile in use. Undo, or switching to it again, puts it back in use.']);
   same('Turn off button exists in the select bar', await a.exists('#select-turn-off'), true);
   await bulkShots('turn-bar');
+  // Deleting the three Everyday names (and two it leaves out, Off) leaves it in use with what is left: its question says nothing of it.
+  await a.click('#select-delete');
+  same('the question to delete them names no profile', [await a.exists('#select-profile-delete'), (await bar()).filter(part => /Everyday/.test(part))], [false, []]);
+  await bulkShots('delete-ask');
+  await a.click('#select-cancel');
   await a.click('#select-turn-off');
   await done();
   same('Turn off takes the three on rows, leaves delta and echo untouched, says 2 were already off and Everyday stopped being in use, ends the mode',
@@ -16119,6 +16752,22 @@ async function selectFlow() {
   same('Undo puts the three back in the same tools as before (alpha still out of Codex)',
     [allFolders(), inAllTools('alpha'), inAllTools('bravo').length, ['alpha', 'bravo', 'charlie', 'delta', 'echo'].map(name => JSON.parse(record()).items[name]?.on)],
     [beforeTurn, ['.claude/skills', '.copilot/skills'], 3, [true, true, true, false, false]]);
+  if (shots) {
+    // A long profile name: cut with "…" after the Turn that would leave it (whole on hover), whole in an opened row's head.
+    const profilesFile = join(home, '.central-knot/profiles.json'), saved = readFileSync(profilesFile, 'utf8');
+    writeFileSync(profilesFile, saved.replace(/"name": ?"Everyday"/, '"name":"Everyday work on every machine at home and on the road"'));
+    await a.click('#header-refresh');
+    await done();
+    await a.click('#library-select');
+    await a.click(tick('alpha'));
+    await a.click(`#${rowPart('open', 'skills', 'alpha')}`);
+    await bulkShots('long-name');
+    await a.click(`#${rowPart('open', 'skills', 'alpha')}`);
+    await a.click('#library-select');
+    writeFileSync(profilesFile, saved);
+    await a.click('#header-refresh');
+    await done();
+  }
 
   // 15. Turn on of many (Example 2 + partly on + Found heading tick): turn Synchronize everything off, turn alpha off
   // (keeping its except: codex-cli), keep bravo out of Codex (partly on), write addable found skill lima after setup.
@@ -16759,12 +17408,15 @@ echo "$*" >> "$HOME/claude-calls.txt"
   await back();
   for (let tries = 0; tries < 100 && (await names('claude-cli')).includes('release-helper'); tries++) await wait(100);
   same('turned off in Claude Code, its group leaves Claude Code’s strip, and Codex’s stays', [(await names('claude-cli')).includes('release-helper'), (await names('claude-cli')).length, await names('codex-cli')], [false, 14, ['release-helper']]);
+  // The box's result is Plugin marketplaces' own (pluginstate.ts pluginsResultPlace): Instructions draws none of it, above its cards or under a strip.
+  same('the box’s result and its Undo stay off Instructions', [await a.exists('#plugins-result'), await a.exists('.plugin-run')], [false, false]);
   // A tool's own Instructions tab under Harnesses has the same strip.
   await a.click(byId('nav-harnesses'));
   await a.click(byId('harness-codex-cli'));
   await a.click(byId('harness-tab-instructions'));
   for (let tries = 0; tries < 100 && !(await a.exists('#session-codex-cli')); tries++) await wait(100);
   same('Codex’s Instructions tab has its strip without standing prose', [(await groups('codex-cli'))[0]?.[1].length, await a.exists('#session-codex-cli .session-about')], [2, false]);
+  same('nor does Codex’s Instructions tab, a place of its own', [await a.exists('#plugins-result'), await a.exists('.plugin-run')], [false, false]);
   const codexTabBtn = await hookBtnIn('session-codex-cli', 'release-helper', 'remind.mjs');
   const codexTabSource = codexTabBtn && await openSource(codexTabBtn, '#session-codex-cli .hook-source');
   check('a tool’s own Instructions tab opens View source from that tool’s installed copy', /Declared in .*hooks\/hooks\.json/.test(codexTabSource ?? '') && /installed in Codex/.test(codexTabSource ?? '') && !/marketplace’s copy/.test(codexTabSource ?? ''), codexTabSource);
@@ -19393,7 +20045,8 @@ async function profilePluginsFlow() {
   same('worked example 5: with an off-switch standing in Copilot CLI, the row tooltip does not say issues is on now',
     [await b.text('.profile-header p'), await b.text('#profile-preview-info-card'), await b.run(`document.querySelector('.pf-row[data-item="mcp:issues"] .pf-state')?.dataset.state`),
       await b.run(`document.querySelector('.pf-row[data-item="mcp:issues"] .pf-tick')?.title`)],
-    ['Switching turns 1 on', 'Switching turns 1 item on. Plugin items stay as they are.', 'Turns on',
+    // The row says where it won't be: the Library keeps issues out of Claude Code and Codex.
+    ['Switching turns 1 on', 'Switching turns 1 item on. Plugin items stay as they are.', 'Turns on, not in Claude Code and Codex',
       'In Old work: switching to it turns issues on. Click to leave it out. issues is off in Copilot CLI now.']);
   await b.click('#profile-switch'); await bDone();
   same('worked example 1 (page): switch clears the off-switch, header keeps the sentence with no Undo switch, row state is blank, and tooltip says on now',
@@ -21379,7 +22032,7 @@ async function skillFileFlow() {
         rowExpanded: row?.getAttribute('aria-expanded'),
         hasDetailsTools: !!document.querySelector('.details-tools'),
         pressed: document.querySelector('${reviewBtn}')?.getAttribute('aria-pressed'),
-        hasRepeatedName: !!box?.querySelector('.file-open-name'),
+        hasRepeatedName: !!box?.querySelector('.file-open-name, .file-open-item'),
         tabs,
         startsWithLine1: (pre?.textContent ?? '').includes('Line 1: review check item 1.') && pre?.scrollTop === 0,
         hasLine60: (pre?.textContent ?? '').includes('Line 60: review check item 60.'),
@@ -21473,6 +22126,8 @@ async function skillFileFlow() {
     same('at 860 with sidebar open, panel sits inside window, footer stays inside box, and tabs wrap cleanly', fit860, {
       boxInsideWindow: true, footInsideBox: true, tabsWrapped: true, noHorizontalOverflow: true,
     });
+    same('at 860, scrolled to its foot, SKILL.md’s last line is whole in its box and in the list', await lastLineWhole(a, '.file-open-box pre.content'),
+      { words: 'Values stay as written: token=demo-raw-001.', scrolls: true, whole: true });
     await a.click('#sidebar-toggle');
     await fullSize(a);
 
@@ -21586,6 +22241,13 @@ async function skillFileFlow() {
     same('Escape in Find clears Find first while leaving the file panel open', [await a.run(`document.querySelector('#find')?.value`), await a.exists('.file-open-box')], ['', true]);
     await a.press('Escape');
     same('a second Escape closes the file panel', await a.exists('.file-open-box'), false);
+    // A second mark pressed before the first file is read: the second's file is the one shown, its mark alone pressed.
+    await a.run(`document.querySelector('${craftBtn}').click(); document.querySelector('${storedBtn}').click();`);
+    await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Kept only in Central Knot'));
+    same('commit-craft’s mark then stored-only’s at once, the last press wins: stored-only’s file alone is shown, its mark alone pressed',
+      await a.run(`[document.querySelectorAll('.file-open-box').length, document.querySelector('.details-file-only')?.getAttribute('aria-label'), [...document.querySelectorAll('.row-file-btn[aria-pressed="true"]')].map(mark => mark.id)]`),
+      [1, 'File for stored-only', [rowPart('file', 'skills', 'stored-only')]]);
+    await a.press('Escape');
 
     // Row click still opens details with Files and contents and Versions Read current untouched.
     await a.click(`.ov-row[data-key="${rowPart('', 'skills', 'code-review')}"]`);
@@ -22101,7 +22763,9 @@ async function skillFileFlow() {
         (await a.text('.file-open-foot .path-text'))?.trim(),
       ], [true, `${prefix}/.claude/skills/linked-plan/plan.md`]);
       await a.run(`(() => { const s = document.querySelector('.file-open-box .file-copy-select select'); s.value = '1'; s.dispatchEvent(new Event('change')); })()`);
-      await until(async () => (await a.text('.file-open-foot .path-text') ?? '').includes('.copilot/skills/linked-plan/SKILL.md'));
+      // The footer names the copy at once; its tabs come with its read.
+      await until(async () => (await a.text('.file-open-foot .path-text') ?? '').includes('.copilot/skills/linked-plan/SKILL.md')
+        && (await a.all('.file-open-box .file-tab', 'e.textContent.trim()')).includes('plan.md'));
       await clickTab('plan.md');
       await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Copilot unhashed plan.'));
       same('switching to the second unhashed copy reads its own plan.md', [
