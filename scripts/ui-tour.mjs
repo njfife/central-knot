@@ -1078,22 +1078,25 @@ if (wanted('first-setup')) {
   await refresh();
   await a.click('#nav-overview');
   if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
-  await atEverySize('question-new-home', 'A new home (the Practice copy, never asked): the Overview’s question, Synchronize everything?, under the lead. Its lines say apart what Yes takes in at once (6 items, and which tools get them) and the 4 more items whose copies differ, which wait with nothing chosen and are asked about one at a time with the latest copy marked where one can be told; and what the one Undo covers (a copy you choose has its own Undo). Under them, No changes nothing. Synchronize everything is the main button, No, I’ll add items myself beside it', true, '#setup-question');
+  await atEverySize('question-new-home', 'A new home (the Practice copy, never asked): the Overview’s question is one line, Add 6 of the items found in your tools to every tool, and new ones as they turn up?, with its (?), and no lead above it; under it, one line for the 4 found items whose copies differ, which stay as they are until you choose, with Show them. Synchronize everything is the main button, No, I’ll add items myself beside it, what No leaves in its hover, and You can undo this.', true, '#setup-question');
   await a.size(860, 560); await show('#setup-question'); await focusOn('#setup-yes');
   await shot(a, 'question-focus-860', 'Tabbed to Synchronize everything at 860×560: its focus ring');
   await a.run(`document.activeElement?.blur()`); await a.size(1280, 800);
   await a.click('#setup-no');
-  await atEverySize('after-no', 'Clicked No, I’ll add items myself: the band says nothing changed, what is on stays on and keeps syncing, found items wait on their page for Add, and Settings can switch it on later; the question is gone, and the lead says to open a card and turn on what you want', true);
+  await atEverySize('after-no', 'Clicked No, I’ll add items myself: the band says Synchronize everything is off., with Turn on; the question is gone, and the lead says to open a card and turn on what you want', true);
   // A home from before this step, with an item already On, whose rule was never answered: the record without its answer.
   await openKind(a, 'skills');
   await turnOnRow('skills', 'notes'); await switchOn('skills', 'notes');
   edit(join(practice, '.central-knot/sync.json'), text => { const record = JSON.parse(text); delete record.syncEverything; return JSON.stringify(record, null, 2); });
   await refresh();
   await a.click('#nav-overview');
-  await atEverySize('question-items-on', 'A home from before this step, with notes already On and the rule never answered: asked as a new home is, 5 items to take in now; the skills card counts 1 synced', false, '#setup-question');
+  await atEverySize('question-items-on', 'A home from before this step, with notes already On and the rule never answered: asked as a new home is, 5 items to add now; the skills card counts 1 synced; No’s hover now says what is on stays on', false, '#setup-question');
   await a.click('#setup-yes');
+  await waitFor(a, `!!document.querySelector('#setup-choosing')`, 15000);
+  await atEverySize('after-yes', 'Clicked Synchronize everything: still on the Overview; the band says what it added, with the switch-on’s own Undo; the line under it counts the 4 found items whose copies differ, with Choose copies', true);
+  await a.click('#setup-choose');
   await waitFor(a, `!!document.querySelector('#walkthrough')`, 15000);
-  await atEverySize('after-yes-walkthrough-first', 'Clicked Synchronize everything: the band says what it took in and what the one Undo covers; the walkthrough opened on Skills at its first item, 1 of 4, deploy, with its copy question as its row asks it, Codex’s copy (the latest) the main button, and beside Skip the line Skip changes no copy', true, '#walkthrough', 'start');
+  await atEverySize('after-yes-walkthrough-first', 'Clicked Choose copies: the walkthrough opened on Skills at its first item, 1 of 4, deploy, with its copy question as its row asks it, Codex’s copy (the latest) the main button, and beside Skip the line Skip changes no copy', true, '#walkthrough', 'start');
   await a.size(860, 560); await show('#walkthrough', 'start'); await focusOn(`#${rowPart('walk-use', 'skills', 'deploy', 'codex-cli')}`);
   await shot(a, 'walkthrough-focus-860', 'Tabbed to Codex’s copy, the latest, at 860×560: the focus ring is on its Use this copy');
   await a.run(`document.activeElement?.blur()`); await a.size(1280, 800);
@@ -2395,26 +2398,27 @@ if (wanted('manage')) {
   await atEverySize('all-managed', 'Harnesses with every tool managed: each card has its Manage switch on, and the line under it says what turning it off leaves as it is', true);
   await focusOn('#manage-codex-cli'); await shot(a, 'switch-focus', 'Keyboard focus on Codex’s Manage switch, with its ring.');
   await a.click('#manage-codex-cli');
-  await atEverySize('codex-left-out', 'Clicked Codex’s switch: the band says Codex is left out and its copies stay; its card has no counts, and its line says no item in Codex would change on turning it on, and two found items would show under Found', true);
+  await atEverySize('codex-left-out', 'Clicked Codex’s switch: the band says Codex is left out and its copies stay; its card has no counts, only its switch', true);
   // While Codex is left out: its copy of notes is edited by hand, and standup is turned off in Central Knot.
   edit(join(practice, '.codex/skills/notes/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Codex while it was left out.\n'));
   await openKind(a, 'skills'); await a.click(`#${rowPart('switch', 'skills', 'standup')}`); await a.settle();
   await atEverySize('skills-one-left-out', 'Turned standup off on the Library’s skills with Codex left out: no Codex mark on any row; standup’s row and the band say no tool Central Knot manages has it');
   await a.click('#nav-overview');
   await atEverySize('overview-one-left-out', 'The Overview with Codex left out: Your tools has a row for Claude Code and Copilot CLI only, and the line under it says Codex is left out and that its switch is on Harnesses (under the fold at 860×560)');
-  await a.click('#nav-harnesses'); await refresh();
-  await atEverySize('codex-line-before-on', 'Edited Codex’s notes by hand, then Refresh on Harnesses: Codex’s line counts what turning it on will do there: Central Knot’s version written for one item, one copy that differs kept as a version first, one copy of an item that is off removed, and two found items', true, '#manage-codex-cli');
-  await a.click('#manage-codex-cli');
+  await a.click('#nav-harnesses');
+  await a.click('#manage-codex-cli'); await waitFor(a, `!!document.getElementById('manage-codex-cli-confirm')`);
+  await atEverySize('codex-question-before-on', 'Edited Codex’s notes by hand, then pressed Codex’s switch: its question, read at the press, counts what turning it on will do there: Central Knot’s version written for one item, one copy that differs kept as a version first, one copy of an item that is off removed, and two found items', true, '#manage-codex-cli');
+  await a.click('#manage-codex-cli-confirm');
   await atEverySize('codex-on-band', 'Clicked Codex’s switch again: the band says what that pass did in Codex, from its results, and that History has each change', true);
   await a.click('#nav-history'); await waitFor(a, `!!document.querySelector('.history-row')`);
   await shot(a, 'history', 'History: the two flips as Tool entries, each saying it has no Undo and that the switch is the way back; Codex’s edited notes kept as a version, with “Use Codex’s copy”; standup’s folder removed from Codex when sync reached it');
   await a.click('#nav-harnesses');
   for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#manage-${tool}`);
-  await atEverySize('all-left-out', 'Every tool’s switch turned off: each card says it is left out, with its line; the note at the top says Central Knot manages none, how found items come in, and that what it keeps stays kept', true);
+  await atEverySize('all-left-out', 'Every tool’s switch turned off: each card says it is left out, with its switch; the note at the top says Central Knot manages none, how found items come in, and that what it keeps stays kept', true);
   await a.click('#nav-overview');
   await atEverySize('overview-none-managed', 'The Overview with no tool managed: it names the tools left out and points to Harnesses; the sidebar holds only the pages that need no tool', true);
   await a.click('#overview-open-harnesses');
-  for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#manage-${tool}`);
+  for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) { await a.click(`#manage-${tool}`); await waitFor(a, `!!document.getElementById('manage-${tool}-confirm')`); await a.click(`#manage-${tool}-confirm`); }
 }
 
 // ---------- Git repo ----------

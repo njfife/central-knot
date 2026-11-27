@@ -29,6 +29,8 @@
 //     there (`in-line`)
 //   on or off in one harness (`only`) while  none: its switch there would change nothing now (the entry says that
 //     that harness is not managed            harness isn't managed now)
+//   kept out of or back in several harnesses Undo: the keep-outs    the item is On and kept out of exactly those
+//     at once while On (`exceptOnly`)        before it back         it left (sameTools)
 //   on or off whose click took tools' own    Undo: that action,     still as the click left it (copies: asTheClickLeftIt;
 //     copies over (`tookFrom`) or changed    earlier keep-outs      keep-outs: sameTools); after that, the plain action
 //     keep-outs with `on` (`wasExcept`)      and copies back        above, which leaves keep-outs and copies as they are
@@ -79,7 +81,7 @@ import { itemKey, pendingChanges, theVersion, type LibraryItem } from './library
 import { linkLabel, pluginOf } from './sourcelink.ts';
 import { asItIs, noTimeTells, versionClock, type RowWords } from './libraryrow.ts';
 import type { Change, HarnessId, HistoryEvent, HomeView, LibraryFacts, PartKind } from './types.ts';
-import { andList, deletedIn, harnessIds, readsIt, sentence, toolName, toolsPhrase, turnIt } from './words.ts';
+import { andList, deletedIn, harnessIds, keptOutWords, readsIt, sameTools, sentence, toolName, toolsPhrase, turnIt } from './words.ts';
 
 /**
  * Whose a History entry is among the library's kinds, by the page's name for the kind (app.ts PageKind), with the item's key.
@@ -139,6 +141,10 @@ export function librarySentence(
   // A click that wrote over a copy a tool had of its own (tookFrom, and written: in `losers`), which is kept as a version.
   const over = (event.tookFrom ?? []).filter(copy => named(copy.tool)).map(copy => toolName(copy.tool));
   const overSaid = over.length ? ` ${andList(over)}’s own ${over.length === 1 ? 'copy was' : 'copies were'} written over and kept as a version.` : '';
+  // Several harnesses' keep-outs changed at once while it stayed On (a profile switch's Undo): each named.
+  if (event.exceptOnly && event.wasExcept && event.nowExcept) {
+    return { glyph: event.kind === 'off' ? 'circle-off' : 'circle-check', text: `${keptOutWords(event.wasExcept, event.nowExcept, 'Kept out of')}.` };
+  }
   switch (event.kind) {
     case 'on': {
       // A pass no click asked put a copy in one tool that had none (`only`: a tool that came under management, say), or wrote
@@ -318,6 +324,10 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
     if (!held) return { label: 'Undo', help: `Take ${name} out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own`, change: { ...now, deleted: true, ...givenBack(event, item) } };
     return event.kind === 'on' ? switchAction(false, undefined, item) : undefined;
   }
+  if (event.exceptOnly && event.wasExcept && event.nowExcept) {
+    const asLeft = item.on && sameTools(item.except, event.nowExcept);
+    return asLeft ? { label: 'Undo', help: `Put ${name} back in the tools it was in before this, and out of the others`, change: { ...now, except: [...event.wasExcept] } } : undefined;
+  }
   if (event.kind === 'off' || event.kind === 'on') {
     const action = switchAction(event.kind === 'off', event.only, item);
     if (!action) return undefined;
@@ -406,9 +416,7 @@ export function takeInHeld(event: HistoryEvent, item: LibraryItem | undefined, n
 /** The tools a take-in found the item in (types.ts HistoryEvent foundIn); an entry from before it was recorded: where it was taken from, and its own copies. */
 const foundIn = (event: HistoryEvent): HarnessId[] => event.foundIn ?? [...new Set([...(event.winner ? [event.winner.tool] : []), ...(event.tookFrom ?? []).map(copy => copy.tool)])];
 
-/** Whether two harness lists hold the same set of tools, regardless of order. */
-const sameTools = (first: readonly HarnessId[], second: readonly HarnessId[]) =>
-  new Set(first).size === new Set(second).size && first.every(tool => second.includes(tool));
+
 
 /**
  * Whether the item is still as the entry's click left it: at the version it left (types.ts HistoryEvent version, or the
@@ -469,8 +477,13 @@ export function versionChoices(event: HistoryEvent, item: LibraryItem | undefine
  */
 export type LeftIn = { item: string; why: TakeInHeld | 'chosen' | 'claude-code' };
 
-/** What the one Undo of a switch-on covers, as every place that promises it says it (the question, Yes's band, History). */
-export const oneUndoCovers = 'One Undo in History takes back what it takes in; a copy you choose has its own Undo.';
+/**
+ * What a switch-on's one Undo covers (everythingPlan): the items it added, but those changed since (takeInHeld: edited, off,
+ * deleted, kept or left out, taken over); and, where a copy may be chosen (`chosen`), that a chosen copy has its own Undo. Said,
+ * each with its own subject, by first setup's (?) (firstsetup.ts), the band's Undo after a switch-on (app.ts
+ * everythingSwitchedOn) and History's entry.
+ */
+export const oneUndoCovers = (subject: string, chosen = true) => `${subject} takes back the items it added, but for any changed since${chosen ? '; a copy you choose has its own Undo' : ''}.`;
 
 /**
  * What a switch-on entry's one Undo would do now, read from History (`history`, oldest first): the rule's take-ins after it (cause
@@ -478,7 +491,8 @@ export const oneUndoCovers = 'One Undo in History takes back what it takes in; a
  * Each take-in whose own Undo is offered (takeInHeld) is taken back (`takeBack`); each other is left in, named with why (`left`),
  * as is each copy chosen (its `chosen` entry has its own Undo, or is named by why it hasn't); one undone by itself already is
  * neither. `switchOff`: no switch came after it, so the rule is on as it set it and the Undo switches it off. `keptIn`: the tools a
- * take-in taken back wrote that are not managed now, which keep Central Knot's copy until they are.
+ * take-in taken back wrote that are not managed now, which keep Central Knot's copy until they are. `added`: how many take-ins there
+ * are, left in or not (what a band says the switch-on added: app.ts everythingSwitchedOn).
  */
 export function everythingPlan(switchOn: HistoryEvent, history: HistoryEvent[], about: EntryItem) {
   const after = history.slice(history.findIndex(entry => entry.id === switchOn.id) + 1);
@@ -490,7 +504,7 @@ export function everythingPlan(switchOn: HistoryEvent, history: HistoryEvent[], 
   const left: LeftIn[] = [...takeIns.flatMap(entry => { const why = held(entry); return why ? [{ item: entry.item, why }] : []; }),
     ...since.filter(entry => entry.kind === 'chosen').map((entry): LeftIn => ({ item: entry.item, why: held(entry) ?? 'chosen' }))];
   const managed = about(switchOn).now.managed, wrote = takeBack.flatMap(entry => entry.losers.map(copy => copy.tool));
-  return { takeBack, left, switchOff: end < 0, keptIn: [...new Set(wrote)].filter(tool => !managed.includes(tool)) };
+  return { added: takeIns.length, takeBack, left, switchOff: end < 0, keptIn: [...new Set(wrote)].filter(tool => !managed.includes(tool)) };
 }
 
 /**
@@ -532,7 +546,7 @@ const keptSaid = (tools: HarnessId[]) => (tools.length === 1 ? `${toolName(tools
 /** What a Synchronize everything entry says: switched on, switched off, or a switch-on's Undo and what it did. */
 export function everythingSentence(event: HistoryEvent): { glyph: IconName; text: string } {
   const { ruleOn, undo } = event.everything ?? { ruleOn: false };
-  if (!undo) return ruleOn ? { glyph: 'refresh-cw', text: `Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. ${oneUndoCovers.replace(/^One Undo in History/, 'Its Undo')}` }
+  if (!undo) return ruleOn ? { glyph: 'refresh-cw', text: `Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. ${oneUndoCovers('Its Undo')}` }
     : { glyph: 'circle-minus', text: 'Switched off: what turns up in a tool waits on its page for Add.' };
   const count = undo.itemUndos.length;
   const out = count ? `${itemsSaid(count)} it took in ${count === 1 ? 'is' : 'are'} out of Central Knot again, each tool it was found in keeping its own copy` : 'nothing it took in was taken back';

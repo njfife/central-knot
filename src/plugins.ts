@@ -1,6 +1,7 @@
 // Marketplaces and plugins for the CLIs: read a catalog without running anything from it, show what each tool would get,
 // and install or uninstall through each tool's own commands, confirmed by reading the record that tool keeps (PLG-03).
 import { createHash, randomUUID } from 'node:crypto';
+import { StringDecoder } from 'node:string_decoder';
 import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
@@ -92,9 +93,12 @@ export const gitEnv = () => ({ ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INT
  * What a run may also be given: `signal` stops it, as its timeout does; `input` is written to its input and closed; `maxBytes`
  * is the most output kept per stream (4 MB unless said); `env`, variables added to its environment; `drainMs`, when positive,
  * caps how long to wait after exit for inherited pipes to close and kills any lingering process group when the run ends;
- * `catchStart`, when true (hookrun.ts), turns a synchronous start throw into `reason: 'error'` instead of rejecting.
+ * `catchStart`, when true (hookrun.ts), turns a synchronous start throw into `reason: 'error'` instead of rejecting; `graceMs`,
+ * when positive (a run in a `group`, off Windows: mcpsigninrun.ts startSignin), a stop asks the group to end (TERM) and kills
+ * it that long after if the run hasn't ended by then (what its leader left as it ended, `drainMs` kills); `inOrder`, when true,
+ * also keeps both streams' lines in the order they ended (RunResult inOrder).
  */
-export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; maxBytes?: number; env?: NodeJS.ProcessEnv; drainMs?: number; catchStart?: boolean }
+export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; maxBytes?: number; env?: NodeJS.ProcessEnv; drainMs?: number; catchStart?: boolean; graceMs?: number; inOrder?: boolean }
 /**
  * A command's outcome: `output` is both streams as trimmed text (what failures are worded from); `stdout` and `stderr` each
  * stream byte for byte. A run stopped by its `signal` still reports `code: 'timeout'` for existing callers, while `reason`
@@ -105,6 +109,8 @@ export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; max
 export type RunResult = {
   code: number | 'timeout' | 'missing'; output: string; stdout: Buffer; stderr: Buffer;
   reason?: 'timeout' | 'aborted' | 'overflow' | 'missing' | 'error'; spawnError?: string; signal?: NodeJS.Signals; leftRunning?: boolean;
+  /** Both streams' lines in the order each ended (a line's parts kept together): only where RunOptions inOrder asked for it. */
+  inOrder?: string;
 };
 
 /**
@@ -117,8 +123,9 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
   const maxBytes = options.maxBytes ?? 4 * 1024 * 1024;
   const group = !!options.group && process.platform !== 'win32';
   const drainMs = options.drainMs && options.drainMs > 0 ? options.drainMs : 0;
+  const graceMs = group && options.graceMs && options.graceMs > 0 ? options.graceMs : 0;
   return new Promise(done => {
-    const out: Buffer[] = [], err: Buffer[] = [];
+    const out: Buffer[] = [], err: Buffer[] = [], arrived: string[] = [];
     let stopped: 'timeout' | 'aborted' | undefined;
     let cut = false;
     let ended = false;
@@ -126,6 +133,7 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
     let errMsg: string | undefined;
     let termSignal: NodeJS.Signals | undefined;
     let drain: NodeJS.Timeout | undefined;
+    let grace: NodeJS.Timeout | undefined;
     let child;
     try {
       child = start(file, args, { env: options.env, cwd: options.cwd, windowsHide: true, detached: group });
@@ -138,9 +146,11 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
     const windows = process.platform === 'win32' ? stopRun<RunResult['code']>(child, (code, whole) => { leftRunning = !whole; end(code); }) : undefined;
     const kill = windows?.stop ?? (() => { try { if (group && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); } catch { /* already ended */ } });
     const stop = (why: 'timeout' | 'aborted') => {
-      if (ended) return;
+      if (ended || grace) return;
       stopped ??= why;
-      kill();
+      if (!graceMs) return kill();
+      try { process.kill(-child.pid!, 'SIGTERM'); } catch { /* already ended */ }
+      grace = setTimeout(kill, graceMs);
     };
     const onAbort = () => stop('aborted');
     // Past maxBytes on either stream it ran, it just said too much: it is stopped, and what it said up to maxBytes is kept.
@@ -164,6 +174,7 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
       ended = true;
       clearTimeout(timer);
       clearTimeout(drain);
+      clearTimeout(grace);
       options.signal?.removeEventListener('abort', onAbort);
       if (drainMs) {
         if (group && child.pid) kill();
@@ -173,16 +184,23 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
       const stdout = Buffer.concat(out);
       const stderr = Buffer.concat(err);
       const output = `${stdout.toString('utf8')}${stderr.toString('utf8')}`.replace(/\r/g, '').trim();
-      const left = leftRunning ? { leftRunning } : {};
+      const also = { ...(leftRunning ? { leftRunning } : {}), ...(options.inOrder ? { inOrder: [...arrived, ...unended.map(stream => stream.text + stream.decoder.end())].join('') } : {}) };
       const sig = termSignal && !stopped && !cut ? { signal: termSignal } : {};
-      if (cut) done({ code: 1, output: `${output.slice(-2000)}\n(output cut: more than ${maxBytes / 1024 / 1024} MB)`, stdout, stderr, reason: 'overflow', ...left });
-      else if (errMsg !== undefined && (options.catchStart || !stopped)) done({ code, output, stdout, stderr, reason: code === 'missing' ? 'missing' : 'error', spawnError: errMsg, ...left });
-      else if (stopped && (code !== 0 || drainMs)) done({ code: 'timeout', output, stdout, stderr, reason: stopped, ...left });
-      else done({ code, output, stdout, stderr, ...left, ...sig });
+      if (cut) done({ code: 1, output: `${output.slice(-2000)}\n(output cut: more than ${maxBytes / 1024 / 1024} MB)`, stdout, stderr, reason: 'overflow', ...also });
+      else if (errMsg !== undefined && (options.catchStart || !stopped)) done({ code, output, stdout, stderr, reason: code === 'missing' ? 'missing' : 'error', spawnError: errMsg, ...also });
+      else if (stopped && (code !== 0 || drainMs)) done({ code: 'timeout', output, stdout, stderr, reason: stopped, ...also });
+      else done({ code, output, stdout, stderr, ...also, ...sig });
     };
     const settle = windows?.settle ?? end;
-    child.stdout.on('data', take(out));
-    child.stderr.on('data', take(err));
+    // inOrder: each stream's text held until a line of it ends, its whole lines then taken in the order they ended.
+    const unended = [0, 1].map(() => ({ decoder: new StringDecoder('utf8'), text: '' }));
+    const keep = (at: number, stream: (chunk: Buffer) => void) => (chunk: Buffer) => {
+      const held = unended[at]!, text = options.inOrder ? held.text + held.decoder.write(chunk) : '', end = text.lastIndexOf('\n') + 1;
+      if (end) { arrived.push(text.slice(0, end)); held.text = text.slice(end); } else held.text = text;
+      stream(chunk);
+    };
+    child.stdout.on('data', keep(0, take(out)));
+    child.stderr.on('data', keep(1, take(err)));
     child.on('error', error => {
       errMsg = error.message;
       settle(errorCode(error) === 'ENOENT' ? 'missing' : 1);
