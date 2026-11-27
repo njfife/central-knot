@@ -15,6 +15,7 @@
 import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { forgetSourcePrompts, loadSources } from './sourcespage.ts';
 import { forgetHistoryFolds } from './historypage.ts';
+import { forgetManageQuestion } from './managecard.ts';
 import { loadSettings, openHistoryWindow, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
@@ -26,19 +27,19 @@ import { button, h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
 import { clickResults, heldWhole, keptBack } from './clickplan.ts';
-import { entriesNow, everythingAction, everythingDone, libraryAction, libraryEntry, librarySentence, restorePlan } from './historyactions.ts';
+import { entriesNow, everythingAction, everythingDone, everythingPlan, libraryAction, libraryEntry, librarySentence, oneUndoCovers, restorePlan } from './historyactions.ts';
 import { asksWhichCopy, copiesDiffer, libraryWords, placeOf, stillReadWords } from './libraryrow.ts';
 import { andList, countedAs, fewNames, fileName, kindNames, kindNouns, noToolsSentence, notAllThrough, orList, profileLeftUse, rowNames, rowNouns, saidByKind, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform, shownFromHome } from './machine.ts';
-import { closeRun, endListNews, fadeRun, forgetResults, loadPlugins, overRun, resetMarket, retire } from './pluginstate.ts';
+import { closeRun, endListNews, fadeRun, forgetResults, loadPlugins, overRun, resetMarket, retire, stillOnFromProfiles } from './pluginstate.ts';
 import { pruneHookSources, resetHookSources } from './hooksourceview.ts';
 import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, type LastRun, type PluginDone, type PluginOp } from './pluginplan.ts';
 import type { PluginEntry } from './pluginrecord.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
-import { changeWords, endedProfiles, inUseInHome, stillLoadAfter, undoOffered, wholeCounts, wholeSaid } from './profileplan.ts';
+import { changeWords, endedProfiles, filledWords, inUseInHome, leftLoadingAfter, stillLoadAfter, undoOffered, wholeCounts, wholeSaid } from './profileplan.ts';
 import { hasReloadAdvice, pluginReloads, reloadAdvice, reloadsFor, settleReloads, waysFrom, type ReloadChange } from './reload.ts';
 import { clickList, drop, endRun, join, runAt, type Run, type Turn } from './clicklist.ts';
 import { followView, type SigninChecks } from './mcpsignin.ts';
@@ -261,7 +262,8 @@ function withProfileEnded(outcome: Outcome, { checkProfile = true, before = actB
 export function tell(outcome: Outcome | undefined, otherwise = '', options?: { checkProfile?: boolean; before?: ProfilesBefore }): void {
   const told = outcome && withProfileEnded(outcome, options);
   state.outcome = told;
-  // Said on Plugins in the run's place, it is the newer result: the run's goes, so this one's × uncovers nothing older.
+  // Said in a plugin run's place (Plugins, Instructions, or a tool's tab of either), the newer result: the run's goes, so this one's ×
+  // uncovers nothing older (pluginstate.ts overRun).
   if (overRun(told)) closeRun();
   if (!told) announce(otherwise);
   else { announce(spoken(told), !saidInStatusBar(told)); told.said = state.said.seq; }
@@ -296,7 +298,7 @@ function fadeNow(): void {
   const outcome = state.outcome;
   if (outcome?.fade || (outcome && resultInHeader() && !outcome.warn && !outcome.reasons?.length && !outcome.stays)) state.outcome = undefined;
   // Drawn only when a result went: a redraw that changes nothing would replace a text field he is typing in, and its Undo.
-  if (fadeRun() || state.outcome !== outcome) rerender();
+  if ((resultInHeader() && fadeRun()) || state.outcome !== outcome) rerender();
 }
 
 /** Paints the status bar's message from state.said (`shown` when given, else `text`, with that visible string as its tooltip and any spoken suffix visually hidden). */
@@ -449,6 +451,7 @@ function accept(view: HomeView): HomeView {
   resetPageData(state.instructions);
   resetPageData(state.history);
   forgetHistoryFolds();
+  forgetManageQuestion();
   if (state.page === 'history') openHistoryWindow();
   resetPageData(state.usage);
   resetPageData(state.sessions);
@@ -1215,7 +1218,7 @@ export function showPage(page: Page, { repair = false } = {}) {
   const leavingHarness = page === 'harnesses' && !state.busy && !!state.harness;
   // A new page drops the last page’s result (plugin runs stay tied to their own place: pluginstate.ts pluginsResultPlace).
   if (page !== state.page || leavingHarness) leaveResults(page);
-  if (page !== state.page) { state.libraryView = 'list'; state.visit += 1; forgetRepoPrompts(); forgetSourcePrompts(); forgetHistoryFolds(); }
+  if (page !== state.page) { state.libraryView = 'list'; state.visit += 1; forgetRepoPrompts(); forgetSourcePrompts(); forgetHistoryFolds(); forgetManageQuestion(); }
   if (leavingHarness) state.harness = undefined;
   // Settings opens fresh (what its rows said last visit belongs to that visit); every other page reads its own data.
   state.page = page;
@@ -1310,7 +1313,10 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   if (past?.kind === 'profile') {
     // Each item it turned back has its own History entry, with its own action: the band offers no Undo of the Undo.
     if (result.stopped) tell({ page, text: `Undo switch to ${past.profile?.toName ?? past.item}: nothing was undone. ${result.stopped.replace(/ Nothing was undone\.$/, '')}`, warn: true, band: true, history: page !== 'history', refused: true });
-    else if (result.switched) turnedOutcome(page, 'Undone', result.switched, result.results, result.reloads, { fade: true });
+    // A plugin a press on Profiles turned on stays on: its Undo is the press's own (pluginstate.ts stillOnFromProfiles).
+    // An item it turned off that a tool still loads (his own copy there) is named among what it left.
+    else if (result.switched) turnedOutcome(page, 'Undone', { ...result.switched, since: [...result.switched.since ?? [], ...(state.home && past.profile ? leftLoadingAfter(past.profile, state.home) : [])] },
+      result.results, result.reloads, { fade: true, kept: stillOnFromProfiles() });
     return;
   }
   const everywhere = touchedToolsPhrase(where);
@@ -1428,7 +1434,7 @@ export interface Outcome {
   fade?: boolean;
   /** It stays in the header until closed or replaced, problems or none: a Delete of many's, whose Undo is many History Restores (fadeNow). */
   stays?: boolean;
-  /** The plugins whose acts its Undo turns back: an act on one of them, from either page, retires it (pluginstate.ts retire). */
+  /** The plugins whose acts its Undo turns back: an act on one of them, from any page, retires it (pluginstate.ts retire). */
   plugins?: string[];
   undo?: { id: string; label: string };
   act?: {
@@ -1858,15 +1864,34 @@ export const setSync = (on: boolean) => busy(on ? 'Turning Sync on…' : 'Turnin
   announce(on ? 'Automatic sync on.' : 'Automatic sync off.', true);
 });
 
+/** The Undo's hover on a band after a switch-on: what it does, with no count (a later pass adds more, and the Undo takes those back too). */
+const undoEverything = `Switches Synchronize everything off. ${oneUndoCovers('It', false)}`;
+
 /**
- * Synchronize everything, the open home's standing rule, on or off from Settings (everything.ts setSyncEverything; first setup's
- * question is firstsetup.ts's). Turned on, main's next pass takes in what is found now: at once with Automatic sync on, at Sync
- * once with it off, and Settings always shows the result band with History's Undo when this click switched it on. Answers why
+ * What Synchronize everything did once switched on, from History: how many items the switch-on entry `event` (everything.ts
+ * setSyncEverything's id) added so far (historyactions.ts everythingPlan), and History's own Undo of it (everythingAction). None
+ * where the open home is no longer `home`, or History has no such entry.
+ */
+export async function everythingSwitchedOn(event: string | undefined, home: string): Promise<{ added: number; undo?: Outcome['act'] }> {
+  if (!event || state.home?.home !== home) return { added: 0 };
+  await putHistory().catch(() => undefined);
+  const events = state.history.data, entry = events?.find(each => each.id === event);
+  if (!entry || !events || !state.home) return { added: 0 };
+  const about = entriesNow(state.home), offer = everythingAction(entry, events, about);
+  const undo = offer && { label: offer.label, id: 'outcome-undo', title: undoEverything, run: () => { if (state.home?.home === home) void restoreEvent(event); } };
+  return { added: everythingPlan(entry, events, about).added, undo };
+}
+
+/**
+ * Synchronize everything, the open home's standing rule, on or off: Settings' switch, first setup's Yes (`answering`: refused once
+ * the home has an answer, everything.ts setSyncEverything) and the band after its No. Turned on, main's next pass adds what is
+ * found now: at once with Automatic sync on, at Sync once (or once it is turned on) with it off. One band says it, on the page
+ * clicked on: what it added, or that nothing is added yet (with Sync once), and the switch-on's Undo (everythingSwitchedOn). Answers why
  * not, if it couldn't be set.
  */
-export const switchSyncEverything = (on: boolean) => busy(on ? 'Turning on Synchronize everything…' : 'Turning off Synchronize everything…', async () => {
+export const switchSyncEverything = (on: boolean, answering = false) => busy(on ? 'Turning on Synchronize everything…' : 'Turning off Synchronize everything…', async page => {
   const home = state.home!.home;
-  const set = await api().setSyncEverything(on, home);
+  const set = await api().setSyncEverything(on, home, answering);
   if (set.view) setHome(set.view);
   if (set.stopped) {
     announce(`Synchronize everything was not changed. ${set.stopped}`);
@@ -1876,27 +1901,11 @@ export const switchSyncEverything = (on: boolean) => busy(on ? 'Turning on Synch
     announce('Synchronize everything is off: what turns up in a tool waits for Add.', true);
     return;
   }
-  const text = state.home?.syncOn
-    ? 'Synchronize everything is on.'
-    : 'Synchronize everything is on. It takes items in at Sync once, or when Automatic sync is on.';
-  let act: Outcome['act'];
-  if (set.event && state.home?.home === home) {
-    await putHistory().catch(() => undefined);
-    const events = state.history.data;
-    const entry = events?.find(each => each.id === set.event);
-    const offer = entry && events ? everythingAction(entry, events, entriesNow(state.home)) : undefined;
-    if (offer) {
-      act = {
-        label: offer.label,
-        id: 'outcome-undo',
-        title: offer.help,
-        run: () => {
-          if (state.home?.home === home) void restoreEvent(set.event!);
-        },
-      };
-    }
-  }
-  tellWritten({ page: 'settings', band: true, settingsBand: true, text, act }, state.home?.syncOn ? set.reloads : [], !!set.event);
+  const { added, undo } = await everythingSwitchedOn(set.event, home), syncOn = !!state.home?.syncOn;
+  const text = !syncOn ? 'Synchronize everything is on. Nothing added yet: Automatic sync is off.'
+    : `Synchronize everything is on${added ? `: it added ${plural(added, 'item')}` : ''}.`;
+  const once = { label: 'Sync once', id: 'outcome-sync-once', title: 'Add what is found now; Automatic sync stays off', run: () => void syncNow() };
+  tellWritten({ page, band: true, settingsBand: true, text, ...(syncOn ? { act: undo } : { act: once, next: undo }) }, syncOn ? set.reloads : [], !!set.event);
 });
 
 let menuSyncHome: string | undefined;
@@ -2084,7 +2093,7 @@ export const profileState = {
   /** The name as typed while renaming, kept across redraws. */
   draft: undefined as string | undefined,
   /** Pinned row ids while the Profiles page's Changes view is open, so ticking moves no row. */
-  changes: undefined as { home: string; profileId: string; on: string[]; off: string[] } | undefined,
+  changes: undefined as { home: string; profileId: string; on: string[]; off: string[]; retooled: string[] } | undefined,
 };
 
 /**
@@ -2093,13 +2102,13 @@ export const profileState = {
  * wholeSaid), and what could not change.
  */
 function turnedOutcome(page: Page, lead: string, turned: NonNullable<ApplyResult['switched']> & Pick<ProfileSwitchResult, 'settingsChanged'>, results: DestinationResult[], reloads: readonly ReloadChange[],
-  { act, fade, still = '', whole = '' }: { act?: Outcome['act']; fade?: boolean; still?: string; whole?: string } = {}) {
+  { act, fade, still = '', whole = '', kept = '' }: { act?: Outcome['act']; fade?: boolean; still?: string; whole?: string; kept?: string } = {}) {
   const leftSaid = `${turned.left.length ? ` ${andList(turned.left)} ${turned.left.length === 1 ? 'is' : 'are'} not as it asked: History says why.` : ''}${(turned.settingsChanged ?? []).map(said => ` ${said}`).join('')}`;
   // An Undo's plugin copies changed since the switch (profiles.ts undoSwitch), left as they are.
   const sinceSaid = turned.since?.length ? ` Left as ${turned.since.length === 1 ? 'it is' : 'they are'}: ${turned.since.join('; ')}.` : '';
   const notDone = results.length ? ` ${results.slice(0, 2).map(entry => entry.message).join(' ')}${results.length > 2 ? ' …' : ''}` : '';
   const warn = results.length > 0 || turned.left.length > 0 || !!turned.since?.length;
-  tellWritten({ page, band: true, fade: !!fade && !warn && !act, text: `${lead}: ${changeWords(turned, turned.plugins ?? { on: 0, off: 0 }, 'did', still) || 'nothing changed'}.${whole}${leftSaid}${sinceSaid}${notDone}`, warn, act }, reloads, false);
+  tellWritten({ page, band: true, fade: !!fade && !warn && !act, text: `${lead}: ${changeWords(turned, turned.plugins ?? { on: 0, off: 0 }, 'did', still) || 'nothing changed'}.${whole}${kept}${leftSaid}${sinceSaid}${notDone}`, warn, act }, reloads, false);
 }
 
 /**
@@ -2149,7 +2158,9 @@ export const saveProfileDef = (profile: ProfileEdit, said?: string, band = false
   if (result.problem) { announce(result.problem); return; }
   if (result.id && (!profile.id || profile.restore)) profileState.open = result.id;
   if (result.id && !profile.id) profileState.renaming = result.id;
-  if (band && said) tell({ page, band: true, text: said }, '', { checkProfile: false });
+  // The save that moved the file to profiles that hold their tools (profiles.ts saveProfile): which others it filled in, once.
+  if (result.filled) tell({ page, band: true, text: filledWords(result.filled) }, '', { checkProfile: false });
+  else if (band && said) tell({ page, band: true, text: said }, '', { checkProfile: false });
   else announce(said ?? 'Profile saved.', true);
 });
 

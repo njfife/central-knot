@@ -2,8 +2,9 @@
 // here, apart from the other features; app.ts only routes to it and resets it when the home changes.
 // Clicks go by one of two routes, split by whether the plugin's record changes: the switch and each tool's box go through
 // turnPlugin (main records first, marketplaces.ts turn); Update, Update all, a skill's switch, Use the plugin's (usePlugins, whose
-// Undo is a turn's) and their Undo go through applyPluginOps or under busy as it does. Both set market.lastRun, which the window's header says with one Undo (pluginspage.ts pluginsResult); a newer
-// result said there in its place lets it go (overRun).
+// Undo is a turn's) and their Undo go through applyPluginOps or under busy as it does. Both set market.lastRun, for the place they
+// were made in (pluginsResultPlace), which the window's header says with one Undo (pluginspage.ts pluginsResult), or on Instructions a
+// band (pluginspage.ts runBand); a newer result said there in its place lets it go (overRun).
 // Which clicks wait their turn and which lock, in one place:
 // - A switch or a tool's box joins the page's one list of clicks (clicklist.ts, which the item lists' switches join too) as a
 //   PluginClick, sent to main one click at a time, in the order clicked (runClick); its run is decided there as an item's is
@@ -17,8 +18,9 @@
 // - A tool's line on a plugin's item in the Library (pluginline.ts) makes a tool's box's own turn (Install the plugin, Put its
 //   items here, Turn the plugin on or off): turnFromLine joins the page's one list as a run of its own; its line says it waits and runs
 //   (lineBusy), and its result, with the turn's Undo (undoLine), is a LineResult (its one lifetime is there), on its line or, when
-//   that isn't on screen, in the header. It sets no market.lastRun: the Plugins page's own result is its own clicks'. An act on a
-//   plugin from either page retires that plugin's earlier results and Undo on both (retire).
+//   that isn't on screen, on the page it was pressed on (LineAim page): the Library's header, or Profiles' band, whose Turn on
+//   <plugin> in <Tool> is the line's Turn the plugin on (profilespage.ts turnOnControl). It sets no market.lastRun: the Plugins
+//   page's own result is its own clicks'. An act on a plugin from any page retires that plugin's earlier results and Undo (retire).
 // Steps that run by themselves (pluginupdates.ts) take their turn with the page's in main's one queue.
 import { harnessTabShown, noteMove, showPage, announce, busy, focusWhenDone, oweHomeRead, pinnedRows, profileEndedLine, profilesBefore, readHomeOnce, rerender, saidInStatusBar, setHome, state as app, tell, toolWays, withReloads, type Outcome, type ProfilesBefore } from './app.ts';
 import { pluginReloads, reloadAdvice, settleReloads, type ReloadAdvice, type ReloadChange } from './reload.ts';
@@ -120,9 +122,15 @@ export function current(): { entry: MarketplaceView; index: number } | undefined
   return entry && { entry, index: list.indexOf(entry) };
 }
 
-/** Which plugin-result place is open now (`'plugins'`, or a tool's Plugins tab under Harnesses), if any. The one place every caller asks. */
-export const pluginsResultPlace = (): RunPlace | undefined =>
-  app.page === 'plugins' ? 'plugins' : harnessTabShown() === 'plugins' ? app.harness : undefined;
+/**
+ * Which plugin-result place is open now (pluginplan.ts RunPlace: Plugins or Instructions, or a tool's Plugins or Instructions tab
+ * under Harnesses), if any. The one place every caller asks; a tool's two tabs are two places.
+ */
+export function pluginsResultPlace(): RunPlace | undefined {
+  const tab = harnessTabShown();
+  if (app.page === 'plugins' || app.page === 'instructions') return app.page;
+  return tab === 'plugins' ? app.harness : tab === 'instructions' ? `instructions:${app.harness!}` : undefined;
+}
 const placeNow = (): RunPlace => pluginsResultPlace() ?? 'plugins';
 const showsPluginsResult = (place?: RunPlace) => {
   const here = pluginsResultPlace();
@@ -551,7 +559,9 @@ async function runClick(click: PluginClick, home: string): Promise<void> {
   oweHomeRead();
   click.ran = result;
   market.working = undefined;
-  setRun({ done: result.done, undo: false, home, place: click.place, ...(result.back ? { turn: { source: click.source, plugin: click.plugin, before: result.before ?? null, back: result.back } } : {}) }, click.place);
+  const stop = result.stopped ? { stop: { source: click.source, plugin: click.plugin, ok: false, text: result.stopped, short: result.stopped } } : {};
+  const turn = result.back ? { turn: { source: click.source, plugin: click.plugin, before: result.before ?? null, back: result.back } } : {};
+  setRun({ done: result.done, undo: false, home, place: click.place, ...stop, ...turn }, click.place);
   if (clickList.turns.some(turn => turn.run === click.run && turn.state === 'waiting'))
     announce(result.stopped ?? (resultSentence(resultLines(result.done, false), false) || `Nothing changed for ${click.plugin}.`), showsPluginsResult(click.place) && !result.stopped && undoOps(click.place).length > 0);
   rerender();
@@ -562,11 +572,12 @@ const ranFor = (last: LastRun) => market.clicks.filter(click => click.ran && cli
 
 /**
  * What the toolbar and the problems band say of the last run: while the latest list's rows are there, every click of it together
- * (a click main stopped is its plugin's line); else the last run's own. The one Undo stays the last run's (undoOps).
+ * (a click main stopped is its plugin's line); else the last run's own, with its click's stop (LastRun stop). The one Undo stays
+ * the last run's (undoOps).
  */
 export function lastLines(place: RunPlace = placeNow()): ResultLine[] {
   const last = runs.get(place), ran = last ? ranFor(last) : [];
-  if (!last || !ran.length) return last ? resultLines(last.done, last.undo) : [];
+  if (!last || !ran.length) return last ? [...resultLines(last.done, last.undo), ...(last.stop ? [last.stop] : [])] : [];
   // One clause a tool: a later click on the plugin in that tool is what the run says of it (a tick then an untick: turned off).
   const there = (step: PluginDone) => (each: PluginDone) => each.source === step.source && each.plugin === step.plugin && each.tool === step.tool;
   const later = (at: number, step: PluginDone) => ran.slice(at + 1).some(click => click.ran!.done.some(there(step)));
@@ -578,6 +589,15 @@ export const runReloads = (place: RunPlace = placeNow()): ReloadAdvice => {
   const last = runs.get(place), ran = last ? ranFor(last) : [];
   return reloadAdvice(settleReloads(pluginReloads(last && ran.length ? ran.flatMap(click => click.ran!.done) : last?.done ?? [])), toolWays());
 };
+
+/**
+ * Each click of the place's run, then each step it did, by plugin and tool (a whole switch's click has none), in the order made:
+ * Instructions says the run under the strip of the first (instructionspage.ts runStrip).
+ */
+export function runTouches(place: RunPlace = placeNow()): { source: string; plugin: string; tool?: HarnessId }[] {
+  const last = runs.get(place);
+  return last ? [...ranFor(last), ...last.done] : [];
+}
 
 /** The Undo of a plugin's switch (or "Undo the rest" after it): its entry put back, then its steps run, in main. */
 const undoTurn = (last: LastRun & { turn: NonNullable<LastRun['turn']> }) => act('undoing', async () => {
@@ -623,13 +643,18 @@ export function undoLast(): void {
 /** × on the run's result in the header: it goes, and its problem lines with it, and the run of clicks ends (clicklist.ts endRun). */
 export function closeRun(): void { endRun(); clearRun(); }
 /**
- * Whether the app's result `outcome` is said in the header in the run's place (pluginspage.ts pluginsResult): one made on Plugins
- * or a tool's Plugins tab, not in the status bar, either with no action of the page's own (Sync once) or a library-item click result (`rows`).
+ * Whether the app's result `outcome`, said on the page of the run's place and not in the status bar, is the newer result there: any
+ * such result, with an action of its own (Add back) or none, in the header or in a band, so the run's goes (app.ts tell) and one
+ * result stands in a place at a time. How the header draws it is pluginspage.ts pluginsResult's.
  */
 export const overRun = (outcome: Outcome | undefined): boolean =>
-  !!outcome && !!pluginsResultPlace() && outcome.page === app.page && (!outcome.act || !!outcome.rows?.length) && !saidInStatusBar(outcome);
+  !!outcome && !!pluginsResultPlace() && outcome.page === app.page && !saidInStatusBar(outcome);
 const clearRun = (place: RunPlace = placeNow()) => { runs.delete(place); problems.delete(place); };
-/** The run's result with no problem line goes by itself, as a list page's result does (app.ts FADE_MS); its Undo with it. Answers whether it went. */
+/**
+ * The run's result with no problem line goes by itself, as a list page's result in the header does (app.ts FADE_MS); its Undo with
+ * it. Asked only where the result is in the header (app.ts fadeNow, by matrix.ts resultInHeader): one in a band stays. Answers
+ * whether it went.
+ */
 export function fadeRun(): boolean {
   const here = pluginsResultPlace();
   const goes = !!here && !!runs.get(here) && !problems.get(here) && lastLines(here).every(line => line.ok);
@@ -675,6 +700,8 @@ export function lineBox(plugin: string, marketName: string, source: string | und
 
 /** The read of the home this page's view was last asked for by the Library (wantView); another home starts over (resetMarket). */
 let viewFor: number | undefined;
+/** Whether this page's view is the one read for the home on screen (wantView), so a press may act on what it says: not while read again, or after a read failed. */
+export const viewCurrent = () => market.read.state === 'ready' && viewFor === app.home?.readId;
 /** While a plugin's item is open in the Library, its lines need this page's view, as Harnesses does: read once for each read of the home. */
 export function wantView(readId: number | undefined): void {
   if (viewFor === readId || app.page === 'plugins') return;
@@ -686,9 +713,13 @@ export function wantView(readId: number | undefined): void {
 /**
  * A line's click: the home it is made in, the plugin as listed (`source`, the listing's own spelling), the tool, and the item whose line
  * it is (`item`), with the names his own there it said stay his (`yours`). Install, Put its items here and Turn the plugin on are
- * its box ticked (`let-in`); Turn the plugin off is its box unticked (`keep-out`).
+ * its box ticked (`let-in`); Turn the plugin off is its box unticked (`keep-out`). `page`: where it was pressed, the Library (a line)
+ * or Profiles (a held profile's Turn on <plugin> in <Tool>), where its result is told while no line of its item is on screen.
  */
-export interface LineAim { home: string; source: string; marketName: string; plugin: string; tool: HarnessId; act: 'install' | 'place' | 'keep-out' | 'let-in'; item: PartRef; yours?: PartRef[] }
+export interface LineAim {
+  home: string; source: string; marketName: string; plugin: string; tool: HarnessId; act: 'install' | 'place' | 'keep-out' | 'let-in'; item: PartRef; yours?: PartRef[];
+  page: 'library' | 'profiles';
+}
 /** A line's click in the page's list (clicklist.ts), a run of its own: its line says it waits and runs (lineBusy). */
 interface LineClick extends Turn { aim: LineAim }
 const isLineClick = (turn: Turn): turn is LineClick => 'aim' in turn;
@@ -702,9 +733,9 @@ const LINE_WORDS: Record<LineAim['act'], { waiting: string; running: string; don
 /**
  * A line's result: what its act did, with the one next step the tool needs (reload.ts reloadAdvice, as the header's chips say it),
  * and its Undo. ONE LIFETIME: one per plugin, for the home its act ran in, on its item's line in its tool whatever row shows that
- * item, until he closes it, an act on that plugin starts from either page (retire), he presses Refresh (forgetResults) or the
- * home changes (resetMarket). Said in the header only when that line isn't on screen as the act ends (`told`); its line shows it
- * once the header no longer does, never both at once.
+ * item, until he closes it, an act on that plugin starts from any page (retire), he presses Refresh (forgetResults) or the
+ * home changes (resetMarket). Told on the page it was pressed on (LineAim page: the Library's header, Profiles' band) only when
+ * that line isn't on screen as the act ends (`told`); its line shows it once that page no longer does, never both at once.
  */
 export interface LineResult { aim: LineAim; words: string; next: string; failed: boolean; profileLine?: string; undo?: () => void; told?: Outcome }
 let results: LineResult[] = [];
@@ -719,7 +750,7 @@ export function closeLineResult(result: LineResult): void {
 /** He pressed Refresh (app.ts readAgain): every line's result goes. */
 export const forgetResults = () => { results = []; };
 /**
- * An act on a plugin starts, from either page (a line's, a box's or a switch's, the item lists' plugin switches: app.ts runSwitches):
+ * An act on a plugin starts, from any page (a line's, a box's or a switch's, the item lists' plugin switches: app.ts runSwitches):
  * that plugin's earlier results and their Undo go, on its line, in the header (an Outcome naming it in `plugins`), and the Plugins
  * page's last run where it was that plugin's. Only that plugin's.
  */
@@ -741,8 +772,8 @@ export function lineBusy(plugin: string, marketName: string, tool: HarnessId): s
 }
 
 /**
- * A line's click (pluginline.ts: Install the plugin, Put its items here, Turn the plugin on or off): it joins the page's list as a run of its
- * own, run in its turn by main as the plugin's box on its page is (marketplaces.ts turn).
+ * A line's click (pluginline.ts: Install the plugin, Put its items here, Turn the plugin on or off; from Profiles, its Turn the plugin on):
+ * it joins the page's list as a run of its own, run in its turn by main as the plugin's box on its page is (marketplaces.ts turn).
  */
 export function turnFromLine(aim: LineAim): void {
   const click: LineClick = { state: 'waiting', run: { place: 'line', lastAt: 0 }, aim, work: () => runLine(click) };
@@ -756,6 +787,8 @@ export function turnFromLine(aim: LineAim): void {
  */
 async function runLine(click: LineClick): Promise<void> {
   const { aim } = click, atStart = profilesBefore();
+  // An earlier act's result on this plugin in another tool goes with its Undo (one result a plugin: retire), and this one says so.
+  const earlier = results.find(each => each.aim.plugin === aim.plugin && each.aim.tool !== aim.tool && each.undo);
   const before = aim.act === 'keep-out' ? app.home?.pluginItems?.find(each => each.tool === aim.tool && each.plugin === aim.plugin && each.marketName === aim.marketName) : undefined;
   const also = before ? wholeAlso({ ...aim.item, tool: aim.tool, install: before }).words : '';
   retire(aim.plugin);
@@ -789,15 +822,16 @@ async function runLine(click: LineClick): Promise<void> {
     : `${words.done} ${aim.plugin} in ${where}${aim.act === 'install' ? installedNow(aim) : also ? `, with its ${also}` : ''}.${aim.yours?.length ? ` ${yoursStay(aim.yours)}` : ''}`;
   const back = result.back ?? [], undoes = back.length > 0 || (already && recordChanged);
   const did = mine.some(step => succeeded(step.report)) || (already && recordChanged);
+  const kept = earlier ? `${toolNames[earlier.aim.tool]} stays ${earlier.aim.act === 'keep-out' ? 'off' : 'on'}${undoes ? `; Undo is for ${where}` : ''}.` : '';
   const headerNote = problem ? lineBox(aim.plugin, aim.marketName, aim.source, aim.tool).words : undefined;
-  sayResult({ aim, words: [said, read ? '' : 'The page couldn’t be read again after it: Refresh shows where things stand.'].filter(Boolean).join(' '),
+  sayResult({ aim, words: [said, kept, read ? '' : 'The page couldn’t be read again after it: Refresh shows where things stand.'].filter(Boolean).join(' '),
     next: reloadAdvice(settleReloads(pluginReloads(mine)), toolWays()).text, failed: !!problem, ...(undoes ? { undo: () => void undoLine(aim, result.before ?? null, back) } : {}) },
     pluginReloads(mine), { checkProfile: did, before: atStart }, headerNote);
 }
 
 /**
- * A line's result kept (one per plugin), and said: on its line if that line is on screen now, else in the header, which has its
- * Undo and next step there (as chips, withReloads: one next step either way) and names its plugin for retire.
+ * A line's result kept (one per plugin), and said: on its line if that line is on screen now, else told on the page it was pressed on
+ * (LineAim page), with its Undo and next step there (withReloads: one next step either way), naming its plugin for retire.
  */
 function sayResult(result: LineResult, changes: ReloadChange[], check: { checkProfile?: boolean; before?: ProfilesBefore } = {}, headerNote?: string): void {
   const profileLine = check.checkProfile === false ? undefined : profileEndedLine(check.before);
@@ -809,11 +843,14 @@ function sayResult(result: LineResult, changes: ReloadChange[], check: { checkPr
     announce([shown, profileLine].filter(Boolean).join(' '), false, undefined, undefined, profileLine ? shown : undefined);
     return;
   }
-  result.told = withReloads({ page: 'library', text: [result.words, headerNote].filter(Boolean).join(' '), band: true, warn: result.failed, plugins: [result.aim.plugin],
+  result.told = withReloads({ page: result.aim.page, text: [result.words, headerNote].filter(Boolean).join(' '), band: true, warn: result.failed, plugins: [result.aim.plugin],
     ...(result.undo ? { act: { label: 'Undo', id: 'outcome-undo', title: 'Put back what this did', run: result.undo } } : {}) }, changes);
   tell(result.told, '', check);
   result.told = app.outcome;
 }
+/** After Undo switch (app.ts restoreEvent): each plugin a press on Profiles turned on and its Undo still stands for, on there now. */
+export const stillOnFromProfiles = () => results.filter(each => each.aim.page === 'profiles' && each.undo && app.home?.pluginItems?.some(install => install.tool === each.aim.tool
+  && install.plugin === each.aim.plugin && install.marketName === each.aim.marketName && !install.off)).map(each => ` ${each.aim.plugin} stays on in ${toolNames[each.aim.tool]}.`).join('');
 /** The one key of the line a result is on: its tool and item (matrix.ts draws it as the result's data-result). */
 export const resultKey = (aim: Pick<LineAim, 'tool' | 'item'>) => `${aim.tool}:${aim.item.kind}:${aim.item.name.toLowerCase()}`;
 
