@@ -13,8 +13,8 @@ import { readTool, writeEntry } from '../src/mcp.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { hashesOf, libraryWords, sentences } from '../src/libraryrow.ts';
 import { migrateProfiles } from '../src/profilemigrate.ts';
-import { allTurns, copilotKeptOnBy, copilotServerName, copilotSharesYours, entryTurns, homeItems, itemRowState, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, listedChanges, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, stillLoadAfter, switchable, switchPlan, switchPreview, takenWhole, turnsWords, undoInHome, undoOffered, undoPlan, undoTurns, wholeSaid, wholeTurns, withCopilotOff, type Libraries, type PluginHome } from '../src/profileplan.ts';
-import { NO_PLUGINS, deleteProfile, readLibraries, readProfiles, saveProfile, saveProfiles, switchProfile, undoSwitch, type PluginSide } from '../src/profiles.ts';
+import { allTurns, changeWords, copilotKeptOnBy, effectiveOut, filledWords, leftLoadingAfter, copilotServerName, copilotSharesYours, entryTurns, homeItems, itemRowState, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, listedChanges, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, stillLoadAfter, switchable, switchPlan, switchPreview, takenWhole, turnsWords, undoInHome, undoOffered, undoPlan, undoTurns, wholeSaid, wholeTurns, withCopilotOff, toolsOf, withTool, type Libraries, type PluginHome, endedByChanges, endedProfiles, inUseInHome } from '../src/profileplan.ts';
+import { NO_PLUGINS, deleteProfile, profilesNaming, readLibraries, readProfiles, saveProfile, saveProfiles, switchProfile, undoSwitch, type PluginSide } from '../src/profiles.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { pluginOnIn } from '../src/pluginrows.ts';
 import { runPlan, type PlanApi } from '../src/pluginplan.ts';
@@ -26,7 +26,8 @@ import { applyServers, serversView } from '../src/servers.ts';
 import { keepDenies } from '../src/serverstore.ts';
 import { applySkills, skillsView } from '../src/skills.ts';
 import { setDisabled } from '../src/skillswitch.ts';
-import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, Profile, ThroughPlugin } from '../src/types.ts';
+import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, Profile, ThroughPlugin, Change } from '../src/types.ts';
+import type { PluginCopy } from '../src/profileplan.ts';
 import { bytes, folderOf, put, sandbox, skillText, type Box, type Tool } from './skillclicks.ts';
 import { standIn } from './standin.ts';
 
@@ -38,6 +39,8 @@ const libraryOf = (items: [ItemKind, string, boolean, boolean?][]): Libraries =>
   return libraries;
 };
 const ids = (items: { id: string }[]) => items.map(item => item.id);
+/** Every tool but these, as a profile's `tools`. */
+const without = (...out: HarnessId[]) => harnessIds.filter(tool => !out.includes(tool));
 const profile = (name: string, items: string[], switchesPluginItems = true): Profile => ({ id: name, name, items, switchesPluginItems });
 
 test('A switch turns what the profile names On and every other library item Off; an id naming no live item is skipped', () => {
@@ -64,13 +67,131 @@ test('A profile is in use exactly while switching to it would change nothing: tw
   assert.deepEqual([dev, empty, profile('Gone', ['skill:gone', 'skill:loose'])].map(each => switchable(each, live, [])), [true, false, false]);
 });
 
+test('Before a Library click, the profiles in use it would end are worked out from the click’s own changes, by the rule the result says after it', () => {
+  // dev and pager On, notes Off; papa On, placed in Pi by the plugin pi-pack (the profiles name it as its item). Everyday and Also
+  // (which names a deleted item too) both match; Focus, which leaves pager out, doesn't.
+  const library = libraryOf([['skill', 'dev', true], ['skill', 'pager', true], ['skill', 'notes', false], ['skill', 'gone', false, true], ['skill', 'papa', true]]);
+  library.skill.papa!.source = 'pi-pack-id';
+  const home = viewOf({ library, recorded: [{ id: 'pi-pack-id', plugin: 'pi-pack', marketName: 'team-tools', on: true }], rows: { skill: [], mcp: [], agent: [] } });
+  const papa = 'plugin:skill:pi-pack@team-tools/papa';
+  const everyday = profile('Everyday', ['skill:dev', 'skill:pager', papa]), also = profile('Also', ['skill:dev', 'skill:pager', 'skill:gone', papa]);
+  home.profiles!.profiles = [everyday, also, profile('Focus', ['skill:dev', papa])];
+  const ending = (...changes: [string, Partial<Change>][]) => endedByChanges(home, changes.map(([key, change]) => ({ kind: 'skill', change: { key, on: !!library.skill[key]?.on, except: [], ...change } }))).map(each => each.name);
+  assert.deepEqual(inUseInHome(home).map(each => each.name), ['Everyday', 'Also']);
+  assert.deepEqual(ending(['pager', { on: false }]), ['Everyday', 'Also'], 'Off of an item they name ends both: two that match end together');
+  assert.deepEqual(ending(['notes', { on: true }]), ['Everyday', 'Also'], 'On of one they leave out, in every tool');
+  assert.deepEqual(ending(['notes', { on: true, except: ['copilot-cli', 'codex-cli'] }]), ['Everyday', 'Also'], 'or in one tool only (libraryrow.ts rowClicks.onOnly)');
+  assert.deepEqual(ending(['loose', { on: true }]), ['Everyday', 'Also'], 'a found item taken in comes in On');
+  assert.deepEqual(ending(['gone', { on: true }]), [], 'an item deleted before, added again, comes in On: Also names it and stays in use, so none is ended');
+  assert.deepEqual(ending(['pager', { deleted: true }]), [], 'Delete of an item they name leaves both matching what is left');
+  assert.deepEqual(ending(['dev', {}], ['notes', { on: false }], ['pager', { except: ['codex-cli'] }]), [], 'changes that leave each On or Off as it is (a no-op, a tool kept out) end none');
+  assert.deepEqual(ending(['papa', { on: false }]), ['Everyday', 'Also'], 'Off of the item papa is placed from turns the plugin’s copy off, which they name');
+  assert.deepEqual(ending(['papa', { on: true }]), [], 'and On of it, on already, changes nothing: it is never taken for a found one of his');
+  assert.deepEqual(ending(['pager', { on: false }], ['pager', { on: true }]), [], 'later changes of one click apply over earlier ones');
+  home.profiles!.profiles = [everyday];
+  assert.deepEqual(ending(['gone', { on: true }]), ['Everyday'], 'with Everyday alone in use, the deleted item added again ends it');
+  home.profiles!.profiles = [profile('Focus', ['skill:dev', papa])];
+  assert.deepEqual(ending(['pager', { on: false }]), [], 'with no profile in use before, none is ended, whichever comes into use');
+});
+
+test('Deleting his server ends a profile that names only it, where a plugin’s server of its name in Copilot CLI was on only by it: said after the click, and forecast before', () => {
+  const kit: InstalledPlugin = { tool: 'copilot-cli', plugin: 'kit', marketName: 'team', listed: true, items: [{ kind: 'mcp', name: 'issues', description: '' }] };
+  const home = (deleted: boolean) => viewOf({ library: libraryOf([['mcp', 'issues', true, deleted]]), rows: { skill: [], mcp: [row('issues')], agent: [] }, installed: [kit], tools: ['copilot-cli'] });
+  const before = home(false), after = home(true), mine = profile('Mine', ['mcp:issues']);
+  before.profiles!.profiles = after.profiles!.profiles = [mine];
+  assert.deepEqual(inUseInHome(before), [mine], 'kit’s issues is on by his issues’s name (copilotKeptOnBy own)');
+  assert.deepEqual(endedProfiles(inUseInHome(before), inUseInHome(after)), [mine], 'the result after the Delete: kit’s issues is on for no one Mine names');
+  const ending = (change: Partial<Change>) => endedByChanges(before, [{ kind: 'mcp', change: { key: 'issues', on: true, except: [], ...change } }]);
+  assert.deepEqual([ending({ deleted: true }), ending({ except: ['copilot-cli'] }), ending({ except: ['claude-cli'] })], [[mine], [mine], []], 'forecast for the Delete, and for keeping it out of Copilot CLI; not of another tool');
+});
+
 test('The Undo of a switch turns back each item still as the switch left it, decided from each item now', () => {
   const entry = { profile: { toName: 'Dev', on: [{ id: 'mcp:docs', name: 'docs' }], off: [{ id: 'skill:pager', name: 'pager' }, { id: 'skill:notes', name: 'notes' }, { id: 'agent:gone', name: 'gone' }] } };
   // Since the switch: pager was turned back on by hand, docs was turned off by hand, and agent gone was deleted.
   const live = liveItems(libraryOf([['skill', 'pager', true], ['skill', 'notes', false], ['mcp', 'docs', false], ['agent', 'gone', false, true]]), new Set());
   const back = undoPlan(entry, live);
   assert.deepEqual([ids(back.on), ids(back.off)], [['skill:notes'], []]);
-  assert.deepEqual(undoPlan({ profile: { toName: 'Old' } }, live), { on: [], off: [] }, 'an entry from before profiles were sets of items has nothing to undo');
+  assert.deepEqual(undoPlan({ profile: { toName: 'Old' } }, live), { on: [], off: [], except: [] }, 'an entry from before profiles were sets of items has nothing to undo');
+});
+
+test('Where switching to a profile keeps an item out (effectiveOut): with neither field, nowhere of its own (the Library’s keep-outs stand); else the tools outside its `tools`, and its `out` for the item', () => {
+  const everyday = profile('Everyday', ['skill:dev', 'skill:pager']), dev = { id: 'skill:dev', except: [] }, pager = { id: 'skill:pager', except: [] };
+  assert.equal(effectiveOut(everyday, dev), undefined);
+  const twoTools = harnessIds.filter(tool => tool !== 'copilot-cli' && tool !== 'pi-cli');
+  assert.deepEqual(effectiveOut({ ...everyday, tools: twoTools }, dev), ['copilot-cli', 'pi-cli'], '`tools` only: out of the unticked tools');
+  assert.deepEqual([effectiveOut({ ...everyday, out: { 'skill:dev': ['codex-cli'] } }, dev), effectiveOut({ ...everyday, out: { 'skill:dev': ['codex-cli'] } }, pager)],
+    [['codex-cli'], []], '`out` only: its own entry, and an item with none in every tool');
+  assert.deepEqual(effectiveOut({ ...everyday, tools: twoTools, out: { 'skill:dev': ['codex-cli', 'pi-cli'] } }, dev), ['copilot-cli', 'codex-cli', 'pi-cli'], 'both: each tool once, in tool order');
+  // Only the tools its kind is managed in are the profile's: Pi, not managed here, keeps the Library's keep-out, and Copilot CLI's none.
+  const managedTwo = { ...dev, except: ['pi-cli' as const], managed: ['claude-cli', 'codex-cli'] as HarnessId[] };
+  assert.deepEqual([effectiveOut({ ...everyday, tools: ['claude-cli'] }, managedTwo), effectiveOut({ ...everyday, tools: without('pi-cli', 'copilot-cli') }, managedTwo)],
+    [['codex-cli', 'pi-cli'], ['pi-cli']]);
+  // An untick leaves out that one tool, every other (managed now or later) still in; a tick puts it back.
+  assert.deepEqual([withTool(everyday, 'codex-cli', false), withTool({ ...everyday, tools: without('codex-cli') }, 'codex-cli', true)], [without('codex-cli'), [...without('codex-cli'), 'codex-cli']]);
+});
+
+test('In use compares keep-outs for a profile that holds them: a keep-out made by hand on the Library ends a format 4 profile’s use, and leaves a format 3 one in use; a tool not managed counts for neither', () => {
+  const library = libraryOf([['skill', 'dev', true], ['skill', 'pager', false]]);
+  library.skill.dev!.except = ['codex-cli'];
+  const live = liveItems(library, new Set());
+  const older = profile('Everyday', ['skill:dev']), owns: Profile = { ...profile('Focused', ['skill:dev']), out: {} };
+  assert.deepEqual(inUse([older, owns], live, []).map(each => each.name), ['Everyday']);
+  const plan = switchPlan(owns, live);
+  assert.deepEqual([ids(plan.on), ids(plan.off), plan.except.map(turn => [turn.item.id, turn.to])], [[], [], [['skill:dev', []]]]);
+  assert.deepEqual(inUse([{ ...owns, out: { 'skill:dev': ['codex-cli'] } }], live, []).map(each => each.name), ['Focused'], 'its own keep-out, the same one');
+  // Pi unticked in the profile while Pi is not managed: nothing would be written there, so it is in use and counts no change.
+  const managed = live.map(item => ({ ...item, managed: ['claude-cli', 'codex-cli'] as HarnessId[] })), noPi: Profile = { ...owns, tools: without('pi-cli'), out: { 'skill:dev': ['codex-cli'] } };
+  assert.deepEqual([inUse([noPi], managed, []).length, listedChanges(noPi, managed, []).retooled], [1, []]);
+  // Said before a Library click as after it: keeping dev out of Pi ends a profile that holds its keep-outs.
+  const home = viewOf({ library: libraryOf([['skill', 'dev', true]]), rows: { skill: [row('dev')], mcp: [], agent: [] } });
+  home.profiles.profiles = [{ ...profile('Focused', ['skill:dev']), out: {} }];
+  assert.deepEqual(endedByChanges(home, [{ kind: 'skill', change: { key: 'dev', on: true, except: ['pi-cli'] } }]).map(each => each.name), ['Focused']);
+});
+
+test('A switch that changes where items are says so from one list: the header’s clause, a row under Changes tools saying where, a row turning on where it won’t be, the menus’ card, and History’s line after', () => {
+  const library = libraryOf([['skill', 'dev', true], ['skill', 'pager', true], ['skill', 'notes', false], ['skill', 'old', true]]);
+  library.skill.pager!.except = ['codex-cli'];
+  library.skill.notes!.except = ['pi-cli'];
+  const live = liveItems(library, new Set());
+  assert.deepEqual(listedChanges(profile('Plain', ['skill:notes']), live, []).on, [{ id: 'skill:notes', said: 'Turns on, not in Pi' }], 'the Library’s keep-out, for a profile with neither field');
+  const noCodex: Profile = { ...profile('Focused', ['skill:dev', 'skill:pager', 'skill:notes']), tools: without('codex-cli'), out: {} };
+  const listed = listedChanges(noCodex, live, []);
+  assert.deepEqual([listed.on, listed.off, listed.retooled], [[{ id: 'skill:notes', said: 'Turns on, not in Codex' }], [{ id: 'skill:old', said: 'Turns off' }], [{ id: 'skill:dev', said: 'Out of Codex' }]],
+    'pager is out of Codex already; notes turns on out of Codex, counted once, as on');
+  const words = switchPreview(noCodex, live, []);
+  assert.deepEqual([words.line, words.card], ['Switching turns 1 on, 1 off · 1 out of Codex', 'Switching turns 1 item on and 1 off. 1 item out of Codex'], 'the rows’ own words');
+  const four: Profile = { ...noCodex, tools: ['claude-cli'], out: { 'skill:pager': [] } };
+  assert.deepEqual(listedChanges(four, live, []).retooled, [{ id: 'skill:dev', said: 'Out of 5 tools', full: 'Out of Copilot CLI, Codex, Pi, OpenCode and Antigravity' },
+    { id: 'skill:pager', said: 'Out of 4 tools', full: 'Out of Copilot CLI, Pi, OpenCode and Antigravity' }]);
+  assert.equal(switchPreview(four, live, []).line, 'Switching turns 1 on, 1 off · 2 change tools', 'they leave different tools: counted');
+  const back: Profile = { ...profile('Back', ['skill:pager']), out: {} };
+  assert.deepEqual([listedChanges(back, live, []).retooled, switchPreview(back, live, []).line], [[{ id: 'skill:pager', said: 'Back in Codex' }], 'Switching turns 2 off · 1 changes tools']);
+  assert.equal(switchPreview({ ...back, items: ['skill:pager', 'skill:dev', 'skill:old'] }, live, []).line, 'Switching · 1 changes tools');
+  const entry = { toName: 'Focused', on: [{ id: 'skill:notes', name: 'notes' }], off: [], except: [{ id: 'skill:dev', name: 'dev', wasExcept: [], nowExcept: ['codex-cli' as const] },
+    { id: 'skill:pager', name: 'pager', wasExcept: [], nowExcept: ['codex-cli' as const] }, { id: 'skill:notes', name: 'notes', wasExcept: ['pi-cli' as const], nowExcept: ['codex-cli' as const] }] };
+  assert.deepEqual(entryTurns(entry).retooled, entry.except.slice(0, 2), 'notes, turned on, is counted as on');
+  assert.deepEqual([changeWords(entryTurns(entry), { on: 0, off: 0 }, 'did'), changeWords({ on: [], off: [], retooled: [entry.except[0]!, { wasExcept: ['codex-cli'], nowExcept: [] }] }, { on: 0, off: 0 }, 'did')],
+    ['1 item turned on. 2 items now out of Codex', '2 items changed tools']);
+  assert.deepEqual([filledWords(['Everyday']), filledWords(['Everyday', 'Incident']), filledWords(['Everyday', 'Incident', 'Writing'])], [
+    'Saved. Nothing in your tools changed. Switching back to Everyday still puts each item where it is now.',
+    'Saved. Nothing in your tools changed. Switching back to Everyday or Incident still puts each item where it is now.',
+    'Saved. Nothing in your tools changed. Switching back to your other profiles still puts each item where it is now.'], 'what the first save says of the profiles it filled in');
+  assert.deepEqual([toolsOf(noCodex, ['claude-cli', 'codex-cli', 'pi-cli']), toolsOf(back, ['claude-cli', 'codex-cli'])], [['claude-cli', 'pi-cli'], ['claude-cli', 'codex-cli']],
+    'the managed tools a profile applies to, as its Tools strip ticks them and the list counts them');
+});
+
+test('A switch is planned against where it leaves things: an On server Copilot CLI blocks is not turned on there by a profile that keeps it out of Copilot CLI, and a server of his of a plugin’s name keeps that name on there only where the profile will have it', () => {
+  const library = libraryOf([['mcp', 'issues', true]]);
+  const blocked = liveItems(library, new Set()).map(item => ({ ...item, copilotOff: 'issues' }));
+  const noCopilot: Profile = { ...profile('Quiet', ['mcp:issues']), tools: without('copilot-cli'), out: {} };
+  const plan = switchPlan(noCopilot, blocked);
+  assert.deepEqual([ids(plan.on), listedChanges(noCopilot, blocked, []).retooled.map(row => row.said)], [[], ['Out of Copilot CLI']], 'its off-switch is left, and it leaves Copilot CLI');
+  assert.deepEqual(ids(switchPlan(profile('Old', ['mcp:issues']), blocked).on), ['mcp:issues'], 'a profile with neither field clears it, as before');
+  const copy: PluginCopy = { tool: 'copilot-cli', on: false, way: 'switch', target: { libraryKey: 'x' }, sharesWith: { own: ['mcp:issues'], plugins: [], out: [] } };
+  const item = { id: 'plugin:mcp:docs@team/issues' }, his = profile('Mine', ['mcp:issues']);
+  assert.deepEqual([copilotKeptOnBy(his, item, copy), copilotKeptOnBy({ ...his, out: { 'mcp:issues': ['copilot-cli'] } }, item, copy)], [{ by: 'own' }, undefined], 'his own, kept out of Copilot CLI by the profile, keeps nothing on there');
+  const keptOutNow = { ...copy, sharesWith: { own: ['mcp:issues'], plugins: [], out: ['mcp:issues'] } };
+  assert.deepEqual([copilotKeptOnBy(his, item, keptOutNow), copilotKeptOnBy({ ...his, out: {} }, item, keptOutNow)], [undefined, { by: 'own' }], 'kept out now: as now with neither field, let in by one that holds them');
 });
 
 /** A plugin as the home records it (pluginrecord.ts PluginEntry), as the view carries it. */
@@ -172,6 +293,15 @@ test('A copy Pi edited, let go of its plugin, is the person’s own item: the pl
   assert.deepEqual([pluginPlan(work, pluginLive(piOnly)), pluginItemsAgree(work, pluginLive(piOnly))], [[], true], 'dormant: nothing to plan, nothing against it');
   // Where Codex still has the plugin installed, the plugin's item is Codex's alone.
   assert.deepEqual(copiesIn(docsHome([docsIn('codex-cli')], [{ key: 'pdf-reader', on: true, source: undefined }]))[pdfId], ['codex-cli on']);
+});
+
+test('A profile applies to its tools for a plugin’s items too: a tool it leaves unticked gets no switch of theirs, and its copy there agrees whatever it is', () => {
+  const after = docsHome([docsIn('claude-cli'), docsIn('codex-cli', { skillsOff: ['pdf-reader'] })], [{ key: 'pdf-reader', on: false }, { key: 'spreadsheet', on: true }]);
+  const noCodex: Profile = { ...profile('Work', [pdfId, sheetId]), tools: without('codex-cli'), out: {} };
+  assert.deepEqual(pluginPlan(noCodex, pluginLive(after)), [{ id: pdfId, on: ['pi-cli'], off: [], held: [] }], 'Pi turned on, Codex left as it is');
+  // One that ticks none of it would turn the whole plugin off in Claude Code; with Claude Code unticked, it leaves it there.
+  const none = profile('None', ['skill:gone']);
+  assert.deepEqual([wholeTurns(none, pluginLive(after)).length, wholeTurns({ ...none, tools: without('claude-cli') }, pluginLive(after)).length], [1, 0]);
 });
 
 test('A plugin’s item has an id of its own form, `plugin:` before its kind, which no item of the person’s own can have, whatever its name holds', () => {
@@ -287,9 +417,9 @@ test('A switch’s count takes each plugin’s item once however many tools turn
   assert.deepEqual(plan.map(each => [each.id, each.on, each.off]), [[pdfId, [], ['codex-cli', 'pi-cli']], [sheetId, ['codex-cli'], []]]);
   assert.equal(turnsWords(allTurns(switchPlan(sheets, homeItems(home)), plan), 'will'), 'turns 1 item on and 1 off');
   const off = docsHome([docsIn('codex-cli', { off: true })]);
-  assert.deepEqual(allTurns(switchPlan(profile('Docs', [pdfId]), homeItems(off)), pluginPlan(profile('Docs', [pdfId]), pluginLive(off))), { on: [], off: [] });
+  assert.deepEqual(allTurns(switchPlan(profile('Docs', [pdfId]), homeItems(off)), pluginPlan(profile('Docs', [pdfId]), pluginLive(off))), { on: [], off: [], retooled: [] });
   const held = docsHome([docsIn('codex-cli', { switchesHeld: 'Codex’s config.toml writes skills.config as a value.' })]), none = profile('None', ['skill:gone']);
-  assert.deepEqual(allTurns(switchPlan(none, homeItems(held)), pluginPlan(none, pluginLive(held))), { on: [], off: [] }, 'held on, a profile that leaves them out turns none off');
+  assert.deepEqual(allTurns(switchPlan(none, homeItems(held)), pluginPlan(none, pluginLive(held))), { on: [], off: [], retooled: [] }, 'held on, a profile that leaves them out turns none off');
 });
 
 test('The Undo of a switch turns back each plugin copy still as the switch left it and still the plugin’s; one changed since, or let go, is left', () => {
@@ -299,7 +429,7 @@ test('The Undo of a switch turns back each plugin copy still as the switch left 
   const home = docsHome([docsIn('claude-cli'), docsIn('codex-cli')], [{ key: 'pdf-reader', on: false }, { key: 'spreadsheet', on: false, source: undefined }]);
   const { back, left } = pluginUndo(entry, pluginLive(home));
   assert.deepEqual([back.map(turn => [turn.item.id, turn.copy.tool, turn.on]), left.map(({ copy, why }) => [copy.name, copy.tool, why])], [[[pdfId, 'pi-cli', true]], [['pdf-reader', 'codex-cli', 'changed since the switch'], ['spreadsheet', 'pi-cli', 'changed since the switch']]]);
-  assert.deepEqual(undoTurns(entry, homeItems(home), pluginLive(home)), { on: [{ id: pdfId, on: true }], off: [] });
+  assert.deepEqual(undoTurns(entry, homeItems(home), pluginLive(home)), { on: [{ id: pdfId, on: true }], off: [], retooled: [] });
   assert.equal(turnsWords(entryTurns(entry.profile), 'did'), '2 items turned off', 'History says what the switch did, each item once');
   // The whole plugin turned off in Codex since: off there, as the switch left it, but no switch of that one item can put it back
   // (its click would turn the plugin on), so it is left.
@@ -557,7 +687,7 @@ test('Which profile is in use follows the library: Delete, a hand click, an item
     await applySkills(box.context, box.tools, []);
     assert.equal(await name(), 'No profile', 'a copy deleted by hand turns its item Off');
     // A profiles file this Central Knot can't use is reported and never written.
-    for (const file of ['{ not json', '{ "formatVersion": 4, "profiles": [] }']) {
+    for (const file of ['{ not json', '{ "formatVersion": 5, "profiles": [] }']) {
       await writeFile(join(box.home, '.central-knot/profiles.json'), file);
       assert.ok((await readProfiles(box.home)).problem);
       assert.ok((await saveProfile(box.context, { name: 'Other' })).problem);
@@ -590,6 +720,219 @@ test('Profiles save only the fields given, a deleted one comes back with its id,
     const resumeFirst = await switchProfile({ ...box.context, settingsPath: join(box.home, 'elsewhere.json') }, box.tools, dev, NO_PLUGINS);
     assert.match(resumeFirst.stopped ?? '', /no memory of it.*Nothing was switched\./);
     assert.deepEqual([(await history(box)).length, (await live(box)).find(item => item.key === 'pager')?.on], [count, true]);
+  } finally { await box.cleanup(); }
+});
+
+// ---------- Which tools a profile applies to, on real files ----------
+
+const profilesFile = async (box: Box) => JSON.parse((await text(box, '.central-knot/profiles.json'))!) as { formatVersion: number; profiles: Profile[] };
+/** Each live item's keep-outs now, by id. */
+const keptOut = async (box: Box) => Object.fromEntries((await live(box)).map(item => [item.id, item.except]));
+
+test('His worked example: an older profile opened, shown, ticked and saved keeps its meaning, and the first save of a Tools untick fills each profile in from the Library and says which', async () => {
+  const { box, profiles } = await home();
+  try {
+    // (1) Saved by the build before: Everyday has all four items; in the Library, pager is kept out of Codex by hand.
+    const all = ['skill:dev', 'skill:pager', 'mcp:sentry', 'agent:writer'];
+    const format3 = `${JSON.stringify({ formatVersion: 3, profiles: [{ id: 'everyday', name: 'Everyday', items: all, switchesPluginItems: true },
+      { id: 'focused', name: 'Focused coding', items: ['skill:dev', 'skill:pager'], switchesPluginItems: true }] }, null, 2)}\n`;
+    await writeFile(join(box.home, '.central-knot/profiles.json'), format3);
+    await applySkills(box.context, box.tools, [{ key: 'pager', on: true, except: ['codex-cli'], seenOn: true }]);
+    // (2) Opened: read as it is with nothing written, every tool ticked; it follows the Library, so it stays in use.
+    const view = await homeNow(box), everyday = view.profiles.profiles[0]!;
+    assert.deepEqual([everyday, toolsOf(everyday, box.tools)], [{ id: 'everyday', name: 'Everyday', items: all, switchesPluginItems: true }, box.tools]);
+    assert.deepEqual([switchPreview(everyday, homeItems(view), []).line, await text(box, '.central-knot/profiles.json')], ['In use · 4 on', format3]);
+    // (3) Copilot CLI unticked in Focused coding: the first write of format 4, which first fills in each profile from the
+    // Library's keep-outs for its ticked items, and says which others it filled in.
+    const saved = await saveProfile(box.context, { id: 'focused', tools: without('copilot-cli') });
+    const everydayNow = { ...everyday, out: { 'skill:pager': ['codex-cli'], 'mcp:sentry': ['copilot-cli'] } };
+    const focusedNow = { id: 'focused', name: 'Focused coding', items: ['skill:dev', 'skill:pager'], switchesPluginItems: true, tools: without('copilot-cli'), out: { 'skill:pager': ['codex-cli'] } };
+    assert.deepEqual([saved.filled, await profilesFile(box)], [['Everyday'], { formatVersion: 4, profiles: [everydayNow, focusedNow] }]);
+    assert.deepEqual(inUse(await profiles(), await live(box), []).map(each => each.name), ['Everyday'], 'it means the same');
+    // (4) Saved again, a rename and a tick: format 4, both fields carried, nothing more filled in.
+    assert.equal((await saveProfile(box.context, { id: 'everyday', name: 'Every day' })).filled, undefined);
+    await saveProfile(box.context, { id: 'everyday', items: all.slice(0, 3) });
+    assert.deepEqual(await profilesFile(box), { formatVersion: 4, profiles: [{ ...everydayNow, name: 'Every day', items: all.slice(0, 3) }, focusedNow] });
+  } finally { await box.cleanup(); }
+});
+
+test('A → B → A returns every item’s keep-outs exactly, and the Undo of a switch to Claude Code alone puts every item back in every tool', async () => {
+  const { box, made, profiles } = await home();
+  try {
+    await applySkills(box.context, box.tools, [{ key: 'pager', on: true, except: ['codex-cli'], seenOn: true }]);
+    const before = await everything(box, ['dev', 'pager'], ['sentry']), keptBefore = await keptOut(box);
+    const all = ['skill:dev', 'skill:pager', 'mcp:sentry', 'agent:writer'];
+    const everyday = await made('Everyday', all), claudeOnly = await made('Claude only', all);
+    assert.deepEqual((await saveProfile(box.context, { id: claudeOnly, tools: without('copilot-cli', 'codex-cli') })).filled, ['Everyday']);
+    assert.deepEqual(inUse(await profiles(), await live(box), []).map(each => each.name), ['Everyday']);
+    // B: every item out of Copilot CLI and Codex, in one History entry with what each was kept out of before; Claude Code as it was.
+    const switched = await switchProfile(box.context, box.tools, claudeOnly, NO_PLUGINS);
+    assert.deepEqual([switched.stopped, switched.on, switched.off, names(switched.retooled ?? [])], [undefined, [], [], ['dev', 'pager', 'sentry', 'writer']]);
+    const entry = (await history(box)).find(each => each.id === switched.event)!.profile!;
+    const both = ['copilot-cli', 'codex-cli'];
+    assert.deepEqual(entry.except?.map(each => [each.name, each.wasExcept, each.nowExcept]), [['dev', [], both], ['pager', ['codex-cli'], both], ['sentry', ['copilot-cli'], both], ['writer', [], both]]);
+    const after = await everything(box, ['dev', 'pager'], ['sentry']);
+    assert.deepEqual([after.skills['claude-cli/dev'], after.skills['claude-cli/pager'], after.servers.sentry!['claude-cli'], after.agents[0]],
+      [before.skills['claude-cli/dev'], before.skills['claude-cli/pager'], before.servers.sentry!['claude-cli'], before.agents[0]]);
+    assert.deepEqual([after.skills['copilot-cli/dev'], after.skills['codex-cli/dev'], after.skills['codex-cli/pager'], after.servers.sentry!['codex-cli'].entry, after.agents[1], after.agents[2]],
+      [undefined, undefined, undefined, undefined, undefined, undefined]);
+    assert.deepEqual(inUse(await profiles(), await live(box), []).map(each => each.name), ['Claude only']);
+    // A again: every keep-out and every file as before.
+    const back = await switchProfile(box.context, box.tools, everyday, NO_PLUGINS);
+    assert.deepEqual([names(back.retooled ?? []), await keptOut(box), await everything(box, ['dev', 'pager'], ['sentry'])], [['dev', 'pager', 'sentry', 'writer'], keptBefore, before]);
+    // B again, then its Undo: the same, each item with its own entry naming every tool it is back in.
+    const again = await switchProfile(box.context, box.tools, claudeOnly, NO_PLUGINS), count = (await history(box)).length;
+    const undone = await undoSwitch(box.context, box.tools, again.event!, NO_PLUGINS);
+    assert.deepEqual([undone.stopped, names(undone.switched?.retooled ?? [])], [undefined, ['dev', 'pager', 'sentry', 'writer']]);
+    assert.deepEqual([await keptOut(box), await everything(box, ['dev', 'pager'], ['sentry'])], [keptBefore, before]);
+    assert.deepEqual((await history(box)).slice(count).map(each => [each.item, each.kind, each.only, each.exceptOnly, each.nowExcept]),
+      [['dev', 'on', undefined, true, []], ['pager', 'on', 'copilot-cli', undefined, undefined], ['sentry', 'on', 'codex-cli', undefined, undefined], ['writer', 'on', undefined, true, []]],
+      'back in two tools, one entry naming both; back in one, as a single tool’s');
+    assert.match((await undoSwitch(box.context, box.tools, again.event!, NO_PLUGINS)).stopped ?? '', /nothing to undo/);
+  } finally { await box.cleanup(); }
+});
+
+test('The Undo of a switch puts back the tools of each item still as the switch left them, and names the rest', async () => {
+  const { box, made } = await home();
+  try {
+    const all = ['skill:dev', 'skill:pager'];
+    await made('Everyday', all);
+    const noCodex = await made('No Codex', all);
+    await saveProfile(box.context, { id: noCodex, tools: without('codex-cli') });
+    const switched = await switchProfile(box.context, box.tools, noCodex, NO_PLUGINS);
+    assert.deepEqual(names(switched.retooled ?? []), ['dev', 'pager']);
+    // Since then, by hand: pager let back into Codex.
+    await applySkills(box.context, box.tools, [{ key: 'pager', on: true, except: [], seenOn: true }]);
+    const undone = await undoSwitch(box.context, box.tools, switched.event!, NO_PLUGINS);
+    assert.deepEqual([names(undone.switched?.retooled ?? []), undone.switched?.since, (await keptOut(box))['skill:dev']], [['dev'], ['pager’s tools, changed since the switch'], []]);
+  } finally { await box.cleanup(); }
+});
+
+test('A switch keeps a tool choice he made on an item it turns On: its Undo turns the item Off kept out where it was, so the Library’s next On leaves it out there', async () => {
+  const { box, made } = await home();
+  try {
+    const everyday = await made('Everyday', ['skill:dev', 'skill:pager', 'mcp:sentry', 'agent:writer']);
+    await saveProfile(box.context, { id: everyday, tools: without() });
+    // Since, by hand: pager kept out of Codex, then turned Off.
+    await applySkills(box.context, box.tools, [{ key: 'pager', on: true, except: ['codex-cli'], seenOn: true }]);
+    await applySkills(box.context, box.tools, [{ key: 'pager', on: false, except: ['codex-cli'], seenOn: true }]);
+    const switched = await switchProfile(box.context, box.tools, everyday, NO_PLUGINS);
+    assert.deepEqual([switched.on, (await keptOut(box))['skill:pager'], !!(await bytes(folderOf(box, 'codex-cli', 'pager')))], [['pager'], [], true], 'Everyday has pager in every tool');
+    assert.deepEqual((await history(box)).find(each => each.id === switched.event)?.profile?.except, [{ id: 'skill:pager', name: 'pager', wasExcept: ['codex-cli'], nowExcept: [] }]);
+    await undoSwitch(box.context, box.tools, switched.event!, NO_PLUGINS);
+    assert.deepEqual((await keptOut(box))['skill:pager'], ['codex-cli'], 'Off again, kept out of Codex as he left it');
+    await applySkills(box.context, box.tools, [{ key: 'pager', on: true, except: ['codex-cli'], seenOn: false }]);
+    assert.deepEqual([!!(await bytes(folderOf(box, 'claude-cli', 'pager'))), await bytes(folderOf(box, 'codex-cli', 'pager'))], [true, undefined]);
+    // Switched again (dev and pager off by then), then pager kept out of Copilot CLI by hand: the Undo turns dev back off, and
+    // leaves pager On as he left it, Codex's copy kept, and names it.
+    await applySkills(box.context, box.tools, [{ key: 'pager', on: false, except: ['codex-cli'], seenOn: true }, { key: 'dev', on: false, except: [], seenOn: true }]);
+    const again = await switchProfile(box.context, box.tools, everyday, NO_PLUGINS);
+    await applySkills(box.context, box.tools, [{ key: 'pager', on: true, except: ['copilot-cli'], seenOn: true }]);
+    const undone = await undoSwitch(box.context, box.tools, again.event!, NO_PLUGINS);
+    assert.deepEqual([undone.switched?.off, undone.switched?.since, (await keptOut(box))['skill:pager'], !!(await bytes(folderOf(box, 'codex-cli', 'pager')))],
+      [['dev'], ['pager’s tools, changed since the switch'], ['copilot-cli'], true]);
+  } finally { await box.cleanup(); }
+});
+
+test('An item ticked into a profile that holds its own keep-outs takes the Library’s keep-outs for it: Start from what’s on now on a new profile, and a tick on an older one, are in use at once', async () => {
+  const { box, made, profiles } = await home();
+  try {
+    const dev = await made('Dev', ['skill:dev']);
+    await saveProfile(box.context, { id: dev, tools: without() });
+    await applySkills(box.context, box.tools, [{ key: 'pager', on: true, except: ['codex-cli'], seenOn: true }]);
+    const now = await made('Now', []);
+    await saveProfile(box.context, { id: now, items: ['skill:dev', 'skill:pager', 'mcp:sentry', 'agent:writer'] });
+    await saveProfile(box.context, { id: dev, items: ['skill:dev', 'skill:pager', 'mcp:sentry', 'agent:writer'] });
+    const stored = await profilesFile(box);
+    assert.deepEqual(stored.profiles.map(each => [each.name, each.out]), [['Dev', { 'skill:pager': ['codex-cli'], 'mcp:sentry': ['copilot-cli'] }], ['Now', { 'skill:pager': ['codex-cli'], 'mcp:sentry': ['copilot-cli'] }]]);
+    assert.deepEqual(inUse(await profiles(), await live(box), []).map(each => each.name), ['Dev', 'Now']);
+    // Unticked, pager keeps its keep-out in the profile, so a later tick puts it back where it was.
+    await saveProfile(box.context, { id: dev, items: ['skill:dev', 'mcp:sentry', 'agent:writer'] });
+    assert.deepEqual((await profilesFile(box)).profiles[0]!.out, { 'skill:pager': ['codex-cli'], 'mcp:sentry': ['copilot-cli'] });
+  } finally { await box.cleanup(); }
+});
+
+test('The page and the switch decide the same tools for each kind: with Antigravity unticked, an agent (Antigravity holds none) keeps its keep-outs, and the result says what the preview did', async () => {
+  const { box, made } = await home();
+  try {
+    const tools = [...box.tools, 'antigravity-cli'] as HarnessId[], id = await made('No Antigravity', ['skill:dev', 'skill:pager', 'mcp:sentry', 'agent:writer']);
+    await saveProfile(box.context, { id, tools: without('antigravity-cli') });
+    const read = await readLibraries(box.context), plan = 'stop' in read ? undefined : liveItems(read.libraries, read.plugins, tools);
+    const preview = listedChanges((await profilesFile(box)).profiles.find(each => each.id === id)!, plan!, []).retooled.map(row => row.id);
+    const switched = await switchProfile(box.context, tools, id, NO_PLUGINS);
+    assert.deepEqual([preview, (switched.retooled ?? []).map(each => each.id), (await keptOut(box))['agent:writer']], [['skill:dev', 'skill:pager', 'mcp:sentry'], ['skill:dev', 'skill:pager', 'mcp:sentry'], []]);
+  } finally { await box.cleanup(); }
+});
+
+test('The Undo of a switch gives an item he turned Off since its keep-outs back, and leaves it Off', async () => {
+  const { box, made } = await home();
+  try {
+    const everyday = await made('Everyday', ['skill:dev', 'skill:pager', 'mcp:sentry', 'agent:writer']);
+    await saveProfile(box.context, { id: everyday, tools: without() });
+    await applySkills(box.context, box.tools, [{ key: 'pager', on: false, except: ['codex-cli'], seenOn: true }]);
+    const switched = await switchProfile(box.context, box.tools, everyday, NO_PLUGINS);
+    await applySkills(box.context, box.tools, [{ key: 'pager', on: false, except: [], seenOn: true }]);
+    await undoSwitch(box.context, box.tools, switched.event!, NO_PLUGINS);
+    const pager = (await live(box)).find(item => item.id === 'skill:pager')!;
+    assert.deepEqual([pager.on, pager.except], [false, ['codex-cli']]);
+  } finally { await box.cleanup(); }
+});
+
+test('The Undo of a switch names an item it turned off that a tool still loads: his own copy, put back by hand where the item is kept out', async () => {
+  const { box, made } = await home();
+  try {
+    await applySkills(box.context, box.tools, [{ key: 'pager', on: false, except: ['codex-cli'], seenOn: true }]);
+    const id = await made('Claude only', ['skill:dev', 'skill:pager', 'mcp:sentry', 'agent:writer']);
+    await saveProfile(box.context, { id, tools: without('codex-cli', 'copilot-cli') });
+    const switched = await switchProfile(box.context, box.tools, id, NO_PLUGINS);
+    await put(box, 'codex-cli', { 'SKILL.md': skillText('Mine.', 'pager') }, [], 'pager');
+    await applySkills(box.context, box.tools, []);
+    await undoSwitch(box.context, box.tools, switched.event!, NO_PLUGINS);
+    const entry = (await history(box)).find(each => each.id === switched.event)!.profile!;
+    assert.deepEqual([leftLoadingAfter(entry, await homeNow(box)), !!(await bytes(folderOf(box, 'codex-cli', 'pager')))], [['pager in Codex, still loading from a copy of yours there'], true]);
+  } finally { await box.cleanup(); }
+});
+
+test('A server Off and blocked in Copilot CLI that a profile keeps out of Copilot CLI turns On elsewhere, its off-switch left there and nothing said of it', async () => {
+  const { box, made } = await home();
+  try {
+    await applyServers(box.context, box.tools, [{ key: 'sentry', on: true, except: [], seenOn: true }]);
+    await applyServers(box.context, box.tools, [{ key: 'sentry', on: false, except: [], seenOn: true }]);
+    await writeFile(join(box.home, SETTINGS['copilot-cli']), `${JSON.stringify({ disabledMcpServers: ['sentry'] }, null, 2)}\n`);
+    const id = await made('Quiet', ['mcp:sentry']);
+    await saveProfile(box.context, { id, tools: without('copilot-cli') });
+    const switched = await switchProfile(box.context, box.tools, id, NO_PLUGINS);
+    assert.deepEqual([switched.on, switched.settingsChanged, JSON.parse((await text(box, SETTINGS['copilot-cli']))!).disabledMcpServers, (await keptOut(box))['mcp:sentry']],
+      [['sentry'], undefined, ['sentry'], ['copilot-cli']]);
+  } finally { await box.cleanup(); }
+});
+
+test('Each writer leaves a format 3 file format 3 (a rename, a delete and its Undo, a plugin’s read renaming an id), and on a format 4 file keeps `tools` and `out`, `out` keyed by the new id', async () => {
+  const { box, made } = await home();
+  const one = async (id: string) => (await profilesFile(box)).profiles.find(each => each.id === id);
+  try {
+    const dev = await made('Dev', ['skill:dev', 'skill:pager']), other = await made('Other', ['skill:dev', 'skill:old']);
+    await saveProfile(box.context, { id: dev, name: 'Dev work' });
+    const gone = (await one(other))!;
+    await deleteProfile(box.context, other);
+    await saveProfile(box.context, { ...gone, restore: true });
+    assert.deepEqual(await profilesNaming(box.context, ['skill:old'], 'skill:new'), ['Other']);
+    assert.deepEqual([(await profilesFile(box)).formatVersion, await one(other)], [3, { ...gone, items: ['skill:dev', 'skill:new'] }]);
+    // Codex unticked in Dev work, with pager kept out of Copilot CLI on the Library: format 4, each profile filled in.
+    await applySkills(box.context, box.tools, [{ key: 'pager', on: true, except: ['copilot-cli'], seenOn: true }]);
+    await saveProfile(box.context, { id: dev, tools: without('codex-cli') });
+    const owned = { id: dev, name: 'Dev work', items: ['skill:dev', 'skill:pager'], switchesPluginItems: true, tools: without('codex-cli'), out: { 'skill:pager': ['copilot-cli'] } };
+    assert.deepEqual([(await profilesFile(box)).formatVersion, await one(dev), (await one(other))?.out], [4, owned, {}]);
+    await saveProfile(box.context, { id: dev, name: 'Dev' });
+    const filled = (await one(other))!;
+    await deleteProfile(box.context, other);
+    assert.deepEqual([(await profilesFile(box)).formatVersion, await one(dev)], [4, { ...owned, name: 'Dev' }]);
+    // Since the delete, dev kept out of Codex by hand: the profile comes back with its own `out`, not one filled in again.
+    await applySkills(box.context, box.tools, [{ key: 'dev', on: true, except: ['codex-cli'], seenOn: true }]);
+    await saveProfile(box.context, { ...filled, restore: true });
+    assert.deepEqual(await one(other), filled, 'Undo of Delete brings its `out` back');
+    assert.deepEqual(await profilesNaming(box.context, ['skill:pager'], 'skill:pager-root'), ['Dev']);
+    assert.deepEqual(await one(dev), { ...owned, name: 'Dev', items: ['skill:dev', 'skill:pager-root'], out: { 'skill:pager-root': ['copilot-cli'] } });
   } finally { await box.cleanup(); }
 });
 
@@ -1838,14 +2181,14 @@ test('Renaming, ticking, or deleting and undoing a non-managing profile keeps it
   } finally { await migrated.cleanup(); }
 });
 
-test('Saving writes format 3 (above format 2), and this reader’s format > FORMAT_VERSION rule refuses a format 4 file without changing a byte', async () => {
+test('Saving writes format 3 (above format 2), and this reader’s format > FORMAT_VERSION rule refuses a format 5 file without changing a byte', async () => {
   const { box } = await home();
   try {
     await saveProfile(box.context, { name: 'Modern', items: ['skill:dev'] });
     const raw = (await text(box, '.central-knot/profiles.json'))!;
     assert.equal(JSON.parse(raw).formatVersion, 3, 'saved in format 3, so a format 2 reader refuses it under format > FORMAT_VERSION');
     // The reader's own format > FORMAT_VERSION check refuses any file saved by a newer format without touching it.
-    const newer = `${JSON.stringify({ formatVersion: 4, profiles: [{ id: 'future', name: 'Future', items: ['skill:dev'], switchesPluginItems: true }] }, null, 2)}\n`;
+    const newer = `${JSON.stringify({ formatVersion: 5, profiles: [{ id: 'future', name: 'Future', items: ['skill:dev'], switchesPluginItems: true }] }, null, 2)}\n`;
     await writeFile(join(box.home, '.central-knot/profiles.json'), newer);
     assert.match((await readProfiles(box.home)).problem ?? '', /saved by a newer Central Knot.*Nothing in it was changed/);
     assert.match((await saveProfile(box.context, { name: 'Other' })).problem ?? '', /saved by a newer Central Knot/);
@@ -2418,7 +2761,7 @@ test('Copilot shared name short 3: History undoTurns uses the same found-entry g
     const now = await sideNow(box);
     const mcp = await serversView(box.context, box.tools);
     const planned = undoTurns(event, now.live, now.plugins, mcp);
-    assert.deepEqual(planned, { on: [], off: [] }, 'History must not offer an Undo that can only leave the off-switch off');
+    assert.deepEqual(planned, { on: [], off: [], retooled: [] }, 'History must not offer an Undo that can only leave the off-switch off');
     const refused = await undoSwitch(box.context, box.tools, event.id, now.side);
     assert.equal(refused.stopped, 'Copilot CLI’s off-switch for “issues” was left off: a server of yours has that name there now.');
   } finally { await box.cleanup(); }
@@ -2480,7 +2823,7 @@ test('A profile switch returns the settled History profile payload, and undoOffe
     const afterCleared = await homeNow();
     assert.equal(undoOffered(cleared, afterCleared), false);
     assert.equal(undoOffered(entry, afterCleared), false);
-    assert.deepEqual(undoInHome(cleared, afterCleared), { on: [], off: [] });
+    assert.deepEqual(undoInHome(cleared, afterCleared), { on: [], off: [], retooled: [] });
     // Failed orphan Copilot CLI clear: settleEntry drops copilotCleared from History and returns that exact payload (no drift).
     await t.test('failed orphan Copilot CLI clear drops copilotCleared from History and result', async () => {
       await writeFile(settingsPath, `${JSON.stringify({ ...JSON.parse((await text(box, '.copilot/settings.json'))!), disabledMcpServers: ['issues'] }, null, 2)}\n`);
