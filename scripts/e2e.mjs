@@ -21,7 +21,7 @@ import { harnessIds } from '../src/harnesses.ts';
 import { managedNow } from '../src/share.ts';
 import { writesRealHome } from '../src/machine.ts';
 import { executableCandidates } from '../src/platform.ts';
-import { STANDARD_BUILD } from '../src/values.ts';
+import { DEBOUNCE_MS, STANDARD_BUILD } from '../src/values.ts';
 import { applySkills } from '../src/skills.ts';
 import { canonicalHome } from '../src/sessionkeep.ts';
 
@@ -765,6 +765,8 @@ async function backPlaceFlow() {
   await sizeTo(a, 860, 600);
   size = '860×600';
   await typeIn('find', '');
+  // Close sample-16 left open by the Files journey above (goAway removes sample-16 on disk, which closes it).
+  if (await a.exists(`#${rowPart('open', 'skills', 'sample-16')}[aria-expanded="true"]`)) await a.click(`#${rowPart('open', 'skills', 'sample-16')}`);
   // Two visits to the Library, each scrolled to a place of its own.
   const first = await scrollTo(library, 300);
   await a.click('#nav-settings');
@@ -787,7 +789,7 @@ async function backPlaceFlow() {
   const readAgain = async count => { await a.click('#header-refresh'); await until(async () => (await rows()) === count || !(await a.exists(`#${library}`))); };
   const goAway = () => { mkdirSync(away, { recursive: true }); for (const name of samples.slice(8)) renameSync(join(P.claude, name), join(away, name)); return readAgain(8); };
   const comeBack = () => { for (const name of samples.slice(8)) renameSync(join(away, name), join(P.claude, name)); return readAgain(42); };
-  const deep = await scrollTo(library, 2400);
+  const deep = await scrollTo(library, 1800);
   await a.click('#nav-settings');
   await goAway();
   await mouse('back');
@@ -22411,12 +22413,14 @@ async function skillFileFlow() {
         await until(() => a.exists(triageBtn));
 
         // Gone plugin root before Refresh: panel says Its file couldn't be read.
-        // Drain the 1.5 s watcher debounce from .copilot/config.json above, pause Automatic sync so main's queued setSync(false)
+        // Drain the watcher debounce (DEBOUNCE_MS) from .copilot/config.json above, pause Automatic sync so main's queued setSync(false)
         // finishes any background pass and the 20 s poll won't run pageSees and drop triage, then wait on a queued call + settle
         // so any owed backgroundRefresh finishes before deleting the folder.
-        const debounceLeft = 2000 - (Date.now() - copilotWrittenAt);
+        const debounceLeft = DEBOUNCE_MS + 500 - (Date.now() - copilotWrittenAt);
         if (debounceLeft > 0) await wait(debounceLeft);
         await a.click('#sync-switch');
+        await until(() => a.exists('#sync-switch[aria-checked="false"]'));
+        same('Automatic sync turns off before deleting the plugin root', await a.run(`document.querySelector('#sync-switch')?.getAttribute('aria-checked')`), 'false');
         await a.run('window.centralKnot.history()');
         await a.settle();
         rmSync(join(home, '.claude/plugins/cache/skill-file-market/issue-tracker/2.1.0'), { recursive: true, force: true });
@@ -22425,6 +22429,8 @@ async function skillFileFlow() {
         same('gone plugin root shows Its file couldn’t be read.', (await a.text('.file-open-box .file-open-state'))?.trim(), 'Its file couldn’t be read.');
         await a.press('Escape');
         await a.click('#sync-switch');
+        await until(() => a.exists('#sync-switch[aria-checked="true"]'));
+        same('Automatic sync turns back on after the gone plugin root check', await a.run(`document.querySelector('#sync-switch')?.getAttribute('aria-checked')`), 'true');
 
         // Reinstall Copilot CLI's copy briefly so we can verify main refuses an unmanaged tool for skillPluginFile below.
         writeCopilotPlugin('1.0.0', { 'skills/triage/SKILL.md': copilotSkill });

@@ -15,6 +15,7 @@ export interface FakeNode {
   addEventListener: () => void;
   replaceChildren: (...kids: unknown[]) => void;
   append: (...kids: unknown[]) => void;
+  after: (...kids: unknown[]) => void;
   focus: () => void;
   scrollTo: () => void;
   click: () => void;
@@ -59,6 +60,7 @@ export const makeElement = (tag = 'div'): FakeNode => {
     append(...kids: unknown[]) {
       this.children.push(...kids);
     },
+    after() {},
     focus() {
       this.focused++;
     },

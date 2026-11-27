@@ -8,7 +8,7 @@
 // a click on an item list goes through the `changes` sanitizer, which must copy each field of types.ts Change. Not here: what a
 // change does (the engines: librarypass.ts and each kind, profiles.ts, sources.ts, gitrepo.ts, instructions.ts, plugins.ts) and
 // what a page shows (from renderer.ts).
-import { jsonObject, onlyAllowed, PRODUCT, record, strings } from './values.ts';
+import { DEBOUNCE_MS, jsonObject, onlyAllowed, PRODUCT, record, strings } from './values.ts';
 import packageInfo from '../package.json' with { type: 'json' };
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, shell, Tray, type MenuItemConstructorOptions } from 'electron';
 import { homedir, hostname, tmpdir } from 'node:os';
@@ -978,7 +978,6 @@ function addCarriedSoon(present: HarnessId[]) {
 
 /** Background passes run through the same queue as the page's requests, one at a time, and tell the page when something changed. */
 const POLL_MS = 20_000;
-const DEBOUNCE_MS = 1_500;
 let watchers: FSWatcher[] = [];
 let poller: NodeJS.Timeout | undefined;
 let soon: NodeJS.Timeout | undefined;
