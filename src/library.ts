@@ -7,8 +7,9 @@
 //   item     What Central Knot holds (LibraryItem): one current version, and On or Off. On: applied to every managed
 //            harness. Off: in no harness; the item, its versions and each harness's own part stay in Central Knot.
 //   harness  A tool Central Knot manages in this home: an installed tool whose Manage switch is on (presence.ts
-//            managedTools). An item's `except` names the harnesses the person keeps it out of: the only thing stored per
-//            harness that a person chose for one item.
+//            managedTools). An item's `except` names the harnesses the person keeps it out of: the only thing the library
+//            stores per harness that a person chose for one item. A profile (profiles.ts) may hold its own for its items
+//            (`tools` and `out`), which a switch to it writes into `except` (profileplan.ts effectiveOut).
 //   apply    Putting the current version into a harness, or taking its copy out. `applied` remembers which version
 //            Central Knot last put or saw in each harness.
 //   version  One content the item has had, with when it was made and where it came from. Every version is kept while the
