@@ -95,6 +95,33 @@ test('Competing edits and a choice among found copies offer each copy that gave 
   assert.equal(offered(chosen, item({ hash: 'x' })), undefined, 'not once it has moved on');
 });
 
+test('A conflict with three or more losing tools formats them through options.tools without formatting unused event.losers', () => {
+  const six = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
+  const multi = entry({
+    kind: 'conflict',
+    winner: { tool: 'codex-cli', hash: 'b' },
+    previous: 'a',
+    losers: [
+      { tool: 'claude-cli', hash: 'a' },
+      { tool: 'copilot-cli', hash: 'x' },
+      { tool: 'pi-cli', hash: 'y' },
+      { tool: 'opencode-cli', hash: 'z' },
+    ],
+  });
+  const calls: string[][] = [];
+  const formatted = librarySentence(multi, libraryWords.agents, six, undefined, false, {
+    row: true,
+    tools: (touched, inHome) => {
+      calls.push(touched);
+      return `[${touched.length}/${inHome.length}]`;
+    },
+  });
+  assert.deepEqual(calls, [['copilot-cli', 'pi-cli', 'opencode-cli']]);
+  assert.equal(formatted?.text, 'Codex’s edit was the latest, so it became the current version. Edits from [3/6] are kept as versions.');
+  assert.equal(librarySentence(multi, libraryWords.agents, six)?.text,
+    'Codex’s edit was the latest, so it became the current version. Edits from Copilot CLI, Pi and OpenCode are kept as versions.');
+});
+
 test('A deletion offers Restore while the agent is deleted; every other entry of a deleted agent offers nothing', () => {
   const deleted = entry({ kind: 'deleted', losers: tools.map(tool => ({ tool: tool as 'claude-cli', hash: 'b' })) });
   const gone = item({ deleted: { at } });

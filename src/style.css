@@ -1209,7 +1209,7 @@ span.ins-confirm { margin-top: 0; }
 .info-box-files strong { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--ink); }
 
 /* ---------- History ---------- */
-/* History's own Keep control (settingspage.ts historyWindowControl): sits above the list or empty state, sharing Settings' warning and outcomes. */
+/* History's own Keep control (settingspage.ts historyWindowControl): sits above the list, empty state or no-managed state, sharing Settings' warning and outcomes. */
 .history-keep { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px var(--pad-end) 4px 16px; }
 .history-keep-row { display: inline-flex; align-items: center; gap: 8px; }
 .history-keep-label { font-size: 12.5px; font-weight: 500; color: var(--ink-soft); }
@@ -1759,10 +1759,11 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 /* A row's question (shortening History): a danger notice under the row's text and control, as wide as its words and buttons
    need (the whole row where the words must wrap), never a mostly empty band. Its buttons follow the words; where they don't
    fit beside them they wrap to the notice's left edge, as a stacked row's control does. */
-.setting-confirm { grid-column: 1 / -1; justify-self: start; width: fit-content; max-width: 100%; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: -4px; }
-.setting-confirm > .icon { align-self: flex-start; margin-top: 2px; }
-.setting-confirm-text { flex: 1 1 200px; min-width: 0; max-width: 72ch; }
-.setting-confirm-actions { display: flex; gap: 8px; }
+.setting-confirm { grid-column: 1 / -1; justify-self: start; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; width: fit-content; max-width: 100%; padding: 10px 12px; border: 1px solid color-mix(in oklab, var(--danger) 28%, var(--line)); border-radius: 8px; background: var(--danger-tint); margin-top: -4px; }
+.setting-confirm-body { display: flex; align-items: flex-start; gap: 8px; flex: 1 1 260px; min-width: 0; }
+.setting-confirm-body > .icon { flex: none; margin-top: 2px; }
+.setting-confirm-text { min-width: 0; max-width: 72ch; }
+.setting-confirm-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 /* The system ignored the person's change: it reads apart from the hints and needs them, without alarm. */
 .setting-attention { color: var(--ink); }
 .setting-attention .icon { color: var(--warning); }

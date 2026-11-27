@@ -17,6 +17,7 @@ export interface FakeNode {
   append: (...kids: unknown[]) => void;
   focus: () => void;
   scrollTo: () => void;
+  scrollIntoView: () => void;
   click: () => void;
   querySelector: (selector: string) => FakeNode | null;
 }
@@ -63,6 +64,7 @@ export const makeElement = (tag = 'div'): FakeNode => {
       this.focused++;
     },
     scrollTo() {},
+    scrollIntoView() {},
     click() {
       if ('disabled' in this.attrs) return;
       this.onclick?.({ stopPropagation() {} });
