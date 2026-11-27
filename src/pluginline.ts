@@ -6,7 +6,8 @@
 // (wholeTurn); where the tool lacks the plugin, whether it may go in is the plugin's box on its own page (pluginstatus.ts boxOf),
 // asked of the Plugins page's view (pluginstate.ts lineBox): no second set of rules here.
 // Elsewhere: the buttons' clicks (pluginstate.ts turnFromLine, a plugin's turn in main), and their result on the line that acted
-// (pluginstate.ts LineResult); the line drawn (matrix.ts pluginLine); which of a library row's lines are a plugin's (matrix.ts
+// (pluginstate.ts LineResult); the line drawn (matrix.ts pluginLine); Profiles' Turn on <plugin> in <Tool>, this rule's let-in asked
+// for a held profile's plugin off in a tool (profilespage.ts wayPast); which of a library row's lines are a plugin's (matrix.ts
 // rowPluginFacts: in a tool that takes plugins and lacks it, and in Pi, OpenCode and Antigravity while the item is Off, where
 // Put its <kinds> here puts them there again after its Undo); and the others, the library's own (libraryrow.ts detailLine).
 import { DIRECTORY, FROM_DIRECTORY, loadsKind, partWords, samePart } from './pluginstatus.ts';
@@ -21,8 +22,8 @@ import type { Components, HarnessId, InstalledPlugin, PartKind, PartRef } from '
  */
 export type LineAct = 'install' | 'place' | 'keep-out' | 'let-in';
 export type LineControl = { control: 'switch'; sentence: string } | { control: 'button'; act: LineAct; label: string; sentence: string; title: string } | { control: 'none'; sentence: string };
-/** A tool's box on the plugin's page, as pluginstatus.ts boxOf answers it: ticked, and off with why. */
-export type LineBox = { ticked: boolean; off?: string };
+/** A tool's box on the plugin's page, as pluginstatus.ts boxOf answers it: ticked, and off with why, and why in short where it has it (`line`). */
+export type LineBox = { ticked: boolean; off?: string; line?: string };
 
 /** What a tool's line is drawn from: the home's view (`through`, `installed`) and the Plugins page's (`box`, `parts`). */
 export interface LineFacts {
