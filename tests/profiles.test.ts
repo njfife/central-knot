@@ -13,7 +13,7 @@ import { readTool, writeEntry } from '../src/mcp.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { hashesOf, libraryWords, sentences } from '../src/libraryrow.ts';
 import { migrateProfiles } from '../src/profilemigrate.ts';
-import { allTurns, changeWords, copilotKeptOnBy, effectiveOut, filledWords, copilotServerName, copilotSharesYours, entryTurns, homeItems, itemRowState, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, listedChanges, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, stillLoadAfter, switchable, switchPlan, switchPreview, takenWhole, turnsWords, undoInHome, undoOffered, undoPlan, undoTurns, wholeSaid, wholeTurns, withCopilotOff, toolsOf, withTool, type Libraries, type PluginHome } from '../src/profileplan.ts';
+import { allTurns, changeWords, copilotKeptOnBy, effectiveOut, filledWords, leftLoadingAfter, copilotServerName, copilotSharesYours, entryTurns, homeItems, itemRowState, pluginItemOn, inUse, inUseName, leftOut, leftOutWords, listedChanges, liveItems, namedCount, PLUGIN_ITEMS_STAY, pluginItemsAgree, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, pluginUndo, stillLoadAfter, switchable, switchPlan, switchPreview, takenWhole, turnsWords, undoInHome, undoOffered, undoPlan, undoTurns, wholeSaid, wholeTurns, withCopilotOff, toolsOf, withTool, type Libraries, type PluginHome } from '../src/profileplan.ts';
 import { NO_PLUGINS, deleteProfile, profilesNaming, readLibraries, readProfiles, saveProfile, saveProfiles, switchProfile, undoSwitch, type PluginSide } from '../src/profiles.ts';
 import { readPluginItems } from '../src/pluginitems.ts';
 import { pluginOnIn } from '../src/pluginrows.ts';
@@ -109,7 +109,9 @@ test('In use compares keep-outs for a profile that holds them: a keep-out made b
 test('A switch that changes where items are says so from one list: the header’s clause, a row under Changes tools saying where, a row turning on where it won’t be, the menus’ card, and History’s line after', () => {
   const library = libraryOf([['skill', 'dev', true], ['skill', 'pager', true], ['skill', 'notes', false], ['skill', 'old', true]]);
   library.skill.pager!.except = ['codex-cli'];
+  library.skill.notes!.except = ['pi-cli'];
   const live = liveItems(library, new Set());
+  assert.deepEqual(listedChanges(profile('Plain', ['skill:notes']), live, []).on, [{ id: 'skill:notes', said: 'Turns on, not in Pi' }], 'the Library’s keep-out, for a profile with neither field');
   const noCodex: Profile = { ...profile('Focused', ['skill:dev', 'skill:pager', 'skill:notes']), tools: without('codex-cli'), out: {} };
   const listed = listedChanges(noCodex, live, []);
   assert.deepEqual([listed.on, listed.off, listed.retooled], [[{ id: 'skill:notes', said: 'Turns on, not in Codex' }], [{ id: 'skill:old', said: 'Turns off' }], [{ id: 'skill:dev', said: 'Out of Codex' }]],
@@ -831,6 +833,21 @@ test('The Undo of a switch gives an item he turned Off since its keep-outs back,
     await undoSwitch(box.context, box.tools, switched.event!, NO_PLUGINS);
     const pager = (await live(box)).find(item => item.id === 'skill:pager')!;
     assert.deepEqual([pager.on, pager.except], [false, ['codex-cli']]);
+  } finally { await box.cleanup(); }
+});
+
+test('The Undo of a switch names an item it turned off that a tool still loads: his own copy, put back by hand where the item is kept out', async () => {
+  const { box, made } = await home();
+  try {
+    await applySkills(box.context, box.tools, [{ key: 'pager', on: false, except: ['codex-cli'], seenOn: true }]);
+    const id = await made('Claude only', ['skill:dev', 'skill:pager', 'mcp:sentry', 'agent:writer']);
+    await saveProfile(box.context, { id, tools: without('codex-cli', 'copilot-cli') });
+    const switched = await switchProfile(box.context, box.tools, id, NO_PLUGINS);
+    await put(box, 'codex-cli', { 'SKILL.md': skillText('Mine.', 'pager') }, [], 'pager');
+    await applySkills(box.context, box.tools, []);
+    await undoSwitch(box.context, box.tools, switched.event!, NO_PLUGINS);
+    const entry = (await history(box)).find(each => each.id === switched.event)!.profile!;
+    assert.deepEqual([leftLoadingAfter(entry, await homeNow(box)), !!(await bytes(folderOf(box, 'codex-cli', 'pager')))], [['pager in Codex, still loading from a copy of yours there'], true]);
   } finally { await box.cleanup(); }
 });
 

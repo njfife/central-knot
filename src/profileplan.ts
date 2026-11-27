@@ -624,6 +624,9 @@ export function stillLoadAfter(entry: NonNullable<HistoryEvent['profile']>, home
   const kept = (items: (LiveItem | PluginLive)[]) => items.filter(item => off.has(item.id)).map(item => keptOn(item, plugs));
   return stillLoadWords(kept(homeItems(home, plugins).filter(item => !item.on)), kept(plugins));
 }
+/** What the Undo of a switch's entry left loading, read from the view after it (`home`): each item it turned on that is Off now and that a tool still loads, by name, where and how. */
+export const leftLoadingAfter = (entry: NonNullable<HistoryEvent['profile']>, home: PluginHome) => homeItems(home).filter(item => !item.on && !!entry.on?.some(each => each.id === item.id))
+  .flatMap(item => { const kept = keptOn(item); return kept.tools.length ? [`${item.name} in ${andList(kept.tools.map(tool => toolNames[tool]))}, still loading ${loadWords([kept])}`] : []; });
 /** The plugins' items a switch's entry turned, each with the tools it turned on and off there (as pluginPlan's turns). */
 const entryPlugs = (entry: NonNullable<HistoryEvent['profile']>) => [...new Set((entry.plugins ?? []).map(copy => copy.id))]
   .map(id => { const copies = entry.plugins!.filter(copy => copy.id === id); return { id, on: copies.filter(copy => copy.on).map(copy => copy.tool), off: copies.filter(copy => !copy.on).map(copy => copy.tool) }; });
@@ -702,7 +705,7 @@ export interface RowChange { id: string; said: string; full?: string }
 /**
  * Each listed row a switch changes, once, in `on` then `off` then `retooled` (`on` before `off`; skills coming on with a plugin
  * in Claude Code turn on; plugin rows follow `listedPlugins`; `retooled`, his items it leaves On kept out elsewhere:
- * toolsChanged) with its cell words (`said`; one of his turning On kept out of a managed tool says where it won't be). The one rule
+ * toolsChanged) with its cell words (`said`; one of his turning On kept out of a managed tool, by the profile or the Library, says where it won't be). The one rule
  * read by `switchPreview`'s short line, `Changes N`, its headings and every row's state cell.
  */
 export function listedChanges(profile: Pick<Profile, 'items' | 'switchesPluginItems' | 'tools' | 'out'>, live: LiveItem[], plugins: PluginLive[],
@@ -712,7 +715,7 @@ export function listedChanges(profile: Pick<Profile, 'items' | 'switchesPluginIt
     return { said, ...(full !== said ? { full } : {}) };
   };
   const on: RowChange[] = turns.on.map(item => {
-    const notIn = (effectiveOut(profile, item) ?? []).filter(tool => !item.managed || item.managed.includes(tool));
+    const notIn = (effectiveOut(profile, item) ?? item.except).filter(tool => !item.managed || item.managed.includes(tool));
     return { id: item.id, ...(notIn.length ? words('Turns on, not in', [], notIn) : { said: 'Turns on' }) };
   });
   const off: RowChange[] = turns.off.map(item => ({ id: item.id, said: 'Turns off' }));
