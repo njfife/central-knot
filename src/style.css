@@ -275,11 +275,11 @@ ul { list-style: none; }
 .band-profile-rest { flex: none; white-space: pre; }
 .header-result:not(.result-whole) .result-row2:has(.band-profile) > .band-lines { flex: 4 1 0; min-width: 48px; }
 .header-result:not(.result-whole) .result-row2:has(.band-profile) > .result-reloads { flex: 1 0 58px; min-width: 0; }
-.reload-list { display: flex; flex-direction: column; gap: 4px; padding: 2px 0 4px 20px; font-size: 12px; line-height: 18px; }
-.reload-fold { padding: 2px 0 2px 20px; }
+.reload-list { display: flex; flex-direction: column; gap: 6px; padding: 2px 0 4px 20px; font-size: 12px; line-height: 18px; }
+.reload-fold { padding: 0 0 0 20px; }
 .reload-fold > summary { font-size: 12px; line-height: 16px; }
-.reload-fold .reload-list { padding: 4px 0 2px 0; }
-.reload-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--ink-soft); }
+.reload-fold .reload-list { padding: 2px 0 2px 0; }
+.reload-row { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; color: var(--ink-soft); }
 .band-done:has(> :is(.reload-list, .reload-fold)) { flex-wrap: wrap; row-gap: 4px; }
 /* Single-action result bands with reload lines or disclosure (every page off the header, excluding .band-two): grid keeps icon,
    wrapped text, Undo and × on row 1 so long text never drops below its icon or orphans × above reloads at 860px. */
