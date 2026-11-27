@@ -11307,7 +11307,9 @@ async function overviewFlow() {
   same('at 860, scrolled to its foot, the file’s last line is whole in its box and in the page', await lastLineWhole(a, `${cardPanel} pre.content`),
     { words: 'Line 60 of Claude Code’s way.', scrolls: true, whole: true });
   await fitsAtMinimum(a, 'the Overview with a most used skill’s file open');
-  // From a lower card at 860: docs' entry opens under MCP servers, brought into view.
+  // From a lower card at 860 (fitsAtMinimum ends at full size): docs' entry opens under MCP servers, brought into view.
+  await sizeTo(a, ...SMALLEST);
+  await a.settle();
   await a.run(`document.querySelector('#overview-scroll').scrollTop = 0`);
   await a.click(fileMark('mcp', 'docs'));
   await panelHolds('"command":"docs"');
