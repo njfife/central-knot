@@ -28,9 +28,6 @@ export const takesItemsOnly = (who: string) => `${who} takes a plugin’s items,
 export function takenItems(tools: HarnessId[], none = tools.filter(tool => !holds(tool, 'agent'))) {
   return `its ${andList(['skills', ...(none.length === tools.length ? [] : [`agents${none.length ? ` (not in ${andList(none.map(tool => names[tool]))})` : ''}`]), 'MCP servers'])}`;
 }
-/** What a native tool's Harnesses → Plugins tab says above its installed plugins: turning on or off and installing elsewhere when writable, or only seeing which tools have it in Preview only. */
-export const pluginsTabNote = (tool: HarnessId, canWrite: boolean) =>
-  `Installed in ${names[tool]} from your marketplaces. Open one to ${canWrite ? 'turn it on or off here, or to install it in another tool.' : 'see which tools have it.'}`;
 
 /**
  * Whether a marketplace's plugin is installed in no tool managed now, so Find may offer its items as ones the person doesn't
@@ -450,6 +447,12 @@ export function updateTools(view: PluginsView, entry: MarketplaceView, plugin: s
  */
 export type ToolMark = 'installed' | 'outdated' | 'items' | 'kept-off' | 'stays' | 'waits' | 'not-brought' | 'missing' | 'parts-waiting' | 'cannot' | 'absent' | 'unknown' | 'not-known';
 
+/** Each mark's short words under a tool's box on a plugin's page and on a tool's Plugins tab (the whole sentence is toolMark's). */
+export const MARK_WORDS: Record<ToolMark, string> = {
+  installed: 'Installed', outdated: 'Installed', items: 'Its items', 'kept-off': 'Off, kept installed', stays: 'Still installed', waits: 'Goes in at the next check', 'not-brought': 'Not brought here: off in a tool’s own settings',
+  missing: 'Not in it, though on', 'parts-waiting': 'Waits to be moved', cannot: 'Not available', absent: 'Not installed', unknown: 'Can’t be read now', 'not-known': 'Unknown',
+};
+
 /**
  * A copy the plugins record keeps installed and off (pluginrecord.ts row 9): the plugin isn't wanted in that tool, and the tool's own
  * switch has it off (`off`). Distinct from the ToolMark `kept-off` below, which marks any installed copy that is `off`, recorded or not.
@@ -606,6 +609,10 @@ export const toolSaid = (tool: HarnessId, words: string) => (words.startsWith(na
 
 /** The marks a tool's box on the plugin's page shows ticked (the plugin is in that tool), and those it can't act on. */
 const TICKED: readonly ToolMark[] = ['installed', 'outdated', 'items', 'stays'], HELD: readonly ToolMark[] = ['cannot', 'unknown', 'not-known', 'parts-waiting'];
+/** Why no plugin switch in this view can write (preview-only home, or a problem with the plugins record). */
+export const viewStopped = (view: Pick<PluginsView, 'canWrite' | 'reason' | 'switchProblem'>) =>
+  !view.canWrite ? view.reason ?? PREVIEW_ONLY : view.switchProblem;
+
 /**
  * A tool's box on the plugin's page (pluginparts.ts toolBox; what a click records: pluginrecord.ts A TOOL'S BOX), from its mark
  * (toolMark): ticked or not; off where it can't act, with why (`off`): its mark held, a copy that can't be changed here
@@ -615,9 +622,9 @@ export function boxOf(view: PluginsView, entry: MarketplaceView, plugin: string,
   const name = names[tool], ticked = TICKED.includes(mark), held = HELD.includes(mark), recorded = entry.switches?.[plugin];
   const kept = !!recorded?.entry?.on && recorded.entry.except.includes(tool);
   const stuck = (ticked || mark === 'kept-off') && takesPlugins(tool) && view.canWrite ? cantUninstall(view, entry, plugin, tool) : undefined;
-  const off = held ? words : stuck ? `${stuck}${ticked && kept ? ` It is kept out of ${name}: uninstall it in ${name} itself, then tick to put it back.` : ''}` : !view.canWrite ? view.reason ?? PREVIEW_ONLY : view.switchProblem;
+  const off = held ? words : stuck ? `${stuck}${ticked && kept ? ` It is kept out of ${name}: uninstall it in ${name} itself, then tick to put it back.` : ''}` : viewStopped(view);
   const line = !held && !stuck ? undefined
     : takesPlugins(tool) && !view.clis[tool] ? `No ${name} command-line tool here` : entry.refusedBy?.[tool] ? `${name} refused this marketplace`
-    : stuck ? (ticked ? 'Can’t be taken out here' : 'Off, kept installed · can’t be changed here') : mark === 'cannot' ? recorded?.tools[tool]?.held ?? unavailable(view, entry, plugin, tool) : undefined;
+    : stuck ? (ticked ? 'Can’t be taken out here' : `${MARK_WORDS['kept-off']} · can’t be changed here`) : mark === 'cannot' ? recorded?.tools[tool]?.held ?? unavailable(view, entry, plugin, tool) : undefined;
   return { ticked, ...(held ? { held: true as const } : {}), ...(off ? { off } : {}), ...(line ? { line } : {}) };
 }

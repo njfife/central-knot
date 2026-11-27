@@ -8,7 +8,7 @@ import { markdown } from './markdown.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginKey, resultLines, succeeded, type PluginOp } from './pluginplan.ts';
 import { applyPluginOps, clickOn, market, openLink, pluginBusy, shownDetail, turnPlugin, type PluginClick } from './pluginstate.ts';
-import { PREVIEW_ONLY, addWords, boxOf, cantUninstall, copyStale, foundIn, inUseIn, itemsAllIn, itemsIn, outdated, switchPartial, switchWords, toolMark, updateTools, versionToCompare, type ToolMark } from './pluginstatus.ts';
+import { addWords, boxOf, cantUninstall, copyStale, foundIn, inUseIn, itemsAllIn, itemsIn, outdated, switchPartial, switchWords, toolMark, updateTools, versionToCompare, viewStopped, type ToolMark } from './pluginstatus.ts';
 import { pluginUpdates } from './pluginupdateview.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, PluginTurn, PluginView, PluginsView } from './types.ts';
 import { takesPlugins } from './presence.ts';
@@ -129,7 +129,7 @@ function boxDoes(view: PluginsView, entry: MarketplaceView, plugin: string, tool
 export function pluginSwitch(view: PluginsView, entry: MarketplaceView, plugin: PluginView, id: string) {
   const sw = entry.switches?.[plugin.name];
   const found = foundIn(view, entry, plugin.name);
-  const stopped = !view.canWrite ? view.reason ?? PREVIEW_ONLY : view.switchProblem;
+  const stopped = viewStopped(view);
   // Off while its click waits or runs, yet it keeps the focus (aria-disabled), so the keyboard stays on its row; a click is dropped.
   const busy = pluginBusy(entry.source, plugin.name), waits = busy ? { 'aria-disabled': 'true' } : {};
   if (found.length) {
