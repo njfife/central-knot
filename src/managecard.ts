@@ -45,7 +45,7 @@ export function manageRow(home: HomeView, tool: HarnessId, showInfo = false): HT
 const MANAGE_INFO = 'Turning a tool off keeps its copies. Central Knot stops writing to it until you turn it on again.';
 /** With Automatic sync off, what brings a tool turned on into line (a click's pass is about its own item: librarypass.ts PassOptions only). */
 const SYNC_OFF = 'With Automatic sync off, Sync once brings it into line; a click on an item brings that item.';
-/** In a home that waits for Resume, what a Manage click also does (its question and History's Leave it out again say it). */
+/** In a home that waits for Resume, what a Manage click also does (its question and History's Leave <tool> out again say it). */
 export const resumeWords = (home: HomeView) => (home.sync.gate.state === 'needs-resume' ? ` ${home.sync.gate.reason} This click resumes sync.` : '');
 
 /** Where a question is asked: a tool's Harnesses card; anything else is the id of the History entry it was asked on. */
@@ -63,8 +63,12 @@ export const forgetManageQuestion = () => { question = undefined; };
 /** A part of a question by id (on a card `manage-<tool>-<part>`, on History `history-manage-<part>-<entry>`), and what opened it. */
 const partId = (open: Question, part: 'text' | 'cancel' | 'confirm' | 'close' | 'retry') => (open.at === CARD ? `manage-${open.tool}-${part}` : `history-manage-${part}-${open.at}`);
 const openerId = (open: Question) => (open.at === CARD ? `manage-${open.tool}` : `history-${open.at}`);
-/** Draws `open` as the question, its Cancel focused. */
-const show = (open: Question) => { question = open; rerender(); document.getElementById(partId(open, 'cancel'))?.focus(); };
+/** Draws `open` as the question, its Cancel focused (Close, where the read failed). */
+const show = (open: Question) => {
+  question = open;
+  rerender();
+  document.getElementById(partId(open, open.read && 'failed' in open.read ? 'close' : 'cancel'))?.focus();
+};
 
 /**
  * Asks before `tool` is managed again, `at` its card or a History entry: the question opens at once, saying it reads, then says
@@ -105,12 +109,12 @@ export function manageQuestion(home: HomeView, tool: HarnessId, at: string): HTM
   const open = question, read = open?.read, name = names[tool];
   if (!open || open.tool !== tool || open.at !== at || open.home !== home.home || manageLocked(home) || home.sync.managed.includes(tool)) return null;
   const failed = read && 'failed' in read ? read.failed : undefined;
-  const text = !read ? `Reading ${name}…` : 'failed' in read ? read.failed : joiningWords(home, tool, read);
-  const lead = [open.changed ? 'Changed since this was read; nothing was written.' : '', at === CARD || !read || failed ? '' : `Managing ${name}:`].filter(Boolean);
+  const text = !read ? `Reading ${name}…` : 'failed' in read ? read.failed : joiningWords(home, tool, read, at !== CARD);
   const act = (part: 'cancel' | 'close' | 'retry' | 'confirm', label: string, onclick: () => void) =>
-    button({ variant: part === 'confirm' ? 'primary' : 'ghost', size: 'small', label, id: partId(open, part), disabled: part === 'confirm' && acting(), onclick });
+    button({ variant: part === 'confirm' ? 'primary' : 'outline', size: 'small', label, id: partId(open, part), disabled: part === 'confirm' && acting(), onclick });
   return h('div.band.manage-question', { role: 'group', 'aria-labelledby': partId(open, 'text') },
-    h('span.band-text', { id: partId(open, 'text') }, ...lead.map(words => h('strong', {}, `${words} `)), text),
+    h('span.band-text', { id: partId(open, 'text') }, open.changed ? h('strong.manage-question-changed', {}, 'Changed since this was read; nothing was written. ') : null,
+      at === CARD || !read || failed ? null : h('strong', {}, `Managing ${name}: `), text),
     h('span.manage-question-actions', {}, failed ? [act('close', 'Close', closeQuestion), act('retry', 'Try again', () => void askManage(tool, at))]
       : [act('cancel', 'Cancel', closeQuestion), read && 'counts' in read ? act('confirm', `Manage ${name}`, () => void manageTool(tool, true, open.home, { read, at })) : null]));
 }
@@ -118,29 +122,30 @@ export function manageQuestion(home: HomeView, tool: HarnessId, at: string): HTM
 /**
  * What managing `tool` again does there, as its question says (types.ts JoinCounts, read when asked), in the order it happens:
  * the one item it changes by name, or each kind of change counted (copies saved, then written, then removed); what it takes in
- * and finds; a kind it can't tell, as unknown, never as no change; the plugins it gets; Sync once with Automatic sync off; and
- * the Resume the click makes.
+ * and leaves as the tool's own; a kind it can't tell, as unknown, never as no change; the plugins it gets; Sync once with
+ * Automatic sync off; and the Resume the click makes. `onHistory`: asked on History, where a saved copy can be restored.
  */
-function joiningWords(home: HomeView, tool: HarnessId, { counts, plugins }: Forecast): string {
+function joiningWords(home: HomeView, tool: HarnessId, { counts, plugins }: Forecast, onHistory: boolean): string {
   const n = names[tool], { written, kept, removed, found, takenIn, unread } = counts;
+  const restore = (them: boolean) => (onHistory ? `${them ? 'they' : 'it'} can be restored here` : `History can restore ${them ? 'them' : 'it'}`);
   const acts = counts.changing.filter(item => item.does !== 'take');
-  const changes = acts.length === 1 && acts[0]!.saves <= 1 ? [oneChange(n, acts[0]!)] : [
-    kept ? `Saves ${kept} of ${n}’s copies as ${kept === 1 ? 'a version (History can restore it)' : 'versions (History can restore them)'}.` : '',
+  const changes = acts.length === 1 && acts[0]!.saves <= 1 ? [oneChange(n, acts[0]!, restore(false))] : [
+    kept ? `Saves ${kept} of ${n}’s copies as ${kept === 1 ? 'a version' : 'versions'} (${restore(kept > 1)}).` : '',
     written ? `Writes Central Knot’s version of ${plural(written, 'item')} in ${n}.` : '',
     removed ? `Removes ${n}’s ${removed === 1 ? 'copy of 1 item that is off' : `copies of ${removed} items that are off`}.` : '',
   ].filter(Boolean);
   return [
     changes.length || unread.length ? '' : `Changes no item in ${n}.`, ...changes,
     takenIn ? `Takes ${takenIn} of ${n}’s items into the Library (Synchronize everything is on).` : '',
-    found ? `${found} of ${n}’s items ${found === 1 ? 'shows' : 'show'} under Found in the Library.` : '',
+    found ? `${found} other ${found === 1 ? 'item stays' : 'items stay'} ${n}’s own: ${found === 1 ? 'it' : 'they'} will show under Found in the Library.` : '',
     unread.length ? `${n}’s ${andList(unread.map(kind => kindNames[pageOfPart[kind]]))} couldn’t be read, so what it does to them isn’t known.` : '',
     plugins ? `${n} also gets each plugin that is on and not kept out of it.` : '', home.syncOn ? '' : SYNC_OFF,
   ].filter(Boolean).join(' ') + resumeWords(home);
 }
 /** What it does to the one item it changes in tool `n`, by the name its plan gave (JoinCounts changing), one copy saved at most. */
-function oneChange(n: string, { name, does, saves }: JoinItem) {
-  const save = `Saves ${n}’s copy of ${name} as a version (History can restore it)`;
-  if (does === 'write') return saves ? `${save}, then writes Central Knot’s over it.` : `Writes Central Knot’s ${name} in ${n}.`;
+function oneChange(n: string, { name, does, saves }: JoinItem, restore: string) {
+  const save = `Saves ${n}’s copy of ${name} as a version (${restore})`;
+  if (does === 'write') return saves ? `${save}, then replaces it in ${n} with Central Knot’s version.` : `Writes Central Knot’s ${name} in ${n}.`;
   if (does === 'remove') return saves ? `${save}, then removes it: ${name} is off.` : `Removes ${name} from ${n}: it is off.`;
   return `${save}.`;
 }

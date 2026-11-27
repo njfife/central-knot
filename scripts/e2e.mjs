@@ -1147,25 +1147,28 @@ async function manageAgain(page, tool) {
  */
 async function manageFlow() {
   // Opening the question writes nothing at all. On History (Harnesses reads the plugins view as it opens), in a home with no
-  // plugins record and the automatic updates off (so nothing else makes one): Manage Codex pressed and its question closed
-  // leave the home's records and the app's plugin folder as they were, once the launch's own pass has settled.
+  // plugins record and the automatic updates on (so main reads what plugins follow; the run's checks never start by themselves:
+  // launch): with the question open, and after Cancel, the home's records and the app's own files in its data folder (its
+  // settings, plugin folder and log; Chromium's caches aside) are byte for byte as they were, once the launch's pass has settled.
   const quietHome = join(scratch, 'manage-quiet-home'), quietData = join(scratch, 'manage-quiet-data');
   for (const folder of ['.claude/skills', '.codex/skills', '.central-knot']) mkdirSync(join(quietHome, folder), { recursive: true });
   writeFileSync(join(quietHome, '.central-knot/sync.json'), JSON.stringify({ formatVersion: 3, generation: 'g-quiet', owner: STANDARD_BUILD, leftOut: ['codex-cli'] }));
   writeFileSync(join(quietHome, '.central-knot/history.json'), JSON.stringify({ events: [
     { id: 'quiet-out', at: new Date().toISOString(), key: 'tool:codex-cli', item: 'Codex', kind: 'managing', managing: { tool: 'codex-cli', on: false }, losers: [], orderProved: true }] }));
   mkdirSync(quietData, { recursive: true });
-  writeFileSync(join(quietData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: quietHome }, pluginUpdates: false }));
+  writeFileSync(join(quietData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: quietHome }, pluginUpdates: true }));
   writeFileSync(join(quietData, 'sharing-settings.json'), JSON.stringify({ homes: { [quietHome]: { generation: 'g-quiet' } } }));
   const wq = await launch(quietData);
   await wq.click('#nav-history');
-  const quiet = () => JSON.stringify([tree(join(quietHome, '.central-knot')), existsSync(join(quietData, 'plugins')) ? tree(join(quietData, 'plugins')) : 'no plugin folder']);
+  const appOwn = () => Object.fromEntries(Object.entries(tree(quietData)).filter(([path]) => /^[a-z][a-z0-9.-]*(\/|$)/.test(path) && !path.startsWith('databases')));
+  const quiet = () => JSON.stringify([tree(join(quietHome, '.central-knot')), appOwn()]);
   let quietBefore = quiet();
   for (let tries = 0; tries < 10; tries++) { await wait(500); if (quiet() === quietBefore) break; quietBefore = quiet(); }
   await wq.click('#history-quiet-out');
   for (let tries = 0; tries < 50 && !(await wq.exists('#history-manage-confirm-quiet-out')); tries++) await wait(100);
+  const asked = [existsSync(join(quietHome, '.central-knot/plugins.json')), quiet() === quietBefore];
   await wq.click('#history-manage-cancel-quiet-out');
-  same('Manage Codex pressed and its question closed write nothing: no plugins record made, no pass, nothing fetched', [existsSync(join(quietHome, '.central-knot/plugins.json')), quiet() === quietBefore], [false, true]);
+  same('Manage Codex’s question, open and then closed, writes nothing: no plugins record made, no pass, nothing fetched', [asked, existsSync(join(quietHome, '.central-knot/plugins.json')), quiet() === quietBefore], [[false, true], false, true]);
   same('no page errors, manage quiet', wq.pageErrors, []);
   await wq.quit();
 
@@ -1219,7 +1222,7 @@ async function manageFlow() {
   const asking = () => waitHistory(a, () => a.run(`!!document.getElementById('manage-codex-cli-confirm') || /couldn’t|no longer/.test(document.getElementById('manage-codex-cli-text')?.textContent ?? '')`));
   await a.click('#manage-codex-cli');
   await asking();
-  const nothingYet = 'Changes no item in Codex. 2 of Codex’s items show under Found in the Library.';
+  const nothingYet = 'Changes no item in Codex. 2 other items stay Codex’s own: they will show under Found in the Library.';
   same('pressed, the switch asks in the card, Cancel focused, and turns nothing yet', [
     await a.text('#manage-codex-cli-text'), await a.all('#harness-codex-cli .manage-question button', 'e.textContent'), await a.run(`document.activeElement?.id`),
     await a.run(`document.getElementById('manage-codex-cli').getAttribute('aria-checked')`), codex(),
@@ -1259,7 +1262,8 @@ async function manageFlow() {
   await wait(2500);
   await a.click('#manage-codex-cli-confirm');
   await asking();
-  const counted = 'Saves Codex’s copy of standup as a version (History can restore it), then writes Central Knot’s over it. 2 of Codex’s items show under Found in the Library.';
+  const overwrite = (restore) => `Saves Codex’s copy of standup as a version (${restore}), then replaces it in Codex with Central Knot’s version. 2 other items stay Codex’s own: they will show under Found in the Library.`;
+  const counted = overwrite('History can restore it');
   same('Manage Codex after the hand edit turns nothing and asks again with what managing it does now', [
     await a.text('#manage-codex-cli-text'), await a.run(`document.getElementById('manage-codex-cli').getAttribute('aria-checked')`), codex(), await a.run(`document.activeElement?.id`),
   ], [`Changed since this was read; nothing was written. ${counted}`, 'false', editedOnCard, 'manage-codex-cli-cancel']);
@@ -1268,16 +1272,18 @@ async function manageFlow() {
   await a.click('#manage-codex-cli');
   await asking();
   same('pressed again, the switch reads afresh: the hand edit counted, without a Refresh', await a.text('#manage-codex-cli-text'), counted);
+  await shotAt(a, 'question-overwrite-860-light', SMALLEST, 'light');
   await a.click('#manage-codex-cli-confirm');
   same('turned on again, the band names what the pass did there, in the question’s words', await a.text('.band-done .band-text'),
     'Central Knot manages Codex now: Codex’s copy of standup is saved as a version (History can restore it), and Central Knot’s is written over it. Each change there is in History.');
+  await shotAt(a, 'result-860-light', SMALLEST, 'light');
   same('turning it on put Central Knot’s version back over the hand edit: Codex holds what it held before', codex(), before);
   check('and its card heading opens its page again', await a.exists('button#harness-codex-cli.harness-card-head'));
-  // From History: Leave it out again acts at once and keeps Codex's copies; Manage Codex asks in the row with the card's own
+  // From History: Leave Codex out again acts at once and keeps Codex's copies; Manage Codex asks in the row with the card's own
   // sentence, lets Cancel and Escape return focus without writing, and confirming puts Central Knot's version back over an edit.
   await a.click('#nav-history');
-  await waitHistory(a, () => a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Leave it out again'`));
-  same('the manages entry offers Leave it out again with its hover, and the older Left out entry offers no button', [
+  await waitHistory(a, () => a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Leave Codex out again'`));
+  same('the manages entry offers Leave Codex out again with its hover, and the older Left out entry offers no button', [
     await a.run(`${newestManage}.querySelector('.history-about').textContent`),
     await a.run(`${newestManage}.querySelector('.history-actions button')?.title`),
     await a.run(`[...document.querySelectorAll('.history-row[data-kind="managing"]')][1]?.querySelectorAll('.history-actions button').length`),
@@ -1288,7 +1294,7 @@ async function manageFlow() {
   await waitHistory(a, () => a.run(`document.body.dataset.busy === 'false' && document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Manage Codex'`));
   const rejoinId = await a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.id`);
   const olderCodexButtons = () => a.run(`[...document.querySelectorAll('.history-row[data-kind="managing"]')].filter(r => r.querySelector('.history-what strong').textContent === 'Codex').slice(1).reduce((n, r) => n + r.querySelectorAll('.history-actions button').length, 0)`);
-  same('Leave it out again acts at once by keyboard, keeps copies, focuses the new entry’s button, and leaves older entries without buttons', [
+  same('Leave Codex out again acts at once by keyboard, keeps copies, focuses the new entry’s button, and leaves older entries without buttons', [
     await a.exists('.manage-question'), codex(), (await a.text('.band-done .band-text') ?? '').startsWith('Codex is left out: Central Knot writes nothing there now.'),
     await olderCodexButtons(), await a.run(`document.activeElement?.id`),
   ], [false, before, true, 0, rejoinId]);
@@ -1300,7 +1306,7 @@ async function manageFlow() {
   same('Manage Codex on History reads afresh without a Refresh, says the card’s words after the tool’s name, focuses Cancel, and writes nothing', [
     await a.text('.manage-question .band-text'), await a.all('.manage-question button', 'e.textContent'),
     await a.run(`document.activeElement?.textContent`), codex(), (await a.all('.history-row', 'e.dataset.kind')).length,
-  ], [`Managing Codex: ${counted}`, ['Cancel', 'Manage Codex'], 'Cancel', edited, rowsBefore]);
+  ], [`Managing Codex: ${overwrite('it can be restored here')}`, ['Cancel', 'Manage Codex'], 'Cancel', edited, rowsBefore]);
   await shotAt(a, 'history-question-860-light', SMALLEST, 'light');
   await a.click('.manage-question button');
   same('Cancel closes the question, writes nothing, and puts focus back on Manage Codex', [
@@ -1316,7 +1322,7 @@ async function manageFlow() {
   await waitHistory(a, () => a.exists('[id^="history-manage-confirm-"]'));
   await a.run(`document.querySelector('[id^="history-manage-confirm-"]').focus()`);
   await a.press(' ', 'Space');
-  await waitHistory(a, () => a.run(`document.body.dataset.busy === 'false' && document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Leave it out again'`));
+  await waitHistory(a, () => a.run(`document.body.dataset.busy === 'false' && document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.textContent === 'Leave Codex out again'`));
   const leaveAgainId = await a.run(`document.querySelector('.history-row[data-kind="managing"] .history-actions button')?.id`);
   same('confirming by keyboard manages Codex again, omits the History self-note, clears older buttons, and focuses the new entry’s button', [
     codex(), await a.text('.band-done .band-text'), await a.exists(`#${rejoinId}`), await olderCodexButtons(),
@@ -1404,6 +1410,7 @@ async function manageFlow() {
     const card = document.getElementById('harness-claude-cli').getBoundingClientRect();
     return ['cancel', 'confirm'].map(part => { const b = document.getElementById('manage-claude-cli-' + part), r = b.getBoundingClientRect(); return [b.scrollWidth <= b.clientWidth, r.height <= 30, r.left >= card.left, r.right <= card.right]; });
   })()`), [[true, true, true, true], [true, true, true, true]]);
+  await shotAt(a, 'question-claude-860-light', SMALLEST, 'light');
   await a.click('#manage-claude-cli-confirm');
   await fullSize(a);
   for (const tool of ['copilot-cli', 'codex-cli']) await manageAgain(a, tool);
@@ -1448,7 +1455,7 @@ async function manageFlow() {
   same('no page errors, manage stale', w1.pageErrors, []);
   await w1.quit();
 
-  // After Leave it out again, History's reopened Manage question reads marketplaces for the tools then managed, as the card's does.
+  // After Leave Claude Code out again, History's reopened Manage question reads marketplaces for the tools then managed, as the card's does.
   const plugHome = join(scratch, 'manage-plug-home'), plugData = join(scratch, 'manage-plug-data'), plugMarket = join(scratch, 'manage-plug-market');
   for (const folder of ['.claude/skills', '.claude/plugins', '.copilot/skills', '.codex/skills', '.central-knot']) mkdirSync(join(plugHome, folder), { recursive: true });
   mkdirSync(join(plugMarket, '.claude-plugin'), { recursive: true });

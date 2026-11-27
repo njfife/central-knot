@@ -1264,6 +1264,7 @@ span.ins-confirm { margin-top: 0; }
 .history-row > .manage-question { grid-column: 1 / -1; }
 .history-row > .manage-question, .harness-manage > .manage-question { border: 1px solid var(--line); border-radius: 8px; flex-wrap: wrap; justify-content: space-between; gap: 8px 12px; padding: 8px 12px; }
 .manage-question > .band-text { flex: 1 1 320px; color: var(--ink); }
+.manage-question-changed { display: block; }
 .manage-question-actions { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
 
 /* ---------- MCP sign-in (mcpsigninpage.ts): a row per server, a column per tool (14% each, six beside the name's 16%); every word

@@ -52,7 +52,7 @@ test('A left-out tool’s switch asks first: what managing it does is read at th
   assert.deepEqual([question(), buttons()], ['Reading Codex…', ['cancel']], 'the question opens at once, Cancel in it');
   await settle();
   assert.equal(question(), 'Saves 1 of Codex’s copies as a version (History can restore it). Writes Central Knot’s version of 2 items in Codex. '
-    + '2 of Codex’s items show under Found in the Library. Codex also gets each plugin that is on and not kept out of it.');
+    + '2 other items stay Codex’s own: they will show under Found in the Library. Codex also gets each plugin that is on and not kept out of it.');
   assert.deepEqual([asked, findById(rendered, 'manage-codex-cli')!.attrs['aria-checked']], [[['read', 'codex-cli', '/home']], 'false'], 'read for that tool and home; nothing turned yet');
   answers.manage = { view: null, did: [] };
   await press('manage-codex-cli-confirm');
@@ -63,12 +63,12 @@ test('What managing it does changed before Manage Codex: main turns nothing, and
   open({ syncOn: false });
   answers.read = { counts: counts({ found: 1 }), plugins: false };
   await press('manage-codex-cli');
-  assert.equal(question(), 'Changes no item in Codex. 1 of Codex’s items shows under Found in the Library. With Automatic sync off, Sync once brings it into line; a click on an item brings that item.');
+  assert.equal(question(), 'Changes no item in Codex. 1 other item stays Codex’s own: it will show under Found in the Library. With Automatic sync off, Sync once brings it into line; a click on an item brings that item.');
   const now = counts({ kept: 1, written: 1, found: 1, changing: [item('standup', 'write', 1)] });
   answers.manage = { changed: now, view: null, did: [] };
   await press('manage-codex-cli-confirm');
-  assert.equal(question(), 'Changed since this was read; nothing was written. Saves Codex’s copy of standup as a version (History can restore it), then writes Central Knot’s over it. '
-    + '1 of Codex’s items shows under Found in the Library. With Automatic sync off, Sync once brings it into line; a click on an item brings that item.');
+  assert.equal(question(), 'Changed since this was read; nothing was written. Saves Codex’s copy of standup as a version (History can restore it), then replaces it in Codex with Central Knot’s version. '
+    + '1 other item stays Codex’s own: it will show under Found in the Library. With Automatic sync off, Sync once brings it into line; a click on an item brings that item.');
   assert.deepEqual([asked.at(-1)?.[5], findById(rendered, 'manage-codex-cli')!.attrs['aria-checked'], app.outcome], [counts({ found: 1 }), 'false', undefined], 'the counts it showed went with the click; no band');
   answers.manage = { view: null, did: [] };
   await press('manage-codex-cli-confirm');
@@ -86,7 +86,8 @@ test('A read that fails says why, with Close and Try again; a kind not read is u
   open();
   answers.read = { failed: 'Codex is no longer present here. Nothing was changed.' };
   await press('manage-codex-cli');
-  assert.deepEqual([question(), buttons()], ['Codex is no longer present here. Nothing was changed.', ['close', 'retry']]);
+  assert.deepEqual([question(), buttons(), findById(rendered, 'manage-codex-cli-close')!.focused], ['Codex is no longer present here. Nothing was changed.', ['close', 'retry'], 1],
+    'the failure takes the focus, on Close');
   answers.read = { counts: counts({ written: 1, changing: [item('standup', 'write')] }), plugins: false };
   await press('manage-codex-cli-retry');
   assert.deepEqual([question(), buttons()], ['Writes Central Knot’s standup in Codex.', ['cancel', 'confirm']], 'Try again reads again');
