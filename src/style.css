@@ -1470,7 +1470,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .result-link { all: unset; cursor: pointer; color: var(--ink); font-weight: 600; text-decoration: underline; text-decoration-color: transparent; }
 .result-link:hover { text-decoration-color: currentColor; }
 .result-link:focus-visible { outline: 2px solid var(--focus); border-radius: 3px; }
-/* The plugin table: the switch, the plugin, a column per tool (each tool's mark over its name), and the way into the plugin. */
+/* The plugin table: the switch, the plugin, a column per tool (each tool's mark, its name on hover), and the way into the plugin. */
 .plugin-table { container: table / inline-size; }
 /* It stripes sooner than the skills table: its taller rows sit further apart, and beside the marketplaces it is narrower. */
 @container table (width >= 700px) {
@@ -1478,24 +1478,26 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 }
 /*
  * A row's name, version and chips show at any width and with any number of tools: nothing in them hides or is cut. When room
- * is short, in this order: the tool columns narrow, from 120px to 76px at the least, before the plugin's column goes under
- * 360px (a title of about 45 characters on one line); then the version and each chip move whole under what is before them;
- * then the title wraps. A piece breaks inside a word only when that word alone is wider than the open button may be (the
- * column; half of it in a wide table, below): a long title can be, and rarely a version or chip (a build identifier with no
- * break in it). A row is as tall as that makes it. The line under the name is the one thing that shortens (.plugin-row-line,
- * below): it stays one line, so a click never changes a row's height.
+ * is short, in this order: the tool columns narrow, from 56px to 40px at the least, before the plugin's column goes under
+ * 520px (room for a description, counts and an update line at 1316 with six tools); then the version and each chip move whole
+ * under what is before them; then the title wraps. A piece breaks inside a word only when that word alone is wider than the
+ * open button may be (the column; half of it in a wide table, below): a long title can be, and rarely a version or chip (a
+ * build identifier with no break in it). A row is as tall as that makes it. The line under the name is the one thing that
+ * shortens (.plugin-row-line, below): it stays one line, so a click never changes a row's height.
  */
 .plugin-table .ov-row {
   --switch-width: 48px; --chevron-width: 28px;
-  /* The row, less the switch, the chevron and the plugin's 360px, shared by the tools. */
-  --tool-width: clamp(76px, (100% - var(--switch-width) - var(--chevron-width) - 360px) / var(--tool-count, 3), 120px);
+  /* The row, less the switch, the chevron and the plugin's 520px, shared by the tools. */
+  --tool-width: clamp(40px, (100% - var(--switch-width) - var(--chevron-width) - 520px) / var(--tool-count, 3), 56px);
   grid-template-columns: var(--switch-width) minmax(0, 1fr) repeat(var(--tool-count, 3), var(--tool-width)) var(--chevron-width);
   height: auto; min-height: 40px;
 }
 .plugin-table .plugin-row-open { flex-wrap: wrap; row-gap: 2px; overflow-wrap: anywhere; }
-/* Room above the tool icons, so the pinned header doesn't touch the toolbar's rule */
-.plugin-table .ov-head { min-height: 48px; }
-.plugin-table .ov-head .ov-name { padding: 6px 0; font-size: 12px; font-weight: 400; color: var(--ink-soft); }
+/* Single-line head (Every tool (?) and 16px tool marks): 40px gives 12px clear above the marks when pinned. */
+.plugin-table .ov-head { min-height: 40px; }
+.plugin-table .ov-head .ov-name { padding: 6px 0; gap: 4px; font-size: 12px; font-weight: 500; color: var(--ink-soft); }
+.plugin-table .ov-head .plugin-head-every { grid-column: 1 / 3; padding-left: 8px; }
+.plugin-table .ov-tool-head { align-self: stretch; }
 .market-hint > span { max-width: 110ch; }
 .plugin-row { cursor: pointer; }
 /* A plugin's one switch heads its row; each tool's mark only says what it has, drawn plain, with no box and no hover look (no
@@ -1543,12 +1545,9 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
   /* A click's state takes the line's place beside the name, as the line does. */
   .plugin-row-name > .plugin-click { flex: 1 1 0; max-width: max-content; }
 }
-/* The header's hint keeps to whole lines: a narrow table says it shorter. */
-.hint-short { display: none; }
 @container table (width < 700px) {
-  .plugin-row-about, .plugin-row-sep, .hint-long { display: none; }
+  .plugin-row-about, .plugin-row-sep { display: none; }
   .plugin-row-sep:has(+ .plugin-row-library) { display: inline; }
-  .hint-short { display: inline; }
 }
 .cannot-dash { font-weight: 700; color: var(--ink-soft); }
 .plugin-add { border-color: color-mix(in oklab, var(--ink) 42%, transparent); color: var(--ink); }
@@ -1705,8 +1704,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
   .plugin-row-name { padding: 7px 12px 7px 0; }
   /* The strip above names the marketplace: the toolbar keeps only a result or the way back, and isn't drawn without one. */
   .market-title-line, .toolbar-title-only { display: none; }
-  /* The plugins get the height: the hint wraps within the header's name column, the description moves under About. */
-  .plugin-table .ov-head .plugin-hint { white-space: normal; line-height: 15px; padding-right: 12px; }
+  /* The plugins get the height: the description moves under About. */
   .market-page > .market-page-about { display: none; }
   .about-only-narrow { display: block; }
   .market-fact-narrow { display: inline; }

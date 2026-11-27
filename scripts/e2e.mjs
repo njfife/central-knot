@@ -1635,7 +1635,7 @@ const ROW_PIECES_CUT = `(() => {
   // A piece's width on one line: its wrapping is off for the moment it is measured.
   const wholeWidth = node => { node.style.whiteSpace = 'nowrap'; const width = node.scrollWidth; node.style.whiteSpace = ''; return width; };
   const shown = node => node.checkVisibility({ visibilityProperty: true, opacityProperty: true });
-  const out = [...document.querySelectorAll('.plugin-table .ov-tool-head')].filter(head => head.scrollWidth > head.clientWidth + 1).map(head => head.textContent + '’s heading is wider than its column');
+  const out = [...document.querySelectorAll('.plugin-table .ov-tool-head')].filter(head => head.scrollWidth > head.clientWidth + 1).map(head => (head.textContent || head.getAttribute('aria-label') || '') + '’s heading is wider than its column');
   for (const row of document.querySelectorAll('.plugin-table .plugin-row')) {
     const name = row.querySelector('.plugin-row-name'), open = name.querySelector('.plugin-row-open');
     const cell = name.getBoundingClientRect(), button = open.getBoundingClientRect();
@@ -6700,6 +6700,9 @@ async function pluginRowsFitFlow() {
   for (const plugin of [long, nightly]) file(market, `plugins/${plugin}/skills/dashboards/SKILL.md`, '---\nname: dashboards\ndescription: Builds a dashboard.\n---\n\nBuild it.\n');
   file(home, '.claude/plugins/known_marketplaces.json', JSON.stringify({ 'rows-fit': { source: { source: 'directory', path: market }, installLocation: market } }));
   writeClaudeInstall(home, 'rows-fit', gone, '1.0.0', { 'skills/ship/SKILL.md': '---\nname: ship\ndescription: Ships logs.\n---\n\nShip them.\n' });
+  const copilotCopy = join(home, '.copilot/installed-plugins/rows-fit', nightly);
+  file(copilotCopy, 'skills/dashboards/SKILL.md', '---\nname: dashboards\ndescription: Builds a dashboard.\n---\n\nBuild it.\n');
+  file(home, '.copilot/config.json', JSON.stringify({ installedPlugins: [{ name: nightly, marketplace: 'rows-fit', version: '2.3.0', cache_path: copilotCopy, enabled: true }] }));
   const a = await launch(join(scratch, 'rows-fit-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' });
   const pieces = name => a.all(`.plugin-row[data-plugin="${name}"] .plugin-row-open > *`);
   const sidebarOpen = async open => { if (await a.run(`document.body.classList.contains('rail')`) === open) await a.click('#sidebar-toggle'); };
@@ -6715,7 +6718,36 @@ async function pluginRowsFitFlow() {
       await sizeTo(a, width, height); await sidebarOpen(open);
       same(`with ${tools} tools at ${width}×${height}, the sidebar ${open ? 'open' : 'folded'}, every plugin’s name, version and chips show whole, nothing cut off`, [...await a.run(ROW_PIECES_CUT), ...await a.run(CUT_OFF)], []);
       if (width === 1280) same(`with ${tools} tools at 1280×800 the 45-character name has room for one line, and takes it`, await titleLines(), 1);
+      if (width === 1316 && tools === 6) {
+        same('with 6 tools at 1316×819, tool headers are icon-only marks (40–56 px) with hover names, descriptions and counts show whole, and the update line stays on one line', await a.run(`(() => {
+          const heads = [...document.querySelectorAll('.plugin-table .ov-tool-head')].map(el => {
+            const r = el.getBoundingClientRect();
+            return { text: el.textContent.trim(), title: el.title, label: el.getAttribute('aria-label'), okSize: r.width >= 39 && r.width <= 57 && r.height >= 39 };
+          });
+          const whole = name => {
+            const row = document.querySelector(\`.plugin-row[data-plugin="\${name}"]\`);
+            return ['.plugin-row-about', '.plugin-row-holds'].every(sel => {
+              const el = row.querySelector(sel);
+              return !!el && el.getBoundingClientRect().width > 0 && el.scrollWidth <= el.clientWidth + 1;
+            });
+          };
+          const upd = [...document.querySelectorAll(\`.plugin-row[data-plugin="${nightly}"] .plugin-row-update > *\`)].map(el => el.getBoundingClientRect());
+          const oneUpdateLine = upd.length >= ${canWriteRealHome ? 2 : 1} && upd.every(r => r.top < upd[0].bottom - 1 && r.bottom > upd[0].top + 1);
+          return { heads, whole: [whole(${JSON.stringify(long)}), whole(${JSON.stringify(nightly)})], oneUpdateLine };
+        })()`), {
+          heads: ['Claude Code', 'Copilot CLI', 'Codex', 'Pi', 'OpenCode', 'Antigravity'].map(name => ({ text: '', title: name, label: name, okSize: true })),
+          whole: [true, true], oneUpdateLine: true,
+        });
+      }
       if (open) await a.shot(`rows-fit-${tools}-tools-${width}x${height}`);
+    }
+    if (tools === 6 && canWriteRealHome) {
+      await sizeTo(a, ...SMALLEST); await sidebarOpen(true);
+      if (await a.exists('#plugin-switch-info')) {
+        if (shots) { await a.click('#plugin-switch-info'); await a.shot('rows-fit-6-tools-860x528-every-tool-card'); await a.press('Escape'); }
+        await checkCard(a, 'plugin-switch-info', 'On puts the plugin in every tool that takes it except those kept out. A striped switch means on with a tool kept out or off.',
+          'with 6 tools at 860×528, Every tool (?) opens its card clear of the status bar');
+      } else check('with 6 tools at 860×528, Every tool (?) info mark exists', false);
     }
     await theme('dark');
     for (const [width, height] of [SMALLEST, [1316, 819]]) { await sizeTo(a, width, height); await sidebarOpen(true); await a.shot(`rows-fit-${tools}-tools-${width}x${height}-dark`); }
@@ -6732,6 +6764,11 @@ async function pluginRowsFitFlow() {
   await a.click('#header-refresh');
   await a.click('#nav-plugins');
   await rowsWhole(5);
+  cli('agy', '1.5.14');
+  await a.click('#nav-harnesses');
+  await a.click('#header-refresh');
+  await a.click('#nav-plugins');
+  await rowsWhole(6);
   same('no page errors, the plugin rows', a.pageErrors, []);
   await a.quit();
 }
@@ -8768,9 +8805,15 @@ esac
   same('the marketplace is added', await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)}).then(result => result.problem ?? 'added')`), 'added');
   await a.click('#nav-plugins');
   for (let tries = 0; tries < 50 && !(await a.exists('#pswitch-0-issue-tracker')); tries++) await wait(100);
-  const pluginHint = (await a.text('.plugin-hint .hint-long'))?.trim() ?? '';
-  check('Plugin marketplaces’ switch hint says off is kept installed where the tool can, not removes',
-    pluginHint === 'A switch turns it on or off (kept installed where the tool can) in every tool that takes it; clicks run in turn.' && !/removes|uninstall/i.test(pluginHint), pluginHint);
+  same('Plugin marketplaces’ head shows Every tool (?) with no hint spans and icon-only tool headers', await a.run(`(() => {
+    const head = document.querySelector('.plugin-table .ov-head');
+    const tools = [...head.querySelectorAll('.ov-tool-head')].map(el => [el.textContent.trim(), el.title, el.getAttribute('aria-label')]);
+    return [head.querySelector('.ov-name')?.innerText.trim(), !!head.querySelector('.hint-long, .hint-short, .plugin-hint'), tools];
+  })()`), ['Every tool', false, [['', 'Claude Code', 'Claude Code'], ['', 'Pi', 'Pi']]]);
+  if (await a.exists('#plugin-switch-info')) {
+    await checkCard(a, 'plugin-switch-info', 'On puts the plugin in every tool that takes it except those kept out. A striped switch means on with a tool kept out or off.',
+      'Plugin marketplaces’ Every tool (?) card explains what On and a striped switch mean');
+  } else check('Plugin marketplaces’ Every tool (?) info mark exists', false);
   const marks = (plugin = 'issue-tracker') => a.run(`[...document.querySelectorAll('[data-plugin="${plugin}"] .cell-button')].map(cell => cell.dataset.state)`);
   const switchIs = selector => a.run(`(() => { const s = document.querySelector('${selector}'); return s ? s.getAttribute('aria-checked') + (s.classList.contains('switch-partial') ? ' partial' : '') : 'missing'; })()`);
   const done = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };

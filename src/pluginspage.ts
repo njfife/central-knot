@@ -6,7 +6,7 @@
 // mark only says what it has.
 import { acting, noteMove, noToolManaged, rerender, showPage, state as app } from './app.ts';
 import { noToolsState } from './pages.ts';
-import { button, closeButton, emptyState, h, icon, rereadBand, whyOff, withToolCount } from './dom.ts';
+import { button, closeButton, emptyState, h, icon, infoMark, rereadBand, whyOff, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
@@ -155,6 +155,8 @@ function filters(entry: MarketplaceView): HTMLElement | null {
   return parts.length ? h('div.market-filter', {}, parts) : null;
 }
 
+const EVERY_TOOL_INFO = 'On puts the plugin in every tool that takes it except those kept out. A striped switch means on with a tool kept out or off.';
+
 function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: number) {
   const shown = shownPlugins(entry);
   // One hint line per tool that can't take this marketplace, in the words its boxes use (pluginstatus.blocked).
@@ -166,10 +168,14 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
   const reasons = [...new Set([noCli.length > 1 ? `${andList(noCli.map(tool => names[tool]))}: command-line tools not found, so plugins can’t be installed there.` : '',
     ...pluginColumns.filter(tool => noCli.length < 2 || !noCli.includes(tool)).map(tool => blocked(view, entry, tool) ?? '')])].filter(Boolean);
   const someCan = view.canWrite && (pluginColumns.some(tool => !blocked(view, entry, tool)) || view.tools.length > pluginColumns.length);
-  // The hint heads the name column, wrapping within it when the column is narrow.
-  const head = h('div.ov-row.ov-head', { role: 'row' }, h('div.ov-managed', { role: 'columnheader', 'aria-label': 'On or off' }),
-    h('div.ov-name.plugin-hint', { role: 'columnheader' }, someCan ? [h('span.hint-long', {}, 'A switch turns it on or off (kept installed where the tool can) in every tool that takes it; clicks run in turn.'), h('span.hint-short', {}, 'Clicks run in turn.')] : 'Plugin'),
-    view.tools.map(tool => h('div.ov-cell.ov-tool-head', { role: 'columnheader' }, brandMark(tool, 16), h('span', {}, names[tool]))), h('div.ov-cell.plugin-row-go', { role: 'columnheader' }));
+  // Every tool (?) heads the switch and name columns when a switch can act; each tool column is its mark alone, name on hover.
+  const head = h('div.ov-row.ov-head', { role: 'row' },
+    someCan
+      ? h('div.ov-name.plugin-head-every', { role: 'columnheader', 'aria-colspan': '2', 'data-info-block': true },
+        'Every tool', infoMark('plugin-switch-info', 'Every tool', EVERY_TOOL_INFO))
+      : [h('div.ov-managed', { role: 'columnheader', 'aria-label': 'On or off' }), h('div.ov-name', { role: 'columnheader' }, 'Plugin')],
+    view.tools.map(tool => h('div.ov-cell.ov-tool-head', { role: 'columnheader', title: names[tool], 'aria-label': names[tool] }, brandMark(tool, 16))),
+    h('div.ov-cell.plugin-row-go', { role: 'columnheader' }));
   // With more than one plugin behind, one button runs every update in this marketplace at once, those the filter hides too.
   const behind = view.canWrite ? entry.plugins.filter(plugin => updateOps(view, entry, plugin).length) : [];
   const updateAll = behind.length > 1 ? h('p.market-hint', {}, icon('refresh-cw', 13, 'tone-warning'), h('span', {}, `${behind.length} plugins have an update. `,
