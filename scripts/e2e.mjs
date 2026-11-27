@@ -22142,7 +22142,9 @@ async function skillFileFlow() {
         (await a.text('.file-open-foot .path-text'))?.trim(),
       ], [true, `${prefix}/.claude/skills/linked-plan/plan.md`]);
       await a.run(`(() => { const s = document.querySelector('.file-open-box .file-copy-select select'); s.value = '1'; s.dispatchEvent(new Event('change')); })()`);
-      await until(async () => (await a.text('.file-open-foot .path-text') ?? '').includes('.copilot/skills/linked-plan/SKILL.md'));
+      // The footer names the copy at once; its tabs come with its read.
+      await until(async () => (await a.text('.file-open-foot .path-text') ?? '').includes('.copilot/skills/linked-plan/SKILL.md')
+        && (await a.all('.file-open-box .file-tab', 'e.textContent.trim()')).includes('plan.md'));
       await clickTab('plan.md');
       await until(async () => (await a.text('.file-open-box pre.content') ?? '').includes('Copilot unhashed plan.'));
       same('switching to the second unhashed copy reads its own plan.md', [
