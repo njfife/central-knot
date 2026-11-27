@@ -162,8 +162,8 @@ export function grouped(rows: SigninRow[], checks: SigninChecks): SigninRow[] {
 
 /** A column's last check: when it ended, what its tool answered, and the cells it holds for: those asked about, unchanged at every view since. */
 export interface ColumnCheck { at: string; answer: SigninAnswer; asked: string[] }
-/** A sign-in started from a cell (mcpsigninpage.ts signIn): its tool, its cell's copy (cellKey), and once it ended, when and how. */
-export interface SigninRun { tool: HarnessId; copy: string; at?: string; end?: SigninEnd }
+/** A sign-in started from a cell (mcpsigninpage.ts signIn): its tool, its row, its cell's copy (cellKey), and once it ended, when and how. */
+export interface SigninRun { tool: HarnessId; row: string; copy: string; at?: string; end?: SigninEnd }
 /**
  * The page's checks in one home (app.ts state.mcpSignin, made again when a home opens): each column's last, the one under way,
  * why one couldn't be run, when the last whole Check all ended (`all`: each column it ran answered or said why it couldn't
@@ -308,13 +308,13 @@ function endWords(tool: HarnessId, end: Exclude<SigninEnd, { signedIn: true }>):
   return { timeout: `No answer after ${SIGNIN_LIMIT_MS / 60_000} minutes`, stopped: 'Stopped', missing: `No ${toolNames[tool]} command line here` }[end.failed];
 }
 /**
- * A cell as the page shows it, and whether it needs him: a sign-in started there for this very copy, while it waits (Stop) and
- * as it ended (Signed in and its time; else what happened, Try again and its command to copy); else its column's answer
- * (cellSays), whose need of a sign-in offers Sign in in place of Copy where `starts` (startsSignin).
+ * A cell as the page shows it, and whether it needs him: a sign-in started there, while it waits (Stop, whatever became of the
+ * copy meanwhile) and as it ended for this very copy (Signed in and its time; else what happened, Try again and its command to
+ * copy); else its column's answer (cellSays), whose need of a sign-in offers Sign in in place of Copy where `starts` (startsSignin).
  */
 export function cellNow(checks: SigninChecks, tool: HarnessId, row: SigninRow, starts: boolean): CellSays {
   const said = cellSays(tool, row, answerFor(checks, tool, row)), cell = row.cells[tool]!;
-  const run = checks.signins?.find(each => each.tool === tool && each.copy === cellKey(row, cell));
+  const run = checks.signins?.find(each => each.tool === tool && (each.end ? each.copy === cellKey(row, cell) : each.row === row.id));
   if (!run) return said.command && starts ? { words: said.words, tone: said.tone, act: { label: 'Sign in', runs: said.command }, heed: true } : said;
   if (!run.end) return { words: 'Finish sign-in in your browser…', act: { label: 'Stop' } };
   if ('signedIn' in run.end) return { words: `Signed in ${clockTime(run.at!)}` };

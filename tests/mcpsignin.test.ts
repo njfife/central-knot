@@ -220,7 +220,7 @@ test('Where Codex says a sign-in is needed its cell offers Sign in, on this comp
 
 test('A sign-in’s cell: Stop while it waits, Signed in with its time, and on any other end what happened, Try again and the command to copy', () => {
   const oauth = server('oauth'), copy = cellKey(oauth, oauth.cells['codex-cli']!), at = '2026-11-27T10:05:00Z';
-  const says = (end?: SigninEnd) => cellNow(needing([oauth], [{ tool: 'codex-cli', copy, ...(end ? { at, end } : {}) }]), 'codex-cli', oauth, true);
+  const says = (end?: SigninEnd) => cellNow(needing([oauth], [{ tool: 'codex-cli', row: 'oauth', copy, ...(end ? { at, end } : {}) }]), 'codex-cli', oauth, true);
   const again = { command: 'codex mcp login oauth', act: { label: 'Try again', runs: 'codex mcp login oauth' }, heed: true };
   assert.deepEqual(says(), { words: 'Finish sign-in in your browser…', act: { label: 'Stop' } });
   assert.deepEqual(says({ signedIn: true }), { words: `Signed in ${clockTime(at)}` });
@@ -229,21 +229,23 @@ test('A sign-in’s cell: Stop while it waits, Signed in with its time, and on a
   assert.deepEqual(says({ failed: 'stopped' }), { words: 'Stopped', ...again });
   assert.deepEqual(says({ failed: 'missing' }), { words: 'No Codex command line here', ...again });
   assert.deepEqual(says({ notStarted: 'Another sign-in is running' }), { words: 'Another sign-in is running', ...again });
-  // A sign-in kept for another copy of the server isn't this cell's: it says the column's answer.
+  // An end kept for another copy of the server isn't this cell's: it says the column's answer. One under way is the row's, with
+  // its Stop, whatever became of the copy meanwhile.
   const moved = { ...oauth, cells: { 'codex-cli': { name: 'oauth', copy: 'other#2', off: false } } };
-  assert.equal(cellNow(needing([moved], [{ tool: 'codex-cli', copy, at, end: { signedIn: true } }]), 'codex-cli', moved, true).words, 'Needs sign-in');
+  assert.equal(cellNow(needing([moved], [{ tool: 'codex-cli', row: 'oauth', copy, at, end: { signedIn: true } }]), 'codex-cli', moved, true).words, 'Needs sign-in');
+  assert.deepEqual(cellNow(needing([moved], [{ tool: 'codex-cli', row: 'oauth', copy }]), 'codex-cli', moved, true), { words: 'Finish sign-in in your browser…', act: { label: 'Stop' } });
   // Signed in needs nothing more of him: its row isn't put first; one that didn't finish is.
   const plain = server('plain');
-  assert.deepEqual(grouped([plain, oauth], needing([plain, oauth], [{ tool: 'codex-cli', copy, at, end: { signedIn: true } }])).map(each => each.name), ['plain', 'oauth']);
-  assert.deepEqual(grouped([plain, oauth], { ...needing([oauth], [{ tool: 'codex-cli', copy, at, end: { failed: 'stopped' } }]) }).map(each => each.name), ['oauth', 'plain']);
+  assert.deepEqual(grouped([plain, oauth], needing([plain, oauth], [{ tool: 'codex-cli', row: 'oauth', copy, at, end: { signedIn: true } }])).map(each => each.name), ['plain', 'oauth']);
+  assert.deepEqual(grouped([plain, oauth], { ...needing([oauth], [{ tool: 'codex-cli', row: 'oauth', copy, at, end: { failed: 'stopped' } }]) }).map(each => each.name), ['oauth', 'plain']);
 });
 
 test('What a sign-in ended with is kept for its copy alone: dropped at a view where that copy is changed, gone or Off; one under way is kept', () => {
   const home = (hash: string, off = false) => view(['codex-cli'], [fact('oauth', { 'codex-cli': 'oauth' }, { copies: { 'codex-cli': { folder: 'oauth', hash } } as LibraryFacts['copies'], ...(off ? { switchedOff: ['codex-cli'] as HarnessId[] } : {}) })]);
   const [before] = signinRows(home('oauth#1')), copy = cellKey(before, before.cells['codex-cli']!);
-  const ended = (): SigninRun => ({ tool: 'codex-cli', copy, at: '2026-11-27T10:05:00Z', end: { signedIn: true } });
+  const ended = (): SigninRun => ({ tool: 'codex-cli', row: 'oauth', copy, at: '2026-11-27T10:05:00Z', end: { signedIn: true } });
   for (const [what, now, kept] of [['unchanged', home('oauth#1'), 1], ['another copy', home('oauth#2'), 0], ['Off', home('oauth#1', true), 0], ['gone', view(['codex-cli'], []), 0]] as const) {
-    const checks: SigninChecks = { home: '/h', columns: {}, signins: [ended(), { tool: 'codex-cli', copy }] };
+    const checks: SigninChecks = { home: '/h', columns: {}, signins: [ended(), { tool: 'codex-cli', row: 'oauth', copy }] };
     followView(checks, now);
     assert.deepEqual(checks.signins!.map(run => !!run.end), [...(kept ? [true] : []), false], what);
   }

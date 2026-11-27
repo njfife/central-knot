@@ -60,7 +60,7 @@ const signingIn = () => (state.mcpSignin.signins?.some(run => !run.end) ? 'A sig
 async function signIn(tool: HarnessId, row: SigninRow) {
   const checks = state.mcpSignin, copy = cellKey(row, row.cells[tool]!);
   if (signingIn()) return;
-  const run: SigninRun = { tool, copy };
+  const run: SigninRun = { tool, row: row.id, copy };
   checks.signins = [...(checks.signins ?? []).filter(kept => kept.tool !== tool || kept.copy !== copy), run];
   rerender();
   run.end = await window.centralKnot.startSignin(tool, checks.home, row.id, copy).catch((error: unknown) => ({ notStarted: String(error instanceof Error ? error.message : error) }));

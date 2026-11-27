@@ -11539,7 +11539,9 @@ ${listen(`spawnSync(${JSON.stringify(opener)}, ['http://127.0.0.1:' + listening.
   // after; Stop, the limit and Quit (below) leave no process of Codex's and no port it listened on; another page and back, the same.
   // A Codex server whose name holds a space and a quote, needing a sign-in there alone.
   const team = "team's docs", codexConfig = readNow(join(home, '.codex/config.toml')), codexSaid = readNow(join(said, 'codex'));
-  write('.codex/config.toml', `${codexConfig}\n[mcp_servers."${team}"]\nurl = "${P(47214)}"\n`);
+  /** Codex's servers with team's docs at `port`'s address. */
+  const withTeam = port => `${codexConfig}\n[mcp_servers."${team}"]\nurl = "${P(port)}"\n`;
+  write('.codex/config.toml', withTeam(47214));
   writeFileSync(join(said, 'codex'), JSON.stringify([...JSON.parse(codexSaid), { ...codex[0], name: team, auth_status: 'not_logged_in' }], null, 2));
   await a.click('#header-refresh');
   await a.click('#signin-check-codex-cli');
@@ -11548,7 +11550,7 @@ ${listen(`spawnSync(${JSON.stringify(opener)}, ['http://127.0.0.1:' + listening.
   const codexCell = async name => a.run(`(cell => [[...cell.querySelector('.signin-words').childNodes].filter(node => node.nodeType === 3).map(node => node.textContent).join(''),
     ...['[id^="signin-act-"]', '[id^="signin-copy-"]', '.signin-command'].map(part => cell.querySelector(part)?.textContent ?? null)])(document.getElementById(${JSON.stringify(await cellId('codex-cli', name))}))`);
   const act = async name => byId(`signin-act-codex-cli-${await rowIdOf(name)}`);
-  /** The last process of Codex's sign-in that listened, as it wrote itself down: its port and its number. */
+  /** Each process of Codex's sign-ins that listened, in order, as it wrote itself down: its port and its number. */
   const listened = () => readNow(ports).split('\n').filter(Boolean).map(line => line.split(' ').map(Number));
   const alive = pid => { try { process.kill(Number(pid), 0); return true; } catch { return false; } };
   const portFree = port => new Promise(done => { const probe = tcpServer().once('error', () => done(false)).listen(port, '127.0.0.1', () => probe.close(() => done(true))); });
@@ -11584,11 +11586,18 @@ ${listen(`spawnSync(${JSON.stringify(opener)}, ['http://127.0.0.1:' + listening.
   await a.click('#nav-library');
   await a.click('#nav-mcpsignin');
   same('another page and back: it still waits, with Stop', await codexCell(team), ['Finish sign-in in your browser…', 'Stop', null, null]);
-  // Stop: Codex is asked to end, then what it left is ended; nothing of its is left running or listening. No list is run after.
+  // Its server given another address while it waits: the cell keeps its Stop. Stop: Codex is asked to end, then what it left is
+  // ended; nothing of its is left running or listening, and no list is run after. Its end is that copy's: shown once it is back.
   const [[loginPort, loginPid], [helperPort, helperPid]] = listened();
+  write('.codex/config.toml', withTeam(47216));
+  await a.click('#header-refresh');
+  same('its server changed while it waits: it still waits, with Stop', await codexCell(team), ['Finish sign-in in your browser…', 'Stop', null, null]);
   await a.click(await act(team));
-  await until(async () => (await codexCell(team))[0] === 'Stopped', 'the stopped sign-in to end');
+  await until(async () => (await codexCell(team))[0] !== 'Finish sign-in in your browser…', 'the stopped sign-in to end');
   same('Stop ends Codex’s sign-in and its helper and frees their ports; no list is run after', [alive(loginPid), alive(helperPid), await portFree(loginPort), await portFree(helperPort), started().length - loginsFrom], [false, false, true, true, 1]);
+  same('… its end is the copy’s it was started for: the server as it is now says Not checked', (await codexCell(team))[0], 'Not checked');
+  write('.codex/config.toml', withTeam(47214));
+  await a.click('#header-refresh');
   same('stopped: it says so, with Try again and the command to copy', await codexCell(team), ['Stopped', 'Try again', 'Copy', 'codex mcp login \'team\'\\\'\'s docs\'']);
   // Try again, and Codex signs in: Signed in with the time, nothing to press; the same after another page and back.
   writeFileSync(join(said, 'codex.login'), 'accept');
@@ -11610,9 +11619,10 @@ ${listen(`spawnSync(${JSON.stringify(opener)}, ['http://127.0.0.1:' + listening.
   await picture('refused', SMALLEST, 'light', 'oauth');
   // No answer in the time it is given (here 6 s; the app's own is 3 minutes): stopped as Stop stops it, and said so.
   writeFileSync(join(said, 'codex.login'), 'wait');
+  const listenedBefore = listened().length;
   await a.click(await act('oauth'));
-  await until(async () => listened().length === 3, 'the sign-in that won’t end to listen');
-  const [waitPort, waitPid] = listened()[2];
+  await until(async () => listened().length === listenedBefore + 1, 'the sign-in that won’t end to listen');
+  const [waitPort, waitPid] = listened().at(-1);
   await until(async () => (await codexCell('oauth'))[0] === 'No answer after 3 minutes', 'the sign-in’s limit');
   same('no answer in its time: said so, with Try again and Copy; nothing of Codex’s left running or listening',
     [await codexCell('oauth'), alive(waitPid), await portFree(waitPort)], [['No answer after 3 minutes', 'Try again', 'Copy', 'codex mcp login oauth'], false, true]);
@@ -11626,12 +11636,13 @@ ${listen(`spawnSync(${JSON.stringify(opener)}, ['http://127.0.0.1:' + listening.
   if (main) {
     await main.run(`(() => { const handlers = electron.ipcMain._invokeHandlers, real = handlers.get('mcp-signin:start'); globalThis.ckAside = real; globalThis.ckAsks = [];
       handlers.set('mcp-signin:start', (event, ...args) => { globalThis.ckAsks.push(args); return real(event, ...args); }); return true; })()`);
+    writeFileSync(join(said, 'codex.login'), 'refuse');
     await a.click(await act('oauth'));
     await until(async () => (await codexCell('oauth'))[0] === 'Sign-in didn’t finish', 'the sign-in whose ask is kept');
     const [kept] = await main.run('globalThis.ckAsks');
     await main.run(`(electron.ipcMain._invokeHandlers.set('mcp-signin:start', globalThis.ckAside), true)`);
     const startedBefore = started().length;
-    write('.codex/config.toml', `${codexConfig.replace(P(47202), P(47215))}\n[mcp_servers."${team}"]\nurl = "${P(47214)}"\n`);
+    write('.codex/config.toml', withTeam(47214).replace(P(47202), P(47215)));
     await a.click('#header-refresh');
     same('the page’s ask sent again after its server changed: refused, nothing run', [await ask(...kept), started().length - startedBefore], [{ notStarted: 'Changed since the page showed it' }, 0]);
     same('… and the page dropped what that copy’s sign-in ended with', (await codexCell('oauth'))[0], 'Not checked');
