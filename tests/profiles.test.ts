@@ -777,12 +777,14 @@ test('A switch keeps a tool choice he made on an item it turns On: its Undo turn
     assert.deepEqual((await keptOut(box))['skill:pager'], ['codex-cli'], 'Off again, kept out of Codex as he left it');
     await applySkills(box.context, box.tools, [{ key: 'pager', on: true, except: ['codex-cli'], seenOn: false }]);
     assert.deepEqual([!!(await bytes(folderOf(box, 'claude-cli', 'pager'))), await bytes(folderOf(box, 'codex-cli', 'pager'))], [true, undefined]);
-    // Switched again, then pager kept out of Copilot CLI by hand: the Undo leaves pager On as he left it, and names it.
-    await applySkills(box.context, box.tools, [{ key: 'pager', on: false, except: ['codex-cli'], seenOn: true }]);
+    // Switched again (dev and pager off by then), then pager kept out of Copilot CLI by hand: the Undo turns dev back off, and
+    // leaves pager On as he left it, Codex's copy kept, and names it.
+    await applySkills(box.context, box.tools, [{ key: 'pager', on: false, except: ['codex-cli'], seenOn: true }, { key: 'dev', on: false, except: [], seenOn: true }]);
     const again = await switchProfile(box.context, box.tools, everyday, NO_PLUGINS);
     await applySkills(box.context, box.tools, [{ key: 'pager', on: true, except: ['copilot-cli'], seenOn: true }]);
     const undone = await undoSwitch(box.context, box.tools, again.event!, NO_PLUGINS);
-    assert.deepEqual([undone.switched?.since, (await keptOut(box))['skill:pager'], !!(await bytes(folderOf(box, 'codex-cli', 'pager')))], [['pager’s tools, changed since the switch'], ['copilot-cli'], true]);
+    assert.deepEqual([undone.switched?.off, undone.switched?.since, (await keptOut(box))['skill:pager'], !!(await bytes(folderOf(box, 'codex-cli', 'pager')))],
+      [['dev'], ['pager’s tools, changed since the switch'], ['copilot-cli'], true]);
   } finally { await box.cleanup(); }
 });
 
