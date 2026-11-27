@@ -676,6 +676,8 @@ export function lineBox(plugin: string, marketName: string, source: string | und
 
 /** The read of the home this page's view was last asked for by the Library (wantView); another home starts over (resetMarket). */
 let viewFor: number | undefined;
+/** Whether this page's view is the one read for the home on screen (wantView), so a press may act on what it says: not while read again, or after a read failed. */
+export const viewCurrent = () => market.read.state === 'ready' && viewFor === app.home?.readId;
 /** While a plugin's item is open in the Library, its lines need this page's view, as Harnesses does: read once for each read of the home. */
 export function wantView(readId: number | undefined): void {
   if (viewFor === readId || app.page === 'plugins') return;
@@ -724,7 +726,7 @@ export function closeLineResult(result: LineResult): void {
 /** He pressed Refresh (app.ts readAgain): every line's result goes. */
 export const forgetResults = () => { results = []; };
 /**
- * An act on a plugin starts, from either page (a line's, a box's or a switch's, the item lists' plugin switches: app.ts runSwitches):
+ * An act on a plugin starts, from any page (a line's, a box's or a switch's, the item lists' plugin switches: app.ts runSwitches):
  * that plugin's earlier results and their Undo go, on its line, in the header (an Outcome naming it in `plugins`), and the Plugins
  * page's last run where it was that plugin's. Only that plugin's.
  */
@@ -761,6 +763,8 @@ export function turnFromLine(aim: LineAim): void {
  */
 async function runLine(click: LineClick): Promise<void> {
   const { aim } = click, atStart = profilesBefore();
+  // An earlier act's result on this plugin in another tool goes with its Undo (one result a plugin: retire), and this one says so.
+  const earlier = results.find(each => each.aim.plugin === aim.plugin && each.aim.tool !== aim.tool && each.undo);
   retire(aim.plugin);
   rerender();
   const result = await api().turnPlugin(aim.source, aim.plugin, aim.act === 'keep-out' ? 'keep-out' : 'let-in', aim.tool, aim.home)
@@ -792,7 +796,8 @@ async function runLine(click: LineClick): Promise<void> {
     : `${words.done} ${aim.plugin} in ${where}${aim.act === 'install' ? installedNow(aim) : ''}.${aim.yours?.length ? ` ${yoursStay(aim.yours)}` : ''}`;
   const back = result.back ?? [], undoes = back.length > 0 || (already && recordChanged);
   const did = mine.some(step => succeeded(step.report)) || (already && recordChanged);
-  sayResult({ aim, words: [said, read ? '' : 'The page couldn’t be read again after it: Refresh shows where things stand.'].filter(Boolean).join(' '),
+  const kept = earlier ? `${toolNames[earlier.aim.tool]} stays ${earlier.aim.act === 'keep-out' ? 'off' : 'on'}${undoes ? `; Undo is for ${where}` : ''}.` : '';
+  sayResult({ aim, words: [said, kept, read ? '' : 'The page couldn’t be read again after it: Refresh shows where things stand.'].filter(Boolean).join(' '),
     next: reloadAdvice(settleReloads(pluginReloads(mine)), toolWays()).text, failed: !!problem, ...(undoes ? { undo: () => void undoLine(aim, result.before ?? null, back) } : {}) }, pluginReloads(mine), { checkProfile: did, before: atStart });
 }
 
@@ -815,6 +820,9 @@ function sayResult(result: LineResult, changes: ReloadChange[], check: { checkPr
   tell(result.told, '', check);
   result.told = app.outcome;
 }
+/** After Undo switch (app.ts restoreEvent): each plugin a press on Profiles turned on and its Undo still stands for, on there now. */
+export const stillOnFromProfiles = () => results.filter(each => each.aim.page === 'profiles' && each.undo && app.home?.pluginItems?.some(install => install.tool === each.aim.tool
+  && install.plugin === each.aim.plugin && install.marketName === each.aim.marketName && !install.off)).map(each => ` ${each.aim.plugin} stays on in ${toolNames[each.aim.tool]}.`).join('');
 /** The one key of the line a result is on: its tool and item (matrix.ts draws it as the result's data-result). */
 export const resultKey = (aim: Pick<LineAim, 'tool' | 'item'>) => `${aim.tool}:${aim.item.kind}:${aim.item.name.toLowerCase()}`;
 

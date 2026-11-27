@@ -135,14 +135,14 @@ function pluginStrip(plugin: string, marketName: string, installs: InstalledPlug
 
 /**
  * The facts a tool's line on a plugin's item is drawn from (pluginline.ts LineFacts): the home's view, and the Plugins page's,
- * read for it while such a row is open (pluginstate.ts wantView, lineBox), with the listing's source a turn names. Profiles asks
- * them too, for a held profile's plugin off in a tool (profilespage.ts turnOnControl).
+ * read for it while such a row is open (pluginstate.ts wantView, lineBox), with the listing's source a turn names, and his own names
+ * there (`withYours`). Profiles asks them too, without his names, for a held profile's plugin off in a tool (profilespage.ts wayPast).
  */
-export function lineFacts(kind: PartKind, plugin: string, marketName: string, tool: HarnessId, through?: PluginItemAt, installed?: InstalledPlugin): LineFacts & { source?: string } {
+export function lineFacts(kind: PartKind, plugin: string, marketName: string, tool: HarnessId, through?: PluginItemAt, installed?: InstalledPlugin, withYours = true): LineFacts & { source?: string } {
   wantView(state.home?.readId);
   // Its source as a tool that has it registered spells it, so the listing is this one's where two of one name list the plugin.
   const known = through?.install.source ?? installed?.source ?? state.home?.pluginItems?.find(install => install.plugin === plugin && install.marketName === marketName && install.source)?.source;
-  const box = lineBox(plugin, marketName, known, tool), yours = state.home ? yoursIn(state.home, plugin, marketName, tool) : undefined;
+  const box = lineBox(plugin, marketName, known, tool), yours = withYours && state.home ? yoursIn(state.home, plugin, marketName, tool) : undefined;
   return { tool, kind, plugin, marketName, through, installed, box: box.box, parts: box.parts, source: box.source, ...(yours?.length ? { yours } : {}) };
 }
 

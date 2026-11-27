@@ -2,6 +2,10 @@
 // main's calls one at a time and reads what the page holds in between. First the Plugins page's switch (pluginstate.ts
 // turnPlugin), then an item page's row switches (app.ts queueClick) and when their result goes by itself (app.ts FADE_MS); then,
 // on the same code, a background notice taken during a click or a home read, and when the rows a click pins are let go (app.ts pinnedRows, drawPage).
+// A trap here: `t.mock.method` on a method a test has mocked already is undone oldest first, so the earlier mock is put back and
+// stays after the test. A `document.querySelector` left answering an element keeps a header result's fade rescheduling itself every
+// 250 ms (app.ts fadeNow, heldInHeader), and this file then never exits. Mock it once a test, and change its answer with
+// `mock.mockImplementation`.
 import { mock, test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Change, HarnessId, HomeView, ItemNotice, MarketplaceView, PassResult, PluginTurn, PluginTurnResult, PluginsView, ProfileSwitchResult } from '../src/types.ts';
@@ -3077,8 +3081,7 @@ test('Library plugin line (sayResult): carries profileLine on LineResult when li
   // Turn the plugin on (let-in) and line Undo ending Work also carry profileLine; failed line act carries none.
   app.home = viewWith(true);
   nextHome = viewWith(false);
-  // Kept so the last case can take the line off screen: a second mock of it would be restored first, leaving this one in place.
-  const lineOnScreen = t.mock.method(document, 'querySelector', () => element());
+  t.mock.method(document, 'querySelector', () => element());
   const letInAim = { ...aim, act: 'let-in' as const, tool: 'codex-cli' as HarnessId, item: { kind: 'skill' as const, name: 'triage' } };
   const turnedOn: PluginTurnResult = {
     done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'codex-cli', action: 'plugin-on', report: { tool: 'codex-cli', outcome: 'plugin-on', changed: true, message: 'Turned on.', runs: [] } }],
@@ -3111,17 +3114,32 @@ test('Library plugin line (sayResult): carries profileLine on LineResult when li
   await settled();
   assert.equal(resultOn('codex-cli', { kind: 'skill', name: 'triage' })?.profileLine, undefined);
   assert.doesNotMatch(app.said.text, /stopped being the profile/);
+});
 
-  // Pressed on Profiles (profilespage.ts turnOnControl), where no line is drawn: its result and Undo are told there, and so is the Undo's.
-  lineOnScreen.mock.mockImplementation(() => null);
-  turnFromLine({ ...letInAim, page: 'profiles' });
+test('Turn the plugin on pressed on Profiles (profilespage.ts turnOnControl), where no line is drawn: its result and Undo are told on Profiles, and so is that Undo’s', async t => {
+  const { viewWith } = pluginProfileWorld(t);
+  app.page = 'library';
+  const prevCss = (globalThis as Record<string, unknown>).CSS;
+  (globalThis as Record<string, unknown>).CSS = { escape: (value: string) => value };
+  t.after(() => { (globalThis as Record<string, unknown>).CSS = prevCss; });
+  app.home = viewWith(true);
+  t.mock.method(api, 'refresh', async () => viewWith(true));
+  t.mock.method(document, 'querySelector', () => null);
+  t.mock.method(api, 'undoPluginTurn', async () => ({
+    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'codex-cli', action: 'plugin-off', report: { tool: 'codex-cli', outcome: 'plugin-off', changed: true, message: 'Off again.', runs: [] } }],
+  }));
+  turnFromLine({ home: '/home', source: '/market', marketName: 'team', plugin: 'alpha', tool: 'codex-cli', act: 'let-in', item: { kind: 'skill', name: 'triage' }, page: 'profiles' });
   await settled();
-  await main.answer(turnedOn);
+  await main.answer({
+    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'codex-cli', action: 'plugin-on', report: { tool: 'codex-cli', outcome: 'plugin-on', changed: true, message: 'Turned on.', runs: [] } }],
+    before: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: ['codex-cli'] },
+    back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'codex-cli', action: 'plugin-off' }],
+  });
   await settled();
   assert.deepEqual([app.outcome?.page, app.outcome?.act?.label, app.outcome?.plugins], ['profiles', 'Undo', ['alpha']]);
   app.outcome!.act!.run();
   await settled();
-  assert.equal(app.outcome?.page, 'profiles');
+  assert.deepEqual([app.outcome?.page, app.outcome?.text], ['profiles', 'Undone: alpha off again in Codex.']);
 });
 
 test('One plugin click announces once, with its result and profile sentence together; a successful click leaving Work in use says nothing', async t => {

@@ -1,7 +1,8 @@
-// A profile held by a plugin that is off in a tool (profilespage.ts turnOnControl): the header's control in Switch's place and the
-// held row's come from one helper, so they can't differ. Where one press turns the plugin on there (pluginline.ts lineControl's
-// let-in, the Library line's own act) it is `Turn on <plugin> in <Tool>`; where it can't, and until the Plugins page's view is
-// read, it is the link to the plugin's page, as before.
+// A profile held by a plugin that is off in a tool (profilespage.ts wayPast, turnOnControl): the header's line, its control in
+// Switch's place and its `(?)` card come from one decision. Where one press turns the plugin on there (pluginline.ts lineControl's
+// let-in, the Library line's own act) on the Plugins page's view read for the home on screen, it is `Turn on <plugin> in <Tool>`;
+// where it can't, the header says why in view, with the link to the plugin's page. A held row has a control of its own only where
+// its plugin or tool isn't the header's.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { HarnessId, HomeView, InstalledPlugin, PluginsView } from '../src/types.ts';
@@ -16,48 +17,65 @@ const { putPageData } = await import('../src/pagedata.ts');
 const { market, resetMarket } = await import('../src/pluginstate.ts');
 
 const triage = 'plugin:skill:alpha@team/triage';
-/** A home where `tool` has alpha installed with its one skill, triage, as `install` says, and the profile Work ticks triage. */
-function homeWith(tool: HarnessId, install: Partial<InstalledPlugin>): HomeView {
-  const kind = { tools: [tool], items: [], library: {}, gate: { state: 'ready' } };
+/** A home where each tool has alpha installed, with its one skill triage, as `installs` says, and the profile Work ticks triage. */
+function homeWith(installs: [HarnessId, Partial<InstalledPlugin>][]): HomeView {
+  const kind = { tools: installs.map(([tool]) => tool), items: [], library: {}, gate: { state: 'ready' } };
   return { home: '/home', sync: { access: { allowed: true }, gate: { state: 'ready' }, caughtUp: [] }, skills: kind, mcp: kind, agents: kind,
-    pluginItems: [{ tool, plugin: 'alpha', marketName: 'team', source: '/market', listed: true, items: [{ kind: 'skill', name: 'triage', description: '' }], ...install }],
+    pluginItems: installs.map(([tool, install]) => ({ tool, plugin: 'alpha', marketName: 'team', source: '/market', listed: true, items: [{ kind: 'skill', name: 'triage', description: '' }], ...install })),
     profiles: { profiles: [{ id: 'work', name: 'Work', items: [triage], switchesPluginItems: true }], plugins: [] } } as unknown as HomeView;
 }
-/** The Plugins page's view, where alpha is listed and installed off in `tool`, its box free to act unless `patch` says otherwise. */
-const viewWith = (tool: HarnessId, patch: Partial<PluginsView> = {}) => ({ home: '/home', canWrite: true, tools: [tool], clis: { [tool]: true },
-  marketplaces: [{ source: '/market', name: 'team', kind: 'folder', plugins: [{ name: 'alpha' }], states: { alpha: { [tool]: { state: 'installed', off: true } } },
-    switches: { alpha: { entry: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: [tool] }, tools: { [tool]: { wanted: false, has: 'whole', takes: true } } } } }],
+/** The Plugins page's view, read for the home on screen: alpha listed and installed off in each of `tools`, its boxes free to act unless `patch` says otherwise. */
+const viewWith = (tools: HarnessId[], patch: Partial<PluginsView> = {}) => ({ home: '/home', canWrite: true, tools, clis: Object.fromEntries(tools.map(tool => [tool, true])),
+  marketplaces: [{ source: '/market', name: 'team', kind: 'folder', plugins: [{ name: 'alpha' }], states: { alpha: Object.fromEntries(tools.map(tool => [tool, { state: 'installed', off: true }])) },
+    switches: { alpha: { entry: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: tools }, tools: Object.fromEntries(tools.map(tool => [tool, { wanted: false, has: 'whole', takes: true }])) } } }],
   ...patch } as unknown as PluginsView);
-/** The header's control and the held row's, as drawn: each one's id and words. */
-function drawn(tool: HarnessId) {
+const all = (node: unknown, match: (el: FakeNode) => boolean): FakeNode[] => (!node || typeof node !== 'object' ? []
+  : [...((node as FakeNode).tag && match(node as FakeNode) ? [node as FakeNode] : []), ...((node as FakeNode).children ?? []).flatMap(child => all(child, match))]);
+/** As drawn: the header's line, then each way past it, header first, as its id and words, then the held row's note. */
+function drawn() {
   rendered = profilesPage() as unknown as FakeNode;
-  return ['profile-turn-on', 'profile-open-plugin', `pf-turn-on-${triage}-${tool}`, `pf-plugin-${triage}-${tool}`].flatMap(id => (findById(rendered, id) ? [`${id}: ${textOf(findById(rendered, id))}`] : []));
+  const ways = all(rendered, el => /^(profile-turn-on|profile-open-plugin|pf-turn-on-|pf-plugin-)/.test(el.attrs?.id ?? '')).map(el => `${el.attrs.id}: ${textOf(el)}`);
+  return [textOf(findById(rendered, 'profile-preview')), ...ways, ...all(rendered, el => el.className.split(/\s+/).includes('pf-note')).map(textOf)];
 }
-const pressIn = (tool: HarnessId, name: string) => [`profile-turn-on: Turn on alpha in ${name}`, `pf-turn-on-${triage}-${tool}: Turn on alpha in ${name}`];
-const linkIn = (tool: HarnessId) => ['profile-open-plugin: Open alpha', `pf-plugin-${triage}-${tool}: Open alpha`];
+const card = () => textOf(findById(rendered, 'profile-preview-info-card'));
 
-test('A held profile offers the one press that turns its plugin on where the Library line would, header and row alike; else the link', () => {
-  // Off in Codex or Copilot CLI, or kept off in Claude Code by the plugins record: one press, once the Plugins page's view is read.
+test('A held profile offers in Switch’s place the one press that turns its plugin on where the Library line would; its row says why, with no second press', () => {
+  // Off in Codex or Copilot CLI, or kept off in Claude Code by the plugins record: one press, once the view read for this home is in.
   for (const [tool, name, install] of [['codex-cli', 'Codex', { off: true }], ['copilot-cli', 'Copilot CLI', { off: true }], ['claude-cli', 'Claude Code', { off: true, keptOff: true }]] as const) {
-    app.home = homeWith(tool, install);
+    app.home = homeWith([[tool, install]]);
     resetMarket();
-    assert.deepEqual(drawn(tool), linkIn(tool), `${name}: while the Plugins page’s view is read, the link, never a button`);
-    putPageData(market.read, viewWith(tool));
-    assert.deepEqual(drawn(tool), pressIn(tool, name), `${name}: its box can act, so one press`);
+    assert.deepEqual(drawn(), [`Can’t switch · alpha is off in ${name}`, 'profile-open-plugin: Open alpha', `Its plugin is off in ${name}.`], `${name}: before the Plugins page’s view is read, the link`);
+    putPageData(market.read, viewWith([tool]));
+    assert.deepEqual(drawn(), [`Can’t switch · alpha is off in ${name}`, `profile-turn-on: Turn on alpha in ${name}`, `Its plugin is off in ${name}.`], `${name}: its box can act, so one press`);
   }
-  assert.equal(findById(rendered, 'profile-turn-on')?.attrs.title, 'Turns alpha on in Claude Code, as its own switch there does.');
-  app.home = homeWith('codex-cli', { off: true });
-  putPageData(market.read, viewWith('codex-cli'));
-  assert.equal(drawn('codex-cli').length, 2);
-  assert.equal(findById(rendered, 'profile-turn-on')?.attrs.title, 'Turns alpha on in Codex, as its own switch there does. Its items come on with it there, except those their own switch keeps off; Switch then turns off the ones this profile leaves out, wherever they can be switched.');
-  // Its box can't act here: no command-line tool, a home only previewed, no marketplace here listing it. The link stays, titled with why.
-  for (const [why, patch] of [['no CLI', { clis: { 'codex-cli': false } }], ['previewed', { canWrite: false, reason: 'Preview only.' }], ['unlisted', { marketplaces: [] }]] as [string, Partial<PluginsView>][]) {
-    putPageData(market.read, viewWith('codex-cli', patch));
-    assert.deepEqual(drawn('codex-cli'), linkIn('codex-cli'), why);
+  // The (?) card says what the press does, as its hover does: not that it can't be switched from here.
+  assert.equal(card(), 'Turns alpha on in Claude Code, as its own switch there does.');
+  app.home = homeWith([['codex-cli', { off: true }]]);
+  putPageData(market.read, viewWith(['codex-cli']));
+  drawn();
+  assert.equal(card(), 'Turns alpha on in Codex, as its own switch there does. Its items come on with it there, except those their own switch keeps off; Switch then turns off the ones this profile leaves out, wherever they can be switched.');
+  assert.equal(findById(rendered, 'profile-turn-on')?.attrs.title, card());
+  // While that view is read again, or after a read that failed, what it says may be gone: the link, until a read answers.
+  for (const state of ['reading', 'failed'] as const) {
+    market.read.state = state;
+    assert.deepEqual(drawn().slice(1, 2), ['profile-open-plugin: Open alpha'], state);
   }
+});
+
+test('Where one press can’t clear it, the header says why in view, with the link; a second plugin or tool held gets its own press on its row', () => {
+  app.home = homeWith([['codex-cli', { off: true }]]);
+  const off = (patch: Partial<PluginsView>) => { putPageData(market.read, viewWith(['codex-cli'], patch)); return drawn().slice(0, 2); };
+  assert.deepEqual(off({ clis: { 'codex-cli': false } }), ['Can’t switch · No Codex command-line tool here', 'profile-open-plugin: Open alpha']);
+  assert.deepEqual(off({ canWrite: false, reason: 'Preview only.' }), ['Can’t switch · this home can only be previewed', 'profile-open-plugin: Open alpha']);
+  assert.deepEqual(off({ marketplaces: [] }), ['Can’t switch · alpha’s marketplace isn’t added here', 'profile-open-plugin: Open alpha']);
   assert.equal(findById(rendered, 'profile-open-plugin')?.attrs.title, 'Off in Codex. Its marketplace “team” isn’t added in Central Knot or in any tool here, so it can’t be turned on from here.');
+  // Off in Codex and in Copilot CLI: the header's press is for the first its line names; Copilot CLI's row has its own.
+  app.home = homeWith([['copilot-cli', { off: true }], ['codex-cli', { off: true }]]);
+  putPageData(market.read, viewWith(['copilot-cli', 'codex-cli']));
+  assert.deepEqual(drawn(), ['Can’t switch · alpha is off in Copilot CLI and 1 more', 'profile-turn-on: Turn on alpha in Copilot CLI', `pf-turn-on-${triage}-codex-cli: Turn on alpha in Codex`,
+    'Its plugin is off in Copilot CLI.', 'Its plugin is off in Codex. Turn on alpha in Codex']);
   // Off in Claude Code without the record keeping it off: the profile turns the plugin whole there, so nothing is held.
-  app.home = homeWith('claude-cli', { off: true });
-  putPageData(market.read, viewWith('claude-cli'));
-  assert.deepEqual(drawn('claude-cli'), []);
+  app.home = homeWith([['claude-cli', { off: true }]]);
+  putPageData(market.read, viewWith(['claude-cli']));
+  assert.deepEqual(drawn().filter(said => said.startsWith('profile-') || said.startsWith('pf-')), []);
 });
