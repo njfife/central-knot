@@ -11,9 +11,9 @@ import { lockSkip, withLock } from './fslock.ts';
 import { spawnSync } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { agentText, readAgents } from '../src/agentfiles.ts';
-import { agentVersion, agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
+import { agentToolFile, agentVersion, agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
 import { rowClicks, harnessIs, placeOf, libraryWords, sentences } from '../src/libraryrow.ts';
 import { clickResults } from '../src/clickplan.ts';
 import { librarySentence } from '../src/historyactions.ts';
@@ -26,7 +26,7 @@ import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
 import { readTomlTables } from '../src/textedit.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import type { HarnessId, PassResult } from '../src/types.ts';
-import { choose, claudeAgent, claudeOwn, codexAgent, deleteIt, fileOf, filesOf, historyActions, historyOf, itemOf, keepOut, makeCurrent, pass, readOf, sandbox, seen, tools, trial, turnOff, turnOn, undo, write, type Box, type Tool } from './agentclicks.ts';
+import { choose, claudeAgent, claudeOwn, codexAgent, deleteIt, fileOf, files, filesOf, historyActions, historyOf, itemOf, keepOut, makeCurrent, pass, readOf, sandbox, seen, tools, trial, turnOff, turnOn, undo, write, type Box, type Tool } from './agentclicks.ts';
 
 const { harnessLine, noticeWords, said } = sentences(libraryWords.agents);
 const inBox = (name: string, body: (box: Box) => Promise<void>, options: { skip?: boolean | string } = {}) => test(name, options, async () => { const box = await sandbox(); try { await body(box); } finally { await box.cleanup(); } });
@@ -1038,6 +1038,22 @@ inBox('Clicking Add, On, or a harness’s switch with a locked agents folder nam
   assert.ok(await readOf(box, 'codex-cli'));
   assert.deepEqual((await pass(box)).results, []);
 }, { skip: lockSkip });
+
+// ---------- An agent's file, read on a click ----------
+
+inPiBox('An agent’s file is read on a click as each tool spells it, found by its key; another home, an unmanaged tool, a name with no file, and Pi’s own skill read nothing; two names a case apart read a note saying so', async box => {
+  await on(box);
+  await writeFile(join(piSkills(box), 'notes.md'), '---\nname: notes\ndescription: The person’s own skill.\n---\n\nNotes.\n');
+  const read = (key: string, tool: HarnessId, home = box.home, managed = box.tools) => agentToolFile(box.context, managed, home, key, tool);
+  for (const tool of box.tools as Tool[]) assert.deepEqual(await read('reviewer', tool), { files: [basename(files[tool])], directory: dirname(fileOf(box, tool)), text: await readOf(box, tool) }, tool);
+  assert.deepEqual([await read('reviewer', 'claude-cli', join(box.base, 'elsewhere')), await read('reviewer', 'codex-cli', box.home, ['claude-cli']), await read('nobody', 'claude-cli'), await read('notes', 'pi-cli')],
+    [undefined, undefined, undefined, undefined]);
+  // A case-sensitive disk holds both names, and which is the agent's can't be told: the read says so, with no folder to show.
+  // On another disk the second write is the same file.
+  await writeFile(join(box.home, '.claude/agents/Reviewer.md'), claudeAgent('Twin.\n'));
+  const twins = (await readdir(join(box.home, '.claude/agents'))).length === 2, got = await read('reviewer', 'claude-cli');
+  assert.deepEqual(twins ? [got?.note, got?.text, got?.directory] : [got?.text], twins ? ['Two agent files here differ only in capitals, so neither is shown.', undefined, undefined] : [claudeAgent('Twin.\n')]);
+});
 
 // ---------- Found agents ----------
 

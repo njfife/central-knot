@@ -1,6 +1,6 @@
 // An agent as each harness's own file holds it: Claude Code Markdown, Copilot `.agent.md`, Codex TOML, OpenCode Markdown
 // (AGT-01), and in Pi, which has no agents, the same Markdown as a skill in its skills folder (`suffixes`, below). This module
-// reads those files and writes them; what is synced, and when, is agents.ts.
+// reads those files (readAgents; one of them for the file panel, agentFile) and writes them; what is synced, and when, is agents.ts.
 // An agent has two parts. The shared part is its name, description and prompt: every harness can hold it, and `agentHash`
 // names it. Its own part is everything else in one harness's file (tools, model, hooks, Codex keys and tables, comments):
 // no equivalent is recorded across harnesses, so it stays in that harness's file. `agentText` writes the shared part into a
@@ -11,9 +11,9 @@ import { parseDocument, stringify as stringifyYaml } from 'yaml';
 import { configRoot, harnesses, writeRoot } from './harnesses.ts';
 import type { LibraryItem } from './library.ts';
 import { agentTools, agentsKeptIn, type AgentTool } from './presence.ts';
-import { errorCode, itemKey, sha256, type ShareContext } from './share.ts';
+import { errorCode, itemKey, sha256, shownText, type ShareContext } from './share.ts';
 import { readTomlTables, tomlValue } from './textedit.ts';
-import type { HarnessId } from './types.ts';
+import type { HarnessId, FileRead } from './types.ts';
 
 export const isAgentTool = (tool: HarnessId): tool is AgentTool => agentTools.some(agentTool => agentTool === tool);
 
@@ -118,6 +118,16 @@ export interface AgentsRead { entries: AgentEntry[]; problems: string[]; unreada
 /** Whether the agents record says Central Knot applied this agent in the tool (LibraryItem applied), live or deleted. */
 const appliedThere = (record: Record<string, LibraryItem>, key: string, tool: AgentTool) =>
   Object.hasOwn(record, key) && record[key].applied[tool] !== undefined;
+/**
+ * What a file in a tool's agents folder is, by its name (readAgents and agentFile both go by this): an agent's copy (`agent`,
+ * its name), the person's own skill (`skill`, its key: a loose file in a skills folder that the record says no agent was
+ * applied as), or neither (another suffix, a dot-file, a file Central Knot set aside while writing).
+ */
+function fileIs(tool: AgentTool, file: string, record: Record<string, LibraryItem>): { agent: string } | { skill: string } | undefined {
+  if (!file.endsWith(suffixes[tool]) || file.startsWith('.') || file.includes('.ck-')) return undefined;
+  const name = file.slice(0, -suffixes[tool].length);
+  return agentsKeptIn[tool] === 'skills folder' && !appliedThere(record, itemKey(name), tool) ? { skill: itemKey(name) } : { agent: name };
+}
 
 /**
  * Reads one tool's agents. A file that cannot be read as an agent is reported in `unreadable` and never written or deleted.
@@ -135,11 +145,11 @@ export async function readAgents(context: ShareContext, tool: AgentTool, record:
     if (!gone) { problems.push(`${agentsFolder(context, tool)} could not be read.`); unreadable.set('*', agentsFolder(context, tool)); }
     return { entries, problems, unreadable, skills };
   }
-  const suffix = suffixes[tool];
-  for (const file of names.filter(entry => entry.endsWith(suffix) && !entry.startsWith('.') && !entry.includes('.ck-'))) {
-    const name = file.slice(0, -suffix.length);
-    if (agentsKeptIn[tool] === 'skills folder' && !appliedThere(record, itemKey(name), tool)) { skills.add(itemKey(name)); continue; }
-    const path = join(agentsFolder(context, tool), file);
+  for (const file of names) {
+    const is = fileIs(tool, file, record);
+    if (!is) continue;
+    if ('skill' in is) { skills.add(is.skill); continue; }
+    const name = is.agent, path = join(agentsFolder(context, tool), file);
     let text: string;
     try { text = await readFile(path, 'utf8'); } catch { problems.push(`${path} could not be read.`); unreadable.set(itemKey(name), path); continue; }
     const agent = parseAgent(tool, name, text);
@@ -148,6 +158,22 @@ export async function readAgents(context: ShareContext, tool: AgentTool, record:
     entries.push({ name, key: itemKey(name), tool, file: path, text, agent, hash: agentHash(agent), bytes: sha256(text), at });
   }
   return { entries, problems, unreadable, skills };
+}
+
+/**
+ * One agent's file in a tool, found by its key as readAgents finds it (fileIs), and its text as it is, for the file panel
+ * (share.ts shownText): following a link as readAgents does. None when no file is there for the key. Where two whose names
+ * differ only by case are (readAgents can't tell them apart either), a note saying so, with no folder: neither is shown.
+ */
+export async function agentFile(context: ShareContext, tool: AgentTool, key: string, record: Record<string, LibraryItem>): Promise<FileRead | undefined> {
+  const directory = agentsFolder(context, tool);
+  const isIt = (file: string) => { const is = fileIs(tool, file, record); return !!is && 'agent' in is && itemKey(is.agent) === key; };
+  const named = (await readdir(directory).catch(() => [] as string[])).filter(isIt);
+  if (named.length > 1) return { files: named, note: 'Two agent files here differ only in capitals, so neither is shown.' };
+  if (!named.length) return undefined;
+  const info = await stat(join(directory, named[0])).catch(() => undefined);
+  const shown = info?.isFile() ? await shownText(join(directory, named[0]), info.size) : undefined;
+  return shown && { files: named, directory, ...shown };
 }
 
 const CONTROL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]|\r(?!\n)/;
