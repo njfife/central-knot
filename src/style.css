@@ -2350,15 +2350,15 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 /* While the rows go by last updated, each says when (matrix.ts whenCell) in a column of its own before the marks, at least 6.5em wide. */
 .ov-row.ov-switch-row.ov-dated { grid-template-columns: auto minmax(0, 1fr) minmax(6.5em, auto) auto auto; }
 .ov-when { font-size: 12px; color: var(--ink-soft); text-align: right; white-space: nowrap; }
-/* Usage (matrix.ts usedCell): each row says its figure in a column of its own before the marks, sized to its words up to the
-   longest ("used 13 days ago · 999 sessions") so a long name uses the room before it (dated rows and empty collecting cells
-   keep the full width so dates line up and the column holds its room); the count fainter; an opened row says each tool's (matrix.ts usageLine). */
+/* Usage (matrix.ts usedCell): each row says its Sort's figure in a column of its own before the marks, sized to its words up
+   to the longest ("no use seen since Nov 29, 2025") so a long name uses the room before it (dated rows and pending collecting
+   cells keep the full width so dates line up and the column holds its room); an opened row says each tool's (matrix.ts usageLine). */
 .ov-row.ov-switch-row.ov-usage { grid-template-columns: auto minmax(0, 1fr) auto auto auto; }
 .ov-row.ov-switch-row.ov-dated.ov-usage { grid-template-columns: auto minmax(0, 1fr) minmax(6.5em, auto) auto auto auto; }
 .ov-used { max-width: 16em; font-size: 12px; color: var(--ink-soft); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ov-dated .ov-used, .ov-used:empty { width: 16em; }
+.ov-usage:not(.ov-dated):has(> .ov-used:not(:empty)) .ov-name-about { padding-right: 16px; }
+.ov-dated .ov-used, .ov-used-pending { width: 16em; }
 .ov-used-faint { color: var(--ink-faint); }
-.ov-used-count { color: var(--ink-faint); }
 .ov-used-skip { color: var(--ink); font-weight: 500; }
 /* The chip's band (matrix.ts unusedBand): one line beside its button; limits unfold full width under it. */
 .usage-band { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; }

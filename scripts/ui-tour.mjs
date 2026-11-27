@@ -3069,7 +3069,7 @@ if (wanted('usage')) {
     await requests.restore('usage:read');
   }
   await waitFor(a, `/^Usage statistics collected/.test(document.querySelector('#usage-line .band-text > :not(.band-unshown)')?.textContent ?? '')`, 30000);
-  await atEverySize('collected', 'The reading landed: the band, as high as while it collected, says it was collected, with its close button (the time is beside the button); each row says used how long ago and, fainter, in how many sessions, or no use seen since the latest date its tools’ history starts (release-notes)', true);
+  await atEverySize('collected', 'The reading landed: the band, as high as while it collected, says it was collected, with its close button (the time is beside the button); under Sort by Name used rows leave the cell blank, while unused rows say no use seen since the latest date their tools’ history starts (release-notes)', true);
   await a.click('#usage-line-close');
   await atEverySize('closed', 'Closed the band: it takes no room, and when it was collected stays beside the button', true);
   await openRow('skills', 'release-notes');
@@ -3084,11 +3084,11 @@ if (wanted('usage')) {
   await a.click('#collect-usage');
   await waitFor(a, `!!document.querySelector('#put-in-order')`, 15000);
   await a.click('#usage-line-close');
-  await atEverySize('held', 'Sort by Last used, release-notes used just now, Update: no row moved when the reading landed (release-notes says used just now where it was), and Put in order, beside Sort, is offered', true);
+  await atEverySize('held', 'Sort by Last used, release-notes used just now, Update: no row moved when the reading landed (release-notes says just now where it was), and Put in order, beside Sort, is offered', true);
   await a.click('#put-in-order');
   await shot(a, 'put-in-order', 'Clicked Put in order: release-notes goes first under On, and the link goes');
   await openKind(a, 'agents');
-  await shot(a, 'agents', 'Agents after the same reading: each agent’s figure, or a faint can’t say where no tool that has it on can tell (release-notes, only in Codex, which keeps no sessions here); no chip, as none is in it');
+  await shot(a, 'agents', 'Agents after the same reading: each agent’s figure, or a faint use unknown where no tool that has it on can tell (release-notes, only in Codex, which keeps no sessions here); no chip, as none is in it');
   if (requests) {
     await openKind(a, 'skills');
     await requests.fail('usage:read');
