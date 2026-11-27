@@ -826,7 +826,7 @@ function homeWith(t: TestContext, items: { kind: PageKind; key: string; plugin?:
     gate: kind === stopped ? { state: 'stopped', reason: 'The MCP record is damaged. Nothing was written or deleted.' } : { state: 'ready' },
     library: Object.fromEntries(items.filter(item => item.kind === kind).map(item => [item.key, { ...newItem(item.key, item.key), on }])) });
   app.home = { home: '/home', label: 'Practice', sync: { managed: ['claude-cli', 'codex-cli'], caughtUp: [], access: { allowed: true }, gate: { state: 'ready' } },
-    skills: view('skills'), mcp: view('mcp'), agents: view('agents') } as unknown as HomeView;
+    skills: view('skills'), mcp: view('mcp'), agents: view('agents'), profiles: { profiles: [] } } as unknown as HomeView;
   const events = items.map((item, at) => ({ id: `off-${item.kind}-${item.key}`, key: `${record[item.kind]}${item.key}`, kind: 'off', at: new Date(Date.UTC(2026, 10, 18, 9, 0, at)).toISOString() }));
   t.mock.method(api, 'history', async () => ({ events, days: 30 }));
   return events;

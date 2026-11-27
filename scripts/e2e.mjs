@@ -19502,7 +19502,8 @@ async function profilePluginsFlow() {
   same('worked example 5: with an off-switch standing in Copilot CLI, the row tooltip does not say issues is on now',
     [await b.text('.profile-header p'), await b.text('#profile-preview-info-card'), await b.run(`document.querySelector('.pf-row[data-item="mcp:issues"] .pf-state')?.dataset.state`),
       await b.run(`document.querySelector('.pf-row[data-item="mcp:issues"] .pf-tick')?.title`)],
-    ['Switching turns 1 on', 'Switching turns 1 item on. Plugin items stay as they are.', 'Turns on',
+    // The row says where it won't be: the Library keeps issues out of Claude Code and Codex.
+    ['Switching turns 1 on', 'Switching turns 1 item on. Plugin items stay as they are.', 'Turns on, not in Claude Code and Codex',
       'In Old work: switching to it turns issues on. Click to leave it out. issues is off in Copilot CLI now.']);
   await b.click('#profile-switch'); await bDone();
   same('worked example 1 (page): switch clears the off-switch, header keeps the sentence with no Undo switch, row state is blank, and tooltip says on now',
