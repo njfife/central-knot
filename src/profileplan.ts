@@ -166,8 +166,10 @@ export function effectiveOut(profile: Pick<Profile, 'tools' | 'out'>, item: Pick
 /** A profile's `tools` once `tool` is ticked (`on`) or unticked on its strip: an untick leaves out that one, every other tool still in. */
 export const withTool = (profile: Pick<Profile, 'tools'>, tool: HarnessId, on: boolean) =>
   (on ? [...profile.tools ?? [], tool] : (profile.tools ?? harnessIds).filter(other => other !== tool));
-/** The managed tools a profile applies to (its `tools`, or every one): what its Tools strip ticks and the list counts. */
-export const toolsOf = (profile: Pick<Profile, 'tools'>, managed: readonly HarnessId[]) => managed.filter(tool => !profile.tools || profile.tools.includes(tool));
+/** Whether a profile applies in `tool` (its `tools` names it, or it has none): a switch to it changes nothing in a tool it doesn't, a plugin's copy there included. */
+export const appliesIn = (profile: Pick<Profile, 'tools'>, tool: HarnessId) => !profile.tools || profile.tools.includes(tool);
+/** The managed tools a profile applies to (appliesIn): what its Tools strip ticks and the list counts. */
+export const toolsOf = (profile: Pick<Profile, 'tools'>, managed: readonly HarnessId[]) => managed.filter(tool => appliesIn(profile, tool));
 /** A profile's `out` as the Library has its ticked items now (`live`): each one's keep-outs, where it has any (profiles.ts saveProfile fills one in so). */
 export const outNow = (profile: Pick<Profile, 'items'>, live: LiveItem[]) =>
   Object.fromEntries(live.filter(item => profile.items.includes(item.id) && item.except.length).map(item => [item.id, [...item.except]]));
@@ -345,7 +347,7 @@ export const comesWith = (profile: Pick<Profile, 'items'>, item: PluginLive) => 
   return !!install && !profile.items.includes(item.id) && takenWhole(profile, install).brought.some(part => samePart(part, item));
 };
 /** Each plugin in Claude Code a switch to `profile` turns on or off there whole (takenWhole against its own switch now), whether or not an item of it changes. */
-export const wholeTurns = (profile: Pick<Profile, 'items' | 'switchesPluginItems'>, plugins: PluginLive[]) => (!profile.switchesPluginItems ? []
+export const wholeTurns = (profile: Pick<Profile, 'items' | 'switchesPluginItems' | 'tools'>, plugins: PluginLive[]) => (!profile.switchesPluginItems || !appliesIn(profile, 'claude-cli') ? []
   : [...new Set(plugins.map(claudeInstall))].filter((install): install is InstalledPlugin => !!install && (takenWhole(profile, install).ticked.length > 0) === !!install.off));
 
 /**
@@ -357,7 +359,7 @@ export const wholeTurns = (profile: Pick<Profile, 'items' | 'switchesPluginItems
 export interface PluginTurn { id: string; on: HarnessId[]; off: HarnessId[]; held: { tool: HarnessId; why: string }[]; along?: HarnessId[] }
 
 /**
- * What switching to `profile` would turn of the plugins' items, one item in one tool at a time. When
+ * What switching to `profile` would turn of the plugins' items, one item in one tool at a time, in the tools it applies in (appliesIn). When
  * `profile.switchesPluginItems` is false, the only copies in its plan are Copilot CLI MCP copies toward on whose exact name
  * `profile` names among his own servers (never held); otherwise each copy that is not as wanted (on when `profile` names `item`,
  * when `copilotKeptOnBy` keeps that exact Copilot CLI name on, or for a skill in Claude Code when its plugin is on there:
@@ -365,10 +367,10 @@ export interface PluginTurn { id: string; on: HarnessId[]; off: HarnessId[]; hel
  * where it is `plugin-off` or `held`; an `unread` copy is held either way; a copy that `stays` is left. Only items with something
  * turned or held are listed; an id naming nothing any tool has now is dormant.
  */
-export function pluginPlan(profile: Pick<Profile, 'items' | 'switchesPluginItems'>, items: PluginLive[]): PluginTurn[] {
+export function pluginPlan(profile: Pick<Profile, 'items' | 'switchesPluginItems' | 'tools' | 'out'>, items: PluginLive[]): PluginTurn[] {
   if (!profile.switchesPluginItems) {
     return items.flatMap(item => {
-      const on = item.copies.filter(copy => copy.way === 'switch' && !copy.on && copilotKeptOnBy(profile, item, copy)?.by === 'own').map(copy => copy.tool);
+      const on = item.copies.filter(copy => copy.way === 'switch' && !copy.on && appliesIn(profile, copy.tool) && copilotKeptOnBy(profile, item, copy)?.by === 'own').map(copy => copy.tool);
       return on.length ? [{ id: item.id, on, off: [], held: [] }] : [];
     });
   }
@@ -376,7 +378,7 @@ export function pluginPlan(profile: Pick<Profile, 'items' | 'switchesPluginItems
     const ticked = profile.items.includes(item.id), brought = comesWith(profile, item);
     const along = (copy: PluginCopy) => brought && copy.way === 'whole';
     const want = (copy: PluginCopy) => ticked || along(copy) || !!copilotKeptOnBy(profile, item, copy);
-    const differ = item.copies.filter(copy => copy.way === 'unread' || (copy.way !== 'stays' && copy.on !== want(copy)));
+    const differ = item.copies.filter(copy => appliesIn(profile, copy.tool) && (copy.way === 'unread' || (copy.way !== 'stays' && copy.on !== want(copy))));
     const turned = differ.filter(copy => copy.way === 'switch' || copy.way === 'whole'), tools = (copies: PluginCopy[]) => copies.map(copy => copy.tool);
     const on = tools(turned.filter(copy => want(copy) && !along(copy))), off = tools(turned.filter(copy => !want(copy))), comes = tools(turned.filter(along));
     const held = differ.flatMap(copy => ('why' in copy ? [{ tool: copy.tool, why: copy.why }] : []));
@@ -394,8 +396,8 @@ export interface WholeRun { copies: CopyTurn[]; ops: PluginOp[] }
  * the plugin's only once they all went through, so nothing the profile leaves out loads meanwhile); while it ticks none, the
  * plugin's own off, the parts' switches left as they are. Each step only where Claude Code has it otherwise now.
  */
-export function wholeRuns(profile: Pick<Profile, 'items' | 'switchesPluginItems'>, copies: CopyTurn[], live: PluginLive[]): WholeRun[] {
-  return !profile.switchesPluginItems ? [] : [...new Set(live.map(claudeInstall))].flatMap(install => {
+export function wholeRuns(profile: Pick<Profile, 'items' | 'switchesPluginItems' | 'tools'>, copies: CopyTurn[], live: PluginLive[]): WholeRun[] {
+  return !profile.switchesPluginItems || !appliesIn(profile, 'claude-cli') ? [] : [...new Set(live.map(claudeInstall))].flatMap(install => {
     if (!install) return [];
     const { ticked } = takenWhole(profile, install), on = ticked.length > 0, turns = copies.filter(turn => 'install' in turn.copy.target && turn.copy.target.install === install);
     const at = { source: install.source ?? '', marketName: install.marketName, plugin: install.plugin, tool: install.tool };
@@ -407,7 +409,7 @@ export function wholeRuns(profile: Pick<Profile, 'items' | 'switchesPluginItems'
 }
 
 /** Whether the plugins' items agree with a profile (their part of "in use"): a switch to it would turn none, hold none, and turn no plugin whole in Claude Code. */
-export const pluginItemsAgree = (profile: Pick<Profile, 'items' | 'switchesPluginItems'>, items: PluginLive[]) => !pluginPlan(profile, items).length && !wholeTurns(profile, items).length;
+export const pluginItemsAgree = (profile: Pick<Profile, 'items' | 'switchesPluginItems' | 'tools' | 'out'>, items: PluginLive[]) => !pluginPlan(profile, items).length && !wholeTurns(profile, items).length;
 
 /**
  * One copy of a plugin's item to turn in one tool, toward `on`: a switch's (pluginPlan) or its Undo's (pluginUndo), as profiles.ts
@@ -631,10 +633,11 @@ const entryPlugs = (entry: NonNullable<HistoryEvent['profile']>) => [...new Set(
  * longer in the library, is left (one turned back and forth since, and now as the switch left it, is turned back like any other).
  */
 export function undoPlan(event: Pick<HistoryEvent, 'profile'>, live: LiveItem[]): Turns {
-  const still = (named: { id: string }[] | undefined, on: boolean) => live.filter(item => item.on === on && !!named?.some(entry => entry.id === item.id));
-  const except = (event.profile?.except ?? []).flatMap(({ id, wasExcept, nowExcept }) => {
+  const kept = event.profile?.except ?? [], asLeft = (item: LiveItem) => kept.every(each => each.id !== item.id || sameTools(item.except, each.nowExcept));
+  const still = (named: { id: string }[] | undefined, on: boolean) => live.filter(item => item.on === on && !!named?.some(entry => entry.id === item.id) && asLeft(item));
+  const except = kept.flatMap(({ id, wasExcept }) => {
     const item = live.find(each => each.id === id);
-    return item?.on && sameTools(item.except, nowExcept) ? [{ item, to: [...wasExcept] }] : [];
+    return item?.on && asLeft(item) ? [{ item, to: [...wasExcept] }] : [];
   });
   return { on: still(event.profile?.off, false), off: still(event.profile?.on, true), except };
 }

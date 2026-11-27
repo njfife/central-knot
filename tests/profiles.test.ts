@@ -249,6 +249,15 @@ test('A copy Pi edited, let go of its plugin, is the person’s own item: the pl
   assert.deepEqual(copiesIn(docsHome([docsIn('codex-cli')], [{ key: 'pdf-reader', on: true, source: undefined }]))[pdfId], ['codex-cli on']);
 });
 
+test('A profile applies to its tools for a plugin’s items too: a tool it leaves unticked gets no switch of theirs, and its copy there agrees whatever it is', () => {
+  const after = docsHome([docsIn('claude-cli'), docsIn('codex-cli', { skillsOff: ['pdf-reader'] })], [{ key: 'pdf-reader', on: false }, { key: 'spreadsheet', on: true }]);
+  const noCodex: Profile = { ...profile('Work', [pdfId, sheetId]), tools: without('codex-cli'), out: {} };
+  assert.deepEqual(pluginPlan(noCodex, pluginLive(after)), [{ id: pdfId, on: ['pi-cli'], off: [], held: [] }], 'Pi turned on, Codex left as it is');
+  // One that ticks none of it would turn the whole plugin off in Claude Code; with Claude Code unticked, it leaves it there.
+  const none = profile('None', ['skill:gone']);
+  assert.deepEqual([wholeTurns(none, pluginLive(after)).length, wholeTurns({ ...none, tools: without('claude-cli') }, pluginLive(after)).length], [1, 0]);
+});
+
 test('A plugin’s item has an id of its own form, `plugin:` before its kind, which no item of the person’s own can have, whatever its name holds', () => {
   // His own server is named, letter for letter, as document-tools' issues is keyed.
   const home = docsHome([docsIn('codex-cli', { items: [{ kind: 'mcp', name: 'issues', description: '' }] })], [], [['mcp', 'document-tools@team-tools/issues', true]]);
@@ -768,6 +777,12 @@ test('A switch keeps a tool choice he made on an item it turns On: its Undo turn
     assert.deepEqual((await keptOut(box))['skill:pager'], ['codex-cli'], 'Off again, kept out of Codex as he left it');
     await applySkills(box.context, box.tools, [{ key: 'pager', on: true, except: ['codex-cli'], seenOn: false }]);
     assert.deepEqual([!!(await bytes(folderOf(box, 'claude-cli', 'pager'))), await bytes(folderOf(box, 'codex-cli', 'pager'))], [true, undefined]);
+    // Switched again, then pager kept out of Copilot CLI by hand: the Undo leaves pager On as he left it, and names it.
+    await applySkills(box.context, box.tools, [{ key: 'pager', on: false, except: ['codex-cli'], seenOn: true }]);
+    const again = await switchProfile(box.context, box.tools, everyday, NO_PLUGINS);
+    await applySkills(box.context, box.tools, [{ key: 'pager', on: true, except: ['copilot-cli'], seenOn: true }]);
+    const undone = await undoSwitch(box.context, box.tools, again.event!, NO_PLUGINS);
+    assert.deepEqual([undone.switched?.since, (await keptOut(box))['skill:pager'], !!(await bytes(folderOf(box, 'codex-cli', 'pager')))], [['pager’s tools, changed since the switch'], ['copilot-cli'], true]);
   } finally { await box.cleanup(); }
 });
 
