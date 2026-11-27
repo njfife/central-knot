@@ -40,8 +40,8 @@ export interface PluginOp {
   forItems?: true;
   /** On a `remove` op: undoing a fresh install of Copilot CLI's live copy turns it off, kept installed, rather than uninstalling it (plugins.ts install, marketplaces.ts undoTurn). */
   keptOff?: true;
-  /** On an `install` that undoes an uninstall: the uninstall deleted settings the tool kept for it (InstallState ownSettings), which stay deleted. */
-  deleted?: true;
+  /** On an `install` that undoes an uninstall: the uninstall deleted settings the tool kept for it (InstallState ownSettings), which stay deleted (`unknown` when its settings couldn't be read). */
+  deleted?: true | 'unknown';
   /** For items-back: each item as it was before the switch (pluginlibrary.ts ItemState). */
   items?: ItemState[];
 }
@@ -196,7 +196,7 @@ export function resultLines(ran: PluginDone[], undo = false, { after = false } =
     const groups: Group[] = item
       ? [[tools(off, true), undo ? `${item} off again in` : `${item} turned off in`], [tools(on, true), undo ? `${item} back on in` : `${item} turned on in`],
         [tools(off, false), `${item} already off in`], [tools(on, false), `${item} already on in`]]
-      : [[tools('installed', true), undo ? 'reinstalled in' : 'installed in', without && `, without ${ownSettingsWords(without.tool)}`], ...updatedGroups(mine, !after), [tools('updated', false), 'already up to date in'], [tools('uninstalled', true), undo ? 'removed from' : 'uninstalled from'],
+      : [[tools('installed', true), undo ? 'reinstalled in' : 'installed in', without && withoutDeleted(without.tool, without.deleted!)], ...updatedGroups(mine, !after), [tools('updated', false), 'already up to date in'], [tools('uninstalled', true), undo ? 'removed from' : 'uninstalled from'],
         [tools('installed', false), 'already in'], [tools('uninstalled', false), 'wasn’t installed in'],
         [offAgain, undo ? 'off again in' : 'turned off in'], [turnedOff, 'turned off in'], [tools('plugin-on', true).filter(tool => !onWith.some(entry => names[entry.tool] === tool)), undo ? 'back on in' : 'turned on in'],
         // Past three, the items left off are counted, not named.
@@ -291,6 +291,10 @@ const UNDO_CLAUSES: [(op: PluginOp) => boolean, string, string?][] = [
   [op => isItemSwitch(op.action) || isWhole(op.action), 'turns each switch back as it was in'],
 ];
 
+/** The tail after an uninstall's Undo (resultLines and undoTitle), saying what the uninstall deleted or may have deleted when settings couldn't be read. */
+const withoutDeleted = (tool: HarnessId, deleted: true | 'unknown') =>
+  (deleted === 'unknown' ? `, without any ${ownSettingsWords(tool).replace(/^its /, '')} it had` : `, without ${ownSettingsWords(tool)}`);
+
 /**
  * Undo's tooltip, from what it will run (`back`): what it reverses where, and that an update in the same run stays; for an
  * uninstall's (its installs: marketplaces.ts turn), that it installs the marketplace's copy, and without what the uninstall deleted.
@@ -298,7 +302,7 @@ const UNDO_CLAUSES: [(op: PluginOp) => boolean, string, string?][] = [
 export function undoTitle(back: PluginOp[], { plugin, updated = false }: { plugin?: string; updated?: boolean } = {}): string {
   const where = (match: (op: PluginOp) => boolean) => andList([...new Set(back.filter(match).map(op => op.tool))].sort(byToolOrder).map(tool => names[tool]));
   const installs = where(op => op.action === 'install'), off = back.some(op => op.action === 'plugin-off') ? ', off as it was' : '', deleted = back.find(op => op.deleted);
-  if (plugin && installs) return `Installs ${plugin} again in ${installs}, from the marketplace${deleted ? `, without ${ownSettingsWords(deleted.tool)}` : ''}${off}.`;
+  if (plugin && installs) return `Installs ${plugin} again in ${installs}, from the marketplace${deleted ? withoutDeleted(deleted.tool, deleted.deleted!) : ''}${off}.`;
   const does = UNDO_CLAUSES.flatMap(([match, verb, after = '']) => {
     const list = where(match);
     return list ? [`${verb} ${list}${after}`] : [];
@@ -315,6 +319,10 @@ export function undoTitle(back: PluginOp[], { plugin, updated = false }: { plugi
  * found nothing left to do ("wasn't installed") is done, so "Undo the rest" never offers it again.
  */
 export const notUndone = (ops: PluginOp[], done: PluginDone[]): PluginOp[] => ops.filter(op => !done.some(entry => succeeded(entry.report) && opKey(entry) === opKey(op)));
+
+/** Whether a plugin run changed a copy irreversibly (uninstall, update) or carried an uninstall's Undo: shown in the header even without Undo, its sentence allowed to wrap while reload details stay behind Show all. */
+export const consequentialRun = (last: LastRun | undefined): boolean => !!last && last.done.some(step =>
+  step.report.changed && (last.undo ? step.action === 'install' : step.action === 'remove' || step.action === 'update'));
 
 /** Where a plugin run or problem belongs: Plugins (`'plugins'`), or one tool's Plugins tab under Harnesses. */
 export type RunPlace = 'plugins' | HarnessId;

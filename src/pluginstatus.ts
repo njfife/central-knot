@@ -88,18 +88,18 @@ export const installedFrom = (view: PluginsView, entry: MarketplaceView) => entr
 
 /** A plugin in a marketplace. */
 export type MarketPlugin = { entry: MarketplaceView; plugin: PluginView };
-/** A marketplace plugin installed in one tool, carrying that tool's recorded version from InstallState.version (if any). */
-export type InstalledMarketPlugin = MarketPlugin & { version?: string };
+/** A marketplace plugin installed in one tool, carrying its real installed id (`directory` when matched from Anthropic Directory, else `plugin@market`) and recorded version (if any). */
+export type InstalledMarketPlugin = MarketPlugin & { id: string; version?: string };
 /**
- * What one tool has from every marketplace read: plugins installed there (each carrying that tool's recorded version from
- * InstallState.version, if any), plugins whose state there could not be checked (with why), and marketplaces that could not be
+ * What one tool has from every marketplace read: plugins installed there (each carrying its real installed id and that tool's
+ * recorded version from InstallState.version, if any), plugins whose state there could not be checked (with why), and marketplaces that could not be
  * read at all, so an incomplete answer never reads as "nothing installed". Null when the tool takes no marketplace plugins (Pi).
  */
 export function installsIn(view: PluginsView, tool: HarnessId): { installed: InstalledMarketPlugin[]; unknown: (MarketPlugin & { reason: string })[]; unreadable: string[] } | null {
   if (!view.tools.includes(tool) || !takesPlugins(tool)) return null;
   const each = view.marketplaces.flatMap(entry => entry.plugins.map(plugin => ({ entry, plugin, install: stateOf(entry, plugin.name, tool) })));
   return {
-    installed: each.flatMap(({ entry, plugin, install }) => (install.state === 'installed' ? [{ entry, plugin, ...(install.version ? { version: install.version } : {}) }] : [])),
+    installed: each.flatMap(({ entry, plugin, install }) => (install.state === 'installed' ? [{ entry, plugin, id: install.directory ?? `${plugin.name}@${entry.name}`, ...(install.version ? { version: install.version } : {}) }] : [])),
     unknown: each.flatMap(({ entry, plugin, install }) => (install.state === 'not-known' ? [{ entry, plugin, reason: install.reason }] : [])),
     unreadable: view.marketplaces.filter(entry => entry.problem && !entry.plugins.length).map(entry => entry.name),
   };
@@ -668,7 +668,10 @@ export function uninstallFacts(entry: MarketplaceView, plugin: PluginView, tool:
   const unmatched = !!theirs && (['skills', 'commands', 'agents'] as const).some(kind => theirs[kind].some(part => !detail![kind].some(other => other.path === part.path)));
   const copy: 'same' | 'differs' | 'unknown' | 'comparing' = cannot || mine?.live || versionDiffers(mine?.version, offered) ? 'same' : detail === undefined ? 'comparing'
     : !detail?.offered || detail.problem || !theirs || unmatched ? 'unknown' : copyDiffers(detail, theirs) ? 'differs' : 'same';
-  return { cannot, app: entry.bundled?.app, version: mine?.version, offered, copy, ownSettings: !!(theirs ?? mine)?.ownSettings };
+  const ownSettings: boolean | 'unknown' = theirs ? (theirs.ownSettings ?? false)
+    : detail !== undefined ? (tool === 'copilot-cli' ? false : 'unknown')
+    : (mine?.ownSettings ?? false);
+  return { cannot, app: entry.bundled?.app, version: mine?.version, offered, copy, ownSettings };
 }
 /** What a tool's uninstall deletes for good of the settings it keeps for a plugin (InstallState ownSettings), as Uninstall…'s question and Undo say it. */
 export const ownSettingsWords = (tool: HarnessId) => (tool === 'codex-cli' ? 'its MCP servers’ settings' : 'its saved options');
@@ -676,16 +679,18 @@ export const ownSettingsWords = (tool: HarnessId) => (tool === 'codex-cli' ? 'it
 /**
  * Uninstall…'s question in one tool: one sentence on whether it can come back, then one on what the tool's own uninstall deletes
  * for good, as measured: in Claude Code its saved options (its data folder is kept: plugins.ts uninstallArgs), in Codex its MCP
- * servers' settings. While the copy is still being compared, only that.
+ * servers' settings (or that its settings couldn't be read, never promising nothing is lost). While the copy is still being compared, only that.
  */
 export function uninstallAsk(title: string, tool: HarnessId, { cannot, app, version, offered, copy, ownSettings }: ReturnType<typeof uninstallFacts>): string {
   if (copy === 'comparing') return `Comparing ${names[tool]}’s copy…`;
-  const ask = `Uninstall ${title} from ${names[tool]}?`, lost = ownSettings ? `${ownSettingsWords(tool)} there are deleted for good` : '';
+  const ask = `Uninstall ${title} from ${names[tool]}?`;
+  const lost = ownSettings === 'unknown' ? `${names[tool]}’s settings couldn’t be read; if it has ${ownSettingsWords(tool).replace(/^its /, '')} there, they are deleted for good`
+    : ownSettings ? `${ownSettingsWords(tool)} there are deleted for good` : '';
   const back = cannot ? (cannot === 'unread' ? 'Its marketplace can’t be read now, so there is no Undo.'
     : `${cannot === 'not-carried' ? `${app} doesn’t include its files` : 'It is no longer offered'}, so it can’t be installed again: there is no Undo.`)
     : versionDiffers(version, offered) ? `Installing it again gives ${offered}; this ${version} can’t be brought back.`
       : copy === 'differs' ? 'Installing it again gives the marketplace’s copy; the edits to this one are lost.'
         : copy === 'unknown' ? 'Installing it again gives the marketplace’s copy; if this one was edited, the edits are lost.' : '';
-  if (!back) return `${ask} It can be installed again; ${lost || 'nothing is lost'}.`;
+  if (!back) return ownSettings === 'unknown' ? `${ask} It can be installed again. ${lost}.` : `${ask} It can be installed again; ${lost || 'nothing is lost'}.`;
   return [ask, back, lost && `${lost.charAt(0).toUpperCase()}${lost.slice(1)}.`].filter(Boolean).join(' ');
 }

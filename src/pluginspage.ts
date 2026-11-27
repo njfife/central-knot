@@ -11,7 +11,7 @@ import { brandMark } from './brand.ts';
 import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
 import { clickNote, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
-import { pluginKey, resultParts, resultSentence, shortOf, undoTitle, type LastRun, type PluginOp, type ResultLine, type RunPlace } from './pluginplan.ts';
+import { consequentialRun, pluginKey, resultParts, resultSentence, shortOf, undoTitle, type LastRun, type PluginOp, type ResultLine, type RunPlace } from './pluginplan.ts';
 import { FIND_FROM, blocked, categoriesOf, copyStale, installedFrom, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
 import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, forgetMarketplace, lastLines, market, openLink, overRun, pickMarketplaceFolder, pluginsResultPlace, runReloads, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
@@ -344,8 +344,8 @@ function undoButton(): HTMLElement | null {
   const undo = button({ variant: 'outline', size: 'small', label: undoLabel(), id: 'plugins-undo', disabled: acting(), onclick: undoLast });
   const last = market.lastRun;
   const updated = !last?.undo && !!last?.done.some(entry => entry.action === 'update' && entry.report.changed);
-  // A switch's Undo names its plugin: several plugins' clicks may have run since the page was last read.
-  const plugin = !last?.undo ? last?.turn?.plugin : undefined;
+  // A switch's Undo (and "Undo the rest" after a failed reinstall) names its plugin so its tooltip says what comes back.
+  const plugin = last?.turn?.plugin;
   undo.title = acting() ?? undoTitle(back, { plugin, updated });
   return undo;
 }
@@ -371,7 +371,9 @@ export function pluginsResult(): HTMLElement[] {
   const advice = !last || elsewhere ? { text: '', items: [] } : runReloads();
   const of = last ?? app.outcome, whole = of !== undefined && app.shownWhole === of, hasAdvice = advice.items.length > 0;
   const run = runLine(last, here, lines, advice, elsewhere, whole);
-  const chips = run && !whole ? reloadChips(advice, of) : null;
+  // Consequential uninstall/Undo sentences wrap across the header's two lines while reload details stay behind Show all.
+  const deferReloads = !!run && !whole && !elsewhere && consequentialRun(last);
+  const chips = run && !whole && !deferReloads ? reloadChips(advice, of) : null;
   const profile = profileSpan(run && !whole ? last?.profileLine : undefined);
   const problems = problemBand(problem, lines, !run, hasAdvice, chips, profile, last);
   // With no problem line, Show all follows the sentence, for one the header cuts or whose reload sentences live under Show all.
@@ -382,15 +384,15 @@ export function pluginsResult(): HTMLElement[] {
 
 /** What just happened (each plugin named a link to its page, with Undo), or else the last notice ("… added"). */
 function runLine(last: LastRun | undefined, place: RunPlace, lines: ResultLine[], advice: ReloadAdvice, elsewhere: boolean, whole = false): HTMLElement | null {
-  // A result is said here only while it offers something to do (Undo, Copy, a failure, or an ended profile); one that only tells
-  // is in the status bar (app.ts saidInStatusBar).
+  // A result is said here while it offers something to do (Undo, Copy, a failure, or an ended profile) or completed a consequential
+  // change (uninstall, update, uninstall's Undo); one that only tells is in the status bar (app.ts saidInStatusBar).
   const back = last ? undoButton() : null;
   const open = current()?.entry;
   const here = place === 'plugins' && open && market.nav.plugin ? { plugin: market.nav.plugin, source: open.source } : undefined;
   const parts = last ? resultParts(lines, last.undo, { short: true, here }) : [];
   // A run that left something undone counts it first, Undo or not (its reasons are the problem lines under it), so the cut never hides it.
   const short = last ? shortOf(lines, last.unreached) : { names: [], of: 0 }, failed = short.names;
-  if (last && (parts.length || failed.length) && (back || failed.length || advice.items.length > 0 || !!last.profileLine)) {
+  if (last && (parts.length || failed.length) && (back || failed.length || advice.items.length > 0 || !!last.profileLine || consequentialRun(last))) {
     const link = (part: { plugin: string; source: string }, at: number) =>
       h('button.result-link', { type: 'button', id: `result-plugin-${at}`, title: `Open ${part.plugin}`, onclick: () => browse({ source: part.source, plugin: part.plugin, tab: 'plugins' }) }, part.plugin);
     // On another plugin's page the result is only named, so it never reads as being about the plugin on screen; an

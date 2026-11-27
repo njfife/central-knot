@@ -495,7 +495,7 @@ const codexTables = (context: PluginContext, root: string) => once(context, `cod
  * doesn't bring back (measured on Claude Code 2.1.332 and Codex 0.169.1): Claude Code's saved options, Codex's plugin table.
  * Copilot CLI's switches for a plugin outlive its uninstall.
  */
-const ownSettings = (kept: boolean) => (kept ? { ownSettings: true as const } : {});
+const ownSettings = (kept: boolean | 'unknown') => (kept ? { ownSettings: kept === true ? true as const : kept } : {});
 
 /**
  * The marketplaces a tool already has, as added there: no setup needed to browse them. Claude Code records the ones its
@@ -589,12 +589,13 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
       if (!path) return { state: 'not-installed' };
       // A plugin kept in a local folder marketplace is loaded from that folder at each start, whatever its record says
       // (Claude Code 2.1.321 records a cache copy and its version then, but reads the folder): the catalog's version counts.
-      const settings = await recordJson(context, join(root, 'settings.json'));
+      const settingsRead = await jsonFile(context, join(root, 'settings.json'));
+      const settings = settingsRead.value;
       const lists = [await recordJson(context, join(root, 'plugins/known_marketplaces.json')), record(settings?.extraKnownMarketplaces)];
       const source = lists.map(list => record(record(list?.[marketplace])?.source)).find(Boolean);
       const live = source?.source === 'directory' && text(source.path) ? await folderItem(context, text(source.path), plugin) : undefined;
       // Options saved for it (as hookrun.ts claudePluginOptions reads them), declared by this copy or an earlier one.
-      const own = ownSettings(Object.keys(record(record(record(settings?.pluginConfigs)?.[id])?.options) ?? {}).length > 0);
+      const own = ownSettings(settingsRead.unread ? 'unknown' : Object.keys(record(record(record(settings?.pluginConfigs)?.[id])?.options) ?? {}).length > 0);
       if (live?.folder && (await hasFiles(live.folder))) return { state: 'installed', path: live.folder, live: true, ...(live.version ? { version: live.version } : {}), ...own };
       return (await hasFiles(path)) ? { state: 'installed', path, version: await copyVersion(user?.version, path), ...own } : { state: 'not-known', reason: 'Claude Code lists it, but its files are not where it records them.' };
     }

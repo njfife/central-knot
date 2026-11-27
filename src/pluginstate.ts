@@ -26,7 +26,7 @@ import { clickList, drop, endRun, join, runAt, type Turn } from './clicklist.ts'
 import { pin, placeIn } from './itemrow.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { plural } from './model.ts';
-import { notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, succeeded, unreachedOps, type LastRun, type PluginDone, type PluginOp, type ResultLine, type RunPlace } from './pluginplan.ts';
+import { consequentialRun, notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, succeeded, unreachedOps, type LastRun, type PluginDone, type PluginOp, type ResultLine, type RunPlace } from './pluginplan.ts';
 import { FIND_FROM, boxOf, categoriesOf, copiesToCompare, installedFrom, marketTitle, matches, pluginPlace, samePart, toolMark } from './pluginstatus.ts';
 import { counted } from './pluginswitch.ts';
 import { yoursStay } from './pluginline.ts';
@@ -321,7 +321,8 @@ function act(activity: MarketActivity, work: () => Promise<string | void>) {
       const last = runs.get(started);
       const profileLine = last?.done.some(step => succeeded(step.report)) ? profileEndedLine() : undefined;
       if (last && profileLine) last.profileLine = profileLine;
-      announce([said, profileLine].filter(Boolean).join(' '), showsPluginsResult(started) && !problems.get(started) && (undoOps(started).length > 0 || !!profileLine));
+      const shownInHeader = showsPluginsResult(started) && !problems.get(started) && (undoOps(started).length > 0 || !!profileLine || runReloads(started).items.length > 0 || consequentialRun(last));
+      announce([said, profileLine].filter(Boolean).join(' '), shownInHeader);
     } finally { market.activity = undefined; }
   });
 }
@@ -522,7 +523,8 @@ function runEnded(): void {
   const multi = [resultSentence(withNotIn(lines), false), failed.length ? `${andList(failed)} failed.` : ''].filter(Boolean).join(' ') || 'Nothing changed.';
   const base = one ? (one.stopped ?? (resultSentence(withNotIn(oneLines), false) || oneFailed || `Nothing changed for ${ran[0]!.plugin}.`)) : multi;
   const here = showsPluginsResult(place);
-  announce([base, profileLine].filter(Boolean).join(' '), here && (one ? !!one.stopped || !!oneFailed || undoOps(place).length > 0 || !!profileLine : !lines.some(line => !line.ok) && (undoOps(place).length > 0 || !!profileLine)));
+  const shown = undoOps(place).length > 0 || !!profileLine || runReloads(place).items.length > 0 || consequentialRun(last);
+  announce([base, profileLine].filter(Boolean).join(' '), here && (one ? !!one.stopped || !!oneFailed || shown : !lines.some(line => !line.ok) && shown));
   if (here && document.activeElement === document.body && clickedLast) {
     // Undo was drawn off while the list ran, and the list's last draw comes after this: drawn usable first, so it takes the focus.
     if (clickedLast === 'plugins-undo') rerender();
@@ -553,7 +555,7 @@ async function runClick(click: PluginClick, home: string): Promise<void> {
   market.working = undefined;
   setRun({ done: result.done, undo: false, home, place: click.place, ...(result.back ? { turn: { source: click.source, plugin: click.plugin, before: result.before ?? null, back: result.back } } : {}) }, click.place);
   if (clickList.turns.some(turn => turn.run === click.run && turn.state === 'waiting'))
-    announce(result.stopped ?? (resultSentence(resultLines(result.done, false), false) || `Nothing changed for ${click.plugin}.`), showsPluginsResult(click.place) && !result.stopped && undoOps(click.place).length > 0);
+    announce(result.stopped ?? (resultSentence(resultLines(result.done, false), false) || `Nothing changed for ${click.plugin}.`), showsPluginsResult(click.place) && !result.stopped && (undoOps(click.place).length > 0 || consequentialRun(runs.get(click.place))));
   rerender();
   showView(await api().plugins().catch(() => null));
 }

@@ -258,7 +258,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const copies = await Promise.all(Object.entries(states).map(async ([tool, state]) => {
       if (state?.state !== 'installed') return undefined;
       const { skills, commands, agents, instructions } = await installedContents(tool as HarnessId, state.path, item.entry, !!item.isMarketplaceRoot);
-      return [tool, { skills, commands, agents, instructions, version: state.version, ...(state.ownSettings ? { ownSettings: true as const } : {}) }] as const;
+      return [tool, { skills, commands, agents, instructions, version: state.version, ...(state.ownSettings ? { ownSettings: state.ownSettings } : {}) }] as const;
     }));
     return Object.fromEntries(copies.filter(copy => !!copy));
   }
@@ -809,7 +809,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     // Uninstall's Undo puts it back as it was: the marketplace's copy installed (what the uninstall deleted with it staying deleted:
     // `deleted`), then turned off again where it was off; none where it can't be installed again (cantInstallAgain).
     const reversed = reverse(ran.done), copy = tool ? stateOf(entry, plugin, tool) : undefined, was = copy?.state === 'installed' ? copy : undefined;
-    const reinstall = reversed.map(op => (was?.ownSettings ? { ...op, deleted: true as const } : op));
+    const reinstall = reversed.map(op => (was?.ownSettings ? { ...op, deleted: was.ownSettings } : op));
     const offAgain = was?.off ? reversed.map(op => ({ ...op, action: 'plugin-off' as const })) : [];
     const back = what !== 'uninstall' ? reversed : cantInstallAgain(entry, plugin) ? [] : [...reinstall, ...offAgain];
     // Pi, OpenCode and Antigravity: its items (pluginlibrary.ts).
@@ -847,7 +847,10 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const done: PluginDone[] = [];
     for (const op of items) if (id && host.share) done.push(...(await itemsBack(host.share(), tools, id, op.items ?? [], op, itemTools(tools))).done);
     const installs = await runPlan(back.filter(op => op.action === 'install'), ownApi, String(home));
-    for (const step of installs.done) if (back.some(op => op.action === 'install' && op.tool === step.tool && op.deleted)) step.deleted = true;
+    for (const step of installs.done) {
+      const deleted = back.find(op => op.action === 'install' && op.tool === step.tool && op.deleted)?.deleted;
+      if (deleted) step.deleted = deleted;
+    }
     if (installs.stopped || !installs.done.every(step => succeeded(step.report))) {
       await changeRecord(String(home), now => withEntry(now, source, plugin, current));
       return { ...installs, done: [...done, ...installs.done] };
@@ -1068,7 +1071,7 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
     const step = record(op);
     return !!step && step.source === source && step.plugin === plugin && isName(step.marketName) && harnessIds.includes(step.tool as HarnessId)
       && ['install', 'remove', 'plugin-off', 'plugin-on', 'items-back'].includes(step.action as string)
-      && (step.keptOff === undefined || step.keptOff === true) && (step.deleted === undefined || step.deleted === true)
+      && (step.keptOff === undefined || step.keptOff === true) && (step.deleted === undefined || step.deleted === true || step.deleted === 'unknown')
       && (step.items === undefined || (step.action === 'items-back' && Array.isArray(step.items) && step.items.length <= 5000 && step.items.every(isItemState)));
   };
   const isEntry = (source: string, plugin: string) => (value: unknown): value is PluginEntry => {

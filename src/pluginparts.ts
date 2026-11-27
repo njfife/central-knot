@@ -135,14 +135,15 @@ export function uninstallControl(entry: MarketplaceView, plugin: PluginView, too
     h('span.uninstall-ask-actions', {}, button({ variant: 'outline', size: 'small', label: 'Cancel', id: `${id}-cancel`, onclick: () => ask(false) }), confirm))];
 }
 
-/** What a click on a tool's box does there, and its Undo, in the state it is drawn in (pluginrecord.ts A TOOL'S BOX and row 9). */
-function boxDoes(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, mark: ToolMark, ticked: boolean): string {
+/** What a click on a tool's box (or its switch on a tool's Plugins tab when `asSwitch`) does there, and its Undo, in the state it is drawn in (pluginrecord.ts A TOOL'S BOX and row 9). */
+export function boxDoes(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, mark: ToolMark, ticked: boolean, asSwitch = false): string {
   const what = takesPlugins(tool) ? plugin : `${plugin}’s items`;
   const where = names[tool];
   const sw = entry.switches?.[plugin];
   const on = !!sw?.entry?.on;
-  if (ticked && takesPlugins(tool)) return `Click to turn ${what} off in ${where}, kept installed: it stays off until you tick it again. Undo turns it on again.`;
-  if (ticked) return `Click to take ${what} out of ${where}: it stays out until you tick it again. Undo puts it back.`;
+  const act = asSwitch ? 'turn it on' : 'tick it';
+  if (ticked && takesPlugins(tool)) return `Click to turn ${what} off in ${where}, kept installed: it stays off until you ${act} again. Undo turns it on again.`;
+  if (ticked) return `Click to take ${what} out of ${where}: it stays out until you ${act} again. Undo puts it back.`;
   if (on && mark !== 'kept-off') return `Click to put ${what} in ${where}. Undo takes it out again.`;
   // A tick on an Off plugin turns it On where another tool has it in use too (marketplaces.ts turnedEntry): "alone" only where none does.
   const alone = on || view.tools.some(other => other !== tool && inUseIn(entry, plugin, other)) ? '' : ' alone';
