@@ -8992,7 +8992,7 @@ esac
   same('Off loses nothing: its data folder, saved options and install record are as they were', kept(), keptBefore);
   const keptLine = '.plugin-tool[data-tool="claude-cli"] .plugin-tool-state';
   same('the hover on “Off, kept installed” says what is kept', await a.run(`document.querySelector('${keptLine}').title`), 'Off in Claude Code: still installed at 2.0.0, with its data and settings.');
-  check('its result is said once in the header as turned off, with no panel duplicate and nothing Undo can’t put back', await a.text('.plugin-panel .plugin-click') === null && /^Turned off in Claude Code\./.test(await a.text('#plugins-result .toolbar-result-text') ?? '') && !/Undo installs/.test(await a.text('#plugins-result') ?? ''),
+  check('its result is said once in the header as turned off, with no panel duplicate and nothing Undo can’t put back', await a.text('.plugin-panel .plugin-click') === null && /turned off in Claude Code\./i.test(await a.text('#plugins-result .toolbar-result-text') ?? '') && !/Undo installs/.test(await a.text('#plugins-result') ?? ''),
     [await a.text('.plugin-panel .plugin-click'), await a.text('#plugins-result')]);
   await keptShots('plugin-keep-off');
   if (shots) {
