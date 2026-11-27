@@ -477,8 +477,13 @@ export function versionChoices(event: HistoryEvent, item: LibraryItem | undefine
  */
 export type LeftIn = { item: string; why: TakeInHeld | 'chosen' | 'claude-code' };
 
-/** What the one Undo of a switch-on covers, as every place that promises it says it (the question, Yes's band, History). */
-export const oneUndoCovers = 'One Undo in History takes back what it takes in; a copy you choose has its own Undo.';
+/**
+ * What a switch-on's one Undo covers (everythingPlan): the items it added, but those changed since (takeInHeld: edited, off,
+ * deleted, kept or left out, taken over); and, where a copy may be chosen (`chosen`), that a chosen copy has its own Undo. Said,
+ * each with its own subject, by first setup's (?) (firstsetup.ts), the band's Undo after a switch-on (app.ts
+ * everythingSwitchedOn) and History's entry.
+ */
+export const oneUndoCovers = (subject: string, chosen = true) => `${subject} takes back the items it added, but for any changed since${chosen ? '; a copy you choose has its own Undo' : ''}.`;
 
 /**
  * What a switch-on entry's one Undo would do now, read from History (`history`, oldest first): the rule's take-ins after it (cause
@@ -486,7 +491,8 @@ export const oneUndoCovers = 'One Undo in History takes back what it takes in; a
  * Each take-in whose own Undo is offered (takeInHeld) is taken back (`takeBack`); each other is left in, named with why (`left`),
  * as is each copy chosen (its `chosen` entry has its own Undo, or is named by why it hasn't); one undone by itself already is
  * neither. `switchOff`: no switch came after it, so the rule is on as it set it and the Undo switches it off. `keptIn`: the tools a
- * take-in taken back wrote that are not managed now, which keep Central Knot's copy until they are.
+ * take-in taken back wrote that are not managed now, which keep Central Knot's copy until they are. `added`: how many take-ins there
+ * are, left in or not (what a band says the switch-on added: app.ts everythingSwitchedOn).
  */
 export function everythingPlan(switchOn: HistoryEvent, history: HistoryEvent[], about: EntryItem) {
   const after = history.slice(history.findIndex(entry => entry.id === switchOn.id) + 1);
@@ -498,7 +504,7 @@ export function everythingPlan(switchOn: HistoryEvent, history: HistoryEvent[], 
   const left: LeftIn[] = [...takeIns.flatMap(entry => { const why = held(entry); return why ? [{ item: entry.item, why }] : []; }),
     ...since.filter(entry => entry.kind === 'chosen').map((entry): LeftIn => ({ item: entry.item, why: held(entry) ?? 'chosen' }))];
   const managed = about(switchOn).now.managed, wrote = takeBack.flatMap(entry => entry.losers.map(copy => copy.tool));
-  return { takeBack, left, switchOff: end < 0, keptIn: [...new Set(wrote)].filter(tool => !managed.includes(tool)) };
+  return { added: takeIns.length, takeBack, left, switchOff: end < 0, keptIn: [...new Set(wrote)].filter(tool => !managed.includes(tool)) };
 }
 
 /**
@@ -540,7 +546,7 @@ const keptSaid = (tools: HarnessId[]) => (tools.length === 1 ? `${toolName(tools
 /** What a Synchronize everything entry says: switched on, switched off, or a switch-on's Undo and what it did. */
 export function everythingSentence(event: HistoryEvent): { glyph: IconName; text: string } {
   const { ruleOn, undo } = event.everything ?? { ruleOn: false };
-  if (!undo) return ruleOn ? { glyph: 'refresh-cw', text: `Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. ${oneUndoCovers.replace(/^One Undo in History/, 'Its Undo')}` }
+  if (!undo) return ruleOn ? { glyph: 'refresh-cw', text: `Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. ${oneUndoCovers('Its Undo')}` }
     : { glyph: 'circle-minus', text: 'Switched off: what turns up in a tool waits on its page for Add.' };
   const count = undo.itemUndos.length;
   const out = count ? `${itemsSaid(count)} it took in ${count === 1 ? 'is' : 'are'} out of Central Knot again, each tool it was found in keeping its own copy` : 'nothing it took in was taken back';

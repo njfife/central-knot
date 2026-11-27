@@ -27,7 +27,7 @@ import { button, h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
 import { clickResults, heldWhole, keptBack } from './clickplan.ts';
-import { entriesNow, everythingAction, everythingDone, libraryAction, libraryEntry, librarySentence, restorePlan } from './historyactions.ts';
+import { entriesNow, everythingAction, everythingDone, everythingPlan, libraryAction, libraryEntry, librarySentence, oneUndoCovers, restorePlan } from './historyactions.ts';
 import { asksWhichCopy, copiesDiffer, libraryWords, placeOf, stillReadWords } from './libraryrow.ts';
 import { andList, countedAs, fewNames, fileName, kindNames, kindNouns, noToolsSentence, notAllThrough, orList, profileLeftUse, rowNames, rowNouns, saidByKind, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
@@ -1864,15 +1864,34 @@ export const setSync = (on: boolean) => busy(on ? 'Turning Sync on…' : 'Turnin
   announce(on ? 'Automatic sync on.' : 'Automatic sync off.', true);
 });
 
+/** The Undo's hover on a band after a switch-on: what it does, with no count (a later pass adds more, and the Undo takes those back too). */
+const undoEverything = `Switches Synchronize everything off. ${oneUndoCovers('It', false)}`;
+
 /**
- * Synchronize everything, the open home's standing rule, on or off from Settings (everything.ts setSyncEverything; first setup's
- * question is firstsetup.ts's). Turned on, main's next pass takes in what is found now: at once with Automatic sync on, at Sync
- * once with it off, and Settings always shows the result band with History's Undo when this click switched it on. Answers why
+ * What Synchronize everything did once switched on, from History: how many items the switch-on entry `event` (everything.ts
+ * setSyncEverything's id) added so far (historyactions.ts everythingPlan), and History's own Undo of it (everythingAction). None
+ * where the open home is no longer `home`, or History has no such entry.
+ */
+export async function everythingSwitchedOn(event: string | undefined, home: string): Promise<{ added: number; undo?: Outcome['act'] }> {
+  if (!event || state.home?.home !== home) return { added: 0 };
+  await putHistory().catch(() => undefined);
+  const events = state.history.data, entry = events?.find(each => each.id === event);
+  if (!entry || !events || !state.home) return { added: 0 };
+  const about = entriesNow(state.home), offer = everythingAction(entry, events, about);
+  const undo = offer && { label: offer.label, id: 'outcome-undo', title: undoEverything, run: () => { if (state.home?.home === home) void restoreEvent(event); } };
+  return { added: everythingPlan(entry, events, about).added, undo };
+}
+
+/**
+ * Synchronize everything, the open home's standing rule, on or off: Settings' switch, first setup's Yes (`answering`: refused once
+ * the home has an answer, everything.ts setSyncEverything) and the band after its No. Turned on, main's next pass adds what is
+ * found now: at once with Automatic sync on, at Sync once (or once it is turned on) with it off. One band says it, on the page
+ * clicked on: what it added, or that nothing is added yet (with Sync once), and the switch-on's Undo (everythingSwitchedOn). Answers why
  * not, if it couldn't be set.
  */
-export const switchSyncEverything = (on: boolean) => busy(on ? 'Turning on Synchronize everything…' : 'Turning off Synchronize everything…', async () => {
+export const switchSyncEverything = (on: boolean, answering = false) => busy(on ? 'Turning on Synchronize everything…' : 'Turning off Synchronize everything…', async page => {
   const home = state.home!.home;
-  const set = await api().setSyncEverything(on, home);
+  const set = await api().setSyncEverything(on, home, answering);
   if (set.view) setHome(set.view);
   if (set.stopped) {
     announce(`Synchronize everything was not changed. ${set.stopped}`);
@@ -1882,27 +1901,11 @@ export const switchSyncEverything = (on: boolean) => busy(on ? 'Turning on Synch
     announce('Synchronize everything is off: what turns up in a tool waits for Add.', true);
     return;
   }
-  const text = state.home?.syncOn
-    ? 'Synchronize everything is on.'
-    : 'Synchronize everything is on. It takes items in at Sync once, or when Automatic sync is on.';
-  let act: Outcome['act'];
-  if (set.event && state.home?.home === home) {
-    await putHistory().catch(() => undefined);
-    const events = state.history.data;
-    const entry = events?.find(each => each.id === set.event);
-    const offer = entry && events ? everythingAction(entry, events, entriesNow(state.home)) : undefined;
-    if (offer) {
-      act = {
-        label: offer.label,
-        id: 'outcome-undo',
-        title: offer.help,
-        run: () => {
-          if (state.home?.home === home) void restoreEvent(set.event!);
-        },
-      };
-    }
-  }
-  tellWritten({ page: 'settings', band: true, settingsBand: true, text, act }, state.home?.syncOn ? set.reloads : [], !!set.event);
+  const { added, undo } = await everythingSwitchedOn(set.event, home), syncOn = !!state.home?.syncOn;
+  const text = !syncOn ? 'Synchronize everything is on. Nothing added yet: Automatic sync is off.'
+    : `Synchronize everything is on${added ? `: it added ${plural(added, 'item')}` : ''}.`;
+  const once = { label: 'Sync once', id: 'outcome-sync-once', title: 'Add what is found now; Automatic sync stays off', run: () => void syncNow() };
+  tellWritten({ page, band: true, settingsBand: true, text, ...(syncOn ? { act: undo } : { act: once, next: undo }) }, syncOn ? set.reloads : [], !!set.event);
 });
 
 let menuSyncHome: string | undefined;

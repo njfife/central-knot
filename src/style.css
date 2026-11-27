@@ -914,10 +914,11 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* ---------- First setup (firstsetup.ts) ---------- */
 /* The question at the top of the Overview: its title, its words at the reading measure, and its two answers under them. */
 .setup-question { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; max-width: var(--measure); padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
-.setup-title { font-size: 15px; line-height: 20px; font-weight: 600; }
+/* Balanced, so a question that wraps never leaves its (?) alone on the last line. */
+.setup-title { font-size: 15px; line-height: 20px; font-weight: 600; text-wrap: balance; }
 .setup-text { font-size: 13px; line-height: 1.5; color: var(--ink-soft); text-wrap: pretty; }
-.setup-text .setup-line + .setup-line { margin-top: 4px; }
-.setup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.setup-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.setup-undo { font-size: 13px; color: var(--ink-soft); }
 /* The walkthrough's band, marked as a copy question is: where it is and its actions on one line; while it asks, the item's copy
    question under them, as wide as the band, which is the box its three layouts go by (The copy question, above). */
 .band-walk { box-shadow: inset 3px 0 0 var(--warning), inset 0 -1px 0 var(--line); }
