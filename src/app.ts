@@ -2084,7 +2084,7 @@ export const profileState = {
   /** The name as typed while renaming, kept across redraws. */
   draft: undefined as string | undefined,
   /** Pinned row ids while the Profiles page's Changes view is open, so ticking moves no row. */
-  changes: undefined as { home: string; profileId: string; on: string[]; off: string[] } | undefined,
+  changes: undefined as { home: string; profileId: string; on: string[]; off: string[]; tools: string[] } | undefined,
 };
 
 /**
@@ -2149,7 +2149,9 @@ export const saveProfileDef = (profile: ProfileEdit, said?: string, band = false
   if (result.problem) { announce(result.problem); return; }
   if (result.id && (!profile.id || profile.restore)) profileState.open = result.id;
   if (result.id && !profile.id) profileState.renaming = result.id;
-  if (band && said) tell({ page, band: true, text: said }, '', { checkProfile: false });
+  // The save that moved the file to profiles that hold their tools (profiles.ts saveProfile): which others it filled in, once.
+  if (result.filled) tell({ page, band: true, text: `Saved. Filled in ${andList(result.filled)} with each item’s tools as they are now.` }, '', { checkProfile: false });
+  else if (band && said) tell({ page, band: true, text: said }, '', { checkProfile: false });
   else announce(said ?? 'Profile saved.', true);
 });
 

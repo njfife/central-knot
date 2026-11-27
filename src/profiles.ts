@@ -8,14 +8,20 @@
 // all of it told to History in one entry of its own, written first (librarypass.ts PassOptions told) and then left holding only
 // the plugin copies and Copilot CLI rules each tool confirmed. Its Undo is each library item's own Turn on or Turn off, each with its own entry, and
 // each plugin copy's own switch back (plus any uncovered Copilot CLI rule), all told in one entry of the Undo's own, which marks the switch's entry undone. Nothing per
-// tool is kept here but those entries, and which profile is in use is never stored. A file from before profiles were sets of items (format 1) is read here for the page and moved once by
-// profilemigrate.ts.
+// tool is kept here but those entries and a profile's own `tools` and `out`, and which profile is in use is never stored. A
+// file from before profiles were sets of items (format 1) is read here for the page and moved once by profilemigrate.ts. A
+// switch to a profile that holds `tools` or `out` also sets each of its items' keep-outs (profileplan.ts effectiveOut), told in
+// its entry (`except`) and put back by its Undo.
 //
 //   profiles.json   { formatVersion: 3, profiles: [{ id, name, items: ['skill:notes', 'mcp:docs', 'agent:writer'], switchesPluginItems: true }] }
+//                   format 4 when some profile holds `tools: ['claude-cli', …]` or `out: { 'skill:notes': ['codex-cli'] }`
 //                   a plugin's item as profileplan.ts pluginItemId names it: 'plugin:skill:document-tools@team-tools/pdf'
 //                   format 2 files are read as-is with switchesPluginItems false and never rewritten until a profile is saved.
-//                   saveProfiles is the one writer: format 3 on a save, format 2 from profilemigrate.ts's format 1 move (a pass
-//                   that runs without a click must not write a file the released build refuses).
+//                   saveProfiles is the one writer, and the format follows the content: 4 only while some profile holds
+//                   `tools` or `out`, else 3, so a writer that adds neither (a rename, a delete, profilesNaming, which a
+//                   plugin's read runs with no click) never moves a file to 4; and 2 from profilemigrate.ts's format 1 move (a
+//                   pass that runs without a click must not write a file the released build refuses). The first save that
+//                   moves a file to 4 fills in each profile's `out` from the Library (saveProfile), so none changes meaning.
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -26,30 +32,47 @@ import type { KindLibrary } from './librarypass.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from './mcpswitch.ts';
 import { reverse, succeeded, type PluginDone, type PluginDraft, type PluginOp } from './pluginplan.ts';
 import { click } from './pluginswitch.ts';
-import { changes, copilotKeptOnBy, copilotUndo, heldWords, wholeCounts, liveItems, onAfterUndo, pluginPlan, pluginUndo, switchPlan, undoPlan, wholeRuns, withCopilotOff, type CopilotRule, type CopyTurn, type Libraries, type LiveItem, type PluginLive, type PluginTurn, type Turns, type WholeRun } from './profileplan.ts';
+import { sameTools } from './historyactions.ts';
+import { changes, copilotKeptOnBy, copilotUndo, heldWords, wholeCounts, liveItems, onAfterUndo, outNow, pluginPlan, pluginUndo, switchPlan, toolsChanged, undoPlan, wholeRuns, withCopilotOff, type CopilotRule, type CopyTurn, type Libraries, type LiveItem, type PluginLive, type PluginTurn, type Turns, type WholeRun } from './profileplan.ts';
 import type { ReloadChange } from './reload.ts';
 import { applyServers, serverKind, serversView } from './servers.ts';
 import { errorCode, libraryGate, plainError, storeDirectory, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { applySkills, skillKind } from './skills.ts';
 import { recordedIds } from './sourcestore.ts';
 import { groupBy } from './model.ts';
-import { strings } from './values.ts';
-import { andList, toolNames } from './words.ts';
-import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, PassResult, PluginSwitched, Profile, ProfileEdit, ProfileSwitchResult, ProfilesView } from './types.ts';
+import { record, strings } from './values.ts';
+import { andList, harnessIds, toolNames } from './words.ts';
+import type { ApplyResult, Change, DestinationResult, ExceptSwitched, HarnessId, HistoryEvent, LibraryFacts, PassResult, PluginSwitched, Profile, ProfileEdit, ProfileSwitchResult, ProfilesView } from './types.ts';
 
 // ---------- The profiles file ----------
 
-const FORMAT_VERSION = 3;
+const FORMAT_VERSION = 4;
 const profilesPath = (home: string) => join(storeDirectory(home), 'profiles.json');
 
 /** A profile's id for an item as format 1 named it: a skill by its key, as now; an MCP server by its name as written. */
 const fromFormat1 = (id: string) => (id.startsWith('mcp:') ? `mcp:${itemKey(id.slice(4))}` : id);
 
-/** The profiles in a profiles file: each with a string id and name, string items, and whether it switches plugin items (false for format 1 and 2, or a format 3 profile missing the field). */
+/** The tool ids in a list as stored, others dropped; undefined for no list. */
+const toolIds = (raw: unknown) => strings(raw)?.filter((tool): tool is HarnessId => harnessIds.includes(tool as HarnessId));
+/** A profile's `out` as stored, each item's tool ids (toolIds); undefined for none. */
+const outOf = (raw: unknown) => {
+  const map = record(raw);
+  return map && Object.fromEntries(Object.entries(map).flatMap(([id, tools]) => { const list = toolIds(tools); return list ? [[id, list]] : []; }));
+};
+/** Whether a profile holds the fields a format 4 file stores. */
+const ownsKeepOuts = (profile: Profile) => !!profile.tools || !!profile.out;
+
+/**
+ * The profiles in a profiles file: each with a string id and name, string items, and whether it switches plugin items (false for
+ * format 1 and 2, or a format 3 profile missing the field); from format 4, `tools` and `out` where it holds them.
+ */
 const profilesOf = (raw: unknown, format: number): Profile[] => (Array.isArray(raw) ? raw : [])
   .filter(profile => profile && typeof profile.id === 'string' && typeof profile.name === 'string')
-  .map(profile => ({ id: profile.id, name: profile.name, items: (strings(profile.items) ?? []).map(id => (format === 1 ? fromFormat1(id) : id)),
-    switchesPluginItems: format >= 3 && profile.switchesPluginItems === true }));
+  .map(profile => {
+    const tools = format >= 4 ? toolIds(profile.tools) : undefined, out = format >= 4 ? outOf(profile.out) : undefined;
+    return { id: profile.id, name: profile.name, items: (strings(profile.items) ?? []).map(id => (format === 1 ? fromFormat1(id) : id)),
+      switchesPluginItems: format >= 3 && profile.switchesPluginItems === true, ...(tools ? { tools } : {}), ...(out ? { out } : {}) };
+  });
 
 /**
  * The home's profiles as the file has them, with its format: 1 is a file from before profiles were sets of items, read with its
@@ -78,10 +101,11 @@ export const readProfiles = async (home: string): Promise<ProfilesView> =>
   ({ ...(await readProfileFile(home)).view, plugins: (await recordedIds(home)).plugins.map(({ id, plugin, marketName, on }) => ({ id, plugin, marketName, on })) });
 
 /**
- * Writes `profiles.json` in `format` (format 3 on a save; format 2 from profilemigrate.ts's format 1 move, since a pass that runs
- * without a click must not write a file the released build refuses). Format 2 omits `switchesPluginItems`.
+ * Writes `profiles.json` in `format`: by default as its content needs (4 while a profile holds `tools` or `out`, else 3); format 2
+ * from profilemigrate.ts's format 1 move, since a pass that runs without a click must not write a file the released build
+ * refuses. Format 2 omits `switchesPluginItems`.
  */
-export const saveProfiles = (home: string, profiles: Profile[], format: 2 | 3 = FORMAT_VERSION) => writeDurably(profilesPath(home),
+export const saveProfiles = (home: string, profiles: Profile[], format: 2 | 3 | 4 = profiles.some(ownsKeepOuts) ? 4 : 3) => writeDurably(profilesPath(home),
   `${JSON.stringify({ formatVersion: format, profiles: format === 2 ? profiles.map(({ id, name, items }) => ({ id, name, items })) : profiles }, null, 2)}\n`);
 
 /**
@@ -90,23 +114,26 @@ export const saveProfiles = (home: string, profiles: Profile[], format: 2 | 3 = 
  * items, which the next pass moves first (profilemigrate.ts, once nothing waits for Resume). Editing a profile writes Central
  * Knot's own file alone, so a record waiting for Resume does not stop it (share.ts libraryGate `ownFile`).
  */
-async function openProfiles(context: ShareContext): Promise<{ profiles: Profile[] } | { stop: string }> {
+async function openProfiles(context: ShareContext): Promise<{ profiles: Profile[]; format: number } | { stop: string }> {
   const gate = await libraryGate(context, { ownFile: true });
   if ('refused' in gate) return { stop: gate.refused };
-  const { view, format } = await readProfileFile(context.home);
+  const { view, format = FORMAT_VERSION } = await readProfileFile(context.home);
   if (view.problem) return { stop: view.problem };
   if (format === 1) return { stop: 'These profiles were made by an earlier Central Knot, and are moved to this one the next time it syncs this home. Nothing was changed.' };
-  return { profiles: view.profiles };
+  return { profiles: view.profiles, format };
 }
 
 /**
- * Adds a profile, or changes an existing one's name, items or `switchesPluginItems`: a field left out keeps what the profile has
- * now, so a rename and a tick sent close together never undo each other. A new profile defaults to `switchesPluginItems: true`;
- * an existing one keeps `false` until opted in with `true` (which drops any `plugin:` ids while keeping all of his own, dormant
- * ones too), and once `true` stays `true`. Names are unique, ignoring case. With `restore`, `id` is a deleted profile's, made
- * again with that id (Undo of Delete) and its saved `switchesPluginItems`.
+ * Adds a profile, or changes an existing one's name, items, `switchesPluginItems` or `tools`: a field left out keeps what the
+ * profile has now, so a rename and a tick sent close together never undo each other. A new profile defaults to
+ * `switchesPluginItems: true`; an existing one keeps `false` until opted in with `true` (which drops any `plugin:` ids while
+ * keeping all of his own, dormant ones too), and once `true` stays `true`. Names are unique, ignoring case. With `restore`, `id`
+ * is a deleted profile's, made again with that id (Undo of Delete) and its saved `switchesPluginItems`, `tools` and `out`.
+ * Once a profile holds `tools` or `out`, each without `out` has it filled in from the Library's keep-outs of its ticked items
+ * (profileplan.ts outNow), so none changes meaning; on the save that moves the file to format 4, the others filled in are named
+ * (`filled`).
  */
-export async function saveProfile(context: ShareContext, input: ProfileEdit): Promise<{ problem?: string; id?: string }> {
+export async function saveProfile(context: ShareContext, input: ProfileEdit): Promise<{ problem?: string; id?: string; filled?: string[] }> {
   const opened = await openProfiles(context);
   if ('stop' in opened) return { problem: opened.stop };
   const existing = input.id ? opened.profiles.find(profile => profile.id === input.id) : undefined;
@@ -119,10 +146,19 @@ export async function saveProfile(context: ShareContext, input: ProfileEdit): Pr
   const items = [...new Set((input.items ?? existing?.items ?? []).filter(item => /^(plugin:)?(skill|agent|mcp):./.test(item) && (!optingIn || !item.startsWith('plugin:'))))];
   const switchesPluginItems = existing ? existing.switchesPluginItems || input.switchesPluginItems === true : (input.switchesPluginItems ?? true);
   const id = existing?.id ?? (input.restore ? input.id : undefined) ?? randomUUID();
-  const saved: Profile = { id, name, items, switchesPluginItems };
-  const profiles = existing ? opened.profiles.map(profile => (profile.id === id ? saved : profile)) : [...opened.profiles, saved];
+  const tools = input.tools ? toolIds(input.tools) : existing?.tools, out = input.out ? outOf(input.out) : existing?.out;
+  const saved: Profile = { id, name, items, switchesPluginItems, ...(tools ? { tools } : {}), ...(out ? { out } : {}) };
+  let profiles = existing ? opened.profiles.map(profile => (profile.id === id ? saved : profile)) : [...opened.profiles, saved];
+  const unfilled = profiles.some(ownsKeepOuts) ? profiles.filter(profile => !profile.out) : [];
+  if (unfilled.length) {
+    const read = await readLibraries(context, 'Nothing was saved.');
+    if ('stop' in read) return { problem: read.stop };
+    const live = liveItems(read.libraries, read.plugins);
+    profiles = profiles.map(profile => (unfilled.includes(profile) ? { ...profile, out: outNow(profile, live) } : profile));
+  }
   await saveProfiles(context.home, profiles);
-  return { id };
+  const named = opened.format < 4 ? unfilled.filter(profile => profile.id !== id).map(profile => profile.name) : [];
+  return { id, ...(named.length ? { filled: named } : {}) };
 }
 
 /**
@@ -132,7 +168,9 @@ export async function saveProfile(context: ShareContext, input: ProfileEdit): Pr
 export async function profilesNaming(context: ShareContext, ids: string[], to?: string): Promise<string[]> {
   const opened = await openProfiles(context);
   const naming = 'stop' in opened ? [] : opened.profiles.filter(profile => profile.items.some(item => ids.includes(item)));
-  const moved = (profile: Profile) => ({ ...profile, items: [...new Set(profile.items.map(item => (ids.includes(item) ? to! : item)))] });
+  const renamed = (item: string) => (ids.includes(item) ? to! : item);
+  const moved = (profile: Profile) => ({ ...profile, items: [...new Set(profile.items.map(renamed))],
+    ...(profile.out ? { out: Object.fromEntries(Object.entries(profile.out).map(([item, tools]) => [renamed(item), tools])) } : {}) });
   if (to && naming.length && !('stop' in opened)) await saveProfiles(context.home, opened.profiles.map(moved));
   return naming.map(profile => profile.name);
 }
@@ -154,12 +192,12 @@ const KINDS: { kind: ItemKind; open: (context: ShareContext) => Promise<{ librar
   { kind: 'agent', open: context => agentKind.open(context), pass: applyAgents },
 ];
 
-/** Each kind's items as its record holds them now, and the plugins the home records (liveItems); or why a record can't be read (then nothing is switched). */
-export async function readLibraries(context: ShareContext): Promise<{ libraries: Libraries; plugins: Set<string> } | { stop: string }> {
+/** Each kind's items as its record holds them now, and the plugins the home records (liveItems); or why a record can't be read, and `then` (what was therefore not done). */
+export async function readLibraries(context: ShareContext, then = 'Nothing was switched.'): Promise<{ libraries: Libraries; plugins: Set<string> } | { stop: string }> {
   const libraries = {} as Libraries;
   for (const { kind, open } of KINDS) {
     const { library, problem } = await open(context);
-    if (problem) return { stop: `${problem} Nothing was switched.` };
+    if (problem) return { stop: `${problem} ${then}` };
     libraries[kind] = library.items;
   }
   return { libraries, plugins: new Set((await recordedIds(context.home)).plugins.map(entry => entry.id)) };
@@ -207,8 +245,9 @@ function placedClicks(kind: ItemKind, copies: CopyTurn[], libraries: Libraries):
 }
 
 /**
- * Turns `turns.on` On and `turns.off` Off, the library's own clicks, one pass per kind (`told`: History has them in the caller's
- * entry); then the placed copies in `copies`, one pass per kind of their own whose entry is always the caller's (placedClicks);
+ * Turns `turns.on` On and `turns.off` Off, and keeps `turns.except` out where each says (an item it turns On, with those
+ * keep-outs), the library's own clicks, one pass per kind (`told`: History has them in the caller's entry); then the placed
+ * copies in `copies`, one pass per kind of their own whose entry is always the caller's (placedClicks);
  * then each installed copy by its own switch in its tool (installedCopy), but those in `runs` (a plugin in Claude Code:
  * profileplan.ts wholeRuns): each run's copies together, its parts' switches first and its plugin's only once they went through,
  * every switch it made put back if any failed. Answers what each pass and tool said, the entries the
@@ -219,9 +258,12 @@ function placedClicks(kind: ItemKind, copies: CopyTurn[], libraries: Libraries):
  */
 async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Turns, told: boolean, copies: CopyTurn[], libraries: Libraries, plugins: PluginSide, runs: WholeRun[]) {
   const results: DestinationResult[] = [], made: string[] = [], placedResults: { kind: ItemKind; result: DestinationResult }[] = [], reloads: ReloadChange[] = [];
+  const keptTo = new Map(turns.except.map(turn => [turn.item, turn.to]));
   for (const { kind, pass } of KINDS) {
-    const asked = [...turns.on.filter(item => item.kind === kind).map(item => [item, true] as const), ...turns.off.filter(item => item.kind === kind).map(item => [item, false] as const)];
-    const clicks = asked.map(([item, on]): Change => ({ key: item.key, on, except: [...item.except], seenOn: !on }));
+    const asked = [...turns.on.filter(item => item.kind === kind).map(item => [item, true] as const), ...turns.off.filter(item => item.kind === kind).map(item => [item, false] as const),
+      ...toolsChanged(turns).filter(turn => turn.item.kind === kind).map(turn => [turn.item, true] as const)];
+    // An item On before and after was seen On; one it turns On, Off.
+    const clicks = asked.map(([item, on]): Change => ({ key: item.key, on, except: [...(on && keptTo.get(item) || item.except)], seenOn: !turns.on.includes(item) }));
     for (const [list, mine, toldHere] of [[clicks, false, told], [placedClicks(kind, copies, libraries), true, true]] as const) {
       if (!list.length) continue;
       const done = await pass(context, tools, list, { only: new Set(list.map(each => each.key)), told: toldHere });
@@ -261,6 +303,7 @@ async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Tu
   }
   const after = await readLibraries(context), records = 'stop' in after ? undefined : after.libraries;
   const now = (item: LiveItem) => records && !records[item.kind][item.key]?.deleted ? records[item.kind][item.key]?.on : undefined;
+  const keptAsAsked = ({ item, to }: Turns['except'][number]) => now(item) === true && sameTools(records![item.kind][item.key]!.except, to);
   const recordOf = ({ item, copy }: CopyTurn) => ('libraryKey' in copy.target ? records?.[item.kind][copy.target.libraryKey] : undefined);
   const letGo = copies.filter(turn => placedKey(turn) && recordOf(turn)?.source !== libraries[turn.item.kind][(turn.copy.target as { libraryKey: string }).libraryKey]?.source);
   const placedDone = (turn: CopyTurn) => {
@@ -269,7 +312,7 @@ async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Tu
     return wanted === turn.on && !letGo.includes(turn) && !placedResults.some(({ kind, result }) => kind === turn.item.kind && result.item === record?.name
       && result.harness === turn.copy.tool && (result.outcome === 'failed' || result.outcome === 'held'));
   };
-  return { results, made, reloads, done: { on: turns.on.filter(item => now(item) === true), off: turns.off.filter(item => now(item) === false) },
+  return { results, made, reloads, done: { on: turns.on.filter(item => now(item) === true), off: turns.off.filter(item => now(item) === false), except: turns.except.filter(keptAsAsked) },
     copies: copies.filter(turn => (placedKey(turn) ? placedDone(turn) : confirmed.includes(turn))), letGo, asAsked, steps };
 }
 
@@ -297,17 +340,23 @@ export const profileEvent = (context: ShareContext, item: string, profile: NonNu
   ({ id: randomUUID(), at: new Date(clock(context)).toISOString(), key: SWITCH_KEY, item, kind: 'profile', losers: [], orderProved: true, profile });
 
 /**
- * What a switch or its Undo did, as the page tells it: the items that are now as it asked (`done`, turned On and Off; of
- * `copies`, those `confirmed`) and those that are not (`left`), by name, a plugin's item once however many tools it was turned
- * in (one turned in one tool and not in another is in both lists); and what could not be done in a tool this time.
+ * What a switch or its Undo did, as the page tells it: the items that are now as it asked (`done`, turned On and Off, and `tools`,
+ * those whose tools alone it changed; of `copies`, those `confirmed`) and those that are not (`left`), by name, a plugin's item
+ * once however many tools it was turned in (one turned in one tool and not in another is in both lists); and what could not be
+ * done in a tool this time.
  */
 function outcome(turns: Turns, done: Turns, results: DestinationResult[], copies: CopyTurn[], confirmed: CopyTurn[]) {
   const names = (items: LiveItem[]) => items.map(item => item.name);
   const itemNames = (list: CopyTurn[]) => [...new Map(list.filter(turn => !turn.along).map(turn => [turn.item.id, turn.item.name])).values()];
   const left = [...turns.on, ...turns.off].filter(item => !done.on.includes(item) && !done.off.includes(item));
+  const keptLeft = turns.except.filter(turn => !done.except.includes(turn) && !left.includes(turn.item)).map(turn => turn.item);
+  const tools = names(toolsChanged(done).map(turn => turn.item));
   return { on: [...names(done.on), ...itemNames(confirmed.filter(turn => turn.on))], off: [...names(done.off), ...itemNames(confirmed.filter(turn => !turn.on))],
-    left: [...names(left), ...itemNames(copies.filter(turn => !confirmed.includes(turn)))], results: results.filter(result => result.outcome === 'failed' || result.outcome === 'held') };
+    ...(tools.length ? { tools } : {}), left: [...names([...left, ...keptLeft]), ...itemNames(copies.filter(turn => !confirmed.includes(turn)))],
+    results: results.filter(result => result.outcome === 'failed' || result.outcome === 'held') };
 }
+/** The items whose tools alone a plan changes (toolsChanged), as History keeps them: each one's keep-outs before and after. */
+const exceptSwitched = (turns: Turns): ExceptSwitched[] => toolsChanged(turns).map(({ item, to }) => ({ id: item.id, name: item.name, wasExcept: [...item.except], nowExcept: [...to] }));
 
 const orphanClearedNote = (rule: CopilotRule) => `Copilot CLI’s off-switch for “${rule.server}” was cleared, so yours is on there.`;
 
@@ -338,13 +387,14 @@ async function runCopilotRules(context: ShareContext, rules: CopilotRule[], disa
   return { confirmed, results, left };
 }
 
-/** Keeps only what actually switched (library items, confirmed plugin copies, whole steps and orphan clears) plus settings notes; returns the settled payload. */
+/** Keeps only what actually switched (library items, their keep-outs, confirmed plugin copies, whole steps and orphan clears) plus settings notes; returns the settled payload. */
 async function settleEntry(context: ShareContext, eventId: string, turned: Turns, confirmed: CopyTurn[],
   steps: PluginOp[], settingsChanged: string[], copilotCleared?: CopilotRule[]): Promise<HistoryEvent['profile']> {
   const history = await readHistory(context), entry = history.find(each => each.id === eventId);
   if (!entry?.profile) return undefined;
   entry.profile.on = named(turned.on);
   entry.profile.off = named(turned.off);
+  if (entry.profile.except) { const kept = exceptSwitched(turned); if (kept.length) entry.profile.except = kept; else delete entry.profile.except; }
   if (entry.profile.plugins) entry.profile.plugins = confirmed.map(switched);
   if (entry.profile.wholeSteps) { if (steps.length) entry.profile.wholeSteps = steps; else delete entry.profile.wholeSteps; }
   if (copilotCleared) { if (copilotCleared.length) entry.profile.copilotCleared = copilotCleared; else delete entry.profile.copilotCleared; }
@@ -353,7 +403,7 @@ async function settleEntry(context: ShareContext, eventId: string, turned: Turns
   return entry.profile;
 }
 
-const short = (done: Turns, planned: Turns) => done.on.length < planned.on.length || done.off.length < planned.off.length;
+const short = (done: Turns, planned: Turns) => done.on.length < planned.on.length || done.off.length < planned.off.length || done.except.length < planned.except.length;
 
 /** Confirmed Copilot CLI off-switches cleared solely because the profile names his own server of that exact name (said in result and History). */
 function clearedForHis(profile: Profile, confirmed: CopyTurn[]): string[] {
@@ -364,7 +414,7 @@ function clearedForHis(profile: Profile, confirmed: CopyTurn[]): string[] {
 
 // ---------- Switching, and its Undo ----------
 
-/** Switches to a profile: library items (switchPlan), orphan Copilot CLI off-switches (`LiveItem.copilotOff`), and plugin copies (pluginPlan). */
+/** Switches to a profile: library items (switchPlan) with their keep-outs, orphan Copilot CLI off-switches (`LiveItem.copilotOff`), and plugin copies (pluginPlan). */
 export async function switchProfile(context: ShareContext, tools: HarnessId[], id: string, plugins: PluginSide): Promise<ProfileSwitchResult> {
   const opened = await openProfiles(context);
   if ('stop' in opened) return stopped(opened.stop);
@@ -373,13 +423,14 @@ export async function switchProfile(context: ShareContext, tools: HarnessId[], i
   const read = await readLibraries(context);
   if ('stop' in read) return stopped(read.stop);
   const live = await plugins.live(), { items } = await withCopilot(context, tools, liveItems(read.libraries, read.plugins), live);
-  const planned = switchPlan(profile, items), turns: Turns = { on: planned.on.filter(item => !item.on), off: planned.off };
+  const planned = switchPlan(profile, items), turns: Turns = { on: planned.on.filter(item => !item.on), off: planned.off, except: planned.except };
   const clears: CopilotRule[] = planned.on.filter(item => item.copilotOff).map(item => ({ id: item.id, name: item.name, server: item.copilotOff! }));
   const plan = pluginPlan(profile, live), copies = copiesTurned(plan, live), runs = wholeRuns(profile, copies, live), held = heldResults(plan, live);
-  if (!changes(planned) && !copies.length && !runs.length) return held.length ? stopped(`${heldWords(plan, live).text}. Nothing was switched.`) : { name: profile.name, on: [], off: [], left: [], results: [], reloads: [] };
+  if (!changes(planned) && !planned.except.length && !copies.length && !runs.length) return held.length ? stopped(`${heldWords(plan, live).text}. Nothing was switched.`) : { name: profile.name, on: [], off: [], left: [], results: [], reloads: [] };
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return stopped(`${gate.refused} Nothing was switched.`);
-  const steps = runs.flatMap(run => run.ops), event = profileEvent(context, profile.name, { toName: profile.name, on: named(turns.on), off: named(turns.off),
+  const steps = runs.flatMap(run => run.ops), kept = exceptSwitched(turns);
+  const event = profileEvent(context, profile.name, { toName: profile.name, on: named(turns.on), off: named(turns.off), ...(kept.length ? { except: kept } : {}),
     ...(copies.length ? { plugins: copies.map(switched) } : {}), ...(steps.length ? { wholeSteps: steps } : {}), ...(clears.length ? { copilotCleared: clears } : {}) });
   await appendHistory(context, [event]);
   const done = await turnTogether(context, tools, turns, true, copies, read.libraries, plugins, runs), rules = await runCopilotRules(context, clears, false);
@@ -390,10 +441,10 @@ export async function switchProfile(context: ShareContext, tools: HarnessId[], i
     : event.profile;
   const out = outcome(turns, done.done, [...held, ...done.results, ...rules.results], copies.filter(turn => !done.asAsked.includes(turn)), done.copies);
   return { name: profile.name, on: [...out.on, ...rules.confirmed.filter(rule => !done.done.on.some(item => item.id === rule.id)).map(rule => rule.name)],
-    off: out.off, left: [...new Set([...out.left, ...rules.left])], results: out.results, event: event.id, profile: settled, ...(settingsChanged.length ? { settingsChanged } : {}), reloads: done.reloads };
+    off: out.off, ...(out.tools ? { tools: out.tools } : {}), left: [...new Set([...out.left, ...rules.left])], results: out.results, event: event.id, profile: settled, ...(settingsChanged.length ? { settingsChanged } : {}), reloads: done.reloads };
 }
 
-/** Undo of a profile entry: turns back library items, plugin copies and uncovered Copilot CLI rules still as left, never re-disabling a name his server uses now, and clears any uncovered rule blocking a server it turns back on. */
+/** Undo of a profile entry: turns back library items (their keep-outs too), plugin copies and uncovered Copilot CLI rules still as left, never re-disabling a name his server uses now, and clears any uncovered rule blocking a server it turns back on. */
 export async function undoSwitch(context: ShareContext, tools: HarnessId[], eventId: string, plugins: PluginSide): Promise<ApplyResult> {
   const stop = (why: string): ApplyResult => ({ stopped: why, results: [], harnessWrites: 0, reloads: [] });
   const history = await readHistory(context);
@@ -406,10 +457,11 @@ export async function undoSwitch(context: ShareContext, tools: HarnessId[], even
   const { back: copilotBack, keptOff: ruleKept } = copilotUndo(past, rows, read.libraries.mcp, afterOn);
   const copilotClear: CopilotRule[] = turns.on.filter(item => item.copilotOff).map(item => ({ id: item.id, name: item.name, server: item.copilotOff! }));
   const keptNotes = [...new Set([...pluginKept, ...ruleKept])].map(name => `Copilot CLI’s off-switch for “${name}” was left off: a server of yours has that name there now.`);
-  if (!changes(turns) && !back.length && !whole.length && !copilotBack.length) return stop(keptNotes.join(' ') || 'Nothing to undo: each item that switch changed was changed again since.');
+  if (!changes(turns) && !turns.except.length && !back.length && !whole.length && !copilotBack.length) return stop(keptNotes.join(' ') || 'Nothing to undo: each item that switch changed was changed again since.');
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return stop(`${gate.refused} Nothing was undone.`);
-  const undo = back.length || whole.length || copilotBack.length || copilotClear.length ? profileEvent(context, past.item, { toName: past.profile.toName, undoOf: past.id, on: named(turns.on), off: named(turns.off),
+  const kept = exceptSwitched(turns);
+  const undo = back.length || whole.length || copilotBack.length || copilotClear.length ? profileEvent(context, past.item, { toName: past.profile.toName, undoOf: past.id, on: named(turns.on), off: named(turns.off), ...(kept.length ? { except: kept } : {}),
     ...(back.length ? { plugins: back.map(switched) } : {}), ...(whole.length ? { wholeSteps: whole.flatMap(run => run.ops) } : {}), ...(copilotBack.length ? { copilotCleared: copilotBack } : {}) }) : undefined;
   if (undo) await appendHistory(context, [undo]);
   const { results, made, reloads, done, copies, letGo, asAsked, steps } = await turnTogether(context, tools, turns, false, back, read.libraries, plugins, whole);
@@ -423,9 +475,10 @@ export async function undoSwitch(context: ShareContext, tools: HarnessId[], even
   const by = notDone.length ? undefined : (undo && (copies.length || steps.length || rules.confirmed.length || cleared.confirmed.length) ? undo.id : undefined) ?? made[0];
   if (by) { const now = await readHistory(context), entry = now.find(each => each.id === eventId); if (entry) { entry.undoneBy = by; await replaceHistory(context, now); } }
   const since = [...left.map(({ copy, why }) => `${copy.name} in ${toolNames[copy.tool]}, ${why}`),
+    ...(past.profile.except ?? []).filter(was => !turns.except.some(turn => turn.item.id === was.id)).map(was => `${was.name}’s tools, changed since the switch`),
     ...[...groupBy(letGo, turn => turn.item.id).values()].map(list => `${list[0]!.item.name} in ${andList(list.map(turn => toolNames[turn.copy.tool]))}, edited by hand since, so it is your own now`)];
-  return { results: notDone, harnessWrites: changes(done) + copies.length + rules.confirmed.length + cleared.confirmed.length, made,
-    switched: { on: switchedBack.on, off: [...switchedBack.off, ...rules.confirmed.filter(rule => !done.off.some(item => item.id === rule.id)).map(rule => rule.name)],
+  return { results: notDone, harnessWrites: changes(done) + done.except.length + copies.length + rules.confirmed.length + cleared.confirmed.length, made,
+    switched: { on: switchedBack.on, off: [...switchedBack.off, ...rules.confirmed.filter(rule => !done.off.some(item => item.id === rule.id)).map(rule => rule.name)], ...(switchedBack.tools ? { tools: switchedBack.tools } : {}),
       left: [...new Set([...switchedBack.left, ...rules.left, ...cleared.left])], ...(since.length ? { since } : {}), ...(undoNotes.length ? { settingsChanged: undoNotes } : {}), ...(steps.length ? { plugins: wholeCounts({ steps }) } : {}) },
     reloads };
 }

@@ -60,6 +60,17 @@ export const NOTHING_CHANGED = 'Nothing was written or deleted. Put the record b
 /** The text with its first letter capitalised, to start a sentence. */
 export const sentence = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 
+/**
+ * A change of keep-outs in words, each list in tool order: `${lead} <the tools it is kept out of now>; back in <those it is in
+ * again>` ("Out of Codex; back in Pi"); with `count`, a list of more than two tools is counted ("Out of 4 tools"). History's
+ * entry (historyactions.ts) and a Profiles row (profileplan.ts listedChanges) say it so.
+ */
+export function keptOutWords(was: readonly HarnessId[], now: readonly HarnessId[], lead: string, count = false): string {
+  const named = (tools: HarnessId[]) => (count && tools.length > 2 ? `${tools.length} tools` : andList(tools.sort(byToolOrder).map(toolName)));
+  const out = now.filter(tool => !was.includes(tool)), back = was.filter(tool => !now.includes(tool));
+  return [out.length ? `${lead} ${named(out)}` : '', back.length ? `${out.length ? 'back' : 'Back'} in ${named(back)}` : ''].filter(Boolean).join('; ');
+}
+
 /** "a", "a and b", "a, b and c". */
 export const andList = (items: string[]) => joined(items, 'and');
 /** Tools by name, as an and-list: "Claude Code, Copilot CLI and Codex". */

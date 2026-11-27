@@ -1759,8 +1759,10 @@ app.whenReady().then(async () => {
   // Profiles: their definitions are Central Knot's own file; a switch is the library's own On and Off clicks (profiles.ts).
   handle('profiles:save', async (profile, home) => {
     if (home !== current?.home || !profile || typeof profile !== 'object') return { problem: elsewhere };
-    const input = profile as { id?: unknown; name?: unknown; items?: unknown; switchesPluginItems?: unknown; restore?: unknown };
-    const saved = await saveProfile(context(), { id: typeof input.id === 'string' ? input.id : undefined, name: typeof input.name === 'string' ? input.name : undefined, items: strings(input.items), switchesPluginItems: typeof input.switchesPluginItems === 'boolean' ? input.switchesPluginItems : undefined, restore: input.restore === true });
+    const input = profile as { id?: unknown; name?: unknown; items?: unknown; switchesPluginItems?: unknown; tools?: unknown; out?: unknown; restore?: unknown };
+    // `tools` and `out` go on as sent: saveProfile keeps only tool ids in them.
+    const saved = await saveProfile(context(), { id: typeof input.id === 'string' ? input.id : undefined, name: typeof input.name === 'string' ? input.name : undefined, items: strings(input.items), switchesPluginItems: typeof input.switchesPluginItems === 'boolean' ? input.switchesPluginItems : undefined,
+      tools: strings(input.tools) as HarnessId[] | undefined, out: record(input.out) as Record<string, HarnessId[]> | undefined, restore: input.restore === true });
     return saved.problem ? saved : { ...saved, profiles: await profilesSaved() };
   });
   handle('profiles:delete', async (id, home) => {

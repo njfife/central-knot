@@ -56,6 +56,16 @@ test('One harness’s switch: its entry turns that harness on or off again, whil
   assert.equal(offered(back, item({ except: ['codex-cli'] })), undefined);
 });
 
+test('Several harnesses’ keep-outs changed at once while the agent stays On (a profile switch’s Undo): one entry names each, and its Undo puts them all back while they are as it left them', () => {
+  const both = entry({ kind: 'off', cause: 'switch', exceptOnly: true, wasExcept: ['codex-cli'], nowExcept: ['copilot-cli', 'pi-cli'], losers: [{ tool: 'copilot-cli', hash: 'b' }] });
+  assert.equal(librarySentence(both, libraryWords.agents, tools)?.text, 'Kept out of Copilot CLI and Pi; back in Codex.');
+  assert.deepEqual(offered(both, item({ except: ['pi-cli', 'copilot-cli'] })), ['Undo', { ...asIs, except: ['codex-cli'] }]);
+  assert.equal(offered(both, item({ except: ['pi-cli'] })), undefined, 'changed since: nothing to put back');
+  const back = entry({ kind: 'on', cause: 'switch', exceptOnly: true, wasExcept: ['copilot-cli', 'codex-cli'], nowExcept: [], losers: [] });
+  assert.equal(librarySentence(back, libraryWords.agents, tools)?.text, 'Back in Copilot CLI and Codex.');
+  assert.deepEqual(offered(back, item()), ['Undo', { ...asIs, except: ['copilot-cli', 'codex-cli'] }]);
+});
+
 test('A content change offers Undo: the version from before it made current, unless it is current already or no longer a version', () => {
   const edit = entry({ kind: 'edit', winner: { tool: 'codex-cli', hash: 'b' }, previous: 'a', losers: [{ tool: 'claude-cli', hash: 'a' }] });
   assert.equal(librarySentence(edit, libraryWords.agents, tools)?.text, 'Edited in Codex; that became the current version, in Claude Code too.');
