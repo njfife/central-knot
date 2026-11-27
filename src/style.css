@@ -801,6 +801,13 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .file-open-tabs { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
 .file-tab { appearance: none; max-width: 100%; overflow-wrap: anywhere; border: 1px solid transparent; border-radius: 6px; padding: 2px 8px; background: transparent; color: var(--ink-soft); font: 500 11.5px/16px var(--mono); cursor: pointer; }
 .file-tab.is-active { background: var(--surface); border-color: var(--control-line); color: var(--ink); box-shadow: var(--lift); }
+/* An agent's one file, or its definition, named by a plain label (matrix.ts filePanel): nothing there to press. */
+.file-open-name { min-width: 0; padding: 3px 0; color: var(--ink); font: 500 11.5px/16px var(--mono); overflow-wrap: anywhere; }
+.file-open-name.file-open-definition { font-family: inherit; font-size: 12px; }
+/* An agent's definition: each part under its word, the prompt (the last block) taking the room left. */
+.file-open-box > .content-block:has(+ .content-block) { flex: none; }
+.file-open-box .content-owner { margin: 0; padding: 8px 12px 0; }
+.file-open-box .content-owner + .content { padding-top: 4px; }
 .file-open-box > .content-block { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .file-open-box .content { flex: 1 1 auto; min-height: 0; max-width: none; padding: 10px 12px; border: 0; border-radius: 0; line-height: 17.5px; overflow-y: auto; overscroll-behavior: contain; }
 .file-open-state { margin: 0; padding: 12px; font-size: 12.5px; color: var(--ink-soft); }
@@ -1998,7 +2005,9 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .profile-in-use { flex: none; height: 20px; display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border-radius: 4px; font-size: 11px; line-height: 14px; font-weight: 500; white-space: nowrap; background: var(--picked); color: var(--accent-ink); }
 /* Their pane header and toolbars span the pane (the Skills files view caps its own) */
 .profiles-split .detail-column .pane-header, .profiles-split .detail-column > .bands { max-width: none; }
-.profiles-split .toolbar-end { border-left: 0; padding-left: 0; }
+.profiles-split .toolbar-end { border-left: 0; padding-left: 0; gap: 8px; }
+.profile-subtitle { display: flex; align-items: center; gap: 4px; min-width: 0; flex-wrap: wrap; }
+.profile-subtitle > .info-wrap { flex: none; }
 .profile-header .pane-title h2, .profile-header .pane-title p { overflow-wrap: anywhere; }
 /* What a switch will do is said whole: it wraps rather than being cut */
 .profile-header .pane-title p { white-space: normal; }
@@ -2017,12 +2026,17 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .profiles-page .band:has(#profile-from-now, #profile-choose-plugins) > .band-text { max-width: calc(100% - 20px); }
 /* The result of a switch spans the pane, like the table under it */
 .page.profiles-page > .bands > .band { padding-right: 16px; }
+/* Narrow-window profile picker bar (shown under 880 px in place of the stacked list; Profiles-only, leaving shared .split unchanged) */
+.pf-picker { display: none; flex: 0 1 auto; align-items: center; gap: 6px; min-width: 0; font-size: 12.5px; color: var(--ink-soft); }
+.pf-picker .select { min-width: 0; max-width: 100%; }
+.pf-picker select { min-width: 120px; max-width: 100%; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Stacked in a narrow window, the Profiles page scrolls as one, every profile and then the open one's items, so many profiles
-   never leave the items a small box of their own */
+/* Under 880 px, Profiles folds its list column to the one-line picker bar and scrolls as one */
 @container content (width < 880px) {
   .profiles-split { overflow-y: auto; }
-  .profiles-split .list-scroll { max-height: none; overflow: visible; }
+  .profiles-split .profiles-list { border-bottom: 0; }
+  .profiles-split .profiles-list .toolbar-title, .profiles-split .list-scroll { display: none; }
+  .profiles-split .pf-picker { display: inline-flex; }
   .profiles-split .detail-column, .profiles-split .pf-scroll { flex: none; min-height: auto; overflow: visible; }
 }
 
@@ -2033,7 +2047,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .pf-row:not(.pf-head):hover { background: var(--hover); }
 .pf-row:not(.pf-head):focus-within { background: var(--hover); }
 .pf-head { position: sticky; top: 0; z-index: 2; background: var(--surface); min-height: 40px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink-soft); }
-.pf-head .pf-name { padding-left: 16px; }
+.pf-head .pf-name { padding-left: 16px; gap: 4px; }
 .pf-name { position: relative; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px; }
 .pf-name-text { flex: 0 1 auto; min-width: 48px; font-weight: 500; overflow-wrap: anywhere; }
 /* A long name wraps instead of being cut: rows grow, keeping their minimum height */
@@ -2046,7 +2060,6 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .pf-claude-turns ul { margin: 2px 0 0; padding-left: 18px; }
 /* What the profile leaves out reads quieter, so its set reads as a set at any width */
 .pf-row:not(.pf-included):not(.pf-head) .pf-name-text { color: var(--ink-soft); font-weight: 400; }
-.pf-desc { flex: 1 1 0; min-width: 0; max-width: 80ch; font-size: 12px; line-height: 16px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A plugin's item: under its name, each tool that doesn't switch it, and why, wrapped at any width */
 .pf-name:has(> .pf-notes) { flex-wrap: wrap; row-gap: 2px; }
 .pf-notes { flex: 1 0 100%; display: flex; flex-direction: column; padding-left: 28px; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
@@ -2055,9 +2068,9 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .pf-tick .tick-box { margin: 0; }
 .pf-tick:has(.hidden-input:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px; }
 .pf-included .pf-tick { color: var(--ink); }
-/* What a switch does to the row: quiet where nothing changes, the ink's own weight where it turns on or off (the blue is a link's);
+/* What a switch does to the row: blank where nothing changes, the ink's own weight where it turns on or off (the blue is a link's);
    wide enough at 1316 with the sidebar open for "Turns off in Codex and Pi" on one line, wrapping only past that */
-.pf-state { padding: 6px 16px; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
+.pf-state { padding: 6px 16px; font-size: 12px; line-height: 16px; color: var(--ink-soft); text-align: right; }
 .pf-state-moves { color: var(--ink); font-weight: 500; }
 /* At the head of a kind, once: a tool that keeps a plugin's items of that kind on */
 .pf-kind-note { padding: 6px 16px; font-size: 12px; line-height: 16px; color: var(--ink-soft); box-shadow: inset 0 -1px 0 var(--control-line); }
@@ -2065,8 +2078,9 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .pf-section-label { display: flex; align-items: center; gap: 8px; font-size: 12px; line-height: 16px; }
 .pf-section-count { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
 .pf-none { padding: 24px 16px; color: var(--ink-soft); }
-.pf-save-note { font-size: 12px; line-height: 16px; color: var(--ink-soft); white-space: nowrap; }
-@container (max-width: 639px) { .pf-save-note { display: none; } }
+.pf-changes-chip { border-color: var(--control-line); background: var(--surface); color: var(--ink); font-size: 12px; font-weight: 500; }
+.pf-changes-chip.chip-on { background: var(--picked); border-color: color-mix(in oklab, var(--accent) 45%, transparent); color: var(--accent-ink); }
+.pf-changes-chip.chip-on .chip-count { color: var(--accent-ink); }
 
 /* Status bar: the profile in use, with a menu to switch */
 /* It gives way first in a crowded bar: a long name ends in an ellipsis (its tooltip and the menu have it whole). The sync switch

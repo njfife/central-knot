@@ -33,7 +33,7 @@ import { checkFeed, type FeedCheck } from './bundlefeed.ts';
 import { mcpFile } from './mcp.ts';
 import { switchPath } from './skillswitch.ts';
 import { applyServers, restoreServer, serversView, serverVersion } from './servers.ts';
-import { agentVersion, agentsView, applyAgents, restoreAgent } from './agents.ts';
+import { agentToolFile, agentVersion, agentsView, applyAgents, restoreAgent } from './agents.ts';
 import { agentsFolder } from './agentfiles.ts';
 import { isClearedSwitch, libraryEntry } from './historyactions.ts';
 import { applyBase, baseView, instructionsView, instructionVersion, repoBase, saveInstruction, undoBase } from './instructions.ts';
@@ -507,7 +507,7 @@ function profileMenu(): Electron.MenuItemConstructorOptions {
     // One not offered (nothing in it: profileplan.ts switchable) is shown disabled, as on the Profiles page.
     ...lastProfiles.profiles.map(profile => {
       const empty = !switchable(profile, lastItems, lastPlugins);
-      return { label: empty ? `${profile.name} (empty)` : `${profile.name} · ${switchPreview(profile, lastItems, lastPlugins)}`, type: 'checkbox' as const, checked: inUseNow.includes(profile), enabled: usable && !empty, click: () => switchFromMenu(profile.id) };
+      return { label: empty ? `${profile.name} (empty)` : `${profile.name} · ${switchPreview(profile, lastItems, lastPlugins).card}`, type: 'checkbox' as const, checked: inUseNow.includes(profile), enabled: usable && !empty, click: () => switchFromMenu(profile.id) };
     }),
     { type: 'separator' },
     { label: 'Edit profiles…', click: () => showPage('profiles') },
@@ -1693,6 +1693,12 @@ app.whenReady().then(async () => {
   // Word search: answered at once from the index last published (search.ts), which reads no file and waits for no pass.
   handleNow('search:ask', async (typed, shown) => search.ask(typeof typed === 'string' ? typed : '', Number.isInteger(shown) ? Number(shown) : 0));
   handleNow('agents:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await agentVersion(context(), key, hash)) ?? null : null));
+  // One agent's file in a managed tool, read on a click for the home on screen (agents.ts agentToolFile): main finds it by the key; no path comes from the page.
+  handleNow('agents:file', async (home, key, tool) => {
+    if (!current || typeof key !== 'string' || !isTool(tool)) return null;
+    const shared = context();
+    return (await agentToolFile(shared, await managedNow(shared, await readFor(handoff.id)), home, key, tool)) ?? null;
+  });
   handle('instructions:view', async readId => (current ? instructionsView(context(), await readFor(readId as number | undefined), true) : null));
   handle('instructions:save', async (tool, text, expected, home, restoring) => (home === current?.home && isTool(tool) && typeof text === 'string' && typeof expected === 'string'
     ? saveInstruction(context(), await read(), tool, text, expected, restoring === true)
