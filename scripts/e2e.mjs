@@ -3048,11 +3048,13 @@ async function practiceFlow() {
   // Watching: an edit on disk spreads with no click (an event prompts a read; polling is the fallback).
   await openKind(a, 'skills');
   writeFileSync(standupPath('copilot'), standupBefore.replace(/\n*$/, '\nEdited in Copilot, watched.\n'));
-  await waitFor('the watched edit to spread to Claude Code', () => readNow(standupPath('claude')).includes('watched'));
-  check('a change on disk spreads on its own', true);
+  const watched = () => readNow(standupPath('claude')).includes('watched');
+  await waitFor('the watched edit to spread to Claude Code', watched);
+  check('a change on disk spreads on its own', watched());
   // The page hears of it once the pass that spread it has told it, and it has read again.
-  await waitFor('the header notice for the watched Copilot edit', async () => (await noticeInLines(a) ?? '').includes('standup was edited in Copilot CLI'));
-  check('and the page hears about it without a click', true);
+  const heard = async () => (await noticeInLines(a) ?? '').includes('standup was edited in Copilot CLI');
+  await waitFor('the header notice for the watched Copilot edit', heard);
+  check('and the page hears about it without a click', await heard(), await a.text('#header'));
   // Deliver the same notification as main and wait until the renderer has received it, even while a read is held.
   if (main) await a.run(`window.ckSyncSignals = 0; centralKnot.onSyncChanged(() => { window.ckSyncSignals++; })`);
   const tellOfChange = async () => {
@@ -19131,7 +19133,7 @@ async function profilePluginsFlow() {
   const pluginProfile = () => a.run(`document.querySelector('#header .band-profile')?.textContent ?? ''`);
   const waitEnabled = async sel => {
     for (let tries = 0; tries < 80 && !(await a.exists(`${sel}:not([disabled])`)); tries++) await wait(100);
-    if (!(await a.exists(`${sel}:not([disabled])`))) throw new Error(`Never became enabled: ${sel}`);
+    if (!(await a.exists(`${sel}:not([disabled])`))) throw new Error(`Waited for ${sel}: ${(await a.exists(sel)) ? 'drawn and disabled' : 'absent'}`);
   };
   await a.click('#nav-plugins');
   for (let tries = 0; tries < 50 && !(await a.exists('#pbox-0-issue-tracker-codex-cli') || await a.exists('#popen-0-issue-tracker')); tries++) await wait(100);

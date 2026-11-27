@@ -645,7 +645,7 @@ test('A catalog that arrives while the listing is being read is not missed; a co
     await rename(join(aside, 'catalogs', copy), join(w.dataDir, 'catalogs', copy));
     const arrived = ends;
     job.listed(listed, false);
-    await until(() => ends > arrived && !job.view().reading, 'the run after the catalog arrived');
+    await until(() => ends > arrived && last?.of === 404 && !job.view().reading, 'the arrived catalog’s 404 plugins');
     assert.equal(last!.of, 404, 'the four of the marketplace whose copy arrived are counted with the 400');
     // A copy that will not read: each telling of the same listing is not a new read.
     await writeFile(join(w.dataDir, 'catalogs', copy, '.claude-plugin/marketplace.json'), '{ broken');
