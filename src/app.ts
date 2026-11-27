@@ -1269,7 +1269,7 @@ export const loadHistory = async (): Promise<void> => {
 };
 
 /** History as an action read it, after what it changed: its events and window, the newest. */
-async function putHistory() {
+export async function putHistory() {
   const { events, days } = await api().history();
   putPageData(state.history, events);
   state.historyDays = days;
@@ -1420,6 +1420,8 @@ export interface Outcome {
   band?: boolean;
   /** Shown as a band on Settings even without reload advice: Synchronize everything's switch-on and its band's Undo (settingspage.ts). */
   settingsBand?: boolean;
+  /** Shown as a band on History even without warn, reloads or profileLine: a tool's Manage click (managecard.ts, historypage.ts). */
+  historyBand?: boolean;
   /** Appended profileLeftUse sentence when an act ended every profile in use; keeps the result in a band (saidInStatusBar) and whole on Row 2 (matrix.ts listResult). */
   profileLine?: string;
   /** The band goes after a few seconds: an Undo's confirmation. */

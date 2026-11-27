@@ -1227,7 +1227,7 @@ span.ins-confirm { margin-top: 0; }
   .history-list { display: block; }
   .history-row { grid-template-columns: minmax(80px, max-content) minmax(0, 1fr) auto; column-gap: 16px; row-gap: 2px; }
   .history-about { grid-column: 2 / -1; grid-row: 2; margin-left: 22px; }
-  .history-row > .change-panel { margin-top: 10px; }
+  .history-row > .change-panel, .history-row > .history-confirm { margin-top: 10px; }
   /* The name takes the line it is on. */
   .history-row .history-what > strong { max-width: none; }
 }
@@ -1243,6 +1243,10 @@ span.ins-confirm { margin-top: 0; }
 .history-undone .history-what strong { color: var(--ink-soft); }
 .history-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 2px 12px; text-align: right; }
 .history-actions .btn.link { flex: 0 1 auto; min-width: 0; height: auto; padding: 0; white-space: normal; text-align: right; }
+/* Inline Manage-again question inside a History row (historypage.ts managingRow). */
+.history-row > .history-confirm { grid-column: 1 / -1; border: 1px solid var(--line); border-radius: 8px; flex-wrap: wrap; justify-content: space-between; gap: 8px 12px; padding: 8px 12px; }
+.history-confirm > .band-text { flex: 1 1 320px; color: var(--ink); }
+.history-confirm-actions { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
 
 /* ---------- MCP sign-in (mcpsigninpage.ts): a row per server, a column per tool (14% each, six beside the name's 16%); every word
    wraps in its cell but the last before a (?), kept with it, its column widening for the pair; none is cut; the head row stays at
