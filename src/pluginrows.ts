@@ -151,14 +151,6 @@ export function cellWords(row: PluginRow, tool: HarnessId): string {
   return `${name}: in the plugin ${row.plugin}${version}${off === 'plugin' ? `; the whole plugin is turned off in ${name}` : off === 'item' ? `; turned off in ${name}` : ''}`;
 }
 
-/** What a tool that has the item says of it in its line in the item's details: its copy in the plugin and whether it is on (one that has none: pluginline.ts). */
-export function toolWords(row: PluginRow, tool: HarnessId): string {
-  const version = row.installs[tool]?.version;
-  const off = offIn(row, tool);
-  const inside = `Inside ${row.plugin}${version ? ` ${version}` : ''}`;
-  return off === 'plugin' ? `${inside}. The whole plugin is turned off here.` : off === 'item' ? `${inside}. Turned off here with its own switch.` : `${inside}, on here.`;
-}
-
 /** Whether the plugin's marketplace is on the Plugins page (it is added in some tool that has it), so it has a page there. */
 const listedHere = (row: PluginRow) => Object.values(row.installs).some(install => install?.listed);
 /**

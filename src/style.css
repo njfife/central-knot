@@ -1943,7 +1943,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .ins-preview, .ins-diff, .ins-text { font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
 
 /* Skills, agents and a plugin's items: every tool's row has the same three columns (tool, what it has, its own controls), so the controls line up. */
-.details.details-grid .details-tool-head { grid-template-columns: 196px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; }
+.details.details-grid .details-tool-head { grid-template-columns: 124px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; }
 .details-tool-head > .details-tool-actions { display: inline-flex; align-items: center; gap: 12px; justify-self: end; }
 .details-tools { container-type: inline-size; }
 /* In a narrow pane (the dock, the Files view's details) the tool and its controls share the first line; the sentence, if any, goes under. */

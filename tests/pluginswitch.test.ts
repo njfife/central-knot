@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { batches, resultLines, strayHolds, type PluginDone, type PluginDraft, type PluginOp } from '../src/pluginplan.ts';
-import { alongWords, cantSwitch, click, clickWords, copilotByName, itemSaid, onNow, standing, switchWords, turnEvery, wholeWords, type PluginItemAt } from '../src/pluginswitch.ts';
+import { alongWords, cantSwitch, click, clickWords, copilotByName, itemSaid, onNow, standing, turnEvery, wholeWords, type PluginItemAt } from '../src/pluginswitch.ts';
 import { statusLine } from '../src/libraryrow.ts';
 import { newItem } from '../src/library.ts';
 import { owedTo } from '../src/pluginrecord.ts';
@@ -118,9 +118,6 @@ test('an item with no switch of its own flips the whole plugin, and its words na
   const claude = installed('claude-cli');
   const skill = item(claude, 'skill', 'one');
   assert.equal(clickWords(skill), 'Claude Code has no switch for one skill of a plugin. Click to turn the whole plugin full off in Claude Code, with its 1 skill, 2 MCP servers and 1 agent.');
-  // The line beside its switch in the opened row says the same before any click; an item with its own switch says nothing.
-  assert.equal(switchWords(skill), 'Claude Code has no switch for one skill of a plugin, so this switch turns the whole plugin off there.');
-  assert.equal(switchWords(item(claude, 'mcp', 'issues')), '');
   click(draft, skill);
   assert.deepEqual(chosen(draft), ['claude-cli plugin-off']);
   // What its own switch already keeps off doesn't go off with the plugin, so it isn't counted.

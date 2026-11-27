@@ -136,10 +136,10 @@ export interface LibraryRow {
  */
 export function fromSourceWords(from: NonNullable<LibraryFacts['fromSource']>): { tag?: { text: string; title: string }; before: string; after: string; page?: 'sources' } {
   const label = linkLabel(from.link);
-  // An item a plugin brought (library.ts A PLUGIN): it never waits, and a change made here lets it go.
+  // An item a plugin brought (library.ts A PLUGIN): its tag keeps the explanation on hover, and the opened row's In each tool card says it (no standing paragraph).
   if (pluginOf(from.link)) {
     const follows = `It follows the plugin in the tools that take no plugins; a change you make to it here makes it your own, no longer the plugin’s`;
-    return { tag: { text: `from ${label}`, title: `${follows}.` }, before: `From ${label}. ${follows}.`, after: '' };
+    return { tag: { text: `from ${label}`, title: `${follows}.` }, before: '', after: '' };
   }
   if (from.removed) {
     const off = `${label} no longer has it: it is Off, and no longer from that source. Turn it on to use it again`;

@@ -720,4 +720,8 @@ test('A library row from a Git source names Sync this source and Replace mine in
   const waiting = fromSourceWords({ link, waits: true });
   assert.match(waiting.after, /and Replace mine takes it as it is; either keeps yours as a version\./);
   assert.match(waiting.tag?.title ?? '', /and Replace mine takes it as it is; either keeps yours as a version\./);
+  // A plugin link keeps its hover tag and drops the standing paragraph at the bottom of details.
+  const fromPlugin = fromSourceWords({ link: 'plugin:issue-tracker@team-tools' });
+  assert.deepEqual([fromPlugin.tag?.text, fromPlugin.before, fromPlugin.after], ['from the plugin issue-tracker', '', '']);
+  assert.match(fromPlugin.tag?.title ?? '', /follows the plugin in the tools that take no plugins; a change you make to it here makes it your own/);
 });

@@ -780,10 +780,10 @@ async function runLine(click: LineClick): Promise<void> {
   // A placement says what it put there and what it left, as its own report counts and names them (pluginlibrary.ts reportIn).
   const said = already
     ? (aim.act === 'keep-out'
-      ? `Nothing was run in ${where}: ${aim.plugin} is already off there.${recordChanged ? ` Central Knot now keeps it out of ${where}.` : ''}`
-      : `Nothing was run in ${where}: it has ${aim.plugin} already.${recordChanged ? ` Central Knot now keeps it in ${where}.` : ''}`)
-    : problem ? `${words.not} ${where}: ${theirs}. ${lineBox(aim.plugin, aim.marketName, aim.source, aim.tool).words ?? ''}`.trim()
-    : aim.act === 'place' ? `Put ${aim.plugin}’s items in ${where}: ${mine[0]!.report.message}`
+      ? `${aim.plugin} was already off in ${where}${recordChanged ? '; Central Knot now keeps it out' : ''}.`
+      : `${aim.plugin} was already in ${where}${recordChanged ? '; Central Knot now keeps it there' : ''}.`)
+    : problem ? `${words.not} ${where}: ${theirs}.`
+    : aim.act === 'place' ? `Placed ${aim.plugin}: ${mine[0]!.report.message}`
     : `${words.done} ${aim.plugin} in ${where}${aim.act === 'install' ? installedNow(aim) : ''}.${aim.yours?.length ? ` ${yoursStay(aim.yours)}` : ''}`;
   const back = result.back ?? [], undoes = back.length > 0 || (already && recordChanged);
   const did = mine.some(step => succeeded(step.report)) || (already && recordChanged);
@@ -813,10 +813,10 @@ function sayResult(result: LineResult, changes: ReloadChange[], check: { checkPr
 /** The one key of the line a result is on: its tool and item (matrix.ts draws it as the result's data-result). */
 export const resultKey = (aim: Pick<LineAim, 'tool' | 'item'>) => `${aim.tool}:${aim.item.kind}:${aim.item.name.toLowerCase()}`;
 
-/** What the tool has of the plugin installed now, as read again after the click: ", with its 3 skills and 1 MCP server", or ''. */
+/** What the tool has of the plugin installed now, as read again after the click: ": 3 skills and 1 MCP server on", or ''. */
 function installedNow(aim: LineAim): string {
   const install = app.home?.pluginItems?.find(each => each.tool === aim.tool && each.plugin === aim.plugin && each.marketName === aim.marketName);
-  return install?.items.length ? `, with its ${counted(install.items)}` : '';
+  return install?.items.length ? `: ${counted(install.items)} on` : '';
 }
 /**
  * A line's Undo: the Plugins page's own (marketplaces.ts undoTurn), its record put back, then its steps, in the home its act ran in;
