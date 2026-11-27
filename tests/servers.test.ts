@@ -301,7 +301,7 @@ test('A home alpha 2 left with Claude Code’s steps owed: the first pass takes 
     assert.equal((await box.files())['claude-cli'], `${JSON.stringify({ numStartups: 2, mcpServers: {} }, null, 2)}\n`, 'its other settings stay');
     const view = await box.view(), row = view.items.find(item => item.key === 'docs')!;
     assert.deepEqual(view.items.map(item => item.key), ['docs'], 'web is gone from the page too');
-    assert.equal(statusLine({ ...row, hashes: hashes(row) }, view.library.docs, view.tools), 'Off · On puts it in every tool.');
+    assert.equal(statusLine({ ...row, hashes: hashes(row) }, view.library.docs, view.tools), 'On puts it in every tool.');
     // Each removal is History's rule for a pass no click asked for (`in-line`); the Delete's own entry keeps its Restore.
     const history = await readHistory(box.context);
     assert.deepEqual(history.slice(-2).map(event => [event.key, event.kind, event.cause, event.losers.map(loser => loser.tool)]), [['mcp:docs', 'off', 'in-line', ['claude-cli']], ['mcp:web', 'deleted', 'in-line', ['claude-cli']]]);

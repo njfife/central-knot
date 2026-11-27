@@ -2,6 +2,10 @@
 // main's calls one at a time and reads what the page holds in between. First the Plugins page's switch (pluginstate.ts
 // turnPlugin), then an item page's row switches (app.ts queueClick) and when their result goes by itself (app.ts FADE_MS); then,
 // on the same code, a background notice taken during a click or a home read, and when the rows a click pins are let go (app.ts pinnedRows, drawPage).
+// A trap here: `t.mock.method` on a method a test has mocked already is undone oldest first, so the earlier mock is put back and
+// stays after the test. A `document.querySelector` left answering an element keeps a header result's fade rescheduling itself every
+// 250 ms (app.ts fadeNow, heldInHeader), and this file then never exits. Mock it once a test, and change its answer with
+// `mock.mockImplementation`.
 import { mock, test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Change, HarnessId, HomeView, ItemNotice, MarketplaceView, PassResult, PluginTurn, PluginTurnResult, PluginsView, ProfileSwitchResult } from '../src/types.ts';
@@ -2714,7 +2718,7 @@ test('Unused band: skipped rows marked, unread managed tool cue, 3-line disclosu
     reset();
     const cells = usedCells(libraryTable());
     for (const key of ['old-1', 'old-2', 'old-3', 'old-4', 'old-5', 'old-6']) {
-      assert.deepEqual(cells[rowId('skills', key)], { text: 'no use seen in 30 days', skip: false });
+      assert.deepEqual(cells[rowId('skills', key)], { text: 'no use seen', skip: false });
     }
     for (const key of ['plug-1', 'plug-2']) {
       assert.deepEqual(cells[rowId('agents', key)], { text: 'from a plugin · skipped', skip: true });
@@ -2722,13 +2726,13 @@ test('Unused band: skipped rows marked, unread managed tool cue, 3-line disclosu
     findById(libraryTable(), 'library-select').onclick();
     const selectCells = usedCells(libraryTable());
     for (const key of ['plug-1', 'plug-2']) {
-      assert.deepEqual(selectCells[rowId('agents', key)], { text: 'no use seen in 30 days', skip: false });
+      assert.deepEqual(selectCells[rowId('agents', key)], { text: 'no use seen', skip: false });
     }
     findById(libraryTable(), 'library-select').onclick();
     openKind('all');
     const allCells = usedCells(libraryTable());
     for (const key of ['plug-1', 'plug-2']) {
-      assert.deepEqual(allCells[rowId('agents', key)], { text: 'no use seen in 30 days', skip: false });
+      assert.deepEqual(allCells[rowId('agents', key)], { text: 'no use seen', skip: false });
     }
   });
 
@@ -3045,7 +3049,7 @@ test('Library plugin line (sayResult): carries profileLine on LineResult when li
     before: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: ['copilot-cli'] },
     back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'copilot-cli', action: 'remove' }],
   };
-  const aim = { home: '/home', source: '/market', marketName: 'team', plugin: 'alpha', tool: 'copilot-cli' as HarnessId, act: 'install' as const, item: { kind: 'agent' as const, name: 'lead' } };
+  const aim = { home: '/home', source: '/market', marketName: 'team', plugin: 'alpha', tool: 'copilot-cli' as HarnessId, act: 'install' as const, item: { kind: 'agent' as const, name: 'lead' }, page: 'library' as const };
 
   // Line on screen: LineResult carries profileLine; spoken text has the whole result while the visible status bar keeps the prior wording.
   t.mock.method(document, 'querySelector', () => element());
@@ -3112,6 +3116,32 @@ test('Library plugin line (sayResult): carries profileLine on LineResult when li
   assert.doesNotMatch(app.said.text, /stopped being the profile/);
 });
 
+test('Turn the plugin on pressed on Profiles (profilespage.ts turnOnControl), where no line is drawn: its result and Undo are told on Profiles, and so is that Undo’s', async t => {
+  const { viewWith } = pluginProfileWorld(t);
+  app.page = 'library';
+  const prevCss = (globalThis as Record<string, unknown>).CSS;
+  (globalThis as Record<string, unknown>).CSS = { escape: (value: string) => value };
+  t.after(() => { (globalThis as Record<string, unknown>).CSS = prevCss; });
+  app.home = viewWith(true);
+  t.mock.method(api, 'refresh', async () => viewWith(true));
+  t.mock.method(document, 'querySelector', () => null);
+  t.mock.method(api, 'undoPluginTurn', async () => ({
+    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'codex-cli', action: 'plugin-off', report: { tool: 'codex-cli', outcome: 'plugin-off', changed: true, message: 'Off again.', runs: [] } }],
+  }));
+  turnFromLine({ home: '/home', source: '/market', marketName: 'team', plugin: 'alpha', tool: 'codex-cli', act: 'let-in', item: { kind: 'skill', name: 'triage' }, page: 'profiles' });
+  await settled();
+  await main.answer({
+    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'codex-cli', action: 'plugin-on', report: { tool: 'codex-cli', outcome: 'plugin-on', changed: true, message: 'Turned on.', runs: [] } }],
+    before: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: ['codex-cli'] },
+    back: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'codex-cli', action: 'plugin-off' }],
+  });
+  await settled();
+  assert.deepEqual([app.outcome?.page, app.outcome?.act?.label, app.outcome?.plugins], ['profiles', 'Undo', ['alpha']]);
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual([app.outcome?.page, app.outcome?.text], ['profiles', 'Undone: alpha off again in Codex.']);
+});
+
 test('One plugin click announces once, with its result and profile sentence together; a successful click leaving Work in use says nothing', async t => {
   const { viewWith } = pluginProfileWorld(t);
   let nextHome = viewWith(false);
@@ -3164,7 +3194,7 @@ test('Overlapping plugin click and Library line act: only the act that ended Wor
     before: { id: 'e2', source: '/market', marketName: 'team', plugin: 'beta', on: true, except: ['copilot-cli'] },
     back: [{ source: '/market', marketName: 'team', plugin: 'beta', tool: 'copilot-cli', action: 'remove' }],
   };
-  const betaAim = { home: '/home', source: '/market', marketName: 'team', plugin: 'beta', tool: 'copilot-cli' as HarnessId, act: 'install' as const, item: { kind: 'agent' as const, name: 'lead' } };
+  const betaAim = { home: '/home', source: '/market', marketName: 'team', plugin: 'beta', tool: 'copilot-cli' as HarnessId, act: 'install' as const, item: { kind: 'agent' as const, name: 'lead' }, page: 'library' as const };
 
   // (a) Forward: alpha untick ends Work; while it runs, Install on beta's line queues behind it. Only alpha's run credits Work ending.
   turnPlugin(entry, 'alpha', 'keep-out', 'codex-cli');
