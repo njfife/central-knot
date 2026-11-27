@@ -2734,7 +2734,7 @@ async function practiceFlow() {
   // Its Turn it on comes with the page's read after the pass that spread the deletion.
   for (let tries = 0; tries < 50 && !(await a.run(`!!${standupDeleted}?.querySelector('.history-actions button')`)); tries++) await wait(100);
   same('History says the deletion turned it off everywhere, and offers Turn it on', await a.run(`[${standupDeleted}?.querySelector('.history-about')?.textContent, ${standupDeleted}?.querySelector('.history-actions button')?.textContent]`),
-    ['Its copy was deleted in Claude Code, so it was turned off and removed from Copilot CLI and Codex. Central Knot keeps it.', 'Turn it on']);
+    ['Its copy was deleted in Claude Code, so it was turned off and removed from Copilot CLI and Codex.', 'Turn it on']);
   await a.run(`${standupDeleted}.querySelector('.history-actions button').click()`);
   await a.settle();
   check('Turn it on brings standup back', existsSync(join(practice, '.claude/skills/standup/SKILL.md')) && existsSync(join(practice, '.copilot/skills/standup/SKILL.md')));
@@ -4122,8 +4122,8 @@ async function practiceFlow() {
     await a.settle();
     const listedMeanwhile = await a.text('#history-scroll') ?? '';
     same('while main is busy the row says it is updating and takes no other change; the newest request wins, the overtaken shorter ones remove nothing, and History opened meanwhile agrees with the window that won',
-      [during, (await savedSettings()).historyDays, agedOnFile(), [overtaken.pruned ?? 'none', newest.pruned], listedMeanwhile.includes('aged-20-days'), listedMeanwhile.includes('aged-60-days'), await a.text('.history-intro')],
-      [[true, 'Updating History…', false, false, 90, true], 30, ['aged-20', 'aged-5'], ['none', 'done'], true, false, 'What sync, your switches, Pull, sources and profile switches changed, newest first. Undo puts the earlier version back; Restore brings back what was deleted or removed. Kept for 30 days. Change in Settings.']);
+      [during, (await savedSettings()).historyDays, agedOnFile(), [overtaken.pruned ?? 'none', newest.pruned], listedMeanwhile.includes('aged-20-days'), listedMeanwhile.includes('aged-60-days'), await a.exists('.history-intro'), await a.run(`document.querySelector('#history-days')?.value`)],
+      [[true, 'Updating History…', false, false, 90, true], 30, ['aged-20', 'aged-5'], ['none', 'done'], true, false, false, '30']);
     await a.click('#nav-settings');
     same('the row then shows the window that won and takes changes again', [await a.run(`document.querySelector('#history-days').value`), await a.run(`document.querySelector('#history-days').disabled`)], ['30', false]);
     await a.click('#appearance-system');
@@ -4133,6 +4133,15 @@ async function practiceFlow() {
   // the settings (still 30 days) before main saves. The re-read main asks for once it has saved can land either side of the
   // save's answer; it is muted here, so the save's answer must stand on its own: it is still the newer one, and the row reports it.
   await keepFor(a, 7);
+  // Choosing another home from Settings leaves an open History warning and outcome line in place (only History resets its own control on home switch).
+  const switchHome = async id => {
+    await a.click(id);
+    for (let tries = 0; tries < 30 && await a.run(`document.querySelector(${JSON.stringify(id)})?.getAttribute('aria-current') !== 'true'`); tries++) await wait(100);
+  };
+  await switchHome('#home-actual');
+  const warnAfterHome = [await a.run(`document.querySelector('#home-actual')?.getAttribute('aria-current')`), await a.exists('#history-shorten')];
+  await switchHome('#home-fixture');
+  if (!(await a.exists('#history-shorten'))) await keepFor(a, 7);
   const shortenMain = a.main && await a.main();
   const shortenHeld = shortenMain && await holdQueue(shortenMain, a);
   await a.click('#history-shorten');
@@ -4146,17 +4155,61 @@ async function practiceFlow() {
   for (let tries = 0; tries < 30 && !(await a.exists('#setting-history-message')); tries++) await wait(100);
   const removedNote = await a.text('#setting-history-message') ?? '';
   if (shortenHeld) { await shortenMain.run('ckUnmute()'); shortenMain.close(); }
+  await switchHome('#home-actual');
+  const noteAfterHome = [await a.run(`document.querySelector('#home-actual')?.getAttribute('aria-current')`), /^Saved\. History before .+ was removed\.$/.test(await a.text('#setting-history-message') ?? '')];
+  await switchHome('#home-fixture');
+  same('choosing another home from Settings leaves an open History warning and outcome line in place', [warnAfterHome, noteAfterHome], [['true', true], ['true', true]]);
   // Another row acting clears the note: the page says one finished thing at a time.
   await a.click('#appearance-light');
   const noteAfterOtherRow = await a.exists('#setting-history-message');
   await a.click('#appearance-system');
   await a.click('#nav-history');
   const listed = await a.text('#history-scroll') ?? '';
-  const intro = await a.text('.history-intro');
-  await a.click('#history-intro-settings');
-  same('Shorten saves, removes the older History from this home’s file, says from when (even after a re-read while it waited), and History shows only what is left, how long it keeps it, and the way to Settings',
-    [(await savedSettings()).historyDays, agedOnFile(), /^Saved\. History before .+ was removed\.$/.test(removedNote), noteAfterOtherRow, listed.includes('aged-5-days'), listed.includes('aged-20-days'), intro, await a.exists('#history-days')],
-    [7, ['aged-5'], true, false, true, false, 'What sync, your switches, Pull, sources and profile switches changed, newest first. Undo puts the earlier version back; Restore brings back what was deleted or removed. Kept for 7 days. Change in Settings.', true]);
+  same('Shorten saves, removes the older History from this home’s file, says from when (even after a re-read while it waited), and History shows only what is left with its own Keep control and no intro paragraph',
+    [(await savedSettings()).historyDays, agedOnFile(), /^Saved\. History before .+ was removed\.$/.test(removedNote), noteAfterOtherRow, listed.includes('aged-5-days'), listed.includes('aged-20-days'), await a.exists('.history-intro'), await a.exists('#history-intro-settings'), await a.run(`document.querySelector('#history-days')?.value`)],
+    [7, ['aged-5'], true, false, true, false, false, false, '7']);
+  // History's own Keep control (shared with Settings): longer saves at once; shorter asks first with Escape/Keep cancelling; pending save disables the control; Shorten saves, prunes and shows the outcome.
+  const baseEvents = JSON.parse(readFileSync(historyFile, 'utf8')).events.filter(event => !event.key.startsWith('aged-'));
+  writeFileSync(historyFile, JSON.stringify({ events: [...baseEvents, ...[60, 20, 5].map(days =>
+    ({ id: `aged-${days}`, at: new Date(Date.now() - days * DAY).toISOString(), key: `aged-${days}`, item: `aged-${days}-days`, kind: 'edit', winner: { tool: 'claude-cli', hash: '0'.repeat(64) }, losers: [], orderProved: true }))] }));
+  await keepFor(a, 90);
+  for (let tries = 0; tries < 40 && !((await a.text('#history-scroll') ?? '').includes('aged-60-days')); tries++) await wait(100);
+  same('on History, a longer window saves at once and shows the older entries',
+    [(await savedSettings()).historyDays, await a.exists('#history-shorten'), await a.run(`document.querySelector('#history-days')?.value`), (await a.text('#history-scroll') ?? '').includes('aged-60-days')],
+    [90, false, '90', true]);
+  await keepFor(a, 7);
+  const histQuestion = await a.text('#history-shorten-text') ?? '';
+  same('on History, a shorter window warns with its date before saving anything',
+    [/^History before .+ will be removed and can’t be restored\. Your other homes remove it too the next time they record a change\.$/.test(histQuestion), await a.text('#history-shorten'), await a.text('#history-shorten-cancel'), await a.run(`document.querySelector('#history-days')?.value`), (await savedSettings()).historyDays, agedOnFile()],
+    [true, 'Shorten to 7 days', 'Keep 90 days', '90', 90, ['aged-60', 'aged-20', 'aged-5']]);
+  await a.run(`document.querySelector('#history-shorten-cancel').focus()`);
+  for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await a.settle();
+  const histEscaped = [await a.exists('#history-shorten'), await a.run(`document.activeElement?.id`)];
+  await keepFor(a, 7);
+  await a.click('#history-shorten-cancel');
+  same('on History, Escape and Keep <N> days write nothing and return focus to the control',
+    [histEscaped, await a.exists('#history-shorten'), (await savedSettings()).historyDays, agedOnFile(), await a.run(`document.activeElement?.id`)],
+    [[false, 'history-days'], false, 90, ['aged-60', 'aged-20', 'aged-5'], 'history-days']);
+  await keepFor(a, 7);
+  let histDuring;
+  if (a.main) {
+    const histMain = await a.main();
+    const histHeld = await holdQueue(histMain, a);
+    await a.click('#history-shorten');
+    histDuring = [await a.run(`document.querySelector('#history-days')?.disabled`), (await a.text('#setting-history-notice'))?.trim(), await a.exists('#history-shorten')];
+    await histHeld.release();
+    histMain.close();
+  } else {
+    console.log('skipped: History pending-save queue hold needs main inspector');
+    await a.click('#history-shorten');
+  }
+  for (let tries = 0; tries < 40 && (!(await a.exists('#setting-history-message')) || (await savedSettings()).historyDays !== 7 || agedOnFile().length > 1 || (await a.text('#history-scroll') ?? '').includes('aged-20-days')); tries++) await wait(100);
+  const histDone = await a.text('#setting-history-message') ?? '', histAfter = await a.text('#history-scroll') ?? '';
+  same('on History, Shorten disables the control while saving, prunes older entries, updates the list and shows the outcome sentence',
+    [histDuring ?? [true, 'Updating History…', false], (await savedSettings()).historyDays, agedOnFile(), /^Saved\. History before .+ was removed\.$/.test(histDone), histAfter.includes('aged-5-days'), histAfter.includes('aged-20-days'), await a.run(`document.querySelector('#history-days')?.value`), await a.run(`document.querySelector('#history-days')?.disabled`)],
+    [[true, 'Updating History…', false], 7, ['aged-5'], true, true, false, '7', false]);
+  await a.click('#nav-settings');
   // Start at sign-in: only an installed app can register a login item, so in a development run, and on a Mac outside the
   // Applications folder, the row is off, can't be changed, and says why in its hint's place (signin.ts whyNoSignIn). Main refuses
   // a change too, and nothing about it is saved. The AppImage on Linux can: appImageSignIn.
@@ -7060,7 +7113,7 @@ async function sharedDeletionChecks(a, home) {
   if (shots) { await sizeTo(a, 1316, 819); await a.shot('shared-deleted-notice'); await openNotices(a); await a.shot('shared-deleted-notice-card'); await closeNotices(a); await fullSize(a); }
   await a.click('#nav-history');
   same('one History entry, naming the shared folder', await a.run(`[...document.querySelectorAll('.history-row[data-kind="off"]')].filter(row => row.textContent.includes('gone-one')).map(row => row.querySelector('.history-about')?.textContent)`),
-    ['Its copy was deleted in the shared folder, so it was turned off. Central Knot keeps it.']);
+    ['Its copy was deleted in the shared folder, so it was turned off.']);
   await openKind(a, 'skills');
   await openNotices(a);
   await a.run(`[...document.querySelectorAll('#notices-card .sync-notice')].find(notice => notice.textContent.includes('gone-one was deleted'))?.querySelector('[id^="notice-restore-"]')?.click()`);
@@ -13607,8 +13660,12 @@ async function libraryFlow() {
   await openKind(b, 'agents');
   await find(b, 'zzz');
   await b.click('#nav-history');
-  await b.click('#history-open-library');
-  same('History’s empty state opens the Library on All, Find let go', [await b.text('.page-title'), await pressed(b), await b.run(`document.querySelector('#find').value`)], ['Library', 'all', '']);
+  await until(() => b.exists('.empty-title'));
+  same('History’s empty state says No changes yet with its shorter body, no Library button, and still shows Keep',
+    [await b.text('.empty-title'), await b.text('.empty-body'), await b.exists('#history-open-library'), await b.text('#history-keep-label'), await b.run(`document.querySelector('#history-days')?.value`)],
+    ['No changes yet', 'Sync edits, switches and deletes appear here with Undo.', false, 'Keep', '30']);
+  await openKind(b, 'all');
+  await find(b, '');
   await pictures(b, 'from-history');
   // Two empty states apart: none of a kind here, and nothing Find leaves.
   await b.click('#library-kind-mcp');
@@ -15097,6 +15154,79 @@ async function libraryFlow() {
   await o.click('#history-pre-14a-on');
   await done(o);
   same('older pre-14a History entry turns legacy-skill Off keeping its current keep-outs', [jsonOrNothing(oSkillRec)?.items['legacy-skill']?.on, jsonOrNothing(oSkillRec)?.items['legacy-skill']?.except], [false, ['codex-cli']]);
+  // History tool-list folding and filler removal on the six-tool home: 5 of 6 folds to "5 tools" and opens by keyboard and pointer; all 6 reads "all 6 tools"; 1 and 2 read as names; two groups fold separately; legacy entry counts as toolsPhrase does; fillers omitted; fits at 860 and 1316 with sidebar open.
+  const foldNow = Date.now();
+  const foldAt = mins => new Date(foldNow - mins * 60_000).toISOString();
+  const hFold = jsonOrNothing(hPath) ?? { events: [] };
+  const sixIds = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
+  const fiveIds = ['claude-cli', 'copilot-cli', 'pi-cli', 'opencode-cli', 'antigravity-cli'];
+  hFold.events.push(
+    { id: 'fold-legacy', at: foldAt(7), key: 'instructions:old', item: 'old', kind: 'edit', winner: { tool: 'claude-cli', hash: 'a' }, losers: ['claude-cli', 'codex-cli', 'old-cli'].map(tool => ({ tool, hash: 'a' })), orderProved: true },
+    { id: 'fold-two-groups', at: foldAt(6), key: 'instructions:legacy', item: 'legacy', kind: 'switched', switched: [{ tool: 'claude-cli', disabled: true }, { tool: 'copilot-cli', disabled: true }, { tool: 'codex-cli', disabled: true }, { tool: 'pi-cli', disabled: false }, { tool: 'opencode-cli', disabled: false }, { tool: 'antigravity-cli', disabled: false }], losers: [], orderProved: true },
+    { id: 'fold-source', at: foldAt(5), key: 'release-prose', of: 'skill', item: 'release-prose', kind: 'off', cause: 'source', link: 'https://github.com/team-samples/writing-skills/tree/main', losers: [], orderProved: true },
+    { id: 'fold-one', at: foldAt(4), key: 'one-tool', of: 'skill', item: 'one-tool', kind: 'on', cause: 'switch', losers: [{ tool: 'codex-cli', hash: '' }], orderProved: true },
+    { id: 'fold-two', at: foldAt(3), key: 'two-tools', of: 'skill', item: 'two-tools', kind: 'on', cause: 'switch', losers: [{ tool: 'claude-cli', hash: '' }, { tool: 'codex-cli', hash: '' }], orderProved: true },
+    { id: 'fold-all', at: foldAt(2), key: 'all-six', of: 'skill', item: 'all-six', kind: 'off', cause: 'switch', losers: sixIds.map(tool => ({ tool, hash: 'b' })), orderProved: true },
+    { id: 'fold-then', at: foldAt(1.5), key: 'draft-over', of: 'skill', item: 'draft-over', kind: 'on', cause: 'switch', losers: fiveIds.map(tool => ({ tool, hash: '' })), tookFrom: [{ tool: 'claude-cli', hash: 'old' }], orderProved: true },
+    { id: 'fold-five', at: foldAt(1), key: 'draft-rfc', of: 'skill', item: 'draft-rfc', kind: 'off', cause: 'switch', losers: fiveIds.map(tool => ({ tool, hash: 'b' })), orderProved: true },
+  );
+  writeFileSync(hPath, `${JSON.stringify(hFold, null, 2)}\n`);
+  await o.click('#header-refresh');
+  check('folded five-of-six tool row renders its fold toggle', await until(() => o.exists('#history-tools-toggle-fold-five-0')));
+  const rowAbout = name => o.run(`(() => { const row = [...document.querySelectorAll('.history-row')].find(el => el.querySelector('.history-what strong')?.textContent === ${JSON.stringify(name)}); return { text: row?.querySelector('.history-about')?.textContent?.trim() ?? '', folds: row?.querySelectorAll('details.fold').length ?? 0 }; })()`);
+  same('History folds 5 of 6 tools (dropping a lone trailing full stop, keeping one before a following sentence), keeps all 6, 2 and 1 unfolded, folds each group of two-group and legacy entries, and omits both fillers',
+    [await rowAbout('draft-rfc'), await rowAbout('draft-over'), await rowAbout('all-six'), await rowAbout('two-tools'), await rowAbout('one-tool'), await rowAbout('release-prose'), await rowAbout('legacy'), await rowAbout('old')],
+    [
+      { text: 'Turned off: removed from 5 of 6 tools', folds: 1 },
+      { text: 'Turned on: put in 5 of 6 tools. Claude Code’s own copy was written over and kept as a version.', folds: 1 },
+      { text: 'Turned off: removed from all 6 tools.', folds: 0 },
+      { text: 'Turned on: put in Claude Code and Codex.', folds: 0 },
+      { text: 'Turned on: put in Codex.', folds: 0 },
+      { text: 'Brought in from github.com/team-samples/writing-skills (main): in Central Knot, Off.', folds: 0 },
+      { text: 'Turned off in 3 of 6 tools; turned on in 3 of 6 tools, using each tool’s own switch.', folds: 2 },
+      { text: 'Edited in Claude Code; that became the current version, in 3 tools too.', folds: 1 },
+    ]);
+  // Keyboard open and close on 5 tools, then pointer click open.
+  const pressEnter = async win => { for (const type of ['keyDown', 'keyUp']) await win.send('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r' } : {}) }); await win.settle(); };
+  await o.run(`document.getElementById('history-tools-toggle-fold-five-0').focus()`);
+  await pressEnter(o);
+  check('keyboard Enter opens the 5-tool fold', await until(() => o.exists('#history-tools-names-fold-five-0')));
+  const fiveKeyOpen = [await o.text('#history-tools-names-fold-five-0'), await o.run(`document.activeElement?.id`)];
+  await pressEnter(o);
+  check('keyboard Enter closes the 5-tool fold again', await until(async () => !(await o.exists('#history-tools-names-fold-five-0'))));
+  await o.click('#history-tools-toggle-fold-five-0');
+  check('pointer click opens the 5-tool fold', await until(() => o.exists('#history-tools-names-fold-five-0')));
+  // Two-group row folds each group independently, and legacy entry opens its names including removed tool id.
+  await o.click('#history-tools-toggle-fold-two-groups-0');
+  check('first group of switched entry opens alone', await until(() => o.exists('#history-tools-names-fold-two-groups-0')));
+  const firstGroupOnly = [await o.text('#history-tools-names-fold-two-groups-0'), await o.exists('#history-tools-names-fold-two-groups-1')];
+  await o.click('#history-tools-toggle-fold-two-groups-1');
+  check('second group opens alongside the first', await until(() => o.exists('#history-tools-names-fold-two-groups-1')));
+  await o.click('#history-tools-toggle-fold-legacy-0');
+  check('legacy entry fold opens', await until(() => o.exists('#history-tools-names-fold-legacy-0')));
+  same('5-tool keyboard/pointer names, independent two-group names, and legacy fold names match',
+    [fiveKeyOpen, await o.text('#history-tools-names-fold-five-0'), firstGroupOnly, await o.text('#history-tools-names-fold-two-groups-1'), await o.text('#history-tools-names-fold-legacy-0')],
+    [['Claude Code, Copilot CLI, Pi, OpenCode and Antigravity', 'history-tools-toggle-fold-five-0'], 'Claude Code, Copilot CLI, Pi, OpenCode and Antigravity', ['Claude Code, Copilot CLI and Codex', false], 'Pi, OpenCode and Antigravity', 'Claude Code, Codex and old-cli']);
+  // An opened tool-list fold survives a redraw (Refresh) and resets when leaving History and returning.
+  await o.click('#header-refresh');
+  await until(() => o.exists('#history-tools-toggle-fold-five-0'));
+  const foldAfterRefresh = [await o.exists('#history-tools-names-fold-five-0'), await o.run(`document.getElementById('history-tools-fold-five-0')?.open ?? false`)];
+  // Fit at 860 and 1316 with sidebar open (fold open and shortening warning open).
+  await keepFor(o, 7);
+  for (const [width, height] of [[860, 560], [1316, 819]]) {
+    await sizeTo(o, width, height);
+    if (await o.run(`document.getElementById('sidebar-toggle')?.getAttribute('aria-label') === 'Expand the sidebar'`)) await o.click('#sidebar-toggle');
+    await o.settle();
+    same(`History with Keep warning and open tool fold fits at ${width}×${height} with sidebar open`, await o.run(CUT_OFF), []);
+  }
+  await o.click('#history-shorten-cancel');
+  await fullSize(o);
+  await o.click('#nav-overview');
+  await o.click('#nav-history');
+  await until(() => o.exists('#history-tools-toggle-fold-five-0'));
+  same('opened tool-list fold stays open through Refresh and closes on leaving History and returning',
+    [foldAfterRefresh, await o.exists('#history-tools-names-fold-five-0'), await o.run(`document.getElementById('history-tools-fold-five-0')?.open ?? false`)],
+    [[true, true], false, false]);
   // With OpenCode not managed: neither the opened Off row nor History after clicking Claude Code mentions OpenCode.
   await o.click('#nav-harnesses');
   await until(() => o.exists('#manage-opencode-cli'));

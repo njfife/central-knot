@@ -14,7 +14,8 @@
 // into matrix.ts, which imports this module: resultInHeader, and holdOrder, which holds the list on screen as a reading lands.
 import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { forgetSourcePrompts, loadSources } from './sourcespage.ts';
-import { loadSettings, openSettings } from './settingspage.ts';
+import { forgetHistoryFolds } from './historypage.ts';
+import { loadSettings, openHistoryWindow, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
 import type { Reason, ApplyResult, Profile, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SessionCostsView, SyncNotice, TakenInNotice, UsageReading } from './types.ts';
@@ -118,7 +119,7 @@ export const state = {
   agentsResult: undefined as PassResult | undefined,
   /** What sync and actions did, newest last: read when the History page opens or the home changes (pagedata.ts). */
   history: pageData<HistoryEvent[]>(),
-  /** How long History keeps things, as Settings saves it: History's intro and the Deletes say it; read with History's events, at launch and at each settings change (readHistoryDays). */
+  /** How long History keeps things, as Settings saves it: History and the Deletes say it; read with History's events, at launch and at each settings change (readHistoryDays). */
   historyDays: undefined as HistoryDays | undefined,
   /** What the last click on skills did, shown until the next action or read. */
   skillsResult: undefined as PassResult | undefined,
@@ -447,6 +448,8 @@ function accept(view: HomeView): HomeView {
   state.draftPick = undefined;
   resetPageData(state.instructions);
   resetPageData(state.history);
+  forgetHistoryFolds();
+  if (state.page === 'history') openHistoryWindow();
   resetPageData(state.usage);
   resetPageData(state.sessions);
   state.keepProblem = undefined;
@@ -1129,7 +1132,7 @@ export const writeOff = (stops: boolean): string | boolean => acting() ?? select
  * each marketplace anew.
  */
 function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; readId?: number } = {}): Promise<void> {
-  if (page === 'history') return loadHistory();
+  if (page === 'history') return Promise.all([loadHistory(), loadSettings()]).then(() => undefined);
   if (page === 'settings') return loadSettings().then(() => undefined);
   if (page === 'instructions') return loadInstructions(readId);
   if (page === 'sessions') return loadSessions(readId);
@@ -1212,12 +1215,15 @@ export function showPage(page: Page, { repair = false } = {}) {
   const leavingHarness = page === 'harnesses' && !state.busy && !!state.harness;
   // A new page starts clean: the last action's message and results belong to the page they happened on.
   if (page !== state.page || leavingHarness) leaveResults(page);
-  if (page !== state.page) { state.libraryView = 'list'; state.visit += 1; forgetRepoPrompts(); forgetSourcePrompts(); }
+  if (page !== state.page) { state.libraryView = 'list'; state.visit += 1; forgetRepoPrompts(); forgetSourcePrompts(); forgetHistoryFolds(); }
   if (leavingHarness) state.harness = undefined;
   // Settings opens fresh (what its rows said last visit belongs to that visit); every other page reads its own data.
   state.page = page;
   if (page === 'settings') openSettings();
-  else if (!stays) void loadPageData(page);
+  else if (!stays) {
+    if (page === 'history') openHistoryWindow();
+    void loadPageData(page);
+  }
   state.find = '';
   state.item = undefined;
   rerender();
@@ -1934,8 +1940,8 @@ api().onNavigate(page => {
   else if (isPage(page)) showPage(page);
 });
 // Settings changed by a menu, a dialog or the system: main says so after every save and whenever the window comes back, and an
-// open Settings page reads them again, so it never shows (or writes back) a value that is no longer the saved one.
-api().onSettingsChanged(() => { readHistoryDays(); if (state.page === 'settings') void loadSettings(); });
+// open Settings or History page reads them again, so it never shows (or writes back) a value that is no longer the saved one.
+api().onSettingsChanged(() => { readHistoryDays(); if (state.page === 'settings' || state.page === 'history') void loadSettings(); });
 /** History's days as Settings saved them, read at launch and at each settings change, before any Delete says them; drawn again when they change. */
 function readHistoryDays() {
   void api().getSettings().then(settings => {
