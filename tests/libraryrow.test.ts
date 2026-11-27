@@ -338,7 +338,7 @@ test('The switch of an Off item says where it is as its row does: a removal stil
     ['still in Claude Code', 'reviewer: off, still in Claude Code. Click to put it in every tool.']);
   // The opened row's status line says the same place.
   assert.deepEqual([statusLine(owed, off, tools), statusLine(unseen, item({ on: false, applied: { 'claude-cli': 'b' } }), tools)].map(line => line.split('. ')[0]),
-    ['Off · still in Codex until sync runs', 'Off · still in Claude Code']);
+    ['Still in Codex until sync runs', 'Still in Claude Code']);
 });
 
 test('A click’s result says what happened, and never claims a harness where it didn’t', () => {

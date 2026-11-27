@@ -989,7 +989,7 @@ function nameCell(t: Table, skill: ItemRow, attention: boolean) {
     h('span.ov-name-main', {}, kindMark(t, skill.kind),
       h('span.ov-name-text', {}, name), fileButton(t, skill), kindWord(t, skill.kind, name),
       attention ? h('span.row-tag.row-tag-differs', { id: elId('decide', skill) }, 'Copies differ') : null),
-    open && libraryPlace(itemOf(skill)) === 'on' ? null : libraryTag(t, skill),
+    libraryTag(t, skill),
     sourceTag(skill),
     // While the row is open, its details show the description whole, except for differing copies (which show the chooser alone)
     // and while its file is in their place.

@@ -649,9 +649,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ov-name-fit > .row-tag, .ov-name-fit > .ov-name-about { line-height: 40px; }
 /* An opened row lets its name cell wrap so a plugin origin tag is never clipped out of view at 860. */
 .ov-row.open:not(.ov-file-anchored) { height: auto; min-height: 40px; }
-.ov-row.open:not(.ov-file-anchored) .ov-name-fit { height: auto; min-height: 40px; padding: 6px 0; row-gap: 2px; }
+.ov-row.open:not(.ov-file-anchored) .ov-name-fit { height: auto; min-height: 40px; padding-block: 6px; row-gap: 2px; }
 .ov-row.open:not(.ov-file-anchored) .ov-name-fit > .ov-name-main { height: 28px; }
-.ov-row.open:not(.ov-file-anchored) .ov-name-fit > .row-tag { line-height: 18px; white-space: normal; }
+.ov-row.open:not(.ov-file-anchored) .ov-name-fit > .row-tag { flex: 0 1 auto; line-height: 18px; white-space: normal; }
 .row-open { display: grid; place-items: center; width: 18px; height: 18px; margin-left: -6px; flex: none; border: 0; background: none; border-radius: 4px; cursor: pointer; color: inherit; }
 .row-open:hover, .row-file-btn:hover, .file-tab:hover { background: var(--press); color: var(--ink); }
 /* Open file mark right after a skill's name (matrix.ts fileButton). */

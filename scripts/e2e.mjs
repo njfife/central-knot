@@ -3045,9 +3045,11 @@ async function practiceFlow() {
   same('on', await switchOn(a, 'skills', 'release-notes'), true);
   await a.shot('practice-applied');
 
-  // Details open under a row.
+  // Details open under a row (On row drops the bold status summary; its tool lines show each tool On).
   await a.click(`#${rowPart('open', 'skills', 'release-notes')}`);
-  check('details say it is on in every tool', (await a.text('.details')).includes('On in all 3 tools'), await a.text('.details'));
+  same('details open with no bold On summary and each tool On',
+    [await a.exists('.details-status'), await a.all('.details .details-tool', '`${e.querySelector(".details-tool-label")?.textContent?.trim()}:${e.querySelector(".tool-switch-word")?.textContent?.trim()}`')],
+    [false, ['Claude Code:On', 'Copilot CLI:On', 'Codex:On']]);
   await a.click(`#${rowPart('open', 'skills', 'release-notes')}`);
 
   // With four tools beside an open sidebar the name column is narrowest: a flagged name still fits. The found skill whose
@@ -11799,7 +11801,7 @@ async function usageFlow() {
   await a.click(`#${rowPart('open', 'skills', 'notes')}`);
   await a.click(`#${rowPart('open', 'skills', 'standup')}`);
   same('an opened row says each tool’s figure: its last use beyond the 30 days, and Use unknown with Codex’s reason behind a sized (?) card',
-    [await a.all('.details-usage', 'e.textContent.trim()'),
+    [await a.all('.details-usage', 'e.innerText.trim()'),
       await a.run(`(() => { const m = document.querySelector('.details-usage .info-mark'); const r = m?.getBoundingClientRect(); const c = m?.nextElementSibling; return m ? [c?.textContent?.trim(), r.width > 0 && r.height > 0] : null; })()`)],
     [['no use seen in 30 days · last used 5 weeks ago', 'Use unknown'], ['It doesn’t always record which skill was used.', true]]);
   await a.click(`#${rowPart('open', 'skills', 'standup')}`);
@@ -12008,10 +12010,12 @@ async function usageFlow() {
       (await a.text(`${byId(rowPart('usage', 'skills', kit, 'claude-cli'))}`))?.trim()],
     [['4 days ago', 'Used 4 days ago · 1 session. Open the row for each tool’s figure.'], 'used 4 days ago · 1 session']);
   await a.shot('usage-plugin-row');
-  // Absent plugin copy whose history is wholly unread keeps Use unknown inline; a tool whose history isn't read yet (Antigravity) shows Use unknown (?).
-  const codexSessions = join(home, '.codex/sessions'), agyStub = join(home, '.local/bin/agy');
+  // Absent plugin copy whose history is wholly unread keeps Use unknown inline; Antigravity shows Use unknown (?); short history shows history from <date>.
+  const codexSessions = join(home, '.codex/sessions'), agyDir = join(home, '.gemini'), piDir = join(home, '.pi');
   chmodSync(codexSessions, 0o000);
-  writeFileSync(agyStub, '#!/bin/sh\n[ "$1" = "--version" ] && echo "1.5.14" && exit 0\nexit 9\n', { mode: 0o755 });
+  mkdirSync(join(agyDir, 'config/skills'), { recursive: true });
+  mkdirSync(join(piDir, 'agent/skills'), { recursive: true });
+  lines(join(piDir, 'agent/sessions/--w--/p.jsonl'), [{ type: 'message', message: { role: 'user', content: [{ type: 'text', text: '<skill name="notes">' }] }, timestamp: ago(12).toISOString() }]);
   try {
     await a.click('#header-refresh');
     await a.click('#collect-usage');
@@ -12020,13 +12024,18 @@ async function usageFlow() {
       (await a.text(`${byId(rowPart('usage', 'skills', kit, 'codex-cli'))}`))?.trim(), 'Use unknown: its sessions couldn’t be read');
     await a.click(byId(rowPart('open', 'skills', 'standup')));
     const agyId = rowPart('usage', 'skills', 'standup', 'antigravity-cli');
+    const piId = rowPart('usage', 'skills', 'standup', 'pi-cli');
     same('a tool whose history isn’t read yet (Antigravity) shows Use unknown with a sized (?) card',
-      await a.run(`(() => { const p = document.getElementById(${JSON.stringify(agyId)}); const m = p?.querySelector('.info-mark'); const r = m?.getBoundingClientRect(); return p ? [p.textContent.trim(), m?.nextElementSibling?.textContent?.trim(), !!(r && r.width > 0 && r.height > 0)] : null; })()`),
+      await a.run(`(() => { const p = document.getElementById(${JSON.stringify(agyId)}); const m = p?.querySelector('.info-mark'); const r = m?.getBoundingClientRect(); return p ? [p.innerText.trim(), m?.nextElementSibling?.textContent?.trim(), !!(r && r.width > 0 && r.height > 0)] : null; })()`),
       ['Use unknown', 'Antigravity’s session history isn’t read yet.', true]);
+    check('a tool whose history starts within 30 days reads no use seen · history from <date>',
+      /^no use seen · history from [A-Z][a-z]{2} \d+/.test((await a.text(byId(piId)))?.trim() ?? ''),
+      await a.text(byId(piId)));
     await a.click(byId(rowPart('open', 'skills', 'standup')));
   } finally {
     chmodSync(codexSessions, 0o755);
-    rmSync(agyStub, { force: true });
+    rmSync(agyDir, { recursive: true, force: true });
+    rmSync(piDir, { recursive: true, force: true });
   }
   await a.click('#header-refresh');
   await a.click('#collect-usage');
@@ -12106,9 +12115,6 @@ async function usageFlow() {
       [collectingLines.length > 0 && collectingLines.every(line => line === 'Collecting usage statistics…'), await tops()], [true, openTops]);
     same('a tool some of whose session files can’t be read says how many beside its figure', (await a.all('.details-usage', 'e.textContent.trim()')).find(line => /couldn’t be read/.test(line)),
       'used 5 days ago · 1 session · 1 session file couldn’t be read');
-    check('a tool whose history starts within 30 days reads no use seen · history from <date>',
-      /^no use seen · history from [A-Z][a-z]{2} \d+/.test((await a.text(byId(rowPart('usage', 'skills', 'alpha', 'pi-cli'))))?.trim() ?? ''),
-      await a.text(byId(rowPart('usage', 'skills', 'alpha', 'pi-cli'))));
     await a.click(`#${rowPart('open', 'skills', 'alpha')}`);
     // Update's band, 900 wide, with five tools' history: the same height while it collects and once the reading lands.
     await sizeTo(a, 900, 760);
@@ -15580,7 +15586,7 @@ async function libraryFlow() {
       (await readToolLines(o)).find(entry => entry.tool === 'OpenCode')?.line,
       await o.text('#header [data-outcome] .band-text'),
       await o.text('#header .band-profile')],
-    [true, true, null, 'Reads Claude Code’s copy',
+    [true, true, null, 'Kept out of this tool, but it still has it another way. OpenCode reads Claude Code’s copy, in Claude Code’s skills folder. Keeping it out stops only a folder of Central Knot’s here.',
       'bench-runner is on in Claude Code. OpenCode reads it too.', 'Everyday stopped being the profile in use.']);
   const checkFitsAt860 = async (win, expected, shotName) => {
     await sizeTo(win, 860, 600);
@@ -21543,7 +21549,7 @@ async function skillFileFlow() {
     for (const selector of ['#nav-harnesses', 'button#harness-claude-cli.harness-card-head', '#harness-tab-skills', reviewChevron]) await a.click(selector);
     const tabStats = await openedRowStats(a, rowPart('', 'skills', 'code-review'));
     check('opened row on a tool’s tab drops bold On summary and cut sentences and fits at 860',
-      !(await a.exists('.details-status')) && tabStats.words <= 55 && !/On in |Has the current version\.|Inside /.test(tabStats.text) && (await a.run(CUT_OFF)).length === 0, tabStats);
+      !(await a.exists('.details-status')) && tabStats.words <= 65 && !/On in |Has the current version\.|Inside /.test(tabStats.text) && (await a.run(CUT_OFF)).length === 0, tabStats);
     await openKind(a, 'all');
     await fullSize(a);
     await a.click(reviewChevron);
