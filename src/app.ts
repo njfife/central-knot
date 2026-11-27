@@ -688,8 +688,11 @@ async function switchesOnly(click: Click, ops: PluginOp[], page: Page): Promise<
 /** A click applied at once, under busy: one tool's control in an opened row, Delete, Make current, Resume, a copy chosen (Turn these off: applyByKind). */
 export const applyClick = (click: Click | (() => Promise<Click | Outcome>)) => busy(typeof click === 'function' || !click.undoing ? 'Applying…' : 'Undoing…', async page => {
   const resolved = typeof click === 'function' ? await click() : click;
-  if ('changes' in resolved) sayDone(await carryOut(resolved, page), resolved);
-  else tell({ ...resolved, page });
+  if ('changes' in resolved) {
+    const done = await carryOut(resolved, page);
+    if (state.page === 'sources') await loadSources();
+    sayDone(done, resolved);
+  } else tell({ ...resolved, page });
 });
 /** What a click applied at once did, said in the header (renderer.ts resultHere) or its band, its rows flashed, the focus on its control. */
 function sayDone(done: Done, click: Click) {
@@ -731,6 +734,7 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], stayed:
   } = {}) => busy('Applying…', async page => {
   const several = new Set(clicks.map(click => click.kind)).size > 1, parts: { click: Click; done: Done }[] = [];
   for (const click of clicks) parts.push({ click, done: await carryOut(click, page) });
+  if (state.page === 'sources') await loadSources();
   const went = parts.filter(part => !part.done.refused), did = parts.filter(part => part.done.did), changed = parts.flatMap(part => part.done.changed ?? []);
   const stops = saidByKind(parts.flatMap(part => (part.done.refused ? [[part.click.kind, part.done.refused] as [PageKind, string]] : [])), several);
   const undos = did.flatMap(part => (part.done.undo ? [part.done.undo] : [])).reverse(), regroups = clicks.some(click => click.regroups);
@@ -915,6 +919,7 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   }
   setHome(await api().refresh());
   await refreshPlugins(true);
+  if (state.page === 'sources') await loadSources();
   // Settled: managed, readable, and matching what the library now wants (not held or owed a write/removal; nothing applied if deleted).
   const settledIn = (kind: PageKind, key: string, tool: HarnessId) => {
     const view = state.home?.[kind], row = view?.items.find(fact => fact.key === key), item = view?.library[key];
