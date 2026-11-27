@@ -1197,7 +1197,13 @@ span.ins-confirm { margin-top: 0; }
 .info-box-files strong { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--ink); }
 
 /* ---------- History ---------- */
-.history-intro { margin: 12px 16px 0; font-size: 12.5px; color: var(--ink-soft); }
+/* History's own Keep control (settingspage.ts historyWindowControl): sits above the list or empty state, sharing Settings' warning and outcomes. */
+.history-keep { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px var(--pad-end) 4px 16px; }
+.history-keep-row { display: inline-flex; align-items: center; gap: 8px; }
+.history-keep-label { font-size: 12.5px; font-weight: 500; color: var(--ink-soft); }
+.history-keep > .setting-message, .history-keep > .setting-confirm { margin-top: 0; }
+.history-empty-scroll { display: flex; flex-direction: column; }
+.history-empty-scroll > .empty { min-height: 0; }
 /*
  * The list is the grid and each row a subgrid of it, so every row shares one set of columns: when, what changed (as wide
  * as the longest), what happened (the free width, its text capped at the reading measure), then the actions in a steady
@@ -1210,6 +1216,13 @@ span.ins-confirm { margin-top: 0; }
 .history-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start; row-gap: 12px; padding: 10px var(--pad-end) 10px 16px; box-shadow: inset 0 -1px 0 var(--line); }
 /* A sentence takes the free width of its column: History's rows are short, and wrapping one beside empty space reads worse. */
 .history-about { margin-left: -8px; }
+/* Inline tool-list fold inside a History row sentence (historypage.ts rowAbout): names open below the sentence. */
+.history-about > .fold { display: inline; }
+.history-about > .fold::details-content { display: none; }
+.history-about > .fold > summary { margin: -1px -4px; padding: 1px 4px; gap: 1px; font-size: inherit; line-height: inherit; vertical-align: baseline; }
+.history-about > .fold > summary > .fold-chevron { margin-inline: -2px -2px; }
+.history-tools-names { font-size: 12px; color: var(--ink-soft); }
+.history-undone .history-tools-names { color: var(--ink-faint); }
 @container content (width < 880px) {
   .history-list { display: block; }
   .history-row { grid-template-columns: minmax(80px, max-content) minmax(0, 1fr) auto; column-gap: 16px; row-gap: 2px; }

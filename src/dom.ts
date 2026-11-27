@@ -517,9 +517,13 @@ export function infoMark(id: string, label: string, text: string): HTMLElement {
 
 /**
  * A collapsible `<details>` fold whose open state lives with its caller across redraws. The summary draws `label` followed by
- * a right chevron that rotates when open; `ontoggle` ignores the browser's initial sync of the `open` attribute.
+ * a right chevron that rotates when open; `ontoggle` ignores the browser's initial sync of the `open` attribute. Pass `body`
+ * for an inner `.fold-body`, or omit it and pass `controls` when the caller draws the opened body outside `<details>`.
  */
-export function fold(options: { id: string; toggleId: string; label: string; open: boolean; onToggle: (open: boolean) => void; bodyClass?: string }, ...body: (Child | Child[])[]): HTMLElement {
+export function fold(
+  options: { id: string; toggleId: string; label: string; open: boolean; onToggle: (open: boolean) => void; bodyClass?: string; controls?: string },
+  ...body: (Child | Child[])[]
+): HTMLElement {
   let shown = options.open;
   return h('details.fold', {
     id: options.id, open: shown,
@@ -530,6 +534,6 @@ export function fold(options: { id: string; toggleId: string; label: string; ope
       options.onToggle(now);
     },
   },
-    h('summary.fold-head', { id: options.toggleId }, options.label, icon('chevron-right', 12, 'tone-faint fold-chevron')),
-    h(`div.fold-body${options.bodyClass ? `.${options.bodyClass}` : ''}`, {}, ...body));
+    h('summary.fold-head', { id: options.toggleId, 'aria-controls': options.controls }, options.label, icon('chevron-right', 12, 'tone-faint fold-chevron')),
+    body.length ? h(`div.fold-body${options.bodyClass ? `.${options.bodyClass}` : ''}`, {}, ...body) : null);
 }

@@ -111,20 +111,26 @@ export function keptOver(name: string, tools: readonly string[]): string {
   return tools.length === 1 ? `Your newer ${name} from ${where} is kept as a version.` : `Your newer copies of ${name} in ${where} are kept as versions.`;
 }
 
+/** Optional row-display overrides for librarySentence (historypage.ts): a custom tool-list formatter and History's shorter wording. */
+export interface SentenceOptions { tools?: (touched: string[], inHome: string[]) => string; row?: boolean }
+
 /**
  * What a library item's entry says happened, in its kind's words (libraryrow.ts RowWords), or undefined for a kind from before
  * the library whose general sentence still holds (historypage.ts describe). `homeTools`: the home's harnesses, so "all 3
  * tools" can be said, and an entry about one harness no longer among them says it isn't managed now. `item`: the item now, to name a version. `undid`: the entry is another's Undo (that one's `undoneBy`
- * names it), so it reads as one.
+ * names it), so it reads as one. `options`: History's row view omits redundant fillers and folds long tool lists; announcements keep the plain sentence.
  */
-export function librarySentence(event: HistoryEvent, words: RowWords, homeTools: string[], item?: LibraryItem, undid = false): { glyph: IconName; text: string } | undefined {
-  const tools = toolsPhrase(event.losers.map(loser => loser.tool), homeTools);
+export function librarySentence(
+  event: HistoryEvent, words: RowWords, homeTools: string[], item?: LibraryItem, undid = false, options?: SentenceOptions,
+): { glyph: IconName; text: string } | undefined {
+  const tools = (options?.tools ?? toolsPhrase)(event.losers.map(loser => loser.tool), homeTools);
   /** " and removed from Codex", or nothing when no harness was touched. */
   const also = (words: string) => (tools ? `${words} ${tools}` : '');
   const where = event.only ? toolName(event.only) : '', from = event.winner ? toolName(event.winner.tool) : '';
   const away = event.only && !homeTools.includes(event.only) ? ` ${where} isn’t managed now.` : '';
   // What made it happen is the entry's `cause` alone (types.ts HistoryEvent); none is the person's own switch or click.
-  const pulled = event.cause === 'pulled', keeps = 'Central Knot keeps it.', source = event.link ? linkLabel(event.link) : 'Its source', plugin = event.link && pluginOf(event.link);
+  const pulled = event.cause === 'pulled', keeps = options?.row ? '' : ' Central Knot keeps it.';
+  const source = event.link ? linkLabel(event.link) : 'Its source', plugin = event.link && pluginOf(event.link);
   // An Undo that gave tools their own copies back instead of removing what was there (types.ts HistoryEvent gaveBack).
   const gave = (event.gaveBack ?? []).map(toolName);
   const gaveSaid = gave.length ? ` ${andList(gave)} ${gave.length === 1 ? 'has its own copy' : 'have their own copies'} back, as before.` : '';
@@ -158,18 +164,18 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       return { glyph, text: `${text}${overSaid}${gaveSaid}` };
     }
     case 'off':
-      if (event.only && event.gaveBack?.includes(event.only)) return { glyph: 'circle-off', text: `Kept out of ${where}: ${where} has its own copy back, as before. ${keeps}${away}` };
-      if (event.only) return { glyph: 'circle-off', text: `Kept out of ${where}${named(event.only) ? ': its copy there was removed' : ''}. ${keeps}${gaveSaid}${away}` };
+      if (event.only && event.gaveBack?.includes(event.only)) return { glyph: 'circle-off', text: `Kept out of ${where}: ${where} has its own copy back, as before.${keeps}${away}` };
+      if (event.only) return { glyph: 'circle-off', text: `Kept out of ${where}${named(event.only) ? ': its copy there was removed' : ''}.${keeps}${gaveSaid}${away}` };
       if (event.cause === 'deleted-by-hand') {
         const place = deletedIn(event.winner?.tool ?? '', event.sharedWay);
-        return { glyph: 'trash-2', text: `Its copy was deleted in ${place}, so it was turned off${also(' and removed from')}. ${keeps}` };
+        return { glyph: 'trash-2', text: `Its copy was deleted in ${place}, so it was turned off${also(' and removed from')}.${keeps}` };
       }
-      if (event.cause === 'source') return { glyph: 'link-2', text: `Brought in from ${source}: in Central Knot, Off, until you turn it on.` };
-      if (event.cause === 'source-dropped' && plugin) return { glyph: 'link-2-off', text: `The plugin ${plugin} no longer has it, so it is off${also(' and removed from')}, and no longer follows it. ${keeps}` };
-      if (event.cause === 'source-dropped') return { glyph: 'link-2-off', text: `${source} no longer has it, so it is off${also(' and removed from')}, and no longer from that source. ${keeps}` };
+      if (event.cause === 'source') return { glyph: 'link-2', text: `Brought in from ${source}: in Central Knot, Off${options?.row ? '' : ', until you turn it on'}.` };
+      if (event.cause === 'source-dropped' && plugin) return { glyph: 'link-2-off', text: `The plugin ${plugin} no longer has it, so it is off${also(' and removed from')}, and no longer follows it.${keeps}` };
+      if (event.cause === 'source-dropped') return { glyph: 'link-2-off', text: `${source} no longer has it, so it is off${also(' and removed from')}, and no longer from that source.${keeps}` };
       // A pass no click asked took its copies out where it is off (or kept out): a tool managed again, a folder writable again.
-      if (event.cause === 'in-line') return { glyph: 'circle-off', text: `Off in ${tools}, so its ${words.copy} there was removed when sync reached ${event.losers.length === 1 ? 'it' : 'them'}. ${keeps}` };
-      return { glyph: 'circle-off', text: `Turned off${also(': removed from')}.${gaveSaid} ${keeps}` };
+      if (event.cause === 'in-line') return { glyph: 'circle-off', text: `Off in ${tools}, so its ${words.copy} there was removed when sync reached ${event.losers.length === 1 ? 'it' : 'them'}.${keeps}` };
+      return { glyph: 'circle-off', text: `Turned off${also(': removed from')}.${gaveSaid}${keeps}` };
     case 'current': {
       // The version as it was first kept says where the content came from; the entry that made it current again doesn't.
       const made = item?.versions.findLast(version => version.hash === event.version), when = made && item && versionClock(item, made);
