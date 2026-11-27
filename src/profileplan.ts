@@ -20,7 +20,9 @@
 //   when a switchable Copilot CLI plugin copy covers a name, `pluginPlan` / `pluginUndo` owns it and `plugins.ts setPart` writes it;
 //   otherwise a standing rule rides on `LiveItem.copilotOff` (`switchPlan`, `inUse`, `switchPreview`, `copilotUndo`) and
 //   `profiles.ts runCopilotRules` writes it.
-// - `inUse` holds while a switch changes and holds nothing (never stored); `listedPlugins` is the one rule for which plugin rows
+// - `inUse` holds while a switch changes and holds nothing (never stored); `endedByChanges` says before a Library click which in use
+//   it would end (its changes projected over the live and plugin items: projected), by the rule its result says after it (`endedProfiles`);
+//   `listedPlugins` is the one rule for which plugin rows
 //   a profile lists and `listedChanges` gives each listed changing row once with its cell words (read by the header's short line,
 //   `Changes N`, its headings and every row's cell); `switchPreview` (`PLUGIN_ITEMS_STAY`, `pluginStayNote`) gives
 //   `{ line, card, tip? }` (short header line, full menu sentence, and `(?)` card only when `card` says more than its plain form),
@@ -41,7 +43,7 @@ import { cantSwitch, hasOwnSwitch, itemOffNow, itemSaid, onNow, ownSwitch, type 
 import { holds, takesPlugins } from './presence.ts';
 import { groupBy } from './model.ts';
 import { andList, byToolOrder, harnessIds, keptOutWords, kindNouns, orList, sameTools, toolNames } from './words.ts';
-import type { ExceptSwitched, HarnessId, HistoryEvent, HomeView, InstalledPlugin, LibraryFacts, PluginItem, PluginSwitched, Profile } from './types.ts';
+import type { ExceptSwitched, HarnessId, HistoryEvent, HomeView, InstalledPlugin, LibraryFacts, PluginItem, PluginSwitched, Profile, Change } from './types.ts';
 
 /** What every screen calls the state where no profile is in use. */
 export const NO_PROFILE = 'No profile';
@@ -563,6 +565,34 @@ export function inUseInHome(home: PluginHome | undefined): Profile[] {
   if (!home?.profiles?.profiles?.length) return [];
   const plugins = pluginLive(home);
   return inUse(home.profiles.profiles, homeItems(home, plugins), plugins);
+}
+
+/** One item's change in a Library click, as libraryrow.ts rowClicks makes it (types.ts Change), with the item's kind. */
+export interface ItemChange { kind: ItemKind; change: Pick<Change, 'key' | 'on' | 'deleted' | 'except'> }
+/**
+ * The live and plugins' items as a click's changes would leave them, each item by its last change (nothing is written): a deleted
+ * item goes; a live one takes its change's `on` and `except`, and so does a copy placed from it (pluginLive `libraryKey`); one the library doesn't
+ * hold, or holds deleted, comes in On when turned on (Add); a server of his deleted or kept out of Copilot CLI no longer shares its name there (`sharesWith.own`).
+ */
+function projected(home: PluginHome, live: LiveItem[], plugins: PluginLive[], changes: readonly ItemChange[]) {
+  const last = new Map(changes.map(each => [itemId(each.kind, each.change.key), each])), to = (id: string) => last.get(id)?.change;
+  const after = live.flatMap(item => (to(item.id)?.deleted ? [] : to(item.id) ? [{ ...item, on: to(item.id)!.on, except: to(item.id)!.except }] : [item]));
+  for (const [id, { kind, change: { key, on } }] of last) {
+    const held = home[pageOfPart[kind]].library[key];
+    if (on && !live.some(item => item.id === id) && (!held || held.deleted)) after.push({ id, kind, key, name: key, on, except: [] });
+  }
+  const left = (id: string) => !!to(id)?.deleted || !!to(id)?.except.includes('copilot-cli');
+  return { live: after, plugins: plugins.map(item => ({ ...item, copies: item.copies.flatMap((copy): PluginCopy[] => {
+    const own = 'libraryKey' in copy.target ? to(itemId(item.kind, copy.target.libraryKey)) : undefined;
+    const sharesWith = copy.sharesWith && { ...copy.sharesWith, own: copy.sharesWith.own.filter(id => !left(id)) };
+    return own?.deleted ? [] : [{ ...copy, on: own ? own.on : copy.on, ...(sharesWith ? { sharesWith } : {}) }];
+  }) })) };
+}
+/** The profiles in use a Library click would end (matrix.ts endsOf), by the rule its result says after it (app.ts profileEndedLine): endedProfiles. */
+export function endedByChanges(home: PluginHome, changes: readonly ItemChange[]): Profile[] {
+  if (!home.profiles?.profiles?.length) return [];
+  const plugins = pluginLive(home), live = homeItems(home, plugins), before = inUse(home.profiles.profiles, live, plugins), after = projected(home, live, plugins, changes);
+  return endedProfiles(before, inUse(before, after.live, after.plugins));
 }
 
 /** Every profile in `before` when none of its ids still matches in `after` (even if another now matches), else empty. */
