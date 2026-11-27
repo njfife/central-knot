@@ -19,7 +19,7 @@ import { addsText, componentsFrom, outcomes, sessionHooksAbout, whenItRuns } fro
 import { clickNote, componentsOf, dotted, itemsThere, libraryLink, markOf, pluginSwitch, pluginTitle, readme, toolBox, uninstallControl, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { pluginKey } from './pluginplan.ts';
-import { DIRECTORY, MARK_WORDS, boxOf, cantSwitchSkill, comparableText, copyOff, itemsIn, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, notInWhy, offeredVersion, otherVersionsLine, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionDiffers, versionToCompare, waitingWords, waitsToMove, whyNotCarried, yourSaid, type ToolMark } from './pluginstatus.ts';
+import { DIRECTORY, MARK_WORDS, boxOf, cantSwitchSkill, comparableText, copyOff, itemsAllIn, itemsIn, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, notInWhy, offeredVersion, otherVersionsLine, pageOfPart, partWords, skillOff, stateOf, unavailable, untestedBuild, versionDiffers, versionToCompare, waitingWords, waitsToMove, whyNotCarried, yourSaid, type ToolMark } from './pluginstatus.ts';
 import { hasCowork, holds, pluginTools, takesPlugins } from './presence.ts';
 import { applyPluginOps, loadPlugins, market, openLink, shownDetail, toggleOpened, usePlugins } from './pluginstate.ts';
 import { pluginLink } from './sourcelink.ts';
@@ -86,7 +86,8 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
         state.skillsOff?.length ? `${plural(state.skillsOff.length, 'skill')} off` : '']);
     }
     if (mark === 'waits' && !updatesRun()) return 'Waits for automatic updates';
-    if (itemsThere(mark, tool)) return `${itemsOnWords(entry, plugin.name, tool, ` in ${names[tool]}`)}.`;
+    // A dash (some of its items in) says what its click does: it takes every one out, one switched in by itself too.
+    if (itemsThere(mark, tool)) return `${itemsOnWords(entry, plugin.name, tool, ` in ${names[tool]}`)}.${itemsAllIn(entry, plugin.name, tool) ? '' : ` A click takes all ${entry.items?.[plugin.name]?.of[tool] ?? 0} out.`}`;
     return [MARK_WORDS[mark], mark === 'absent' || mark === 'missing' ? limitNote(limits(tool)) : ''].filter(Boolean).join(' · ');
   };
   const updates = view.canWrite ? updateOps(view, entry, plugin) : [];
@@ -115,11 +116,12 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
       const { mark, words } = markOf(view, entry, plugin, tool, compareTo);
       const box = boxOf(view, entry, plugin.name, tool, { mark, words });
       // Under the box: what it has, or what the box says more (why it is off); in Pi, OpenCode and Antigravity, where none
-      // of its items is on, each non-clash reason on its own line, then own/shared clashes and each name of his (yourLines).
+      // of its items is on, each non-clash reason on its own line, then shared-folder clashes and each name of his (yourLines);
+      // his own copy's Use the plugin's is on its item's row (useOverOwnCopy).
       const items = entry.items?.[plugin.name];
       const notIn = items?.notIn?.[tool];
       const why = notIn?.nonClash ?? notIn?.reasons ?? [];
-      const clashes = (items?.clashes ?? []).filter(clash => clash.tool === tool);
+      const clashes = (items?.clashes ?? []).filter(clash => clash.tool === tool && clash.clash === 'shared');
       const yours = items?.yours?.[tool] ?? [];
       const state = why.length ? why.map(reason => h('span.plugin-tool-state.plugin-tool-why', {}, reason))
         : box.held && (yours.length || clashes.length) ? null : h('span.plugin-tool-state', { title: words }, box.line ?? status(tool, mark));
@@ -127,7 +129,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
       const [uninstall, question] = uninstallControl(entry, plugin, tool, `puninstall-${marketIndex}-${plugin.name}-${tool}`, box);
       return [h('div.plugin-tool', { 'data-tool': tool }, toolBox(view, entry, plugin, tool, marketIndex, compareTo),
         h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]),
-          state, clashLines(view, entry, plugin, tool, clashes, marketIndex), yourLines(view, entry, plugin, tool, yours, marketIndex),
+          state, clashLines(plugin, tool, clashes), yourLines(view, entry, plugin, tool, yours, marketIndex),
           // With no CLI, its plugin commands run through the copy its desktop app carries: said so, never as the CLI.
           view.via?.[tool] ? h('span.plugin-tool-state.plugin-tool-via', { title: `${names[tool]}’s command-line tool wasn’t found, so its plugin commands run through ${view.via[tool]}.` }, `Through ${view.via[tool]}`) : null,
           uninstall)), question];
@@ -166,30 +168,18 @@ async function stillLinked(entry: MarketplaceView, plugin: string, ref: Pick<Plu
 
 /** Use the plugin's over his own copy says History's sentence for the entry it made, which names his copy kept as a version. */
 const historySaid = (kind: 'skills' | 'agents' | 'mcp', key: string, name: string, tool: HarnessId): Click['said'] => (notIn, _wrote, recorded) => {
-  if (notIn.includes(tool)) return libraryPages[kind].say.said.inHarness(name, tool, false, true);
   const same = recorded?.filter(each => { const hit = libraryEntry(each); return hit?.kind === kind && hit.key === key; }) ?? [];
-  const recordedEvent = same.find(each => each.kind === 'on') ?? same[0];
-  const sentence = recordedEvent && librarySentence(recordedEvent, libraryWords[kind], app.home?.[kind].tools ?? [], app.home?.[kind].library[key])?.text;
-  return sentence ? `${name}: ${sentence.replace(/^./, first => first.toLowerCase())}` : libraryPages[kind].say.said.inHarness(name, tool, false, false);
+  const recordedEvent = same.find(each => each.kind === 'on') ?? same[0], failed = notIn.includes(tool);
+  const sentence = !failed && recordedEvent && librarySentence(recordedEvent, libraryWords[kind], app.home?.[kind].tools ?? [], app.home?.[kind].library[key])?.text;
+  return sentence ? `${name}: ${sentence.replace(/^./, first => first.toLowerCase())}` : libraryPages[kind].say.said.inHarness(name, tool, false, failed);
 };
 
 const cantChange = (view: PluginsView, kind: 'skills' | 'agents' | 'mcp') =>
   acting() || (!view.canWrite ? view.reason ?? true : app.home ? whyKindReadOnly(app.home, kind) ?? false : true);
 
-/** Clashes under a tool's box (`PluginItemsView clashes`): own copies settled right here; shared-folder skills keep their Library sentence. */
-function clashLines(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, clashes: PluginItemClash[], marketIndex: number) {
-  const own = clashes.filter(clash => clash.clash === 'own');
-  const shared = clashes.filter(clash => clash.clash === 'shared');
-  const sharedLines = shared.length ? notInWhy(tool, plugin.name, shared.map(clash => ({ name: clash.name, kind: clash.kind, out: 'shared' as const })))
-    .map(line => h('span.plugin-tool-state.plugin-tool-why', {}, line)) : [];
-  return [...own.map(clash => {
-    const kind = pageOfPart[clash.kind], now = linkedOn(entry, plugin.name, clash), drawn = now && switchDrawn(now.row, now.item, tool), disabled = cantChange(view, kind) || !drawn;
-    const title = `Puts the plugin’s ${clash.name} in ${names[tool]}. ${names[tool]}’s own copy is kept as a version, and Undo puts it back.`;
-    const id = `pclash-${marketIndex}-${plugin.name}-${tool}-${clash.kind}-${clash.key}`;
-    return h('span.plugin-tool-state.plugin-tool-why.plugin-tool-clash', {}, `${clash.name}: ${names[tool]} has its own copy.`,
-      button({ size: 'small', label: `Use the plugin’s ${clash.name}`, id, disabled, attrs: { title }, onclick: () => drawn && flipInHarness(kind, clash.key, clash.name, tool, drawn, { still: () => stillLinked(entry, plugin.name, clash, tool, true), said: historySaid(kind, clash.key, clash.name, tool) }) }));
-  }), ...sharedLines];
-}
+/** Shared-folder clashes under a tool's box (`PluginItemsView clashes`), in their Library sentence. */
+const clashLines = (plugin: PluginView, tool: HarnessId, shared: PluginItemClash[]) => (shared.length ? notInWhy(tool, plugin.name, shared.map(clash => ({ name: clash.name, kind: clash.kind, out: 'shared' as const })))
+  .map(line => h('span.plugin-tool-state.plugin-tool-why', {}, line)) : []);
 
 /**
  * Each name of his under a tool's box (pluginstatus.ts yourSaid), with Use the plugin's under it where its take can land there
@@ -214,15 +204,15 @@ function itemsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   if (!items || !tools.length) return null;
   const state = (line: PluginItemLine, cells?: (ToolSwitch | 'kind')[]): string => {
     // A tool with a place on the line says its own state there; else kept out in words, never of a tool that takes no such item.
-    const own = tools.filter((_tool, at) => cells?.[at] === 'own-copy').map(tool => names[tool]);
     const out = cells ? [] : tools.filter(tool => holds(tool, line.kind) && line.except?.includes(tool)).map(tool => names[tool]);
-    const where = line.on === false ? 'Off' : own.length ? `${andList(own)} ${own.length === 1 ? 'has its own copy' : 'have their own copies'}` : out.length ? `Kept out of ${andList(out)}` : '';
+    const where = line.on === false ? 'Off' : out.length ? `Kept out of ${andList(out)}` : '';
     const said = { linked: where, update: 'An update is ready: Update brings it in', going: 'No longer in the plugin: Update turns it off', new: 'New in the plugin: Update brings it in',
       removed: 'Removed by the plugin’s update, so it is off. Turning it on keeps it as yours', deleted: 'Deleted here: tick to bring it back',
       'not-brought': `Not brought in: ${line.why ?? ''}`, alike: 'Yours, the same as the plugin’s: its switch leaves yours as it is' }[line.state];
     return [said, line.state === 'update' ? where : ''].filter(Boolean).join(' · ');
   };
   const linked = (line: PluginItemLine) => line.state !== 'new' && line.state !== 'not-brought' && line.state !== 'deleted';
+  const ownClash = (tool: HarnessId, line: PluginItemLine) => !!items.clashes?.some(clash => clash.clash === 'own' && clash.tool === tool && clash.kind === line.kind && clash.key === line.key);
   const lines = (['skill', 'agent', 'mcp'] as const).flatMap(kind => items.lines.filter(line => line.kind === kind)).map(line => ({ line, cells: itemCells(entry, plugin.name, line, tools) }));
   return h('section.plugin-section.plugin-items-section', { 'aria-label': 'Its items' },
     h('div.plugin-section-head', {}, h('h3', {}, 'Its items')),
@@ -233,22 +223,34 @@ function itemsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
         ? h('button.inline-link.plugin-part-link', { type: 'button', title: `Open ${line.name} in the Library`, onclick: () => openKind(pageOfPart[line.kind], { key: line.key }) }, h('code.plugin-name', {}, line.name))
         : h('code.plugin-name', {}, line.name)),
       h('span.plugin-outcome-what', {}, state(line, cells)),
-      cells ? h('span.skill-switches', {}, tools.map((tool, at) => (cells[at] === 'switch' ? itemSwitch(view, entry, plugin.name, line, tool, marketIndex) : cellWhy(line, tool, cells[at]!)))) : null))));
+      cells ? h('span.skill-switches', {}, tools.map((tool, at) => (cells[at] === 'switch' ? itemSwitch(view, entry, plugin.name, line, tool, marketIndex)
+        : cells[at] === 'own-copy' && ownClash(tool, line) ? useOverOwnCopy(view, entry, plugin.name, line, tool, marketIndex)
+        : cellWhy(line, tool, cells[at]!, cells[at] === 'another-way' ? linkedOn(entry, plugin.name, line)?.row.anotherWay?.[tool] : undefined)))) : null))));
 }
 
-/** One item's switch in one tool that takes items one by one: on unless kept out there (`except`, as this view read it); a click is the Library row's (matrix.ts flipInHarness). */
+/** One item's switch in one tool that takes items one by one: on unless kept out there; a click is the Library row's (matrix.ts flipInHarness). */
 function itemSwitch(view: PluginsView, entry: MarketplaceView, plugin: string, line: PluginItemLine, tool: HarnessId, marketIndex: number) {
-  const on = !line.except?.includes(tool), where = names[tool], kind = pageOfPart[line.kind], now = linkedOn(entry, plugin, line), drawn = now && switchDrawn(now.row, now.item, tool);
+  // On or off as the home it acts on has it (switchDrawn), which a profile switched from the menu bar changes without this view.
+  const where = names[tool], kind = pageOfPart[line.kind], now = linkedOn(entry, plugin, line), drawn = now && switchDrawn(now.row, now.item, tool), on = drawn ? !drawn.out : !line.except?.includes(tool);
   const label = `${line.name} in ${where}: ${on ? 'on' : 'kept out'}. ${inHarnessDoes(where, !on, libraryPages[kind].words.copy)}`;
   return h('span.skill-switch', { 'data-state': on ? 'on' : 'off' }, switchToggle({ on, label, disabled: cantChange(view, kind) || !drawn, id: `pitem-${marketIndex}-${plugin}-${tool}-${line.kind}-${line.key}`,
     onchange: () => drawn && flipInHarness(kind, line.key, line.name, tool, drawn, { still: () => stillLinked(entry, plugin, line, tool) }) }));
 }
 
-/** Where an item's line has no switch in a tool (itemCells): the tool's own state in the Library's word, or a dash; why, on hover. */
-function cellWhy(line: PluginItemLine, tool: HarnessId, cell: Exclude<ToolSwitch, 'switch'> | 'kind') {
+/** Where an item's line has no switch in a tool (itemCells): the tool's own state, or a dash; why on hover (`way`: how it has it another way). */
+function cellWhy(line: PluginItemLine, tool: HarnessId, cell: Exclude<ToolSwitch, 'switch'> | 'kind', way?: string) {
   const where = names[tool], why = { 'own-copy': `${where} has its own copy of ${line.name}, which stays as it is.`, 'switched-off': `${where}’s own settings keep ${line.name} off.`,
-    'another-way': `${where} has ${line.name} another way.`, kind: `${where} takes no ${partWords[line.kind][1]}.`, cannot: `${where} can’t take ${line.name}.`, none: `${line.name} isn’t in Central Knot.` }[cell];
-  return h('span.skill-switch.item-cell-why', { title: why, 'aria-label': why, 'data-cell': cell }, cell in TOOL_STATE_WORDS ? TOOL_STATE_WORDS[cell as keyof typeof TOOL_STATE_WORDS] : '–');
+    'another-way': way ?? `${where} has ${line.name} another way.`, kind: `${where} takes no ${partWords[line.kind][1]}.`, cannot: `${where} can’t take ${line.name}.`, none: `${line.name} isn’t in Central Knot.` }[cell];
+  const word = cell === 'switched-off' ? `Off in ${where}’s settings` : cell === 'own-copy' || cell === 'another-way' ? TOOL_STATE_WORDS[cell] : '–';
+  return h('span.skill-switch.item-cell-why', { title: why, 'aria-label': why, 'data-cell': cell }, word);
+}
+
+/** His own copy in a tool, said once, on its item's row: Use the plugin's (matrix.ts flipInHarness while that clash stands: stillLinked), with History's sentence. */
+function useOverOwnCopy(view: PluginsView, entry: MarketplaceView, plugin: string, line: PluginItemLine, tool: HarnessId, marketIndex: number) {
+  const kind = pageOfPart[line.kind], where = names[tool], now = linkedOn(entry, plugin, line), drawn = now && switchDrawn(now.row, now.item, tool);
+  const title = `${where} has its own copy of ${line.name}. Puts the plugin’s in its place there; ${where}’s copy is kept as a version, and Undo puts it back.`;
+  return h('span.skill-switch', {}, button({ variant: 'link', size: 'micro', label: 'Use the plugin’s', id: `pclash-${marketIndex}-${plugin}-${tool}-${line.kind}-${line.key}`, disabled: cantChange(view, kind) || !drawn,
+    attrs: { title, 'aria-label': `Use the plugin’s ${line.name} in ${where}` }, onclick: () => drawn && flipInHarness(kind, line.key, line.name, tool, drawn, { still: () => stillLinked(entry, plugin, line, tool, true), said: historySaid(kind, line.key, line.name, tool) }) }));
 }
 
 /** The tools' marks over a list's columns of switches: a plugin's skills (skillColumns) and its items (itemsSection). */
