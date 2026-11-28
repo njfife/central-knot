@@ -16,7 +16,10 @@ const { mcpSigninPage } = await import('../src/mcpsigninpage.ts');
 const tools: HarnessId[] = ['claude-cli', 'codex-cli'];
 const fact = (name: string): LibraryFacts => ({
   key: name, name, description: '', on: name === 'oauth', except: [], cannot: {}, edited: [],
-  copies: { 'claude-cli': { folder: name, hash: `${name}#1`, directory: '/tmp/signin-page/.claude.json' } },
+  copies: {
+    'claude-cli': { folder: name, hash: `${name}#1`, directory: '/tmp/signin-page/.claude.json' },
+    ...(name === 'oauth' ? { 'codex-cli': { folder: name, hash: `${name}#1`, directory: '/tmp/signin-page/.codex/config.toml' } } : {}),
+  },
 }) as unknown as LibraryFacts;
 const makeHome = (empty = false): HomeView => {
   const kind = { tools, items: [], library: {}, access: { allowed: true }, gate: { state: 'ready' }, problems: [], notices: [], unread: [] };
