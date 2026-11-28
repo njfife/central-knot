@@ -3354,6 +3354,10 @@ async function practiceFlow() {
     [await titleWords(), await a.text('.profile-row.selected .profile-row-head'), await a.run(`document.querySelector('.profile-row.selected .profile-changed-word')?.title`),
       await a.exists('.profile-row .profile-in-use'), await a.text('#profile-preview')],
     ['Incident · changed', 'Incident · changed', changedCard, false, 'Switching turns 1 off']);
+  await withSidebarOpen(a, 1316, 819, async () => same('in the list, · changed sits right after the name, on its line', await a.run(`(() => {
+    const row = document.querySelector('.profile-row.selected'), name = row?.querySelector('.profile-row-name')?.getBoundingClientRect(), word = row?.querySelector('.profile-changed-word')?.getBoundingClientRect();
+    return !!name && !!word && Math.abs(word.left - name.right) <= 1 && Math.abs(word.top - name.top) <= 1;
+  })()`), true));
   await shotOpen('profile-changed-list-row-1316-light', [1316, 819], 'light');
   await shotOpen('profile-changed-bar-header-860-light', SMALLEST, 'light');
   await withSidebarOpen(a, ...SMALLEST, async () => {
