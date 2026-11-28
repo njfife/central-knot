@@ -51,7 +51,7 @@ const api = {
   applyServers: async (changes: Change[]) => applyServers(boxNow!.context, boxNow!.tools, changes),
   setPluginSkill: async (...args: unknown[]) => {
     pluginCalls.push(args);
-    return { reports: [{ tool: args[4] as HarnessId, outcome: (args[5] ? 'skill-on' : 'skill-off') as const, changed: true, message: 'Switched.', runs: [] }] };
+    return { reports: [{ tool: args[4] as HarnessId, outcome: (args[5] ? 'skill-on' : 'skill-off') as 'skill-on' | 'skill-off', changed: true, message: 'Switched.', runs: [] }] };
   },
   addSource: async (token: string) => (pendingAdd ?? addSource(boxNow!.context, boxNow!.tools, token)),
   checkSource: async (id: string) => (pendingCheck ?? checkSource(boxNow!.context, async () => boxNow!.tools, id, work => work())),
@@ -142,7 +142,7 @@ test('Turn it on on Library sources matches the Library switch by making the sam
   const pluginItems: InstalledPlugin[] = [{
     tool: 'copilot-cli', source: '/market', marketName: 'team', plugin: 'kit', off: false,
     skillsOff: ['notes'], listed: true,
-    items: [{ kind: 'skill', name: 'notes' }],
+    items: [{ kind: 'skill', name: 'notes', description: '' }],
   }];
   const withPlugin = (s: HomeView['skills']): HomeView['skills'] => ({
     ...s,

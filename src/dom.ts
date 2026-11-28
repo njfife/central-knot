@@ -514,7 +514,7 @@ export function infoMark(id: string, label: string, text: string | readonly stri
       else openInfoCard(id, true);
     },
   }, icon('circle-question-mark', 14));
-  const body = Array.isArray(text) ? text.flatMap((line, at) => (at ? ['\n', h('span.info-line', {}, line)] : [h('span.info-line', {}, line)])) : [text];
+  const body = typeof text === 'string' ? [text] : text.flatMap((line, at) => (at ? ['\n', h('span.info-line', {}, line)] : [h('span.info-line', {}, line)]));
   const card = h('span.info-card', { id: infoCardId(id), role: 'tooltip', popover: 'manual', onpointerenter: enter, onpointerleave: leave }, ...body);
   return h('span.info-wrap', {}, mark, card);
 }
