@@ -2186,20 +2186,25 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .harness-count, .harness-count-group { display: contents; }
 .harness-count-label { color: var(--ink-soft); font-size: 12.5px; }
 .harness-count-value { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 13px; white-space: nowrap; }
-.harness-count-dash { justify-content: flex-start; width: auto; min-width: 22px; height: 20px; padding: 0 4px; margin: -2px 0 -2px -4px; font: inherit; font-weight: 600; text-decoration: underline dotted; text-underline-offset: 3px; }
+.harness-count-dash { justify-content: flex-start; gap: 4px; width: auto; min-width: 20px; height: 20px; padding: 0 5px 0 4px; margin: -2px 0 -2px -4px; font: inherit; font-weight: 600; }
 .harness-count-note { color: var(--ink-soft); font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
 .harness-count-span { grid-column: 2 / -1; }
+.harness-count-link { all: unset; cursor: pointer; color: var(--accent-ink); font: inherit; overflow-wrap: anywhere; }
+.harness-count-link:hover:not(:disabled) { text-decoration: underline; }
+.harness-count-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+.harness-count-link:disabled { opacity: 0.5; cursor: default; }
 .harness-card-attention { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 0 6px; border-radius: 6px; font-size: 12px; color: var(--warning); cursor: pointer; }
 .harness-card-attention:hover:not(:disabled) { background: var(--hover); text-decoration: underline; }
 .harness-card-attention:disabled { opacity: 0.5; cursor: default; }
 .harness-card-attention:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .harness-card-path { font-size: 12px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: auto; padding: 0 14px 10px; }
 .harness-card-next { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
-/* Compact footer: a tool's Manage switch (managecard.ts) and config path share one row on managed cards so switches line up
-   and stay within reach; when an unmanaged tool's question opens beneath the switch, Manage takes full width above the path. */
+/* Compact footer: a tool's Manage switch (managecard.ts) and config path share one row on installed cards (managed and
+   left-out) so switches line up and stay within reach; when a left-out tool's question opens beneath the switch, Manage
+   takes full width above the path. */
 .harness-card-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin: auto 14px 0; padding: 8px 0 10px; border-top: 1px solid var(--line); }
 .harness-manage { display: flex; flex-direction: column; gap: 6px; flex: none; min-width: 0; }
-.harness-manage:has(> :nth-child(2)) { flex: 1 0 100%; }
+.harness-manage:has(> .manage-question) { flex: 1 0 100%; }
 .harness-manage-head { display: flex; align-items: center; gap: 8px; min-height: 20px; font-size: 12.5px; font-weight: 600; }
 .harness-manage-head > .info-wrap { margin-left: -4px; flex: none; }
 .harness-card-foot > .harness-card-path { margin: 0; padding: 0; flex: 0 1 auto; min-width: 0; }
@@ -2259,11 +2264,12 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
   .harness-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; align-items: start; }
   .harness-count-group { display: grid; grid-template-columns: max-content minmax(2ch, max-content) minmax(0, 1fr); column-gap: 10px; row-gap: 4px; align-items: baseline; }
 }
-/* Two harnesses fit across from the minimum window, three at 1316 (six as 3 × 2); four sit 2 × 2, or four across once each card can be 310px wide; never
-   three and one. */
+/* Two harnesses fit across from the minimum window, three at 1316 through 1728 (six as 3 × 2, never 4 + 2 or 5 + 1); four
+   sit 2 × 2, or four across once each card can be 310px wide; never three and one. */
 .harness-cards[data-count="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @container (min-width: 1300px) { .harness-cards[data-count="4"] { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @container (max-width: 600px) { .harness-cards[data-count="4"] { grid-template-columns: minmax(0, 1fr); } }
+@container (min-width: 960px) and (max-width: 1920px) { .harness-cards[data-count="6"] { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 /* "Not in <harness>" and Off: quieter headings than On and Not synced. */
 .ov-section-away .ov-section-label > strong { font-weight: 500; color: var(--ink-soft); }
 /* About: every fact row is as tall as one with a copy button, so the two groups' rows line up. */

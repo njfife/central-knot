@@ -10,7 +10,7 @@ import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { pluginTitle, uninstallControl } from './pluginparts.ts';
 import { button, emptyState, h, icon, infoMark, pathText, section, toggle, type Child } from './dom.ts';
 import { fullToolName, plural } from './model.ts';
-import { andList, coworkWords, fileName, kindNouns, pageNames, sentence, toolNames as names } from './words.ts';
+import { andList, coworkWords, fileName, kindNouns, pageNames, toolNames as names } from './words.ts';
 import { agentsKeptIn, hasCowork, takesPlugins, type AgentTool } from './presence.ts';
 import { brandMark } from './brand.ts';
 import { shortBuild } from './values.ts';
@@ -36,8 +36,8 @@ const readProblems = (snapshot: Snapshot) => (snapshot.discovery === 'missing' ?
 const listed = (home: HomeView) => home.snapshots.filter(snapshot => home.mode === 'actual' || home.sync.present.includes(snapshot.harness));
 
 const supports = (home: HomeView, kind: PageKind, tool: HarnessId) => kindSource(home, kind).tools.includes(tool);
-/** Said on the card, the tab's tooltip and the empty tab when Central Knot holds no kind of this in a tool (Antigravity's agents). */
-const kindNotUsed = (tool: HarnessId, kind: PageKind) => `${sentence(kindNouns[kind].many)} aren’t handled for ${names[tool]}`;
+/** Said on the card, the tab's tooltip and the empty tab when Central Knot doesn't handle a kind for a tool (Antigravity's agents). */
+const kindNotUsed = (tool: HarnessId, kind: PageKind) => `Central Knot doesn’t handle ${kindNouns[kind].many} for ${names[tool]} yet`;
 
 /**
  * What one tool has of one kind: its total, the synced subtotal (for skills, only copies managed there), and copies that
@@ -89,23 +89,43 @@ const appLine = (app: DesktopApp) => `${app.name}${app.version ? ` ${app.version
 
 // ---------- Every harness ----------
 
-type Count = { value: string; note?: string; faint?: boolean; reason?: { id: string; text: string }; describe?: string };
+type Count = {
+  value: string;
+  note?: string;
+  faint?: boolean;
+  reason?: { id: string; text: string };
+  link?: { id: string; label: string; title: string; open: () => void };
+  describe?: string;
+};
 /**
- * One line of a card's counts: what, how many, and a short note. An empty `value` (a filename) lets the note span both value
- * and note tracks; a capability `reason` turns the dash into a keyboard-accessible detail button; a bare count carries `describe`.
+ * One line of a card's counts: what, how many, and a short note. An empty `value` (an instruction file) lets its `link` and
+ * `note` span both value and note tracks; a capability `reason` spans both tracks with a keyboard-accessible dash mark
+ * (`infoMark`, ignoring `faint`); `faint` dims plain non-numeric values (`?`, `…`, `—`); a bare count carries `describe`.
  */
 function countRow(label: string, count: Count | null, tool: HarnessId) {
   if (!count) return null;
-  const { value, note, faint = false, reason, describe } = count;
-  if (!value) return h('div.harness-count', {}, h('span.harness-count-label', {}, label), h('span.harness-count-note.harness-count-span', {}, note ?? ''));
-  const shown = reason
-    ? h('span.harness-count-value.tone-faint', {}, infoMark(reason.id, `${names[tool]} ${label}`, reason.text, { face: value, look: 'harness-count-dash' }))
-    : h(`span.harness-count-value${faint ? '.tone-faint' : ''}`, { 'aria-description': describe }, value);
-  return h('div.harness-count', {}, h('span.harness-count-label', {}, label), shown, h('span.harness-count-note', {}, note ?? ''));
+  const { value, note, faint = false, reason, link, describe } = count;
+  if (!value) {
+    return h('div.harness-count', {},
+      h('span.harness-count-label', {}, label),
+      h('span.harness-count-note.harness-count-span', {},
+        link ? h('button.harness-count-link', { type: 'button', id: link.id, title: link.title, disabled: !!state.busy, onclick: link.open }, link.label) : null,
+        note ?? ''));
+  }
+  if (reason) {
+    return h('div.harness-count', {},
+      h('span.harness-count-label', {}, label),
+      h('span.harness-count-value.harness-count-span', {},
+        infoMark(reason.id, `${names[tool]} ${label}`, reason.text, { face: [value, icon('circle-question-mark', 14)], look: 'harness-count-dash' })));
+  }
+  return h('div.harness-count', {},
+    h('span.harness-count-label', {}, label),
+    h(`span.harness-count-value${faint ? '.tone-faint' : ''}`, { 'aria-description': describe }, value),
+    h('span.harness-count-note', {}, note ?? ''));
 }
 
 function kindCount(home: HomeView, { kind, supported, total, plugins, on }: ReturnType<typeof tally>, tool: HarnessId): Count | null {
-  if (!supported) return { value: '—', reason: { id: `harness-${tool}-${kind}-reason`, text: kindNotUsed(tool, kind) }, faint: true };
+  if (!supported) return { value: '—', reason: { id: `harness-${tool}-${kind}-reason`, text: kindNotUsed(tool, kind) } };
   // Unread comes before any total, as on the Overview; known zero is omitted.
   if (home[kind]?.unread?.includes(tool)) return { value: '?', note: 'couldn’t be read', faint: true };
   if (!total) return null;
@@ -113,24 +133,27 @@ function kindCount(home: HomeView, { kind, supported, total, plugins, on }: Retu
   const own = total - plugins;
   const mine = !own ? '' : on === own ? (plugins ? `${own} synced` : '') : !on ? `${own} not synced` : `${on} synced · ${own - on} not synced`;
   const note = [mine, plugins ? `${plugins} from plugins` : ''].filter(Boolean).join(' · ');
-  return { value: String(total), note, describe: note ? undefined : plural(total, `synced ${kindNouns[kind].one}`, `synced ${kindNouns[kind].many}`) };
+  return { value: String(total), note, describe: note ? undefined : plural(total, kindNouns[kind].one, kindNouns[kind].many) };
 }
 
 function instructionCount(tool: HarnessId): Count {
   // Files already read stay shown if a later read fails, here as on the Instructions tab.
-  if (!state.instructions.data) return state.instructions.state === 'failed' ? { value: '—', note: 'couldn’t be read', faint: true } : { value: '…', faint: true };
-  // A file, not a number: its name and length, or that there is none yet.
+  if (!state.instructions.data) return state.instructions.state === 'failed' ? { value: '?', note: 'couldn’t be read', faint: true } : { value: '…', faint: true };
+  // A file, not a number: its name links straight to the tool's Instructions tab; no file yet stays plain.
   const file = instructionOf(tool);
   if (!file) return { value: '—', faint: true };
   if (!file.exists) return { value: '', note: 'no file yet' };
-  // Its name alone spans the value and note tracks; an empty file says so.
-  return { value: '', note: file.text.trim() ? fileName(file.path) : `${fileName(file.path)} (empty)` };
+  return {
+    value: '',
+    note: file.text.trim() ? '' : ' (empty)',
+    link: { id: `harness-${tool}-instructions`, label: fileName(file.path), title: `Open ${names[tool]}’s Instructions tab`, open: () => goHarness(tool, 'instructions') },
+  };
 }
 
 /** A tool's plugins on its card (pluginstatus.ts pluginsInstalled, the Overview's count too). */
 function pluginCount(tool: HarnessId): Count | null {
   const plugins = pluginsInstalled(state.home, tool);
-  if (plugins.state === 'unsupported') return { value: '—', reason: { id: `harness-${tool}-plugins-reason`, text: takesItemsOnly(names[tool]) }, faint: true };
+  if (plugins.state === 'unsupported') return { value: '—', reason: { id: `harness-${tool}-plugins-reason`, text: takesItemsOnly(names[tool]) } };
   if (plugins.state === 'unknown') return { value: '?', note: 'its record couldn’t be read', faint: true };
   return plugins.count ? { value: String(plugins.count), describe: plural(plugins.count, 'installed plugin') } : null;
 }
