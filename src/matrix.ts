@@ -65,7 +65,7 @@ import { cellWords, handledWhere, inTool, insideTitle, itemThrough, offIn, pageR
 import { fromChoices, fromShows, originOf, type From, type FromEntry } from './origins.ts';
 import { sources } from './sourcespage.ts';
 import { folded, lineDiff } from './diff.ts';
-import { reloadAdvice, rowReload, toItemKind, type ReloadAdvice } from './reload.ts';
+import { reloadAdvice, rowReload, toItemKind, type ReloadAdvice, type ReloadItem } from './reload.ts';
 import { pageData, readPageData, resetPageData } from './pagedata.ts';
 import { ask, askedNow, cancelAsk, cantWords, deletedWords, DIFFERS_REASON, headingState, isTicked, ofListed, questionWords, selectedWords, selecting, listDrawn, startSelecting, stopSelecting, restoreWords, tickHeading, tickRow, toggleWhy, turnedWords, turnLabel, turnTail, whyLines, whyShown, type Listed } from './selection.ts';
 
@@ -1104,24 +1104,61 @@ export function reloadButton(item: { chip?: string; command: string; title: stri
   return control;
 }
 
-/** One non-wrapping line of per-tool reload chips for the folded header, with +N more opening Show all on overflow. */
+/** Count of Show all rows with no chip in sight (one per tool, whether a tool has zero chips or multiple commands). */
+export const unshownReloadRows = (total: number, chips: readonly { tool?: string; hidden: boolean }[]): number =>
+  Math.max(0, total - new Set(chips.filter(chip => !chip.hidden && chip.tool).map(chip => chip.tool)).size);
+
+/** One non-wrapping line of per-tool reload chips for the folded header, with +N more step(s) opening Show all for any unshown row. */
 export function reloadChips(advice: ReloadAdvice, of: typeof state.shownWhole): HTMLElement | null {
   const chips = advice.items.flatMap(item => [
-    ...(item.chip ? [{ chip: item.chip, command: item.command, title: item.title!, id: `outcome-copy-${item.tool}` }] : []),
-    ...(item.more ?? []).map((extra, at) => ({ ...extra, id: `outcome-copy-${item.tool}-${at + 1}` })),
+    ...(item.chip ? [{ tool: item.tool, chip: item.chip, command: item.command, title: item.title!, id: `outcome-copy-${item.tool}` }] : []),
+    ...(item.more ?? []).map((extra, at) => ({ ...extra, tool: item.tool, id: `outcome-copy-${item.tool}-${at + 1}` })),
   ]);
-  const view = (chip: { chip: string; command?: string; title: string; id: string }) =>
-    (chip.command ? reloadButton({ chip: chip.chip, command: chip.command, title: chip.title }, chip.id) : h('span.reload-chip', { title: chip.title }, chip.chip));
+  const view = (chip: { tool: string; chip: string; command?: string; title: string; id: string }) => {
+    const node = chip.command ? reloadButton({ chip: chip.chip, command: chip.command, title: chip.title }, chip.id) : h('span.reload-chip', { title: chip.title }, chip.chip);
+    node.setAttribute('data-reload-tool', chip.tool);
+    return node;
+  };
   return chips.length ? h('div.result-reloads', {},
     h('span.result-copies', {}, chips.map(view)),
-    h('button.inline-link.reload-more', { type: 'button', id: 'outcome-reload-more', hidden: true, onclick: (event: Event) => { event.stopPropagation(); state.shownWhole = of; rerender(); } }, '')) : null;
+    h('button.inline-link.reload-more', { type: 'button', id: 'outcome-reload-more', hidden: true, 'data-reload-rows': String(advice.items.length), onclick: (event: Event) => { event.stopPropagation(); state.shownWhole = of; rerender(); } }, '')) : null;
 }
 
-/** Per-tool reload lines for Show all and off-header bands: the table's sentence, then its Copy buttons if it has any. */
-export const reloadLines = (advice: ReloadAdvice): HTMLElement | null => (advice.items.length
-  ? h('div.reload-list.result-copies', {}, advice.items.map(item => h('div.reload-row', {}, h('span.reload-row-text', {}, item.text),
-    item.command ? reloadButton({ chip: item.chip!, command: item.command, title: item.title! }, `outcome-copy-${item.tool}`) : null,
-    ...(item.more ?? []).flatMap((extra, at) => (extra.command ? [reloadButton({ ...extra, command: extra.command }, `outcome-copy-${item.tool}-${at + 1}`)] : []))))) : null);
+const RELOAD_FOLD_FROM = 3;
+let reloadFoldOpen: object | undefined;
+/** One reload step's row: each distinct command once paired with its own note (grouped so a wrap never parts a command from its purpose), or plain text when there is no command. */
+function reloadRow(item: ReloadItem): HTMLElement {
+  if (!item.command) return h('div.reload-row', {}, h('span.reload-row-text', {}, item.text));
+  const parts: Child[] = [
+    reloadButton({ chip: item.chip!, command: item.command, title: item.title! }, `outcome-copy-${item.tool}`),
+    ...(item.note ? [h('span.reload-row-note', {}, item.note)] : []),
+    ...(item.more ?? []).flatMap((extra, at) => (extra.command
+      ? [h('span.reload-cmd-part', {},
+        ...(extra.lead ? [h('span.reload-row-note', {}, extra.lead)] : []),
+        reloadButton({ ...extra, command: extra.command }, `outcome-copy-${item.tool}-${at + 1}`),
+        ...(extra.note ? [h('span.reload-row-note', {}, extra.note)] : []))]
+      : [])),
+  ];
+  return h('div.reload-row.reload-row-cmd', {}, parts);
+}
+
+/**
+ * Per-tool reload steps for page bands and the header's whole result: each command said once on its Copy button, caveats and
+ * no-command steps in plain text. Every page band folds 3+ shown steps behind "Reload steps (N)" (keyed by its outcome/run);
+ * the header's Show all card passes `'whole'` as the one named exception that never folds.
+ */
+export function reloadLines(advice: ReloadAdvice, owner: object | 'whole'): HTMLElement | null {
+  if (!advice.items.length) return null;
+  const list = h('div.reload-list.result-copies', {}, advice.items.map(reloadRow));
+  if (owner === 'whole' || advice.items.length < RELOAD_FOLD_FROM) return list;
+  const disclosure = fold({
+    id: 'outcome-reloads-fold', toggleId: 'outcome-reloads-toggle',
+    label: `Reload steps (${advice.items.length})`, open: reloadFoldOpen === owner,
+    onToggle: open => { reloadFoldOpen = open ? owner : undefined; }, bodyClass: 'reload-fold-body',
+  }, list);
+  disclosure.className = 'fold reload-fold';
+  return disclosure;
+}
 
 /**
  * The last action's result as a band, when it offers something to do; a result that only tells is in the status bar. While a
@@ -1170,7 +1207,7 @@ export function outcomeBand(cardResult?: Outcome, omitProfile = false): HTMLElem
       !outcome.act && !outcome.undo && outcome.history ? smallAction(outcome.refused ? 'History' : 'Undo in History', 'outcome-history', () => showPage('history')) : null,
       outcome.next ? button({ variant: 'outline', size: 'small', label: outcome.next.label, id: outcome.next.id, attrs: outcome.next.title ? { title: outcome.next.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.next!.run(); } }) : null),
     cardResult ? null : closeButton(closeResult, { id: 'outcome-dismiss' }),
-    outcome === state.outcome && !resultInHeader() && outcome.reloads ? reloadLines(reloadAdvice(outcome.reloads, toolWays())) : null);
+    outcome === state.outcome && !resultInHeader() && outcome.reloads ? reloadLines(reloadAdvice(outcome.reloads, toolWays()), outcome) : null);
 }
 
 /**
@@ -1266,8 +1303,8 @@ export function listResult(): HTMLElement[] {
   const chips = !whole && advice ? reloadChips(advice, of) : null;
   const profile = profileSpan(done && !whole ? state.outcome?.profileLine : undefined);
   const problem = lines.length ? h(`div.band${chips || profile ? '.result-row2' : ''}`, { role: 'status' }, profile, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, of, hasAdvice), chips, done ? null : closeButton(close, { id: 'problems-dismiss' })) : null;
-  const row2 = whole && advice ? reloadLines(advice) : problem ? null : profile ? h('div.result-row2.result-profile-row', {}, profile, chips) : chips;
-  return [done, row2, problem].filter((band): band is HTMLElement => !!band);
+  const row2 = whole && advice ? reloadLines(advice, 'whole') : problem ? null : profile ? h('div.result-row2.result-profile-row', {}, profile, chips) : chips;
+  return [done, problem, row2].filter((band): band is HTMLElement => !!band);
 }
 
 /**

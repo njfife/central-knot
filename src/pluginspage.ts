@@ -409,14 +409,14 @@ export function pluginsResult(): HTMLElement[] {
   const problems = problemBand(problem, lines, !run, hasAdvice, chips, profile, last);
   // With no problem line, Show all follows the sentence, for one the header cuts or whose reload sentences live under Show all.
   if (run && !problems) run.querySelector('.toolbar-result-text')!.after(wholeToggle(of, 0, hasAdvice));
-  const row2 = run && whole && hasAdvice ? reloadLines(advice) : problems ? null : profile ? h('div.result-row2.result-profile-row', {}, profile, chips) : chips;
-  return [run, row2, problems].filter((part): part is HTMLElement => !!part);
+  const row2 = run && whole && hasAdvice ? reloadLines(advice, 'whole') : problems ? null : profile ? h('div.result-row2.result-profile-row', {}, profile, chips) : chips;
+  return [run, problems, row2].filter((part): part is HTMLElement => !!part);
 }
 
 /**
  * The last run on Instructions or a tool's Instructions tab, where no plugin result is in the header (pluginstate.ts
  * pluginsResultPlace): one band, under the strip it was made in or above the cards (instructionspage.ts runStrip). What it did and an
- * ended profile, each plugin it failed for and the stop, its Undo and ×, then its reload steps whole, as a band page's result has them.
+ * ended profile, each plugin it failed for and the stop, its Undo and ×, then its reload steps, as a band page's result has them.
  */
 export function runBand(): HTMLElement | null {
   const last = market.lastRun, problem = market.problem, lines = last ? lastLines() : [];
@@ -425,7 +425,7 @@ export function runBand(): HTMLElement | null {
   if (!said && !reasons.length) return null;
   return h('div.band.band-done.plugin-run', { role: 'status', id: 'plugins-result' }, reasons.length ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'),
     h('span.band-text', {}, said, reasons.map(reason => h('span.band-reason', {}, reason))),
-    h('span.band-actions', {}, undoButton()), dismiss(closeRun, 'report-dismiss'), last ? reloadLines(runReloads()) : null);
+    h('span.band-actions', {}, undoButton()), dismiss(closeRun, 'report-dismiss'), last ? reloadLines(runReloads(), last) : null);
 }
 
 /** What just happened (each plugin named a link to its page, with Undo), or else the last notice ("… added"). */
