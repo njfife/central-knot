@@ -1298,8 +1298,9 @@ async function harnessFlow() {
       await t.click('#header-refresh');
       for (let tries = 0; tries < 40 && !(await t.exists(`#${rowPart('add', 'skills', longDocked)}`)); tries++) await wait(100);
       await t.click(`#${rowPart('add', 'skills', longDocked)}`);
-      await t.click(`#${rowPart('open', 'skills', longDocked)}`);
-      await t.run(`document.querySelector('.ov-row.open')?.scrollIntoView({ block: 'center' })`);
+      await t.click('#header-refresh');
+      await t.click(`#${rowPart('open', 'skills', 'skill-01')}`);
+      await t.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', longDocked)}"]')?.scrollIntoView({ block: 'center' })`);
       await take('tp1-docked-long-wide-light', [1728, 1117], true, 'light');
       await t.run(`window.centralKnot.setAppearance('system')`);
       await wait(80);
