@@ -295,8 +295,9 @@ test('An added line has its own Undo once History is read, where one of its take
     takeEv('take-files', 'mcp', 'files', 'codex-cli'),
   ];
   state.outcome = { page: 'settings', band: true, settingsBand: true, everythingUndo: 'sw2', text: 'Synchronize everything is on: it added 3 items.', act: { label: 'Undo', id: 'outcome-undo', run() {} } };
-  // While History is being read, a line names what it added and offers nothing yet.
+  // While History is being read (the read the first draw asked for), a line names what it added and offers nothing yet.
   state.history.state = 'reading';
+  draw();
   draw();
   assert.deepEqual([addedLines().map(textOf), undos()], [
     ['Added skill early from Claude Code.', 'Added skill notes from Claude Code.', 'Added skill edited from Claude Code.', 'Added MCP server files from Codex.'], ['', '', '', '']]);
