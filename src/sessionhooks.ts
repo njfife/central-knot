@@ -144,17 +144,17 @@ export interface HookRunView {
   errDirect?: string;
 }
 
-/** Maps one HookRunResult to its exact sentence, leading when (Collected/Tried + day and time) with tool/plugin-version/place on hover, notes, and stdout/stderr display slots. */
+/** Maps one HookRunResult to its exact sentence, leading when (Collected/Tried + day and time, plus empty prompt on the line) with tool/plugin-version/place on hover, notes, and stdout/stderr display slots. */
 export function hookRunWords(tool: HarnessId, result: HookRunResult, shownCwd: string, time = dayAndTime(result.at), runAs?: HarnessId): HookRunView {
   if (result.outcome === 'refused') return { sentence: result.problem ? `Not run: ${lowerLead(result.problem)}` : 'Couldn’t run it.', notes: [] };
   const place = shownCwd || '~';
-  const promptPart = result.emptyPrompt ? ' with an empty prompt' : '';
   const started = result.outcome !== 'missing' && result.detail !== 'spawn-error';
+  const promptPart = started && result.emptyPrompt ? ', with an empty prompt' : '';
   const version = result.pluginVersion?.trim();
   const who = runAs ? `as ${toolNames[runAs]}${version ? `, plugin ${version}` : ''}` : '';
   const when = time.includes(' at ') ? time : `at ${time}`;
-  const meta = `${started ? 'Collected' : 'Tried'} ${when}`;
-  const metaTitle = [who, started ? `run in ${place}${promptPart}` : ''].filter(Boolean).join(', ') || undefined;
+  const meta = `${started ? 'Collected' : 'Tried'} ${when}${promptPart}`;
+  const metaTitle = [who, started ? `run in ${place}` : ''].filter(Boolean).join(', ') || undefined;
   const baseNotes = started && result.missingOptions ? ['Ran without some of the plugin’s options.'] : [];
   const err = result.stderr || undefined;
   const out = result.allPrinted || undefined;

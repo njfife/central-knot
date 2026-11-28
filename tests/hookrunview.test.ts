@@ -63,8 +63,8 @@ test('Check 2: hookRunWords matches every outcome, quiet trailing run place/time
     emptyPrompt: true, durationMs: 400,
   }), '~/sub', time);
   assert.equal(addPrompt.sentence, 'Would add');
-  assert.equal(addPrompt.meta, 'Collected at 9:14 PM');
-  assert.equal(addPrompt.metaTitle, 'run in ~/sub with an empty prompt');
+  assert.equal(addPrompt.meta, 'Collected at 9:14 PM, with an empty prompt');
+  assert.equal(addPrompt.metaTitle, 'run in ~/sub');
   assert.equal(addPrompt.added, 'Extra context');
   assert.equal(addPrompt.allFold, '{"hookSpecificOutput":{"additionalContext":"Extra context"}}');
   assert.equal(addPrompt.errFold, undefined);
@@ -125,8 +125,8 @@ test('Check 2: hookRunWords matches every outcome, quiet trailing run place/time
   }), '~', time);
   assert.deepEqual(exit2Prompt, {
     sentence: 'Exited 2: Claude Code would block the prompt and show this error.',
-    meta: 'Collected at 9:14 PM',
-    metaTitle: 'run in ~ with an empty prompt',
+    meta: 'Collected at 9:14 PM, with an empty prompt',
+    metaTitle: 'run in ~',
     notes: [],
     errDirect: 'blocked\n',
   });
@@ -192,8 +192,8 @@ test('Check 2: hookRunWords matches every outcome, quiet trailing run place/time
     outcome: 'not-added', detail: 'codex-prompt-exit-2', exitCode: 2, emptyPrompt: true, stderr: 'err', allPrinted: 'out',
   }), '~', time);
   assert.equal(codexExit2.sentence, 'Exited 2: it would add nothing.');
-  assert.equal(codexExit2.meta, 'Collected at 9:14 PM');
-  assert.equal(codexExit2.metaTitle, 'run in ~ with an empty prompt');
+  assert.equal(codexExit2.meta, 'Collected at 9:14 PM, with an empty prompt');
+  assert.equal(codexExit2.metaTitle, 'run in ~');
   assert.equal(codexExit2.errDirect, 'err');
   assert.equal(codexExit2.allFold, 'out');
 
@@ -1050,8 +1050,10 @@ test('Installed plugin hook row renders Run it for Claude Code (with missingOpti
   assert.equal(dom.findAll(copilotRow, n => 'data-hook-source' in (n.attrs ?? {})).length, 1);
   copilotBtn.onclick({ detail: 1 });
   await new Promise(resolve => setTimeout(resolve, 10));
-  const copilotPanelText = dom.textOf(dom.findAll(copilotRow, n => n.className === 'hook-run')[0]);
-  assert.match(copilotPanelText, /^Would add as Copilot CLI, plugin 1\.0\.0, /);
+  const copilotPanel = dom.findAll(copilotRow, n => n.className === 'hook-run')[0];
+  const copilotPanelText = dom.textOf(copilotPanel);
+  assert.match(copilotPanelText, /^Would add Collected .+ at /);
+  assert.equal(dom.findAll(copilotPanel, n => n.className === 'hook-run-meta')[0]?.getAttribute('title'), 'as Copilot CLI, plugin 1.0.0, run in /home/u');
   assert.match(copilotPanelText, /copilot plugin text/);
 });
 
@@ -1486,11 +1488,14 @@ test('View-only and Other hooks on plugin page use one plain heading, plain even
   assert.match(dom.textOf(cantRunIns[0]), /Claude Code’s command line isn’t on this computer/);
 });
 
-test('hookRunWords leads with Collected/Tried day-and-time, puts tool/place on hover, and chosen-folder card quotes See what it adds', () => {
+test('hookRunWords leads with Collected/Tried day-and-time (with empty prompt on the line), puts tool/place on hover, and chosen-folder card quotes See what it adds', () => {
   const nowIso = new Date().toISOString();
   const addsNow = hookRunWords('claude-cli', baseResult({ outcome: 'adds', added: 'hi', allPrinted: 'hi', at: nowIso, pluginVersion: '0.4.1' }), '~', undefined, 'claude-cli');
   assert.match(addsNow.meta ?? '', /^Collected today at /);
   assert.equal(addsNow.metaTitle, 'as Claude Code, plugin 0.4.1, run in ~');
+  const promptNow = hookRunWords('claude-cli', baseResult({ outcome: 'adds', added: 'hi', allPrinted: 'hi', emptyPrompt: true, at: nowIso }), '~', undefined, 'claude-cli');
+  assert.match(promptNow.meta ?? '', /^Collected today at .+, with an empty prompt$/);
+  assert.equal(promptNow.metaTitle, 'as Claude Code, run in ~');
   const missingNow = hookRunWords('claude-cli', baseResult({ outcome: 'missing', program: '/nope', at: nowIso }), '~', undefined, 'claude-cli');
   assert.match(missingNow.meta ?? '', /^Tried today at /);
   assert.equal(missingNow.metaTitle, 'as Claude Code');
@@ -1498,7 +1503,7 @@ test('hookRunWords leads with Collected/Tried day-and-time, puts tool/place on h
   assert.equal(HOOK_RUN_ACTUAL_ONLY, 'See what it adds works only on this computer’s home.');
 });
 
-test('Kept results in hooksourceview: remember flag, single batch across harness switch, Stop+leave restore, Forget result vs Close result, Escape, and 6-line fold on return', async t => {
+test('Kept results in hooksourceview: remember flag, single batch across harness switch, late-read guard, Stop+leave restore, Forget link vs Close result cross, Escape, and 6-line fold on return', async t => {
   const dom = makeDom();
   const runCalls: unknown[] = [];
   const forgetCalls: HookSourceRef[] = [];
@@ -1539,7 +1544,7 @@ test('Kept results in hooksourceview: remember flag, single batch across harness
   };
   const panelText = (row: any) => dom.textOf(dom.findAll(row, n => n.className === 'hook-run')[0] ?? '');
 
-  await t.test('item 1 & 3: hookRun carries remember, cross says Forget result vs Close result, and Forget forgets on remembered rows only', async () => {
+  await t.test('item 1 & 3: hookRun carries remember, remembered panel ends with Forget link (Forget this result), plugin keeps Close result cross', async () => {
     const pluginRow = drawRow(claudeRef, false);
     await clickRun(pluginRow);
     const pluginClose = dom.findAll(pluginRow, n => n.id?.endsWith('-close'))[0];
@@ -1550,13 +1555,14 @@ test('Kept results in hooksourceview: remember flag, single batch across harness
     const insRow = drawRow(claudeRef, true);
     await clickRun(insRow);
     const insClose = dom.findAll(insRow, n => n.id?.endsWith('-close'))[0];
-    assert.deepEqual([runCalls.at(-1), dom.textOf(dom.findAll(insRow, n => 'data-hook-run' in (n.attrs ?? {}))[0]), insClose.getAttribute('aria-label'), insClose.getAttribute('title')],
-      [true, 'Collect again', 'Forget result', 'Forget result']);
+    assert.deepEqual([runCalls.at(-1), dom.textOf(dom.findAll(insRow, n => 'data-hook-run' in (n.attrs ?? {}))[0]),
+      dom.textOf(insClose), insClose.getAttribute('aria-label'), insClose.getAttribute('title')],
+      [true, 'Collect again', 'Forget', 'Forget this result', 'Forget this result']);
     insClose.onclick();
     assert.deepEqual([forgetCalls.length, dom.textOf(dom.findAll(insRow, n => 'data-hook-run' in (n.attrs ?? {}))[0])], [1, 'See what it adds']);
   });
 
-  await t.test('item 2: one batch survives harness switch, drops on home switch, and Stop+leave restores kept on first draw', async () => {
+  await t.test('item 2 & late-read guard: batch survives harness switch, drops on home switch, skips Forget and fresh run in flight, and Stop+leave restores kept', async () => {
     viewMod.resetHookSources();
     state.harness = 'claude-cli';
     const loading = viewMod.loadHookResults([claudeFile, codexFile]);
@@ -1565,17 +1571,38 @@ test('Kept results in hooksourceview: remember flag, single batch across harness
     await loading;
     assert.match(panelText(drawRow(codexRef, true)), /codex kept/);
 
+    // Late hook:last reply neither restores a result forgotten while in flight nor overwrites/removes a fresh collection.
+    const lateForgetRow = drawRow(claudeRef, true);
+    const lateAfterForget = viewMod.loadHookResults([claudeFile]);
+    dom.findAll(lateForgetRow, n => n.id?.endsWith('-close'))[0].onclick();
+    resolveLast([baseResult({ outcome: 'adds', added: 'claude kept', allPrinted: 'claude kept' })]);
+    await lateAfterForget;
+    assert.equal(panelText(drawRow(claudeRef, true)), '');
+
+    nextResult = baseResult({ outcome: 'adds', added: 'fresh during read', allPrinted: 'fresh during read' });
+    const lateRunRow = drawRow(claudeRef, true);
+    const lateAfterRun = viewMod.loadHookResults([claudeFile]);
+    await clickRun(lateRunRow);
+    resolveLast([baseResult({ outcome: 'adds', added: 'older kept', allPrinted: 'older kept' })]);
+    await lateAfterRun;
+    assert.match(panelText(drawRow(claudeRef, true)), /fresh during read/);
+    const lateAfterRunNull = viewMod.loadHookResults([claudeFile]);
+    await clickRun(drawRow(claudeRef, true));
+    resolveLast([null]);
+    await lateAfterRunNull;
+    assert.match(panelText(drawRow(claudeRef, true)), /fresh during read/);
+
     nextResult = baseResult({ outcome: 'stopped' });
     await clickRun(drawRow(claudeRef, true));
     dom.nodes.clear();
     viewMod.pruneHookSources();
-    assert.match(panelText(drawRow(claudeRef, true)), /claude kept/);
+    assert.match(panelText(drawRow(claudeRef, true)), /fresh during read/);
 
     nextResult = baseResult({ outcome: 'refused', problem: 'Hooks are off.' });
     const refRow = drawRow(claudeRef, true);
     await clickRun(refRow);
     dom.findAll(refRow, n => n.className === 'hook-run')[0].onkeydown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
-    assert.equal(forgetCalls.length, 2);
+    assert.equal(forgetCalls.length, 3);
 
     const stale = viewMod.loadHookResults([claudeFile]);
     state.home = { home: '/tmp/other', mode: 'actual', label: 'Other' } as any;

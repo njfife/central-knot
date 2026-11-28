@@ -358,7 +358,7 @@ export interface DesktopApi {
   hookStop(home: string, ref: HookSourceRef): Promise<void>;
   /** Reads the last kept result for each hook in `refs` on `home` in one batch (hookrunstore.ts). */
   hookLast(home: string, refs: HookSourceRef[]): Promise<(HookRunResult | null)[]>;
-  /** Forgets the kept result for one hook on `home` (hookrunstore.ts, called on Forget result or Escape). */
+  /** Forgets the kept result for one hook on `home` (hookrunstore.ts, called on Forget or Escape). */
   hookForget(home: string, ref: HookSourceRef): Promise<void>;
 }
 
