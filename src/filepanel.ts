@@ -362,7 +362,7 @@ function settleFileBox(): void {
   const row = before?.matches('.ov-row') ? before : scroller.querySelector('.file-anchored');
   const sticky = custom?.sticky ?? 0, from = row ? row.getBoundingClientRect().top : sides.top - scroller.scrollTop + sticky;
   // A page's panel leaves its scroll margin under it (style.css: a row's height), so the next row shows below its box.
-  const end = Math.max(8, parseFloat(getComputedStyle(scroller).paddingBottom)) + (custom?.padding ?? 0)
+  const end = Math.max(8, parseFloat(getComputedStyle(scroller).paddingBottom) + (custom?.padding ?? 0))
     + (parseFloat(getComputedStyle(box.parentElement!).scrollMarginBottom) || 0);
   const room = Math.floor(sides.height - sticky - (top - from) - end), under = Math.floor(sides.bottom - top - end);
   const pre = [...box.querySelectorAll<HTMLElement>('pre.content')].at(-1), text = pre && getComputedStyle(pre);

@@ -33,15 +33,16 @@ import type { InstalledPlugin, PluginItem, Profile } from './types.ts';
 let find = '';
 /** Whether the status bar's profile menu is open. */
 let menuOpen = false;
-/** Under 880 px .profiles-split scrolls while .pf-scroll expands to its content, so supply its box, sticky heads and panel padding to settleFileBox. */
-function narrowBoxRoom(box: HTMLElement) {
+/** Profiles' scroll box for settleFileBox: #profiles-split under 880 px, else #profile-scroll, with its sticky table heads and panel bottom padding. */
+function profilesBoxRoom(box: HTMLElement) {
   const split = document.getElementById('profiles-split');
-  if (!split || getComputedStyle(split).overflowY !== 'auto') return undefined;
-  const sticky = (split.querySelector<HTMLElement>('.pf-head')?.offsetHeight ?? 0) + (split.querySelector<HTMLElement>('.pf-section')?.offsetHeight ?? 0);
-  return { scroller: split, sticky, padding: parseFloat(getComputedStyle(box.parentElement!).paddingBottom) || 0 };
+  const scroller = split && getComputedStyle(split).overflowY === 'auto' ? split : document.getElementById('profile-scroll');
+  if (!scroller) return undefined;
+  const sticky = (scroller.querySelector<HTMLElement>('.pf-head')?.offsetHeight ?? 0) + (scroller.querySelector<HTMLElement>('.pf-section')?.offsetHeight ?? 0);
+  return { scroller, sticky, padding: parseFloat(getComputedStyle(box.parentElement!).paddingBottom) || 0 };
 }
 /** Profiles as a file panel's place (filepanel.ts pagePlace), and the Library key each row opens (its own, linked library copy, or plugin row). */
-const profilesFiles = pagePlace('profiles', { foundAndPlugins: true, boxRoom: narrowBoxRoom });
+const profilesFiles = pagePlace('profiles', { foundAndPlugins: true, boxRoom: profilesBoxRoom });
 export const rowKey = (item: LiveItem | PluginLive) => ('key' in item ? item.key
   : item.copies.map(copy => ('libraryKey' in copy.target ? copy.target.libraryKey : '')).find(Boolean) ?? pluginRowKey(item.plugin, item.marketName, item.kind, item.name));
 

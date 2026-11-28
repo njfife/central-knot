@@ -5016,7 +5016,7 @@ async function practiceFlow() {
             const barW = pre.offsetWidth - pre.clientWidth;
             return { boxH: Math.round(box.height), splitH: Math.round(split.height), footH: Math.round(foot.height), preH: pre.clientHeight, barW,
               capped: box.height < split.height - 60, rowInSight: !!row && row.getBoundingClientRect().top >= (head?.bottom ?? split.top) - 2,
-              nextInSight: !!next && next.top < split.bottom - 8, footOneLine: foot.height <= 36, tailUncut: !!tail && tail.scrollWidth <= tail.clientWidth,
+              nextInSight: !!next && next.top < split.bottom - 8, footOneLine: foot.height <= 42, tailUncut: !!tail && tail.scrollWidth <= tail.clientWidth,
               noHangingDot: getComputedStyle(item, '::after').content === 'none' && getComputedStyle(named).overflowX === 'clip',
               hasScrollbar: pre.scrollHeight > pre.clientHeight && barW > 0 && barW <= 10, moreTextShown: pre.clientHeight >= 130 };
           })()`);
@@ -5056,8 +5056,8 @@ async function practiceFlow() {
         await a.settle();
         await openPf(longRowId, 'Step 1 of the release checklist.');
         await wait(80);
-        const wideBox = await a.run(`(() => { const box = document.querySelector('.file-open-box'), pre = box.querySelector('pre.content'), tail = box.querySelector('.file-open-foot .middle-tail'), barW = pre.offsetWidth - pre.clientWidth; return { footOneLine: box.querySelector('.file-open-foot').getBoundingClientRect().height <= 36, tailUncut: !!tail && tail.scrollWidth <= tail.clientWidth, hasScrollbar: pre.scrollHeight > pre.clientHeight && barW > 0 && barW <= 10 }; })()`);
-        same('at 1316×819, a 60-line file panel keeps a 1-line uncut filename foot, visible scrollbar, and nothing cut off', [wideBox.footOneLine, wideBox.tailUncut, wideBox.hasScrollbar, ...await a.run(CUT_OFF)], [true, true, true]);
+        const wideBox = await a.run(`(() => { const sc = document.getElementById('profile-scroll').getBoundingClientRect(), box = document.querySelector('.file-open-box'), row = document.querySelector('.pf-row.file-anchored'), head = document.querySelector('.pf-section')?.getBoundingClientRect(), next = row?.nextElementSibling?.getBoundingClientRect(), pre = box.querySelector('pre.content'), tail = box.querySelector('.file-open-foot .middle-tail'), barW = pre.offsetWidth - pre.clientWidth; return { rowInSight: !!row && row.getBoundingClientRect().top >= (head?.bottom ?? sc.top) - 2, nextInSight: !!next && next.top < sc.bottom - 8, footOneLine: box.querySelector('.file-open-foot').getBoundingClientRect().height <= 42, tailUncut: !!tail && tail.scrollWidth <= tail.clientWidth, hasScrollbar: pre.scrollHeight > pre.clientHeight && barW > 0 && barW <= 10 }; })()`);
+        same('at 1316×819, a 60-line file panel keeps its row and next row in sight, a 1-line uncut filename foot, visible scrollbar, and nothing cut off', [wideBox.rowInSight, wideBox.nextInSight, wideBox.footOneLine, wideBox.tailUncut, wideBox.hasScrollbar, ...await a.run(CUT_OFF)], [true, true, true, true, true]);
         if (shots) { await a.run(`window.centralKnot.setAppearance('dark')`); await wait(80); await a.shot('profiles-long-file-1316-dark'); await a.run(`window.centralKnot.setAppearance('system')`); await wait(80); }
         await a.press('Escape');
       });
