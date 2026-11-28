@@ -277,8 +277,8 @@ export interface Look<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
   foldersNow: KindLibrary['folders'];
   /** By item, the copies a harness managed again holds that give way to the library (cameBack): what the page says will be kept. */
   givingWay: Map<string, Plan['keep']>;
-  /** How long a copy must stay missing before it counts as deleted by hand, the clock it is measured on, and whether a copy is inside it now. */
-  settle?: { clock: number; ms: number; settling: boolean };
+  /** How long a copy must stay missing before it counts as deleted by hand, the clock it is measured on, whether a copy is inside it now, and the absences already past it in this pass. */
+  settle?: { clock: number; ms: number; settling: boolean; settled: Set<string> };
   /** Sources and plugins recorded now, with any plugins.json problem that holds plugin items (sourcestore.ts pluginsRecordHold). */
   recorded: Recorded;
 }
@@ -525,16 +525,21 @@ const firstSeenMissingAt = new Map<string, number>();
  *   it is the window's length old; a clock that went back restarts it.
  * - A copy's date ends (absenceEnds) at any pass that reads anything else of it, in its scope or not: there whole, there in
  *   part or unreadable (unseen, its folder's listing too), held, or not owed there; and, in its scope, missing past its window.
+ *   An absence past its window is noted on `settle.settled`, so a second read in the same pass still sees it past its window
+ *   instead of starting a new date.
  *   A tool whose folder can't be looked at is held for the pass (guardFolders): unseen, so its dates end and none starts. A
  *   folder's date ends at a pass that finds it there, or can't look at it. Every date ends when another home is taken
  *   (forgetMissing, from main.ts selectHome).
  * - The dates are kept while the app runs: a restart forgets them, which only delays an Off.
  */
 function stillSettling(look: AnyLook, at: string): boolean {
-  if (!look.settle) return false;
+  if (!look.settle || look.settle.settled.has(at)) return false;
   const first = Math.min(firstSeenMissingAt.get(at) ?? look.settle.clock, look.settle.clock);
   firstSeenMissingAt.set(at, first);
-  if (look.settle.clock - first >= look.settle.ms) return false;
+  if (look.settle.clock - first >= look.settle.ms) {
+    look.settle.settled.add(at);
+    return false;
+  }
   look.settle.settling = true;
   return true;
 }
@@ -678,7 +683,7 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   // A write or removal a crash interrupted is finished first, so a copy moved aside is never read as deleted.
   for (const tool of managed) await kind.recover(context, tool);
   const saved = JSON.stringify(library);
-  const settle = { clock: options.now ?? Date.now(), ms: options.settleMs ?? context.settleMs ?? SETTLE_MS, settling: false };
+  const settle = { clock: options.now ?? Date.now(), ms: options.settleMs ?? context.settleMs ?? SETTLE_MS, settling: false, settled: new Set<string>() };
   const look: AnyLook = await lookAt(kind, context, managed, library, settle);
   const asRead = context.kept && new Map(look.disk.unseen); // before this pass's guards note more on it (guardFolders)
   const store = (item: LibraryItem, hash: string, content: unknown) => kind.store(context, item, hash, content as C);
