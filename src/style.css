@@ -1860,8 +1860,17 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 /* Only the prose keeps the reading measure: a message's action sits inline right after its last sentence. */
 .setting-hint, .setting-message-body { max-width: 72ch; }
 .setting-message { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 6px; margin: -8px 0 0; }
-/* What Synchronize everything just took in, a line per kind: spaced as the row's own lines are (each takes back 8px of 12). */
-.setting-added { grid-column: 1 / -1; display: grid; row-gap: 12px; }
+/* What Synchronize everything just took in, one line per notice (and its opened file beneath); minmax(0, 1fr) keeps wide files inside the row. */
+.setting-added { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr); row-gap: 12px; }
+/* Lines holding a file mark take a taller line so stacked marks never touch; name+mark+punctuation and the History tail stay together when wrapping. */
+.setting-added > .setting-message:has(.row-file-btn) { line-height: 24px; }
+.setting-added > .setting-message:has(.row-file-btn) > .icon { margin-top: 5px; }
+.setting-added > .setting-message.file-anchored { color: var(--ink); }
+.setting-added-name, .setting-added-tail { white-space: nowrap; }
+.setting-added .row-file-btn { width: 20px; height: 20px; margin: 0 1px 0 4px; vertical-align: -5px; }
+/* Marked lines use line-height 24px (20px marks) while a following (i) notice uses 16px, so keep the same gap as between lines. */
+.setting-added:has(> .setting-message:last-child .row-file-btn) + .setting-message { margin-top: -4px; }
+.setting-added > .details-file-only { min-width: 0; margin: -6px 0 8px; }
 .setting-message .icon { flex: none; margin-top: 1px; }
 .setting-message-body { min-width: 0; }
 .setting-message-text:not(:last-child) { margin-right: 8px; }
@@ -1886,6 +1895,8 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .setting-attention { color: var(--ink); }
 .setting-attention .icon { color: var(--warning); }
 .setting-message .text-action { margin: -2px -4px; padding: 2px 4px; line-height: 16px; }
+/* History sits inside .setting-added-tail (no .setting-message-text margin-right: 8px), so +4px margin + 4px padding keeps the 8px gap. */
+.setting-added .setting-added-tail > .text-action { margin-left: 4px; }
 .setting-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 /* The log under its row (Show log): as tall as its lines, so the page scrolls, never the block; a long line wraps; its text can
    be selected and copied (the body's is not). */
