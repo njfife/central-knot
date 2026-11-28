@@ -1,7 +1,7 @@
 // History: what Central Knot did, by itself (sync) or on a click (a switch, a profile switch, a Pull, …), newest first, with
 // Undo or Restore where kept content allows (CON-02, DEL-03), and History's Keep control (settingspage.ts historyWindowControl).
 // Skills', MCP servers', agents' and Synchronize everything's entries are worded and decided by historyactions.ts; here are
-// profiles', base instructions', Manage switches' and pre-library entries, plus in-place folds for 3+ non-all tool lists.
+// profiles', base instructions', Manage switches' and pre-library entries, plus in-place folds for 3+ recorded tool lists (including all tools).
 import { DAY_MS, plural, timesApart } from './model.ts';
 import { acting, homeTools, noToolManaged, rerender, restoreEvent, shownPath, state, touchedToolsPhrase } from './app.ts';
 import { noToolsState } from './pages.ts';
@@ -57,7 +57,11 @@ function describe(event: HistoryEvent, formatTools: ToolFormat): { glyph: IconNa
   const tools = (list: { tool: string }[]) => phrase(list.map(entry => entry.tool));
   switch (event.kind) {
     case 'edit': return { glyph: 'pencil-line', text: `Edited in ${who(event.winner?.tool)}, then copied to ${tools(event.losers) || 'the others'}.` };
-    case 'conflict': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit won over ${andList(event.losers.filter(loser => loser.hash !== event.previous).map(loser => who(loser.tool)))}’s.${order}` };
+    case 'conflict': {
+      const lost = [...new Set(event.losers.filter(loser => loser.hash !== event.previous).map(loser => loser.tool))];
+      const over = lost.length > 2 ? `edits in ${phrase(lost)}` : `${lost.length ? phrase(lost) : 'another'}’s`;
+      return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit won over ${over}.${order}` };
+    }
     case 'deleted': return { glyph: 'trash-2', text: `Deleted${event.winner ? ` in ${who(event.winner.tool)}` : ''}, then removed from the other tools it synced to.` };
     case 'kept-edit': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit was kept over a deletion in ${tools(event.losers)}.${order}` };
     case 'chosen': return { glyph: 'check', text: `You chose ${who(event.winner?.tool)}’s copy; it replaced ${andList(event.losers.map(loser => who(loser.tool)))}’s.` };
@@ -82,23 +86,23 @@ function describe(event: HistoryEvent, formatTools: ToolFormat): { glyph: IconNa
   }
 }
 
-/** Describes a History row and builds its sentence element, folding 3+ non-all tool lists into in-place folds under the sentence. */
+/** Describes a History row and builds its sentence element, folding 3+ recorded tool lists (including all tools) into in-place folds under the sentence. */
 function rowAbout(event: HistoryEvent): { glyph: IconName; action?: string; node: HTMLElement } {
   const groups: { label: string; names: string }[] = [];
   // formatTools splices `\0<group index>\0` markers into the plain sentence so rowAbout can swap each slot for a fold below.
   const formatTools: ToolFormat = (touched, inHome) => {
     const { tools, all, names, fold: label } = touchedTools(touched, inHome);
-    if (all) return `all ${tools.length} tools`;
-    return label ? `\0${groups.push({ label, names }) - 1}\0` : names;
+    const shown = all ? `all ${tools.length} tools` : label;
+    return shown ? `\0${groups.push({ label: shown, names }) - 1}\0` : names;
   };
   const described = describe(event, formatTools);
   // What it also changed in a tool's own settings (Pi's skills list: HistoryEvent settingsChanged) follows its words.
   const text = event.settingsChanged ? `${described.text} ${event.settingsChanged.join(' ')}` : described.text;
   if (!text.includes('\0')) return { glyph: described.glyph, action: described.action, node: h('div.history-about', {}, text) };
   const opened: HTMLElement[] = [];
-  // Odd slots are `\0<group index>\0` markers from formatTools; even slots are literal text (drop a trailing "." only when a fold ends the row).
-  const inline: Child[] = text.split('\0').map((part, slot, parts) => {
-    if (slot % 2 === 0) return slot === parts.length - 1 ? part.replace(/^\.$/, '') : part;
+  // Odd slots are `\0<group index>\0` markers from formatTools; even slots are literal text (drop a trailing "." and separate a following sentence with " — " so no fold chevron stands before a full stop).
+  const inline: Child[] = text.split('\0').map((part, slot) => {
+    if (slot % 2 === 0) return slot > 0 ? part.replace(/^\.$/, '').replace(/^\.\s+/, ' — ') : part;
     const group = groups[Number(part)]!;
     const key = `${event.id}-${(slot - 1) / 2}`;
     const open = openToolFolds.has(key);
@@ -191,7 +195,7 @@ const actionHelp = (event: HistoryEvent) => (event.kind === 'profile'
   : event.kind === 'everything' ? everythingOffer(event)?.help ?? ''
     : 'Put the base instructions back as they were before this Pull, and in the tools that got them (where their file is unchanged since)');
 
-/** A library entry's buttons (historyactions.ts): its own action, and one "Use <harness>’s copy" for each copy that gave way. */
+/** A library entry's buttons (historyactions.ts): its own action, and one "Use <harness>’s version" for each version that gave way. */
 function libraryButtons(event: HistoryEvent) {
   const entry = libraryEntry(event)!, item = itemOf(event);
   // A skill's own switches as the page last read them, so an action that would change nothing there is not offered.
@@ -207,7 +211,7 @@ function libraryButtons(event: HistoryEvent) {
   const over = Object.entries(found?.copies ?? {}).filter(([, copy]) => copy && copy.hash !== item?.hash).map(([tool]) => tool);
   const help = own && over.length ? `${own.help}. ${keptOver(event.item, over)}` : own?.help;
   return [own ? link(own.label, help!, `history-${event.id}`) : null,
-    ...versionChoices(event, item).map(choice => link(`Use ${who(choice.tool)}’s copy`, `Make ${who(choice.tool)}’s version of ${event.item} the current one`, `history-${event.id}-${choice.tool}`, choice.hash))];
+    ...versionChoices(event, item).map(choice => link(`Use ${who(choice.tool)}’s version`, `Make ${who(choice.tool)}’s version of ${event.item} the current one`, `history-${event.id}-${choice.tool}`, choice.hash))];
 }
 
 /** A profile's or the base instructions' Undo (or Redo), naming what it undoes: "Undo switch", or "Undo pull in Claude Code and Codex". */
@@ -227,11 +231,15 @@ export function historyPage() {
   // From History's own read (pagedata.ts): what it found, else that it is reading or could not read.
   const events = state.history.data;
   if (!events) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.history.state === 'failed' ? 'History could not be read.' : 'Reading History…')));
-  if (!events.length && noToolManaged()) return h('div.page', {}, noToolsState('history'));
-  if (!events.length) return h('div.page', {}, state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null,
-    h('div.scroll.history-empty-scroll', { id: 'history-scroll' }, historyWindowControl(), emptyState('history', 'No changes yet', 'Sync edits, switches and deletes appear here with Undo.')));
-  const ordered = [...events].reverse(), times = timesApart(ordered.map(event => event.at));
   const reread = rereadBand(state.history);
+  if (!events.length) {
+    const shown = state.outcome?.page === 'history' ? outcomeBand() : null;
+    const bands = reread || shown ? h('div.bands', {}, reread, shown) : null;
+    if (noToolManaged()) return h('div.page', {}, bands, historyWindowControl(), noToolsState('history'));
+    return h('div.page', {}, bands, h('div.scroll.history-empty-scroll', { id: 'history-scroll' }, historyWindowControl(),
+      emptyState('history', 'No changes yet', 'Changes by sync and by you appear here, with Undo.')));
+  }
+  const ordered = [...events].reverse(), times = timesApart(ordered.map(event => event.at));
   // A refused Undo, a Manage click, a Restore with reload advice, or an Undo that ended the profile in use shows in a band; other results here are in the status bar.
   const shown = state.outcome?.page === 'history' && (state.outcome.warn || state.outcome.historyBand || !!state.outcome.reloads?.length || !!state.outcome.profileLine) ? outcomeBand() : null;
   const latestManage = (tool: HarnessId) => ordered.find(other => other.kind === 'managing' && other.managing?.tool === tool)?.id;
