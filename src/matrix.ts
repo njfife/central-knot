@@ -1127,13 +1127,25 @@ export function outcomeBand(cardResult?: Outcome, omitProfile = false): HTMLElem
   // In the header its reasons are its problem lines (listResult); in a band, each is a line of its own under it.
   const reasons = resultInHeader() ? [] : (outcome.reasons ?? []).flatMap(reason => [' ', h('span.band-reason', {}, typeof reason === 'string' ? reason : [h('strong.item-name', {}, reason[0]), reason[1]])]);
   // Two buttons take their own line under the words in a narrow window (style.css), so the sentence is never squeezed.
-  return h(`div.band.band-done${outcome.next ? '.band-two' : ''}`, { role: 'status', 'data-outcome': cardResult ? undefined : outcome.kind ?? '' }, outcome.warn ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'), h('span.band-text', {}, ...text,
+  const actBtn = outcome.act ? button({
+    variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id,
+    disabled: outcome.act.whyOff?.() ?? acting(),
+    attrs: {
+      ...(outcome.act.title ? { title: outcome.act.title } : {}),
+      ...(outcome.act.ends ? endsOnHover(outcome.act.title ?? outcome.act.label, outcome.act.ends.clicks) : {}),
+    },
+    onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); },
+  }) : null;
+  const actEnds = outcome.act?.ends ? endsMark(endsOf(outcome.act.ends.clicks()), outcome.act.ends.act, outcome.act.ends.id, 'band') : null;
+  return h(`div.band.band-done${outcome.next || (outcome.act && outcome.undo) ? '.band-two' : ''}`, { role: 'status', 'data-outcome': cardResult ? undefined : outcome.kind ?? '' }, outcome.warn ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'), h('span.band-text', {}, ...text,
     // The space before the note sits outside it, so a note kept whole on its line never carries the last word with it.
-    outcome.note ? [' ', h('span.tone-faint', {}, outcome.note.replace(/ History\.$/, ' '), h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History'), '.')] : null, reasons),
+    outcome.note ? [' ', outcome.note === 'History'
+      ? h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History')
+      : h('span.tone-faint', {}, outcome.note.replace(/ History\.$/, ' '), h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History'), '.')] : null, reasons),
     outcome === state.outcome && h('span.band-actions', {},
-      outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, disabled: outcome.act.whyOff?.() ?? acting(), attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
-        : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), undefined, !!acting())
-        : outcome.history ? smallAction(outcome.refused ? 'History' : 'Undo in History', 'outcome-history', () => showPage('history')) : null,
+      outcome.undo ? button({ variant: 'outline', size: 'small', label: outcome.undo.label, id: 'outcome-undo', disabled: acting(), onclick: (event: Event) => { event.stopPropagation(); void restoreEvent(outcome.undo!.id); } }) : null,
+      actEnds ? h(`span.band-act-stop${outcome.next ? '.band-act-sep' : ''}`, {}, actBtn, actEnds) : actBtn,
+      !outcome.act && !outcome.undo && outcome.history ? smallAction(outcome.refused ? 'History' : 'Undo in History', 'outcome-history', () => showPage('history')) : null,
       outcome.next ? button({ variant: 'outline', size: 'small', label: outcome.next.label, id: outcome.next.id, attrs: outcome.next.title ? { title: outcome.next.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.next!.run(); } }) : null),
     cardResult ? null : closeButton(closeResult, { id: 'outcome-dismiss' }),
     outcome === state.outcome && !resultInHeader() && outcome.reloads ? reloadLines(reloadAdvice(outcome.reloads, toolWays())) : null);
@@ -2195,6 +2207,13 @@ function turnOn(t: Table, skill: ItemRow, use?: Tool, seen?: boolean): Click {
   return mainClick(t, skill, true, [seen === undefined ? change : { ...change, seenOn: seen }], plugins, said, plugins.left, focusOn(t, skill));
 }
 
+/** One Library row's Turn on click (including any matching plugin item disabled in a managed tool), for another page (sourcespage.ts). */
+export function turnOnRow(kind: PageKind, key: string, seen?: boolean): Click | undefined {
+  const row = rowByKey(kind, key);
+  if (!row) return undefined;
+  return { ...turnOn(useLibrary(), row, undefined, seen), focus: undefined };
+}
+
 // ---------- Items tools have through a plugin ----------
 
 /** The items a person's own row has through a plugin: in each tool with no copy of its own that has it through an installed plugin. */
@@ -2678,7 +2697,7 @@ function endsOf(clicks: Pick<Click, 'kind' | 'changes'>[]) {
   return ended.length ? { names: ended.map(profile => profile.name), may: !!acting() } : undefined;
 }
 /** What `clicks` would end, as a control's hover (after `label`) and its description, worked out as the pointer or the focus comes to it, not as the page draws. */
-const endsOnHover = (label: string, clicks: () => Pick<Click, 'kind' | 'changes'>[]) => {
+export const endsOnHover = (label: string, clicks: () => Pick<Click, 'kind' | 'changes'>[]) => {
   const say = ({ currentTarget: node }: Event) => {
     const ending = endsOf(clicks()), more = ending ? `${profileStops(ending.names, ending.may)}.` : '';
     (node as HTMLElement).setAttribute('title', more ? `${label} ${more}` : label);
@@ -2686,11 +2705,13 @@ const endsOnHover = (label: string, clicks: () => Pick<Click, 'kind' | 'changes'
   };
   return { onmouseenter: say, onfocus: say };
 };
-/** After a control, what its click would end (endsOf): "Would leave Everyday" ("Either would …" after two), its sentence and what brings it back on hover; `line`, a row's head. */
-function endsMark(ending: ReturnType<typeof endsOf>, act: string, id: string, shown: 'mark' | 'either' | 'line' = 'mark') {
+/** After a control, what its click would end (endsOf): "Would leave Everyday" ("Either would …" after two), its sentence and what brings it back on hover; `line`, a row's head; `band`, the result band's full wording. */
+function endsMark(ending: ReturnType<typeof endsOf>, act: string, id: string, shown: 'mark' | 'either' | 'line' | 'band' = 'mark') {
   if (!ending) return null;
   const said = `${act}, ${shown === 'line' ? 'only this item changes: ' : ''}${profileStops(ending.names, ending.may)}.`, back = profileBack(ending.names);
-  const short = profileStops(ending.names, ending.may, true), text = shown === 'line' ? said : shown === 'either' ? `Either ${short}` : sentence(short);
+  const short = profileStops(ending.names, ending.may, true);
+  const bandText = `${andList(ending.names)} ${ending.may ? 'may' : 'would'} stop being the ${ending.names.length === 1 ? 'profile' : 'profiles'} in use`;
+  const text = shown === 'band' ? bandText : shown === 'line' ? said : shown === 'either' ? `Either ${short}` : sentence(short);
   return h('span.profile-stop', { id, title: shown === 'line' ? back : `${said} ${back}` }, icon('sliders-horizontal', 12), h('span', {}, text));
 }
 /**

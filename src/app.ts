@@ -23,9 +23,10 @@ import type { Reason, ApplyResult, Profile, ProfileEdit, ProfileSwitchResult, Ba
 import { anyOn, kindSource, noPins, pinsOn, rowId, sameRow, type NamedRow, type Pinned, type RowKey } from './itemrow.ts';
 import { itemKey, wantedIn } from './library.ts';
 import { caughtUpNames, groupBy, noticeNames, plural, withSetAside } from './model.ts';
-import { button, h } from './dom.ts';
+import { button, h, scrollIntoBox } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
+import { pageOfPart } from './pluginstatus.ts';
 import { clickResults, heldWhole, keptBack } from './clickplan.ts';
 import { entriesNow, everythingAction, everythingDone, everythingPlan, libraryAction, libraryEntry, librarySentence, oneUndoCovers, restorePlan } from './historyactions.ts';
 import { asksWhichCopy, copiesDiffer, libraryWords, placeOf, stillReadWords } from './libraryrow.ts';
@@ -696,8 +697,12 @@ async function switchesOnly(click: Click, ops: PluginOp[], page: Page): Promise<
 /** A click applied at once, under busy: one tool's control in an opened row, Delete, Make current, Resume, a copy chosen (Turn these off: applyByKind). */
 export const applyClick = (click: Click | (() => Promise<Click | Outcome>)) => busy(typeof click === 'function' || !click.undoing ? 'Applying…' : 'Undoing…', async page => {
   const resolved = typeof click === 'function' ? await click() : click;
-  if ('changes' in resolved) sayDone(await carryOut(resolved, page), resolved);
-  else tell({ ...resolved, page });
+  if ('changes' in resolved) {
+    const done = await carryOut(resolved, page);
+    // Turning an item on/off from the Sources page updates its In Central Knot, Off/On lines.
+    if (state.page === 'sources') await loadSources();
+    sayDone(done, resolved);
+  } else tell({ ...resolved, page });
 });
 /** What a click applied at once did, said in the header (renderer.ts resultHere) or its band, its rows flashed, the focus on its control. */
 function sayDone(done: Done, click: Click) {
@@ -732,17 +737,23 @@ const stillRead = (rows: NamedRow[], among: NamedRow[]) => [...groupBy(rows, row
  * in the asked state or skipped); `failedRow`: per-row reason line for each row kept back in one or more tools (when given, failed
  * rows are named there instead of counted as `now`).
  */
-export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], stayed: string[]) => string,
-  { now = 'off', withoutUndo, stays, reasons: extra = [], tail, failedRow }: {
+type ByKindBatch = { clicks: Click[]; reasons?: string[]; tail?: string };
+export const applyByKind = (clicks: Click[] | (() => Promise<ByKindBatch | Outcome>), said: (changed: NamedRow[], stayed: string[]) => string,
+  { now = 'off', withoutUndo, stays, reasons: extra = [], tail, failedRow, exactUndo }: {
     now?: 'on' | 'off' | 'deleted'; withoutUndo?: (count: number) => string; stays?: boolean; reasons?: string[];
-    tail?: string; failedRow?: (name: string, failedTools: HarnessId[]) => string;
+    tail?: string; failedRow?: (name: string, failedTools: HarnessId[]) => string; exactUndo?: boolean;
   } = {}) => busy('Applying…', async page => {
-  const several = new Set(clicks.map(click => click.kind)).size > 1, parts: { click: Click; done: Done }[] = [];
-  for (const click of clicks) parts.push({ click, done: await carryOut(click, page) });
+  const batch = typeof clicks === 'function' ? await clicks() : { clicks, reasons: extra, tail };
+  if (!('clicks' in batch)) { tell({ ...batch, page }); return; }
+  const { clicks: list, reasons: extraReasons = extra, tail: endTail = tail } = batch;
+  const several = new Set(list.map(click => click.kind)).size > 1, parts: { click: Click; done: Done }[] = [];
+  for (const click of list) parts.push({ click, done: await carryOut(click, page) });
+  // Turning several items on from the Sources page updates their In Central Knot, Off/On lines.
+  if (state.page === 'sources') await loadSources();
   const went = parts.filter(part => !part.done.refused), did = parts.filter(part => part.done.did), changed = parts.flatMap(part => part.done.changed ?? []);
   const stops = saidByKind(parts.flatMap(part => (part.done.refused ? [[part.click.kind, part.done.refused] as [PageKind, string]] : [])), several);
-  const undos = did.flatMap(part => (part.done.undo ? [part.done.undo] : [])).reverse(), regroups = clicks.some(click => click.regroups);
-  const undo = did.length && undos.length === did.length ? () => void undoClick({ rows: changed, regroups }, undos) : undefined;
+  const undos = did.flatMap(part => (part.done.undo ? [part.done.undo] : [])).reverse(), regroups = list.some(click => click.regroups);
+  const undo = did.length && undos.length === did.length ? () => void undoClick({ rows: changed, regroups, exact: exactUndo }, undos) : undefined;
   keepOwn(parts.map(({ done }) => done.kept));
   // Each row that didn't go through in every tool (its kind refused, its own change held, or a tool kept it back) is said first
   // (words.ts notAllThrough), by its kind where another row asked has its name; `said` then names the rows that went through, or
@@ -761,8 +772,8 @@ export const applyByKind = (clicks: Click[], said: (changed: NamedRow[], stayed:
   const after = !changed.length ? 'Nothing changed.' : through.length ? said(through, stillRead(through, all)) : failedRow ? '' : `${countedAs(changed.length, asked.length, now)}.`;
   const back = changed.length && !undo ? withoutUndo?.(changed.length) : undefined;
   const diffReasons = differed.map(row => `${rowNames([row], all)[0]}: ${DIFFERS_REASON}`);
-  tellWritten({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(clicks.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn) || differed.length > 0, stays,
-    text: [lead, after, tail, back].filter(Boolean).join(' '), reasons: [...stops, ...went.flatMap(part => part.done.outcome.reasons ?? []), ...failedReasons, ...diffReasons, ...extra],
+  tellWritten({ page, items: rowNames(changed), rows: changed, kinds: [...new Set(list.map(click => click.kind))], band: true, warn: parts.some(part => part.done.outcome.warn) || differed.length > 0, stays,
+    text: [lead, after, endTail, back].filter(Boolean).join(' '), reasons: [...stops, ...went.flatMap(part => part.done.outcome.reasons ?? []), ...failedReasons, ...diffReasons, ...extraReasons],
     act: undo && { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } }, parts.flatMap(part => part.done.reloads), did.length > 0);
   for (const row of changed) flashRow(row);
   if (regroups) unpin();
@@ -870,7 +881,7 @@ function allUndoable(events: HistoryEvent[]) {
 }
 
 /** What an Undo puts back: the rows its clicks changed (named in its result and flashed once it is done), where the focus goes, whether every pinned row is let go, and whether a single-tool Undo says History's own sentence. */
-interface UndoOf { rows: NamedRow[]; focus?: () => string; regroups?: boolean; sentence?: boolean }
+interface UndoOf { rows: NamedRow[]; focus?: () => string; regroups?: boolean; sentence?: boolean; exact?: boolean }
 /** What a whole-plugin turn inside runSwitches needs for Undo (marketplaces.ts undoTurn). */
 interface TurnUndo { source: string; plugin: string; before: PluginEntry | null; back: PluginOp[] }
 /** What one click can take back (Done undo): its kind, the History entries it made, and the plugin switches and whole-plugin turns that turn its plugins' part back. */
@@ -886,27 +897,54 @@ interface Undoable { kind: PageKind; made: string[]; back: PluginOp[]; turns?: T
  */
 const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async page => {
   const home = state.home!, several = new Set(parts.map(part => part.kind)).size > 1;
-  // The plugin items' switches go back first: other tools than the copies', so the rest is undone whatever they do (`parts` arrives newest first).
-  const switchedBack = parts.flatMap(part => part.back), turnsBack = parts.flatMap(part => part.turns ?? []);
-  const unswitched = switchedBack.length || turnsBack.length ? await runSwitches(switchedBack, true, turnsBack) : undefined;
   const kindOfEntry = new Map(parts.flatMap(part => part.made.map(id => [id, part.kind] as const)));
   // History is stored newest-last (history.ts); reversing first keeps entries written in the same millisecond newest-first.
-  const events = (await api().history()).events.filter(event => kindOfEntry.has(event.id)).reverse()
+  const allEvents = (await api().history()).events;
+  const events = allEvents.filter(event => kindOfEntry.has(event.id)).reverse()
     .sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
   const gone = [...kindOfEntry].filter(([id]) => !events.some(event => event.id === id));
+  const exact = !!about.exact;
+  const changedSince = (event: HistoryEvent, entry: NonNullable<ReturnType<typeof libraryEntry>>) =>
+    !!event.undoneBy || allEvents.slice(allEvents.indexOf(event) + 1).some(later => !kindOfEntry.has(later.id)
+      && later.cause !== 'in-line' && libraryEntry(later)?.kind === entry.kind && libraryEntry(later)?.key === entry.key);
+  const left: NamedRow[] = [], leftReasons: string[] = [], leftKeys = new Set<string>(), toRestore: HistoryEvent[] = [];
+  const leave = (row: NamedRow, why: string) => {
+    left.push(row);
+    leftKeys.add(`${row.kind}:${row.key}`);
+    leftReasons.push(`${rowNames([row], about.rows)[0]}: ${why}`);
+  };
+  for (const event of events) {
+    const entry = exact ? libraryEntry(event) : undefined;
+    if (entry && changedSince(event, entry)) leave({ ...entry, name: event.item }, 'changed since, so it was left as it is.');
+    else if (entry && event.kind === 'on' && !event.only && home[entry.kind].library[entry.key]?.on === false) leave({ ...entry, name: event.item }, 'already as before.');
+    else toRestore.push(event);
+  }
+  // The plugin items' switches go back first: other tools than the copies', so the rest is undone whatever they do (`parts` arrives newest first);
+  // in exact batch Undo, items decided as left above are skipped here too so they are left whole.
+  const opKey = (op: PluginOp) => (op.skill ? `skills:${itemKey(op.skill)}` : op.part ? `${pageOfPart[op.part.kind]}:${itemKey(op.part.name)}` : undefined);
+  const pluginLeft = (part: Undoable, plugin: string) =>
+    left.some(row => row.kind === part.kind && Object.values(home[part.kind].items.find(fact => fact.key === row.key)?.plugin ?? {}).some(each => each?.plugin === plugin));
+  const switchedBack = parts.flatMap(part => part.back.filter(op => { const key = opKey(op); return key ? !leftKeys.has(key) : !pluginLeft(part, op.plugin); }));
+  const turnsBack = parts.flatMap(part => (part.turns ?? []).filter(turn => !pluginLeft(part, turn.plugin)));
+  const unswitched = switchedBack.length || turnsBack.length ? await runSwitches(switchedBack, true, turnsBack) : undefined;
   type UndoEntry = { key?: string; entry: DestinationResult; answeredLater?: boolean };
   const raw = new Map(parts.map(part => [part.kind, [] as UndoEntry[]])), restored = new Map(parts.map(part => [part.kind, new Map<string, Set<HarnessId> | null>()])), stops = new Map<PageKind, string>();
   const reloads: ReloadChange[] = unswitched ? pluginReloads(unswitched.done) : [];
   let anyDid = !!unswitched?.done.some(entry => succeeded(entry.report));
-  for (const event of events) {
+  for (const event of toRestore) {
     const kind = kindOfEntry.get(event.id)!;
     if (stops.has(kind)) continue;
+    const entry = libraryEntry(event);
     const result = await api().restore(event.id, home.home);
-    if (result.stopped) { stops.set(kind, result.stopped); continue; }
+    if (result.stopped) {
+      if (exact && entry && result.stopped.startsWith('That change has nothing left to undo')) leave({ ...entry, name: event.item }, 'already as before.');
+      else stops.set(kind, result.stopped);
+      continue;
+    }
     const held = result.results.some(entry => heldWhole(entry) || keptBack(entry));
     if (result.made?.length || result.harnessWrites > 0 || !held) anyDid = true;
     reloads.push(...result.reloads);
-    const key = libraryEntry(event)?.key, list = raw.get(kind)!;
+    const key = entry?.key, list = raw.get(kind)!;
     // A later restore of the same item in this Undo answers an earlier tool problem: replaced if that tool failed again,
     // or dropped below once settled. restore runs with `only`, so every result in result.results belongs to this item.
     if (key) {
@@ -923,6 +961,8 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   }
   setHome(await api().refresh());
   await refreshPlugins(true);
+  // Undoing a Turn on from the Sources page restores its In Central Knot, Off lines.
+  if (state.page === 'sources') await loadSources();
   // Settled: managed, readable, and matching what the library now wants (not held or owed a write/removal; nothing applied if deleted).
   const settledIn = (kind: PageKind, key: string, tool: HarnessId) => {
     const view = state.home?.[kind], row = view?.items.find(fact => fact.key === key), item = view?.library[key];
@@ -951,21 +991,22 @@ const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async
   keepOwn([...results].map(([kind, list]) => ({ kind, results: list, notices: [] })));
   const missing = [...groupBy(gone, ([, kind]) => kind)].map(([kind, of]): [PageKind, string] =>
     [kind, `${plural(of.length, 'History entry', 'History entries')} it was to put back ${of.length === 1 ? 'is' : 'are'} no longer in History.`]);
-  const reasons = [...saidByKind([...stops, ...missing], several), ...switchReasons(unswitched)], undone = !reasons.length && ![...results.values()].flat().some(keptBack);
+  const reasons = [...saidByKind([...stops, ...missing], several), ...leftReasons, ...switchReasons(unswitched)], undone = !reasons.length && ![...results.values()].flat().some(keptBack);
   // What did go back, where some of it didn't: the rows of the kinds whose entries all went back as they were, and whose plugin
   // switches, if they had any to turn back, all went back too.
   const short = new Set([...stops.keys(), ...gone.map(([, kind]) => kind)]), names = (rows: NamedRow[]) => [...new Set(rowNames(rows, about.rows))];
   const switchesShort = new Set(unswitched && switchProblems(unswitched).length ? parts.filter(part => part.back.length || part.turns?.length).map(part => part.kind) : []);
-  const all = names(about.rows), asBefore = names(about.rows.filter(row => !short.has(row.kind) && !switchesShort.has(row.kind) && !results.get(row.kind)?.some(keptBack)));
+  const all = names(about.rows), asBefore = names(about.rows.filter(row => !short.has(row.kind) && !switchesShort.has(row.kind) && !left.some(each => sameRow(each, row)) && !results.get(row.kind)?.some(keptBack)));
   const failed = names(about.rows.filter(row => switchesShort.has(row.kind) || kept.get(row.kind)?.some(each => keptBack(each.entry) && (each.key ? each.key === row.key : each.entry.item.toLowerCase() === row.name.toLowerCase()))));
   const are = (list: string[]) => `${fewNames(list)} ${list.length === 1 ? 'is' : 'are'} as before`;
+  const leftText = left.length ? `${asBefore.length ? `Undone: ${are(asBefore)}. Left as ${left.length === 1 ? 'it is' : 'they are'}: ${fewNames(names(left))}.` : `Nothing was undone: ${fewNames(names(left))} ${left.length === 1 ? 'was' : 'were'} left as ${left.length === 1 ? 'it is' : 'they are'}.`}` : '';
   const single = about.sentence && undone && !unswitched && events.length === 1 && events[0]!.only ? events[0]! : undefined;
   const singleKind = single && kindOfEntry.get(single.id);
   const singleMade = single && state.history.data?.find(each => each.id === state.history.data?.find(past => past.id === single.id)?.undoneBy);
   const singleView = singleKind ? state.home?.[singleKind] : undefined;
   const singleSaid = singleMade && singleKind && librarySentence(singleMade, libraryWords[singleKind], singleView?.tools ?? [], singleView?.library[libraryEntry(single!)!.key], true)?.text;
   tellWritten({ page, items: all, rows: about.rows, warn: !undone, band: true, fade: undone, reasons,
-    text: singleSaid ? `${single!.item}: ${singleSaid.replace(/^./, first => first.toLowerCase())}` : undone ? `Undone: ${are(all)}.` : short.size ? `Not all of it could be undone${several && asBefore.length ? `; ${are(asBefore)}` : ''}.` : `Not all of ${fewNames(failed.length ? failed : all)} could be put back.` }, reloads, anyDid);
+    text: singleSaid ? `${single!.item}: ${singleSaid.replace(/^./, first => first.toLowerCase())}` : undone ? `Undone: ${are(all)}.` : left.length && !short.size ? leftText : short.size ? `Not all of it could be undone${several && asBefore.length ? `; ${are(asBefore)}` : ''}.` : `Not all of ${fewNames(failed.length ? failed : all)} could be put back.` }, reloads, anyDid);
   for (const row of about.rows) flashRow(row);
   if (about.regroups) unpin();
 });
@@ -1448,6 +1489,8 @@ export interface Outcome {
     label: string; id: string; run: () => void; title?: string;
     /** Why it is off now, asked at each drawing (a home's Go back while the page acts). */
     whyOff?: () => string | undefined;
+    /** Clicks this button sends, for forecasting an ended profile on hover and beside it (matrix.ts endsMark / endsOnHover). */
+    ends?: { clicks: () => Pick<Click, 'kind' | 'changes'>[]; act: string; id: string };
   };
   /** A second button after `act`: the next step the result offers (the whole plugin's switch, "Turn its plugins off in Codex"). */
   next?: { label: string; id: string; run: () => void; title?: string };
@@ -1590,7 +1633,7 @@ function focusEditor(id: string, headId: string, caret?: number) {
     box.setSelectionRange(caret!, caret!);
   }
   const shows = (element: Element) => { const edges = element.getBoundingClientRect(); return edges.top >= page.top - 1 && edges.bottom <= page.bottom + 1; };
-  if (!shows(head) || !shows(target)) head.scrollIntoView({ block: 'start' });
+  if (!shows(head) || !shows(target)) scrollIntoBox(head);
   if (box) box.scrollTop = lineEnd > box.clientHeight ? lineEnd - box.clientHeight / 2 : 0;
 }
 
@@ -1649,7 +1692,10 @@ function askAboutBaseDraft(): boolean {
   const base = state.baseEdit;
   if (!base || !baseDraftTyped()) return false;
   base.confirmDiscard = true;
-  rerender(); document.getElementById(base.stage === 'review' ? 'base-review-keep' : 'base-keep')?.focus(); return true;
+  rerender();
+  scrollIntoBox(document.getElementById('base-head'), 'nearest');
+  document.getElementById(base.stage === 'review' ? 'base-review-keep' : 'base-keep')?.focus({ preventScroll: true });
+  return true;
 }
 
 /** This home only shows its files: saving is off (writeAccess refuses it: preview only, or held by another build). */
@@ -1736,8 +1782,8 @@ export const applyBaseChange = (request: Omit<BaseApply, 'expected'>, done: (wri
     return;
   }
   state.baseEdit = undefined;
-  // Back to the card's rows, which now show each file's state; focus goes to the result's Undo.
-  document.getElementById('instructions-scroll')?.scrollTo({ top: 0 });
+  // Back to the base card's rows, which now show each file's state; focus goes to the result's Undo.
+  scrollIntoBox(document.getElementById('base-card'));
   const written = result.written.map(entry => entry.tool);
   const sessions = written.length ? ` Start a new ${written.length === 1 ? `${toolList(written)} session` : 'session in each'} for this to take effect.` : '';
   const created = result.written.filter(entry => entry.before === null).map(entry => entry.tool);
@@ -1857,7 +1903,7 @@ export const startDraft = () => {
       announce(`${namedTools[tool]} wrote a draft. Review it, then save to update the files.`, true);
     } finally { state.drafting = undefined; }
     // Focus is on Save, at the foot of the review; the page shows the draft from its top, where reading it starts.
-  }).then(() => { if (state.baseEdit?.source?.kind === 'draft') document.getElementById('base-card')?.scrollIntoView({ block: 'start' }); });
+  }).then(() => { if (state.baseEdit?.source?.kind === 'draft') scrollIntoBox(document.getElementById('base-card')); });
 };
 
 /** Stops the draft being written; its request then answers that it was cancelled. */

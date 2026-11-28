@@ -438,6 +438,8 @@ ul { list-style: none; }
 .info-mark:hover, .info-mark:focus-visible { color: var(--ink); background: var(--press); }
 .info-mark:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .info-card { position: fixed; inset: auto; margin: 0; width: max-content; max-width: min(320px, calc(100vw - 16px)); padding: 8px 10px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); box-shadow: var(--overlay); color: var(--ink); font: 400 12px/17px var(--sans); white-space: normal; overflow: visible; overflow-wrap: break-word; }
+.info-line { display: block; }
+.info-line + .info-line { margin-top: 5px; }
 @media (prefers-color-scheme: dark) { .info-card { background: color-mix(in oklab, var(--surface) 84%, white); border-color: var(--cell-line); box-shadow: 0 10px 24px rgb(0 0 0 / 70%); } }
 /* Collapsible fold (dom.ts fold): one look on every page. */
 .fold > summary { list-style: none; display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; margin-left: -6px; border-radius: 6px; font-size: 12.5px; color: var(--accent-ink); cursor: pointer; }
@@ -1135,16 +1137,12 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .overview-line > svg.icon:first-child, .tools-note > svg.icon:first-child { display: inline-block; vertical-align: -2px; margin-right: 8px; }
 .overview-line .btn, .tools-note .btn { height: auto; padding: 0 2px; margin: 0 -2px; text-indent: 0; }
 
-/* ---------- Instructions: the base's card across the page, then the tools' cards ---------- */
+/* ---------- Instructions: the tools' cards first, then the base card across the page ---------- */
 .cards-scroll { container: cards / inline-size; display: flex; flex-direction: column; gap: 16px; padding: 12px var(--pad-end) 16px 16px; }
 .cards-scroll > * { flex: none; }
-/* The tools' cards: one a row, and two a row from the width where each of two still holds a line of about 120 characters
-   (120 × 7.5 px of the 12.5 px mono text, its box's 26 px, the card's 34 px, and the 16 px gap: 2 × 960 + 16). */
+/* The tools' cards on the full Instructions page: one a row, and two a row from 1,000 inner px. */
 .ins-tool-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
-@container cards (width >= 1936px) { .ins-tool-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-/* The heading over the tools' own cards. */
-.ins-section-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin-top: 8px; }
-.ins-section-title { font-size: 15px; line-height: 22px; font-weight: 600; }
+@container cards (width >= 1000px) { .ins-tool-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .tool-head { display: flex; align-items: center; gap: 8px; min-height: 53px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 /* A narrow card leaves its header's folder out rather than cut it to a stub; "Config folder" below says it whole. */
 @container (width < 440px) { .tool-head > .path-text { display: none; } }
@@ -1166,14 +1164,14 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
  */
 .ins-head { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ins-head > .ins-actions { margin-top: 0; }
-.ins-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
+.ins-title { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px 10px; min-width: 0; }
 .ins-title > :not(svg, [hidden], .ins-missing) { flex-shrink: 0; height: 24px; display: inline-flex; align-items: center; }
 .ins-title > .path-text { flex-shrink: 1; }
 .ins-title .btn, .ins-title .ins-missing { height: 22px; }
-/* A card's status pill never wraps; with no room beside the name it moves under it. */
+/* A card's status pill stays beside its title; on a narrow card (or the base card under 700 px) the path moves under them. */
 .ins-missing { margin-left: auto; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 11.5px; line-height: 18px; color: var(--ink-soft); white-space: nowrap; }
-/* A narrow card gives its file's path a line of its own under the name, rather than cutting it to a stub. */
-@container ins-card (width < 420px) { .ins-title > .path-text { order: 1; flex-basis: 100%; } }
+@container ins-card (width < 420px) { .ins-title { flex-wrap: wrap; } .ins-title > .path-text { order: 1; flex-basis: 100%; } }
+@container ins-card (width < 700px) { .base-card .ins-title { flex-wrap: wrap; } .base-card .ins-title > .path-text { order: 1; flex-basis: 100%; } }
 .ins-saved-group { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
 .ins-saved-group > .ins-missing { margin-left: 0; }
 .ins-saved { color: var(--success); border-color: color-mix(in oklab, var(--success) 45%, transparent); }
@@ -1731,7 +1729,8 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 /* With a skill's switches at the row's end, the toggle covers name and description only */
 .plugin-parts li.with-end > .plugin-file-toggle { grid-column: 1 / 3; }
 /* A row that opens nothing starts its name where an opening row's name starts, after the chevron */
-.plugin-parts > li > .plugin-name:first-child { margin-left: 17px; }
+.plugin-parts > li > :is(.plugin-name, .plugin-hook-event):first-child { margin-left: 17px; }
+.plugin-hook-event { line-height: 18px; max-width: 240px; }
 /* Versions: the marketplace's beside a plugin's name; a tool with another version, in the warning tone */
 .plugin-row-version, .plugin-meta-version { font-size: 12px; font-weight: 400; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 /* The icon keeps its own column, so a wrapped second line stays under the first line's text */
@@ -1878,7 +1877,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 /* A short phrase and its link stay on one line, so a link never wraps away from the words that lead to it. */
 .keep-together { white-space: nowrap; }
 
-/* Base instructions: one card above the tools, and a marked strip on each tool card that gets them. */
+/* Base instructions: one card below the tools, and a marked strip on each tool card that gets them. */
 .base-card { border-color: color-mix(in oklab, var(--accent) 35%, var(--line)); }
 .base-tools { border: 0; margin: 2px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 18px; }
 .base-tools legend { padding: 0; margin-bottom: 4px; font-size: 12.5px; color: var(--ink-soft); }
@@ -1897,6 +1896,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .base-edited { color: var(--ink); }
 .base-choice { display: flex; flex-direction: column; gap: 6px; padding-left: 22px; }
 .base-choice .ins-actions { margin-top: 0; }
+.base-choice .ins-actions > .btn.link { padding-left: 0; }
 .base-matching summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; padding: 2px 6px; margin-left: -6px; border-radius: 6px; font-size: 12.5px; color: var(--ink-soft); cursor: pointer; }
 .base-matching summary::-webkit-details-marker { display: none; }
 .base-matching summary:hover { color: var(--ink); background: var(--hover); }
@@ -1904,8 +1904,8 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .base-matching[open] > summary > .base-matching-chevron { transform: rotate(90deg); }
 .base-matching > .base-tool-list { margin-top: 6px; padding-left: 18px; }
 .base-strip { display: flex; flex-direction: column; gap: 6px; padding: 6px 10px; border: 1px dashed color-mix(in oklab, var(--accent) 40%, var(--line)); border-radius: 8px; }
-.base-strip-line { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-soft); }
-.base-strip-line > span { flex: 1; min-width: 0; }
+.base-strip-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: 12.5px; color: var(--ink-soft); }
+.base-strip-line > span { flex: 1 1 180px; min-width: 0; }
 .base-strip-line strong { color: var(--ink); font-weight: 600; }
 
 /*
@@ -1926,6 +1926,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .plugin-hook-as { margin-left: auto; }
 .session-run-warn { font-size: 12px; color: var(--ink); font-weight: 500; }
 .session-note { font-size: 12px; color: var(--ink-soft); }
+.session-cant-run { color: var(--ink); font-weight: 500; }
 .session-note code { font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
 .session-groups { display: flex; flex-direction: column; gap: 8px; }
 .session-group { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -1936,18 +1937,21 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .session-head > .btn.link { height: auto; padding: 0; }
 .session-name { color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
 .session-warning { display: flex; align-items: flex-start; gap: 4px; padding-left: 16px; font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
-.session-hooks { display: flex; flex-direction: column; gap: 2px; padding-left: 16px; }
-.session-hooks.plugin-session-hooks { padding-left: 0; }
+.session-hooks { display: flex; flex-direction: column; gap: 4px; padding: 2px 4px 2px 16px; }
+.session-hooks.plugin-session-hooks { padding-left: 4px; }
 .session-hook { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: 8px; min-width: 0; }
 .session-lead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; }
 .session-when { font-size: 12px; color: var(--ink-soft); }
 .session-command { min-width: 0; font-family: var(--mono); font-size: 12px; line-height: 18px; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
-.hook-actions { display: inline-flex; align-items: baseline; gap: 8px; justify-self: end; white-space: nowrap; }
+.hook-actions { display: inline-flex; align-items: baseline; gap: 10px; justify-self: end; white-space: nowrap; }
 .hook-actions .btn.link, .hook-run .btn.link { height: auto; padding: 0; white-space: nowrap; }
+.hook-actions .btn.link:focus-visible, .hook-run .btn.link:focus-visible { outline-offset: 2px; border-radius: 4px; }
 .hook-actions .btn[aria-disabled="true"] { cursor: default; text-decoration: none; transform: none; }
 .hook-source, .hook-run { grid-column: 1 / -1; min-width: 0; margin: 4px 0 6px; display: flex; flex-direction: column; gap: 6px; }
 .hook-run { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--hover); }
 .hook-run-head { display: flex; align-items: flex-start; gap: 8px; min-width: 0; font-size: 12px; line-height: 18px; color: var(--ink); }
+.hook-run-head .band-dismiss { color: var(--ink-soft); }
+.hook-run-head .band-dismiss:hover { background: var(--press); color: var(--ink); }
 .hook-run-says { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 12px; overflow-wrap: anywhere; }
 .hook-run-meta { color: var(--ink-soft); }
 .hook-run-note { margin: 0; font-size: 12px; color: var(--ink-soft); }
@@ -1988,11 +1992,12 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .ins-parts-head { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-soft); }
 .ins-parts-head strong { color: var(--ink); font-weight: 600; }
 .ins-part { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.ins-part-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; min-width: 0; font-size: 12.5px; }
+.ins-part-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; font-size: 12.5px; }
 .ins-part-line > .path-text { flex: 0 1 auto; min-width: 8ch; max-width: 100%; }
-.ins-part-says { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; color: var(--ink-soft); }
+.ins-part-says { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; color: var(--ink-soft); }
 .ins-part-says.tone-warning { display: flex; align-items: flex-start; gap: 4px; color: var(--warning); }
 .ins-part-says > svg { flex: none; margin-top: 3px; }
+.ins-part-says > span { min-width: 0; }
 .ins-part-line > .btn { margin-left: auto; }
 .ins-parts-group { display: flex; flex-direction: column; gap: 6px; }
 .ins-parts-sub { margin: 2px 0 0; font-size: 11.5px; font-weight: 600; color: var(--ink-soft); }
@@ -2317,6 +2322,9 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 /* Its Instructions tab: the info box with "Every tool's file" beside its line, then the same card as on Instructions. */
 .ins-about-line { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 16px; }
 .ins-about-line > .btn { height: 26px; margin-left: auto; }
+.ins-go-base:hover:not(:disabled) { text-decoration: none; }
+.ins-go-base:hover:not(:disabled) .ins-go-label { text-decoration: underline; }
+.ins-go-wait { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border: 1px solid color-mix(in oklab, var(--warning, #d29922) 60%, transparent); border-radius: 999px; font-size: 11.5px; line-height: 18px; color: var(--warning); }
 /* A wide card lays its counts in two groups side by side: the three kinds, then its instruction file and plugins. Below 600px
    (a 2×2 grid at 1280) one column keeps notes such as "2 managed · 3 unmanaged" on one line. */
 @container (min-width: 600px) {
@@ -2550,6 +2558,9 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .profile-stop > span { overflow: hidden; text-overflow: ellipsis; }
 .details-head > .profile-stop { white-space: normal; max-width: var(--measure); }
 .select-line > .profile-stop { padding-right: 10px; border-right: 1px solid var(--line); }
+.band-act-stop { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.band-act-sep { padding-right: 10px; border-right: 1px solid var(--line); }
+.band-act-stop > .profile-stop { color: var(--ink); white-space: normal; }
 .band-act { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .select-why { position: absolute; top: 100%; left: 0; right: 0; z-index: 5; padding: 6px 16px; background: var(--surface); border-bottom: 1px solid var(--line); box-shadow: 0 8px 20px rgb(0 0 0 / 18%); font-size: 12px; line-height: 18px; color: var(--ink-soft); }
 .select-why > p { margin: 0; }

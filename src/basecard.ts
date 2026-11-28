@@ -11,7 +11,7 @@
 import { acting, applyBaseChange, closeDraftPick, draftFile, startDraft, draftStale, draftable, openDraftPick, savingOff, startTakeOut, stopDraft, baseDraftTyped, baseSaveDoesSomething, loadBaseVersion, ownText, rerender, showPage, toolDraftTyped, shownPath, startBaseEdit, state, type BaseEdit, type DraftPick } from './app.ts';
 import { baseAction, draftedOwn, fileWithBase, linesNotCarried, readersOfFile, sameBase, splitBase } from './basetext.ts';
 import { lineDiff } from './diff.ts';
-import { button, checkbox, h, icon, lockAttrs as lockAttrsFor, pathText } from './dom.ts';
+import { button, checkbox, h, icon, lockAttrs as lockAttrsFor, pathText, scrollIntoBox } from './dom.ts';
 import { changeCounts, diffView, discardConfirm, escapeTo, keys, legend, previewBlock, versionsList, type Stage } from './editparts.ts';
 import { brandMark } from './matrix.ts';
 import { fileName, lineCount, toolList, toolNames } from './words.ts';
@@ -301,27 +301,39 @@ function draftPanel(pick: DraftPick): HTMLElement {
 function toolRow(file: InstructionFile, locked: boolean, lockAttrs: Record<string, string> | undefined) {
   const base = file.base!;
   const name = fileName(file.path);
+  const owner = readerNames(file);
   const key = `copy-${file.tool}`;
   const status = base.state === 'same' ? h('span.base-state', {}, icon('check', 13, 'tone-success'), 'Matches the base')
     : base.state === 'edited' ? h('span.base-state.base-edited', {}, icon('triangle-alert', 13, 'tone-warning'), `Edited in ${name}`)
     : h('span.base-state', {}, icon('circle-dashed', 13, 'tone-muted'), base.state === 'older' ? 'Has an older version' : file.exists ? 'Not in the file yet' : 'No file yet');
   return h('li.base-tool', {},
-    h('div.base-tool-line', {}, readers(file).map(tool => brandMark(tool, 14)), h('strong', {}, readerNames(file)), h('span.base-file', {}, name), status),
+    h('div.base-tool-line', {}, readers(file).map(tool => brandMark(tool, 14)), h('strong', {}, owner), h('span.base-file', {}, name), status),
     base.state !== 'edited' ? null : h('div.base-choice', {},
-      h('p.base-explain', {}, `Its copy of the base was changed outside Central Knot, so ${name} was left as it is.`),
-      h('p.base-explain', {}, `Either choice below shows the change first, keeps the replaced text under Earlier versions, and can be undone.`),
+      h('p.base-explain', {}, `Changed outside Central Knot, so ${name} was left as it is.`),
       shown.has(key) ? [legend('the base', `${name}’s copy`),
         diffView(`base-copy-changes-${file.tool}`, lineDiff(state.base!.text, base.copy ?? ''), true, () => {}, `${name}’s copy compared with the base`)] : null,
       h('div.ins-actions', {},
         button({ variant: 'link', size: 'micro', label: shown.has(key) ? 'Hide the difference' : 'See the difference', id: `base-diff-${file.tool}`, attrs: { 'aria-expanded': String(shown.has(key)) }, onclick: () => toggle(key) }),
-        // An emptied copy can't be the base (an empty base shares nothing): only putting the base back is offered.
-        base.copy?.trim() ? button({ variant: 'outline', size: 'small', label: `Use ${name}’s copy as the base…`, id: `base-usecopy-${file.tool}`, disabled: locked, attrs: lockAttrs ?? { title: `Review making ${name}’s copy the base for every tool` },
+        // An emptied copy can't be the base (an empty base shares nothing): only replacing it with the base is offered.
+        base.copy?.trim() ? button({ variant: 'outline', size: 'small', label: `Make ${owner}’s copy the base…`, id: `base-usecopy-${file.tool}`, disabled: locked, attrs: lockAttrs ?? { title: `Review making ${owner}’s copy the base for every tool. Shows the change first, keeps the replaced text under Earlier versions, and can be undone.` },
           onclick: () => startBaseEdit({ text: base.copy ?? '', tools: state.base!.tools, stage: 'review', source: { kind: 'copy', tool: file.tool } }) }) : null,
-        button({ variant: 'outline', size: 'small', label: `Put the base back in ${name}…`, id: `base-restore-${file.tool}`, disabled: locked, attrs: lockAttrs ?? { title: `Review replacing ${name}’s edited copy with the base` },
+        button({ variant: 'outline', size: 'small', label: `Replace ${owner}’s copy with the base…`, id: `base-restore-${file.tool}`, disabled: locked, attrs: lockAttrs ?? { title: `Review replacing ${owner}’s edited copy in ${name} with the base. Shows the change first, keeps the replaced text under Earlier versions, and can be undone.` },
           onclick: () => startBaseEdit({ text: state.base!.text, tools: state.base!.tools, stage: 'review', source: { kind: 'putBack', tool: file.tool } }) }))));
 }
 
-/** The card above the tools: write the base once; each chosen tool's file gets it after its own instructions. */
+const baseStatus = (files: InstructionFile[]) => {
+  const chosen = files.filter(file => file.base?.chosen && isFirstReader(file, files));
+  return { chosen, edited: chosen.filter(file => file.base!.state === 'edited'), behind: chosen.filter(file => file.base!.state === 'older' || file.base!.state === 'missing') };
+};
+
+/** Actionable base status for the top-of-page jump link (same deduplicated file counts as baseCard). */
+export function baseWaiting(files: InstructionFile[]): string {
+  if (!state.base?.text.trim()) return '';
+  const { edited, behind } = baseStatus(files);
+  return [edited.length ? plural(edited.length, 'edited copy', 'edited copies') : '', behind.length ? `${plural(behind.length, 'file')} to update` : ''].filter(Boolean).join(' · ');
+}
+
+/** The card below the tools: write the base once; each chosen tool's file gets it after its own instructions. */
 export function baseCard(files: InstructionFile[]) {
   const base = state.base;
   if (!base) return null;
@@ -335,14 +347,12 @@ export function baseCard(files: InstructionFile[]) {
     : files.some(file => file.tool === toolDraft.tool) ? `Finish or cancel the ${fileName(toolDraft.from.path)} edit first.` : 'Copy or discard the unsaved draft above first.';
   const locked = !!acting() || !!lockedWhy;
   const lockAttrs = lockAttrsFor(lockedWhy);
-  const chosen = files.filter(file => file.base?.chosen && isFirstReader(file, files));
+  const { chosen, edited, behind } = baseStatus(files);
   const chosenTools = toolCount(chosen);
   const matching = chosen.filter(file => file.base!.state === 'same');
   const matchingTools = toolCount(matching);
   const needing = chosen.filter(file => file.base!.state !== 'same');
-  const behind = chosen.filter(file => file.base!.state === 'older' || file.base!.state === 'missing');
   const others = files.filter(file => !file.base?.chosen);
-  const edited = chosen.filter(file => file.base!.state === 'edited');
   const hasBase = !!base.text.trim();
   // A file still holding a block (left there edited) can't start the base: its block would stay beside the moved text.
   const starts = files.filter(file => isFirstReader(file, files) && ownText(file).trim() && file.base?.copy === undefined);
@@ -381,8 +391,9 @@ export function baseCard(files: InstructionFile[]) {
                 else shown.delete('matching');
               },
             },
-              h('summary', { id: 'base-matching-toggle' }, icon('chevron-right', 12, 'tone-faint base-matching-chevron'), icon('check', 13, 'tone-success'),
-                matchingTools === 1 ? '1 tool matches the base' : `${matchingTools} tools match the base`),
+              h('summary', { id: 'base-matching-toggle' }, icon('check', 13, 'tone-success'),
+                matchingTools === 1 ? '1 tool matches the base' : `${matchingTools} tools match the base`,
+                icon('chevron-right', 12, 'base-matching-chevron')),
               h('ul.plain-list.base-tool-list', {}, matching.map(file => toolRow(file, locked, lockAttrs)))) : null,
             others.length && chosen.length ? h('p.ins-empty', {}, `Not added to ${toolList(others.map(file => file.tool))}.`) : null),
           h('div.base-column', {},
@@ -400,7 +411,7 @@ export function baseCard(files: InstructionFile[]) {
     pick ? null : stage.actions);
   const versions = edit || pick ? null : versionsList(base.versions, { id: version => `base-load-${version}`, disabled: locked, why: lockedWhy, run: version => void loadBaseVersion(version) });
   // Esc anywhere in the card while its editor is open (the text, a tool box, a button in its head) is Cancel.
-  return h('article.card.ins-card.base-card', { id: 'base-card', 'aria-label': 'Base instructions', onkeydown: edit?.stage === 'edit' ? escapeTo('base-cancel', 'base-keep') : undefined },
+  return h('article.card.ins-card.base-card', { id: 'base-card', tabindex: '-1', 'aria-label': 'Base instructions', onkeydown: edit?.stage === 'edit' ? escapeTo('base-cancel', 'base-keep') : undefined },
     head, ...stage.body, pick ? draftPanel(pick) : null, versions);
 }
 
@@ -422,7 +433,7 @@ export function baseStrip(file: InstructionFile, lockedWhy?: string) {
       goTo ? button({ variant: 'link', size: 'micro', label: base.state === 'edited' ? 'Choose what to do…' : 'Update…', id: `ins-base-go-${file.tool}`, disabled: !!goWhy, attrs: lockAttrsFor(goWhy), onclick: () => {
         // On a harness's Instructions tab the Base instructions card isn't on the page: the choice is made on Instructions.
         if (!document.getElementById(goTo)) showPage('instructions');
-        const target = document.getElementById(goTo); target?.scrollIntoView({ block: 'center' }); target?.focus();
+        const target = document.getElementById(goTo); scrollIntoBox(target, 'center'); target?.focus({ preventScroll: true });
       } }) : null,
       // Not on the list any more: its block (an edited copy the list change left) can be taken out here, after a review.
       // Hidden under its own open review, so that review is the one decision on screen.

@@ -128,7 +128,7 @@ export const pageNames = { plugins: 'Plugin marketplaces', sources: 'Library sou
 export const toPluginsLabel = `Add to ${pageNames.plugins}`;
 /**
  * An item's switch turned On or Off from outside its row, "it" being the item the line names: History's action
- * (historyactions.ts switchAction), an item's notice (matrix.ts libraryNotice) and a removed item's line on the sources' page.
+ * (historyactions.ts switchAction), an item's notice (matrix.ts libraryNotice) and an Off or removed item's line (or single-item Add/Sync band) on the sources' page.
  */
 export const turnIt = (on: boolean, inTool?: string) => `Turn it ${on ? 'on' : 'off'}${inTool ? ` in ${inTool}` : ''}`;
 
