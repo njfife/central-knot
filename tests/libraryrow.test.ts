@@ -2,7 +2,7 @@
 // stands, what each harness's mark says, when its switch asks which copy, and the click each control sends.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FOLDED_VERSIONS, addLabel, asksWhichCopy, copiesDiffer, waitsForSync, canAdd, fromSourceWords, rowClicks, foldVersions, harnessIs, loadsFrom, madeFrom, placeOf, libraryWords, ruleSays, sentences, statusLine, stillIn, stillReadWords, switchLabel, switchedOffWords, versionChange, versionOrigin, type LibraryRow } from '../src/libraryrow.ts';
+import { FOLDED_VERSIONS, addLabel, asksWhichCopy, copiesDiffer, waitsForSync, canAdd, fromSourceWords, rowClicks, foldVersions, harnessIs, loadsFrom, madeFrom, placeOf, libraryWords, ruleSays, sentences, statusLine, stillIn, stillReadWords, switchLabel, switchedOffWords, toolSwitch, versionChange, versionOrigin, type LibraryRow } from '../src/libraryrow.ts';
 import { readAgainst, wordDiff } from '../src/diff.ts';
 import { newItem, plan, takeInAnswer, type Copies, type FoundKey, type LibraryItem } from '../src/library.ts';
 import { anyOn, kindSource } from '../src/itemrow.ts';
@@ -101,6 +101,19 @@ test('A harness the agent is kept out of: no copy, a copy still to go, or a copy
   assert.equal(markIn({ 'claude-cli': 'b', 'copilot-cli': 'b' }, out, 'codex-cli'), 'kept-out');
   assert.equal(markIn({ 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'x' }, out, 'codex-cli'), 'own-copy');
   assert.equal(markIn({ 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'b' }, item({ except: ['codex-cli'] }), 'codex-cli'), 'leaving');
+});
+
+test('What stands in a tool’s place for an item’s own switch, one rule for the Library row and a plugin’s page: its switch; none where it can’t go; the tool’s own state where it isn’t kept out; his own copy where it is', () => {
+  const on = item(), all = { 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'b' }, out = item({ except: ['codex-cli'], applied: { 'claude-cli': 'b', 'copilot-cli': 'b' } });
+  const at = (hashes: LibraryRow['hashes'], agent: LibraryItem | undefined, more: Partial<LibraryRow> = {}) => tools.map(tool => toolSwitch(row(hashes, more, agent), agent, tool));
+  assert.deepEqual(at(all, on), ['switch', 'switch', 'switch']);
+  // Kept out of Codex: its switch puts it back; with a copy of his there, Codex has its own copy.
+  assert.deepEqual([at({ 'claude-cli': 'b', 'copilot-cli': 'b' }, out)[2], at({ 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'x' }, out)[2]], ['switch', 'own-copy']);
+  // Codex's own settings keep it off; Codex has it another way; Codex can't take it.
+  assert.deepEqual([at(all, on, { switchedOff: ['codex-cli'] })[2], at({ 'claude-cli': 'b', 'copilot-cli': 'b' }, on, { anotherWay: { 'codex-cli': 'claude-cli' } })[2],
+    at(all, on, { cannot: { 'codex-cli': 'Codex can’t hold it.' } })[2]], ['switched-off', 'another-way', 'cannot']);
+  // Not in Central Knot; Off and from a plugin.
+  assert.deepEqual([at({ 'claude-cli': 'a' }, undefined), at({}, item({ on: false, applied: {} }), { fromSource: { link: 'plugin:kit@team' } as LibraryRow['fromSource'] })], [['none', 'none', 'none'], ['none', 'none', 'none']]);
 });
 
 test('An Off agent has no copy anywhere; one that turns up is its harness’s own; a found agent’s copies are just there', () => {
