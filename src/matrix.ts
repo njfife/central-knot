@@ -46,7 +46,7 @@ import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, fo
 import type { IconName } from './icons.ts';
 import { byName, byUsage, inOrder, kindSource, lastUpdated, noPins, partId, pin, placeIn, rankIn, rowId, type ItemRow, type KindSource, type Pinned, type RowKey, type RowOrder, type RowUsage, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
-import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inHarnessDoes, switchDrawn, TOOL_STATE_WORDS, toolSwitch, type SwitchDrawn, inLibrary, loadingIn, madeFrom, otherReadLines, ownCopies, placeOf as libraryPlace, pluginToolsCard, rowClicks, showsPlaceTag, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
+import { addLabel, asksWhichCopy, canAdd, copiesDiffer, waitsForSync, fromSourceWords, harnessIs, hashesOf, inHarnessDoes, switchDrawn, TOOL_STATE_WORDS, toolSwitch, type SwitchDrawn, inLibrary, loadingIn, madeFrom, ownCopies, placeOf as libraryPlace, pluginToolsCard, rowClicks, showsPlaceTag, statusLine, stillIn, stillReadWords, switchedOffWords, switchLabel, versionClock, type DetailPart, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { itemKey, listed, type Version } from './library.ts';
@@ -450,7 +450,7 @@ const newView = () => ({
   whereOpen: undefined as boolean | undefined,
   /** Whether the unused band's "What’s counted" disclosure is open. */
   unusedCounted: false,
-  /** Whether the tool tab's "Mark key" disclosure is open. */
+  /** Whether the "What the marks mean" disclosure is open. */
   legendOpen: false,
   /** The order a way in asked for (openKind `order`: the Overview's Most used), shown on the visit it is first drawn on (`visit`); Sort's kept choice stays as it was. */
   askedOrder: undefined as { order: RowOrder; visit?: number } | undefined,
@@ -1747,17 +1747,20 @@ function tableOf(name: keyof typeof views, kinds: PageKind[], harness?: Tool, fi
   if (view.openFile) keepOpenFile(t, [...drawn, ...shownCatalog(t, inPlugins)]);
   return t;
 }
-/** The segment the Library was last drawn for (useLibrary), so another one starts its list afresh. */
-let drawnSegment: PageKind | 'all' | undefined;
+/** The segment, visit and home the Library was last drawn for (useLibrary), so another starts its list afresh. */
+let drawnLibrary: { segment: PageKind | 'all'; visit: number; home?: string } | undefined;
 /**
  * The Library's table: its segment's kinds. Another segment than the one drawn last starts its list afresh: at its top (its
  * table's id names the segment: tableId), its pins let go (its list's name names its kinds: listNow), and its armed Delete
- * disarmed (tableOf closes an opened row it no longer lists). Find, the chip and From stay (a chip is offered over every kind: overEveryKind).
+ * disarmed (tableOf closes an opened row it no longer lists). Its open mark key (`legendOpen`) is forgotten on another visit,
+ * another home or another segment (in addition to `startFresh` via `openKind`), without touching a tool tab's view. Find,
+ * the chip and From stay (a chip is offered over every kind: overEveryKind).
  */
 function useLibrary(): Table {
-  const view = views.library, shown = segment(), moved = drawnSegment !== undefined && drawnSegment !== shown;
-  drawnSegment = shown;
-  if (moved) view.confirmDelete = undefined;
+  const view = views.library, now = { segment: segment(), visit: state.visit, home: state.home?.home };
+  if (drawnLibrary && drawnLibrary.segment !== now.segment) view.confirmDelete = undefined;
+  if (drawnLibrary && (drawnLibrary.segment !== now.segment || drawnLibrary.visit !== now.visit || drawnLibrary.home !== now.home)) view.legendOpen = false;
+  drawnLibrary = now;
   return tableOf('library', segmentKinds());
 }
 /** A tool's tab of one kind under Harnesses: that kind alone, with that tool first, in the kind's own view. */
@@ -2077,8 +2080,8 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
     // Its id keeps it where it was scrolled across a redraw (the dock's breakpoint crossed, say): tableId.
     h('div.scroll.matrix', { id: tableId(t) },
       // Library rows keep no column heads; a tool's tab heads its switch column with Every tool (switchColumnHead).
-      nothing ?? withToolCount(h('div.ov.ov-switched', { role: 'table', 'aria-label': `${tool ? nouns[t.kinds[0]!][1] : 'Items'} and where they are on` }, tool ? switchColumnHead(tool) : null, sections), columns(t).length),
-      legend?.foot ?? null)];
+      nothing ?? withToolCount(h('div.ov.ov-switched', { role: 'table', 'aria-label': `${tool ? nouns[t.kinds[0]!][1] : 'Items'} and where they are on` }, tool ? switchColumnHead(tool) : null, sections), columns(t).length)),
+    legend?.foot ?? null];
   // An item's details hold its versions, and a file in a row's details' place is read at length: their dock takes a share of the
   // width that grows with the window (style.css .dock-wide).
   if (openRow) return h(`div.page.ov-page.docked${fileInDetails(view, view.comparing) ? '.dock-wide' : ''}`, {}, h('div.dock-main', {}, table), pluginDock(t, openRow));
@@ -2426,10 +2429,10 @@ type MarkLook = 'on' | 'off' | 'none' | 'differs' | 'waits' | 'held';
 
 /** What a mark says in the key, by what it is (libraryrow.ts HarnessIs, and a plugin's item). */
 const keyWords = {
-  on: 'On there', 'plugin-off': 'Off there', none: 'No copy',
+  on: 'Has a copy', 'plugin-off': 'Off there', none: 'No copy',
   'will-sync': 'Gets a copy when sync runs next',
-  taken: 'Edited, becomes the current version', 'deleted-by-hand': 'Deleted there; turns off when sync runs', leaving: 'Removed when sync runs', own: 'Its own copy, not from Central Knot',
-  current: 'Has the current version', has: 'Has it', 'kept-out': 'Kept out', 'off-in-ck': 'Off: Central Knot keeps it', unseen: 'Left as it is (its line says why)', 'cannot-take': 'Can’t take it',
+  taken: 'Edited, becomes the current version', 'deleted-by-hand': 'Deleted there; turns off when sync runs', leaving: 'Removed when sync runs',
+  'kept-out': 'Kept out', 'off-in-ck': 'Off: Central Knot keeps it', unseen: 'Left as it is (its line says why)', 'cannot-take': 'Can’t take it',
   'with-plugin': 'Gets it with its plugin (its line installs it)',
   'another-way': 'Has it another way, not from Central Knot', switched: 'Switched off in its own settings',
 } as const;
@@ -2452,8 +2455,8 @@ function markOf(skill: ItemRow, tool: Tool): { look: MarkLook; words: string; gl
 
 /** An item's mark for one harness: what the library's rule says of it (libraryrow.ts harnessIs), drawn with the page's looks. */
 const libraryMarks: Record<HarnessIs, { look: MarkLook; key: keyof typeof keyWords; glyph?: IconName }> = {
-  current: { look: 'on', key: 'current' },
-  'own-copy': { look: 'on', key: 'own' },
+  current: { look: 'on', key: 'on' },
+  'own-copy': { look: 'on', key: 'on' },
   'kept-out': { look: 'held', key: 'kept-out', glyph: 'circle-minus' },
   none: { look: 'none', key: 'none' },
   cannot: { look: 'held', key: 'cannot-take', glyph: 'circle-slash-2' },
@@ -2468,8 +2471,8 @@ function libraryMark(lib: LibraryPage, skill: ItemRow, tool: Tool): ReturnType<t
   const item = itemOf(skill), is = harnessIs(skill, item, tool);
   const line = lib.say.harnessLine(skill, item, tool, names[tool]) || 'No copy while it is off.';
   const words = `${names[tool]}: ${line.replace(/^./, first => first.toLowerCase())}`;
-  // Off, or found: a harness with no copy while Central Knot keeps the item is off there; a found item's own copy is simply on.
-  const drawn = is === 'none' && inLibrary(item) ? { look: 'off' as const, key: 'off-in-ck' as const } : is === 'own-copy' && !inLibrary(item) ? { look: 'on' as const, key: 'has' as const } : libraryMarks[is];
+  // Off: a harness with no copy while Central Knot keeps the item is off there.
+  const drawn = is === 'none' && inLibrary(item) ? { look: 'off' as const, key: 'off-in-ck' as const } : libraryMarks[is];
   // Loaded there, but that tool's own switch turns it off: a mark of its own, whoever set the switch (libraryrow.ts `switchedOff`).
   const switched = skill.switchedOff?.includes(tool) && drawn.look === 'on' ? { look: 'held' as const, key: 'switched' as const, glyph: 'circle-off' as IconName } : undefined;
   return { ...(switched ?? drawn), state: is, words };
@@ -2480,7 +2483,7 @@ function libraryMark(lib: LibraryPage, skill: ItemRow, tool: Tool): ReturnType<t
  * button. With no tool, a neutral sample for the key.
  */
 function toolMark(look: MarkLook, tool: Tool | undefined, glyph?: IconName, size = 14) {
-  return h(`span.tool-mark.mark-${look}`, { 'aria-hidden': 'true' }, glyph ? icon(glyph, size, look === 'differs' || look === 'waits' ? 'tone-warning' : look === 'held' ? 'tone-faint' : '') : tool ? brandMark(tool, size) : icon('blocks', size));
+  return h(`span.tool-mark.mark-${look}`, { 'aria-hidden': 'true' }, glyph ? icon(glyph, size, look === 'differs' || look === 'waits' ? 'tone-warning' : look === 'held' ? 'tone-faint' : '') : tool ? brandMark(tool, size) : icon('blocks', size, 'sample-mark'));
 }
 
 /** Which tools' marks a row or key draws: on a tool's tab, only that tool; elsewhere, every tool the kind uses. */
@@ -2503,7 +2506,7 @@ function rowMarks(t: Table, skill: ItemRow, size = 14, table = true) {
 const inColumns = (t: Table, holds: Tool[], draw: (tool: Tool) => HTMLElement) =>
   t.tool ? holds.map(draw) : columns(t).map(tool => (holds.includes(tool) ? draw(tool) : h('span.tool-mark.mark-blank', { 'aria-hidden': 'true' })));
 
-/** The key: under the Library table, or toggled from the tool tab's toolbar ("What the marks mean") grouping keyWords by visual look. */
+/** The key, behind "What the marks mean" (grouped by visual look): pinned at the Library's foot, or in a tool tab's toolbar. */
 function markLegend(t: Table, list: ItemRow[], plugins: PluginRow[]) {
   if (!columns(t).length) return null;
   const seen = new Map<keyof typeof keyWords, { look: MarkLook; glyph?: IconName }>();
@@ -2511,14 +2514,12 @@ function markLegend(t: Table, list: ItemRow[], plugins: PluginRow[]) {
   // A plugin's own rows: on there, or off there (no copy kept: a plugin's item has none of its own).
   for (const row of plugins) for (const each of markTools(t, toolsFor(t, kindOf(row)))) if (row.copies[each as HarnessId]) seen.set(offIn(row, each as HarnessId) ? 'plugin-off' : 'on', { look: offIn(row, each as HarnessId) ? 'off' : 'on' });
   const entries = (Object.keys(keyWords) as (keyof typeof keyWords)[]).filter(key => seen.has(key)).map(key => ({ key, ...seen.get(key)! }));
-  const shown = t.tool
-    ? [...groupBy(entries, item => `${item.look}:${item.glyph ?? ''}`).values()].map(group => ({ ...group[0]!, label: group.map(item => keyWords[item.key]).join(' / ') }))
-    : entries.map(item => ({ ...item, label: keyWords[item.key] }));
-  const keyed = h('div.legend', { 'aria-label': 'Key' }, shown.map(item => h('span.legend-item', {}, toolMark(item.look, t.tool, item.glyph, 12), item.label)));
+  const shown = [...groupBy(entries, item => `${item.look}:${item.glyph ?? ''}`).values()].map(group => ({ ...group[0]!, label: group.map(item => keyWords[item.key]).join(' / ') }));
+  const keyed = h('div.legend', { 'aria-label': 'Key' }, shown.map(item => h('span.legend-item', {}, toolMark(item.look, t.tool, item.glyph), item.label)));
   if (!keyed.childElementCount) return null;
-  if (!t.tool) return { foot: keyed };
   const toggle = fold({ id: 'mark-legend', toggleId: 'mark-legend-toggle', label: 'What the marks mean', open: t.view.legendOpen, controls: 'mark-legend-body', onToggle: open => { t.view.legendOpen = open; rerender(); } });
-  return { toggle, body: t.view.legendOpen ? h('div.legend-band', { id: 'mark-legend-body' }, keyed) : undefined };
+  const body = t.view.legendOpen ? h('div.legend-band', { id: 'mark-legend-body' }, keyed) : undefined;
+  return t.tool ? { toggle, body } : { foot: h('div.legend-foot', {}, body ?? null, toggle) };
 }
 
 /** One row: its switch (in Select's mode, its tick), its name, a mark per tool, and the chevron that opens its details. */
@@ -2940,7 +2941,7 @@ function section(t: Table, role: Role, rows: ItemRow[], truly: ItemRow[]) {
   const about = own ? matching : rows;
   const card = role === 'found' ? foundCard() : role === 'off' ? offCard() : '';
   const mark = card ? infoMark(`section-${role}-info`, label, card) : null;
-  const note = role === 'found' ? foundNote(about) : role === 'off' ? offNote(t, about) : '';
+  const note = role === 'found' ? foundNote(about) : '';
   return h('div', { role: 'rowgroup' },
     h(`div.ov-section${role === 'off' || role === 'away' ? '.ov-section-away' : ''}`,
       { role: 'row', 'data-section': role, ...(mark ? { 'data-info-block': true } : {}) },
@@ -2990,25 +2991,6 @@ function foundNote(list: ItemRow[]): string {
   if (!state.home?.sync.syncEverything) return '';
   const choosing = list.filter(skill => skill.takeInAnswers && 'wait' in skill.takeInAnswers.rule).length;
   return choosing ? `${choosing} ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy` : '';
-}
-
-/**
- * The Off heading's live line, in order: tools that still have some on through a plugin; removals waiting until sync runs;
- * copies Central Knot didn't place; or a single Off row's other-reader/switched-off sentence (with several rows, each row's tag says so).
- */
-function offNote(t: Table, list: ItemRow[]): string {
-  const through = columns(t).filter(tool => list.some(skill => skill.pluginOn?.includes(tool)));
-  if (through.length) return `some on in ${andList(through.map(tool => names[tool]))} through a plugin`;
-  const owed = list.filter(skill => skill.plan?.remove.length);
-  const still = [...new Set(owed.flatMap(skill => skill.plan!.remove))];
-  if (owed.length) return `${owed.length} still in ${andList(still.map(tool => names[tool]))} until sync runs`;
-  const ownTools = list.flatMap(skill => ownCopies(skill, itemOf(skill), toolsFor(t, skill.kind)));
-  const where = [...new Set(ownTools)];
-  if (ownTools.length) return `${plural(ownTools.length, 'own copy', 'own copies')} in ${andList(where.map(tool => names[tool]))}`;
-  // A single Off row names the tools still reading it or holding it switched off; with several rows, each row's own tag says so.
-  const ways = list.flatMap(row => [...otherReadLines(row, toolsFor(t, row.kind)), ...switchedOffWords(row, toolsFor(t, row.kind))]);
-  if (ways.length && list.length === 1) return ways.join(' ');
-  return '';
 }
 
 /** An opened row's head line of what its switch or Add would end ("If on, Everyday stops being …"); none while its own click is out (clicklist.ts wantedOn). */
