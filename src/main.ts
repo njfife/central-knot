@@ -61,13 +61,13 @@ import { forgetMissing, SETTLE_MS } from './librarypass.ts';
 import { byHand, observe, passStarts, seenBefore, seenIn, type ToolsSeen } from './arrivals.ts';
 import { homePass, passTells, syncOnceReport, takenInReloads, type HomePass } from './homepass.ts';
 import { waysFrom } from './reload.ts';
-import { deleteProfile, readProfiles, saveProfile, switchProfile, undoSwitch, type PluginSide } from './profiles.ts';
-import { homeItems, inUse, inUseName, pluginLive, switchable, switchPreview, type LiveItem, type PluginHome, type PluginLive } from './profileplan.ts';
+import { deleteProfile, profilesWithLast, saveProfile, switchProfile, undoSwitch, type PluginSide } from './profiles.ts';
+import { homeItems, inUse, nameNow, pluginLive, profileNow, switchable, switchPreview, type LiveItem, type PluginHome, type PluginLive } from './profileplan.ts';
 import { atMostEvery, defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil, oneTurn } from './model.ts';
 import { keepEntries, linuxPlaces, placeAutostart, readAutostart, signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, BuildOutcome, OtherBuild, PartRef, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, LogFolderOpened, LogTail, Snapshot, SyncNotice } from './types.ts';
 import { machineNames, writesRealHome } from './machine.ts';
-import { HOOK_SOURCE_UNREADABLE, pageNames, toolList, toolName } from './words.ts';
+import { CHANGED, changedName, HOOK_SOURCE_UNREADABLE, pageNames, toolList, toolName } from './words.ts';
 import { buildTag, startUpdater, type PendingUpdate } from './updater.ts';
 import { lineApp, releaseLine } from './updates.ts';
 import { autoUpdates, CHECK_EVERY_MS, PLUGIN_UPDATES_DEFAULT, type UpdatesRecord } from './pluginupdates.ts';
@@ -500,18 +500,18 @@ function switchFromMenu(id: string) {
 }
 
 /**
- * Profile: one click switches, from the menu bar or the app menu. The label names the profile in use (worked out: profileplan.ts
- * inUse), each profile is a checkbox item ticked while it is in use. Before any profile exists, "Profiles…" opens the page that
- * makes one.
+ * Profile: one click switches, from the menu bar or the app menu. The label names the profile in use (worked out, or the one last
+ * switched to, changed: profileplan.ts profileNow), each profile is a checkbox item ticked while it is in use. Before any profile
+ * exists, "Profiles…" opens the page that makes one.
  */
 function profileMenu(): Electron.MenuItemConstructorOptions {
   if (!lastProfiles.profiles.length) return { label: 'Profiles…', enabled: !!current, click: () => showPage('profiles') };
-  const usable = homeWritable && !heldReason() && !!current, inUseNow = inUse(lastProfiles.profiles, lastItems, lastPlugins);
-  return { label: `Profile: ${inUseName(lastProfiles.profiles, lastItems, lastPlugins)}`, submenu: [
+  const usable = homeWritable && !heldReason() && !!current, now = profileNow(lastProfiles, lastItems, lastPlugins);
+  return { label: `Profile: ${now.name}`, submenu: [
     // One not offered (nothing in it: profileplan.ts switchable) is shown disabled, as on the Profiles page.
     ...lastProfiles.profiles.map(profile => {
-      const empty = !switchable(profile, lastItems, lastPlugins);
-      return { label: empty ? `${profile.name} (empty)` : `${profile.name} · ${switchPreview(profile, lastItems, lastPlugins).card}`, type: 'checkbox' as const, checked: inUseNow.includes(profile), enabled: usable && !empty, click: () => switchFromMenu(profile.id) };
+      const empty = !switchable(profile, lastItems, lastPlugins), name = nameNow(now, profile);
+      return { label: empty ? `${name} (empty)` : `${name} · ${switchPreview(profile, lastItems, lastPlugins).card}`, type: 'checkbox' as const, checked: now.inUse.includes(profile), enabled: usable && !empty, click: () => switchFromMenu(profile.id) };
     }),
     { type: 'separator' },
     { label: 'Edit profiles…', click: () => showPage('profiles') },
@@ -550,11 +550,13 @@ function refreshTray() {
   appMenu();
   if (!tray) return;
   tray.setContextMenu(trayMenu());
-  const profile = lastProfiles.profiles.length ? inUseName(lastProfiles.profiles, lastItems, lastPlugins) : undefined;
+  const now = lastProfiles.profiles.length ? profileNow(lastProfiles, lastItems, lastPlugins) : undefined, profile = now?.name;
   tray.setToolTip(`Central Knot${profile ? ` · Profile: ${profile}` : ''}${unseen ? ': sync made changes' : unseenPlugins === 'updated' ? ': plugins were updated' : unseenPlugins ? ': a plugin couldn’t be updated' : ''}`);
-  // The profile in use is always in sight: its name sits beside the menu bar icon (No profile when none is).
-  // Shortened past 20 characters, so a long name can't crowd the menu bar (the full name is in the tooltip and the menu).
-  const short = profile && profile.length > 20 ? `${profile.slice(0, 19)}…` : profile;
+  // The profile in use is always in sight: its name sits beside the menu bar icon (`Everyday · changed`, or No profile when none is).
+  // Shortened past 20 characters, so a long name can't crowd the menu bar (the full name is in the tooltip and the menu): the
+  // name is cut, never ` · changed`.
+  const cut = (name: string, room: number) => (name.length > room ? `${name.slice(0, room - 1)}…` : name);
+  const short = now?.changed ? changedName(cut(now.changed.name, 20 - CHANGED.length)) : profile && cut(profile, 20);
   if (process.platform === 'darwin') tray.setTitle(`${unseen || unseenPlugins ? '•' : ''}${short ? ` ${short}` : ''}`.trim());
 }
 /** Page and menu share one request, admitted before the queue so repeat clicks cannot start another. */
@@ -733,7 +735,7 @@ async function syncAndView(explicit = false, runPass = true): Promise<{ view: Ho
     lastSeen = passed.seen;
   }
   const caughtUp = pendingResults.splice(0), notices = pendingNotices.splice(0);
-  const profiles = await readProfiles(current!.home);
+  const profiles = await profilesWithLast(context());
   // The home is read again after a pass that may have written (Sync on, or Sync once): a pass that stopped part-way reports
   // no writes, yet may have made some. An observe-only pass, or one that couldn't run, wrote nothing. A pass whose every kind
   // left the home as it read it gives the view its reads (each kind's taken by its view's look: librarypass.ts lookFor), unless
@@ -1031,7 +1033,7 @@ function followProfiles(profiles: ProfilesView, items = lastItems, plugins = las
 /** The home in `tools` as profiles read it (profileplan.ts PluginHome), read now as a view reads it. */
 async function profileHome(tools: HarnessId[]): Promise<PluginHome> {
   const shared: ShareContext = { ...context(), reads: new Map() };
-  return { pluginItems: await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), tools), profiles: await readProfiles(current!.home),
+  return { pluginItems: await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), tools), profiles: await profilesWithLast(shared),
     skills: await skillsView(shared, tools), mcp: await serversView(shared, tools), agents: await agentsView(shared, tools) };
 }
 
@@ -1048,15 +1050,15 @@ const pluginSide = (tools: HarnessId[]): PluginSide => ({ live: async () => plug
   return (await runPlan(ops, { install: (...args) => never(args[3]), uninstall: (...args) => never([args[3]]), setSkill: markets.setSkill, setPart: markets.setPart, setWhole: markets.setWhole }, home)).done;
 } });
 
-/** Refreshes the menus' live library items and plugin copies for `tools`, from the same read the page and switch use (profileHome). */
+/** Refreshes the menus' profiles (the one last switched to too), live library items and plugin copies for `tools`, from the same read the page and switch use (profileHome). */
 async function refreshMenus(tools: HarnessId[]) {
   const home = await profileHome(tools), plugins = pluginLive(home);
-  followProfiles(lastProfiles, homeItems(home, plugins), plugins);
+  followProfiles(home.profiles, homeItems(home, plugins), plugins);
 }
 
 /** After a profile is made, changed or deleted (Central Knot's own file only, no tool changes): the profiles for the page, and the menus. */
 async function profilesSaved(): Promise<ProfilesView> {
-  const profiles = await readProfiles(current!.home);
+  const profiles = await profilesWithLast(context());
   followProfiles(profiles);
   return profiles;
 }
