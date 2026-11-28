@@ -1431,6 +1431,8 @@ export interface Outcome {
   band?: boolean;
   /** Shown as a band on Settings even without reload advice: Synchronize everything's switch-on and its band's Undo (settingspage.ts). */
   settingsBand?: boolean;
+  /** Switch-on History entry id whose Undo this Settings band holds, so only covered take-in lines drop History (settingspage.ts). */
+  everythingUndo?: string;
   /** Shown as a band on History even without warn, reloads or profileLine: a tool's Manage click (managecard.ts, historypage.ts). */
   historyBand?: boolean;
   /** Appended profileLeftUse sentence when an act ended every profile in use; keeps the result in a band (saidInStatusBar) and whole on Row 2 (matrix.ts listResult). */
@@ -1910,7 +1912,7 @@ export const switchSyncEverything = (on: boolean, answering = false) => busy(on 
   const text = !syncOn ? 'Synchronize everything is on. Nothing added yet: Automatic sync is off.'
     : `Synchronize everything is on${added ? `: it added ${plural(added, 'item')}` : ''}.`;
   const once = { label: 'Sync once', id: 'outcome-sync-once', title: 'Add what is found now; Automatic sync stays off', run: () => void syncNow() };
-  tellWritten({ page, band: true, settingsBand: true, text, ...(syncOn ? { act: undo } : { act: once, next: undo }) }, syncOn ? set.reloads : [], !!set.event);
+  tellWritten({ page, band: true, settingsBand: true, ...(undo && set.event ? { everythingUndo: set.event } : {}), text, ...(syncOn ? { act: undo } : { act: once, next: undo }) }, syncOn ? set.reloads : [], !!set.event);
 });
 
 let menuSyncHome: string | undefined;
@@ -2058,6 +2060,8 @@ async function backgroundRefresh() {
     if (!view) return;
     // A tool appeared or went away: the page leaves a kind no longer here and reads its own data again (setHome).
     setHome(view, { background: true });
+    // While Settings holds a switch-on Undo band, keep History current so take-in lines know what Undo still takes back.
+    if (state.page === 'settings' && state.outcome?.page === 'settings' && state.outcome.everythingUndo) await putHistory().catch(() => undefined);
     rerender();
   } finally {
     refreshing = false;
