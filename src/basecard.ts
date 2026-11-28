@@ -301,22 +301,23 @@ function draftPanel(pick: DraftPick): HTMLElement {
 function toolRow(file: InstructionFile, locked: boolean, lockAttrs: Record<string, string> | undefined) {
   const base = file.base!;
   const name = fileName(file.path);
+  const owner = readerNames(file);
   const key = `copy-${file.tool}`;
   const status = base.state === 'same' ? h('span.base-state', {}, icon('check', 13, 'tone-success'), 'Matches the base')
     : base.state === 'edited' ? h('span.base-state.base-edited', {}, icon('triangle-alert', 13, 'tone-warning'), `Edited in ${name}`)
     : h('span.base-state', {}, icon('circle-dashed', 13, 'tone-muted'), base.state === 'older' ? 'Has an older version' : file.exists ? 'Not in the file yet' : 'No file yet');
   return h('li.base-tool', {},
-    h('div.base-tool-line', {}, readers(file).map(tool => brandMark(tool, 14)), h('strong', {}, readerNames(file)), h('span.base-file', {}, name), status),
+    h('div.base-tool-line', {}, readers(file).map(tool => brandMark(tool, 14)), h('strong', {}, owner), h('span.base-file', {}, name), status),
     base.state !== 'edited' ? null : h('div.base-choice', {},
       h('p.base-explain', {}, `Changed outside Central Knot, so ${name} was left as it is.`),
       shown.has(key) ? [legend('the base', `${name}’s copy`),
         diffView(`base-copy-changes-${file.tool}`, lineDiff(state.base!.text, base.copy ?? ''), true, () => {}, `${name}’s copy compared with the base`)] : null,
       h('div.ins-actions', {},
         button({ variant: 'link', size: 'micro', label: shown.has(key) ? 'Hide the difference' : 'See the difference', id: `base-diff-${file.tool}`, attrs: { 'aria-expanded': String(shown.has(key)) }, onclick: () => toggle(key) }),
-        // An emptied copy can't be the base (an empty base shares nothing): only putting the base back is offered.
-        base.copy?.trim() ? button({ variant: 'outline', size: 'small', label: `Use ${name}’s copy as the base…`, id: `base-usecopy-${file.tool}`, disabled: locked, attrs: lockAttrs ?? { title: `Review making ${name}’s copy the base for every tool. Shows the change first, keeps the replaced text under Earlier versions, and can be undone.` },
+        // An emptied copy can't be the base (an empty base shares nothing): only replacing it with the base is offered.
+        base.copy?.trim() ? button({ variant: 'outline', size: 'small', label: `Make ${owner}’s copy the base…`, id: `base-usecopy-${file.tool}`, disabled: locked, attrs: lockAttrs ?? { title: `Review making ${owner}’s copy the base for every tool. Shows the change first, keeps the replaced text under Earlier versions, and can be undone.` },
           onclick: () => startBaseEdit({ text: base.copy ?? '', tools: state.base!.tools, stage: 'review', source: { kind: 'copy', tool: file.tool } }) }) : null,
-        button({ variant: 'outline', size: 'small', label: `Put the base back in ${name}…`, id: `base-restore-${file.tool}`, disabled: locked, attrs: lockAttrs ?? { title: `Review replacing ${name}’s edited copy with the base. Shows the change first, keeps the replaced text under Earlier versions, and can be undone.` },
+        button({ variant: 'outline', size: 'small', label: `Replace ${owner}’s copy with the base…`, id: `base-restore-${file.tool}`, disabled: locked, attrs: lockAttrs ?? { title: `Review replacing ${owner}’s edited copy in ${name} with the base. Shows the change first, keeps the replaced text under Earlier versions, and can be undone.` },
           onclick: () => startBaseEdit({ text: state.base!.text, tools: state.base!.tools, stage: 'review', source: { kind: 'putBack', tool: file.tool } }) }))));
 }
 
@@ -432,7 +433,7 @@ export function baseStrip(file: InstructionFile, lockedWhy?: string) {
       goTo ? button({ variant: 'link', size: 'micro', label: base.state === 'edited' ? 'Choose what to do…' : 'Update…', id: `ins-base-go-${file.tool}`, disabled: !!goWhy, attrs: lockAttrsFor(goWhy), onclick: () => {
         // On a harness's Instructions tab the Base instructions card isn't on the page: the choice is made on Instructions.
         if (!document.getElementById(goTo)) showPage('instructions');
-        const target = document.getElementById(goTo); scrollIntoBox(target); target?.focus({ preventScroll: true });
+        const target = document.getElementById(goTo); scrollIntoBox(target, 'center'); target?.focus({ preventScroll: true });
       } }) : null,
       // Not on the list any more: its block (an edited copy the list change left) can be taken out here, after a review.
       // Hidden under its own open review, so that review is the one decision on screen.

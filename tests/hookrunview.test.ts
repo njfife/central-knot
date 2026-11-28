@@ -239,7 +239,7 @@ test('Check 2: hookRunWords matches every outcome, quiet trailing run place/time
 // ---------- Pure unit tests: T1.23 & T2.28 strip lines (Check 3) ----------
 
 test('Check 3: standing line, T1.23 help card (with plugin sentence <= 30 words), and T2.28 strip notes replace strip.note', () => {
-  assert.equal(HOOK_RUN_WARN, 'Run it runs a hook’s command to show what it adds; it may change your files.');
+  assert.equal(HOOK_RUN_WARN, '“Run it” runs a hook’s command to show what it adds; it may change your files.');
 
   const claudeRun = hookStripHelp('claude-cli', true);
   assert.equal(claudeRun, 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.');
@@ -1168,7 +1168,7 @@ test('Plugin page runs installed hooks, keeps marketplace-only text hooks View s
   const codexPage = pluginPage(view, entry, 0, entry.plugins[0]);
   const codexText = dom.textOf(codexPage);
   const codexWarn = dom.textOf(dom.findAll(codexPage, n => n.className === 'session-run-warn')[0]);
-  assert.equal(codexWarn, 'Run it runs a hook’s command to show what it adds; it may change your files.');
+  assert.equal(codexWarn, '“Run it” runs a hook’s command to show what it adds; it may change your files.');
   assert.match(codexText, /Codex: Run it runs a hook even if it isn’t trusted in \/hooks\./);
   assert.match(codexText, /echo codex-installed/);
   assert.match(codexText, /echo market-only/, 'marketplace-only text hook stays listed with View source');
@@ -1269,7 +1269,7 @@ test('Plugin page runs installed hooks, keeps marketplace-only text hooks View s
     ownHooks: [{ declaredIn: '/tmp/h/.claude/settings.json', event: 'SessionStart', at: 0, launch: { shell: 'echo mine' } }],
   } as any);
   const warnText = dom.textOf(dom.findAll(withPluginCard, n => n.className === 'session-run-warn')[0]);
-  assert.equal(warnText, 'Run it runs a hook’s command to show what it adds; it may change your files.');
+  assert.equal(warnText, '“Run it” runs a hook’s command to show what it adds; it may change your files.');
   const cardHelp = dom.findAll(withPluginCard, n => n.attrs?.role === 'tooltip')[0];
   assert.match(dom.textOf(cardHelp), /Plugin hooks can change their installed files and data\./);
 });
@@ -1328,9 +1328,10 @@ test('runHook reports live installed pluginVersion at click time rather than sta
   const root = await mkdtemp(join(tmpdir(), 'ck-hook-ver-'));
   try {
     const home = join(root, 'home');
+    const tools = join(root, 'tools');
     const dataDir = join(root, 'data');
-    const bin = join(root, 'bin');
-    await standIn(bin, 'claude', '#!/bin/sh\nexit 0\n');
+    await mkdir(join(tools, '.local/bin'), { recursive: true });
+    await standIn(join(tools, '.local/bin/claude'), '#!/bin/sh\necho "2.1.327 (Claude Code)"\n', 'console.log("2.1.327");');
     const copy = join(home, '.claude/plugins/cache/team/helper/0.5.0');
     await put(join(copy, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'helper', version: '0.5.0' }));
     await put(join(copy, 'hooks/hooks.json'), JSON.stringify({ hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: 'echo live-ok' }] }] } }));
@@ -1338,7 +1339,11 @@ test('runHook reports live installed pluginVersion at click time rather than sta
     await put(join(home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'helper@team': true } }));
     const declaredIn = join(copy, 'hooks/hooks.json');
     const hook = { declaredIn, event: 'SessionStart', matcher: 'startup', at: 0, launch: { shell: 'echo live-ok' } };
-    const ctx: HookRunContext = { home, toolsHome: home, mode: 'actual', dataDir, searchPath: `${bin}:${process.env.PATH ?? ''}` };
+    const ctx: HookRunContext = {
+      home, toolsHome: tools, mode: 'actual', dataDir,
+      searchPath: '/usr/bin:/bin',
+      env: { PATH: '/usr/bin:/bin', HOME: home, CK_TEST_HOME_ONLY: 'claude' },
+    };
     const res = await runHook(ctx, { from: 'installed', tool: 'claude-cli', plugin: 'helper', marketName: 'team', declaredIn, event: 'SessionStart', at: 0, command: 'echo live-ok', fingerprint: hookFingerprint(hook) });
     assert.equal(res.outcome, 'adds');
     assert.equal(res.pluginVersion, '0.5.0');

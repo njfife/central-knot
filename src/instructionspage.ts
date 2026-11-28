@@ -323,14 +323,15 @@ export function instructionsPage() {
   const anyRunnable = files.some(file => stripHasRunnable(sessionStrip(file.tool, items, file)));
   const hookInfo: HookStripPage = { marked: false, anyRunnable };
   const waiting = baseWaiting(files);
-  const goBase = state.base ? button({ variant: 'link', size: 'micro', label: waiting ? `Base instructions · ${waiting} ↓` : 'Base instructions ↓', id: 'ins-go-base', onclick: () => {
+  const goBase = state.base ? h('button.btn.link.micro.ins-go-base', { id: 'ins-go-base', type: 'button', onclick: () => {
     const card = document.getElementById('base-card');
     scrollIntoBox(card);
-    const target = card?.querySelector<HTMLElement>('#base-text:not(:disabled), #base-save:not(:disabled), #base-edit:not(:disabled), #base-write:not(:disabled)')
+    const target = card?.querySelector<HTMLElement>('#base-review-keep:not(:disabled), #base-keep:not(:disabled)')
+      ?? card?.querySelector<HTMLElement>('#base-text:not(:disabled), #base-save:not(:disabled), #base-edit:not(:disabled), #base-write:not(:disabled)')
       ?? card?.querySelector<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), summary, [tabindex="0"]')
       ?? card;
     target?.focus({ preventScroll: true });
-  } }) : null;
+  } }, waiting ? [h('span.ins-go-label', {}, 'Base instructions'), ' ', h('span.ins-go-wait.base-pill-warn', {}, waiting), ' ', h('span.ins-go-arrow', {}, '↓')] : h('span.ins-go-label', {}, 'Base instructions ↓')) : null;
   return h('div.page', {}, instructionBands(),
     h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
       h('div.ins-about-line', {}, aboutInstructions(files, !!state.base), goBase),

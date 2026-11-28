@@ -4570,7 +4570,10 @@ async function practiceFlow() {
     await a.exists('#base-usecopy-codex-cli') && await a.exists('#base-restore-codex-cli')
     && await a.run(`(() => { const fold = document.querySelector('#base-matching'), sum = fold?.querySelector('summary'), chev = sum?.lastElementChild, explains = document.querySelectorAll('#base-card .base-choice .base-explain');
       const useBtn = document.querySelector('#base-usecopy-codex-cli'), putBtn = document.querySelector('#base-restore-codex-cli');
-      return document.querySelector('#ins-go-base')?.textContent === 'Base instructions · 1 edited copy ↓'
+      const waitPill = document.querySelector('#ins-go-base .ins-go-wait.base-pill-warn');
+      return document.querySelector('#ins-go-base')?.textContent === 'Base instructions 1 edited copy ↓'
+        && waitPill?.textContent === '1 edited copy'
+        && useBtn?.textContent === 'Make Codex’s copy the base…' && putBtn?.textContent === 'Replace Codex’s copy with the base…'
         && !!fold && !fold.open && sum?.textContent === '1 tool matches the base' && !!chev?.classList.contains('base-matching-chevron') && !chev?.classList.contains('tone-faint')
         && explains.length === 1 && explains[0].textContent === 'Changed outside Central Knot, so AGENTS.md was left as it is.'
         && /Shows the change first, keeps the replaced text under Earlier versions, and can be undone\./.test(useBtn?.title ?? '')
@@ -18095,7 +18098,7 @@ async function hookRunFlow() {
   same('nothing ran on opening Instructions, Refresh, or a redraw landing', [markerCount(), existsSync(pluginMarker)], [0, false]);
 
   // Check 3: single standing line on runnable strips, none on non-runnable; Copilot prompt-only note; Codex T2.28 note; T1.23 once & <= 30 words with plugin sentence.
-  const runWarn = 'Run it runs a hook’s command to show what it adds; it may change your files.';
+  const runWarn = '“Run it” runs a hook’s command to show what it adds; it may change your files.';
   const helpCardText = 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.';
   same('standing warning is on Claude Code and Codex strips and absent on Copilot CLI prompt-only strip',
     [await a.text('#session-claude-cli .session-run-warn'), await a.text('#session-codex-cli .session-run-warn'), await a.text('#session-copilot-cli .session-run-warn')],

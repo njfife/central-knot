@@ -7,9 +7,12 @@ export interface FakeNode {
   style: Record<string, unknown>;
   classList: { toggle: (name: string, on?: boolean) => void; add: () => void; remove: () => void; contains: (name: string) => boolean };
   children: unknown[];
+  parent?: FakeNode;
   content: { firstElementChild?: FakeNode };
   onclick?: (event: unknown) => void;
   focused: number;
+  scrollTop: number;
+  rect: { top: number; bottom: number; height: number };
   textContent: string;
   setAttribute: (key: string, value: string) => void;
   addEventListener: () => void;
@@ -19,6 +22,8 @@ export interface FakeNode {
   focus: (opts?: { preventScroll?: boolean }) => void;
   scrollTo: () => void;
   scrollIntoView: (opts?: unknown) => void;
+  closest: (selector: string) => FakeNode | null;
+  getBoundingClientRect: () => { top: number; bottom: number; height: number };
   click: () => void;
   querySelector: (selector: string) => FakeNode | null;
 }
@@ -62,6 +67,8 @@ export const makeElement = (tag = 'div'): FakeNode => {
     children: [],
     content: {},
     focused: 0,
+    scrollTop: 0,
+    rect: { top: 0, bottom: 0, height: 0 },
     get textContent() {
       return textOf(node);
     },
@@ -74,9 +81,11 @@ export const makeElement = (tag = 'div'): FakeNode => {
     addEventListener() {},
     replaceChildren(...kids: unknown[]) {
       this.children = [...kids];
+      for (const kid of kids) if (kid && typeof kid === 'object' && 'tag' in kid) (kid as FakeNode).parent = this;
     },
     append(...kids: unknown[]) {
       this.children.push(...kids);
+      for (const kid of kids) if (kid && typeof kid === 'object' && 'tag' in kid) (kid as FakeNode).parent = this;
     },
     after() {},
     focus() {
@@ -87,6 +96,17 @@ export const makeElement = (tag = 'div'): FakeNode => {
     },
     scrollTo() {},
     scrollIntoView() {},
+    closest(selector: string) {
+      let cur: FakeNode | undefined = this;
+      while (cur) {
+        if (matchesSimple(cur, selector)) return cur;
+        cur = cur.parent;
+      }
+      return null;
+    },
+    getBoundingClientRect() {
+      return this.rect;
+    },
     click() {
       if ('disabled' in this.attrs) return;
       this.onclick?.({ stopPropagation() {} });

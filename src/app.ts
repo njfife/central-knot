@@ -1643,7 +1643,7 @@ function askAboutBaseDraft(): boolean {
   if (!base || !baseDraftTyped()) return false;
   base.confirmDiscard = true;
   rerender();
-  scrollIntoBox(document.getElementById('base-head'));
+  scrollIntoBox(document.getElementById('base-head'), 'nearest');
   document.getElementById(base.stage === 'review' ? 'base-review-keep' : 'base-keep')?.focus({ preventScroll: true });
   return true;
 }

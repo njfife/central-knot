@@ -3,13 +3,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { HarnessId, InstructionFile } from '../src/types.ts';
-import { findById, findNode, installDom, textOf, type FakeNode } from './domstub.ts';
+import { findById, findNode, installDom, makeElement, textOf, type FakeNode } from './domstub.ts';
 
 let rendered: FakeNode | undefined;
 installDom({}, { userAgent: 'Macintosh', byId: id => findById(rendered, id) ?? null });
 
 const { state: app } = await import('../src/app.ts');
 const { baseCard } = await import('../src/basecard.ts');
+const { scrollIntoBox } = await import('../src/dom.ts');
 const { instructionsPage } = await import('../src/instructionspage.ts');
 
 const FILE_NAMES: Record<HarnessId, string> = {
@@ -165,7 +166,11 @@ test('Base jump link carries actionable status with arrow and lands focus in loc
   ];
   setupBase(editedFiles);
   rendered = instructionsPage() as unknown as FakeNode;
-  assert.equal(textOf(findById(rendered, 'ins-go-base')), 'Base instructions · 1 edited copy · 1 file to update ↓');
+  const waitingLink = findById(rendered, 'ins-go-base')!;
+  const waitingBadge = findNode(waitingLink, el => el.className.split(/\s+/).includes('ins-go-wait'));
+  assert.ok(waitingBadge?.className.split(/\s+/).includes('base-pill-warn'), 'waiting count carries amber pill mark');
+  assert.equal(textOf(waitingBadge), '1 edited copy · 1 file to update');
+  assert.equal(textOf(waitingLink), 'Base instructions 1 edited copy · 1 file to update ↓');
 
   const jumpFrom = () => {
     rendered = instructionsPage() as unknown as FakeNode;
@@ -194,10 +199,10 @@ test('Base jump link carries actionable status with arrow and lands focus in loc
   app.draftPick = { tool: 'claude-cli', model: '', prompt: 'Sort these instructions.' };
   assert.equal(jumpFrom(), 'base-draft-model');
 
-  // 3. Review discard question (#base-save replaced by discard confirmation): lands on first enabled control.
+  // 3. Review discard question (#base-save replaced by discard confirmation): lands on Keep, not Discard.
   setupBase([makeFile('claude-cli', 'same')]);
   app.baseEdit = { text: '- Changed.\n', hash: 'base-h', tools: ['claude-cli'], stage: 'review', confirmDiscard: true };
-  assert.equal(jumpFrom(), 'base-review-discard-yes');
+  assert.equal(jumpFrom(), 'base-review-keep');
 
   // 4. Stale draft review (#base-save disabled): lands on enabled #base-back.
   setupBase([makeFile('claude-cli', 'same')]);
@@ -227,12 +232,50 @@ test('Base matching fold puts its chevron after the label without tone-faint, an
   assert.equal(codexExplains.length, 1, 'edited-copy explanation should be one concise paragraph');
   assert.equal(textOf(codexExplains[0]), 'Changed outside Central Knot, so AGENTS.md was left as it is.');
   assert.ok(findById(choices[0], 'base-diff-codex-cli'));
-  assert.match(findById(choices[0], 'base-usecopy-codex-cli')!.attrs.title, /Shows the change first, keeps the replaced text under Earlier versions, and can be undone\./);
-  assert.match(findById(choices[0], 'base-restore-codex-cli')!.attrs.title, /Shows the change first, keeps the replaced text under Earlier versions, and can be undone\./);
+  const codexUse = findById(choices[0], 'base-usecopy-codex-cli')!;
+  const codexRestore = findById(choices[0], 'base-restore-codex-cli')!;
+  assert.equal(textOf(codexUse), 'Make Codex’s copy the base…');
+  assert.equal(textOf(codexRestore), 'Replace Codex’s copy with the base…');
+  assert.match(codexUse.attrs.title, /Shows the change first, keeps the replaced text under Earlier versions, and can be undone\./);
+  assert.match(codexRestore.attrs.title, /Shows the change first, keeps the replaced text under Earlier versions, and can be undone\./);
 
   const piExplains = findAll(choices[1], el => el.className.split(/\s+/).includes('base-explain'));
   assert.equal(piExplains.length, 1);
   assert.equal(textOf(piExplains[0]), 'Changed outside Central Knot, so AGENTS.md was left as it is.');
   assert.equal(findById(choices[1], 'base-usecopy-pi-cli'), undefined);
-  assert.match(findById(choices[1], 'base-restore-pi-cli')!.attrs.title, /Shows the change first, keeps the replaced text under Earlier versions, and can be undone\./);
+  const piRestore = findById(choices[1], 'base-restore-pi-cli')!;
+  assert.equal(textOf(piRestore), 'Replace Pi’s copy with the base…');
+  assert.match(piRestore.attrs.title, /Shows the change first, keeps the replaced text under Earlier versions, and can be undone\./);
+});
+
+test('scrollIntoBox scrolls only its enclosing .scroll box for start, center, and nearest', () => {
+  const box = makeElement('div');
+  box.className = 'scroll';
+  box.rect = { top: 100, bottom: 500, height: 400 };
+  const target = makeElement('div');
+  box.append(target);
+
+  box.scrollTop = 200;
+  target.rect = { top: 450, bottom: 490, height: 40 };
+  scrollIntoBox(target as unknown as Element, 'start');
+  assert.equal(box.scrollTop, 538, 'start places element 12 px inside scroll box top');
+
+  box.scrollTop = 200;
+  target.rect = { top: 450, bottom: 490, height: 40 };
+  scrollIntoBox(target as unknown as Element, 'center');
+  assert.equal(box.scrollTop, 370, 'center aligns element midpoint with scroll box midpoint');
+
+  box.scrollTop = 200;
+  target.rect = { top: 150, bottom: 250, height: 100 };
+  scrollIntoBox(target as unknown as Element, 'nearest');
+  assert.equal(box.scrollTop, 200, 'nearest does not move an element already in sight');
+
+  target.rect = { top: 40, bottom: 80, height: 40 };
+  scrollIntoBox(target as unknown as Element, 'nearest');
+  assert.equal(box.scrollTop, 128, 'nearest scrolls up just enough when above view');
+
+  box.scrollTop = 200;
+  target.rect = { top: 520, bottom: 560, height: 40 };
+  scrollIntoBox(target as unknown as Element, 'nearest');
+  assert.equal(box.scrollTop, 272, 'nearest scrolls down just enough when below view');
 });
