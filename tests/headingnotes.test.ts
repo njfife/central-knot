@@ -194,11 +194,11 @@ test('Off live line keeps branch priority order and drops static fallback prose 
   openKind('skills');
   assert.equal(readHeading(libraryTable(), 'off').liveLine, '1 own copy in Codex');
 
-  // 4. Multiple Off rows with other-reader/switched-off copies use the short summary without old fallback prose.
+  // 4. Multiple Off rows with other-reader/switched-off copies leave the Off heading quiet (each row's tag says so).
   const readers = [reader1, reader2];
   app.home = makeHome({ homePath: '/heading-priority-4', tools, skills: readers, library: libOf(readers) });
   openKind('skills');
-  assert.equal(readHeading(libraryTable(), 'off').liveLine, 'some tools still have copies elsewhere');
+  assert.equal(readHeading(libraryTable(), 'off').hasAfter, false);
 
   // 5. Plain Off with an unmanaged tool left out has no live line and no static fallback prose.
   app.home = makeHome({ homePath: '/heading-priority-5', tools, leftOut: ['pi-cli'], skills: [plainSkill], library: libOf([plainSkill]) });
@@ -248,4 +248,43 @@ test('Found live line handles zero and plural differing rows with real takeInAns
   assert.equal(mixed.count, '1');
   assert.equal(mixed.liveLine, undefined);
   assert.equal(mixed.roomHidden, true);
+});
+
+test('Off card names left-out tools and unreadBand folds plural plugin reasons into its card', () => {
+  const cardText = (tree: unknown, id: string) => textOf(findAll(tree, el => el.attrs?.id === `${id}-card`)[0]);
+  const bandText = (tree: unknown) => {
+    const band = findAll(tree, el => el.className.split(' ').includes('band') && !!findAll(el, c => c.attrs?.id === 'unread-plugins-info').length)[0];
+    return textOf(findAll(band, el => el.className.split(' ').includes('band-text'))[0]);
+  };
+  const plainOff = makeFact('plain-off');
+  const library = { 'plain-off': makeItem('plain-off', false) };
+  const unread = (pairs: [HarnessId, string][]): HomeView['pluginItems'] => pairs.map(([tool, plugin]) => (
+    { tool, plugin, source: '/m', marketName: 'm', listed: true, problem: `${plugin} missing.`, items: [] }
+  ));
+
+  // Left-out tool in Off card, and 4 unread plugins folded to 1 name + "and 3 more" with every reason in the card.
+  app.home = makeHome({ homePath: '/list-words-leftout', tools: ['claude-cli', 'codex-cli'], leftOut: ['pi-cli'], skills: [plainOff], library, pluginItems: unread([['claude-cli', 'p1'], ['claude-cli', 'p2'], ['claude-cli', 'p3'], ['claude-cli', 'p4']]) });
+  openKind('skills');
+  unpin();
+  const fourTree = libraryTable();
+  assert.equal(cardText(fourTree, 'section-off-info'), 'Kept in Central Knot with its versions, switched off. Where a tool still has it, its row says so; Pi, left out, keeps whatever it has.');
+  assert.equal(bandText(fourTree), 'What 4 plugins bring isn’t listed: p1 and 3 more');
+  assert.equal(cardText(fourTree, 'unread-plugins-info'), 'p1 (Claude Code): p1 missing.\np2 (Claude Code): p2 missing.\np3 (Claude Code): p3 missing.\np4 (Claude Code): p4 missing.');
+
+  // Same plugin unread in 2 distinct tools counts tools; same plugin from 2 marketplaces in 1 tool names that tool (never "2 tools").
+  app.home = makeHome({ homePath: '/list-words-same', tools: ['claude-cli', 'codex-cli'], skills: [plainOff], library, pluginItems: unread([['claude-cli', 'p1'], ['codex-cli', 'p1']]) });
+  openKind('skills');
+  const sameTree = libraryTable();
+  assert.equal(bandText(sameTree), 'What the plugin p1 brings in 2 tools isn’t listed');
+  assert.equal(cardText(sameTree, 'unread-plugins-info'), 'p1 (Claude Code): p1 missing.\np1 (Codex): p1 missing.');
+
+  const twoMarketsOneTool: HomeView['pluginItems'] = ['m1', 'm2'].map(marketName => (
+    { tool: 'claude-cli', plugin: 'p1', source: `/${marketName}`, marketName, listed: true, problem: 'Claude Code lists it, but its files are not where it records them.', items: [] }
+  ));
+  app.home = makeHome({ homePath: '/list-words-same-tool', tools: ['claude-cli', 'codex-cli'], skills: [plainOff], library, pluginItems: twoMarketsOneTool });
+  openKind('skills');
+  const sameToolTree = libraryTable();
+  assert.equal(bandText(sameToolTree), 'What the plugin p1 brings in Claude Code isn’t listed');
+  assert.equal(cardText(sameToolTree, 'unread-plugins-info'),
+    'Claude Code lists p1, but its files are not where Claude Code records them.\nClaude Code lists p1, but its files are not where Claude Code records them.');
 });
