@@ -11500,11 +11500,11 @@ async function foundOwnCopyPage() {
   // Click again and undo from History: check History's own sentence and byte-exact restoration of Pi's copy.
   await a.click(ownBtn);
   await done();
-  const findTddRow = () => a.run(`(() => { const row = [...document.querySelectorAll('li.history-row')].find(r => r.textContent.includes('tdd') && r.querySelector('.history-actions button')?.textContent === 'Undo'); return row ? { id: row.querySelector('.history-actions button')?.id ?? '', about: row.querySelector('.history-about')?.textContent?.trim() ?? '' } : null; })()`);
+  const findTddRow = () => a.run(`(() => { const row = [...document.querySelectorAll('li.history-row')].find(r => r.textContent.includes('tdd') && r.querySelector('.history-actions button')?.textContent === 'Undo'); return row ? { id: row.querySelector('.history-actions button')?.id ?? '', about: row.querySelector('.history-about')?.textContent?.trim() ?? '', use: row.querySelector('.history-choice-one .btn')?.textContent?.trim() ?? '' } : null; })()`);
   await openHistory(a, '#nav-history', async () => !!(await findTddRow())?.id);
   const tddHistory = await findTddRow();
-  same('History has the tdd let-in entry with copy wording and Undo', [!!tddHistory?.id, tddHistory?.about],
-    [true, 'Turned on in Pi. Pi’s own copy was written over and kept as a version.']);
+  same('History has the tdd let-in entry with Undo and Use Pi’s version', [!!tddHistory?.id, tddHistory?.about, tddHistory?.use],
+    [true, 'Turned on in Pi.', 'Use Pi’s version']);
   await a.click(byId(tddHistory.id));
   await done();
   same('History Undo brings Pi’s tdd copy back byte for byte and leaves OpenCode untouched', [readNow(piTddPath), readNow(ocTddPath)], [piTddMine, pluginTdd]);
@@ -18888,6 +18888,30 @@ async function libraryFlow() {
     except: [], applied: {}, own: {}, deleted: { at: foldAt(1.1) } };
   skill(join(O.home, `.central-knot/items/skills/${retired}/versions`), retiredHash, text(retired, 'Kept from the last planning review.'));
   sFold.items['lapsed-notes'] = { ...structuredClone(sFold.items['legacy-skill']), key: 'lapsed-notes', name: 'lapsed-notes', on: false, applied: {}, deleted: { at: foldAt(1.05) } };
+  // Real items for History's folded/single-tool rows (and release-prose), matching what their entries say happened; only the two pre-library entries stay without records.
+  const skillDirOf = Object.fromEntries(sixIds.map((id, at) => [id, oSkillDirs[at]]));
+  const seedSkill = async (key, body, on, inTools, extra = []) => {
+    const hash = await seedVersion(key, body);
+    // OpenCode reads Claude Code's skills folder (anotherWay), so Central Knot puts no copy of its own there when Claude Code has it.
+    const placed = inTools.includes('claude-cli') ? inTools.filter(tool => tool !== 'opencode-cli') : inTools;
+    const applied = on ? Object.fromEntries(placed.map(tool => [tool, hash])) : {};
+    if (on) for (const tool of placed) skill(join(O.home, skillDirOf[tool]), key, text(key, body));
+    sFold.items[key] = {
+      key, name: key, on, hash,
+      versions: [{ hash, at: foldAt(10), from: { how: 'found', harness: inTools[0] ?? 'claude-cli' } }, ...extra],
+      except: sixIds.filter(tool => !inTools.includes(tool)), applied, own: {},
+    };
+    return hash;
+  };
+  const rfcHash = await seedSkill('draft-rfc', 'Reviews architecture drafts before sign-off.', false, fiveIds);
+  const allHash = await seedSkill('all-six', 'Checks formatting across every workspace.', false, sixIds);
+  await seedSkill('release-prose', 'Polishes release notes before publishing.', false, sixIds);
+  await seedSkill('one-tool', 'Runs Codex-only lint checks.', true, ['codex-cli']);
+  await seedSkill('two-tools', 'Shares review checklists between Claude Code and Codex.', true, ['claude-cli', 'codex-cli']);
+  const overOld = await seedVersion('draft-over', 'Claude Code’s own draft-over copy.');
+  const overNow = await seedSkill('draft-over', 'Central Knot’s draft-over copy.', true, fiveIds,
+    [{ hash: overOld, at: foldAt(1.5), from: { how: 'was-in', harness: 'claude-cli' } }]);
+  sFold.items['draft-over'].versions[1].from.replacedBy = overNow;
   writeFileSync(oSkillRec, `${JSON.stringify(sFold, null, 2)}\n`);
   hFold.events.push(
     { id: 'fold-legacy', at: foldAt(7), key: 'instructions:old', item: 'old', kind: 'edit', winner: { tool: 'claude-cli', hash: 'a' }, losers: ['claude-cli', 'codex-cli', 'old-cli'].map(tool => ({ tool, hash: 'a' })), orderProved: true },
@@ -18895,13 +18919,13 @@ async function libraryFlow() {
     { id: 'fold-source', at: foldAt(5), key: 'release-prose', of: 'skill', item: 'release-prose', kind: 'off', cause: 'source', link: 'https://github.com/team-samples/writing-skills/tree/main', losers: [], orderProved: true },
     { id: 'fold-one', at: foldAt(4), key: 'one-tool', of: 'skill', item: 'one-tool', kind: 'on', cause: 'switch', losers: [{ tool: 'codex-cli', hash: '' }], orderProved: true },
     { id: 'fold-two', at: foldAt(3), key: 'two-tools', of: 'skill', item: 'two-tools', kind: 'on', cause: 'switch', losers: [{ tool: 'claude-cli', hash: '' }, { tool: 'codex-cli', hash: '' }], orderProved: true },
-    { id: 'fold-all', at: foldAt(2), key: 'all-six', of: 'skill', item: 'all-six', kind: 'off', cause: 'switch', losers: sixIds.map(tool => ({ tool, hash: 'b' })), orderProved: true },
-    { id: 'fold-then', at: foldAt(1.5), key: 'draft-over', of: 'skill', item: 'draft-over', kind: 'on', cause: 'switch', losers: fiveIds.map(tool => ({ tool, hash: '' })), tookFrom: [{ tool: 'claude-cli', hash: 'old' }], orderProved: true },
+    { id: 'fold-all', at: foldAt(2), key: 'all-six', of: 'skill', item: 'all-six', kind: 'off', cause: 'switch', losers: sixIds.map(tool => ({ tool, hash: allHash })), orderProved: true },
+    { id: 'fold-then', at: foldAt(1.5), key: 'draft-over', of: 'skill', item: 'draft-over', kind: 'on', cause: 'switch', version: overNow, losers: fiveIds.map(tool => ({ tool, hash: tool === 'claude-cli' ? overOld : '' })), tookFrom: [{ tool: 'claude-cli', hash: overOld }], orderProved: true },
     { id: 'fold-gone-off', at: foldAt(1.3), key: retired, of: 'skill', item: retired, kind: 'off', cause: 'switch', losers: [{ tool: 'codex-cli', hash: 'b' }], orderProved: true },
     { id: 'fold-long', at: foldAt(1.2), key: 'cross-workspace-release-migration-checklist-v2', of: 'skill', item: 'cross-workspace-release-migration-checklist-v2', kind: 'off', cause: 'switch', losers: [{ tool: 'codex-cli', hash: 'b' }], orderProved: true },
     { id: 'fold-gone', at: foldAt(1.1), key: retired, of: 'skill', item: retired, kind: 'deleted', losers: [], orderProved: true },
     { id: 'fold-lapsed', at: foldAt(1.05), key: 'lapsed-notes', of: 'skill', item: 'lapsed-notes', kind: 'deleted', losers: [], orderProved: true },
-    { id: 'fold-five', at: foldAt(1), key: 'draft-rfc', of: 'skill', item: 'draft-rfc', kind: 'off', cause: 'switch', losers: fiveIds.map(tool => ({ tool, hash: 'b' })), orderProved: true },
+    { id: 'fold-five', at: foldAt(1), key: 'draft-rfc', of: 'skill', item: 'draft-rfc', kind: 'off', cause: 'switch', losers: fiveIds.map(tool => ({ tool, hash: rfcHash })), orderProved: true },
     { id: 'fold-one-choice', at: foldAt(0.7), key: 'legacy-skill', of: 'skill', item: 'legacy-skill', kind: 'conflict', winner: { tool: 'codex-cli', hash: legacyItem.hash }, version: legacyItem.hash, previous: chosenX, losers: [{ tool: 'pi-cli', hash: chosenY }], orderProved: true },
     { id: 'fold-chosen', at: foldAt(0.6), key: 'legacy-skill', of: 'skill', item: 'legacy-skill', kind: 'chosen', winner: { tool: 'codex-cli', hash: legacyItem.hash }, losers: [{ tool: 'copilot-cli', hash: chosenX }, { tool: 'pi-cli', hash: chosenY }], orderProved: true },
     { id: 'fold-clash', at: foldAt(0.5), key: 'active-skill', of: 'skill', item: 'active-skill', kind: 'conflict', winner: { tool: 'codex-cli', hash: clashItem.hash }, version: clashItem.hash, previous: clashP, losers: [{ tool: 'claude-cli', hash: clashP }, { tool: 'copilot-cli', hash: clashX }, { tool: 'pi-cli', hash: clashY }, { tool: 'opencode-cli', hash: clashZ }], orderProved: true },
@@ -18914,7 +18938,7 @@ async function libraryFlow() {
     [await rowAbout('draft-rfc'), await rowAbout('draft-over'), await rowAbout('all-six'), await rowAbout('two-tools'), await rowAbout('one-tool'), await rowAbout('release-prose'), await rowAbout('legacy'), await rowAbout('old')],
     [
       { text: 'Turned off: removed from 5 of 6 tools', folds: 1 },
-      { text: 'Turned on: put in 5 of 6 tools — Claude Code’s own copy was written over and kept as a version.', folds: 1 },
+      { text: 'Turned on: put in 5 of 6 tools', folds: 1 },
       { text: 'Turned off: removed from all 6 tools', folds: 1 },
       { text: 'Turned on: put in Claude Code and Codex.', folds: 0 },
       { text: 'Turned on: put in Codex.', folds: 0 },
@@ -19046,11 +19070,27 @@ async function libraryFlow() {
       return [said.top >= panel.top && said.bottom <= panel.bottom + 0.5, panel.top >= view.top && panel.bottom <= view.bottom + 0.5]; })()`), [true, true]);
   await historyShot('history-kept-let-go-860-light', 'light');
   await o.click(goneMark('fold-lapsed'));
+  // Every item row except the pre-library rows has its file mark; draft-over offers Use Claude Code’s version with a mark opening its kept text.
+  const unmarked = await o.run(`[...document.querySelectorAll('.history-row')].filter(row => row.dataset.kind !== 'everything' && !row.querySelector('.history-what strong + .row-file-btn')).map(row => [row.id, row.querySelector('.history-what strong')?.getAttribute('title')])`);
+  same('every item row in History has its file mark except the pre-library rows without a record', unmarked,
+    [['history-row-fold-two-groups', 'legacy: no longer in Central Knot'], ['history-row-fold-legacy', 'old: no longer in Central Knot']]);
+  await o.run(`document.getElementById('history-row-fold-then').scrollIntoView({ block: 'center' }); document.activeElement?.blur?.()`);
+  const draftOver = await o.run(`(() => { const row = document.getElementById('history-row-fold-then'); return { use: row?.querySelector('.history-choice-one .btn')?.textContent?.trim() ?? '', mark: row?.querySelector('.history-choice-one .row-file-btn')?.getAttribute('title') ?? '' }; })()`);
+  same('draft-over offers Use Claude Code’s version with its kept-version mark and fits at 860', [draftOver, await o.run(CUT_OFF)],
+    [{ use: 'Use Claude Code’s version', mark: 'Read Claude Code’s version' }, []]);
+  await o.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 });
+  await historyShot('hh4-draft-over-860-light', 'light');
+  await o.click('#history-row-fold-then .history-choice-one .row-file-btn');
+  await until(async () => (await o.text('#history-row-fold-then .file-open-box pre.content') ?? '').includes('Claude Code’s own draft-over copy.'));
+  same('draft-over’s kept-version mark opens Claude Code’s overwritten copy under its row', (await o.text('#history-row-fold-then .file-open-box pre.content') ?? '').includes('Claude Code’s own draft-over copy.'), true);
+  await o.press('Escape');
+  await until(async () => !(await o.exists('.file-open-box')));
   if (shots) {
     await o.run(`document.getElementById('history-row-fold-long').scrollIntoView({ block: 'center' })`);
     await historyShot('history-file-long-name-860-light', 'light');
-    // A skill's row with no mark (draft-rfc is not in Central Knot), its name hovered: its hover says so (a native tooltip, not in the picture).
-    const name = await o.run(`(box => [box.x + box.width / 2, box.y + box.height / 2])(document.querySelector('#history-row-fold-five .history-what strong').getBoundingClientRect())`);
+    // A pre-library row with no mark (old is not in Central Knot), its name hovered: its hover says so (a native tooltip, not in the picture).
+    await o.run(`document.getElementById('history-row-fold-legacy').scrollIntoView({ block: 'center' })`);
+    const name = await o.run(`(box => [box.x + box.width / 2, box.y + box.height / 2])(document.querySelector('#history-row-fold-legacy .history-what strong').getBoundingClientRect())`);
     await o.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: name[0], y: name[1] });
     await historyShot('history-file-no-mark-860-light', 'light');
   }
@@ -19145,17 +19185,18 @@ async function libraryFlow() {
     return {
       topKind: top?.dataset.kind,
       topItem: top?.querySelector('.history-what strong')?.textContent?.trim(),
+      topAbout: top?.querySelector('.history-about')?.textContent?.trim() ?? '',
       band: document.querySelector('[data-outcome] .band-text')?.textContent?.trim() ?? '',
       undo: document.getElementById('outcome-undo')?.textContent?.trim() ?? '',
       remaining: [...document.querySelectorAll('#history-versions-list-fold-clash .history-version-who')].map(el => el.textContent),
       focused: document.activeElement?.id ?? '',
     };
   })()`);
-  same('keyboard Use writes every tool copy, logs current entry, shows History band with Undo, keeps list open and focuses next Use',
+  same('keyboard Use writes every tool copy, logs current entry, shows History band with pressed choice and Undo, keeps list open and focuses next Use',
     [activeDirs.length === 5, activeDirs.every(rel => readFileSync(join(O.home, rel, 'active-skill/SKILL.md'), 'utf8').includes('Copilot CLI conflict edit.')),
-      afterPick.topKind, afterPick.topItem, /^active-skill: the version edited in Copilot CLI \(.*\) was made current, in Claude Code, Copilot CLI, Codex, Pi and Antigravity\.$/.test(afterPick.band),
-      afterPick.undo, afterPick.remaining, afterPick.focused],
-    [true, true, 'current', 'active-skill', true, 'Undo', ['Pi’s version', 'OpenCode’s version'], 'history-fold-clash-pi-cli']);
+      afterPick.topKind, afterPick.topItem, /^The version edited in Copilot CLI \(.*\) was made current, in 5 of 6 tools$/.test(afterPick.topAbout),
+      afterPick.band, afterPick.undo, afterPick.remaining, afterPick.focused],
+    [true, true, 'current', 'active-skill', true, 'active-skill: Copilot CLI’s version is now current.', 'Undo', ['Pi’s version', 'OpenCode’s version'], 'history-fold-clash-pi-cli']);
   await historyShot('hh2-band-860-light', 'light');
   await o.click('#outcome-undo');
   await done(o);
