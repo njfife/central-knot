@@ -4,7 +4,7 @@
 // it as a tool (History's entries, and the Overview's line under its tools table, still name it). Nothing here has its own
 // engine: every change goes through the pages it mirrors, or the switch's toolchoice.ts.
 import { noteMove, KINDS, acting, harnessManaged as managed, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type PageKind } from './app.ts';
-import { manageLocked, manageRow } from './managecard.ts';
+import { manageCardFile, manageLocked, manageRow } from './managecard.ts';
 import { MARK_WORDS, installsIn, pluginsInstalled, takenItems, takesItemsOnly, viewStopped, type InstalledMarketPlugin } from './pluginstatus.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { pluginTitle, uninstallControl } from './pluginparts.ts';
@@ -185,7 +185,7 @@ function attentionLinks(snapshot: Snapshot, kinds: ReturnType<typeof tally>[]) {
  * a tool left out has its name, how it was found, its switch and its folder, and does not open; a tool not found has nothing
  * to count, so its card is its name, how to fix that, and its folder, and does not open.
  */
-function summaryCard(snapshot: Snapshot, home: HomeView, showManageInfo = false) {
+function summaryCard(snapshot: Snapshot, home: HomeView, showManageInfo = false, file?: ReturnType<typeof manageCardFile>) {
   const tool = snapshot.harness;
   const here = managed(home, tool), installed = home.sync.present.includes(tool);
   const title = [brandMark(tool, 18), h('strong.harness-card-name', {}, names[tool])];
@@ -198,8 +198,8 @@ function summaryCard(snapshot: Snapshot, home: HomeView, showManageInfo = false)
   const status = home.mode === 'actual' ? h(`span.harness-card-status${installed ? '' : '.tone-faint'}`, {}, detectionLine(snapshot, home)) : null;
   const path = h('span.harness-card-path', {}, pathText(shownPath(snapshot.root), snapshot.root));
   const foot = (manage: HTMLElement) => h('div.harness-card-foot', {}, manage, path);
-  if (installed && !here) return h('div.card.harness-card.harness-card-out', { id: `harness-card-${tool}`, 'aria-label': `${names[tool]}: not managed` },
-    h('div.harness-card-main', {}, head, status, h('span.harness-card-next', {}, 'Left out')), foot(manageRow(home, tool)));
+  if (installed && !here) return h(`div.card.harness-card.harness-card-out${file?.panel ? '.file-anchored' : ''}`, { id: `harness-card-${tool}`, 'aria-label': `${names[tool]}: not managed` },
+    h('div.harness-card-main', {}, head, status, h('span.harness-card-next', {}, 'Left out')), foot(manageRow(home, tool, false, file?.mark)));
   if (!here) return h('div.card.harness-card.harness-card-missing', { id: `harness-card-${tool}`, 'aria-label': `${names[tool]}: not found` },
     // When no tool at all was found, the note above already says to install one; each card need not repeat it.
     h('div.harness-card-main', {}, head, status, home.sync.present.length ? h('span.harness-card-next', {}, `Install ${names[tool]}, then Refresh.`) : null), path);
@@ -249,7 +249,7 @@ function otherApps(home: HomeView) {
     h('ul', {}, apps.map(app => h('li.other-app', {}, h('strong.other-app-name', {}, app.name, app.version ? h('span.other-app-version', {}, ` ${shortBuild(app.version)}`) : null), h('span.other-app-says', {}, app.says)))));
 }
 
-function everyHarness(home: HomeView) {
+function everyHarness(home: HomeView, file: ReturnType<typeof manageCardFile>) {
   const cards = listed(home);
   // What the passes since the last read copied where it was missing, every kind's: news on this list.
   const caught = caughtUpBand(home);
@@ -272,7 +272,9 @@ function everyHarness(home: HomeView) {
   return h('div.page', {}, caught ? h('div.bands', {}, caught) : null,
     h('div.scroll.harness-scroll', { id: 'harnesses-scroll' },
       notes.length ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), h('span', {}, notes.flatMap((part, index) => (index ? [' ', ...part] : part)))) : null,
-      h('div.harness-cards', { 'data-count': String(cards.length) }, cards.map(snapshot => summaryCard(snapshot, home, snapshot.harness === firstManaged))),
+      h('div.harness-cards', { 'data-count': String(cards.length) }, cards.flatMap(snapshot => [
+        summaryCard(snapshot, home, snapshot.harness === firstManaged, file.tool === snapshot.harness ? file : undefined),
+        file.tool === snapshot.harness ? file.panel ?? null : null])),
       otherApps(home)));
 }
 
@@ -446,5 +448,6 @@ export function harnessesPage() {
   if (!home) return notRead();
   // A harness no longer managed (uninstalled, or its switch turned off) falls back to the list (harnessTabShown agrees); a home switch already closed any open harness (accept()).
   const snapshot = openSnapshot(home);
-  return snapshot ? oneHarness(snapshot, home) : everyHarness(home);
+  const file = manageCardFile(snapshot ? undefined : home);
+  return snapshot ? oneHarness(snapshot, home) : everyHarness(home, file);
 }

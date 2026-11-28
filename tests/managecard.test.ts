@@ -5,13 +5,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { HarnessId, HomeView, JoinCounts, JoinItem } from '../src/types.ts';
-import { findById, installDom, textOf, type FakeNode } from './domstub.ts';
+import { findById, findNode, installDom, textOf, type FakeNode } from './domstub.ts';
 
 let rendered: FakeNode | undefined;
 /** What the page asked main, in order; and what main answers next. */
 const asked: unknown[][] = [];
 const answers: { read?: unknown; manage?: unknown } = {};
-installDom({
+const { dispatch } = installDom({
   whatJoiningDoes: async (...args: unknown[]) => { asked.push(['read', ...args]); return answers.read; },
   manageTool: async (...args: unknown[]) => { asked.push(['manage', ...args]); return answers.manage; },
 }, { byId: id => findById(rendered, id) ?? null });
@@ -133,4 +133,33 @@ test('The band after the click names the one item the pass changed there, in the
     'Central Knot manages Codex now: notes, which is off, is removed there.',
     'Central Knot manages Codex now: Central Knot’s version written there for 2 items (1 over Codex’s copy, saved as a version: History can restore it).',
   ]);
+});
+
+test('A single named library item gets a file mark opening Central Knot’s panel after its card; deleted or several items get none, and Escape closes the panel before the question', async () => {
+  open();
+  const held = { versions: [], except: [], applied: {}, own: {} };
+  app.home!.skills = { ...app.home!.skills, items: [{ key: 'standup', name: 'standup', on: true, copies: {}, except: [] }, { key: 'gone', name: 'gone', copies: {}, except: [] }],
+    library: { standup: { key: 'standup', name: 'standup', on: true, hash: 'h1', ...held }, gone: { key: 'gone', name: 'gone', on: false, deleted: true, hash: 'h2', ...held } } } as unknown as HomeView['skills'];
+  const ask = async (some: Partial<JoinCounts>) => { answers.read = { counts: counts(some), plugins: false }; await press('manage-codex-cli'); };
+  await ask({ written: 2, changing: [item('standup', 'write'), item('notes', 'write')] });
+  assert.equal(findNode(findById(rendered, 'manage-codex-cli-text'), el => el.classList.contains('row-file-btn')), undefined, 'several items: no mark');
+  await ask({ removed: 1, changing: [item('gone', 'remove')] });
+  assert.equal(findNode(findById(rendered, 'manage-codex-cli-text'), el => el.classList.contains('row-file-btn')), undefined, 'deleted item: no mark');
+  await ask({ kept: 1, written: 1, changing: [item('standup', 'write', 1)] });
+  const mark = findById(findById(rendered, 'manage-codex-cli-text'), 'file-skills-standup');
+  assert.deepEqual([mark?.attrs.title, question()], ['Open the current version', 'Saves Codex’s copy of standup as a version (History can restore it), then replaces it in Codex with Central Knot’s version.']);
+  mark!.click();
+  const cards = (findNode(rendered, el => el.classList.contains('harness-cards'))?.children ?? []).map(el => (el as FakeNode).attrs?.id);
+  assert.deepEqual([cards, findById(rendered, 'harness-card-codex-cli')!.classList.contains('file-anchored'), findById(findById(rendered, 'harness-card-codex-cli'), 'file-panel-harnesses')],
+    [['harness-card-claude-cli', 'harness-card-codex-cli', 'file-panel-harnesses'], true, undefined]);
+  const escape = () => { const event = { key: 'Escape', defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } }; dispatch('keydown', event); };
+  escape();
+  assert.deepEqual([!!findById(rendered, 'file-panel-harnesses'), !!question(), findById(rendered, 'file-skills-standup')!.focused], [false, true, 1], 'first Escape closes only the panel');
+  escape();
+  assert.deepEqual([!!question(), findById(rendered, 'manage-codex-cli')!.focused], [false, 1], 'second Escape closes the question');
+  await ask({ kept: 1, written: 1, changing: [item('standup', 'write', 1)] });
+  findById(rendered, 'file-skills-standup')!.click();
+  await press('manage-codex-cli-cancel');
+  await ask({ kept: 1, written: 1, changing: [item('standup', 'write', 1)] });
+  assert.equal(findById(rendered, 'file-panel-harnesses'), undefined, 'closing the question forgets its open panel');
 });

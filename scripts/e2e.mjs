@@ -1737,6 +1737,29 @@ async function manageFlow() {
   await asking();
   same('pressed again, the switch reads afresh: the hand edit counted, without a Refresh', await a.text('#manage-codex-cli-text'), counted);
   await shotAt(a, 'question-overwrite-860-light', SMALLEST, 'light');
+  // The one named item gets the file mark, opening Central Knot's version under its card's row without changing card heights; Escape closes the panel first, then the question.
+  const cardHeights = async (width, height) => {
+    await sizeTo(a, width, height);
+    return a.run(`[...document.querySelectorAll('.harness-card')].map(el => Math.round(el.getBoundingClientRect().height))`);
+  };
+  const before1316 = await cardHeights(1316, 819), before860 = await cardHeights(...SMALLEST);
+  if (shots) { await a.run(`document.getElementById('harness-card-codex-cli')?.scrollIntoView({ block: 'end' })`); await shotAt(a, 'question-mark-860-light', SMALLEST, 'light'); await sizeTo(a, ...SMALLEST); }
+  await a.click('#harness-card-codex-cli .manage-question #file-skills-standup');
+  await waitHistory(a, () => a.run(`!!document.querySelector('#file-panel-harnesses pre.content')?.textContent?.trim()`));
+  const panelText = await a.text('#file-panel-harnesses pre.content') ?? '';
+  check('pressing the named item’s mark opens Central Knot’s version, never the left-out tool’s copy',
+    panelText.includes('Read the commits. Write what shipped') && !panelText.includes('Edited in Codex while it was left out.'), panelText);
+  same('with the panel open at 860, nothing is cut off and card heights stay unchanged', [await cardHeights(...SMALLEST), await a.run(CUT_OFF)], [before860, []]);
+  await shotAt(a, 'question-panel-860-light', SMALLEST, 'light');
+  same('with the panel open at 1316, nothing is cut off and card heights stay unchanged', [await cardHeights(1316, 819), await a.run(CUT_OFF)], [before1316, []]);
+  await shotAt(a, 'question-panel-1316-dark', [1316, 819], 'dark');
+  await fullSize(a);
+  await a.press('Escape');
+  same('first Escape closes only the file panel and returns focus to its mark', [await a.exists('#file-panel-harnesses'), await a.exists('#manage-codex-cli-text'), await a.run(`document.activeElement?.id`)], [false, true, 'file-skills-standup']);
+  await a.press('Escape');
+  same('second Escape closes the question and returns focus to the switch', [await a.exists('#manage-codex-cli-text'), await a.run(`document.activeElement?.id`)], [false, 'manage-codex-cli']);
+  await a.click('#manage-codex-cli');
+  await asking();
   await a.click('#manage-codex-cli-confirm');
   same('turned on again, the band names what the pass did there, in the question’s words', await a.text('.band-done .band-text'),
     'Central Knot manages Codex now: Codex’s copy of standup is saved as a version (History can restore it), and Central Knot’s is written over it. Each change there is in History.');
