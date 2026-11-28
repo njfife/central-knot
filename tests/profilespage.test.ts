@@ -106,3 +106,31 @@ test('With no profile in use, the page opens the one last switched to, titled as
   findById(rendered, 'status-profile-edit')?.onclick?.({});
   assert.deepEqual([app.page, profileState.open], ['profiles', 'last'], 'it lands on Profiles, with Last open');
 });
+
+test('See changes clears Find, rename and delete state, pins Changes for that visit only, and read-only hides Switch back', async () => {
+  const { newItem } = await import('../src/library.ts');
+  const { profileState, showPage } = await import('../src/app.ts');
+  const { profileStatus } = await import('../src/profilespage.ts');
+  const base = homeWith([]), kind = (library: Record<string, unknown>) => ({ ...base.skills, items: [], library });
+  app.home = { ...base, skills: kind({ notes: { ...newItem('notes', 'notes'), on: true }, standup: { ...newItem('standup', 'standup'), on: true } }), mcp: kind({}), agents: kind({}),
+    profiles: { profiles: [{ id: 'last', name: 'Last', items: ['skill:notes'], switchesPluginItems: true }], plugins: [], last: 'last' } } as unknown as HomeView;
+  app.page = 'profiles';
+  profileState.open = 'last';
+  (findById(profilesPage() as unknown as FakeNode, 'profile-find') as unknown as { oninput?: (e: unknown) => void })?.oninput?.({ target: { value: 'zzz' } });
+  Object.assign(profileState, { confirmDelete: 'last', renaming: 'last', draft: 'Draft' });
+  app.page = 'library';
+  const toggleMenu = () => { findById(profileStatus() as unknown as FakeNode, 'status-profile')?.onclick?.({ stopPropagation() {} }); return profileStatus() as unknown as FakeNode; };
+  rendered = toggleMenu();
+  assert.deepEqual([!!findById(rendered, 'status-profile-switch-back'), !!findById(rendered, 'status-profile-see-changes')], [true, true]);
+  findById(rendered, 'status-profile-see-changes')?.onclick?.({});
+  rendered = profilesPage() as unknown as FakeNode;
+  assert.deepEqual([app.page, profileState.open, profileState.confirmDelete, profileState.renaming, profileState.draft, (findById(rendered, 'profile-find') as unknown as { value?: string })?.value, profileState.changes?.off, !!findById(profileStatus() as unknown as FakeNode, 'status-profile-see-changes')],
+    ['profiles', 'last', undefined, undefined, undefined, '', ['skill:standup'], false]);
+  showPage('library');
+  showPage('profiles');
+  assert.equal(profileState.changes, undefined, 'a later visit to Profiles does not come back pinned');
+  app.home = { ...app.home, sync: { ...app.home.sync, access: { allowed: false, reason: 'Preview only.' } } };
+  rendered = toggleMenu();
+  assert.deepEqual([!!findById(rendered, 'status-profile-switch-back'), !!findById(rendered, 'status-profile-see-changes'), 'disabled' in (findById(profilesPage() as unknown as FakeNode, 'profile-switch')?.attrs ?? {})], [false, true, true]);
+  toggleMenu();
+});

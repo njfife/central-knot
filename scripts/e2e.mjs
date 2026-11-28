@@ -3300,6 +3300,9 @@ async function practiceFlow() {
   same('emptied, Incident is in use while nothing is on', (await a.text('#status-profile'))?.trim(), 'Incident');
   await a.click(`#${rowPart('switch', 'skills', 'notes')}`);
   same('notes on ends it: Incident · changed', [(await headerResultWords(a)).endsWith(' Incident · changed'), (await a.text('#status-profile'))?.trim()], [true, 'Incident · changed']);
+  await a.click('#status-profile');
+  same('an empty changed profile offers neither Switch back nor See changes in the menu', [await a.exists('#status-profile-switch-back'), await a.exists('#status-profile-see-changes')], [false, false]);
+  await a.click('#status-profile');
   await withSidebarOpen(a, ...SMALLEST, async () => {
     await checkCard(a, 'profile-changed-info', 'What is on differs from Incident, the profile you last switched to. Incident itself is as you saved it.', 'the result’s (?) for a profile with nothing in it promises no switch');
     await shotOpen('profile-changed-empty-card-860-light', SMALLEST, 'light', () => a.click('#profile-changed-info'));
@@ -3429,10 +3432,58 @@ async function practiceFlow() {
   }
   // Turned on by hand: the profile in use is worked out, so the status bar follows at once, and every place names Incident, the
   // profile last switched to, as changed: the bar, Profiles' list, title and the profile it opens, and Harnesses' line.
+  const afterIncident = allFolders();
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
+  const withStandup = allFolders();
   same('after a hand click no profile is in use, and the status bar names the one last switched to: Incident · changed', (await a.text('#status-profile'))?.trim(), 'Incident · changed');
   const changedCard = 'What is on differs from Incident, the profile you last switched to. Incident itself is as you saved it; switching to it again sets what Central Knot manages as it says.';
   same('the status bar’s hover says what Incident · changed means', await a.run(`document.getElementById('status-profile')?.title`), `Profile: Incident · changed. ${changedCard} Click to switch profiles.`);
+  // Status bar menu under Incident · changed: Switch back, See changes, keyboard traversal, Back + scroll restore, and Switch back → Undo switch.
+  await a.click('#status-profile');
+  const menuOrder = [await a.all('.pf-menu-item .pf-menu-name', 'e.textContent'), await a.exists('.pf-menu-item[aria-checked="true"]')];
+  same('the status bar’s menu puts Switch back and See changes under Incident · changed', menuOrder, [['Incident · changed', 'Switch back', 'See changes', 'Edit profiles…'], false]);
+  const keyIds = [];
+  for (const key of ['ArrowDown', 'ArrowDown', 'ArrowDown', 'Home', 'End']) { await a.press(key); keyIds.push(await a.run('document.activeElement?.id')); }
+  await a.press('Escape');
+  same('menu keys traverse Switch back and See changes in order, and Escape returns focus to the status bar',
+    [keyIds.slice(0, 3), keyIds[3]?.startsWith('status-profile-'), keyIds[4], await a.exists('.pf-menu'), await a.run('document.activeElement?.id')],
+    [['status-profile-switch-back', 'status-profile-see-changes', 'status-profile-edit'], true, 'status-profile-edit', false, 'status-profile']);
+  await shotOpen('pc2-menu-860-light', SMALLEST, 'light', () => a.click('#status-profile'));
+  if (shots) await a.press('Escape');
+  await shotOpen('pc2-menu-1316-dark', [1316, 819], 'dark', () => a.click('#status-profile'));
+  if (shots) await a.press('Escape');
+  await sizeTo(a, ...SMALLEST);
+  await a.click('#library-kind-all');
+  const libScroll = await a.run(`(() => { const el = document.querySelector('.scroll.matrix'); if (el) el.scrollTop = 60; return Math.round(el?.scrollTop ?? 0); })()`);
+  await a.click('#status-profile');
+  await a.click('#status-profile-see-changes');
+  same('See changes opens Incident on Profiles with Changes pinned and switches nothing',
+    [await a.run(`document.querySelector('#profile-changes')?.getAttribute('aria-pressed')`), await a.all('.pf-section strong', 'e.textContent'),
+      await a.all('.pf-row[data-item]', 'e.dataset.item'), allFolders()],
+    ['true', ['Turns off'], ['skill:standup'], withStandup]);
+  await shotOpen('pc2-see-changes-860-light', SMALLEST, 'light');
+  await a.run('document.activeElement?.blur()');
+  const macBack = process.platform === 'darwin';
+  for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: macBack ? '[' : 'ArrowLeft', modifiers: macBack ? 4 : 1 });
+  await a.settle();
+  const backScroll = await a.run(`Math.round(document.querySelector('.scroll.matrix')?.scrollTop ?? -1)`);
+  same('Back from See changes returns to the Library at its scroll place', [await a.text('h1.page-title'), libScroll > 0, backScroll], ['Library', true, libScroll]);
+  await fullSize(a);
+  await a.click('#nav-profiles');
+  same('a later visit to Profiles does not come back pinned by See changes', await a.run(`document.querySelector('#profile-changes')?.getAttribute('aria-pressed')`), 'false');
+  await openKind(a, 'skills');
+  const profileEventsBefore = jsonOrNothing(join(practice, '.central-knot/history.json'))?.events?.filter(event => event.kind === 'profile').length ?? 0;
+  await a.click('#status-profile');
+  await a.click('#status-profile-switch-back');
+  const profileEventsAfter = jsonOrNothing(join(practice, '.central-knot/history.json'))?.events?.filter(event => event.kind === 'profile').length ?? 0;
+  same('Switch back restores Incident, every tool’s files and one History entry, with Undo switch in the Library header',
+    [(await headerResultWords(a)).startsWith('Switched to Incident: 1 item turned off.'), await a.exists('#outcome-undo'),
+      (await a.text('#status-profile'))?.trim(), allFolders(), profileEventsAfter - profileEventsBefore],
+    [true, true, 'Incident', afterIncident, 1]);
+  await shotOpen('pc2-switch-back-library-860-light', SMALLEST, 'light');
+  await fullSize(a);
+  await a.click('#outcome-undo');
+  same('Undo switch puts the hand change back and restores Incident · changed', [allFolders(), (await a.text('#status-profile'))?.trim()], [withStandup, 'Incident · changed']);
   await a.click('#nav-profiles');
   const titleWords = () => a.run(`[...document.querySelector('.profile-header h2').childNodes].filter(node => !node.classList?.contains('info-wrap')).map(node => node.textContent).join('')`);
   same('Profiles opens Incident, titled Incident · changed and so named in the list, each saying what that means',
@@ -3466,8 +3517,8 @@ async function practiceFlow() {
   await a.click('#pf-skill\\:release-notes');
   await fullSize(a);
   await a.click('#status-profile');
-  same('the status bar’s menu names Incident as changed, unticked, a click away from switching back', [await a.all('.pf-menu-item .pf-menu-name', 'e.textContent'), await a.exists('.pf-menu-item[aria-checked="true"]')],
-    [['Incident · changed', 'Edit profiles…'], false]);
+  same('the status bar’s menu names Incident as changed, unticked, with Switch back and See changes under it', [await a.all('.pf-menu-item .pf-menu-name', 'e.textContent'), await a.exists('.pf-menu-item[aria-checked="true"]')],
+    [['Incident · changed', 'Switch back', 'See changes', 'Edit profiles…'], false]);
   await a.click('#status-profile');
   await a.click('#nav-harnesses');
   same('Harnesses names it the same way: Profile: Incident · changed.', [(await a.text('.tools-note > span'))?.includes('Profile: Incident · changed.'), await a.text('#harnesses-profile')], [true, 'Incident · changed']);
