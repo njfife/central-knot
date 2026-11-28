@@ -92,6 +92,9 @@ export function markCell(view: PluginsView, entry: MarketplaceView, plugin: Plug
   return workingCell(entry, plugin, tool, id) ?? h('div.ov-cell', { role: 'cell' }, h(`span.cell-button.cell-mark.cell-plain.${look}`, { id, role: 'img', title: words, 'aria-label': words, 'data-state': mark }, glyph()));
 }
 
+/** A tool that takes items one by one with its items there, kept out by its box or not (`stays`): drawn and counted as its items. */
+export const itemsThere = (mark: ToolMark, tool: HarnessId) => mark === 'items' || (mark === 'stays' && !takesPlugins(tool));
+
 /**
  * One tool's box on the plugin's page (pluginstatus.ts boxOf: ticked, or off with why), whose click joins the page's list
  * (pluginstate.ts turnPlugin; what it records: pluginrecord.ts A TOOL'S BOX). Its name and tooltip say what a click will do.
@@ -101,7 +104,8 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
   const { mark, words } = markOf(view, entry, plugin, tool, offered), box = boxOf(view, entry, plugin.name, tool, { mark, words });
   const label = box.held ? words : `${words} ${box.off ?? boxDoes(view, entry, plugin.name, tool, mark, box.ticked)}`;
   // Ticked with its items in full only where each is on there or the same as his (pluginstatus.ts itemsAllIn); else a dash, mixed.
-  const some = mark === 'items' && !itemsAllIn(entry, plugin.name, tool), shown = some ? { ...MARK_LOOKS[mark], glyph: () => icon('minus', 16) } : MARK_LOOKS[mark];
+  const items = itemsThere(mark, tool), some = items && !itemsAllIn(entry, plugin.name, tool);
+  const shown = some ? { ...MARK_LOOKS.items, glyph: () => icon('minus', 16) } : MARK_LOOKS[items ? 'items' : mark];
   const { look, glyph } = box.ticked || box.held ? shown : { look: 'cell-absent', glyph: () => null };
   return workingCell(entry, plugin, tool, id) ?? waitingCell(entry, plugin, tool, id) ?? h('div.ov-cell', { role: 'cell' }, h(`button.cell-button.cell-box.${look}`, { type: 'button', id, role: 'checkbox', 'aria-checked': some ? 'mixed' : String(box.ticked),
     'aria-label': label, title: label, 'data-state': mark, disabled: !!box.off || pluginBusy(entry.source, plugin.name),
@@ -137,7 +141,8 @@ export function uninstallControl(entry: MarketplaceView, plugin: PluginView, too
 
 /** What a click on a tool's box (or its switch on a tool's Plugins tab when `asSwitch`) does there, and its Undo, in the state it is drawn in (pluginrecord.ts A TOOL'S BOX and row 9). */
 export function boxDoes(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, mark: ToolMark, ticked: boolean, asSwitch = false): string {
-  const what = takesPlugins(tool) ? plugin : `${plugin}’s items`;
+  // In a tool that takes items one by one a tick lets every item in, one kept out there by its own switch too (pluginlibrary.ts clickOn).
+  const what = takesPlugins(tool) ? plugin : `all of ${plugin}’s items`;
   const where = names[tool];
   const sw = entry.switches?.[plugin];
   const on = !!sw?.entry?.on;
