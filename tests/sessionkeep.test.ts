@@ -255,7 +255,7 @@ test('Check 1: nothing is created or written before the click; clicking keeps st
   assert.equal(h.keeper.view(homeC).on, false, 'receipts on disk do not establish consent');
   assert.equal(await pathExists(sessionLockPath(homeC)), false, 'no sweep ran on unconsented home with receipts');
 
-  // Reopen Home A and click Start keeping session costs.
+  // Reopen Home A and click Keep costs for a 7-day view.
   await h.openHome(homeA);
   const reply = await h.keeper.setKeep(homeA, true);
   assert.equal(reply.refused, undefined);
