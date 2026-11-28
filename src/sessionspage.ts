@@ -6,12 +6,14 @@
 // is held in app.ts state.sessions (pagedata.ts). 7 days, once drawn, ask the keeper for a sweep (main.ts sessions:sweep →
 // sessionkeep.ts sweepNow) and, while in view, are read again whenever an attempt of the keeper's ends (keeperNews), and once
 // when the window is shown again (windowBack); such a read asks for none. Beside the choice sits
-// "Start keeping session costs" (with its infoMark), "Collecting…" while sweeping, or "Stop keeping" once kept (sessionkeep.ts); any
-// refusal shows verbatim inline. This module makes the period's local midnights from the calendar (boundsOf) and says the rows:
-// every figure and sum is sessionrow.ts's, and the tools read are presence.ts SESSION_TOOLS. What a person needs is on the page;
-// the heading's price dates, lower-bound reasons and unpriced reasons live in conditional infoMark cards, while per-tool and per-row
-// details stay on hover (the native `title`); a day's rows are built only once it is opened. Not here: reading files or the record,
-// pricing, summing, sweeping.
+// "Keep costs for a 7-day view" while off, "Collecting…" while sweeping, or "Stop keeping" once kept, both buttons sharing one
+// infoMark (sessionkeep.ts); any refusal shows verbatim inline. This module makes the period's local midnights from the calendar
+// (boundsOf) and says the rows: every dollar figure, token sum and session total is sessionrow.ts's (nested agent counts are
+// summed from row.children), and the tools read are presence.ts SESSION_TOOLS. What a person needs is on the page; the heading's
+// price dates, lower-bound reasons, unpriced reasons (carrying session count and price dates when no estimate exists) and model
+// aliases live in conditional infoMark cards, while per-tool and per-row details stay on hover (the native `title`, preserved on
+// unpriced-only tool figures too); column amounts end on one right edge with qualifiers stacked beneath; a day's rows are built
+// only once it is opened. Not here: reading files or the record, pricing, summing, sweeping.
 import { announce, keepingBusy, rerender, state, switchSessionCosts, windowVisible } from './app.ts';
 import { brandMark } from './brand.ts';
 import { button, h, icon, infoCardId, infoMark } from './dom.ts';
@@ -42,7 +44,7 @@ const opened = new Set<string>();
 const drawnDays = new Set<string>();
 /** The most sessions today may have and still open by itself among 7 days (dayFold). */
 const OPEN_TODAY_UP_TO = 10;
-const ONE_HOUR = 'One-hour cache writes are priced at the shorter cache’s rate; they cost more.';
+const ONE_HOUR = 'One-hour cache writes are priced at the shorter cache or input rate; higher rate unknown.';
 const TOKEN_HEADS = ['Input', 'Cached', 'Cache-written', 'Output'];
 
 /** Local midnight `back` days before `now`'s day, from the calendar: a day is 23 or 25 hours when the clocks change, never 24 added. */
@@ -123,75 +125,102 @@ function dayChoice(home: HomeView) {
 
 /** Dollars as money: cents, or two significant digits under a cent. */
 const dollars = (amount: number) => amount.toLocaleString('en-US', { style: 'currency', currency: 'USD', ...(amount < 0.01 ? { maximumSignificantDigits: 2 } : {}) });
-/** A sum's dollars: "≈ $21.40", "≈ $21.40 or more" for a lower bound; blank where nothing was priced. */
-const estimate = (cost: CostSum) => (cost.dollars === undefined ? '' : `≈ ${dollars(cost.dollars)}${cost.atLeast ? ' or more' : ''}`);
+/** A sum's dollar amount alone ("≈ $21.40"); blank where nothing was priced. */
+const amount = (cost: CostSum) => (cost.dollars === undefined ? '' : `≈ ${dollars(cost.dollars)}`);
+/** A sum's dollars in inline prose ("≈ $21.40", "≈ $21.40 or more"); blank where nothing was priced. */
+const estimate = (cost: CostSum) => (cost.dollars === undefined ? '' : `${amount(cost)}${cost.atLeast ? ' or more' : ''}`);
 const sentence = (words: string) => `${words[0]!.toUpperCase()}${words.slice(1)}.`;
 
-/** Why requests have no price, each reason once: "no price known" where no matching rate (no row for the provider or model) is the only one, else what each was. */
-function noPriceWords({ noRow, speedOrTier, other }: UnpricedBy): string {
+/** Why requests have no price, each reason once: concise inline ("no price known"), or naming the missing rate in cards and hovers. */
+function noPriceWords({ noRow, speedOrTier, other }: UnpricedBy, detail = false): string {
   const why = [...(noRow ? [`${plural(noRow, 'request')} with no matching rate`] : []),
     ...speedOrTier.map(each => (each.requests === 1 ? `a ${each.saved} reply` : `${each.requests} ${each.saved} replies`)),
     ...(other ? [`${plural(other, 'request')} for another reason`] : [])];
-  return noRow && why.length === 1 ? 'no price known' : `no price known for ${andList(why)}`;
+  return noRow && why.length === 1 ? (detail ? 'no matching rate in Central Knot’s price list' : 'no price known') : `no price known for ${andList(why)}`;
 }
 
 /**
- * A sum as a row, a day of 7 days, and a tool say it: its estimate in bold, `about` (the other reasons it may be low, first)
- * and the one-hour reason on its hover; how many have no price, why on theirs: "2 unpriced", or with `requests` (a day of 7 days,
- * where a bare count would read as sessions) "2 requests unpriced".
+ * A column cell's sum (day, session, nested agent, or model line): the dollar amount alone flush right, with any "or more" and
+ * unpriced count stacked beneath so amounts share one right edge; an unpriced-only cell sits on one line.
  */
-function sumView(cost: CostSum, about: string[] = [], requests = false): [HTMLElement | null, HTMLElement | null] {
-  const title = [...about, ...(cost.oneHourLow ? [ONE_HOUR] : [])].join(' ');
-  return [cost.dollars === undefined ? null : h('strong.sessions-estimate', title ? { title } : {}, estimate(cost)),
-    cost.unpriced ? h('span.sessions-unpriced', { title: sentence(noPriceWords(cost.unpricedBy)) }, `${requests ? plural(cost.unpriced, 'request') : cost.unpriced} unpriced`) : null];
+function costCell(cost: CostSum, kind: 'row' | 'day' | 'model' = 'row'): (Node | string | null)[] {
+  const whyLow = cost.oneHourLow ? ONE_HOUR : '';
+  const unpricedTitle = cost.unpriced ? sentence(noPriceWords(cost.unpricedBy, true)) : '';
+  if (cost.dollars === undefined) {
+    if (!cost.unpriced) return [];
+    return [kind === 'model' ? h('span.sessions-unpriced', {}, noPriceWords(cost.unpricedBy))
+      : h('span.sessions-unpriced', { title: unpricedTitle }, `${kind === 'day' ? plural(cost.unpriced, 'request') : cost.unpriced} unpriced`)];
+  }
+  const more = cost.atLeast ? h('span.sessions-more', whyLow ? { title: whyLow } : {}, 'or more') : null;
+  const unpriced = cost.unpriced ? h('span.sessions-unpriced', { title: unpricedTitle }, `${kind === 'day' ? plural(cost.unpriced, 'request') : cost.unpriced} unpriced`) : null;
+  const notes = [more, unpriced].filter((node): node is HTMLElement => node !== null);
+  const amountTag = kind === 'model' ? 'span.sessions-amount' : 'strong.sessions-estimate';
+  return [h(amountTag, !more && whyLow ? { title: whyLow } : {}, amount(cost)),
+    notes.length ? ' ' : null, notes.length ? h('span.sessions-cost-note', {}, ...(notes.length === 2 ? [notes[0]!, ' ', notes[1]!] : notes)) : null];
 }
 
-/** Each model's price and tokens by kind, on the page's columns: in an opened row and in By model; its saved id as saved. */
-function modelLines(models: ModelCost[]) {
+/** Injective DOM id fragment without hyphens, so `-`-joined alias ids have unambiguous parts and never meet `-card`. */
+const safeId = (text: string) => text.replace(/[^a-zA-Z0-9]/g, char => `_${char.charCodeAt(0).toString(16)}_`);
+
+/** Each model's price and tokens by kind, on the page's columns: in an opened row and in By model; its saved id as saved, any wider-rule alias behind an info mark. */
+function modelLines(models: ModelCost[], prefix: string) {
   const counts = ({ tokens }: ModelCost) => [tokens.input, tokens.cacheRead, tokens.cacheWrite, tokens.output];
-  return [h('div.sessions-line.sessions-line-head', {}, h('span.sessions-span', {}, 'Model'), h('span', {}, 'Cost'),
+  return [h('div.sessions-line.sessions-line-head', {}, h('span.sessions-span', {}, 'Model'), h('span.sessions-line-cost', {}, 'Cost'),
     h('span.sessions-counts', {}, ...TOKEN_HEADS.map(head => h('span', {}, head)))),
-  ...models.map(model => h('div.sessions-line', { 'data-model': model.model },
-    h('span.sessions-span', {}, h('span.sessions-model', {}, model.model), ...model.cost.pricedAs.map(as => h('span.sessions-as', {}, `priced as ${as.as}`))),
-    h('span', {}, [estimate(model.cost), model.cost.unpriced ? noPriceWords(model.cost.unpricedBy) : ''].filter(Boolean).join('; ')),
-    h('span.sessions-counts', {}, ...counts(model).map((count, index) => h('span', { 'data-label': TOKEN_HEADS[index]!.toLowerCase() }, count.toLocaleString())))))];
+  ...models.map(model => {
+    const aliasId = model.cost.pricedAs.length ? `sessions-alias-${safeId(prefix)}-${safeId(model.model)}` : undefined;
+    const aliasText = model.cost.pricedAs.length ? `Priced as ${andList(model.cost.pricedAs.map(as => as.as))}.` : '';
+    return h('div.sessions-line', { 'data-model': model.model },
+      h('span.sessions-span', aliasId ? { 'data-info-block': true } : {},
+        h('span.sessions-model', aliasId ? { 'aria-describedby': infoCardId(aliasId) } : {}, model.model),
+        aliasId ? infoMark(aliasId, model.model, aliasText) : null),
+      h('span.sessions-line-cost', {}, ...costCell(model.cost, 'model')),
+      h('span.sessions-counts', {}, ...counts(model).map((count, index) => h('span', { 'data-label': TOKEN_HEADS[index]!.toLowerCase() }, count.toLocaleString()))));
+  })];
 }
 
-/** Notes whether a `<details>` was opened or closed, by its key, and gives it back. */
-const noteToggle = (key: string, event: Event) => {
+/** Notes whether a `<details>` was opened or closed, by its key, building or clearing a lazy body. */
+function noteToggle(key: string, event: Event, later?: () => Node) {
   const box = event.currentTarget as HTMLDetailsElement;
-  if (box.open) opened.add(key);
-  else opened.delete(key);
-  return box;
-};
+  if (box.open) {
+    opened.add(key);
+    if (later && box.childElementCount === 1) box.append(later());
+  } else {
+    opened.delete(key);
+    if (later && box.childElementCount > 1) box.lastElementChild!.remove();
+  }
+}
 /** A `<details>` kept open across redraws by `key`. */
 const kept = (key: string, ...children: (Node | null)[]) => h('details', { open: opened.has(key), ontoggle: (event: Event) => noteToggle(key, event) }, ...children);
 /**
  * A `<details>` kept open as `kept` is, whose body `later` is there only while it is open: built on a draw then and on its
  * opening, taken out on its closing.
  */
-const keptLater = (key: string, summary: Node, later: () => Node) => h('details', { open: opened.has(key), ontoggle: (event: Event) => {
-  const box = noteToggle(key, event);
-  if (box.open && box.childElementCount === 1) box.append(later());
-  if (!box.open && box.childElementCount > 1) box.lastElementChild!.remove();
-} }, summary, opened.has(key) ? later() : null);
+const keptLater = (key: string, summary: Node, later: () => Node) => h('details', { open: opened.has(key), ontoggle: (event: Event) => noteToggle(key, event, later) },
+  summary, opened.has(key) ? later() : null);
+
+/** Total nested agent sessions under `row`, derived recursively from `row.children`. */
+const agentCount = (row: SessionRow): number => row.children.reduce((sum, child) => sum + 1 + agentCount(child), 0);
 
 /**
- * One session's row: when, the tool (or "Agent" for a session another started), the project folder's name and its sum with
- * its agents'; opened, its own models, Claude Code's own figure and why a figure is low, then its agents' rows. `scope` keeps
- * a row of a day of 7 days opened apart from the same session's row under another day.
+ * One session's row: when, the tool (or "Agent" for a session another started), the project folder's name (with its nested
+ * agent count) and its sum with its agents'; opened, its own models, Claude Code's own figure and why a figure is low, then
+ * its agents' rows. `scope` keeps a row of a day of 7 days opened apart from the same session's row under another day.
  */
 function sessionRow(row: SessionRow, agent = false, scope = ''): HTMLElement {
+  const key = `${scope}${row.tool}\0${row.session}`;
+  const agents = agentCount(row);
   const [first, last] = [row.first, row.last].map(at => clockTime(new Date(at).toISOString()));
-  const notes = [row.reported === undefined ? null : `${toolNames[row.tool]}’s own figure for this session: ${dollars(row.reported)}. Not in the totals.`,
+  const notes = [row.reported === undefined ? null : `${toolNames[row.tool]}’s own figure: ${dollars(row.reported)}. Not in the totals.`,
     row.cost.oneHourLow ? ONE_HOUR : null];
-  return h('li.sessions-row', { 'data-session': row.session, 'data-tool': row.tool }, kept(`${scope}${row.tool}\0${row.session}`,
+  return h('li.sessions-row', { 'data-session': row.session, 'data-tool': row.tool }, kept(key,
     h('summary', {}, icon('chevron-right', 12, 'tone-faint sessions-chevron'),
       h('span.sessions-when', {}, first === last ? first : `${first}–${last}`),
-      h('span.sessions-tool', {}, brandMark(row.tool, 14), agent ? 'Agent' : toolNames[row.tool]),
-      h('span.sessions-project', {}, row.project ?? ''),
-      h('span.sessions-cost', {}, ...sumView(row.withChildren.cost))),
-    h('div.sessions-body', {}, ...modelLines(row.models), ...notes.map(note => note && h('p.sessions-aside', {}, note)),
+      h('span.sessions-tool', {}, brandMark(row.tool, 14), h('span', {}, agent ? 'Agent' : toolNames[row.tool])),
+      h('span.sessions-project', {}, row.project ? h('span.sessions-project-name', {}, row.project) : null,
+        agents ? h('span.sessions-agents', {}, `+${plural(agents, 'agent')}`) : null),
+      h('span.sessions-cost', {}, ...costCell(row.withChildren.cost))),
+    h('div.sessions-body', {}, ...modelLines(row.models, key), ...notes.map(note => note && h('p.sessions-aside', {}, note)),
       row.children.length ? h('ul.sessions-children', {}, ...row.children.map(child => sessionRow(child, true, scope))) : null)));
 }
 
@@ -206,7 +235,7 @@ function dayFold(day: PeriodDay, home: string): HTMLElement {
   const rows = () => h('ul.sessions-rows', {}, ...day.rows.map(row => sessionRow(row, false, `${key}\0`)));
   const label = h('span.sessions-day-label', {}, h('span.sessions-day-name', {}, dayLineName(day.period.start)),
     h('span.sessions-day-count', {}, plural(day.total.sessions, 'session')));
-  const summary = h('summary', {}, icon('chevron-right', 12, 'tone-faint sessions-chevron'), label, h('span.sessions-cost', {}, ...sumView(day.total.cost, [], true)));
+  const summary = h('summary', {}, icon('chevron-right', 12, 'tone-faint sessions-chevron'), label, h('span.sessions-cost', {}, ...costCell(day.total.cost, 'day')));
   return h('li.sessions-day', { 'data-day': String(day.period.start) }, keptLater(key, summary, rows));
 }
 
@@ -218,10 +247,13 @@ function toolsLine(rows: DayRows | PeriodRows, day: string, present: HarnessId[]
     : rows.byTool.some(total => total.unread) ? 'No sessions found.' : 'days' in rows ? `No ${read} sessions ${day}.` : `No sessions ${day} in ${read}.`;
   const tools = rows.byTool.map(total => {
     const names = [...new Set(total.cost.providers.map(each => providerNames[each.provider] ?? each.provider))];
-    const about = [`${plural(total.sessions, 'session')}.`, ...(names.length ? [`At ${andList(names.map(name => `${name}’s`))} API prices.`] : []),
-      ...(total.unread ? [unreadWords(total.tool)] : [])];
+    const about = [`${plural(total.sessions, 'session')}.`, ...(names.length ? [`At ${andList(names.map(name => `${name}’s`))} API prices.`] : [])];
+    const estTitle = [...about, ...(total.unread ? [unreadWords(total.tool)] : []), ...(total.cost.oneHourLow ? [ONE_HOUR] : [])].join(' ');
+    const unpricedTitle = [...(total.cost.dollars === undefined ? about : []), ...(total.cost.unpriced ? [sentence(noPriceWords(total.cost.unpricedBy, true))] : [])].join(' ');
     return h('span.sessions-tool-total', { 'data-tool': total.tool, ...(total.sessions ? {} : { title: total.unread ? 'No sessions found.' : `No sessions ${day}.` }) },
-      brandMark(total.tool, 14), toolNames[total.tool], ...(total.sessions ? sumView(total.cost, about) : []));
+      brandMark(total.tool, 14), h('span', {}, toolNames[total.tool]),
+      ...(total.sessions ? [total.cost.dollars === undefined ? null : h('strong.sessions-estimate', estTitle ? { title: estTitle } : {}, estimate(total.cost)),
+        total.cost.unpriced ? h('span.sessions-unpriced', { title: unpricedTitle }, `${total.cost.unpriced} unpriced`) : null] : []));
   });
   return h('p.sessions-tools.sessions-sep', { id: 'sessions-by-tool' }, ...(rows.total.sessions ? tools : [h('span', { id: 'sessions-none' }, none)]),
     notYet.length ? h('span', { id: 'sessions-not-read' }, `Not counted: ${andList(notYet.map(tool => toolNames[tool]))}`) : null);
@@ -249,7 +281,9 @@ function readingView(rows: DayRows | PeriodRows, home: HomeView) {
   const total = any && cost.dollars !== undefined
     ? headPart(h('strong.sessions-estimate', {}, `${estimate(cost)} at API prices`), 'sessions-total-info', 'API prices', totalAbout)
     : null;
-  const unpricedAbout = cost.unpriced ? sentence(noPriceWords(cost.unpricedBy)) : '';
+  const unpricedAbout = cost.unpriced
+    ? [...(cost.dollars === undefined ? [`${plural(rows.total.sessions, 'session')}.`, ...prices] : []), sentence(noPriceWords(cost.unpricedBy, true))].join(' ')
+    : '';
   const unpriced = any && cost.unpriced
     ? headPart(h('span.sessions-unpriced', {}, `${plural(cost.unpriced, 'request')} unpriced`), 'sessions-unpriced-info', 'Unpriced requests', unpricedAbout)
     : null;
@@ -260,7 +294,7 @@ function readingView(rows: DayRows | PeriodRows, home: HomeView) {
     'days' in rows ? h('ul.sessions-days', { id: 'sessions-days' }, ...rows.days.map(day => dayFold(day, home.home)))
       : any ? h('ul.sessions-rows', {}, ...rows.rows.map(row => sessionRow(row))) : null,
     any ? h('div.sessions-by-model', { id: 'sessions-by-model' }, kept('by-model', h('summary', {}, icon('chevron-right', 12, 'tone-faint sessions-chevron'), 'By model'),
-      ...modelLines(rows.byModel))) : null,
+      ...modelLines(rows.byModel, 'by-model'))) : null,
   ];
 }
 
@@ -276,15 +310,14 @@ async function changeKeeping(on: boolean): Promise<void> {
   rerender();
 }
 
-/** Beside the period's choice: Start button with info mark while off, "Collecting…" while a sweep runs, Stop keeping once kept. */
+/** Beside the period's choice: "Keep costs for a 7-day view" while off, "Collecting…" while a sweep runs, "Stop keeping" once kept, both sharing one info mark. */
 function keepControl(home: HomeView): HTMLElement {
   const costs = home.sessionCosts;
   if (costs?.collecting) return h('span.sessions-collecting', { id: 'sessions-collecting', role: 'status' }, 'Collecting…');
-  const busy = keepingBusy();
-  if (costs?.on) return button({ variant: 'outline', label: 'Stop keeping', id: 'sessions-keep-stop', disabled: busy, onclick: () => void changeKeeping(false) });
+  const on = !!costs?.on, label = on ? 'Stop keeping' : 'Keep costs for a 7-day view';
   return h('span.sessions-keep', { 'data-info-block': true },
-    button({ variant: 'outline', label: 'Start keeping session costs', id: 'sessions-keep-start', disabled: busy, onclick: () => void changeKeeping(true), attrs: { 'aria-describedby': infoCardId('sessions-keep-info') } }),
-    infoMark('sessions-keep-info', 'Start keeping session costs', `Adds a 7-day view here, keeping ${SESSION_COSTS_KEPT}`));
+    button({ variant: 'outline', label, id: on ? 'sessions-keep-stop' : 'sessions-keep-start', disabled: keepingBusy(), onclick: () => void changeKeeping(!on), attrs: { 'aria-describedby': infoCardId('sessions-keep-info') } }),
+    infoMark('sessions-keep-info', label, `${on ? 'Keeps' : 'Adds a 7-day view here, keeping'} ${SESSION_COSTS_KEPT}`));
 }
 
 /** Verbatim refusal or settings save failure shown inline beneath the top bar. */
