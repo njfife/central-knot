@@ -39,7 +39,7 @@ import { andList, byToolOrder, fewNames, kindNouns, NOTHING_CHANGED, orList, pag
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type RowFigure, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
 import { copilotSharesYours, endedByChanges } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
-import { noteMove, acting, applyByKind, askFlash, closeResult, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, unpin, whyKindReadOnly, whyReadOnly, writeOff, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, setHome, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
+import { noteMove, acting, applyByKind, askFlash, closeResult, homeReadOwed, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, readHomeOnce, unpin, whyKindReadOnly, whyReadOnly, writeOff, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, setHome, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, infoMark, middle, pathText, toggle, whyOff, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -475,7 +475,15 @@ export function showRow(which: PageKind, key: string) {
   if (state.page !== 'library') showPage('library');
   if (state.libraryView === 'files') leaveFiles();
   const t = useLibrary(), row = rowOf(which, key);
-  if (row) reveal(t, row); else openFromAway(t.view, rowId(which, key));
+  if (row) { reveal(t, row); return; }
+  // A link from a plugin's page may arrive before its owed home read lands (pluginstate.ts oweHomeRead): await it, then reveal.
+  if (!homeReadOwed()) return;
+  const visit = state.visit, home = state.home?.home, opened = t.view.comparing;
+  void readHomeOnce().then(() => {
+    if (state.page !== 'library' || state.libraryView === 'files' || state.visit !== visit || state.home?.home !== home || (segment() !== 'all' && segment() !== which) || (views.library.comparing && views.library.comparing !== opened)) return;
+    const now = useLibrary(), found = rowOf(which, key);
+    if (found) reveal(now, found);
+  });
 }
 /** A link to a row where the person is (a notice's name, the walkthrough): Find let go only if it hides the row, the chip only if it does, From too. */
 function reveal(t: Table, row: ItemRow | PluginRow) {
@@ -537,12 +545,11 @@ const fromMenu = (): FromEntry[][] => {
 /** Whether a choice of From is in the menu now: a plugin's while it has rows here, a source's while the home records it. */
 const fromOffered = (from: From) => fromMenu().flat().some(entry => entry.value === from);
 /**
- * From or a chip chosen (`choice`): an opened row the new list no longer holds is closed, its armed Delete with it, as Find's in
- * drawTable; and the new list shows from its top (listFromTop).
+ * From or a chip chosen (`choice`): the new list shows from its top (listFromTop), and tableOf closes an opened row, armed
+ * Delete or open file it no longer holds.
  */
 function relist(t: Table, choice: Partial<Pick<View, 'from' | 'filter'>>) {
   Object.assign(t.view, choice);
-  if (!listedRows(t).some(row => idOf(row) === t.view.comparing)) Object.assign(t.view, { comparing: undefined, confirmDelete: undefined });
   listFromTop(t);
   rerender();
 }
@@ -1630,29 +1637,43 @@ function tableOf(name: keyof typeof views, kinds: PageKind[], harness?: Tool, fi
   if (files) return t;
   // A plugin with no row left, or a source removed: From is let go, at once (a chip waits while rows are pinned, below).
   if (!fromOffered(t.view.from)) t.view.from = 'anywhere';
+  const pins = pinnedHere(t);
   // Not while rows are pinned under it: they stay listed (drawTable).
-  if (pinnedHere(t).rows.size > 0) return t;
-  const over = overEveryKind(t);
-  if (t.view.filter === 'attention' && !copiesDifferChipShown(over)) t.view.filter = 'all';
-  if (t.view.filter === 'unused' && (!reading(over) || !unusedCount(over.kinds))) t.view.filter = 'all';
-  if (t.view.filter !== 'unused') t.view.unusedCounted = false;
+  if (!pins.rows.size) {
+    const over = overEveryKind(t);
+    if (t.view.filter === 'attention' && !copiesDifferChipShown(over)) t.view.filter = 'all';
+    if (t.view.filter === 'unused' && (!reading(over) || !unusedCount(over.kinds))) t.view.filter = 'all';
+    if (t.view.filter !== 'unused') t.view.unusedCounted = false;
+  }
+  // While nothing is open, armed or viewing a file, skip the reconcile (and drawnRows). While no home is read yet, or the
+  // Library's Find answer is still out (matchesFind would only check name and description), wait for the read or answer.
+  // Otherwise: a copy question doesn't outlive the visit, and an open row, an armed Delete (open or closed), or an open file
+  // (with catalog hits) closes once the list drawn no longer holds it (Find on the Library or a tool's tab, a chip, From,
+  // the kind switch, or an item gone). Covers emptyList too, and runs before the header reads comparing.
+  const { view } = t;
+  if (!state.home || (!view.comparing && !view.confirmDelete && !view.openFile)) return t;
+  if (searching(t) && !answerFor(t) && findAnswer.state === 'reading') return t;
+  const { shown, plugins } = drawnRows(t, pins), drawn = [...shown, ...plugins];
+  const holds = (id: string) => drawn.some(row => idOf(row) === id);
+  if (view.comparing && view.openedOn !== state.visit && rowsIn(t).some(skill => idOf(skill) === view.comparing && isDiffering(skill))) view.comparing = undefined;
+  if (view.comparing && !holds(view.comparing)) view.comparing = undefined;
+  if (view.confirmDelete && !holds(view.confirmDelete)) view.confirmDelete = undefined;
+  const inPlugins = searching(t) ? catalogHits(t) : undefined;
+  if (view.openFile) keepOpenFile(t, [...drawn, ...shownCatalog(t, inPlugins)]);
   return t;
 }
 /** The segment the Library was last drawn for (useLibrary), so another one starts its list afresh. */
 let drawnSegment: PageKind | 'all' | undefined;
 /**
  * The Library's table: its segment's kinds. Another segment than the one drawn last starts its list afresh: at its top (its
- * table's id names the segment: tableId), its pins let go (its list's name names its kinds: listNow), its armed Delete
- * disarmed, and an opened row it no longer lists closed. Find, the chip and From stay (a chip is offered over every kind: overEveryKind).
+ * table's id names the segment: tableId), its pins let go (its list's name names its kinds: listNow), and its armed Delete
+ * disarmed (tableOf closes an opened row it no longer lists). Find, the chip and From stay (a chip is offered over every kind: overEveryKind).
  */
 function useLibrary(): Table {
   const view = views.library, shown = segment(), moved = drawnSegment !== undefined && drawnSegment !== shown;
   drawnSegment = shown;
-  const t = tableOf('library', segmentKinds());
-  if (!moved) return t;
-  view.confirmDelete = undefined;
-  if (view.comparing && ![...rowsIn(t), ...plugged(t).rows].some(row => idOf(row) === view.comparing)) view.comparing = undefined;
-  return t;
+  if (moved) view.confirmDelete = undefined;
+  return tableOf('library', segmentKinds());
 }
 /** A tool's tab of one kind under Harnesses: that kind alone, with that tool first, in the kind's own view. */
 const useTab = (kind: PageKind, tool: Tool) => tableOf(kind, [kind], tool);
@@ -1929,14 +1950,8 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
   // After the Library's own, while Find has text: the items of plugins installed nowhere, unless the chip hides them (catalogHits).
   const inPlugins = found && catalogHits(t);
   const find = findInput({ id: 'find', label: 'Find', value: view.find, onInput: text => findTyped(t, text) });
-  // A copy question doesn't outlive the visit: back on the page, its row is closed. Nor does a row Find no longer lists stay open.
   const isOpen = (row: ItemRow | PluginRow) => idOf(row) === view.comparing;
-  if (view.comparing && view.openedOn !== state.visit && all.some(skill => isOpen(skill) && isDiffering(skill))) view.comparing = undefined;
-  if (found && view.comparing && !found.some(isOpen)) view.comparing = undefined;
-  // An open row whose file is in its details' place goes, both together, when the list no longer holds it (Find on a tool's tab).
-  if (fileInDetails(view, view.comparing) && ![...shown, ...plugins].some(isOpen)) view.comparing = undefined;
-  keepOpenFile(t, [...shown, ...plugins, ...shownCatalog(t, inPlugins)]);
-  const open = docked() && view.comparing && !underRow(t, view.comparing) ? all.find(isOpen) : undefined;
+  const open = docked() && view.comparing && !underRow(t, view.comparing) ? shown.find(isOpen) : undefined;
   const openRow = docked() && !open ? plugins.find(isOpen) : undefined;
   // Off goes last, under its own heading. Of the rest, the rows a harness's page is about (it has a copy) split into On and
   // Found; the others, only other tools have. A row whose own switch was clicked here stays under the heading it was under.
