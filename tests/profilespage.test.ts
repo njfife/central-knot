@@ -142,8 +142,8 @@ test('Marks cover own items, folded plugin skills, and Pi-linked copies, never w
   draw();
   await t.test('rowKey shares the Library’s key rule (keeps MCP server case)', () => {
     const plugged = pluginLive(home);
-    assert.deepEqual([rowKey(plugged.find(item => item.kind === 'mcp')!), rowKey(plugged.find(item => item.name === 'Triage')!)],
-      [pageRows(home, 'mcp').rows[0]!.key, 'alpha@team/triage']);
+    assert.deepEqual([rowKey(plugged.find(item => item.kind === 'mcp')!), pageRows(home, 'mcp').rows[0]!.key, rowKey(plugged.find(item => item.name === 'Triage')!)],
+      ['alpha@team/Issues', 'alpha@team/Issues', 'alpha@team/triage']);
   });
   await t.test('marks cover folded plugin skills and each same-named row opens its own text', () => {
     assert.equal(pageRows(home, 'skills').rows.length, 0);
