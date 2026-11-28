@@ -111,7 +111,7 @@ Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh'
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 const { settingsPage } = await import('../src/settingspage.ts');
 const { acting, announce, applyByKind, applyClick, askFlash, busy, closeResult, deleteProfileDef, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, profileEndedLine, profilesBefore, saveProfileDef, selectOff, switchToProfile, whyKindReadOnly, whyReadOnly,
-  loadHome, problemKey, queueClick, readAgain, restoreEvent, setRenderer, showPage, syncNow, tell, state: app } = await import('../src/app.ts');
+  loadHome, problemKey, queueClick, readAgain, restoreEvent, setHome, setRenderer, showPage, syncNow, tell, state: app } = await import('../src/app.ts');
 const { repo, repoPage } = await import('../src/repopage.ts');
 const { addMarketplace, applyPluginOps, clickOn, closeRun, forgetMarketplace, lastLines, market, pluginBusy, resetMarket, resultOn, runReloads, shownPlugins, turnFromLine, turnPlugin, undoLabel, undoLast, undoOps, usePlugins } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
@@ -710,6 +710,49 @@ test('The background’s line for a failed removal stands while the view still o
   assert.deepEqual(backgroundProblems().map(({ problem, retried }) => [problem.item, retried]), [['a', true]]);
   app.home!.syncOn = false;
   assert.deepEqual(backgroundProblems().map(({ problem, retried }) => [problem.item, retried]), [['a', false]]);
+});
+
+test('A closed removal failure stays closed while owed, clears once no longer owed even with stale caughtUp, and returns if owed again', t => {
+  onLibrary();
+  const plan = (remove: string[]) => ({ orderProved: true, keep: [], write: [], remove, forget: [], current: [], ownCopy: [] });
+  const tools = ['claude-cli', 'codex-cli', 'pi-cli'];
+  const failedRemoval = {
+    item: 'a', harness: 'claude-cli' as const, outcome: 'failed' as const, removal: true, of: 'skills' as const,
+    message: 'Could not remove Claude Code’s copy yet. Central Knot will try again.',
+  };
+  const failedWrite = {
+    item: 'b', harness: 'claude-cli' as const, outcome: 'failed' as const, of: 'skills' as const,
+    message: 'Could not write Claude Code’s copy.',
+  };
+  const viewWith = (removeA: string[], caughtUp: HomeView['sync']['caughtUp']) => {
+    const empty = { tools, items: [], notices: [], problems: [], unread: [], library: {} };
+    const skills = {
+      ...empty,
+      items: [{ key: 'a', name: 'a', copies: {}, plan: plan(removeA) }, { key: 'b', name: 'b', copies: {}, plan: plan([]) }],
+      library: { a: newItem('a', 'a'), b: newItem('b', 'b') },
+    };
+    return {
+      home: '/home', label: 'Practice', syncOn: true, snapshots: [],
+      sync: { managed: tools, caughtUp, access: { allowed: true }, gate: { state: 'ready' } },
+      skills, mcp: empty, agents: empty,
+    } as unknown as HomeView;
+  };
+  const removalKey = problemKey(failedRemoval);
+  const writeKey = problemKey(failedWrite);
+  t.after(() => {
+    app.dismissed.delete(removalKey);
+    app.dismissed.delete(writeKey);
+  });
+  setHome(viewWith(['claude-cli'], [failedRemoval, failedWrite]), { reload: false });
+  assert.deepEqual(backgroundProblems().map(({ problem, retried }) => [problem.item, retried]), [['a', true], ['b', false]]);
+  app.dismissed.add(removalKey);
+  app.dismissed.add(writeKey);
+  setHome(viewWith(['claude-cli'], [failedRemoval, failedWrite]), { reload: false });
+  assert.deepEqual([app.dismissed.has(removalKey), app.dismissed.has(writeKey), backgroundProblems()], [true, true, []]);
+  setHome(viewWith([], [failedRemoval, failedWrite]), { reload: false });
+  assert.deepEqual([app.dismissed.has(removalKey), app.dismissed.has(writeKey)], [false, true]);
+  setHome(viewWith(['claude-cli'], [failedRemoval]), { reload: false });
+  assert.deepEqual([app.dismissed.has(writeKey), backgroundProblems().map(({ problem, retried }) => [problem.item, retried])], [false, [['a', true]]]);
 });
 
 test('Sync once from the menu on Plugin marketplaces, an older run’s result there: the header draws Sync once’s result and its reasons, not the run’s', () => {

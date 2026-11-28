@@ -49,7 +49,7 @@ import type { DayRows, PeriodRows } from './sessionrow.ts';
 import { DIFFERS_REASON, selecting, stopSelecting } from './selection.ts';
 import { takesPlugins } from './presence.ts';
 import { pluginOf } from './sourcelink.ts';
-import { findInHome, holdOrder, keptNoticeList, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, supersedes, usageNotCollected } from './matrix.ts';
+import { findInHome, holdOrder, keptNoticeList, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, standingBackgroundProblems, supersedes, usageNotCollected } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -355,8 +355,11 @@ export function setHome(view: HomeView | null | undefined, { reload = true, say,
   // A cell an MCP sign-in check was asked about that this view shows gone, switched off or as another copy is held for no more.
   followView(state.mcpSignin, view);
   if (news && !acting() && sayNews) sayBackgroundNews();
-  // A closed background problem stays closed while reads report it, and is forgotten once one doesn't (matrix.ts listResult).
-  for (const key of state.dismissed) if (key.startsWith('problem:') && !view.sync.caughtUp.some(entry => problemKey(entry) === key)) state.dismissed.delete(key);
+  // A closed background problem stays closed while it still stands, and is forgotten once it doesn't (matrix.ts standingBackgroundProblems).
+  const standing = new Set(standingBackgroundProblems().map(({ problem }) => problemKey(problem)));
+  for (const key of state.dismissed) {
+    if (key.startsWith('problem:') && !standing.has(key)) state.dismissed.delete(key);
+  }
   // A record taken over at this view's look (types.ts HomeView tookOver), after whatever the read itself said.
   if (view.tookOver) announce(view.tookOver);
   forgetLostHarness();
