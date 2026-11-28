@@ -718,11 +718,10 @@ export function listingOf(plugin: string, marketName: string | undefined, source
 /**
  * One tool's box for a plugin on its page (pluginstatus.ts boxOf, as pluginparts.ts toolBox asks it), for that tool's line in the
  * Library (pluginline.ts LineFacts box) and for a tool's Plugins tab under Harnesses (harnesspage.ts pluginRow): with the tool's
- * mark and words, the listing's source and what it lists in the plugin. No box while this page's view is read (wantView);
- * `unlisted` where no listing has it.
+ * mark and words, the listing's source and what it lists in the plugin. No box until this page's view is read once (keeps the
+ * last read view during a re-read or after one that failed); `unlisted` where no listing has it.
  */
 export function lineBox(plugin: string, marketName: string, source: string | undefined, tool: HarnessId) {
-  if (market.read.state !== 'ready') return { box: undefined };
   const view = market.view, entry = listingOf(plugin, marketName, source);
   if (!view || !view.tools.includes(tool)) return { box: undefined };
   if (!entry) return { box: 'unlisted' as const };

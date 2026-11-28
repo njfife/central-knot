@@ -319,6 +319,5 @@ test('installedImpact counts only parts on in that tool now and its hooks, leavi
   const claude = installed('claude-cli', { serversOff: ['wiki'], agentsOff: ['helper'], hooks: [hook, { ...hook, at: 1 }] });
   assert.equal(installedImpact(claude).words, '2 skills, 1 MCP server and 2 hooks');
   assert.deepEqual([installedImpact(claude, undefined, true).hooks, installedImpact(claude, undefined, true).words], [0, '2 skills and 1 MCP server']);
-  assert.deepEqual([installedImpact({ ...claude, hooksOff: true }).hooks, installedImpact({ ...claude, hooksOff: true }).words], [0, '2 skills and 1 MCP server']);
   assert.equal(installedImpact(installed('claude-cli', { items: [] })).words, '');
 });

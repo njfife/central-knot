@@ -136,7 +136,7 @@ const named = (op: PluginOp) => (op.part ? `${partWords[op.part.kind][0]} ${op.p
 /** What of an installed plugin is on in its tool now (items not already off by their own switch, and its hooks unless disabled in the tool), optionally leaving out `except`. */
 export function installedImpact(install: InstalledPlugin, except?: Part, hooksOff = false) {
   const items = install.items.filter(entry => (!except || !samePart(entry, except)) && !(hasOwnSwitch(install.tool, entry.kind) && itemOffNow(install, entry)));
-  const hooks = hooksOff || install.hooksOff ? 0 : install.hooks?.length ?? 0;
+  const hooks = hooksOff ? 0 : install.hooks?.length ?? 0;
   return { items, hooks, words: counted(items, except?.kind, hooks) };
 }
 /** What else of an installed plugin turns with it in its tool: items not already off by their own switch, and its hooks. */

@@ -93,12 +93,12 @@ test('one plugin name in two marketplaces gives two groups told apart by their m
   assert.deepEqual(strip!.groups.map(group => group.plugin), [ours, theirs]);
 });
 
-test('a plugin whose marketplace isn’t added has no page here, and its group says why and where it is turned off', () => {
+test('a plugin whose marketplace isn’t added keeps its group with listed false and no duplicate says field', () => {
   const [group] = sessionStrip('claude-cli', [plugin('claude-cli', 'directory-one', atStart('echo hi'), { listed: false, marketName: 'anthropic-plugin-directory' })], {})!.groups;
-  assert.equal(group!.says, 'Not from a marketplace Central Knot or a tool here lists, so it can’t be turned off here. Claude Code’s own plugin commands turn it off.');
+  assert.deepEqual([group!.plugin?.listed, 'says' in group!], [false, false]);
 });
 
-test('readPluginItems marks hooksOff when Claude Code sets disableAllHooks so installedImpact omits hooks', async () => {
+test('sessionSettings reports disableAllHooks so installedImpact omits hooks without a second settings read', async () => {
   const home = await mkdtemp(join(tmpdir(), 'ck-sessionhooks-'));
   try {
     const installPath = join(home, '.claude/plugins/cache/team/helper/1.0.0');
@@ -108,7 +108,8 @@ test('readPluginItems marks hooksOff when Claude Code sets disableAllHooks so in
     await put(join(home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'directory', path: '/markets/team' } } }));
     await put(join(home, '.claude/settings.json'), JSON.stringify({ disableAllHooks: true }));
     const [install] = await readPluginItems({ home, dataDir: home, binaries: {} }, ['claude-cli']);
-    assert.deepEqual([install?.hooksOff, installedImpact(install!).words], [true, '1 skill']);
+    const settings = await sessionSettings('claude-cli', join(home, '.claude'));
+    assert.deepEqual([settings.ownHooksDisabled, installedImpact(install!, undefined, !!settings.ownHooksDisabled).words], ['disableAllHooks', '1 skill']);
   } finally {
     await rm(home, { recursive: true, force: true });
   }

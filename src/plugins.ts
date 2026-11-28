@@ -540,7 +540,10 @@ export async function registrations(context: PluginContext, tool: PluginTool): P
   return { entries: [...found].map(([name, source]) => ({ name, source })), unread: settings.unread || !!known?.unread };
 }
 
-const hasFiles = async (path: string) => { try { return (await readdir(path)).length > 0; } catch { return false; } };
+const folderState = (path: string) => readdir(path).then(list => (list.length > 0 ? 'has-files' as const : 'missing' as const),
+  error => (errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR' ? 'missing' as const : 'unreadable' as const));
+const notKnown = (tool: PluginTool, state: 'has-files' | 'missing' | 'unreadable', missing: string): InstallState =>
+  state === 'unreadable' ? { state: 'not-known', reason: `${toolNames[tool]} lists it, but its files couldn’t be read.`, unreadable: true } : { state: 'not-known', reason: missing };
 
 /**
  * Whether a tool's own records of its plugins can be read: each file it keeps them in is absent (nothing installed) or reads.
@@ -613,15 +616,18 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
       const live = source?.source === 'directory' && text(source.path) ? await folderItem(context, text(source.path), plugin) : undefined;
       // Options saved for it (as hookrun.ts claudePluginOptions reads them), declared by this copy or an earlier one.
       const own = ownSettings(Object.keys(record(record(record(settings?.pluginConfigs)?.[id])?.options) ?? {}).length > 0);
-      if (live?.folder && (await hasFiles(live.folder))) return { state: 'installed', path: live.folder, live: true, ...(live.version ? { version: live.version } : {}), ...own };
-      return (await hasFiles(path)) ? { state: 'installed', path, version: await copyVersion(user?.version, path), ...own } : { state: 'not-known', reason: 'Claude Code lists it, but its files are not where it records them.' };
+      const liveState = live?.folder ? await folderState(live.folder) : undefined;
+      if (live?.folder && liveState === 'has-files') return { state: 'installed', path: live.folder, live: true, ...(live.version ? { version: live.version } : {}), ...own };
+      const cacheState = liveState === 'unreadable' ? 'unreadable' : await folderState(path);
+      return cacheState === 'has-files' ? { state: 'installed', path, version: await copyVersion(user?.version, path), ...own } : notKnown(tool, cacheState, 'Claude Code lists it, but its files are not where it records them.');
     }
     case 'copilot-cli': {
       const settingsOf = () => recordJson(context, join(root, 'settings.json'));
       const listed = (await recordJson(context, join(root, 'config.json')))?.installedPlugins;
       const listing = (Array.isArray(listed) ? listed : []).map(record).find(item => item?.name === plugin && item.marketplace === marketplace);
       const cache = text(listing?.cache_path);
-      if (cache) return (await hasFiles(cache)) ? installedCopy(cache, entry, { live: false, version: await copyVersion(listing?.version, cache), readAs: { skillsListReplaces: true } }, async skills => copilotSkillsOff(await settingsOf(), plugin, skills)) : { state: 'not-known', reason: 'Copilot CLI lists it, but its files are not where it records them.' };
+      const cacheState = cache ? await folderState(cache) : undefined;
+      if (cache) return cacheState === 'has-files' ? installedCopy(cache, entry, { live: false, version: await copyVersion(listing?.version, cache), readAs: { skillsListReplaces: true } }, async skills => copilotSkillsOff(await settingsOf(), plugin, skills)) : notKnown(tool, cacheState!, 'Copilot CLI lists it, but its files are not where it records them.');
       // A plugin from a local folder marketplace is loaded live from that folder: nothing is copied. Its only record is
       // enabledPlugins: true when on, false when off (uninstall sets it to false; its folder, data and switches stay).
       const settings = await settingsOf();
@@ -631,11 +637,12 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
       if (typeof enabled === 'boolean' && source?.source === 'directory' && folderPath) {
         const item = await folderItem(context, folderPath, plugin);
         const folder = item?.folder;
-        if (folder && (await hasFiles(folder))) {
+        const liveState = folder ? await folderState(folder) : 'missing';
+        if (folder && liveState === 'has-files') {
           const copy = await installedCopy(folder, item.entry ?? entry, { live: true, version: item.version, readAs: { skillsListReplaces: true } }, async skills => copilotSkillsOff(settings, plugin, skills));
           return enabled ? copy : { ...copy, off: true };
         }
-        if (enabled) return { state: 'not-known', reason: 'Copilot CLI lists it, but the folder it loads from is gone.' };
+        if (enabled) return notKnown(tool, liveState, 'Copilot CLI lists it, but the folder it loads from is gone.');
       }
       return { state: 'not-installed' };
     }
@@ -643,9 +650,11 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
       const tables = await codexTables(context, root);
       if (!tables.plugins[id]) return { state: 'not-installed' };
       const cache = join(root, 'plugins/cache', marketplace, plugin);
-      const version = activeCodexVersion(await readdir(cache).catch(() => [] as string[]));
+      const entries = await readdir(cache).catch(error => (errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR' ? [] as string[] : 'unreadable' as const));
+      const version = Array.isArray(entries) ? activeCodexVersion(entries) : undefined;
       const folder = version && join(cache, version);
-      if (folder && (await hasFiles(folder))) {
+      const copyState = entries === 'unreadable' ? 'unreadable' : folder ? await folderState(folder) : 'missing';
+      if (folder && copyState === 'has-files') {
         // Codex names each copy's folder for its version; "local" (no version) and a commit prefix (its curated plugins)
         // name none, so the copy's manifest gives it (see copyVersion).
         const copy = await installedCopy(folder, entry, { live: false, version: await copyVersion(version === 'local' ? undefined : version, folder, true), readAs: { codex: await codexManifest(folder) } }, skills => codexSkillsOff(tables.skills, plugin, folder, skills));
@@ -653,7 +662,7 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
         const own = ownSettings(Object.keys(tables.plugins[id]!).some(key => key !== 'enabled') || tables.nested.has(id));
         return { ...copy, ...own, ...(tables.skillsInline ? { switchesHeld: INLINE_SKILLS_CONFIG } : {}) };
       }
-      return { state: 'not-known', reason: 'Codex lists it, but its files are not in its plugin cache.' };
+      return notKnown(tool, copyState, 'Codex lists it, but its files are not in its plugin cache.');
     }
   }
 }

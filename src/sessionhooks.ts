@@ -57,8 +57,6 @@ export interface SessionGroup {
   plugin?: InstalledPlugin;
   /** The person's own settings file that declares its hooks. */
   settings?: string;
-  /** Where else it is turned off: a plugin whose marketplace isn't listed here. */
-  says?: string;
   /** Why its hooks aren't known: its installed copy couldn't be read. */
   problem?: string;
   /** Each of its hooks files that couldn't be read: what those declare isn't known. */
@@ -87,7 +85,6 @@ export function sessionStrip(tool: HarnessId, items: InstalledPlugin[], file: Pi
     ...[...new Set([...own.filter(hook => addsText(tool, hook)).map(hook => hook.declaredIn), ...unread])].map(settings =>
       ({ name: 'yours', mark: YOURS, settings, unread: unread.filter(path => path === settings), hooks: textHookRows(tool, own.filter(hook => hook.declaredIn === settings), { from: 'own', tool }) })),
     ...plugins.map((install): SessionGroup => ({ name: named(install), mark: originMark(`${install.plugin}@${install.marketName}`), plugin: install,
-      ...(install.listed ? {} : { says: `Not from a marketplace Central Knot or a tool here lists, so it can’t be turned off here. ${toolNames[tool]}’s own plugin commands turn it off.` }),
       ...(install.problem ? { problem: `${install.problem} What its hooks add isn’t known.` } : {}), unread: install.hooksUnread ?? [],
       hooks: textHookRows(tool, install.hooks, { from: 'installed', tool, plugin: install.plugin, marketName: install.marketName }) }))
       .filter(group => group.problem || group.unread.length || group.hooks.length),

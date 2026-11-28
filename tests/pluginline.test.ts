@@ -5,7 +5,7 @@
 // OpenCode or Antigravity, On, kept out, Off ("No copy while it is off."), held, or there another way (libraryrow.ts hasLine).
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cantTurnOffReason, lineControl, type LineFacts } from '../src/pluginline.ts';
+import { lineControl, type LineFacts } from '../src/pluginline.ts';
 import { DIRECTORY, FROM_DIRECTORY } from '../src/pluginstatus.ts';
 import type { Components, HarnessId, InstalledPlugin, PartKind } from '../src/types.ts';
 
@@ -117,12 +117,4 @@ for (const [name, facts, expected] of cases) test(`a tool’s line: ${name}`, ()
 
 test('no line offers the way to another page to act: no sentence says to go to the plugin’s page', () => {
   for (const [name, facts] of cases) { const said = lineControl(facts); assert.ok(!('sentence' in said) || !/plugin’s page|Plugin marketplaces|Uninstall it on/.test(said.sentence), name); }
-});
-
-test('cantTurnOffReason returns the app’s own reason for unlisted, Directory, ambiguous and held boxes, and nothing when ready', () => {
-  assert.equal(cantTurnOffReason('alpha', 'team', 'unlisted'), 'Its marketplace “team” isn’t added in Central Knot or in any tool here, so it can’t be turned off from here.');
-  assert.equal(cantTurnOffReason('alpha', DIRECTORY, 'unlisted'), FROM_DIRECTORY);
-  assert.equal(cantTurnOffReason('alpha', 'team', 'ambiguous'), 'More than one marketplace here named “team” lists alpha, so which one to turn off can’t be told here.');
-  assert.equal(cantTurnOffReason('alpha', 'team', { ticked: true, off: 'Full reason.', line: 'Short line' }), 'Full reason.');
-  assert.equal(cantTurnOffReason('alpha', 'team', { ticked: true }), undefined);
 });

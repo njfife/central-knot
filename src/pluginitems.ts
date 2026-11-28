@@ -5,7 +5,7 @@
 import { readFile, readdir, realpath } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { installedContents, readHooks } from './catalogdetail.ts';
-import { configRoot, harnesses, openCodeSettings } from './harnesses.ts';
+import { openCodeSettings } from './harnesses.ts';
 import { readJsonc, readTomlTables } from './textedit.ts';
 import { nameOfFile, record, text } from './values.ts';
 import { installedCopies, installedPlugins, registeredMarketplaces, type PluginContext } from './plugins.ts';
@@ -28,14 +28,12 @@ export async function readPluginItems(context: PluginContext, tools: HarnessId[]
   const read = { ...context, reads: context.reads ?? new Map() };
   const { record } = await readPluginRecord(context.home);
   const perTool = await Promise.all(tools.filter(takesPlugins).map(async tool => {
-    const root = configRoot(harnesses[tool], context.home, context.overrides?.[tool]);
-    const [plugins, markets, hooksOff] = await Promise.all([installedCopies(read, tool).catch(() => []), registeredMarketplaces(read, tool).catch(() => []), hooksDisabled(tool, root)]);
+    const [plugins, markets] = await Promise.all([installedCopies(read, tool).catch(() => []), registeredMarketplaces(read, tool).catch(() => [])]);
     return Promise.all(plugins.map(async ({ plugin, marketplace, state, off, contents, serversOff, agentsOff, serversHeld }): Promise<InstalledPlugin> => {
       const source = markets.find(market => market.name === marketplace)?.source;
       const kept = keptOff(source ? entryOf(record, source, plugin) : undefined, tool, off);
       const base: InstalledPlugin = { tool, plugin, marketName: marketplace, ...(off ? { off } : {}), ...(kept ? { keptOff: true as const } : {}), items: [], listed: !!source, ...(source ? { source } : {}) };
-      if (state.state !== 'installed') return { ...base, problem: state.state === 'not-known' ? state.reason : UNREADABLE, problemKind: state.state === 'not-known' ? 'missing' : 'unreadable' };
-      if (!contents) return { ...base, problem: UNREADABLE, problemKind: 'unreadable' };
+      if (state.state !== 'installed' || !contents) return { ...base, problem: state.state === 'not-known' ? state.reason : UNREADABLE, problemKind: state.state === 'not-known' && !state.unreadable ? 'missing' : 'unreadable' };
       // `path`: the skill's folder ('.' for the plugin's root) or the agent's file, as each copy has it (catalogdetail.ts skillsIn).
       const file = (kind: 'skill' | 'agent') => (part: NamedPart): PluginItem => ({ kind, name: part.name, description: part.description,
         ...(part.path === '.' ? { keyName: plugin } : { keyName: kind === 'agent' ? nameOfFile(basename(part.path)) : basename(part.path) }) });
@@ -50,30 +48,11 @@ export async function readPluginItems(context: PluginContext, tools: HarnessId[]
       ];
       const skillsOff = (state.skillsOff ?? []).map(entry => entry.skill);
       const skillsHeld = Object.fromEntries((state.skillsOff ?? []).flatMap(entry => (entry.held ? [[entry.skill, entry.held]] : [])));
-      return { ...base, version: state.version, items, ...(contents.hooks.length ? { hooks: contents.hooks } : {}), ...(hooksOff ? { hooksOff: true } : {}), ...(contents.hooksUnread ? { hooksUnread: contents.hooksUnread } : {}), ...(skillsOff.length ? { skillsOff } : {}), ...(serversOff?.length ? { serversOff } : {}), ...(agentsOff?.length ? { agentsOff } : {}),
+      return { ...base, version: state.version, items, ...(contents.hooks.length ? { hooks: contents.hooks } : {}), ...(contents.hooksUnread ? { hooksUnread: contents.hooksUnread } : {}), ...(skillsOff.length ? { skillsOff } : {}), ...(serversOff?.length ? { serversOff } : {}), ...(agentsOff?.length ? { agentsOff } : {}),
         ...(state.switchesHeld ? { switchesHeld: state.switchesHeld } : {}), ...(serversHeld ? { serversHeld } : {}), ...(state.live ? { live: true } : {}), ...(Object.keys(skillsHeld).length ? { skillsHeld } : {}) };
     }));
   }));
   return perTool.flat();
-}
-
-/** Setting key that turns all hooks off in Codex's parsed config.toml, if any. */
-function codexHooksDisabled(tables: ReturnType<typeof readTomlTables> | undefined): string | undefined {
-  const entries = tables?.filter(table => !table.array).flatMap(table => table.entries.flatMap(entry => {
-    const path = [...table.path, ...entry.keys];
-    const inline = path.length === 1 && path[0] === 'features' ? record(entry.value) : undefined;
-    return inline ? Object.entries(inline).map(([key, value]) => ({ path: ['features', key], value })) : [{ path, value: entry.value }];
-  }));
-  const flag = (name: string) => entries?.findLast(entry => entry.path.length === 2 && entry.path[0] === 'features' && entry.path[1] === name)?.value;
-  const hooksFlag = flag('hooks');
-  return typeof hooksFlag === 'boolean' ? (hooksFlag ? undefined : '[features] hooks = false') : (flag('codex_hooks') === false ? '[features] codex_hooks = false' : undefined);
-}
-
-/** Whether `tool`'s own settings turn off all hooks in `root` now. */
-async function hooksDisabled(tool: HarnessId, root: string): Promise<boolean> {
-  if (tool === 'claude-cli') return readFile(join(root, 'settings.json'), 'utf8').then(raw => record(readJsonc(raw))?.disableAllHooks === true).catch(() => false);
-  if (tool === 'codex-cli') return readFile(join(root, 'config.toml'), 'utf8').then(raw => !!codexHooksDisabled(readTomlTables(raw))).catch(() => false);
-  return false;
 }
 
 /**
@@ -110,7 +89,16 @@ export async function sessionSettings(tool: HarnessId, root: string): Promise<Pi
       } catch {
         unread.push(toml);
       }
-      const disabledBy = codexHooksDisabled(tables);
+      const featureEntries = tables?.filter(table => !table.array).flatMap(table => table.entries.flatMap(entry => {
+        const path = [...table.path, ...entry.keys];
+        const inline = path.length === 1 && path[0] === 'features' ? record(entry.value) : undefined;
+        return inline ? Object.entries(inline).map(([key, value]) => ({ path: ['features', key], value })) : [{ path, value: entry.value }];
+      }));
+      const flag = (name: string) => featureEntries?.findLast(entry => entry.path.length === 2 && entry.path[0] === 'features' && entry.path[1] === name)?.value;
+      const hooksFlag = flag('hooks');
+      const disabledBy = typeof hooksFlag === 'boolean'
+        ? (hooksFlag ? undefined : '[features] hooks = false')
+        : (flag('codex_hooks') === false ? '[features] codex_hooks = false' : undefined);
       return {
         ownHooks: [...(await hooksIn(join(root, 'hooks.json'))).hooks, ...readHooks(tool, toml, tables ? tomlHooks(tables) : {})],
         ownHooksUnread: unread,
