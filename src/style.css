@@ -1323,8 +1323,8 @@ span.ins-confirm { margin-top: 0; }
 .signin-table { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 12.5px; line-height: 1.45; }
 .signin-table th, .signin-table td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; font-weight: 400; vertical-align: top; overflow-wrap: anywhere; }
 .signin-table tbody tr:last-child > * { border-bottom: 0; }
-/* A server's name breaks at a hyphen or a space, never inside a word while it can (its column no narrower than its longest word); 2px right padding leaves room for a 10-letter name + mark at 860 without widening the column. */
-.signin-table th.signin-name { width: 16%; padding-right: 2px; overflow-wrap: break-word; }
+/* A server's name breaks at a hyphen or a space while it fits, or inside an unbroken word wider than its 16% column (inheriting overflow-wrap: anywhere) so neither the word nor its mark widens the column; 2px right padding leaves room for a 10-letter name + mark at 860. */
+.signin-table th.signin-name { width: 16%; padding-right: 2px; }
 .signin-table th.signin-head { width: 14%; }
 /* Sticky within the scroll area's top padding, which Chromium keeps: at its very top edge, so no row shows above the head. */
 .signin-table thead th { position: sticky; top: calc(-1 * var(--signin-pad-top)); z-index: 1; background: var(--surface); }
@@ -1338,7 +1338,7 @@ span.ins-confirm { margin-top: 0; }
 .signin-head > .signin-check { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .signin-when { font-size: 11.5px; color: var(--ink-soft); }
 .signin-server { display: block; font-weight: 600; color: var(--ink); }
-.signin-server .row-file-btn { width: 20px; height: 20px; margin-left: 3px; }
+.signin-server .row-file-btn { width: 20px; height: 20px; margin-left: 2px; }
 /* Drop the 1px border so the left accent bar joins the panel row without a gap; 9px (8px + 1px) keeps the row's height unchanged. */
 .signin-table tbody tr.file-anchored > * { background: var(--picked); padding-bottom: 9px; border-bottom: 0; }
 .signin-table tbody tr.file-anchored > :first-child, .signin-table tbody tr.signin-file > td { box-shadow: inset 3px 0 0 var(--accent); }

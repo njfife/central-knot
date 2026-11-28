@@ -12872,10 +12872,6 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
     [['copilot-cli'], 'Sign-in shows only inside a session of that tool. • means the tool has the server; blank means it doesn’t.']);
   same('Local’s card says where the server runs and nothing more', await card('signin-local-mark', 'local-card'), 'Runs on this computer.');
   await fits('not-checked');
-  // At 860 and 1316 with six tools: each of your own servers has the file mark on the same line as its name's last characters
-  // (the long hyphenated name at 1316, a ten-letter capitalised name at 860 with no column width shift and single-word names on
-  // one line); pressing a mark opens its entry in a full-width row under it (nothing cut off), a second mark moves it, and
-  // Escape closes an open (?) card first before closing the panel and refocusing its mark.
   const fileShot = async (name, theme) => { if (!shots) return; await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] }); await wait(300); await a.shot(`mcp-signin-file-${name}-${theme}`); await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }); };
   const markMetrics = () => a.run(`(() => {
     const ths = [...document.querySelectorAll('.signin-table thead th')].map(e => Math.round(e.getBoundingClientRect().width));
@@ -12901,6 +12897,13 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   same('at 860 every own server (including a ten-letter capitalised name) keeps its mark on its last line, single-word names on one line, and no column width moves',
     [at860.ths, at860.rows.every(r => r.onLast && (r.name.includes('-') || r.lines === 1))], [colsBefore, true]);
   if (shots) { await a.run(`document.querySelector('tr[data-row="filesystem"]').scrollIntoView({ block: 'center' })`); await fileShot('ten-letter-860', 'light'); }
+  const unbroken = ['elasticsearch', 'observabilityservice'];
+  write('.claude.json', claudeFile({ Filesystem: { type: 'http', url: P(47215) }, elasticsearch: { type: 'http', url: P(47216) }, observabilityservice: { type: 'http', url: P(47217) } }));
+  await a.click('#header-refresh');
+  const withUnbroken = await markMetrics();
+  same('at 860 unbroken names (elasticsearch and a twenty-letter name) keep every column width unchanged and each mark on its last line',
+    [withUnbroken.ths, unbroken.every(name => withUnbroken.rows.find(r => r.name === name)?.onLast)], [colsBefore, true]);
+  if (shots) { await a.run(`document.querySelector('tr[data-row="observabilityservice"]').scrollIntoView({ block: 'end' })`); await fileShot('unbroken-name-860', 'light'); }
   const openEntry = async (name, expect) => {
     const id = await rowIdOf(name);
     await a.click(`tr[data-row="${id}"] .row-file-btn`);

@@ -114,9 +114,10 @@ function columnHead(tool: HarnessId, mark: Mark, does: string | undefined) {
 /** MCP sign-in as a file panel's place (filepanel.ts pagePlace): a server of your own opens its entry under its row (found ones too, or a home with nothing taken in would show no mark; plugins' have no reader yet). */
 const signinFiles = pagePlace('mcpsignin', { foundAndPlugins: true });
 
-/** A row's first cell: the server's name with its file mark bound to its last segment so wrapping never orphans it, Local, and the plugin it comes in. */
+/** A row's first cell: the server's name with its file mark bound to its last few letters (or short last segment) so wrapping never orphans it or widens the column, Local, and the plugin it comes in. */
 const nameCell = (row: SigninRow, mark: Mark, file?: FileMark) => {
-  const tail = file ? /(?:^|[\s-])([^\s-]+-*)$/.exec(row.name)?.[1] ?? row.name : '';
+  const seg = file ? /(?:^|[\s-])([^\s-]+-*)$/.exec(row.name)?.[1] ?? row.name : '';
+  const tail = seg.length <= 5 ? seg : [...seg].slice(-3).join('');
   return h('th.signin-name', { scope: 'row' },
     h('span.signin-server', {}, ...(file ? [row.name.slice(0, row.name.length - tail.length), h('span.signin-keep', {}, tail, file.mark)] : [row.name])),
     row.transport === 'stdio' ? h('span.signin-local', {}, 'Local', mark('local')) : null,
