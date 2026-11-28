@@ -4,7 +4,8 @@
 // (FADE_MS), the busy line (busy) and whether the page is acting (acting: busy, or a run of clicks: clicklist.ts); a click on an
 // item list sent to its kind's engine (carryOut, through kindPages), at once under busy (applyClick), one per kind as one
 // (applyByKind) or in its turn in the page's list (queueClick), its result kept for the page (lastResult), a run's said once
-// (sayRun), an Undo's kind by kind (undoClick); History's actions (restoreEvent); the reads of
+// (sayRun), an Undo's kind by kind (undoClick); History's actions (restoreEvent), and Settings' added line's Undo and taken-out
+// list's Add (undoAdded, addTakenOut); the reads of
 // the home (loadHome, readAgain, readHomeOnce), usage collected when a home opens and on Update (collectUsage), and the Sync
 // switch, Sync once and Synchronize everything's row; the rows a click pins where they were (pinnedRows, drawPage); and the
 // Instructions, base instructions and Profiles pages' actions.
@@ -16,7 +17,7 @@ import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { forgetSourcePrompts, loadSources } from './sourcespage.ts';
 import { forgetHistoryFolds } from './historypage.ts';
 import { forgetManageQuestion } from './managecard.ts';
-import { loadSettings, openHistoryWindow, openSettings } from './settingspage.ts';
+import { forgetAddedReads, loadSettings, openHistoryWindow, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
 import type { Reason, ApplyResult, Profile, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SessionCostsView, SyncNotice, TakenInNotice, UsageReading } from './types.ts';
@@ -28,7 +29,7 @@ import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
 import { pageOfPart } from './pluginstatus.ts';
 import { clickResults, heldWhole, keptBack } from './clickplan.ts';
-import { entriesNow, everythingAction, everythingDone, everythingPlan, libraryAction, libraryEntry, librarySentence, oneUndoCovers, restorePlan } from './historyactions.ts';
+import { entriesNow, everythingAction, everythingDone, everythingPlan, libraryAction, libraryEntry, librarySentence, oneUndoCovers, restorePlan, undoneAddedWords } from './historyactions.ts';
 import { asksWhichCopy, copiesDiffer, libraryWords, placeOf, stillReadWords } from './libraryrow.ts';
 import { andList, changedName, countedAs, fewNames, fileName, kindNames, kindNouns, noToolsSentence, notAllThrough, orList, profileLeftUse, rowNames, rowNouns, saidByKind, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
@@ -49,7 +50,7 @@ import type { DayRows, PeriodRows } from './sessionrow.ts';
 import { DIFFERS_REASON, selecting, stopSelecting } from './selection.ts';
 import { takesPlugins } from './presence.ts';
 import { pluginOf } from './sourcelink.ts';
-import { findInHome, holdOrder, keptNoticeList, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, standingBackgroundProblems, supersedes, usageNotCollected } from './matrix.ts';
+import { findInHome, holdOrder, keptNoticeList, noticeArrived, noticesKept, noticeUnseen, resultInHeader, rowByKey, standingBackgroundProblems, supersedes, turnOnRow, usageNotCollected } from './matrix.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -460,6 +461,7 @@ function accept(view: HomeView): HomeView {
   state.draftPick = undefined;
   resetPageData(state.instructions);
   resetPageData(state.history);
+  forgetAddedReads();
   forgetHistoryFolds();
   forgetManageQuestion();
   if (state.page === 'history') openHistoryWindow();
@@ -1320,6 +1322,8 @@ export const loadHistory = async (): Promise<void> => {
   if (result === 'dropped') return;
   if (result === 'ready') state.historyDays = days;
   rerender();
+  // After that draw, so Settings' lines ask again at the next one, not in a loop while reads keep failing.
+  if (result === 'failed') forgetAddedReads();
 };
 
 /** History as an action read it, after what it changed: its events and window, the newest. */
@@ -1339,17 +1343,10 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const result = received(await api().restore(eventId, home.home, choice));
   const view = await api().refresh();
   await putHistory();
-  // Dismiss the notices of what this Undo took back before setHome carries unseen ones on; a multi-item taken-in notice goes only once every item it names is undone.
   if (!result.stopped) {
     const events = state.history.data ?? [];
     const undos = new Set(events.find(event => event.id === result.made?.[0])?.everything?.undo?.itemUndos ?? []);
-    const taken = new Set([eventId, ...(undos.size ? events.filter(event => event.undoneBy && undos.has(event.undoneBy)).map(event => event.id) : [])]);
-    const allUndone = new Set([...taken, ...events.filter(event => event.undoneBy).map(event => event.id)]);
-    const takenIn = [...(state.home ? KINDS.flatMap(kind => state.home![kind].notices) : []), ...keptNoticeList(), ...backgroundNews.map(entry => entry.notice)]
-      .filter((notice): notice is TakenInNotice => notice.kind === 'taken-in' && !!notice.histories?.length);
-    const stillKept = new Set(takenIn.filter(notice => notice.histories!.some(id => !allUndone.has(id))).map(notice => notice.history));
-    for (const id of taken) if (!stillKept.has(id)) state.dismissed.add(id);
-    for (const notice of takenIn) if (notice.histories!.some(id => taken.has(id)) && !stillKept.has(notice.history)) state.dismissed.add(notice.history);
+    dismissTakenBack(new Set([eventId, ...(undos.size ? events.filter(event => event.undoneBy && undos.has(event.undoneBy)).map(event => event.id) : [])]));
   }
   setHome(view);
   // A source's band offers its click's Undo (sourcespage.ts whatItDid): its rows say what waits there now.
@@ -1385,6 +1382,50 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const done = !result.stopped && restored.length > 0;
   tell(done ? { page, item, rows: [row], history: true, text: `Undid the change to ${item}. The earlier version is back in ${everywhere}.` } : undefined, result.stopped ?? `Restored in ${plural(0, 'tool')}.`);
   if (done) flashRow(row);
+});
+
+/**
+ * Dismisses the notices of take-ins an Undo took back (`taken`: their History entries) before setHome carries unseen ones on; a
+ * multi-item taken-in notice goes only once every item it names is undone, by History as just put (putHistory).
+ */
+function dismissTakenBack(taken: Set<string>) {
+  const events = state.history.data ?? [];
+  const allUndone = new Set([...taken, ...events.filter(event => event.undoneBy).map(event => event.id)]);
+  const takenIn = [...(state.home ? KINDS.flatMap(kind => state.home![kind].notices) : []), ...keptNoticeList(), ...backgroundNews.map(entry => entry.notice)]
+    .filter((notice): notice is TakenInNotice => notice.kind === 'taken-in' && !!notice.histories?.length);
+  const stillKept = new Set(takenIn.filter(notice => notice.histories!.some(id => !allUndone.has(id))).map(notice => notice.history));
+  for (const id of taken) if (!stillKept.has(id)) state.dismissed.add(id);
+  for (const notice of takenIn) if (notice.histories!.some(id => taken.has(id)) && !stillKept.has(notice.history)) state.dismissed.add(notice.history);
+}
+
+/**
+ * Settings' added line's own Undo of these take-ins of one kind (`names`: as the line said them), or (`putBack`) its band's
+ * Restore of the deletions it made; said in Settings' band. A line goes once every item it names is undone; a press that ends
+ * once he has left Settings says nothing.
+ */
+export const undoAdded = (kind: PageKind, names: Map<string, string>, putBack = false) => busy(putBack ? 'Restoring…' : 'Undoing…', async page => {
+  const visit = state.visit, result = received(await api().undoAdded(kind, [...names.keys()], state.home!.home, putBack));
+  const view = await api().refresh();
+  await putHistory();
+  if (!putBack) dismissTakenBack(new Set(result.undid.map(done => done.id)));
+  setHome(view);
+  keepOwn([{ kind, results: result.results, notices: result.notices }]);
+  if (state.visit !== visit) return;
+  // Named in the line's order, by the names it showed (an entry History has pruned since keeps its name).
+  const undid = new Map(result.undid.map(each => [each.id, each.by])), done = [...names].filter(([id]) => undid.has(id)).map(([, name]) => name);
+  const passed = result.passed.map(each => ({ item: names.get(each.id) ?? each.id, why: each.why })), notDone = result.results.filter(keptBack).map(entry => entry.message);
+  const back = new Map([...names].flatMap(([id, name]) => (undid.has(id) ? [[undid.get(id)!, name] as const] : [])));
+  const text = result.stopped ? `${undoneAddedWords([], [], putBack)} ${result.stopped}` : [undoneAddedWords(done, passed, putBack), ...notDone].join(' ');
+  tellWritten({ page, items: [...names.values()], band: true, settingsBand: true, warn: !!result.stopped || passed.length + notDone.length > 0, text,
+    act: !putBack && back.size ? { label: 'Restore', id: 'outcome-undo', run: () => void undoAdded(kind, back, true) } : undefined }, result.reloads, back.size > 0);
+});
+
+/** The taken-out list's Add on Settings (settingspage.ts): the Library row's own Add (matrix.ts turnOnRow). */
+export const addTakenOut = (kind: PageKind, key: string) => busy('Applying…', async page => {
+  const visit = state.visit, click = turnOnRow(kind, key, false), done = click && await carryOut(click, page);
+  if (state.visit !== visit) return;
+  if (click && done) sayDone(done, click);
+  else tell({ page, band: true, settingsBand: true, warn: true, text: 'It is no longer found in your tools. Nothing changed.' });
 });
 
 /**

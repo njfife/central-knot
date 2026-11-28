@@ -86,6 +86,7 @@ const api: DesktopApi = {
   restartToUpdate: () => ipcRenderer.invoke('updates:restart'),
   onUpdatesChanged: callback => { ipcRenderer.on('updates:changed', (_event, view) => callback(view)); },
   restore: (eventId, home, choice) => ipcRenderer.invoke('history:restore', eventId, home, choice),
+  undoAdded: (kind, eventIds, home, putBack) => ipcRenderer.invoke('history:undo-added', kind, eventIds, home, putBack),
   plugins: (fresh, readId) => ipcRenderer.invoke('plugins:view', fresh, readId),
   addMarketplace: source => ipcRenderer.invoke('plugins:add', source),
   forgetMarketplace: source => ipcRenderer.invoke('plugins:forget', source),
