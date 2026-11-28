@@ -1297,8 +1297,8 @@ span.ins-confirm { margin-top: 0; }
 .signin-scroll { --signin-pad-top: 16px; display: flex; flex-direction: column; gap: 14px; padding: var(--signin-pad-top) var(--pad-end) 32px 16px; }
 .signin-scroll > * { flex: none; }
 .signin-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
-.signin-top > .btn { flex: none; }
-.signin-line { font-size: 12.5px; line-height: 1.55; color: var(--ink-soft); }
+.signin-check-all { flex: none; display: inline-flex; align-items: center; gap: 4px; }
+.signin-need { font-size: 12.5px; font-weight: 600; }
 .signin-table { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 12.5px; line-height: 1.45; }
 .signin-table th, .signin-table td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; font-weight: 400; vertical-align: top; overflow-wrap: anywhere; }
 .signin-table tbody tr:last-child > * { border-bottom: 0; }
@@ -1319,8 +1319,8 @@ span.ins-confirm { margin-top: 0; }
 .signin-server { display: block; font-weight: 600; color: var(--ink); }
 .signin-plugin { display: block; font-size: 11.5px; color: var(--ink-soft); }
 .signin-local { display: flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--ink-soft); }
-.signin-keep { white-space: nowrap; }
-.signin-cell .signin-words { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; }
+.signin-keep { display: inline-flex; align-items: center; white-space: nowrap; }
+.signin-cell .signin-words { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 4px; }
 .signin-words .btn { flex: none; }
 /* A sign-in's button and its Copy, stacked on one edge under the words; each wraps within the column (a word too, where one is wider), its icon left out, so a failed cell never widens its column. */
 .signin-acts { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 4px; }
