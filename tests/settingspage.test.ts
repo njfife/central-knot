@@ -228,7 +228,7 @@ test('Synchronize everything agrees on managed tools and puts not-added-again fi
 });
 
 test('Synchronize everything puts what was taken in before what waits with Choose copies last', () => {
-  const notice = { kind: 'taken-in', items: ['notes'], from: ['claude-cli'], history: 'take-notes', histories: ['take-notes'] };
+  const notice = { kind: 'taken-in', items: ['notes'], keys: ['notes'], from: ['claude-cli'], history: 'take-notes', histories: ['take-notes'] };
   state.outcome = undefined;
   state.history.data = undefined;
   state.dismissed.clear();
@@ -248,10 +248,10 @@ test('Synchronize everything puts what was taken in before what waits with Choos
 });
 
 test('Synchronize everything drops History only on take-in lines the band’s Undo takes back as items stand now', () => {
-  const oldNotice = { kind: 'taken-in' as const, items: ['early'], from: ['claude-cli' as const], history: 'take-early', histories: ['take-early'] };
-  const notesNotice = { kind: 'taken-in' as const, items: ['notes'], from: ['claude-cli' as const], history: 'take-notes', histories: ['take-notes'] };
-  const editedNotice = { kind: 'taken-in' as const, items: ['edited'], from: ['claude-cli' as const], history: 'take-edited', histories: ['take-edited'] };
-  const mcpNotice = { kind: 'taken-in' as const, items: ['files'], from: ['codex-cli' as const], history: 'take-files', histories: ['take-files'] };
+  const oldNotice = { kind: 'taken-in' as const, items: ['early'], keys: ['early'], from: ['claude-cli' as const], history: 'take-early', histories: ['take-early'] };
+  const notesNotice = { kind: 'taken-in' as const, items: ['notes'], keys: ['notes'], from: ['claude-cli' as const], history: 'take-notes', histories: ['take-notes'] };
+  const editedNotice = { kind: 'taken-in' as const, items: ['edited'], keys: ['edited'], from: ['claude-cli' as const], history: 'take-edited', histories: ['take-edited'] };
+  const mcpNotice = { kind: 'taken-in' as const, items: ['files'], keys: ['files'], from: ['codex-cli' as const], history: 'take-files', histories: ['take-files'] };
   const live = (key: string, hash = 'v1') => ({
     key, name: key, on: true, hash, except: [], versions: [{ hash, at: '2026-11-27T19:00:00Z', from: { how: 'found', harness: 'claude-cli' } }],
     applied: { 'claude-cli': hash, 'codex-cli': hash },
@@ -320,7 +320,7 @@ test('Synchronize everything drops History only on take-in lines the band’s Un
   // Multi-item notice: if even one item on it was changed since, the line keeps History.
   state.home.skills.items = [];
   state.home.skills.library.edited = live('edited', 'v2') as never;
-  state.home.skills.notices = [{ kind: 'taken-in', items: ['notes', 'edited'], from: ['claude-cli'], history: 'take-notes', histories: ['take-notes', 'take-edited'] }];
+  state.home.skills.notices = [{ kind: 'taken-in', items: ['notes', 'edited'], keys: ['notes', 'edited'], from: ['claude-cli'], history: 'take-notes', histories: ['take-notes', 'take-edited'] }];
   draw();
   assert.equal(textOf(addedLines()[0]), 'Added 2 skills from Claude Code: notes and edited. History can undo each.History');
 
@@ -372,6 +372,48 @@ test('editing a taken-in skill in its tool restores History on its line while th
   assert.deepEqual(lines.map(line => !!line.querySelector('.text-action')), [false, true], 'untouched notes hides History while edited skill restores History');
   state.outcome = undefined;
   state.history.data = undefined;
+});
+
+test('Synchronize everything marks added items Central Knot holds, opens the file under that line, and drops it when gone', () => {
+  const held = (key: string, name = key, deleted = false) => ({ key, name, on: !deleted, hash: `h-${key}`, versions: [], except: [], applied: {}, own: {}, ...(deleted ? { deleted: { at: '2026-11-28T00:00:00Z' } } : {}) });
+  const fact = (key: string, name = key) => ({ key, name, description: '', on: key !== 'gone', copies: {}, except: [], cannot: {}, edited: [] });
+  state.dismissed.clear();
+  state.home = makeHome({
+    snapshots: [{ harness: 'claude-cli', skills: [{ folder: 'gone', directory: '/found/gone', realDirectory: '/found/gone', rootLabel: '~/.claude/skills' }] }],
+    sync: { managed: ['claude-cli', 'codex-cli'], present: ['claude-cli', 'codex-cli'], leftOut: [], access: { allowed: true }, gate: { state: 'ready' }, syncEverything: true, caughtUp: [] },
+    skills: {
+      ...emptyKind(),
+      items: [fact('notes', 'Notes'), fact('lint'), fact('gone', 'Gone')],
+      library: { notes: held('notes', 'Notes'), lint: held('lint'), gone: held('gone', 'Gone', true) },
+      notices: [
+        { kind: 'taken-in', items: ['Notes', 'Gone'], keys: ['notes', 'gone'], from: ['claude-cli'], history: 'take-1', histories: ['take-1', 'take-gone'] },
+        { kind: 'taken-in', items: ['Notes', 'lint'], keys: ['notes', 'lint'], from: ['claude-cli', 'codex-cli'], history: 'take-2', histories: ['take-2', 'take-lint'] },
+      ],
+    },
+  });
+  draw();
+  const kids = () => (findById(rendered, 'setting-sync-everything')?.querySelector('.setting-added')?.children ?? [])
+    .filter((child): child is FakeNode => !!child && typeof child === 'object' && 'tag' in child);
+  // Held items get marks (by key even when name differs), deleted/found-only gets none, same item on two lines gets distinct ids.
+  assert.deepEqual(['file-skills-notes-take-1', 'file-skills-gone-take-1', 'file-skills-notes-take-2', 'file-skills-lint-take-2'].map(id => !!findById(rendered, id)), [true, false, true, true]);
+  assert.equal(textOf(kids()[0]), 'Added 2 skills from Claude Code: Notes and Gone. History can undo each.History');
+  findById(rendered, 'file-skills-notes-take-1')!.click();
+  assert.deepEqual(kids().map(el => [el.attrs.id, el.classList.contains('file-anchored')]), [['setting-sync-everything-added-skills', true], ['file-panel-settings', false], ['setting-sync-everything-added-skills', false]]);
+  findById(rendered, 'file-skills-notes-take-2')!.click();
+  assert.deepEqual(kids().map(el => [el.attrs.id, el.classList.contains('file-anchored')]), [['setting-sync-everything-added-skills', false], ['setting-sync-everything-added-skills', true], ['file-panel-settings', false]]);
+  findById(rendered, 'file-skills-lint-take-2')!.click();
+  assert.deepEqual([findById(rendered, 'file-skills-notes-take-2')?.attrs['aria-pressed'], findById(rendered, 'file-skills-lint-take-2')?.attrs['aria-pressed'], findById(rendered, 'file-panel-settings')?.attrs['aria-label']], ['false', 'true', 'File for lint']);
+  // Clearing notices (and drawing without a home) calls placePanel and drops the open file.
+  const savedHome = state.home, savedNotices = savedHome.skills.notices;
+  for (const clear of [() => { savedHome.skills.notices = []; }, () => { state.home = undefined; }]) {
+    findById(rendered, 'file-skills-lint-take-2')!.click();
+    clear();
+    draw();
+    state.home = savedHome;
+    savedHome.skills.notices = savedNotices;
+    draw();
+    assert.equal(findById(rendered, 'file-panel-settings'), undefined);
+  }
 });
 
 test('History and Settings share one Keep label and one-sentence shortening warning with icon beside text', () => {

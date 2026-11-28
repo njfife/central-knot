@@ -798,18 +798,24 @@ export function sentences(words: RowWords) {
   }
 
   /**
-   * What Synchronize everything's notice says (types.ts TakenInNotice), on its page and in Settings: how many it added and
-   * where it found them, their names, and (unless `history` is false, as on Settings while the band holds Undo) that History
-   * can undo each. `lead: false` omits the repeated "Synchronize everything" lead under Settings' own row.
+   * What Synchronize everything's notice says (types.ts TakenInNotice), split at each item's name (with its index in
+   * `notice.items`), so Settings can put a file mark after each name while `takenInWords` joins the same parts into one
+   * sentence. `lead: false` omits the repeated "Synchronize everything" lead under Settings' own row.
    */
-  function takenInWords(notice: Pick<TakenInNotice, 'items' | 'from' | 'settingsChanged'>, options?: { history?: boolean; lead?: boolean }): string {
+  function takenInParts(notice: Pick<TakenInNotice, 'items' | 'from' | 'settingsChanged'>, options?: { history?: boolean; lead?: boolean }): (string | { index: number; name: string })[] {
     const { history = true, lead = true } = options ?? {};
     const count = notice.items.length, from = andList(notice.from.map(toolName));
-    const what = lead ? `Synchronize everything took in ${count} ${count === 1 ? noun : words.many}, found in ${from}: ${andList(notice.items)}.`
-      : count === 1 ? `Added ${noun} ${notice.items[0]} from ${from}.` : `Added ${count} ${words.many} from ${from}: ${andList(notice.items)}.`;
-    const tail = history ? ` History can undo ${count === 1 ? 'it' : 'each'}.` : '';
-    return `${what}${notice.settingsChanged ? ` ${notice.settingsChanged.join(' ')}` : ''}${tail}`;
+    const names = notice.items.flatMap<string | { index: number; name: string }>((name, index) => (index === 0 ? [{ index, name }] : [index === count - 1 ? ' and ' : ', ', { index, name }]));
+    const head = lead ? [`Synchronize everything took in ${count} ${count === 1 ? noun : words.many}, found in ${from}: `, ...names, '.']
+      : count === 1 ? [`Added ${noun} `, { index: 0, name: notice.items[0] ?? '' }, ` from ${from}.`]
+      : [`Added ${count} ${words.many} from ${from}: `, ...names, '.'];
+    const tail = `${notice.settingsChanged ? ` ${notice.settingsChanged.join(' ')}` : ''}${history ? ` History can undo ${count === 1 ? 'it' : 'each'}.` : ''}`;
+    return tail ? [...head, tail] : head;
   }
 
-  return { harnessLine, detailLine, placeTag, said, noticeWords, takenInWords };
+  /** The same sentence as plain text (the Library's notice). */
+  const takenInWords = (notice: Pick<TakenInNotice, 'items' | 'from' | 'settingsChanged'>, options?: { history?: boolean; lead?: boolean }) =>
+    takenInParts(notice, options).map(part => (typeof part === 'string' ? part : part.name)).join('');
+
+  return { harnessLine, detailLine, placeTag, said, noticeWords, takenInParts, takenInWords };
 }

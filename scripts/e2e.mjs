@@ -8695,6 +8695,38 @@ async function syncEverythingFlow() {
   for (let tries = 0; tries < 300 && !/fresh/.test(await unseenOnLibrary()); tries++) await wait(100);
   same('a notice no page has shown stays until shown: the sidebar’s Library names both passes’ notices, of every kind', await unseenOnLibrary(), '3 automatic changes: notes, fresh, files');
   await a.shot('everything-on');
+  // Added lines on Settings: each held item's name gets a file mark; at 860 one press opens its text under that line, a second mark moves it, Escape closes it, nothing cut off.
+  const setTheme = (page, value) => page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+  const openAdded = async (page, id, expect) => {
+    await page.click(`#${id}`);
+    const read = () => page.run(`(() => { const p = document.getElementById('file-panel-settings'), l = p?.previousElementSibling;
+      return { anchored: !!l?.classList.contains('file-anchored'), line: l?.textContent ?? '', text: p?.querySelector('pre.content')?.textContent ?? '' }; })()`);
+    for (let tries = 0; tries < 40 && !(await read()).text.includes(expect); tries++) await wait(100);
+    await page.settle();
+    return read();
+  };
+  await sizeTo(a, ...SMALLEST);
+  await setTheme(a, 'light');
+  await a.run(`document.getElementById('setting-sync-everything')?.scrollIntoView({ block: 'start' })`);
+  await a.settle();
+  await a.shot('settings-added-marks-860-light');
+  const markIds = await a.all('.setting-added .row-file-btn', 'e.id');
+  same('at 860, each added item on Settings has a file mark after its name', markIds.map(id => id.replace(/^file-(skills|mcp)-([^-]+)-.*$/, '$1:$2')), ['skills:notes', 'skills:fresh', 'mcp:files']);
+  const firstOpen = await openAdded(a, markIds[0], 'Take notes.');
+  same('at 860, pressing notes’s mark opens its text under that line with nothing cut off', [firstOpen.anchored, firstOpen.line, firstOpen.text.includes('Take notes.'), await a.run(CUT_OFF)], [true, 'Added skill notes from Claude Code.', true, []]);
+  await a.shot('settings-added-open-860-light');
+  const secondOpen = await openAdded(a, markIds[2], 'files-mcp');
+  same('at 860, pressing files’s mark moves the panel under its line with nothing cut off', [secondOpen.anchored, secondOpen.line, secondOpen.text.includes('files-mcp'), await a.run(CUT_OFF)], [true, 'Added MCP server files from Codex.', true, []]);
+  await a.press('Escape');
+  await a.settle();
+  same('Escape closes the file panel on Settings and returns focus to its mark', [await a.exists('#file-panel-settings'), await a.run(`document.activeElement?.id`)], [false, markIds[2]]);
+  await sizeTo(a, 1316, 819);
+  await setTheme(a, 'dark');
+  await a.run(`document.getElementById('setting-sync-everything')?.scrollIntoView({ block: 'start' })`);
+  await a.settle();
+  await a.shot('settings-added-marks-1316-dark');
+  await setTheme(a, '');
+  await fullSize(a);
   await a.click('#outcome-dismiss');
   same('closing the band brings back History on the take-in lines', await a.all('.setting-added .setting-message', 'e.textContent'),
     ['Added skill notes from Claude Code. History can undo it.History', 'Added skill fresh from Claude Code. History can undo it.History', 'Added MCP server files from Codex. History can undo it.History']);
@@ -8851,6 +8883,24 @@ async function syncEverythingFlow() {
       [await b.exists('[data-outcome]'), await b.run(`document.querySelector('#announcement')?.classList.contains('visually-hidden')`), await b.run(`document.querySelector('#announcement')?.dataset.text`)],
       [false, false, 'Copied s1 to Claude Code. Took in s1. Copied s2 to Claude Code. Took in s2. Sync once took in 2 more items.']);
   }
+  // A line naming two items in one pass: each name gets its own mark, switching the open file under that line.
+  settleOld([skill(uClaude, 'lint', text('lint', 'Lint gently.')), join(uClaude, 'lint/SKILL.md'),
+    skill(uCodex, 'tidy', text('tidy', 'Tidy up.')), join(uCodex, 'tidy/SKILL.md')]);
+  await b.click('#sync-switch');
+  for (let tries = 0; tries < 80 && !(await b.all('.setting-added .setting-message', 'e.textContent')).some(line => line.startsWith('Added 2 skills from Claude Code and Codex: lint and tidy.')); tries++) await wait(100);
+  await sizeTo(b, ...SMALLEST);
+  await setTheme(b, 'light');
+  await b.run(`document.getElementById('setting-sync-everything')?.scrollIntoView({ block: 'start' })`);
+  await b.settle();
+  const twoMarks = await b.run(`(() => { const line = [...document.querySelectorAll('.setting-added .setting-message')].find(el => el.textContent.startsWith('Added 2 skills from Claude Code and Codex: lint and tidy.')); return [...(line?.querySelectorAll('.row-file-btn') ?? [])].map(el => el.id); })()`);
+  await b.shot('settings-added-two-items-860-light');
+  same('a line naming two items puts a file mark after each name', twoMarks.map(id => id.replace(/^file-skills-([^-]+)-.*$/, '$1')), ['lint', 'tidy']);
+  const firstTwo = await openAdded(b, twoMarks[0], 'Lint gently.');
+  const secondTwo = await openAdded(b, twoMarks[1], 'Tidy up.');
+  same('pressing each mark on a two-item line opens then switches the file under that line with nothing cut off', [firstTwo.anchored, firstTwo.text.includes('Lint gently.'), secondTwo.anchored, secondTwo.text.includes('Tidy up.'), await b.run(CUT_OFF)], [true, true, true, true, []]);
+  await b.press('Escape');
+  await setTheme(b, '');
+  await fullSize(b);
   same('no page errors, Settings inline Undo', b.pageErrors, []);
   await b.quit();
 }
