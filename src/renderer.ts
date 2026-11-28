@@ -22,7 +22,7 @@ import { harnessesPage, harnessTitle } from './harnesspage.ts';
 import { pluginsPage, pluginsResult } from './pluginspage.ts';
 import { pluginsResultPlace } from './pluginstate.ts';
 import { afterPluginPageDrawn } from './pluginpage.ts';
-import { backFromFiles, headerNotices, listResult, noticeKindsShown, resultInHeader, unseenNotices } from './matrix.ts';
+import { backFromFiles, headerNotices, listResult, noticeKindsShown, resultInHeader, unseenNotices, unshownReloadRows } from './matrix.ts';
 import { historyPage } from './historypage.ts';
 import { mcpSigninPage } from './mcpsigninpage.ts';
 import { sessionsPage } from './sessionspage.ts';
@@ -291,21 +291,27 @@ window.addEventListener('keydown', event => { if (event.key === 'Escape' && (clo
 // come up to date), except while an editor's text area has the focus: drawn again, it would lose its Undo, and its page draws no notices.
 window.addEventListener('focus', () => { if (!document.activeElement?.matches('textarea.ins-text')) rerender(); });
 
-// Laid out, and at each resize: fit reload chips on Row 2 (+N more on overflow) and show Show all on cut or hidden advice.
+// Laid out, and at each resize: fit reload chips on Row 2 (+N more step(s) for any row with no chip in sight) and show Show all on cut or hidden advice.
 const cut = (text: Element) => text.scrollWidth > text.clientWidth || text.scrollHeight > text.clientHeight;
 function fitReloadChips(header: HTMLElement): boolean {
   const strip = header.querySelector<HTMLElement>('.header-result:not(.result-whole) .result-reloads');
   if (!strip) return false;
   const chips = [...strip.querySelectorAll<HTMLElement>('.result-copies > *')], more = strip.querySelector<HTMLElement>('#outcome-reload-more');
+  const total = Number(more?.dataset.reloadRows || 0);
+  const syncMore = () => {
+    const hiddenRows = unshownReloadRows(total, chips.map(chip => ({ tool: chip.dataset.reloadTool, hidden: Boolean(chip.hidden) })));
+    if (more) { more.textContent = hiddenRows ? `+${hiddenRows} more ${hiddenRows === 1 ? 'step' : 'steps'}` : ''; more.hidden = !hiddenRows; }
+    return hiddenRows > 0;
+  };
   for (const chip of chips) chip.hidden = false;
-  if (more) more.hidden = true;
-  if (strip.scrollWidth <= strip.clientWidth + 1) return false;
+  let any = syncMore();
+  if (strip.scrollWidth <= strip.clientWidth + 1) return any;
   for (let hidden = 1; hidden <= chips.length; hidden++) {
     chips[chips.length - hidden]!.hidden = true;
-    if (more) { more.textContent = `+${hidden} more`; more.hidden = false; }
-    if (strip.scrollWidth <= strip.clientWidth + 1) return true;
+    any = syncMore();
+    if (strip.scrollWidth <= strip.clientWidth + 1) return any;
   }
-  return chips.length > 0;
+  return any;
 }
 afterLayout(() => {
   const header = region('header'), more = header.querySelector<HTMLElement>('[data-when-cut]');

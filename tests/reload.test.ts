@@ -17,7 +17,7 @@ import { runItems } from '../src/pluginlibrary.ts';
 import { newEntry } from '../src/pluginrecord.ts';
 import { install, parseCatalog, setPart, setWhole, update, type PluginContext } from '../src/plugins.ts';
 import { NO_PLUGINS, saveProfile, switchProfile, type PluginSide } from '../src/profiles.ts';
-import { destinationReloads, hasReloadAdvice, pluginReloads, reloadAdvice, reloadStep, reloadTable, reloadsFor, rowReload, settleReloads, toolWay, waysFrom } from '../src/reload.ts';
+import { destinationReloads, hasReloadAdvice, pluginReloads, reloadAdvice, reloadStep, reloadTable, reloadsFor, rowReload, settleReloads, toolWay, waysFrom, type ReloadStep } from '../src/reload.ts';
 import { applyServers, restoreServer } from '../src/servers.ts';
 import type { ShareContext } from '../src/share.ts';
 import { applySkills, clearSwitch, restoreSkill, takeOver } from '../src/skills.ts';
@@ -87,11 +87,11 @@ test('Worked example 2 and 5: an MCP server added to all five gives exact senten
     const advice = reloadAdvice(writes);
     assert.equal(advice.text, 'Restart Claude Code (claude --continue keeps the chat). In Codex, type /new, or restart it (codex resume --last keeps the chat). In Pi, type /reload. Restart OpenCode (opencode --continue keeps the chat).');
     assert.deepEqual(advice.items, [
-      { tool: 'claude-cli', text: 'Restart Claude Code (claude --continue keeps the chat).', command: 'claude --continue', chip: 'Claude Code: claude --continue', title: 'Quit Claude Code, then run this in a terminal: it keeps the chat.' },
+      { tool: 'claude-cli', text: 'Restart Claude Code (claude --continue keeps the chat).', command: 'claude --continue', chip: 'Claude Code: claude --continue', title: 'Quit Claude Code, then run this in a terminal: it keeps the chat.', note: 'Restart; keeps the chat.' },
       { tool: 'codex-cli', text: 'In Codex, type /new, or restart it (codex resume --last keeps the chat).', command: '/new', chip: 'Codex: /new', title: 'Type this in your Codex session.',
-        more: [{ chip: 'codex resume --last', command: 'codex resume --last', title: 'Quit Codex, then run this in a terminal: it keeps the chat.' }] },
+        note: 'for a new chat,', more: [{ chip: 'codex resume --last', command: 'codex resume --last', title: 'Quit Codex, then run this in a terminal: it keeps the chat.', lead: 'or', note: 'to restart and keep the chat.' }] },
       { tool: 'pi-cli', text: 'In Pi, type /reload.', command: '/reload', chip: 'Pi: /reload', title: 'Type this in your Pi session.' },
-      { tool: 'opencode-cli', text: 'Restart OpenCode (opencode --continue keeps the chat).', command: 'opencode --continue', chip: 'OpenCode: opencode --continue', title: 'Quit OpenCode, then run this in a terminal: it keeps the chat.' },
+      { tool: 'opencode-cli', text: 'Restart OpenCode (opencode --continue keeps the chat).', command: 'opencode --continue', chip: 'OpenCode: opencode --continue', title: 'Quit OpenCode, then run this in a terminal: it keeps the chat.', note: 'Restart; keeps the chat.' },
     ]);
     assert.equal(pass.results.find(entry => entry.harness === 'claude-cli')?.message, 'Added. Restart Claude Code (claude --continue keeps the chat).');
     assert.equal(pass.results.find(entry => entry.harness === 'copilot-cli')?.message, 'Added.');
@@ -146,7 +146,7 @@ test('Item 1: final state decides — On then Off and combined Undo say nothing;
     const settledPlugin = settleReloads(pluginReloads([...piOn.done, ...ocOn.done, ...piOff.done]));
     assert.deepEqual(reloadAdvice(settledPlugin), {
       text: 'Restart OpenCode (opencode --continue keeps the chat).',
-      items: [{ tool: 'opencode-cli', text: 'Restart OpenCode (opencode --continue keeps the chat).', command: 'opencode --continue', chip: 'OpenCode: opencode --continue', title: 'Quit OpenCode, then run this in a terminal: it keeps the chat.' }],
+      items: [{ tool: 'opencode-cli', text: 'Restart OpenCode (opencode --continue keeps the chat).', command: 'opencode --continue', chip: 'OpenCode: opencode --continue', title: 'Quit OpenCode, then run this in a terminal: it keeps the chat.', note: 'Restart; keeps the chat.' }],
     });
   } finally { await box.cleanup(); }
 });
@@ -174,7 +174,7 @@ test('Item 2: enabling a whole Claude Code plugin counts its actually enabled it
     const done: PluginDone[] = [{ source: join(box.base, 'market'), marketName: 'team', plugin: 'kit', tool: 'claude-cli', action: 'plugin-on', report }];
     assert.deepEqual(reloadAdvice(settleReloads(pluginReloads(done))), {
       text: 'Restart Claude Code (claude --continue keeps the chat).',
-      items: [{ tool: 'claude-cli', text: 'Restart Claude Code (claude --continue keeps the chat).', command: 'claude --continue', chip: 'Claude Code: claude --continue', title: 'Quit Claude Code, then run this in a terminal: it keeps the chat.' }],
+      items: [{ tool: 'claude-cli', text: 'Restart Claude Code (claude --continue keeps the chat).', command: 'claude --continue', chip: 'Claude Code: claude --continue', title: 'Quit Claude Code, then run this in a terminal: it keeps the chat.', note: 'Restart; keeps the chat.' }],
     });
     // When the MCP server inside the plugin is denied in Claude Code's settings, enabling the whole plugin leaves only its skill -> /reload-plugins.
     await put(settingsPath, JSON.stringify({ enabledPlugins: { 'kit@team': false }, deniedMcpServers: [{ serverName: 'plugin:kit:issues' }] }));
@@ -352,12 +352,12 @@ test('Item 7: every cell’s exact chip, title, command, tool order, ranking, an
   ]);
   assert.equal(allFive.text, 'Restart Claude Code (claude --continue keeps the chat). In Copilot CLI, type /skills reload. In Codex, type /new, or restart it (codex resume --last keeps the chat). In Pi, type /reload. Restart OpenCode (opencode --continue keeps the chat).');
   assert.deepEqual(allFive.items, [
-    { tool: 'claude-cli', text: 'Restart Claude Code (claude --continue keeps the chat).', command: 'claude --continue', chip: 'Claude Code: claude --continue', title: 'Quit Claude Code, then run this in a terminal: it keeps the chat.' },
+    { tool: 'claude-cli', text: 'Restart Claude Code (claude --continue keeps the chat).', command: 'claude --continue', chip: 'Claude Code: claude --continue', title: 'Quit Claude Code, then run this in a terminal: it keeps the chat.', note: 'Restart; keeps the chat.' },
     { tool: 'copilot-cli', text: 'In Copilot CLI, type /skills reload.', command: '/skills reload', chip: 'Copilot CLI: /skills reload', title: 'Type this in your Copilot CLI session.' },
     { tool: 'codex-cli', text: 'In Codex, type /new, or restart it (codex resume --last keeps the chat).', command: '/new', chip: 'Codex: /new', title: 'Type this in your Codex session.',
-      more: [{ chip: 'codex resume --last', command: 'codex resume --last', title: 'Quit Codex, then run this in a terminal: it keeps the chat.' }] },
+      note: 'for a new chat,', more: [{ chip: 'codex resume --last', command: 'codex resume --last', title: 'Quit Codex, then run this in a terminal: it keeps the chat.', lead: 'or', note: 'to restart and keep the chat.' }] },
     { tool: 'pi-cli', text: 'In Pi, type /reload.', command: '/reload', chip: 'Pi: /reload', title: 'Type this in your Pi session.' },
-    { tool: 'opencode-cli', text: 'Restart OpenCode (opencode --continue keeps the chat).', command: 'opencode --continue', chip: 'OpenCode: opencode --continue', title: 'Quit OpenCode, then run this in a terminal: it keeps the chat.' },
+    { tool: 'opencode-cli', text: 'Restart OpenCode (opencode --continue keeps the chat).', command: 'opencode --continue', chip: 'OpenCode: opencode --continue', title: 'Quit OpenCode, then run this in a terminal: it keeps the chat.', note: 'Restart; keeps the chat.' },
   ]);
   // Plain-word agent chips and Codex skill alone (no chip, still a Show all line).
   assert.deepEqual(reloadAdvice([on('copilot-cli', 'agent'), on('codex-cli', 'agent'), on('opencode-cli', 'agent')]).items, [
@@ -566,6 +566,7 @@ test('Desktop app only and CLI plus desktop app tailor reload words to what is f
     items: [{
       tool: 'claude-cli', text: 'Restart Claude Code (claude --continue keeps the chat) or Claude desktop.',
       command: 'claude --continue', chip: 'Claude Code: claude --continue', title: 'Quit Claude Code, then run this in a terminal: it keeps the chat.',
+      note: 'Restart (keeps the chat), or restart Claude desktop.',
       more: [{ chip: 'Claude desktop: restart', title: 'Restart Claude desktop.' }],
     }],
   });
@@ -657,7 +658,7 @@ test('Codex MCP advises /new or restarting with codex resume --last to copy', ()
   const mcp = reloadAdvice([{ tool: 'codex-cli', kind: 'mcp', key: 'docs', on: true }]);
   assert.equal(mcp.text, 'In Codex, type /new, or restart it (codex resume --last keeps the chat).');
   assert.equal(mcp.items[0]?.command, '/new');
-  assert.deepEqual(mcp.items[0]?.more, [{ chip: 'codex resume --last', command: 'codex resume --last', title: 'Quit Codex, then run this in a terminal: it keeps the chat.' }]);
+  assert.deepEqual(mcp.items[0]?.more, [{ chip: 'codex resume --last', command: 'codex resume --last', title: 'Quit Codex, then run this in a terminal: it keeps the chat.', lead: 'or', note: 'to restart and keep the chat.' }]);
 });
 
 test('Whole plugin install and switch advise plugin-level reload per tool and way in while keeping stronger MCP advice', async () => {
@@ -811,6 +812,7 @@ test('Copilot found both ways with a skill and an MCP server in one run keeps bo
       command: '/skills reload',
       chip: 'Copilot CLI: /skills reload',
       title: 'Type this in your Copilot CLI session.',
+      note: 'Or restart the GitHub Copilot app.',
       more: [{ chip: 'GitHub Copilot app: restart', title: 'Restart the GitHub Copilot app.' }],
     }],
   });
@@ -906,4 +908,35 @@ test('Opened plugin skill row agrees with the header after a whole plugin turns 
   assert.equal(rowReload(copilotWhole, 'skill', 'other', 'copilot-cli', 'kit@team'), '');
   assert.equal(rowReload(copilotWhole, 'skill', 'triage', 'copilot-cli'), '');
   assert.equal(rowReload([copilotWhole[0]!], 'skill', 'triage', 'copilot-cli', 'kit@team'), 'In Copilot CLI, type /skills reload.');
+});
+
+test('Every reloadTable cell keeps command copy controls free of repeated command text and preserves non-command caveats', () => {
+  const ways = ['cli', 'app', 'both'] as const;
+  const kinds = ['skill', 'mcp', 'agent', 'plugin'] as const;
+  for (const [tool, steps] of Object.entries(reloadTable)) {
+    for (const kind of kinds) {
+      const byWay = steps[kind];
+      if (!byWay) continue;
+      for (const way of ways) {
+        const step: ReloadStep = byWay[way];
+        if (!step.text) continue;
+        if (step.command) {
+          assert.ok(step.chip?.includes(step.command), `${tool} ${kind} ${way}: chip labels its command`);
+          const notes = [step.note, ...(step.more ?? []).flatMap(extra => [extra.lead, extra.note])].filter(Boolean).join(' ');
+          assert.ok(!notes.includes(step.command), `${tool} ${kind} ${way}: notes must not repeat command`);
+          for (const extra of step.more ?? []) {
+            if (extra.command) assert.ok(!notes.includes(extra.command), `${tool} ${kind} ${way}: notes must not repeat secondary command`);
+          }
+          for (const extra of step.more ?? []) {
+            if (!extra.command) {
+              const appName = extra.chip.split(':')[0]!;
+              assert.ok(notes.includes(appName), `${tool} ${kind} ${way}: notes preserve non-command ${appName} caveat`);
+            }
+          }
+        } else {
+          assert.equal(step.note, undefined, `${tool} ${kind} ${way}: no-command step carries plain text without a duplicate note`);
+        }
+      }
+    }
+  }
 });
