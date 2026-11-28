@@ -9222,7 +9222,7 @@ async function syncEverythingFlow() {
   await a.click('#nav-settings');
   await a.click('#sync-everything-on');
   for (let tries = 0; tries < 40 && await ruleOn() !== 'false'; tries++) await wait(100);
-  same('turned off, its fold counts what was undone, which isn’t added again by itself', [await ruleOn(), await a.text('#setting-taken-out-toggle'), await ruleSays()], ['false', '1 found item isn’t added by itself again (taken out of Central Knot).', '2 found items have copies that differ and wait for your choice of copy.']);
+  same('turned off, its fold counts what was undone, which isn’t added again by itself', [await ruleOn(), await a.text('#setting-taken-out-toggle'), await ruleSays()], ['false', '1 removed item stays out of Central Knot.', '2 found items have copies that differ and wait for your choice of copy.']);
   await openAgainOnSettings('switched on and off');
   // Saved just before the rule is switched on again, with nothing else for that pass to write, and still being saved as it
   // runs: that pass leaves it, and a pass soon after takes it in (takenInSoon).
@@ -9272,7 +9272,7 @@ async function syncEverythingFlow() {
     [uRecord().syncEverything, existsSync(join(uCodex, 'notes')), readNow(join(uClaude, 'notes/SKILL.md')), readNow(join(uClaude, 'review/SKILL.md')), readNow(join(uCodex, 'review/SKILL.md')), 'files' in (JSON.parse(readNow(join(uHome, '.claude.json'))).mcpServers ?? {}), /\[mcp_servers\.files\]/.test(readNow(join(uHome, '.codex/config.toml'))), await uBand(),
       await b.all('.setting-added .setting-message', 'e.textContent'), await b.exists('#nav-library .nav-unseen'), await b.text('#setting-taken-out-toggle'), await b.text('#setting-sync-everything-notice .setting-message-text')],
     [false, false, text('notes', 'Take notes.'), text('review', 'Review gently.'), text('review', 'Review hard.'), false, true, [twoUndone, null, null, false, false],
-      [], false, '2 found items aren’t added by themselves again (taken out of Central Knot).', '1 found item has copies that differ and waits for your choice of copy.']);
+      [], false, '2 removed items stay out of Central Knot.', '1 found item has copies that differ and waits for your choice of copy.']);
   check('Choose copies sits beside the last sentence (waiting), not up on the first line', await b.run(`(() => { const t = document.querySelector('#setting-sync-everything-notice .setting-message-text')?.getBoundingClientRect(), a = document.querySelector('#setting-sync-everything-notice-action')?.getBoundingClientRect(); return !!t && !!a && a.bottom >= t.bottom - 4; })()`));
   await b.click('#nav-history');
   for (let tries = 0; tries < 30 && !(await b.exists('.history-row[data-kind="everything"]')); tries++) await wait(100);
@@ -9291,22 +9291,22 @@ async function syncEverythingFlow() {
   writeFileSync(join(uClaude, 'edited/SKILL.md'), text('edited', 'Edited by hand.'));
   for (let tries = 0; tries < 80 && readNow(join(uCodex, 'edited/SKILL.md')) !== text('edited', 'Edited by hand.'); tries++) await wait(100);
   await b.settle();
-  same('a taken-in skill edited in its tool gets no Undo of its own on its line (History offers Turn it off), and the untouched one stays covered by the band',
+  same('a taken-in skill edited in its tool gets no Undo of its own on its line but says why, and the untouched one stays covered by the band',
     await b.all('.setting-added .setting-message', 'e.textContent'),
-    ['Added skill later from Claude Code.', 'Added skill edited from Claude Code.']);
+    ['Added skill later from Claude Code.', 'Added skill edited from Claude Code. edited since']);
   await b.click('#outcome-undo');
   await waitBand('false', 'Undone:');
   same('inline Undo takes back the untouched take-in, clears its line, and keeps the later edited addition and its line',
     [uRecord().syncEverything, existsSync(join(uCodex, 'later')), readNow(join(uClaude, 'edited/SKILL.md')), await b.text('[data-outcome] .band-text'), await b.all('.setting-added .setting-message', 'e.textContent')],
-    [false, false, text('edited', 'Edited by hand.'), 'Undone: switched off, and 1 item it took in is out of Central Knot again, each tool it was found in keeping its own copy. Left in: edited (changed since).', ['Added skill edited from Claude Code.']]);
+    [false, false, text('edited', 'Edited by hand.'), 'Undone: switched off, and 1 item it took in is out of Central Knot again, each tool it was found in keeping its own copy. Left in: edited (changed since).', ['Added skill edited from Claude Code. edited since']]);
   // Automatic sync off: band shows without reloads, carries the second sentence, and Undo switches the rule off.
   await b.click('#sync-switch');
   for (let tries = 0; tries < 40 && await b.run(`document.querySelector('#sync-switch')?.getAttribute('aria-checked')`) !== 'false'; tries++) await wait(100);
   await b.click('#sync-everything-on');
   await waitBand('true', 'Synchronize everything is on');
   same('with Automatic sync off, the band shows its second sentence and Undo without reloads, and the older edited take-in’s line still has no Undo of its own',
-    [await uBand(), await b.exists('#setting-sync-everything-added-skills-action')],
-    [['Synchronize everything is on. Nothing added yet: Automatic sync is off.', 'Undo', twoHelp, false, false], false]);
+    [await uBand(), await b.all('.setting-added .text-action')],
+    [['Synchronize everything is on. Nothing added yet: Automatic sync is off.', 'Undo', twoHelp, false, false], []]);
   await b.click('#outcome-undo');
   await waitBand('false', 'Undone:');
   same('Undo with Automatic sync off turns the rule off and says nothing was taken back',
@@ -9339,6 +9339,14 @@ async function syncEverythingFlow() {
   await b.run(`document.getElementById('setting-sync-everything')?.scrollIntoView({ block: 'start' })`);
   await b.settle();
   await b.shot('settings-added-two-items-860-light');
+  // lint edited in Claude Code since: the line's Undo takes tidy alone, and says so.
+  writeFileSync(join(uClaude, 'lint/SKILL.md'), text('lint', 'Lint harder.'));
+  const twoLine = `[...document.querySelectorAll('.setting-added .setting-message')].find(el => el.textContent.startsWith('Added 2 skills from Claude Code and Codex: lint and tidy.'))`;
+  for (let tries = 0; tries < 100 && await b.run(`${twoLine}?.querySelector('.text-action')?.textContent`) !== 'Undo 1'; tries++) await wait(100);
+  await b.settle();
+  same('a line one of whose two take-ins was edited since has Undo 1, its hover naming the other', await b.run(`[${twoLine}.querySelector('.text-action').textContent, ${twoLine}.querySelector('.text-action').title]`),
+    ['Undo 1', 'Take tidy out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own']);
+  await b.shot('settings-added-undo-some-860-light');
   const twelve = ['audit-logs', 'bench-run', 'code-review', 'deploy', 'doc-syncs', 'migrate-db', 'plan-work', 'release-cut', 'schema-diff', 'test-smoke', 'trace-req', 'watch-ci'];
   await b.click('#sync-switch');
   for (let tries = 0; tries < 40 && await b.run(`document.querySelector('#sync-switch')?.getAttribute('aria-checked')`) !== 'false'; tries++) await wait(100);
@@ -9373,7 +9381,7 @@ async function syncEverythingFlow() {
     return { marks: marks.length, markStarts, punctStarts, undoBefore, undos, thirdMark: marks[2]?.id };
   })()`);
   same('at 860, added lines (including a twelve-item line) start no wrapped line with a mark or punctuation, and each has its Undo after its last name',
-    [wrapped.marks, wrapped.markStarts, wrapped.punctStarts, wrapped.undoBefore, wrapped.undos, await b.run(CUT_OFF)], [12, 0, 0, 0, ['Undo', 'Undo'], []]);
+    [wrapped.marks, wrapped.markStarts, wrapped.punctStarts, wrapped.undoBefore, wrapped.undos, await b.run(CUT_OFF)], [12, 0, 0, 0, ['Undo 1', 'Undo all 12'], []]);
   await openAdded(b, wrapped.thirdMark, 'Skill code-review.');
   await b.shot('settings-added-several-open-860-light');
   await b.press('Escape');
@@ -9393,7 +9401,7 @@ async function syncEverythingFlow() {
   await b.settle();
   same('the twelve-item line’s Undo says in Settings’ band what is out again, with Restore, and the line goes; the fold counts them',
     [await b.text('[data-outcome] .band-text'), await b.text('[data-outcome] #outcome-undo'), await b.run(`!!${twelveLine}`), await takenOut() - outBefore, existsSync(join(uCodex, 'deploy')), readNow(join(uClaude, 'deploy/SKILL.md')), await b.run(CUT_OFF)],
-    [`${twelve.slice(0, -1).join(', ')} and watch-ci are out of Central Knot again, each tool they were found in keeping its own; Restore puts back Central Knot’s kept versions.`, 'Restore', false, 12, false, text('deploy', 'Skill deploy.'), []]);
+    [`${twelve.slice(0, -1).join(', ')} and watch-ci are out of Central Knot again. The copies it put in other tools are gone; the tools they were found in keep theirs.`, 'Restore', false, 12, false, text('deploy', 'Skill deploy.'), []]);
   await b.shot('settings-undo-band-860-light');
   await b.click('#outcome-undo');
   for (let tries = 0; tries < 80 && !(await b.text('[data-outcome] .band-text') ?? '').endsWith('are back in Central Knot.'); tries++) await wait(100);
@@ -9412,6 +9420,25 @@ async function syncEverythingFlow() {
   await b.settle();
   same('Add in the fold takes notes in again from Claude Code’s copy and puts it in Codex; its band says so, and the fold counts one fewer',
     [readNow(join(uCodex, 'notes/SKILL.md')), !!(await b.text('[data-outcome] .band-text')), await takenOut()], [text('notes', 'Take notes.'), true, outBefore - 1]);
+  // A copy of later turns up in Codex, unlike Claude Code's: its row has Choose copy, which opens the Library row's own question
+  // under it; choosing Claude Code's copy takes it in and puts that copy in Codex.
+  settleOld([skill(uCodex, 'later', text('later', 'Later, another way.')), join(uCodex, 'later/SKILL.md')]);
+  for (let tries = 0; tries < 100 && !(await b.exists('#setting-taken-out-choose-skills-later')); tries++) await wait(100);
+  await b.settle();
+  same('a removed item whose copies came to differ has copies differ, its hover saying why, and Choose copy in Add’s place',
+    [await b.all('.setting-taken-out-row', 'e.textContent'), await b.run(`document.querySelector('#setting-taken-out .row-tag-differs')?.title`)],
+    [['later skillcopies differChoose copy', 'files MCP serverAdd'], 'Its tools’ copies differ, so adding it needs a choice of copy.']);
+  await b.shot('settings-taken-out-differ-860-light');
+  await b.click('#setting-taken-out-choose-skills-later');
+  for (let tries = 0; tries < 40 && !(await b.exists('.setting-taken-out-list .compare-block')); tries++) await wait(100);
+  await b.settle();
+  check('Choose copy opens the copy question under its row, nothing cut off', await b.exists('.setting-taken-out-list .compare-block') && (await b.run(CUT_OFF)).length === 0, await b.run(CUT_OFF));
+  await b.shot('settings-taken-out-choose-860-light');
+  await b.run(`document.querySelector('.setting-taken-out-list .compare-choices button.version[id$="claude-cli"]').click()`);
+  for (let tries = 0; tries < 80 && readNow(join(uCodex, 'later/SKILL.md')) !== text('later', 'Later skill.'); tries++) await wait(100);
+  await b.settle();
+  same('choosing Claude Code’s copy takes later in, puts that copy in Codex, says so in the band, and the list no longer names it',
+    [readNow(join(uCodex, 'later/SKILL.md')), !!(await b.text('[data-outcome] .band-text')), await b.all('.setting-taken-out-row', 'e.textContent')], [text('later', 'Later skill.'), true, ['files MCP serverAdd']]);
   await setTheme(b, '');
   await fullSize(b);
   same('no page errors, Settings inline Undo', b.pageErrors, []);

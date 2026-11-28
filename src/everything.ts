@@ -146,10 +146,9 @@ async function markDone(context: ShareContext, id: string, by: string, appended?
 }
 
 /**
- * An added line's own Undo on Settings (settingspage.ts): of these entries of one kind, each whose own action is still the Undo of
- * an addition the rule made (historyactions.ts undoesAddition, worked out again in the pass), in one pass (librarypass.ts
- * restoreAll); or, `putBack`, each deletion such an Undo made whose own action is its Restore (restoresAddition). Every other entry
- * is passed over, with why. Not History's own button, the switch-on's Undo or a plugin's, which run restoreAll as they did.
+ * An added line's own Undo on Settings: of these entries of one kind, in one pass, each whose own action is still the Undo of an
+ * addition the rule made (historyactions.ts undoesAddition, worked out again in the pass); or, `putBack`, each deletion of such a
+ * take-in whose own action is its Restore (restoresAddition). Every other entry is passed over, with why.
  */
 export async function undoAdded(context: ShareContext, tools: HarnessId[], kind: 'skills' | 'mcp' | 'agents', eventIds: string[], putBack: boolean): Promise<UndoneAdded> {
   // The pass refuses where the home may not be written, as History's own button's does.

@@ -490,6 +490,8 @@ export type LeftIn = { item: string; why: TakeInHeld | 'chosen' | 'claude-code' 
  */
 export const oneUndoCovers = (subject: string, chosen = true) => `${subject} takes back the items it added, but for any changed since${chosen ? '; a copy you choose has its own Undo' : ''}.`;
 
+/** A take-in by Synchronize everything's rule, no click behind it. */
+const takenByRule = (entry: HistoryEvent) => entry.kind === 'on' && entry.cause === 'sync-everything';
 /**
  * What a switch-on entry's one Undo would do now, read from History (`history`, oldest first): the rule's take-ins after it (cause
  * `sync-everything`) up to the next switch (a Synchronize everything entry that is no Undo), and the copies chosen meanwhile.
@@ -504,7 +506,7 @@ export function everythingPlan(switchOn: HistoryEvent, history: HistoryEvent[], 
   const end = after.findIndex(entry => entry.kind === 'everything' && !entry.everything?.undo);
   const since = (end < 0 ? after : after.slice(0, end)).filter(entry => !entry.undoneBy && libraryEntry(entry));
   const held = (entry: HistoryEvent) => takeInHeld(entry, about(entry).item, about(entry).now);
-  const takeIns = since.filter(entry => entry.kind === 'on' && entry.cause === 'sync-everything');
+  const takeIns = since.filter(takenByRule);
   const takeBack = takeIns.filter(entry => !held(entry));
   const left: LeftIn[] = [...takeIns.flatMap(entry => { const why = held(entry); return why ? [{ item: entry.item, why }] : []; }),
     ...since.filter(entry => entry.kind === 'chosen').map((entry): LeftIn => ({ item: entry.item, why: held(entry) ?? 'chosen' }))];
@@ -545,6 +547,9 @@ const leftSaid = (left: LeftIn[]) => andList([...new Set(left.map(entry => entry
 }));
 const itemsSaid = (count: number) => `${count} ${count === 1 ? 'item' : 'items'}`;
 const keptOwn = (count: number) => (count === 1 ? 'each tool it was found in keeping its own copy' : 'each tool they were found in keeping its own');
+/** Why a take-in has no Undo (TakeInHeld), as Settings' added line says it in Undo's place; for an edit, what an Undo would cost (`help`). */
+export const heldSaid = (why: TakeInHeld) => (why === 'changed'
+  ? { tag: 'edited since', help: 'Edited since it was added, so an Undo would lose the edit; its switch in the Library turns it off.' } : { tag: leftWords[why][0] });
 /** Tools not managed now that a take-in taken back wrote: "Codex isn’t managed now, so it keeps Central Knot’s copy until it is". */
 const keptSaid = (tools: HarnessId[]) => (tools.length === 1 ? `${toolName(tools[0])} isn’t managed now, so it keeps Central Knot’s copy until it is`
   : `${andList(tools.map(toolName))} aren’t managed now, so they keep Central Knot’s copies until they are`);
@@ -608,15 +613,13 @@ export function stillAdded(notice: TakenInNotice, events: readonly HistoryEvent[
   return { named, words: { items: named.map(each => each.name), from, ...(settingsChanged.length ? { settingsChanged } : {}) } };
 }
 
-/** A take-in by Synchronize everything's rule, no click behind it (everythingPlan's take-ins). */
-const takenByRule = (entry: HistoryEvent) => entry.kind === 'on' && entry.cause === 'sync-everything';
 /**
  * Whether an entry's own action now (`change`: libraryAction's on the page, Kind.historyAction's in main) is the Undo of an
  * addition the rule made, which takes it out of Central Knot again (a take-in changed since offers Turn it off instead, which
  * this is not). The one test for an added line's Undo, on Settings and in main (everything.ts undoAdded).
  */
 export const undoesAddition = (entry: HistoryEvent, change: Change | undefined) => takenByRule(entry) && change?.deleted === true;
-/** Whether an entry is a deletion that Undo made (a take-in by the rule is `undoneBy` it) whose own action now is its Restore. */
+/** Whether an entry is the deletion of a take-in by the rule (any such Undo's, not only one line's) whose own action now is its Restore. */
 export const restoresAddition = (entry: HistoryEvent, change: Change | undefined, history: readonly HistoryEvent[]) =>
   entry.kind === 'deleted' && change?.deleted === false && history.some(added => added.undoneBy === entry.id && takenByRule(added));
 
@@ -624,9 +627,8 @@ export const restoresAddition = (entry: HistoryEvent, change: Change | undefined
 export type AddedPassed = 'changed' | 'done' | 'gone';
 const passedWords = (why: AddedPassed, putBack: boolean) => ({ changed: 'changed since', done: putBack ? 'restored already' : 'undone already', gone: 'no longer in History' })[why];
 /**
- * What an added line's Undo did (`putBack` false: the items out of Central Knot again, each tool they were found in keeping its
- * own copy, and that its Restore puts back Central Knot's kept version, not a tool's copy as the taken-out list's Add takes), or
- * that Restore (the items back); then each item it passed over, by why, also when it did nothing.
+ * What an added line's Undo did (`putBack` false: what went and what stayed), or its Restore (the items back); then each item it
+ * passed over, by why, also when it did nothing.
  */
 export function undoneAddedWords(done: readonly string[], passed: readonly { item: string; why: AddedPassed }[], putBack: boolean): string {
   const whys = [...new Set(passed.map(entry => entry.why))].map(why => `${andList(passed.filter(entry => entry.why === why).map(entry => entry.item))} (${passedWords(why, putBack)})`);
@@ -634,6 +636,6 @@ export function undoneAddedWords(done: readonly string[], passed: readonly { ite
   if (!done.length) return `Nothing was ${not}${whys.length ? `: ${andList(whys)}` : ''}.`;
   const one = done.length === 1;
   const lead = putBack ? `${andList([...done])} ${one ? 'is' : 'are'} back in Central Knot`
-    : `${andList([...done])} ${one ? 'is' : 'are'} out of Central Knot again, ${keptOwn(done.length)}; Restore puts back Central Knot’s kept ${one ? 'version' : 'versions'}`;
+    : `${andList([...done])} ${one ? 'is' : 'are'} out of Central Knot again. The copies it put in other tools are gone; the tools ${one ? 'it was' : 'they were'} found in keep theirs`;
   return `${lead}.${whys.length ? ` Not ${not}: ${andList(whys)}.` : ''}`;
 }

@@ -201,7 +201,7 @@ test('Synchronize everything shows the switch difference on the page', () => {
     'What turns up in a tool is turned on in every tool Central Knot manages; items whose copies differ wait for your choice.');
 });
 
-test('Synchronize everything counts the found items taken out earlier on a fold that names each, with its kind and Add, or that its copies differ', () => {
+test('Synchronize everything counts the items taken out earlier on a fold that names each, its text a click away, with its kind and Add, or Choose copy where its copies differ', () => {
   state.outcome = undefined;
   state.history.data = undefined;
   state.dismissed.clear();
@@ -211,21 +211,25 @@ test('Synchronize everything counts the found items taken out earlier on a fold 
   draw();
   assert.deepEqual([textOf(findById(rendered, 'setting-sync-everything-notice')), textOf(findById(rendered, 'setting-taken-out-toggle'))],
     ['Turning it on puts the 1 item found in your tools into every tool Central Knot manages now. 1 found item has copies that differ and waits for your choice of copy.Choose copies',
-      '1 found item isn’t added by itself again (taken out of Central Knot).']);
+      '1 removed item stays out of Central Knot.']);
 
   // After Undo (nothing ready to add, 3 taken out, 1 waiting): the fold stands in for "nothing would be added"; opened, it names
-  // each by kind, Add on those it takes at once, and says so of the one whose copies differ, which waits for no walkthrough.
+  // each by kind, its kept version's mark after its name, Add on those it takes at once, and Choose copy on the one whose copies
+  // differ, which waits for no walkthrough.
   const differing = { ...deletedFact('split'), takeInAnswers: { click: { wait: 'choice' }, rule: { leave: 'deleted' } } };
+  const kept = { key: 'old-one', name: 'old-one', on: false, hash: 'h-old', versions: [{ hash: 'h-old', at: '2026-11-27T19:00:00Z', from: { how: 'found', harness: 'claude-cli' } }], except: [], applied: {}, deleted: { at: '2026-11-28T00:00:00Z' } };
   state.home = makeHome({
-    skills: { ...emptyKind(), items: [deletedFact('old-one'), differing, waitingFact('review')] },
+    skills: { ...emptyKind(), items: [deletedFact('old-one'), differing, waitingFact('review')], library: { 'old-one': kept } },
     agents: { ...emptyKind(), items: [deletedFact('helper')] },
   });
   draw();
   const rows = () => (findById(rendered, 'setting-taken-out')?.querySelector('.setting-taken-out-list')?.children ?? []) as FakeNode[];
   assert.deepEqual([textOf(findById(rendered, 'setting-sync-everything-notice')), textOf(findById(rendered, 'setting-taken-out-toggle')), findById(rendered, 'setting-taken-out')?.attrs.open],
-    ['1 found item has copies that differ and waits for your choice of copy.Choose copies', '3 found items aren’t added by themselves again (taken out of Central Knot).', undefined]);
-  assert.deepEqual(rows().map(row => [textOf(row), !!row.querySelector('button')]), [['old-one skillAdd', true], ['split skillcopies differ', false], ['helper agentAdd', true]]);
-  assert.ok(findById(rendered, 'setting-taken-out-add-agents-helper'), 'each Add is named by its kind and key');
+    ['1 found item has copies that differ and waits for your choice of copy.Choose copies', '3 removed items stay out of Central Knot.', undefined]);
+  assert.deepEqual(rows().map(row => [textOf(row), row.querySelector('.setting-taken-out-act')?.querySelector('button')?.attrs.id]),
+    [['old-one skillAdd', 'setting-taken-out-add-skills-old-one'], ['split skillcopies differChoose copy', 'setting-taken-out-choose-skills-split'], ['helper agentAdd', 'setting-taken-out-add-agents-helper']]);
+  assert.deepEqual([!!rows()[0].querySelector('.row-file-btn'), rows()[1].querySelector('.row-tag')?.attrs.title],
+    [true, 'Its tools’ copies differ, so adding it needs a choice of copy.']);
 
   // With nothing found at all while off, still says nothing would be added.
   state.home = makeHome();
@@ -271,7 +275,8 @@ test('An added line has its own Undo once History is read, where one of its take
   });
   const addedLines = () => (findById(rendered, 'setting-sync-everything')?.querySelector('.setting-added')?.children ?? [])
     .filter((child): child is FakeNode => !!child && typeof child === 'object' && 'tag' in child);
-  const undos = () => addedLines().map(line => textOf(line.querySelector('.text-action') ?? undefined));
+  // What each line has in its Undo's place: the Undo, why there is none, or nothing.
+  const undos = () => addedLines().map(line => textOf(line.querySelector('.text-action') ?? line.querySelector('.setting-added-why') ?? undefined));
 
   state.dismissed.clear();
   state.home = makeHome({
@@ -304,26 +309,30 @@ test('An added line has its own Undo once History is read, where one of its take
   state.history.state = 'ready';
   draw();
   assert.deepEqual(undos(), ['Undo', '', '', ''], 'only early, which the band’s Undo doesn’t take back, has its own');
-  assert.equal(findById(rendered, 'setting-sync-everything-added-skills-action')?.attrs.title, 'Take early out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own');
+  // Two lines of one kind each have their own ids, so a redraw puts the focus back on the line it was on.
+  assert.deepEqual(addedLines().map(line => line.attrs.id), ['take-early', 'take-notes', 'take-edited', 'take-files'].map((id, at) => `setting-sync-everything-added-${at < 3 ? 'skills' : 'mcp'}-${id}`));
+  assert.equal(findById(rendered, 'setting-sync-everything-added-skills-take-early-action')?.attrs.title, 'Take early out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own');
 
   // Edit `edited` in its tool while the band stands: the band's Undo leaves it in, and its own action is Turn it off now, so its
-  // line has no Undo either.
+  // line says why it has no Undo, in Undo's place, with what an Undo would cost on its hover.
   state.home.skills.library.edited = live('edited', 'v2') as never;
   draw();
-  assert.deepEqual(undos(), ['Undo', '', '', '']);
+  assert.deepEqual(undos(), ['Undo', '', 'edited since', '']);
+  assert.equal(addedLines()[2].querySelector('.setting-added-why')?.attrs.title, 'Edited since it was added, so an Undo would lose the edit; its switch in the Library turns it off.');
 
-  // A line of two, one changed since: the band leaves it, and its untouched take-in has its Undo.
+  // A line of two, one changed since: the band leaves it; its Undo says how many it takes, and its hover names that one alone.
   state.home.skills.notices = [{ kind: 'taken-in', items: ['notes', 'edited'], keys: ['notes', 'edited'], from: ['claude-cli'], history: 'take-notes', histories: ['take-notes', 'take-edited'] }];
   draw();
-  assert.deepEqual([textOf(addedLines()[0]), undos()], ['Added 2 skills from Claude Code: notes and edited.Undo', ['Undo', '']]);
+  assert.deepEqual([textOf(addedLines()[0]), undos()], ['Added 2 skills from Claude Code: notes and edited.Undo 1', ['Undo 1', '']]);
+  assert.equal(addedLines()[0].querySelector('.text-action')?.attrs.title, 'Take notes out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own');
 
-  // No band, or a band holding no switch-on's Undo: every line whose take-in offers it has its own Undo.
+  // No band, or a band holding no switch-on's Undo: every line whose take-ins offer it has its own Undo; of several, all of them.
   state.home.skills.library.edited = live('edited', 'v1') as never;
-  state.home.skills.notices = [oldNotice, notesNotice];
+  state.home.skills.notices = [oldNotice, { ...notesNotice, items: ['notes', 'edited'], keys: ['notes', 'edited'], histories: ['take-notes', 'take-edited'] }];
   for (const outcome of [undefined, { page: 'settings' as const, band: true, settingsBand: true, text: 'Other Undo.', act: { label: 'Undo', id: 'outcome-undo', run() {} } }]) {
     state.outcome = outcome;
     draw();
-    assert.deepEqual(undos(), ['Undo', 'Undo', 'Undo'], `${outcome?.text}`);
+    assert.deepEqual(undos(), ['Undo', 'Undo all 2', 'Undo'], `${outcome?.text}`);
   }
   state.outcome = undefined;
   state.history.data = undefined;
@@ -349,11 +358,11 @@ test('A line of two, the first undone in History: it names the other alone, wher
   draw();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(historyReads - reads, 1, 'a line naming take-ins History wasn’t read for in this visit reads it, once');
-  const line = findById(rendered, 'setting-sync-everything-added-skills');
+  const line = findById(rendered, 'setting-sync-everything-added-skills-take-deploy');
   assert.deepEqual([textOf(line), !!findById(rendered, 'file-skills-lint-take-deploy'), !!line?.querySelector('.text-action')], ['Added skill lint from Codex.', true, false]);
   state.outcome = undefined;
   draw();
-  assert.equal(textOf(findById(rendered, 'setting-sync-everything-added-skills')), 'Added skill lint from Codex.Undo');
+  assert.equal(textOf(findById(rendered, 'setting-sync-everything-added-skills-take-deploy')), 'Added skill lint from Codex.Undo');
   state.history.data = undefined;
   historyEvents = [];
 });
@@ -392,9 +401,9 @@ test('Synchronize everything marks added items Central Knot holds, opens the fil
   assert.deepEqual(partsOf(kids()[1].querySelector('.setting-message-text')),
     ['Added 3 skills from Claude Code and Codex: ', '(Notes[file-skills-notes-take-2],)', ' ', '(lint[file-skills-lint-take-2])', ' and ', '(tidy[file-skills-tidy-take-2].)']);
   findById(rendered, 'file-skills-notes-take-1')!.click();
-  assert.deepEqual(kids().map(el => [el.attrs.id, el.classList.contains('file-anchored')]), [['setting-sync-everything-added-skills', true], ['file-panel-settings', false], ['setting-sync-everything-added-skills', false]]);
+  assert.deepEqual(kids().map(el => [el.attrs.id, el.classList.contains('file-anchored')]), [['setting-sync-everything-added-skills-take-1', true], ['file-panel-settings', false], ['setting-sync-everything-added-skills-take-2', false]]);
   findById(rendered, 'file-skills-notes-take-2')!.click();
-  assert.deepEqual(kids().map(el => [el.attrs.id, el.classList.contains('file-anchored')]), [['setting-sync-everything-added-skills', false], ['setting-sync-everything-added-skills', true], ['file-panel-settings', false]]);
+  assert.deepEqual(kids().map(el => [el.attrs.id, el.classList.contains('file-anchored')]), [['setting-sync-everything-added-skills-take-1', false], ['setting-sync-everything-added-skills-take-2', true], ['file-panel-settings', false]]);
   // Clearing notices (and drawing without a home) calls placePanel and drops the open file.
   const savedHome = state.home, savedNotices = savedHome.skills.notices;
   for (const clear of [() => { savedHome.skills.notices = []; }, () => { state.home = undefined; }]) {

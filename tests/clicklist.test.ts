@@ -2677,7 +2677,7 @@ test('Multi-item taken-in notice stays when either item is left in (both orders)
     app.home!.skills.notices = [twoNotice()];
     await restoreEvent('ev-on');
     if (extra) { events[2].undoneBy = 'u-b'; await extra(); }
-    return [app.dismissed.has('take-alpha'), !!findById(settingsPage(), 'setting-sync-everything-added-skills')];
+    return [app.dismissed.has('take-alpha'), !!findById(settingsPage(), 'setting-sync-everything-added-skills-take-alpha')];
   };
   // Order B: alpha (first) taken back, beta left in -> line stays; then undoing beta alone clears it.
   assert.deepEqual(await runCase(true, false), [false, true], 'alpha undone, beta left in: stays');
@@ -2702,7 +2702,7 @@ test('An added line’s Undo of twelve take-ins is one call to main and one band
   });
   await undoAdded('skills', new Map(ids.map((id, at) => [id, names[at]])));
   assert.deepEqual([asked, app.outcome?.text, app.outcome?.act?.label, app.outcome?.settingsBand, app.dismissed.has(ids[0])],
-    [[['skills', ids, '/home', false]], `${names.slice(0, -1).join(', ')} and skill-11 are out of Central Knot again, each tool they were found in keeping its own; Restore puts back Central Knot’s kept versions.`, 'Restore', true, true]);
+    [[['skills', ids, '/home', false]], `${names.slice(0, -1).join(', ')} and skill-11 are out of Central Knot again. The copies it put in other tools are gone; the tools they were found in keep theirs.`, 'Restore', true, true]);
   app.outcome!.act!.run();
   await settled();
   assert.deepEqual(asked[1], ['skills', ids.map(id => `gone-${id}`), '/home', true], 'Restore sends the deletions that Undo made, and no other');
@@ -2718,7 +2718,9 @@ test('The taken-out list’s Add is the Library row’s own Add, said in Setting
   assert.equal(main.sent.at(-1), 'notes on, seen off');
   await main.pass({ results: [{ item: 'notes', harness: 'claude-cli', outcome: 'held', differs: true, unchanged: true, message: 'Its copies differ.' }], writes: 0, reloads: [] });
   await added;
-  assert.deepEqual([app.outcome?.page, app.outcome?.settingsBand, app.outcome?.text], ['settings', true, 'notes has differing copies. Choose which copy every tool uses.']);
+  assert.deepEqual([app.outcome?.page, app.outcome?.rows, app.outcome?.text], ['settings', [{ kind: 'skills', key: 'notes' }], 'notes has differing copies. Choose which copy every tool uses.']);
+  const band = (node: any): boolean => typeof node === 'object' && !!node && (node.attrs?.['data-outcome'] !== undefined || (node.children ?? []).some(band));
+  assert.ok(band(settingsPage()), 'Settings draws a click’s result on an item in its band');
 });
 
 test('An added line’s Undo that ends once Settings was left draws no band there or when Settings opens again', async t => {

@@ -919,6 +919,8 @@ export function copyQuestion(t: Table, kind: PageKind, key: string, then: () => 
   const skill = rowByKey(kind, key);
   return skill && isDiffering(skill) ? compareChoices(t, skill, false, then, 'walk-') : null;
 }
+/** The same question on the Library's table, for a page with none of its own (Settings' taken-out list: settingspage.ts). */
+export const libraryCopyQuestion = (kind: PageKind, key: string, then: () => void) => copyQuestion(useLibrary(), kind, key, then);
 
 /** Whether an open row's details dock beside the table: the content is wide enough (renderer.ts sets state.wide). */
 const docked = () => state.wide;

@@ -17,7 +17,7 @@ import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { forgetSourcePrompts, loadSources } from './sourcespage.ts';
 import { forgetHistoryFolds } from './historypage.ts';
 import { forgetManageQuestion } from './managecard.ts';
-import { loadSettings, openHistoryWindow, openSettings, settingsReadsHistory } from './settingspage.ts';
+import { loadSettings, openHistoryWindow, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
 import type { Reason, ApplyResult, Profile, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SessionCostsView, SyncNotice, TakenInNotice, UsageReading } from './types.ts';
@@ -1187,7 +1187,7 @@ export const writeOff = (stops: boolean): string | boolean => acting() ?? select
  */
 function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; readId?: number } = {}): Promise<void> {
   if (page === 'history') return Promise.all([loadHistory(), loadSettings()]).then(() => undefined);
-  if (page === 'settings') return Promise.all([loadSettings(), settingsReadsHistory() ? loadHistory() : undefined]).then(() => undefined);
+  if (page === 'settings') return loadSettings().then(() => undefined);
   if (page === 'instructions') return loadInstructions(readId);
   if (page === 'sessions') return loadSessions(readId);
   // Harnesses sums up each tool's instruction file and installs, as Instructions and Plugins read them. It only counts installs,
@@ -1396,10 +1396,9 @@ function dismissTakenBack(taken: Set<string>) {
 }
 
 /**
- * Settings' added line's own Undo (settingspage.ts): these take-ins of one kind (`names`: each entry's name as the line said it)
- * taken out of Central Knot again by main in one pass (everything.ts undoAdded); or, `putBack`, its band's Restore of the
- * deletions it made. Said in Settings' band, with each passed over and why; a line goes once every item it names is undone. A
- * press that ends once he has left Settings says nothing on any page.
+ * Settings' added line's own Undo of these take-ins of one kind (`names`: as the line said them), or (`putBack`) its band's
+ * Restore of the deletions it made; said in Settings' band. A line goes once every item it names is undone; a press that ends
+ * once he has left Settings says nothing.
  */
 export const undoAdded = (kind: PageKind, names: Map<string, string>, putBack = false) => busy(putBack ? 'Restoring…' : 'Undoing…', async page => {
   const visit = state.visit, result = received(await api().undoAdded(kind, [...names.keys()], state.home!.home, putBack));
@@ -1418,11 +1417,11 @@ export const undoAdded = (kind: PageKind, names: Map<string, string>, putBack = 
     act: !putBack && back.size ? { label: 'Restore', id: 'outcome-undo', run: () => void undoAdded(kind, back, true) } : undefined }, result.reloads, back.size > 0);
 });
 
-/** The taken-out list's Add on Settings (settingspage.ts): the Library row's own Add (matrix.ts turnOnRow), said in Settings' band. */
+/** The taken-out list's Add on Settings (settingspage.ts): the Library row's own Add (matrix.ts turnOnRow). */
 export const addTakenOut = (kind: PageKind, key: string) => busy('Applying…', async page => {
   const visit = state.visit, click = turnOnRow(kind, key, false), done = click && await carryOut(click, page);
   if (state.visit !== visit) return;
-  if (click && done) sayDone({ ...done, outcome: { ...done.outcome, settingsBand: true } }, click);
+  if (click && done) sayDone(done, click);
   else tell({ page, band: true, settingsBand: true, warn: true, text: 'It is no longer found in your tools. Nothing changed.' });
 });
 
@@ -2150,8 +2149,8 @@ async function backgroundRefresh() {
     if (!view) return;
     // A tool appeared or went away: the page leaves a kind no longer here and reads its own data again (setHome).
     setHome(view, { background: true });
-    // On Settings, History is kept current so its added lines and the band's switch-on Undo say what an Undo still takes back.
-    if (state.page === 'settings' && settingsReadsHistory()) await putHistory().catch(() => undefined);
+    // While Settings holds a switch-on Undo band, keep History current so take-in lines know what Undo still takes back.
+    if (state.page === 'settings' && state.outcome?.page === 'settings' && state.outcome.everythingUndo) await putHistory().catch(() => undefined);
     rerender();
   } finally {
     refreshing = false;
