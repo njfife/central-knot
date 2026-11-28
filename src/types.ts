@@ -820,8 +820,8 @@ export type InstallState = { state: 'installed'; path: string; live?: boolean;
   switchesHeld?: string;
   /** The tool's own switch has the whole plugin turned off there (a mark: the plugin is still installed). */
   off?: true;
-  /** The tool keeps settings of its own for it, which its uninstall deletes and an install doesn't bring back (plugins.ts ownSettings). */
-  ownSettings?: true } | { state: 'not-installed' } | { state: 'not-known'; reason: string; unreadable?: true }
+  /** The tool keeps settings of its own for it, which its uninstall deletes and an install doesn't bring back (`unknown` when its settings file couldn't be read: plugins.ts ownSettings). */
+  ownSettings?: true | 'unknown' } | { state: 'not-installed' } | { state: 'not-known'; reason: string; unreadable?: true }
   /** The tool has a different marketplace under the same name: Central Knot neither reads nor changes its plugins. */
   | { state: 'held'; reason: string };
 
@@ -1036,7 +1036,7 @@ export interface PluginDetail extends PluginContents {
   installed?: Partial<Record<HarnessId, InstalledCopy>>;
 }
 /** What one tool has installed of a plugin, read from that tool's own copy, and the settings the tool keeps for it (InstallState ownSettings). */
-export type InstalledCopy = Pick<PluginContents, 'skills' | 'commands' | 'agents' | 'instructions' | 'version'> & { ownSettings?: true };
+export type InstalledCopy = Pick<PluginContents, 'skills' | 'commands' | 'agents' | 'instructions' | 'version'> & { ownSettings?: true | 'unknown' };
 
 export interface PluginsView {
   home: string;
