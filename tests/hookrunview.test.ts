@@ -1,5 +1,5 @@
 // Worked examples of "Run it" on a hook's row (hooksourceview.ts hookSourceControls, canRun, resetHookSources,
-// pruneHookSources; sessionhooks.ts hookRunWords, hookStripHelp, hookStripNote, HOOK_RUN_WARN): Check 1 (Claude Code
+// pruneHookSources; sessionhooks.ts hookRunWords, hookRunWarn, hookStripHelp, hookStripCard, HOOK_RUN_WARN): Check 1 (Claude Code
 // start hook printing two lines), a unit test per row of hookRunWords (every outcome and detail), T1.23 and T2.28 strip
 // lines, eligibility (canRun), and row guards (hashed ids, double click, held Enter, late results dropped, leaving page
 // without stopping, stale Run again refusal, source + result open together with result above source, folds kept across
@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { runHook, stopHookRun, type HookRunContext } from '../src/hookrun.ts';
 import { readHookSource } from '../src/hooksource.ts';
 import { sessionSettings } from '../src/pluginitems.ts';
-import { HOOK_RUN_WARN, hookFingerprint, hookRunWords, hookStripHelp, hookStripNote, sessionStrip } from '../src/sessionhooks.ts';
+import { HOOK_RUN_ACTUAL_ONLY, HOOK_RUN_COPILOT_PLUGIN, HOOK_RUN_WARN, hookFingerprint, hookRunWarn, hookRunWords, hookStripCard, hookStripHelp, sessionStrip } from '../src/sessionhooks.ts';
 import type { HookRunResult, HookSourceRef } from '../src/types.ts';
 import { standIn } from './standin.ts';
 
@@ -238,36 +238,38 @@ test('Check 2: hookRunWords matches every outcome, quiet trailing run place/time
 
 // ---------- Pure unit tests: T1.23 & T2.28 strip lines (Check 3) ----------
 
-test('Check 3: standing line, T1.23 help card (with plugin sentence <= 30 words), and T2.28 strip notes replace strip.note', () => {
+test('Check 3: standing warning (Codex joined), T1.23 help card (<= 30 words), and hookStripCard (<= 2 sentences)', () => {
   assert.equal(HOOK_RUN_WARN, '“Run it” runs a hook’s command to show what it adds; it may change your files.');
+  assert.equal(hookRunWarn('claude-cli'), HOOK_RUN_WARN);
+  assert.equal(hookRunWarn('codex-cli'), `${HOOK_RUN_WARN} Codex: Run it runs a hook even if it isn’t trusted in /hooks.`);
 
   const claudeRun = hookStripHelp('claude-cli', true);
   assert.equal(claudeRun, 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.');
   assert.ok(wordCount(claudeRun) <= 30, `expected <=30 words, got ${wordCount(claudeRun)}`);
+  assert.equal(hookStripHelp('claude-cli', false), 'Session-start and prompt hooks; not URL, MCP, project or organisation.');
+  assert.equal(hookStripHelp('copilot-cli', false), 'Session-start hooks; not URL, MCP, project or organisation.');
 
-  const claudeNoRun = hookStripHelp('claude-cli', false);
-  assert.equal(claudeNoRun, 'Session-start and prompt hooks; not URL, MCP, project or organisation.');
-  assert.ok(wordCount(claudeNoRun) <= 30);
+  const sentences = (text: string) => text.split(/(?<=\.)\s+/).length;
+  const ownGroup = [{ hooks: [{ source: { from: 'own' } }] }] as any;
+  const copPluginGroup = [{ hooks: [{ source: { from: 'installed', tool: 'copilot-cli' } }] }] as any;
 
-  const copilotRun = hookStripHelp('copilot-cli', true);
-  assert.equal(copilotRun, 'Session-start hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.');
-  assert.ok(wordCount(copilotRun) <= 30);
+  assert.equal(hookStripCard('codex-cli', { groups: ownGroup }, { first: false, runnable: true, anyRunnable: true, mode: 'actual', platform: 'linux' }), undefined);
+  assert.equal(hookStripCard('codex-cli', { groups: ownGroup }, { first: false, runnable: false, anyRunnable: false, mode: 'actual', platform: 'linux' }), 'Codex runs a hook only after you trust it in /hooks.');
+  const codexFolder = hookStripCard('codex-cli', { groups: ownGroup }, { first: true, runnable: false, anyRunnable: false, mode: 'custom', platform: 'linux' })!;
+  assert.equal(sentences(codexFolder), 2);
+  assert.match(codexFolder, /trust it in \/hooks; Run it works only on this computer’s home\./);
 
-  const copilotNoRun = hookStripHelp('copilot-cli', false);
-  assert.equal(copilotNoRun, 'Session-start hooks; not URL, MCP, project or organisation.');
-  assert.ok(wordCount(copilotNoRun) <= 30);
+  assert.equal(hookStripCard('copilot-cli', { groups: [] }, { first: false, runnable: false, anyRunnable: true, mode: 'actual', platform: 'linux' }), 'Copilot CLI ignores what prompt hooks print.');
+  const copPlugin = hookStripCard('copilot-cli', { groups: copPluginGroup }, { first: false, runnable: false, anyRunnable: true, mode: 'actual', platform: 'linux' })!;
+  assert.equal(copPlugin, `Copilot CLI uses only top-level additionalContext from start-of-session hooks (not hookSpecificOutput) and ignores prompt hooks. Run it: ${HOOK_RUN_COPILOT_PLUGIN}`);
+  assert.equal(sentences(copPlugin), 2);
+  const copFirst = hookStripCard('copilot-cli', { groups: copPluginGroup }, { first: true, runnable: false, anyRunnable: false, mode: 'actual', platform: 'linux' })!;
+  assert.equal(sentences(copFirst), 2);
 
-  // T2.28 Codex note replaces strip.note only when runnable.
-  const codexStrip = { note: 'Codex runs a hook only after you trust it in `/hooks`', groups: [{} as any] };
-  assert.equal(hookStripNote('codex-cli', codexStrip, true), 'Codex: Run it runs a hook even if it isn’t trusted in `/hooks`.');
-  assert.equal(hookStripNote('codex-cli', codexStrip, false), 'Codex runs a hook only after you trust it in `/hooks`.');
-
-  // T2.28 Copilot CLI prompt-only strip replaces strip.note; strip with start hooks keeps strip.note.
-  const copilotPrompt = { note: 'Copilot CLI uses only…', groups: [] };
-  const copilotStart = { note: 'Copilot CLI uses only…', groups: [{} as any] };
-  assert.equal(hookStripNote('copilot-cli', copilotPrompt, false), 'Copilot CLI ignores what prompt hooks print.');
-  assert.equal(hookStripNote('copilot-cli', copilotStart, true), 'Copilot CLI uses only….');
-  assert.equal(hookStripNote('claude-cli', { groups: [] }, true), undefined);
+  assert.equal(hookStripCard('claude-cli', { groups: ownGroup }, { first: true, runnable: false, anyRunnable: false, mode: 'custom', platform: 'linux' }),
+    `${hookStripHelp('claude-cli', false)} ${HOOK_RUN_ACTUAL_ONLY}`);
+  assert.equal(hookStripCard('claude-cli', { groups: ownGroup }, { first: true, runnable: false, anyRunnable: false, mode: 'custom', platform: 'win32' }),
+    hookStripHelp('claude-cli', false));
 });
 
 // ---------- DOM harness for Checks 1, 4, 5, 6, 7, 8 ----------
@@ -1100,7 +1102,7 @@ test('hookCantRunReason only speaks when one known cause covers every text hook 
   assert.equal(reason({ inAnyTool: false, installs: [], fingerprints: [fpA] }, 'actual', 'win32'), undefined, 'nothing for Windows');
 });
 
-test('Plugin page runs installed hooks, keeps marketplace-only text hooks View source alone, explains why Run it is absent, and puts plugin sentence behind (?)', async () => {
+test('Plugin page runs installed hooks, keeps marketplace-only text hooks View source alone, explains why Run it is absent, and puts plugin sentence behind (?)', async t => {
   const dom = makeDom();
   await import('../src/settingspage.ts');
   const { state } = await import('../src/app.ts');
@@ -1168,8 +1170,8 @@ test('Plugin page runs installed hooks, keeps marketplace-only text hooks View s
   const codexPage = pluginPage(view, entry, 0, entry.plugins[0]);
   const codexText = dom.textOf(codexPage);
   const codexWarn = dom.textOf(dom.findAll(codexPage, n => n.className === 'session-run-warn')[0]);
-  assert.equal(codexWarn, HOOK_RUN_WARN);
-  assert.match(codexText, /Codex: Run it runs a hook even if it isn’t trusted in \/hooks\./);
+  assert.equal(codexWarn, `${HOOK_RUN_WARN} Codex: Run it runs a hook even if it isn’t trusted in /hooks.`);
+  assert.equal(dom.findAll(codexPage, n => n.className === 'session-note').length, 0);
   assert.match(codexText, /echo codex-installed/);
   assert.match(codexText, /echo market-only/, 'marketplace-only text hook stays listed with View source');
   assert.match(codexText, /marketplace only/, 'same version as marketplace tags row as marketplace only');
@@ -1263,15 +1265,31 @@ test('Plugin page runs installed hooks, keeps marketplace-only text hooks View s
   state.home!.snapshots = prevSnaps;
 
   // Instructions strip with a runnable plugin hook shows only HOOK_RUN_WARN standing, with plugin sentence in (?).
-  const withPluginCard = instructionCard({
-    tool: 'claude-cli', path: '/tmp/h/.claude/CLAUDE.md', exists: true, text: '# Hi', hash: 'h1',
-    readers: 'Claude Code', notes: [], versions: [],
-    ownHooks: [{ declaredIn: '/tmp/h/.claude/settings.json', event: 'SessionStart', at: 0, launch: { shell: 'echo mine' } }],
-  } as any);
-  const warnText = dom.textOf(dom.findAll(withPluginCard, n => n.className === 'session-run-warn')[0]);
-  assert.equal(warnText, HOOK_RUN_WARN);
-  const cardHelp = dom.findAll(withPluginCard, n => n.attrs?.role === 'tooltip')[0];
-  assert.match(dom.textOf(cardHelp), /Plugin hooks can change their installed files and data\./);
+  const ownClaude = [{ declaredIn: '/tmp/h/.claude/settings.json', event: 'SessionStart', at: 0, launch: { shell: 'echo mine' } }];
+  const mkFile = (tool: string, ownHooks?: any[]) => ({ tool, path: `/tmp/h/${tool}.md`, exists: true, text: '# Hi', hash: tool, readers: tool, notes: [], versions: [], ...(ownHooks ? { ownHooks } : {}) }) as any;
+  const withPluginCard = instructionCard(mkFile('claude-cli', ownClaude));
+  assert.equal(dom.textOf(dom.findAll(withPluginCard, n => n.className === 'session-run-warn')[0]), HOOK_RUN_WARN);
+  assert.match(dom.textOf(dom.findAll(withPluginCard, n => n.attrs?.role === 'tooltip')[0]), /Plugin hooks can change their installed files and data\./);
+
+  await t.test('Instructions hooks strips: Copilot note + plugin refusal behind (?), Codex warning joined, chosen folder reason, one (?) per strip', () => {
+    const info = { marked: false, anyRunnable: true };
+    const [claude, copilot, codex] = [mkFile('claude-cli', ownClaude), mkFile('copilot-cli'), mkFile('codex-cli')].map(f => instructionCard(f, { hookInfo: info }));
+    assert.deepEqual([claude, copilot, codex].map(c => dom.findAll(c, n => n.className.includes('info-mark')).map(n => n.id)),
+      [['session-hooks-info'], ['session-hooks-info-copilot-cli'], []]);
+    assert.equal(dom.findAll(copilot, n => n.className.includes('session-note')).length, 0);
+    assert.match(dom.textOf(dom.findAll(copilot, n => n.id === 'session-hooks-info-copilot-cli-card')[0]), /top-level additionalContext.*Copilot CLI plugin hooks aren’t supported here\./);
+    assert.doesNotMatch(dom.textOf(dom.findAll(claude, n => n.id === 'session-hooks-info-card')[0]), /this computer’s home/);
+    assert.equal(dom.textOf(dom.findAll(codex, n => n.className === 'session-run-warn')[0]), hookRunWarn('codex-cli'));
+    assert.equal(dom.findAll(codex, n => n.className.includes('session-note')).length, 0);
+    // Tool's own Instructions tab (first strip with a tool note) stays one mark with both in its card.
+    const copTab = instructionCard(mkFile('copilot-cli'));
+    assert.deepEqual(dom.findAll(copTab, n => n.className.includes('info-mark')).map(n => n.id), ['session-hooks-info']);
+    state.home!.mode = 'custom';
+    const folderCard = instructionCard(mkFile('claude-cli', ownClaude), { hookInfo: { marked: false, anyRunnable: false } });
+    assert.equal(dom.findAll(folderCard, n => 'data-hook-run' in (n.attrs ?? {})).length, 0);
+    assert.match(dom.textOf(dom.findAll(folderCard, n => n.id === 'session-hooks-info-card')[0]), /Run it works only on this computer’s home\./);
+    state.home!.mode = 'actual';
+  });
 });
 
 test('hookRunWords labels tool and live plugin version truthfully, and script-only hook source shows raw event', async () => {

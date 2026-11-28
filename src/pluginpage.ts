@@ -27,7 +27,7 @@ import { applyPluginOps, loadPlugins, market, openLink, shownDetail, toggleOpene
 import { pluginLink } from './sourcelink.ts';
 import type { Components, DeclaredHook, HarnessId, HookSourceRef, InstalledPlugin, MarketplaceView, Outcome, PluginDetail, PluginItemClash, PluginItemLine, PluginView, PluginsView, YourName } from './types.ts';
 import { canRun, hookCantRunReason, hookRow, hookSourceControls } from './hooksourceview.ts';
-import { HOOK_RUN_WARN, hookFingerprint, hookLine, hookStripHelp, hookStripNote, textHookRows, type TextHookRow } from './sessionhooks.ts';
+import { hookFingerprint, hookLine, hookRunWarn, hookStripHelp, textHookRows, type TextHookRow } from './sessionhooks.ts';
 import { plural } from './model.ts';
 import { andList, coworkWords, sentence, toolNames as names } from './words.ts';
 import { flipInHarness, openKind, rowByKey } from './matrix.ts';
@@ -444,7 +444,6 @@ function sessionHookStrip(view: PluginsView, entry: MarketplaceView, plugin: Plu
       rerender();
     } }, eligible.map(each => h('option', { value: each.install.tool, selected: each.install.tool === tool }, `As ${names[each.install.tool]}`))), icon('chevrons-up-down', 14)) : null;
   const copy = hookCopyNote(selected.install, eligible.map(each => each.install), compareTo);
-  const note = hookStripNote(tool, { groups: [] }, true);
   const seen = new Set(selected.rows.map(row => row.source.fingerprint));
   const tag = compareTo && selected.install.version !== compareTo ? `${compareTo} only` : 'marketplace only';
   const marketRows = marketText.filter(hook => !seen.has(hookFingerprint(hook))).map((hook): TextHookRow => {
@@ -455,8 +454,7 @@ function sessionHookStrip(view: PluginsView, entry: MarketplaceView, plugin: Plu
     h('div.session-title-row', {}, h('h4.session-title', {}, `Hooks that can add text (${selected.rows.length + marketRows.length})`),
       infoMark('plugin-hooks-info', 'Hooks that can add text', hookStripHelp(tool, true)), picker),
     copy ? h('p.plugin-group-note', {}, versionNote(copy)) : null,
-    h('p.session-run-warn', {}, HOOK_RUN_WARN),
-    note ? h('p.session-note', {}, ...inlineMarkdown(note, () => undefined)) : null,
+    h('p.session-run-warn', {}, hookRunWarn(tool)),
     h('ul.session-hooks.plugin-session-hooks', {},
       selected.rows.map((hook, row) => hookRow(hook, `hook-source-plugin-${tool}-${row}`)),
       marketRows.map((hook, row) => hookRow(hook, `hook-source-session-${row}`))));
