@@ -18,7 +18,7 @@ import type { DesktopApp, HarnessId, HomeView, InstructionFile, Snapshot } from 
 import { caughtUpBand, resetTablesForHarness, itemsTable, differingIn, emptyList, showFiltered } from './matrix.ts';
 import { kindSource } from './itemrow.ts';
 import { aboutInstructions, instructionBands, instructionCard, instructionsNotRead } from './instructionspage.ts';
-import { browse, clickOn, lineBox, loadPlugins, market, pluginBusy, turnPlugin } from './pluginstate.ts';
+import { browse, clickOn, lineBox, loadPlugins, market, pluginBusy, titleShared, turnPlugin } from './pluginstate.ts';
 import { homeItems, inUseName, pluginLive } from './profileplan.ts';
 import { copyButton, fact, kindEmpty, noToolsState, notRead } from './pages.ts';
 
@@ -335,8 +335,10 @@ function instructionsTab(tool: HarnessId) {
   return h('div.page', {}, instructionBands(), h('div.scroll.harness-scroll', { id: 'harness-body' }, body));
 }
 
-/** One installed plugin: its name (with marketplace when ambiguous), recorded version, live click or state line, Uninstall…, quiet Its page, and that tool's switch (pluginstate.ts lineBox). */
-function pluginRow({ entry, plugin, version }: InstalledMarketPlugin, tool: HarnessId, showMarket = false) {
+/** One installed plugin: its name (with marketplace whenever another listed catalog shares its title), recorded version, live click or state line (with an accessible info mark when held/stuck), Uninstall…, quiet Its page, and that tool's switch (pluginstate.ts lineBox). */
+function pluginRow({ entry, plugin, version }: InstalledMarketPlugin, tool: HarnessId) {
+  const showMarket = titleShared(entry.source, plugin.name);
+  const named = showMarket ? `${pluginTitle(plugin)} (${marketTitle(entry)})` : pluginTitle(plugin);
   const { box, mark, words } = lineBox(plugin.name, entry.name, entry.source, tool);
   const own = typeof box === 'object' ? box : undefined;
   const note = [marketTitle(entry), plugin.description, own?.line ? own.off : undefined].filter(Boolean).join(' · ');
@@ -346,17 +348,19 @@ function pluginRow({ entry, plugin, version }: InstalledMarketPlugin, tool: Harn
   const liveRow = pending && (!pending.tool || pending.tool === tool) ? h('span.plugin-click', { 'data-click': pending.state }, pending.state === 'waiting' ? icon('clock', 12) : icon('refresh-cw', 12, 'spin'), h('span', {}, liveText)) : null;
   const stateText = own ? own.line ?? (mark && (mark === 'kept-off' || mark === 'stays' || own.held) ? MARK_WORDS[mark] : undefined) : undefined;
   const stateTip = own?.line && own.off ? (mark === 'kept-off' ? `${words} ${own.off}` : own.off) : words;
-  const does = own && mark && market.view ? boxDoes(market.view, entry, plugin.name, tool, mark, own.ticked, true) : undefined;
+  const stateWhy = stateText && own?.line && own.off ? infoMark(`harness-plugin-why-${entry.name}-${plugin.name}`, `${named}: ${stateText}`, own.off) : null;
+  const stateRow = stateText ? (stateWhy ? h('span.harness-plugin-state-line', {}, h('span.harness-plugin-state', { title: stateTip }, stateText), stateWhy) : h('span.harness-plugin-state', { title: stateTip }, stateText)) : null;
+  const does = own && mark && market.view ? boxDoes(market.view, entry, plugin.name, tool, mark, own.ticked, true, named) : undefined;
   const disabled = own?.off || liveText || state.busy || pluginBusy(entry.source, plugin.name);
-  const pageLink = button({ variant: 'ghost', size: 'small', label: 'Its page', name: `Open ${pluginTitle(plugin)} in ${pageNames.plugins}`, id: `harness-plugin-${entry.name}-${plugin.name}`,
+  const pageLink = button({ variant: 'ghost', size: 'small', label: 'Its page', name: `Open ${named} in ${pageNames.plugins}`, id: `harness-plugin-${entry.name}-${plugin.name}`,
     onclick: () => { showPage('plugins'); browse({ source: entry.source, plugin: plugin.name, tab: 'plugins', find: '', category: undefined, hookTool: tool }); } });
-  const control = own ? toggle({ on: own.ticked, label: `${pluginTitle(plugin)} in ${names[tool]}`, disabled, attrs: does ? { title: does, 'aria-description': does } : {},
+  const control = own ? toggle({ on: own.ticked, label: `${named} in ${names[tool]}`, disabled, attrs: does ? { title: does, 'aria-description': does } : {},
     id: `harness-plugin-switch-${entry.name}-${plugin.name}`, onchange: () => turnPlugin(entry, plugin.name, own.ticked ? 'keep-out' : 'let-in', tool) }) : null;
   const [uninstall, question] = own ? uninstallControl(entry, plugin, tool, `harness-plugin-uninstall-${entry.name}-${plugin.name}`, own, showMarket) : [null, null];
   return h('div.harness-plugin', { role: 'listitem', title: note || undefined },
     h('div.harness-plugin-text', {},
       h('strong', {}, pluginTitle(plugin), version ? h('span.harness-plugin-version', {}, ` ${version}`) : null, showMarket ? h('span.harness-plugin-market', {}, ` · ${marketTitle(entry)}`) : null),
-      liveRow ?? (stateText ? h('span.harness-plugin-state', { title: stateTip }, stateText) : null)),
+      liveRow ?? stateRow),
     uninstall, pageLink, control, question);
 }
 
@@ -386,13 +390,8 @@ function pluginsTab(tool: HarnessId) {
     button({ variant: 'outline', label: 'Browse plugins', id: 'harness-browse-plugins', onclick: () => showPage('plugins') })));
   const stopped = plugins.installed.length && market.view ? viewStopped(market.view) : undefined;
   const stoppedNote = stopped ? h('p.tools-note', { id: 'harness-plugins-stopped' }, icon(market.view?.canWrite ? 'circle-alert' : 'eye', 14, market.view?.canWrite ? 'tone-warning' : 'tone-muted'), stopped) : null;
-  const titleCounts = new Map<string, number>();
-  for (const { plugin } of plugins.installed) {
-    const title = pluginTitle(plugin).toLowerCase();
-    titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
-  }
   return page(unread, unsureNote, unlistedNote, stoppedNote,
-    plugins.installed.length ? h('div.harness-plugins', { role: 'list' }, plugins.installed.map(item => pluginRow(item, tool, (titleCounts.get(pluginTitle(item.plugin).toLowerCase()) ?? 0) > 1))) : null);
+    plugins.installed.length ? h('div.harness-plugins', { role: 'list' }, plugins.installed.map(item => pluginRow(item, tool))) : null);
 }
 
 /** Where the tool's files are, how it was found, and which other products read them. */

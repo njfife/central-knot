@@ -191,13 +191,13 @@ export function resultLines(ran: PluginDone[], undo = false, { after = false } =
     const turnedOff = mine.filter(entry => entry.action === 'remove' && entry.report.outcome === 'plugin-off' && !!entry.report.changed)
       .sort((first, second) => byToolOrder(first.tool, second.tool)).map(entry => names[entry.tool]);
     const offAgain = tools('plugin-off', true).filter(tool => !turnedOff.includes(tool));
-    // An uninstall's Undo brings back the copy, never what the uninstall deleted with it; when settings couldn't be read, neither the uninstall nor its Undo claims they are gone.
+    // An uninstall says when it deleted saved options (or that its record couldn't be read); its Undo says the copy comes back without them (or that it isn't known).
     const without = undo ? mine.find(entry => entry.deleted && entry.report.changed) : undefined;
-    const removedUnknown = !undo ? mine.find(entry => entry.action === 'remove' && entry.deleted === 'unknown' && entry.report.changed) : undefined;
+    const removed = !undo ? mine.find(entry => entry.action === 'remove' && entry.deleted && entry.report.changed) : undefined;
     const groups: Group[] = item
       ? [[tools(off, true), undo ? `${item} off again in` : `${item} turned off in`], [tools(on, true), undo ? `${item} back on in` : `${item} turned on in`],
         [tools(off, false), `${item} already off in`], [tools(on, false), `${item} already on in`]]
-      : [[tools('installed', true), undo ? 'reinstalled in' : 'installed in', without && withoutDeleted(without.tool, without.deleted!)], ...updatedGroups(mine, !after), [tools('updated', false), 'already up to date in'], [tools('uninstalled', true), undo ? 'removed from' : 'uninstalled from', removedUnknown && withoutDeleted(removedUnknown.tool, 'unknown')],
+      : [[tools('installed', true), undo ? 'reinstalled in' : 'installed in', without && withoutDeleted(without.tool, without.deleted!)], ...updatedGroups(mine, !after), [tools('updated', false), 'already up to date in'], [tools('uninstalled', true), undo ? 'removed from' : 'uninstalled from', removed && withoutDeleted(removed.tool, removed.deleted!, true)],
         [tools('installed', false), 'already in'], [tools('uninstalled', false), 'wasn’t installed in'],
         [offAgain, undo ? 'off again in' : 'turned off in'], [turnedOff, 'turned off in'], [tools('plugin-on', true).filter(tool => !onWith.some(entry => names[entry.tool] === tool)), undo ? 'back on in' : 'turned on in'],
         // Past three, the items left off are counted, not named.
@@ -251,15 +251,27 @@ export function resultParts(lines: ResultLine[], undo: boolean, { short = false,
   const parts: (string | { plugin: string; source: string })[] = undo ? ['Undone: '] : [];
   // A sentence that names another plugin too names the open one as well, so each result is said once, by its plugin.
   if (ok.some(line => line.plugin !== here?.plugin || line.source !== here.source)) here = undefined;
-  ok.forEach((line, at) => {
-    const text = short ? line.short : line.text;
+  // In the header (`short`), plugins sharing the exact same outcome group ("A and B: uninstalled from Claude Code.") so both stay visible beside Undo.
+  const grouped: ResultLine[][] = [];
+  for (const line of ok) {
+    const match = short && !line.skill && !line.part ? grouped.find(group => !group[0]!.skill && !group[0]!.part && group[0]!.short === line.short) : undefined;
+    if (match) match.push(line); else grouped.push([line]);
+  }
+  grouped.forEach((group, at) => {
+    const first = group[0]!, text = short ? first.short : first.text;
     if (at) parts.push('; ');
     // On the plugin's own page its name is already in the breadcrumb: "Installed in Codex." / "pdf-reader turned off in Codex."
     // Only a line that starts the sentence takes a capital, and never a skill's name.
-    const opens = !at && !undo && !line.skill && !line.part;
-    if (here?.plugin === line.plugin && here.source === line.source) parts.push(opens ? capitalized(text) : text);
+    const opens = !at && !undo && !first.skill && !first.part;
+    if (group.length === 1 && here?.plugin === first.plugin && here.source === first.source) parts.push(opens ? capitalized(text) : text);
     // "Undone: document-tools removed from Codex" reads on; a skill's line starts with the skill, so the plugin takes a colon.
-    else parts.push({ plugin: line.plugin, source: line.source }, `${undo && !line.skill && !line.part ? ' ' : ': '}${text}`);
+    else {
+      group.forEach((line, index) => {
+        if (index) parts.push(index === group.length - 1 ? ' and ' : ', ');
+        parts.push({ plugin: line.plugin, source: line.source });
+      });
+      parts.push(`${undo && !first.skill && !first.part ? ' ' : ': '}${text}`);
+    }
   });
   return [...parts, '.'];
 }
@@ -293,9 +305,10 @@ const UNDO_CLAUSES: [(op: PluginOp) => boolean, string, string?][] = [
   [op => isItemSwitch(op.action) || isWhole(op.action), 'turns each switch back as it was in'],
 ];
 
-/** The tail after an uninstall or its Undo (resultLines and undoTitle): deleted settings when known, or that it isn't known whether they are still there when settings couldn't be read. */
-const withoutDeleted = (tool: HarnessId, deleted: true | 'unknown') =>
-  (deleted === 'unknown' ? `; it isn’t known whether ${ownSettingsWords(tool)} are still there` : `, without ${ownSettingsWords(tool)}`);
+/** The tail after an uninstall or its Undo (resultLines and undoTitle): deleted settings when known, or that its record couldn't be read so it isn't known whether they are still there. */
+const withoutDeleted = (tool: HarnessId, deleted: true | 'unknown', removed = false) =>
+  (deleted === 'unknown' ? `; its record couldn’t be read, so it isn’t known whether ${ownSettingsWords(tool)} are still there`
+    : removed ? `; ${ownSettingsWords(tool)} were deleted` : `, without ${ownSettingsWords(tool)}`);
 
 /**
  * Undo's tooltip, from what it will run (`back`): what it reverses where, and that an update in the same run stays; for an

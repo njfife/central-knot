@@ -4162,6 +4162,22 @@ test('Consequential uninstall/Undo shows irreversible completion without Undo qu
   await settled();
   assert.deepEqual(pluginsResult(), [], 'header draws nothing on B’s page when only A’s dropped reload advice remains');
   assert.equal(app.said.quiet, false, 'status bar announces the result whenever the header does not draw it');
+
+  // 4b. Irreversible uninstall started on A's page while the user moves to B's page: header shows only "Last change: alpha.", so the status bar shows the irreversible loss in sight.
+  app.page = 'plugins';
+  market.nav = { ...market.nav, source: '/market', plugin: 'alpha' };
+  turnPlugin(entry, 'alpha', 'uninstall', 'claude-cli');
+  await settled();
+  market.nav = { ...market.nav, source: '/market', plugin: 'beta' };
+  await main.answer({
+    done: [{ source: '/market', marketName: 'team', plugin: 'alpha', tool: 'claude-cli', action: 'remove', report: { tool: 'claude-cli', outcome: 'uninstalled', changed: true, message: 'Uninstalled.', runs: [] } }],
+    before: null,
+    back: [],
+  });
+  await settled();
+  assert.match(textOf(findById(pluginsResult()[0], 'plugins-result')), /Last change: alpha\./);
+  assert.equal(app.said.quiet, false, 'irreversible uninstall while on another plugin’s page must be visible in the status bar');
+  assert.equal(app.said.text, 'alpha: uninstalled from Claude Code. Can’t be undone.');
   app.page = 'harnesses';
   app.harness = 'claude-cli';
   app.harnessTab = 'plugins';
@@ -4205,9 +4221,9 @@ test('Shared plugin titles name their marketplace in the result, Undo label, Und
   });
   await settled();
   const both = pluginsResult();
-  assert.match(textOf(findById(both[0], 'plugins-result')), /shared-kit \(alpha-market\): uninstalled from Claude Code; shared-kit \(beta-market\): uninstalled from Claude Code\./);
+  assert.match(textOf(findById(both[0], 'plugins-result')), /shared-kit \(alpha-market\) and shared-kit \(beta-market\): uninstalled from Claude Code\./);
   const undo = findById(both[0], 'plugins-undo')!;
-  assert.equal(textOf(undo), 'Undo shared-kit (beta-market) in Claude Code');
+  assert.equal(textOf(undo), 'Undo shared-kit (beta-market)');
   assert.equal(undo.title, 'Installs shared-kit (beta-market) again in Claude Code, from the marketplace.');
 
   const undoneCalls: [string, string][] = [];

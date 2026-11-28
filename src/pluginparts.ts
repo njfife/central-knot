@@ -141,9 +141,9 @@ export function uninstallControl(entry: MarketplaceView, plugin: PluginView, too
 }
 
 /** What a click on a tool's box (or its switch on a tool's Plugins tab when `asSwitch`) does there, and its Undo, in the state it is drawn in (pluginrecord.ts A TOOL'S BOX and row 9). */
-export function boxDoes(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, mark: ToolMark, ticked: boolean, asSwitch = false): string {
+export function boxDoes(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, mark: ToolMark, ticked: boolean, asSwitch = false, named = plugin): string {
   // In a tool that takes items one by one a tick lets every item in, one kept out there by its own switch too (pluginlibrary.ts clickOn).
-  const what = takesPlugins(tool) ? plugin : `all of ${plugin}’s items`;
+  const what = takesPlugins(tool) ? named : `all of ${named}’s items`;
   const where = names[tool];
   const sw = entry.switches?.[plugin];
   const on = !!sw?.entry?.on;
@@ -153,7 +153,7 @@ export function boxDoes(view: PluginsView, entry: MarketplaceView, plugin: strin
   if (on && mark !== 'kept-off') return `Click to put ${what} in ${where}. Undo takes it out again.`;
   // A tick on an Off plugin turns it On where another tool has it in use too (marketplaces.ts turnedEntry): "alone" only where none does.
   const alone = on || view.tools.some(other => other !== tool && inUseIn(entry, plugin, other)) ? '' : ' alone';
-  return `Click to turn ${plugin} on in ${where}${alone}. Undo ${mark === 'kept-off' ? 'turns it off' : 'takes it out'} again.`;
+  return `Click to turn ${named} on in ${where}${alone}. Undo ${mark === 'kept-off' ? 'turns it off' : 'takes it out'} again.`;
 }
 
 /**

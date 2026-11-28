@@ -429,8 +429,7 @@ export const applyPluginOps = (ops: PluginOp[], undo = false, from?: RunPlace) =
     setProblem(result.stopped && result.done.length && unrun.length ? `Stopped before ${andList(unrun)}: ${result.stopped}` : result.stopped, place);
     await readAgain();
   }
-  const label = (part: { source: string; plugin: string }) => pluginLabel(part.source, part.plugin, result.done);
-  return problems.get(place) ?? (resultSentence(resultLines(result.done, undo), undo, label) || 'Nothing changed.');
+  return problems.get(place) ?? (resultSentence(resultLines(result.done, undo), undo, pluginLabeler(result.done)) || 'Nothing changed.');
 });
 
 /**
@@ -445,8 +444,7 @@ export const usePlugins = (entry: MarketplaceView, plugin: string, tool: Harness
   setRun({ done: result.done, undo: false, home, place, ...(result.back ? { turn: { source: entry.source, plugin, before: result.before ?? null, back: result.back } } : {}) }, place);
   setProblem(result.stopped, place);
   await readAgain();
-  const label = (part: { source: string; plugin: string }) => pluginLabel(part.source, part.plugin, result.done);
-  return problems.get(place) ?? (resultSentence(resultLines(result.done, false), false, label) || `Nothing changed for ${pluginLabel(entry.source, plugin)}.`);
+  return problems.get(place) ?? (resultSentence(resultLines(result.done, false), false, pluginLabeler(result.done)) || `Nothing changed for ${pluginLabel(entry.source, plugin)}.`);
 });
 
 /** What each tool now has changed: the page and the item lists read again, once for the action (app.ts readHomeOnce). */
@@ -520,7 +518,7 @@ function runEnded(): void {
   // A plugin that partly failed is said once, where it went and where not ("beta: installed in Claude Code, not in Codex");
   // one that went nowhere is named as failed.
   const lines = lastLines(place), went = new Set(lines.filter(line => line.ok).map(line => pluginKey(line.source, line.plugin)));
-  const label = (part: { source: string; plugin: string }) => pluginLabel(part.source, part.plugin, [...lines, ...ran, ...(last?.done ?? [])]);
+  const label = pluginLabeler([...lines, ...ran, ...(last?.done ?? [])]);
   const notIn = (source: string, plugin: string) => [...new Set(ran.filter(click => click.source === source && click.plugin === plugin).flatMap(click => click.ran?.done ?? []).filter(step => !succeeded(step.report)).map(step => toolNames[step.tool]))];
   const withNotIn = (list: ResultLine[]) => list.map(line => (line.ok && notIn(line.source, line.plugin).length ? { ...line, text: `${line.text}, not in ${andList(notIn(line.source, line.plugin))}` } : line));
   const failed = [...new Map(lines.filter(line => !line.ok && !went.has(pluginKey(line.source, line.plugin))).map(line => [pluginKey(line.source, line.plugin), label(line)])).values()];
@@ -535,8 +533,9 @@ function runEnded(): void {
   const oneSaid = one ? resultSentence(withNotIn(oneLines), false, label) : '';
   const base = one ? (one.stopped ?? (oneSaid ? `${oneSaid}${note}` : oneFailed || `Nothing changed for ${label(ran[0]!)}.`)) : `${multi}${note}`;
   const here = showsPluginsResult(place);
-  const { shown } = runDisplay(place);
-  announce([base, profileLine].filter(Boolean).join(' '), here && (one ? !!one.stopped || !!oneFailed || shown : !lines.some(line => !line.ok) && shown));
+  const { shown, elsewhere } = runDisplay(place);
+  // An irreversible uninstall whose page was left (header shows only "Last change: …") stays visible in the status bar.
+  announce([base, profileLine].filter(Boolean).join(' '), here && !(note && elsewhere) && (one ? !!one.stopped || !!oneFailed || shown : !lines.some(line => !line.ok) && shown));
   if (here && document.activeElement === document.body && clickedLast) {
     // Undo was drawn off while the list ran, and the list's last draw comes after this: drawn usable first, so it takes the focus.
     if (clickedLast === 'plugins-undo') rerender();
@@ -569,8 +568,9 @@ async function runClick(click: PluginClick, home: string): Promise<void> {
   const turn = result.back ? { turn: { source: click.source, plugin: click.plugin, before: result.before ?? null, back: result.back } } : {};
   setRun({ done: result.done, undo: false, home, place: click.place, ...stop, ...turn }, click.place);
   if (clickList.turns.some(turn => turn.run === click.run && turn.state === 'waiting')) {
-    const label = (part: { source: string; plugin: string }) => pluginLabel(part.source, part.plugin, result.done);
-    announce(result.stopped ?? (resultSentence(resultLines(result.done, false), false, label) || `Nothing changed for ${label(click)}.`), showsPluginsResult(click.place) && !result.stopped && runDisplay(click.place).shown);
+    const label = pluginLabeler(result.done), display = runDisplay(click.place), note = noUndoNote(display.last, undoOps(click.place).length > 0);
+    const said = resultSentence(resultLines(result.done, false), false, label);
+    announce(result.stopped ?? (said ? `${said}${note}` : `Nothing changed for ${label(click)}.`), showsPluginsResult(click.place) && !result.stopped && !(note && display.elsewhere) && display.shown);
   }
   rerender();
   showView(await api().plugins().catch(() => null));
@@ -605,7 +605,8 @@ export const runReloads = (place: RunPlace = placeNow()): ReloadAdvice => {
 export function runDisplay(place: RunPlace = placeNow()) {
   const last = runs.get(place), lines = last ? lastLines(place) : [];
   const openName = place === 'plugins' ? market.nav.plugin : undefined;
-  const elsewhere = !!last && (last.reread || (!!openName && !lines.some(line => line.plugin === openName)));
+  const openEntry = openName ? current()?.entry : undefined;
+  const elsewhere = !!last && (last.reread || (!!openName && !lines.some(line => line.plugin === openName && (!openEntry || line.source === openEntry.source))));
   const advice = !last || elsewhere ? { text: '', items: [] } : runReloads(place);
   const back = undoOps(place), failed = last ? shortOf(lines, last.unreached).names.length > 0 : false, hasOk = lines.some(line => line.ok);
   const onBand = place === 'instructions' || place.startsWith('instructions:');
@@ -645,30 +646,40 @@ const undoTurn = (last: LastRun & { turn: NonNullable<LastRun['turn']> }) => act
   const at = entry ? market.view!.marketplaces.indexOf(entry) : -1;
   const id = place !== 'plugins' && entry ? `harness-plugin-switch-${entry.name}-${last.turn.plugin}` : `pswitch-${market.nav.plugin ? 'page-' : ''}${at}-${last.turn.plugin}`;
   if (showsPluginsResult(place)) focusWhenDone(document.getElementById(id) ? id : id.replace(/^pswitch/, 'padd'));
-  const label = (part: { source: string; plugin: string }) => pluginLabel(part.source, part.plugin, done);
-  return problems.get(place) ?? (resultSentence(resultLines(done, true), true, label) || 'Nothing changed.');
+  return problems.get(place) ?? (resultSentence(resultLines(done, true), true, pluginLabeler(done)) || 'Nothing changed.');
 });
 
-/** A plugin's name in a result or Undo, with its marketplace in parentheses when another marketplace shares its title or name. */
-export function pluginLabel(source: string, plugin: string, extra: { source: string; plugin: string; marketName?: string }[] = []): string {
+/** Whether another listed marketplace (or another entry in `extra`) shares this plugin's title or name. */
+export function titleShared(source: string, plugin: string, extra: { source: string; plugin: string }[] = []): boolean {
   const markets = market.view?.marketplaces ?? [];
   const entry = markets.find(each => each.source === source);
   const title = (entry?.plugins.find(each => each.name === plugin)?.displayName ?? plugin).toLowerCase();
-  const shared = markets.some(each => each.source !== source && each.plugins.some(other => other.name === plugin || (other.displayName ?? other.name).toLowerCase() === title))
+  return markets.some(each => each.source !== source && each.plugins.some(other => other.name === plugin || (other.displayName ?? other.name).toLowerCase() === title))
     || extra.some(other => other.source !== source && other.plugin === plugin);
-  if (!shared) return plugin;
+}
+
+/** A plugin's name in a result or Undo, with its marketplace in parentheses when another marketplace shares its title or name. */
+export function pluginLabel(source: string, plugin: string, extra: { source: string; plugin: string; marketName?: string }[] = []): string {
+  if (!titleShared(source, plugin, extra)) return plugin;
+  const entry = market.view?.marketplaces.find(each => each.source === source);
   const where = entry ? marketTitle(entry) : extra.find(each => each.source === source && each.marketName)?.marketName;
   return where ? `${plugin} (${where})` : plugin;
 }
 
+/** Label callback for resultSentence, shortOf and header/band rendering over a run's entries. */
+export const pluginLabeler = (extra: { source: string; plugin: string; marketName?: string }[] = []) =>
+  (part: { source: string; plugin: string }) => pluginLabel(part.source, part.plugin, extra);
+
 /**
  * Undo's label: "Undo the rest" after an Undo that didn't finish; with the click it reverses ("Undo gamma", "Undo gamma in Codex"
- * for a box) when the sentence beside it (lastLines) names more than that one click, since it reverses only the last; else "Undo".
+ * for a box on Plugin marketplaces; on a tool's own Plugins tab the tool is not repeated) when the sentence beside it names more
+ * than that one click; else "Undo".
  */
 export function undoLabel(place: RunPlace = placeNow()): string {
   const last = runs.get(place), ran = last ? ranFor(last) : [], click = ran.at(-1);
   if (last?.undo) return 'Undo the rest';
-  return last?.turn && click && ran.length > 1 ? `Undo ${pluginLabel(click.source, click.plugin, [...ran, ...last.done])}${click.tool ? ` in ${toolNames[click.tool]}` : ''}` : 'Undo';
+  const inTool = click?.tool && place === 'plugins' ? ` in ${toolNames[click.tool]}` : '';
+  return last?.turn && click && ran.length > 1 ? `Undo ${pluginLabel(click.source, click.plugin, [...ran, ...last.done])}${inTool}` : 'Undo';
 }
 
 /** Undo, or "Undo the rest": the last run's way back, by the route that made it (turnPlugin or applyPluginOps). */

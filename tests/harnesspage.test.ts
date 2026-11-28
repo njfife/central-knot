@@ -331,16 +331,19 @@ test('Plugins tab switch carries its consequence on title and aria-description w
   try {
     draw();
     const onSw = findById(rendered, 'harness-plugin-switch-team-one-shared-tool')!;
-    assert.equal(onSw.attrs['aria-label'], 'shared-tool in Claude Code');
-    assert.equal(onSw.attrs.title, 'Click to turn shared-tool off in Claude Code, kept installed: it stays off until you turn it on again. Undo turns it on again.');
+    assert.equal(onSw.attrs['aria-label'], 'shared-tool (team-one) in Claude Code');
+    assert.equal(onSw.attrs.title, 'Click to turn shared-tool (team-one) off in Claude Code, kept installed: it stays off until you turn it on again. Undo turns it on again.');
     assert.equal(onSw.attrs['aria-description'], onSw.attrs.title);
+    const onPage = findById(rendered, 'harness-plugin-team-one-shared-tool')!;
+    assert.equal(onPage.attrs['aria-label'], 'Open shared-tool (team-one) in Plugin marketplaces');
     const offSw = findById(rendered, 'harness-plugin-switch-team-one-kept-off-tool')!;
+    assert.equal(offSw.attrs['aria-label'], 'kept-off-tool in Claude Code');
     assert.equal(offSw.attrs.title, 'Click to turn kept-off-tool on in Claude Code alone. Undo turns it off again.');
     assert.equal(offSw.attrs['aria-description'], offSw.attrs.title);
   } finally { resetMarket(); }
 });
 
-test('Plugins tab shows stays, unknown and stuck/held state lines with the full reason on hover', () => {
+test('Plugins tab shows stays, unknown and stuck/held state lines with an accessible info mark carrying the full reason', () => {
   // Anthropic Directory installs are stuck (cantUninstall -> FROM_DIRECTORY): on shows 'Can’t be taken out here', off shows 'Off, kept installed · can’t be changed here'.
   const { draw } = pluginsTabFixture({
     markets: [mkMarket('/m3', 'dir-off', [{ name: 'dir-off-tool', description: 'Off dir.' }], {
@@ -362,23 +365,33 @@ test('Plugins tab shows stays, unknown and stuck/held state lines with the full 
     const stuckOnRow = rowOf('harness-plugin-team-two-incident-io');
     const stuckOnState = findNode(stuckOnRow, el => el.className.split(/\s+/).includes('harness-plugin-state'))!;
     assert.equal(textOf(stuckOnState), 'Can’t be taken out here');
-    assert.match(stuckOnState.attrs.title ?? '', /Anthropic Directory.*\/plugin/, 'held row state hover explains why it cannot be taken out');
-    assert.match(stuckOnRow.attrs.title ?? '', /Anthropic Directory.*\/plugin/, 'held row hover carries the reason');
+    const stuckOnMark = findById(stuckOnRow, 'harness-plugin-why-team-two-incident-io')!;
+    const stuckOnCard = findById(stuckOnRow, 'harness-plugin-why-team-two-incident-io-card')!;
+    assert.equal(stuckOnMark.classList.contains('info-mark'), true);
+    assert.match(textOf(stuckOnCard), /Anthropic Directory.*\/plugin/);
 
     const stuckOffRow = rowOf('harness-plugin-dir-off-dir-off-tool');
     const stuckOffState = findNode(stuckOffRow, el => el.className.split(/\s+/).includes('harness-plugin-state'))!;
     assert.equal(textOf(stuckOffState), 'Off, kept installed · can’t be changed here');
-    assert.match(stuckOffState.attrs.title ?? '', /Off in Claude Code/);
-    assert.match(stuckOffState.attrs.title ?? '', /Anthropic Directory.*\/plugin/, 'stuck kept-off hover explains why it cannot be changed');
+    const stuckOffMark = findById(stuckOffRow, 'harness-plugin-why-dir-off-dir-off-tool')!;
+    const stuckOffCard = findById(stuckOffRow, 'harness-plugin-why-dir-off-dir-off-tool-card')!;
+    assert.equal(stuckOffMark.classList.contains('info-mark'), true);
+    assert.match(textOf(stuckOffCard), /Anthropic Directory.*\/plugin/);
+
+    assert.equal(findNode(rowOf('harness-plugin-team-one-kept-off-tool'), el => el.classList.contains('info-mark')), undefined);
   } finally { resetMarket(); }
 });
 
-test('Plugins tab shows marketplace inline for ambiguous titles only, and names the marketplace in their Uninstall… question', () => {
+test('Plugins tab names the marketplace on row, question, switch and Its page whenever another listed catalog shares the title, even with only one installed', () => {
   const { draw } = pluginsTabFixture();
   try {
+    // Uninstall team-two's copy so only team-one's shared-tool is installed while both catalogs still list shared-tool.
+    market.view!.marketplaces[1]!.states['shared-tool']!['claude-cli'] = { state: 'not-installed' };
     const { rowOf } = draw();
-    assert.equal(textOf(findNode(rowOf('harness-plugin-team-one-shared-tool'), el => el.className.split(/\s+/).includes('harness-plugin-market'))), ' · team-one');
-    assert.equal(textOf(findNode(rowOf('harness-plugin-team-two-shared-tool'), el => el.className.split(/\s+/).includes('harness-plugin-market'))), ' · team-two');
+    const row = rowOf('harness-plugin-team-one-shared-tool');
+    assert.equal(textOf(findNode(row, el => el.className.split(/\s+/).includes('harness-plugin-market'))), ' · team-one');
+    assert.equal(findById(row, 'harness-plugin-switch-team-one-shared-tool')!.attrs['aria-label'], 'shared-tool (team-one) in Claude Code');
+    assert.equal(findById(row, 'harness-plugin-team-one-shared-tool')!.attrs['aria-label'], 'Open shared-tool (team-one) in Plugin marketplaces');
     assert.equal(findNode(rowOf('harness-plugin-team-one-kept-off-tool'), el => el.className.split(/\s+/).includes('harness-plugin-market')), undefined);
 
     const detail = { skills: [], commands: [], agents: [], instructions: [], offered: true, installed: { 'claude-cli': { skills: [], commands: [], agents: [], instructions: [], version: '1.0.0' } } };

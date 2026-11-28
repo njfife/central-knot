@@ -10096,7 +10096,7 @@ esac
   await done();
   same('confirmed: Claude Code’s own uninstall with --keep-data, its data folder as it was, Claude Code kept out, the row gone, the focus on Undo, which says what it brings back',
     [calls().at(-1), treeOf(join(home, '.claude/plugins/data')), entry()?.on, entry()?.except, await a.exists(`#${tabSwitch}`), await a.run(`document.activeElement?.id`), await a.text('#plugins-result .toolbar-result-text'), await a.run(`document.querySelector('#plugins-undo')?.title`)],
-    ['plugin uninstall issue-tracker@ck-test-market --scope user --keep-data', dataBefore, false, ['pi-cli'], false, 'plugins-undo', 'issue-tracker: uninstalled from Claude Code.',
+    ['plugin uninstall issue-tracker@ck-test-market --scope user --keep-data', dataBefore, false, ['pi-cli'], false, 'plugins-undo', 'issue-tracker: uninstalled from Claude Code; its saved options were deleted.',
       'Installs issue-tracker again in Claude Code, from the marketplace, without its saved options.']);
   await a.click('#plugins-undo');
   await done();
@@ -10417,8 +10417,8 @@ esac
   const unreadAsk = await asked();
   await a.press('Escape');
   writeFileSync(claudeSettings, validClaudeSettings);
-  same('unreadable settings.json warns settings couldn’t be read instead of promising nothing is lost', unreadAsk,
-    'Uninstall solo-kit from Claude Code? It can be installed again. Claude Code’s settings couldn’t be read; if it has saved options there, they are deleted for good.');
+  same('unreadable settings.json warns record couldn’t be read instead of promising nothing is lost', unreadAsk,
+    'Uninstall solo-kit from Claude Code? It can be installed again. Claude Code’s record of its plugins couldn’t be read, so it isn’t known whether its saved options will be deleted.');
 
   // 7. No-longer-offered plugin (irreversible uninstall, no Undo) with Codex tab open during completion.
   writeMini(alphaM, 'alpha-market', [{ name: 'shared-kit', description: 'Alpha shared kit.', version: '2.0.0' }]);

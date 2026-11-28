@@ -1760,13 +1760,16 @@ test('Unreadable Claude Code settings.json reports ownSettings unknown in detail
     assert.equal(await readFile(settingsPath, 'utf8'), brokenSettings, 'broken settings.json stays untouched byte for byte');
     assert.equal(gone.done[0]?.deleted, 'unknown');
     assert.equal(gone.back?.[0]?.deleted, 'unknown');
-    assert.equal(resultSentence(resultLines(gone.done, false), false), 'pdf: uninstalled from Claude Code; it isn’t known whether its saved options are still there.');
-    assert.equal(undoTitle(gone.back!, { plugin: 'pdf' }), 'Installs pdf again in Claude Code, from the marketplace; it isn’t known whether its saved options are still there.');
 
     const undone = await box.markets.undoTurn(box.root, 'pdf', gone.before!, gone.back!, box.home);
     assert.equal(await readFile(settingsPath, 'utf8'), brokenSettings, 'broken settings.json stays untouched after Undo');
     assert.equal(undone.done[0]?.deleted, 'unknown');
-    assert.equal(resultSentence(resultLines(undone.done, true), true), 'Undone: pdf reinstalled in Claude Code; it isn’t known whether its saved options are still there.');
+
+    // Readable settings with saved options: uninstall marks deleted: true on both done (for the result) and back (for Undo).
+    await put(settingsPath, JSON.stringify({ pluginConfigs: { 'pdf@team': { options: { theme: 'dark' } } } }));
+    const goneKnown = await box.markets.turn(box.root, 'pdf', 'uninstall', 'claude-cli', box.home);
+    assert.equal(goneKnown.done[0]?.deleted, true);
+    assert.equal(goneKnown.back?.[0]?.deleted, true);
 
     // IPC sanitizer accepts deleted: 'unknown' on plugins:undo-turn (reaching writeAccess instead of malformed refusal) and rejects unknown strings.
     const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();

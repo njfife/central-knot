@@ -244,9 +244,11 @@ function renderStatus() {
  * notices, marked and filled while one is unseen; a notice arriving while a result is on show is told there alone, the result keeping the
  * lines until it fades, is closed or a newer result takes its place. A card hangs from the header over the page, one at a time
  * (state.shownWhole says which): the result whole, from Show all, or every notice, from Notices or the notice in the lines
- * (matrix.ts noticesCard). A card closes like a menu: on Show less or Notices again, its ×, Escape, or a press that begins outside
- * it (foldResult), and keeps its scroll through a redraw by its id (scrolledNow). A newer result shows folded; a card whose result
- * or notices are no longer drawn, or whose place is left, goes, so none opens again by itself.
+ * (matrix.ts noticesCard); when only reload advice is opened (state.wholeDrawer), it opens in a full-width drawer directly under
+ * the header (.result-drawer#result-whole) so it never covers the page's switcher or tabs. Both close like a menu: on Show less /
+ * Hide step(s) or Notices again, ×, Escape, or a press that begins outside (foldResult), and keep scroll through a redraw by id
+ * (scrolledNow). A newer result shows folded; a card or drawer whose result or notices are no longer drawn, or whose place is left,
+ * goes, so none opens again by itself.
  */
 function resultHere() {
   let parts: HTMLElement[] = [];
@@ -300,7 +302,8 @@ window.addEventListener('keydown', event => { if (event.key === 'Escape' && (clo
 // come up to date), except while an editor's text area has the focus: drawn again, it would lose its Undo, and its page draws no notices.
 window.addEventListener('focus', () => { if (!document.activeElement?.matches('textarea.ins-text')) rerender(); });
 
-// Laid out, and at each resize: fit reload chips on Row 2 (+N more on overflow) and show Show all on cut or hidden advice.
+// Laid out, and at each resize: fit reload chips on Row 2 (+N more on overflow), show Show all when text is cut, and
+// label the disclosure Reload step(s) (data-advice-only -> under-header drawer) when only reload advice sits behind it without cutting the sentence.
 const cut = (text: Element) => text.scrollWidth > text.clientWidth || text.scrollHeight > text.clientHeight;
 function fitReloadChips(header: HTMLElement): boolean {
   const strip = header.querySelector<HTMLElement>('.header-result:not(.result-whole) .result-reloads');

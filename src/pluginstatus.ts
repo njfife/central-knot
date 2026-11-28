@@ -683,18 +683,18 @@ export function uninstallFacts(entry: MarketplaceView, plugin: PluginView, tool:
   const ownSettings: boolean | 'unknown' = theirs ? (theirs.ownSettings ?? false) : (mine?.ownSettings ?? false);
   return { cannot, app: entry.bundled?.app, version: mine?.version, offered, copy, ownSettings };
 }
-/** What a tool's uninstall deletes for good of the settings it keeps for a plugin (InstallState ownSettings), as Uninstall…'s question and Undo say it. */
-export const ownSettingsWords = (tool: HarnessId, bare = false) => `${bare ? '' : 'its '}${tool === 'codex-cli' ? 'MCP servers’ settings' : 'saved options'}`;
+/** What a tool's uninstall deletes for good of the settings it keeps for a plugin (InstallState ownSettings), as Uninstall…'s question, result and Undo say it. */
+export const ownSettingsWords = (tool: HarnessId) => `its ${tool === 'codex-cli' ? 'MCP servers’ settings' : 'saved options'}`;
 
 /**
  * Uninstall…'s question in one tool: one sentence on whether it can come back, then one on what the tool's own uninstall deletes
  * for good, as measured: in Claude Code its saved options (its data folder is kept: plugins.ts uninstallArgs), in Codex its MCP
- * servers' settings (or that its settings couldn't be read, never promising nothing is lost). While the copy is still being compared, only that.
+ * servers' settings (or that its plugin record couldn't be read, so it isn't known whether they will be deleted). While the copy is still being compared, only that.
  */
 export function uninstallAsk(title: string, tool: HarnessId, { cannot, app, version, offered, copy, ownSettings }: ReturnType<typeof uninstallFacts>): string {
   if (copy === 'comparing') return `Comparing ${names[tool]}’s copy…`;
   const ask = `Uninstall ${title} from ${names[tool]}?`;
-  const lost = ownSettings === 'unknown' ? `${names[tool]}’s settings couldn’t be read; if it has ${ownSettingsWords(tool, true)} there, they are deleted for good`
+  const lost = ownSettings === 'unknown' ? `${names[tool]}’s record of its plugins couldn’t be read, so it isn’t known whether ${ownSettingsWords(tool)} will be deleted`
     : ownSettings ? `${ownSettingsWords(tool)} there are deleted for good` : '';
   const back = cannot ? (cannot === 'unread' ? 'Its marketplace can’t be read now, so there is no Undo.'
     : `${cannot === 'not-carried' ? `${app} doesn’t include its files` : 'It is no longer offered'}, so it can’t be installed again: there is no Undo.`)

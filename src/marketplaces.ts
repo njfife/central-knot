@@ -809,7 +809,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     // Uninstall's Undo puts it back as it was: the marketplace's copy installed (what the uninstall deleted with it staying deleted:
     // `deleted`), then turned off again where it was off; none where it can't be installed again (cantInstallAgain).
     const reversed = reverse(ran.done), copy = tool ? stateOf(entry, plugin, tool) : undefined, was = copy?.state === 'installed' ? copy : undefined;
-    if (what === 'uninstall' && was?.ownSettings === 'unknown') for (const step of ran.done) if (step.action === 'remove' && step.report.changed) step.deleted = 'unknown';
+    if (what === 'uninstall' && was?.ownSettings) for (const step of ran.done) if (step.action === 'remove' && step.report.changed) step.deleted = was.ownSettings;
     const reinstall = reversed.map(op => (was?.ownSettings ? { ...op, deleted: was.ownSettings } : op));
     const offAgain = was?.off ? reversed.map(op => ({ ...op, action: 'plugin-off' as const })) : [];
     const back = what !== 'uninstall' ? reversed : cantInstallAgain(entry, plugin) ? [] : [...reinstall, ...offAgain];

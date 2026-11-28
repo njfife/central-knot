@@ -377,9 +377,9 @@ test('uninstallFacts falls back to what the view knows when detail lacks the too
 
   const none: Parameters<typeof uninstallAsk>[2] = { cannot: undefined, app: undefined, version: undefined, offered: undefined, copy: 'same', ownSettings: 'unknown' };
   assert.equal(uninstallAsk('issue-tracker', 'claude-cli', none),
-    'Uninstall issue-tracker from Claude Code? It can be installed again. Claude Code’s settings couldn’t be read; if it has saved options there, they are deleted for good.');
+    'Uninstall issue-tracker from Claude Code? It can be installed again. Claude Code’s record of its plugins couldn’t be read, so it isn’t known whether its saved options will be deleted.');
   assert.equal(uninstallAsk('issue-tracker', 'codex-cli', { ...none, copy: 'unknown' }),
-    'Uninstall issue-tracker from Codex? Installing it again gives the marketplace’s copy; if this one was edited, the edits are lost. Codex’s settings couldn’t be read; if it has MCP servers’ settings there, they are deleted for good.');
+    'Uninstall issue-tracker from Codex? Installing it again gives the marketplace’s copy; if this one was edited, the edits are lost. Codex’s record of its plugins couldn’t be read, so it isn’t known whether its MCP servers’ settings will be deleted.');
   assert.equal(uninstallAsk('issue-tracker', 'claude-cli', { ...none, cannot: 'gone' }),
-    'Uninstall issue-tracker from Claude Code? It is no longer offered, so it can’t be installed again: there is no Undo. Claude Code’s settings couldn’t be read; if it has saved options there, they are deleted for good.');
+    'Uninstall issue-tracker from Claude Code? It is no longer offered, so it can’t be installed again: there is no Undo. Claude Code’s record of its plugins couldn’t be read, so it isn’t known whether its saved options will be deleted.');
 });

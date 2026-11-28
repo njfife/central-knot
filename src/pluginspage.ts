@@ -13,7 +13,7 @@ import { pluginPage } from './pluginpage.ts';
 import { clickNote, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { consequentialRun, noUndoNote, pluginKey, resultParts, resultSentence, shortOf, undoTitle, type LastRun, type PluginOp, type ResultLine, type RunPlace } from './pluginplan.ts';
 import { FIND_FROM, NO_LONGER_OFFERED, blocked, categoriesOf, copyStale, installedFrom, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
-import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, forgetMarketplace, lastLines, market, openLink, overRun, pickMarketplaceFolder, pluginLabel, pluginsResultPlace, runDisplay, runReloads, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
+import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, forgetMarketplace, lastLines, market, openLink, overRun, pickMarketplaceFolder, pluginLabel, pluginLabeler, pluginsResultPlace, runDisplay, runReloads, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
 import { listResult, problemLines, profileSpan, reloadChips, reloadLines, wholeToggle } from './matrix.ts';
 import type { ReloadAdvice } from './reload.ts';
@@ -418,7 +418,7 @@ export function pluginsResult(): HTMLElement[] {
  */
 export function runBand(): HTMLElement | null {
   const last = market.lastRun, problem = market.problem, lines = last ? lastLines() : [];
-  const label = (part: { source: string; plugin: string }) => pluginLabel(part.source, part.plugin, [...lines, ...(last?.done ?? [])]);
+  const label = pluginLabeler([...lines, ...(last?.done ?? [])]);
   const reasons = [...lines.filter(line => !line.ok).map(line => [h('strong.item-name', {}, label(line)), `: ${line.text}`]), ...(problem ? [problem] : [])];
   const undo = undoButton();
   const said = [last ? `${resultSentence(lines, last.undo, label)}${noUndoNote(last, !!undo)}` : '', last?.profileLine].filter(Boolean).join(' ');
@@ -435,7 +435,7 @@ function runLine(last: LastRun | undefined, place: RunPlace, lines: ResultLine[]
   const open = current()?.entry;
   const here = place === 'plugins' && open && market.nav.plugin ? { plugin: market.nav.plugin, source: open.source } : undefined;
   const parts = last ? resultParts(lines, last.undo, { short: true, here }) : [];
-  const label = (part: { source: string; plugin: string }) => pluginLabel(part.source, part.plugin, [...lines, ...(last?.done ?? [])]);
+  const label = pluginLabeler([...lines, ...(last?.done ?? [])]);
   // A run that left something undone counts it first, Undo or not (its reasons are the problem lines under it), so the cut never hides it.
   const short = last ? shortOf(lines, last.unreached, label) : { names: [], of: 0 }, failed = short.names;
   if (last && (parts.length || failed.length) && shown) {
@@ -468,7 +468,7 @@ function runLine(last: LastRun | undefined, place: RunPlace, lines: ResultLine[]
 function problemBand(problem: string | undefined, lines: ResultLine[], alone: boolean, adviceCount = 0, chips: HTMLElement | null = null, profile: HTMLElement | null = null, last?: LastRun) {
   const failures = lines.filter(line => !line.ok);
   if (!problem && !failures.length) return null;
-  const label = (part: { source: string; plugin: string }) => pluginLabel(part.source, part.plugin, [...lines, ...(last?.done ?? [])]);
+  const label = pluginLabeler([...lines, ...(last?.done ?? [])]);
   return h(`div.band.plugin-problems${chips || profile ? '.result-row2' : ''}`, { role: 'alert' }, profile, icon('triangle-alert', 14, 'tone-warning'),
     problemLines([...failures.map(line => [h('strong.item-name', {}, label(line)), `: ${line.text}`]), ...(problem ? [problem] : [])], last ?? problem, adviceCount),
     chips, alone ? dismiss(closeRun, 'report-dismiss') : null);

@@ -70,14 +70,18 @@ test('An uninstall’s Undo says it installs the marketplace’s copy again, and
   assert.equal(undoTitle([op('pdf', 'codex-cli')], { plugin: 'pdf' }), 'Installs pdf again in Codex, from the marketplace.');
   const done: PluginDone[] = [{ ...back[0]!, report: { tool: 'claude-cli', outcome: 'installed', message: '', runs: [], changed: true } }];
   assert.equal(resultSentence(resultLines(done, true), true), 'Undone: pdf reinstalled in Claude Code, without its saved options.');
+  const removedClaude: PluginDone[] = [{ ...op('pdf', 'claude-cli', 'remove'), deleted: true, report: { tool: 'claude-cli', outcome: 'uninstalled', message: '', runs: [], changed: true } }];
+  assert.equal(resultSentence(resultLines(removedClaude, false), false), 'pdf: uninstalled from Claude Code; its saved options were deleted.');
+  const removedCodex: PluginDone[] = [{ ...op('pdf', 'codex-cli', 'remove'), deleted: true, report: { tool: 'codex-cli', outcome: 'uninstalled', message: '', runs: [], changed: true } }];
+  assert.equal(resultSentence(resultLines(removedCodex, false), false), 'pdf: uninstalled from Codex; its MCP servers’ settings were deleted.');
   const unknownBack: PluginOp[] = [{ ...op('pdf', 'claude-cli'), deleted: 'unknown' }];
-  assert.equal(undoTitle(unknownBack, { plugin: 'pdf' }), 'Installs pdf again in Claude Code, from the marketplace; it isn’t known whether its saved options are still there.');
-  assert.equal(undoTitle([...unknownBack, op('pdf', 'claude-cli', 'plugin-off')], { plugin: 'pdf' }), 'Installs pdf again in Claude Code, from the marketplace, off as it was; it isn’t known whether its saved options are still there.');
-  assert.equal(undoTitle([{ ...op('pdf', 'codex-cli'), deleted: 'unknown' }], { plugin: 'pdf' }), 'Installs pdf again in Codex, from the marketplace; it isn’t known whether its MCP servers’ settings are still there.');
+  assert.equal(undoTitle(unknownBack, { plugin: 'pdf' }), 'Installs pdf again in Claude Code, from the marketplace; its record couldn’t be read, so it isn’t known whether its saved options are still there.');
+  assert.equal(undoTitle([...unknownBack, op('pdf', 'claude-cli', 'plugin-off')], { plugin: 'pdf' }), 'Installs pdf again in Claude Code, from the marketplace, off as it was; its record couldn’t be read, so it isn’t known whether its saved options are still there.');
+  assert.equal(undoTitle([{ ...op('pdf', 'codex-cli'), deleted: 'unknown' }], { plugin: 'pdf' }), 'Installs pdf again in Codex, from the marketplace; its record couldn’t be read, so it isn’t known whether its MCP servers’ settings are still there.');
   const unknownRemoved: PluginDone[] = [{ ...op('pdf', 'claude-cli', 'remove'), deleted: 'unknown', report: { tool: 'claude-cli', outcome: 'uninstalled', message: '', runs: [], changed: true } }];
-  assert.equal(resultSentence(resultLines(unknownRemoved, false), false), 'pdf: uninstalled from Claude Code; it isn’t known whether its saved options are still there.');
+  assert.equal(resultSentence(resultLines(unknownRemoved, false), false), 'pdf: uninstalled from Claude Code; its record couldn’t be read, so it isn’t known whether its saved options are still there.');
   const unknownDone: PluginDone[] = [{ ...unknownBack[0]!, report: { tool: 'claude-cli', outcome: 'installed', message: '', runs: [], changed: true } }];
-  assert.equal(resultSentence(resultLines(unknownDone, true), true), 'Undone: pdf reinstalled in Claude Code; it isn’t known whether its saved options are still there.');
+  assert.equal(resultSentence(resultLines(unknownDone, true), true), 'Undone: pdf reinstalled in Claude Code; its record couldn’t be read, so it isn’t known whether its saved options are still there.');
   const step = (action: PluginOp['action'], changed = true): PluginDone => ({ ...op('pdf', 'claude-cli', action), report: { tool: 'claude-cli', outcome: action === 'remove' ? 'uninstalled' : action === 'update' ? 'updated' : action === 'install' ? 'installed' : 'plugin-off', message: '', runs: [], changed } });
   assert.deepEqual([
     consequentialRun(undefined),
