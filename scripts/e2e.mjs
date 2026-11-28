@@ -3468,10 +3468,63 @@ async function practiceFlow() {
   }
   // Turned on by hand: the profile in use is worked out, so the status bar follows at once, and every place names Incident, the
   // profile last switched to, as changed: the bar, Profiles' list, title and the profile it opens, and Harnesses' line.
+  const afterIncident = allFolders();
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
+  const withStandup = allFolders();
   same('after a hand click no profile is in use, and the status bar names the one last switched to: Incident · changed', (await a.text('#status-profile'))?.trim(), 'Incident · changed');
   const changedCard = 'What is on differs from Incident, the profile you last switched to. Incident itself is as you saved it; switching to it again sets what Central Knot manages as it says.';
   same('the status bar’s hover says what Incident · changed means', await a.run(`document.getElementById('status-profile')?.title`), `Profile: Incident · changed. ${changedCard} Click to switch profiles.`);
+  // Status bar menu under Incident · changed: heading (non-interactive), Switch back to Incident (with consequence), See changes…, keys step over heading, and Switch back → Undo switch.
+  await a.click('#status-profile');
+  same('the status bar’s menu shows Incident · changed as a heading with Switch back to Incident and See changes… under it',
+    [await a.all('.pf-menu-head', 'e.textContent'), await a.all('.pf-menu-item .pf-menu-name', 'e.textContent'), await a.text('#status-profile-switch-back .pf-menu-preview'), await a.exists('.pf-menu-item[aria-checked="true"]')],
+    [['Incident · changed'], ['Switch back to Incident', 'See changes…', 'Edit profiles…'], 'Switching turns 1 item off', false]);
+  const keyIds = [await a.run('document.activeElement?.id')];
+  for (const key of ['ArrowDown', 'End', 'Home', 'ArrowUp']) { await a.press(key); keyIds.push(await a.run('document.activeElement?.id')); }
+  await a.press('Escape');
+  same('menu keys start on Switch back, step over the heading on Home and ArrowUp, and Escape returns focus to the status bar',
+    [keyIds, await a.exists('.pf-menu'), await a.run('document.activeElement?.id')],
+    [['status-profile-switch-back', 'status-profile-see-changes', 'status-profile-edit', 'status-profile-switch-back', 'status-profile-edit'], false, 'status-profile']);
+  await shotOpen('pc2-menu-860-light', SMALLEST, 'light', () => a.click('#status-profile'));
+  if (shots) await a.press('Escape');
+  await shotOpen('pc2-menu-1316-dark', [1316, 819], 'dark', () => a.click('#status-profile'));
+  if (shots) await a.press('Escape');
+  await a.click('#status-profile');
+  await a.click('#status-profile-see-changes');
+  same('See changes… opens Incident on Profiles and switches nothing', [await a.text('h1.page-title'), allFolders()], ['Profiles', withStandup]);
+  await shotOpen('pc2-see-changes-860-light', SMALLEST, 'light');
+  await fullSize(a);
+  await openKind(a, 'skills');
+  const profileEventsBefore = jsonOrNothing(join(practice, '.central-knot/history.json'))?.events?.filter(event => event.kind === 'profile').length ?? 0;
+  await a.click('#status-profile');
+  await a.click('#status-profile-switch-back');
+  const profileEventsAfter = jsonOrNothing(join(practice, '.central-knot/history.json'))?.events?.filter(event => event.kind === 'profile').length ?? 0;
+  same('Switch back restores Incident, every tool’s files and one History entry, with Undo switch in the Library header',
+    [(await headerResultWords(a)).startsWith('Switched to Incident: 1 item turned off.'), await a.exists('#outcome-undo'),
+      (await a.text('#status-profile'))?.trim(), allFolders(), profileEventsAfter - profileEventsBefore],
+    [true, true, 'Incident', afterIncident, 1]);
+  await shotOpen('pc2-switch-back-library-860-light', SMALLEST, 'light');
+  await fullSize(a);
+  await a.click('#outcome-undo');
+  same('Undo switch puts the hand change back and restores Incident · changed', [allFolders(), (await a.text('#status-profile'))?.trim()], [withStandup, 'Incident · changed']);
+  if (shots) {
+    await a.click('#nav-profiles');
+    for (const [name, skill] of [['Everyday', 'review'], ['Focus', 'release-notes']]) {
+      await newProfile(a, name);
+      await a.click(`#pf-skill\\:${skill}`);
+    }
+    await openKind(a, 'skills');
+    await shotOpen('pc2-menu-three-860-light', SMALLEST, 'light', () => a.click('#status-profile'));
+    await a.press('Escape');
+    await a.click('#nav-profiles');
+    for (const name of ['Everyday', 'Focus']) {
+      await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes(${JSON.stringify(name)})).click()`);
+      await a.settle();
+      await a.click('#profile-delete');
+      await a.click('#profile-delete-confirm');
+    }
+    await openKind(a, 'skills');
+  }
   await a.click('#nav-profiles');
   const titleWords = () => a.run(`[...document.querySelector('.profile-header h2').childNodes].filter(node => !node.classList?.contains('info-wrap')).map(node => node.textContent).join('')`);
   same('Profiles opens Incident, titled Incident · changed and so named in the list, each saying what that means',
@@ -3504,10 +3557,6 @@ async function practiceFlow() {
   await shotOpen('profile-changed-after-tick-1316-light', [1316, 819], 'light');
   await a.click('#pf-skill\\:release-notes');
   await fullSize(a);
-  await a.click('#status-profile');
-  same('the status bar’s menu names Incident as changed, unticked, a click away from switching back', [await a.all('.pf-menu-item .pf-menu-name', 'e.textContent'), await a.exists('.pf-menu-item[aria-checked="true"]')],
-    [['Incident · changed', 'Edit profiles…'], false]);
-  await a.click('#status-profile');
   await a.click('#nav-harnesses');
   same('Harnesses names it the same way: Profile: Incident · changed.', [(await a.text('.tools-note > span'))?.includes('Profile: Incident · changed.'), await a.text('#harnesses-profile')], [true, 'Incident · changed']);
   await withSidebarOpen(a, ...SMALLEST, async () => same('at 860 with sidebar open, Profile: and Incident · changed. stay on one line',

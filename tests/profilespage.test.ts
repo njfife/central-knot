@@ -9,7 +9,18 @@ import type { HarnessId, HomeView, InstalledPlugin, PluginsView } from '../src/t
 import { findById, findNode, installDom, textOf, type FakeNode } from './domstub.ts';
 
 let rendered: FakeNode | undefined;
-const { dispatch } = installDom({}, { byId: id => findById(rendered, id) ?? null });
+let onNavigate: ((page: string) => void) | undefined;
+let savedProfiles: unknown[] = [];
+let saveProblem: string | undefined;
+let switchStopped: string | undefined;
+let nextHome: HomeView | null = null;
+const { announcement, dispatch } = installDom({
+  onNavigate: (fn: (page: string) => void) => { onNavigate = fn; },
+  saveProfile: async (edit: unknown) => { savedProfiles.push(edit); return saveProblem ? { problem: saveProblem } : { profiles: app.home?.profiles }; },
+  switchProfile: async () => (switchStopped ? { stopped: switchStopped } : {}),
+  selectHome: async () => nextHome,
+  readUsage: async () => ({ at: '2026-11-20T00:00:00.000Z', tools: [] }),
+}, { byId: id => findById(rendered, id) ?? null });
 
 const { state: app } = await import('../src/app.ts');
 const { profilesPage, profileStatus, rowKey } = await import('../src/profilespage.ts');
@@ -19,8 +30,8 @@ const { market, resetMarket } = await import('../src/pluginstate.ts');
 const triage = 'plugin:skill:alpha@team/triage';
 /** A home where each tool has alpha installed, with its one skill triage, as `installs` says, and the profile Work ticks triage. */
 function homeWith(installs: [HarnessId, Partial<InstalledPlugin>][]): HomeView {
-  const kind = { tools: installs.map(([tool]) => tool), items: [], library: {}, gate: { state: 'ready' } };
-  return { home: '/home', sync: { access: { allowed: true }, gate: { state: 'ready' }, caughtUp: [], managed: installs.map(([tool]) => tool) }, skills: kind, mcp: kind, agents: kind,
+  const kind = { tools: installs.map(([tool]) => tool), items: [], library: {}, gate: { state: 'ready' }, notices: [] };
+  return { home: '/home', label: 'Home', mode: 'fixture', sync: { access: { allowed: true }, gate: { state: 'ready' }, caughtUp: [], takenIn: [], managed: installs.map(([tool]) => tool) }, skills: kind, mcp: kind, agents: kind,
     pluginItems: installs.map(([tool, install]) => ({ tool, plugin: 'alpha', marketName: 'team', source: '/market', listed: true, items: [{ kind: 'skill', name: 'triage', description: '' }], ...install })),
     profiles: { profiles: [{ id: 'work', name: 'Work', items: [triage], switchesPluginItems: true }], plugins: [] } } as unknown as HomeView;
 }
@@ -107,88 +118,181 @@ test('With no profile in use, the page opens the one last switched to, titled as
   assert.deepEqual([app.page, profileState.open], ['profiles', 'last'], 'it lands on Profiles, with Last open');
 });
 
+const { newItem } = await import('../src/library.ts');
+function changedHome(home = '/home') {
+  const base = homeWith([]), kind = (library: Record<string, unknown>) => ({ ...base.skills, items: [], library });
+  return { ...base, home, skills: kind({ notes: { ...newItem('notes', 'notes'), on: true }, standup: { ...newItem('standup', 'standup'), on: true } }), mcp: kind({}), agents: kind({}),
+    profiles: { profiles: [{ id: 'last', name: 'Last', items: ['skill:notes'], switchesPluginItems: true }, { id: 'other', name: 'Other', items: ['skill:standup'], switchesPluginItems: true }], plugins: [], last: 'last' } } as unknown as HomeView;
+}
+
+test('Status bar menu frames three profiles with one rule after changed acts and one before Edit profiles…, and pressing a wholly held profile reads its refusal', async () => {
+  const { profileStatus } = await import('../src/profilespage.ts');
+  const three = changedHome();
+  three.profiles.profiles.splice(1, 0, { id: 'first', name: 'First', items: ['skill:standup'], switchesPluginItems: true });
+  app.home = three;
+  const toggleMenu = () => { findById(profileStatus() as unknown as FakeNode, 'status-profile')?.onclick?.({ stopPropagation() {} }); return profileStatus() as unknown as FakeNode; };
+  rendered = toggleMenu();
+  try {
+    const kids = (findNode(rendered, el => el.className.split(/\s+/).includes('pf-menu'))?.children ?? []).map(el => (el as FakeNode).attrs?.id || (el as FakeNode).className);
+    assert.deepEqual(kids, ['pf-menu-head', 'status-profile-switch-back', 'status-profile-see-changes', 'pf-menu-sep', 'status-profile-first', 'status-profile-other', 'pf-menu-sep', 'status-profile-edit']);
+  } finally { toggleMenu(); }
+  // Wholly held changed profile keeps its clickable name row, and pressing it announces the refusal.
+  const held = homeWith([['codex-cli', { off: true }]]);
+  held.profiles.last = 'work';
+  app.home = held;
+  switchStopped = 'alpha is off in Codex. Nothing was switched.';
+  rendered = toggleMenu();
+  try {
+    findById(rendered, 'status-profile-work')?.onclick?.({ detail: 1 });
+    await new Promise(done => setImmediate(done));
+    assert.equal(textOf(announcement), switchStopped);
+  } finally { switchStopped = undefined; if (findNode(profileStatus() as unknown as FakeNode, el => el.className.split(/\s+/).includes('pf-menu'))) toggleMenu(); }
+});
+
+test('See changes… saves an unblurred rename through saveRename (skipping unchanged names, surfacing failures), clears Find/delete and closes the menu', async () => {
+  const { profileState } = await import('../src/app.ts');
+  const { profileStatus } = await import('../src/profilespage.ts');
+  const runSeeChanges = async (typed: string) => {
+    savedProfiles = [];
+    app.page = 'profiles';
+    profileState.open = 'other';
+    profileState.confirmDelete = 'other';
+    profileState.renaming = 'other';
+    const input = findById(profilesPage() as unknown as FakeNode, 'profile-name') as unknown as { oninput?: (e: unknown) => void; onblur?: (e: unknown) => void };
+    input?.oninput?.({ target: { value: typed } });
+    onNavigate?.('settings');
+    input?.onblur?.({ target: { value: typed, isConnected: false } });
+    assert.deepEqual(savedProfiles, [], 'disconnected blur on Settings shortcut did not save the rename');
+    findById(profileStatus() as unknown as FakeNode, 'status-profile')?.onclick?.({ stopPropagation() {} });
+    findById(profileStatus() as unknown as FakeNode, 'status-profile-see-changes')?.onclick?.({});
+    await new Promise(done => setImmediate(done));
+  };
+  app.home = changedHome();
+  (findById(profilesPage() as unknown as FakeNode, 'profile-find') as unknown as { oninput?: (e: unknown) => void })?.oninput?.({ target: { value: 'zzz' } });
+  await runSeeChanges(' Other ');
+  assert.deepEqual(savedProfiles, [], 'an unchanged rename saves nothing');
+  await runSeeChanges('Other Renamed');
+  rendered = profilesPage() as unknown as FakeNode;
+  assert.deepEqual([savedProfiles, app.page, profileState.open, profileState.confirmDelete, profileState.renaming, profileState.draft, (findById(rendered, 'profile-find') as unknown as { value?: string })?.value, !!findById(profileStatus() as unknown as FakeNode, 'status-profile-see-changes')],
+    [[{ id: 'other', name: 'Other Renamed' }], 'profiles', 'last', undefined, undefined, undefined, '', false]);
+  // Read-only or failing save: not silently dropped, leaves the blur's failure announced.
+  app.home = { ...app.home, sync: { ...app.home.sync, access: { allowed: false, reason: 'Preview only.' } } };
+  saveProblem = 'Preview only.';
+  try {
+    await runSeeChanges('Other ReadOnly');
+    assert.deepEqual([savedProfiles, textOf(announcement)], [[{ id: 'other', name: 'Other ReadOnly' }], 'Preview only.']);
+  } finally { saveProblem = undefined; }
+});
+
+test('Leaving Profiles ends only See changes…’s pin; the page toggle’s pin survives leaving, and no pin survives another home', async () => {
+  const { loadHome, profileState, showPage } = await import('../src/app.ts');
+  const { profileStatus } = await import('../src/profilespage.ts');
+  const homeA = changedHome();
+  app.home = homeA;
+  app.page = 'library';
+  findById(profileStatus() as unknown as FakeNode, 'status-profile')?.onclick?.({ stopPropagation() {} });
+  findById(profileStatus() as unknown as FakeNode, 'status-profile-see-changes')?.onclick?.({});
+  const pinnedOff = () => profileState.changes?.off;
+  assert.deepEqual(pinnedOff(), ['skill:standup'], 'See changes… pins Changes');
+  showPage('library');
+  showPage('profiles');
+  assert.equal(pinnedOff(), undefined, 'See changes… pin ends on leaving Profiles');
+  findById(profilesPage() as unknown as FakeNode, 'profile-changes')?.onclick?.({});
+  assert.deepEqual(pinnedOff(), ['skill:standup'], 'page toggle pins Changes');
+  showPage('library');
+  showPage('profiles');
+  const ownSurvived = pinnedOff();
+  if (!profileState.changes) findById(profilesPage() as unknown as FakeNode, 'profile-changes')?.onclick?.({});
+  nextHome = { ...homeWith([['codex-cli', {}]]), home: '/other-home', profiles: { profiles: [], plugins: [] } } as unknown as HomeView;
+  await loadHome('actual');
+  nextHome = homeA;
+  await loadHome('fixture');
+  assert.deepEqual([ownSurvived, profileState.changes], [['skill:standup'], undefined], 'page toggle pin survives leaving Profiles, and no pin survives switching to another home and back');
+});
+
 test('Marks cover own items, folded plugin skills, and Pi-linked copies, never whole-only plugin agents or servers; rowKey keeps server case; mark binds only last few letters; Escape and empty draws keep state true', async t => {
-  const { newItem } = await import('../src/library.ts');
   const { profileState, setRenderer } = await import('../src/app.ts');
   const { pageRows } = await import('../src/pluginrows.ts');
   const { pluginLive } = await import('../src/profileplan.ts');
   const draw = () => (rendered = profilesPage() as unknown as FakeNode);
   setRenderer(() => { draw(); });
-  const tools: HarnessId[] = ['claude-cli', 'pi-cli'];
-  const held = (key: string, source?: string) => ({ ...newItem(key, key), on: true, hash: `h-${key}`, ...(source ? { source } : {}) });
-  const fact = (key: string, extra = {}) => ({ key, name: key, on: true, copies: {}, except: [], ...extra });
-  const longWord = 'supercalifragilisticexpialidocious';
-  const allWork = ['skill:triage', `skill:${longWord}`, 'mcp:docs', 'agent:reviewer', 'plugin:skill:alpha@team/triage', 'plugin:skill:alpha@team/placed', 'plugin:mcp:alpha@team/Issues', 'plugin:agent:alpha@team/helper'];
-  // Work is in use (ticks every live item); Other is not. Own triage has Claude Code through plugin alpha so pageRows folds alpha@team/triage onto it.
-  const home = app.home = {
-    home: '/tmp/profiles-files-home', readId: 1, snapshots: [],
-    sync: { access: { allowed: true }, gate: { state: 'ready' }, caughtUp: [], managed: tools },
-    skills: { tools, items: [fact('triage', { plugin: { 'claude-cli': { plugin: 'alpha', marketplace: 'team' } } }), fact(longWord), fact('placed')],
-      library: { triage: held('triage'), [longWord]: held(longWord), placed: held('placed', 'p1') }, gate: { state: 'ready' } },
-    mcp: { tools, items: [fact('docs')], library: { docs: held('docs') }, gate: { state: 'ready' } },
-    agents: { tools, items: [fact('reviewer')], library: { reviewer: held('reviewer') }, gate: { state: 'ready' } },
-    pluginItems: [{ tool: 'claude-cli', plugin: 'alpha', marketName: 'team', source: '/market', listed: true,
-      items: [{ kind: 'skill', name: 'Triage', description: '', path: 'skills/triage' }, { kind: 'mcp', name: 'Issues', description: '' }, { kind: 'agent', name: 'Helper', description: '' }] }],
-    profiles: { profiles: [{ id: 'work', name: 'Work', items: allWork, switchesPluginItems: true }, { id: 'other', name: 'Other', items: ['skill:triage'], switchesPluginItems: true }],
-      plugins: [{ id: 'p1', source: '/market', marketName: 'team', plugin: 'alpha', on: true }] },
-  } as unknown as HomeView;
-  app.page = 'profiles';
-  profileState.open = 'work';
-  const rowOfItem = (id: string) => findNode(rendered, el => el.dataset?.item === id);
-  const has = (id: string, part: string) => !!findNode(rowOfItem(id), el => el.classList.contains(part));
-  const markOf = (id: string) => findNode(rowOfItem(id), el => el.classList.contains('row-file-btn'));
-  draw();
-  await t.test('rowKey shares the Library’s key rule (keeps MCP server case)', () => {
-    const plugged = pluginLive(home);
-    assert.deepEqual([rowKey(plugged.find(item => item.kind === 'mcp')!), pageRows(home, 'mcp').rows[0]!.key, rowKey(plugged.find(item => item.name === 'Triage')!)],
-      ['alpha@team/Issues', 'alpha@team/Issues', 'alpha@team/triage']);
-  });
-  await t.test('marks cover folded plugin skills and bind only the last few letters of a long word', () => {
-    assert.equal(pageRows(home, 'skills').rows.length, 0);
-    assert.deepEqual(['skill:triage', 'mcp:docs', 'agent:reviewer', 'plugin:skill:alpha@team/triage', 'plugin:skill:alpha@team/placed', 'plugin:mcp:alpha@team/Issues', 'plugin:agent:alpha@team/helper'].map(id => has(id, 'row-file-btn')),
-      [true, true, true, true, true, false, false]);
-    const longRow = rowOfItem(`skill:${longWord}`);
-    const keep = findNode(longRow, el => el.classList.contains('pf-mark-keep'));
-    assert.deepEqual([textOf(findNode(longRow, el => el.classList.contains('pf-name-text'))), textOf(keep), !!findNode(keep, el => el.classList.contains('row-file-btn'))],
-      [longWord, 'ious', true]);
-  });
-  await t.test('Rename and active Delete confirmation claim Escape, stale Delete confirmation after Edit profiles… does not, and switching/empty draws clear the place', () => {
-    markOf('skill:triage')!.click();
-    const esc = (extra = {}) => ({ key: 'Escape', defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...extra });
-    profileState.renaming = 'work';
+  try {
+    const tools: HarnessId[] = ['claude-cli', 'pi-cli'];
+    const held = (key: string, source?: string) => ({ ...newItem(key, key), on: true, hash: `h-${key}`, ...(source ? { source } : {}) });
+    const fact = (key: string, extra = {}) => ({ key, name: key, on: true, copies: {}, except: [], ...extra });
+    const longWord = 'supercalifragilisticexpialidocious';
+    const allWork = ['skill:triage', `skill:${longWord}`, 'mcp:docs', 'agent:reviewer', 'plugin:skill:alpha@team/triage', 'plugin:skill:alpha@team/placed', 'plugin:mcp:alpha@team/Issues', 'plugin:agent:alpha@team/helper'];
+    // Work is in use (ticks every live item); Other is not. Own triage has Claude Code through plugin alpha so pageRows folds alpha@team/triage onto it.
+    const home = app.home = {
+      home: '/tmp/profiles-files-home', readId: 1, snapshots: [],
+      sync: { access: { allowed: true }, gate: { state: 'ready' }, caughtUp: [], managed: tools },
+      skills: { tools, items: [fact('triage', { plugin: { 'claude-cli': { plugin: 'alpha', marketplace: 'team' } } }), fact(longWord), fact('placed')],
+        library: { triage: held('triage'), [longWord]: held(longWord), placed: held('placed', 'p1') }, gate: { state: 'ready' } },
+      mcp: { tools, items: [fact('docs')], library: { docs: held('docs') }, gate: { state: 'ready' } },
+      agents: { tools, items: [fact('reviewer')], library: { reviewer: held('reviewer') }, gate: { state: 'ready' } },
+      pluginItems: [{ tool: 'claude-cli', plugin: 'alpha', marketName: 'team', source: '/market', listed: true,
+        items: [{ kind: 'skill', name: 'Triage', description: '', path: 'skills/triage' }, { kind: 'mcp', name: 'Issues', description: '' }, { kind: 'agent', name: 'Helper', description: '' }] }],
+      profiles: { profiles: [{ id: 'work', name: 'Work', items: allWork, switchesPluginItems: true }, { id: 'other', name: 'Other', items: ['skill:triage'], switchesPluginItems: true }],
+        plugins: [{ id: 'p1', source: '/market', marketName: 'team', plugin: 'alpha', on: true }] },
+    } as unknown as HomeView;
+    app.page = 'profiles';
+    profileState.open = 'work';
+    const rowOfItem = (id: string) => findNode(rendered, el => el.dataset?.item === id);
+    const has = (id: string, part: string) => !!findNode(rowOfItem(id), el => el.classList.contains(part));
+    const markOf = (id: string) => findNode(rowOfItem(id), el => el.classList.contains('row-file-btn'));
     draw();
-    const renameEsc = esc({ target: { value: 'Work' } });
-    (findById(rendered, 'profile-name') as FakeNode & { onkeydown?: (e: unknown) => void }).onkeydown?.(renameEsc);
-    dispatch('keydown', renameEsc);
-    assert.deepEqual([profileState.renaming, has('skill:triage', 'details-file-only')], [undefined, true]);
-    profileState.confirmDelete = 'work';
-    draw();
-    dispatch('keydown', esc());
-    assert.deepEqual([profileState.confirmDelete, has('skill:triage', 'details-file-only')], [undefined, true]);
-    // Arm Delete on a profile not in use, choose Edit profiles… from the status bar's menu, open a file on Work (in use), press Escape: file closes, Delete isn't focused.
-    profileState.open = 'other';
-    profileState.confirmDelete = 'other';
-    draw();
-    let status = profileStatus() as unknown as FakeNode;
-    findById(status, 'status-profile')?.onclick?.({ stopPropagation() {} });
-    status = profileStatus() as unknown as FakeNode;
-    findById(status, 'status-profile-edit')?.onclick?.({});
-    markOf('skill:triage')!.click();
-    dispatch('keydown', esc());
-    assert.deepEqual([profileState.open, has('skill:triage', 'details-file-only'), findById(rendered, 'profile-delete')?.focused], ['work', false, 0]);
-    markOf('skill:triage')!.click();
-    findById(rendered, 'profile-row-other')!.click();
-    assert.equal(findNode(rendered, el => el.classList.contains('details-file-only')), undefined);
-    markOf('skill:triage')!.click();
-    (findById(rendered, 'profile-find') as FakeNode & { oninput?: (e: unknown) => void }).oninput?.({ target: { value: 'zzz-none' } });
-    findById(rendered, 'profile-find-clear')!.click();
-    assert.equal(findNode(rendered, el => el.classList.contains('details-file-only')), undefined);
-    markOf('skill:triage')!.click();
-    const savedProfiles = home.profiles.profiles;
-    home.profiles.profiles = [];
-    draw();
-    home.profiles.profiles = savedProfiles;
-    draw();
-    assert.equal(findNode(rendered, el => el.classList.contains('details-file-only')), undefined);
-  });
+    await t.test('rowKey shares the Library’s key rule (keeps MCP server case)', () => {
+      const plugged = pluginLive(home);
+      assert.deepEqual([rowKey(plugged.find(item => item.kind === 'mcp')!), pageRows(home, 'mcp').rows[0]!.key, rowKey(plugged.find(item => item.name === 'Triage')!)],
+        ['alpha@team/Issues', 'alpha@team/Issues', 'alpha@team/triage']);
+    });
+    await t.test('marks cover folded plugin skills and bind only the last few letters of a long word', () => {
+      assert.equal(pageRows(home, 'skills').rows.length, 0);
+      assert.deepEqual(['skill:triage', 'mcp:docs', 'agent:reviewer', 'plugin:skill:alpha@team/triage', 'plugin:skill:alpha@team/placed', 'plugin:mcp:alpha@team/Issues', 'plugin:agent:alpha@team/helper'].map(id => has(id, 'row-file-btn')),
+        [true, true, true, true, true, false, false]);
+      const longRow = rowOfItem(`skill:${longWord}`);
+      const keep = findNode(longRow, el => el.classList.contains('pf-mark-keep'));
+      assert.deepEqual([textOf(findNode(longRow, el => el.classList.contains('pf-name-text'))), textOf(keep), !!findNode(keep, el => el.classList.contains('row-file-btn'))],
+        [longWord, 'ious', true]);
+    });
+    await t.test('Rename and active Delete confirmation claim Escape, stale Delete confirmation after Edit profiles… does not, and switching/empty draws clear the place', () => {
+      markOf('skill:triage')!.click();
+      const esc = (extra = {}) => ({ key: 'Escape', defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...extra });
+      profileState.renaming = 'work';
+      draw();
+      const renameEsc = esc({ target: { value: 'Work' } });
+      (findById(rendered, 'profile-name') as FakeNode & { onkeydown?: (e: unknown) => void }).onkeydown?.(renameEsc);
+      dispatch('keydown', renameEsc);
+      assert.deepEqual([profileState.renaming, has('skill:triage', 'details-file-only')], [undefined, true]);
+      profileState.confirmDelete = 'work';
+      draw();
+      dispatch('keydown', esc());
+      assert.deepEqual([profileState.confirmDelete, has('skill:triage', 'details-file-only')], [undefined, true]);
+      // Arm Delete on a profile not in use, choose Edit profiles… from the status bar's menu, open a file on Work (in use), press Escape: file closes, Delete isn't focused.
+      profileState.open = 'other';
+      profileState.confirmDelete = 'other';
+      draw();
+      let status = profileStatus() as unknown as FakeNode;
+      findById(status, 'status-profile')?.onclick?.({ stopPropagation() {} });
+      status = profileStatus() as unknown as FakeNode;
+      findById(status, 'status-profile-edit')?.onclick?.({});
+      markOf('skill:triage')!.click();
+      dispatch('keydown', esc());
+      assert.deepEqual([profileState.open, has('skill:triage', 'details-file-only'), findById(rendered, 'profile-delete')?.focused], ['work', false, 0]);
+      markOf('skill:triage')!.click();
+      findById(rendered, 'profile-row-other')!.click();
+      assert.equal(findNode(rendered, el => el.classList.contains('details-file-only')), undefined);
+      markOf('skill:triage')!.click();
+      (findById(rendered, 'profile-find') as FakeNode & { oninput?: (e: unknown) => void }).oninput?.({ target: { value: 'zzz-none' } });
+      findById(rendered, 'profile-find-clear')!.click();
+      assert.equal(findNode(rendered, el => el.classList.contains('details-file-only')), undefined);
+      markOf('skill:triage')!.click();
+      const savedList = home.profiles.profiles;
+      home.profiles.profiles = [];
+      draw();
+      home.profiles.profiles = savedList;
+      draw();
+      assert.equal(findNode(rendered, el => el.classList.contains('details-file-only')), undefined);
+    });
+  } finally { setRenderer(() => {}); }
 });

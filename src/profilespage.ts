@@ -14,7 +14,7 @@
 // opening its current version under that row (profilesFiles, rowKey → filepanel.ts); whole-only plugin servers and agents have none.
 // A profile held by a plugin off in a tool offers in Switch's place, and on each row held in another plugin or tool, the Library
 // line's own press to turn it on there, its result and Undo in this page's band, else the link to its page, the header saying why (wayPast, turnOnControl).
-// Every rule and preview is profileplan.ts's (listedChanges, switchPlan, pluginPlan, inUse, switchPreview, keptOn, leftOutWords, toolsOf), as profiles.ts carries it out.
+// Every rule and preview is profileplan.ts's (listedChanges, listedChangeCount, switchPlan, pluginPlan, inUse, switchSaid, switchOffer, statusMenuRows, switchPreview, keptOn, leftOutWords, toolsOf), as profiles.ts carries it out.
 import { acting, deleteProfileDef, machine, profileState, rerender, saveProfileDef, showPage, state, switchToProfile, whyReadOnly } from './app.ts';
 import { brandMark, kindGlyph, lineFacts, openPlugin, outcomeBand, pluginTag, problemsBand } from './matrix.ts';
 import { lineControl } from './pluginline.ts';
@@ -22,7 +22,7 @@ import { pluginRowKey } from './pluginrows.ts';
 import { lineBusy, market, turnFromLine, viewCurrent, type LineAim } from './pluginstate.ts';
 import { button, checkbox, emptyState, findInput, h, icon, infoMark } from './dom.ts';
 import { itemFile, pagePlace, placePanel } from './filepanel.ts';
-import { allTurns, changeWords, claudeInstall, comesWith, copilotKeptOnBy, heldWords, homeItems, inUse, itemRowState, nameNow, nowLead, profileNow, keptOn, leftOut, listedChanges, listedPlugins, loadWords, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, switchable, switchPlan, switchPreview, takenWhole, toolsOf, wholeCounts, withTool, wholeTurns, type LiveItem, type PluginCopy, type PluginLive, type PluginTurn } from './profileplan.ts';
+import { claudeInstall, comesWith, copilotKeptOnBy, heldWords, homeItems, inUse, itemRowState, nameNow, nowLead, profileNow, keptOn, leftOut, listedChangeCount, listedChanges, listedPlugins, loadWords, leftOutWords, namedCount, PLUGIN_ITEMS_STAY, pluginItemOn, pluginLive, pluginLiveState, pluginPlan, pluginRowState, pluginStayNote, statusMenuRows, switchable, switchOffer, switchPlan, switchPreview, switchSaid, takenWhole, toolsOf, withTool, wholeTurns, type LiveItem, type MenuRow, type PluginCopy, type PluginLive, type PluginTurn, type ProfileNow } from './profileplan.ts';
 import { DIRECTORY, noSingleSwitch, pageOfPart } from './pluginstatus.ts';
 import { counted } from './pluginswitch.ts';
 import { andList, CHANGED, changedCard, toolList, toolNames } from './words.ts';
@@ -81,7 +81,25 @@ function openProfileById(id: string) {
   profileState.open = id;
   profileState.confirmDelete = undefined;
   profileState.renaming = undefined;
+  profileState.draft = undefined;
   rerender();
+}
+const pinChanges = (profile: Profile, { on, off, retooled }: Plan['changes']) =>
+  ({ home: state.home!.home, profileId: profile.id, on: on.map(each => each.id), off: off.map(each => each.id), retooled: retooled.map(each => each.id) });
+/** Saves a rename when `raw` trims to a non-empty new name; returns the save promise, or null when unchanged/blank. */
+const saveRename = (profile: Profile, raw: string | undefined) => {
+  const name = raw?.trim();
+  return name && name !== profile.name ? saveProfileDef({ id: profile.id, name }, `Renamed to ${name}.`) : null;
+};
+/** Opens `profile` on Profiles from the status bar menu with Changes pinned for this visit; finishes any rename left open without blur. */
+function seeChanges(profile: Profile, changes: Plan['changes']) {
+  const target = profileState.renaming ? profiles().profiles.find(each => each.id === profileState.renaming) : undefined, draft = profileState.draft;
+  menuOpen = false;
+  find = '';
+  openProfileById(profile.id);
+  profileState.changes = { ...pinChanges(profile, changes), fromMenu: true };
+  showPage('profiles');
+  if (target) void saveRename(target, draft);
 }
 
 /** The managed tools here, as the Tools strip and the list count them. */
@@ -292,13 +310,13 @@ function pluginRow(profile: Profile, item: PluginLive, plan: Plan, file: { mark?
 /**
  * What a switch to the open profile would do, as the page shows it: the plugins' items (`plugs`: pluginPlan), each listed
  * changing row once (`changes`: listedChanges), the plugins it turns whole in Claude Code (`whole`: wholeTurns), all of it in
- * words (`said`: changeWords, '' when it changes nothing), the first plugin and tool holding it when it can change nothing
+ * words (`said`: switchSaid, '' when it changes nothing), the first plugin and tool holding it when it can change nothing
  * (`off`: heldWords), and whether it is in use (inUse).
  */
 interface Plan { plugs: PluginTurn[]; changes: ReturnType<typeof listedChanges>; whole: InstalledPlugin[]; said: string; off?: ReturnType<typeof heldWords>['off']; isInUse: boolean }
 const planOf = (profile: Profile, all: LiveItem[], plugged: PluginLive[]): Plan => {
   const turns = switchPlan(profile, all), plugs = pluginPlan(profile, plugged), whole = wholeTurns(profile, plugged);
-  const said = changeWords(allTurns(turns, plugs), wholeCounts({ installs: whole }), 'will');
+  const said = switchSaid(profile, all, plugged, turns, plugs, whole);
   return { plugs, changes: listedChanges(profile, all, plugged, turns, plugs), whole, said, off: said ? undefined : heldWords(plugs, plugged).off, isInUse: inUse([profile], all, plugged).length > 0 };
 };
 
@@ -425,9 +443,8 @@ function renameField(profile: Profile) {
     done = true;
     profileState.renaming = undefined;
     profileState.draft = undefined;
-    const name = input.value.trim();
-    if (save && name && name !== profile.name) void saveProfileDef({ id: profile.id, name }, `Renamed to ${name}.`).then(then);
-    else { rerender(); then(); }
+    const saving = save ? saveRename(profile, input.value) : null;
+    if (saving) void saving.then(then); else { rerender(); then(); }
   };
   return h('input.profile-name-input', { id: 'profile-name', type: 'text', value: profileState.draft ?? profile.name, maxlength: '40', 'aria-label': 'Profile name', spellcheck: 'false',
     oninput: (event: Event) => { profileState.draft = (event.target as HTMLInputElement).value; },
@@ -459,10 +476,11 @@ function deleteActions(profile: Profile) {
 function switchButton(profile: Profile, plan: Plan, all: LiveItem[], plugged: PluginLive[], way?: ReturnType<typeof wayPast>): HTMLElement | null {
   if (profileState.renaming === profile.id) return null;
   if (plan.off && way) return turnOnControl(plan.off.item, plan.off.copy, 'header', way);
-  if (!plan.said || !switchable(profile, all, plugged)) return null;
+  const offer = switchOffer(profile, all, plugged, canEditProfiles(), plan.said);
+  if (!offer.offered) return null;
   const label = profile.name.length > 18 ? 'Switch to this profile' : `Switch to ${profile.name}`;
   const title = whyReadOnly(state.home!) ?? `Use ${profile.name}: ${plan.said}.${profile.switchesPluginItems ? '' : ` ${pluginStayNote(plan.plugs, plugged)}`} One step in History, with Undo.`;
-  return button({ variant: 'primary', size: 'small', label, id: 'profile-switch', disabled: !canEditProfiles(), attrs: { title }, onclick: () => void switchToProfile(profile.id) });
+  return button({ variant: 'primary', size: 'small', label, id: 'profile-switch', disabled: !offer.enabled, attrs: { title }, onclick: () => void switchToProfile(profile.id) });
 }
 
 /** The header's actions: Delete's confirmation while it is asked, a hint while renaming, else Switch, Rename and Delete. */
@@ -490,7 +508,7 @@ function profileDetail(profile: Profile) {
   if (profileState.changes && (profileState.changes.profileId !== profile.id || profileState.changes.home !== state.home!.home)) profileState.changes = undefined;
   const way = plan.off && wayPast(plan.off.item, plan.off.copy), primary = switchButton(profile, plan, all, plugged, way), shown = all.filter(item => matches(`${item.name} ${descriptionOf(item)}`));
   const pluggedShown = visiblePlugins.filter(item => matches(`${item.name} ${item.plugin}`));
-  const changeCount = plan.changes.on.length + plan.changes.off.length + plan.changes.retooled.length, pinned = profileState.changes;
+  const changeCount = listedChangeCount(plan.changes), pinned = profileState.changes;
   const pinnedIds = pinned ? new Set([...pinned.on, ...pinned.off, ...pinned.retooled]) : undefined;
   const inView = (list: { id: string }[]) => (pinnedIds ? list.filter(item => pinnedIds.has(item.id)).length : list.length);
   const shownCount = inView(shown) + inView(pluggedShown), totalCount = inView(all) + inView(visiblePlugins);
@@ -499,8 +517,7 @@ function profileDetail(profile: Profile) {
   const title = profileState.renaming === profile.id ? renameField(profile) : h('h2', { title: profile.name }, profile.name, changed ? changedWord(profile, !!named.canSwitchBack) : null);
   const preview = switchPreview(profile, all, plugged), tip = way?.title ?? preview.tip;
   const toggleChanges = () => {
-    const ids = (list: { id: string }[]) => list.map(change => change.id);
-    profileState.changes = pinned ? undefined : { home: state.home!.home, profileId: profile.id, on: ids(plan.changes.on), off: ids(plan.changes.off), retooled: ids(plan.changes.retooled) };
+    profileState.changes = pinned ? undefined : pinChanges(profile, plan.changes);
     rerender();
   };
   if (!shownCount) placePanel(profilesFiles, []);
@@ -561,6 +578,14 @@ function menuKeys(event: KeyboardEvent, close: () => void) {
   choices[(to + choices.length) % choices.length].focus();
 }
 
+/** Closes the status bar menu and switches to `id` (shared by a profile row and Switch back). */
+function switchFromBar(event: MouseEvent, id: string, isInUse = false) {
+  menuOpen = false;
+  // Focus goes back to the status item only for a keyboard choice; after a click it would sit there ringed.
+  if (event.detail === 0) document.getElementById('status-profile')?.focus(); else (document.activeElement as HTMLElement | null)?.blur();
+  if (!isInUse) void switchToProfile(id); else rerender();
+}
+
 /**
  * One profile in the status bar's menu: choosing it switches, unless it is in use already. One not offered (profileplan.ts
  * switchable: nothing in it) is shown disabled, as on the page.
@@ -569,28 +594,44 @@ function menuChoice(profile: Profile, isInUse: boolean, name: string, all: LiveI
   const empty = !switchable(profile, all, plugged), preview = empty ? '' : switchPreview(profile, all, plugged).card;
   return h('button.pf-menu-item', { type: 'button', role: 'menuitemcheckbox', 'aria-checked': String(isInUse), id: `status-profile-${profile.id}`, disabled: !canEditProfiles() || empty,
     title: empty ? `${profile.name} has nothing in it yet. Tick what it should have on, on the Profiles page.` : `${profile.name} · ${preview}`,
-    onclick: (event: MouseEvent) => {
-      menuOpen = false;
-      // Focus goes back to the status item only for a keyboard choice; after a click it would sit there ringed.
-      if (event.detail === 0) document.getElementById('status-profile')?.focus(); else (document.activeElement as HTMLElement | null)?.blur();
-      if (!isInUse) void switchToProfile(profile.id); else rerender();
-    } },
+    onclick: (event: MouseEvent) => switchFromBar(event, profile.id, isInUse) },
     h('span.pf-menu-tick', {}, isInUse ? icon('check', 14) : null),
     h('span.pf-menu-body', {}, h('span.pf-menu-name', {}, empty ? `${name} (empty)` : name),
       preview ? h('span.pf-menu-preview', {}, preview) : null));
 }
+/** One row of the status bar's profile menu: a profile switch, a changed profile's non-interactive heading, Switch back to it, or See changes…. */
+function menuRow(row: MenuRow, named: ProfileNow, all: LiveItem[], plugged: PluginLive[]): HTMLElement {
+  switch (row.kind) {
+    case 'profile': return menuChoice(row.profile, named.inUse.includes(row.profile), nameNow(named, row.profile), all, plugged);
+    case 'changed-heading': return h('div.pf-menu-head', { role: 'presentation' }, nameNow(named, row.profile));
+    case 'switch-back': {
+      const preview = switchPreview(row.profile, all, plugged).card;
+      return h('button.pf-menu-item', { type: 'button', role: 'menuitem', id: 'status-profile-switch-back',
+        title: `${preview.replace(/\.$/, '')}. One step in History, with Undo.`, onclick: (event: MouseEvent) => switchFromBar(event, row.profile.id) },
+        h('span.pf-menu-tick', {}, icon('undo-2', 14)),
+        h('span.pf-menu-body', {}, h('span.pf-menu-name', {}, `Switch back to ${row.profile.name}`), h('span.pf-menu-preview', {}, preview)));
+    }
+    case 'see-changes': return h('button.pf-menu-item', { type: 'button', role: 'menuitem', id: 'status-profile-see-changes',
+      title: `Open ${row.profile.name} on Profiles showing what switching changes.`, onclick: () => seeChanges(row.profile, listedChanges(row.profile, all, plugged)) },
+      h('span.pf-menu-tick', {}, icon('diff', 14, 'tone-muted')), h('span.pf-menu-name', {}, 'See changes…'));
+  }
+}
 
 /**
  * The status bar's profile item: the profile in use (worked out), or the one last switched to while none is, `Everyday · changed`
- * with only the name cut (profileplan.ts profileNow), and a menu to switch in one click.
+ * with only the name cut (profileplan.ts profileNow), and a menu to switch in one click (a heading, Switch back to it and See changes… under `changed`).
  */
 export function profileStatus(): HTMLElement | null {
   const home = state.home;
   if (!home?.profiles.profiles.length) return null;
   const all = items(), plugged = plugins(), list = home.profiles.profiles, named = now(), inUseNow = named.inUse;
   const close = () => { menuOpen = false; rerender(); document.getElementById('status-profile')?.focus(); };
+  const rows = statusMenuRows(list, named, all, plugged, canEditProfiles()), sep = () => h('div.pf-menu-sep', { role: 'separator' });
+  // Separators frame the changed profile's heading and acts apart from other profiles, and Edit profiles… below.
   const menu = menuOpen ? h('div.pf-menu', { role: 'menu', 'aria-label': 'Switch profile', onkeydown: (event: KeyboardEvent) => menuKeys(event, close) },
-    list.map(profile => menuChoice(profile, inUseNow.includes(profile), nameNow(named, profile), all, plugged)), h('div.pf-menu-sep', { role: 'separator' }),
+    rows.flatMap((row, at) => [...(row.kind === 'changed-heading' && at > 0 ? [sep()] : []), menuRow(row, named, all, plugged),
+      ...((row.kind === 'switch-back' || row.kind === 'see-changes') && rows[at + 1]?.kind === 'profile' ? [sep()] : [])]),
+    sep(),
     h('button.pf-menu-item', { type: 'button', role: 'menuitem', id: 'status-profile-edit', onclick: () => { menuOpen = false; profileState.open = (inUseNow[0] ?? named.changed)?.id; showPage('profiles'); } }, h('span.pf-menu-tick'), h('span.pf-menu-name', {}, 'Edit profiles…'))) : null;
   return h('span.status-profile-wrap', {},
     h('button.status-item.status-profile', { type: 'button', id: 'status-profile', 'aria-haspopup': 'menu', 'aria-expanded': String(menuOpen), disabled: !!acting(),

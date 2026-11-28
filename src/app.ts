@@ -450,6 +450,7 @@ function accept(view: HomeView): HomeView {
   Object.assign(state, { skillsResult: undefined, mcpResult: undefined, agentsResult: undefined, item: undefined });
   unpin();
   stopSelecting();
+  profileState.changes = undefined;
   // A harness page belongs to the home it was opened in.
   state.harness = undefined;
   if (!draftUnsaved()) state.instructionEdit = undefined;
@@ -1267,6 +1268,7 @@ export function showPage(page: Page, { repair = false } = {}) {
   const leavingHarness = page === 'harnesses' && !state.busy && !!state.harness;
   // A new page drops the last page’s result (plugin runs stay tied to their own place: pluginstate.ts pluginsResultPlace).
   if (page !== state.page || leavingHarness) leaveResults(page);
+  if (state.page === 'profiles' && page !== 'profiles' && profileState.changes?.fromMenu) profileState.changes = undefined;
   if (page !== state.page) { state.libraryView = 'list'; state.visit += 1; forgetRepoPrompts(); forgetSourcePrompts(); forgetHistoryFolds(); forgetManageQuestion(); }
   if (leavingHarness) state.harness = undefined;
   // Settings opens fresh (what its rows said last visit belongs to that visit); every other page reads its own data.
@@ -2158,8 +2160,8 @@ export const profileState = {
   renaming: undefined as string | undefined,
   /** The name as typed while renaming, kept across redraws. */
   draft: undefined as string | undefined,
-  /** Pinned row ids while the Profiles page's Changes view is open, so ticking moves no row. */
-  changes: undefined as { home: string; profileId: string; on: string[]; off: string[]; retooled: string[] } | undefined,
+  /** Pinned row ids while the Profiles page's Changes view is open, so ticking moves no row (`fromMenu`: opened by See changes…, cleared on leaving). */
+  changes: undefined as { home: string; profileId: string; on: string[]; off: string[]; retooled: string[]; fromMenu?: boolean } | undefined,
 };
 
 /**
