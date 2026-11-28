@@ -2275,6 +2275,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .pf-menu-name { min-width: 0; overflow-wrap: anywhere; }
 .pf-menu-preview { font-size: 11.5px; line-height: 15px; color: var(--ink-soft); white-space: normal; overflow-wrap: anywhere; }
 .pf-menu-sep { height: 1px; margin: 2px 4px; background: var(--line); }
+.pf-menu-head { padding: 4px 8px 2px; font-size: 12px; line-height: 16px; font-weight: 600; color: var(--ink-soft); overflow-wrap: anywhere; }
 
 /* ---------- Harnesses ---------- */
 .harness-scroll { container-type: inline-size; padding: 12px var(--pad-end) 16px 16px; display: flex; flex-direction: column; gap: 12px; }
