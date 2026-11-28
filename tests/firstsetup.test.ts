@@ -10,7 +10,7 @@ import { mkdir, mkdtemp, readdir, readFile, realpath, rm, utimes, writeFile } fr
 import { join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { agentsView, applyAgents } from '../src/agents.ts';
-import { everythingEntryAction, setSyncEverything } from '../src/everything.ts';
+import { everythingEntryAction, setSyncEverything, undoAdded } from '../src/everything.ts';
 import { readHistory } from '../src/history.ts';
 import { entriesNow, everythingAction, everythingDone, everythingPlan, everythingSentence, libraryAction } from '../src/historyactions.ts';
 import { rowClicks } from '../src/libraryrow.ts';
@@ -532,18 +532,61 @@ test('The copy deleted by hand in the tool it was found in, not taken in yet (Au
   } finally { await box.cleanup(); }
 });
 
-test('After the one Undo, what Yes would add is nothing, and Settings can say why: the items it took back are counted as taken out earlier', async () => {
+test('After the one Undo, what Yes would add is nothing, and Settings can say why: the items it took back are taken out earlier, Add taking one at once and asking which copy of one whose copies differ since', async () => {
   const box = await sandbox();
   try {
     await putSkill(box, skillRoot['claude-cli'], 'notes');
     await putSkill(box, skillRoot['claude-cli'], 'plan');
-    assert.equal(takenOutEarlier(await homeView(box)), 0);
+    assert.deepEqual(takenOutEarlier(await homeView(box)), []);
     await setSyncEverything(box.context, true, true);
     await background(box);
     const [switchOn] = await switchesOn(box);
     await everythingEntryAction(box.context, tools, switchOn.id);
+    await putSkill(box, skillRoot['codex-cli'], 'plan', 'Plan another way.');
     const view = await homeView(box);
-    assert.deepEqual([whatYesDoes(view).takes, takenOutEarlier(view)], [0, 2]);
+    assert.deepEqual([whatYesDoes(view).takes, takenOutEarlier(view)], [0, [{ kind: 'skills', key: 'notes', name: 'notes', differs: false }, { kind: 'skills', key: 'plan', name: 'plan', differs: true }]]);
+  } finally { await box.cleanup(); }
+});
+
+// ---------- An added line's own Undo on Settings (everything.ts undoAdded) ----------
+
+test('An added line’s Undo takes back its take-ins of one kind in one pass, each tool it was found in keeping its own copy byte for byte; its Restore puts back just those deletions', async () => {
+  const box = await sandbox();
+  try {
+    for (const [root, name] of [[skillRoot['claude-cli'], 'deploy'], [skillRoot['codex-cli'], 'lint'], [skillRoot['claude-cli'], 'other']]) await putSkill(box, root, name);
+    await setSyncEverything(box.context, true, true);
+    await background(box);
+    const before = await filesIn(box), takeIns = (await history(box)).filter(event => event.cause === 'sync-everything' && event.key !== 'other').map(event => event.id);
+    const undone = await undoAdded(box.context, tools, 'skills', takeIns, false);
+    const after = await history(box), view = await homeView(box);
+    // Each tool keeps its own copy (deploy Claude Code's, lint Codex's), byte for byte; the copies Central Knot put in go; nothing else changes.
+    const kept = Object.fromEntries(Object.entries(before).filter(([path]) => !/skills\/(deploy|lint)\//.test(path) || /^\.claude\/skills\/deploy\/|^\.codex\/skills\/lint\//.test(path)));
+    assert.deepEqual([undone.undid.map(each => each.id), undone.passed, await filesIn(box)], [takeIns, [], kept]);
+    assert.deepEqual([undone.undid.map(each => after.find(event => event.id === each.by)?.kind), takeIns.map(id => after.find(event => event.id === id)?.undoneBy), takenOutEarlier(view).map(item => item.key)],
+      [['deleted', 'deleted'], undone.undid.map(each => each.by), ['deploy', 'lint']]);
+    // Its Restore: a Delete clicked since is no deletion of that Undo, and is passed over.
+    await applySkills(box.context, tools, [{ key: 'other', on: true, except: [], seenOn: true, deleted: true }]);
+    const clicked = (await history(box)).findLast(event => event.kind === 'deleted')!;
+    const back = await undoAdded(box.context, tools, 'skills', [...undone.undid.map(each => each.by), clicked.id], true), library = (await skillsView(box.context, tools)).library;
+    assert.deepEqual([back.undid.map(each => each.id), back.passed, ['deploy', 'lint', 'other'].map(key => !library[key].deleted)],
+      [undone.undid.map(each => each.by), [{ id: clicked.id, why: 'changed' }], [true, true, false]]);
+  } finally { await box.cleanup(); }
+});
+
+test('An added line’s Undo works its Undo out again in the pass: it takes back the sibling and passes over one edited since (never turning it off), one undone already and one History no longer has', async () => {
+  const box = await sandbox();
+  try {
+    for (const name of ['deploy', 'edited', 'undone']) await putSkill(box, skillRoot['claude-cli'], name);
+    await setSyncEverything(box.context, true, true);
+    await background(box);
+    const id = async (key: string) => (await history(box)).find(event => event.cause === 'sync-everything' && event.key === key)!.id;
+    await restoreSkill(box.context, tools, await id('undone'));
+    await putSkill(box, skillRoot['claude-cli'], 'edited', 'Edited by hand.');
+    await background(box);
+    const asked = [await id('deploy'), await id('edited'), await id('undone'), 'pruned-entry'];
+    const done = await undoAdded(box.context, tools, 'skills', asked, false), library = (await skillsView(box.context, tools)).library;
+    assert.deepEqual([done.undid.map(each => each.id), done.passed], [[asked[0]], [{ id: asked[1], why: 'changed' }, { id: asked[2], why: 'done' }, { id: 'pruned-entry', why: 'gone' }]]);
+    assert.deepEqual([!!library.deploy.deleted, library.edited.on, await readFile(join(box.home, skillRoot['codex-cli'], 'edited/SKILL.md'), 'utf8')], [true, true, skill('edited', 'Edited by hand.')]);
   } finally { await box.cleanup(); }
 });
 

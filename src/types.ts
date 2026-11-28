@@ -3,7 +3,7 @@
 // History entry (HistoryEvent), and the views of plugins, instructions, sources, the Git repo and profiles. Types alone: nothing
 // here decides anything. Not here: the library's own shapes (library.ts LibraryItem, Plan), the pass's (librarypass.ts Kind,
 // Disk), and each store's record (kindstore.ts, sourcestore.ts, share.ts SyncRecord).
-import type { LeftIn } from './historyactions.ts';
+import type { AddedPassed, LeftIn } from './historyactions.ts';
 import type { ItemKind, LibraryItem, Plan, SourceAnswer, TakeInAnswer, VersionChange } from './library.ts';
 import type { NeutralServer } from './mcp.ts';
 import type { PluginDone, PluginOp } from './pluginplan.ts';
@@ -224,6 +224,8 @@ export interface DesktopApi {
   onUpdatesChanged(callback: (view: UpdateView) => void): void;
   /** `choice`: which overwritten edit to put back, for an event with several. */
   restore(eventId: string, home: string, choice?: string): Promise<ApplyResult>;
+  /** Settings' added line's Undo of these take-ins of one kind, in one pass; or (`putBack`) the Restore of the deletions it made (everything.ts undoAdded). */
+  undoAdded(kind: 'skills' | 'mcp' | 'agents', eventIds: string[], home: string, putBack: boolean): Promise<UndoneAdded>;
   /** Each tool's own instruction file (INS-01). */
   instructions(readId?: number): Promise<InstructionFile[] | null>;
   /** One version of an agent as Central Knot's library holds it: its name, description and prompt; null when it is no longer kept. */
@@ -518,6 +520,9 @@ export interface Change {
 }
 
 export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, what is not as it asked, any settings notes, and each plugin item's copy it left (`since`). */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'retooled' | 'left' | 'settingsChanged'> & { since?: string[]; /** The plugins it turned back whole in Claude Code, by direction (profileplan.ts wholeCounts). */ plugins?: { on: number; off: number } }; /** Confirmed changes for reload advice (reload.ts). */ reloads: ReloadChange[]; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
+
+/** What an added line's Undo, or its Restore, did entry by entry (everything.ts undoAdded): each entry done and the entry its action made (`by`), and each passed over, with why. */
+export interface UndoneAdded extends ApplyResult { undid: { id: string; by: string }[]; passed: { id: string; why: AddedPassed }[] }
 
 /**
  * What sync did on its own, told once in the Library: to one item (ItemNotice), the found items Synchronize everything
