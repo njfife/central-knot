@@ -316,7 +316,7 @@ function sessionStripView(file: InstructionFile, hookInfo?: HookStripPage) {
         why ? (warn ? warning(why) : h('p.session-why', {}, why)) : null,
         !warn && group.problem ? warning(group.problem) : null,
         ...group.unread.map(path => (path === group.settings ? warning('Its hooks couldn’t be read.') : warning('Its hooks couldn’t be read: ', path))),
-        group.hooks.length ? h('ul.session-hooks', {}, group.hooks.map((hook, row) => hookRow(hook, `hook-source-${state.page}-${file.tool}-${at}-${row}`))) : null);
+        group.hooks.length ? h('ul.session-hooks', {}, group.hooks.map((hook, row) => hookRow(hook, `hook-source-${state.page}-${file.tool}-${at}-${row}`, true))) : null);
     })) : null,
     runStrip() === file.tool ? runBand() : null);
 }

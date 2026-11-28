@@ -353,9 +353,13 @@ export interface DesktopApi {
   /** One hook's declaring entry and the script its command names, read from disk on click (hooksource.ts). Nothing is run. */
   hookSource(home: string, ref: HookSourceRef): Promise<HookSource>;
   /** Runs one hook's command once as its tool would on click (hookrun.ts); only on this computer's own home. */
-  hookRun(home: string, ref: HookSourceRef): Promise<HookRunResult>;
+  hookRun(home: string, ref: HookSourceRef, remember?: boolean): Promise<HookRunResult>;
   /** Stops a hook run currently under way for this home and hook identity (hookrun.ts). */
   hookStop(home: string, ref: HookSourceRef): Promise<void>;
+  /** Reads the last kept result for each hook in `refs` on `home` in one batch (hookrunstore.ts). */
+  hookLast(home: string, refs: HookSourceRef[]): Promise<(HookRunResult | null)[]>;
+  /** Forgets the kept result for one hook on `home` (hookrunstore.ts, called on Forget or Escape). */
+  hookForget(home: string, ref: HookSourceRef): Promise<void>;
 }
 
 export interface PluginActionResult { stopped?: string; reports: ActionReport[] }
@@ -998,7 +1002,7 @@ export interface HookSource {
 export type HookRunOutcome = 'adds' | 'empty' | 'copilot-ignored' | 'claude-exit-2' | 'failed' | 'timeout' | 'stopped' | 'missing' | 'not-added' | 'refused';
 /** Why `HookRunOutcome` is `'not-added'` (cases outside the short outcome sentences, kept for A2's wording). */
 export type HookNotAddedDetail = 'json-no-context' | 'json-block' | 'invalid-json' | 'codex-prompt-exit-2' | 'overflow' | 'spawn-error';
-/** One hook run's complete result from main (hook:run), never stored. */
+/** One hook run's complete result from main (hook:run); the last keepable result per hook is kept by hookrunstore.ts. */
 export interface HookRunResult {
   outcome: HookRunOutcome; detail?: HookNotAddedDetail; added?: string; allPrinted: string; stderr: string;
   exitCode?: number; signal?: NodeJS.Signals; source?: string; durationMs: number; at: string; cwd: string; emptyPrompt: boolean;

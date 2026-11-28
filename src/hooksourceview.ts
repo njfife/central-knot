@@ -1,31 +1,36 @@
-// Shared hook-row controls, rows (hookRow) and panels for every hook row: See what it adds / Running… + Stop (offered by canRun; main's hookrun.ts
+// Shared hook-row controls, rows (hookRow) and panels for every hook row: See what it adds / Collect again / Running… + Stop (offered by canRun; main's hookrun.ts
 // runHook decides) beside View source / Hide source inside one span, plus the opened run result (above) and source block
-// (below), called by instructionspage.ts sessionStripView (Instructions and a tool's Instructions tab) and pluginpage.ts
-// (sessionHookStrip and partList from hookGroup). Reads source over hook:source (hooksource.ts) and runs/stops on click over hook:run / hook:stop
-// (hookrun.ts), wording results through sessionhooks.ts hookRunWords, updating in place so open editors keep their caret.
-// Nothing starts a run on draw; ids hash the row key and declaration fingerprint; Escape closes the focused block and refocuses
-// its button; leaving the page prunes state (without stopping main); Refresh and home switches clear all state.
-import { shownPath, state } from './app.ts';
+// (below), called by instructionspage.ts sessionStripView (Instructions and a tool's Instructions tab, opting into kept results) and pluginpage.ts
+// (sessionHookStrip and partList from hookGroup, visit-only). Reads source over hook:source (hooksource.ts), runs/stops on click over hook:run / hook:stop
+// (hookrun.ts), and reads/forgets kept results over hook:last / hook:forget (hookrunstore.ts) once per visit or Refresh before strips draw, wording results through sessionhooks.ts hookRunWords, updating in place so open editors keep their caret.
+// Nothing starts a run on draw; ids hash the row key and declaration fingerprint; Forget (Close result on a plugin's page) and Escape close the result block, delete any kept result (on remembered rows) and refocus
+// its button; long kept results fold to 6 lines + Show all on a return; leaving the page or a same-home Refresh keeps in-flight runs and kept results (restoring any earlier kept result over a stopped/refused run), while a home switch clears all state.
+import { rerender, shownPath, state } from './app.ts';
 import { button, closeButton, h, icon, pathText } from './dom.ts';
 import { pagePlatform } from './machine.ts';
 import { addsText, isTextEvent } from './pluginoutcomes.ts';
 import { takesPlugins } from './presence.ts';
-import { HOOK_RUN_ACTUAL_ONLY, hookFingerprint, hookRunWords, type TextHookRow } from './sessionhooks.ts';
-import type { HarnessId, HomeMode, HomeView, HookRunResult, HookSource, HookSourceRef, InstalledPlugin } from './types.ts';
+import { HOOK_RUN_ACTUAL_CARD, hookFingerprint, hookRunWords, isKeptHookOutcome, sessionStrip, type TextHookRow } from './sessionhooks.ts';
+import type { HarnessId, HomeMode, HomeView, HookRunResult, HookSource, HookSourceRef, InstalledPlugin, InstructionFile } from './types.ts';
 import { HOOK_SOURCE_UNREADABLE, andList, fileName, sentence, toolNames } from './words.ts';
 
 interface RunEntry {
   seq: number;
   runBtnId: string;
   running: boolean;
+  kept?: HookRunResult;
+  fromStore?: boolean;
   result?: HookRunResult;
+  openAdded: boolean;
   openAll: boolean;
   openErr: boolean;
 }
 
 const opened = new Map<string, { seq: number; panelId: string; source?: HookSource }>();
 const runs = new Map<string, RunEntry>();
+const mutatedAt = new Map<string, number>();
 let seq = 0;
+let loadSeq = 0;
 
 const hasCli = (tool: HarnessId, home?: Pick<HomeView, 'snapshots'>) =>
   !home?.snapshots || home.snapshots.some(s => s.harness === tool && (s.detection === 'Installed' || s.detection === 'Version unknown' || !!s.app?.binary));
@@ -33,7 +38,7 @@ const hasCli = (tool: HarnessId, home?: Pick<HomeView, 'snapshots'>) =>
 /** Home, platform and tool gates shared by canRun and stripCantRunReason; returns a card reason where the strip's (?) explains it, or 'silent'. */
 const hookGate = (ref: HookSourceRef, mode: HomeMode | undefined, platform: string): string | 'silent' | undefined =>
   platform === 'win32' || !mode || ref.from === 'marketplace' ? 'silent'
-  : mode !== 'actual' ? HOOK_RUN_ACTUAL_ONLY
+  : mode !== 'actual' ? HOOK_RUN_ACTUAL_CARD
   : ref.from === 'installed' && !takesPlugins(ref.tool) ? 'silent' : undefined;
 
 /** Whether the page offers See what it adds (mirrors main's deciding gate in hookrun.ts runHook): actual home, non-Windows, own or installed plugin hook that adds text, with the tool's CLI found and the plugin on. */
@@ -82,17 +87,51 @@ function rowOnScreen(actionsEl: HTMLElement): boolean {
   return rect.bottom > top && rect.top < bottom;
 }
 
-/** Closes all open hook source and run blocks and drops any in-flight reads or runs (called on Refresh and home switch). */
-export function resetHookSources(): void {
+const keptEntry = (result: HookRunResult, at: number, runBtnId = ''): RunEntry =>
+  ({ seq: at, runBtnId, running: false, kept: result, fromStore: true, result, openAdded: false, openAll: false, openErr: false });
+
+/** Reads kept results for every runnable hook in `files` in one hook:last call; drops replies after a home switch or newer read, and skips hooks acted on meanwhile. */
+export async function loadHookResults(files: readonly InstructionFile[]): Promise<void> {
+  const home = state.home;
+  const refs = home ? files.flatMap(file =>
+    sessionStrip(file.tool, home.pluginItems ?? [], file)?.groups.flatMap(g => g.hooks.map(row => row.source).filter(ref => canRun(ref))) ?? []) : [];
+  if (!refs.length) return;
+  const call = ++loadSeq;
+  const startSeq = seq;
+  const reply = await window.centralKnot.hookLast?.(home!.home, refs)?.catch(() => undefined);
+  if (call !== loadSeq || state.home?.home !== home!.home || !Array.isArray(reply)) return;
+  for (let at = 0; at < refs.length; at++) {
+    const runKey = JSON.stringify(refs[at]);
+    const current = runs.get(runKey);
+    if (current?.running || (mutatedAt.get(runKey) ?? 0) > startSeq) continue;
+    const kept = reply[at];
+    if (kept) runs.set(runKey, keptEntry(kept, seq, current?.runBtnId));
+    else if (current?.kept) runs.delete(runKey);
+  }
+}
+
+function dropTransientRuns(keepOnScreen: boolean): void {
+  for (const [key, entry] of runs) {
+    if (entry.running || (keepOnScreen && document.getElementById(entry.runBtnId))) continue;
+    if (entry.kept) runs.set(key, keptEntry(entry.kept, entry.seq));
+    else runs.delete(key);
+  }
+}
+
+/** Closes open hook source blocks; clears all run state on a home switch, or keeps in-flight runs and kept results on a same-home Refresh. */
+export function resetHookSources(sameHome = false): void {
   opened.clear();
+  loadSeq++;
+  if (sameHome) return dropTransientRuns(false);
   runs.clear();
+  mutatedAt.clear();
   seq++;
 }
 
-/** Drops open hook source and finished run state for any row no longer drawn on screen; in-flight runs stay so returning keeps Stop and receives the result. */
+/** Drops open hook source and transient run state for rows no longer on screen; in-flight runs and remembered kept results stay. */
 export function pruneHookSources(): void {
   for (const [key, entry] of opened) if (!document.getElementById(entry.panelId)) opened.delete(key);
-  for (const [key, entry] of runs) if (!entry.running && !document.getElementById(entry.runBtnId)) runs.delete(key);
+  dropTransientRuns(true);
 }
 
 const textPre = (id: string, label: string, text: string): HTMLElement =>
@@ -109,9 +148,10 @@ function sourceBlock(blockId: string, path?: string, text?: string, note?: strin
       : h('p.hook-source-note', {}, note ?? ''));
 }
 
-/** Returns the row's action span (See what it adds / Running… + Stop when runnable, beside View source), then any open result and source blocks. */
-export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[] {
+/** Returns the row's action span (See what it adds / Collect again / Running… + Stop when runnable, beside View source), then any open result and source blocks. */
+export function hookSourceControls(ref: HookSourceRef, id: string, remember = false): HTMLElement[] {
   const key = `${id}\u0000${JSON.stringify(ref)}`;
+  const runKey = remember ? JSON.stringify(ref) : key;
   const base = `${id}-${keyHash(key)}`;
   const actionsId = `${base}-actions`;
   const btnId = `${base}-btn`;
@@ -128,7 +168,7 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
     toggle();
   };
   const onRunEscape = (event: KeyboardEvent) => {
-    if (event.key !== 'Escape' || !runs.get(key)?.result) return;
+    if (event.key !== 'Escape' || !runs.get(runKey)?.result) return;
     event.preventDefault();
     event.stopPropagation();
     closeRun();
@@ -153,68 +193,81 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
   const control = (open: boolean): HTMLElement => rowLink(open ? 'Hide source' : 'View source', btnId, toggle,
     { 'data-hook-source': '', 'aria-expanded': String(open), ...(open ? { 'aria-controls': panelId } : {}), onkeydown: onEscape });
 
+  const foldBtn = (foldId: string, label: string, controls: string | undefined, open: boolean, flip: () => void): HTMLElement =>
+    h('button.btn.link.micro.hook-fold', {
+      type: 'button', id: foldId, 'aria-expanded': String(open),
+      ...(controls ? { 'aria-controls': controls } : {}), onclick: flip,
+    }, label, icon(open ? 'chevron-down' : 'chevron-right', 12));
+
   const foldBlock = (foldId: string, label: string, text: string, open: boolean, flip: () => void): HTMLElement =>
-    h('div.hook-run-fold', {},
-      h('button.btn.link.micro.hook-fold', {
-        type: 'button', id: foldId, 'aria-expanded': String(open),
-        ...(open ? { 'aria-controls': `${foldId}-text` } : {}), onclick: flip,
-      }, label, icon(open ? 'chevron-down' : 'chevron-right', 12)),
-      open ? textPre(`${foldId}-text`, label, text) : null);
+    h('div.hook-run-fold', {}, foldBtn(foldId, label, open ? `${foldId}-text` : undefined, open, flip), open ? textPre(`${foldId}-text`, label, text) : null);
 
   const runPanel = (entry: RunEntry): HTMLElement => {
     const result = entry.result!;
     const knownTool = 'tool' in ref ? ref.tool : undefined;
     const view = hookRunWords(knownTool ?? 'claude-cli', result, result.cwd ? shownPath(result.cwd) : '~', undefined, knownTool);
-    const flip = (which: 'openAll' | 'openErr', focusId: string) => () => {
-      const live = runs.get(key);
+    const flip = (which: 'openAdded' | 'openAll' | 'openErr', focusId: string) => () => {
+      const live = runs.get(runKey);
       if (!live?.result) return;
       live[which] = !live[which];
       document.getElementById(runPanelId)?.replaceWith(runPanel(live));
       document.getElementById(focusId)?.focus({ preventScroll: true });
     };
+    const addedLines = view.added !== undefined ? view.added.replace(/\n$/, '').split('\n') : [];
+    const longKept = !!entry.fromStore && addedLines.length > 6;
+    const addedText = longKept && !entry.openAdded ? addedLines.slice(0, 6).join('\n') : view.added;
     return h('div.hook-run', { id: runPanelId, role: 'region', 'aria-label': 'Hook run result', onkeydown: onRunEscape },
       h('div.hook-run-head', {},
-        h('span.hook-run-says', {}, view.sentence, view.meta ? [' ', h('span.hook-run-meta', {}, view.meta)] : null),
-        closeButton(closeRun, { id: `${base}-close`, label: 'Close result' })),
+        h('span.hook-run-says', {}, view.sentence, view.meta ? [' ', h('span.hook-run-meta', { title: view.metaTitle }, view.meta)] : null),
+        remember
+          ? rowLink('Forget', `${base}-close`, closeRun, { 'aria-label': 'Forget this result', title: 'Forget this result' })
+          : closeButton(closeRun, { id: `${base}-close`, label: 'Close result' })),
       ...view.notes.map(note => h('p.hook-run-note', {}, note)),
-      view.added !== undefined ? textPre(`${base}-added`, 'Text the hook would add', view.added) : null,
+      addedText !== undefined ? textPre(`${base}-added`, 'Text the hook would add', addedText) : null,
+      longKept ? h('div.hook-run-fold', {}, foldBtn(`${base}-more`, 'Show all', `${base}-added`, entry.openAdded, flip('openAdded', `${base}-more`))) : null,
       view.errDirect !== undefined ? h('div.content-block', {}, h('p.content-owner', {}, 'Standard error'), textPre(`${base}-stderr`, 'Standard error', view.errDirect)) : null,
       view.allFold !== undefined ? foldBlock(`${base}-all`, 'Show all it printed', view.allFold, entry.openAll, flip('openAll', `${base}-all`)) : null,
       view.errFold !== undefined ? foldBlock(`${base}-err-fold`, 'Standard error', view.errFold, entry.openErr, flip('openErr', `${base}-err-fold`)) : null);
   };
 
-  const runButton = (running: boolean): HTMLElement => rowLink(running ? 'Running…' : 'See what it adds', runBtnId, running ? () => {} : startRun,
-    { 'data-hook-run': '', ...(running ? { 'aria-disabled': 'true' } : {}), onkeydown: onRunKey });
+  const runButton = (running: boolean, hasResult: boolean): HTMLElement =>
+    rowLink(running ? 'Running…' : hasResult ? 'Collect again' : 'See what it adds', runBtnId, running ? () => {} : startRun,
+      { 'data-hook-run': '', ...(running ? { 'aria-disabled': 'true' } : {}), onkeydown: onRunKey });
   const stopButton = (): HTMLElement => rowLink('Stop', stopBtnId, stopRun, { 'data-hook-stop': '', onkeydown: onRunKey });
 
   function closeRun(): void {
-    const entry = runs.get(key);
+    const entry = runs.get(runKey);
     if (!entry || entry.running) return;
-    runs.delete(key);
+    runs.delete(runKey);
+    mutatedAt.set(runKey, ++seq);
+    if (remember && state.home?.home) void window.centralKnot.hookForget?.(state.home.home, ref);
     document.getElementById(runPanelId)?.remove();
-    document.getElementById(runBtnId)?.focus({ preventScroll: true });
+    const idle = runButton(false, false);
+    document.getElementById(runBtnId)?.replaceWith(idle);
+    idle.focus({ preventScroll: true });
   }
 
   function stopRun(event?: MouseEvent): void {
     if (event?.detail && event.detail > 1) return;
     const activeHome = state.home?.home;
-    if (!activeHome || !runs.get(key)?.running) return;
+    if (!activeHome || !runs.get(runKey)?.running) return;
     void window.centralKnot.hookStop(activeHome, ref);
   }
 
   function startRun(event?: MouseEvent): void {
     if (event?.detail && event.detail > 1) return;
     const activeHome = state.home?.home;
-    if (!activeHome || runs.get(key)?.running) return;
+    if (!activeHome || runs.get(runKey)?.running) return;
     const call = ++seq;
-    runs.set(key, { seq: call, runBtnId, running: true, openAll: false, openErr: false });
+    mutatedAt.set(runKey, call);
+    runs.set(runKey, { seq: call, runBtnId, running: true, kept: runs.get(runKey)?.kept, openAdded: false, openAll: false, openErr: false });
     document.getElementById(runPanelId)?.remove();
-    const busy = runButton(true);
+    const busy = runButton(true, false);
     document.getElementById(runBtnId)?.replaceWith(busy);
     document.getElementById(stopBtnId)?.remove();
     busy.after(stopButton());
     busy.focus({ preventScroll: true });
-    void window.centralKnot.hookRun(activeHome, ref)
+    void window.centralKnot.hookRun(activeHome, ref, remember)
       .catch((): HookRunResult => ({
         outcome: 'refused',
         allPrinted: '',
@@ -225,18 +278,24 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
         emptyPrompt: false,
       }))
       .then(result => {
-        if (state.home?.home !== activeHome || runs.get(key)?.seq !== call) return;
+        const live = runs.get(runKey);
+        if (state.home?.home !== activeHome || live?.seq !== call) return;
+        const kept = remember && isKeptHookOutcome(result.outcome) ? result : live.kept;
+        const done: RunEntry = { seq: call, runBtnId: live.runBtnId, running: false, kept, result, openAdded: false, openAll: false, openErr: false };
         const actionsEl = document.getElementById(actionsId);
         if (!actionsEl) {
-          runs.delete(key);
+          const onOtherTab = !!live.runBtnId && !!document.getElementById(live.runBtnId);
+          if (onOtherTab) runs.set(runKey, done);
+          else if (kept) runs.set(runKey, keptEntry(kept, call, live.runBtnId));
+          else runs.delete(runKey);
+          if (onOtherTab) rerender();
           return;
         }
         const visible = rowOnScreen(actionsEl);
-        const done: RunEntry = { seq: call, runBtnId, running: false, result, openAll: false, openErr: false };
-        runs.set(key, done);
+        runs.set(runKey, done);
         const activeId = document.activeElement?.id;
         const keepFocus = activeId === runBtnId || activeId === stopBtnId;
-        const idle = runButton(false);
+        const idle = runButton(false, true);
         document.getElementById(runBtnId)?.replaceWith(idle);
         document.getElementById(stopBtnId)?.remove();
         if (keepFocus) idle.focus({ preventScroll: true });
@@ -270,10 +329,11 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
   }
 
   const currentSource = opened.get(key);
-  const currentRun = runnable ? runs.get(key) : undefined;
+  const currentRun = runnable ? runs.get(runKey) : undefined;
+  if (currentRun) currentRun.runBtnId = runBtnId;
   const running = !!currentRun?.running;
   const actions = h('span.hook-actions', { id: actionsId },
-    runnable ? [runButton(running), running ? stopButton() : null] : null,
+    runnable ? [runButton(running, !!currentRun?.result), running ? stopButton() : null] : null,
     control(!!currentSource));
   return [
     actions,
@@ -282,10 +342,10 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
   ].filter((node): node is HTMLElement => !!node);
 }
 
-/** One hook row (when it runs, its command, optional quiet tag, and its See what it adds / Stop / View source controls and inline panels), shared by Instructions and a plugin's page. */
-export function hookRow(hook: TextHookRow, id: string): HTMLElement {
+/** One hook row (when it runs, its command, optional quiet tag, and its See what it adds / Collect again / Stop / View source controls and inline panels), shared by Instructions and a plugin's page. */
+export function hookRow(hook: TextHookRow, id: string, remember = false): HTMLElement {
   return h('li.session-hook', {},
     h('span.session-lead', {}, h('span.session-when', { title: hook.source.event }, sentence(hook.when)), h('code.session-command', {}, hook.command),
       hook.tag ? h('span.session-when', {}, hook.tag) : null),
-    hookSourceControls(hook.source, id));
+    hookSourceControls(hook.source, id, remember));
 }
