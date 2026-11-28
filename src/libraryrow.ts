@@ -27,7 +27,7 @@ import type { Change, HarnessId, ItemNotice, LibraryFacts, PluginItemNotice, Tak
 import { andList, andParts, deletedIn, harnessIds, kindNouns, pageNames, readsIt, sentence, toolName, toolsPhrase } from './words.ts';
 
 /** One part of a sentence naming items (`sentences().takenInParts`): plain text, or an item's name with its index in `notice.items`. */
-export type NamedPart = string | { index: number; name: string };
+export type SentencePart = string | { index: number; name: string };
 
 // ---------- What a kind supplies ----------
 
@@ -806,11 +806,11 @@ export function sentences(words: RowWords) {
    * sentence. `history: false` drops the trailing "History can undo it/each." sentence (as on Settings while the band holds
    * Undo); `lead: false` omits the repeated "Synchronize everything" lead under Settings' own row.
    */
-  function takenInParts(notice: Pick<TakenInNotice, 'items' | 'from' | 'settingsChanged'>, options?: { history?: boolean; lead?: boolean }): NamedPart[] {
+  function takenInParts(notice: Pick<TakenInNotice, 'items' | 'from' | 'settingsChanged'>, options?: { history?: boolean; lead?: boolean }): SentencePart[] {
     const { history = true, lead = true } = options ?? {};
     const count = notice.items.length, from = andList(notice.from.map(toolName));
     const names = andParts(notice.items.map((name, index) => ({ index, name })));
-    const head: NamedPart[] = lead ? [`Synchronize everything took in ${count} ${count === 1 ? noun : words.many}, found in ${from}: `, ...names, '.']
+    const head: SentencePart[] = lead ? [`Synchronize everything took in ${count} ${count === 1 ? noun : words.many}, found in ${from}: `, ...names, '.']
       : count === 1 ? [`Added ${noun} `, { index: 0, name: notice.items[0] ?? '' }, ` from ${from}.`]
       : [`Added ${count} ${words.many} from ${from}: `, ...names, '.'];
     return [

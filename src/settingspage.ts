@@ -556,24 +556,26 @@ function syncEverythingRow(): HTMLElement | null {
   const takenBack = switchOn && state.history.data ? new Set(everythingPlan(switchOn, state.history.data, entriesNow(home)).takeBack.map(entry => entry.id)) : undefined;
   // What it added comes first; History stays off only on lines the standing band's Undo actually takes back as items stand now.
   // Each held item's name gets its file mark (filepanel.ts itemFile), keyed by the notice's id so two lines naming one item keep their own.
+  const LEADING_PUNCT = /^[,.;:]/;
   const entries = (['skills', 'mcp', 'agents'] as const).flatMap(kind => home[kind].notices.flatMap(told => {
     if (told.kind !== 'taken-in' || state.dismissed.has(told.history)) return [];
     const ids = told.histories?.length ? told.histories : [told.history];
     const covered = !!takenBack && ids.every(id => takenBack.has(id));
     const marks = told.keys.map(key => itemFile(settingsFiles, kind, key, told.history));
     const parts = sentences(libraryWords[kind]).takenInParts(told, { history: !covered, lead: false });
-    const historyTail = !covered ? parts.pop() as string : undefined;
+    // takenInParts appends " History can undo it/each." as the last string when history is true.
+    const historyTail = !covered ? parts.pop() : undefined;
     // Keep each name with its mark and trailing punctuation, and the History link with its sentence, so wrapping leaves none alone.
     const text = parts.map<Child>((part, at) => {
       if (typeof part !== 'string') {
-        const next = parts[at + 1], punct = typeof next === 'string' && /^[,.;:]/.test(next) ? next[0] : '';
+        const next = parts[at + 1], punct = typeof next === 'string' && LEADING_PUNCT.test(next) ? next[0] : '';
         const mark = marks[part.index]?.mark;
         return mark ? h('span.setting-added-name', {}, part.name, mark, punct) : `${part.name}${punct}`;
       }
       const prev = parts[at - 1];
-      return prev && typeof prev !== 'string' && /^[,.;:]/.test(part) ? part.slice(1) : part;
+      return prev && typeof prev !== 'string' && LEADING_PUNCT.test(part) ? part.slice(1) : part;
     });
-    if (historyTail) text.push(' ', h('span.setting-added-tail', {}, historyTail.trimStart(),
+    if (typeof historyTail === 'string') text.push(' ', h('span.setting-added-tail', {}, historyTail.trimStart(),
       h('button.text-action', { type: 'button', id: `setting-sync-everything-added-${kind}-action`, onclick: () => showPage('history') }, 'History')));
     return [{ kind, marks, text }];
   }));

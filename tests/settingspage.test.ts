@@ -383,11 +383,11 @@ test('Synchronize everything marks added items Central Knot holds, opens the fil
     sync: { managed: ['claude-cli', 'codex-cli'], present: ['claude-cli', 'codex-cli'], leftOut: [], access: { allowed: true }, gate: { state: 'ready' }, syncEverything: true, caughtUp: [] },
     skills: {
       ...emptyKind(),
-      items: [fact('notes', 'Notes'), fact('lint'), fact('gone', 'Gone')],
-      library: { notes: held('notes', 'Notes'), lint: held('lint'), gone: held('gone', 'Gone', true) },
+      items: [fact('notes', 'Notes'), fact('lint'), fact('tidy'), fact('gone', 'Gone')],
+      library: { notes: held('notes', 'Notes'), lint: held('lint'), tidy: held('tidy'), gone: held('gone', 'Gone', true) },
       notices: [
         { kind: 'taken-in', items: ['Notes', 'Gone'], keys: ['notes', 'gone'], from: ['claude-cli'], history: 'take-1', histories: ['take-1', 'take-gone'] },
-        { kind: 'taken-in', items: ['Notes', 'lint'], keys: ['notes', 'lint'], from: ['claude-cli', 'codex-cli'], history: 'take-2', histories: ['take-2', 'take-lint'] },
+        { kind: 'taken-in', items: ['Notes', 'lint', 'tidy'], keys: ['notes', 'lint', 'tidy'], from: ['claude-cli', 'codex-cli'], history: 'take-2', histories: ['take-2', 'take-lint', 'take-tidy'] },
       ],
     },
   });
@@ -395,12 +395,18 @@ test('Synchronize everything marks added items Central Knot holds, opens the fil
   const kids = () => (findById(rendered, 'setting-sync-everything')?.querySelector('.setting-added')?.children ?? [])
     .filter((child): child is FakeNode => !!child && typeof child === 'object' && 'tag' in child);
   // Held items get marks (by key even when name differs), deleted/found-only gets none, same item on two lines gets distinct ids.
-  assert.deepEqual(['file-skills-notes-take-1', 'file-skills-gone-take-1', 'file-skills-notes-take-2', 'file-skills-lint-take-2'].map(id => !!findById(rendered, id)), [true, false, true, true]);
+  assert.deepEqual(['file-skills-notes-take-1', 'file-skills-gone-take-1', 'file-skills-notes-take-2', 'file-skills-lint-take-2', 'file-skills-tidy-take-2'].map(id => !!findById(rendered, id)), [true, false, true, true, true]);
   assert.equal(textOf(kids()[0]), 'Added 2 skills from Claude Code: Notes and Gone. History can undo each.History');
-  const partsOf = (node: unknown): string[] => (typeof node === 'string' ? (node ? [node] : []) : !node || typeof node !== 'object' ? []
-    : (node as FakeNode).tag === 'button' ? [`[${(node as FakeNode).attrs.id}]`] : ((node as FakeNode).children ?? []).flatMap(partsOf));
+  const partsOf = (node: unknown): string[] => {
+    if (typeof node === 'string') return node ? [node] : [];
+    if (!node || typeof node !== 'object') return [];
+    const el = node as FakeNode;
+    if (el.tag === 'button') return [`[${el.attrs.id}]`];
+    const inner = (el.children ?? []).flatMap(partsOf);
+    return el.classList.contains('setting-added-name') || el.classList.contains('setting-added-tail') ? [`(${inner.join('')})`] : inner;
+  };
   assert.deepEqual(partsOf(kids()[1].querySelector('.setting-message-text')),
-    ['Added 2 skills from Claude Code and Codex: ', 'Notes', '[file-skills-notes-take-2]', ' and ', 'lint', '[file-skills-lint-take-2]', '.', ' ', 'History can undo each.', '[setting-sync-everything-added-skills-action]']);
+    ['Added 3 skills from Claude Code and Codex: ', '(Notes[file-skills-notes-take-2],)', ' ', '(lint[file-skills-lint-take-2])', ' and ', '(tidy[file-skills-tidy-take-2].)', ' ', '(History can undo each.[setting-sync-everything-added-skills-action])']);
   findById(rendered, 'file-skills-notes-take-1')!.click();
   assert.deepEqual(kids().map(el => [el.attrs.id, el.classList.contains('file-anchored')]), [['setting-sync-everything-added-skills', true], ['file-panel-settings', false], ['setting-sync-everything-added-skills', false]]);
   findById(rendered, 'file-skills-notes-take-2')!.click();
