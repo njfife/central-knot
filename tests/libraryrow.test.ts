@@ -2,7 +2,7 @@
 // stands, what each harness's mark says, when its switch asks which copy, and the click each control sends.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FOLDED_VERSIONS, addLabel, asksWhichCopy, copiesDiffer, waitsForSync, canAdd, fromSourceWords, rowClicks, foldVersions, harnessIs, loadsFrom, madeFrom, placeOf, libraryWords, ruleSays, sentences, statusLine, stillIn, stillReadWords, switchLabel, switchedOffWords, toolSwitch, versionChange, versionOrigin, type LibraryRow } from '../src/libraryrow.ts';
+import { FOLDED_VERSIONS, addLabel, asksWhichCopy, copiesDiffer, waitsForSync, canAdd, fromSourceWords, rowClicks, foldVersions, harnessIs, loadsFrom, madeFrom, placeOf, libraryWords, ruleSays, sentences, showsPlaceTag, statusLine, stillIn, stillReadWords, switchLabel, switchedOffWords, toolSwitch, versionChange, versionOrigin, type LibraryRow } from '../src/libraryrow.ts';
 import { readAgainst, wordDiff } from '../src/diff.ts';
 import { newItem, plan, takeInAnswer, type Copies, type FoundKey, type LibraryItem } from '../src/library.ts';
 import { anyOn, kindSource } from '../src/itemrow.ts';
@@ -736,6 +736,83 @@ test('A library row from a Git source names Sync this source and Replace mine in
   const fromPlugin = fromSourceWords({ link: 'plugin:issue-tracker@team-tools' });
   assert.deepEqual([fromPlugin.tag?.text, fromPlugin.before, fromPlugin.after], ['from the plugin issue-tracker', '', '']);
   assert.match(fromPlugin.tag?.title ?? '', /In Pi, OpenCode and Antigravity it follows the plugin; a change you make to it here makes it your own/);
+});
+
+test('showsPlaceTag hides routine Found and Off tags under their own headings, keeps non-routine rows and every tag under other headings', () => {
+  const plainFound = row({ 'claude-cli': 'a' });
+  const cantAdd = row({}, { unseen: { 'claude-cli': 'Cannot read.' } });
+  const cannotFound = row({ 'claude-cli': 'a' }, { cannot: { 'codex-cli': 'Codex can’t take it.' } });
+  const sharedFound = row({ 'claude-cli': 'a' }, { anotherWay: { 'codex-cli': 'Codex reads ~/.agents/skills.' } });
+  const readerTools = ['claude-cli', 'codex-cli', 'opencode-cli'];
+  const readerFound = row({ 'claude-cli': 'a' }, {
+    anotherWay: { 'opencode-cli': 'OpenCode reads Claude Code’s copy.' },
+    readsFrom: { 'opencode-cli': 'claude-cli' },
+    readBy: { 'claude-cli': ['opencode-cli'] },
+  });
+  // Pending folder-reader (no readsFrom yet, only readBy): fails if the readBy check is dropped.
+  const pendingReaderFound = row({ 'codex-cli': 'a' }, {
+    anotherWay: { 'opencode-cli': 'OpenCode reads Claude Code’s skills folder, so it gets the skill from there once it is on in Claude Code.' },
+    readBy: { 'claude-cli': ['opencode-cli'] },
+  });
+  const off = item({ on: false, applied: {} });
+  const plainOff = row({}, {}, off);
+  const offOwn = row({ 'codex-cli': 'x' }, {}, off);
+  const offReaders = row({}, {
+    anotherWay: { 'codex-cli': 'Codex also reads a copy at ~/.agents/skills.' },
+    loads: { 'codex-cli': { folder: 'reviewer', name: 'reviewer', skillFile: '~/.agents/skills/reviewer/SKILL.md', switchedOff: false } },
+  }, off);
+  const offPlugin = row({}, { pluginOn: ['claude-cli'] }, off);
+  const offSwitched = row({}, {
+    anotherWay: { 'codex-cli': 'Codex has a link.' },
+    loads: { 'codex-cli': { folder: 'reviewer', name: 'reviewer', skillFile: '~/.codex/skills/reviewer/SKILL.md', switchedOff: true } },
+  }, off);
+  const offOwedItem = item({ on: false, applied: { 'codex-cli': 'b' } });
+  const offOwed = row({ 'codex-cli': 'b' }, {}, offOwedItem);
+  // Under Found: routine plain found (including active and pending folder-readers) hides; !canAdd, cannot, non-reader anotherWay, and pinned Off stay.
+  assert.deepEqual([
+    showsPlaceTag('found', plainFound, undefined, tools),
+    showsPlaceTag('found', readerFound, undefined, readerTools),
+    showsPlaceTag('found', pendingReaderFound, undefined, readerTools),
+    showsPlaceTag('found', cantAdd, undefined, tools),
+    showsPlaceTag('found', cannotFound, undefined, tools),
+    showsPlaceTag('found', sharedFound, undefined, tools),
+    showsPlaceTag('found', plainOff, off, tools),
+  ], [false, false, false, true, true, true, true]);
+  // Under Off: routine Off hides; own copy, other-reader, pluginOn, switchedOff, and pending removal stay.
+  assert.deepEqual([
+    showsPlaceTag('off', plainOff, off, tools),
+    showsPlaceTag('off', offOwn, off, tools),
+    showsPlaceTag('off', offReaders, off, tools),
+    showsPlaceTag('off', offPlugin, off, tools),
+    showsPlaceTag('off', offSwitched, off, tools),
+    showsPlaceTag('off', offOwed, offOwedItem, tools),
+  ], [false, true, true, true, true, true]);
+  // Under Off, kept tags drop "in Central Knot" and name own/other-reader copies as "another copy in …"; outside Off, the whole tag stays.
+  assert.deepEqual([
+    placeTag(offSwitched, off, tools, [], true)?.text,
+    placeTag(offSwitched, off, tools, [], false)?.text,
+    placeTag(offOwn, off, tools, [], true)?.text,
+    placeTag(offOwn, off, tools, [], false)?.text,
+    placeTag(offReaders, off, tools, [], true)?.text,
+    placeTag(offReaders, off, tools, [], false)?.text,
+    placeTag(offPlugin, off, tools, [], true)?.text,
+    placeTag(cantAdd, undefined, tools)?.warn,
+    placeTag(plainFound, undefined, tools)?.warn,
+  ], [
+    'switched off in Codex',
+    'in Central Knot · switched off in Codex',
+    'another copy in Codex',
+    'in Central Knot and Codex',
+    'another copy in Codex',
+    'in Central Knot and Codex',
+    'on in Claude Code only, through its plugin',
+    true,
+    undefined,
+  ]);
+  // Under Results, Not in <tool> (away), and On: routine tags stay.
+  for (const heading of ['results', 'away', 'on'] as const) {
+    assert.deepEqual([showsPlaceTag(heading, plainFound, undefined, tools), showsPlaceTag(heading, plainOff, off, tools)], [true, true]);
+  }
 });
 
 test('takenInWords keeps History and lead by default, drops either when asked for Settings', () => {

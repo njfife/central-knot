@@ -390,27 +390,51 @@ export const copiesDiffer = (names: readonly string[]) =>
   `${andList([...names])} ${names.length === 1 ? 'has' : 'have'} differing copies. Choose which copy every tool uses${names.length === 1 ? '' : ' for each'}.`;
 
 /**
- * Where an item that is Off is: in Central Knot only; on in the tools that have it through a plugin still on there (`pluginOn`),
- * where no other tool loads it; in Central Knot and the tools with a copy of their own, left alone while it is off (ownNamed), or
- * that still read it another way (otherReaders), with those that have it on through a plugin; in Central Knot, and switched off in
- * the tools that have it another way but don't load it; or, while some installed tool is left out (`leftOut`: its Manage switch
- * off; it keeps whatever it had), in no tool Central Knot manages.
+ * What an Off row's tag says beyond its heading (undefined for a routine Off item held only in Central Knot): copies that can't
+ * be seen (`stillIn`), removals owed until sync runs, tools still reading or holding their own copy (`otherReaders`, `ownNamed`),
+ * tools with it on through a plugin (`onThrough`), or tools holding an outside copy switched off in their own settings (`outsideCopyIn`).
+ * `underOff`: drops the leading "in Central Knot" and names an own/other-reader copy as "another copy in …" so it never contradicts Off.
  */
-function offWhere(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[]) {
-  const through = onThrough(row, tools), own = ownNamed(row, item, tools, through);
-  const readers = otherReaders(row, tools), held = outsideCopyIn(row, tools, true);
-  if (readers.length || (through.length && own.length)) return `in ${andList(['Central Knot', ...tools.filter(tool => readers.includes(tool) || own.includes(tool) || through.includes(tool)).map(toolName)])}`;
+function offExtra(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], underOff = false): string | undefined {
+  const unseen = stillIn(row, item, [], tools);
+  if (unseen.length) return `still in ${andList(unseen.map(toolName))}`;
+  const owed = removalOwed(row, tools);
+  if (owed.length) return `still in ${andList(owed.map(toolName))} until sync runs`;
+  const through = onThrough(row, tools);
+  const own = ownNamed(row, item, tools, through);
+  const readers = otherReaders(row, tools);
+  const held = outsideCopyIn(row, tools, true);
+  if (readers.length || (through.length && own.length)) {
+    const rest = tools.filter(tool => readers.includes(tool) || own.includes(tool) || through.includes(tool)).map(toolName);
+    return underOff ? `another copy in ${andList(rest)}` : `in ${andList(['Central Knot', ...rest])}`;
+  }
   return through.length ? `on in ${andList(through.map(toolName))} only, through its plugin`
-    : own.length ? `in ${andList(['Central Knot', ...own.map(toolName)])}` : held.length ? `in Central Knot · switched off in ${andList(held.map(toolName))}`
-    : leftOut.length ? 'in no tool Central Knot manages' : 'in Central Knot only';
+    : own.length ? (underOff ? `another copy in ${andList(own.map(toolName))}` : `in ${andList(['Central Knot', ...own.map(toolName)])}`)
+    : held.length ? `${underOff ? '' : 'in Central Knot · '}switched off in ${andList(held.map(toolName))}` : undefined;
 }
 /**
- * Where an item that is Off is, as its tag, its switch and its status line say it: still in the tools whose copy can't be seen for
- * sure (stillIn), else in those whose removal the plan still owes ("until sync runs"), else offWhere.
+ * Where an item that is Off is, as its tag, its switch and its status line say it: `offExtra` where a tool still has it,
+ * else routine (`leftOut`: installed tools with Manage off).
  */
 function offPlace(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[]) {
-  const unseen = stillIn(row, item, [], tools), owed = removalOwed(row, tools);
-  return unseen.length ? `still in ${andList(unseen.map(toolName))}` : owed.length ? `still in ${andList(owed.map(toolName))} until sync runs` : offWhere(row, item, tools, leftOut);
+  return offExtra(row, item, tools) ?? (leftOut.length ? 'in no tool Central Knot manages' : 'in Central Knot only');
+}
+/**
+ * The managed tool whose skills folder `tool` reads this skill from — now (`row.readsFrom`), or once it is on there
+ * (`row.readBy`, from `skills.ts readers`: managed, writable, can take it, no copy or way of its own, not disabled).
+ * For a found row, such a reader is routine (Add's hover and the tool marks already show it), so `showsPlaceTag` hides its tag.
+ */
+function readsFolderOf(row: LibraryRow, tool: string): HarnessId | undefined {
+  return row.readsFrom?.[tool as HarnessId]
+    ?? Object.entries(row.readBy ?? {}).find(([, list]) => list?.includes(tool as HarnessId))?.[0] as HarnessId | undefined;
+}
+/** Whether a row's placeTag is drawn under `heading` (matrix.ts Role): false when Found or Off already says a routine row's place. */
+export function showsPlaceTag(heading: 'on' | 'found' | 'off' | 'away' | 'results', row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]): boolean {
+  const place = placeOf(item);
+  if (heading === 'off' && place === 'off') return offExtra(row, item, tools) !== undefined;
+  if (heading !== 'found' || place !== 'found' || !canAdd(row)) return true;
+  return harnessesWhere(row, item, tools, 'cannot').length > 0
+    || harnessesWhere(row, item, tools, 'another-way').some(tool => !readsFolderOf(row, tool));
 }
 /** The tools that have an Off item on through its plugin (`pluginOn`), in the page's order of `tools` (its own tool first on a tool's page). */
 const onThrough = (row: LibraryRow, tools: readonly string[]) => tools.filter(tool => row.pluginOn?.includes(tool));
@@ -478,7 +502,7 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
 }
 
 /**
- * What the switch of an item in Central Knot says: where it stands, as its row's tag says it (offPlace; `leftOut` as offWhere's),
+ * What the switch of an item in Central Knot says: where it stands, as its row's tag says it (offPlace; `leftOut` as offPlace's),
  * and what a click does. (A found item has Add instead: addLabel.)
  */
 export function switchLabel(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[] = []): string {
@@ -592,7 +616,7 @@ export function sentences(words: RowWords) {
       const also = !inLib.on && !pluginOf(row.fromSource?.link ?? '') ? row.readBy?.[tool as HarnessId] : undefined;
       if (also?.length) parts.push({ text: `If on, ${readsIt(also)} too` });
     } else if (is !== 'current' && is !== 'kept-out') {
-      const waits = !inLib && is === 'another-way' ? Object.entries(row.readBy ?? {}).find(([, list]) => list?.includes(tool as HarnessId))?.[0] : undefined;
+      const waits = !inLib && is === 'another-way' ? readsFolderOf(row, tool) : undefined;
       parts.push({ text: waits ? `Gets it from ${toolName(waits)}’s skills folder once it is on there.` : hasLine(row, item, tool, where) });
     }
     if (words.asSkill && (agentsKeptIn as Partial<Record<string, string>>)[tool] === 'skills folder'
@@ -659,9 +683,10 @@ export function sentences(words: RowWords) {
 
   /**
    * The tag after an item's name when it isn't plainly on everywhere: where it stands, or the tools it is kept out of, and
-   * (its tooltip) what that means. `tools`: the home's harnesses; `leftOut`: the installed tools left out (offWhere).
+   * (its tooltip) what that means. `tools`: the home's harnesses; `leftOut`: the installed tools left out (offPlace); `underOff`:
+   * row sits under the Off heading, so a kept Off tag drops the leading "in Central Knot" (offExtra).
    */
-  function placeTag(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[] = []): { text: string; title: string } | undefined {
+  function placeTag(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[] = [], underOff = false): { text: string; title: string; warn?: boolean } | undefined {
     const place = placeOf(item);
     const unseen = stillIn(row, item, [], tools);
     const through = onThrough(row, tools), own = ownNamed(row, item, tools, through);
@@ -671,10 +696,10 @@ export function sentences(words: RowWords) {
       : 'No tool has it until you turn it on.'));
     const owed = andList(removalOwed(row, tools).map(toolName));
     // Its tooltip says why it is where its text says (offPlace): a copy that can't be seen, a removal still owed, or where else it is.
-    if (place === 'off') return { text: offPlace(row, item, tools, leftOut), title: unseen.length ? unseen.map(tool => row.unseen![tool]).join(' ')
+    if (place === 'off') return { text: (underOff ? offExtra(row, item, tools, true) : undefined) ?? offPlace(row, item, tools, leftOut), title: unseen.length ? unseen.map(tool => row.unseen![tool]).join(' ')
       : owed ? `Off. Central Knot keeps this ${noun}; its ${copy} leaves ${owed} when sync runs.` : `Central Knot keeps this ${noun} and its versions. ${otherReadLines(row, tools).join(' ') || none}` };
     const found = `A tool has this ${noun}; Central Knot doesn’t yet. Add it to keep it in Central Knot${whereAdded(row, item, tools)}.`;
-    if (place === 'found' && !canAdd(row)) return { text: 'can’t be taken in', title: 'Its line in the opened row says why.' };
+    if (place === 'found' && !canAdd(row)) return { text: 'can’t be taken in', title: 'Its line in the opened row says why.', warn: true };
     if (place === 'found') return { text: 'not in Central Knot', title: found };
     const out = item!.except.filter(tool => tools.includes(tool)), keptOut = `Kept out of ${andList(out.map(toolName))}. Its switch there, in the opened row, puts it back.`;
     // A tool that can't take it and has no copy is as lasting as one it is kept out of: the tag names where it is.
