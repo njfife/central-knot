@@ -17,7 +17,7 @@ import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { forgetSourcePrompts, loadSources } from './sourcespage.ts';
 import { forgetHistoryFolds } from './historypage.ts';
 import { forgetManageQuestion } from './managecard.ts';
-import { loadSettings, openHistoryWindow, openSettings } from './settingspage.ts';
+import { forgetAddedReads, loadSettings, openHistoryWindow, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
 import type { Reason, ApplyResult, Profile, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SessionCostsView, SyncNotice, TakenInNotice, UsageReading } from './types.ts';
@@ -461,6 +461,7 @@ function accept(view: HomeView): HomeView {
   state.draftPick = undefined;
   resetPageData(state.instructions);
   resetPageData(state.history);
+  forgetAddedReads();
   forgetHistoryFolds();
   forgetManageQuestion();
   if (state.page === 'history') openHistoryWindow();
@@ -1321,6 +1322,8 @@ export const loadHistory = async (): Promise<void> => {
   if (result === 'dropped') return;
   if (result === 'ready') state.historyDays = days;
   rerender();
+  // After that draw, so Settings' lines ask again at the next one, not in a loop while reads keep failing.
+  if (result === 'failed') forgetAddedReads();
 };
 
 /** History as an action read it, after what it changed: its events and window, the newest. */

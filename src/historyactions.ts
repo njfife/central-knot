@@ -547,9 +547,9 @@ const leftSaid = (left: LeftIn[]) => andList([...new Set(left.map(entry => entry
 }));
 const itemsSaid = (count: number) => `${count} ${count === 1 ? 'item' : 'items'}`;
 const keptOwn = (count: number) => (count === 1 ? 'each tool it was found in keeping its own copy' : 'each tool they were found in keeping its own');
-/** Why a take-in has no Undo (TakeInHeld), as Settings' added line says it in Undo's place; for an edit, what an Undo would cost (`help`). */
+/** Why a take-in has no Undo (TakeInHeld), as Settings' added line says it in Undo's place; for a change, what an Undo would cost (`help`). */
 export const heldSaid = (why: TakeInHeld) => (why === 'changed'
-  ? { tag: 'edited since', help: 'Edited since it was added, so an Undo would lose the edit; its switch in the Library turns it off.' } : { tag: leftWords[why][0] });
+  ? { tag: 'changed since', help: 'Changed since it was added, so an Undo would lose that change.' } : { tag: leftWords[why][0] });
 /** Tools not managed now that a take-in taken back wrote: "Codex isn’t managed now, so it keeps Central Knot’s copy until it is". */
 const keptSaid = (tools: HarnessId[]) => (tools.length === 1 ? `${toolName(tools[0])} isn’t managed now, so it keeps Central Knot’s copy until it is`
   : `${andList(tools.map(toolName))} aren’t managed now, so they keep Central Knot’s copies until they are`);
@@ -636,6 +636,6 @@ export function undoneAddedWords(done: readonly string[], passed: readonly { ite
   if (!done.length) return `Nothing was ${not}${whys.length ? `: ${andList(whys)}` : ''}.`;
   const one = done.length === 1;
   const lead = putBack ? `${andList([...done])} ${one ? 'is' : 'are'} back in Central Knot`
-    : `${andList([...done])} ${one ? 'is' : 'are'} out of Central Knot again. The copies it put in other tools are gone; the tools ${one ? 'it was' : 'they were'} found in keep theirs`;
+    : `${andList([...done])} ${one ? 'is' : 'are'} out of Central Knot again. The copies Central Knot put in other tools are gone; the tools ${one ? 'it was' : 'they were'} found in keep theirs`;
   return `${lead}.${whys.length ? ` Not ${not}: ${andList(whys)}.` : ''}`;
 }

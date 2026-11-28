@@ -278,9 +278,9 @@ test('An added line’s Undo is a take-in by the rule whose own action takes it 
 });
 
 test('An added line’s Undo says what is out of Central Knot again, what went and what stayed; what it passed over, by why; and nothing done', () => {
-  assert.equal(undoneAddedWords(['deploy', 'lint'], [], false), 'deploy and lint are out of Central Knot again. The copies it put in other tools are gone; the tools they were found in keep theirs.');
+  assert.equal(undoneAddedWords(['deploy', 'lint'], [], false), 'deploy and lint are out of Central Knot again. The copies Central Knot put in other tools are gone; the tools they were found in keep theirs.');
   assert.equal(undoneAddedWords(['deploy'], [{ item: 'review', why: 'changed' }, { item: 'tidy', why: 'gone' }], false),
-    'deploy is out of Central Knot again. The copies it put in other tools are gone; the tools it was found in keep theirs. Not taken back: review (changed since) and tidy (no longer in History).');
+    'deploy is out of Central Knot again. The copies Central Knot put in other tools are gone; the tools it was found in keep theirs. Not taken back: review (changed since) and tidy (no longer in History).');
   assert.equal(undoneAddedWords([], [{ item: 'review', why: 'done' }], false), 'Nothing was taken back: review (undone already).');
   assert.equal(undoneAddedWords(['deploy'], [{ item: 'lint', why: 'changed' }], true), 'deploy is back in Central Knot. Not restored: lint (changed since).');
 });

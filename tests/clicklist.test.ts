@@ -2702,7 +2702,7 @@ test('An added line’s Undo of twelve take-ins is one call to main and one band
   });
   await undoAdded('skills', new Map(ids.map((id, at) => [id, names[at]])));
   assert.deepEqual([asked, app.outcome?.text, app.outcome?.act?.label, app.outcome?.settingsBand, app.dismissed.has(ids[0])],
-    [[['skills', ids, '/home', false]], `${names.slice(0, -1).join(', ')} and skill-11 are out of Central Knot again. The copies it put in other tools are gone; the tools they were found in keep theirs.`, 'Restore', true, true]);
+    [[['skills', ids, '/home', false]], `${names.slice(0, -1).join(', ')} and skill-11 are out of Central Knot again. The copies Central Knot put in other tools are gone; the tools they were found in keep theirs.`, 'Restore', true, true]);
   app.outcome!.act!.run();
   await settled();
   assert.deepEqual(asked[1], ['skills', ids.map(id => `gone-${id}`), '/home', true], 'Restore sends the deletions that Undo made, and no other');

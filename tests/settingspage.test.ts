@@ -11,6 +11,11 @@ let redraws = 0;
 let historyReads = 0;
 let saveHistoryImpl: (days: HistoryDays) => Promise<HistoryWindowSaved> = async days => ({ settings: { ...settings, historyDays: days }, pruned: 'done' });
 let historyEvents: HistoryEvent[] = [];
+/** History's read fails while this is true (main answers nothing). */
+let historyFails = false;
+/** The home main opens next (Settings' home change), and each Undo of added lines main was asked for. */
+let nextHome: HomeView | undefined;
+const undoCalls: unknown[][] = [];
 
 let settings: AppPreferences = {
   appearance: 'system',
@@ -24,7 +29,9 @@ let settings: AppPreferences = {
 const api = {
   getSettings: async () => ({ ...settings }),
   setHistoryDays: (days: HistoryDays) => saveHistoryImpl(days),
-  history: async () => { historyReads++; return { events: historyEvents, days: settings.historyDays }; },
+  history: async () => { historyReads++; return historyFails ? null : { events: historyEvents, days: settings.historyDays }; },
+  selectHome: async () => nextHome,
+  undoAdded: async (...call: unknown[]) => { undoCalls.push(call); return { results: [], harnessWrites: 0, reloads: [], undid: [], passed: [] }; },
   pluginText: async (): Promise<PluginTextView> => ({ read: 0, of: 0, elsewhere: 0, reading: false, on: true }),
   onPluginTextChanged: (listener: (view: PluginTextView) => void) => { onPluginText = listener; },
   onUpdatesChanged() {},
@@ -38,7 +45,7 @@ const api = {
 
 installDom(api, { byId: id => (rendered ? findById(rendered, id) ?? null : null) });
 
-const { setRenderer, state } = await import('../src/app.ts');
+const { loadHistory, loadHome, setRenderer, state } = await import('../src/app.ts');
 const { historyWindowControl, loadSettings, openHistoryWindow, settingsPage } = await import('../src/settingspage.ts');
 const { checkedWords, pluginUpdates } = await import('../src/pluginupdateview.ts');
 
@@ -317,14 +324,8 @@ test('An added line has its own Undo once History is read, where one of its take
   // line says why it has no Undo, in Undo's place, with what an Undo would cost on its hover.
   state.home.skills.library.edited = live('edited', 'v2') as never;
   draw();
-  assert.deepEqual(undos(), ['Undo', '', 'edited since', '']);
-  assert.equal(addedLines()[2].querySelector('.setting-added-why')?.attrs.title, 'Edited since it was added, so an Undo would lose the edit; its switch in the Library turns it off.');
-
-  // A line of two, one changed since: the band leaves it; its Undo says how many it takes, and its hover names that one alone.
-  state.home.skills.notices = [{ kind: 'taken-in', items: ['notes', 'edited'], keys: ['notes', 'edited'], from: ['claude-cli'], history: 'take-notes', histories: ['take-notes', 'take-edited'] }];
-  draw();
-  assert.deepEqual([textOf(addedLines()[0]), undos()], ['Added 2 skills from Claude Code: notes and edited.Undo 1', ['Undo 1', '']]);
-  assert.equal(addedLines()[0].querySelector('.text-action')?.attrs.title, 'Take notes out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own');
+  assert.deepEqual(undos(), ['Undo', '', 'changed since', '']);
+  assert.equal(addedLines()[2].querySelector('.setting-added-why')?.attrs.title, 'Changed since it was added, so an Undo would lose that change.');
 
   // No band, or a band holding no switch-on's Undo: every line whose take-ins offer it has its own Undo; of several, all of them.
   state.home.skills.library.edited = live('edited', 'v1') as never;
@@ -336,6 +337,53 @@ test('An added line has its own Undo once History is read, where one of its take
   }
   state.outcome = undefined;
   state.history.data = undefined;
+});
+
+test('A line of two, one changed since: its Undo names the other, Undo notes, and its press sends that one alone', async () => {
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  const live = (key: string, hash: string) => ({ key, name: key, on: true, hash, except: [], versions: [{ hash, at: '2026-11-27T19:00:00Z', from: { how: 'found', harness: 'claude-cli' } }], applied: { 'claude-cli': hash, 'codex-cli': hash } });
+  const take = (key: string) => ({ id: `take-${key}`, at: '2026-11-27T19:00:00Z', kind: 'on', of: 'skill', key, item: key, losers: [], orderProved: true, cause: 'sync-everything',
+    version: 'v1', winner: { tool: 'claude-cli', hash: 'v1' }, tookFrom: [{ tool: 'claude-cli', hash: 'v1' }], foundIn: ['claude-cli'] }) as HistoryEvent;
+  state.outcome = undefined;
+  state.dismissed.clear();
+  state.home = makeHome({ skills: { ...emptyKind(), library: { notes: live('notes', 'v1'), edited: live('edited', 'v2') },
+    notices: [{ kind: 'taken-in', items: ['notes', 'edited'], keys: ['notes', 'edited'], from: ['claude-cli'], history: 'take-notes', histories: ['take-notes', 'take-edited'] }] } });
+  historyEvents = state.history.data = [take('notes'), take('edited')];
+  draw();
+  await settle();
+  draw();
+  const undo = findById(rendered, 'setting-sync-everything-added-skills-take-notes-action');
+  assert.deepEqual([textOf(undo), undo?.attrs.title], ['Undo notes', 'Take notes out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own']);
+  undo!.click();
+  for (let round = 0; round < 5; round++) await settle();
+  assert.deepEqual(undoCalls.at(-1), ['skills', ['take-notes'], '/tmp/fake-settings-home', false]);
+  state.outcome = undefined;
+  state.history.data = undefined;
+  historyEvents = [];
+});
+
+test('An added line’s Undo comes back after a change of home and back, and after a History read that failed: History is read for it again', async () => {
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  const live = { key: 'notes', name: 'notes', on: true, hash: 'v1', except: [], versions: [{ hash: 'v1', at: '2026-11-27T19:00:00Z', from: { how: 'found', harness: 'claude-cli' } }], applied: { 'claude-cli': 'v1', 'codex-cli': 'v1' } };
+  const homeA = makeHome({ skills: { ...emptyKind(), library: { notes: live }, notices: [{ kind: 'taken-in', items: ['notes'], keys: ['notes'], from: ['claude-cli'], history: 'take-notes', histories: ['take-notes'] }] } });
+  historyEvents = [{ id: 'take-notes', at: '2026-11-27T19:00:00Z', kind: 'on', of: 'skill', key: 'notes', item: 'notes', losers: [], orderProved: true, cause: 'sync-everything',
+    version: 'v1', winner: { tool: 'claude-cli', hash: 'v1' }, tookFrom: [{ tool: 'claude-cli', hash: 'v1' }], foundIn: ['claude-cli'] } as HistoryEvent];
+  state.dismissed.clear();
+  const undo = async () => { draw(); for (let round = 0; round < 3; round++) await settle(); draw(); return textOf(findById(rendered, 'setting-sync-everything-added-skills-take-notes-action')); };
+  nextHome = homeA;
+  await loadHome('custom');
+  state.outcome = undefined;
+  assert.equal(await undo(), 'Undo', 'in A, once History is read');
+  for (const home of [makeHome({ home: '/tmp/fake-settings-other' }), homeA]) { nextHome = home; await loadHome('custom'); }
+  state.outcome = undefined;
+  assert.equal(await undo(), 'Undo', 'back in A, its line is read for again');
+  historyFails = true;
+  await loadHistory();
+  historyFails = false;
+  assert.equal(await undo(), 'Undo', 'a read that failed is asked again at the next draw');
+  state.outcome = undefined;
+  state.history.data = undefined;
+  historyEvents = [];
 });
 
 test('A line of two, the first undone in History: it names the other alone, where it was found, its mark, and the band covers it by that one alone; History is read once for it', async () => {

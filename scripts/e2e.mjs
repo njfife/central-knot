@@ -9290,16 +9290,16 @@ async function syncEverythingFlow() {
   for (let tries = 0; tries < 100 && (readNow(join(uCodex, 'edited/SKILL.md')) !== text('edited', 'Original.') || (await b.all('.setting-added .setting-message')).length < 2); tries++) await wait(100);
   writeFileSync(join(uClaude, 'edited/SKILL.md'), text('edited', 'Edited by hand.'));
   for (let tries = 0; tries < 80 && readNow(join(uCodex, 'edited/SKILL.md')) !== text('edited', 'Edited by hand.'); tries++) await wait(100);
-  for (let tries = 0; tries < 80 && !(await b.all('.setting-added .setting-message', 'e.textContent')).includes('Added skill edited from Claude Code. edited since'); tries++) await wait(100);
+  for (let tries = 0; tries < 80 && !(await b.all('.setting-added .setting-message', 'e.textContent')).includes('Added skill edited from Claude Code. changed since'); tries++) await wait(100);
   await b.settle();
   same('a taken-in skill edited in its tool gets no Undo of its own on its line but says why, and the untouched one stays covered by the band',
     await b.all('.setting-added .setting-message', 'e.textContent'),
-    ['Added skill later from Claude Code.', 'Added skill edited from Claude Code. edited since']);
+    ['Added skill later from Claude Code.', 'Added skill edited from Claude Code. changed since']);
   await b.click('#outcome-undo');
   await waitBand('false', 'Undone:');
   same('inline Undo takes back the untouched take-in, clears its line, and keeps the later edited addition and its line',
     [uRecord().syncEverything, existsSync(join(uCodex, 'later')), readNow(join(uClaude, 'edited/SKILL.md')), await b.text('[data-outcome] .band-text'), await b.all('.setting-added .setting-message', 'e.textContent')],
-    [false, false, text('edited', 'Edited by hand.'), 'Undone: switched off, and 1 item it took in is out of Central Knot again, each tool it was found in keeping its own copy. Left in: edited (changed since).', ['Added skill edited from Claude Code. edited since']]);
+    [false, false, text('edited', 'Edited by hand.'), 'Undone: switched off, and 1 item it took in is out of Central Knot again, each tool it was found in keeping its own copy. Left in: edited (changed since).', ['Added skill edited from Claude Code. changed since']]);
   // Automatic sync off: band shows without reloads, carries the second sentence, and Undo switches the rule off.
   await b.click('#sync-switch');
   for (let tries = 0; tries < 40 && await b.run(`document.querySelector('#sync-switch')?.getAttribute('aria-checked')`) !== 'false'; tries++) await wait(100);
@@ -9343,10 +9343,10 @@ async function syncEverythingFlow() {
   // lint edited in Claude Code since: the line's Undo takes tidy alone, and says so.
   writeFileSync(join(uClaude, 'lint/SKILL.md'), text('lint', 'Lint harder.'));
   const twoLine = `[...document.querySelectorAll('.setting-added .setting-message')].find(el => el.textContent.startsWith('Added 2 skills from Claude Code and Codex: lint and tidy.'))`;
-  for (let tries = 0; tries < 100 && await b.run(`${twoLine}?.querySelector('.text-action')?.textContent`) !== 'Undo 1'; tries++) await wait(100);
+  for (let tries = 0; tries < 100 && await b.run(`${twoLine}?.querySelector('.text-action')?.textContent`) !== 'Undo tidy'; tries++) await wait(100);
   await b.settle();
-  same('a line one of whose two take-ins was edited since has Undo 1, its hover naming the other', await b.run(`[${twoLine}.querySelector('.text-action').textContent, ${twoLine}.querySelector('.text-action').title]`),
-    ['Undo 1', 'Take tidy out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own']);
+  same('a line one of whose two take-ins was edited since has Undo tidy, its hover naming it', await b.run(`[${twoLine}.querySelector('.text-action').textContent, ${twoLine}.querySelector('.text-action').title]`),
+    ['Undo tidy', 'Take tidy out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own']);
   await b.shot('settings-added-undo-some-860-light');
   const twelve = ['audit-logs', 'bench-run', 'code-review', 'deploy', 'doc-syncs', 'migrate-db', 'plan-work', 'release-cut', 'schema-diff', 'test-smoke', 'trace-req', 'watch-ci'];
   await b.click('#sync-switch');
@@ -9382,7 +9382,7 @@ async function syncEverythingFlow() {
     return { marks: marks.length, markStarts, punctStarts, undoBefore, undos, thirdMark: marks[2]?.id };
   })()`);
   same('at 860, added lines (including a twelve-item line) start no wrapped line with a mark or punctuation, and each has its Undo after its last name',
-    [wrapped.marks, wrapped.markStarts, wrapped.punctStarts, wrapped.undoBefore, wrapped.undos, await b.run(CUT_OFF)], [12, 0, 0, 0, ['Undo 1', 'Undo all 12'], []]);
+    [wrapped.marks, wrapped.markStarts, wrapped.punctStarts, wrapped.undoBefore, wrapped.undos, await b.run(CUT_OFF)], [12, 0, 0, 0, ['Undo tidy', 'Undo all 12'], []]);
   await openAdded(b, wrapped.thirdMark, 'Skill code-review.');
   await b.shot('settings-added-several-open-860-light');
   await b.press('Escape');
@@ -9402,7 +9402,7 @@ async function syncEverythingFlow() {
   await b.settle();
   same('the twelve-item line’s Undo says in Settings’ band what is out again, with Restore, and the line goes; the fold counts them',
     [await b.text('[data-outcome] .band-text'), await b.text('[data-outcome] #outcome-undo'), await b.run(`!!${twelveLine}`), await takenOut() - outBefore, existsSync(join(uCodex, 'deploy')), readNow(join(uClaude, 'deploy/SKILL.md')), await b.run(CUT_OFF)],
-    [`${twelve.slice(0, -1).join(', ')} and watch-ci are out of Central Knot again. The copies it put in other tools are gone; the tools they were found in keep theirs.`, 'Restore', false, 12, false, text('deploy', 'Skill deploy.'), []]);
+    [`${twelve.slice(0, -1).join(', ')} and watch-ci are out of Central Knot again. The copies Central Knot put in other tools are gone; the tools they were found in keep theirs.`, 'Restore', false, 12, false, text('deploy', 'Skill deploy.'), []]);
   await b.shot('settings-undo-band-860-light');
   await b.click('#outcome-undo');
   for (let tries = 0; tries < 80 && !(await b.text('[data-outcome] .band-text') ?? '').endsWith('are back in Central Knot.'); tries++) await wait(100);

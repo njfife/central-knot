@@ -543,6 +543,8 @@ const bandUndo = () => (state.outcome?.page === 'settings' ? state.outcome.every
 let takenOutOpen = false, choosingCopy: string | undefined;
 /** The added lines' take-ins History was read for in this visit: a line naming another reads it once (a pass may come with any view). */
 const readFor = new Set<string>();
+/** What was read for no longer stands: History's slot was reset (another home) or its read failed (app.ts accept, loadHistory). */
+export const forgetAddedReads = () => readFor.clear();
 
 /**
  * The found items taken out earlier (setupcounts.ts takenOutEarlier), one fold: its line counts them; opened, each is named with
@@ -613,9 +615,9 @@ function syncEverythingRow(): HTMLElement | null {
       return prev && typeof prev !== 'string' && LEADING_PUNCT.test(part) ? part.slice(1) : part;
     });
     if (held) text.push(' ', h('span.setting-added-why', { title: heldSaid(held).help }, heldSaid(held).tag));
-    const label = named.length === 1 ? 'Undo' : takes.length === named.length ? `Undo all ${takes.length}` : `Undo ${takes.length}`, one = takes.length === 1;
+    const one = takes.length === 1, label = named.length === 1 ? 'Undo' : takes.length === named.length ? `Undo all ${takes.length}` : one ? `Undo ${takes[0].name}` : `Undo ${takes.length}`;
     const undo = takes.length ? { label, disabled: !!acting(), title: `Take ${andList(takes.map(each => each.name))} out of Central Knot again: the copies it put in tools go, and each tool ${one ? 'it was' : 'they were'} found in keeps its own`,
-      run: () => void undoAdded(kind, new Map(named.map(each => [each.id, each.name]))) } : undefined;
+      run: () => void undoAdded(kind, new Map(takes.map(each => [each.id, each.name]))) } : undefined;
     return [{ kind, id: told.history, marks, text, undo, ids: named.map(each => each.id) }];
   });
   const unread = entries.flatMap(entry => entry.ids).filter(id => !readFor.has(id));
