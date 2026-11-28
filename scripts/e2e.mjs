@@ -3266,6 +3266,14 @@ async function practiceFlow() {
     await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Focus')).click()`); await a.settle();
     await a.click('#profile-changes');
   } else check('Changes N button exists while previewing', false);
+  const pfMark = id => `.pf-row[data-item="${id}"] .pf-title .row-file-btn`;
+  const pfFile = () => a.run(`(() => { const box = document.querySelector('.file-open-box'), row = box?.closest('.pf-row'); return { item: row?.dataset.item ?? null, anchored: !!row?.classList.contains('file-anchored'), text: box?.querySelector('pre.content')?.textContent ?? '', boxes: document.querySelectorAll('.file-open-box').length }; })()`);
+  const openPf = async (id, line) => {
+    await a.click(pfMark(id));
+    for (let i = 0; i < 40 && !(await pfFile()).text.includes(line); i++) await wait(50);
+    await a.settle();
+    return pfFile();
+  };
   await withSidebarOpen(a, ...SMALLEST, async () => {
     const picker = await a.run(`(() => {
       const sel = document.getElementById('profile-picker');
@@ -3288,12 +3296,43 @@ async function practiceFlow() {
       same('picking Incident at 860×528 opens it and clears Changes', [await a.text('.profile-header h2'), await a.exists('#profile-changes')], ['Incident', false]);
     }
     same('nothing cut off on Profiles at 860×528 with sidebar open', [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], []);
+    // File mark after each item's name: one press opens its text under its row, a second moves it, menu/Find/Delete confirm claim Escape, next Escape closes it.
+    if (shots) { await a.run(`document.activeElement?.blur?.()`); await a.run(`window.centralKnot.setAppearance('light')`); await wait(80); await a.shot('profiles-file-marks-860-light'); await a.run(`window.centralKnot.setAppearance('system')`); await wait(80); }
+    same('at 860, every listed item has a file mark right after its name', await a.all('.pf-row[data-item]', `!!e.querySelector('.pf-title .row-file-btn')`), [true, true, true, true]);
+    const notesFile = await openPf('skill:notes', 'Keep the facts and the writer’s intent.');
+    same('at 860, pressing notes’s mark opens its text under its row, nothing cut off', [notesFile.item, notesFile.anchored, notesFile.text.includes('Keep the facts and the writer’s intent.'), notesFile.boxes, ...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], ['skill:notes', true, true, 1]);
+    const standupFile = await openPf('skill:standup', 'Read the commits.');
+    same('at 860, pressing standup’s mark moves the panel there, nothing cut off', [standupFile.item, standupFile.anchored, standupFile.text.includes('Read the commits.'), standupFile.boxes, ...await a.run(CUT_OFF)], ['skill:standup', true, true, 1]);
+    await a.click('#status-profile');
+    await a.press('Escape');
+    const menuEsc = [await a.exists('.pf-menu'), (await pfFile()).boxes];
+    await a.run(`(() => { const i = document.querySelector('#profile-find'); i.focus(); i.value = 'stand'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.settle();
+    await a.press('Escape');
+    const findEsc = [await a.run(`document.querySelector('#profile-find')?.value`), (await pfFile()).boxes];
+    await a.click('#profile-delete');
+    await a.press('Escape');
+    const delEsc = [await a.exists('#profile-delete-confirm'), (await pfFile()).boxes, await a.run(`document.activeElement?.id`)];
+    await a.press('Escape');
+    same('status bar menu, Find and Delete confirmation claim Escape while the file stays open; next Escape closes it and refocuses its mark',
+      [menuEsc, findEsc, delEsc, (await pfFile()).boxes, await a.run(`document.activeElement === document.querySelector(${JSON.stringify(pfMark('skill:standup'))})`)],
+      [[false, 1], ['', 1], [false, 1, 'profile-delete'], 0, true]);
   });
   await withSidebarOpen(a, 1316, 819, async () => {
-    same('at 1316×819 the list column shows, the picker hides, and nothing is cut off',
+    if (shots) { await a.run(`document.activeElement?.blur?.()`); await a.run(`window.centralKnot.setAppearance('dark')`); await wait(80); await a.shot('profiles-file-marks-1316-dark'); await a.run(`window.centralKnot.setAppearance('system')`); await wait(80); }
+    await openPf('skill:notes', 'Keep the facts and the writer’s intent.');
+    same('at 1316×819 the list column shows, the picker hides, and nothing is cut off with a file open',
       [await a.run(`(() => { const p = document.querySelector('.pf-picker'); return p ? getComputedStyle(p).display : null; })()`), await a.run(`getComputedStyle(document.querySelector('.profiles-list .list-scroll')).display !== 'none'`),
         ...await a.run(CUT_OFF)],
       ['none', true]);
+    if (shots) {
+      await a.run(`window.centralKnot.setAppearance('dark')`);
+      await wait(80);
+      await a.shot('profiles-file-open-1316-dark');
+      await a.run(`window.centralKnot.setAppearance('system')`);
+      await wait(80);
+    }
+    await a.press('Escape');
   });
   await fullSize(a);
   await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Focus')).click()`); await a.settle();
@@ -5208,6 +5247,121 @@ async function practiceFlow() {
   await a.click('#plugins-undo');
   same('Undo turns it back on: config.toml is as it was', [readFileSync(codexConfig, 'utf8') === configBefore, await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`)], [true, 'true']);
   same('nothing on the plugin pages waited for a later click: no Apply, no Discard, no chosen switch', await a.run('window.ckWaiting'), []);
+  // Shared Profiles check & pictures at 860: same-named own & plugin skills (folded and different-text), long name + long `from` label, and 60-line file open under 880 px.
+  {
+    const longPlug = 'enterprise-platform-engineering-developer-tools';
+    const longSlug = 'quarterly-release-readiness-checklist-and-handoff';
+    const longBody = ['---', 'name: Quarterly release readiness checklist and post-deploy verification handoff', 'description: Long skill.', '---', '', ...Array.from({ length: 60 }, (_, i) => `Step ${i + 1} of the release checklist.`)].join('\n');
+    const standupHash = JSON.parse(readFileSync(join(practice, '.central-knot/skills.json'), 'utf8')).items.standup.hash;
+    const standupText = readFileSync(join(practice, `.central-knot/items/skills/standup/versions/${standupHash}/SKILL.md`), 'utf8');
+    const sameNotesId = `plugin:skill:${longPlug}@ck-test-market/notes`;
+    const foldedStandupId = `plugin:skill:${longPlug}@ck-test-market/standup`;
+    const longRowId = `plugin:skill:${longPlug}@ck-test-market/${longSlug}`;
+    writeClaudeInstall(practice, 'ck-test-market', longPlug, '1.0.0', {
+      'skills/notes/SKILL.md': '---\nname: notes\ndescription: Plugin notes.\n---\n\nPlugin notes body.\n',
+      'skills/standup/SKILL.md': standupText,
+      'skills/standup/extra.md': 'Plugin extra file.\n',
+      [`skills/${longSlug}/SKILL.md`]: longBody,
+      '.mcp.json': JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp'] } } }),
+    });
+    try {
+      await a.click('#nav-profiles');
+      await a.click('#header-refresh');
+      for (let i = 0; i < 40 && !(await a.exists(`.pf-row[data-item="${longRowId}"]`)); i++) await wait(100);
+      await withSidebarOpen(a, ...SMALLEST, async () => {
+        if (shots) { await a.run(`window.centralKnot.setAppearance('light')`); await wait(80); }
+        try {
+          const ownNotes = await openPf('skill:notes', 'Keep the facts and the writer’s intent.');
+          const plugNotes = await openPf(sameNotesId, 'Plugin notes body.');
+          await a.press('Escape');
+          const folded = await a.exists(pfMark(foldedStandupId)) ? await openPf(foldedStandupId, 'Read the commits.') : { item: null };
+          const foldedTabs = folded.item ? await a.all('.file-tab', 'e.textContent') : [];
+          if (folded.item) await a.press('Escape');
+          same('same-named own and plugin skills each open their own text, and a folded plugin skill opens its plugin copy',
+            [ownNotes.text.includes('Keep the facts and the writer’s intent.'), plugNotes.text.includes('Plugin notes body.'), folded.item, foldedTabs.includes('extra.md')],
+            [true, true, foldedStandupId, true]);
+          if (shots) {
+            await a.run(`document.activeElement?.blur?.()`);
+            await a.run(`document.querySelector('.pf-row[data-item="skill:standup"]')?.scrollIntoView({ block: 'center' })`);
+            await wait(80);
+            await a.shot('profiles-same-name-860-light');
+          }
+          await a.run(`document.querySelector('.pf-row[data-item="${longRowId}"]')?.scrollIntoView({ block: 'center' })`);
+          await a.settle();
+          const longFit = await a.run(`(() => { const r = document.querySelector('.pf-row[data-item="${longRowId}"]'), n = r.querySelector('.pf-name-text'), m = r.querySelector('.row-file-btn'), s = r.querySelector('.pf-state'), nr = n.getBoundingClientRect(), mr = m.getBoundingClientRect(), sr = s.getBoundingClientRect(), rects = [...n.getClientRects()], last = rects.at(-1); return { width: Math.round(nr.width), lines: rects.length, markOnLast: Math.abs((mr.top + mr.bottom) / 2 - (last.top + last.bottom) / 2) <= 6, stateWidth: Math.round(sr.width), noOverlap: r.querySelector('.pf-name').getBoundingClientRect().right <= sr.left + 1 }; })()`);
+          same('at 860, a long name beside a long from label wraps cleanly, keeps its mark on the last line, and leaves Switching uncrowded',
+            [longFit.width >= 150, longFit.lines >= 2, longFit.markOnLast, longFit.stateWidth >= 200, longFit.noOverlap, ...await a.run(CUT_OFF)],
+            [true, true, true, true, true]);
+          if (shots) { await a.run(`document.activeElement?.blur?.()`); await a.shot('profiles-long-name-860-light'); }
+          if (shots) {
+            await a.run(`document.querySelector('.pf-row[data-item="plugin:mcp:${longPlug}@ck-test-market/issues"]')?.scrollIntoView({ block: 'end' })`);
+            await wait(80);
+            await a.shot('profiles-plugin-and-own-860-light');
+            await a.run(`document.querySelector('.pf-row[data-item="${longRowId}"]')?.scrollIntoView({ block: 'center' })`);
+            await a.settle();
+          }
+          await openPf(longRowId, 'Step 1 of the release checklist.');
+          await wait(80);
+          const longBox = await a.run(`(() => {
+            const split = document.getElementById('profiles-split').getBoundingClientRect(), boxEl = document.querySelector('.file-open-box'), box = boxEl.getBoundingClientRect();
+            const row = document.querySelector('.pf-row.file-anchored'), head = document.querySelector('.pf-section')?.getBoundingClientRect(), next = row?.nextElementSibling?.getBoundingClientRect();
+            const foot = boxEl.querySelector('.file-open-foot').getBoundingClientRect(), tail = boxEl.querySelector('.file-open-foot .middle-tail');
+            const named = boxEl.querySelector('.file-open-named'), item = boxEl.querySelector('.file-open-item'), pre = boxEl.querySelector('pre.content');
+            const barW = pre.offsetWidth - pre.clientWidth;
+            return { boxH: Math.round(box.height), splitH: Math.round(split.height), footH: Math.round(foot.height), preH: pre.clientHeight, barW,
+              capped: box.height < split.height - 60, rowInSight: !!row && row.getBoundingClientRect().top >= (head?.bottom ?? split.top) - 2,
+              nextInSight: !!next && next.top < split.bottom - 8, footOneLine: foot.height <= 42, tailUncut: !!tail && tail.scrollWidth <= tail.clientWidth,
+              noHangingDot: getComputedStyle(item, '::after').content === 'none' && getComputedStyle(named).overflowX === 'clip',
+              hasScrollbar: pre.scrollHeight > pre.clientHeight && barW > 0 && barW <= 10, moreTextShown: pre.clientHeight >= 130 };
+          })()`);
+          same('at 860, a 60-line file box is capped inside .profiles-split with its row and next row in sight, 1-line uncut filename foot, no hanging head dot, visible scrollbar and text past frontmatter',
+            [longBox.capped, longBox.rowInSight, longBox.nextInSight, longBox.footOneLine, longBox.tailUncut, longBox.noHangingDot, longBox.hasScrollbar, longBox.moreTextShown, ...await a.run(CUT_OFF)],
+            [true, true, true, true, true, true, true, true]);
+          if (shots) await a.shot('profiles-long-file-860-light');
+          await a.press('Escape');
+        } finally { if (shots) { await a.run(`window.centralKnot.setAppearance('system')`); await wait(80); } }
+      });
+      // Narrow to the exact width where the last word fits on one line and the mark does not: the mark stays with the last word, never alone on a line.
+      await sizeTo(a, 1360, 819);
+      const fullW = await a.run(`(() => { const r = document.querySelector('.pf-row[data-item="${longRowId}"]'), n = r.querySelector('.pf-name-text'), w = document.createTreeWalker(n, NodeFilter.SHOW_TEXT); let textW = 0; for (let t; (t = w.nextNode()); ) { const rg = document.createRange(); rg.selectNodeContents(t); textW += rg.getBoundingClientRect().width; } return { textW, mainW: r.querySelector('.pf-main').getBoundingClientRect().width }; })()`);
+      let tightW = 1360 - Math.round((fullW.mainW - fullW.textW - 8) / 0.74);
+      await sizeTo(a, tightW, 819);
+      const adj = await a.run(`document.querySelector('.pf-row[data-item="${longRowId}"] .pf-main').getBoundingClientRect().width`);
+      if (adj < fullW.textW + 2 || adj > fullW.textW + 18) { tightW += Math.round((fullW.textW + 8 - adj) / 0.74); await sizeTo(a, tightW, 819); }
+      const markCheck = await a.run(`(() => {
+        const r = document.querySelector('.pf-row[data-item="${longRowId}"]'), n = r.querySelector('.pf-name-text'), m = r.querySelector('.row-file-btn').getBoundingClientRect();
+        const w = document.createTreeWalker(n, NodeFilter.SHOW_TEXT), nodes = [];
+        for (let t; (t = w.nextNode()); ) if (t.nodeValue.trim()) nodes.push(t);
+        const last = nodes.at(-1), rg = document.createRange(), mid = b => (b.top + b.bottom) / 2;
+        rg.setStart(last, last.nodeValue.length - 1); rg.setEnd(last, last.nodeValue.length);
+        const ch = rg.getBoundingClientRect();
+        const full = nodes.map(t => t.nodeValue).join(''), wordAt = full.lastIndexOf(' ') + 1;
+        let seen = 0, firstNode = nodes[0], firstOff = 0;
+        for (const t of nodes) { if (seen + t.nodeValue.length > wordAt) { firstNode = t; firstOff = wordAt - seen; break; } seen += t.nodeValue.length; }
+        rg.setStart(firstNode, firstOff); rg.setEnd(firstNode, firstOff + 1);
+        const wordStart = rg.getBoundingClientRect();
+        return { tightW: window.innerWidth, mainW: Math.round(r.querySelector('.pf-main').getBoundingClientRect().width), textW: Math.round(${fullW.textW}),
+          markWithLastChar: Math.abs(mid(m) - mid(ch)) <= 6 && m.left >= ch.right - 2, wholeLastWord: Math.abs(mid(wordStart) - mid(ch)) <= 6 };
+      })()`);
+      same('at the width where the name’s last word fits and the mark does not, the mark never wraps alone and the last word stays whole',
+        [markCheck.markWithLastChar, markCheck.wholeLastWord], [true, true]);
+      await withSidebarOpen(a, 1316, 819, async () => {
+        await a.run(`document.querySelector('.pf-row[data-item="${longRowId}"]')?.scrollIntoView({ block: 'center' })`);
+        await a.settle();
+        await openPf(longRowId, 'Step 1 of the release checklist.');
+        await wait(80);
+        const wideBox = await a.run(`(() => { const sc = document.getElementById('profile-scroll').getBoundingClientRect(), box = document.querySelector('.file-open-box'), row = document.querySelector('.pf-row.file-anchored'), head = document.querySelector('.pf-section')?.getBoundingClientRect(), next = row?.nextElementSibling?.getBoundingClientRect(), pre = box.querySelector('pre.content'), tail = box.querySelector('.file-open-foot .middle-tail'), barW = pre.offsetWidth - pre.clientWidth; return { rowInSight: !!row && row.getBoundingClientRect().top >= (head?.bottom ?? sc.top) - 2, nextInSight: !!next && next.top < sc.bottom - 8, footOneLine: box.querySelector('.file-open-foot').getBoundingClientRect().height <= 42, tailUncut: !!tail && tail.scrollWidth <= tail.clientWidth, hasScrollbar: pre.scrollHeight > pre.clientHeight && barW > 0 && barW <= 10 }; })()`);
+        same('at 1316×819, a 60-line file panel keeps its row and next row in sight, a 1-line uncut filename foot, visible scrollbar, and nothing cut off', [wideBox.rowInSight, wideBox.nextInSight, wideBox.footOneLine, wideBox.tailUncut, wideBox.hasScrollbar, ...await a.run(CUT_OFF)], [true, true, true, true, true]);
+        if (shots) { await a.run(`window.centralKnot.setAppearance('dark')`); await wait(80); await a.shot('profiles-long-file-1316-dark'); await a.run(`window.centralKnot.setAppearance('system')`); await wait(80); }
+        await a.press('Escape');
+      });
+      await fullSize(a);
+    } finally {
+      if (installsBefore === undefined) rmSync(installRecord); else writeFileSync(installRecord, installsBefore);
+      rmSync(join(practice, `.claude/plugins/cache/ck-test-market/${longPlug}/1.0.0`), { recursive: true, force: true });
+      await a.click('#nav-plugins');
+    }
+  }
   writeFileSync(codexConfig, configBefore.slice(0, configBefore.indexOf('\n[marketplaces.ck-test-market]')));
   // document-tools' parts from an earlier version, moved at one look too: pdf-reader, edited in Pi since (Pi's skills folder known
   // first, as an earlier version's pass noted it), is his own now, said once; spreadsheet, left out of Pi, stays out of it.
@@ -13293,8 +13447,9 @@ async function mcpSigninFlow() {
   /** Claude Code's servers (notes a local one), with `more` added or changed. */
   const claudeFile = (more = {}) => JSON.stringify({ mcpServers: { ...remote(claudeServers), notes: { type: 'stdio', command: server }, ...more } });
   write('.claude.json', claudeFile());
+  const copilotDir = 'enterprise-platform-engineering-settings/copilot-config', copilotPath = `${copilotDir}/mcp-config.json`;
   const copilotFile = JSON.stringify({ mcpServers: Object.fromEntries(Object.entries(remote(['plain', 'oauth', 'github'])).map(([name, entry]) => [name, { ...entry, tools: ['*'] }])) });
-  write('.copilot/mcp-config.json', copilotFile);
+  write(copilotPath, copilotFile);
   write('.codex/config.toml', ['plain', 'oauth', 'down', 'silent', 'docs', 'calendar'].map((name, index) => `[mcp_servers.${name}]\nurl = "${P(47201 + index)}"\n${name === 'docs' ? 'enabled = false\n' : ''}`).join('\n'));
   /** Pi's servers (tickets a local one), with `more` added or changed. */
   const piFile = (more = {}) => JSON.stringify({ mcpServers: { ...Object.fromEntries(['plain', 'oauth', 'down', 'silent', 'tickets', 'calendar'].map((name, index) => [name, { url: P(47201 + index) }])), tickets: { command: server }, ...more } });
@@ -13375,7 +13530,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   const started = () => called().filter(([what]) => what === 'start');
   // A check's limit of 4 s here (main.ts CK_SIGNIN_LIMIT_MS), so "Didn’t answer" comes without waiting 70 s; a sign-in's of 6 s
   // (CK_SIGNIN_START_LIMIT_MS), so "Not finished in 3 minutes" comes without waiting three minutes.
-  const a = await launch(join(scratch, 'signin-data'), [], home, { CK_TEST_HOME_ONLY: Object.keys(versions).join(','), CK_SIGNIN_LIMIT_MS: '4000', BROWSER: 'ck-browser', CK_SIGNIN_START_LIMIT_MS: '6000' });
+  const a = await launch(join(scratch, 'signin-data'), [], home, { CK_TEST_HOME_ONLY: Object.keys(versions).join(','), COPILOT_HOME: join(home, copilotDir), CK_SIGNIN_LIMIT_MS: '4000', BROWSER: 'ck-browser', CK_SIGNIN_START_LIMIT_MS: '6000' });
   await a.click('#home-actual');
   /** The page as drawn: the tools' columns, and each row's name, plugin and cells' words (a mark and a Copy's label aside). */
   const page = async () => {
@@ -13529,6 +13684,23 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   same('at 860 pressing a server’s mark opens its entry in a full-width row under it, nothing cut off',
     [oauthEntry.anchored, oauthEntry.colspan, oauthEntry.boxes, oauthEntry.text.includes('http://127.0.0.1:47202/mcp'), ...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)],
     [true, '7', 1, true]);
+  const ghEntry = await openEntry('github', 'http://127.0.0.1:47203/mcp');
+  const ghFoot = await a.run(`(() => {
+    const scroll = document.getElementById('mcpsignin-scroll'), panel = document.getElementById('file-panel-mcpsignin');
+    const td = panel?.closest('td'), foot = panel?.querySelector('.file-open-foot');
+    const head = foot?.querySelector('.middle-head'), tail = foot?.querySelector('.middle-tail');
+    return {
+      pathLen: ((head?.textContent ?? '') + (tail?.textContent ?? '')).length,
+      fullWidth: !!td && !!panel && Math.abs(panel.getBoundingClientRect().width - (td.getBoundingClientRect().width - 20)) <= 2,
+      noScrollX: scroll.scrollWidth <= scroll.clientWidth,
+      footOneLine: !!foot && Math.round(foot.getBoundingClientRect().height) <= 42,
+      tail: tail?.textContent ?? '',
+      tailUncut: !!tail && tail.scrollWidth <= tail.clientWidth,
+    };
+  })()`);
+  same('at 860 a 50+ char settings path keeps every column width unchanged, no horizontal scroll, a 1-line foot and an uncut filename',
+    [ghEntry.anchored, ghFoot.pathLen >= 50, ghFoot.fullWidth, (await markMetrics()).ths, ghFoot.noScrollX, ghFoot.footOneLine, ghFoot.tail, ghFoot.tailUncut, ...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)],
+    [true, true, true, colsBefore, true, true, '/mcp-config.json', true]);
   const fsEntry = await openEntry('Filesystem', 'http://127.0.0.1:47215/mcp');
   same('at 860 pressing a second capitalised server’s mark moves the panel under it with that server’s entry',
     [fsEntry.anchored, fsEntry.colspan, fsEntry.boxes, fsEntry.text.includes('http://127.0.0.1:47215/mcp')], [true, '7', 1, true]);
@@ -14103,7 +14275,7 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   same('OpenCode of a version not known: it may do either', await top(), ['Check starts local servers in Claude Code, Pi and OpenCode; OpenCode may leave a service running or add $schema to its config files (its version isn’t known).', true]);
   await owners('version-not-known');
   // And the tools there: Codex and Pi, then Codex alone, then only the two whose sign-in shows inside a session.
-  for (const path of ['.claude.json', '.copilot/mcp-config.json', '.config/opencode/opencode.json', '.gemini/config/mcp_config.json']) write(path, '{}');
+  for (const path of ['.claude.json', copilotPath, '.config/opencode/opencode.json', '.gemini/config/mcp_config.json']) write(path, '{}');
   rmSync(join(home, '.claude/plugins'), { recursive: true, force: true });
   await a.click('#header-refresh');
   same('Codex and Pi: Pi starts its local server, Codex starts none', [(await page()).tools, ...await top()], [['codex-cli', 'pi-cli'], 'Check starts local servers in Pi.', true]);
@@ -14111,14 +14283,14 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   await a.click('#header-refresh');
   same('Codex alone: it contacts its remote servers', [(await page()).tools, ...await top()], [['codex-cli'], 'Check contacts remote servers in Codex.', true]);
   write('.codex/config.toml', '');
-  write('.copilot/mcp-config.json', copilotFile);
+  write(copilotPath, copilotFile);
   write('.gemini/config/mcp_config.json', antigravityFile);
   await a.click('#header-refresh');
   same('only Copilot CLI and Antigravity: no line and no Check all; Antigravity’s head names no command', [(await page()).tools, ...await top(), await head('antigravity-cli')],
     [['copilot-cli', 'antigravity-cli'], null, false, 'Antigravity\nSign in inside a session']);
   await owners('session-only');
   // No server in any tool: the page says so.
-  for (const path of ['.copilot/mcp-config.json', '.gemini/config/mcp_config.json']) write(path, '{}');
+  for (const path of [copilotPath, '.gemini/config/mcp_config.json']) write(path, '{}');
   await a.click('#header-refresh');
   same('with no server in any tool the page says so, in one line', [await a.text('.empty-title'), await a.exists('.empty-body')], ['No MCP servers in your tools.', false]);
   await owners('no-servers');
