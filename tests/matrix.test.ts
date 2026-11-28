@@ -130,7 +130,7 @@ test('tool tab switch column head states Every tool with its info mark and Libra
   assert.ok(head, 'tool tab renders its switch column head');
   assert.ok(textOf(head).includes('Every tool'));
   assert.ok(findById(head, 'tab-switch-info'), 'Every tool carries its (?) info mark');
-  assert.match(textOf(findById(head, 'tab-switch-info-card')), /every managed tool/i);
+  assert.match(textOf(findById(head, 'tab-switch-info-card')), /every tool that can take it/i);
 
   openKind('skills');
   const libTree = libraryTable() as unknown as FakeNode;
@@ -155,7 +155,7 @@ test('tool tab places What the marks mean by the toolbar with one entry per visu
   const body = findById(openTree, 'mark-legend-body');
   assert.ok(body, 'opening What the marks mean draws #mark-legend-body below the toolbar');
   const legendItems = findAll(body, el => el.className.split(/\s+/).includes('legend-item')).map(el => textOf(el));
-  assert.deepEqual(legendItems, ['Has it', 'No copy', 'Off here']);
+  assert.deepEqual(legendItems, ['On there / Has the current version / Has it', 'No copy', 'Off: Central Knot keeps it']);
   // Close again to leave view clean for later tests.
   const openFold = findById(openTree, 'mark-legend') as unknown as { ontoggle: (e: { currentTarget: { open: boolean } }) => void };
   openFold.ontoggle({ currentTarget: { open: false } });
@@ -168,7 +168,7 @@ test('tool tab places What the marks mean by the toolbar with one entry per visu
   findById(openedTabTree, 'open-skills-alpha')!.click();
 });
 
-test('tool tab section jump uses Jump to: plain links with data-section on plugins, hides first section, and omits jump for a single section', () => {
+test('tool tab section jump lists all drawn section names without counts, sets data-section on plugins, and omits jump for a single section', () => {
   const { onSkill, library } = installFiveToolFixture();
   const tabTree = itemsTable('skills', 'claude-cli') as unknown as FakeNode;
   const pluginHead = findAll(tabTree, el => el.className.split(/\s+/).includes('ov-section-plugins'))[0]!;
@@ -179,11 +179,11 @@ test('tool tab section jump uses Jump to: plain links with data-section on plugi
   assert.equal(textOf(findAll(jump, el => el.className.split(/\s+/).includes('section-jump-lead'))[0]), 'Jump to:');
   const links = findAll(jump, el => el.className.split(/\s+/).includes('section-jump-link'));
   assert.deepEqual(links.map(el => [el.attrs.id, textOf(el), 'hidden' in el.attrs]), [
-    ['jump-on', 'On1', true],
-    ['jump-found', 'Found1', false],
-    ['jump-plugins', 'Only through a plugin1', false],
-    ['jump-away', 'Not in Claude Code1', false],
-    ['jump-off', 'Off1', false],
+    ['jump-on', 'On', false],
+    ['jump-found', 'Found', false],
+    ['jump-plugins', 'Only through a plugin', false],
+    ['jump-away', 'Not in Claude Code', false],
+    ['jump-off', 'Off', false],
   ]);
 
   // Single-section tool tab omits the section jump.

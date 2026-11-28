@@ -1179,11 +1179,11 @@ async function harnessFlow() {
       const swLines = new Set(sw.map(el => Math.round(el.getBoundingClientRect().top))).size;
       const fullTabs = tabs.every(el => el.scrollWidth <= el.clientWidth + 1);
       const allNamed = sw.every(el => { const n = el.querySelector('.harness-switch-name'); return n && n.offsetWidth > 0 && el.getAttribute('aria-label') === el.title; });
-      const tabsBottom = Math.max(...tabs.map(el => el.getBoundingClientRect().bottom));
-      const swTop = Math.min(...sw.map(el => el.getBoundingClientRect().top));
+      const tabsTop = Math.min(...tabs.map(el => el.getBoundingClientRect().top));
+      const swBottom = Math.max(...sw.map(el => el.getBoundingClientRect().bottom));
       const stacked = b.classList.contains('harness-bar-stacked');
       const marksOnly = b.classList.contains('harness-bar-marks');
-      return { count: sw.length, content: b.clientWidth, tabLines, swLines, fullTabs, allNamed, stacked, marksOnly, swBelowTabs: swTop >= tabsBottom - 1 };
+      return { count: sw.length, content: b.clientWidth, tabLines, swLines, fullTabs, allNamed, stacked, marksOnly, swAboveTabs: tabsTop >= swBottom - 1 };
     })()`);
     const checkNav = async (toolCount, label) => {
       const states = {};
@@ -1194,8 +1194,8 @@ async function harnessFlow() {
           const bar = await readBar();
           states[`${width}-${open ? 'open' : 'rail'}`] = bar.stacked ? 'stacked' : 'single';
           const expectSingle = width === 1728 || (width === 1316 && (!open || toolCount === 5));
-          same(`${label} (${toolCount} tools) at ${width}×${height} ${open ? 'sidebar open' : 'rail'}: full tabs on one row, switcher always named, stacked only when names cannot share row 1`,
-            [bar.count, bar.tabLines, bar.swLines, bar.fullTabs, bar.allNamed, bar.marksOnly, bar.stacked, !bar.stacked || bar.swBelowTabs],
+          same(`${label} (${toolCount} tools) at ${width}×${height} ${open ? 'sidebar open' : 'rail'}: full tabs on one row, switcher always named and above tabs when stacked`,
+            [bar.count, bar.tabLines, bar.swLines, bar.fullTabs, bar.allNamed, bar.marksOnly, bar.stacked, !bar.stacked || bar.swAboveTabs],
             [toolCount, 1, 1, true, true, false, !expectSingle, true]);
           same(`${label} (${toolCount} tools) at ${width}×${height} ${open ? 'sidebar open' : 'rail'}: nothing cut off`, await t.run(CUT_OFF), []);
         }
@@ -1240,7 +1240,7 @@ async function harnessFlow() {
     await t.click('#tab-switch-info');
     same('clicking Every tool (?) opens its explanation card and Escape closes it',
       await t.run(`(() => { const c = document.getElementById('tab-switch-info-card'); return [!!c?.matches(':popover-open'), c?.textContent?.trim() ?? null]; })()`),
-      [true, 'Each switch turns an item on or off in every managed tool. Open a row to change one tool alone.']);
+      [true, 'Each switch turns an item on or off in every tool that can take it. Open a row to change one tool alone.']);
     await t.press('Escape');
 
     const tabMarks = await t.run(`(() => {
@@ -1282,11 +1282,11 @@ async function harnessFlow() {
       const bodyTop = body?.getBoundingClientRect().top ?? 0;
       return { open: !!d?.open, belowToolbar: !!body && Math.abs(bodyTop - barBottom) <= 2, items };
     })()`);
-    same('opening What the marks mean draws one entry per visual mark look right under the toolbar',
-      legendOpen, { open: true, belowToolbar: true, items: ['Has it', 'No copy', 'Off here'] });
+    same('opening What the marks mean groups keyWords by visual look right under the toolbar',
+      legendOpen, { open: true, belowToolbar: true, items: ['On there / Has the current version / Has it', 'No copy', 'Off: Central Knot keeps it'] });
     await t.click('#mark-legend-toggle');
 
-    // Plain "Jump to:" links on a long tool list at 860×528: first-in-sight omitted, no pills, landing heading flashes on jump, On appears once scrolled down.
+    // Plain "Jump to:" links on a long tool list at 860×528: all section names without counts, sticky heads stay in sight, landing heading flashes with an accent bar and clears under reduced motion.
     await sizeTo(t, ...SMALLEST);
     await sidebarAs(false);
     const jumpState = await t.run(`(() => {
@@ -1297,26 +1297,43 @@ async function harnessFlow() {
       const noPill = links.every(el => getComputedStyle(el).borderTopWidth === '0px');
       return { shown: !!nav && !nav.hidden, lead, visible, noPill };
     })()`);
-    same('long tool list shows plain Jump to: links omitting the section already first in sight', jumpState, {
+    same('long tool list shows plain Jump to: links with all section names and no counts', jumpState, {
       shown: true,
       lead: 'Jump to:',
-      visible: ['Found2', 'Only through a plugin1', 'Not in Claude Code1', 'Off2'],
+      visible: ['On', 'Found', 'Only through a plugin', 'Not in Claude Code', 'Off'],
       noPill: true,
     });
     await t.click('#jump-off');
     const jumpedOff = await t.run(`(() => {
       const list = document.querySelector('.scroll.matrix').getBoundingClientRect();
+      const head = document.querySelector('.ov-tab-head').getBoundingClientRect();
       const off = document.querySelector('.ov-section[data-section="off"]');
       const r = off.getBoundingClientRect();
-      return { inView: r.top >= list.top - 2 && r.bottom <= list.bottom + 2, flashed: off.classList.contains('section-flash'), onOffered: !document.getElementById('jump-on').hidden };
+      const links = [...document.querySelectorAll('.harness-page .section-jump-link')].filter(el => !el.hidden).map(el => el.textContent.trim());
+      return {
+        stickyInSight: Math.abs(head.top - list.top) <= 2,
+        inViewBelowHead: r.top >= head.bottom - 2 && r.bottom <= list.bottom + 2,
+        flashed: off.classList.contains('section-flash'),
+        accentBar: /inset 3px 0px 0px|3px 0px 0px 0px inset/.test(getComputedStyle(off).boxShadow),
+        sameLinks: links.length === 5,
+      };
     })()`);
-    same('jumping to Off brings it into view, flashes its heading, and offers On to return', jumpedOff, { inView: true, flashed: true, onOffered: true });
+    same('jumping to Off keeps sticky heads in sight, lands Off uncovered with an accent-bar flash, and keeps all Jump to: links', jumpedOff,
+      { stickyInSight: true, inViewBelowHead: true, flashed: true, accentBar: true, sameLinks: true });
+    // Under prefers-reduced-motion: reduce, the landing mark still clears on its timer instead of sticking until a redraw.
+    await t.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    await t.click('#jump-found');
+    const reducedBefore = await t.run(`document.querySelector('.ov-section[data-section="found"]').classList.contains('section-flash')`);
+    await wait(2600);
+    const reducedAfter = await t.run(`document.querySelector('.ov-section[data-section="found"]').classList.contains('section-flash')`);
+    await t.send('Emulation.setEmulatedMedia', { features: [] });
+    same('under reduced motion, the landing mark appears on jump and clears after its timer', [reducedBefore, reducedAfter], [true, false]);
     await t.click('#jump-on');
     const jumpedOn = await t.run(`(() => {
       const on = document.querySelector('.ov-section[data-section="on"]');
-      return { atTop: document.querySelector('.scroll.matrix').scrollTop <= 2, flashed: on.classList.contains('section-flash'), onHiddenAgain: document.getElementById('jump-on').hidden };
+      return { atTop: document.querySelector('.scroll.matrix').scrollTop <= 2, flashed: on.classList.contains('section-flash') };
     })()`);
-    same('jumping back to On scrolls to top, flashes On, and hides On again', jumpedOn, { atTop: true, flashed: true, onHiddenAgain: true });
+    same('jumping back to On scrolls to top and marks On', jumpedOn, { atTop: true, flashed: true });
 
     // Short MCP tab hides section jump even after opening an inline file panel (.details.details-file-only) that overflows the viewport.
     await t.click('#harness-tab-mcp');
@@ -1349,7 +1366,6 @@ async function harnessFlow() {
       };
       await t.run(`const d = document.getElementById('mark-legend'); if (d?.open) document.getElementById('mark-legend-toggle')?.click();`);
       await t.settle();
-      await take('tool-page-skills-860-rail-light', [860, 560], false, 'light');
       await take('tool-page-skills-860-open-light', [860, 560], true, 'light');
       await take('tool-page-skills-1316-dark', [1316, 819], true, 'dark');
       await sizeTo(t, 860, 560);
@@ -1365,21 +1381,12 @@ async function harnessFlow() {
       await t.run(`document.activeElement?.blur()`);
       await wait(40);
       await t.shot('tool-page-jump-860-light');
-      // Add a long-named skill for the docked Library picture (only its own row drops description; other rows keep theirs).
-      const longDocked = 'quarterly-platform-engineering-changelog-summary-report-writer';
-      skill(tClaude, longDocked, text(longDocked, 'Summarises quarterly platform engineering changes and release milestones across repositories.'));
-      await t.click('#header-refresh');
-      for (let tries = 0; tries < 40 && !(await t.exists(`#${rowPart('add', 'skills', longDocked)}`)); tries++) await wait(100);
-      await t.click(`#${rowPart('add', 'skills', longDocked)}`);
-      await openKind(t, 'skills');
-      await t.click('#header-refresh');
-      await sizeTo(t, 1728, 1117);
-      await sidebarAs(true);
-      await t.click(`#${rowPart('open', 'skills', 'skill-01')}`);
-      await t.run(`document.querySelector('.ov-row[data-key="${rowPart('', 'skills', longDocked)}"]')?.scrollIntoView({ block: 'center' })`);
-      await t.run(`document.activeElement?.blur()`);
-      await wait(120);
-      await t.shot('tool-page-docked-library-long-wide-light');
+      // Open Every tool (?) card while plugin row is visible beneath the sticky head.
+      await t.click('#jump-plugins');
+      await t.click('#tab-switch-info');
+      await wait(80);
+      await t.shot('tool-page-card-open-860-light');
+      await t.press('Escape');
       await t.run(`window.centralKnot.setAppearance('system')`);
       await wait(80);
     }
