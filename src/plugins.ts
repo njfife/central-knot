@@ -625,7 +625,7 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
     case 'copilot-cli': {
       const settingsOf = () => recordJson(context, join(root, 'settings.json'));
       const listed = (await recordJson(context, join(root, 'config.json')))?.installedPlugins;
-      const listing = (Array.isArray(listed) ? listed : []).map(record).find(item => item?.name === plugin && item.marketplace === marketplace);
+      const listing = (Array.isArray(listed) ? listed : []).map(record).find(item => item?.name === plugin && text(item.marketplace) === marketplace);
       const cache = text(listing?.cache_path);
       const cacheState = cache ? await folderState(cache) : undefined;
       if (cache) return cacheState === 'has-files' ? installedCopy(cache, entry, { live: false, version: await copyVersion(listing?.version, cache), readAs: { skillsListReplaces: true } }, async skills => copilotSkillsOff(await settingsOf(), plugin, skills)) : notKnown(tool, cacheState!, 'Copilot CLI lists it, but its files are not where it records them.');

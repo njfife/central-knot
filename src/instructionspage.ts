@@ -277,7 +277,7 @@ export function pluginOffButton(plugin: InstalledPlugin, info: { current: boolea
 
 /**
  * The strip on a tool's card after the files read with it (sessionhooks.ts sessionStrip): its heading with at most one (?)
- * mark (hookStripCard: why hooks can't run in a folder or Copilot plugin, any tool note, and first-strip help),
+ * mark (hookStripCard: why hooks can't run in another folder, any tool note, and first-strip help),
  * the standing run warning when any row can run (hookRunWarn) or missing-CLI reason, then each origin by its mark and name
  * with where it is turned off, what couldn't be read, and each hook beneath it (hooksourceview.ts).
  */

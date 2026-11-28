@@ -9,7 +9,8 @@ import { shownPath, state } from './app.ts';
 import { button, closeButton, h, icon, pathText } from './dom.ts';
 import { pagePlatform } from './machine.ts';
 import { addsText, isTextEvent } from './pluginoutcomes.ts';
-import { HOOK_RUN_ACTUAL_ONLY, HOOK_RUN_COPILOT_PLUGIN, hookFingerprint, hookRunWords, type TextHookRow } from './sessionhooks.ts';
+import { takesPlugins } from './presence.ts';
+import { HOOK_RUN_ACTUAL_ONLY, hookFingerprint, hookRunWords, type TextHookRow } from './sessionhooks.ts';
 import type { HarnessId, HomeMode, HomeView, HookRunResult, HookSource, HookSourceRef, InstalledPlugin } from './types.ts';
 import { HOOK_SOURCE_UNREADABLE, andList, fileName, sentence, toolNames } from './words.ts';
 
@@ -33,10 +34,9 @@ const hasCli = (tool: HarnessId, home?: Pick<HomeView, 'snapshots'>) =>
 const hookGate = (ref: HookSourceRef, mode: HomeMode | undefined, platform: string): string | 'silent' | undefined =>
   platform === 'win32' || !mode || ref.from === 'marketplace' ? 'silent'
   : mode !== 'actual' ? HOOK_RUN_ACTUAL_ONLY
-  : ref.from === 'installed' && ref.tool === 'copilot-cli' ? HOOK_RUN_COPILOT_PLUGIN
-  : ref.from === 'installed' && ref.tool !== 'claude-cli' && ref.tool !== 'codex-cli' ? 'silent' : undefined;
+  : ref.from === 'installed' && !takesPlugins(ref.tool) ? 'silent' : undefined;
 
-/** Whether the page offers See what it adds (mirrors main's deciding gate in hookrun.ts runHook): actual home, non-Windows, own or Claude Code / Codex installed plugin hook that adds text, with the tool's CLI found and the plugin on. */
+/** Whether the page offers See what it adds (mirrors main's deciding gate in hookrun.ts runHook): actual home, non-Windows, own or installed plugin hook that adds text, with the tool's CLI found and the plugin on. */
 export function canRun(ref: HookSourceRef, mode: HomeMode | undefined = state.home?.mode, platform = pagePlatform(navigator.userAgent), home: Pick<HomeView, 'snapshots' | 'pluginItems'> | undefined = state.home): boolean {
   if (ref.from === 'marketplace' || hookGate(ref, mode, platform)) return false;
   if (!ref.command || !isTextEvent(ref.tool, ref.event)) return false;
@@ -45,20 +45,20 @@ export function canRun(ref: HookSourceRef, mode: HomeMode | undefined = state.ho
   return true;
 }
 
-/** Why hooks on a strip can't be run, for its (?) card (from hookGate: chosen folder or Copilot CLI plugin hook on Mac/Linux). */
+/** Why hooks on a strip can't be run, for its (?) card (from hookGate: chosen folder on Mac/Linux). */
 export const stripCantRunReason = (refs: readonly HookSourceRef[], mode: HomeMode | undefined = state.home?.mode, platform = pagePlatform(navigator.userAgent)): string | undefined =>
   refs.map(ref => hookGate(ref, mode, platform)).find((why): why is string => !!why && why !== 'silent');
 
-/** Standing line explaining why text hooks can't run in an actual home on Mac/Linux (missing CLI, not installed or off); card-only reasons (another home, Copilot CLI plugin hooks) come from stripCantRunReason above. */
+/** Standing line explaining why text hooks can't run in an actual home on Mac/Linux (missing CLI, not installed or off); card-only reasons (another home) come from stripCantRunReason above. */
 export function hookCantRunReason(target: HarnessId | { inAnyTool: boolean; installs: InstalledPlugin[]; fingerprints: string[] },
   mode: HomeMode | undefined = state.home?.mode, platform = pagePlatform(navigator.userAgent), home: Pick<HomeView, 'snapshots'> | undefined = state.home): string | undefined {
   if (mode !== 'actual' || platform === 'win32') return undefined;
   const noCli = (tool: HarnessId) => `${toolNames[tool]}’s command line isn’t on this computer, so these can’t be run here.`;
-  if (typeof target === 'string') return target !== 'copilot-cli' && !hasCli(target, home) ? noCli(target) : undefined;
+  if (typeof target === 'string') return !hasCli(target, home) ? noCli(target) : undefined;
   if (!target.inAnyTool && !target.installs.length) return 'Not installed, so these can’t be run here.';
   if (!target.installs.length || target.installs.some(item => item.problem || item.hooksUnread?.length)) return undefined;
   const withText = target.installs.filter(item => item.hooks?.some(hook => addsText(item.tool, hook)));
-  if (!withText.length || withText.some(item => item.tool !== 'claude-cli' && item.tool !== 'codex-cli')) return undefined;
+  if (!withText.length || withText.some(item => !takesPlugins(item.tool))) return undefined;
   const covered = new Set(withText.flatMap(item => (item.hooks ?? []).filter(hook => addsText(item.tool, hook)).map(hookFingerprint)));
   if (target.fingerprints.some(fp => !covered.has(fp))) return undefined;
   if (withText.every(item => item.off)) return `Off in ${andList(withText.map(item => toolNames[item.tool]))}, so these can’t be run here.`;

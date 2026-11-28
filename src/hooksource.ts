@@ -1,7 +1,8 @@
 // Shared hook identity lookup (parseHookRef, findHook — called by both readHookSource here and hookrun.ts runHook) and reading
 // one hook's source on click (IPC hook:source): finds the hook again through the same readers the page was drawn with
-// (own tool settings, an installed plugin copy, or a marketplace copy resolved by marketplace name through marketplaces.ts,
-// without fetching). For both own and installed hooks, findOwner reads the tool's settings (pluginitems.ts sessionSettings) so
+// (own tool settings, an installed plugin copy — including a direct-installed Copilot CLI copy with no marketplace name via
+// plugins.ts installState — or a marketplace copy resolved by marketplace name through marketplaces.ts, without fetching).
+// For both own and installed hooks, findOwner reads the tool's settings (pluginitems.ts sessionSettings) so
 // findHook reports whether the tool's hooks are off (hooksDisabled) or the plugin is off (pluginOff), while readHookSource
 // still shows the source. Never reads a path or folder sent from the page, and shows only the hook's own entry (from
 // JSON/JSONC, the file's own bytes with common leading indentation removed; from TOML, its own bytes with trailing whitespace
@@ -12,7 +13,7 @@ import { READ_LIMIT, installedContents, pathIn, pluginContents, readCapped } fro
 import { harnessIds, toolConfigRoot } from './harnesses.ts';
 import { shownFromHome } from './machine.ts';
 import { sessionSettings } from './pluginitems.ts';
-import { installedPlugins, type PluginContext } from './plugins.ts';
+import { installState, installedPlugins, type PluginContext } from './plugins.ts';
 import { takesPlugins } from './presence.ts';
 import { hookFingerprint, hookLine } from './sessionhooks.ts';
 import { jsonElements, jsonStart, members, ownEnd, readTomlTables } from './textedit.ts';
@@ -40,7 +41,9 @@ export function parseHookRef(value: unknown): HookSourceRef | undefined {
   const base = { declaredIn: ref.declaredIn, event: ref.event, at: ref.at, command: ref.command, fingerprint: ref.fingerprint };
   const tool = harnessIds.includes(ref.tool as HarnessId) ? (ref.tool as HarnessId) : undefined;
   if (ref.from === 'own' && tool) return { ...base, from: 'own', tool };
-  if (ref.from === 'installed' && tool && asText(ref.plugin) && asText(ref.marketName)) return { ...base, from: 'installed', tool, plugin: asText(ref.plugin), marketName: asText(ref.marketName) };
+  if (ref.from === 'installed' && tool && asText(ref.plugin) && (asText(ref.marketName) || (tool === 'copilot-cli' && ref.marketName === ''))) {
+    return { ...base, from: 'installed', tool, plugin: asText(ref.plugin), marketName: asText(ref.marketName) };
+  }
   if (ref.from === 'marketplace' && asText(ref.marketName) && asText(ref.plugin)) return { ...base, from: 'marketplace', marketName: asText(ref.marketName), plugin: asText(ref.plugin) };
   return undefined;
 }
@@ -157,16 +160,18 @@ async function findOwner(ctx: HookSourceContext, ref: HookSourceRef): Promise<{ 
     if (!takesPlugins(ref.tool)) return undefined;
     const pluginCtx: PluginContext = { home: ctx.home, dataDir: ctx.dataDir, binaries: {}, overrides: ctx.overrides };
     const install = (await installedPlugins(pluginCtx, ref.tool).catch(() => [])).find(candidate => candidate.plugin === ref.plugin && candidate.marketplace === ref.marketName);
-    if (!install || install.state.state !== 'installed') return undefined;
+    const direct = !install && ref.tool === 'copilot-cli' && !ref.marketName ? await installState(pluginCtx, ref.tool, '', ref.plugin).catch(() => undefined) : undefined;
+    const state = install?.state ?? direct;
+    if (!state || state.state !== 'installed') return undefined;
     const [{ hooks, hooksUnread = [] }, { ownHooksDisabled }] = await Promise.all([
-      installedContents(ref.tool, install.state.path, install.entry, install.atMarketplaceRoot),
+      installedContents(ref.tool, state.path, install?.entry, install?.atMarketplaceRoot),
       sessionSettings(ref.tool, toolConfigRoot(ctx, ref.tool)),
     ]);
     return {
-      hooks, unread: hooksUnread, pluginRoot: install.state.path, within: install.state.path,
-      ...(install.state.version ? { pluginVersion: install.state.version } : {}),
+      hooks, unread: hooksUnread, pluginRoot: state.path, within: state.path,
+      ...(state.version ? { pluginVersion: state.version } : {}),
       ...(ownHooksDisabled ? { hooksDisabled: ownHooksDisabled } : {}),
-      ...(install.off ? { pluginOff: true } : {}),
+      ...(install?.off ? { pluginOff: true } : {}),
     };
   }
   const copy = await ctx.marketplace?.(ref.marketName, ref.plugin);
