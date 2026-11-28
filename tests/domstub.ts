@@ -10,29 +10,23 @@ export interface FakeNode {
   parent?: FakeNode;
   content: { firstElementChild?: FakeNode };
   onclick?: (event: unknown) => void;
-  onkeydown?: (event: unknown) => void;
-  onpointerdown?: (event: unknown) => void;
-  ontoggle?: (event: unknown) => void;
   focused: number;
   scrollTop: number;
   tabIndex?: number;
-  rect: { left?: number; top: number; bottom: number; width?: number; height: number };
+  rect: { top: number; bottom: number; height: number };
   childElementCount: number;
   textContent: string;
-  isConnected: boolean;
   setAttribute: (key: string, value: string) => void;
   hasAttribute: (key: string) => boolean;
   addEventListener: () => void;
   replaceChildren: (...kids: unknown[]) => void;
   append: (...kids: unknown[]) => void;
   after: (...kids: unknown[]) => void;
-  remove: () => void;
-  contains: (target: unknown) => boolean;
   focus: (opts?: { preventScroll?: boolean }) => void;
   scrollTo: () => void;
   scrollIntoView: (opts?: unknown) => void;
   closest: (selector: string) => FakeNode | null;
-  getBoundingClientRect: () => { left?: number; top: number; bottom: number; width?: number; height: number };
+  getBoundingClientRect: () => { top: number; bottom: number; height: number };
   click: () => void;
   querySelector: (selector: string) => FakeNode | null;
   querySelectorAll: (selector: string) => FakeNode[];
@@ -43,10 +37,8 @@ const canFocus = (el: FakeNode) => !isDisabled(el) && (['button', 'input', 'text
 
 const matchesSimple = (el: FakeNode, raw: string): boolean => {
   const notDisabled = raw.includes(':not(:disabled)');
-  let sel = raw.replace(':not(:disabled)', '');
+  const sel = raw.replace(':not(:disabled)', '');
   if (notDisabled && isDisabled(el)) return false;
-  const attrPrefix = /^([a-z]*)\[([a-z-]+)\^="([^"]+)"\]$/i.exec(sel);
-  if (attrPrefix) return (!attrPrefix[1] || el.tag === attrPrefix[1]) && (el.attrs[attrPrefix[2]!] ?? '').startsWith(attrPrefix[3]!);
   if (sel === '[tabindex="0"]') return el.attrs.tabindex === '0';
   if (sel.startsWith('#')) return el.attrs.id === sel.slice(1);
   if (sel.startsWith('.')) return el.className.split(/\s+/).includes(sel.slice(1));
@@ -68,8 +60,8 @@ const queryAllIn = (root: FakeNode, selector: string): FakeNode[] => {
 
 const queryIn = (root: FakeNode, selector: string): FakeNode | null => {
   const parts = selector.split(',').map(part => part.trim()).filter(Boolean);
-  if (parts.length > 1 || parts[0]?.includes(':not(') || parts[0]?.includes('[') || /^[a-z]+$/i.test(parts[0] ?? '')) {
-    return queryAllIn(root, selector)[0] ?? null;
+  if (parts.length > 1 || parts[0]?.includes(':not(') || parts[0]?.startsWith('[') || /^[a-z]+$/i.test(parts[0] ?? '')) {
+    return findNode(root, el => el !== root && parts.some(part => matchesSimple(el, part))) ?? null;
   }
   let scope: FakeNode | undefined = root;
   for (const part of selector.trim().split(/\s+/)) {
@@ -93,7 +85,7 @@ export const makeElement = (tag = 'div'): FakeNode => {
     content: {},
     focused: 0,
     scrollTop: 0,
-    rect: { left: 0, top: 0, bottom: 0, width: 0, height: 0 },
+    rect: { top: 0, bottom: 0, height: 0 },
     get childElementCount() {
       return node.children.filter(child => typeof child === 'object' && child !== null).length;
     },
@@ -102,9 +94,6 @@ export const makeElement = (tag = 'div'): FakeNode => {
     },
     set textContent(value: string) {
       node.children = [value];
-    },
-    get isConnected() {
-      return !!node.parent || node === (globalThis as unknown as { document?: { body?: FakeNode } }).document?.body;
     },
     setAttribute(key: string, value: string) {
       this.attrs[key] = value;
@@ -123,19 +112,6 @@ export const makeElement = (tag = 'div'): FakeNode => {
       for (const kid of kids) if (kid && typeof kid === 'object' && 'tag' in kid) (kid as FakeNode).parent = this;
     },
     after() {},
-    remove() {
-      if (!this.parent) return;
-      this.parent.children = this.parent.children.filter(child => child !== this);
-      this.parent = undefined;
-    },
-    contains(target: unknown) {
-      let cur = target as FakeNode | undefined | null;
-      while (cur) {
-        if (cur === this) return true;
-        cur = cur.parent;
-      }
-      return false;
-    },
     focus() {
       if (!canFocus(this)) return;
       this.focused++;
@@ -157,7 +133,7 @@ export const makeElement = (tag = 'div'): FakeNode => {
     },
     click() {
       if ('disabled' in this.attrs) return;
-      this.onclick?.({ detail: 1, currentTarget: this, stopPropagation() {} });
+      this.onclick?.({ stopPropagation() {} });
     },
     querySelector(selector: string) {
       return queryIn(node, selector);
@@ -208,8 +184,6 @@ export function installDom(
   const windowListeners: Record<string, ((event: unknown) => void)[]> = {};
   Object.assign(globalThis, {
     window: {
-      innerWidth: 1280,
-      innerHeight: 800,
       centralKnot: new Proxy(api, { get: (known, name) => known[name as string] ?? (() => Promise.resolve(null)) }),
       addEventListener(name: string, fn: (event: unknown) => void, capture?: boolean) { if (capture !== true) (windowListeners[name] ??= []).push(fn); },
       matchMedia: () => ({ matches: false, addEventListener() {} }),

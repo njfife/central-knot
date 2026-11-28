@@ -18651,9 +18651,6 @@ async function libraryFlow() {
   skill(join(O.home, `.central-knot/items/skills/${retired}/versions`), retiredHash, text(retired, 'Kept from the last planning review.'));
   sFold.items['lapsed-notes'] = { ...structuredClone(sFold.items['legacy-skill']), key: 'lapsed-notes', name: 'lapsed-notes', on: false, applied: {}, deleted: { at: foldAt(1.05) } };
   writeFileSync(oSkillRec, `${JSON.stringify(sFold, null, 2)}\n`);
-  hFold.events.unshift(
-    { id: 'fold-foot', at: foldAt(25), key: 'active-skill', of: 'skill', item: 'active-skill', kind: 'conflict', winner: { tool: 'codex-cli', hash: clashItem.hash }, version: clashItem.hash, previous: clashP, losers: [{ tool: 'copilot-cli', hash: clashX }, { tool: 'pi-cli', hash: clashY }], orderProved: true },
-  );
   hFold.events.push(
     { id: 'fold-legacy', at: foldAt(7), key: 'instructions:old', item: 'old', kind: 'edit', winner: { tool: 'claude-cli', hash: 'a' }, losers: ['claude-cli', 'codex-cli', 'old-cli'].map(tool => ({ tool, hash: 'a' })), orderProved: true },
     { id: 'fold-two-groups', at: foldAt(6), key: 'instructions:legacy', item: 'legacy', kind: 'switched', switched: [{ tool: 'claude-cli', disabled: true }, { tool: 'copilot-cli', disabled: true }, { tool: 'codex-cli', disabled: true }, { tool: 'pi-cli', disabled: false }, { tool: 'opencode-cli', disabled: false }, { tool: 'antigravity-cli', disabled: false }], losers: [], orderProved: true },
@@ -18734,9 +18731,9 @@ async function libraryFlow() {
         const row = document.getElementById('history-row-fold-clash');
         const name = row?.querySelector('.history-what strong'), about = row?.querySelector('.history-about'), acts = row?.querySelector('.history-actions');
         const nr = name?.getBoundingClientRect(), ar = about?.getBoundingClientRect(), br = acts?.getBoundingClientRect();
-        return { buttons: [...(acts?.querySelectorAll('button') ?? [])].map(b => b.textContent?.trim()), nameW: Math.round(nr?.width ?? 0), nameWhole: !!(name && nr && nr.width > 0 && name.scrollWidth <= name.clientWidth + 1), underAbout: !!(ar && br && br.top >= ar.bottom - 1 && Math.abs(br.left - ar.left) <= 2) };
+        return { buttons: [...(acts?.querySelectorAll('button, summary') ?? [])].map(b => b.textContent?.trim()), nameW: Math.round(nr?.width ?? 0), nameWhole: !!(name && nr && nr.width > 0 && name.scrollWidth <= name.clientWidth + 1), underAbout: !!(ar && br && br.top >= ar.bottom - 1 && Math.abs(br.left - ar.left) <= 2) };
       })()`);
-      same('at 860 with conflict version menu button, the item name keeps its width in sight and actions sit under the sentence',
+      same('at 860 with conflict version fold, the item name keeps its width in sight and actions sit under the sentence',
         [clash860.buttons, clash860.nameW >= 50, clash860.nameWhole, clash860.underAbout],
         [['See change', 'Undo', 'Use another version…'], true, true, true]);
     } else {
@@ -18833,97 +18830,72 @@ async function libraryFlow() {
   same('at 1316, bench-runner’s file opens under its row, nothing cut off', [wide.row, await o.run(CUT_OFF)], [benchFirst, []]);
   await historyShot('history-file-open-1316-dark', 'dark');
   await o.click(benchMark(benchFirst));
-  // History version-choices menu: 3 choices at 1316 fit in 1–2 lines, keys & Escape, Escape over open file panel, second row closes first,
-  // foot placement flips above, pressing a choice writes all tools + shows band with Undo (byte-for-byte back), 2→1 becomes link, and redraw closes menu focusing trigger.
+  // History kept-versions list: fits at 1316 and 860; file mark opens kept version under the row with the list still open;
+  // keyboard Use writes every tool copy, shows band with Undo (byte-for-byte back), and moves focus to next Use (3→2) or surviving single link (2→1).
   await o.run(`document.getElementById('history-scroll').scrollTop = 0`);
   const clash1316 = await o.run(`(() => {
-    const row = document.getElementById('history-row-fold-clash'), acts = row?.querySelector('.history-actions');
+    const acts = document.querySelector('#history-row-fold-clash .history-actions');
     const one = document.getElementById('history-row-fold-one-choice');
     return {
-      buttons: [...(acts?.querySelectorAll('button') ?? [])].map(b => b.textContent?.trim()),
       actsH: Math.round(acts?.getBoundingClientRect().height ?? 0),
-      about: row?.querySelector('.history-about')?.textContent?.trim(),
-      folds: row?.querySelectorAll('details.fold').length ?? 0,
-      oneButtons: [...(one?.querySelectorAll('.history-actions button') ?? [])].map(b => b.textContent?.trim()),
-      oneAbout: one?.querySelector('.history-about')?.textContent?.trim(),
+      oneMark: one?.querySelector('.history-choice-one .row-file-btn')?.getAttribute('title') ?? '',
     };
   })()`);
-  same('at 1316, 3-choice conflict shows Use another version… in 1–2 lines without second sentence; 1-choice row keeps link and sentence',
-    [clash1316.buttons, clash1316.actsH <= 46, clash1316.about, clash1316.folds, clash1316.oneButtons, clash1316.oneAbout],
-    [['See change', 'Undo', 'Use another version…'], true, 'Codex’s edit was the latest, so it became the current version.', 0,
-      ['See change', 'Undo', 'Use Pi’s version'], 'Codex’s edit was the latest, so it became the current version. Pi’s is kept as a version.']);
+  same('at 1316, 3-choice conflict actions fit in 1–2 lines and 1-choice row has its kept-version mark',
+    [clash1316.actsH <= 46, clash1316.oneMark], [true, 'Read Pi’s version']);
   await historyShot('hh2-row-1316-dark', 'dark');
   await o.click('#history-versions-fold-clash');
-  await until(() => o.exists('#history-versions-menu-fold-clash'));
-  const menu1316 = await o.run(`(() => {
-    const m = document.getElementById('history-versions-menu-fold-clash'), t = document.getElementById('history-versions-fold-clash');
-    const mr = m.getBoundingClientRect(), tr = t.getBoundingClientRect();
-    return {
-      below: mr.top >= tr.bottom - 1,
-      head: m.querySelector('.history-menu-head')?.textContent?.trim(),
-      items: [...m.querySelectorAll('button[role="menuitem"]')].map(b => b.textContent?.trim()),
-    };
-  })()`);
-  same('at 1316, version menu opens below with provenance and 3 items, nothing cut off',
-    [menu1316, await o.run(CUT_OFF)],
-    [{ below: true, head: 'Edits from 3 of 6 tools are kept as versions.', items: ['Copilot CLI’s version', 'Pi’s version', 'OpenCode’s version'] }, []]);
-  await historyShot('hh2-menu-1316-dark', 'dark');
-  const menuKeyIds = [await o.run(`document.activeElement?.id`)];
-  for (const key of ['ArrowDown', 'End', 'Home', 'ArrowUp']) {
-    await o.press(key);
-    menuKeyIds.push(await o.run(`document.activeElement?.id`));
-  }
-  await o.press('Escape');
-  same('version menu keys cycle enabled items and Escape returns focus to trigger',
-    [menuKeyIds, await o.exists('.history-menu'), await o.run(`document.activeElement?.id`)],
-    [['history-fold-clash-copilot-cli', 'history-fold-clash-pi-cli', 'history-fold-clash-opencode-cli', 'history-fold-clash-copilot-cli', 'history-fold-clash-opencode-cli'], false, 'history-versions-fold-clash']);
-  // Second row's menu closes the first.
+  await until(() => o.exists('#history-versions-list-fold-clash'));
+  same('at 1316, open version list shows 3 kept versions with marks and Use, nothing cut off',
+    [await o.all('#history-versions-list-fold-clash .history-version-who', 'e.textContent'), await o.run(CUT_OFF)],
+    [['Copilot CLI’s version', 'Pi’s version', 'OpenCode’s version'], []]);
+  await historyShot('hh2-list-1316-dark', 'dark');
   await o.click('#history-versions-fold-clash');
-  await o.click('#history-versions-fold-chosen');
-  same('opening a second row’s version menu closes the first',
-    [await o.all('.history-menu', 'e.id'), await o.run(`document.getElementById('history-versions-fold-clash')?.getAttribute('aria-expanded')`)],
-    [['history-versions-menu-fold-chosen'], 'false']);
-  await o.press('Escape');
-  // Menu open with row's file panel open: Escape closes menu first, next Escape closes file panel.
-  await o.click('#history-row-fold-clash .row-file-btn');
-  await until(() => o.exists('.file-open-box'));
-  await o.click('#history-versions-fold-clash');
-  await until(() => o.exists('#history-versions-menu-fold-clash'));
-  await o.press('Escape');
-  const afterEsc1 = [await o.exists('.history-menu'), await o.run(`document.activeElement?.id`), await o.exists('.file-open-box')];
-  await o.press('Escape');
-  same('with file panel open, first Escape closes version menu and focuses trigger, second closes file panel',
-    [afterEsc1, await o.exists('.file-open-box')],
-    [[false, 'history-versions-fold-clash', true], false]);
-  // 860 light: row picture, menu picture, 1-choice picture, foot-row menu flips above.
+  await until(async () => !(await o.exists('#history-versions-list-fold-clash')));
+  // 860 light: rows shut, list open, kept version text open under row with list still open, one-choice row, and band after Use.
   await sizeTo(o, ...SMALLEST);
   await sidebarOpen();
   await o.run(`document.getElementById('history-scroll').scrollTop = 0; document.activeElement?.blur?.()`);
   await historyShot('hh2-row-860-light', 'light');
   await o.click('#history-versions-fold-clash');
-  await until(() => o.exists('#history-versions-menu-fold-clash'));
-  same('at 860, open version menu fits without clipping', await o.run(CUT_OFF), []);
-  await historyShot('hh2-menu-860-light', 'light');
+  await until(() => o.exists('#history-versions-list-fold-clash'));
+  same('at 860, open version list fits without clipping', await o.run(CUT_OFF), []);
+  await historyShot('hh2-list-860-light', 'light');
+  await o.click('#history-versions-list-fold-clash .history-version:nth-child(2) .row-file-btn');
+  await until(async () => (await o.text('#history-row-fold-clash .file-open-box pre.content') ?? '').includes('Pi conflict edit.'));
+  const keptPanel = await o.run(`(() => {
+    const row = document.getElementById('history-row-fold-clash');
+    return {
+      listOpen: !!row?.querySelector('#history-versions-list-fold-clash'),
+      now: [...(row?.querySelectorAll('.file-open-now') ?? [])].map(el => el.textContent),
+      text: row?.querySelector('.file-open-box pre.content')?.textContent ?? '',
+    };
+  })()`);
+  same('kept version mark opens Pi’s version text under the row with the list still open and nothing cut off',
+    [keptPanel.listOpen, keptPanel.now, keptPanel.text.includes('Pi conflict edit.'), await o.run(CUT_OFF)],
+    [true, ['Pi’s version', 'kept'], true, []]);
+  await historyShot('hh2-version-open-860-light', 'light');
   await o.press('Escape');
+  same('Escape closes kept version panel and refocuses its mark inside the still-open list',
+    [await o.exists('.file-open-box'), await o.exists('#history-versions-list-fold-clash'), await o.run(`document.activeElement?.getAttribute('title')`)],
+    [false, true, 'Read Pi’s version']);
+  await o.click('#history-versions-fold-clash');
+  await until(async () => !(await o.exists('#history-versions-list-fold-clash')));
   await o.run(`document.getElementById('history-row-fold-one-choice').scrollIntoView({ block: 'center' }); document.activeElement?.blur?.()`);
   await historyShot('hh2-one-choice-860-light', 'light');
-  await o.run(`document.getElementById('history-row-fold-foot').scrollIntoView({ block: 'end' })`);
-  await o.click('#history-versions-fold-foot');
-  await until(() => o.exists('#history-versions-menu-fold-foot'));
-  const footMenu = await o.run(`(() => {
-    const m = document.getElementById('history-versions-menu-fold-foot'), t = document.getElementById('history-versions-fold-foot');
-    const mr = m.getBoundingClientRect(), tr = t.getBoundingClientRect();
-    return { above: mr.bottom <= tr.top + 1 && mr.top >= 0 };
-  })()`);
-  same('button at the window’s foot opens its version menu above without clipping', [footMenu.above, await o.run(CUT_OFF)], [true, []]);
+  await o.click('#history-row-fold-one-choice .history-choice-one .row-file-btn');
+  await until(async () => (await o.text('#history-row-fold-one-choice .file-open-box pre.content') ?? '').includes('Pi chosen copy.'));
   await o.press('Escape');
-  // Press a menu item: makes Copilot CLI's version current in every written tool, gains current entry, shows band with Undo, clicked row keeps its menu (naming Copilot CLI as Also counted), and Undo restores byte for byte.
+  await until(async () => !(await o.exists('.file-open-box')));
+  // Keyboard Use on 3-choice row: writes all 5 tool copies, logs current entry, shows band with Undo, focuses next Use (Pi), and Undo restores byte for byte.
   await o.run(`document.getElementById('history-scroll').scrollTop = 0`);
   const activeDirs = oSkillDirs.filter(rel => existsSync(join(O.home, rel, 'active-skill')));
   const snapActive = () => Object.fromEntries(oSkillDirs.map(rel => [rel, existsSync(join(O.home, rel, 'active-skill')) ? tree(join(O.home, rel, 'active-skill')) : null]));
   const activeBefore = snapActive();
   await o.click('#history-versions-fold-clash');
-  await o.click('#history-fold-clash-copilot-cli');
+  await until(() => o.exists('#history-versions-list-fold-clash'));
+  await o.run(`document.getElementById('history-fold-clash-copilot-cli').focus()`);
+  await pressEnter(o);
   await done(o);
   const afterPick = await o.run(`(() => {
     const top = document.querySelector('.history-row');
@@ -18932,36 +18904,31 @@ async function libraryFlow() {
       topItem: top?.querySelector('.history-what strong')?.textContent?.trim(),
       band: document.querySelector('[data-outcome] .band-text')?.textContent?.trim() ?? '',
       undo: document.getElementById('outcome-undo')?.textContent?.trim() ?? '',
-      stillMenu: document.getElementById('history-versions-fold-clash')?.textContent?.trim() ?? '',
+      remaining: [...document.querySelectorAll('#history-versions-list-fold-clash .history-version-who')].map(el => el.textContent),
+      focused: document.activeElement?.id ?? '',
     };
   })()`);
-  same('picking a version writes every tool copy, logs current entry, shows History band with Undo, and keeps row’s menu',
+  same('keyboard Use writes every tool copy, logs current entry, shows History band with Undo, keeps list open and focuses next Use',
     [activeDirs.length === 5, activeDirs.every(rel => readFileSync(join(O.home, rel, 'active-skill/SKILL.md'), 'utf8').includes('Copilot CLI conflict edit.')),
       afterPick.topKind, afterPick.topItem, /^active-skill: the version edited in Copilot CLI \(.*\) was made current, in Claude Code, Copilot CLI, Codex, Pi and Antigravity\.$/.test(afterPick.band),
-      afterPick.undo, afterPick.stillMenu],
-    [true, true, 'current', 'active-skill', true, 'Undo', 'Use another version…']);
+      afterPick.undo, afterPick.remaining, afterPick.focused],
+    [true, true, 'current', 'active-skill', true, 'Undo', ['Pi’s version', 'OpenCode’s version'], 'history-fold-clash-pi-cli']);
   await historyShot('hh2-band-860-light', 'light');
-  await o.click('#history-versions-fold-clash');
-  same('after picking Copilot CLI’s version, row’s menu still names Copilot CLI under the 3-of-6 provenance line and offers the remaining 2',
-    [await o.text('#history-versions-menu-fold-clash .history-menu-also'), await o.all('#history-versions-menu-fold-clash button[role="menuitem"]', 'e.textContent')],
-    ['Also counted: Copilot CLI', ['Pi’s version', 'OpenCode’s version']]);
-  await o.press('Escape');
   await o.click('#outcome-undo');
   await done(o);
   same('band Undo puts active-skill back byte for byte in every tool', snapActive(), activeBefore);
-  // 2→1 transition: picking one of 2 choices on fold-chosen turns the row into a single link and restores its clause.
-  await o.click('#history-versions-fold-chosen');
-  await o.click('#history-fold-chosen-copilot-cli');
+  // 2→1 by keyboard on fold-chosen: open fold with Enter, focus Copilot CLI's Use, press Enter -> surviving single link takes focus.
+  await o.run(`document.getElementById('history-versions-fold-chosen').focus()`);
+  await pressEnter(o);
+  await until(() => o.exists('#history-versions-list-fold-chosen'));
+  await o.run(`document.getElementById('history-fold-chosen-copilot-cli').focus()`);
+  await pressEnter(o);
   await done(o);
-  same('after choosing one of 2 choices, row draws a single link and restores its kept-versions clause',
-    [await o.exists('#history-versions-fold-chosen'), await o.text('#history-fold-chosen-pi-cli'), await o.text('#history-row-fold-chosen .history-about')],
-    [false, 'Use Pi’s version', 'You chose Codex’s copy; Copilot CLI and Pi’s are kept as versions.']);
-  // History redrawing for a new entry while a menu is open closes the menu and focuses its button.
-  await o.click('#history-versions-fold-clash');
-  await until(() => o.exists('#history-versions-menu-fold-clash'));
-  writeFileSync(join(O.home, '.claude/skills/active-skill/SKILL.md'), text('active-skill', 'Edited while version menu open.'));
-  check('redraw for a new entry closes open version menu and focuses its trigger button',
-    await until(async () => !(await o.exists('.history-menu')) && (await o.run(`document.activeElement?.id`)) === 'history-versions-fold-clash'));
+  same('2→1 by keyboard leaves the single link with its mark and focuses that link',
+    [await o.exists('#history-versions-fold-chosen'), await o.text('#history-fold-chosen-pi-cli'),
+      await o.run(`document.querySelector('#history-row-fold-chosen .history-choice-one .row-file-btn')?.getAttribute('title')`),
+      await o.run(`document.activeElement?.id`)],
+    [false, 'Use Pi’s version', 'Read Pi’s version', 'history-fold-chosen-pi-cli']);
   await fullSize(o);
   // With OpenCode not managed: neither the opened Off row nor History after clicking Claude Code mentions OpenCode.
   await o.click('#nav-harnesses');
@@ -18979,7 +18946,8 @@ async function libraryFlow() {
   await done(o);
   await o.click('#nav-history');
   await until(() => o.exists('.history-row'));
-  check('leaving History and returning clears the finished version-choice band', !(await o.exists('[data-outcome]')));
+  same('leaving History and returning clears the finished version-choice band and open version list',
+    [await o.exists('[data-outcome]'), await o.exists('#history-versions-list-fold-clash')], [false, false]);
   const latestUnmanaged = await o.run(`(() => { const row = [...document.querySelectorAll('.history-row')].find(el => el.querySelector('.history-what strong')?.textContent === 'bench-runner'); return { about: row?.querySelector('.history-about')?.textContent?.trim(), act: row?.querySelector('.history-actions button')?.textContent?.trim() }; })()`);
   same('with OpenCode not managed, History entry omits OpenCode reads it too',
     [latestUnmanaged.about, latestUnmanaged.act], ['Turned on in Claude Code; kept out of every other tool.', 'Undo']);

@@ -3,7 +3,7 @@
 // click each action runs: tests/agents.test.ts and tests/agentswalk.test.ts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { doneWords, entryKind, everythingAction, everythingPlan, everythingSentence, keptVersionsNote, libraryAction, libraryEntry, librarySentence, restorePlan, versionChoices, type ItemNow } from '../src/historyactions.ts';
+import { doneWords, entryKind, everythingAction, everythingPlan, everythingSentence, libraryAction, libraryEntry, librarySentence, restorePlan, versionChoices, type ItemNow } from '../src/historyactions.ts';
 import { libraryWords } from '../src/libraryrow.ts';
 import { newItem, type LibraryItem } from '../src/library.ts';
 import type { HarnessId, HistoryEvent } from '../src/types.ts';
@@ -130,26 +130,23 @@ test('A conflict with three or more losing tools formats them through options.to
   assert.equal(formatted?.text, 'Codex’s edit was the latest, so it became the current version. Edits from [3/6] are kept as versions.');
   assert.equal(librarySentence(multi, libraryWords.agents, six)?.text,
     'Codex’s edit was the latest, so it became the current version. Edits from Copilot CLI, Pi and OpenCode are kept as versions.');
-  // When 2+ choices move into the menu, conflict and chosen drop their kept-versions clause on the row and keptVersionsNote produces it once for the menu; kept-edit and on stay on the row.
-  const twoConflict = entry({ kind: 'conflict', winner: { tool: 'codex-cli', hash: 'b' }, previous: 'a', losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }] });
+  // When the row offers one or more version choices (options.choices), conflict and chosen drop their kept-versions clause; kept-edit and on stay as they are.
+  const oneConflict = entry({ kind: 'conflict', winner: { tool: 'codex-cli', hash: 'b' }, previous: 'a', losers: [{ tool: 'pi-cli', hash: 'y' }] });
   const twoChosen = entry({ kind: 'chosen', winner: { tool: 'codex-cli', hash: 'b' }, losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }] });
   const keptEdit = entry({ kind: 'kept-edit', losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }] });
   const onOver = entry({ kind: 'on', cause: 'switch', losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }], tookFrom: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }] });
-  assert.equal(librarySentence(multi, libraryWords.agents, six, undefined, false, { row: true, choicesInMenu: true })?.text,
+  assert.equal(librarySentence(multi, libraryWords.agents, six, undefined, false, { row: true, choices: true })?.text,
     'Codex’s edit was the latest, so it became the current version.');
-  assert.deepEqual(keptVersionsNote(multi, six, (touched, inHome) => `${touched.length} of ${inHome.length} tools`),
-    { text: 'Edits from 3 of 6 tools are kept as versions.', tools: ['copilot-cli', 'pi-cli', 'opencode-cli'] });
-  assert.deepEqual(keptVersionsNote(twoConflict, six),
-    { text: 'Copilot CLI and Pi’s is kept as a version.', tools: ['copilot-cli', 'pi-cli'] });
-  assert.equal(librarySentence(twoChosen, libraryWords.agents, six, undefined, false, { row: true, choicesInMenu: true })?.text,
+  assert.equal(librarySentence(oneConflict, libraryWords.agents, six, undefined, false, { row: true, choices: true })?.text,
+    'Codex’s edit was the latest, so it became the current version.');
+  assert.equal(librarySentence(oneConflict, libraryWords.agents, six, undefined, false, { row: true })?.text,
+    'Codex’s edit was the latest, so it became the current version. Pi’s is kept as a version.');
+  assert.equal(librarySentence(twoChosen, libraryWords.agents, six, undefined, false, { row: true, choices: true })?.text,
     'You chose Codex’s copy.');
-  assert.deepEqual(keptVersionsNote(twoChosen, six),
-    { text: 'Copilot CLI and Pi’s are kept as versions.', tools: ['copilot-cli', 'pi-cli'] });
-  assert.equal(librarySentence(keptEdit, libraryWords.agents, six, undefined, false, { row: true, choicesInMenu: true })?.text,
+  assert.equal(librarySentence(keptEdit, libraryWords.agents, six, undefined, false, { row: true, choices: true })?.text,
     librarySentence(keptEdit, libraryWords.agents, six, undefined, false, { row: true })?.text);
-  assert.equal(librarySentence(onOver, libraryWords.agents, six, undefined, false, { row: true, choicesInMenu: true })?.text,
+  assert.equal(librarySentence(onOver, libraryWords.agents, six, undefined, false, { row: true, choices: true })?.text,
     librarySentence(onOver, libraryWords.agents, six, undefined, false, { row: true })?.text);
-  assert.deepEqual([keptVersionsNote(keptEdit, six), keptVersionsNote(onOver, six)], [undefined, undefined]);
 });
 
 test('A library conflict with no losing tools recorded reads its prefix alone without calling options.tools', () => {

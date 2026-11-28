@@ -6,18 +6,20 @@ import type { AppPreferences, HarnessId, HistoryEvent, HomeView } from '../src/t
 import { findById, findNode, installDom, textOf, type FakeNode } from './domstub.ts';
 
 let rendered: FakeNode | undefined;
+let onRestore: ((choice?: string) => void) | undefined;
 const restoreCalls: [string, string, string | undefined][] = [];
 const settings: AppPreferences = { appearance: 'system', historyDays: 30, pluginUpdates: true, pluginText: true, signIn: { on: false, available: true } };
 const noop = () => {};
 installDom({
   getSettings: async () => ({ ...settings }),
-  restore: async (id: string, home: string, choice?: string) => { restoreCalls.push([id, home, choice]); return { results: [], harnessWrites: 0, reloads: [] }; },
+  restore: async (id: string, home: string, choice?: string) => { restoreCalls.push([id, home, choice]); onRestore?.(choice); return { results: [], harnessWrites: 1, reloads: [], made: [] }; },
+  refresh: async () => state.home!,
+  history: async () => ({ events: state.history.data ?? [], days: 30 }),
   onPluginTextChanged: noop, onUpdatesChanged: noop, onPluginUpdatesChanged: noop, onNavigate: noop,
   onSettingsChanged: noop, onSyncChanged: noop, onSessionCostsChanged: noop, onSaid: noop,
-}, { byId: id => findById(rendered, id) ?? findById(document.body as unknown as FakeNode, id) ?? null });
+}, { byId: id => findById(rendered, id) ?? null });
 
 const { setRenderer, state } = await import('../src/app.ts');
-const { runAfterLayout } = await import('../src/dom.ts');
 const { loadSettings } = await import('../src/settingspage.ts');
 const { forgetHistoryFolds, historyPage } = await import('../src/historypage.ts');
 
@@ -114,64 +116,94 @@ test('History folds all-tools and conflict losers, leaves unrecorded and zero-lo
   }
   const trigger = findById(page, 'history-versions-lib-conflict');
   assert.equal(textOf(trigger), 'Use another version…');
-  assert.deepEqual([trigger?.attrs['aria-haspopup'], trigger?.attrs['aria-expanded']], ['menu', 'false']);
   assert.equal(findById(page, 'history-lib-conflict-copilot-cli'), undefined);
 });
 
-test('History version menu: kept-edit/on keep row text, shared hash names unlisted tool, acting() blocks item, redraw falls back to row when button goes', () => {
+test('History version fold: shared-tool line, file mark per kept version, 1-choice row with mark and no clause, acting() disables Use', () => {
   forgetHistoryFolds();
   state.page = 'history';
   state.busy = undefined;
   state.home = makeHome(six, six);
   const madeAt = '2026-11-27T10:00:00.000Z';
-  state.home.agents.library.reviewer = {
-    key: 'reviewer', name: 'reviewer', on: true, hash: 'w',
-    versions: ['w', 'x', 'y', 'z', 'p'].map(hash => ({ hash, at: madeAt, from: { how: 'edited', harness: 'codex-cli' } })),
-    except: [], applied: {}, own: {},
-  };
+  const versions = (hashes: string[]) => hashes.map(hash => ({ hash, at: madeAt, from: { how: 'edited' as const, harness: 'codex-cli' as HarnessId } }));
+  state.home.agents.library.reviewer = { key: 'reviewer', name: 'reviewer', on: true, hash: 'w', versions: versions(['w', 'x', 'y', 'z', 'p']), except: [], applied: {}, own: {} };
   const base = { at: madeAt, key: 'agent:reviewer', of: 'agent' as const, item: 'reviewer', orderProved: true };
   state.history.state = 'ready';
   state.history.data = [
     { ...base, id: 'c-dup', kind: 'conflict', winner: { tool: 'codex-cli', hash: 'w' }, previous: 'p', losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'x' }, { tool: 'opencode-cli', hash: 'z' }] },
-    { ...base, id: 'ch2', kind: 'chosen', winner: { tool: 'codex-cli', hash: 'w' }, losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }] },
-    { ...base, id: 'ke2', kind: 'kept-edit', losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }] },
-    { ...base, id: 'on2', kind: 'on', cause: 'switch', losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }], tookFrom: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }] },
+    { ...base, id: 'c1', kind: 'conflict', winner: { tool: 'codex-cli', hash: 'w' }, previous: 'p', losers: [{ tool: 'pi-cli', hash: 'y' }] },
   ];
 
-  const rowAbout = (page: FakeNode, id: string) => textOf(findNode(findById(page, `history-row-${id}`), el => el.classList.contains('history-about')));
-  const openMenus = () => (document.body as unknown as FakeNode).querySelectorAll('.history-menu');
   let page = draw();
+  // 1-choice row has link + file mark beside it and omits kept-versions clause.
+  const row1 = findById(page, 'history-row-c1')!;
+  assert.deepEqual([
+    textOf(findById(row1, 'history-c1-pi-cli')),
+    findNode(findNode(row1, el => el.classList.contains('history-choice-one')), el => el.classList.contains('row-file-btn'))?.attrs.title,
+    textOf(findNode(row1, el => el.classList.contains('history-about'))),
+  ], ['Use Pi’s version', 'Read Pi’s version', 'Codex’s edit was the latest, so it became the current version.']);
 
-  // kept-edit and on keep their row explanations and open menus with no provenance header; chosen moves its clause into the menu.
-  assert.equal(rowAbout(page, 'ke2'), 'Edited in Copilot CLI and Pi, not taken in yet; it gave way to the current version and is kept as a version.');
-  assert.match(rowAbout(page, 'on2'), /Copilot CLI and Pi’s own copies were written over and kept as a version\./);
-  findById(page, 'history-versions-ke2')!.click();
-  assert.equal(openMenus()[0]?.querySelector('.history-menu-head'), null);
-  findById(page, 'history-versions-on2')!.click();
-  assert.equal(openMenus()[0]?.querySelector('.history-menu-head'), null);
-  findById(page, 'history-versions-ch2')!.click();
-  assert.equal(textOf(openMenus()[0]?.querySelector('.history-menu-head')), 'Copilot CLI and Pi’s are kept as versions.');
+  // Shared hash shares one line with combined name, file mark, and Use (accessible name + hover).
+  page = openFold(page, 'history-versions-fold-c-dup');
+  const dupList = findById(page, 'history-versions-list-c-dup')!;
+  const dupLines = dupList.children as FakeNode[];
+  assert.deepEqual(dupLines.map(li => [
+    textOf(findNode(li, el => el.classList.contains('history-version-who'))),
+    findNode(li, el => el.classList.contains('row-file-btn'))?.attrs.title,
+    textOf(findNode(li, el => el.classList.contains('btn'))),
+    findNode(li, el => el.classList.contains('btn'))?.attrs['aria-label'],
+    findNode(li, el => el.classList.contains('btn'))?.attrs.title,
+  ]), [
+    ['Copilot CLI and Pi’s version', 'Read Copilot CLI and Pi’s version', 'Use', 'Use Copilot CLI and Pi’s version', 'Use Copilot CLI and Pi’s version'],
+    ['OpenCode’s version', 'Read OpenCode’s version', 'Use', 'Use OpenCode’s version', 'Use OpenCode’s version'],
+  ]);
 
-  // Redraw when choices drop below 2 closes the open menu and falls back focus to the row.
-  state.home.agents.library.reviewer.hash = 'x';
-  page = draw();
-  runAfterLayout();
-  assert.deepEqual([openMenus().length, (document.activeElement as unknown as FakeNode)?.attrs.id], [0, 'history-row-ch2']);
-
-  // Shared hash in conflict: Pi shares Copilot CLI's hash -> Pi is named under Also counted; acting() keeps item inert and disables trigger.
-  state.home.agents.library.reviewer.hash = 'w';
-  page = draw();
-  findById(page, 'history-versions-c-dup')!.click();
-  const dupMenu = findById(document.body as unknown as FakeNode, 'history-versions-menu-c-dup')!;
-  assert.deepEqual([textOf(dupMenu.querySelector('.history-menu-also')), dupMenu.querySelectorAll('button[role^="menuitem"]').map(textOf)],
-    ['Also counted: Pi', ['Copilot CLI’s version', 'OpenCode’s version']]);
-  restoreCalls.length = 0;
+  // acting() disables Use with busy title.
   state.busy = 'Syncing…';
-  findById(dupMenu, 'history-c-dup-copilot-cli')!.click();
-  assert.deepEqual(restoreCalls, []);
   page = draw();
-  assert.deepEqual(['disabled' in (findById(page, 'history-versions-c-dup')?.attrs ?? {}), findById(page, 'history-versions-c-dup')?.attrs.title], [true, 'Syncing…']);
+  const busyUse = findById(page, 'history-c-dup-copilot-cli')!;
+  assert.deepEqual(['disabled' in busyUse.attrs, busyUse.attrs.title], [true, 'Syncing…']);
   state.busy = undefined;
+  forgetHistoryFolds();
+});
+
+test('History keyboard Use moves focus to the same row’s next Use, then surviving single link, then row', async () => {
+  forgetHistoryFolds();
+  state.page = 'history';
+  state.busy = undefined;
+  state.home = makeHome(six, six);
+  const madeAt = '2026-11-27T10:00:00.000Z';
+  const versions = (hashes: string[]) => hashes.map(hash => ({ hash, at: madeAt, from: { how: 'edited' as const, harness: 'codex-cli' as HarnessId } }));
+  state.home.agents.library.reviewer = { key: 'reviewer', name: 'reviewer', on: true, hash: 'w', versions: versions(['w', 'x', 'y', 'z', 'p']), except: [], applied: {}, own: {} };
+  const base = { at: madeAt, key: 'agent:reviewer', of: 'agent' as const, item: 'reviewer', orderProved: true };
+  state.history.state = 'ready';
+  state.history.data = [
+    { ...base, id: 'c3', kind: 'conflict', winner: { tool: 'codex-cli', hash: 'w' }, previous: 'p', losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }, { tool: 'opencode-cli', hash: 'z' }] },
+    { ...base, id: 'ch2', kind: 'chosen', winner: { tool: 'codex-cli', hash: 'w' }, losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }] },
+  ];
+  const pressKey = (id: string) => { const el = findById(rendered, id)!; el.focus(); el.onclick?.({ detail: 0, stopPropagation() {} }); };
+
+  // 3→2: focuses next Use in same row.
+  openFold(draw(), 'history-versions-fold-c3');
+  onRestore = choice => { if (choice) state.home!.agents.library.reviewer!.hash = choice; };
+  pressKey('history-c3-copilot-cli');
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal((document.activeElement as unknown as FakeNode)?.attrs.id, 'history-c3-pi-cli');
+
+  // 2→1: focuses surviving single link; 1→0 (no choice left): focuses row with tabIndex -1.
+  state.home.agents.library.reviewer.hash = 'w';
+  openFold(draw(), 'history-versions-fold-ch2');
+  pressKey('history-ch2-copilot-cli');
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal((document.activeElement as unknown as FakeNode)?.attrs.id, 'history-ch2-pi-cli');
+  onRestore = choice => {
+    state.home!.agents.library.reviewer!.hash = choice!;
+    state.home!.agents.library.reviewer!.versions = versions(['w', choice!]);
+  };
+  pressKey('history-ch2-pi-cli');
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual([(document.activeElement as unknown as FakeNode)?.attrs.id, findById(rendered, 'history-row-ch2')?.tabIndex], ['history-row-ch2', -1]);
+  onRestore = undefined;
   forgetHistoryFolds();
 });
 
