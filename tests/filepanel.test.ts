@@ -11,13 +11,16 @@ import { findNode, installDom, textOf, type FakeNode } from './domstub.ts';
 // Central Knot's store keeps notes's (h1), guide's (a2) and docs's (s2) current versions, gone's last version (h2), and no longer keeps old's (h3: let go at History's days); a tool's copy reads otherwise.
 // It keeps scout's (an agent's: a1) and tracker's (a server's: s1) last versions too: each read by its key and hash.
 const { dispatch } = installDom({
-  skillVersionFile: async (key: string, hash: string) => (key === 'notes' && hash === 'h1' ? { files: ['SKILL.md'], text: 'notes, as Central Knot stores it' }
+  skillVersionFile: async (key: string, hash: string, file = 'SKILL.md') => (key === 'notes' && hash === 'h1' ? { files: ['SKILL.md'], text: 'notes, as Central Knot stores it' }
+    : key === 'notes' && hash === 'h4' ? { files: ['SKILL.md', 'extra.md'], text: file === 'extra.md' ? 'extra kept file' : 'notes, pi kept version' }
     : key === 'gone' && hash === 'h2' ? { files: ['SKILL.md'], text: 'gone, as Central Knot kept it' } : null),
   skillFoundFile: async () => ({ files: ['SKILL.md'], text: 'a tool’s copy of gone' }),
   agentVersion: async (key: string, hash: string) => (key === 'guide' && hash === 'a2' ? { name: 'guide', description: 'Guides.', prompt: 'Stored agent prompt.' }
+    : key === 'guide' && hash === 'a3' ? { name: 'guide', description: 'Pi guide.', prompt: 'Pi kept agent prompt.' }
     : key === 'scout' && hash === 'a1' ? { name: 'scout', description: 'Scouts.', prompt: 'Look around first.' } : null),
   agentFile: async () => ({ files: ['guide.md'], directory: '/home/.claude/agents', text: 'Edited agent in Claude Code.' }),
   serverStored: async (key: string, hash: string) => (key === 'docs' && hash === 's2' ? { files: [], text: '{ "command": "stored-docs" }' }
+    : key === 'docs' && hash === 's3' ? { files: [], text: '{ "command": "pi-docs" }' }
     : key === 'tracker' && hash === 's1' ? { files: [], text: '{ "command": "tracker" }' } : null),
   serverEntry: async () => ({ files: ['.claude.json'], directory: '/home', holder: 'mcpServers', text: '{ "command": "claude-edit" }' }),
   pluginItemTexts: async (plugin: string, _market: string, kind: string, name: string) => (name === 'missing' ? []
@@ -27,7 +30,7 @@ const { dispatch } = installDom({
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 await import('../src/settingspage.ts');
 const { setRenderer, state } = await import('../src/app.ts');
-const { itemFile, keptFile, pagePlace, placePanel } = await import('../src/filepanel.ts');
+const { itemFile, keptFile, pagePlace, placePanel, versionFile } = await import('../src/filepanel.ts');
 
 const tools: HarnessId[] = ['claude-cli', 'codex-cli'];
 const kind = { tools, items: [], library: {}, notices: [], gate: { state: 'open' }, unread: [], problems: [], access: { allowed: true } };
@@ -193,6 +196,53 @@ test('Escape on the page closes its file after whatever else on the page heard i
   assert.deepEqual([asking, draw().open], [false, 1]);
   escape();
   assert.equal(draw().open, undefined);
+});
+
+test('versionFile opens a live item’s kept version by hash with tool heading, multi-file skill tabs, agent/server definitions, shared-tool wording, and missing-bytes state', async () => {
+  state.home = homeAt('/tmp/filepanel-version');
+  assert.equal(versionFile(place, 'skills', 'gone', 'h2', 'pi-cli', 'ev1'), undefined);
+  for (const [kind, key, hash, tool, openTitle, heading, shownText, hasTabs] of [
+    ['skills', 'notes', 'h4', 'pi-cli', 'Read Pi’s version', ['Pi’s version', 'kept'], 'notes, pi kept version', true],
+    ['skills', 'notes', 'h4', ['copilot-cli', 'pi-cli'] as const, 'Read Copilot CLI and Pi’s version', ['Copilot CLI and Pi’s version', 'kept'], 'notes, pi kept version', true],
+    ['agents', 'guide', 'a3', 'pi-cli', 'Read Pi’s version', ['Pi’s version', 'kept'], 'Pi kept agent prompt.', false],
+    ['mcp', 'docs', 's3', 'pi-cli', 'Read Pi’s version', ['Pi’s version', 'kept'], '{ "command": "pi-docs" }', false],
+  ] as const) {
+    const drawHere = () => {
+      const mark = versionFile(place, kind, key, hash, tool, 'ev1');
+      return { mark: mark?.mark as unknown as FakeNode, panel: placePanel(place, [mark])?.panel as unknown as FakeNode | undefined };
+    };
+    const before = drawHere();
+    assert.deepEqual([before.mark.attrs.title, before.mark.attrs['aria-label']], [openTitle, `${openTitle} of ${key}`], `${kind}-${hash}`);
+    before.mark.click();
+    await new Promise(resolve => setTimeout(resolve));
+    const panel = drawHere().panel;
+    assert.deepEqual([
+      allOf(panel, el => el.classList.contains('file-open-now')).map(textOf),
+      !!findNode(panel, el => el.attrs.role === 'tablist'),
+      allOf(panel, el => el.tag === 'pre').map(textOf).at(-1),
+    ], [heading, hasTabs, shownText], `${kind}-${hash}`);
+    if (hasTabs) {
+      const extraTab = allOf(panel, el => el.classList.contains('file-tab')).find(el => textOf(el) === 'extra.md');
+      assert.ok(extraTab);
+      extraTab.click();
+      await new Promise(resolve => setTimeout(resolve));
+      assert.equal(textOf(findNode(drawHere().panel, el => el.tag === 'pre')), 'extra kept file');
+    }
+    drawHere().mark.click();
+  }
+  const drawMissing = () => {
+    const mark = versionFile(place, 'skills', 'notes', 'missing', 'pi-cli', 'ev2');
+    return { mark: mark?.mark as unknown as FakeNode, panel: placePanel(place, [mark])?.panel as unknown as FakeNode | undefined };
+  };
+  drawMissing().mark.click();
+  await new Promise(resolve => setTimeout(resolve));
+  const missingPanel = drawMissing().panel;
+  assert.deepEqual([
+    allOf(missingPanel, el => el.classList.contains('file-open-now')).map(textOf),
+    !!findNode(missingPanel, el => el.classList.contains('file-tab')),
+    textOf(findNode(missingPanel, el => el.classList.contains('file-open-state'))),
+  ], [['Pi’s version'], false, 'Central Knot no longer keeps this version.']);
+  drawMissing().mark.click();
 });
 
 test('a plugin’s agent or server opens through pluginItemTexts: differing versions offer each tool’s copy, same versions collapse to one, a turned-off plugin still opens, and an empty read says it couldn’t be read', async () => {

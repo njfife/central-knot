@@ -1306,8 +1306,9 @@ span.ins-confirm { margin-top: 0; }
   .history-row { grid-template-columns: minmax(80px, max-content) minmax(0, 1fr); column-gap: 16px; row-gap: 2px; }
   .history-about { grid-column: 2 / -1; grid-row: 2; margin-left: 22px; }
   .history-row > .history-actions { grid-column: 2 / -1; grid-row: 3; justify-content: flex-start; margin: 2px 0 0 22px; text-align: left; }
-  .history-row > .history-actions:not(:has(button, .history-done)) { display: none; }
+  .history-row > .history-actions:not(:has(button, summary, .history-done)) { display: none; }
   .history-row > .history-actions .btn.link { text-align: left; }
+  .history-row > .history-versions { grid-column: 2 / -1; margin: 6px 0 0 22px; }
   .history-row > .change-panel, .history-row > .manage-question, .history-row > .details-file-only { margin-top: 10px; }
   /* The name takes the line it is on. */
   .history-row .history-what > strong { max-width: none; }
@@ -1324,6 +1325,15 @@ span.ins-confirm { margin-top: 0; }
 .history-undone .history-what strong, .history-what > strong.history-gone { color: var(--ink-soft); }
 .history-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 2px 12px; text-align: right; }
 .history-actions .btn.link { flex: 0 1 auto; min-width: 0; height: auto; padding: 0; white-space: normal; text-align: right; }
+/* Version choices behind Use another version… (historypage.ts versionList) and one-choice link + file mark. */
+.history-actions > .fold { display: inline; }
+.history-actions > .fold::details-content { display: none; }
+.history-actions > .fold > summary { margin: 0; padding: 0; gap: 2px; font: 500 13px/20px var(--sans); }
+.history-choice-one { display: inline-flex; align-items: center; gap: 6px; }
+.history-choice-one > .row-file-btn, .history-version > .row-file-btn { width: 20px; height: 20px; margin-left: 0; }
+.history-versions { grid-column: 3 / -1; list-style: none; margin: -4px 0 0 -8px; padding: 8px 0 2px; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line); }
+.history-version { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12.5px; color: var(--ink); }
+.history-version > .btn.link { height: auto; padding: 0; margin-left: 4px; }
 /* The question before a tool left out is managed again, in its History row and in its Harnesses card (managecard.ts manageQuestion). */
 .history-row > .manage-question { grid-column: 1 / -1; }
 /* An item's file, opened at its name's mark (historypage.ts fileMark), spans the row under the sentence and the actions. */
