@@ -132,12 +132,13 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
   };
 
   const copy = ref.from === 'marketplace' ? ' · the marketplace’s copy' : undefined;
+  const entrySuffix = `${copy ?? ''} · ${ref.event}`;
   const panel = (source?: HookSource): HTMLElement => h('div.hook-source', { id: panelId, onkeydown: onEscape },
     !source ? h('p.hook-source-note', {}, 'Reading…')
       : source.problem ? sourceBlock(`${base}-err`, source.file, undefined, source.problem)
       : [
-        source.script ? sourceBlock(`${base}-script`, source.script.path, source.script.text, source.script.problem, undefined, !source.file ? copy : undefined) : null,
-        source.entry !== undefined && source.file ? sourceBlock(`${base}-entry`, source.file, source.entry, undefined, 'Declared in', copy) : null,
+        source.script ? sourceBlock(`${base}-script`, source.script.path, source.script.text, source.script.problem, undefined, source.entry !== undefined && source.file ? undefined : entrySuffix) : null,
+        source.entry !== undefined && source.file ? sourceBlock(`${base}-entry`, source.file, source.entry, undefined, 'Declared in', entrySuffix) : null,
       ]);
   const control = (open: boolean): HTMLElement => rowLink(open ? 'Hide source' : 'View source', btnId, toggle,
     { 'data-hook-source': '', 'aria-expanded': String(open), ...(open ? { 'aria-controls': panelId } : {}), onkeydown: onEscape });
@@ -152,8 +153,8 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
 
   const runPanel = (entry: RunEntry): HTMLElement => {
     const result = entry.result!;
-    const tool = 'tool' in ref ? ref.tool : 'claude-cli';
-    const view = hookRunWords(tool, result, result.cwd ? shownPath(result.cwd) : '~');
+    const knownTool = 'tool' in ref ? ref.tool : undefined;
+    const view = hookRunWords(knownTool ?? 'claude-cli', result, result.cwd ? shownPath(result.cwd) : '~', undefined, knownTool);
     const flip = (which: 'openAll' | 'openErr', focusId: string) => () => {
       const live = runs.get(key);
       if (!live?.result) return;
@@ -274,7 +275,7 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
 /** One hook row (when it runs, its command, optional quiet tag, and its Run it / Stop / View source controls and inline panels), shared by Instructions and a plugin's page. */
 export function hookRow(hook: TextHookRow, id: string): HTMLElement {
   return h('li.session-hook', {},
-    h('span.session-lead', {}, h('span.session-when', {}, sentence(hook.when)), h('code.session-command', {}, hook.command),
+    h('span.session-lead', {}, h('span.session-when', { title: hook.source.event }, sentence(hook.when)), h('code.session-command', {}, hook.command),
       hook.tag ? h('span.session-when', {}, hook.tag) : null),
     hookSourceControls(hook.source, id));
 }
