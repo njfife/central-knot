@@ -1721,7 +1721,7 @@ test('A one-tool click writes nothing and returns the refusal when that tool is 
   } finally { await box.cleanup(); }
 });
 
-test('Unreadable Claude Code settings.json reports ownSettings unknown in detail, carries deleted unknown through undoTurn and IPC validation', async () => {
+test('Unreadable Claude Code settings.json reports ownSettings unknown in detail, carries deleted unknown through turn, undoTurn and IPC validation', async () => {
   const box = await keptHome();
   try {
     await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
@@ -1730,26 +1730,30 @@ test('Unreadable Claude Code settings.json reports ownSettings unknown in detail
     const det = await box.markets.detail(box.root, 'pdf');
     assert.equal(det?.installed?.['claude-cli']?.ownSettings, 'unknown');
 
+    // While settings.json is unreadable, uninstall refuses as held (recordReadable).
+    const refused = await box.markets.turn(box.root, 'pdf', 'uninstall', 'claude-cli', box.home);
+    assert.equal(refused.done[0]?.report.outcome, 'held');
+    assert.deepEqual(refused.back, []);
+
     await rm(settingsPath, { force: true });
-    const before = (await box.record()).plugins.find(each => each.plugin === 'pdf')!;
-    const undone = await box.markets.undoTurn(box.root, 'pdf', before, [{ source: box.root, marketName: 'team', plugin: 'pdf', tool: 'claude-cli', action: 'install', deleted: 'unknown' }], box.home);
+    const gone = await box.markets.turn(box.root, 'pdf', 'uninstall', 'claude-cli', box.home);
+    const undone = await box.markets.undoTurn(box.root, 'pdf', gone.before!, [{ ...gone.back![0]!, deleted: 'unknown' }], box.home);
     assert.equal(undone.done[0]?.deleted, 'unknown');
 
-    // IPC sanitizer accepts deleted: 'unknown' on plugins:undo-turn.
+    // IPC sanitizer accepts deleted: 'unknown' on plugins:undo-turn (reaching writeAccess instead of malformed refusal) and rejects unknown strings.
     const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
-    registerMarketplaces((channel, fn) => { handlers.set(channel, fn); }, {
+    const reg = (channel: string, fn: (...args: unknown[]) => Promise<unknown>) => { handlers.set(channel, fn); };
+    registerMarketplaces({ handle: reg, handleNow: reg }, {
       home: () => ({ home: box.home, actual: true }),
       read: async () => ({ tools: ['claude-cli'], snapshots: [] }),
-      writeAccess: async () => ({ allowed: true }),
+      writeAccess: async () => ({ allowed: false, reason: 'Preview only here.' }),
       dataDir: join(box.base, 'ipc-data'),
       pickFolder: async () => undefined,
       openExternal: async () => {},
-    }, {
-      findClis: async () => ({ binaries: { 'claude-cli': '/bin/true' }, apps: {} }),
-      install: async (_ctx, _cat, _plugin, tool) => ({ tool, outcome: 'installed', message: 'Installed.', runs: [], changed: true }),
     });
-    const ipcOut = await handlers.get('plugins:undo-turn')!(box.root, 'pdf', before, [{ source: box.root, marketName: 'team', plugin: 'pdf', tool: 'claude-cli', action: 'install', deleted: 'unknown' }], box.home) as { stopped?: string; done: { deleted?: unknown }[] };
-    assert.equal(ipcOut.stopped, undefined);
-    assert.equal(ipcOut.done[0]?.deleted, 'unknown');
+    const accepted = await handlers.get('plugins:undo-turn')!(box.root, 'pdf', gone.before, [{ source: box.root, marketName: 'team', plugin: 'pdf', tool: 'claude-cli', action: 'install', deleted: 'unknown' }], box.home) as { stopped?: string };
+    assert.equal(accepted.stopped, 'Preview only here.');
+    const rejected = await handlers.get('plugins:undo-turn')!(box.root, 'pdf', gone.before, [{ source: box.root, marketName: 'team', plugin: 'pdf', tool: 'claude-cli', action: 'install', deleted: 'bogus' }], box.home) as { stopped?: string };
+    assert.equal(rejected.stopped, 'That request was malformed, so nothing ran.');
   } finally { await box.cleanup(); }
 });
