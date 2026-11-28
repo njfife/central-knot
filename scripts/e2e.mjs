@@ -1695,12 +1695,16 @@ async function manageFlow() {
   same('Cancel closes the question, writes nothing, and puts focus back on Manage Codex', [
     await a.exists('.manage-question'), codex(), (await a.all('.history-row', 'e.dataset.kind')).length, await a.run(`document.activeElement?.id`),
   ], [false, edited, rowsBefore, rejoinId]);
+  // A file open on History meanwhile: the question takes that Escape, and the file stays open.
+  await a.click('.history-row .row-file-btn');
+  await waitHistory(a, () => a.exists('.file-open-box'));
   await a.click(`#${rejoinId}`);
   await waitHistory(a, () => a.exists('[id^="history-manage-confirm-"]'));
   await a.press('Escape');
-  same('Escape cancels too, writes nothing, and puts focus back on Manage Codex', [
-    await a.exists('.manage-question'), codex(), (await a.all('.history-row', 'e.dataset.kind')).length, await a.run(`document.activeElement?.id`),
-  ], [false, edited, rowsBefore, rejoinId]);
+  same('Escape cancels too, writes nothing, and puts focus back on Manage Codex, a file open on History staying open', [
+    await a.exists('.manage-question'), codex(), (await a.all('.history-row', 'e.dataset.kind')).length, await a.run(`document.activeElement?.id`), await a.exists('.file-open-box'),
+  ], [false, edited, rowsBefore, rejoinId, true]);
+  await a.click('.history-row .row-file-btn[aria-pressed="true"]');
   await a.press(' ', 'Space');
   await waitHistory(a, () => a.exists('[id^="history-manage-confirm-"]'));
   await a.run(`document.querySelector('[id^="history-manage-confirm-"]').focus()`);
@@ -14052,9 +14056,9 @@ async function usageFlow() {
     [apart[1316].marks, apart[1316].gapsBelow.every(gap => gap >= 4), apart[1316].nameToMark, apart[860].gapsBelow.every(gap => gap >= 4), apart[860].nameToMark],
     [3, true, [4, 4, 4], true, [4, 4, 4]]);
   same('at 1316 and 860 Most used → ends the “Used in the last 30 days” line, at its right end, on no name’s line', [apart[1316].sorted, apart[860].sorted], [[true, true, true], [true, true, true]]);
-  same('a most used name’s hover says it opens its row in the Library; its mark’s, its file',
+  same('a most used name’s hover says it opens its row in the Library; its mark’s, its current version',
     [await a.all('#overview-skills-usage .kind-card-top-name', 'e.title'), await a.all('#overview-skills-usage .row-file-btn', 'e.title')],
-    [['alpha', 'echo', 'charlie'].map(name => `${name}: open its row in the Library`), ['Open file', 'Open file', 'Open file']]);
+    [['alpha', 'echo', 'charlie'].map(name => `${name}: open its row in the Library`), ['Open the current version', 'Open the current version', 'Open the current version']]);
   await a.click('#overview-unused');
   const allRows = await a.all('.ov-row[data-key]', 'e.dataset.key');
   const expectedUnused = [...['delta', ...extraUnusedSkills].map(key => rowPart('', 'skills', key)), ...extraUnusedAgents.map(key => rowPart('', 'agents', key))].sort();
@@ -17421,7 +17425,8 @@ async function libraryFlow() {
   const O = homeWith('library-off-one-tool');
   for (const folder of ['.copilot', '.codex', '.pi/agent', '.config/opencode', '.gemini/config']) mkdirSync(join(O.home, folder), { recursive: true });
   skill(O.claude, 'active-skill', text('active-skill', 'Always on.'));
-  skill(O.claude, 'bench-runner', text('bench-runner', 'Runs overnight throughput suites against local fixtures.'));
+  // bench-runner's file is long, so opened on History under a row near the foot it has the window to fill.
+  skill(O.claude, 'bench-runner', text('bench-runner', ['Runs overnight throughput suites against local fixtures.', ...Array.from({ length: 40 }, (_, at) => `Step ${at + 1} of the run.`)].join('\n')));
   skill(O.claude, 'legacy-skill', text('legacy-skill', 'Legacy skill.'));
   skill(O.claude, 'own-test', text('own-test', 'Checks an independent copy kept in another tool.'));
   agent(O.home, 'claude-cli', 'release-scribe', agentText('release-scribe', 'Drafts detailed post-release summaries.'));
@@ -17676,6 +17681,10 @@ async function libraryFlow() {
     { hash: 'y', at: foldAt(1), from: { how: 'edited', tool: 'pi-cli', replacedBy: clashItem.hash } },
     { hash: 'z', at: foldAt(1), from: { how: 'edited', tool: 'opencode-cli', replacedBy: clashItem.hash } },
   );
+  // The long-named entry's skill is one Central Knot holds (Off, legacy-skill's text), so its name on History has its mark.
+  const longKey = 'cross-workspace-release-migration-checklist-v2';
+  sFold.items[longKey] = { ...structuredClone(sFold.items['legacy-skill']), key: longKey, name: longKey, on: false, applied: {} };
+  cpSync(join(O.home, '.central-knot/items/skills/legacy-skill'), join(O.home, `.central-knot/items/skills/${longKey}`), { recursive: true });
   writeFileSync(oSkillRec, `${JSON.stringify(sFold, null, 2)}\n`);
   hFold.events.push(
     { id: 'fold-legacy', at: foldAt(7), key: 'instructions:old', item: 'old', kind: 'edit', winner: { tool: 'claude-cli', hash: 'a' }, losers: ['claude-cli', 'codex-cli', 'old-cli'].map(tool => ({ tool, hash: 'a' })), orderProved: true },
@@ -17774,6 +17783,57 @@ async function libraryFlow() {
   same('opened tool-list fold stays open through Refresh and closes on leaving History and returning',
     [foldAfterRefresh, await o.exists('#history-tools-names-fold-five-0'), await o.run(`document.getElementById('history-tools-fold-five-0')?.open ?? false`)],
     [[true, true], false, false]);
+  // A name History holds an item under has the Library's file mark after it. At 860: one press opens its text under that row, a
+  // second row naming it takes it, the profile menu's and the Keep confirmation's Escape leave it open and the next closes it,
+  // nothing cut off; under a row near the foot, its long file uses the window under that row, the next row in sight. At 1316: opened.
+  const benchRows = await o.run(`[...document.querySelectorAll('.history-row')].filter(row => row.querySelector('.history-what strong')?.textContent === 'bench-runner').map(row => row.id)`);
+  const [benchFirst, benchSecond] = benchRows, benchLast = benchRows.at(-1), benchMark = row => `#${row} .history-what strong + .row-file-btn`;
+  const fileUnder = () => o.run(`(() => { const box = document.querySelector('.file-open-box'), row = box?.closest('.history-row'), view = document.querySelector('#history-scroll').getBoundingClientRect();
+    return { row: row?.id ?? null, text: box?.querySelector('pre.content')?.textContent ?? '', boxes: document.querySelectorAll('.file-open-box').length,
+      rowAtTop: !!row && Math.abs(row.getBoundingClientRect().top - view.top) <= 40, nextInSight: !!row?.nextElementSibling && row.nextElementSibling.getBoundingClientRect().top < view.bottom - 8 }; })()`);
+  const openUnder = async row => { await o.click(benchMark(row)); await until(async () => (said => said.row === row && said.text.includes('name: bench-runner'))(await fileUnder())); await o.settle(); return fileUnder(); };
+  const historyShot = async (name, look) => { if (!shots) return; await theme(o, look); await o.settle(); await o.shot(name); await theme(o, 'light'); };
+  const sidebarOpen = async () => { if (await o.run(`document.getElementById('sidebar-toggle')?.getAttribute('aria-label') === 'Expand the sidebar'`)) await o.click('#sidebar-toggle'); await o.settle(); };
+  await sizeTo(o, ...SMALLEST);
+  await sidebarOpen();
+  await historyShot('history-file-marks-860-light', 'light');
+  const first = await openUnder(benchFirst);
+  same('at 860, bench-runner’s mark on History opens its text under that row', [first.row, first.text.startsWith('---\nname: bench-runner\n'), first.boxes], [benchFirst, true, 1]);
+  await historyShot('history-file-open-860-light', 'light');
+  const second = await openUnder(benchSecond);
+  same('at 860, a second row naming bench-runner takes its file, nothing cut off', [second.row, second.boxes, await o.run(CUT_OFF)], [benchSecond, 1, []]);
+  await historyShot('history-file-second-860-light', 'light');
+  await o.click('#status-profile');
+  await o.press('Escape');
+  const menuShut = [await o.exists('.pf-menu'), (await fileUnder()).boxes];
+  await keepFor(o, 7);
+  await o.run(`document.getElementById('history-shorten-cancel').focus()`);
+  await o.press('Escape');
+  const keptOpen = [await o.exists('#setting-history-question'), (await fileUnder()).boxes];
+  await o.press('Escape');
+  same('Escape closes the profile menu, then the Keep confirmation, the file staying open; the next closes the file, the focus back on its mark',
+    [menuShut, keptOpen, (await fileUnder()).boxes, await o.run(`document.activeElement === document.querySelector('${benchMark(benchSecond)}')`)], [[false, 1], [false, 1], 0, true]);
+  await o.run(`document.getElementById('${benchLast}').scrollIntoView({ block: 'end' })`);
+  const foot = await openUnder(benchLast);
+  same('at 860, opened at a row near the foot, bench-runner’s long file uses the window under that row, the next row in sight', [foot.rowAtTop, foot.nextInSight], [true, true]);
+  await historyShot('history-file-long-foot-860-light', 'light');
+  await o.click(benchMark(benchLast));
+  if (shots) {
+    await o.run(`document.getElementById('history-row-fold-long').scrollIntoView({ block: 'center' })`);
+    await historyShot('history-file-long-name-860-light', 'light');
+    // A skill's row with no mark (draft-rfc is not in Central Knot), its name hovered: its hover says so (a native tooltip, not in the picture).
+    const name = await o.run(`(box => [box.x + box.width / 2, box.y + box.height / 2])(document.querySelector('#history-row-fold-five .history-what strong').getBoundingClientRect())`);
+    await o.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: name[0], y: name[1] });
+    await historyShot('history-file-no-mark-860-light', 'light');
+  }
+  await sizeTo(o, 1316, 819);
+  await sidebarOpen();
+  await historyShot('history-file-marks-1316-dark', 'dark');
+  const wide = await openUnder(benchFirst);
+  same('at 1316, bench-runner’s file opens under its row, nothing cut off', [wide.row, await o.run(CUT_OFF)], [benchFirst, []]);
+  await historyShot('history-file-open-1316-dark', 'dark');
+  await o.click(benchMark(benchFirst));
+  await fullSize(o);
   // With OpenCode not managed: neither the opened Off row nor History after clicking Claude Code mentions OpenCode.
   await o.click('#nav-harnesses');
   await until(() => o.exists('#manage-opencode-cli'));
