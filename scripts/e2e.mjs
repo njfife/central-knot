@@ -12020,8 +12020,8 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   // (the page's own ask recorded in main as it came, then sent again after the change: a development run, which opens main).
   const refusedFrom = started().length;
   const ask = (tool, onHome, row, copy) => a.run(`window.centralKnot.startSignin(${JSON.stringify(tool)}, ${JSON.stringify(onHome)}, ${JSON.stringify(row)}, ${JSON.stringify(copy)})`);
-  same('another home, and a tool whose sign-in it doesn’t start, are refused', [await ask('codex-cli', join(scratch, 'another-home'), await rowIdOf(team), 'x'), await ask('pi-cli', home, await rowIdOf('oauth'), 'x')],
-    [{ notStarted: 'Another home is open' }, { notStarted: 'Central Knot doesn’t start Pi’s sign-in here' }]);
+  same('another home, and a tool whose sign-in it doesn’t start, are refused', [await ask('codex-cli', join(scratch, 'another-home'), await rowIdOf(team), 'x'), await ask('claude-cli', home, await rowIdOf('oauth'), 'x')],
+    [{ notStarted: 'Another home is open' }, { notStarted: 'Central Knot doesn’t start Claude Code’s sign-in here' }]);
   if (main) {
     await main.run(`(() => { const handlers = electron.ipcMain._invokeHandlers, real = handlers.get('mcp-signin:start'); globalThis.ckAside = real; globalThis.ckAsks = [];
       handlers.set('mcp-signin:start', (event, ...args) => { globalThis.ckAsks.push(args); return real(event, ...args); }); return true; })()`);
@@ -12279,6 +12279,196 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   await preview.quit();
   // The stand-in browsers are this check's own: ended here (each ends by itself after two minutes besides).
   for (const pid of browserPids()) try { process.kill(pid, 'SIGKILL'); } catch { /* already ended */ }
+}
+
+/**
+ * Pi's and OpenCode's sign-in on the MCP sign-in page (mcpsigninrun.ts startSignin; mcpsignin.ts addressAfter, signinEnd), with
+ * stand-ins for both found only in this flow's home, never this machine's own tools: each prints an address before its own line
+ * asking for the browser, the address after it (Pi's in two writes), and (Pi) one more; hands the address to `xdg-open` itself,
+ * as both do; and, once the address is opened, signs in, refuses (OpenCode, as it does, with exit 0 and Done), or waits. Main's
+ * opener (shell.openExternal) reaches an `xdg-open` of this home's, first on the path the app is given, which writes down each
+ * address (or fails, by a setting); the tools' own call reaches one that writes elsewhere, never main's. OpenCode's stand-in is one
+ * process that ignores TERM and, as OpenCode does, asks 127.0.0.1:19876 first and takes the port only when nothing answers.
+ * On Linux a cell that needs a sign-in offers Sign in; the tool's own command runs, its server's name (a space and a quote in it)
+ * one argument; the address after its line is opened once; Reopen opens it again while it waits, and is gone after; the browser
+ * not opened, a refusal and port 19876 held by another program (which lives on) are said in the cell with Try again and Copy;
+ * no list is run after; Stop, the limit and Quit leave nothing of OpenCode's running and its port free. On macOS and Windows the
+ * cells keep their Copy. With --shots, six pictures.
+ */
+async function mcpSigninPrintedFlow() {
+  const home = join(scratch, 'printed-home'), said = join(scratch, 'printed-said'), bin = join(home, '.local/bin'), opener = join(home, '.local/opener');
+  for (const folder of [bin, opener, said]) mkdirSync(folder, { recursive: true });
+  const team = "team's docs", P = port => `http://127.0.0.1:${port}/mcp`;
+  const write = (path, text) => { mkdirSync(dirname(join(home, path)), { recursive: true }); writeFileSync(join(home, path), text); };
+  write('.pi/agent/mcp.json', JSON.stringify({ mcpServers: { [team]: { url: P(47231) }, oauth: { url: P(47232) } } }));
+  write('.config/opencode/opencode.json', JSON.stringify({ mcp: { [team]: { type: 'remote', url: P(47231) }, oauth: { type: 'remote', url: P(47232) } } }));
+  const at = file => join(said, file), calls = at('calls.log'), mainOpened = at('main-opened.log'), toolOpened = at('tool-opened.log');
+  const lines = file => readNow(file).split('\n').filter(Boolean);
+  const address = name => `http://127.0.0.1:1/authorize?client_id=ck&state=${encodeURIComponent(name)}`;
+  writeFileSync(at('pi.list'), JSON.stringify({ servers: [team, 'oauth'].map(name => ({ name, enabled: true, state: 'needs-auth' })) }));
+  writeFileSync(at('opencode.list'), `┌  MCP Servers\n│\n${[team, 'oauth'].map(name => `●  ⚠ ${name} needs authentication\n│      ${P(47231)}\n│\n`).join('')}└  2 server(s)\n`);
+  // What both stand-ins share: their process written down, and whether main's opener has opened their address since they began.
+  const shared = tool => `const fs = require('fs'), net = require('net'), { spawn } = require('child_process'), name = process.argv[4];
+fs.writeFileSync(${JSON.stringify(at(`${tool}.pid`))}, String(process.pid));
+const mode = fs.readFileSync(${JSON.stringify(at(`${tool}.mode`))}, 'utf8').trim(), url = 'http://127.0.0.1:1/authorize?client_id=ck&state=' + encodeURIComponent(name);
+const seen = () => (fs.existsSync(${JSON.stringify(mainOpened)}) ? fs.readFileSync(${JSON.stringify(mainOpened)}, 'utf8').split('\\n').filter(Boolean).length : 0), before = seen();
+const once = then => setInterval(() => { if (mode !== 'wait' && seen() > before) then(); }, 50);
+const own = () => spawn('xdg-open', [url], { stdio: 'ignore' }).on('error', () => {});
+`;
+  writeFileSync(at('pi-login.cjs'), `${shared('pi')}process.stdout.write('Connecting to ${P(47231)}\\nSign in to MCP server "' + name + '" in your browser:\\n' + url.slice(0, 30));
+setTimeout(() => {
+  process.stdout.write(url.slice(30) + '\\nOr open http://127.0.0.1:1/other\\n');
+  own();
+  once(() => { if (mode === 'accept') { console.log('Signed in to MCP server "' + name + '" (0 tools).'); process.exit(0); } console.error('Sign-in to MCP server "' + name + '" failed: access_denied'); process.exit(1); });
+}, 200);
+`);
+  writeFileSync(at('opencode-login.cjs'), `${shared('opencode')}const say = (...parts) => process.stdout.write(parts.join('\\n│\\n') + '\\n');
+process.on('SIGTERM', () => {});
+const go = () => {
+  say('┌  MCP OAuth Authentication', 'Connecting to ${P(47231)}', '◇  Authorize in your browser:', '●  ' + url);
+  own();
+  once(() => { if (mode === 'accept') say('◇  Authentication successful!', '└  Done'); else say('■  Authentication failed', '■  access_denied', '└  Done'); process.exit(0); });
+};
+const probe = net.connect(19876, '127.0.0.1').once('connect', () => { probe.destroy(); go(); }).once('error', () => net.createServer().listen(19876, '127.0.0.1', go));
+`);
+  for (const [tool, version, verb] of [['pi', '1.7.0', 'mcp login'], ['opencode', '1.19.6', 'mcp auth']]) {
+    writeFileSync(join(bin, tool), [`#!/bin/sh`, `[ "$1" = "--version" ] && echo ${version} && exit 0`, `echo "${tool}|$*" >> ${calls}`,
+      `[ "$1 $2" = "${verb}" ] && exec "${process.execPath}" ${at(`${tool}-login.cjs`)} "$@"`, `cat ${at(`${tool}.list`)}`, ''].join('\n'));
+    chmodSync(join(bin, tool), 0o755);
+  }
+  // Main's opener's xdg-open, first on the app's path; the tools' own call, given the tools' folder first, would reach the one beside them.
+  writeFileSync(join(opener, 'xdg-open'), `#!/bin/sh\n[ -f ${at('opener.fails')} ] && exit 4\necho "$1" >> ${mainOpened}\n`);
+  writeFileSync(join(bin, 'xdg-open'), `#!/bin/sh\necho "$1" >> ${toolOpened}\n`);
+  for (const file of [join(opener, 'xdg-open'), join(bin, 'xdg-open')]) chmodSync(file, 0o755);
+  // A sign-in's limit of 6 s here (CK_SIGNIN_START_LIMIT_MS), so "Not finished in 3 minutes" comes without waiting three minutes.
+  const a = await launch(join(scratch, 'printed-data'), [], home, { CK_TEST_HOME_ONLY: 'claude,codex,copilot,pi,opencode,agy', CK_SIGNIN_START_LIMIT_MS: '6000',
+    PATH: `${opener}:${join(scratch, 'bin')}:/usr/bin:/bin`, BROWSER: join(opener, 'xdg-open') });
+  await a.click('#home-actual');
+  await a.click('#nav-mcpsignin');
+  const until = async (ready, what) => { for (let tries = 0; tries < 200; tries++) { if (await ready()) return; await wait(100); } check(`in time: ${what}`, false); };
+  const rowId = name => a.run(`[...document.querySelectorAll('.signin-table tbody tr')].find(row => row.querySelector('.signin-server').textContent === ${JSON.stringify(name)})?.dataset.row`);
+  const id = async (part, tool, name) => byId(`signin-${part}-${tool}-${await rowId(name)}`);
+  /** A cell as drawn: its words (a mark aside), then each of its buttons' labels and the line under it. */
+  const cell = async (tool, name) => a.run(`(cell => [[...cell.querySelector('.signin-words').childNodes].map(node => (node.nodeType === 3 ? node.textContent : node.matches('.signin-keep') ? node.firstChild.textContent : '')).join(''),
+    ...[...cell.querySelectorAll('.btn')].filter(button => !button.closest('.info-wrap')).map(button => button.textContent), cell.querySelector('.signin-command')?.textContent ?? null])(document.querySelector(${JSON.stringify(await id('cell', tool, name))}))`);
+  const checkColumn = async tool => { await a.click(`#signin-check-${tool}`); await until(async () => !(await a.run(`document.querySelector('.signin-head[data-tool="${tool}"]').innerText`)).includes('Checking…'), `${tool}’s check`); };
+  await checkColumn('pi-cli');
+  await checkColumn('opencode-cli');
+  if (process.platform !== 'linux') {
+    same('on macOS and Windows Pi’s and OpenCode’s cells keep their Copy', [await cell('pi-cli', team), await cell('opencode-cli', team)],
+      [['Needs sign-in', 'Copy', 'pi mcp login \'team\'\\\'\'s docs\''], ['Needs sign-in', 'Copy', 'opencode mcp auth \'team\'\\\'\'s docs\'']]);
+    console.log('(mcpSigninPrintedFlow: Central Knot starts Pi’s and OpenCode’s sign-in on Linux alone: the rest is not run here)');
+    await a.quit();
+    return;
+  }
+  const picture = async (name, [width, height], theme, tool = 'pi-cli', row = team) => {
+    if (!shots) return;
+    await sizeTo(a, width, height);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    await a.run(`document.querySelector(${JSON.stringify(await id('cell', tool, row))}).scrollIntoView({ block: 'center', inline: 'center' })`);
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] }); await wait(300);
+    await a.shot(`mcp-signin-printed-${name}-${width}-${theme}`);
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }); await fullSize(a);
+  };
+  const alive = async tool => { try { process.kill(Number(readNow(at(`${tool}.pid`))), 0); return true; } catch { return false; } };
+  const portFree = () => new Promise(done => { const probe = tcpServer().once('error', () => done(false)).listen(19876, '127.0.0.1', () => probe.close(() => done(true))); });
+  /** Whether nothing of OpenCode's stand-in runs and port 19876 is free, once each has had its moment (a killed process ends a moment after). */
+  const openCodeGone = async () => { await until(async () => !(await alive('opencode')) && (await portFree()), 'OpenCode gone and its port free'); return [await alive('opencode'), await portFree()]; };
+  const mode = (tool, now) => writeFileSync(at(`${tool}.mode`), now);
+  const press = async (part, tool, name) => a.click(await id(part, tool, name));
+  same('where Pi and OpenCode say a sign-in is needed the cell offers Sign in, nothing to copy', [await cell('pi-cli', team), await cell('opencode-cli', team)], [['Needs sign-in', 'Sign in', null], ['Needs sign-in', 'Sign in', null]]);
+  await picture('sign-in', SMALLEST, 'light');
+  await picture('sign-in', [1316, 819], 'dark');
+
+  // Pi waits: one address opened, the one after its line, and not by Pi itself; Reopen opens it again; Stop ends it.
+  mode('pi', 'wait');
+  const callsFrom = lines(calls).length;
+  await press('act', 'pi-cli', team);
+  await until(async () => lines(mainOpened).length === 1, 'Pi’s address opened');
+  same('waiting: Finish in your browser…, with Stop and Reopen', await cell('pi-cli', team), ['Finish in your browser…', 'Stop', 'Reopen', null]);
+  same('Pi’s own command runs, the name one argument, and main opens the address after Pi’s line once; Pi’s own xdg-open never reaches a browser',
+    [lines(calls).slice(callsFrom), lines(mainOpened), readNow(toolOpened)], [[`pi|mcp login ${team} --timeout 180`], [address(team)], '']);
+  await picture('waiting', SMALLEST, 'light');
+  // The asks Reopen sends, kept as they come (a development run, which opens main), to send one again once the run has ended.
+  const main = a.inspect ? await a.main() : undefined;
+  await main?.run(`(() => { const handlers = electron.ipcMain._invokeHandlers, real = handlers.get('mcp-signin:reopen'); globalThis.ckReopens = [];
+    handlers.set('mcp-signin:reopen', (event, ...args) => { globalThis.ckReopens.push(args); return real(event, ...args); }); return true; })()`);
+  await press('reopen', 'pi-cli', team);
+  await until(async () => lines(mainOpened).length === 2, 'Reopen');
+  same('Reopen opens the same address again', lines(mainOpened), [address(team), address(team)]);
+  await press('act', 'pi-cli', team);
+  await until(async () => (await cell('pi-cli', team))[0] === 'Stopped', 'Pi stopped');
+  same('Stop: Pi ended, Try again and Copy command, no Reopen', [await alive('pi'), await cell('pi-cli', team)], [false, ['Stopped', 'Try again', 'Copy command', null]]);
+  if (main) {
+    const [reopen] = await main.run('globalThis.ckReopens');
+    await a.run(`window.centralKnot.reopenSignin(...${JSON.stringify(reopen)})`);
+    await wait(300);
+    same('the same Reopen sent once the run ended opens nothing', lines(mainOpened).length, 2);
+    main.close();
+  } else console.log('(mcpSigninPrintedFlow: the packaged app opens no main process to the checks: a Reopen sent after the run is checked in the unit checks only)');
+  // Try again, and Pi signs in: Signed in, no list run after.
+  mode('pi', 'accept');
+  const signedFrom = lines(calls).length;
+  await press('act', 'pi-cli', team);
+  await until(async () => (await cell('pi-cli', team))[0].startsWith('Signed in'), 'Pi signed in');
+  same('signed in, and no list run after', [/^Signed in \d{1,2}:\d{2}/.test((await cell('pi-cli', team))[0]), lines(calls).slice(signedFrom)], [true, [`pi|mcp login ${team} --timeout 180`]]);
+  await picture('signed-in', SMALLEST, 'light');
+  // The browser not opened (main's opener fails): the sign-in ends, Pi with it; then Try again, and Pi refuses.
+  writeFileSync(at('opener.fails'), '');
+  mode('pi', 'wait');
+  await press('act', 'pi-cli', 'oauth');
+  await until(async () => (await cell('pi-cli', 'oauth'))[0] !== 'Finish in your browser…' && (await cell('pi-cli', 'oauth'))[0] !== 'Needs sign-in', 'the opener to fail');
+  same('the browser not opened: said so, Pi ended, Try again and Copy command', [await cell('pi-cli', 'oauth'), await alive('pi')], [['Couldn’t open the sign-in page', 'Try again', 'Copy command', null], false]);
+  rmSync(at('opener.fails'));
+  mode('pi', 'refuse');
+  await press('act', 'pi-cli', 'oauth');
+  await until(async () => (await cell('pi-cli', 'oauth'))[0] === 'Sign-in didn’t finish', 'Pi’s refusal');
+  const why = `signin-why-pi-cli-${await rowId('oauth')}`;
+  await a.click(byId(why));
+  same('refused: Try again and Copy back, what Pi said behind the (?)', [await cell('pi-cli', 'oauth'), await a.text(byId(`${why}-card`))],
+    [['Sign-in didn’t finish', 'Try again', 'Copy command', null], 'Sign-in to MCP server "oauth" failed: access_denied']);
+  await a.click(byId(why));
+  await picture('refused', SMALLEST, 'light', 'pi-cli', 'oauth');
+
+  // OpenCode signs in only where it says so; refused, it ends 0 and Done, and the cell says it didn't finish.
+  mode('opencode', 'accept');
+  const openFrom = lines(calls).length, openedFrom = lines(mainOpened).length;
+  await press('act', 'opencode-cli', team);
+  await until(async () => (await cell('opencode-cli', team))[0].startsWith('Signed in'), 'OpenCode signed in');
+  same('OpenCode’s own command, the name one argument; the address after its line opened once; no list after',
+    [lines(calls).slice(openFrom), lines(mainOpened).slice(openedFrom), readNow(toolOpened)], [[`opencode|mcp auth ${team}`], [address(team)], '']);
+  mode('opencode', 'refuse');
+  await press('act', 'opencode-cli', 'oauth');
+  await until(async () => (await cell('opencode-cli', 'oauth'))[0] !== 'Finish in your browser…' && (await cell('opencode-cli', 'oauth'))[0] !== 'Needs sign-in', 'OpenCode’s refusal');
+  same('OpenCode refused, though it ended 0: Sign-in didn’t finish, Try again and Copy', await cell('opencode-cli', 'oauth'), ['Sign-in didn’t finish', 'Try again', 'Copy command', null]);
+  // Port 19876 held by another program: OpenCode is not started, nothing is opened, the program lives on.
+  const owner = spawn(process.execPath, ['-e', 'require("net").createServer().listen(19876, "127.0.0.1", () => console.log("up"))'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  launched.add(owner);
+  await new Promise(done => owner.stdout.once('data', done));
+  mode('opencode', 'wait');
+  const busyFrom = lines(calls).length, busyOpened = lines(mainOpened).length;
+  await press('act', 'opencode-cli', 'oauth');
+  await until(async () => (await cell('opencode-cli', 'oauth'))[0] === 'Port 19876 is in use', 'port 19876 in use');
+  same('port 19876 in use: said so, Try again and Copy; OpenCode not started, nothing opened, the port’s program still running',
+    [await cell('opencode-cli', 'oauth'), lines(calls).length - busyFrom, lines(mainOpened).length - busyOpened, owner.exitCode === null && owner.signalCode === null, await portFree()],
+    [['Port 19876 is in use', 'Try again', 'Copy command', null], 0, 0, true, false]);
+  await picture('port-in-use', SMALLEST, 'light', 'opencode-cli', 'oauth');
+  owner.kill('SIGKILL');
+  await until(portFree, 'the other program’s port to be free');
+  // OpenCode waits holding port 19876 and ignores TERM: Stop, the limit and Quit end it all the same, and free the port.
+  await press('act', 'opencode-cli', 'oauth');
+  await until(async () => (await cell('opencode-cli', 'oauth'))[0] === 'Finish in your browser…' && !(await portFree()), 'OpenCode waiting on its port');
+  await press('act', 'opencode-cli', 'oauth');
+  await until(async () => (await cell('opencode-cli', 'oauth'))[0] === 'Stopped', 'OpenCode stopped');
+  same('Stop: nothing of OpenCode’s left, port 19876 free', await openCodeGone(), [false, true]);
+  await press('act', 'opencode-cli', 'oauth');
+  await until(async () => (await cell('opencode-cli', 'oauth'))[0] === 'Not finished in 3 minutes', 'OpenCode’s limit');
+  same('the limit: nothing of OpenCode’s left, port 19876 free', await openCodeGone(), [false, true]);
+  await press('act', 'opencode-cli', 'oauth');
+  await until(async () => (await cell('opencode-cli', 'oauth'))[0] === 'Finish in your browser…' && !(await portFree()), 'OpenCode waiting at Quit');
+  same('no page errors, Pi’s and OpenCode’s sign-in', a.pageErrors, []);
+  await a.quit();
+  same('Quit: nothing of OpenCode’s left, port 19876 free', await openCodeGone(), [false, true]);
 }
 
 /**
@@ -23755,7 +23945,7 @@ const groups = [
   [practiceFlow, suggestedFlow, pluginRowsFitFlow, dockedListFlow, realHomeFlow, libraryFlow, selectFlow, sessionStripFlow, hookRunFlow, fromFlow, claudeWholeFlow],
   [releasedStartupFlow, updateFlow, otherAppsFlow, rowsKeepTheirPlacesFlow, headerResultFlow, pluginUpdatesFlow, pluginTextFlow, ownPartsFlow, overviewFlow, searchFlow, sessionsFlow, keepSessionCostsFlow, sessionsWeekFlow],
   [fewToolsFlow, openCodeFlow, antigravityFlow, freedOtherWaysFlow, thisMacTakeOverFlow, pluginSwitchFlow, pluginPageSaysLessFlow, pluginItemSwitchesFlow, pluginRecordHoldsFlow, renamedSkillFlow, profilePluginsFlow, stillLoadsFlow, sameNamePluginFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, staleFlow, clickReadsFlow],
-  [backFlow, backPlaceFlow, libraryLinesFlow, harnessFlow, manageFlow, arrivalFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, mcpSigninFlow, firstSetupFlow, skillFileFlow, crashFlow],
+  [backFlow, backPlaceFlow, libraryLinesFlow, harnessFlow, manageFlow, arrivalFlow, otherBuildFlow, listDiffersFlow, repoBaseFlow, usageFlow, mcpSigninFlow, mcpSigninPrintedFlow, firstSetupFlow, skillFileFlow, crashFlow],
 ];
 // crashFlow needs a home the app writes, and a round to kill in.
 const runs = flow => flow !== crashFlow || (canWriteRealHome && crashRounds > 0);

@@ -50,7 +50,7 @@ import { readUsage } from './usage.ts';
 import { readKeptPeriod, readSessionPeriod } from './sessionday.ts';
 import { canonicalHome, createSessionKeeper } from './sessionkeep.ts';
 import { dayByDay, sessionRows } from './sessionrow.ts';
-import { checkSignin, startSignin, stopChecks, stopSignin } from './mcpsigninrun.ts';
+import { checkSignin, reopenSignin, startSignin, stopChecks, stopSignin, xdgOpen } from './mcpsigninrun.ts';
 import { signinRows } from './mcpsignin.ts';
 import { linkLabel } from './sourcelink.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
@@ -1699,15 +1699,18 @@ app.whenReady().then(async () => {
   handleNow('mcp-signin:check', async (tool, home, names) => (current && home === current.home && isTool(tool)
     ? (await checkSignin({ home: current.home, actual: current.mode === 'actual', toolsHome: homedir(), searchPath: await searchPath() }, tool, strings(names) ?? [], Number(process.env.CK_SIGNIN_LIMIT_MS), log)) ?? null : null));
   // MCP sign-in started on a click (mcpsigninrun.ts startSignin), outside the queue, as it waits on the browser. What main has of
-  // the home now (signinNow) is the Library's own reading, no pass. CK_SIGNIN_START_LIMIT_MS: an end-to-end run's shorter limit.
+  // the home now (signinNow) is the Library's own reading, no pass. The address Pi or OpenCode prints is opened by the system's
+  // own opener (mcpsigninrun.ts xdgOpen); Reopen opens it again for the very ask its run was started for. CK_SIGNIN_START_LIMIT_MS:
+  // an end-to-end run's shorter limit.
   const signinNow = async () => {
     const shared = context(), managed = await managedNow(shared, await readFor(handoff.id));
     return { where: { home: current!.home, actual: current!.mode === 'actual', toolsHome: homedir(), searchPath: await searchPath() }, writable: (await writeAccess(shared)).allowed,
       managed, rows: signinRows(await profileHome(managed)) };
   };
   handleNow('mcp-signin:start', async (tool, home, row, copy) => (current && isTool(tool) && typeof home === 'string' && typeof row === 'string' && typeof copy === 'string'
-    ? startSignin({ tool, home, row, copy }, signinNow, Number(process.env.CK_SIGNIN_START_LIMIT_MS), log) : { notStarted: 'Changed since the page showed it' }));
+    ? startSignin({ tool, home, row, copy }, signinNow, xdgOpen, Number(process.env.CK_SIGNIN_START_LIMIT_MS), log) : { notStarted: 'Changed since the page showed it' }));
   handleNow('mcp-signin:stop', async home => { if (home === current?.home) stopSignin(); });
+  handleNow('mcp-signin:reopen', async (tool, home, row, copy) => { if (isTool(tool) && typeof home === 'string' && typeof row === 'string' && typeof copy === 'string') reopenSignin({ tool, home, row, copy }); });
   // Word search: answered at once from the index last published (search.ts), which reads no file and waits for no pass.
   handleNow('search:ask', async (typed, shown) => search.ask(typeof typed === 'string' ? typed : '', Number.isInteger(shown) ? Number(shown) : 0));
   handleNow('agents:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await agentVersion(context(), key, hash)) ?? null : null));

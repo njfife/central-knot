@@ -259,6 +259,8 @@ export interface DesktopApi {
   startSignin(tool: HarnessId, home: string, row: string, copy: string): Promise<SigninEnd>;
   /** Stops the sign-in under way, if the open home is `home` (mcpsigninrun.ts stopSignin). */
   stopSignin(home: string): Promise<void>;
+  /** Opens again the address the sign-in under way for this very ask printed, if one is (mcpsigninrun.ts reopenSignin). */
+  reopenSignin(tool: HarnessId, home: string, row: string, copy: string): Promise<void>;
   /**
    * Word search over what the Library holds and the items of listed plugins installed in no managed tool (search.ts), answered
    * beside main's queue from the index last published; `shown`: how many of those plugins' items the page draws (search.ts drawnAtOnce).
@@ -1083,10 +1085,11 @@ export type SigninSaid = { is: 'no-sign-in' | 'signed-in' | 'connected' | 'needs
 /** One tool's MCP sign-in check: what it said of each server, by its own name for it; or that it couldn't be run or didn't end in time; or the first line of an answer in a shape not known. */
 export type SigninAnswer = { servers: Record<string, SigninSaid> } | { failed: 'missing' | 'timeout' } | { unreadable: string };
 /**
- * How a sign-in ended (mcpsigninrun.ts startSignin): its tool ended with exit code 0; its tool ended otherwise (`unfinished`: the
- * last line it printed); it was stopped, or no command line was found (`failed`); or main started nothing (`notStarted`: why).
+ * How a sign-in ended (mcpsigninrun.ts startSignin, mcpsignin.ts signinEnd): its tool signed in; its tool ended otherwise
+ * (`unfinished`: the last line it printed); it was stopped, no command line was found, the port its tool listens on was taken
+ * (`port`), or the address it printed wasn't opened (`browser`: `failed`); or main started nothing (`notStarted`: why).
  */
-export type SigninEnd = { signedIn: true } | { unfinished: string } | { failed: 'timeout' | 'stopped' | 'missing' } | { notStarted: string };
+export type SigninEnd = { signedIn: true } | { unfinished: string } | { failed: 'timeout' | 'stopped' | 'missing' | 'port' | 'browser' } | { notStarted: string };
 /** One reading of a home's session history, made when the page collects usage (app.ts collectUsage): when, and every tool's. */
 export interface UsageReading { at: string; tools: ToolUsage[] }
 

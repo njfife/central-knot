@@ -7,17 +7,17 @@
 // for each mix of tools; and one check run for a home (mcpsigninrun.ts), on stand-in commands.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { spawn, spawnSync } from 'node:child_process';
+import { appendFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
-import { answerFor, askedNow, cannotRun, cellKey, cellNow, cellSays, checkLine, connectedCard, followView, grouped, lastSaid, ownTime, readAnswer, signInArgs, signInCommand, signinKey, signinRows, signinStarted,
-  offersSignin, type SigninCell, type SigninChecks, type SigninRow, type SigninRun } from '../src/mcpsignin.ts';
+import { addressAfter, answerFor, askedNow, cannotRun, cellKey, cellNow, cellSays, checkLine, connectedCard, followView, grouped, lastSaid, ownTime, readAnswer, signInArgs, signInCommand, signinEnd, signinKey, signinRows,
+  signinStarted, offersSignin, type SigninCell, type SigninChecks, type SigninRow, type SigninRun } from '../src/mcpsignin.ts';
 import { harnessIds } from '../src/harnesses.ts';
 import { clockTime } from '../src/model.ts';
-import { checkLimit, checkSignin, signinRefusal, startSignin, stopChecks, stopSignin, type SigninAsk, type SigninNow } from '../src/mcpsigninrun.ts';
+import { checkLimit, checkSignin, reopenSignin, signinRefusal, startSignin, stopChecks, stopSignin, xdgOpen, type SigninAsk, type SigninNow } from '../src/mcpsigninrun.ts';
 import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, SigninAnswer, SigninEnd } from '../src/types.ts';
 import { standIn } from './standin.ts';
 
@@ -207,12 +207,49 @@ const needing = (rows: SigninRow[], signins: SigninRun[] = []): SigninChecks => 
 test('The command a Sign in runs and the one its Copy gives are one table’s: the arguments as given, the command with the name one shell word', () => {
   assert.deepEqual(signInArgs('codex-cli', 'team\'s docs'), ['mcp', 'login', '--', 'team\'s docs']);
   assert.equal(signInCommand('codex-cli', 'team\'s docs'), 'codex mcp login -- \'team\'\\\'\'s docs\'');
+  // Pi's run gives it the limit Central Knot keeps, after the name; its Copy stays the command he would type.
+  assert.deepEqual([signInArgs('pi-cli', 'team\'s docs'), signInCommand('pi-cli', 'team\'s docs')], [['mcp', 'login', 'team\'s docs', '--timeout', '180'], 'pi mcp login \'team\'\\\'\'s docs\'']);
+  assert.deepEqual(signInArgs('opencode-cli', 'team\'s docs'), ['mcp', 'auth', 'team\'s docs']);
   assert.equal(signInArgs('copilot-cli', 'github'), undefined);
 });
 
-test('Where Codex says a sign-in is needed its cell offers Sign in, on this computer’s home and not on Windows; elsewhere, and in every other tool, Copy', () => {
-  assert.deepEqual([offersSignin('codex-cli', true, 'linux'), offersSignin('codex-cli', true, 'darwin'), offersSignin('codex-cli', true, 'win32'), offersSignin('codex-cli', false, 'linux'),
-    offersSignin('pi-cli', true, 'linux'), offersSignin('claude-cli', true, 'linux')], [true, true, false, false, false, false]);
+test('The address Pi and OpenCode print is read line by line as it comes: the first after their own line asking for the browser, once; none from any other tool', () => {
+  const found: string[] = [];
+  const pi = addressAfter('pi-cli', address => found.push(address))!;
+  // An address before the line that asks for the browser is not the one; the one after it is, though its line came in parts
+  // (the run hands over whole lines: plugins.ts RunOptions heard); a later one is not opened again.
+  for (const lines of ['Connecting to http://127.0.0.1:47201/mcp\n', '\x1b[1mSign in to MCP server "team\'s docs" in your browser:\x1b[0m\n',
+    'https://auth.example.com/authorize?client_id=ck&state=s1&redirect_uri=http%3A%2F%2F127.0.0.1%3A43111%2Fcallback\n', 'Or open http://127.0.0.1:43111/other\n']) pi(lines);
+  assert.deepEqual(found, ['https://auth.example.com/authorize?client_id=ck&state=s1&redirect_uri=http%3A%2F%2F127.0.0.1%3A43111%2Fcallback']);
+  // OpenCode's, in its frame and colours, the address on a line of its own under its mark.
+  const opencode: string[] = [];
+  addressAfter('opencode-cli', address => opencode.push(address))!('┌  MCP OAuth Authentication\n│\n\x1b[32m◇\x1b[39m  Authorize in your browser:\n│\n\x1b[34m●\x1b[39m  http://127.0.0.1:47202/authorize?state=o1\n◒  Waiting for authorization...');
+  assert.deepEqual(opencode, ['http://127.0.0.1:47202/authorize?state=o1']);
+  // Codex opens its browser itself: nothing it prints is read for an address.
+  assert.equal(addressAfter('codex-cli', () => undefined), undefined);
+});
+
+test('How a sign-in ended, from its tool’s exit and what it said: OpenCode’s exit 0 is Signed in only with its own words, and its port taken is said so', () => {
+  const frame = (...lines: string[]) => `┌  MCP OAuth Authentication\n│\n${lines.join('\n│\n')}\n│\n└  Done\n`;
+  assert.deepEqual(signinEnd('opencode-cli', 0, frame('◇  Authorize in your browser:', '●  http://127.0.0.1:47202/authorize', '◇  Authentication successful!')), { signedIn: true });
+  // Refused at the browser, OpenCode still ends with exit 0 and Done: what it said before Done is why, its mark left out.
+  assert.deepEqual(signinEnd('opencode-cli', 0, frame('◇  Authorize in your browser:', '●  http://127.0.0.1:47202/authorize', '■  Authentication failed', '\x1b[31m■\x1b[39m  access_denied')), { unfinished: 'access_denied' });
+  assert.deepEqual(signinEnd('opencode-cli', 0, frame('■  Authentication failed', '■  listen EADDRINUSE: address already in use 127.0.0.1:19876')), { failed: 'port' });
+  // Pi's and Codex's exit code says it: 0 is Signed in, any other the last line, by arrival.
+  assert.deepEqual([signinEnd('pi-cli', 0, 'Signed in to MCP server "team" (3 tools).\n'), signinEnd('pi-cli', 1, 'Sign-in to MCP server "team" failed: access_denied\n')],
+    [{ signedIn: true }, { unfinished: 'Sign-in to MCP server "team" failed: access_denied' }]);
+  assert.deepEqual(signinEnd('codex-cli', 1, 'listen EADDRINUSE\n'), { unfinished: 'listen EADDRINUSE' });
+});
+
+test('Where a sign-in is needed the cell offers Sign in on this computer’s home: Codex off Windows, Pi and OpenCode on Linux alone; elsewhere, and in every other tool, Copy', () => {
+  const platforms = ['linux', 'darwin', 'win32'];
+  const offered = (here: boolean) => Object.fromEntries(harnessIds.map(tool => [tool, platforms.filter(platform => offersSignin(tool, here, platform))]));
+  assert.deepEqual(offered(true), { 'claude-cli': [], 'copilot-cli': [], 'codex-cli': ['linux', 'darwin'], 'pi-cli': ['linux'], 'opencode-cli': ['linux'], 'antigravity-cli': [] });
+  assert.deepEqual(Object.values(offered(false)).flat(), []);
+  // macOS and Windows keep Pi's and OpenCode's Copy, its command as before.
+  const pi = server('team'), piChecks: SigninChecks = { home: '/h', columns: { 'pi-cli': { at: '2026-11-27T10:00:00Z', answer: { servers: { team: { is: 'needs-sign-in' } } }, asked: [cellKey(pi, pi.cells['pi-cli']!)] } } };
+  assert.deepEqual(cellNow(piChecks, 'pi-cli', pi, offersSignin('pi-cli', true, 'darwin')), { words: 'Needs sign-in', tone: 'warning', command: 'pi mcp login team', heed: true });
+  assert.deepEqual(cellNow(piChecks, 'pi-cli', pi, offersSignin('pi-cli', true, 'linux')), { words: 'Needs sign-in', tone: 'warning', act: { label: 'Sign in', runs: 'pi mcp login team' }, heed: true });
   const oauth = server('oauth'), checks = needing([oauth]);
   assert.deepEqual(cellNow(checks, 'codex-cli', oauth, true), { words: 'Needs sign-in', tone: 'warning', act: { label: 'Sign in', runs: 'codex mcp login -- oauth' }, heed: true });
   assert.deepEqual(cellNow(checks, 'codex-cli', oauth, false), { words: 'Needs sign-in', tone: 'warning', command: 'codex mcp login -- oauth', heed: true });
@@ -240,6 +277,15 @@ test('A sign-in’s cell: Stop while it waits, Signed in with its time, and on a
   // Codex's copy gone from a row another tool still has, while its sign-in waits: the row's Codex cell keeps its Stop.
   const elsewhere = { ...oauth, cells: { 'claude-cli': { name: 'oauth', off: false } } };
   assert.deepEqual(cellNow(needing([oauth], [{ tool: 'codex-cli', row: 'oauth', copy }]), 'codex-cli', elsewhere, true), { words: 'Finish in your browser…', act: { label: 'Stop' }, heed: true });
+  // Pi's and OpenCode's waiting cell offers Reopen beside Stop (main opens the address their tool printed again); Codex's doesn't.
+  // Their port taken and the browser not opened are said so, with Try again and the command to copy.
+  const pi = server('oauth'), piCopy = cellKey(pi, pi.cells['pi-cli']!);
+  const piSays = (end?: SigninEnd) => cellNow({ home: '/h', columns: {}, signins: kept({ tool: 'pi-cli', row: 'oauth', copy: piCopy, ...(end ? { at, end } : {}) }) }, 'pi-cli', pi, true);
+  assert.deepEqual(piSays(), { words: 'Finish in your browser…', act: { label: 'Stop' }, reopen: true, heed: true });
+  const piAgain = { tone: 'warning', command: 'pi mcp login oauth', act: { label: 'Try again', runs: 'pi mcp login oauth' }, heed: true };
+  assert.deepEqual(piSays({ failed: 'browser' }), { words: 'Couldn’t open the sign-in page', ...piAgain });
+  const openCode = cellNow({ home: '/h', columns: {}, signins: kept({ tool: 'opencode-cli', row: 'oauth', copy: cellKey(pi, pi.cells['opencode-cli']!), at, end: { failed: 'port' } }) }, 'opencode-cli', pi, true);
+  assert.deepEqual(openCode, { words: 'Port 19876 is in use', tone: 'warning', command: 'opencode mcp auth oauth', act: { label: 'Try again', runs: 'opencode mcp auth oauth' }, heed: true });
   // A Check of the column begun after it ended says what Codex answers then; one begun before it ended doesn't.
   const checked = (began: string) => ({ ...needing([oauth], [{ tool: 'codex-cli', row: 'oauth', copy, at, end: { signedIn: true } }]), columns: { 'codex-cli': { ...needing([oauth]).columns['codex-cli']!, began } } });
   assert.deepEqual([cellNow(checked('2026-11-27T10:06:00Z'), 'codex-cli', oauth, true).words, cellNow(checked('2026-11-27T10:04:00Z'), 'codex-cli', oauth, true).words], ['Needs sign-in', `Signed in ${clockTime(at)}`]);
@@ -293,7 +339,9 @@ test('Main starts a sign-in only for the home open, a managed tool it starts sig
     ['another home open', { home: '/other' }, {}, 'linux', 'Another home is open'],
     ['the Practice copy or another folder', {}, where({ actual: false }), 'linux', 'Central Knot doesn’t start Codex’s sign-in here'],
     ['Windows', {}, {}, 'win32', 'Central Knot doesn’t start Codex’s sign-in here'],
-    ['a tool whose sign-in it doesn’t start', { tool: 'pi-cli', copy: cellKey(oauth, oauth.cells['pi-cli']!) }, {}, 'linux', 'Central Knot doesn’t start Pi’s sign-in here'],
+    ['a tool whose sign-in it doesn’t start', { tool: 'claude-cli', copy: cellKey(oauth, oauth.cells['claude-cli']!) }, {}, 'linux', 'Central Knot doesn’t start Claude Code’s sign-in here'],
+    ['Pi on macOS', { tool: 'pi-cli', copy: cellKey(oauth, oauth.cells['pi-cli']!) }, { managed: ['pi-cli'] }, 'darwin', 'Central Knot doesn’t start Pi’s sign-in here'],
+    ['Pi on Linux', { tool: 'pi-cli', copy: cellKey(oauth, oauth.cells['pi-cli']!) }, { managed: ['pi-cli'] }, 'linux', undefined],
     ['a tool not managed', {}, { managed: ['pi-cli'] }, 'linux', 'Codex isn’t managed here'],
     ['a home Central Knot may only preview', {}, { writable: false }, 'linux', 'Central Knot doesn’t start Codex’s sign-in here'],
     ['the server gone', {}, { rows: [] }, 'linux', 'Changed since the page showed it'],
@@ -599,6 +647,8 @@ const closeBrowsers = async (sandbox: Awaited<ReturnType<typeof standIns>>) => {
 /** What main has now for `rows` (the home open, Codex managed) in the sandbox's home. */
 const nowIn = (sandbox: Awaited<ReturnType<typeof standIns>>, rows: SigninRow[]) => async (): Promise<SigninNow> => ({ where: sandbox.where(), writable: true, managed: ['codex-cli'], rows });
 const askFor = (sandbox: Awaited<ReturnType<typeof standIns>>, row: SigninRow): SigninAsk => ({ home: sandbox.home, tool: 'codex-cli', row: row.id, copy: cellKey(row, row.cells['codex-cli']!) });
+/** Main is never asked to open an address for Codex, which opens its browser itself: were it, the run would end Couldn’t open (failed: 'browser'). */
+const codexOpens = async () => { throw new Error('main was asked to open an address for Codex'); };
 /** Whether something listens on `port` (on 127.0.0.1) still: a new listener there can't be opened. */
 const portTaken = (port: number) => new Promise<boolean>(done => { const probe = createServer().once('error', () => done(true)).listen(port, '127.0.0.1', () => probe.close(() => done(false))); });
 /** Whether `pid` still runs and `port` is still held, once each has had its moment to go (a killed process ends a moment after its kill). */
@@ -608,7 +658,7 @@ test('Sign in runs the tool’s own `mcp login`, the server’s name one literal
   const sandbox = await standIns();
   try {
     const fake = await signinStandIn(sandbox, 'accept'), team = server(TEAM);
-    assert.deepEqual(await startSignin(askFor(sandbox, team), nowIn(sandbox, [team])), { signedIn: true });
+    assert.deepEqual(await startSignin(askFor(sandbox, team), nowIn(sandbox, [team]), codexOpens), { signedIn: true });
     assert.deepEqual(await fake.args(), ['mcp', 'login', '--', TEAM]);
     const calls = await sandbox.calledWith();
     assert.equal(calls.length, 1, 'no list is run after it');
@@ -616,7 +666,7 @@ test('Sign in runs the tool’s own `mcp login`, the server’s name one literal
     await assert.rejects(readdir(calls[0][0]), { code: 'ENOENT' });
     // What it said last, by when it came (here its output after its errors), is the cell's when it ends otherwise.
     await signinStandIn(sandbox, 'refuse');
-    assert.deepEqual(await startSignin(askFor(sandbox, team), nowIn(sandbox, [team])), { unfinished: 'Error: the server refused the sign-in' });
+    assert.deepEqual(await startSignin(askFor(sandbox, team), nowIn(sandbox, [team]), codexOpens), { unfinished: 'Error: the server refused the sign-in' });
   } finally { await closeBrowsers(sandbox); await sandbox.done(); }
 });
 
@@ -624,7 +674,7 @@ test('A server’s name is never an option: one that begins with a dash comes af
   const sandbox = await standIns();
   try {
     const fake = await signinStandIn(sandbox, 'accept'), help = server('--help');
-    await startSignin(askFor(sandbox, help), nowIn(sandbox, [help]));
+    await startSignin(askFor(sandbox, help), nowIn(sandbox, [help]), codexOpens);
     assert.deepEqual([await fake.args(), signInCommand('codex-cli', '--help')], [['mcp', 'login', '--', '--help'], 'codex mcp login -- --help']);
   } finally { await closeBrowsers(sandbox); await sandbox.done(); }
 });
@@ -634,7 +684,7 @@ test('Its input is closed: a tool that reads its input to the end goes on to sig
   try {
     await sandbox.put('codex', `cat > ${join(sandbox.base, 'input')}\necho "Successfully logged in"`, '');
     const oauth = server('oauth');
-    assert.deepEqual(await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), 2000), { signedIn: true });
+    assert.deepEqual(await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), codexOpens, 2000), { signedIn: true });
   } finally { await sandbox.done(); }
 });
 
@@ -643,10 +693,10 @@ test('A sign-in main refuses runs nothing: a server changed since the page showe
   try {
     const fake = await signinStandIn(sandbox, 'wait'), oauth = server('oauth');
     const changed = { ...oauth, cells: { 'codex-cli': { name: 'oauth', copy: 'oauth#2', off: false } } };
-    assert.deepEqual(await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [changed])), { notStarted: 'Changed since the page showed it' });
+    assert.deepEqual(await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [changed]), codexOpens), { notStarted: 'Changed since the page showed it' });
     assert.deepEqual(await sandbox.calledWith(), []);
-    const first = startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]));
-    assert.deepEqual(await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth])), { notStarted: 'Another sign-in is running' });
+    const first = startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), codexOpens);
+    assert.deepEqual(await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), codexOpens), { notStarted: 'Another sign-in is running' });
     await fake.listening();
     stopSignin();
     assert.deepEqual(await first, { failed: 'stopped' });
@@ -659,9 +709,9 @@ test('His own BROWSER keeps its order: a first command not found here is left ou
   try {
     process.env.BROWSER = 'ck-missing-browser:ck-firefox';
     const fake = await signinStandIn(sandbox, 'accept', ['ck-firefox']), oauth = server('oauth');
-    assert.deepEqual([await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), 2000), (await fake.opened()).length], [{ signedIn: true }, 1]);
+    assert.deepEqual([await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), codexOpens, 2000), (await fake.opened()).length], [{ signedIn: true }, 1]);
     process.env.BROWSER = 'ck-missing-browser';
-    await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), 500);
+    await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), codexOpens, 500);
     assert.equal(await fake.browserGiven(), 'ck-missing-browser');
   } finally { await closeBrowsers(sandbox); await sandbox.done(); }
 });
@@ -671,7 +721,7 @@ test('The last line Codex said is a whole line: one written in two parts with a 
   try {
     await sandbox.put('codex', `printf 'Error: consent '\nsleep 0.2\necho 'Browser closed' >&2\nsleep 0.2\necho 'declined'\nexit 1`, '');
     const oauth = server('oauth');
-    assert.deepEqual(await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), 5000), { unfinished: 'Error: consent declined' });
+    assert.deepEqual(await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), codexOpens, 5000), { unfinished: 'Error: consent declined' });
   } finally { await sandbox.done(); }
 });
 
@@ -679,7 +729,7 @@ test('Stop asks the tool to end, then ends what it left: its helper that ignores
   const sandbox = await standIns();
   try {
     const fake = await signinStandIn(sandbox, 'wait'), oauth = server('oauth');
-    const run = startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]));
+    const run = startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), codexOpens);
     const [port, helper] = await fake.listening();
     assert.equal(await portTaken(port), true);
     stopSignin();
@@ -694,7 +744,7 @@ test('No ending reaches the browser Codex opened: it lives on after Signed in, a
     const sandbox = await standIns();
     try {
       const fake = await signinStandIn(sandbox, mode), oauth = server('oauth');
-      const run = startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), limit);
+      const run = startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), codexOpens, limit);
       const [browser] = await fake.opened();
       if (mode === 'wait') { await fake.listening(); stopSignin(); }
       const ending = await run;
@@ -703,6 +753,118 @@ test('No ending reaches the browser Codex opened: it lives on after Signed in, a
     } finally { await closeBrowsers(sandbox); await sandbox.done(); }
   }
   assert.deepEqual(lives, [[{ signedIn: true }, true], [{ failed: 'stopped' }, true], [{ failed: 'timeout' }, true]]);
+});
+
+// ---------- Pi's and OpenCode's sign-in: the address they print, opened by main ----------
+
+const noPrintHere = process.platform !== 'linux' && 'Central Knot starts Pi’s and OpenCode’s sign-in on Linux alone (mcpsignin.ts offersSignin): elsewhere the cell keeps its Copy.';
+const AUTHORIZE = 'http://127.0.0.1:1/authorize?client_id=ck&state=s1';
+type Sandbox = Awaited<ReturnType<typeof standIns>>;
+const nowFor = (sandbox: Sandbox, tool: HarnessId, rows: SigninRow[]) => async (): Promise<SigninNow> => ({ where: sandbox.where(), writable: true, managed: [tool], rows });
+const askOf = (sandbox: Sandbox, tool: HarnessId, row: SigninRow): SigninAsk => ({ home: sandbox.home, tool, row: row.id, copy: cellKey(row, row.cells[tool]!) });
+/**
+ * A stand-in for Pi 1.7.0's sign-in (read in its code): it writes its arguments and its process down, prints an address, its own
+ * line asking for the browser, the address after it in two writes (`pi.address`, else AUTHORIZE) and one more address, and hands
+ * the address to `xdg-open` itself as Pi does; the `xdg-open` beside it, on the path the tool is given, writes down what it was
+ * handed (`toolOpened`). Then by its mode (`pi.mode`), once main's opener has opened the address: says it signed in; refuses
+ * (exit 1 with its line); or waits, ending on TERM. `opener` is main's: it writes each address down, or refuses (`refuse`).
+ */
+async function printingStandIn(sandbox: Sandbox) {
+  const at = (file: string) => join(sandbox.base, file), opened = at('main-opened');
+  const seen = (file: string) => readFile(at(file), 'utf8').catch(() => '');
+  await sandbox.put('xdg-open', `echo "$1" >> ${at('tool-opened')}`, '');
+  const waitOpened = `while [ ! -s ${opened} ]; do sleep 0.05; done`;
+  await sandbox.put('pi', [`printf '%s\\n' "$@" > ${at('args')}`, `echo $$ > ${at('pi.pid')}`, `address=$(cat ${at('pi.address')} 2>/dev/null || echo '${AUTHORIZE}')`,
+    'echo "Connecting to http://127.0.0.1:47201/mcp"', `printf 'Sign in to MCP server "%s" in your browser:\\n%s' "$3" "$(echo "$address" | cut -c1-30)"`, 'sleep 0.2',
+    `printf '%s\\n' "$(echo "$address" | cut -c31-)"`, 'xdg-open "$address" 2>/dev/null', 'echo "Or open http://127.0.0.1:1/other"', `mode=$(cat ${at('pi.mode')})`,
+    `[ "$mode" = wait ] && { trap 'exit 143' TERM; while :; do sleep 0.05; done; }`, waitOpened,
+    `[ "$mode" = refuse ] && { echo 'Sign-in to MCP server "team" failed: access_denied' >&2; exit 1; }`, 'echo \'Signed in to MCP server "team" (0 tools).\''].join('\n'), '');
+  // OpenCode's stand-in is never to run here (its run is on screen: e2e.mjs mcpSigninPrintedFlow): it would only say it ran.
+  await sandbox.put('opencode', 'exit 0', '');
+  let refuse = false;
+  const opener = { open: async (address: string) => { if (refuse) throw new Error('Failed to open'); await appendFile(opened, `${address}\n`); }, refuse: (on: boolean) => { refuse = on; } };
+  return { opener, mode: (mode: string) => writeFile(at('pi.mode'), mode), address: (address: string) => writeFile(at('pi.address'), address),
+    args: async () => (await seen('args')).split('\n').slice(0, -1), pid: async () => Number(await seen('pi.pid')),
+    opened: async () => (await seen('main-opened')).split('\n').filter(Boolean), toolOpened: () => seen('tool-opened'),
+    forget: () => rm(opened, { force: true }) };
+}
+
+test('Pi’s Sign in runs `pi mcp login <name> --timeout 180`, the name one argument, and main opens the address printed after Pi’s own line, once; Pi’s own opener does nothing; no list after', { skip: noPrintHere, timeout: 15_000 }, async () => {
+  const sandbox = await standIns();
+  try {
+    const fake = await printingStandIn(sandbox), team = server(TEAM);
+    await fake.mode('accept');
+    assert.deepEqual(await startSignin(askOf(sandbox, 'pi-cli', team), nowFor(sandbox, 'pi-cli', [team]), fake.opener.open), { signedIn: true });
+    assert.deepEqual([await fake.args(), await fake.opened(), await fake.toolOpened()], [['mcp', 'login', TEAM, '--timeout', '180'], [AUTHORIZE], '']);
+    assert.deepEqual((await sandbox.calledWith()).map(call => call[4]), [`mcp login ${TEAM} --timeout 180`], 'one call: no list after it');
+    // Refused: Pi's own last line is why.
+    await fake.forget();
+    await fake.mode('refuse');
+    assert.deepEqual(await startSignin(askOf(sandbox, 'pi-cli', team), nowFor(sandbox, 'pi-cli', [team]), fake.opener.open), { unfinished: 'Sign-in to MCP server "team" failed: access_denied' });
+  } finally { await sandbox.done(); }
+});
+
+test('Reopen opens the address of the sign-in under way again, for the very ask it was started for, and nothing once it ended', { skip: noPrintHere, timeout: 15_000 }, async () => {
+  const sandbox = await standIns();
+  try {
+    const fake = await printingStandIn(sandbox), team = server(TEAM), ask = askOf(sandbox, 'pi-cli', team);
+    await fake.mode('wait');
+    const run = startSignin(ask, nowFor(sandbox, 'pi-cli', [team]), fake.opener.open);
+    await until(async () => (await fake.opened()).length === 1);
+    reopenSignin({ ...ask, copy: 'another copy' });
+    reopenSignin({ ...ask, home: '/another/home' });
+    reopenSignin(ask);
+    await until(async () => (await fake.opened()).length === 2);
+    assert.deepEqual(await fake.opened(), [AUTHORIZE, AUTHORIZE]);
+    stopSignin();
+    assert.deepEqual(await run, { failed: 'stopped' });
+    reopenSignin(ask);
+    await new Promise(done => setTimeout(done, 200));
+    assert.deepEqual([(await fake.opened()).length, isRunning(await fake.pid())], [2, false]);
+  } finally { await sandbox.done(); }
+});
+
+test('The browser not opened ends the sign-in, its tool stopped, and says so, as does an address neither https nor on this computer, never opened; Try again opens it', { skip: noPrintHere, timeout: 15_000 }, async () => {
+  const sandbox = await standIns();
+  try {
+    const fake = await printingStandIn(sandbox), team = server(TEAM);
+    await fake.mode('wait');
+    fake.opener.refuse(true);
+    assert.deepEqual(await startSignin(askOf(sandbox, 'pi-cli', team), nowFor(sandbox, 'pi-cli', [team]), fake.opener.open), { failed: 'browser' });
+    assert.equal(isRunning(await fake.pid()), false);
+    fake.opener.refuse(false);
+    await fake.address('http://auth.example.com/authorize?client_id=ck&state=s1');
+    assert.deepEqual([await startSignin(askOf(sandbox, 'pi-cli', team), nowFor(sandbox, 'pi-cli', [team]), fake.opener.open), await fake.opened()], [{ failed: 'browser' }, []]);
+    assert.equal(isRunning(await fake.pid()), false);
+    await rm(join(sandbox.base, 'pi.address'));
+    fake.opener.refuse(false);
+    await fake.mode('accept');
+    assert.deepEqual([await startSignin(askOf(sandbox, 'pi-cli', team), nowFor(sandbox, 'pi-cli', [team]), fake.opener.open), await fake.opened()], [{ signedIn: true }, [AUTHORIZE]]);
+  } finally { await sandbox.done(); }
+});
+
+test('Main’s opener hands the address to xdg-open, and fails where xdg-open ends otherwise than 0 or can’t be started', { skip: noPrintHere, timeout: 15_000 }, async () => {
+  const sandbox = await standIns(), path = process.env.PATH, opened = join(sandbox.base, 'xdg-opened'), opener = join(sandbox.base, 'opener');
+  try {
+    await standIn(join(opener, 'xdg-open'), `#!/bin/sh\necho "$1" >> ${opened}\n[ "$1" = https://fails.example/ ] && exit 4\nexit 0`, '');
+    process.env.PATH = opener;
+    await xdgOpen(AUTHORIZE);
+    await assert.rejects(xdgOpen('https://fails.example/'));
+    assert.deepEqual((await readFile(opened, 'utf8')).split('\n').filter(Boolean), [AUTHORIZE, 'https://fails.example/']);
+    process.env.PATH = join(sandbox.base, 'no-opener-here');
+    await assert.rejects(xdgOpen(AUTHORIZE));
+  } finally { process.env.PATH = path; await sandbox.done(); }
+});
+
+test('Port 19876 held by another program: OpenCode, which would take it for its own, is not started, nothing is opened, and that program is never stopped', { skip: noPrintHere, timeout: 15_000 }, async () => {
+  const sandbox = await standIns();
+  const owner = spawn(process.execPath, ['-e', 'require("net").createServer().listen(19876, "127.0.0.1", () => console.log("up"))'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  try {
+    await new Promise(done => owner.stdout!.once('data', done));
+    const fake = await printingStandIn(sandbox), team = server(TEAM);
+    assert.deepEqual(await startSignin(askOf(sandbox, 'opencode-cli', team), nowFor(sandbox, 'opencode-cli', [team]), fake.opener.open), { failed: 'port' });
+    assert.deepEqual([await sandbox.calledWith(), await fake.opened(), isRunning(owner.pid!), await portTaken(19876)], [[], [], true, true]);
+  } finally { owner.kill('SIGKILL'); await sandbox.done(); }
 });
 
 // Last in this file: Quit closes the door to new checks and sign-ins for the rest of the process, as it does for the app.
@@ -716,7 +878,7 @@ test('Quit stops every check and sign-in, the check just clicked too, each secon
     const [[folder]] = await sandbox.calledWith();
     // A sign-in waiting on the browser it opened, its helper ignoring TERM (none is started on Windows: mcpsignin.ts offersSignin).
     const fake = windows ? undefined : await signinStandIn(sandbox, 'wait'), oauth = server('oauth');
-    const signing = fake && startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]));
+    const signing = fake && startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), codexOpens);
     const [port, helper] = (await fake?.listening()) ?? [];
     const [browser] = (await fake?.opened()) ?? [];
     // Clicked a moment before Quit: still looking for its command line when Quit comes.
@@ -732,7 +894,7 @@ test('Quit stops every check and sign-in, the check just clicked too, each secon
     assert.equal(await clicked, undefined);
     if (fake) {
       assert.deepEqual([await signing, ...await left(helper!, port!), ...(browserApartHere ? [isRunning(browser!)] : [])], [{ failed: 'stopped' }, false, false, ...(browserApartHere ? [true] : [])]);
-      assert.deepEqual(await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth])), { failed: 'stopped' });
+      assert.deepEqual(await startSignin(askFor(sandbox, oauth), nowIn(sandbox, [oauth]), codexOpens), { failed: 'stopped' });
     }
     // Once Quit has begun no check starts: only the first ever ran its command, and the sign-in before Quit its own.
     assert.equal(await checkSignin(sandbox.where(), 'codex-cli', []), undefined);

@@ -96,9 +96,11 @@ export const gitEnv = () => ({ ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INT
  * `catchStart`, when true (hookrun.ts), turns a synchronous start throw into `reason: 'error'` instead of rejecting; `graceMs`,
  * when positive (a run in a `group`, off Windows: mcpsigninrun.ts startSignin), a stop asks the group to end (TERM) and kills
  * it that long after if the run hasn't ended by then (what its leader left as it ended, `drainMs` kills); `inOrder`, when true,
- * also keeps both streams' lines in the order they ended (RunResult inOrder).
+ * also keeps both streams' lines in the order they ended (RunResult inOrder); `heard` is handed those whole lines as each ends,
+ * while it runs (mcpsigninrun.ts reads a printed address so).
  */
-export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; maxBytes?: number; env?: NodeJS.ProcessEnv; drainMs?: number; catchStart?: boolean; graceMs?: number; inOrder?: boolean }
+export interface RunOptions { signal?: AbortSignal; input?: Buffer | string; maxBytes?: number; env?: NodeJS.ProcessEnv; drainMs?: number; catchStart?: boolean; graceMs?: number; inOrder?: boolean;
+  heard?: (lines: string) => void }
 /**
  * A command's outcome: `output` is both streams as trimmed text (what failures are worded from); `stdout` and `stderr` each
  * stream byte for byte. A run stopped by its `signal` still reports `code: 'timeout'` for existing callers, while `reason`
@@ -192,11 +194,11 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
       else done({ code, output, stdout, stderr, ...also, ...sig });
     };
     const settle = windows?.settle ?? end;
-    // inOrder: each stream's text held until a line of it ends, its whole lines then taken in the order they ended.
+    // inOrder and heard: each stream's text held until a line of it ends, its whole lines then taken in the order they ended.
     const unended = [0, 1].map(() => ({ decoder: new StringDecoder('utf8'), text: '' }));
     const keep = (at: number, stream: (chunk: Buffer) => void) => (chunk: Buffer) => {
-      const held = unended[at]!, text = options.inOrder ? held.text + held.decoder.write(chunk) : '', end = text.lastIndexOf('\n') + 1;
-      if (end) { arrived.push(text.slice(0, end)); held.text = text.slice(end); } else held.text = text;
+      const held = unended[at]!, text = options.inOrder || options.heard ? held.text + held.decoder.write(chunk) : '', end = text.lastIndexOf('\n') + 1;
+      if (end) { arrived.push(text.slice(0, end)); options.heard?.(text.slice(0, end)); held.text = text.slice(end); } else held.text = text;
       stream(chunk);
     };
     child.stdout.on('data', keep(0, take(out)));

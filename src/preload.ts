@@ -30,6 +30,7 @@ const api: DesktopApi = {
   checkSignin: (tool, home, names) => ipcRenderer.invoke('mcp-signin:check', tool, home, names),
   startSignin: (tool, home, row, copy) => ipcRenderer.invoke('mcp-signin:start', tool, home, row, copy),
   stopSignin: home => ipcRenderer.invoke('mcp-signin:stop', home),
+  reopenSignin: (tool, home, row, copy) => ipcRenderer.invoke('mcp-signin:reopen', tool, home, row, copy),
   search: (typed, shown) => ipcRenderer.invoke('search:ask', typed, shown),
   onSearchPublished: callback => { ipcRenderer.on('search:published', (_event, home, readId) => callback(String(home), Number(readId))); },
   eventChange: eventId => ipcRenderer.invoke('history:change', eventId),

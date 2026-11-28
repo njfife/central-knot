@@ -7,13 +7,16 @@
 // main.ts's before-quit), and none starts once Quit has begun. This computer's own home is checked with the app's environment,
 // its tools' overrides included (as main.ts overrideFor reads them); any other home with an environment made for it (ownEnv), so
 // none of the tools' own variables reaches it. Central Knot writes nothing and keeps nothing; the tools' own commands write their
-// own logs, caches and, for a sign-in, what they keep of it, in their own folders or stores.
-import { mkdtemp } from 'node:fs/promises';
+// own logs, caches and, for a sign-in, what they keep of it, in their own folders or stores. The address Pi or OpenCode prints
+// for a sign-in is held here for that run alone, opened by main (startSignin, reopenSignin), and given to nothing else.
+import { spawn } from 'node:child_process';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { accessSync, constants } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { findCli } from './discovery.ts';
-import { cellKey, CHECK_LIMIT_MS, lastSaid, listCommand, offersSignin, readAnswer, signInArgs, SIGNIN_LIMIT_MS, type SigninRow } from './mcpsignin.ts';
+import { addressAfter, cellKey, CHECK_LIMIT_MS, listCommand, offersSignin, readAnswer, signInArgs, signinEnd, SIGNIN_LIMIT_MS, SIGNIN_PORT, type SigninRow } from './mcpsignin.ts';
 import { pathBeside } from './platform.ts';
 import { clearRunFolder, homeVariables } from './launch.ts';
 import { run } from './plugins.ts';
@@ -70,7 +73,8 @@ async function runCheck(where: CheckWhere, tool: HarnessId, args: string[], name
  * `binary` run with `args` for `where`'s home, from an empty folder made for it and removed after, in a process group of its own;
  * undefined where it was stopped while the folder was made, and so never started. `what` names it in the app's log.
  */
-async function runIn(where: CheckWhere, binary: string, args: string[], options: { timeoutMs: number; signal: AbortSignal; graceMs?: number; drainMs?: number; input?: string; inOrder?: boolean; env?: NodeJS.ProcessEnv },
+async function runIn(where: CheckWhere, binary: string, args: string[], options: { timeoutMs: number; signal: AbortSignal; graceMs?: number; drainMs?: number; input?: string; inOrder?: boolean;
+  heard?: (lines: string) => void; env?: NodeJS.ProcessEnv },
   what: string, log?: (line: string) => void) {
   const folder = await mkdtemp(join(tmpdir(), 'ck-mcp-signin-'));
   const env = { ...(where.actual ? { ...process.env, HOME: where.home, PATH: pathBeside(binary) } : ownEnv(where.home, binary)), ...options.env };
@@ -105,27 +109,50 @@ export function signinRefusal(ask: SigninAsk, now: SigninNow, platform: string =
   return !row || !cell || cell.off || cell.name === undefined || cellKey(row, cell) !== ask.copy ? 'Changed since the page showed it' : undefined;
 }
 
-/** The sign-in under way (startSignin). */
-let signing: AbortController | undefined;
+/** What main opens an address with (main.ts gives xdgOpen); it rejects where it couldn't. */
+export type Opener = (address: string) => Promise<void>;
+/**
+ * Main's opener, on Linux (the one platform where a tool prints an address for main: mcpsignin.ts STARTS_SIGNIN): the address
+ * handed to xdg-open, the system's own opener, in a session of its own, so no ending of the app's or the tool's reaches the
+ * browser. Electron's shell.openExternal hands it over the same way but answers before xdg-open ends, so an xdg-open that fails
+ * never says so there (one that ended 4 left the cell waiting: e2e.mjs mcpSigninPrintedFlow). It rejects where xdg-open can't be
+ * started or ends otherwise than 0, and answers nothing while it runs on (a browser it runs in its place).
+ */
+export const xdgOpen: Opener = address => new Promise((done, fail) => {
+  const child = spawn('xdg-open', [address], { detached: true, stdio: 'ignore' });
+  child.once('error', fail).once('exit', code => (code === 0 ? done() : fail(new Error(`xdg-open ended with ${code}`))));
+  child.unref();
+});
+/** A sign-in under way (startSignin): its stop, the ask it was started for, and, once its tool printed its address, that address opened again (reopenSignin). */
+interface Signing { stop: AbortController; ask: SigninAsk; reopen?: () => void }
+/** The sign-in under way. */
+let signing: Signing | undefined;
 /** Stop: the sign-in under way, if one is, is asked to end; its start answers Stopped. */
-export const stopSignin = () => signing?.abort();
+export const stopSignin = () => signing?.stop.abort();
+const sameAsk = (one: SigninAsk, other: SigninAsk) => one.home === other.home && one.tool === other.tool && one.row === other.row && one.copy === other.copy;
+/** Reopen: the address the sign-in under way for this very ask printed, opened again as startSignin opens it; nothing where none is under way for it, or its tool printed none yet. */
+export const reopenSignin = (ask: SigninAsk) => { if (signing && sameAsk(signing.ask, ask)) signing.reopen?.(); };
 
 /**
  * One server's sign-in in its tool, started on a click: the whole course of a run, said here alone. One at a time: a second is
  * refused at once, before anything is looked up. Then `now()` is read and the ask refused (signinRefusal), the command line
- * found, and `now()` read and the ask refused again just before the tool starts. It runs the tool's own command (mcpsignin.ts
- * signInArgs) as checkSignin runs a check, its input closed and the browser it opens apart (browserApart), and ends as the tool
- * ends: exit 0 is Signed in, anything else the last line it printed, by arrival (SigninEnd unfinished). Its limit, Stop
- * (stopSignin), Quit (stopChecks: none starts after) and another home opening (main.ts selectHome) stop it alike: its process
- * group asked to end, then killed after STOP_GRACE_MS, what its leader left killed DRAIN_MS after it ends (plugins.ts run
- * graceMs, drainMs). `limitMs`: a shorter limit than SIGNIN_LIMIT_MS (an end-to-end run's).
+ * found, and `now()` read and the ask refused again just before the tool starts; where its tool listens on a port of its own
+ * that something already answers on (portAnswers), it is not started (SigninEnd port). It runs the tool's own command
+ * (mcpsignin.ts signInArgs) as checkSignin runs a check, its input closed. Codex opens the browser itself, apart (browserApart).
+ * Pi and OpenCode print the address: main reads their output as it comes (mcpsignin.ts addressAfter), opens that address once
+ * with `open` (and again on Reopen: reopenSignin) where it is https or on this computer (openable), and holds it until the run
+ * ends; their own opener does nothing (quietOpener). An address not opened ends the run (SigninEnd browser). It ends as the
+ * tool ends (mcpsignin.ts signinEnd). Its limit, Stop (stopSignin), Quit (stopChecks: none starts after) and another home
+ * opening (main.ts selectHome) stop it alike: its process group asked to end, then killed after STOP_GRACE_MS, what its leader
+ * left killed DRAIN_MS after it ends (plugins.ts run graceMs, drainMs). `limitMs`: a shorter limit than SIGNIN_LIMIT_MS (an
+ * end-to-end run's).
  */
-export async function startSignin(ask: SigninAsk, now: () => Promise<SigninNow>, limitMs = SIGNIN_LIMIT_MS, log?: (line: string) => void): Promise<SigninEnd> {
+export async function startSignin(ask: SigninAsk, now: () => Promise<SigninNow>, open: Opener, limitMs = SIGNIN_LIMIT_MS, log?: (line: string) => void): Promise<SigninEnd> {
   if (signing) return { notStarted: 'Another sign-in is running' };
   if (quitting) return { failed: 'stopped' };
-  const stop = signing = new AbortController(), ended = runSignin(ask, now, shortened(limitMs, SIGNIN_LIMIT_MS), stop.signal, log);
-  underWay.set(stop, ended.catch(() => undefined));
-  try { return await ended; } finally { underWay.delete(stop); signing = undefined; }
+  const run: Signing = signing = { stop: new AbortController(), ask }, ended = runSignin(run, now, open, shortened(limitMs, SIGNIN_LIMIT_MS), log);
+  underWay.set(run.stop, ended.catch(() => undefined));
+  try { return await ended; } finally { underWay.delete(run.stop); signing = undefined; }
 }
 
 /** Whether `command` (a path, or a name looked for in `path`) is a program that can be run. */
@@ -143,17 +170,49 @@ function browserApart(path: string): NodeJS.ProcessEnv {
   const found = (process.env.BROWSER || 'xdg-open').split(':').map(entry => entry.trim()).filter(entry => entry && runnable(entry.split(/\s+/)[0]!, path));
   return process.platform === 'linux' && found.length && runnable('setsid', path) ? { BROWSER: found.map(entry => `setsid ${entry}`).join(':') } : {};
 }
+/**
+ * Pi and OpenCode hand the address to xdg-open themselves too (Pi 1.7.0 utils/open-browser.js, OpenCode 1.19.6 McpBrowser.open,
+ * read in their code; the computer they were measured on had no xdg-open, so neither opened anything there): their run's path
+ * begins with a folder made for it, removed after, whose xdg-open does nothing, so the browser opens once, by main.
+ */
+async function quietOpener(): Promise<string> {
+  const folder = await mkdtemp(join(tmpdir(), 'ck-mcp-opener-'));
+  await writeFile(join(folder, 'xdg-open'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  return folder;
+}
+/** Whether main opens `address`: an https one, or an http one on this computer (a sign-in's own test server); never any other. */
+function openable(address: string): boolean {
+  try { const url = new URL(address); return url.protocol === 'https:' || (url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)); } catch { return false; }
+}
+/**
+ * Whether something answers on 127.0.0.1:`port`. OpenCode 1.19.6 asks the same before its sign-in and, answered, takes none of
+ * its own and waits on a callback that goes to that other program (read in its code): its sign-in isn't started then.
+ */
+const portAnswers = (port: number) => new Promise<boolean>(done => {
+  const probe = connect(port, '127.0.0.1').once('connect', () => { probe.destroy(); done(true); }).once('error', () => done(false));
+});
 
-async function runSignin(ask: SigninAsk, now: () => Promise<SigninNow>, limitMs: number, signal: AbortSignal, log?: (line: string) => void): Promise<SigninEnd> {
-  const first = await now(), refused = signinRefusal(ask, first);
+async function runSignin(run: Signing, now: () => Promise<SigninNow>, open: Opener, limitMs: number, log?: (line: string) => void): Promise<SigninEnd> {
+  const { ask, stop: { signal } } = run, first = await now(), refused = signinRefusal(ask, first);
   if (refused) return { notStarted: refused };
   const binary = await findCli(ask.tool, first.where.toolsHome, first.where.searchPath);
   if (!binary) return { failed: 'missing' };
-  const last = await now(), changed = signinRefusal(ask, last);
+  const last = await now(), changed = signinRefusal(ask, last), port = SIGNIN_PORT[ask.tool];
   if (changed) return { notStarted: changed };
+  if (port && await portAnswers(port)) return { failed: 'port' };
   const name = last.rows.find(row => row.id === ask.row)!.cells[ask.tool]!.name!;
-  const result = signal.aborted ? undefined : await runIn(last.where, binary, signInArgs(ask.tool, name)!, { timeoutMs: limitMs, signal, graceMs: STOP_GRACE_MS, drainMs: DRAIN_MS, input: '', inOrder: true, env: browserApart(pathBeside(binary)) }, `sign-in in ${toolNames[ask.tool]}`, log);
-  if (!result || result.reason === 'aborted') return { failed: 'stopped' };
-  if (result.reason === 'timeout' || result.code === 'missing') return { failed: result.reason === 'timeout' ? 'timeout' : 'missing' };
-  return result.code === 0 ? { signedIn: true } : { unfinished: lastSaid(result.inOrder ?? result.output) };
+  // The address its tool prints, opened as it comes and on Reopen; one not opened ends the run, said so.
+  let unopened = false;
+  const opens = (address: string) => void (openable(address) ? open(address) : Promise.reject()).catch(() => { unopened = true; run.stop.abort(); });
+  const heard = addressAfter(ask.tool, address => { run.reopen = () => opens(address); opens(address); });
+  const quiet = heard && await quietOpener();
+  try {
+    const env = quiet ? { PATH: [quiet, pathBeside(binary)].join(delimiter) } : browserApart(pathBeside(binary));
+    const result = signal.aborted ? undefined : await runIn(last.where, binary, signInArgs(ask.tool, name)!,
+      { timeoutMs: limitMs, signal, graceMs: STOP_GRACE_MS, drainMs: DRAIN_MS, input: '', inOrder: true, heard, env }, `sign-in in ${toolNames[ask.tool]}`, log);
+    if (unopened) return { failed: 'browser' };
+    if (!result || result.reason === 'aborted') return { failed: 'stopped' };
+    if (result.reason === 'timeout' || result.code === 'missing') return { failed: result.reason === 'timeout' ? 'timeout' : 'missing' };
+    return signinEnd(ask.tool, result.code, result.inOrder ?? result.output);
+  } finally { if (quiet) await clearRunFolder(quiet, `sign-in in ${toolNames[ask.tool]}: its opener`, undefined, log); }
 }
