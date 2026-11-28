@@ -225,7 +225,7 @@ test('Check 2: hookRunWords matches every outcome, quiet trailing run place/time
   const refusedActualOnly = hookRunWords('claude-cli', baseResult({
     outcome: 'refused', problem: HOOK_RUN_ACTUAL_ONLY,
   }), '~', time);
-  assert.equal(refusedActualOnly.sentence, 'Not run: Run it works only on this computer’s home.');
+  assert.equal(refusedActualOnly.sentence, 'Not run: See what it adds works only on this computer’s home.');
   const ipcFailed = hookRunWords('claude-cli', baseResult({ outcome: 'refused' }), '~', time);
   assert.equal(ipcFailed.sentence, 'Couldn’t run it.');
   assert.equal(ipcFailed.meta, undefined);
@@ -243,19 +243,19 @@ test('Check 2: hookRunWords matches every outcome, quiet trailing run place/time
 
 // ---------- Pure unit tests: T1.23 & T2.28 strip lines (Check 3) ----------
 
-test('Check 3: standing warning (Codex one sentence), help card (<= 2 sentences, <= 30 words), and hookStripCard (<= 2 sentences)', async t => {
+test('Check 3: standing warning (See what it adds, plain sentences), help card (<= 2 sentences, <= 30 words), and hookStripCard (<= 2 sentences)', async t => {
   const sentences = (text: string) => text.split(/(?<=\.)\s+/).length;
-  await t.test('item 1: Codex warning is one plain sentence naming Codex’s /hooks command', () => {
-    assert.equal(HOOK_RUN_WARN, '“Run it” runs a hook’s command to show what it adds; it may change your files.');
+  await t.test('item 1 & 7: standing warning names See what it adds, says nothing is added to any session, and on Codex names its /hooks command', () => {
+    assert.equal(HOOK_RUN_WARN, '“See what it adds” runs the hook’s command on this computer to collect what it prints. Nothing is added to any session, but the command may change your files.');
     assert.equal(hookRunWarn('claude-cli'), HOOK_RUN_WARN);
     const codexWarn = hookRunWarn('codex-cli');
-    assert.equal(codexWarn, '“Run it” runs a hook’s command to show what it adds, whether or not you have trusted it in Codex’s /hooks command, and may change your files.');
-    assert.equal(sentences(codexWarn), 1);
+    assert.equal(codexWarn, '“See what it adds” runs the hook’s command on this computer to collect what it prints, whether or not you have trusted it in Codex’s /hooks command. Nothing is added to any session, but the command may change your files.');
+    assert.ok(sentences(HOOK_RUN_WARN) <= 2 && sentences(codexWarn) <= 2);
   });
 
-  await t.test('item 2: first help card is at most two whole sentences and <= 30 words without semicolons', () => {
+  await t.test('item 2 & 7: first help card is at most two whole sentences and <= 30 words without semicolons', () => {
     const claudeRun = hookStripHelp('claude-cli', true);
-    assert.equal(claudeRun, 'This lists session-start and prompt hooks, not URL, MCP, project or organisation. Run it uses your home or the hook’s folder, and plugin hooks can change installed files and data.');
+    assert.equal(claudeRun, 'This lists session-start and prompt hooks, not URL, MCP, project or organisation. “See what it adds” uses your home or the hook’s folder, and plugin hooks can change installed files.');
     assert.ok(wordCount(claudeRun) <= 30, `expected <=30 words, got ${wordCount(claudeRun)}`);
     assert.ok(sentences(claudeRun) <= 2 && !claudeRun.includes(';'));
     assert.equal(hookStripHelp('claude-cli', false), 'This lists session-start and prompt hooks, not URL, MCP, project or organisation.');
@@ -485,8 +485,8 @@ test('Check 1 & 6: Claude Code start-of-session stand-in runs on click, shows Ru
     row.connected = true;
     row.append(...viewMod.hookSourceControls(ref, 'hook-source-instructions-claude-cli-0-0'));
     const runBtn = dom.findAll(row, n => 'data-hook-run' in (n.attrs ?? {}))[0];
-    assert.ok(runBtn, 'expected a Run it button on an own Claude Code hook row in actual home');
-    assert.equal(dom.textOf(runBtn), 'Run it');
+    assert.ok(runBtn, 'expected a See what it adds button on an own Claude Code hook row in actual home');
+    assert.equal(dom.textOf(runBtn), 'See what it adds');
 
     // Click Run it -> Running… (same id, aria-disabled, focused) and Stop.
     runBtn.onclick({ detail: 1 });
@@ -707,7 +707,7 @@ test('Checks 4, 5, 6, 7, 8: eligibility, hashed ids, double click & held Enter g
   const afterAwayRow = dom.makeNode('li');
   afterAwayRow.connected = true;
   afterAwayRow.append(...viewMod.hookSourceControls(ownRef, 'hook-source-instructions-claude-cli-0-0'));
-  assert.equal(dom.textOf(dom.findAll(afterAwayRow, n => 'data-hook-run' in (n.attrs ?? {}))[0]), 'Run it');
+  assert.equal(dom.textOf(dom.findAll(afterAwayRow, n => 'data-hook-run' in (n.attrs ?? {}))[0]), 'See what it adds');
   assert.equal(dom.findAll(afterAwayRow, n => n.className === 'hook-run').length, 0);
 });
 
@@ -1292,7 +1292,7 @@ test('Plugin page runs installed hooks, keeps marketplace-only text hooks View s
   const mkFile = (tool: string, ownHooks?: any[]) => ({ tool, path: `/tmp/h/${tool}.md`, exists: true, text: '# Hi', hash: tool, readers: tool, notes: [], versions: [], ...(ownHooks ? { ownHooks } : {}) }) as any;
   const withPluginCard = instructionCard(mkFile('claude-cli', ownClaude));
   assert.equal(dom.textOf(dom.findAll(withPluginCard, n => n.className === 'session-run-warn')[0]), HOOK_RUN_WARN);
-  assert.match(dom.textOf(dom.findAll(withPluginCard, n => n.attrs?.role === 'tooltip')[0]), /plugin hooks can change installed files and data\./);
+  assert.match(dom.textOf(dom.findAll(withPluginCard, n => n.attrs?.role === 'tooltip')[0]), /plugin hooks can change installed files\./);
 
   await t.test('item 2 & 3: Copilot card order/words, runnable Codex gets (?), chosen folder starts with reason, one (?) per strip', () => {
     const info = { marked: false, anyRunnable: true };
@@ -1311,7 +1311,7 @@ test('Plugin page runs installed hooks, keeps marketplace-only text hooks View s
     state.home!.mode = 'custom';
     const folderCard = instructionCard(mkFile('claude-cli', ownClaude), { hookInfo: { marked: false, anyRunnable: false } });
     assert.equal(dom.findAll(folderCard, n => 'data-hook-run' in (n.attrs ?? {})).length, 0);
-    assert.match(dom.textOf(dom.findAll(folderCard, n => n.id === 'session-hooks-info-card')[0]), /^Run it works only on this computer’s home\. This lists /);
+    assert.match(dom.textOf(dom.findAll(folderCard, n => n.id === 'session-hooks-info-card')[0]), /^See what it adds works only on this computer’s home\. This lists /);
     state.home!.mode = 'actual';
   });
 });

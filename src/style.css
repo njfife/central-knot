@@ -2008,7 +2008,7 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 .session-head > .origin-mark { margin-left: -16px; }
 .session-in, .session-warning > span { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 4px; min-width: 0; max-width: 100%; }
 .session-in > .path-text, .session-warning .path-text { min-width: 0; max-width: 100%; }
-/* Quiet link weight matching View source and Run it; wraps cleanly beside long plugin names. */
+/* Quiet link weight matching View source and See what it adds; wraps cleanly beside long plugin names. */
 .session-head > .btn.link { max-width: 100%; height: auto; padding: 0; white-space: normal; text-align: left; }
 .session-head > .btn.link:focus-visible { outline-offset: 2px; border-radius: 4px; }
 .session-why { padding-left: 16px; font-size: 12px; color: var(--ink-soft); overflow-wrap: anywhere; }

@@ -98,19 +98,19 @@ export function sessionStrip(tool: HarnessId, items: InstalledPlugin[], file: Pi
 }
 
 /** One source for main's hookrun.ts refusals and hooksourceview.ts stripCantRunReason when hooks can't be run here. */
-export const HOOK_RUN_ACTUAL_ONLY = 'Run it works only on this computer’s home.';
+export const HOOK_RUN_ACTUAL_ONLY = 'See what it adds works only on this computer’s home.';
 export const HOOK_RUN_COPILOT_PLUGIN = 'Central Knot can’t run a Copilot CLI plugin’s hook, but View source shows its script.';
 
 /** Standing line above the first row of every strip that has a runnable hook. */
-export const HOOK_RUN_WARN = '“Run it” runs a hook’s command to show what it adds; it may change your files.';
-/** Standing line for a runnable strip: Codex names its /hooks command in one plain sentence. */
+export const HOOK_RUN_WARN = '“See what it adds” runs the hook’s command on this computer to collect what it prints. Nothing is added to any session, but the command may change your files.';
+/** Standing line for a runnable strip: Codex also says it runs regardless of trust in Codex's /hooks command. */
 export const hookRunWarn = (tool: HarnessId): string =>
-  tool === 'codex-cli' ? '“Run it” runs a hook’s command to show what it adds, whether or not you have trusted it in Codex’s /hooks command, and may change your files.' : HOOK_RUN_WARN;
+  tool === 'codex-cli' ? '“See what it adds” runs the hook’s command on this computer to collect what it prints, whether or not you have trusted it in Codex’s /hooks command. Nothing is added to any session, but the command may change your files.' : HOOK_RUN_WARN;
 
 /** Whole-sentence parts for the first hooks strip's (?) card (at most 2 sentences, ≤30 words). */
 const hookStripHelpParts = (tool: HarnessId, runnable: boolean): string[] => [
   `This lists ${tool === 'copilot-cli' ? 'session-start' : 'session-start and prompt'} hooks, not URL, MCP, project or organisation.`,
-  ...(runnable ? ['Run it uses your home or the hook’s folder, and plugin hooks can change installed files and data.'] : []),
+  ...(runnable ? ['“See what it adds” uses your home or the hook’s folder, and plugin hooks can change installed files.'] : []),
 ];
 
 /** Information-mark card text on the first hooks strip of a page (≤2 sentences, ≤30 words). */
@@ -124,7 +124,7 @@ export function hookStripCard(tool: HarnessId, strip: Pick<SessionStrip, 'note'>
   return parts.length ? parts.join(' ') : undefined;
 }
 
-const KEEP_CAP = /^(?:Central Knot|Claude Code|Codex|Copilot CLI|Run it|Windows)\b|^\S+ is turned off in /;
+const KEEP_CAP = /^(?:Central Knot|Claude Code|Codex|Copilot CLI|See what it adds|Windows)\b|^\S+ is turned off in /;
 const lowerLead = (text: string) => (KEEP_CAP.test(text) ? text : text.replace(/^[A-Z](?=[a-z])/, ch => ch.toLowerCase()));
 
 /** What a hook run's result block shows (sentence, quiet trailing run place/time, notes, and output slots), pure. */

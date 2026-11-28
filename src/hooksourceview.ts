@@ -1,4 +1,4 @@
-// Shared hook-row controls, rows (hookRow) and panels for every hook row: Run it / Running… + Stop (offered by canRun; main's hookrun.ts
+// Shared hook-row controls, rows (hookRow) and panels for every hook row: See what it adds / Running… + Stop (offered by canRun; main's hookrun.ts
 // runHook decides) beside View source / Hide source inside one span, plus the opened run result (above) and source block
 // (below), called by instructionspage.ts sessionStripView (Instructions and a tool's Instructions tab) and pluginpage.ts
 // (sessionHookStrip and partList from hookGroup). Reads source over hook:source (hooksource.ts) and runs/stops on click over hook:run / hook:stop
@@ -36,7 +36,7 @@ const hookGate = (ref: HookSourceRef, mode: HomeMode | undefined, platform: stri
   : ref.from === 'installed' && ref.tool === 'copilot-cli' ? HOOK_RUN_COPILOT_PLUGIN
   : ref.from === 'installed' && ref.tool !== 'claude-cli' && ref.tool !== 'codex-cli' ? 'silent' : undefined;
 
-/** Whether the page offers Run it (mirrors main's deciding gate in hookrun.ts runHook): actual home, non-Windows, own or Claude Code / Codex installed plugin hook that adds text, with the tool's CLI found and the plugin on. */
+/** Whether the page offers See what it adds (mirrors main's deciding gate in hookrun.ts runHook): actual home, non-Windows, own or Claude Code / Codex installed plugin hook that adds text, with the tool's CLI found and the plugin on. */
 export function canRun(ref: HookSourceRef, mode: HomeMode | undefined = state.home?.mode, platform = pagePlatform(navigator.userAgent), home: Pick<HomeView, 'snapshots' | 'pluginItems'> | undefined = state.home): boolean {
   if (ref.from === 'marketplace' || hookGate(ref, mode, platform)) return false;
   if (!ref.command || !isTextEvent(ref.tool, ref.event)) return false;
@@ -109,7 +109,7 @@ function sourceBlock(blockId: string, path?: string, text?: string, note?: strin
       : h('p.hook-source-note', {}, note ?? ''));
 }
 
-/** Returns the row's action span (Run it / Running… + Stop when runnable, beside View source), then any open result and source blocks. */
+/** Returns the row's action span (See what it adds / Running… + Stop when runnable, beside View source), then any open result and source blocks. */
 export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[] {
   const key = `${id}\u0000${JSON.stringify(ref)}`;
   const base = `${id}-${keyHash(key)}`;
@@ -183,7 +183,7 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
       view.errFold !== undefined ? foldBlock(`${base}-err-fold`, 'Standard error', view.errFold, entry.openErr, flip('openErr', `${base}-err-fold`)) : null);
   };
 
-  const runButton = (running: boolean): HTMLElement => rowLink(running ? 'Running…' : 'Run it', runBtnId, running ? () => {} : startRun,
+  const runButton = (running: boolean): HTMLElement => rowLink(running ? 'Running…' : 'See what it adds', runBtnId, running ? () => {} : startRun,
     { 'data-hook-run': '', ...(running ? { 'aria-disabled': 'true' } : {}), onkeydown: onRunKey });
   const stopButton = (): HTMLElement => rowLink('Stop', stopBtnId, stopRun, { 'data-hook-stop': '', onkeydown: onRunKey });
 
@@ -282,7 +282,7 @@ export function hookSourceControls(ref: HookSourceRef, id: string): HTMLElement[
   ].filter((node): node is HTMLElement => !!node);
 }
 
-/** One hook row (when it runs, its command, optional quiet tag, and its Run it / Stop / View source controls and inline panels), shared by Instructions and a plugin's page. */
+/** One hook row (when it runs, its command, optional quiet tag, and its See what it adds / Stop / View source controls and inline panels), shared by Instructions and a plugin's page. */
 export function hookRow(hook: TextHookRow, id: string): HTMLElement {
   return h('li.session-hook', {},
     h('span.session-lead', {}, h('span.session-when', { title: hook.source.event }, sentence(hook.when)), h('code.session-command', {}, hook.command),
