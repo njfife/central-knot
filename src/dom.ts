@@ -500,7 +500,7 @@ if (typeof document !== 'undefined') {
  *   New native `title` attributes only name an icon, a mark, a "—", a label cut short, or a command's hint (older disabled
  *   reasons in whyOff/lockAttrs and checkbox's help still use `title`).
  */
-export function infoMark(id: string, label: string, text: Child | Child[], { face = icon('circle-question-mark', 14), look = '' }: { face?: Child | Child[]; look?: string } = {}): HTMLElement {
+export function infoMark(id: string, label: string, text: Child | readonly Child[], { face = icon('circle-question-mark', 14), look = '' }: { face?: Child | Child[]; look?: string } = {}): HTMLElement {
   const enter = hoverInfo(id, true), leave = hoverInfo(id, false);
   const mark = h(`button.info-mark${look ? `.${look}` : ''}`, {
     type: 'button', id, 'aria-label': `About ${label}`, 'aria-describedby': infoCardId(id),
@@ -521,7 +521,10 @@ export function infoMark(id: string, label: string, text: Child | Child[], { fac
       else openInfoCard(id, true);
     },
   }, face);
-  const card = h('span.info-card', { id: infoCardId(id), role: 'tooltip', popover: 'manual', onpointerenter: enter, onpointerleave: leave }, text);
+  const body: Child[] = Array.isArray(text) && text.every((line): line is string => typeof line === 'string')
+    ? text.flatMap((line, at) => (at ? ['\n', h('span.info-line', {}, line)] : [h('span.info-line', {}, line)]))
+    : Array.isArray(text) ? [...text] : [text as Child];
+  const card = h('span.info-card', { id: infoCardId(id), role: 'tooltip', popover: 'manual', onpointerenter: enter, onpointerleave: leave }, ...body);
   return h('span.info-wrap', {}, mark, card);
 }
 

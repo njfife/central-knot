@@ -1311,7 +1311,7 @@ async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Se
   for (const [key, answer] of answers) {
     const item = pass.library.items[key], entry = read.names.get(key);
     if (item && !item.deleted && pluginsRecordHold(item, pass.recorded)) continue;
-    if (answer !== 'nothing' && answer !== 'same') pass.sourced.set(key, { name: entry && 'name' in entry ? entry.name : item?.name ?? key, answer });
+    if (answer !== 'nothing' && answer !== 'same') pass.sourced.set(key, { key, name: entry && 'name' in entry ? entry.name : item?.name ?? key, answer });
     // Merge asked, and the table left it waiting: a tool's copy still holds a change (library.ts MERGE).
     if (answer === 'wait' && read.merge?.has(key)) pass.sourced.get(key)!.merge = 'unsettled';
     if (answer === 'drop' && item) {
