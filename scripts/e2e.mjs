@@ -26045,9 +26045,11 @@ async function pluginItemSwitchesFlow() {
       [true, 'Its copy was deleted in OpenCode. When sync runs, the agent turns off; Central Knot keeps it.']);
     await shot('item-switches-copy-gone-light-860', SMALLEST, 'light');
   }
-  // Work around a fault (queued: DELETED-BY-HAND-1): a plugin-linked item deleted by hand never settles and keeps scheduling
-  // follow-up passes every AFTER_SETTLE_MS. Put checker.md back so those passes stop before the shared-copy check; remove once mended.
-  if (ocAgent) renameSync(aside, ocAgent);
+  const checkerDeleted = () => a.run(
+    `window.centralKnot.history().then(history => history.events.some(event => event.key === 'agent:checker' && event.kind === 'off' && event.cause === 'deleted-by-hand'))`,
+  );
+  await until(checkerDeleted);
+  check('checker deleted by hand in OpenCode settles and records deleted-by-hand in History', await checkerDeleted());
   // The long skill is kept out of Pi and on in OpenCode now (Pi's box unticked, OpenCode's ticked); once any owed pass has run and
   // the page has taken it in, his copy of it comes in the shared skills folder, which both read, behind the page: the Pi switch
   // drawn before is refused, leaves every tool's files (outside OpenCode's copy) as they were, and makes no click entry.
