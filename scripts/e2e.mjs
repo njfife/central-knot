@@ -6027,7 +6027,7 @@ async function sourcesFlow() {
   await until(async () => (await a.all('.source-row')).length === 2);
   check('Add says the kinds and names are in Central Knot, Off, with Turn them on and profile forecast on the band', /1 skill, 1 agent and 1 MCP server \(notes, reviewer and relay\) are in Central Knot\. All 3 are off\.$/.test(await a.text('.band-done .band-text') ?? '')
     && (await a.text('#source-turn-made-on'))?.trim() === 'Turn them on'
-    && (await a.text('#source-turn-made-profile'))?.trim() === 'Would leave Everyday' && agentRecord()?.on === false, await a.text('.band-done'));
+    && (await a.text('#source-turn-made-profile'))?.trim() === 'Everyday would stop being the profile in use' && agentRecord()?.on === false, await a.text('.band-done'));
   const kitId = await a.run(`[...document.querySelectorAll('.source-row')].find(row => row.textContent.includes('team/kit')).dataset.source`);
   same('with two sources, every source row has its own Sync this source info mark', await a.run(`(() => {
     const rows = [...document.querySelectorAll('.source-row')];
@@ -6066,8 +6066,8 @@ async function sourcesFlow() {
   await a.click('#nav-sources');
   commit(kit, { 'agents/reviewer.md': reviewerMd.replace('Be brief.', 'Be brief and kind.') });
   await a.click(`#source-check-${kitId}`);
-  check('a change at the source updates the agent in every tool, and the band opens Agents', await until(async () => /reviewer was updated from its source, now in all 3 tools\./.test(await a.text('.band-done .band-text') ?? ''))
-    && await a.exists('#source-open-agents') && await until(() => ['claude-cli', 'copilot-cli', 'codex-cli'].every(tool => readNow(agentFile(tool)).includes('Be brief and kind.'))), await a.text('.band-done'));
+  check('a change at the source updates the agent in every tool, and the band opens Agents via Open in the Library', await until(async () => /reviewer was updated from its source, now in all 3 tools\./.test(await a.text('.band-done .band-text') ?? ''))
+    && (await a.text('#source-open-agents'))?.trim() === 'Open in the Library' && await until(() => ['claude-cli', 'copilot-cli', 'codex-cli'].every(tool => readNow(agentFile(tool)).includes('Be brief and kind.'))), await a.text('.band-done'));
   writeFileSync(agentFile('claude-cli'), readNow(agentFile('claude-cli')).replace('You review code.', 'You review code, mine.'));
   // Agents folders the app made after it opened the home aren't watched (main.ts startWatching watches what is there), so
   // the edit is taken in by the pass the next event elsewhere prompts or by the poll (main.ts POLL_MS, 20 s): waited for.
@@ -6095,8 +6095,8 @@ async function sourcesFlow() {
   commit(kit, { '.mcp.json': relayJson({ A: '1', B: '2' }) });
   await a.click('#nav-sources');
   await a.click(`#source-check-${kitId}`);
-  check('a change at the source updates every tool, Claude Code too, with Open MCP servers', await until(async () => /relay was updated from its source, now in all 3 tools\./.test(await a.text('.band-done .band-text') ?? ''))
-    && await a.exists('#source-open-mcp') && relayIn('copilot-cli')?.env?.B === '2' && relayIn('claude-cli')?.env?.B === '2', [await a.text('.band-done'), readNow(mcpFile('claude-cli'))]);
+  check('a change at the source updates every tool, Claude Code too, with Open in the Library', await until(async () => /relay was updated from its source, now in all 3 tools\./.test(await a.text('.band-done .band-text') ?? ''))
+    && (await a.text('#source-open-mcp'))?.trim() === 'Open in the Library' && relayIn('copilot-cli')?.env?.B === '2' && relayIn('claude-cli')?.env?.B === '2', [await a.text('.band-done'), readNow(mcpFile('claude-cli'))]);
   await a.shot('sources-server-updated');
   const copilotMcp = JSON.parse(readNow(mcpFile('copilot-cli')));
   copilotMcp.mcpServers.relay.env.A = 'mine';

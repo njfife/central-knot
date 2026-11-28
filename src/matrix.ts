@@ -1134,7 +1134,7 @@ export function outcomeBand(cardResult?: Outcome, omitProfile = false): HTMLElem
     },
     onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); },
   }) : null;
-  const actEnds = outcome.act?.ends ? endsMark(endsOf(outcome.act.ends.clicks()), outcome.act.ends.act, outcome.act.ends.id) : null;
+  const actEnds = outcome.act?.ends ? endsMark(endsOf(outcome.act.ends.clicks()), outcome.act.ends.act, outcome.act.ends.id, 'band') : null;
   return h(`div.band.band-done${outcome.next || (outcome.act && outcome.undo) ? '.band-two' : ''}`, { role: 'status', 'data-outcome': cardResult ? undefined : outcome.kind ?? '' }, outcome.warn ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'), h('span.band-text', {}, ...text,
     // The space before the note sits outside it, so a note kept whole on its line never carries the last word with it.
     outcome.note ? [' ', outcome.note === 'History'
@@ -1142,7 +1142,7 @@ export function outcomeBand(cardResult?: Outcome, omitProfile = false): HTMLElem
       : h('span.tone-faint', {}, outcome.note.replace(/ History\.$/, ' '), h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History'), '.')] : null, reasons),
     outcome === state.outcome && h('span.band-actions', {},
       outcome.undo ? button({ variant: 'outline', size: 'small', label: outcome.undo.label, id: 'outcome-undo', disabled: acting(), onclick: (event: Event) => { event.stopPropagation(); void restoreEvent(outcome.undo!.id); } }) : null,
-      actBtn, actEnds,
+      actEnds ? h(`span.band-act-stop${outcome.next ? '.band-act-sep' : ''}`, {}, actBtn, actEnds) : actBtn,
       !outcome.act && !outcome.undo && outcome.history ? smallAction(outcome.refused ? 'History' : 'Undo in History', 'outcome-history', () => showPage('history')) : null,
       outcome.next ? button({ variant: 'outline', size: 'small', label: outcome.next.label, id: outcome.next.id, attrs: outcome.next.title ? { title: outcome.next.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.next!.run(); } }) : null),
     cardResult ? null : closeButton(closeResult, { id: 'outcome-dismiss' }),
@@ -2667,7 +2667,7 @@ const switchClicks = (skill: ItemRow) => [{ kind: skill.kind, changes: [changeBy
  * The names of the profiles in use `clicks` would end, from the very changes they send (profileplan.ts endedByChanges; none projected
  * for no change), and `may` while other clicks still wait or run, whose writes the view doesn't hold yet; undefined for none.
  */
-export function endsOf(clicks: Pick<Click, 'kind' | 'changes'>[]) {
+function endsOf(clicks: Pick<Click, 'kind' | 'changes'>[]) {
   const changes = clicks.flatMap(click => click.changes.map(change => ({ kind: partOfPage[click.kind], change })));
   const ended = state.home && changes.length ? endedByChanges(state.home, changes) : [];
   return ended.length ? { names: ended.map(profile => profile.name), may: !!acting() } : undefined;
@@ -2681,11 +2681,13 @@ export const endsOnHover = (label: string, clicks: () => Pick<Click, 'kind' | 'c
   };
   return { onmouseenter: say, onfocus: say };
 };
-/** After a control, what its click would end (endsOf): "Would leave Everyday" ("Either would …" after two), its sentence and what brings it back on hover; `line`, a row's head. */
-export function endsMark(ending: ReturnType<typeof endsOf>, act: string, id: string, shown: 'mark' | 'either' | 'line' = 'mark') {
+/** After a control, what its click would end (endsOf): "Would leave Everyday" ("Either would …" after two), its sentence and what brings it back on hover; `line`, a row's head; `band`, the result band's full wording. */
+function endsMark(ending: ReturnType<typeof endsOf>, act: string, id: string, shown: 'mark' | 'either' | 'line' | 'band' = 'mark') {
   if (!ending) return null;
   const said = `${act}, ${shown === 'line' ? 'only this item changes: ' : ''}${profileStops(ending.names, ending.may)}.`, back = profileBack(ending.names);
-  const short = profileStops(ending.names, ending.may, true), text = shown === 'line' ? said : shown === 'either' ? `Either ${short}` : sentence(short);
+  const short = profileStops(ending.names, ending.may, true);
+  const bandText = `${andList(ending.names)} ${ending.may ? 'may' : 'would'} stop being the ${ending.names.length === 1 ? 'profile' : 'profiles'} in use`;
+  const text = shown === 'band' ? bandText : shown === 'line' ? said : shown === 'either' ? `Either ${short}` : sentence(short);
   return h('span.profile-stop', { id, title: shown === 'line' ? back : `${said} ${back}` }, icon('sliders-horizontal', 12), h('span', {}, text));
 }
 /**

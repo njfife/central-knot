@@ -2519,6 +2519,9 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .profile-stop > span { overflow: hidden; text-overflow: ellipsis; }
 .details-head > .profile-stop { white-space: normal; max-width: var(--measure); }
 .select-line > .profile-stop { padding-right: 10px; border-right: 1px solid var(--line); }
+.band-act-stop { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.band-act-sep { padding-right: 10px; border-right: 1px solid var(--line); }
+.band-act-stop > .profile-stop { color: var(--ink); white-space: normal; }
 .band-act { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .select-why { position: absolute; top: 100%; left: 0; right: 0; z-index: 5; padding: 6px 16px; background: var(--surface); border-bottom: 1px solid var(--line); box-shadow: 0 8px 20px rgb(0 0 0 / 18%); font-size: 12px; line-height: 18px; color: var(--ink-soft); }
 .select-why > p { margin: 0; }

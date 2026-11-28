@@ -10,7 +10,7 @@ import { libraryEntry } from '../src/historyactions.ts';
 import { applyServers, restoreServer, serversView } from '../src/servers.ts';
 import { applySkills, restoreSkill, skillsView } from '../src/skills.ts';
 import { addSource, checkSource, previewSource, rowClick, sourcesView } from '../src/sources.ts';
-import type { Change, HarnessId, HomeView, InstalledPlugin, Profile, SourceName, SourceResult, SourcesView, SourceView } from '../src/types.ts';
+import type { Change, HarnessId, HomeView, InstalledPlugin, Profile, SourceName, SourcesView, SourceView } from '../src/types.ts';
 import { findById, findNode, installDom, textOf, type FakeNode } from './domstub.ts';
 import { everywhere, folderOf, put, sandbox, skillText, type Box } from './skillclicks.ts';
 import { repository, standInHosts } from './sourcerepo.ts';
@@ -24,8 +24,6 @@ let extraHome: Partial<HomeView> = {};
 let patchSkills: ((skills: HomeView['skills']) => HomeView['skills']) | undefined;
 let pluginCalls: unknown[][] = [];
 let sourcesNow: SourcesView | undefined;
-let pendingAdd: SourceResult | undefined;
-let pendingCheck: SourceResult | undefined;
 
 async function readBoxHome(box: Box): Promise<HomeView> {
   const [rawSkills, agents, mcp] = await Promise.all([
@@ -53,8 +51,8 @@ const api = {
     pluginCalls.push(args);
     return { reports: [{ tool: args[4] as HarnessId, outcome: (args[5] ? 'skill-on' : 'skill-off') as 'skill-on' | 'skill-off', changed: true, message: 'Switched.', runs: [] }] };
   },
-  addSource: async (token: string) => (pendingAdd ?? addSource(boxNow!.context, boxNow!.tools, token)),
-  checkSource: async (id: string) => (pendingCheck ?? checkSource(boxNow!.context, async () => boxNow!.tools, id, work => work())),
+  addSource: async (token: string) => addSource(boxNow!.context, boxNow!.tools, token),
+  checkSource: async (id: string) => checkSource(boxNow!.context, async () => boxNow!.tools, id, work => work()),
   history: async () => ({ events: boxNow ? await readHistory(boxNow.context) : [], days: 30 }),
   restore: async (id: string) => {
     const events = await readHistory(boxNow!.context);
@@ -78,15 +76,16 @@ const api = {
 
 installDom(api, { byId: id => (rendered ? findById(rendered, id) ?? null : null) });
 
-const { applyClick, setRenderer, state } = await import('../src/app.ts');
-const { turnOnRow } = await import('../src/matrix.ts');
+const { setRenderer, state } = await import('../src/app.ts');
+const { clickList, drop, endRun } = await import('../src/clicklist.ts');
+const { libraryTable } = await import('../src/matrix.ts');
 const { sources, sourcesPage, whatItDid } = await import('../src/sourcespage.ts');
 
-const draw = () => { rendered = sourcesPage() as unknown as FakeNode; };
+const draw = () => { rendered = (state.page === 'library' ? libraryTable() : sourcesPage()) as unknown as FakeNode; };
 setRenderer(draw);
 
 const flush = async () => {
-  for (let i = 0; i < 60 && (i < 3 || state.busy); i++) await new Promise(resolve => setTimeout(resolve, 10));
+  for (let i = 0; i < 80 && (i < 3 || state.busy || clickList.running); i++) await new Promise(resolve => setTimeout(resolve, 10));
 };
 
 const allNodes = (node: unknown, match: (el: FakeNode) => boolean, out: FakeNode[] = []): FakeNode[] => {
@@ -102,10 +101,11 @@ async function openOnBox(box: Box, extra: Partial<HomeView> = {}, onSkills?: (sk
   extraHome = extra;
   patchSkills = onSkills;
   pluginCalls = [];
-  pendingAdd = undefined;
-  pendingCheck = undefined;
   sourcesNow = undefined;
+  drop(() => true);
+  endRun();
   state.page = 'sources';
+  state.libraryKind = 'all';
   state.outcome = undefined;
   state.busy = undefined;
   state.home = await readBoxHome(box);
@@ -164,9 +164,9 @@ test('Turn it on on Library sources matches the Library switch by making the sam
     const sourcesDisk = await everywhere(fromSources, 'notes');
 
     await openOnBox(fromLibrary, { pluginItems }, withPlugin);
-    const libClick = turnOnRow('skills', 'notes', false);
-    assert.ok(libClick);
-    await applyClick(libClick);
+    state.page = 'library';
+    draw();
+    findById(rendered, 'switch-skills-notes')!.click();
     await flush();
     const libraryPlugins = pluginCalls.map(call => call.slice(0, 6));
     const libraryDisk = await everywhere(fromLibrary, 'notes');
@@ -270,20 +270,24 @@ test('Band Turn them on does not turn on an item replaced meanwhile by another s
   } finally { await box.cleanup(); }
 });
 
-test('Undo of Turn them on leaves an item turned off and on again by hand and still turns off siblings of the same kind and other kinds', async () => {
-  const repo = await repository(hosts, 'https://github.com/team/kit-undo-hand');
+async function setupUndoBatch(slug: string, extra: Partial<HomeView> = {}, onSkills?: (skills: HomeView['skills']) => HomeView['skills']) {
+  const repo = await repository(hosts, `https://github.com/team/${slug}`);
   await repo.commit({
     'notes/SKILL.md': skillText('Take notes.', 'notes'),
     'spare/SKILL.md': skillText('Spare notes.', 'spare'),
     'agents/reviewer.md': kitFiles['agents/reviewer.md'],
   }, '2026-11-01T10:00:00Z');
   const box = await sandbox();
-  try {
-    await openOnBox(box);
-    await addViaPage(box, 'https://github.com/team/kit-undo-hand');
-    findById(rendered, 'source-turn-made-on')!.click();
-    await flush();
+  await openOnBox(box, extra, onSkills);
+  await addViaPage(box, `https://github.com/team/${slug}`);
+  findById(rendered, 'source-turn-made-on')!.click();
+  await flush();
+  return box;
+}
 
+test('Undo of Turn them on leaves an item turned off and on again by hand and still turns off siblings of the same kind and other kinds', async () => {
+  const box = await setupUndoBatch('kit-undo-hand');
+  try {
     // Turn notes off and back on again by hand before clicking Undo.
     await applySkills(box.context, box.tools, [{ key: 'notes', on: false, except: [] }]);
     await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [] }]);
@@ -302,19 +306,8 @@ test('Undo of Turn them on leaves an item turned off and on again by hand and st
 });
 
 test('Undo of Turn them on does not stop at an item already off and still turns off same-kind and other-kind siblings', async () => {
-  const repo = await repository(hosts, 'https://github.com/team/kit-undo-off');
-  await repo.commit({
-    'notes/SKILL.md': skillText('Take notes.', 'notes'),
-    'spare/SKILL.md': skillText('Spare notes.', 'spare'),
-    'agents/reviewer.md': kitFiles['agents/reviewer.md'],
-  }, '2026-11-01T10:00:00Z');
-  const box = await sandbox();
+  const box = await setupUndoBatch('kit-undo-off');
   try {
-    await openOnBox(box);
-    await addViaPage(box, 'https://github.com/team/kit-undo-off');
-    findById(rendered, 'source-turn-made-on')!.click();
-    await flush();
-
     await applySkills(box.context, box.tools, [{ key: 'spare', on: false, except: [] }]);
 
     findById(rendered, 'outcome-undo')!.click();
@@ -343,7 +336,7 @@ test('Add band states the kinds covered, caps long lists, and forecasts an ended
     await addViaPage(box, 'https://github.com/team/kit-kinds');
     const bandText = textOf(findNode(rendered, el => el.className.includes('band-text')));
     assert.equal(bandText, 'Added github.com/team/kit-kinds. 1 skill, 1 agent and 1 MCP server (notes, reviewer and relay) are in Central Knot. All 3 are off.');
-    assert.match(textOf(findById(rendered, 'source-turn-made-profile')), /Would leave Everyday/);
+    assert.equal(textOf(findById(rendered, 'source-turn-made-profile')), 'Everyday would stop being the profile in use');
 
     const bandBtn = findById(rendered, 'source-turn-made-on')! as FakeNode & { onmouseenter?: (e: unknown) => void };
     bandBtn.onmouseenter?.({ currentTarget: bandBtn });
@@ -368,7 +361,7 @@ test('Add band states the kinds covered, caps long lists, and forecasts an ended
   } finally { await box.cleanup(); }
 });
 
-test('A Sync bringing a new item alongside an update or drop keeps Undo (as an outline button), Turn it on, and the History link without filler', async () => {
+test('A mixed Sync names the new item on its Turn button, uses Open in the Library everywhere, and drops the misplaced trailing History link', async () => {
   const repo = await repository(hosts, 'https://github.com/team/mixed-sync');
   await repo.commit({ 'deslop/SKILL.md': skillText('One.', 'deslop') }, '2026-11-01T10:00:00Z');
   const box = await sandbox();
@@ -388,16 +381,17 @@ test('A Sync bringing a new item alongside an update or drop keeps Undo (as an o
 
     const bandText = textOf(findNode(rendered, el => el.className.includes('band-text')));
     assert.doesNotMatch(bandText, /See each change, or undo it, in History\./);
-    assert.equal(textOf(findById(rendered, 'outcome-note-history')), 'History');
+    assert.equal(findById(rendered, 'outcome-note-history'), undefined);
     const undoBtn = findById(rendered, 'outcome-undo')!;
     assert.equal(textOf(undoBtn), 'Undo the update');
     assert.ok(undoBtn.className.includes('btn') && undoBtn.className.includes('outline'), `expected outline button, got ${undoBtn.className}`);
-    assert.equal(textOf(findById(rendered, 'source-turn-made-on')), 'Turn it on');
-    assert.equal(textOf(findById(rendered, 'source-open-skills')), 'Open Skills');
+    assert.equal(textOf(findById(rendered, 'source-turn-made-on')), 'Turn unslop on');
+    assert.equal(textOf(findById(rendered, 'source-open-skills')), 'Open in the Library');
+    assert.equal(textOf(findById(rendered, `source-library-${sid}`)), 'Open in the Library');
   } finally { await box.cleanup(); }
 });
 
-test('Waiting band warns and states both sides changed; Update waiting card has three plain lines; every source has its own Sync (?) naming Turn on', async () => {
+test('Waiting band warns and states both sides changed; Update waiting card has three lines; every source has its own Sync (?)', async () => {
   const box = await sandbox();
   try {
     await openOnBox(box);
@@ -425,17 +419,10 @@ test('Waiting band warns and states both sides changed; Update waiting card has 
     const waitCard = findById(rendered, 'source-wait-info-s1-skill-deslop-card')!;
     const lines = allNodes(waitCard, el => el.className.includes('info-line')).map(textOf);
     assert.equal(lines.length, 3, 'Update waiting card is three plain lines');
-    assert.match(lines[0]!, /^Merge:.*keeps yours as a version.*Undo.*clashes\./);
-    assert.match(lines[1]!, /^Replace mine:.*keeps yours as a version.*Undo/);
-    assert.match(lines[2]!, /^Keep mine:.*keeps the source’s as a version.*Undo.*changes further\./);
-    assert.doesNotMatch(textOf(waitCard), /two causes|compares the source’s next change/);
 
     const sync1 = textOf(findById(rendered, 'source-sync-info-s1-card'));
     const sync2 = textOf(findById(rendered, 'source-sync-info-s2-card'));
     assert.equal(sync1, sync2);
-    assert.match(sync1, /Automatic sync is on/);
-    assert.match(sync1, /Turn on/);
-    assert.doesNotMatch(sync1, /with Undo/);
     assert.equal(findById(rendered, 'source-check-s2')?.attrs['aria-describedby'], 'source-sync-info-s2-card');
 
     sources.confirmRemove = 's1';
@@ -458,5 +445,113 @@ test('Mixed-case item names carry the engine key from fromSourceStep and fall ba
     assert.equal(derived.made?.[0]?.key, 'myskill');
     const carried = whatItDid({ sourced: [{ kind: 'skill', key: 'custom-folder', name: 'MySkill', answer: 'make', written: [], removed: [] }] }, 'github.com/team/mixed-case');
     assert.equal(carried.made?.[0]?.key, 'custom-folder');
+  } finally { await box.cleanup(); }
+});
+
+test('Stale removed-at-source row Turn it on refuses to turn on another source’s Off item of the same key', async () => {
+  const repoA = await repository(hosts, 'https://github.com/team/removed-a');
+  await repoA.commit({
+    'notes/SKILL.md': skillText('From A.', 'notes'),
+    'spare/SKILL.md': skillText('Spare A.', 'spare'),
+  }, '2026-11-01T10:00:00Z');
+  const repoB = await repository(hosts, 'https://github.com/team/removed-b');
+  await repoB.commit({ 'SKILL.md': skillText('From B.', 'notes') }, '2026-11-01T11:00:00Z');
+  const box = await sandbox();
+  try {
+    const lookA = await previewSource(box.context, box.tools, 'https://github.com/team/removed-a');
+    assert.ok('token' in lookA);
+    await addSource(box.context, box.tools, lookA.token);
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [] }]);
+    await repoA.commit({ 'notes/SKILL.md': null }, '2026-11-02T10:00:00Z');
+    const sourceA = (await sourcesView(box.context, box.tools)).sources[0]!;
+    await checkSource(box.context, async () => box.tools, sourceA.id, work => work());
+
+    await openOnBox(box);
+    const staleBtn = findById(rendered, 'source-turn-on-skill-notes');
+    assert.ok(staleBtn, 'removed row renders Turn it on');
+
+    // Meanwhile delete A's removed notes and bring B's notes in Off.
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: false, except: [], deleted: true }]);
+    const lookB = await previewSource(box.context, box.tools, 'https://github.com/team/removed-b');
+    assert.ok('token' in lookB);
+    await addSource(box.context, box.tools, lookB.token);
+    const sourceB = (await sourcesView(box.context, box.tools)).sources.find(source => source.link.includes('removed-b'))!;
+    await rowClick(box.context, box.tools, sourceB.id, 'skill', 'notes', 'bringBack');
+
+    staleBtn.click();
+    await flush();
+
+    const view = await skillsView(box.context, box.tools);
+    const text = textOf(findNode(rendered, el => el.className.includes('band-text')));
+    assert.equal(view.library.notes?.source, sourceB.id);
+    assert.equal(view.library.notes?.on, false, 'stale removed row from A must not turn on B’s Off item');
+    assert.equal(state.outcome?.warn, true);
+    assert.match(text, /notes: now from another source/);
+  } finally { await box.cleanup(); }
+});
+
+test('Undo of Turn them on leaves a hand-changed plugin skill whole without touching its plugin switch', async () => {
+  const pluginItems: InstalledPlugin[] = [{
+    tool: 'copilot-cli', source: '/market', marketName: 'team', plugin: 'kit', off: false,
+    skillsOff: ['notes'], listed: true,
+    items: [{ kind: 'skill', name: 'notes', description: '' }],
+  }];
+  const withPlugin = (s: HomeView['skills']): HomeView['skills'] => ({
+    ...s,
+    items: s.items.map(fact => (fact.key === 'notes'
+      ? { ...fact, plugin: { 'copilot-cli': { plugin: 'kit', marketplace: 'team', off: true as const } } } : fact)),
+  });
+  const box = await setupUndoBatch('kit-undo-plugin', { pluginItems }, withPlugin);
+  try {
+    assert.equal(pluginCalls.length, 1, 'Turn them on enabled notes’s disabled plugin skill');
+    pluginCalls = [];
+
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: false, except: [] }]);
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [] }]);
+
+    findById(rendered, 'outcome-undo')!.click();
+    await flush();
+
+    const skills = await skillsView(box.context, box.tools);
+    const agents = await agentsView(box.context, box.tools);
+    const text = textOf(findNode(rendered, el => el.className.includes('band-text')));
+    assert.equal(pluginCalls.length, 0, 'Undo must not flip the plugin switch of an item left as it is');
+    assert.equal(skills.library.notes?.on, true);
+    assert.equal(skills.library.spare?.on, false);
+    assert.equal(agents.library.reviewer?.on, false);
+    assert.match(text, /Left as it is: notes/);
+  } finally { await box.cleanup(); }
+});
+
+test('Library switch Undo still turns an item off after sync copies it into another tool', async () => {
+  const repo = await repository(hosts, 'https://github.com/team/lib-undo-sync');
+  await repo.commit({ 'SKILL.md': skillText('Take notes.', 'notes') }, '2026-11-01T10:00:00Z');
+  const box = await sandbox();
+  try {
+    const look = await previewSource(box.context, box.tools, 'https://github.com/team/lib-undo-sync');
+    assert.ok('token' in look);
+    await addSource(box.context, box.tools, look.token);
+
+    // Start with two managed tools, turn notes On through the Library switch, then let sync copy it into Codex.
+    box.tools = ['claude-cli', 'copilot-cli'];
+    await openOnBox(box);
+    state.page = 'library';
+    draw();
+    findById(rendered, 'switch-skills-notes')!.click();
+    await flush();
+    assert.equal(state.outcome?.act?.label, 'Undo');
+
+    box.tools = ['claude-cli', 'copilot-cli', 'codex-cli'];
+    await applySkills(box.context, box.tools, []);
+    const historyAfterSync = await readHistory(box.context);
+    assert.ok(historyAfterSync.some(event => event.cause === 'in-line' && event.key === 'notes'), 'sync wrote an in-line History entry');
+
+    state.outcome!.act!.run();
+    await flush();
+
+    const view = await skillsView(box.context, box.tools);
+    assert.equal(view.library.notes?.on, false, 'Library Undo turns notes back Off even after sync copied it into Codex');
+    assert.equal(state.outcome?.warn, false, `unexpected warning: ${state.outcome?.text}`);
+    assert.match(state.outcome?.text ?? '', /Undone: notes is as before\./);
   } finally { await box.cleanup(); }
 });

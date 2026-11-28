@@ -26,6 +26,7 @@ import { caughtUpNames, groupBy, noticeNames, plural, withSetAside } from './mod
 import { button, h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
+import { pageOfPart } from './pluginstatus.ts';
 import { clickResults, heldWhole, keptBack } from './clickplan.ts';
 import { entriesNow, everythingAction, everythingDone, everythingPlan, libraryAction, libraryEntry, librarySentence, oneUndoCovers, restorePlan } from './historyactions.ts';
 import { asksWhichCopy, copiesDiffer, libraryWords, placeOf, stillReadWords } from './libraryrow.ts';
@@ -733,9 +734,9 @@ const stillRead = (rows: NamedRow[], among: NamedRow[]) => [...groupBy(rows, row
  */
 type ByKindBatch = { clicks: Click[]; reasons?: string[]; tail?: string };
 export const applyByKind = (clicks: Click[] | (() => Promise<ByKindBatch | Outcome>), said: (changed: NamedRow[], stayed: string[]) => string,
-  { now = 'off', withoutUndo, stays, reasons: extra = [], tail, failedRow }: {
+  { now = 'off', withoutUndo, stays, reasons: extra = [], tail, failedRow, exactUndo }: {
     now?: 'on' | 'off' | 'deleted'; withoutUndo?: (count: number) => string; stays?: boolean; reasons?: string[];
-    tail?: string; failedRow?: (name: string, failedTools: HarnessId[]) => string;
+    tail?: string; failedRow?: (name: string, failedTools: HarnessId[]) => string; exactUndo?: boolean;
   } = {}) => busy('Applying…', async page => {
   const batch = typeof clicks === 'function' ? await clicks() : { clicks, reasons: extra, tail };
   if (!('clicks' in batch)) { tell({ ...batch, page }); return; }
@@ -747,7 +748,7 @@ export const applyByKind = (clicks: Click[] | (() => Promise<ByKindBatch | Outco
   const went = parts.filter(part => !part.done.refused), did = parts.filter(part => part.done.did), changed = parts.flatMap(part => part.done.changed ?? []);
   const stops = saidByKind(parts.flatMap(part => (part.done.refused ? [[part.click.kind, part.done.refused] as [PageKind, string]] : [])), several);
   const undos = did.flatMap(part => (part.done.undo ? [part.done.undo] : [])).reverse(), regroups = list.some(click => click.regroups);
-  const undo = did.length && undos.length === did.length ? () => void undoClick({ rows: changed, regroups }, undos) : undefined;
+  const undo = did.length && undos.length === did.length ? () => void undoClick({ rows: changed, regroups, exact: exactUndo }, undos) : undefined;
   keepOwn(parts.map(({ done }) => done.kept));
   // Each row that didn't go through in every tool (its kind refused, its own change held, or a tool kept it back) is said first
   // (words.ts notAllThrough), by its kind where another row asked has its name; `said` then names the rows that went through, or
@@ -875,7 +876,7 @@ function allUndoable(events: HistoryEvent[]) {
 }
 
 /** What an Undo puts back: the rows its clicks changed (named in its result and flashed once it is done), where the focus goes, whether every pinned row is let go, and whether a single-tool Undo says History's own sentence. */
-interface UndoOf { rows: NamedRow[]; focus?: () => string; regroups?: boolean; sentence?: boolean }
+interface UndoOf { rows: NamedRow[]; focus?: () => string; regroups?: boolean; sentence?: boolean; exact?: boolean }
 /** What a whole-plugin turn inside runSwitches needs for Undo (marketplaces.ts undoTurn). */
 interface TurnUndo { source: string; plugin: string; before: PluginEntry | null; back: PluginOp[] }
 /** What one click can take back (Done undo): its kind, the History entries it made, and the plugin switches and whole-plugin turns that turn its plugins' part back. */
@@ -891,32 +892,47 @@ interface Undoable { kind: PageKind; made: string[]; back: PluginOp[]; turns?: T
  */
 const undoClick = (about: UndoOf, parts: Undoable[]) => busy('Undoing…', async page => {
   const home = state.home!, several = new Set(parts.map(part => part.kind)).size > 1;
-  // The plugin items' switches go back first: other tools than the copies', so the rest is undone whatever they do (`parts` arrives newest first).
-  const switchedBack = parts.flatMap(part => part.back), turnsBack = parts.flatMap(part => part.turns ?? []);
-  const unswitched = switchedBack.length || turnsBack.length ? await runSwitches(switchedBack, true, turnsBack) : undefined;
   const kindOfEntry = new Map(parts.flatMap(part => part.made.map(id => [id, part.kind] as const)));
   // History is stored newest-last (history.ts); reversing first keeps entries written in the same millisecond newest-first.
   const allEvents = (await api().history()).events;
   const events = allEvents.filter(event => kindOfEntry.has(event.id)).reverse()
     .sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
   const gone = [...kindOfEntry].filter(([id]) => !events.some(event => event.id === id));
+  const exact = !!about.exact;
   const changedSince = (event: HistoryEvent, entry: NonNullable<ReturnType<typeof libraryEntry>>) =>
     !!event.undoneBy || allEvents.slice(allEvents.indexOf(event) + 1).some(later => !kindOfEntry.has(later.id)
-      && libraryEntry(later)?.kind === entry.kind && libraryEntry(later)?.key === entry.key);
+      && later.cause !== 'in-line' && libraryEntry(later)?.kind === entry.kind && libraryEntry(later)?.key === entry.key);
+  const left: NamedRow[] = [], leftReasons: string[] = [], leftKeys = new Set<string>(), toRestore: HistoryEvent[] = [];
+  const leave = (row: NamedRow, why: string) => {
+    left.push(row);
+    leftKeys.add(`${row.kind}:${row.key}`);
+    leftReasons.push(`${rowNames([row], about.rows)[0]}: ${why}`);
+  };
+  for (const event of events) {
+    const entry = exact ? libraryEntry(event) : undefined;
+    if (entry && changedSince(event, entry)) leave({ ...entry, name: event.item }, 'changed since, so it was left as it is.');
+    else if (entry && event.kind === 'on' && !event.only && home[entry.kind].library[entry.key]?.on === false) leave({ ...entry, name: event.item }, 'already as before.');
+    else toRestore.push(event);
+  }
+  // The plugin items' switches go back first: other tools than the copies', so the rest is undone whatever they do (`parts` arrives newest first);
+  // in exact batch Undo, items decided as left above are skipped here too so they are left whole.
+  const opKey = (op: PluginOp) => (op.skill ? `skills:${itemKey(op.skill)}` : op.part ? `${pageOfPart[op.part.kind]}:${itemKey(op.part.name)}` : undefined);
+  const pluginLeft = (part: Undoable, plugin: string) =>
+    left.some(row => row.kind === part.kind && Object.values(home[part.kind].items.find(fact => fact.key === row.key)?.plugin ?? {}).some(each => each?.plugin === plugin));
+  const switchedBack = parts.flatMap(part => part.back.filter(op => { const key = opKey(op); return key ? !leftKeys.has(key) : !pluginLeft(part, op.plugin); }));
+  const turnsBack = parts.flatMap(part => (part.turns ?? []).filter(turn => !pluginLeft(part, turn.plugin)));
+  const unswitched = switchedBack.length || turnsBack.length ? await runSwitches(switchedBack, true, turnsBack) : undefined;
   type UndoEntry = { key?: string; entry: DestinationResult; answeredLater?: boolean };
   const raw = new Map(parts.map(part => [part.kind, [] as UndoEntry[]])), restored = new Map(parts.map(part => [part.kind, new Map<string, Set<HarnessId> | null>()])), stops = new Map<PageKind, string>();
-  const left: NamedRow[] = [], leftReasons: string[] = [];
-  const leave = (row: NamedRow, why: string) => { left.push(row); leftReasons.push(`${rowNames([row], about.rows)[0]}: ${why}`); };
   const reloads: ReloadChange[] = unswitched ? pluginReloads(unswitched.done) : [];
   let anyDid = !!unswitched?.done.some(entry => succeeded(entry.report));
-  for (const event of events) {
+  for (const event of toRestore) {
     const kind = kindOfEntry.get(event.id)!;
     if (stops.has(kind)) continue;
     const entry = libraryEntry(event);
-    if (entry && changedSince(event, entry)) { leave({ ...entry, name: event.item }, 'changed since, so it was left as it is.'); continue; }
     const result = await api().restore(event.id, home.home);
     if (result.stopped) {
-      if (entry && result.stopped.startsWith('That change has nothing left to undo')) leave({ ...entry, name: event.item }, 'already as before.');
+      if (exact && entry && result.stopped.startsWith('That change has nothing left to undo')) leave({ ...entry, name: event.item }, 'already as before.');
       else stops.set(kind, result.stopped);
       continue;
     }
