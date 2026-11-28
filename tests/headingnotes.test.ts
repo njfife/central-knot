@@ -1,5 +1,5 @@
-// Library section heading rules (matrix.ts section, foundNote, offNote): own-copy counting across tools,
-// Off live-line branch priority and multi-row fallback, Found wait zero/plural counts,
+// Library section heading rules (matrix.ts section, foundNote): Off heading stays quiet without a live note
+// (rows carry their own tags and Off keeps its count and (?) card), Found wait zero/plural counts,
 // and hiding the live wait over pinned mixed rows under Found while Synchronize everything is on.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -117,40 +117,11 @@ function makeHome(opts: {
   } as unknown as HomeView;
 }
 
-test('Off heading counts own copies across tools rather than items', () => {
-  const tools: HarnessId[] = ['claude-cli', 'codex-cli', 'opencode-cli'];
-  const twoToolsOneSkill = makeFact('off-a', {
-    copies: { 'codex-cli': makeCopy('off-a', 'h-codex'), 'opencode-cli': makeCopy('off-a', 'h-oc') },
-  });
-  const oneToolOneSkill = makeFact('off-b', {
-    copies: { 'opencode-cli': makeCopy('off-b', 'h-oc-b') },
-  });
-
-  // One Off item with own copies in both Codex and OpenCode: 2 own copies, not 1.
-  app.home = makeHome({
-    homePath: '/heading-own-two-tools',
-    tools,
-    skills: [twoToolsOneSkill],
-    library: { 'off-a': makeItem('off-a', false) },
-  });
-  openKind('skills');
-  unpin();
-  assert.equal(readHeading(libraryTable(), 'off').liveLine, '2 own copies in Codex and OpenCode');
-
-  // Two Off items totaling three own copies across Codex and OpenCode.
-  app.home = makeHome({
-    homePath: '/heading-own-three-copies',
-    tools,
-    skills: [twoToolsOneSkill, oneToolOneSkill],
-    library: { 'off-a': makeItem('off-a', false), 'off-b': makeItem('off-b', false) },
-  });
-  openKind('skills');
-  assert.equal(readHeading(libraryTable(), 'off').liveLine, '3 own copies in Codex and OpenCode');
-});
-
-test('Off live line keeps branch priority order and drops static fallback prose even with a left-out tool', () => {
+test('Off heading stays quiet with no live note across plugin-on, pending removal, own copies, other readers, switched-off copies, and left-out tools', () => {
   const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
-  const ownSkill = makeFact('off-own', { copies: { 'codex-cli': makeCopy('off-own') } });
+  const ownTwoTools = makeFact('off-own', {
+    copies: { 'codex-cli': makeCopy('off-own', 'h-codex'), 'copilot-cli': makeCopy('off-own', 'h-cp') },
+  });
   const owedSkill = makeFact('off-owed', {
     copies: { 'codex-cli': makeCopy('off-owed') },
     plan: makePlan({ remove: ['codex-cli'] }),
@@ -169,43 +140,32 @@ test('Off live line keeps branch priority order and drops static fallback prose 
   const plainSkill = makeFact('off-plain');
 
   const libOf = (list: LibraryFacts[]) => Object.fromEntries(list.map(row => [row.key, makeItem(row.key, false)]));
-
-  // 1. Plugin on beats pending removal, own copies and other-reader.
-  const allFour = [pluginSkill, owedSkill, ownSkill, reader1];
-  app.home = makeHome({
-    homePath: '/heading-priority-1',
-    tools,
-    skills: allFour,
-    library: libOf(allFour),
-    pluginItems: [{ tool: 'copilot-cli', plugin: 'kit', source: '/market', marketName: 'local-market', off: false, listed: true, items: [{ kind: 'skill', name: 'off-plug', description: '' }] }],
-  });
-  openKind('skills');
-  assert.equal(readHeading(libraryTable(), 'off').liveLine, 'some on in Copilot CLI through a plugin');
-
-  // 2. Pending removal beats own copies and other-reader.
-  const three = [owedSkill, ownSkill, reader1];
-  app.home = makeHome({ homePath: '/heading-priority-2', tools, skills: three, library: libOf(three) });
-  openKind('skills');
-  assert.equal(readHeading(libraryTable(), 'off').liveLine, '1 still in Codex until sync runs');
-
-  // 3. Own copies beat other-reader/switched-off.
-  const two = [ownSkill, reader2];
-  app.home = makeHome({ homePath: '/heading-priority-3', tools, skills: two, library: libOf(two) });
-  openKind('skills');
-  assert.equal(readHeading(libraryTable(), 'off').liveLine, '1 own copy in Codex');
-
-  // 4. Multiple Off rows with other-reader/switched-off copies leave the Off heading quiet (each row's tag says so).
-  const readers = [reader1, reader2];
-  app.home = makeHome({ homePath: '/heading-priority-4', tools, skills: readers, library: libOf(readers) });
-  openKind('skills');
-  assert.equal(readHeading(libraryTable(), 'off').hasAfter, false);
-
-  // 5. Plain Off with an unmanaged tool left out has no live line and no static fallback prose.
-  app.home = makeHome({ homePath: '/heading-priority-5', tools, leftOut: ['pi-cli'], skills: [plainSkill], library: libOf([plainSkill]) });
-  openKind('skills');
-  const plain = readHeading(libraryTable(), 'off');
-  assert.equal(plain.hasAfter, false);
-  assert.doesNotMatch(plain.rawText, /no tool (it manages )?has these/);
+  const cases: [string, LibraryFacts[], Partial<Parameters<typeof makeHome>[0]>][] = [
+    ['/heading-off-plugin', [pluginSkill, owedSkill, ownTwoTools, reader1], {
+      pluginItems: [{ tool: 'copilot-cli', plugin: 'kit', source: '/market', marketName: 'local-market', off: false, listed: true, items: [{ kind: 'skill', name: 'off-plug', description: '' }] }],
+    }],
+    ['/heading-off-owed', [owedSkill, ownTwoTools], {}],
+    ['/heading-off-own', [ownTwoTools], {}],
+    ['/heading-off-reader-single', [reader1], {}],
+    ['/heading-off-switched-single', [reader2], {}],
+    ['/heading-off-plain-leftout', [plainSkill], { leftOut: ['pi-cli'] }],
+    ['/heading-off-two-leftout', [plainSkill], { leftOut: ['pi-cli', 'opencode-cli'] }],
+  ];
+  for (const [homePath, skills, extra] of cases) {
+    app.home = makeHome({ homePath, tools, skills, library: libOf(skills), ...extra });
+    openKind('skills');
+    unpin();
+    const tree = libraryTable();
+    const head = readHeading(tree, 'off');
+    assert.equal(head.count, String(skills.length), `${homePath} keeps Off count`);
+    assert.equal(head.hasAfter, false, `${homePath} has no live note beside Off heading`);
+    assert.doesNotMatch(head.rawText, /no tool (it manages )?has these/);
+    assert.ok(findAll(tree, el => el.attrs?.id === 'section-off-info').length === 1, `${homePath} keeps Off (?) mark`);
+    const card = textOf(findAll(tree, el => el.attrs?.id === 'section-off-info-card')[0]);
+    if (extra.leftOut?.length === 1) assert.equal(card, 'Kept in Central Knot with its versions, switched off. Where a tool still has it, its row says so; Pi, left out, keeps whatever it has.');
+    else if (extra.leftOut?.length === 2) assert.equal(card, 'Kept in Central Knot with its versions, switched off. Where a tool still has it, its row says so; Pi and OpenCode, left out, keep whatever they have.');
+    else assert.equal(card, 'Kept in Central Knot with its versions, switched off. Where a tool still has it, its row says so.');
+  }
 });
 
 test('Found live line handles zero and plural differing rows with real takeInAnswer shapes, and hides wait over pinned mixed rows', t => {

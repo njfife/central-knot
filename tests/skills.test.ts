@@ -16,7 +16,7 @@ import { readHistory } from '../src/history.ts';
 import { libraryEntry, librarySentence } from '../src/historyactions.ts';
 import { addLabel, canAdd, harnessIs, isPartial, libraryWords, ownCopies, placeOf, rowClicks, sentences, statusLine, switchLabel } from '../src/libraryrow.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
-import { applySkills, clearSwitch, readDisk, skillChange, skillFoundFile, skillPluginFile, skillsView, skillVersion, skillVersionFile, takeOver } from '../src/skills.ts';
+import { applySkills, clearSwitch, readDisk, skillChange, skillFoundFile, skillKind, skillPluginFile, skillsView, skillVersion, skillVersionFile, takeOver } from '../src/skills.ts';
 import { serversView } from '../src/servers.ts';
 import { agentsView } from '../src/agents.ts';
 import { homePass } from '../src/homepass.ts';
@@ -24,6 +24,7 @@ import { pruneDeleted } from '../src/skillstore.ts';
 import { isDisabled, readSwitchFile, setDisabled } from '../src/skillswitch.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import { forgetMissing } from '../src/librarypass.ts';
+import { savePluginRecord } from '../src/pluginrecord.ts';
 import { readRecord, saveRecord } from '../src/share.ts';
 import { clickResults } from '../src/clickplan.ts';
 import { setSyncEverything } from '../src/everything.ts';
@@ -191,6 +192,39 @@ test('A folder really deleted by hand in one tool turns the skill Off everywhere
   } finally { await box.cleanup(); }
 });
 
+test('A plugin-linked skill whose folder is deleted by hand settles and turns Off, and a third pass changes nothing', async () => {
+  const box = await sandbox(['claude-cli', 'pi-cli', 'opencode-cli']);
+  try {
+    await savePluginRecord(box.home, { tools: box.tools, knows: [...box.tools], plugins: [{ id: 'kit', source: '/market', marketName: 'team', plugin: 'kit', on: true, except: [] }] });
+    const sourceDir = join(box.base, 'plugin-skill');
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, 'SKILL.md'), skillText());
+    const { hash } = await readTree(sourceDir);
+    await applySkills(box.context, box.tools, [], {
+      source: {
+        id: 'kit', link: 'plugin:kit@team', commitAt: '2026-11-28T00:00:00Z', whole: true, kind: 'skill',
+        mergeWith: skillKind.merge, recorded: new Set(['kit']), plugin: { on: true, outOf: [], into: ['pi-cli', 'opencode-cli'] },
+        names: new Map([['notes', { name: 'notes', hash, content: { directory: sourceDir, hash } }]]),
+      },
+    });
+    const waiting = { ...box.context, settleMs: 2000 };
+    assert.ok(await bytes(folderOf(box, 'pi-cli')));
+    assert.ok(await bytes(folderOf(box, 'opencode-cli')));
+    await rm(folderOf(box, 'pi-cli'), { recursive: true });
+    const first = await applySkills(waiting, box.tools, [], { now: 1000 });
+    assert.deepEqual([first.writes, first.settling, (await itemOf(box))!.on, (await historyOf(box)).some(event => event.cause === 'deleted-by-hand')], [0, true, true, false]);
+    const second = await applySkills(waiting, box.tools, [], { now: 3500 });
+    assert.deepEqual([second.settling, second.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner, notice.losers])], [false, [['deleted-by-hand', 'pi-cli', ['opencode-cli']]]]);
+    assert.deepEqual([(await historyOf(box)).at(-1)?.cause, placeOf(await itemOf(box)), (await itemOf(box))!.source], ['deleted-by-hand', 'off', 'kit']);
+    assert.equal(await bytes(folderOf(box, 'opencode-cli')), undefined);
+    const historyCount = (await historyOf(box)).length;
+    const third = await applySkills(waiting, box.tools, [], { now: 6000 });
+    assert.deepEqual([third.writes, third.settling, third.notices, (await historyOf(box)).length], [0, false, [], historyCount]);
+  } finally {
+    await box.cleanup();
+  }
+});
+
 test('A folder seen again in part ends its absence: moved away by a save, back without its SKILL.md, later away again for a moment, it turns nothing Off', async () => {
   const box = await sandbox();
   try {
@@ -296,7 +330,7 @@ test('A found skill whose only copy can’t be copied as it is (a link inside) i
     await mkdir(join(box.home, roots['codex-cli'], 'not-a-skill'), { recursive: true });
     const { fact, item, row } = await seen(box);
     assert.match(fact!.unseen?.['claude-cli'] ?? '', /can’t be copied as it is/);
-    assert.deepEqual([canAdd(row), statusLine(row, item, tools)], [false, 'Not in Central Knot · it can’t be taken in now (see below).']);
+    assert.deepEqual([canAdd(row), statusLine(row, item, tools)], [false, '']);
     assert.equal((await seen(box, box.context, 'not-a-skill')).fact, undefined);
     // Found only where a tool has it another way (the shared folder), it says so, and can be taken in.
     await rm(folderOf(box, 'claude-cli'), { recursive: true });
@@ -1472,7 +1506,7 @@ test('An edit Codex won’t load is never written over Codex’s copy, which sta
   } finally { await box.cleanup(); }
 });
 
-test('A found row says “every tool” only when it is true: the tools it will go to, those that can’t take it, those that have it another way, and what to do when it can’t be taken in', async () => {
+test('A found row says “every tool” only when it is true: the tools it will go to, those that can’t take it, those that have it another way, and what to do when it can’t be added', async () => {
   const box = await sandbox();
   try {
     await put(box, 'claude-cli', { 'SKILL.md': 'Just text.\n' });
@@ -1491,7 +1525,7 @@ test('A found row says “every tool” only when it is true: the tools it will 
     await put(box, 'claude-cli');
     await symlink('SKILL.md', join(folderOf(box, 'claude-cli'), 'alias'));
     const linked = await seen(box);
-    assert.equal(say.placeTag(linked.row, linked.item, tools)?.text, 'can’t be taken in');
+    assert.equal(say.placeTag(linked.row, linked.item, tools)?.text, 'can’t be added');
     assert.match(linked.fact!.unseen?.['claude-cli'] ?? '', /Replace the link with the file it leads to, then Refresh\.$/);
   } finally { await box.cleanup(); }
 });
