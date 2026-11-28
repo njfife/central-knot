@@ -15,6 +15,7 @@ export interface FakeNode {
   addEventListener: () => void;
   replaceChildren: (...kids: unknown[]) => void;
   append: (...kids: unknown[]) => void;
+  after: (...kids: unknown[]) => void;
   focus: () => void;
   scrollTo: () => void;
   scrollIntoView: () => void;
@@ -60,6 +61,7 @@ export const makeElement = (tag = 'div'): FakeNode => {
     append(...kids: unknown[]) {
       this.children.push(...kids);
     },
+    after() {},
     focus() {
       this.focused++;
     },
@@ -101,6 +103,7 @@ export function installDom(
   { userAgent = 'Linux', byId }: { userAgent?: string; byId?: (id: string) => FakeNode | null | undefined } = {},
 ) {
   const announcement = makeElement('span');
+  const docListeners: Record<string, ((event: unknown) => void)[]> = {};
   Object.assign(globalThis, {
     window: {
       centralKnot: new Proxy(api, { get: (known, name) => known[name as string] ?? (() => Promise.resolve(null)) }),
@@ -116,7 +119,7 @@ export function installDom(
       getElementById: (id: string) => (id === 'announcement' ? announcement : (byId ? byId(id) : makeElement('span'))),
       querySelector: () => null,
       querySelectorAll: () => [],
-      addEventListener() {},
+      addEventListener(name: string, fn: (event: unknown) => void) { (docListeners[name] ??= []).push(fn); },
       createElement: makeElement,
       createTextNode: (text: string) => text,
     },
@@ -127,5 +130,5 @@ export function installDom(
     requestAnimationFrame: () => 0,
   });
   Object.defineProperty(globalThis, 'navigator', { value: { userAgent }, configurable: true });
-  return { announcement };
+  return { announcement, dispatch(name: string, event: unknown) { for (const fn of docListeners[name] ?? []) fn(event); } };
 }
