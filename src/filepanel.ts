@@ -292,6 +292,8 @@ export function filePanel(t: FilePlace, target: FileTarget, open: OpenFile, bare
 
 // ---------- A page that names items (the header's three calls) ----------
 
+/** What a page's scroll box differs by when sizing an open file box (settleFileBox): its scroll container, sticky height above it, and bottom padding. */
+export interface BoxRoom { scroller: HTMLElement; sticky?: number; padding?: number }
 /**
  * A page as a file panel's place (pagePlace): its page; the name its open file was opened at (`occurrenceId`); the home and
  * visit that file belongs to (`on`: thisVisit); whether its names open a found copy's or a plugin's row too (`foundAndPlugins`);
@@ -303,13 +305,16 @@ export interface FileMark { occurrenceId?: string; target: FileTarget; mark: HTM
 /** A mark's id on a page: the item's own (`file-<row id>`, as a table's), then the name's occurrence where there is one. */
 const markId = (id: string, occurrenceId?: string) => partId('file', id, ...(occurrenceId === undefined ? [] : [occurrenceId]));
 const panelId = (page: Page) => `file-panel-${page}`;
+const boxRooms = new Map<string, (box: HTMLElement) => BoxRoom | undefined>();
 
 /**
- * A page's place, its Escape heard on the window: after every listener on the document (a confirmation's on Settings and
- * History, and History's Manage question first; on Harnesses, managecard.ts leaves Escape to this panel while it is open).
+ * A page's place, its Escape heard on the window: after every listener on the document (a confirmation's on Settings, Profiles
+ * and History, and History's Manage question first; on Harnesses, managecard.ts leaves Escape to this panel while it is open).
  */
-export function pagePlace(page: Page, options: Pick<PagePlace, 'foundAndPlugins' | 'storedOnly'> = {}): PagePlace {
-  const place: PagePlace = { page, ...options, view: {}, named: true, markOf: id => markId(id, place.occurrenceId),
+export function pagePlace(page: Page, options: Pick<PagePlace, 'foundAndPlugins' | 'storedOnly'> & { boxRoom?: (box: HTMLElement) => BoxRoom | undefined } = {}): PagePlace {
+  const { boxRoom, ...placeOptions } = options;
+  if (boxRoom) boxRooms.set(panelId(page), boxRoom);
+  const place: PagePlace = { page, ...placeOptions, view: {}, named: true, markOf: id => markId(id, place.occurrenceId),
     reveal: () => requestAnimationFrame(() => document.getElementById(panelId(page))?.scrollIntoView({ block: 'nearest' })) };
   window.addEventListener('keydown', event => {
     if (event.key === 'Escape' && !event.defaultPrevented && state.page === page && place.view.openFile) setFile(place, undefined, undefined, true);
@@ -371,16 +376,22 @@ export function placePanel(place: PagePlace, shown: readonly (FileMark | undefin
  * (FilePlace) brings it into view.
  */
 function settleFileBox(): void {
-  const box = document.querySelector<HTMLElement>('.file-open-box'), scroller = box?.closest<HTMLElement>('.scroll');
-  if (!box || !scroller) return;
+  const box = document.querySelector<HTMLElement>('.file-open-box');
+  if (!box) return;
+  const custom = box.parentElement?.id ? boxRooms.get(box.parentElement.id)?.(box) : undefined;
+  const scroller = custom?.scroller ?? box.closest<HTMLElement>('.scroll');
+  if (!scroller) return;
   const sides = scroller.getBoundingClientRect(), top = box.getBoundingClientRect().top, before = box.parentElement?.previousElementSibling;
   const row = before?.matches('.ov-row') ? before : scroller.querySelector('.file-anchored');
-  const from = row ? row.getBoundingClientRect().top : sides.top - scroller.scrollTop;
+  const sticky = custom?.sticky ?? 0, from = row ? row.getBoundingClientRect().top : sides.top - scroller.scrollTop;
   // A page's panel leaves its scroll margin under it (style.css: a row's height), so the next row shows below its box.
-  const end = Math.max(8, parseFloat(getComputedStyle(scroller).paddingBottom)) + (parseFloat(getComputedStyle(box.parentElement!).scrollMarginBottom) || 0);
-  const room = Math.floor(sides.height - (top - from) - end), under = Math.floor(sides.bottom - top - end);
+  const end = Math.max(8, parseFloat(getComputedStyle(scroller).paddingBottom) + (custom?.padding ?? 0))
+    + (parseFloat(getComputedStyle(box.parentElement!).scrollMarginBottom) || 0);
+  const room = Math.floor(sides.height - sticky - (top - from) - end), under = Math.floor(sides.bottom - top - end);
   const pre = [...box.querySelectorAll<HTMLElement>('pre.content')].at(-1), text = pre && getComputedStyle(pre);
-  const least = !pre || !text ? box.scrollHeight + box.offsetHeight - box.clientHeight : box.offsetHeight - pre.offsetHeight + 8 * parseFloat(text.lineHeight) + parseFloat(text.paddingTop) + parseFloat(text.paddingBottom);
-  box.style.maxHeight = `${Math.ceil(Math.max(least, under >= least ? Math.min(under, room) : room))}px`;
+  const least = !pre || !text ? box.scrollHeight + box.offsetHeight - box.clientHeight
+    : box.offsetHeight - pre.offsetHeight + 8 * parseFloat(text.lineHeight) + parseFloat(text.paddingTop) + parseFloat(text.paddingBottom);
+  const floor = !pre || !text ? least : custom ? Math.min(least, Math.max(0, room)) : least;
+  box.style.maxHeight = `${Math.ceil(Math.max(floor, under >= floor ? Math.min(under, room) : room))}px`;
 }
 afterLayout(settleFileBox);
