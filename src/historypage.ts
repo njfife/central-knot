@@ -2,8 +2,9 @@
 // Undo or Restore where kept content allows (CON-02, DEL-03), and History's Keep control (settingspage.ts historyWindowControl).
 // Skills', MCP servers', agents' and Synchronize everything's entries are worded and decided by historyactions.ts; here are
 // profiles', base instructions', Manage switches' and pre-library entries, plus in-place folds for 3+ recorded tool lists (including all tools),
-// and the file mark after the name of an item Central Knot holds, its file opening under that row (historyFiles, fileMark; the
-// name of one it no longer holds is muted and says so on its hover: gone).
+// and the file mark after the name of an item Central Knot holds, its file opening under that row (historyFiles, fileMark: its
+// current version; of one it deleted, the last version kept; the name of one it has no record of is muted and says so on its
+// hover: gone).
 import { DAY_MS, plural, timesApart } from './model.ts';
 import { acting, homeTools, noToolManaged, rerender, restoreEvent, shownPath, state, touchedToolsPhrase } from './app.ts';
 import { noToolsState } from './pages.ts';
@@ -11,9 +12,9 @@ import { andList, toolName, touchedTools } from './words.ts';
 import { changeWords, entryTurns, NO_PROFILE, undoOffered, undoWords, wholeCounts } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
 import { doneWords, entriesNow, entryKind, everythingAction, everythingSentence, keptOver, libraryAction, libraryEntry, librarySentence, versionChoices } from './historyactions.ts';
-import { inLibrary, libraryWords } from './libraryrow.ts';
+import { libraryWords } from './libraryrow.ts';
 import { button, emptyState, fold, h, icon, rereadBand, type Child } from './dom.ts';
-import { itemFile, pagePlace, placePanel } from './filepanel.ts';
+import { itemFile, keptFile, pagePlace, placePanel } from './filepanel.ts';
 import type { IconName } from './icons.ts';
 import { askManage, manageLocked, manageQuestion, manageTool, resumeWords } from './managecard.ts';
 import { historyWindowControl } from './settingspage.ts';
@@ -33,10 +34,11 @@ const itemOf = (event: HistoryEvent) => { const entry = libraryEntry(event); ret
 const pathsShown = (event: HistoryEvent): HistoryEvent => (event.kind === 'took-over' ? { ...event, losers: event.losers.map(copy => (copy.path ? { ...copy, path: shownPath(copy.path) } : copy)) } : event);
 /** History as a file panel's place (filepanel.ts pagePlace): an item's file, opened at one of the rows naming it, under that row. */
 const historyFiles = pagePlace('history');
-/** The file mark after an entry's name, where it names an item Central Knot holds now: its current version (filepanel.ts itemFile). */
-const fileMark = (event: HistoryEvent) => { const entry = libraryEntry(event); return entry && itemFile(historyFiles, entry.kind, entry.key, event.id); };
-/** Whether a row names an item Central Knot no longer holds: it has no file mark, its name is muted and its hover says so. */
-const gone = (event: HistoryEvent) => !!libraryEntry(event) && !inLibrary(itemOf(event));
+/** The file mark after an entry's name: an item Central Knot holds, its current version (filepanel.ts itemFile); one it deleted, the last version kept (keptFile). */
+const fileMark = (event: HistoryEvent) => { const entry = libraryEntry(event);
+  return entry && (itemOf(event)?.deleted ? keptFile : itemFile)(historyFiles, entry.kind, entry.key, event.id); };
+/** Whether a row names an item Central Knot has no record of, not even a tombstone: it has no file mark, its name is muted and its hover says so. */
+const gone = (event: HistoryEvent) => !!libraryEntry(event) && !itemOf(event);
 /** Whether the entry is another's Undo: that one's `undoneBy` names it. */
 const undid = (event: HistoryEvent) => !!state.history.data?.some(other => other.undoneBy === event.id);
 

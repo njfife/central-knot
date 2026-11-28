@@ -17765,6 +17765,9 @@ async function libraryFlow() {
   const longKey = 'cross-workspace-release-migration-checklist-v2';
   sFold.items[longKey] = { ...structuredClone(sFold.items['legacy-skill']), key: longKey, name: longKey, on: false, applied: {} };
   cpSync(join(O.home, '.central-knot/items/skills/legacy-skill'), join(O.home, `.central-knot/items/skills/${longKey}`), { recursive: true });
+  // retired-notes, deleted from Central Knot: its tombstone keeps legacy-skill's text as its last version, so its name has a mark too.
+  sFold.items['retired-notes'] = { ...structuredClone(sFold.items['legacy-skill']), key: 'retired-notes', name: 'retired-notes', on: false, applied: {}, deleted: { at: foldAt(1.1) } };
+  cpSync(join(O.home, '.central-knot/items/skills/legacy-skill'), join(O.home, '.central-knot/items/skills/retired-notes'), { recursive: true });
   writeFileSync(oSkillRec, `${JSON.stringify(sFold, null, 2)}\n`);
   hFold.events.push(
     { id: 'fold-legacy', at: foldAt(7), key: 'instructions:old', item: 'old', kind: 'edit', winner: { tool: 'claude-cli', hash: 'a' }, losers: ['claude-cli', 'codex-cli', 'old-cli'].map(tool => ({ tool, hash: 'a' })), orderProved: true },
@@ -17775,6 +17778,7 @@ async function libraryFlow() {
     { id: 'fold-all', at: foldAt(2), key: 'all-six', of: 'skill', item: 'all-six', kind: 'off', cause: 'switch', losers: sixIds.map(tool => ({ tool, hash: 'b' })), orderProved: true },
     { id: 'fold-then', at: foldAt(1.5), key: 'draft-over', of: 'skill', item: 'draft-over', kind: 'on', cause: 'switch', losers: fiveIds.map(tool => ({ tool, hash: '' })), tookFrom: [{ tool: 'claude-cli', hash: 'old' }], orderProved: true },
     { id: 'fold-long', at: foldAt(1.2), key: 'cross-workspace-release-migration-checklist-v2', of: 'skill', item: 'cross-workspace-release-migration-checklist-v2', kind: 'off', cause: 'switch', losers: [{ tool: 'codex-cli', hash: 'b' }], orderProved: true },
+    { id: 'fold-gone', at: foldAt(1.1), key: 'retired-notes', of: 'skill', item: 'retired-notes', kind: 'deleted', losers: [], orderProved: true },
     { id: 'fold-five', at: foldAt(1), key: 'draft-rfc', of: 'skill', item: 'draft-rfc', kind: 'off', cause: 'switch', losers: fiveIds.map(tool => ({ tool, hash: 'b' })), orderProved: true },
     { id: 'fold-clash', at: foldAt(0.5), key: 'active-skill', of: 'skill', item: 'active-skill', kind: 'conflict', winner: { tool: 'codex-cli', hash: clashItem.hash }, version: clashItem.hash, previous: 'p', losers: [{ tool: 'claude-cli', hash: 'p' }, { tool: 'copilot-cli', hash: 'x' }, { tool: 'pi-cli', hash: 'y' }, { tool: 'opencode-cli', hash: 'z' }], orderProved: true },
   );
@@ -17865,7 +17869,8 @@ async function libraryFlow() {
     [[true, true], false, false]);
   // A name History holds an item under has the Library's file mark after it. At 860: one press opens its text under that row, a
   // second row naming it takes it, the profile menu's and the Keep confirmation's Escape leave it open and the next closes it,
-  // nothing cut off; under a row near the foot, its long file uses the window under that row, the next row in sight. At 1316: opened.
+  // nothing cut off; under a row near the foot, its long file uses the window under that row, the next row in sight; a deleted
+  // skill's mark opens its last version kept under its row. At 1316: opened.
   const benchRows = await o.run(`[...document.querySelectorAll('.history-row')].filter(row => row.querySelector('.history-what strong')?.textContent === 'bench-runner').map(row => row.id)`);
   const [benchFirst, benchSecond] = benchRows, benchLast = benchRows.at(-1), benchMark = row => `#${row} .history-what strong + .row-file-btn`;
   const fileUnder = () => o.run(`(() => { const box = document.querySelector('.file-open-box'), row = box?.closest('.history-row'), view = document.querySelector('#history-scroll').getBoundingClientRect();
@@ -17898,6 +17903,16 @@ async function libraryFlow() {
   same('at 860, opened at a row near the foot, bench-runner’s long file uses the window under that row, the next row in sight', [foot.rowAtTop, foot.nextInSight], [true, true]);
   await historyShot('history-file-long-foot-860-light', 'light');
   await o.click(benchMark(benchLast));
+  const goneMark = '#history-row-fold-gone .history-what strong + .row-file-btn';
+  await o.run(`document.getElementById('history-row-fold-gone').scrollIntoView({ block: 'center' })`);
+  await historyShot('history-kept-mark-860-light', 'light');
+  await o.click(goneMark);
+  await until(async () => (await fileUnder()).text.includes('Legacy skill.'));
+  const kept = await fileUnder();
+  same('at 860, retired-notes’ mark on History opens the last version Central Knot kept of it under that row, nothing cut off',
+    [kept.row, kept.text.includes('Legacy skill.'), await o.run(CUT_OFF)], ['history-row-fold-gone', true, []]);
+  await historyShot('history-kept-open-860-light', 'light');
+  await o.click(goneMark);
   if (shots) {
     await o.run(`document.getElementById('history-row-fold-long').scrollIntoView({ block: 'center' })`);
     await historyShot('history-file-long-name-860-light', 'light');
@@ -17909,6 +17924,10 @@ async function libraryFlow() {
   await sizeTo(o, 1316, 819);
   await sidebarOpen();
   await historyShot('history-file-marks-1316-dark', 'dark');
+  if (shots) {
+    await o.run(`document.getElementById('history-row-fold-gone').scrollIntoView({ block: 'center' })`);
+    await historyShot('history-kept-mark-1316-dark', 'dark');
+  }
   const wide = await openUnder(benchFirst);
   same('at 1316, bench-runner’s file opens under its row, nothing cut off', [wide.row, await o.run(CUT_OFF)], [benchFirst, []]);
   await historyShot('history-file-open-1316-dark', 'dark');
