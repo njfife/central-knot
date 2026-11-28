@@ -1744,11 +1744,30 @@ async function manageFlow() {
   };
   const before1728 = await cardRects(1728, 1117), before1316 = await cardRects(1316, 819), before860 = await cardRects(...SMALLEST);
   if (shots) { await a.run(`document.getElementById('harness-card-codex-cli')?.scrollIntoView({ block: 'end' })`); await shotAt(a, 'question-mark-860-light', SMALLEST, 'light'); await sizeTo(a, ...SMALLEST); }
+  const standupMark = await a.run(`(() => {
+    const text = document.getElementById('manage-codex-cli-text'), mark = text?.querySelector('#file-skills-standup');
+    if (!text || !mark) return null;
+    const before = document.createRange(); before.setStart(text, 0); before.setEndBefore(mark);
+    return { title: mark.title, before: before.toString() };
+  })()`);
+  same('standup’s mark in the question says Open Central Knot’s version and sits after Central Knot’s version',
+    [standupMark?.title, standupMark?.before.endsWith('Central Knot’s version')], ['Open Central Knot’s version', true]);
   await a.click('#harness-card-codex-cli .manage-question #file-skills-standup');
   await waitHistory(a, () => a.run(`!!document.querySelector('#file-panel-harnesses pre.content')?.textContent?.trim()`));
-  const panelText = await a.text('#file-panel-harnesses pre.content') ?? '';
+  const panelMeta = await a.run(`(() => {
+    const box = document.getElementById('file-panel-harnesses');
+    return {
+      text: box?.querySelector('pre.content')?.textContent ?? '',
+      now: [...(box?.querySelectorAll('.file-open-now') ?? [])].map(el => el.textContent),
+      tab: box?.querySelector('.file-tab.is-active')?.textContent ?? null,
+      chooser: !!box?.querySelector('select'),
+      foot: !!box?.querySelector('.file-open-foot'),
+    };
+  })()`);
   check('pressing the named item’s mark opens Central Knot’s version, never the left-out tool’s copy',
-    panelText.includes('Read the commits. Write what shipped') && !panelText.includes('Edited in Codex while it was left out.'), panelText);
+    panelMeta.text.includes('Read the commits. Write what shipped') && !panelMeta.text.includes('Edited in Codex while it was left out.'), panelMeta.text);
+  same('the panel is headed Central Knot’s version · SKILL.md with no copy chooser or third-tool path footer',
+    [panelMeta.now, panelMeta.tab, panelMeta.chooser, panelMeta.foot], [['Central Knot’s version'], 'SKILL.md', false, false]);
   same('the asking card carries the anchored accent edge and the question leaves room under the mark',
     await a.run(`(() => {
       const codex = getComputedStyle(document.getElementById('harness-card-codex-cli')).boxShadow;
@@ -1923,6 +1942,48 @@ async function manageFlow() {
   await fullSize(a);
   for (const tool of ['copilot-cli', 'codex-cli']) await manageAgain(a, tool);
   same('every tool managed again', await switches(), ['manage-claude-cli:true', 'manage-copilot-cli:true', 'manage-codex-cli:true']);
+  // A held MCP server edited in another managed tool while Codex is left out: pressing its mark in Codex's Manage question
+  // opens Central Knot's stored definition (never Claude Code's edit), with no copy chooser or tool path, and sits after Central Knot's version.
+  const codexToml = join(practice, '.codex/config.toml'), claudeJson = join(practice, '.claude.json');
+  await openKind(a, 'mcp');
+  await a.click(`#${rowPart('add', 'mcp', 'docs')}`);
+  await waitHistory(a, () => readFileSync(codexToml, 'utf8').includes('https://docs.example.test/mcp'));
+  await a.click('#nav-harnesses');
+  await a.click('#manage-codex-cli');
+  await a.click('#sync-switch');
+  const codexBeforeEdit = readFileSync(codexToml, 'utf8'), claudeBeforeEdit = readFileSync(claudeJson, 'utf8');
+  writeFileSync(codexToml, codexBeforeEdit.replace('https://docs.example.test/mcp', 'https://codex-edit.example.test/mcp'));
+  writeFileSync(claudeJson, claudeBeforeEdit.replace('https://docs.example.test/mcp', 'https://claude-edit.example.test/mcp'));
+  check('both Codex’s and Claude Code’s copies of docs were edited to differ from Central Knot’s stored version',
+    readFileSync(codexToml, 'utf8').includes('codex-edit.example.test') && readFileSync(claudeJson, 'utf8').includes('claude-edit.example.test'));
+  await a.click('#manage-codex-cli');
+  await asking();
+  const mcpMark = await a.run(`(() => {
+    const text = document.getElementById('manage-codex-cli-text'), mark = text?.querySelector('#file-mcp-docs');
+    if (!text || !mark) return null;
+    const before = document.createRange(); before.setStart(text, 0); before.setEndBefore(mark);
+    return { title: mark.title, before: before.toString(), full: text.textContent };
+  })()`);
+  same('MCP server’s mark in Codex’s question says Open Central Knot’s version and sits after Central Knot’s version',
+    [mcpMark?.title, mcpMark?.before.endsWith('Central Knot’s version'), mcpMark?.full.includes('Saves Codex’s copy of docs as a version (History can restore it), then replaces it in Codex with Central Knot’s version.')],
+    ['Open Central Knot’s version', true, true]);
+  await a.click('#harness-card-codex-cli .manage-question #file-mcp-docs');
+  await waitHistory(a, () => a.run(`!!document.querySelector('#file-panel-harnesses pre.content')?.textContent?.trim()`));
+  const mcpPanel = await a.run(`(() => {
+    const box = document.getElementById('file-panel-harnesses');
+    return {
+      now: [...(box?.querySelectorAll('.file-open-now') ?? [])].map(el => el.textContent),
+      name: box?.querySelector('.file-open-name')?.textContent ?? null,
+      text: box?.querySelector('pre.content')?.textContent ?? '',
+      chooser: !!box?.querySelector('select'),
+      foot: !!box?.querySelector('.file-open-foot'),
+    };
+  })()`);
+  same('pressing a held server’s mark in Codex’s question opens Central Knot’s stored definition, never Claude Code’s edit, with no chooser or tool path',
+    [mcpPanel.now, mcpPanel.name, mcpPanel.text.includes('https://docs.example.test/mcp'), mcpPanel.text.includes('claude-edit.example.test'), mcpPanel.text.includes('codex-edit.example.test'), mcpPanel.chooser, mcpPanel.foot],
+    [['Central Knot’s version'], 'Central Knot’s definition', true, false, false, false, false]);
+  await a.press('Escape');
+  await a.press('Escape');
   same('no page errors, manage', a.pageErrors, []);
   await a.quit();
 

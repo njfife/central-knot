@@ -1317,7 +1317,8 @@ span.ins-confirm { margin-top: 0; }
 .history-row > .manage-question, .harness-manage > .manage-question { border: 1px solid var(--line); border-radius: 8px; flex-wrap: wrap; justify-content: space-between; gap: 8px 12px; padding: 8px 12px; }
 .manage-question > .band-text { flex: 1 1 320px; color: var(--ink); }
 .manage-question > .band-text:has(.row-file-btn) { line-height: 22px; }
-.manage-question .row-file-btn { width: 20px; height: 20px; margin-left: 4px; vertical-align: -5px; }
+.manage-question-mark { white-space: nowrap; }
+.manage-question .row-file-btn { width: 20px; height: 20px; margin: 0 1px 0 4px; vertical-align: -5px; }
 .manage-question-changed { display: block; }
 /* The buttons keep to the box: one that doesn't fit beside the other goes whole to the next line. */
 .manage-question-actions { flex: 0 1 auto; min-width: 0; display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; margin-left: auto; }

@@ -70,8 +70,8 @@ export const forgetManageQuestion = () => { question = undefined; };
 const openQuestion = (home: HomeView, tool: HarnessId, at: string) =>
   question && question.tool === tool && question.at === at && question.home === home.home && !manageLocked(home)
   && !home.sync.managed.includes(tool) && (at !== CARD || home.sync.present.includes(tool)) ? question : undefined;
-/** Harnesses as a file panel's place (filepanel.ts pagePlace). */
-const manageFiles = pagePlace('harnesses');
+/** Harnesses as a file panel's place (filepanel.ts pagePlace): opens Central Knot's stored version alone. */
+const manageFiles = pagePlace('harnesses', { storedOnly: true });
 /**
  * The open card question's file mark and open panel for Harnesses (called on every Harnesses draw so placePanel forgets closed
  * marks; pass undefined when the list is not drawn, such as no home yet or a single harness's page).
@@ -175,10 +175,14 @@ function joiningWords(home: HomeView, tool: HarnessId, { counts, plugins }: Fore
 }
 /** What it does to the one item it changes in tool `n`, by the name its plan gave (JoinCounts changing), one copy saved at most. */
 function oneChange(n: string, { name, does, saves }: JoinItem, restore: string, mark?: HTMLElement): Child[] {
-  const save: Child[] = [`Saves ${n}’s copy of ${name}`, mark ?? null, ` as a version (${restore})`];
-  if (does === 'write') return saves ? [...save, `, then replaces it in ${n} with Central Knot’s version.`] : [`Writes Central Knot’s ${name}`, mark ?? null, ` in ${n}.`];
-  if (does === 'remove') return saves ? [...save, `, then removes it: ${name} is off.`] : [`Removes ${name}`, mark ?? null, ` from ${n}: it is off.`];
-  return [...save, '.'];
+  const saved = `Saves ${n}’s copy of ${name} as a version (${restore})`;
+  if (does === 'write') return saves
+    ? [`${saved}, then replaces it in ${n} with Central Knot’s `, mark ? h('span.manage-question-mark', {}, 'version', mark, '.') : 'version.']
+    : [`Writes Central Knot’s ${name}`, mark ?? null, ` in ${n}.`];
+  if (does === 'remove') return saves
+    ? [`${saved}, then removes it: ${name}`, mark ?? null, ' is off.']
+    : [`Removes ${name}`, mark ?? null, ` from ${n}: it is off.`];
+  return [`Saves ${n}’s copy of ${name}`, mark ?? null, ` as a version (${restore}).`];
 }
 
 /**

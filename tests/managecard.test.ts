@@ -146,13 +146,33 @@ test('A single named library item gets a file mark opening Central Knot’s pane
   await ask({ removed: 1, changing: [item('gone', 'remove')] });
   assert.equal(findNode(findById(rendered, 'manage-codex-cli-text'), el => el.classList.contains('row-file-btn')), undefined, 'deleted item: no mark');
   await ask({ kept: 1, written: 1, changing: [item('standup', 'write', 1)] });
-  const mark = findById(findById(rendered, 'manage-codex-cli-text'), 'file-skills-standup');
-  assert.deepEqual([mark?.attrs.title, question()], ['Open the current version', 'Saves Codex’s copy of standup as a version (History can restore it), then replaces it in Codex with Central Knot’s version.']);
-  mark!.click();
+  const textNode = findById(rendered, 'manage-codex-cli-text')!;
+  const mark = findById(textNode, 'file-skills-standup')!;
+  const splitAt = (root: FakeNode, target: FakeNode): [string, string] => {
+    const out = ['', '']; let after = 0;
+    const walk = (child: unknown) => {
+      if (child === target) { after = 1; return; }
+      if (typeof child === 'string') out[after] += child;
+      else if (child && typeof child === 'object') for (const sub of (child as FakeNode).children ?? []) walk(sub);
+    };
+    walk(root);
+    return [out[0], out[1]];
+  };
+  assert.deepEqual([mark?.attrs.title, question(), splitAt(textNode, mark)], [
+    'Open Central Knot’s version',
+    'Saves Codex’s copy of standup as a version (History can restore it), then replaces it in Codex with Central Knot’s version.',
+    ['Saves Codex’s copy of standup as a version (History can restore it), then replaces it in Codex with Central Knot’s version', '.'],
+  ]);
+  mark.click();
   const cards = (findNode(rendered, el => el.classList.contains('harness-cards'))?.children ?? []).map(el => (el as FakeNode).attrs?.id);
   assert.deepEqual([cards, findById(rendered, 'harness-card-codex-cli')!.classList.contains('file-anchored'), findById(findById(rendered, 'harness-card-codex-cli'), 'file-panel-harnesses')],
     [['harness-card-claude-cli', 'harness-card-codex-cli', 'file-panel-harnesses'], true, undefined]);
   await press('manage-codex-cli-cancel');
   await ask({ kept: 1, written: 1, changing: [item('standup', 'write', 1)] });
   assert.equal(findById(rendered, 'file-panel-harnesses'), undefined, 'closing the question forgets its open panel');
+  await ask({ kept: 1, removed: 1, changing: [item('standup', 'remove', 1)] });
+  const removeText = findById(rendered, 'manage-codex-cli-text')!;
+  assert.deepEqual(splitAt(removeText, findById(removeText, 'file-skills-standup')!), [
+    'Saves Codex’s copy of standup as a version (History can restore it), then removes it: standup', ' is off.',
+  ]);
 });
