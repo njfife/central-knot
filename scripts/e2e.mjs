@@ -6194,8 +6194,8 @@ async function sourcesFlow() {
   await a.click('#nav-plugins');
   same('the Plugins page’s title says Plugin marketplaces', await a.text('.page-title'), 'Plugin marketplaces');
   const LINK_CARD = 'Any link to a repository, branch, folder or file; owner/repo or a git clone address works too. Uses this computer’s git sign-in.';
-  const SYNC_CARD = 'Reads the link now and applies it: changed items update unless changed here; removed ones turn off, with Undo.';
-  const WAIT_CARD = 'Changed here, or a tool’s copy couldn’t be read. Merge takes changes that don’t clash; Replace mine takes the source’s and keeps yours as a version.';
+  const SYNC_CARD = 'Syncs from the link now, and once a day while Automatic sync is on: changed items update unless changed here; removed ones turn off, with Turn on to put them back.';
+  const WAIT_CARD = 'Merge: puts the source’s changes into yours and keeps yours as a version (with Undo), or changes nothing and names what clashes.\nReplace mine: takes the source’s version and keeps yours as a version (with Undo).\nKeep mine: leaves yours current and keeps the source’s as a version (with Undo); waits again only if the source changes further.';
   const EMPTY_CARD = 'A link that skills, agents and MCP servers are read from. Each arrives Off.';
   const NOT_COMING_CARD = 'A whole plugin installs only from a marketplace that lists it.';
 
@@ -6219,18 +6219,30 @@ async function sourcesFlow() {
   await a.shot('sources-look');
   await a.click('#source-add');
   await until(() => a.exists('.source-row'));
-  check('Add says deslop is in Central Knot, Off, to turn on in the Library', /Added github\.com\/stephenturner\/skill-deslop \(main\)\. deslop is in Central Knot\. It is off\. Turn it on in the Library\./.test(await a.text('.band-done .band-text') ?? ''), await a.text('.band-done'));
+  check('Add says deslop is in Central Knot, Off, and offers Turn it on on the band and row', /Added github\.com\/stephenturner\/skill-deslop \(main\)\. deslop is in Central Knot\. It is off\.$/.test(await a.text('.band-done .band-text') ?? '')
+    && (await a.text('#source-turn-made-on'))?.trim() === 'Turn it on' && await a.exists('#source-open-library'), await a.text('.band-done'));
   same('in Central Knot, Off, in no tool', [record()?.on, Object.values(roots).some(root => existsSync(join(home, root, 'deslop')))], [false, false]);
   const id = await a.run(`document.querySelector('.source-row').dataset.source`);
   const rowText = await a.text('.source-row') ?? '';
-  check('its row says In Central Knot, Off, renames Check now to Sync this source, drops the standing paragraph and folds branch/folder/commit behind Details · read',
+  check('its row says In Central Knot, Off with Turn it on, renames Check now to Sync this source, drops the standing paragraph and folds branch/folder/commit behind Details · read',
     /In Central Knot, Off/.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '')
+    && (await a.text(`#source-turn-on-${id}-skill-deslop`))?.trim() === 'Turn it on'
     && (await a.text(`#source-check-${id}`))?.trim() === 'Sync this source'
-    && await a.run(`document.getElementById('source-check-${id}')?.getAttribute('aria-describedby')`) === 'source-sync-info-card'
+    && await a.run(`document.getElementById('source-check-${id}')?.getAttribute('aria-describedby')`) === `source-sync-info-${id}-card`
     && !(await a.exists('.source-does')) && !rowText.includes('Check now reads the link again')
     && await a.run(`(() => { const d = document.getElementById('source-where-${id}'), s = document.getElementById('source-where-toggle-${id}'), w = d?.querySelector('.source-where'); return d?.open === false && w?.checkVisibility() === false && d.getBoundingClientRect().height <= s.getBoundingClientRect().height + 2; })()`)
     && /^Details · read /.test((await a.text(`#source-where-toggle-${id}`) ?? '').trim()), rowText);
-  await checkCard(a, 'source-sync-info', SYNC_CARD, 'first Sync this source info card');
+  await checkCard(a, `source-sync-info-${id}`, SYNC_CARD, 'first Sync this source info card');
+  await a.click(`#source-turn-on-${id}-skill-deslop`);
+  check('Turn it on from an Off line turns deslop on in every tool, updates the row, and Undo puts it back Off',
+    await until(() => Object.values(roots).every(root => existsSync(join(home, root, 'deslop/SKILL.md'))))
+    && await until(async () => /deslop is on in all 3 tools\./.test(await a.text('.band-done .band-text') ?? '') && !(await a.exists(`#source-turn-on-${id}-skill-deslop`)))
+    && await a.exists('#outcome-undo') && /In Central Knot, On/.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? ''), [await a.text('.band-done'), await a.text('.source-row')]);
+  await a.click('#outcome-undo');
+  check('Undo turns deslop back Off on disk and restores Turn it on on its row',
+    await until(() => Object.values(roots).every(root => !existsSync(join(home, root, 'deslop'))))
+    && await until(async () => /Undone: deslop is as before\./.test(await a.text('.band-done .band-text') ?? '') && await a.exists(`#source-turn-on-${id}-skill-deslop`))
+    && record()?.on === false, [await a.text('.band-done'), await a.text('.source-row')]);
   await a.click(`#source-where-toggle-${id}`);
   const foldedWhere = await a.text(`#source-where-${id} .source-where`) ?? '';
   check('opening the source’s fold shows its branch, folder and commit',
@@ -6254,7 +6266,11 @@ async function sourcesFlow() {
   commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('Remove slop.', 'Remove slop, gently.') });
   await a.click('#nav-sources');
   await a.click(`#source-check-${id}`);
-  check('Check now brings the change in, and the band says it was updated and where it went, with its Undo and reload advice', /deslop was updated from its source, now in all 3 tools\./.test(await a.text('.band-done .band-text') ?? '') && await a.exists('#outcome-undo') && await a.exists('.band-done #outcome-copy-copilot-cli') && await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('gently'))), await a.text('.band-done'));
+  check('Check now brings the change in, and the band says it was updated and where it went, with outline Undo, History link and reload advice', /deslop was updated from its source, now in all 3 tools\./.test(await a.text('.band-done .band-text') ?? '')
+    && !(await a.text('.band-done .band-text') ?? '').includes('See each change, or undo it, in History.')
+    && (await a.text('#outcome-note-history'))?.trim() === 'History'
+    && await a.run(`document.querySelector('#outcome-undo')?.classList.contains('outline')`) === true
+    && await a.exists('.band-done #outcome-copy-copilot-cli') && await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('gently'))), await a.text('.band-done'));
 
   // Edited in Claude Code (sync takes it in), then changed at the source: the source's version waits; Replace takes it.
   const inClaude = join(home, roots['claude-cli'], 'deslop/SKILL.md');
@@ -6267,7 +6283,8 @@ async function sourcesFlow() {
   commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('Remove slop.', 'Remove slop, firmly.') });
   await a.click(`#source-check-${id}`);
   await until(async () => await a.exists(`#source-replace-${id}-skill-deslop`));
-  check('Sync this source leaves the edit current in every tool, says the source’s version waits with Replace mine, and its line shows Update waiting with Merge, Replace mine and Keep mine', /deslop changed at the source; yours stays current, since it was changed here or a tool’s copy can’t be read just now: on its row, Merge puts the source’s changes into yours if they don’t clash, Replace mine takes the source’s, and Keep mine keeps yours\./.test(await a.text('.band-done .band-text') ?? '')
+  check('Sync this source leaves the edit current in every tool, warns that deslop changed at the source and here to choose on its row, and its line shows Update waiting with Merge, Replace mine and Keep mine', /^deslop changed at the source and here: choose on its row\.$/.test((await a.text('.band-done .band-text') ?? '').trim())
+    && await a.exists('.band-done svg.tone-warning')
     && /Update waiting/.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '')
     && !(await a.text('.source-row .source-name[data-key="deslop"]') ?? '').includes('Changed at the source. Yours stays current')
     && (await a.text(`#source-replace-${id}-skill-deslop`))?.trim() === 'Replace mine'
@@ -6344,8 +6361,9 @@ async function sourcesFlow() {
 
   commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('name: deslop', 'name: unslop') });
   await a.click(`#source-check-${id}`);
-  check('renamed there, Check now turns deslop Off and takes it out of every tool, said first, as a warning, with Turn on; unslop comes in Off', /^deslop is no longer at github\.com\/stephenturner\/skill-deslop \(main\): it was turned off and taken out of all 3 tools; Central Knot keeps it\./.test(await a.text('.band-done .band-text') ?? '')
-    && /unslop is in Central Knot\. It is off\./.test(await a.text('.band-done .band-text') ?? '') && await a.exists('.band-done svg.tone-warning') && (await a.text('#outcome-undo')) === 'Turn deslop on'
+  check('renamed there, Check now turns deslop Off and takes it out of every tool, said first, as a warning, with Turn deslop on and Turn unslop on beside it', /^deslop is no longer at github\.com\/stephenturner\/skill-deslop \(main\): it was turned off and taken out of all 3 tools; Central Knot keeps it\./.test(await a.text('.band-done .band-text') ?? '')
+    && /unslop is in Central Knot\. It is off\./.test(await a.text('.band-done .band-text') ?? '') && await a.exists('.band-done svg.tone-warning')
+    && (await a.text('#outcome-undo')) === 'Turn deslop on' && (await a.text('#source-turn-made-on'))?.trim() === 'Turn unslop on'
     && await until(() => Object.values(roots).every(root => !existsSync(join(home, root, 'deslop')))) && record()?.on === false, await a.text('.band-done'));
   await a.click('#nav-history');
   check('History says the source dropped it', await until(async () => /github\.com\/stephenturner\/skill-deslop \(main\) no longer has it, so it is off and removed from all 3 tools/.test(await a.text('.page') ?? '')), await a.text('.page'));
@@ -6374,7 +6392,8 @@ async function sourcesFlow() {
   await a.click('#nav-sources');
   check('its line on the source’s row says it is deleted, with Add', await until(async () => await a.exists(`#source-bring-${id}-skill-unslop`)) && /Not brought in: deleted from Central Knot\./.test(await a.text('.source-row .source-name[data-key="unslop"]') ?? ''), await a.text('.source-row'));
   await a.click(`#source-bring-${id}-skill-unslop`);
-  check('Add on its line brings unslop back into Central Knot, Off, and says so', await until(async () => /unslop is in Central Knot\. It is off\. Turn it on in the Library\./.test(await a.text('.band-done .band-text') ?? ''))
+  check('Add on its line brings unslop back into Central Knot, Off, with Turn it on on the band and row', await until(async () => /unslop is in Central Knot\. It is off\.$/.test(await a.text('.band-done .band-text') ?? ''))
+    && (await a.text('#source-turn-made-on'))?.trim() === 'Turn it on' && await a.exists(`#source-turn-on-${id}-skill-unslop`)
     && !unslop()?.deleted && unslop()?.on === false && !(await a.exists(`#source-bring-${id}-skill-unslop`)), [await a.text('.band-done'), unslop()]);
 
   // A source with a skill, an agent and an MCP server: the look lists all three, Add brings them in Off, the agent turned On on
@@ -6398,18 +6417,35 @@ async function sourcesFlow() {
     && /relay\s*MCP server, at the root of kit/.test(await a.text('#source-preview .source-name[data-kind="mcp"]') ?? '') && /1 file: \.mcp\.json/.test(await a.text('#source-preview .source-name[data-kind="mcp"]') ?? '')
     && (await a.text('#source-add'))?.trim() === 'Add 1 skill, 1 agent and 1 MCP server', kitLook);
   await a.shot('sources-look-agent');
+  const everyday = await a.run(`window.centralKnot.saveProfile({ name: 'Everyday', items: ['skill:deslop'] }, ${JSON.stringify(home)})`);
   await a.click('#source-add');
   await until(async () => (await a.all('.source-row')).length === 2);
-  check('Add says notes, reviewer and relay are in Central Knot, Off, to turn on in the Library', /notes, reviewer and relay are in Central Knot\. All 3 are off\. Turn them on in the Library\./.test(await a.text('.band-done .band-text') ?? '') && agentRecord()?.on === false, await a.text('.band-done'));
+  check('Add says the kinds and names are in Central Knot, Off, with Turn them on and profile forecast on the band', /1 skill, 1 agent and 1 MCP server \(notes, reviewer and relay\) are in Central Knot\. All 3 are off\.$/.test(await a.text('.band-done .band-text') ?? '')
+    && (await a.text('#source-turn-made-on'))?.trim() === 'Turn them on'
+    && (await a.text('#source-turn-made-profile'))?.trim() === 'Everyday would stop being the profile in use' && agentRecord()?.on === false, await a.text('.band-done'));
   const kitId = await a.run(`[...document.querySelectorAll('.source-row')].find(row => row.textContent.includes('team/kit')).dataset.source`);
-  same('with two sources, Sync this source’s info mark appears only on the first source row', await a.run(`(() => {
+  same('with two sources, every source row has its own Sync this source info mark', await a.run(`(() => {
     const rows = [...document.querySelectorAll('.source-row')];
-    return [rows.length, rows.map(row => row.querySelector('[id^="source-check-"]')?.textContent?.trim()), rows.map(row => !!row.querySelector('#source-sync-info'))];
-  })()`), [2, ['Sync this source', 'Sync this source'], [true, false]]);
+    return [rows.length, rows.map(row => row.querySelector('[id^="source-check-"]')?.textContent?.trim()), rows.map(row => !!row.querySelector('#source-sync-info-' + row.dataset.source))];
+  })()`), [2, ['Sync this source', 'Sync this source'], [true, true]]);
+  await checkCard(a, `source-sync-info-${kitId}`, SYNC_CARD, 'second Sync this source info card');
+  await a.click('#source-turn-made-on');
+  check('Turn them on from Add’s band turns all 3 kinds on, names the ended profile in Sources’ band, and Undo puts all 3 back Off',
+    await until(() => existsSync(join(home, roots['claude-cli'], 'notes/SKILL.md')) && existsSync(agentFile('claude-cli')) && JSON.parse(readNow(join(home, '.claude.json')) || '{}').mcpServers?.relay?.command === 'relay-mcp')
+    && await until(async () => /Turned on 3 items: notes, reviewer and relay\. Everyday stopped being the profile in use\./.test(await a.text('.band-done .band-text') ?? '') && !(await a.exists(`#source-turn-on-${kitId}-agent-reviewer`)))
+    && await a.exists('#outcome-undo'), [await a.text('.band-done'), await a.text(`#source-${kitId}`)]);
+  await a.click('#outcome-undo');
+  check('Undo of Turn them on turns all 3 back Off on disk and restores Turn it on on their rows',
+    await until(() => !existsSync(join(home, roots['claude-cli'], 'notes')) && !existsSync(agentFile('claude-cli')) && !JSON.parse(readNow(join(home, '.claude.json')) || '{}').mcpServers?.relay)
+    && await until(async () => /Undone: notes, reviewer and relay are as before\./.test(await a.text('.band-done .band-text') ?? '') && await a.exists(`#source-turn-on-${kitId}-agent-reviewer`))
+    && agentRecord()?.on === false, [await a.text('.band-done'), await a.text(`#source-${kitId}`)]);
+  await a.run(`window.centralKnot.deleteProfile(${JSON.stringify(everyday.id)}, ${JSON.stringify(home)})`);
+  await a.click('#header-refresh');
+  await until(() => a.run(`document.body.dataset.busy !== 'true'`));
   await a.click(`#source-remove-${id}`);
   check('remove confirmation stays visible on the first source and keeps the Sync this source card alive on the second',
     (await a.text('.source-confirm') ?? '').includes('Remove this source? Its skills, agents and MCP servers stay in Central Knot as they are')
-    && await a.exists(`#source-${kitId} #source-sync-info`), await a.text('.source-rows'));
+    && await a.exists(`#source-${kitId} #source-sync-info-${kitId}`), await a.text('.source-rows'));
   await a.click(`#source-remove-cancel-${id}`);
   for (const [w, h] of [[860, 560], [1316, 819]]) {
     await withSidebarOpen(a, w, h, async () => { same(`two sources fit at ${w}×${h} with sidebar open`, await a.run(CUT_OFF), []); });
@@ -6425,8 +6461,8 @@ async function sourcesFlow() {
   await a.click('#nav-sources');
   commit(kit, { 'agents/reviewer.md': reviewerMd.replace('Be brief.', 'Be brief and kind.') });
   await a.click(`#source-check-${kitId}`);
-  check('a change at the source updates the agent in every tool, and the band opens Agents', await until(async () => /reviewer was updated from its source, now in all 3 tools\./.test(await a.text('.band-done .band-text') ?? ''))
-    && await a.exists('#source-open-agents') && await until(() => ['claude-cli', 'copilot-cli', 'codex-cli'].every(tool => readNow(agentFile(tool)).includes('Be brief and kind.'))), await a.text('.band-done'));
+  check('a change at the source updates the agent in every tool, and the band opens Agents via Open in the Library', await until(async () => /reviewer was updated from its source, now in all 3 tools\./.test(await a.text('.band-done .band-text') ?? ''))
+    && (await a.text('#source-open-agents'))?.trim() === 'Open in the Library' && await until(() => ['claude-cli', 'copilot-cli', 'codex-cli'].every(tool => readNow(agentFile(tool)).includes('Be brief and kind.'))), await a.text('.band-done'));
   writeFileSync(agentFile('claude-cli'), readNow(agentFile('claude-cli')).replace('You review code.', 'You review code, mine.'));
   // Agents folders the app made after it opened the home aren't watched (main.ts startWatching watches what is there), so
   // the edit is taken in by the pass the next event elsewhere prompts or by the poll (main.ts POLL_MS, 20 s): waited for.
@@ -6454,8 +6490,8 @@ async function sourcesFlow() {
   commit(kit, { '.mcp.json': relayJson({ A: '1', B: '2' }) });
   await a.click('#nav-sources');
   await a.click(`#source-check-${kitId}`);
-  check('a change at the source updates every tool, Claude Code too, with Open MCP servers', await until(async () => /relay was updated from its source, now in all 3 tools\./.test(await a.text('.band-done .band-text') ?? ''))
-    && await a.exists('#source-open-mcp') && relayIn('copilot-cli')?.env?.B === '2' && relayIn('claude-cli')?.env?.B === '2', [await a.text('.band-done'), readNow(mcpFile('claude-cli'))]);
+  check('a change at the source updates every tool, Claude Code too, with Open in the Library', await until(async () => /relay was updated from its source, now in all 3 tools\./.test(await a.text('.band-done .band-text') ?? ''))
+    && (await a.text('#source-open-mcp'))?.trim() === 'Open in the Library' && relayIn('copilot-cli')?.env?.B === '2' && relayIn('claude-cli')?.env?.B === '2', [await a.text('.band-done'), readNow(mcpFile('claude-cli'))]);
   await a.shot('sources-server-updated');
   const copilotMcp = JSON.parse(readNow(mcpFile('copilot-cli')));
   copilotMcp.mcpServers.relay.env.A = 'mine';
@@ -6489,7 +6525,7 @@ async function sourcesFlow() {
   await checkCard(a, 'source-preview-not-coming-info', NOT_COMING_CARD, 'preview Not brought in info card');
   await fitsAtMinimum(a, 'Sources, with a source and a look open');
   await a.click('#source-add');
-  await until(async () => /pdf is in Central Knot, Off/.test(await a.text('.band-done .band-text') ?? ''));
+  await until(async () => /pdf is in Central Knot\. It is off\./.test(await a.text('.band-done .band-text') ?? ''));
   const pdfRecord = () => JSON.parse(readNow(join(home, '.central-knot/skills.json')) || '{"items":{}}').items.pdf;
   const pdfId = await a.run(`document.querySelector('.source-row:has(.source-name[data-key="pdf"])')?.dataset.source`);
   const pdfRowText = await a.text(`.source-row[data-source="${pdfId}"]`) ?? '';
@@ -19966,7 +20002,7 @@ async function fromFlow() {
   await openKind(a, 'all');
   await find(a, 'ledger');
   await addSource(mixed);
-  same('Add’s band says the three are off, to turn on in the Library, and offers Open in the Library', [/are in Central Knot\. All 3 are off\. Turn them on in the Library\./.test(await a.text('.band-done .band-text') ?? ''), await a.text('#source-open-library')], [true, 'Open in the Library']);
+  same('Add’s band says the kinds and names are off and offers Turn them on and Open in the Library', [/1 skill, 1 agent and 1 MCP server \(kit-skill, kit-agent and kit-server\) are in Central Knot\. All 3 are off\.$/.test(await a.text('.band-done .band-text') ?? ''), await a.text('#source-turn-made-on'), await a.text('#source-open-library')], [true, 'Turn them on', 'Open in the Library']);
   await a.click('#source-open-library');
   same('it lands on All, From the source, Find let go: its skill, agent and server', [await fromIs(a), await a.run(`document.querySelector('#find').value`), (await listed(a)).sort()],
     [`source:${mixed}`, '', [id('agents', 'kit-agent'), id('mcp', 'kit-server'), id('skills', 'kit-skill')]]);

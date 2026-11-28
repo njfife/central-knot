@@ -271,7 +271,7 @@ const foundOf = (source: Resolved & Partial<Pick<SourceRecord, 'commit' | 'commi
 async function answer(context: ShareContext, tools: HarnessId[], done: Omit<SourceResult, 'view'>): Promise<SourceResult> {
   const { stopped, results, reloads, notWhole } = done, view = await sourcesView(context, tools);
   const waitsNow = new Set(view.sources.flatMap(source => source.names.filter(name => name.state === 'wait').map(name => itemId(name.kind, name.key))));
-  const sourced = done.sourced?.filter(entry => entry.answer !== 'wait' || waitsNow.has(itemId(entry.kind, itemKey(entry.name))));
+  const sourced = done.sourced?.filter(entry => entry.answer !== 'wait' || waitsNow.has(itemId(entry.kind, entry.key ?? itemKey(entry.name))));
   return { ...(stopped ? { stopped } : {}), ...(sourced ? { sourced } : {}), ...(results ? { results } : {}), reloads, ...(notWhole ? { notWhole } : {}), view };
 }
 

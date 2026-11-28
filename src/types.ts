@@ -1240,7 +1240,7 @@ export interface PassResult {
    * (which change nothing a person sees), with the History entry that says it, whether the item is On once the step is done
    * (`on`), and for the item a click on Merge asked for, what Merge did (`merge`).
    */
-  sourced?: { name: string; answer: SourceAnswer; history?: string; on?: true; merge?: MergeDone; /** A take that can't land in its tool: why, and nothing changed (library.ts TAKE). */ held?: string }[];
+  sourced?: { key?: string; name: string; answer: SourceAnswer; history?: string; on?: true; merge?: MergeDone; /** A take that can't land in its tool: why, and nothing changed (library.ts TAKE). */ held?: string }[];
 }
 /**
  * What a click on Merge did (library.ts MERGE; librarypass.ts mergeIn): the merged version made current (`merged`); merged to
