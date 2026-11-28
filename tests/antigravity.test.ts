@@ -230,9 +230,9 @@ test('What a running Antigravity needs: a skill, nothing but /skills reload for 
   const serverOn = [{ tool: 'antigravity-cli' as const, kind: 'mcp' as const, key: 'docs', on: true }];
   assert.deepEqual(reloadAdvice(skillOn).items, [{ tool: 'antigravity-cli', text: 'Antigravity reads it at the next turn; for the CLI’s slash menu, type /skills reload.',
     command: '/skills reload', chip: 'Antigravity: /skills reload', title: 'Type this in your Antigravity CLI session: its slash menu then lists the skill.',
-    note: 'Reads it at the next turn; for the CLI’s slash menu.' }]);
+    note: 'Antigravity reads it at the next turn anyway; this is only for the CLI’s slash menu.' }]);
   assert.deepEqual(reloadAdvice(skillOn, { 'antigravity-cli': 'app' }).items, []);
-  assert.equal(reloadAdvice(serverOn).text, 'In Antigravity, type /mcp.');
+  assert.equal(reloadAdvice(serverOn).text, 'In Antigravity, type /mcp, then reload the servers there.');
   assert.equal(reloadAdvice(serverOn, { 'antigravity-cli': 'app' }).text, 'In the Antigravity app, choose Restart on the server’s menu.');
   assert.deepEqual(reloadAdvice(serverOn, { 'antigravity-cli': 'both' }).items, [{ tool: 'antigravity-cli',
     text: 'In Antigravity, type /mcp and reload, or choose Restart on the server’s menu in the Antigravity app.', command: '/mcp', chip: 'Antigravity: /mcp',

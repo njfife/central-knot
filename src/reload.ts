@@ -15,13 +15,17 @@ import { byToolOrder } from './words.ts';
 export type ToolWay = 'cli' | 'app' | 'both';
 export type ToolWays = Partial<Record<HarnessId, ToolWay>>;
 export type ReloadKind = ItemKind | 'plugin';
-export interface ReloadChip { readonly chip: string; readonly command?: string; readonly title: string }
+export interface ReloadChip { readonly chip: string; readonly command?: string; readonly title: string; /** Caveat shown beside this command in reloadLines, never repeating the command. */ readonly note?: string }
+/**
+ * `text` is the full sentence for spoken announcements (app.ts spoken), opened-row advice (rowReload), pass/plugin messages
+ * (librarypass.ts, plugins.ts, pluginstate.ts) and plain no-command rows (matrix.ts reloadLines). `note` (and `more[].note`)
+ * holds only the non-command caveat shown beside each Copy button in reloadLines, never repeating the command.
+ */
 export interface ReloadStep {
   readonly text: string;
   readonly command?: string;
   readonly chip?: string;
   readonly title?: string;
-  /** Non-command caveat shown beside a command's Copy control (matrix.ts reloadLines), never repeating the command. */
   readonly note?: string;
   readonly more?: readonly ReloadChip[];
   /** This step is for the desktop app alone, so the CLI's strongest step is kept beside it when both are found. */
@@ -45,7 +49,7 @@ const typeCmd = (where: string, command: string, chipName = where, title = `Type
 const newSession = (where: string, chipName = where, rank = 3): ReloadStep => ({ text: `In ${where}, start a new session.`, chip: `${chipName}: new session`, rank });
 const orRestartApp = (cli: ReloadStep, chipName: string, phrase = chipName, rank = cli.rank): ReloadStep => ({
   ...cli, text: `${cli.text.slice(0, -1)}, or restart ${phrase}.`,
-  ...(cli.command ? { note: cli.note ? `${cli.note.slice(0, -1)}, or restart ${phrase}.` : `Or restart ${phrase}.` } : {}),
+  ...(cli.command ? { note: `Or restart ${phrase}.` } : {}),
   title: cli.title ?? cli.text, more: [...(cli.more ?? []), appMore(chipName, phrase)], rank,
 });
 const restartWays = (name: string, command: string, app: string, title = `Quit ${name}, then run this in a terminal: it keeps the chat.`): WaySteps => ({
@@ -57,11 +61,11 @@ const restartWays = (name: string, command: string, app: string, title = `Quit $
 const COPILOT_APP = restartApp('GitHub Copilot app', 'the GitHub Copilot app');
 const COPILOT_SESSION: WaySteps = { cli: newSession('Copilot CLI'), app: COPILOT_APP, both: orRestartApp(newSession('Copilot CLI'), 'GitHub Copilot app', 'the GitHub Copilot app', 5) };
 const CHATGPT_APP = restartApp('ChatGPT desktop', 'the ChatGPT desktop app', 4);
-const CODEX_RESUME: ReloadChip = { chip: 'codex resume --last', command: 'codex resume --last', title: 'Quit Codex, then run this in a terminal: it keeps the chat.' };
+const CODEX_RESUME: ReloadChip = { chip: 'codex resume --last', command: 'codex resume --last', title: 'Quit Codex, then run this in a terminal: it keeps the chat.', note: 'to restart and keep the chat.' };
 const CODEX_MCP_CLI: ReloadStep = {
   text: 'In Codex, type /new, or restart it (codex resume --last keeps the chat).',
   command: '/new', chip: 'Codex: /new', title: 'Type this in your Codex session.',
-  note: 'Or restart to keep the chat.', more: [CODEX_RESUME], rank: 4,
+  note: 'for a new chat, or', more: [CODEX_RESUME], rank: 4,
 };
 const PI_CLI = typeCmd('Pi', '/reload');
 const PI_ALL: WaySteps = { cli: PI_CLI, app: restartApp('pi-gui'), both: orRestartApp(PI_CLI, 'pi-gui') };
@@ -70,9 +74,9 @@ const OPENCODE_RESTART = restartWays('OpenCode', 'opencode --continue', 'OpenCod
 // reload; an MCP server is reloaded from the CLI's /mcp manager, or by Restart on its menu in the app (Customizations › Installed).
 const AGY_SKILL: ReloadStep = { ...typeCmd('Antigravity', '/skills reload', 'Antigravity', 'Type this in your Antigravity CLI session: its slash menu then lists the skill.'),
   text: 'Antigravity reads it at the next turn; for the CLI’s slash menu, type /skills reload.',
-  note: 'Reads it at the next turn; for the CLI’s slash menu.', rank: 1 };
+  note: 'Antigravity reads it at the next turn anyway; this is only for the CLI’s slash menu.', rank: 1 };
 const AGY_MCP_CLI: ReloadStep = { ...typeCmd('Antigravity', '/mcp', 'Antigravity', 'Type this in your Antigravity session, then reload the servers there.'),
-  note: 'Then reload the servers there.' };
+  text: 'In Antigravity, type /mcp, then reload the servers there.', note: 'Then reload the servers there.' };
 const AGY_MCP_APP: ReloadStep = { text: 'In the Antigravity app, choose Restart on the server’s menu.', chip: 'Antigravity app: restart the server', rank: 2 };
 
 export const reloadTable: Record<HarnessId, ToolSteps> = {
@@ -115,8 +119,7 @@ export const reloadTable: Record<HarnessId, ToolSteps> = {
       both: {
         ...CODEX_MCP_CLI,
         text: 'In Codex, type /new, or restart it (codex resume --last keeps the chat); restart the ChatGPT desktop app if it is open.',
-        note: 'Or restart to keep the chat; restart the ChatGPT desktop app if it is open.',
-        more: [CODEX_RESUME, appMore('ChatGPT desktop', 'the ChatGPT desktop app')],
+        more: [{ ...CODEX_RESUME, note: 'to restart and keep the chat; restart the ChatGPT desktop app if it is open.' }, appMore('ChatGPT desktop', 'the ChatGPT desktop app')],
       },
     },
     agent: { cli: newSession('Codex'), app: newSession('ChatGPT desktop'), both: newSession('Codex or ChatGPT desktop', 'Codex / ChatGPT desktop') },

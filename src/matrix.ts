@@ -1080,44 +1080,55 @@ export function reloadButton(item: { chip?: string; command: string; title: stri
   return control;
 }
 
-/** One non-wrapping line of per-tool reload chips for the folded header, with +N more opening Show all on overflow. */
+/** Count of Show all rows with no chip in sight (one per tool, whether a tool has zero chips or multiple commands). */
+export const unshownReloadRows = (total: number, chips: readonly { tool?: string; hidden: boolean }[]): number =>
+  Math.max(0, total - new Set(chips.filter(chip => !chip.hidden && chip.tool).map(chip => chip.tool)).size);
+
+/** One non-wrapping line of per-tool reload chips for the folded header, with +N more opening Show all for any unshown row. */
 export function reloadChips(advice: ReloadAdvice, of: typeof state.shownWhole): HTMLElement | null {
   const chips = advice.items.flatMap(item => [
-    ...(item.chip ? [{ chip: item.chip, command: item.command, title: item.title!, id: `outcome-copy-${item.tool}` }] : []),
-    ...(item.more ?? []).map((extra, at) => ({ ...extra, id: `outcome-copy-${item.tool}-${at + 1}` })),
+    ...(item.chip ? [{ tool: item.tool, chip: item.chip, command: item.command, title: item.title!, id: `outcome-copy-${item.tool}` }] : []),
+    ...(item.more ?? []).map((extra, at) => ({ ...extra, tool: item.tool, id: `outcome-copy-${item.tool}-${at + 1}` })),
   ]);
-  const extra = advice.items.filter(item => !item.chip && !item.more?.length).length;
-  const view = (chip: { chip: string; command?: string; title: string; id: string }) =>
-    (chip.command ? reloadButton({ chip: chip.chip, command: chip.command, title: chip.title }, chip.id) : h('span.reload-chip', { title: chip.title }, chip.chip));
+  const view = (chip: { tool: string; chip: string; command?: string; title: string; id: string }) => {
+    const node = chip.command ? reloadButton({ chip: chip.chip, command: chip.command, title: chip.title }, chip.id) : h('span.reload-chip', { title: chip.title }, chip.chip);
+    node.setAttribute('data-reload-tool', chip.tool);
+    return node;
+  };
   return chips.length ? h('div.result-reloads', {},
     h('span.result-copies', {}, chips.map(view)),
-    h('button.inline-link.reload-more', { type: 'button', id: 'outcome-reload-more', hidden: true, 'data-extra-reloads': extra ? String(extra) : undefined, onclick: (event: Event) => { event.stopPropagation(); state.shownWhole = of; rerender(); } }, '')) : null;
+    h('button.inline-link.reload-more', { type: 'button', id: 'outcome-reload-more', hidden: true, 'data-reload-rows': String(advice.items.length), onclick: (event: Event) => { event.stopPropagation(); state.shownWhole = of; rerender(); } }, '')) : null;
 }
 
 const RELOAD_FOLD_FROM = 3;
-let reloadFoldOpen: Outcome | undefined;
-/** One reload step's row: each distinct command once as a labelled Copy control plus any non-command caveat, or plain text when there is no command. */
+let reloadFoldOpen: object | undefined;
+/** One reload step's row: each distinct command once paired with its own note, or plain text when there is no command. */
 function reloadRow(item: ReloadItem): HTMLElement {
-  const copies = [
-    ...(item.command ? [reloadButton({ chip: item.chip!, command: item.command, title: item.title! }, `outcome-copy-${item.tool}`)] : []),
-    ...(item.more ?? []).flatMap((extra, at) => (extra.command ? [reloadButton({ ...extra, command: extra.command }, `outcome-copy-${item.tool}-${at + 1}`)] : [])),
+  if (!item.command) return h('div.reload-row', {}, h('span.reload-row-text', {}, item.text));
+  const parts: Child[] = [
+    reloadButton({ chip: item.chip!, command: item.command, title: item.title! }, `outcome-copy-${item.tool}`),
+    ...(item.note ? [h('span.reload-row-note', {}, item.note)] : []),
+    ...(item.more ?? []).flatMap((extra, at) => (extra.command
+      ? [reloadButton({ ...extra, command: extra.command }, `outcome-copy-${item.tool}-${at + 1}`),
+        ...(extra.note ? [h('span.reload-row-note', {}, extra.note)] : [])]
+      : [])),
   ];
-  const text = copies.length ? item.note : item.text;
-  return h('div.reload-row', {}, ...copies, text ? h('span.reload-row-text', {}, text) : null);
+  return h('div.reload-row.reload-row-cmd', {}, parts);
 }
 
 /**
- * Per-tool reload steps for Show all and off-header bands: each command said once on its Copy button, caveats and no-command
- * steps in plain text. For a long group (3+ shown steps) on a band (`foldFor`), folded behind an explicit "Reload steps (N)" disclosure.
+ * Per-tool reload steps for page bands and the header's whole result: each command said once on its Copy button, caveats and
+ * no-command steps in plain text. Every page band folds 3+ shown steps behind "Reload steps (N)" (keyed by its outcome/run);
+ * the header's Show all card passes `'whole'` as the one named exception that never folds.
  */
-export function reloadLines(advice: ReloadAdvice, foldFor?: Outcome): HTMLElement | null {
+export function reloadLines(advice: ReloadAdvice, owner: object | 'whole'): HTMLElement | null {
   if (!advice.items.length) return null;
   const list = h('div.reload-list.result-copies', {}, advice.items.map(reloadRow));
-  if (!foldFor || advice.items.length < RELOAD_FOLD_FROM) return list;
+  if (owner === 'whole' || advice.items.length < RELOAD_FOLD_FROM) return list;
   const disclosure = fold({
     id: 'outcome-reloads-fold', toggleId: 'outcome-reloads-toggle',
-    label: `Reload steps (${advice.items.length})`, open: reloadFoldOpen === foldFor,
-    onToggle: open => { reloadFoldOpen = open ? foldFor : undefined; }, bodyClass: 'reload-fold-body',
+    label: `Reload steps (${advice.items.length})`, open: reloadFoldOpen === owner,
+    onToggle: open => { reloadFoldOpen = open ? owner : undefined; }, bodyClass: 'reload-fold-body',
   }, list);
   disclosure.className = 'fold reload-fold';
   return disclosure;
@@ -1254,7 +1265,7 @@ export function listResult(): HTMLElement[] {
   const chips = !whole && advice ? reloadChips(advice, of) : null;
   const profile = profileSpan(done && !whole ? state.outcome?.profileLine : undefined);
   const problem = lines.length ? h(`div.band${chips || profile ? '.result-row2' : ''}`, { role: 'status' }, profile, icon('triangle-alert', 14, 'tone-warning'), problemLines(lines, of, hasAdvice), chips, done ? null : closeButton(close, { id: 'problems-dismiss' })) : null;
-  const row2 = whole && advice ? reloadLines(advice) : problem ? null : profile ? h('div.result-row2.result-profile-row', {}, profile, chips) : chips;
+  const row2 = whole && advice ? reloadLines(advice, 'whole') : problem ? null : profile ? h('div.result-row2.result-profile-row', {}, profile, chips) : chips;
   return [done, problem, row2].filter((band): band is HTMLElement => !!band);
 }
 

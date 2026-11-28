@@ -19,7 +19,9 @@ const { dispatch } = installDom({
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first, before matrix.ts.
 await import('../src/settingspage.ts');
 const { oweHomeRead, readHomeOnce, setRenderer, state } = await import('../src/app.ts');
-const { headerNotices, libraryTable, listResult, noticeKindsShown, openKind, reloadChips, reloadLines, rowByKey, usedCellWords } = await import('../src/matrix.ts');
+const { headerNotices, libraryTable, listResult, noticeKindsShown, openKind, reloadChips, reloadLines, rowByKey, unshownReloadRows, usedCellWords } = await import('../src/matrix.ts');
+const { pluginsResult, runBand } = await import('../src/pluginspage.ts');
+const { market } = await import('../src/pluginstate.ts');
 
 const collectNodes = (node: unknown, match: (el: FakeNode) => boolean, out: FakeNode[] = []): FakeNode[] => {
   if (!node || typeof node !== 'object') return out;
@@ -45,7 +47,7 @@ test('usedCellWords shows the Sort’s figure (recency in the unused filter), ke
   }
 });
 
-test('reloadLines says each command once on its copy control, keeps caveats and secondary commands, and uses plain text for no-command steps', () => {
+test('reloadLines says each command once paired with its own note, distinguishes command rows from plain-text steps, and keeps secondary commands and desktop caveats', () => {
   // Five-tool skill write: Claude Code needs no reload, leaving four tools' steps.
   const fourSkill = reloadAdvice([
     { tool: 'claude-cli', kind: 'skill', key: 'draft-rfc', on: true },
@@ -54,36 +56,40 @@ test('reloadLines says each command once on its copy control, keeps caveats and 
     { tool: 'pi-cli', kind: 'skill', key: 'draft-rfc', on: true },
     { tool: 'antigravity-cli', kind: 'skill', key: 'draft-rfc', on: true },
   ]);
-  const view = reloadLines(fourSkill) as unknown as FakeNode;
+  const view = reloadLines(fourSkill, 'whole') as unknown as FakeNode;
   const rows = collectNodes(view, el => el.className.split(/\s+/).includes('reload-row'));
-  assert.deepEqual(rows.map(row => ({
-    buttons: collectNodes(row, el => el.tag === 'button').map(btn => [textOf(btn), btn.attrs['data-copy']]),
-    text: findNode(row, el => el.className.split(/\s+/).includes('reload-row-text'))?.textContent ?? null,
-  })), [
-    { buttons: [['Copilot CLI: /skills reload', '/skills reload']], text: null },
-    { buttons: [], text: 'Codex picks it up at the next turn; if not, start a new chat.' },
-    { buttons: [['Pi: /reload', '/reload']], text: null },
-    { buttons: [['Antigravity: /skills reload', '/skills reload']], text: 'Reads it at the next turn; for the CLI’s slash menu.' },
+  const rowShape = (row: FakeNode) => ({
+    cmdRow: row.className.split(/\s+/).includes('reload-row-cmd'),
+    parts: (row.children ?? []).map(child => {
+      const el = child as FakeNode;
+      return el.tag === 'button' ? ['button', textOf(el), el.attrs['data-copy']] : [el.className, textOf(el)];
+    }),
+  });
+  assert.deepEqual(rows.map(rowShape), [
+    { cmdRow: true, parts: [['button', 'Copilot CLI: /skills reload', '/skills reload']] },
+    { cmdRow: false, parts: [['reload-row-text', 'Codex picks it up at the next turn; if not, start a new chat.']] },
+    { cmdRow: true, parts: [['button', 'Pi: /reload', '/reload']] },
+    { cmdRow: true, parts: [['button', 'Antigravity: /skills reload', '/skills reload'], ['reload-row-note', 'Antigravity reads it at the next turn anyway; this is only for the CLI’s slash menu.']] },
   ]);
-  // Secondary command + desktop app caveat (Codex MCP both + Claude MCP both): each command once, desktop restart preserved.
+  // Secondary command + desktop app caveat (Codex MCP both + Claude MCP both): each command paired with what it is for, reading as two ways not three.
   const bothMcp = reloadAdvice([
     { tool: 'claude-cli', kind: 'mcp', key: 'docs', on: true },
     { tool: 'codex-cli', kind: 'mcp', key: 'docs', on: true },
   ], { 'claude-cli': 'both', 'codex-cli': 'both' });
-  const mcpRows = collectNodes(reloadLines(bothMcp) as unknown as FakeNode, el => el.className.split(/\s+/).includes('reload-row'));
-  assert.deepEqual(mcpRows.map(row => ({
-    buttons: collectNodes(row, el => el.tag === 'button').map(btn => [textOf(btn), btn.attrs['data-copy']]),
-    text: findNode(row, el => el.className.split(/\s+/).includes('reload-row-text'))?.textContent ?? null,
-  })), [
-    { buttons: [['Claude Code: claude --continue', 'claude --continue']], text: 'Restart (keeps the chat), or restart Claude desktop.' },
-    { buttons: [['Codex: /new', '/new'], ['codex resume --last', 'codex resume --last']], text: 'Or restart to keep the chat; restart the ChatGPT desktop app if it is open.' },
+  const mcpRows = collectNodes(reloadLines(bothMcp, 'whole') as unknown as FakeNode, el => el.className.split(/\s+/).includes('reload-row'));
+  assert.deepEqual(mcpRows.map(rowShape), [
+    { cmdRow: true, parts: [['button', 'Claude Code: claude --continue', 'claude --continue'], ['reload-row-note', 'Restart (keeps the chat), or restart Claude desktop.']] },
+    { cmdRow: true, parts: [
+      ['button', 'Codex: /new', '/new'], ['reload-row-note', 'for a new chat, or'],
+      ['button', 'codex resume --last', 'codex resume --last'], ['reload-row-note', 'to restart and keep the chat; restart the ChatGPT desktop app if it is open.'],
+    ] },
   ]);
 });
 
-test('reloadLines folds 3+ shown steps on bands behind Reload steps (N) counted from advice actually shown, keeping 1–2 inline and persisting open state per outcome', () => {
+test('reloadLines folds from exactly 3 shown steps on every page band (including Instructions runBand), keeps header whole unfolded, and counts unshown tool rows once per tool', () => {
   const outcomeA: Outcome = { page: 'history', text: 'Done A.' };
   const outcomeB: Outcome = { page: 'history', text: 'Done B.' };
-  // 3 raw writes where Claude Code is silent -> only 2 shown steps -> inline, no disclosure.
+  // 2 shown steps from 3 raw writes -> inline, no disclosure.
   const twoShown = reloadAdvice([
     { tool: 'claude-cli', kind: 'skill', key: 'notes', on: true },
     { tool: 'copilot-cli', kind: 'skill', key: 'notes', on: true },
@@ -92,7 +98,18 @@ test('reloadLines folds 3+ shown steps on bands behind Reload steps (N) counted 
   const inline = reloadLines(twoShown, outcomeA) as unknown as FakeNode;
   assert.equal(inline.tag, 'div');
   assert.equal(findById(inline, 'outcome-reloads-fold'), undefined);
-  // 5 raw writes where Claude Code is silent -> 4 shown steps -> folded behind Reload steps (4).
+  // Exactly 3 shown steps -> folds behind Reload steps (3).
+  const threeShown = reloadAdvice([
+    { tool: 'claude-cli', kind: 'skill', key: 'notes', on: true },
+    { tool: 'copilot-cli', kind: 'skill', key: 'notes', on: true },
+    { tool: 'codex-cli', kind: 'skill', key: 'notes', on: true },
+    { tool: 'pi-cli', kind: 'skill', key: 'notes', on: true },
+  ]);
+  const foldedThree = reloadLines(threeShown, outcomeA) as unknown as FakeNode;
+  assert.equal(foldedThree.tag, 'details');
+  assert.equal(foldedThree.attrs.id, 'outcome-reloads-fold');
+  assert.equal(textOf(findById(foldedThree, 'outcome-reloads-toggle')), 'Reload steps (3)');
+  // 4 shown steps -> folds behind Reload steps (4); open state persists per owner and resets for a new owner.
   const fourShown = reloadAdvice([
     { tool: 'claude-cli', kind: 'skill', key: 'draft-rfc', on: true },
     { tool: 'copilot-cli', kind: 'skill', key: 'draft-rfc', on: true },
@@ -102,24 +119,74 @@ test('reloadLines folds 3+ shown steps on bands behind Reload steps (N) counted 
   ]);
   const folded = reloadLines(fourShown, outcomeA) as unknown as FakeNode;
   assert.equal(folded.tag, 'details');
-  assert.equal(folded.attrs.id, 'outcome-reloads-fold');
   assert.equal('open' in folded.attrs, false);
   assert.equal(textOf(findById(folded, 'outcome-reloads-toggle')), 'Reload steps (4)');
-  // Opening the disclosure persists across redraws for the same outcome and resets for a new outcome.
   (folded as unknown as { open: boolean; ontoggle: (event: { currentTarget: unknown }) => void }).open = true;
   (folded as unknown as { ontoggle: (event: { currentTarget: unknown }) => void }).ontoggle({ currentTarget: folded });
-  const redrawn = reloadLines(fourShown, outcomeA) as unknown as FakeNode;
-  assert.equal('open' in redrawn.attrs, true);
-  const nextOutcome = reloadLines(fourShown, outcomeB) as unknown as FakeNode;
-  assert.equal('open' in nextOutcome.attrs, false);
-  // Without foldFor (Show all card), 4 steps render directly without double disclosure; 0 steps returns null.
-  assert.equal((reloadLines(fourShown) as unknown as FakeNode).tag, 'div');
+  assert.equal('open' in (reloadLines(fourShown, outcomeA) as unknown as FakeNode).attrs, true);
+  assert.equal('open' in (reloadLines(fourShown, outcomeB) as unknown as FakeNode).attrs, false);
+  // Header whole result ('whole') never folds; 0 steps returns null.
+  assert.equal((reloadLines(fourShown, 'whole') as unknown as FakeNode).tag, 'div');
   assert.equal(reloadLines(reloadAdvice([{ tool: 'claude-cli', kind: 'skill', key: 'notes', on: true }]), outcomeA), null);
-  // reloadChips marks unchipped advice items on #outcome-reload-more so +N more counts actual hidden advice.
+  // reloadChips stamps data-reload-rows and per-chip data-reload-tool so +N more counts rows without a chip in sight (one per tool).
+  const mcpFour = reloadAdvice([
+    { tool: 'claude-cli', kind: 'mcp', key: 'docs', on: true },
+    { tool: 'codex-cli', kind: 'mcp', key: 'docs', on: true },
+    { tool: 'pi-cli', kind: 'mcp', key: 'docs', on: true },
+    { tool: 'opencode-cli', kind: 'mcp', key: 'docs', on: true },
+  ]);
   const chipsWithCodex = reloadChips(fourShown, outcomeA) as unknown as FakeNode;
-  assert.equal(findById(chipsWithCodex, 'outcome-reload-more')?.attrs['data-extra-reloads'], '1');
-  const chipsAllChipped = reloadChips(twoShown, outcomeA) as unknown as FakeNode;
-  assert.equal(findById(chipsAllChipped, 'outcome-reload-more')?.attrs['data-extra-reloads'], undefined);
+  assert.equal(findById(chipsWithCodex, 'outcome-reload-more')?.attrs['data-reload-rows'], '4');
+  assert.deepEqual(
+    collectNodes(chipsWithCodex, el => 'data-reload-tool' in el.attrs).map(el => el.attrs['data-reload-tool']),
+    ['copilot-cli', 'pi-cli', 'antigravity-cli'],
+  );
+  const chipsTwoCmd = reloadChips(mcpFour, outcomeA) as unknown as FakeNode;
+  assert.equal(findById(chipsTwoCmd, 'outcome-reload-more')?.attrs['data-reload-rows'], '4');
+  assert.deepEqual(
+    collectNodes(chipsTwoCmd, el => 'data-reload-tool' in el.attrs).map(el => el.attrs['data-reload-tool']),
+    ['claude-cli', 'codex-cli', 'codex-cli', 'pi-cli', 'opencode-cli'],
+  );
+  // One unit: unshownReloadRows counts rows Show all opens without a visible chip (chipless row counts even when all chips fit; two hidden commands for one tool count once).
+  assert.equal(unshownReloadRows(4, [{ tool: 'copilot-cli', hidden: false }, { tool: 'pi-cli', hidden: false }, { tool: 'antigravity-cli', hidden: false }]), 1);
+  assert.equal(unshownReloadRows(5, [
+    { tool: 'claude-cli', hidden: false }, { tool: 'copilot-cli', hidden: false },
+    { tool: 'codex-cli', hidden: true }, { tool: 'codex-cli', hidden: true },
+    { tool: 'pi-cli', hidden: true }, { tool: 'opencode-cli', hidden: true },
+  ]), 3);
+  assert.equal(unshownReloadRows(5, [
+    { tool: 'claude-cli', hidden: false }, { tool: 'copilot-cli', hidden: false },
+    { tool: 'codex-cli', hidden: false }, { tool: 'codex-cli', hidden: true },
+    { tool: 'pi-cli', hidden: true }, { tool: 'opencode-cli', hidden: true },
+  ]), 2);
+  assert.equal(unshownReloadRows(2, [{ tool: 'copilot-cli', hidden: false }, { tool: 'pi-cli', hidden: false }]), 0);
+  // Instructions runBand follows the same band fold rule (3+ steps fold behind Reload steps (N)), and Plugins header whole places problems before reload rows.
+  const prevPage = state.page, prevHome = state.home, prevShown = state.shownWhole, prevOutcome = state.outcome;
+  const okStep = (tool: HarnessId) => ({ source: 'm', marketName: 'team', plugin: 'kit', tool, action: 'install-items' as const, report: { ok: true, changed: true, message: 'ok', reloads: [{ tool, kind: 'mcp' as const, key: 'docs', on: true }] } });
+  const failStep = { source: 'm', marketName: 'team', plugin: 'bad', tool: 'claude-cli' as const, action: 'install' as const, report: { ok: false, changed: false, message: 'failed' } };
+  try {
+    state.home = makeHome('/tmp/ck-reload-unit', []);
+    state.outcome = undefined;
+    state.page = 'instructions';
+    const insRun = { done: [okStep('claude-cli'), okStep('codex-cli'), okStep('pi-cli')], undo: false, home: '/tmp/ck-reload-unit', place: 'instructions' as const };
+    market.lastRun = insRun;
+    const insBand = runBand() as unknown as FakeNode;
+    assert.equal(findById(insBand, 'outcome-reloads-fold')?.tag, 'details');
+    assert.equal(textOf(findById(insBand, 'outcome-reloads-toggle')), 'Reload steps (3)');
+    state.page = 'plugins';
+    const plugRun = { done: [failStep, okStep('claude-cli'), okStep('codex-cli'), okStep('pi-cli')], undo: false, home: '/tmp/ck-reload-unit', place: 'plugins' as const };
+    market.lastRun = plugRun;
+    state.shownWhole = plugRun;
+    const parts = pluginsResult() as unknown as FakeNode[];
+    const problemAt = parts.findIndex(part => !!findNode(part, el => el.className.split(/\s+/).includes('problem-line')));
+    const reloadAt = parts.findIndex(part => part.className.split(/\s+/).includes('reload-list'));
+    assert.ok(problemAt >= 0 && reloadAt > problemAt, `Plugins header whole puts problems (${problemAt}) before reload rows (${reloadAt})`);
+    assert.equal(parts.some(part => !!findById(part, 'outcome-reloads-fold')), false, 'Plugins header whole never folds reload rows');
+  } finally {
+    state.page = 'instructions'; market.lastRun = undefined;
+    state.page = 'plugins'; market.lastRun = undefined;
+    state.page = prevPage; state.home = prevHome; state.shownWhole = prevShown; state.outcome = prevOutcome;
+  }
 });
 
 const emptyKind = (tools: HarnessId[]) => ({ tools, items: [], library: {}, notices: [], gate: { state: 'open' }, unread: [], problems: [], access: { allowed: true } });

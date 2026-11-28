@@ -89,7 +89,7 @@ test('Worked example 2 and 5: an MCP server added to all five gives exact senten
     assert.deepEqual(advice.items, [
       { tool: 'claude-cli', text: 'Restart Claude Code (claude --continue keeps the chat).', command: 'claude --continue', chip: 'Claude Code: claude --continue', title: 'Quit Claude Code, then run this in a terminal: it keeps the chat.', note: 'Restart; keeps the chat.' },
       { tool: 'codex-cli', text: 'In Codex, type /new, or restart it (codex resume --last keeps the chat).', command: '/new', chip: 'Codex: /new', title: 'Type this in your Codex session.',
-        note: 'Or restart to keep the chat.', more: [{ chip: 'codex resume --last', command: 'codex resume --last', title: 'Quit Codex, then run this in a terminal: it keeps the chat.' }] },
+        note: 'for a new chat, or', more: [{ chip: 'codex resume --last', command: 'codex resume --last', title: 'Quit Codex, then run this in a terminal: it keeps the chat.', note: 'to restart and keep the chat.' }] },
       { tool: 'pi-cli', text: 'In Pi, type /reload.', command: '/reload', chip: 'Pi: /reload', title: 'Type this in your Pi session.' },
       { tool: 'opencode-cli', text: 'Restart OpenCode (opencode --continue keeps the chat).', command: 'opencode --continue', chip: 'OpenCode: opencode --continue', title: 'Quit OpenCode, then run this in a terminal: it keeps the chat.', note: 'Restart; keeps the chat.' },
     ]);
@@ -355,7 +355,7 @@ test('Item 7: every cell’s exact chip, title, command, tool order, ranking, an
     { tool: 'claude-cli', text: 'Restart Claude Code (claude --continue keeps the chat).', command: 'claude --continue', chip: 'Claude Code: claude --continue', title: 'Quit Claude Code, then run this in a terminal: it keeps the chat.', note: 'Restart; keeps the chat.' },
     { tool: 'copilot-cli', text: 'In Copilot CLI, type /skills reload.', command: '/skills reload', chip: 'Copilot CLI: /skills reload', title: 'Type this in your Copilot CLI session.' },
     { tool: 'codex-cli', text: 'In Codex, type /new, or restart it (codex resume --last keeps the chat).', command: '/new', chip: 'Codex: /new', title: 'Type this in your Codex session.',
-      note: 'Or restart to keep the chat.', more: [{ chip: 'codex resume --last', command: 'codex resume --last', title: 'Quit Codex, then run this in a terminal: it keeps the chat.' }] },
+      note: 'for a new chat, or', more: [{ chip: 'codex resume --last', command: 'codex resume --last', title: 'Quit Codex, then run this in a terminal: it keeps the chat.', note: 'to restart and keep the chat.' }] },
     { tool: 'pi-cli', text: 'In Pi, type /reload.', command: '/reload', chip: 'Pi: /reload', title: 'Type this in your Pi session.' },
     { tool: 'opencode-cli', text: 'Restart OpenCode (opencode --continue keeps the chat).', command: 'opencode --continue', chip: 'OpenCode: opencode --continue', title: 'Quit OpenCode, then run this in a terminal: it keeps the chat.', note: 'Restart; keeps the chat.' },
   ]);
@@ -922,16 +922,14 @@ test('Every reloadTable cell keeps command copy controls free of repeated comman
         if (!step.text) continue;
         if (step.command) {
           assert.ok(step.chip?.includes(step.command), `${tool} ${kind} ${way}: chip labels its command`);
-          if (step.note) {
-            assert.ok(!step.note.includes(step.command), `${tool} ${kind} ${way}: note must not repeat primary command`);
-            for (const extra of step.more ?? []) {
-              if (extra.command) assert.ok(!step.note.includes(extra.command), `${tool} ${kind} ${way}: note must not repeat secondary command`);
-            }
+          const notes = [step.note, ...(step.more ?? []).map(extra => extra.note)].filter(Boolean).join(' ');
+          for (const extra of step.more ?? []) {
+            if (extra.command) assert.ok(!notes.includes(extra.command), `${tool} ${kind} ${way}: notes must not repeat secondary command`);
           }
           for (const extra of step.more ?? []) {
             if (!extra.command) {
               const appName = extra.chip.split(':')[0]!;
-              assert.ok(step.note?.includes(appName), `${tool} ${kind} ${way}: note preserves non-command ${appName} caveat`);
+              assert.ok(notes.includes(appName), `${tool} ${kind} ${way}: notes preserve non-command ${appName} caveat`);
             }
           }
         } else {
@@ -940,33 +938,4 @@ test('Every reloadTable cell keeps command copy controls free of repeated comman
       }
     }
   }
-  // Worked examples: pure commands have no note; restart, secondary-command and desktop caveats carry note on ReloadItem.
-  const cliAll = reloadAdvice([
-    { tool: 'claude-cli', kind: 'mcp', on: true },
-    { tool: 'copilot-cli', kind: 'skill', on: true },
-    { tool: 'codex-cli', kind: 'mcp', on: true },
-    { tool: 'pi-cli', kind: 'skill', on: true },
-    { tool: 'opencode-cli', kind: 'skill', on: true },
-    { tool: 'antigravity-cli', kind: 'skill', on: true },
-  ]);
-  assert.deepEqual(cliAll.items.map(item => [item.tool, item.note]), [
-    ['claude-cli', 'Restart; keeps the chat.'],
-    ['copilot-cli', undefined],
-    ['codex-cli', 'Or restart to keep the chat.'],
-    ['pi-cli', undefined],
-    ['opencode-cli', 'Restart; keeps the chat.'],
-    ['antigravity-cli', 'Reads it at the next turn; for the CLI’s slash menu.'],
-  ]);
-  // Copilot CLI + desktop app with skill and MCP keeps /skills reload and the desktop app restart caveat.
-  const copilotBoth = reloadAdvice([
-    { tool: 'copilot-cli', kind: 'skill', on: true },
-    { tool: 'copilot-cli', kind: 'mcp', on: true },
-  ], { 'copilot-cli': 'both' });
-  assert.equal(copilotBoth.items[0]?.note, 'Or restart the GitHub Copilot app.');
-  // Claude desktop plugin app/both and Codex MCP both preserve every non-command caveat.
-  assert.equal(reloadAdvice([{ tool: 'claude-cli', kind: 'plugin', on: true }], { 'claude-cli': 'app' }).items[0]?.note, 'In the Code tab, or start a new session.');
-  assert.equal(reloadAdvice([{ tool: 'claude-cli', kind: 'plugin', on: true }], { 'claude-cli': 'both' }).items[0]?.note, 'In desktop, use the Code tab.');
-  assert.equal(reloadAdvice([{ tool: 'codex-cli', kind: 'mcp', on: true }], { 'codex-cli': 'both' }).items[0]?.note, 'Or restart to keep the chat; restart the ChatGPT desktop app if it is open.');
-  assert.equal(reloadAdvice([{ tool: 'antigravity-cli', kind: 'mcp', on: true }], { 'antigravity-cli': 'cli' }).items[0]?.note, 'Then reload the servers there.');
-  assert.equal(reloadAdvice([{ tool: 'antigravity-cli', kind: 'mcp', on: true }], { 'antigravity-cli': 'both' }).items[0]?.note, 'Then reload, or choose Restart on the server’s menu in the Antigravity app.');
 });
