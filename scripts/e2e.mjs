@@ -25519,24 +25519,42 @@ async function pluginItemSwitchesFlow() {
   const refresh = async () => { await a.click('#header-refresh'); await done(); };
   // History entries a click made since `before` (their ids): no cause, or the person's switch; a sync pass's own say why.
   const entryIds = () => a.run('window.centralKnot.history().then(history => history.events.map(event => event.id))');
-  // Every file under the tools' folders and the shared skills folder, by its path, with its bytes; and History's entries.
-  const homeNow = async () => {
-    const files = {};
-    const walk = dir => { for (const each of readdirSync(dir, { withFileTypes: true })) { const path = join(dir, each.name); if (each.isDirectory()) walk(path); else files[path] = readFileSync(path, 'utf8'); } };
-    for (const dir of ['.pi', '.config/opencode', '.gemini', '.agents', '.claude']) if (existsSync(join(home, dir))) walk(join(home, dir));
-    return { files, history: await entryIds() };
-  };
-  // What a click changed (`before`: homeNow before it): the paths whose bytes differ as soon as its result is told, and History's new
-  // entries made by then (each its kind and cause). Sync's own pass on what changed outside (a debounce after it) comes later.
-  const changedSince = async before => {
-    const told = Date.now(), now = await homeNow();
-    const events = await a.run('window.centralKnot.history().then(history => history.events.map(event => [event.id, event.kind, event.cause ?? "", event.at]))');
-    const paths = [...new Set([...Object.keys(before.files), ...Object.keys(now.files)])].filter(path => before.files[path] !== now.files[path]);
-    const made = events.filter(([id, , , at]) => !before.history.includes(id) && Date.parse(at) <= told);
-    return { files: paths.map(path => path.slice(home.length + 1)), history: made.map(([, kind, cause]) => `${kind} ${cause}`.trim()) };
-  };
   const clicksSince = async before => (await a.run('window.centralKnot.history().then(history => history.events.map(event => [event.id, event.cause ?? ""]))'))
     .filter(([id, cause]) => !before.includes(id) && (!cause || cause === 'switch'));
+  // Waits past DEBOUNCE_MS so a debounced pass has entered main's queue, refreshes behind it, then runs history() behind any
+  // backgroundRefresh already queued by sync:changed (does not fence a pass asked for later).
+  const settlePass = async () => {
+    await wait(DEBOUNCE_MS + 1000); // + 1000 ms margin for OS watcher delivery
+    await refresh();
+    await a.run('window.centralKnot.history()');
+    await a.settle();
+  };
+  // Every tool's files and the shared skills folder, leaving out OpenCode's copy of `name` (which a background pass may lawfully remove).
+  const toolsExcept = name => {
+    const out = {};
+    const skip = `.config/opencode/skills/${name}`;
+    for (const dir of ['.pi', '.config/opencode', '.gemini', '.agents', '.claude']) {
+      if (!existsSync(join(home, dir))) continue;
+      for (const [rel, val] of Object.entries(tree(join(home, dir)))) {
+        const path = `${dir}/${rel.replaceAll('\\', '/')}`;
+        if (path !== skip && !path.startsWith(`${skip}/`)) out[path] = val;
+      }
+    }
+    return out;
+  };
+  // Puts his copy in the shared skills folder behind the page and clicks the stale Pi switch: checks the refusal sentence,
+  // every tool's files outside OpenCode's copy of `name`, and that no click entry was recorded.
+  // Still open: the 20 s poll landing in the milliseconds between the snapshot and the press lets the press go through and fails the check (it never passes wrongly).
+  const refusedAfterShared = async (name, control, content, label) => {
+    const sharedPath = join(home, `.agents/skills/${name}/SKILL.md`);
+    const historyBefore = await entryIds();
+    put(sharedPath, content);
+    const filesBefore = toolsExcept(name);
+    await a.click(control);
+    await done();
+    same(label, [await header(), toolsExcept(name), await clicksSince(historyBefore)],
+      [`${name} changed since the page was read. Nothing was changed.`, filesBefore, []]);
+  };
   // A picture with `place` in view (Its items: at 860 it is below the panel), the header's result above it, the pointer over `hover`.
   const shot = async (name, [width, height], theme, place = '.plugin-items-section', hover) => { if (!shots) return; await a.run(`window.centralKnot.setAppearance('${theme}')`); await sizeTo(a, width, height);
     await a.run(`document.querySelector('${place}')?.scrollIntoView({ block: 'end' })`);
@@ -25601,18 +25619,15 @@ async function pluginItemSwitchesFlow() {
     [await header(), readNow(join(home, '.pi/agent/skills/draft/SKILL.md')), await a.exists(sw('trio', 'pi-cli', 'skill', 'draft')), (await cell('skill', 'draft', 'Pi'))?.[0], await words('skill', 'draft')],
     ['draft changed since the page was read. Nothing was changed.', draftInPi, false, 'Its own copy', '']);
   // The Library's own row, by the same rule: polish kept out of Pi there and let into OpenCode, then a copy of his named polish comes
-  // in the shared skills folder behind the page. The refused click looks at the home and runs no pass: nothing anywhere changes.
+  // in the shared skills folder behind the page. The refused click leaves every tool's files (outside OpenCode's copy) as they were and makes no click entry.
   await openKind(a, 'skills');
   const libSwitch = tool => `#${rowPart('enable', 'skills', 'polish', tool)}`, polishShared = md('polish', 'My own polish, in the shared skills folder.');
   if (await a.run(`document.querySelector('#${rowPart('open', 'skills', 'polish')}')?.getAttribute('aria-expanded')`) !== 'true') await a.click(`#${rowPart('open', 'skills', 'polish')}`);
   await until(() => a.exists(libSwitch('pi-cli')));
   for (const tool of ['pi-cli', 'opencode-cli']) { await a.click(libSwitch(tool)); await done(); }
-  put(join(home, '.agents/skills/polish/SKILL.md'), polishShared);
-  const beforeLibrary = await homeNow();
-  await a.click(libSwitch('pi-cli'));
-  await done();
-  same('on the Library’s row too, its Pi switch drawn before his shared copy came is refused; when it is told, every tool’s files and History are as before it',
-    [await header(), await changedSince(beforeLibrary)], ['polish changed since the page was read. Nothing was changed.', { files: [], history: [] }]);
+  await settlePass();
+  await refusedAfterShared('polish', libSwitch('pi-cli'), polishShared,
+    'on the Library’s row too, its Pi switch drawn before his shared copy came is refused; every tool’s files (outside OpenCode’s copy of polish) are unchanged and no click is recorded');
   await a.click('#nav-plugins');
   await openPage('trio');
   // An Off line and a deleted one have no switch.
@@ -25683,18 +25698,15 @@ async function pluginItemSwitchesFlow() {
       [true, 'Its copy was deleted in OpenCode. When sync runs, the agent turns off; Central Knot keeps it.']);
     await shot('item-switches-copy-gone-light-860', SMALLEST, 'light');
   }
-  // The long skill is kept out of Pi and on in OpenCode now (Pi's box unticked, OpenCode's ticked); once the pass the moved copy set
-  // off has run, his copy of it comes in the shared skills folder, which both read, behind the page: the Pi switch drawn before is
-  // refused, and as the click looks at the home and runs no pass, nothing anywhere changes.
-  await until(async () => (await a.run('window.centralKnot.history().then(history => history.events.map(event => event.cause ?? ""))')).includes('deleted-by-hand'));
-  await a.click('#header-refresh');
-  await done();
-  put(join(home, `.agents/skills/${long}/SKILL.md`), md(long, 'My own, in the shared skills folder.'));
-  const beforeShared = await homeNow();
-  await a.click(sw('pair', 'pi-cli', 'skill', long));
-  await done();
-  same('his copy in the shared skills folder behind the page: the Pi switch drawn before is refused; when it is told, every tool’s files and History are as before it',
-    [await header(), await changedSince(beforeShared)], [`${long} changed since the page was read. Nothing was changed.`, { files: [], history: [] }]);
+  // Work around a fault (queued: DELETED-BY-HAND-1): a plugin-linked item deleted by hand never settles and keeps scheduling
+  // follow-up passes every AFTER_SETTLE_MS. Put checker.md back so those passes stop before the shared-copy check; remove once mended.
+  if (ocAgent) renameSync(aside, ocAgent);
+  // The long skill is kept out of Pi and on in OpenCode now (Pi's box unticked, OpenCode's ticked); once any owed pass has run and
+  // the page has taken it in, his copy of it comes in the shared skills folder, which both read, behind the page: the Pi switch
+  // drawn before is refused, leaves every tool's files (outside OpenCode's copy) as they were, and makes no click entry.
+  await settlePass();
+  await refusedAfterShared(long, sw('pair', 'pi-cli', 'skill', long), md(long, 'My own, in the shared skills folder.'),
+    'his copy in the shared skills folder behind the page: the Pi switch drawn before is refused; every tool’s files (outside OpenCode’s copy of it) are unchanged and no click is recorded');
   same('no page errors, item switches', a.pageErrors, []);
   await a.quit();
 }
