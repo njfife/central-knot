@@ -8,7 +8,7 @@ import { manageCardFile, manageLocked, manageRow } from './managecard.ts';
 import { MARK_WORDS, installsIn, pluginsInstalled, takenItems, takesItemsOnly, viewStopped, type InstalledMarketPlugin } from './pluginstatus.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { pluginTitle, uninstallControl } from './pluginparts.ts';
-import { button, emptyState, h, icon, infoMark, pathText, section, toggle, type Child } from './dom.ts';
+import { button, emptyState, h, icon, infoMark, pathText, section, toggle, withToolCount, type Child } from './dom.ts';
 import { fullToolName, plural } from './model.ts';
 import { andList, coworkWords, fileName, kindNouns, pageNames, toolNames as names } from './words.ts';
 import { agentsKeptIn, hasCowork, takesPlugins, type AgentTool } from './presence.ts';
@@ -272,9 +272,9 @@ function everyHarness(home: HomeView, file: ReturnType<typeof manageCardFile>) {
   return h('div.page', {}, caught ? h('div.bands', {}, caught) : null,
     h('div.scroll.harness-scroll', { id: 'harnesses-scroll' },
       notes.length ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), h('span', {}, notes.flatMap((part, index) => (index ? [' ', ...part] : part)))) : null,
-      h('div.harness-cards', { 'data-count': String(cards.length) }, cards.flatMap(snapshot => [
+      withToolCount(h('div.harness-cards', { 'data-count': String(cards.length) }, cards.flatMap(snapshot => [
         summaryCard(snapshot, home, snapshot.harness === firstManaged, file.tool === snapshot.harness ? file : undefined),
-        file.tool === snapshot.harness ? file.panel ?? null : null])),
+        file.tool === snapshot.harness ? file.panel ?? null : null])), cards.length),
       otherApps(home)));
 }
 
@@ -445,9 +445,9 @@ export function harnessTitle(): (Node | null)[] | undefined {
 
 export function harnessesPage() {
   const home = state.home;
-  if (!home) return notRead();
   // A harness no longer managed (uninstalled, or its switch turned off) falls back to the list (harnessTabShown agrees); a home switch already closed any open harness (accept()).
-  const snapshot = openSnapshot(home);
+  const snapshot = home && openSnapshot(home);
   const file = manageCardFile(snapshot ? undefined : home);
+  if (!home) return notRead();
   return snapshot ? oneHarness(snapshot, home) : everyHarness(home, file);
 }

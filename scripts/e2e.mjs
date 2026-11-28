@@ -1737,22 +1737,32 @@ async function manageFlow() {
   await asking();
   same('pressed again, the switch reads afresh: the hand edit counted, without a Refresh', await a.text('#manage-codex-cli-text'), counted);
   await shotAt(a, 'question-overwrite-860-light', SMALLEST, 'light');
-  // The one named item gets the file mark, opening Central Knot's version under its card's row without changing card heights; Escape closes the panel first, then the question.
-  const cardHeights = async (width, height) => {
+  // The one named item gets the file mark, opening Central Knot's version under its card's row without moving or resizing cards; Escape closes the panel first, then the question.
+  const cardRects = async (width, height) => {
     await sizeTo(a, width, height);
-    return a.run(`[...document.querySelectorAll('.harness-card')].map(el => Math.round(el.getBoundingClientRect().height))`);
+    return a.run(`[...document.querySelectorAll('.harness-card')].map(el => { const r = el.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.width), Math.round(r.height)]; })`);
   };
-  const before1316 = await cardHeights(1316, 819), before860 = await cardHeights(...SMALLEST);
+  const before1728 = await cardRects(1728, 1117), before1316 = await cardRects(1316, 819), before860 = await cardRects(...SMALLEST);
   if (shots) { await a.run(`document.getElementById('harness-card-codex-cli')?.scrollIntoView({ block: 'end' })`); await shotAt(a, 'question-mark-860-light', SMALLEST, 'light'); await sizeTo(a, ...SMALLEST); }
   await a.click('#harness-card-codex-cli .manage-question #file-skills-standup');
   await waitHistory(a, () => a.run(`!!document.querySelector('#file-panel-harnesses pre.content')?.textContent?.trim()`));
   const panelText = await a.text('#file-panel-harnesses pre.content') ?? '';
   check('pressing the named item’s mark opens Central Knot’s version, never the left-out tool’s copy',
     panelText.includes('Read the commits. Write what shipped') && !panelText.includes('Edited in Codex while it was left out.'), panelText);
-  same('with the panel open at 860, nothing is cut off and card heights stay unchanged', [await cardHeights(...SMALLEST), await a.run(CUT_OFF)], [before860, []]);
+  same('the asking card carries the anchored accent edge and the question leaves room under the mark',
+    await a.run(`(() => {
+      const codex = getComputedStyle(document.getElementById('harness-card-codex-cli')).boxShadow;
+      const claude = getComputedStyle(document.getElementById('harness-card-claude-cli')).boxShadow;
+      const lh = parseFloat(getComputedStyle(document.getElementById('manage-codex-cli-text')).lineHeight);
+      const mh = Math.round(document.getElementById('file-skills-standup').getBoundingClientRect().height);
+      return [codex.includes('3px 0px 0px'), codex !== claude, lh >= mh + 2];
+    })()`), [true, true, true]);
+  same('with the panel open at 860, nothing is cut off and card geometry stays unchanged', [await cardRects(...SMALLEST), await a.run(CUT_OFF)], [before860, []]);
   await shotAt(a, 'question-panel-860-light', SMALLEST, 'light');
-  same('with the panel open at 1316, nothing is cut off and card heights stay unchanged', [await cardHeights(1316, 819), await a.run(CUT_OFF)], [before1316, []]);
+  same('with the panel open at 1316, nothing is cut off and card geometry stays unchanged', [await cardRects(1316, 819), await a.run(CUT_OFF)], [before1316, []]);
   await shotAt(a, 'question-panel-1316-dark', [1316, 819], 'dark');
+  same('with the panel open at 1728, nothing is cut off and card geometry stays unchanged', [await cardRects(1728, 1117), await a.run(CUT_OFF)], [before1728, []]);
+  await shotAt(a, 'question-panel-1728-light', [1728, 1117], 'light');
   await fullSize(a);
   await a.press('Escape');
   same('first Escape closes only the file panel and returns focus to its mark', [await a.exists('#file-panel-harnesses'), await a.exists('#manage-codex-cli-text'), await a.run(`document.activeElement?.id`)], [false, true, 'file-skills-standup']);

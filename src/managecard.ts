@@ -66,14 +66,22 @@ type Question = { tool: HarnessId; home: string; at: string; read?: Forecast | {
  */
 let question: Question | undefined;
 export const forgetManageQuestion = () => { question = undefined; };
-/** Harnesses as a file panel's place (filepanel.ts pagePlace), called on every Harnesses draw so placePanel forgets closed marks. */
+/** The open Manage question when it is showing for `tool` at `at` in `home` (present on a card, still left out, switch unlocked). */
+const openQuestion = (home: HomeView, tool: HarnessId, at: string) =>
+  question && question.tool === tool && question.at === at && question.home === home.home && !manageLocked(home)
+  && !home.sync.managed.includes(tool) && (at !== CARD || home.sync.present.includes(tool)) ? question : undefined;
+/** Harnesses as a file panel's place (filepanel.ts pagePlace). */
 const manageFiles = pagePlace('harnesses');
+/**
+ * The open card question's file mark and open panel for Harnesses (called on every Harnesses draw so placePanel forgets closed
+ * marks; pass undefined when the list is not drawn, such as no home yet or a single harness's page).
+ */
 export function manageCardFile(home?: HomeView): { tool?: HarnessId; mark?: HTMLElement; panel?: HTMLElement } {
-  const one = home && question?.at === CARD && question.home === home.home && !manageLocked(home) && home.sync.present.includes(question.tool)
-    && !home.sync.managed.includes(question.tool) && question.read && 'counts' in question.read ? namedItem(question.read.counts) : undefined;
+  const open = home && question ? openQuestion(home, question.tool, CARD) : undefined;
+  const one = open?.read && 'counts' in open.read ? namedItem(open.read.counts) : undefined;
   const mark = one ? itemFile(manageFiles, pageOfPart[one.kind], one.key) : undefined;
   const file = placePanel(manageFiles, [mark]);
-  return mark ? { tool: question!.tool, mark: mark.mark, panel: file && file.mark === mark ? file.panel : undefined } : {};
+  return mark ? { tool: open!.tool, mark: mark.mark, panel: file?.panel } : {};
 }
 /** A part of a question by id (on a card `manage-<tool>-<part>`, on History `history-manage-<part>-<entry>`), and what opened it. */
 const partId = (open: Question, part: 'text' | 'cancel' | 'confirm' | 'close' | 'retry') => (open.at === CARD ? `manage-${open.tool}-${part}` : `history-manage-${part}-${open.at}`);
@@ -100,7 +108,10 @@ export async function askManage(tool: HarnessId, at: string) {
   show({ ...open, read: read ?? { failed: `Couldn’t read what managing ${names[tool]} would do. Nothing was changed.` } });
 }
 
-/** Cancel or Close, or Escape while one is open: the question closes, and the focus goes back to what opened it. */
+/**
+ * Cancel or Close, or Escape while one is open: the question closes, and the focus goes back to what opened it. On Harnesses,
+ * an open file panel under the question takes Escape first (filepanel.ts pagePlace); on History, the question takes Escape first.
+ */
 function closeQuestion() {
   const open = question;
   if (!open) return;
@@ -110,6 +121,7 @@ function closeQuestion() {
 }
 if (typeof document !== 'undefined') {
   document.addEventListener('keydown', event => {
+    // Panel first on Harnesses (filepanel.ts window listener closes it); question first on History.
     if (event.key !== 'Escape' || event.defaultPrevented || !question || (state.page === 'harnesses' && manageFiles.view.openFile)) return;
     event.preventDefault();
     closeQuestion();
@@ -121,8 +133,8 @@ if (typeof document !== 'undefined') {
  * nothing. On History it names the tool first (a card is the tool's own); a read that failed offers Close and Try again.
  */
 export function manageQuestion(home: HomeView, tool: HarnessId, at: string, fileMark?: HTMLElement): HTMLElement | null {
-  const open = question, read = open?.read, name = names[tool];
-  if (!open || open.tool !== tool || open.at !== at || open.home !== home.home || manageLocked(home) || home.sync.managed.includes(tool)) return null;
+  const open = openQuestion(home, tool, at), read = open?.read, name = names[tool];
+  if (!open) return null;
   const failed = read && 'failed' in read ? read.failed : undefined;
   const text = !read ? `Reading ${name}…` : 'failed' in read ? read.failed : joiningWords(home, tool, read, at !== CARD, fileMark);
   const act = (part: 'cancel' | 'close' | 'retry' | 'confirm', label: string, onclick: () => void) =>
