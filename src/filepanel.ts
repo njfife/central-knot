@@ -133,17 +133,18 @@ const readDefinition = (key: string, hash: string): Promise<PanelRead | null> =>
 const readStored = (of: PageKind, key: string, hash: string, file: string): Promise<PanelRead | null> => (of === 'agents' ? readDefinition(key, hash)
   : of === 'mcp' ? window.centralKnot.serverStored(key, hash) : window.centralKnot.skillVersionFile(key, hash, file));
 /**
- * Which version of Central Knot's text a panel shows, and what it says where its read brings nothing: a row's is its item's
- * current version; a kept one, the last version of an item Central Knot deleted. Said by a page's panel's header (`now`: each
- * part before one of the header's dots, the first after `glyph`, the bin History's delete rows have), a page's mark's hover
- * (`open`), the text's accessible name, a table's panel's too (`owner`), and the panel where the read brings nothing (`unread`,
- * a tool's copy's too). A kept version's read brings nothing where it was let go (skillstore.ts pruneDeleted, at History's
- * days), and also where its file is there but can't be read: the read doesn't say which.
+ * Which version of Central Knot's text a panel shows, and what it says where its read brings nothing (`nothing`: it came back
+ * empty): a row's is its item's current version; a kept one, the last version of an item Central Knot deleted, or, where its
+ * read brought nothing, only that the item is deleted. Said by a page's panel's header (`now`: each part before one of the
+ * header's dots, the first after `glyph`, the bin History's delete rows have; `file`: whether it names the file shown), a page's
+ * mark's hover (`open`), the text's accessible name, a table's panel's too (`owner`), and the panel where the read brings
+ * nothing (`unread`, a tool's copy's too). A kept version's read brings nothing where it was let go (skillstore.ts
+ * pruneDeleted, at History's days), and also where its file is there but can't be read: the read doesn't say which.
  */
-const versionWords = (target: FileTarget): { now: string[]; glyph?: IconName; open: string; owner: string; unread: string } => (isKept(target)
-  ? { now: ['deleted', 'last version kept'], glyph: 'trash-2', open: 'Open the last version kept', owner: 'Central Knot’s last version kept',
-    unread: 'Central Knot no longer keeps this version.' }
-  : { now: ['current version'], open: 'Open the current version', owner: 'Central Knot’s current version', unread: 'Its file couldn’t be read.' });
+const versionWords = (target: FileTarget, nothing = false): { now: string[]; glyph?: IconName; file: boolean; open: string; owner: string; unread: string } => (isKept(target)
+  ? { now: nothing ? ['deleted'] : ['deleted', 'last version kept'], glyph: 'trash-2', file: !nothing, open: 'Open the last version kept',
+    owner: 'Central Knot’s last version kept', unread: 'Central Knot no longer keeps this version.' }
+  : { now: ['current version'], file: true, open: 'Open the current version', owner: 'Central Knot’s current version', unread: 'Its file couldn’t be read.' });
 /**
  * Opens a file (`asked`; a skill's SKILL.md when none) of a stored, found, installed plugin or marketplace skill, an agent's file
  * in the chosen tool (or its definition), a server's entry in the chosen tool (its definition where `asked` is DEFINITION, or
@@ -218,7 +219,7 @@ export function fileButton(t: FilePlace, target: FileTarget) {
  */
 export function filePanel(t: FilePlace, target: FileTarget, open: OpenFile, bare = false, back?: HTMLElement) {
   const id = fileTargetId(target);
-  const name = fileTargetName(target), words = versionWords(target);
+  const name = fileTargetName(target), words = versionWords(target, open.loaded === null);
   const offered = storedOf(t, target), stored = !!offered && !open.copy;
   const copies = fileCopies(t, target);
   const activeAt = open.copy ? copies.findIndex(copy => copy.tool === open.copy!.tool && copy.rootLabel === open.copy!.rootLabel) : -1;
@@ -271,7 +272,7 @@ export function filePanel(t: FilePlace, target: FileTarget, open: OpenFile, bare
   const shows = isAgentRow(target) || keptDefinition(target) ? label : lead || h('span.file-open-tabs', { role: 'tablist', 'aria-label': `Files in ${name}` }, tabs.map(tab));
   return h(`div.details.details-file-only${bare ? '.details-bare' : ''}`, { role: 'region', 'aria-label': `File for ${name}` }, back ?? null, h('div.file-open-box', {},
     h('div.file-open-head', {}, t.named ? h('span.file-open-named', {}, h('strong.file-open-item', {}, name),
-      ...words.now.map((part, index) => h('span.file-open-now', {}, index || !words.glyph ? null : icon(words.glyph, 12), part)), shows) : shows,
+      ...words.now.map((part, index) => h('span.file-open-now', {}, index || !words.glyph ? null : icon(words.glyph, 12), part)), words.file ? shows : null) : shows,
       h('span.file-open-controls', {}, chooser, close)),
     ...body, foot.length || !t.named ? h('div.file-open-foot', {}, ...foot) : null));
 }
@@ -342,8 +343,10 @@ export function placePanel(place: PagePlace, shown: readonly (FileMark | undefin
 /**
  * Sizes the open file's box to what its scroll container (the list, the dock, a page) leaves under it, at most what is left once
  * its row (a table's, just before it; a page's, .file-anchored; elsewhere, the top of what scrolls) is at the container's top,
- * never under eight lines of its last block's text (an agent's definition: its prompt). A place's reveal (FilePlace) brings it
- * into view.
+ * never under eight lines of its last block's text (an agent's definition: its prompt), and one with no text (a sentence:
+ * Reading…, a version no longer kept, a file that couldn't be read) never under its own height. It is measured before the page
+ * puts its scroll back (renderer.ts renderWindow), so where it is then may not be where it is drawn. A place's reveal
+ * (FilePlace) brings it into view.
  */
 function settleFileBox(): void {
   const box = document.querySelector<HTMLElement>('.file-open-box'), scroller = box?.closest<HTMLElement>('.scroll');
@@ -355,7 +358,7 @@ function settleFileBox(): void {
   const end = Math.max(8, parseFloat(getComputedStyle(scroller).paddingBottom)) + (parseFloat(getComputedStyle(box.parentElement!).scrollMarginBottom) || 0);
   const room = Math.floor(sides.height - (top - from) - end), under = Math.floor(sides.bottom - top - end);
   const pre = [...box.querySelectorAll<HTMLElement>('pre.content')].at(-1), text = pre && getComputedStyle(pre);
-  const least = !pre || !text ? 0 : box.offsetHeight - pre.offsetHeight + 8 * parseFloat(text.lineHeight) + parseFloat(text.paddingTop) + parseFloat(text.paddingBottom);
+  const least = !pre || !text ? box.scrollHeight + box.offsetHeight - box.clientHeight : box.offsetHeight - pre.offsetHeight + 8 * parseFloat(text.lineHeight) + parseFloat(text.paddingTop) + parseFloat(text.paddingBottom);
   box.style.maxHeight = `${Math.ceil(Math.max(least, under >= least ? Math.min(under, room) : room))}px`;
 }
 afterLayout(settleFileBox);

@@ -81,7 +81,7 @@ test('a mark only for an item Central Knot holds now; a page that opens found co
 const allOf = (node: FakeNode | undefined, match: (el: FakeNode) => boolean): FakeNode[] => (!node ? []
   : [...(match(node) ? [node] : []), ...(node.children ?? []).flatMap(child => (child && typeof child === 'object' ? allOf(child as FakeNode, match) : []))]);
 
-test('a deleted item named twice has a mark of its own (keptFile) at each name: it opens the last version Central Knot kept at the one pressed, said with the bin, never a tool’s copy of that name; a version let go says so', async () => {
+test('a deleted item named twice has a mark of its own (keptFile) at each name: it opens the last version Central Knot kept at the one pressed, said with the bin, never a tool’s copy of that name; a version let go says so, its header only that the item is deleted', async () => {
   state.home = homeAt('/tmp/filepanel-kept');
   const kept = (key: string) => draw(occurrenceId => keptFile(place, 'skills', key, occurrenceId));
   let page = kept('gone');
@@ -101,7 +101,9 @@ test('a deleted item named twice has a mark of its own (keptFile) at each name: 
   kept('old').marks[0]!.click();
   await new Promise(resolve => setTimeout(resolve));
   page = kept('old');
-  assert.equal(textOf(findNode(page.panel, el => el.classList.contains('file-open-state'))), 'Central Knot no longer keeps this version.');
+  const letGo = allOf(page.panel, el => el.classList.contains('file-open-now'));
+  assert.deepEqual([letGo.map(textOf), !!findNode(letGo[0], el => el.tag === 'svg'), !!findNode(page.panel, el => el.classList.contains('file-tab')),
+    textOf(findNode(page.panel, el => el.classList.contains('file-open-state')))], [['deleted'], true, false, 'Central Knot no longer keeps this version.']);
   page.marks[0]!.click();
 });
 
