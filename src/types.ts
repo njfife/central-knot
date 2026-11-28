@@ -867,8 +867,10 @@ export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: 
   /** Loaded live from a folder marketplace, nothing copied. */ live?: boolean;
   items: PluginItem[];
   /** Its hooks as that tool's installed copy declares them; absent when it has none or `problem`. */ hooks?: DeclaredHook[];
+  /** Tool settings disable all hooks (`disableAllHooks`, `[features] hooks = false`): declared hooks don't run now. */ hooksOff?: boolean;
   /** Each hooks file of that copy that couldn't be read as JSON (PluginContents hooksUnread). */ hooksUnread?: string[];
   /** Why what it brings couldn't be read; then `items` is empty. */ problem?: string;
+  /** Whether the copy's files are missing from where the tool records them, or present but unreadable. */ problemKind?: 'missing' | 'unreadable';
   /** Its marketplace is on the Plugins page (it is added in a tool), so the plugin's page can be opened there. */ listed: boolean;
   /** Where that tool has its marketplace from, as it records it. */ source?: string }
 

@@ -314,9 +314,11 @@ test('a main switch never falls back to the whole plugin where the item’s own 
   assert.deepEqual(turnEvery([item(held, 'skill', 'one'), ...live], false).left, ['Still on in Codex: Codex’s skills.config is written inline.']);
 });
 
-test('installedImpact counts only parts on in that tool now and its hooks, leaving out parts already off', () => {
+test('installedImpact counts only parts on in that tool now and its hooks, leaving out parts already off and disabled hooks', () => {
   const hook = { declaredIn: 'hooks/hooks.json', event: 'SessionStart', at: 0 };
   const claude = installed('claude-cli', { serversOff: ['wiki'], agentsOff: ['helper'], hooks: [hook, { ...hook, at: 1 }] });
   assert.equal(installedImpact(claude).words, '2 skills, 1 MCP server and 2 hooks');
+  assert.deepEqual([installedImpact(claude, undefined, true).hooks, installedImpact(claude, undefined, true).words], [0, '2 skills and 1 MCP server']);
+  assert.deepEqual([installedImpact({ ...claude, hooksOff: true }).hooks, installedImpact({ ...claude, hooksOff: true }).words], [0, '2 skills and 1 MCP server']);
   assert.equal(installedImpact(installed('claude-cli', { items: [] })).words, '');
 });

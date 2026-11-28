@@ -37,6 +37,12 @@ export function putPageData<T>(slot: PageData<T>, data: T): void {
   slot.state = 'ready';
 }
 
+/** A re-read after an action failed: mark the slot failed (keeping earlier data as readPageData does) and drop older reads. */
+export function failPageData<T>(slot: PageData<T>): void {
+  slot.gen++;
+  slot.state = 'failed';
+}
+
 /** A new home: what was read belonged to the old one. The slot starts over, at reading, and replies on their way are dropped. */
 export function resetPageData<T>(slot: PageData<T>): void {
   slot.gen++;

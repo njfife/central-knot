@@ -37,7 +37,7 @@ const api = {
   applyAgents: (changes: Change[]) => { main.sent.push(`agent ${changes.map(change => `${change.key} ${change.on ? 'on' : 'off'}`).join()}`); return new Promise<PassResult>(done => main.passes.push(done)); },
   applyServers: (changes: Change[]) => { main.sent.push(`server ${changes.map(change => `${change.key} ${change.on ? 'on' : 'off'}`).join()}`); return new Promise<PassResult>(done => main.passes.push(done)); },
   restore: async (id: string) => { main.restored.push(id); return { results: [], reloads: [] }; },
-  plugins: async () => { main.reads.plugins++; return view; },
+  plugins: async (_fresh?: boolean, _readId?: number): Promise<PluginsView | null> => { main.reads.plugins++; return view; },
   refresh: async (): Promise<HomeView | null> => { main.reads.home++; main.duringHomeRead?.(); return null; },
   repo: async () => { main.followUps.repo++; return null; },
   sources: async () => { main.followUps.sources++; return null; },
@@ -82,7 +82,7 @@ const { settingsPage } = await import('../src/settingspage.ts');
 const { acting, announce, applyByKind, applyClick, askFlash, busy, closeResult, deleteProfileDef, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, profileEndedLine, profilesBefore, saveProfileDef, selectOff, switchToProfile, whyKindReadOnly, whyReadOnly,
   loadHome, problemKey, queueClick, readAgain, restoreEvent, setHome, setRenderer, showPage, syncNow, tell, state: app } = await import('../src/app.ts');
 const { repo, repoPage } = await import('../src/repopage.ts');
-const { addMarketplace, applyPluginOps, clickOn, closeRun, forgetMarketplace, lastLines, market, pluginBusy, resetMarket, resultOn, runReloads, sessionOffId, shownPlugins, turnFromLine, turnPlugin, undoLabel, undoLast, undoOps, usePlugins, viewCurrent } = await import('../src/pluginstate.ts');
+const { addMarketplace, applyPluginOps, clickOn, closeRun, forgetMarketplace, lastLines, lineBox, market, pluginBusy, resetMarket, resultOn, runReloads, sessionOffId, shownPlugins, turnFromLine, turnPlugin, undoLabel, undoLast, undoOps, usePlugins, viewCurrent } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
 const { pin, rowId } = await import('../src/itemrow.ts');
 const { backgroundProblems, copyQuestion, headerNotices, libraryTable, listResult, openKind, theseOff, toTurnOff, turnTheseOff } = await import('../src/matrix.ts');
@@ -1388,81 +1388,192 @@ test('A run in two tools on Instructions, Claude Code refusing and Codex turning
   assert.deepEqual(drawnIn(), [false, true]);
 });
 
-test('pluginOffButton decides label, hover, reading/failed/cannot-act/waiting states, and wantView reads once per readId without trusting cached data after failure', async t => {
+test('pluginOffButton decides label, hover, hooksOff, wait/failed/cannot-act shapes, lineBox hides cached boxes during a read, and wantView invalidates a ready view once per readId', async t => {
   const hook = { declaredIn: '/h/hooks.json', event: 'SessionStart', at: 0, launch: { shell: 'echo a' } };
   const install = { tool: 'claude-cli', plugin: 'alpha', marketName: 'team', source: '/market', listed: true, items: [{ kind: 'skill', name: 'one', description: '' }], hooks: [hook] } as unknown as InstalledPlugin;
   assert.deepEqual(pluginOffButton(install, { current: true, readState: 'ready', box: { ticked: true }, canWrite: true }),
-    { label: 'Turn off alpha in Claude Code', title: 'Turns alpha off in Claude Code, with its 1 skill and 1 hook. Undo turns it on again.' });
-  assert.equal(pluginOffButton(install, { current: false, readState: 'reading' }).why, 'Reading…');
-  assert.equal(pluginOffButton(install, { current: false, readState: 'failed', box: { ticked: true } }).why, 'Marketplaces could not be read.');
-  assert.deepEqual(pluginOffButton(install, { current: true, readState: 'ready', box: { ticked: true, off: 'Full CLI reason.', line: 'No Claude Code command-line tool here' }, canWrite: true }),
-    { label: 'Turn off alpha in Claude Code', disabled: 'Full CLI reason.', why: 'No Claude Code command-line tool here' });
-  assert.equal(pluginOffButton(install, { current: true, readState: 'ready', box: { ticked: true, off: 'Preview only.' }, canWrite: false }).why, undefined);
-  assert.equal(pluginOffButton(install, { current: true, readState: 'ready', box: { ticked: false }, canWrite: true }).why, 'Reading…');
+    { kind: 'button', label: 'Turn off plugin in Claude Code', also: '1 skill and 1 hook', title: 'Turns alpha off in Claude Code, with its 1 skill and 1 hook. Undo turns it on again.' });
+  assert.deepEqual(pluginOffButton(install, { current: true, readState: 'ready', box: { ticked: true }, canWrite: true, hooksOff: true }),
+    { kind: 'button', label: 'Turn off plugin in Claude Code', also: '1 skill', title: 'Turns alpha off in Claude Code, with its 1 skill. Undo turns it on again.' });
+  assert.deepEqual(pluginOffButton(install, { current: false, readState: 'reading' }),
+    { kind: 'wait', label: 'Turn off plugin in Claude Code', disabled: 'Reading marketplaces…', why: 'Reading…' });
+  assert.deepEqual(pluginOffButton(install, { current: false, readState: 'failed', box: { ticked: true } }),
+    { kind: 'wait', label: 'Turn off plugin in Claude Code', disabled: 'Marketplaces could not be read.', why: 'Marketplaces could not be read.' });
+  const waitingClick = { state: 'waiting' as const, tool: 'claude-cli' as const, what: 'keep-out' as const, said: { waiting: 'Waiting to turn off in Claude Code', running: 'Turning off in Claude Code…' } };
+  assert.deepEqual(pluginOffButton(install, { current: true, readState: 'ready', box: { ticked: true }, canWrite: true, click: waitingClick }),
+    { kind: 'wait', label: 'Turn off plugin in Claude Code', disabled: 'Waiting to turn off in Claude Code', why: 'Waiting to turn off in Claude Code' });
+  assert.deepEqual(pluginOffButton(install, { current: true, readState: 'ready', box: { ticked: false }, canWrite: true, click: { ...waitingClick, state: 'ended' } }),
+    { kind: 'wait', label: 'Turn off plugin in Claude Code', disabled: 'Turning off in Claude Code…', why: 'Turning off in Claude Code…' });
+  // Cannot-act: unified shape (kind: 'none', no dead button), with reason; files-gone/unreadable matched by plugin.problem kind, not text.
+  assert.deepEqual(pluginOffButton(install, { current: true, readState: 'ready', box: { ticked: true, off: 'Claude Code’s command-line tool wasn’t found.', line: 'No Claude Code command-line tool here' }, canWrite: true }),
+    { kind: 'none', why: 'Claude Code’s command-line tool wasn’t found.' });
+  assert.deepEqual(pluginOffButton({ ...install, problem: 'Claude Code lists it, but its files are not where it records them.', problemKind: 'missing' }, { current: true, readState: 'ready', box: { ticked: true, off: 'Anything.' }, canWrite: true }),
+    { kind: 'none', why: 'Central Knot can’t turn it off because its files are not there.' });
+  assert.deepEqual(pluginOffButton({ ...install, problem: 'Its files couldn’t be read.', problemKind: 'unreadable' }, { current: true, readState: 'ready', box: { ticked: true, off: 'Anything.' }, canWrite: true }),
+    { kind: 'none', why: 'Central Knot can’t turn it off because its files couldn’t be read.' });
+  assert.deepEqual(pluginOffButton({ ...install, listed: false }, { current: true, readState: 'ready', canWrite: true }),
+    { kind: 'none', why: 'Not from a marketplace Central Knot or a tool here lists, so it can’t be turned off here. Claude Code’s own plugin commands turn it off.' });
+  assert.deepEqual(pluginOffButton(install, { current: true, readState: 'ready', box: { ticked: true, off: 'Preview only.' }, canWrite: false }), { kind: 'none' });
+  // Start from a ready, actionable view (readId 6), then bump readId to 7: wantView immediately invalidates cached data, lineBox hides cached boxes while reading, and a failed read never trusts cache.
   start();
   onPage('instructions');
   claudeStrip();
-  app.home!.readId = 7;
-  let resolveRead!: (v: PluginsView | null) => void;
-  t.mock.method(api, 'plugins', () => { main.reads.plugins++; return new Promise<PluginsView | null>(done => { resolveRead = done; }); });
-  const id = sessionOffId('claude-cli', '/market', 'alpha');
-  const first = instructionCard(app.instructions.data![0]!);
+  const ready = { ...view, tools: ['claude-cli'], clis: { 'claude-cli': true },
+    marketplaces: [{ ...entry, states: { alpha: { 'claude-cli': { state: 'installed' } } },
+      switches: { alpha: { entry: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: [] },
+        tools: { 'claude-cli': { wanted: true, has: 'whole', takes: true } } } } }] } as unknown as PluginsView;
+  let resolveRead: ((v: PluginsView | null) => void) | undefined;
+  t.after(() => resolveRead?.(null));
+  const pluginsMock = t.mock.method(api, 'plugins', async () => { main.reads.plugins++; return ready; });
+  app.home!.readId = 6;
   instructionCard(app.instructions.data![0]!);
   await settled();
-  assert.deepEqual([main.reads.plugins, findById(first, id)?.attrs.disabled, textOf(first).includes('Reading…')], [1, '', true]);
-  resolveRead(null);
+  const id = sessionOffId('claude-cli', '/market', 'alpha');
+  const actionable = instructionCard(app.instructions.data![0]!);
+  assert.deepEqual([viewCurrent(), 'disabled' in (findById(actionable, id)?.attrs ?? {}), !!lineBox('alpha', 'team', '/market', 'claude-cli').box], [true, false, true]);
+  pluginsMock.mock.mockImplementation(() => { main.reads.plugins++; return new Promise<PluginsView | null>(done => { resolveRead = done; }); });
+  app.home!.readId = 7;
+  const first = instructionCard(app.instructions.data![0]!);
+  instructionCard(app.instructions.data![0]!);
+  assert.equal(lineBox('alpha', 'team', '/market', 'claude-cli').box, undefined);
+  await settled();
+  assert.deepEqual([main.reads.plugins, findById(first, id)?.attrs.disabled, textOf(first).includes('Reading…')], [2, '', true]);
+  resolveRead?.(null);
+  resolveRead = undefined;
   await settled();
   const afterFail = instructionCard(app.instructions.data![0]!);
-  assert.deepEqual([viewCurrent(), findById(afterFail, id)?.attrs.disabled, textOf(afterFail).includes('Marketplaces could not be read.')], [false, '', true]);
+  assert.deepEqual([viewCurrent(), lineBox('alpha', 'team', '/market', 'claude-cli').box, findById(afterFail, id)?.attrs.disabled, textOf(afterFail).includes('Marketplaces could not be read.')], [false, undefined, '', true]);
 });
 
-test('Same plugin in two tools locks both buttons while busy, keeps pressed group disabled until home read, and moves focus to Undo/band and back to returned button', async t => {
+test('Same plugin in two tools locks both while busy, keeps pressed group disabled until home read, focuses band on failure, keeps other buttons steady (no Reading blink), and shows parts in band', async t => {
   start();
   onPage('instructions');
-  const { alpha } = claudeStrip();
-  const codexInstall = { ...alpha, tool: 'codex-cli' as const };
+  const { alpha, beta } = claudeStrip();
+  const alphaWithSkill = { ...alpha, items: [{ kind: 'skill', name: 'one', description: '' }] } as unknown as InstalledPlugin;
+  const codexInstall = { ...alphaWithSkill, tool: 'codex-cli' as const };
   const codexFile = { tool: 'codex-cli', path: '/home/.codex/AGENTS.md', exists: true, text: '', hash: 'h2', readers: 'Codex', notes: [], versions: [] } as unknown as InstructionFile;
-  app.home!.pluginItems = [alpha, codexInstall];
+  app.home!.pluginItems = [alphaWithSkill, beta, codexInstall];
   app.home!.sync.managed = ['claude-cli', 'codex-cli'];
   app.instructions.data = [app.instructions.data![0]!, codexFile];
   const readyView = (claudeOff: boolean) => ({ ...view, tools: ['claude-cli', 'codex-cli'], clis: { 'claude-cli': true, 'codex-cli': true },
-    marketplaces: [{ ...entry, states: { alpha: { 'claude-cli': { state: 'installed', off: claudeOff }, 'codex-cli': { state: 'installed' } } },
-      switches: { alpha: { entry: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: claudeOff ? ['claude-cli'] : [] },
-        tools: { 'claude-cli': { wanted: !claudeOff, has: 'whole', takes: true }, 'codex-cli': { wanted: true, has: 'whole', takes: true } } } } }] }) as unknown as PluginsView;
-  market.read.state = 'ready';
-  market.read.data = readyView(false);
-  const claudeId = sessionOffId('claude-cli', '/market', 'alpha'), codexId = sessionOffId('codex-cli', '/market', 'alpha');
-  let nextView = readyView(false), hasUndo = false;
+    marketplaces: [{ ...entry, states: { alpha: { 'claude-cli': { state: 'installed', off: claudeOff }, 'codex-cli': { state: 'installed' } }, beta: { 'claude-cli': { state: 'installed' } } },
+      switches: {
+        alpha: { entry: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: claudeOff ? ['claude-cli'] : [] },
+          tools: { 'claude-cli': { wanted: !claudeOff, has: 'whole', takes: true }, 'codex-cli': { wanted: true, has: 'whole', takes: true } } },
+        beta: { entry: { id: 'e2', source: '/market', marketName: 'team', plugin: 'beta', on: true, except: [] },
+          tools: { 'claude-cli': { wanted: true, has: 'whole', takes: true } } },
+      } }] }) as unknown as PluginsView;
+  let nextView = readyView(false);
   t.mock.method(api, 'plugins', async () => { main.reads.plugins++; return nextView; });
+  app.home!.readId = 10;
+  instructionCard(app.instructions.data[0]!);
+  await settled();
+  const claudeId = sessionOffId('claude-cli', '/market', 'alpha'), betaId = sessionOffId('claude-cli', '/market', 'beta'), codexId = sessionOffId('codex-cli', '/market', 'alpha');
   const focused: string[] = [];
   t.mock.method(document, 'getElementById', (id: string) => id === 'announcement' ? announcement
-    : (id === 'plugins-result' || (id === 'plugins-undo' && hasUndo) || id === claudeId) ? { ...element(), id, focus() { focused.push(id); } } : null);
+    : id === 'plugins-result' ? { ...element(), id, focus() { focused.push(id); } } : null);
   (document as unknown as { activeElement: unknown }).activeElement = document.body;
   t.after(() => { (document as unknown as { activeElement: unknown }).activeElement = null; });
-  // Failure with no Undo focuses #plugins-result (which has tabindex=-1).
+  // Failure with no Undo focuses #plugins-result (which has tabindex=-1) and does not append "with its ...".
   findById(instructionCard(app.instructions.data[0]!), claudeId)?.onclick();
   await main.answer(turnedOff('claude-cli', 'failed'));
-  assert.deepEqual([focused.at(-1), findById(instructionCard(app.instructions.data[0]!), 'plugins-result')?.attrs.tabindex], ['plugins-result', '-1']);
-  // Press on Claude Code locks both buttons while busy; before home read removes the group, pressed button stays disabled while Codex stays live.
-  hasUndo = true;
+  assert.deepEqual([focused.at(-1), findById(instructionCard(app.instructions.data[0]!), 'plugins-result')?.attrs.tabindex, textOf(instructionCard(app.instructions.data[0]!)).includes('with its')], ['plugins-result', '-1', false]);
+  // Press on Claude Code locks both alpha buttons while busy; before home read removes the group, pressed button stays disabled while Codex and beta stay live; after home read bumps readId, beta never blinks Reading….
   nextView = readyView(true);
   findById(instructionCard(app.instructions.data[0]!), claudeId)?.onclick();
   assert.deepEqual([findById(instructionCard(app.instructions.data[0]!), claudeId)?.attrs.disabled, findById(instructionCard(codexFile), codexId)?.attrs.disabled], ['', '']);
-  let holdHome!: () => void;
-  const refreshMock = t.mock.method(api, 'refresh', () => { main.reads.home++; return new Promise<HomeView | null>(done => { holdHome = () => done(null); }); });
+  let holdHome: (() => void) | undefined;
+  t.after(() => holdHome?.());
+  t.mock.method(api, 'refresh', () => { main.reads.home++; return new Promise<HomeView | null>(done => { holdHome = () => done({ ...app.home!, readId: 11, pluginItems: [{ ...alphaWithSkill, off: true }, beta, codexInstall] } as HomeView); }); });
   await main.answer(turnedOff('claude-cli'));
   assert.deepEqual([findById(instructionCard(app.instructions.data[0]!), claudeId)?.attrs.disabled, 'disabled' in (findById(instructionCard(codexFile), codexId)?.attrs ?? {})], ['', false]);
-  app.home!.pluginItems = [{ ...alpha, off: true }, codexInstall];
-  holdHome();
+  const readsBeforeHome = main.reads.plugins;
+  holdHome?.();
+  holdHome = undefined;
   await settled();
-  assert.equal(focused.at(-1), 'plugins-undo');
-  onPage('plugins');
+  const cardAfter = instructionCard(app.instructions.data[0]!);
+  assert.deepEqual([
+    'disabled' in (findById(cardAfter, betaId)?.attrs ?? {}),
+    textOf(cardAfter).includes('Reading…'),
+    main.reads.plugins,
+    textOf(instructionBands()).includes('alpha: turned off in Claude Code, with its 1 skill and 1 hook.'),
+  ], [false, false, readsBeforeHome, true]);
+});
+
+test('Failed marketplaces re-read after a press marks the view failed, blocks a second press before home read, and keeps the first Undo', async t => {
+  start();
   onPage('instructions');
-  nextView = readyView(false);
-  refreshMock.mock.mockImplementation(async () => { main.reads.home++; app.home!.pluginItems = [alpha, codexInstall]; return null; });
+  claudeStrip();
+  const ready = { ...view, tools: ['claude-cli'], clis: { 'claude-cli': true },
+    marketplaces: [{ ...entry, states: { alpha: { 'claude-cli': { state: 'installed' } } },
+      switches: { alpha: { entry: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: [] },
+        tools: { 'claude-cli': { wanted: true, has: 'whole', takes: true } } } } }] } as unknown as PluginsView;
+  const pluginsMock = t.mock.method(api, 'plugins', async () => { main.reads.plugins++; return ready; });
+  app.home!.readId = 20;
+  instructionCard(app.instructions.data![0]!);
+  await settled();
+  const id = sessionOffId('claude-cli', '/market', 'alpha');
+  let holdHome: (() => void) | undefined;
+  t.after(() => holdHome?.());
+  t.mock.method(api, 'refresh', () => { main.reads.home++; return new Promise<HomeView | null>(done => { holdHome = () => done(null); }); });
+  pluginsMock.mock.mockImplementation(async () => { main.reads.plugins++; return null; });
+  findById(instructionCard(app.instructions.data![0]!), id)?.onclick();
+  await main.answer(turnedOff('claude-cli'));
+  const cardBetween = instructionCard(app.instructions.data![0]!);
+  assert.deepEqual([market.read.state, viewCurrent(), findById(cardBetween, id)?.attrs.disabled, textOf(cardBetween).includes('Marketplaces could not be read.')], ['failed', false, '', true]);
+  // A second click while failed does not run or replace the first press's Undo.
+  const sentBefore = main.sent.length;
+  findById(cardBetween, id)?.onclick();
+  await settled();
+  assert.deepEqual([main.sent.length, undoOps('instructions').length > 0], [sentBefore, true]);
+  holdHome?.();
+  holdHome = undefined;
+  await settled();
+});
+
+test('Undo reads the home before marketplaces for the returned readId, and with two plugins off reverses only the latest while focusing its button', async t => {
+  start();
+  onPage('instructions');
+  const { alpha, beta } = claudeStrip();
+  app.home!.pluginItems = [alpha, beta];
+  const viewWith = (aOff: boolean, bOff: boolean) => ({ ...view, tools: ['claude-cli'], clis: { 'claude-cli': true },
+    marketplaces: [{ ...entry, states: { alpha: { 'claude-cli': { state: 'installed', off: aOff } }, beta: { 'claude-cli': { state: 'installed', off: bOff } } },
+      switches: {
+        alpha: { entry: { id: 'e1', source: '/market', marketName: 'team', plugin: 'alpha', on: true, except: aOff ? ['claude-cli'] : [] }, tools: { 'claude-cli': { wanted: !aOff, has: 'whole', takes: true } } },
+        beta: { entry: { id: 'e2', source: '/market', marketName: 'team', plugin: 'beta', on: true, except: bOff ? ['claude-cli'] : [] }, tools: { 'claude-cli': { wanted: !bOff, has: 'whole', takes: true } } },
+      } }] }) as unknown as PluginsView;
+  let nextView = viewWith(false, false);
+  const order: string[] = [];
+  const pluginsMock = t.mock.method(api, 'plugins', async (_fresh?: boolean, readId?: number) => { order.push(`plugins:${readId}`); main.reads.plugins++; return nextView; });
+  app.home!.readId = 30;
+  instructionCard(app.instructions.data![0]!);
+  await settled();
+  const alphaId = sessionOffId('claude-cli', '/market', 'alpha'), betaId = sessionOffId('claude-cli', '/market', 'beta');
+  let homeAfter = { ...app.home!, readId: 31, pluginItems: [{ ...alpha, off: true }, beta] } as HomeView;
+  const refreshMock = t.mock.method(api, 'refresh', async () => { order.push(`home:${homeAfter.readId}`); main.reads.home++; return homeAfter; });
+  // Turn alpha off, then beta off in the same run.
+  nextView = viewWith(true, false);
+  findById(instructionCard(app.instructions.data![0]!), alphaId)?.onclick();
+  await main.answer(turnedOff('claude-cli'));
+  nextView = viewWith(true, true);
+  homeAfter = { ...app.home!, readId: 32, pluginItems: [{ ...alpha, off: true }, { ...beta, off: true }] } as HomeView;
+  findById(instructionCard(app.instructions.data![0]!), betaId)?.onclick();
+  await main.answer({ done: [{ source: '/market', marketName: 'team', plugin: 'beta', tool: 'claude-cli', action: 'plugin-off', report: report('plugin-off', 'Turned off.') }],
+    before: null, back: [{ source: '/market', marketName: 'team', plugin: 'beta', tool: 'claude-cli', action: 'plugin-on' }] });
+  assert.match(textOf(instructionBands()), /alpha: turned off in Claude Code, with its 1 hook; beta: turned off in Claude Code, with its 1 hook\./);
+  // Now Undo: home (readId 33) must be read BEFORE plugins(false, 33), restoring beta while alpha stays off and focusing beta's button.
+  order.length = 0;
+  nextView = viewWith(true, false);
+  homeAfter = { ...app.home!, readId: 33, pluginItems: [{ ...alpha, off: true }, beta] } as HomeView;
+  refreshMock.mock.mockImplementation(async () => { order.push(`home:${homeAfter.readId}`); main.reads.home++; return homeAfter; });
+  pluginsMock.mock.mockImplementation(async (_fresh?: boolean, readId?: number) => { order.push(`plugins:${readId}`); main.reads.plugins++; return nextView; });
+  const focused: string[] = [];
+  t.mock.method(document, 'getElementById', (id: string) => id === 'announcement' ? announcement
+    : id === betaId ? { ...element(), id, focus() { focused.push(id); } } : null);
   undoLast();
   await settled();
-  assert.equal(focused.at(-1), claudeId);
+  assert.deepEqual([order, main.sent.at(-1), focused.at(-1), app.home!.pluginItems?.filter(p => !p.off).map(p => p.plugin)],
+    [['home:33', 'plugins:33'], 'beta undone', betaId, ['beta']]);
 });
 
 test('On a tool’s Instructions tab the band follows the card shown there: a run in Claude Code made on Codex’s tab is said above its card', async () => {

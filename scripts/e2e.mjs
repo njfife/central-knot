@@ -18575,16 +18575,17 @@ esac
       await a.run(`[...document.querySelectorAll('.session-hook')].some(hook => /known only/.test(hook.textContent))`),
       await a.run(`(() => { const text = document.querySelector('#instructions-scroll')?.textContent ?? ''; const strip = [...document.querySelectorAll('.base-strip')].some(el => el.textContent.includes('matches the base')); return [...['shown as they are, not changed here', 'Only that tool reads these.'].filter(phrase => text.includes(phrase)), ...(strip ? ['matches the base'] : [])]; })()`)],
     ['Hooks that can add text', [], false, []]);
-  const headBtn = (stripId, groupName) => a.run(`(() => { const b = [...document.querySelectorAll('#${stripId} .session-group')].find(g => g.querySelector('.session-name')?.textContent === ${JSON.stringify(groupName)})?.querySelector('.session-head button'); return b ? { id: b.id, text: b.textContent, title: b.title, disabled: b.disabled } : null; })()`);
+  const headBtn = (stripId, groupName) => a.run(`(() => { const g = [...document.querySelectorAll('#${stripId} .session-group')].find(x => x.querySelector('.session-name')?.textContent === ${JSON.stringify(groupName)}); const b = g?.querySelector('.session-head button'); return b ? { id: b.id, text: b.textContent, title: b.title, disabled: b.disabled } : null; })()`);
+  const groupWhy = (stripId, groupName) => a.run(`([...document.querySelectorAll('#${stripId} .session-group')].find(x => x.querySelector('.session-name')?.textContent === ${JSON.stringify(groupName)})?.querySelector('.session-why')?.textContent ?? null)`);
   for (let tries = 0; tries < 100 && (await headBtn('session-claude-cli', 'release-helper'))?.disabled !== false; tries++) await wait(100);
   const helperHead = await headBtn('session-claude-cli', 'release-helper'), vanishedHead = await headBtn('session-claude-cli', 'vanished');
-  same('your own hooks say the file that holds them; a plugin’s button names the act and its parts on hover, and a plugin that can’t be turned off is disabled with its reason',
+  same('your own hooks say the file that holds them; a plugin’s button names the plugin act and its parts on hover, and a plugin that can’t be turned off shows its reason with no dead button',
     [await a.text('#session-claude-cli .session-in'), await a.run(`document.querySelector('#session-claude-cli .session-in .path-text')?.title`),
-      helperHead?.text, helperHead?.title, vanishedHead?.text, vanishedHead?.disabled, /not where it records them/.test(vanishedHead?.title ?? ''),
+      helperHead?.text, helperHead?.title, vanishedHead, await groupWhy('session-claude-cli', 'vanished'),
       await a.run(`[...document.querySelectorAll('#session-claude-cli .session-head button')].some(b => /Plugin’s page/.test(b.textContent))`)],
     [`in …${join(home, '.claude/settings.json').slice(home.length)}`, join(home, '.claude/settings.json'),
-      'Turn off release-helper in Claude Code', 'Turns release-helper off in Claude Code, with its 3 hooks. Undo turns it on again.',
-      'Turn off vanished in Claude Code', true, true, false]);
+      'Turn off plugin in Claude Code', 'Turns release-helper off in Claude Code, with its 3 hooks. Undo turns it on again.',
+      null, 'Central Knot can’t turn it off because its files are not there.', false]);
   same('on the card: the file, the base strip, the files read with it, this strip, then Earlier versions', await a.run(`(() => { const card = document.querySelector('article[aria-label="Claude Code instructions"]');
     const parts = ['.ins-body > :first-child', '.base-strip', '#ins-parts-claude-cli', '#session-claude-cli', 'details.ins-versions'].map(selector => card.querySelector(selector));
     return [parts.map(part => !!part), parts.every((part, at) => at === 0 || (parts[at - 1].compareDocumentPosition(part) & Node.DOCUMENT_POSITION_FOLLOWING))]; })()`), [[true, true, true, true, true], true]);
@@ -18775,15 +18776,19 @@ esac
   await a.click('#nav-instructions');
   await showStrips();
   same('Instructions keeps the same strips on return', [await a.run(`document.querySelector('.nav-row[aria-current=page]')?.id`), (await names('claude-cli')).length, (await names('codex-cli')).length], ['nav-instructions', 15, 1]);
-  // Turn off release-helper in Claude Code right from its group: band with Undo appears above cards (focused), Codex keeps its group; leaving and returning keeps Undo; Undo brings it back and restores focus.
+  // Turn off release-helper in Claude Code right from its group while scrolled down: band with parts and Undo appears above cards (focused) without jumping the scroller, Codex keeps its group; leaving and returning keeps Undo; Undo brings it back and restores focus.
   const helperOffId = (await headBtn('session-claude-cli', 'release-helper'))?.id;
+  await a.run(`document.getElementById(${JSON.stringify(helperOffId)})?.closest('.session-group')?.scrollIntoView({ block: 'start' })`);
+  await a.settle();
+  const scrollBefore = await a.run(`document.getElementById('instructions-scroll')?.scrollTop ?? 0`);
   await a.click(byId(helperOffId));
   for (let tries = 0; tries < 300 && (await a.run(`document.body.dataset.busy === 'true'`) || (await names('claude-cli')).includes('release-helper') || !(await a.exists('#plugins-undo'))); tries++) await wait(100);
   await a.settle();
-  same('turning off from Claude Code’s card runs disable alone, removes Claude Code’s group while Codex’s stays, shows the band with Undo and focuses Undo',
+  const scrollAfter = await a.run(`document.getElementById('instructions-scroll')?.scrollTop ?? 0`);
+  same('turning off from Claude Code’s card runs disable alone, removes Claude Code’s group while Codex’s stays, keeps scroll place, shows the band with its parts and Undo, and focuses Undo',
     [readNow(join(home, 'claude-calls.txt')).trim().split('\n'), (await names('claude-cli')).includes('release-helper'), (await names('claude-cli')).length, await names('codex-cli'),
-      /release-helper: turned off in Claude Code\./.test(await a.text('#plugins-result') ?? ''), await a.run(`document.activeElement?.id`)],
-    [[`plugin disable release-helper@${name} --scope user`], false, 14, ['release-helper'], true, 'plugins-undo']);
+      /release-helper: turned off in Claude Code, with its 3 hooks\./.test(await a.text('#plugins-result') ?? ''), await a.run(`document.activeElement?.id`), scrollBefore > 50 && Math.abs(scrollAfter - scrollBefore) <= 2],
+    [[`plugin disable release-helper@${name} --scope user`], false, 14, ['release-helper'], true, 'plugins-undo', true]);
   const pluginSnapshot = () => [readNow(join(home, '.claude/settings.json')), readNow(join(home, '.central-knot/plugins.json'))];
   const fromInstructions = pluginSnapshot();
   await a.click('#nav-overview');
@@ -18816,13 +18821,13 @@ esac
   same('Codex’s Instructions tab has its strip without standing prose', [(await groups('codex-cli'))[0]?.[1].length, await a.exists('#session-codex-cli .session-about')], [2, false]);
   same('nor does Codex’s Instructions tab carry another place’s result', [await a.exists('#plugins-result'), await a.exists('.plugin-run')], [false, false]);
   for (let tries = 0; tries < 100 && (await headBtn('session-codex-cli', 'release-helper'))?.disabled !== false; tries++) await wait(100);
-  const codexOffId = (await headBtn('session-codex-cli', 'release-helper'))?.id;
+  const codexHead = await headBtn('session-codex-cli', 'release-helper'), codexOffId = codexHead?.id;
   await a.click(byId(codexOffId));
   for (let tries = 0; tries < 300 && (await a.run(`document.body.dataset.busy === 'true'`) || !(await a.exists('#plugins-undo'))); tries++) await wait(100);
   await a.settle();
-  same('turning off on Codex’s Instructions tab removes its group, shows the band with Undo and focuses Undo',
-    [await a.exists('#session-codex-cli'), /release-helper: turned off in Codex\./.test(await a.text('#plugins-result') ?? ''), await a.run(`document.activeElement?.id`)],
-    [false, true, 'plugins-undo']);
+  same('turning off on Codex’s Instructions tab removes its group, shows the band with its parts and Undo, and focuses Undo',
+    [codexHead?.text, await a.exists('#session-codex-cli'), /release-helper: turned off in Codex, with its 2 hooks\./.test(await a.text('#plugins-result') ?? ''), await a.run(`document.activeElement?.id`)],
+    ['Turn off plugin in Codex', false, true, 'plugins-undo']);
   await a.click('#plugins-undo');
   for (let tries = 0; tries < 300 && (await a.run(`document.body.dataset.busy === 'true'`) || !(await a.exists('#session-codex-cli'))); tries++) await wait(100);
   await a.settle();
