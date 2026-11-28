@@ -1256,19 +1256,22 @@ export function profileSpan(line: string | undefined): HTMLElement | null {
 }
 
 /**
- * What the background passes could not do, as the latest read reports it (types.ts SyncView caughtUp), but what its × closed: each
- * failure; a removal that failed, where the read names its kind (`of`), only while the item's row still owes it (its plan removes it
- * from that tool: a later pass may have done it, or the item is On or deleted since). `retried`: such a removal Automatic sync
- * keeps trying, said in its own words (listResult).
+ * What the background passes could not do that still stands (types.ts SyncView caughtUp), dismissed or not: each failure; a
+ * removal that failed, where the read names its kind (`of`), only while the item's row still owes it (its plan removes it from
+ * that tool: a later pass may have done it, or the item is On or deleted since). `retried`: such a removal Automatic sync keeps
+ * trying, said in its own words (listResult). Both `backgroundProblems` and `app.ts setHome` ask this one rule.
  */
-export const backgroundProblems = () => (state.home?.sync.caughtUp ?? [])
-  .filter(entry => entry.outcome !== 'written' && entry.outcome !== 'removed' && !state.dismissed.has(problemKey(entry)))
+export const standingBackgroundProblems = () => (state.home?.sync.caughtUp ?? [])
+  .filter(entry => entry.outcome !== 'written' && entry.outcome !== 'removed')
   .flatMap(problem => {
     const removal = problem.removal && problem.outcome === 'failed' && problem.harness;
     if (!removal || !problem.of) return [{ problem, retried: false }];
     const owed = !!rowByKey(problem.of, itemKey(problem.item))?.plan?.remove.includes(problem.harness!);
     return owed ? [{ problem, retried: !!state.home?.syncOn }] : [];
   });
+
+/** What the background passes could not do, as the header shows it (listResult): `standingBackgroundProblems` minus what its × closed. */
+export const backgroundProblems = () => standingBackgroundProblems().filter(({ problem }) => !state.dismissed.has(problemKey(problem)));
 
 /**
  * What went wrong, under a result in the header (renderer.ts resultHere): its first line, on the header's second line, then
