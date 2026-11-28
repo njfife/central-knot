@@ -1,9 +1,10 @@
 // History: what Central Knot did, by itself (sync) or on a click (a switch, a profile switch, a Pull, …), newest first, with
-// Undo or Restore where kept content allows (CON-02, DEL-03), and History's Keep control (settingspage.ts historyWindowControl).
+// Undo or Restore where kept content allows (CON-02, DEL-03), a collapsible version list under the row when two or more kept
+// versions can be made current (each with its file mark and Use), and History's Keep control (settingspage.ts historyWindowControl).
 // Skills', MCP servers', agents' and Synchronize everything's entries are worded and decided by historyactions.ts; here are
 // profiles', base instructions', Manage switches' and pre-library entries, plus in-place folds for 3+ recorded tool lists (including all tools),
 // and the file mark after the name of an item Central Knot holds, its file opening under that row (historyFiles, fileMark: its
-// current version; of one it deleted, the last version kept). The name of one it no longer holds is muted and says so on its
+// current version; of one it deleted, the last version kept; of a kept choice, versionFile). The name of one it no longer holds is muted and says so on its
 // hover (gone), a deleted one's mark beside it.
 import { DAY_MS, plural, timesApart } from './model.ts';
 import { acting, homeTools, noToolManaged, rerender, restoreEvent, shownPath, state, touchedToolsPhrase } from './app.ts';
@@ -14,19 +15,41 @@ import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
 import { doneWords, entriesNow, entryKind, everythingAction, everythingSentence, keptOver, libraryAction, libraryEntry, librarySentence, versionChoices } from './historyactions.ts';
 import { inLibrary, libraryWords } from './libraryrow.ts';
 import { button, emptyState, fold, h, icon, rereadBand, type Child } from './dom.ts';
-import { itemFile, keptFile, pagePlace, placePanel } from './filepanel.ts';
+import { itemFile, keptFile, pagePlace, placePanel, versionFile, type FileMark } from './filepanel.ts';
 import type { IconName } from './icons.ts';
 import { askManage, manageLocked, manageQuestion, manageTool, resumeWords } from './managecard.ts';
 import { historyWindowControl } from './settingspage.ts';
 import type { HarnessId, HistoryEvent } from './types.ts';
 
 const who = (tool?: string) => (tool ? toolName(tool) : 'Central Knot');
-/** Folded tool lists open on History rows (`${event.id}-${index}` across redraws); cleared on page leave or home switch (app.ts). */
+/** Folded tool lists (`${event.id}-${index}`) and open version-choice lists (`event.id`) kept across redraws. */
 const openToolFolds = new Set<string>();
+const openVersionFolds = new Set<string>();
+/** Clears open History tool folds and version-choice lists on page leave or home switch (app.ts). */
 export function forgetHistoryFolds() {
   openToolFolds.clear();
+  openVersionFolds.clear();
 }
 type ToolFormat = (touched: string[], inHome: string[]) => string;
+interface RowChoice { choice: { tool: HarnessId; tools: HarnessId[]; hash: string }; mark?: FileMark }
+const whoseVersion = (tools: readonly HarnessId[]) => `${andList(tools.map(toolName))}’s version`;
+/** Moves keyboard focus after a version choice vanishes: the row's next Use, its single link, or the row itself. */
+function focusAfterUse(eventId: string, index: number) {
+  const list = document.getElementById(`history-versions-list-${eventId}`);
+  const uses = list ? [...list.querySelectorAll<HTMLElement>('.btn')] : [];
+  const row = document.getElementById(`history-row-${eventId}`);
+  const target = uses[Math.min(index, uses.length - 1)]
+    ?? row?.querySelector<HTMLElement>('.history-choice-one')?.querySelector<HTMLElement>('.btn')
+    ?? row;
+  if (target === row && row && !row.hasAttribute('tabindex')) row.tabIndex = -1;
+  target?.focus({ preventScroll: true });
+}
+const useChoice = (eventId: string, tool: HarnessId, hash: string, index: number) => (clickEvent: MouseEvent) => {
+  const byKey = clickEvent.detail === 0;
+  void restoreEvent(eventId, hash).then(() => {
+    if (byKey && state.page === 'history' && !document.getElementById(`history-${eventId}-${tool}`)) focusAfterUse(eventId, index);
+  });
+};
 
 /** The skill, MCP server or agent an entry is about, as Central Knot's library holds it now (deleted or not). */
 const itemOf = (event: HistoryEvent) => { const entry = libraryEntry(event); return entry && state.home?.[entry.kind].library?.[entry.key]; };
@@ -47,9 +70,9 @@ const undid = (event: HistoryEvent) => !!state.history.data?.some(other => other
  * on the library that the library has no words for keeps a general sentence below. `action`: the button profiles' and the base
  * instructions' entries offer (a library item's are libraryButtons).
  */
-function describe(event: HistoryEvent, formatTools: ToolFormat): { glyph: IconName; text: string; action?: string } {
+function describe(event: HistoryEvent, formatTools: ToolFormat, hasChoices = false): { glyph: IconName; text: string; action?: string } {
   const entry = libraryEntry(event);
-  const library = entry && librarySentence(pathsShown(event), libraryWords[entry.kind], state.home?.[entry.kind].tools ?? [], itemOf(event), undid(event), { row: true, tools: formatTools });
+  const library = entry && librarySentence(pathsShown(event), libraryWords[entry.kind], state.home?.[entry.kind].tools ?? [], itemOf(event), undid(event), { row: true, tools: formatTools, choices: hasChoices });
   if (library) return library;
   const phrase = (touched: string[]) => formatTools(touched, homeTools());
   const order = event.orderProved ? '' : ' Order not proved; the fixed tool order decided.';
@@ -98,7 +121,7 @@ function describe(event: HistoryEvent, formatTools: ToolFormat): { glyph: IconNa
 }
 
 /** Describes a History row and builds its sentence element, folding 3+ recorded tool lists (including all tools) into in-place folds under the sentence. */
-function rowAbout(event: HistoryEvent): { glyph: IconName; action?: string; node: HTMLElement } {
+function rowAbout(event: HistoryEvent, hasChoices = false): { glyph: IconName; action?: string; node: HTMLElement } {
   const groups: { label: string; names: string }[] = [];
   // formatTools splices `\0<group index>\0` markers into the plain sentence so rowAbout can swap each slot for a fold below.
   const formatTools: ToolFormat = (touched, inHome) => {
@@ -106,7 +129,7 @@ function rowAbout(event: HistoryEvent): { glyph: IconName; action?: string; node
     const shown = all ? `all ${tools.length} tools` : label;
     return shown ? `\0${groups.push({ label: shown, names }) - 1}\0` : names;
   };
-  const described = describe(event, formatTools);
+  const described = describe(event, formatTools, hasChoices);
   // What it also changed in a tool's own settings (Pi's skills list: HistoryEvent settingsChanged) follows its words.
   const text = event.settingsChanged ? `${described.text} ${event.settingsChanged.join(' ')}` : described.text;
   if (!text.includes('\0')) return { glyph: described.glyph, action: described.action, node: h('div.history-about', {}, text) };
@@ -206,24 +229,42 @@ const actionHelp = (event: HistoryEvent) => (event.kind === 'profile'
   : event.kind === 'everything' ? everythingOffer(event)?.help ?? ''
     : 'Put the base instructions back as they were before this Pull, and in the tools that got them (where their file is unchanged since)');
 
-/** A library entry's buttons (historyactions.ts): its own action, and one "Use <harness>’s version" for each version that gave way. */
-function libraryButtons(event: HistoryEvent) {
+/** A library entry's buttons (historyactions.ts): its own action, then a link + file mark for one version choice or a fold for two or more. */
+function libraryButtons(event: HistoryEvent, choices: RowChoice[]) {
   const entry = libraryEntry(event)!, item = itemOf(event);
   // A skill's own switches as the page last read them, so an action that would change nothing there is not offered.
   const loads = entry.kind === 'skills' ? state.home?.skills.items.find(row => row.key === entry.key)?.loads : undefined;
   const own = libraryAction(event, item, entriesNow(state.home!)(event).now, undefined, loads);
-  const link = (label: string, help: string, id: string, version?: string) => {
-    const control = button({ variant: 'link', size: 'small', label, name: `${label} (${event.item}): ${help}`, id, disabled: acting(), onclick: () => void restoreEvent(event.id, version) });
-    control.title = help;
-    return control;
-  };
+  const link = (label: string, help: string, id: string, onclick: (clickEvent: MouseEvent) => void) =>
+    button({ variant: 'link', size: 'small', label, name: `${label} (${event.item}): ${help}`, id, disabled: acting(), attrs: { title: help }, onclick });
   // Restore over an item of that name made since (a found copy that isn't the restored version): it is kept as a version.
   const found = own?.label === 'Restore' ? state.home?.[entry.kind].items.find(row => row.key === entry.key) : undefined;
   const over = Object.entries(found?.copies ?? {}).filter(([, copy]) => copy && copy.hash !== item?.hash).map(([tool]) => tool);
   const help = own && over.length ? `${own.help}. ${keptOver(event.item, over)}` : own?.help;
-  return [own ? link(own.label, help!, `history-${event.id}`) : null,
-    ...versionChoices(event, item).map(choice => link(`Use ${who(choice.tool)}’s version`, `Make ${who(choice.tool)}’s version of ${event.item} the current one`, `history-${event.id}-${choice.tool}`, choice.hash))];
+  const one = choices.length === 1 ? choices[0]! : undefined;
+  const open = openVersionFolds.has(event.id);
+  const choiceControl = one
+    ? h('span.history-choice-one', {},
+      link(`Use ${whoseVersion(one.choice.tools)}`, `Make ${whoseVersion(one.choice.tools)} of ${event.item} the current one`, `history-${event.id}-${one.choice.tool}`, useChoice(event.id, one.choice.tool, one.choice.hash, 0)),
+      one.mark?.mark)
+    : choices.length > 1 ? fold({
+      id: `history-versions-fold-${event.id}`, toggleId: `history-versions-${event.id}`, label: 'Use another version…', open,
+      controls: open ? `history-versions-list-${event.id}` : undefined,
+      onToggle: now => { if (now) openVersionFolds.add(event.id); else openVersionFolds.delete(event.id); rerender(); },
+    }) : null;
+  return [own ? link(own.label, help!, `history-${event.id}`, () => void restoreEvent(event.id)) : null, choiceControl];
 }
+
+/** Kept versions opened under a row by Use another version…: holder name(s), file mark, and Use. */
+const versionList = (event: HistoryEvent, choices: RowChoice[]) => h('ul.history-versions', { id: `history-versions-list-${event.id}` },
+  choices.map(({ choice, mark }, index) => {
+    const text = whoseVersion(choice.tools), label = `Use ${text}`;
+    return h('li.history-version', {},
+      h('span.history-version-who', {}, text),
+      mark?.mark,
+      button({ variant: 'link', size: 'small', label: 'Use', name: label, id: `history-${event.id}-${choice.tool}`, disabled: acting(),
+        attrs: { title: label }, onclick: useChoice(event.id, choice.tool, choice.hash, index) }));
+  }));
 
 /** A profile's or the base instructions' Undo (or Redo), naming what it undoes: "Undo switch", or "Undo pull in Claude Code and Codex". */
 function actions(event: HistoryEvent, action?: string) {
@@ -242,8 +283,20 @@ export function historyPage() {
   // From History's own read (pagedata.ts): what it found, else that it is reading or could not read.
   const events = state.history.data;
   if (!events) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.history.state === 'failed' ? 'History could not be read.' : 'Reading History…')));
-  // Each row's mark, and the file open at one of them, are worked out before the list is drawn, an empty one too (placePanel).
-  const ordered = [...events].reverse(), marks = ordered.map(fileMark), file = placePanel(historyFiles, marks);
+  // Each row's marks (its name's and any shown kept versions'), and the one file open at one of them, are worked out before the list is drawn, an empty one too (placePanel).
+  const ordered = [...events].reverse();
+  const rows = ordered.map(event => {
+    const entry = libraryEntry(event);
+    const raw = entry ? versionChoices(event, itemOf(event)) : [];
+    const showMarks = raw.length === 1 || (raw.length > 1 && openVersionFolds.has(event.id));
+    const choices: RowChoice[] = raw.map(choice => ({
+      choice,
+      mark: showMarks && entry ? versionFile(historyFiles, entry.kind, entry.key, choice.hash, choice.tools, event.id) : undefined,
+    }));
+    const itemMark = fileMark(event);
+    return { event, entry, choices, itemMark, marks: [itemMark, ...choices.map(choice => choice.mark)] };
+  });
+  const file = placePanel(historyFiles, rows.flatMap(row => row.marks));
   const reread = rereadBand(state.history);
   if (!events.length) {
     const shown = state.outcome?.page === 'history' ? outcomeBand() : null;
@@ -253,28 +306,29 @@ export function historyPage() {
       emptyState('history', 'No changes yet', 'Changes by sync and by you appear here, with Undo.')));
   }
   const times = timesApart(ordered.map(event => event.at));
-  // A refused Undo, a Manage click, a Restore with reload advice, or an Undo that ended the profile in use shows in a band; other results here are in the status bar.
+  // A refused Undo, a Manage click, a version choice, a Restore with reload advice, or an Undo that ended the profile in use shows in a band; other results here are in the status bar.
   const shown = state.outcome?.page === 'history' && (state.outcome.warn || state.outcome.historyBand || !!state.outcome.reloads?.length || !!state.outcome.profileLine) ? outcomeBand() : null;
   const latestManage = (tool: HarnessId) => ordered.find(other => other.kind === 'managing' && other.managing?.tool === tool)?.id;
-  return h('div.page', {}, reread || shown ? h('div.bands', {}, reread, shown) : null, h('div.scroll', { id: 'history-scroll' }, historyWindowControl(), h('ul.history-list', {}, ordered.flatMap((event, index) => {
-    const about = rowAbout(event);
+  return h('div.page', {}, reread || shown ? h('div.bands', {}, reread, shown) : null, h('div.scroll', { id: 'history-scroll' }, historyWindowControl(), h('ul.history-list', {}, rows.flatMap(({ event, entry, choices, itemMark, marks }, index) => {
+    const about = rowAbout(event, choices.length > 0);
     const heading = index === 0 || day(ordered[index - 1].at) !== day(event.at) ? h('li.history-day', { role: 'presentation' }, day(event.at)) : null;
     // The newest row, made by a click just now, gets the same brief highlight the tables use.
     const fresh = index === 0 && Date.now() - Date.parse(event.at) < 8000;
     const managed = event.kind === 'managing' && event.managing && latestManage(event.managing.tool) === event.id ? managingRow(event) : undefined;
     // The row its file is open under holds its panel, after See change's, and is marked as a table's is (.file-anchored).
-    const panel = file && file.mark === marks[index] ? file.panel : null, away = gone(event);
+    const panel = file && marks.includes(file.mark) ? file.panel : null, away = gone(event);
     return [heading, h(`li.history-row${event.undoneBy ? '.history-undone' : ''}${fresh ? '.row-flash' : ''}${panel ? '.file-anchored' : ''}`,
       { 'data-kind': event.kind, id: `history-row-${event.id}`, ...(event.kind === 'managing' ? { tabIndex: -1 } : {}) },
       h('span.history-when', { title: new Date(event.at).toLocaleString() }, times[index]),
       // What changed, then what happened in the flexible column (its text capped at the reading measure); the actions keep a
       // steady column at the right, the same on every row. Narrow, what happened takes a line of its own beneath (style.css).
-      h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event)), h(`strong${away ? '.history-gone' : ''}`, { title: away ? `${event.item}: no longer in Central Knot` : event.item }, event.item), marks[index]?.mark),
+      h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event)), h(`strong${away ? '.history-gone' : ''}`, { title: away ? `${event.item}: no longer in Central Knot` : event.item }, event.item), itemMark?.mark),
       about.node,
-      event.undoneBy ? h('span.history-actions', {}, h('span.history-done', {}, libraryEntry(event) ? doneWords(event) : event.kind === 'removed' || event.everything?.undo ? 'Restored' : 'Undone'))
+      event.undoneBy ? h('span.history-actions', {}, h('span.history-done', {}, entry ? doneWords(event) : event.kind === 'removed' || event.everything?.undo ? 'Restored' : 'Undone'))
         : h('span.history-actions', {},
-          !event.base && (event.kind === 'edit' || event.kind === 'conflict') ? seeChangeLink(event.id, libraryEntry(event)?.kind, true) : null,
-          libraryEntry(event) ? libraryButtons(event) : managed ? managed[0] : actions(event, about.action)),
+          !event.base && (event.kind === 'edit' || event.kind === 'conflict') ? seeChangeLink(event.id, entry?.kind, true) : null,
+          entry ? libraryButtons(event, choices) : managed ? managed[0] : actions(event, about.action)),
+      choices.length > 1 && openVersionFolds.has(event.id) ? versionList(event, choices) : null,
       changePanel(event.id),
       panel,
       managed?.[1] ?? null)];

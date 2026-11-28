@@ -12,10 +12,12 @@ export interface FakeNode {
   onclick?: (event: unknown) => void;
   focused: number;
   scrollTop: number;
+  tabIndex?: number;
   rect: { top: number; bottom: number; height: number };
   childElementCount: number;
   textContent: string;
   setAttribute: (key: string, value: string) => void;
+  hasAttribute: (key: string) => boolean;
   addEventListener: () => void;
   replaceChildren: (...kids: unknown[]) => void;
   append: (...kids: unknown[]) => void;
@@ -27,10 +29,11 @@ export interface FakeNode {
   getBoundingClientRect: () => { top: number; bottom: number; height: number };
   click: () => void;
   querySelector: (selector: string) => FakeNode | null;
+  querySelectorAll: (selector: string) => FakeNode[];
 }
 
 const isDisabled = (el: FakeNode) => 'disabled' in el.attrs;
-const canFocus = (el: FakeNode) => !isDisabled(el) && (['button', 'input', 'textarea', 'select', 'summary', 'a'].includes(el.tag) || 'tabindex' in el.attrs);
+const canFocus = (el: FakeNode) => !isDisabled(el) && (['button', 'input', 'textarea', 'select', 'summary', 'a'].includes(el.tag) || 'tabindex' in el.attrs || el.tabIndex !== undefined);
 
 const matchesSimple = (el: FakeNode, raw: string): boolean => {
   const notDisabled = raw.includes(':not(:disabled)');
@@ -40,6 +43,19 @@ const matchesSimple = (el: FakeNode, raw: string): boolean => {
   if (sel.startsWith('#')) return el.attrs.id === sel.slice(1);
   if (sel.startsWith('.')) return el.className.split(/\s+/).includes(sel.slice(1));
   return el.tag === sel;
+};
+
+const queryAllIn = (root: FakeNode, selector: string): FakeNode[] => {
+  const parts = selector.split(',').map(part => part.trim()).filter(Boolean);
+  const out: FakeNode[] = [];
+  const walk = (node: unknown) => {
+    if (!node || typeof node !== 'object') return;
+    const el = node as FakeNode;
+    if (el !== root && el.tag && parts.some(part => matchesSimple(el, part))) out.push(el);
+    for (const child of el.children ?? []) walk(child);
+  };
+  walk(root);
+  return out;
 };
 
 const queryIn = (root: FakeNode, selector: string): FakeNode | null => {
@@ -83,6 +99,9 @@ export const makeElement = (tag = 'div'): FakeNode => {
       this.attrs[key] = value;
       if (key.startsWith('data-')) this.dataset[key.slice(5).replace(/-([a-z])/g, (_, ch: string) => ch.toUpperCase())] = value;
     },
+    hasAttribute(key: string) {
+      return key in this.attrs;
+    },
     addEventListener() {},
     replaceChildren(...kids: unknown[]) {
       this.children = [...kids];
@@ -118,6 +137,9 @@ export const makeElement = (tag = 'div'): FakeNode => {
     },
     querySelector(selector: string) {
       return queryIn(node, selector);
+    },
+    querySelectorAll(selector: string) {
+      return queryAllIn(node, selector);
     },
   };
   if (tag === 'template') {
