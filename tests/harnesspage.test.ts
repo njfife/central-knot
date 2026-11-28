@@ -174,6 +174,7 @@ test('locked home keeps every Manage switch named for its tool with lock reason 
   rendered = harnessesPage() as unknown as FakeNode;
 
   assert.equal(findById(rendered, 'manage-info'), undefined);
+  assert.equal(findById(rendered, 'manage-claude-cli-info'), undefined);
   for (const tool of ALL_SIX) {
     const sw: FakeNode = findById(rendered, `manage-${tool}`)!;
     assert.ok(sw.attrs['aria-label']?.includes(`Manage ${SIX_NAMES[tool]}`), `locked ${tool} switch keeps tool name`);
@@ -284,7 +285,7 @@ test('capability reasons live on a keyboard-accessible dash mark naming whose li
   assert.match(agentsDash.attrs['aria-label'] ?? '', /Antigravity Agents/);
   assert.equal(agentsCard.attrs.role, 'tooltip');
   assert.equal(agentsCard.attrs.popover, 'manual');
-  assert.equal(textOf(agentsCard), 'Central Knot doesn’t handle agents for Antigravity yet');
+  assert.equal(textOf(agentsCard), 'Central Knot doesn’t handle agents for Antigravity.');
   assert.equal(findNode(agentsRow, el => el.classList.contains('harness-count-note')), undefined);
 
   const pi = findById(rendered, 'harness-card-pi-cli')!;
@@ -374,11 +375,11 @@ test('plugin count hides installed and bare counts describe what they count with
   });
   app.home = makeHome({
     managed: ['claude-cli', 'copilot-cli', 'pi-cli'],
-    skills: [skillFact('alpha', 'pi-cli', true), skillFact('beta', 'pi-cli', true), skillFact('draft', 'claude-cli', false)],
-    skillsLibrary: { alpha: { applied: { 'pi-cli': 'h1' } }, beta: { applied: { 'pi-cli': 'h1' } } },
+    skills: [skillFact('alpha', 'pi-cli', true), skillFact('beta', 'pi-cli', true), skillFact('draft', 'claude-cli', false), skillFact('synced-one', 'claude-cli', true)],
+    skillsLibrary: { alpha: { applied: { 'pi-cli': 'h1' } }, beta: { applied: { 'pi-cli': 'h1' } }, 'synced-one': { applied: { 'claude-cli': 'h1' } } },
     mcp: [mcpFact('docs', 'pi-cli')],
     pluginItems: [
-      { tool: 'claude-cli', plugin: 'kit-a', marketName: 'team', source: 'team/m', items: [] },
+      { tool: 'claude-cli', plugin: 'kit-a', marketName: 'team', source: 'team/m', items: [{ kind: 'skill', name: 'p1', description: '' }] },
       { tool: 'claude-cli', plugin: 'kit-b', marketName: 'team', source: 'team/m', items: [] },
       { tool: 'copilot-cli', plugin: 'kit-a', marketName: 'team', source: 'team/m', items: [] },
     ],
@@ -396,9 +397,10 @@ test('plugin count hides installed and bare counts describe what they count with
 
   const claudeSkills = rowIn(claude, 'Skills');
   const claudeSkillsVal = findNode(claudeSkills, el => el.classList.contains('harness-count-value'))!;
-  assert.equal(textOf(claudeSkillsVal), '1');
+  assert.equal(textOf(claudeSkillsVal), '3');
   assert.equal(claudeSkillsVal.attrs['aria-description'], undefined);
-  assert.equal(textOf(findNode(claudeSkills, el => el.classList.contains('harness-count-note'))), '1 not synced');
+  const claudeSkillParts = findAll(claudeSkills, el => el.classList.contains('harness-count-part')).map(textOf);
+  assert.deepEqual(claudeSkillParts, ['1 synced', '1 not synced', '1 from plugins']);
 
   const copilotPluginsVal = findNode(rowIn(findById(rendered, 'harness-card-copilot-cli')!, 'Plugins'), el => el.classList.contains('harness-count-value'))!;
   assert.equal(copilotPluginsVal.attrs['aria-description'], '1 installed plugin');
@@ -436,7 +438,8 @@ test('wrapper ids stay distinct from the managed heading id, Manage shares the f
   assert.equal(textOf(claudeCard).includes('Plugins?its record couldn’t be read'), true);
   const claudeFoot = findNode(claudeCard, el => el.classList.contains('harness-card-foot'))!;
   assert.ok(findNode(claudeFoot, el => el.classList.contains('harness-manage')));
-  assert.ok(findNode(claudeFoot, el => el.classList.contains('harness-card-path')));
+  const claudePath = findNode(claudeFoot, el => el.classList.contains('harness-card-path'))!;
+  assert.equal(textOf(findNode(claudePath, el => el.classList.contains('middle-tail'))), '/.claude');
 
   const piCard = findById(rendered, 'harness-card-pi-cli')!;
   assert.equal(textOf(piCard).includes('pi-gui (third-party) 0.4.0 · no CLI found'), true);
@@ -445,6 +448,9 @@ test('wrapper ids stay distinct from the managed heading id, Manage shares the f
   assert.equal(copilotCard.classList.contains('harness-card-out'), true);
   assert.equal(findById(rendered, 'harness-copilot-cli'), undefined);
   assert.equal(findById(rendered, 'harness-copilot-cli-instructions'), undefined);
+  assert.equal(textOf(findNode(copilotCard, el => el.classList.contains('harness-card-next'))), 'Left out');
+  assert.equal(textOf(findById(copilotCard, 'manage-copilot-cli-info-card')),
+    'Central Knot doesn’t read or write Copilot CLI while it’s left out, so its copies and every item stay as they are. Its switch asks before managing it again.');
   const copilotFoot = findNode(copilotCard, el => el.classList.contains('harness-card-foot'))!;
   assert.ok(findNode(copilotFoot, el => el.classList.contains('harness-manage')));
   assert.ok(findNode(copilotFoot, el => el.classList.contains('harness-card-path')));

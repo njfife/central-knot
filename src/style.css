@@ -2204,6 +2204,9 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .harness-count-value { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 13px; white-space: nowrap; }
 .harness-count-dash { justify-content: flex-start; gap: 4px; width: auto; min-width: 20px; height: 20px; padding: 0 5px 0 4px; margin: -2px 0 -2px -4px; font: inherit; font-weight: 600; }
 .harness-count-note { color: var(--ink-soft); font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+.harness-count-parts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; overflow-x: clip; }
+.harness-count-part { white-space: nowrap; }
+.harness-count-part:not(:first-child)::before { content: "·"; display: inline-block; width: 12px; margin-left: -12px; text-align: center; }
 .harness-count-span { grid-column: 2 / -1; }
 .harness-count-link { all: unset; cursor: pointer; color: var(--accent-ink); font: inherit; overflow-wrap: anywhere; }
 .harness-count-link:hover:not(:disabled) { text-decoration: underline; }
@@ -2213,12 +2216,15 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .harness-card-attention:hover:not(:disabled) { background: var(--hover); text-decoration: underline; }
 .harness-card-attention:disabled { opacity: 0.5; cursor: default; }
 .harness-card-attention:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.harness-card-path { font-size: 12px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: auto; padding: 0 14px 10px; }
+.harness-card-path { display: flex; min-width: 0; font-size: 12px; color: var(--ink-faint); margin-top: auto; padding: 0 14px 10px; }
+.harness-card-path > .path-text { min-width: 0; max-width: 100%; }
+.harness-card-path > .path-text > .middle-tail { flex: none; max-width: 55%; }
 .harness-card-next { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
-/* Compact footer: a tool's Manage switch (managecard.ts) and config path share one row on installed cards (managed and
-   left-out) so switches line up and stay within reach; when a left-out tool's question opens beneath the switch, Manage
-   takes full width above the path. */
-.harness-card-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin: auto 14px 0; padding: 8px 0 10px; border-top: 1px solid var(--line); }
+/* Compact footer: a tool's Manage switch (managecard.ts) and middle-cut config path share one row on installed cards
+   (managed and left-out) so switches stay level across a row; when a left-out tool's question opens beneath the switch,
+   the footer wraps so Manage takes full width above the path. */
+.harness-card-foot { display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin: auto 14px 0; padding: 8px 0 10px; border-top: 1px solid var(--line); }
+.harness-card-foot:has(.manage-question) { flex-wrap: wrap; }
 .harness-manage { display: flex; flex-direction: column; gap: 6px; flex: none; min-width: 0; }
 .harness-manage:has(> .manage-question) { flex: 1 0 100%; }
 .harness-manage-head { display: flex; align-items: center; gap: 8px; min-height: 20px; font-size: 12.5px; font-weight: 600; }
