@@ -111,14 +111,17 @@ function columnHead(tool: HarnessId, mark: Mark, does: string | undefined) {
       when ? h('span.signin-when', { id: `signin-when-${tool}` }, when) : null) : h('span.signin-when', {}, keep(IN_SESSION[tool]?.head, mark('session'))));
 }
 
-/** MCP sign-in as a file panel's place (filepanel.ts pagePlace): a server of your own opens its entry under its row (found ones too; plugins' have no reader yet). */
+/** MCP sign-in as a file panel's place (filepanel.ts pagePlace): a server of your own opens its entry under its row (found ones too, or a home with nothing taken in would show no mark; plugins' have no reader yet). */
 const signinFiles = pagePlace('mcpsignin', { foundAndPlugins: true });
 
-/** A row's first cell: the server's name with its file mark (for your own servers), Local where it runs on this computer, and the plugin it comes in. */
-const nameCell = (row: SigninRow, mark: Mark, file?: FileMark) => h('th.signin-name', { scope: 'row' },
-  h('span.signin-server', {}, row.name), file ? [' ', file.mark] : null,
-  row.transport === 'stdio' ? h('span.signin-local', {}, 'Local', mark('local')) : null,
-  row.plugin ? h('span.signin-plugin', {}, `In the plugin ${row.plugin}`) : null);
+/** A row's first cell: the server's name with its file mark bound to its last segment so wrapping never orphans it, Local, and the plugin it comes in. */
+const nameCell = (row: SigninRow, mark: Mark, file?: FileMark) => {
+  const tail = file ? /(?:^|[\s-])([^\s-]+-*)$/.exec(row.name)?.[1] ?? row.name : '';
+  return h('th.signin-name', { scope: 'row' },
+    h('span.signin-server', {}, ...(file ? [row.name.slice(0, row.name.length - tail.length), h('span.signin-keep', {}, tail, file.mark)] : [row.name])),
+    row.transport === 'stdio' ? h('span.signin-local', {}, 'Local', mark('local')) : null,
+    row.plugin ? h('span.signin-plugin', {}, `In the plugin ${row.plugin}`) : null);
+};
 
 /** Sign in or Try again, which starts the tool's own sign-in, or Stop: a cell's sign-in button (mcpsignin.ts CellSays act). */
 function actButton(tool: HarnessId, row: SigninRow, act: NonNullable<CellSays['act']>, id: string) {
