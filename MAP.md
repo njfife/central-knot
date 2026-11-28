@@ -116,7 +116,7 @@ Named sets of items to have on: switching to one turns those library items On an
 
 ## The Git repo
 The Managed set kept in a git repo, with Pull and Push; nothing moves until one is clicked.
-- `gitrepo.ts` connect, Pull, Push, and the repo's layout (its header) · `repopage.ts` the page (per-state `(?)` card `repoStateInfo`, **Check again** when up to date)
+- `gitrepo.ts` connect, Pull, Push, and the repo's layout (its header) · `repopage.ts` the page (`repoPhase`, per-state `(?)` card `repoStateInfo`, **Check again** when up to date)
 - **Start:** `gitrepo.ts`'s header. **Examples:** `tests/gitrepo.test.ts`, `tests/gitrepo-pull.test.ts`, `tests/gitrepo-edits.test.ts` (shared setup in `tests/gitrepo-world.ts`), `tests/repopage.test.ts`.
 
 ## Sources

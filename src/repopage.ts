@@ -1,8 +1,8 @@
 // Git repo: the Managed set kept in a git repo (GitHub, GitLab or any git server), with Pull to bring the repo's changes into the
 // tools and Push to send this computer's. The page says which repo and commit are in use, when it last pulled and pushed, and
 // what differs each way; nothing moves until Pull or Push is clicked.
-import { acting, announce, busy, rerender, setHome, setSync, showPage, state, tell } from './app.ts';
-import { button, closeButton, emptyState, fold, h, icon, infoMark } from './dom.ts';
+import { acting, announce, busy, FADE_MS, rerender, setHome, setSync, showPage, state, tell } from './app.ts';
+import { button, closeButton, emptyState, fold, h, icon, infoCardId, infoMark } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { outcomeBand } from './matrix.ts';
 import { dayAndTime, plural } from './model.ts';
@@ -26,7 +26,27 @@ export const repo = {
   confirmDisconnect: false,
   /** Whether the unconnected page's "What goes where" fold is open on this visit. */
   layoutOpen: false,
+  /** Whether an explicit Check again just found nothing new; clears after FADE_MS. */
+  checkedNote: false,
 };
+
+let checkedTimer: ReturnType<typeof setTimeout> | undefined;
+function clearCheckedNote(): void {
+  clearTimeout(checkedTimer);
+  checkedTimer = undefined;
+  repo.checkedNote = false;
+}
+function showCheckedNote(): void {
+  clearTimeout(checkedTimer);
+  repo.checkedNote = true;
+  checkedTimer = setTimeout(() => {
+    checkedTimer = undefined;
+    if (!repo.checkedNote) return;
+    repo.checkedNote = false;
+    rerender();
+  }, FADE_MS);
+  (checkedTimer as { unref?: () => void }).unref?.();
+}
 
 /**
  * Leaving the page or the home: what the last Connect, Pull, Push or Disconnect said, and an open question or fold, belong to it alone.
@@ -36,7 +56,13 @@ export function forgetRepoPrompts(homeChanged = false): void {
   repo.problem = undefined;
   repo.confirmDisconnect = false;
   repo.layoutOpen = false;
-  if (homeChanged) { repo.view = undefined; lastReadFailure = undefined; }
+  clearCheckedNote();
+  showQuietNote = false;
+  focusAfterCheck = false;
+  if (!homeChanged) return;
+  repo.view = undefined;
+  lastReadFailure = undefined;
+  checkPending = false;
 }
 
 /** Each load's turn: an older load that finishes late never overwrites a newer one, or ends its "Checking…". */
@@ -53,6 +79,12 @@ export function loadRepoSoon(): void {
 let inFlight: Promise<RepoView | null> | undefined;
 /** Whether any load since the last check asked for one: whichever load ends up newest does it, so an overtaken load's ask isn't lost. */
 let wantCheck = false;
+/** A fetch ended while another read overtook it: the winning read announces it and shows any quiet note once it draws. */
+let checkPending = false;
+/** An explicit Check again asked for an in-sight note if the repo is still up to date. */
+let showQuietNote = false;
+/** A keyboard press of Check again awaits the winning read so focus lands only once the button is enabled (or on #repo-state). */
+let focusAfterCheck = false;
 
 /** An error from the main process in plain words (Electron prefixes the method it came through). */
 const errorText = (error: unknown) => String(error instanceof Error ? error.message : error).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
@@ -60,7 +92,23 @@ const errorText = (error: unknown) => String(error instanceof Error ? error.mess
 /** What the last failed read said, so a good read clears only that. */
 let lastReadFailure: string | undefined;
 /** What a read can change of what this page and the sidebar's count show, as one value to compare (loadRepo). */
-const shownNow = () => JSON.stringify([repo.view, repo.problem, repo.checking]);
+const shownNow = () => JSON.stringify([repo.view, repo.problem, repo.checking, repo.checkedNote]);
+
+/** Completes a finished check once the winning read is ready to draw: quiet note, redraw, status-bar announcement and keyboard focus. */
+function finishCheck(view: RepoView | undefined, failed: boolean, redraw: () => void): void {
+  const announced = checkPending;
+  const quiet = showQuietNote;
+  const focus = focusAfterCheck;
+  checkPending = false;
+  showQuietNote = false;
+  focusAfterCheck = false;
+  const upToDate = !failed && !!view?.connected && repoPhase(view, waitingCounts(view)) === 'up-to-date';
+  if (announced && quiet && upToDate && state.page === 'repo') showCheckedNote();
+  else if (!upToDate) clearCheckedNote();
+  redraw();
+  if (announced && !failed && view?.connected && state.page === 'repo') announce(checkedText(view));
+  if (focus) (document.getElementById('repo-check') ?? document.getElementById('repo-state'))?.focus();
+}
 
 /**
  * Reads the repo's view; `check` then asks the repo for its latest commit (a fetch), showing the view meanwhile. Loads may overlap
@@ -71,9 +119,9 @@ const shownNow = () => JSON.stringify([repo.view, repo.problem, repo.checking]);
 export async function loadRepo(check = false): Promise<void> {
   clearTimeout(soon);
   const turn = ++loads;
-  wantCheck ||= check;
-  // A check already in flight is joined, never started again: once it ends, this load reads the page as it then is.
+  // A check already in flight is joined, never started again: once it ends, the winning read draws, announces and lands focus.
   const joined = inFlight;
+  if (!joined) wantCheck ||= check;
   if (joined) await joined.catch(() => undefined);
   let view: RepoView | undefined;
   let failed: string | undefined;
@@ -87,25 +135,37 @@ export async function loadRepo(check = false): Promise<void> {
   check = wantCheck && !joined;
   wantCheck = false;
   repo.view = view;
-  if (!inFlight) repo.checking = false;
+  const willFetch = check && !!view?.connected && view.access.allowed && !view.held;
+  if (!inFlight && !willFetch) repo.checking = false;
   // Drawn only when the read changed what is shown: a redraw that changes nothing would replace a text field he is typing in, and its Undo.
-  if (shownNow() !== shown) rerender();
-  // An overtaken check dropped its own status-bar line; the load that joined it announces what the check found.
-  if (joined && !failed && view?.connected && state.page === 'repo') announce(checkedText(view));
-  if (!check || !view?.connected || !view.access.allowed || view.held) return;
+  const redraw = () => { if (shownNow() !== shown) rerender(); };
+  if (!willFetch) {
+    if (!inFlight && (checkPending || focusAfterCheck || showQuietNote)) {
+      finishCheck(view, !!failed, redraw);
+    } else {
+      if (view?.connected && repoPhase(view, waitingCounts(view)) !== 'up-to-date') clearCheckedNote();
+      redraw();
+    }
+    return;
+  }
+  clearCheckedNote();
+  checkPending = false;
   repo.checking = true;
   rerender();
-  inFlight = api().repo(true).finally(() => { inFlight = undefined; });
+  inFlight = api().repo(true)
+    .then(result => {
+      checkPending = true;
+      return result;
+    })
+    .finally(() => {
+      inFlight = undefined;
+    });
   try { view = (await inFlight) ?? view; } catch { /* the view already shown stands */ }
-  // A load that started meanwhile joined this check and shows its result, "Checking…" ended.
+  // A load that started meanwhile joined this check and its winning read draws, announces and lands focus.
   if (turn !== loads) return;
   repo.view = view;
   repo.checking = false;
-  // What the check found, in the status bar, so it never disagrees with the page.
-  if (view?.connected && state.page === 'repo') {
-    announce(checkedText(view));
-  }
-  rerender();
+  finishCheck(view, false, rerender);
 }
 
 /** After a write: the page and the home both read again, so every page shows what Pull or Push left on disk. */
@@ -113,6 +173,7 @@ async function settle(result: RepoResult, done: string, note?: string, warn?: bo
   repo.view = result.view;
   repo.problem = result.stopped;
   repo.confirmDisconnect = false;
+  clearCheckedNote();
   setHome(await api().refresh(), { reload: false });
   const moved = !!result.pulled || result.results.some(entry => entry.outcome === 'written' || entry.outcome === 'removed');
   if (result.stopped) announce(result.stopped, true);
@@ -183,10 +244,13 @@ document.addEventListener('keydown', event => { if (event.key === 'Escape' && re
 
 /** After Pull or Push: if its button went away (nothing left to move), focus moves to the page's state line. */
 const keepFocus = (id: string) => { if (!document.getElementById(id)) document.getElementById('repo-state')?.focus(); };
-/** After Check again: focus returns to the button when still up to date, or lands on the state line once it goes away. */
-const checkAgain = (byKeyboard: boolean) => void loadRepo(true).then(() => {
-  if (byKeyboard) (document.getElementById('repo-check') ?? document.getElementById('repo-state'))?.focus();
-});
+/** After Check again: clears any old note and lets the winning read show the new quiet note and land keyboard focus. */
+const checkAgain = (byKeyboard: boolean) => {
+  clearCheckedNote();
+  showQuietNote = true;
+  focusAfterCheck ||= byKeyboard;
+  void loadRepo(true);
+};
 
 const disconnect = () => busy('Disconnecting…', async () => {
   // The address stays in the form, so connecting again is one click.
@@ -312,63 +376,86 @@ function sameCommitText(counts: Waiting): string {
 /** Push's count as the toolbar says it: waiting on Pull when Push can't run yet. */
 const pushCountText = (view: ConnectedRepoView, count: number) => (view.pushBlocked ? `${count} to push after Pull` : `${count} to push`);
 
-/** What the state line's (?) card says for each state, matching what the page offers now. */
-function repoStateInfo(view: ConnectedRepoView, counts: Waiting): string {
-  if (repo.checking) return 'Asking the repo for its latest commit. Nothing in your tools or the repo changes until you click Pull or Push.';
-  if (view.held) return 'Pull and Push stay paused until the problem below is cleared. Nothing in your tools or the repo moves meanwhile.';
-  if (view.problem) return 'Pull and Push wait until the repo can be reached again. Nothing in your tools changes meanwhile.';
+type RepoPhase = 'held' | 'problem' | 'moving' | 'branch-gone' | 'newer-commit' | 'stuck' | 'up-to-date';
+
+/** The connected repo's one state, in precedence order, read by the state line, (?) card, status bar and in-sync panel. */
+function repoPhase(view: ConnectedRepoView, counts: Waiting): RepoPhase {
+  if (view.held) return 'held';
+  if (view.problem) return 'problem';
+  if (counts.pull || counts.push || counts.retry) return 'moving';
+  if (view.branchGone) return 'branch-gone';
+  if (view.pushBlocked) return 'newer-commit';
+  if (counts.stuck || counts.syncWaits || counts.cantGo) return 'stuck';
+  return 'up-to-date';
+}
+
+/** What the state line's (?) card says for each state, matching only the buttons shown now. */
+function repoStateInfo(view: ConnectedRepoView, counts: Waiting, phase: RepoPhase): string {
+  if (repo.checking) return 'Asking the repo for its latest commit. Nothing in your tools or the repo changes.';
+  if (phase === 'held') return 'Pull and Push stay paused until the problem below is cleared. Nothing in your tools or the repo moves meanwhile.';
+  if (phase === 'problem') return 'Pull and Push wait until the repo can be reached again. Nothing in your tools changes meanwhile.';
+  if (phase === 'branch-gone') return 'That branch is no longer in the repo. Push puts this computer’s saved commit back as the branch.';
+  if (phase === 'newer-commit') return 'The repo has a newer commit. Pull moves this computer to it.';
+  if (phase === 'stuck') return 'Only items that can’t move differ right now. Each row below says what is holding it back.';
+  if (phase === 'up-to-date') return 'Nothing to pull or push. Check again asks the repo for new commits now.';
+  // phase === 'moving'. From gitrepo.ts classify/stageSides: a row that moves (counts.pull > 0) only exists with a newer commit
+  // (view.pushBlocked), while branchGone sets latest === base (so pushBlocked is never set alongside it).
   const pullable = counts.pull > 0 || counts.retry > 0;
   const pushable = counts.push > 0;
   if (pullable && pushable && view.pushBlocked) {
     return 'Pull brings the repo’s changes into your tools first (each with Undo in History), then Push sends this computer’s Managed set.';
   }
+  if (pullable && pushable && view.branchGone) {
+    return 'Pull again retries what the last Pull couldn’t finish; Push commits this computer’s Managed set and puts the branch back.';
+  }
   if (pullable && pushable) return 'Pull again retries what the last Pull couldn’t finish; Push sends this computer’s Managed set.';
+  if (pullable && view.branchGone) {
+    return 'Pull again retries what the last Pull couldn’t finish; Push puts this computer’s saved commit back as the branch.';
+  }
   if (pushable && view.pushBlocked) return 'Pull moves this computer to the repo’s latest commit first, then Push sends this computer’s Managed set.';
-  if (pullable) return 'Pull brings the repo’s changes into your tools, each with Undo in History. Nothing moves until you click Pull.';
-  if (pushable) return 'Push commits this computer’s Managed set to the repo; other files stay as they are. Nothing moves until you click Push.';
-  if (view.branchGone) return 'That branch is no longer in the repo. Push recreates it from this computer’s Managed set.';
-  if (view.pushBlocked) return 'The repo has a newer commit. Pull moves this computer to it so Push can run again.';
-  if (counts.stuck || counts.syncWaits || counts.cantGo) return 'Only items that can’t move differ right now. Each row below says what is holding it back.';
-  return 'Nothing to pull or push. Pull and Push show here when the repo or this computer changes.';
+  if (counts.pull > 0) return 'Pull brings the repo’s changes into your tools, each with Undo in History. Nothing moves until you click Pull.';
+  if (counts.retry > 0) return 'Pull again retries what the last Pull couldn’t finish (with Undo in History). Nothing moves until you click Pull again.';
+  if (view.branchGone) return 'That branch is no longer in the repo. Push commits this computer’s Managed set and puts the branch back.';
+  return 'Push commits this computer’s Managed set to the repo; other files stay as they are. Nothing moves until you click Push.';
 }
 
 /** The state in one line: up to date, what waits each way, or that the repo couldn't be reached. */
-function stateLine(view: ConnectedRepoView, counts: Waiting): HTMLElement {
+function stateLine(view: ConnectedRepoView, counts: Waiting, phase: RepoPhase): HTMLElement {
   const part = (glyph: IconName, tone: string, text: string, muted = false) => h(`span.repo-state-part${muted ? '.tone-muted' : ''}`, {}, icon(glyph, 14, tone), h('span', {}, text));
   const words = waitingWords(counts);
   const stuck = [words.stuckIn, words.stuckOut].filter(Boolean).join(', ');
   // While the repo can't be reached, the counts are what was last seen: said quietly, as neither button can act on them.
-  const quiet = !!view.problem;
+  const quiet = phase === 'problem';
   const moving = [counts.pull ? part('arrow-down-to-line', quiet ? 'tone-muted' : 'tone-accent', words.pull, quiet) : null,
     counts.push ? part('arrow-up-from-line', view.pushBlocked || quiet ? 'tone-muted' : 'tone-accent', pushCountText(view, counts.push), !!view.pushBlocked || quiet) : null,
     counts.retry ? part('arrow-down-to-line', quiet ? 'tone-muted' : 'tone-accent', words.retry, quiet) : null];
-  // Up to date only when nothing waits: a newer commit that changes nothing here still has to be pulled before a push.
-  const settled = view.branchGone ? part('triangle-alert', 'tone-warning', 'The repo’s branch is gone')
-    : view.pushBlocked ? part('arrow-down-to-line', 'tone-accent', 'A newer commit to pull')
-    : stuck ? part('circle-check', 'tone-muted', 'Nothing else to pull or push', true)
+  const settled = phase === 'branch-gone' ? part('triangle-alert', 'tone-warning', 'The repo’s branch is gone')
+    : phase === 'newer-commit' ? part('arrow-down-to-line', 'tone-accent', 'A newer commit to pull')
+    : phase === 'stuck' ? part('circle-check', 'tone-muted', 'Nothing else to pull or push', true)
     : part('circle-check', 'tone-success', 'Up to date with the repo');
-  const nothingMoves = !counts.pull && !counts.push && !counts.retry;
   const parts = repo.checking ? [part('refresh-cw', 'tone-muted spin', 'Checking the repo…')]
-    : view.held ? [part('circle-alert', 'tone-danger', 'Pull and Push are held')]
+    : phase === 'held' ? [part('circle-alert', 'tone-danger', 'Pull and Push are held')]
     // Unreachable: what can't move is said beside each list; the line keeps to the problem and the counts.
-    : view.problem ? [part('circle-alert', 'tone-danger', 'Couldn’t reach the repo'), ...moving]
+    : phase === 'problem' ? [part('circle-alert', 'tone-danger', 'Couldn’t reach the repo'), ...moving]
     // Nothing moves: what can't leads, in full ink, then the rest. Otherwise it follows the counts, quietly.
-    : nothingMoves ? [stuck ? part('triangle-alert', 'tone-warning', stuck) : null, settled]
+    : phase !== 'moving' ? [stuck ? part('triangle-alert', 'tone-warning', stuck) : null, settled]
     : [...moving, stuck ? part('triangle-alert', 'tone-warning', stuck, true) : null];
   // Focusable, so focus has somewhere to land when the button just used goes away (nothing left to pull or push).
   return h('span.repo-state-wrap', { 'data-info-block': true },
     h('span.repo-state', { id: 'repo-state', role: 'status', tabindex: '-1' }, parts),
-    infoMark('repo-state-info', 'Git repo', repoStateInfo(view, counts)));
+    infoMark('repo-state-info', 'Git repo', repoStateInfo(view, counts, phase)));
 }
 
 /** What a check found, for the status bar: the state line's words, so the two never disagree. */
 function checkedText(view: ConnectedRepoView): string {
-  if (view.held || view.problem) return view.held ? 'Pull and Push are held.' : 'Couldn’t reach the repo.';
-  const words = waitingWords(waitingCounts(view));
+  const counts = waitingCounts(view);
+  const phase = repoPhase(view, counts);
+  if (phase === 'held' || phase === 'problem') return phase === 'held' ? 'Pull and Push are held.' : 'Couldn’t reach the repo.';
+  const words = waitingWords(counts);
   const moving = [words.pull, words.push, words.retry].filter(Boolean).join(', ');
   const stuck = [words.stuckIn, words.stuckOut].filter(Boolean).join(', ');
-  if (moving) return `Checked the repo: ${[moving, stuck].filter(Boolean).join(', ')}.`;
-  const rest = view.branchGone ? 'its branch is gone' : view.pushBlocked ? 'a newer commit to pull' : stuck ? 'nothing else to pull or push' : 'up to date';
+  if (phase === 'moving') return `Checked the repo: ${[moving, stuck].filter(Boolean).join(', ')}.`;
+  const rest = phase === 'branch-gone' ? 'its branch is gone' : phase === 'newer-commit' ? 'a newer commit to pull' : phase === 'stuck' ? 'nothing else to pull or push' : 'up to date';
   return `Checked the repo: ${[stuck, rest].filter(Boolean).join('; ')}.`;
 }
 
@@ -420,10 +507,11 @@ const checkButton = (disabled: boolean | string) => button({
 function connectedPage(view: ConnectedRepoView) {
   // Counted once, so every place on the page says the same numbers.
   const counts = waitingCounts(view);
+  const phase = repoPhase(view, counts);
   const words = waitingWords(counts);
   const locked = !!acting() || !view.access.allowed;
   // While the repo can't be reached or Pull and Push are held, neither button can act.
-  const moving = locked || repo.checking || !!view.problem || !!view.held;
+  const moving = locked || repo.checking || phase === 'problem' || phase === 'held';
   const pullControl = pullButton(view, counts, moving);
   const pushControl = pushButton(view, counts.push, moving);
   // Rows to pull but none Pull will move (each waits or can't come in): Pull only moves this computer to the newer commit.
@@ -442,7 +530,7 @@ function connectedPage(view: ConnectedRepoView) {
   const activity = parts.flatMap((text, index) => [index ? ' ' : '', h('span.repo-activity-part', {}, `${index ? text : text.charAt(0).toUpperCase() + text.slice(1)}${index < parts.length - 1 ? ',' : ''}`)]);
   return h('div.page.repo-page', {},
     h('div.toolbar.repo-toolbar', {},
-      stateLine(view, counts),
+      stateLine(view, counts, phase),
       h('span.toolbar-spacer'),
       // While the question is open it stands in for this button, so the button steps aside rather than sit there dimmed.
       repo.confirmDisconnect ? null : disconnectButton(locked)),
@@ -458,10 +546,11 @@ function connectedPage(view: ConnectedRepoView) {
           h('dt', {}, 'This computer is at'), h('dd', {}, view.base ? commitText(view.base) : h('span.tone-muted', {}, 'Nothing pulled or pushed yet')),
           h('dt', {}, view.problem ? 'Repo, last seen' : 'Repo’s latest'), h('dd', {}, view.branchGone ? h('span.tone-warning', {}, `The repo no longer has the branch ${view.branch}. Push puts it back.`) : !view.latest ? h('span.tone-muted', {}, 'The repo is empty') : latestDiffers ? h('span.repo-latest', {}, commitText(view.latest), h('span.repo-new', {}, 'not pulled yet')) : h('span.tone-muted', {}, sameCommitText(counts))),
           h('dt', {}, 'Activity'), h('dd', {}, h('span.repo-activity', {}, activity)))),
-      !view.held && view.problem ? h('p.repo-stale', { id: WAITING_ID }, icon('info', 12), `${view.latest ? 'These lists are from the last time the repo was reached' : 'The repo hasn’t been reached yet'}; Pull and Push wait until it can be.`) : null,
-      view.held ? null : inSync && view.branchGone ? h('div.repo-in-sync', {}, h('span', {}, `Nothing else differs. Push puts the branch ${view.branch} back in the repo.`), pushControl)
-        : inSync && view.pushBlocked ? h('div.repo-in-sync', {}, h('span', {}, 'The repo has a newer commit that changes nothing in your Managed set. Pull to move to it.'), pullControl)
-        : inSync && !view.problem ? h('div.repo-in-sync', {}, checkButton(acting() || !view.access.allowed || repo.checking))
+      phase === 'problem' ? h('p.repo-stale', { id: WAITING_ID }, icon('info', 12), `${view.latest ? 'These lists are from the last time the repo was reached' : 'The repo hasn’t been reached yet'}; Pull and Push wait until it can be.`) : null,
+      phase === 'held' ? null
+        : inSync && phase === 'branch-gone' ? h('div.repo-in-sync', {}, h('span', {}, `Nothing else differs. Push puts the branch ${view.branch} back in the repo.`), pushControl)
+        : inSync && phase === 'newer-commit' ? h('div.repo-in-sync', {}, h('span', {}, 'The repo has a newer commit that changes nothing in your Managed set. Pull to move to it.'), pullControl)
+        : phase === 'up-to-date' ? h('div.repo-in-sync', {}, checkButton(locked || repo.checking), repo.checkedNote && !repo.checking ? h('span', { id: 'repo-checked-note' }, 'Checked just now: nothing new.') : null)
         : inSync ? null
         : h('div.repo-sides', {},
           // When Pull moves none of the rows, the note under it explains the list, so no count beside it.
@@ -509,24 +598,26 @@ function connectForm(allowed: boolean) {
   const ready = () => !acting() && allowed && !!repo.draftUrl.trim();
   const go = () => { if (ready()) void connect(); };
   const refresh = () => { const control = document.getElementById('repo-connect') as HTMLButtonElement | null; if (control) control.disabled = !ready(); };
-  const field = (id: string, label: string, placeholder: string, value: string, set: (text: string) => void, hint?: string, below?: (Node | string)[]) => h('div.repo-field', {},
-    h('label.market-add-label', { for: id }, label, hint ? h('span.repo-field-hint', {}, hint) : null),
-    h('input.market-add-input', { id, type: 'text', placeholder, value, spellcheck: 'false', autocomplete: 'off', disabled: !!acting() || !allowed, 'aria-describedby': below ? `${id}-below` : undefined,
+  const field = (id: string, label: string, placeholder: string, value: string, set: (text: string) => void, { hint, info, below }: { hint?: string; info?: HTMLElement; below?: string } = {}) => h('div.repo-field', { 'data-info-block': info ? true : undefined },
+    h('div.repo-field-head', {}, h('label.market-add-label', { for: id }, label, hint ? h('span.repo-field-hint', {}, hint) : null), info),
+    h('input.market-add-input', { id, type: 'text', placeholder, value, spellcheck: 'false', autocomplete: 'off', disabled: !!acting() || !allowed,
+      'aria-describedby': [below ? `${id}-below` : '', info ? infoCardId(`${id}-info`) : ''].filter(Boolean).join(' ') || undefined,
       'aria-invalid': repo.problem && id === `repo-${repo.problemField}` ? 'true' : undefined,
       // Typing a new address or branch answers the last failure: its band goes.
       oninput: (event: Event) => { set((event.target as HTMLInputElement).value); if (repo.problem) { repo.problem = undefined; rerender(); } refresh(); }, onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') go(); } }),
     below ? h('span.repo-field-below', { id: `${id}-below` }, below) : null);
-  const addressHint = [
-    h('span', {}, 'The address you’d give git clone. SSH works too: ', h('span.mono', {}, 'git@gitlab.com:you/agent-config.git')),
-    h('span', {}, 'Central Knot uses this computer’s git and the sign-in it already has (HTTPS or SSH). It never asks for or keeps a password or token.'),
-  ];
   return h('div.repo-connect', {},
     // The address takes the width; the branch, one word, sits beside it when there is room.
     h('div.repo-fields', {},
-      field('repo-url', 'Repo address', 'https://github.com/you/agent-config.git', repo.draftUrl, text => { repo.draftUrl = text; }, undefined, addressHint),
-      field('repo-branch', 'Branch', 'Default branch', repo.draftBranch, text => { repo.draftBranch = text; }, 'optional')),
-    h('div.repo-connect-actions', {}, button({ variant: 'primary', size: 'small', icon: 'git-branch', label: 'Connect', id: 'repo-connect', disabled: !ready(), onclick: go }),
-      h('span.repo-connect-note', {}, 'Connecting changes nothing in your tools. You choose when to Pull or Push.')));
+      field('repo-url', 'Repo address', 'https://github.com/you/agent-config.git', repo.draftUrl, text => { repo.draftUrl = text; }, {
+        info: infoMark('repo-url-info', 'Repo address', 'The address you’d give git clone. SSH works too: git@gitlab.com:you/agent-config.git'),
+        below: 'Uses this computer’s git sign-in (HTTPS or SSH); never asks for a password or token.',
+      }),
+      field('repo-branch', 'Branch', 'Default branch', repo.draftBranch, text => { repo.draftBranch = text; }, { hint: 'optional' })),
+    h('div.repo-connect-actions', {},
+      button({ variant: 'primary', size: 'small', icon: 'git-branch', label: 'Connect', id: 'repo-connect', disabled: !ready(), onclick: go,
+        attrs: { title: 'Connecting changes nothing in your tools. You choose when to Pull or Push.' } }),
+      h('span.repo-connect-note', {}, 'Connecting changes nothing in your tools.')));
 }
 
 export function repoPage(): HTMLElement {

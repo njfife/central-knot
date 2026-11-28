@@ -5406,23 +5406,25 @@ async function repoBaseFlow() {
   };
 
   const first = await open('first');
-  const UP_TO_DATE_CARD = 'Nothing to pull or push. Pull and Push show here when the repo or this computer changes.';
+  const UP_TO_DATE_CARD = 'Nothing to pull or push. Check again asks the repo for new commits now.';
+  const BRANCH_GONE_CARD = 'That branch is no longer in the repo. Push puts this computer’s saved commit back as the branch.';
   const PULL_ONLY_CARD = 'Pull brings the repo’s changes into your tools, each with Undo in History. Nothing moves until you click Pull.';
   const PUSH_ONLY_CARD = 'Push commits this computer’s Managed set to the repo; other files stay as they are. Nothing moves until you click Push.';
-  const SIGN_IN_NOTE = 'Central Knot uses this computer’s git and the sign-in it already has (HTTPS or SSH). It never asks for or keeps a password or token.';
+  const URL_INFO_CARD = 'The address you’d give git clone. SSH works too: git@gitlab.com:you/agent-config.git';
+  const SIGN_IN_NOTE = 'Uses this computer’s git sign-in (HTTPS or SSH); never asks for a password or token.';
   const MANAGED_NOTE = 'Only your Managed set goes to the repo: skills, MCP servers and agents in Central Knot (On or Off, not from plugins) and base instructions.';
-  const theme = async (a, value) => { await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] }); await a.settle(); };
 
-  // Not connected: standing intro gone; Connect note kept; sign-in note under Repo address; paths and Managed set words folded behind What goes where without linking out.
+  // Not connected: standing intro gone; sign-in note under Repo address; clone/SSH behind its (?); Connect note trimmed; paths and Managed set words folded behind What goes where.
   await first.click('#nav-repo');
   await until(() => first.exists('#repo-url'));
   const startPage = await first.text('.repo-page') ?? '';
-  check('not connected Git repo drops the introduction, puts the sign-in note under Repo address, keeps the Connect note, and starts What goes where folded',
+  check('not connected Git repo drops the introduction, puts sign-in under Repo address, trims Connect note, and starts What goes where folded',
     !(await first.exists('.empty-body')) && !startPage.includes('can live in any git repo')
-    && (await first.text('#repo-url-below') ?? '').includes(SIGN_IN_NOTE)
-    && await first.run(`document.getElementById('repo-url')?.getAttribute('aria-describedby')`) === 'repo-url-below'
-    && (await first.text('.repo-connect-note'))?.trim() === 'Connecting changes nothing in your tools. You choose when to Pull or Push.'
+    && (await first.text('#repo-url-below'))?.trim() === SIGN_IN_NOTE
+    && await first.run(`document.getElementById('repo-url')?.getAttribute('aria-describedby')`) === 'repo-url-below repo-url-info-card'
+    && (await first.text('.repo-connect-note'))?.trim() === 'Connecting changes nothing in your tools.'
     && await first.run(`(() => { const d = document.getElementById('repo-what-goes-where'), s = document.getElementById('repo-what-goes-where-toggle'), l = document.querySelector('.repo-layout'); return d?.open === false && l?.checkVisibility() === false && d.getBoundingClientRect().height <= s.getBoundingClientRect().height + 2; })()`), startPage);
+  await checkCard(first, 'repo-url-info', URL_INFO_CARD, 'Repo address (?) card holds clone and SSH examples');
   await first.click('#repo-what-goes-where-toggle');
   const foldText = await first.text('#repo-what-goes-where') ?? '';
   check('opening What goes where shows the 4 paths and Managed set words, without the sign-in note or See what’s Managed link',
@@ -5438,13 +5440,12 @@ async function repoBaseFlow() {
   for (const [w, h] of [[860, 560], [1316, 819]]) {
     await withSidebarOpen(first, w, h, async () => { same(`not connected Git repo with fold open fits at ${w}×${h}`, await first.run(CUT_OFF), []); });
   }
-  if (shots) {
-    await sizeTo(first, 860, 560);
-    await theme(first, 'light');
-    await first.shot('repo-not-connected-860-light');
-    await theme(first, 'dark');
-  }
-  await fullSize(first);
+  await sizeTo(first, ...SMALLEST);
+  check('not connected Git repo with What goes where open fits 860×560 without vertical scroll',
+    await first.run(`(() => { const s = document.getElementById('repo-scroll'); return !!s && s.scrollHeight <= s.clientHeight; })()`),
+    await first.run(`(() => { const s = document.getElementById('repo-scroll'); return s ? { scrollHeight: s.scrollHeight, clientHeight: s.clientHeight } : null; })()`));
+  await shotAt(first, 'repo-not-connected-860-light', SMALLEST, 'light');
+  await shotAt(first, 'repo-not-connected-1316-dark', [1316, 819], 'dark');
 
   same('the first home saves a base and pushes it', [await setBase(first, 'Be brief.\n'), await api(first, `return (await api.connectRepo(${JSON.stringify(remote)}, '', home)).stopped ?? 'connected';`), await push(first)], ['saved', 'connected', 'pushed']);
   await first.click('#nav-overview');
@@ -5465,30 +5466,23 @@ async function repoBaseFlow() {
       same(`connected up-to-date Git repo fits at ${w}×${h}`, await first.run(CUT_OFF), []);
     });
   }
+  await first.run(`document.activeElement?.blur?.()`);
+  await shotAt(first, 'repo-up-to-date-860-light', SMALLEST, 'light');
+  await shotAt(first, 'repo-up-to-date-1316-dark', [1316, 819], 'dark');
   if (shots) {
-    await first.run(`document.activeElement?.blur?.()`);
-    await sizeTo(first, 1316, 819);
-    await theme(first, 'dark');
-    await first.shot('repo-up-to-date-1316-dark');
-    await sizeTo(first, 860, 560);
-    await theme(first, 'light');
-    await first.shot('repo-up-to-date-860-light');
     await first.click('#repo-state-info');
-    await first.shot('repo-state-card-860-light');
+    await shotAt(first, 'repo-state-card-860-light', SMALLEST, 'light');
     await first.press('Escape');
-    await theme(first, 'dark');
   }
-  await fullSize(first);
 
   const second = await open('second');
   await setBase(second, 'Be thorough.\n');
   await api(second, `return (await api.connectRepo(${JSON.stringify(remote)}, '', home)).stopped ?? 'connected';`);
   const firstIncoming = await rowSays(second, 'Base instructions');
-  same('the second home’s Git repo page lists the base with a short badge, keeps its conflict note, and hides Check again', [
+  same('the second home’s Git repo page lists the base with a short badge and keeps its conflict note', [
     await second.text(`${baseRow} .repo-row-change`),
     firstIncoming.includes('Changed here too. Pull uses the repo’s version; yours stays in History.'),
-    await second.exists('#repo-check'),
-  ], ['New', true, false]);
+  ], ['New', true]);
   await checkCard(second, 'repo-state-info', PULL_ONLY_CARD, 'Git repo Pull-only state card');
   await pull(second, 'Be brief.\n');
   same('Pull sets the base, and Claude Code, which gets it, has it', [baseText('second'), claudeText('second').includes('Be brief.')], ['Be brief.\n', true]);
@@ -5497,7 +5491,7 @@ async function repoBaseFlow() {
   await first.click('#nav-overview');
   await first.click('#nav-repo');
   await until(() => first.exists(`section[aria-labelledby="repo-outgoing"] ${baseRow}`));
-  same('outgoing row uses the short Changed badge and hides Check again', [await first.text(`section[aria-labelledby="repo-outgoing"] ${baseRow} .repo-row-change`), await first.exists('#repo-check')], ['Changed', false]);
+  same('outgoing row uses the short Changed badge', await first.text(`section[aria-labelledby="repo-outgoing"] ${baseRow} .repo-row-change`), 'Changed');
   await checkCard(first, 'repo-state-info', PUSH_ONLY_CARD, 'Git repo Push-only state card');
   same('an edit in the first home goes out', await push(first), 'pushed');
   check('and shows with the short Changed badge on the incoming side', (await rowSays(second, 'Changed')).includes('Base instructions') && await second.text(`${baseRow} .repo-row-change`) === 'Changed', await second.text('#repo-incoming'));
@@ -5562,33 +5556,19 @@ async function repoBaseFlow() {
   await until(() => first.exists('div.repo-in-sync #repo-pull'));
   check('Check again finds a newer commit, offers Pull in div.repo-in-sync, and announces it',
     (await first.text('div.repo-in-sync') ?? '').includes('The repo has a newer commit that changes nothing in your Managed set. Pull to move to it.')
-    && !(await first.exists('#repo-check'))
     && (await first.text('#announcement') ?? '').includes('Checked the repo: a newer commit to pull.'), await first.text('.repo-page'));
-  if (shots) {
-    await first.run(`document.activeElement?.blur?.()`);
-    await sizeTo(first, 860, 560);
-    await theme(first, 'light');
-    await first.shot('repo-check-found-860-light');
-    await theme(first, 'dark');
-    await fullSize(first);
-  }
   await first.click('#repo-pull');
   await until(() => first.exists('div.repo-in-sync #repo-check:not([disabled])'));
   check('Pulling the newer commit restores Check again and removes Pull', !(await first.exists('#repo-pull')) && await first.exists('#repo-check'));
   if (await first.exists('#outcome-dismiss')) await first.click('#outcome-dismiss');
   await first.click('#repo-check');
-  await until(async () => (await first.text('#announcement') ?? '').includes('Checked the repo: up to date.') && await first.exists('#repo-check:not([disabled])'));
-  check('Check again while up to date runs the repo check and announces up to date',
-    (await first.text('#announcement') ?? '').includes('Checked the repo: up to date.') && await first.exists('#repo-check:not([disabled])'), await first.text('#announcement'));
-  if (shots) {
-    await first.settle();
-    await first.run(`document.activeElement?.blur?.()`);
-    await sizeTo(first, 860, 560);
-    await theme(first, 'light');
-    await first.shot('repo-check-result-860-light');
-    await theme(first, 'dark');
-    await fullSize(first);
-  }
+  await until(async () => (await first.text('#announcement') ?? '').includes('Checked the repo: up to date.') && await first.exists('#repo-checked-note') && await first.exists('#repo-check:not([disabled])'));
+  check('Check again while up to date announces up to date and says so beside the button',
+    (await first.text('#announcement') ?? '').includes('Checked the repo: up to date.')
+    && (await first.text('#repo-checked-note'))?.trim() === 'Checked just now: nothing new.'
+    && await first.exists('#repo-check:not([disabled])'), await first.text('.repo-page'));
+  await first.run(`document.activeElement?.blur?.()`);
+  await shotAt(first, 'repo-check-result-860-light', SMALLEST, 'light');
 
   git('--git-dir', remote, 'branch', '-m', 'main', 'archived');
   git('--git-dir', remote, 'symbolic-ref', 'HEAD', 'refs/heads/archived');
@@ -5596,8 +5576,13 @@ async function repoBaseFlow() {
   await until(() => first.exists('div.repo-in-sync #repo-push'));
   check('Check again finds a gone branch, offers Push in div.repo-in-sync, and announces it',
     (await first.text('div.repo-in-sync') ?? '').includes('Nothing else differs. Push puts the branch main back in the repo.')
-    && !(await first.exists('#repo-check'))
     && (await first.text('#announcement') ?? '').includes('Checked the repo: its branch is gone.'), await first.text('.repo-page'));
+  await checkCard(first, 'repo-state-info', BRANCH_GONE_CARD, 'Git repo branch-gone state card');
+  if (shots) {
+    await first.click('#repo-state-info');
+    await shotAt(first, 'repo-branch-gone-card-860-light', SMALLEST, 'light');
+    await first.press('Escape');
+  }
   await first.click('#repo-push');
   await until(() => first.exists('div.repo-in-sync #repo-check:not([disabled])'));
   check('Pushing the gone branch restores Check again and removes Push', !(await first.exists('#repo-push')) && await first.exists('#repo-check'));
@@ -5605,18 +5590,18 @@ async function repoBaseFlow() {
   renameSync(remote, `${remote}.away`);
   await first.click('#repo-check');
   await until(() => first.exists('#repo-waiting'));
-  check('unreachable repo keeps the stale message and Try again, and hides Check again',
+  check('unreachable repo keeps the stale message and Try again',
     (await first.text('#repo-state') ?? '').includes('Couldn’t reach the repo')
     && (await first.text('#repo-waiting') ?? '').includes('These lists are from the last time the repo was reached; Pull and Push wait until it can be.')
-    && await first.exists('#repo-try-again') && !(await first.exists('#repo-check')), await first.text('.repo-page'));
+    && await first.exists('#repo-try-again'), await first.text('.repo-page'));
   renameSync(`${remote}.away`, remote);
 
   const firstPlugins = join(homes.first, '.central-knot/plugins.json');
   writeFileSync(firstPlugins, '{bad');
   await first.click('#header-refresh');
   await until(async () => (await first.text('#repo-state') ?? '').includes('Pull and Push are held'));
-  check('damaged plugins record keeps the held message on Git repo and hides Check again',
-    (await first.text('#repo-state') ?? '').includes('Pull and Push are held') && await first.exists('.band-danger') && !(await first.exists('#repo-check')), await first.text('.repo-page'));
+  check('damaged plugins record keeps the held message on Git repo',
+    (await first.text('#repo-state') ?? '').includes('Pull and Push are held') && await first.exists('.band-danger'), await first.text('.repo-page'));
   rmSync(firstPlugins, { force: true });
   same('no page errors on Git repo', [...first.pageErrors, ...second.pageErrors], []);
   await second.quit();
