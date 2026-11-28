@@ -3545,8 +3545,9 @@ async function practiceFlow() {
   same('a background pass’s problem, alone in the header, is closed by its ×', [retried.test(backgroundSaid ?? ''), await a.exists('#header .header-result')], [true, false]);
   await a.click('#header-refresh');
   same('reported again by the next read, it stays closed', await a.exists('#header .header-result'), false);
-  // Let one silent background pass run while Copilot's folder is still locked (leaving its failure in pendingResults)
-  // before unlocking and turning standup On, so the sequence does not depend on timer luck.
+  // Prompt one silent background pass while Copilot's folder is still locked (leaving its failure in pendingResults): wait by time
+  // for the watcher's debounce (DEBOUNCE_MS; a silent pass sends no sync:changed), then drain main's queue via centralKnot.history()
+  // (which waits behind the pass only because main.ts handle queues it).
   const nudgeFile = join(claudeSkills, '.nudge');
   writeFileSync(nudgeFile, '');
   rmSync(nudgeFile, { force: true });
