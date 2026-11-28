@@ -85,13 +85,22 @@ export function hookEventLabel(hook: DeclaredHook, tool?: HarnessId): string {
 
 /**
  * What a tool takes of such a hook, where it differs from Claude Code (which runs each and takes what it prints): one sentence,
- * starting with the tool's name, so it reads both after the outcome table's colon (below) and on its own on the tool's card
- * on the Instructions page (sessionhooks.ts sessionStrip). Codex runs a hook only once trusted in its /hooks, a project's trust
- * aside (https://learn.chatgpt.com/docs/hooks); Copilot CLI takes only JSON (capability data, Appendix D).
+ * starting with the tool's name, so it reads after the outcome table's colon (below); sessionTextCardNote holds the short
+ * plain-text form carried in sessionhooks.ts sessionStrip for a strip's (?) card. Codex runs a hook only once trusted in its
+ * /hooks, a project's trust aside (https://learn.chatgpt.com/docs/hooks); Copilot CLI takes only JSON (capability data, Appendix D).
  */
 export function sessionTextNote(tool: HarnessId): string | undefined {
   if (tool === 'codex-cli') return 'Codex runs a hook only after you trust it in `/hooks`';
   if (tool === 'copilot-cli') return 'Copilot CLI uses only what a start-of-session hook prints as top-level `additionalContext`, not Claude Code’s `hookSpecificOutput` form; it ignores what prompt hooks print';
+  return undefined;
+}
+
+/** Short plain-text form of sessionTextNote carried in sessionhooks.ts sessionStrip for a hooks strip's (?) card. */
+export function sessionTextCardNote(tool: HarnessId, hasRows: boolean): string | undefined {
+  if (tool === 'codex-cli') return 'Codex runs a hook only after you trust it in its /hooks command.';
+  if (tool === 'copilot-cli') return hasRows
+    ? 'Copilot CLI uses only top-level additionalContext from start-of-session hooks (not hookSpecificOutput) and ignores what prompt hooks print.'
+    : 'Copilot CLI ignores what prompt hooks print.';
   return undefined;
 }
 
