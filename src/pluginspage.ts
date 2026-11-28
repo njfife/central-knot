@@ -421,7 +421,7 @@ export function runBand(): HTMLElement | null {
   const undo = undoButton();
   const said = [last ? `${resultSentence(lines, last.undo, label)}${noUndoNote(last, !!undo)}` : '', last?.profileLine].filter(Boolean).join(' ');
   if (!said && !reasons.length) return null;
-  return h('div.band.band-done.plugin-run', { role: 'status', id: 'plugins-result' }, reasons.length ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'),
+  return h('div.band.band-done.plugin-run', { role: 'status', id: 'plugins-result', tabindex: '-1' }, reasons.length ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'),
     h('span.band-text', {}, said, reasons.map(reason => h('span.band-reason', {}, reason))),
     h('span.band-actions', {}, undo), dismiss(closeRun, 'report-dismiss'), last ? reloadLines(runReloads(), last) : null);
 }

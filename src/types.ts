@@ -821,7 +821,7 @@ export type InstallState = { state: 'installed'; path: string; live?: boolean;
   /** The tool's own switch has the whole plugin turned off there (a mark: the plugin is still installed). */
   off?: true;
   /** The tool keeps settings of its own for it, which its uninstall deletes and an install doesn't bring back (`unknown` when its settings file couldn't be read: plugins.ts ownSettings). */
-  ownSettings?: true | 'unknown' } | { state: 'not-installed' } | { state: 'not-known'; reason: string }
+  ownSettings?: true | 'unknown' } | { state: 'not-installed' } | { state: 'not-known'; reason: string; unreadable?: true }
   /** The tool has a different marketplace under the same name: Central Knot neither reads nor changes its plugins. */
   | { state: 'held'; reason: string };
 
@@ -872,6 +872,7 @@ export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: 
   /** Its hooks as that tool's installed copy declares them; absent when it has none or `problem`. */ hooks?: DeclaredHook[];
   /** Each hooks file of that copy that couldn't be read as JSON (PluginContents hooksUnread). */ hooksUnread?: string[];
   /** Why what it brings couldn't be read; then `items` is empty. */ problem?: string;
+  /** Whether the copy's files are missing from where the tool records them, or present but unreadable. */ problemKind?: 'missing' | 'unreadable';
   /** Its marketplace is on the Plugins page (it is added in a tool), so the plugin's page can be opened there. */ listed: boolean;
   /** Where that tool has its marketplace from, as it records it. */ source?: string }
 

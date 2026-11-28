@@ -9,7 +9,8 @@ import { withLock } from './fslock.ts';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ORIGIN_COLOURS, originMark, sessionStrip } from '../src/sessionhooks.ts';
-import { sessionSettings } from '../src/pluginitems.ts';
+import { readPluginItems, sessionSettings } from '../src/pluginitems.ts';
+import { installedImpact } from '../src/pluginswitch.ts';
 import { hookEventLabel, outcomes, sessionTextNote } from '../src/pluginoutcomes.ts';
 import type { DeclaredHook, HarnessId, InstalledPlugin } from '../src/types.ts';
 
@@ -92,9 +93,26 @@ test('one plugin name in two marketplaces gives two groups told apart by their m
   assert.deepEqual(strip!.groups.map(group => group.plugin), [ours, theirs]);
 });
 
-test('a plugin whose marketplace isn’t added has no page here, and its group says where it is turned off', () => {
+test('a plugin whose marketplace isn’t added keeps its group with listed false and no duplicate says field', () => {
   const [group] = sessionStrip('claude-cli', [plugin('claude-cli', 'directory-one', atStart('echo hi'), { listed: false, marketName: 'anthropic-plugin-directory' })], {})!.groups;
-  assert.equal(group!.says, 'Claude Code’s own plugin commands turn it off.');
+  assert.deepEqual([group!.plugin?.listed, 'says' in group!], [false, false]);
+});
+
+test('sessionSettings reports disableAllHooks so installedImpact omits hooks without a second settings read', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'ck-sessionhooks-'));
+  try {
+    const installPath = join(home, '.claude/plugins/cache/team/helper/1.0.0');
+    await put(join(installPath, 'skills/notes/SKILL.md'), '---\nname: notes\ndescription: Notes.\n---\nBody.\n');
+    await put(join(installPath, 'hooks/hooks.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo hi' }] }] } }));
+    await put(join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'helper@team': [{ scope: 'user', installPath, version: '1.0.0' }] } }));
+    await put(join(home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'directory', path: '/markets/team' } } }));
+    await put(join(home, '.claude/settings.json'), JSON.stringify({ disableAllHooks: true }));
+    const [install] = await readPluginItems({ home, dataDir: home, binaries: {} }, ['claude-cli']);
+    const settings = await sessionSettings('claude-cli', join(home, '.claude'));
+    assert.deepEqual([settings.ownHooksDisabled, installedImpact(install!, undefined, !!settings.ownHooksDisabled).words], ['disableAllHooks', '1 skill']);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
 });
 
 test('Codex and Copilot CLI say once what they take of a hook, in the words their plugins’ outcome table uses', () => {

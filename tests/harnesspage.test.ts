@@ -10,7 +10,7 @@ installDom({}, { userAgent: 'Macintosh', byId: id => findById(rendered, id) ?? n
 
 const { setRenderer, state: app } = await import('../src/app.ts');
 const { goHarness, harnessesPage } = await import('../src/harnesspage.ts');
-const { putPageData } = await import('../src/pagedata.ts');
+const { failPageData, putPageData } = await import('../src/pagedata.ts');
 const { clickList, drop } = await import('../src/clicklist.ts');
 const { market, resetMarket } = await import('../src/pluginstate.ts');
 
@@ -263,6 +263,15 @@ test('Plugins tab matches boxOf disabled rule, shows box.line on locked rows, an
   putPageData(market.read, makeView({ canWrite: true, switchProblem: problem }));
   rendered = harnessesPage() as unknown as FakeNode;
   assert.equal(textOf(findById(rendered, 'harness-plugins-stopped')), problem);
+
+  // Re-read in flight and failed re-read: Plugins tab keeps its switch and Uninstall… from the last read view (lineBox uses cached view).
+  putPageData(market.read, makeView({ canWrite: true }));
+  market.read.state = 'reading';
+  rendered = harnessesPage() as unknown as FakeNode;
+  assert.deepEqual([!!findById(rendered, 'harness-plugin-switch-team-alpha'), !!findById(rendered, 'harness-plugin-uninstall-team-alpha')], [true, true]);
+  failPageData(market.read);
+  rendered = harnessesPage() as unknown as FakeNode;
+  assert.deepEqual([!!findById(rendered, 'harness-plugin-switch-team-alpha'), !!findById(rendered, 'harness-plugin-uninstall-team-alpha')], [true, true]);
   resetMarket();
 });
 
