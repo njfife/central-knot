@@ -122,7 +122,7 @@ async function launch(name, env) {
   const errors = [];
   const page = await connect(target.webSocketDebuggerUrl, data => { if (data.method === 'Runtime.exceptionThrown') errors.push(data.params.exceptionDetails.exception?.description ?? data.params.exceptionDetails.text); });
   await page.send('Runtime.enable');
-  const ready = () => page.run(`new Promise((done, fail) => { const end = Date.now() + 30000; const c = () => document.body.dataset.ready === 'true' && document.body.dataset.busy !== 'true' ? done(true) : Date.now() > end ? fail(new Error('The page did not settle.')) : setTimeout(c, 50); c(); })`);
+  const ready = () => page.run(`new Promise((done, fail) => { const end = Date.now() + 30000; const c = () => document.body?.dataset.ready === 'true' && document.body?.dataset.busy !== 'true' ? done(true) : Date.now() > end ? fail(new Error('The page did not settle.')) : setTimeout(c, 50); c(); })`);
   await ready();
   const until = async (expression, ms = 20000) => { for (const end = Date.now() + ms; Date.now() < end; await wait(150)) if (await page.run(expression)) return true; return false; };
   const text = selector => page.run(`document.querySelector(${JSON.stringify(selector)})?.textContent.trim() ?? ''`);
@@ -134,7 +134,7 @@ async function launch(name, env) {
 // The standard app first, so the alpha finds it open.
 const plain = await launch(STANDARD, { CK_UPDATE_STUB: 'v0.5.0-preview.98', CK_UPDATE_RELEASES: forStandard.releasesUrl });
 const alpha = await launch(ALPHA, { CK_UPDATE_RELEASES: forAlpha.releasesUrl });
-check('the two apps run side by side', await plain.run('document.body.dataset.ready') === 'true' && await alpha.run('document.body.dataset.ready') === 'true');
+check('the two apps run side by side', await plain.run('document.body?.dataset.ready') === 'true' && await alpha.run('document.body?.dataset.ready') === 'true');
 check('the window and the sidebar carry the alpha’s name', await alpha.run(`document.title + '|' + document.querySelector('.wordmark').textContent`) === 'Central Knot Alpha|Central Knot Alpha');
 check('the status bar names the alpha and its version', await alpha.text('#status-end') === 'Central Knot Alpha 0.6.0 alpha 98', await alpha.text('#status-end'));
 check('the alpha reports the tag it was packaged from', (await alpha.run('window.centralKnot.updates()')).tag === TAG);
