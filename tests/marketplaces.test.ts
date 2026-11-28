@@ -1722,7 +1722,19 @@ test('A one-tool click writes nothing and returns the refusal when that tool is 
 });
 
 test('Unreadable Claude Code settings.json reports ownSettings unknown in detail, carries deleted unknown through turn, undoTurn and IPC validation', async () => {
-  const box = await keptHome();
+  const box = await switchHome({
+    codex: true,
+    tools: ['claude-cli', 'codex-cli'],
+    engine: {
+      uninstall: async (context, marketplace, plugin, tool) => {
+        const listedPath = join(context.home, '.claude/plugins/installed_plugins.json');
+        const listed = JSON.parse(await readFile(listedPath, 'utf8')).plugins ?? {};
+        delete listed[`${plugin}@${marketplace}`];
+        await put(listedPath, JSON.stringify({ version: 2, plugins: listed }));
+        return { tool, outcome: 'uninstalled', message: 'Uninstalled.', runs: [], changed: true };
+      },
+    },
+  });
   try {
     await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
     const settingsPath = join(box.home, '.claude/settings.json');
@@ -1730,14 +1742,11 @@ test('Unreadable Claude Code settings.json reports ownSettings unknown in detail
     const det = await box.markets.detail(box.root, 'pdf');
     assert.equal(det?.installed?.['claude-cli']?.ownSettings, 'unknown');
 
-    // While settings.json is unreadable, uninstall refuses as held (recordReadable).
-    const refused = await box.markets.turn(box.root, 'pdf', 'uninstall', 'claude-cli', box.home);
-    assert.equal(refused.done[0]?.report.outcome, 'held');
-    assert.deepEqual(refused.back, []);
+    const gone = await box.markets.turn(box.root, 'pdf', 'uninstall', 'claude-cli', box.home);
+    assert.equal(gone.back?.[0]?.deleted, 'unknown');
 
     await rm(settingsPath, { force: true });
-    const gone = await box.markets.turn(box.root, 'pdf', 'uninstall', 'claude-cli', box.home);
-    const undone = await box.markets.undoTurn(box.root, 'pdf', gone.before!, [{ ...gone.back![0]!, deleted: 'unknown' }], box.home);
+    const undone = await box.markets.undoTurn(box.root, 'pdf', gone.before!, gone.back!, box.home);
     assert.equal(undone.done[0]?.deleted, 'unknown');
 
     // IPC sanitizer accepts deleted: 'unknown' on plugins:undo-turn (reaching writeAccess instead of malformed refusal) and rejects unknown strings.
