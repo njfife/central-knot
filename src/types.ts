@@ -353,12 +353,12 @@ export interface DesktopApi {
   /** One hook's declaring entry and the script its command names, read from disk on click (hooksource.ts). Nothing is run. */
   hookSource(home: string, ref: HookSourceRef): Promise<HookSource>;
   /** Runs one hook's command once as its tool would on click (hookrun.ts); only on this computer's own home. */
-  hookRun(home: string, ref: HookSourceRef): Promise<HookRunResult>;
+  hookRun(home: string, ref: HookSourceRef, remember?: boolean): Promise<HookRunResult>;
   /** Stops a hook run currently under way for this home and hook identity (hookrun.ts). */
   hookStop(home: string, ref: HookSourceRef): Promise<void>;
   /** Reads the last kept result for each hook in `refs` on `home` in one batch (hookrunstore.ts). */
   hookLast(home: string, refs: HookSourceRef[]): Promise<(HookRunResult | null)[]>;
-  /** Forgets the kept result for one hook on `home` (hookrunstore.ts, called on Close result or Escape). */
+  /** Forgets the kept result for one hook on `home` (hookrunstore.ts, called on Forget result or Escape). */
   hookForget(home: string, ref: HookSourceRef): Promise<void>;
 }
 

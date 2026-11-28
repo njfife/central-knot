@@ -18,7 +18,6 @@ import type { DesktopApp, HarnessId, HomeView, InstructionFile, Snapshot } from 
 import { caughtUpBand, resetTablesForHarness, itemsTable, differingIn, emptyList, showFiltered } from './matrix.ts';
 import { kindSource } from './itemrow.ts';
 import { aboutInstructions, instructionBands, instructionCard, instructionsNotRead } from './instructionspage.ts';
-import { loadHookResults } from './hooksourceview.ts';
 import { browse, clickOn, lineBox, loadPlugins, market, pluginBusy, titleShared, turnPlugin } from './pluginstate.ts';
 import { nowLead, profileNowIn } from './profileplan.ts';
 import { copyButton, fact, kindEmpty, noToolsState, notRead } from './pages.ts';
@@ -233,8 +232,6 @@ export function goHarness(tool: HarnessId | undefined, tab?: HarnessTab, { fromK
   if (showOnly && tool) showFiltered(showOnly, 'attention', tool);
   // A home switch's result (and its Go back) survives one move, as it does across pages.
   leaveResults();
-  const file = tool && state.harnessTab === 'instructions' && state.instructions.state !== 'reading' ? instructionOf(tool) : undefined;
-  if (file) void loadHookResults([file], true);
   rerender();
   if (tool) document.getElementById('harness-body')?.scrollTo(0, 0);
   else if (from && fromKeyboard) document.getElementById(`harness-${from}`)?.focus();

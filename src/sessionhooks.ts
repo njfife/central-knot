@@ -108,10 +108,10 @@ export const isKeptHookOutcome = (outcome: unknown): outcome is HookRunOutcome =
   typeof outcome === 'string' && KEPT_HOOK_OUTCOMES.has(outcome as HookRunOutcome);
 
 /** Standing line above the first row of every strip that has a runnable hook. */
-export const HOOK_RUN_WARN = '“See what it adds” runs the hook’s command on this computer to collect what it prints. Nothing is added to any session, but the command may change your files.';
+export const HOOK_RUN_WARN = 'Collecting what a hook adds runs its command on this computer. Nothing is added to any session, but the command may change your files.';
 /** Standing line for a runnable strip: Codex also says it runs regardless of trust in Codex's /hooks command. */
 export const hookRunWarn = (tool: HarnessId): string =>
-  tool === 'codex-cli' ? '“See what it adds” runs the hook’s command on this computer to collect what it prints, whether or not you have trusted it in Codex’s /hooks command. Nothing is added to any session, but the command may change your files.' : HOOK_RUN_WARN;
+  tool === 'codex-cli' ? 'Collecting what a hook adds runs its command on this computer, whether or not you have trusted it in Codex’s /hooks command. Nothing is added to any session, but the command may change your files.' : HOOK_RUN_WARN;
 
 /** Whole-sentence parts for the first hooks strip's (?) card (at most 2 sentences, ≤30 words). */
 const hookStripHelpParts = (tool: HarnessId, runnable: boolean): string[] => [
@@ -133,10 +133,11 @@ export function hookStripCard(tool: HarnessId, strip: Pick<SessionStrip, 'note'>
 const KEEP_CAP = /^(?:Central Knot|Claude Code|Codex|Copilot CLI|See what it adds|Windows)\b|^\S+ is turned off in /;
 const lowerLead = (text: string) => (KEEP_CAP.test(text) ? text : text.replace(/^[A-Z](?=[a-z])/, ch => ch.toLowerCase()));
 
-/** What a hook run's result block shows (sentence, quiet trailing run place/time, notes, and output slots), pure. */
+/** What a hook run's result block shows (sentence, leading when + hover detail, notes, and output slots), pure. */
 export interface HookRunView {
   sentence: string;
   meta?: string;
+  metaTitle?: string;
   notes: string[];
   added?: string;
   allFold?: string;
@@ -144,20 +145,21 @@ export interface HookRunView {
   errDirect?: string;
 }
 
-/** Maps one HookRunResult to its exact sentence, quiet trailing run tool/plugin-version/place/day-and-time (only when known), notes, and stdout/stderr display slots. */
+/** Maps one HookRunResult to its exact sentence, leading when (Collected/Tried + day and time) with tool/plugin-version/place on hover, notes, and stdout/stderr display slots. */
 export function hookRunWords(tool: HarnessId, result: HookRunResult, shownCwd: string, time = dayAndTime(result.at), runAs?: HarnessId): HookRunView {
   if (result.outcome === 'refused') return { sentence: result.problem ? `Not run: ${lowerLead(result.problem)}` : 'Couldn’t run it.', notes: [] };
   const place = shownCwd || '~';
   const promptPart = result.emptyPrompt ? ' with an empty prompt' : '';
   const started = result.outcome !== 'missing' && result.detail !== 'spawn-error';
   const version = result.pluginVersion?.trim();
-  const who = runAs ? `as ${toolNames[runAs]}${version ? `, plugin ${version}` : ''}, ` : '';
-  const tried = time.includes(' at ') ? `tried ${time}` : `tried at ${time}`;
-  const meta = `${who}${started ? `run in ${place}${promptPart}, ${time}` : tried}`;
+  const who = runAs ? `as ${toolNames[runAs]}${version ? `, plugin ${version}` : ''}` : '';
+  const when = time.includes(' at ') ? time : `at ${time}`;
+  const meta = `${started ? 'Collected' : 'Tried'} ${when}`;
+  const metaTitle = [who, started ? `run in ${place}${promptPart}` : ''].filter(Boolean).join(', ') || undefined;
   const baseNotes = started && result.missingOptions ? ['Ran without some of the plugin’s options.'] : [];
   const err = result.stderr || undefined;
   const out = result.allPrinted || undefined;
-  const view = (sentence: string, more: Partial<HookRunView> = {}): HookRunView => ({ sentence, meta, ...more, notes: [...(more.notes ?? []), ...baseNotes] });
+  const view = (sentence: string, more: Partial<HookRunView> = {}): HookRunView => ({ sentence, meta, ...(metaTitle ? { metaTitle } : {}), ...more, notes: [...(more.notes ?? []), ...baseNotes] });
   if (result.outcome === 'adds') {
     const notes: string[] = [];
     if (tool === 'codex-cli') notes.push('Codex adds it only once trusted in /hooks.');

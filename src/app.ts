@@ -1612,11 +1612,7 @@ const rereadInstructions = async () => { const files = await readInstructionsAnd
 async function readInstructionsAndBase(readId?: number, hooks = false) {
   const [files, base] = await Promise.all([api().instructions(readId), api().instructionBase()]);
   state.base = base ?? undefined;
-  if (hooks && files) {
-    const shown = state.page === 'instructions' ? files
-      : harnessTabShown() === 'instructions' ? files.filter(file => file.tool === state.harness) : [];
-    await loadHookResults(shown);
-  }
+  if (hooks && files) await loadHookResults(files);
   return files;
 }
 

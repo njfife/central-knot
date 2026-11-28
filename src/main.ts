@@ -1663,7 +1663,7 @@ app.whenReady().then(async () => {
   });
   const hookRunStore = createHookRunStore(join(app.getPath('userData'), 'hook-results.json'));
   // One hook's command run once on click (hookrun.ts), outside the queue; only on this computer's own home, never by itself.
-  handleNow('hook:run', async (home, ref) => {
+  handleNow('hook:run', async (home, ref, remember) => {
     const parsed = parseHookRef(ref);
     if (!current || home !== current.home || !parsed) return hookRunRefused(HOOK_SOURCE_UNREADABLE);
     const openHome = current.home;
@@ -1671,7 +1671,7 @@ app.whenReady().then(async () => {
       home: openHome, mode: current.mode, overrides: context().overrides, dataDir: join(app.getPath('userData'), 'plugins'),
       toolsHome: homedir(), searchPath, stillOpen: () => current?.home === openHome && current.mode === 'actual',
     }, parsed);
-    await hookRunStore.put(openHome, parsed, result).catch(() => undefined);
+    if (remember === true) await hookRunStore.put(openHome, parsed, result).catch(() => undefined);
     return result;
   });
   handleNow('hook:last', async (home, refs) => {
