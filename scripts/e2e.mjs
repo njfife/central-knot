@@ -20761,21 +20761,49 @@ async function hookRunFlow() {
       return head.top >= sc.top - 1 && head.bottom <= sc.bottom + 1; })()`), true);
   await fullSize(a);
 
-  // Check 2 & Worked example 6: Copilot CLI own start hook runs (ignored plain stdout) while Copilot CLI installed plugin hook keeps View source alone.
+  // Check 2 & Worked example 1 / 6: Copilot CLI installed plugin hook runs as Copilot CLI does, and own start hook runs (ignored plain stdout).
   const copilotPluginRoot = join(home, '.copilot/plugins/cache', marketName, 'release-helper/0.4.1');
+  const copilotPluginData = join(home, '.copilot/plugin-data', marketName, 'release-helper');
   mkdirSync(join(copilotPluginRoot, 'hooks'), { recursive: true });
-  writeFileSync(join(copilotPluginRoot, 'hooks/hooks.json'), JSON.stringify({ version: 1, hooks: { sessionStart: [{ type: 'command', bash: 'echo copilot-plugin-hook' }] } }));
+  writeFileSync(join(copilotPluginRoot, 'hooks/hello.sh'), `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} -e 'const fs=require("fs");const lines=[\`root=\${process.env.COPILOT_PLUGIN_ROOT}\`,\`data=\${process.env.COPILOT_PLUGIN_DATA}\`,\`hookDir=\${process.env.COPILOT_HOOK_DIR}\`,\`pwd=\${fs.realpathSync(process.cwd())}\`,\`pluginData=\${Object.hasOwn(process.env,"PLUGIN_DATA")?"set":"unset"}\`].join("\\n");process.stdout.write(JSON.stringify({additionalContext:lines})+"\\n");'\n`, { mode: 0o755 });
+  writeFileSync(join(copilotPluginRoot, 'hooks/hooks.json'), JSON.stringify({ version: 1, hooks: { sessionStart: [{ type: 'command', bash: '${PLUGIN_ROOT}/hooks/hello.sh' }] } }));
   writeFileSync(join(home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'release-helper', marketplace: marketName, version: '0.4.1', cache_path: copilotPluginRoot, enabled: true }] }));
   writeFileSync(join(home, '.copilot/hooks/start.json'), JSON.stringify({ version: 1, hooks: { sessionStart: [{ type: 'command', bash: '~/bin/copilot-plain.sh' }] } }));
   await a.click('#header-refresh');
   await steady();
   await waitFor(`!!document.querySelector('#session-copilot-cli button[data-hook-run]')`);
-  const copilotPluginRow = await rowOf('session-copilot-cli', 'copilot-plugin-hook');
-  same('Copilot CLI installed plugin hook keeps View source alone, no standing .session-note, and (?) names plugin reason then output rule',
-    [!!copilotPluginRow?.srcId, copilotPluginRow?.runId, await a.text('#session-copilot-cli .session-note'), await a.text('#session-hooks-info-copilot-cli-card')],
-    [true, null, null, 'Central Knot can’t run a Copilot CLI plugin’s hook, but View source shows its script. Copilot CLI uses only top-level additionalContext from start-of-session hooks (not hookSpecificOutput) and ignores what prompt hooks print.']);
-  same('Copilot CLI strip with runnable own hook and non-runnable plugin hook omits the plugin standing line',
-    await a.run(`(() => { const w = document.querySelectorAll('#session-copilot-cli .session-run-warn'); return [w.length, !w[0]?.textContent?.includes('Plugin')]; })()`), [1, true]);
+  const copilotPluginRow = await rowOf('session-copilot-cli', 'hello.sh');
+  same('Copilot CLI installed plugin hook offers See what it adds beside View source, no standing .session-note, and (?) holds only Copilot CLI’s output rule',
+    [!!copilotPluginRow?.srcId, !!copilotPluginRow?.runId, await a.text('#session-copilot-cli .session-note'), await a.text('#session-hooks-info-copilot-cli-card'), existsSync(copilotPluginData)],
+    [true, true, null, 'Copilot CLI uses only top-level additionalContext from start-of-session hooks (not hookSpecificOutput) and ignores what prompt hooks print.', false]);
+  const copPluginRes = await runAndWait('session-copilot-cli', 'hello.sh');
+  check('Copilot CLI installed plugin hook runs with plugin root cwd, verbatim data dir created, COPILOT_HOOK_DIR, and PLUGIN_DATA unset',
+    /^Would add as Copilot CLI, plugin 0\.4\.1, run in ~\/\.copilot\/plugins\/cache\//.test(copPluginRes)
+    && copPluginRes.includes(`root=${copilotPluginRoot}`) && copPluginRes.includes(`data=${copilotPluginData}`)
+    && copPluginRes.includes(`hookDir=${join(copilotPluginRoot, 'hooks')}`) && copPluginRes.includes(`pwd=${copilotPluginRoot}`)
+    && copPluginRes.includes('pluginData=unset') && existsSync(copilotPluginData), copPluginRes);
+  await sizeTo(a, 860, 560);
+  if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+  await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+  await a.run(`document.getElementById(${JSON.stringify(copilotPluginRow.runId)})?.closest('.session-group')?.scrollIntoView({ block: 'start' })`);
+  await steady();
+  same('Copilot CLI plugin hook result fits at 860×560 with sidebar open without horizontal overflow',
+    await a.run(`(() => { const sc = document.getElementById('instructions-scroll'); return sc.scrollWidth <= sc.clientWidth + 1; })()`), true);
+  if (shots) await a.shot('copilot-plugin-row-860x560-light');
+  await a.run(`document.querySelector('#session-copilot-cli')?.scrollIntoView({ block: 'start' })`);
+  await steady();
+  await a.click('#session-hooks-info-copilot-cli');
+  await steady();
+  check('Copilot CLI strip (?) card opens cleanly inside viewport at 860×560', await a.run(`(() => {
+    const card = document.getElementById('session-hooks-info-copilot-cli-card');
+    if (!card?.matches(':popover-open')) return false;
+    const r = card.getBoundingClientRect(), statusTop = document.getElementById('status')?.getBoundingClientRect().top ?? innerHeight;
+    return r.width > 0 && r.left >= 0 && r.right <= innerWidth + 1 && r.top >= 0 && r.bottom <= statusTop;
+  })()`));
+  if (shots) await a.shot('copilot-strip-card-860x560-light');
+  await a.press('Escape');
+  await a.send('Emulation.setEmulatedMedia', { features: [] });
+  await fullSize(a);
   const copRes = await runAndWait('session-copilot-cli', 'copilot-plain.sh');
   check('Copilot CLI plain stdout shows ignored sentence with quiet meta and Show all it printed fold',
     /^Copilot CLI would ignore this: no top-level additionalContext\. as Copilot CLI, run in ~, /.test(copRes) && copRes.includes('Show all it printed'), copRes);
@@ -20879,9 +20907,9 @@ async function hookRunFlow() {
     [await a.text('#plugin-session-hooks .session-run-warn'), await a.text('#plugin-session-hooks .plugin-version-differs'),
       await a.run(`document.getElementById('plugin-hooks-info-card')?.textContent ?? ''`)],
     [runWarn, 'Runs Claude Code’s installed copy (0.4.1). The marketplace has 0.5.0.', helpCardText]);
-  same('arriving from Claude Code selects As Claude Code and lists both eligible tools',
+  same('arriving from Claude Code selects As Claude Code and lists all three eligible tools',
     await a.run(`(() => { const s = document.getElementById('plugin-hook-tool'); return [s?.value, [...(s?.options ?? [])].map(o => o.textContent)]; })()`),
-    ['claude-cli', ['As Claude Code', 'As Codex']]);
+    ['claude-cli', ['As Claude Code', 'As Copilot CLI', 'As Codex']]);
   same('plugin page shows installed runnable row first, marketplace-only text row below with version tag and View source alone, and Other hooks View source alone',
     await a.run(`(() => {
       const rows = [...document.querySelectorAll('#plugin-session-hooks .session-hook')].map(r => [
@@ -21018,9 +21046,9 @@ async function hookRunFlow() {
   await waitFor(`!!document.querySelector('#popen-0-release-helper')`);
   await a.click('#popen-0-release-helper');
   await waitFor(`document.querySelector('.crumb-here')?.textContent === 'release-helper' && !!document.querySelector('#plugin-session-hooks button[data-hook-run]')`);
-  same('without Codex CLI, As <tool> disappears and only Claude Code remains runnable',
-    [await a.exists('#plugin-hook-tool'), await a.text('#plugin-session-hooks .session-command')],
-    [false, '${CLAUDE_PLUGIN_ROOT}/hooks/hello.sh']);
+  same('without Codex CLI, As Codex disappears and Claude Code and Copilot CLI remain runnable',
+    await a.run(`(() => { const s = document.getElementById('plugin-hook-tool'); return [[...(s?.options ?? [])].map(o => o.textContent), document.querySelector('#plugin-session-hooks .session-command')?.textContent]; })()`),
+    [['As Claude Code', 'As Copilot CLI'], '${CLAUDE_PLUGIN_ROOT}/hooks/hello.sh']);
   await a.click('#nav-instructions');
   await waitFor(`!!document.querySelector('#session-codex-cli')`);
   await steady();

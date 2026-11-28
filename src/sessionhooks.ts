@@ -1,6 +1,6 @@
 // A hook as the pages show it (hookLine, hookFingerprint, textHookRows, on a plugin's page and the Instructions page alike), the strip on
 // each tool's card on the Instructions page ("Hooks that can add text", Pi's packages, OpenCode's plugins; its standing warning
-// HOOK_RUN_WARN / hookRunWarn, info-card text hookStripHelp / hookStripCard, and refusals HOOK_RUN_ACTUAL_ONLY / HOOK_RUN_COPILOT_PLUGIN),
+// HOOK_RUN_WARN / hookRunWarn, info-card text hookStripHelp / hookStripCard, and refusal HOOK_RUN_ACTUAL_ONLY),
 // and what a hook run's result says in words (hookRunWords), drawn by instructionspage.ts sessionStripView, pluginpage.ts sessionHookStrip and hooksourceview.ts. Pure: nothing here reads a file or runs a hook. Its facts:
 // - each plugin installed whole in the tool and On there, with its hooks as its installed copy declares them (HomeView
 //   pluginItems, read by pluginitems.ts readPluginItems);
@@ -97,9 +97,8 @@ export function sessionStrip(tool: HarnessId, items: InstalledPlugin[], file: Pi
     : { heading: 'Hooks that can add text', groups, ...(note ? { note } : {}) };
 }
 
-/** One source for main's hookrun.ts refusals and hooksourceview.ts stripCantRunReason when hooks can't be run here. */
+/** One source for main's hookrun.ts refusal and hooksourceview.ts stripCantRunReason outside this computer's home. */
 export const HOOK_RUN_ACTUAL_ONLY = 'See what it adds works only on this computer’s home.';
-export const HOOK_RUN_COPILOT_PLUGIN = 'Central Knot can’t run a Copilot CLI plugin’s hook, but View source shows its script.';
 
 /** Standing line above the first row of every strip that has a runnable hook. */
 export const HOOK_RUN_WARN = '“See what it adds” runs the hook’s command on this computer to collect what it prints. Nothing is added to any session, but the command may change your files.';
