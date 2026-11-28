@@ -16608,7 +16608,7 @@ async function libraryFlow() {
   const fileUnder = () => o.run(`(() => { const box = document.querySelector('.file-open-box');
     return { row: box?.closest('.history-row')?.id ?? null, item: box?.querySelector('.file-open-item')?.textContent ?? null, text: box?.querySelector('pre.content')?.textContent ?? '',
       pressed: [...document.querySelectorAll('.history-row .row-file-btn[aria-pressed="true"]')].map(mark => mark.closest('.history-row').id), boxes: document.querySelectorAll('.file-open-box').length }; })()`);
-  const historyShot = async (name, look) => { if (!shots) return; await o.run(`window.centralKnot.setAppearance('${look}')`); await wait(80); await o.shot(name); await o.run(`window.centralKnot.setAppearance('system')`); };
+  const historyShot = async (name, look) => { if (!shots) return; await theme(o, look); await o.settle(); await o.shot(name); await theme(o, 'light'); };
   for (const [width, height] of [SMALLEST, [1316, 819]]) {
     await sizeTo(o, width, height);
     if (await o.run(`document.getElementById('sidebar-toggle')?.getAttribute('aria-label') === 'Expand the sidebar'`)) await o.click('#sidebar-toggle');
