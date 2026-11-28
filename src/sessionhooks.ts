@@ -7,13 +7,13 @@
 // - the person's own hooks, and Pi's packages and OpenCode's plugins, as the tool's own settings name them (InstructionFile
 //   ownHooks and extensions, read by pluginitems.ts sessionSettings).
 // What it lists: hooks that start a program when a session starts or with a prompt, by each tool's rule (pluginoutcomes.ts
-// addsText, whenItRuns, and the tool's own note, sessionTextNote). A hook's text is known only when it runs, so the strip says
+// addsText, whenItRuns, and the tool's card note, sessionTextCardNote). A hook's text is known only when it runs, so the strip says
 // when it runs, never what it adds. Not listed: other kinds of hook (one that calls a URL or an MCP tool, or asks a model), a
 // project's or an organisation's hooks, a skill's or an agent's own hooks, and `additionalContext` printed by other events.
 import { clockTime } from './model.ts';
-import { addsText, hookEventLabel, ignoresText, sessionTextNote } from './pluginoutcomes.ts';
+import { addsText, hookEventLabel, ignoresText, sessionTextCardNote } from './pluginoutcomes.ts';
 import { commandLine, toolNames } from './words.ts';
-import type { DeclaredHook, HarnessId, HomeMode, HookRunResult, HookSourceOwner, HookSourceRef, InstalledPlugin, InstructionFile } from './types.ts';
+import type { DeclaredHook, HarnessId, HookRunResult, HookSourceOwner, HookSourceRef, InstalledPlugin, InstructionFile } from './types.ts';
 
 /** How a hook starts, in one line: its shell command as written, or its program with its arguments; '' for one that starts nothing here. */
 export const hookLine = (hook: DeclaredHook) => (!hook.launch ? '' : 'shell' in hook.launch ? hook.launch.shell : commandLine(hook.launch.program, hook.launch.args));
@@ -90,47 +90,37 @@ export function sessionStrip(tool: HarnessId, items: InstalledPlugin[], file: Pi
       .filter(group => group.problem || group.unread.length || group.hooks.length),
     ...(file.extensions ?? []).map(name => ({ name, mark: originMark(name), unread: [], hooks: [] })),
   ];
-  const note = sessionTextNote(tool), word = EXTENSIONS[tool];
+  const note = sessionTextCardNote(tool, groups.length > 0), word = EXTENSIONS[tool];
   if (!groups.length && ![...own, ...plugins.flatMap(install => install.hooks ?? [])].some(hook => ignoresText(tool, hook))) return undefined;
   return word
     ? { heading: `${word[0]!.toUpperCase()}${word.slice(1)} that can add text`, groups }
     : { heading: 'Hooks that can add text', groups, ...(note ? { note } : {}) };
 }
 
-/** One source for main's hookrun.ts refusals and the strip's (?) card when hooks can't be run here. */
+/** One source for main's hookrun.ts refusals and hooksourceview.ts stripCantRunReason when hooks can't be run here. */
 export const HOOK_RUN_ACTUAL_ONLY = 'Run it works only on this computer’s home.';
-export const HOOK_RUN_COPILOT_PLUGIN = 'Copilot CLI plugin hooks aren’t supported here.';
+export const HOOK_RUN_COPILOT_PLUGIN = 'Central Knot can’t run a Copilot CLI plugin’s hook, but View source shows its script.';
 
 /** Standing line above the first row of every strip that has a runnable hook. */
 export const HOOK_RUN_WARN = '“Run it” runs a hook’s command to show what it adds; it may change your files.';
-/** Standing line for a runnable strip: joins Codex's pre-run trust warning into one line. */
+/** Standing line for a runnable strip: Codex names its /hooks command in one plain sentence. */
 export const hookRunWarn = (tool: HarnessId): string =>
-  tool === 'codex-cli' ? `${HOOK_RUN_WARN} Codex: Run it runs a hook even if it isn’t trusted in /hooks.` : HOOK_RUN_WARN;
+  tool === 'codex-cli' ? '“Run it” runs a hook’s command to show what it adds, whether or not you have trusted it in Codex’s /hooks command, and may change your files.' : HOOK_RUN_WARN;
 
-/** Information-mark card text on the first hooks strip of a page (30 words at most). */
-export function hookStripHelp(tool: HarnessId, runnable: boolean): string {
-  const when = tool === 'copilot-cli' ? 'Session-start' : 'Session-start and prompt';
-  const base = `${when} hooks; not URL, MCP, project or organisation.`;
-  return runnable ? `${base} Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.` : base;
-}
+/** Whole-sentence parts for the first hooks strip's (?) card (at most 2 sentences, ≤30 words). */
+const hookStripHelpParts = (tool: HarnessId, runnable: boolean): string[] => [
+  `This lists ${tool === 'copilot-cli' ? 'session-start' : 'session-start and prompt'} hooks, not URL, MCP, project or organisation.`,
+  ...(runnable ? ['Run it uses your home or the hook’s folder, and plugin hooks can change installed files and data.'] : []),
+];
 
-/** Standing text for one hooks strip's (?) card (≤2 sentences, keeping hookStripHelp alone when the first strip adds nothing). */
-export function hookStripCard(tool: HarnessId, strip: Pick<SessionStrip, 'note' | 'groups'>,
-  info: { first: boolean; runnable: boolean; anyRunnable: boolean; mode?: HomeMode; platform?: string }): string | undefined {
-  const note = tool === 'codex-cli' ? (info.runnable ? undefined : 'Codex runs a hook only after you trust it in /hooks.')
-    : tool === 'copilot-cli' ? (strip.groups.length
-      ? 'Copilot CLI uses only top-level additionalContext from start-of-session hooks (not hookSpecificOutput) and ignores prompt hooks.'
-      : 'Copilot CLI ignores what prompt hooks print.')
-    : strip.note ? `${strip.note}.` : undefined;
-  const hooks = strip.groups.flatMap(group => group.hooks);
-  const cantRun = info.platform === 'win32' || !hooks.length ? undefined
-    : info.mode && info.mode !== 'actual' ? HOOK_RUN_ACTUAL_ONLY
-    : info.mode === 'actual' && tool === 'copilot-cli' && hooks.some(hook => hook.source.from === 'installed') ? `Run it: ${HOOK_RUN_COPILOT_PLUGIN}` : undefined;
-  if (info.first && !note && !cantRun) return hookStripHelp(tool, info.anyRunnable);
-  const head = !info.first ? undefined : info.anyRunnable
-    ? `${tool === 'copilot-cli' ? 'Session-start' : 'Session-start and prompt'} hooks (not URL, MCP, project or organisation); Run it uses your home or the hook’s folder.`
-    : hookStripHelp(tool, false);
-  const parts = head && note && cantRun ? [head, `${note.replace(/\.$/, '')}; ${cantRun}`] : [head, note, cantRun].filter(Boolean);
+/** Information-mark card text on the first hooks strip of a page (≤2 sentences, ≤30 words). */
+export const hookStripHelp = (tool: HarnessId, runnable: boolean): string => hookStripHelpParts(tool, runnable).join(' ');
+
+/** Standing text for one hooks strip's (?) card: at most two whole sentences, in order (why not runnable, tool note, then first-strip help if room). */
+export function hookStripCard(tool: HarnessId, strip: Pick<SessionStrip, 'note'>,
+  info: { first: boolean; anyRunnable: boolean; cantRun?: string }): string | undefined {
+  const parts = [info.cantRun, strip.note, ...(info.first ? hookStripHelpParts(tool, info.anyRunnable) : [])]
+    .filter((part): part is string => !!part).slice(0, 2);
   return parts.length ? parts.join(' ') : undefined;
 }
 

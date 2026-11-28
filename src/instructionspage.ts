@@ -15,9 +15,8 @@ import { fileName, lineCount, toolNames } from './words.ts';
 import { button, h, icon, infoMark, lockAttrs, pathText, rereadBand, scrollIntoBox } from './dom.ts';
 import { noToolsState } from './pages.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
-import { pagePlatform } from './machine.ts';
 import { plural } from './model.ts';
-import { canRun, hookCantRunReason, hookRow } from './hooksourceview.ts';
+import { canRun, hookCantRunReason, hookRow, stripCantRunReason } from './hooksourceview.ts';
 import { hookRunWarn, hookStripCard, sessionStrip, type SessionGroup, type SessionStrip } from './sessionhooks.ts';
 import type { LineBox } from './pluginline.ts';
 import { DIRECTORY, FROM_DIRECTORY } from './pluginstatus.ts';
@@ -278,7 +277,7 @@ export function pluginOffButton(plugin: InstalledPlugin, info: { current: boolea
 
 /**
  * The strip on a tool's card after the files read with it (sessionhooks.ts sessionStrip): its heading with at most one (?)
- * mark (hookStripCard: first-strip help, any tool standing note, and why hooks can't run in a folder or Copilot plugin),
+ * mark (hookStripCard: why hooks can't run in a folder or Copilot plugin, any tool note, and first-strip help),
  * the standing run warning when any row can run (hookRunWarn) or missing-CLI reason, then each origin by its mark and name
  * with where it is turned off, what couldn't be read, and each hook beneath it (hooksourceview.ts).
  */
@@ -290,7 +289,8 @@ function sessionStripView(file: InstructionFile, hookInfo?: HookStripPage) {
   const hasRunnable = stripHasRunnable(strip);
   const first = isHooks && (!hookInfo || !hookInfo.marked);
   if (first && hookInfo) hookInfo.marked = true;
-  const card = isHooks ? hookStripCard(file.tool, strip, { first, runnable: hasRunnable, anyRunnable: hookInfo ? hookInfo.anyRunnable : hasRunnable, mode: state.home?.mode, platform: pagePlatform(navigator.userAgent) }) : undefined;
+  const cantRun = isHooks ? stripCantRunReason(strip.groups.flatMap(group => group.hooks.map(hook => hook.source))) : undefined;
+  const card = isHooks ? hookStripCard(file.tool, strip, { first, anyRunnable: hookInfo ? hookInfo.anyRunnable : hasRunnable, cantRun }) : undefined;
   const mark = card ? infoMark(first ? 'session-hooks-info' : `session-hooks-info-${file.tool}`, `${toolNames[file.tool]}: ${strip.heading}`, card) : null;
   const whyNot = isHooks && !hasRunnable && strip.groups.some(group => group.hooks.length) ? hookCantRunReason(file.tool) : undefined;
   const controlOf = ({ plugin, settings }: SessionGroup): { head: Node | null; why?: string; warn?: true } => {

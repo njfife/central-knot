@@ -9,7 +9,7 @@ import { shownPath, state } from './app.ts';
 import { button, closeButton, h, icon, pathText } from './dom.ts';
 import { pagePlatform } from './machine.ts';
 import { addsText, isTextEvent } from './pluginoutcomes.ts';
-import { hookFingerprint, hookRunWords, type TextHookRow } from './sessionhooks.ts';
+import { HOOK_RUN_ACTUAL_ONLY, HOOK_RUN_COPILOT_PLUGIN, hookFingerprint, hookRunWords, type TextHookRow } from './sessionhooks.ts';
 import type { HarnessId, HomeMode, HomeView, HookRunResult, HookSource, HookSourceRef, InstalledPlugin } from './types.ts';
 import { HOOK_SOURCE_UNREADABLE, andList, fileName, sentence, toolNames } from './words.ts';
 
@@ -29,17 +29,27 @@ let seq = 0;
 const hasCli = (tool: HarnessId, home?: Pick<HomeView, 'snapshots'>) =>
   !home?.snapshots || home.snapshots.some(s => s.harness === tool && (s.detection === 'Installed' || s.detection === 'Version unknown' || !!s.app?.binary));
 
+/** Home, platform and tool gates shared by canRun and stripCantRunReason; returns a card reason where the strip's (?) explains it, or 'silent'. */
+const hookGate = (ref: HookSourceRef, mode: HomeMode | undefined, platform: string): string | 'silent' | undefined =>
+  platform === 'win32' || !mode || ref.from === 'marketplace' ? 'silent'
+  : mode !== 'actual' ? HOOK_RUN_ACTUAL_ONLY
+  : ref.from === 'installed' && ref.tool === 'copilot-cli' ? HOOK_RUN_COPILOT_PLUGIN
+  : ref.from === 'installed' && ref.tool !== 'claude-cli' && ref.tool !== 'codex-cli' ? 'silent' : undefined;
+
 /** Whether the page offers Run it (mirrors main's deciding gate in hookrun.ts runHook): actual home, non-Windows, own or Claude Code / Codex installed plugin hook that adds text, with the tool's CLI found and the plugin on. */
 export function canRun(ref: HookSourceRef, mode: HomeMode | undefined = state.home?.mode, platform = pagePlatform(navigator.userAgent), home: Pick<HomeView, 'snapshots' | 'pluginItems'> | undefined = state.home): boolean {
-  if (mode !== 'actual' || platform === 'win32' || ref.from === 'marketplace') return false;
-  if (ref.from === 'installed' && ref.tool !== 'claude-cli' && ref.tool !== 'codex-cli') return false;
+  if (ref.from === 'marketplace' || hookGate(ref, mode, platform)) return false;
   if (!ref.command || !isTextEvent(ref.tool, ref.event)) return false;
   if (!hasCli(ref.tool, home)) return false;
   if (ref.from === 'installed' && home?.pluginItems && !home.pluginItems.some(i => i.tool === ref.tool && i.plugin === ref.plugin && i.marketName === ref.marketName && !i.off && !i.problem)) return false;
   return true;
 }
 
-/** Why text hooks can't run in this home on Mac/Linux (one place for the words); undefined for another home, Windows, Copilot CLI or mixed/unknown causes. */
+/** Why hooks on a strip can't be run, for its (?) card (from hookGate: chosen folder or Copilot CLI plugin hook on Mac/Linux). */
+export const stripCantRunReason = (refs: readonly HookSourceRef[], mode: HomeMode | undefined = state.home?.mode, platform = pagePlatform(navigator.userAgent)): string | undefined =>
+  refs.map(ref => hookGate(ref, mode, platform)).find((why): why is string => !!why && why !== 'silent');
+
+/** Standing line explaining why text hooks can't run in an actual home on Mac/Linux (missing CLI, not installed or off); card-only reasons (another home, Copilot CLI plugin hooks) come from stripCantRunReason above. */
 export function hookCantRunReason(target: HarnessId | { inAnyTool: boolean; installs: InstalledPlugin[]; fingerprints: string[] },
   mode: HomeMode | undefined = state.home?.mode, platform = pagePlatform(navigator.userAgent), home: Pick<HomeView, 'snapshots'> | undefined = state.home): string | undefined {
   if (mode !== 'actual' || platform === 'win32') return undefined;

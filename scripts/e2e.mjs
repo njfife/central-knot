@@ -19380,16 +19380,16 @@ esac
   same('on the card: the file, the base strip, the files read with it, this strip, then Earlier versions', await a.run(`(() => { const card = document.querySelector('article[aria-label="Claude Code instructions"]');
     const parts = ['.ins-body > :first-child', '.base-strip', '#ins-parts-claude-cli', '#session-claude-cli', 'details.ins-versions'].map(selector => card.querySelector(selector));
     return [parts.map(part => !!part), parts.every((part, at) => at === 0 || (parts[at - 1].compareDocumentPosition(part) & Node.DOCUMENT_POSITION_FOLLOWING))]; })()`), [[true, true, true, true, true], true]);
-  same('Codex’s strip: its note and chosen-folder reason behind its (?), then the same plugin in Codex’s form, when each runs as its matcher says',
+  same('Codex’s strip: chosen-folder reason then its note behind its (?), then the same plugin in Codex’s form, when each runs as its matcher says',
     [await a.text('#session-codex-cli .session-note'), await a.text('#session-hooks-info-codex-cli-card'), await groups('codex-cli')],
-    [null, 'Codex runs a hook only after you trust it in /hooks. Run it works only on this computer’s home.', [['release-helper', [['When a session starts or when a session resumes', 'node "${PLUGIN_ROOT}/hooks/remind.mjs" --days 2'], ['When a session starts or when a session resumes', long]], []]]]);
+    [null, 'Run it works only on this computer’s home. Codex runs a hook only after you trust it in its /hooks command.', [['release-helper', [['When a session starts or when a session resumes', 'node "${PLUGIN_ROOT}/hooks/remind.mjs" --days 2'], ['When a session starts or when a session resumes', long]], []]]]);
   same('Copilot CLI with only a prompt hook: no row, no standing paragraph, its (?) says why',
     [await groups('copilot-cli'), await a.text('#session-copilot-cli .session-note'), await a.text('#session-hooks-info-copilot-cli-card')],
     [[], null, 'Copilot CLI ignores what prompt hooks print.']);
   same('in another folder, no Run it button and no standing run warning appear anywhere, and the first strip’s (?) says why',
     [await a.run(`document.querySelectorAll('button[data-hook-run]').length`), await a.run(`document.querySelectorAll('.session-run-warn').length`),
       await a.text('#session-hooks-info-card')],
-    [0, 0, 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it works only on this computer’s home.']);
+    [0, 0, 'Run it works only on this computer’s home. This lists session-start and prompt hooks, not URL, MCP, project or organisation.']);
   same('Pi’s and OpenCode’s extensions by name, under each tool’s own word, with no standing prose paragraph', [await a.text('#session-pi-cli .session-title'), await names('pi-cli'), await a.text('#session-opencode-cli .session-title'), await names('opencode-cli'),
     await a.exists('#session-pi-cli .session-about'), await a.exists('#session-opencode-cli .session-about')], ['Packages that can add text', ['npm:@example/pi-tools@1.0.0'], 'Plugins that can add text', ['opencode-wakatime'],
     false, false]);
@@ -19850,25 +19850,26 @@ async function hookRunFlow() {
   await redrawUnder(a, '#session-claude-cli .session-title');
   same('nothing ran on opening Instructions, Refresh, or a redraw landing', [markerCount(), existsSync(pluginMarker)], [0, false]);
 
-  // Check 3: single standing line on runnable strips (Codex joined), no standing .session-note, at most one (?) a strip.
+  // Check 3: single standing line on runnable strips (Codex one sentence), no standing .session-note, at most one (?) a strip.
   const runWarn = '“Run it” runs a hook’s command to show what it adds; it may change your files.';
-  const codexRunWarn = `${runWarn} Codex: Run it runs a hook even if it isn’t trusted in /hooks.`;
-  const helpCardText = 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.';
-  same('standing warning is on Claude Code and Codex strips (Codex joined) and absent on Copilot CLI prompt-only strip',
+  const codexRunWarn = '“Run it” runs a hook’s command to show what it adds, whether or not you have trusted it in Codex’s /hooks command, and may change your files.';
+  const helpCardText = 'This lists session-start and prompt hooks, not URL, MCP, project or organisation. Run it uses your home or the hook’s folder, and plugin hooks can change installed files and data.';
+  same('standing warning is on Claude Code and Codex strips (Codex one sentence) and absent on Copilot CLI prompt-only strip',
     [await a.text('#session-claude-cli .session-run-warn'), await a.text('#session-codex-cli .session-run-warn'), await a.text('#session-copilot-cli .session-run-warn')],
     [runWarn, codexRunWarn, null]);
-  same('Codex runnable strip and Copilot CLI prompt-only strip draw no standing .session-note; Copilot’s (?) holds its note',
+  same('Codex runnable strip and Copilot CLI prompt-only strip draw no standing .session-note; each (?) holds its note',
     [await a.text('#session-codex-cli .session-note'), await a.text('#session-copilot-cli .session-note'),
-      await a.text('#session-hooks-info-copilot-cli-card'), await a.run(`document.querySelectorAll('#session-copilot-cli button[data-hook-run]').length`)],
-    [null, null, 'Copilot CLI ignores what prompt hooks print.', 0]);
+      await a.text('#session-hooks-info-codex-cli-card'), await a.text('#session-hooks-info-copilot-cli-card'),
+      await a.run(`document.querySelectorAll('#session-copilot-cli button[data-hook-run]').length`)],
+    [null, null, 'Codex runs a hook only after you trust it in its /hooks command.', 'Copilot CLI ignores what prompt hooks print.', 0]);
   const helpInfo = await a.run(`(() => {
     const perStrip = [...document.querySelectorAll('.session-strip')].map(s => s.querySelectorAll('.info-mark').length);
     const ids = [...document.querySelectorAll('.session-strip .info-mark')].map(m => m.id);
     const card = document.getElementById('session-hooks-info-card')?.textContent ?? '';
     return { maxPerStrip: Math.max(0, ...perStrip), ids, card, words: card.trim().split(/\\s+/).length };
   })()`);
-  check('at most one (?) mark per strip, first strip keeps T1.23 wording <= 30 words, Copilot has its own mark',
-    helpInfo.maxPerStrip === 1 && JSON.stringify(helpInfo.ids) === JSON.stringify(['session-hooks-info', 'session-hooks-info-copilot-cli'])
+  check('at most one (?) mark per strip, first strip keeps T1.23 wording <= 30 words, Copilot and Codex each have a mark',
+    helpInfo.maxPerStrip === 1 && JSON.stringify(helpInfo.ids) === JSON.stringify(['session-hooks-info', 'session-hooks-info-copilot-cli', 'session-hooks-info-codex-cli'])
     && helpInfo.words <= 30 && helpInfo.card === helpCardText, helpInfo);
   await a.run(`document.querySelector('#session-claude-cli')?.scrollIntoView({ block: 'start' })`);
   await a.click('#session-hooks-info');
@@ -20168,9 +20169,9 @@ async function hookRunFlow() {
   await steady();
   await waitFor(`!!document.querySelector('#session-copilot-cli button[data-hook-run]')`);
   const copilotPluginRow = await rowOf('session-copilot-cli', 'copilot-plugin-hook');
-  same('Copilot CLI installed plugin hook keeps View source alone, no standing .session-note, and (?) names output rule and plugin refusal',
+  same('Copilot CLI installed plugin hook keeps View source alone, no standing .session-note, and (?) names plugin reason then output rule',
     [!!copilotPluginRow?.srcId, copilotPluginRow?.runId, await a.text('#session-copilot-cli .session-note'), await a.text('#session-hooks-info-copilot-cli-card')],
-    [true, null, null, 'Copilot CLI uses only top-level additionalContext from start-of-session hooks (not hookSpecificOutput) and ignores prompt hooks. Run it: Copilot CLI plugin hooks aren’t supported here.']);
+    [true, null, null, 'Central Knot can’t run a Copilot CLI plugin’s hook, but View source shows its script. Copilot CLI uses only top-level additionalContext from start-of-session hooks (not hookSpecificOutput) and ignores what prompt hooks print.']);
   same('Copilot CLI strip with runnable own hook and non-runnable plugin hook omits the plugin standing line',
     await a.run(`(() => { const w = document.querySelectorAll('#session-copilot-cli .session-run-warn'); return [w.length, !w[0]?.textContent?.includes('Plugin')]; })()`), [1, true]);
   const copRes = await runAndWait('session-copilot-cli', 'copilot-plain.sh');
@@ -20349,9 +20350,10 @@ async function hookRunFlow() {
   // Switch As <tool> to Codex and run Codex's installed hook.
   await a.run(`(() => { const s = document.getElementById('plugin-hook-tool'); s.value = 'codex-cli'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   await waitFor(`document.querySelector('#plugin-session-hooks .session-command')?.textContent?.includes('codex-hello.sh')`);
-  same('switching to As Codex joins Codex trust warning into .session-run-warn with no .session-note',
-    [await a.text('#plugin-session-hooks .session-run-warn'), await a.text('#plugin-session-hooks .session-note'), await a.text('#plugin-session-hooks .session-command')],
-    [codexRunWarn, null, '${PLUGIN_ROOT}/hooks/codex-hello.sh']);
+  const asCodexWarn = await a.text('#plugin-session-hooks .session-run-warn');
+  same('switching to As Codex shows Codex’s warning in .session-run-warn with no .session-note',
+    [asCodexWarn !== runWarn && !!asCodexWarn?.includes('Codex’s /hooks command'), await a.text('#plugin-session-hooks .session-note'), await a.text('#plugin-session-hooks .session-command')],
+    [true, null, '${PLUGIN_ROOT}/hooks/codex-hello.sh']);
   const codexPageRes = await runAndWait('plugin-session-hooks', 'codex-hello.sh');
   check('Run it as Codex on plugin page runs Codex installed hook with executed tool and plugin version and trust note',
     /^Would add as Codex, plugin 0\.4\.1, run in ~, /.test(codexPageRes) && codexPageRes.includes(`codex-root=${codexPluginRoot}`)
@@ -20425,7 +20427,7 @@ async function hookRunFlow() {
       await a.text('#session-codex-cli .session-run-warn'),
       await a.run(`(() => { const n = document.querySelector('#session-codex-cli .session-note'); return [n?.textContent, n?.classList.contains('session-cant-run')]; })()`),
       await a.text('#session-hooks-info-codex-cli-card')],
-    [0, null, ['Codex’s command line isn’t on this computer, so these can’t be run here.', true], 'Codex runs a hook only after you trust it in /hooks.']);
+    [0, null, ['Codex’s command line isn’t on this computer, so these can’t be run here.', true], 'Codex runs a hook only after you trust it in its /hooks command.']);
   if (shots) {
     await sizeTo(a, 860, 560);
     if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
