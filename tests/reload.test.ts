@@ -17,7 +17,7 @@ import { runItems } from '../src/pluginlibrary.ts';
 import { newEntry } from '../src/pluginrecord.ts';
 import { install, parseCatalog, setPart, setWhole, update, type PluginContext } from '../src/plugins.ts';
 import { NO_PLUGINS, saveProfile, switchProfile, type PluginSide } from '../src/profiles.ts';
-import { destinationReloads, hasReloadAdvice, pluginReloads, reloadAdvice, reloadStep, reloadTable, reloadsFor, rowReload, settleReloads, toolWay, waysFrom, type ReloadStep } from '../src/reload.ts';
+import { destinationReloads, hasReloadAdvice, pluginReloads, reloadAdvice, reloadStep, reloadTable, reloadsFor, rowReload, settleReloads, toolWay, waysFrom, type ReloadChange, type ReloadStep } from '../src/reload.ts';
 import { applyServers, restoreServer } from '../src/servers.ts';
 import type { ShareContext } from '../src/share.ts';
 import { applySkills, clearSwitch, restoreSkill, takeOver } from '../src/skills.ts';
@@ -380,6 +380,18 @@ test('Item 7: every cell’s exact chip, title, command, tool order, ranking, an
     text: 'In Copilot CLI, start a new session.',
     items: [{ tool: 'copilot-cli', text: 'In Copilot CLI, start a new session.', chip: 'Copilot CLI: new session', title: 'In Copilot CLI, start a new session.' }],
   });
+});
+
+test('takenInReloads matches taken-in items by notice.keys even when a key differs from itemKey(name)', () => {
+  const kept: ReloadChange = { tool: 'copilot-cli', kind: 'skill', key: 'deploy-prod', on: true };
+  const other: ReloadChange = { tool: 'pi-cli', kind: 'skill', key: 'deploy', on: true };
+  assert.deepEqual(takenInReloads([{
+    crashes: [],
+    skills: {
+      results: [], writes: 1, reloads: [kept, other],
+      notices: [{ kind: 'taken-in', items: ['Deploy'], keys: ['deploy-prod'], from: ['claude-cli'], history: 'take-deploy' }],
+    },
+  }]), [kept]);
 });
 
 test('Synchronize everything attributes only its own take-ins, not unrelated background catch-up writes; Sync once and History Restore report their confirmed writes', async () => {

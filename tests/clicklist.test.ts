@@ -2408,7 +2408,7 @@ test('Synchronize everything Restore ending Everyday appends the profile sentenc
 });
 
 test('Multi-item taken-in notice stays when either item is left in (both orders) and goes once every item it names is undone', async t => {
-  const twoNotice = () => ({ kind: 'taken-in', items: ['alpha', 'beta'], from: ['claude-cli'], history: 'take-alpha', histories: ['take-alpha', 'take-beta'] });
+  const twoNotice = () => ({ kind: 'taken-in' as const, items: ['alpha', 'beta'], keys: ['alpha', 'beta'], from: ['claude-cli' as const], history: 'take-alpha', histories: ['take-alpha', 'take-beta'] });
   const runCase = async (alphaUndone: boolean, betaUndone: boolean, extra?: () => Promise<void>) => {
     const itemUndos = [...(alphaUndone ? ['u-a'] : []), ...(betaUndone ? ['u-b'] : [])];
     const events: Record<string, unknown>[] = [
@@ -2420,7 +2420,7 @@ test('Multi-item taken-in notice stays when either item is left in (both orders)
     historyRestoreWorld(t, events, { beforeOn: { notes: true, standup: false }, afterOn: { notes: false, standup: false }, profiles: [], reply: { results: [], harnessWrites: 1, made: ['ev-undo'], reloads: [] } });
     app.dismissed.clear();
     app.page = 'settings';
-    app.home!.skills.notices = [twoNotice() as never];
+    app.home!.skills.notices = [twoNotice()];
     await restoreEvent('ev-on');
     if (extra) { events[2].undoneBy = 'u-b'; await extra(); }
     return [app.dismissed.has('take-alpha'), !!findById(settingsPage(), 'setting-sync-everything-added-skills')];
