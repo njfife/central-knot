@@ -239,7 +239,7 @@ test('Check 2: hookRunWords matches every outcome, quiet trailing run place/time
 // ---------- Pure unit tests: T1.23 & T2.28 strip lines (Check 3) ----------
 
 test('Check 3: standing line, T1.23 help card (with plugin sentence <= 30 words), and T2.28 strip notes replace strip.note', () => {
-  assert.equal(HOOK_RUN_WARN, 'Running a hook runs its command for real and may change your files.');
+  assert.equal(HOOK_RUN_WARN, '“Run it” runs a hook’s command to show what it adds; it may change your files.');
 
   const claudeRun = hookStripHelp('claude-cli', true);
   assert.equal(claudeRun, 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.');
@@ -493,7 +493,7 @@ test('Check 1 & 6: Claude Code start-of-session stand-in runs on click, shows Ru
     const panel = dom.findAll(row, n => n.className === 'hook-run')[0];
     assert.ok(panel, 'expected .hook-run result panel');
     const panelText = dom.textOf(panel);
-    assert.match(panelText, /^Would add run in ~, .+/);
+    assert.match(panelText, /^Would add as Claude Code, run in ~, .+/);
     assert.doesNotMatch(panelText, /Run again/);
     assert.match(panelText, /First line from hook\nSecond line from hook/);
     assert.deepEqual(dom.scrolled, [{ id: panel.id, opts: { block: 'nearest' } }]);
@@ -1272,4 +1272,142 @@ test('Plugin page runs installed hooks, keeps marketplace-only text hooks View s
   assert.equal(warnText, HOOK_RUN_WARN);
   const cardHelp = dom.findAll(withPluginCard, n => n.attrs?.role === 'tooltip')[0];
   assert.match(dom.textOf(cardHelp), /Plugin hooks can change their installed files and data\./);
+});
+
+test('hookRunWords labels tool and live plugin version truthfully, and script-only hook source shows raw event', async () => {
+  const time = '9:14 PM';
+  const withVer = baseResult({ outcome: 'adds', added: 'hello', allPrinted: 'hello', pluginVersion: '0.4.1' });
+  const noVer = baseResult({ outcome: 'adds', added: 'hello', allPrinted: 'hello' });
+  const blankVer = baseResult({ outcome: 'adds', added: 'hello', allPrinted: 'hello', pluginVersion: '  ' });
+  const missing = baseResult({ outcome: 'missing', program: '/no/bin', pluginVersion: '0.4.1' });
+  assert.equal(hookRunWords('claude-cli', withVer, '~', time, 'claude-cli').meta, 'as Claude Code, plugin 0.4.1, run in ~, 9:14 PM');
+  assert.equal(hookRunWords('claude-cli', noVer, '~', time, 'claude-cli').meta, 'as Claude Code, run in ~, 9:14 PM');
+  assert.equal(hookRunWords('claude-cli', blankVer, '~', time, 'claude-cli').meta, 'as Claude Code, run in ~, 9:14 PM');
+  assert.equal(hookRunWords('claude-cli', withVer, '~', time).meta, 'run in ~, 9:14 PM');
+  assert.equal(hookRunWords('claude-cli', missing, '~', time, 'claude-cli').meta, 'as Claude Code, plugin 0.4.1, tried at 9:14 PM');
+
+  const dom = makeDom();
+  dom.handlers.hookRun = async () => baseResult({ outcome: 'adds', added: 'hello', allPrinted: 'hello', pluginVersion: '0.5.0' });
+  dom.handlers.hookSource = async () => ({ script: { path: '/tmp/h/.claude/plugins/cache/team/helper/0.5.0/hooks/hello.sh', text: '#!/bin/sh\necho hi\n' } });
+  await import('../src/settingspage.ts');
+  const { state } = await import('../src/app.ts');
+  const viewMod = await import('../src/hooksourceview.ts');
+  viewMod.resetHookSources();
+  // Page still holds stale 0.4.1 in pluginItems; live hookRun result carries 0.5.0 installed at click.
+  state.home = {
+    home: '/home/u', mode: 'actual', label: 'Home',
+    pluginItems: [
+      { tool: 'claude-cli', plugin: 'helper', marketName: 'team', version: '0.4.1', items: [], listed: true },
+      { tool: 'codex-cli', plugin: 'no-ver', marketName: 'team', items: [], listed: true },
+    ],
+  } as any;
+  const withVerRef: HookSourceRef = { from: 'installed', tool: 'claude-cli', plugin: 'helper', marketName: 'team', declaredIn: '/tmp/h/.claude/plugins/cache/team/helper/0.4.1/hooks/hooks.json', event: 'SessionStart', at: 0, command: 'echo hi', fingerprint: 'fp-v1' };
+  const noVerRef: HookSourceRef = { from: 'installed', tool: 'codex-cli', plugin: 'no-ver', marketName: 'team', declaredIn: '/tmp/h/.codex/plugins/cache/team/no-ver/local/hooks/hooks.json', event: 'UserPromptSubmit', at: 0, command: 'echo hi', fingerprint: 'fp-v2' };
+
+  const row1 = dom.makeNode('li');
+  row1.connected = true;
+  row1.append(...viewMod.hookSourceControls(withVerRef, 'hook-source-plugin-claude-0'));
+  dom.findAll(row1, n => 'data-hook-run' in (n.attrs ?? {}))[0].onclick({ detail: 1 });
+  dom.findAll(row1, n => 'data-hook-source' in (n.attrs ?? {}))[0].onclick();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.match(dom.textOf(dom.findAll(row1, n => n.className === 'hook-run')[0]), /^Would add as Claude Code, plugin 0\.5\.0, run in ~, /);
+  assert.match(dom.textOf(dom.findAll(row1, n => n.className === 'hook-source')[0]), /hello\.sh · SessionStart/);
+
+  dom.handlers.hookRun = async () => noVer;
+  const row2 = dom.makeNode('li');
+  row2.connected = true;
+  row2.append(...viewMod.hookSourceControls(noVerRef, 'hook-source-plugin-codex-0'));
+  dom.findAll(row2, n => 'data-hook-run' in (n.attrs ?? {}))[0].onclick({ detail: 1 });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const row2Text = dom.textOf(dom.findAll(row2, n => n.className === 'hook-run')[0]);
+  assert.match(row2Text, /^Would add as Codex, run in ~, /);
+  assert.doesNotMatch(row2Text, /plugin|undefined|unknown/);
+});
+
+test('runHook reports live installed pluginVersion at click time rather than stale state', { skip: unixSkip }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ck-hook-ver-'));
+  try {
+    const home = join(root, 'home');
+    const tools = join(root, 'tools');
+    const dataDir = join(root, 'data');
+    await mkdir(join(tools, '.local/bin'), { recursive: true });
+    await standIn(join(tools, '.local/bin/claude'), '#!/bin/sh\necho "2.1.327 (Claude Code)"\n', 'console.log("2.1.327");');
+    const copy = join(home, '.claude/plugins/cache/team/helper/0.5.0');
+    await put(join(copy, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'helper', version: '0.5.0' }));
+    await put(join(copy, 'hooks/hooks.json'), JSON.stringify({ hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: 'echo live-ok' }] }] } }));
+    await put(join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'helper@team': [{ scope: 'user', installPath: copy, version: '0.5.0' }] } }));
+    await put(join(home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'helper@team': true } }));
+    const declaredIn = join(copy, 'hooks/hooks.json');
+    const hook = { declaredIn, event: 'SessionStart', matcher: 'startup', at: 0, launch: { shell: 'echo live-ok' } };
+    const ctx: HookRunContext = {
+      home, toolsHome: tools, mode: 'actual', dataDir,
+      searchPath: '/usr/bin:/bin',
+      env: { PATH: '/usr/bin:/bin', HOME: home, CK_TEST_HOME_ONLY: 'claude' },
+    };
+    const res = await runHook(ctx, { from: 'installed', tool: 'claude-cli', plugin: 'helper', marketName: 'team', declaredIn, event: 'SessionStart', at: 0, command: 'echo live-ok', fingerprint: hookFingerprint(hook) });
+    assert.equal(res.outcome, 'adds');
+    assert.equal(res.pluginVersion, '0.5.0');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('View-only and Other hooks on plugin page use one plain heading, plain event labels with raw event in title, and visible missing-CLI styling', async () => {
+  const dom = makeDom();
+  await import('../src/settingspage.ts');
+  const { state } = await import('../src/app.ts');
+  const { market } = await import('../src/pluginstate.ts');
+  const { pluginPage } = await import('../src/pluginpage.ts');
+  const { instructionCard } = await import('../src/instructionspage.ts');
+  const { resetHookSources } = await import('../src/hooksourceview.ts');
+  resetHookSources();
+
+  const textHook = { declaredIn: '/m/hooks.json', event: 'SessionStart', at: 0, launch: { shell: 'echo start' } };
+  const otherHook = { declaredIn: '/m/hooks.json', event: 'PreToolUse', at: 0, launch: { shell: 'echo check' } };
+  const snap = (harness: string, detection: string) => ({
+    harness, harnessName: harness, surface: 'CLI', mode: 'actual', label: 'Home', root: '/tmp/h',
+    detection, probe: { state: detection === 'Installed' ? 'ok' : 'missing', detail: '' }, discovery: 'ready', skills: [], issues: [],
+  });
+  state.home = {
+    home: '/tmp/h', mode: 'actual', label: 'Home',
+    snapshots: [snap('claude-cli', 'Config found but app not detected')],
+    sync: { managed: ['claude-cli'], writes: {}, access: { allowed: true, reason: '' } },
+    skills: { tools: [], items: [], found: [], issues: [] },
+    mcp: { tools: [], items: [], found: [], issues: [] },
+    agents: { tools: [], items: [], found: [], issues: [] },
+    pluginItems: [{ tool: 'claude-cli', plugin: 'helper', marketName: 'team', version: '0.4.0', items: [], listed: true, source: '/m', hooks: [textHook] }],
+  } as any;
+  const view: any = { home: '/tmp/h', tools: ['claude-cli'], clis: {}, canWrite: true, marketplaces: [] };
+  const entry: any = {
+    source: '/m', origins: ['central-knot'], name: 'team', kind: 'folder', sourceLabel: 'Folder: team',
+    plugins: [{ name: 'helper', version: '0.4.0', description: 'Helper', folder: 'plugins/helper' }],
+    states: { helper: { 'claude-cli': { state: 'installed', version: '0.4.0', path: '/p' } } },
+  };
+  market.details.set('/m\u0000helper', {
+    reading: false,
+    value: {
+      skills: [], commands: [], agents: [], instructions: [], onlyInstructions: false,
+      hooks: [textHook, otherHook], hooksByTool: { 'claude-cli': [textHook, otherHook] },
+      mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false, version: '0.4.0', offered: true,
+    },
+  });
+
+  const page = pluginPage(view, entry, 0, entry.plugins[0]);
+  const h4s = dom.findAll(page, n => n.tag === 'h4').map(n => dom.textOf(n));
+  assert.ok(h4s.includes('Hooks that can add text (1)'), `expected unified heading, got ${h4s}`);
+  assert.equal(h4s.some(h => h.includes('to sessions')), false, 'must not split heading into "to sessions"');
+  const events = dom.findAll(page, n => n.className.includes('plugin-hook-event')).map(n => [dom.textOf(n), n.attrs.title]);
+  assert.deepEqual(events, [['When a session starts', 'SessionStart'], ['Before a tool runs', 'PreToolUse']]);
+  const cantRunPlugin = dom.findAll(page, n => n.className.includes('session-cant-run'));
+  assert.equal(cantRunPlugin.length, 1);
+  assert.match(dom.textOf(cantRunPlugin[0]), /Claude Code’s command line isn’t on this computer/);
+
+  const insCard = instructionCard({
+    tool: 'claude-cli', path: '/tmp/h/.claude/CLAUDE.md', exists: true, text: '# Hi', hash: 'h1',
+    readers: 'Claude Code', notes: [], versions: [],
+    ownHooks: [{ declaredIn: '/tmp/h/.claude/settings.json', event: 'SessionStart', at: 0, launch: { shell: 'echo mine' } }],
+  } as any);
+  const cantRunIns = dom.findAll(insCard, n => n.className.includes('session-cant-run'));
+  assert.equal(cantRunIns.length, 1);
+  assert.match(dom.textOf(cantRunIns[0]), /Claude Code’s command line isn’t on this computer/);
 });

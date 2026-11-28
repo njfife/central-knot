@@ -74,6 +74,8 @@ export function blocked(view: PluginsView, entry: MarketplaceView, tool: Harness
   return (tool === 'copilot-cli' ? entry.copilotRefuses : undefined) ?? entry.refusedBy?.[tool];
 }
 
+/** Said of a plugin a tool still has that its marketplace's catalog dropped, on its "No longer offered" mark and its own page. */
+export const NO_LONGER_OFFERED = 'Stays installed as it is until you uninstall it.';
 /**
  * Whether a plugin is marked "No longer offered": its marketplace's catalog was read and no longer lists it, while a tool
  * still has it. (A plugin listed only because its marketplace can't be read now is `gone` too, without the mark.)

@@ -8,9 +8,9 @@ import { manageLocked, manageRow } from './managecard.ts';
 import { MARK_WORDS, installsIn, pluginsInstalled, takenItems, takesItemsOnly, viewStopped, type InstalledMarketPlugin } from './pluginstatus.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { pluginTitle, uninstallControl } from './pluginparts.ts';
-import { button, emptyState, h, icon, pathText, section, toggle, type Child } from './dom.ts';
+import { button, emptyState, h, icon, infoMark, pathText, section, toggle, type Child } from './dom.ts';
 import { fullToolName, plural } from './model.ts';
-import { andList, coworkWords, fileName, kindNouns, pageNames, sentence, toolNames as names } from './words.ts';
+import { andList, coworkWords, fileName, kindNouns, pageNames, toolNames as names } from './words.ts';
 import { agentsKeptIn, hasCowork, takesPlugins, type AgentTool } from './presence.ts';
 import { brandMark } from './brand.ts';
 import { shortBuild } from './values.ts';
@@ -36,8 +36,8 @@ const readProblems = (snapshot: Snapshot) => (snapshot.discovery === 'missing' ?
 const listed = (home: HomeView) => home.snapshots.filter(snapshot => home.mode === 'actual' || home.sync.present.includes(snapshot.harness));
 
 const supports = (home: HomeView, kind: PageKind, tool: HarnessId) => kindSource(home, kind).tools.includes(tool);
-/** Said on the card, the tab's tooltip and the empty tab when Central Knot holds no kind of this in a tool (Antigravity's agents). */
-const kindNotUsed = (tool: HarnessId, kind: PageKind) => `${sentence(kindNouns[kind].many)} aren’t handled for ${names[tool]}`;
+/** Said on the card, the tab's tooltip and the empty tab when Central Knot doesn't handle a kind for a tool (Antigravity's agents). */
+const kindNotUsed = (tool: HarnessId, kind: PageKind) => `Central Knot doesn’t handle ${kindNouns[kind].many} for ${names[tool]}.`;
 
 /**
  * What one tool has of one kind: its total, the synced subtotal (for skills, only copies managed there), and copies that
@@ -89,42 +89,81 @@ const appLine = (app: DesktopApp) => `${app.name}${app.version ? ` ${app.version
 
 // ---------- Every harness ----------
 
-type Count = { value: string; note?: string; faint?: boolean };
-/** One line of a card's counts: what, how many, and a short note. `faint` for a count that is not there or not known. */
-function countRow(label: string, count: Count | null) {
+type Count = {
+  value: string;
+  note?: string;
+  parts?: string[];
+  faint?: boolean;
+  reason?: { id: string; text: string };
+  link?: { id: string; label: string; title: string; open: () => void };
+  describe?: string;
+};
+/**
+ * One line of a card's counts: what, how many, and a short note. An empty `value` (an instruction file) lets its `link` and
+ * `note` span both value and note tracks; a capability `reason` spans both tracks with a keyboard-accessible dash mark
+ * (`infoMark`, ignoring `faint`); `faint` dims plain non-numeric values (`?`, `…`, `—`); `parts` keeps short phrases intact
+ * with CSS separators so wrapped lines never orphan a word; a bare count carries `describe`.
+ */
+function countRow(label: string, count: Count | null, tool: HarnessId) {
   if (!count) return null;
-  const { value, note, faint = false } = count;
-  return h('div.harness-count', {}, h('span.harness-count-label', {}, label), h(`span.harness-count-value${faint ? '.tone-faint' : ''}`, {}, value), h('span.harness-count-note', {}, note ?? ''));
+  const { value, note, parts, faint = false, reason, link, describe } = count;
+  if (!value) {
+    return h('div.harness-count', {},
+      h('span.harness-count-label', {}, label),
+      h('span.harness-count-note.harness-count-span', {},
+        link ? h('button.harness-count-link', { type: 'button', id: link.id, title: link.title, disabled: !!state.busy, onclick: link.open }, link.label) : null,
+        note ?? ''));
+  }
+  if (reason) {
+    return h('div.harness-count', {},
+      h('span.harness-count-label', {}, label),
+      h('span.harness-count-value.harness-count-span', {},
+        infoMark(reason.id, `${names[tool]} ${label}`, reason.text, { face: [value, icon('circle-question-mark', 14)], look: 'harness-count-dash' })));
+  }
+  const tail = parts && parts.length > 1
+    ? h('span.harness-count-note.harness-count-parts', {}, parts.map(part => h('span.harness-count-part', {}, part)))
+    : h('span.harness-count-note', {}, parts?.[0] ?? note ?? '');
+  return h('div.harness-count', {},
+    h('span.harness-count-label', {}, label),
+    h(`span.harness-count-value${faint ? '.tone-faint' : ''}`, { 'aria-description': describe }, value),
+    tail);
 }
 
 function kindCount(home: HomeView, { kind, supported, total, plugins, on }: ReturnType<typeof tally>, tool: HarnessId): Count | null {
-  if (!supported) return { value: '—', note: kindNotUsed(tool, kind), faint: true };
+  if (!supported) return { value: '—', reason: { id: `harness-${tool}-${kind}-reason`, text: kindNotUsed(tool, kind) } };
   // Unread comes before any total, as on the Overview; known zero is omitted.
   if (home[kind]?.unread?.includes(tool)) return { value: '?', note: 'couldn’t be read', faint: true };
   if (!total) return null;
   // A plugin's items are counted and said apart: they are never synced.
   const own = total - plugins;
-  const mine = !own ? '' : on === own ? (plugins ? `${own} synced` : '') : !on ? `${own} not synced` : `${on} synced · ${own - on} not synced`;
-  return { value: String(total), note: [mine, plugins ? `${plugins} from plugins` : ''].filter(Boolean).join(' · ') };
+  const parts = [
+    ...(own && on && (on < own || plugins) ? [`${on} synced`] : []),
+    ...(own > on ? [`${own - on} not synced`] : []),
+    ...(plugins ? [`${plugins} from plugins`] : []),
+  ];
+  return { value: String(total), parts, describe: parts.length ? undefined : plural(total, kindNouns[kind].one, kindNouns[kind].many) };
 }
 
 function instructionCount(tool: HarnessId): Count {
   // Files already read stay shown if a later read fails, here as on the Instructions tab.
-  if (!state.instructions.data) return state.instructions.state === 'failed' ? { value: '—', note: 'couldn’t be read', faint: true } : { value: '…', faint: true };
-  // A file, not a number: its name and length, or that there is none yet.
+  if (!state.instructions.data) return state.instructions.state === 'failed' ? { value: '?', note: 'couldn’t be read', faint: true } : { value: '…', faint: true };
+  // A file, not a number: its name links straight to the tool's Instructions tab; no file yet stays plain.
   const file = instructionOf(tool);
   if (!file) return { value: '—', faint: true };
   if (!file.exists) return { value: '', note: 'no file yet' };
-  // Its name alone, so the note keeps to one line on a narrow card; an empty file says so.
-  return { value: '', note: file.text.trim() ? fileName(file.path) : `${fileName(file.path)} (empty)` };
+  return {
+    value: '',
+    note: file.text.trim() ? '' : ' (empty)',
+    link: { id: `harness-${tool}-instructions`, label: fileName(file.path), title: `Open ${names[tool]}’s Instructions tab`, open: () => goHarness(tool, 'instructions') },
+  };
 }
 
 /** A tool's plugins on its card (pluginstatus.ts pluginsInstalled, the Overview's count too). */
 function pluginCount(tool: HarnessId): Count | null {
   const plugins = pluginsInstalled(state.home, tool);
-  if (plugins.state === 'unsupported') return { value: '—', note: takesItemsOnly(names[tool]), faint: true };
+  if (plugins.state === 'unsupported') return { value: '—', reason: { id: `harness-${tool}-plugins-reason`, text: takesItemsOnly(names[tool]) } };
   if (plugins.state === 'unknown') return { value: '?', note: 'its record couldn’t be read', faint: true };
-  return plugins.count ? { value: String(plugins.count), note: 'installed' } : null;
+  return plugins.count ? { value: String(plugins.count), describe: plural(plugins.count, 'installed plugin') } : null;
 }
 
 /** What needs a look on a card, each a link: differing copies (to that kind's tab, showing only those) and read problems (to About). */
@@ -157,24 +196,25 @@ function summaryCard(snapshot: Snapshot, home: HomeView, showManageInfo = false)
     : h('span.harness-card-head', {}, ...title);
   // On this computer each card says how its tool was found; a sample or chosen folder is said once, in the note above.
   const status = home.mode === 'actual' ? h(`span.harness-card-status${installed ? '' : '.tone-faint'}`, {}, detectionLine(snapshot, home)) : null;
-  const path = h('span.harness-card-path', { title: snapshot.root }, h('span.mono', {}, shownPath(snapshot.root)));
-  if (installed && !here) return h('div.card.harness-card.harness-card-out', { id: `harness-${tool}`, 'aria-label': `${names[tool]}: not managed` },
-    h('div.harness-card-main', {}, head, status, h('span.harness-card-next', {}, `Left out: Central Knot writes nothing in ${names[tool]}. Its switch asks before managing it again.`)), manageRow(home, tool), path);
-  if (!here) return h('div.card.harness-card.harness-card-missing', { id: `harness-${tool}`, 'aria-label': `${names[tool]}: not found` },
+  const path = h('span.harness-card-path', {}, pathText(shownPath(snapshot.root), snapshot.root));
+  const foot = (manage: HTMLElement) => h('div.harness-card-foot', {}, manage, path);
+  if (installed && !here) return h('div.card.harness-card.harness-card-out', { id: `harness-card-${tool}`, 'aria-label': `${names[tool]}: not managed` },
+    h('div.harness-card-main', {}, head, status, h('span.harness-card-next', {}, 'Left out')), foot(manageRow(home, tool)));
+  if (!here) return h('div.card.harness-card.harness-card-missing', { id: `harness-card-${tool}`, 'aria-label': `${names[tool]}: not found` },
     // When no tool at all was found, the note above already says to install one; each card need not repeat it.
     h('div.harness-card-main', {}, head, status, home.sync.present.length ? h('span.harness-card-next', {}, `Install ${names[tool]}, then Refresh.`) : null), path);
   const kinds = KINDS.map(kind => tally(home, kind, tool));
-  const kindRows = kinds.map(entry => countRow(tabLabel(entry.kind), kindCount(home, entry, tool))).filter((row): row is HTMLElement => !!row);
-  const extraRows = [countRow(tabLabel('instructions'), instructionCount(tool)), countRow(tabLabel('plugins'), pluginCount(tool)),
+  const kindRows = kinds.map(entry => countRow(tabLabel(entry.kind), kindCount(home, entry, tool), tool)).filter((row): row is HTMLElement => !!row);
+  const extraRows = [countRow(tabLabel('instructions'), instructionCount(tool), tool), countRow(tabLabel('plugins'), pluginCount(tool), tool),
     // Cowork comes with Claude desktop and is no tool here: it uses the Claude account's plugins, said once on Claude Code's card.
-    tool === 'claude-cli' && hasCowork(home.snapshots) ? countRow('Cowork', { value: '—', note: coworkWords.card, faint: true }) : null]
+    tool === 'claude-cli' && hasCowork(home.snapshots) ? countRow('Cowork', { value: '—', note: coworkWords.card, faint: true }, tool) : null]
     .filter((row): row is HTMLElement => !!row);
   const groups = [kindRows, extraRows].filter(rows => rows.length);
   // Two groups (the three kinds, then its file and plugins), which sit side by side on a wide card.
   const body = [head, status, groups.length ? h('span.harness-counts', {}, groups.map(rows => h('span.harness-count-group', {}, rows))) : null];
-  return h('div.card.harness-card', {},
+  return h('div.card.harness-card', { id: `harness-card-${tool}` },
     h('div.harness-card-main', {}, body),
-    attentionLinks(snapshot, kinds), manageRow(home, tool, showManageInfo), path);
+    attentionLinks(snapshot, kinds), foot(manageRow(home, tool, showManageInfo)));
 }
 
 /**
@@ -267,7 +307,7 @@ function switcher(home: HomeView, tool: HarnessId) {
   const others = home.sync.managed;
   if (others.length < 2) return null;
   return h('div.harness-switch', { role: 'group', 'aria-label': 'Other harnesses' }, others.map(other => h(`button.harness-switch-item${other === tool ? '.selected' : ''}`, {
-    type: 'button', id: `harness-switch-${other}`, 'aria-pressed': String(other === tool), title: names[other], disabled: !!state.busy && other !== tool,
+    type: 'button', id: `harness-switch-${other}`, 'aria-pressed': String(other === tool), 'aria-label': names[other], title: names[other], disabled: !!state.busy && other !== tool,
     onclick: () => { if (other !== tool) goHarness(other); },
   }, brandMark(other, 14), h('span.harness-switch-name', {}, names[other]))));
 }

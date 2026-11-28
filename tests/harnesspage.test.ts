@@ -114,38 +114,55 @@ test('managed card has a div body and heading button; keyboard Back focuses it a
 function makeHome({
   managed = ['claude-cli', 'codex-cli'] as HarnessId[],
   leftOut = [] as HarnessId[],
+  missing = [] as HarnessId[],
   allowed = true,
   mcpUnread = [] as HarnessId[],
   pluginItems = [] as unknown[],
+  pluginRecordsUnread = [] as HarnessId[],
+  skills = [] as unknown[],
+  skillsLibrary = {} as Record<string, unknown>,
+  mcp = [] as unknown[],
+  snapshots,
 }: {
   managed?: HarnessId[];
   leftOut?: HarnessId[];
+  missing?: HarnessId[];
   allowed?: boolean;
   mcpUnread?: HarnessId[];
   pluginItems?: unknown[];
+  pluginRecordsUnread?: HarnessId[];
+  skills?: unknown[];
+  skillsLibrary?: Record<string, unknown>;
+  mcp?: unknown[];
+  snapshots?: unknown[];
 } = {}): HomeView {
   const present = [...managed, ...leftOut];
-  const emptyLib = (tools: HarnessId[], unread: HarnessId[] = []) => ({
-    tools, items: [], notices: [], problems: [], unread, access: { allowed }, gate: { state: 'ready' }, library: {},
+  const all = [...present, ...missing];
+  const lib = (tools: HarnessId[], items: unknown[] = [], unread: HarnessId[] = [], library: Record<string, unknown> = {}) => ({
+    tools, items, notices: [], problems: [], unread, access: { allowed }, gate: { state: 'ready' }, library,
   });
   return {
     home: '/home',
     mode: 'actual',
     label: 'This computer',
     syncOn: true,
-    snapshots: present.map(harness => ({
-      harness, root: `/home/.${harness}`, discovery: 'found', detection: 'Installed', probe: { version: '1.0.0', detail: '' }, skills: [], issues: [],
+    snapshots: snapshots ?? all.map(harness => ({
+      harness, root: `/home/.${harness}`,
+      discovery: missing.includes(harness) ? 'missing' : 'found',
+      detection: missing.includes(harness) ? 'Not found' : 'Installed',
+      probe: { version: missing.includes(harness) ? undefined : '1.0.0', detail: '' },
+      skills: [], issues: [],
     })),
     sync: {
       present, managed, leftOut, writes: {}, caughtUp: [], arrived: [],
       access: allowed ? { allowed: true } : { allowed: false, reason: 'Preview only' },
       gate: { state: 'ready' },
     },
-    skills: emptyLib(present),
-    mcp: emptyLib(present, mcpUnread),
-    agents: emptyLib(present),
+    skills: lib(present, skills, [], skillsLibrary),
+    mcp: lib(present, mcp, mcpUnread),
+    agents: lib(present.filter(tool => tool !== 'antigravity-cli')),
     pluginItems,
-    pluginRecordsUnread: [],
+    pluginRecordsUnread,
     profiles: { profiles: [] },
     otherApps: [],
   } as unknown as HomeView;
@@ -157,6 +174,7 @@ test('locked home keeps every Manage switch named for its tool with lock reason 
   rendered = harnessesPage() as unknown as FakeNode;
 
   assert.equal(findById(rendered, 'manage-info'), undefined);
+  assert.equal(findById(rendered, 'manage-claude-cli-info'), undefined);
   for (const tool of ALL_SIX) {
     const sw: FakeNode = findById(rendered, `manage-${tool}`)!;
     assert.ok(sw.attrs['aria-label']?.includes(`Manage ${SIX_NAMES[tool]}`), `locked ${tool} switch keeps tool name`);
@@ -245,4 +263,217 @@ test('Plugins tab matches boxOf disabled rule, shows box.line on locked rows, an
   rendered = harnessesPage() as unknown as FakeNode;
   assert.equal(textOf(findById(rendered, 'harness-plugins-stopped')), problem);
   resetMarket();
+});
+
+test('tool page tabs keep full labels and switcher buttons carry accessible tool names', () => {
+  app.home = makeHome({ managed: ALL_SIX });
+  Object.assign(app, { page: 'harnesses', harness: 'claude-cli', harnessTab: 'skills', busy: undefined, instructions: { state: 'ready', data: [], gen: 0 } });
+  rendered = harnessesPage() as unknown as FakeNode;
+
+  const tabLabels = findAll(rendered, el => el.className.split(/\s+/).includes('harness-tab')).map(el => textOf(el));
+  assert.deepEqual(tabLabels, ['Skills', 'MCP servers', 'Agents', 'Instructions', 'Plugins', 'About']);
+  for (const tool of ALL_SIX) {
+    const sw: FakeNode = findById(rendered, `harness-switch-${tool}`)!;
+    assert.equal(sw.attrs['aria-label'], SIX_NAMES[tool]);
+    assert.equal(sw.attrs.title, SIX_NAMES[tool]);
+    assert.equal(textOf(findNode(sw, el => el.className.split(/\s+/).includes('harness-switch-name'))!), SIX_NAMES[tool]);
+  }
+});
+
+test('capability reasons live on a keyboard-accessible dash mark naming whose limit it is with no inline prose', () => {
+  app.home = makeHome({ managed: ['pi-cli', 'antigravity-cli'] });
+  Object.assign(app, { page: 'harnesses', harness: undefined, busy: undefined, instructions: { state: 'ready', data: [], gen: 0 } });
+  rendered = harnessesPage() as unknown as FakeNode;
+
+  const antigravity = findById(rendered, 'harness-card-antigravity-cli')!;
+  const agentsRow = findAll(antigravity, el => el.classList.contains('harness-count')).find(row => textOf(row.children[0]) === 'Agents')!;
+  const agentsVal = findNode(agentsRow, el => el.classList.contains('harness-count-value'))!;
+  const agentsDash = findById(agentsRow, 'harness-antigravity-cli-agents-reason')!;
+  const agentsCard = findById(agentsRow, 'harness-antigravity-cli-agents-reason-card')!;
+  assert.equal(agentsVal.classList.contains('harness-count-span'), true);
+  assert.equal(agentsVal.classList.contains('tone-faint'), false);
+  assert.equal(agentsDash.tag, 'button');
+  assert.equal(agentsDash.classList.contains('info-mark'), true);
+  assert.equal(agentsDash.classList.contains('harness-count-dash'), true);
+  assert.equal(textOf(agentsDash), '—');
+  assert.equal(agentsDash.attrs['aria-describedby'], 'harness-antigravity-cli-agents-reason-card');
+  assert.match(agentsDash.attrs['aria-label'] ?? '', /Antigravity Agents/);
+  assert.equal(agentsCard.attrs.role, 'tooltip');
+  assert.equal(agentsCard.attrs.popover, 'manual');
+  assert.equal(textOf(agentsCard), 'Central Knot doesn’t handle agents for Antigravity.');
+  assert.equal(findNode(agentsRow, el => el.classList.contains('harness-count-note')), undefined);
+
+  const pi = findById(rendered, 'harness-card-pi-cli')!;
+  const pluginsRow = findAll(pi, el => el.classList.contains('harness-count')).find(row => textOf(row.children[0]) === 'Plugins')!;
+  const pluginsVal = findNode(pluginsRow, el => el.classList.contains('harness-count-value'))!;
+  const pluginsDash = findById(pluginsRow, 'harness-pi-cli-plugins-reason')!;
+  const pluginsCard = findById(pluginsRow, 'harness-pi-cli-plugins-reason-card')!;
+  assert.equal(pluginsVal.classList.contains('harness-count-span'), true);
+  assert.equal(pluginsVal.classList.contains('tone-faint'), false);
+  assert.equal(pluginsDash.tag, 'button');
+  assert.equal(textOf(pluginsDash), '—');
+  assert.equal(pluginsDash.attrs['aria-describedby'], 'harness-pi-cli-plugins-reason-card');
+  assert.equal(textOf(pluginsCard), 'Pi takes a plugin’s items, not the plugin');
+  assert.equal(findNode(pluginsRow, el => el.classList.contains('harness-count-note')), undefined);
+});
+
+test('existing instruction files link to their Instructions tab, empty files keep (empty) plain, and no file yet stays plain', () => {
+  app.home = makeHome({ managed: ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'] });
+  Object.assign(app, {
+    page: 'harnesses', harness: undefined, harnessTab: 'skills', busy: undefined,
+    instructions: {
+      state: 'ready', gen: 0,
+      data: [
+        { tool: 'claude-cli', path: '/home/.claude/CLAUDE.md', exists: true, text: 'Be brief.\n' },
+        { tool: 'copilot-cli', path: '/home/.copilot/copilot-instructions.md', exists: true, text: 'Rules.\n' },
+        { tool: 'codex-cli', path: '/home/.codex/AGENTS.md', exists: true, text: '   \n' },
+        { tool: 'pi-cli', path: '/home/.pi/agent/AGENTS.md', exists: false, text: '' },
+      ],
+    },
+  });
+  rendered = harnessesPage() as unknown as FakeNode;
+
+  const rowIn = (card: FakeNode, label: string) => findAll(card, el => el.classList.contains('harness-count')).find(row => textOf(row.children[0]) === label)!;
+  const claude = findById(rendered, 'harness-card-claude-cli')!;
+  const claudeInsLink = findById(claude, 'harness-claude-cli-instructions')!;
+  assert.equal(claudeInsLink.tag, 'button');
+  assert.equal(claudeInsLink.classList.contains('harness-count-link'), true);
+  assert.equal(textOf(claudeInsLink), 'CLAUDE.md');
+  assert.equal(claudeInsLink.attrs.title, 'Open Claude Code’s Instructions tab');
+  claudeInsLink.onclick!({});
+  assert.equal(app.harness, 'claude-cli');
+  assert.equal(app.harnessTab, 'instructions');
+  app.harness = undefined;
+  app.harnessTab = 'skills';
+
+  app.busy = 'Working…';
+  rendered = harnessesPage() as unknown as FakeNode;
+  assert.equal('disabled' in findById(rendered, 'harness-claude-cli-instructions')!.attrs, true);
+  app.busy = undefined;
+  rendered = harnessesPage() as unknown as FakeNode;
+
+  const copilotIns = rowIn(findById(rendered, 'harness-card-copilot-cli')!, 'Instructions');
+  assert.equal(findNode(copilotIns, el => el.classList.contains('harness-count-value')), undefined);
+  const copilotInsNote = findNode(copilotIns, el => el.classList.contains('harness-count-note'))!;
+  assert.equal(copilotInsNote.classList.contains('harness-count-span'), true);
+  assert.equal(textOf(copilotInsNote), 'copilot-instructions.md');
+  assert.equal(findById(copilotIns, 'harness-copilot-cli-instructions')?.attrs.title, 'Open Copilot CLI’s Instructions tab');
+
+  const codexIns = rowIn(findById(rendered, 'harness-card-codex-cli')!, 'Instructions');
+  assert.equal(textOf(findNode(codexIns, el => el.classList.contains('harness-count-span'))), 'AGENTS.md (empty)');
+  assert.equal(textOf(findById(codexIns, 'harness-codex-cli-instructions')), 'AGENTS.md');
+
+  const piIns = rowIn(findById(rendered, 'harness-card-pi-cli')!, 'Instructions');
+  assert.equal(findNode(piIns, el => el.classList.contains('harness-count-value')), undefined);
+  assert.equal(findNode(piIns, el => el.classList.contains('harness-count-span'))?.textContent, 'no file yet');
+  assert.equal(findById(piIns, 'harness-pi-cli-instructions'), undefined);
+});
+
+test('failed instructions read shows ? with couldn’t be read, matching every other unread row', () => {
+  app.home = makeHome({ managed: ['claude-cli'] });
+  Object.assign(app, { page: 'harnesses', harness: undefined, busy: undefined, instructions: { state: 'failed', data: undefined, gen: 0 } });
+  rendered = harnessesPage() as unknown as FakeNode;
+
+  const claude = findById(rendered, 'harness-card-claude-cli')!;
+  const insRow = findAll(claude, el => el.classList.contains('harness-count')).find(row => textOf(row.children[0]) === 'Instructions')!;
+  assert.equal(textOf(findNode(insRow, el => el.classList.contains('harness-count-value'))), '?');
+  assert.equal(textOf(findNode(insRow, el => el.classList.contains('harness-count-note'))), 'couldn’t be read');
+  assert.equal(findById(insRow, 'harness-claude-cli-instructions'), undefined);
+});
+
+test('plugin count hides installed and bare counts describe what they count without claiming copies match', () => {
+  const skillFact = (key: string, tool: HarnessId, on: boolean) => ({
+    key, name: key, description: '', on, except: [], copies: { [tool]: { contentId: 'h1', directory: `/home/${key}` } },
+  });
+  const mcpFact = (key: string, tool: HarnessId) => ({
+    key, name: key, description: '', on: true, except: [], copies: { [tool]: { contentId: 'h2', directory: `/home/${key}` } },
+  });
+  app.home = makeHome({
+    managed: ['claude-cli', 'copilot-cli', 'pi-cli'],
+    skills: [skillFact('alpha', 'pi-cli', true), skillFact('beta', 'pi-cli', true), skillFact('draft', 'claude-cli', false), skillFact('synced-one', 'claude-cli', true)],
+    skillsLibrary: { alpha: { applied: { 'pi-cli': 'h1' } }, beta: { applied: { 'pi-cli': 'h1' } }, 'synced-one': { applied: { 'claude-cli': 'h1' } } },
+    mcp: [mcpFact('docs', 'pi-cli')],
+    pluginItems: [
+      { tool: 'claude-cli', plugin: 'kit-a', marketName: 'team', source: 'team/m', items: [{ kind: 'skill', name: 'p1', description: '' }] },
+      { tool: 'claude-cli', plugin: 'kit-b', marketName: 'team', source: 'team/m', items: [] },
+      { tool: 'copilot-cli', plugin: 'kit-a', marketName: 'team', source: 'team/m', items: [] },
+    ],
+  });
+  Object.assign(app, { page: 'harnesses', harness: undefined, busy: undefined, instructions: { state: 'ready', data: [], gen: 0 } });
+  rendered = harnessesPage() as unknown as FakeNode;
+
+  const rowIn = (card: FakeNode, label: string) => findAll(card, el => el.classList.contains('harness-count')).find(row => textOf(row.children[0]) === label)!;
+  const claude = findById(rendered, 'harness-card-claude-cli')!;
+  const claudePlugins = rowIn(claude, 'Plugins');
+  const claudePluginsVal = findNode(claudePlugins, el => el.classList.contains('harness-count-value'))!;
+  assert.equal(textOf(claudePluginsVal), '2');
+  assert.equal(claudePluginsVal.attrs['aria-description'], '2 installed plugins');
+  assert.equal(textOf(findNode(claudePlugins, el => el.classList.contains('harness-count-note'))), '');
+
+  const claudeSkills = rowIn(claude, 'Skills');
+  const claudeSkillsVal = findNode(claudeSkills, el => el.classList.contains('harness-count-value'))!;
+  assert.equal(textOf(claudeSkillsVal), '3');
+  assert.equal(claudeSkillsVal.attrs['aria-description'], undefined);
+  const claudeSkillParts = findAll(claudeSkills, el => el.classList.contains('harness-count-part')).map(textOf);
+  assert.deepEqual(claudeSkillParts, ['1 synced', '1 not synced', '1 from plugins']);
+
+  const copilotPluginsVal = findNode(rowIn(findById(rendered, 'harness-card-copilot-cli')!, 'Plugins'), el => el.classList.contains('harness-count-value'))!;
+  assert.equal(copilotPluginsVal.attrs['aria-description'], '1 installed plugin');
+
+  const pi = findById(rendered, 'harness-card-pi-cli')!;
+  const piSkillsVal = findNode(rowIn(pi, 'Skills'), el => el.classList.contains('harness-count-value'))!;
+  assert.equal(textOf(piSkillsVal), '2');
+  assert.equal(piSkillsVal.attrs['aria-description'], '2 skills');
+  const piMcpVal = findNode(rowIn(pi, 'MCP servers'), el => el.classList.contains('harness-count-value'))!;
+  assert.equal(textOf(piMcpVal), '1');
+  assert.equal(piMcpVal.attrs['aria-description'], '1 MCP server');
+});
+
+test('wrapper ids stay distinct from the managed heading id, Manage shares the footer with path, and Cowork, unread, desktop-only and folder-only meanings stay available', () => {
+  app.home = makeHome({
+    managed: ['claude-cli', 'pi-cli'],
+    leftOut: ['copilot-cli'],
+    missing: ['codex-cli'],
+    pluginRecordsUnread: ['claude-cli'],
+    snapshots: [
+      { harness: 'claude-cli', root: '/home/.claude', discovery: 'found', detection: 'App only', probe: { detail: '' }, app: { name: 'Claude desktop', version: '4.16336.0', carries: 'Code tab', carriedVersion: '2.1.317' }, skills: [], issues: [] },
+      { harness: 'pi-cli', root: '/home/.pi/agent', discovery: 'found', detection: 'App only', probe: { detail: '' }, app: { name: 'pi-gui (third-party)', version: '0.4.0' }, skills: [], issues: [] },
+      { harness: 'copilot-cli', root: '/home/.copilot', discovery: 'found', detection: 'Installed', probe: { version: '1.0.114', detail: '' }, skills: [], issues: [] },
+      { harness: 'codex-cli', root: '/home/.codex', discovery: 'found', detection: 'Config found but app not detected', probe: { detail: '' }, skills: [], issues: [] },
+    ],
+  });
+  Object.assign(app, { page: 'harnesses', harness: undefined, busy: undefined, instructions: { state: 'ready', data: [], gen: 0 } });
+  rendered = harnessesPage() as unknown as FakeNode;
+
+  const claudeCard = findById(rendered, 'harness-card-claude-cli')!;
+  const claudeHead = findById(rendered, 'harness-claude-cli')!;
+  assert.equal(claudeCard.tag, 'div');
+  assert.equal(claudeHead.tag, 'button');
+  assert.equal(textOf(claudeCard).includes('Cowork—uses the plugins in your Claude account'), true);
+  assert.equal(textOf(claudeCard).includes('Plugins?its record couldn’t be read'), true);
+  const claudeFoot = findNode(claudeCard, el => el.classList.contains('harness-card-foot'))!;
+  assert.ok(findNode(claudeFoot, el => el.classList.contains('harness-manage')));
+  const claudePath = findNode(claudeFoot, el => el.classList.contains('harness-card-path'))!;
+  assert.equal(textOf(findNode(claudePath, el => el.classList.contains('middle-tail'))), '/.claude');
+
+  const piCard = findById(rendered, 'harness-card-pi-cli')!;
+  assert.equal(textOf(piCard).includes('pi-gui (third-party) 0.4.0 · no CLI found'), true);
+
+  const copilotCard = findById(rendered, 'harness-card-copilot-cli')!;
+  assert.equal(copilotCard.classList.contains('harness-card-out'), true);
+  assert.equal(findById(rendered, 'harness-copilot-cli'), undefined);
+  assert.equal(findById(rendered, 'harness-copilot-cli-instructions'), undefined);
+  assert.equal(textOf(findNode(copilotCard, el => el.classList.contains('harness-card-next'))), 'Left out');
+  assert.equal(textOf(findById(copilotCard, 'manage-copilot-cli-info-card')),
+    'Central Knot doesn’t read or write Copilot CLI while it’s left out, so its copies and every item stay as they are. Its switch asks before managing it again.');
+  const copilotFoot = findNode(copilotCard, el => el.classList.contains('harness-card-foot'))!;
+  assert.ok(findNode(copilotFoot, el => el.classList.contains('harness-manage')));
+  assert.ok(findNode(copilotFoot, el => el.classList.contains('harness-card-path')));
+
+  const codexCard = findById(rendered, 'harness-card-codex-cli')!;
+  assert.equal(codexCard.classList.contains('harness-card-missing'), true);
+  assert.equal(findById(rendered, 'harness-codex-cli'), undefined);
+  assert.equal(findById(rendered, 'harness-codex-cli-instructions'), undefined);
+  assert.equal(textOf(codexCard).includes('Not found · only its folder is here'), true);
+  assert.equal(textOf(codexCard).includes('Install Codex, then Refresh.'), true);
 });
