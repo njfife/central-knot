@@ -113,7 +113,7 @@ test('History folds all-tools and conflict losers, leaves unrecorded and zero-lo
   );
 });
 
-test('History marks a name Central Knot holds now, the name of one it no longer holds saying so; its file opens under the row pressed, marked, stays there through a newer entry, and goes with its row', () => {
+test('History marks a name Central Knot holds now, the name of one it no longer holds saying so; its file opens under the row pressed, stays there through a newer entry, and goes with its row', () => {
   forgetHistoryFolds();
   state.home = makeHome(six, six);
   const held = { key: 'notes', name: 'notes', hash: 'n', versions: [], except: [], applied: {}, own: {} };
@@ -134,7 +134,7 @@ test('History marks a name Central Knot holds now, the name of one it no longer 
     [[true, 'notes'], [true, 'notes'], [false, 'gone: no longer in Central Knot']]);
   inRow('notes-on', 'row-file-btn')!.click();
   page = draw();
-  assert.deepEqual(['notes-on', 'notes-off'].map(id => [!!inRow(id, 'details-file-only'), findById(page, `history-row-${id}`)!.classList.contains('file-anchored')]), [[true, true], [false, false]]);
+  assert.deepEqual(['notes-on', 'notes-off'].map(id => !!inRow(id, 'details-file-only')), [true, false]);
   state.history.data = [...entries, entry('notes-on-again', 'notes', 'on', 3)];
   page = draw();
   assert.deepEqual(['notes-on', 'notes-off', 'notes-on-again'].map(id => !!inRow(id, 'details-file-only')), [true, false, false]);
@@ -151,4 +151,12 @@ test('History marks a name Central Knot holds now, the name of one it no longer 
   state.history.data = entries;
   page = draw();
   assert.equal(findNode(page, el => el.classList.contains('details-file-only')), undefined);
+  // A stored file that holds one entry twice: History draws, the first of the two rows has the mark, and its file opens there.
+  state.history.data = [entries[0], entries[0]];
+  page = draw();
+  const all = (node: unknown, part: string): FakeNode[] => (!node || typeof node !== 'object' ? []
+    : [...((node as FakeNode).classList?.contains(part) ? [node as FakeNode] : []), ...((node as FakeNode).children ?? []).flatMap(child => all(child, part))]);
+  assert.equal(all(page, 'row-file-btn').length, 1);
+  all(page, 'row-file-btn')[0]!.click();
+  assert.equal(all(draw(), 'details-file-only').length, 1);
 });

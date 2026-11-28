@@ -9,7 +9,8 @@
 // or a page that names items (a PagePlace: the Overview's cards, History's rows), in three calls: pagePlace once, for its place
 // and its Escape; itemFile at each name, for the Library's mark there, at that name's occurrence where the page names an item
 // more than once; then placePanel with those marks, for the one open and its panel, which the page puts under that name's row,
-// marking the row .file-anchored (its tint on History; settleFileBox measures from it).
+// marking the row .file-anchored (its tint on History; settleFileBox measures from it). Two rows naming one item need an
+// occurrenceId each: two names that would share a mark in one draw get one, the first's.
 import { rerender, shownPath, state, type Page, type PageKind } from './app.ts';
 import { afterLayout, closeButton, fileBlocks, h, icon, pathText } from './dom.ts';
 import { partId, type ItemRow, type Tool } from './itemrow.ts';
@@ -233,8 +234,9 @@ export function filePanel(t: FilePlace, target: FileTarget, open: OpenFile, bare
     : fileBlocks(blockId, `${name} ${open.file}`, [{ text: open.loaded!.text ?? '' }], owner);
   // A server's path is copied by a button in words: beside its JSON a bare copy icon would read as copying the entry.
   const copy = full && reloadButton(isServerRow(target) ? { chip: 'Copy path', command: full, title: full } : { command: full, title: 'Copy path' }, partId('file-copy', id));
+  // Where the stored text is shown, a table's foot says so; a page's header has said it is the current version, and it has no foot.
   const foot = full ? [pathText(shownPath(full), full), h('span.file-open-foot-actions', {}, showInFolder(full), copy)]
-    : stored ? [h('span.file-open-stored', {}, 'Stored in Central Knot')] : [];
+    : stored && !t.named ? [h('span.file-open-stored', {}, 'Stored in Central Knot')] : [];
   // An agent's or a server's panel shows one file, or its definition: its name is a label, with nothing to press. A server's
   // entry says where in the file it is, left of its chooser, or of its label after a dot (its chooser names it where there is one).
   const label = h(`span.file-open-name${stored ? '.file-open-definition' : ''}`, {}, open.file);
@@ -244,16 +246,17 @@ export function filePanel(t: FilePlace, target: FileTarget, open: OpenFile, bare
   return h(`div.details.details-file-only${bare ? '.details-bare' : ''}`, { role: 'region', 'aria-label': `File for ${name}` }, back ?? null, h('div.file-open-box', {},
     h('div.file-open-head', {}, t.named ? h('span.file-open-named', {}, h('strong.file-open-item', {}, name), h('span.file-open-now', {}, 'current version'), shows) : shows,
       h('span.file-open-controls', {}, chooser, close)),
-    ...body, h('div.file-open-foot', {}, ...foot)));
+    ...body, foot.length || !t.named ? h('div.file-open-foot', {}, ...foot) : null));
 }
 
 // ---------- A page that names items (the header's three calls) ----------
 
 /**
  * A page as a file panel's place (pagePlace): its page; the name its open file was opened at (`occurrenceId`); the home and
- * visit that file belongs to (`on`: thisVisit); whether its names open a found copy's or a plugin's row too (`foundAndPlugins`).
+ * visit that file belongs to (`on`: thisVisit); whether its names open a found copy's or a plugin's row too (`foundAndPlugins`);
+ * the marks drawn since it last placed its panel (`drawn`: itemFile, placePanel).
  */
-export interface PagePlace extends FilePlace { page: Page; occurrenceId?: string; on?: string; foundAndPlugins?: boolean }
+export interface PagePlace extends FilePlace { page: Page; occurrenceId?: string; on?: string; foundAndPlugins?: boolean; drawn?: Set<string> }
 /** A name's mark (itemFile): the name's occurrence, the row its file is read from, the mark. */
 export interface FileMark { occurrenceId?: string; target: FileTarget; mark: HTMLElement }
 /** A mark's id on a page: the item's own (`file-<row id>`, as a table's), then the name's occurrence where there is one. */
@@ -272,32 +275,27 @@ export function pagePlace(page: Page, options: Pick<PagePlace, 'foundAndPlugins'
 /** A page's place holds its file for the home and the visit it was opened on (app.ts state.visit): on another, none is open. */
 function thisVisit(place: PagePlace) {
   const on = `${state.home?.home} ${state.visit}`;
-  if (place.on !== on) Object.assign(place, { on, view: {}, occurrenceId: undefined });
+  if (place.on !== on) Object.assign(place, { on, view: {}, occurrenceId: undefined, drawn: undefined });
 }
-/**
- * The mark at a name of an item Central Knot holds now (On or Off), its row as the Library lists it (matrix.ts rowOf), at the
- * name's occurrence; a found or plugin row only where the place opens those too. None where that row has no file.
- */
+/** The mark at a name of an item Central Knot holds (found and plugin rows too where the place opens them), at its occurrence. */
 export function itemFile(place: PagePlace, kind: PageKind, key: string, occurrenceId?: string): FileMark | undefined {
   thisVisit(place);
   const target = inLibrary(state.home?.[kind].library[key]) || place.foundAndPlugins ? rowOf(kind, key) : undefined;
   if (!target || !hasFile(place, target)) return undefined;
-  const id = fileTargetId(target), open = place.view.openFile?.id === id && place.occurrenceId === occurrenceId;
+  const id = fileTargetId(target), drawn = (place.drawn ??= new Set()), open = place.view.openFile?.id === id && place.occurrenceId === occurrenceId;
+  // A second name with the same mark in one draw (an entry stored twice, two most used found as one row) has none.
+  if (drawn.has(markId(id, occurrenceId))) return undefined;
+  drawn.add(markId(id, occurrenceId));
   // Pressed at another name of the open item, its file moves there and is brought into view.
   const moves = !open && place.view.openFile?.id === id;
   const onclick = (event: Event) => { place.occurrenceId = occurrenceId; setFile(place, open ? undefined : target, undefined, false, event); if (moves) place.reveal?.(id); };
   return { occurrenceId, target, mark: markButton(target, markId(id, occurrenceId), 'Open the current version', open, onclick) };
 }
-/**
- * The page's open file against its names' marks as drawn now (`shown`, none where a name has none): kept while the mark it was
- * opened at is drawn (keepOpenFile), given back as that very mark with its panel; else let go. Two marks with one id throw.
- */
+/** The open file against the marks drawn now (`shown`): the very mark it was opened at, with its panel; else none, the file let go. */
 export function placePanel(place: PagePlace, shown: readonly (FileMark | undefined)[]): { mark: FileMark; panel: HTMLElement } | undefined {
   thisVisit(place);
-  const marks = shown.filter((mark): mark is FileMark => !!mark), ids = marks.map(mark => markId(fileTargetId(mark.target), mark.occurrenceId));
-  const twice = ids.find((id, at) => ids.indexOf(id) !== at);
-  if (twice) throw new Error(`Two file marks drawn with one id on ${place.page}: ${twice}`);
-  const here = marks.filter(mark => mark.occurrenceId === place.occurrenceId), target = keepOpenFile(place, here.map(mark => mark.target));
+  place.drawn = undefined;
+  const here = shown.filter((mark): mark is FileMark => !!mark && mark.occurrenceId === place.occurrenceId), target = keepOpenFile(place, here.map(mark => mark.target));
   const mark = here.find(each => each.target === target);
   if (!mark) return undefined;
   const panel = filePanel(place, mark.target, place.view.openFile!, true);
@@ -316,7 +314,8 @@ function settleFileBox(): void {
   const sides = scroller.getBoundingClientRect(), top = box.getBoundingClientRect().top, before = box.parentElement?.previousElementSibling;
   const row = before?.matches('.ov-row') ? before : scroller.querySelector('.file-anchored');
   const from = row ? row.getBoundingClientRect().top : sides.top - scroller.scrollTop;
-  const end = Math.max(8, parseFloat(getComputedStyle(scroller).paddingBottom));
+  // A page's panel leaves its scroll margin under it (style.css: a row's height), so the next row shows below its box.
+  const end = Math.max(8, parseFloat(getComputedStyle(scroller).paddingBottom)) + (parseFloat(getComputedStyle(box.parentElement!).scrollMarginBottom) || 0);
   const room = Math.floor(sides.height - (top - from) - end), under = Math.floor(sides.bottom - top - end);
   const pre = [...box.querySelectorAll<HTMLElement>('pre.content')].at(-1), text = pre && getComputedStyle(pre);
   const least = !pre || !text ? 0 : box.offsetHeight - pre.offsetHeight + 8 * parseFloat(text.lineHeight) + parseFloat(text.paddingTop) + parseFloat(text.paddingBottom);

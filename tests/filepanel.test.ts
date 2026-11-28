@@ -48,10 +48,17 @@ test('one item named twice on a page has a mark at each name, with its own id; i
   assert.equal(draw().open, undefined);
 });
 
-test('two names drawn with one occurrence, or none where an item is named twice, would share a mark: the page is told at once', () => {
+test('two names that would share a mark (one occurrence twice, or none where an item is named twice, as the Overview’s most used can): the first keeps it, the second has none, and its file opens', () => {
   state.home = homeAt('/tmp/filepanel-one-id');
-  assert.throws(() => placePanel(place, ['same', 'same'].map(occurrenceId => itemFile(place, 'skills', 'notes', occurrenceId))), /file-skills-notes-same/);
-  assert.throws(() => placePanel(place, [itemFile(place, 'skills', 'notes'), itemFile(place, 'skills', 'notes')]), /file-skills-notes\b/);
+  for (const occurrenceId of ['same', undefined]) {
+    let marks = [itemFile(place, 'skills', 'notes', occurrenceId), itemFile(place, 'skills', 'notes', occurrenceId)];
+    assert.deepEqual([!!marks[0], marks[1], placePanel(place, marks)], [true, undefined, undefined]);
+    (marks[0]!.mark as unknown as FakeNode).click();
+    marks = [itemFile(place, 'skills', 'notes', occurrenceId), itemFile(place, 'skills', 'notes', occurrenceId)];
+    assert.equal(placePanel(place, marks)?.mark, marks[0]);
+    (marks[0]!.mark as unknown as FakeNode).click();
+    placePanel(place, []);
+  }
 });
 
 test('a mark only for an item Central Knot holds now; a page that opens found copies too marks the found copy of a deleted item’s name', () => {

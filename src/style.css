@@ -598,8 +598,13 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ov-row:not(.ov-head) { cursor: pointer; }
 /* A row's hover and focus tint spans the full width, in the tables and in History, so the eye can follow it to its actions. */
 .ov-row:not(.ov-head):hover, .ov-row:not(.ov-head):has(:focus-visible), .history-row:hover, .history-row:has(:focus-visible) { background: var(--row-hover); }
-/* The History row an item's file is open under (historypage.ts), tinted as a table's row is (.ov-file-anchored), its line kept. */
+/* The History row an item's file is open under (historypage.ts), tinted as a table's row is (.ov-file-anchored), its line kept;
+   its quiet words a step darker there, keeping their contrast on the tint. */
 .history-row.file-anchored { background: var(--picked); box-shadow: inset 3px 0 0 var(--accent), inset 0 -1px 0 var(--line); }
+.history-row.file-anchored :is(.history-when, .history-kind, .history-done, .history-tools-names), .history-undone.file-anchored :is(.history-what, .history-about) { color: var(--ink-soft); }
+.history-undone.file-anchored .history-what strong { color: var(--ink); }
+/* A page's file panel stops a row short of the foot, so the next row shows under it (filepanel.ts settleFileBox reads this). */
+.file-anchored > .details-file-only, .file-anchored + .details-file-only { scroll-margin-bottom: 48px; }
 /*
  * A wide table stripes every other row, so the eye can follow a row from its name across to its tools; so does a wide
  * History, from its description across to its actions. (The plugin table has its own, below.)
@@ -806,8 +811,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .file-open-named { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
 .file-open-item { font-weight: 600; overflow-wrap: anywhere; }
 .file-open-item::after { content: "·"; margin-left: 8px; font-weight: 400; color: var(--ink-faint); }
-/* A page's panel says it shows the item as it is now (filepanel.ts filePanel named), quietly, before its file's name. */
-.file-open-now { color: var(--ink-soft); }
+/* A page's panel says it shows the item as it is now (filepanel.ts filePanel named), before its file's name. */
 .file-open-now::after { content: "·"; margin-left: 8px; color: var(--ink-faint); }
 .file-open-tabs { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
 .file-tab { appearance: none; max-width: 100%; overflow-wrap: anywhere; border: 1px solid transparent; border-radius: 6px; padding: 2px 8px; background: transparent; color: var(--ink-soft); font: 500 11.5px/16px var(--mono); cursor: pointer; }
@@ -1279,7 +1283,7 @@ span.ins-confirm { margin-top: 0; }
 .history-kind { flex: none; min-width: 6em; font-size: 11px; color: var(--ink-faint); }
 .history-done { font-size: 12px; color: var(--ink-faint); }
 .history-undone .history-what, .history-undone .history-about { color: var(--ink-faint); }
-.history-undone .history-what strong { color: var(--ink-soft); }
+.history-undone .history-what strong, .history-what > strong.history-gone { color: var(--ink-soft); }
 .history-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 2px 12px; text-align: right; }
 .history-actions .btn.link { flex: 0 1 auto; min-width: 0; height: auto; padding: 0; white-space: normal; text-align: right; }
 /* The question before a tool left out is managed again, in its History row and in its Harnesses card (managecard.ts manageQuestion). */

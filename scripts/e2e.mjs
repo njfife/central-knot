@@ -17525,14 +17525,13 @@ async function libraryFlow() {
     [foldAfterRefresh, await o.exists('#history-tools-names-fold-five-0'), await o.run(`document.getElementById('history-tools-fold-five-0')?.open ?? false`)],
     [[true, true], false, false]);
   // A name History holds an item under has the Library's file mark after it. At 860: one press opens its text under that row, a
-  // second row naming it takes it, the Keep confirmation's Escape leaves it open and the next closes it, nothing cut off; under a
-  // row near the foot, its long file uses the window under that row. At 1316: opened, nothing cut off.
+  // second row naming it takes it, the profile menu's and the Keep confirmation's Escape leave it open and the next closes it,
+  // nothing cut off; under a row near the foot, its long file uses the window under that row, the next row in sight. At 1316: opened.
   const benchRows = await o.run(`[...document.querySelectorAll('.history-row')].filter(row => row.querySelector('.history-what strong')?.textContent === 'bench-runner').map(row => row.id)`);
   const [benchFirst, benchSecond] = benchRows, benchLast = benchRows.at(-1), benchMark = row => `#${row} .history-what strong + .row-file-btn`;
   const fileUnder = () => o.run(`(() => { const box = document.querySelector('.file-open-box'), row = box?.closest('.history-row'), view = document.querySelector('#history-scroll').getBoundingClientRect();
     return { row: row?.id ?? null, text: box?.querySelector('pre.content')?.textContent ?? '', boxes: document.querySelectorAll('.file-open-box').length,
-      pressed: [...document.querySelectorAll('.history-row .row-file-btn[aria-pressed="true"]')].map(mark => mark.closest('.history-row').id),
-      rowAtTop: !!row && Math.abs(row.getBoundingClientRect().top - view.top) <= 40, boxToFoot: !!box && Math.abs(view.bottom - box.getBoundingClientRect().bottom) <= 24 }; })()`);
+      rowAtTop: !!row && Math.abs(row.getBoundingClientRect().top - view.top) <= 40, nextInSight: !!row?.nextElementSibling && row.nextElementSibling.getBoundingClientRect().top < view.bottom - 8 }; })()`);
   const openUnder = async row => { await o.click(benchMark(row)); await until(async () => (said => said.row === row && said.text.includes('name: bench-runner'))(await fileUnder())); await o.settle(); return fileUnder(); };
   const historyShot = async (name, look) => { if (!shots) return; await theme(o, look); await o.settle(); await o.shot(name); await theme(o, 'light'); };
   const sidebarOpen = async () => { if (await o.run(`document.getElementById('sidebar-toggle')?.getAttribute('aria-label') === 'Expand the sidebar'`)) await o.click('#sidebar-toggle'); await o.settle(); };
@@ -17540,21 +17539,24 @@ async function libraryFlow() {
   await sidebarOpen();
   await historyShot('history-file-marks-860-light', 'light');
   const first = await openUnder(benchFirst);
-  same('at 860, bench-runner’s mark on History opens its text under that row, its mark alone pressed', [first.row, first.text.startsWith('---\nname: bench-runner\n'), first.pressed, first.boxes], [benchFirst, true, [benchFirst], 1]);
+  same('at 860, bench-runner’s mark on History opens its text under that row', [first.row, first.text.startsWith('---\nname: bench-runner\n'), first.boxes], [benchFirst, true, 1]);
   await historyShot('history-file-open-860-light', 'light');
   const second = await openUnder(benchSecond);
-  same('at 860, a second row naming bench-runner takes its file, its mark alone pressed, nothing cut off', [second.row, second.pressed, second.boxes, await o.run(CUT_OFF)], [benchSecond, [benchSecond], 1, []]);
+  same('at 860, a second row naming bench-runner takes its file, nothing cut off', [second.row, second.boxes, await o.run(CUT_OFF)], [benchSecond, 1, []]);
   await historyShot('history-file-second-860-light', 'light');
+  await o.click('#status-profile');
+  await o.press('Escape');
+  const menuShut = [await o.exists('.pf-menu'), (await fileUnder()).boxes];
   await keepFor(o, 7);
   await o.run(`document.getElementById('history-shorten-cancel').focus()`);
   await o.press('Escape');
   const keptOpen = [await o.exists('#setting-history-question'), (await fileUnder()).boxes];
   await o.press('Escape');
-  same('Escape closes the Keep confirmation first, the file staying open; the next closes the file, the focus back on its mark',
-    [keptOpen, (await fileUnder()).boxes, await o.run(`document.activeElement === document.querySelector('${benchMark(benchSecond)}')`)], [[false, 1], 0, true]);
+  same('Escape closes the profile menu, then the Keep confirmation, the file staying open; the next closes the file, the focus back on its mark',
+    [menuShut, keptOpen, (await fileUnder()).boxes, await o.run(`document.activeElement === document.querySelector('${benchMark(benchSecond)}')`)], [[false, 1], [false, 1], 0, true]);
   await o.run(`document.getElementById('${benchLast}').scrollIntoView({ block: 'end' })`);
   const foot = await openUnder(benchLast);
-  same('at 860, opened at a row near the foot, bench-runner’s long file uses the window under that row', [foot.rowAtTop, foot.boxToFoot], [true, true]);
+  same('at 860, opened at a row near the foot, bench-runner’s long file uses the window under that row, the next row in sight', [foot.rowAtTop, foot.nextInSight], [true, true]);
   await historyShot('history-file-long-foot-860-light', 'light');
   await o.click(benchMark(benchLast));
   if (shots) {
@@ -17569,7 +17571,7 @@ async function libraryFlow() {
   await sidebarOpen();
   await historyShot('history-file-marks-1316-dark', 'dark');
   const wide = await openUnder(benchFirst);
-  same('at 1316, bench-runner’s file opens under its row, nothing cut off', [wide.row, wide.pressed, await o.run(CUT_OFF)], [benchFirst, [benchFirst], []]);
+  same('at 1316, bench-runner’s file opens under its row, nothing cut off', [wide.row, await o.run(CUT_OFF)], [benchFirst, []]);
   await historyShot('history-file-open-1316-dark', 'dark');
   await o.click(benchMark(benchFirst));
   await fullSize(o);

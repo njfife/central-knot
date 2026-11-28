@@ -3,7 +3,7 @@
 // Skills', MCP servers', agents' and Synchronize everything's entries are worded and decided by historyactions.ts; here are
 // profiles', base instructions', Manage switches' and pre-library entries, plus in-place folds for 3+ recorded tool lists (including all tools),
 // and the file mark after the name of an item Central Knot holds, its file opening under that row (historyFiles, fileMark; the
-// name of one it no longer holds says so on its hover: nameHover).
+// name of one it no longer holds is muted and says so on its hover: gone).
 import { DAY_MS, plural, timesApart } from './model.ts';
 import { acting, homeTools, noToolManaged, rerender, restoreEvent, shownPath, state, touchedToolsPhrase } from './app.ts';
 import { noToolsState } from './pages.ts';
@@ -35,8 +35,8 @@ const pathsShown = (event: HistoryEvent): HistoryEvent => (event.kind === 'took-
 const historyFiles = pagePlace('history');
 /** The file mark after an entry's name, where it names an item Central Knot holds now: its current version (filepanel.ts itemFile). */
 const fileMark = (event: HistoryEvent) => { const entry = libraryEntry(event); return entry && itemFile(historyFiles, entry.kind, entry.key, event.id); };
-/** A row's name's hover: the name, and that Central Knot no longer holds the item where it doesn't (so it has no file mark). */
-const nameHover = (event: HistoryEvent) => (libraryEntry(event) && !inLibrary(itemOf(event)) ? `${event.item}: no longer in Central Knot` : event.item);
+/** Whether a row names an item Central Knot no longer holds: it has no file mark, its name is muted and its hover says so. */
+const gone = (event: HistoryEvent) => !!libraryEntry(event) && !inLibrary(itemOf(event));
 /** Whether the entry is another's Undo: that one's `undoneBy` names it. */
 const undid = (event: HistoryEvent) => !!state.history.data?.some(other => other.undoneBy === event.id);
 
@@ -261,13 +261,13 @@ export function historyPage() {
     const fresh = index === 0 && Date.now() - Date.parse(event.at) < 8000;
     const managed = event.kind === 'managing' && event.managing && latestManage(event.managing.tool) === event.id ? managingRow(event) : undefined;
     // The row its file is open under holds its panel, after See change's, and is marked as a table's is (.file-anchored).
-    const panel = file && file.mark === marks[index] ? file.panel : null;
+    const panel = file && file.mark === marks[index] ? file.panel : null, away = gone(event);
     return [heading, h(`li.history-row${event.undoneBy ? '.history-undone' : ''}${fresh ? '.row-flash' : ''}${panel ? '.file-anchored' : ''}`,
       { 'data-kind': event.kind, id: `history-row-${event.id}`, ...(event.kind === 'managing' ? { tabIndex: -1 } : {}) },
       h('span.history-when', { title: new Date(event.at).toLocaleString() }, times[index]),
       // What changed, then what happened in the flexible column (its text capped at the reading measure); the actions keep a
       // steady column at the right, the same on every row. Narrow, what happened takes a line of its own beneath (style.css).
-      h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event)), h('strong', { title: nameHover(event) }, event.item), marks[index]?.mark),
+      h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event)), h(`strong${away ? '.history-gone' : ''}`, { title: away ? `${event.item}: no longer in Central Knot` : event.item }, event.item), marks[index]?.mark),
       about.node,
       event.undoneBy ? h('span.history-actions', {}, h('span.history-done', {}, libraryEntry(event) ? doneWords(event) : event.kind === 'removed' || event.everything?.undo ? 'Restored' : 'Undone'))
         : h('span.history-actions', {},
