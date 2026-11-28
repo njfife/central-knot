@@ -1432,7 +1432,10 @@ process.stdout.write(JSON.stringify({ additionalContext: JSON.stringify(payload)
     assert.equal(blockedRes.outcome, 'refused');
     assert.equal(blockedRes.problem, 'Couldn’t create the plugin’s data folder.');
 
-    // Worked example 3: plugin turned off after page read -> refused in existing words, no marker, View source still works.
+    // Worked example 3: plugin turned off after page read -> refused in existing words, no marker, no data folder made, View source still works.
+    const pluginDataRoot = join(box.home, '.copilot/plugin-data');
+    await rm(pluginDataRoot, { recursive: true, force: true });
+    await assert.rejects(stat(expectedData), { code: 'ENOENT' });
     const markerBeforeOff = (await readFile(marker, 'utf8')).trim().split('\n').length;
     await put(join(box.home, '.copilot/config.json'), JSON.stringify({
       installedPlugins: [{ name: 'dot.plug', marketplace: 'e6.market', version: '1.2.0', cache_path: installPath, enabled: false }],
@@ -1442,36 +1445,24 @@ process.stdout.write(JSON.stringify({ additionalContext: JSON.stringify(payload)
     assert.equal(offRes.outcome, 'refused');
     assert.equal(offRes.problem, 'dot.plug is turned off in Copilot CLI.');
     assert.equal((await readFile(marker, 'utf8')).trim().split('\n').length, markerBeforeOff);
+    await assert.rejects(stat(expectedData), { code: 'ENOENT' }, 'data folder not created when plugin is off');
+    await assert.rejects(stat(pluginDataRoot), { code: 'ENOENT' }, 'plugin-data root not created when plugin is off');
 
-    // Worked example 4: plugin with no marketplace name -> refused with point 1's sentence, View source still opens it.
-    const directInstall = join(box.home, '.copilot/installed-plugins/_direct/direct-plug');
-    const directHooks = join(directInstall, 'hooks/hooks.json');
-    const directScript = join(directInstall, 'hooks/direct.sh');
-    const directMarker = join(box.base, 'direct.marker');
-    await put(directScript, `#!/bin/sh\necho ran > ${JSON.stringify(directMarker)}\n`, 0o755);
-    await put(directHooks, JSON.stringify({
-      version: 1, hooks: { sessionStart: [{ type: 'command', bash: '${PLUGIN_ROOT}/hooks/direct.sh' }] },
-    }));
-    await put(join(box.home, '.copilot/config.json'), JSON.stringify({
-      installedPlugins: [{ name: 'direct-plug', marketplace: '', version: '1.0.0', cache_path: directInstall, enabled: true }],
-    }));
+    // Worked example 4: runHook guard alone — a Copilot CLI plugin ref with no marketplace name is refused before anything is made.
+    const directHooks = join(box.home, '.copilot/installed-plugins/_direct/direct-plug/hooks/hooks.json');
     const directHook = { declaredIn: directHooks, event: 'sessionStart', at: 0, launch: { shell: '${PLUGIN_ROOT}/hooks/direct.sh' } };
     const directRef: HookSourceRef = {
       from: 'installed', tool: 'copilot-cli', plugin: 'direct-plug', marketName: '',
       declaredIn: directHooks, event: 'sessionStart', at: 0, command: '${PLUGIN_ROOT}/hooks/direct.sh',
       fingerprint: hookFingerprint(directHook),
     };
-    assert.ok(parseHookRef(directRef), 'parseHookRef accepts a Copilot CLI installed plugin with no marketplace name');
-    assert.equal(parseHookRef({ ...directRef, tool: 'claude-cli' }), undefined, 'parseHookRef still rejects empty marketName for Claude Code');
-    const directSrc = await readHookSource({ home: box.home, mode: 'actual', dataDir: box.data }, directRef);
-    assert.equal(directSrc.problem, undefined);
-    assert.equal(directSrc.file, directHooks);
-    assert.match(directSrc.script?.text ?? '', /direct\.marker/);
+    assert.equal(parseHookRef(directRef), undefined, 'parseHookRef rejects empty marketName for Copilot CLI too');
     const directRes = await runHook(runCtx, directRef);
     assert.equal(directRes.outcome, 'refused');
     assert.equal(directRes.problem, 'Central Knot can’t work out where Copilot CLI keeps this plugin’s data.');
     assert.equal(hookRunWords('copilot-cli', directRes, '~').sentence, 'Not run: Central Knot can’t work out where Copilot CLI keeps this plugin’s data.');
-    await assert.rejects(stat(directMarker), { code: 'ENOENT' });
+    await assert.rejects(stat(join(pluginDataRoot, 'direct-plug')), { code: 'ENOENT' }, 'no data folder made for empty marketplace refusal');
+    await assert.rejects(stat(pluginDataRoot), { code: 'ENOENT' }, 'plugin-data root not created for empty marketplace refusal');
   } finally { await box.done(); }
 });
 

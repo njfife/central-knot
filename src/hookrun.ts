@@ -3,7 +3,7 @@
 // Gate: re-finds the hook via hooksource.ts findHook; requires actual home, non-Windows, own hooks or installed Claude Code /
 // Copilot CLI / Codex plugin hooks, installed tool binary, plugin on, tool hooks not disabled, command type, event adding text
 // (pluginoutcomes.ts addsText), matching start source (pluginoutcomes.ts pickStartSource), and one run at a time per hook
-// (a direct Copilot CLI plugin with no marketplace name is refused because its data folder hash cannot be reproduced).
+// (a Copilot CLI plugin with no marketplace name is refused in runHook before anything is made, as its data folder hash cannot be reproduced).
 // Environment and launch: scrubs inherited control, session and plugin variables first, then sets tool and plugin variables
 // (including plain declared Claude Code userConfig options from settings.json or manifest defaults) and creates Claude Code's
 // and Copilot CLI's plugin data folder before the run. Claude Code puts ${CLAUDE_PROJECT_DIR} (and for plugins, ${CLAUDE_PLUGIN_ROOT}
@@ -72,9 +72,12 @@ interface PluginLaunch {
   id: string;
   root: string;
   data: string;
+  /** Substituted into the hook's command/exec/args before launch (Copilot CLI's six omit COPILOT_PLUGIN_ROOT). */
   vars: Record<string, string>;
+  /** Plugin-supplied variables merged into the process environment before any hook-declared env entries. */
   env: Record<string, string>;
-  cwdVars?: Record<string, string>;
+  /** Copilot CLI only: the seven placeholders substituted into the hook's cwd and env fields (vars plus COPILOT_PLUGIN_ROOT). */
+  fieldVars?: Record<string, string>;
 }
 
 const isPlainOption = (value: unknown): value is string | number | boolean =>
@@ -91,11 +94,19 @@ function pluginPaths(tool: PluginTool, toolRoot: string, home: string, plugin: s
   }
   if (tool === 'copilot-cli') {
     const data = join(toolRoot, 'plugin-data', marketName, plugin);
-    const vars = { PLUGIN_ROOT: root, CLAUDE_PLUGIN_ROOT: root, COPILOT_PLUGIN_DATA: data, CLAUDE_PLUGIN_DATA: data, COPILOT_PROJECT_DIR: home, CLAUDE_PROJECT_DIR: home };
-    const cwdVars = { ...vars, COPILOT_PLUGIN_ROOT: root };
+    const vars = {
+      PLUGIN_ROOT: root, CLAUDE_PLUGIN_ROOT: root, COPILOT_PLUGIN_DATA: data,
+      CLAUDE_PLUGIN_DATA: data, COPILOT_PROJECT_DIR: home, CLAUDE_PROJECT_DIR: home,
+    };
+    const fieldVars = { ...vars, COPILOT_PLUGIN_ROOT: root };
     const hookFile = resolve(declaredIn);
-    const env = { ...cwdVars, ...(hookFile !== root ? { COPILOT_HOOK_DIR: dirname(hookFile) } : {}), COPILOT_HOOK_DEPTH: '1', COPILOT_CLI: '1' };
-    return { id, root, data, vars, env, cwdVars };
+    // Inline hooks (declaredIn === plugin root) have no separate hooks file; Copilot CLI leaves COPILOT_HOOK_DIR unset for them.
+    const env = {
+      ...fieldVars,
+      ...(hookFile !== root ? { COPILOT_HOOK_DIR: dirname(hookFile) } : {}),
+      COPILOT_HOOK_DEPTH: '1', COPILOT_CLI: '1',
+    };
+    return { id, root, data, vars, env, fieldVars };
   }
   const data = join(toolRoot, 'plugins', 'data', `${plugin}-${marketName}`);
   const vars = { PLUGIN_ROOT: root, CLAUDE_PLUGIN_ROOT: root, PLUGIN_DATA: data, CLAUDE_PLUGIN_DATA: data };
@@ -126,7 +137,7 @@ async function claudePluginOptions(pluginRoot: string, toolRoot: string, id: str
 /** Builds the environment for one hook run: user env + tool overrides, scrubbed of app/session/plugin controls first, then tool and plugin vars. */
 function buildHookEnv(
   tool: HarnessId, home: string, path: string, base: NodeJS.ProcessEnv,
-  extra: { overrides?: Partial<Record<HarnessId, string>>; envFile?: string; copilotEnv?: Record<string, string>; pluginEnv?: Record<string, string>; copilotVars?: Record<string, string> },
+  extra: { overrides?: Partial<Record<HarnessId, string>>; envFile?: string; copilotEnv?: Record<string, string>; pluginEnv?: Record<string, string>; fieldVars?: Record<string, string> },
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(base)) {
@@ -143,10 +154,11 @@ function buildHookEnv(
   }
   if (extra.pluginEnv) Object.assign(env, extra.pluginEnv);
   if (tool === 'copilot-cli' && extra.copilotEnv) {
-    const snap = extra.copilotVars ? undefined : { ...env };
+    // Plugin hooks pass fieldVars and expand only those seven placeholders (unknowns stay literal); own hooks omit it and expand against the env snapshot (unset -> '').
+    const snap = extra.fieldVars ? undefined : { ...env };
     for (const [name, raw] of Object.entries(extra.copilotEnv)) {
-      env[name] = extra.copilotVars
-        ? replaceBraced(raw, extra.copilotVars)
+      env[name] = extra.fieldVars
+        ? replaceBraced(raw, extra.fieldVars)
         : raw.replace(/\$\{([A-Za-z_]\w*)\}/g, (_all, key: string) => snap![key] ?? '');
     }
   }
@@ -321,6 +333,9 @@ export async function runHook(ctx: HookRunContext, ref: HookSourceRef): Promise<
   if ((ctx.platform ?? process.platform) === 'win32') return hookRunRefused('Not run on Windows yet.');
   if (ctx.mode !== 'actual') return hookRunRefused(HOOK_RUN_ACTUAL_ONLY);
   if (ref.from === 'marketplace') return hookRunRefused('Marketplace hooks aren’t run.');
+  if (ref.from === 'installed' && ref.tool === 'copilot-cli' && !ref.marketName.trim()) {
+    return hookRunRefused('Central Knot can’t work out where Copilot CLI keeps this plugin’s data.');
+  }
   const key = hookRunKey(ctx.home, ref);
   if (active.has(key)) return hookRunRefused('This hook is already running.');
   const stop = new AbortController();
@@ -371,7 +386,6 @@ async function executeHook(ctx: HookRunContext, ref: Extract<HookSourceRef, { fr
   let plugin: PluginLaunch | undefined;
   if (ref.from === 'installed') {
     if (!found.pluginRoot || !takesPlugins(ref.tool)) return hookRunRefused(HOOK_SOURCE_UNREADABLE);
-    if (ref.tool === 'copilot-cli' && !ref.marketName.trim()) return hookRunRefused('Central Knot can’t work out where Copilot CLI keeps this plugin’s data.');
     plugin = pluginPaths(ref.tool, toolRoot, ctx.home, ref.plugin, ref.marketName, found.pluginRoot, hook.declaredIn);
   }
   const shellCandidate = baseEnv.SHELL?.trim();
@@ -380,7 +394,7 @@ async function executeHook(ctx: HookRunContext, ref: Extract<HookSourceRef, { fr
   const launch = buildHookLaunch(ref.tool, hook, ctx.home, codexShell, plugin);
   if ('problem' in launch) return hookRunRefused(launch.problem, isPrompt);
   const cwd = ref.tool === 'copilot-cli'
-    ? (hook.cwd ? resolve(ctx.home, plugin?.cwdVars ? replaceBraced(hook.cwd, plugin.cwdVars) : hook.cwd) : plugin?.root ?? ctx.home)
+    ? (hook.cwd ? resolve(ctx.home, plugin?.fieldVars ? replaceBraced(hook.cwd, plugin.fieldVars) : hook.cwd) : plugin?.root ?? ctx.home)
     : ctx.home;
   const limitSec = hookTimeoutSec(ref.tool, isPrompt, hook.timeout);
   let pluginEnv: Record<string, string> | undefined = plugin?.env;
@@ -417,7 +431,7 @@ async function executeHook(ctx: HookRunContext, ref: Extract<HookSourceRef, { fr
     }
     const beforeRun = halt(cwd, isPrompt, limitSec, source);
     if (beforeRun) return beforeRun;
-    const env = buildHookEnv(ref.tool, ctx.home, path, baseEnv, { overrides: ctx.overrides, envFile, copilotEnv: hook.env, pluginEnv, copilotVars: plugin?.cwdVars });
+    const env = buildHookEnv(ref.tool, ctx.home, path, baseEnv, { overrides: ctx.overrides, envFile, copilotEnv: hook.env, pluginEnv, fieldVars: plugin?.fieldVars });
     const input = JSON.stringify(buildHookInput(ref.tool, hook.event, ctx.home, { source, transcriptPath }));
     const runStart = Date.now();
     const ran = await run(launch.file, launch.args, {
