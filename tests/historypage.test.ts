@@ -113,7 +113,7 @@ test('History folds all-tools and conflict losers, leaves unrecorded and zero-lo
   );
 });
 
-test('History marks a name Central Knot holds now; its file opens under the row pressed, stays there through a newer entry, and goes with its row', () => {
+test('History marks a name Central Knot holds now, the name of one it no longer holds saying so; its file opens under the row pressed, marked, stays there through a newer entry, and goes with its row', () => {
   forgetHistoryFolds();
   state.home = makeHome(six, six);
   const held = { key: 'notes', name: 'notes', hash: 'n', versions: [], except: [], applied: {}, own: {} };
@@ -129,10 +129,12 @@ test('History marks a name Central Knot holds now; its file opens under the row 
   state.history.data = entries;
   let page = draw();
   const inRow = (id: string, part: string) => findNode(findById(page, `history-row-${id}`), el => el.classList.contains(part));
-  assert.deepEqual(['notes-on', 'notes-off', 'gone-deleted'].map(id => !!inRow(id, 'row-file-btn')), [true, true, false]);
+  const name = (id: string) => findNode(findById(page, `history-row-${id}`), el => el.tag === 'strong')?.attrs.title;
+  assert.deepEqual(['notes-on', 'notes-off', 'gone-deleted'].map(id => [!!inRow(id, 'row-file-btn'), name(id)]),
+    [[true, 'notes'], [true, 'notes'], [false, 'gone: no longer in Central Knot']]);
   inRow('notes-on', 'row-file-btn')!.click();
   page = draw();
-  assert.deepEqual(['notes-on', 'notes-off'].map(id => !!inRow(id, 'details-file-only')), [true, false]);
+  assert.deepEqual(['notes-on', 'notes-off'].map(id => [!!inRow(id, 'details-file-only'), findById(page, `history-row-${id}`)!.classList.contains('file-anchored')]), [[true, true], [false, false]]);
   state.history.data = [...entries, entry('notes-on-again', 'notes', 'on', 3)];
   page = draw();
   assert.deepEqual(['notes-on', 'notes-off', 'notes-on-again'].map(id => !!inRow(id, 'details-file-only')), [true, false, false]);

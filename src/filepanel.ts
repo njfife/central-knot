@@ -6,9 +6,10 @@
 // choice, its close, the text, the path), its box's height (settleFileBox) and whether a place's open file stays at a draw
 // (keepOpenFile, asked by matrix.ts tableOf and placePanel). Where a panel is drawn is its caller's, a FilePlace: a table
 // (matrix.ts Table: under a closed row, or in an open row's details' place, matrix.ts openedPart; Escape there is matrix.ts's),
-// or a page that names items (pagePlace: the Overview's cards, overview.ts cardFiles; History's rows, historypage.ts
-// historyFiles), which needs only three calls: its place, with its Escape (pagePlace), a mark where it names an item, at that
-// name's occurrence (itemFile), and the panel for the page to put under the occurrence pressed (placePanel).
+// or a page that names items (a PagePlace: the Overview's cards, History's rows), in three calls: pagePlace once, for its place
+// and its Escape; itemFile at each name, for the Library's mark there, at that name's occurrence where the page names an item
+// more than once; then placePanel with those marks, for the one open and its panel, which the page puts under that name's row,
+// marking the row .file-anchored (its tint on History; settleFileBox measures from it).
 import { rerender, shownPath, state, type Page, type PageKind } from './app.ts';
 import { afterLayout, closeButton, fileBlocks, h, icon, pathText } from './dom.ts';
 import { partId, type ItemRow, type Tool } from './itemrow.ts';
@@ -25,12 +26,11 @@ import { andList, toolNames } from './words.ts';
 export interface OpenFile { id: string; token: string; file: string; copy?: { tool: HarnessId; rootLabel?: string }; directory?: string; files?: string[]; loaded?: { text?: string; blocks?: string[]; note?: string; parts?: VersionPart[]; holder?: string } | null }
 /**
  * Where a file panel is drawn: the file open there (`view.openFile`), the tool whose copy it offers first (`tool`: a tool's tab's),
- * whether its panels begin with the item's name (`named`: where nothing beside them names it, the Overview's), what the place
+ * whether its panels begin with the item's name and say it is the current version (`named`: a page's, pagePlace), what the place
  * does as a file opens for an item (`opening`) and once one newly opened is read (`reveal`). A table's say what a table does
- * (matrix.ts fileHooks). `at`: which of the item's names on the page its file was opened from, where a page names one item more
- * than once (History: an entry's id); a table and the Overview name an item once, and have none.
+ * (matrix.ts fileHooks). `markOf`: the id of the mark its open file was opened at, where it isn't the item's own (a page's).
  */
-export interface FilePlace { tool?: Tool; view: { openFile?: OpenFile }; named?: boolean; at?: string; opening?: (id: string) => void; reveal?: (id: string) => void }
+export interface FilePlace { tool?: Tool; view: { openFile?: OpenFile }; named?: boolean; opening?: (id: string) => void; reveal?: (id: string) => void; markOf?: (id: string) => string }
 
 
 export type CatalogTarget = { kind: 'catalog'; hit: SearchHit };
@@ -149,7 +149,7 @@ export function setFile(t: FilePlace, target?: FileTarget, asked?: string, refoc
   if (next) t.opening?.(next.id);
   t.view.openFile = next;
   if (draw) rerender();
-  if (!next && refocus && prev) document.getElementById(markId(prev.id, t.at))?.focus();
+  if (!next && refocus && prev) document.getElementById(t.markOf?.(prev.id) ?? partId('file', prev.id))?.focus();
   if (!next) return;
   const load: Promise<PanelRead | null> = stored ? (isAgentRow(target) ? readDefinition(target.key, stored.hash)
     : isServerRow(target) ? window.centralKnot.serverStored(target.key, stored.hash) : window.centralKnot.skillVersionFile((target as ItemRow).key, next.token, file))
@@ -173,21 +173,14 @@ export function setFile(t: FilePlace, target?: FileTarget, asked?: string, refoc
     if (!unchanged) rerender();
   });
 }
-/** A file mark's id: the item's (`file-<row id>`), then the name's occurrence where a page names one item more than once (FilePlace at). */
-const markId = (id: string, at?: string) => partId('file', id, ...(at === undefined ? [] : [at]));
-/**
- * Open file mark right after a library, found or plugin skill's name, an ordinary agent's and an ordinary server's (Library list,
- * Find hits, a tool's tabs, a page's names: itemFile), at the name's occurrence `at` where the page has one (FilePlace at).
- */
-export function fileButton(t: FilePlace, target: FileTarget, at?: string) {
+/** A file mark: its id, its hover, whether its file is open, what a press does (a table's: fileButton; a page's: itemFile). */
+const markButton = (target: FileTarget, id: string, title: string, open: boolean, onclick: (event: Event) => void) => h('button.row-file-btn',
+  { type: 'button', id, title, 'aria-label': `Open file: ${fileTargetName(target)}`, 'aria-pressed': String(open), onclick }, icon('file-text', 14));
+/** Open file mark right after a library, found or plugin skill's name, an ordinary agent's and an ordinary server's (Library list, Find hits, a tool's tabs). */
+export function fileButton(t: FilePlace, target: FileTarget) {
   if (!hasFile(t, target)) return null;
-  const id = fileTargetId(target);
-  const open = t.view.openFile?.id === id && t.at === at;
-  // Pressed at another of the open item's names, its file moves there and is brought into view (FilePlace reveal).
-  const moves = !open && t.view.openFile?.id === id;
-  const onclick = (event: Event) => { t.at = at; setFile(t, open ? undefined : target, undefined, false, event); if (moves) t.reveal?.(id); };
-  return h('button.row-file-btn', { type: 'button', id: markId(id, at), title: 'Open file',
-    'aria-label': `Open file: ${fileTargetName(target)}`, 'aria-pressed': String(open), onclick }, icon('file-text', 14));
+  const id = fileTargetId(target), open = t.view.openFile?.id === id;
+  return markButton(target, partId('file', id), 'Open file', open, event => setFile(t, open ? undefined : target, undefined, false, event));
 }
 /**
  * A skill's, an agent's or a server's open file: wrapping tabs (an agent's and a server's one: a label), copy chooser where copies
@@ -249,28 +242,29 @@ export function filePanel(t: FilePlace, target: FileTarget, open: OpenFile, bare
   const lead = isServerRow(target) && h('span.file-open-lead', {}, where, where && !chooser ? h('span.meta-dot', { 'aria-hidden': 'true' }, '·') : null, chooser ? null : label);
   const shows = isAgentRow(target) ? label : lead || h('span.file-open-tabs', { role: 'tablist', 'aria-label': `Files in ${name}` }, tabs.map(tab));
   return h(`div.details.details-file-only${bare ? '.details-bare' : ''}`, { role: 'region', 'aria-label': `File for ${name}` }, back ?? null, h('div.file-open-box', {},
-    h('div.file-open-head', {}, t.named ? h('span.file-open-named', {}, h('strong.file-open-item', {}, name), shows) : shows,
+    h('div.file-open-head', {}, t.named ? h('span.file-open-named', {}, h('strong.file-open-item', {}, name), h('span.file-open-now', {}, 'current version'), shows) : shows,
       h('span.file-open-controls', {}, chooser, close)),
     ...body, h('div.file-open-foot', {}, ...foot)));
 }
 
-// ---------- A page that names items: its place, a mark at each name, the panel under the name pressed ----------
-
-/** A page as a file panel's place (pagePlace), kept for the home and the visit its file was opened on (`on`: thisVisit). */
-export interface PagePlace extends FilePlace { on?: string }
-/** A page's name of an item with a file (itemFile): the name's occurrence (FilePlace at), the row its file is read from, the mark. */
-export interface FileMark { at?: string; target: FileTarget; mark: HTMLElement }
+// ---------- A page that names items (the header's three calls) ----------
 
 /**
- * A page as a file panel's place: one file open at a time, its panels beginning with the item's name and drawn bare where the
- * page puts them (placePanel), brought into view once read. Escape on the page closes it, the focus back on its mark, unless a
- * card took that Escape first (renderer.ts) or a question or a confirmation on the page did (event.defaultPrevented: History's
- * Keep confirmation, settingspage.ts shortenConfirmation; its Manage question, managecard.ts).
+ * A page as a file panel's place (pagePlace): its page; the name its open file was opened at (`occurrenceId`); the home and
+ * visit that file belongs to (`on`: thisVisit); whether its names open a found copy's or a plugin's row too (`foundAndPlugins`).
  */
-export function pagePlace(page: Page): PagePlace {
-  const place: PagePlace = { view: {}, named: true,
-    reveal: () => requestAnimationFrame(() => document.querySelector('.file-open-box')?.closest('.details-file-only')?.scrollIntoView({ block: 'nearest' })) };
-  document.addEventListener('keydown', event => {
+export interface PagePlace extends FilePlace { page: Page; occurrenceId?: string; on?: string; foundAndPlugins?: boolean }
+/** A name's mark (itemFile): the name's occurrence, the row its file is read from, the mark. */
+export interface FileMark { occurrenceId?: string; target: FileTarget; mark: HTMLElement }
+/** A mark's id on a page: the item's own (`file-<row id>`, as a table's), then the name's occurrence where there is one. */
+const markId = (id: string, occurrenceId?: string) => partId('file', id, ...(occurrenceId === undefined ? [] : [occurrenceId]));
+const panelId = (page: Page) => `file-panel-${page}`;
+
+/** A page's place, its Escape heard on the window: after every listener on the document, a question's or a confirmation's first. */
+export function pagePlace(page: Page, options: Pick<PagePlace, 'foundAndPlugins'> = {}): PagePlace {
+  const place: PagePlace = { page, ...options, view: {}, named: true, markOf: id => markId(id, place.occurrenceId),
+    reveal: () => requestAnimationFrame(() => document.getElementById(panelId(page))?.scrollIntoView({ block: 'nearest' })) };
+  window.addEventListener('keydown', event => {
     if (event.key === 'Escape' && !event.defaultPrevented && state.page === page && place.view.openFile) setFile(place, undefined, undefined, true);
   });
   return place;
@@ -278,39 +272,50 @@ export function pagePlace(page: Page): PagePlace {
 /** A page's place holds its file for the home and the visit it was opened on (app.ts state.visit): on another, none is open. */
 function thisVisit(place: PagePlace) {
   const on = `${state.home?.home} ${state.visit}`;
-  if (place.on !== on) Object.assign(place, { on, view: {}, at: undefined });
+  if (place.on !== on) Object.assign(place, { on, view: {}, occurrenceId: undefined });
 }
 /**
- * The mark where a page names an item of `kind` by its key, at the name's occurrence `at` where the page has one: the file of
- * its row as the Library lists it (matrix.ts rowOf: Central Knot's item, else a found copy or a plugin's), the Library's mark
- * (fileButton); none where that row has no file. A page that must not open a found copy under a name (History, for an item
- * deleted from Central Knot) does not ask for its mark.
+ * The mark at a name of an item Central Knot holds now (On or Off), its row as the Library lists it (matrix.ts rowOf), at the
+ * name's occurrence; a found or plugin row only where the place opens those too. None where that row has no file.
  */
-export function itemFile(place: PagePlace, kind: PageKind, key: string, at?: string): FileMark | undefined {
+export function itemFile(place: PagePlace, kind: PageKind, key: string, occurrenceId?: string): FileMark | undefined {
   thisVisit(place);
-  const target = rowOf(kind, key), mark = target ? fileButton(place, target, at) : null;
-  return target && mark ? { at, target, mark } : undefined;
+  const target = inLibrary(state.home?.[kind].library[key]) || place.foundAndPlugins ? rowOf(kind, key) : undefined;
+  if (!target || !hasFile(place, target)) return undefined;
+  const id = fileTargetId(target), open = place.view.openFile?.id === id && place.occurrenceId === occurrenceId;
+  // Pressed at another name of the open item, its file moves there and is brought into view.
+  const moves = !open && place.view.openFile?.id === id;
+  const onclick = (event: Event) => { place.occurrenceId = occurrenceId; setFile(place, open ? undefined : target, undefined, false, event); if (moves) place.reveal?.(id); };
+  return { occurrenceId, target, mark: markButton(target, markId(id, occurrenceId), 'Open the current version', open, onclick) };
 }
 /**
- * The page's open file at a draw, against its names' marks as drawn now (`shown`, none where a name has no mark): kept while
- * the mark it was opened at is still drawn (keepOpenFile), with its panel for the page to put under that occurrence; else none,
- * the file let go (that name's row gone, or its item deleted).
+ * The page's open file against its names' marks as drawn now (`shown`, none where a name has none): kept while the mark it was
+ * opened at is drawn (keepOpenFile), given back as that very mark with its panel; else let go. Two marks with one id throw.
  */
-export function placePanel(place: PagePlace, shown: readonly (FileMark | undefined)[]): { at?: string; target: FileTarget; panel: HTMLElement } | undefined {
+export function placePanel(place: PagePlace, shown: readonly (FileMark | undefined)[]): { mark: FileMark; panel: HTMLElement } | undefined {
   thisVisit(place);
-  const target = keepOpenFile(place, shown.flatMap(mark => (mark && mark.at === place.at ? [mark.target] : [])));
-  return target && { at: place.at, target, panel: filePanel(place, target, place.view.openFile!, true) };
+  const marks = shown.filter((mark): mark is FileMark => !!mark), ids = marks.map(mark => markId(fileTargetId(mark.target), mark.occurrenceId));
+  const twice = ids.find((id, at) => ids.indexOf(id) !== at);
+  if (twice) throw new Error(`Two file marks drawn with one id on ${place.page}: ${twice}`);
+  const here = marks.filter(mark => mark.occurrenceId === place.occurrenceId), target = keepOpenFile(place, here.map(mark => mark.target));
+  const mark = here.find(each => each.target === target);
+  if (!mark) return undefined;
+  const panel = filePanel(place, mark.target, place.view.openFile!, true);
+  panel.setAttribute('id', panelId(place.page));
+  return { mark, panel };
 }
 /**
- * Sizes the open file's box to what its scroll container (the list, the dock, the Overview's page) leaves under it, at most what
- * is left once its row (elsewhere, the top of what scrolls) is at the container's top, never under eight lines of its last
- * block's text (an agent's definition: its prompt). A place's reveal (FilePlace) brings it into view.
+ * Sizes the open file's box to what its scroll container (the list, the dock, a page) leaves under it, at most what is left once
+ * its row (a table's, just before it; a page's, .file-anchored; elsewhere, the top of what scrolls) is at the container's top,
+ * never under eight lines of its last block's text (an agent's definition: its prompt). A place's reveal (FilePlace) brings it
+ * into view.
  */
 function settleFileBox(): void {
   const box = document.querySelector<HTMLElement>('.file-open-box'), scroller = box?.closest<HTMLElement>('.scroll');
   if (!box || !scroller) return;
-  const sides = scroller.getBoundingClientRect(), top = box.getBoundingClientRect().top, row = box.parentElement?.previousElementSibling;
-  const from = row?.matches('.ov-row') ? row.getBoundingClientRect().top : sides.top - scroller.scrollTop;
+  const sides = scroller.getBoundingClientRect(), top = box.getBoundingClientRect().top, before = box.parentElement?.previousElementSibling;
+  const row = before?.matches('.ov-row') ? before : scroller.querySelector('.file-anchored');
+  const from = row ? row.getBoundingClientRect().top : sides.top - scroller.scrollTop;
   const end = Math.max(8, parseFloat(getComputedStyle(scroller).paddingBottom));
   const room = Math.floor(sides.height - (top - from) - end), under = Math.floor(sides.bottom - top - end);
   const pre = [...box.querySelectorAll<HTMLElement>('pre.content')].at(-1), text = pre && getComputedStyle(pre);

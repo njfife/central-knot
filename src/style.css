@@ -596,6 +596,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ov-row:not(.ov-head) { cursor: pointer; }
 /* A row's hover and focus tint spans the full width, in the tables and in History, so the eye can follow it to its actions. */
 .ov-row:not(.ov-head):hover, .ov-row:not(.ov-head):has(:focus-visible), .history-row:hover, .history-row:has(:focus-visible) { background: var(--row-hover); }
+/* The History row an item's file is open under (historypage.ts), tinted as a table's row is (.ov-file-anchored), its line kept. */
+.history-row.file-anchored { background: var(--picked); box-shadow: inset 3px 0 0 var(--accent), inset 0 -1px 0 var(--line); }
 /*
  * A wide table stripes every other row, so the eye can follow a row from its name across to its tools; so does a wide
  * History, from its description across to its actions. (The plugin table has its own, below.)
@@ -604,7 +606,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
   [role="rowgroup"] > .ov-row:nth-child(even of .ov-row):not(:hover):not(.open):not(.ov-file-anchored):not(.row-ticked):not(:has(:focus-visible)) { background: var(--row-stripe); }
 }
 @container content (width >= 1000px) {
-  .history-row:nth-child(even of .history-row):not(:hover):not(:has(:focus-visible)) { background: var(--row-stripe); }
+  .history-row:nth-child(even of .history-row):not(:hover):not(.file-anchored):not(:has(:focus-visible)) { background: var(--row-stripe); }
 }
 /*
  * An opened row and its details under it are one block: one background, one 3px bar down the left of both (the warning colour
@@ -802,6 +804,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .file-open-named { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
 .file-open-item { font-weight: 600; overflow-wrap: anywhere; }
 .file-open-item::after { content: "·"; margin-left: 8px; font-weight: 400; color: var(--ink-faint); }
+/* A page's panel says it shows the item as it is now (filepanel.ts filePanel named), quietly, before its file's name. */
+.file-open-now { color: var(--ink-soft); }
+.file-open-now::after { content: "·"; margin-left: 8px; color: var(--ink-faint); }
 .file-open-tabs { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
 .file-tab { appearance: none; max-width: 100%; overflow-wrap: anywhere; border: 1px solid transparent; border-radius: 6px; padding: 2px 8px; background: transparent; color: var(--ink-soft); font: 500 11.5px/16px var(--mono); cursor: pointer; }
 .file-tab.is-active { background: var(--surface); border-color: var(--control-line); color: var(--ink); box-shadow: var(--lift); }

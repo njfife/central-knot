@@ -2,7 +2,8 @@
 // Undo or Restore where kept content allows (CON-02, DEL-03), and History's Keep control (settingspage.ts historyWindowControl).
 // Skills', MCP servers', agents' and Synchronize everything's entries are worded and decided by historyactions.ts; here are
 // profiles', base instructions', Manage switches' and pre-library entries, plus in-place folds for 3+ recorded tool lists (including all tools),
-// and the file mark after the name of an item Central Knot holds, its file opening under that row (historyFiles, fileMark).
+// and the file mark after the name of an item Central Knot holds, its file opening under that row (historyFiles, fileMark; the
+// name of one it no longer holds says so on its hover: nameHover).
 import { DAY_MS, plural, timesApart } from './model.ts';
 import { acting, homeTools, noToolManaged, rerender, restoreEvent, shownPath, state, touchedToolsPhrase } from './app.ts';
 import { noToolsState } from './pages.ts';
@@ -32,14 +33,10 @@ const itemOf = (event: HistoryEvent) => { const entry = libraryEntry(event); ret
 const pathsShown = (event: HistoryEvent): HistoryEvent => (event.kind === 'took-over' ? { ...event, losers: event.losers.map(copy => (copy.path ? { ...copy, path: shownPath(copy.path) } : copy)) } : event);
 /** History as a file panel's place (filepanel.ts pagePlace): an item's file, opened at one of the rows naming it, under that row. */
 const historyFiles = pagePlace('history');
-/**
- * The file mark after an entry's name, where it names an item Central Knot holds now (On or Off): its text as it is now. None
- * for an item deleted since, though a tool may hold a found copy of that name: that copy is not the item the entry is about.
- */
-const fileMark = (event: HistoryEvent) => {
-  const entry = libraryEntry(event);
-  return entry && inLibrary(itemOf(event)) ? itemFile(historyFiles, entry.kind, entry.key, event.id) : undefined;
-};
+/** The file mark after an entry's name, where it names an item Central Knot holds now: its current version (filepanel.ts itemFile). */
+const fileMark = (event: HistoryEvent) => { const entry = libraryEntry(event); return entry && itemFile(historyFiles, entry.kind, entry.key, event.id); };
+/** A row's name's hover: the name, and that Central Knot no longer holds the item where it doesn't (so it has no file mark). */
+const nameHover = (event: HistoryEvent) => (libraryEntry(event) && !inLibrary(itemOf(event)) ? `${event.item}: no longer in Central Knot` : event.item);
 /** Whether the entry is another's Undo: that one's `undoneBy` names it. */
 const undid = (event: HistoryEvent) => !!state.history.data?.some(other => other.undoneBy === event.id);
 
@@ -263,19 +260,21 @@ export function historyPage() {
     // The newest row, made by a click just now, gets the same brief highlight the tables use.
     const fresh = index === 0 && Date.now() - Date.parse(event.at) < 8000;
     const managed = event.kind === 'managing' && event.managing && latestManage(event.managing.tool) === event.id ? managingRow(event) : undefined;
-    return [heading, h(`li.history-row${event.undoneBy ? '.history-undone' : ''}${fresh ? '.row-flash' : ''}`,
+    // The row its file is open under holds its panel, after See change's, and is marked as a table's is (.file-anchored).
+    const panel = file && file.mark === marks[index] ? file.panel : null;
+    return [heading, h(`li.history-row${event.undoneBy ? '.history-undone' : ''}${fresh ? '.row-flash' : ''}${panel ? '.file-anchored' : ''}`,
       { 'data-kind': event.kind, id: `history-row-${event.id}`, ...(event.kind === 'managing' ? { tabIndex: -1 } : {}) },
       h('span.history-when', { title: new Date(event.at).toLocaleString() }, times[index]),
       // What changed, then what happened in the flexible column (its text capped at the reading measure); the actions keep a
       // steady column at the right, the same on every row. Narrow, what happened takes a line of its own beneath (style.css).
-      h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event)), h('strong', { title: event.item }, event.item), marks[index]?.mark),
+      h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event)), h('strong', { title: nameHover(event) }, event.item), marks[index]?.mark),
       about.node,
       event.undoneBy ? h('span.history-actions', {}, h('span.history-done', {}, libraryEntry(event) ? doneWords(event) : event.kind === 'removed' || event.everything?.undo ? 'Restored' : 'Undone'))
         : h('span.history-actions', {},
           !event.base && (event.kind === 'edit' || event.kind === 'conflict') ? seeChangeLink(event.id, libraryEntry(event)?.kind, true) : null,
           libraryEntry(event) ? libraryButtons(event) : managed ? managed[0] : actions(event, about.action)),
       changePanel(event.id),
-      file?.at === event.id ? file.panel : null,
+      panel,
       managed?.[1] ?? null)];
   }))));
 }

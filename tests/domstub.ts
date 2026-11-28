@@ -109,10 +109,12 @@ export function installDom(
 ) {
   const announcement = makeElement('span');
   const docListeners: Record<string, ((event: unknown) => void)[]> = {};
+  // A window listener added without capture hears an event after the document's, as a key event bubbling up does.
+  const windowListeners: Record<string, ((event: unknown) => void)[]> = {};
   Object.assign(globalThis, {
     window: {
       centralKnot: new Proxy(api, { get: (known, name) => known[name as string] ?? (() => Promise.resolve(null)) }),
-      addEventListener() {},
+      addEventListener(name: string, fn: (event: unknown) => void, capture?: boolean) { if (capture !== true) (windowListeners[name] ??= []).push(fn); },
       matchMedia: () => ({ matches: false, addEventListener() {} }),
     },
     document: {
@@ -135,5 +137,5 @@ export function installDom(
     requestAnimationFrame: () => 0,
   });
   Object.defineProperty(globalThis, 'navigator', { value: { userAgent }, configurable: true });
-  return { announcement, dispatch(name: string, event: unknown) { for (const fn of docListeners[name] ?? []) fn(event); } };
+  return { announcement, dispatch(name: string, event: unknown) { for (const fn of [...docListeners[name] ?? [], ...windowListeners[name] ?? []]) fn(event); } };
 }

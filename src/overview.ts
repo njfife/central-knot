@@ -219,13 +219,13 @@ function syncState(kind: PageKind, home: HomeView): HTMLElement | null {
 /**
  * One kind: its page (the card's one button, over the whole card); how many there are, how many are On (the page's word: some may
  * still wait to sync), and how many came from some plugin (origins.ts fromAnyPlugin, as the Library's From says); whether it is in step
- * (syncState); its usage (cardUsage), its three most used given (`top`: kindCards).
+ * (syncState); its usage (cardUsage), its three most used given (`top`: kindCards); `.file-anchored` while its file panel is open.
  */
-function kindCard(kind: PageKind, home: HomeView, top: TopRow[]) {
+function kindCard(kind: PageKind, home: HomeView, top: TopRow[], anchored: boolean) {
   const { title, short: noun } = kindNouns[kind], facts = kindSource(home, kind).facts;
   const total = rowCount(home, kind), on = facts.filter(fact => fact.on).length, fromPlugins = fromAnyPlugin(home, kind);
   const counts = total ? `${plural(total, noun[0], noun[1])} · ${on ? `${on} on` : 'none on'}${fromPlugins ? ` · ${fromPlugins} from plugins` : ''}` : `No ${noun[1]}`;
-  return h('div.kind-card', {},
+  return h(`div.kind-card${anchored ? '.file-anchored' : ''}`, {},
     h('div.kind-card-about', {},
       h('button.kind-card-main', { type: 'button', id: `overview-${kind}`, onclick: () => openKind(kind) },
         h('span.kind-card-head', {}, icon(kindGlyph[kind], 16), h('strong', {}, title), icon('arrow-right', 14, 'tone-faint'))),
@@ -237,9 +237,9 @@ function kindCard(kind: PageKind, home: HomeView, top: TopRow[]) {
 
 /**
  * The Overview as a file panel's place (filepanel.ts pagePlace): one most used item's file open at a time, drawn under its kind's
- * card (kindCards), closed by Escape and by another home or another page.
+ * card (kindCards); its most used may be found or a plugin's, and open too.
  */
-const cardFiles = pagePlace('overview');
+const cardFiles = pagePlace('overview', { foundAndPlugins: true });
 
 /**
  * The cards, each followed by its file panel where the file open here is one of the items it names (topRows), kept or let go
@@ -249,8 +249,8 @@ const cardFiles = pagePlace('overview');
 function kindCards(home: HomeView, kinds: PageKind[]) {
   const tops = kinds.map(kind => ({ kind, top: topRows(home, kind) }));
   const open = placePanel(cardFiles, tops.flatMap(({ top }) => top.map(each => each.file)));
-  const filed = open && tops.find(({ top }) => top.some(each => each.file?.target === open.target))?.kind;
-  return h('div.kind-cards', { 'data-count': String(kinds.length) }, tops.flatMap(({ kind, top }) => [kindCard(kind, home, top), kind === filed ? open?.panel : null]));
+  const filed = open && tops.find(({ top }) => top.some(each => each.file === open.mark))?.kind;
+  return h('div.kind-cards', { 'data-count': String(kinds.length) }, tops.flatMap(({ kind, top }) => [kindCard(kind, home, top, kind === filed), kind === filed ? open?.panel : null]));
 }
 
 // ---------- Usage: the strip that says it and collects it again ----------
