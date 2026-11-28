@@ -19,8 +19,8 @@ import { listResult, problemLines, profileSpan, reloadChips, reloadLines, wholeT
 import type { ReloadAdvice } from './reload.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginUpdateNotes } from './pluginupdateview.ts';
-import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
-import { andList, notAllThrough, orList, pageNames, toolName, toolNames as names } from './words.ts';
+import type { HarnessId, MarketplaceView, PluginView, PluginsView } from './types.ts';
+import { andList, notAllThrough, orList, pageNames, toolName, toolNames as names, toolShortNames as shortNames } from './words.ts';
 
 /** "9:20 AM" today, else "Nov 8". */
 const when = (iso: string) => (new Date(iso).toDateString() === new Date().toDateString() ? clockTime(iso) : new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
@@ -115,18 +115,23 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
         h('span.plugin-row-title', {}, pluginTitle(plugin)), offered ? h('span.plugin-row-version', { title: 'The version the marketplace offers' }, offered) : null,
         noLongerOffered(entry, plugin) ? h('span.plugin-chip.plugin-chip-gone', {}, 'No longer offered') : null,
         plugin.category && !market.nav.category ? h('span.plugin-chip', {}, plugin.category) : null),
-      // The description first, then what it holds: when room runs out the description shortens or steps aside (style.css). While
-      // the list's news says how a click on it stands, that note is the row's line instead, in one line: a row with neither
-      // still has its line, so a click never changes the row's height and the rows below keep their places.
-      clickNote(entry, plugin.name, true) ?? h('span.plugin-row-line', {},
-        plugin.description ? h('span.plugin-row-about', { title: plugin.description }, plugin.description) : null,
-        plugin.description && (holds || left) ? h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·') : null,
-        holds ? h('span.plugin-row-holds', { title: holds }, holds) : null,
-        // The link sits beside the words: a long app name shortens the words, never the link.
-        left ? h('span.plugin-row-left', {}, h('span.plugin-row-holds', { title: `Can’t be installed from ${entry.bundled!.app}` }, `Can’t be installed from ${entry.bundled!.app}`), h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·'),
-            h('button.text-action', { type: 'button', id: `pleft-${marketIndex}-${plugin.name}`, onclick: (event: Event) => { event.stopPropagation(); browse({ tab: 'about' }); } }, 'see why')) : null,
-        // Its items in the Library, where it has any, last: the words before it shorten, never the link.
-        library ? [plugin.description || holds || left ? h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·') : null, library] : null),
+      // The description (wrapping up to two lines) and what it holds / Library link; while a click note stands in their place,
+      // the line stays hidden in the same grid cell so a click never changes the row's height and the rows below keep their places.
+      (() => {
+        const meta = holds || left || library
+          ? h('span.plugin-row-meta', {},
+            holds ? h('span.plugin-row-holds', { title: holds }, holds) : null,
+            // The link sits beside the words: a long app name wraps cleanly, never clipping the link.
+            left ? h('span.plugin-row-left', {}, h('span.plugin-row-holds', { title: `Can’t be installed from ${entry.bundled!.app}` }, `Can’t be installed from ${entry.bundled!.app}`), h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·'),
+              h('button.text-action', { type: 'button', id: `pleft-${marketIndex}-${plugin.name}`, onclick: (event: Event) => { event.stopPropagation(); browse({ tab: 'about' }); } }, 'see why')) : null,
+            library)
+          : null;
+        const click = clickNote(entry, plugin.name, true);
+        const line = h('span.plugin-row-line', click ? { 'aria-hidden': 'true', inert: true } : {},
+          plugin.description ? h('span.plugin-row-about', { title: plugin.description }, plugin.description) : null,
+          meta);
+        return click ? h('span.plugin-row-slot', {}, line, click) : line;
+      })(),
       // A tool on another version or with another copy, on its own line under that, with Update for every tool that is behind.
       behind || updates.length ? h('span.plugin-row-update', {},
         behind ? versionNote(h('span', {}, behind.charAt(0).toUpperCase() + behind.slice(1)), '.plugin-row-warning') : null,
@@ -155,7 +160,8 @@ function filters(entry: MarketplaceView): HTMLElement | null {
   return parts.length ? h('div.market-filter', {}, parts) : null;
 }
 
-const EVERY_TOOL_INFO = 'On puts the plugin in every tool that takes it except those kept out. A striped switch means on with a tool kept out or off.';
+const everyToolInfo = (tools: HarnessId[]) =>
+  `On puts a plugin in every tool that takes it except those kept out; Off turns it off everywhere, kept installed where a tool can. Stripes: on, with at least one tool kept out or off. Open a row to choose tools one by one. Columns: ${tools.map(tool => names[tool]).join(', ')}.`;
 
 function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: number) {
   const shown = shownPlugins(entry);
@@ -168,13 +174,15 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
   const reasons = [...new Set([noCli.length > 1 ? `${andList(noCli.map(tool => names[tool]))}: command-line tools not found, so plugins can’t be installed there.` : '',
     ...pluginColumns.filter(tool => noCli.length < 2 || !noCli.includes(tool)).map(tool => blocked(view, entry, tool) ?? '')])].filter(Boolean);
   const someCan = view.canWrite && (pluginColumns.some(tool => !blocked(view, entry, tool)) || view.tools.length > pluginColumns.length);
-  // Every tool (?) heads the switch and name columns when a switch can act; each tool column is its mark alone, name on hover.
+  // Every tool (?) heads the switch and name columns when a switch can act; each tool column carries its mark over its short name
+  // (icon-only below 700 px of table, where the (?) card names the tools in column order).
   const head = h('div.ov-row.ov-head', { role: 'row' },
     someCan
-      ? h('div.ov-name.plugin-head-every', { role: 'columnheader', 'aria-colspan': '2', 'data-info-block': true },
-        'Every tool', infoMark('plugin-switch-info', 'Every tool', EVERY_TOOL_INFO))
+      ? h('div.ov-name.plugin-head-every', { role: 'columnheader', 'aria-colspan': '2', 'aria-label': 'Every tool', 'data-info-block': true },
+        'Every tool', infoMark('plugin-switch-info', 'Every tool', everyToolInfo(view.tools)))
       : [h('div.ov-managed', { role: 'columnheader', 'aria-label': 'On or off' }), h('div.ov-name', { role: 'columnheader' }, 'Plugin')],
-    view.tools.map(tool => h('div.ov-cell.ov-tool-head', { role: 'columnheader', title: names[tool], 'aria-label': names[tool] }, brandMark(tool, 16))),
+    view.tools.map(tool => h('div.ov-cell.ov-tool-head', { role: 'columnheader', title: names[tool], 'aria-label': names[tool] },
+      brandMark(tool, 16), h('span.plugin-tool-short', { 'aria-hidden': 'true' }, shortNames[tool]))),
     h('div.ov-cell.plugin-row-go', { role: 'columnheader' }));
   // With more than one plugin behind, one button runs every update in this marketplace at once, those the filter hides too.
   const behind = view.canWrite ? entry.plugins.filter(plugin => updateOps(view, entry, plugin).length) : [];
@@ -320,13 +328,12 @@ function marketPage(view: PluginsView, entry: MarketplaceView, marketIndex: numb
 }
 
 /**
- * What the marks mean, only for marks on screen that need saying: a check, nothing and a striped one explain themselves with
- * their tooltips, so the key names the rest.
+ * What the marks mean, only for marks on screen that need saying: a check, nothing and a striped switch explain themselves
+ * with their tooltips, and an out-of-date row already carries Update in <tool>, so the key names the rest.
  */
 function legend(view: PluginsView, entry: MarketplaceView) {
   const marks = new Set<ToolMark>(entry.plugins.flatMap(plugin => view.tools.map(tool => markOf(view, entry, plugin, tool, versionToCompare(plugin, shownDetail(pluginKey(entry.source, plugin.name)))).mark)));
   const keyed: [ToolMark[], string, string, Parameters<typeof icon>[0]][] = [
-    [['outdated'], 'Out of date: Update on its row', 'cell-differs.cell-on', 'refresh-cw'],
     [['waits'], 'Goes in at the next automatic check', 'cell-waiting', 'clock'],
     [['parts-waiting'], 'Waits to be moved: parts from an earlier version', 'cell-waiting', 'clock'],
     [['not-brought'], 'Not brought by itself: off in a tool’s own settings', 'cell-not-brought', 'circle-off'],
@@ -340,7 +347,7 @@ function legend(view: PluginsView, entry: MarketplaceView) {
   const item = (label: string, node: HTMLElement) => h('span.legend-item', {}, node, label);
   return h('div.legend.plugin-legend', { 'aria-label': 'Key' },
     shown.map(([, label, look, glyph]) => item(label, h(`span.legend-cell.${look}`, {}, icon(glyph, 10)))),
-    marks.has('cannot') ? item('Can’t go there', h('span.legend-cell.cell-cannot', {})) : null);
+    marks.has('cannot') ? item('Can’t go there', h('span.legend-cell.cell-cannot', {}, h('span.cannot-dash', { 'aria-hidden': 'true' }, '–'))) : null);
 }
 
 /** The way back from the last run, as a button labelled by undoLabel. */

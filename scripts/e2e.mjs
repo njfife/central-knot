@@ -1729,7 +1729,20 @@ const ROW_PIECES_CUT = `(() => {
   // A piece's width on one line: its wrapping is off for the moment it is measured.
   const wholeWidth = node => { node.style.whiteSpace = 'nowrap'; const width = node.scrollWidth; node.style.whiteSpace = ''; return width; };
   const shown = node => node.checkVisibility({ visibilityProperty: true, opacityProperty: true });
-  const out = [...document.querySelectorAll('.plugin-table .ov-tool-head')].filter(head => head.scrollWidth > head.clientWidth + 1).map(head => (head.textContent || head.getAttribute('aria-label') || '') + '’s heading is wider than its column');
+  const out = [...document.querySelectorAll('.plugin-table .ov-tool-head')].flatMap(head => {
+    const label = head.getAttribute('aria-label') || head.textContent.trim();
+    const box = head.getBoundingClientRect();
+    const issues = [];
+    if (head.scrollWidth > head.clientWidth + 1) issues.push(label + '’s heading is wider than its column');
+    const short = head.querySelector('.plugin-tool-short');
+    if (short && shown(short)) {
+      const sbox = short.getBoundingClientRect();
+      if (sbox.width < 1 || sbox.height < 1 || !within(sbox, box) || short.scrollWidth > short.clientWidth + 1 || lines(short) > 1) {
+        issues.push(label + '’s short label is clipped or wrapped');
+      }
+    }
+    return issues;
+  });
   for (const row of document.querySelectorAll('.plugin-table .plugin-row')) {
     const name = row.querySelector('.plugin-row-name'), open = name.querySelector('.plugin-row-open');
     const cell = name.getBoundingClientRect(), button = open.getBoundingClientRect();
@@ -6820,11 +6833,12 @@ async function openCodeFlow() {
 }
 
 /**
- * Plugin marketplaces with four tools, then five (Pi joins): every row's name, version and chips show whole, in the smallest
- * window with the sidebar folded and open, and at 860×600, 1280×800, 1316×819, 1728×1117 and 2560×1440 with it open (style.css
- * "The plugin table"). The marketplace is this flow's own, registered in Claude Code: a plugin whose name is 45 characters with
- * a run of 25 letters, a long version and a category; one whose version is a build identifier with no break in it, wider than
- * the name's column in a narrow window; and one that Claude Code still has and the marketplace no longer lists.
+ * Plugin marketplaces with three, four, five and six tools: every row's name, version, chips, description, counts and Library
+ * link show whole, in the smallest window with the sidebar folded and open, and at 860×600, 1280×800, 1316×819, 1728×1117 and
+ * 2560×1440 with it open (style.css "The plugin table"). The marketplace is this flow's own, registered in Claude Code: a plugin
+ * whose name is 45 characters with a run of 25 letters, a long version and a category; one whose version is a build identifier
+ * with no break in it, wider than the name's column in a narrow window; and one that Claude Code still has and the marketplace
+ * no longer lists.
  */
 async function pluginRowsFitFlow() {
   const home = join(scratch, 'home-rows-fit'), market = join(scratch, 'market-rows-fit');
@@ -6833,7 +6847,6 @@ async function pluginRowsFitFlow() {
   const file = (root, path, body) => { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), body); };
   const cli = (name, version) => { file(home, `.local/bin/${name}`, `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(join(home, '.local/bin', name), 0o755); };
   toolClis(home);
-  cli('opencode', '1.19.5');
   file(market, '.claude-plugin/marketplace.json', JSON.stringify({ name: 'rows-fit', owner: { name: 'Platform team' }, plugins: [
     { name: long, source: `./plugins/${long}`, version: '12.10.0-beta.3', category: 'observability', description: 'Dashboards, alerts and traces for the services a team runs, in one place.' },
     { name: nightly, source: `./plugins/${nightly}`, version: buildId, category: 'development', description: 'The latest build of the team’s tools, every night.' },
@@ -6850,6 +6863,13 @@ async function pluginRowsFitFlow() {
   const titleLines = () => a.run(`(() => { const range = document.createRange(); range.selectNodeContents(document.querySelector('.plugin-row[data-plugin="${long}"] .plugin-row-title'));
     return new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size; })()`);
   const theme = value => a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] });
+  const expectedTools = {
+    3: [['Claude Code', 'Claude'], ['Copilot CLI', 'Copilot'], ['Codex', 'Codex']],
+    4: [['Claude Code', 'Claude'], ['Copilot CLI', 'Copilot'], ['Codex', 'Codex'], ['OpenCode', 'OpenCode']],
+    5: [['Claude Code', 'Claude'], ['Copilot CLI', 'Copilot'], ['Codex', 'Codex'], ['Pi', 'Pi'], ['OpenCode', 'OpenCode']],
+    6: [['Claude Code', 'Claude'], ['Copilot CLI', 'Copilot'], ['Codex', 'Codex'], ['Pi', 'Pi'], ['OpenCode', 'OpenCode'], ['Antigravity', 'Antigravity']],
+  };
+  const everyCard = tools => `On puts a plugin in every tool that takes it except those kept out; Off turns it off everywhere, kept installed where a tool can. Stripes: on, with at least one tool kept out or off. Open a row to choose tools one by one. Columns: ${tools.map(([full]) => full).join(', ')}.`;
   const rowsWhole = async tools => {
     for (let tries = 0; tries < 50 && await a.run(`document.querySelector('.plugin-table')?.dataset.tools`) !== String(tools); tries++) await wait(100);
     same(`the table has ${tools} tool columns; each row has its name, version and chips: the one no longer offered says so`,
@@ -6859,45 +6879,122 @@ async function pluginRowsFitFlow() {
       await sizeTo(a, width, height); await sidebarOpen(open);
       same(`with ${tools} tools at ${width}×${height}, the sidebar ${open ? 'open' : 'folded'}, every plugin’s name, version and chips show whole, nothing cut off`, [...await a.run(ROW_PIECES_CUT), ...await a.run(CUT_OFF)], []);
       if (width === 1280) same(`with ${tools} tools at 1280×800 the 45-character name has room for one line, and takes it`, await titleLines(), 1);
-      if (width === 1316 && tools === 6) {
-        same('with 6 tools at 1316×819, tool headers are icon-only marks (40–56 px) with hover names, descriptions and counts show whole, and the update line stays on one line', await a.run(`(() => {
+      if (open && tools === 6 && height !== 600) {
+        const narrow = width === 860;
+        const measured = await a.run(`(() => {
+          const shown = el => !!el && el.checkVisibility({ visibilityProperty: true, opacityProperty: true });
           const heads = [...document.querySelectorAll('.plugin-table .ov-tool-head')].map(el => {
             const r = el.getBoundingClientRect();
-            return { text: el.textContent.trim(), title: el.title, label: el.getAttribute('aria-label'), okSize: r.width >= 39 && r.width <= 57 && r.height >= 39 };
+            const mark = el.querySelector('svg.brand-mark, .mono-mark');
+            const mr = mark?.getBoundingClientRect();
+            const short = el.querySelector('.plugin-tool-short');
+            const sr = short?.getBoundingClientRect();
+            const shortVisible = shown(short) && !!sr && sr.width > 0 && sr.height > 0;
+            return {
+              markOk: shown(mark) && !!mr && mr.width >= 14 && mr.height >= 14,
+              short: shortVisible ? short.textContent.trim() : '',
+              shortFits: !shortVisible || (short.scrollWidth <= short.clientWidth + 1 && sr.left >= r.left - 1 && sr.right <= r.right + 1),
+              title: el.title,
+              label: el.getAttribute('aria-label'),
+              okSize: ${narrow} ? (r.width >= 39 && r.width <= 42) : (r.width >= 58 && r.width <= 70),
+            };
           });
-          const whole = name => {
+          const wholeRow = (name, hasHolds, hasLibrary) => {
             const row = document.querySelector(\`.plugin-row[data-plugin="\${name}"]\`);
-            return ['.plugin-row-about', '.plugin-row-holds'].every(sel => {
+            const cell = row.querySelector('.plugin-row-name').getBoundingClientRect();
+            const okEl = (sel, maxLines = 1) => {
               const el = row.querySelector(sel);
-              return !!el && el.getBoundingClientRect().width > 0 && el.scrollWidth <= el.clientWidth + 1;
+              if (!shown(el)) return false;
+              const r = el.getBoundingClientRect();
+              const range = document.createRange();
+              range.selectNodeContents(el);
+              const lineCount = new Set([...range.getClientRects()].map(rect => Math.round(rect.top / 4))).size;
+              return r.width > 0 && r.height > 0 && r.left >= cell.left - 1 && r.right <= cell.right + 1
+                && el.scrollWidth <= el.clientWidth + 1 && el.scrollHeight <= el.clientHeight + 1 && lineCount <= maxLines;
+            };
+            const seps = [...row.querySelectorAll('.plugin-row-sep')].filter(shown);
+            const noOrphanSep = seps.every(sep => {
+              const prev = sep.previousElementSibling, next = sep.nextElementSibling;
+              if (!shown(prev) || !shown(next)) return false;
+              const pr = prev.getBoundingClientRect(), sr = sep.getBoundingClientRect(), nr = next.getBoundingClientRect();
+              return pr.width > 0 && nr.width > 0 && Math.abs(sr.top - pr.top) < 8 && Math.abs(nr.top - sr.top) < 8;
             });
+            return {
+              about: okEl('.plugin-row-about', 2),
+              holds: !hasHolds || okEl('.plugin-row-holds', 2),
+              library: !hasLibrary || okEl('.plugin-row-library', 1),
+              noOrphanSep,
+            };
           };
+          const everyHead = document.querySelector('.plugin-table .plugin-head-every');
+          const nameWidth = Math.round(document.querySelector('.plugin-row-name').getBoundingClientRect().width);
           const upd = [...document.querySelectorAll(\`.plugin-row[data-plugin="${nightly}"] .plugin-row-update > *\`)].map(el => el.getBoundingClientRect());
           const oneUpdateLine = upd.length >= ${canWriteRealHome ? 2 : 1} && upd.every(r => r.top < upd[0].bottom - 1 && r.bottom > upd[0].top + 1);
-          return { heads, whole: [whole(${JSON.stringify(long)}), whole(${JSON.stringify(nightly)})], oneUpdateLine };
-        })()`), {
-          heads: ['Claude Code', 'Copilot CLI', 'Codex', 'Pi', 'OpenCode', 'Antigravity'].map(name => ({ text: '', title: name, label: name, okSize: true })),
-          whole: [true, true], oneUpdateLine: true,
+          return {
+            nameWidth,
+            everyLabel: everyHead ? everyHead.getAttribute('aria-label') : null,
+            heads,
+            rows: [
+              wholeRow(${JSON.stringify(long)}, true, false),
+              wholeRow(${JSON.stringify(nightly)}, true, true),
+              wholeRow(${JSON.stringify(gone)}, false, true),
+            ],
+            oneUpdateLine,
+          };
+        })()`);
+        if ([860, 1316, 1728].includes(width)) console.log(`rows-fit 6 tools @ ${width}: nameWidth=${measured.nameWidth}px`);
+        same(`with 6 tools at ${width}×${height}, headers show marks (${narrow ? 'icon-only' : 'with short names'}), rows stay whole with no orphan separators`, {
+          everyLabel: measured.everyLabel, heads: measured.heads, rows: measured.rows,
+          ...(width === 1316 ? { oneUpdateLine: measured.oneUpdateLine } : {}),
+        }, {
+          everyLabel: canWriteRealHome ? 'Every tool' : null,
+          heads: expectedTools[6].map(([full, short]) => ({ markOk: true, short: narrow ? '' : short, shortFits: true, title: full, label: full, okSize: true })),
+          rows: [
+            { about: true, holds: true, library: true, noOrphanSep: true },
+            { about: true, holds: true, library: true, noOrphanSep: true },
+            { about: true, holds: true, library: true, noOrphanSep: true },
+          ],
+          ...(width === 1316 ? { oneUpdateLine: true } : {}),
         });
       }
-      if (open) await a.shot(`rows-fit-${tools}-tools-${width}x${height}`);
+      if (open && (tools === 6 || (tools === 3 && width === 1316))) await a.shot(`rows-fit-${tools}-tools-${width}x${height}`);
+    }
+    if (tools === 6) {
+      await sizeTo(a, 1316, 819); await sidebarOpen(true);
+      same('with 6 tools, the key shows the row’s dash for Can’t go there and drops Out of date when rows name Update', await a.run(`(() => {
+        const legend = document.querySelector('.plugin-legend');
+        const cannot = legend?.querySelector('.legend-cell.cell-cannot .cannot-dash');
+        const cr = cannot?.getBoundingClientRect();
+        return {
+          hasCannot: !!legend && legend.textContent.includes('Can’t go there'),
+          cannotDash: !!cannot && cannot.textContent.trim() === '–' && !!cr && cr.width > 0 && cr.height > 0,
+          hasOutdated: !!legend && legend.textContent.includes('Out of date'),
+        };
+      })()`), { hasCannot: true, cannotDash: true, hasOutdated: false });
     }
     if (tools === 6 && canWriteRealHome) {
       await sizeTo(a, ...SMALLEST); await sidebarOpen(true);
       if (await a.exists('#plugin-switch-info')) {
         if (shots) { await a.click('#plugin-switch-info'); await a.shot('rows-fit-6-tools-860x528-every-tool-card'); await a.press('Escape'); }
-        await checkCard(a, 'plugin-switch-info', 'On puts the plugin in every tool that takes it except those kept out. A striped switch means on with a tool kept out or off.',
+        await checkCard(a, 'plugin-switch-info', everyCard(expectedTools[6]),
           'with 6 tools at 860×528, Every tool (?) opens its card clear of the status bar');
       } else check('with 6 tools at 860×528, Every tool (?) info mark exists', false);
     }
-    await theme('dark');
-    for (const [width, height] of [SMALLEST, [1316, 819]]) { await sizeTo(a, width, height); await sidebarOpen(true); await a.shot(`rows-fit-${tools}-tools-${width}x${height}-dark`); }
-    await theme('light');
+    if (tools === 6) {
+      await theme('dark');
+      await sizeTo(a, 1316, 819); await sidebarOpen(true); await a.shot('rows-fit-6-tools-1316x819-dark');
+      await theme('light');
+    }
     await fullSize(a);
   };
   await theme('light');
   await a.click('#nav-plugins');
   for (let tries = 0; tries < 50 && !(await a.exists(`.plugin-row[data-plugin="${gone}"]`)); tries++) await wait(100);
+  await rowsWhole(3);
+  cli('opencode', '1.19.5');
+  await a.click('#nav-harnesses');
+  await a.click('#header-refresh');
+  await a.click('#nav-plugins');
   await rowsWhole(4);
   // Pi joins at a read of the home, made where it is the one read (as openCodeFlow does: Plugins' own read would start a second).
   cli('pi', '0.70.2');
@@ -8990,14 +9087,18 @@ esac
   same('the marketplace is added', await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)}).then(result => result.problem ?? 'added')`), 'added');
   await a.click('#nav-plugins');
   for (let tries = 0; tries < 50 && !(await a.exists('#pswitch-0-issue-tracker')); tries++) await wait(100);
-  same('Plugin marketplaces’ head shows Every tool (?) with no hint spans and icon-only tool headers', await a.run(`(() => {
+  same('Plugin marketplaces’ head shows Every tool (?) with no hint spans and tool headers with marks and short names', await a.run(`(() => {
     const head = document.querySelector('.plugin-table .ov-head');
-    const tools = [...head.querySelectorAll('.ov-tool-head')].map(el => [el.textContent.trim(), el.title, el.getAttribute('aria-label')]);
-    return [head.querySelector('.ov-name')?.innerText.trim(), !!head.querySelector('.hint-long, .hint-short, .plugin-hint'), tools];
-  })()`), ['Every tool', false, [['', 'Claude Code', 'Claude Code'], ['', 'Pi', 'Pi']]]);
+    const every = head.querySelector('.plugin-head-every');
+    const tools = [...head.querySelectorAll('.ov-tool-head')].map(el => {
+      const mark = el.querySelector('svg.brand-mark, .mono-mark'), mr = mark?.getBoundingClientRect();
+      return [!!mark && mr.width >= 14 && mr.height >= 14, el.querySelector('.plugin-tool-short')?.textContent.trim() ?? '', el.title, el.getAttribute('aria-label')];
+    });
+    return [every?.innerText.trim(), every?.getAttribute('aria-label'), !!head.querySelector('.hint-long, .hint-short, .plugin-hint'), tools];
+  })()`), ['Every tool', 'Every tool', false, [[true, 'Claude', 'Claude Code', 'Claude Code'], [true, 'Pi', 'Pi', 'Pi']]]);
   if (await a.exists('#plugin-switch-info')) {
-    await checkCard(a, 'plugin-switch-info', 'On puts the plugin in every tool that takes it except those kept out. A striped switch means on with a tool kept out or off.',
-      'Plugin marketplaces’ Every tool (?) card explains what On and a striped switch mean');
+    await checkCard(a, 'plugin-switch-info', 'On puts a plugin in every tool that takes it except those kept out; Off turns it off everywhere, kept installed where a tool can. Stripes: on, with at least one tool kept out or off. Open a row to choose tools one by one. Columns: Claude Code, Pi.',
+      'Plugin marketplaces’ Every tool (?) card explains On, Off, stripes, choosing one tool and column order');
   } else check('Plugin marketplaces’ Every tool (?) info mark exists', false);
   const marks = (plugin = 'issue-tracker') => a.run(`[...document.querySelectorAll('[data-plugin="${plugin}"] .cell-button')].map(cell => cell.dataset.state)`);
   const switchIs = selector => a.run(`(() => { const s = document.querySelector('${selector}'); return s ? s.getAttribute('aria-checked') + (s.classList.contains('switch-partial') ? ' partial' : '') : 'missing'; })()`);
@@ -10129,8 +10230,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   same('while its click runs, a plugin’s switch is off and keeps the focus', [await a.run(`document.querySelector('#pswitch-0-plug-22').getAttribute('aria-disabled')`), await focused()], ['true', 'pswitch-0-plug-22']);
   letGo(); await done();
   // Five plugins clicked quickly, one after another, each where it was before the first click: they wait their turn in one
-  // list, each row saying how its click stands in place of its line, so no row grows and none below moves. In the table's
-  // narrow form (here) and its wide one (1728), where a row's line sits beside its name.
+  // list, each row saying how its click stands in place of its line, so no row grows and none below moves, at 1280 and 1728.
   const fiveQuickly = async from => {
     await putAt(list, `[data-plugin="${from}"]`, 200);
     const five = listed.slice(listed.indexOf(from), listed.indexOf(from) + 5), points = [], before = await states('[data-plugin]');
@@ -10194,7 +10294,7 @@ fs.writeFileSync(record, JSON.stringify(now));
   // so its Off above left that copy where it is, and its On now finds it there: pluginstatus.ts cantUninstall.)
   const failNow = ['plug-04', 'plug-05', 'plug-17'];
   for (const name of failNow) writeFileSync(join(home, `fail-${name}`), '');
-  // 80 px clears sticky .ov-head (min-height 48 px) while keeping plug-17 in view; wait for the four switches to rest, enabled and uncovered.
+  // 80 px clears sticky .ov-head (min-height 48 px with tool labels, 40 px icon-only) while keeping plug-17 in view; wait for the four switches to rest, enabled and uncovered.
   await putAt(list, '[data-plugin="plug-04"]', 80);
   const four = ['plug-04', 'plug-05', 'plug-17', 'plug-10'];
   await a.run(`(async () => {
