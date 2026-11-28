@@ -8,7 +8,7 @@ import { acting, noteMove, noToolManaged, rerender, showPage, state as app } fro
 import { noToolsState } from './pages.ts';
 import { button, closeButton, emptyState, h, icon, rereadBand, whyOff, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
-import { clockTime, plural } from './model.ts';
+import { plural, timeOrDay } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
 import { clickNote, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { pluginKey, resultParts, resultSentence, shortOf, undoTitle, type LastRun, type PluginOp, type ResultLine, type RunPlace } from './pluginplan.ts';
@@ -21,9 +21,6 @@ import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginUpdateNotes } from './pluginupdateview.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
 import { andList, notAllThrough, orList, pageNames, toolName, toolNames as names } from './words.ts';
-
-/** "9:20 AM" today, else "Nov 8". */
-const when = (iso: string) => (new Date(iso).toDateString() === new Date().toDateString() ? clockTime(iso) : new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
 
 /** The add box: open with no marketplaces yet, otherwise one "Add marketplace" button that opens it. */
 function addBox(first: boolean) {
@@ -231,7 +228,7 @@ function aboutTab(view: PluginsView, entry: MarketplaceView, marketIndex: number
 function marketFacts(entry: MarketplaceView): string[] {
   if (entry.bundled) return [entry.owner ? `By ${entry.owner}` : '', entry.sourceLabel].filter(Boolean);
   const addedBy = entry.origins.includes('central-knot') ? [] : entry.origins.filter(origin => origin !== 'bundle').map(toolName);
-  return [entry.owner ? `By ${entry.owner}` : '', addedBy.length ? `Added in ${andList(addedBy)}` : '', entry.fetchedAt ? `Updated ${when(entry.fetchedAt)}` : ''].filter(Boolean);
+  return [entry.owner ? `By ${entry.owner}` : '', addedBy.length ? `Added in ${andList(addedBy)}` : '', entry.fetchedAt ? `Updated ${timeOrDay(entry.fetchedAt)}` : ''].filter(Boolean);
 }
 
 /**
@@ -242,7 +239,7 @@ function feedNote(entry: MarketplaceView, marketIndex: number): HTMLElement | nu
   const feed = entry.bundled?.feed;
   if (!feed) return null;
   const trouble = feed.outcome === 'failed' || feed.outcome === 'held';
-  const at = feed.checked ? when(feed.checked) : '';
+  const at = feed.checked ? timeOrDay(feed.checked) : '';
   // Trouble says when it was last tried and, when it didn't mend itself, who to tell; otherwise what "arrive" means for a plugin a tool already has.
   const said = trouble ? `${feed.message!}${at ? ` Last tried ${at}.` : ''}${feed.outcome === 'failed' && entry.owner ? ` If it keeps happening, tell ${entry.owner}.` : ''}`
     : `Newer plugins arrive by themselves. Tools that have one installed pick up the new version when they next start; if a tool can’t, Update shows here.${at ? ` Last checked ${at}.` : ''}`;
@@ -304,7 +301,7 @@ function marketPage(view: PluginsView, entry: MarketplaceView, marketIndex: numb
   // and Remove under About, the filters on the tab row. The header's Refresh fetches every marketplace again.
   return h('section.market-page', { 'aria-label': marketTitle(entry) },
     entry.description ? h('p.market-page-about', { title: entry.description }, entry.description) : null,
-    entry.problem ? h('div.band', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'), h('span.band-text', {}, entry.problem, entry.stale && entry.fetchedAt ? ` Showing the copy from ${when(entry.fetchedAt)}.` : '')) : null,
+    entry.problem ? h('div.band', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'), h('span.band-text', {}, entry.problem, entry.stale && entry.fetchedAt ? ` Showing the copy from ${timeOrDay(entry.fetchedAt)}.` : '')) : null,
     h('div.market-tabs', {},
       h('div.market-tablist', { role: 'tablist' },
         (['plugins', 'about'] as const).map(tab => h(`button.market-tab${market.nav.tab === tab ? '.selected' : ''}`, { type: 'button', role: 'tab', id: `market-tab-${tab}`, 'aria-selected': String(market.nav.tab === tab), onclick: () => browse({ tab }) },
