@@ -1,6 +1,7 @@
 // Shared hook identity lookup (parseHookRef, findHook — called by both readHookSource here and hookrun.ts runHook) and reading
 // one hook's source on click (IPC hook:source): finds the hook again through the same readers the page was drawn with
-// (own tool settings, an installed plugin copy, or a marketplace copy resolved by marketplace name through marketplaces.ts,
+// (own tool settings, an installed plugin copy via plugins.ts installedPlugins — which omits plugins installed with no
+// marketplace, so their hooks are not shown — or a marketplace copy resolved by marketplace name through marketplaces.ts,
 // without fetching). For both own and installed hooks, findOwner reads the tool's settings (pluginitems.ts sessionSettings) so
 // findHook reports whether the tool's hooks are off (hooksDisabled) or the plugin is off (pluginOff), while readHookSource
 // still shows the source. Never reads a path or folder sent from the page, and shows only the hook's own entry (from
