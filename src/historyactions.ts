@@ -543,6 +543,7 @@ const leftSaid = (left: LeftIn[]) => andList([...new Set(left.map(entry => entry
   return `${andList(names)} (${leftWords[why][names.length === 1 ? 0 : 1]})`;
 }));
 const itemsSaid = (count: number) => `${count} ${count === 1 ? 'item' : 'items'}`;
+const keptOwn = (count: number) => (count === 1 ? 'each tool it was found in keeping its own copy' : 'each tool they were found in keeping its own');
 /** Tools not managed now that a take-in taken back wrote: "Codex isn’t managed now, so it keeps Central Knot’s copy until it is". */
 const keptSaid = (tools: HarnessId[]) => (tools.length === 1 ? `${toolName(tools[0])} isn’t managed now, so it keeps Central Knot’s copy until it is`
   : `${andList(tools.map(toolName))} aren’t managed now, so they keep Central Knot’s copies until they are`);
@@ -553,7 +554,7 @@ export function everythingSentence(event: HistoryEvent): { glyph: IconName; text
   if (!undo) return ruleOn ? { glyph: 'refresh-cw', text: `Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. ${oneUndoCovers('Its Undo')}` }
     : { glyph: 'circle-minus', text: 'Switched off: what turns up in a tool waits on its page for Add.' };
   const count = undo.itemUndos.length;
-  const out = count ? `${itemsSaid(count)} it took in ${count === 1 ? 'is' : 'are'} out of Central Knot again, each tool it was found in keeping its own copy` : 'nothing it took in was taken back';
+  const out = count ? `${itemsSaid(count)} it took in ${count === 1 ? 'is' : 'are'} out of Central Knot again, ${keptOwn(count)}` : 'nothing it took in was taken back';
   return { glyph: 'undo-2', text: `Undone: ${undo.switchedOff ? `switched off${count ? ', and ' : '; '}` : ''}${out}.${undo.left.length ? ` Left in: ${leftSaid(undo.left)}.` : ''}${undo.keptIn.length ? ` ${keptSaid(undo.keptIn)}.` : ''}` };
 }
 
@@ -584,7 +585,7 @@ export function everythingAction(event: HistoryEvent, history: HistoryEvent[], a
   }
   const { takeBack, left, switchOff, keptIn } = everythingPlan(event, history, about);
   if (!switchOff && !takeBack.length) return undefined;
-  const takes = takeBack.length ? `take back the ${itemsSaid(takeBack.length)} it took in since, each tool it was found in keeping its own copy` : '';
+  const takes = takeBack.length ? `take back the ${itemsSaid(takeBack.length)} it took in since, ${keptOwn(takeBack.length)}` : '';
   const help = sentence([switchOff ? 'switch Synchronize everything off' : '', takes].filter(Boolean).join(' and '));
   return { label: 'Undo', help: `${help}${left.length ? `; ${leftSaid(left)} stay${left.length === 1 ? 's' : ''}` : ''}${keptIn.length ? `; ${keptSaid(keptIn)}` : ''}` };
 }
