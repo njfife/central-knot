@@ -11,9 +11,9 @@ import { brandMark } from './brand.ts';
 import { plural, timeOrDay } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
 import { clickNote, dotted, libraryLink, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, versionNote } from './pluginparts.ts';
-import { pluginKey, resultParts, resultSentence, shortOf, undoTitle, type LastRun, type PluginOp, type ResultLine, type RunPlace } from './pluginplan.ts';
+import { noUndoNote, pluginKey, resultParts, resultSentence, shortOf, undoTitle, type LastRun, type PluginOp, type ResultLine, type RunPlace } from './pluginplan.ts';
 import { FIND_FROM, NO_LONGER_OFFERED, blocked, categoriesOf, copyStale, installedFrom, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, summaryOf, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
-import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, forgetMarketplace, lastLines, market, openLink, overRun, pickMarketplaceFolder, pluginsResultPlace, runReloads, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
+import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, closeRun, current, declineMarketplace, forgetMarketplace, lastLines, market, openLink, overRun, pickMarketplaceFolder, pluginLabel, pluginLabeler, pluginsResultPlace, runDisplay, runReloads, shownDetail, shownPlugins, undoLabel, undoLast, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
 import { listResult, problemLines, profileSpan, reloadChips, reloadLines, wholeToggle } from './matrix.ts';
 import type { ReloadAdvice } from './reload.ts';
@@ -375,8 +375,8 @@ function undoButton(): HTMLElement | null {
   const undo = button({ variant: 'outline', size: 'small', label: undoLabel(), id: 'plugins-undo', disabled: acting(), onclick: undoLast });
   const last = market.lastRun;
   const updated = !last?.undo && !!last?.done.some(entry => entry.action === 'update' && entry.report.changed);
-  // A switch's Undo names its plugin: several plugins' clicks may have run since the page was last read.
-  const plugin = !last?.undo ? last?.turn?.plugin : undefined;
+  // A switch's Undo (and "Undo the rest" after a failed reinstall) names its plugin (and marketplace when shared) so its tooltip says what comes back.
+  const plugin = last?.turn ? pluginLabel(last.turn.source, last.turn.plugin, [...lastLines(), ...last.done]) : undefined;
   undo.title = acting() ?? undoTitle(back, { plugin, updated });
   return undo;
 }
@@ -396,14 +396,10 @@ export function pluginsResult(): HTMLElement[] {
   // One with an action of its own (Add back) is its own line here (runLine).
   const told = app.outcome;
   if (told && overRun(told) && (!told.act || !!told.rows?.length)) return listResult();
-  const last = market.lastRun;
   const problem = market.problem;
-  const lines = last ? lastLines() : [];
-  const openName = here === 'plugins' ? market.nav.plugin : undefined;
-  const elsewhere = !!last && (last.reread || (!!openName && !lines.some(line => line.plugin === openName)));
-  const advice = !last || elsewhere ? { text: '', items: [] } : runReloads();
+  const { last, lines, elsewhere, advice, shown } = runDisplay(here);
   const of = last ?? app.outcome, whole = of !== undefined && app.shownWhole === of, hasAdvice = advice.items.length > 0;
-  const run = runLine(last, here, lines, advice, elsewhere, whole);
+  const run = runLine(last, here, lines, shown, elsewhere, whole);
   const chips = run && !whole ? reloadChips(advice, of) : null;
   const profile = profileSpan(run && !whole ? last?.profileLine : undefined, 'plugins-profile-changed-info');
   const problems = problemBand(problem, lines, !run, hasAdvice, chips, profile, last);
@@ -420,27 +416,31 @@ export function pluginsResult(): HTMLElement[] {
  */
 export function runBand(): HTMLElement | null {
   const last = market.lastRun, problem = market.problem, lines = last ? lastLines() : [];
-  const reasons = [...lines.filter(line => !line.ok).map(line => [h('strong.item-name', {}, line.plugin), `: ${line.text}`]), ...(problem ? [problem] : [])];
-  const said = [last ? resultSentence(lines, last.undo) : '', last?.profileLine].filter(Boolean).join(' ');
+  const label = pluginLabeler([...lines, ...(last?.done ?? [])]);
+  const reasons = [...lines.filter(line => !line.ok).map(line => [h('strong.item-name', {}, label(line)), `: ${line.text}`]), ...(problem ? [problem] : [])];
+  const undo = undoButton();
+  const said = [last ? `${resultSentence(lines, last.undo, label)}${noUndoNote(last, !!undo)}` : '', last?.profileLine].filter(Boolean).join(' ');
   if (!said && !reasons.length) return null;
   return h('div.band.band-done.plugin-run', { role: 'status', id: 'plugins-result', tabindex: '-1' }, reasons.length ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'),
     h('span.band-text', {}, said, reasons.map(reason => h('span.band-reason', {}, reason))),
-    h('span.band-actions', {}, undoButton()), dismiss(closeRun, 'report-dismiss'), last ? reloadLines(runReloads(), last) : null);
+    h('span.band-actions', {}, undo), dismiss(closeRun, 'report-dismiss'), last ? reloadLines(runReloads(), last) : null);
 }
 
 /** What just happened (each plugin named a link to its page, with Undo), or else the last notice ("… added"). */
-function runLine(last: LastRun | undefined, place: RunPlace, lines: ResultLine[], advice: ReloadAdvice, elsewhere: boolean, whole = false): HTMLElement | null {
-  // A result is said here only while it offers something to do (Undo, Copy, a failure, or an ended profile); one that only tells
-  // is in the status bar (app.ts saidInStatusBar).
+function runLine(last: LastRun | undefined, place: RunPlace, lines: ResultLine[], shown: boolean, elsewhere: boolean, whole = false): HTMLElement | null {
+  // Visibility follows pluginstate.ts runDisplay so the header and status-bar quiet check always agree.
   const back = last ? undoButton() : null;
   const open = current()?.entry;
   const here = place === 'plugins' && open && market.nav.plugin ? { plugin: market.nav.plugin, source: open.source } : undefined;
-  const parts = last ? resultParts(lines, last.undo, { short: true, here }) : [];
+  const parts = last ? resultParts(lines, last.undo, { short: true, here, group: place !== 'plugins' }) : [];
+  const label = pluginLabeler([...lines, ...(last?.done ?? [])]);
   // A run that left something undone counts it first, Undo or not (its reasons are the problem lines under it), so the cut never hides it.
-  const short = last ? shortOf(lines, last.unreached) : { names: [], of: 0 }, failed = short.names;
-  if (last && (parts.length || failed.length) && (back || failed.length || advice.items.length > 0 || !!last.profileLine)) {
-    const link = (part: { plugin: string; source: string }, at: number) =>
-      h('button.result-link', { type: 'button', id: `result-plugin-${at}`, title: `Open ${part.plugin}`, onclick: () => browse({ source: part.source, plugin: part.plugin, tab: 'plugins' }) }, part.plugin);
+  const short = last ? shortOf(lines, last.unreached, label) : { names: [], of: 0 }, failed = short.names;
+  if (last && (parts.length || failed.length) && shown) {
+    const link = (part: { plugin: string; source: string }, at: number) => {
+      const named = label(part);
+      return h('button.result-link', { type: 'button', id: `result-plugin-${at}`, title: `Open ${named}`, onclick: () => browse({ source: part.source, plugin: part.plugin, tab: 'plugins' }) }, named);
+    };
     // On another plugin's page the result is only named, so it never reads as being about the plugin on screen; an
     // Undo still says it was undone.
     // Once the tools were read again (Refresh) the run is only named, so its sentence never contradicts what the page now shows.
@@ -450,9 +450,9 @@ function runLine(last: LastRun | undefined, place: RunPlace, lines: ResultLine[]
       ? changed.length ? [last.undo ? 'Undone: ' : 'Last change: ', ...changed.flatMap((part, at) => [at ? ', ' : '', link(part, at)]), '.'] : []
       : parts.map((part, at) => (typeof part === 'string' ? part : link(part, at)));
     const lead = failed.length ? `${notAllThrough(failed, short.of)} ` : '';
-    const profile = whole && last.profileLine ? ` ${last.profileLine}` : '';
+    const tail = `${elsewhere ? '' : noUndoNote(last, !!back)}${whole && last.profileLine ? ` ${last.profileLine}` : ''}`;
     return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, failed.length ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'),
-      h('span.toolbar-result-text', { title: `${lead}${resultSentence(lines, last.undo)}${profile}` }, lead, sentence, profile || null), back, dismiss(closeRun, 'report-dismiss'));
+      h('span.toolbar-result-text', { title: `${lead}${resultSentence(lines, last.undo, label)}${tail}` }, lead, sentence, tail || null), back, dismiss(closeRun, 'report-dismiss'));
   }
   // An Undo that undid nothing still offers its way back here, whether or not its failures are still shown.
   if (last && back) return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, h('span.toolbar-result-text', {}, 'Not everything was undone.'), back, dismiss(closeRun, 'report-dismiss'));
@@ -466,8 +466,9 @@ function runLine(last: LastRun | undefined, place: RunPlace, lines: ResultLine[]
 function problemBand(problem: string | undefined, lines: ResultLine[], alone: boolean, hasAdvice = false, chips: HTMLElement | null = null, profile: HTMLElement | null = null, last?: LastRun) {
   const failures = lines.filter(line => !line.ok);
   if (!problem && !failures.length) return null;
+  const label = pluginLabeler([...lines, ...(last?.done ?? [])]);
   return h(`div.band.plugin-problems${chips || profile ? '.result-row2' : ''}`, { role: 'alert' }, profile, icon('triangle-alert', 14, 'tone-warning'),
-    problemLines([...failures.map(line => [h('strong.item-name', {}, line.plugin), `: ${line.text}`]), ...(problem ? [problem] : [])], last ?? problem, hasAdvice),
+    problemLines([...failures.map(line => [h('strong.item-name', {}, label(line)), `: ${line.text}`]), ...(problem ? [problem] : [])], last ?? problem, hasAdvice),
     chips, alone ? dismiss(closeRun, 'report-dismiss') : null);
 }
 

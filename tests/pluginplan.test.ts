@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { batches, notUndone, resultLines, resultParts, resultSentence, reverse, runPlan, shortOf, undoTitle, unreachedOps, type PlanApi, type PluginDone, type PluginOp, type ResultLine } from '../src/pluginplan.ts';
+import { batches, consequentialRun, notUndone, resultLines, resultParts, resultSentence, reverse, runPlan, shortOf, undoTitle, unreachedOps, type PlanApi, type PluginDone, type PluginOp, type ResultLine } from '../src/pluginplan.ts';
 import type { ActionReport, HarnessId } from '../src/types.ts';
 
 const op = (plugin: string, tool: HarnessId, action: PluginOp['action'] = 'install'): PluginOp => ({ source: 'anthropics/skills', marketName: 'anthropic-agent-skills', plugin, tool, action });
@@ -70,6 +70,28 @@ test('An uninstall’s Undo says it installs the marketplace’s copy again, and
   assert.equal(undoTitle([op('pdf', 'codex-cli')], { plugin: 'pdf' }), 'Installs pdf again in Codex, from the marketplace.');
   const done: PluginDone[] = [{ ...back[0]!, report: { tool: 'claude-cli', outcome: 'installed', message: '', runs: [], changed: true } }];
   assert.equal(resultSentence(resultLines(done, true), true), 'Undone: pdf reinstalled in Claude Code, without its saved options.');
+  const removedClaude: PluginDone[] = [{ ...op('pdf', 'claude-cli', 'remove'), deleted: true, report: { tool: 'claude-cli', outcome: 'uninstalled', message: '', runs: [], changed: true } }];
+  assert.equal(resultSentence(resultLines(removedClaude, false), false), 'pdf: uninstalled from Claude Code; its saved options were deleted.');
+  const removedCodex: PluginDone[] = [{ ...op('pdf', 'codex-cli', 'remove'), deleted: true, report: { tool: 'codex-cli', outcome: 'uninstalled', message: '', runs: [], changed: true } }];
+  assert.equal(resultSentence(resultLines(removedCodex, false), false), 'pdf: uninstalled from Codex; its MCP servers’ settings were deleted.');
+  const unknownBack: PluginOp[] = [{ ...op('pdf', 'claude-cli'), deleted: 'unknown' }];
+  assert.equal(undoTitle(unknownBack, { plugin: 'pdf' }), 'Installs pdf again in Claude Code, from the marketplace; its record couldn’t be read, so it isn’t known whether its saved options are still there.');
+  assert.equal(undoTitle([...unknownBack, op('pdf', 'claude-cli', 'plugin-off')], { plugin: 'pdf' }), 'Installs pdf again in Claude Code, from the marketplace, off as it was; its record couldn’t be read, so it isn’t known whether its saved options are still there.');
+  assert.equal(undoTitle([{ ...op('pdf', 'codex-cli'), deleted: 'unknown' }], { plugin: 'pdf' }), 'Installs pdf again in Codex, from the marketplace; its record couldn’t be read, so it isn’t known whether its MCP servers’ settings are still there.');
+  const unknownRemoved: PluginDone[] = [{ ...op('pdf', 'claude-cli', 'remove'), deleted: 'unknown', report: { tool: 'claude-cli', outcome: 'uninstalled', message: '', runs: [], changed: true } }];
+  assert.equal(resultSentence(resultLines(unknownRemoved, false), false), 'pdf: uninstalled from Claude Code; its record couldn’t be read, so it isn’t known whether its saved options are still there.');
+  const unknownDone: PluginDone[] = [{ ...unknownBack[0]!, report: { tool: 'claude-cli', outcome: 'installed', message: '', runs: [], changed: true } }];
+  assert.equal(resultSentence(resultLines(unknownDone, true), true), 'Undone: pdf reinstalled in Claude Code; its record couldn’t be read, so it isn’t known whether its saved options are still there.');
+  const step = (action: PluginOp['action'], changed = true): PluginDone => ({ ...op('pdf', 'claude-cli', action), report: { tool: 'claude-cli', outcome: action === 'remove' ? 'uninstalled' : action === 'update' ? 'updated' : action === 'install' ? 'installed' : 'plugin-off', message: '', runs: [], changed } });
+  assert.deepEqual([
+    consequentialRun(undefined),
+    consequentialRun({ done: [step('remove')], undo: false, home: '/h' }),
+    consequentialRun({ done: [step('update')], undo: false, home: '/h' }),
+    consequentialRun({ done: [step('install')], undo: true, home: '/h' }),
+    consequentialRun({ done: [step('install')], undo: false, home: '/h' }),
+    consequentialRun({ done: [step('plugin-off')], undo: false, home: '/h' }),
+    consequentialRun({ done: [step('remove', false)], undo: false, home: '/h' }),
+  ], [false, true, false, true, false, false, false]);
 });
 
 test('An Undo says what came back, and keeps what it did not get to', () => {
@@ -111,6 +133,12 @@ test('The toolbar counts three or more tools; the full sentence names them', () 
   assert.deepEqual(resultParts(lines, false, { short: true }), [{ plugin: 'pdf', source: 'anthropics/skills' }, ': installed in 3 tools', '.']);
   // On a plugin's own page its name is left out, but not where the sentence names another plugin too: each result said once, named.
   const two = resultLines([{ ...done[0]!, plugin: 'docs' }, done[0]!]);
+  const twoSame: ResultLine[] = [
+    { source: '/m', plugin: 'alpha', ok: true, text: 'its items put in OpenCode', short: 'its items put in OpenCode' },
+    { source: '/m', plugin: 'beta', ok: true, text: 'its items put in OpenCode', short: 'its items put in OpenCode' },
+  ];
+  assert.deepEqual(resultParts(twoSame, false, { short: true }), [{ plugin: 'alpha', source: '/m' }, ': its items put in OpenCode', '; ', { plugin: 'beta', source: '/m' }, ': its items put in OpenCode', '.']);
+  assert.deepEqual(resultParts(twoSame, false, { short: true, group: true }), [{ plugin: 'alpha', source: '/m' }, ' and ', { plugin: 'beta', source: '/m' }, ': its items put in OpenCode', '.']);
   assert.deepEqual(resultParts(two, false, { here: { plugin: 'pdf', source: 'anthropics/skills' } }).filter(part => typeof part !== 'string').map(part => (part as { plugin: string }).plugin), ['docs', 'pdf']);
 });
 
