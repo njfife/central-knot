@@ -500,7 +500,7 @@ async function backFlow() {
   await thumb();
   same('one Back skips left-out tool entries that now show the current list', await page(), 'nav-history');
   await a.click(byId('nav-harnesses'));
-  await a.click(byId('manage-codex-cli'));
+  await manageAgain(a, 'codex-cli');
   await a.click(byId('harness-codex-cli'));
   await a.click(byId('nav-settings'));
   await a.click(byId('nav-harnesses'));
@@ -893,7 +893,7 @@ async function harnessFlow() {
   })()`);
   same('a managed card’s main part is a div and its heading is the link button, first in keyboard order, with the arrow beside the name in its ink, no nested buttons, and Managed (?) on the first managed card',
     [cardShape.mainTag, cardShape.headTag, cardShape.headClass, cardShape.label, cardShape.arrowGap, cardShape.sameInk, cardShape.inMain, cardShape.nestedButtons, cardShape.buttons],
-    ['DIV', 'BUTTON', true, 'Claude Code. Open its page.', 8, true, true, 0, ['harness-claude-cli', 'harness-claude-cli-differ-skills', 'manage-claude-cli', 'manage-info']]);
+    ['DIV', 'BUTTON', true, 'Claude Code. Open its page.', 8, true, true, 0, ['harness-claude-cli', 'harness-claude-cli-instructions', 'harness-claude-cli-differ-skills', 'manage-claude-cli', 'manage-info']]);
   // Clicking the card's body outside its heading does nothing (both DOM click on counts and real pointer click on the body).
   await a.click('.harness-card:has(#harness-claude-cli) .harness-counts');
   const bodyPoint = await a.run(`(() => {
@@ -924,9 +924,9 @@ async function harnessFlow() {
     [openedByKey, returnedFocus], ['Claude Code', { id: 'harness-claude-cli', tag: 'BUTTON', head: true, visible: true }]);
   // Manage switch never navigates, and an unmanaged card's heading and body never navigate.
   await a.click('#manage-codex-cli');
-  const codexOut = await a.exists('.harness-cards') && !(await a.exists('#harness-back')) && !(await a.exists('button#harness-codex-cli'));
-  await a.click('#harness-codex-cli .harness-card-head');
-  await a.click('#harness-codex-cli .harness-card-main');
+  const codexOut = await a.exists('.harness-cards') && !(await a.exists('#harness-back')) && !(await a.exists('#harness-codex-cli')) && await a.exists('#harness-card-codex-cli.harness-card-out');
+  await a.click('#harness-card-codex-cli .harness-card-head');
+  await a.click('#harness-card-codex-cli .harness-card-main');
   const outStayed = await a.exists('.harness-cards') && !(await a.exists('#harness-back'));
   await manageAgain(a, 'codex-cli');
   const managedBack = await a.exists('.harness-cards') && !(await a.exists('#harness-back')) && await a.exists('button#harness-codex-cli.harness-card-head');
@@ -986,16 +986,121 @@ async function harnessFlow() {
   // Another home: the instruction file shown is that home's, not the practice copy's.
   await a.click('#home-actual');
   await a.click('#nav-harnesses');
-  // A missing tool's card has no heading button and clicking its heading or body never navigates.
-  const piMissing = await a.exists('#harness-pi-cli.harness-card-missing') && !(await a.exists('button#harness-pi-cli'));
-  await a.click('#harness-pi-cli .harness-card-head');
-  await a.click('#harness-pi-cli .harness-card-main');
+  // A missing tool's card has a distinct wrapper id, no heading button, and clicking its heading or body never navigates.
+  const piMissing = await a.exists('#harness-card-pi-cli.harness-card-missing') && !(await a.exists('#harness-pi-cli'));
+  await a.click('#harness-card-pi-cli .harness-card-head');
+  await a.click('#harness-card-pi-cli .harness-card-main');
   same('a missing tool’s card has no heading button and clicking it never navigates', [piMissing, await a.exists('.harness-cards') && !(await a.exists('#harness-back'))], [true, true]);
   await a.click('button#harness-claude-cli.harness-card-head');
   await a.click('#harness-tab-instructions');
   check('after a home switch, instructions are that home’s', (await a.text('#harness-body') ?? '').includes('~/.claude/CLAUDE.md'), await a.text('#harness-body'));
   same('no page errors, harnesses', a.pageErrors, []);
   await a.quit();
+
+  // Six-tool Harnesses cards: compact footer brings all six Manage switches above the fold at 1316×822, wide sits 3 × 2,
+  // capability dashes carry the (?) mark and keyboard-accessible cards, filenames span value+note on one line and open
+  // that tool's Instructions tab, and clicking beside the heading never navigates.
+  const sHome = join(scratch, 'harness-six-home'), sData = join(scratch, 'harness-six-data');
+  const sCli = (name, version) => { const p = join(sHome, '.local/bin', name); mkdirSync(join(p, '..'), { recursive: true }); writeFileSync(p, `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(p, 0o755); };
+  for (const [name, version] of [['claude', '2.1.330 (Claude Code)'], ['copilot', '1.0.114'], ['codex', 'codex-cli 0.171.0'], ['pi', 'pi 1.6.0'], ['opencode', '1.19.6'], ['agy', '1.5.14']]) sCli(name, version);
+  for (const dir of ['.claude/skills', '.copilot/skills', '.codex/skills', '.pi/agent/skills', '.config/opencode/skills', '.gemini/config/skills']) {
+    skill(join(sHome, dir), 'notes', text('notes', 'Notes.'));
+    skill(join(sHome, dir), 'review', text('review', 'Review.'));
+  }
+  for (const dir of ['.claude/skills', '.copilot/skills', '.codex/skills']) skill(join(sHome, dir), 'local-draft', text('local-draft', 'Draft.'));
+  skill(join(sHome, '.claude/skills'), 'clash', text('clash', 'Claude copy.'));
+  skill(join(sHome, '.copilot/skills'), 'clash', text('clash', 'Copilot copy.'));
+  skill(join(sHome, '.config/opencode/skills'), 'clash', text('clash', 'OpenCode copy.'));
+  const sMcp = `${JSON.stringify({ mcpServers: { docs: { command: 'npx', args: ['-y', 'docs'] } } }, null, 2)}\n`;
+  writeFileSync(join(sHome, '.claude.json'), sMcp);
+  writeFileSync(join(sHome, '.copilot/mcp-config.json'), sMcp);
+  writeFileSync(join(sHome, '.codex/config.toml'), '[mcp_servers.docs]\ncommand = "npx"\nargs = ["-y", "docs"]\n');
+  writeFileSync(join(sHome, '.pi/agent/mcp.json'), sMcp);
+  writeFileSync(join(sHome, '.config/opencode/opencode.json'), `${JSON.stringify({ mcp: { docs: { type: 'local', command: ['npx', '-y', 'docs'] } } }, null, 2)}\n`);
+  writeFileSync(join(sHome, '.gemini/config/mcp_config.json'), sMcp);
+  const sAgent = name => `---\nname: ${name}\ndescription: The ${name} agent.\n---\n\nPrompt.\n`;
+  for (const [dir, ext] of [['.claude/agents', '.md'], ['.copilot/agents', '.agent.md'], ['.codex/agents', '.md'], ['.config/opencode/agents', '.md']]) {
+    mkdirSync(join(sHome, dir), { recursive: true });
+    writeFileSync(join(sHome, dir, `helper${ext}`), sAgent('helper'));
+  }
+  writeFileSync(join(sHome, '.claude/CLAUDE.md'), '# Claude\n');
+  writeFileSync(join(sHome, '.copilot/copilot-instructions.md'), '# Copilot\n');
+  for (const rel of ['.codex/AGENTS.md', '.config/opencode/AGENTS.md', '.gemini/config/AGENTS.md']) writeFileSync(join(sHome, rel), '# Agents\n');
+  mkdirSync(sData, { recursive: true });
+  const s = await launch(sData, flag('--electron') ? ['--as-released'] : [], sHome, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,agy' });
+  try {
+    await s.run(`window.centralKnot.applySkills([{ key: 'notes', on: true, except: [] }, { key: 'review', on: true, except: [] }], false, ${JSON.stringify(sHome)})`);
+    await s.run(`window.centralKnot.applyServers([{ key: 'docs', on: true, except: [] }], false, ${JSON.stringify(sHome)})`);
+    await s.run(`window.centralKnot.applyAgents([{ key: 'helper', on: true, except: [] }], false, ${JSON.stringify(sHome)})`);
+    await s.click('#header-refresh');
+    await s.click('#nav-harnesses');
+    // Clicking blank space beside the heading button inside .harness-card-main does not navigate; keyboard Enter + Back returns focus cleanly clear of the version line.
+    const besideHead = await s.run(`(() => { const main = document.querySelector('#harness-card-claude-cli .harness-card-main').getBoundingClientRect(), head = document.getElementById('harness-claude-cli').getBoundingClientRect(); return { x: Math.round(main.right - 12), y: Math.round(head.top + head.height / 2), wider: main.right - head.right > 20 }; })()`);
+    check('the heading button hugs its title rather than spanning the full card', besideHead.wider, besideHead);
+    for (const type of ['mousePressed', 'mouseReleased']) await s.send('Input.dispatchMouseEvent', { type, x: besideHead.x, y: besideHead.y, button: 'left', clickCount: 1 });
+    await s.settle();
+    check('clicking empty space beside the heading does not navigate', await s.exists('.harness-cards') && !(await s.exists('#harness-back')));
+    const pressKeySix = async (key, code, keyCode, extra = {}) => {
+      for (const type of ['keyDown', 'keyUp']) await s.send('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode: keyCode, ...(type === 'keyDown' ? extra : {}) });
+      await s.settle();
+    };
+    await s.run(`document.getElementById('harness-claude-cli')?.focus()`);
+    await pressKeySix('Enter', 'Enter', 13, { text: '\r' });
+    await s.run(`document.getElementById('harness-back')?.focus()`);
+    await pressKeySix('Enter', 'Enter', 13, { text: '\r' });
+    const ringClear = await s.run(`(() => { const head = document.getElementById('harness-claude-cli'), st = document.querySelector('#harness-card-claude-cli .harness-card-status'); return { focused: document.activeElement?.id, visible: !!head?.matches(':focus-visible'), gap: Math.round(st.getBoundingClientRect().top - head.getBoundingClientRect().bottom) }; })()`);
+    check('keyboard return focuses the heading with room clear of the version line', ringClear.focused === 'harness-claude-cli' && ringClear.visible && ringClear.gap >= 6, ringClear);
+    // Capability dashes show the page's (?) mark in the same ink and measurable hit targets.
+    const dashLook = await s.run(`(() => {
+      const manageInk = getComputedStyle(document.getElementById('manage-info')).color;
+      return ['harness-antigravity-cli-agents-reason', 'harness-pi-cli-plugins-reason'].map(id => {
+        const el = document.getElementById(id), r = el?.getBoundingClientRect(), svg = el?.querySelector('svg');
+        return el && r ? [Math.round(r.width) >= 20, Math.round(r.height) >= 20, !!svg, getComputedStyle(el).color === manageInk] : null;
+      });
+    })()`);
+    same('capability dashes carry the (?) mark in Managed (?) ink with measurable targets', dashLook, [[true, true, true, true], [true, true, true, true]]);
+    // Existing instruction filename opens that tool's Instructions tab by click and keyboard; no file yet stays plain.
+    same('copilot-instructions.md link names its destination on hover and Pi’s no file yet has no button',
+      [await s.run(`document.getElementById('harness-copilot-cli-instructions')?.title ?? null`), await s.exists('#harness-pi-cli-instructions')],
+      ['Open Copilot CLI’s Instructions tab', false]);
+    await s.click('#harness-copilot-cli-instructions');
+    same('clicking an instruction filename opens that tool’s Instructions tab',
+      [await s.text('.title-harness'), await s.exists('#harness-tab-instructions[aria-selected="true"]')], ['Copilot CLI', true]);
+    await s.click('#harness-back');
+    await s.run(`document.getElementById('harness-claude-cli-instructions')?.focus()`);
+    await pressKeySix('Enter', 'Enter', 13, { text: '\r' });
+    same('keyboard Enter on an instruction filename opens that tool’s Instructions tab',
+      [await s.text('.title-harness'), await s.exists('#harness-tab-instructions[aria-selected="true"]')], ['Claude Code', true]);
+    await s.click('#harness-back');
+    // Check 860×528, 1316×822 (all six Manage switches above fold), and wide window (1728×1117 in 3 × 2), plus copilot-instructions.md on one line.
+    for (const [w, h] of [SMALLEST, [1316, 822], [1728, 1117]]) {
+      await sizeTo(s, w, h);
+      same(`six-tool Harnesses has nothing cut off at ${w}×${h}`, await s.run(CUT_OFF), []);
+      const copLines = await s.run(`(() => { const note = [...document.querySelectorAll('#harness-card-copilot-cli .harness-count-note')].find(n => n.textContent === 'copilot-instructions.md'); const btn = note?.querySelector('#harness-copilot-cli-instructions'); if (!note || !note.classList.contains('harness-count-span') || !btn?.firstChild) return -1; const r = document.createRange(); r.selectNodeContents(btn.firstChild); return new Set([...r.getClientRects()].map(box => Math.round(box.top))).size; })()`);
+      same(`copilot-instructions.md spans value+note on one line at ${w}×${h}`, copLines, 1);
+      if (w === 1316) {
+        const fold = await s.run(`(() => { const top = document.getElementById('status').getBoundingClientRect().top; const sw = [...document.querySelectorAll('[id^="manage-"][role="switch"]')]; const partsWhole = [...document.querySelectorAll('.harness-count-part')].every(el => { const r = document.createRange(); r.selectNodeContents(el); return new Set([...r.getClientRects()].map(b => Math.round(b.top))).size <= 1; }); return { count: sw.length, allAboveFold: sw.every(el => el.getBoundingClientRect().bottom <= top + 1), inFoot: sw.every(el => !!el.closest('.harness-card-foot')), partsWhole }; })()`);
+        same('at 1316×822 all six Manage switches sit in compact footers above the fold and no note phrase splits across lines', fold, { count: 6, allAboveFold: true, inFoot: true, partsWhole: true });
+      }
+      if (w === 1728) {
+        const rows = await s.run(`(() => { const byTop = new Map(); for (const card of document.querySelectorAll('.harness-card')) { const y = Math.round(card.getBoundingClientRect().top); byTop.set(y, (byTop.get(y) ?? 0) + 1); } return [...byTop.values()]; })()`);
+        same('at 1728×1117 six cards sit three and three', rows, [3, 3]);
+      }
+    }
+    await sizeTo(s, ...SMALLEST);
+    await s.run(`document.getElementById('harness-antigravity-cli-agents-reason').scrollIntoView({ block: 'center' })`);
+    await checkCard(s, 'harness-antigravity-cli-agents-reason', 'Central Knot doesn’t handle agents for Antigravity.', 'Antigravity Agents capability dash card at 860×528');
+    await checkCard(s, 'harness-pi-cli-plugins-reason', 'Pi takes a plugin’s items, not the plugin', 'Pi Plugins capability dash card at 860×528');
+    check('clicking capability dashes never navigated away from Harnesses', await s.exists('.harness-cards') && !(await s.exists('#harness-back')));
+    // Keyboard Enter opens the dash card and Escape closes it, keeping focus on the dash.
+    await s.run(`document.getElementById('harness-antigravity-cli-agents-reason').focus()`);
+    await pressKeySix('Enter', 'Enter', 13, { text: '\r' });
+    const dashKeyOpen = await s.run(`!!document.getElementById('harness-antigravity-cli-agents-reason-card')?.matches(':popover-open')`);
+    await pressKeySix('Escape', 'Escape', 27);
+    const dashKeyClose = await s.run(`[!document.getElementById('harness-antigravity-cli-agents-reason-card')?.matches(':popover-open'), document.activeElement?.id]`);
+    same('keyboard Enter opens the capability dash card and Escape closes it keeping focus', [dashKeyOpen, dashKeyClose], [true, [true, 'harness-antigravity-cli-agents-reason']]);
+    same('no page errors, six-tool harnesses', s.pageErrors, []);
+  } finally { await s.quit(); }
 
   // Heading info marks, cards, live lines, keyboard access, pinned rows and stable heading heights on Library and each tool tab.
   const hHome = join(scratch, 'heading-notes-home'), hData = join(scratch, 'heading-notes-data'), hReal = join(scratch, 'heading-notes-real');
@@ -1182,6 +1287,15 @@ async function manageFlow() {
   await a.click(`#${rowPart('add', 'skills', 'standup')}`);
   await a.click('#nav-harnesses');
   same('every installed tool’s card has its Manage switch, on', await switches(), ['manage-claude-cli:true', 'manage-copilot-cli:true', 'manage-codex-cli:true']);
+  await sizeTo(a, 1316, 822);
+  const footLayout = await a.run(`(() => {
+    const cards = [...document.querySelectorAll('.harness-card')];
+    const feet = cards.map(c => c.querySelector('.harness-card-foot'));
+    const tops = feet.map(f => Math.round(f?.querySelector('[role="switch"]')?.getBoundingClientRect().top ?? -1));
+    return { allFoot: feet.every(f => f && f.querySelector('.harness-manage') && f.querySelector('.harness-card-path')), aligned: new Set(tops).size === 1 };
+  })()`);
+  same('Manage switches sit in compact footers aligned across the row at 1316×822', footLayout, { allFoot: true, aligned: true });
+  await fullSize(a);
   same('only the first managed card carries Managed (?) with its card text, and no managed card keeps a question or dangling aria-describedby',
     await a.run(`(() => {
       const marks = [...document.querySelectorAll('.harness-manage .info-mark')].map(el => [el.id, el.closest('.harness-manage')?.querySelector('[role="switch"]')?.id]);
@@ -1191,11 +1305,14 @@ async function manageFlow() {
       return [marks, card, lines, dangling];
     })()`),
     [[['manage-info', 'manage-claude-cli']], 'Turning a tool off keeps its copies. Central Knot stops writing to it until you turn it on again.', [], []]);
-  // Turning Claude Code off moves the single Managed (?) to Copilot CLI (first managed card after an unmanaged one).
+  // Turning Claude Code off moves the single Managed (?) to Copilot CLI and gives left-out Claude Code its own (?) card.
   await a.click('#manage-claude-cli');
-  same('first managed card after an unmanaged one carries the one Managed (?)',
-    await a.run(`[...document.querySelectorAll('.harness-manage .info-mark')].map(el => [el.id, el.closest('.harness-manage')?.querySelector('[role="switch"]')?.id, document.getElementById('manage-info-card')?.textContent ?? ''])`),
-    [['manage-info', 'manage-copilot-cli', 'Turning a tool off keeps its copies. Central Knot stops writing to it until you turn it on again.']]);
+  same('first managed card after an unmanaged one carries the one Managed (?), and the left-out card carries its own (?)',
+    await a.run(`[...document.querySelectorAll('.harness-manage .info-mark')].map(el => [el.id, el.closest('.harness-manage')?.querySelector('[role="switch"]')?.id, document.getElementById(el.id + '-card')?.textContent ?? ''])`),
+    [
+      ['manage-claude-cli-info', 'manage-claude-cli', 'Central Knot doesn’t read or write Claude Code while it’s left out, so its copies and every item stay as they are. Its switch asks before managing it again.'],
+      ['manage-info', 'manage-copilot-cli', 'Turning a tool off keeps its copies. Central Knot stops writing to it until you turn it on again.'],
+    ]);
   await manageAgain(a, 'claude-cli');
   const codex = () => tree(join(practice, '.codex'));
   const before = codex();
@@ -1203,9 +1320,11 @@ async function manageFlow() {
   await a.click('#manage-codex-cli');
   check('the band says Codex is left out and its copies stay', (await a.text('.band-done .band-text') ?? '').startsWith('Codex is left out: Central Knot writes nothing there now.'), await a.text('.band-done'));
   same('turning it off wrote nothing in Codex', codex(), before);
-  const card = await a.text('#harness-codex-cli');
-  check('its card says it is left out and that its switch asks first, opens nothing, and never says Not found or Install',
-    card.includes('Not managed') && card.includes('Left out: Central Knot writes nothing in Codex. Its switch asks before managing it again.') && !/Not found|Install/.test(card) && !(await a.exists('button#harness-codex-cli')), card);
+  const card = await a.text('#harness-card-codex-cli');
+  check('its card says only Left out, puts its explanation behind Not managed (?), opens nothing, and never says Not found or Install',
+    card.includes('Not managed') && (await a.text('#harness-card-codex-cli .harness-card-next')) === 'Left out'
+    && (await a.text('#manage-codex-cli-info-card')) === 'Central Knot doesn’t read or write Codex while it’s left out, so its copies and every item stay as they are. Its switch asks before managing it again.'
+    && !/Not found|Install/.test(card) && !(await a.exists('#harness-codex-cli')), card);
   same('its card says nothing of what turning it on would do until the switch is pressed', await a.exists('#manage-codex-cli-text'), false);
   await shotAt(a, 'harnesses-left-out-860-light', SMALLEST, 'light');
   await fitsAtMinimum(a, 'Harnesses with a tool left out');
@@ -1216,9 +1335,12 @@ async function manageFlow() {
   await asking();
   const nothingYet = 'Changes no item in Codex. 2 items stay Codex’s own: they will show under Found in the Library.';
   same('pressed, the switch asks in the card, Cancel focused, and turns nothing yet', [
-    await a.text('#manage-codex-cli-text'), await a.all('#harness-codex-cli .manage-question button', 'e.textContent'), await a.run(`document.activeElement?.id`),
+    await a.text('#manage-codex-cli-text'), await a.all('#harness-card-codex-cli .manage-question button', 'e.textContent'), await a.run(`document.activeElement?.id`),
     await a.run(`document.getElementById('manage-codex-cli').getAttribute('aria-checked')`), codex(),
   ], [nothingYet, ['Cancel', 'Manage Codex'], 'manage-codex-cli-cancel', 'false', before]);
+  await sizeTo(a, 1316, 822);
+  same('left-out card’s open Manage question sits full width above its path with nothing cut off at 1316×822', [await a.run(CUT_OFF), await a.run(`(() => { const q = document.querySelector('#harness-card-codex-cli .manage-question').getBoundingClientRect(), path = document.querySelector('#harness-card-codex-cli .harness-card-path').getBoundingClientRect(); return q.bottom <= path.top + 1; })()`)], [[], true]);
+  await fullSize(a);
   await shotAt(a, 'question-860-light', SMALLEST, 'light');
   await shotAt(a, 'question-1316-dark', [1316, 819], 'dark');
   await shotAt(a, 'question-1728-light', [1728, 1117], 'light');
@@ -1400,7 +1522,7 @@ async function manageFlow() {
   await a.click('#manage-claude-cli');
   await waitHistory(a, () => a.exists('#manage-claude-cli-confirm'));
   const fits = () => a.run(`(() => {
-    const box = document.querySelector('#harness-claude-cli .manage-question'), style = getComputedStyle(box), outer = box.getBoundingClientRect();
+    const box = document.querySelector('#harness-card-claude-cli .manage-question'), style = getComputedStyle(box), outer = box.getBoundingClientRect();
     const left = outer.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft), right = outer.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight);
     return ['cancel', 'confirm'].map(part => { const b = document.getElementById('manage-claude-cli-' + part), r = b.getBoundingClientRect(); return [b.scrollWidth <= b.clientWidth, r.height <= 30, r.left >= left - 0.5, r.right <= right + 0.5]; });
   })()`);
@@ -1448,7 +1570,7 @@ async function manageFlow() {
   await w1.run(`document.querySelector('#manage-codex-cli').click()`);
   await waitHistory(w1, () => w1.run(`/no longer/.test(document.getElementById('manage-codex-cli-text')?.textContent ?? '')`));
   same('a read that fails says why in the question, offers Close and Try again, and writes nothing', [
-    await w1.text('#manage-codex-cli-text'), await w1.all('#harness-codex-cli .manage-question button', 'e.textContent'), existsSync(join(staleHome, '.codex')),
+    await w1.text('#manage-codex-cli-text'), await w1.all('#harness-card-codex-cli .manage-question button', 'e.textContent'), existsSync(join(staleHome, '.codex')),
   ], ['Codex is no longer present here. Nothing was changed.', ['Close', 'Try again'], false]);
   await shotAt(w1, 'failed-860-light', SMALLEST, 'light');
   same('no page errors, manage stale', w1.pageErrors, []);
@@ -3053,7 +3175,7 @@ async function practiceFlow() {
   await a.click('#header-refresh');
   check('a tool not in this home has no column or mark', !(await a.exists('[data-tool="pi-cli"], #tool-pi-cli')));
   await a.click('#nav-harnesses');
-  check('nor a card on Harnesses', !(await a.exists('#harness-pi-cli')) && await a.exists('#harness-codex-cli'));
+  check('nor a card on Harnesses', !(await a.exists('#harness-card-pi-cli')) && await a.exists('#harness-card-codex-cli'));
   // Copilot CLI and Codex do read the shared folder, so its skill is theirs; it goes again before the checks that count skills.
   rmSync(join(practice, '.agents'), { recursive: true, force: true });
   await a.click('#header-refresh');
@@ -6505,8 +6627,8 @@ async function fewToolsFlow() {
   await openKind(a, 'skills');
   check('the tool with only a folder has no mark', await a.exists('.tool-mark[data-tool="pi-cli"]') && !(await a.exists('[data-tool="codex-cli"], #tool-codex-cli')));
   await a.click('#nav-harnesses');
-  const folderOnly = await a.text('#harness-codex-cli');
-  check('Harnesses says its folder is all that is here, and its card opens nothing', folderOnly.includes('Not found · only its folder is here') && folderOnly.includes('Install Codex, then Refresh.') && !(await a.exists('button#harness-codex-cli')), folderOnly);
+  const folderOnly = await a.text('#harness-card-codex-cli');
+  check('Harnesses says its folder is all that is here, and its card opens nothing', folderOnly.includes('Not found · only its folder is here') && folderOnly.includes('Install Codex, then Refresh.') && !(await a.exists('#harness-codex-cli')), folderOnly);
   await fitsAtMinimum(a, 'Harnesses with a tool that left only its folder');
   await a.shot('folder-only-harness');
   rmSync(join(home, '.codex'), { recursive: true, force: true });
@@ -6609,7 +6731,7 @@ async function antigravityFlow() {
   await a.click('#nav-harnesses');
   const card = await a.text('.harness-card:has(#harness-antigravity-cli)');
   check('Antigravity’s card names its CLI version without Installed ·, and says its agents aren’t handled',
-    card.includes('1.5.14') && !card.includes('Installed ·') && card.includes('Agents aren’t handled for Antigravity'), card);
+    card.includes('1.5.14') && !card.includes('Installed ·') && card.includes('Central Knot doesn’t handle agents for Antigravity.'), card);
   same('all six Manage switches keep their tool-named accessible names with no dangling descriptions, and only the first managed card carries Managed (?)',
     await a.run(`(() => {
       const expected = [['claude-cli', 'Claude Code'], ['copilot-cli', 'Copilot CLI'], ['codex-cli', 'Codex'], ['pi-cli', 'Pi'], ['opencode-cli', 'OpenCode'], ['antigravity-cli', 'Antigravity']];
@@ -7115,6 +7237,7 @@ async function otherAppsFlow() {
   const pi = await a.text('.harness-card:has(#harness-pi-cli)') ?? '';
   check('pi-gui alone makes Pi a tool here, named as the third-party app it is, with no CLI', pi.includes('pi-gui (third-party) 0.4.0 · no CLI found') && await a.exists('button#harness-pi-cli'), pi);
   await fitsAtMinimum(a, 'Harnesses with other apps named');
+  for (const [w, h] of [[1316, 822], [1728, 1117]]) { await sizeTo(a, w, h); same(`Harnesses with other apps has nothing cut off at ${w}×${h}`, await a.run(CUT_OFF), []); }
   if (shots) for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); await a.shot(`other-apps-${width}`); }
   await fullSize(a);
   same('no page errors, other apps', a.pageErrors, []);
@@ -11693,8 +11816,10 @@ async function overviewFlow() {
  * meanwhile does nothing; one time beside Check all, a column's own only where it differs; the rows keep their places through a
  * visit's checks, under the pointer too, each Copy its own row's, and on Refresh those that need a sign-in or say a fault come
  * first; what a check said is still there after another page, is not shown for a server changed while it ran, and is not shown
- * on another home; Copy gives the tool's own command with its name for the server; each mark's card says what it stands for. The
- * head row stays in view as the rows scroll. Nothing is cut off at 860×528, 1280×800, the owner's 1316×819, 1728×1117 or
+ * on another home; Copy gives the tool's own command with its name for the server; each mark's card says what it stands for, a
+ * fault's the tool's own words and the one beside Check all what a check does; above the table, how many cells need a sign-in
+ * ("At least" while a column that can be checked here isn't), whose rows come first, which a sign-in made lowers and another home
+ * clears; a check of an earlier day says its day, on one line. The head row stays in view as the rows scroll. Nothing is cut off at 860×528, 1280×800, the owner's 1316×819, 1728×1117 or
  * 2560×1440, the sidebar open and as a rail; with --shots, pictures in light and dark of every state.
  */
 async function mcpSigninFlow() {
@@ -11812,16 +11937,23 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   const cellId = async (tool, name) => `signin-cell-${tool}-${await rowIdOf(name)}`;
   /** A column's head as it reads (a no-break space read as a space, the ends trimmed). */
   const head = async tool => (await a.run(`document.querySelector('.signin-head[data-tool="${tool}"]')?.innerText ?? null`))?.replace(/\u00a0/g, ' ').trim() ?? null;
-  /** Each (?) on a line its word is on, never alone on a line, and inside its cell's edges: the ids of those that aren't. */
+  /**
+   * Each (?) on a line its word is on (the one beside Check all: that button's), never alone on a line, and inside its cell's edges
+   * (the top line's): the ids of those that aren't.
+   */
   const KEPT = `[...document.querySelectorAll('#mcpsignin-scroll .info-mark')].flatMap(mark => {
-    const word = [...mark.closest('.info-wrap').parentElement.childNodes].filter(node => node.nodeType === 3 && node.textContent.trim()).at(-1);
+    const wrap = mark.closest('.info-wrap'), word = [...wrap.parentElement.childNodes].filter(node => node.nodeType === 3 && node.textContent.trim()).at(-1);
     const range = document.createRange();
-    range.selectNodeContents(word);
-    const line = [...range.getClientRects()].at(-1), own = mark.getBoundingClientRect(), cell = mark.closest('th, td').getBoundingClientRect();
+    if (word) range.selectNodeContents(word); else range.selectNode(wrap.previousElementSibling);
+    const line = [...range.getClientRects()].at(-1), own = mark.getBoundingClientRect(), cell = mark.closest('th, td, .signin-top').getBoundingClientRect();
     return line && line.bottom > own.top && line.top < own.bottom && own.left >= cell.left - 0.5 && own.right <= cell.right + 0.5 ? [] : [mark.id];
   })`;
   /** Above the table: the line saying what a check does, and whether Check all is there. */
-  const top = async () => [await a.text('#signin-line'), await a.exists('#signin-check-all')];
+  const top = async () => [await line(), await a.exists('#signin-check-all')];
+  /** What a check does, as the card of the (?) beside Check all holds it. */
+  const line = () => a.text('#signin-line-mark-card');
+  /** What a cell's (?) holds: the tool's own words for a fault, or for a sign-in that didn't finish. */
+  const whyOf = async (tool, name) => a.text(byId(`signin-why-${tool}-${await rowIdOf(name)}-card`));
   const until = async (ready, what) => { for (let tries = 0; tries < 200; tries++) { if (await ready()) return; await wait(100); } check(`in time: ${what}`, false); };
   // A check has ended when its call has: its column no longer says Checking…, whatever time its head shows.
   const checked = tool => until(async () => { const now = await head(tool); return !!now && !now.includes('Checking…'); }, `${tool}’s check`);
@@ -11884,6 +12016,12 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   same('above the table only Check all and what a check does: no paragraphs, no time before a check',
     [await a.exists('.signin-intro'), await a.exists('#signin-checked'), ...await top()],
     [false, false, 'Check starts local servers in Claude Code, Pi and OpenCode; OpenCode adds $schema to its config files.', true]);
+  same('each column’s Check says in its hover what that check does on this computer, in the words beside Check all',
+    await a.all('[id^="signin-check-"]:not(#signin-check-all)', '[e.id.slice(13), e.title]'), [['claude-cli', 'Check starts local servers in Claude Code.'],
+      ['codex-cli', 'Check contacts remote servers in Codex.'], ['pi-cli', 'Check starts local servers in Pi.'], ['opencode-cli', 'Check starts local servers in OpenCode; OpenCode adds $schema to its config files.']]);
+  same('what a check does is behind a (?) right beside Check all, not a sentence on the page', await a.run(`(() => {
+    const button = document.querySelector('#signin-check-all').getBoundingClientRect(), mark = document.querySelector('#signin-line-mark')?.getBoundingClientRect();
+    return [!!document.querySelector('#signin-line'), !!mark && mark.left >= button.right && mark.left - button.right <= 8 && Math.abs(mark.top + mark.bottom - button.top - button.bottom) <= 4]; })()`), [false, true]);
   same('Local under a server that runs on this computer, by its transport alone: not under a remote one, nor one whose transport isn’t known; its card on the first',
     [await a.all('.signin-local', '[e.closest("tr").querySelector(".signin-server").textContent, e.firstChild.textContent]'), await a.all('.signin-name .info-mark', 'e.closest("tr").querySelector(".signin-server").textContent'), await a.exists(`tr[data-row="${await rowIdOf('broken (tracker)')}"] .signin-local`)],
     [[['notes', 'Local'], ['search', 'Local'], ['tickets', 'Local']], ['notes'], false]);
@@ -12146,7 +12284,8 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   same('a second press while it ran did nothing', started().length, during);
   rmSync(join(said, 'pi.wait'));
   const piWords = await column('pi-cli');
-  same('Pi’s answers read though it ended with exit code 1', ['plain', 'oauth', 'down', 'silent', 'tickets', 'calendar'].map(name => piWords[name]), ['Connected', 'Needs sign-in', 'Couldn’t reach: fetch failed', 'Couldn’t reach: MCP request timed out after 60000ms', 'Connected', 'Needs sign-in']);
+  same('Pi’s answers read though it ended with exit code 1', ['plain', 'oauth', 'down', 'silent', 'tickets', 'calendar'].map(name => piWords[name]), ['Connected', 'Needs sign-in', 'Couldn’t reach', 'Couldn’t reach', 'Connected', 'Needs sign-in']);
+  same('… Pi’s own words for those it couldn’t reach are behind their (?)', [await whyOf('pi-cli', 'down'), await whyOf('pi-cli', 'silent')], ['fetch failed', 'MCP request timed out after 60000ms']);
 
   // Check all: the four columns one after another, never two at once (each tool takes a moment, so two at once would overlap),
   // within one minute of the clock, so every column's time is the one beside Check all.
@@ -12166,10 +12305,14 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   await picture('beside-copy', SMALLEST, 'light', 'oauth');
   const claudeWords = await column('claude-cli'), openCodeWords = await column('opencode-cli');
   same('Claude Code’s answers, a failure with its reason, the plugin’s server its own, one it doesn’t list', ['plain', 'oauth', 'down', 'silent', 'issues', 'issues (tracker)', 'notes'].map(name => claudeWords[name]),
-    ['Connected', 'Needs sign-in', 'Couldn’t reach: ECONNREFUSED: Unable to connect. Is the computer able to access the url?', 'Couldn’t reach: MCP server "silent" connection timed out after 30000ms', 'Connected', 'Needs sign-in', 'Not reported by Claude Code']);
+    ['Connected', 'Needs sign-in', 'Couldn’t reach', 'Couldn’t reach', 'Connected', 'Needs sign-in', 'Not reported by Claude Code']);
+  same('… Claude Code’s own words for those it couldn’t reach are behind their (?)', [await whyOf('claude-cli', 'down'), await whyOf('claude-cli', 'silent')],
+    ['ECONNREFUSED: Unable to connect. Is the computer able to access the url?', 'MCP server "silent" connection timed out after 30000ms']);
   same('OpenCode’s answers, line by line', ['plain', 'oauth', 'down', 'silent', 'search', longName].map(name => openCodeWords[name]),
-    ['Connected', 'Needs sign-in', 'Couldn’t reach: SSE error: ECONNREFUSED: Unable to connect. Is the computer able to access the url?', 'Couldn’t reach: Operation timed out after 30000ms', 'Connected', 'Needs sign-in']);
-  same('Connected’s card, once, on the first: the tools whose Connected doesn’t tell a sign-in from none needed', [await a.all('.signin-cell .info-mark', 'e.id'), await card('signin-connected-mark', 'connected-card')],
+    ['Connected', 'Needs sign-in', 'Couldn’t reach', 'Couldn’t reach', 'Connected', 'Needs sign-in']);
+  same('… OpenCode’s own words for those it couldn’t reach are behind their (?)', [await whyOf('opencode-cli', 'down'), await whyOf('opencode-cli', 'silent')],
+    ['SSE error: ECONNREFUSED: Unable to connect. Is the computer able to access the url?', 'Operation timed out after 30000ms']);
+  same('Connected’s card, once, on the first: the tools whose Connected doesn’t tell a sign-in from none needed', [await a.all('.signin-cell .info-mark:not([id^="signin-why-"])', 'e.id'), await card('signin-connected-mark', 'connected-card')],
     [['signin-connected-mark'], 'The server answered. Claude Code, Pi and OpenCode don’t say whether it needed a sign-in.']);
   same('Copy on the plugin’s server gives Claude Code’s name for it', (await copyOn('claude-cli', 'issues (tracker)')).slice(1), ['claude mcp login plugin:tracker:issues', 'Copied: run it in a terminal', ...(main ? ['claude mcp login plugin:tracker:issues'] : [])]);
   main?.close();
@@ -12183,12 +12326,14 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   same('a column checked again later shows its own time, unlike the one beside Check all, which stays',
     [ownTimes.map(([tool]) => tool), ownTimes[0]?.[1].split('\n').at(-1) !== allTime, await a.text('#signin-checked')], [['claude-cli'], true, allTime]);
   await owners('own-time');
-  // Refresh: the rows that need a sign-in or say a fault come first, each group by name.
+  // Refresh: the rows with a sign-in to make come first, then those that say a fault, each group by name.
   await a.click('#header-refresh');
-  const drawn = (await page()).rows, heeds = row => row.slice(2).some(cell => /^(Needs sign-in|Couldn’t |Not reported by |No .* command line here|Didn’t answer)/.test(cell));
+  const drawn = (await page()).rows, needs = row => row.slice(2).some(cell => /^(Needs sign-in|Finish in your browser)/.test(cell));
+  const heeds = row => !needs(row) && row.slice(2).some(cell => /^(Couldn’t |Not reported by |No .* command line here|Didn’t answer)/.test(cell));
   const byName = (first, second) => first[0].localeCompare(second[0]);
-  same('on Refresh the rows that need a sign-in or say a fault come first, each group by name', drawn.map(rowName), [...drawn.filter(heeds).sort(byName), ...drawn.filter(row => !heeds(row)).sort(byName)].map(rowName));
-  same('those first are the ones that need him', drawn.filter(heeds).map(rowName), ['broken (tracker)', 'calendar', 'down', 'issues (tracker)', 'notes', 'oauth', 'silent', longName]);
+  same('on Refresh the rows with a sign-in to make come first, then those that say a fault, each group by name', drawn.map(rowName),
+    [...drawn.filter(needs).sort(byName), ...drawn.filter(heeds).sort(byName), ...drawn.filter(row => !needs(row) && !heeds(row)).sort(byName)].map(rowName));
+  same('first the sign-ins to make, then the faults', drawn.filter(row => needs(row) || heeds(row)).map(rowName), ['calendar', 'issues (tracker)', 'oauth', longName, 'broken (tracker)', 'down', 'notes', 'silent']);
   await owners('grouped');
   // Scrolled to the end, in the smallest window and in the owner's: the tools' names stay at the top as the rows go under them.
   for (const [width, height] of [SMALLEST, [1316, 819]]) {
@@ -12241,12 +12386,12 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   await a.click('#signin-check-opencode-cli');
   await until(async () => (await column('opencode-cli')).plain === 'No OpenCode command line here', 'OpenCode’s missing command line');
   check('a tool with no command line here says so in its cells', true);
-  same('a tool whose check can’t run here is left out of the line', await a.text('#signin-line'), 'Check starts local servers in Claude Code and Pi.');
+  same('a tool whose check can’t run here is left out of the line', await line(), 'Check starts local servers in Claude Code and Pi.');
   await owners('no-command-line');
   renameSync(join(scratch, 'opencode-aside'), join(home, '.local/bin/opencode'));
   // OpenCode there again, and a Refresh: its probe finds it, which is newer than the check that found none: it is in the line again.
   await a.click('#header-refresh');
-  same('a tool a Refresh finds after a check found none is in the line again, with its clause', await a.text('#signin-line'),
+  same('a tool a Refresh finds after a check found none is in the line again, with its clause', await line(),
     'Check starts local servers in Claude Code, Pi and OpenCode; OpenCode adds $schema to its config files.');
   // A check stopped at its limit (here 4 s): Didn’t answer in 70 s, the limit the app keeps.
   writeFileSync(join(said, 'codex.wait'), '30');
@@ -12281,10 +12426,153 @@ ${listen(`const [opener, ...words] = (process.env.BROWSER || '').split(':').map(
   await a.click('#nav-mcpsignin');
   same('this home opened again starts with nothing checked', [(await column('claude-cli')).plain, await a.all('.signin-when', 'e.innerText.trim()'), await a.exists('#signin-checked')], ['Not checked', ['In a session: /mcp auth <name>', 'Sign in inside a session'], false]);
   same('… and its rows go by name again: the places of the visit before are let go with the home', await order(), opened.rows.map(rowName));
+  // The head gathers what the cells say (mcpsignin.ts signinsNeeded): Claude Code and Codex both say oauth needs a sign-in, and
+  // Claude Code couldn't reach down, a fault, not counted. "At least" while a column that can be checked here isn't, or its check
+  // failed (its hover names them), never for Copilot CLI or Antigravity, whose sign-in shows only in their own sessions. Its rows
+  // come first, in sight under the head at 860. Another page and back starts nothing. Codex's sign-in of oauth makes it one. Checks
+  // made yesterday and three days ago (the page's clock set back by calendar days while each ran) say so, on one line, when the page
+  // is drawn again; this home opened again says nothing of them.
+  /** The count as it reads (its (?) aside), and what its (?) holds. */
+  const needed = async () => [await a.run(`(count => count && [...count.childNodes].map(node => (node.nodeType === 3 ? node.textContent : node.matches('.signin-keep') ? node.firstChild.textContent : '')).join(''))(document.querySelector('#signin-needed'))`),
+    await a.text('#signin-needed-mark-card')];
+  /**
+   * At this size, each (?) after a cell's words: the ids of those more than a pixel and a half off the middle of their word, or
+   * whose word sits off the row of the words before it on that line.
+   */
+  const OFF_ROW = `[...document.querySelectorAll('.signin-cell .signin-keep')].flatMap(keep => {
+    const mark = keep.querySelector('.info-mark'), range = document.createRange(), before = keep.previousSibling;
+    if (!mark) return [];
+    range.selectNodeContents(keep.firstChild);
+    const word = range.getBoundingClientRect(), own = mark.getBoundingClientRect();
+    range.selectNodeContents(before ?? keep.firstChild);
+    const line = before?.nodeType === 3 && before.textContent.trim() ? [...range.getClientRects()].at(-1) : word, apart = Math.abs(line.top - word.top);
+    return Math.abs(own.top + own.bottom - word.top - word.bottom) / 2 > 1.5 || (apart > 0.5 && apart < word.height) ? [mark.id] : [];
+  })`;
+  /** The (?) `mark` opened at 860 with the page at its top: whether its card stays off the words it belongs to. */
+  const clearOfWords = async mark => {
+    await sizeTo(a, ...SMALLEST); await shape(false);
+    await a.run(`document.querySelector('#mcpsignin-scroll').scrollTop = 0`);
+    await a.click(byId(mark));
+    const clear = await a.run(`((card, words) => !!card && (card.bottom <= words.top || card.top >= words.bottom || card.right <= words.left || card.left >= words.right))(
+      document.getElementById(${JSON.stringify(`${mark}-card`)})?.getBoundingClientRect(), document.getElementById(${JSON.stringify(mark)}).closest('.signin-words, .signin-need').getBoundingClientRect())`);
+    if (await a.run(`!!document.getElementById(${JSON.stringify(`${mark}-card`)})?.matches(':popover-open')`)) await a.click(byId(mark));
+    await fullSize(a);
+    return clear;
+  };
+  /** The page from its top, at `size`, in `theme`, with the (?) `mark` held open where one is named (with --shots). */
+  const headShot = async (name, [width, height], theme, mark) => {
+    if (!shots) return;
+    const open = () => a.run(`!!document.getElementById(${JSON.stringify(`${mark}-card`)})?.matches(':popover-open')`);
+    await sizeTo(a, width, height); await shape(false);
+    await a.run(`document.querySelector('#mcpsignin-scroll').scrollTop = 0`);
+    if (mark && !(await open())) await a.click(byId(mark));
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] }); await wait(300);
+    await a.shot(`mcp-signin-known-${name}-${width}-${theme}`);
+    if (mark && await open()) await a.click(byId(mark));
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }); await fullSize(a);
+  };
+  /** The page's clock set back `days` calendar days from the real one (none: put right). */
+  const setBack = days => a.run(days ? `(Real => { const at = () => { const day = new Real(); day.setDate(day.getDate() - ${days}); return day.getTime(); };
+    window.Date = class extends Real { constructor(...given) { super(...(given.length ? given : [at()])); } static now() { return at(); } }; })(window.RealDate ??= Date)` : `window.Date = window.RealDate ?? Date`);
+  /** How many lines the words after "Checked" take in a column's head. */
+  const timeLines = tool => a.run(`(node => { const range = document.createRange(); range.setStart(node, 'Checked '.length); range.setEnd(node, node.textContent.length);
+    return new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size; })(document.querySelector('#signin-when-${tool}').firstChild)`);
+  writeFileSync(join(said, 'claude'), outputs.claude.replace('plugin:tracker:issues: http://127.0.0.1:47212/mcp (HTTP) - ! Needs authentication', 'plugin:tracker:issues: http://127.0.0.1:47212/mcp (HTTP) - ✔ Connected'));
+  same('before any check the head counts nothing', await a.exists('#signin-needed'), false);
+  await a.click('#signin-check-claude-cli');
+  await checked('claude-cli');
+  same('Claude Code checked: at least one sign-in needed, the columns still to check behind its (?); its server it couldn’t reach not counted',
+    [...await needed(), (await column('claude-cli')).down], ['At least 1 sign-in needed', 'Still to check: Codex, Pi and OpenCode', 'Couldn’t reach']);
+  await a.click('#signin-check-codex-cli');
+  await checked('codex-cli');
+  same('Codex checked too: oauth needs a sign-in in both, at least two', [...await needed(), (await column('claude-cli')).oauth, (await codexCell('oauth'))[0]],
+    ['At least 2 sign-ins needed', 'Still to check: Pi and OpenCode', 'Needs sign-in', 'Needs sign-in']);
+  same('… its (?) is a button of its own after the words', await a.run(`document.querySelector('#signin-needed .info-mark')?.id ?? null`), 'signin-needed-mark');
+  const pageFrom = started().length;
+  await a.click('#nav-library');
+  await a.click('#nav-mcpsignin');
+  await wait(500);
+  same('another page and back: the same count, and opening the page started nothing', [(await needed())[0], started().length - pageFrom, existsSync(marker)], ['At least 2 sign-ins needed', 0, false]);
+  await sizeTo(a, ...SMALLEST); await shape(false);
+  await a.run(`document.querySelector('#mcpsignin-scroll').scrollTop = 0`);
+  same('the rows it counts come first, then the faults; at 860 a counted cell is in sight under the head', [(await order()).slice(0, 2), await a.run(`(() => {
+    const area = document.querySelector('#mcpsignin-scroll').getBoundingClientRect(), cell = document.getElementById(${JSON.stringify(await cellId('claude-cli', 'oauth'))}).getBoundingClientRect();
+    return cell.top >= area.top && cell.bottom <= area.bottom; })()`)], [['oauth', 'broken (tracker)'], true]);
+  await fullSize(a);
+  await sizeTo(a, 1316, 819); await shape(false);
+  same('at 1316 each (?) in a cell sits on the middle of its word, its word on the row of the words before it', await a.run(OFF_ROW), []);
+  await fullSize(a);
+  same('a fault’s card, opened at 860, stays off its words', await clearOfWords(`signin-why-claude-cli-${await rowIdOf('down')}`), true);
+  await headShot('two', SMALLEST, 'light');
+  await headShot('two', [1316, 819], 'dark');
+  await headShot('more', SMALLEST, 'light', 'signin-needed-mark');
+  await headShot('line', SMALLEST, 'light', 'signin-line-mark');
+  await headShot('fault', SMALLEST, 'light', `signin-why-claude-cli-${await rowIdOf('down')}`);
+  writeFileSync(join(said, 'codex.login'), 'accept');
+  await a.click(await act('oauth'));
+  await until(async () => (await codexCell('oauth'))[0].startsWith('Signed in'), 'Codex’s sign-in of oauth');
+  same('one sign-in made: at least one sign-in needed, the head and the cell alike', [(await needed())[0], /^Signed in \d{1,2}:\d{2}/.test((await codexCell('oauth'))[0]), (await column('claude-cli')).oauth],
+    ['At least 1 sign-in needed', true, 'Needs sign-in']);
+  await headShot('one', SMALLEST, 'light');
+  // Pi checked, and OpenCode, whose answer can't be read: still at least. OpenCode's read: every column that can be checked here has
+  // answered, and the count is whole, though Copilot CLI's and Antigravity's sign-ins aren't seen and Claude Code couldn't reach down.
+  await a.click('#signin-check-pi-cli');
+  await checked('pi-cli');
+  await a.click('#signin-check-opencode-cli');
+  await checked('opencode-cli');
+  same('a column whose check failed is still to check', await needed(), ['At least 3 sign-ins needed', 'Still to check: OpenCode']);
+  writeFileSync(join(said, 'opencode'), outputs.opencode);
+  await a.click('#signin-check-opencode-cli');
+  await checked('opencode-cli');
+  same('every column that can be checked here answered: the count alone, with no hover', await needed(), ['5 sign-ins needed', null]);
+  await setBack(1);
+  await a.click('#signin-check-claude-cli');
+  await checked('claude-cli');
+  await setBack(3);
+  await a.click('#signin-check-codex-cli');
+  await checked('codex-cli');
+  await setBack(0);
+  const dayFrom = started().length;
+  await a.click('#nav-library');
+  await a.click('#nav-mcpsignin');
+  await wait(500);
+  const threeBack = await a.run(`(day => { day.setDate(day.getDate() - 3); return day.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: day.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' }); })(new Date())`);
+  same('checks made yesterday and three days ago say so, drawn again today; opening the page started nothing',
+    [(await head('claude-cli')).split('\n').at(-1), (await head('codex-cli')).split('\n').at(-1), started().length - dayFrom], ['Checked yesterday', `Checked ${threeBack}`, 0]);
+  await sizeTo(a, ...SMALLEST); await shape(false);
+  same('at 860 a time or a date stays on one line', [await timeLines('claude-cli'), await timeLines('codex-cli'), await timeLines('pi-cli')], [1, 1, 1]);
+  await fullSize(a);
+  await headShot('dated', SMALLEST, 'light');
+  // Codex's only server needs a sign-in, which waits; then Codex no longer has it while Claude Code still does: Codex's column
+  // stays, with that cell's Stop, which ends it.
+  write('.codex/config.toml', `[mcp_servers.oauth]\nurl = "${P(47202)}"\n`);
+  await a.click('#header-refresh');
+  await a.click('#signin-check-codex-cli');
+  await checked('codex-cli');
+  writeFileSync(join(said, 'codex.login'), 'wait');
+  const goneFrom = listened().length;
+  await a.click(await act('oauth'));
+  await until(async () => listened().length === goneFrom + 1, 'the sign-in on Codex’s only server to listen');
+  write('.codex/config.toml', '');
+  await a.click('#header-refresh');
+  same('Codex’s only server gone from Codex while its sign-in waits: Codex’s column stays, that cell with its Stop',
+    [await a.exists('.signin-head[data-tool="codex-cli"]'), await a.text(await act('oauth'))], [true, 'Stop']);
+  await headShot('gone', SMALLEST, 'light');
+  if (await a.exists(await act('oauth'))) await a.click(await act('oauth'));
+  await until(async () => !(await a.exists('.signin-head[data-tool="codex-cli"]')), 'the stopped sign-in to end, and Codex’s column with it');
+  write('.codex/config.toml', codexConfig);
+  await a.click('#header-refresh');
+  const switchFrom = started().length;
+  await a.click('#home-actual');
+  await a.click('#nav-mcpsignin');
+  await wait(500);
+  same('this home opened again: no count, and nothing started', [await a.exists('#signin-needed'), started().length - switchFrom], [false, 0]);
+  writeFileSync(join(said, 'claude'), outputs.claude);
+  rmSync(ports);
   // A tool's only local server switched off there (Pi's tickets): it isn't started, so Pi, with only remote servers on, isn't named.
   write('.pi/agent/mcp.json', piFile({ tickets: { command: server, enabled: false } }));
   await a.click('#header-refresh');
-  same('a local server switched off in its tool isn’t counted in the line; its cell says Off', [await a.text('#signin-line'), (await column('pi-cli')).tickets],
+  same('a local server switched off in its tool isn’t counted in the line; its cell says Off', [await line(), (await column('pi-cli')).tickets],
     ['Check starts local servers in Claude Code and OpenCode; OpenCode adds $schema to its config files.', 'Off in Pi']);
   await owners('local-off');
   write('.pi/agent/mcp.json', piFile());
