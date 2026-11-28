@@ -41,7 +41,7 @@ import { copilotSharesYours, endedByChanges } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
 import { noteMove, acting, applyByKind, askFlash, closeResult, homeReadOwed, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, readHomeOnce, unpin, whyKindReadOnly, whyReadOnly, writeOff, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, setHome, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
-import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, infoMark, middle, pathText, toggle, whyOff, withToolCount, type Child } from './dom.ts';
+import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, fold, h, icon, infoMark, middle, pathText, toggle, whyOff, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { byName, byUsage, inOrder, kindSource, lastUpdated, noPins, partId, pin, placeIn, rankIn, rowId, type ItemRow, type KindSource, type Pinned, type RowKey, type RowOrder, type RowUsage, type Tool } from './itemrow.ts';
 import { readFlag, writeFlag } from './flags.ts';
@@ -237,7 +237,7 @@ function pluginDetails(t: Table, row: PluginRow, placement: 'row' | 'dock' = 'ro
 
 /** A plugin item's row: its switch (each tool's switch for one item), its name with the plugin's mark, and a mark per tool. */
 function pluginRowEl(t: Table, row: PluginRow) {
-  const id = idOf(row), open = t.view.comparing === id, fileOpen = t.view.openFile?.id === id, tools = toolsFor(t, kindOf(row));
+  const id = idOf(row), open = t.view.comparing === id, fileOpen = t.view.openFile?.id === id, tools = toolsFor(t, kindOf(row)), shown = markTools(t, tools);
   const mark = (tool: Tool) => {
     const look: MarkLook = !row.copies[tool as HarnessId] ? 'none' : offIn(row, tool as HarnessId) ? 'off' : 'on';
     const drawn = toolMark(look, tool);
@@ -254,7 +254,7 @@ function pluginRowEl(t: Table, row: PluginRow) {
         pluginTag(row.plugin, insideTitle(row)),
         open && !fileOpen ? null : aboutLine(t, row)),
       t.used ? usedCell(t, row) : null,
-      h('div.ov-marks', { role: 'cell' }, h('span.tool-marks', { role: 'img', 'aria-label': tools.map(tool => cellWords(row, tool as HarnessId)).join('. ') }, inColumns(t, tools, mark))),
+      h('div.ov-marks', { role: 'cell' }, h('span.tool-marks', { role: 'img', 'aria-label': shown.map(tool => cellWords(row, tool as HarnessId)).join('. ') }, inColumns(t, shown, mark))),
       h('div.ov-open', { role: 'cell' }, openButton(t, row))),
     open && underRow(t, id) ? openedPart(t, row, 'row') : null,
     fileOpen && !open ? filePanel(t, row, t.view.openFile!) : null,
@@ -265,10 +265,10 @@ function pluginRowEl(t: Table, row: PluginRow) {
 function pluginSection(t: Table, list: PluginRow[]) {
   if (!list.length) return null;
   return h('div', { role: 'rowgroup' },
-    h('div.ov-section.ov-section-plugins', { role: 'row', 'data-info-block': true },
+    h('div.ov-section.ov-section-plugins', { role: 'row', 'data-section': 'plugins', 'data-info-block': true },
       h('div.ov-section-label', { role: 'cell' },
         headingTick(t, 'plugins', 'Only through a plugin', list),
-        h('strong', {}, 'Only through a plugin'),
+        h('strong.ov-section-title', {}, 'Only through a plugin'),
         h('span.ov-section-count', {}, String(list.length)),
         infoMark('section-plugins-info', 'Only through a plugin', PLUGIN_HEADING_CARD))),
     list.flatMap(row => pluginRowEl(t, row)));
@@ -426,6 +426,8 @@ const newView = () => ({
   whereOpen: undefined as boolean | undefined,
   /** Whether the unused band's "What’s counted" disclosure is open. */
   unusedCounted: false,
+  /** Whether the tool tab's "Mark key" disclosure is open. */
+  legendOpen: false,
   /** The order a way in asked for (openKind `order`: the Overview's Most used), shown on the visit it is first drawn on (`visit`); Sort's kept choice stays as it was. */
   askedOrder: undefined as { order: RowOrder; visit?: number } | undefined,
 });
@@ -440,7 +442,7 @@ const views: Record<PageKind | 'library', View> = { library: newView(), skills: 
 export const showFiltered = (which: PageKind, filter: Filter, harness: Tool) => { startFresh(views[which], harness); views[which].filter = filter; };
 /** A view drawn for another place (a tool's tab, or the Library) starts with no filter, From, Find text, open row or menu from the last one. */
 function startFresh(table: View, harness: Tool | undefined) {
-  Object.assign(table, { filter: 'all', from: 'anywhere', comparing: undefined, openFile: undefined, shownFor: harness, unusedCounted: false });
+  Object.assign(table, { filter: 'all', from: 'anywhere', comparing: undefined, openFile: undefined, shownFor: harness, unusedCounted: false, legendOpen: false });
   newFind(table, '');
 }
 /**
@@ -1933,8 +1935,15 @@ export function emptyList(empty: HTMLElement, tab?: { kind: PageKind; tool: Tool
  * segment whose kind has none here, `none` of that kind (pages.ts kindEmpty).
  */
 export const libraryTable = (none?: (kind: PageKind) => HTMLElement) => drawTable(useLibrary(), none);
-/** A tool's tab of one kind under Harnesses: its column first, and the rows it doesn't have under their own heading. */
+/** A tool's tab of one kind under Harnesses: its own mark on each row (opened details keep every tool, this tool first), and the rows it doesn't have under their own heading. */
 export const itemsTable = (which: PageKind, harness: Tool) => drawTable(useTab(which, harness));
+
+// The same card as the plugins table's head (pluginspage.ts); one labelled mark for both once that table's change lands.
+const EVERY_TOOL_CARD = 'Each switch turns an item on or off in every tool that can take it. Open a row to change one tool alone.';
+/** Column head on a tool's tab: states that each row's switch acts in every tool, opposite this tool's single mark column. */
+const switchColumnHead = (tool: Tool) => h('div.ov-tab-head', { role: 'row', 'data-info-block': true },
+  h('div.ov-tab-head-switch', { role: 'columnheader' }, 'Every tool', infoMark('tab-switch-info', 'Every tool', EVERY_TOOL_CARD)),
+  h('div.ov-tab-head-mark', { role: 'columnheader' }, names[tool]));
 
 /**
  * A table: its toolbar, bands and rows, under the headings On, Found, Only through a plugin, (on a tab) Not in it, and Off; on the
@@ -1973,17 +1982,20 @@ function drawTable(t: Table, none?: (kind: PageKind) => HTMLElement) {
   // With no hit at all, the group's line on the reading goes under those words, in view.
   const said = nothing && inPlugins && coverageLine();
   if (said) nothing!.append(h('p.catalog-coverage', {}, said[0], ' · ', said[1]));
+  const legend = markLegend(t, all, plugins);
   const table = [
-    h('div.toolbar.fit-bar', {}, kindSwitch(t), h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(t), fromChoice(t), orderChoice(t), h('div.toolbar-end', {}, selectControl(t), toolbarState(t), usageControls(t))),
+    h('div.toolbar.fit-bar', {}, kindSwitch(t), h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(t), fromChoice(t), orderChoice(t), h('div.toolbar-end', {}, selectControl(t), toolbarState(t), usageControls(t), legend?.toggle ?? null)),
+    legend?.body ?? null,
     t.selectable ? selectBar(t, rowsDrawn) : null,
     usageBand(t),
     view.filter === 'unused' ? unusedBand(t, unusedShown) : null,
     bands(t),
+    sectionJump(t, sections),
     // Its id keeps it where it was scrolled across a redraw (the dock's breakpoint crossed, say): tableId.
     h('div.scroll.matrix', { id: tableId(t) },
-      // No column heads: each row's switch comes first, and its marks name their tools.
-      nothing ?? withToolCount(h('div.ov.ov-switched', { role: 'table', 'aria-label': `${tool ? nouns[t.kinds[0]!][1] : 'Items'} and where they are on` }, sections), columns(t).length),
-      markLegend(t, all, plugins))];
+      // Library rows keep no column heads; a tool's tab heads its switch column with Every tool (switchColumnHead).
+      nothing ?? withToolCount(h('div.ov.ov-switched', { role: 'table', 'aria-label': `${tool ? nouns[t.kinds[0]!][1] : 'Items'} and where they are on` }, tool ? switchColumnHead(tool) : null, sections), columns(t).length),
+      legend?.foot ?? null)];
   // An item's details hold its versions, and a file in a row's details' place is read at length: their dock takes a share of the
   // width that grows with the window (style.css .dock-wide).
   if (openRow) return h(`div.page.ov-page.docked${fileInDetails(view, view.comparing) ? '.dock-wide' : ''}`, {}, h('div.dock-main', {}, table), pluginDock(t, openRow));
@@ -2381,11 +2393,14 @@ function toolMark(look: MarkLook, tool: Tool | undefined, glyph?: IconName, size
   return h(`span.tool-mark.mark-${look}`, { 'aria-hidden': 'true' }, glyph ? icon(glyph, size, look === 'differs' || look === 'waits' ? 'tone-warning' : look === 'held' ? 'tone-faint' : '') : tool ? brandMark(tool, size) : icon('blocks', size));
 }
 
-/** A row's marks: one per tool, quiet and small, each naming its tool and what it has in its tooltip. `table`: the table's own (with ids). */
+/** Which tools' marks a row or key draws: on a tool's tab, only that tool; elsewhere, every tool the kind uses. */
+const markTools = (t: Table, holds: Tool[]) => (t.tool ? holds.filter(tool => tool === t.tool) : holds);
+
+/** A row's marks: one per tool (only this tool on a tool's tab), quiet and small, each naming its tool and what it has in its tooltip. `table`: the table's own (with ids). */
 function rowMarks(t: Table, skill: ItemRow, size = 14, table = true) {
-  const holds = toolsFor(t, skill.kind), marks = holds.map(tool => ({ tool, ...markOf(skill, tool) }));
+  const shown = markTools(t, toolsFor(t, skill.kind)), marks = shown.map(tool => ({ tool, ...markOf(skill, tool) }));
   return h('span.tool-marks', table ? { role: 'img', 'aria-label': marks.map(mark => mark.words).join('. ') } : { 'aria-hidden': 'true' },
-    inColumns(t, holds, tool => {
+    inColumns(t, shown, tool => {
       const { look, words, glyph, state } = marks.find(each => each.tool === tool)!;
       const mark = toolMark(look, tool, glyph, size);
       if (table) mark.id = elId('cell', skill, tool);
@@ -2394,20 +2409,26 @@ function rowMarks(t: Table, skill: ItemRow, size = 14, table = true) {
       return mark;
     }));
 }
-/** A row's marks in the table's columns (columns): `draw`'s for each tool its kind can be in, a blank of a mark's size in the others. */
+/** A row's marks: on a tool's tab, only the marks in `holds`; elsewhere, in the table's columns with a blank where its kind cannot be in a tool. */
 const inColumns = (t: Table, holds: Tool[], draw: (tool: Tool) => HTMLElement) =>
-  columns(t).map(tool => (holds.includes(tool) ? draw(tool) : h('span.tool-mark.mark-blank', { 'aria-hidden': 'true' })));
+  t.tool ? holds.map(draw) : columns(t).map(tool => (holds.includes(tool) ? draw(tool) : h('span.tool-mark.mark-blank', { 'aria-hidden': 'true' })));
 
-/** The key under the table: the marks it shows, each drawn with a neutral sample, since it is for every tool's mark. */
+/** The key: under the Library table, or toggled from the tool tab's toolbar ("What the marks mean") grouping keyWords by visual look. */
 function markLegend(t: Table, list: ItemRow[], plugins: PluginRow[]) {
   if (!columns(t).length) return null;
   const seen = new Map<keyof typeof keyWords, { look: MarkLook; glyph?: IconName }>();
-  for (const skill of list) for (const each of toolsFor(t, skill.kind)) { const { look, glyph, key } = markOf(skill, each); seen.set(key, { look, glyph }); }
+  for (const skill of list) for (const each of markTools(t, toolsFor(t, skill.kind))) { const { look, glyph, key } = markOf(skill, each); seen.set(key, { look, glyph }); }
   // A plugin's own rows: on there, or off there (no copy kept: a plugin's item has none of its own).
-  for (const row of plugins) for (const each of toolsFor(t, kindOf(row))) if (row.copies[each as HarnessId]) seen.set(offIn(row, each as HarnessId) ? 'plugin-off' : 'on', { look: offIn(row, each as HarnessId) ? 'off' : 'on' });
-  const keyed = h('div.legend', { 'aria-label': 'Key' }, (Object.keys(keyWords) as (keyof typeof keyWords)[]).filter(key => seen.has(key))
-    .map(key => h('span.legend-item', {}, toolMark(seen.get(key)!.look, undefined, seen.get(key)!.glyph, 12), keyWords[key])));
-  return keyed.childElementCount ? keyed : null;
+  for (const row of plugins) for (const each of markTools(t, toolsFor(t, kindOf(row)))) if (row.copies[each as HarnessId]) seen.set(offIn(row, each as HarnessId) ? 'plugin-off' : 'on', { look: offIn(row, each as HarnessId) ? 'off' : 'on' });
+  const entries = (Object.keys(keyWords) as (keyof typeof keyWords)[]).filter(key => seen.has(key)).map(key => ({ key, ...seen.get(key)! }));
+  const shown = t.tool
+    ? [...groupBy(entries, item => `${item.look}:${item.glyph ?? ''}`).values()].map(group => ({ ...group[0]!, label: group.map(item => keyWords[item.key]).join(' / ') }))
+    : entries.map(item => ({ ...item, label: keyWords[item.key] }));
+  const keyed = h('div.legend', { 'aria-label': 'Key' }, shown.map(item => h('span.legend-item', {}, toolMark(item.look, t.tool, item.glyph, 12), item.label)));
+  if (!keyed.childElementCount) return null;
+  if (!t.tool) return { foot: keyed };
+  const toggle = fold({ id: 'mark-legend', toggleId: 'mark-legend-toggle', label: 'What the marks mean', open: t.view.legendOpen, controls: 'mark-legend-body', onToggle: open => { t.view.legendOpen = open; rerender(); } });
+  return { toggle, body: t.view.legendOpen ? h('div.legend-band', { id: 'mark-legend-body' }, keyed) : undefined };
 }
 
 /** One row: its switch (in Select's mode, its tick), its name, a mark per tool, and the chevron that opens its details. */
@@ -2825,11 +2846,33 @@ function section(t: Table, role: Role, rows: ItemRow[], truly: ItemRow[]) {
       // Counts are of the rows that match (Find, From and the chip), as the kind switch's are: a pin keeps a row's place, not a count.
       h('div.ov-section-label', { role: 'cell' },
         headingTick(t, role, label, rows),
-        h('strong', {}, label),
+        h('strong.ov-section-title', {}, label),
         h('span.ov-section-count', {}, String(matching.length)),
         mark,
         note ? sectionNote(own, note) : null)),
     rows.flatMap(skill => row(t, skill)));
+}
+
+let jumpFlashTimer: ReturnType<typeof setTimeout> | undefined;
+/** Small jump to every drawn section on a long tool tab: plain links, names only, nothing stored. */
+function sectionJump(t: Table, sections: (HTMLElement | null | false | undefined)[]) {
+  if (!t.tool) return null;
+  const heads = sections.map(group => group && group.querySelector<HTMLElement>('.ov-section')).filter((head): head is HTMLElement => !!head);
+  if (heads.length < 2) return null;
+  return h('nav.section-jump', { 'aria-label': 'Jump to section', hidden: true }, h('span.section-jump-lead', {}, 'Jump to:'),
+    heads.map(head => h('button.section-jump-link', {
+      type: 'button', id: `jump-${head.dataset.section}`,
+      onclick: () => {
+        const list = head.closest<HTMLElement>('.scroll');
+        const stick = list?.querySelector<HTMLElement>('.ov-tab-head')?.offsetHeight ?? 0;
+        if (list) list.scrollTop += head.getBoundingClientRect().top - list.getBoundingClientRect().top - stick;
+        for (const prev of list?.querySelectorAll('.section-flash') ?? []) prev.classList.remove('section-flash');
+        void head.offsetWidth;
+        head.classList.add('section-flash');
+        clearTimeout(jumpFlashTimer);
+        jumpFlashTimer = setTimeout(() => head.classList.remove('section-flash'), 2500);
+      },
+    }, head.querySelector('.ov-section-title')?.textContent ?? '')));
 }
 
 /** The card behind the Found heading's mark: what Add does, or what Synchronize everything skips. */
@@ -3155,19 +3198,21 @@ const ABOUT_MIN = 90;
 const NAME_CUT_MIN = 280;
 
 /**
- * A table's descriptions are all shown or all left out, so rows never differ: when the narrowest one has room for fewer
- * than about twelve characters, every row leaves its description out (.no-about); its name's tooltip still has it.
- * A description pushed onto the cell's hidden second line, after a tag or pill that took the room, has none. A name that
- * takes more than half its name cell (and NAME_CUT_MIN) is cut first (.name-cut), so one very long name doesn't take every
- * description away; once every description is left out, the cut is taken off again and the name has its whole cell.
- * Run after layout (dom.ts afterLayout).
+ * Undocked tables keep every row's description on or off together (.no-about on the table), cutting a long name past half
+ * its cell and NAME_CUT_MIN (.name-cut) first so one long name doesn't drop every description. Docked tables never cut a
+ * name for its description; only a row whose own description lacks room hides it (.no-about on its .ov-name cell), while
+ * other rows keep theirs (full text stays on the cell's tooltip). Run after layout (dom.ts afterLayout).
  */
 function settleDescriptions(): void {
   const short = (about: HTMLElement) => about.offsetTop >= about.offsetHeight || about.clientWidth < ABOUT_MIN;
   for (const table of document.querySelectorAll<HTMLElement>('.ov')) {
     table.classList.remove('no-about');
-    for (const cut of table.querySelectorAll('.name-cut')) cut.classList.remove('name-cut');
+    for (const node of table.querySelectorAll('.name-cut, .no-about')) node.classList.remove('name-cut', 'no-about');
     const abouts = [...table.querySelectorAll<HTMLElement>('.ov-name-about')];
+    if (table.closest('.docked')) {
+      for (const about of abouts.filter(short)) about.parentElement!.classList.add('no-about');
+      continue;
+    }
     for (const cell of abouts.filter(short).map(about => about.parentElement!)) {
       if (cell.querySelector<HTMLElement>('.ov-name-main')!.offsetWidth > Math.max(cell.clientWidth / 2, NAME_CUT_MIN)) cell.classList.add('name-cut');
     }
@@ -3176,6 +3221,18 @@ function settleDescriptions(): void {
   }
 }
 afterLayout(settleDescriptions);
+
+/** Shows a tool tab's section jump only when its collapsed rows overflow the list height (subtracting opened details and inline file panels, both .details). */
+function settleSectionJump(): void {
+  const jump = document.querySelector<HTMLElement>('.harness-page .section-jump');
+  const scroller = jump?.parentElement?.querySelector<HTMLElement>(':scope > .scroll.matrix');
+  const table = scroller?.querySelector<HTMLElement>('.ov');
+  if (!jump || !scroller || !table || !scroller.clientHeight) return;
+  jump.hidden = true;
+  const open = [...table.querySelectorAll<HTMLElement>(':scope > [role="rowgroup"] > .details')].reduce((sum, panel) => sum + panel.offsetHeight, 0);
+  jump.hidden = table.offsetHeight - open <= scroller.clientHeight + 1;
+}
+afterLayout(settleSectionJump);
 
 /** The Files view's pane width from which the file and the skill's details sit in two columns. */
 const DETAIL_COLUMNS_FROM = 1040;
@@ -3282,6 +3339,7 @@ document.addEventListener('keydown', event => {
   if (id === 'skills-find' && view?.listFind) { view.listFind = ''; rerender(); }
   else if (id === 'find' && t && view?.find) findTyped(t, '');
   else if (id === 'unused-counted-toggle' && view?.unusedCounted) { view.unusedCounted = false; rerender(); }
+  else if (id === 'mark-legend-toggle' && view?.legendOpen) { view.legendOpen = false; rerender(); }
   else if (t && view?.openFile && !(state.page === 'library' && state.libraryView === 'files')) setFile(t, undefined, undefined, true);
   else if (state.page === 'library' && state.libraryView === 'list' && selecting()) { if (!cancelAsk()) stopSelecting(); rerender(); }
 });

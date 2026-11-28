@@ -2248,7 +2248,7 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .harness-switch-item:disabled { opacity: 0.5; cursor: default; }
 .harness-switch-item.selected { background: var(--surface); color: var(--ink); box-shadow: var(--lift); }
 .harness-switch-item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.harness-tabs { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 2px; padding: 0 16px; }
+.harness-tabs { flex: 1; min-width: 0; display: flex; flex-wrap: nowrap; align-self: stretch; align-items: stretch; gap: 2px; padding: 0 0 0 16px; }
 /* The tabs look like the marketplace tabs (shared rules above); each is inline-flex for its count and keeps its label on one line. */
 .harness-tab { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .harness-tab:hover:not(:disabled) { color: var(--ink); }
@@ -2278,8 +2278,26 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 .harness-path { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; min-width: 0; }
 .harness-path > .tone-faint { white-space: nowrap; }
 .harness-path .middle { min-width: 0; }
-/* Narrow: the switcher keeps only the marks (names stay in their tooltips). */
-@media (max-width: 1180px) { .harness-switch-item:not(.selected) .harness-switch-name { display: none; } }
+/* Measured nav fit (dom.ts fitBars): stack the whole named switcher above the tabs when they cannot share row 1. */
+.harness-bar-stacked { flex-direction: column-reverse; align-items: stretch; gap: 0; padding: 0; }
+.harness-bar-stacked .harness-tabs { flex: none; flex-wrap: wrap; padding: 0 16px; border-top: 1px solid var(--line); }
+.harness-bar-stacked .harness-switch { align-self: flex-start; flex-wrap: wrap; margin: 6px 16px; }
+/* Tool tab: sticky Every tool switch column head, hittable file icon, toolbar legend disclosure, and plain Jump to: links. */
+.harness-page .toolbar-end > .band-stack:not(:has(.apply-state:not(.band-unshown))) { display: none; }
+.toolbar-end:not(:has(> :not(.band-stack), .apply-state:not(.band-unshown))) { border-left: 0; padding-left: 0; }
+.harness-page .toolbar-end > .fold > summary { margin-left: 0; white-space: nowrap; }
+.harness-page .legend-band { flex: none; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.harness-page .legend-band .legend { padding: 0; }
+.harness-page .ov-tab-head { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; justify-content: space-between; min-height: 28px; padding: 0 42px 0 16px; border-bottom: 1px solid var(--line); background: var(--surface); font-size: 11.5px; font-weight: 500; color: var(--ink-soft); }
+.harness-page .ov-tab-head-switch { display: inline-flex; align-items: center; gap: 2px; }
+.harness-page .row-file-btn { width: 28px; height: 28px; border-radius: 6px; }
+.harness-page .section-jump { flex: none; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 5px 16px; border-bottom: 1px solid var(--line); background: var(--surface); font-size: 12px; }
+.harness-page .section-jump-lead { color: var(--ink-faint); }
+.harness-page .section-jump-link { all: unset; display: inline-flex; align-items: baseline; color: var(--accent-ink); cursor: pointer; white-space: nowrap; }
+.harness-page .section-jump-link:hover { text-decoration: underline; }
+.harness-page .section-jump-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+@keyframes section-flash { from { background: color-mix(in oklab, var(--accent) 18%, var(--chrome)); box-shadow: inset 3px 0 0 var(--accent), inset 0 -1px 0 var(--line), inset 0 1px 0 var(--line); } to { background: var(--chrome); } }
+.ov-section.section-flash { background: color-mix(in oklab, var(--accent) 14%, var(--chrome)); box-shadow: inset 3px 0 0 var(--accent), inset 0 -1px 0 var(--line), inset 0 1px 0 var(--line); animation: section-flash 2.5s ease-out forwards; }
 /* The harness's own column header: a quiet fill across the whole column's width. */
 /* Its Instructions tab: the info box with "Every tool's file" beside its line, then the same card as on Instructions. */
 .ins-about-line { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 16px; }
@@ -2436,8 +2454,8 @@ button.harness-card-head:disabled { opacity: 0.5; cursor: default; }
 /* ---------- One switch per item (matrix.ts switchRow) ---------- */
 /*
  * The switch starts each row, where the eye starts; then the name and its description, which take the free width; then a
- * small, quiet mark per tool and the chevron. No column heads: each mark names its tool in its tooltip, and the key under
- * the table says what each look means. Group headings scroll with their rows: none is pinned, so two never stack.
+ * small, quiet mark per tool and the chevron. No column heads on the Library (a tool's tab heads its switch column with
+ * Every tool): each mark names its tool in its tooltip, and the key says what each look means. Group headings scroll with their rows: none is pinned, so two never stack.
  */
 .ov-switched .ov-section { position: static; }
 .ov-row.ov-switch-row { grid-template-columns: auto minmax(0, 1fr) auto auto; column-gap: 12px; padding: 0 8px 0 16px; scroll-margin-top: 8px; }
