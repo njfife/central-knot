@@ -1230,8 +1230,8 @@ span.ins-confirm { margin-top: 0; }
 .info-box-files strong { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--ink); }
 
 /* ---------- History ---------- */
-/* History's own Keep control (settingspage.ts historyWindowControl): sits above the list or empty state, sharing Settings' warning and outcomes. */
-.history-keep { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px var(--pad-end) 4px 16px; }
+/* History's own Keep control (settingspage.ts historyWindowControl): sits above the list, empty state or no-managed state, sharing Settings' warning and outcomes. */
+.history-keep { flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px var(--pad-end) 4px 16px; }
 .history-keep-row { display: inline-flex; align-items: center; gap: 8px; }
 .history-keep-label { font-size: 12.5px; font-weight: 500; color: var(--ink-soft); }
 .history-keep > .setting-message, .history-keep > .setting-confirm { margin-top: 0; }
@@ -1245,21 +1245,24 @@ span.ins-confirm { margin-top: 0; }
 /* The actions column is as wide as its widest actions, up to 220px (longer ones wrap), so no sentence wraps beside an empty column. */
 .history-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(80px, max-content) auto minmax(0, 1fr) fit-content(220px); column-gap: 16px; }
 .history-day { grid-column: 1 / -1; list-style: none; padding: 14px 16px 4px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
-/* In narrow content a row is its own grid, and what happened takes its own line beneath, so a row is two lines. */
+/* In narrow content a row is its own grid: the name takes its line, with what happened and any actions beneath. */
 .history-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start; row-gap: 12px; padding: 10px var(--pad-end) 10px 16px; box-shadow: inset 0 -1px 0 var(--line); }
 /* A sentence takes the free width of its column: History's rows are short, and wrapping one beside empty space reads worse. */
 .history-about { margin-left: -8px; }
 /* Inline tool-list fold inside a History row sentence (historypage.ts rowAbout): names open below the sentence. */
 .history-about > .fold { display: inline; }
 .history-about > .fold::details-content { display: none; }
-.history-about > .fold > summary { margin: -1px -4px; padding: 1px 4px; gap: 1px; font-size: inherit; line-height: inherit; vertical-align: baseline; }
+.history-about > .fold > summary { margin: -2px -4px; padding: 2px 4px; gap: 1px; font-size: inherit; line-height: inherit; vertical-align: baseline; }
 .history-about > .fold > summary > .fold-chevron { margin-inline: -2px -2px; }
 .history-tools-names { font-size: 12px; color: var(--ink-soft); }
 .history-undone .history-tools-names { color: var(--ink-faint); }
 @container content (width < 880px) {
   .history-list { display: block; }
-  .history-row { grid-template-columns: minmax(80px, max-content) minmax(0, 1fr) auto; column-gap: 16px; row-gap: 2px; }
+  .history-row { grid-template-columns: minmax(80px, max-content) minmax(0, 1fr); column-gap: 16px; row-gap: 2px; }
   .history-about { grid-column: 2 / -1; grid-row: 2; margin-left: 22px; }
+  .history-row > .history-actions { grid-column: 2 / -1; grid-row: 3; justify-content: flex-start; margin: 2px 0 0 22px; text-align: left; }
+  .history-row > .history-actions:not(:has(button, .history-done)) { display: none; }
+  .history-row > .history-actions .btn.link { text-align: left; }
   .history-row > .change-panel, .history-row > .manage-question { margin-top: 10px; }
   /* The name takes the line it is on. */
   .history-row .history-what > strong { max-width: none; }
@@ -1268,8 +1271,8 @@ span.ins-confirm { margin-top: 0; }
 .history-when { font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .history-what { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
 .history-what > svg { flex: none; margin-top: 2px; }
-/* A name's room grows with the window (150px up to 1280, about 600px at 2560), so a long one is not cut beside an empty row. */
-.history-what > strong { flex: 0 1 auto; min-width: 0; max-width: max(150px, 40cqw - 300px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+/* A name's room grows with the content width (about 340px at 1316 with sidebar open, up to 600px wide), so a long one is not cut beside an empty row. */
+.history-what > strong { flex: 0 1 auto; min-width: 0; max-width: clamp(150px, 45cqw - 160px, 600px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .history-kind { flex: none; min-width: 6em; font-size: 11px; color: var(--ink-faint); }
 .history-done { font-size: 12px; color: var(--ink-faint); }
 .history-undone .history-what, .history-undone .history-about { color: var(--ink-faint); }
@@ -1817,10 +1820,11 @@ details[open] > summary > .sessions-chevron { transform: rotate(90deg); }
 /* A row's question (shortening History): a danger notice under the row's text and control, as wide as its words and buttons
    need (the whole row where the words must wrap), never a mostly empty band. Its buttons follow the words; where they don't
    fit beside them they wrap to the notice's left edge, as a stacked row's control does. */
-.setting-confirm { grid-column: 1 / -1; justify-self: start; width: fit-content; max-width: 100%; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: -4px; }
-.setting-confirm > .icon { align-self: flex-start; margin-top: 2px; }
-.setting-confirm-text { flex: 1 1 200px; min-width: 0; max-width: 72ch; }
-.setting-confirm-actions { display: flex; gap: 8px; }
+.setting-confirm { grid-column: 1 / -1; justify-self: start; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; width: fit-content; max-width: 100%; padding: 10px 12px; border: 1px solid color-mix(in oklab, var(--danger) 28%, var(--line)); border-radius: 8px; background: var(--danger-tint); margin-top: -4px; }
+.setting-confirm-body { display: flex; align-items: flex-start; gap: 8px; flex: 1 1 260px; min-width: 0; }
+.setting-confirm-body > .icon { flex: none; margin-top: 2px; }
+.setting-confirm-text { min-width: 0; max-width: 72ch; }
+.setting-confirm-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 /* The system ignored the person's change: it reads apart from the hints and needs them, without alarm. */
 .setting-attention { color: var(--ink); }
 .setting-attention .icon { color: var(--warning); }
