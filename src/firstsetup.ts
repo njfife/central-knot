@@ -10,7 +10,7 @@
 // Settings' switch (app.ts switchSyncEverything, answering), whose band says what it added with the switch-on's Undo; No's band
 // names the setting and turns it on there with that same switch. The found items whose copies differ are one line under the
 // question while it asks (overview.ts needsYou). Settings' Synchronize everything row counts with setupcounts.ts whatYesDoes
-// too, and leads in (settingspage.ts). What Yes does in the engine, and its one Undo, are everything.ts's.
+// too, and calls useLatest from its waiting list (settingspage.ts). What Yes does in the engine, and its one Undo, are everything.ts's.
 import { acting, applyClick, busy, clickResumes, noToolManaged, rerender, runSwitches, setHome, state, switchReasons, switchSyncEverything, tell, tellWritten, whyReadOnly, type PageKind } from './app.ts';
 import { pluginReloads, reloadsFor } from './reload.ts';
 import { button, closeButton, h, icon, infoMark } from './dom.ts';
@@ -127,10 +127,11 @@ const passChosen = (items: Waiting[]) => {
 const skip = (item: Waiting) => { walk.passed.push(walkId(item)); goOn(); };
 
 /**
- * "Use the latest for the rest": for each item left with a latest copy, the click its question's main button sends (`use`, as
- * seen: `useHash`), each with its own History entry and Undo; those with no dates to go by are skipped, and said.
+ * "Use the latest for the rest" (and Settings' "Use the latest for all N", `inWalk` false): for each item left with a latest
+ * copy, the click its question's main button sends (`use`, as seen: `useHash`), each with its own History entry and Undo; those
+ * with no dates to go by are skipped, and said.
  */
-const useLatest = (left: Waiting[]) => busy('Choosing the latest copies…', async page => {
+export const useLatest = (left: Waiting[], inWalk = true) => busy('Choosing the latest copies…', async page => {
   const home = state.home!, dated = left.filter(item => item.latest), undated = left.filter(item => !item.latest);
   const send = { skills: window.centralKnot.applySkills, mcp: window.centralKnot.applyServers, agents: window.centralKnot.applyAgents };
   const sent: { kind: PageKind; keys: Set<string>; result: PassResult }[] = [];
@@ -144,10 +145,12 @@ const useLatest = (left: Waiting[]) => busy('Choosing the latest copies…', asy
   const plugins = turnEvery(chosen.flatMap(item => throughItemsFor(item.kind, item.key)), true);
   const plugged = plugins.ops.length ? await runSwitches(plugins.ops) : undefined;
   if (plugged) setHome(await window.centralKnot.refresh());
-  walk.passed.push(...undated.map(walkId));
-  passChosen(dated);
+  if (inWalk) {
+    walk.passed.push(...undated.map(walkId));
+    passChosen(dated);
+  }
   const done = latestDone(dated, undated, sent, still), reasons = switchReasons(plugged, plugins.left);
-  tellWritten({ page, band: true, history: true, ...done, warn: done.warn || reasons.length > 0, ...(reasons.length ? { reasons } : {}) },
+  tellWritten({ page, band: true, ...(page === 'settings' ? { settingsBand: true } : {}), history: true, ...done, warn: done.warn || reasons.length > 0, ...(reasons.length ? { reasons } : {}) },
     [...sent.flatMap(({ keys, result }) => reloadsFor(result.reloads, keys)), ...(plugged ? pluginReloads(plugged.done) : [])]);
 });
 
