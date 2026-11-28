@@ -307,7 +307,7 @@ function switcher(home: HomeView, tool: HarnessId) {
   const others = home.sync.managed;
   if (others.length < 2) return null;
   return h('div.harness-switch', { role: 'group', 'aria-label': 'Other harnesses' }, others.map(other => h(`button.harness-switch-item${other === tool ? '.selected' : ''}`, {
-    type: 'button', id: `harness-switch-${other}`, 'aria-pressed': String(other === tool), title: names[other], disabled: !!state.busy && other !== tool,
+    type: 'button', id: `harness-switch-${other}`, 'aria-pressed': String(other === tool), 'aria-label': names[other], title: names[other], disabled: !!state.busy && other !== tool,
     onclick: () => { if (other !== tool) goHarness(other); },
   }, brandMark(other, 14), h('span.harness-switch-name', {}, names[other]))));
 }

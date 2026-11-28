@@ -342,10 +342,10 @@ function renderWindow() {
   // After the header, which marks the notices it draws seen: the sidebar's dot is for those it didn't.
   renderSidebar();
   recordDraw(visitOffsets);
-  // What depends on the drawn widths (columns, wrapped lines) is decided now, before the page is painted (dom.ts afterLayout).
-  runAfterLayout();
+  // Fit the status bar and header/toolbars first so afterLayout steps measure the settled list height (dom.ts fitBars, afterLayout).
   renderStatus();
   fitBars();
+  runAfterLayout();
   // What was selected, then the scroll places, each where it was (scrolledNow), and over them the place of a visit Back or Forward
   // opened (places.ts putBack); keepingFocus puts the focus back after, without scrolling to it (dom.ts keepSelection neither
   // focuses nor scrolls).
