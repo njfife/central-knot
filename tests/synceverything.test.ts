@@ -134,8 +134,9 @@ test('Switched on in a home with found items: each it may take is taken in and O
     assert.equal(mcpNotice.kind === 'taken-in' && sentences(libraryWords.mcp).takenInWords(mcpNotice),
       'Synchronize everything took in 2 MCP servers, found in Claude Code and Codex: docs and files. History can undo each.');
     assert.deepEqual(mcpNotice.kind === 'taken-in' ? mcpNotice.histories : undefined, [docs.id, files.id]);
-    // One notice per pass of a kind: how many, by name, and where they were found. None for a key it left.
-    assert.deepEqual(noticesOf(done).map(notice => notice.kind === 'taken-in' ? [notice.items, notice.from] : notice.kind), [[['notes', 'tidy'], ['claude-cli']], [['docs', 'files'], ['claude-cli', 'codex-cli']], [['helper'], ['copilot-cli']]], 'each tool named once');
+    // One notice per pass of a kind: how many, by name and key, and where they were found. None for a key it left.
+    assert.deepEqual(noticesOf(done).map(notice => notice.kind === 'taken-in' ? [notice.items, notice.keys, notice.from] : notice.kind),
+      [[['notes', 'tidy'], ['notes', 'tidy'], ['claude-cli']], [['docs', 'files'], ['docs', 'files'], ['claude-cli', 'codex-cli']], [['helper'], ['helper'], ['copilot-cli']]], 'each tool named once');
     // A click's Undo never undoes what the rule took in: none of it is a click's.
     assert.deepEqual(Object.values(done).flatMap(pass => pass.made ?? []), []);
     // The next pass writes nothing and says nothing.
@@ -496,5 +497,15 @@ test('A click’s pass with Automatic sync on (no `only`) takes in the clicked i
     assert.deepEqual([placeIn(view, 'notes'), placeIn(view, 'tidy')], ['on', 'found']);
     await background(box);
     assert.equal(placeIn((await views(box)).skills, 'tidy'), 'on');
+  } finally { await box.cleanup(); }
+});
+
+test('A taken-in notice carries each item’s library key beside its display name when they differ', async () => {
+  const box = await sandbox();
+  try {
+    await putSkill(box, 'claude-cli', 'Notes');
+    await turnOn(box);
+    const notice = noticesOf(await background(box)).find(each => each.kind === 'taken-in');
+    assert.deepEqual(notice && notice.kind === 'taken-in' ? [notice.items, notice.keys] : undefined, [['Notes'], ['notes']]);
   } finally { await box.cleanup(); }
 });
