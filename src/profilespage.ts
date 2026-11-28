@@ -74,20 +74,21 @@ const managed = () => state.home!.sync.managed;
 
 /**
  * One row of the list: a profile, how many items it has and, where it applies to fewer than every managed tool, how many tools;
- * whether it is in use, or the one last switched to, changed since (profileplan.ts profileNow), and whether it is open.
+ * whether it is in use, or the one last switched to named `<Profile> · changed` as everywhere (`changed`: its hover, words.ts
+ * changedCard), and whether it is open.
  */
-function listRow(profile: Profile, { count, isInUse, changed, selected }: { count: number; isInUse: boolean; changed: boolean; selected: boolean }) {
+function listRow(profile: Profile, { count, isInUse, changed, selected }: { count: number; isInUse: boolean; changed?: string; selected: boolean }) {
   const tools = toolsOf(profile, managed());
   return h(`button.list-row.profile-row${selected ? '.selected' : ''}`, { type: 'button', id: `profile-row-${profile.id}`, 'aria-current': selected ? 'true' : undefined,
     onclick: () => openProfileById(profile.id) },
     icon('sliders-horizontal', 14, 'tone-muted'),
-    // The name keeps its line (cut with … where it must, whole on hover); the counts go under it.
-    h('span.profile-row-text', {}, h('span.list-name.profile-row-name', { title: profile.name }, profile.name),
+    // The name keeps its line (cut with … where it must, whole on hover, ` · changed` never cut); the counts go under it.
+    h('span.profile-row-text', {}, h('span.profile-row-head', {}, h('span.list-name.profile-row-name', { title: profile.name }, profile.name),
+      changed ? h('span.profile-changed-word', { title: changed }, CHANGED) : null),
       h('span.list-fraction', {}, plural(count, 'item'), tools.length < managed().length ? ` · ${plural(tools.length, 'tool')}` : '')),
     isInUse ? h('span.profile-in-use', { title: profile.switchesPluginItems
       ? `${profile.name} is in use: what it has is on, and every other item is off wherever it can be switched`
-      : `${profile.name} is in use: what it has is on, and every other item of yours is off. ${PLUGIN_ITEMS_STAY}` }, icon('check', 12), 'In use')
-      : changed ? h('span.profile-changed', { title: changedCard(profile.name) }, 'Changed') : null);
+      : `${profile.name} is in use: what it has is on, and every other item of yours is off. ${PLUGIN_ITEMS_STAY}` }, icon('check', 12), 'In use') : null);
 }
 
 /** The list column (and under 880 px, the one-line picker bar): New profile, then each profile, with `open` shown as selected. */
@@ -104,7 +105,7 @@ function listColumn(open: Profile | undefined) {
     h('div.toolbar.list-toolbar', {}, h('span.toolbar-title', {}, 'Profiles'), picker,
       h('div.toolbar-end', {}, button({ variant: 'outline', size: 'small', icon: 'plus', label: 'New profile', id: 'profile-new', disabled: !canEditProfiles(), onclick: newProfile }))),
     h('div.scroll.list-scroll', { id: 'profiles-list-scroll' },
-      profiles().profiles.map(profile => listRow(profile, { count: namedCount(profile, all, plugged), isInUse: inUseNow.includes(profile), changed: profile === named.changed, selected: profile === open }))));
+      profiles().profiles.map(profile => listRow(profile, { count: namedCount(profile, all, plugged), isInUse: inUseNow.includes(profile), changed: profile === named.changed ? changedCard(profile.name, !!named.canSwitchBack) : undefined, selected: profile === open }))));
 }
 
 // ---------- The open profile ----------
@@ -437,8 +438,8 @@ function headerActions(profile: Profile, primary: HTMLElement | null): (Node | n
 }
 
 /** After the title of the one last switched to while none is in use: ` · changed` and its (?) saying what that means (words.ts changedCard). */
-function changedWord(profile: Profile) {
-  const mark = infoMark('profile-changed-title-info', `${profile.name} · changed`, changedCard(profile.name));
+function changedWord(profile: Profile, canSwitchBack: boolean) {
+  const mark = infoMark('profile-changed-title-info', `${profile.name} · changed`, changedCard(profile.name, canSwitchBack));
   // The title's own hover names the profile; over the (?) its card says the rest.
   mark.setAttribute('title', '');
   return [h('span.profile-changed-word', {}, CHANGED), mark];
@@ -457,8 +458,8 @@ function profileDetail(profile: Profile) {
   const inView = (list: { id: string }[]) => (pinnedIds ? list.filter(item => pinnedIds.has(item.id)).length : list.length);
   const shownCount = inView(shown) + inView(pluggedShown), totalCount = inView(all) + inView(visiblePlugins);
   // The one last switched to, while none is in use, is titled as every place names it: `Everyday · changed`.
-  const changed = profile.id === now().changed?.id;
-  const title = profileState.renaming === profile.id ? renameField(profile) : h('h2', { title: profile.name }, profile.name, changed ? changedWord(profile) : null);
+  const named = now(), changed = profile.id === named.changed?.id;
+  const title = profileState.renaming === profile.id ? renameField(profile) : h('h2', { title: profile.name }, profile.name, changed ? changedWord(profile, !!named.canSwitchBack) : null);
   const preview = switchPreview(profile, all, plugged), tip = way?.title ?? preview.tip;
   const toggleChanges = () => {
     const ids = (list: { id: string }[]) => list.map(change => change.id);
@@ -466,7 +467,8 @@ function profileDetail(profile: Profile) {
     rerender();
   };
   return h('div.detail-column', {},
-    h('div.pane-header.profile-header', {}, icon('sliders-horizontal', 16, 'tone-muted'),
+    // The title's (?) card opens below the whole header, clear of Switch, which it speaks of.
+    h('div.pane-header.profile-header', { 'data-info-block': true }, icon('sliders-horizontal', 16, 'tone-muted'),
       h('div.pane-title', {}, title,
         h('div.profile-subtitle', { 'data-info-block': true }, h('p', { id: 'profile-preview' }, way?.why ? `Can’t switch · ${way.why}` : preview.line),
           tip ? infoMark('profile-preview-info', 'Switch preview', tip) : null)),
@@ -553,7 +555,7 @@ export function profileStatus(): HTMLElement | null {
     h('button.pf-menu-item', { type: 'button', role: 'menuitem', id: 'status-profile-edit', onclick: () => { menuOpen = false; profileState.open = (inUseNow[0] ?? named.changed)?.id; showPage('profiles'); } }, h('span.pf-menu-tick'), h('span.pf-menu-name', {}, 'Edit profiles…'))) : null;
   return h('span.status-profile-wrap', {},
     h('button.status-item.status-profile', { type: 'button', id: 'status-profile', 'aria-haspopup': 'menu', 'aria-expanded': String(menuOpen), disabled: !!acting(),
-      title: `${nowLead(named)}: ${named.name}.${named.changed ? ` ${changedCard(named.changed.name)}` : ''} Click to switch profiles.`,
+      title: `${nowLead(named)}: ${named.name}.${named.changed ? ` ${changedCard(named.changed.name, !!named.canSwitchBack)}` : ''} Click to switch profiles.`,
       onclick: (event: Event) => { event.stopPropagation(); menuOpen = !menuOpen; rerender(); if (menuOpen) (document.querySelector('.pf-menu-item[aria-checked="true"], .pf-menu-item:not(:disabled)') as HTMLElement | null)?.focus(); } },
       icon('sliders-horizontal', 14), h('span.status-clip', {}, named.changed?.name ?? named.name), named.changed ? h('span.status-changed', {}, CHANGED) : null,
       icon('chevron-up', 12, 'status-profile-chevron')),

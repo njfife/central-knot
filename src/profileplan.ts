@@ -568,8 +568,11 @@ export function lastSwitched(events: readonly HistoryEvent[], profiles: readonly
   return (entry.toId ? profiles.find(profile => profile.id === entry.toId) : profiles.find(profile => profile.name === entry.toName))?.id;
 }
 
-/** The profiles now, as profileNow gives them: those in use, else the one last switched to (`changed`), and the name every place says. */
-export interface ProfileNow { inUse: Profile[]; changed?: Profile; name: string }
+/**
+ * The profiles now, as profileNow gives them: those in use, else the one last switched to (`changed`, with whether it can be
+ * switched to now: `canSwitchBack`, the menus' and the page's rule, switchable), and the name every place says.
+ */
+export interface ProfileNow { inUse: Profile[]; changed?: Profile; canSwitchBack?: boolean; name: string }
 /**
  * The profiles now, the one rule every place that names the profile in use asks (the status bar and its menu, the menu bar's
  * Profile menu, the tray's tooltip and title, the Profiles list, picker, title and the profile it opens, Harnesses' line, an
@@ -580,7 +583,7 @@ export interface ProfileNow { inUse: Profile[]; changed?: Profile; name: string 
 export function profileNow(view: Pick<ProfilesView, 'profiles' | 'last'>, live: LiveItem[], plugins: PluginLive[]): ProfileNow {
   const now = inUse(view.profiles, live, plugins), changed = now.length ? undefined : view.profiles.find(profile => profile.id === view.last);
   const name = now.length ? andList(now.map(profile => profile.name)) : changed ? changedName(changed.name) : NO_PROFILE;
-  return { inUse: now, ...(changed ? { changed } : {}), name };
+  return { inUse: now, ...(changed ? { changed, canSwitchBack: switchable(changed, live, plugins) } : {}), name };
 }
 /** One profile's name where profiles are listed (both menus, the picker): `Everyday · changed` for profileNow's `changed`. */
 export const nameNow = (now: ProfileNow, profile: Profile) => (profile.id === now.changed?.id ? changedName(profile.name) : profile.name);

@@ -3163,9 +3163,9 @@ async function practiceFlow() {
   // Before the click, standup's opened row says what it would end in the words said after it: Incident · changed.
   const standupEnds = `#${rowPart('profile-ends', 'skills', 'standup')}`;
   await openRow('standup', standupEnds);
-  same('before the click, the opened row says the profile becomes Incident · changed, Incident staying saved on hover',
+  same('before the click, the opened row says what the status bar will then say, Incident staying saved on hover',
     [(await a.text(standupEnds))?.trim(), await a.run(`document.querySelector(${JSON.stringify(standupEnds)})?.title`)],
-    ['If on, only this item changes: the profile becomes Incident · changed.', 'Incident stays saved: Undo, or switching to it again, puts it back in use.']);
+    ['If on, only this item changes: the status bar will say Incident · changed.', 'Incident stays saved: Undo, or switching to it again, puts it back in use.']);
   await shotOpen('profile-changed-forecast-860-light', SMALLEST, 'light', () => a.run(`document.querySelector(${JSON.stringify(standupEnds)})?.scrollIntoView({ block: 'center' })`));
   await fullSize(a);
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
@@ -3174,7 +3174,7 @@ async function practiceFlow() {
     rowEndsText.endsWith(' Incident · changed') && (await a.text('#status-profile'))?.trim() === 'Incident · changed',
     [rowEndsText, await a.text('#status-profile')]);
   await withSidebarOpen(a, ...SMALLEST, async () => {
-    await checkCard(a, 'profile-changed-info', 'What is on differs from Incident, the profile you last switched to. Incident itself is as you saved it; switching to it again sets everything as it says.', 'the result’s (?) beside Incident · changed says what that means');
+    await checkCard(a, 'profile-changed-info', 'What is on differs from Incident, the profile you last switched to. Incident itself is as you saved it; switching to it again sets what Central Knot manages as it says.', 'the result’s (?) beside Incident · changed says what that means');
     await shotOpen('profile-changed-result-card-860-light', SMALLEST, 'light', () => a.click('#profile-changed-info'));
     if (shots) await a.press('Escape');
   });
@@ -3202,6 +3202,29 @@ async function practiceFlow() {
   same('its Undo restores Incident with no profile sentence',
     [(await a.text('#status-profile'))?.trim(), /stopped being the profile|· changed/.test(await headerResultWords(a))],
     ['Incident', false]);
+  // A profile that can't be switched to (nothing left in it) is still the one last switched to: Incident emptied, in use while
+  // nothing is on, then ended by notes turned on. Its card makes no promise of a switch. Then all as it was.
+  const tickNotes = async () => {
+    await a.click('#nav-profiles');
+    await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Incident')).click()`); await a.settle();
+    await a.click('#pf-skill\\:notes');
+    await openKind(a, 'skills');
+  };
+  await tickNotes();
+  await a.click(`#${rowPart('switch', 'skills', 'notes')}`);
+  same('emptied, Incident is in use while nothing is on', (await a.text('#status-profile'))?.trim(), 'Incident');
+  await a.click(`#${rowPart('switch', 'skills', 'notes')}`);
+  same('notes on ends it: Incident · changed', [(await headerResultWords(a)).endsWith(' Incident · changed'), (await a.text('#status-profile'))?.trim()], [true, 'Incident · changed']);
+  await withSidebarOpen(a, ...SMALLEST, async () => {
+    await checkCard(a, 'profile-changed-info', 'What is on differs from Incident, the profile you last switched to. Incident itself is as you saved it.', 'the result’s (?) for a profile with nothing in it promises no switch');
+    await shotOpen('profile-changed-empty-card-860-light', SMALLEST, 'light', () => a.click('#profile-changed-info'));
+    if (shots) await a.press('Escape');
+  });
+  await fullSize(a);
+  await a.click('#outcome-undo');
+  await tickNotes();
+  await a.click(`#${rowPart('switch', 'skills', 'notes')}`);
+  same('notes ticked back into Incident and turned on: Incident is in use as before', (await a.text('#status-profile'))?.trim(), 'Incident');
   await a.clickInRun(`#${rowPart('switch', 'skills', 'standup')}`);
   await a.clickInRun(`#${rowPart('switch', 'skills', 'standup')}`);
   same('turning standup on then off in one run leaves Incident in use with no profile sentence',
@@ -3323,17 +3346,25 @@ async function practiceFlow() {
   // profile last switched to, as changed: the bar, Profiles' list, title and the profile it opens, and Harnesses' line.
   await a.click(`#${rowPart('switch', 'skills', 'standup')}`);
   same('after a hand click no profile is in use, and the status bar names the one last switched to: Incident · changed', (await a.text('#status-profile'))?.trim(), 'Incident · changed');
-  const changedCard = 'What is on differs from Incident, the profile you last switched to. Incident itself is as you saved it; switching to it again sets everything as it says.';
+  const changedCard = 'What is on differs from Incident, the profile you last switched to. Incident itself is as you saved it; switching to it again sets what Central Knot manages as it says.';
   same('the status bar’s hover says what Incident · changed means', await a.run(`document.getElementById('status-profile')?.title`), `Profile: Incident · changed. ${changedCard} Click to switch profiles.`);
   await a.click('#nav-profiles');
   const titleWords = () => a.run(`[...document.querySelector('.profile-header h2').childNodes].filter(node => !node.classList?.contains('info-wrap')).map(node => node.textContent).join('')`);
-  same('Profiles opens Incident, titled Incident · changed and marked Changed in the list, each saying what that means',
-    [await titleWords(), await a.text('.profile-row.selected .profile-changed'), await a.run(`document.querySelector('.profile-row.selected .profile-changed')?.title`),
+  same('Profiles opens Incident, titled Incident · changed and so named in the list, each saying what that means',
+    [await titleWords(), await a.text('.profile-row.selected .profile-row-head'), await a.run(`document.querySelector('.profile-row.selected .profile-changed-word')?.title`),
       await a.exists('.profile-row .profile-in-use'), await a.text('#profile-preview')],
-    ['Incident · changed', 'Changed', changedCard, false, 'Switching turns 1 off']);
+    ['Incident · changed', 'Incident · changed', changedCard, false, 'Switching turns 1 off']);
+  await shotOpen('profile-changed-list-row-1316-light', [1316, 819], 'light');
   await shotOpen('profile-changed-bar-header-860-light', SMALLEST, 'light');
   await withSidebarOpen(a, ...SMALLEST, async () => {
     await checkCard(a, 'profile-changed-title-info', changedCard, 'the title’s (?) says what Incident · changed means, where the list folds into the picker');
+    await a.click('#profile-changed-title-info');
+    same('its card opens clear of Switch, below the whole header', await a.run(`(() => {
+      const card = document.getElementById('profile-changed-title-info-card')?.getBoundingClientRect(), header = document.querySelector('.profile-header').getBoundingClientRect();
+      const button = document.getElementById('profile-switch')?.getBoundingClientRect();
+      return !!card && !!button && card.top >= header.bottom - 1 && (card.top >= button.bottom || card.bottom <= button.top || card.left >= button.right || card.right <= button.left);
+    })()`), true);
+    await a.press('Escape');
     await shotOpen('profile-changed-title-card-860-light', SMALLEST, 'light', () => a.click('#profile-changed-title-info'));
     if (shots) await a.press('Escape');
   });
@@ -3341,7 +3372,7 @@ async function practiceFlow() {
   // Ticking an item into Incident (its own ticks) keeps it changed, and says so as before: what is on differs from it.
   await a.click('#pf-skill\\:release-notes');
   same('after a tick of his own Incident is still changed, its mark saying what is on differs from it, not that it was edited',
-    [await titleWords(), await a.run(`document.querySelector('.profile-row.selected .profile-changed')?.title`)], ['Incident · changed', changedCard]);
+    [await titleWords(), await a.run(`document.querySelector('.profile-row.selected .profile-changed-word')?.title`)], ['Incident · changed', changedCard]);
   await shotOpen('profile-changed-after-tick-1316-light', [1316, 819], 'light');
   await a.click('#pf-skill\\:release-notes');
   await fullSize(a);

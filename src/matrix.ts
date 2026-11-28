@@ -38,7 +38,7 @@ import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
 import { andList, byToolOrder, CHANGED, changedCard, fewNames, kindNouns, NOTHING_CHANGED, orList, pageNames, profileBack, profileStops, readsIt, rowNames, rowNouns,
   saidByKind, sentence, toolList as toolsInWords, toolNames, toolsPhrase, turnIt, withKind, type Ending } from './words.ts';
 import { allSay, figureFor, incompleteHistory, lastUse, leftToItsRow, pluginRowFacts, toolHistories, usageSummary, USAGE_DAYS, type CantSay, type KindUsage, type RowFigure, type ToolHistory, type ToolSays, type UsageFacts, type UsageSummary } from './usagerow.ts';
-import { copilotSharesYours, endedByChanges } from './profileplan.ts';
+import { copilotSharesYours, endedByChanges, profileNowIn } from './profileplan.ts';
 import { walkingAt, walkthroughBand } from './firstsetup.ts';
 import { noteMove, acting, applyByKind, askFlash, closeResult, homeReadOwed, KINDS, notDoneFirst, problemKey, leftOutTools, collectUsage, readHomeOnce, unpin, whyKindReadOnly, whyReadOnly, writeOff, saidInStatusBar, selectOff, tell, toolWays, type Click, type Outcome, type Page, type PageKind, harnessKindShown, noToolManaged, pinnedRows, lastResult, flashRequests, leaveFiles, applyClick, setHome, queueClick, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow } from './app.ts';
 import { takeBack, wantedOn } from './clicklist.ts';
@@ -1251,16 +1251,18 @@ export function listResult(): HTMLElement[] {
 
 /**
  * The words of an act that ended the profile in use (app.ts profileEndedLine), for a result's second line: long names give way while
- * the rest stays whole (style.css .band-profile), ` · changed` (words.ts CHANGED) with a (?) saying what the next switch does, or
- * " stopped being the profile in use." `id`: the (?)'s, one per place a result is drawn.
+ * the rest stays whole (style.css .band-profile), ` · changed` (words.ts CHANGED) with a (?) saying what that means, its switch
+ * promised only while the home on screen can switch to it (profileplan.ts profileNowIn `canSwitchBack`), or " stopped being the
+ * profile in use." `id`: the (?)'s, one per place a result is drawn.
  */
 export function profileSpan(line: string | undefined, id = 'profile-changed-info'): HTMLElement | null {
   if (!line) return null;
-  const changed = line.endsWith(CHANGED), at = changed ? line.length - CHANGED.length : line.lastIndexOf(' stopped being the ');
-  const card = changed ? infoMark(id, 'the profile', changedCard(line.slice(0, at))) : null;
+  const changed = line.endsWith(CHANGED), at = changed ? line.length - CHANGED.length : line.lastIndexOf(' stopped being the '), name = line.slice(0, at);
+  const now = changed && state.home ? profileNowIn(state.home) : undefined;
+  const card = changed ? infoMark(id, 'the profile', changedCard(name, now?.changed?.name === name && !!now.canSwitchBack)) : null;
   // The span's own title names the line where its name is cut; the (?) says the rest.
   card?.setAttribute('title', '');
-  return h('span.band-profile', { title: line }, h('span.band-profile-name', {}, line.slice(0, at)), h('span.band-profile-rest', {}, line.slice(at)), card);
+  return h('span.band-profile', { title: line }, h('span.band-profile-name', {}, name), h('span.band-profile-rest', {}, line.slice(at)), card);
 }
 
 /**
@@ -2713,7 +2715,7 @@ export const endsOnHover = (label: string, clicks: () => Pick<Click, 'kind' | 'c
   };
   return { onmouseenter: say, onfocus: say };
 };
-/** After a control, what its click would end (endsOf): "Would leave Everyday", or "Becomes Everyday · changed" ("Either …" after two), its sentence and what brings it back on hover; `line`, a row's head; `band`, the result band's full wording. */
+/** After a control, what its click would end (endsOf): "Would leave Everyday", or "Would show Everyday · changed" ("Either would …" after two), its sentence and what brings it back on hover; `line`, a row's head; `band`, the result band's full wording. */
 function endsMark(ending: ReturnType<typeof endsOf>, act: string, id: string, shown: 'mark' | 'either' | 'line' | 'band' = 'mark') {
   if (!ending) return null;
   const said = `${act}, ${shown === 'line' ? 'only this item changes: ' : ''}${profileStops(ending)}.`, back = profileBack(ending);

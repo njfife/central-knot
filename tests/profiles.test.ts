@@ -93,7 +93,10 @@ test('Every place names the profiles now by one rule: those in use; else, while 
   const dev = profile('Dev', ['skill:dev', 'agent:writer']), all = profile('All', ['skill:dev', 'agent:writer', 'mcp:docs']);
   assert.deepEqual(profileNow({ profiles: [dev, all], last: 'All' }, live, []), { inUse: [dev], name: 'Dev' }, 'one in use: the one last switched to is not named');
   const now = profileNow({ profiles: [dev, all], last: 'All' }, liveItems(libraryOf([['skill', 'dev', true], ['agent', 'writer', false], ['mcp', 'docs', false]]), new Set()), []);
-  assert.deepEqual(now, { inUse: [], changed: all, name: 'All · changed' }, 'none in use: the one last switched to, changed');
+  assert.deepEqual(now, { inUse: [], changed: all, canSwitchBack: true, name: 'All · changed' }, 'none in use: the one last switched to, changed, which can be switched to');
+  const emptied = { ...all, items: [] };
+  assert.equal(profileNow({ profiles: [dev, emptied], last: 'All' }, liveItems(libraryOf([['skill', 'dev', true], ['agent', 'writer', false]]), new Set()), []).canSwitchBack, false,
+    'with nothing left in it, it can’t be switched to: switchable');
   assert.deepEqual([nameNow(now, all), nameNow(now, dev)], ['All · changed', 'Dev'], 'where profiles are listed, only it is named so');
   assert.deepEqual(profileNow({ profiles: [all] }, live, []), { inUse: [], name: 'No profile' }, 'none switched to within History’s days');
   assert.deepEqual(profileNow({ profiles: [all], last: 'gone' }, live, []), { inUse: [], name: 'No profile' }, 'or the one last switched to gone');

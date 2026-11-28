@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { HarnessId, HomeView, InstalledPlugin, PluginsView } from '../src/types.ts';
-import { findById, installDom, textOf, type FakeNode } from './domstub.ts';
+import { findById, findNode, installDom, textOf, type FakeNode } from './domstub.ts';
 
 let rendered: FakeNode | undefined;
 installDom({}, { byId: id => findById(rendered, id) ?? null });
@@ -92,12 +92,17 @@ test('With no profile in use, the page opens the one last switched to, titled as
   rendered = profilesPage() as unknown as FakeNode;
   const title = all(rendered, el => el.tag === 'h2')[0];
   assert.equal(title?.children.slice(0, 2).map(textOf).join(''), 'Last · changed', 'opened by default, before First');
-  assert.equal(textOf(findById(rendered, 'profile-changed-title-info-card')), 'What is on differs from Last, the profile you last switched to. Last itself is as you saved it; switching to it again sets everything as it says.');
+  // Nothing is in Last, so it can't be switched to: its card makes no promise of a switch.
+  assert.equal(textOf(findById(rendered, 'profile-changed-title-info-card')), 'What is on differs from Last, the profile you last switched to. Last itself is as you saved it.');
+  // Its row in the list says it as every other place does, its name cut, never the words.
+  const row = findById(rendered, 'profile-row-last');
+  assert.deepEqual([textOf(findNode(row, el => el.className.split(/\s+/).includes('profile-row-head'))), findNode(row, el => el.className.includes('profile-changed '))], ['Last · changed', undefined]);
   // Edit profiles… opens it too, whichever profile was open.
   rendered = profileStatus() as unknown as FakeNode;
   findById(rendered, 'status-profile')?.onclick?.({ stopPropagation() {} });
   rendered = profileStatus() as unknown as FakeNode;
   profileState.open = 'first';
-  try { findById(rendered, 'status-profile-edit')?.onclick?.({}); } catch { /* showPage reads the page's data, which this fake has none of */ }
-  assert.equal(profileState.open, 'last');
+  app.page = 'library';
+  findById(rendered, 'status-profile-edit')?.onclick?.({});
+  assert.deepEqual([app.page, profileState.open], ['profiles', 'last'], 'it lands on Profiles, with Last open');
 });

@@ -177,11 +177,12 @@ export const CHANGED = ' · changed';
 /** The profile last switched to, while no profile is in use, as every place names it: "Everyday · changed". */
 export const changedName = (name: string) => `${name}${CHANGED}`;
 /**
- * What `Everyday · changed` means, said once from here wherever he meets it (behind the result's (?): matrix.ts profileSpan; the
- * Profiles title's (?), the list's Changed mark and the status bar's hover: profilespage.ts).
+ * What `Everyday · changed` means, said once from here (the result's (?): matrix.ts profileSpan; the Profiles title's (?), the
+ * list row's ` · changed` and the status bar's hover: profilespage.ts); the switch is promised only where the profile can be
+ * switched to now (`canSwitchBack`: profileplan.ts ProfileNow).
  */
-export const changedCard = (name: string) =>
-  `What is on differs from ${name}, the profile you last switched to. ${name} itself is as you saved it; switching to it again sets everything as it says.`;
+export const changedCard = (name: string, canSwitchBack: boolean) =>
+  `What is on differs from ${name}, the profile you last switched to. ${name} itself is as you saved it${canSwitchBack ? '; switching to it again sets what Central Knot manages as it says' : ''}.`;
 
 /**
  * What an act would end of the profiles in use (matrix.ts endsOf): their names, `may` while other clicks still wait, and
@@ -189,13 +190,12 @@ export const changedCard = (name: string) =>
  */
 export interface Ending { names: readonly string[]; may: boolean; changed?: string }
 /**
- * Before an act that would end the profiles in use (matrix.ts endsOf), in the words said after it (app.ts profileEndedLine): where
- * the one last switched to would then be named `Everyday · changed`, "the profile becomes Everyday · changed" (`may`: "may
- * become"; `short`: "becomes Everyday · changed"); else "Everyday stays saved but stops being the profile in use", `may`: "… but
- * may stop …", `short`: "would leave Everyday" ("might …").
+ * Before an act that would end the profiles in use, in the words every page's forecast and the Sources band read (matrix.ts
+ * endsMark): where one would then be named `· changed`, what the status bar will then say; else that they stop being in use.
+ * `short`: beside a control.
  */
 export function profileStops({ names, may, changed }: Ending, short = false): string {
-  if (changed) return `${short ? '' : 'the profile '}${may ? 'may become' : 'becomes'} ${changedName(changed)}`;
+  if (changed) return short ? `${may ? 'might' : 'would'} show ${changedName(changed)}` : `the status bar ${may ? 'may' : 'will'} say ${changedName(changed)}`;
   const many = names.length > 1, who = andList([...names]);
   if (short) return `${may ? 'might' : 'would'} leave ${who}`;
   return `${who} ${many ? 'stay' : 'stays'} saved but ${may ? 'may stop' : many ? 'stop' : 'stops'} being the ${many ? 'profiles' : 'profile'} in use`;

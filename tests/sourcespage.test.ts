@@ -340,7 +340,7 @@ test('Add band states the kinds covered, caps long lists, and forecasts an ended
     // Everyday the one last switched to (ProfilesView `last`): the band says what every place will then call it, as after the press.
     state.home!.profiles = { ...state.home!.profiles, last: 'p1' };
     draw();
-    assert.equal(textOf(findById(rendered, 'source-turn-made-profile')), 'The profile becomes Everyday · changed');
+    assert.equal(textOf(findById(rendered, 'source-turn-made-profile')), 'The status bar will say Everyday · changed');
     state.home!.profiles = { ...state.home!.profiles, last: undefined };
     draw();
 

@@ -40,12 +40,14 @@ test('many names in a sentence: four in full, then the first three and how many 
 
 test('before an act that would end the profile in use, its words are those said after it: Everyday · changed where it is the one last switched to', () => {
   const ending = { names: ['Everyday'], may: false, changed: 'Everyday' };
-  assert.deepEqual([changedName('Everyday'), changedCard('Everyday')], ['Everyday · changed',
-    'What is on differs from Everyday, the profile you last switched to. Everyday itself is as you saved it; switching to it again sets everything as it says.'],
+  assert.deepEqual([changedName('Everyday'), changedCard('Everyday', true)], ['Everyday · changed',
+    'What is on differs from Everyday, the profile you last switched to. Everyday itself is as you saved it; switching to it again sets what Central Knot manages as it says.'],
     'after it: the name, and what it means behind its (?)');
+  assert.equal(changedCard('Everyday', false), 'What is on differs from Everyday, the profile you last switched to. Everyday itself is as you saved it.',
+    'where it can’t be switched to now (nothing in it), no promise of a switch');
   assert.deepEqual([profileStops(ending), profileStops(ending, true), profileBack(ending)],
-    ['the profile becomes Everyday · changed', 'becomes Everyday · changed', 'Everyday stays saved: Undo, or switching to it again, puts it back in use.']);
-  assert.deepEqual([profileStops({ ...ending, may: true }), profileStops({ ...ending, may: true }, true)], ['the profile may become Everyday · changed', 'may become Everyday · changed'],
+    ['the status bar will say Everyday · changed', 'would show Everyday · changed', 'Everyday stays saved: Undo, or switching to it again, puts it back in use.']);
+  assert.deepEqual([profileStops({ ...ending, may: true }), profileStops({ ...ending, may: true }, true)], ['the status bar may say Everyday · changed', 'might show Everyday · changed'],
     'while other clicks still wait');
   // Focus came into use without a switch, Everyday was switched to last: the click ends Focus, after it Everyday is named changed,
   // and Undo puts Focus back in use, which the hover says.
