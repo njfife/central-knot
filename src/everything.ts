@@ -22,16 +22,17 @@
 // Its Restore undoes that Undo: the rule on again where the Undo switched it off, each item it took back that was not added,
 // changed or deleted since put back by its own Restore, and the switch-on and those take-ins in force again, so the switch-on's
 // Undo takes back exactly what the Restore put back.
+// Apart from these: an added line's own Undo on Settings (undoAdded), each named take-in's own Undo, and that Undo's Restore.
 import { randomUUID } from 'node:crypto';
 import { agentKind } from './agents.ts';
 import { appendHistory, clock, readHistory, replaceHistory } from './history.ts';
-import { everythingAction, everythingPlan, libraryEntry, restorePlan, type EntryItem, type LeftIn } from './historyactions.ts';
+import { everythingAction, everythingPlan, libraryEntry, restorePlan, restoresAddition, undoesAddition, type AddedPassed, type EntryItem, type LeftIn } from './historyactions.ts';
 import { itemsNow, restoreAll, type Kind, type Seen } from './librarypass.ts';
 import { serverKind } from './servers.ts';
 import { destinationReloads } from './reload.ts';
 import { libraryGate, readRecord, saveRecord, type ShareContext, type SyncRecord } from './share.ts';
 import { skillKind } from './skills.ts';
-import type { ApplyResult, DestinationResult, HarnessId, HistoryEvent } from './types.ts';
+import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, UndoneAdded } from './types.ts';
 
 const entry = (context: ShareContext, everything: NonNullable<HistoryEvent['everything']>): HistoryEvent => ({
   id: randomUUID(), at: new Date(clock(context)).toISOString(), key: 'home:everything', item: 'Synchronize everything', kind: 'everything', everything, losers: [], orderProved: true,
@@ -142,4 +143,20 @@ async function markDone(context: ShareContext, id: string, by: string, appended?
   const done = history.find(each => each.id === id);
   if (done) done.undoneBy = by;
   await replaceHistory(context, history);
+}
+
+/**
+ * An added line's own Undo on Settings (settingspage.ts): of these entries of one kind, each whose own action is still the Undo of
+ * an addition the rule made (historyactions.ts undoesAddition, worked out again in the pass), in one pass (librarypass.ts
+ * restoreAll); or, `putBack`, each deletion such an Undo made whose own action is its Restore (restoresAddition). Every other entry
+ * is passed over, with why. Not History's own button, the switch-on's Undo or a plugin's, which run restoreAll as they did.
+ */
+export async function undoAdded(context: ShareContext, tools: HarnessId[], kind: 'skills' | 'mcp' | 'agents', eventIds: string[], putBack: boolean): Promise<UndoneAdded> {
+  // The pass refuses where the home may not be written, as History's own button's does.
+  const history = await readHistory(context), of = { skills: skillKind, mcp: serverKind, agents: agentKind }[kind] as Kind<unknown, Seen>;
+  const wanted = (past: HistoryEvent, change: Change) => (putBack ? restoresAddition(past, change, history) : undoesAddition(past, change));
+  const done = await restoreAll(of, context, tools, eventIds, undefined, wanted);
+  const why = (id: string): AddedPassed => { const past = history.find(entry => entry.id === id); return !past ? 'gone' : past.undoneBy ? 'done' : 'changed'; };
+  const passed = eventIds.filter(id => done.passed.includes(id) || !history.some(entry => entry.id === id)).map(id => ({ id, why: why(id) }));
+  return { stopped: done.stopped, results: done.results, harnessWrites: done.writes, made: done.made, reloads: done.reloads, undid: [...done.undid].map(([id, by]) => ({ id, by })), passed };
 }

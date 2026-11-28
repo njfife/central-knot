@@ -3,7 +3,7 @@
 // click each action runs: tests/agents.test.ts and tests/agentswalk.test.ts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { doneWords, entryKind, everythingAction, everythingPlan, everythingSentence, libraryAction, libraryEntry, librarySentence, restorePlan, versionChoices, type ItemNow } from '../src/historyactions.ts';
+import { doneWords, entryKind, everythingAction, everythingPlan, everythingSentence, libraryAction, libraryEntry, librarySentence, restorePlan, restoresAddition, stillAdded, undoesAddition, undoneAddedWords, versionChoices, type ItemNow } from '../src/historyactions.ts';
 import { libraryWords } from '../src/libraryrow.ts';
 import { newItem, type LibraryItem } from '../src/library.ts';
 import type { HarnessId, HistoryEvent } from '../src/types.ts';
@@ -260,6 +260,29 @@ test('A take-in is taken back only while every place it was found in still holds
   assert.deepEqual(everythingPlan(on, [on, ruleTook('took', { undoneBy: 'x' })], about()), { added: 0, takeBack: [], left: [], switchOff: true, keptIn: [] });
   // A tool a take-in wrote that isn't managed now keeps Central Knot's copy until it is.
   assert.deepEqual(everythingPlan(on, [on, ruleTook('took')], about(item(), { ...settled, managed: ['claude-cli'] })).keptIn, ['codex-cli']);
+});
+
+test('An added line names what History hasn’t seen undone: the other of two, where it was found, and every name while History isn’t read or has pruned one', () => {
+  const notice = { kind: 'taken-in' as const, items: ['deploy', 'review'], keys: ['deploy', 'review'], from: ['claude-cli', 'codex-cli'] as HarnessId[], history: 'take-deploy', histories: ['take-deploy', 'take-review'] };
+  const deploy = ruleTook('take-deploy', { foundIn: ['claude-cli'], undoneBy: 'gone-deploy' }), review = ruleTook('take-review', { foundIn: ['codex-cli'], settingsChanged: ['Pi’s list changed.'] });
+  const now = stillAdded(notice, [deploy, review]);
+  assert.deepEqual([now.named.map(each => [each.name, each.key, each.id]), now.words], [[['review', 'review', 'take-review']], { items: ['review'], from: ['codex-cli'], settingsChanged: ['Pi’s list changed.'] }]);
+  assert.deepEqual([stillAdded(notice, undefined).words, stillAdded(notice, [review]).named.map(each => each.name)], [notice, ['deploy', 'review']]);
+});
+
+test('An added line’s Undo is a take-in by the rule whose own action takes it out again: not its Turn it off once changed, not a click’s Add; its Restore only of a deletion such an Undo made', () => {
+  const took = ruleTook('took'), byClick = ruleTook('took', { cause: 'found' });
+  assert.deepEqual([undoesAddition(took, libraryAction(took, item(), settled)?.change), undoesAddition(took, libraryAction(took, item({ hash: 'a' }), settled)?.change), undoesAddition(byClick, libraryAction(byClick, item(), settled)?.change)], [true, false, false]);
+  const gone = entry({ id: 'gone', kind: 'deleted' }), deleted = item({ deleted: { at } });
+  assert.deepEqual([restoresAddition(gone, libraryAction(gone, deleted, settled)?.change, [ruleTook('took', { undoneBy: 'gone' }), gone]), restoresAddition(gone, libraryAction(gone, deleted, settled)?.change, [gone])], [true, false]);
+});
+
+test('An added line’s Undo says what is out of Central Knot again and that Restore puts back its kept version; what it passed over, by why; and nothing done', () => {
+  assert.equal(undoneAddedWords(['deploy', 'lint'], [], false), 'deploy and lint are out of Central Knot again, each tool they were found in keeping its own; Restore puts back Central Knot’s kept versions.');
+  assert.equal(undoneAddedWords(['deploy'], [{ item: 'review', why: 'changed' }, { item: 'tidy', why: 'gone' }], false),
+    'deploy is out of Central Knot again, each tool it was found in keeping its own copy; Restore puts back Central Knot’s kept version. Not taken back: review (changed since) and tidy (no longer in History).');
+  assert.equal(undoneAddedWords([], [{ item: 'review', why: 'done' }], false), 'Nothing was taken back: review (undone already).');
+  assert.equal(undoneAddedWords(['deploy'], [{ item: 'lint', why: 'changed' }], true), 'deploy is back in Central Knot. Not restored: lint (changed since).');
 });
 
 test('A switch-on, a switch-off and an Undo say what they did; the Undo’s entry offers Restore while it can put an item back, passing over one touched since', () => {

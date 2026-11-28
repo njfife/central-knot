@@ -1,5 +1,5 @@
 // Settings row words and transitions (settingspage.ts, pluginupdateview.ts):
-// download-estimate hint and unread-count tails, plugin-update card truth, and Synchronize everything copy and History link.
+// download-estimate hint and unread-count tails, plugin-update card truth, and Synchronize everything copy, its added lines' Undo and the taken-out fold.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { AppPreferences, HistoryDays, HistoryEvent, HistoryWindowSaved, HomeView, PluginTextView } from '../src/types.ts';
@@ -201,7 +201,7 @@ test('Synchronize everything shows the switch difference on the page', () => {
     'What turns up in a tool is turned on in every tool Central Knot manages; items whose copies differ wait for your choice.');
 });
 
-test('Synchronize everything agrees on managed tools and puts not-added-again first after Undo', () => {
+test('Synchronize everything counts the found items taken out earlier on a fold that names each, with its kind and Add, or that its copies differ', () => {
   state.outcome = undefined;
   state.history.data = undefined;
   state.dismissed.clear();
@@ -209,16 +209,23 @@ test('Synchronize everything agrees on managed tools and puts not-added-again fi
     skills: { ...emptyKind(), items: [takeFact('new-one'), deletedFact('old-one'), waitingFact('review')] },
   });
   draw();
-  assert.equal(textOf(findById(rendered, 'setting-sync-everything-notice')),
-    'Turning it on puts the 1 item found in your tools into every tool Central Knot manages now. 1 found item isn’t added by itself again (taken out of Central Knot). Add on its row in the Library, or Restore in History, brings it back. 1 found item has copies that differ and waits for your choice of copy.Choose copies');
+  assert.deepEqual([textOf(findById(rendered, 'setting-sync-everything-notice')), textOf(findById(rendered, 'setting-taken-out-toggle'))],
+    ['Turning it on puts the 1 item found in your tools into every tool Central Knot manages now. 1 found item has copies that differ and waits for your choice of copy.Choose copies',
+      '1 found item isn’t added by itself again (taken out of Central Knot).']);
 
-  // After Undo (nothing ready to add, 2 taken out, 1 waiting): leads directly with not added again by themselves.
+  // After Undo (nothing ready to add, 3 taken out, 1 waiting): the fold stands in for "nothing would be added"; opened, it names
+  // each by kind, Add on those it takes at once, and says so of the one whose copies differ, which waits for no walkthrough.
+  const differing = { ...deletedFact('split'), takeInAnswers: { click: { wait: 'choice' }, rule: { leave: 'deleted' } } };
   state.home = makeHome({
-    skills: { ...emptyKind(), items: [deletedFact('old-one'), deletedFact('old-two'), waitingFact('review')] },
+    skills: { ...emptyKind(), items: [deletedFact('old-one'), differing, waitingFact('review')] },
+    agents: { ...emptyKind(), items: [deletedFact('helper')] },
   });
   draw();
-  assert.equal(textOf(findById(rendered, 'setting-sync-everything-notice')),
-    '2 found items aren’t added by themselves again (taken out of Central Knot). Add on their rows in the Library, or Restore in History, brings them back. 1 found item has copies that differ and waits for your choice of copy.Choose copies');
+  const rows = () => (findById(rendered, 'setting-taken-out')?.querySelector('.setting-taken-out-list')?.children ?? []) as FakeNode[];
+  assert.deepEqual([textOf(findById(rendered, 'setting-sync-everything-notice')), textOf(findById(rendered, 'setting-taken-out-toggle')), findById(rendered, 'setting-taken-out')?.attrs.open],
+    ['1 found item has copies that differ and waits for your choice of copy.Choose copies', '3 found items aren’t added by themselves again (taken out of Central Knot).', undefined]);
+  assert.deepEqual(rows().map(row => [textOf(row), !!row.querySelector('button')]), [['old-one skillAdd', true], ['split skillcopies differ', false], ['helper agentAdd', true]]);
+  assert.ok(findById(rendered, 'setting-taken-out-add-agents-helper'), 'each Add is named by its kind and key');
 
   // With nothing found at all while off, still says nothing would be added.
   state.home = makeHome();
@@ -247,7 +254,7 @@ test('Synchronize everything puts what was taken in before what waits with Choos
     'Automatic sync is off, so it takes items in at Sync once. 1 found item has copies that differ and waits for your choice of copy.Choose copies');
 });
 
-test('Synchronize everything drops History only on take-in lines the band’s Undo takes back as items stand now', () => {
+test('An added line has its own Undo once History is read, where one of its take-ins still offers it, and none on a line the band’s Undo takes back as items stand now', () => {
   const oldNotice = { kind: 'taken-in' as const, items: ['early'], keys: ['early'], from: ['claude-cli' as const], history: 'take-early', histories: ['take-early'] };
   const notesNotice = { kind: 'taken-in' as const, items: ['notes'], keys: ['notes'], from: ['claude-cli' as const], history: 'take-notes', histories: ['take-notes'] };
   const editedNotice = { kind: 'taken-in' as const, items: ['edited'], keys: ['edited'], from: ['claude-cli' as const], history: 'take-edited', histories: ['take-edited'] };
@@ -264,6 +271,7 @@ test('Synchronize everything drops History only on take-in lines the band’s Un
   });
   const addedLines = () => (findById(rendered, 'setting-sync-everything')?.querySelector('.setting-added')?.children ?? [])
     .filter((child): child is FakeNode => !!child && typeof child === 'object' && 'tag' in child);
+  const undos = () => addedLines().map(line => textOf(line.querySelector('.text-action') ?? undefined));
 
   state.dismissed.clear();
   state.home = makeHome({
@@ -287,91 +295,66 @@ test('Synchronize everything drops History only on take-in lines the band’s Un
     takeEv('take-files', 'mcp', 'files', 'codex-cli'),
   ];
   state.outcome = { page: 'settings', band: true, settingsBand: true, everythingUndo: 'sw2', text: 'Synchronize everything is on: it added 3 items.', act: { label: 'Undo', id: 'outcome-undo', run() {} } };
+  // While History is being read, a line names what it added and offers nothing yet.
+  state.history.state = 'reading';
   draw();
-  assert.deepEqual(addedLines().map(textOf), [
-    'Added skill early from Claude Code. History can undo it.History',
-    'Added skill notes from Claude Code.',
-    'Added skill edited from Claude Code.',
-    'Added MCP server files from Codex.',
-  ]);
-  assert.deepEqual(addedLines().map(line => !!line.querySelector('.text-action')), [true, false, false, false]);
+  assert.deepEqual([addedLines().map(textOf), undos()], [
+    ['Added skill early from Claude Code.', 'Added skill notes from Claude Code.', 'Added skill edited from Claude Code.', 'Added MCP server files from Codex.'], ['', '', '', '']]);
+  state.history.state = 'ready';
+  draw();
+  assert.deepEqual(undos(), ['Undo', '', '', ''], 'only early, which the band’s Undo doesn’t take back, has its own');
+  assert.equal(findById(rendered, 'setting-sync-everything-added-skills-action')?.attrs.title, 'Take early out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own');
 
-  // Edit `edited` in its tool while Settings stays open and sw2's band still stands: Undo would leave `edited` in,
-  // so `edited`'s surviving notice immediately shows History again while untouched `notes` and `files` still omit it.
+  // Edit `edited` in its tool while the band stands: the band's Undo leaves it in, and its own action is Turn it off now, so its
+  // line has no Undo either.
   state.home.skills.library.edited = live('edited', 'v2') as never;
   draw();
-  assert.deepEqual(addedLines().map(textOf), [
-    'Added skill early from Claude Code. History can undo it.History',
-    'Added skill notes from Claude Code.',
-    'Added skill edited from Claude Code. History can undo it.History',
-    'Added MCP server files from Codex.',
-  ]);
-  assert.deepEqual(addedLines().map(line => !!line.querySelector('.text-action')), [true, false, true, false]);
+  assert.deepEqual(undos(), ['Undo', '', '', '']);
 
-  // An un-synced edit on disk (pending change while library hash is still v1) also keeps History on that line.
-  state.home.skills.library.edited = live('edited', 'v1') as never;
-  state.home.skills.items = [{
-    key: 'edited', name: 'edited', description: '', copies: {}, except: [], cannot: {}, edited: ['claude-cli'],
-    plan: { takeIn: 'claude-cli', keep: [] },
-  }] as never;
-  draw();
-  assert.equal(!!addedLines()[2].querySelector('.text-action'), true, 'pending edit on disk restores History before pass runs');
-
-  // Multi-item notice: if even one item on it was changed since, the line keeps History.
-  state.home.skills.items = [];
-  state.home.skills.library.edited = live('edited', 'v2') as never;
+  // A line of two, one changed since: the band leaves it, and its untouched take-in has its Undo.
   state.home.skills.notices = [{ kind: 'taken-in', items: ['notes', 'edited'], keys: ['notes', 'edited'], from: ['claude-cli'], history: 'take-notes', histories: ['take-notes', 'take-edited'] }];
   draw();
-  assert.equal(textOf(addedLines()[0]), 'Added 2 skills from Claude Code: notes and edited. History can undo each.History');
+  assert.deepEqual([textOf(addedLines()[0]), undos()], ['Added 2 skills from Claude Code: notes and edited.Undo', ['Undo', '']]);
 
-  // Dismissed band, Undo's own result, or another Settings band with id 'outcome-undo' but no everythingUndo: every line keeps History.
+  // No band, or a band holding no switch-on's Undo: every line whose take-in offers it has its own Undo.
   state.home.skills.library.edited = live('edited', 'v1') as never;
   state.home.skills.notices = [oldNotice, notesNotice];
-  for (const outcome of [
-    undefined,
-    { page: 'settings' as const, band: true, settingsBand: true, text: 'Undone: switched off.' },
-    { page: 'settings' as const, band: true, settingsBand: true, text: 'Other Undo.', act: { label: 'Undo', id: 'outcome-undo', run() {} } },
-  ]) {
+  for (const outcome of [undefined, { page: 'settings' as const, band: true, settingsBand: true, text: 'Other Undo.', act: { label: 'Undo', id: 'outcome-undo', run() {} } }]) {
     state.outcome = outcome;
     draw();
-    const lines = addedLines();
-    assert.ok(lines.every(line => /History can undo it\.History$/.test(textOf(line))), `expected History on all lines: ${lines.map(textOf).join(' | ')}`);
+    assert.deepEqual(undos(), ['Undo', 'Undo', 'Undo'], `${outcome?.text}`);
   }
   state.outcome = undefined;
   state.history.data = undefined;
 });
 
-test('editing a taken-in skill in its tool restores History on its line while the band’s Undo still stands', () => {
-  const live = (key: string, hash: string) => ({
-    key, name: key, on: true, hash, except: [], versions: [{ hash, at: '2026-11-27T19:00:00Z', from: { how: 'found', harness: 'claude-cli' } }],
-    applied: { 'claude-cli': hash, 'codex-cli': hash },
-  });
-  const ev = (id: string, kind: HistoryEvent['kind'], extra: Partial<HistoryEvent> = {}) =>
-    ({ id, at: '2026-11-27T19:00:00Z', kind, item: id, key: id, losers: [], ...extra }) as HistoryEvent;
+test('A line of two, the first undone in History: it names the other alone, where it was found, its mark, and the band covers it by that one alone; History is read once for it', async () => {
+  const live = (key: string) => ({ key, name: key, on: true, hash: 'v1', except: [], versions: [{ hash: 'v1', at: '2026-11-27T19:00:00Z', from: { how: 'found', harness: 'claude-cli' } }], applied: { 'claude-cli': 'v1', 'codex-cli': 'v1' } });
+  const take = (id: string, key: string, tool: 'claude-cli' | 'codex-cli', more: Partial<HistoryEvent> = {}) => ({ id, at: '2026-11-27T19:00:00Z', kind: 'on', of: 'skill', key, item: key, losers: [], cause: 'sync-everything',
+    version: 'v1', winner: { tool, hash: 'v1' }, tookFrom: [{ tool, hash: 'v1' }], foundIn: [tool], ...more }) as HistoryEvent;
   state.dismissed.clear();
   state.home = makeHome({
     sync: { managed: ['claude-cli', 'codex-cli'], present: ['claude-cli', 'codex-cli'], leftOut: [], access: { allowed: true }, gate: { state: 'ready' }, syncEverything: true, caughtUp: [] },
-    skills: {
-      ...emptyKind(),
-      library: { notes: live('notes', 'v1'), edited: live('edited', 'v2') },
-      notices: [
-        { kind: 'taken-in', items: ['notes'], keys: ['notes'], from: ['claude-cli'], history: 'take-notes', histories: ['take-notes'] },
-        { kind: 'taken-in', items: ['edited'], keys: ['edited'], from: ['claude-cli'], history: 'take-edited', histories: ['take-edited'] },
-      ],
-    },
+    skills: { ...emptyKind(), items: [{ key: 'lint', name: 'lint', description: '', copies: {}, except: [], cannot: {}, edited: [] }], library: { deploy: { ...live('deploy'), deleted: { at: '2026-11-27T19:01:00Z' } }, lint: live('lint') },
+      notices: [{ kind: 'taken-in', items: ['deploy', 'lint'], keys: ['deploy', 'lint'], from: ['claude-cli', 'codex-cli'], history: 'take-deploy', histories: ['take-deploy', 'take-lint'] }] },
   });
-  state.history.data = [
-    ev('sw', 'everything', { everything: { ruleOn: true } }),
-    ev('take-notes', 'on', { of: 'skill', key: 'notes', item: 'notes', cause: 'sync-everything', version: 'v1', winner: { tool: 'claude-cli', hash: 'v1' }, tookFrom: [{ tool: 'claude-cli', hash: 'v1' }], foundIn: ['claude-cli'] }),
-    ev('take-edited', 'on', { of: 'skill', key: 'edited', item: 'edited', cause: 'sync-everything', version: 'v1', winner: { tool: 'claude-cli', hash: 'v1' }, tookFrom: [{ tool: 'claude-cli', hash: 'v1' }], foundIn: ['claude-cli'] }),
-  ];
-  state.outcome = { page: 'settings', band: true, settingsBand: true, everythingUndo: 'sw', text: 'Synchronize everything is on: it added 2 items.', act: { label: 'Undo', id: 'outcome-undo', run() {} } };
+  state.history.data = [{ id: 'sw', at: '2026-11-27T19:00:00Z', kind: 'everything', item: 'Synchronize everything', key: 'home:everything', losers: [], orderProved: true, everything: { ruleOn: true } } as HistoryEvent,
+    take('take-deploy', 'deploy', 'claude-cli', { undoneBy: 'gone-deploy' }), take('take-lint', 'lint', 'codex-cli')];
+  state.history.state = 'ready';
+  state.outcome = { page: 'settings', band: true, settingsBand: true, everythingUndo: 'sw', text: 'Synchronize everything is on: it added 2 items.' };
+  const reads = historyReads;
+  historyEvents = state.history.data!;
   draw();
-  const lines = (findById(rendered, 'setting-sync-everything')?.querySelector('.setting-added')?.children ?? [])
-    .filter((child): child is FakeNode => !!child && typeof child === 'object' && 'tag' in child);
-  assert.deepEqual(lines.map(line => !!line.querySelector('.text-action')), [false, true], 'untouched notes hides History while edited skill restores History');
+  draw();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(historyReads - reads, 1, 'a line naming take-ins History wasn’t read for in this visit reads it, once');
+  const line = findById(rendered, 'setting-sync-everything-added-skills');
+  assert.deepEqual([textOf(line), !!findById(rendered, 'file-skills-lint-take-deploy'), !!line?.querySelector('.text-action')], ['Added skill lint from Codex.', true, false]);
   state.outcome = undefined;
+  draw();
+  assert.equal(textOf(findById(rendered, 'setting-sync-everything-added-skills')), 'Added skill lint from Codex.Undo');
   state.history.data = undefined;
+  historyEvents = [];
 });
 
 test('Synchronize everything marks added items Central Knot holds, opens the file under that line, and drops it when gone', () => {
@@ -396,17 +379,17 @@ test('Synchronize everything marks added items Central Knot holds, opens the fil
     .filter((child): child is FakeNode => !!child && typeof child === 'object' && 'tag' in child);
   // Held items get marks (by key even when name differs), deleted/found-only gets none, same item on two lines gets distinct ids.
   assert.deepEqual(['file-skills-notes-take-1', 'file-skills-gone-take-1', 'file-skills-notes-take-2', 'file-skills-lint-take-2', 'file-skills-tidy-take-2'].map(id => !!findById(rendered, id)), [true, false, true, true, true]);
-  assert.equal(textOf(kids()[0]), 'Added 2 skills from Claude Code: Notes and Gone. History can undo each.History');
+  assert.equal(textOf(kids()[0]), 'Added 2 skills from Claude Code: Notes and Gone.');
   const partsOf = (node: unknown): string[] => {
     if (typeof node === 'string') return node ? [node] : [];
     if (!node || typeof node !== 'object') return [];
     const el = node as FakeNode;
     if (el.tag === 'button') return [`[${el.attrs.id}]`];
     const inner = (el.children ?? []).flatMap(partsOf);
-    return el.classList.contains('setting-added-name') || el.classList.contains('setting-added-tail') ? [`(${inner.join('')})`] : inner;
+    return el.classList.contains('setting-added-name') ? [`(${inner.join('')})`] : inner;
   };
   assert.deepEqual(partsOf(kids()[1].querySelector('.setting-message-text')),
-    ['Added 3 skills from Claude Code and Codex: ', '(Notes[file-skills-notes-take-2],)', ' ', '(lint[file-skills-lint-take-2])', ' and ', '(tidy[file-skills-tidy-take-2].)', ' ', '(History can undo each.[setting-sync-everything-added-skills-action])']);
+    ['Added 3 skills from Claude Code and Codex: ', '(Notes[file-skills-notes-take-2],)', ' ', '(lint[file-skills-lint-take-2])', ' and ', '(tidy[file-skills-tidy-take-2].)']);
   findById(rendered, 'file-skills-notes-take-1')!.click();
   assert.deepEqual(kids().map(el => [el.attrs.id, el.classList.contains('file-anchored')]), [['setting-sync-everything-added-skills', true], ['file-panel-settings', false], ['setting-sync-everything-added-skills', false]]);
   findById(rendered, 'file-skills-notes-take-2')!.click();

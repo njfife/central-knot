@@ -37,6 +37,7 @@ const api = {
   applyAgents: (changes: Change[]) => { main.sent.push(`agent ${changes.map(change => `${change.key} ${change.on ? 'on' : 'off'}`).join()}`); return new Promise<PassResult>(done => main.passes.push(done)); },
   applyServers: (changes: Change[]) => { main.sent.push(`server ${changes.map(change => `${change.key} ${change.on ? 'on' : 'off'}`).join()}`); return new Promise<PassResult>(done => main.passes.push(done)); },
   restore: async (id: string) => { main.restored.push(id); return { results: [], reloads: [] }; },
+  undoAdded: async (_kind: string, _ids: string[], _home: string, _putBack: boolean): Promise<unknown> => null,
   plugins: async (_fresh?: boolean, _readId?: number): Promise<PluginsView | null> => { main.reads.plugins++; return view; },
   refresh: async (): Promise<HomeView | null> => { main.reads.home++; main.duringHomeRead?.(); return null; },
   repo: async () => { main.followUps.repo++; return null; },
@@ -126,7 +127,7 @@ Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Macintosh'
 // In the order the page's entry (renderer.ts) loads them: settingspage.ts first.
 const { settingsPage } = await import('../src/settingspage.ts');
 const { acting, announce, applyByKind, applyClick, askFlash, busy, closeResult, deleteProfileDef, drawPage, flashRequests, lastResult, leaveResults, pinnedRows, profileEndedLine, profilesBefore, saveProfileDef, selectOff, switchToProfile, whyKindReadOnly, whyReadOnly,
-  loadHome, problemKey, queueClick, readAgain, restoreEvent, setHome, setRenderer, showPage, syncNow, tell, state: app } = await import('../src/app.ts');
+  addTakenOut, loadHome, problemKey, queueClick, readAgain, restoreEvent, setHome, setRenderer, showPage, syncNow, tell, undoAdded, state: app } = await import('../src/app.ts');
 const { repo, repoPage } = await import('../src/repopage.ts');
 const { addMarketplace, applyPluginOps, clickOn, closeRun, forgetMarketplace, lastLines, lineBox, market, pluginBusy, resetMarket, resultOn, runReloads, sessionOffId, shownPlugins, turnFromLine, turnPlugin, undoLabel, undoLast, undoOps, usePlugins, viewCurrent } = await import('../src/pluginstate.ts');
 const { clickList, drop, endRun, takeBack, wantedOn } = await import('../src/clicklist.ts');
@@ -2684,6 +2685,53 @@ test('Multi-item taken-in notice stays when either item is left in (both orders)
   // Order A: beta (second) taken back, alpha left in -> line stays; both taken back -> line goes.
   assert.deepEqual(await runCase(false, true), [false, true], 'beta undone, alpha left in: stays');
   assert.deepEqual(await runCase(true, true), [true, false], 'both undone: goes');
+});
+
+test('An added line’s Undo of twelve take-ins is one call to main and one band: what is out again, its Restore of just those deletions, and the line gone', async t => {
+  const names = Array.from({ length: 12 }, (_, at) => `skill-${at}`), ids = names.map((_, at) => `take-${at}`);
+  const events = names.map((name, at) => ({ id: ids[at], kind: 'on', cause: 'sync-everything', of: 'skill', item: name, key: name, at: '2026-11-25T10:00:10.000Z', losers: [], orderProved: true }));
+  historyRestoreWorld(t, events, { beforeOn: { notes: true, standup: false }, afterOn: { notes: true, standup: false }, profiles: [], reply: {} });
+  app.page = 'settings';
+  app.dismissed.clear();
+  app.home!.skills.notices = [{ kind: 'taken-in', items: names, keys: names, from: ['claude-cli'], history: ids[0], histories: ids }];
+  const asked: unknown[][] = [];
+  t.mock.method(api, 'undoAdded', async (...call: unknown[]) => {
+    asked.push(call);
+    for (const event of events) (event as Record<string, unknown>).undoneBy = `gone-${event.id}`;
+    return { results: [], harnessWrites: 12, reloads: [], undid: call[3] ? [] : ids.map(id => ({ id, by: `gone-${id}` })), passed: [] };
+  });
+  await undoAdded('skills', new Map(ids.map((id, at) => [id, names[at]])));
+  assert.deepEqual([asked, app.outcome?.text, app.outcome?.act?.label, app.outcome?.settingsBand, app.dismissed.has(ids[0])],
+    [[['skills', ids, '/home', false]], `${names.slice(0, -1).join(', ')} and skill-11 are out of Central Knot again, each tool they were found in keeping its own; Restore puts back Central Knot’s kept versions.`, 'Restore', true, true]);
+  app.outcome!.act!.run();
+  await settled();
+  assert.deepEqual(asked[1], ['skills', ids.map(id => `gone-${id}`), '/home', true], 'Restore sends the deletions that Undo made, and no other');
+});
+
+test('The taken-out list’s Add is the Library row’s own Add, said in Settings’ band; refused where its copies came to differ since the page was drawn', async t => {
+  start();
+  homeWith(t, [{ kind: 'skills', key: 'notes' }]);
+  app.home!.skills.library.notes!.deleted = { at: '2026-11-25T09:00:00.000Z' };
+  app.page = 'settings';
+  const added = addTakenOut('skills', 'notes');
+  await settled();
+  assert.equal(main.sent.at(-1), 'notes on, seen off');
+  await main.pass({ results: [{ item: 'notes', harness: 'claude-cli', outcome: 'held', differs: true, unchanged: true, message: 'Its copies differ.' }], writes: 0, reloads: [] });
+  await added;
+  assert.deepEqual([app.outcome?.page, app.outcome?.settingsBand, app.outcome?.text], ['settings', true, 'notes has differing copies. Choose which copy every tool uses.']);
+});
+
+test('An added line’s Undo that ends once Settings was left draws no band there or when Settings opens again', async t => {
+  historyRestoreWorld(t, [], { beforeOn: { notes: true, standup: false }, afterOn: { notes: true, standup: false }, profiles: [], reply: {} });
+  app.page = 'settings';
+  let answer: (result: unknown) => void = () => {};
+  t.mock.method(api, 'undoAdded', () => new Promise(done => { answer = done; }));
+  const pressed = undoAdded('skills', new Map([['take-notes', 'notes']]));
+  showPage('library');
+  showPage('settings');
+  answer({ results: [], harnessWrites: 1, reloads: [], undid: [{ id: 'take-notes', by: 'gone-notes' }], passed: [] });
+  await pressed;
+  assert.equal(app.outcome, undefined);
 });
 
 test('Synchronize everything Restore that puts nothing back (made empty, 0 writes) adds no profile sentence', async t => {
