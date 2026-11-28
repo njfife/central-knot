@@ -10,7 +10,7 @@
 // Codex puts its four plugin variables into the command before the shell. A Claude Code plugin command or argument holding
 // ${user_config. is refused; Codex has no ${user_config.…} and leaves that as written. Runs through plugins.ts run (process
 // group + launch.ts CLOSE_GRACE_MS drain), cleans up disposable Claude files, and stops active runs on Stop or Quit.
-// Nothing here stores results or draws a page; source reading stays in hooksource.ts.
+// Nothing here stores results (hookrunstore.ts keeps them for main) or draws a page; source reading stays in hooksource.ts.
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';

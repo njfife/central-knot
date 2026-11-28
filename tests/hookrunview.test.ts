@@ -13,7 +13,7 @@ import { runHook, stopHookRun, type HookRunContext } from '../src/hookrun.ts';
 import { readHookSource } from '../src/hooksource.ts';
 import { sessionSettings } from '../src/pluginitems.ts';
 import { sessionTextCardNote } from '../src/pluginoutcomes.ts';
-import { HOOK_RUN_ACTUAL_ONLY, HOOK_RUN_COPILOT_PLUGIN, HOOK_RUN_WARN, hookFingerprint, hookRunWarn, hookRunWords, hookStripCard, hookStripHelp, sessionStrip } from '../src/sessionhooks.ts';
+import { HOOK_RUN_ACTUAL_CARD, HOOK_RUN_ACTUAL_ONLY, HOOK_RUN_COPILOT_PLUGIN, HOOK_RUN_WARN, hookFingerprint, hookRunWarn, hookRunWords, hookStripCard, hookStripHelp, sessionStrip } from '../src/sessionhooks.ts';
 import type { HookRunResult, HookSourceRef } from '../src/types.ts';
 import { standIn } from './standin.ts';
 
@@ -912,7 +912,7 @@ test('Off-screen row does not scroll the page when its result arrives', async ()
   assert.equal(dom.scrolled.length, 0, 'off-screen row must not call scrollIntoView');
 });
 
-test('Refresh drops in-flight hook answers when Refresh starts, before refresh completes', async () => {
+test('Refresh preserves same-home in-flight hook runs while IPC call rejection renders "Couldn’t run it."', async () => {
   const dom = makeDom();
   let resolveRun!: (r: HookRunResult) => void;
   let resolveRefresh!: (v: any) => void;
@@ -932,15 +932,15 @@ test('Refresh drops in-flight hook answers when Refresh starts, before refresh c
   const ref: HookSourceRef = { from: 'own', tool: 'claude-cli', declaredIn: '/tmp/h/.claude/settings.json', event: 'SessionStart', at: 0, command: 'echo race', fingerprint: 'fp-race' };
   const row = dom.makeNode('li');
   row.connected = true;
-  row.append(...viewMod.hookSourceControls(ref, 'hook-source-instructions-claude-cli-0-0'));
+  row.append(...viewMod.hookSourceControls(ref, 'hook-source-instructions-claude-cli-0-0', true));
   dom.findAll(row, n => 'data-hook-run' in (n.attrs ?? {}))[0].onclick({ detail: 1 });
 
-  // Start Refresh; while api().refresh(true) is still in flight, the hook finishes.
+  // Start Refresh on the same home; while api().refresh(true) is still in flight, the hook finishes and lands cleanly.
   const refreshing = readAgain();
   resolveRun(baseResult({ outcome: 'adds', added: 'arrived during refresh' }));
   await new Promise(resolve => setTimeout(resolve, 10));
-  assert.equal(dom.findAll(row, n => n.className === 'hook-run').length, 0, 'hook ending while Refresh is reading must be dropped');
-  assert.equal(dom.scrolled.length, 0, 'dropped answer during Refresh must not scroll');
+  assert.equal(dom.findAll(row, n => n.className === 'hook-run').length, 1, 'same-home in-flight hook survives Refresh');
+  assert.match(dom.textOf(dom.findAll(row, n => n.className === 'hook-run')[0]), /arrived during refresh/);
   resolveRefresh(null);
   await refreshing;
 
@@ -1115,11 +1115,11 @@ test('hookCantRunReason only speaks when one known cause covers every text hook 
   const ownRef: HookSourceRef = { from: 'own', tool: 'claude-cli', declaredIn: '/p/s.json', event: 'SessionStart', at: 0, command: 'echo x', fingerprint: fpA };
   const copPluginRef: HookSourceRef = { from: 'installed', tool: 'copilot-cli', plugin: 'helper', marketName: 'team', declaredIn: '/p/h.json', event: 'sessionStart', at: 0, command: 'echo x', fingerprint: fpA };
   assert.equal(viewMod.stripCantRunReason([ownRef], 'actual', 'linux'), undefined);
-  assert.equal(viewMod.stripCantRunReason([ownRef], 'custom', 'linux'), HOOK_RUN_ACTUAL_ONLY);
-  assert.equal(viewMod.stripCantRunReason([ownRef], 'fixture', 'linux'), HOOK_RUN_ACTUAL_ONLY);
+  assert.equal(viewMod.stripCantRunReason([ownRef], 'custom', 'linux'), HOOK_RUN_ACTUAL_CARD);
+  assert.equal(viewMod.stripCantRunReason([ownRef], 'fixture', 'linux'), HOOK_RUN_ACTUAL_CARD);
   assert.equal(viewMod.stripCantRunReason([copPluginRef], 'actual', 'linux'), HOOK_RUN_COPILOT_PLUGIN);
   assert.equal(viewMod.stripCantRunReason([ownRef, copPluginRef], 'actual', 'linux'), HOOK_RUN_COPILOT_PLUGIN);
-  assert.equal(viewMod.stripCantRunReason([copPluginRef], 'custom', 'linux'), HOOK_RUN_ACTUAL_ONLY);
+  assert.equal(viewMod.stripCantRunReason([copPluginRef], 'custom', 'linux'), HOOK_RUN_ACTUAL_CARD);
   assert.equal(viewMod.stripCantRunReason([copPluginRef], 'actual', 'win32'), undefined);
   assert.equal(viewMod.stripCantRunReason([ownRef], 'custom', 'win32'), undefined);
   assert.equal(viewMod.stripCantRunReason([], 'custom', 'linux'), undefined);
@@ -1311,7 +1311,7 @@ test('Plugin page runs installed hooks, keeps marketplace-only text hooks View s
     state.home!.mode = 'custom';
     const folderCard = instructionCard(mkFile('claude-cli', ownClaude), { hookInfo: { marked: false, anyRunnable: false } });
     assert.equal(dom.findAll(folderCard, n => 'data-hook-run' in (n.attrs ?? {})).length, 0);
-    assert.match(dom.textOf(dom.findAll(folderCard, n => n.id === 'session-hooks-info-card')[0]), /^See what it adds works only on this computer’s home\. This lists /);
+    assert.match(dom.textOf(dom.findAll(folderCard, n => n.id === 'session-hooks-info-card')[0]), /^“See what it adds” works only on this computer’s home\. This lists /);
     state.home!.mode = 'actual';
   });
 });
@@ -1452,4 +1452,232 @@ test('View-only and Other hooks on plugin page use one plain heading, plain even
   const cantRunIns = dom.findAll(insCard, n => n.className.includes('session-cant-run'));
   assert.equal(cantRunIns.length, 1);
   assert.match(dom.textOf(cantRunIns[0]), /Claude Code’s command line isn’t on this computer/);
+});
+
+test('Worked examples 1 & 3: stand-in hook collected, kept across leave/return with day and time and Collect again without re-running, forgotten on Close result or Escape (also after Stop/refusal)', { skip: unixSkip, timeout: 15_000 }, async () => {
+  const base = await mkdtemp(join(tmpdir(), 'ck-hookresult-view-'));
+  try {
+    const home = join(base, 'home');
+    const tools = join(base, 'tools');
+    const data = join(base, 'data');
+    const countFile = join(base, 'runs.count');
+    await mkdir(join(tools, '.local/bin'), { recursive: true });
+    await standIn(join(tools, '.local/bin/claude'), '#!/bin/sh\necho "2.1.327 (Claude Code)"\n', 'console.log("2.1.327");');
+    await put(join(home, 'bin/count.sh'), `#!/bin/sh\necho 1 >> ${JSON.stringify(countFile)}\nprintf "Kept line one\\nKept line two\\n"\n`, 0o755);
+    await put(join(home, '.claude/settings.json'), JSON.stringify({
+      hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: '~/bin/count.sh' }] }] },
+    }, null, 2));
+    const settings = await sessionSettings('claude-cli', join(home, '.claude'));
+    const file = {
+      tool: 'claude-cli', path: join(home, '.claude/CLAUDE.md'), exists: true, text: '# Hi', hash: 'h1',
+      readers: 'Claude Code', notes: [], versions: [], ...settings,
+    } as any;
+    const ref = sessionStrip('claude-cli', [], settings)!.groups[0]!.hooks[0]!.source;
+
+    const { createHookRunStore } = await import('../src/hookrunstore.ts');
+    const store = createHookRunStore(join(data, 'hook-results.json'));
+    const dom = makeDom();
+    const ctx: HookRunContext = {
+      home, mode: 'actual', dataDir: data, toolsHome: tools,
+      searchPath: '/usr/bin:/bin',
+      env: { PATH: '/usr/bin:/bin', HOME: home },
+    };
+    let lastCalls = 0;
+    let nextOverride: HookRunResult | undefined;
+    dom.handlers.hookRun = async (h: string, r: HookSourceRef) => {
+      const res = nextOverride ?? await runHook(ctx, r);
+      nextOverride = undefined;
+      await store.put(h, r, res);
+      return res;
+    };
+    dom.handlers.hookLast = (h: string, refs: HookSourceRef[]) => {
+      lastCalls++;
+      return store.get(h, refs);
+    };
+    dom.handlers.hookForget = (h: string, r: HookSourceRef) => store.remove(h, r);
+
+    await import('../src/settingspage.ts');
+    const { state } = await import('../src/app.ts');
+    const { instructionCard } = await import('../src/instructionspage.ts');
+    const viewMod = await import('../src/hooksourceview.ts');
+    viewMod.resetHookSources();
+    state.page = 'instructions';
+    state.home = { home, mode: 'actual', label: 'This computer’s home', sync: { managed: ['claude-cli'], access: { allowed: true }, gate: { state: 'ok' } } } as any;
+
+    const drawCard = () => {
+      dom.nodes.clear();
+      const host = dom.makeNode('div');
+      host.connected = true;
+      host.append(instructionCard(file));
+      return host;
+    };
+
+    // Visit 1: load once (empty), collect on click -> Would add with day & time, button reads Collect again, ran once.
+    await viewMod.loadHookResults([file]);
+    assert.equal(lastCalls, 1);
+    const visit1 = drawCard();
+    const btn1 = dom.findAll(visit1, n => 'data-hook-run' in (n.attrs ?? {}))[0];
+    assert.equal(dom.textOf(btn1), 'See what it adds');
+    btn1.onclick({ detail: 1 });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    const { readFile } = await import('node:fs/promises');
+    const runCount = async () => (await readFile(countFile, 'utf8')).trim().split('\n').filter(Boolean).length;
+    assert.equal(await runCount(), 1);
+    assert.equal(dom.textOf(dom.findAll(visit1, n => 'data-hook-run' in (n.attrs ?? {}))[0]), 'Collect again');
+    assert.match(dom.textOf(dom.findAll(visit1, n => n.className === 'hook-run')[0]), /^Would add as Claude Code, run in ~, today at /);
+
+    // Leave page and simulate a cold return (resetHookSources + single loadHookResults): kept result renders without scroll or re-run.
+    dom.nodes.clear();
+    viewMod.pruneHookSources();
+    viewMod.resetHookSources();
+    dom.scrolled.length = 0;
+    await viewMod.loadHookResults([file]);
+    assert.equal(lastCalls, 2);
+    const visit2 = drawCard();
+    const panel2 = dom.findAll(visit2, n => n.className === 'hook-run')[0];
+    assert.ok(panel2, 'kept result shown on return');
+    assert.match(dom.textOf(panel2), /^Would add as Claude Code, run in ~, today at /);
+    assert.match(dom.textOf(panel2), /Kept line one\nKept line two/);
+    assert.equal(dom.textOf(dom.findAll(visit2, n => 'data-hook-run' in (n.attrs ?? {}))[0]), 'Collect again');
+    assert.equal(dom.scrolled.length, 0, 'kept result replay does not scroll');
+    assert.equal(await runCount(), 1, 'nothing ran again on return');
+
+    // A later Stop leaves the earlier kept result on disk; Refresh without closing brings the earlier kept result back.
+    nextOverride = baseResult({ outcome: 'stopped' });
+    dom.findAll(visit2, n => 'data-hook-run' in (n.attrs ?? {}))[0].onclick({ detail: 1 });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.match(dom.textOf(dom.findAll(visit2, n => n.className === 'hook-run')[0]), /^Stopped\./);
+    viewMod.resetHookSources(true);
+    await viewMod.loadHookResults([file]);
+    const afterRefresh = drawCard();
+    assert.match(dom.textOf(dom.findAll(afterRefresh, n => n.className === 'hook-run')[0]), /Kept line one/);
+
+    // A later refusal followed by Close result deletes the earlier kept result too, and resets the button to See what it adds.
+    nextOverride = baseResult({ outcome: 'refused', problem: 'Hooks are turned off.' });
+    dom.findAll(afterRefresh, n => 'data-hook-run' in (n.attrs ?? {}))[0].onclick({ detail: 1 });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const closeBtn = dom.findAll(afterRefresh, n => n.id?.endsWith('-close'))[0];
+    closeBtn.onclick();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(dom.findAll(afterRefresh, n => n.className === 'hook-run').length, 0);
+    assert.equal(dom.textOf(dom.findAll(afterRefresh, n => 'data-hook-run' in (n.attrs ?? {}))[0]), 'See what it adds');
+    viewMod.resetHookSources();
+    await viewMod.loadHookResults([file]);
+    const visit3 = drawCard();
+    assert.equal(dom.findAll(visit3, n => n.className === 'hook-run').length, 0, 'Close result forgot the kept result across return');
+    assert.equal(dom.textOf(dom.findAll(visit3, n => 'data-hook-run' in (n.attrs ?? {}))[0]), 'See what it adds');
+
+    // Re-save directly, return, and press Escape -> forgets it too.
+    await store.put(home, ref, baseResult({ outcome: 'adds', added: 'via escape', allPrinted: 'via escape' }));
+    await viewMod.loadHookResults([file]);
+    const visit4 = drawCard();
+    const escPanel = dom.findAll(visit4, n => n.className === 'hook-run')[0];
+    assert.ok(escPanel);
+    escPanel.onkeydown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(dom.textOf(dom.findAll(visit4, n => 'data-hook-run' in (n.attrs ?? {}))[0]), 'See what it adds');
+    assert.deepEqual(await store.get(home, [ref]), [null]);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test('Design check cases: leave mid-run -> return to Stop -> let end -> close -> Refresh leaves nothing; batch guards drop stale replies and preserve mutated hooks', async () => {
+  const dom = makeDom();
+  const kept = new Map<string, HookRunResult>();
+  let resolveRun!: (r: HookRunResult) => void;
+  let resolveLast!: (r: (HookRunResult | null)[]) => void;
+  let lastCount = 0;
+  dom.handlers.hookRun = (_h: string, r: HookSourceRef) => new Promise<HookRunResult>(resolve => {
+    resolveRun = res => {
+      if (res.outcome !== 'stopped' && res.outcome !== 'refused') kept.set(JSON.stringify(r), res);
+      resolve(res);
+    };
+  });
+  dom.handlers.hookForget = (_h: string, r: HookSourceRef) => { kept.delete(JSON.stringify(r)); };
+  dom.handlers.hookLast = (_h: string, refs: HookSourceRef[]) => {
+    lastCount++;
+    return new Promise<(HookRunResult | null)[]>(resolve => {
+      resolveLast = resolve;
+    });
+  };
+
+  await import('../src/settingspage.ts');
+  const { state, setRenderer } = await import('../src/app.ts');
+  const viewMod = await import('../src/hooksourceview.ts');
+  setRenderer(() => {});
+  viewMod.resetHookSources();
+  state.page = 'instructions';
+  state.visit = 1;
+  state.home = { home: '/tmp/h', mode: 'actual', label: 'Home' } as any;
+
+  const file = {
+    tool: 'claude-cli', path: '/tmp/h/.claude/CLAUDE.md', exists: true, text: '# Hi', hash: 'h1',
+    readers: 'Claude Code', notes: [], versions: [],
+    ownHooks: [{ declaredIn: '/tmp/h/.claude/settings.json', event: 'SessionStart', at: 0, launch: { shell: 'echo mid' } }],
+  } as any;
+  const ref = sessionStrip('claude-cli', [], file)!.groups[0]!.hooks[0]!.source;
+  const drawRow = () => {
+    dom.nodes.clear();
+    const row = dom.makeNode('li');
+    row.connected = true;
+    row.append(...viewMod.hookSourceControls(ref, 'hook-source-instructions-claude-cli-0-0', true));
+    return row;
+  };
+
+  // Start run, leave page (prune), return while still running -> Stop still there; let end -> close -> Refresh -> nothing kept.
+  const r1 = drawRow();
+  dom.findAll(r1, n => 'data-hook-run' in (n.attrs ?? {}))[0].onclick({ detail: 1 });
+  dom.nodes.clear();
+  viewMod.pruneHookSources();
+  const r2 = drawRow();
+  assert.equal(dom.textOf(dom.findAll(r2, n => 'data-hook-run' in (n.attrs ?? {}))[0]), 'Running…');
+  assert.equal(dom.findAll(r2, n => 'data-hook-stop' in (n.attrs ?? {})).length, 1);
+  resolveRun(baseResult({ outcome: 'adds', added: 'mid done', allPrinted: 'mid done' }));
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(dom.textOf(dom.findAll(r2, n => 'data-hook-run' in (n.attrs ?? {}))[0]), 'Collect again');
+  dom.findAll(r2, n => n.id?.endsWith('-close'))[0].onclick();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  viewMod.resetHookSources(true);
+  const refreshLoad = viewMod.loadHookResults([file]);
+  resolveLast([kept.get(JSON.stringify(ref)) ?? null]);
+  await refreshLoad;
+  const r3 = drawRow();
+  assert.equal(dom.findAll(r3, n => n.className === 'hook-run').length, 0);
+  assert.equal(dom.textOf(dom.findAll(r3, n => 'data-hook-run' in (n.attrs ?? {}))[0]), 'See what it adds');
+
+  // Batch guard: visit changes while hook:last is in flight -> stale reply dropped.
+  const staleLoad = viewMod.loadHookResults([file]);
+  state.visit++;
+  resolveLast([baseResult({ outcome: 'adds', added: 'stale visit', allPrinted: 'stale visit' })]);
+  await staleLoad;
+  const r4 = drawRow();
+  assert.equal(dom.findAll(r4, n => n.className === 'hook-run').length, 0);
+
+  // Batch guard: hook closed while hook:last is in flight -> reply must not resurrect it.
+  const loadBeforeClose = viewMod.loadHookResults([file]);
+  resolveLast([baseResult({ outcome: 'adds', added: 'open first', allPrinted: 'open first' })]);
+  await loadBeforeClose;
+  const r5 = drawRow();
+  assert.equal(dom.findAll(r5, n => n.className === 'hook-run').length, 1);
+  const raceLoad = viewMod.loadHookResults([file]);
+  dom.findAll(r5, n => n.id?.endsWith('-close'))[0].onclick();
+  resolveLast([baseResult({ outcome: 'adds', added: 'resurrected', allPrinted: 'resurrected' })]);
+  await raceLoad;
+  const r6 = drawRow();
+  assert.equal(dom.findAll(r6, n => n.className === 'hook-run').length, 0);
+  assert.ok(lastCount >= 3);
+});
+
+test('hookRunWords defaults to dayAndTime (no double "at" on tried) and chosen-folder card quotes See what it adds while main refusal stays unquoted', async () => {
+  const { HOOK_RUN_ACTUAL_CARD } = await import('../src/sessionhooks.ts');
+  const nowIso = new Date().toISOString();
+  const addsNow = hookRunWords('claude-cli', baseResult({ outcome: 'adds', added: 'hi', allPrinted: 'hi', at: nowIso }), '~');
+  assert.match(addsNow.meta ?? '', /^run in ~, today at /);
+  const missingNow = hookRunWords('claude-cli', baseResult({ outcome: 'missing', program: '/nope', at: nowIso }), '~');
+  assert.match(missingNow.meta ?? '', /^tried today at /);
+  assert.doesNotMatch(missingNow.meta ?? '', /tried at today/);
+
+  assert.equal(HOOK_RUN_ACTUAL_CARD, '“See what it adds” works only on this computer’s home.');
+  assert.equal(HOOK_RUN_ACTUAL_ONLY, 'See what it adds works only on this computer’s home.');
 });

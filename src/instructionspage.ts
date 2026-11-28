@@ -16,7 +16,7 @@ import { button, h, icon, infoMark, lockAttrs, pathText, rereadBand, scrollIntoB
 import { noToolsState } from './pages.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
 import { plural } from './model.ts';
-import { canRun, hookCantRunReason, hookRow, stripCantRunReason } from './hooksourceview.ts';
+import { canRun, hookCantRunReason, hookResultsWaiting, hookRow, stripCantRunReason } from './hooksourceview.ts';
 import { hookRunWarn, hookStripCard, sessionStrip, type SessionGroup, type SessionStrip } from './sessionhooks.ts';
 import type { LineBox } from './pluginline.ts';
 import { DIRECTORY, FROM_DIRECTORY } from './pluginstatus.ts';
@@ -283,7 +283,7 @@ export function pluginOffButton(plugin: InstalledPlugin, info: { current: boolea
  */
 function sessionStripView(file: InstructionFile, hookInfo?: HookStripPage) {
   const strip = sessionStrip(file.tool, state.home?.pluginItems ?? [], file);
-  if (!strip) return null;
+  if (!strip || hookResultsWaiting(file.tool)) return null;
   if (strip.groups.some(group => group.plugin?.listed)) wantView(state.home?.readId);
   const isHooks = strip.heading === 'Hooks that can add text';
   const hasRunnable = stripHasRunnable(strip);
@@ -316,7 +316,7 @@ function sessionStripView(file: InstructionFile, hookInfo?: HookStripPage) {
         why ? (warn ? warning(why) : h('p.session-why', {}, why)) : null,
         !warn && group.problem ? warning(group.problem) : null,
         ...group.unread.map(path => (path === group.settings ? warning('Its hooks couldn’t be read.') : warning('Its hooks couldn’t be read: ', path))),
-        group.hooks.length ? h('ul.session-hooks', {}, group.hooks.map((hook, row) => hookRow(hook, `hook-source-${state.page}-${file.tool}-${at}-${row}`))) : null);
+        group.hooks.length ? h('ul.session-hooks', {}, group.hooks.map((hook, row) => hookRow(hook, `hook-source-${state.page}-${file.tool}-${at}-${row}`, true))) : null);
     })) : null,
     runStrip() === file.tool ? runBand() : null);
 }

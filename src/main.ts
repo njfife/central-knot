@@ -56,6 +56,7 @@ import { linkLabel } from './sourcelink.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { parseHookRef, readHookSource } from './hooksource.ts';
 import { hookRunRefused, runHook, stopHookRun, stopHookRuns } from './hookrun.ts';
+import { createHookRunStore } from './hookrunstore.ts';
 import { trayIconPng } from './trayicon.ts';
 import { forgetMissing, SETTLE_MS } from './librarypass.ts';
 import { byHand, observe, passStarts, seenBefore, seenIn, type ToolsSeen } from './arrivals.ts';
@@ -1660,15 +1661,26 @@ app.whenReady().then(async () => {
     return readHookSource({ home: current.home, mode: current.mode, overrides: context().overrides, dataDir: join(app.getPath('userData'), 'plugins'),
       marketplace: (marketName, plugin) => markets.pluginCopy(marketName, plugin) }, parsed);
   });
+  const hookRunStore = createHookRunStore(join(app.getPath('userData'), 'hook-results.json'));
   // One hook's command run once on click (hookrun.ts), outside the queue; only on this computer's own home, never by itself.
   handleNow('hook:run', async (home, ref) => {
     const parsed = parseHookRef(ref);
     if (!current || home !== current.home || !parsed) return hookRunRefused(HOOK_SOURCE_UNREADABLE);
     const openHome = current.home;
-    return runHook({
+    const result = await runHook({
       home: openHome, mode: current.mode, overrides: context().overrides, dataDir: join(app.getPath('userData'), 'plugins'),
       toolsHome: homedir(), searchPath, stillOpen: () => current?.home === openHome && current.mode === 'actual',
     }, parsed);
+    await hookRunStore.put(openHome, parsed, result).catch(() => undefined);
+    return result;
+  });
+  handleNow('hook:last', async (home, refs) => {
+    if (!current || home !== current.home || current.mode !== 'actual' || !Array.isArray(refs)) return [];
+    return hookRunStore.get(current.home, refs.map(parseHookRef));
+  });
+  handleNow('hook:forget', async (home, ref) => {
+    const parsed = parseHookRef(ref);
+    if (current && home === current.home && current.mode === 'actual' && parsed) await hookRunStore.remove(current.home, parsed).catch(() => undefined);
   });
   handleNow('hook:stop', async (home, ref) => {
     const parsed = parseHookRef(ref);

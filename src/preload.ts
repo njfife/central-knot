@@ -121,6 +121,8 @@ const api: DesktopApi = {
   hookSource: (home, ref) => ipcRenderer.invoke('hook:source', home, ref),
   hookRun: (home, ref) => ipcRenderer.invoke('hook:run', home, ref),
   hookStop: (home, ref) => ipcRenderer.invoke('hook:stop', home, ref),
+  hookLast: (home, refs) => ipcRenderer.invoke('hook:last', home, refs),
+  hookForget: (home, ref) => ipcRenderer.invoke('hook:forget', home, ref),
   pluginItems: (source, marketName, plugin, tools, home) => ipcRenderer.invoke('plugins:items', source, marketName, plugin, tools, home),
 };
 contextBridge.exposeInMainWorld('centralKnot', api);

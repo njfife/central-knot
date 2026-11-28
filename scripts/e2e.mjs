@@ -19564,14 +19564,14 @@ esac
     return [parts.map(part => !!part), parts.every((part, at) => at === 0 || (parts[at - 1].compareDocumentPosition(part) & Node.DOCUMENT_POSITION_FOLLOWING))]; })()`), [[true, true, true, true, true], true]);
   same('Codex’s strip: chosen-folder reason then its note behind its (?), then the same plugin in Codex’s form, when each runs as its matcher says',
     [await a.text('#session-codex-cli .session-note'), await a.text('#session-hooks-info-codex-cli-card'), await groups('codex-cli')],
-    [null, 'See what it adds works only on this computer’s home. Codex runs a hook only after you trust it in its /hooks command.', [['release-helper', [['When a session starts or when a session resumes', 'node "${PLUGIN_ROOT}/hooks/remind.mjs" --days 2'], ['When a session starts or when a session resumes', long]], []]]]);
+    [null, '“See what it adds” works only on this computer’s home. Codex runs a hook only after you trust it in its /hooks command.', [['release-helper', [['When a session starts or when a session resumes', 'node "${PLUGIN_ROOT}/hooks/remind.mjs" --days 2'], ['When a session starts or when a session resumes', long]], []]]]);
   same('Copilot CLI with only a prompt hook: no row, no standing paragraph, its (?) says why',
     [await groups('copilot-cli'), await a.text('#session-copilot-cli .session-note'), await a.text('#session-hooks-info-copilot-cli-card')],
     [[], null, 'Copilot CLI ignores what prompt hooks print.']);
   same('in another folder, no See what it adds button and no standing run warning appear anywhere, and the first strip’s (?) says why',
     [await a.run(`document.querySelectorAll('button[data-hook-run]').length`), await a.run(`document.querySelectorAll('.session-run-warn').length`),
       await a.text('#session-hooks-info-card')],
-    [0, 0, 'See what it adds works only on this computer’s home. This lists session-start and prompt hooks, not URL, MCP, project or organisation.']);
+    [0, 0, '“See what it adds” works only on this computer’s home. This lists session-start and prompt hooks, not URL, MCP, project or organisation.']);
   same('Pi’s and OpenCode’s extensions by name, under each tool’s own word, with no standing prose paragraph', [await a.text('#session-pi-cli .session-title'), await names('pi-cli'), await a.text('#session-opencode-cli .session-title'), await names('opencode-cli'),
     await a.exists('#session-pi-cli .session-about'), await a.exists('#session-opencode-cli .session-about')], ['Packages that can add text', ['npm:@example/pi-tools@1.0.0'], 'Plugins that can add text', ['opencode-wakatime'],
     false, false]);
@@ -20000,7 +20000,7 @@ async function hookRunFlow() {
     const ids = await rowOf(stripId, cmd);
     if (!ids?.runId) throw new Error(`No Run it button for ${stripId} / ${cmd}`);
     await a.click(byId(ids.runId));
-    await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(ids.runId)}); return b && b.textContent === 'See what it adds' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`, ms);
+    await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(ids.runId)}); return b && b.textContent === 'Collect again' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`, ms);
     return a.run(`document.getElementById(${JSON.stringify(ids.runId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`);
   };
   const pictures = async (label, selector, sizes = [[1316, 820, false]]) => {
@@ -20133,11 +20133,11 @@ async function hookRunFlow() {
   const scrollBefore = await a.run(`document.getElementById('instructions-scroll')?.scrollTop ?? 0`);
   await a.run(`document.getElementById(${JSON.stringify(twoIds.runId)})?.focus()`);
   for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r' } : {}) });
-  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(twoIds.runId)}); return b && b.textContent === 'See what it adds' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
+  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(twoIds.runId)}); return b && b.textContent === 'Collect again' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
   const addsText = await a.run(`document.getElementById(${JSON.stringify(twoIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`);
   const scrollAfter = await a.run(`document.getElementById('instructions-scroll')?.scrollTop ?? 0`);
-  check('Enter on Run it shows Would add with quiet meta, both lines, no Run again, and page stays still when row is already in view',
-    /^Would add as Claude Code, run in ~, /.test(addsText) && !addsText.includes('Run again') && !/\d+\.\d s/.test(addsText)
+  check('Enter on Run it shows Would add with quiet day-and-time meta, both lines, no Run again, and page stays still when row is already in view',
+    /^Would add as Claude Code, run in ~, today at /.test(addsText) && !addsText.includes('Run again') && !/\d+\.\d s/.test(addsText)
     && addsText.includes('First line from hook\nSecond line from hook') && Math.abs(scrollAfter - scrollBefore) <= 1 && markerCount() === 1,
     { addsText, scrollBefore, scrollAfter, count: markerCount() });
   await pictures('result-adds', '#session-claude-cli', bothSizes);
@@ -20151,25 +20151,25 @@ async function hookRunFlow() {
       return [!!run, !!src, !!(run && src && (run.compareDocumentPosition(src) & Node.DOCUMENT_POSITION_FOLLOWING))]; })()`), [true, true, true]);
   await pictures('source-and-result', '#session-claude-cli');
 
-  // Check 8: Escape inside result closes result & returns focus to Run it, leaving source open.
+  // Check 8: Escape inside result closes result, restores See what it adds, returns focus, and leaves View source open.
   await a.run(`document.getElementById(${JSON.stringify(twoIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run pre')?.focus()`);
   await a.press('Escape');
-  same('Escape closes result, returns focus to Run it, and leaves View source open',
+  same('Escape closes result, restores See what it adds, returns focus, and leaves View source open',
     await a.run(`(() => { const row = document.getElementById(${JSON.stringify(twoIds.runId)})?.closest('.session-hook');
-      return [!row?.querySelector('.hook-run'), !!row?.querySelector('.hook-source'), document.activeElement?.id === ${JSON.stringify(twoIds.runId)}]; })()`),
-    [true, true, true]);
+      return [!row?.querySelector('.hook-run'), document.getElementById(${JSON.stringify(twoIds.runId)})?.textContent, !!row?.querySelector('.hook-source'), document.activeElement?.id === ${JSON.stringify(twoIds.runId)}]; })()`),
+    [true, 'See what it adds', true, true]);
   await a.click(byId(twoIds.srcId));
 
   // Keyboard Space runs once; held Enter (autoRepeat: true) starts only one run!
   await a.run(`document.getElementById(${JSON.stringify(twoIds.runId)})?.focus()`);
   for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: ' ', code: 'Space', windowsVirtualKeyCode: 32, ...(type === 'keyDown' ? { text: ' ' } : {}) });
-  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(twoIds.runId)}); return b && b.textContent === 'See what it adds' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
+  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(twoIds.runId)}); return b && b.textContent === 'Collect again' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
   same('Space on Run it ran once', markerCount(), 2);
   await a.run(`document.getElementById(${JSON.stringify(twoIds.runId)})?.focus()`);
   await a.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r', autoRepeat: false });
   for (let i = 0; i < 3; i++) await a.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r', autoRepeat: true });
   await a.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
-  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(twoIds.runId)}); return b && b.textContent === 'See what it adds' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
+  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(twoIds.runId)}); return b && b.textContent === 'Collect again' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
   await wait(250);
   same('held Enter starts only one run', markerCount(), 3);
 
@@ -20179,9 +20179,48 @@ async function hookRunFlow() {
   await mouse(a, 'mousePressed', pt, 1);
   await redrawUnder(a, byId(twoIds.runId));
   await mouse(a, 'mouseReleased', pt, 0);
-  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(twoIds.runId)}); return b && b.textContent === 'See what it adds' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
+  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(twoIds.runId)}); return b && b.textContent === 'Collect again' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
   await wait(200);
   same('kept click across redraw runs once', markerCount(), 4);
+
+  // HOOK-RESULT-A Worked examples 1, 3, 7: leave and return keeps result with day & time and Collect again without re-running; fits at 860 and 1316 (light & dark); Close result forgets it.
+  await a.click('#nav-overview');
+  await waitFor(`document.querySelector('.nav-row[aria-current=page]')?.id === 'nav-overview'`);
+  await a.click('#nav-instructions');
+  await waitFor(`!!document.getElementById(${JSON.stringify(twoIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run')`);
+  await steady();
+  const keptOnReturn = await a.run(`(() => { const b = document.getElementById(${JSON.stringify(twoIds.runId)});
+    const p = b?.closest('.session-hook')?.querySelector('.hook-run');
+    return { btn: b?.textContent ?? '', text: p?.textContent ?? '' }; })()`);
+  check('leaving and returning keeps result with day & time and Collect again without running hook again',
+    keptOnReturn.btn === 'Collect again' && /^Would add as Claude Code, run in ~, today at /.test(keptOnReturn.text)
+    && keptOnReturn.text.includes('First line from hook\nSecond line from hook') && markerCount() === 4,
+    { keptOnReturn, count: markerCount() });
+  for (const [w, h] of [[860, 560], [1316, 820]]) {
+    await sizeTo(a, w, h);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    await a.run(`document.getElementById(${JSON.stringify(twoIds.runId)})?.closest('.session-hook')?.scrollIntoView({ block: 'start' })`);
+    await a.settle();
+    same(`kept result fits without overflow at ${w}×${h} with sidebar open`,
+      await a.run(`(() => { const sc = document.getElementById('instructions-scroll');
+        const row = document.getElementById(${JSON.stringify(twoIds.runId)})?.closest('.session-hook');
+        const actions = row?.querySelector('.hook-actions');
+        const box = row?.querySelector('.hook-run');
+        return [sc.scrollWidth <= sc.clientWidth + 1, actions.getBoundingClientRect().right <= row.getBoundingClientRect().right + 1,
+          box.getBoundingClientRect().right <= row.getBoundingClientRect().right + 1]; })()`),
+      [true, true, true]);
+  }
+  await fullSize(a);
+  await pictures('kept-result', `#session-claude-cli .session-hook:has(#${twoIds.runId})`, bothSizes);
+  await a.run(`document.getElementById(${JSON.stringify(twoIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run button[aria-label="Close result"]')?.click()`);
+  await waitFor(`document.getElementById(${JSON.stringify(twoIds.runId)})?.textContent === 'See what it adds'`);
+  await a.click('#nav-overview');
+  await a.click('#nav-instructions');
+  await waitFor(`!!document.getElementById(${JSON.stringify(twoIds.runId)})`);
+  await steady();
+  same('Close result forgets kept result across leave and return',
+    await a.run(`(() => { const b = document.getElementById(${JSON.stringify(twoIds.runId)}); return [b?.textContent, !!b?.closest('.session-hook')?.querySelector('.hook-run')]; })()`),
+    ['See what it adds', false]);
 
   // Check 2 & 7: JSON hook with Show all it printed + Standard error folds kept across redraw.
   const jsonIds = await rowOf('session-claude-cli', 'json-extra.sh');
@@ -20299,14 +20338,14 @@ async function hookRunFlow() {
     await waitFor(`document.getElementById(${JSON.stringify(stopRowIds.runId)})?.textContent === 'Running…'`);
   }
   await a.click(`#session-claude-cli .session-hook:has(#${stopRowIds.runId}) button[data-hook-stop]`);
-  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(stopRowIds.runId)}); return b && b.textContent === 'See what it adds' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
+  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(stopRowIds.runId)}); return b && b.textContent === 'Collect again' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
   const stoppedRes = await a.run(`document.getElementById(${JSON.stringify(stopRowIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`);
   check('Stop click shows Stopped caveat with quiet meta',
     /^Stopped\. What it changed stays; a program it started may still be running\. as Claude Code, run in ~, /.test(stoppedRes), stoppedRes);
 
   const missingRes = await runAndWait('session-claude-cli', '/nonexistent-ck-hook-bin-xyz');
-  check('missing executable shows Couldn’t start with tried at <time> and no Run again',
-    /^Couldn’t start: \/nonexistent-ck-hook-bin-xyz not found\. as Claude Code, tried at /.test(missingRes) && !missingRes.includes('Run again'), missingRes);
+  check('missing executable shows Couldn’t start with tried <day and time> and no Run again',
+    /^Couldn’t start: \/nonexistent-ck-hook-bin-xyz not found\. as Claude Code, tried today at /.test(missingRes) && !missingRes.includes('Run again'), missingRes);
   await pictures('result-timeout-stopped-missing', `#session-claude-cli .session-hook:has(#${(await rowOf('session-claude-cli', 'slow-limit.sh')).runId})`);
 
   // Check 2: Codex refusal (hooks turned off in config.toml), then Codex plugin hook runs with trust note and no data folder created.
@@ -20370,7 +20409,7 @@ async function hookRunFlow() {
   await a.run(`document.querySelector('#session-codex-cli')?.scrollIntoView({ block: 'center' })`);
   await a.settle();
   const awayTop = await a.run(`document.querySelector('#session-codex-cli')?.getBoundingClientRect().top ?? 0`);
-  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(lateIds.runId)}); return b && b.textContent === 'See what it adds' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`, 8000);
+  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(lateIds.runId)}); return b && b.textContent === 'Collect again' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`, 8000);
   const awayAfter = await a.run(`(() => { const sc = document.getElementById('instructions-scroll').getBoundingClientRect();
     const row = document.getElementById(${JSON.stringify(lateIds.runId)}).closest('.session-hook').getBoundingClientRect();
     return { codexTop: document.querySelector('#session-codex-cli')?.getBoundingClientRect().top ?? 0, rowOffTop: row.bottom <= sc.top + 1 }; })()`);
@@ -20378,7 +20417,7 @@ async function hookRunFlow() {
     Math.abs(awayAfter.codexTop - awayTop) <= 1 && awayAfter.rowOffTop, { awayTop, awayAfter });
   await fullSize(a);
 
-  // Check 6: returning while still running keeps Running… + Stop; settling while off-page drops the late result; Refresh resets state (and clicking Run it shows already running).
+  // Leave during a run, return to Stop, let it end, close, Refresh: nothing kept.
   await a.click(byId(lateIds.runId));
   await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'Running…'`);
   await a.click('#nav-overview');
@@ -20387,31 +20426,42 @@ async function hookRunFlow() {
   same('returning while hook still runs keeps Running… and Stop',
     await a.run(`(() => { const b = document.getElementById(${JSON.stringify(lateIds.runId)}); return [b?.textContent, !!b?.closest('.session-hook')?.querySelector('button[data-hook-stop]')]; })()`),
     ['Running…', true]);
-  await a.click(`#session-claude-cli .session-hook:has(#${lateIds.runId}) button[data-hook-stop]`);
+  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(lateIds.runId)}); return b && b.textContent === 'Collect again' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`, 8000);
+  await a.run(`document.getElementById(${JSON.stringify(lateIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run button[aria-label="Close result"]')?.click()`);
   await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'See what it adds'`);
-  // Settling while away on Overview drops the late result.
+  await a.click('#header-refresh');
+  await steady();
+  await waitFor(`!!document.getElementById(${JSON.stringify(lateIds.runId)})`);
+  same('after leave mid-run -> return -> let end -> close -> Refresh, nothing is kept for that hook',
+    await a.run(`(() => { const b = document.getElementById(${JSON.stringify(lateIds.runId)}); return [b?.textContent, !!b?.closest('.session-hook')?.querySelector('.hook-run')]; })()`),
+    ['See what it adds', false]);
+
+  // Settling while away on Overview still saves in main so returning to Instructions shows the kept result.
   await a.click(byId(lateIds.runId));
   await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'Running…'`);
   await a.click('#nav-overview');
   await wait(3300);
   await a.click('#nav-instructions');
-  await waitFor(`!!document.getElementById(${JSON.stringify(lateIds.runId)})`);
-  same('late result settled while off the page is dropped', await a.run(`document.querySelectorAll('.hook-run').length`), 0);
+  await waitFor(`!!document.getElementById(${JSON.stringify(lateIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run')`);
+  check('result settled while away on Overview is kept and shown on return',
+    (await a.run(`document.getElementById(${JSON.stringify(lateIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`)).includes('late output'));
+  await a.run(`document.getElementById(${JSON.stringify(lateIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run button[aria-label="Close result"]')?.click()`);
+  await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'See what it adds'`);
 
-  // Refresh clears renderer state (clicking Run it while main still runs refuses as already running; abandoned run does not overwrite).
+  // Same-home Refresh preserves an in-flight hook run so Running… + Stop stays and the result lands in place.
   await a.click(byId(lateIds.runId));
   await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'Running…'`);
   await a.click('#header-refresh');
   await steady();
-  await waitFor(`!!document.getElementById(${JSON.stringify(lateIds.runId)})`);
-  const alreadyMsg = await runAndWait('session-claude-cli', 'slow-stop.sh');
-  check('clicking Run it after Refresh while hook still runs in main shows Not run: + already running',
-    alreadyMsg.includes('Not run: this hook is already running.'), alreadyMsg);
-  await wait(3300);
-  check('abandoned run after Refresh did not overwrite the refusal',
-    (await a.run(`document.getElementById(${JSON.stringify(lateIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`)).includes('Not run: this hook is already running.'));
+  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(lateIds.runId)}); return b && b.textContent === 'Collect again' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`, 8000);
+  check('same-home Refresh preserves in-flight hook run and delivers its result',
+    (await a.run(`document.getElementById(${JSON.stringify(lateIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`)).includes('late output'));
+  await a.run(`document.getElementById(${JSON.stringify(lateIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run button[aria-label="Close result"]')?.click()`);
+  await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'See what it adds'`);
 
-  // Late result after switching to Practice copy is dropped, and Practice copy has no Run it.
+  // Collect two-lines.sh, switch to Practice copy and back: Practice copy has no Run it and drops late runs, and returning to actual home keeps two-lines.sh without re-running!
+  await runAndWait('session-claude-cli', 'two-lines.sh');
+  const countBeforeSwitch = markerCount();
   await a.click(byId(lateIds.runId));
   await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'Running…'`);
   await a.click('#home-fixture');
@@ -20422,12 +20472,15 @@ async function hookRunFlow() {
   same('Practice copy has no Run it and drops late result from previous home',
     [await a.run(`document.querySelectorAll('button[data-hook-run]').length`), await a.run(`document.querySelectorAll('.hook-run').length`)], [0, 0]);
 
-  // Switch back to actual home: clicking Run it after hook edited on disk shows Not run: refusal!
+  // Switch back to actual home: two-lines.sh's kept result is still there; editing on disk refuses Collect again and Refresh clears the old result!
   await a.click('#home-actual');
   await steady();
   await a.click('#nav-instructions');
   await waitFor(`!!document.querySelector('#session-claude-cli button[data-hook-run]')`);
-  await runAndWait('session-claude-cli', 'two-lines.sh');
+  await steady();
+  check('switching home and returning keeps two-lines.sh result without running it again',
+    await a.run(`(() => { const b = document.getElementById(${JSON.stringify(twoIds.runId)}); return b?.textContent === 'Collect again' && !!b?.closest('.session-hook')?.querySelector('.hook-run')?.textContent?.includes('First line from hook'); })()`)
+    && markerCount() === countBeforeSwitch, { countBeforeSwitch, now: markerCount() });
   writeFileSync(claudeSettings, initialClaudeJson.replace('~/bin/two-lines.sh', '~/bin/edited-on-disk.sh'));
   const staleBtnId = (await rowOf('session-claude-cli', 'two-lines.sh')).runId;
   await a.click(byId(staleBtnId));
@@ -20435,6 +20488,12 @@ async function hookRunFlow() {
   const staleRes = await a.run(`document.getElementById(${JSON.stringify(staleBtnId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`);
   check('Run it after hook edited on disk shows Not run: + main’s refusal',
     staleRes.includes('Not run: this hook is no longer in ~/.claude/settings.json.'), staleRes);
+  await a.click('#header-refresh');
+  await steady();
+  const editedRow = await rowOf('session-claude-cli', 'edited-on-disk.sh');
+  same('after editing command and refreshing, the edited hook shows no old result',
+    await a.run(`(() => { const b = document.getElementById(${JSON.stringify(editedRow?.runId)}); return [b?.textContent, !!b?.closest('.session-hook')?.querySelector('.hook-run')]; })()`),
+    ['See what it adds', false]);
   writeFileSync(claudeSettings, initialClaudeJson);
   await a.click('#header-refresh');
   await steady();
@@ -20525,10 +20584,18 @@ async function hookRunFlow() {
   same('switching back to As Claude Code while still running keeps Running… and Stop reachable',
     await a.run(`(() => { const b = document.getElementById(${JSON.stringify(claudePluginRunId)}); return [b?.textContent, !!b?.closest('.session-hook')?.querySelector('button[data-hook-stop]')]; })()`),
     ['Running…', true]);
-  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(claudePluginRunId)}); return b && b.textContent === 'See what it adds' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`, 8000);
+  await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(claudePluginRunId)}); return b && b.textContent === 'Collect again' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`, 8000);
   check('Claude Code hook result lands in place after switching back from As Codex',
     (await a.text('#plugin-session-hooks .hook-run') ?? '').includes('Releases ship on Tuesdays. Run smoke checks before tagging.'));
   rmSync(slowFlag, { force: true });
+  // Plugin's own page keeps results for the visit only: leaving and returning shows no kept panel.
+  await a.click('#plugin-back');
+  await waitFor(`!!document.querySelector('#popen-0-release-helper')`);
+  await a.click('#popen-0-release-helper');
+  await waitFor(`document.querySelector('.crumb-here')?.textContent === 'release-helper' && !!document.querySelector('#plugin-session-hooks button[data-hook-run]')`);
+  same('plugin page keeps its results for the visit only',
+    [await a.run(`document.querySelectorAll('#plugin-session-hooks .hook-run').length`), await a.text('#plugin-session-hooks button[data-hook-run]')],
+    [0, 'See what it adds']);
   // Switch As <tool> to Codex and run Codex's installed hook.
   await a.run(`(() => { const s = document.getElementById('plugin-hook-tool'); s.value = 'codex-cli'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   await waitFor(`document.querySelector('#plugin-session-hooks .session-command')?.textContent?.includes('codex-hello.sh')`);
@@ -20632,6 +20699,11 @@ async function hookRunFlow() {
   await waitFor(`!!document.querySelector('#session-claude-cli button[data-hook-run]')`);
   same('tool’s Instructions tab with runnable plugin hook shows single standing warning',
     await a.text('#session-claude-cli .session-run-warn'), runWarn);
+  const tabTwoBefore = await rowOf('session-claude-cli', 'two-lines.sh');
+  const countBeforeTab = markerCount();
+  check('tool’s Instructions tab shows two-lines.sh’s kept result on first draw with Collect again without re-running',
+    await a.run(`(() => { const b = document.getElementById(${JSON.stringify(tabTwoBefore?.runId)}); return b?.textContent === 'Collect again' && !!b?.closest('.session-hook')?.querySelector('.hook-run')?.textContent?.includes('First line from hook'); })()`)
+    && markerCount() === countBeforeTab);
   const tabRes = await runAndWait('session-claude-cli', 'two-lines.sh');
   check('tool’s Instructions tab runs hook and shows Would add with executed tool', /^Would add as Claude Code, run in ~, /.test(tabRes) && tabRes.includes('First line from hook'), tabRes);
   const tabPluginRes = await runAndWait('session-claude-cli', 'hello.sh');

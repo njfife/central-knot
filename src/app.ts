@@ -34,7 +34,7 @@ import { andList, changedName, countedAs, fewNames, fileName, kindNames, kindNou
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform, shownFromHome } from './machine.ts';
 import { closeRun, endListNews, fadeRun, forgetResults, loadPlugins, overRun, resetMarket, retire, stillOnFromProfiles } from './pluginstate.ts';
-import { pruneHookSources, resetHookSources } from './hooksourceview.ts';
+import { loadHookResults, pruneHookSources, resetHookSources } from './hooksourceview.ts';
 import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, type LastRun, type PluginDone, type PluginOp } from './pluginplan.ts';
 import type { PluginEntry } from './pluginrecord.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
@@ -1153,11 +1153,11 @@ export async function readAgain() {
   // What a list of plugin clicks said is not restated over a home read again, nor a line's result (pluginstate.ts LineResult).
   endListNews();
   forgetResults();
-  resetHookSources();
+  resetHookSources(true);
   await busy(noToolManaged() ? 'Reading…' : `Reading ${heldKindNames()}…`, async () => {
     const view = await api().refresh(true);
     if (!view) return;
-    resetHookSources();
+    resetHookSources(true);
     state.skillsResult = undefined;
     // Said first, so a page that leaves (setHome) adds its reason after what was read.
     setHome(view, { reload: false, say: taken => announce(readSummary(taken)) });
@@ -1556,7 +1556,7 @@ const settleDraft = () => {
 
 /** Reads each tool's instruction file into its slot; the page redraws once the answer is the newest. */
 export const loadInstructions = async (readId?: number): Promise<void> => {
-  const reading = readPageData(state.instructions, () => readInstructionsAndBase(readId));
+  const reading = readPageData(state.instructions, () => readInstructionsAndBase(readId, true));
   rerender();
   const result = await reading;
   if (result === 'dropped') return;
@@ -1567,10 +1567,15 @@ export const loadInstructions = async (readId?: number): Promise<void> => {
 /** The files again after a save, as an action read them. */
 const rereadInstructions = async () => { const files = await readInstructionsAndBase(); if (files) { putPageData(state.instructions, files); settleDraft(); } };
 
-/** Each tool's instruction file, with the base read beside it (state.base). */
-async function readInstructionsAndBase(readId?: number) {
+/** Each tool's instruction file, with the base read beside it (state.base) and kept hook results staged before strips draw. */
+async function readInstructionsAndBase(readId?: number, hooks = false) {
   const [files, base] = await Promise.all([api().instructions(readId), api().instructionBase()]);
   state.base = base ?? undefined;
+  if (hooks && files) {
+    const shown = state.page === 'instructions' ? files
+      : harnessTabShown() === 'instructions' ? files.filter(file => file.tool === state.harness) : [];
+    await loadHookResults(shown);
+  }
   return files;
 }
 
