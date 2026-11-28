@@ -112,3 +112,41 @@ test('History folds all-tools and conflict losers, leaves unrecorded and zero-lo
     ['Use Copilot CLI’s version', 'Use Pi’s version', 'Use OpenCode’s version'],
   );
 });
+
+test('History marks a name Central Knot holds now; its file opens under the row pressed, stays there through a newer entry, and goes with its row', () => {
+  forgetHistoryFolds();
+  state.home = makeHome(six, six);
+  const held = { key: 'notes', name: 'notes', hash: 'n', versions: [], except: [], applied: {}, own: {} };
+  // gone is deleted from Central Knot, and Claude Code still holds a found copy of that name.
+  state.home.snapshots = [{ harness: 'claude-cli', skills: [{ folder: 'gone', directory: '/found/gone', realDirectory: '/found/gone', rootLabel: '~/.claude/skills' }] }] as unknown as HomeView['snapshots'];
+  state.home.skills = { ...state.home.skills, items: [{ key: 'notes', name: 'notes', on: false, copies: {}, except: [] }, { key: 'gone', name: 'gone', copies: {}, except: [] }],
+    library: { notes: { ...held, on: false }, gone: { ...held, key: 'gone', name: 'gone', on: false, deleted: true } } } as unknown as HomeView['skills'];
+  const at = '2026-11-27T10:00:00.000Z';
+  const entry = (id: string, key: string, kind: 'on' | 'off' | 'deleted', minutes: number): HistoryEvent => ({ id, at: new Date(Date.parse(at) + minutes * 60_000).toISOString(),
+    key, of: 'skill', item: key, kind, cause: 'switch', losers: [{ tool: 'claude-cli', hash: 'n' }], orderProved: true });
+  const entries = [entry('notes-on', 'notes', 'on', 0), entry('notes-off', 'notes', 'off', 1), entry('gone-deleted', 'gone', 'deleted', 2)];
+  state.history.state = 'ready';
+  state.history.data = entries;
+  let page = draw();
+  const inRow = (id: string, part: string) => findNode(findById(page, `history-row-${id}`), el => el.classList.contains(part));
+  assert.deepEqual(['notes-on', 'notes-off', 'gone-deleted'].map(id => !!inRow(id, 'row-file-btn')), [true, true, false]);
+  inRow('notes-on', 'row-file-btn')!.click();
+  page = draw();
+  assert.deepEqual(['notes-on', 'notes-off'].map(id => !!inRow(id, 'details-file-only')), [true, false]);
+  state.history.data = [...entries, entry('notes-on-again', 'notes', 'on', 3)];
+  page = draw();
+  assert.deepEqual(['notes-on', 'notes-off', 'notes-on-again'].map(id => !!inRow(id, 'details-file-only')), [true, false, false]);
+  // Keep shortened past its row, another row of notes still drawn: the file goes with its row, and does not come back with it.
+  state.history.data = entries.slice(1);
+  draw();
+  state.history.data = entries;
+  page = draw();
+  assert.equal(findNode(page, el => el.classList.contains('details-file-only')), undefined);
+  // Shortened until no entry is left: the same.
+  inRow('notes-off', 'row-file-btn')!.click();
+  state.history.data = [];
+  draw();
+  state.history.data = entries;
+  page = draw();
+  assert.equal(findNode(page, el => el.classList.contains('details-file-only')), undefined);
+});

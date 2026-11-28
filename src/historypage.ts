@@ -1,7 +1,8 @@
 // History: what Central Knot did, by itself (sync) or on a click (a switch, a profile switch, a Pull, …), newest first, with
 // Undo or Restore where kept content allows (CON-02, DEL-03), and History's Keep control (settingspage.ts historyWindowControl).
 // Skills', MCP servers', agents' and Synchronize everything's entries are worded and decided by historyactions.ts; here are
-// profiles', base instructions', Manage switches' and pre-library entries, plus in-place folds for 3+ recorded tool lists (including all tools).
+// profiles', base instructions', Manage switches' and pre-library entries, plus in-place folds for 3+ recorded tool lists (including all tools),
+// and the file mark after the name of an item Central Knot holds, its file opening under that row (historyFiles, fileMark).
 import { DAY_MS, plural, timesApart } from './model.ts';
 import { acting, homeTools, noToolManaged, rerender, restoreEvent, shownPath, state, touchedToolsPhrase } from './app.ts';
 import { noToolsState } from './pages.ts';
@@ -9,8 +10,9 @@ import { andList, toolName, touchedTools } from './words.ts';
 import { changeWords, entryTurns, NO_PROFILE, undoOffered, undoWords, wholeCounts } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
 import { doneWords, entriesNow, entryKind, everythingAction, everythingSentence, keptOver, libraryAction, libraryEntry, librarySentence, versionChoices } from './historyactions.ts';
-import { libraryWords } from './libraryrow.ts';
+import { inLibrary, libraryWords } from './libraryrow.ts';
 import { button, emptyState, fold, h, icon, rereadBand, type Child } from './dom.ts';
+import { itemFile, pagePlace, placePanel } from './filepanel.ts';
 import type { IconName } from './icons.ts';
 import { askManage, manageLocked, manageQuestion, manageTool, resumeWords } from './managecard.ts';
 import { historyWindowControl } from './settingspage.ts';
@@ -28,6 +30,16 @@ type ToolFormat = (touched: string[], inHome: string[]) => string;
 const itemOf = (event: HistoryEvent) => { const entry = libraryEntry(event); return entry && state.home?.[entry.kind].library?.[entry.key]; };
 /** A take-over's entry names the copy's path as the page shows paths (from ~, or "…" inside another home). */
 const pathsShown = (event: HistoryEvent): HistoryEvent => (event.kind === 'took-over' ? { ...event, losers: event.losers.map(copy => (copy.path ? { ...copy, path: shownPath(copy.path) } : copy)) } : event);
+/** History as a file panel's place (filepanel.ts pagePlace): an item's file, opened at one of the rows naming it, under that row. */
+const historyFiles = pagePlace('history');
+/**
+ * The file mark after an entry's name, where it names an item Central Knot holds now (On or Off): its text as it is now. None
+ * for an item deleted since, though a tool may hold a found copy of that name: that copy is not the item the entry is about.
+ */
+const fileMark = (event: HistoryEvent) => {
+  const entry = libraryEntry(event);
+  return entry && inLibrary(itemOf(event)) ? itemFile(historyFiles, entry.kind, entry.key, event.id) : undefined;
+};
 /** Whether the entry is another's Undo: that one's `undoneBy` names it. */
 const undid = (event: HistoryEvent) => !!state.history.data?.some(other => other.undoneBy === event.id);
 
@@ -231,6 +243,8 @@ export function historyPage() {
   // From History's own read (pagedata.ts): what it found, else that it is reading or could not read.
   const events = state.history.data;
   if (!events) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.history.state === 'failed' ? 'History could not be read.' : 'Reading History…')));
+  // Each row's mark, and the file open at one of them, are worked out before the list is drawn, an empty one too (placePanel).
+  const ordered = [...events].reverse(), marks = ordered.map(fileMark), file = placePanel(historyFiles, marks);
   const reread = rereadBand(state.history);
   if (!events.length) {
     const shown = state.outcome?.page === 'history' ? outcomeBand() : null;
@@ -239,7 +253,7 @@ export function historyPage() {
     return h('div.page', {}, bands, h('div.scroll.history-empty-scroll', { id: 'history-scroll' }, historyWindowControl(),
       emptyState('history', 'No changes yet', 'Changes by sync and by you appear here, with Undo.')));
   }
-  const ordered = [...events].reverse(), times = timesApart(ordered.map(event => event.at));
+  const times = timesApart(ordered.map(event => event.at));
   // A refused Undo, a Manage click, a Restore with reload advice, or an Undo that ended the profile in use shows in a band; other results here are in the status bar.
   const shown = state.outcome?.page === 'history' && (state.outcome.warn || state.outcome.historyBand || !!state.outcome.reloads?.length || !!state.outcome.profileLine) ? outcomeBand() : null;
   const latestManage = (tool: HarnessId) => ordered.find(other => other.kind === 'managing' && other.managing?.tool === tool)?.id;
@@ -254,13 +268,14 @@ export function historyPage() {
       h('span.history-when', { title: new Date(event.at).toLocaleString() }, times[index]),
       // What changed, then what happened in the flexible column (its text capped at the reading measure); the actions keep a
       // steady column at the right, the same on every row. Narrow, what happened takes a line of its own beneath (style.css).
-      h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event)), h('strong', { title: event.item }, event.item)),
+      h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event)), h('strong', { title: event.item }, event.item), marks[index]?.mark),
       about.node,
       event.undoneBy ? h('span.history-actions', {}, h('span.history-done', {}, libraryEntry(event) ? doneWords(event) : event.kind === 'removed' || event.everything?.undo ? 'Restored' : 'Undone'))
         : h('span.history-actions', {},
           !event.base && (event.kind === 'edit' || event.kind === 'conflict') ? seeChangeLink(event.id, libraryEntry(event)?.kind, true) : null,
           libraryEntry(event) ? libraryButtons(event) : managed ? managed[0] : actions(event, about.action)),
       changePanel(event.id),
+      file?.at === event.id ? file.panel : null,
       managed?.[1] ?? null)];
   }))));
 }
