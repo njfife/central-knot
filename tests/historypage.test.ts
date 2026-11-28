@@ -7,12 +7,11 @@ import { findById, findNode, installDom, textOf, type FakeNode } from './domstub
 
 let rendered: FakeNode | undefined;
 let onRestore: ((choice?: string) => void) | undefined;
-const restoreCalls: [string, string, string | undefined][] = [];
 const settings: AppPreferences = { appearance: 'system', historyDays: 30, pluginUpdates: true, pluginText: true, signIn: { on: false, available: true } };
 const noop = () => {};
 installDom({
   getSettings: async () => ({ ...settings }),
-  restore: async (id: string, home: string, choice?: string) => { restoreCalls.push([id, home, choice]); onRestore?.(choice); return { results: [], harnessWrites: 1, reloads: [], made: [] }; },
+  restore: async (_id: string, _home: string, choice?: string) => { onRestore?.(choice); return { results: [], harnessWrites: 1, reloads: [], made: [] }; },
   refresh: async () => state.home!,
   history: async () => ({ events: state.history.data ?? [], days: 30 }),
   onPluginTextChanged: noop, onUpdatesChanged: noop, onPluginUpdatesChanged: noop, onNavigate: noop,

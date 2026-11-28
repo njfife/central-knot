@@ -31,12 +31,7 @@ export function forgetHistoryFolds() {
   openVersionFolds.clear();
 }
 type ToolFormat = (touched: string[], inHome: string[]) => string;
-interface RowChoice { choice: { tool: HarnessId; hash: string }; tools: HarnessId[]; mark?: FileMark }
-const choiceTools = (event: HistoryEvent, choice: { tool: HarnessId; hash: string }): HarnessId[] => {
-  const from = event.kind === 'on' ? event.losers.filter(loser => event.tookFrom?.some(copy => copy.tool === loser.tool)) : event.losers;
-  const tools = [...new Set(from.filter(loser => loser.hash === choice.hash).map(loser => loser.tool))];
-  return tools.length ? tools : [choice.tool];
-};
+interface RowChoice { choice: { tool: HarnessId; tools: HarnessId[]; hash: string }; mark?: FileMark }
 const whoseVersion = (tools: readonly HarnessId[]) => `${andList(tools.map(toolName))}’s version`;
 /** Moves keyboard focus after a version choice vanishes: the row's next Use, its single link, or the row itself. */
 function focusAfterUse(eventId: string, index: number) {
@@ -250,7 +245,7 @@ function libraryButtons(event: HistoryEvent, choices: RowChoice[]) {
   const open = openVersionFolds.has(event.id);
   const choiceControl = one
     ? h('span.history-choice-one', {},
-      link(`Use ${whoseVersion(one.tools)}`, `Make ${whoseVersion(one.tools)} of ${event.item} the current one`, `history-${event.id}-${one.choice.tool}`, useChoice(event.id, one.choice.tool, one.choice.hash, 0)),
+      link(`Use ${whoseVersion(one.choice.tools)}`, `Make ${whoseVersion(one.choice.tools)} of ${event.item} the current one`, `history-${event.id}-${one.choice.tool}`, useChoice(event.id, one.choice.tool, one.choice.hash, 0)),
       one.mark?.mark)
     : choices.length > 1 ? fold({
       id: `history-versions-fold-${event.id}`, toggleId: `history-versions-${event.id}`, label: 'Use another version…', open,
@@ -262,8 +257,8 @@ function libraryButtons(event: HistoryEvent, choices: RowChoice[]) {
 
 /** Kept versions opened under a row by Use another version…: holder name(s), file mark, and Use. */
 const versionList = (event: HistoryEvent, choices: RowChoice[]) => h('ul.history-versions', { id: `history-versions-list-${event.id}` },
-  choices.map(({ choice, tools, mark }, index) => {
-    const text = whoseVersion(tools), label = `Use ${text}`;
+  choices.map(({ choice, mark }, index) => {
+    const text = whoseVersion(choice.tools), label = `Use ${text}`;
     return h('li.history-version', {},
       h('span.history-version-who', {}, text),
       mark?.mark,
@@ -294,10 +289,10 @@ export function historyPage() {
     const entry = libraryEntry(event);
     const raw = entry ? versionChoices(event, itemOf(event)) : [];
     const showMarks = raw.length === 1 || (raw.length > 1 && openVersionFolds.has(event.id));
-    const choices: RowChoice[] = raw.map(choice => {
-      const tools = choiceTools(event, choice);
-      return { choice, tools, mark: showMarks && entry ? versionFile(historyFiles, entry.kind, entry.key, choice.hash, tools, event.id) : undefined };
-    });
+    const choices: RowChoice[] = raw.map(choice => ({
+      choice,
+      mark: showMarks && entry ? versionFile(historyFiles, entry.kind, entry.key, choice.hash, choice.tools, event.id) : undefined,
+    }));
     const itemMark = fileMark(event);
     return { event, entry, choices, itemMark, marks: [itemMark, ...choices.map(choice => choice.mark)] };
   });

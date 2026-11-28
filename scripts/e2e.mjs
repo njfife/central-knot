@@ -19084,9 +19084,14 @@ async function libraryFlow() {
   await historyShot('hh2-row-1316-dark', 'dark');
   await o.click('#history-versions-fold-clash');
   await until(() => o.exists('#history-versions-list-fold-clash'));
-  same('at 1316, open version list shows 3 kept versions with marks and Use, nothing cut off',
-    [await o.all('#history-versions-list-fold-clash .history-version-who', 'e.textContent'), await o.run(CUT_OFF)],
-    [['Copilot CLI’s version', 'Pi’s version', 'OpenCode’s version'], []]);
+  const list1316 = await o.run(`[...document.querySelectorAll('#history-versions-list-fold-clash .history-version')].map(li => {
+    const mark = li.querySelector('.row-file-btn')?.getBoundingClientRect();
+    const use = li.querySelector('.btn')?.getBoundingClientRect();
+    return { who: li.querySelector('.history-version-who')?.textContent, gap: mark && use ? Math.round(use.left - mark.right) : -1 };
+  })`);
+  same('at 1316, open version list shows 3 kept versions with each Use beside its mark and nothing cut off',
+    [list1316.map(entry => entry.who), list1316.every(entry => entry.gap >= 0 && entry.gap <= 20), await o.run(CUT_OFF)],
+    [['Copilot CLI’s version', 'Pi’s version', 'OpenCode’s version'], true, []]);
   await historyShot('hh2-list-1316-dark', 'dark');
   await o.click('#history-versions-fold-clash');
   await until(async () => !(await o.exists('#history-versions-list-fold-clash')));

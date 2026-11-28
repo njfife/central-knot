@@ -1309,7 +1309,6 @@ span.ins-confirm { margin-top: 0; }
   .history-row > .history-actions:not(:has(button, summary, .history-done)) { display: none; }
   .history-row > .history-actions .btn.link { text-align: left; }
   .history-row > .history-versions { grid-column: 2 / -1; margin: 6px 0 0 22px; }
-  .history-row > .history-versions .btn.link { margin-left: 4px; }
   .history-row > .change-panel, .history-row > .manage-question, .history-row > .details-file-only { margin-top: 10px; }
   /* The name takes the line it is on. */
   .history-row .history-what > strong { max-width: none; }
@@ -1334,7 +1333,7 @@ span.ins-confirm { margin-top: 0; }
 .history-choice-one > .row-file-btn, .history-version > .row-file-btn { width: 20px; height: 20px; margin-left: 0; }
 .history-versions { grid-column: 3 / -1; list-style: none; margin: -4px 0 0 -8px; padding: 8px 0 2px; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line); }
 .history-version { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12.5px; color: var(--ink); }
-.history-version > .btn.link { height: auto; padding: 0; margin-left: auto; }
+.history-version > .btn.link { height: auto; padding: 0; margin-left: 4px; }
 /* The question before a tool left out is managed again, in its History row and in its Harnesses card (managecard.ts manageQuestion). */
 .history-row > .manage-question { grid-column: 1 / -1; }
 /* An item's file, opened at its name's mark (historypage.ts fileMark), spans the row under the sentence and the actions. */

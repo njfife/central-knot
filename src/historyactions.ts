@@ -458,19 +458,20 @@ function switchAction(turnOn: boolean, only: HarnessId | undefined, item: Librar
     : { label: turnIt(false, there), help: `Take ${name} out of ${there}; Central Knot keeps it`, change: { ...now, except: [...item.except, only] } };
 }
 
-/** The copies an entry says gave way, each of which is a version that can be made current now: one "Use <harness>’s" each. */
-export function versionChoices(event: HistoryEvent, item: LibraryItem | undefined): { tool: HarnessId; hash: string }[] {
+/** The copies an entry says gave way, each of which is a version that can be made current now: one "Use <harness>’s" each, grouping tools that share a hash in `tools`. */
+export function versionChoices(event: HistoryEvent, item: LibraryItem | undefined): { tool: HarnessId; tools: HarnessId[]; hash: string }[] {
   // An On entry offers the copies of a tool's own its click wrote over (each kept as a version), as the others offer theirs.
   if (!item || item.deleted || event.undoneBy || !['conflict', 'chosen', 'kept-edit', 'on'].includes(event.kind)) return [];
-  const seen = new Set<string>([event.previous ?? '', event.winner?.hash ?? '']);
-  const choices: { tool: HarnessId; hash: string }[] = [];
+  const skip = new Set<string>([event.previous ?? '', event.winner?.hash ?? '']);
+  const byHash = new Map<string, { tool: HarnessId; tools: HarnessId[]; hash: string }>();
   const gaveWay = event.kind === 'on' ? event.losers.filter(loser => event.tookFrom?.some(copy => copy.tool === loser.tool)) : event.losers;
   for (const { tool, hash } of gaveWay) {
-    if (!isVersion(item, hash) || seen.has(hash)) continue;
-    seen.add(hash);
-    choices.push({ tool, hash });
+    if (!isVersion(item, hash) || skip.has(hash)) continue;
+    const held = byHash.get(hash);
+    if (held) { if (!held.tools.includes(tool)) held.tools.push(tool); continue; }
+    byHash.set(hash, { tool, tools: [tool], hash });
   }
-  return choices;
+  return [...byHash.values()];
 }
 
 // ---------- Synchronize everything's own entries (everything.ts) ----------
