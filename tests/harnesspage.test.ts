@@ -344,7 +344,7 @@ test('Plugins tab switch carries its consequence on title and aria-description w
 });
 
 test('Plugins tab shows stays, unknown and stuck/held state lines with an accessible info mark carrying the full reason', () => {
-  // Anthropic Directory installs are stuck (cantUninstall -> FROM_DIRECTORY): on shows 'Can’t be taken out here', off shows 'Off, kept installed · can’t be changed here'.
+  // Anthropic Directory installs are stuck (cantUninstall -> FROM_DIRECTORY): on shows 'Can’t be turned off here', off shows 'Off, kept installed · can’t be changed here'.
   const { draw } = pluginsTabFixture({
     markets: [mkMarket('/m3', 'dir-off', [{ name: 'dir-off-tool', description: 'Off dir.' }], {
       'dir-off-tool': { 'claude-cli': { state: 'installed', version: '1.0.0', path: '/p7', off: true, directory: 'dir.off@anthropic-plugin-directory' } },
@@ -364,7 +364,7 @@ test('Plugins tab shows stays, unknown and stuck/held state lines with an access
 
     const stuckOnRow = rowOf('harness-plugin-team-two-incident-io');
     const stuckOnState = findNode(stuckOnRow, el => el.className.split(/\s+/).includes('harness-plugin-state'))!;
-    assert.equal(textOf(stuckOnState), 'Can’t be taken out here');
+    assert.equal(textOf(stuckOnState), 'Can’t be turned off here');
     const stuckOnMark = findById(stuckOnRow, 'harness-plugin-why-team-two-incident-io')!;
     const stuckOnCard = findById(stuckOnRow, 'harness-plugin-why-team-two-incident-io-card')!;
     assert.equal(stuckOnMark.classList.contains('info-mark'), true);
