@@ -4445,18 +4445,20 @@ async function practiceFlow() {
   await a.click('#plugin-back');
   await a.click('#popen-0-release-helper');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-group')); tries++) await wait(100);
-  check('a plugin page names what it holds', /release-notes[\s\S]*Drafts release notes/.test(await a.text('.plugin-page')) && (await a.text('.plugin-page')).includes('release-reviewer') && /Other hooks \(1\)\s*PreToolUse\s*echo checked/.test(await a.text('.plugin-page')), await a.text('.plugin-page'));
+  check('a plugin page names what it holds', /release-notes[\s\S]*Drafts release notes/.test(await a.text('.plugin-page')) && (await a.text('.plugin-page')).includes('release-reviewer') && (await a.text('.plugin-page')).includes('echo checked'), await a.text('.plugin-page'));
   // Its AGENTS.md is listed, with the line that no tool reads it, and opens to its text; its start-of-session hooks are a group of
   // their own, a row per command (the second with its arguments), apart from its other hooks; "In each tool" says what reaches
   // each tool's sessions.
   const holds = await a.text('.plugin-page');
-  check('a plugin’s instruction file heading names it read by no tool with its card, and a hook that can add text to sessions shows what it runs, apart from the rest',
+  const eventTitles = await a.all('.plugin-hook-event', '[e.textContent, e.title]');
+  check('a plugin’s instruction file heading names it read by no tool with its card, and a hook that can add text shows plain event labels with raw ids in title',
     await a.run(`[...document.querySelectorAll('.plugin-group h4')].some(h => h.textContent === 'Instruction files (1), read by no tool')`)
     && !holds.includes('No tool reads a plugin’s own instruction file into a session.')
     && await a.text('#plugin-instructions-info-card') === 'The model sees one only when something tells it to read the file, such as one of the plugin’s skills.'
     && /Instruction files \(1\), read by no tool[\s\S]*AGENTS\.md/.test(holds)
-    && /Hooks that can add text to sessions \(2\)\s*These run when a session starts or you send a prompt \(in Codex, once you trust them\); what they add is known only when they run\.\s*SessionStart\s*echo '\{"hookSpecificOutput"[^]*?SessionStart\s*node \$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/remind\.mjs --days 2/.test(holds)
-    && /Other hooks \(1\)\s*PreToolUse\s*echo checked/.test(holds) && /Session text\s*(comes from|is limited|waits for trust)/.test(holds), holds);
+    && /Hooks that can add text \(2\)\s*These run when a session starts or you send a prompt \(in Codex, once you trust them\); what they add is known only when they run\.\s*When a session starts\s*echo '\{"hookSpecificOutput"[^]*?When a session starts\s*node \$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/remind\.mjs --days 2/.test(holds)
+    && /Other hooks \(1\)\s*Before a tool runs\s*echo checked/.test(holds) && /Session text\s*(comes from|is limited|waits for trust)/.test(holds)
+    && JSON.stringify(eventTitles) === JSON.stringify([['When a session starts', 'SessionStart'], ['When a session starts', 'SessionStart'], ['Before a tool runs', 'PreToolUse']]), { holds, eventTitles });
   // It holds more than its instruction file, so its panel doesn't say that installing it won't make the tools read its files.
   check('a plugin holding more than instruction files has no line saying installing it won’t make your tools read them', !(await a.exists('#plugin-only-instructions')), await a.text('.plugin-panel'));
   await a.click('#pfile-0-AGENTS-md');
@@ -4808,15 +4810,17 @@ async function practiceFlow() {
   await a.click('#nav-instructions');
   for (let tries = 0; tries < 40 && !(await a.exists('#ins-edit-claude-cli')); tries++) await wait(100);
   check('Instructions show Claude Code’s CLAUDE.md', (await a.text('#instructions-scroll')).includes('Explain the plan in two or three lines'), await a.text('#instructions-scroll'));
-  // What explains the files waits closed in one info box at the top; a click opens it, and it stays open across a redraw.
-  check('what explains the files is one closed info box at the top of the page', await a.run(`document.querySelector('#instructions-scroll').firstElementChild.id === 'ins-about' && !document.querySelector('#ins-about').open`));
+  // What explains the files waits closed in one info box at the top beside the jump to Base instructions; a click opens it, and it stays open across a redraw.
+  check('what explains the files is one closed info box at the top of the page beside Base instructions', await a.run(`(() => { const top = document.querySelector('#instructions-scroll').firstElementChild; return top.classList.contains('ins-about-line') && top.firstElementChild.id === 'ins-about' && !document.querySelector('#ins-about').open && document.querySelector('#ins-go-base')?.textContent === 'Base instructions ↓'; })()`));
   await a.click('#ins-about summary');
   check('a click opens it, saying who reads each file', (await a.run(`document.querySelector('#ins-about').open ? document.querySelector('#ins-about').innerText : ''`)).includes('CLAUDE.md · Claude Code reads this in every session'), await a.text('#ins-about'));
   await openKind(a, 'skills'); await a.click('#nav-instructions');
   check('and it stays open when the page is drawn again', await a.run(`document.querySelector('#ins-about')?.open`));
   await a.click('#ins-about summary');
-  const order = [...await a.all('#instructions-scroll > *', `e.id || e.querySelector('h2')?.textContent || e.className`), ...await a.all('.ins-tool-cards > *', `e.querySelector('h3').textContent`)];
-  same('the base comes first, then a heading over the tools’ own cards', order.slice(0, 7), ['ins-about', 'base-card', 'Each tool’s own instructions', 'ins-tool-cards', 'Claude Code', 'Copilot CLI', 'Codex']);
+  const order = [...await a.all('#instructions-scroll > *', `e.id || e.className`), ...await a.all('.ins-tool-cards > *', `e.querySelector('h2').textContent`)];
+  same('the tools’ own cards come first, then the base card', order.slice(0, 6), ['ins-about-line', 'ins-tool-cards', 'base-card', 'Claude Code', 'Copilot CLI', 'Codex']);
+  await a.click('#ins-go-base');
+  check('clicking Base instructions brings the base card into view, keeps the header pinned, and focuses its primary action', await a.run(`(() => { const sc = document.getElementById('instructions-scroll').getBoundingClientRect(), card = document.getElementById('base-card').getBoundingClientRect(), head = document.getElementById('header').getBoundingClientRect(); return head.top === 0 && sc.top >= head.bottom - 1 && card.top < sc.bottom && card.bottom > sc.top && document.activeElement?.id === 'base-write'; })()`));
   check('a tool with no file says so, and its one action names it', (await a.text('#ins-head-copilot-cli')).includes('No file yet') && (await a.text('#ins-edit-copilot-cli')) === 'Add instructions for Copilot CLI', await a.text('#ins-head-copilot-cli'));
   await a.click('#ins-edit-claude-cli');
   await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); area.value = area.value + '- Edited in Central Knot.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
@@ -4882,8 +4886,13 @@ async function practiceFlow() {
   await a.press('Escape');
   // A redraw landing between the press and the release (as a background pass or a usage reading may) replaces the text under the
   // button, and the browser then sends no click: the release opens the editor of the text now there, the caret where it was aimed.
+  // Dispatched via window focus (renderer.ts) so the redraw keeps the page's width instead of toggling the sidebar across the 1,000 px grid threshold.
   let underPress;
-  await clickText(a, baseText, 'every tool.', async () => { underPress = await redrawUnder(a, baseText); });
+  await clickText(a, baseText, 'every tool.', async () => {
+    await a.run(`document.querySelector(${JSON.stringify(baseText)}).dataset.before = 'the redraw'`);
+    await a.run(`window.dispatchEvent(new Event('focus'))`);
+    underPress = await a.run(`(() => { const now = document.querySelector(${JSON.stringify(baseText)}); return [now.dataset.before !== 'the redraw', now.matches('.ins-editable')]; })()`);
+  });
   same('a click on the base’s text with a redraw between its press and its release: the text was replaced, and its editor opens with the caret where it was aimed',
     [...underPress, ...await caretAt(a)], [true, true, 'base-text', '- Shared by '.length]);
   await a.press('Escape');
@@ -4924,9 +4933,19 @@ async function practiceFlow() {
   writeFileSync(join(practice, '.codex/AGENTS.md'), baseCodex1.replace('- Shared by every tool.', '- Shared, edited in Codex.'));
   await a.click('#header-refresh');
   for (let tries = 0; tries < 40 && !(await a.exists('#base-restore-codex-cli')); tries++) await wait(100);
-  check('an edit inside Codex’s copy shows unfolded outside the matching fold, with both choices',
+  check('an edit inside Codex’s copy shows unfolded outside the matching fold, updates the jump link, keeps one sentence with details on hover, trailing chevron and both choices',
     await a.exists('#base-usecopy-codex-cli') && await a.exists('#base-restore-codex-cli')
-    && await a.run(`(() => { const fold = document.querySelector('#base-matching'); return !!fold && !fold.open && fold.querySelector('summary')?.textContent === '1 tool matches the base' && !fold.contains(document.querySelector('#base-diff-codex-cli')); })()`),
+    && await a.run(`(() => { const fold = document.querySelector('#base-matching'), sum = fold?.querySelector('summary'), chev = sum?.lastElementChild, explains = document.querySelectorAll('#base-card .base-choice .base-explain');
+      const useBtn = document.querySelector('#base-usecopy-codex-cli'), putBtn = document.querySelector('#base-restore-codex-cli');
+      const waitPill = document.querySelector('#ins-go-base .ins-go-wait.base-pill-warn');
+      return document.querySelector('#ins-go-base')?.textContent === 'Base instructions 1 edited copy ↓'
+        && waitPill?.textContent === '1 edited copy'
+        && useBtn?.textContent === 'Make Codex’s copy the base…' && putBtn?.textContent === 'Replace Codex’s copy with the base…'
+        && !!fold && !fold.open && sum?.textContent === '1 tool matches the base' && !!chev?.classList.contains('base-matching-chevron') && !chev?.classList.contains('tone-faint')
+        && explains.length === 1 && explains[0].textContent === 'Changed outside Central Knot, so AGENTS.md was left as it is.'
+        && /Shows the change first, keeps the replaced text under Earlier versions, and can be undone\./.test(useBtn?.title ?? '')
+        && /Shows the change first, keeps the replaced text under Earlier versions, and can be undone\./.test(putBtn?.title ?? '')
+        && !fold.contains(document.querySelector('#base-diff-codex-cli')); })()`),
     await a.text('#base-card'));
   // On Codex's harness page the strip's "Choose what to do…" goes to that choice on Instructions (its target isn't on a harness tab).
   await a.click('#nav-harnesses'); await a.click('#harness-codex-cli'); await a.click('#harness-tab-instructions');
@@ -4941,9 +4960,20 @@ async function practiceFlow() {
   check('going back from "Stop sharing" keeps the ticks', await a.run(`document.querySelector('#base-tool-claude-cli').checked && document.querySelector('#base-tool-codex-cli').checked`));
   await a.run(`document.querySelector('#base-tool-claude-cli').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`); await a.settle();
   check('Esc on a tool box cancels the untouched base editor', !(await a.exists('#base-text')));
-  // A typed base draft belongs to this home: switching home from another page asks first on Instructions, and stays.
+  // A typed base draft belongs to this home: following Base instructions ↓ and a redraw keep the editor in place with its unsaved text and caret; switching home asks first and stays.
   await a.click('#base-edit');
-  await a.run(`(() => { const area = document.querySelector('#base-text'); area.value += '- Not saved.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.run(`(() => { const area = document.querySelector('#base-text'); area.value += '- Not saved.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); area.focus(); area.setSelectionRange(10, 10); document.getElementById('instructions-scroll').scrollTop = 0; })()`);
+  await a.click('#ins-go-base');
+  const dirtyAfterJump = await a.run(`(() => { const area = document.querySelector('#base-text'), sc = document.getElementById('instructions-scroll');
+    const children = [...sc.children].map(el => el.id || el.className);
+    return [children.indexOf('base-card') > children.indexOf('ins-tool-cards'), document.activeElement?.id === 'base-text', area.value.includes('- Not saved.'), area.selectionStart, area.selectionEnd]; })()`);
+  await a.run(`(() => { document.querySelector('#base-text').dataset.before = 'the redraw'; for (let times = 0; times < 2; times++) document.querySelector('#sidebar-toggle').click(); })()`);
+  await a.settle();
+  const dirtyAfterRedraw = await a.run(`(() => { const area = document.querySelector('#base-text'), sc = document.getElementById('instructions-scroll');
+    const children = [...sc.children].map(el => el.id || el.className);
+    return [area.dataset.before !== 'the redraw', children.indexOf('base-card') > children.indexOf('ins-tool-cards'), document.activeElement?.id === 'base-text', area.value.includes('- Not saved.'), area.selectionStart, area.selectionEnd]; })()`);
+  same('dirty base editor stays in place with its unsaved text and caret after the jump and after a redraw',
+    [...dirtyAfterJump, ...dirtyAfterRedraw], [true, true, true, 10, 10, true, true, true, true, 10, 10]);
   // The click on a tool's text and its Edit share one lock. Typing doesn't redraw the page: until something else does (a
   // background pass may), the first click meets the base's typed work as Edit does and asks about it; once the page is drawn
   // again, the card is locked and the click says why. Either way nothing opens and the typed work stays. Kept, a click on the
@@ -5720,17 +5750,22 @@ async function practiceFlow() {
   for (let tries = 0; tries < 30 && !(await a.exists('.harness-cards')); tries++) await wait(100);
   const harnessRows = await a.run(`(() => { const cards = [...document.querySelectorAll('.harness-cards > *')]; return [cards.length, new Set(cards.map(card => Math.round(card.getBoundingClientRect().top))).size]; })()`);
   same(`at 2560×1440 the harnesses cards (${harnessRows[0]}) sit in one row`, harnessRows[1], 1);
-  // Instructions at full screen: the base across the page, the tools' cards two a row; at 1728 one a row, each card's head
-  // ending where its text ends (at about 160 characters).
+  // Instructions across widths: two a row from 1,000 inner px (2560 and 1316), one a row under 1,000 inner px (860), and the
+  // base card's status pill stays beside its title at 860 (the path moves below instead).
   await a.click('#nav-instructions');
   for (let tries = 0; tries < 30 && !(await a.exists('.ins-card')); tries++) await wait(100);
   const toolRows = `(() => { const cards = [...document.querySelectorAll('.ins-tool-cards > .ins-card')], text = document.querySelector('.ins-tool-cards .ins-preview').getBoundingClientRect(), title = text && document.querySelector('.ins-tool-cards .ins-title').getBoundingClientRect();
-    return { cards: cards.length, rows: new Set(cards.map(card => Math.round(card.getBoundingClientRect().top))).size, base: document.querySelector('#base-card').getBoundingClientRect().width, card: cards[0].getBoundingClientRect().width, text: Math.round(text.width), titleEnd: Math.round(title.right - text.right) }; })()`;
+    const baseHead = document.querySelector('#base-head .tool-title')?.getBoundingClientRect(), basePill = document.querySelector('#base-head .ins-missing')?.getBoundingClientRect();
+    return { cards: cards.length, rows: new Set(cards.map(card => Math.round(card.getBoundingClientRect().top))).size, base: document.querySelector('#base-card').getBoundingClientRect().width, card: cards[0].getBoundingClientRect().width, text: Math.round(text.width), titleEnd: Math.round(title.right - text.right), pillSameLine: !basePill || Math.abs(basePill.top - baseHead.top) <= 6 }; })()`;
   const twoUp = await a.run(toolRows);
   check(`at 2560×1440 the base card spans the page and the tools’ cards (${twoUp.cards}) sit two a row`, twoUp.rows === Math.ceil(twoUp.cards / 2) && twoUp.base > 2000 && twoUp.card < 1200, twoUp);
-  await sizeTo(a, 1728, 1117);
+  await sizeTo(a, 1316, 819);
+  if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+  const at1316 = await a.run(toolRows);
+  check(`at 1316×819 (over 1,000 inner px) the tools’ cards sit two a row with nothing cut off`, at1316.rows === Math.ceil(at1316.cards / 2) && (await a.run(CUT_OFF)).length === 0, at1316);
+  await sizeTo(a, 860, 560);
   const narrower = await a.run(toolRows);
-  check(`at 1728×1117 the tools' cards sit one a row, each text at most about 160 characters, the head ending where the text ends`, narrower.rows === narrower.cards && narrower.text <= 1226 && narrower.titleEnd <= 1, narrower);
+  check(`at 860×560 the tools’ cards sit one a row, the head ends where the text ends, and the base pill stays on its title line`, narrower.rows === narrower.cards && narrower.text <= 1226 && narrower.titleEnd <= 1 && narrower.pillSameLine, narrower);
   await fullSize(a);
   await openKind(a, 'skills');
   same('no page errors, practice', a.pageErrors, []);
@@ -18461,9 +18496,9 @@ echo "$*" >> "$HOME/claude-calls.txt"
   if (pluginHookBtns.length >= 3) {
     const inlineSrc = await openSource(pluginHookBtns[0], '.plugin-page .hook-source');
     const inlineBlocks = await a.run(`document.querySelectorAll('.plugin-page .hook-source .content-block').length`);
-    check('an inline echo hook on the plugin’s page shows only Declared in <path> · the marketplace’s copy and the entry',
+    check('an inline echo hook on the plugin’s page shows only Declared in <path> · the marketplace’s copy · SessionStart and the entry',
       inlineBlocks === 1 && !/No script file found/.test(inlineSrc ?? '') && !/The marketplace’s copy\./.test(inlineSrc ?? '')
-      && /Declared in .*hooks\/hooks\.json · the marketplace’s copy/.test(inlineSrc ?? '') && /hookSpecificOutput/.test(inlineSrc ?? ''), { inlineBlocks, inlineSrc });
+      && /Declared in .*hooks\/hooks\.json · the marketplace’s copy · SessionStart/.test(inlineSrc ?? '') && /hookSpecificOutput/.test(inlineSrc ?? ''), { inlineBlocks, inlineSrc });
     same('a wrapped entry line also has a hanging indent', await a.run(`(() => {
       const pre = document.querySelector('.plugin-page .hook-source pre');
       const r = document.createRange(); r.selectNodeContents(pre.firstChild);
@@ -18481,8 +18516,8 @@ echo "$*" >> "$HOME/claude-calls.txt"
     await pictures('hook-source-plugin', '.plugin-parts li.with-source', [...atTwo, [1316, 819, true]]);
     await a.click(byId(pluginHookBtns[1]));
     const otherSrc = await openSource(pluginHookBtns[2], '.plugin-page .hook-source');
-    check('Other hooks rows also open View source cleanly',
-      !/No script file found/.test(otherSrc ?? '') && /Declared in .*hooks\/hooks\.json · the marketplace’s copy/.test(otherSrc ?? '') && /echo checked/.test(otherSrc ?? ''), otherSrc);
+    check('Other hooks rows also open View source cleanly with raw event in details',
+      !/No script file found/.test(otherSrc ?? '') && /Declared in .*hooks\/hooks\.json · the marketplace’s copy · PreToolUse/.test(otherSrc ?? '') && /echo checked/.test(otherSrc ?? ''), otherSrc);
     await a.click(byId(pluginHookBtns[2]));
   }
   const back = async () => { await a.send('Input.dispatchKeyEvent', { type: 'keyDown', key: process.platform === 'darwin' ? '[' : 'ArrowLeft', modifiers: process.platform === 'darwin' ? 4 : 1 }); await a.send('Input.dispatchKeyEvent', { type: 'keyUp', key: process.platform === 'darwin' ? '[' : 'ArrowLeft', modifiers: process.platform === 'darwin' ? 4 : 1 }); await a.settle(); await showStrips(); };
@@ -18528,7 +18563,7 @@ echo "$*" >> "$HOME/claude-calls.txt"
   [['Claude Code', ['Skills', 'Hooks', 'Session text']], ['Copilot CLI', ['Skills', 'Hooks', 'Session text']], ['Codex', ['Skills']]]);
   // Its hooks group says the same of its hook: Codex is named as taking no text from it, and nothing is said of trusting it there.
   same('on superpowers’ page, the line under its hooks that can add text names Codex as taking text from none, with no wait for trust', await a.run(`[...document.querySelectorAll('.plugin-group')]
-    .find(group => group.querySelector('h4')?.textContent.startsWith('Hooks that can add text to sessions'))?.querySelector('.plugin-group-note')?.textContent`),
+    .find(group => group.querySelector('h4')?.textContent.startsWith('Hooks that can add text'))?.querySelector('.plugin-group-note')?.textContent`),
   'These run when a session starts or you send a prompt; what they add is known only when they run. In Codex, none of them adds text.');
   // Nothing the strips offer wrote a file: in the tools' folders, only Claude Code's settings changed, where its disable turned it off.
   const after = toolFolders();
@@ -18734,7 +18769,7 @@ async function hookRunFlow() {
   same('nothing ran on opening Instructions, Refresh, or a redraw landing', [markerCount(), existsSync(pluginMarker)], [0, false]);
 
   // Check 3: single standing line on runnable strips, none on non-runnable; Copilot prompt-only note; Codex T2.28 note; T1.23 once & <= 30 words with plugin sentence.
-  const runWarn = 'Run it runs the command for real. It may change your files.';
+  const runWarn = '“Run it” runs a hook’s command to show what it adds; it may change your files.';
   const helpCardText = 'Session-start and prompt hooks; not URL, MCP, project or organisation. Run it uses your home or the folder the hook names. Plugin hooks can change their installed files and data.';
   same('standing warning is on Claude Code and Codex strips and absent on Copilot CLI prompt-only strip',
     [await a.text('#session-claude-cli .session-run-warn'), await a.text('#session-codex-cli .session-run-warn'), await a.text('#session-copilot-cli .session-run-warn')],
@@ -18789,8 +18824,8 @@ async function hookRunFlow() {
   // Worked example 1 & 3 (plugin hook): Claude Code installed plugin hook runs with root, data (created on first use) and option, fits at 860 & 1316, then refuses once turned off.
   same('Claude Code plugin data folder absent before first run', existsSync(claudePluginData), false);
   const pluginRes = await runAndWait('session-claude-cli', 'hello.sh');
-  check('Claude Code plugin hook shows Would add with installed root, data path and option',
-    /^Would add run in ~, /.test(pluginRes) && pluginRes.includes(`root=${claudePluginRoot}`)
+  check('Claude Code plugin hook shows Would add with executed tool and plugin version, installed root, data path and option',
+    /^Would add as Claude Code, plugin 0\.4\.1, run in ~, /.test(pluginRes) && pluginRes.includes(`root=${claudePluginRoot}`)
     && pluginRes.includes(`data=${claudePluginData}`) && pluginRes.includes('note=Tuesday-releases'), pluginRes);
   same('Claude Code plugin data folder created on first run', existsSync(claudePluginData), true);
   for (const [w, h] of [[860, 560], [1316, 820]]) {
@@ -18809,7 +18844,7 @@ async function hookRunFlow() {
   writeFileSync(claudeManifest, JSON.stringify({ name: 'release-helper', version: '0.4.1', userConfig: { team_note: { description: 'Release note' }, extra_opt: { description: 'Extra option' } } }));
   const pluginNoteRes = await runAndWait('session-claude-cli', 'hello.sh');
   check('plugin hook with an unavailable declared option shows Ran without some of the plugin’s options. note',
-    /^Would add run in ~, /.test(pluginNoteRes) && pluginNoteRes.includes('Ran without some of the plugin’s options.'), pluginNoteRes);
+    /^Would add as Claude Code, plugin 0\.4\.1, run in ~, /.test(pluginNoteRes) && pluginNoteRes.includes('Ran without some of the plugin’s options.'), pluginNoteRes);
   await pictures('plugin-note', `#session-claude-cli .session-group:has(#${pluginRow.runId})`);
   writeFileSync(claudeManifest, initialManifest);
   const pluginCountAfterRun = readNow(pluginMarker).trim().split('\n').filter(Boolean).length;
@@ -18833,7 +18868,7 @@ async function hookRunFlow() {
   const addsText = await a.run(`document.getElementById(${JSON.stringify(twoIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`);
   const scrollAfter = await a.run(`document.getElementById('instructions-scroll')?.scrollTop ?? 0`);
   check('Enter on Run it shows Would add with quiet meta, both lines, no Run again, and page stays still when row is already in view',
-    /^Would add run in ~, /.test(addsText) && !addsText.includes('Run again') && !/\d+\.\d s/.test(addsText)
+    /^Would add as Claude Code, run in ~, /.test(addsText) && !addsText.includes('Run again') && !/\d+\.\d s/.test(addsText)
     && addsText.includes('First line from hook\nSecond line from hook') && Math.abs(scrollAfter - scrollBefore) <= 1 && markerCount() === 1,
     { addsText, scrollBefore, scrollAfter, count: markerCount() });
   await pictures('result-adds', '#session-claude-cli', bothSizes);
@@ -18897,45 +18932,54 @@ async function hookRunFlow() {
     await pictures('result-adds-folds', `#session-claude-cli .session-hook:has(#${jsonIds.runId})`);
   }
 
-  // Check 2: empty, blank lines, long output at 860, exit 2 (start & prompt), failed (exit 7), catch-all (json-no-context), timeout, double click + Running… + Stop, missing.
+  // Check 2: empty, blank lines, long output at 860 and 1316 (light and dark), exit 2 (start & prompt), failed (exit 7), catch-all (json-no-context), timeout, double click + Running… + Stop, missing.
   const emptyRes = await runAndWait('session-claude-cli', 'empty.sh');
-  check('empty hook says it printed nothing with quiet meta', /^Would add nothing: it printed nothing\. run in ~, /.test(emptyRes), emptyRes);
+  check('empty hook says it printed nothing with quiet meta', /^Would add nothing: it printed nothing\. as Claude Code, run in ~, /.test(emptyRes), emptyRes);
   const blankRes = await runAndWait('session-claude-cli', 'blank.sh');
-  check('blank-lines hook says it printed only blank lines', /^Would add nothing: it printed only blank lines\. run in ~, /.test(blankRes), blankRes);
+  check('blank-lines hook says it printed only blank lines', /^Would add nothing: it printed only blank lines\. as Claude Code, run in ~, /.test(blankRes), blankRes);
   await pictures('result-empty', `#session-claude-cli .session-hook:has(#${(await rowOf('session-claude-cli', 'empty.sh')).runId})`);
 
   const longIds = await rowOf('session-claude-cli', 'long-out.sh');
   const longRes = await runAndWait('session-claude-cli', 'long-out.sh');
-  check('long output hook renders capped scrollable box without horizontal page overflow at 860',
+  check('long output hook renders capped scrollable box without horizontal page overflow at 860 and 1316',
     longRes.includes('LONG_UNBROKEN_LINE_WITHOUT_SPACES') && longRes.includes('Output line 30'), longRes);
+  for (const [w, h] of [[860, 560], [1316, 819]]) {
+    await sizeTo(a, w, h);
+    if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
+    await a.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+    await a.run(`document.getElementById(${JSON.stringify(longIds.runId)})?.closest('.session-hook')?.scrollIntoView({ block: 'start' })`);
+    await a.settle();
+    same(`long output box caps height, keeps close button, and scrolls without overflow at ${w}×${h} dark`,
+      await a.run(`(() => { const sc = document.getElementById('instructions-scroll');
+        const box = document.getElementById(${JSON.stringify(longIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run');
+        const pre = box?.querySelector('pre'), close = box?.querySelector('.band-dismiss');
+        return [sc.scrollWidth <= sc.clientWidth + 1, pre.getBoundingClientRect().height <= 322, pre.scrollHeight > pre.clientHeight, !!close]; })()`),
+      [true, true, true, true]);
+  }
+  await a.send('Emulation.setEmulatedMedia', { features: [] });
   await sizeTo(a, 860, 560);
   if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
   await a.run(`document.getElementById(${JSON.stringify(longIds.runId)})?.closest('.session-hook')?.scrollIntoView({ block: 'start' })`);
   await a.settle();
-  same('long output box caps height and scrolls itself without overflowing 860 page width',
-    await a.run(`(() => { const sc = document.getElementById('instructions-scroll');
-      const pre = document.getElementById(${JSON.stringify(longIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run pre');
-      return [sc.scrollWidth <= sc.clientWidth + 1, pre.getBoundingClientRect().height <= 322, pre.scrollHeight > pre.clientHeight]; })()`),
-    [true, true, true]);
   await pictures('long-output', `#session-claude-cli .session-hook:has(#${longIds.runId})`, [[860, 560, false]]);
 
   const exit2StartRes = await runAndWait('session-claude-cli', 'exit2-start.sh');
   check('Claude Code start exit 2 shows plain wording and stderr',
-    /^Exited 2: Claude Code would show you this error and add nothing\. run in ~, /.test(exit2StartRes) && exit2StartRes.includes('Start hook blocked cleanly'), exit2StartRes);
+    /^Exited 2: Claude Code would show you this error and add nothing\. as Claude Code, run in ~, /.test(exit2StartRes) && exit2StartRes.includes('Start hook blocked cleanly'), exit2StartRes);
   const exit2PromptRes = await runAndWait('session-claude-cli', 'exit2-prompt.sh');
   check('Claude Code prompt exit 2 shows plain wording with empty prompt and stderr',
-    /^Exited 2: Claude Code would block the prompt and show this error\. run in ~ with an empty prompt, /.test(exit2PromptRes) && exit2PromptRes.includes('Prompt rejected by guard'), exit2PromptRes);
+    /^Exited 2: Claude Code would block the prompt and show this error\. as Claude Code, run in ~ with an empty prompt, /.test(exit2PromptRes) && exit2PromptRes.includes('Prompt rejected by guard'), exit2PromptRes);
   await pictures('result-exit2', `#session-claude-cli .session-hook:has(#${(await rowOf('session-claude-cli', 'exit2-start.sh')).runId})`);
 
   const fail7Res = await runAndWait('session-claude-cli', 'fail7.sh');
   check('non-zero exit shows stderr directly and stdout under Show all it printed fold',
-    /^Exited 7: it would add nothing\. run in ~, /.test(fail7Res) && fail7Res.includes('Something failed') && fail7Res.includes('Show all it printed') && !fail7Res.includes('Standard output'), fail7Res);
+    /^Exited 7: it would add nothing\. as Claude Code, run in ~, /.test(fail7Res) && fail7Res.includes('Something failed') && fail7Res.includes('Show all it printed') && !fail7Res.includes('Standard output'), fail7Res);
   const noCtxRes = await runAndWait('session-claude-cli', 'no-ctx.sh');
-  check('JSON without additionalContext shows catch-all sentence with quiet meta', /^Would add nothing: its JSON has no additionalContext\. run in ~, /.test(noCtxRes), noCtxRes);
+  check('JSON without additionalContext shows catch-all sentence with quiet meta', /^Would add nothing: its JSON has no additionalContext\. as Claude Code, run in ~, /.test(noCtxRes), noCtxRes);
   await pictures('result-failed-and-not-added', `#session-claude-cli .session-hook:has(#${(await rowOf('session-claude-cli', 'fail7.sh')).runId})`);
 
   const timeoutRes = await runAndWait('session-claude-cli', 'slow-limit.sh', 12000);
-  check('timeout shows limit sentence with quiet meta', /^Stopped after 1 s, its time limit: it would add nothing\. run in ~, /.test(timeoutRes), timeoutRes);
+  check('timeout shows limit sentence with quiet meta', /^Stopped after 1 s, its time limit: it would add nothing\. as Claude Code, run in ~, /.test(timeoutRes), timeoutRes);
 
   // Double click on slow-stop.sh starts one run and stops none; picture Running… + Stop at 860 & 1316, then click Stop!
   const stopRowIds = await rowOf('session-claude-cli', 'slow-stop.sh');
@@ -18989,11 +19033,11 @@ async function hookRunFlow() {
   await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(stopRowIds.runId)}); return b && b.textContent === 'Run it' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`);
   const stoppedRes = await a.run(`document.getElementById(${JSON.stringify(stopRowIds.runId)})?.closest('.session-hook')?.querySelector('.hook-run')?.textContent ?? ''`);
   check('Stop click shows Stopped caveat with quiet meta',
-    /^Stopped\. What it changed stays; a program it started may still be running\. run in ~, /.test(stoppedRes), stoppedRes);
+    /^Stopped\. What it changed stays; a program it started may still be running\. as Claude Code, run in ~, /.test(stoppedRes), stoppedRes);
 
   const missingRes = await runAndWait('session-claude-cli', '/nonexistent-ck-hook-bin-xyz');
   check('missing executable shows Couldn’t start with tried at <time> and no Run again',
-    /^Couldn’t start: \/nonexistent-ck-hook-bin-xyz not found\. tried at /.test(missingRes) && !missingRes.includes('Run again'), missingRes);
+    /^Couldn’t start: \/nonexistent-ck-hook-bin-xyz not found\. as Claude Code, tried at /.test(missingRes) && !missingRes.includes('Run again'), missingRes);
   await pictures('result-timeout-stopped-missing', `#session-claude-cli .session-hook:has(#${(await rowOf('session-claude-cli', 'slow-limit.sh')).runId})`);
 
   // Check 2: Codex refusal (hooks turned off in config.toml), then Codex plugin hook runs with trust note and no data folder created.
@@ -19006,8 +19050,8 @@ async function hookRunFlow() {
   await pictures('result-codex-refused', '#session-codex-cli');
   writeFileSync(codexConfig, `[features]\nhooks = true\n\n[marketplaces.${marketName}]\nsource = ${JSON.stringify(market)}\n\n[plugins."release-helper@${marketName}"]\nenabled = true\n\n[[hooks.SessionStart]]\nmatcher = "startup"\n\n[[hooks.SessionStart.hooks]]\ntype = "command"\ncommand = "~/bin/codex-hook.sh"\n`);
   const codexPluginRes = await runAndWait('session-codex-cli', 'codex-hello.sh');
-  check('Codex installed plugin hook runs with PLUGIN_ROOT, PLUGIN_DATA, trust note and no data folder created',
-    /^Would add run in ~, /.test(codexPluginRes) && codexPluginRes.includes('Codex adds it only once trusted in /hooks.')
+  check('Codex installed plugin hook runs with executed tool and plugin version, PLUGIN_ROOT, PLUGIN_DATA, trust note and no data folder created',
+    /^Would add as Codex, plugin 0\.4\.1, run in ~, /.test(codexPluginRes) && codexPluginRes.includes('Codex adds it only once trusted in /hooks.')
     && codexPluginRes.includes(`codex-root=${codexPluginRoot}`) && codexPluginRes.includes(`codex-data=${codexPluginData}`)
     && !existsSync(codexPluginData), codexPluginRes);
   await pictures('plugin-codex-result', '#session-codex-cli');
@@ -19039,20 +19083,20 @@ async function hookRunFlow() {
   await waitFor(`!!document.querySelector('#session-copilot-cli button[data-hook-run]')`);
   const copilotPluginRow = await rowOf('session-copilot-cli', 'copilot-plugin-hook');
   same('Copilot CLI installed plugin hook keeps View source alone and no Run it', [!!copilotPluginRow?.srcId, copilotPluginRow?.runId], [true, null]);
-  same('Copilot CLI strip with runnable own hook and non-runnable plugin hook omits the plugin standing line',
-    await a.text('#session-copilot-cli .session-run-warn'), 'Run it runs the command for real. It may change your files.');
+  same('Copilot CLI strip with runnable own hook and non-runnable plugin hook uses standing line',
+    await a.text('#session-copilot-cli .session-run-warn'), runWarn);
   const copRes = await runAndWait('session-copilot-cli', 'copilot-plain.sh');
   check('Copilot CLI plain stdout shows ignored sentence with quiet meta and Show all it printed fold',
-    /^Copilot CLI would ignore this: no top-level additionalContext\. run in ~, /.test(copRes) && copRes.includes('Show all it printed'), copRes);
+    /^Copilot CLI would ignore this: no top-level additionalContext\. as Copilot CLI, run in ~, /.test(copRes) && copRes.includes('Show all it printed'), copRes);
   await pictures('result-copilot-ignored', '#session-copilot-cli');
 
   // Off-screen row does not jump the scroll container when its result arrives (item 4).
   const lateIds = await rowOf('session-claude-cli', 'slow-stop.sh');
-  await sizeTo(a, 1316, 820);
+  await sizeTo(a, 860, 560);
   await a.run(`document.getElementById(${JSON.stringify(lateIds.runId)})?.scrollIntoView({ block: 'center' })`);
   await a.click(byId(lateIds.runId));
   await waitFor(`document.getElementById(${JSON.stringify(lateIds.runId)})?.textContent === 'Running…'`);
-  await a.run(`document.querySelector('#session-codex-cli')?.scrollIntoView({ block: 'end' })`);
+  await a.run(`document.querySelector('#session-codex-cli')?.scrollIntoView({ block: 'center' })`);
   await a.settle();
   const awayTop = await a.run(`document.querySelector('#session-codex-cli')?.getBoundingClientRect().top ?? 0`);
   await waitFor(`(() => { const b = document.getElementById(${JSON.stringify(lateIds.runId)}); return b && b.textContent === 'Run it' && !!b.closest('.session-hook')?.querySelector('.hook-run'); })()`, 8000);
@@ -19183,8 +19227,8 @@ async function hookRunFlow() {
   same('opening plugin page, Refresh and View source ran nothing', pluginMarkerCount(), pluginMarkerBefore);
   // Click 3: Run it runs installed copy and shows text inline in place.
   const pluginPageRes = await runAndWait('plugin-session-hooks', 'hello.sh');
-  check('Run it on plugin page shows installed hook text inline (not marketplace copy)',
-    /^Would add run in ~, /.test(pluginPageRes) && pluginPageRes.includes('Releases ship on Tuesdays. Run smoke checks before tagging.')
+  check('Run it on plugin page shows installed hook text inline (not marketplace copy) with executed tool and plugin version',
+    /^Would add as Claude Code, plugin 0\.4\.1, run in ~, /.test(pluginPageRes) && pluginPageRes.includes('Releases ship on Tuesdays. Run smoke checks before tagging.')
     && !pluginPageRes.includes('Marketplace only text') && pluginMarkerCount() === pluginMarkerBefore + 1, pluginPageRes);
   for (const [w, h] of [[860, 560], [1316, 820]]) {
     await sizeTo(a, w, h);
@@ -19223,8 +19267,8 @@ async function hookRunFlow() {
     [await a.text('#plugin-session-hooks .session-note'), await a.text('#plugin-session-hooks .session-command')],
     ['Codex: Run it runs a hook even if it isn’t trusted in /hooks.', '${PLUGIN_ROOT}/hooks/codex-hello.sh']);
   const codexPageRes = await runAndWait('plugin-session-hooks', 'codex-hello.sh');
-  check('Run it as Codex on plugin page runs Codex installed hook with trust note',
-    /^Would add run in ~, /.test(codexPageRes) && codexPageRes.includes(`codex-root=${codexPluginRoot}`)
+  check('Run it as Codex on plugin page runs Codex installed hook with executed tool and plugin version and trust note',
+    /^Would add as Codex, plugin 0\.4\.1, run in ~, /.test(codexPageRes) && codexPageRes.includes(`codex-root=${codexPluginRoot}`)
     && codexPageRes.includes('Codex adds it only once trusted in /hooks.'), codexPageRes);
   // Arriving from Codex's strip on Instructions selects As Codex directly.
   await a.click('#nav-instructions');
@@ -19237,23 +19281,25 @@ async function hookRunFlow() {
   await waitFor(`!!document.querySelector('#popen-0-document-tools')`);
   await a.click('#popen-0-document-tools');
   await waitFor(`document.querySelector('.crumb-here')?.textContent === 'document-tools' && !!document.querySelector('.plugin-parts li.with-source button[data-hook-source]')`);
-  same('marketplace-only plugin keeps View source alone and states why it cannot be run',
+  same('marketplace-only plugin keeps View source alone, uses unified heading, plain event label with raw id in title, and visible reason',
     [await a.run(`document.querySelectorAll('.plugin-parts li.with-source button[data-hook-source]').length`),
       await a.run(`document.querySelectorAll('button[data-hook-run]').length`),
       await a.run(`document.querySelectorAll('.session-run-warn').length`),
-      await a.text('.plugin-group:has(.plugin-parts li.with-source) .plugin-group-note')],
-    [1, 0, 0, 'Not installed, so these can’t be run here.']);
+      await a.text('.plugin-group:has(.plugin-parts li.with-source) h4'),
+      await a.run(`(() => { const n = document.querySelector('.plugin-group:has(.plugin-parts li.with-source) .plugin-group-note'); return [n?.textContent, n?.classList.contains('session-cant-run')]; })()`),
+      await a.all('.plugin-group:has(.plugin-parts li.with-source) .plugin-hook-event', '[e.textContent, e.title]')],
+    [1, 0, 0, 'Hooks that can add text (1)', ['Not installed, so these can’t be run here.', true], [['When a session starts', 'SessionStart']]]);
   await pictures('plugin-hooks-view-only', '.plugin-group:has(.plugin-parts li.with-source)', bothSizes);
   await a.click('#plugin-back');
   await waitFor(`!!document.querySelector('#popen-0-off-plugin')`);
   await a.click('#popen-0-off-plugin');
   await waitFor(`document.querySelector('.crumb-here')?.textContent === 'off-plugin' && !!document.querySelector('.plugin-parts li.with-source button[data-hook-source]')`);
-  same('off plugin keeps View source alone and states Off in Claude Code',
+  same('off plugin keeps View source alone and states Off in Claude Code with visible reason styling',
     [await a.run(`document.querySelectorAll('.plugin-parts li.with-source button[data-hook-source]').length`),
       await a.run(`document.querySelectorAll('button[data-hook-run]').length`),
       await a.run(`document.querySelectorAll('.session-run-warn').length`),
-      await a.text('.plugin-group:has(.plugin-parts li.with-source) .plugin-group-note')],
-    [1, 0, 0, 'Off in Claude Code, so these can’t be run here.']);
+      await a.run(`(() => { const n = document.querySelector('.plugin-group:has(.plugin-parts li.with-source) .plugin-group-note'); return [n?.textContent, n?.classList.contains('session-cant-run')]; })()`)],
+    [1, 0, 0, ['Off in Claude Code, so these can’t be run here.', true]]);
   // Non-actual home (Practice copy) on plugin page keeps View source alone and does not show the actual-home reason line.
   await a.click('#home-fixture');
   await steady();
@@ -19286,11 +19332,11 @@ async function hookRunFlow() {
   await a.click('#nav-instructions');
   await waitFor(`!!document.querySelector('#session-codex-cli')`);
   await steady();
-  same('Instructions strip whose tool has no command line hides Run it and states why in the standing line’s place',
+  same('Instructions strip whose tool has no command line hides Run it and states why with visible styling',
     [await a.run(`document.querySelectorAll('#session-codex-cli button[data-hook-run]').length`),
       await a.text('#session-codex-cli .session-run-warn'),
-      await a.text('#session-codex-cli .session-note')],
-    [0, null, 'Codex’s command line isn’t on this computer, so these can’t be run here.']);
+      await a.run(`(() => { const n = document.querySelector('#session-codex-cli .session-note'); return [n?.textContent, n?.classList.contains('session-cant-run')]; })()`)],
+    [0, null, ['Codex’s command line isn’t on this computer, so these can’t be run here.', true]]);
   if (shots) {
     await sizeTo(a, 860, 560);
     if (await a.run(`document.body.classList.contains('rail')`)) await a.click('#sidebar-toggle');
@@ -19314,10 +19360,10 @@ async function hookRunFlow() {
   same('tool’s Instructions tab with runnable plugin hook shows single standing warning',
     await a.text('#session-claude-cli .session-run-warn'), runWarn);
   const tabRes = await runAndWait('session-claude-cli', 'two-lines.sh');
-  check('tool’s Instructions tab runs hook and shows Would add', /^Would add run in ~, /.test(tabRes) && tabRes.includes('First line from hook'), tabRes);
+  check('tool’s Instructions tab runs hook and shows Would add with executed tool', /^Would add as Claude Code, run in ~, /.test(tabRes) && tabRes.includes('First line from hook'), tabRes);
   const tabPluginRes = await runAndWait('session-claude-cli', 'hello.sh');
-  check('tool’s Instructions tab runs installed plugin hook and shows Would add',
-    /^Would add run in ~, /.test(tabPluginRes) && tabPluginRes.includes(`root=${claudePluginRoot}`) && tabPluginRes.includes('note=Tuesday-releases'), tabPluginRes);
+  check('tool’s Instructions tab runs installed plugin hook and shows Would add with executed tool and plugin version',
+    /^Would add as Claude Code, plugin 0\.4\.1, run in ~, /.test(tabPluginRes) && tabPluginRes.includes(`root=${claudePluginRoot}`) && tabPluginRes.includes('note=Tuesday-releases'), tabPluginRes);
   await pictures('tab-claude', '#session-claude-cli', bothSizes);
   await fitsAtMinimum(a, 'Claude Code Instructions tab with Run it result');
   await sizeTo(a, 1316, 820);
