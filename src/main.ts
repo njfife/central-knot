@@ -23,7 +23,7 @@ import {
   errorCode, forgetStale, keepUnreadable, leftOutNow, managedNow, plainError, readRecord, remember, syncGate, takeOverSync, withoutFolderAnswers,
   writeAccess, writeDurably, type ShareContext,
 } from './share.ts';
-import { everythingEntryAction, setSyncEverything } from './everything.ts';
+import { everythingEntryAction, setSyncEverything, undoAdded } from './everything.ts';
 import { chooseTools, manageRefused, sameJoin, whatJoiningDoes } from './toolchoice.ts';
 import { pruneHistory, readHistory } from './history.ts';
 import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skillFoundFile, skillPluginFile, skillVersion, skillVersionFile, skillsView, takeOver } from './skills.ts';
@@ -1777,6 +1777,10 @@ app.whenReady().then(async () => {
       return { stopped: restored.stopped, results: restored.results, harnessWrites: restored.writes, made: restored.made, reloads: restored.reloads };
     })()
     : { stopped: elsewhere, results: [], harnessWrites: 0, reloads: [] } satisfies ApplyResult));
+  // Settings' added line: its take-ins' Undo, or that Undo's Restore, of one kind in one pass (everything.ts undoAdded).
+  handle('history:undo-added', async (kind, eventIds, home, putBack) => (home === current?.home && (kind === 'skills' || kind === 'mcp' || kind === 'agents')
+    ? undoAdded(context(), await toolsNow(), kind, strings(eventIds) ?? [], putBack === true)
+    : { stopped: elsewhere, results: [], harnessWrites: 0, reloads: [], undid: [], passed: [] }));
   // Profiles: their definitions are Central Knot's own file; a switch is the library's own On and Off clicks (profiles.ts).
   handle('profiles:save', async (profile, home) => {
     if (home !== current?.home || !profile || typeof profile !== 'object') return { problem: elsewhere };
