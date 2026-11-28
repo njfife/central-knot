@@ -1931,17 +1931,25 @@ let refreshOwed = false;
 let setAside: HomeView | undefined;
 /** A menu-bar profile switch that arrived while the page acted or refreshed, applied once that ends (drainOwedRefresh). */
 let pendingSwitch: ProfileSwitchResult | undefined;
-/** Whether the home waits to be read once the page's run of clicks is done: a background refresh asked for meanwhile, or a plugin's click (oweHomeRead). */
-export const homeReadOwed = () => refreshOwed;
+/** An in-flight readHomeOnce call, shared by callers that await the same read (clicklist.ts, matrix.ts showRow). */
+let homeRead: Promise<void> | undefined;
+/** Whether the home waits to be read (or is being read) for a run of clicks or a plugin's click (oweHomeRead, readHomeOnce). */
+export const homeReadOwed = () => refreshOwed || !!homeRead;
 /** A plugin's click changed what the item lists show: the home is read once at the run's end (clicklist.ts), not after each click. */
 export const oweHomeRead = () => { refreshOwed = true; };
 /**
- * The home read again by a Plugins action before it ends (pluginstate.ts readAgain), or at a run of clicks' end (clicklist.ts):
- * it stands for a background refresh owed meanwhile, so the home is read once.
+ * The home read again by a Plugins action before it ends (pluginstate.ts readAgain), at a run of clicks' end (clicklist.ts),
+ * or by a link to a row not in this read yet (matrix.ts showRow): stands for a background refresh owed meanwhile, and shares
+ * an in-flight read so two callers run one IPC.
  */
-export async function readHomeOnce(): Promise<void> {
+export function readHomeOnce(): Promise<void> {
+  if (homeRead) return homeRead;
   refreshOwed = false;
-  setHome(await api().refresh().catch(() => null));
+  const reading = api().refresh().catch(() => null).then(view => {
+    if (homeRead === reading) homeRead = undefined;
+    setHome(view);
+  });
+  return (homeRead = reading);
 }
 // The Settings… menu item (and any later page the main process asks for) opens that page.
 const isPage = (page: string): page is Page => (pages as readonly string[]).includes(page);

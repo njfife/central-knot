@@ -4,7 +4,7 @@
 // skillVersionFile, skillFoundFile, skillPluginFile, agentFile, serverEntry; an agent no tool has: its definition,
 // agentVersion; a server in Central Knot: its definition too, serverStored), the panel (filePanel: tabs or a label, the copy
 // choice, its close, the text, the path), its box's height (settleFileBox) and whether a place's open file stays at a draw
-// (keepOpenFile, asked by matrix.ts drawTable and overview.ts kindCards). Where a panel is drawn is its caller's, a FilePlace: a
+// (keepOpenFile, asked by matrix.ts tableOf and overview.ts kindCards). Where a panel is drawn is its caller's, a FilePlace: a
 // table (matrix.ts Table: under a closed row, or in an open row's details' place, matrix.ts openedPart), and the Overview's
 // cards (overview.ts cardFiles). Not here: Escape (matrix.ts on a table, overview.ts on the Overview).
 import { rerender, shownPath, state } from './app.ts';
@@ -78,7 +78,7 @@ function fileCopies(t: FilePlace, target: FileTarget): FileCopy[] {
 /** Change token for a copy: its hash and real folder when hashed, else the home's readId so an unhashed or plugin copy reloads silently on every new view. */
 const copyToken = (copy?: FileCopy) => (copy?.hash ? `${copy.hash}:${copy.realDirectory ?? ''}` : `read:${state.home?.readId ?? 0}`);
 /**
- * Whether a row has the file mark (fileButton; the reconcile in drawTable asks it too): a skill with a stored version or a copy,
+ * Whether a row has the file mark (fileButton; the reconcile in tableOf asks it too): a skill with a stored version or a copy,
  * a marketplace skill hit with its path, every ordinary agent, an ordinary server with an entry in a tool or in Central Knot.
  */
 const hasFile = (t: FilePlace, target: FileTarget) => (isCatalogHit(target) ? target.hit.item?.kind === 'skill' && !!target.hit.item.path
