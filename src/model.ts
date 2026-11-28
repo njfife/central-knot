@@ -1,4 +1,4 @@
-// Small helpers both the main process and the page use (but atMostEvery and oneTurn, main's alone): times in words (dayAndTime, timeAgo, timesApart), History's days (the choices
+// Small helpers both the main process and the page use (but atMostEvery and oneTurn, main's alone): times in words (dayAndTime, timeAgo, timesApart, timeOrDay), History's days (the choices
 // and the default: historyDayChoices, defaultHistoryDays), counts (plural), a tool's monogram, one install at a time (what
 // holds this build: holdingBuild, holdsUntil, QUIT_WAIT_MS), a notice's names, what the Caught up band names (caughtUpNames),
 // the notices a view set aside brought, carried into the next view (withSetAside), grouping, a call paced to at most once
@@ -13,6 +13,11 @@ export const toolMonogram = (tool: HarnessId) => monograms[tool];
 export const fullToolName = (snapshot: Snapshot) => `${snapshot.harnessName} ${snapshot.surface}`;
 /** A clock time in the person's own format: "9:20 AM". */
 export const clockTime = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+/**
+ * A kept time as it reads on the day it is shown: its clock time on the day it was kept ("9:20 AM"), else its day (dayWords:
+ * "yesterday", "Nov 8", "Nov 8, 2025"); every space a no-break one, so it is never split across two lines.
+ */
+export const timeOrDay = (iso: string) => (nearDay(iso) === 'today' ? clockTime(iso) : dayWords(iso)).replace(/\s/g, '\u00a0');
 /**
  * One install at a time: what holds this build, from what the looks have found so far (main.ts others, types.ts HomeView
  * otherBuilds): 'unlooked' until the first look answers, so nothing is written before it; else the first other build the last
@@ -61,10 +66,14 @@ export const DAY_MS = 86_400_000;
 /** How many days History can keep changes and deleted items (Settings), and how many it keeps unless told otherwise. */
 export const historyDayChoices: readonly HistoryDays[] = [7, 30, 90];
 export const defaultHistoryDays: HistoryDays = 30;
-/** 'today' or 'yesterday' for a time on one of those days, in the person's own time zone; undefined otherwise. */
+/**
+ * 'today' or 'yesterday' for a time on one of those days, in the person's own time zone; undefined otherwise. Yesterday is the
+ * calendar day before, not 24 hours back: the night the clocks go back has 25.
+ */
 export function nearDay(iso: string): 'today' | 'yesterday' | undefined {
-  const day = new Date(iso).toDateString();
-  return day === new Date().toDateString() ? 'today' : day === new Date(Date.now() - DAY_MS).toDateString() ? 'yesterday' : undefined;
+  const day = new Date(iso).toDateString(), before = new Date();
+  before.setDate(before.getDate() - 1);
+  return day === new Date().toDateString() ? 'today' : day === before.toDateString() ? 'yesterday' : undefined;
 }
 /** "today", "yesterday", else "Nov 8" (with the year when it isn't this one). */
 export function dayWords(iso: string): string {
