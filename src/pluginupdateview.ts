@@ -25,7 +25,7 @@ export function checkedWords(view: PluginUpdatesView | undefined): { text: strin
   const checked = view.checked;
   // Off means Central Knot writes nothing to the tools in the background; a check the person asks for still runs.
   if (view.paused) return { text: `Paused while Automatic sync is off: nothing is updated by itself. Check now still updates what is behind.${checked ? ` Last checked ${at(checked.at)}.` : ''}`, tone: 'attention', note: !!(view.updated.length || view.failed.length) };
-  if (!checked) return { text: 'Not checked yet in this home. The first check comes soon after Central Knot opens.', tone: 'info' };
+  if (!checked) return { text: 'Not checked yet in this home.', tone: 'info' };
   const note = !!(view.updated.length || view.failed.length);
   // A check that stopped during its updates (the app was quitting, the home was switched) says how far it got; the rest come soon.
   if (checked.partway) return { text: `Last checked ${at(checked.at)}. ${checked.updated ? `${plural(checked.updated, 'update')} made before it stopped` : 'It stopped before any update was made'}; the rest are tried again soon.`, tone: 'info', note };

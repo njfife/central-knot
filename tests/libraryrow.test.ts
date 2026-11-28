@@ -814,3 +814,15 @@ test('showsPlaceTag hides routine Found and Off tags under their own headings, k
     assert.deepEqual([showsPlaceTag(heading, plainFound, undefined, tools), showsPlaceTag(heading, plainOff, off, tools)], [true, true]);
   }
 });
+
+test('takenInWords keeps History and lead by default, drops either when asked for Settings', () => {
+  const { takenInWords } = sentences(libraryWords.skills);
+  const one = { items: ['notes'], from: ['claude-cli' as HarnessId] };
+  const two = { items: ['notes', 'lint'], from: ['claude-cli' as HarnessId, 'codex-cli' as HarnessId] };
+  assert.equal(takenInWords(one), 'Synchronize everything took in 1 skill, found in Claude Code: notes. History can undo it.');
+  assert.equal(takenInWords(two), 'Synchronize everything took in 2 skills, found in Claude Code and Codex: notes and lint. History can undo each.');
+  assert.equal(takenInWords(one, { history: false, lead: false }), 'Added skill notes from Claude Code.');
+  assert.equal(takenInWords(two, { history: false, lead: false }), 'Added 2 skills from Claude Code and Codex: notes and lint.');
+  assert.equal(takenInWords(one, { history: true, lead: false }), 'Added skill notes from Claude Code. History can undo it.');
+  assert.equal(takenInWords(two, { history: true, lead: false }), 'Added 2 skills from Claude Code and Codex: notes and lint. History can undo each.');
+});
